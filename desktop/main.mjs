@@ -3766,6 +3766,7 @@ function unregisterIpc() {
     ...Object.values(REVIEW_RUNTIME_SNAPSHOT_CHANNELS),
     ...Object.values(EDIT_RUNTIME_CHANNELS),
     ...Object.values(UI_PREFERENCE_CHANNELS),
+    ...Object.values(WORKBENCH_TAB_CHANNELS),
     APP_CHANNELS.closeResult,
     APP_CHANNELS.workspaceRecoveryReady,
     APP_CHANNELS.externalOpenReady,

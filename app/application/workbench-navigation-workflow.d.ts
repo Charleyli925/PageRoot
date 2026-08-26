@@ -2,6 +2,8 @@ import type { WorkbenchNavigationSession, WorkbenchNavigationReceipt } from "./w
 import type { WorkbenchTabsSession, WorkbenchTabStatus } from "./workbench-tabs-session.js";
 import type { ProjectWorkflow, ProjectWorkflowOutcome, ProjectWorkflowProject } from "./project-workflow.js";
 import type { WorkspaceController } from "./workspace-controller.js";
+import type { BrowserDocumentSession } from "./browser-document-session.js";
+import type { WorkbenchTabsPersistenceCoordinator } from "./workbench-tabs-persistence-coordinator.js";
 export type WorkbenchNavigationOutcome = ProjectWorkflowOutcome<Record<string, unknown>> & Readonly<{
   committed?: boolean;
   tabId?: string;
@@ -18,6 +20,8 @@ export class WorkbenchNavigationWorkflow {
     tabs: WorkbenchTabsSession;
     projectWorkflow: ProjectWorkflow;
     controller: WorkspaceController;
+    browserDocuments?: BrowserDocumentSession | null;
+    tabsPersistence?: WorkbenchTabsPersistenceCoordinator | null;
   });
   openProject(input?: Record<string, unknown>): Promise<WorkbenchNavigationOutcome>;
   activateTab(tabId: string, input?: { deadlineMs?: number; intentKind?: string }): Promise<WorkbenchNavigationOutcome>;

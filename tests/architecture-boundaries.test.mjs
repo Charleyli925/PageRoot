@@ -84,6 +84,13 @@ test("composition gate rejects tabs and navigation business construction in Work
   assert.match(compositionBoundaryViolations({
     workbench: "const workbenchTabsSessionRef = useRef(tabs);",
   }).join("\n"), /cannot own runtime Session\/Workflow construction/u);
+
+  assert.match(compositionBoundaryViolations({
+    workbench: [
+      "const browserDocuments = new BrowserDocumentSession();",
+      "const persistence = new WorkbenchTabsPersistenceCoordinator({ port });",
+    ].join("\n"),
+  }).join("\n"), /cannot own runtime Session\/Workflow construction/u);
 });
 
 test("provider-neutral renderer gate rejects provider branches and workflow implementation imports", () => {

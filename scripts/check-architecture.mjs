@@ -47,6 +47,8 @@ const RUNTIME_SESSION_CONSTRUCTORS = [
   "FirstEditGuideSession",
   "WorkbenchTabsSession",
   "WorkbenchNavigationSession",
+  "BrowserDocumentSession",
+  "WorkbenchTabsPersistenceCoordinator",
 ];
 const PROVIDER_LITERAL_BRANCH = /\b(?:[A-Za-z_$][\w$]*\s*(?:\?\.|\.)\s*)*(?:providerId|mode)\s*(?:===|!==|==|!=)\s*["'`](?:qoder|codex|qoder-acp|codex-acp)["'`]|["'`](?:qoder|codex|qoder-acp|codex-acp)["'`]\s*(?:===|!==|==|!=)\s*(?:[A-Za-z_$][\w$]*\s*(?:\?\.|\.)\s*)*(?:providerId|mode)\b/u;
 const PROVIDER_IMPLEMENTATION_IMPORT = /(?:^|\/)(?:qoder-availability|QoderAvailabilityCard|qoder-provider)(?:\.[^/]*)?$/u;
@@ -117,7 +119,7 @@ export function compositionBoundaryViolations({
     );
   }
   if (
-    /\bnew\s+(?:ProjectSession|DocumentSession|CommentSession|DraftSession|VersionSession|SourceHistorySession|RunSession|ProjectRulesSession|ExternalFileOpenSession|ProjectApplicationSession|FirstEditGuideSession|WorkbenchTabsSession|WorkbenchTabsWorkflow|WorkbenchNavigationSession|WorkbenchNavigationWorkflow)\b/u.test(workbench)
+    /\bnew\s+(?:ProjectSession|DocumentSession|CommentSession|DraftSession|VersionSession|SourceHistorySession|RunSession|ProjectRulesSession|ExternalFileOpenSession|ProjectApplicationSession|FirstEditGuideSession|WorkbenchTabsSession|WorkbenchTabsWorkflow|WorkbenchNavigationSession|WorkbenchNavigationWorkflow|BrowserDocumentSession|WorkbenchTabsPersistenceCoordinator)\b/u.test(workbench)
     || /\bcreateWorkbenchTabsSession\s*\(/u.test(workbench)
     || /\b(?:projectSessionRef|documentSessionRef|commentSessionRef|draftSessionRef|versionSessionRef|sourceHistorySessionRef|runSessionRef|projectRulesSessionRef|workbenchTabsSessionRef|workbenchTabsWorkflowRef|restoredPendingTabIdRef|restoredTabOpeningRef|tabsStateControlsStartupRef)\b/u.test(workbench)
   ) {
@@ -179,9 +181,13 @@ export function compositionBoundaryViolations({
   if (
     !/\bworkbenchTabsSession:\s*new\s+WorkbenchTabsSession\s*\(/u.test(workspaceController)
     || !/\bworkbenchNavigationSession:\s*new\s+WorkbenchNavigationSession\s*\(/u.test(workspaceController)
+    || !/\bbrowserDocumentSession:\s*new\s+BrowserDocumentSession\s*\(/u.test(workspaceController)
+    || !/\bworkbenchTabsPersistenceCoordinator:\s*new\s+WorkbenchTabsPersistenceCoordinator\s*\(/u.test(workspaceController)
     || !/\bnew\s+WorkbenchNavigationWorkflow\s*\(/u.test(workspaceController)
     || !/\bworkbenchTabs:\s*this\.#workbenchTabsSnapshot\b/u.test(workspaceController)
     || !/\bworkbenchNavigation:\s*this\.#workbenchNavigationSnapshot\b/u.test(workspaceController)
+    || !/\bworkbenchTabsPersistence:\s*this\.#workbenchTabsPersistenceSnapshot\b/u.test(workspaceController)
+    || !/\bthis\.#workbenchTabsPersistenceCoordinator\?\.drain\(input\)/u.test(workspaceController)
     || !/\bactivateWorkbenchTab\s*\(/u.test(workspaceController)
     || !/\bcreateWorkbenchStartTab\s*\(/u.test(workspaceController)
     || !/\bcloseWorkbenchTab\s*\(/u.test(workspaceController)

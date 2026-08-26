@@ -1521,6 +1521,17 @@ export default function Workbench() {
         });
         return;
       }
+      if (event.type === "workbench-tabs-persistence-failed") {
+        setToast({
+          title: "标签页状态未安全保存",
+          message: String(event.reason || "当前窗口会保持开启，请重试后再关闭。"),
+          tone: "error",
+          sticky: true,
+          disposition: "background-result",
+          dedupeKey: "workbench-tabs-persistence-failed",
+        });
+        return;
+      }
       if (event.type === "workbench-tabs-restore-failed") {
         const failure = event as { tabId?: unknown; committed?: unknown; reason?: unknown };
         if (failure.committed === true) {

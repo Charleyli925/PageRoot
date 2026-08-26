@@ -253,6 +253,7 @@ export class ProjectWorkflow {
   #locatorRetryHandle = null;
   #registeredProjectsRefresh = null;
   #reconcileScheduled = false;
+  #pollWaiters = new Set();
   #disposed = false;
   #closeLifecycle = {
     preparingRequestId: null,
@@ -469,6 +470,7 @@ export class ProjectWorkflow {
     }
     this.#locatorRetryHandle = null;
     this.#pendingLocatorReconcile = null;
+    for (const waiter of [...this.#pollWaiters]) waiter.resolve(false);
     this.#externalAckPending.clear();
     this.#externalFileOpenSession.setObserver(null);
     this.#projectApplicationSession.setObserver(null);
@@ -477,6 +479,7 @@ export class ProjectWorkflow {
     for (const name of [
       "external-file-open",
       "project-application",
+      "project-picker",
       "project-hydration",
       "view-transition",
       "submission",
@@ -2036,8 +2039,9 @@ export class ProjectWorkflow {
         state: "pending",
         reason: "已接收的 HTML 仍在完成安全切换。",
       } : { state: "resolved" },
-      drain: () => this.#waitUntil(
+      drain: ({ deadlineAt }) => this.#waitUntil(
         () => this.#projectApplicationSession.snapshot.status === "idle",
+        deadlineAt,
       ),
     });
     this.#drainCoordinator.replace("project-picker", {
@@ -2048,8 +2052,9 @@ export class ProjectWorkflow {
         state: "pending",
         reason: "本地 HTML 选择仍在等待结果。",
       } : { state: "resolved" },
-      drain: () => this.#waitUntil(
+      drain: ({ deadlineAt }) => this.#waitUntil(
         () => this.#snapshot.open.phase !== "opening",
+        deadlineAt,
       ),
     });
     this.#drainCoordinator.replace("project-hydration", {
@@ -2091,7 +2096,10 @@ export class ProjectWorkflow {
         state: "pending",
         reason: "内部 AI 的冻结 Request 尚未安全建立。",
       } : { state: "resolved" },
-      drain: () => this.#waitUntil(() => !this.#runSession.submissionPending),
+      drain: ({ deadlineAt }) => this.#waitUntil(
+        () => !this.#runSession.submissionPending,
+        deadlineAt,
+      ),
     });
     this.#drainCoordinator.replace("attachments", {
       label: "等待附件添加完成",
@@ -3791,17 +3799,36 @@ export class ProjectWorkflow {
     });
   }
 
-  #waitUntil(predicate) {
-    if (predicate()) return Promise.resolve();
+  #waitUntil(predicate, deadlineAt) {
+    if (predicate()) return Promise.resolve(true);
+    const deadline = Number(deadlineAt);
+    if (this.#disposed || !Number.isFinite(deadline) || this.#clock.now() >= deadline) {
+      return Promise.resolve(false);
+    }
     return new Promise((resolve) => {
+      const waiter = {
+        timer: null,
+        resolve: (value) => {
+          if (!this.#pollWaiters.delete(waiter)) return;
+          if (waiter.timer !== null && typeof this.#scheduler.clearTimeout === "function") {
+            this.#scheduler.clearTimeout(waiter.timer);
+          }
+          resolve(value);
+        },
+      };
       const poll = () => {
         if (predicate()) {
-          resolve();
+          waiter.resolve(true);
           return;
         }
-        this.#scheduler.setTimeout(poll, 40);
+        if (this.#disposed || this.#clock.now() >= deadline) {
+          waiter.resolve(false);
+          return;
+        }
+        waiter.timer = this.#scheduler.setTimeout(poll, Math.min(40, deadline - this.#clock.now()));
       };
-      this.#scheduler.setTimeout(poll, 40);
+      this.#pollWaiters.add(waiter);
+      waiter.timer = this.#scheduler.setTimeout(poll, Math.min(40, deadline - this.#clock.now()));
     });
   }
 
@@ -3818,10 +3845,11 @@ export class ProjectWorkflow {
         continue;
       }
       if (this.#externalFileOpenSession.snapshot.status === "idle") return true;
-      await this.#waitUntil(() => (
+      const settled = await this.#waitUntil(() => (
         Boolean(this.#openConfirmation)
         || this.#externalFileOpenSession.snapshot.status === "idle"
-      ));
+      ), deadlineAt);
+      if (!settled) return false;
     }
     return false;
   }

@@ -45,6 +45,8 @@ export class WorkbenchNavigationWorkflow {
   #tabs;
   #projectWorkflow;
   #controller;
+  #browserDocuments;
+  #tabsPersistence;
   #clock;
   #setTimer;
   #clearTimer;
@@ -53,12 +55,15 @@ export class WorkbenchNavigationWorkflow {
   #ordinal = 0;
   #disposed = false;
   #terminalReceipts = new Map();
+  #idleWaiters = new Set();
 
   constructor({
     session,
     tabs,
     projectWorkflow,
     controller,
+    browserDocuments = null,
+    tabsPersistence = null,
     clock = { now: Date.now },
     setTimer = (callback, delay) => setTimeout(callback, delay),
     clearTimer = (timer) => clearTimeout(timer),
@@ -70,6 +75,8 @@ export class WorkbenchNavigationWorkflow {
     this.#tabs = tabs;
     this.#projectWorkflow = projectWorkflow;
     this.#controller = controller;
+    this.#browserDocuments = browserDocuments;
+    this.#tabsPersistence = tabsPersistence;
     this.#clock = clock;
     this.#setTimer = setTimer;
     this.#clearTimer = clearTimer;
@@ -129,8 +136,12 @@ export class WorkbenchNavigationWorkflow {
       const snapshot = this.#tabs.snapshot;
       const index = snapshot.tabs.findIndex((tab) => tab.tabId === tabId);
       if (index < 0) return { outcome: succeeded({ unchanged: true }) };
+      const closing = snapshot.tabs[index];
       if (snapshot.activeTabId !== tabId) {
         this.#tabs.close(tabId);
+        if (closing.kind === "document") {
+          this.#browserDocuments?.remove(closing.projectId, closing.documentId);
+        }
         return { outcome: succeeded({ tabId }) };
       }
       let next = snapshot.tabs[index + 1] || snapshot.tabs[index - 1] || null;
@@ -143,6 +154,9 @@ export class WorkbenchNavigationWorkflow {
       const activated = await this.#activateTab(active, next.tabId, {});
       if (activated.outcome.status !== "succeeded") return activated;
       this.#tabs.close(tabId);
+      if (closing.kind === "document") {
+        this.#browserDocuments?.remove(closing.projectId, closing.documentId);
+      }
       return {
         ...activated,
         outcome: succeeded({ tabId, activeTabId: next.tabId }),
@@ -154,6 +168,7 @@ export class WorkbenchNavigationWorkflow {
     const active = this.#active;
     if (active?.continuation === "browser-file") {
       return this.#continue(active, async () => {
+        active.browserAuthority = this.#browserDocuments?.retain(input?.project) || null;
         this.#session.transition(active.transactionId, "opening");
         active.continuation = null;
         const outcome = this.#projectWorkflow.acceptBrowserProject({
@@ -164,6 +179,7 @@ export class WorkbenchNavigationWorkflow {
       });
     }
     return this.#admit({ kind: "browser-file" }, async (next) => {
+      next.browserAuthority = this.#browserDocuments?.retain(input?.project) || null;
       this.#session.transition(next.transactionId, "opening");
       const outcome = this.#projectWorkflow.acceptBrowserProject({
         ...input,
@@ -334,17 +350,21 @@ export class WorkbenchNavigationWorkflow {
     const remaining = Math.max(0, Number(deadlineAt) - Number(this.#clock.now()));
     if (remaining <= 0) return Promise.resolve(false);
     return new Promise((resolve) => {
-      let timer = null;
+      const waiter = { timer: null, unsubscribe: () => {}, resolve: null };
+      const settle = (value) => {
+        if (!this.#idleWaiters.delete(waiter)) return;
+        if (waiter.timer !== null) this.#clearTimer(waiter.timer);
+        waiter.unsubscribe();
+        resolve(value);
+      };
+      waiter.resolve = settle;
       const unsubscribe = this.#session.subscribe((snapshot) => {
         if (snapshot.phase !== "idle") return;
-        if (timer !== null) this.#clearTimer(timer);
-        unsubscribe();
-        resolve(true);
+        settle(true);
       });
-      timer = this.#setTimer(() => {
-        unsubscribe();
-        resolve(false);
-      }, remaining);
+      waiter.unsubscribe = unsubscribe;
+      waiter.timer = this.#setTimer(() => settle(false), remaining);
+      this.#idleWaiters.add(waiter);
     });
   }
 
@@ -364,6 +384,7 @@ export class WorkbenchNavigationWorkflow {
       code: "WORKBENCH_NAVIGATION_DISPOSED",
       reason: "导航已停止。",
     });
+    for (const waiter of [...this.#idleWaiters]) waiter.resolve(false);
     this.#session.dispose();
   }
 
@@ -428,11 +449,17 @@ export class WorkbenchNavigationWorkflow {
       return { outcome: succeeded({ tabId: target.tabId }), receipt };
     }
     this.#session.transition(active.transactionId, "opening");
-    const outcome = await this.#projectWorkflow.openProject({
-      kind: "registered",
-      projectId: target.projectId,
-      transactionId: active.transactionId,
-    });
+    const browserProject = this.#browserDocuments?.resolve(target.projectId, target.documentId);
+    const outcome = browserProject
+      ? this.#projectWorkflow.acceptProject(browserProject, {
+        kind: "browser-memory",
+        transactionId: active.transactionId,
+      })
+      : await this.#projectWorkflow.openProject({
+        kind: "registered",
+        projectId: target.projectId,
+        transactionId: active.transactionId,
+      });
     return this.#finishOpened(active, outcome, { deadlineMs });
   }
 
@@ -494,7 +521,7 @@ export class WorkbenchNavigationWorkflow {
       ) };
     }
     this.#session.transition(active.transactionId, "hydrating", { receipt });
-    const settled = await this.#waitForSettlement(receipt, deadlineMs);
+    const settled = await this.#waitForSettlement(active, receipt, deadlineMs);
     if (!settled.ok) {
       if (receipt.projectId && receipt.documentId) {
         this.#tabs.updateStatus(receipt.projectId, receipt.documentId, "error");
@@ -546,20 +573,25 @@ export class WorkbenchNavigationWorkflow {
     ) return Promise.resolve(active.receipt);
     return new Promise((resolve) => {
       let timer = null;
-      active.resolveReceipt = (receipt) => {
-        if (expectedApplicationId && receipt.applicationId !== expectedApplicationId) return;
+      let settled = false;
+      const settle = (receipt) => {
+        if (settled) return;
+        settled = true;
         if (timer !== null) this.#clearTimer(timer);
         active.resolveReceipt = null;
+        active.cancelReceiptWait = null;
         resolve(receipt);
       };
-      timer = this.#setTimer(() => {
-        active.resolveReceipt = null;
-        resolve(null);
-      }, deadlineMs);
+      active.resolveReceipt = (receipt) => {
+        if (expectedApplicationId && receipt.applicationId !== expectedApplicationId) return;
+        settle(receipt);
+      };
+      active.cancelReceiptWait = () => settle(null);
+      timer = this.#setTimer(() => settle(null), deadlineMs);
     });
   }
 
-  #waitForSettlement(receipt, deadlineMs) {
+  #waitForSettlement(active, receipt, deadlineMs) {
     let timer = null;
     let unsubscribe = () => {};
     return new Promise((resolve) => {
@@ -569,6 +601,7 @@ export class WorkbenchNavigationWorkflow {
         settled = true;
         if (timer !== null) this.#clearTimer(timer);
         unsubscribe();
+        active.cancelSettlementWait = null;
         resolve(value);
       };
       const inspect = (snapshot) => {
@@ -607,6 +640,11 @@ export class WorkbenchNavigationWorkflow {
         settle({ ok: true });
       };
       unsubscribe = this.#controller.subscribe(inspect);
+      active.cancelSettlementWait = () => settle({
+        ok: false,
+        code: "WORKBENCH_NAVIGATION_DISPOSED",
+        reason: "导航已停止。",
+      });
       inspect(this.#controller.getSnapshot());
       if (!settled) timer = this.#setTimer(() => {
         settle({
@@ -636,6 +674,9 @@ export class WorkbenchNavigationWorkflow {
         expectedTabId: null,
         requestId: null,
         continuation: null,
+        browserAuthority: null,
+        cancelReceiptWait: null,
+        cancelSettlementWait: null,
         release,
       };
       active.terminalPromise = new Promise((resolve) => {
@@ -686,6 +727,7 @@ export class WorkbenchNavigationWorkflow {
       : outcomeError(outcome, "WORKBENCH_NAVIGATION_REJECTED", "导航失败。");
     if (outcome.status !== "succeeded" && !result.receipt) {
       this.#tabs.restoreAuthority(active.priorTabs);
+      if (active.browserAuthority) this.#browserDocuments?.restore(active.browserAuthority);
     }
     this.#session.finish(active.transactionId, {
       receipt: result.receipt || null,
@@ -697,6 +739,11 @@ export class WorkbenchNavigationWorkflow {
       receipt: result.receipt || null,
     });
     this.#terminalReceipts.set(active.transactionId, terminal);
+    if (this.#terminalReceipts.size > 256) {
+      this.#terminalReceipts.delete(this.#terminalReceipts.keys().next().value);
+    }
+    this.#tabsPersistence?.commit(this.#tabs.serialize());
+    this.#cancelActiveWaits(active);
     active.resolveTerminal?.(terminal);
     this.#active = null;
     active.release?.();
@@ -706,6 +753,7 @@ export class WorkbenchNavigationWorkflow {
   #rollbackAndRelease(active, error) {
     if (this.#active !== active) return;
     this.#tabs.restoreAuthority(active.priorTabs);
+    if (active.browserAuthority) this.#browserDocuments?.restore(active.browserAuthority);
     this.#session.finish(active.transactionId, { error });
     const terminal = Object.freeze({
       transactionId: active.transactionId,
@@ -713,9 +761,22 @@ export class WorkbenchNavigationWorkflow {
       receipt: null,
     });
     this.#terminalReceipts.set(active.transactionId, terminal);
+    if (this.#terminalReceipts.size > 256) {
+      this.#terminalReceipts.delete(this.#terminalReceipts.keys().next().value);
+    }
+    this.#tabsPersistence?.commit(this.#tabs.serialize());
+    this.#cancelActiveWaits(active);
     active.resolveTerminal?.(terminal);
     this.#active = null;
     active.release?.();
+  }
+
+  #cancelActiveWaits(active) {
+    active.cancelReceiptWait?.();
+    active.cancelSettlementWait?.();
+    active.cancelReceiptWait = null;
+    active.cancelSettlementWait = null;
+    active.resolveReceipt = null;
   }
 
   #controllerMatchesPrior(prior) {

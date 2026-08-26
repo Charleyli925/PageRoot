@@ -7,6 +7,7 @@ import {
   workbenchStartupPriority,
 } from "../app/application/workbench-navigation-workflow.js";
 import { WorkbenchTabsSession } from "../app/application/workbench-tabs-session.js";
+import { BrowserDocumentSession } from "../app/application/browser-document-session.js";
 
 const A = { projectId: "project_alpha", documentId: "doc_alpha", name: "Alpha" };
 const B = { projectId: "project_beta", documentId: "doc_beta", name: "Beta" };
@@ -50,7 +51,15 @@ function projectSnapshot(project, epoch, options = {}) {
   };
 }
 
-function fixture({ open, confirm, cancel, acceptExternal, acceptBrowser } = {}) {
+function fixture({
+  open,
+  confirm,
+  cancel,
+  acceptExternal,
+  acceptBrowser,
+  browserDocuments = null,
+  tabsPersistence = null,
+} = {}) {
   const tabs = new WorkbenchTabsSession();
   tabs.bindDocument({ ...A, title: A.name });
   const navigation = new WorkbenchNavigationSession();
@@ -113,6 +122,11 @@ function fixture({ open, confirm, cancel, acceptExternal, acceptBrowser } = {}) 
       const applied = apply(input, project);
       return { status: "succeeded", value: { opened: true, applicationId: applied.applicationId } };
     },
+    acceptProject(project, input) {
+      calls.push(`accept:${input.kind}:${project.projectId}`);
+      const applied = apply(input, project);
+      return { status: "succeeded", value: { opened: true, applicationId: applied.applicationId } };
+    },
     acceptBrowserProject(input) {
       calls.push("browser");
       if (acceptBrowser) return acceptBrowser({ input, apply: (project, options) => apply(input, project, options), publish });
@@ -141,6 +155,8 @@ function fixture({ open, confirm, cancel, acceptExternal, acceptBrowser } = {}) 
     tabs,
     projectWorkflow,
     controller,
+    browserDocuments,
+    tabsPersistence,
     clock: { now: () => 1_000 },
   });
   return { tabs, navigation, phases, calls, controller, projectWorkflow, workflow, publish, apply };
@@ -188,6 +204,91 @@ test("browser picker continuation retains its admitted transaction and exact app
   assert.equal(accepted.status, "succeeded");
   assert.equal(harness.navigation.snapshot.lastReceipt.transactionId, transactionId);
   assert.equal(harness.tabs.snapshot.activeTabId, `document:${B.projectId}:${B.documentId}`);
+});
+
+test("browser A to B to A reopens frozen bytes through the accepted application FIFO", async () => {
+  const browserDocuments = new BrowserDocumentSession();
+  const browserA = {
+    ...A,
+    name: "A.html",
+    sourcePath: null,
+    html: "<h1>A</h1>",
+    sha256: `sha256:${"a".repeat(64)}`,
+  };
+  const browserB = {
+    ...B,
+    name: "B.html",
+    sourcePath: null,
+    html: "<h1>B</h1>",
+    sha256: `sha256:${"b".repeat(64)}`,
+  };
+  browserDocuments.retain(browserA);
+  const persisted = [];
+  const harness = fixture({
+    browserDocuments,
+    tabsPersistence: { commit: (state) => persisted.push(state) },
+    acceptBrowser: ({ input, apply }) => {
+      const applied = apply(input.project);
+      return { status: "succeeded", value: { opened: true, applicationId: applied.applicationId } };
+    },
+  });
+  assert.equal((await harness.workflow.acceptBrowserProject({ project: browserB })).status, "succeeded");
+  assert.equal((await harness.workflow.activateTab(`document:${A.projectId}:${A.documentId}`)).status, "succeeded");
+  assert.equal((await harness.workflow.activateTab(`document:${B.projectId}:${B.documentId}`)).status, "succeeded");
+  assert.deepEqual(
+    harness.calls.filter((call) => call.startsWith("accept:browser-memory")),
+    [`accept:browser-memory:${A.projectId}`, `accept:browser-memory:${B.projectId}`],
+  );
+  assert.equal(harness.calls.some((call) => call === `open:registered:${A.projectId}`), false);
+  assert.equal(harness.tabs.snapshot.tabs.filter((tab) => tab.kind === "document").length, 2);
+  assert.equal(browserDocuments.resolve(A.projectId, A.documentId).html, "<h1>A</h1>");
+  assert.equal(browserDocuments.resolve(B.projectId, B.documentId).html, "<h1>B</h1>");
+  assert.equal(JSON.stringify(persisted).includes("<h1>"), false);
+  assert.equal(JSON.stringify(persisted).includes("sha256"), false);
+
+  assert.equal((await harness.workflow.acceptBrowserProject({ project: browserB })).status, "succeeded");
+  assert.equal(harness.tabs.snapshot.tabs.filter((tab) => tab.kind === "document").length, 2);
+});
+
+test("closing a browser tab removes its in-memory backing and runtime owner", async () => {
+  const browserDocuments = new BrowserDocumentSession();
+  const browserA = {
+    ...A,
+    sourcePath: null,
+    html: "A",
+    sha256: `sha256:${"a".repeat(64)}`,
+  };
+  browserDocuments.retain(browserA);
+  const harness = fixture({ browserDocuments });
+  const closed = await harness.workflow.closeTab(`document:${A.projectId}:${A.documentId}`);
+  assert.equal(closed.status, "succeeded");
+  assert.equal(browserDocuments.resolve(A.projectId, A.documentId), null);
+  assert.equal(harness.tabs.snapshot.runtimeOwnerTabId, null);
+});
+
+test("browser pre-apply rejection restores the prior in-memory authority", async () => {
+  const browserDocuments = new BrowserDocumentSession();
+  const prior = {
+    ...B,
+    sourcePath: null,
+    html: "prior",
+    sha256: `sha256:${"a".repeat(64)}`,
+  };
+  browserDocuments.retain(prior);
+  const harness = fixture({
+    browserDocuments,
+    acceptBrowser: () => ({ status: "rejected", code: "BROWSER_REJECTED", reason: "no" }),
+  });
+  const outcome = await harness.workflow.acceptBrowserProject({
+    project: {
+      ...prior,
+      html: "replacement",
+      sha256: `sha256:${"b".repeat(64)}`,
+    },
+  });
+  assert.equal(outcome.status, "rejected");
+  assert.equal(browserDocuments.resolve(B.projectId, B.documentId).html, "prior");
+  assert.equal(harness.tabs.snapshot.activeTabId, `document:${A.projectId}:${A.documentId}`);
 });
 
 test("Start activation and active-tab close keep mounted/runtime ownership invariant", async () => {

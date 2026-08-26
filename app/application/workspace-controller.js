@@ -1,6 +1,7 @@
 import { createRuntimeBridgeClient, isBridgeRequestError } from "./bridge-client.js";
 import { CommentSession } from "./comment-session.js";
 import { CommentWorkflow } from "./comment-workflow.js";
+import { BrowserDocumentSession } from "./browser-document-session.js";
 import { DocumentSession } from "./document-session.js";
 import { DocumentWorkflow } from "./document-workflow.js";
 import { EditAuthorRuntimeSession } from "./edit-author-runtime-session.js";
@@ -26,6 +27,7 @@ import {
   WorkbenchTabsSession,
 } from "./workbench-tabs-session.js";
 import { WorkbenchNavigationSession } from "./workbench-navigation-session.js";
+import { WorkbenchTabsPersistenceCoordinator } from "./workbench-tabs-persistence-coordinator.js";
 import {
   WorkbenchNavigationWorkflow,
   workbenchStartupPriority,
@@ -178,6 +180,11 @@ export function createRuntimeWorkspaceController({
     conversationSession: new ConversationSession(),
     workbenchTabsSession: new WorkbenchTabsSession(),
     workbenchNavigationSession: new WorkbenchNavigationSession(),
+    browserDocumentSession: new BrowserDocumentSession(),
+    workbenchTabsPersistenceCoordinator: new WorkbenchTabsPersistenceCoordinator({
+      port: ports.workbenchTabs || null,
+      clock,
+    }),
     codecs,
     ports,
     documentWorkflow: {
@@ -251,13 +258,16 @@ export class WorkspaceController {
   #versionWorkflow = null;
   #versionWorkflowUnsubscribe = null;
   #workbenchTabsSession = null;
+  #browserDocumentSession = null;
+  #workbenchTabsPersistenceCoordinator = null;
+  #workbenchTabsPersistenceUnsubscribe = null;
+  #workbenchTabsPersistenceSnapshot = null;
   #workbenchNavigationSession = null;
   #workbenchNavigationWorkflow = null;
   #workbenchNavigationUnsubscribe = null;
   #workbenchNavigationSnapshot = null;
   #workbenchTabsUnsubscribe = null;
   #workbenchTabsSnapshot = null;
-  #workbenchTabsPort = null;
   #workbenchTabsReady = false;
   #externalOpenUnsubscribe = null;
   #navigationHostPort = null;
@@ -292,6 +302,7 @@ export class WorkspaceController {
     workbenchTabs: null,
     workbenchTabsReady: false,
     workbenchNavigation: null,
+    workbenchTabsPersistence: null,
   });
   #listeners = new Set();
   #eventListeners = new Set();
@@ -310,6 +321,8 @@ export class WorkspaceController {
     conversationSession = null,
     workbenchTabsSession = null,
     workbenchNavigationSession = null,
+    browserDocumentSession = null,
+    workbenchTabsPersistenceCoordinator = null,
     codecs,
     ports = {},
     documentWorkflow = null,
@@ -375,7 +388,9 @@ export class WorkspaceController {
     this.#sourceHistorySession = sourceHistorySession;
     this.#workbenchTabsSession = workbenchTabsSession;
     this.#workbenchTabsSnapshot = workbenchTabsSession?.snapshot || null;
-    this.#workbenchTabsPort = ports.workbenchTabs || null;
+    this.#browserDocumentSession = browserDocumentSession;
+    this.#workbenchTabsPersistenceCoordinator = workbenchTabsPersistenceCoordinator;
+    this.#workbenchTabsPersistenceSnapshot = workbenchTabsPersistenceCoordinator?.snapshot || null;
     this.#navigationHostPort = ports.navigation || null;
     this.#workbenchNavigationSession = workbenchNavigationSession;
     this.#workbenchNavigationSnapshot = workbenchNavigationSession?.snapshot || null;
@@ -614,6 +629,8 @@ export class WorkspaceController {
           tabs: this.#workbenchTabsSession,
           projectWorkflow: this.#projectWorkflow,
           controller: this,
+          browserDocuments: this.#browserDocumentSession,
+          tabsPersistence: this.#workbenchTabsPersistenceCoordinator,
           clock,
         });
         this.#workbenchNavigationUnsubscribe = this.#workbenchNavigationSession.subscribe(
@@ -627,15 +644,20 @@ export class WorkspaceController {
           if (this.#disposed) return;
           this.#workbenchTabsSnapshot = snapshot;
           this.#publishAggregateSnapshot();
-          if (this.#workbenchTabsReady && typeof this.#workbenchTabsPort?.set === "function") {
-            void Promise.resolve(this.#workbenchTabsPort.set(
-              this.#workbenchTabsSession.serialize(),
-            )).catch((cause) => this.#emitEvent({
-              type: "workbench-tabs-persistence-failed",
-              reason: String(cause?.message || cause || "标签页状态写入失败。"),
-            }));
-          }
         });
+        this.#workbenchTabsPersistenceUnsubscribe =
+          this.#workbenchTabsPersistenceCoordinator?.subscribe((snapshot) => {
+            if (this.#disposed) return;
+            const wasFailed = this.#workbenchTabsPersistenceSnapshot?.phase === "failed";
+            this.#workbenchTabsPersistenceSnapshot = snapshot;
+            this.#publishAggregateSnapshot();
+            if (snapshot.phase === "failed" && !wasFailed) {
+              this.#emitEvent({
+                type: "workbench-tabs-persistence-failed",
+                reason: snapshot.error || "标签页状态写入失败。",
+              });
+            }
+          }) || null;
       }
     }
     if (runWorkflow) {
@@ -801,11 +823,17 @@ export class WorkspaceController {
     this.#versionWorkflow = null;
     this.#workbenchTabsUnsubscribe?.();
     this.#workbenchTabsUnsubscribe = null;
+    this.#workbenchTabsPersistenceUnsubscribe?.();
+    this.#workbenchTabsPersistenceUnsubscribe = null;
     this.#workbenchNavigationUnsubscribe?.();
     this.#workbenchNavigationUnsubscribe = null;
     this.#workbenchNavigationWorkflow?.dispose();
     this.#workbenchNavigationWorkflow = null;
     this.#workbenchNavigationSession = null;
+    this.#workbenchTabsPersistenceCoordinator?.dispose();
+    this.#workbenchTabsPersistenceCoordinator = null;
+    this.#browserDocumentSession?.dispose();
+    this.#browserDocumentSession = null;
     this.#externalOpenUnsubscribe?.();
     this.#externalOpenUnsubscribe = null;
     this.#workbenchTabsSession = null;
@@ -971,18 +999,16 @@ export class WorkspaceController {
         // Live subscription still owns delivery; startup fallback remains safe.
       }
     }
-    if (typeof this.#workbenchTabsPort?.get === "function") {
+    if (this.#workbenchTabsPersistenceCoordinator) {
       try {
-        stored = await this.#workbenchTabsPort.get();
+        stored = await this.#workbenchTabsPersistenceCoordinator.load();
         if (stored) {
           storedStatePresent = true;
           this.#workbenchTabsSession.hydrate(stored);
         }
-      } catch (cause) {
-        this.#emitEvent({
-          type: "workbench-tabs-persistence-failed",
-          reason: String(cause?.message || cause || "无法读取上次的标签页状态。"),
-        });
+      } catch {
+        // The coordinator publishes a visible failure and keeps restart safety
+        // closed until a terminal navigation state is acknowledged.
       }
     }
     if (this.#disposed) return;
@@ -1020,6 +1046,7 @@ export class WorkspaceController {
 
   async #reconcileAndRestoreWorkbenchTabs(projects) {
     if (!this.#workbenchTabsReady || !this.#workbenchTabsSession) return;
+    const priorRevision = this.#workbenchTabsSession.snapshot.revision;
     const reconciled = this.#workbenchTabsSession.reconcileRegisteredProjects(projects);
     if (reconciled.missing.length > 0) {
       this.#emitEvent({
@@ -1028,7 +1055,12 @@ export class WorkspaceController {
       });
     }
     const pending = this.#workbenchTabsSession.snapshot.pendingTabId;
-    if (!pending || !this.#workbenchNavigationWorkflow) return;
+    if (!pending || !this.#workbenchNavigationWorkflow) {
+      if (this.#workbenchTabsSession.snapshot.revision !== priorRevision) {
+        this.#workbenchTabsPersistenceCoordinator?.commit(this.#workbenchTabsSession.serialize());
+      }
+      return;
+    }
     const outcome = await this.#workbenchNavigationWorkflow.activateTab(pending, {
       intentKind: "startup-restore",
     });
@@ -1134,10 +1166,19 @@ export class WorkspaceController {
         presentation: "in-app",
       });
     }
+    const tabsPersisted = await this.#workbenchTabsPersistenceCoordinator?.drain(input);
+    if (tabsPersisted && !tabsPersisted.ok) {
+      return Object.freeze({
+        ready: false,
+        reason: tabsPersisted.reason || "标签页状态尚未安全写入。",
+        presentation: "in-app",
+      });
+    }
     return this.#requireProjectWorkflow().prepareClose(input);
   }
 
   abortClose(input) {
+    this.#workbenchTabsPersistenceCoordinator?.retry();
     return this.#requireProjectWorkflow().abortClose(input);
   }
 
@@ -1569,6 +1610,7 @@ export class WorkspaceController {
       workbenchTabs: this.#workbenchTabsSnapshot,
       workbenchTabsReady: this.#workbenchTabsReady,
       workbenchNavigation: this.#workbenchNavigationSnapshot,
+      workbenchTabsPersistence: this.#workbenchTabsPersistenceSnapshot,
     });
     for (const listener of this.#listeners) {
       try {

@@ -78,6 +78,11 @@ import type {
   WorkbenchNavigationSnapshot,
 } from "./workbench-navigation-session.js";
 import type { WorkbenchNavigationOutcome } from "./workbench-navigation-workflow.js";
+import type { BrowserDocumentSession } from "./browser-document-session.js";
+import type {
+  WorkbenchTabsPersistenceCoordinator,
+  WorkbenchTabsPersistenceSnapshot,
+} from "./workbench-tabs-persistence-coordinator.js";
 
 export type OperationIdentity = Readonly<{
   operationId: string;
@@ -126,6 +131,7 @@ export type WorkspaceControllerSnapshot = Readonly<{
   workbenchTabs: WorkbenchTabsSnapshot | null;
   workbenchTabsReady: boolean;
   workbenchNavigation: WorkbenchNavigationSnapshot | null;
+  workbenchTabsPersistence: WorkbenchTabsPersistenceSnapshot | null;
 }>;
 
 export type WorkspaceEvent =
@@ -140,6 +146,20 @@ export type WorkspaceEvent =
   | Readonly<{
       type: "draft-authority-rebound";
       context: ProjectContext;
+    }>
+  | Readonly<{
+      type: "workbench-tabs-persistence-failed";
+      reason: string;
+    }>
+  | Readonly<{
+      type: "workbench-tabs-restore-missing";
+      missing: ReadonlyArray<Record<string, unknown>>;
+    }>
+  | Readonly<{
+      type: "workbench-tabs-restore-failed";
+      tabId: string;
+      committed: boolean;
+      reason: string;
     }>
   | Readonly<{
       type:
@@ -258,6 +278,8 @@ export type WorkspaceControllerConstruction = Readonly<{
   conversationSession?: ConversationSession | null;
   workbenchTabsSession?: WorkbenchTabsSession | null;
   workbenchNavigationSession?: WorkbenchNavigationSession | null;
+  browserDocumentSession?: BrowserDocumentSession | null;
+  workbenchTabsPersistenceCoordinator?: WorkbenchTabsPersistenceCoordinator | null;
   codecs: WorkspaceControllerCodecs;
   ports: Readonly<{
     hash: HashPort;

@@ -402,15 +402,18 @@
     {
       "id": "workbench-tabs",
       "patterns": [
-        "^app/application/workbench-tabs-(?:session|workflow)\\.(?:js|d\\.ts)$",
+        "^app/application/workbench-(?:tabs-(?:session|persistence-coordinator)|navigation-(?:session|workflow))\\.(?:js|d\\.ts)$",
+        "^app/application/browser-document-session\\.(?:js|d\\.ts)$",
         "^app/workbench/WorkbenchChrome\\.tsx$",
         "^desktop/workbench-tabs-state\\.mjs$",
-        "^tests/workbench-tabs-(?:session|workflow|state)\\.test\\.mjs$"
+        "^tests/(?:browser-document-session|workbench-(?:navigation-workflow|tabs-(?:session|state|persistence-coordinator)))\\.test\\.mjs$"
       ],
       "suites": ["typecheck", "electron-smoke"],
       "nodeTests": [
         "tests/workbench-tabs-session.test.mjs",
+        "tests/browser-document-session.test.mjs",
         "tests/workbench-navigation-workflow.test.mjs",
+        "tests/workbench-tabs-persistence-coordinator.test.mjs",
         "tests/workbench-tabs-state.test.mjs",
         "tests/project-workflow.test.mjs",
         "tests/desktop-preload-ipc.test.mjs"

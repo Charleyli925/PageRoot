@@ -30,7 +30,7 @@ test("workbench tab persistence accepts presentation identity and rejects author
 });
 
 test("workbench tab persistence accepts many identity-only tabs", () => {
-  const tabs = Array.from({ length: 40 }, (_, index) => ({
+  const tabs = Array.from({ length: 2_048 }, (_, index) => ({
     tabId: `document:project_many_${index}:doc_many_${index}`,
     projectId: `project_many_${index}`,
     documentId: `doc_many_${index}`,
@@ -39,13 +39,13 @@ test("workbench tab persistence accepts many identity-only tabs", () => {
   assert.deepEqual(normalizeWorkbenchTabsState(state), state);
 });
 
-test("workbench tab state is atomically written and malformed state fails closed", async () => {
+test("workbench tab state is atomically written and malformed state fails visibly closed", async () => {
   const userDataPath = await mkdtemp(path.join(os.tmpdir(), "pageroot-tabs-"));
   await writeWorkbenchTabsState({ userDataPath, state: valid });
   assert.deepEqual(await readWorkbenchTabsState({ userDataPath }), valid);
   const filePath = path.join(userDataPath, "workbench-tabs.json");
   await writeFile(filePath, "{not json", "utf8");
-  assert.equal(await readWorkbenchTabsState({ userDataPath }), null);
+  await assert.rejects(readWorkbenchTabsState({ userDataPath }), SyntaxError);
   assert.equal((await readFile(filePath, "utf8")), "{not json");
 });
 

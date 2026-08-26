@@ -1,9 +1,8 @@
-import { mkdir, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 
 const VERSION = 1;
-const MAX_BYTES = 64 * 1024;
 const EXACT_ROOT_KEYS = new Set(["version", "activeTabId", "tabs"]);
 const EXACT_TAB_KEYS = new Set(["tabId", "projectId", "documentId"]);
 
@@ -52,13 +51,13 @@ export function normalizeWorkbenchTabsState(value) {
 export async function readWorkbenchTabsState({ userDataPath }) {
   const filePath = path.join(userDataPath, "workbench-tabs.json");
   try {
-    const metadata = await stat(filePath);
-    if (!metadata.isFile() || metadata.size > MAX_BYTES) return null;
     const raw = await readFile(filePath, "utf8");
-    if (Buffer.byteLength(raw, "utf8") > MAX_BYTES) return null;
-    return normalizeWorkbenchTabsState(JSON.parse(raw));
-  } catch {
-    return null;
+    const normalized = normalizeWorkbenchTabsState(JSON.parse(raw));
+    if (!normalized) throw new TypeError("已保存的工作台标签状态无效。");
+    return normalized;
+  } catch (cause) {
+    if (cause?.code === "ENOENT") return null;
+    throw cause;
   }
 }
 
@@ -67,9 +66,6 @@ export async function writeWorkbenchTabsState({ userDataPath, state }) {
   if (!normalized) throw new TypeError("工作台标签状态无效。");
   const filePath = path.join(userDataPath, "workbench-tabs.json");
   const contents = `${JSON.stringify(normalized, null, 2)}\n`;
-  if (Buffer.byteLength(contents, "utf8") > MAX_BYTES) {
-    throw new RangeError("工作台标签状态超过大小上限。");
-  }
   await mkdir(userDataPath, { recursive: true, mode: 0o700 });
   const temporaryPath = `${filePath}.${process.pid}.${randomUUID()}.tmp`;
   try {
