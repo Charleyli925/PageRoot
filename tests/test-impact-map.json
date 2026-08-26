@@ -994,6 +994,7 @@
       "id": "project-file-lifecycle",
       "patterns": [
         "^scripts/project-file-(?:repository|finalizer)\\.mjs$",
+        "^scripts/project-file-repository/.+\\.mjs$",
         "^tests/project-file-(?:repository|finalizer|bridge|schema)\\.test\\.mjs$"
       ],
       "suites": ["ai-smoke"],
