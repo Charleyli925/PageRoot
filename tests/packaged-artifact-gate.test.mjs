@@ -180,7 +180,11 @@ test("release commands use one automated artifact lane with full tests and packa
   assert.equal(path.basename(layout.updateInfoPath), "latest-mac.yml");
 });
 
-test("the pinned Codex package passes the native packaged-runtime verifier", async () => {
+test("the pinned Codex package passes the native packaged-runtime verifier", async (t) => {
+  if (process.platform !== "darwin") {
+    t.skip("the packaged artifact verifier targets the macOS application");
+    return;
+  }
   const result = await verifyPackagedCodexRuntime({
     resourcesPath: productRoot,
     arch: process.arch,
