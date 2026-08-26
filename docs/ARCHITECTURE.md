@@ -315,6 +315,9 @@ services.
 | Request freeze/persisted-boundary validation, authority reconciliation, run polling, cancellation, conflict commands and confirmed handoff | `app/application/run-workflow.js` |
 | Workbench pure record/comment/project/version/browser helpers | `app/workbench/*-model.ts`, `app/workbench/browser-io.ts` |
 | History, attachment and preview presentation | `app/workbench/presentation.tsx` |
+| File title, rename, update badge and save-status presentation | `app/workbench/file-header-view.tsx` |
+| Comment rail presentation | `app/workbench/comment-rail-view.tsx` |
+| Project files drawer presentation | `app/workbench/project-files-view.tsx` |
 | AI handoff drawer presentation | `app/workbench/handoff-view.tsx` |
 | Formal AI review state transitions | `app/workbench/review-state.ts` |
 | Bounded pure sibling alignment for semantic review units | `app/lib/review-semantic-alignment.js` |

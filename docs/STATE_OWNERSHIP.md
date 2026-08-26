@@ -168,7 +168,9 @@ Rules:
   success means exact readback only; it never implies an external Agent has run.
 - Workbench presentation modules receive snapshots and callbacks only. They
   may not import application sessions, Bridge services or persistence
-  adapters.
+  adapters. File header, comment rail and project-files drawer live in
+  `app/workbench/*-view.tsx` modules composed by `workbench.tsx`; they do not
+  own Sessions or create a second Store.
 - An opened source locator is not a registered project context. Empty
   `projectId` or `documentId` values may not be used as placeholder authority.
 - The first durable action atomically registers the project identity and binds
