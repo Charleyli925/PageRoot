@@ -19,6 +19,7 @@ import test from "node:test";
 
 import { sha256 } from "../scripts/lifecycle-core.mjs";
 import { createDeviceIdentifier } from "../shared/provenance.mjs";
+import { normalizeAgentDelivery } from "../shared/agent-delivery.mjs";
 import {
   ProjectFileRepository,
   ProjectFileRepositoryError,
@@ -2552,6 +2553,53 @@ test("an existing unknown-provider Request remains readable and durably cancella
   });
   assert.equal(cancelled.status, "cancelled");
   assert.equal(JSON.parse(await readFile(requestPath, "utf8")).status, "cancelled");
+});
+
+test("injected provider authority can normalize a new selection without a legacy driver", async (t) => {
+  const value = await fixture(t);
+  const repository = new ProjectFileRepository({
+    projectsRoot: value.projects,
+    agentDeliveryNormalizer: (input) => {
+      const delivery = normalizeAgentDelivery(input, { allowLegacy: false });
+      if (delivery.mode === "managed-agent"
+        && (delivery.selection.providerId !== "synthetic-provider"
+          || delivery.selection.runtimeId !== "synthetic-runtime")) {
+        throw Object.assign(new Error("unsupported provider"), {
+          code: "AGENT_PROVIDER_UNSUPPORTED",
+        });
+      }
+      return delivery;
+    },
+  });
+  const imported = await importSource({ ...value, repository }, "selection-first-request.html");
+  const agentDelivery = {
+    mode: "managed-agent",
+    selection: {
+      providerId: "synthetic-provider",
+      runtimeId: "synthetic-runtime",
+      requestedModelId: null,
+      resolvedModelId: null,
+      reasoning: { requested: null, applied: null, resolution: "provider-default" },
+    },
+    trustPolicyVersion: "trusted-local-agent-v1",
+  };
+  const prepared = await repository.prepareRequest({
+    target: imported.target,
+    requestId: "req_selection_first_provider",
+    attemptId: "attempt_001",
+    expectedSourceSha256: imported.target.sourceSha256,
+    request: {
+      freezeCutoffRevision: 0,
+      summary: "selection-first request",
+      comments: [],
+      changeEvents: [],
+      instructions: [],
+      targets: [],
+      agentDelivery,
+    },
+    prompt: "# selection-first request\n",
+  });
+  assert.deepEqual(prepared.request.agentDelivery, normalizeAgentDelivery(agentDelivery));
 });
 
 test("a copied project remains external and its first import creates an independent V1", async (t) => {

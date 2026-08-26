@@ -15,13 +15,35 @@ const IDENTITY = Object.freeze({
   sourcePath: "/tmp/runtime-contract.html",
 });
 
-function registry({ run, verifyTicket } = {}) {
+function registry({ run, verifyTicket, preflight } = {}) {
   const capabilities = Object.freeze({
     availability: true,
     preflight: true,
     execution: true,
     discussion: true,
     modelCatalog: true,
+  });
+  const selection = Object.freeze({
+    providerId: "synthetic-provider",
+    runtimeId: "synthetic-runtime",
+    requestedModelId: null,
+    resolvedModelId: null,
+    reasoning: Object.freeze({
+      requested: null,
+      applied: null,
+      resolution: "provider-default",
+    }),
+  });
+  const prepared = (driver) => Object.freeze({
+    ...(driver ? { driver } : {}),
+    providerId: "synthetic-provider",
+    runtimeId: "synthetic-runtime",
+    securityProfile: "client-mediated",
+    installation: Object.freeze({ generation: 1 }),
+    installationDigest: `sha256:${"a".repeat(64)}`,
+    capabilities,
+    evidence: Object.freeze({ version: "1.0.0", modelCount: 1, models: [] }),
+    selection,
   });
   return {
     resolveDriver(driver) {
@@ -30,17 +52,28 @@ function registry({ run, verifyTicket } = {}) {
       });
       return {};
     },
-    availability: async () => ({ status: "ready" }),
-    preflight: async ({ driver }) => Object.freeze({
-      driver,
-      providerId: "synthetic-provider",
-      runtimeId: "synthetic-runtime",
-      securityProfile: "client-mediated",
-      installation: Object.freeze({ generation: 1 }),
-      installationDigest: `sha256:${"a".repeat(64)}`,
-      capabilities,
-      evidence: Object.freeze({ version: "1.0.0", modelCount: 1, models: [] }),
+    selectionFromDriver(driver) {
+      this.resolveDriver(driver);
+      return selection;
+    },
+    resolveSelection(received) {
+      if (received?.providerId !== selection.providerId
+        || received?.runtimeId !== selection.runtimeId) {
+        throw Object.assign(new Error("unsupported"), { code: "AGENT_PROVIDER_UNSUPPORTED" });
+      }
+      return {};
+    },
+    assertCapabilityForSelection(received) {
+      this.resolveSelection(received);
+      return true;
+    },
+    availabilityForSelection: async () => ({ status: "ready" }),
+    preflightForSelection: preflight || (async (received) => {
+      if (received?.providerId !== selection.providerId) throw new Error("selection mismatch");
+      return prepared(null);
     }),
+    availability: async () => ({ status: "ready" }),
+    preflight: async ({ driver }) => prepared(driver),
     verifyTicket: verifyTicket || (async (ticket) => ticket),
     loadExecutionPolicy: async (_ticket, input) => ({
       ...input,
@@ -52,6 +85,14 @@ function registry({ run, verifyTicket } = {}) {
     failureMessage: (_ticket, code) => `failure:${code}`,
     failureMessageForDriver: (_driver, code) => `failure:${code}`,
     preflightFailureMessageForDriver: (_driver, code) => `preflight:${code}`,
+    failureMessageForSelection(received, code) {
+      this.resolveSelection(received);
+      return `failure:${code}`;
+    },
+    preflightFailureMessageForSelection(received, code) {
+      this.resolveSelection(received);
+      return `preflight:${code}`;
+    },
     createTurnRunner: () => async () => ({ stopReason: "end_turn" }),
   };
 }
@@ -298,6 +339,58 @@ test("a start racing shutdown fails closed before recording or spawning", async 
   await assert.rejects(start, (error) => error?.code === "AGENT_BRIDGE_DISPOSED");
   await shutdown;
   assert.equal(records, 0);
+});
+
+test("shutdown drains an in-flight provider preflight before confirming exit", async () => {
+  let releasePreflight;
+  let markPreflightStarted;
+  const preflightGate = new Promise((resolve) => { releasePreflight = resolve; });
+  const preflightStarted = new Promise((resolve) => { markPreflightStarted = resolve; });
+  const coordinator = new AgentRuntimeCoordinator({
+    providerRegistry: registry({
+      preflight: async (selection) => {
+        markPreflightStarted();
+        await preflightGate;
+        return {
+          providerId: selection.providerId,
+          runtimeId: selection.runtimeId,
+          securityProfile: "client-mediated",
+          installation: Object.freeze({ generation: 1 }),
+          installationDigest: `sha256:${"a".repeat(64)}`,
+          capabilities: Object.freeze({ execution: true, discussion: true }),
+          evidence: Object.freeze({ version: "1.0.0", modelCount: 1, models: [] }),
+          selection,
+        };
+      },
+    }),
+    cancelTimeoutMs: 500,
+  });
+  const preflight = ready(coordinator);
+  await preflightStarted;
+  const shutdown = coordinator.shutdown();
+  releasePreflight();
+  await assert.rejects(preflight, (error) => error?.code === "AGENT_BRIDGE_DISPOSED");
+  await shutdown;
+});
+
+test("an unknown historical provider stays readable but cannot become start authority", () => {
+  const coordinator = new AgentRuntimeCoordinator({ providerRegistry: registry() });
+  const selection = {
+    providerId: "future-provider",
+    runtimeId: "future-runtime",
+    requestedModelId: null,
+    resolvedModelId: null,
+    reasoning: { requested: null, applied: null, resolution: "provider-default" },
+  };
+  const interrupted = coordinator.interrupted(IDENTITY, { selection });
+  assert.equal(interrupted.driver, "future-provider");
+  assert.equal(interrupted.state, "interrupted");
+  assert.equal(interrupted.errorCode, "AGENT_RESTART_RECOVERY_REQUIRED");
+  assert.match(interrupted.errorMessage, /无法恢复此 Agent 会话/u);
+  assert.throws(
+    () => coordinator.assertSelection(selection, "execution"),
+    (error) => error?.code === "AGENT_PROVIDER_UNSUPPORTED",
+  );
 });
 
 test("shutdown drains a discussion start waiting on lease acquisition", async () => {

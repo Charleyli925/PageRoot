@@ -251,6 +251,32 @@ export class AgentRuntimeCoordinator {
     return this.#providerRegistry.catalog();
   }
 
+  assertSelection(selection, purpose) {
+    return this.#providerRegistry.assertCapabilityForSelection(selection, validatePurpose(purpose));
+  }
+
+  #selectionForInput({ selection, driver, trustPolicyAccepted } = {}) {
+    if (selection) {
+      const requestedSelection = trustPolicyAccepted === undefined
+        ? selection
+        : canonicalSelection(selection, trustPolicyAccepted);
+      if (driver) {
+        const legacySelection = this.#providerRegistry.selectionFromDriver(driver);
+        if (legacySelection.providerId !== requestedSelection.providerId
+          || legacySelection.runtimeId !== requestedSelection.runtimeId) {
+          failAgentRuntime(
+            "AGENT_SELECTION_UNSUPPORTED",
+            "The selected Agent provider does not match its legacy driver.",
+            { status: 409 },
+          );
+        }
+      }
+      return requestedSelection;
+    }
+    if (driver) return this.#providerRegistry.selectionFromDriver(driver);
+    return defaultManagedAgentDelivery().selection;
+  }
+
   #assertAcceptingStarts() {
     if (!this.#acceptingStarts) {
       failAgentRuntime("AGENT_BRIDGE_DISPOSED", "Agent Bridge 已停止。", { status: 503 });
@@ -295,39 +321,53 @@ export class AgentRuntimeCoordinator {
     }
   }
 
-  async availability({ driver } = {}) {
+  async availability({ driver, selection } = {}) {
+    const requestedSelection = this.#selectionForInput({ selection, driver });
     if (!this.#acceptingStarts) {
-      return Object.freeze({ ok: true, status: "unavailable", reason: "check-failed", driver });
+      return Object.freeze({
+        ok: true,
+        status: "unavailable",
+        reason: "check-failed",
+        ...(driver ? { driver } : {}),
+      });
     }
-    const result = await this.#providerRegistry.availability({
-      driver,
+    const result = await this.#providerRegistry.availabilityForSelection(requestedSelection, {
       environment: this.#environment,
     });
-    return Object.freeze({ ok: true, ...result, driver });
+    return Object.freeze({ ok: true, ...result, ...(driver ? { driver } : {}) });
   }
 
-  async preflight({ driver, selection, trustPolicyAccepted, purpose = "execution" } = {}) {
-    this.#assertAcceptingStarts();
+  preflight(input = {}) {
+    return this.#trackStart(() => this.#performPreflight(input));
+  }
+
+  async #performPreflight({ driver, selection, trustPolicyAccepted, purpose = "execution" } = {}) {
     const ticketPurpose = validatePurpose(purpose);
+    const requestedSelection = this.#selectionForInput({
+      selection,
+      driver,
+      trustPolicyAccepted,
+    });
     if (this.#preflightCleanupUnconfirmed) {
       failAgentRuntime(
         "AGENT_PREFLIGHT_CLEANUP_UNCONFIRMED",
-        this.#providerRegistry.preflightFailureMessageForDriver(
-          driver,
+        this.#providerRegistry.preflightFailureMessageForSelection(
+          requestedSelection,
           "AGENT_PREFLIGHT_CLEANUP_UNCONFIRMED",
         ),
         { status: 503 },
       );
     }
-    this.#providerRegistry.resolveDriver(driver);
+    this.#providerRegistry.resolveSelection(requestedSelection);
     validateTrustPolicy(trustPolicyAccepted);
     this.#prune();
     let prepared;
     try {
-      prepared = await this.#providerRegistry.preflight({
-        driver,
-        environment: this.#environment,
-      });
+      prepared = await this.#providerRegistry.preflightForSelection(
+        requestedSelection,
+        ticketPurpose,
+        { environment: this.#environment },
+      );
     } catch (cause) {
       if (cause?.code === "AGENT_PREFLIGHT_CLEANUP_UNCONFIRMED") {
         this.#preflightCleanupUnconfirmed = true;
@@ -335,31 +375,15 @@ export class AgentRuntimeCoordinator {
       throw cause;
     }
     this.#assertAcceptingStarts();
-    const requestedSelection = selection
-      ? canonicalSelection(selection, trustPolicyAccepted)
-      : Object.freeze({
-          providerId: prepared.providerId,
-          runtimeId: prepared.runtimeId,
-          requestedModelId: null,
-          resolvedModelId: null,
-          reasoning: Object.freeze({
-            requested: null,
-            applied: null,
-            resolution: "provider-default",
-          }),
-        });
     if (requestedSelection.providerId !== prepared.providerId
-      || requestedSelection.runtimeId !== prepared.runtimeId
-      || requestedSelection.requestedModelId !== null
-      || requestedSelection.resolvedModelId !== null
-      || requestedSelection.reasoning.resolution !== "provider-default") {
+      || requestedSelection.runtimeId !== prepared.runtimeId) {
       failAgentRuntime(
         "AGENT_SELECTION_UNSUPPORTED",
-        "The selected Agent model or reasoning policy is unsupported.",
+        "The selected Agent provider is unsupported.",
         { status: 409 },
       );
     }
-    const resolvedSelection = requestedSelection;
+    const resolvedSelection = prepared.selection;
     const fingerprint = selectionFingerprint(resolvedSelection);
     const preflightId = `preflight_${randomUUID().replaceAll("-", "")}`;
     const createdAt = this.#clock.now();
@@ -369,7 +393,7 @@ export class AgentRuntimeCoordinator {
     this.#tickets.set(preflightId, Object.freeze({
       preflightId,
       purpose: ticketPurpose,
-      driver: prepared.driver,
+      ...(driver ? { driver } : {}),
       providerId: prepared.providerId,
       runtimeId: prepared.runtimeId,
       securityProfile: prepared.securityProfile,
@@ -385,7 +409,7 @@ export class AgentRuntimeCoordinator {
     return Object.freeze({
       ok: true,
       status: "ready",
-      driver: prepared.driver,
+      ...(driver ? { driver } : {}),
       preflightId,
       trustPolicyVersion: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
       agentVersion: prepared.evidence.version,
@@ -397,11 +421,15 @@ export class AgentRuntimeCoordinator {
     });
   }
 
-  async redeemCommandTicket(preflightId, { purpose = "execution", driver } = {}) {
+  async redeemCommandTicket(preflightId, { purpose = "execution", driver, selection } = {}) {
     this.#assertAcceptingStarts();
     const expectedPurpose = validatePurpose(purpose);
     if (this.#externalRedeemTicket && this.#tickets.size === 0) {
-      const ticket = await this.#externalRedeemTicket(preflightId, { purpose: expectedPurpose, driver });
+      const ticket = await this.#externalRedeemTicket(preflightId, {
+        purpose: expectedPurpose,
+        driver,
+        selection,
+      });
       return Object.freeze({ ...ticket, purpose: ticket.purpose || expectedPurpose });
     }
     const ticket = this.#tickets.get(preflightId);
@@ -412,12 +440,21 @@ export class AgentRuntimeCoordinator {
     // Consume before every verification. A drifted, cross-provider or
     // cross-purpose ticket is never replayable after the failed attempt.
     this.#tickets.delete(preflightId);
+    const selectionMismatch = selection
+      && ticket.selectionFingerprint !== selectionFingerprint(selection);
     if (ticket.purpose !== expectedPurpose || (driver && ticket.driver !== driver)) {
       failAgentRuntime("AGENT_PREFLIGHT_PURPOSE_MISMATCH", "Agent 预检与本次操作不匹配，请重新检查。", {
         status: 409,
       });
     }
-    const verified = await this.#providerRegistry.verifyTicket(ticket);
+    if (selectionMismatch) {
+      failAgentRuntime(
+        "AGENT_PROVIDER_TICKET_INVALID",
+        "Agent selection does not match its preflight ticket.",
+        { status: 409 },
+      );
+    }
+    const verified = await this.#providerRegistry.verifyTicket(ticket, { purpose: expectedPurpose });
     if (verified.providerId !== ticket.providerId || verified.runtimeId !== ticket.runtimeId
       || verified.securityProfile !== ticket.securityProfile) {
       failAgentRuntime("AGENT_PROVIDER_TICKET_INVALID", "Agent provider ticket binding is invalid.", {
@@ -464,10 +501,15 @@ export class AgentRuntimeCoordinator {
       entry.keepLease = true;
       entry.retryable = false;
       entry.errorCode = "AGENT_RESTART_RECOVERY_REQUIRED";
-      entry.errorMessage = this.#providerRegistry.failureMessageForDriver(
-        entry.driver,
-        "AGENT_RESTART_RECOVERY_REQUIRED",
-      );
+      entry.errorMessage = entry.selection
+        ? this.#providerRegistry.failureMessageForSelection(
+            entry.selection,
+            "AGENT_RESTART_RECOVERY_REQUIRED",
+          )
+        : this.#providerRegistry.failureMessageForDriver(
+            entry.driver,
+            "AGENT_RESTART_RECOVERY_REQUIRED",
+          );
       this.#touch(entry);
       return false;
     }
@@ -480,11 +522,13 @@ export class AgentRuntimeCoordinator {
 
   async submit({ driver, selection, trustPolicyAccepted, preflightId, ...identityInput } = {}) {
     this.#assertAcceptingStarts();
-    this.#providerRegistry.resolveDriver(driver);
     validateTrustPolicy(trustPolicyAccepted);
-    const requestedSelection = selection
-      ? canonicalSelection(selection, trustPolicyAccepted)
-      : null;
+    const requestedSelection = this.#selectionForInput({
+      selection,
+      driver,
+      trustPolicyAccepted,
+    });
+    this.#providerRegistry.resolveSelection(requestedSelection);
     const identity = validateExecutionIdentity(identityInput);
     this.#prune();
     const key = executionKey(identity);
@@ -504,12 +548,11 @@ export class AgentRuntimeCoordinator {
         { status: 409 },
       );
     }
-    const ticket = await this.redeemCommandTicket(preflightId, { purpose: "execution", driver });
-    if (requestedSelection && !sameSelection(requestedSelection, ticket.selection)) {
-      failAgentRuntime("AGENT_PROVIDER_TICKET_INVALID", "Agent selection does not match its preflight ticket.", {
-        status: 409,
-      });
-    }
+    const ticket = await this.redeemCommandTicket(preflightId, {
+      purpose: "execution",
+      driver,
+      selection: requestedSelection,
+    });
     if (!this.#resolveTask) throw new TypeError("Execution authority is not configured.");
     const task = await this.#resolveTask(identity);
     this.#assertAcceptingStarts();
@@ -564,7 +607,7 @@ export class AgentRuntimeCoordinator {
       providerId: ticket.providerId,
       runtimeId: ticket.runtimeId,
       purpose: "execution",
-      driver: ticket.driver,
+      ...(ticket.driver ? { driver: ticket.driver } : {}),
       projectId: identity.projectId,
       documentId: identity.documentId,
       requestId: identity.requestId,
@@ -581,6 +624,8 @@ export class AgentRuntimeCoordinator {
     const controller = new AbortController();
     const entry = {
       purpose: "execution",
+      selection: ticket.selection,
+      driver: ticket.driver || ticket.providerId,
       turnId: identity.requestId,
       nextSequence: -1,
       identity,
@@ -665,11 +710,24 @@ export class AgentRuntimeCoordinator {
     return publicExecutionSession(entry, entry?.driver);
   }
 
-  interrupted(identityInput, { driver } = {}) {
+  interrupted(identityInput, { driver, selection } = {}) {
     validateExecutionIdentity(identityInput);
+    const requestedSelection = this.#selectionForInput({ driver, selection });
+    let errorMessage;
+    try {
+      errorMessage = this.#providerRegistry.failureMessageForSelection(
+        requestedSelection,
+        "AGENT_RESTART_RECOVERY_REQUIRED",
+      );
+    } catch (cause) {
+      if (!["AGENT_PROVIDER_UNSUPPORTED", "AGENT_SELECTION_UNSUPPORTED"].includes(cause?.code)) {
+        throw cause;
+      }
+      errorMessage = "当前版本无法恢复此 Agent 会话。请结束本轮后重新发送。";
+    }
     const timestamp = nowIso(this.#clock);
     return Object.freeze({
-      driver,
+      driver: driver || requestedSelection.providerId,
       state: "interrupted",
       phase: "interrupted",
       startedAt: null,
@@ -679,10 +737,7 @@ export class AgentRuntimeCoordinator {
       eventCount: 0,
       retryable: false,
       errorCode: "AGENT_RESTART_RECOVERY_REQUIRED",
-      errorMessage: this.#providerRegistry.failureMessageForDriver(
-        driver,
-        "AGENT_RESTART_RECOVERY_REQUIRED",
-      ),
+      errorMessage,
     });
   }
 

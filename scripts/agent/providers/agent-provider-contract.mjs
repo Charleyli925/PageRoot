@@ -13,6 +13,11 @@ const CAPABILITY_NAMES = Object.freeze([
   "modelCatalog",
 ]);
 
+const PURPOSE_CAPABILITIES = Object.freeze({
+  discussion: "discussion",
+  execution: "execution",
+});
+
 export class AgentProviderError extends LifecycleError {
   constructor(code, message, { status = 422, details } = {}) {
     super(code, message, details, status);
@@ -71,9 +76,6 @@ export function defineAgentProvider(value) {
   const legacyDrivers = Array.isArray(value.legacyDrivers)
     ? [...new Set(value.legacyDrivers.map((driver) => assertComponentId(driver, "legacy driver")))]
     : [];
-  if (legacyDrivers.length === 0) {
-    throw new TypeError("Agent provider must declare at least one legacy driver mapping.");
-  }
   const requiredMethods = [
     "resolveInstallation",
     "preflight",
@@ -104,6 +106,18 @@ export function defineAgentProvider(value) {
   });
 }
 
+export function assertProviderCapability(provider, purpose) {
+  const capability = PURPOSE_CAPABILITIES[purpose];
+  if (!capability || provider?.capabilities?.[capability] !== true) {
+    throw agentProviderError(
+      "AGENT_CAPABILITY_UNSUPPORTED",
+      "The selected Agent provider does not support this operation.",
+      { status: 409 },
+    );
+  }
+  return capability;
+}
+
 export function assertProviderTicket(ticket) {
   if (!ticket || typeof ticket !== "object" || Array.isArray(ticket)) {
     throw agentProviderError(
@@ -123,5 +137,14 @@ export function assertProviderTicket(ticket) {
     );
   }
   normalizedCapabilities(ticket.capabilities);
+  if (ticket.purpose !== undefined) {
+    if (!PURPOSE_CAPABILITIES[ticket.purpose]) {
+      throw agentProviderError(
+        "AGENT_PROVIDER_TICKET_INVALID",
+        "Agent provider ticket purpose is invalid.",
+        { status: 409 },
+      );
+    }
+  }
   return ticket;
 }

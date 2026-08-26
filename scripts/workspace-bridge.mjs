@@ -41,10 +41,7 @@ import {
   sealDiscussionReply,
   writeConversationDraft,
 } from "./conversation-repository.mjs";
-import {
-  AgentBridgeService,
-  TRUSTED_LOCAL_AGENT_POLICY_VERSION,
-} from "./agent-bridge-service.mjs";
+import { AgentBridgeService } from "./agent-bridge-service.mjs";
 import { DiscussionBridgeService } from "./discussion-bridge-service.mjs";
 import {
   closeWorkspaceBridgeAfterAgentCleanup,
@@ -54,7 +51,6 @@ import {
   defaultManagedAgentDelivery,
   legacyDriverForAgentDelivery,
   normalizeAgentDelivery,
-  normalizeNewAgentDelivery,
 } from "../shared/agent-delivery.mjs";
 
 const HOST = "127.0.0.1";
@@ -78,15 +74,23 @@ const DEFAULT_PROJECT_FILE_ROOT = path.join(
 const PROJECT_FILE_ROOT = path.resolve(
   process.env.HTML_AI_PROJECT_FILES_ROOT || DEFAULT_PROJECT_FILE_ROOT,
 );
+const agentBridgeService = new AgentBridgeService({
+  resolveTask: resolveAgentBridgeTask,
+});
+function normalizeDispatchableAgentDelivery(value) {
+  const delivery = normalizeAgentDelivery(value, { allowLegacy: false });
+  if (delivery.mode === "managed-agent") {
+    agentBridgeService.assertSelection(delivery.selection, "execution");
+  }
+  return delivery;
+}
 const projectFileRepository = new ProjectFileRepository({
   projectsRoot: PROJECT_FILE_ROOT,
   deviceId: process.env.HTML_AI_DEVICE_ID || null,
+  agentDeliveryNormalizer: normalizeDispatchableAgentDelivery,
   failpoint: process.env.HTML_AI_FAILPOINT
     ? async (name) => name === process.env.HTML_AI_FAILPOINT
     : null,
-});
-const agentBridgeService = new AgentBridgeService({
-  resolveTask: resolveAgentBridgeTask,
 });
 // Discussion keeps its own service so the read-only turn authority never shares
 // a code path with Request execution. It redeems the one-use command ticket from
@@ -1018,7 +1022,7 @@ function projectFileFinalizerCommand(target, request) {
 
 function agentDeliveryForRequest(body = {}) {
   try {
-    return normalizeNewAgentDelivery(body.agentDelivery || { mode: "clipboard" });
+    return normalizeDispatchableAgentDelivery(body.agentDelivery || { mode: "clipboard" });
   } catch (cause) {
     throw new HttpError(
       422,
@@ -1299,15 +1303,25 @@ async function resolveAgentBridgeTask(identity) {
   return { target, request: status.request || null, run };
 }
 
-function agentSessionForStatus({ request, run, lifecycleStatus }) {
-  const delivery = request?.request?.agentDelivery;
-  if (!run || delivery?.mode === "clipboard") return null;
-  let driver;
+function compatibilityDriverForAgentDelivery(delivery) {
   try {
-    driver = legacyDriverForAgentDelivery(delivery);
+    return legacyDriverForAgentDelivery(delivery);
   } catch {
     return null;
   }
+}
+
+function agentSessionForStatus({ request, run, lifecycleStatus }) {
+  const delivery = request?.request?.agentDelivery;
+  if (!run || delivery?.mode === "clipboard") return null;
+  let normalizedDelivery;
+  try {
+    normalizedDelivery = normalizeAgentDelivery(delivery);
+  } catch {
+    return null;
+  }
+  const compatibilityDriver = compatibilityDriverForAgentDelivery(normalizedDelivery);
+  const publicDriver = compatibilityDriver || normalizedDelivery.selection.providerId;
   const identity = {
     projectId: run.projectId,
     documentId: run.documentId,
@@ -1319,7 +1333,7 @@ function agentSessionForStatus({ request, run, lifecycleStatus }) {
   if (session) return session;
   if (lifecycleStatus === "candidate-ready") {
     return {
-      driver,
+      driver: publicDriver,
       state: "completed",
       phase: "awaiting-validation",
       startedAt: null,
@@ -1330,7 +1344,10 @@ function agentSessionForStatus({ request, run, lifecycleStatus }) {
       retryable: false,
     };
   }
-  return agentBridgeService.interrupted(identity);
+  return agentBridgeService.interrupted(identity, {
+    ...(compatibilityDriver ? { driver: compatibilityDriver } : {}),
+    selection: normalizedDelivery.selection,
+  });
 }
 
 async function activateProjectFileCandidate(body) {
@@ -1418,9 +1435,10 @@ async function preflightAgent(body) {
             trustPolicyVersion: body.trustPolicyAccepted,
           })
         : defaultManagedAgentDelivery();
+  const driver = compatibilityDriverForAgentDelivery(delivery);
   return agentBridgeService.preflight({
     ...body,
-    driver: legacyDriverForAgentDelivery(delivery),
+    ...(driver ? { driver } : {}),
     selection: delivery.selection,
     trustPolicyAccepted: delivery.trustPolicyVersion,
   });
@@ -1461,8 +1479,9 @@ async function startAgent(body) {
             trustPolicyVersion: body.trustPolicyAccepted,
           })
         : defaultManagedAgentDelivery();
+  const driver = compatibilityDriverForAgentDelivery(delivery);
   return agentBridgeService.submit({
-    driver: legacyDriverForAgentDelivery(delivery),
+    ...(driver ? { driver } : {}),
     selection: delivery.selection,
     trustPolicyAccepted: delivery.trustPolicyVersion,
     preflightId: body.preflightId,
