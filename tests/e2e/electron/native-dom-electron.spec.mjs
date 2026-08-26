@@ -73,9 +73,8 @@ async function waitForProjectReady(page, timeout = 60_000) {
 async function chooseClipboardDelivery(page) {
   const sidebar = page.getByTestId("ai-conversation-sidebar");
   await expect(sidebar).toBeVisible();
-  const modifyIntent = sidebar.getByRole("radio", { name: "修改", exact: true });
-  await modifyIntent.click();
-  await expect(modifyIntent).toHaveAttribute("aria-checked", "true");
+  await expect(sidebar.getByTestId("ai-conversation-intent")).toHaveCount(0);
+  await expect(sidebar.getByTestId("ai-conversation-input")).toHaveCount(0);
   await sidebar.getByRole("button", { name: /复制给别的 AI/u }).click();
 }
 
