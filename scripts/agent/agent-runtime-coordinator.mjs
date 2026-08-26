@@ -148,6 +148,10 @@ export class AgentRuntimeCoordinator {
     policyLoader,
     runTask,
     preflightRunner,
+    codexInstallationResolver,
+    codexProbeRunner,
+    codexPolicyLoader,
+    codexRunTask,
     providerRegistry,
     leaseStore = defaultAgentLeaseStore,
     cancelTimeoutMs = CANCEL_TIMEOUT_MS,
@@ -182,6 +186,10 @@ export class AgentRuntimeCoordinator {
       ...(policyLoader ? { policyLoader } : {}),
       ...(runTask ? { runTask } : {}),
       ...(preflightRunner ? { preflightRunner } : {}),
+      ...(codexInstallationResolver ? { codexInstallationResolver } : {}),
+      ...(codexProbeRunner ? { codexProbeRunner } : {}),
+      ...(codexPolicyLoader ? { codexPolicyLoader } : {}),
+      ...(codexRunTask ? { codexRunTask } : {}),
     });
     this.#leaseStore = leaseStore;
     this.#cancelTimeoutMs = cancelTimeoutMs;
@@ -408,12 +416,31 @@ export class AgentRuntimeCoordinator {
   }
 
   #observe(entry, rawEvent, phaseForEvent, textField) {
-    entry.nextSequence += 1;
-    const canonical = canonicalAgentEvent(rawEvent, {
+    if (
+      rawEvent?.turnId
+      && String(rawEvent.turnId) !== entry.turnId
+    ) return;
+    const nextSequence = entry.nextSequence + 1;
+    const canonical = canonicalAgentEvent({
+      ...rawEvent,
       turnId: entry.turnId,
-      sequence: entry.nextSequence,
+      sequence: nextSequence,
+      timestamp: this.#clock.now(),
+    }, {
+      turnId: entry.turnId,
+      sequence: nextSequence,
       timestamp: this.#clock.now(),
     });
+    // Runtime callbacks can outlive their turn. A late event must not advance
+    // the entry sequence or mutate this Request's public session projection.
+    if (!canonical || canonical.turnId !== entry.turnId) return;
+    entry.nextSequence = nextSequence;
+    // A Provider can flush buffered narration while cancellation is in flight.
+    // It must never make a cancelled Request look active again.
+    if (
+      canonical?.kind === "visible-text"
+      && (entry.cancelState || ["cancelling", "cancelled"].includes(entry.state))
+    ) return;
     const reduced = this.#eventReducer.accept(canonical);
     if (!reduced.accepted) return;
     entry.eventCount = reduced.projection.eventCount;
@@ -423,6 +450,7 @@ export class AgentRuntimeCoordinator {
     if (textField) {
       entry[textField] = reduced.projection.visibleText;
       if (textField === "replyText") entry.replyTruncated = reduced.projection.textTruncated;
+      if (textField === "visibleText") entry.textTruncated = reduced.projection.textTruncated;
     }
     if (reduced.event.kind === "initialized") {
       if (["starting", "running"].includes(entry.state)) entry.state = "running";
@@ -481,7 +509,7 @@ export class AgentRuntimeCoordinator {
         ok: true,
         accepted: false,
         idempotent: true,
-        session: publicExecutionSession(existing, existing.driver),
+        session: publicExecutionSession(existing),
       };
     }
     if (existing && existing.retryable !== true) {
@@ -568,6 +596,8 @@ export class AgentRuntimeCoordinator {
     const entry = {
       purpose: "execution",
       selection: ticket.selection,
+      providerId: ticket.providerId,
+      runtimeId: ticket.runtimeId,
       driver: ticket.driver || ticket.providerId,
       turnId: identity.requestId,
       nextSequence: -1,
@@ -589,6 +619,7 @@ export class AgentRuntimeCoordinator {
       controller,
       promise: null,
       visibleText: "",
+      textTruncated: false,
     };
     this.#executionSessions.set(key, entry);
     const pendingEvents = [];
@@ -617,8 +648,13 @@ export class AgentRuntimeCoordinator {
     });
     entry.promise = Promise.resolve(runtimePromise).then(() => {
       if (this.#executionSessions.get(key) !== entry) return;
-      entry.state = "completed";
-      entry.phase = "awaiting-validation";
+      if (controller.signal.aborted) {
+        entry.state = "cancelled";
+        entry.phase = "cancelled";
+      } else {
+        entry.state = "completed";
+        entry.phase = "awaiting-validation";
+      }
       entry.retryable = false;
       if (entry.cancelState === "requested") entry.cancelState = "provider-acknowledged";
       this.#touch(entry);
@@ -643,14 +679,14 @@ export class AgentRuntimeCoordinator {
       await this.#releaseLease(entry);
     });
     void entry.promise.catch(() => {});
-    return { ok: true, accepted: true, idempotent: false, session: publicExecutionSession(entry, entry.driver) };
+    return { ok: true, accepted: true, idempotent: false, session: publicExecutionSession(entry) };
   }
 
   executionStatus(identityInput) {
     const identity = validateExecutionIdentity(identityInput);
     this.#prune();
     const entry = this.#executionSessions.get(executionKey(identity));
-    return publicExecutionSession(entry, entry?.driver);
+    return publicExecutionSession(entry);
   }
 
   interrupted(identityInput, { driver, selection } = {}) {
@@ -670,6 +706,8 @@ export class AgentRuntimeCoordinator {
     }
     const timestamp = nowIso(this.#clock);
     return Object.freeze({
+      providerId: requestedSelection.providerId,
+      runtimeId: requestedSelection.runtimeId,
       driver: driver || requestedSelection.providerId,
       state: "interrupted",
       phase: "interrupted",
@@ -678,6 +716,8 @@ export class AgentRuntimeCoordinator {
       agentName: null,
       agentVersion: null,
       eventCount: 0,
+      visibleText: "",
+      textTruncated: false,
       retryable: false,
       errorCode: "AGENT_RESTART_RECOVERY_REQUIRED",
       errorMessage,
@@ -688,7 +728,7 @@ export class AgentRuntimeCoordinator {
     const identity = validateExecutionIdentity(identityInput);
     const entry = this.#executionSessions.get(executionKey(identity));
     if (!entry || !LIVE_STATES.has(entry.state)) {
-      return { ok: true, stopped: false, session: publicExecutionSession(entry, entry?.driver) };
+      return { ok: true, stopped: false, session: publicExecutionSession(entry) };
     }
     entry.cancelState = "requested";
     entry.state = "cancelling";
@@ -713,7 +753,7 @@ export class AgentRuntimeCoordinator {
       );
     }
     entry.cancelState = "termination-confirmed";
-    return { ok: true, stopped: true, session: publicExecutionSession(entry, entry.driver) };
+    return { ok: true, stopped: true, session: publicExecutionSession(entry) };
   }
 
   async cancelDurableExecution({ identity, cancelRequest } = {}) {

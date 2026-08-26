@@ -16,6 +16,7 @@ import {
   sidebarCopyTaskState,
   sidebarRunProgress,
   sidebarStateFromRun,
+  sidebarTimestampLabel,
 } from "../app/workbench/ai-conversation-model.js";
 
 function factMessage(overrides = {}) {
@@ -231,7 +232,7 @@ test("Agent connection recovery is an explicit sidebar action, not a send", () =
   assert.deepEqual(login, {
     kind: "open-agent-settings",
     canSend: false,
-    label: "登录 Qoder CLI",
+    label: "登录 Agent",
     reason: null,
   });
 
@@ -241,7 +242,7 @@ test("Agent connection recovery is an explicit sidebar action, not a send", () =
     hasText: true,
   });
   assert.equal(install.kind, "open-agent-settings");
-  assert.equal(install.label, "设置 Qoder CLI");
+  assert.equal(install.label, "设置 Agent");
 
   const unavailable = sidebarSendState({
     state: "preview-ready",
@@ -393,7 +394,7 @@ test("the Composer sends only the page-comment modification", () => {
     pendingCommentCount: 2,
   });
   assert.equal(modify.canSend, true);
-  assert.equal(modify.label, "交给 Qoder 修改");
+  assert.equal(modify.label, "交给 Agent 修改");
   assert.equal(modify.reason, null);
 
   // With nothing written there is nothing for the Agent to act on, and the
@@ -506,7 +507,7 @@ test("the delivery disclosure moves out of the dialog and onto the modify intent
   // on it, so the user is informed without being interrupted first.
   assert.equal(
     sidebarDeliveryDisclosure("modify"),
-    "Qoder 会读取本轮 HTML、评论和附件；结果先进入审阅。",
+    "Agent 会读取本轮 HTML、评论和附件；结果先进入审阅。",
   );
   assert.equal(
     sidebarDeliveryDisclosure("modify", {
@@ -623,7 +624,7 @@ test("the clipboard round says what is actually happening and keeps the task rea
   }
 });
 
-test("Qoder narrates the round while PageRoot states the stage", () => {
+test("the selected Agent narrates the round while PageRoot states the stage", () => {
   const steps = [
     { key: "handoff", label: "Qoder CLI 已启动", state: "done" },
     { key: "agent", label: "等待 AI 完成", detail: "正在执行本轮要求", state: "current" },
@@ -647,6 +648,37 @@ test("Qoder narrates the round while PageRoot states the stage", () => {
     sidebarRunProgress({ state: "processing", steps, agentText: "   " }).narration,
     null,
   );
+});
+
+test("live Agent narration carries its bounded-text fact and local timestamp", () => {
+  const progress = sidebarRunProgress({
+    state: "processing",
+    steps: [{ key: "agent", label: "Codex 正在修改", state: "current" }],
+    agentText: "已读取冻结的任务。",
+    agentTextTruncated: true,
+  });
+  assert.equal(progress.narrationTruncated, true);
+  assert.equal(progress.liveLabel, "Codex 正在修改");
+  assert.equal(
+    sidebarTimestampLabel("2026-08-26T03:04:00.000Z", {
+      now: Date.parse("2026-08-26T12:00:00.000Z"),
+    }),
+    "11:04",
+  );
+  assert.equal(sidebarTimestampLabel("not-a-date"), null);
+});
+
+test("public Agent narration remains available with the completed Candidate decision", () => {
+  const progress = sidebarRunProgress({
+    state: "ready-to-open",
+    steps: [
+      { key: "agent", label: "Codex 已完成", state: "done" },
+      { key: "result", label: "新版本已准备好", state: "current" },
+    ],
+    agentText: "Candidate 已交给 PageRoot 校验。",
+  });
+  assert.equal(progress.narration, "Candidate 已交给 PageRoot 校验。");
+  assert.equal(progress.liveLabel, "新版本已准备好");
 });
 
 test("the Agent's chunks read as the paragraphs it wrote, not one wall of text", () => {

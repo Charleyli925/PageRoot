@@ -282,7 +282,7 @@ test("provider boundary normalizes ACP raw failures before coordinator ownership
   assert.doesNotMatch(coordinatorSource, /\bACP_/u);
 });
 
-test("Bridge keeps the legacy HTTP projection while tickets remain provider/runtime bound", async (t) => {
+test("Bridge keeps preflight internals private while public execution sessions identify their provider", async (t) => {
   const { fixture, registry } = fixtureRegistry();
   const service = new AgentBridgeService({
     providerRegistry: registry,
@@ -357,7 +357,9 @@ test("Bridge keeps the legacy HTTP projection while tickets remain provider/runt
   });
   assert.equal(started.accepted, true);
   assert.equal(started.session.driver, "qoder-acp");
-  for (const internal of ["providerId", "runtimeId", "installation", "installationDigest", "capabilities"]) {
+  assert.equal(started.session.providerId, "qoder");
+  assert.equal(started.session.runtimeId, "acp");
+  for (const internal of ["installation", "installationDigest", "capabilities"]) {
     assert.equal(internal in started.session, false, `${internal} must stay out of session status`);
   }
   await new Promise((resolve) => setImmediate(resolve));

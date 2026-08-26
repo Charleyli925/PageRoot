@@ -9,7 +9,14 @@ import {
 } from "../../shared/agent-delivery.mjs";
 
 const SHA256 = /^sha256:[a-f0-9]{64}$/u;
-const POLL_INTERVAL_MS = 1_600;
+const POLL_DELAYS_MS = Object.freeze({
+  reconcile: 500,
+  starting: 500,
+  active: 350,
+  streaming: 250,
+  cancelling: 500,
+  hidden: 1_400,
+});
 const NON_RETRYABLE_AGENT_ERRORS = new Set([
   "ACP_PROCESS_CLEANUP_UNCONFIRMED",
   "AGENT_DELIVERY_NOT_AUTHORIZED",
@@ -128,6 +135,7 @@ function agentHandoffState(run, session) {
     "cancelling",
     "cancelled",
   ].includes(state)) return null;
+  const selection = deliveryForRun(run)?.selection || null;
   return {
     sourcePath: run.sourcePath,
     requestId: run.requestId,
@@ -135,11 +143,20 @@ function agentHandoffState(run, session) {
     mode: MANAGED_AGENT_MODE,
     status: state,
     phase: String(session.phase || state),
+    providerId: typeof session.providerId === "string"
+      ? session.providerId
+      : selection?.providerId || null,
+    runtimeId: typeof session.runtimeId === "string"
+      ? session.runtimeId
+      : selection?.runtimeId || null,
     agentName: session.agentName ? String(session.agentName) : null,
     agentVersion: session.agentVersion ? String(session.agentVersion) : null,
     // ADR 0037: narration only. It reaches the view so the user can see what the
     // Agent is doing, and it carries no authority over the Candidate.
     visibleText: typeof session.visibleText === "string" ? session.visibleText : "",
+    textTruncated: session.textTruncated === true,
+    startedAt: typeof session.startedAt === "string" ? session.startedAt : null,
+    updatedAt: typeof session.updatedAt === "string" ? session.updatedAt : null,
     errorCode: session.errorCode ? String(session.errorCode) : null,
     errorMessage: session.errorMessage ? String(session.errorMessage) : null,
     retryable: session.retryable === true,
@@ -220,7 +237,12 @@ export class RunWorkflow {
   #listeners = new Set();
   #eventListeners = new Set();
   #timer = null;
+  #pollLoopActive = false;
+  #pollPromise = null;
   #pollGeneration = 0;
+  #lastNarrationAt = 0;
+  #visibility = null;
+  #visibilityListener = null;
   #uncertainSubmissions = new Map();
   #agentStartsPending = new Set();
   #disposed = false;
@@ -238,6 +260,7 @@ export class RunWorkflow {
     codecs,
     ports = {},
     scheduler = globalThis,
+    visibility = typeof globalThis.document === "object" ? globalThis.document : null,
     clock,
     agentCatalog = null,
   } = {}) {
@@ -299,10 +322,10 @@ export class RunWorkflow {
     }
     if (
       !scheduler
-      || typeof scheduler.setInterval !== "function"
-      || typeof scheduler.clearInterval !== "function"
+      || typeof scheduler.setTimeout !== "function"
+      || typeof scheduler.clearTimeout !== "function"
     ) {
-      throw new TypeError("RunWorkflow requires an interval Scheduler.");
+      throw new TypeError("RunWorkflow requires a timeout Scheduler.");
     }
     if (!clock || typeof clock.now !== "function") {
       throw new TypeError("RunWorkflow requires a ClockPort.");
@@ -330,6 +353,11 @@ export class RunWorkflow {
     this.#hashPort = ports.hash;
     this.#scheduler = scheduler;
     this.#clock = clock;
+    this.#visibility = visibility;
+    if (typeof visibility?.addEventListener === "function") {
+      this.#visibilityListener = () => this.#rescheduleForVisibility();
+      visibility.addEventListener("visibilitychange", this.#visibilityListener);
+    }
     this.#agentCatalog = agentCatalog || new AgentCatalogState({
       bridgeClient,
       handoffPort: this.#handoffPort,
@@ -343,7 +371,7 @@ export class RunWorkflow {
 
   getSnapshot() {
     return Object.freeze({
-      polling: this.#timer !== null,
+      polling: this.#pollLoopActive,
       pendingReconciliations: frozenArray(this.#uncertainSubmissions.keys()),
       agentCatalog: this.#agentCatalog.getSnapshot(),
       agentPresentation: this.#agentCatalog.presentation(),
@@ -371,6 +399,11 @@ export class RunWorkflow {
   dispose() {
     this.#disposed = true;
     this.stopPolling();
+    if (this.#visibilityListener && typeof this.#visibility?.removeEventListener === "function") {
+      this.#visibility.removeEventListener("visibilitychange", this.#visibilityListener);
+    }
+    this.#visibilityListener = null;
+    this.#visibility = null;
     this.#uncertainSubmissions.clear();
     this.#agentStartsPending.clear();
     this.#unsubscribeAgentCatalog?.();
@@ -387,26 +420,36 @@ export class RunWorkflow {
   }
 
   startPolling() {
-    if (this.#disposed || this.#timer !== null || !this.#hasPollingWork()) return;
-    const generation = this.#pollGeneration;
-    this.#timer = this.#scheduler.setInterval(() => {
-      void this.pollNow({ generation });
-    }, POLL_INTERVAL_MS);
+    if (this.#disposed || this.#pollLoopActive || !this.#hasPollingWork()) return;
+    this.#pollLoopActive = true;
+    this.#scheduleNextPoll(this.#pollGeneration, 0);
     this.#publishSnapshot();
-    void this.pollNow({ generation });
   }
 
   stopPolling() {
+    const active = this.#pollLoopActive || this.#timer !== null || this.#pollPromise !== null;
+    if (!active) return;
     this.#pollGeneration += 1;
+    this.#pollLoopActive = false;
     if (this.#timer !== null) {
-      this.#scheduler.clearInterval(this.#timer);
+      this.#scheduler.clearTimeout(this.#timer);
       this.#timer = null;
     }
     this.#publishSnapshot();
   }
 
-  async pollNow({ generation = this.#pollGeneration } = {}) {
-    if (!this.#isPollCurrent(generation)) return stale({ generation });
+  pollNow({ generation = this.#pollGeneration } = {}) {
+    if (!this.#isPollCurrent(generation)) return Promise.resolve(stale({ generation }));
+    if (this.#pollPromise) return this.#pollPromise;
+    const polling = this.#pollOnce({ generation });
+    this.#pollPromise = polling;
+    void polling.finally(() => {
+      if (this.#pollPromise === polling) this.#pollPromise = null;
+    }).catch(() => {});
+    return polling;
+  }
+
+  async #pollOnce({ generation }) {
     const runs = this.#runSession.runs.filter((run) => (
       isPollable(run)
       && !this.#agentStartsPending.has(this.#codecs.operationKey(run))
@@ -1143,6 +1186,14 @@ export class RunWorkflow {
         mode: MANAGED_AGENT_MODE,
         status: "starting",
         phase: "launching",
+        providerId: delivery.selection.providerId,
+        runtimeId: delivery.selection.runtimeId,
+        agentName: presentation.agentName || presentation.displayName || "Agent",
+        agentVersion: null,
+        visibleText: "",
+        textTruncated: false,
+        startedAt: null,
+        updatedAt: null,
       });
       const result = await this.#bridgeClient.startAgent({
         projectId: run.projectId,
@@ -1159,7 +1210,18 @@ export class RunWorkflow {
       if (!next || !["starting", "running", "completed"].includes(next.status)) {
         throw responseError("RUN_AGENT_START_UNCONFIRMED", "Agent 没有确认启动。");
       }
-      this.#runSession.publishHandoff(next);
+      const previous = this.#runSession.handoffForSource(run.sourcePath);
+      this.#runSession.publishHandoff({
+        ...previous,
+        ...next,
+        // The provider runtime may identify itself with a technical process
+        // name. The execution surface always speaks with the Request-frozen
+        // provider presentation instead.
+        agentName: previous?.agentName || presentation.agentName || presentation.displayName
+          || next.agentName || "Agent",
+        providerId: next.providerId || previous?.providerId || delivery.selection.providerId,
+        runtimeId: next.runtimeId || previous?.runtimeId || delivery.selection.runtimeId,
+      });
       this.#emitEvent({
         type: "run-agent-started",
         run,
@@ -1454,10 +1516,29 @@ export class RunWorkflow {
   #processStatus(run, payload) {
     const previousHandoff = this.#runSession.handoffForSource(run.sourcePath);
     const agentState = agentHandoffState(run, payload.agentSession);
+    const frozenPresentation = this.#agentCatalog.presentation(deliveryForRun(run)?.selection);
     const clipboardFallbackActive = previousHandoff?.mode === "clipboard"
       && ["copying", "copied"].includes(previousHandoff.status);
     if (agentState && !clipboardFallbackActive) {
-      this.#runSession.publishHandoff(agentState);
+      const nextHandoff = {
+        ...previousHandoff,
+        ...agentState,
+        // Runtime-native names are evidence, not display identity. A current
+        // run keeps the Provider presentation frozen at Request creation.
+        agentName: previousHandoff?.agentName || frozenPresentation.agentName
+          || frozenPresentation.displayName || agentState.agentName || null,
+        providerId: agentState.providerId || previousHandoff?.providerId || null,
+        runtimeId: agentState.runtimeId || previousHandoff?.runtimeId || null,
+        startedAt: agentState.startedAt || previousHandoff?.startedAt || null,
+        updatedAt: agentState.updatedAt || previousHandoff?.updatedAt || null,
+      };
+      if (
+        agentState.visibleText
+        && agentState.visibleText !== previousHandoff?.visibleText
+      ) {
+        this.#lastNarrationAt = this.#clock.now();
+      }
+      this.#runSession.publishHandoff(nextHandoff);
       if (
         ["failed", "interrupted"].includes(agentState.status)
         && previousHandoff?.status !== agentState.status
@@ -1690,6 +1771,65 @@ export class RunWorkflow {
         isPollable(run)
         && !this.#agentStartsPending.has(this.#codecs.operationKey(run))
       ));
+  }
+
+  #pollDelayMs() {
+    if (String(this.#visibility?.visibilityState || "visible") === "hidden") {
+      return POLL_DELAYS_MS.hidden;
+    }
+    if (this.#uncertainSubmissions.size > 0) return POLL_DELAYS_MS.reconcile;
+    const handoffs = this.#runSession.runs.map((run) => (
+      this.#runSession.handoffForSource(run.sourcePath)
+    )).filter(Boolean);
+    if (handoffs.some((handoff) => handoff.status === "cancelling")) {
+      return POLL_DELAYS_MS.cancelling;
+    }
+    if (this.#clock.now() - this.#lastNarrationAt < 1_000) {
+      return POLL_DELAYS_MS.streaming;
+    }
+    if (handoffs.some((handoff) => ["starting", "launching", "starting-session"].includes(
+      handoff.status === "starting" ? handoff.phase || handoff.status : handoff.status,
+    ))) {
+      return POLL_DELAYS_MS.starting;
+    }
+    if (handoffs.some((handoff) => ["reading-task", "writing-candidate", "finalizing"].includes(
+      handoff.phase,
+    ))) {
+      return POLL_DELAYS_MS.active;
+    }
+    return POLL_DELAYS_MS.reconcile;
+  }
+
+  #scheduleNextPoll(generation, delayMs) {
+    if (
+      !this.#isPollCurrent(generation)
+      || !this.#pollLoopActive
+      || !this.#hasPollingWork()
+      || this.#timer !== null
+    ) return;
+    this.#timer = this.#scheduler.setTimeout(() => {
+      this.#timer = null;
+      void this.pollNow({ generation }).finally(() => {
+        if (
+          this.#isPollCurrent(generation)
+          && this.#pollLoopActive
+          && this.#hasPollingWork()
+        ) {
+          this.#scheduleNextPoll(generation, this.#pollDelayMs());
+        } else if (this.#pollGeneration === generation && this.#pollLoopActive) {
+          this.#pollLoopActive = false;
+          this.#publishSnapshot();
+        }
+      });
+    }, Math.max(0, Number(delayMs) || 0));
+  }
+
+  #rescheduleForVisibility() {
+    if (this.#disposed || !this.#pollLoopActive || this.#timer === null) return;
+    const generation = this.#pollGeneration;
+    this.#scheduler.clearTimeout(this.#timer);
+    this.#timer = null;
+    this.#scheduleNextPoll(generation, this.#pollDelayMs());
   }
 
   #isPollCurrent(generation) {

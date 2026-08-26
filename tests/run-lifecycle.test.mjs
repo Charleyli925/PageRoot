@@ -174,12 +174,12 @@ test("run presentation copy follows the four stages and keeps exception actions 
     }),
     {
       header: {
-        eyebrow: "正在确认发送",
-        title: "正在确认这次发送是否成功",
+        eyebrow: "正在准备本轮修改",
+        title: "正在冻结本轮页面和评论…",
       },
-      statusLabel: "正在确认发送结果",
-      summaryTitle: "为避免重复任务，画布暂时保持只读",
-      summaryDetail: "源页会在后台继续核对，不会重复发送同一轮要求",
+      statusLabel: "正在冻结本轮内容",
+      summaryTitle: "正在确认本轮任务是否已创建",
+      summaryDetail: "当前 HTML、评论和项目规则会以同一份冻结快照交给 Agent。",
     },
   );
   assert.deepEqual(
@@ -321,7 +321,7 @@ test("run presentation copy follows the four stages and keeps exception actions 
   );
 });
 
-test("Qoder ACP progress is distinct from clipboard delivery and never claims Candidate readiness", () => {
+test("managed Agent progress is provider-neutral and never claims Candidate readiness", () => {
   const run = {
     requestId: "req_qoder",
     status: "processing",
@@ -329,17 +329,19 @@ test("Qoder ACP progress is distinct from clipboard delivery and never claims Ca
   };
   const running = deriveRunProgressPresentation(run, {
     mode: "managed-agent",
+    agentName: "Codex",
     status: "running",
     phase: "reading-task",
   });
-  assert.equal(running.header.title, "Qoder 正在读取本轮任务");
+  assert.equal(running.header.title, "Codex 正在读取本轮任务…");
   assert.equal(running.statusLabel, "正在处理");
-  assert.equal(running.steps[0].label, "Qoder CLI 已启动");
+  assert.equal(running.steps[0].label, "Codex 已启动");
   assert.equal(running.steps[1].state, "current");
   assert.equal(running.steps[3].state, "pending");
 
   const interrupted = deriveRunProgressPresentation(run, {
     mode: "managed-agent",
+    agentName: "Codex",
     status: "interrupted",
     phase: "interrupted",
     errorMessage: "会话已停止，但 Request 仍然保留。",

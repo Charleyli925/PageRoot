@@ -139,7 +139,12 @@ const RUN_PROGRESS_STATES = Object.freeze([
   "review-view",
 ]);
 
-export function sidebarRunProgress({ state, steps = [], agentText = "" } = {}) {
+export function sidebarRunProgress({
+  state,
+  steps = [],
+  agentText = "",
+  agentTextTruncated = false,
+} = {}) {
   if (!RUN_PROGRESS_STATES.includes(String(state))) return null;
   if (!Array.isArray(steps) || steps.length === 0) return null;
   const projected = [];
@@ -181,10 +186,11 @@ export function sidebarRunProgress({ state, steps = [], agentText = "" } = {}) {
     // full strength, and each stage carries its own detail, so nothing is repeated
     // above it.
     headline: failedStep?.label ?? null,
-    // What Qoder is saying while it works. Collapsible by the view; absent when the
-    // Agent has said nothing, so an empty shell never appears.
+    // Public Agent narration is projected separately from PageRoot's lifecycle
+    // facts. It never grants Candidate authority.
     narration: narration || null,
     narrationBlocks: narrationBlocks && narrationBlocks.length > 0 ? narrationBlocks : null,
+    narrationTruncated: agentTextTruncated === true,
     liveLabel: liveStep?.label ?? null,
     tone: failedStep ? "attention" : "quiet",
   });
@@ -207,6 +213,21 @@ export function sidebarActorInitial(actor) {
 
 export function sidebarActorLabel(actor) {
   return ACTOR_LABELS[actor] ?? ACTOR_LABELS.pageroot;
+}
+
+export function sidebarTimestampLabel(value, { now = Date.now() } = {}) {
+  const timestamp = Date.parse(String(value || ""));
+  const reference = Number(now);
+  if (!Number.isFinite(timestamp) || !Number.isFinite(reference)) return null;
+  const date = new Date(timestamp);
+  const current = new Date(reference);
+  const time = `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+  if (
+    date.getFullYear() === current.getFullYear()
+    && date.getMonth() === current.getMonth()
+    && date.getDate() === current.getDate()
+  ) return time;
+  return `${date.getMonth() + 1}月${date.getDate()}日 ${time}`;
 }
 
 /**
@@ -339,9 +360,9 @@ export function sidebarActionBar({
     };
   }
   if (state === "processing" || state === "validating") {
-    // The clipboard round is not being processed by Qoder at all: the user pasted
+    // The clipboard round is not being processed by the selected Agent at all: the user pasted
     // the task into an Agent of their own and PageRoot is waiting for the file to
-    // come back. Saying "Qoder 正在处理" there would describe something that is not
+    // come back. Claiming an Agent is processing there would describe something that is not
     // happening, and the user would lose the one action they actually need — the
     // task back on the clipboard if the paste went wrong.
     if (deliveryMode === "clipboard") {
@@ -403,7 +424,7 @@ export function sidebarActionBar({
  * modal first.
  */
 export function sidebarDeliveryDisclosure(intent, {
-  agentName = "Qoder",
+  agentName = "Agent",
   localReadDisclosure = null,
 } = {}) {
   if (intent !== INTENT_MODIFY) return null;
@@ -419,8 +440,8 @@ export function sidebarSendState({
   queued = false,
   intent = INTENT_MODIFY,
   pendingCommentCount = 0,
-  agentName = "Qoder",
-  agentSettingsName = "Qoder CLI",
+  agentName = "Agent",
+  agentSettingsName = "Agent",
   agentSettingsSupported = true,
 } = {}) {
   const boundedAgentName = String(agentName || "Agent").trim().slice(0, 80) || "Agent";
@@ -570,7 +591,7 @@ export function sidebarSendState({
  *
  * Copying is the other branch of the same modification round (PRD §11.4): it
  * freezes the page's comments into a Request and writes the clipboard, and
- * neither step consults Qoder. The send button guards on the model catalog
+   * neither step consults the selected Agent. The send button guards on the model catalog
  * because the Agent path needs it; applying that guard here would take the
  * clipboard down with an unreadable catalog — PRD §10.2 keeps 复制任务 available
  * through every catalog status, and the old delivery dialog's copy option never
@@ -581,7 +602,7 @@ export function sidebarCopyTaskState({
   state = "preview-ready",
   queued = false,
   pendingCommentCount = 0,
-  agentName = "Qoder",
+  agentName = "Agent",
 } = {}) {
   const boundedAgentName = String(agentName || "Agent").trim().slice(0, 80) || "Agent";
   if (state === "review-view") {

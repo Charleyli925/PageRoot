@@ -175,7 +175,7 @@ export type QoderHandoffResult = {
   reason: string | null;
 };
 
-export type QoderHandoffUiStatus =
+export type AgentHandoffUiStatus =
   | "copying"
   | "copied"
   | "starting"
@@ -186,12 +186,12 @@ export type QoderHandoffUiStatus =
   | "cancelling"
   | "cancelled";
 
-export type ProjectQoderHandoffState = {
+export type ProjectAgentHandoffState = {
   sourcePath: string;
   requestId: string;
   attemptId: string;
   mode?: "clipboard" | "managed-agent";
-  status: QoderHandoffUiStatus;
+  status: AgentHandoffUiStatus;
   phase?: string;
   agentName?: string | null;
   agentVersion?: string | null;

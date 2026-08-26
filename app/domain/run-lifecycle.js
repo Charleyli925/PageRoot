@@ -79,11 +79,13 @@ function progressContext(run, handoffValue) {
     : { status: handoffValue };
   const handoffStatus = String(handoff.status || "idle");
   const agentMode = handoff.mode === "managed-agent";
+  const agentName = String(handoff.agentName || "Agent").trim().slice(0, 80) || "Agent";
   return {
     run,
     handoff,
     handoffStatus,
     agentMode,
+    agentName,
     status: canonicalLifecycleState(run.status),
     completionObserved,
     copyFailed: !agentMode && handoffStatus === "failed" && !completionObserved,
@@ -124,14 +126,15 @@ function deriveRunProgressCopy({
   agentRunning,
   agentCompleted,
   handoff,
+  agentName,
 }) {
   if (run.requestId === "pending") {
     return progressPresentationCopy(
-      "正在确认发送",
-      "正在确认这次发送是否成功",
-      "正在确认发送结果",
-      "为避免重复任务，画布暂时保持只读",
-      "源页会在后台继续核对，不会重复发送同一轮要求",
+      "正在准备本轮修改",
+      "正在冻结本轮页面和评论…",
+      "正在冻结本轮内容",
+      "正在确认本轮任务是否已创建",
+      "当前 HTML、评论和项目规则会以同一份冻结快照交给 Agent。",
     );
   }
   if (copyFailed) {
@@ -147,13 +150,13 @@ function deriveRunProgressCopy({
     const interrupted = handoffStatus === "interrupted";
     const recoveryRequired = handoff.retryable === false;
     return progressPresentationCopy(
-      "Qoder 需要处理",
-      interrupted ? "Qoder 会话已中断" : "Qoder CLI 没有完成本轮",
+      `${agentName} 需要处理`,
+      interrupted ? `${agentName} 会话已中断` : `${agentName} 没有完成本轮`,
       interrupted ? "会话已中断" : "执行失败",
       "本轮 Request 与当前 HTML 均已保留",
       handoff.errorMessage || (recoveryRequired
         ? "请结束旧 Request，再重新发送本轮要求。"
-        : "可重新启动 Qoder，或复制本轮任务给其他 Agent。"),
+        : `可重新启动 ${agentName}，或复制本轮任务给其他 Agent。`),
     );
   }
   if (status === "awaiting-conflict-resolution") {
@@ -216,7 +219,7 @@ function deriveRunProgressCopy({
   if (status === "processing" && agentMode && agentCompleted) {
     return progressPresentationCopy(
       "正在确认结果",
-      "Qoder 已完成，PageRoot 正在核对 Candidate",
+      `${agentName} 已返回，PageRoot 正在核对 Candidate`,
       "正在确认结果",
       "当前 HTML 仍未被替换",
       "只有官方完成记录和 Candidate 校验通过后才会进入审阅。",
@@ -224,15 +227,16 @@ function deriveRunProgressCopy({
   }
   if (status === "processing" && agentMode && agentRunning) {
     const phaseCopy = {
-      launching: ["正在启动 Qoder CLI", "正在建立受管 ACP 会话"],
-      "starting-session": ["正在连接 Qoder CLI", "ACP 会话正在初始化"],
-      "reading-task": ["Qoder 正在读取本轮任务", "只读冻结 HTML、评论、附件与项目规则"],
-      "writing-candidate": ["Qoder 正在写入候选 HTML", "当前 HTML 不会被直接覆盖"],
-      finalizing: ["Qoder 正在完成最终化", "PageRoot 将独立核对完成记录和 Candidate"],
-      cancelling: ["正在停止 Qoder CLI", "停止完成前本轮仍保持锁定"],
-    }[handoff.phase] || ["Qoder 正在处理", "PageRoot 正在接收受管 ACP 进度"];
+      launching: [`正在启动 ${agentName}…`, "正在冻结本轮 HTML、评论和项目规则"],
+      "starting-session": [`正在连接 ${agentName}…`, "正在建立本轮受管会话"],
+      "reading-task": [`${agentName} 正在读取本轮任务…`, "只读冻结 HTML、评论、附件与项目规则"],
+      "writing-candidate": [`${agentName} 正在修改并写入候选版本…`, "当前 HTML 不会被直接覆盖"],
+      finalizing: [`${agentName} 正在完成本轮修改…`, "PageRoot 将独立核对完成记录和 Candidate"],
+      "awaiting-validation": ["Agent 已返回，正在校验并保存…", "当前 HTML 不会被直接覆盖"],
+      cancelling: [`正在停止 ${agentName}…`, "停止完成前本轮仍保持锁定"],
+    }[handoff.phase] || [`${agentName} 正在处理…`, "PageRoot 正在接收受管 Agent 进度"];
     return progressPresentationCopy(
-      "Qoder CLI",
+      agentName,
       phaseCopy[0],
       handoffStatus === "starting" ? "正在启动" : "正在处理",
       "页面暂时只能看",
@@ -269,16 +273,17 @@ function deriveRunProgressStepsFromContext({
   agentRunning,
   agentCompleted,
   handoff,
+  agentName,
 }) {
   const agentDelivery = agentMode;
   const steps = [
     progressStep(
       "handoff",
-      agentDelivery ? "启动 Qoder CLI" : "正在准备并复制",
+      agentDelivery ? `启动 ${agentName}` : "正在准备并复制",
       agentDelivery
         ? handoffStatus === "starting"
-          ? "正在建立受管 ACP 会话"
-          : "本轮要求已冻结，等待 Qoder CLI"
+          ? `正在连接 ${agentName}`
+          : `本轮要求已冻结，等待 ${agentName}`
         : handoffStatus === "copying"
         ? "正在写入并核对剪贴板"
         : run.requestId === "pending" || status === "submitting"
@@ -291,7 +296,7 @@ function deriveRunProgressStepsFromContext({
       "等待 AI 完成",
       agentDelivery
         ? agentRunning
-          ? "Qoder CLI 正在执行本轮要求"
+          ? `${agentName} 正在执行本轮要求`
           : agentCompleted
             ? "已收到 Agent 完成信号"
             : "Agent 启动后开始"
@@ -315,14 +320,14 @@ function deriveRunProgressStepsFromContext({
       handoffStep,
       progressStep(
         "handoff",
-        handoffStatus === "interrupted" ? "Qoder 会话已中断" : "Qoder CLI 执行失败",
+        handoffStatus === "interrupted" ? `${agentName} 会话已中断` : `${agentName} 执行失败`,
         handoff.errorMessage || "本轮 Request 已安全保留",
         "error",
       ),
     );
     aiStep.detail = handoff.retryable === false
       ? "旧 Request 结束后可重新发送"
-      : "可重新启动 Qoder 或复制任务";
+      : `可重新启动 ${agentName} 或复制任务`;
     aiStep.state = "pending";
     validationStep.detail = "尚未收到可验证完成记录";
     resultStep.detail = "当前 HTML 保持不变";
@@ -354,7 +359,7 @@ function deriveRunProgressStepsFromContext({
   if (agentDelivery && (agentRunning || agentCompleted)) {
     Object.assign(
       handoffStep,
-      progressStep("handoff", "Qoder CLI 已启动", "受管 ACP 会话已建立", "done"),
+      progressStep("handoff", `${agentName} 已启动`, "受管会话已建立", "done"),
     );
   }
   if (completionObserved) {

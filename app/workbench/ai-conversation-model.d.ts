@@ -118,6 +118,8 @@ export type SidebarRunProgress = {
   narration: string | null;
   /** The same words split into the paragraphs the Agent actually wrote. */
   narrationBlocks: readonly string[] | null;
+  /** Whether an upstream public-text boundary omitted a suffix. */
+  narrationTruncated: boolean;
   /** The stage actually running, for callers that need to name it. */
   liveLabel: string | null;
   tone: "attention" | "quiet";
@@ -127,7 +129,13 @@ export function sidebarRunProgress(options?: {
   state?: string;
   steps?: readonly unknown[];
   agentText?: string;
+  agentTextTruncated?: boolean;
 }): SidebarRunProgress | null;
+
+export function sidebarTimestampLabel(
+  value: unknown,
+  options?: { now?: number },
+): string | null;
 
 export function sidebarDeliveryDisclosure(
   intent?: SidebarIntent | string,

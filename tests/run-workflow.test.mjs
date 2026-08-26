@@ -81,21 +81,53 @@ function createScheduler() {
   let nextId = 0;
   const callbacks = new Map();
   return {
-    setInterval(callback, delayMs) {
+    setTimeout(callback, delayMs) {
       const id = ++nextId;
       callbacks.set(id, { callback, delayMs });
       return id;
     },
-    clearInterval(id) {
+    clearTimeout(id) {
       callbacks.delete(id);
     },
     ids() {
       return [...callbacks.keys()];
     },
     fire(id) {
-      callbacks.get(id)?.callback();
+      const timer = callbacks.get(id);
+      callbacks.delete(id);
+      timer?.callback();
+    },
+    delay(id) {
+      return callbacks.get(id)?.delayMs;
     },
   };
+}
+
+function createVisibility(initialState = "visible") {
+  let visibilityState = initialState;
+  const listeners = new Set();
+  return {
+    get visibilityState() {
+      return visibilityState;
+    },
+    addEventListener(type, listener) {
+      if (type === "visibilitychange") listeners.add(listener);
+    },
+    removeEventListener(type, listener) {
+      if (type === "visibilitychange") listeners.delete(listener);
+    },
+    set(nextState) {
+      visibilityState = nextState;
+      for (const listener of listeners) listener();
+    },
+  };
+}
+
+async function fireNextTimer(scheduler) {
+  const [timer] = scheduler.ids();
+  assert.ok(timer, "expected the polling loop to own a next timer");
+  scheduler.fire(timer);
+  await new Promise((resolve) => setImmediate(resolve));
 }
 
 function codecs() {
@@ -132,6 +164,8 @@ function createHarness({
   freeze = null,
   drain = async () => ({ ok: true }),
   ensureRegistered = null,
+  visibility = null,
+  clock = { now: () => Date.parse("2026-08-11T00:00:00.000Z") },
 } = {}) {
   const projectSession = new ProjectSession();
   projectSession.openLocator(sourcePath);
@@ -274,7 +308,8 @@ function createHarness({
       hash: { sha256: async (value) => sha256(value) },
     },
     scheduler,
-    clock: { now: () => Date.parse("2026-08-11T00:00:00.000Z") },
+    visibility,
+    clock,
   });
   return {
     workflow,
@@ -389,7 +424,7 @@ test("a reconciled Qoder Request reserves Agent start before polling becomes vis
     session: { state: "starting", phase: "launching" },
   });
   assert.equal((await submitted).status, "succeeded");
-  await new Promise((resolve) => setImmediate(resolve));
+  await fireNextTimer(harness.scheduler);
   assert.equal(harness.calls.status.length, 1);
   harness.workflow.dispose();
 });
@@ -473,6 +508,7 @@ test("a failed authority read keeps the Request uncertain until a later read rec
   assert.equal(createCount, 1);
   assert.equal(harness.runSession.activeSubmission?.phase, "uncertain");
 
+  await fireNextTimer(harness.scheduler);
   laterAuthority.resolve(runRecord());
   await new Promise((resolve) => setImmediate(resolve));
 
@@ -855,7 +891,7 @@ test("Qoder polling waits until the managed Agent start is registered", async ()
     session: { state: "starting", phase: "launching" },
   });
   assert.equal((await submitted).status, "succeeded");
-  await new Promise((resolve) => setImmediate(resolve));
+  await fireNextTimer(harness.scheduler);
   assert.equal(harness.calls.status.length, 1);
   harness.workflow.dispose();
 });
@@ -1043,6 +1079,126 @@ test("a terminal no-change poll unlocks the current project and remains reopenab
   assert.equal(harness.runSession.activeRun?.status, "no-change");
   assert.equal(harness.runSession.outcomeForSource(SOURCE_A)?.status, "no-change");
   assert.equal(harness.calls.unlock, 1);
+});
+
+test("recursive polling is single-flight and speeds up only after public Agent text arrives", async () => {
+  const pendingStatus = deferred();
+  let statusCalls = 0;
+  const harness = createHarness({
+    bridge: {
+      async status() {
+        statusCalls += 1;
+        return pendingStatus.promise;
+      },
+    },
+  });
+  const run = runRecord({
+    agentDelivery: {
+      mode: "managed-agent",
+      selection: harness.workflow.getSnapshot().agentCatalog.providers.codex.selection,
+      trustPolicyVersion: "trusted-local-agent-v1",
+    },
+  });
+  harness.runSession.trackRun(run, { activate: "always" });
+
+  harness.workflow.syncPolling();
+  const [initialTimer] = harness.scheduler.ids();
+  assert.equal(harness.scheduler.delay(initialTimer), 0);
+  harness.scheduler.fire(initialTimer);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(statusCalls, 1);
+  assert.deepEqual(
+    harness.scheduler.ids(),
+    [],
+    "the next pass is not scheduled until the in-flight status read settles",
+  );
+  assert.equal(harness.workflow.getSnapshot().polling, true);
+
+  pendingStatus.resolve({
+    status: "processing",
+    agentSession: {
+      providerId: "codex",
+      runtimeId: "app-server",
+      state: "running",
+      phase: "reading-task",
+      agentName: "runtime-internal-name",
+      visibleText: "正在读取冻结任务。",
+      updatedAt: "2026-08-11T00:00:00.000Z",
+    },
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
+  const [nextTimer] = harness.scheduler.ids();
+  assert.equal(harness.scheduler.delay(nextTimer), 250);
+  assert.equal(harness.runSession.activeHandoff?.visibleText, "正在读取冻结任务。");
+  assert.equal(harness.runSession.activeHandoff?.providerId, "codex");
+  assert.equal(harness.runSession.activeHandoff?.agentName, "Codex");
+  harness.workflow.dispose();
+});
+
+test("visibility changes reschedule the owned polling timer without creating another loop", () => {
+  const visibility = createVisibility();
+  const harness = createHarness({ visibility });
+  harness.runSession.trackRun(runRecord(), { activate: "always" });
+
+  harness.workflow.syncPolling();
+  const [visibleTimer] = harness.scheduler.ids();
+  assert.equal(harness.scheduler.delay(visibleTimer), 0);
+  visibility.set("hidden");
+  const [hiddenTimer] = harness.scheduler.ids();
+  assert.notEqual(hiddenTimer, visibleTimer);
+  assert.equal(harness.scheduler.delay(hiddenTimer), 1_400);
+  assert.equal(harness.scheduler.ids().length, 1);
+  harness.workflow.dispose();
+});
+
+test("an automatic terminal poll stops its recursive loop", async () => {
+  const harness = createHarness({
+    bridge: {
+      async status() {
+        return { status: "no-change", completionObserved: true };
+      },
+    },
+  });
+  harness.runSession.trackRun(runRecord(), { activate: "always" });
+
+  harness.workflow.syncPolling();
+  await fireNextTimer(harness.scheduler);
+  assert.equal(harness.workflow.getSnapshot().polling, false);
+  assert.deepEqual(harness.scheduler.ids(), []);
+  assert.equal(harness.runSession.activeRun?.status, "no-change");
+  harness.workflow.dispose();
+});
+
+test("a transient status failure preserves the last public Agent narration", async () => {
+  let statusReads = 0;
+  const harness = createHarness({
+    bridge: {
+      async status() {
+        statusReads += 1;
+        if (statusReads === 1) {
+          return {
+            status: "processing",
+            agentSession: {
+              state: "running",
+              phase: "writing-candidate",
+              visibleText: "正在写入 Candidate。",
+              textTruncated: false,
+            },
+          };
+        }
+        throw new Error("temporary bridge error");
+      },
+    },
+  });
+  harness.runSession.trackRun(runRecord(), { activate: "always" });
+
+  await harness.workflow.pollNow();
+  await harness.workflow.pollNow();
+  assert.equal(statusReads, 2);
+  assert.equal(harness.runSession.activeHandoff?.visibleText, "正在写入 Candidate。");
+  assert.equal(harness.runSession.activeHandoff?.status, "running");
+  harness.workflow.dispose();
 });
 
 test("polling does not start a ready-run status read while activation owns it", async () => {
