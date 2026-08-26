@@ -6,6 +6,7 @@ import { createHash } from "node:crypto";
 import { constants as fsConstants, existsSync } from "node:fs";
 import {
   access,
+  copyFile,
   lstat,
   mkdtemp,
   readFile,
@@ -386,6 +387,52 @@ async function assertFilesEqual(sourcePath, packagedPath, label) {
   );
 }
 
+export async function assertSignedMachOContentEqual({
+  sourcePath,
+  packagedPath,
+  entitlementsPath,
+  label,
+}) {
+  runCommand(
+    "codesign",
+    ["--verify", "--strict", "--verbose=4", packagedPath],
+    `${label} signature verification`,
+  );
+  const comparisonRoot = await mkdtemp(path.join(os.tmpdir(), "pageroot-macho-compare-"));
+  const sourceCopy = path.join(comparisonRoot, "source");
+  const packagedCopy = path.join(comparisonRoot, "packaged");
+  try {
+    await Promise.all([
+      copyFile(sourcePath, sourceCopy),
+      copyFile(packagedPath, packagedCopy),
+    ]);
+    for (const filePath of [sourceCopy, packagedCopy]) {
+      runCommand(
+        "codesign",
+        ["--remove-signature", filePath],
+        `${label} signature normalization`,
+      );
+      runCommand(
+        "codesign",
+        [
+          "--force",
+          "--sign",
+          "-",
+          "--identifier",
+          "app.pageroot.packaged-codex-verifier",
+          "--entitlements",
+          entitlementsPath,
+          filePath,
+        ],
+        `${label} deterministic signature normalization`,
+      );
+    }
+    await assertFilesEqual(sourceCopy, packagedCopy, `${label} executable content`);
+  } finally {
+    await rm(comparisonRoot, { recursive: true, force: true });
+  }
+}
+
 function asarFilePaths(asarPath) {
   const output = [];
   for (const entry of listPackage(asarPath).map((value) => value.replace(/^\//, ""))) {
@@ -406,17 +453,24 @@ function asarFilePaths(asarPath) {
   return output.sort();
 }
 
-async function assertDirectoryMatches({ sourceRoot, packagedRoot, predicate, label }) {
+async function assertDirectoryMatches({
+  sourceRoot,
+  packagedRoot,
+  predicate,
+  label,
+  compareFile = assertFilesEqual,
+}) {
   const [sourceFiles, packagedFiles] = await Promise.all([
     listFiles(sourceRoot, predicate),
     listFiles(packagedRoot, predicate),
   ]);
   assert.deepEqual(packagedFiles, sourceFiles, `${label} file list does not match source`);
   for (const relativePath of sourceFiles) {
-    await assertFilesEqual(
+    await compareFile(
       path.join(sourceRoot, relativePath),
       path.join(packagedRoot, relativePath),
       `${label}/${relativePath}`,
+      relativePath,
     );
   }
   return sourceFiles;
@@ -709,10 +763,31 @@ export async function verifyAppBundle({
     "packaged runtime modules must exactly match the reviewed allowlist",
   );
   for (const moduleName of requiredModules) {
+    const codexPlatformModule = `@openai/codex-darwin-${arch}`;
+    const codexNativeRelativePath = path.join(
+      "vendor",
+      `${arch === "arm64" ? "aarch64" : "x86_64"}-apple-darwin`,
+      "bin",
+      "codex",
+    );
     await assertDirectoryMatches({
       sourceRoot: path.join(productRoot, "node_modules", moduleName),
       packagedRoot: path.join(resourcesPath, "node_modules", moduleName),
       label: `node_modules/${moduleName}`,
+      compareFile: moduleName === codexPlatformModule
+        ? async (sourcePath, packagedPath, label, relativePath) => {
+          if (relativePath !== codexNativeRelativePath) {
+            await assertFilesEqual(sourcePath, packagedPath, label);
+            return;
+          }
+          await assertSignedMachOContentEqual({
+            sourcePath,
+            packagedPath,
+            entitlementsPath: path.join(productRoot, "desktop/resources/entitlements.mac.plist"),
+            label,
+          });
+        }
+        : assertFilesEqual,
     });
   }
   const codex = requirePackagedCodexRuntime

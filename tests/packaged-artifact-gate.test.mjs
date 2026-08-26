@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import {
+  copyFile,
   mkdir,
   mkdtemp,
   readFile,
@@ -22,6 +23,7 @@ import {
 import {
   appBundleSignaturePolicyForProfile,
   assertNoRetiredEditorArtifacts,
+  assertSignedMachOContentEqual,
   expectedArtifactLayout,
   verifyAppBundle,
   verifyPackagedCodexRuntime,
@@ -30,6 +32,38 @@ import { createSyntheticAppBundle } from "./helpers/release-evidence-fixtures.mj
 
 const productRoot = fileURLToPath(new URL("../", import.meta.url));
 const execFileAsync = promisify(execFile);
+
+test("a packaged Mach-O may be re-signed but not replaced", async (t) => {
+  if (process.platform !== "darwin") {
+    t.skip("Mach-O signing is macOS-only");
+    return;
+  }
+  const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), "pageroot-macho-contract-"));
+  t.after(() => rm(temporaryRoot, { recursive: true, force: true }));
+  const sourcePath = path.join(temporaryRoot, "source-true");
+  const packagedPath = path.join(temporaryRoot, "packaged-true");
+  const entitlementsPath = path.join(productRoot, "desktop/resources/entitlements.mac.plist");
+  await Promise.all([
+    copyFile("/usr/bin/true", sourcePath),
+    copyFile("/usr/bin/true", packagedPath),
+  ]);
+  await execFileAsync("codesign", [
+    "--force",
+    "--sign",
+    "-",
+    "--identifier",
+    "app.pageroot.synthetic-packaged-runtime",
+    "--entitlements",
+    entitlementsPath,
+    packagedPath,
+  ]);
+  await assertSignedMachOContentEqual({
+    sourcePath,
+    packagedPath,
+    entitlementsPath,
+    label: "synthetic native runtime",
+  });
+});
 
 async function verifySyntheticAppBundle(fixture, { allowUnsigned = true } = {}) {
   return verifyAppBundle({
