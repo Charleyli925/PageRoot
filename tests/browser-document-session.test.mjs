@@ -1,9 +1,36 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import test from "node:test";
 
 import { BrowserDocumentSession } from "../app/application/browser-document-session.js";
+import { createBrowserFileTabIdentity } from "../app/application/browser-file-tab-identity.js";
 
 const SHA_A = `sha256:${"a".repeat(64)}`;
+const browserSha256 = async (value) => (
+  `sha256:${createHash("sha256").update(value).digest("hex")}`
+);
+
+test("real browser Hash shape crosses identity creation and in-memory retention", async () => {
+  const html = "<!doctype html><title>Real Hash</title>";
+  const sourceSha256 = await browserSha256(html);
+  const identity = await createBrowserFileTabIdentity({
+    name: "real-hash.html",
+    size: Buffer.byteLength(html),
+    lastModified: 1_787_000_000_000,
+    sourceSha256,
+    sha256: browserSha256,
+  });
+  const session = new BrowserDocumentSession();
+  session.retain({
+    ...identity,
+    name: "real-hash.html",
+    sourcePath: null,
+    html,
+    sha256: sourceSha256,
+  });
+  assert.equal(session.resolve(identity.projectId, identity.documentId).sha256, sourceSha256);
+  assert.match(sourceSha256, /^sha256:[a-f0-9]{64}$/u);
+});
 
 test("browser documents retain frozen in-memory Source and Hash authority only", () => {
   const session = new BrowserDocumentSession();

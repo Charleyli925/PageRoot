@@ -420,11 +420,18 @@ export class WorkbenchNavigationWorkflow {
     if (target.tabId === this.#tabs.snapshot.activeTabId) {
       return { outcome: succeeded({ unchanged: true }) };
     }
+    const current = this.#tabs.resolveTab(this.#tabs.snapshot.activeTabId);
     active.expectedTabId = target.tabId;
     this.#tabs.beginSwitch(target.tabId);
     this.#session.transition(active.transactionId, "preparing");
     if (target.kind === "start") {
-      const prepared = await this.#projectWorkflow.prepareSwitch();
+      // Start -> Start changes presentation focus only. The retained document
+      // controller was already fenced and unmounted by the first Start
+      // activation, so a second drain would incorrectly let a transient React
+      // view transition reject a valid queued new-tab command.
+      const prepared = current?.kind === "start"
+        ? succeeded()
+        : await this.#projectWorkflow.prepareSwitch();
       if (prepared?.status !== "succeeded") {
         return { outcome: rejected(
           prepared?.code || "WORKBENCH_TAB_SWITCH_BLOCKED",

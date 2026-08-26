@@ -194,6 +194,12 @@ export class WorkbenchTabsPersistenceCoordinator {
       ...next,
       revision: this.#snapshot.revision + 1,
     });
-    for (const listener of this.#listeners) listener(this.#snapshot);
+    for (const listener of this.#listeners) {
+      try {
+        listener(this.#snapshot);
+      } catch {
+        // Presentation projection cannot interrupt persistence authority.
+      }
+    }
   }
 }

@@ -12,6 +12,29 @@ import { BrowserDocumentSession } from "../app/application/browser-document-sess
 const A = { projectId: "project_alpha", documentId: "doc_alpha", name: "Alpha" };
 const B = { projectId: "project_beta", documentId: "doc_beta", name: "Beta" };
 const C = { projectId: "project_gamma", documentId: "doc_gamma", name: "Gamma" };
+const D = { projectId: "project_delta", documentId: "doc_delta", name: "Delta" };
+
+const nextTurn = () => new Promise((resolve) => setImmediate(resolve));
+
+function assertAlignedNavigation(harness, expectedProject) {
+  const snapshot = harness.tabs.snapshot;
+  const active = snapshot.tabs.find((tab) => tab.tabId === snapshot.activeTabId);
+  assert.ok(active);
+  if (active.kind === "start") {
+    assert.equal(snapshot.mountedDocumentTabId, null);
+    if (snapshot.runtimeOwnerTabId) {
+      assert.equal(snapshot.tabs.some((tab) => (
+        tab.kind === "document" && tab.tabId === snapshot.runtimeOwnerTabId
+      )), true);
+    }
+    return;
+  }
+  assert.equal(snapshot.activeTabId, snapshot.mountedDocumentTabId);
+  assert.equal(active.projectId, expectedProject.projectId);
+  assert.equal(active.documentId, expectedProject.documentId);
+  assert.equal(harness.controller.getSnapshot().projectSession.projectId, expectedProject.projectId);
+  assert.equal(harness.controller.getSnapshot().projectSession.documentId, expectedProject.documentId);
+}
 
 test("cold-start priority is external FIFO, persisted active tab, activePath compatibility, then Start", () => {
   assert.equal(workbenchStartupPriority({
@@ -186,6 +209,112 @@ for (const intent of ["startup", "local", "recent", "registered"]) {
   });
 }
 
+const SUCCESS_INGRESS_CASES = [
+  {
+    name: "startup restore compatibility",
+    prepare: () => fixture(),
+    run: (harness) => harness.workflow.openProject({ kind: "startup" }),
+  },
+  {
+    name: "local Finder",
+    prepare: () => fixture(),
+    run: (harness) => harness.workflow.openProject({ kind: "local" }),
+  },
+  {
+    name: "recent file",
+    prepare: () => fixture(),
+    run: (harness) => harness.workflow.openProject({ kind: "recent", sourcePath: "/B.html" }),
+  },
+  {
+    name: "registered sidebar",
+    prepare: () => fixture(),
+    run: (harness) => harness.workflow.openRegisteredProject({ ...B, title: B.name }),
+  },
+  {
+    name: "registered tab activation",
+    prepare: () => {
+      const harness = fixture();
+      harness.tabs.bindDocument({ ...B, title: B.name, focus: false });
+      return harness;
+    },
+    run: (harness) => harness.workflow.activateTab(`document:${B.projectId}:${B.documentId}`),
+  },
+  {
+    name: "browser file",
+    prepare: () => fixture(),
+    run: (harness) => harness.workflow.acceptBrowserProject({ project: B }),
+  },
+  {
+    name: "OS external",
+    prepare: () => fixture(),
+    run: async (harness) => {
+      const outcome = await harness.workflow.acceptExternalProject({ requestId: "external-matrix-B" });
+      await nextTurn();
+      return outcome;
+    },
+  },
+];
+
+for (const ingress of SUCCESS_INGRESS_CASES) {
+  test(`navigation ingress matrix keeps one aligned identity: ${ingress.name}`, async () => {
+    const harness = ingress.prepare();
+    const outcome = await ingress.run(harness);
+    assert.equal(outcome.status, "succeeded");
+    assertAlignedNavigation(harness, B);
+    assert.equal(harness.navigation.snapshot.phase, "idle");
+  });
+}
+
+const DIRECT_FAILURE_CASES = [
+  {
+    name: "startup",
+    action: (harness) => harness.workflow.openProject({ kind: "startup" }),
+  },
+  {
+    name: "local Finder",
+    action: (harness) => harness.workflow.openProject({ kind: "local" }),
+  },
+  {
+    name: "recent",
+    action: (harness) => harness.workflow.openProject({ kind: "recent", sourcePath: "/B.html" }),
+  },
+  {
+    name: "registered sidebar",
+    action: (harness) => harness.workflow.openRegisteredProject({ ...B, title: B.name }),
+  },
+  {
+    name: "tab activation",
+    setup(harness) { harness.tabs.bindDocument({ ...B, title: B.name, focus: false }); },
+    action: (harness) => harness.workflow.activateTab(`document:${B.projectId}:${B.documentId}`),
+  },
+];
+
+for (const ingress of DIRECT_FAILURE_CASES) {
+  test(`pre-apply failure matrix preserves A: ${ingress.name}`, async () => {
+    const harness = fixture({
+      open: async () => ({ status: "rejected", code: "OPEN_FAILED", reason: "pre-apply" }),
+    });
+    ingress.setup?.(harness);
+    const outcome = await ingress.action(harness);
+    assert.equal(outcome.status, "rejected");
+    assertAlignedNavigation(harness, A);
+  });
+
+  test(`post-apply failure matrix commits aligned B error: ${ingress.name}`, async () => {
+    const harness = fixture({
+      open: async ({ apply }) => {
+        const applied = apply(B, { hydration: "failed", error: "post-apply" });
+        return { status: "succeeded", value: { opened: true, applicationId: applied.applicationId } };
+      },
+    });
+    ingress.setup?.(harness);
+    const outcome = await ingress.action(harness);
+    assert.equal(outcome.status, "rejected");
+    assert.equal(outcome.committed, true);
+    assertAlignedNavigation(harness, B);
+  });
+}
+
 test("browser picker continuation retains its admitted transaction and exact application receipt", async () => {
   const harness = fixture({
     open: async ({ input }) => ({
@@ -291,6 +420,83 @@ test("browser pre-apply rejection restores the prior in-memory authority", async
   assert.equal(harness.tabs.snapshot.activeTabId, `document:${A.projectId}:${A.documentId}`);
 });
 
+test("browser post-apply failure keeps the accepted bytes and aligned committed-error tab", async () => {
+  const browserDocuments = new BrowserDocumentSession();
+  const browserB = {
+    ...B,
+    sourcePath: null,
+    html: "browser B",
+    sha256: `sha256:${"b".repeat(64)}`,
+  };
+  const harness = fixture({
+    browserDocuments,
+    acceptBrowser: ({ input, apply }) => {
+      const applied = apply(input.project, { hydration: "failed", error: "browser hydrate" });
+      return { status: "succeeded", value: { opened: true, applicationId: applied.applicationId } };
+    },
+  });
+  const outcome = await harness.workflow.acceptBrowserProject({ project: browserB });
+  assert.equal(outcome.status, "rejected");
+  assert.equal(outcome.committed, true);
+  assert.equal(browserDocuments.resolve(B.projectId, B.documentId).html, "browser B");
+  assertAlignedNavigation(harness, B);
+});
+
+test("external pre-apply and post-apply failures preserve the phase contract", async () => {
+  const pre = fixture({
+    acceptExternal: () => ({ status: "rejected", code: "EXTERNAL_READ", reason: "pre" }),
+  });
+  const preOutcome = await pre.workflow.acceptExternalProject({ requestId: "external-pre" });
+  assert.equal(preOutcome.status, "rejected");
+  assertAlignedNavigation(pre, A);
+
+  const post = fixture({
+    acceptExternal: ({ input, apply }) => {
+      queueMicrotask(() => apply(B, { hydration: "failed", error: "external hydrate" }));
+      return { status: "succeeded", value: { requestId: input.requestId } };
+    },
+  });
+  const accepted = await post.workflow.acceptExternalProject({ requestId: "external-post" });
+  assert.equal(accepted.status, "succeeded");
+  await nextTurn();
+  const terminal = await post.workflow.waitForTerminal(post.navigation.snapshot.lastReceipt.transactionId);
+  assert.equal(terminal.outcome.status, "rejected");
+  assert.equal(terminal.outcome.committed, true);
+  assertAlignedNavigation(post, B);
+});
+
+for (const failurePhase of ["pre-apply", "post-apply"]) {
+  test(`confirmation ${failurePhase} failure keeps tab and Controller paired`, async () => {
+    const harness = fixture({
+      open: async ({ input, workflow, projectWorkflow }) => {
+        projectWorkflow.confirmation = { requestId: `confirm-${failurePhase}`, classification: "new-external" };
+        workflow.onConfirmationPresented({
+          transactionId: input.transactionId,
+          requestId: `confirm-${failurePhase}`,
+        });
+        return { status: "succeeded", value: { awaitingConfirmation: true, opened: false } };
+      },
+      confirm: async ({ input, apply }) => {
+        if (failurePhase === "post-apply") apply(B, { applicationId: `prepared-${input.requestId}` });
+        return { status: "rejected", code: "CONFIRM_FAILED", reason: failurePhase };
+      },
+    });
+    await harness.workflow.openProject({ kind: "local" });
+    const outcome = await harness.workflow.confirmOpen({
+      requestId: `confirm-${failurePhase}`,
+      action: "import-new",
+    });
+    assert.equal(outcome.status, "rejected");
+    if (failurePhase === "post-apply") {
+      assert.equal(outcome.committed, true);
+      assertAlignedNavigation(harness, B);
+    } else {
+      assert.equal(outcome.committed, undefined);
+      assertAlignedNavigation(harness, A);
+    }
+  });
+}
+
 test("Start activation and active-tab close keep mounted/runtime ownership invariant", async () => {
   const harness = fixture();
   const created = await harness.workflow.createStart();
@@ -311,6 +517,19 @@ test("Start activation and active-tab close keep mounted/runtime ownership invar
   ).kind, "start");
   assert.equal(harness.tabs.snapshot.mountedDocumentTabId, null);
   assert.equal(harness.tabs.snapshot.runtimeOwnerTabId, null);
+});
+
+test("same-tick new Start tabs focus the last admitted tab without a second document drain", async () => {
+  const harness = fixture();
+  const first = harness.workflow.createStart();
+  const second = harness.workflow.createStart();
+  assert.equal((await first).status, "succeeded");
+  assert.equal((await second).status, "succeeded");
+  assert.equal(harness.tabs.snapshot.tabs.length, 3);
+  assert.equal(harness.tabs.snapshot.activeTabId, "start:2");
+  assert.equal(harness.tabs.snapshot.mountedDocumentTabId, null);
+  assert.equal(harness.tabs.snapshot.runtimeOwnerTabId, `document:${A.projectId}:${A.documentId}`);
+  assert.deepEqual(harness.calls.filter((call) => call === "prepare"), ["prepare"]);
 });
 
 test("external admission completes only after the correlated application and terminal settlement", async () => {
@@ -373,6 +592,53 @@ test("same-tick A then B is admitted in ordinal order without busy rejection", a
   assert.equal(harness.tabs.snapshot.activeTabId, `document:${C.projectId}:${C.documentId}`);
   assert.equal(harness.navigation.snapshot.admissionOrdinal, 2);
 });
+
+const INTERLEAVING_CASES = [
+  { name: "restore B + startup external C", intentKind: "startup-restore", second: "external", expected: C },
+  { name: "activate B + external C", intentKind: "tab-activation", second: "external", expected: C },
+  { name: "activate B + local D", intentKind: "tab-activation", second: "local", expected: D },
+  { name: "activate B + recent D", intentKind: "tab-activation", second: "recent", expected: D },
+];
+
+for (const scenario of INTERLEAVING_CASES) {
+  test(`navigation admission interleaving is FIFO: ${scenario.name}`, async () => {
+    let releaseB;
+    const gateB = new Promise((resolve) => { releaseB = resolve; });
+    const harness = fixture({
+      open: async ({ input, apply }) => {
+        if (input.projectId === B.projectId) {
+          await gateB;
+          const applied = apply(B);
+          return { status: "succeeded", value: { opened: true, applicationId: applied.applicationId } };
+        }
+        const applied = apply(D);
+        return { status: "succeeded", value: { opened: true, applicationId: applied.applicationId } };
+      },
+      acceptExternal: ({ input, apply }) => {
+        queueMicrotask(() => apply(C));
+        return { status: "succeeded", value: { requestId: input.requestId } };
+      },
+    });
+    harness.tabs.bindDocument({ ...B, title: B.name, focus: false });
+    const first = harness.workflow.activateTab(`document:${B.projectId}:${B.documentId}`, {
+      intentKind: scenario.intentKind,
+    });
+    const second = scenario.second === "external"
+      ? harness.workflow.acceptExternalProject({ requestId: `external-${scenario.intentKind}` })
+      : harness.workflow.openProject({
+        kind: scenario.second,
+        sourcePath: scenario.second === "recent" ? "/D.html" : null,
+      });
+    await nextTurn();
+    assert.deepEqual(harness.calls, [`open:registered:${B.projectId}`]);
+    releaseB();
+    assert.equal((await first).status, "succeeded");
+    assert.equal((await second).status, "succeeded");
+    await nextTurn();
+    assertAlignedNavigation(harness, scenario.expected);
+    assert.equal(harness.navigation.snapshot.admissionOrdinal, 2);
+  });
+}
 
 test("confirmation failure after apply rolls tabs back with the controller receipt", async () => {
   const harness = fixture({
@@ -441,4 +707,14 @@ test("disposal rolls back an awaiting transaction and rejects later admissions",
   assert.equal(harness.tabs.snapshot.activeTabId, `document:${A.projectId}:${A.documentId}`);
   const outcome = await harness.workflow.openProject({ kind: "local" });
   assert.equal(outcome.code, "WORKBENCH_NAVIGATION_DISPOSED");
+});
+
+test("presentation listener failure cannot interrupt navigation or tab authority", async () => {
+  const harness = fixture();
+  harness.navigation.subscribe(() => { throw new Error("navigation presentation failed"); });
+  harness.tabs.subscribe(() => { throw new Error("tabs presentation failed"); });
+  const outcome = await harness.workflow.openProject({ kind: "local" });
+  assert.equal(outcome.status, "succeeded");
+  assertAlignedNavigation(harness, B);
+  assert.equal(harness.navigation.snapshot.phase, "idle");
 });

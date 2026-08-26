@@ -57,6 +57,32 @@ test("same-batch authoritative project events retain every identity and focus th
   assert.equal(session.snapshot.mountedDocumentTabId, documents[1].tabId);
 });
 
+test("AI background status and Candidate adoption remain on the same project document tab", () => {
+  const session = new WorkbenchTabsSession();
+  session.bindDocument(a);
+  const tabId = session.snapshot.activeTabId;
+  for (const status of ["processing", "review-ready", "normal"]) {
+    session.updateStatus(a.projectId, a.documentId, status);
+    assert.equal(session.snapshot.activeTabId, tabId);
+    assert.equal(session.snapshot.mountedDocumentTabId, tabId);
+    assert.equal(session.snapshot.runtimeOwnerTabId, tabId);
+    assert.equal(session.snapshot.tabs.filter((tab) => tab.kind === "document").length, 1);
+    assert.equal(session.snapshot.tabs.find((tab) => tab.tabId === tabId).status, status);
+  }
+  projectAppliedEventToWorkbenchTabs({
+    session,
+    event: {
+      type: "project-applied",
+      project: { ...a, name: "Alpha Candidate.html" },
+      activeLocked: false,
+    },
+  });
+  assert.equal(session.snapshot.activeTabId, tabId);
+  assert.equal(session.snapshot.mountedDocumentTabId, tabId);
+  assert.equal(session.snapshot.tabs.filter((tab) => tab.kind === "document").length, 1);
+  assert.equal(session.snapshot.tabs.find((tab) => tab.tabId === tabId).title, "Alpha Candidate.html");
+});
+
 test("staging a registered project from active Start reuses the blank slot", () => {
   const session = new WorkbenchTabsSession();
   session.createStart({ focus: true });

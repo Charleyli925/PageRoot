@@ -836,6 +836,7 @@ export async function ensureRendererMounted(page, {
 export async function launchPageRoot({
   activeSourcePath = null,
   recentSourcePaths = activeSourcePath ? [activeSourcePath] : [],
+  externalSourcePaths = [],
   isolatedUserData: existingUserData = null,
   injectedEnv = {},
   userDataPrefix = DEFAULT_USER_DATA_PREFIX,
@@ -856,7 +857,7 @@ export async function launchPageRoot({
   }
   const electronApp = await electronLauncher({
     executablePath: electronExecutable,
-    args: [path.join(productRoot, "desktop/main.mjs")],
+    args: [path.join(productRoot, "desktop/main.mjs"), ...externalSourcePaths],
     cwd: productRoot,
     env: {
       ...process.env,

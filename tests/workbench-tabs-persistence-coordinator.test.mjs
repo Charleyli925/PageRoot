@@ -44,7 +44,7 @@ test("tabs persistence is revisioned single-flight and drains the latest receipt
   assert.equal(coordinator.snapshot.restartSafe, true);
 });
 
-test("tabs persistence rejection is visible and failure-closes close until retry", async () => {
+test("tabs persistence rejection failure-closes close and close-abort retry re-acknowledges", async () => {
   let fail = true;
   const snapshots = [];
   const coordinator = new WorkbenchTabsPersistenceCoordinator({
@@ -123,4 +123,21 @@ test("tabs persistence payload remains identity-only", async () => {
   for (const forbidden of ["html", "sha256", "sourcePath", "title", "name"]) {
     assert.equal(serialized.includes(forbidden), false);
   }
+});
+
+test("presentation listener failure cannot interrupt persistence or immediate restart", async () => {
+  let persisted = null;
+  const port = {
+    async get() { return persisted; },
+    async set(state) { persisted = structuredClone(state); },
+  };
+  const first = new WorkbenchTabsPersistenceCoordinator({ port });
+  first.subscribe(() => { throw new Error("persistence presentation failed"); });
+  first.commit(B);
+  assert.deepEqual(await first.drain({ deadlineAt: Date.now() + 1_000 }), {
+    ok: true,
+    revision: 1,
+  });
+  const restarted = new WorkbenchTabsPersistenceCoordinator({ port });
+  assert.deepEqual(await restarted.load(), B);
 });

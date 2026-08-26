@@ -1040,7 +1040,15 @@ export class WorkspaceController {
       }
       return;
     }
-    if (startupPriority === "start") return;
+    if (startupPriority === "start") {
+      // A persisted Start remains active, but its retained document tabs still
+      // need Registry projection for real titles and missing-project cleanup.
+      // Refreshing the catalog does not activate activePath compatibility.
+      if (this.#workbenchTabsSession.snapshot.tabs.some((tab) => tab.kind === "document")) {
+        await this.#projectWorkflow.refreshRegisteredProjects();
+      }
+      return;
+    }
     await this.#workbenchNavigationWorkflow?.openProject({ kind: "startup" });
   }
 
