@@ -10,7 +10,7 @@
 // showing Document B's frame with Document A's conversation, even briefly, is
 // the worst kind of defect because it looks like a feature.
 
-const DEFAULT_INTENT = "discuss";
+const DEFAULT_INTENT = "modify";
 
 function sameDocument(left, right) {
   return Boolean(

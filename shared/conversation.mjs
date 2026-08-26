@@ -1474,7 +1474,7 @@ export function createEmptyConversationDraft({ conversationId, now }) {
       revision: 0,
       updatedAt: requiredTimestamp(now?.(), "draft updatedAt"),
       text: "",
-      intent: "discuss",
+      intent: "modify",
     },
     { conversationId },
   );

@@ -15,14 +15,10 @@ import {
 } from "../scripts/agent/providers/qoder-provider.mjs";
 import {
   acpDriverProfile,
-  createRestrictedDiscussionHost,
   createRestrictedQoderAcpHost,
-  loadQoderAcpDiscussionPolicy,
   loadQoderAcpTaskPolicy,
 } from "../scripts/qoder-acp-client.mjs";
-import { createDiscussionHost } from "../scripts/agent/hosts/discussion-host.mjs";
 import { createExecutionHost } from "../scripts/agent/hosts/execution-host.mjs";
-import { loadDiscussionPolicy } from "../scripts/agent/policies/discussion-policy.mjs";
 import {
   AGENT_POLICY_BRAND,
   loadExecutionPolicy,
@@ -64,9 +60,7 @@ function providerSelection() {
 
 test("shared policy brand stays neutral while the legacy facade preserves errors", async () => {
   assert.notEqual(loadQoderAcpTaskPolicy, loadExecutionPolicy);
-  assert.notEqual(loadQoderAcpDiscussionPolicy, loadDiscussionPolicy);
   assert.notEqual(createRestrictedQoderAcpHost, createExecutionHost);
-  assert.notEqual(createRestrictedDiscussionHost, createDiscussionHost);
   assert.equal(typeof AGENT_POLICY_BRAND, "symbol");
 
   await assert.rejects(
@@ -82,38 +76,15 @@ test("shared policy brand stays neutral while the legacy facade preserves errors
       && error?.message.includes("ACP task policy options"),
   );
 
-  const policy = Object.freeze({
+  assert.throws(() => acpDriverProfile(Object.freeze({
     [AGENT_POLICY_BRAND]: true,
     mode: "discussion",
-    requestRoot: "/synthetic/discussion",
-    readableFiles: Object.freeze([]),
-  });
-  assert.equal(acpDriverProfile(policy).mode, "discussion");
-
-  const genericHost = createDiscussionHost(policy);
-  genericHost.bindSessionId("generic-session");
-  await assert.rejects(
-    genericHost.readTextFile({ sessionId: "generic-session", path: "/synthetic/file.html" }),
-    (error) => error?.name === "AgentPolicyError"
-      && error?.code === "AGENT_READ_NOT_AUTHORIZED"
-      && error?.message === "The Agent requested a file outside the discussion snapshot.",
-  );
-
-  const legacyHost = createRestrictedDiscussionHost(policy);
-  legacyHost.bindSessionId("legacy-session");
-  await assert.rejects(
-    legacyHost.readTextFile({ sessionId: "legacy-session", path: "/synthetic/file.html" }),
-    (error) => error?.name === "QoderAcpPolicyError"
-      && error?.code === "ACP_READ_NOT_AUTHORIZED"
-      && error?.message === "Qoder requested a file outside the discussion snapshot.",
-  );
+  })), { code: "ACP_POLICY_MODE_UNSUPPORTED" });
 });
 
 test("shared host and policy sources contain no provider or transport ownership literals", async () => {
   const sources = await Promise.all([
-    "../scripts/agent/policies/discussion-policy.mjs",
     "../scripts/agent/policies/execution-policy.mjs",
-    "../scripts/agent/hosts/discussion-host.mjs",
     "../scripts/agent/hosts/execution-host.mjs",
   ].map((relativePath) => readFile(new URL(relativePath, import.meta.url), "utf8")));
   const forbidden = /qoder|codex|acp|app-server/iu;
@@ -161,7 +132,7 @@ test("selection-first dispatch supports a provider with no legacy driver", async
   const { fixture, registry } = fixtureRegistry({ legacyDrivers: [] });
   const selection = providerSelection();
 
-  assert.equal(fixture.capabilities.discussion, false);
+  assert.equal("discussion" in fixture.capabilities, false);
 
   assert.deepEqual(await registry.availabilityForSelection(selection, { environment: {} }), {
     status: "ready",
@@ -189,13 +160,13 @@ test("selection-first dispatch supports a provider with no legacy driver", async
   assert.ok(fixture.calls.includes("runtime:run"));
 });
 
-test("selection-only providers cannot advertise the legacy Discussion path", () => {
+test("providers cannot advertise a removed Discussion capability", () => {
   assert.throws(
     () => createSyntheticQoderProviderFixture({
       legacyDrivers: [],
       capabilities: { discussion: true },
     }),
-    /cannot declare the legacy Discussion capability/u,
+    /capability "discussion" is unsupported/u,
   );
 });
 
@@ -208,21 +179,18 @@ test("provider capability is enforced at preflight, ticket verification, and sta
     registry.preflightForSelection(selection, "execution", { environment: {} }),
     { code: "AGENT_CAPABILITY_UNSUPPORTED" },
   );
-  const prepared = await registry.preflightForSelection(selection, "discussion", {
-    environment: {},
-  });
-  const crossPurpose = Object.freeze({
-    ...prepared,
-    purpose: "execution",
+  const invalidPurpose = Object.freeze({
+    providerId: "qoder",
+    runtimeId: "acp",
+    securityProfile: "client-mediated",
+    installationDigest: `sha256:${"a".repeat(64)}`,
+    capabilities: registry.catalog()[0].capabilities,
+    purpose: "discussion",
     preflightId: "preflight_capability_fence",
   });
   await assert.rejects(
-    registry.verifyTicket(crossPurpose, { purpose: "execution" }),
-    { code: "AGENT_CAPABILITY_UNSUPPORTED" },
-  );
-  await assert.rejects(
-    registry.run(crossPurpose, { policy: {}, prompt: "must not run", onEvent: () => {} }),
-    { code: "AGENT_CAPABILITY_UNSUPPORTED" },
+    registry.verifyTicket(invalidPurpose, { purpose: "discussion" }),
+    { code: "AGENT_PROVIDER_TICKET_INVALID" },
   );
 });
 

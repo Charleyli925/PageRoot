@@ -33,10 +33,6 @@ if (pidFileArgument) {
   writeFileSync(pidFileArgument.slice("--pid-file=".length), `${process.pid}\n`, "utf8");
 }
 const hang = process.argv.includes("--hang");
-// A discussion turn is read-only: the snapshot is the only readable file and the
-// snapshot directory is the whole working scope. This branch also asserts the
-// boundary from the Agent side, so the turn fails loudly if writes ever open up.
-const discussion = process.argv.includes("--discussion");
 
 const sessionId = "session_pageroot_e2e_qoder";
 let requestRoot = "";
@@ -73,64 +69,6 @@ const app = acp.agent({ name: "pageroot-e2e-qoder" })
   })
   .onRequest(acp.methods.agent.session.prompt, async ({ params, client }) => {
     if (hang) return new Promise(() => {});
-    if (discussion) {
-      const snapshot = await client.request(acp.methods.client.fs.readTextFile, {
-        sessionId,
-        path: `${requestRoot}/snapshot.html`,
-      });
-      if (!snapshot.content.includes("<html")) {
-        throw new Error("PageRoot discussion snapshot is missing");
-      }
-      let writeRefused = false;
-      try {
-        await client.request(acp.methods.client.fs.writeTextFile, {
-          sessionId,
-          path: `${requestRoot}/snapshot.html`,
-          content: "<html>rewritten</html>",
-        });
-      } catch {
-        writeRefused = true;
-      }
-      if (!writeRefused) throw new Error("PageRoot discussion write must be refused");
-      let terminalRefused = false;
-      try {
-        await client.request(acp.methods.client.terminal.create, {
-          sessionId,
-          command: "/bin/sh",
-          args: ["-c", "echo escalate"],
-          cwd: requestRoot,
-          env: [],
-          outputByteLimit: 1024,
-        });
-      } catch {
-        terminalRefused = true;
-      }
-      if (!terminalRefused) throw new Error("PageRoot discussion terminal must be refused");
-      // Visible prose is the payload of a discussion turn (ADR 0036). The thought
-      // chunk must be dropped by the driver rather than reaching the user.
-      await client.notify(acp.methods.client.session.update, {
-        sessionId,
-        update: {
-          sessionUpdate: "agent_thought_chunk",
-          content: { type: "text", text: "internal reasoning must not surface" },
-        },
-      });
-      await client.notify(acp.methods.client.session.update, {
-        sessionId,
-        update: {
-          sessionUpdate: "agent_message_chunk",
-          content: { type: "text", text: "这页的标题偏笼统，" },
-        },
-      });
-      await client.notify(acp.methods.client.session.update, {
-        sessionId,
-        update: {
-          sessionUpdate: "agent_message_chunk",
-          content: { type: "text", text: "可以点明读者能得到什么。" },
-        },
-      });
-      return { stopReason: "end_turn" };
-    }
     const changeRequest = await client.request(acp.methods.client.fs.readTextFile, {
       sessionId,
       path: `${requestRoot}/change-request.json`,

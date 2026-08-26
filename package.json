@@ -252,16 +252,8 @@
         "to": "bridge/agent/runtimes/acp-runtime.mjs"
       },
       {
-        "from": "scripts/agent/policies/discussion-policy.mjs",
-        "to": "bridge/agent/policies/discussion-policy.mjs"
-      },
-      {
         "from": "scripts/agent/policies/execution-policy.mjs",
         "to": "bridge/agent/policies/execution-policy.mjs"
-      },
-      {
-        "from": "scripts/agent/hosts/discussion-host.mjs",
-        "to": "bridge/agent/hosts/discussion-host.mjs"
       },
       {
         "from": "scripts/agent/hosts/execution-host.mjs",
@@ -270,14 +262,6 @@
       {
         "from": "scripts/qoder-acp-client.mjs",
         "to": "bridge/qoder-acp-client.mjs"
-      },
-      {
-        "from": "scripts/discussion-turn-runner.mjs",
-        "to": "bridge/discussion-turn-runner.mjs"
-      },
-      {
-        "from": "scripts/discussion-bridge-service.mjs",
-        "to": "bridge/discussion-bridge-service.mjs"
       },
       {
         "from": "scripts/finalize-attempt.mjs",

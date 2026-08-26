@@ -51,7 +51,7 @@ const PROVIDER_IMPLEMENTATION_IMPORT = /(?:^|\/)(?:qoder-availability|QoderAvail
 
 export function providerNeutralRendererViolations({ file = "", source = "" } = {}) {
   const violations = [];
-  const workflow = /^app\/application\/(?:run|discussion|review|version)[^/]*\.(?:js|ts)$/u.test(file);
+  const workflow = /^app\/application\/(?:run|review|version)[^/]*\.(?:js|ts)$/u.test(file);
   const react = /\.tsx$/u.test(file);
   if ((workflow || react) && PROVIDER_LITERAL_BRANCH.test(source)) {
     violations.push(`${file}: provider selection branches must use canonical delivery and descriptor data`);

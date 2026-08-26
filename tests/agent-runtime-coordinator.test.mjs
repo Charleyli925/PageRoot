@@ -20,7 +20,6 @@ function registry({ run, verifyTicket, preflight } = {}) {
     availability: true,
     preflight: true,
     execution: true,
-    discussion: true,
     modelCatalog: true,
   });
   const selection = Object.freeze({
@@ -137,7 +136,7 @@ async function ready(coordinator, purpose = "execution") {
   });
 }
 
-test("preflight tickets are purpose-bound, one-use, TTL-bound, and reverify installation", async () => {
+test("preflight rejects removed purposes and execution tickets are one-use, TTL-bound, and reverified", async () => {
   let now = 1_000;
   let drifted = false;
   const coordinator = new AgentRuntimeCoordinator({
@@ -151,16 +150,17 @@ test("preflight tickets are purpose-bound, one-use, TTL-bound, and reverify inst
       },
     }),
   });
-  const discussion = await ready(coordinator, "discussion");
   await assert.rejects(
-    coordinator.redeemCommandTicket(discussion.preflightId, {
-      purpose: "execution",
-      driver: "synthetic-driver",
-    }),
-    (error) => error?.code === "AGENT_PREFLIGHT_PURPOSE_MISMATCH",
+    ready(coordinator, "discussion"),
+    (error) => error?.code === "AGENT_TICKET_PURPOSE_INVALID",
   );
+  const singleUse = await ready(coordinator);
+  await coordinator.redeemCommandTicket(singleUse.preflightId, {
+    purpose: "execution",
+    driver: "synthetic-driver",
+  });
   await assert.rejects(
-    coordinator.redeemCommandTicket(discussion.preflightId, { purpose: "discussion" }),
+    coordinator.redeemCommandTicket(singleUse.preflightId, { purpose: "execution" }),
     (error) => error?.code === "AGENT_PREFLIGHT_EXPIRED",
   );
 
@@ -260,87 +260,6 @@ test("canonical events reject reorder and duplicates while preserving bounded te
   assert.ok(completed.projection.retainedEvents.some((event) => event.kind === "completion"));
 });
 
-test("discussion ticket failure seals the already-recorded question", async () => {
-  const sealed = [];
-  const coordinator = new AgentRuntimeCoordinator({
-    providerRegistry: registry(),
-    redeemCommandTicket: async () => {
-      throw Object.assign(new Error("spent elsewhere"), { code: "AGENT_PREFLIGHT_EXPIRED" });
-    },
-  });
-  coordinator.configureDiscussion({
-    readWorkingCopy: async () => ({
-      target: {
-        projectId: IDENTITY.projectId,
-        documentId: IDENTITY.documentId,
-        projectRootPath: "/tmp/project",
-      },
-      sourceSha256: `sha256:${"c".repeat(64)}`,
-      content: "<!doctype html><html></html>",
-    }),
-    recordQuestion: async () => ({ conversationId: "conversation_recorded" }),
-    sealReply: async (input) => { sealed.push(input); },
-  });
-  await assert.rejects(
-    coordinator.discussionStart({
-      driver: "synthetic-driver",
-      trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
-      preflightId: "preflight_missing",
-      projectId: IDENTITY.projectId,
-      documentId: IDENTITY.documentId,
-      sourcePath: IDENTITY.sourcePath,
-      conversationId: "conversation_1",
-      question: "Explain this page",
-    }),
-    (error) => error?.code === "AGENT_PREFLIGHT_EXPIRED",
-  );
-  assert.equal(sealed.length, 1);
-  assert.equal(sealed[0].status, "failed");
-  await coordinator.shutdown();
-});
-
-test("a start racing shutdown fails closed before recording or spawning", async () => {
-  let releaseRead;
-  let readStarted;
-  const readGate = new Promise((resolve) => { releaseRead = resolve; });
-  const startedReading = new Promise((resolve) => { readStarted = resolve; });
-  let records = 0;
-  const coordinator = new AgentRuntimeCoordinator({ providerRegistry: registry() });
-  coordinator.configureDiscussion({
-    readWorkingCopy: async () => {
-      readStarted();
-      await readGate;
-      return {
-        target: {
-          projectId: IDENTITY.projectId,
-          documentId: IDENTITY.documentId,
-          projectRootPath: "/tmp/project",
-        },
-        sourceSha256: `sha256:${"d".repeat(64)}`,
-        content: "<!doctype html><html></html>",
-      };
-    },
-    recordQuestion: async () => { records += 1; },
-    sealReply: async () => {},
-  });
-  const start = coordinator.discussionStart({
-    driver: "synthetic-driver",
-    trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
-    preflightId: "preflight_unused",
-    projectId: IDENTITY.projectId,
-    documentId: IDENTITY.documentId,
-    sourcePath: IDENTITY.sourcePath,
-    conversationId: "conversation_1",
-    question: "Explain this page",
-  });
-  await startedReading;
-  const shutdown = coordinator.shutdown();
-  releaseRead();
-  await assert.rejects(start, (error) => error?.code === "AGENT_BRIDGE_DISPOSED");
-  await shutdown;
-  assert.equal(records, 0);
-});
-
 test("shutdown drains an in-flight provider preflight before confirming exit", async () => {
   let releasePreflight;
   let markPreflightStarted;
@@ -357,7 +276,7 @@ test("shutdown drains an in-flight provider preflight before confirming exit", a
           securityProfile: "client-mediated",
           installation: Object.freeze({ generation: 1 }),
           installationDigest: `sha256:${"a".repeat(64)}`,
-          capabilities: Object.freeze({ execution: true, discussion: true }),
+          capabilities: Object.freeze({ execution: true }),
           evidence: Object.freeze({ version: "1.0.0", modelCount: 1, models: [] }),
           selection,
         };
@@ -391,110 +310,4 @@ test("an unknown historical provider stays readable but cannot become start auth
     () => coordinator.assertSelection(selection, "execution"),
     (error) => error?.code === "AGENT_PROVIDER_UNSUPPORTED",
   );
-});
-
-test("shutdown drains a discussion start waiting on lease acquisition", async () => {
-  for (const releaseResult of [true, false]) {
-    let resolveAcquire;
-    let acquireStarted;
-    const acquireGate = new Promise((resolve) => { resolveAcquire = resolve; });
-    const acquiring = new Promise((resolve) => { acquireStarted = resolve; });
-    let releaseCalls = 0;
-    let runCalls = 0;
-    const coordinator = new AgentRuntimeCoordinator({
-      providerRegistry: registry(),
-      leaseStore: {
-        acquire: async ({ ownerToken }) => {
-          acquireStarted();
-          await acquireGate;
-          return { key: "discussion-lease", path: "memory", ownerToken };
-        },
-        release: async () => {
-          releaseCalls += 1;
-          return releaseResult;
-        },
-      },
-      cancelTimeoutMs: 100,
-    });
-    coordinator.configureDiscussion({
-      readWorkingCopy: async () => ({
-        target: {
-          projectId: IDENTITY.projectId,
-          documentId: IDENTITY.documentId,
-          projectRootPath: "/tmp/project",
-        },
-        sourceSha256: `sha256:${"e".repeat(64)}`,
-        content: "<!doctype html><html></html>",
-      }),
-      recordQuestion: async () => ({ conversationId: "conversation_recorded" }),
-      sealReply: async () => {},
-      runDiscussion: async () => { runCalls += 1; },
-      createTurnRunner: () => async () => {},
-    });
-    const ticket = await ready(coordinator, "discussion");
-    const start = coordinator.discussionStart({
-      driver: "synthetic-driver",
-      trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
-      preflightId: ticket.preflightId,
-      projectId: IDENTITY.projectId,
-      documentId: IDENTITY.documentId,
-      sourcePath: IDENTITY.sourcePath,
-      conversationId: "conversation_1",
-      question: "Explain this page",
-    });
-    await acquiring;
-    const shutdown = coordinator.shutdown();
-    resolveAcquire();
-    await assert.rejects(start, (error) => error?.code === "AGENT_BRIDGE_DISPOSED");
-    if (releaseResult) await shutdown;
-    else await assert.rejects(
-      shutdown,
-      (error) => error?.code === "AGENT_SHUTDOWN_UNCONFIRMED",
-    );
-    assert.equal(releaseCalls, 1);
-    assert.equal(runCalls, 0);
-  }
-});
-
-test("a synchronous discussion runner failure still seals and releases", async () => {
-  const sealed = [];
-  let releases = 0;
-  const coordinator = new AgentRuntimeCoordinator({
-    providerRegistry: registry(),
-    leaseStore: {
-      acquire: async ({ ownerToken }) => ({ key: "sync-throw", path: "memory", ownerToken }),
-      release: async () => { releases += 1; return true; },
-    },
-  });
-  coordinator.configureDiscussion({
-    readWorkingCopy: async () => ({
-      target: {
-        projectId: IDENTITY.projectId,
-        documentId: IDENTITY.documentId,
-        projectRootPath: "/tmp/project",
-      },
-      sourceSha256: `sha256:${"f".repeat(64)}`,
-      content: "<!doctype html><html></html>",
-    }),
-    recordQuestion: async () => ({ conversationId: "conversation_recorded" }),
-    sealReply: async (input) => { sealed.push(input); },
-    createTurnRunner: () => { throw Object.assign(new Error("sync failure"), {
-      code: "DISCUSSION_RUNNER_FAILED",
-    }); },
-  });
-  const ticket = await ready(coordinator, "discussion");
-  await coordinator.discussionStart({
-    driver: "synthetic-driver",
-    trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
-    preflightId: ticket.preflightId,
-    projectId: IDENTITY.projectId,
-    documentId: IDENTITY.documentId,
-    sourcePath: IDENTITY.sourcePath,
-    conversationId: "conversation_1",
-    question: "Explain this page",
-  });
-  await coordinator.shutdown();
-  assert.equal(sealed.length, 1);
-  assert.equal(sealed[0].status, "failed");
-  assert.equal(releases, 1);
 });

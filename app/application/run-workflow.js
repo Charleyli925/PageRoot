@@ -1643,32 +1643,12 @@ export class RunWorkflow {
     return !this.#disposed && generation === this.#pollGeneration;
   }
 
-  async spendAgentTicket({ selection = this.#agentCatalog.freezeSelected(), purpose = "discussion" } = {}) {
-    const provider = this.#agentCatalog.provider(selection);
-    const preflight = await this.#agentCatalog.spendTicket(selection, {
-      purpose,
-      trustPolicyVersion: provider?.trustPolicyVersion,
-    });
-    return Object.freeze({
-      preflightId: preflight.preflightId,
-      selection: preflight.selection,
-      securityProfile: preflight.securityProfile,
-      purpose: preflight.purpose,
-      trustPolicyAccepted: preflight.trustPolicyVersion,
-    });
-  }
-
   freezeAgentSelection() {
     return this.#agentCatalog.freezeSelected();
   }
 
   selectAgent(selection) {
     return this.#agentCatalog.select(selection);
-  }
-
-  // Compatibility facade for existing controller callers.
-  spendQoderTicket(purpose = "discussion") {
-    return this.spendAgentTicket({ purpose });
   }
 
   #publishSnapshot() {

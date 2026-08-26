@@ -4249,7 +4249,7 @@ test("Qoder ACP Agent Bridge reaches review without clipboard or automatic adopt
   }
 });
 
-test("Qoder login entry opens About, preserves the draft, and rechecks automatically", async () => {
+test("Qoder login entry opens About without restoring a Discussion composer", async () => {
   test.setTimeout(120_000);
   const fixture = createSourceFixture("qoder-auth-required.html");
   const qoderCommand = createQoderAcpE2ECommand(fixture.sourceDirectory, {
@@ -4276,14 +4276,8 @@ test("Qoder login entry opens About, preserves the draft, and rechecks automatic
     await launched.page.getByRole("button", { name: /AI 助手/u }).click();
     const sidebar = launched.page.getByTestId("ai-conversation-sidebar");
     await expect(sidebar).toBeVisible();
-    // The unified header entry opens the general discussion surface. Keep that
-    // intent while creating a draft so the settings detour proves it survives.
-    await expect(sidebar.getByRole("radio", { name: "讨论" }))
-      .toHaveAttribute("aria-checked", "true");
-    const input = sidebar.getByTestId("ai-conversation-input");
-    await expect(input).toBeEnabled();
-    await input.fill("保留这份登录草稿");
-    await expect(input).toHaveValue("保留这份登录草稿");
+    await expect(sidebar.getByTestId("ai-conversation-input")).toHaveCount(0);
+    await expect(sidebar.getByTestId("ai-conversation-intent")).toHaveCount(0);
     await expect(sidebar.getByRole("button", { name: "登录 Qoder CLI" }))
       .toBeVisible();
     await launched.page.screenshot({
@@ -4316,12 +4310,7 @@ test("Qoder login entry opens About, preserves the draft, and rechecks automatic
     expect(requestPosts).toBe(0);
 
     await closeQoderAvailability(launched.page);
-    // Closing About can restore the review intent selected by the existing
-    // comment. Switch back to the discussion surface before checking that
-    // its draft survived the settings detour.
-    await sidebar.getByRole("radio", { name: "讨论" }).click();
-    await expect(sidebar.getByTestId("ai-conversation-input"))
-      .toHaveValue("保留这份登录草稿");
+    await expect(sidebar.getByTestId("ai-conversation-input")).toHaveCount(0);
     await launched.page.getByRole("button", { name: "关于源页" }).click();
     await expect(about.getByText("等待登录", { exact: true })).toBeVisible();
     expect(requestPosts).toBe(0);

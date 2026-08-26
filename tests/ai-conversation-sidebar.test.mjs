@@ -7,11 +7,7 @@ import {
   conversationReadyForDocument,
   sidebarActionBar,
   sidebarActorInitial,
-  sidebarDiscussionNotice,
   sidebarDeliveryDisclosure,
-  sidebarDraftNotice,
-  sidebarIntentOptions,
-  sidebarLiveReply,
   sidebarMessageStream,
   sidebarModelLine,
   sidebarModePresentation,
@@ -70,7 +66,7 @@ test("the action bar is derived from product state, never from a message", () =>
   const messages = [factMessage()];
   assert.equal(sidebarMessageStream(messages).length, 1);
 
-  assert.equal(sidebarActionBar({ state: "preview-discussion" }), null);
+  assert.equal(sidebarActionBar({ state: "preview-ready" }), null);
   assert.equal(sidebarActionBar({ state: "preparing-delivery" }), null);
 
   const pending = sidebarActionBar({
@@ -88,7 +84,7 @@ test("the action bar is derived from product state, never from a message", () =>
 });
 
 test("no pending decision means the action bar occupies no space", () => {
-  for (const state of ["preview-discussion", "preparing-delivery"]) {
+  for (const state of ["preview-ready", "preparing-delivery"]) {
     assert.equal(sidebarActionBar({ state }), null);
   }
 });
@@ -126,36 +122,11 @@ test("a blocked candidate offers recovery instead of adoption", () => {
   assert.ok(!bar.actions.some((action) => action.id === "adopt"));
 });
 
-test("the intent switch is one control whose second option follows the state", () => {
-  assert.deepEqual(
-    sidebarIntentOptions("preview-discussion").map((option) => option.value),
-    ["discuss", "modify"],
-  );
-  assert.deepEqual(
-    sidebarIntentOptions("preview-discussion").map((option) => option.label),
-    // The tab names the kind of round; the destination is named on the button below.
-    ["讨论", "修改"],
-  );
-  for (const state of ["ready-to-open", "review-view"]) {
-    assert.deepEqual(
-      sidebarIntentOptions(state).map((option) => option.value),
-      ["discuss", "continue"],
-      `${state} keeps the same control with a different second option`,
-    );
-    assert.deepEqual(
-      sidebarIntentOptions(state).map((option) => option.label),
-      ["讨论结果", "继续修改"],
-    );
-  }
-});
-
-test("an intent that the current state does not offer falls back to discussion", () => {
-  // Continuing requires an adopted candidate, so it can never be reached from
-  // the preview state by carrying a stale draft intent forward.
-  assert.equal(sidebarResolvedIntent("preview-discussion", "continue"), "discuss");
-  assert.equal(sidebarResolvedIntent("ready-to-open", "modify"), "discuss");
-  assert.equal(sidebarResolvedIntent("preview-discussion", "modify"), "modify");
-  assert.equal(sidebarResolvedIntent("review-view", "continue"), "continue");
+test("the product state owns the single available modification intent", () => {
+  assert.equal(sidebarResolvedIntent("preview-ready"), "modify");
+  assert.equal(sidebarResolvedIntent("processing"), "modify");
+  assert.equal(sidebarResolvedIntent("ready-to-open"), "continue");
+  assert.equal(sidebarResolvedIntent("review-view"), "continue");
 });
 
 test("a reveal intent is only written directly where no load can follow it", () => {
@@ -221,11 +192,11 @@ test("a disabled send button always says why", () => {
     { catalogStatus: "unavailable" },
     { state: "processing", hasText: true },
     { state: "promoting", hasText: true },
-    { state: "preview-discussion", hasText: true, queued: true },
+    { state: "preview-ready", queued: true, pendingCommentCount: 1 },
   ];
   for (const options of blocked) {
     const send = sidebarSendState({
-      state: "preview-discussion",
+      state: "preview-ready",
       catalogStatus: "ready",
       ...options,
     });
@@ -238,33 +209,9 @@ test("a disabled send button always says why", () => {
   }
 });
 
-test("an empty composer simply cannot send and needs no explanation", () => {
-  const send = sidebarSendState({
-    state: "preview-discussion",
-    catalogStatus: "ready",
-    hasText: false,
-  });
-  assert.equal(send.canSend, false);
-  assert.equal(send.reason, null);
-});
-
-test("a ready catalog with text can send", () => {
-  const send = sidebarSendState({
-    state: "preview-discussion",
-    catalogStatus: "ready",
-    hasText: true,
-  });
-  assert.deepEqual(send, {
-    kind: "send",
-    canSend: true,
-    label: "发送",
-    reason: null,
-  });
-});
-
 test("Agent connection recovery is an explicit sidebar action, not a send", () => {
   const checking = sidebarSendState({
-    state: "preview-discussion",
+    state: "preview-ready",
     catalogStatus: "checking",
     hasText: true,
   });
@@ -276,7 +223,7 @@ test("Agent connection recovery is an explicit sidebar action, not a send", () =
   });
 
   const login = sidebarSendState({
-    state: "preview-discussion",
+    state: "preview-ready",
     catalogStatus: "auth-required",
     hasText: true,
   });
@@ -288,7 +235,7 @@ test("Agent connection recovery is an explicit sidebar action, not a send", () =
   });
 
   const install = sidebarSendState({
-    state: "preview-discussion",
+    state: "preview-ready",
     catalogStatus: "not-installed",
     hasText: true,
   });
@@ -296,7 +243,7 @@ test("Agent connection recovery is an explicit sidebar action, not a send", () =
   assert.equal(install.label, "设置 Qoder CLI");
 
   const unavailable = sidebarSendState({
-    state: "preview-discussion",
+    state: "preview-ready",
     catalogStatus: "unavailable",
     hasText: true,
   });
@@ -304,21 +251,13 @@ test("Agent connection recovery is an explicit sidebar action, not a send", () =
   assert.equal(unavailable.label, "Agent 暂不可用");
 });
 
-test("a draft written while a round runs says it will not be sent", () => {
-  for (const state of ["processing", "validating", "promoting"]) {
-    assert.equal(sidebarDraftNotice(state), "仅保存草稿，不会发送给当前任务");
-  }
-  assert.equal(sidebarDraftNotice("preview-discussion"), null);
-  assert.equal(sidebarDraftNotice("ready-to-open"), null);
-});
-
 test("mode copy separates who may write from who may only read", () => {
-  assert.equal(sidebarModePresentation("preview-discussion").label, "讨论 · 只读");
+  assert.equal(sidebarModePresentation("preview-ready").label, "修改 · 待发送");
   assert.equal(sidebarModePresentation("processing").label, "执行 · 写入候选");
   assert.equal(sidebarModePresentation("ready-to-open").label, "结果 · 等待决定");
   assert.equal(sidebarModePresentation("review-view").label, "审阅 · 只读");
   // An unknown state falls back to the most restrictive copy.
-  assert.equal(sidebarModePresentation("unknown-state").label, "讨论 · 只读");
+  assert.equal(sidebarModePresentation("unknown-state").label, "修改 · 待发送");
 });
 
 test("the model line names a model only when one is actually known", () => {
@@ -345,49 +284,12 @@ test("the model line names a model only when one is actually known", () => {
   assert.equal(many.choosable, true);
 });
 
-test("the live reply reuses the stored message shape and marks what is incomplete", () => {
-  // Nothing to show until words arrive: an empty shell would make the stream
-  // jump for no information.
-  assert.equal(sidebarLiveReply(null), null);
-  assert.equal(sidebarLiveReply({ status: "running", replyText: "" }), null);
-  assert.equal(sidebarLiveReply({ status: "running", replyText: "   " }), null);
-
-  const streaming = sidebarLiveReply({ status: "running", replyText: "标题可以更具体" });
-  // The same fields a stored message carries, so the view needs one treatment.
-  assert.equal(streaming.actor, "qoder");
-  assert.equal(streaming.actorLabel, "Qoder CLI");
-  assert.equal(streaming.text, "标题可以更具体");
-  assert.equal(streaming.streaming, true);
-  assert.equal(streaming.truncated, false);
-  assert.equal(streaming.interrupted, false);
-
-  const truncated = sidebarLiveReply({
-    status: "completed",
-    replyText: "很长的回复",
-    replyTruncated: true,
-  });
-  assert.equal(truncated.truncated, true);
-  assert.equal(truncated.streaming, false);
-
-  // An interrupted reply is marked on the reply itself, because the text is what
-  // the user reads.
-  const interrupted = sidebarLiveReply({
-    status: "interrupted",
-    replyText: "说到一半",
-    interrupted: true,
-  });
-  assert.equal(interrupted.interrupted, true);
-  assert.equal(interrupted.streaming, false);
-  assert.equal(interrupted.text, "说到一半");
-});
-
 test("the header's mode is derived from Request authority, not guessed", () => {
-  // No run: read-only discussion.
-  assert.equal(sidebarStateFromRun(), "preview-discussion");
-  assert.equal(sidebarStateFromRun({ activeRun: { status: "editing" } }), "preview-discussion");
-  assert.equal(sidebarStateFromRun({ activeRun: { status: "ready" } }), "preview-discussion");
+  assert.equal(sidebarStateFromRun(), "preview-ready");
+  assert.equal(sidebarStateFromRun({ activeRun: { status: "editing" } }), "preview-ready");
+  assert.equal(sidebarStateFromRun({ activeRun: { status: "ready" } }), "preview-ready");
 
-  // A durable execution run must never be shown as read-only discussion.
+  // A durable execution run must stay bound to Request authority.
   assert.equal(sidebarStateFromRun({ activeRun: { status: "processing" } }), "processing");
   assert.equal(sidebarStateFromRun({ activeRun: { status: "validating" } }), "validating");
   assert.equal(
@@ -411,7 +313,7 @@ test("the header's mode is derived from Request authority, not guessed", () => {
   );
 
   // A settled round with no effective change keeps its own state: falling back
-  // to preview-discussion would hide the no-change decision copy in the bar.
+  // to preview-ready would hide the no-change decision copy in the bar.
   assert.equal(sidebarStateFromRun({ activeRun: { status: "no-change" } }), "no-change");
   assert.equal(
     sidebarModePresentation(
@@ -427,40 +329,11 @@ test("the header's mode is derived from Request authority, not guessed", () => {
   );
 });
 
-test("a live discussion turn blocks a second send and says why", () => {
-  const busy = sidebarSendState({
-    state: "preview-discussion",
-    catalogStatus: "ready",
-    hasText: true,
-    discussionBusy: true,
-  });
-  assert.equal(busy.canSend, false);
-  // The streaming notice above the Composer carries that sentence already.
-  assert.equal(busy.reason, null);
-
-  // Once the turn settles the Composer is usable again.
-  const settled = sidebarSendState({
-    state: "preview-discussion",
-    catalogStatus: "ready",
-    hasText: true,
-    discussionBusy: false,
-  });
-  assert.equal(settled.canSend, true);
-});
-
-test("the Composer sends discussion only and points modify at its real entry", () => {
-  const discuss = sidebarSendState({
-    state: "preview-discussion",
-    catalogStatus: "ready",
-    hasText: true,
-    intent: "discuss",
-  });
-  assert.equal(discuss.canSend, true);
-
+test("the Composer sends only the page-comment modification", () => {
   // Modify is driven by the comments already on the page, not by the Composer,
   // so it sends without a typed sentence and nothing can be silently dropped.
   const modify = sidebarSendState({
-    state: "preview-discussion",
+    state: "preview-ready",
     catalogStatus: "ready",
     hasText: false,
     intent: "modify",
@@ -473,7 +346,7 @@ test("the Composer sends discussion only and points modify at its real entry", (
   // With nothing written there is nothing for the Agent to act on, and the
   // button says where to write it rather than only greying out.
   const empty = sidebarSendState({
-    state: "preview-discussion",
+    state: "preview-ready",
     catalogStatus: "ready",
     intent: "modify",
     pendingCommentCount: 0,
@@ -497,14 +370,14 @@ test("copying the task stays available when the model catalog is not", () => {
   // open through every catalog status rather than greying out both buttons.
   for (const catalogStatus of ["checking", "auth-required", "not-installed", "unavailable"]) {
     const send = sidebarSendState({
-      state: "preview-discussion",
+      state: "preview-ready",
       catalogStatus,
       intent: "modify",
       pendingCommentCount: 1,
     });
     assert.equal(send.canSend, false, `${catalogStatus} must still block the send button`);
     const copy = sidebarCopyTaskState({
-      state: "preview-discussion",
+      state: "preview-ready",
       pendingCommentCount: 1,
     });
     assert.deepEqual(
@@ -517,13 +390,13 @@ test("copying the task stays available when the model catalog is not", () => {
 
 test("copying still needs a quiet round with comments to freeze", () => {
   // With nothing written there is nothing to hand to any Agent.
-  const empty = sidebarCopyTaskState({ state: "preview-discussion", pendingCommentCount: 0 });
+  const empty = sidebarCopyTaskState({ state: "preview-ready", pendingCommentCount: 0 });
   assert.equal(empty.canCopy, false);
   assert.equal(empty.reason, "先在编辑模式写下评论，AI 会按评论改");
 
   // A round already in flight owns the comments; a second delivery of the
   // same round must wait for it.
-  const queued = sidebarCopyTaskState({ state: "preview-discussion", queued: true, pendingCommentCount: 2 });
+  const queued = sidebarCopyTaskState({ state: "preview-ready", queued: true, pendingCommentCount: 2 });
   assert.equal(queued.canCopy, false);
   assert.equal(queued.reason, "正在等待上一个任务完成");
   for (const state of ["processing", "validating", "promoting"]) {
@@ -542,46 +415,9 @@ test("copying still needs a quiet round with comments to freeze", () => {
   assert.equal(settled.canCopy, true);
 });
 
-test("an interrupted discussion turn is never presented as a complete answer", () => {
-  assert.equal(sidebarDiscussionNotice(null), null);
-  assert.equal(sidebarDiscussionNotice({ status: "idle" }), null);
-  assert.equal(sidebarDiscussionNotice({ status: "completed" }), null);
-
-  assert.equal(
-    sidebarDiscussionNotice({ status: "running" }).tone,
-    "progress",
-  );
-  assert.equal(
-    sidebarDiscussionNotice({ status: "cancelling" }).text,
-    "正在结束这轮讨论…",
-  );
-
-  const timedOut = sidebarDiscussionNotice({
-    status: "interrupted",
-    interrupted: true,
-    interruptedReason: "timeout",
-  });
-  assert.equal(timedOut.tone, "attention");
-  assert.match(timedOut.text, /超时中断/u);
-  assert.match(timedOut.text, /不是完整回复/u);
-
-  const cancelled = sidebarDiscussionNotice({
-    status: "cancelled",
-    interrupted: true,
-    interruptedReason: "cancelled",
-  });
-  assert.equal(cancelled.tone, "attention");
-  assert.match(cancelled.text, /不是完整回复/u);
-
-  const failed = sidebarDiscussionNotice({ status: "failed" });
-  assert.equal(failed.tone, "attention");
-  assert.match(failed.text, /没有完成/u);
-});
-
 test("the review Canvas keeps the thread on screen but refuses a new round", () => {
-  // The candidate on screen is not the page a discussion would read, so the
-  // Composer must not accept a question there. State is the single owner of that
-  // fact, so a reviewing run and an explicit review state agree.
+  // The candidate on screen is not a new modification source. State is the
+  // single owner of that fact, so a reviewing run and an explicit review state agree.
   assert.equal(sidebarStateFromRun({ reviewing: true }), "review-view");
 
   const send = sidebarSendState({
@@ -596,7 +432,7 @@ test("the review Canvas keeps the thread on screen but refuses a new round", () 
   // still explains what this surface is.
   const mode = sidebarModePresentation("review-view");
   assert.equal(mode.label, "审阅 · 只读");
-  assert.equal(mode.detail, "讨论不会改变候选。");
+  assert.equal(mode.detail, "采纳后才能在结果基础上继续修改。");
 });
 
 test("review refuses a round even when the model catalog is still checking", () => {
@@ -618,15 +454,12 @@ test("the delivery disclosure moves out of the dialog and onto the modify intent
     "Qoder 会读取本轮 HTML、评论和附件；结果先进入审阅。",
   );
 
-  // Discussion reads the page without writing it, so that sentence would be a
-  // false statement of scope there.
-  assert.equal(sidebarDeliveryDisclosure("discuss"), null);
   assert.equal(sidebarDeliveryDisclosure("continue"), null);
 });
 
 test("a queued round blocks the modify intent instead of stacking a second Request", () => {
   const send = sidebarSendState({
-    state: "preview-discussion",
+    state: "preview-ready",
     catalogStatus: "ready",
     intent: "modify",
     pendingCommentCount: 3,
@@ -677,27 +510,22 @@ test("progress belongs to a moving round only", () => {
   assert.ok(sidebarRunProgress({ state: "ready-to-open", steps }));
   assert.ok(sidebarRunProgress({ state: "review-view", steps }));
   // A surface with no round at all still says nothing.
-  assert.equal(sidebarRunProgress({ state: "preview-discussion", steps }), null);
+  assert.equal(sidebarRunProgress({ state: "preview-ready", steps }), null);
   // No steps means nothing to say.
   assert.equal(sidebarRunProgress({ state: "processing", steps: [] }), null);
   // Malformed entries are dropped rather than rendered as blanks.
   assert.equal(sidebarRunProgress({ state: "processing", steps: [{ label: "无 key" }] }), null);
 });
 
-test("preparing a modification renames the mode instead of still claiming discussion", () => {
-  // No run exists yet, so run status alone cannot tell these apart. The header has
-  // to follow the intent, or it contradicts the Composer right below it.
-  const pending = sidebarModePresentation("preview-discussion", "modify");
+test("the idle mode describes the only available modification action", () => {
+  const pending = sidebarModePresentation("preview-ready");
   assert.equal(pending.label, "修改 · 待发送");
-  assert.equal(pending.detail, "按你写的评论改，结果先进入审阅。");
-
-  // Discussion keeps its own honest label.
-  assert.equal(sidebarModePresentation("preview-discussion", "discuss").label, "讨论 · 只读");
+  assert.equal(pending.detail, "按页面评论发起修改，结果先进入审阅。");
 
   // Once a round exists, its durable status wins again — the intent cannot dress
   // a running execution up as something pending.
-  assert.equal(sidebarModePresentation("processing", "modify").label, "执行 · 写入候选");
-  assert.equal(sidebarModePresentation("review-view", "modify").label, "审阅 · 只读");
+  assert.equal(sidebarModePresentation("processing").label, "执行 · 写入候选");
+  assert.equal(sidebarModePresentation("review-view").label, "审阅 · 只读");
 });
 
 test("the clipboard round says what is actually happening and keeps the task reachable", () => {

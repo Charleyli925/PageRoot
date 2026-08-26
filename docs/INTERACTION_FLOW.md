@@ -642,8 +642,8 @@ Request 持久化后，Repository 才能基于冻结 Prompt 建立 `AI任务/<�
 ### 7.3 Agent Bridge 交接
 
 交付方式不再由弹窗询问。点「AI 助手」直接把画布切到预览并展开同一对话侧栏；这个入口
-只负责导航，不改写发送意图。新会话默认「讨论」，重开时恢复用户已保存的意图；用户需在
-侧栏中显式切换到「修改」后再提交。提交所需的一切都在那一处，页面始终可见：
+只负责导航。侧栏没有讨论/修改开关和提问框；历史 Conversation 仍可阅读，新动作只有
+基于页面评论的修改。提交所需的一切都在那一处，页面始终可见：
 
 - 披露「Qoder 会读取本轮 HTML、评论和附件；结果先进入审阅」显示在按钮上方，用户在
   动作之前读到它。更完整的本机权限与第三方处理说明继续由用户声明承担。
@@ -696,8 +696,8 @@ unavailable` 状态。打开 About 或侧栏立即进入“检测中”并执行
 - 自动执行模式在预检成功后才冻结并创建一个带固定 `agentDelivery` 授权的 Request。
   Bridge 从已登记项目与该 Request 派生命令、cwd、输入、输出和 finalizer 权限；Renderer
   不传这些路径。它使用一次性短时 ticket 启动 Qoder，自动模式不读写剪贴板。
-- preflight ticket 同时绑定 installation digest、trust policy 与 `execution` / `discussion`
-  purpose；领取即从 Renderer cache 删除，讨论 ticket 不能用于执行。未知 Provider 的历史
+- preflight ticket 同时绑定 installation digest、trust policy 与 `execution`
+  purpose；领取即从 Renderer cache 删除，非 execution purpose 一律拒绝。未知 Provider 的历史
   Request 仍可结束和审阅，但不会回退成 Qoder 或剪贴板，也不显示重新启动动作。
 - ACP 初始化、读取任务、写 Candidate、finalizer 和停止事件只用于显示进度；它们不表示
   Candidate 已完成。只有 completion 与 Repository 校验通过才进入待审阅。

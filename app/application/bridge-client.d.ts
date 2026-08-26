@@ -48,9 +48,6 @@ export type BridgeClient = {
     attemptId?: string | null,
   ): Promise<BridgeJson>;
   cancelAgent(body: BridgeJson): Promise<BridgeJson>;
-  startDiscussion(body: BridgeJson): Promise<BridgeJson>;
-  discussionStatus(sourcePath: string): Promise<BridgeJson>;
-  cancelDiscussion(body: BridgeJson): Promise<BridgeJson>;
   resolveConflict(body: BridgeJson): Promise<BridgeJson>;
   activateReadyVersion(body: BridgeJson): Promise<BridgeJson>;
   continueEditingHistoryVersion(body: BridgeJson): Promise<BridgeJson>;

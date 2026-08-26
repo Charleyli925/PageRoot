@@ -3,18 +3,11 @@ import { lstat } from "node:fs/promises";
 import path from "node:path";
 
 import { nowIso } from "../lifecycle-core.mjs";
-import {
-  DISCUSSION_TURN_TIMEOUT_MS,
-  discussionPrompt,
-  runDiscussionTurn,
-} from "../discussion-turn-runner.mjs";
 import { createAgentEventReducer, canonicalAgentEvent } from "./agent-events.mjs";
 import { cleanAgentText, failAgentRuntime, AgentRuntimeError } from "./agent-errors.mjs";
 import { defaultAgentLeaseStore } from "./agent-lease-store.mjs";
 import {
-  discussionPhaseForEvent,
   executionPhaseForEvent,
-  publicDiscussionSession,
   publicExecutionSession,
 } from "./agent-session-projector.mjs";
 import { createDefaultProviderRegistry } from "./providers/provider-registry.mjs";
@@ -27,16 +20,14 @@ export const TRUSTED_LOCAL_AGENT_POLICY_VERSION = "trusted-local-agent-v1";
 
 const PREFLIGHT_TTL_MS = 2 * 60_000;
 const TERMINAL_SESSION_TTL_MS = 30 * 60_000;
-const DISCUSSION_RETENTION_MS = 10 * 60_000;
 const MAX_RETAINED_SESSIONS = 100;
 const MAX_PREFLIGHT_TICKETS = 20;
 const CANCEL_TIMEOUT_MS = 12_000;
 const PROJECT_ID = /^project_[a-f0-9]{16,64}$/u;
 const DOCUMENT_ID = /^doc_[a-f0-9]{16,64}$/u;
 const SAFE_ID = /^[A-Za-z0-9_-]{1,160}$/u;
-const CONVERSATION_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,80}$/u;
 const LIVE_STATES = new Set(["starting", "running", "cancelling"]);
-const PURPOSES = new Set(["execution", "discussion"]);
+const PURPOSES = new Set(["execution"]);
 
 function validatePurpose(value, fallback = "execution") {
   const purpose = value || fallback;
@@ -90,10 +81,6 @@ function executionKey(identity) {
   return [identity.projectId, identity.documentId, identity.requestId, identity.attemptId].join(":");
 }
 
-function discussionKey(documentId) {
-  return String(documentId || "");
-}
-
 function finalizerPrompt(policy) {
   const terminalRequest = {
     command: policy.finalizer.command,
@@ -141,11 +128,9 @@ export class AgentRuntimeCoordinator {
   #leaseStore;
   #cancelTimeoutMs;
   #terminalSessionTtlMs;
-  #discussionRetentionMs;
   #maxRetainedSessions;
   #tickets = new Map();
   #executionSessions = new Map();
-  #discussionSessions = new Map();
   #pendingStarts = new Set();
   #eventReducer;
   #ownerToken = `agent_owner_${randomUUID().replaceAll("-", "")}`;
@@ -153,7 +138,6 @@ export class AgentRuntimeCoordinator {
   #shutdownPromise = null;
   #shutdownConfirmed = false;
   #preflightCleanupUnconfirmed = false;
-  #discussion = null;
   #externalRedeemTicket = null;
 
   constructor({
@@ -168,10 +152,8 @@ export class AgentRuntimeCoordinator {
     leaseStore = defaultAgentLeaseStore,
     cancelTimeoutMs = CANCEL_TIMEOUT_MS,
     terminalSessionTtlMs = TERMINAL_SESSION_TTL_MS,
-    discussionRetentionMs = DISCUSSION_RETENTION_MS,
     maxRetainedSessions = MAX_RETAINED_SESSIONS,
     redeemCommandTicket,
-    ...discussionDependencies
   } = {}) {
     if (resolveTask !== undefined && typeof resolveTask !== "function") {
       throw new TypeError("AgentRuntimeCoordinator requires a task authority resolver.");
@@ -186,7 +168,6 @@ export class AgentRuntimeCoordinator {
     for (const [value, label] of [
       [cancelTimeoutMs, "cancel timeout"],
       [terminalSessionTtlMs, "terminal-session TTL"],
-      [discussionRetentionMs, "discussion retention"],
       [maxRetainedSessions, "retained-session limit"],
     ]) {
       if (!Number.isSafeInteger(value) || value <= 0) {
@@ -205,42 +186,11 @@ export class AgentRuntimeCoordinator {
     this.#leaseStore = leaseStore;
     this.#cancelTimeoutMs = cancelTimeoutMs;
     this.#terminalSessionTtlMs = terminalSessionTtlMs;
-    this.#discussionRetentionMs = discussionRetentionMs;
     this.#maxRetainedSessions = maxRetainedSessions;
     this.#eventReducer = createAgentEventReducer();
     this.#externalRedeemTicket = typeof redeemCommandTicket === "function"
       ? redeemCommandTicket
       : null;
-    if (Object.keys(discussionDependencies).length > 0) {
-      this.configureDiscussion(discussionDependencies);
-    }
-  }
-
-  configureDiscussion({
-    readWorkingCopy,
-    recordQuestion,
-    sealReply,
-    runDiscussion = runDiscussionTurn,
-    createTurnRunner,
-    turnTimeoutMs = DISCUSSION_TURN_TIMEOUT_MS,
-  } = {}) {
-    if (this.#discussion) return;
-    if (typeof readWorkingCopy !== "function" || typeof recordQuestion !== "function"
-      || typeof sealReply !== "function" || typeof runDiscussion !== "function"
-      || (createTurnRunner !== undefined && typeof createTurnRunner !== "function")
-      || !Number.isSafeInteger(turnTimeoutMs) || turnTimeoutMs <= 0) {
-      throw new TypeError("AgentRuntimeCoordinator discussion dependencies are invalid.");
-    }
-    this.#discussion = Object.freeze({
-      readWorkingCopy,
-      recordQuestion,
-      sealReply,
-      runDiscussion,
-      turnTimeoutMs,
-      createTurnRunner: createTurnRunner || (({ ticket, environment }) => (
-        this.#providerRegistry.createTurnRunner(ticket, { environment })
-      )),
-    });
   }
 
   get disposed() {
@@ -311,13 +261,6 @@ export class AgentRuntimeCoordinator {
         && entry.updatedAtMs + this.#terminalSessionTtlMs > now) break;
       this.#executionSessions.delete(key);
       this.#eventReducer.clear(entry.turnId);
-    }
-    for (const [key, entry] of this.#discussionSessions) {
-      if (!LIVE_STATES.has(entry.state) && entry.keepLease !== true
-        && now - entry.updatedAtMs > this.#discussionRetentionMs) {
-        this.#discussionSessions.delete(key);
-        this.#eventReducer.clear(entry.turnId);
-      }
     }
   }
 
@@ -787,297 +730,6 @@ export class AgentRuntimeCoordinator {
     return cancelled;
   }
 
-  async discussionStart(input) {
-    return this.#trackStart(() => this.#startDiscussion(input));
-  }
-
-  async #startDiscussion({
-    driver,
-    selection,
-    trustPolicyAccepted,
-    preflightId,
-    projectId,
-    documentId,
-    sourcePath,
-    conversationId,
-    question,
-    expectedSourceSha256,
-  } = {}) {
-    this.#assertAcceptingStarts();
-    if (!this.#discussion) throw new TypeError("Discussion authority is not configured.");
-    try {
-      this.#providerRegistry.resolveDriver(driver);
-    } catch {
-      failAgentRuntime("AGENT_DRIVER_UNSUPPORTED", "所选 Agent 驱动不支持受管讨论。", { status: 422 });
-    }
-    validateTrustPolicy(trustPolicyAccepted, 422);
-    if (!PROJECT_ID.test(String(projectId || "")) || !DOCUMENT_ID.test(String(documentId || ""))
-      || !CONVERSATION_ID.test(String(conversationId || ""))) {
-      failAgentRuntime("DISCUSSION_IDENTITY_INVALID", "讨论目标身份无效。", { status: 422 });
-    }
-    try {
-      discussionPrompt({ question });
-    } catch (cause) {
-      failAgentRuntime(cleanAgentText(cause?.code, 120) || "DISCUSSION_QUESTION_INVALID", "这段讨论内容无法发送给所选 Agent。", {
-        status: 422,
-      });
-    }
-    this.#prune();
-    const key = discussionKey(documentId);
-    const existing = this.#discussionSessions.get(key);
-    if (existing && LIVE_STATES.has(existing.state)) {
-      return {
-        ok: true,
-        accepted: false,
-        idempotent: true,
-        session: publicDiscussionSession(existing, existing.driver),
-      };
-    }
-    const workingCopy = await this.#discussion.readWorkingCopy({ sourcePath });
-    this.#assertAcceptingStarts();
-    if (workingCopy?.target?.projectId !== projectId
-      || workingCopy?.target?.documentId !== documentId) {
-      failAgentRuntime("DISCUSSION_IDENTITY_MISMATCH", "讨论目标与已登记的 Project File 不一致。", {
-        status: 409,
-      });
-    }
-    if (expectedSourceSha256 && expectedSourceSha256 !== workingCopy.sourceSha256) {
-      failAgentRuntime("DISCUSSION_SOURCE_STALE", "页面内容已经变化，请重新发起讨论。", { status: 409 });
-    }
-    const turnId = `turn_${randomUUID().replaceAll("-", "")}`;
-    const ticketPreview = this.#tickets.get(preflightId);
-    const recordedSelection = selection
-      ? canonicalSelection(selection, trustPolicyAccepted)
-      : ticketPreview?.selection || Object.freeze({
-          providerId: "legacy-provider",
-          runtimeId: "legacy-runtime",
-          requestedModelId: null,
-          resolvedModelId: null,
-          reasoning: Object.freeze({
-            requested: null,
-            applied: null,
-            resolution: "provider-default",
-          }),
-        });
-    let recorded;
-    try {
-      recorded = await this.#discussion.recordQuestion({
-        sourcePath,
-        conversationId,
-        turnId,
-        sourceSha256: workingCopy.sourceSha256,
-        question,
-        providerSelection: recordedSelection,
-        providerBinding: {
-          providerId: recordedSelection.providerId,
-          runtimeId: recordedSelection.runtimeId,
-        },
-        capabilitySnapshotFingerprint: ticketPreview
-          ? selectionFingerprint(ticketPreview.capabilities)
-          : null,
-      });
-    } catch (cause) {
-      failAgentRuntime(cleanAgentText(cause?.code, 120) || "DISCUSSION_RECORD_FAILED", "这条提问没有存下来，没有启动 Agent。", {
-        status: 409,
-      });
-    }
-    const recordedConversationId = cleanAgentText(recorded?.conversationId, 200) || conversationId;
-    if (!this.#acceptingStarts) {
-      await this.#discussion.sealReply({
-        sourcePath,
-        conversationId: recordedConversationId,
-        turnId,
-        status: "interrupted",
-        replyText: "",
-        replyTruncated: false,
-      }).catch(() => {});
-      this.#assertAcceptingStarts();
-    }
-    let ticket;
-    try {
-      ticket = await this.redeemCommandTicket(preflightId, { purpose: "discussion", driver });
-      const redeemedSelection = ticket.selection || recordedSelection;
-      if (!sameSelection(recordedSelection, redeemedSelection)) {
-        failAgentRuntime("AGENT_PROVIDER_TICKET_INVALID", "Agent selection does not match its preflight ticket.", {
-          status: 409,
-        });
-      }
-    } catch (cause) {
-      // The question is already durable. Seal the same Turn before surfacing the
-      // ticket failure so restart can never reveal a permanently half-open round.
-      await this.#discussion.sealReply({
-        sourcePath,
-        conversationId: recordedConversationId,
-        turnId,
-        status: "failed",
-        replyText: "",
-        replyTruncated: false,
-      }).catch(() => {});
-      throw cause;
-    }
-    this.#assertAcceptingStarts();
-    const lease = await this.#leaseStore.acquire({
-      providerId: ticket.providerId || "legacy-provider",
-      runtimeId: ticket.runtimeId || "legacy-runtime",
-      purpose: "discussion",
-      driver: ticket.driver || driver,
-      projectId,
-      documentId,
-      turnId,
-      projectRoot: workingCopy.target.projectRootPath,
-      ownerToken: this.#ownerToken,
-      clock: this.#clock,
-    });
-    if (!this.#acceptingStarts) {
-      const released = await this.#leaseStore.release(lease).catch(() => false);
-      if (released !== true) this.#preflightCleanupUnconfirmed = true;
-      this.#assertAcceptingStarts();
-    }
-    const controller = new AbortController();
-    const entry = {
-      purpose: "discussion",
-      turnId,
-      nextSequence: -1,
-      documentId,
-      conversationId: recordedConversationId,
-      sourceSha256: workingCopy.sourceSha256,
-      state: "starting",
-      phase: "launching",
-      startedAt: nowIso(this.#clock),
-      updatedAt: nowIso(this.#clock),
-      updatedAtMs: this.#clock.now(),
-      agentName: null,
-      agentVersion: ticket.evidence?.version || null,
-      eventCount: 0,
-      replyText: "",
-      replyTruncated: false,
-      recorded: false,
-      interrupted: false,
-      interruptedReason: null,
-      errorCode: null,
-      errorMessage: null,
-      retryable: false,
-      lease,
-      keepLease: false,
-      cancelState: null,
-      controller,
-      promise: null,
-    };
-    this.#discussionSessions.set(key, entry);
-    const observe = (event) => {
-      if (this.#discussionSessions.get(key) === entry) {
-        this.#observe(entry, event, discussionPhaseForEvent, "replyText");
-      }
-    };
-    entry.promise = Promise.resolve().then(() => {
-      const runTurn = this.#discussion.createTurnRunner({
-        ticket,
-        environment: this.#environment,
-      });
-      return this.#discussion.runDiscussion({
-        projectRoot: workingCopy.target.projectRootPath,
-        turnId,
-        html: workingCopy.content,
-        expectedSourceSha256: workingCopy.sourceSha256,
-        question,
-        turnTimeoutMs: this.#discussion.turnTimeoutMs,
-        cancellationSignal: controller.signal,
-        onEvent: observe,
-        runTurn,
-      });
-    }).then(
-      (outcome) => ({
-        state: outcome.status === "completed"
-          ? "completed"
-          : outcome.interruptedReason === "cancelled" ? "cancelled" : "interrupted",
-        interrupted: outcome.interrupted === true,
-        interruptedReason: outcome.interruptedReason || null,
-        replyText: typeof outcome.replyText === "string" ? outcome.replyText : entry.replyText,
-        replyTruncated: outcome.replyTruncated === true || entry.replyTruncated,
-        errorCode: null,
-        errorMessage: null,
-      }),
-      (cause) => ({
-        state: "failed",
-        interrupted: cause?.discussionOutcome?.interrupted === true,
-        interruptedReason: cause?.discussionOutcome?.interruptedReason || null,
-        replyText: entry.replyText,
-        replyTruncated: entry.replyTruncated,
-        errorCode: cleanAgentText(cause?.code, 120) || "DISCUSSION_TURN_FAILED",
-        errorMessage: "这轮讨论没有完成。请稍后重试。",
-        cleanupUnconfirmed: cause?.code === "AGENT_PROCESS_CLEANUP_UNCONFIRMED",
-      }),
-    ).then(async (settled) => {
-      if (this.#discussionSessions.get(key) !== entry) return;
-      if (settled.cleanupUnconfirmed) entry.keepLease = true;
-      let recordFailure = null;
-      try {
-        await this.#discussion.sealReply({
-          sourcePath,
-          conversationId: entry.conversationId,
-          turnId,
-          status: settled.state === "failed" ? "failed" : settled.state,
-          replyText: settled.replyText,
-          replyTruncated: settled.replyTruncated,
-        });
-      } catch (cause) {
-        recordFailure = cause;
-      }
-      entry.interrupted = settled.interrupted;
-      entry.interruptedReason = settled.interruptedReason;
-      entry.replyText = settled.replyText;
-      entry.replyTruncated = settled.replyTruncated;
-      entry.recorded = recordFailure === null;
-      entry.errorCode = settled.errorCode || (recordFailure
-        ? cleanAgentText(recordFailure?.code, 120) || "DISCUSSION_RECORD_FAILED"
-        : null);
-      entry.errorMessage = settled.errorMessage || (recordFailure
-        ? "这轮讨论没有存进对话记录。"
-        : null);
-      entry.state = settled.state;
-      entry.phase = settled.state;
-      if (entry.cancelState === "requested") entry.cancelState = "provider-acknowledged";
-      this.#touch(entry);
-    }).finally(async () => {
-      await this.#releaseLease(entry);
-    });
-    void entry.promise.catch(() => {});
-    return {
-      ok: true,
-      accepted: true,
-      idempotent: false,
-      session: publicDiscussionSession(entry, entry.driver),
-    };
-  }
-
-  discussionStatus({ documentId } = {}) {
-    this.#prune();
-    const entry = this.#discussionSessions.get(discussionKey(documentId));
-    return publicDiscussionSession(entry, entry?.driver);
-  }
-
-  async cancelDiscussion({ documentId } = {}) {
-    const entry = this.#discussionSessions.get(discussionKey(documentId));
-    if (!entry || !LIVE_STATES.has(entry.state)) {
-      return {
-        ok: true,
-        cancelled: false,
-        session: publicDiscussionSession(entry, entry?.driver),
-      };
-    }
-    entry.cancelState = "requested";
-    entry.state = "cancelling";
-    entry.phase = "cancelling";
-    this.#touch(entry);
-    entry.controller.abort();
-    await entry.promise;
-    if (entry.keepLease || entry.lease) {
-      failAgentRuntime("AGENT_CANCEL_UNCONFIRMED", "Agent 讨论轮清理未被确认。", { status: 503 });
-    }
-    entry.cancelState = "termination-confirmed";
-    return { ok: true, cancelled: true, session: publicDiscussionSession(entry, entry.driver) };
-  }
-
   async shutdown() {
     if (this.#shutdownConfirmed) return;
     if (this.#shutdownPromise) return this.#shutdownPromise;
@@ -1103,10 +755,7 @@ export class AgentRuntimeCoordinator {
       } finally {
         startTimeout.clear();
       }
-      const entries = [
-        ...this.#discussionSessions.values(),
-        ...this.#executionSessions.values(),
-      ];
+      const entries = [...this.#executionSessions.values()];
       for (const entry of entries) {
         if (LIVE_STATES.has(entry.state)) {
           entry.cancelState = "requested";

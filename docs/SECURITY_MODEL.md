@@ -211,14 +211,10 @@ does not change that trust statement. The sole provider registry maps legacy
 `qoder-acp` to the Qoder provider and ACP runtime; unknown identifiers fail
 closed. Provider/runtime IDs, the opaque installation digest and capabilities
 remain inside the Bridge ticket, and preload exposes no executable, spawn,
-command or path capability. One restricted driver still serves execution and
-discussion policy through the provider-neutral modules under
-`scripts/agent/policies/` and `scripts/agent/hosts/`. Their one shared branded
-policy `mode` — never a caller-supplied host — selects
-the host, the client capabilities declared to the Agent and whether the turn
-must prove completion; a host that cannot answer the required surface, such as a
-read-only host in an execution turn, is refused before the turn starts. For an
-execution turn it checks the runtime-sealed manifest Hash, exact current
+command or path capability. One restricted driver serves execution policy
+through the provider-neutral modules under `scripts/agent/policies/` and
+`scripts/agent/hosts/`. Only the execution Host is registered, and every turn
+must prove completion. It checks the runtime-sealed manifest Hash, exact current
 Request layout, frozen file identities, single Candidate path and exact
 official finalizer; every other ACP filesystem and terminal request is rejected.
 It revalidates runtime authority before mutations and Candidate publication,
@@ -253,21 +249,10 @@ process. `agent-native` is reserved by the contract but no such provider is
 registered; registration requires a separate sandbox conformance and security
 gate. Unknown or mixed ticket/launch profiles fail closed.
 
-A read-only discussion turn is a narrower surface on the same trust boundary.
-The renderer may request `POST /discussion/start`, `GET /discussion/status` and
-`POST /discussion/cancel` with registered document identity, the fixed
-`qoder-acp` driver, explicit `trusted-local-agent-v1` consent and a one-use
-ticket redeemed from the Agent service; it names no command and no path. The
-Bridge reads the Working Copy through the Repository, refuses a stale context
-Hash or a target that does not match the registered Project File, mints the turn
-identifier itself, and keeps at most one in-flight turn per Document. Qoder sees
-only a short-lived owner-only snapshot directory, so it cannot derive the
-Working Copy path; the snapshot is deleted on every exit path and an unconfirmed
-deletion fails the turn. No Request, Attempt, Candidate or Version is created,
-no finalizer runs, and `activeRequest` is never touched. A timed-out or
-cancelled turn is reported as interrupted with the bounded evidence that
-actually arrived, never as a completed answer. In-flight discussion turns drain
-on the same shutdown gate as execution sessions.
+Discussion is not an authorized Agent surface. The Bridge has no discussion
+routes, policy, Host, snapshot or session owner, and provider capabilities and
+preflight tickets reject any non-execution purpose. Historical Conversation
+records remain data only and cannot reopen an Agent process.
 
 The driver may retain at most 16 KiB of raw Qoder stderr only inside the live
 Bridge promise to classify authentication/capacity/process failures. It is

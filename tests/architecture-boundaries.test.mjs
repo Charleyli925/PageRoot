@@ -77,7 +77,7 @@ test("provider-neutral renderer gate rejects provider branches and workflow impl
     source: 'const selected = request.selection.providerId === "codex";',
   }).join("\n"), /descriptor data/u);
   assert.match(providerNeutralRendererViolations({
-    file: "app/application/discussion-turn-workflow.js",
+    file: "app/application/run-workflow.js",
     source: 'const legacy = delivery?.mode === "qoder-acp";',
   }).join("\n"), /descriptor data/u);
   assert.match(providerNeutralRendererViolations({

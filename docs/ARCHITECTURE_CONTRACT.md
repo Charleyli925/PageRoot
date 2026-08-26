@@ -105,11 +105,10 @@ The renderer's main workspace facts are partitioned as follows:
   runtime dispatch point. The Qoder provider owns installation, version,
   login/model preflight and raw-error normalization. Unknown IDs fail closed;
   opaque installation facts, digests and capabilities stay inside the ticket;
-- Bridge Agent Host/Policy Ports: `scripts/agent/policies/` owns the one shared
-  branded policy family and freezes all readable files, output/completion paths,
+- Bridge Agent Host/Policy Ports: `scripts/agent/policies/` owns the execution
+  policy and freezes all readable files, output/completion paths,
   runtime authority and finalizer authority. `scripts/agent/hosts/` owns the
-  read-only Discussion surface and the single-output Execution surface,
-  including cancellation fencing, completion proof and managed terminal
+  single-output Execution surface, including cancellation fencing, completion proof and managed terminal
   cleanup. Provider/runtime code may invoke these ports but cannot choose their
   paths, command, success criteria or durable outcome;
   these Ports constrain only requests mediated through the ACP Client Host.

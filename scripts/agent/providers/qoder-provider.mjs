@@ -482,7 +482,6 @@ export function createQoderProvider({
       availability: true,
       preflight: true,
       execution: true,
-      discussion: true,
       modelCatalog: true,
     },
     resolveInstallation: ({ environment }) => commandResolver({ environment }),

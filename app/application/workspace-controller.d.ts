@@ -18,11 +18,6 @@ import type {
   ConversationSessionSnapshot,
 } from "./conversation-session.js";
 import type {
-  DiscussionTurnContext,
-  DiscussionTurnSession,
-  DiscussionTurnSnapshot,
-} from "./discussion-turn-session.js";
-import type {
   DocumentSession,
   DocumentSessionSnapshot,
   PersistedBoundaryResult,
@@ -118,7 +113,6 @@ export type WorkspaceControllerSnapshot = Readonly<{
   run: RunWorkflowSnapshot | null;
   version: VersionWorkflowSnapshot | null;
   conversation: ConversationSessionSnapshot | null;
-  discussionTurn: DiscussionTurnSnapshot | null;
 }>;
 
 export type WorkspaceEvent =
@@ -249,7 +243,6 @@ export type WorkspaceControllerConstruction = Readonly<{
   versionSession: VersionSession;
   sourceHistorySession: SourceHistorySession;
   conversationSession?: ConversationSession | null;
-  discussionTurnSession?: DiscussionTurnSession | null;
   codecs: WorkspaceControllerCodecs;
   ports: Readonly<{
     hash: HashPort;
@@ -392,17 +385,6 @@ export class WorkspaceController {
   updateConversationDraftText(text: string): void;
   updateConversationDraftIntent(intent: string): void;
   flushConversationDraft(): Promise<void>;
-  startDiscussionTurn(
-    context: DiscussionTurnContext | null,
-    options?: {
-      question?: string;
-      conversationId?: string | null;
-      expectedSourceSha256?: string | null;
-    },
-  ): Promise<unknown>;
-  cancelDiscussionTurn(): Promise<DiscussionTurnSnapshot | null>;
-  drainDiscussionTurn(): Promise<void>;
-  closeDiscussionTurn(): void;
   subscribe(
     listener: (snapshot: WorkspaceControllerSnapshot) => void,
   ): () => void;

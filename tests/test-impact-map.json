@@ -958,13 +958,13 @@
     {
       "id": "qoder-acp-agent-bridge",
       "patterns": [
-        "^scripts/(?:agent-bridge-service|discussion-bridge-service|workspace-bridge-shutdown|qoder-acp-(?:client|spike(?:-client)?)|verify-packaged-artifact)\\.mjs$",
+        "^scripts/(?:agent-bridge-service|workspace-bridge-shutdown|qoder-acp-(?:client|spike(?:-client)?)|verify-packaged-artifact)\\.mjs$",
         "^scripts/agent/(?:[a-z0-9-]+|(?:providers|runtimes|policies|hosts)/[a-z0-9-]+)\\.mjs$",
         "^shared/agent-delivery\\.mjs$",
-        "^app/application/(?:agent-provider-catalog|bridge-client|discussion-turn-(?:session|workflow)|run-(?:session|workflow)|workspace-controller)\\.(?:js|d\\.ts)$",
+        "^app/application/(?:agent-provider-catalog|bridge-client|run-(?:session|workflow)|workspace-controller)\\.(?:js|d\\.ts)$",
         "^app/components/(?:AboutPageRootDialog|AgentDeliveryButton|AgentProviderCard|QoderAvailabilityCard)\\.tsx$",
         "^app/domain/(?:agent-provider-state|qoder-availability)\\.(?:js|d\\.ts)$",
-        "^tests/(?:agent-delivery-codec|agent-runtime-coordinator|agent-provider-contract|agent-bridge-(?:service|workspace)|discussion-bridge-service|qoder-acp-spike-client)\\.test\\.mjs$",
+        "^tests/(?:agent-delivery-codec|agent-runtime-coordinator|agent-provider-contract|agent-bridge-(?:service|workspace)|qoder-acp-spike-client)\\.test\\.mjs$",
         "^tests/fixtures/(?:agent-provider/|qoder-acp-agent|packaged-agent-bridge-runner)"
       ],
       "suites": ["typecheck", "dependency-audit", "build-desktop", "electron-smoke", "ai-smoke"],
@@ -978,7 +978,6 @@
         "tests/agent-model-catalog.test.mjs",
         "tests/agent-bridge-workspace.test.mjs",
         "tests/qoder-acp-spike-client.test.mjs",
-        "tests/discussion-bridge-service.test.mjs",
         "tests/run-workflow.test.mjs",
         "tests/run-session.test.mjs",
         "tests/run-lifecycle.test.mjs",
