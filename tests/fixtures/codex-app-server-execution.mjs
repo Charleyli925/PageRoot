@@ -82,7 +82,7 @@ input.on("line", async (line) => {
       item: { id: "change_1", type: "fileChange", status: "completed", changes: [] },
     },
   });
-  send({
+  const completedMessage = {
     method: "turn/completed",
     params: {
       threadId: "thread_synthetic",
@@ -92,5 +92,18 @@ input.on("line", async (line) => {
         items: [],
       },
     },
-  });
+  };
+  if (mode === "late-permission") {
+    process.stdout.write([
+      JSON.stringify(completedMessage),
+      JSON.stringify({
+        id: "server_permission_after_completion",
+        method: "item/fileChange/requestApproval",
+        params: { threadId: "thread_synthetic", turnId: "turn_synthetic" },
+      }),
+      "",
+    ].join("\n"));
+    return;
+  }
+  send(completedMessage);
 });

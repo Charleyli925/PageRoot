@@ -13,6 +13,7 @@ import {
 } from "../scripts/agent/runtimes/codex-app-server-runtime.mjs";
 import { createDefaultProviderRegistry } from "../scripts/agent/providers/provider-registry.mjs";
 import { resolveBundledCodexInstallation } from "../scripts/agent/providers/codex-provider.mjs";
+import { terminateManagedProcess } from "../scripts/agent/hosts/execution-host.mjs";
 import { promisify } from "node:util";
 
 const fixture = fileURLToPath(new URL("./fixtures/codex-app-server-execution.mjs", import.meta.url));
@@ -142,6 +143,30 @@ test("Codex App Server denies permission requests and never reaches finalization
       (error) => error?.code === "CODEX_PERMISSION_REQUESTED",
     );
     assert.deepEqual(hostCalls.map(([kind]) => kind), ["bind", "cancel", "dispose"]);
+  });
+});
+
+test("Codex App Server rejects a permission request emitted after turn completion", async () => {
+  await runtimeFixture("late-permission", async ({ launch, hostCalls }) => {
+    await assert.rejects(
+      runCodexAppServerTask(launch),
+      (error) => error?.code === "CODEX_PERMISSION_REQUESTED",
+    );
+    assert.equal(hostCalls.some(([kind]) => kind === "finalizer"), false);
+  });
+});
+
+test("Codex App Server rejects unconfirmed process-group cleanup", async () => {
+  await runtimeFixture("completed", async ({ launch, hostCalls }) => {
+    launch.terminateProcess = async (child, options) => {
+      await terminateManagedProcess(child, options);
+      return false;
+    };
+    await assert.rejects(
+      runCodexAppServerTask(launch),
+      (error) => error?.code === "CODEX_APP_SERVER_CLEANUP_UNCONFIRMED",
+    );
+    assert.equal(hostCalls.some(([kind]) => kind === "finalizer"), false);
   });
 });
 

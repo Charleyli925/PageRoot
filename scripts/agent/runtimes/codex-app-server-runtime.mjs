@@ -253,6 +253,7 @@ export async function runCodexAppServerTask({
   turnTimeoutMs = DEFAULT_TURN_TIMEOUT_MS,
   spawnProcess = spawn,
   hostFactory = createExecutionHost,
+  terminateProcess = terminateManagedProcess,
 } = {}) {
   if (typeof command !== "string" || !path.isAbsolute(command)
     || typeof cwd !== "string" || !path.isAbsolute(cwd)
@@ -264,7 +265,8 @@ export async function runCodexAppServerTask({
   if (cancellationSignal && typeof cancellationSignal.addEventListener !== "function") {
     throw new TypeError("Codex cancellationSignal must be an AbortSignal.");
   }
-  if (typeof onEvent !== "function" || typeof spawnProcess !== "function" || typeof hostFactory !== "function") {
+  if (typeof onEvent !== "function" || typeof spawnProcess !== "function"
+    || typeof hostFactory !== "function" || typeof terminateProcess !== "function") {
     throw new TypeError("Codex App Server runtime dependencies are invalid.");
   }
 
@@ -486,18 +488,44 @@ export async function runCodexAppServerTask({
     failure = cause;
   } finally {
     cancellationSignal?.removeEventListener?.("abort", abort);
-    child.stdout.removeListener("data", onStdout);
     child.stdin.end();
     cleanupRequested = true;
     try {
-      await terminateManagedProcess(child, { processGroup: process.platform !== "win32" });
+      const terminated = await terminateProcess(child, {
+        processGroup: process.platform !== "win32",
+      });
       await closePromise.catch(() => {});
+      if (terminated !== true) {
+        throw executionError(
+          "CODEX_APP_SERVER_CLEANUP_UNCONFIRMED",
+          "Codex App Server process-group cleanup was not confirmed.",
+        );
+      }
+      try {
+        buffer += decoder.decode();
+      } catch {
+        protocolFailure ||= executionError(
+          "CODEX_APP_SERVER_INVALID_UTF8",
+          "Codex returned invalid UTF-8.",
+        );
+      }
+      if (buffer.trim()) {
+        protocolFailure ||= executionError(
+          "CODEX_APP_SERVER_PROTOCOL_INVALID",
+          "Codex returned an incomplete JSONL frame.",
+        );
+      }
       cleanupConfirmed = true;
-    } catch {
-      failure = executionError(
-        "CODEX_APP_SERVER_CLEANUP_UNCONFIRMED",
-        "Codex App Server cleanup could not be confirmed.",
-      );
+    } catch (cause) {
+      failure = cause instanceof CodexExecutionError
+        && cause.code === "CODEX_APP_SERVER_CLEANUP_UNCONFIRMED"
+        ? cause
+        : executionError(
+          "CODEX_APP_SERVER_CLEANUP_UNCONFIRMED",
+          "Codex App Server cleanup could not be confirmed.",
+        );
+    } finally {
+      child.stdout.removeListener("data", onStdout);
     }
     if (preparedCommand) {
       await preparedCommand.cleanup().catch(() => {
@@ -507,6 +535,7 @@ export async function runCodexAppServerTask({
         );
       });
     }
+    if (!failure && protocolFailure) failure = protocolFailure;
   }
   if (failure) {
     await host.cancel().catch(() => {});

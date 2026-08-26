@@ -293,3 +293,45 @@ test("a provider-resolved default model becomes the selected durable execution a
   assert.deepEqual(preflight.selection, resolved);
   assert.deepEqual(catalog.freezeSelected(), resolved);
 });
+
+test("a resolved default model stays pinned during later preflight", async () => {
+  const pinned = freezeAgentSelection({
+    providerId: "codex",
+    runtimeId: "app-server",
+    requestedModelId: null,
+    resolvedModelId: "codex:model-a",
+    reasoning: { requested: null, applied: null, resolution: "provider-default" },
+  });
+  const changed = freezeAgentSelection({
+    ...pinned,
+    resolvedModelId: "codex:model-b",
+  });
+  const codex = Object.freeze({
+    ...provider("codex", pinned),
+    runtimeId: "app-server",
+    securityProfile: "agent-native",
+    selection: pinned,
+  });
+  const catalog = new AgentCatalogState({
+    bridgeClient: {
+      async preflightAgent() {
+        return {
+          status: "ready",
+          preflightId: "ticket_changed_default",
+          selection: changed,
+          securityProfile: "agent-native",
+          expiresAt: new Date(20_000).toISOString(),
+        };
+      },
+    },
+    providers: [codex],
+    selected: pinned,
+    clock: { now: () => 10 },
+  });
+
+  await assert.rejects(
+    catalog.preflight(pinned),
+    (error) => error?.code === "AGENT_PREFLIGHT_SELECTION_MISMATCH",
+  );
+  assert.deepEqual(catalog.freezeSelected(), pinned);
+});

@@ -177,7 +177,8 @@ function preflightExpired(preflight, clock) {
 
 function preflightResolvedRequestedSelection(requested, returned) {
   if (
-    requested.providerId !== returned.providerId
+    requested.resolvedModelId !== null
+    || requested.providerId !== returned.providerId
     || requested.runtimeId !== returned.runtimeId
     || requested.requestedModelId !== returned.requestedModelId
     || requested.reasoning.requested !== returned.reasoning.requested
