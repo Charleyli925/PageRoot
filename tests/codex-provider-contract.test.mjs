@@ -179,6 +179,21 @@ test("the packaged execution gate exposes Codex through the default product cata
   assert.equal(catalog.find((entry) => entry.providerId === "codex")?.capabilities.execution, true);
 });
 
+test("normative security contracts describe the enabled agent-native Codex gate", async () => {
+  const [security, architecture] = await Promise.all([
+    readFile(path.join(repositoryRoot, "docs/SECURITY_MODEL.md"), "utf8"),
+    readFile(path.join(repositoryRoot, "docs/ARCHITECTURE_CONTRACT.md"), "utf8"),
+  ]);
+  for (const contract of [security, architecture]) {
+    assert.match(contract, /sole registered `agent-native` provider|sole\s+`agent-native` mapping/u);
+    assert.match(contract, /fresh\s+ephemeral thread/u);
+    assert.match(contract, /approval\s+`never`/u);
+    assert.match(contract, /unique Candidate/u);
+    assert.match(contract, /trusted local|trusted-local-Agent/u);
+  }
+  assert.doesNotMatch(security, /no such provider is\s+registered/u);
+});
+
 test("enabled Codex execution writes only the Candidate and leaves finalization to Stemmio", async () => {
   const policy = {
     manifestPath: "/request/input-manifest.json",

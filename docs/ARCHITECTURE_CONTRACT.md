@@ -113,8 +113,14 @@ The renderer's main workspace facts are partitioned as follows:
   paths, command, success criteria or durable outcome;
   these Ports constrain only requests mediated through the ACP Client Host.
   They are not a sandbox for native filesystem or command operations performed
-  by an Agent process. An `agent-native` provider requires a separate sandbox
-  conformance and security gate before registration;
+  by an Agent process. The sole registered `agent-native` provider is the
+  source-gated, pinned Codex App Server: one fresh ephemeral thread, approval
+  `never`, disabled MCP/skills/plugins/apps/Web/subagents, tool network disabled,
+  a Request-output-only workspace-write root, fixed finalizer, unique Candidate
+  acceptance and confirmed process-group cleanup. It remains a trusted local
+  process with the signed-in user's native read authority; any other
+  `agent-native` provider requires a separate sandbox conformance and security
+  gate before registration;
 - `VersionSession`: immutable Version records plus the current/history
   projection facts;
 - `VersionWorkflow`: Version operation identity/generation, Bridge version
