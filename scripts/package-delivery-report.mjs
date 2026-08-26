@@ -21,6 +21,8 @@ const SHA_PATTERN = /^[0-9a-f]{40}$/u;
 const VERSION_PATTERN = /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/u;
 const STABLE_TAG_PATTERN = /^v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/u;
 const REPOSITORY_PATTERN = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/u;
+const GITHUB_COMMAND_ATTEMPTS = 3;
+const GITHUB_COMMAND_TIMEOUT_MS = 30_000;
 const FAILED_CHECK_CONCLUSIONS = new Set([
   "ACTION_REQUIRED",
   "CANCELLED",
@@ -30,12 +32,16 @@ const FAILED_CHECK_CONCLUSIONS = new Set([
   "TIMED_OUT",
 ]);
 
-function commandOutput(command, arguments_, { cwd = productRoot } = {}) {
+function commandOutput(command, arguments_, {
+  cwd = productRoot,
+  timeout = undefined,
+} = {}) {
   const result = spawnSync(command, arguments_, {
     cwd,
     encoding: "utf8",
     env: process.env,
     maxBuffer: 20 * 1024 * 1024,
+    timeout,
   });
   if (result.error) throw result.error;
   if (result.status !== 0) {
@@ -50,8 +56,46 @@ function gitOutput(root, arguments_) {
   return commandOutput("git", arguments_, { cwd: root });
 }
 
+export function isTransientGitHubCommandFailure(cause) {
+  const code = String(cause?.code || cause?.cause?.code || "").toUpperCase();
+  if (["ECONNRESET", "ETIMEDOUT", "EAI_AGAIN", "ENETUNREACH"].includes(code)) return true;
+  const message = String(cause?.message || cause || "");
+  return /(?:\bEOF\b|connection reset|could not resolve host|TLS handshake timeout|temporarily unavailable|HTTP (?:502|503|504)\b)/iu.test(message);
+}
+
+export function retryTransientGitHubCommand(run, {
+  attempts = GITHUB_COMMAND_ATTEMPTS,
+  onRetry = () => {},
+} = {}) {
+  if (typeof run !== "function") throw new TypeError("GitHub command runner must be a function.");
+  if (!Number.isInteger(attempts) || attempts < 1) {
+    throw new TypeError("GitHub command attempts must be a positive integer.");
+  }
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      return run();
+    } catch (cause) {
+      if (attempt === attempts || !isTransientGitHubCommandFailure(cause)) throw cause;
+      onRetry({ attempt, nextAttempt: attempt + 1, attempts });
+    }
+  }
+  throw new Error("GitHub command retry invariant failed.");
+}
+
 function githubJson(arguments_, root) {
-  const output = commandOutput("gh", arguments_, { cwd: root });
+  const output = retryTransientGitHubCommand(
+    () => commandOutput("gh", arguments_, {
+      cwd: root,
+      timeout: GITHUB_COMMAND_TIMEOUT_MS,
+    }),
+    {
+      onRetry({ nextAttempt, attempts }) {
+        console.warn(
+          `Transient GitHub transport failure; retrying delivery evidence (${nextAttempt}/${attempts}).`,
+        );
+      },
+    },
+  );
   try {
     return JSON.parse(output);
   } catch {
