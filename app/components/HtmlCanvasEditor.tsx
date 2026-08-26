@@ -13,8 +13,6 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 import { flushSync } from "react-dom";
-import { ArrowDownIcon } from "@phosphor-icons/react/dist/csr/ArrowDown";
-import { ArrowUpIcon } from "@phosphor-icons/react/dist/csr/ArrowUp";
 
 import {
   EDIT_AUTHOR_RUNTIME_BUDGET,
@@ -149,7 +147,11 @@ import {
   placeCanvasHoverHint,
   type CanvasCapabilityHoverSnapshot,
 } from "./html-canvas-capability-hover";
-import NoticeBar from "./NoticeBar";
+import {
+  HtmlCanvasSelectionChrome,
+  type HtmlCanvasCommentMarker,
+  type HtmlCanvasEditFeedback,
+} from "./html-canvas-selection-chrome";
 import type {
   HtmlCanvasCommentedTarget,
   HtmlCanvasCommitResult,
@@ -423,15 +425,6 @@ type InsertionPoint = {
   width: number;
 };
 
-type CommentMarker = {
-  key: string;
-  selection: HtmlCanvasSelection;
-  count?: number;
-  label?: string;
-  placement?: "target-corner" | "tab-side";
-  left: number;
-  top: number;
-};
 
 type ActiveNativeEdit = {
   mode: "editable-island" | "text-fragment";
@@ -510,14 +503,6 @@ type FinishNativeEditingOptions = {
   replayQueuedUserCommand?: boolean;
 };
 
-type EditFeedback = {
-  code: string;
-  title: string;
-  message: string;
-  tone: "warning" | "error";
-  sticky: boolean;
-  recovery: "reload" | "none";
-};
 
 type SourcePatchCommand = Parameters<typeof planSourcePatch>[0];
 type SourcePatchPlan = NonNullable<ReturnType<typeof planSourcePatch>>;
@@ -828,9 +813,9 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   const [moveAvailability, setMoveAvailability] = useState<MoveAvailability>({ up: false, down: false });
   const [isEditing, setIsEditing] = useState(false);
   const [, setInsertionPoints] = useState<InsertionPoint[]>([]);
-  const [commentMarkers, setCommentMarkers] = useState<CommentMarker[]>([]);
+  const [commentMarkers, setCommentMarkers] = useState<HtmlCanvasCommentMarker[]>([]);
   const [, setSelectedInsertionId] = useState<string | null>(null);
-  const [editFeedback, setEditFeedback] = useState<EditFeedback | null>(null);
+  const [editFeedback, setEditFeedback] = useState<HtmlCanvasEditFeedback | null>(null);
   const [editFeedbackPaused, setEditFeedbackPaused] = useState(false);
   const [spacingMenuOpen, setSpacingMenuOpen] = useState(false);
 
@@ -1534,7 +1519,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     insertionPointsRef.current = allInsertionPoints;
     setInsertionPoints(nextInsertionPoints);
 
-    const nextCommentMarkers: CommentMarker[] = [];
+    const nextCommentMarkers: HtmlCanvasCommentMarker[] = [];
     commentedTargetsRef.current.forEach((rawTarget, targetIndex) => {
       if (rawTarget.showMarker === false) return;
       const target = rawTarget.target;
@@ -5634,450 +5619,121 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           frameRender.elementGeneration,
         )}
       />
-      <div
-        className="canvas-transition-overlay"
-        data-active={canvasTransitionActive ? "true" : undefined}
-        aria-hidden="true"
-      />
-      <div className="sr-only" aria-live="polite" aria-atomic="true">
-        {selectionCapability ? selectionCapability.spoken : ""}
-      </div>
-      {!interactionLocked && selection && selectedOutlineStyle ? (
-        <div
-          className={styles.targetOutline}
-          data-testid="canvas-target-outline"
-          data-tone="selected"
-          style={selectedOutlineStyle}
-          aria-hidden="true"
-        />
-      ) : null}
-      {showHoverOutline && hoverOutlineStyle ? (
-        <div
-          className={styles.targetOutline}
-          data-testid="canvas-capability-outline"
-          data-tone="hover"
-          style={hoverOutlineStyle}
-          aria-hidden="true"
-        />
-      ) : null}
-      {showHoverOutline && showHoverHint && hoverHintStyle && hoverChrome.capability ? (
-        <>
-          <div
-            ref={hoverHintMeasureRef}
-            className={`${styles.hoverHint} ${styles.hoverHintMeasure}`}
-            aria-hidden="true"
-          >
-            {hoverChrome.capability.hint}
-          </div>
-          <div
-            className={styles.hoverHint}
-            data-testid="canvas-capability-hint"
-            data-placement={hoverHintPlacement?.placement}
-            data-html-canvas-preserve-selection="true"
-            style={hoverHintStyle}
-            role="button"
-            aria-label={hoverChrome.capability.hint}
-            onPointerDown={(event) => {
-              hoverHintPointerInsideRef.current = true;
-              event.preventDefault();
-              event.stopPropagation();
-            }}
-            onPointerEnter={() => {
-              hoverHintPointerInsideRef.current = true;
-            }}
-            onPointerLeave={() => {
-              hoverHintPointerInsideRef.current = false;
-              hoverControllerRef.current?.hide();
-            }}
-            onClick={(event) => {
-              event.preventDefault();
-              event.stopPropagation();
-              const capability = hoverChrome.capability;
-              if (!interactionLocked && capability) {
-                hoverControllerRef.current?.hide();
-                selectElement(capability.selectionElement);
-              }
-            }}
-          >
-            {hoverChrome.capability.hint}
-          </div>
-        </>
-      ) : null}
-      {editFeedback && !interactionLocked ? (
-        <NoticeBar
-          placement="viewport"
-          title={editFeedback.title}
-          message={editFeedback.message}
-          tone={editFeedback.tone}
-          actionLabel={editFeedback.recovery === "reload"
-            ? reloadActionLabel
-            : undefined}
-          onAction={editFeedbackActionAvailable ? handleEditFeedbackAction : undefined}
-          onDismiss={() => setEditFeedback(null)}
-          onPauseChange={setEditFeedbackPaused}
-          dismissLabel="关闭修改提示"
-          usageCode={editFeedback.code}
-          usageDisposition={editFeedback.recovery === "none"
-            ? "inform-in-place"
-            : "direct-action"}
-          usageSurface="canvas"
-          usageProjectId={usageProjectId}
-          usageCapture={usageCapture}
-        />
-      ) : null}
-
-      {interactionLocked ? (
-        <div
-          className={styles.lockNotice}
-          data-mode={renderedMode}
-          role="status"
-          aria-label={
-            renderedMode === "history"
-              ? "正在查看历史版本，只读"
-              : "本轮已锁定，仅可滚动浏览"
+      <HtmlCanvasSelectionChrome
+        canvasTransitionActive={canvasTransitionActive}
+        selectionCapabilitySpoken={selectionCapability ? selectionCapability.spoken : ""}
+        interactionLocked={interactionLocked}
+        selection={selection}
+        selectedOutlineStyle={selectedOutlineStyle}
+        showHoverOutline={showHoverOutline}
+        showHoverHint={showHoverHint}
+        hoverOutlineStyle={hoverOutlineStyle}
+        hoverHintStyle={hoverHintStyle}
+        hoverHintPlacement={hoverHintPlacement}
+        hoverChrome={hoverChrome}
+        hoverHintMeasureRef={hoverHintMeasureRef}
+        editFeedback={editFeedback}
+        reloadActionLabel={reloadActionLabel}
+        editFeedbackActionAvailable={editFeedbackActionAvailable}
+        renderedMode={renderedMode}
+        commentMarkers={commentMarkers}
+        toolbarVisible={toolbarVisible}
+        overlayPosition={overlayPosition}
+        toolbarRef={toolbarRef}
+        hasTextRange={hasTextRange}
+        isEditing={isEditing}
+        toolbarStyle={toolbarStyle}
+        selectedPagePresentationAction={selectedPagePresentationAction}
+        readOnly={readOnly}
+        selectedNativeEditAvailable={selectedNativeEditAvailable}
+        selectedStyle={selectedStyle}
+        textFormatRequiresSelection={textFormatRequiresSelection}
+        enableReorder={enableReorder}
+        moveAvailability={moveAvailability}
+        spacingMenuRef={spacingMenuRef}
+        spacingMenuOpen={spacingMenuOpen}
+        usageProjectId={usageProjectId}
+        usageCapture={usageCapture}
+        onHoverHintPointerDown={(event) => {
+          hoverHintPointerInsideRef.current = true;
+          event.preventDefault();
+          event.stopPropagation();
+        }}
+        onHoverHintPointerEnter={() => {
+          hoverHintPointerInsideRef.current = true;
+        }}
+        onHoverHintPointerLeave={() => {
+          hoverHintPointerInsideRef.current = false;
+          hoverControllerRef.current?.hide();
+        }}
+        onHoverHintClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          const capability = hoverChrome.capability;
+          if (!interactionLocked && capability) {
+            hoverControllerRef.current?.hide();
+            selectElement(capability.selectionElement);
           }
-        >
-          <span className={styles.lockGlyph} aria-hidden="true"><span /></span>
-          <span>
-            {renderedMode === "history"
-              ? "正在查看历史版本 · 只读"
-              : "本轮已锁定 · 仅可浏览"}
-          </span>
-        </div>
-      ) : null}
-
-      {!interactionLocked ? commentMarkers.map((marker) => (
-        <button
-          key={marker.key}
-          type="button"
-          className={styles.commentMarker}
-          data-global={isPageRootSelection(marker.selection) ? "true" : undefined}
-          data-placement={marker.placement}
-          style={{ left: marker.left, top: marker.top }}
-          aria-label={marker.count && marker.count > 1
-            ? `${marker.label || marker.selection.label}已有${marker.count}条评论`
-            : marker.label || `${marker.selection.label}已有1条评论`}
-          title={`查看${marker.label || marker.selection.label}的${marker.count || 1}条评论`}
-          onClick={() => {
-            if (lockedRef.current) return;
-            // The marker was clicked at the user's current Canvas position.
-            // Keep that viewport stable; navigation from the comment rail can
-            // still opt into revealing the paired target.
-            selectTarget(marker.selection, { reveal: false, showToolbar: true });
-          }}
-        >
-          <span className={styles.commentGlyph} aria-hidden="true">
-            评{marker.count || 1}
-          </span>
-        </button>
-      )) : null}
-
-      {!interactionLocked
-      && toolbarVisible
-      && selection
-      && !isPageRootSelection(selection)
-      && overlayPosition ? (
-        <div
-          ref={toolbarRef}
-          className={styles.toolbar}
-          data-selection-level={selection.level}
-          data-text-range={hasTextRange ? "true" : undefined}
-          data-text-editing={isEditing ? "true" : undefined}
-          style={toolbarStyle}
-          role="toolbar"
-          aria-label={`编辑${selection.label}`}
-          onKeyDown={handleToolbarKeyDown}
-          onPointerDownCapture={(event) => {
-            const activeNativeEdit = activeNativeEditRef.current;
-            if (!activeNativeEdit) return;
-            if (activeNativeEdit.session.isComposing()) {
-              // Moving focus from the authored iframe to this outer toolbar
-              // makes Chromium/macOS end the live IME composition and expose
-              // its intermediate pinyin as ordinary DOM text. Keep the native
-              // editor focused while allowing the button click to enqueue its
-              // explicit command.
-              event.preventDefault();
-              return;
+        }}
+        onEditFeedbackAction={handleEditFeedbackAction}
+        onDismissEditFeedback={() => setEditFeedback(null)}
+        onPauseEditFeedback={setEditFeedbackPaused}
+        onSelectCommentMarker={(markerSelection) => {
+          if (lockedRef.current) return;
+          // The marker was clicked at the user's current Canvas position.
+          // Keep that viewport stable; navigation from the comment rail can
+          // still opt into revealing the paired target.
+          selectTarget(markerSelection, { reveal: false, showToolbar: true });
+        }}
+        onToolbarKeyDown={handleToolbarKeyDown}
+        onToolbarPointerDownCapture={(event) => {
+          const activeNativeEdit = activeNativeEditRef.current;
+          if (!activeNativeEdit) return;
+          if (activeNativeEdit.session.isComposing()) {
+            // Moving focus from the authored iframe to this outer toolbar
+            // makes Chromium/macOS end the live IME composition and expose
+            // its intermediate pinyin as ordinary DOM text. Keep the native
+            // editor focused while allowing the button click to enqueue its
+            // explicit command.
+            event.preventDefault();
+            return;
+          }
+          retainNativeEditFocusRef.current = {
+            session: activeNativeEdit.session,
+            lease: { ...activeNativeEdit.lease },
+          };
+        }}
+        onToolbarMouseDownCapture={(event) => {
+          if (activeNativeEditRef.current?.session.isComposing()) {
+            // The focus default is attached to mousedown in Chromium. Keep
+            // this fallback even when pointerdown compatibility changes.
+            event.preventDefault();
+          }
+        }}
+        onExecutePresentationAction={() => {
+          if (selection) executePagePresentationAction(selection);
+        }}
+        onComment={() => {
+          if (lockedRef.current || !selection) return;
+          const openComment = () => {
+            if (activeNativeEditRef.current) {
+              const committed = finishNativeEditing(true, "manual");
+              if (!committed.ok) return;
             }
-            retainNativeEditFocusRef.current = {
-              session: activeNativeEdit.session,
-              lease: { ...activeNativeEdit.lease },
-            };
-          }}
-          onMouseDownCapture={(event) => {
-            if (activeNativeEditRef.current?.session.isComposing()) {
-              // The focus default is attached to mousedown in Chromium. Keep
-              // this fallback even when pointerdown compatibility changes.
-              event.preventDefault();
-            }
-          }}
-        >
-          <div className={styles.toolbarRow}>
-          {selectedPagePresentationAction ? (
-            <>
-              <button
-                type="button"
-                className={`${styles.toolButton} ${styles.presentationToolButton}`}
-                data-presentation-kind={selectedPagePresentationAction.kind}
-                data-current={selectedPagePresentationAction.isCurrent ? "true" : undefined}
-                aria-label={selectedPagePresentationAction.label}
-                aria-pressed={
-                  selectedPagePresentationAction.kind === "activate-tab"
-                    ? selectedPagePresentationAction.isCurrent
-                    : undefined
-                }
-                title={
-                  selectedPagePresentationAction.isCurrent
-                    ? "当前页签"
-                    : "快捷操作：按住 ⌥ 并单击页面中的这个控件"
-                }
-                onClick={() => {
-                  executePagePresentationAction(selection);
-                }}
-              >
-                {selectedPagePresentationAction.label}
-              </button>
-              <span className={styles.toolbarDivider} aria-hidden="true" />
-            </>
-          ) : null}
-
-          <button
-            type="button"
-            className={styles.commentToolButton}
-            aria-label={`给${selection.label}留评论`}
-            onClick={() => {
-              if (lockedRef.current) return;
-              const openComment = () => {
-                if (activeNativeEditRef.current) {
-                  const committed = finishNativeEditing(true, "manual");
-                  if (!committed.ok) return;
-                }
-                requestCommentForTarget(selection);
-              };
-              if (deferNativeCommandRef.current("comment", openComment)) return;
-              openComment();
-            }}
-          >
-            评论
-          </button>
-
-          {!readOnly && selection.level === "part" ? (
-            <>
-              <button
-                type="button"
-                className={styles.toolButton}
-                aria-pressed={isEditing}
-                disabled={!selectedNativeEditAvailable}
-                title={!selectedNativeEditAvailable
-                  ? "这段内容不是当前源码中的唯一静态文字"
-                  : "像文档一样在原位置编辑文字"}
-                onClick={() => {
-                  startEditing();
-                }}
-              >
-                {isEditing ? "编辑中" : "编辑"}
-              </button>
-
-              <div className={styles.formatGroup} aria-label="文字格式">
-                <button
-                  type="button"
-                  className={styles.formatButton}
-                  aria-pressed={selectedStyle.isBold}
-                  disabled={textFormatRequiresSelection}
-                  title={textFormatRequiresSelection ? "请先选中要修改的文字" : "加粗"}
-                  onClick={() => applyInlineStyle("fontWeight", selectedStyle.isBold ? "normal" : "700")}
-                >
-                  <strong aria-hidden="true">B</strong>
-                  <span className={styles.visuallyHidden}>加粗</span>
-                </button>
-                <button
-                  type="button"
-                  className={styles.formatButton}
-                  aria-pressed={selectedStyle.isItalic}
-                  disabled={textFormatRequiresSelection}
-                  title={textFormatRequiresSelection ? "请先选中要修改的文字" : "斜体"}
-                  onClick={() => applyInlineStyle("fontStyle", selectedStyle.isItalic ? "normal" : "italic")}
-                >
-                  <em aria-hidden="true">I</em>
-                  <span className={styles.visuallyHidden}>斜体</span>
-                </button>
-                <button
-                  type="button"
-                  className={styles.formatButton}
-                  aria-pressed={selectedStyle.isUnderline}
-                  disabled={textFormatRequiresSelection}
-                  title={textFormatRequiresSelection ? "请先选中要修改的文字" : "下划线"}
-                  onClick={() => applyInlineStyle(
-                    "textDecorationLine",
-                    selectedStyle.isUnderline ? "none" : "underline",
-                  )}
-                >
-                  <span className={styles.underlineGlyph} aria-hidden="true">U</span>
-                  <span className={styles.visuallyHidden}>下划线</span>
-                </button>
-              </div>
-
-              {enableReorder ? (
-                <div className={styles.moveGroup} aria-label="移动选中内容">
-                  <button
-                    type="button"
-                    className={styles.iconButton}
-                    aria-label="上移"
-                    data-tooltip="上移（Option + ↑）"
-                    data-tooltip-side="below"
-                    disabled={!moveAvailability.up}
-                    onClick={() => moveSelected("up")}
-                  >
-                    <ArrowUpIcon size={15} weight="bold" aria-hidden="true" />
-                  </button>
-                  <button
-                    type="button"
-                    className={styles.iconButton}
-                    aria-label="下移"
-                    data-tooltip="下移（Option + ↓）"
-                    data-tooltip-side="below"
-                    disabled={!moveAvailability.down}
-                    onClick={() => moveSelected("down")}
-                  >
-                    <ArrowDownIcon size={15} weight="bold" aria-hidden="true" />
-                  </button>
-                </div>
-              ) : null}
-
-              <details
-                ref={spacingMenuRef}
-                className={styles.spacingMenu}
-                open={spacingMenuOpen}
-              >
-                <summary
-                  aria-expanded={spacingMenuOpen}
-                  onClick={(event) => {
-                    event.preventDefault();
-                    setSpacingMenuOpen((open) => !open);
-                  }}
-                >样式与间距</summary>
-                <div className={styles.spacingPanel} aria-label="样式与间距">
-                  <div className={styles.popoverSection} aria-label="文字与颜色">
-                    <span className={styles.popoverSectionLabel}>文字与颜色</span>
-                    <label className={styles.controlRow}>
-                      <span>字号</span>
-                      <span className={styles.numberValue}>
-                        <input
-                          type="number"
-                          min="8"
-                          max="120"
-                          step="1"
-                          value={selectedStyle.fontSize}
-                          disabled={textFormatRequiresSelection}
-                          aria-label="字号（像素）"
-                          onChange={(event) => {
-                            const value = Math.max(8, Math.min(120, Number(event.currentTarget.value)));
-                            if (Number.isFinite(value)) applyInlineStyle("fontSize", `${value}px`);
-                          }}
-                        />
-                        <small>px</small>
-                      </span>
-                    </label>
-                    <label className={styles.controlRow}>
-                      <span>字色</span>
-                      <span
-                        className={styles.colorValue}
-                        style={{ "--toolbar-swatch": selectedStyle.color } as CSSProperties}
-                      >
-                        <span className={styles.colorSwatch} aria-hidden="true" />
-                        <span>{selectedStyle.color.toUpperCase()}</span>
-                        <input
-                          type="color"
-                          value={selectedStyle.color}
-                          disabled={textFormatRequiresSelection}
-                          aria-label="文字颜色"
-                          onChange={(event) => applyInlineStyle("color", event.currentTarget.value)}
-                        />
-                      </span>
-                    </label>
-                    <label className={styles.controlRow}>
-                      <span>填充</span>
-                      <span
-                        className={styles.colorValue}
-                        style={{ "--toolbar-swatch": selectedStyle.backgroundColor } as CSSProperties}
-                      >
-                        <span className={styles.colorSwatch} aria-hidden="true" />
-                        <span>{selectedStyle.backgroundColor.toUpperCase()}</span>
-                        <input
-                          type="color"
-                          value={selectedStyle.backgroundColor}
-                          disabled={textFormatRequiresSelection}
-                          aria-label="元素填充色"
-                          onChange={(event) => applyInlineStyle("backgroundColor", event.currentTarget.value)}
-                        />
-                      </span>
-                    </label>
-                  </div>
-
-                  <div className={styles.popoverSection} aria-label="间距">
-                    <span className={styles.popoverSectionLabel}>间距</span>
-                    <label className={styles.controlRow}>
-                      <span>内边距</span>
-                      <span className={styles.numberValue}>
-                        <input
-                          type="number"
-                          min="0"
-                          max="240"
-                          step="1"
-                          value={selectedStyle.padding}
-                          aria-label="内边距（像素）"
-                          onChange={(event) => {
-                            const value = Math.max(0, Math.min(240, Number(event.currentTarget.value)));
-                            if (Number.isFinite(value)) applyInlineStyle("padding", `${value}px`);
-                          }}
-                        />
-                        <small>px</small>
-                      </span>
-                    </label>
-                    <label className={styles.controlRow}>
-                      <span>外间距</span>
-                      <span className={styles.numberValue}>
-                        <input
-                          type="number"
-                          min="-120"
-                          max="240"
-                          step="1"
-                          value={selectedStyle.margin}
-                          aria-label="外间距（像素）"
-                          onChange={(event) => {
-                            const value = Math.max(-120, Math.min(240, Number(event.currentTarget.value)));
-                            if (Number.isFinite(value)) applyInlineStyle("margin", `${value}px`);
-                          }}
-                        />
-                        <small>px</small>
-                      </span>
-                    </label>
-                    <label className={styles.controlRow}>
-                      <span>行距</span>
-                      <span className={styles.numberValue}>
-                        <input
-                          type="number"
-                          min="8"
-                          max="240"
-                          step="1"
-                          value={selectedStyle.lineHeight}
-                          aria-label="行距（像素）"
-                          onChange={(event) => {
-                            const value = Math.max(8, Math.min(240, Number(event.currentTarget.value)));
-                            if (Number.isFinite(value)) applyInlineStyle("lineHeight", `${value}px`);
-                          }}
-                        />
-                        <small>px</small>
-                      </span>
-                    </label>
-                  </div>
-                </div>
-              </details>
-            </>
-          ) : null}
-          </div>
-        </div>
-      ) : null}
+            requestCommentForTarget(selection);
+          };
+          if (deferNativeCommandRef.current("comment", openComment)) return;
+          openComment();
+        }}
+        onStartEditing={() => {
+          startEditing();
+        }}
+        onApplyInlineStyle={applyInlineStyle}
+        onMoveSelected={moveSelected}
+        onToggleSpacingMenu={() => {
+          setSpacingMenuOpen((open) => !open);
+        }}
+      />
     </div>
   );
 });

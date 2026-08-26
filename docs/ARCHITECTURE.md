@@ -303,6 +303,7 @@ services.
 | Pseudonymous identity, strict event schemas, local queue and PostHog delivery | `desktop/usage-telemetry.mjs` |
 | Install-level first-real-HTML guide status and built-in welcome identity | `desktop/ui-preferences.mjs`, `app/application/first-edit-guide-session.js` |
 | Preview sanitization and verified frame injection | `app/components/html-preview-sandbox.js` |
+| Canvas selection chrome, comment markers, hover hints and edit toolbar presentation | `app/components/html-canvas-selection-chrome.tsx`; snapshots and callbacks only, no source or editing authority |
 | Volatile desktop preview sessions and contained local-asset serving | `desktop/preview-protocol.mjs` |
 | Imported project's original sibling-asset directory | `desktop/imported-asset-root.mjs` plus Main `html-projects.json` |
 | Edit one-shot candidate limits, source-host contract and direct-frame grant | `app/domain/edit-runtime-contract.js`, `app/application/edit-author-runtime-session.js` |
@@ -340,7 +341,9 @@ scopes.
 `HtmlCanvasEditor.tsx` remains the Canvas coordinator. Parsing, DOM
 instrumentation, interaction policy, preview synchronization, selection,
 source-backed page view and style inspection live in the adjacent
-`html-canvas-*.ts` modules. Those helpers do not gain a second source or
+`html-canvas-*.ts` modules. Selection chrome, comment markers, hover hints and
+the edit toolbar are presented by `html-canvas-selection-chrome.tsx`; they
+receive snapshots and callbacks only. Those helpers do not gain a second source or
 editing authority; `IslandEditingController` and `SourcePatchEngine` remain
 the only production text and source-mutation route.
 
