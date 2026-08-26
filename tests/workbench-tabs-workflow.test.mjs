@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { createWorkbenchTabsSession } from "../app/application/workbench-tabs-session.js";
+import {
+  createWorkbenchTabsSession,
+  projectAppliedEventToWorkbenchTabs,
+} from "../app/application/workbench-tabs-session.js";
 import {
   WorkbenchTabsWorkflow,
   workbenchTabOutcomeHasCommittedDocument,
@@ -48,11 +51,29 @@ test("document activation commits only after ProjectWorkflow publication matches
   const session = createWorkbenchTabsSession();
   session.bindDocument({ projectId: "project_alpha", documentId: "doc_alpha", title: "Alpha" });
   session.bindDocument({ projectId: "project_beta", documentId: "doc_beta", title: "Beta", focus: false });
-  const { controller, calls } = controllerFixture();
+  let eventProjectionObserved = false;
+  const { controller, calls } = controllerFixture({
+    async openProject({ input, calls: openCalls, publish }) {
+      openCalls.push("prepareSwitch", "fence", "drain", `open:${input.projectId}`);
+      projectAppliedEventToWorkbenchTabs({
+        session,
+        event: {
+          type: "project-applied",
+          project: { projectId: "project_beta", documentId: "doc_beta", name: "Beta event" },
+        },
+      });
+      assert.equal(session.snapshot.pendingTabId, "document:project_beta:doc_beta");
+      assert.equal(session.snapshot.activeTabId, "document:project_alpha:doc_alpha");
+      eventProjectionObserved = true;
+      publish({ projectSession: { projectId: "project_beta", documentId: "doc_beta" } });
+      return { status: "succeeded" };
+    },
+  });
   const workflow = new WorkbenchTabsWorkflow({ session, controller });
   const beta = session.snapshot.tabs.find((tab) => tab.projectId === "project_beta");
   const outcome = await workflow.activate(beta.tabId);
   assert.equal(outcome.status, "succeeded");
+  assert.equal(eventProjectionObserved, true);
   assert.deepEqual(calls, ["prepareSwitch", "fence", "drain", "open:project_beta"]);
   assert.equal(session.snapshot.activeTabId, beta.tabId);
   assert.equal(session.snapshot.runtimeOwnerTabId, beta.tabId);

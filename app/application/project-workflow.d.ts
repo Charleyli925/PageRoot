@@ -19,6 +19,8 @@ export type ProjectWorkflowOutcome<T = Record<string, unknown>> =
 
 export type ProjectWorkflowProject = Readonly<{
   name: string;
+  projectId?: string;
+  documentId?: string;
   sourcePath: string | null;
   html: string;
   sha256?: string | null;

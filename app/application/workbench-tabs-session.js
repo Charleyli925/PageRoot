@@ -439,19 +439,32 @@ export function createWorkbenchTabsSession() {
   return new WorkbenchTabsSession();
 }
 
-export function shouldFocusAuthoritativeWorkbenchDocument({
-  pendingTabId,
-  committedEpoch,
-  currentEpoch,
-  startPageRequested,
-  firstBinding,
-}) {
-  if (pendingTabId) return false;
+export function projectAppliedEventToWorkbenchTabs({ session, event, title }) {
   if (
-    Number.isSafeInteger(committedEpoch)
-    && committedEpoch === currentEpoch
-  ) return true;
-  return startPageRequested !== true && firstBinding === true;
+    !session
+    || !event
+    || event.type !== "project-applied"
+    || !event.project
+  ) return null;
+  const projectId = String(event.project.projectId || "");
+  const documentId = String(event.project.documentId || "");
+  const tabTitle = String(title || event.project.name || "").trim();
+  if (
+    !/^project_[A-Za-z0-9_-]+$/.test(projectId)
+    || !/^doc_[A-Za-z0-9_-]+$/.test(documentId)
+    || !tabTitle
+  ) return null;
+  return session.bindDocument({
+    projectId,
+    documentId,
+    title: tabTitle,
+    status: event.activeLocked === true ? "processing" : "normal",
+    // A pending registered-tab activation is committed only by
+    // WorkbenchTabsWorkflow after its Controller identity check. The event
+    // still refreshes/stages that exact identity, but never impersonates the
+    // workflow's commit.
+    focus: !session.snapshot.pendingTabId,
+  });
 }
 
 export function reconcileWorkbenchTabsWhenReady({

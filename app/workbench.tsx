@@ -107,8 +107,8 @@ import type { RunOperationKind, RunSessionSnapshot } from "./application/run-ses
 import type { VersionSessionSnapshot } from "./application/version-session.js";
 import {
   createWorkbenchTabsSession,
+  projectAppliedEventToWorkbenchTabs,
   reconcileWorkbenchTabsWhenReady,
-  shouldFocusAuthoritativeWorkbenchDocument,
   type WorkbenchTab,
 } from "./application/workbench-tabs-session.js";
 import {
@@ -460,9 +460,7 @@ export default function Workbench() {
   const restoredPendingTabIdRef = useRef("");
   const restoredTabOpeningRef = useRef("");
   const restoredCatalogRequestedRef = useRef(false);
-  const lastBoundDocumentRef = useRef("");
   const startPageRequestedRef = useRef(true);
-  const focusOpenedProjectEpochRef = useRef<number | null>(null);
   const [workbenchTabsSnapshot, setWorkbenchTabsSnapshot] = useState(
     () => createWorkbenchTabsSession().snapshot,
   );
@@ -1924,6 +1922,7 @@ export default function Workbench() {
         lastModifiedAt?: unknown;
         showHandoff?: unknown;
         contentChanged?: unknown;
+        activeLocked?: unknown;
         epoch?: unknown;
         requestId?: unknown;
         ackPending?: unknown;
@@ -1942,11 +1941,20 @@ export default function Workbench() {
       }
       if (projectEvent.type === "project-applied") {
         const project = projectEvent.project as HtmlProject;
-        if (!workbenchTabsSessionRef.current.snapshot.pendingTabId) {
-          const appliedEpoch = Number(projectEvent.epoch);
-          focusOpenedProjectEpochRef.current = Number.isSafeInteger(appliedEpoch)
-            ? appliedEpoch
-            : null;
+        const pendingTabId = workbenchTabsSessionRef.current.snapshot.pendingTabId;
+        projectAppliedEventToWorkbenchTabs({
+          session: workbenchTabsSessionRef.current,
+          event: {
+            type: "project-applied",
+            project,
+            activeLocked: projectEvent.activeLocked === true,
+          },
+          title: fileStem(project.name) || project.name,
+        });
+        if (!pendingTabId) {
+          // Exact-identity Desktop events project synchronously above. Browser
+          // fallback projects the aggregate identity after this authoritative
+          // event; cancel/failure paths never publish it.
           startPageRequestedRef.current = false;
         }
         setStartupIssue(null);
@@ -2721,18 +2729,9 @@ export default function Workbench() {
   useEffect(() => {
     if (!projectId || !documentId) return;
     const tabsSession = workbenchTabsSessionRef.current;
-    const identity = `${projectId}\u0000${documentId}`;
-    const firstBinding = lastBoundDocumentRef.current !== identity;
-    if (firstBinding) lastBoundDocumentRef.current = identity;
-    const switchingDocument = Boolean(tabsSession.snapshot.pendingTabId);
-    const focus = shouldFocusAuthoritativeWorkbenchDocument({
-      pendingTabId: switchingDocument ? tabsSession.snapshot.pendingTabId : null,
-      committedEpoch: focusOpenedProjectEpochRef.current,
-      currentEpoch: projectSnapshot.epoch,
-      startPageRequested: startPageRequestedRef.current,
-      firstBinding,
-    });
-    const bound = tabsSession.bindDocument({
+    const tabId = `document:${projectId}:${documentId}`;
+    const alreadyProjected = Boolean(tabsSession.resolveTab(tabId));
+    tabsSession.bindDocument({
       projectId,
       documentId,
       title: currentSourceFileStem || projectName,
@@ -2743,10 +2742,13 @@ export default function Workbench() {
           : runInProgress
             ? "processing"
             : "normal",
-      focus,
+      // Event projection owns normal creation/focus. This is a safe fallback
+      // for browser-only/id-less projects and otherwise only refreshes the
+      // current title/status projection.
+      focus: !alreadyProjected
+        && !tabsSession.snapshot.pendingTabId
+        && !startPageRequestedRef.current,
     });
-    if (!bound) return;
-    if (focus) focusOpenedProjectEpochRef.current = null;
   }, [
     currentSourceFileStem,
     documentId,
@@ -2754,7 +2756,6 @@ export default function Workbench() {
     projectId,
     projectLoadError,
     projectName,
-    projectSnapshot.epoch,
     readyReviewSession,
     runInProgress,
   ]);
@@ -4142,7 +4143,6 @@ export default function Workbench() {
       startPageRequestedRef.current = snapshot.tabs.find(
         (tab) => tab.tabId === snapshot.activeTabId,
       )?.kind === "start";
-      focusOpenedProjectEpochRef.current = null;
     }
   }, [workspaceController]);
   const presentWorkbenchTabOutcome = useCallback((outcome: unknown) => {
@@ -4163,7 +4163,6 @@ export default function Workbench() {
       presentWorkbenchTabOutcome(outcome);
       if (outcome.status === "succeeded") {
         startPageRequestedRef.current = tab.kind === "start";
-        if (tab.kind === "start") focusOpenedProjectEpochRef.current = null;
       }
     });
   }, [presentWorkbenchTabOutcome]);
@@ -4172,7 +4171,6 @@ export default function Workbench() {
       presentWorkbenchTabOutcome(outcome);
       if (outcome.status === "succeeded") {
         startPageRequestedRef.current = true;
-        focusOpenedProjectEpochRef.current = null;
       }
     });
   }, [presentWorkbenchTabOutcome]);
@@ -4183,7 +4181,6 @@ export default function Workbench() {
         (item) => item.tabId === workbenchTabsSessionRef.current.snapshot.activeTabId,
       );
       startPageRequestedRef.current = active?.kind === "start";
-      if (active?.kind === "start") focusOpenedProjectEpochRef.current = null;
       if (outcome.status === "succeeded" && active) {
         window.requestAnimationFrame(() => {
           document.getElementById(`workbench-tab-${active.tabId}`)?.focus();

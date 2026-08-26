@@ -169,6 +169,13 @@ Rules:
   close/quit obligations remain owned by the same Controller. Close and activate
   are mutually exclusive. Inactive tabs keep no contenteditable, Selection or
   IME DOM.
+- Every authoritative `project-applied` publication carries the already
+  verified `projectId + documentId` pair and is synchronously projected into
+  `WorkbenchTabsSession` before React aggregate rendering. Accepted-project
+  FIFO successors therefore cannot erase a predecessor tab. A pending
+  registered-tab switch may stage or refresh that identity, but only
+  `WorkbenchTabsWorkflow` may commit its active/mounted tab after Controller
+  identity verification.
 - A failed Desktop acknowledgement retains an opaque request-keyed completion
   in `ProjectWorkflow`: retry performs only that ack, while the external Session
   keeps the FIFO head and withholds successors. Close drain cancels and

@@ -14,6 +14,8 @@ export type HtmlProject = {
   html: string;
   sha256: string;
   lastModifiedAt?: string;
+  projectId?: string;
+  documentId?: string;
   openKind?: "project";
 };
 

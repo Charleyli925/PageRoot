@@ -3,8 +3,8 @@ import test from "node:test";
 
 import {
   createWorkbenchTabsSession,
+  projectAppliedEventToWorkbenchTabs,
   reconcileWorkbenchTabsWhenReady,
-  shouldFocusAuthoritativeWorkbenchDocument,
 } from "../app/application/workbench-tabs-session.js";
 
 const a = { projectId: "project_alpha", documentId: "doc_alpha", title: "Alpha" };
@@ -39,30 +39,22 @@ test("opening from the active Start converts only that blank tab in place", () =
   assert.equal(session.snapshot.tabs.length, before);
 });
 
-test("Start focus is created only by an authoritative project commit", () => {
-  const waiting = {
-    pendingTabId: null,
-    committedEpoch: null,
-    currentEpoch: 4,
-    startPageRequested: true,
-    firstBinding: false,
-  };
-  assert.equal(shouldFocusAuthoritativeWorkbenchDocument(waiting), false);
-  assert.equal(shouldFocusAuthoritativeWorkbenchDocument({
-    ...waiting,
-    // Confirmation cancel/failure publishes no project-applied epoch.
-    committedEpoch: null,
-  }), false);
-  assert.equal(shouldFocusAuthoritativeWorkbenchDocument({
-    ...waiting,
-    committedEpoch: 5,
-    currentEpoch: 5,
-  }), true);
-  assert.equal(shouldFocusAuthoritativeWorkbenchDocument({
-    ...waiting,
-    committedEpoch: 4,
-    currentEpoch: 5,
-  }), false);
+test("same-batch authoritative project events retain every identity and focus the newest", () => {
+  const session = createWorkbenchTabsSession();
+  const apply = (project, activeLocked = false) => projectAppliedEventToWorkbenchTabs({
+    session,
+    event: { type: "project-applied", project, activeLocked },
+  });
+  apply({ ...a, name: "Alpha.html" });
+  apply({ ...a, name: "Alpha renamed.html" });
+  apply({ ...b, name: "Beta.html" }, true);
+
+  const documents = session.snapshot.tabs.filter((tab) => tab.kind === "document");
+  assert.deepEqual(documents.map((tab) => tab.projectId), [a.projectId, b.projectId]);
+  assert.equal(documents[0].title, "Alpha renamed.html");
+  assert.equal(documents[1].status, "processing");
+  assert.equal(session.snapshot.activeTabId, documents[1].tabId);
+  assert.equal(session.snapshot.mountedDocumentTabId, documents[1].tabId);
 });
 
 test("staging a registered project from active Start reuses the blank slot", () => {

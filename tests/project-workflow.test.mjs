@@ -11,6 +11,10 @@ import { ProjectSession } from "../app/application/project-session.js";
 import { ProjectWorkflow } from "../app/application/project-workflow.js";
 import { RunSession } from "../app/application/run-session.js";
 import { VersionSession } from "../app/application/version-session.js";
+import {
+  createWorkbenchTabsSession,
+  projectAppliedEventToWorkbenchTabs,
+} from "../app/application/workbench-tabs-session.js";
 
 const OLD_PATH = "/tmp/project-workflow-old.html";
 const RENAMED_PATH = "/tmp/project-workflow-renamed.html";
@@ -999,6 +1003,16 @@ test("a stale hydration result cannot publish into a newer project locator", asy
 
 test("accepted projects retain FIFO order while the predecessor hydrates slowly", async (t) => {
   let resolveA;
+  const aWorkspace = {
+    ...workspacePayload(A_PATH, A_HTML),
+    projectId: "project_fifo_a",
+    documentId: "doc_fifo_a",
+  };
+  const bWorkspace = {
+    ...workspacePayload(B_PATH, B_HTML),
+    projectId: "project_fifo_b",
+    documentId: "doc_fifo_b",
+  };
   const harness = createHarness({
     bridge: {
       workspace(sourcePath) {
@@ -1007,14 +1021,33 @@ test("accepted projects retain FIFO order while the predecessor hydrates slowly"
             resolveA = resolve;
           });
         }
-        return Promise.resolve(workspacePayload(sourcePath, B_HTML));
+        return Promise.resolve(bWorkspace);
+      },
+      source(sourcePath) {
+        const payload = sourcePayload(
+          sourcePath,
+          sourcePath === A_PATH ? A_HTML : B_HTML,
+        );
+        const workspace = sourcePath === A_PATH ? aWorkspace : bWorkspace;
+        return Promise.resolve({
+          ...payload,
+          projectId: workspace.projectId,
+          documentId: workspace.documentId,
+        });
       },
     },
   });
   t.after(() => harness.workflow.dispose());
+  const tabsSession = createWorkbenchTabsSession();
+  const unsubscribeTabs = harness.workflow.subscribeEvents((event) => {
+    projectAppliedEventToWorkbenchTabs({ session: tabsSession, event });
+  });
+  t.after(unsubscribeTabs);
 
   assert.equal(harness.workflow.acceptProject({
     name: "A",
+    projectId: aWorkspace.projectId,
+    documentId: aWorkspace.documentId,
     sourcePath: A_PATH,
     html: A_HTML,
     sha256: sha256(A_HTML),
@@ -1022,6 +1055,8 @@ test("accepted projects retain FIFO order while the predecessor hydrates slowly"
   await waitFor(() => Boolean(resolveA));
   assert.equal(harness.workflow.acceptProject({
     name: "B",
+    projectId: bWorkspace.projectId,
+    documentId: bWorkspace.documentId,
     sourcePath: B_PATH,
     html: B_HTML,
     sha256: sha256(B_HTML),
@@ -1037,9 +1072,23 @@ test("accepted projects retain FIFO order while the predecessor hydrates slowly"
       .map((event) => event.project.name),
     ["A", "B"],
   );
+  assert.deepEqual(
+    tabsSession.snapshot.tabs
+      .filter((tab) => tab.kind === "document")
+      .map((tab) => `${tab.projectId}/${tab.documentId}`),
+    ["project_fifo_a/doc_fifo_a", "project_fifo_b/doc_fifo_b"],
+  );
+  assert.equal(
+    tabsSession.snapshot.tabs.find((tab) => tab.tabId === tabsSession.snapshot.activeTabId)?.projectId,
+    "project_fifo_b",
+  );
   assert.equal(harness.documentSession.html, B_HTML);
-  assert.equal(harness.projectSession.context.projectId, `project_${slug(B_PATH)}`);
-  resolveA(workspacePayload(A_PATH, A_HTML));
+  await waitFor(
+    () => harness.projectSession.context?.projectId === bWorkspace.projectId,
+    "fast FIFO successor identity did not hydrate",
+  );
+  assert.equal(harness.projectSession.context.projectId, bWorkspace.projectId);
+  resolveA(aWorkspace);
   await new Promise((resolve) => setTimeout(resolve, 10));
   assert.equal(harness.projectSession.sourcePath, B_PATH);
   assert.equal(harness.documentSession.html, B_HTML);

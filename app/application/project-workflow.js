@@ -108,12 +108,19 @@ function copyProject(value) {
   }
   const sourcePath = value.sourcePath ? String(value.sourcePath) : null;
   const sha256 = value.sha256 ? String(value.sha256) : null;
+  const projectId = String(value.projectId || "");
+  const documentId = String(value.documentId || "");
+  const hasIdentity = (
+    /^project_[A-Za-z0-9_-]+$/.test(projectId)
+    && /^doc_[A-Za-z0-9_-]+$/.test(documentId)
+  );
   return Object.freeze({
     ...(value.path ? { path: String(value.path) } : {}),
     name: value.name,
     sourcePath,
     html: value.html,
     sha256,
+    ...(hasIdentity ? { projectId, documentId } : {}),
     ...(value.lastModifiedAt
       ? { lastModifiedAt: String(value.lastModifiedAt) }
       : {}),

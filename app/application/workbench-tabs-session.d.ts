@@ -48,13 +48,19 @@ export class WorkbenchTabsSession {
   serialize(): Readonly<Record<string, unknown>>;
 }
 export function createWorkbenchTabsSession(): WorkbenchTabsSession;
-export function shouldFocusAuthoritativeWorkbenchDocument(input: {
-  pendingTabId: string | null;
-  committedEpoch: number | null;
-  currentEpoch: number;
-  startPageRequested: boolean;
-  firstBinding: boolean;
-}): boolean;
+export function projectAppliedEventToWorkbenchTabs(input: {
+  session: WorkbenchTabsSession;
+  event: Readonly<{
+    type: "project-applied";
+    project: Readonly<{
+      projectId?: string;
+      documentId?: string;
+      name?: string;
+    }>;
+    activeLocked?: boolean;
+  }>;
+  title?: string;
+}): WorkbenchTabsSnapshot | null;
 export function reconcileWorkbenchTabsWhenReady(input: {
   session: WorkbenchTabsSession;
   tabsPersistenceReady: boolean;

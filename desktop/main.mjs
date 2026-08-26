@@ -1024,16 +1024,34 @@ async function readHtmlProject(filePath) {
   });
 }
 
+function projectWithIdentity(project, identity) {
+  const projectId = String(identity?.projectId || "");
+  const documentId = String(identity?.documentId || "");
+  if (
+    !project
+    || !/^project_[A-Za-z0-9_-]+$/.test(projectId)
+    || !/^doc_[A-Za-z0-9_-]+$/.test(documentId)
+  ) return project;
+  return Object.freeze({ ...project, projectId, documentId });
+}
+
 function taggedProject(project) {
   if (!project || typeof project.name !== "string" || typeof project.html !== "string") {
     return null;
   }
+  const projectId = String(project.projectId || "");
+  const documentId = String(project.documentId || "");
+  const hasIdentity = (
+    /^project_[A-Za-z0-9_-]+$/.test(projectId)
+    && /^doc_[A-Za-z0-9_-]+$/.test(documentId)
+  );
   return Object.freeze({
     openKind: "project",
     name: project.name,
     html: project.html,
     sourcePath: project.sourcePath || null,
     sha256: project.sha256 || null,
+    ...(hasIdentity ? { projectId, documentId } : {}),
     ...(project.lastModifiedAt ? { lastModifiedAt: String(project.lastModifiedAt) } : {}),
     ...(project.path ? { path: String(project.path) } : {}),
   });
@@ -1132,7 +1150,7 @@ async function prepareOrOpenFromPath(sourcePath, { requestId } = {}) {
   if (classified.kind === "managed-project") {
     const project = await readHtmlProject(canonicalPath);
     await activateProject(project.sourcePath);
-    return taggedProject(project);
+    return taggedProject(projectWithIdentity(project, classified.openTarget));
   }
   const nextRequestId = String(requestId || "");
   const reusable = preparedHtmlOpenStore.findPreparedBySourcePath(canonicalPath);
@@ -1401,10 +1419,10 @@ async function ensureBridgeProjectRegistered(project) {
       importedAssetSourcePath: projectSourceIdentity,
     });
     managedWelcomeRegistration = `${workspaceSourceIdentity}\0${importedProject.sha256}`;
-    return importedProject;
+    return projectWithIdentity(importedProject, workspace);
   }
   managedWelcomeRegistration = `${projectSourceIdentity}\0${project.sha256}`;
-  return project;
+  return projectWithIdentity(project, workspace);
 }
 
 async function getActiveProject() {
@@ -1556,7 +1574,7 @@ async function importExternalViaBridge(sourcePath, expectedSourceSha256) {
   });
   await activateProject(importedProject.sourcePath);
   return {
-    project: importedProject,
+    project: projectWithIdentity(importedProject, workspace),
     imported: workspace.imported === true,
   };
 }
@@ -1637,6 +1655,7 @@ async function commitPreparedHtmlOpenOperation(payload) {
         );
       }
       project = await readHtmlProject(targetPath);
+      project = projectWithIdentity(project, classified.openTarget || classified);
       await rememberAndBindImportedAssetSource({
         originalPath: intent.sourcePath,
         projectSourcePath: project.sourcePath,
@@ -1651,6 +1670,7 @@ async function commitPreparedHtmlOpenOperation(payload) {
       imported = importedResult.imported;
     } else if (action === "open-managed") {
       project = await readHtmlProject(intent.sourcePath);
+      project = projectWithIdentity(project, classified.openTarget || classified);
       await activateProject(project.sourcePath);
     } else {
       assertCommitAction({
@@ -3225,7 +3245,10 @@ async function openRegisteredProject(projectIdInput) {
     await persistProjectState();
     await restoreActiveImportedAssetSource(sourcePath);
     sourceFileWatcher.watch(sourcePath);
-    return project;
+    return projectWithIdentity(project, {
+      projectId,
+      documentId: target.documentId,
+    });
   });
 }
 
