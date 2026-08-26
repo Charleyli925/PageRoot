@@ -12,6 +12,8 @@ export type AgentProviderPresentation = Readonly<{
   primaryActionDataAttribute: string | null;
   restartLabel?: string;
   restartSupported?: boolean;
+  settingsSupported?: boolean;
+  localReadDisclosure?: string;
   stopLabel?: string;
   frozenPreviewDetail?: string;
   [key: string]: unknown;

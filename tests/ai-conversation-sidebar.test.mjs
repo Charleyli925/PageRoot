@@ -250,6 +250,31 @@ test("Agent connection recovery is an explicit sidebar action, not a send", () =
   });
   assert.equal(unavailable.kind, "status");
   assert.equal(unavailable.label, "Agent 暂不可用");
+
+  const codexLogin = sidebarSendState({
+    state: "preview-ready",
+    catalogStatus: "auth-required",
+    hasText: true,
+    agentName: "Codex",
+    agentSettingsSupported: false,
+  });
+  assert.deepEqual(codexLogin, {
+    kind: "status",
+    canSend: false,
+    label: "请先登录 Codex",
+    reason: "在 Codex 中完成登录后返回 Stemmio",
+  });
+
+  const codexModify = sidebarSendState({
+    state: "preview-ready",
+    catalogStatus: "ready",
+    intent: "modify",
+    pendingCommentCount: 1,
+    agentName: "Codex",
+    agentSettingsName: "Codex",
+    agentSettingsSupported: false,
+  });
+  assert.equal(codexModify.label, "交给 Codex 修改");
 });
 
 test("Candidate decisions and in-flight delivery win over Agent setup", () => {
@@ -482,6 +507,13 @@ test("the delivery disclosure moves out of the dialog and onto the modify intent
   assert.equal(
     sidebarDeliveryDisclosure("modify"),
     "Qoder 会读取本轮 HTML、评论和附件；结果先进入审阅。",
+  );
+  assert.equal(
+    sidebarDeliveryDisclosure("modify", {
+      agentName: "Codex",
+      localReadDisclosure: "Codex 修改时可能读取这台 Mac 上的本机文件。",
+    }),
+    "Codex 修改时可能读取这台 Mac 上的本机文件。 本轮结果先进入审阅。",
   );
 
   assert.equal(sidebarDeliveryDisclosure("continue"), null);

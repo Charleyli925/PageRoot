@@ -409,6 +409,20 @@
         ]
       },
       {
+        "from": "node_modules/@openai/codex",
+        "to": "node_modules/@openai/codex",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "node_modules/@openai/codex-darwin-${arch}",
+        "to": "node_modules/@openai/codex-darwin-${arch}",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
         "from": "node_modules/zod",
         "to": "node_modules/zod",
         "filter": [

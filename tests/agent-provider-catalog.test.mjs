@@ -14,14 +14,14 @@ import {
 
 const TRUST = "trusted-local-agent-v1";
 
-test("Codex remains hidden behind its hard gate while preserving the shared Agent chooser", () => {
+test("the source-owned hard gate exposes Codex through the shared Agent chooser", () => {
   assert.deepEqual(
     defaultAgentProviders().map(({ providerId }) => providerId),
-    ["qoder"],
+    ["qoder", "codex"],
   );
   assert.deepEqual(
-    defaultAgentProviders({ codexExecution: true }).map(({ providerId }) => providerId),
-    ["qoder", "codex"],
+    defaultAgentProviders({ codexExecution: false }).map(({ providerId }) => providerId),
+    ["qoder"],
   );
   assert.equal(
     CODEX_AGENT_PROVIDER.presentation.localReadDisclosure,

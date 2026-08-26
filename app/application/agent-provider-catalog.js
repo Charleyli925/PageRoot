@@ -54,6 +54,7 @@ const QODER_PRESENTATION = Object.freeze({
   startFailure: "Qoder CLI 没有启动。本轮 Request 已保留，可重试或复制任务。",
   restartLabel: "重新启动 Qoder",
   restartSupported: true,
+  settingsSupported: true,
   stopLabel: "停止 Qoder 并继续编辑",
   frozenPreviewDetail: "这是本轮冻结并交给 Qoder CLI 的只读内容",
 });
@@ -119,6 +120,7 @@ const CODEX_PRESENTATION = Object.freeze({
   startFailure: "Codex 没有启动。本轮 Request 已保留，可安全结束后重试。",
   restartLabel: "重新启动 Codex",
   restartSupported: true,
+  settingsSupported: false,
   stopLabel: "停止 Codex 并继续编辑",
   frozenPreviewDetail: "这是本轮冻结并交给 Codex 的只读任务资料",
   localReadDisclosure: "Codex 修改时可能读取这台 Mac 上的本机文件。",

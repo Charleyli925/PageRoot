@@ -24,6 +24,7 @@ import {
   assertNoRetiredEditorArtifacts,
   expectedArtifactLayout,
   verifyAppBundle,
+  verifyPackagedCodexRuntime,
 } from "../scripts/verify-packaged-artifact.mjs";
 import { createSyntheticAppBundle } from "./helpers/release-evidence-fixtures.mjs";
 
@@ -121,6 +122,15 @@ test("release commands use one automated artifact lane with full tests and packa
     "PageRoot-" + packageJson.version + "-arm64.zip.blockmap",
   );
   assert.equal(path.basename(layout.updateInfoPath), "latest-mac.yml");
+});
+
+test("the pinned Codex package passes the native packaged-runtime verifier", async () => {
+  const result = await verifyPackagedCodexRuntime({
+    resourcesPath: productRoot,
+    arch: process.arch,
+  });
+  assert.equal(result.version, "0.149.1");
+  assert.match(result.installationDigest, /^sha256:[a-f0-9]{64}$/u);
 });
 
 test("app-only profiles keep dry-run unsigned without weakening Candidate signature gates", () => {
@@ -301,6 +311,7 @@ test("real app verification requires the Electron Helper ACP smoke even when uns
       appPath: fixture.appPath,
       packageJson: fixture.packageJson,
       verifySignature: false,
+      requirePackagedCodexRuntime: false,
     }),
     /packaged Electron Helper is missing/u,
   );

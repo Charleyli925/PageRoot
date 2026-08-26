@@ -94,6 +94,8 @@ const BRIDGE_FILES = [
 
 const PACKAGED_MODULES = [
   "@agentclientprotocol/sdk",
+  "@openai/codex",
+  "@openai/codex-darwin-${arch}",
   "parse5",
   "entities",
   "electron-updater",

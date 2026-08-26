@@ -38,6 +38,11 @@ import {
   readPackagedPlistIdentity,
 } from "./packaged-app-identity.mjs";
 import { assertBuildInfo, expectedBuildInfo } from "./release-provenance.mjs";
+import {
+  PINNED_CODEX_VERSION,
+  codexInstallationDigest,
+  resolveBundledCodexInstallation,
+} from "./agent/providers/codex-provider.mjs";
 
 const SCRIPT_PATH = fileURLToPath(import.meta.url);
 const DEFAULT_PRODUCT_ROOT = path.resolve(path.dirname(SCRIPT_PATH), "..");
@@ -83,7 +88,7 @@ const REQUIRED_BRIDGE_FILES = [
   "conversation-repository.mjs",
   "source-transaction-service.mjs",
 ];
-const REQUIRED_PACKAGED_MODULES = [
+const REQUIRED_BASE_PACKAGED_MODULES = [
   "@agentclientprotocol/sdk",
   "argparse",
   "builder-util-runtime",
@@ -105,6 +110,16 @@ const REQUIRED_PACKAGED_MODULES = [
   "universalify",
   "zod",
 ];
+
+function requiredPackagedModules({ arch, includeCodex }) {
+  assert.match(arch, /^(?:arm64|x64)$/u, "packaged Codex architecture is invalid");
+  return [
+    ...REQUIRED_BASE_PACKAGED_MODULES,
+    ...(includeCodex
+      ? ["@openai/codex", `@openai/codex-darwin-${arch}`]
+      : []),
+  ].sort();
+}
 export const REQUIRED_SHARED_FILES = [
   "direct-edit-compatibility.mjs",
   "draft-aggregate.mjs",
@@ -514,6 +529,47 @@ function runCommand(command, arguments_, label, options = {}) {
   return `${result.stdout ?? ""}${result.stderr ?? ""}`.trim();
 }
 
+export async function verifyPackagedCodexRuntime({ resourcesPath, arch }) {
+  assert.equal(path.isAbsolute(resourcesPath), true, "Codex resourcesPath must be absolute");
+  const installation = await resolveBundledCodexInstallation({
+    resourcesRoot: resourcesPath,
+    platform: "darwin",
+    arch,
+  });
+  assert.equal(installation.version, PINNED_CODEX_VERSION, "packaged Codex version drifted");
+  const versionResult = spawnSync(installation.command, ["--version"], {
+    encoding: "utf8",
+    maxBuffer: 64 * 1024,
+    timeout: 10_000,
+  });
+  if (versionResult.error) throw versionResult.error;
+  assert.equal(
+    versionResult.status,
+    0,
+    `packaged Codex native runtime smoke failed\n${versionResult.stderr ?? ""}`,
+  );
+  assert.match(
+    String(versionResult.stdout || "").trim(),
+    new RegExp(`^codex-cli ${PINNED_CODEX_VERSION.replaceAll(".", "\\.")}$`, "u"),
+    "packaged Codex executable did not report the pinned version",
+  );
+  const gatePath = path.join(resourcesPath, "shared", "agent-feature-gates.mjs");
+  const gateBytes = await readFile(gatePath);
+  const gateModule = await import(
+    `${pathToFileURL(gatePath).href}?verify=${sha256(gateBytes)}`
+  );
+  assert.deepEqual(
+    gateModule.AGENT_FEATURE_GATES,
+    { codexDiscussion: false, codexExecution: true },
+    "packaged Agent feature gates do not enable only Codex execution",
+  );
+  return Object.freeze({
+    version: installation.version,
+    target: installation.target,
+    installationDigest: codexInstallationDigest(installation),
+  });
+}
+
 export async function verifyAppBundle({
   productRoot = DEFAULT_PRODUCT_ROOT,
   appPath,
@@ -523,6 +579,8 @@ export async function verifyAppBundle({
   signaturePolicy,
   expectedProvenance,
   requirePackagedAgentBridgeSmoke = true,
+  requirePackagedCodexRuntime = requirePackagedAgentBridgeSmoke,
+  arch = process.arch,
 }) {
   const effectiveSignaturePolicy = signaturePolicy
     ?? (verifySignature ? "developer-id" : "none");
@@ -641,18 +699,25 @@ export async function verifyAppBundle({
   const packagedModuleDirectories = await listPackagedModuleNames(
     path.join(resourcesPath, "node_modules"),
   );
+  const requiredModules = requiredPackagedModules({
+    arch,
+    includeCodex: requirePackagedCodexRuntime,
+  });
   assert.deepEqual(
     packagedModuleDirectories,
-    [...REQUIRED_PACKAGED_MODULES].sort(),
+    requiredModules,
     "packaged runtime modules must exactly match the reviewed allowlist",
   );
-  for (const moduleName of REQUIRED_PACKAGED_MODULES) {
+  for (const moduleName of requiredModules) {
     await assertDirectoryMatches({
       sourceRoot: path.join(productRoot, "node_modules", moduleName),
       packagedRoot: path.join(resourcesPath, "node_modules", moduleName),
       label: `node_modules/${moduleName}`,
     });
   }
+  const codex = requirePackagedCodexRuntime
+    ? await verifyPackagedCodexRuntime({ resourcesPath, arch })
+    : null;
 
   const helperExecutable = path.join(
     appPath,
@@ -824,6 +889,7 @@ export async function verifyAppBundle({
     schemaFileCount: schemas.length,
     legalResourceCount: REQUIRED_LEGAL_RESOURCES.length,
     applicationUpdate,
+    codex,
     provenance,
     telemetry,
   };
@@ -837,6 +903,7 @@ async function verifyDmg({
   sourcePackageJson = packageJson,
   expectedProvenance,
   signaturePolicy = "developer-id",
+  arch = process.arch,
 }) {
   const dmgInfo = await stat(dmgPath);
   assert.ok(dmgInfo.isFile(), `DMG is not a file: ${dmgPath}`);
@@ -874,6 +941,7 @@ async function verifyDmg({
       sourcePackageJson,
       signaturePolicy,
       expectedProvenance,
+      arch,
     });
     return { mounted: true, mountedAppPath };
   } finally {
@@ -893,6 +961,7 @@ async function verifyUpdateAssets({
   productRoot,
   packageJson,
   expectedProvenance,
+  arch = process.arch,
 }) {
   const [zipInfo, zipBytes, blockmap, updateInfo] = await Promise.all([
     stat(zipPath),
@@ -974,6 +1043,7 @@ async function verifyUpdateAssets({
       packageJson,
       verifySignature: true,
       expectedProvenance,
+      arch,
     });
     return { extracted: true, app };
   } finally {
@@ -1055,6 +1125,7 @@ export async function verifyPackagedArtifact({
         sourcePackageJson,
         signaturePolicy: "adhoc",
         expectedProvenance: provenance,
+        arch,
       }),
       verifyDmg({
         dmgPath: layout.dmgPath,
@@ -1064,6 +1135,7 @@ export async function verifyPackagedArtifact({
         sourcePackageJson,
         expectedProvenance: provenance,
         signaturePolicy: "adhoc",
+        arch,
       }),
     ]);
     return {
@@ -1081,6 +1153,7 @@ export async function verifyPackagedArtifact({
       packageJson,
       signaturePolicy: appBundleSignaturePolicyForProfile(profile),
       expectedProvenance: provenance,
+      arch,
     });
     return {
       ...layout,
@@ -1097,6 +1170,7 @@ export async function verifyPackagedArtifact({
       packageJson,
       verifySignature: true,
       expectedProvenance: provenance,
+      arch,
     }),
     verifyDmg({
       dmgPath: layout.dmgPath,
@@ -1104,6 +1178,7 @@ export async function verifyPackagedArtifact({
       productRoot,
       packageJson,
       expectedProvenance: provenance,
+      arch,
     }),
     verifyUpdateAssets({
       dmgPath: layout.dmgPath,
@@ -1114,6 +1189,7 @@ export async function verifyPackagedArtifact({
       productRoot,
       packageJson,
       expectedProvenance: provenance,
+      arch,
     }),
   ]);
   return { ...layout, profile, app, dmg, update };

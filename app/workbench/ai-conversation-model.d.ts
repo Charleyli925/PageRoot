@@ -129,7 +129,10 @@ export function sidebarRunProgress(options?: {
   agentText?: string;
 }): SidebarRunProgress | null;
 
-export function sidebarDeliveryDisclosure(intent?: SidebarIntent | string): string | null;
+export function sidebarDeliveryDisclosure(
+  intent?: SidebarIntent | string,
+  options?: { agentName?: string; localReadDisclosure?: string | null },
+): string | null;
 
 export function sidebarSendState(options?: {
   state?: string;
@@ -137,12 +140,16 @@ export function sidebarSendState(options?: {
   queued?: boolean;
   intent?: SidebarIntent;
   pendingCommentCount?: number;
+  agentName?: string;
+  agentSettingsName?: string;
+  agentSettingsSupported?: boolean;
 }): SidebarSendState;
 
 export function sidebarCopyTaskState(options?: {
   state?: string;
   queued?: boolean;
   pendingCommentCount?: number;
+  agentName?: string;
 }): SidebarCopyTaskState;
 
 export function sidebarStateFromRun(options?: {

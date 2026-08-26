@@ -173,10 +173,10 @@ test("Codex Provider resolves model and reasoning but cannot execute in PR3", as
   assert.throws(() => provider.createRuntimeLaunch(), { code: "CODEX_EXECUTION_DISABLED" });
 });
 
-test("PR3 does not expose Codex through the default product catalog", () => {
+test("the packaged execution gate exposes Codex through the default product catalog", () => {
   const catalog = createDefaultProviderRegistry().catalog();
-  assert.deepEqual(catalog.map((entry) => entry.providerId), ["qoder"]);
-  assert.equal(catalog.some((entry) => entry.providerId === "codex"), false);
+  assert.deepEqual(catalog.map((entry) => entry.providerId), ["qoder", "codex"]);
+  assert.equal(catalog.find((entry) => entry.providerId === "codex")?.capabilities.execution, true);
 });
 
 test("enabled Codex execution writes only the Candidate and leaves finalization to Stemmio", async () => {

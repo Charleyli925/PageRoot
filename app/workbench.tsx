@@ -673,7 +673,10 @@ export default function Workbench() {
     ? agentCatalogSnapshot?.providers?.[frozenAgentSelection.providerId]
     : null;
   const agentPresentation = frozenProvider?.presentation ?? {
+    displayName: frozenAgentSelection?.providerId || "Agent",
     agentName: frozenAgentSelection?.providerId || "Agent",
+    settingsSupported: false,
+    localReadDisclosure: undefined,
     restartLabel: `重新启动 ${frozenAgentSelection?.providerId || "Agent"}`,
     restartSupported: false,
     stopLabel: `停止 ${frozenAgentSelection?.providerId || "Agent"} 并继续编辑`,
@@ -794,6 +797,12 @@ export default function Workbench() {
     conversation: workspaceControllerSnapshot?.conversation ?? null,
     qoderAvailability,
     agentModelDisplayName,
+    agentActionName: agentPresentation.agentName || agentPresentation.displayName,
+    agentSettingsName: agentPresentation.displayName || agentPresentation.agentName,
+    agentSettingsSupported: agentPresentation.settingsSupported !== false,
+    agentLocalReadDisclosure: typeof agentPresentation.localReadDisclosure === "string"
+      ? agentPresentation.localReadDisclosure
+      : null,
     agentChoices: agentProviderChoices,
     selectedAgentChoiceId,
     // The header's mode comes from Request authority, not from a local guess.

@@ -402,9 +402,15 @@ export function sidebarActionBar({
  * button that acts on it, so the user reads it without being interrupted by a
  * modal first.
  */
-export function sidebarDeliveryDisclosure(intent) {
+export function sidebarDeliveryDisclosure(intent, {
+  agentName = "Qoder",
+  localReadDisclosure = null,
+} = {}) {
   if (intent !== INTENT_MODIFY) return null;
-  return "Qoder 会读取本轮 HTML、评论和附件；结果先进入审阅。";
+  if (typeof localReadDisclosure === "string" && localReadDisclosure.trim()) {
+    return `${localReadDisclosure.trim()} 本轮结果先进入审阅。`;
+  }
+  return `${String(agentName || "Agent").trim() || "Agent"} 会读取本轮 HTML、评论和附件；结果先进入审阅。`;
 }
 
 export function sidebarSendState({
@@ -413,7 +419,14 @@ export function sidebarSendState({
   queued = false,
   intent = INTENT_MODIFY,
   pendingCommentCount = 0,
+  agentName = "Qoder",
+  agentSettingsName = "Qoder CLI",
+  agentSettingsSupported = true,
 } = {}) {
+  const boundedAgentName = String(agentName || "Agent").trim().slice(0, 80) || "Agent";
+  const boundedAgentSettingsName = String(agentSettingsName || boundedAgentName)
+    .trim()
+    .slice(0, 80) || boundedAgentName;
   // The review Canvas wins over every other reason. It is showing a candidate,
   // so no round may start from here. The
   // thread stays on screen so the user keeps the context that produced the
@@ -451,7 +464,7 @@ export function sidebarSendState({
       kind: "send",
       canSend: false,
       label: "发送",
-      reason: "Qoder 完成本轮后可发送",
+      reason: `${boundedAgentName} 完成本轮后可发送`,
     };
   }
   if (state === "promoting") {
@@ -471,18 +484,34 @@ export function sidebarSendState({
     };
   }
   if (catalogStatus === "auth-required") {
+    if (!agentSettingsSupported) {
+      return {
+        kind: "status",
+        canSend: false,
+        label: `请先登录 ${boundedAgentName}`,
+        reason: `在 ${boundedAgentName} 中完成登录后返回 Stemmio`,
+      };
+    }
     return {
       kind: "open-agent-settings",
       canSend: false,
-      label: "登录 Qoder CLI",
+      label: `登录 ${boundedAgentSettingsName}`,
       reason: null,
     };
   }
   if (catalogStatus === "not-installed") {
+    if (!agentSettingsSupported) {
+      return {
+        kind: "status",
+        canSend: false,
+        label: `${boundedAgentName} runtime 不可用`,
+        reason: "请重新安装当前版本的 Stemmio",
+      };
+    }
     return {
       kind: "open-agent-settings",
       canSend: false,
-      label: "设置 Qoder CLI",
+      label: `设置 ${boundedAgentSettingsName}`,
       reason: null,
     };
   }
@@ -491,7 +520,7 @@ export function sidebarSendState({
       kind: "status",
       canSend: false,
       label: "Agent 暂不可用",
-      reason: "Qoder 暂时无法确认",
+      reason: `${boundedAgentName} 暂时无法确认`,
     };
   }
   // Modifying is a Request, and a Request is frozen from the edit surface's
@@ -505,7 +534,7 @@ export function sidebarSendState({
       return {
         kind: "send",
         canSend: false,
-        label: "交给 Qoder 修改",
+        label: `交给 ${boundedAgentName} 修改`,
         reason: "正在等待上一个任务完成",
       };
     }
@@ -513,11 +542,16 @@ export function sidebarSendState({
       return {
         kind: "send",
         canSend: false,
-        label: "交给 Qoder 修改",
+        label: `交给 ${boundedAgentName} 修改`,
         reason: "先在编辑模式写下评论，AI 会按评论改",
       };
     }
-    return { kind: "send", canSend: true, label: "交给 Qoder 修改", reason: null };
+    return {
+      kind: "send",
+      canSend: true,
+      label: `交给 ${boundedAgentName} 修改`,
+      reason: null,
+    };
   }
   if (intent === INTENT_CONTINUE) {
     return {
@@ -547,7 +581,9 @@ export function sidebarCopyTaskState({
   state = "preview-ready",
   queued = false,
   pendingCommentCount = 0,
+  agentName = "Qoder",
 } = {}) {
+  const boundedAgentName = String(agentName || "Agent").trim().slice(0, 80) || "Agent";
   if (state === "review-view") {
     return {
       canCopy: false,
@@ -561,7 +597,7 @@ export function sidebarCopyTaskState({
     return { canCopy: false, reason: "先处理当前结果" };
   }
   if (state === "processing" || state === "validating") {
-    return { canCopy: false, reason: "Qoder 完成本轮后可发送" };
+    return { canCopy: false, reason: `${boundedAgentName} 完成本轮后可发送` };
   }
   if (state === "promoting") {
     return { canCopy: false, reason: "正在采用候选版本" };

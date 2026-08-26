@@ -40,16 +40,27 @@ export function evaluateAuditReport(report, {
   });
 }
 
-function managedRuntimeModules(packageJson) {
+function runtimeResourcePath(value, {
+  platform = process.platform,
+  arch = process.arch,
+} = {}) {
+  return String(value || "")
+    .replaceAll("${platform}", platform)
+    .replaceAll("${arch}", arch);
+}
+
+function managedRuntimeModules(packageJson, options) {
   const modules = new Set();
   for (const resource of packageJson?.build?.extraResources || []) {
+    const from = runtimeResourcePath(resource?.from, options);
+    const to = runtimeResourcePath(resource?.to, options);
     if (
-      typeof resource?.from !== "string"
-      || resource.to !== resource.from
+      !from
+      || to !== from
     ) {
       continue;
     }
-    const match = resource.from.match(
+    const match = from.match(
       /^node_modules\/((?:@[^/]+\/)?[^/]+)$/u,
     );
     if (match) modules.add(match[1]);
@@ -57,7 +68,7 @@ function managedRuntimeModules(packageJson) {
   return modules;
 }
 
-export function evaluatePackagedRuntimeClosure(packageJson, packageLock) {
+export function evaluatePackagedRuntimeClosure(packageJson, packageLock, options = {}) {
   if (
     !packageJson
     || typeof packageJson !== "object"
@@ -68,7 +79,7 @@ export function evaluatePackagedRuntimeClosure(packageJson, packageLock) {
   ) {
     throw new Error("Package manifest and lockfile are required.");
   }
-  const managedModules = managedRuntimeModules(packageJson);
+  const managedModules = managedRuntimeModules(packageJson, options);
   const missingPackages = [];
   const missingResources = [];
   const nestedPackages = [];
