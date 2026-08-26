@@ -19,7 +19,7 @@
       "maxHooks": 317
     },
     "scripts/project-file-repository.mjs": {
-      "maxLines": 7450
+      "maxLines": 5658
     }
   }
 }

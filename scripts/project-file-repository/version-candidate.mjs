@@ -1,0 +1,108 @@
+// Version snapshot paths and Candidate identity/assessment evidence.
+import {
+  assessHtmlCandidate,
+} from "../candidate-assessment.mjs";
+
+import {
+  ProjectFileRepositoryError,
+} from "./errors.mjs";
+import {
+  ensureRelativePath,
+  isObject,
+  nowIso,
+  pathInside,
+  resolveRelative,
+} from "./path-safety.mjs";
+
+export function mapCandidateValidationError(cause) {
+  const code = String(cause?.code || "");
+  const message = String(cause?.message || "");
+  if (code === "INCOMPLETE_HTML") {
+    return {
+      errorCode: "INCOMPLETE_HTML",
+      message: message || "The Candidate HTML is incomplete.",
+      errorDetail: "输出缺少完整 HTML 文档结构",
+      recoveryHint: "请检查 AI Agent 的输出是否被截断，然后重新提交。",
+    };
+  }
+  if (
+    code === "CANDIDATE_HASH_MISMATCH"
+    || code === "FROZEN_INPUT_HASH_MISMATCH"
+    || code === "REQUEST_OUTPUT_CHANGED"
+    || code === "HASH_MISMATCH"
+  ) {
+    return {
+      errorCode: "HASH_MISMATCH",
+      message: message || "The Candidate HTML hash did not match the sealed record.",
+      errorDetail: "输出内容与声明的 Hash 不一致",
+      recoveryHint: "请重新提交完整输出，不要改动校验字段。",
+    };
+  }
+  if (code === "CANDIDATE_UNUSABLE" || code === "PROTOCOL_FIELD_MISSING") {
+    return {
+      errorCode: "PROTOCOL_FIELD_MISSING",
+      message: message || "The Candidate HTML is unusable.",
+      errorDetail: "输出缺少必要的协议字段或无法作为完整页面使用",
+      recoveryHint: "请检查 AI Agent 的输出是否完整，然后重新提交。",
+    };
+  }
+  return null;
+}
+
+export function versionSnapshotPath(paths, version) {
+  const relative = ensureRelativePath(version.snapshotRelativePath, "snapshotRelativePath");
+  const resolved = resolveRelative(paths.controlRoot, relative, "snapshotRelativePath");
+  if (!pathInside(paths.versionsRoot, resolved)) {
+    throw new ProjectFileRepositoryError(
+      "PATH_ESCAPES_PROJECT",
+      "A Version snapshot must stay inside versions/.",
+    );
+  }
+  return resolved;
+}
+
+export function assertCandidateId(value) {
+  const id = String(value || "");
+  if (!/^candidate_[A-Za-z0-9_-]{8,160}$/u.test(id)) {
+    throw new ProjectFileRepositoryError("INVALID_CANDIDATE_ID", "candidateId is invalid.");
+  }
+  return id;
+}
+
+export function assessedCandidate(baseHtml, outputHtml, clock) {
+  const assessment = {
+    ...assessHtmlCandidate({ baseHtml, outputHtml }),
+    assessedAt: nowIso(clock),
+  };
+  if (assessment.status === "blocked") {
+    throw new ProjectFileRepositoryError(
+      "CANDIDATE_UNUSABLE",
+      "The Candidate HTML could not be safely adopted.",
+      { issueCodes: assessment.issueCodes },
+    );
+  }
+  return assessment;
+}
+
+export function assertCandidateAssessment(assessment) {
+  if (
+    !isObject(assessment)
+    || assessment.schemaVersion !== "1.0.0"
+    || !["ready", "attention"].includes(assessment.status)
+    || !Array.isArray(assessment.issueCodes)
+    || assessment.issueCodes.some((value) => typeof value !== "string" || !value)
+    || !isObject(assessment.health)
+    || typeof assessment.health.completeDocument !== "boolean"
+    || typeof assessment.health.bodyHasContent !== "boolean"
+    || !isObject(assessment.continuity)
+    || !["related", "uncertain"].includes(assessment.continuity.status)
+    || !assessment.assessedAt
+    || Number.isNaN(Date.parse(assessment.assessedAt))
+  ) {
+    throw new ProjectFileRepositoryError(
+      "CANDIDATE_VALIDATION_INVALID",
+      "Candidate validation evidence is invalid.",
+    );
+  }
+  return assessment;
+}

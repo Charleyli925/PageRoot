@@ -292,6 +292,38 @@
         "to": "bridge/project-file-repository.mjs"
       },
       {
+        "from": "scripts/project-file-repository/constants.mjs",
+        "to": "bridge/project-file-repository/constants.mjs"
+      },
+      {
+        "from": "scripts/project-file-repository/errors.mjs",
+        "to": "bridge/project-file-repository/errors.mjs"
+      },
+      {
+        "from": "scripts/project-file-repository/identity.mjs",
+        "to": "bridge/project-file-repository/identity.mjs"
+      },
+      {
+        "from": "scripts/project-file-repository/path-safety.mjs",
+        "to": "bridge/project-file-repository/path-safety.mjs"
+      },
+      {
+        "from": "scripts/project-file-repository/registry.mjs",
+        "to": "bridge/project-file-repository/registry.mjs"
+      },
+      {
+        "from": "scripts/project-file-repository/request-draft.mjs",
+        "to": "bridge/project-file-repository/request-draft.mjs"
+      },
+      {
+        "from": "scripts/project-file-repository/version-candidate.mjs",
+        "to": "bridge/project-file-repository/version-candidate.mjs"
+      },
+      {
+        "from": "scripts/project-file-repository/working-copy.mjs",
+        "to": "bridge/project-file-repository/working-copy.mjs"
+      },
+      {
         "from": "scripts/ai-task-projection.mjs",
         "to": "bridge/ai-task-projection.mjs"
       },

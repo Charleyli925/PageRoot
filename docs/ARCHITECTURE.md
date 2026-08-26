@@ -290,6 +290,7 @@ services.
 | Bridge-side source-history repository, autosave preparation and action application | `scripts/source-history-service.mjs` |
 | Bridge-side current-source commit/recovery WAL, same-directory replacement, history application, metadata settlement and exactly-once audit outbox | `scripts/source-transaction-service.mjs` |
 | Bridge-side registered command identity and source-observation classification | `scripts/project-context-service.mjs` |
+| Durable Project File Registry, Working Copy CAS, Version/Candidate and Request/Draft records | `scripts/project-file-repository.mjs` façade over `scripts/project-file-repository/` internals (path safety, Registry, Working Copy CAS, Version/Candidate, Request/Draft). Callers keep importing the façade; there is no second persistence owner |
 | Close, switch, submit and history obligations | `app/application/drain-coordinator.js` |
 | Late query rejection and monotonic draft reads | `app/application/project-query-fence.js` |
 | Crash-only browser recovery | `app/application/recovery-store.js` |
@@ -345,7 +346,10 @@ the only production text and source-mutation route.
 Direct edits form ordered revisions and are written through a single queue. Every write checks the expected source Hash, uses a same-directory temporary file and atomic replacement, then rereads the result. External modification causes a fail-closed conflict.
 
 `/autosave` retains its own transport decoding and revision checks, then
-delegates the current-source write to `ProjectFileRepository`. The v3 Bridge
+delegates the current-source write to `ProjectFileRepository`. Path safety,
+Registry, Working Copy CAS, Version/Candidate and Request/Draft helpers live
+under `scripts/project-file-repository/`; the façade remains the only public
+module and the only persistence owner. The v3 Bridge
 `SourceTransaction` kernel and `history/source-operations.json` journal are
 not on the live open path. `/source-history/action` returns the current source
 bytes and empty history so the renderer empty-history path still works. There

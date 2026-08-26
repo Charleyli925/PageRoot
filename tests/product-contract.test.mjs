@@ -112,7 +112,10 @@ test("Prompt, protocol, helper, and finalizer agree on frozen input plus control
     productRequirements,
   ] = await Promise.all([
     readFile(new URL("../scripts/workspace-bridge.mjs", import.meta.url), "utf8"),
-    readFile(new URL("../scripts/project-file-repository.mjs", import.meta.url), "utf8"),
+    readFile(new URL("../scripts/project-file-repository.mjs", import.meta.url), "utf8").then(async (facade) => (
+      facade
+      + await readFile(new URL("../scripts/project-file-repository/request-draft.mjs", import.meta.url), "utf8")
+    )),
     readFile(new URL("../scripts/lifecycle-core.mjs", import.meta.url), "utf8"),
     readFile(new URL("../docs/CHANGE_REQUEST_PROTOCOL.md", import.meta.url), "utf8"),
     readFile(new URL("../docs/INTERACTION_FLOW.md", import.meta.url), "utf8"),

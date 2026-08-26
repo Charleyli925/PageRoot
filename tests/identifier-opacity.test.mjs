@@ -20,7 +20,7 @@ const SKIPPED_DIRECTORIES = new Set([
 // undone before Version identifiers can become globally unique instead of a
 // zero-padded local counter. Nothing validates that a Working Copy identifier
 // even agrees with its Version's ordinal, so the manifest is the only truthful
-// source. `versionOrdinalFor` in scripts/project-file-repository.mjs is the
+// source. `versionOrdinalFor` in scripts/project-file-repository/identity.mjs is the
 // supported way to obtain it.
 const ORDINAL_RECOVERY_PATTERNS = [
   {
