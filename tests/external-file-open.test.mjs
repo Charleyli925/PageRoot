@@ -103,7 +103,7 @@ test("native external-open failures use stable product errors instead of raw pat
   );
 });
 
-test("an external open received after committed shutdown is handed to the next launch once", () => {
+test("external opens received after committed shutdown are handed to the next launch in order", () => {
   const filesystem = createMemoryFilesystem();
   const handoffPath = "/Users/demo/Library/Application Support/PageRoot/external-open-handoff.json";
   const createHandoff = () => createExternalFileOpenExitHandoff({
@@ -125,11 +125,8 @@ test("an external open received after committed shutdown is handed to the next l
   );
 
   const restarted = createHandoff();
-  assert.equal(
-    restarted.take(),
-    "/Users/demo/Qoder 输出/latest.htm",
-    "the next process receives the validated latest external path",
-  );
+  assert.equal(restarted.take(), "/Users/demo/Qoder 输出/first.html");
+  assert.equal(restarted.take(), "/Users/demo/Qoder 输出/latest.htm");
   assert.equal(restarted.take(), null, "a consumed handoff cannot replay twice");
   assert.equal(filesystem.files.size, 0, "the one-shot record is removed after claim");
 });
@@ -152,7 +149,7 @@ test("an invalid shutdown handoff is discarded before it gains file authority", 
   assert.equal(filesystem.files.has(handoffPath), false);
 });
 
-test("external open mailbox authorizes only its latest opaque request", () => {
+test("external open mailbox preserves every opaque request in FIFO order", () => {
   let nextId = 0;
   const mailbox = createExternalFileOpenMailbox({
     createRequestId: () => `external_${++nextId}`,
@@ -162,8 +159,10 @@ test("external open mailbox authorizes only its latest opaque request", () => {
   const second = mailbox.publish("/Users/demo/second.htm");
 
   assert.equal(first.requestId, "external_1");
+  assert.deepEqual(mailbox.peek(), first);
+  assert.equal(mailbox.consume(second.requestId), null);
+  assert.deepEqual(mailbox.consume(first.requestId), first);
   assert.deepEqual(mailbox.peek(), second);
-  assert.equal(mailbox.consume(first.requestId), null);
   assert.deepEqual(mailbox.consume(second.requestId), second);
   assert.equal(mailbox.peek(), null);
   assert.equal(mailbox.consume(second.requestId), null);

@@ -167,6 +167,19 @@ export type DesktopProjectsApi = {
   }>;
 };
 
+export type DesktopWorkbenchTabsApi = {
+  get: () => Promise<{
+    version: 1;
+    activeTabId: string | null;
+    tabs: Array<{
+      tabId: string;
+      projectId: string;
+      documentId: string;
+    }>;
+  } | null>;
+  set: (state: Record<string, unknown>) => Promise<Record<string, unknown>>;
+};
+
 export type QoderHandoffResult = {
   status: "copied";
   copied: boolean;
@@ -244,6 +257,7 @@ export type DesktopUpdatesApi = {
 declare global {
   interface Window {
     htmlAIProjects?: DesktopProjectsApi;
+    htmlAIWorkbenchTabs?: DesktopWorkbenchTabsApi;
     htmlAIIntegrations?: DesktopIntegrationsApi;
     htmlAIUpdates?: DesktopUpdatesApi;
     htmlAIEdit?: {

@@ -64,6 +64,10 @@ import {
   externalHtmlPathsFromArgv,
 } from "./external-file-open.mjs";
 import {
+  readWorkbenchTabsState,
+  writeWorkbenchTabsState,
+} from "./workbench-tabs-state.mjs";
+import {
   assertCommitAction,
   assertExactPayload,
   createPreparedHtmlOpenStore,
@@ -252,6 +256,10 @@ const APP_CHANNELS = Object.freeze({
   relaunch: "html-app:relaunch",
   openUserNotice: "html-app:open-user-notice",
 });
+const WORKBENCH_TAB_CHANNELS = Object.freeze({
+  get: "html-workbench-tabs:get",
+  set: "html-workbench-tabs:set",
+});
 const INTEGRATION_CHANNELS = Object.freeze({
   qoderHandoff: "html-integrations:qoder-handoff",
 });
@@ -303,6 +311,7 @@ let closeAttemptGeneration = 0;
 let projectIpcRegistered = false;
 let projectState = null;
 let stateWriteQueue = Promise.resolve();
+let workbenchTabsWriteQueue = Promise.resolve();
 let latestUpdateResult = null;
 let applicationUpdate = null;
 let usageTelemetry = null;
@@ -873,6 +882,15 @@ function persistProjectState() {
   return stateWriteQueue;
 }
 
+function persistWorkbenchTabsState(payload) {
+  const writeState = () => writeWorkbenchTabsState({
+    userDataPath: app.getPath("userData"),
+    state: payload,
+  });
+  workbenchTabsWriteQueue = workbenchTabsWriteQueue.then(writeState, writeState);
+  return workbenchTabsWriteQueue;
+}
+
 async function restoreActiveImportedAssetSource(projectSourcePath) {
   const state = await loadProjectState();
   const record = await importedAssetRootForProjectPath(
@@ -1181,8 +1199,9 @@ function deferExternalFileOpenUntilNextLaunch(filePath) {
 
 function resumeDeferredExternalFileOpenAfterExitAbort() {
   if (isQuitting || finalExitStarted) return;
-  const sourcePath = externalFileOpenExitHandoff.take();
-  if (sourcePath) publishExternalFileOpen(sourcePath);
+  for (let sourcePath = externalFileOpenExitHandoff.take(); sourcePath; sourcePath = externalFileOpenExitHandoff.take()) {
+    publishExternalFileOpen(sourcePath);
+  }
 }
 
 function publishExternalFileOpen(filePath) {
@@ -1191,9 +1210,10 @@ function publishExternalFileOpen(filePath) {
   }
   interruptCloseForExternalOpen();
   try {
+    const wasEmpty = externalFileOpenMailbox.size() === 0;
     const request = externalFileOpenMailbox.publish(filePath);
     focusMainWindow();
-    if (rendererHasLoaded && mainWindow && !mainWindow.isDestroyed()) {
+    if (wasEmpty && rendererHasLoaded && mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send(
         APP_CHANNELS.externalOpenRequested,
         publicMailboxRequest(request),
@@ -1234,7 +1254,17 @@ async function acceptExternalFileOpen(payload) {
       "这次外部打开请求已经失效，请从 QoderWork 再点一次 PageRoot。",
     );
   }
-  return projectOpenQueue.run(() => openExternalFileRequest(request));
+  try {
+    return await projectOpenQueue.run(() => openExternalFileRequest(request));
+  } finally {
+    const next = externalFileOpenMailbox.peek();
+    if (next && rendererHasLoaded && mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send(
+        APP_CHANNELS.externalOpenRequested,
+        publicMailboxRequest(next),
+      );
+    }
+  }
 }
 
 async function currentActivePath() {
@@ -3503,6 +3533,16 @@ function registerProjectIpc() {
       action: payload?.action,
     }), "ui_preferences_record"),
   );
+  ipcMain.handle(
+    WORKBENCH_TAB_CHANNELS.get,
+    trustedProject(() => readWorkbenchTabsState({
+      userDataPath: app.getPath("userData"),
+    }), "workbench_tabs_get"),
+  );
+  ipcMain.handle(
+    WORKBENCH_TAB_CHANNELS.set,
+    trustedProject((payload) => persistWorkbenchTabsState(payload), "workbench_tabs_set"),
+  );
   ipcMain.on(USAGE_CHANNELS.capture, (event, payload) => {
     try {
       assertTrustedEvent(event);
@@ -3768,7 +3808,10 @@ async function coordinateApplicationExit(reason, intent = "quit") {
 
     isQuitting = true;
     const watchedSourcePath = sourceFileWatcher.watchedPath;
-    await stateWriteQueue.catch(() => {});
+    await Promise.all([
+      stateWriteQueue.catch(() => {}),
+      workbenchTabsWriteQueue.catch(() => {}),
+    ]);
     await stopBridgeOrNotifyCloseAborted({
       requestId: result.requestId,
       stopBridge: stopBridgeGracefully,
@@ -4248,10 +4291,14 @@ if (!hasSingleInstanceLock) {
   // command line to the owner and must leave this record for the authoritative
   // next launch. Keep ordinary argv opens in the same sequence so a newer
   // launch argument still supersedes an older committed-exit handoff.
+  const deferredExternalPaths = [];
+  for (let sourcePath = externalFileOpenExitHandoff.take(); sourcePath; sourcePath = externalFileOpenExitHandoff.take()) {
+    deferredExternalPaths.push(sourcePath);
+  }
   for (const sourcePath of [
-    externalFileOpenExitHandoff.take(),
+    ...deferredExternalPaths,
     ...externalHtmlPathsFromArgv(process.argv.slice(1)),
-  ].filter(Boolean)) {
+  ]) {
     externalFileOpenMailbox.publish(sourcePath);
   }
 

@@ -61,6 +61,10 @@ const uiPreferenceChannels = Object.freeze({
   get: "html-ui-preferences:get",
   record: "html-ui-preferences:record",
 });
+const workbenchTabChannels = Object.freeze({
+  get: "html-workbench-tabs:get",
+  set: "html-workbench-tabs:set",
+});
 const previewChannels = Object.freeze({
   createSession: "html-preview:create-session",
   revokeSession: "html-preview:revoke-session",
@@ -475,6 +479,10 @@ const uiPreferencesApi = Object.freeze({
     });
   },
 });
+const workbenchTabsApi = Object.freeze({
+  get: () => invokeProject(workbenchTabChannels.get),
+  set: (state) => invokeProject(workbenchTabChannels.set, state),
+});
 const historyRequestListeners = new Map();
 const editApi = Object.freeze({
   onHistoryRequested: (listener) => {
@@ -522,4 +530,5 @@ const exposeUiPreferences = !(
 if (exposeUiPreferences) {
   contextBridge.exposeInMainWorld("htmlAIUiPreferences", uiPreferencesApi);
 }
+contextBridge.exposeInMainWorld("htmlAIWorkbenchTabs", workbenchTabsApi);
 contextBridge.exposeInMainWorld("htmlAIEdit", editApi);
