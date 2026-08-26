@@ -13,10 +13,15 @@ import {
   reviewTextEvidenceUnits,
 } from "../app/lib/review-text-evidence-marks.js";
 
-const reviewDocument = await readFile(
-  new URL("../app/workbench/review-document.ts", import.meta.url),
+const reviewSerialize = await readFile(
+  new URL("../app/workbench/review/serialize.ts", import.meta.url),
   "utf8",
 );
+const reviewRuntimeProjection = await readFile(
+  new URL("../app/workbench/review/runtime-projection.ts", import.meta.url),
+  "utf8",
+);
+const reviewPipeline = `${reviewSerialize}\n${reviewRuntimeProjection}`;
 const interactionFlow = await readFile(
   new URL("../docs/INTERACTION_FLOW.md", import.meta.url),
   "utf8",
@@ -28,11 +33,11 @@ const changeRequestProtocol = await readFile(
 
 test("character-evidence CSS cannot recolor, resize, or use emphasis", () => {
   assert.deepEqual(reviewTextEvidenceStyleViolations(REVIEW_TEXT_EVIDENCE_MARKER_CSS), []);
-  assert.match(reviewDocument, /REVIEW_TEXT_EVIDENCE_MARKER_CSS/);
-  assert.match(reviewDocument, /reviewTextEvidenceMarkGeometry/);
-  assert.doesNotMatch(reviewDocument, /text-emphasis-style:\s*filled/u);
-  assert.doesNotMatch(reviewDocument, /color:\s*#a13f3b/u);
-  assert.match(reviewDocument, /data-pageroot-review-text-mark/u);
+  assert.match(reviewPipeline, /REVIEW_TEXT_EVIDENCE_MARKER_CSS/);
+  assert.match(reviewPipeline, /reviewTextEvidenceMarkGeometry/);
+  assert.doesNotMatch(reviewPipeline, /text-emphasis-style:\s*filled/u);
+  assert.doesNotMatch(reviewPipeline, /color:\s*#a13f3b/u);
+  assert.match(reviewPipeline, /data-pageroot-review-text-mark/u);
   assert.equal(REVIEW_TEXT_EVIDENCE_REMOVED_COLOR, "#d92d20");
   assert.equal(REVIEW_TEXT_EVIDENCE_ADDED_COLOR, "#239b56");
 });

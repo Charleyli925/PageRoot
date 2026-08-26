@@ -19,8 +19,8 @@ import {
   reviewRegionAnnotations,
 } from "../../app/lib/review-region-annotation.js";
 
-const reviewDocument = await readFile(
-  new URL("../../app/workbench/review-document.ts", import.meta.url),
+const reviewRuntimeProjection = await readFile(
+  new URL("../../app/workbench/review/runtime-projection.ts", import.meta.url),
   "utf8",
 );
 
@@ -30,8 +30,8 @@ export function generatedReviewBootstrap(
   side = "before",
 ) {
   const sourceFile = ts.createSourceFile(
-    "review-document.ts",
-    reviewDocument,
+    "runtime-projection.ts",
+    reviewRuntimeProjection,
     ts.ScriptTarget.Latest,
     true,
     ts.ScriptKind.TS,
@@ -42,7 +42,7 @@ export function generatedReviewBootstrap(
   ));
   assert.ok(declaration, "reviewBootstrap declaration must exist");
   const transpiled = ts.transpileModule(
-    reviewDocument.slice(declaration.getStart(sourceFile), declaration.end),
+    reviewRuntimeProjection.slice(declaration.getStart(sourceFile), declaration.end),
     {
       compilerOptions: {
         module: ts.ModuleKind.None,
@@ -84,14 +84,14 @@ export function generatedReviewBootstrap(
   // The bootstrap receives its helpers as `${fn.toString()}` injections, so a
   // new injection that is not also provided here fails deep inside the vm with a
   // bare ReferenceError. Compare the two lists up front and name the gap.
-  const injected = [...reviewDocument.matchAll(
+  const injected = [...reviewRuntimeProjection.matchAll(
     /^\s*const (\w+) = \$\{\1\.toString\(\)\};$/gmu,
   )].map((match) => match[1]);
   const missing = injected.filter((name) => !(name in context));
   assert.deepEqual(
     missing,
     [],
-    `review-document.ts injects ${missing.join(", ")} into the bootstrap; add it to this harness context too`,
+    `runtime-projection.ts injects ${missing.join(", ")} into the bootstrap; add it to this harness context too`,
   );
   assert.ok(injected.length > 0, "expected to find toString() injections to verify");
   new vm.Script(transpiled).runInContext(context);
