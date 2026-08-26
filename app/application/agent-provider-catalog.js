@@ -470,7 +470,13 @@ export class AgentCatalogState {
           trustPolicyVersion: trust,
           installationDigest: String(preflight.installationDigest || digest || ""),
         });
-        if (this.#isSelected(frozen)) this.#selected = returnedSelection;
+        const generationIsCurrent = (
+          !this.#disposed
+          && this.#generationByProvider.get(frozen.providerId) === generation
+        );
+        if (!generationIsCurrent) return result;
+        const wasSelected = this.#isSelected(frozen);
+        if (wasSelected) this.#selected = returnedSelection;
         const finalKey = agentPreflightKey(result.selection, {
           installationDigest: result.installationDigest,
           trustPolicyVersion: trust,
@@ -478,11 +484,7 @@ export class AgentCatalogState {
         });
         this.#preflightBySelection.set(finalKey, result);
         if (finalKey !== key) this.#preflightBySelection.delete(key);
-        if (
-          !this.#disposed
-          && this.#generationByProvider.get(frozen.providerId) === generation
-          && this.#canProjectAvailability(frozen)
-        ) {
+        if (wasSelected || this.#canProjectAvailability(frozen)) {
           this.#setProviderDigest(frozen.providerId, result.installationDigest);
           this.#setAvailability(
             frozen.providerId,

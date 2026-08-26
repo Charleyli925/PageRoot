@@ -135,22 +135,38 @@ test("switching away and back starts a fresh Provider preflight", async () => {
   assert.equal(starts.length, 3);
   assert.notEqual(currentFirst, staleFirst);
 
+  const staleResolvedFirst = freezeAgentSelection({
+    ...first,
+    resolvedModelId: "first:stale-default",
+  });
+  const currentResolvedFirst = freezeAgentSelection({
+    ...first,
+    resolvedModelId: "first:current-default",
+  });
+
   starts[0].pending.resolve({
     status: "ready",
     preflightId: "ticket_stale_first",
-    selection: first,
+    selection: staleResolvedFirst,
     expiresAt: new Date(20_000).toISOString(),
   });
   await staleFirst;
   assert.equal(catalog.availability(first).status, "checking");
+  assert.equal(catalog.freezeSelected().resolvedModelId, null);
+  assert.equal(
+    Object.values(catalog.getSnapshot().preflightBySelection)
+      .some((preflight) => preflight.preflightId === "ticket_stale_first"),
+    false,
+  );
 
   starts[2].pending.resolve({
     status: "ready",
     preflightId: "ticket_current_first",
-    selection: first,
+    selection: currentResolvedFirst,
     expiresAt: new Date(20_000).toISOString(),
   });
   assert.equal((await currentFirst).preflightId, "ticket_current_first");
+  assert.equal(catalog.freezeSelected().resolvedModelId, "first:current-default");
   assert.equal(catalog.availability(first).status, "ready");
 
   starts[1].pending.resolve({
