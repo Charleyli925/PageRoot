@@ -181,6 +181,29 @@ gate permits no `bridgeClient.*` call, generic Bridge-command escape, business
 Session/Workflow construction or Session ref in Workbench. The gate also forbids React,
 Workbench, component or desktop imports from Application composition code.
 
+Workbench navigation has one application transaction contract. Startup restore,
+local/recent/Registry selection, tab activation, browser file continuation, OS
+external FIFO delivery and confirmation continuations enter the same admission
+order. Each admitted intent owns one `transactionId` and moves through:
+
+```text
+idle -> admitted -> preparing -> awaiting-user/opening
+     -> applied(identity, epoch, application receipt)
+     -> hydrating -> canvas-verified -> committed -> idle
+```
+
+`ProjectWorkflow` calls the synchronous navigation application port while the
+new Project/Document authority is being published. The returned receipt is the
+only authority for tab mutation, hydration and Canvas settlement;
+`project-applied` remains presentation information and React may not infer an
+application from any-pending state. A pre-applied failure restores the captured
+tab authority without changing the Controller. After apply, a failure either
+restores Controller and tabs from the same receipt or retains both on that
+identity as committed-error. A close may cancel an awaiting-user prompt, but it
+must wait for committing, applied, hydrating, finalizing and acknowledgement
+work to reach a terminal receipt. Cold-start priority is explicit OS external
+FIFO, persisted active tab, `activePath` compatibility, then Start.
+
 An asynchronous result may update state only when its complete identity is
 current:
 

@@ -78,6 +78,23 @@ export class WorkbenchTabsSession {
     return this.#snapshot;
   }
 
+  captureAuthority() {
+    return Object.freeze({
+      snapshot: this.#snapshot,
+      pendingPriorStatus: this.#pendingPriorStatus,
+      stagedStartReplacement: this.#stagedStartReplacement,
+      restoredDocumentTabIds: Object.freeze([...this.#restoredDocumentTabIds]),
+    });
+  }
+
+  restoreAuthority(authority) {
+    if (!authority?.snapshot || !Array.isArray(authority.snapshot.tabs)) return null;
+    this.#pendingPriorStatus = authority.pendingPriorStatus || null;
+    this.#stagedStartReplacement = authority.stagedStartReplacement || null;
+    this.#restoredDocumentTabIds = new Set(authority.restoredDocumentTabIds || []);
+    return this.#publish({ ...authority.snapshot });
+  }
+
   subscribe(listener) {
     if (typeof listener !== "function") throw new TypeError("tabs listener is required");
     this.#listeners.add(listener);
@@ -414,7 +431,9 @@ export class WorkbenchTabsSession {
       mountedDocumentTabId: wasActive
         ? (next.kind === "document" ? null : null)
         : this.#snapshot.mountedDocumentTabId,
-      runtimeOwnerTabId: this.#snapshot.runtimeOwnerTabId,
+      runtimeOwnerTabId: this.#snapshot.runtimeOwnerTabId === tabId
+        ? null
+        : this.#snapshot.runtimeOwnerTabId,
     });
     return Object.freeze({ snapshot, nextTabId: next?.tabId || null });
   }
@@ -458,7 +477,7 @@ export function projectAppliedEventToWorkbenchTabs({ session, event, title }) {
     title: tabTitle,
     status: event.activeLocked === true ? "processing" : "normal",
     // A pending registered-tab activation is committed only by
-    // WorkbenchTabsWorkflow after its Controller identity check. The event
+    // WorkbenchNavigationWorkflow after its Controller identity check. The event
     // still refreshes/stages that exact identity, but never impersonates the
     // workflow's commit.
     focus: !session.snapshot.pendingTabId,

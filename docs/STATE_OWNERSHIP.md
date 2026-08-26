@@ -12,7 +12,7 @@
 | Canonical external-source path → unique `projectId` lookup, first-import Hash relation, and read-only A/B/C open classification | `ProjectFileRepository` | Registry `importSourceKey` / `importSourceSha256` pair plus the bound project's current active Working Copy | `/project/open-classification`, `/project/ensure` and Desktop Prepared Intent |
 | Registry project-catalog membership, availability and validated registered-project OpenTarget resolution | `ProjectFileRepository` Registry reader | Registry `projectId → registeredProjectRootPath` records plus validated per-project metadata; Desktop Recent may rank but never add/remove/authorize a member | read-only catalog route, `ProjectWorkflow` projectId open command and Workbench project list |
 | Runtime Bridge/Session/workflow composition, aggregate-observer lifecycle, registration operation identity, single-flight, stale-result fence and cross-Session publication sequence | `createRuntimeWorkspaceController()` and `WorkspaceController` | none; the factory creates the one fact-owner set and the Controller publishes only frozen aggregate projections through existing Project, Document, Comment, Draft, Version and SourceHistory owners | Workbench aggregate-snapshot subscription, Controller commands and presentation-event adapter |
-| Browser-workbench tab order, active/pending tab, mounted content-outlet tab, runtime-owner tab identity and lightweight status/title projection | Renderer `WorkbenchTabsSession`; `WorkbenchTabsWorkflow` alone coordinates activation/close | validated `workbench-tabs.json` stores only `tabId + projectId + documentId` and the active document tab; `activeTabId: null` authoritatively means Start; no path, title, HTML, Hash, Request, Candidate, Version or Conversation authority | TabBar, StartPage and global project sidebar; document activation delegates to existing `ProjectWorkflow`, mounts only a post-open Controller identity, and keeps the operation locked through hydration/Canvas verification |
+| Browser-workbench navigation admission, receipt and tab order/active/pending/mounted/runtime-owner identity | Renderer `WorkbenchNavigationSession` owns the transaction phase/receipt and `WorkbenchTabsSession` owns the tab projection; the Controller-owned `WorkbenchNavigationWorkflow` is the only coordinator | validated `workbench-tabs.json` stores only `tabId + projectId + documentId` and the active document tab; no path, title, HTML, Hash, Request, Candidate, Version or Conversation authority | Startup/restore, local/recent, registered/sidebar/tab, browser-file, OS-external and confirmation all enter one ordered admission stream; ProjectWorkflow applies the tab mutation synchronously through the correlated application receipt before its presentation event |
 | Project hydration generation and load outcome, switch/open operation, accepted-result execution, close request identity, project-switch publication, Prepared Intent commit after confirmation, and the unified managed-source prepare/commit handoff for Candidate promotion, historical Working Copy continuation and Registry opens | Renderer `ProjectWorkflow`, composed by `WorkspaceController` | none; it publishes through existing Session owners and trusted ProjectOpen/Canvas ports | Workbench commands and presentation-event adapter |
 | Durable source filename transaction, pending operation and active/recent path rebase | Desktop source-rename transaction | active-file `pendingRename` / `lastRename`, then filesystem path | trusted desktop rename port and Bridge relink |
 | Current active managed Working Copy restart cache | Main `activeManagedLocator` in the private active-file record | none; non-authoritative, fail-closed cache of the last verified identity tuple and path. Registry plus project metadata remain the only write authority. Missing cache never guesses by name or Hash | startup `getActiveProject`, Finder locator reconcile and trusted `reconcileActiveManagedSource` IPC |
@@ -157,7 +157,7 @@ Rules:
   allowance is exactly 0; the checked architecture gate permits no
   `bridgeClient.*` call from Workbench.
 - A tab is presentation and navigation, never a second Workspace. The renderer
-  creates exactly one runtime `WorkspaceController`. `WorkbenchTabsWorkflow`
+  creates exactly one runtime `WorkspaceController`. `WorkbenchNavigationWorkflow`
   asks the existing `ProjectWorkflow.openProject(kind=registered)` to run its
   canonical `prepareSwitch`/drain/Canvas fence, rejects pre-open matching
   identity, then mounts only a newer aggregate Project epoch. The operation
@@ -174,7 +174,8 @@ Rules:
   `WorkbenchTabsSession` before React aggregate rendering. Accepted-project
   FIFO successors therefore cannot erase a predecessor tab. A pending
   registered-tab switch may stage or refresh that identity, but only
-  `WorkbenchTabsWorkflow` may commit its active/mounted tab after Controller
+  `WorkbenchNavigationWorkflow` may commit its active/mounted tab through the
+  synchronous application receipt after Controller
   identity verification.
 - Browser-only file input has no filesystem locator authority. After bytes are
   decoded and hashed, it mints a presentation identity from a versioned digest

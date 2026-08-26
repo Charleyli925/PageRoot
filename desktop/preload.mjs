@@ -433,6 +433,10 @@ const appLifecycleApi = Object.freeze({
       ipcRenderer.removeListener(appChannels.externalOpenRequested, registered);
     };
   },
+  getInitialExternalOpen: async () => {
+    const payload = await ipcRenderer.invoke(appChannels.externalOpenReady);
+    return normalizedExternalOpenRequest(payload);
+  },
   relaunch: () => ipcRenderer.invoke(appChannels.relaunch),
   openUserNotice: () => invokeProject(appChannels.openUserNotice),
 });

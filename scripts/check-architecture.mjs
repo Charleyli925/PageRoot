@@ -46,6 +46,7 @@ const RUNTIME_SESSION_CONSTRUCTORS = [
   "EditAuthorRuntimeSession",
   "FirstEditGuideSession",
   "WorkbenchTabsSession",
+  "WorkbenchNavigationSession",
 ];
 const PROVIDER_LITERAL_BRANCH = /\b(?:[A-Za-z_$][\w$]*\s*(?:\?\.|\.)\s*)*(?:providerId|mode)\s*(?:===|!==|==|!=)\s*["'`](?:qoder|codex|qoder-acp|codex-acp)["'`]|["'`](?:qoder|codex|qoder-acp|codex-acp)["'`]\s*(?:===|!==|==|!=)\s*(?:[A-Za-z_$][\w$]*\s*(?:\?\.|\.)\s*)*(?:providerId|mode)\b/u;
 const PROVIDER_IMPLEMENTATION_IMPORT = /(?:^|\/)(?:qoder-availability|QoderAvailabilityCard|qoder-provider)(?:\.[^/]*)?$/u;
@@ -116,7 +117,7 @@ export function compositionBoundaryViolations({
     );
   }
   if (
-    /\bnew\s+(?:ProjectSession|DocumentSession|CommentSession|DraftSession|VersionSession|SourceHistorySession|RunSession|ProjectRulesSession|ExternalFileOpenSession|ProjectApplicationSession|FirstEditGuideSession|WorkbenchTabsSession|WorkbenchTabsWorkflow)\b/u.test(workbench)
+    /\bnew\s+(?:ProjectSession|DocumentSession|CommentSession|DraftSession|VersionSession|SourceHistorySession|RunSession|ProjectRulesSession|ExternalFileOpenSession|ProjectApplicationSession|FirstEditGuideSession|WorkbenchTabsSession|WorkbenchTabsWorkflow|WorkbenchNavigationSession|WorkbenchNavigationWorkflow)\b/u.test(workbench)
     || /\bcreateWorkbenchTabsSession\s*\(/u.test(workbench)
     || /\b(?:projectSessionRef|documentSessionRef|commentSessionRef|draftSessionRef|versionSessionRef|sourceHistorySessionRef|runSessionRef|projectRulesSessionRef|workbenchTabsSessionRef|workbenchTabsWorkflowRef|restoredPendingTabIdRef|restoredTabOpeningRef|tabsStateControlsStartupRef)\b/u.test(workbench)
   ) {
@@ -177,14 +178,26 @@ export function compositionBoundaryViolations({
   }
   if (
     !/\bworkbenchTabsSession:\s*new\s+WorkbenchTabsSession\s*\(/u.test(workspaceController)
-    || !/\bnew\s+WorkbenchTabsWorkflow\s*\(/u.test(workspaceController)
+    || !/\bworkbenchNavigationSession:\s*new\s+WorkbenchNavigationSession\s*\(/u.test(workspaceController)
+    || !/\bnew\s+WorkbenchNavigationWorkflow\s*\(/u.test(workspaceController)
     || !/\bworkbenchTabs:\s*this\.#workbenchTabsSnapshot\b/u.test(workspaceController)
+    || !/\bworkbenchNavigation:\s*this\.#workbenchNavigationSnapshot\b/u.test(workspaceController)
     || !/\bactivateWorkbenchTab\s*\(/u.test(workspaceController)
     || !/\bcreateWorkbenchStartTab\s*\(/u.test(workspaceController)
     || !/\bcloseWorkbenchTab\s*\(/u.test(workspaceController)
   ) {
     violations.push(
-      "app/application/workspace-controller.js: WorkspaceController must compose, project, and command the tabs workflow",
+      "app/application/workspace-controller.js: WorkspaceController must compose, project, and command the unified navigation workflow",
+    );
+  }
+  if (
+    /\b(?:projectAppliedEventToWorkbenchTabs|workbenchTabsSessionRef|workbenchTabsWorkflowRef|navigationTransactionRef|pendingNavigationRef)\b/u.test(workbench)
+    || !/\bthis\.#navigationPort\?\.applyProject\?\.\s*\(/u.test(projectWorkflow)
+    || !/\bapplicationReceipt\b/u.test(projectWorkflow)
+    || !/\bapplicationReceipt\b/u.test(workspaceController)
+  ) {
+    violations.push(
+      "app/application: navigation must use a correlated synchronous application receipt below React",
     );
   }
   if (
@@ -676,7 +689,9 @@ export async function architectureViolations() {
     RETIRED_WORKBENCH_MIGRATION_OWNERS.test(workbench)
     || !hasObjectProperty(workbenchAst, "projectWorkflow", { valueKind: "object" })
     || !hasCall(workbenchAst, { path: "workspaceController.prepareClose" })
-    || !hasCall(workbenchAst, { path: "workspaceController.acceptExternalProject" })
+    || !hasObjectProperty(workbenchAst, "navigation", { valueKind: "object" })
+    || !hasCall(workbenchAst, { method: "onExternalOpenRequested" })
+    || !classHasMember(workspaceControllerAst, "WorkspaceController", "acceptExternalProject")
     || !hasCall(workbenchAst, { path: "workspaceController.acceptBrowserProject" })
     || !hasCall(workbenchAst, { method: "readProjectFile" })
     || !hasCall(workbenchAst, { method: "openProjectRecords" })

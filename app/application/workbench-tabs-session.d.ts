@@ -18,6 +18,8 @@ export type WorkbenchTabsSnapshot = Readonly<{
 export const INITIAL_WORKBENCH_TABS_SNAPSHOT: WorkbenchTabsSnapshot;
 export class WorkbenchTabsSession {
   readonly snapshot: WorkbenchTabsSnapshot;
+  captureAuthority(): unknown;
+  restoreAuthority(authority: unknown): WorkbenchTabsSnapshot | null;
   subscribe(listener: (snapshot: WorkbenchTabsSnapshot) => void): () => void;
   hydrate(value: unknown): WorkbenchTabsSnapshot;
   createStart(input?: { focus?: boolean }): WorkbenchTabsSnapshot | null;

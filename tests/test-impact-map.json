@@ -410,7 +410,7 @@
       "suites": ["typecheck", "electron-smoke"],
       "nodeTests": [
         "tests/workbench-tabs-session.test.mjs",
-        "tests/workbench-tabs-workflow.test.mjs",
+        "tests/workbench-navigation-workflow.test.mjs",
         "tests/workbench-tabs-state.test.mjs",
         "tests/project-workflow.test.mjs",
         "tests/desktop-preload-ipc.test.mjs"

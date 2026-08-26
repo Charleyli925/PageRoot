@@ -113,7 +113,7 @@ loading surface 确认前不调用窄 port、同代不因 autosave/评论重试�
 Workbench 只确认已提交 loading surface、传入窄 port 并消费快照。Node 测试证明晚到 observer
   在 `dispose()` 后不再发布；Document snapshot 只投影 `hasPendingWrite`/`isFlushing`，
   不泄露写入内容或 Promise。Workbench 只能订阅该 aggregate snapshot 与 event stream。
-- `WorkbenchTabsSession/Workflow`：Node 直接证明 `projectId + documentId` 去重、多开始页、
+- `WorkbenchNavigationSession/Workflow` + `WorkbenchTabsSession`：Node 直接证明单一 admission/receipt 顺序、`projectId + documentId` 去重、多开始页、
   活动 Start 原位承载新文档/去重已有文档、较多标签仍保持顺序与身份去重且不设产品数量上限、状态投影、关闭不删业务权威、close/activate 竞态 fail-closed，以及 Start 和文档
   激活严格按 `ProjectWorkflow.prepareSwitch` 的 native fence/drain → Registry 打开 → 新 epoch
   身份挂载 → hydration/Canvas settle 顺序；相同旧身份不得提前完成。Registry-before-hydrate 与
@@ -122,7 +122,7 @@ Workbench 只确认已提交 loading surface、传入窄 port 并消费快照。
   Home/End 的 roving focus、键盘关闭后的活动标签焦点、Start 冷重启抑制 activePath、Start→Registry 原位打开、Registry 标题恢复及 unmounted outlet 安全关闭。
 - Accepted ProjectApplication 的慢 A/快 B Node 联测把真实 `project-applied`
   事件同步投影到同一 `WorkbenchTabsSession`，必须同时保留 A/B、只聚焦 B 且不重复；pending
-  registered switch 的事件投影不得越过 `WorkbenchTabsWorkflow` 身份核对提前 commit。
+  registered switch 的展示事件不得替代 `WorkbenchNavigationWorkflow` 的同步应用回执。
 - Browser-file identity Node 测试证明版本化 metadata/content 摘要重选稳定、同内容异名不混同且不携带
   path/HTML/Hash 权威；ProjectWorkflow→TabsSession 联测证明 Start 原位成为文档、重复打开仍只有一个标签。
 - 外部打开 FIFO：Main mailbox Node 测试证明队首在 renderer 显式 ack 前不消费、不发送后继；renderer

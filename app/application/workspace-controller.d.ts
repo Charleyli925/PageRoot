@@ -69,12 +69,15 @@ import type {
   VersionWorkflowSnapshot,
 } from "./version-workflow.js";
 import type {
-  WorkbenchTab,
   WorkbenchTabStatus,
   WorkbenchTabsSession,
   WorkbenchTabsSnapshot,
 } from "./workbench-tabs-session.js";
-import type { WorkbenchTabsOutcome } from "./workbench-tabs-workflow.js";
+import type {
+  WorkbenchNavigationSession,
+  WorkbenchNavigationSnapshot,
+} from "./workbench-navigation-session.js";
+import type { WorkbenchNavigationOutcome } from "./workbench-navigation-workflow.js";
 
 export type OperationIdentity = Readonly<{
   operationId: string;
@@ -122,6 +125,7 @@ export type WorkspaceControllerSnapshot = Readonly<{
   conversation: ConversationSessionSnapshot | null;
   workbenchTabs: WorkbenchTabsSnapshot | null;
   workbenchTabsReady: boolean;
+  workbenchNavigation: WorkbenchNavigationSnapshot | null;
 }>;
 
 export type WorkspaceEvent =
@@ -253,6 +257,7 @@ export type WorkspaceControllerConstruction = Readonly<{
   sourceHistorySession: SourceHistorySession;
   conversationSession?: ConversationSession | null;
   workbenchTabsSession?: WorkbenchTabsSession | null;
+  workbenchNavigationSession?: WorkbenchNavigationSession | null;
   codecs: WorkspaceControllerCodecs;
   ports: Readonly<{
     hash: HashPort;
@@ -264,6 +269,16 @@ export type WorkspaceControllerConstruction = Readonly<{
     workbenchTabs?: Readonly<{
       get(): Promise<unknown>;
       set(value: Readonly<Record<string, unknown>>): Promise<unknown>;
+    }>;
+    navigation?: Readonly<{
+      subscribeExternalOpen(listener: (request: {
+        requestId: string;
+        sourcePath?: string;
+      }) => void): (() => void) | void;
+      readInitialExternalOpen?(): Promise<{
+        requestId: string;
+        sourcePath?: string;
+      } | null>;
     }>;
   }>;
   documentWorkflow?: Readonly<{
@@ -399,15 +414,15 @@ export class WorkspaceController {
   updateConversationDraftText(text: string): void;
   updateConversationDraftIntent(intent: string): void;
   flushConversationDraft(): Promise<void>;
-  activateWorkbenchTab(tabId: string, input?: { deadlineMs?: number }): Promise<WorkbenchTabsOutcome>;
-  createWorkbenchStartTab(): Promise<WorkbenchTabsOutcome>;
-  closeWorkbenchTab(tabId: string): Promise<WorkbenchTabsOutcome>;
-  stageWorkbenchDocument(input: {
+  activateWorkbenchTab(tabId: string, input?: { deadlineMs?: number }): Promise<WorkbenchNavigationOutcome>;
+  createWorkbenchStartTab(): Promise<WorkbenchNavigationOutcome>;
+  closeWorkbenchTab(tabId: string): Promise<WorkbenchNavigationOutcome>;
+  openRegisteredWorkbenchProject(input: {
     projectId: string;
     documentId: string;
     title: string;
     status?: WorkbenchTabStatus;
-  }): WorkbenchTab | null;
+  }): Promise<WorkbenchNavigationOutcome>;
   updateWorkbenchTabStatus(
     projectId: string,
     documentId: string,
@@ -454,7 +469,7 @@ export class WorkspaceController {
   retryProjectHydration(): Promise<ProjectWorkflowOutcome>;
   prepareProjectSwitch(input?: {
     fromDeferred?: boolean;
-  }): Promise<ProjectWorkflowOutcome>;
+  }): Promise<WorkbenchNavigationOutcome>;
   openProject(input?: {
     kind?: "local" | "recent" | "registered" | "startup";
     sourcePath?: string | null;
@@ -468,22 +483,22 @@ export class WorkspaceController {
   acceptBrowserProject(input: {
     operationId?: string;
     project: ProjectWorkflowProject;
-  }): ProjectWorkflowOutcome;
+  }): Promise<WorkbenchNavigationOutcome>;
   acceptExternalProject(input: {
     requestId: string;
     sourcePath?: string;
-  }): ProjectWorkflowOutcome;
+  }): Promise<WorkbenchNavigationOutcome>;
   confirmExternalOpen(input?: {
     requestId?: string;
     action?: string;
     deleteOriginal?: boolean;
-  }): Promise<ProjectWorkflowOutcome>;
-  cancelExternalOpen(input?: { requestId?: string }): Promise<ProjectWorkflowOutcome>;
+  }): Promise<WorkbenchNavigationOutcome>;
+  cancelExternalOpen(input?: { requestId?: string }): Promise<WorkbenchNavigationOutcome>;
   setExternalOpenDeleteOriginal(input?: {
     requestId?: string;
     deleteOriginal?: boolean;
   }): ProjectWorkflowOutcome;
-  retryExternalOpen(input?: { requestId?: string }): Promise<ProjectWorkflowOutcome>;
+  retryExternalOpen(input?: { requestId?: string }): Promise<WorkbenchNavigationOutcome>;
   acknowledgeEditCanvas(input?: {
     generation?: number;
     renderedSha256?: string | null;

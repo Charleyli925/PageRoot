@@ -114,6 +114,10 @@ export type ProjectWorkflowConstruction = Readonly<{
     recentRuns: Readonly<{
       hydrate(projects: unknown[], activeSourcePath: string | null): void | Promise<void>;
     }>;
+    navigation?: Readonly<{
+      applyProject(input: Readonly<Record<string, unknown>>): Readonly<Record<string, unknown>>;
+      waitForTerminal?(transactionId: string): Promise<Readonly<Record<string, unknown>> | null>;
+    }>;
   }>;
   policies: object;
   scheduler?: Readonly<{
@@ -138,23 +142,27 @@ export class ProjectWorkflow {
     sourcePath?: string | null;
     projectId?: string | null;
     fromDeferred?: boolean;
+    transactionId?: string | null;
   }): Promise<ProjectWorkflowOutcome>;
   acceptProject(
     project: ProjectWorkflowProject,
-    input?: { kind?: string; operationId?: string; sourcePath?: string | null },
+    input?: { kind?: string; operationId?: string; sourcePath?: string | null; transactionId?: string | null },
   ): ProjectWorkflowOutcome;
   acceptBrowserProject(input: {
     operationId?: string;
     project: ProjectWorkflowProject;
+    transactionId?: string | null;
   }): ProjectWorkflowOutcome;
   acceptExternalProject(input: {
     requestId: string;
     sourcePath?: string;
+    transactionId?: string;
   }): ProjectWorkflowOutcome;
   confirmExternalOpen(input?: {
     requestId?: string;
     action?: string;
     deleteOriginal?: boolean;
+    transactionId?: string | null;
   }): Promise<ProjectWorkflowOutcome>;
   cancelExternalOpen(input?: { requestId?: string }): Promise<ProjectWorkflowOutcome>;
   setExternalOpenDeleteOriginal(input?: {

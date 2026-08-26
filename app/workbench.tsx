@@ -938,6 +938,18 @@ export default function Workbench() {
             ),
           },
         } : {}),
+        ...(window.htmlAIAppLifecycle?.onExternalOpenRequested ? {
+          navigation: {
+            subscribeExternalOpen: (listener: (request: {
+              requestId: string;
+              sourcePath?: string;
+            }) => void) => window.htmlAIAppLifecycle!.onExternalOpenRequested(listener),
+            readInitialExternalOpen: () => (
+              window.htmlAIAppLifecycle!.getInitialExternalOpen?.()
+              ?? Promise.resolve(null)
+            ),
+          },
+        } : {}),
         projectSource: {
           activateManagedWorkingCopy: async (input: {
             previousSourcePath: string;
@@ -4033,20 +4045,11 @@ export default function Workbench() {
   }, [presentWorkbenchTabOutcome, workspaceController]);
   const openRegisteredWorkbenchProject = useCallback((project: RegisteredProject) => {
     if (!workspaceController || !project.documentId || project.availability !== "ready") return;
-    const tab = workspaceController.stageWorkbenchDocument({
+    void workspaceController.openRegisteredWorkbenchProject({
       projectId: project.projectId,
       documentId: project.documentId,
       title: project.projectName,
-    });
-    if (!tab) {
-      presentWorkbenchTabOutcome({
-        status: "rejected",
-        code: "WORKBENCH_TAB_SWITCH_BUSY",
-        reason: "另一个开始标签正在打开 HTML，请稍后重试。",
-      });
-      return;
-    }
-    void workspaceController.activateWorkbenchTab(tab.tabId).then((outcome) => {
+    }).then((outcome) => {
       presentWorkbenchTabOutcome(outcome);
     });
   }, [presentWorkbenchTabOutcome, workspaceController]);
@@ -4096,15 +4099,6 @@ export default function Workbench() {
   const resumeDeferredExternalProject = useCallback(() => (
     workspaceController?.resumeDeferredExternalProject().status === "succeeded"
   ), [workspaceController]);
-
-  useEffect(() => {
-    if (!workspaceController) return undefined;
-    const lifecycle = window.htmlAIAppLifecycle;
-    if (!lifecycle?.onExternalOpenRequested) return undefined;
-    return lifecycle.onExternalOpenRequested((request) => {
-      workspaceController.acceptExternalProject(request);
-    });
-  }, [workspaceController]);
 
   useEffect(() => {
     workspaceController?.reconcileProjectTransitions();

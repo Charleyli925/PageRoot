@@ -158,6 +158,7 @@ function createHarness({
   projectOpen = {},
   policies = {},
   projectRulesWorkflow: rulesWorkflow = {},
+  navigation = null,
   initialProject = true,
   openTarget = null,
 } = {}) {
@@ -418,6 +419,7 @@ function createHarness({
       projectOpen: openPort,
       viewState,
       recentRuns,
+      ...(navigation ? { navigation } : {}),
     },
     policies: {
       canCloseDuringHydration: (state) => Boolean(
@@ -919,6 +921,49 @@ test("v4 exposes no relocation workflow that can retarget a moved project", (t) 
   assert.equal("rebindRelocatedOpenTarget" in harness.documentWorkflow, false);
 });
 
+test("project application requires the synchronous navigation receipt before presentation", async (t) => {
+  const order = [];
+  const receipts = [];
+  const harness = createHarness({
+    navigation: {
+      applyProject(input) {
+        order.push("application-port");
+        const receipt = Object.freeze({
+          transactionId: input.transactionId,
+          applicationId: input.applicationId,
+          projectId: input.project.projectId,
+          documentId: input.project.documentId,
+          epoch: input.epoch,
+        });
+        receipts.push(receipt);
+        return receipt;
+      },
+    },
+  });
+  t.after(() => harness.workflow.dispose());
+  harness.workflow.subscribeEvents((event) => {
+    if (event.type !== "project-applied") return;
+    order.push("presentation-event");
+    assert.equal(event.applicationReceipt, receipts[0]);
+  });
+  const outcome = harness.workflow.acceptBrowserProject({
+    transactionId: "navigation-browser-A",
+    project: {
+      projectId: "project_browser_A",
+      documentId: "doc_browser_A",
+      name: "A",
+      sourcePath: null,
+      html: A_HTML,
+      sha256: sha256(A_HTML),
+    },
+  });
+  assert.equal(outcome.status, "succeeded");
+  await waitFor(() => order.includes("presentation-event"));
+  assert.deepEqual(order, ["application-port", "presentation-event"]);
+  assert.equal(receipts[0].transactionId, "navigation-browser-A");
+  assert.equal(receipts[0].applicationId, outcome.value.applicationId);
+});
+
 test("a trusted direct browser file submission still enters the accepted FIFO", async (t) => {
   const harness = createHarness();
   t.after(() => harness.workflow.dispose());
@@ -1162,6 +1207,64 @@ test("native input delivered after the switch drain defers without losing the ac
     "retained accepted project did not resume",
   );
   assert.equal(harness.documentSession.html, A_HTML);
+});
+
+test("direct external ACK waits for the correlated navigation terminal", async (t) => {
+  const order = [];
+  let resolveTerminal;
+  const terminal = new Promise((resolve) => { resolveTerminal = resolve; });
+  const harness = createHarness({
+    initialProject: false,
+    canvas: { isMounted: () => false },
+    projectOpen: {
+      async acceptExternal() {
+        order.push("accept");
+        return {
+          projectId: "project_external_terminal",
+          documentId: "doc_external_terminal",
+          name: "External terminal",
+          sourcePath: A_PATH,
+          html: A_HTML,
+          sha256: sha256(A_HTML),
+        };
+      },
+      async ackExternal() {
+        order.push("ack");
+      },
+    },
+    navigation: {
+      applyProject(input) {
+        order.push("apply-receipt");
+        return { transactionId: input.transactionId, epoch: input.epoch };
+      },
+      async waitForTerminal(transactionId) {
+        assert.equal(transactionId, "navigation-external-terminal");
+        order.push("wait-terminal");
+        await terminal;
+        order.push("terminal");
+        return { transactionId };
+      },
+    },
+  });
+  t.after(() => harness.workflow.dispose());
+  harness.workflow.prepareSwitch = async () => succeeded({ prepared: true });
+  assert.equal(harness.workflow.acceptExternalProject({
+    requestId: "external-terminal",
+    sourcePath: A_PATH,
+    transactionId: "navigation-external-terminal",
+  }).status, "succeeded");
+  await waitFor(
+    () => order.includes("wait-terminal"),
+    `navigation terminal wait did not start: ${JSON.stringify({
+      order,
+      events: harness.events.map((event) => ({ type: event.type, reason: event.reason })),
+      snapshot: harness.workflow.getSnapshot(),
+    })}`,
+  );
+  assert.deepEqual(order, ["accept", "apply-receipt", "wait-terminal"]);
+  resolveTerminal();
+  await waitFor(() => order.includes("ack"));
+  assert.deepEqual(order, ["accept", "apply-receipt", "wait-terminal", "terminal", "ack"]);
 });
 
 test("an external request arriving during close preparation cancels that exact close", async (t) => {
