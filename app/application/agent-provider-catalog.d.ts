@@ -65,6 +65,7 @@ export class AgentCatalogState {
   dispose(): void;
   select(selection: AgentSelection): AgentSelection;
   freezeSelected(): AgentSelection | null;
+  freezeProviderSelection(providerId: string): AgentSelection | null;
   provider(selection?: AgentSelection | null): AgentProviderEntry | null;
   availability(selection?: AgentSelection | null): AgentProviderAvailabilitySnapshot;
   presentation(selection?: AgentSelection | null): AgentProviderPresentation;

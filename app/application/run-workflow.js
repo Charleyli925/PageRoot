@@ -479,8 +479,12 @@ export class RunWorkflow {
     }
   }
 
+  #qoderSelection() {
+    return this.#agentCatalog.freezeProviderSelection("qoder");
+  }
+
   refreshQoderAvailability() {
-    const selection = this.#agentCatalog.getSnapshot().providers.qoder?.selection ?? null;
+    const selection = this.#qoderSelection();
     if (!selection) {
       return Promise.resolve(rejected("AGENT_PROVIDER_UNSUPPORTED", "Qoder CLI 不可用。"));
     }
@@ -502,7 +506,7 @@ export class RunWorkflow {
   }
 
   async checkQoderUsability() {
-    const selection = this.#agentCatalog.getSnapshot().providers.qoder?.selection ?? null;
+    const selection = this.#qoderSelection();
     if (!selection) return rejected("AGENT_PROVIDER_UNSUPPORTED", "Qoder CLI 不可用。");
     if (this.#disposed) {
       return blocked("RUN_WORKFLOW_DISPOSED", "Qoder CLI 状态检查已经停止。");
@@ -523,7 +527,7 @@ export class RunWorkflow {
     if (kind !== "install" && kind !== "login") {
       return rejected("AGENT_GUIDANCE_INVALID", "选择的 Qoder 引导无效。");
     }
-    const selection = this.#agentCatalog.getSnapshot().providers.qoder?.selection ?? null;
+    const selection = this.#qoderSelection();
     if (!selection) return rejected("AGENT_PROVIDER_UNSUPPORTED", "Qoder CLI 不可用。");
     try {
       const result = await this.#agentCatalog.copyGuidance(kind, selection);

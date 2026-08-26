@@ -699,6 +699,48 @@ test("About keeps checking and guiding Qoder while Codex is selected", async () 
   harness.workflow.dispose();
 });
 
+test("About rechecks the resolved current Qoder selection", async () => {
+  const authError = Object.assign(new Error("Qoder CLI 尚未登录。"), {
+    code: "QODER_AUTH_REQUIRED",
+  });
+  let preflightCount = 0;
+  let harness;
+  harness = createHarness({
+    bridge: {
+      async preflightAgent(request) {
+        harness.calls.preflight.push(request);
+        preflightCount += 1;
+        if (preflightCount > 1) throw authError;
+        return {
+          status: "ready",
+          preflightId: "preflight_resolved_qoder",
+          selection: {
+            ...request.selection,
+            resolvedModelId: "qoder:qoder-default",
+          },
+          expiresAt: "2026-08-11T00:02:00.000Z",
+        };
+      },
+    },
+  });
+
+  const first = await harness.workflow.checkQoderUsability();
+  assert.equal(first.status, "succeeded");
+  assert.equal(
+    harness.workflow.freezeAgentSelection().resolvedModelId,
+    "qoder:qoder-default",
+  );
+
+  const refreshed = await harness.workflow.refreshQoderAvailability();
+  assert.equal(refreshed.status, "rejected");
+  assert.equal(
+    harness.calls.preflight.at(-1).selection.resolvedModelId,
+    "qoder:qoder-default",
+  );
+  assert.equal(harness.workflow.getSnapshot().qoderAvailability.status, "auth-required");
+  harness.workflow.dispose();
+});
+
 test("Qoder guidance copy is isolated from Request and Canvas authority", async () => {
   const harness = createHarness();
 

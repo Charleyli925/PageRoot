@@ -313,6 +313,14 @@ export class AgentCatalogState {
     return freezeAgentSelection(this.#selected);
   }
 
+  freezeProviderSelection(providerId) {
+    const provider = this.#providers.get(String(providerId || ""));
+    if (!provider) return null;
+    return this.#selected?.providerId === provider.providerId
+      ? freezeAgentSelection(this.#selected)
+      : freezeAgentSelection(provider.selection);
+  }
+
   provider(selection = this.#selected) {
     if (!selection) return null;
     const provider = this.#providers.get(selection.providerId) || null;
