@@ -178,3 +178,39 @@ test("PR3 does not expose Codex through the default product catalog", () => {
   assert.deepEqual(catalog.map((entry) => entry.providerId), ["qoder"]);
   assert.equal(catalog.some((entry) => entry.providerId === "codex"), false);
 });
+
+test("enabled Codex execution writes only the Candidate and leaves finalization to Stemmio", async () => {
+  const policy = {
+    manifestPath: "/request/input-manifest.json",
+    promptPath: "/request/PROMPT.md",
+    outputPath: "/request/attempts/attempt_001/output/candidate.html",
+    finalizer: { command: "/stemmio/finalizer", args: [], cwd: "/request", env: {} },
+  };
+  const provider = createCodexProvider({
+    executionEnabled: true,
+    policyLoader: async () => policy,
+  });
+  assert.equal(provider.capabilities.execution, true);
+  assert.equal(await provider.loadExecutionPolicy({}), policy);
+  const launch = provider.createRuntimeLaunch({
+    ticket: {
+      installation: {
+        command: "/runtime/codex",
+        commandIdentity: { sha256: "a".repeat(64) },
+      },
+      selection: {
+        resolvedModelId: "codex:gpt-synthetic",
+        reasoning: { applied: "high" },
+      },
+    },
+    policy,
+    baseEnvironment: {},
+    cancellationSignal: new AbortController().signal,
+    onEvent() {},
+  });
+  assert.equal(launch.securityProfile, "agent-native");
+  assert.equal(launch.model, "gpt-synthetic");
+  assert.equal(launch.effort, "high");
+  assert.match(launch.prompt, /Stemmio alone runs and verifies the fixed finalizer/u);
+  assert.doesNotMatch(launch.prompt, /terminal\/create/u);
+});

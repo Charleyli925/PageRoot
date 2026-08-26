@@ -61,9 +61,12 @@ const BRIDGE_FILES = [
   "agent/providers/agent-provider-contract.mjs",
   "agent/providers/provider-registry.mjs",
   "agent/providers/qoder-provider.mjs",
+  "agent/providers/codex-provider.mjs",
   "agent/runtimes/agent-runtime-contract.mjs",
   "agent/runtimes/runtime-registry.mjs",
   "agent/runtimes/acp-runtime.mjs",
+  "agent/runtimes/codex-app-server-client.mjs",
+  "agent/runtimes/codex-app-server-runtime.mjs",
   "agent/policies/execution-policy.mjs",
   "agent/hosts/execution-host.mjs",
   "qoder-acp-client.mjs",
@@ -119,6 +122,7 @@ const SHARED_FILES = [
   "source-history.mjs",
   "conversation.mjs",
   "agent-delivery.mjs",
+  "agent-feature-gates.mjs",
 ];
 
 const SCHEMA_FILES = [

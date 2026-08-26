@@ -39,6 +39,12 @@ export type AiConversationSidebarProps = {
   catalogStatus?: SidebarCatalogStatus;
   modelDisplayName?: string | null;
   modelChoiceCount?: number;
+  modelChoices?: readonly Readonly<{
+    id: string;
+    label: string;
+    detail?: string | null;
+  }>[];
+  selectedModelChoiceId?: string | null;
   candidateVersionLabel?: string | null;
   candidateStatus?: string | null;
   failureMessage?: string | null;
@@ -50,6 +56,7 @@ export type AiConversationSidebarProps = {
   onAction?: (actionId: string) => void;
   onOpenAgentSettings?: () => void;
   onOpenModelChoices?: () => void;
+  onSelectModelChoice?: (choiceId: string) => void;
   onCollapse?: () => void;
   /** Hands the same round to the clipboard instead of the local Agent. */
   onCopyTask?: () => void;
@@ -68,6 +75,8 @@ export default function AiConversationSidebar({
   catalogStatus = "ready",
   modelDisplayName = null,
   modelChoiceCount = 0,
+  modelChoices = [],
+  selectedModelChoiceId = null,
   candidateVersionLabel = null,
   candidateStatus = null,
   failureMessage = null,
@@ -79,6 +88,7 @@ export default function AiConversationSidebar({
   onAction,
   onOpenAgentSettings,
   onOpenModelChoices,
+  onSelectModelChoice,
   onCollapse,
   onCopyTask,
   deliveryMode = "managed-agent",
@@ -88,6 +98,7 @@ export default function AiConversationSidebar({
   // ADR 0037 §5: the narration is collapsible in one click and the choice sticks for
   // as long as the surface is mounted, rather than springing open on every update.
   const [narrationOpen, setNarrationOpen] = useState(true);
+  const [modelChoicesOpen, setModelChoicesOpen] = useState(false);
   const stream = useMemo(() => sidebarMessageStream(messages), [messages]);
   const activeIntent = sidebarResolvedIntent(state);
   // Product state alone determines the one available action and mode copy.
@@ -325,7 +336,12 @@ export default function AiConversationSidebar({
               type="button"
               className={styles.model}
               data-testid="ai-conversation-model"
-              onClick={onOpenModelChoices}
+              onClick={() => {
+                setModelChoicesOpen((value) => !value);
+                onOpenModelChoices?.();
+              }}
+              aria-expanded={modelChoicesOpen}
+              aria-haspopup="listbox"
               aria-label={`当前模型 ${modelLine.text}，点击切换`}
             >
               {modelLine.text}
@@ -337,6 +353,32 @@ export default function AiConversationSidebar({
             </span>
           ) : null}
         </div>
+
+        {modelChoicesOpen && modelChoices.length > 1 ? (
+          <div
+            className={styles.modelChoices}
+            role="listbox"
+            aria-label="选择本轮 Agent"
+            data-testid="ai-conversation-model-choices"
+          >
+            {modelChoices.map((choice) => (
+              <button
+                key={choice.id}
+                type="button"
+                role="option"
+                aria-selected={choice.id === selectedModelChoiceId}
+                className={styles.modelChoice}
+                onClick={() => {
+                  onSelectModelChoice?.(choice.id);
+                  setModelChoicesOpen(false);
+                }}
+              >
+                <strong>{choice.label}</strong>
+                {choice.detail ? <span>{choice.detail}</span> : null}
+              </button>
+            ))}
+          </div>
+        ) : null}
 
         {/*
           * The round's context summary belongs to the Composer, not to the fact

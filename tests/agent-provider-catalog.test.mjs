@@ -3,7 +3,9 @@ import test from "node:test";
 
 import {
   AgentCatalogState,
+  CODEX_AGENT_PROVIDER,
   QODER_AGENT_PROVIDER,
+  defaultAgentProviders,
 } from "../app/application/agent-provider-catalog.js";
 import {
   agentPreflightKey,
@@ -11,6 +13,21 @@ import {
 } from "../app/domain/agent-provider-state.js";
 
 const TRUST = "trusted-local-agent-v1";
+
+test("Codex remains hidden behind its hard gate while preserving the shared Agent chooser", () => {
+  assert.deepEqual(
+    defaultAgentProviders().map(({ providerId }) => providerId),
+    ["qoder"],
+  );
+  assert.deepEqual(
+    defaultAgentProviders({ codexExecution: true }).map(({ providerId }) => providerId),
+    ["qoder", "codex"],
+  );
+  assert.equal(
+    CODEX_AGENT_PROVIDER.presentation.localReadDisclosure,
+    "Codex 修改时可能读取这台 Mac 上的本机文件。",
+  );
+});
 
 function selection(providerId, {
   modelId = null,
@@ -236,4 +253,85 @@ test("descriptor runtime and security profile stay part of dispatch authority", 
     catalog.preflight(first),
     (error) => error?.code === "AGENT_SECURITY_PROFILE_MISMATCH",
   );
+});
+
+test("a provider-resolved default model becomes the selected durable execution authority", async () => {
+  const requested = freezeAgentSelection({
+    providerId: "codex",
+    runtimeId: "app-server",
+    requestedModelId: null,
+    resolvedModelId: null,
+    reasoning: { requested: null, applied: null, resolution: "provider-default" },
+  });
+  const resolved = freezeAgentSelection({
+    ...requested,
+    resolvedModelId: "codex:gpt-synthetic",
+  });
+  const codex = Object.freeze({
+    ...provider("codex", requested),
+    runtimeId: "app-server",
+    securityProfile: "agent-native",
+    selection: requested,
+  });
+  const catalog = new AgentCatalogState({
+    bridgeClient: {
+      async preflightAgent() {
+        return {
+          status: "ready",
+          preflightId: "ticket_codex_default",
+          selection: resolved,
+          securityProfile: "agent-native",
+          expiresAt: new Date(20_000).toISOString(),
+        };
+      },
+    },
+    providers: [codex],
+    selected: requested,
+    clock: { now: () => 10 },
+  });
+  const preflight = await catalog.preflight(requested);
+  assert.deepEqual(preflight.selection, resolved);
+  assert.deepEqual(catalog.freezeSelected(), resolved);
+});
+
+test("a resolved default model stays pinned during later preflight", async () => {
+  const pinned = freezeAgentSelection({
+    providerId: "codex",
+    runtimeId: "app-server",
+    requestedModelId: null,
+    resolvedModelId: "codex:model-a",
+    reasoning: { requested: null, applied: null, resolution: "provider-default" },
+  });
+  const changed = freezeAgentSelection({
+    ...pinned,
+    resolvedModelId: "codex:model-b",
+  });
+  const codex = Object.freeze({
+    ...provider("codex", pinned),
+    runtimeId: "app-server",
+    securityProfile: "agent-native",
+    selection: pinned,
+  });
+  const catalog = new AgentCatalogState({
+    bridgeClient: {
+      async preflightAgent() {
+        return {
+          status: "ready",
+          preflightId: "ticket_changed_default",
+          selection: changed,
+          securityProfile: "agent-native",
+          expiresAt: new Date(20_000).toISOString(),
+        };
+      },
+    },
+    providers: [codex],
+    selected: pinned,
+    clock: { now: () => 10 },
+  });
+
+  await assert.rejects(
+    catalog.preflight(pinned),
+    (error) => error?.code === "AGENT_PREFLIGHT_SELECTION_MISMATCH",
+  );
+  assert.deepEqual(catalog.freezeSelected(), pinned);
 });

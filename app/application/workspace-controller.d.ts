@@ -543,6 +543,9 @@ export class WorkspaceController {
     deadlineAt?: number;
     deliveryMode?: "clipboard" | "managed-agent" | string;
   }): Promise<RunWorkflowOutcome>;
+  selectAgent(
+    selection: import("../domain/agent-provider-state.js").AgentSelection,
+  ): import("../domain/agent-provider-state.js").AgentSelection;
   refreshQoderAvailability(): Promise<RunWorkflowOutcome>;
   checkQoderUsability(): Promise<RunWorkflowOutcome>;
   copyQoderGuidance(input: {

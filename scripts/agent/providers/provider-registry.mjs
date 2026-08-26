@@ -5,12 +5,15 @@ import {
   assertProviderTicket,
 } from "./agent-provider-contract.mjs";
 import { createQoderProvider } from "./qoder-provider.mjs";
+import { createCodexProvider } from "./codex-provider.mjs";
 import { createAcpRuntime } from "../runtimes/acp-runtime.mjs";
+import { createCodexAppServerRuntime } from "../runtimes/codex-app-server-runtime.mjs";
 import { createRuntimeRegistry } from "../runtimes/runtime-registry.mjs";
 import {
   normalizeAgentDelivery,
   TRUSTED_LOCAL_AGENT_POLICY_VERSION,
 } from "../../../shared/agent-delivery.mjs";
+import { AGENT_FEATURE_GATES } from "../../../shared/agent-feature-gates.mjs";
 
 function unsupportedDriver() {
   throw agentProviderError(
@@ -321,16 +324,32 @@ export function createDefaultProviderRegistry({
   preflightRunner,
   policyLoader,
   runTask,
+  codexExecution = AGENT_FEATURE_GATES.codexExecution,
+  codexInstallationResolver,
+  codexProbeRunner,
+  codexPolicyLoader,
+  codexRunTask,
 } = {}) {
-  const runtimeRegistry = createRuntimeRegistry([
-    createAcpRuntime({ ...(runTask ? { runTask } : {}) }),
-  ]);
+  const runtimes = [createAcpRuntime({ ...(runTask ? { runTask } : {}) })];
+  const providers = [createQoderProvider({
+    ...(commandResolver ? { commandResolver } : {}),
+    ...(preflightRunner ? { preflightRunner } : {}),
+    ...(policyLoader ? { policyLoader } : {}),
+  })];
+  if (codexExecution === true) {
+    runtimes.push(createCodexAppServerRuntime({
+      ...(codexRunTask ? { runTask: codexRunTask } : {}),
+    }));
+    providers.push(createCodexProvider({
+      executionEnabled: true,
+      ...(codexInstallationResolver ? { installationResolver: codexInstallationResolver } : {}),
+      ...(codexProbeRunner ? { probeRunner: codexProbeRunner } : {}),
+      ...(codexPolicyLoader ? { policyLoader: codexPolicyLoader } : {}),
+    }));
+  }
+  const runtimeRegistry = createRuntimeRegistry(runtimes);
   return createProviderRegistry({
-    providers: [createQoderProvider({
-      ...(commandResolver ? { commandResolver } : {}),
-      ...(preflightRunner ? { preflightRunner } : {}),
-      ...(policyLoader ? { policyLoader } : {}),
-    })],
+    providers,
     runtimeRegistry,
   });
 }

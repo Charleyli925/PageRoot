@@ -352,6 +352,43 @@
   outline-offset: 1px;
 }
 
+.modelChoices {
+  display: grid;
+  gap: 4px;
+  padding: 5px;
+  border: 1px solid rgb(32 29 49 / 10%);
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 8px 24px rgb(32 29 49 / 10%);
+}
+
+.modelChoice {
+  display: grid;
+  gap: 2px;
+  width: 100%;
+  padding: 8px 9px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: #201d31;
+  text-align: left;
+}
+
+.modelChoice:hover,
+.modelChoice[aria-selected="true"] {
+  background: #f1f0f6;
+}
+
+.modelChoice strong {
+  font-size: 12px;
+}
+
+.modelChoice span {
+  color: #6b6878;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
 /*
  * Plain text, not a tinted card. It sits inside the Composer inside the sidebar, so
  * a fill here is a third frame — and a purple fill spends the accent on a sentence

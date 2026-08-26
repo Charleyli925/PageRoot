@@ -684,9 +684,20 @@ export default function Workbench() {
     || null;
   const agentModelDisplayName = frozenModelId
     ? `${agentPresentation.agentName || frozenAgentSelection?.providerId || "Agent"} · ${frozenModelId}`
-    : frozenProvider
-      ? null
-      : frozenAgentSelection?.providerId || null;
+    : agentPresentation.agentName || frozenAgentSelection?.providerId || null;
+  const agentProviderChoices = Object.values(agentCatalogSnapshot?.providers ?? {}).map(
+    (provider) => ({
+      id: `${provider.providerId}:${provider.runtimeId}`,
+      label: provider.presentation.agentName || provider.presentation.displayName,
+      detail: typeof provider.presentation.localReadDisclosure === "string"
+        ? provider.presentation.localReadDisclosure
+        : null,
+      selection: provider.selection,
+    }),
+  );
+  const selectedAgentChoiceId = frozenAgentSelection
+    ? `${frozenAgentSelection.providerId}:${frozenAgentSelection.runtimeId}`
+    : null;
   const qoderAvailability = workspaceControllerSnapshot?.run?.qoderAvailability
     ?? INITIAL_QODER_AVAILABILITY;
   const backgroundProjectResults = useMemo(
@@ -783,6 +794,8 @@ export default function Workbench() {
     conversation: workspaceControllerSnapshot?.conversation ?? null,
     qoderAvailability,
     agentModelDisplayName,
+    agentChoices: agentProviderChoices,
+    selectedAgentChoiceId,
     // The header's mode comes from Request authority, not from a local guess.
     activeRun: runSnapshot.activeRun,
     submissionPending: runSnapshot.submissionPending,
