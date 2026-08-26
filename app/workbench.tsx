@@ -1352,7 +1352,7 @@ export default function Workbench() {
     if (!tabsApi) {
       tabsHydratedRef.current = true;
       startPageRequestedRef.current = false;
-      setTabsPersistenceReady(true);
+      queueMicrotask(() => setTabsPersistenceReady(true));
       return unsubscribe;
     }
     let storedStatePresent = false;
