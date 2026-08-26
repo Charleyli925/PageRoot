@@ -29,6 +29,16 @@ test("workbench tab persistence accepts presentation identity and rejects author
   assert.equal(normalizeWorkbenchTabsState({ ...valid, activeTabId: "missing" }), null);
 });
 
+test("workbench tab persistence accepts many identity-only tabs", () => {
+  const tabs = Array.from({ length: 40 }, (_, index) => ({
+    tabId: `document:project_many_${index}:doc_many_${index}`,
+    projectId: `project_many_${index}`,
+    documentId: `doc_many_${index}`,
+  }));
+  const state = { version: 1, activeTabId: tabs.at(-1).tabId, tabs };
+  assert.deepEqual(normalizeWorkbenchTabsState(state), state);
+});
+
 test("workbench tab state is atomically written and malformed state fails closed", async () => {
   const userDataPath = await mkdtemp(path.join(os.tmpdir(), "pageroot-tabs-"));
   await writeWorkbenchTabsState({ userDataPath, state: valid });

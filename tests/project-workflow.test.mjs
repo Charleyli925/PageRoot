@@ -151,7 +151,6 @@ function createHarness({
   bridge = {},
   canvas = {},
   projectOpen = {},
-  externalCapacity = {},
   policies = {},
   projectRulesWorkflow: rulesWorkflow = {},
   initialProject = true,
@@ -412,10 +411,6 @@ function createHarness({
       hash: { sha256: async (value) => sha256(value) },
       canvas: canvasPort,
       projectOpen: openPort,
-      externalCapacity: {
-        canAccept: () => true,
-        ...externalCapacity,
-      },
       viewState,
       recentRuns,
     },
@@ -1128,49 +1123,6 @@ test("an external request arriving during close preparation cancels that exact c
   await waitFor(() => Boolean(resolveExternal));
   resolveExternal(null);
   await waitFor(() => harness.workflow.getSnapshot().externalOpen.status === "idle");
-});
-
-test("a full tab workbench defers OS accept before Controller authority and resumes after capacity clears", async (t) => {
-  let capacity = false;
-  let acceptCount = 0;
-  const harness = createHarness({
-    externalCapacity: {
-      canAccept: () => capacity,
-    },
-    projectOpen: {
-      async acceptExternal() {
-        acceptCount += 1;
-        return {
-          name: "A",
-          sourcePath: A_PATH,
-          html: A_HTML,
-          sha256: sha256(A_HTML),
-        };
-      },
-      async ackExternal(requestId) {
-        return { acknowledged: true, requestId };
-      },
-    },
-  });
-  t.after(() => harness.workflow.dispose());
-
-  const beforeContext = harness.projectSession.context;
-  assert.equal(harness.workflow.acceptExternalProject({
-    requestId: "external_capacity",
-    sourcePath: A_PATH,
-  }).status, "succeeded");
-  await waitFor(() => harness.workflow.getSnapshot().externalOpen.status === "deferred");
-  assert.equal(acceptCount, 0);
-  assert.deepEqual(harness.projectSession.context, beforeContext);
-
-  capacity = true;
-  harness.workflow.reconcileDeferred();
-  await waitFor(() => (
-    acceptCount === 1
-    && harness.projectSession.context?.sourcePath === A_PATH
-    && harness.workflow.getSnapshot().externalOpen.status === "idle"
-  ));
-  assert.equal(harness.documentSession.html, A_HTML);
 });
 
 test("two unregistered OS opens keep confirmation and acknowledgement order", async (t) => {
@@ -2423,6 +2375,57 @@ test("startup confirmation commits without fencing a nonexistent Canvas", async 
     "startup confirmation did not finish hydration",
   );
   assert.equal(harness.documentSession.html, A_HTML);
+});
+
+test("a local Start confirmation cancel or commit failure never publishes the retained Controller", async (t) => {
+  let commitShouldFail = false;
+  let appliedCount = 0;
+  let canceledCount = 0;
+  const harness = createHarness({
+    initialProject: false,
+    projectOpen: {
+      async openLocal() {
+        return {
+          openKind: "confirmation",
+          requestId: "req_local_start",
+          classification: "new-external",
+          sourceFileName: "local.html",
+          visibleV1FileName: "local-V1.html",
+          projectsRootLabel: "文稿 › PageRoot › 项目",
+        };
+      },
+      async cancelPrepared() {
+        canceledCount += 1;
+        return { canceled: true };
+      },
+      async commitPrepared() {
+        if (commitShouldFail) throw new Error("commit rejected");
+        return { name: "A", sourcePath: A_PATH, html: A_HTML, sha256: sha256(A_HTML) };
+      },
+    },
+  });
+  t.after(() => harness.workflow.dispose());
+  const unsubscribe = harness.workflow.subscribeEvents((event) => {
+    if (event.type === "project-applied") appliedCount += 1;
+  });
+  t.after(unsubscribe);
+
+  await harness.workflow.openProject({ kind: "local" });
+  const canceled = await harness.workflow.cancelExternalOpen({ requestId: "req_local_start" });
+  assert.equal(canceled.status, "succeeded");
+  assert.equal(canceledCount, 1);
+  assert.equal(harness.projectSession.epoch, 0);
+  assert.equal(appliedCount, 0);
+
+  commitShouldFail = true;
+  await harness.workflow.openProject({ kind: "local" });
+  const failed = await harness.workflow.confirmExternalOpen({
+    requestId: "req_local_start",
+    action: "import-new",
+  });
+  assert.equal(failed.status, "rejected");
+  assert.equal(harness.projectSession.epoch, 0);
+  assert.equal(appliedCount, 0);
 });
 
 test("a new-external picker result shows confirmation without switching", async (t) => {

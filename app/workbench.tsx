@@ -108,6 +108,7 @@ import type { VersionSessionSnapshot } from "./application/version-session.js";
 import {
   createWorkbenchTabsSession,
   reconcileWorkbenchTabsWhenReady,
+  shouldFocusAuthoritativeWorkbenchDocument,
   type WorkbenchTab,
 } from "./application/workbench-tabs-session.js";
 import {
@@ -461,7 +462,7 @@ export default function Workbench() {
   const restoredCatalogRequestedRef = useRef(false);
   const lastBoundDocumentRef = useRef("");
   const startPageRequestedRef = useRef(true);
-  const focusNextOpenedDocumentRef = useRef(false);
+  const focusOpenedProjectEpochRef = useRef<number | null>(null);
   const [workbenchTabsSnapshot, setWorkbenchTabsSnapshot] = useState(
     () => createWorkbenchTabsSession().snapshot,
   );
@@ -1093,9 +1094,6 @@ export default function Workbench() {
         },
         ports: {
           hash: { sha256: browserSha256 },
-          externalCapacity: {
-            canAccept: () => workbenchTabsSessionRef.current.canRepresentNewDocument(),
-          },
           canvas: {
             invalidateRenderAcks: invalidateCanvasRenderAcks,
             isMounted: () => Boolean(editorRef.current),
@@ -1926,6 +1924,7 @@ export default function Workbench() {
         lastModifiedAt?: unknown;
         showHandoff?: unknown;
         contentChanged?: unknown;
+        epoch?: unknown;
         requestId?: unknown;
         ackPending?: unknown;
       }>;
@@ -1943,6 +1942,13 @@ export default function Workbench() {
       }
       if (projectEvent.type === "project-applied") {
         const project = projectEvent.project as HtmlProject;
+        if (!workbenchTabsSessionRef.current.snapshot.pendingTabId) {
+          const appliedEpoch = Number(projectEvent.epoch);
+          focusOpenedProjectEpochRef.current = Number.isSafeInteger(appliedEpoch)
+            ? appliedEpoch
+            : null;
+          startPageRequestedRef.current = false;
+        }
         setStartupIssue(null);
         setProjectName(project.name);
         setProjectRecordsPath(null);
@@ -2119,17 +2125,6 @@ export default function Workbench() {
             id: "retry-external-project-open",
             label: ackPending ? "重试回执" : "重试打开",
           },
-        });
-        return;
-      }
-      if (projectEvent.type === "external-project-open-capacity") {
-        setToast({
-          title: "标签页已满",
-          message: String(projectEvent.reason || "请先关闭一个标签页，外部 HTML 会保留并继续打开。"),
-          tone: "warning",
-          sticky: true,
-          disposition: "defer-and-resume",
-          dedupeKey: "external-project-open-capacity",
         });
         return;
       }
@@ -2730,9 +2725,13 @@ export default function Workbench() {
     const firstBinding = lastBoundDocumentRef.current !== identity;
     if (firstBinding) lastBoundDocumentRef.current = identity;
     const switchingDocument = Boolean(tabsSession.snapshot.pendingTabId);
-    const focus = !switchingDocument && !startPageRequestedRef.current && (
-      firstBinding || focusNextOpenedDocumentRef.current
-    );
+    const focus = shouldFocusAuthoritativeWorkbenchDocument({
+      pendingTabId: switchingDocument ? tabsSession.snapshot.pendingTabId : null,
+      committedEpoch: focusOpenedProjectEpochRef.current,
+      currentEpoch: projectSnapshot.epoch,
+      startPageRequested: startPageRequestedRef.current,
+      firstBinding,
+    });
     const bound = tabsSession.bindDocument({
       projectId,
       documentId,
@@ -2746,17 +2745,8 @@ export default function Workbench() {
             : "normal",
       focus,
     });
-    if (!bound) {
-      setToast({
-        title: "标签页已满",
-        message: "最多可同时打开 24 个标签页。请先关闭一个，再打开这份 HTML。",
-        tone: "warning",
-        sticky: true,
-        dedupeKey: "workbench-tab-capacity",
-      });
-      return;
-    }
-    if (focus) focusNextOpenedDocumentRef.current = false;
+    if (!bound) return;
+    if (focus) focusOpenedProjectEpochRef.current = null;
   }, [
     currentSourceFileStem,
     documentId,
@@ -2764,6 +2754,7 @@ export default function Workbench() {
     projectId,
     projectLoadError,
     projectName,
+    projectSnapshot.epoch,
     readyReviewSession,
     runInProgress,
   ]);
@@ -4142,18 +4133,6 @@ export default function Workbench() {
   }, [workspaceController]);
   const openProject = useCallback(async (recentPath?: string) => {
     if (!workspaceController) return;
-    if (!workbenchTabsSessionRef.current.canRepresentNewDocument()) {
-      setToast({
-        title: "标签页已满",
-        message: "请先关闭一个标签页，再打开新的 HTML。",
-        tone: "warning",
-        sticky: true,
-        dedupeKey: "workbench-tab-capacity",
-      });
-      return;
-    }
-    startPageRequestedRef.current = false;
-    focusNextOpenedDocumentRef.current = true;
     const outcome = await workspaceController.openProject({
       kind: recentPath ? "recent" : "local",
       sourcePath: recentPath || null,
@@ -4163,9 +4142,9 @@ export default function Workbench() {
       startPageRequestedRef.current = snapshot.tabs.find(
         (tab) => tab.tabId === snapshot.activeTabId,
       )?.kind === "start";
-      focusNextOpenedDocumentRef.current = false;
+      focusOpenedProjectEpochRef.current = null;
     }
-  }, [setToast, workspaceController]);
+  }, [workspaceController]);
   const presentWorkbenchTabOutcome = useCallback((outcome: unknown) => {
     if (!outcome || typeof outcome !== "object" || (outcome as { status?: string }).status === "succeeded") return;
     const result = outcome as { reason?: string; code?: string };
@@ -4184,13 +4163,17 @@ export default function Workbench() {
       presentWorkbenchTabOutcome(outcome);
       if (outcome.status === "succeeded") {
         startPageRequestedRef.current = tab.kind === "start";
+        if (tab.kind === "start") focusOpenedProjectEpochRef.current = null;
       }
     });
   }, [presentWorkbenchTabOutcome]);
   const createWorkbenchStartTab = useCallback(() => {
     void workbenchTabsWorkflowRef.current?.createStart().then((outcome) => {
       presentWorkbenchTabOutcome(outcome);
-      if (outcome.status === "succeeded") startPageRequestedRef.current = true;
+      if (outcome.status === "succeeded") {
+        startPageRequestedRef.current = true;
+        focusOpenedProjectEpochRef.current = null;
+      }
     });
   }, [presentWorkbenchTabOutcome]);
   const closeWorkbenchTab = useCallback((tab: WorkbenchTab) => {
@@ -4200,6 +4183,7 @@ export default function Workbench() {
         (item) => item.tabId === workbenchTabsSessionRef.current.snapshot.activeTabId,
       );
       startPageRequestedRef.current = active?.kind === "start";
+      if (active?.kind === "start") focusOpenedProjectEpochRef.current = null;
       if (outcome.status === "succeeded" && active) {
         window.requestAnimationFrame(() => {
           document.getElementById(`workbench-tab-${active.tabId}`)?.focus();
@@ -4217,8 +4201,8 @@ export default function Workbench() {
     if (!tab) {
       presentWorkbenchTabOutcome({
         status: "rejected",
-        code: "WORKBENCH_TAB_CAPACITY",
-        reason: "最多可同时打开 24 个标签页。请先关闭一个。",
+        code: "WORKBENCH_TAB_SWITCH_BUSY",
+        reason: "另一个开始标签正在打开 HTML，请稍后重试。",
       });
       return;
     }
@@ -4279,8 +4263,6 @@ export default function Workbench() {
     const lifecycle = window.htmlAIAppLifecycle;
     if (!lifecycle?.onExternalOpenRequested) return undefined;
     return lifecycle.onExternalOpenRequested((request) => {
-      startPageRequestedRef.current = false;
-      focusNextOpenedDocumentRef.current = true;
       workspaceController.acceptExternalProject(request);
     });
   }, [workspaceController]);

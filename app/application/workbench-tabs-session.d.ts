@@ -45,11 +45,16 @@ export class WorkbenchTabsSession {
     missing: readonly WorkbenchTab[];
   }>;
   close(tabId: string): Readonly<{ snapshot: WorkbenchTabsSnapshot; nextTabId: string | null }>;
-  canAddTab(): boolean;
-  canRepresentNewDocument(): boolean;
   serialize(): Readonly<Record<string, unknown>>;
 }
 export function createWorkbenchTabsSession(): WorkbenchTabsSession;
+export function shouldFocusAuthoritativeWorkbenchDocument(input: {
+  pendingTabId: string | null;
+  committedEpoch: number | null;
+  currentEpoch: number;
+  startPageRequested: boolean;
+  firstBinding: boolean;
+}): boolean;
 export function reconcileWorkbenchTabsWhenReady(input: {
   session: WorkbenchTabsSession;
   tabsPersistenceReady: boolean;

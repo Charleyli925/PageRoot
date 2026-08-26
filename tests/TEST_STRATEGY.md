@@ -114,7 +114,7 @@ Workbench 只确认已提交 loading surface、传入窄 port 并消费快照。
   在 `dispose()` 后不再发布；Document snapshot 只投影 `hasPendingWrite`/`isFlushing`，
   不泄露写入内容或 Promise。Workbench 只能订阅该 aggregate snapshot 与 event stream。
 - `WorkbenchTabsSession/Workflow`：Node 直接证明 `projectId + documentId` 去重、多开始页、
-  活动 Start 原位承载新文档/去重已有文档、24 标签上限、状态投影、关闭不删业务权威、close/activate 竞态 fail-closed，以及 Start 和文档
+  活动 Start 原位承载新文档/去重已有文档、较多标签仍保持顺序与身份去重且不设产品数量上限、状态投影、关闭不删业务权威、close/activate 竞态 fail-closed，以及 Start 和文档
   激活严格按 `ProjectWorkflow.prepareSwitch` 的 native fence/drain → Registry 打开 → 新 epoch
   身份挂载 → hydration/Canvas settle 顺序；相同旧身份不得提前完成。Registry-before-hydrate 与
   hydrate-before-Registry 都必须得到相同标题/缺失项结果。持久化测试拒绝 title/path/HTML/Hash
@@ -122,8 +122,7 @@ Workbench 只确认已提交 loading surface、传入窄 port 并消费快照。
   Home/End 的 roving focus、键盘关闭后的活动标签焦点、Start 冷重启抑制 activePath、Start→Registry 原位打开、Registry 标题恢复及 unmounted outlet 安全关闭。
 - 外部打开 FIFO：Main mailbox Node 测试证明队首在 renderer 显式 ack 前不消费、不发送后继；renderer
   Session/ProjectWorkflow 测试证明两个未登记 OS 请求依次显示确认，并覆盖接受、取消、拒绝与 deferred
-  的回执顺序；另证明满容量在 Desktop accept/Controller 切换前 deferred、直接/终态/确认后 ack 失败只重试
-  同一回执且不重复打开或提交，以及关闭会逐个取消并回执全部排队确认。preload 合同只暴露 opaque requestId
+  的回执顺序；另证明直接/终态/确认后 ack 失败只重试同一回执且不重复打开或提交，以及关闭会逐个取消并回执全部排队确认。preload 合同只暴露 opaque requestId
   的 accept/ack，不暴露路径权威。
 - Bridge 集成环境：每个真实 Bridge 测试各自创建临时 root、workspace、sources、端口、子进程与 stdout/stderr；同一测试可为重启恢复顺序启动新进程，但不同测试绝不共享 workspace 或长寿命 Bridge。环境默认携带配置的 Bridge auth token，测试缺失/错误 token 时必须显式关闭或覆盖它；HTTP/连接失败保留 response text 与 Bridge 日志，不重试 mutation。
 - Agent Host/Policy contract：公共 owner 位于 `scripts/agent/policies/` 与 `scripts/agent/hosts/`；`tests/agent-provider-contract.test.mjs` 证明公共层只产生通用 Agent error/brand，旧 façade 在边界映射回既有 provider/transport error name、code 与 copy，并以 source literal gate 阻止 provider/transport ownership 回流。Discussion capability 和非 execution ticket 必须 fail-closed。`tests/qoder-acp-spike-client.test.mjs` 属于 Node integration owner，只使用合成 HTML、隔离的真实 v4 `ProjectFileRepository`、进程内 fake ACP Agent 与官方 finalizer。oracle 必须独立证明外部封存的 manifest Hash、精确 readOrder/role/media type、单一 Candidate 写路径与原子 no-replace 发布、无 shell 的精确 finalizer、session/permission/terminal 绑定、completion/output Hash、runtime authority drift、macOS `/var` realpath alias、事件/prompt 边界、timeout cancel 后拒绝晚到写入/finalizer、Agent 早退出与孤儿进程组清理，以及 Candidate ready 后 Working Copy 全量状态、manifest 和 Version 快照均未变化。

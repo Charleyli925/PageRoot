@@ -4,7 +4,6 @@ import path from "node:path";
 
 const VERSION = 1;
 const MAX_BYTES = 64 * 1024;
-const MAX_TABS = 24;
 const EXACT_ROOT_KEYS = new Set(["version", "activeTabId", "tabs"]);
 const EXACT_TAB_KEYS = new Set(["tabId", "projectId", "documentId"]);
 
@@ -18,7 +17,7 @@ function cleanString(value, pattern, maxLength) {
 export function normalizeWorkbenchTabsState(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   if (Object.keys(value).some((key) => !EXACT_ROOT_KEYS.has(key))) return null;
-  if (value.version !== VERSION || !Array.isArray(value.tabs) || value.tabs.length > MAX_TABS) {
+  if (value.version !== VERSION || !Array.isArray(value.tabs)) {
     return null;
   }
   const tabs = [];

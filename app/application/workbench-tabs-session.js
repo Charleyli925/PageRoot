@@ -1,4 +1,3 @@
-const MAX_TABS = 24;
 const STATUS = new Set(["normal", "processing", "review-ready", "error", "opening"]);
 
 function documentKey(projectId, documentId) {
@@ -105,8 +104,6 @@ export class WorkbenchTabsSession {
       seenTabs.add(tab.tabId);
       seenDocuments.add(key);
       tabs.push(tab);
-      // The synthetic start page also occupies a tab slot after hydration.
-      if (tabs.length >= MAX_TABS - 1) break;
     }
     const start = startTab();
     tabs.unshift(start);
@@ -127,7 +124,6 @@ export class WorkbenchTabsSession {
   }
 
   createStart({ focus = true } = {}) {
-    if (this.#snapshot.tabs.length >= MAX_TABS) return null;
     let sequence = 1;
     const ids = new Set(this.#snapshot.tabs.map((tab) => tab.tabId));
     while (ids.has(`start:${sequence}`)) sequence += 1;
@@ -182,11 +178,7 @@ export class WorkbenchTabsSession {
       // Browser behavior: opening from the active blank page converts that
       // one tab into the document. Other explicitly-created Start tabs remain.
       tabs.splice(activeStartIndex, 1, resolved);
-    } else if (tabs.length < MAX_TABS) {
-      tabs.push(resolved);
-    } else {
-      return null;
-    }
+    } else tabs.push(resolved);
     this.#restoredDocumentTabIds.delete(resolved.tabId);
     const shouldFocus = focus;
     return this.#publish({
@@ -223,7 +215,6 @@ export class WorkbenchTabsSession {
       this.#stagedStartReplacement = existing || tab;
       return this.#stagedStartReplacement;
     }
-    if (this.#snapshot.tabs.length >= MAX_TABS) return null;
     this.#publish({ ...this.#snapshot, tabs: [...this.#snapshot.tabs, tab] });
     return tab;
   }
@@ -442,20 +433,25 @@ export class WorkbenchTabsSession {
     });
   }
 
-  canAddTab() {
-    return this.#snapshot.tabs.length < MAX_TABS;
-  }
-
-  canRepresentNewDocument() {
-    if (this.canAddTab()) return true;
-    return this.#snapshot.tabs.some((tab) => (
-      tab.tabId === this.#snapshot.activeTabId && tab.kind === "start"
-    ));
-  }
 }
 
 export function createWorkbenchTabsSession() {
   return new WorkbenchTabsSession();
+}
+
+export function shouldFocusAuthoritativeWorkbenchDocument({
+  pendingTabId,
+  committedEpoch,
+  currentEpoch,
+  startPageRequested,
+  firstBinding,
+}) {
+  if (pendingTabId) return false;
+  if (
+    Number.isSafeInteger(committedEpoch)
+    && committedEpoch === currentEpoch
+  ) return true;
+  return startPageRequested !== true && firstBinding === true;
 }
 
 export function reconcileWorkbenchTabsWhenReady({

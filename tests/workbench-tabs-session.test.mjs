@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   createWorkbenchTabsSession,
   reconcileWorkbenchTabsWhenReady,
+  shouldFocusAuthoritativeWorkbenchDocument,
 } from "../app/application/workbench-tabs-session.js";
 
 const a = { projectId: "project_alpha", documentId: "doc_alpha", title: "Alpha" };
@@ -36,6 +37,32 @@ test("opening from the active Start converts only that blank tab in place", () =
   session.bindDocument({ ...a, title: "Alpha renamed" });
   assert.equal(session.snapshot.tabs.filter((tab) => tab.kind === "document").length, 1);
   assert.equal(session.snapshot.tabs.length, before);
+});
+
+test("Start focus is created only by an authoritative project commit", () => {
+  const waiting = {
+    pendingTabId: null,
+    committedEpoch: null,
+    currentEpoch: 4,
+    startPageRequested: true,
+    firstBinding: false,
+  };
+  assert.equal(shouldFocusAuthoritativeWorkbenchDocument(waiting), false);
+  assert.equal(shouldFocusAuthoritativeWorkbenchDocument({
+    ...waiting,
+    // Confirmation cancel/failure publishes no project-applied epoch.
+    committedEpoch: null,
+  }), false);
+  assert.equal(shouldFocusAuthoritativeWorkbenchDocument({
+    ...waiting,
+    committedEpoch: 5,
+    currentEpoch: 5,
+  }), true);
+  assert.equal(shouldFocusAuthoritativeWorkbenchDocument({
+    ...waiting,
+    committedEpoch: 4,
+    currentEpoch: 5,
+  }), false);
 });
 
 test("staging a registered project from active Start reuses the blank slot", () => {
@@ -225,47 +252,22 @@ test("restore reconciliation is deterministic when tabs hydration arrives first"
   assert.equal(reconciled.snapshot.tabs.every((tab) => tab.kind === "start"), true);
 });
 
-test("binding a twenty-fifth document fails closed instead of creating invalid persistence", () => {
+test("tab order remains identity-deduplicated across many open documents", () => {
   const session = createWorkbenchTabsSession();
-  for (let index = 0; index < 24; index += 1) {
+  for (let index = 0; index < 40; index += 1) {
     assert.ok(session.bindDocument({
-      projectId: `project_capacity_${index}`,
-      documentId: `doc_capacity_${index}`,
-      title: `Capacity ${index}`,
+      projectId: `project_unlimited_${index}`,
+      documentId: `doc_unlimited_${index}`,
+      title: `Unlimited ${index}`,
       focus: index === 0,
     }));
   }
-  assert.equal(session.snapshot.tabs.length, 24);
-  assert.equal(session.canAddTab(), false);
-  assert.equal(session.canRepresentNewDocument(), false);
-  assert.equal(session.bindDocument({
-    projectId: "project_capacity_overflow",
-    documentId: "doc_capacity_overflow",
-    title: "Overflow",
-  }), null);
-  assert.equal(session.snapshot.tabs.length, 24);
-});
-
-test("a full workbench can replace its active Start slot with one accepted document", () => {
-  const session = createWorkbenchTabsSession();
-  for (let index = 0; index < 23; index += 1) {
-    session.bindDocument({
-      projectId: `project_replace_${index}`,
-      documentId: `doc_replace_${index}`,
-      title: `Replace ${index}`,
-      focus: false,
-    });
-  }
-  assert.equal(session.snapshot.tabs.length, 24);
-  assert.equal(session.canAddTab(), false);
-  assert.equal(session.canRepresentNewDocument(), true);
-  const bound = session.bindDocument({
-    projectId: "project_replacement",
-    documentId: "doc_replacement",
-    title: "Replacement",
+  assert.equal(session.snapshot.tabs.length, 40);
+  session.bindDocument({
+    projectId: "project_unlimited_39",
+    documentId: "doc_unlimited_39",
+    title: "Unlimited renamed",
   });
-  assert.ok(bound);
-  assert.equal(bound.tabs.length, 24);
-  assert.equal(bound.tabs.some((tab) => tab.kind === "start"), false);
-  assert.equal(bound.tabs.find((tab) => tab.tabId === bound.activeTabId)?.projectId, "project_replacement");
+  assert.equal(session.snapshot.tabs.length, 40);
+  assert.equal(session.snapshot.tabs.find((tab) => tab.projectId === "project_unlimited_39")?.title, "Unlimited renamed");
 });

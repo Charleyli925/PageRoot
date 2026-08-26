@@ -223,7 +223,6 @@ export class ProjectWorkflow {
   #projectOpenPort;
   #viewStatePort;
   #recentRunsPort;
-  #externalCapacityPort;
   #policies;
   #scheduler;
   #clock;
@@ -413,9 +412,6 @@ export class ProjectWorkflow {
     this.#projectOpenPort = ports.projectOpen;
     this.#viewStatePort = ports.viewState;
     this.#recentRunsPort = ports.recentRuns;
-    this.#externalCapacityPort = ports.externalCapacity || Object.freeze({
-      canAccept: () => true,
-    });
     this.#policies = policies;
     this.#scheduler = scheduler;
     this.#clock = clock;
@@ -930,10 +926,8 @@ export class ProjectWorkflow {
       return;
     }
     if (this.#externalFileOpenSession.snapshot.status === "deferred") {
-      const externalBlocked = switchBlocked
-        || this.#externalCapacityPort.canAccept() !== true;
       const retry = this.#externalFileOpenSession.reconcileDeferredSwitch({
-        switchBlocked: externalBlocked,
+        switchBlocked,
         execute: (request, options) => this.#openExternalProject(request, options),
       });
       if (retry === "action-required") {
@@ -2390,14 +2384,6 @@ export class ProjectWorkflow {
       return await this.#retryPendingExternalAck(request.requestId)
         ? "complete"
         : "deferred";
-    }
-    if (this.#externalCapacityPort.canAccept() !== true) {
-      this.#emit({
-        type: "external-project-open-capacity",
-        requestId: request.requestId,
-        reason: "标签页已满，请先关闭一个再继续打开。",
-      });
-      return "deferred";
     }
     const operationId = this.#nextOpenOperation();
     try {
