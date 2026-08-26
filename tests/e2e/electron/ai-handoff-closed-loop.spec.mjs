@@ -5095,11 +5095,9 @@ test("a rewrite outside <main> is still reviewed", async () => {
     await expect(afterReviewFrame.locator(
       '[data-review-outside-main] [data-pageroot-review-text="added"]',
     ).filter({ hasText: "一致" }).first()).toBeVisible();
-    // The header icon keeps one meaning across editing and review: it opens
-    // 关于源页 instead of quietly leaving the review page.
-    await launched.page.getByTestId("ai-review-workspace")
-      .getByRole("button", { name: "关于源页" })
-      .click();
+    // Review is embedded in the shared Workbench shell. Its one top-level
+    // header icon keeps the same meaning without duplicating a Review header.
+    await launched.page.getByRole("button", { name: "关于源页" }).click();
     await expect(launched.page.getByRole("button", { name: "关闭关于源页" }))
       .toBeVisible({ timeout: 15_000 });
     await launched.page.getByRole("button", { name: "关闭关于源页" }).click();

@@ -105,6 +105,11 @@ import type { PageViewContext } from "./lib/page-view-context.js";
 import type { ProjectSessionSnapshot } from "./application/project-session.js";
 import type { RunOperationKind, RunSessionSnapshot } from "./application/run-session.js";
 import type { VersionSessionSnapshot } from "./application/version-session.js";
+import {
+  createWorkbenchTabsSession,
+  type WorkbenchTab,
+} from "./application/workbench-tabs-session.js";
+import { WorkbenchTabsWorkflow } from "./application/workbench-tabs-workflow.js";
 import type { SourceHistoryDirection } from "./domain/source-history.js";
 import {
   EDIT_AUTHOR_RUNTIME_VERIFICATION_DEADLINE_MS,
@@ -189,6 +194,12 @@ import {
   WorkbenchHeaderShell,
 } from "./workbench/workbench-header-shell";
 import {
+  WorkbenchGlobalSidebar,
+  WorkbenchStartPage,
+  WorkbenchStartToolbar,
+  WorkbenchTabBar,
+} from "./workbench/WorkbenchChrome";
+import {
   activeRunOperationKey,
   currentWorkingCopyPresentation,
   fileExtension,
@@ -231,6 +242,7 @@ import type {
   PrepareCloseDetail,
   ProjectContext,
   RecentProject,
+  RegisteredProject,
   StartupIssue,
   Toast,
   ToastAction,
@@ -435,6 +447,19 @@ function documentEditFailureReason(outcome: DocumentEditOutcome): string {
 }
 
 export default function Workbench() {
+  const workbenchTabsSessionRef = useRef(createWorkbenchTabsSession());
+  const workbenchTabsWorkflowRef = useRef<WorkbenchTabsWorkflow | null>(null);
+  const tabsHydratedRef = useRef(false);
+  const tabsStateControlsStartupRef = useRef(false);
+  const restoredTabOpeningRef = useRef("");
+  const lastBoundDocumentRef = useRef("");
+  const startPageRequestedRef = useRef(true);
+  const focusNextOpenedDocumentRef = useRef(false);
+  const [workbenchTabsSnapshot, setWorkbenchTabsSnapshot] = useState(
+    () => createWorkbenchTabsSession().snapshot,
+  );
+  const [globalSidebarOpen, setGlobalSidebarOpen] = useState(false);
+  const [tabsPersistenceReady, setTabsPersistenceReady] = useState(false);
   const editorRef = useRef<HtmlCanvasEditorHandle>(null);
   const interactionPreviewRef = useRef<HtmlInteractionPreviewHandle>(null);
   const previewToEditPendingRef = useRef(false);
@@ -629,6 +654,7 @@ export default function Workbench() {
   const [fileRenameDraft, setFileRenameDraft] = useState("");
   const [fileRenameError, setFileRenameError] = useState("");
   const [recentProjects, setRecentProjects] = useState<RecentProject[]>([]);
+  const [registeredProjects, setRegisteredProjects] = useState<RegisteredProject[]>([]);
   const [recentProjectsError, setRecentProjectsError] = useState("");
   const [selection, setSelection] = useState<HtmlCanvasSelection | null>(null);
   const commentSnapshot = (
@@ -1061,6 +1087,7 @@ export default function Workbench() {
           hash: { sha256: browserSha256 },
           canvas: {
             invalidateRenderAcks: invalidateCanvasRenderAcks,
+            isMounted: () => Boolean(editorRef.current),
             deferCommand: (
               kind: string,
               run: () => void,
@@ -1298,16 +1325,75 @@ export default function Workbench() {
       clock: { now: Date.now },
     });
     workspaceControllerRef.current = controller;
+    workbenchTabsWorkflowRef.current = new WorkbenchTabsWorkflow({
+      session: workbenchTabsSessionRef.current,
+      controller,
+    });
     setWorkspaceController(controller);
     setWorkspaceControllerSnapshot(controller.getSnapshot());
     return () => {
       if (workspaceControllerRef.current === controller) {
         workspaceControllerRef.current = null;
+        workbenchTabsWorkflowRef.current = null;
       }
       setWorkspaceController((current) => current === controller ? null : current);
       controller.dispose();
     };
   }, [deferEditorCommand, invalidateCanvasRenderAcks, isViewTransitioning]);
+  useEffect(() => {
+    const session = workbenchTabsSessionRef.current;
+    const unsubscribe = session.subscribe((snapshot) => {
+      setWorkbenchTabsSnapshot(snapshot);
+      if (tabsHydratedRef.current) {
+        void window.htmlAIWorkbenchTabs?.set(session.serialize()).catch(() => {});
+      }
+    });
+    const tabsApi = window.htmlAIWorkbenchTabs;
+    if (!tabsApi) {
+      tabsHydratedRef.current = true;
+      startPageRequestedRef.current = false;
+      setTabsPersistenceReady(true);
+      return unsubscribe;
+    }
+    let storedStatePresent = false;
+    void tabsApi.get()
+      .then((stored) => {
+        if (stored) {
+          storedStatePresent = true;
+          session.hydrate(stored);
+          tabsStateControlsStartupRef.current = Boolean(session.snapshot.pendingTabId);
+          startPageRequestedRef.current = !session.snapshot.pendingTabId;
+        }
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!storedStatePresent) {
+          startPageRequestedRef.current = false;
+          const current = workspaceControllerRef.current?.getSnapshot().projectSession;
+          if (current?.projectId && current.documentId) {
+            session.bindDocument({
+              projectId: current.projectId,
+              documentId: current.documentId,
+              title: "HTML",
+              focus: true,
+            });
+          }
+        }
+        tabsHydratedRef.current = true;
+        setTabsPersistenceReady(true);
+      });
+    return unsubscribe;
+  }, []);
+
+  useEffect(() => {
+    const pending = workbenchTabsSessionRef.current.snapshot.pendingTabId;
+    if (!workspaceController || !tabsPersistenceReady || !pending) return;
+    if (restoredTabOpeningRef.current === pending) return;
+    restoredTabOpeningRef.current = pending;
+    void workbenchTabsWorkflowRef.current?.restorePending().finally(() => {
+      if (restoredTabOpeningRef.current === pending) restoredTabOpeningRef.current = "";
+    });
+  }, [tabsPersistenceReady, workspaceController, workbenchTabsSnapshot.pendingTabId]);
   const invalidateEditCanvasRenderAck = useCallback(() => {
     setCanvasRenderAcks((current) => (
       current.edit ? { ...current, edit: null } : current
@@ -1851,6 +1937,20 @@ export default function Workbench() {
       if (projectEvent.type === "project-recents-failed") {
         setRecentProjectsError(String(
           projectEvent.reason || "最近打开记录暂时无法读取。",
+        ));
+        return;
+      }
+      if (projectEvent.type === "project-catalog-loaded") {
+        setRegisteredProjects(
+          Array.isArray(projectEvent.projects)
+            ? projectEvent.projects as RegisteredProject[]
+            : [],
+        );
+        return;
+      }
+      if (projectEvent.type === "project-catalog-failed") {
+        setRecentProjectsError(String(
+          projectEvent.reason || "项目目录暂时无法读取。",
         ));
         return;
       }
@@ -2482,6 +2582,38 @@ export default function Workbench() {
     localFileNameFromSourcePath(sourcePath) || projectName;
   const currentSourceFileExtension = fileExtension(currentSourceFileName);
   const currentSourceFileStem = fileStem(currentSourceFileName);
+  useEffect(() => {
+    if (!projectId || !documentId) return;
+    const identity = `${projectId}\u0000${documentId}`;
+    const firstBinding = lastBoundDocumentRef.current !== identity;
+    if (firstBinding) lastBoundDocumentRef.current = identity;
+    const focus = !startPageRequestedRef.current && (
+      firstBinding || focusNextOpenedDocumentRef.current
+    );
+    workbenchTabsSessionRef.current.bindDocument({
+      projectId,
+      documentId,
+      title: currentSourceFileStem || projectName,
+      status: projectLoadError || persistState === "failed" || persistState === "conflict"
+        ? "error"
+        : readyReviewSession
+          ? "review-ready"
+          : runInProgress
+            ? "processing"
+            : "normal",
+      focus,
+    });
+    if (focus) focusNextOpenedDocumentRef.current = false;
+  }, [
+    currentSourceFileStem,
+    documentId,
+    persistState,
+    projectId,
+    projectLoadError,
+    projectName,
+    readyReviewSession,
+    runInProgress,
+  ]);
   const canOfferFileRename = Boolean(
     sourcePath
     && sourceSha256
@@ -3405,9 +3537,14 @@ export default function Workbench() {
     });
   }, [workspaceController]);
   useEffect(() => {
-    if (!workspaceController || !window.htmlAIProjects) return;
+    if (
+      !workspaceController
+      || !window.htmlAIProjects
+      || !tabsPersistenceReady
+      || tabsStateControlsStartupRef.current
+    ) return;
     void workspaceController.openProject({ kind: "startup" });
-  }, [workspaceController]);
+  }, [tabsPersistenceReady, workspaceController]);
 
   useEffect(() => {
     if (!toast) {
@@ -3838,11 +3975,78 @@ export default function Workbench() {
   }, [workspaceController]);
   const openProject = useCallback(async (recentPath?: string) => {
     if (!workspaceController) return;
+    startPageRequestedRef.current = false;
+    focusNextOpenedDocumentRef.current = true;
     await workspaceController.openProject({
       kind: recentPath ? "recent" : "local",
       sourcePath: recentPath || null,
     });
   }, [workspaceController]);
+  const selectWorkbenchTab = useCallback((tab: WorkbenchTab) => {
+    startPageRequestedRef.current = tab.kind === "start";
+    void workbenchTabsWorkflowRef.current?.activate(tab.tabId);
+  }, []);
+  const createWorkbenchStartTab = useCallback(() => {
+    startPageRequestedRef.current = true;
+    void workbenchTabsWorkflowRef.current?.createStart();
+  }, []);
+  const closeWorkbenchTab = useCallback((tab: WorkbenchTab) => {
+    void workbenchTabsWorkflowRef.current?.close(tab.tabId).then(() => {
+      const active = workbenchTabsSessionRef.current.snapshot.tabs.find(
+        (item) => item.tabId === workbenchTabsSessionRef.current.snapshot.activeTabId,
+      );
+      startPageRequestedRef.current = active?.kind === "start";
+    });
+  }, []);
+  const openRegisteredWorkbenchProject = useCallback((project: RegisteredProject) => {
+    if (!project.documentId || project.availability !== "ready") return;
+    const tab = workbenchTabsSessionRef.current.stageDocument({
+      projectId: project.projectId,
+      documentId: project.documentId,
+      title: project.projectName,
+    });
+    if (!tab) return;
+    startPageRequestedRef.current = false;
+    void workbenchTabsWorkflowRef.current?.activate(tab.tabId);
+  }, []);
+  useEffect(() => {
+    const handleWorkbenchShortcut = (event: KeyboardEvent) => {
+      const command = event.metaKey || event.ctrlKey;
+      if (!command || event.altKey) return;
+      if (event.key.toLowerCase() === "t") {
+        event.preventDefault();
+        createWorkbenchStartTab();
+        return;
+      }
+      if (event.key.toLowerCase() === "w") {
+        const active = workbenchTabsSessionRef.current.snapshot.tabs.find(
+          (tab) => tab.tabId === workbenchTabsSessionRef.current.snapshot.activeTabId,
+        );
+        if (!active) return;
+        event.preventDefault();
+        closeWorkbenchTab(active);
+        return;
+      }
+      const numeric = Number(event.key);
+      if (Number.isInteger(numeric) && numeric >= 1 && numeric <= 9) {
+        const tab = workbenchTabsSessionRef.current.snapshot.tabs[numeric - 1];
+        if (!tab) return;
+        event.preventDefault();
+        selectWorkbenchTab(tab);
+        return;
+      }
+      if (event.key === "Tab" && workbenchTabsSessionRef.current.snapshot.tabs.length > 1) {
+        event.preventDefault();
+        const snapshot = workbenchTabsSessionRef.current.snapshot;
+        const currentIndex = snapshot.tabs.findIndex((tab) => tab.tabId === snapshot.activeTabId);
+        const direction = event.shiftKey ? -1 : 1;
+        const nextIndex = (currentIndex + direction + snapshot.tabs.length) % snapshot.tabs.length;
+        selectWorkbenchTab(snapshot.tabs[nextIndex]);
+      }
+    };
+    window.addEventListener("keydown", handleWorkbenchShortcut);
+    return () => window.removeEventListener("keydown", handleWorkbenchShortcut);
+  }, [closeWorkbenchTab, createWorkbenchStartTab, selectWorkbenchTab]);
 
   const resumeDeferredProjectApplication = useCallback(() => (
     workspaceController?.resumeDeferredProjectApplication().status === "succeeded"
@@ -3857,6 +4061,8 @@ export default function Workbench() {
     const lifecycle = window.htmlAIAppLifecycle;
     if (!lifecycle?.onExternalOpenRequested) return undefined;
     return lifecycle.onExternalOpenRequested((request) => {
+      startPageRequestedRef.current = false;
+      focusNextOpenedDocumentRef.current = true;
       workspaceController.acceptExternalProject(request);
     });
   }, [workspaceController]);
@@ -7218,6 +7424,7 @@ export default function Workbench() {
   // both preview sessions (and retitle the header) mid-accept for nothing.
   const readyReviewOverlay = readyReviewSession ? (
     <AiReviewWorkspace
+      embedded
       fileName={
         localFileNameFromSourcePath(readyReviewSession.sourcePath)
         || currentSourceFileName
@@ -7265,11 +7472,19 @@ export default function Workbench() {
       ) : null}
     />
   ) : null;
+  const activeWorkbenchTab = workbenchTabsSnapshot.tabs.find(
+    (tab) => tab.tabId === workbenchTabsSnapshot.activeTabId,
+  ) || workbenchTabsSnapshot.tabs[0];
+  const startPageActive = activeWorkbenchTab?.kind === "start"
+    && typeof window !== "undefined"
+    && Boolean(window.htmlAIProjects);
 
   return (
     <>
       <main
         className="workbench"
+        data-start-page={startPageActive ? "true" : undefined}
+        data-left-sidebar={globalSidebarOpen ? "open" : "collapsed"}
         data-round-state={runInProgress ? "processing" : viewMode}
         data-canvas-mode={canvasMode}
         data-handoff-preview={runInProgress && handoffPreviewOpen ? "true" : undefined}
@@ -7283,8 +7498,16 @@ export default function Workbench() {
                 : "unbound"
         }
         aria-label="HTML AI 可视化编辑工作台"
-        inert={readyReviewSession ? true : undefined}
       >
+      <WorkbenchTabBar
+        snapshot={workbenchTabsSnapshot}
+        onSelect={selectWorkbenchTab}
+        onClose={closeWorkbenchTab}
+        onNew={createWorkbenchStartTab}
+      />
+      {startPageActive ? (
+        <WorkbenchStartToolbar onOpenSidebar={() => setGlobalSidebarOpen(true)} />
+      ) : null}
       <WorkbenchHeaderShell
         data-file-renaming={fileRenameEditing ? "true" : undefined}
       >
@@ -7606,8 +7829,44 @@ export default function Workbench() {
         />
       ) : null}
 
-      <div ref={reviewStageRef} className="review-scroll-stage">
-        <section className="canvas-column" aria-label="页面画布">
+      <WorkbenchGlobalSidebar
+        open={globalSidebarOpen}
+        recentProjects={recentProjects}
+        registeredProjects={registeredProjects}
+        onToggle={() => {
+          setGlobalSidebarOpen((open) => !open);
+          void workspaceController?.refreshRecentProjects();
+          void workspaceController?.refreshRegisteredProjects();
+        }}
+        onOpenLocal={() => void openProject()}
+        onOpenRecent={(recentSourcePath) => void openProject(recentSourcePath)}
+        onOpenRegistered={openRegisteredWorkbenchProject}
+        onOpenCurrentProject={() => setDrawer("files")}
+      />
+      {startPageActive ? (
+        <WorkbenchStartPage
+          recentProjects={recentProjects}
+          onOpenLocal={() => void openProject()}
+          onOpenRecent={(recentSourcePath) => void openProject(recentSourcePath)}
+          onOpenSidebar={() => {
+            setGlobalSidebarOpen(true);
+            void workspaceController?.refreshRegisteredProjects();
+          }}
+        />
+      ) : (
+      <div
+        id="workbench-content-outlet"
+        ref={reviewStageRef}
+        className="review-scroll-stage"
+        data-review-active={readyReviewOverlay ? "true" : undefined}
+      >
+        {readyReviewOverlay}
+        <section
+          className="canvas-column"
+          aria-label="页面画布"
+          inert={readyReviewOverlay ? true : undefined}
+          aria-hidden={readyReviewOverlay ? true : undefined}
+        >
           <div
             className="canvas-edit-surface"
             hidden={canvasMode !== "edit"}
@@ -7819,6 +8078,7 @@ export default function Workbench() {
           />
         ) : null}
       </div>
+      )}
 
       {previewAttachment && attachmentObjectUrls[previewAttachment.attachmentId] ? (
         <AttachmentLightbox
@@ -8124,7 +8384,6 @@ export default function Workbench() {
           void workspaceControllerRef.current?.dismissFirstEditGuide();
         }}
       />
-      {readyReviewOverlay}
     </>
   );
 }

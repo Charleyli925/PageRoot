@@ -436,6 +436,7 @@ export default function AiReviewWorkspace({
   onRevealAiTask,
   assistantEntry = null,
   sidebar = null,
+  embedded = false,
 }: {
   fileName: string;
   beforeLabel: string;
@@ -458,6 +459,8 @@ export default function AiReviewWorkspace({
    * not the editable page a new modification would use.
   */
   sidebar?: ReactNode;
+  /** Uses the Workbench header and mounts only the review content outlet. */
+  embedded?: boolean;
 }) {
   const fileTitle = fileName.replace(/\.(?:html?|xhtml)$/iu, "") || fileName;
   const hydrated = useSyncExternalStore(subscribeHydration, () => true, () => false);
@@ -1546,6 +1549,7 @@ export default function AiReviewWorkspace({
   return (
     <div
       className={styles.reviewRoot}
+      data-embedded={embedded ? "true" : undefined}
       data-testid="ai-review-workspace"
       data-review-runtime-visual-state={
         !documents.runtimeVisualCandidates.length
@@ -1566,7 +1570,7 @@ export default function AiReviewWorkspace({
             : "pending"
       }
     >
-      <WorkbenchHeaderShell
+      {!embedded ? <WorkbenchHeaderShell
         className={styles.reviewHeader}
         inert={confirmationAction ? true : undefined}
       >
@@ -1617,7 +1621,34 @@ export default function AiReviewWorkspace({
             {accepting ? "正在采纳并核对…" : "采纳 AI 修改"}
           </button>
         </WorkbenchHeaderActions>
-      </WorkbenchHeaderShell>
+      </WorkbenchHeaderShell> : (
+        <nav
+          className={styles.embeddedReviewActions}
+          aria-label="审阅结果操作"
+          inert={confirmationAction ? true : undefined}
+        >
+          <span>只读对比 · 尚未采纳</span>
+          {assistantEntry}
+          <button
+            className="recent-run-button"
+            type="button"
+            disabled={accepting}
+            onClick={(event) => openConfirmation("return", event.currentTarget)}
+          >
+            <ClockCounterClockwiseIcon aria-hidden="true" size={18} weight="duotone" />
+            返回 AI 修改前
+          </button>
+          <button
+            className="header-send-button"
+            type="button"
+            disabled={accepting}
+            onClick={(event) => openConfirmation("accept", event.currentTarget)}
+          >
+            <CheckCircleIcon aria-hidden="true" size={15} weight="fill" />
+            {accepting ? "正在采纳并核对…" : "采纳 AI 修改"}
+          </button>
+        </nav>
+      )}
 
       {error ? (
         <div className={styles.reviewError} role="alert">
