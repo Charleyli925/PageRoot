@@ -319,6 +319,7 @@ services.
 | Request freeze/persisted-boundary validation, authority reconciliation, run polling, cancellation, conflict commands and confirmed handoff | `app/application/run-workflow.js` |
 | Workbench pure record/comment/project/version/browser helpers | `app/workbench/*-model.ts`, `app/workbench/browser-io.ts` |
 | History, attachment and preview presentation | `app/workbench/presentation.tsx` |
+| Workbench visual cascade | `app/globals.css` is import-only; `app/styles/*.css` load in fixed order (tokens/base, shell, review V5/V5.1/V5.2 canvas, comment hierarchy, project resources, about/chrome, top toolbar). Later layers override earlier ones; the two `:root` blocks stay split |
 | File title, rename, update badge and save-status presentation | `app/workbench/file-header-view.tsx` |
 | Comment rail presentation | `app/workbench/comment-rail-view.tsx` |
 | Project files drawer presentation | `app/workbench/project-files-view.tsx` |

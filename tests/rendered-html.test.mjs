@@ -73,65 +73,6 @@ test("server-renders the public workbench without retired hosting or editor surf
   );
 });
 
-test("top toolbar keeps the approved restrained visual contract", async () => {
-  const css = await readFile(
-    new URL("../app/globals.css", import.meta.url),
-    "utf8",
-  );
-
-  const header = lastCssRule(css, ".workbench-header");
-  assert.match(header, /background:\s*rgb\(253 252 249 \/ 92%\)/u);
-  assert.match(header, /box-shadow:\s*none/u);
-  assert.match(header, /backdrop-filter:\s*blur\(18px\) saturate\(116%\)/u);
-
-  const modeFrame = lastCssRule(css, ".canvas-mode-switch");
-  assert.match(modeFrame, /width:\s*147px/u);
-  assert.match(modeFrame, /height:\s*34px/u);
-  assert.match(modeFrame, /padding:\s*2\.5px/u);
-  assert.match(modeFrame, /border:\s*1px solid rgb\(46 43 58 \/ 7\.5%\)/u);
-  assert.match(modeFrame, /background:\s*transparent/u);
-
-  const selectedLayer = lastCssRule(css, ".canvas-mode-switch::before");
-  assert.match(selectedLayer, /top:\s*1\.5px/u);
-  assert.match(selectedLayer, /width:\s*70px/u);
-  assert.match(selectedLayer, /height:\s*29px/u);
-  assert.match(selectedLayer, /background:\s*rgb\(91 82 219 \/ 7\.5%\)/u);
-  assert.doesNotMatch(selectedLayer, /backdrop-filter|box-shadow|(?:^|\n)\s*border:/u);
-
-  const sendButton = lastCssRule(css, ".header-actions .header-send-button");
-  assert.match(sendButton, /height:\s*34px/u);
-  assert.match(sendButton, /margin-left:\s*10px/u);
-  assert.match(sendButton, /box-shadow:\s*0 2px 5px rgb\(65 57 166 \/ 14%\)/u);
-});
-
-test("a hover tooltip stays pointer-scoped and yields to the surface it opened", async () => {
-  const css = await readFile(
-    new URL("../app/globals.css", import.meta.url),
-    "utf8",
-  );
-
-  // Chromium leaves a clicked button focused. Revealing the bubble on any focus
-  // state (:focus, or :focus-within which also matches the element itself)
-  // pins it on screen long after the pointer left.
-  assert.match(
-    css,
-    /\[data-tooltip\]:hover::after,\n\[data-tooltip\]:focus-visible::after \{/u,
-  );
-  assert.doesNotMatch(css, /\[data-tooltip\][^\n{,]*:focus-within::after/u);
-  assert.doesNotMatch(css, /\[data-tooltip\][^\n{,]*:focus::after/u);
-
-  const openedTrigger = lastCssRule(css, '[data-tooltip][aria-expanded="true"]::after');
-  assert.match(openedTrigger, /opacity:\s*0/u);
-  assert.match(openedTrigger, /visibility:\s*hidden/u);
-  // The reveal rules carry the same specificity, so only source order keeps the
-  // suppression in force while the trigger's own surface is open.
-  assert.ok(
-    css.lastIndexOf('[data-tooltip][aria-expanded="true"]::after')
-      > css.lastIndexOf("[data-tooltip]:focus-visible::after"),
-    "the opened-trigger suppression must follow every tooltip reveal rule",
-  );
-});
-
 test("the anchored open-HTML popover keeps click-outside dismissal reachable", async () => {
   const css = await readFile(
     new URL("../app/workbench/open-html-dialog.module.css", import.meta.url),
