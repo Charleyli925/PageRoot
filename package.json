@@ -182,6 +182,7 @@
       "desktop/ipc/agent-ipc.mjs",
       "desktop/ipc/update-ipc.mjs",
       "desktop/app-lifecycle.mjs",
+      "desktop/startup-performance-timeline.mjs",
       "desktop/bridge-startup.mjs",
       "desktop/bridge-shutdown.mjs",
       "desktop/close-recovery.mjs",
@@ -331,6 +332,10 @@
       {
         "from": "bridge/project-file-repository/working-copy.mjs",
         "to": "bridge/project-file-repository/working-copy.mjs"
+      },
+      {
+        "from": "bridge/project-file-repository/workspace-performance-timing.mjs",
+        "to": "bridge/project-file-repository/workspace-performance-timing.mjs"
       },
       {
         "from": "bridge/ai-task-projection.mjs",
