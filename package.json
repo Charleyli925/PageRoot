@@ -51,6 +51,7 @@
     "census:review-runtime-visual": "electron scripts/review-runtime-visual-census.mjs --",
     "e2e:review-pages": "electron scripts/review-runtime-e2e-pages.mjs --",
     "benchmark:review-analysis": "node scripts/benchmark-review-analysis.mjs",
+    "benchmark:html-workflows": "node scripts/benchmark-html-workflows.mjs",
     "benchmark:persistence": "npm run desktop:renderer && node scripts/benchmark-persistence.mjs",
     "test:package": "node scripts/test-node-group.mjs package",
     "verify:packaged": "node scripts/verify-packaged-artifact.mjs --arch arm64",
@@ -181,6 +182,7 @@
       "desktop/ipc/agent-ipc.mjs",
       "desktop/ipc/update-ipc.mjs",
       "desktop/app-lifecycle.mjs",
+      "desktop/startup-performance-timeline.mjs",
       "desktop/bridge-startup.mjs",
       "desktop/bridge-shutdown.mjs",
       "desktop/close-recovery.mjs",
@@ -330,6 +332,10 @@
       {
         "from": "bridge/project-file-repository/working-copy.mjs",
         "to": "bridge/project-file-repository/working-copy.mjs"
+      },
+      {
+        "from": "bridge/project-file-repository/workspace-performance-timing.mjs",
+        "to": "bridge/project-file-repository/workspace-performance-timing.mjs"
       },
       {
         "from": "bridge/ai-task-projection.mjs",

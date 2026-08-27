@@ -226,6 +226,7 @@ const TASK_OWNER_CASES = [
       "tests/project-registry-and-open.test.mjs",
       "tests/project-request-authority.test.mjs",
       "tests/project-working-copy-save.test.mjs",
+      "tests/workspace-performance-timing.test.mjs",
     ],
     suites: ["typecheck", "lint", "node-targeted", "build-desktop", "ai-review-smoke"],
     directOwners: ["tests/project-registry-and-open.test.mjs"],

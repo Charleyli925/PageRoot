@@ -10,6 +10,7 @@ import {
 import { createServer } from "node:http";
 import os from "node:os";
 import path from "node:path";
+import { performance as nodePerformance } from "node:perf_hooks";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import {
@@ -864,6 +865,7 @@ async function projectFileBaseWorkspaceState(workspace) {
       sha256: workspace.sourceSha256,
     },
     content: workspace.content,
+    performanceTiming: workspace.performanceTiming || null,
   };
 }
 
@@ -1803,8 +1805,18 @@ async function unmanagedSourceFile(sourcePath) {
 }
 
 async function workspaceState(sourcePath) {
+  const startedAt = nodePerformance.now();
   const projectFileState = await projectFileWorkspaceState(sourcePath);
-  return projectFileState || unmanagedWorkspaceState(sourcePath);
+  const state = projectFileState || await unmanagedWorkspaceState(sourcePath);
+  return {
+    ...state,
+    performanceTiming: {
+      ...(state.performanceTiming || {}),
+      bridgeWorkspaceTotalMs: Math.round(
+        Math.max(0, nodePerformance.now() - startedAt) * 1_000,
+      ) / 1_000,
+    },
+  };
 }
 
 async function sourceFile(sourcePath) {

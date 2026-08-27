@@ -11,7 +11,10 @@ export class BridgeRequestError extends Error {
 export function isBridgeRequestError(value: unknown): value is BridgeRequestError;
 
 export type BridgeClient = {
-  workspace(sourcePath: string): Promise<BridgeJson>;
+  workspace(
+    sourcePath: string,
+    options?: { operationId?: string },
+  ): Promise<BridgeJson>;
   source(
     sourcePath: string,
     options?: { timeoutMs?: number },

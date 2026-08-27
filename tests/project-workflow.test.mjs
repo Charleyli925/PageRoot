@@ -609,6 +609,56 @@ test("the read-only catalog refresh waits until project hydration settles", asyn
   assert.ok(stageNames.includes("apply-authority:sessions-reset"));
 });
 
+test("hydration correlates repository timing with its unique operation", async (t) => {
+  let requestedOperationId = null;
+  const harness = createHarness({
+    bridge: {
+      async workspace(sourcePath, options) {
+        requestedOperationId = options?.operationId || null;
+        return {
+          ...workspacePayload(sourcePath, sourcePath === A_PATH ? A_HTML : OLD_HTML),
+          performanceTiming: {
+            repositoryQueueWaitMs: 4,
+            workspaceTotalMs: 18,
+            bridgeWorkspaceTotalMs: 21,
+          },
+        };
+      },
+    },
+    projectOpen: {
+      async getActive() {
+        return {
+          name: "A",
+          sourcePath: A_PATH,
+          html: A_HTML,
+          sha256: sha256(A_HTML),
+        };
+      },
+    },
+    initialProject: false,
+  });
+  t.after(() => harness.workflow.dispose());
+
+  const opened = await harness.workflow.openProject({ kind: "startup" });
+  assert.equal(opened.status, "succeeded");
+  await waitFor(() => harness.events.some((event) => (
+    event.type === "project-hydration-stage"
+    && event.stage === "workspace-response"
+  )), "hydration response was not observed");
+
+  const response = harness.events.find((event) => (
+    event.type === "project-hydration-stage"
+    && event.stage === "workspace-response"
+  ));
+  assert.match(requestedOperationId, /^hydration_/u);
+  assert.equal(response.operationId, requestedOperationId);
+  assert.deepEqual(response.timing, {
+    repositoryQueueWaitMs: 4,
+    workspaceTotalMs: 18,
+    bridgeWorkspaceTotalMs: 21,
+  });
+});
+
 test("concurrent catalog refreshes coalesce into one in-flight read", async (t) => {
   let resolveCatalog;
   let catalogCalls = 0;

@@ -27,6 +27,7 @@ export function createWindowLifecycle(ctx) {
       startBridge,
       rendererPath,
     } = ctx;
+    ctx.markStartupStage?.("window-create-start");
     // Only the renderer URL needs the Bridge endpoint. Protocol installation,
     // external-file adoption, window construction and IPC registration do not,
     // so let the utility process boot alongside them instead of ahead of them.
@@ -40,6 +41,7 @@ export function createWindowLifecycle(ctx) {
     bridgeStartup.catch(() => {});
     ctx.ensurePreviewProtocolController();
     await ctx.adoptPendingExternalFileAtStartup();
+    ctx.markStartupStage?.("external-open-adopted");
 
     ctx.rendererHasLoaded = false;
     ctx.workspaceRecoveryMailbox.beginRendererLoad();
@@ -72,6 +74,7 @@ export function createWindowLifecycle(ctx) {
       },
     });
     ctx.mainWindow = mainWindow;
+    ctx.markStartupStage?.("browser-window-created");
 
     registerProjectIpc();
     mainWindow.removeMenu();
@@ -139,6 +142,7 @@ export function createWindowLifecycle(ctx) {
       },
     );
     mainWindow.webContents.on("did-finish-load", () => {
+      ctx.markStartupStage?.("renderer-load-finished");
       ctx.rendererHasLoaded = true;
       ctx.ensureApplicationUpdateController().startAutomaticChecks();
       const pendingExternalOpen = ctx.externalFileOpenMailbox.peek();
@@ -186,7 +190,10 @@ export function createWindowLifecycle(ctx) {
         reason_code: "RESPONSIVE",
       });
     });
-    mainWindow.once("ready-to-show", presentMainWindow);
+    mainWindow.once("ready-to-show", () => {
+      ctx.markStartupStage?.("window-ready-to-show");
+      presentMainWindow();
+    });
     mainWindow.on("close", (event) => {
       if (ctx.finalExitStarted) return;
       event.preventDefault();
@@ -205,16 +212,19 @@ export function createWindowLifecycle(ctx) {
     });
 
     const port = await bridgeStartup;
+    ctx.markStartupStage?.("bridge-await-finished");
     /*
      * Remembered so a renderer that died can be booted again with the same handshake.
      * reload() was not enough: the renderer only reaches the Bridge through these
      * query values, and a window that comes back without them renders nothing at all —
      * which is the blank white window users were left staring at.
      */
+    ctx.markStartupStage?.("renderer-load-start");
     ctx.rendererLoadQuery = {
       bridgePort: String(port),
       bridgeAuthToken: ctx.bridgeAuthToken,
       appVersion: app.getVersion(),
+      startupTiming: JSON.stringify(ctx.startupTimingSnapshot?.() || null),
     };
     await mainWindow.loadFile(rendererPath(), { query: ctx.rendererLoadQuery });
   }
