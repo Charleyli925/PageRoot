@@ -78,6 +78,11 @@ async function bridgeJson(page, pathname, {
   sourcePath,
   body,
 } = {}) {
+  await page.waitForFunction(
+    () => Boolean(window.htmlAIRuntime?.getBridgeConnection?.()),
+    undefined,
+    { timeout: 30_000 },
+  );
   const runtime = await page.evaluate(() => (
     window.htmlAIRuntime?.getBridgeConnection?.() || window.htmlAIRuntime
   ));

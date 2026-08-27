@@ -192,6 +192,11 @@ export async function managedWorkingCopyPath(page, externalSourcePath) {
 }
 
 export async function bridgeJson(page, pathname, { method = "GET", body = null } = {}) {
+  await page.waitForFunction(
+    () => Boolean(window.htmlAIRuntime?.getBridgeConnection?.()),
+    undefined,
+    { timeout: 30_000 },
+  );
   const runtime = await page.evaluate(() => ({
     port: window.htmlAIRuntime?.getBridgeConnection?.()?.bridgePort
       || window.htmlAIRuntime?.bridgePort || "",
