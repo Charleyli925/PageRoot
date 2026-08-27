@@ -905,6 +905,9 @@ async function exerciseReviewAndAccept() {
 
 async function openAfterAccept(source) {
   const page = launched.page;
+  const beforeOpenProject = await activeProject();
+  const beforeOpenSourcePath = beforeOpenProject?.sourcePath || null;
+  assert(beforeOpenSourcePath, "post-accept open requires one active source identity");
   const tabs = page.getByRole("tablist", { name: "已打开的 HTML" }).getByRole("tab");
   const beforeClose = await tabs.count();
   assert.equal(beforeClose, 20);
@@ -925,7 +928,7 @@ async function openAfterAccept(source) {
     if (await openLocalButton.isVisible().catch(() => false)) return "picker";
     if (await importButton.isVisible().catch(() => false)) return "confirm";
     const project = await activeProject();
-    if (project?.sourcePath && path.basename(project.sourcePath).includes(source.stem)) return "opened";
+    if (project?.sourcePath && project.sourcePath !== beforeOpenSourcePath) return "opened";
     return "";
   }, { timeout: 15_000, label: "post-accept open handoff" });
   if (pendingImport === "picker") {
@@ -933,16 +936,19 @@ async function openAfterAccept(source) {
     pendingImport = await waitUntil(async () => {
       if (await importButton.isVisible().catch(() => false)) return "confirm";
       const project = await activeProject();
-      if (project?.sourcePath && path.basename(project.sourcePath).includes(source.stem)) return "opened";
+      if (project?.sourcePath && project.sourcePath !== beforeOpenSourcePath) return "opened";
       return "";
     }, { timeout: 15_000, label: "post-accept picker handoff" });
   }
   if (pendingImport === "confirm") await importButton.click();
+  await waitUntil(async () => {
+    const project = await activeProject();
+    return project?.sourcePath && project.sourcePath !== beforeOpenSourcePath;
+  }, { timeout: 45_000, label: "post-accept active source transition" });
   const displayPromise = firstUsefulDocumentVisible({
-    expectedStem: source.stem,
     timeout: 45_000,
   }).then(() => performance.now() - started);
-  const editorPromise = activeContentReady({ expectedStem: source.stem, timeout: 45_000 })
+  const editorPromise = activeContentReady({ timeout: 45_000 })
     .then((value) => ({ ...value, editReadyMs: performance.now() - started }));
   const [displayReadyMs, { editor, editReadyMs }] = await Promise.all([
     displayPromise,
@@ -960,6 +966,10 @@ async function openAfterAccept(source) {
     },
   );
   await finishActiveReadiness(editor);
+  const openedProject = await activeProject();
+  assert.notEqual(openedProject?.sourcePath, beforeOpenSourcePath);
+  assert.equal(openedProject?.html, readFileSync(source.original, "utf8"));
+  results.acceptThenOpen.activeSourcePath = openedProject.sourcePath;
   results.acceptThenOpen.readyMs = round(performance.now() - started);
   results.acceptThenOpen.finalTabCount = await tabs.count();
   assert.equal(results.acceptThenOpen.finalTabCount, 20);
