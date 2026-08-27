@@ -9,32 +9,16 @@ import {
   useRef,
   useState,
   useSyncExternalStore,
-  type CSSProperties,
   type ReactNode,
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
-import { BrowsersIcon } from "@phosphor-icons/react/dist/csr/Browsers";
-import { CaretDownIcon } from "@phosphor-icons/react/dist/csr/CaretDown";
-import { CaretLeftIcon } from "@phosphor-icons/react/dist/csr/CaretLeft";
-import { CaretRightIcon } from "@phosphor-icons/react/dist/csr/CaretRight";
-import { CaretUpIcon } from "@phosphor-icons/react/dist/csr/CaretUp";
+import { createPortal } from "react-dom";
 import { CheckCircleIcon } from "@phosphor-icons/react/dist/csr/CheckCircle";
 import { ClockCounterClockwiseIcon } from "@phosphor-icons/react/dist/csr/ClockCounterClockwise";
-import { CornersOutIcon } from "@phosphor-icons/react/dist/csr/CornersOut";
-import { EyeIcon } from "@phosphor-icons/react/dist/csr/Eye";
 import { FileHtmlIcon } from "@phosphor-icons/react/dist/csr/FileHtml";
-import { GitDiffIcon } from "@phosphor-icons/react/dist/csr/GitDiff";
-import { LinkBreakIcon } from "@phosphor-icons/react/dist/csr/LinkBreak";
-import { LinkIcon } from "@phosphor-icons/react/dist/csr/Link";
-import { PaletteIcon } from "@phosphor-icons/react/dist/csr/Palette";
-import { TextTIcon } from "@phosphor-icons/react/dist/csr/TextT";
-import { TreeStructureIcon } from "@phosphor-icons/react/dist/csr/TreeStructure";
 import { WarningCircleIcon } from "@phosphor-icons/react/dist/csr/WarningCircle";
 
 import {
-  REVIEW_STRUCTURE_TONE_COLOR,
-  REVIEW_STYLE_TONE_COLOR,
-  REVIEW_SUSPECTED_TONE_COLOR,
   type ReviewCommentGroup,
   type ReviewDocuments,
   type ReviewSide,
@@ -51,10 +35,6 @@ import type {
   ReviewRuntimeVisualMarker,
   ReviewRuntimeVisualVerdicts,
 } from "../lib/review-runtime-visual.js";
-import {
-  REVIEW_TEXT_EVIDENCE_ADDED_COLOR,
-  REVIEW_TEXT_EVIDENCE_REMOVED_COLOR,
-} from "../lib/review-text-evidence-marks.js";
 import {
   classifyReviewRuntimeVisualCandidateKeys,
 } from "./review-runtime-capture-adapter";
@@ -77,6 +57,7 @@ import {
   WorkbenchHeaderActions,
   WorkbenchHeaderShell,
 } from "./workbench-header-shell";
+import { ReviewToolbarControls } from "./review-toolbar-controls";
 import styles from "./ai-review-workspace.module.css";
 
 type ConfirmationAction = "return" | "accept";
@@ -119,16 +100,6 @@ const FILTER_LABELS: Record<ReviewChangeFilter, string> = {
   text: "文案",
   structure: "结构",
   style: "视觉",
-};
-
-// Legend dots reuse the canvas diff tones so the toolbar explains the marks
-// users already see on the pages: removed and added text, structure, visual
-// and the amber suspected frame on unverifiable chart hosts.
-const FILTER_TONE_COLORS: Record<ReviewChangeFilter, string[]> = {
-  all: [],
-  text: [REVIEW_TEXT_EVIDENCE_REMOVED_COLOR, REVIEW_TEXT_EVIDENCE_ADDED_COLOR],
-  structure: [REVIEW_STRUCTURE_TONE_COLOR],
-  style: [REVIEW_STYLE_TONE_COLOR, REVIEW_SUSPECTED_TONE_COLOR],
 };
 
 const PAGE_VIEW_LABELS: Record<ReviewPageView, string> = {
@@ -478,7 +449,9 @@ export default function AiReviewWorkspace({
     scrollMode,
     zoomMode: zoom,
   } = reviewState;
-  const [toolbarPinned, setToolbarPinned] = useState(true);
+  const toolbarHost = embedded && hydrated
+    ? document.getElementById("workbench-review-tools-slot")
+    : null;
   const [confirmationAction, setConfirmationAction] = useState<ConfirmationAction | null>(null);
   const [desktopSessionResult, setDesktopSessionResult] =
     useState<ReviewDesktopSessionResult | null>(null);
@@ -1480,30 +1453,6 @@ export default function AiReviewWorkspace({
     selectChange(navigableChanges[nextIndex].id);
   }, [activeIndex, navigableChanges, selectChange]);
 
-  const handleSegmentedKeyDown = useCallback((event: ReactKeyboardEvent<HTMLButtonElement>) => {
-    const buttons = [...(event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>(
-      "button:not(:disabled)",
-    ) || [])];
-    const currentIndex = buttons.indexOf(event.currentTarget);
-    if (currentIndex < 0 || !buttons.length) return;
-
-    let targetIndex: number | null = null;
-    if (event.key === "ArrowRight" || event.key === "ArrowDown") {
-      targetIndex = (currentIndex + 1) % buttons.length;
-    } else if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
-      targetIndex = (currentIndex - 1 + buttons.length) % buttons.length;
-    } else if (event.key === "Home") {
-      targetIndex = 0;
-    } else if (event.key === "End") {
-      targetIndex = buttons.length - 1;
-    }
-
-    if (targetIndex === null) return;
-    event.preventDefault();
-    buttons[targetIndex].focus();
-    buttons[targetIndex].click();
-  }, []);
-
   const openConfirmation = useCallback((
     action: ConfirmationAction,
     trigger: HTMLButtonElement,
@@ -1622,34 +1571,63 @@ export default function AiReviewWorkspace({
             {accepting ? "正在采纳并核对…" : "采纳 AI 修改"}
           </button>
         </WorkbenchHeaderActions>
-      </WorkbenchHeaderShell> : (
-        <nav
-          className={styles.embeddedReviewActions}
-          aria-label="审阅结果操作"
-          inert={confirmationAction ? true : undefined}
-        >
-          <span>只读对比 · 尚未采纳</span>
-          {assistantEntry}
+      </WorkbenchHeaderShell> : null}
+
+      {embedded && toolbarHost ? createPortal((
+        <>
+          <ReviewToolbarControls
+            pageView={canvasView}
+            changeFilter={filter}
+            contextVisibility={transparency}
+            scrollMode={scrollMode}
+            zoomMode={zoom}
+            activeIndex={activeIndex}
+            changeCount={navigableChanges.length}
+            onPageViewChange={selectPreviewMode}
+            onChangeFilter={selectReviewMode}
+            onContextVisibilityChange={(value) => dispatchReviewState({
+              type: "set-context-visibility",
+              value,
+            })}
+            onScrollModeChange={(value) => dispatchReviewState({
+              type: "set-scroll-mode",
+              value,
+            })}
+            onZoomModeChange={(value) => dispatchReviewState({
+              type: "set-zoom-mode",
+              value,
+            })}
+            onNavigate={navigate}
+            onShowWholePage={() => dispatchReviewState({
+              type: "set-navigation-target",
+              value: "all",
+            })}
+          />
+          <span className="unified-review-status" role="status">
+            {filter === "all"
+              ? `${reviewChanges.length} 个变化`
+              : `${navigableChanges.length}/${reviewChanges.length} 个变化`}
+          </span>
           <button
-            className="recent-run-button"
+            className="recent-run-button review-return-button"
             type="button"
             disabled={accepting}
             onClick={(event) => openConfirmation("return", event.currentTarget)}
           >
-            <ClockCounterClockwiseIcon aria-hidden="true" size={18} weight="duotone" />
-            返回 AI 修改前
+            <ClockCounterClockwiseIcon aria-hidden="true" size={16} weight="duotone" />
+            返回修改前
           </button>
           <button
-            className="header-send-button"
+            className="header-send-button review-accept-button"
             type="button"
             disabled={accepting}
             onClick={(event) => openConfirmation("accept", event.currentTarget)}
           >
-            <CheckCircleIcon aria-hidden="true" size={15} weight="fill" />
-            {accepting ? "正在采纳并核对…" : "采纳 AI 修改"}
+            <CheckCircleIcon aria-hidden="true" size={14} weight="fill" />
+            {accepting ? "正在采纳…" : "采纳修改"}
           </button>
-        </nav>
-      )}
+        </>
+      ), toolbarHost) : null}
 
       {error ? (
         <div className={styles.reviewError} role="alert">
@@ -1669,197 +1647,7 @@ export default function AiReviewWorkspace({
         className={styles.reviewMain}
         inert={confirmationAction ? true : undefined}
       >
-        <section
-          className={styles.canvasReview}
-          data-toolbar-open={toolbarPinned ? "true" : undefined}
-        >
-          <div className={styles.canvasToolbarDock}>
-            <div className={styles.canvasToolbar}>
-              <div className={styles.canvasReviewTitle}>
-                <span className={styles.canvasReviewIcon}><EyeIcon aria-hidden="true" size={20} weight="duotone" /></span>
-                <span>
-                  <strong>审阅模式</strong>
-                  <small>
-                    {filter === "all"
-                      ? `${reviewChanges.length} 个变化区域`
-                      : `${navigableChanges.length}/${reviewChanges.length} 个变化区域`}
-                  </small>
-                </span>
-              </div>
-
-              <div className={`${styles.reviewModeControl} ${styles.pagePreviewControl}`}>
-                <span className={styles.toolbarFieldLabel}>页面预览</span>
-                <div
-                  className={styles.segmented}
-                  data-items="3"
-                  role="group"
-                  aria-label="页面预览"
-                >
-                  <button
-                    type="button"
-                    aria-label="双页对比（修改前与 AI 修改后）"
-                    title="双页对比"
-                    aria-pressed={canvasView === "split"}
-                    onClick={() => selectPreviewMode("split")}
-                    onKeyDown={handleSegmentedKeyDown}
-                  >
-                    <BrowsersIcon aria-hidden="true" size={14} weight="duotone" />
-                    <span className={styles.previewButtonLabel}><span>双页</span></span>
-                  </button>
-                  <button
-                    type="button"
-                    aria-label={`单独查看修改前 ${beforeLabel}`}
-                    aria-pressed={canvasView === "before"}
-                    onClick={() => selectPreviewMode("before")}
-                    onKeyDown={handleSegmentedKeyDown}
-                  >
-                    <CaretLeftIcon aria-hidden="true" size={14} weight="bold" />
-                    <span className={styles.previewButtonLabel}><span>左页</span><small>修改前</small></span>
-                  </button>
-                  <button
-                    type="button"
-                    aria-label={`单独查看 AI 修改后 ${afterLabel}`}
-                    aria-pressed={canvasView === "after"}
-                    onClick={() => selectPreviewMode("after")}
-                    onKeyDown={handleSegmentedKeyDown}
-                  >
-                    <CaretRightIcon aria-hidden="true" size={14} weight="bold" />
-                    <span className={styles.previewButtonLabel}><span>右页</span><small>修改后</small></span>
-                  </button>
-                </div>
-              </div>
-
-              <div className={styles.transparencyField}>
-                <span className={styles.toolbarFieldLabel}>
-                  <span>上下文可见度</span><output>{transparency}%</output>
-                </span>
-                <label className={styles.transparencyControl}>
-                  <input
-                    type="range"
-                    min="0"
-                    max="100"
-                    step="1"
-                    value={transparency}
-                    aria-label="非修改区域上下文可见度"
-                    title="调整非修改区域的可见度"
-                    style={{ "--mask-position": `${transparency}%` } as CSSProperties}
-                    onInput={(event) => dispatchReviewState({
-                      type: "set-context-visibility",
-                      value: Number(event.currentTarget.value),
-                    })}
-                  />
-                </label>
-              </div>
-
-              <div className={styles.reviewModeControl}>
-                <span className={styles.toolbarFieldLabel}>变化审阅</span>
-                <div
-                  className={styles.segmented}
-                  data-items="4"
-                  role="group"
-                  aria-label="变化审阅"
-                >
-                  {(["all", "text", "structure", "style"] as ReviewChangeFilter[]).map((mode) => (
-                    <button
-                      key={mode}
-                      type="button"
-                      aria-label={mode === "all" ? "查看全部变化" : `${FILTER_LABELS[mode]}变化`}
-                      aria-pressed={filter === mode}
-                      onClick={() => selectReviewMode(mode)}
-                      onKeyDown={handleSegmentedKeyDown}
-                    >
-                      {mode === "all" ? <GitDiffIcon aria-hidden="true" size={14} weight="duotone" /> : null}
-                      {mode === "text" ? <TextTIcon aria-hidden="true" size={14} weight="bold" /> : null}
-                      {mode === "structure" ? <TreeStructureIcon aria-hidden="true" size={14} weight="duotone" /> : null}
-                      {mode === "style" ? <PaletteIcon aria-hidden="true" size={14} weight="duotone" /> : null}
-                      <span>{FILTER_LABELS[mode]}</span>
-                      {FILTER_TONE_COLORS[mode].length ? (
-                        <span className={styles.filterTones} aria-hidden="true">
-                          {FILTER_TONE_COLORS[mode].map((color) => (
-                            <span key={color} style={{ background: color }} />
-                          ))}
-                        </span>
-                      ) : null}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className={styles.canvasToolGroup}>
-                <div className={styles.toolbarField}>
-                  <span className={styles.toolbarFieldLabel}>滚动方式</span>
-                  <div className={styles.scrollSwitch} aria-label="滚动方式">
-                    <button type="button" aria-label="同步滚动" aria-pressed={scrollMode === "linked"} onClick={() => dispatchReviewState({ type: "set-scroll-mode", value: "linked" })}>
-                      <LinkIcon aria-hidden="true" size={12} weight="bold" /><span>同步</span>
-                    </button>
-                    <button type="button" aria-label="独立滚动" aria-pressed={scrollMode === "independent"} onClick={() => dispatchReviewState({ type: "set-scroll-mode", value: "independent" })}>
-                      <LinkBreakIcon aria-hidden="true" size={12} weight="bold" /><span>独立</span>
-                    </button>
-                  </div>
-                </div>
-                <div className={styles.toolbarField}>
-                  <span className={styles.toolbarFieldLabel}>画布缩放</span>
-                  <div className={styles.zoomSwitch} aria-label="画布缩放">
-                    <button type="button" aria-pressed={zoom === "fit"} onClick={() => dispatchReviewState({ type: "set-zoom-mode", value: "fit" })}>
-                      <CornersOutIcon aria-hidden="true" size={12} /><span>适应</span>
-                    </button>
-                    <button type="button" aria-pressed={zoom === "actual"} onClick={() => dispatchReviewState({ type: "set-zoom-mode", value: "actual" })}>100%</button>
-                  </div>
-                <div className={styles.changeNavigator} aria-label="逐处查看变化">
-                  <button
-                    type="button"
-                    aria-label="上一处变化"
-                    disabled={!navigableChanges.length}
-                    onClick={() => navigate(-1)}
-                  >
-                    <CaretUpIcon aria-hidden="true" size={11} weight="bold" />
-                  </button>
-                  <span>
-                    <strong>{activeIndex >= 0 ? activeIndex + 1 : 0}</strong>
-                    <small>/{navigableChanges.length}</small>
-                  </span>
-                  <button
-                    type="button"
-                    aria-label="下一处变化"
-                    disabled={!navigableChanges.length}
-                    onClick={() => navigate(1)}
-                  >
-                    <CaretDownIcon aria-hidden="true" size={11} weight="bold" />
-                  </button>
-                  {/*
-                    * The way back out of a single change. Returning to the whole page used
-                    * to live in the content map, so removing the map left a reviewer who
-                    * had focused one change with no way to see the page as a whole again.
-                    */}
-                  <button
-                    type="button"
-                    aria-label="完整页面"
-                    aria-pressed={focus === "all"}
-                    onClick={() => dispatchReviewState({
-                      type: "set-navigation-target",
-                      value: "all",
-                    })}
-                  >
-                    整页
-                  </button>
-                </div>
-                </div>
-              </div>
-            </div>
-            <button
-              className={styles.canvasToolbarHandle}
-              type="button"
-              aria-expanded={toolbarPinned}
-              aria-label={toolbarPinned ? "收起审阅工具" : "显示并固定审阅工具"}
-              onClick={() => setToolbarPinned((current) => !current)}
-            >
-              {toolbarPinned
-                ? <CaretUpIcon aria-hidden="true" size={12} weight="bold" />
-                : <CaretDownIcon aria-hidden="true" size={12} weight="bold" />}
-              <span>审阅工具</span>
-            </button>
-          </div>
-
+        <section className={styles.canvasReview}>
           <div className={styles.canvasReviewBody}>
             {!navigableChanges.length ? (
               <div className={styles.emptyFilterNotice} role="status">

@@ -155,10 +155,7 @@ async function openFixtureThroughHiddenInput({
   name,
   buffer,
 }) {
-  const visibleFileStem = name.replace(/\.html?$/iu, "");
-  const fixtureTitle = page.locator(".window-file-title-row")
-    .getByText(visibleFileStem, { exact: true })
-    .first();
+  const fixtureTitle = page.getByRole("tab", { name, exact: true });
   let lastError;
 
   for (let attempt = 1; attempt <= FIXTURE_OPEN_ATTEMPTS; attempt += 1) {
@@ -188,7 +185,9 @@ async function openFixtureThroughHiddenInput({
     }
   }
 
-  const currentTitle = await page.locator(".window-file-title-row")
+  const currentTitle = await page.locator(
+    '.workbench-tab[data-selected="true"] button[role="tab"] > span:last-child',
+  )
     .textContent()
     .catch(() => "");
   throw new Error(

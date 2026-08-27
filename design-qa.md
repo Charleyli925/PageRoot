@@ -2573,3 +2573,75 @@ not happen.
 - [x] Resting canvas, violet accent family and mask behaviour unchanged.
 
 final result: passed
+
+---
+
+# Unified global sidebar and document toolbar
+
+Date: 2026-08-27
+
+## Comparison target
+
+- Source visual truth:
+  - `/var/folders/jx/w52403cs2hx39vwhd1sb3tg80000gn/T/codex-clipboard-874b3be9-85a3-4fdf-bc39-681567a52de0.png` for the ChatGPT-style full-height sidebar and titlebar control relationship.
+  - `/var/folders/jx/w52403cs2hx39vwhd1sb3tg80000gn/T/codex-clipboard-acab32ef-eca3-4387-8d20-03bcb3ef8a12.png` for the compact document toolbar.
+  - `/var/folders/jx/w52403cs2hx39vwhd1sb3tg80000gn/T/codex-clipboard-3f932414-1909-448f-b00a-b8d0d80ff5f3.png` for the original start-page state that needed the card removed and the project action promoted.
+- Rendered implementation:
+  - `output/design-qa/unified-sidebar-toolbar/implementation-start-sidebar-open.jpeg`
+  - `output/design-qa/unified-sidebar-toolbar/implementation-start-sidebar-collapsed.jpeg`
+  - `output/design-qa/unified-sidebar-toolbar/implementation-document-toolbar.jpeg`
+  - `output/design-qa/unified-sidebar-toolbar/implementation-document-sidebar-collapsed.jpeg`
+- Same-input comparison evidence:
+  - `output/design-qa/unified-sidebar-toolbar/comparison-sidebar.png`
+  - `output/design-qa/unified-sidebar-toolbar/comparison-toolbar.png`
+
+## Viewport and normalization
+
+- Electron window CSS size: `1440 x 960`; minimum product size: `960 x 720`.
+- Computer Use capture: `1152 x 768` JPEG, normalized by the capture service to 80% of the CSS window; no device frame or browser chrome was added.
+- Sidebar source: `762 x 1993`; normalized to `294 x 768` before placing it beside the `1152 x 768` implementation capture.
+- Toolbar source: `2870 x 156`; normalized to `1152 x 63`, then stacked with the implementation's `1152 x 72` titlebar-plus-toolbar crop.
+- The source images are directional references rather than pixel-identical screens. The comparison therefore judges the requested shell hierarchy, control ownership, density, alignment, tokens, and states rather than copying ChatGPT product content.
+
+## States and interactions tested
+
+- Start page with sidebar collapsed: the titlebar contains one sidebar toggle beside the native traffic lights; the page has no white card; `查看现有项目` is the primary action above the Finder action.
+- Start page with sidebar expanded: the sidebar owns the full left edge across tabs, toolbar, and content; the main product shifts as one surface; the HTML brand mark and project lists live in the sidebar.
+- Registered project opened from the sidebar: the document header contains status, folder, and default-browser actions without the previous HTML icon, file title, plus button, or popup.
+- Document with sidebar expanded and collapsed: the round trip preserves the selected tab and document, exposes exactly one collapse/expand control, and does not leave a narrow rail.
+- Edit state with an AI candidate ready: edit/preview/review modes, review controls, project, and AI actions remain in one row; unavailable review controls remain visible and disabled.
+- Accessibility tree confirmed named buttons for sidebar, folder, browser, modes, review filters, scrolling, zoom, project, and AI actions.
+- The successful isolated launch produced no crash or unhandled renderer error. It did surface the expected welcome-workspace integrity warning from the disposable E2E profile; that banner was dismissed before comparison and did not affect the tested project.
+
+## Fidelity review
+
+- Fonts and typography: the implementation retains the product's system CJK stack and compact UI hierarchy. Sidebar labels, start-page actions, status copy, and toolbar labels remain legible without wrapping at the tested desktop size.
+- Spacing and layout rhythm: native controls, the unique sidebar toggle, and tabs share one 40px titlebar rhythm. The sidebar uses a single quiet boundary; the document toolbar is one 48px aligned row. The start page removes the former card elevation and keeps content directly on the workspace surface.
+- Colors and tokens: neutral shell surfaces, hairline dividers, semantic green save state, and the existing violet accent remain consistent. Disabled review controls are intentionally lower contrast but still present and identifiable.
+- Image and asset fidelity: no source imagery was substituted with CSS drawings or placeholder art. Product controls use the existing Phosphor icon family; the HTML brand asset was moved to the sidebar instead of recreated.
+- Copy and content: `继续编辑 HTML`, `查看现有项目`, `从 Finder 打开 HTML`, file actions, and mode/review labels match the requested hierarchy and remain product-specific.
+- Icons and control states: the sidebar toggle, folder, external-browser, mode, review, project, and AI icons use consistent stroke weight and 32-34px control geometry. Selected, unavailable, and disabled states are visually distinct.
+- Responsiveness and accessibility: no clipping or toolbar overlap appeared at the tested desktop window. The product minimum and responsive token contracts remain covered by the edit gate; reduced-motion handling is retained for the sidebar grid transition.
+
+## Findings
+
+- No actionable P0, P1, or P2 mismatch remained in the combined full-view and focused-toolbar comparisons.
+- P3 follow-up polish: the disabled review cluster is deliberately quiet and dense; after regular use, its opacity can be tuned if users cannot distinguish individual tools at a glance. This does not block the requested persistent-but-disabled behavior.
+
+## Comparison history
+
+- Pass 1: the combined sidebar comparison preserved the reference's full-height shell ownership while applying Stemmio's project-focused information architecture. No P0/P1/P2 issue was found.
+- Pass 1: the focused toolbar comparison confirmed that the old document identity block was removed, file actions moved into the compact status group, and mode/review/project/AI controls remained aligned in one row. No fix iteration was required.
+
+## Implementation checklist
+
+- [x] Full-height collapsible global sidebar with one titlebar control.
+- [x] Native traffic lights and sidebar control aligned in both sidebar states.
+- [x] Start page without a white card and with projects promoted over Finder.
+- [x] Compact one-row document toolbar across modes.
+- [x] Persistent disabled review tools outside review mode.
+- [x] Folder and default-browser actions in the toolbar.
+- [x] HTML mark moved to sidebar; document icon, title, plus, and popup removed.
+- [x] Real isolated Electron interaction and screenshot evidence captured.
+
+final result: passed

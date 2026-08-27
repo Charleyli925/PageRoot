@@ -402,12 +402,25 @@ test("multiple orphaned comments relink in sequence and resume the original send
   }
 });
 
-test("automatic update actions keep the header geometry and About lifecycle", async () => {
+test("automatic update actions keep the sidebar product geometry and About lifecycle", async () => {
   const fixture = createSourceFixture("update-indicator.html");
   const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
   try {
     await loadedDiskFrame(launched.page, fixture.sourcePath, "list-item");
-    const captureHeader = async ({ badgeExpected = true } = {}) => {
+    const sidebar = launched.page.locator(".workbench-global-sidebar");
+    if (await sidebar.getAttribute("data-open") !== "true") {
+      await launched.page.getByRole("button", { name: "展开左侧边栏" }).click();
+    }
+    await expect(sidebar).toHaveAttribute("data-open", "true");
+    await expect.poll(() => sidebar.evaluate((element) => {
+      const actualWidth = element.getBoundingClientRect().width;
+      const workbench = element.closest(".workbench");
+      const targetWidth = workbench
+        ? Number.parseFloat(getComputedStyle(workbench).getPropertyValue("--workbench-sidebar-width"))
+        : 0;
+      return Math.abs(actualWidth - targetWidth);
+    })).toBeLessThanOrEqual(0.5);
+    const captureSidebarProduct = async ({ badgeExpected = true } = {}) => {
       const geometry = await launched.page.evaluate(() => {
         const rect = (selector) => {
           const element = document.querySelector(selector);
@@ -423,43 +436,34 @@ test("automatic update actions keep the header geometry and About lifecycle", as
           };
         };
         return {
-          header: rect(".workbench-header"),
-          cluster: rect(".window-file-icon-cluster"),
-          icon: rect(".window-file-about-button"),
-          badge: rect(".window-file-update-badge"),
-          badgeLabel: rect(".window-file-update-badge > span"),
-          fileCopy: rect(".window-file-copy"),
+          sidebar: rect(".workbench-global-sidebar"),
+          product: rect(".workbench-sidebar-product"),
+          about: rect(".workbench-sidebar-product > button:first-child"),
+          icon: rect(".workbench-sidebar-product > button:first-child > span"),
+          badge: rect(".workbench-sidebar-update"),
         };
       });
-      expect(geometry.header).not.toBeNull();
-      expect(geometry.cluster).not.toBeNull();
+      expect(geometry.sidebar).not.toBeNull();
+      expect(geometry.product).not.toBeNull();
+      expect(geometry.about).not.toBeNull();
       expect(geometry.icon).not.toBeNull();
-      expect(geometry.fileCopy).not.toBeNull();
       expect(Math.abs(
         (geometry.icon.top + geometry.icon.bottom) / 2
-        - (geometry.cluster.top + geometry.cluster.bottom) / 2,
+        - (geometry.about.top + geometry.about.bottom) / 2,
       )).toBeLessThanOrEqual(0.5);
       if (badgeExpected) {
         expect(geometry.badge).not.toBeNull();
-        expect(geometry.badgeLabel).not.toBeNull();
-        expect(geometry.badgeLabel.top).toBeGreaterThanOrEqual(
-          geometry.header.top,
-        );
-        expect(geometry.badgeLabel.bottom).toBeLessThanOrEqual(
-          geometry.header.bottom,
-        );
-        expect(geometry.badgeLabel.right).toBeLessThanOrEqual(
-          geometry.fileCopy.left - 8,
-        );
-        expect(geometry.badgeLabel.top).toBeLessThan(geometry.icon.bottom);
+        expect(geometry.badge.top).toBeGreaterThanOrEqual(geometry.product.top);
+        expect(geometry.badge.bottom).toBeLessThanOrEqual(geometry.product.bottom);
+        expect(geometry.badge.right).toBeLessThanOrEqual(geometry.product.right);
+        expect(geometry.badge.left).toBeGreaterThan(geometry.icon.right);
       } else {
         expect(geometry.badge).toBeNull();
-        expect(geometry.badgeLabel).toBeNull();
       }
       return geometry;
     };
 
-    const noUpdateGeometry = await captureHeader({ badgeExpected: false });
+    const noUpdateGeometry = await captureSidebarProduct({ badgeExpected: false });
     const updateStatus = {
       currentVersion: "0.8.6",
       latestVersion: "9.9.9",
@@ -476,9 +480,9 @@ test("automatic update actions keep the header geometry and About lifecycle", as
     await expect(launched.page.getByRole("button", {
       name: "发现 PageRoot 9.9.9，下载更新",
     })).toBeVisible();
-    const availableGeometry = await captureHeader();
+    const availableGeometry = await captureSidebarProduct();
 
-    await launched.page.getByRole("button", { name: "关于源页" }).click();
+    await sidebar.getByRole("button", { name: "源页", exact: true }).click();
     await expect(launched.page.getByRole("dialog", { name: "源页" }))
       .toBeVisible();
     await launched.page.getByRole("button", { name: "关闭关于源页" }).click();
@@ -500,11 +504,12 @@ test("automatic update actions keep the header geometry and About lifecycle", as
     await launched.page.getByRole("button", { name: "稍后" }).click();
     await expect(launched.page.locator("dialog.restart-update-dialog[open]"))
       .toHaveCount(0);
-    const downloadedGeometry = await captureHeader();
+    const downloadedGeometry = await captureSidebarProduct();
     for (const geometry of [availableGeometry, downloadedGeometry]) {
       expect(geometry.icon).toEqual(noUpdateGeometry.icon);
-      expect(geometry.cluster).toEqual(noUpdateGeometry.cluster);
-      expect(geometry.fileCopy).toEqual(noUpdateGeometry.fileCopy);
+      expect(geometry.about).toEqual(noUpdateGeometry.about);
+      expect(geometry.product).toEqual(noUpdateGeometry.product);
+      expect(geometry.sidebar).toEqual(noUpdateGeometry.sidebar);
     }
   } finally {
     await stopPageRoot(launched.electronApp, launched.isolatedUserData);
