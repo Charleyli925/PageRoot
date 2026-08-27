@@ -524,6 +524,7 @@ test("Workbench and review surfaces route to architecture or observable runtime 
     changedFiles: ["app/workbench.tsx"],
   });
   assert.deepEqual(workbench.selectedNodeTests, [
+    "tests/comment-rail-contract.test.mjs",
     "tests/desktop-preload-ipc.test.mjs",
     "tests/edit-author-runtime-session.test.mjs",
     "tests/edit-runtime-bootstrap.test.mjs",
@@ -570,6 +571,7 @@ test("Workbench and review surfaces route to architecture or observable runtime 
     changedFiles: ["app/workbench/comment-rail-view.tsx"],
   });
   assert.deepEqual(commentRail.selectedNodeTests, [
+    "tests/comment-rail-contract.test.mjs",
     "tests/project-rules-workflow.test.mjs",
     "tests/project-workflow.test.mjs",
     "tests/source-rename.test.mjs",

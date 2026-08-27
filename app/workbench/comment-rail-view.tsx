@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  memo,
   type CSSProperties,
 } from "react";
 import { CaretRightIcon } from "@phosphor-icons/react/dist/csr/CaretRight";
@@ -30,7 +31,7 @@ export type CommentRailViewProps = {
   actions: CommentRailActions;
 };
 
-export function CommentRailView({
+export const CommentRailView = memo(function CommentRailView({
   model,
   actions,
 }: CommentRailViewProps) {
@@ -53,7 +54,6 @@ export function CommentRailView({
     hasUnsavedCommentEdit,
     otherTabCommentEntryCount,
     otherTabCommentsOpen,
-    otherTabCommentsContextKey,
     interactionLocked,
     unfinishedEditedComment,
     otherTabCommentGroups,
@@ -99,9 +99,11 @@ export function CommentRailView({
     openGlobalCommentComposer,
     resumeCurrentComposer,
     resumeCommentEdit,
-    setExpandedOtherTabCommentsKey,
-    setComposerOpen,
-    setPendingDeleteCommentId,
+    toggleOtherTabComments,
+    collapseOtherTabComments,
+    hideCommentComposer,
+    requestDeleteComment,
+    clearDeleteRequest,
     focusCommentTarget,
     startUnsafeTargetRelink,
     cancelTargetRelink,
@@ -231,11 +233,7 @@ export function CommentRailView({
                       aria-label={`其他标签页评论 ${otherTabCommentEntryCount}`}
                       aria-expanded={otherTabCommentsOpen}
                       aria-controls="other-tab-comment-groups"
-                      onClick={() => setExpandedOtherTabCommentsKey((current) => (
-                        current === otherTabCommentsContextKey
-                          ? ""
-                          : otherTabCommentsContextKey
-                      ))}
+                      onClick={toggleOtherTabComments}
                     >
                       <span>其他标签页 {otherTabCommentEntryCount}</span>
                       <CaretRightIcon aria-hidden="true" size={12} weight="bold" />
@@ -276,7 +274,7 @@ export function CommentRailView({
                                 aria-label={`${group.label}：未保存评论：${insertionLabel(entry.target)}：${entry.previewText}`}
                                 key={entry.key}
                                 onClick={() => {
-                                  setExpandedOtherTabCommentsKey("");
+                                  collapseOtherTabComments();
                                   window.requestAnimationFrame(resumeCurrentComposer);
                                 }}
                               >
@@ -300,9 +298,9 @@ export function CommentRailView({
                               aria-label={`${group.label}：${insertionLabel(entry.target)}：${entry.previewText}`}
                               key={entry.key}
                               onClick={() => {
-                                setExpandedOtherTabCommentsKey("");
-                                setComposerOpen(false);
-                                setPendingDeleteCommentId(null);
+                                collapseOtherTabComments();
+                                hideCommentComposer();
+                                clearDeleteRequest();
                                 window.requestAnimationFrame(() => {
                                   focusCommentTarget(
                                     entry.target,
@@ -460,7 +458,7 @@ export function CommentRailView({
                         type="button"
                         autoFocus
                         onClick={() => {
-                          setPendingDeleteCommentId(null);
+                          clearDeleteRequest();
                           window.requestAnimationFrame(() => {
                             document.getElementById("composer-delete-button")?.focus();
                           });
@@ -521,7 +519,7 @@ export function CommentRailView({
                           || attachmentUploadCount > 0
                           || (!draft.trim() && draftAttachments.length === 0)
                         }
-                        onClick={() => setPendingDeleteCommentId("__composer")}
+                        onClick={() => requestDeleteComment("__composer")}
                       >
                         <TrashIcon aria-hidden="true" size={17} weight="bold" />
                       </button>
@@ -730,7 +728,7 @@ export function CommentRailView({
                             autoFocus
                             onClick={(event) => {
                               event.currentTarget.blur();
-                              setPendingDeleteCommentId(null);
+                              clearDeleteRequest();
                               queueReviewCommentFocus(comment.target, comment.commentId);
                               window.requestAnimationFrame(() => {
                                 document.getElementById(`comment-delete-${comment.commentId}`)?.focus();
@@ -858,7 +856,7 @@ export function CommentRailView({
                             onClick={(event) => {
                               event.stopPropagation();
                               event.currentTarget.blur();
-                              setPendingDeleteCommentId(comment.commentId);
+                              requestDeleteComment(comment.commentId);
                               queueReviewCommentFocus(comment.target, comment.commentId);
                             }}
                           >
@@ -876,4 +874,4 @@ export function CommentRailView({
           </aside>
 
   );
-}
+});

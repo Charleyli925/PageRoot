@@ -171,7 +171,11 @@ import {
   unsafeRelinkComments,
 } from "./workbench/comment-relink-model.js";
 import { CommentRailView } from "./workbench/comment-rail-view";
-import { deriveComposerState } from "./workbench/comment-rail-contract";
+import {
+  deriveComposerState,
+  type CommentRailActions,
+  type CommentRailModel,
+} from "./workbench/comment-rail-contract";
 import {
   WorkbenchFileHeaderView,
   WorkbenchHeaderToolbar,
@@ -2780,10 +2784,8 @@ export default function Workbench() {
   const submissionRelinkPending = submissionRelinkPendingIds.some(
     (commentId) => unsafeRelinkCommentIds.has(commentId),
   );
-  const relinkCardCopy = relinkNoticeCopy(unsafeRelinkCommentItems);
   const relinkCardActive = Boolean(relinkingTarget && relinkingTarget !== "__composer");
   const commentEditDraft = commentEditSession?.draftText ?? "";
-  const commentEditAttachments = commentEditSession?.draftAttachments ?? [];
   const unfinishedEditedComment = commentEditSession
     ? activeCommentItems.find(
         (comment) => comment.commentId === commentEditSession.commentId,
@@ -7546,6 +7548,196 @@ export default function Workbench() {
     (entry) => entry.tier === "hot"
       && entry.tabId === workbenchTabsSnapshot.pendingTabId,
   ) || null;
+  const retryProjectHydrationFromCommentRail = useCallback(() => {
+    void workspaceController?.retryProjectHydration();
+  }, [workspaceController]);
+  const updateCommentDraftFromRail = useCallback((value: string) => {
+    workspaceControllerRef.current?.updateCommentDraft(value);
+  }, []);
+  const pasteIntoCommentComposer = useCallback((event: ClipboardEvent<HTMLTextAreaElement>) => {
+    const commentId = draftCommentId
+      || currentCommentSessionSnapshot().composerCommentId;
+    if (commentId) pasteImages(event, { kind: "composer", commentId });
+  }, [currentCommentSessionSnapshot, draftCommentId, pasteImages]);
+  const commentRailModel = useMemo<CommentRailModel>(() => ({
+    composer: deriveComposerState({
+      relinkingTarget,
+      editingCommentId,
+      commentEditSession,
+      commentEditDraft,
+      commentEditAttachments: commentEditSession?.draftAttachments ?? [],
+      composerOpen,
+      draftTarget,
+      draft,
+      draftCommentId,
+      draftAttachments,
+      hasCollapsedCommentDraft,
+    }),
+    commentsPanelRef,
+    commentsHeaderRef,
+    composerRef,
+    commentEditRef,
+    viewMode,
+    commentLayoutReady,
+    commentLayoutAuthority,
+    commentRailMinimumOffset,
+    commentRailFollowsFocus,
+    canvasDocumentHeight,
+    commentRailContentHeight,
+    commentRailOffset,
+    commentRailMinimumTop,
+    visibleCommentItems,
+    draftInCurrentTab,
+    hasUnsavedCommentEdit,
+    otherTabCommentEntryCount,
+    otherTabCommentsOpen,
+    interactionLocked,
+    unfinishedEditedComment,
+    otherTabCommentGroups,
+    activeCommentCount,
+    changeEvents,
+    composerInCurrentTab,
+    composerTop,
+    focusedCommentId,
+    relinkRailCardVisible,
+    relinkCardCopy: relinkNoticeCopy(unsafeRelinkCommentItems),
+    relinkCardActive,
+    projectLoadError,
+    draftTargetScope,
+    attachmentUploadCount,
+    draftTargetCanSave,
+    composerMeasurementKey,
+    attachmentObjectUrls,
+    pendingDeleteCommentId,
+    draftRecoveryTop,
+    draftRecoveryMeasurementKey,
+    expectedCommentLayoutTargetIds,
+    sortedVisibleCommentItems,
+    renderedVisibleCommentItems,
+    commentTargetLayouts,
+    selection,
+    commentMeasurementKeys,
+    visibleCommentPositions,
+  }), [
+    activeCommentCount,
+    attachmentObjectUrls,
+    attachmentUploadCount,
+    canvasDocumentHeight,
+    changeEvents,
+    commentEditDraft,
+    commentEditSession,
+    commentLayoutAuthority,
+    commentLayoutReady,
+    commentMeasurementKeys,
+    commentRailContentHeight,
+    commentRailFollowsFocus,
+    commentRailMinimumOffset,
+    commentRailMinimumTop,
+    commentRailOffset,
+    commentTargetLayouts,
+    composerInCurrentTab,
+    composerMeasurementKey,
+    composerOpen,
+    composerTop,
+    draft,
+    draftAttachments,
+    draftCommentId,
+    draftInCurrentTab,
+    draftRecoveryMeasurementKey,
+    draftRecoveryTop,
+    draftTarget,
+    draftTargetCanSave,
+    draftTargetScope,
+    editingCommentId,
+    expectedCommentLayoutTargetIds,
+    focusedCommentId,
+    hasCollapsedCommentDraft,
+    hasUnsavedCommentEdit,
+    interactionLocked,
+    otherTabCommentEntryCount,
+    otherTabCommentGroups,
+    otherTabCommentsOpen,
+    pendingDeleteCommentId,
+    projectLoadError,
+    relinkCardActive,
+    relinkRailCardVisible,
+    relinkingTarget,
+    renderedVisibleCommentItems,
+    selection,
+    sortedVisibleCommentItems,
+    unfinishedEditedComment,
+    unsafeRelinkCommentItems,
+    viewMode,
+    visibleCommentItems,
+    visibleCommentPositions,
+  ]);
+  const commentRailActions = useMemo<CommentRailActions>(() => ({
+    openGlobalCommentComposer,
+    resumeCurrentComposer,
+    resumeCommentEdit,
+    toggleOtherTabComments: () => {
+      setExpandedOtherTabCommentsKey((current) => (
+        current === otherTabCommentsContextKey ? "" : otherTabCommentsContextKey
+      ));
+    },
+    collapseOtherTabComments: () => setExpandedOtherTabCommentsKey(""),
+    hideCommentComposer: () => setComposerOpen(false),
+    requestDeleteComment: (commentId) => setPendingDeleteCommentId(commentId),
+    clearDeleteRequest: () => setPendingDeleteCommentId(null),
+    focusCommentTarget,
+    startUnsafeTargetRelink,
+    cancelTargetRelink,
+    onRetryProjectHydration: retryProjectHydrationFromCommentRail,
+    closeCommentComposer,
+    beginTargetRelink,
+    updateDraft: updateCommentDraftFromRail,
+    onComposerPaste: pasteIntoCommentComposer,
+    commit: addComment,
+    ensureAttachmentObjectUrl,
+    openAttachmentPreview,
+    downloadAttachment,
+    removeComposerAttachment,
+    discardCurrentComposer,
+    openAttachmentPicker,
+    commentTargetIsLocatable,
+    updateCommentEditDraft,
+    cancelCommentEdit,
+    confirmEdit: confirmCommentEdit,
+    pasteImages,
+    removeCommentAttachment,
+    queueReviewCommentFocus,
+    deleteComment,
+    beginEdit: beginCommentEdit,
+  }), [
+    addComment,
+    beginCommentEdit,
+    beginTargetRelink,
+    cancelCommentEdit,
+    cancelTargetRelink,
+    closeCommentComposer,
+    commentTargetIsLocatable,
+    confirmCommentEdit,
+    deleteComment,
+    discardCurrentComposer,
+    downloadAttachment,
+    ensureAttachmentObjectUrl,
+    focusCommentTarget,
+    openAttachmentPicker,
+    openAttachmentPreview,
+    openGlobalCommentComposer,
+    otherTabCommentsContextKey,
+    pasteImages,
+    pasteIntoCommentComposer,
+    queueReviewCommentFocus,
+    removeCommentAttachment,
+    removeComposerAttachment,
+    resumeCommentEdit,
+    resumeCurrentComposer,
+    retryProjectHydrationFromCommentRail,
+    startUnsafeTargetRelink,
+    updateCommentDraftFromRail,
+    updateCommentEditDraft,
+  ]);
 
   return (
     <>
@@ -8063,107 +8255,8 @@ export default function Workbench() {
 
         {canvasMode === "edit" ? (
           <CommentRailView
-            model={{
-              composer: deriveComposerState({
-                relinkingTarget,
-                editingCommentId,
-                commentEditSession,
-                commentEditDraft,
-                commentEditAttachments,
-                composerOpen,
-                draftTarget,
-                draft,
-                draftCommentId,
-                draftAttachments,
-                hasCollapsedCommentDraft,
-              }),
-              commentsPanelRef,
-              commentsHeaderRef,
-              composerRef,
-              commentEditRef,
-              viewMode,
-              commentLayoutReady,
-              commentLayoutAuthority,
-              commentRailMinimumOffset,
-              commentRailFollowsFocus,
-              canvasDocumentHeight,
-              commentRailContentHeight,
-              commentRailOffset,
-              commentRailMinimumTop,
-              visibleCommentItems,
-              draftInCurrentTab,
-              hasUnsavedCommentEdit,
-              otherTabCommentEntryCount,
-              otherTabCommentsOpen,
-              otherTabCommentsContextKey,
-              interactionLocked,
-              unfinishedEditedComment,
-              otherTabCommentGroups,
-              activeCommentCount,
-              changeEvents,
-              composerInCurrentTab,
-              composerTop,
-              focusedCommentId,
-              relinkRailCardVisible,
-              relinkCardCopy,
-              relinkCardActive,
-              projectLoadError,
-              draftTargetScope,
-              attachmentUploadCount,
-              draftTargetCanSave,
-              composerMeasurementKey,
-              attachmentObjectUrls,
-              pendingDeleteCommentId,
-              draftRecoveryTop,
-              draftRecoveryMeasurementKey,
-              expectedCommentLayoutTargetIds,
-              sortedVisibleCommentItems,
-              renderedVisibleCommentItems,
-              commentTargetLayouts,
-              selection,
-              commentMeasurementKeys,
-              visibleCommentPositions,
-            }}
-            actions={{
-              openGlobalCommentComposer,
-              resumeCurrentComposer,
-              resumeCommentEdit,
-              setExpandedOtherTabCommentsKey,
-              setComposerOpen,
-              setPendingDeleteCommentId,
-              focusCommentTarget,
-              startUnsafeTargetRelink,
-              cancelTargetRelink,
-              onRetryProjectHydration: () => {
-                void workspaceController?.retryProjectHydration();
-              },
-              closeCommentComposer,
-              beginTargetRelink,
-              updateDraft: (value) => {
-                workspaceControllerRef.current?.updateCommentDraft(value);
-              },
-              onComposerPaste: (event) => {
-                const commentId = draftCommentId
-                  || currentCommentSessionSnapshot().composerCommentId;
-                if (commentId) pasteImages(event, { kind: "composer", commentId });
-              },
-              commit: addComment,
-              ensureAttachmentObjectUrl,
-              openAttachmentPreview,
-              downloadAttachment,
-              removeComposerAttachment,
-              discardCurrentComposer,
-              openAttachmentPicker,
-              commentTargetIsLocatable,
-              updateCommentEditDraft,
-              cancelCommentEdit,
-              confirmEdit: confirmCommentEdit,
-              pasteImages,
-              removeCommentAttachment,
-              queueReviewCommentFocus,
-              deleteComment,
-              beginEdit: beginCommentEdit,
-            }}
+            model={commentRailModel}
+            actions={commentRailActions}
           />
         ) : null}
       </div>

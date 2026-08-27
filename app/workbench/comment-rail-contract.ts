@@ -1,4 +1,4 @@
-import type { ClipboardEvent, Dispatch, RefObject, SetStateAction } from "react";
+import type { ClipboardEvent, RefObject } from "react";
 
 import type {
   HtmlCanvasCommentLayoutState,
@@ -65,7 +65,6 @@ export type CommentRailModel = {
   hasUnsavedCommentEdit: boolean;
   otherTabCommentEntryCount: number;
   otherTabCommentsOpen: boolean;
-  otherTabCommentsContextKey: string;
   interactionLocked: boolean;
   unfinishedEditedComment: CommentItem | null | undefined;
   otherTabCommentGroups: OtherTabCommentGroup[];
@@ -99,9 +98,11 @@ export type CommentRailActions = {
   openGlobalCommentComposer: () => void;
   resumeCurrentComposer: () => void;
   resumeCommentEdit: (commentId: string) => void;
-  setExpandedOtherTabCommentsKey: Dispatch<SetStateAction<string>>;
-  setComposerOpen: Dispatch<SetStateAction<boolean>>;
-  setPendingDeleteCommentId: Dispatch<SetStateAction<string | null>>;
+  toggleOtherTabComments: () => void;
+  collapseOtherTabComments: () => void;
+  hideCommentComposer: () => void;
+  requestDeleteComment: (commentId: string) => void;
+  clearDeleteRequest: () => void;
   focusCommentTarget: (target: HtmlCanvasSelection, commentId: string) => void;
   startUnsafeTargetRelink: () => void;
   cancelTargetRelink: () => void;

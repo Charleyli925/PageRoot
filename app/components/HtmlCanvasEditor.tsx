@@ -11,6 +11,8 @@ import {
   useState,
   type CSSProperties,
   type KeyboardEvent as ReactKeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
+  type PointerEvent as ReactPointerEvent,
 } from "react";
 import { flushSync } from "react-dom";
 
@@ -164,6 +166,8 @@ import {
 import {
   deriveCapabilityHoverState,
   deriveSelectionOverlay,
+  type SelectionChromeActions,
+  type SelectionChromeModel,
 } from "./html-canvas-selection-chrome-contract";
 import type {
   HtmlCanvasCommentedTarget,
@@ -4976,7 +4980,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   ]);
   applyNativeFormatShortcutRef.current = applyNativeFormatShortcut;
 
-  const handleToolbarKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+  const handleToolbarKeyDown = useCallback((event: ReactKeyboardEvent<HTMLDivElement>) => {
     const historyDirection = sourceHistoryDirectionForShortcut(event);
     if (historyDirection) {
       event.preventDefault();
@@ -4998,7 +5002,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       iframeRef.current?.focus();
       clearSelection();
     }
-  };
+  }, [clearSelection, finishNativeEditing, spacingMenuOpen]);
 
   const editorHeight = typeof height === "number" ? `${height}px` : height;
   const containerStyle = { "--html-canvas-height": editorHeight } as CSSProperties;
@@ -5128,6 +5132,193 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   }, [editFeedback?.recovery, onRequestReload]);
   const editFeedbackActionAvailable = editFeedback?.recovery === "reload"
     && Boolean(onRequestReload);
+  const handleHoverHintPointerDown = useCallback((
+    event: ReactPointerEvent<HTMLDivElement>,
+  ) => {
+    hoverHintPointerInsideRef.current = true;
+    event.preventDefault();
+    event.stopPropagation();
+  }, []);
+  const handleHoverHintPointerEnter = useCallback(() => {
+    hoverHintPointerInsideRef.current = true;
+  }, []);
+  const handleHoverHintPointerLeave = useCallback(() => {
+    hoverHintPointerInsideRef.current = false;
+    hoverControllerRef.current?.hide();
+  }, []);
+  const handleHoverHintClick = useCallback((event: ReactMouseEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const capability = hoverChrome.capability;
+    if (!interactionLocked && capability) {
+      hoverControllerRef.current?.hide();
+      selectElement(capability.selectionElement);
+    }
+  }, [hoverChrome.capability, interactionLocked, selectElement]);
+  const dismissEditFeedback = useCallback(() => {
+    setEditFeedback(null);
+  }, []);
+  const handleSelectCommentMarker = useCallback((markerSelection: HtmlCanvasSelection) => {
+    if (lockedRef.current) return;
+    // The marker was clicked at the user's current Canvas position. Keep that
+    // viewport stable; rail navigation can still reveal the paired target.
+    selectTarget(markerSelection, { reveal: false, showToolbar: true });
+  }, [selectTarget]);
+  const handleToolbarPointerDownCapture = useCallback((
+    event: ReactPointerEvent<HTMLDivElement>,
+  ) => {
+    const activeNativeEdit = activeNativeEditRef.current;
+    if (!activeNativeEdit) return;
+    if (activeNativeEdit.session.isComposing()) {
+      // Moving focus from the authored iframe to this outer toolbar makes
+      // Chromium/macOS expose intermediate IME text. Keep the editor focused.
+      event.preventDefault();
+      return;
+    }
+    retainNativeEditFocusRef.current = {
+      session: activeNativeEdit.session,
+      lease: { ...activeNativeEdit.lease },
+    };
+  }, []);
+  const handleToolbarMouseDownCapture = useCallback((
+    event: ReactMouseEvent<HTMLDivElement>,
+  ) => {
+    if (activeNativeEditRef.current?.session.isComposing()) {
+      // Chromium attaches the focus default to mousedown as well.
+      event.preventDefault();
+    }
+  }, []);
+  const executeSelectedPresentationAction = useCallback(() => {
+    if (selection) executePagePresentationAction(selection);
+  }, [executePagePresentationAction, selection]);
+  const commentOnSelection = useCallback(() => {
+    if (lockedRef.current || !selection) return;
+    const openComment = () => {
+      if (activeNativeEditRef.current) {
+        const committed = finishNativeEditing(true, "manual");
+        if (!committed.ok) return;
+      }
+      requestCommentForTarget(selection);
+    };
+    if (deferNativeCommandRef.current("comment", openComment)) return;
+    openComment();
+  }, [finishNativeEditing, requestCommentForTarget, selection]);
+  const startEditingSelection = useCallback(() => {
+    startEditing();
+  }, [startEditing]);
+  const toggleSpacingMenu = useCallback(() => {
+    setSpacingMenuOpen((open) => !open);
+  }, []);
+  const selectionChromeModel = useMemo<SelectionChromeModel>(() => ({
+    hover: deriveCapabilityHoverState({
+      enabled: pointerCapabilityHoverEnabled,
+      hoverChrome,
+      hoverTargetIsSelected,
+      isEditing,
+      interactionLocked,
+      outlineStyle: hoverOutlineStyle,
+      hintStyle: hoverHintStyle,
+      hintPlacement: hoverHintPlacement,
+    }),
+    overlay: deriveSelectionOverlay({
+      selection,
+      outlineStyle: selectedOutlineStyle,
+    }),
+    canvasTransitionActive,
+    selectionCapabilitySpoken: selectionCapability ? selectionCapability.spoken : "",
+    interactionLocked,
+    hoverHintMeasureRef,
+    editFeedback,
+    reloadActionLabel,
+    editFeedbackActionAvailable,
+    renderedMode,
+    commentMarkers,
+    toolbarVisible,
+    overlayPosition,
+    toolbarRef,
+    hasTextRange,
+    isEditing,
+    toolbarStyle,
+    selectedPagePresentationAction,
+    readOnly,
+    selectedNativeEditAvailable,
+    selectedStyle,
+    textFormatRequiresSelection,
+    enableReorder,
+    moveAvailability,
+    spacingMenuRef,
+    spacingMenuOpen,
+    usageProjectId,
+    usageCapture,
+  }), [
+    canvasTransitionActive,
+    commentMarkers,
+    editFeedback,
+    editFeedbackActionAvailable,
+    enableReorder,
+    hasTextRange,
+    hoverChrome,
+    hoverHintPlacement,
+    hoverHintStyle,
+    hoverOutlineStyle,
+    hoverTargetIsSelected,
+    interactionLocked,
+    isEditing,
+    moveAvailability,
+    overlayPosition,
+    pointerCapabilityHoverEnabled,
+    readOnly,
+    reloadActionLabel,
+    renderedMode,
+    selectedNativeEditAvailable,
+    selectedOutlineStyle,
+    selectedPagePresentationAction,
+    selectedStyle,
+    selection,
+    selectionCapability,
+    spacingMenuOpen,
+    textFormatRequiresSelection,
+    toolbarStyle,
+    toolbarVisible,
+    usageCapture,
+    usageProjectId,
+  ]);
+  const selectionChromeActions = useMemo<SelectionChromeActions>(() => ({
+    onHoverHintPointerDown: handleHoverHintPointerDown,
+    onHoverHintPointerEnter: handleHoverHintPointerEnter,
+    onHoverHintPointerLeave: handleHoverHintPointerLeave,
+    onHoverHintClick: handleHoverHintClick,
+    onEditFeedbackAction: handleEditFeedbackAction,
+    onDismissEditFeedback: dismissEditFeedback,
+    onPauseEditFeedback: setEditFeedbackPaused,
+    onSelectCommentMarker: handleSelectCommentMarker,
+    onToolbarKeyDown: handleToolbarKeyDown,
+    onToolbarPointerDownCapture: handleToolbarPointerDownCapture,
+    onToolbarMouseDownCapture: handleToolbarMouseDownCapture,
+    onExecutePresentationAction: executeSelectedPresentationAction,
+    onComment: commentOnSelection,
+    onStartEditing: startEditingSelection,
+    onApplyInlineStyle: applyInlineStyle,
+    onMoveSelected: moveSelected,
+    onToggleSpacingMenu: toggleSpacingMenu,
+  }), [
+    applyInlineStyle,
+    commentOnSelection,
+    dismissEditFeedback,
+    executeSelectedPresentationAction,
+    handleEditFeedbackAction,
+    handleHoverHintClick,
+    handleHoverHintPointerDown,
+    handleHoverHintPointerEnter,
+    handleHoverHintPointerLeave,
+    handleSelectCommentMarker,
+    handleToolbarKeyDown,
+    handleToolbarMouseDownCapture,
+    handleToolbarPointerDownCapture,
+    moveSelected,
+    startEditingSelection,
+    toggleSpacingMenu,
+  ]);
 
   return (
     <div
@@ -5161,129 +5352,8 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         )}
       />
       <HtmlCanvasSelectionChrome
-        model={{
-          hover: deriveCapabilityHoverState({
-            enabled: pointerCapabilityHoverEnabled,
-            hoverChrome,
-            hoverTargetIsSelected,
-            isEditing,
-            interactionLocked,
-            outlineStyle: hoverOutlineStyle,
-            hintStyle: hoverHintStyle,
-            hintPlacement: hoverHintPlacement,
-          }),
-          overlay: deriveSelectionOverlay({
-            selection,
-            outlineStyle: selectedOutlineStyle,
-          }),
-          canvasTransitionActive,
-          selectionCapabilitySpoken: selectionCapability ? selectionCapability.spoken : "",
-          interactionLocked,
-          hoverHintMeasureRef,
-          editFeedback,
-          reloadActionLabel,
-          editFeedbackActionAvailable,
-          renderedMode,
-          commentMarkers,
-          toolbarVisible,
-          overlayPosition,
-          toolbarRef,
-          hasTextRange,
-          isEditing,
-          toolbarStyle,
-          selectedPagePresentationAction,
-          readOnly,
-          selectedNativeEditAvailable,
-          selectedStyle,
-          textFormatRequiresSelection,
-          enableReorder,
-          moveAvailability,
-          spacingMenuRef,
-          spacingMenuOpen,
-          usageProjectId,
-          usageCapture,
-        }}
-        actions={{
-          onHoverHintPointerDown: (event) => {
-            hoverHintPointerInsideRef.current = true;
-            event.preventDefault();
-            event.stopPropagation();
-          },
-          onHoverHintPointerEnter: () => {
-            hoverHintPointerInsideRef.current = true;
-          },
-          onHoverHintPointerLeave: () => {
-            hoverHintPointerInsideRef.current = false;
-            hoverControllerRef.current?.hide();
-          },
-          onHoverHintClick: (event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            const capability = hoverChrome.capability;
-            if (!interactionLocked && capability) {
-              hoverControllerRef.current?.hide();
-              selectElement(capability.selectionElement);
-            }
-          },
-          onEditFeedbackAction: handleEditFeedbackAction,
-          onDismissEditFeedback: () => setEditFeedback(null),
-          onPauseEditFeedback: setEditFeedbackPaused,
-          onSelectCommentMarker: (markerSelection) => {
-            if (lockedRef.current) return;
-            // The marker was clicked at the user's current Canvas position.
-            // Keep that viewport stable; navigation from the comment rail can
-            // still opt into revealing the paired target.
-            selectTarget(markerSelection, { reveal: false, showToolbar: true });
-          },
-          onToolbarKeyDown: handleToolbarKeyDown,
-          onToolbarPointerDownCapture: (event) => {
-            const activeNativeEdit = activeNativeEditRef.current;
-            if (!activeNativeEdit) return;
-            if (activeNativeEdit.session.isComposing()) {
-              // Moving focus from the authored iframe to this outer toolbar
-              // makes Chromium/macOS end the live IME composition and expose
-              // its intermediate pinyin as ordinary DOM text. Keep the native
-              // editor focused while allowing the button click to enqueue its
-              // explicit command.
-              event.preventDefault();
-              return;
-            }
-            retainNativeEditFocusRef.current = {
-              session: activeNativeEdit.session,
-              lease: { ...activeNativeEdit.lease },
-            };
-          },
-          onToolbarMouseDownCapture: (event) => {
-            if (activeNativeEditRef.current?.session.isComposing()) {
-              // The focus default is attached to mousedown in Chromium. Keep
-              // this fallback even when pointerdown compatibility changes.
-              event.preventDefault();
-            }
-          },
-          onExecutePresentationAction: () => {
-            if (selection) executePagePresentationAction(selection);
-          },
-          onComment: () => {
-            if (lockedRef.current || !selection) return;
-            const openComment = () => {
-              if (activeNativeEditRef.current) {
-                const committed = finishNativeEditing(true, "manual");
-                if (!committed.ok) return;
-              }
-              requestCommentForTarget(selection);
-            };
-            if (deferNativeCommandRef.current("comment", openComment)) return;
-            openComment();
-          },
-          onStartEditing: () => {
-            startEditing();
-          },
-          onApplyInlineStyle: applyInlineStyle,
-          onMoveSelected: moveSelected,
-          onToggleSpacingMenu: () => {
-            setSpacingMenuOpen((open) => !open);
-          },
-        }}
+        model={selectionChromeModel}
+        actions={selectionChromeActions}
       />
     </div>
   );
