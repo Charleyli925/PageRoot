@@ -49,6 +49,21 @@ const RUNTIME_SESSION_CONSTRUCTORS = [
 const PROVIDER_LITERAL_BRANCH = /\b(?:[A-Za-z_$][\w$]*\s*(?:\?\.|\.)\s*)*(?:providerId|mode)\s*(?:===|!==|==|!=)\s*["'`](?:qoder|codex|qoder-acp|codex-acp)["'`]|["'`](?:qoder|codex|qoder-acp|codex-acp)["'`]\s*(?:===|!==|==|!=)\s*(?:[A-Za-z_$][\w$]*\s*(?:\?\.|\.)\s*)*(?:providerId|mode)\b/u;
 const PROVIDER_IMPLEMENTATION_IMPORT = /(?:^|\/)(?:qoder-availability|QoderAvailabilityCard|qoder-provider)(?:\.[^/]*)?$/u;
 
+const POINTER_CAPABILITY_FILES = new Set([
+  "app/components/html-canvas-pointer-capability.ts",
+  "app/components/html-canvas-pointer-proof.js",
+]);
+
+export function canvasPointerLayerViolations({ file = "", source = "" } = {}) {
+  if (!POINTER_CAPABILITY_FILES.has(file)) return [];
+  if (/\bisNativeDirectEditRoot\b/u.test(source)) {
+    return [
+      `${file}: pointer capability must not approximate editability from native-edit tag roots`,
+    ];
+  }
+  return [];
+}
+
 export function providerNeutralRendererViolations({ file = "", source = "" } = {}) {
   const violations = [];
   const workflow = /^app\/application\/(?:run|review|version)[^/]*\.(?:js|ts)$/u.test(file);
@@ -260,6 +275,7 @@ export async function architectureViolations() {
     const file = relative(filePath);
     const source = await readFile(filePath, "utf8");
     violations.push(...providerNeutralRendererViolations({ file, source }));
+    violations.push(...canvasPointerLayerViolations({ file, source }));
     if (file.startsWith("app/application/")) {
       applicationSources.push({ file, source });
     }

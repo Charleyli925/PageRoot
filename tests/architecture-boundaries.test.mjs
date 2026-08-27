@@ -4,6 +4,7 @@ import test from "node:test";
 
 import {
   architectureViolations,
+  canvasPointerLayerViolations,
   compositionBoundaryViolations,
   providerNeutralRendererViolations,
 } from "../scripts/check-architecture.mjs";
@@ -87,6 +88,25 @@ test("provider-neutral renderer gate rejects provider branches and workflow impl
   assert.deepEqual(providerNeutralRendererViolations({
     file: "app/application/run-workflow.js",
     source: 'const managed = delivery.mode === "managed-agent";',
+  }), []);
+});
+
+test("pointer capability files cannot approximate editability from native-edit tag roots", () => {
+  assert.match(canvasPointerLayerViolations({
+    file: "app/components/html-canvas-pointer-capability.ts",
+    source: 'import { isNativeDirectEditRoot } from "../lib/native-edit-capability.js";',
+  }).join("\n"), /native-edit tag roots/u);
+  assert.match(canvasPointerLayerViolations({
+    file: "app/components/html-canvas-pointer-proof.js",
+    source: "if (isNativeDirectEditRoot(tagName)) return true;",
+  }).join("\n"), /native-edit tag roots/u);
+  assert.deepEqual(canvasPointerLayerViolations({
+    file: "app/components/html-canvas-pointer-capability.ts",
+    source: "export function resolveCanvasPointerCapability(input) { return input; }",
+  }), []);
+  assert.deepEqual(canvasPointerLayerViolations({
+    file: "app/lib/native-edit-capability.js",
+    source: "export function isNativeDirectEditRoot(tagName) { return false; }",
   }), []);
 });
 

@@ -718,7 +718,9 @@ only these assertion forms:
   properties, so a rename, reflow, comment or format change to compliant code
   cannot fail the gate, and a dead string cannot pass it.
 - **Negative boundary regexes** that forbid an import, construction, endpoint or
-  retired identifier from appearing (a dependency/security boundary).
+  retired identifier from appearing (a dependency/security boundary). Pointer
+  capability files must not reference `isNativeDirectEditRoot`; tag-root
+  editability stays in `app/lib/native-edit-capability.js`.
 - **Document-content strings** for `docs/**` prose, which is not runtime code.
 
 The gate must not assert that a specific code fragment *exists* by substring or
