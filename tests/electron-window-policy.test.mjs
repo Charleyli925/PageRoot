@@ -5,35 +5,46 @@ import test from "node:test";
 const sourceUrl = (relativePath) => new URL(relativePath, import.meta.url);
 
 test("Electron automation stays backgrounded unless foreground debugging is explicit", async () => {
+  const nativeSpecFiles = [
+    "./e2e/electron/electron-native-harness.mjs",
+    "./e2e/electron/electron-project-lifecycle.spec.mjs",
+    "./e2e/electron/electron-edit-runtime.spec.mjs",
+    "./e2e/electron/electron-native-input.spec.mjs",
+    "./e2e/electron/electron-comments-and-rules.spec.mjs",
+    "./e2e/electron/electron-source-recovery.spec.mjs",
+  ];
   const [
     mainProcess,
+    appLifecycle,
     appFixture,
-    nativeSuite,
-    aiSuite,
-    preflightSuite,
-    preflightMain,
+    ...productSuites
   ] = await Promise.all([
     readFile(sourceUrl("../desktop/main.mjs"), "utf8"),
-    readFile(sourceUrl("./e2e/electron/helpers/pageroot-app-fixture.mjs"), "utf8"),
-    readFile(sourceUrl("./e2e/electron/native-dom-electron.spec.mjs"), "utf8"),
-    readFile(sourceUrl("./e2e/electron/ai-handoff-closed-loop.spec.mjs"), "utf8"),
+    readFile(sourceUrl("../desktop/app-lifecycle.mjs"), "utf8"),
+    readFile(sourceUrl("./e2e/electron/helpers/electron-app-launch.mjs"), "utf8"),
+    ...nativeSpecFiles.map((file) => readFile(sourceUrl(file), "utf8")),
+    readFile(sourceUrl("./e2e/electron/ai-closed-loop-helpers.mjs"), "utf8"),
     readFile(sourceUrl("./e2e/electron/ci-environment-preflight.spec.mjs"), "utf8"),
     readFile(sourceUrl("./e2e/electron/fixtures/ci-preflight-main.mjs"), "utf8"),
   ]);
+  const preflightSuite = productSuites.at(-2);
+  const preflightMain = productSuites.at(-1);
+  const nativeAndAiSuites = productSuites.slice(0, -2);
 
+  const desktopSource = `${mainProcess}\n${appLifecycle}`;
   assert.match(mainProcess, /PAGEROOT_E2E_FOREGROUND === "1"/u);
   // 后台 E2E 不再使用 accessory 激活策略彻底隐藏应用：Dock 图标保留，
   // 窗口仍默认不显示，只有用户主动点击 Dock 图标才调到前台。
-  assert.doesNotMatch(mainProcess, /setActivationPolicy\("accessory"\)/u);
+  assert.doesNotMatch(desktopSource, /setActivationPolicy\("accessory"\)/u);
   assert.match(mainProcess, /app\.on\("activate"/u);
   assert.match(mainProcess, /presentMainWindow\(\{ userInitiated: true \}\)/u);
-  assert.match(mainProcess, /show:\s*e2eWindowForeground/u);
+  assert.match(appLifecycle, /show:\s*e2eWindowForeground/u);
   assert.match(
     mainProcess,
     /const e2eNativeDialogsSuppressed = Boolean\(e2eUserDataPath\);/u,
   );
   assert.match(
-    mainProcess,
+    appLifecycle,
     /function presentMainWindow\(\{ userInitiated = false \} = \{\}\)[\s\S]*?e2eWindowRunsInBackground[\s\S]*?return false;/u,
   );
   // 即使显式前台观察 E2E，自动触发的原生弹窗也必须走日志拦截，
@@ -54,8 +65,8 @@ test("Electron automation stays backgrounded unless foreground debugging is expl
   assert.doesNotMatch(appFixture, /window\?\.show\(\)/u);
   assert.doesNotMatch(appFixture, /window\?\.focus\(\)/u);
 
-  for (const productSuite of [nativeSuite, aiSuite]) {
-    assert.match(productSuite, /\.\/helpers\/pageroot-app-fixture\.mjs/u);
+  assert.match(nativeAndAiSuites[0], /\.\/helpers\/pageroot-app-fixture\.mjs/u);
+  for (const productSuite of nativeAndAiSuites) {
     assert.doesNotMatch(productSuite, /page\.bringToFront\(\)/u);
     assert.doesNotMatch(productSuite, /app\.focus\(\{\s*steal:\s*true\s*\}\)/u);
     assert.doesNotMatch(productSuite, /window\?\.show\(\)/u);
@@ -71,7 +82,7 @@ test("Electron automation stays backgrounded unless foreground debugging is expl
 });
 
 test("window construction never waits for the Bridge utility process", async () => {
-  const mainProcess = await readFile(sourceUrl("../desktop/main.mjs"), "utf8");
+  const mainProcess = await readFile(sourceUrl("../desktop/app-lifecycle.mjs"), "utf8");
   const createWindow = mainProcess.slice(
     mainProcess.indexOf("async function createWindow()"),
   );
@@ -104,17 +115,15 @@ test("window construction never waits for the Bridge utility process", async () 
 });
 
 test("final-exit IPC unregister and close-abort registration include workbench tabs", async () => {
-  const mainProcess = await readFile(sourceUrl("../desktop/main.mjs"), "utf8");
-  const unregister = mainProcess.slice(
-    mainProcess.indexOf("function unregisterIpc()"),
-    mainProcess.indexOf("const EXIT_INTENTS"),
-  );
-  assert.match(unregister, /\.\.\.Object\.values\(WORKBENCH_TAB_CHANNELS\)/u);
+  const [mainProcess, windowIpc, projectIpc] = await Promise.all([
+    readFile(sourceUrl("../desktop/main.mjs"), "utf8"),
+    readFile(sourceUrl("../desktop/ipc/window-ipc.mjs"), "utf8"),
+    readFile(sourceUrl("../desktop/ipc/project-ipc.mjs"), "utf8"),
+  ]);
+  assert.match(mainProcess, /WORKBENCH_TAB_CHANNELS/u);
   assert.match(mainProcess, /restoreFinalExit:[\s\S]*?registerProjectIpc\(\)/u);
-  const registration = mainProcess.slice(
-    mainProcess.indexOf("function registerProjectIpc()"),
-    mainProcess.indexOf("function requestRendererClose"),
-  );
-  assert.match(registration, /WORKBENCH_TAB_CHANNELS\.get/u);
-  assert.match(registration, /WORKBENCH_TAB_CHANNELS\.set/u);
+  assert.match(windowIpc, /WORKBENCH_TAB_CHANNELS\.get/u);
+  assert.match(windowIpc, /WORKBENCH_TAB_CHANNELS\.set/u);
+  assert.match(windowIpc, /\.\.\.Object\.values\(WORKBENCH_TAB_CHANNELS/u);
+  assert.match(projectIpc, /acknowledgeExternalOpen/u);
 });

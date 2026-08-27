@@ -105,9 +105,9 @@ The renderer's main workspace facts are partitioned as follows:
   runtime dispatch point. The Qoder provider owns installation, version,
   login/model preflight and raw-error normalization. Unknown IDs fail closed;
   opaque installation facts, digests and capabilities stay inside the ticket;
-- Bridge Agent Host/Policy Ports: `scripts/agent/policies/` owns the execution
+- Bridge Agent Host/Policy Ports: `bridge/agent/policies/` owns the execution
   policy and freezes all readable files, output/completion paths,
-  runtime authority and finalizer authority. `scripts/agent/hosts/` owns the
+  runtime authority and finalizer authority. `bridge/agent/hosts/` owns the
   single-output Execution surface, including cancellation fencing, completion proof and managed terminal
   cleanup. Provider/runtime code may invoke these ports but cannot choose their
   paths, command, success criteria or durable outcome;
@@ -755,7 +755,9 @@ only these assertion forms:
   properties, so a rename, reflow, comment or format change to compliant code
   cannot fail the gate, and a dead string cannot pass it.
 - **Negative boundary regexes** that forbid an import, construction, endpoint or
-  retired identifier from appearing (a dependency/security boundary).
+  retired identifier from appearing (a dependency/security boundary). Pointer
+  capability files must not reference `isNativeDirectEditRoot`; tag-root
+  editability stays in `app/lib/native-edit-capability.js`.
 - **Document-content strings** for `docs/**` prose, which is not runtime code.
 
 The gate must not assert that a specific code fragment *exists* by substring or
@@ -765,16 +767,16 @@ by matching its source text.
 
 #### Review behavior test debt
 
-Converting the gate away from ordered source-string matching exposed three
-renderer behaviors whose ordering guarantees are now asserted only
-structurally (call presence), because the repository has no DOM test harness for
-`HtmlCanvasEditor.tsx`. Each needs Electron/Playwright behavior coverage:
+Converting the gate away from ordered source-string matching exposed renderer
+behaviors whose ordering guarantees are now asserted only structurally (call
+presence), because the repository has no DOM test harness for
+`HtmlCanvasEditor.tsx`. Native deferred-command arbitration now has a Node
+unit test on `html-canvas-native-commands.js` (system work blocked by a pending
+user-explicit command, supersede, and stale-lease drain). The remaining items
+still need Electron/Playwright behavior coverage:
 
 - Canvas fail-closed freeze: a source transition must abort when
   `freezeNow()` fails or returns bytes that differ from the live source.
-- Native command arbitration: a lower-priority `system` command must be
-  rejected before it reaches the controller queue when a `user-explicit`
-  command is pending.
 - Canonical host replacement: the native lease must be disposed before the
   authored DOM host is replaced.
 
@@ -783,7 +785,7 @@ structurally (call presence), because the repository has no DOM test harness for
 `scripts/architecture-budget.json` records a line count and total React-hook
 count ceiling for files with a demonstrated regrowth risk (currently
 `app/workbench.tsx`, `app/components/HtmlCanvasEditor.tsx` and
-`scripts/project-file-repository.mjs`). The gate counts hooks structurally, so generic-typed calls such as
+`bridge/project-file-repository.mjs`). The gate counts hooks structurally, so generic-typed calls such as
 `useState<T>()` are included.
 
 This is a guardrail against silent drift, not a hard cap, and it is deliberately

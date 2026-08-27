@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { parsePublicModels } from "../scripts/agent-bridge-service.mjs";
+import { parsePublicModels } from "../bridge/agent-bridge-service.mjs";
 
 // The model catalog is the first thing the renderer receives about Qoder that
 // is not a bounded status enum, so the parser is the boundary that keeps raw

@@ -15,7 +15,7 @@ import {
   writeConversationDraft,
   conversationIndexPath,
   conversationRecordPath,
-} from "../scripts/conversation-repository.mjs";
+} from "../bridge/conversation-repository.mjs";
 import { appendConversationContext } from "../shared/conversation.mjs";
 
 // These pins lock the forward-compatibility contract the platform now relies on:

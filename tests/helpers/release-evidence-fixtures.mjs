@@ -39,6 +39,12 @@ export const APP_SOURCE_FILES = [
   "desktop/export-copy.mjs",
   "desktop/open-in-default-browser.mjs",
   "desktop/project-ipc-security.mjs",
+  "desktop/ipc/trusted-ipc.mjs",
+  "desktop/ipc/project-ipc.mjs",
+  "desktop/ipc/window-ipc.mjs",
+  "desktop/ipc/agent-ipc.mjs",
+  "desktop/ipc/update-ipc.mjs",
+  "desktop/app-lifecycle.mjs",
   "desktop/bridge-startup.mjs",
   "desktop/bridge-shutdown.mjs",
   "desktop/close-recovery.mjs",
@@ -387,8 +393,8 @@ export async function createSyntheticAppBundle(t, {
   )));
   await Promise.all(BRIDGE_FILES.map((fileName) => writeFixtureFile(
     productRoot,
-    "scripts/" + fileName,
-    "fixture:scripts/" + fileName + "\n",
+    "bridge/" + fileName,
+    "fixture:bridge/" + fileName + "\n",
   )));
   await Promise.all([
     writeFixtureFile(
@@ -484,7 +490,7 @@ export async function createSyntheticAppBundle(t, {
     ...BRIDGE_FILES.map(async (fileName) => {
       const sourcePath = fileName === "product-contract.mjs"
         ? "desktop/" + fileName
-        : "scripts/" + fileName;
+        : "bridge/" + fileName;
       const destination = path.join(resourcesPath, "bridge", fileName);
       await mkdir(path.dirname(destination), { recursive: true });
       await copyFile(path.join(productRoot, sourcePath), destination);

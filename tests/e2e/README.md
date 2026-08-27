@@ -94,9 +94,15 @@ same final commit and content hash recorded by the automated gate report.
 - `native-dom-source.spec.mjs`: byte-exact UTF-8 replacement, BOM/CRLF,
   entities/quotes/comments/duplicate attributes, exact forward bytes, and
   blocked source-reversal shortcuts.
-- `native-dom-electron.spec.mjs`: the same real native editing path in the
-  shipped Chromium environment, plus temporary-disk checkpoint/autosave,
-  exact forward bytes, graceful close, and cold reopen consistency.
+- `electron-project-lifecycle.spec.mjs`, `electron-workbench-tabs.spec.mjs`,
+  `electron-edit-runtime.spec.mjs`,
+  `electron-native-input.spec.mjs`, `electron-comments-and-rules.spec.mjs`
+  and `electron-source-recovery.spec.mjs`: the same real native editing path
+  in the shipped Chromium environment, plus temporary-disk checkpoint/autosave,
+  exact forward bytes, graceful close, and cold reopen consistency. Capability
+  smoke uses Playwright tags (`@smoke-editing`, `@smoke-project-lifecycle`,
+  `@smoke-recovery`, `@smoke-agent`) rather than title regular expressions.
+  The full Electron lane still runs every test in these files.
 - `conflict-force-unlock.spec.mjs`: external Working Copy change surfaces the
   conflict banner (including after reopening an already imported project), and
   confirmed “采用磁盘版本” restores an editable idle project without rewriting
@@ -107,10 +113,14 @@ same final commit and content hash recorded by the automated gate report.
   npx playwright test --config tests/e2e/electron/playwright.config.mjs \
     tests/e2e/electron/conflict-force-unlock.spec.mjs
   ```
-- `ai-handoff-closed-loop.spec.mjs`: real comment UI, per-task delivery choice,
+- `ai-review-adoption.spec.mjs`, `ai-provider-availability.spec.mjs`,
+  `ai-run-lifecycle.spec.mjs`, `ai-candidate-validation.spec.mjs` and
+  `ai-request-comments.spec.mjs`: real comment UI, per-task delivery choice,
   frozen Request, clipboard and managed Qoder ACP handoff, generated-AI/finalizer
   result, status polling, Candidate-first review, explicit non-overwriting Version
-  adoption, and fail-closed recovery paths.
+  adoption, and fail-closed recovery paths. Task canaries use `@smoke-review`,
+  `@smoke-provider` and `@smoke-run-lifecycle`; the original `@gate-smoke` union
+  remains the `main` lane AI smoke.
 - `packaged-runtime-smoke.spec.mjs`: the packaged `.app` executable, isolated
   user data, authored-DOM input and byte-exact export without source-runtime substitution.
 

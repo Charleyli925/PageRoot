@@ -1,6 +1,7 @@
 # PageRoot 设计语言
 
-- 状态：v1。全部原则从既有产品事实提炼——`app/globals.css` 的令牌、根目录
+- 状态：v1。全部原则从既有产品事实提炼——`app/globals.css` 级联入口导入的
+  `app/styles/` 令牌与分层样式、根目录
   `design-qa.md` 的全部已通过条目、`docs/INTERACTION_FLOW.md` 的交互合同。
   本文不发明新风格，只把已被反复接受的决定显性化。
 - 上位文档：[交互流程](INTERACTION_FLOW.md)（行为与文案合同）、
@@ -132,7 +133,9 @@ PageRoot 的设计只追求两件事：
 
 ## 3. 视觉基础
 
-数值的唯一真相是 `app/globals.css` 的 `:root`。本表只定义语义与
+数值的唯一真相是 Workbench 级联入口 `app/globals.css` 导入的 `:root`
+令牌（先 `app/styles/tokens-and-base.css`，后 `app/styles/review-v5.css`
+可覆盖）。本表只定义语义与
 使用规则，改值不需要改本文；新增或重定义令牌才需要。
 
 | 令牌 | 语义 | 使用规则 |

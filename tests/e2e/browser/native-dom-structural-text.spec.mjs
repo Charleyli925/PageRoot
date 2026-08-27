@@ -160,7 +160,9 @@ test("nested list headings and wbr text edit without changing their authored str
   expect((await exportCurrentHtml(page)).equals(expected)).toBe(true);
 });
 
-test("mixed block parents fall back to safe inline hosts and exact bare-text fragments", async ({
+test("mixed block parents fall back to safe inline hosts and exact bare-text fragments", {
+  tag: ["@gate-smoke","@smoke-editing"],
+}, async ({
   page,
 }) => {
   await page.goto("/");
@@ -251,7 +253,9 @@ test("mixed block parents fall back to safe inline hosts and exact bare-text fra
   expect((await exportCurrentHtml(page)).equals(expected)).toBe(true);
 });
 
-test("bare-text fragments persist toolbar and shortcut formatting through guarded source patches", async ({
+test("bare-text fragments persist toolbar and shortcut formatting through guarded source patches", {
+  tag: ["@gate-smoke","@smoke-editing"],
+}, async ({
   page,
 }) => {
   await page.goto("/");
@@ -309,7 +313,9 @@ test("bare-text fragments persist toolbar and shortcut formatting through guarde
   await expect(mixedParent.locator(':scope > span[data-keep="tail"]')).toHaveText("尾注");
 });
 
-test("deleting a bare-text fragment ends its session without a blocked resume", async ({
+test("deleting a bare-text fragment ends its session without a blocked resume", {
+  tag: ["@gate-smoke","@smoke-editing"],
+}, async ({
   page,
 }) => {
   await page.goto("/");

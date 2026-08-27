@@ -49,13 +49,13 @@ boundary.
 ## Product Qoder ACP Agent Bridge
 
 The packaged Bridge owns the product session through
-`scripts/agent/agent-runtime-coordinator.mjs`; the old Service exports only
+`bridge/agent/agent-runtime-coordinator.mjs`; the old Service exports only
 delegate existing routes. Its sole provider registry maps legacy
-`qoder-acp` to `scripts/agent/providers/qoder-provider.mjs` and the `acp`
-runtime in `scripts/agent/runtimes/acp-runtime.mjs`; unknown provider/runtime
-IDs fail closed. The restricted Host Ports now live in `scripts/agent/hosts/`,
-while frozen execution policy lives in `scripts/agent/policies/`.
-`scripts/qoder-acp-client.mjs` retains the legacy transport façade and exact
+`qoder-acp` to `bridge/agent/providers/qoder-provider.mjs` and the `acp`
+runtime in `bridge/agent/runtimes/acp-runtime.mjs`; unknown provider/runtime
+IDs fail closed. The restricted Host Ports now live in `bridge/agent/hosts/`,
+while frozen execution policy lives in `bridge/agent/policies/`.
+`bridge/qoder-acp-client.mjs` retains the legacy transport façade and exact
 compatibility exports without a second policy brand. The
 renderer can request only `POST /agent/preflight` and `POST /agent/start` with
 registered task identity, the fixed `qoder-acp` driver, explicit
@@ -128,7 +128,9 @@ Qoder process, so it must not be repurposed for real user Requests. See
 | Command | Purpose |
 | --- | --- |
 | `npm run gate:edit` | Fast, impact-selected feedback for uncommitted work |
-| `npm run gate:task` | Static checks plus impacted Node/browser/Electron coverage |
+| `npm run gate:plan -- --base origin/main` | Compact JSON of the task-lane selection: owners, Node tests, capability canaries and estimated fan-out |
+| `npm run gate:task` | Static checks plus impacted Node tests and capability-level Browser/Electron/AI canaries |
+| `npm run gate:task -- --resume <run-id>` | Replay a failed task gate on the identical source hash; reuse passed suites only when fingerprints match |
 | `npm run gate:main:auto` | Optional local/diagnostic Node/browser smoke; it is not part of the automatic post-merge path |
 | `Release Dry Run` Actions workflow | Candidate-classified Ready packaging check: generate the stable application-update config, assemble an explicitly unsigned (`identity=null`) App, cross a clean-job checkpoint, rebuild metadata/renderer oracles and launch-check identity without credentials; source-only candidates skip it |
 | `npm run gate:release:auto` | Complete source gate on a clean commit |
@@ -139,17 +141,27 @@ Qoder process, so it must not be repurposed for real user Requests. See
 | `npm run benchmark:persistence` | Build one Electron renderer, then serially collect frozen-main full-HTML persistence decision evidence: it rejects changed runtime inputs outside its explicit harness/report allowlist; each autosave, switch and close duration stops at that operation's own endpoint; and it measures memory, event-loop and safety oracles |
 
 Every `gate:edit` or `gate:task` run writes its selected files, suites and reasons
-to `output/test-runs/<run-id>/selection.json`; inspect that file when validating a
-local ownership change instead of inferring selection from command duration. When
-changing `tests/test-impact-map.json`, run
+to `output/test-runs/<run-id>/selection.json`, including which rule matched each
+file, which owner selected each test, rule-to-production coverage and width
+warnings. `gate:plan` prints the compact subset of that record to stdout. Inspect
+these files when validating a local ownership change instead of inferring
+selection from command duration. When changing `tests/test-impact-map.json`, run
 `node --test tests/test-gate-selection.test.mjs` before the ordinary gate. The
 selection contract keeps direct-owner coverage narrow while the `release` lane
-remains a fixed complete suite.
+remains a fixed complete suite. Canvas pointer/selection/overlay, Review
+algorithm files, Agent provider/runtime leaves, Repository internals and
+Desktop IPC modules each have their own owner so a leaf change does not
+reselect the old wide union. Task canaries are Playwright tags such as
+`@smoke-editing`; the original global `@gate-smoke` union remains the `main`
+lane smoke. Ready PRs still run `node-full`, `browser-full`, `electron-full`,
+`ai-closed-loop` and `real-html`.
 
 Node business tests use public Session/algorithm outcomes rather than scanning
 Workbench, Canvas, JSX, CSS, or callback source. Explicit application
 source-shape invariants are centralized in `scripts/check-architecture.mjs` and
-executed by `tests/architecture-boundaries.test.mjs`; package, dependency,
+run by `typecheck`. `tests/architecture-boundaries.test.mjs` owns the checker's
+AST fixtures and is selected only when the checker, its AST query, budget/config
+or those fixtures change. Package, dependency,
 security, and workflow scans remain with their dedicated owners. The one SSR
 test, `tests/rendered-html.test.mjs`, imports the real `dist/server/index.js`, so
 impact selection schedules `build-web` before running it.

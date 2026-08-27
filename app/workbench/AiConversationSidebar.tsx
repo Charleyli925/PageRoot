@@ -1,6 +1,12 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 import {
   sidebarActionBar,
@@ -13,8 +19,10 @@ import {
   sidebarRunProgress,
   sidebarSendState,
   sidebarCopyTaskState,
+  sidebarTimestampLabel,
   type SidebarCatalogStatus,
 } from "./ai-conversation-model.js";
+import { copyText } from "./browser-io";
 import styles from "./ai-conversation-sidebar.module.css";
 
 // The AI conversation sidebar.
@@ -66,11 +74,57 @@ export type AiConversationSidebarProps = {
   onCopyTask?: () => void;
   /** What the selected Agent is saying while it works (ADR 0037). */
   agentText?: string;
+  /** True only when a bounded public-text projection omitted a suffix. */
+  agentTextTruncated?: boolean;
+  agentStartedAt?: string | null;
+  agentUpdatedAt?: string | null;
+  /** A frozen Request identity, used solely to follow the round the user started. */
+  runKey?: string | null;
+  runCommentCount?: number | null;
+  agentPresentation?: Readonly<{
+    providerId: string;
+    displayName: string;
+    agentName: string;
+    logoSrc: string | null;
+  }> | null;
   /** Which destination this round uses; the decision bar copy depends on it. */
   deliveryMode?: "managed-agent" | "clipboard";
   /** The run's own progress steps, so a round in flight reads inside the thread. */
   runSteps?: readonly unknown[];
 };
+
+type CopyFeedback = Readonly<{
+  key: string;
+  label: "已复制" | "复制失败";
+}> | null;
+
+const FOLLOW_THRESHOLD_PX = 48;
+
+function prefersReducedMotion(): boolean {
+  return typeof window !== "undefined"
+    && typeof window.matchMedia === "function"
+    && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
+
+function AgentAvatar({
+  presentation,
+}: {
+  presentation: AiConversationSidebarProps["agentPresentation"];
+}) {
+  if (presentation?.logoSrc) {
+    return (
+      <span className={`${styles.avatar} ${styles.agentAvatar}`} aria-hidden="true">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={presentation.logoSrc} alt="" />
+      </span>
+    );
+  }
+  return (
+    <span className={`${styles.avatar} ${styles.agentAvatar}`} aria-hidden="true">
+      {sidebarActorInitial("agent")}
+    </span>
+  );
+}
 
 export default function AiConversationSidebar({
   state,
@@ -78,8 +132,8 @@ export default function AiConversationSidebar({
   messages,
   catalogStatus = "ready",
   modelDisplayName = null,
-  agentActionName = "Qoder",
-  agentSettingsName = "Qoder CLI",
+  agentActionName = "Agent",
+  agentSettingsName = "Agent",
   agentSettingsSupported = true,
   agentLocalReadDisclosure = null,
   modelChoiceCount = 0,
@@ -101,13 +155,27 @@ export default function AiConversationSidebar({
   onCopyTask,
   deliveryMode = "managed-agent",
   agentText = "",
+  agentTextTruncated = false,
+  agentStartedAt = null,
+  agentUpdatedAt = null,
+  runKey = null,
+  runCommentCount = null,
+  agentPresentation = null,
   runSteps = [],
 }: AiConversationSidebarProps) {
-  // ADR 0037 §5: the narration is collapsible in one click and the choice sticks for
-  // as long as the surface is mounted, rather than springing open on every update.
-  const [narrationOpen, setNarrationOpen] = useState(true);
   const [modelChoicesOpen, setModelChoicesOpen] = useState(false);
-  const resolvedAgentActionName = agentActionName || "Agent";
+  const [hasUnseenContent, setHasUnseenContent] = useState(false);
+  const [copyFeedback, setCopyFeedback] = useState<CopyFeedback>(null);
+  const streamRef = useRef<HTMLDivElement | null>(null);
+  const bottomSentinelRef = useRef<HTMLDivElement | null>(null);
+  const liveMessageRef = useRef<HTMLElement | null>(null);
+  const followingRef = useRef(true);
+  const contentKeyRef = useRef<string | null>(null);
+  const runKeyRef = useRef<string | null>(null);
+  const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const resolvedAgentActionName = agentPresentation?.agentName
+    || agentActionName
+    || "Agent";
   const resolvedAgentSettingsName = agentSettingsName || resolvedAgentActionName;
   const stream = useMemo(() => sidebarMessageStream(messages), [messages]);
   const activeIntent = sidebarResolvedIntent(state);
@@ -134,7 +202,7 @@ export default function AiConversationSidebar({
     agentSettingsSupported,
   });
   // The clipboard button does not read the model catalog: copying is a branch
-  // of the same round that never consults Qoder, so an unreadable catalog must
+  // of the same round that never consults the selected Agent, so an unreadable catalog must
   // not grey it out with the send button it sits beside.
   const copyTask = sidebarCopyTaskState({
     state,
@@ -146,12 +214,113 @@ export default function AiConversationSidebar({
     agentName: resolvedAgentActionName,
     localReadDisclosure: agentLocalReadDisclosure,
   });
-  const runProgress = sidebarRunProgress({ state, steps: runSteps, agentText });
+  const runProgress = sidebarRunProgress({
+    state,
+    steps: runSteps,
+    agentText,
+    agentTextTruncated,
+  });
   const modelLine = sidebarModelLine({
     catalogStatus,
     modelDisplayName,
     modelChoiceCount,
   });
+  const runSummary = runKey
+    ? runKey.startsWith("pending:")
+      ? { title: "正在确认本轮任务是否已创建…", detail: null }
+      : {
+          title: "本轮修改已提交",
+          detail: `${Math.max(0, Number(runCommentCount ?? pendingCommentCount) || 0)} 条评论 · 当前 HTML · 项目规则`,
+        }
+    : null;
+  const liveTimestamp = sidebarTimestampLabel(agentUpdatedAt || agentStartedAt);
+  const contentKey = [
+    runKey || "",
+    state,
+    runProgress?.liveLabel || runProgress?.headline || "",
+    runProgress?.narration || "",
+    runProgress?.narrationTruncated ? "truncated" : "",
+    actionBar?.kind || "",
+    actionBar?.title || "",
+    stream.map((message) => `${message.messageId}:${message.sequence}:${message.text.length}`).join(","),
+  ].join("|");
+
+  const scrollToLatest = useCallback((behavior: ScrollBehavior = "auto") => {
+    const streamElement = streamRef.current;
+    if (!streamElement) return;
+    const resolvedBehavior = behavior === "smooth" && !prefersReducedMotion()
+      ? "smooth"
+      : "auto";
+    streamElement.scrollTo({ top: streamElement.scrollHeight, behavior: resolvedBehavior });
+  }, []);
+
+  const scheduleFollow = useCallback((behavior: ScrollBehavior = "auto") => {
+    if (typeof window === "undefined") return;
+    window.requestAnimationFrame(() => scrollToLatest(behavior));
+  }, [scrollToLatest]);
+
+  const onStreamScroll = useCallback(() => {
+    const streamElement = streamRef.current;
+    if (!streamElement) return;
+    const distanceFromBottom = Math.max(
+      0,
+      streamElement.scrollHeight - streamElement.clientHeight - streamElement.scrollTop,
+    );
+    followingRef.current = distanceFromBottom <= FOLLOW_THRESHOLD_PX;
+    if (followingRef.current) setHasUnseenContent(false);
+  }, []);
+
+  const revealLatest = useCallback(() => {
+    followingRef.current = true;
+    setHasUnseenContent(false);
+    scheduleFollow("smooth");
+  }, [scheduleFollow]);
+
+  const copyMessage = useCallback((key: string, value: string) => {
+    if (!value) return;
+    void copyText(value).then(() => {
+      setCopyFeedback({ key, label: "已复制" });
+    }, () => {
+      setCopyFeedback({ key, label: "复制失败" });
+    }).finally(() => {
+      if (copyTimerRef.current !== null) clearTimeout(copyTimerRef.current);
+      copyTimerRef.current = setTimeout(() => setCopyFeedback(null), 1_800);
+    });
+  }, []);
+
+  useEffect(() => () => {
+    if (copyTimerRef.current !== null) clearTimeout(copyTimerRef.current);
+  }, []);
+
+  useEffect(() => {
+    if (runKey && runKey !== runKeyRef.current) {
+      followingRef.current = true;
+      setHasUnseenContent(false);
+      scheduleFollow("auto");
+    }
+    runKeyRef.current = runKey;
+  }, [runKey, scheduleFollow]);
+
+  useEffect(() => {
+    if (contentKeyRef.current === null) {
+      contentKeyRef.current = contentKey;
+      return;
+    }
+    if (contentKeyRef.current === contentKey) return;
+    contentKeyRef.current = contentKey;
+    if (followingRef.current) scheduleFollow("auto");
+    else setHasUnseenContent(true);
+  }, [contentKey, scheduleFollow]);
+
+  useEffect(() => {
+    const liveMessage = liveMessageRef.current;
+    if (!liveMessage || typeof ResizeObserver === "undefined") return undefined;
+    const observer = new ResizeObserver(() => {
+      if (followingRef.current) scheduleFollow("auto");
+    });
+    observer.observe(liveMessage);
+    return () => observer.disconnect();
+  }, [contentKey, scheduleFollow]);
 
   return (
     <aside
@@ -190,12 +359,14 @@ export default function AiConversationSidebar({
         * being interrupted for every streamed fragment.
         */}
       <div
+        ref={streamRef}
         className={styles.stream}
         role="log"
-        aria-live="polite"
+        aria-live="off"
         aria-busy={loading}
         aria-label="对话记录"
         data-testid="ai-conversation-stream"
+        onScroll={onStreamScroll}
       >
         {loading ? (
           <p className={styles.placeholder}>正在读取这份文档的对话…</p>
@@ -204,35 +375,65 @@ export default function AiConversationSidebar({
             还没有修改记录。先在页面上写评论，再交给 AI 修改。
           </p>
         ) : (
-          stream.map((message) => (
-            <article
-              key={message.messageId}
-              className={styles.message}
-              data-actor={message.actor}
-              data-kind={message.kind}
-              data-status={message.status}
-              data-testid="ai-conversation-message"
-            >
-              <span className={styles.avatar} aria-hidden="true">
-                {sidebarActorInitial(message.actor)}
-              </span>
-              <span className={styles.actor}>{message.actorLabel}</span>
-              <p className={styles.text}>{message.text}</p>
-              {message.truncated ? (
-                <small className={styles.truncated}>部分内容已省略</small>
-              ) : null}
-              {message.status === "interrupted" ? (
-                <small className={styles.interrupted}>这条回复没有完成</small>
-              ) : null}
-            </article>
-          ))
+          stream.map((message) => {
+            const timestamp = sidebarTimestampLabel(message.createdAt);
+            const copyKey = `message:${message.messageId}`;
+            return (
+              <article
+                key={message.messageId}
+                className={styles.message}
+                data-actor={message.actor}
+                data-kind={message.kind}
+                data-status={message.status}
+                data-testid="ai-conversation-message"
+              >
+                <span className={styles.avatar} aria-hidden="true">
+                  {sidebarActorInitial(message.actor)}
+                </span>
+                <span className={styles.actor}>{message.actorLabel}</span>
+                <p className={styles.text}>{message.text}</p>
+                {timestamp || message.text ? (
+                  <div className={styles.messageMeta}>
+                    {timestamp ? <time dateTime={message.createdAt}>{timestamp}</time> : null}
+                    {message.text ? (
+                      <button type="button" onClick={() => copyMessage(copyKey, message.text)}>
+                        {copyFeedback?.key === copyKey ? copyFeedback.label : "复制"}
+                      </button>
+                    ) : null}
+                  </div>
+                ) : null}
+                {message.truncated ? (
+                  <small className={styles.truncated}>部分内容已省略</small>
+                ) : null}
+                {message.status === "interrupted" ? (
+                  <small className={styles.interrupted}>这条回复没有完成</small>
+                ) : null}
+              </article>
+            );
+          })
         )}
+
+        {runSummary ? (
+          <section
+            className={`${styles.message} ${styles.runSummary}`}
+            data-actor="pageroot"
+            data-testid="ai-conversation-run-summary"
+            aria-label="本轮任务摘要"
+          >
+            <span className={styles.avatar} aria-hidden="true">
+              {sidebarActorInitial("pageroot")}
+            </span>
+            <span className={styles.actor}>PageRoot</span>
+            <p className={styles.text}>{runSummary.title}</p>
+            {runSummary.detail ? <small className={styles.runSummaryDetail}>{runSummary.detail}</small> : null}
+          </section>
+        ) : null}
 
         {/*
           * A round in flight, told inside the thread rather than a
           * panel of its own. PageRoot states the stage from the run's durable status
-          * (ADR 0037 §4) and the Agent's own words ride along underneath, collapsible
-          * in one click so the thread stays readable while a long round runs.
+          * (ADR 0037 §4). The selected Agent's public words follow in their
+          * own stable article, so the two speakers never blur together.
           */}
         {runProgress ? (
           <section
@@ -249,10 +450,17 @@ export default function AiConversationSidebar({
               * PageRoot states the stages from the run's durable status (ADR 0037 §4).
               * Signing them with an Agent name made the Agent look like the author of
               * PageRoot's own bookkeeping, and put the brand mark on the wrong speaker.
-              */}
+            */}
             <span className={styles.actor}>PageRoot</span>
-            {runProgress.headline ? (
-              <p className={styles.text}>{runProgress.headline}</p>
+            {runProgress.liveLabel || runProgress.headline ? (
+              <p
+                className={`${styles.text} ${styles.liveStatus}`}
+                role="status"
+                aria-live="polite"
+                aria-atomic="true"
+              >
+                {runProgress.liveLabel || runProgress.headline}
+              </p>
             ) : null}
             <ol className={styles.runSteps}>
               {runProgress.steps.map((step) => (
@@ -267,44 +475,44 @@ export default function AiConversationSidebar({
           </section>
         ) : null}
 
-        {/*
-          * The Agent speaks for itself, in its own message. Nesting its words inside
-          * PageRoot's stage message put two speakers under one avatar and one signature,
-          * so the user could not tell whose words they were reading.
-          */}
+        {/* Public Agent narration grows in one stable article. It is presentation
+            evidence only and never changes Candidate authority. */}
         {runProgress?.narration ? (
-          <section
+          <article
+            ref={liveMessageRef}
             className={styles.message}
             data-actor="agent"
             data-testid="ai-conversation-narration-message"
             aria-label={`${resolvedAgentActionName} 的说明`}
+            aria-live="off"
           >
-            <span className={styles.avatar} aria-hidden="true">
-              {sidebarActorInitial("agent")}
-            </span>
+            <AgentAvatar presentation={agentPresentation} />
             <span className={styles.actor}>{resolvedAgentActionName}</span>
-            <div className={styles.narration}>
-              <button
-                type="button"
-                className={styles.narrationToggle}
-                data-testid="ai-conversation-narration-toggle"
-                aria-expanded={narrationOpen}
-                onClick={() => setNarrationOpen((open) => !open)}
-              >
-                {narrationOpen ? "收起它说的话" : "看看它说了什么"}
-              </button>
-              {narrationOpen ? (
-                <div
-                  className={styles.narrationText}
-                  data-testid="ai-conversation-narration"
-                >
-                  {(runProgress.narrationBlocks ?? []).map((block, index) => (
-                    <p key={index}>{block}</p>
-                  ))}
-                </div>
-              ) : null}
+            <div
+              className={styles.narrationText}
+              data-testid="ai-conversation-narration"
+            >
+              {runProgress.narration}
             </div>
-          </section>
+            {liveTimestamp || runProgress.narration ? (
+              <div className={styles.messageMeta}>
+                {liveTimestamp ? (
+                  <time dateTime={agentUpdatedAt || agentStartedAt || undefined}>
+                    {liveTimestamp}
+                  </time>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={() => copyMessage("live-agent", runProgress.narration || "")}
+                >
+                  {copyFeedback?.key === "live-agent" ? copyFeedback.label : "复制"}
+                </button>
+              </div>
+            ) : null}
+            {runProgress.narrationTruncated ? (
+              <small className={styles.truncated}>部分输出已省略</small>
+            ) : null}
+          </article>
         ) : null}
 
         {/*
@@ -342,6 +550,17 @@ export default function AiConversationSidebar({
             ) : null}
           </section>
         ) : null}
+        {hasUnseenContent ? (
+          <button
+            className={styles.unseenContent}
+            type="button"
+            data-testid="ai-conversation-unseen-content"
+            onClick={revealLatest}
+          >
+            有新进展
+          </button>
+        ) : null}
+        <div ref={bottomSentinelRef} className={styles.bottomSentinel} aria-hidden="true" />
       </div>
 
       <div className={styles.composer} data-testid="ai-conversation-composer">

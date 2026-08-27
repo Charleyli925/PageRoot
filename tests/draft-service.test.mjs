@@ -4,7 +4,7 @@ import test from "node:test";
 import {
   activeDraftSnapshot,
   applyDraftCommand,
-} from "../scripts/draft-service.mjs";
+} from "../bridge/draft-service.mjs";
 
 const operationId = "draftop_123456789012";
 const now = () => "2026-07-26T00:00:00.000Z";

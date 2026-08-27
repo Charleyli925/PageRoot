@@ -40,6 +40,7 @@ import {
   writeConversationDraft,
 } from "./conversation-repository.mjs";
 import { AgentBridgeService } from "./agent-bridge-service.mjs";
+import { runCodexAppServerTask } from "./agent/runtimes/codex-app-server-runtime.mjs";
 import {
   closeWorkspaceBridgeAfterAgentCleanup,
 } from "./workspace-bridge-shutdown.mjs";
@@ -71,8 +72,59 @@ const DEFAULT_PROJECT_FILE_ROOT = path.join(
 const PROJECT_FILE_ROOT = path.resolve(
   process.env.HTML_AI_PROJECT_FILES_ROOT || DEFAULT_PROJECT_FILE_ROOT,
 );
+
+function e2eCodexRuntimeOverrides(environment = process.env) {
+  const enabled = environment.PAGEROOT_E2E === "1"
+    && environment.PAGEROOT_E2E_CODEX_APP_SERVER_ALLOW_TEST_COMMAND === "1";
+  if (!enabled) return {};
+  const command = String(environment.PAGEROOT_E2E_CODEX_APP_SERVER_COMMAND || "").trim();
+  if (!command || command.includes("\0") || !path.isAbsolute(command)) {
+    throw new Error("PAGEROOT_E2E_CODEX_APP_SERVER_COMMAND must be an absolute E2E command.");
+  }
+  const gate = Math.max(
+    0,
+    Math.min(5_000, Number.parseInt(environment.PAGEROOT_E2E_CODEX_STREAM_GATE_MS || "0", 10) || 0),
+  );
+  return Object.freeze({
+    codexProbeRunner: async () => Object.freeze({
+      protocol: "codex-app-server-v2",
+      authMode: "e2e",
+      models: Object.freeze([Object.freeze({
+        id: "codex:gpt-synthetic",
+        providerModelId: "gpt-synthetic",
+        displayName: "GPT Synthetic",
+        reasoningEfforts: Object.freeze([]),
+        defaultReasoningEffort: null,
+        isDefault: true,
+      })]),
+    }),
+    codexRunTask(launch) {
+      const baseHtmlPath = launch?.policy?.readableFiles?.find(
+        (entry) => entry?.role === "base-html",
+      )?.path;
+      if (typeof baseHtmlPath !== "string" || !path.isAbsolute(baseHtmlPath)) {
+        throw new TypeError("E2E Codex launch is missing its frozen base HTML input.");
+      }
+      return runCodexAppServerTask({
+        ...launch,
+        command,
+        expectedCommandIdentity: null,
+        argsPrefix: [],
+        environment: {
+          ...launch.environment,
+          FAKE_CODEX_EXECUTION_MODE: "streaming",
+          FAKE_CODEX_OUTPUT_PATH: launch.policy.outputPath,
+          FAKE_CODEX_BASE_HTML_PATH: baseHtmlPath,
+          FAKE_CODEX_STREAM_GATE_MS: String(gate),
+        },
+      });
+    },
+  });
+}
+
 const agentBridgeService = new AgentBridgeService({
   resolveTask: resolveAgentBridgeTask,
+  ...e2eCodexRuntimeOverrides(),
 });
 function normalizeDispatchableAgentDelivery(value) {
   const delivery = normalizeAgentDelivery(value, { allowLegacy: false });
@@ -1318,6 +1370,8 @@ function agentSessionForStatus({ request, run, lifecycleStatus }) {
   if (session) return session;
   if (lifecycleStatus === "candidate-ready") {
     return {
+      providerId: normalizedDelivery.selection.providerId,
+      runtimeId: normalizedDelivery.selection.runtimeId,
       driver: publicDriver,
       state: "completed",
       phase: "awaiting-validation",
@@ -1326,6 +1380,8 @@ function agentSessionForStatus({ request, run, lifecycleStatus }) {
       agentName: null,
       agentVersion: null,
       eventCount: 0,
+      visibleText: "",
+      textTruncated: false,
       retryable: false,
     };
   }

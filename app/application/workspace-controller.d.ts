@@ -352,8 +352,8 @@ export type WorkspaceControllerConstruction = Readonly<{
       }): Promise<{ status: string; copied: boolean }>;
     }>;
     scheduler?: Readonly<{
-      setInterval(callback: () => void, delayMs: number): unknown;
-      clearInterval(handle: unknown): void;
+      setTimeout(callback: () => void, delayMs: number): unknown;
+      clearTimeout(handle: unknown): void;
     }>;
   }>;
   versionWorkflow?: Readonly<{

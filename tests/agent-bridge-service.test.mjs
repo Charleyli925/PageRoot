@@ -19,11 +19,11 @@ import {
   AgentBridgeService,
   resolveQoderAcpCommand,
   TRUSTED_LOCAL_AGENT_POLICY_VERSION,
-} from "../scripts/agent-bridge-service.mjs";
+} from "../bridge/agent-bridge-service.mjs";
 import {
   cancelDurableRequestAfterAgentCleanup,
   closeWorkspaceBridgeAfterAgentCleanup,
-} from "../scripts/workspace-bridge-shutdown.mjs";
+} from "../bridge/workspace-bridge-shutdown.mjs";
 
 const IDENTITY = Object.freeze({
   projectId: `project_${"a".repeat(16)}`,

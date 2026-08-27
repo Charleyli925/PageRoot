@@ -1,7 +1,7 @@
 import {
   codexInstallationDigest,
   createCodexProvider,
-} from "./agent/providers/codex-provider.mjs";
+} from "../bridge/agent/providers/codex-provider.mjs";
 
 const provider = createCodexProvider();
 

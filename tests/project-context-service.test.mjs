@@ -6,7 +6,7 @@ import {
   ProjectContextPolicyError,
   registeredCommandIdentity,
   registeredProjectRecord,
-} from "../scripts/project-context-service.mjs";
+} from "../bridge/project-context-service.mjs";
 
 test("registered mutation identity is complete or explicitly legacy", () => {
   assert.equal(registeredCommandIdentity({}), null);

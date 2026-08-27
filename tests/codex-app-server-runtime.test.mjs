@@ -10,10 +10,10 @@ import {
   createCodexAppServerRuntime,
   prepareVerifiedCodexExecutable,
   runCodexAppServerTask,
-} from "../scripts/agent/runtimes/codex-app-server-runtime.mjs";
-import { createDefaultProviderRegistry } from "../scripts/agent/providers/provider-registry.mjs";
-import { resolveBundledCodexInstallation } from "../scripts/agent/providers/codex-provider.mjs";
-import { terminateManagedProcess } from "../scripts/agent/hosts/execution-host.mjs";
+} from "../bridge/agent/runtimes/codex-app-server-runtime.mjs";
+import { createDefaultProviderRegistry } from "../bridge/agent/providers/provider-registry.mjs";
+import { resolveBundledCodexInstallation } from "../bridge/agent/providers/codex-provider.mjs";
+import { terminateManagedProcess } from "../bridge/agent/hosts/execution-host.mjs";
 import { promisify } from "node:util";
 
 const fixture = fileURLToPath(new URL("./fixtures/codex-app-server-execution.mjs", import.meta.url));
@@ -116,6 +116,26 @@ test("Codex App Server executes one ephemeral sandboxed turn before the fixed fi
     assert.ok(events.some((event) => event.kind === "visible-text"));
     assert.ok(events.some((event) => event.kind === "file-written"));
     assert.deepEqual(hostCalls.map(([kind]) => kind), ["bind", "finalizer", "dispose"]);
+  });
+});
+
+test("Codex App Server emits only public message deltas as execution narration", async () => {
+  await runtimeFixture("streaming", async ({ launch, events }) => {
+    // The gate runs this beside filesystem-heavy provider tests; this fixture
+    // still proves one finite turn, so avoid treating scheduler contention as
+    // a false protocol timeout.
+    launch.turnTimeoutMs = 2_000;
+    const result = await runCodexAppServerTask(launch);
+    assert.equal(result.status, "completed");
+    const narration = events
+      .filter((event) => event.kind === "visible-text")
+      .map((event) => event.text)
+      .join("");
+    assert.equal(
+      narration,
+      "先读取冻结任务。再写入 Candidate。最后等待校验。正在修改页面。",
+    );
+    assert.equal(narration.includes("推理不能进入"), false);
   });
 });
 

@@ -1,6 +1,6 @@
-import { sha256 } from "../../../scripts/lifecycle-core.mjs";
-import { defineAgentProvider } from "../../../scripts/agent/providers/agent-provider-contract.mjs";
-import { defineAgentRuntime } from "../../../scripts/agent/runtimes/agent-runtime-contract.mjs";
+import { sha256 } from "../../../bridge/lifecycle-core.mjs";
+import { defineAgentProvider } from "../../../bridge/agent/providers/agent-provider-contract.mjs";
+import { defineAgentRuntime } from "../../../bridge/agent/runtimes/agent-runtime-contract.mjs";
 
 export function createSyntheticQoderProviderFixture({
   calls = [],

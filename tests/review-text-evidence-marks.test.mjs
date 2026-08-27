@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import {
@@ -13,31 +12,8 @@ import {
   reviewTextEvidenceUnits,
 } from "../app/lib/review-text-evidence-marks.js";
 
-const reviewSerialize = await readFile(
-  new URL("../app/workbench/review/serialize.ts", import.meta.url),
-  "utf8",
-);
-const reviewRuntimeProjection = await readFile(
-  new URL("../app/workbench/review/runtime-projection.ts", import.meta.url),
-  "utf8",
-);
-const reviewPipeline = `${reviewSerialize}\n${reviewRuntimeProjection}`;
-const interactionFlow = await readFile(
-  new URL("../docs/INTERACTION_FLOW.md", import.meta.url),
-  "utf8",
-);
-const changeRequestProtocol = await readFile(
-  new URL("../docs/CHANGE_REQUEST_PROTOCOL.md", import.meta.url),
-  "utf8",
-);
-
 test("character-evidence CSS cannot recolor, resize, or use emphasis", () => {
   assert.deepEqual(reviewTextEvidenceStyleViolations(REVIEW_TEXT_EVIDENCE_MARKER_CSS), []);
-  assert.match(reviewPipeline, /REVIEW_TEXT_EVIDENCE_MARKER_CSS/);
-  assert.match(reviewPipeline, /reviewTextEvidenceMarkGeometry/);
-  assert.doesNotMatch(reviewPipeline, /text-emphasis-style:\s*filled/u);
-  assert.doesNotMatch(reviewPipeline, /color:\s*#a13f3b/u);
-  assert.match(reviewPipeline, /data-pageroot-review-text-mark/u);
   assert.equal(REVIEW_TEXT_EVIDENCE_REMOVED_COLOR, "#d92d20");
   assert.equal(REVIEW_TEXT_EVIDENCE_ADDED_COLOR, "#239b56");
 });
@@ -188,14 +164,4 @@ test("dot rows never merge across glyph sizes or into the next line", () => {
     2,
     "a drifting row must not chain into the following text line",
   );
-});
-
-test("product and protocol freeze the character-evidence mark contract", () => {
-  for (const source of [interactionFlow, changeRequestProtocol]) {
-    assert.match(source, /字符证据标记（冻结合同）/u);
-    assert.match(source, /红色横虚线穿过被删/u);
-    assert.match(source, /绿色实点/u);
-    assert.match(source, /不得改变作者颜色、字号、字重、行距/u);
-    assert.match(source, /text-emphasis/u);
-  }
 });

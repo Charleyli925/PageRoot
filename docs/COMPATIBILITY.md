@@ -48,11 +48,11 @@ level, not per file: `runtime-state.json` is preserved at its root and in
   the identity the writer just computed and pin the schema version forever. The
   stored Draft envelope had the reverse order and was corrected.
 - Proof: `tests/source-history.test.mjs`, `tests/draft-service.test.mjs` and
-  `tests/project-file-repository.test.mjs` each assert the round trip and each
+  `tests/project-working-copy-save.test.mjs` each assert the round trip and each
   fails without the corresponding production change.
   `tests/source-history.test.mjs` also asserts that an unknown member never
   rescues an invalid required member, and
-  `tests/project-file-repository.test.mjs` pins both the Draft envelope defect
+  `tests/project-working-copy-save.test.mjs` pins both the Draft envelope defect
   and the authored `fileIdentity` boundary.
 - Direction: this protects builds from this change onward only. A build released
   before it still refuses or discards a newer member. Any release that adds a
@@ -67,10 +67,10 @@ level, not per file: `runtime-state.json` is preserved at its root and in
   semantic version sent an otherwise valid `/draft` command without
   `operationId`. Its acknowledgement could be persisted as
   `draftop_legacy_*`.
-- Current consumer: `scripts/draft-service.mjs` command ingress and Draft
+- Current consumer: `bridge/draft-service.mjs` command ingress and Draft
   acknowledgement reconciliation.
 - Decoder and canonical output:
-  `scripts/draft-command-decoder.mjs` maps a missing ID to a newly generated
+  `bridge/draft-command-decoder.mjs` maps a missing ID to a newly generated
   current `draftop_<id>`. Existing `draftop_legacy_*` values remain opaque,
   readable acknowledgement IDs; nothing creates them.
 - Historical fixtures:
@@ -90,7 +90,7 @@ level, not per file: `runtime-state.json` is preserved at its root and in
   `project.json` files contained a valid project/document/source identity but
   omitted `displayName`, `createdAt`, and `storageDirectoryName`.
 - Current consumer: none. Desktop open and Bridge mutation are v4-only.
-  `scripts/workspace-bridge.mjs` no longer reads `project-registry.json` or
+  `bridge/workspace-bridge.mjs` no longer reads `project-registry.json` or
   runs `migrateLegacyProjectStorageMetadata`.
 - Migration and canonical output: removed from the live Bridge. Unregistered
   HTML is an unmanaged import source for a new v4 V1. On-disk v3 project
@@ -108,7 +108,7 @@ level, not per file: `runtime-state.json` is preserved at its root and in
   project record contained exactly `projectRootPath` and `updatedAt`.
 - Support window and deletion evidence: removed. That shape existed on `main`
   from `4fe5eb7` (2026-08-14 15:04) to `379523b` (2026-08-14 21:17) and was never
-  part of a tagged release — `scripts/project-file-repository.mjs` is absent from
+  part of a tagged release — `bridge/project-file-repository.mjs` is absent from
   `v0.9.8`, the newest tag. No shipped PageRoot can produce it, so no user disk
   can hold it.
 - Current consumer: none. `ProjectFileRepository.#readRegistry` performs one
@@ -123,7 +123,7 @@ level, not per file: `runtime-state.json` is preserved at its root and in
 - Disk persistence read/write: none. A refused Registry keeps its exact bytes,
   and Project, Working Copy, Version, Draft, comment, attachment and HTML are
   untouched, so re-importing rebuilds the Registry.
-- Historical proof: `tests/project-file-repository.test.mjs` asserts that an
+- Historical proof: `tests/project-registry-and-open.test.mjs` asserts that an
   unrecognized shape fails closed across read, classify and import without
   changing the Registry bytes, the managed HTML, or creating a backup directory.
 - Decision: `docs/decisions/0028-unrecognized-registry-fails-closed.md`
@@ -140,7 +140,7 @@ level, not per file: `runtime-state.json` is preserved at its root and in
   rewriting timestamps or bytes merely because it was classified.
 - Decoder and canonical output: none. Missing pairs stay unbound and are not
   guessed from filename or Hash. Duplicate keys fail closed.
-- Historical proof: `tests/project-file-repository.test.mjs` and
+- Historical proof: `tests/project-registry-and-open.test.mjs` and
   `tests/project-file-bridge.test.mjs`.
 - Disk persistence read/write: read-only for classification; writes occur only
   on a successful new import under the current Registry write lock.
@@ -169,7 +169,7 @@ level, not per file: `runtime-state.json` is preserved at its root and in
   its embedded document stamp while its file identity sidecar lagged after an
   owned atomic replacement.
 - Current consumer: none. v3 source-observation relink was removed from
-  `scripts/workspace-bridge.mjs` with the v3 Bridge stack.
+  `bridge/workspace-bridge.mjs` with the v3 Bridge stack.
 - Decoder and canonical output: historical. Unregistered HTML, including HTML
   beside old v3 directories, is an unmanaged import source for a new v4 V1.
 - Historical proof: retired with the v3 Bridge stack in P0-B.
@@ -182,7 +182,7 @@ level, not per file: `runtime-state.json` is preserved at its root and in
   stored semantic version used `baseVersionId` and `capturedRevision`; current
   immutable Version archives use `basedOnVersionId` and `revision`.
 - Current consumer: the Request freeze adapter in
-  `scripts/workspace-bridge.mjs`, mutable Draft ingress and immutable Version
+  `bridge/workspace-bridge.mjs`, mutable Draft ingress and immutable Version
   history ingress in `app/workbench/version-model.ts`.
 - Decoder and canonical output:
   `shared/direct-edit-compatibility.mjs` yields the persisted canonical pair
@@ -217,7 +217,7 @@ level, not per file: `runtime-state.json` is preserved at its root and in
   direct-edit event without its own Version identity while the current unsaved
   Draft already had a trusted freeze version and revision.
 - Current consumer: `normalizeFrozenEditEvents` in
-  `scripts/workspace-bridge.mjs`.
+  `bridge/workspace-bridge.mjs`.
 - Decoder and canonical output:
   `decodeDirectEditIdentity` may use the trusted freeze
   `basedOnVersionId` and revision for that unsaved Draft, including an
@@ -277,9 +277,9 @@ level, not per file: `runtime-state.json` is preserved at its root and in
   executable-surface pair or with
   `health.executableSurfaceUnchanged` plus `executable`.
 - Current consumer: Version history and archived terminal-outcome reads in
-  `scripts/workspace-bridge.mjs`.
+  `bridge/workspace-bridge.mjs`.
 - Decoder and canonical output:
-  `scripts/candidate-assessment-decoder.mjs` validates strict input, requires
+  `bridge/candidate-assessment-decoder.mjs` validates strict input, requires
   the retired fields to appear as a consistent pair, verifies sealed HTML
   evidence, recomputes current document-health/continuity policy, and returns
   a v1 assessment without either retired field.

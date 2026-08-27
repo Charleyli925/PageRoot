@@ -10,7 +10,6 @@ import {
   session as electronSession,
   shell,
   utilityProcess,
-  webFrameMain,
 } from "electron";
 import electronUpdater from "electron-updater";
 import {
@@ -45,7 +44,6 @@ import {
   createSafeExportDefaultPath,
   isProtectedExportDestination,
   normalizeHtmlExportPath,
-  runProjectIpcOperation,
   selectExportDestination,
 } from "./export-copy.mjs";
 import {
@@ -78,7 +76,15 @@ import {
   resolveOpenDialogDefaultPath,
 } from "./prepared-html-open.mjs";
 import { createProjectOpenQueue } from "./project-open-queue.mjs";
-import { assertTrustedRendererEvent } from "./project-ipc-security.mjs";
+import { createTrustedIpc } from "./ipc/trusted-ipc.mjs";
+import {
+  registerProjectIpc as registerProjectIpcChannels,
+  unregisterProjectIpc,
+} from "./ipc/project-ipc.mjs";
+import { registerAgentIpc, unregisterAgentIpc } from "./ipc/agent-ipc.mjs";
+import { registerUpdateIpc, unregisterUpdateIpc } from "./ipc/update-ipc.mjs";
+import { registerWindowIpc, unregisterWindowIpc } from "./ipc/window-ipc.mjs";
+import { createWindowLifecycle } from "./app-lifecycle.mjs";
 import {
   closeAbortPayload,
   normalizeCloseResult,
@@ -95,7 +101,6 @@ import {
   isActiveProjectIdentity,
   isManagedVersionRelativePath,
 } from "./project-path-policy.mjs";
-import { handoffToQoderWork } from "./qoder-handoff.mjs";
 import {
   LATEST_RELEASE_PAGE_URL,
   PROJECT_REPOSITORY_URL,
@@ -115,7 +120,6 @@ import {
 import {
   createTelemetryBuildConfig,
   createUsageTelemetry,
-  durationBucket,
   readTelemetryBuildConfig,
 } from "./usage-telemetry.mjs";
 import {
@@ -125,7 +129,6 @@ import {
 } from "./ui-preferences.mjs";
 import { readOrCreateDeviceIdentity } from "./device-identity.mjs";
 import {
-  PREVIEW_PROTOCOL_SCHEME,
   createPreviewProtocolController,
   createPreviewSessionOperation,
   registerPreviewProtocolScheme,
@@ -328,6 +331,35 @@ const sourceFileWatcher = createSourceFileWatcher({
     void recoverWatchedManagedSource(info);
   },
 });
+const desktopRuntime = {
+  get mainWindow() { return mainWindow; },
+  set mainWindow(value) { mainWindow = value; },
+  get rendererHasLoaded() { return rendererHasLoaded; },
+  set rendererHasLoaded(value) { rendererHasLoaded = value; },
+  get rendererLoadQuery() { return rendererLoadQuery; },
+  set rendererLoadQuery(value) { rendererLoadQuery = value; },
+  get isQuitting() { return isQuitting; },
+  get finalExitStarted() { return finalExitStarted; },
+  get applicationUpdate() { return applicationUpdate; },
+  get reviewRuntimeSnapshotCaptureController() {
+    return reviewRuntimeSnapshotCaptureController;
+  },
+  set reviewRuntimeSnapshotCaptureController(value) {
+    reviewRuntimeSnapshotCaptureController = value;
+  },
+  get editRuntimeProtocolController() { return editRuntimeProtocolController; },
+  set editRuntimeProtocolController(value) { editRuntimeProtocolController = value; },
+  get previewProtocolController() { return previewProtocolController; },
+  e2eWindowForeground,
+  e2eWindowRunsInBackground,
+  directory,
+  bridgeAuthToken,
+  APP_CHANNELS,
+};
+const {
+  presentMainWindow,
+  createWindow,
+} = createWindowLifecycle(desktopRuntime);
 
 function publishSourceFileMayHaveChanged(info) {
   if (!mainWindow || mainWindow.isDestroyed()) return;
@@ -545,18 +577,6 @@ function reportSuppressedNativeDialog(title, message) {
   console.error(
     `[PageRoot E2E] 后台测试模式拦截原生弹窗：${title} — ${message}`,
   );
-}
-
-function presentMainWindow({ userInitiated = false } = {}) {
-  if (
-    (e2eWindowRunsInBackground && !userInitiated)
-    || !mainWindow
-    || mainWindow.isDestroyed()
-  ) return false;
-  if (mainWindow.isMinimized()) mainWindow.restore();
-  mainWindow.show();
-  mainWindow.focus();
-  return true;
 }
 
 function requestAboutPageRoot() {
@@ -3368,225 +3388,90 @@ function registerProjectIpc() {
   if (projectIpcRegistered) return;
   projectIpcRegistered = true;
 
-  const assertTrustedEvent = (event) => assertTrustedRendererEvent(event, {
-    mainWindow,
+  const { assertTrustedEvent, trusted, trustedProject } = createTrustedIpc({
+    getMainWindow: () => mainWindow,
     isTrustedRendererUrl,
+    captureUsage,
   });
-  const trusted = (handler) => async (event, ...args) => {
-    assertTrustedEvent(event);
-    return handler(...args);
-  };
-  const trustedProject = (handler, operationOverride) => async (event, ...args) => {
-    const startedAt = Date.now();
-    const operation = operationOverride || String(handler.name || "desktop_operation")
-      .replace(/([a-z0-9])([A-Z])/gu, "$1_$2")
-      .toLowerCase();
-    const result = await runProjectIpcOperation(
-      async () => {
-        assertTrustedEvent(event);
-        return handler(...args);
-      },
-      {
-        onError: (error, normalized) => {
-          console.error(
-            `[project-ipc:${normalized.code}]`,
-            error instanceof Error ? error.stack || error.message : String(error),
-          );
-        },
-      },
-    );
-    const projectId = args.find((argument) => (
-      argument
-      && typeof argument === "object"
-      && !Array.isArray(argument)
-      && typeof argument.projectId === "string"
-    ))?.projectId;
-    let operationResult = "failure";
-    if (result.ok) {
-      operationResult = result.value === null ? "cancelled" : "success";
-    }
-    captureUsage(
-      "operation_finished",
-      {
-        operation,
-        result: operationResult,
-        ...(result.ok ? {} : { error_code: result.error.code }),
-        duration_bucket: durationBucket(Date.now() - startedAt),
-      },
-      { projectId },
-    );
-    return result;
-  };
 
-  ipcMain.handle(PROJECT_CHANNELS.getActiveProject, trustedProject(getActiveProject));
-  ipcMain.handle(PROJECT_CHANNELS.openHtml, trustedProject(openHtml));
-  ipcMain.handle(PROJECT_CHANNELS.readHtml, trustedProject(readHtml));
-  ipcMain.handle(PROJECT_CHANNELS.exportHtmlCopy, trustedProject(exportHtmlCopy));
-  ipcMain.handle(PROJECT_CHANNELS.showInFolder, trustedProject(showInFolder));
-  ipcMain.handle(PROJECT_CHANNELS.openProjectsRoot, trustedProject(openProjectsRoot));
-  ipcMain.handle(
-    PROJECT_CHANNELS.openInDefaultBrowser,
-    trustedProject(openInDefaultBrowser),
-  );
-  ipcMain.handle(PROJECT_CHANNELS.renameHtml, trustedProject(renameHtml));
-  ipcMain.handle(
-    PROJECT_CHANNELS.activateGeneratedVersion,
-    trustedProject(activateGeneratedVersion),
-  );
-  ipcMain.handle(
-    PROJECT_CHANNELS.activateManagedWorkingCopy,
-    trustedProject(activateManagedWorkingCopy),
-  );
-  ipcMain.handle(
-    PROJECT_CHANNELS.reconcileActiveManagedSource,
-    trustedProject(reconcileActiveManagedSource),
-  );
-  ipcMain.handle(PROJECT_CHANNELS.revealVersionFile, trustedProject(revealVersionFile));
-  ipcMain.handle(PROJECT_CHANNELS.revealAiTask, trustedProject(revealAiTask));
-  ipcMain.handle(PROJECT_CHANNELS.listRecentProjects, trustedProject(listRecentProjects));
-  ipcMain.handle(
-    PROJECT_CHANNELS.listRegisteredProjects,
-    trustedProject(listRegisteredProjects),
-  );
-  ipcMain.handle(
-    PROJECT_CHANNELS.openRegisteredProject,
-    trustedProject(openRegisteredProject),
-  );
-  ipcMain.handle(PROJECT_CHANNELS.openRecent, trustedProject(openRecent));
-  ipcMain.handle(PROJECT_CHANNELS.forgetRecent, trustedProject(forgetRecentProject));
-  ipcMain.handle(
-    PROJECT_CHANNELS.acceptExternalOpen,
-    trustedProject(acceptExternalFileOpen, "external_open"),
-  );
-  ipcMain.handle(
-    PROJECT_CHANNELS.acknowledgeExternalOpen,
-    trustedProject(acknowledgeExternalFileOpen, "external_open_ack"),
-  );
-  ipcMain.handle(
-    PROJECT_CHANNELS.commitPreparedHtmlOpen,
-    trustedProject(commitPreparedHtmlOpen, "prepared_open_commit"),
-  );
-  ipcMain.handle(
-    PROJECT_CHANNELS.cancelPreparedHtmlOpen,
-    trustedProject(cancelPreparedHtmlOpen, "prepared_open_cancel"),
-  );
-  ipcMain.handle(
-    PROJECT_CHANNELS.finalizePreparedHtmlOpen,
-    trustedProject(finalizePreparedHtmlOpen, "prepared_open_finalize"),
-  );
-  ipcMain.handle(
-    PROJECT_CHANNELS.rollbackPreparedHtmlOpen,
-    trustedProject(rollbackPreparedHtmlOpen, "prepared_open_rollback"),
-  );
-  ipcMain.handle(
-    INTEGRATION_CHANNELS.qoderHandoff,
-    trustedProject((payload) => {
-      if (
-        process.env.PAGEROOT_E2E === "1"
-        && process.env.PAGEROOT_E2E_QODER_HANDOFF_FAILURE === "1"
-      ) {
-        throw new ProjectFileError(
-          "E2E_QODER_HANDOFF_FAILED",
-          "测试注入：交接内容未能写入剪贴板。",
-        );
-      }
-      return handoffToQoderWork(payload, {
-        writeClipboard: (message) => clipboard.writeText(message),
-        readClipboard: () => clipboard.readText(),
-      });
-    }, "qoder_handoff"),
-  );
-  ipcMain.handle(
-    UPDATE_CHANNELS.getStatus,
-    trustedProject(() => latestUpdateResult, "update_get_status"),
-  );
-  ipcMain.handle(
-    UPDATE_CHANNELS.checkNow,
-    trustedProject(checkForApplicationUpdates),
-  );
-  ipcMain.handle(
-    UPDATE_CHANNELS.downloadAvailable,
-    trustedProject(downloadApplicationUpdate),
-  );
-  ipcMain.handle(
-    UPDATE_CHANNELS.installDownloaded,
-    trustedProject(async () => {
-      if (
-        ensureApplicationUpdateController().getStatus().status
-        !== "downloaded"
-      ) {
-        return { installing: false, reason: "not-ready" };
-      }
-      const installing = await coordinateApplicationUpdateInstall(
-        "update-install",
-      );
-      return {
-        installing,
-        reason: installing ? null : "close-blocked",
-      };
-    }, "update_install"),
-  );
-  ipcMain.handle(
-    UPDATE_CHANNELS.openLatestRelease,
-    trustedProject(openLatestRelease),
-  );
-  ipcMain.handle(
-    UPDATE_CHANNELS.openRepository,
-    trustedProject(openProjectRepository),
-  );
-  ipcMain.handle(
-    APP_CHANNELS.openUserNotice,
-    trustedProject(openUserNotice),
-  );
-  ipcMain.handle(
-    PREVIEW_CHANNELS.createSession,
-    trustedProject(
+  registerProjectIpcChannels({
+    ipcMain,
+    trustedProject,
+    PROJECT_CHANNELS,
+    PREVIEW_CHANNELS,
+    REVIEW_RUNTIME_SNAPSHOT_CHANNELS,
+    EDIT_RUNTIME_CHANNELS,
+    handlers: {
+      getActiveProject,
+      openHtml,
+      readHtml,
+      exportHtmlCopy,
+      showInFolder,
+      openProjectsRoot,
+      openInDefaultBrowser,
+      renameHtml,
+      activateGeneratedVersion,
+      activateManagedWorkingCopy,
+      reconcileActiveManagedSource,
+      revealVersionFile,
+      revealAiTask,
+      listRecentProjects,
+      listRegisteredProjects,
+      openRegisteredProject,
+      openRecent,
+      forgetRecentProject,
+      acceptExternalFileOpen,
+      acknowledgeExternalFileOpen,
+      commitPreparedHtmlOpen,
+      cancelPreparedHtmlOpen,
+      finalizePreparedHtmlOpen,
+      rollbackPreparedHtmlOpen,
       createPreviewSession,
-      "preview_create_session",
-    ),
-  );
-  ipcMain.handle(
-    PREVIEW_CHANNELS.revokeSession,
-    trustedProject(
-      (sessionId) => ensurePreviewProtocolController().revokeSession(sessionId),
-      "preview_revoke_session",
-    ),
-  );
-  ipcMain.handle(
-    REVIEW_RUNTIME_SNAPSHOT_CHANNELS.capture,
-    trustedProject(
+      revokePreviewSession: (sessionId) => (
+        ensurePreviewProtocolController().revokeSession(sessionId)
+      ),
       captureReviewRuntimeSnapshot,
-      "review_runtime_snapshot_capture",
-    ),
-  );
-  ipcMain.handle(
-    EDIT_RUNTIME_CHANNELS.prepare,
-    trustedProject(prepareEditAuthorRuntime, "edit_runtime_prepare"),
-  );
-  ipcMain.handle(
-    EDIT_RUNTIME_CHANNELS.revoke,
-    trustedProject(revokeEditAuthorRuntime, "edit_runtime_revoke"),
-  );
-  ipcMain.handle(APP_CHANNELS.closeResult, trusted(reportCloseResult));
-  ipcMain.handle(
-    APP_CHANNELS.workspaceRecoveryReady,
-    trusted(() => ({
+      prepareEditAuthorRuntime,
+      revokeEditAuthorRuntime,
+    },
+  });
+  registerAgentIpc({
+    ipcMain,
+    trustedProject,
+    INTEGRATION_CHANNELS,
+    clipboard,
+  });
+  registerUpdateIpc({
+    ipcMain,
+    trustedProject,
+    UPDATE_CHANNELS,
+    getLatestUpdateResult: () => latestUpdateResult,
+    checkForApplicationUpdates,
+    downloadApplicationUpdate,
+    ensureApplicationUpdateController,
+    coordinateApplicationUpdateInstall,
+    openLatestRelease,
+    openProjectRepository,
+  });
+  registerWindowIpc({
+    ipcMain,
+    trusted,
+    trustedProject,
+    APP_CHANNELS,
+    EDIT_CHANNELS,
+    UI_PREFERENCE_CHANNELS,
+    USAGE_CHANNELS,
+    WORKBENCH_TAB_CHANNELS,
+    openUserNotice,
+    reportCloseResult,
+    acknowledgeWorkspaceRecoveryReady: () => ({
       issue: workspaceRecoveryMailbox.acknowledgeRendererReady(),
-    })),
-  );
-  ipcMain.handle(
-    APP_CHANNELS.externalOpenReady,
-    trusted(() => publicMailboxRequest(externalFileOpenMailbox.peek())),
-  );
-  ipcMain.handle(
-    APP_CHANNELS.relaunch,
-    trusted(async () => ({
+    }),
+    peekExternalOpenReady: () => publicMailboxRequest(externalFileOpenMailbox.peek()),
+    relaunchApplication: async () => ({
       relaunched: await coordinateApplicationRelaunch("user-relaunch"),
-    })),
-  );
-  ipcMain.handle(
-    EDIT_CHANNELS.nativeHistory,
-    trusted((direction) => {
+    }),
+    applyNativeHistory: (direction) => {
       if (direction !== "undo" && direction !== "redo") {
         throw new TypeError("原生编辑历史方向无效。");
       }
@@ -3596,38 +3481,20 @@ function registerProjectIpc() {
       if (direction === "undo") mainWindow.webContents.undo();
       else mainWindow.webContents.redo();
       return { applied: true };
-    }),
-  );
-  ipcMain.handle(
-    UI_PREFERENCE_CHANNELS.get,
-    trustedProject(async () => readUiPreferences({
+    },
+    getUiPreferences: async () => readUiPreferences({
       userDataPath: app.getPath("userData"),
-    }), "ui_preferences_get"),
-  );
-  ipcMain.handle(
-    UI_PREFERENCE_CHANNELS.record,
-    trustedProject(async (payload) => recordFirstEditGuide({
+    }),
+    recordUiPreference: async (payload) => recordFirstEditGuide({
       userDataPath: app.getPath("userData"),
       action: payload?.action,
-    }), "ui_preferences_record"),
-  );
-  ipcMain.handle(
-    WORKBENCH_TAB_CHANNELS.get,
-    trustedProject(() => readWorkbenchTabsState({
+    }),
+    getWorkbenchTabs: () => readWorkbenchTabsState({
       userDataPath: app.getPath("userData"),
-    }), "workbench_tabs_get"),
-  );
-  ipcMain.handle(
-    WORKBENCH_TAB_CHANNELS.set,
-    trustedProject((payload) => persistWorkbenchTabsState(payload), "workbench_tabs_set"),
-  );
-  ipcMain.on(USAGE_CHANNELS.capture, (event, payload) => {
-    try {
-      assertTrustedEvent(event);
-      usageTelemetry?.captureFromRenderer(payload);
-    } catch {
-      // Usage reporting is deliberately best-effort and never changes product flow.
-    }
+    }),
+    setWorkbenchTabs: (payload) => persistWorkbenchTabsState(payload),
+    assertTrustedEvent,
+    captureUsageFromRenderer: (payload) => usageTelemetry?.captureFromRenderer(payload),
   });
 }
 
@@ -3651,7 +3518,7 @@ function findAvailablePort() {
 function bridgeScriptPath() {
   return app.isPackaged
     ? path.join(process.resourcesPath, "bridge", "workspace-bridge.mjs")
-    : path.join(directory, "..", "scripts", "workspace-bridge.mjs");
+    : path.join(directory, "..", "bridge", "workspace-bridge.mjs");
 }
 
 function rendererPath() {
@@ -3827,23 +3694,22 @@ async function stopBridgeGracefully() {
 }
 
 function unregisterIpc() {
-  for (const channel of [
-    ...Object.values(PROJECT_CHANNELS),
-    ...Object.values(INTEGRATION_CHANNELS),
-    ...Object.values(UPDATE_CHANNELS),
-    ...Object.values(REVIEW_RUNTIME_SNAPSHOT_CHANNELS),
-    ...Object.values(EDIT_RUNTIME_CHANNELS),
-    ...Object.values(UI_PREFERENCE_CHANNELS),
-    ...Object.values(WORKBENCH_TAB_CHANNELS),
-    APP_CHANNELS.closeResult,
-    APP_CHANNELS.workspaceRecoveryReady,
-    APP_CHANNELS.externalOpenReady,
-    APP_CHANNELS.relaunch,
-    EDIT_CHANNELS.nativeHistory,
-  ]) {
-    ipcMain.removeHandler(channel);
-  }
-  ipcMain.removeAllListeners(USAGE_CHANNELS.capture);
+  unregisterProjectIpc({
+    ipcMain,
+    PROJECT_CHANNELS,
+    REVIEW_RUNTIME_SNAPSHOT_CHANNELS,
+    EDIT_RUNTIME_CHANNELS,
+  });
+  unregisterAgentIpc({ ipcMain, INTEGRATION_CHANNELS });
+  unregisterUpdateIpc({ ipcMain, UPDATE_CHANNELS });
+  unregisterWindowIpc({
+    ipcMain,
+    APP_CHANNELS,
+    EDIT_CHANNELS,
+    UI_PREFERENCE_CHANNELS,
+    USAGE_CHANNELS,
+    WORKBENCH_TAB_CHANNELS,
+  });
   projectIpcRegistered = false;
 }
 
@@ -4236,196 +4102,20 @@ async function startBridge() {
   }
 }
 
-async function createWindow() {
-  // Only the renderer URL needs the Bridge endpoint. Protocol installation,
-  // external-file adoption, window construction and IPC registration do not,
-  // so let the utility process boot alongside them instead of ahead of them.
-  // startBridge is idempotent and deduplicates concurrent starts, so awaiting
-  // it again below costs nothing once the boot has already settled. No IPC
-  // handler can observe a missing port either: the renderer that would call
-  // one is loaded after the await, and fetchBridgeJson still fails closed.
-  const bridgeStartup = startBridge();
-  // Claim the rejection now so a throw between here and the await below cannot
-  // surface as an unhandled rejection; the awaited promise still rejects.
-  bridgeStartup.catch(() => {});
-  ensurePreviewProtocolController();
-  await adoptPendingExternalFileAtStartup();
+desktopRuntime.startBridge = startBridge;
+desktopRuntime.ensurePreviewProtocolController = ensurePreviewProtocolController;
+desktopRuntime.adoptPendingExternalFileAtStartup = adoptPendingExternalFileAtStartup;
+desktopRuntime.workspaceRecoveryMailbox = workspaceRecoveryMailbox;
+desktopRuntime.registerProjectIpc = registerProjectIpc;
+desktopRuntime.isTrustedRendererUrl = isTrustedRendererUrl;
+desktopRuntime.rendererPath = rendererPath;
+desktopRuntime.ensureApplicationUpdateController = ensureApplicationUpdateController;
+desktopRuntime.externalFileOpenMailbox = externalFileOpenMailbox;
+desktopRuntime.publicMailboxRequest = publicMailboxRequest;
+desktopRuntime.captureUsage = captureUsage;
+desktopRuntime.telemetryReasonCode = telemetryReasonCode;
+desktopRuntime.coordinateApplicationExit = coordinateApplicationExit;
 
-  rendererHasLoaded = false;
-  externalFileOpenDelivery.beginRendererLoad();
-  workspaceRecoveryMailbox.beginRendererLoad();
-  mainWindow = new BrowserWindow({
-    width: 1440,
-    height: 960,
-    minWidth: 960,
-    minHeight: 720,
-    backgroundColor: "#f7f8fa",
-    title: "源页",
-    show: e2eWindowForeground,
-    ...(process.platform === "darwin"
-      ? {
-          titleBarStyle: "hiddenInset",
-          trafficLightPosition: { x: 18, y: 15 },
-        }
-      : {}),
-    ...(!app.isPackaged
-      ? { icon: path.join(directory, "resources", "icon.png") }
-      : {}),
-    webPreferences: {
-      preload: path.join(directory, "preload.mjs"),
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true,
-      webSecurity: true,
-      ...(process.env.PAGEROOT_E2E === "1"
-        ? { backgroundThrottling: false }
-        : {}),
-    },
-  });
-
-  registerProjectIpc();
-
-  mainWindow.removeMenu();
-  const loadedManagedPreviewFrameIds = new Set();
-  mainWindow.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
-  mainWindow.webContents.on("will-navigate", (event, url) => {
-    if (!isTrustedRendererUrl(url)) event.preventDefault();
-  });
-  mainWindow.webContents.on("will-frame-navigate", (details) => {
-    if (details.isMainFrame) return;
-    const parentFrame = details.frame?.parent;
-    if (parentFrame !== mainWindow?.webContents.mainFrame) return;
-    try {
-      const previewProtocol = `${PREVIEW_PROTOCOL_SCHEME}:`;
-      const protectedPreviewUrl = [details.frame?.url, details.initiator?.url]
-        .find((url) => new URL(url || "about:blank").protocol === previewProtocol);
-      if (!protectedPreviewUrl) return;
-      details.preventDefault();
-      const frame = details.frame;
-      if (!frame || loadedManagedPreviewFrameIds.has(frame.frameTreeNodeId)) return;
-      const activated = ensurePreviewProtocolController()
-        .activateNavigationFallback(protectedPreviewUrl);
-      if (!activated) return;
-      const protectedSessionId = new URL(protectedPreviewUrl).hostname;
-      setImmediate(() => {
-        if (frame.isDestroyed()) return;
-        try {
-          const currentFrameUrl = new URL(frame.url);
-          if (
-            currentFrameUrl.protocol !== previewProtocol
-            || currentFrameUrl.hostname !== protectedSessionId
-            || !["/", "/index.html"].includes(currentFrameUrl.pathname)
-          ) return;
-          frame.reload();
-        } catch {
-          // A detached frame has already been replaced by its owning React tree.
-        }
-      });
-    } catch {
-      details.preventDefault();
-    }
-  });
-  mainWindow.webContents.on(
-    "did-frame-finish-load",
-    (_event, isMainFrame, frameProcessId, frameRoutingId) => {
-      if (isMainFrame) return;
-      const frame = webFrameMain.fromId(frameProcessId, frameRoutingId);
-      if (!frame || frame.parent !== mainWindow?.webContents.mainFrame) return;
-      try {
-        if (new URL(frame.url).protocol === `${PREVIEW_PROTOCOL_SCHEME}:`) {
-          loadedManagedPreviewFrameIds.add(frame.frameTreeNodeId);
-        }
-      } catch {
-        // A detached frame has no stable completion identity to retain.
-      }
-    },
-  );
-  mainWindow.webContents.on(
-    "did-start-navigation",
-    (_event, _url, isInPlace, isMainFrame) => {
-      if (isInPlace || !isMainFrame) return;
-      loadedManagedPreviewFrameIds.clear();
-      rendererHasLoaded = false;
-      externalFileOpenDelivery.beginRendererLoad();
-      workspaceRecoveryMailbox.beginRendererLoad();
-    },
-  );
-  mainWindow.webContents.on("did-finish-load", () => {
-    rendererHasLoaded = true;
-    ensureApplicationUpdateController().startAutomaticChecks();
-    deliverExternalMailboxHead();
-  });
-  mainWindow.webContents.on("render-process-gone", (_event, details) => {
-    captureUsage("runtime_fault", {
-      process: "renderer",
-      kind: "renderer_gone",
-      reason_code: telemetryReasonCode(details?.reason, "RENDERER_GONE"),
-      exit_code: Number.isInteger(details?.exitCode)
-        ? Math.max(-1, Math.min(255, details.exitCode))
-        : -1,
-    });
-    /*
-     * Reporting the fault is not the same as surviving it. With no reload the window
-     * stays on screen as a blank white rectangle for as long as the user looks at it,
-     * which reads as a dead application even though the Bridge, the project and the
-     * Working Copy are all intact. A clean exit is not a fault to recover from.
-     */
-    if (details?.reason === "clean-exit" || isQuitting || finalExitStarted) return;
-    if (!mainWindow || mainWindow.isDestroyed() || !rendererLoadQuery) return;
-    rendererHasLoaded = false;
-    externalFileOpenDelivery.beginRendererLoad();
-    // A cold boot with the original handshake, not reload(): the renderer needs those
-    // query values to reach the Bridge, and this path also runs its normal restore of
-    // the last active project instead of leaving an empty shell.
-    void mainWindow.loadFile(rendererPath(), { query: rendererLoadQuery });
-  });
-  mainWindow.webContents.on("unresponsive", () => {
-    captureUsage("runtime_fault", {
-      process: "renderer",
-      kind: "renderer_unresponsive",
-      reason_code: "UNRESPONSIVE",
-    });
-  });
-  mainWindow.webContents.on("responsive", () => {
-    captureUsage("runtime_fault", {
-      process: "renderer",
-      kind: "renderer_responsive",
-      reason_code: "RESPONSIVE",
-    });
-  });
-  mainWindow.once("ready-to-show", presentMainWindow);
-  mainWindow.on("close", (event) => {
-    if (finalExitStarted) return;
-    event.preventDefault();
-    void coordinateApplicationExit("window-close");
-  });
-  mainWindow.on("closed", () => {
-    applicationUpdate?.stopAutomaticChecks();
-    reviewRuntimeSnapshotCaptureController?.dispose();
-    reviewRuntimeSnapshotCaptureController = null;
-    editRuntimeProtocolController?.dispose();
-    editRuntimeProtocolController = null;
-    previewProtocolController?.dispose();
-    rendererHasLoaded = false;
-    externalFileOpenDelivery.beginRendererLoad();
-    workspaceRecoveryMailbox.beginRendererLoad();
-    mainWindow = null;
-  });
-
-  const port = await bridgeStartup;
-  /*
-   * Remembered so a renderer that died can be booted again with the same handshake.
-   * reload() was not enough: the renderer only reaches the Bridge through these
-   * query values, and a window that comes back without them renders nothing at all —
-   * which is the blank white window users were left staring at.
-   */
-  rendererLoadQuery = {
-    bridgePort: String(port),
-    bridgeAuthToken,
-    appVersion: app.getVersion(),
-  };
-  await mainWindow.loadFile(rendererPath(), { query: rendererLoadQuery });
-}
 
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
 

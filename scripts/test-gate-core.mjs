@@ -1,7 +1,17 @@
 import path from "node:path";
 
+import {
+  CAPABILITY_SMOKE_SUITES,
+  GATE_WIDTH_LIMITS,
+  isRuntimeCanarySuite,
+  runtimeOfSuite,
+} from "./gate-smoke-suites.mjs";
+
 const CODE_PATH = /\.(?:cjs|mjs|js|jsx|ts|tsx|json)$/iu;
 const NODE_TEST_PATH = /^tests\/[^/]+\.test\.mjs$/u;
+const PRODUCTION_MODULE_PATH = /^(?:app|desktop|scripts|shared)\//u;
+
+export { GATE_WIDTH_LIMITS };
 
 export function normalizeRepositoryPath(value) {
   return String(value).replaceAll(path.sep, "/").replace(/^\.\//u, "");
@@ -80,7 +90,7 @@ function orderForFastFailure(suiteIds, selectedNodeTests) {
     if (suiteId === "real-html") return 55;
     if (suiteId === "build-desktop") return 60;
     if (suiteId.startsWith("electron-")) return 70;
-    if (suiteId === "ai-closed-loop" || suiteId === "ai-smoke") return 80;
+    if (suiteId.startsWith("ai-")) return 80;
     if (suiteId === "developer-package-build") return 90;
     if (suiteId === "developer-packaged-verify") return 95;
     if (suiteId === "developer-packaged-startup") return 100;
@@ -110,13 +120,25 @@ export function selectGatePlan({ map, lane, changedFiles = [] }) {
   const requestedSet = new Set();
   const selectedNodeTests = new Set();
   const fallbackReasons = [];
-  const addSuite = (suiteId, reason) => {
+  const matchedOwners = [];
+  const matchedOwnerSet = new Set();
+  const fileMatches = [];
+  const nodeTestOrigins = new Map();
+  const addOrigin = (collection, key, origin) => {
+    const entries = collection.get(key) || [];
+    if (!entries.some((entry) => entry.file === origin.file && entry.owner === origin.owner)) {
+      entries.push(origin);
+    }
+    collection.set(key, entries);
+  };
+  const addSuite = (suiteId, reason, origin = null) => {
     if (!map.suites[suiteId]) throw new Error(`Unknown selected suite ${suiteId}.`);
     addReason(reasons, suiteId, reason);
     if (!requestedSet.has(suiteId)) {
       requestedSet.add(suiteId);
       requested.push(suiteId);
     }
+    if (origin) addOrigin(nodeTestOrigins, `suite:${suiteId}`, origin);
   };
 
   if (Array.isArray(laneConfig.fullSuites)) {
@@ -130,19 +152,32 @@ export function selectGatePlan({ map, lane, changedFiles = [] }) {
 
     for (const file of normalizedFiles) {
       const isTopLevelNodeTest = NODE_TEST_PATH.test(file);
+      const matchedRules = [];
       if (isTopLevelNodeTest) {
         selectedNodeTests.add(file);
-        if (allowed.has("node-targeted")) addSuite("node-targeted", `${file} changed`);
+        addOrigin(nodeTestOrigins, file, { file, owner: "self" });
+        if (allowed.has("node-targeted")) addSuite("node-targeted", `${file} changed`, { file, owner: "self" });
       }
       let matched = isTopLevelNodeTest;
       for (const rule of map.rules || []) {
         if (!rule.patterns.some((pattern) => new RegExp(pattern, "u").test(file))) continue;
         matched = true;
-        for (const nodeTest of rule.nodeTests || []) selectedNodeTests.add(nodeTest);
+        matchedRules.push(rule.id);
+        if (!matchedOwnerSet.has(rule.id)) {
+          matchedOwnerSet.add(rule.id);
+          matchedOwners.push(rule.id);
+        }
+        for (const nodeTest of rule.nodeTests || []) {
+          selectedNodeTests.add(nodeTest);
+          addOrigin(nodeTestOrigins, nodeTest, { file, owner: rule.id });
+        }
         for (const suiteId of rule.suites || []) {
-          if (allowed.has(suiteId)) addSuite(suiteId, `${rule.id}: ${file}`);
+          if (allowed.has(suiteId)) {
+            addSuite(suiteId, `${rule.id}: ${file}`, { file, owner: rule.id });
+          }
         }
       }
+      fileMatches.push({ file, rules: matchedRules });
       if (matched && selectedNodeTests.size > 0 && allowed.has("node-targeted")) {
         addSuite("node-targeted", `impact-mapped Node tests for ${file}`);
       }
@@ -179,14 +214,146 @@ export function selectGatePlan({ map, lane, changedFiles = [] }) {
     expandPrerequisites(map, requested, reasons),
     [...selectedNodeTests],
   );
+  const suites = suiteIds.map((id) => ({
+    id,
+    description: map.suites[id].description,
+    reasons: reasons.get(id) || [],
+    origins: nodeTestOrigins.get(`suite:${id}`) || [],
+  }));
   return {
     lane,
     changedFiles: normalizedFiles,
+    matchedOwners,
+    fileMatches,
+    nodeTestOrigins: Object.fromEntries(
+      [...nodeTestOrigins.entries()]
+        .filter(([key]) => !key.startsWith("suite:"))
+        .sort(([left], [right]) => left.localeCompare(right)),
+    ),
     selectedNodeTests: [...selectedNodeTests].sort(),
-    suites: suiteIds.map((id) => ({
-      id,
-      description: map.suites[id].description,
-      reasons: reasons.get(id) || [],
+    suites,
+  };
+}
+
+export function isProductionModule(file) {
+  return PRODUCTION_MODULE_PATH.test(normalizeRepositoryPath(file));
+}
+
+export function collectRuleCoverage(map, inventoryFiles = []) {
+  const files = inventoryFiles.map(normalizeRepositoryPath);
+  return (map.rules || []).map((rule) => {
+    const matchedFiles = files.filter((file) => (
+      rule.patterns.some((pattern) => new RegExp(pattern, "u").test(file))
+    ));
+    return {
+      id: rule.id,
+      matchedFiles,
+      productionModuleCount: matchedFiles.filter(isProductionModule).length,
+      nodeTestCount: (rule.nodeTests || []).length,
+      suites: [...(rule.suites || [])],
+    };
+  });
+}
+
+function leafNodeFanout(plan, file) {
+  const tests = new Set();
+  const match = plan.fileMatches.find((entry) => entry.file === file);
+  if (!match) return 0;
+  for (const [testFile, origins] of Object.entries(plan.nodeTestOrigins)) {
+    if (origins.some((origin) => origin.file === file)) tests.add(testFile);
+  }
+  return tests.size;
+}
+
+export function buildGateWarnings(plan, { map, inventoryFiles = [] } = {}) {
+  const warnings = [];
+  for (const file of plan.changedFiles) {
+    const count = leafNodeFanout(plan, file);
+    if (count > GATE_WIDTH_LIMITS.leafFileNodeTests) {
+      warnings.push({
+        code: "leaf-file-node-fanout",
+        message: `${file} selected ${count} Node files`,
+        file,
+        count,
+        limit: GATE_WIDTH_LIMITS.leafFileNodeTests,
+      });
+    }
+  }
+  if (inventoryFiles.length > 0) {
+    for (const rule of collectRuleCoverage(map, inventoryFiles)) {
+      if (rule.productionModuleCount > GATE_WIDTH_LIMITS.ruleProductionModules) {
+        warnings.push({
+          code: "rule-production-width",
+          message: `${rule.id} matches ${rule.productionModuleCount} production modules`,
+          owner: rule.id,
+          count: rule.productionModuleCount,
+          limit: GATE_WIDTH_LIMITS.ruleProductionModules,
+        });
+      }
+    }
+  }
+  const runtimes = new Set(
+    plan.suites.map((suite) => runtimeOfSuite(suite.id)).filter(Boolean),
+  );
+  if (runtimes.has("browser") && runtimes.has("electron") && runtimes.has("ai")) {
+    warnings.push({
+      code: "task-heavy-lane-union",
+      message: "task selected Browser, Electron and AI runtime canaries together",
+      suites: plan.suites.map((suite) => suite.id).filter(isRuntimeCanarySuite),
+    });
+  }
+  return warnings;
+}
+
+export function estimateRuntimeFanout(plan, tagCounts = {}) {
+  const fanout = { nodeFiles: plan.selectedNodeTests.length, browserTests: 0, electronTests: 0, aiTests: 0 };
+  for (const suite of plan.suites) {
+    const runtime = runtimeOfSuite(suite.id);
+    const tag = CAPABILITY_SMOKE_SUITES[suite.id]?.tag;
+    if (!runtime || !tag) continue;
+    const count = tagCounts[`${runtime}:${tag}`] || 0;
+    if (runtime === "browser") fanout.browserTests += count;
+    else if (runtime === "electron") fanout.electronTests += count;
+    else if (runtime === "ai") fanout.aiTests += count;
+  }
+  return fanout;
+}
+
+export function annotateGatePlan(plan, { map, inventoryFiles = [], tagCounts = {} } = {}) {
+  const warnings = buildGateWarnings(plan, { map, inventoryFiles });
+  const ruleStats = inventoryFiles.length > 0
+    ? collectRuleCoverage(map, inventoryFiles).filter((rule) => plan.matchedOwners.includes(rule.id))
+      .map((rule) => ({
+        id: rule.id,
+        productionModules: rule.productionModuleCount,
+        matchedFiles: rule.matchedFiles.length,
+        nodeTests: rule.nodeTestCount,
+        suites: rule.suites,
+      }))
+    : [];
+  return {
+    ...plan,
+    warnings,
+    ruleStats,
+    runtimeCanaries: plan.suites.map((suite) => suite.id).filter(isRuntimeCanarySuite),
+    estimatedFanout: estimateRuntimeFanout(plan, tagCounts),
+  };
+}
+
+export function compactGatePlan(plan) {
+  return {
+    changedFiles: plan.changedFiles,
+    matchedOwners: plan.matchedOwners || [],
+    nodeTests: plan.selectedNodeTests,
+    runtimeCanaries: plan.runtimeCanaries || [],
+    estimatedFanout: plan.estimatedFanout || {
+      nodeFiles: plan.selectedNodeTests.length,
+      browserTests: 0,
+      electronTests: 0,
+    },
+    warnings: (plan.warnings || []).map((warning) => ({
+      code: warning.code,
+      message: warning.message,
     })),
   };
 }

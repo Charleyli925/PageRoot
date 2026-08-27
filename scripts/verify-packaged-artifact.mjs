@@ -44,7 +44,7 @@ import {
   PINNED_CODEX_VERSION,
   codexInstallationDigest,
   resolveBundledCodexInstallation,
-} from "./agent/providers/codex-provider.mjs";
+} from "../bridge/agent/providers/codex-provider.mjs";
 import { AGENT_FEATURE_GATES } from "../shared/agent-feature-gates.mjs";
 
 const SCRIPT_PATH = fileURLToPath(import.meta.url);
@@ -164,6 +164,12 @@ export const REQUIRED_APP_SOURCE_FILES = [
   "desktop/export-copy.mjs",
   "desktop/open-in-default-browser.mjs",
   "desktop/project-ipc-security.mjs",
+  "desktop/ipc/trusted-ipc.mjs",
+  "desktop/ipc/project-ipc.mjs",
+  "desktop/ipc/window-ipc.mjs",
+  "desktop/ipc/agent-ipc.mjs",
+  "desktop/ipc/update-ipc.mjs",
+  "desktop/app-lifecycle.mjs",
   "desktop/bridge-startup.mjs",
   "desktop/bridge-shutdown.mjs",
   "desktop/close-recovery.mjs",
@@ -786,7 +792,7 @@ export async function verifyAppBundle({
   for (const fileName of REQUIRED_BRIDGE_FILES) {
     const sourcePath = fileName === "product-contract.mjs"
       ? path.join(productRoot, "desktop", fileName)
-      : path.join(productRoot, "scripts", fileName);
+      : path.join(productRoot, "bridge", fileName);
     await assertFilesEqual(
       sourcePath,
       path.join(bridgePackagedRoot, fileName),

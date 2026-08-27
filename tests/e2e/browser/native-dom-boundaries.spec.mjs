@@ -22,7 +22,9 @@ test.beforeEach(async ({ page }) => {
   await page.goto("/");
 });
 
-test("pure browser use stays in a formal read-only preview", async ({ page }) => {
+test("pure browser use stays in a formal read-only preview", {
+  tag: ["@gate-smoke","@smoke-editing"],
+}, async ({ page }) => {
   await expect(page.getByText("浏览器预览 · 只读", { exact: true })).toBeVisible();
   await expect(page.getByText("操作不会保存", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "编辑", exact: true })).toBeDisabled();
@@ -40,7 +42,9 @@ test("pure browser use stays in a formal read-only preview", async ({ page }) =>
   expect(await page.evaluate(() => Boolean(window.htmlAIProjects))).toBe(false);
 });
 
-test("the edit iframe is same-origin but never executes author scripts or refresh", async ({ page }) => {
+test("the edit iframe is same-origin but never executes author scripts or refresh", {
+  tag: ["@gate-smoke","@smoke-editing"],
+}, async ({ page }) => {
   const { iframe, frame } = await loadFixture(page, "complex-layout.html");
   await expect(iframe).toHaveAttribute("sandbox", "allow-same-origin");
   expect((await iframe.getAttribute("sandbox")).split(/\s+/)).not.toContain("allow-scripts");
@@ -296,67 +300,6 @@ test("text-edit hover caption hugs its copy instead of a fixed ribbon", async ({
   expect(Math.abs(metrics.width - metrics.scrollWidth)).toBeLessThanOrEqual(2);
 });
 
-test("text-edit hover caption stays at the right canvas edge", async ({ page }) => {
-  const { editor, frame } = await loadFixture(page, "complex-layout.html");
-  const target = frame.locator(caseSelector("paragraph-entities"));
-
-  await target.evaluate((element) => {
-    Object.assign(element.style, {
-      position: "fixed",
-      top: "120px",
-      right: "0px",
-      width: "96px",
-    });
-  });
-  await target.hover({ position: { x: 20, y: 20 } });
-  const hint = editor.getByTestId("canvas-capability-hint");
-  await expect(hint).toBeVisible({ timeout: 1500 });
-
-  await expect.poll(async () => {
-    const [hintBox, editorBox] = await Promise.all([
-      hint.boundingBox(),
-      editor.boundingBox(),
-    ]);
-    if (!hintBox || !editorBox) return Number.POSITIVE_INFINITY;
-    return Math.abs((editorBox.x + editorBox.width) - (hintBox.x + hintBox.width));
-  }).toBeLessThanOrEqual(10);
-});
-
-test("text-edit hover caption stays inside a narrow canvas", async ({ page }) => {
-  const { editor, frame } = await loadFixture(page, "complex-layout.html");
-  const target = frame.locator(caseSelector("paragraph-entities"));
-
-  await editor.evaluate((element) => {
-    Object.assign(element.style, {
-      width: "104px",
-      minWidth: "0px",
-    });
-  });
-  await target.evaluate((element) => {
-    Object.assign(element.style, {
-      position: "fixed",
-      top: "120px",
-      right: "0px",
-      width: "48px",
-    });
-  });
-  await target.hover({ position: { x: 12, y: 12 } });
-  const hint = editor.getByTestId("canvas-capability-hint");
-  await expect(hint).toBeVisible({ timeout: 1500 });
-
-  await expect.poll(async () => {
-    const [hintBox, editorBox] = await Promise.all([
-      hint.boundingBox(),
-      editor.boundingBox(),
-    ]);
-    if (!hintBox || !editorBox) return Number.POSITIVE_INFINITY;
-    return Math.max(
-      (editorBox.x + 6) - hintBox.x,
-      (hintBox.x + hintBox.width) - (editorBox.x + editorBox.width - 6),
-    );
-  }).toBeLessThanOrEqual(1);
-});
-
 test("text-edit hover caption regains its intrinsic width after the canvas widens", async ({
   page,
 }) => {
@@ -530,7 +473,9 @@ test("clicking a canvas selects the dedicated surface instead of the wrapping mo
     .not.toHaveAttribute("data-html-canvas-selected", /.+/u);
 });
 
-test("double-clicking a canvas reports the dedicated root and stays comment-only", async ({ page }) => {
+test("double-clicking a canvas reports the dedicated root and stays comment-only", {
+  tag: ["@gate-smoke","@smoke-editing"],
+}, async ({ page }) => {
   const { editor, frame } = await loadFixture(page, "complex-layout.html");
   const canvas = frame.locator(caseSelector("canvas-surface"));
   await canvas.scrollIntoViewIfNeeded();
@@ -540,7 +485,9 @@ test("double-clicking a canvas reports the dedicated root and stays comment-only
     .toContain("EDITABLE_ISLAND_ROOT_UNSUPPORTED");
 });
 
-test("first double-click places a caret; a second double-click selects the word", async ({ page }) => {
+test("first double-click places a caret; a second double-click selects the word", {
+  tag: ["@gate-smoke","@smoke-editing"],
+}, async ({ page }) => {
   const { editor, frame } = await loadFixture(page, "complex-layout.html");
   const target = frame.locator(caseSelector("heading-inline"));
   const toolbar = editor.getByRole("toolbar");

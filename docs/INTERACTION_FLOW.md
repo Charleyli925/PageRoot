@@ -13,7 +13,7 @@
 用户只需要理解这些事：
 
 1. 我在当前 HTML 上直接编辑，系统自动更新文件。
-2. 我在同一弹窗选择“Qoder CLI”或“复制任务”；检查成功后工作台才把当前内容和评论冻结成 AI 任务，只有冻结成功，当前项目才会锁住。
+2. 我在同一工作流选择受管 Agent 或“复制任务”；检查成功后工作台才把当前内容和评论冻结成 AI 任务，只有冻结成功，当前项目才会锁住。
 3. AI 真正完成且产生有效变化后，系统先保留独立 Candidate 并让我审阅；只有我明确采纳才切换到下一份 HTML，不会覆盖提交前的文件。
 4. 修改前完整 HTML、修改后新工作文件和不可变历史 HTML 都会保留。
 5. 编辑画布上：单击选择，双击改字；需要点页面自己的按钮或脚本交互时切到“预览”。部分 Tab 等源码可证明的切换在编辑里也能做，不必为它们切预览。
@@ -58,7 +58,7 @@
 - 直接编辑工具。
 - 评论与本轮要求面板。
 - 自动写回状态。
-- 发给 AI 的主按钮：无评论时为“写评论后再发送”，有评论时为“发给 AI”。复制模式使用“正在复制…”、“查看本轮”和“复制失败，再试一次”；受管 Qoder 模式使用“正在启动 Qoder…”、“Qoder 正在处理”与“Qoder 会话已中断”。只有已确认无进程和输出残留的普通失败才提供“重新启动 Qoder”；崩溃中断只允许结束旧 Request。
+- 发给 AI 的主按钮：无评论时为“写评论后再发送”，有评论时为“发给 AI”。复制模式使用“正在复制…”、“查看本轮”和“复制失败，再试一次”；受管模式使用冻结 Agent 的名称显示“正在启动…”、“正在处理”与“会话已中断”。只有已确认无进程和输出残留的普通失败才提供该 Agent 的重新启动；崩溃中断只允许结束旧 Request。
 - macOS 应用菜单中的“关于源页”入口；弹层以简洁文案说明本地 HTML 与 AI Agent 协作定位，展示当前版本和运行架构，提供“检查更新”、“查看更新内容”、GitHub 仓库和“用户声明与免责声明”入口，并把检查中、已是最新、等待下载、下载中、可以重启或失败原因原位展示。“查看更新内容”常驻更新卡，任何更新状态下都打开该版本的 GitHub Release 页，说明正文即 `CHANGELOG.md` 中该版本的小节；页面没有打开时在同一位置说明原因。声明入口只打开安装包内随附的固定本地文本文件，不接受页面传入路径。
 - 仅在正式签名的 macOS App 检测到 stable 新版本后，在 HTML 图标下缘显示小号红色斜体 `New!`；点击后才静默下载，下载期间不显示百分比或动效。下载完成后弹出“现在重启 / 稍后”确认；选择稍后时入口变为 `New! 重启更新`，再次点击打开同一确认。Canvas 不显示下载完成横幅，顶部也不新增图标。应用在启动约 5 秒后及持续打开期间每 4 小时检查 stable 更新，安装前仍执行同一套安全写入与关闭确认。
 - 当前项目工作台（项目规则与版本历史）与交接详情。
@@ -612,7 +612,7 @@ POST 超时也按“结果未知”处理：先查询 operation 是否已经被�
 ```text
 commit pending native edit checkpoint
 → validate comments / enter transient preparing
-→ optional Qoder CLI use-time check / ensure project / re-read comments
+→ optional selected-Agent use-time check / ensure project / re-read comments
 → freezeNow() returns exact html + sha + revision
 → projectLocked = true
 → lifecycleState = submitting
@@ -669,14 +669,14 @@ Request 持久化后，Repository 才能基于冻结 Prompt 建立 `AI任务/<�
 只负责导航。侧栏没有讨论/修改开关和提问框；历史 Conversation 仍可阅读，新动作只有
 基于页面评论的修改。提交所需的一切都在那一处，页面始终可见：
 
-- 披露「Qoder 会读取本轮 HTML、评论和附件；结果先进入审阅」显示在按钮上方，用户在
+- 披露「选中的 Agent 会读取本轮 HTML、评论和附件；结果先进入审阅」显示在按钮上方，用户在
   动作之前读到它。更完整的本机权限与第三方处理说明继续由用户声明承担。
 - 主按钮「交给 AI 修改」自动执行并在对话内显示进度。按下即确认本轮采用
   `trusted-local-agent-v1`——这是原弹窗中「选择即确认」的同一个显式动作，只是不再由
   一个盖住页面的模态承载。到提交为止的点击次数与弹窗时代相同。
 - 按下的同一同步事件会冻结 provider、runtime、model 与 reasoning；随后即使用户切换
   下一轮 Agent 选择，正在预检、登记、排空、对账或启动的 Request 仍显示并使用这份冻结选择。
-- 安静的次要动作「复制任务」保留通用本地文件交接，用户把一条简洁指令粘贴给 Qoder 或
+- 安静的次要动作「复制任务」保留通用本地文件交接，用户把一条简洁指令粘贴给选中的 Agent 或
   任意能够读取本机文件并执行命令的 Agent；它与主按钮同时可用。
 - 修改意图下不渲染输入框。该意图的输入是页面上已写好的评论，因此不存在被静默丢弃的
   已输入文本。没有评论时按钮说明去哪里写，而不是只变灰。
@@ -719,14 +719,14 @@ unavailable` 状态。打开 About 或侧栏立即进入“检测中”并执行
 - 每个附件在当前 Request 内的本机绝对路径和相对回退路径，不包含外部原文件路径或 Base64。
 - 自动执行模式在预检成功后才冻结并创建一个带固定 `agentDelivery` 授权的 Request。
   Bridge 从已登记项目与该 Request 派生命令、cwd、输入、输出和 finalizer 权限；Renderer
-  不传这些路径。它使用一次性短时 ticket 启动 Qoder，自动模式不读写剪贴板。
+  不传这些路径。它使用一次性短时 ticket 启动已冻结的 Agent，自动模式不读写剪贴板。
 - preflight ticket 同时绑定 installation digest、trust policy 与 `execution`
   purpose；领取即从 Renderer cache 删除，非 execution purpose 一律拒绝。未知 Provider 的历史
   Request 仍可结束和审阅，但不会回退成 Qoder 或剪贴板，也不显示重新启动动作。
-- ACP 初始化、读取任务、写 Candidate、finalizer 和停止事件只用于显示进度；它们不表示
+- runtime 初始化、读取任务、写 Candidate、finalizer 和停止事件只用于显示进度；它们不表示
   Candidate 已完成。只有 completion 与 Repository 校验通过才进入待审阅。
-- Qoder 普通启动失败时，只有当前 Bridge 已确认所拥有的进程组退出且没有
-  output/completion 残留，才显示“重新启动 Qoder”与“复制任务”，并只复用同一 Request。
+- 受管 Agent 普通启动失败时，只有当前 Bridge 已确认所拥有的进程组退出且没有
+  output/completion 残留，才显示“重新启动 Agent”与“复制任务”，并只复用同一 Request。
   Bridge 崩溃留下启动租约、进程清理无法确认或已有残留时，本轮不可重试、不可改为复制；
   用户先结束旧 Request 形成 authority fence，再重新发送为新 Request。残留保留用于诊断，
   不覆盖现场。
@@ -736,8 +736,27 @@ unavailable` 状态。打开 About 或侧栏立即进入“检测中”并执行
 
 用户选择“预览已发送 HTML”后，画布必须按冻结 HTML 的原始视觉强度正常显示，不沿用处理面板的降饱和或透明弱化。顶部返回横条先完整显示，3.5 秒后收起到 2px 提示线；鼠标扫过顶部感应区或点击提示线时平滑展开，并在一次完整展示时间后重新收起。键盘焦点进入时同样展开，但在焦点离开前保持可见。历史版本等带返回操作的只读 HTML 预览使用同一行为；阻断错误与冲突提示不自动收起。系统开启“减少动态效果”时保留状态切换，但不播放位移动画。
 
-复制模式由用户把消息粘贴给 Agent；自动模式由 Bridge 启动 Qoder ACP 会话。两种模式的
+复制模式由用户把消息粘贴给 Agent；自动模式由 Bridge 启动已冻结 provider/runtime 的会话。两种模式的
 Agent 都只能按协议处理同一个指定 Request/Attempt。
+
+#### 7.3.1 流式执行体验
+
+本轮的受管执行只在现有“修改任务”闭环中显示；不恢复自由聊天讨论、讨论输入或新的
+Conversation 写入。Bridge 的公开会话投影固定包含 `providerId`、`runtimeId`、会话状态与
+阶段、Agent 身份与时间、`visibleText`、截断标记、事件数和可恢复错误。Qoder ACP 与 Codex
+App Server 都只把 Agent 明确发送给用户的文本归一为 `visible-text`；推理、工具参数、文件内容、
+系统提示、异常堆栈和 finalizer 输出一律不进入侧栏。公开文本最多保留 64 KiB，截断必须明确标记。
+
+Renderer 通过一个可取消、单飞的递归轮询读取 Bridge 状态：初始核对与提交不确定态约 500ms，
+普通活跃阶段约 350ms，新公开文本后约 250ms；窗口隐藏时退避到约 1.4s。下一次轮询只在上一次
+完成后安排，`visibilitychange` 只重排本轮自己的 timer；瞬态读取失败保留最后可见文本，终态停止
+轮询，项目切换与 dispose 使迟到回调失效。
+
+对话侧栏的顺序固定为：历史事实 → “本轮修改已提交”摘要 → PageRoot 阶段状态 → 一个持续增长的
+Agent 公开文本气泡 → Candidate/结束动作。侧栏只在用户已处于底部或启动新 Request 时跟随到底部；
+用户上滚阅读时不抢滚动，出现“有新进展”按钮供其主动跳回。Agent 文本不使用逐块 `aria-live`；
+只对简短阶段状态使用礼貌播报。历史与流式文本均可复制，时间以本地时区在悬停或键盘聚焦时显示。
+这些展示不改变 Request、Candidate、Version 或当前 HTML 的权威性。
 
 ### 7.4 结束已交接的本轮
 
@@ -752,12 +771,12 @@ Agent 都只能按协议处理同一个指定 Request/Attempt。
 
 用户确认结束后，工作台写入受控 `cancelled.json`、释放候选并立即恢复当前源 HTML 的编辑，不删除 Attempt 或它的 output 路径。界面只显示：“本轮已结束，已恢复编辑”“AI Agent 不会被自动停止；如仍在运行，请手动停止。”产品不声称也不尝试停止外部 AI Agent。
 
-当前 Bridge 仍明确托管的 Qoder 会话不显示上述外部 Agent 风险确认。用户点击“停止 Qoder
-并继续编辑”后，Bridge 必须先关闭 ACP mutation surface、发送取消并有界终止受管进程组；
+当前 Bridge 仍明确托管的 Agent 会话不显示上述外部 Agent 风险确认。用户点击“停止 Agent
+并继续编辑”后，Bridge 必须先关闭 runtime mutation surface、发送取消并有界终止受管进程组；
 确认 Agent 已停止后，才写 durable Request cancellation 并恢复编辑。停止期间本轮保持锁定。
-应用/Bridge 正常关闭走同一边界。Bridge 崩溃后，处理中 Qoder Request 投影为不可重试的
+应用/Bridge 正常关闭走同一边界。Bridge 崩溃后，处理中 Agent Request 投影为不可重试的
 “会话已中断”；PageRoot 无法证明旧进程已退出，因此结束时使用同一外部 Agent 风险确认，
-durable cancel 只作为旧 Request 的 authority fence，不声称已经停止旧 Qoder。
+durable cancel 只作为旧 Request 的 authority fence，不声称已经停止旧 Agent。
 
 ## 8. 内部 AI 处理与完成
 
@@ -811,8 +830,8 @@ finalizer 最后原子写入 `completion.json`。工作台发现它后进入 `va
 和 refresh 指令变化不检测、不提示，按普通候选内容建版。文档不完整、body 无内容或
 身份/Hash/路径/协议不一致时才阻断，并保留 Request、Attempt、output、assessment 与失败 outcome。
 
-处理面板不逐条暴露上述内部检查，而是固定合并成四个用户阶段：
-第一阶段按模式显示“启动 Qoder CLI”或“正在准备并复制”，其后为“等待 AI 完成”
+对话侧栏不逐条暴露上述内部检查，而是固定合并成四个用户阶段：
+第一阶段按模式显示“启动 Agent”或“正在准备并复制”，其后为“等待 AI 完成”
 “校验并保存”“结果”。每轮只允许一个当前阶段；启动或复制失败落在第一阶段，
 完成记录缺失落在第二阶段，校验失败或外部冲突落在第三阶段，
 成功、无变化和最终选择落在第四阶段。完成记录出现前不得把第二阶段显示为完成。
@@ -821,9 +840,9 @@ finalizer 最后原子写入 `completion.json`。工作台发现它后进入 `va
 
 | 当前事实 | 顶部小字 | 顶部大字 | 状态徽章 | 主要底部操作 |
 |---|---|---|---|---|
-| 正在启动或运行受管 Qoder | `Qoder CLI` | 按 `launching / starting-session / reading-task / writing-candidate / finalizing` 显示真实阶段 | `正在启动` 或 `正在处理` | 停止 Qoder、预览 |
-| Qoder 普通失败且已确认无进程/残留 | `Qoder CLI` | `Qoder CLI 执行失败` | 失败 | 重新启动 Qoder、复制任务、取消本轮 |
-| Qoder 崩溃中断、清理未知或存在残留 | `Qoder CLI` | `Qoder 会话已中断` 或不可安全重试说明 | 需处理 | 结束本轮并返回编辑 |
+| 正在启动或运行受管 Agent | 冻结 Agent 名称 | 按 `launching / starting-session / reading-task / writing-candidate / finalizing` 显示真实阶段 | `正在启动` 或 `正在处理` | 停止 Agent、预览 |
+| Agent 普通失败且已确认无进程/残留 | 冻结 Agent 名称 | `Agent 执行失败` | 失败 | 重新启动 Agent、复制任务、取消本轮 |
+| Agent 崩溃中断、清理未知或存在残留 | 冻结 Agent 名称 | `Agent 会话已中断` 或不可安全重试说明 | 需处理 | 结束本轮并返回编辑 |
 | 正在准备或复制交接内容 | `等待AI返回结果` | `正在准备并复制 AI 任务` | `正在准备 AI 任务` 或 `正在复制 AI 任务` | 显示当前复制进度 |
 | 剪贴板交接已确认，等待 completion | `等待AI返回结果` | `AI任务已经复制，直接粘贴给 AI Agent` | `等待 AI 返回` | 结束本轮、预览、再次复制 |
 | completion 已生成，正在校验或保存 | `AI返回结果` | `AI 已返回，正在校验并保存` | `正在校验并保存` | `查看 AI任务` |
@@ -836,7 +855,7 @@ finalizer 最后原子写入 `completion.json`。工作台发现它后进入 `va
 右侧明确显示“进行中”“待进行”或完成标记。校验阶段使用保存图标，并说明 AI
 完成后会自动校验并写入本地；底部操作区不显示分隔线，按钮靠近内容区顶部对齐。
 
-等待 AI 时提供与当前交付模式一致的操作。自动模式提供停止 Qoder 与预览；复制模式提供
+等待 AI 时提供与当前交付模式一致的操作。自动模式提供停止 Agent 与预览；复制模式提供
 结束本轮、预览与再次复制，且已完成剪贴板交接时结束本轮先经过 7.4 的确认边界。
 Agent 启动失败、复制失败、校验中、成功、无变化和
 外部冲突只显示各自下一步所需的底部操作。所有新增操作复用同一套底部按钮层级，

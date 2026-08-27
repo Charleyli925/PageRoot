@@ -19,7 +19,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 
 const productRoot = fileURLToPath(new URL("../../", import.meta.url));
-const bridgeScript = join(productRoot, "scripts", "workspace-bridge.mjs");
+const bridgeScript = join(productRoot, "bridge", "workspace-bridge.mjs");
 const authHeader = "x-html-ai-bridge-token";
 
 async function reservePort() {

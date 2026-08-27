@@ -5,10 +5,10 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { loadExecutionPolicy } from "../scripts/agent/policies/execution-policy.mjs";
-import { runCodexAppServerTask } from "../scripts/agent/runtimes/codex-app-server-runtime.mjs";
-import { sha256 } from "../scripts/lifecycle-core.mjs";
-import { ProjectFileRepository } from "../scripts/project-file-repository.mjs";
+import { loadExecutionPolicy } from "../bridge/agent/policies/execution-policy.mjs";
+import { runCodexAppServerTask } from "../bridge/agent/runtimes/codex-app-server-runtime.mjs";
+import { sha256 } from "../bridge/lifecycle-core.mjs";
+import { ProjectFileRepository } from "../bridge/project-file-repository.mjs";
 import { normalizeAgentDelivery } from "../shared/agent-delivery.mjs";
 
 const appServerFixture = fileURLToPath(new URL(

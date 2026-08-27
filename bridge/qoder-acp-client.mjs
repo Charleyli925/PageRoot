@@ -747,6 +747,7 @@ export async function runAcpTask({
   const cancellation = cancellationGate(cancellationSignal);
   const updates = [];
   let droppedUpdateCount = 0;
+  let visibleTextTruncationReported = false;
   // Zero budget means this mode captures no prose at all (ADR 0036).
   const visibleText = visibleTextBuffer(profile.visibleTextByteLimit);
   const cancelStartup = () => {
@@ -856,6 +857,10 @@ export async function runAcpTask({
           // summary. A mode with no text budget appends nothing.
           const chunk = visibleText.append(visibleTextChunk(message.update));
           if (chunk) onEvent(Object.freeze({ kind: "visible-text", text: chunk }));
+          if (visibleText.truncated && !visibleTextTruncationReported) {
+            visibleTextTruncationReported = true;
+            onEvent(Object.freeze({ kind: "visible-text-truncated" }));
+          }
           const summary = summarizeUpdate(message.update);
           if (updates.length < MAX_SESSION_UPDATES) {
             updates.push(summary);

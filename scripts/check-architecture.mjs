@@ -53,6 +53,21 @@ const RUNTIME_SESSION_CONSTRUCTORS = [
 const PROVIDER_LITERAL_BRANCH = /\b(?:[A-Za-z_$][\w$]*\s*(?:\?\.|\.)\s*)*(?:providerId|mode)\s*(?:===|!==|==|!=)\s*["'`](?:qoder|codex|qoder-acp|codex-acp)["'`]|["'`](?:qoder|codex|qoder-acp|codex-acp)["'`]\s*(?:===|!==|==|!=)\s*(?:[A-Za-z_$][\w$]*\s*(?:\?\.|\.)\s*)*(?:providerId|mode)\b/u;
 const PROVIDER_IMPLEMENTATION_IMPORT = /(?:^|\/)(?:qoder-availability|QoderAvailabilityCard|qoder-provider)(?:\.[^/]*)?$/u;
 
+const POINTER_CAPABILITY_FILES = new Set([
+  "app/components/html-canvas-pointer-capability.ts",
+  "app/components/html-canvas-pointer-proof.js",
+]);
+
+export function canvasPointerLayerViolations({ file = "", source = "" } = {}) {
+  if (!POINTER_CAPABILITY_FILES.has(file)) return [];
+  if (/\bisNativeDirectEditRoot\b/u.test(source)) {
+    return [
+      `${file}: pointer capability must not approximate editability from native-edit tag roots`,
+    ];
+  }
+  return [];
+}
+
 export function providerNeutralRendererViolations({ file = "", source = "" } = {}) {
   const violations = [];
   const workflow = /^app\/application\/(?:run|review|version)[^/]*\.(?:js|ts)$/u.test(file);
@@ -300,6 +315,7 @@ export async function architectureViolations() {
     const file = relative(filePath);
     const source = await readFile(filePath, "utf8");
     violations.push(...providerNeutralRendererViolations({ file, source }));
+    violations.push(...canvasPointerLayerViolations({ file, source }));
     if (file.startsWith("app/application/")) {
       applicationSources.push({ file, source });
     }
@@ -400,7 +416,10 @@ export async function architectureViolations() {
     }
   }
 
-  const scriptFiles = await sourceFiles(path.join(PRODUCT_ROOT, "scripts"));
+  const scriptFiles = [
+    ...(await sourceFiles(path.join(PRODUCT_ROOT, "scripts"))),
+    ...(await sourceFiles(path.join(PRODUCT_ROOT, "bridge"))),
+  ];
   for (const filePath of scriptFiles) {
     const file = relative(filePath);
     const source = await readFile(filePath, "utf8");
@@ -417,7 +436,7 @@ export async function architectureViolations() {
         source,
       )
       && ![
-        "scripts/draft-service.mjs",
+        "bridge/draft-service.mjs",
         "scripts/check-architecture.mjs",
       ].includes(file)
     ) {
@@ -426,19 +445,19 @@ export async function architectureViolations() {
   }
 
   const workspaceBridge = await readFile(
-    path.join(PRODUCT_ROOT, "scripts", "workspace-bridge.mjs"),
+    path.join(PRODUCT_ROOT, "bridge", "workspace-bridge.mjs"),
     "utf8",
   );
   const sourceTransactionService = await readFile(
-    path.join(PRODUCT_ROOT, "scripts", "source-transaction-service.mjs"),
+    path.join(PRODUCT_ROOT, "bridge", "source-transaction-service.mjs"),
     "utf8",
   );
   const workspaceBridgeAst = parseModule(
-    path.join(PRODUCT_ROOT, "scripts", "workspace-bridge.mjs"),
+    path.join(PRODUCT_ROOT, "bridge", "workspace-bridge.mjs"),
     workspaceBridge,
   );
   const sourceTransactionServiceAst = parseModule(
-    path.join(PRODUCT_ROOT, "scripts", "source-transaction-service.mjs"),
+    path.join(PRODUCT_ROOT, "bridge", "source-transaction-service.mjs"),
     sourceTransactionService,
   );
   if (
@@ -450,7 +469,7 @@ export async function architectureViolations() {
     || hasCall(workspaceBridgeAst, { method: "loadMutationContext" })
   ) {
     violations.push(
-      "scripts/workspace-bridge.mjs: must not import or call the retired v3 registry, SourceTransaction, or source-history journal",
+      "bridge/workspace-bridge.mjs: must not import or call the retired v3 registry, SourceTransaction, or source-history journal",
     );
   }
   if (
@@ -458,7 +477,7 @@ export async function architectureViolations() {
     || !hasCall(workspaceBridgeAst, { method: "saveProjectFileAutosave" })
   ) {
     violations.push(
-      "scripts/workspace-bridge.mjs: /autosave must delegate to ProjectFileRepository",
+      "bridge/workspace-bridge.mjs: /autosave must delegate to ProjectFileRepository",
     );
   }
   if (
@@ -466,7 +485,7 @@ export async function architectureViolations() {
     || /\bwriteSourceHistory\s*\(/.test(workspaceBridge)
   ) {
     violations.push(
-      "scripts/workspace-bridge.mjs: current-source writer belongs to ProjectFileRepository",
+      "bridge/workspace-bridge.mjs: current-source writer belongs to ProjectFileRepository",
     );
   }
   if (
@@ -476,7 +495,7 @@ export async function architectureViolations() {
     || !hasCall(sourceTransactionServiceAst, { method: "writeSourceHistory" })
   ) {
     violations.push(
-      "scripts/source-transaction-service.mjs: SourceTransaction must own commit, recovery, and source-history application",
+      "bridge/source-transaction-service.mjs: SourceTransaction must own commit, recovery, and source-history application",
     );
   }
 
@@ -486,6 +505,14 @@ export async function architectureViolations() {
   );
   const canvasEditor = await readFile(
     path.join(PRODUCT_ROOT, "app", "components", "HtmlCanvasEditor.tsx"),
+    "utf8",
+  );
+  const canvasFrame = await readFile(
+    path.join(PRODUCT_ROOT, "app", "components", "html-canvas-frame.js"),
+    "utf8",
+  );
+  const canvasNativeCommands = await readFile(
+    path.join(PRODUCT_ROOT, "app", "components", "html-canvas-native-commands.js"),
     "utf8",
   );
   const firstEditGuideCard = await readFile(
@@ -1115,9 +1142,10 @@ export async function architectureViolations() {
     || !canvasEditor.includes("allow-scripts")
     || !canvasEditor.includes("EDIT_RUNTIME_FROZEN_ATTRIBUTE")
     || !canvasEditor.includes("runtimeFrameKeepsAuthorPaint")
-    || !canvasEditor.includes("hostHasAuthorPaint")
-    || !canvasEditor.includes("frame.grant.hosts.some")
+    || !canvasFrame.includes("hostHasAuthorPaint")
+    || !canvasFrame.includes("frame.grant.hosts.some")
     || canvasEditor.includes("frame.grant.hosts.every")
+    || canvasFrame.includes("frame.grant.hosts.every")
     || !canvasEditor.includes("alignPreviewSourceSurface")
     || !canvasEditor.includes("previewHostStillMounted")
     || !canvasEditor.includes('active.mode === "text-fragment"')
@@ -1128,6 +1156,7 @@ export async function architectureViolations() {
     || !canvasEditor.includes("frameReloadRequired && !settledRuntimeFrame")
     || canvasEditor.includes('img[src^="data:image/png"]')
     || /pngBase64|static-runtime-snapshot|mountFrozenRuntimeSnapshots|object-fit:\s*fill/u.test(canvasEditor)
+    || /pngBase64|static-runtime-snapshot|mountFrozenRuntimeSnapshots/u.test(canvasFrame)
   ) {
     violations.push(
       "app/components/HtmlCanvasEditor.tsx: one-shot runtime frames must execute once in the final iframe, keep real canvas/svg, and never mount PNG substitutes",
@@ -1217,6 +1246,10 @@ export async function architectureViolations() {
     path.join(PRODUCT_ROOT, "app", "components", "HtmlCanvasEditor.tsx"),
     canvasEditor,
   );
+  const canvasNativeCommandsAst = parseModule(
+    path.join(PRODUCT_ROOT, "app", "components", "html-canvas-native-commands.js"),
+    canvasNativeCommands,
+  );
   // Structural facts only. The ordered statement sequence these blocks used to
   // assert is behavior; it is tracked as E2E behavior debt (see
   // docs/ARCHITECTURE_CONTRACT.md), not matched as source strings here.
@@ -1234,10 +1267,10 @@ export async function architectureViolations() {
   }
 
   if (
-    !hasCall(canvasEditorAst, { path: "active.session.queuePendingCommand" })
+    !hasCall(canvasNativeCommandsAst, { path: "active.session.queuePendingCommand" })
   ) {
     violations.push(
-      "app/components/HtmlCanvasEditor.tsx: native command arbitration must reject lower-priority system work before the controller queue",
+      "app/components/html-canvas-native-commands.js: native command arbitration must reject lower-priority system work before the controller queue",
     );
   }
 

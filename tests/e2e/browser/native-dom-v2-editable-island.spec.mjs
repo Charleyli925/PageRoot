@@ -291,7 +291,9 @@ test("toolbar formatting, protected atoms, comments and link identity stay safe"
   await expect(link).toHaveAttribute("href", "#safe");
 });
 
-test("IME confirmation replays at the frozen left-style caret", async ({ page }) => {
+test("IME confirmation replays at the frozen left-style caret", {
+  tag: ["@gate-smoke","@smoke-editing"],
+}, async ({ page }) => {
   const { frame } = await openFixture(page);
   const target = await activateNativeEdit(frame, "mixed");
   await target.evaluate((element) => {
@@ -329,7 +331,9 @@ test("IME confirmation replays at the frozen left-style caret", async ({ page })
   );
 });
 
-test("a repeated header command waits for composition and replays only once", async ({ page }) => {
+test("a repeated header command waits for composition and replays only once", {
+  tag: ["@gate-smoke","@smoke-editing"],
+}, async ({ page }) => {
   const { frame } = await openFixture(page);
   const target = await activateNativeEdit(frame, "plain");
   await setTextSelection(frame, "plain", 0);
@@ -362,7 +366,9 @@ test("a repeated header command waits for composition and replays only once", as
   await expect(projectButton).toHaveAttribute("aria-expanded", "true");
 });
 
-test("out-of-band mutation restores the last safe draft without an edit-blocked notice", async ({ page }) => {
+test("out-of-band mutation restores the last safe draft without an edit-blocked notice", {
+  tag: ["@gate-smoke", "@smoke-editing"],
+}, async ({ page }) => {
   const { editor, frame } = await openFixture(page);
   const target = await activateNativeEdit(frame, "plain");
   await setTextSelection(frame, "plain", "普通".length);

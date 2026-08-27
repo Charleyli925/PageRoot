@@ -6,7 +6,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
-import { resolveBundledCodexInstallation } from "./agent/providers/codex-provider.mjs";
+import { resolveBundledCodexInstallation } from "../bridge/agent/providers/codex-provider.mjs";
 
 const execFileAsync = promisify(execFile);
 const repositoryRoot = fileURLToPath(new URL("../", import.meta.url));

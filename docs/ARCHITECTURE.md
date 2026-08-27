@@ -45,7 +45,8 @@ the historical synthetic-spike decision.
   sole owner of each mutable fact.
 - `app/` owns the visual workbench, source mapping and direct-edit transaction model.
 - `desktop/` owns privileged filesystem access, windows, lifecycle, update checks, usage telemetry and safe IPC exposure.
-- `scripts/` owns the local Bridge, protocol finalization, AI candidate assessment, direct-edit/legacy scope evidence and automated gates.
+- `bridge/` owns the local Bridge, protocol finalization, AI candidate assessment and packaged runtime modules.
+- `scripts/` owns automated gates, packaging, CLI and developer spikes.
 - `schemas/` defines persisted and exchanged records. `fixtures/` proves strict current and legacy behavior.
 - Preview DOM is disposable. It is never a persistence source.
 - Current-source and generated-Version changes use prepare-then-publish: all
@@ -275,23 +276,23 @@ services.
 | Renderer comment working copy, composer and saved-comment edit projection | `app/application/comment-session.js` |
 | Active/background runs, Agent delivery projection, background outcomes, submission lifecycle locks and operation locks | `app/application/run-session.js` |
 | Renderer Agent catalog, provider-keyed availability/guidance, selection-keyed use-time check and submission sequencing | `app/application/agent-provider-catalog.js`, `app/domain/agent-provider-state.js` and `app/application/run-workflow.js`; `qoder-availability.js` and `QoderAvailabilityCard.tsx` are compatibility wrappers only. Delivery and About consume the same `WorkspaceController` snapshot, and neither card receives command, version, path or npm prefix |
-| Provider-neutral dispatch, provider/runtime/security-profile/execution-purpose tickets, process/session lifetime, canonical events, cancellation-before-durable-Request and shutdown drain | `scripts/agent/agent-runtime-coordinator.mjs` plus provider/runtime registries; legacy Services are stateless façades and durable Request/Candidate authority remains in `ProjectFileRepository` |
-| Trusted-local Qoder installation discovery, package/version/login/model preflight, error classification and ACP launch descriptor | `scripts/agent/providers/qoder-provider.mjs`; legacy `qoder-acp` is mapped only by the provider registry and its external projection remains compatible |
-| Pinned Codex package identity and real App Server auth/model preflight | `scripts/agent/providers/codex-provider.mjs`, `scripts/agent/runtimes/codex-app-server-client.mjs` and `schemas/codex-app-server.runtime-lock.json`; packaged verification binds the wrapper, architecture-specific native package, runtime manifest and executable version before the default catalog may expose Codex |
+| Provider-neutral dispatch, provider/runtime/security-profile/execution-purpose tickets, process/session lifetime, canonical events, cancellation-before-durable-Request and shutdown drain | `bridge/agent/agent-runtime-coordinator.mjs` plus provider/runtime registries; legacy Services are stateless façades and durable Request/Candidate authority remains in `ProjectFileRepository` |
+| Trusted-local Qoder installation discovery, package/version/login/model preflight, error classification and ACP launch descriptor | `bridge/agent/providers/qoder-provider.mjs`; legacy `qoder-acp` is mapped only by the provider registry and its external projection remains compatible |
+| Pinned Codex package identity and real App Server auth/model preflight | `bridge/agent/providers/codex-provider.mjs`, `bridge/agent/runtimes/codex-app-server-client.mjs` and `schemas/codex-app-server.runtime-lock.json`; packaged verification binds the wrapper, architecture-specific native package, runtime manifest and executable version before the default catalog may expose Codex |
 | Gated Codex App Server execution to unique Candidate | `codex-app-server-runtime.mjs` owns one ephemeral sandboxed turn and confirmed cleanup; `codex-provider.mjs` owns model-bound launch and Codex-only prompt; the existing Execution Host alone invokes and verifies the fixed finalizer. `shared/agent-feature-gates.mjs` enables `codexExecution` while leaving `codexDiscussion` false; disabling that one source fact is the immediate rollback |
-| Provider-neutral ACP launch and immutable standard event envelope | `scripts/agent/runtimes/acp-runtime.mjs`; transport compatibility remains in `scripts/qoder-acp-client.mjs` |
-| Frozen execution policy and single-output client-mediated Host Port | `scripts/agent/policies/` and `scripts/agent/hosts/`; these constrain only requests made through the ACP Client Host, never native filesystem/command actions inside an Agent process |
+| Provider-neutral ACP launch and immutable standard event envelope | `bridge/agent/runtimes/acp-runtime.mjs`; transport compatibility remains in `bridge/qoder-acp-client.mjs` |
+| Frozen execution policy and single-output client-mediated Host Port | `bridge/agent/policies/` and `bridge/agent/hosts/`; these constrain only requests made through the ACP Client Host, never native filesystem/command actions inside an Agent process |
 | Immutable Version projection and history-view transition | `app/application/version-session.js` |
 | `PROJECT.md` editor working copy, generation, composition fence and save projection facts | `app/application/project-rules-session.js` |
 | `PROJECT.md` Bridge read/write, 700ms autosave, unknown-write reconciliation, close/switch drain and editor-restore host port | `app/application/project-rules-workflow.js`, composed by `WorkspaceController` |
 | Renderer source-history context, pending Patch operations and action intent | `app/application/source-history-session.js` |
 | Pure comment/edit-event/tombstone transition rules | `shared/draft-aggregate.mjs` |
 | Pure source-history validation, cursor transitions and exact Patch replay | `shared/source-history.mjs`, re-exported through `app/domain/source-history.js` |
-| Bridge-side draft command validation and CAS | `scripts/draft-service.mjs` |
-| Bridge-side source-history repository, autosave preparation and action application | `scripts/source-history-service.mjs` |
-| Bridge-side current-source commit/recovery WAL, same-directory replacement, history application, metadata settlement and exactly-once audit outbox | `scripts/source-transaction-service.mjs` |
-| Bridge-side registered command identity and source-observation classification | `scripts/project-context-service.mjs` |
-| Durable Project File Registry, Working Copy CAS, Version/Candidate and Request/Draft records | `scripts/project-file-repository.mjs` façade over `scripts/project-file-repository/` internals (path safety, Registry, Working Copy CAS, Version/Candidate, Request/Draft). Callers keep importing the façade; there is no second persistence owner |
+| Bridge-side draft command validation and CAS | `bridge/draft-service.mjs` |
+| Bridge-side source-history repository, autosave preparation and action application | `bridge/source-history-service.mjs` |
+| Bridge-side current-source commit/recovery WAL, same-directory replacement, history application, metadata settlement and exactly-once audit outbox | `bridge/source-transaction-service.mjs` |
+| Bridge-side registered command identity and source-observation classification | `bridge/project-context-service.mjs` |
+| Durable Project File Registry, Working Copy CAS, Version/Candidate and Request/Draft records | `bridge/project-file-repository.mjs` façade over `bridge/project-file-repository/` internals (path safety, Registry, Working Copy CAS, Version/Candidate, Request/Draft). Callers keep importing the façade; there is no second persistence owner |
 | Close, switch, submit and history obligations | `app/application/drain-coordinator.js` |
 | Late query rejection and monotonic draft reads | `app/application/project-query-fence.js` |
 | Crash-only browser recovery | `app/application/recovery-store.js` |
@@ -299,11 +300,14 @@ services.
 | Same-directory source rename, operation journal and durable active/recent path rebase | `desktop/source-rename.mjs` |
 | Directory-change hint, live source-file early warning and non-authoritative active managed locator cache | `desktop/source-file-watch.mjs`, `desktop/active-managed-locator.mjs` |
 | Renderer source-rename and Finder locator rebase, Hash/identity fence, lost-response reconciliation and synchronous Project/Document/Run publication | `app/application/project-workflow.js` through its narrow `ProjectOpenPort.renameSource` / `reconcileActiveManagedSource` |
-| Known-source Finder reveal | narrow project IPC in `desktop/main.mjs` |
+| Known-source Finder reveal | narrow project IPC in `desktop/ipc/project-ipc.mjs`, composed from `desktop/main.mjs` |
 | Validated default-browser HTML launch | `desktop/open-in-default-browser.mjs`, behind `desktop/project-ipc-security.mjs` sender authority |
 | Pseudonymous identity, strict event schemas, local queue and PostHog delivery | `desktop/usage-telemetry.mjs` |
 | Install-level first-real-HTML guide status and built-in welcome identity | `desktop/ui-preferences.mjs`, `app/application/first-edit-guide-session.js` |
 | Preview sanitization and verified frame injection | `app/components/html-preview-sandbox.js` |
+| Canvas one-shot runtime frame identity, frozen-result verification and author-paint retention | `app/components/html-canvas-frame.js`; `HtmlCanvasEditor` still owns iframe mount/reload |
+| Native deferred-command arbitration (user-explicit vs system, lease matching, stale drain) | `app/components/html-canvas-native-commands.js`; the editor supplies the live session/lease and still retires the queue before host replacement |
+| Canvas comment-target measurement, insertion-point and marker layout | `app/components/html-canvas-comment-layout.ts`; disposable geometry only |
 | Canvas selection chrome, comment markers, hover hints and edit toolbar presentation | `app/components/html-canvas-selection-chrome.tsx`; snapshots and callbacks only, no source or editing authority |
 | Volatile desktop preview sessions and contained local-asset serving | `desktop/preview-protocol.mjs` |
 | Imported project's original sibling-asset directory | `desktop/imported-asset-root.mjs` plus Main `html-projects.json` |
@@ -317,6 +321,7 @@ services.
 | Request freeze/persisted-boundary validation, authority reconciliation, run polling, cancellation, conflict commands and confirmed handoff | `app/application/run-workflow.js` |
 | Workbench pure record/comment/project/version/browser helpers | `app/workbench/*-model.ts`, `app/workbench/browser-io.ts` |
 | History, attachment and preview presentation | `app/workbench/presentation.tsx` |
+| Workbench visual cascade | `app/globals.css` is import-only; `app/styles/*.css` load in fixed order (tokens/base, shell, review V5/V5.1/V5.2 canvas, comment hierarchy, project resources, about/chrome, top toolbar). Later layers override earlier ones; the two `:root` blocks stay split |
 | File title, rename, update badge and save-status presentation | `app/workbench/file-header-view.tsx` |
 | Comment rail presentation | `app/workbench/comment-rail-view.tsx` |
 | Project files drawer presentation | `app/workbench/project-files-view.tsx` |
@@ -342,7 +347,10 @@ scopes.
 `HtmlCanvasEditor.tsx` remains the Canvas coordinator. Parsing, DOM
 instrumentation, interaction policy, preview synchronization, selection,
 source-backed page view and style inspection live in the adjacent
-`html-canvas-*.ts` modules. Selection chrome, comment markers, hover hints and
+`html-canvas-*.ts` modules. One-shot runtime frame verification lives in
+`html-canvas-frame.js`. Native deferred-command arbitration lives in
+`html-canvas-native-commands.js`. Comment-target geometry lives in
+`html-canvas-comment-layout.ts`. Selection chrome, comment markers, hover hints and
 the edit toolbar are presented by `html-canvas-selection-chrome.tsx`; they
 receive snapshots and callbacks only. Those helpers do not gain a second source or
 editing authority; `IslandEditingController` and `SourcePatchEngine` remain
@@ -369,7 +377,7 @@ Direct edits form ordered revisions and are written through a single queue. Ever
 `/autosave` retains its own transport decoding and revision checks, then
 delegates the current-source write to `ProjectFileRepository`. Path safety,
 Registry, Working Copy CAS, Version/Candidate and Request/Draft helpers live
-under `scripts/project-file-repository/`; the façade remains the only public
+under `bridge/project-file-repository/`; the façade remains the only public
 module and the only persistence owner. The v3 Bridge
 `SourceTransaction` kernel and `history/source-operations.json` journal are
 not on the live open path. `/source-history/action` returns the current source

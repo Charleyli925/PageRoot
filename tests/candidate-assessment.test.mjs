@@ -3,10 +3,10 @@ import test from "node:test";
 
 import {
   assessHtmlCandidate,
-} from "../scripts/candidate-assessment.mjs";
+} from "../bridge/candidate-assessment.mjs";
 import {
   normalizeCandidateAssessmentPolicy,
-} from "../scripts/candidate-assessment-decoder.mjs";
+} from "../bridge/candidate-assessment-decoder.mjs";
 
 function documentHtml() {
   return `<!doctype html>

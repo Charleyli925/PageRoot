@@ -33,7 +33,7 @@ import {
   readConversationIndex,
   rotateConversationAtLimit,
   writeConversationDraft,
-} from "../scripts/conversation-repository.mjs";
+} from "../bridge/conversation-repository.mjs";
 
 const projectId = "project_conversation_test";
 const documentId = "doc_conversation_test";

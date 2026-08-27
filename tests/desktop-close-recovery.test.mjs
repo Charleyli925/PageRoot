@@ -164,11 +164,11 @@ test("Main orders close abort, barrier release, handoff restore and one mailbox-
 test("desktop shutdown outlives the Bridge Agent cleanup budget", () => {
   const mainSource = readFileSync(path.join(productRoot, "desktop", "main.mjs"), "utf8");
   const coordinatorSource = readFileSync(
-    path.join(productRoot, "scripts", "agent", "agent-runtime-coordinator.mjs"),
+    path.join(productRoot, "bridge", "agent", "agent-runtime-coordinator.mjs"),
     "utf8",
   );
   const bridgeSource = readFileSync(
-    path.join(productRoot, "scripts", "workspace-bridge.mjs"),
+    path.join(productRoot, "bridge", "workspace-bridge.mjs"),
     "utf8",
   );
   const desktopTimeout = Number(mainSource.match(

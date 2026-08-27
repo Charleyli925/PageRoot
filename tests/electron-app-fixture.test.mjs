@@ -357,7 +357,7 @@ test("Electron app fixture cleans up after confirmed process exit when the close
 
 test("Electron app fixture can opt an E2E launch back into the first-edit guide port", () => {
   const fixture = readFileSync(
-    new URL("./e2e/electron/helpers/pageroot-app-fixture.mjs", import.meta.url),
+    new URL("./e2e/electron/helpers/electron-app-launch.mjs", import.meta.url),
     "utf8",
   );
   assert.match(fixture, /PAGEROOT_E2E_FIRST_EDIT_GUIDE: "1"/u);
