@@ -4,7 +4,7 @@ import test from "node:test";
 import {
   composerViewFields,
   deriveComposerState,
-} from "../app/workbench/comment-rail-contract.ts";
+} from "../app/workbench/comment-rail-state.js";
 
 const target = Object.freeze({
   id: "target_draft",
