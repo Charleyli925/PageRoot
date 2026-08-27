@@ -17,10 +17,11 @@ this bounded tab identity correctly, but it also exposed two different costs:
 HTML string bytes are therefore a useful warm-cache bound, but not a credible
 proxy for live iframe, DOM, image, font, Canvas or GPU cost.
 
-A two-Hot trial raised the same 40-switch churn from 150 to 187 iframe
-creations/removals and did not produce a credible working-set reduction. The
-measured budget therefore retains three Hot surfaces and constrains the larger
-Warm tier explicitly instead of optimizing the live count by assumption.
+A two-Hot trial and the restored three-Hot run both recreated 187 iframes under
+the new overlap handoff and produced no credible working-set difference. Hot
+count was therefore not the dominant churn variable. The measured budget keeps
+the existing three Hot surfaces and constrains the larger Warm tier explicitly;
+the higher overlap-handoff churn remains separately visible in the benchmark.
 
 ## Decision
 
