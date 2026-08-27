@@ -187,8 +187,8 @@ test("Electron browser A to B to A reopens exact in-memory HTML and deduplicates
     }, cachedATabId);
     expect(cacheTiming.visible).toBeLessThan(cacheTiming.handoff);
     const cacheRoot = launched.page.getByTestId("workbench-document-surface-cache");
-    await expect(cacheRoot).toHaveAttribute("data-hot-count", "2");
-    await expect(cacheRoot).toHaveAttribute("data-max-hot-entries", "2");
+    await expect(cacheRoot).toHaveAttribute("data-hot-count", "3");
+    await expect(cacheRoot).toHaveAttribute("data-max-hot-entries", "3");
 
     await htmlInput.setInputFiles(projectA.sourcePath);
     frame = await waitForBrowserText("Browser memory A");

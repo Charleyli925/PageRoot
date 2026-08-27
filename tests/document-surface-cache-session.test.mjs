@@ -120,11 +120,11 @@ test("surface cache reports evicted document identities as cold under the defaul
   session.reconcile(tabIds);
   for (let index = 0; index < 21; index += 1) capture(session, String(index));
 
-  assert.equal(session.snapshot.hotTabIds.length, 2);
-  assert.equal(session.snapshot.warmTabIds.length, 18);
+  assert.equal(session.snapshot.hotTabIds.length, 3);
+  assert.equal(session.snapshot.warmTabIds.length, 17);
   assert.deepEqual(session.snapshot.coldTabIds, ["document:project_0:doc_0"]);
   assert.deepEqual(session.snapshot.limits, {
-    maxHotEntries: 2,
+    maxHotEntries: 3,
     maxEntries: 20,
     maxBytes: 32 * 1024 * 1024,
   });

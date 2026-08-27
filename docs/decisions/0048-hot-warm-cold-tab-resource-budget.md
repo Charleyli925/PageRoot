@@ -17,15 +17,20 @@ this bounded tab identity correctly, but it also exposed two different costs:
 HTML string bytes are therefore a useful warm-cache bound, but not a credible
 proxy for live iframe, DOM, image, font, Canvas or GPU cost.
 
+A two-Hot trial raised the same 40-switch churn from 150 to 187 iframe
+creations/removals and did not produce a credible working-set reduction. The
+measured budget therefore retains three Hot surfaces and constrains the larger
+Warm tier explicitly instead of optimizing the live count by assumption.
+
 ## Decision
 
 The cache now publishes three explicit projection tiers:
 
-- **Hot**: at most two recent exact projections may keep inert, script-disabled
-  display iframes mounted. Two is the hard live-surface budget, independent of
+- **Hot**: at most three recent exact projections may keep inert, script-disabled
+  display iframes mounted. Three is the hard live-surface budget, independent of
   how small the HTML strings are.
 - **Warm**: Hot and Warm together retain at most twenty exact HTML projections;
-  after the two Hot entries, up to eighteen remain as frozen in-memory bytes
+  after the three Hot entries, up to seventeen remain as frozen in-memory bytes
   and presentation metadata. They have no mounted DOM and cover the product's
   measured 20-tab scenario without becoming another authority.
 - **Cold**: every open document tab outside the entry or byte budget retains
@@ -54,7 +59,7 @@ The handoff emits distinct `visible-ready` and `handoff-complete` timing marks.
 
 ## Required proof
 
-- default budget retains two Hot plus eighteen Warm projections for 20 tabs;
+- default budget retains three Hot plus seventeen Warm projections for 20 tabs;
 - the twenty-first retained document becomes Cold without losing its tab;
 - 20-open and 40-switch packaged runs remain within live, entry and byte limits;
 - a cached surface becomes visible before the authoritative Canvas handoff and
