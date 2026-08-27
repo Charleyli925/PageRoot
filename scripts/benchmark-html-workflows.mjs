@@ -391,7 +391,26 @@ async function renderedSnapshot(frame) {
         ready: element.childElementCount > 0 || (element.textContent || "").trim().length > 0,
         signature: `${element.childElementCount}:${element.innerHTML.length}`,
       }));
-    const chartFacts = [...canvasFacts, ...svgFacts, ...chartContainers];
+    const runtimeVisualHosts = [...document.querySelectorAll(
+      "[data-pageroot-edit-runtime-host]",
+    )]
+      .filter(visibleRect)
+      .map((element) => {
+        const ownedNodes = element.querySelectorAll(
+          "[data-pageroot-edit-runtime-owned]",
+        ).length;
+        return {
+          ready: ownedNodes > 0,
+          signature: `${ownedNodes}:${element.innerHTML.length}`,
+        };
+      })
+      .filter((fact) => fact.ready);
+    const chartFacts = [
+      ...canvasFacts,
+      ...svgFacts,
+      ...chartContainers,
+      ...runtimeVisualHosts,
+    ];
     const body = document.body;
     return {
       readyState: document.readyState,
@@ -407,6 +426,7 @@ async function renderedSnapshot(frame) {
       canvasCount: canvasFacts.length,
       svgChartCount: svgFacts.length,
       chartContainerCount: chartContainers.length,
+      runtimeVisualHostCount: runtimeVisualHosts.length,
     };
   });
 }
