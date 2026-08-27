@@ -261,7 +261,7 @@ test("Qoder login entry opens About without restoring a Discussion composer", as
 
     await closeQoderAvailability(launched.page);
     await expect(sidebar.getByTestId("ai-conversation-input")).toHaveCount(0);
-    await launched.page.getByRole("button", { name: "关于源页" }).click();
+    await openQoderAvailability(launched.page);
     await expect(about.getByText("等待登录", { exact: true })).toBeVisible();
     expect(requestPosts).toBe(0);
     expect(readFileSync(fixture.sourcePath).equals(fixture.original)).toBe(true);

@@ -336,7 +336,12 @@ export function createCodexAppServerE2ECommand(directory) {
 // Qoder availability moved out of the delivery dialog and into 关于源页; that card is
 // where installation, login and readiness are surfaced now.
 export async function openQoderAvailability(page) {
-  await page.getByRole("button", { name: "关于源页" }).click();
+  const sidebar = page.locator(".workbench-global-sidebar");
+  if (await sidebar.getAttribute("data-open") !== "true") {
+    await page.getByRole("button", { name: "展开左侧边栏" }).click();
+  }
+  await expect(sidebar).toHaveAttribute("data-open", "true");
+  await sidebar.getByRole("button", { name: "源页", exact: true }).click();
   const card = page.getByRole("dialog").locator(".about-agent-section");
   await expect(card).toBeVisible();
   return card;
