@@ -113,3 +113,29 @@ test("window construction never waits for the Bridge utility process", async () 
   // has to settle before the load and nowhere earlier.
   assert.ok(awaitBridge < loadRenderer);
 });
+
+test("final-exit IPC unregister and close-abort registration include workbench tabs", async () => {
+  const [mainProcess, projectIpcOwner] = await Promise.all([
+    readFile(sourceUrl("../desktop/main.mjs"), "utf8"),
+    readFile(sourceUrl("../desktop/ipc/project-ipc.mjs"), "utf8"),
+  ]);
+  const unregister = mainProcess.slice(
+    mainProcess.indexOf("function unregisterIpc()"),
+    mainProcess.indexOf("const EXIT_INTENTS"),
+  );
+  assert.match(
+    unregister,
+    /unregisterProjectIpc\(\{[\s\S]*?WORKBENCH_TAB_CHANNELS/u,
+  );
+  assert.match(projectIpcOwner, /\.\.\.Object\.values\(WORKBENCH_TAB_CHANNELS\)/u);
+  assert.match(mainProcess, /restoreFinalExit:[\s\S]*?registerProjectIpc\(\)/u);
+  const registration = mainProcess.slice(
+    mainProcess.indexOf("function registerProjectIpc()"),
+    mainProcess.indexOf("function requestRendererClose"),
+  );
+  assert.match(registration, /registerProjectIpcChannels\(\{[\s\S]*?WORKBENCH_TAB_CHANNELS/u);
+  assert.match(registration, /getWorkbenchTabs/u);
+  assert.match(registration, /setWorkbenchTabs/u);
+  assert.match(projectIpcOwner, /WORKBENCH_TAB_CHANNELS\.get/u);
+  assert.match(projectIpcOwner, /WORKBENCH_TAB_CHANNELS\.set/u);
+});

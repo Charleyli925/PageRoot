@@ -13,6 +13,7 @@ const APP_FILE_ALLOWLIST = [
   "desktop/main.mjs",
   "desktop/preload.mjs",
   "desktop/external-file-open.mjs",
+  "desktop/workbench-tabs-state.mjs",
   "desktop/prepared-html-open.mjs",
   "desktop/project-open-queue.mjs",
   "desktop/project-files.mjs",

@@ -42,6 +42,7 @@ export function createWindowLifecycle(ctx) {
     await ctx.adoptPendingExternalFileAtStartup();
 
     ctx.rendererHasLoaded = false;
+    ctx.externalFileOpenDelivery.beginRendererLoad();
     ctx.workspaceRecoveryMailbox.beginRendererLoad();
     const mainWindow = new BrowserWindow({
       width: 1440,
@@ -135,19 +136,14 @@ export function createWindowLifecycle(ctx) {
         if (isInPlace || !isMainFrame) return;
         loadedManagedPreviewFrameIds.clear();
         ctx.rendererHasLoaded = false;
+        ctx.externalFileOpenDelivery.beginRendererLoad();
         ctx.workspaceRecoveryMailbox.beginRendererLoad();
       },
     );
     mainWindow.webContents.on("did-finish-load", () => {
       ctx.rendererHasLoaded = true;
       ctx.ensureApplicationUpdateController().startAutomaticChecks();
-      const pendingExternalOpen = ctx.externalFileOpenMailbox.peek();
-      if (pendingExternalOpen) {
-        ctx.mainWindow?.webContents.send(
-          ctx.APP_CHANNELS.externalOpenRequested,
-          ctx.publicMailboxRequest(pendingExternalOpen),
-        );
-      }
+      ctx.deliverExternalMailboxHead();
     });
     mainWindow.webContents.on("render-process-gone", (_event, details) => {
       ctx.captureUsage("runtime_fault", {
@@ -167,6 +163,7 @@ export function createWindowLifecycle(ctx) {
       if (details?.reason === "clean-exit" || ctx.isQuitting || ctx.finalExitStarted) return;
       if (!ctx.mainWindow || ctx.mainWindow.isDestroyed() || !ctx.rendererLoadQuery) return;
       ctx.rendererHasLoaded = false;
+      ctx.externalFileOpenDelivery.beginRendererLoad();
       // A cold boot with the original handshake, not reload(): the renderer needs those
       // query values to reach the Bridge, and this path also runs its normal restore of
       // the last active project instead of leaving an empty shell.
@@ -200,6 +197,7 @@ export function createWindowLifecycle(ctx) {
       ctx.editRuntimeProtocolController = null;
       ctx.previewProtocolController?.dispose();
       ctx.rendererHasLoaded = false;
+      ctx.externalFileOpenDelivery.beginRendererLoad();
       ctx.workspaceRecoveryMailbox.beginRendererLoad();
       ctx.mainWindow = null;
     });

@@ -38,6 +38,29 @@ test("Qoder compatibility actions stay pinned to the Qoder workflow", () => {
   );
 });
 
+test("workspace close freezes navigation before awaiting and pins the final tabs revision", () => {
+  const source = readFileSync(
+    new URL("../app/application/workspace-controller.js", import.meta.url),
+    "utf8",
+  );
+  const beginClose = source.indexOf("navigation.beginClose({ requestId })");
+  const firstAwait = source.indexOf("await navigation.prepareClose(input)", beginClose);
+  assert.ok(beginClose >= 0);
+  assert.ok(firstAwait > beginClose);
+  assert.match(source, /pinCloseRevision\(\)/u);
+  assert.match(source, /throughRevision: persistenceRevision/u);
+  assert.match(
+    source,
+    /requestedRevision \|\| 0\) !== persistenceRevision/u,
+  );
+  assert.match(source, /navigation\.commitClose\(\{ requestId \}\)/u);
+  assert.match(source, /releaseCloseRevision\(\)/u);
+  assert.match(
+    source,
+    /abortClose\(input\) \{\s+this\.#workbenchNavigationWorkflow\?\.abortClose\(input\)/u,
+  );
+});
+
 function sha256(html) {
   return `sha256:${createHash("sha256").update(html).digest("hex")}`;
 }

@@ -1,6 +1,7 @@
 import { createRuntimeBridgeClient, isBridgeRequestError } from "./bridge-client.js";
 import { CommentSession } from "./comment-session.js";
 import { CommentWorkflow } from "./comment-workflow.js";
+import { BrowserDocumentSession } from "./browser-document-session.js";
 import { DocumentSession } from "./document-session.js";
 import { DocumentWorkflow } from "./document-workflow.js";
 import { EditAuthorRuntimeSession } from "./edit-author-runtime-session.js";
@@ -22,6 +23,15 @@ import { ConversationWorkflow } from "./conversation-workflow.js";
 import { VersionSession } from "./version-session.js";
 import { VersionWorkflow } from "./version-workflow.js";
 import { createWorkspaceControllerCodecs } from "./workspace-controller-codecs.js";
+import {
+  WorkbenchTabsSession,
+} from "./workbench-tabs-session.js";
+import { WorkbenchNavigationSession } from "./workbench-navigation-session.js";
+import { WorkbenchTabsPersistenceCoordinator } from "./workbench-tabs-persistence-coordinator.js";
+import {
+  WorkbenchNavigationWorkflow,
+  workbenchStartupPriority,
+} from "./workbench-navigation-workflow.js";
 
 function copyLocator({
   operationId,
@@ -168,6 +178,13 @@ export function createRuntimeWorkspaceController({
     versionSession: new VersionSession(),
     sourceHistorySession: new SourceHistorySession(),
     conversationSession: new ConversationSession(),
+    workbenchTabsSession: new WorkbenchTabsSession(),
+    workbenchNavigationSession: new WorkbenchNavigationSession(),
+    browserDocumentSession: new BrowserDocumentSession(),
+    workbenchTabsPersistenceCoordinator: new WorkbenchTabsPersistenceCoordinator({
+      port: ports.workbenchTabs || null,
+      clock,
+    }),
     codecs,
     ports,
     documentWorkflow: {
@@ -240,6 +257,21 @@ export class WorkspaceController {
   #runWorkflowUnsubscribe = null;
   #versionWorkflow = null;
   #versionWorkflowUnsubscribe = null;
+  #workbenchTabsSession = null;
+  #browserDocumentSession = null;
+  #workbenchTabsPersistenceCoordinator = null;
+  #workbenchTabsPersistenceUnsubscribe = null;
+  #workbenchTabsPersistenceSnapshot = null;
+  #workbenchNavigationSession = null;
+  #workbenchNavigationWorkflow = null;
+  #workbenchNavigationUnsubscribe = null;
+  #workbenchNavigationSnapshot = null;
+  #workbenchTabsUnsubscribe = null;
+  #workbenchTabsSnapshot = null;
+  #workbenchTabsReady = false;
+  #externalOpenUnsubscribe = null;
+  #navigationHostPort = null;
+  #bufferedExternalOpens = [];
   #runSessionUnsubscribe = null;
   #registration = registrationSnapshot().registration;
   #projectSessionSnapshot = null;
@@ -267,6 +299,10 @@ export class WorkspaceController {
     project: null,
     run: null,
     version: null,
+    workbenchTabs: null,
+    workbenchTabsReady: false,
+    workbenchNavigation: null,
+    workbenchTabsPersistence: null,
   });
   #listeners = new Set();
   #eventListeners = new Set();
@@ -283,6 +319,10 @@ export class WorkspaceController {
     versionSession,
     sourceHistorySession,
     conversationSession = null,
+    workbenchTabsSession = null,
+    workbenchNavigationSession = null,
+    browserDocumentSession = null,
+    workbenchTabsPersistenceCoordinator = null,
     codecs,
     ports = {},
     documentWorkflow = null,
@@ -346,6 +386,14 @@ export class WorkspaceController {
       port: ports.uiPreferences || null,
     });
     this.#sourceHistorySession = sourceHistorySession;
+    this.#workbenchTabsSession = workbenchTabsSession;
+    this.#workbenchTabsSnapshot = workbenchTabsSession?.snapshot || null;
+    this.#browserDocumentSession = browserDocumentSession;
+    this.#workbenchTabsPersistenceCoordinator = workbenchTabsPersistenceCoordinator;
+    this.#workbenchTabsPersistenceSnapshot = workbenchTabsPersistenceCoordinator?.snapshot || null;
+    this.#navigationHostPort = ports.navigation || null;
+    this.#workbenchNavigationSession = workbenchNavigationSession;
+    this.#workbenchNavigationSnapshot = workbenchNavigationSession?.snapshot || null;
     // The conversation projection is optional so an existing embedder that has
     // not opted in keeps working unchanged.
     if (conversationSession) {
@@ -528,6 +576,25 @@ export class WorkspaceController {
         codecs: projectWorkflow.codecs,
         ports: {
           ...projectWorkflow.ports,
+          navigation: {
+            authorizeProjectApplication: (input) => {
+              if (!this.#workbenchNavigationWorkflow) {
+                return Object.freeze({ accepted: false, kind: "stale" });
+              }
+              return this.#workbenchNavigationWorkflow.authorizeProjectApplication(input);
+            },
+            applyProject: (input) => {
+              if (!this.#workbenchNavigationWorkflow) {
+                throw new Error("Workbench navigation workflow is unavailable.");
+              }
+              const applicationReceipt = this.#workbenchNavigationWorkflow.applyProject(input);
+              return applicationReceipt;
+            },
+            waitForTerminal: (transactionId) => (
+              this.#workbenchNavigationWorkflow?.waitForTerminal(transactionId)
+              || Promise.resolve(null)
+            ),
+          },
           recentRuns: {
             hydrate: (projects, activeSourcePath) => {
               if (!this.#runWorkflow) return undefined;
@@ -549,8 +616,55 @@ export class WorkspaceController {
         },
       );
       this.#projectWorkflowEventsUnsubscribe = this.#projectWorkflow.subscribeEvents(
-        (event) => this.#emitEvent(event),
+        (event) => {
+          if (event?.type === "project-open-confirmation-presented") {
+            this.#workbenchNavigationWorkflow?.onConfirmationPresented(event);
+          }
+          if (event?.type === "project-navigation-terminal-failed") {
+            this.#workbenchNavigationWorkflow?.onTerminalFailure(event);
+          }
+          if (event?.type === "project-catalog-loaded") {
+            void this.#reconcileAndRestoreWorkbenchTabs(event.projects);
+          }
+          this.#emitEvent(event);
+        },
       );
+      if (this.#workbenchTabsSession && this.#workbenchNavigationSession) {
+        this.#workbenchNavigationWorkflow = new WorkbenchNavigationWorkflow({
+          session: this.#workbenchNavigationSession,
+          tabs: this.#workbenchTabsSession,
+          projectWorkflow: this.#projectWorkflow,
+          controller: this,
+          browserDocuments: this.#browserDocumentSession,
+          tabsPersistence: this.#workbenchTabsPersistenceCoordinator,
+          clock,
+        });
+        this.#workbenchNavigationUnsubscribe = this.#workbenchNavigationSession.subscribe(
+          (snapshot) => {
+            if (this.#disposed) return;
+            this.#workbenchNavigationSnapshot = snapshot;
+            this.#publishAggregateSnapshot();
+          },
+        );
+        this.#workbenchTabsUnsubscribe = this.#workbenchTabsSession.subscribe((snapshot) => {
+          if (this.#disposed) return;
+          this.#workbenchTabsSnapshot = snapshot;
+          this.#publishAggregateSnapshot();
+        });
+        this.#workbenchTabsPersistenceUnsubscribe =
+          this.#workbenchTabsPersistenceCoordinator?.subscribe((snapshot) => {
+            if (this.#disposed) return;
+            const wasFailed = this.#workbenchTabsPersistenceSnapshot?.phase === "failed";
+            this.#workbenchTabsPersistenceSnapshot = snapshot;
+            this.#publishAggregateSnapshot();
+            if (snapshot.phase === "failed" && !wasFailed) {
+              this.#emitEvent({
+                type: "workbench-tabs-persistence-failed",
+                reason: snapshot.error || "标签页状态写入失败。",
+              });
+            }
+          }) || null;
+      }
     }
     if (runWorkflow) {
       if (!this.#documentWorkflow || !this.#projectWorkflow) {
@@ -635,6 +749,16 @@ export class WorkspaceController {
     void this.#firstEditGuideSession.load();
     this.#refreshEditAuthorRuntime();
     this.#publishAggregateSnapshot();
+    if (typeof ports.navigation?.subscribeExternalOpen === "function") {
+      this.#externalOpenUnsubscribe = ports.navigation.subscribeExternalOpen((request) => {
+        if (!this.#workbenchTabsReady) {
+          this.#bufferedExternalOpens.push(request);
+          return;
+        }
+        void this.acceptExternalProject(request);
+      });
+    }
+    void this.#initializeWorkbenchTabs();
   }
 
   getSnapshot() {
@@ -703,6 +827,22 @@ export class WorkspaceController {
     this.#versionWorkflowUnsubscribe = null;
     this.#versionWorkflow?.dispose();
     this.#versionWorkflow = null;
+    this.#workbenchTabsUnsubscribe?.();
+    this.#workbenchTabsUnsubscribe = null;
+    this.#workbenchTabsPersistenceUnsubscribe?.();
+    this.#workbenchTabsPersistenceUnsubscribe = null;
+    this.#workbenchNavigationUnsubscribe?.();
+    this.#workbenchNavigationUnsubscribe = null;
+    this.#workbenchNavigationWorkflow?.dispose();
+    this.#workbenchNavigationWorkflow = null;
+    this.#workbenchNavigationSession = null;
+    this.#workbenchTabsPersistenceCoordinator?.dispose();
+    this.#workbenchTabsPersistenceCoordinator = null;
+    this.#browserDocumentSession?.dispose();
+    this.#browserDocumentSession = null;
+    this.#externalOpenUnsubscribe?.();
+    this.#externalOpenUnsubscribe = null;
+    this.#workbenchTabsSession = null;
     this.#runSessionUnsubscribe?.();
     this.#runSessionUnsubscribe = null;
     this.#conversationSessionUnsubscribe?.();
@@ -829,6 +969,136 @@ export class WorkspaceController {
     return true;
   }
 
+  activateWorkbenchTab(tabId, input) {
+    return this.#workbenchNavigationWorkflow?.activateTab(tabId, input)
+      || Promise.resolve(rejected("WORKBENCH_TABS_UNAVAILABLE", "标签页尚未完成初始化。"));
+  }
+
+  createWorkbenchStartTab() {
+    return this.#workbenchNavigationWorkflow?.createStart()
+      || Promise.resolve(rejected("WORKBENCH_TABS_UNAVAILABLE", "标签页尚未完成初始化。"));
+  }
+
+  closeWorkbenchTab(tabId) {
+    return this.#workbenchNavigationWorkflow?.closeTab(tabId)
+      || Promise.resolve(rejected("WORKBENCH_TABS_UNAVAILABLE", "标签页尚未完成初始化。"));
+  }
+
+  openRegisteredWorkbenchProject(input) {
+    return this.#workbenchNavigationWorkflow?.openRegisteredProject(input)
+      || Promise.resolve(rejected("WORKBENCH_TABS_UNAVAILABLE", "标签页尚未完成初始化。"));
+  }
+
+  updateWorkbenchTabStatus(projectId, documentId, status) {
+    return this.#workbenchTabsSession?.updateStatus(projectId, documentId, status) || null;
+  }
+
+  async #initializeWorkbenchTabs() {
+    if (!this.#workbenchTabsSession || !this.#projectWorkflow) return;
+    let stored = null;
+    let storedStatePresent = false;
+    let initialExternal = null;
+    if (typeof this.#navigationHostPort?.readInitialExternalOpen === "function") {
+      try {
+        initialExternal = await this.#navigationHostPort.readInitialExternalOpen();
+      } catch {
+        // Live subscription still owns delivery; startup fallback remains safe.
+      }
+    }
+    if (this.#workbenchTabsPersistenceCoordinator) {
+      try {
+        stored = await this.#workbenchTabsPersistenceCoordinator.load();
+        if (stored) {
+          storedStatePresent = true;
+          this.#workbenchTabsSession.hydrate(stored);
+        }
+      } catch {
+        // The coordinator publishes a visible failure and keeps restart safety
+        // closed until a terminal navigation state is acknowledged.
+      }
+    }
+    if (this.#disposed) return;
+    this.#workbenchTabsReady = true;
+    this.#publishAggregateSnapshot();
+    const externalRequests = [];
+    const seenExternalRequests = new Set();
+    for (const request of [initialExternal, ...this.#bufferedExternalOpens]) {
+      const requestId = String(request?.requestId || "");
+      if (!requestId || seenExternalRequests.has(requestId)) continue;
+      seenExternalRequests.add(requestId);
+      externalRequests.push(request);
+    }
+    this.#bufferedExternalOpens = [];
+    const startupPriority = workbenchStartupPriority({
+      externalRequestCount: externalRequests.length,
+      persistedStatePresent: storedStatePresent,
+      persistedActiveTabId: this.#workbenchTabsSession.snapshot.pendingTabId,
+    });
+    if (startupPriority === "external") {
+      const pending = this.#workbenchTabsSession.snapshot.pendingTabId;
+      if (pending) this.#workbenchTabsSession.cancelSwitch(pending);
+      for (const request of externalRequests) void this.acceptExternalProject(request);
+      return;
+    }
+    if (startupPriority === "persisted-active-tab") {
+      if (this.#workbenchTabsSession.snapshot.tabs.some((tab) => tab.kind === "document")) {
+        await this.#projectWorkflow.refreshRegisteredProjects();
+      }
+      return;
+    }
+    if (startupPriority === "start") {
+      // A persisted Start remains active, but its retained document tabs still
+      // need Registry projection for real titles and missing-project cleanup.
+      // Refreshing the catalog does not activate activePath compatibility.
+      if (this.#workbenchTabsSession.snapshot.tabs.some((tab) => tab.kind === "document")) {
+        await this.#projectWorkflow.refreshRegisteredProjects();
+      }
+      return;
+    }
+    await this.#workbenchNavigationWorkflow?.openProject({ kind: "startup" });
+  }
+
+  async #reconcileAndRestoreWorkbenchTabs(projects) {
+    if (!this.#workbenchTabsReady || !this.#workbenchTabsSession) return;
+    const priorRevision = this.#workbenchTabsSession.snapshot.revision;
+    const reconciled = this.#workbenchTabsSession.reconcileRegisteredProjects(projects);
+    if (reconciled.missing.length > 0) {
+      this.#emitEvent({
+        type: "workbench-tabs-restore-missing",
+        missing: reconciled.missing,
+      });
+    }
+    const pending = this.#workbenchTabsSession.snapshot.pendingTabId;
+    if (!pending || !this.#workbenchNavigationWorkflow) {
+      if (this.#workbenchTabsSession.snapshot.revision !== priorRevision) {
+        this.#workbenchTabsPersistenceCoordinator?.commit(this.#workbenchTabsSession.serialize());
+      }
+      return;
+    }
+    const outcome = await this.#workbenchNavigationWorkflow.activateTab(pending, {
+      intentKind: "startup-restore",
+    });
+    if (outcome.status === "succeeded") return;
+    if (outcome.committed === true) {
+      const target = this.#workbenchTabsSession.resolveTab(pending);
+      if (target?.kind === "document") {
+        this.#workbenchTabsSession.updateStatus(
+          target.projectId,
+          target.documentId,
+          "error",
+        );
+      }
+    } else {
+      this.#workbenchTabsSession.close(pending);
+    }
+    this.#emitEvent({
+      type: "workbench-tabs-restore-failed",
+      tabId: pending,
+      committed: outcome.committed === true,
+      reason: outcome.reason,
+    });
+  }
+
   refreshProject(input) {
     return this.#requireProjectWorkflow().refreshWorkspace(input);
   }
@@ -842,7 +1112,7 @@ export class WorkspaceController {
   }
 
   openProject(input) {
-    return this.#requireProjectWorkflow().openProject(input);
+    return this.#requireWorkbenchNavigationWorkflow().openProject(input);
   }
 
   acceptProject(project, input) {
@@ -850,11 +1120,11 @@ export class WorkspaceController {
   }
 
   acceptBrowserProject(input) {
-    return this.#requireProjectWorkflow().acceptBrowserProject(input);
+    return this.#requireWorkbenchNavigationWorkflow().acceptBrowserProject(input);
   }
 
   acceptExternalProject(input) {
-    return this.#requireProjectWorkflow().acceptExternalProject(input);
+    return this.#requireWorkbenchNavigationWorkflow().acceptExternalProject(input);
   }
 
   confirmExternalOpen(input = {}) {
@@ -865,11 +1135,11 @@ export class WorkspaceController {
         reason: "这条打开确认不提供查看初始版本。",
       }));
     }
-    return this.#requireProjectWorkflow().confirmExternalOpen(input);
+    return this.#requireWorkbenchNavigationWorkflow().confirmOpen(input);
   }
 
   cancelExternalOpen(input) {
-    return this.#requireProjectWorkflow().cancelExternalOpen(input);
+    return this.#requireWorkbenchNavigationWorkflow().cancelOpen(input);
   }
 
   setExternalOpenDeleteOriginal(input) {
@@ -877,7 +1147,7 @@ export class WorkspaceController {
   }
 
   retryExternalOpen(input) {
-    return this.#requireProjectWorkflow().retryExternalOpen(input);
+    return this.#requireWorkbenchNavigationWorkflow().retryOpen(input);
   }
 
   acknowledgeEditCanvas(input) {
@@ -890,22 +1160,97 @@ export class WorkspaceController {
   }
 
   resumeDeferredExternalProject() {
-    return this.#requireProjectWorkflow().resumeDeferredExternalProject();
+    return this.#requireWorkbenchNavigationWorkflow().resumeDeferredExternalProject();
   }
 
   resumeDeferredProjectApplication() {
-    return this.#requireProjectWorkflow().resumeDeferredProjectApplication();
+    return this.#requireWorkbenchNavigationWorkflow().resumeDeferredProjectApplication();
   }
 
   reconcileProjectTransitions() {
     return this.#requireProjectWorkflow().reconcileDeferred();
   }
 
-  prepareClose(input) {
-    return this.#requireProjectWorkflow().prepareClose(input);
+  async prepareClose(input) {
+    const navigation = this.#requireWorkbenchNavigationWorkflow();
+    const project = this.#requireProjectWorkflow();
+    const requestId = String(input?.requestId || "");
+    const abortPreparation = () => {
+      navigation.abortClose({ requestId });
+      this.#workbenchTabsPersistenceCoordinator?.releaseCloseRevision();
+    };
+    if (!navigation.beginClose({ requestId })) {
+      return Object.freeze({
+        ready: false,
+        reason: "另一个关闭核对正在进行。",
+        presentation: "in-app",
+      });
+    }
+    try {
+      const navigationReady = await navigation.prepareClose(input);
+      if (!navigationReady) {
+        abortPreparation();
+        return Object.freeze({
+          ready: false,
+          reason: "HTML 导航尚未在关闭时限内完成。",
+          presentation: "in-app",
+        });
+      }
+      const persistenceRevision = Number(
+        this.#workbenchTabsPersistenceCoordinator?.pinCloseRevision()
+        ?? this.#workbenchTabsPersistenceCoordinator?.snapshot.requestedRevision
+        ?? 0,
+      );
+      const tabsPersisted = await this.#workbenchTabsPersistenceCoordinator?.drain({
+        ...input,
+        throughRevision: persistenceRevision,
+      });
+      if (tabsPersisted && !tabsPersisted.ok) {
+        abortPreparation();
+        return Object.freeze({
+          ready: false,
+          reason: tabsPersisted.reason || "标签页状态尚未安全写入。",
+          presentation: "in-app",
+        });
+      }
+      const projectReady = await project.prepareClose(input);
+      const persistence = this.#workbenchTabsPersistenceCoordinator?.snapshot;
+      if (
+        !projectReady?.ready
+        || Number(persistence?.requestedRevision || 0) !== persistenceRevision
+        || Number(persistence?.acknowledgedRevision || 0) < persistenceRevision
+      ) {
+        if (projectReady?.ready) project.abortClose(input);
+        abortPreparation();
+        if (projectReady?.ready) {
+          return Object.freeze({
+            ready: false,
+            reason: "标签页状态在关闭核对期间发生变化，请重试关闭。",
+            presentation: "in-app",
+          });
+        }
+        return projectReady;
+      }
+      if (!navigation.commitClose({ requestId })) {
+        project.abortClose(input);
+        abortPreparation();
+        return Object.freeze({
+          ready: false,
+          reason: "桌面外壳已取消本次关闭。",
+          presentation: "in-app",
+        });
+      }
+      return projectReady;
+    } catch (cause) {
+      abortPreparation();
+      throw cause;
+    }
   }
 
   abortClose(input) {
+    this.#workbenchNavigationWorkflow?.abortClose(input);
+    this.#workbenchTabsPersistenceCoordinator?.releaseCloseRevision();
+    this.#workbenchTabsPersistenceCoordinator?.retry();
     return this.#requireProjectWorkflow().abortClose(input);
   }
 
@@ -1195,6 +1540,13 @@ export class WorkspaceController {
     return this.#projectWorkflow;
   }
 
+  #requireWorkbenchNavigationWorkflow() {
+    if (!this.#workbenchNavigationWorkflow) {
+      throw new Error("导航工作流尚未完成组合。");
+    }
+    return this.#workbenchNavigationWorkflow;
+  }
+
   #requireProjectRulesWorkflow() {
     if (!this.#projectRulesWorkflow) {
       throw new Error("项目规则工作流尚未完成组合。");
@@ -1327,6 +1679,10 @@ export class WorkspaceController {
       run: this.#runSnapshot,
       version: this.#versionSnapshot,
       conversation: this.#conversationSnapshot,
+      workbenchTabs: this.#workbenchTabsSnapshot,
+      workbenchTabsReady: this.#workbenchTabsReady,
+      workbenchNavigation: this.#workbenchNavigationSnapshot,
+      workbenchTabsPersistence: this.#workbenchTabsPersistenceSnapshot,
     });
     for (const listener of this.#listeners) {
       try {

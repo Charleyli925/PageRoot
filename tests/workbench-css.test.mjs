@@ -18,6 +18,7 @@ async function readWorkbenchCascadeCss() {
     .map((match) => match[1]);
   assert.deepEqual(imports, [
     "./styles/tokens-and-base.css",
+    "./styles/browser-workbench-shell.css",
     "./styles/workbench-shell.css",
     "./styles/review-v5.css",
     "./styles/review-v51.css",
@@ -26,6 +27,7 @@ async function readWorkbenchCascadeCss() {
     "./styles/project-resources.css",
     "./styles/about-and-chrome.css",
     "./styles/top-toolbar.css",
+    "./styles/browser-workbench-ownership.css",
   ]);
   assert.equal(entry.trim(), imports.map((file) => `@import "${file}";`).join("\n"));
   const parts = await Promise.all(imports.map((file) => (

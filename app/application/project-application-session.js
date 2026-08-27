@@ -53,6 +53,8 @@ export class ProjectApplicationSession {
 
   #waiters = new Map();
 
+  #cancelled = new Set();
+
   setObserver(observer) {
     this.#observer = typeof observer === "function" ? observer : null;
   }
@@ -87,6 +89,11 @@ export class ProjectApplicationSession {
       while (generation === this.#generation) {
         const application = this.#queued.shift();
         if (!application) break;
+        if (this.#cancelled.delete(application.applicationId)) {
+          this.#settle(application.applicationId, "stale");
+          this.#emit();
+          continue;
+        }
         this.#active = application;
         this.#emit();
 
@@ -100,16 +107,24 @@ export class ProjectApplicationSession {
 
         if (generation !== this.#generation) break;
         this.#active = null;
+        const cancelled = this.#cancelled.delete(application.applicationId);
         if (result === "deferred") {
+          if (cancelled) {
+            this.#settle(application.applicationId, "stale");
+            this.#emit();
+            continue;
+          }
           this.#deferred = application;
           this.#deferredSequence += 1;
           this.#sawSwitchBlocker = false;
           this.#emit();
           break;
         }
-        this.#settle(application.applicationId, result === "complete" || !result
-          ? "succeeded"
-          : String(result));
+        this.#settle(application.applicationId, cancelled
+          ? "stale"
+          : result === "complete" || !result
+            ? "succeeded"
+            : String(result));
         this.#emit();
       }
     };
@@ -144,6 +159,29 @@ export class ProjectApplicationSession {
     this.#emit();
     void this.#drain();
     return true;
+  }
+
+  cancel(applicationId, result = "stale") {
+    const id = String(applicationId || "");
+    if (!id || this.#receipts.has(id)) return false;
+    this.#cancelled.add(id);
+    const queuedBefore = this.#queued.length;
+    this.#queued = this.#queued.filter((application) => application.applicationId !== id);
+    if (this.#deferred?.applicationId === id) {
+      this.#deferred = null;
+      this.#settle(id, result);
+      this.#cancelled.delete(id);
+      this.#emit();
+      if (this.#queued.length > 0) void this.#drain();
+      return true;
+    }
+    if (this.#queued.length !== queuedBefore) {
+      this.#settle(id, result);
+      this.#cancelled.delete(id);
+      this.#emit();
+      return true;
+    }
+    return this.#active?.applicationId === id;
   }
 
   // This session owns the FIFO predecessor's blocker transition, so Workbench
@@ -203,6 +241,7 @@ export class ProjectApplicationSession {
     this.#observedDeferredSequence = 0;
     this.#sawSwitchBlocker = false;
     this.#execute = null;
+    this.#cancelled.clear();
     for (const [applicationId, waiters] of this.#waiters) {
       const receipt = Object.freeze({
         applicationId,

@@ -2,6 +2,7 @@ export function registerProjectIpc({
   ipcMain,
   trustedProject,
   PROJECT_CHANNELS,
+  WORKBENCH_TAB_CHANNELS,
   PREVIEW_CHANNELS,
   REVIEW_RUNTIME_SNAPSHOT_CHANNELS,
   EDIT_RUNTIME_CHANNELS,
@@ -48,6 +49,10 @@ export function registerProjectIpc({
     trustedProject(handlers.acceptExternalFileOpen, "external_open"),
   );
   ipcMain.handle(
+    PROJECT_CHANNELS.acknowledgeExternalOpen,
+    trustedProject(handlers.acknowledgeExternalFileOpen, "external_open_ack"),
+  );
+  ipcMain.handle(
     PROJECT_CHANNELS.commitPreparedHtmlOpen,
     trustedProject(handlers.commitPreparedHtmlOpen, "prepared_open_commit"),
   );
@@ -92,16 +97,26 @@ export function registerProjectIpc({
     EDIT_RUNTIME_CHANNELS.revoke,
     trustedProject(handlers.revokeEditAuthorRuntime, "edit_runtime_revoke"),
   );
+  ipcMain.handle(
+    WORKBENCH_TAB_CHANNELS.get,
+    trustedProject(handlers.getWorkbenchTabs, "workbench_tabs_get"),
+  );
+  ipcMain.handle(
+    WORKBENCH_TAB_CHANNELS.set,
+    trustedProject(handlers.setWorkbenchTabs, "workbench_tabs_set"),
+  );
 }
 
 export function unregisterProjectIpc({
   ipcMain,
   PROJECT_CHANNELS,
+  WORKBENCH_TAB_CHANNELS,
   REVIEW_RUNTIME_SNAPSHOT_CHANNELS,
   EDIT_RUNTIME_CHANNELS,
 }) {
   for (const channel of [
     ...Object.values(PROJECT_CHANNELS),
+    ...Object.values(WORKBENCH_TAB_CHANNELS),
     ...Object.values(REVIEW_RUNTIME_SNAPSHOT_CHANNELS),
     ...Object.values(EDIT_RUNTIME_CHANNELS),
   ]) {

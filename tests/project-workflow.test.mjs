@@ -11,6 +11,11 @@ import { ProjectSession } from "../app/application/project-session.js";
 import { ProjectWorkflow } from "../app/application/project-workflow.js";
 import { RunSession } from "../app/application/run-session.js";
 import { VersionSession } from "../app/application/version-session.js";
+import {
+  WorkbenchTabsSession,
+  projectAppliedEventToWorkbenchTabs,
+} from "../app/application/workbench-tabs-session.js";
+import { createBrowserFileTabIdentity } from "../app/application/browser-file-tab-identity.js";
 
 const OLD_PATH = "/tmp/project-workflow-old.html";
 const RENAMED_PATH = "/tmp/project-workflow-renamed.html";
@@ -153,6 +158,7 @@ function createHarness({
   projectOpen = {},
   policies = {},
   projectRulesWorkflow: rulesWorkflow = {},
+  navigation = null,
   initialProject = true,
   openTarget = null,
 } = {}) {
@@ -413,6 +419,7 @@ function createHarness({
       projectOpen: openPort,
       viewState,
       recentRuns,
+      ...(navigation ? { navigation } : {}),
     },
     policies: {
       canCloseDuringHydration: (state) => Boolean(
@@ -773,6 +780,87 @@ test("a Registry project open routes only its projectId through the desktop auth
   assert.equal(harness.documentSession.html, B_HTML);
 });
 
+test("a Registry project opens from Start without fencing an unmounted Canvas", async (t) => {
+  let fenceCount = 0;
+  const harness = createHarness({
+    initialProject: false,
+    canvas: {
+      isMounted: () => false,
+      fencePendingEdit: () => {
+        fenceCount += 1;
+        return null;
+      },
+    },
+    projectOpen: {
+      async openRegistered() {
+        return {
+          name: "B",
+          sourcePath: B_PATH,
+          html: B_HTML,
+          sha256: sha256(B_HTML),
+        };
+      },
+    },
+  });
+  t.after(() => harness.workflow.dispose());
+
+  const opening = await harness.workflow.openProject({
+    kind: "registered",
+    projectId: "project_catalog_b",
+  });
+  assert.equal(opening.status, "succeeded");
+  await waitFor(
+    () => harness.projectSession.context?.sourcePath === B_PATH
+      && !harness.workflow.projectHydrating,
+    "registered project did not publish from Start",
+  );
+  assert.equal(fenceCount, 0);
+  assert.equal(harness.documentSession.html, B_HTML);
+});
+
+test("a retained Controller can switch Registry projects while Start owns the unmounted outlet", async (t) => {
+  let fenceCount = 0;
+  let freezeCount = 0;
+  const harness = createHarness({
+    canvas: {
+      isMounted: () => false,
+      fencePendingEdit: () => {
+        fenceCount += 1;
+        return null;
+      },
+      freeze: () => {
+        freezeCount += 1;
+        return null;
+      },
+    },
+    projectOpen: {
+      async openRegistered() {
+        return {
+          name: "B",
+          sourcePath: B_PATH,
+          html: B_HTML,
+          sha256: sha256(B_HTML),
+        };
+      },
+    },
+  });
+  t.after(() => harness.workflow.dispose());
+
+  const opening = await harness.workflow.openProject({
+    kind: "registered",
+    projectId: "project_catalog_b",
+  });
+  assert.equal(opening.status, "succeeded");
+  await waitFor(
+    () => harness.projectSession.context?.sourcePath === B_PATH
+      && !harness.workflow.projectHydrating,
+    "retained Controller did not publish the Registry project from Start",
+  );
+  assert.equal(fenceCount, 0);
+  assert.equal(freezeCount, 0);
+  assert.equal(harness.documentSession.html, B_HTML);
+});
+
 test("a v4 Working Copy transition uses the exact managed desktop activation", async (t) => {
   const calls = [];
   const managedTarget = {
@@ -833,16 +921,126 @@ test("v4 exposes no relocation workflow that can retarget a moved project", (t) 
   assert.equal("rebindRelocatedOpenTarget" in harness.documentWorkflow, false);
 });
 
+test("project application requires the synchronous navigation receipt before presentation", async (t) => {
+  const order = [];
+  const receipts = [];
+  const harness = createHarness({
+    navigation: {
+      authorizeProjectApplication() {
+        return { accepted: true, kind: "transaction" };
+      },
+      applyProject(input) {
+        order.push("application-port");
+        const receipt = Object.freeze({
+          transactionId: input.transactionId,
+          applicationId: input.applicationId,
+          projectId: input.project.projectId,
+          documentId: input.project.documentId,
+          epoch: input.epoch,
+        });
+        receipts.push(receipt);
+        return receipt;
+      },
+    },
+  });
+  t.after(() => harness.workflow.dispose());
+  harness.workflow.subscribeEvents((event) => {
+    if (event.type !== "project-applied") return;
+    order.push("presentation-event");
+    assert.equal(event.applicationReceipt, receipts[0]);
+  });
+  const outcome = harness.workflow.acceptBrowserProject({
+    transactionId: "navigation-browser-A",
+    project: {
+      projectId: "project_browser_A",
+      documentId: "doc_browser_A",
+      name: "A",
+      sourcePath: null,
+      html: A_HTML,
+      sha256: sha256(A_HTML),
+    },
+  });
+  assert.equal(outcome.status, "succeeded");
+  await waitFor(() => order.includes("presentation-event"));
+  assert.deepEqual(order, ["application-port", "presentation-event"]);
+  assert.equal(receipts[0].transactionId, "navigation-browser-A");
+  assert.equal(receipts[0].applicationId, outcome.value.applicationId);
+});
+
+test("a terminal transaction rejects its deferred application before Controller authority changes", async (t) => {
+  let applicationAuthorityOpen = true;
+  let canvasReady = false;
+  let applyCount = 0;
+  const harness = createHarness({
+    canvas: {
+      freeze() {
+        return canvasReady
+          ? {
+              ok: true,
+              html: harness.documentSession.html,
+              sourceSha256: harness.documentSession.sourceSha256,
+            }
+          : { ok: false, reason: "defer once" };
+      },
+    },
+    navigation: {
+      authorizeProjectApplication() {
+        return applicationAuthorityOpen
+          ? { accepted: true, kind: "transaction" }
+          : { accepted: false, kind: "stale" };
+      },
+      applyProject() {
+        applyCount += 1;
+        return {};
+      },
+    },
+  });
+  t.after(() => harness.workflow.dispose());
+  const prior = harness.projectSession.snapshot;
+  const accepted = harness.workflow.acceptProject({
+    name: "Late B",
+    projectId: "project_late_b",
+    documentId: "doc_late_b",
+    sourcePath: B_PATH,
+    html: B_HTML,
+    sha256: sha256(B_HTML),
+  }, { transactionId: "navigation-expired" });
+  assert.equal(accepted.status, "succeeded");
+  await waitFor(() => harness.workflow.getSnapshot().projectApplication.status === "deferred");
+
+  applicationAuthorityOpen = false;
+  canvasReady = true;
+  assert.equal(harness.workflow.resumeDeferredProjectApplication().status, "succeeded");
+  await waitFor(() => harness.workflow.getSnapshot().projectApplication.status === "idle");
+  assert.deepEqual(harness.projectSession.snapshot, prior);
+  assert.equal(harness.documentSession.html, OLD_HTML);
+  assert.equal(applyCount, 0);
+});
+
 test("a trusted direct browser file submission still enters the accepted FIFO", async (t) => {
   const harness = createHarness();
   t.after(() => harness.workflow.dispose());
+  const tabsSession = new WorkbenchTabsSession();
+  const unsubscribeTabs = harness.workflow.subscribeEvents((event) => {
+    projectAppliedEventToWorkbenchTabs({ session: tabsSession, event });
+  });
+  t.after(unsubscribeTabs);
+  const identity = await createBrowserFileTabIdentity({
+    name: "browser-fixture.html",
+    size: Buffer.byteLength(A_HTML),
+    lastModified: 1_786_000_000_000,
+    sourceSha256: sha256(A_HTML),
+    sha256: async (value) => sha256(value),
+  });
+  const project = {
+    ...identity,
+    name: "browser-fixture.html",
+    sourcePath: null,
+    html: A_HTML,
+  };
 
   const outcome = harness.workflow.acceptBrowserProject({
-    project: {
-      name: "browser-fixture.html",
-      sourcePath: null,
-      html: A_HTML,
-    },
+    project,
   });
   assert.equal(outcome.status, "succeeded");
   await waitFor(
@@ -853,6 +1051,17 @@ test("a trusted direct browser file submission still enters the accepted FIFO", 
   assert.equal(harness.projectSession.sourcePath, null);
   assert.equal(harness.documentSession.html, A_HTML);
   assert.equal(harness.documentSession.sourceSha256, sha256(A_HTML));
+  assert.equal(tabsSession.snapshot.tabs.length, 1);
+  assert.equal(tabsSession.snapshot.tabs[0].kind, "document");
+  assert.equal(tabsSession.snapshot.activeTabId, `document:${identity.projectId}:${identity.documentId}`);
+
+  assert.equal(harness.workflow.acceptBrowserProject({ project }).status, "succeeded");
+  await waitFor(
+    () => harness.projectSession.epoch === 3
+      && harness.workflow.getSnapshot().projectApplication.status === "idle",
+    "reselected browser file did not pass the accepted project boundary",
+  );
+  assert.equal(tabsSession.snapshot.tabs.filter((tab) => tab.kind === "document").length, 1);
 });
 
 test("a second in-memory browser file can switch after the first HTML is applied", async (t) => {
@@ -918,6 +1127,16 @@ test("a stale hydration result cannot publish into a newer project locator", asy
 
 test("accepted projects retain FIFO order while the predecessor hydrates slowly", async (t) => {
   let resolveA;
+  const aWorkspace = {
+    ...workspacePayload(A_PATH, A_HTML),
+    projectId: "project_fifo_a",
+    documentId: "doc_fifo_a",
+  };
+  const bWorkspace = {
+    ...workspacePayload(B_PATH, B_HTML),
+    projectId: "project_fifo_b",
+    documentId: "doc_fifo_b",
+  };
   const harness = createHarness({
     bridge: {
       workspace(sourcePath) {
@@ -926,14 +1145,33 @@ test("accepted projects retain FIFO order while the predecessor hydrates slowly"
             resolveA = resolve;
           });
         }
-        return Promise.resolve(workspacePayload(sourcePath, B_HTML));
+        return Promise.resolve(bWorkspace);
+      },
+      source(sourcePath) {
+        const payload = sourcePayload(
+          sourcePath,
+          sourcePath === A_PATH ? A_HTML : B_HTML,
+        );
+        const workspace = sourcePath === A_PATH ? aWorkspace : bWorkspace;
+        return Promise.resolve({
+          ...payload,
+          projectId: workspace.projectId,
+          documentId: workspace.documentId,
+        });
       },
     },
   });
   t.after(() => harness.workflow.dispose());
+  const tabsSession = new WorkbenchTabsSession();
+  const unsubscribeTabs = harness.workflow.subscribeEvents((event) => {
+    projectAppliedEventToWorkbenchTabs({ session: tabsSession, event });
+  });
+  t.after(unsubscribeTabs);
 
   assert.equal(harness.workflow.acceptProject({
     name: "A",
+    projectId: aWorkspace.projectId,
+    documentId: aWorkspace.documentId,
     sourcePath: A_PATH,
     html: A_HTML,
     sha256: sha256(A_HTML),
@@ -941,6 +1179,8 @@ test("accepted projects retain FIFO order while the predecessor hydrates slowly"
   await waitFor(() => Boolean(resolveA));
   assert.equal(harness.workflow.acceptProject({
     name: "B",
+    projectId: bWorkspace.projectId,
+    documentId: bWorkspace.documentId,
     sourcePath: B_PATH,
     html: B_HTML,
     sha256: sha256(B_HTML),
@@ -956,9 +1196,23 @@ test("accepted projects retain FIFO order while the predecessor hydrates slowly"
       .map((event) => event.project.name),
     ["A", "B"],
   );
+  assert.deepEqual(
+    tabsSession.snapshot.tabs
+      .filter((tab) => tab.kind === "document")
+      .map((tab) => `${tab.projectId}/${tab.documentId}`),
+    ["project_fifo_a/doc_fifo_a", "project_fifo_b/doc_fifo_b"],
+  );
+  assert.equal(
+    tabsSession.snapshot.tabs.find((tab) => tab.tabId === tabsSession.snapshot.activeTabId)?.projectId,
+    "project_fifo_b",
+  );
   assert.equal(harness.documentSession.html, B_HTML);
-  assert.equal(harness.projectSession.context.projectId, `project_${slug(B_PATH)}`);
-  resolveA(workspacePayload(A_PATH, A_HTML));
+  await waitFor(
+    () => harness.projectSession.context?.projectId === bWorkspace.projectId,
+    "fast FIFO successor identity did not hydrate",
+  );
+  assert.equal(harness.projectSession.context.projectId, bWorkspace.projectId);
+  resolveA(aWorkspace);
   await new Promise((resolve) => setTimeout(resolve, 10));
   assert.equal(harness.projectSession.sourcePath, B_PATH);
   assert.equal(harness.documentSession.html, B_HTML);
@@ -1008,6 +1262,176 @@ test("native input delivered after the switch drain defers without losing the ac
   assert.equal(harness.documentSession.html, A_HTML);
 });
 
+test("direct external ACK waits for the correlated navigation terminal", async (t) => {
+  const order = [];
+  let appliedApplicationId = null;
+  let resolveTerminal;
+  const terminal = new Promise((resolve) => { resolveTerminal = resolve; });
+  const harness = createHarness({
+    initialProject: false,
+    canvas: { isMounted: () => false },
+    projectOpen: {
+      async acceptExternal() {
+        order.push("accept");
+        return {
+          projectId: "project_external_terminal",
+          documentId: "doc_external_terminal",
+          name: "External terminal",
+          sourcePath: A_PATH,
+          html: A_HTML,
+          sha256: sha256(A_HTML),
+        };
+      },
+      async ackExternal() {
+        order.push("ack");
+      },
+    },
+    navigation: {
+      authorizeProjectApplication() {
+        return { accepted: true, kind: "transaction" };
+      },
+      applyProject(input) {
+        order.push("apply-receipt");
+        appliedApplicationId = input.applicationId;
+        return { transactionId: input.transactionId, epoch: input.epoch };
+      },
+      async waitForTerminal(transactionId) {
+        assert.equal(transactionId, "navigation-external-terminal");
+        order.push("wait-terminal");
+        await terminal;
+        order.push("terminal");
+        return {
+          transactionId,
+          outcome: { status: "succeeded", value: {} },
+          receipt: { applicationId: appliedApplicationId },
+        };
+      },
+    },
+  });
+  t.after(() => harness.workflow.dispose());
+  harness.workflow.prepareSwitch = async () => succeeded({ prepared: true });
+  assert.equal(harness.workflow.acceptExternalProject({
+    requestId: "external-terminal",
+    sourcePath: A_PATH,
+    transactionId: "navigation-external-terminal",
+  }).status, "succeeded");
+  await waitFor(
+    () => order.includes("wait-terminal"),
+    `navigation terminal wait did not start: ${JSON.stringify({
+      order,
+      events: harness.events.map((event) => ({ type: event.type, reason: event.reason })),
+      snapshot: harness.workflow.getSnapshot(),
+    })}`,
+  );
+  assert.deepEqual(order, ["accept", "apply-receipt", "wait-terminal"]);
+  resolveTerminal();
+  await waitFor(() => order.includes("ack"));
+  assert.deepEqual(order, ["accept", "apply-receipt", "wait-terminal", "terminal", "ack"]);
+});
+
+test("external FIFO does not ACK until waitForTerminal returns a real terminal contract", async (t) => {
+  const order = [];
+  const harness = createHarness({
+    initialProject: false,
+    canvas: { isMounted: () => false },
+    projectOpen: {
+      async acceptExternal() {
+        order.push("accept");
+        return {
+          projectId: "project_external_unsettled",
+          documentId: "doc_external_unsettled",
+          name: "External unsettled",
+          sourcePath: A_PATH,
+          html: A_HTML,
+          sha256: sha256(A_HTML),
+        };
+      },
+      async ackExternal() {
+        order.push("ack");
+      },
+    },
+    navigation: {
+      authorizeProjectApplication() {
+        return { accepted: false, kind: "stale" };
+      },
+      applyProject() {
+        order.push("apply-receipt");
+        return {};
+      },
+      async waitForTerminal() {
+        order.push("wait-terminal");
+        return null;
+      },
+    },
+  });
+  t.after(() => harness.workflow.dispose());
+  harness.workflow.prepareSwitch = async () => succeeded({ prepared: true });
+  assert.equal(harness.workflow.acceptExternalProject({
+    requestId: "external-unsettled",
+    sourcePath: A_PATH,
+    transactionId: "navigation-external-unsettled",
+  }).status, "succeeded");
+  await waitFor(() => harness.workflow.getSnapshot().externalOpen.status === "deferred");
+  assert.deepEqual(order, ["accept", "wait-terminal"]);
+  assert.equal(harness.projectSession.sourcePath, null);
+});
+
+test("external FIFO ACKs a correlated expired terminal without applying its stale project", async (t) => {
+  const order = [];
+  const harness = createHarness({
+    initialProject: false,
+    canvas: { isMounted: () => false },
+    projectOpen: {
+      async acceptExternal() {
+        order.push("accept");
+        return {
+          projectId: "project_external_expired",
+          documentId: "doc_external_expired",
+          name: "External expired",
+          sourcePath: A_PATH,
+          html: A_HTML,
+          sha256: sha256(A_HTML),
+        };
+      },
+      async ackExternal() {
+        order.push("ack");
+      },
+    },
+    navigation: {
+      authorizeProjectApplication() {
+        return { accepted: false, kind: "stale" };
+      },
+      applyProject() {
+        order.push("apply-receipt");
+        return {};
+      },
+      async waitForTerminal(transactionId) {
+        order.push("terminal");
+        return {
+          transactionId,
+          outcome: {
+            status: "rejected",
+            code: "WORKBENCH_NAVIGATION_APPLY_TIMEOUT",
+            reason: "expired",
+          },
+          receipt: null,
+        };
+      },
+    },
+  });
+  t.after(() => harness.workflow.dispose());
+  harness.workflow.prepareSwitch = async () => succeeded({ prepared: true });
+  assert.equal(harness.workflow.acceptExternalProject({
+    requestId: "external-expired",
+    sourcePath: A_PATH,
+    transactionId: "navigation-external-expired",
+  }).status, "succeeded");
+  await waitFor(() => order.includes("ack"));
+  assert.deepEqual(order, ["accept", "terminal", "ack"]);
+  assert.equal(harness.projectSession.sourcePath, null);
+  assert.equal(harness.workflow.getSnapshot().projectApplication.status, "idle");
+});
+
 test("an external request arriving during close preparation cancels that exact close", async (t) => {
   let resolveExternal;
   const harness = createHarness({
@@ -1042,6 +1466,240 @@ test("an external request arriving during close preparation cancels that exact c
   await waitFor(() => Boolean(resolveExternal));
   resolveExternal(null);
   await waitFor(() => harness.workflow.getSnapshot().externalOpen.status === "idle");
+});
+
+test("two unregistered OS opens keep confirmation and acknowledgement order", async (t) => {
+  const order = [];
+  const harness = createHarness({
+    initialProject: false,
+    projectOpen: {
+      async acceptExternal(requestId) {
+        order.push(`accept:${requestId}`);
+        return {
+          openKind: "confirmation",
+          requestId,
+          classification: "new-external",
+          sourceFileName: `${requestId}.html`,
+          visibleV1FileName: `${requestId}-V1.html`,
+          projectsRootLabel: "文稿 › PageRoot › 项目",
+        };
+      },
+      async ackExternal(requestId) {
+        order.push(`ack:${requestId}`);
+        return { acknowledged: true, requestId };
+      },
+      async cancelPrepared() {
+        return { canceled: true };
+      },
+    },
+  });
+  t.after(() => harness.workflow.dispose());
+
+  assert.equal(harness.workflow.acceptExternalProject({
+    requestId: "external_first",
+    sourcePath: A_PATH,
+  }).status, "succeeded");
+  assert.equal(harness.workflow.acceptExternalProject({
+    requestId: "external_second",
+    sourcePath: B_PATH,
+  }).status, "succeeded");
+  await waitFor(() => (
+    harness.workflow.getSnapshot().openConfirmation?.requestId === "external_first"
+  ));
+  assert.deepEqual(order, ["accept:external_first"]);
+  assert.equal(harness.workflow.getSnapshot().externalOpen.queuedRequestId, "external_second");
+
+  assert.equal((await harness.workflow.cancelExternalOpen({ requestId: "external_first" })).status, "succeeded");
+  await waitFor(() => (
+    harness.workflow.getSnapshot().openConfirmation?.requestId === "external_second"
+  ));
+  assert.deepEqual(order, [
+    "accept:external_first",
+    "ack:external_first",
+    "accept:external_second",
+  ]);
+  assert.equal((await harness.workflow.cancelExternalOpen({ requestId: "external_second" })).status, "succeeded");
+  await waitFor(() => order.at(-1) === "ack:external_second");
+});
+
+test("direct external ack rejection defers the head and retry never accepts or enqueues it twice", async (t) => {
+  const accepted = [];
+  const acknowledgements = [];
+  let rejectFirstAck = true;
+  const harness = createHarness({
+    projectOpen: {
+      async acceptExternal(requestId) {
+        accepted.push(requestId);
+        return requestId === "external_ack_first"
+          ? { name: "A", sourcePath: A_PATH, html: A_HTML, sha256: sha256(A_HTML) }
+          : { name: "B", sourcePath: B_PATH, html: B_HTML, sha256: sha256(B_HTML) };
+      },
+      async ackExternal(requestId) {
+        acknowledgements.push(requestId);
+        if (requestId === "external_ack_first" && rejectFirstAck) {
+          rejectFirstAck = false;
+          throw new Error("ack unavailable");
+        }
+        return { acknowledged: true, requestId };
+      },
+    },
+  });
+  t.after(() => harness.workflow.dispose());
+
+  harness.workflow.acceptExternalProject({
+    requestId: "external_ack_first",
+    sourcePath: A_PATH,
+  });
+  harness.workflow.acceptExternalProject({
+    requestId: "external_ack_second",
+    sourcePath: B_PATH,
+  });
+  await waitFor(() => harness.workflow.getSnapshot().externalOpen.status === "deferred");
+  assert.deepEqual(accepted, ["external_ack_first"]);
+  assert.deepEqual(acknowledgements, ["external_ack_first"]);
+
+  assert.equal(harness.workflow.resumeDeferredExternalProject().status, "succeeded");
+  await waitFor(() => (
+    harness.workflow.getSnapshot().externalOpen.status === "idle"
+    && accepted.length === 2
+  ));
+  assert.deepEqual(accepted, ["external_ack_first", "external_ack_second"]);
+  assert.deepEqual(acknowledgements, [
+    "external_ack_first",
+    "external_ack_first",
+    "external_ack_second",
+  ]);
+  assert.equal(harness.projectSession.context?.sourcePath, B_PATH);
+});
+
+test("terminal external failure remains deferred until ack retry without reopening", async (t) => {
+  let acceptCount = 0;
+  let ackCount = 0;
+  const harness = createHarness({
+    projectOpen: {
+      async acceptExternal() {
+        acceptCount += 1;
+        return { invalid: true };
+      },
+      async ackExternal(requestId) {
+        ackCount += 1;
+        if (ackCount === 1) throw new Error("ack unavailable");
+        return { acknowledged: true, requestId };
+      },
+    },
+  });
+  t.after(() => harness.workflow.dispose());
+
+  harness.workflow.acceptExternalProject({
+    requestId: "external_terminal_ack",
+    sourcePath: A_PATH,
+  });
+  await waitFor(() => harness.workflow.getSnapshot().externalOpen.status === "deferred");
+  assert.equal(acceptCount, 1);
+  assert.equal(ackCount, 1);
+  assert.equal(harness.workflow.resumeDeferredExternalProject().status, "succeeded");
+  await waitFor(() => harness.workflow.getSnapshot().externalOpen.status === "idle");
+  assert.equal(acceptCount, 1);
+  assert.equal(ackCount, 2);
+  assert.equal(harness.projectSession.context?.sourcePath, OLD_PATH);
+});
+
+test("confirmed external open retries only its failed ack and never commits twice", async (t) => {
+  let commitCount = 0;
+  let ackCount = 0;
+  const harness = createHarness({
+    initialProject: false,
+    projectOpen: {
+      async acceptExternal(requestId) {
+        return {
+          openKind: "confirmation",
+          requestId,
+          classification: "new-external",
+          sourceFileName: "confirm.html",
+          visibleV1FileName: "confirm-V1.html",
+          projectsRootLabel: "文稿 › PageRoot › 项目",
+        };
+      },
+      async commitPrepared() {
+        commitCount += 1;
+        return { name: "A", sourcePath: A_PATH, html: A_HTML, sha256: sha256(A_HTML) };
+      },
+      async finalizePrepared() {
+        return { disposition: "kept" };
+      },
+      async ackExternal(requestId) {
+        ackCount += 1;
+        if (ackCount === 1) throw new Error("ack unavailable");
+        return { acknowledged: true, requestId };
+      },
+    },
+  });
+  t.after(() => harness.workflow.dispose());
+  harness.workflow.acceptExternalProject({
+    requestId: "external_confirm_ack",
+    sourcePath: A_PATH,
+  });
+  await waitFor(() => harness.workflow.getSnapshot().openConfirmation?.requestId === "external_confirm_ack");
+  const first = await harness.workflow.confirmExternalOpen({
+    requestId: "external_confirm_ack",
+    action: "import-new",
+  });
+  assert.equal(first.code, "EXTERNAL_OPEN_ACK_REJECTED");
+  assert.equal(commitCount, 1);
+  assert.equal(harness.workflow.getSnapshot().externalOpen.status, "awaiting-confirmation");
+  const retried = await harness.workflow.retryExternalOpen({ requestId: "external_confirm_ack" });
+  assert.equal(retried.status, "succeeded");
+  assert.equal(commitCount, 1);
+  assert.equal(ackCount, 2);
+  assert.equal(harness.workflow.getSnapshot().externalOpen.status, "idle");
+  assert.equal(harness.workflow.getSnapshot().openConfirmation, null);
+});
+
+test("close drains and acknowledges every queued external confirmation", async (t) => {
+  const order = [];
+  const harness = createHarness({
+    initialProject: false,
+    projectOpen: {
+      async acceptExternal(requestId) {
+        order.push(`accept:${requestId}`);
+        return {
+          openKind: "confirmation",
+          requestId,
+          classification: "new-external",
+          sourceFileName: `${requestId}.html`,
+          visibleV1FileName: `${requestId}-V1.html`,
+          projectsRootLabel: "文稿 › PageRoot › 项目",
+        };
+      },
+      async ackExternal(requestId) {
+        order.push(`ack:${requestId}`);
+        return { acknowledged: true, requestId };
+      },
+      async cancelPrepared() {
+        return { canceled: true };
+      },
+    },
+  });
+  t.after(() => harness.workflow.dispose());
+  for (const requestId of ["close_confirmation_1", "close_confirmation_2", "close_confirmation_3"]) {
+    harness.workflow.acceptExternalProject({ requestId, sourcePath: A_PATH });
+  }
+  await waitFor(() => harness.workflow.getSnapshot().openConfirmation?.requestId === "close_confirmation_1");
+  const closed = await harness.workflow.prepareClose({
+    requestId: "close_all_confirmations",
+    deadlineAt: Date.now() + 2_000,
+  });
+  assert.deepEqual(closed, { ready: true });
+  assert.deepEqual(order, [
+    "accept:close_confirmation_1",
+    "ack:close_confirmation_1",
+    "accept:close_confirmation_2",
+    "ack:close_confirmation_2",
+    "accept:close_confirmation_3",
+    "ack:close_confirmation_3",
+  ]);
+  assert.equal(harness.workflow.getSnapshot().externalOpen.status, "idle");
+  assert.equal(harness.workflow.getSnapshot().openConfirmation, null);
 });
 
 test("close drains an in-flight local picker before it commits", async (t) => {
@@ -1190,6 +1848,27 @@ test("committed close rejects new external work and abort unlocks only its own f
   harness.workflow.abortClose({ requestId: "close_owned_freeze" });
   assert.equal(harness.unlockCount, 1);
   assert.equal(harness.workflow.getSnapshot().close.phase, "idle");
+});
+
+test("close trusts the prior Start navigation fence when the Canvas outlet is unmounted", async (t) => {
+  let freezeCount = 0;
+  const harness = createHarness({
+    canvas: {
+      isMounted: () => false,
+      freeze: () => {
+        freezeCount += 1;
+        return null;
+      },
+    },
+  });
+  t.after(() => harness.workflow.dispose());
+
+  const readiness = await harness.workflow.prepareClose({
+    requestId: "close_from_start_outlet",
+    deadlineAt: Date.now() + 2_000,
+  });
+  assert.deepEqual(readiness, { ready: true });
+  assert.equal(freezeCount, 0);
 });
 
 test("a stuck immutable hydration can close without waiting for the remote read", async (t) => {
@@ -1980,6 +2659,7 @@ test("cancelling the local picker does not drain the current project", async (t)
 
 test("startup confirmation commits without fencing a nonexistent Canvas", async (t) => {
   let fenced = 0;
+  let ackCount = 0;
   const harness = createHarness({
     initialProject: false,
     canvas: {
@@ -2010,6 +2690,10 @@ test("startup confirmation commits without fencing a nonexistent Canvas", async 
       async finalizePrepared() {
         return { disposition: "kept" };
       },
+      async ackExternal() {
+        ackCount += 1;
+        throw new Error("startup confirmation has no external mailbox head");
+      },
     },
   });
   t.after(() => harness.workflow.dispose());
@@ -2025,6 +2709,7 @@ test("startup confirmation commits without fencing a nonexistent Canvas", async 
     action: "import-new",
   });
   assert.equal(confirmed.status, "succeeded");
+  assert.equal(ackCount, 0);
   assert.equal(fenced, 0);
   await waitFor(
     () => harness.projectSession.sourcePath === A_PATH
@@ -2033,6 +2718,57 @@ test("startup confirmation commits without fencing a nonexistent Canvas", async 
     "startup confirmation did not finish hydration",
   );
   assert.equal(harness.documentSession.html, A_HTML);
+});
+
+test("a local Start confirmation cancel or commit failure never publishes the retained Controller", async (t) => {
+  let commitShouldFail = false;
+  let appliedCount = 0;
+  let canceledCount = 0;
+  const harness = createHarness({
+    initialProject: false,
+    projectOpen: {
+      async openLocal() {
+        return {
+          openKind: "confirmation",
+          requestId: "req_local_start",
+          classification: "new-external",
+          sourceFileName: "local.html",
+          visibleV1FileName: "local-V1.html",
+          projectsRootLabel: "文稿 › PageRoot › 项目",
+        };
+      },
+      async cancelPrepared() {
+        canceledCount += 1;
+        return { canceled: true };
+      },
+      async commitPrepared() {
+        if (commitShouldFail) throw new Error("commit rejected");
+        return { name: "A", sourcePath: A_PATH, html: A_HTML, sha256: sha256(A_HTML) };
+      },
+    },
+  });
+  t.after(() => harness.workflow.dispose());
+  const unsubscribe = harness.workflow.subscribeEvents((event) => {
+    if (event.type === "project-applied") appliedCount += 1;
+  });
+  t.after(unsubscribe);
+
+  await harness.workflow.openProject({ kind: "local" });
+  const canceled = await harness.workflow.cancelExternalOpen({ requestId: "req_local_start" });
+  assert.equal(canceled.status, "succeeded");
+  assert.equal(canceledCount, 1);
+  assert.equal(harness.projectSession.epoch, 0);
+  assert.equal(appliedCount, 0);
+
+  commitShouldFail = true;
+  await harness.workflow.openProject({ kind: "local" });
+  const failed = await harness.workflow.confirmExternalOpen({
+    requestId: "req_local_start",
+    action: "import-new",
+  });
+  assert.equal(failed.status, "rejected");
+  assert.equal(harness.projectSession.epoch, 0);
+  assert.equal(appliedCount, 0);
 });
 
 test("a new-external picker result shows confirmation without switching", async (t) => {
@@ -2231,4 +2967,3 @@ test("continue-current opens the bound project without importing again", async (
   assert.equal(finalized, 1);
   assert.equal(harness.projectSession.sourcePath, A_PATH);
 });
-

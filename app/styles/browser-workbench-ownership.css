@@ -1,0 +1,30 @@
+/* Final browser-workbench row ownership. Kept after every legacy shell layer so
+   the tab bar, shared toolbar and single content outlet cannot be recaptured by
+   an older two-row layout. */
+.workbench:has(> .workbench-tabbar) {
+  --workbench-tabbar-height: 32px;
+  --notice-header-height: 74px;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows:
+    var(--workbench-tabbar-height)
+    var(--notice-header-height)
+    minmax(0, 1fr);
+}
+
+.workbench:has(> .workbench-tabbar) > .workbench-tabbar {
+  grid-column: 1 / -1;
+  grid-row: 1;
+}
+
+.workbench:has(> .workbench-tabbar) > .workbench-header,
+.workbench:has(> .workbench-tabbar) > .workbench-start-toolbar {
+  grid-column: 1 / -1;
+  grid-row: 2;
+}
+
+.workbench:has(> .workbench-tabbar) > .review-scroll-stage,
+.workbench:has(> .workbench-tabbar) > [data-testid="ai-review-workspace"],
+.workbench:has(> .workbench-tabbar) > .workbench-start-page {
+  grid-column: 1 / -1;
+  grid-row: 3;
+}
