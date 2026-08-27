@@ -616,6 +616,17 @@
       ]
     },
     {
+      "id": "workspace-controller-capability-contracts",
+      "patterns": [
+        "^app/application/workspace-controller-capabilities\\.d\\.ts$",
+        "^tests/workspace-controller-capabilities\\.typecheck\\.ts$"
+      ],
+      "suites": [
+        "typecheck"
+      ],
+      "nodeTests": []
+    },
+    {
       "id": "workspace-controller",
       "patterns": [
         "^app/application/workspace-controller(?:-codecs)?\\.(?:js|d\\.ts)$",

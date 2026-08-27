@@ -1,5 +1,6 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
+  "defaultLevel": "contract",
   "domains": [
     {
       "id": "comments",
@@ -11,7 +12,8 @@
       ],
       "entryInterfaces": [
         "app/workbench/comment-rail-contract.ts",
-        "app/application/comment-workflow.js"
+        "app/application/comment/commit-plan.d.ts",
+        "app/application/workspace-controller-capabilities.d.ts"
       ],
       "owners": [
         "CommentSession",
@@ -44,8 +46,9 @@
         "^tests/document-"
       ],
       "entryInterfaces": [
-        "app/application/document/save-plan.js",
-        "app/application/verified-project-context.js"
+        "app/application/document/save-plan.d.ts",
+        "app/application/verified-project-context.d.ts",
+        "app/application/workspace-controller-capabilities.d.ts"
       ],
       "owners": [
         "DocumentSession",
@@ -80,10 +83,10 @@
         "^tests/desktop-close-recovery"
       ],
       "entryInterfaces": [
-        "app/application/project/open-intent.js",
-        "app/application/project/switch-plan.js",
-        "app/application/project/close-plan.js",
-        "app/application/project-workflow.js"
+        "app/application/project/open-intent.d.ts",
+        "app/application/project/switch-plan.d.ts",
+        "app/application/project/close-plan.d.ts",
+        "app/application/workspace-controller-capabilities.d.ts"
       ],
       "owners": [
         "ProjectSession",
@@ -150,8 +153,9 @@
         "^tests/version-"
       ],
       "entryInterfaces": [
-        "app/application/run-workflow.js",
-        "app/application/version-workflow.js"
+        "app/application/run/submit-plan.d.ts",
+        "app/application/version/review-plan.d.ts",
+        "app/application/workspace-controller-capabilities.d.ts"
       ],
       "owners": [
         "RunSession",
@@ -186,7 +190,8 @@
         "^tests/workbench-tabs"
       ],
       "entryInterfaces": [
-        "app/application/workbench-navigation-workflow.js"
+        "app/application/workbench-navigation-workflow.d.ts",
+        "app/application/workspace-controller-capabilities.d.ts"
       ],
       "owners": [
         "WorkbenchTabsSession",
@@ -202,6 +207,36 @@
       "requiredDocs": [
         "docs/ARCHITECTURE_MAP.md",
         "docs/INTERACTION_FLOW.md"
+      ]
+    },
+    {
+      "id": "workspace-controller-capabilities",
+      "patterns": [
+        "^app/application/workspace-controller(?:-capabilities)?\\.d\\.ts$",
+        "^app/application/workbench-navigation-workflow\\.d\\.ts$",
+        "^app/workbench/(?:ReviewAnalysisPrewarm|document-surface-presentation|use-ai-conversation)\\.(?:ts|tsx)$",
+        "^tests/workspace-controller-capabilities\\.typecheck\\.ts$"
+      ],
+      "entryInterfaces": [
+        "app/application/workspace-controller-capabilities.d.ts"
+      ],
+      "owners": [
+        "WorkspaceController capability contracts"
+      ],
+      "implementationFiles": [
+        "app/application/workspace-controller.d.ts",
+        "app/application/workbench-navigation-workflow.d.ts",
+        "app/workbench/ReviewAnalysisPrewarm.tsx",
+        "app/workbench/document-surface-presentation.ts",
+        "app/workbench/use-ai-conversation.ts"
+      ],
+      "focusedTests": [
+        "tests/workspace-controller-capabilities.typecheck.ts",
+        "tests/workbench-navigation-workflow.test.mjs",
+        "tests/review-analysis-session.test.mjs"
+      ],
+      "requiredDocs": [
+        "docs/CODEX_WORKFLOW.md"
       ]
     },
     {

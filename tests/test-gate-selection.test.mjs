@@ -896,20 +896,44 @@ test("gate plans expose owner provenance and width warnings without failing", ()
   assert.ok(compact.warnings.some((warning) => warning.code === "leaf-file-node-fanout"));
 });
 
-test("gate:plan capability-context is a separate reading set and is not stored in the impact map", () => {
+test("gate:plan capability-context schema v2 exposes contract-first and implementation reading sets", () => {
   const capabilityMap = loadCapabilityContextMap();
+  assert.equal(capabilityMap.schemaVersion, 2);
+  assert.equal(capabilityMap.defaultLevel, "contract");
   const comments = selectCapabilityContext({
     changedFiles: ["app/application/comment-workflow.js"],
     map: capabilityMap,
     productRoot,
   });
   assert.deepEqual(comments.domains, ["comments"]);
-  assert.ok(comments.entryInterfaces.includes("app/workbench/comment-rail-contract.ts"));
+  assert.equal(comments.defaultLevel, "contract");
   assert.ok(comments.owners.includes("CommentWorkflow"));
-  assert.ok(comments.implementationFiles.includes("app/application/comment/commit-plan.js"));
-  assert.ok(comments.focusedTests.includes("tests/comment-workflow.test.mjs"));
-  assert.ok(comments.requiredDocs.includes("docs/ARCHITECTURE_MAP.md"));
-  assert.ok(comments.estimatedContextBytes > 0);
+  assert.ok(comments.contract.files.includes("app/workbench/comment-rail-contract.ts"));
+  assert.ok(comments.contract.files.includes("app/application/workspace-controller-capabilities.d.ts"));
+  assert.ok(!comments.contract.files.includes("app/application/comment-workflow.js"));
+  assert.ok(comments.implementation.files.includes("app/application/comment-workflow.js"));
+  assert.ok(comments.implementation.files.includes("app/application/comment/commit-plan.js"));
+  assert.ok(comments.implementation.files.includes("tests/comment-workflow.test.mjs"));
+  assert.ok(comments.implementation.files.includes("docs/ARCHITECTURE_MAP.md"));
+  assert.ok(comments.contract.estimatedBytes > 0);
+  assert.ok(comments.implementation.estimatedBytes > comments.contract.estimatedBytes);
+  assert.ok(comments.contract.files.every((file) => comments.implementation.files.includes(file)));
+
+  for (const changedFile of [
+    "app/application/project-workflow.js",
+    "app/application/run-workflow.js",
+    "app/application/version-workflow.js",
+    "app/application/workbench-navigation-workflow.js",
+  ]) {
+    const context = selectCapabilityContext({
+      changedFiles: [changedFile],
+      map: capabilityMap,
+      productRoot,
+    });
+    assert.ok(context.contract.files.includes("app/application/workspace-controller-capabilities.d.ts"));
+    assert.ok(!context.contract.files.some((file) => /workflow\.js$/u.test(file)));
+    assert.ok(context.implementation.files.includes(changedFile));
+  }
 
   const unknown = selectCapabilityContext({
     changedFiles: ["README.md"],
@@ -917,7 +941,9 @@ test("gate:plan capability-context is a separate reading set and is not stored i
     productRoot,
   });
   assert.deepEqual(unknown.domains, []);
-  assert.equal(unknown.estimatedContextBytes, 0);
+  assert.equal(unknown.defaultLevel, "contract");
+  assert.deepEqual(unknown.contract, { files: [], estimatedBytes: 0 });
+  assert.deepEqual(unknown.implementation, { files: [], estimatedBytes: 0 });
 
   const compact = compactGatePlan({
     changedFiles: ["app/application/comment-workflow.js"],
@@ -926,7 +952,40 @@ test("gate:plan capability-context is a separate reading set and is not stored i
     capabilityContext: comments,
   });
   assert.deepEqual(compact.capabilityContext.domains, ["comments"]);
-  assert.equal(compact.capabilityContext.estimatedContextBytes, comments.estimatedContextBytes);
+  assert.equal(compact.capabilityContext.defaultLevel, "contract");
+  assert.deepEqual(compact.capabilityContext.contract, comments.contract);
+  assert.deepEqual(compact.capabilityContext.implementation, comments.implementation);
+  assert.equal("entryInterfaces" in compact.capabilityContext, false);
+  assert.equal("estimatedContextBytes" in compact.capabilityContext, false);
   assert.equal("capabilityContext" in map, false);
-  assert.equal(JSON.stringify(map).includes("estimatedContextBytes"), false);
+  assert.equal(JSON.stringify(map).includes("estimatedBytes"), false);
+
+  const capabilityContract = selectCapabilityContext({
+    changedFiles: ["app/application/workspace-controller-capabilities.d.ts"],
+    map: capabilityMap,
+    productRoot,
+  });
+  assert.deepEqual(capabilityContract.domains, ["workspace-controller-capabilities"]);
+  assert.deepEqual(capabilityContract.contract.files, [
+    "app/application/workspace-controller-capabilities.d.ts",
+  ]);
+  assert.ok(capabilityContract.implementation.files.includes(
+    "tests/workspace-controller-capabilities.typecheck.ts",
+  ));
+});
+
+test("capability contracts select only their independent typecheck owner", () => {
+  const plan = selectGatePlan({
+    map,
+    lane: "task",
+    changedFiles: [
+      "app/application/workspace-controller-capabilities.d.ts",
+      "tests/workspace-controller-capabilities.typecheck.ts",
+    ],
+  });
+  assert.deepEqual(plan.matchedOwners, ["workspace-controller-capability-contracts"]);
+  assert.deepEqual(suiteIds(plan), ["typecheck", "lint"]);
+  assert.deepEqual(plan.selectedNodeTests, []);
+  assert.ok(!plan.matchedOwners.includes("workspace-controller"));
+  assert.ok(!plan.suites.some(({ id }) => id.includes("electron") || id.includes("browser")));
 });

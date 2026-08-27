@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import type { WorkspaceController } from "../application/workspace-controller.js";
+import type { AiConversationControllerCapability } from "../application/workspace-controller-capabilities.js";
 import type { ConversationSessionSnapshot } from "../application/conversation-session.js";
 import type { QoderAvailabilitySnapshot } from "../domain/qoder-availability.js";
 import type { ActiveRun } from "../domain/run-lifecycle.js";
@@ -27,7 +27,7 @@ import {
 // Document closes it so one Document's messages never linger under another.
 
 export type UseAiConversationOptions = {
-  controllerRef: { current: WorkspaceController | null };
+  controllerRef: { current: AiConversationControllerCapability | null };
   conversation: ConversationSessionSnapshot | null;
   qoderAvailability: QoderAvailabilitySnapshot | null;
   agentModelDisplayName?: string | null;

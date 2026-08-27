@@ -4,7 +4,7 @@ import { useEffect, useRef } from "react";
 
 import type { ReviewAnalysisSession } from "../application/review-analysis-session.js";
 import { ReviewAnalysisCancelledError } from "../application/review-analysis-session.js";
-import type { WorkspaceController } from "../application/workspace-controller.js";
+import type { ReviewPreparationControllerCapability } from "../application/workspace-controller-capabilities.js";
 import type { VersionReviewCandidate } from "../application/version-workflow.js";
 import type { ActiveRun } from "../domain/run-lifecycle.js";
 import { browserSha256 } from "./browser-io";
@@ -146,7 +146,7 @@ export default function ReviewAnalysisPrewarm({
   projectLoadError,
 }: {
   session: ReviewAnalysisSession<PreparedReviewDocuments>;
-  controller: WorkspaceController | null;
+  controller: ReviewPreparationControllerCapability | null;
   activeRun: ActiveRun | null;
   projectId: string;
   documentId: string;

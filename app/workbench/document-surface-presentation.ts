@@ -1,11 +1,11 @@
-import type { WorkspaceController } from "../application/workspace-controller.js";
+import type { DocumentSurfaceControllerCapability } from "../application/workspace-controller-capabilities.js";
 import type { WorkbenchTabsSnapshot } from "../application/workbench-tabs-session.js";
 import type { PageViewContext } from "../lib/page-view-context.js";
 import type { CanvasMode, HtmlProject } from "./types";
 import type { ActiveRun } from "../domain/run-lifecycle.js";
 
 export function readyVersionPublicationMatches(
-  controller: WorkspaceController,
+  controller: DocumentSurfaceControllerCapability,
   run: ActiveRun,
 ): boolean {
   const snapshot = controller.getSnapshot();
@@ -23,7 +23,7 @@ export function rememberActiveDocumentPresentation({
   pageViewContext,
   scrollTop,
 }: {
-  controller: WorkspaceController;
+  controller: DocumentSurfaceControllerCapability;
   tabs: WorkbenchTabsSnapshot;
   canvasMode: CanvasMode;
   pageViewContext: PageViewContext | null;
@@ -45,7 +45,7 @@ export function restoreCachedDocumentPresentation({
   setCanvasMode,
   stage,
 }: {
-  controller: WorkspaceController;
+  controller: DocumentSurfaceControllerCapability;
   project: HtmlProject;
   setPageViewContext: (value: PageViewContext | null) => void;
   setCanvasMode: (value: CanvasMode) => void;

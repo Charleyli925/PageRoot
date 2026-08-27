@@ -74,7 +74,7 @@ Inspect the selected task coverage without running it:
 npm run gate:plan -- --base origin/main
 ```
 
-The compact JSON lists changed files, matched owners, Node tests, capability canaries, estimated fan-out, and a capability-context reading set (`entryInterfaces`, `owners`, `implementationFiles`, `focusedTests`, `requiredDocs`, `estimatedContextBytes`) from `scripts/capability-context.json`. Width warnings are informational. After an environment flake on the same source hash, resume with `npm run gate:task -- --resume <run-id>`; reuse requires an identical HEAD tree, dirty change-set, base, package-lock, Node version, platform, suite commands and surviving build artifacts. Ready/release/candidate/artifact complete proofs never resume.
+The compact JSON lists changed files, matched owners, Node tests, capability canaries, estimated fan-out, and a schema-v2 capability context from `scripts/capability-context.json`. Its `defaultLevel` is `contract`: read `capabilityContext.contract.files` first; it contains only the matched entry interfaces and reports their `estimatedBytes`. Expand to `capabilityContext.implementation.files` only when implementation evidence is needed; that set adds implementation files, focused tests, and required docs and has its own `estimatedBytes`. `owners` remains top-level capability context metadata. Width warnings are informational. After an environment flake on the same source hash, resume with `npm run gate:task -- --resume <run-id>`; reuse requires an identical HEAD tree, dirty change-set, base, package-lock, Node version, platform, suite commands and surviving build artifacts. Ready/release/candidate/artifact complete proofs never resume.
 
 ### Audit and retire
 
