@@ -303,7 +303,6 @@ services.
 | Pseudonymous identity, strict event schemas, local queue and PostHog delivery | `desktop/usage-telemetry.mjs` |
 | Install-level first-real-HTML guide status and built-in welcome identity | `desktop/ui-preferences.mjs`, `app/application/first-edit-guide-session.js` |
 | Preview sanitization and verified frame injection | `app/components/html-preview-sandbox.js` |
-| Workbench visual cascade | `app/globals.css` imports `app/styles/` layers in source order; tokens first, later layers may override |
 | Canvas one-shot runtime frame identity, frozen-result verification and author-paint retention | `app/components/html-canvas-frame.js`; `HtmlCanvasEditor` still owns iframe mount/reload |
 | Native deferred-command arbitration (user-explicit vs system, lease matching, stale drain) | `app/components/html-canvas-native-commands.js`; the editor supplies the live session/lease and still retires the queue before host replacement |
 | Canvas comment-target measurement, insertion-point and marker layout | `app/components/html-canvas-comment-layout.ts`; disposable geometry only |
