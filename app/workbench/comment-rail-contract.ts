@@ -98,7 +98,6 @@ export type CommentRailModel = {
 
 export type CommentRailContainerContext = {
   reviewStageRef: RefObject<HTMLDivElement | null>;
-  composer: ComposerState;
   canvasMode: CanvasMode;
   viewMode: "current" | "history";
   expectedCommentLayoutSourceSha256: string;
@@ -109,11 +108,9 @@ export type CommentRailContainerContext = {
   interactionLocked: boolean;
   unfinishedEditedComment: CommentItem | null | undefined;
   unsafeRelinkCommentItems: CommentItem[];
-  relinkCardActive: boolean;
   projectLoadError: string | null | undefined;
   otherTabCommentsContextKey: string;
   attachmentObjectUrls: Record<string, string>;
-  focusedCommentId: string | null;
 };
 
 export type CommentRailActions = {
@@ -163,7 +160,14 @@ export type CommentRailHostActions = Omit<
   | "collapseOtherTabComments"
   | "requestDeleteComment"
   | "clearDeleteRequest"
->;
+  | "hideCommentComposer"
+> & {
+  uploadAttachments: (
+    files: File[],
+    target: CommentAttachmentTarget,
+    source: "clipboard" | "file-picker",
+  ) => void | Promise<void>;
+};
 
 export {
   composerViewFields,

@@ -2,6 +2,7 @@ import type {
   HtmlCanvasCommentLayoutState,
   HtmlCanvasSelection,
 } from "../components/HtmlCanvasEditor";
+import type { CommentAttachmentTarget } from "./comment-rail-contract";
 
 export type CommentTargetLayout = HtmlCanvasCommentLayoutState["targets"][number];
 
@@ -28,6 +29,16 @@ export type CommentCanvasSnapshot = Readonly<{
     commentId: string;
     select: boolean;
   }> | null;
+  composerOpen: boolean;
+  editingCommentId: string | null;
+  focusedCommentId: string | null;
+  relinkingTarget: string | null;
+  relinkSelectionArmed: boolean;
+  attachmentPickerRequest: Readonly<{
+    requestId: number;
+    target: CommentAttachmentTarget;
+    accept: "all" | "image";
+  }> | null;
 }>;
 
 export type CommentCanvasPort = Readonly<{
@@ -42,6 +53,17 @@ export type CommentCanvasPort = Readonly<{
   requestComposerFocus: () => void;
   requestCommentEditFocus: (commentId: string, select?: boolean) => void;
   settleCommentEditFocus: (requestId: number) => void;
+  setComposerOpen: (open: boolean) => void;
+  setEditingCommentId: (commentId: string | null) => void;
+  setFocusedCommentId: (commentId: string | null) => void;
+  beginRelink: (itemId: string) => void;
+  armRelinkSelection: () => void;
+  clearRelink: () => void;
+  requestAttachmentPicker: (
+    target: CommentAttachmentTarget,
+    accept?: "all" | "image",
+  ) => void;
+  settleAttachmentPicker: (requestId: number) => void;
 }>;
 
 export function createCommentCanvasPort(): CommentCanvasPort;

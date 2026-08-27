@@ -17,6 +17,12 @@ const EMPTY_COMMENT_CANVAS_SNAPSHOT = Object.freeze({
   railResetRevision: 0,
   composerFocusRevision: 0,
   editFocusRequest: null,
+  composerOpen: false,
+  editingCommentId: null,
+  focusedCommentId: null,
+  relinkingTarget: null,
+  relinkSelectionArmed: false,
+  attachmentPickerRequest: null,
 });
 
 function applyCanvasHeight(height) {
@@ -58,6 +64,7 @@ export function createCommentCanvasPort() {
   const listeners = new Set();
   let revealSequence = 0;
   let editFocusSequence = 0;
+  let attachmentPickerSequence = 0;
   const publish = (next) => {
     if (snapshot === next) return;
     snapshot = Object.freeze(next);
@@ -142,6 +149,12 @@ export function createCommentCanvasPort() {
         canvasDocumentHeight: 760,
         revealRequest: null,
         editFocusRequest: null,
+        composerOpen: false,
+        editingCommentId: null,
+        focusedCommentId: null,
+        relinkingTarget: null,
+        relinkSelectionArmed: false,
+        attachmentPickerRequest: null,
         railResetRevision: snapshot.railResetRevision + 1,
       });
     },
@@ -184,6 +197,52 @@ export function createCommentCanvasPort() {
     settleCommentEditFocus(requestId) {
       if (snapshot.editFocusRequest?.requestId !== requestId) return;
       publish({ ...snapshot, editFocusRequest: null });
+    },
+    setComposerOpen(composerOpen) {
+      if (snapshot.composerOpen === composerOpen) return;
+      publish({ ...snapshot, composerOpen });
+    },
+    setEditingCommentId(editingCommentId) {
+      if (snapshot.editingCommentId === editingCommentId) return;
+      publish({ ...snapshot, editingCommentId });
+    },
+    setFocusedCommentId(focusedCommentId) {
+      if (snapshot.focusedCommentId === focusedCommentId) return;
+      publish({ ...snapshot, focusedCommentId });
+    },
+    beginRelink(relinkingTarget) {
+      publish({
+        ...snapshot,
+        relinkingTarget,
+        relinkSelectionArmed: false,
+        editingCommentId: null,
+      });
+    },
+    armRelinkSelection() {
+      if (!snapshot.relinkingTarget || snapshot.relinkSelectionArmed) return;
+      publish({ ...snapshot, relinkSelectionArmed: true });
+    },
+    clearRelink() {
+      if (!snapshot.relinkingTarget && !snapshot.relinkSelectionArmed) return;
+      publish({
+        ...snapshot,
+        relinkingTarget: null,
+        relinkSelectionArmed: false,
+      });
+    },
+    requestAttachmentPicker(target, accept = "all") {
+      publish({
+        ...snapshot,
+        attachmentPickerRequest: Object.freeze({
+          requestId: ++attachmentPickerSequence,
+          target,
+          accept,
+        }),
+      });
+    },
+    settleAttachmentPicker(requestId) {
+      if (snapshot.attachmentPickerRequest?.requestId !== requestId) return;
+      publish({ ...snapshot, attachmentPickerRequest: null });
     },
   });
 }

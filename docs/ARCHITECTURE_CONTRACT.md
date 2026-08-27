@@ -178,10 +178,11 @@ cross-capability presentation.
 
 Comment geometry is a disposable presentation port, not Controller or Session
 state. `HtmlCanvasEditor` publishes source-tagged layout snapshots to one stable
-`commentCanvasPort`; `CommentRailContainer` alone subscribes, measures cards,
-virtualizes the rail and routes paired reveal/focus. Workbench may issue a
-typed reveal/reset intent or read the latest target status inside a user
-command, but it must not subscribe its composition render to geometry changes.
+`commentCanvasPort`; `CommentRailContainer` alone subscribes, owns composer/edit
+disclosure, delete confirmation and file-input refs, measures cards, virtualizes
+the rail and routes paired reveal/focus/relink intents. Workbench may issue a
+typed presentation intent or read the latest target status inside a user command,
+but it must not subscribe its composition render to comment presentation changes.
 The Tabs snapshot is part of the same aggregate; startup restore, Registry
 reconciliation and tab persistence enter through Controller-owned commands and
 narrow host ports, never React refs or effects. `DocumentSession`

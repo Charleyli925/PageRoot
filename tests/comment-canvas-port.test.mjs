@@ -113,3 +113,36 @@ test("comment canvas port sequences reveal, rail reset and composer focus intent
   port.settleCommentEditFocus(editFocus.requestId);
   assert.equal(port.getSnapshot().editFocusRequest, null);
 });
+
+test("comment canvas port owns cross-region rail presentation without comment facts", () => {
+  const port = createCommentCanvasPort();
+
+  port.setComposerOpen(true);
+  port.setEditingCommentId("comment_edit");
+  port.setFocusedCommentId("comment_focus");
+  assert.equal(port.getSnapshot().composerOpen, true);
+  assert.equal(port.getSnapshot().editingCommentId, "comment_edit");
+  assert.equal(port.getSnapshot().focusedCommentId, "comment_focus");
+
+  port.beginRelink("comment_relink");
+  assert.equal(port.getSnapshot().relinkingTarget, "comment_relink");
+  assert.equal(port.getSnapshot().relinkSelectionArmed, false);
+  assert.equal(port.getSnapshot().editingCommentId, null);
+  port.armRelinkSelection();
+  assert.equal(port.getSnapshot().relinkSelectionArmed, true);
+  port.clearRelink();
+  assert.equal(port.getSnapshot().relinkingTarget, null);
+  assert.equal(port.getSnapshot().relinkSelectionArmed, false);
+
+  const target = { kind: "composer", commentId: "comment_draft" };
+  port.requestAttachmentPicker(target, "image");
+  const picker = port.getSnapshot().attachmentPickerRequest;
+  assert.equal(picker.target, target);
+  assert.equal(picker.accept, "image");
+  port.settleAttachmentPicker(picker.requestId);
+  assert.equal(port.getSnapshot().attachmentPickerRequest, null);
+
+  port.resetLayout();
+  assert.equal(port.getSnapshot().composerOpen, false);
+  assert.equal(port.getSnapshot().focusedCommentId, null);
+});

@@ -165,7 +165,6 @@ import {
 } from "./workbench/comment-rail-container";
 import { createCommentCanvasPort } from "./workbench/comment-canvas-port";
 import {
-  deriveComposerState,
   type CommentRailContainerContext,
   type CommentRailHostActions,
 } from "./workbench/comment-rail-contract";
@@ -472,14 +471,8 @@ export default function Workbench() {
   const fenceAndFreezeCurrentCanvasRef = useRef(fenceAndFreezeCurrentCanvas);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [commentCanvasPort] = useState(createCommentCanvasPort);
-  const attachmentInputRef = useRef<HTMLInputElement>(null);
-  const attachmentInputTargetRef = useRef<{
-    kind: "composer" | "comment";
-    commentId: string;
-  } | null>(null);
   const reviewStageRef = useRef<HTMLDivElement>(null);
   const commentCounter = useRef(1);
-  const focusedCommentIdRef = useRef<string | null>(null);
   const commentEditResumePendingRef = useRef<string | null>(null);
   const pagePresentationScrollRequestRef = useRef(0);
   const [reviewAnalysisSession] = useState(
@@ -510,8 +503,6 @@ export default function Workbench() {
     new Map<string, LifecycleState | "none">(),
   );
   const interruptionPresenceRef = useRef(new Map<string, boolean>());
-  const relinkingTargetRef = useRef<string | null>(null);
-  const relinkSelectionArmedRef = useRef(false);
   const resumeSubmissionAfterRelinkRef = useRef(false);
   const normalizeCurrentGlobalCommentsRef = useRef<() => CommentItem[]>(() => []);
   const projectRulesEditorRef = useRef<HTMLTextAreaElement | null>(null);
@@ -678,12 +669,9 @@ export default function Workbench() {
   const aboutQoderAvailability = agentCatalogSnapshot?.providers?.qoder?.availability
     ?? INITIAL_QODER_AVAILABILITY;
   const [previewAttachment, setPreviewAttachment] = useState<CommentAttachment | null>(null);
-  const [composerOpen, setComposerOpen] = useState(false);
   const [drawer, setDrawer] = useState<Drawer>(null);
   const [selectedVersionId, setSelectedVersionId] = useState<string | null>(null);
-  const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
   const [handoffPreviewOpen, setHandoffPreviewOpen] = useState(false);
-  const [focusedCommentId, setFocusedCommentId] = useState<string | null>(null);
   const [fileView, setFileView] = useState<WorkspaceFileView | null>(null);
   const projectRulesSnapshot = workspaceControllerSnapshot?.projectRules
     ?? EMPTY_PROJECT_RULES_SNAPSHOT;
@@ -1367,7 +1355,6 @@ export default function Workbench() {
     useState<string | null>(null);
   const [reviewPreparing, setReviewPreparing] = useState(false);
   const [openingReadyVersion, setOpeningReadyVersion] = useState(false);
-  const [relinkingTarget, setRelinkingTarget] = useState<string | null>(null);
   // Comment ids a blocked send was parked on. The send stays pending exactly
   // while at least one of them is still unsafe, so the promise lapses by
   // derivation — re-proofs, external reloads and cancels need no effect.
@@ -1617,9 +1604,8 @@ export default function Workbench() {
         }
         setLastModifiedAt(publication.lastModifiedAt || null);
         commentCanvasPort.setSelection(null);
-        setComposerOpen(false);
         commentEditResumePendingRef.current = null;
-        setEditingCommentId(null);
+        commentCanvasPort.setEditingCommentId(null);
         setPreviewAttachment(null);
         setHandoffPreviewOpen(false);
         setCanvasMode("edit");
@@ -1850,7 +1836,7 @@ export default function Workbench() {
         });
         // Exact identity keys let tab changes cancel work without purging cache.
         reviewAnalysisSession.cancel();
-        setComposerOpen(false);
+        commentCanvasPort.setComposerOpen(false);
         for (const url of attachmentObjectUrlsRef.current.values()) {
           try {
             URL.revokeObjectURL(url);
@@ -1861,15 +1847,9 @@ export default function Workbench() {
         attachmentObjectUrlsRef.current.clear();
         setAttachmentObjectUrls({});
         setPreviewAttachment(null);
-        setEditingCommentId(null);
         commentEditResumePendingRef.current = null;
-        relinkingTargetRef.current = null;
-        relinkSelectionArmedRef.current = false;
         resumeSubmissionAfterRelinkRef.current = false;
-        setRelinkingTarget(null);
         commentCanvasPort.resetLayout();
-        focusedCommentIdRef.current = null;
-        setFocusedCommentId(null);
         setCanvasMode(
           runtimeCapabilitiesRef.current.sourceEditing !== "enabled"
             ? "preview"
@@ -1903,8 +1883,8 @@ export default function Workbench() {
       }
       if (projectEvent.type === "project-draft-recovered") {
         commentEditResumePendingRef.current = null;
-        setEditingCommentId(null);
-        setComposerOpen(false);
+        commentCanvasPort.setEditingCommentId(null);
+        commentCanvasPort.setComposerOpen(false);
         return;
       }
       if (projectEvent.type === "project-hydrated") {
@@ -2708,8 +2688,6 @@ export default function Workbench() {
   const submissionRelinkPending = submissionRelinkPendingIds.some(
     (commentId) => unsafeRelinkCommentIds.has(commentId),
   );
-  const relinkCardActive = Boolean(relinkingTarget && relinkingTarget !== "__composer");
-  const commentEditDraft = commentEditSession?.draftText ?? "";
   const unfinishedEditedComment = commentEditSession
     ? activeCommentItems.find(
         (comment) => comment.commentId === commentEditSession.commentId,
@@ -2782,12 +2760,10 @@ export default function Workbench() {
     && draftTarget
     && (draft.trim() || draftAttachments.length > 0),
   );
+  const composerOpen = commentCanvasPort.getSnapshot().composerOpen;
   useEffect(() => {
     pageViewDocumentKeyRef.current = pageViewDocumentKey;
   }, [pageViewDocumentKey]);
-  useEffect(() => {
-    focusedCommentIdRef.current = focusedCommentId;
-  }, [focusedCommentId]);
   useEffect(() => {
     const capabilities = resolveRuntimeCapabilities({
       runtimeConfig: window.htmlAIRuntime,
@@ -3428,18 +3404,8 @@ export default function Workbench() {
     target: { kind: "composer" | "comment"; commentId: string },
     accept: "all" | "image" = "all",
   ) => {
-    attachmentInputTargetRef.current = target;
-    const input = attachmentInputRef.current;
-    if (!input) return;
-    input.accept = accept === "image" ? "image/*" : "";
-    input.value = "";
-    try {
-      if (typeof input.showPicker === "function") input.showPicker();
-      else input.click();
-    } catch {
-      input.click();
-    }
-  }, []);
+    commentCanvasPort.requestAttachmentPicker(target, accept);
+  }, [commentCanvasPort]);
 
   const pasteImages = useCallback((
     event: ClipboardEvent<HTMLTextAreaElement>,
@@ -4491,9 +4457,8 @@ export default function Workbench() {
   }, [exportCurrentHtml, requestSourceHistoryAction, requestUserFlush]);
 
   const updateFocusedComment = useCallback((commentId: string | null) => {
-    focusedCommentIdRef.current = commentId;
-    setFocusedCommentId(commentId);
-  }, []);
+    commentCanvasPort.setFocusedCommentId(commentId);
+  }, [commentCanvasPort]);
 
   const queueReviewPairReveal = useCallback((
     target: HtmlCanvasSelection,
@@ -4508,10 +4473,7 @@ export default function Workbench() {
 
   const beginTargetRelink = useCallback((itemId: string) => {
     const currentComments = currentCommentSessionSnapshot();
-    relinkingTargetRef.current = itemId;
-    relinkSelectionArmedRef.current = false;
-    setRelinkingTarget(itemId);
-    setEditingCommentId(null);
+    commentCanvasPort.beginRelink(itemId);
     if (!commentEditSessionHasChanges(currentComments.editSession)) {
       workspaceControllerRef.current?.clearCommentEdit();
       commentEditResumePendingRef.current = null;
@@ -4535,10 +4497,11 @@ export default function Workbench() {
   const finishTargetRelink = useCallback((target: HtmlCanvasSelection): boolean => {
     const controller = workspaceControllerRef.current;
     const currentComments = currentCommentSessionSnapshot();
-    const relinkingId = relinkingTargetRef.current;
+    const presentation = commentCanvasPort.getSnapshot();
+    const relinkingId = presentation.relinkingTarget;
     if (
       !relinkingId
-      || !relinkSelectionArmedRef.current
+      || !presentation.relinkSelectionArmed
       || !canSaveCommentTarget(target)
     ) return false;
     if (relinkingId === "__composer") {
@@ -4548,10 +4511,8 @@ export default function Workbench() {
         : target;
       controller?.rebindCommentComposer(nextTarget);
       commentCanvasPort.setSelection(nextTarget);
-      relinkingTargetRef.current = null;
-      relinkSelectionArmedRef.current = false;
-      setRelinkingTarget(null);
-      setComposerOpen(true);
+      commentCanvasPort.clearRelink();
+      commentCanvasPort.setComposerOpen(true);
       queueReviewPairReveal(nextTarget, "__composer");
       requestComposerFocus();
       return true;
@@ -4560,9 +4521,7 @@ export default function Workbench() {
       (comment) => comment.commentId === relinkingId,
     );
     if (!current) {
-      relinkingTargetRef.current = null;
-      relinkSelectionArmedRef.current = false;
-      setRelinkingTarget(null);
+      commentCanvasPort.clearRelink();
       return false;
     }
     const rebound = controller?.rebindCommentTarget({
@@ -4579,9 +4538,7 @@ export default function Workbench() {
       comments: CommentItem[];
     }).comments;
     commentCanvasPort.setSelection(nextTarget);
-    relinkingTargetRef.current = null;
-    relinkSelectionArmedRef.current = false;
-    setRelinkingTarget(null);
+    commentCanvasPort.clearRelink();
     updateFocusedComment(relinkingId);
     queueReviewPairReveal(nextTarget, relinkingId);
     const remainingUnsafe = unsafeRelinkComments(nextComments);
@@ -4612,16 +4569,14 @@ export default function Workbench() {
   ]);
 
   const cancelTargetRelink = useCallback(() => {
-    const relinkingId = relinkingTargetRef.current;
-    relinkingTargetRef.current = null;
-    relinkSelectionArmedRef.current = false;
+    const relinkingId = commentCanvasPort.getSnapshot().relinkingTarget;
+    commentCanvasPort.clearRelink();
     resumeSubmissionAfterRelinkRef.current = false;
     setSubmissionRelinkPendingIds([]);
-    setRelinkingTarget(null);
     if (relinkingId === "__composer") {
       requestComposerFocus();
     }
-  }, [requestComposerFocus]);
+  }, [commentCanvasPort, requestComposerFocus]);
 
   // The durable relink entry on the comment rail. The surface is persistent,
   // so a click lost to a reflow window can simply be repeated (#281); the
@@ -4636,9 +4591,9 @@ export default function Workbench() {
 
   const clearCurrentComposer = useCallback(() => {
     workspaceControllerRef.current?.cancelCommentComposer();
-    setComposerOpen(false);
+    commentCanvasPort.setComposerOpen(false);
     updateFocusedComment(null);
-  }, [updateFocusedComment]);
+  }, [commentCanvasPort, updateFocusedComment]);
 
   const resumeCurrentComposer = useCallback(() => {
     const target = currentCommentSessionSnapshot().composerTarget;
@@ -4652,7 +4607,7 @@ export default function Workbench() {
     workspaceControllerRef.current?.rebindCommentComposer(nextTarget);
     commentCanvasPort.setSelection(nextTarget);
     updateFocusedComment(null);
-    setComposerOpen(true);
+    commentCanvasPort.setComposerOpen(true);
     queueReviewPairReveal(nextTarget, "__composer");
     if (toastRef.current?.dedupeKey === "unfinished-comment-draft") {
       setToast(null);
@@ -4691,7 +4646,7 @@ export default function Workbench() {
     const currentDocument = currentDocumentSessionSnapshot();
     const currentComments = currentCommentSessionSnapshot();
     if (!controller) return;
-    if (relinkingTargetRef.current && finishTargetRelink(target)) return;
+    if (commentCanvasPort.getSnapshot().relinkingTarget && finishTargetRelink(target)) return;
     if (attachmentUploadCount > 0) return;
     if (
       currentRun.activeLocked
@@ -4717,7 +4672,7 @@ export default function Workbench() {
     if (currentEdit) {
       controller.clearCommentEdit();
       commentEditResumePendingRef.current = null;
-      setEditingCommentId(null);
+      commentCanvasPort.setEditingCommentId(null);
     }
     // Project identity starts at file open. Recheck here to serialize a
     // just-opened composer with any still-pending registration.
@@ -4761,7 +4716,7 @@ export default function Workbench() {
       controller.rebindCommentComposer(target);
     }
     updateFocusedComment(null);
-    setComposerOpen(true);
+    commentCanvasPort.setComposerOpen(true);
     queueReviewPairReveal(target, "__composer");
     requestComposerFocus();
   }, [
@@ -4799,11 +4754,11 @@ export default function Workbench() {
       text: "",
       resolution: "exact",
     };
-    const wasRelinking = Boolean(relinkingTargetRef.current);
+    const wasRelinking = Boolean(commentCanvasPort.getSnapshot().relinkingTarget);
     editorRef.current?.clearSelection();
     commentCanvasPort.setSelection(null);
     if (wasRelinking) {
-      relinkSelectionArmedRef.current = true;
+      commentCanvasPort.armRelinkSelection();
       finishTargetRelink(globalTarget);
       return;
     }
@@ -4823,7 +4778,7 @@ export default function Workbench() {
       currentComments.composerDraft.trim()
       || currentComments.composerAttachments.length > 0
     ) {
-      setComposerOpen(false);
+      commentCanvasPort.setComposerOpen(false);
       updateFocusedComment(null);
       return;
     }
@@ -4831,6 +4786,7 @@ export default function Workbench() {
   }, [
     attachmentUploadCount,
     clearCurrentComposer,
+    commentCanvasPort,
     currentCommentSessionSnapshot,
     updateFocusedComment,
   ]);
@@ -4839,12 +4795,10 @@ export default function Workbench() {
     if (attachmentUploadCount > 0) return;
     const outcome = workspaceController?.discardCommentComposer();
     if (outcome?.status !== "succeeded") return;
-    if (relinkingTargetRef.current === "__composer") {
-      relinkingTargetRef.current = null;
-      relinkSelectionArmedRef.current = false;
-      setRelinkingTarget(null);
+    if (commentCanvasPort.getSnapshot().relinkingTarget === "__composer") {
+      commentCanvasPort.clearRelink();
     }
-    setComposerOpen(false);
+    commentCanvasPort.setComposerOpen(false);
     updateFocusedComment(null);
     const discardedAttachments = (
       outcome.value as { attachments?: CommentAttachment[] }
@@ -4857,6 +4811,7 @@ export default function Workbench() {
     }
   }, [
     attachmentUploadCount,
+    commentCanvasPort,
     forgetAttachmentObjectUrl,
     updateFocusedComment,
     workspaceController,
@@ -4911,7 +4866,7 @@ export default function Workbench() {
       return;
     }
     const comment = (outcome.value as { comment: CommentItem }).comment;
-    setComposerOpen(false);
+    commentCanvasPort.setComposerOpen(false);
     if (toastRef.current?.dedupeKey === "unfinished-comment-draft") {
       setToast(null);
     }
@@ -4940,6 +4895,7 @@ export default function Workbench() {
     viewMode,
     workspaceController,
     beginTargetRelink,
+    commentCanvasPort,
   ]);
 
   const queueReviewCommentFocus = useCallback((
@@ -4988,7 +4944,7 @@ export default function Workbench() {
     const outcome = controller.beginCommentEdit({ commentId: comment.commentId });
     if (outcome.status !== "succeeded") return false;
     const nextSession = (outcome.value as { session: CommentEditSession }).session;
-    setEditingCommentId(comment.commentId);
+    commentCanvasPort.setEditingCommentId(comment.commentId);
     queueReviewCommentFocus(comment.target, comment.commentId);
     if (focusText) {
       commentCanvasPort.requestCommentEditFocus(
@@ -5017,7 +4973,7 @@ export default function Workbench() {
     });
     if (outcome?.status !== "succeeded") return;
     commentEditResumePendingRef.current = null;
-    setEditingCommentId(null);
+    commentCanvasPort.setEditingCommentId(null);
     const stagedAttachments = (
       outcome.value as { stagedAttachments?: CommentAttachment[] }
     ).stagedAttachments ?? [];
@@ -5032,6 +4988,7 @@ export default function Workbench() {
     }
   }, [
     attachmentUploadCount,
+    commentCanvasPort,
     currentCommentSessionSnapshot,
     forgetAttachmentObjectUrl,
     queueReviewCommentFocus,
@@ -5049,7 +5006,7 @@ export default function Workbench() {
     if (!current) {
       controller?.clearCommentEdit();
       commentEditResumePendingRef.current = null;
-      setEditingCommentId(null);
+      commentCanvasPort.setEditingCommentId(null);
       return;
     }
     const located = editorRef.current?.select(
@@ -5066,7 +5023,7 @@ export default function Workbench() {
     commentEditResumePendingRef.current = targetVisible
       ? null
       : current.commentId;
-    if (targetVisible) setEditingCommentId(current.commentId);
+    if (targetVisible) commentCanvasPort.setEditingCommentId(current.commentId);
     queueReviewCommentFocus(nextTarget, current.commentId);
     if (toastRef.current?.dedupeKey === "unfinished-comment-edit") {
       setToast(null);
@@ -5097,7 +5054,7 @@ export default function Workbench() {
     const outcome = workspaceController?.confirmCommentEdit({ commentId });
     if (outcome?.status !== "succeeded") return;
     commentEditResumePendingRef.current = null;
-    setEditingCommentId(null);
+    commentCanvasPort.setEditingCommentId(null);
     const removedAttachments = (
       outcome.value as { removedAttachments?: CommentAttachment[] }
     ).removedAttachments ?? [];
@@ -5111,6 +5068,7 @@ export default function Workbench() {
   }, [
     attachmentUploadCount,
     cancelCommentEdit,
+    commentCanvasPort,
     currentCommentSessionSnapshot,
     forgetAttachmentObjectUrl,
     queueReviewCommentFocus,
@@ -5127,7 +5085,7 @@ export default function Workbench() {
     };
     if (editSession) {
       commentEditResumePendingRef.current = null;
-      setEditingCommentId(null);
+      commentCanvasPort.setEditingCommentId(null);
     }
     for (const attachment of attachments) {
       forgetAttachmentObjectUrl(attachment.attachmentId);
@@ -5137,6 +5095,7 @@ export default function Workbench() {
       queueReviewPairReveal(deleted.target, "");
     }
   }, [
+    commentCanvasPort,
     forgetAttachmentObjectUrl,
     queueReviewPairReveal,
     updateFocusedComment,
@@ -5154,18 +5113,19 @@ export default function Workbench() {
       workspaceControllerRef.current?.clearCommentEdit();
       commentEditResumePendingRef.current = null;
       const frame = window.requestAnimationFrame(() => {
-        setEditingCommentId(null);
+        commentCanvasPort.setEditingCommentId(null);
       });
       return () => window.cancelAnimationFrame(frame);
     }
     const targetStatus = commentCanvasPort.getSnapshot()
       .targetLayouts[editedComment.target.id]?.status;
+    const presentation = commentCanvasPort.getSnapshot();
     const leftEditingContext = (
       canvasMode !== "edit"
       || targetStatus === "hidden"
       || (
-        Boolean(focusedCommentId)
-        && focusedCommentId !== session.commentId
+        Boolean(presentation.focusedCommentId)
+        && presentation.focusedCommentId !== session.commentId
       )
     );
     if (!leftEditingContext) return;
@@ -5175,9 +5135,9 @@ export default function Workbench() {
       });
       return () => window.cancelAnimationFrame(frame);
     }
-    if (editingCommentId === session.commentId) {
+    if (presentation.editingCommentId === session.commentId) {
       const frame = window.requestAnimationFrame(() => {
-        setEditingCommentId(null);
+        commentCanvasPort.setEditingCommentId(null);
       });
       return () => window.cancelAnimationFrame(frame);
     }
@@ -5187,8 +5147,6 @@ export default function Workbench() {
     commentCanvasPort,
     commentEditSession,
     currentCommentSessionSnapshot,
-    editingCommentId,
-    focusedCommentId,
   ]);
 
   useEffect(() => {
@@ -5214,7 +5172,7 @@ export default function Workbench() {
     );
     if (!targetVisible) return;
     commentEditResumePendingRef.current = null;
-    setEditingCommentId(current.commentId);
+    commentCanvasPort.setEditingCommentId(current.commentId);
     queueReviewCommentFocus(current.target, current.commentId);
     commentCanvasPort.requestCommentEditFocus(current.commentId);
   }, [
@@ -5234,31 +5192,37 @@ export default function Workbench() {
       (comment) => comment.commentId === session.commentId,
     );
     if (!current) return;
-    const targetStatus = commentCanvasPort.getSnapshot()
-      .targetLayouts[current.target.id]?.status;
+    const presentation = commentCanvasPort.getSnapshot();
+    const targetStatus = presentation.targetLayouts[current.target.id]?.status;
     const pendingId = commentEditResumePendingRef.current;
     if (
       pendingId === session.commentId
       && (current.target.tagName === "body" || targetStatus === "visible")
     ) {
       commentEditResumePendingRef.current = null;
-      setEditingCommentId(current.commentId);
+      commentCanvasPort.setEditingCommentId(current.commentId);
       queueReviewCommentFocus(current.target, current.commentId);
       commentCanvasPort.requestCommentEditFocus(current.commentId);
       return;
     }
-    if (editingCommentId !== session.commentId || targetStatus !== "hidden") return;
+    const leftFocusedComment = Boolean(
+      presentation.focusedCommentId
+      && presentation.focusedCommentId !== session.commentId
+    );
+    if (
+      presentation.editingCommentId !== session.commentId
+      || (targetStatus !== "hidden" && !leftFocusedComment)
+    ) return;
     if (!commentEditSessionHasChanges(session)) {
       window.requestAnimationFrame(() => cancelCommentEdit(false));
     } else {
-      window.requestAnimationFrame(() => setEditingCommentId(null));
+      window.requestAnimationFrame(() => commentCanvasPort.setEditingCommentId(null));
     }
   }), [
     cancelCommentEdit,
     canvasMode,
     commentCanvasPort,
     currentCommentSessionSnapshot,
-    editingCommentId,
     queueReviewCommentFocus,
   ]);
 
@@ -5282,12 +5246,13 @@ export default function Workbench() {
   const handleCanvasSelection = useCallback((target: HtmlCanvasSelection | null) => {
     commentCanvasPort.resetRail();
     commentCanvasPort.setSelection(target);
+    const currentComposerOpen = commentCanvasPort.getSnapshot().composerOpen;
     if (!target) {
-      if (!composerOpen) updateFocusedComment(null);
+      if (!currentComposerOpen) updateFocusedComment(null);
       return;
     }
     if (finishTargetRelink(target)) return;
-    if (composerOpen || viewMode === "history") return;
+    if (currentComposerOpen || viewMode === "history") return;
     const matchesTarget = (comment: CommentItem) => (
       comment.target.id === target.id
       || (
@@ -5295,7 +5260,7 @@ export default function Workbench() {
         && comment.target.level === target.level
       )
     );
-    const currentFocusedId = focusedCommentIdRef.current;
+    const currentFocusedId = commentCanvasPort.getSnapshot().focusedCommentId;
     const focusedMatch = visibleCommentItems.find(
       (comment) => comment.commentId === currentFocusedId && matchesTarget(comment),
     );
@@ -5310,7 +5275,6 @@ export default function Workbench() {
     updateFocusedComment(nextComment.commentId);
   }, [
     commentCanvasPort,
-    composerOpen,
     finishTargetRelink,
     updateFocusedComment,
     viewMode,
@@ -5720,9 +5684,9 @@ export default function Workbench() {
       }
       setLastModifiedAt(result.lastModifiedAt || null);
       commentCanvasPort.setSelection(null);
-      setComposerOpen(false);
+      commentCanvasPort.setComposerOpen(false);
       commentEditResumePendingRef.current = null;
-      setEditingCommentId(null);
+      commentCanvasPort.setEditingCommentId(null);
       setPreviewAttachment(null);
       setHandoffPreviewOpen(false);
       setCanvasMode("edit");
@@ -6342,7 +6306,7 @@ export default function Workbench() {
             currentComments.composerCommentId === action.target.commentId
             && target
           ) {
-            setComposerOpen(true);
+            commentCanvasPort.setComposerOpen(true);
             queueReviewPairReveal(target, "__composer");
             requestComposerFocus();
           }
@@ -6509,23 +6473,6 @@ export default function Workbench() {
   }, [currentCommentSessionSnapshot, draftCommentId, pasteImages]);
   const commentRailContext: CommentRailContainerContext = {
     reviewStageRef,
-    composer: deriveComposerState({
-      relinkingTarget,
-      editingCommentId,
-      commentEditSession,
-      commentEditDraft,
-      commentEditAttachments: commentEditSession?.draftAttachments ?? [],
-      composerOpen,
-      draftTarget,
-      draft,
-      draftCommentId,
-      draftAttachments,
-      hasCollapsedCommentDraft: Boolean(
-        draftTarget
-        && !composerOpen
-        && (draft.trim() || draftAttachments.length > 0)
-      ),
-    }),
     canvasMode,
     viewMode,
     expectedCommentLayoutSourceSha256,
@@ -6536,17 +6483,14 @@ export default function Workbench() {
     interactionLocked,
     unfinishedEditedComment,
     unsafeRelinkCommentItems,
-    relinkCardActive,
     projectLoadError,
     otherTabCommentsContextKey,
     attachmentObjectUrls,
-    focusedCommentId,
   };
   const commentRailActions = useMemo<CommentRailHostActions>(() => ({
     openGlobalCommentComposer,
     resumeCurrentComposer,
     resumeCommentEdit,
-    hideCommentComposer: () => setComposerOpen(false),
     focusCommentTarget,
     startUnsafeTargetRelink,
     cancelTargetRelink,
@@ -6571,6 +6515,7 @@ export default function Workbench() {
     queueReviewCommentFocus,
     deleteComment,
     beginEdit: beginCommentEdit,
+    uploadAttachments,
   }), [
     addComment,
     beginCommentEdit,
@@ -6599,6 +6544,7 @@ export default function Workbench() {
     startUnsafeTargetRelink,
     updateCommentDraftFromRail,
     updateCommentEditDraft,
+    uploadAttachments,
   ]);
 
   return (
@@ -6757,18 +6703,6 @@ export default function Workbench() {
           type="file"
           accept=".html,.htm,text/html"
           onChange={(event) => void handleBrowserFile(event)}
-        />
-        <input
-          ref={attachmentInputRef}
-          className="sr-only"
-          type="file"
-          multiple
-          onChange={(event) => {
-            const target = attachmentInputTargetRef.current;
-            const files = [...(event.target.files ?? [])];
-            event.target.value = "";
-            if (target) void uploadAttachments(files, target, "file-picker");
-          }}
         />
       </WorkbenchHeaderShell> : null}
 
@@ -6993,8 +6927,8 @@ export default function Workbench() {
                   height="var(--comment-canvas-height, 760px)"
                   onChange={handleCanvasChange}
                   onInteraction={() => {
-                    if (relinkingTargetRef.current) {
-                      relinkSelectionArmedRef.current = true;
+                    if (commentCanvasPort.getSnapshot().relinkingTarget) {
+                      commentCanvasPort.armRelinkSelection();
                     }
                   }}
                   editRuntimeGrant={editRuntimeGrant}

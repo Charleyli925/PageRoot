@@ -29,12 +29,11 @@ import {
 import { relinkNoticeCopy } from "./comment-relink-model.js";
 import {
   composerViewFields,
-  type CommentDraft,
+  deriveComposerState,
   type CommentRailActions,
   type CommentRailContainerContext,
   type CommentRailHostActions,
   type CommentRailModel,
-  type ComposerState,
   type OtherTabCommentGroup,
 } from "./comment-rail-contract";
 import type { CommentCanvasPort } from "./comment-canvas-port";
@@ -55,41 +54,6 @@ export type CommentRailCapability = CommentControllerCapability<
   CommentEditSession
 >;
 
-function liveComposer(
-  composer: ComposerState,
-  workingCopy: ReturnType<CommentRailCapability["getSnapshot"]>["workingCopy"],
-): ComposerState {
-  if (!workingCopy || composer.kind === "relinking") return composer;
-  if (composer.kind === "editing") {
-    const session = workingCopy.editSession;
-    if (!session || session.commentId !== composer.commentId) return composer;
-    return {
-      ...composer,
-      draft: {
-        ...composer.draft,
-        text: session.draftText,
-        attachments: session.draftAttachments,
-      },
-      session,
-    };
-  }
-  const draft = {
-    text: workingCopy.composerDraft,
-    commentId: workingCopy.composerCommentId,
-    attachments: workingCopy.composerAttachments,
-    target: workingCopy.composerTarget,
-  };
-  if (composer.kind === "new") {
-    return {
-      kind: "new",
-      target: workingCopy.composerTarget || composer.target,
-      draft,
-    };
-  }
-  if (!composer.collapsedDraft && !workingCopy.composerTarget) return composer;
-  return { kind: "closed", collapsedDraft: draft };
-}
-
 function commentMeasurementKey(itemKey: string, layoutState: unknown): string {
   const text = JSON.stringify(layoutState);
   let hash = 2_166_136_261;
@@ -109,34 +73,6 @@ function shallowEqualRecord(
   const rightKeys = Object.keys(right).filter((key) => !ignored.has(key));
   return leftKeys.length === rightKeys.length
     && leftKeys.every((key) => Object.is(left[key], right[key]));
-}
-
-function sameDraft(left: CommentDraft | null, right: CommentDraft | null): boolean {
-  if (left === right) return true;
-  if (!left || !right) return false;
-  return left.text === right.text
-    && left.commentId === right.commentId
-    && left.attachments === right.attachments
-    && left.target === right.target;
-}
-
-function sameComposer(left: ComposerState, right: ComposerState): boolean {
-  if (left === right) return true;
-  if (left.kind !== right.kind) return false;
-  if (left.kind === "closed" && right.kind === "closed") {
-    return sameDraft(left.collapsedDraft, right.collapsedDraft);
-  }
-  if (left.kind === "new" && right.kind === "new") {
-    return left.target === right.target && sameDraft(left.draft, right.draft);
-  }
-  if (left.kind === "editing" && right.kind === "editing") {
-    return left.commentId === right.commentId
-      && left.session === right.session
-      && sameDraft(left.draft, right.draft);
-  }
-  return left.kind === "relinking"
-    && right.kind === "relinking"
-    && left.commentId === right.commentId;
 }
 
 function draftScope(target: HtmlCanvasSelection | null): string {
@@ -162,6 +98,10 @@ export const CommentRailContainer = memo(function CommentRailContainer({
   const commentsHeaderRef = useRef<HTMLElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const commentEditRef = useRef<HTMLTextAreaElement>(null);
+  const attachmentInputRef = useRef<HTMLInputElement>(null);
+  const attachmentInputTargetRef = useRef<{
+    target: Parameters<CommentRailHostActions["uploadAttachments"]>[1];
+  } | null>(null);
   const handledComposerFocusRevisionRef = useRef(0);
   const commentRailOffsetRef = useRef(0);
   const commentRailMinimumOffsetRef = useRef(0);
@@ -182,7 +122,27 @@ export const CommentRailContainer = memo(function CommentRailContainer({
     canvasPort.getSnapshot,
     canvasPort.getSnapshot,
   );
-  const composer = liveComposer(context.composer, snapshot.workingCopy);
+  const workingCopy = snapshot.workingCopy;
+  const composer = deriveComposerState({
+    relinkingTarget: canvasSnapshot.relinkingTarget,
+    editingCommentId: canvasSnapshot.editingCommentId,
+    commentEditSession: workingCopy?.editSession ?? null,
+    commentEditDraft: workingCopy?.editSession?.draftText ?? "",
+    commentEditAttachments: workingCopy?.editSession?.draftAttachments ?? [],
+    composerOpen: canvasSnapshot.composerOpen,
+    draftTarget: workingCopy?.composerTarget ?? null,
+    draft: workingCopy?.composerDraft ?? "",
+    draftCommentId: workingCopy?.composerCommentId ?? null,
+    draftAttachments: workingCopy?.composerAttachments ?? [],
+    hasCollapsedCommentDraft: Boolean(
+      workingCopy?.composerTarget
+      && !canvasSnapshot.composerOpen
+      && (
+        workingCopy.composerDraft.trim()
+        || workingCopy.composerAttachments.length > 0
+      )
+    ),
+  });
   const {
     composerOpen,
     draftTarget,
@@ -560,7 +520,7 @@ export const CommentRailContainer = memo(function CommentRailContainer({
     viewportTop: Math.max(0, commentViewport.top - commentRailOffset),
     viewportHeight: commentViewport.height,
     forcedIds: [
-      context.focusedCommentId,
+      canvasSnapshot.focusedCommentId,
       editingCommentId,
       pendingDeleteCommentId,
     ].filter((value): value is string => Boolean(value)),
@@ -570,7 +530,7 @@ export const CommentRailContainer = memo(function CommentRailContainer({
     commentRailOffset,
     commentViewport.height,
     commentViewport.top,
-    context.focusedCommentId,
+    canvasSnapshot.focusedCommentId,
     pendingDeleteCommentId,
     editingCommentId,
     sortedVisibleCommentItems,
@@ -741,7 +701,7 @@ export const CommentRailContainer = memo(function CommentRailContainer({
   useEffect(() => {
     if (
       context.canvasMode === "edit"
-      && (context.focusedCommentId || composerOpen || editingCommentId)
+      && (canvasSnapshot.focusedCommentId || composerOpen || editingCommentId)
     ) return undefined;
     const frame = window.requestAnimationFrame(() => {
       commentRailOffsetRef.current = 0;
@@ -749,7 +709,7 @@ export const CommentRailContainer = memo(function CommentRailContainer({
       setCommentRailOffset(0);
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [context.canvasMode, context.focusedCommentId, composerOpen, editingCommentId]);
+  }, [canvasSnapshot.focusedCommentId, context.canvasMode, composerOpen, editingCommentId]);
 
   useEffect(() => {
     commentRailOffsetRef.current = 0;
@@ -844,6 +804,23 @@ export const CommentRailContainer = memo(function CommentRailContainer({
     canvasPort.settleCommentEditFocus(request.requestId);
   }, [canvasPort, canvasSnapshot.editFocusRequest, editingCommentId]);
 
+  useLayoutEffect(() => {
+    const request = canvasSnapshot.attachmentPickerRequest;
+    if (!request) return;
+    const input = attachmentInputRef.current;
+    if (!input) return;
+    attachmentInputTargetRef.current = { target: request.target };
+    input.accept = request.accept === "image" ? "image/*" : "";
+    input.value = "";
+    try {
+      if (typeof input.showPicker === "function") input.showPicker();
+      else input.click();
+    } catch {
+      input.click();
+    }
+    canvasPort.settleAttachmentPicker(request.requestId);
+  }, [canvasPort, canvasSnapshot.attachmentPickerRequest]);
+
   const model = useMemo<CommentRailModel>(() => ({
     composer,
     commentsPanelRef,
@@ -873,10 +850,13 @@ export const CommentRailContainer = memo(function CommentRailContainer({
       || context.changeEvents,
     composerInCurrentTab,
     composerTop: commentRailLayout.composerTop,
-    focusedCommentId: context.focusedCommentId,
+    focusedCommentId: canvasSnapshot.focusedCommentId,
     relinkRailCardVisible,
     relinkCardCopy: relinkNoticeCopy(context.unsafeRelinkCommentItems),
-    relinkCardActive: context.relinkCardActive,
+    relinkCardActive: Boolean(
+      canvasSnapshot.relinkingTarget
+      && canvasSnapshot.relinkingTarget !== "__composer"
+    ),
     projectLoadError: context.projectLoadError,
     draftTargetScope: draftScope(draftTarget),
     attachmentUploadCount,
@@ -914,12 +894,12 @@ export const CommentRailContainer = memo(function CommentRailContainer({
     context.activeCommentCount,
     context.attachmentObjectUrls,
     context.changeEvents,
-    context.focusedCommentId,
     context.interactionLocked,
     context.otherTabCommentsContextKey,
     pendingDeleteCommentId,
     context.projectLoadError,
-    context.relinkCardActive,
+    canvasSnapshot.focusedCommentId,
+    canvasSnapshot.relinkingTarget,
     context.unfinishedEditedComment,
     context.unsafeRelinkCommentItems,
     context.viewMode,
@@ -951,15 +931,38 @@ export const CommentRailContainer = memo(function CommentRailContainer({
       ));
     },
     collapseOtherTabComments: () => setExpandedOtherTabCommentsKey(""),
+    hideCommentComposer: () => canvasPort.setComposerOpen(false),
+    openAttachmentPicker: (target, accept = "all") => {
+      canvasPort.requestAttachmentPicker(target, accept);
+    },
     requestDeleteComment: (commentId) => setPendingDeleteCommentId(commentId),
     clearDeleteRequest: () => setPendingDeleteCommentId(null),
     deleteComment: (commentId) => {
       setPendingDeleteCommentId(null);
       actions.deleteComment(commentId);
     },
-  }), [actions, capability, context.otherTabCommentsContextKey]);
+  }), [actions, canvasPort, capability, context.otherTabCommentsContextKey]);
 
-  return <CommentRailView model={model} actions={liveActions} />;
+  return (
+    <>
+      <CommentRailView model={model} actions={liveActions} />
+      <input
+        ref={attachmentInputRef}
+        className="sr-only"
+        type="file"
+        multiple
+        onChange={(event) => {
+          const pending = attachmentInputTargetRef.current;
+          attachmentInputTargetRef.current = null;
+          const files = [...(event.target.files ?? [])];
+          event.target.value = "";
+          if (pending) {
+            void actions.uploadAttachments(files, pending.target, "file-picker");
+          }
+        }}
+      />
+    </>
+  );
 }, (previous, next) => (
   previous.capability === next.capability
   && previous.canvasPort === next.canvasPort
@@ -967,7 +970,5 @@ export const CommentRailContainer = memo(function CommentRailContainer({
   && shallowEqualRecord(
     previous.context as unknown as Record<string, unknown>,
     next.context as unknown as Record<string, unknown>,
-    new Set(["composer"]),
   )
-  && sameComposer(previous.context.composer, next.context.composer)
 ));
