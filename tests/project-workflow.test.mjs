@@ -659,6 +659,122 @@ test("hydration correlates repository timing with its unique operation", async (
   });
 });
 
+test("production split workspace commits Core without a second source read and fences Supplemental", async (t) => {
+  let sourceCalls = 0;
+  const harness = createHarness({
+    bridge: {
+      async workspaceEnvelope(sourcePath, options) {
+        const flat = {
+          ...workspacePayload(sourcePath, A_HTML),
+          content: A_HTML,
+          sourceSha256: sha256(A_HTML),
+          lastModifiedAt: "2026-08-27T00:00:00.000Z",
+        };
+        return {
+          workspaceEnvelopeVersion: 1,
+          operationId: options.operationId,
+          snapshotRevision: `${options.operationId}:revision_1`,
+          core: {
+            ...flat,
+            project: undefined,
+            paths: undefined,
+            versions: undefined,
+            sourceHistory: undefined,
+          },
+          supplemental: {
+            operationId: options.operationId,
+            snapshotRevision: `${options.operationId}:revision_1`,
+            project: flat.project,
+            paths: flat.paths,
+            versions: flat.versions,
+            sourceHistory: null,
+          },
+          performanceTiming: { workspaceTotalMs: 9 },
+        };
+      },
+      async source() {
+        sourceCalls += 1;
+        throw new Error("split workspace must not repeat the source read");
+      },
+    },
+    projectOpen: {
+      async getActive() {
+        return {
+          name: "A",
+          sourcePath: A_PATH,
+          html: OLD_HTML,
+          sha256: sha256(OLD_HTML),
+        };
+      },
+    },
+    initialProject: false,
+  });
+  t.after(() => harness.workflow.dispose());
+
+  const opened = await harness.workflow.openProject({ kind: "startup" });
+  assert.equal(opened.status, "succeeded");
+  await waitFor(() => harness.workflow.getSnapshot().supplemental.phase === "ready");
+
+  assert.equal(sourceCalls, 0);
+  assert.equal(harness.documentSession.html, A_HTML);
+  assert.deepEqual(harness.versionSession.snapshot.versions, [
+    { id: `version_${slug(A_PATH)}` },
+  ]);
+  assert.ok(harness.events.some((event) => event.type === "project-core-ready"));
+  assert.ok(harness.events.some((event) => event.type === "project-hydrated"));
+});
+
+test("Supplemental failure never rolls back committed Core HTML", async (t) => {
+  const harness = createHarness({
+    bridge: {
+      async workspaceEnvelope(sourcePath, options) {
+        const flat = {
+          ...workspacePayload(sourcePath, A_HTML),
+          content: A_HTML,
+          sourceSha256: sha256(A_HTML),
+        };
+        return {
+          workspaceEnvelopeVersion: 1,
+          operationId: options.operationId,
+          snapshotRevision: `${options.operationId}:revision_2`,
+          core: flat,
+          supplemental: {
+            operationId: options.operationId,
+            snapshotRevision: `${options.operationId}:revision_2`,
+            versions: flat.versions,
+            sourceHistory: { revision: 1 },
+          },
+        };
+      },
+    },
+    projectOpen: {
+      async getActive() {
+        return {
+          name: "A",
+          sourcePath: A_PATH,
+          html: OLD_HTML,
+          sha256: sha256(OLD_HTML),
+        };
+      },
+    },
+    initialProject: false,
+  });
+  harness.documentWorkflow.activateSourceHistory = () => {
+    throw new Error("supplement unavailable");
+  };
+  t.after(() => harness.workflow.dispose());
+
+  const opened = await harness.workflow.openProject({ kind: "startup" });
+  assert.equal(opened.status, "succeeded");
+  await waitFor(() => harness.workflow.getSnapshot().supplemental.phase === "failed");
+
+  assert.equal(harness.workflow.projectHydrating, false);
+  assert.equal(harness.documentSession.html, A_HTML);
+  assert.equal(harness.workflow.projectLoadError, null);
+  assert.ok(harness.events.some((event) => event.type === "project-core-ready"));
+  assert.ok(harness.events.some((event) => event.type === "project-supplemental-failed"));
+});
+
 test("concurrent catalog refreshes coalesce into one in-flight read", async (t) => {
   let resolveCatalog;
   let catalogCalls = 0;

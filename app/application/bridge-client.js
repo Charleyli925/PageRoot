@@ -188,6 +188,16 @@ export function createBridgeClient({
       },
       "本地项目记录不可用。",
     ),
+    workspaceEnvelope: (sourcePath, { operationId } = {}) => query(
+      "/workspace",
+      {
+        sourcePath,
+        projectStorageVersion: PROJECT_FILE_STORAGE_VERSION,
+        operationId,
+        shape: "core-supplemental",
+      },
+      "本地项目记录不可用。",
+    ),
     source: (sourcePath, { timeoutMs = DEFAULT_READ_TIMEOUT_MS } = {}) => query(
       "/source",
       { sourcePath, projectStorageVersion: PROJECT_FILE_STORAGE_VERSION },

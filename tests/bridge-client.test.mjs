@@ -186,6 +186,21 @@ test("Bridge client retries a transient read and attaches authorization", async 
   );
 });
 
+test("Bridge client requests a Core/Supplemental workspace with one operation identity", async () => {
+  let requestedUrl = null;
+  const client = createBridgeClient({
+    baseUrl: "http://127.0.0.1:4317",
+    fetchImpl: async (input) => {
+      requestedUrl = new URL(String(input));
+      return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    },
+  });
+  await client.workspaceEnvelope("/tmp/page.html", { operationId: "hydration_123" });
+  assert.equal(requestedUrl.pathname, "/workspace");
+  assert.equal(requestedUrl.searchParams.get("shape"), "core-supplemental");
+  assert.equal(requestedUrl.searchParams.get("operationId"), "hydration_123");
+});
+
 test("Bridge client exposes the five neutral Agent routes and keeps availability alias", async () => {
   const requests = [];
   const client = createBridgeClient({

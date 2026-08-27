@@ -551,6 +551,16 @@ export async function architectureViolations() {
     ),
     "utf8",
   );
+  const projectOpenOperationProcedure = await readFile(
+    path.join(
+      PRODUCT_ROOT,
+      "app",
+      "application",
+      "project",
+      "open-operation-procedure.js",
+    ),
+    "utf8",
+  );
   const projectRulesSession = await readFile(
     path.join(
       PRODUCT_ROOT,
@@ -619,6 +629,16 @@ export async function architectureViolations() {
   const projectWorkflowAst = parseModule(
     path.join(PRODUCT_ROOT, "app", "application", "project-workflow.js"),
     projectWorkflow,
+  );
+  const projectOpenOperationProcedureAst = parseModule(
+    path.join(
+      PRODUCT_ROOT,
+      "app",
+      "application",
+      "project",
+      "open-operation-procedure.js",
+    ),
+    projectOpenOperationProcedure,
   );
   const runWorkflowAst = parseModule(
     path.join(PRODUCT_ROOT, "app", "application", "run-workflow.js"),
@@ -694,6 +714,22 @@ export async function architectureViolations() {
   ) {
     violations.push(
       "app/application/project-workflow.js: hydration, switch and close must remain public ProjectWorkflow commands",
+    );
+  }
+  if (
+    !exportsSymbol(projectOpenOperationProcedureAst, "acquireProjectOpenWorkspace", {
+      kind: "function",
+    })
+    || !exportsSymbol(projectOpenOperationProcedureAst, "prepareProjectOpenCore", {
+      kind: "function",
+    })
+    || /(?:^|\n)\s*(?:export\s+)?class\s/u.test(projectOpenOperationProcedure)
+    || /from\s+["'][^"']*(?:session|workflow|controller)[^"']*["']/iu.test(
+      projectOpenOperationProcedure,
+    )
+  ) {
+    violations.push(
+      "app/application/project/open-operation-procedure.js: open procedure must remain stateless, class-free and independent of Session/Workflow/Controller owners",
     );
   }
   if (

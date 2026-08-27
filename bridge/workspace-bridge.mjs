@@ -874,6 +874,47 @@ async function projectFileWorkspaceState(sourcePath, options = {}) {
   return workspace ? await projectFileBaseWorkspaceState(workspace) : null;
 }
 
+function workspaceSnapshotRevision(state, operationId) {
+  const operation = String(operationId || "workspace");
+  const projectId = String(state.projectId || "unmanaged");
+  const documentId = String(state.documentId || "unmanaged");
+  const sourceSha256 = String(
+    state.sourceSha256
+    || state.currentHtmlSha256
+    || state.sha256
+    || "unhashed",
+  );
+  return `${operation}:${projectId}:${documentId}:${sourceSha256}`;
+}
+
+function coreSupplementalWorkspaceEnvelope(state, { operationId } = {}) {
+  const revision = workspaceSnapshotRevision(state, operationId);
+  const {
+    paths = null,
+    project = null,
+    sourceHistory = null,
+    versions = [],
+    performanceTiming = null,
+    ...core
+  } = state;
+  return {
+    ok: state.ok !== false,
+    workspaceEnvelopeVersion: 1,
+    operationId: String(operationId || ""),
+    snapshotRevision: revision,
+    core,
+    supplemental: {
+      operationId: String(operationId || ""),
+      snapshotRevision: revision,
+      paths,
+      project,
+      sourceHistory,
+      versions,
+    },
+    performanceTiming,
+  };
+}
+
 function projectFileBodyIdentityMatches(workspace, body) {
   if (
     body.projectId
@@ -1804,11 +1845,11 @@ async function unmanagedSourceFile(sourcePath) {
   };
 }
 
-async function workspaceState(sourcePath) {
+async function workspaceState(sourcePath, { operationId, split = false } = {}) {
   const startedAt = nodePerformance.now();
   const projectFileState = await projectFileWorkspaceState(sourcePath);
   const state = projectFileState || await unmanagedWorkspaceState(sourcePath);
-  return {
+  const timedState = {
     ...state,
     performanceTiming: {
       ...(state.performanceTiming || {}),
@@ -1817,6 +1858,9 @@ async function workspaceState(sourcePath) {
       ) / 1_000,
     },
   };
+  return split
+    ? coreSupplementalWorkspaceEnvelope(timedState, { operationId })
+    : timedState;
 }
 
 async function sourceFile(sourcePath) {
@@ -2383,11 +2427,16 @@ async function route(request, response) {
     return;
   }
   if (request.method === "GET" && url.pathname === "/workspace") {
+    const split = url.searchParams.get("shape") === "core-supplemental";
     sendJson(
       response,
       200,
       await workspaceState(
         requiredSourcePath(url.searchParams.get("sourcePath")),
+        {
+          operationId: url.searchParams.get("operationId") || "",
+          split,
+        },
       ),
     );
     return;
