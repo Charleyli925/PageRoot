@@ -69,7 +69,14 @@ Write to `output/simplification-proposal-YYYY-MM-DD.md` (gitignored) using the t
 ## Guardrails (non-negotiable)
 
 - **Read-only.** The audit never deletes, edits, or stages anything. The proposal document in `output/` is the only artifact.
-- **Never propose weakening** fail-closed safety paths (stale-hash checks, identity checks, registry validation), product invariants in AGENTS.md, or security/packaging string assertions (those are legitimately string-based).
+- **Never propose deleting** an irreversible authority-boundary protection
+  (commit-time stale-hash, identity, registry, AI complete-HTML/Hash, Version
+  adoption, destructive delete, published Tree binding) unless an equivalent
+  protection remains. Reversible interaction, presentation and preflight
+  blocks may be proposed for post-validation, automatic repair or degradation
+  when tests and a recovery path exist; record them in `docs/GUARD_LEDGER.md`.
+  Product invariants in AGENTS.md and security/packaging string assertions
+  stay in force.
 - **Never classify authored user scripts or fixtures as dead code** — synthetic fixtures under `fixtures/` and `tests/fixtures/` are referenced by schema/compat tests in non-obvious ways; verify via test runs, not grep alone.
 - A planned-but-unfinished refactor is **not** a finding; duplicating an existing plan wastes everyone's time. Cross-check `docs/` plans first.
 - Findings are proposals, not verdicts. The requester decides; deviation from a proposal needs no justification.

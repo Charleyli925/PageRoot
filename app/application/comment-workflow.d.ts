@@ -84,6 +84,20 @@ export class CommentWorkflow {
   }): Readonly<{ state: "pending" | "resolved"; reason?: string }>;
   drainDraft(input?: { boundary?: string; projectLoadError?: boolean }): Promise<boolean>;
   queueDraft(): CommentWorkflowOutcome;
+  beginComposer(input?: Record<string, unknown>): CommentWorkflowOutcome;
+  updateDraft(draft: string): CommentWorkflowOutcome;
+  rebindComposerTarget(target: unknown): CommentWorkflowOutcome;
+  clearComposer(): CommentWorkflowOutcome;
+  beginEdit(input: { commentId: string }): CommentWorkflowOutcome;
+  updateEditDraft(draftText: string): CommentWorkflowOutcome;
+  clearEditSession(): CommentWorkflowOutcome;
+  rebindCommentTarget(input: {
+    commentId: string;
+    target: unknown;
+  }): CommentWorkflowOutcome;
+  applyCommentItems(comments: unknown[]): CommentWorkflowOutcome;
+  applyWorkingCopy(input: Record<string, unknown>): CommentWorkflowOutcome;
+  confirmEdit(input: { commentId: string }): CommentWorkflowOutcome;
   flushDraft(input?: Record<string, unknown>): Promise<CommentWorkflowOutcome>;
   commitComment(input?: { commentId?: string }): Promise<CommentWorkflowOutcome>;
   editComment(input: { commentId: string }): CommentWorkflowOutcome;

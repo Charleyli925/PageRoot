@@ -1,4 +1,8 @@
 import { ProjectQueryFence } from "./project-query-fence.js";
+import {
+  planSourceLocatorRegister,
+  planSourceLocatorTransition,
+} from "./project/source-locator-plan.js";
 
 function normalizedPath(value) {
   return value ? String(value) : null;
@@ -145,13 +149,15 @@ export class ProjectSession {
     exactSourcePath,
     sourceSha256,
   }) {
-    if (
-      Number(epoch) !== this.#epoch
-      || !samePath(sourcePath, this.#sourcePath)
-      || !String(projectId || "")
-      || !String(documentId || "")
-      || !this.#sourcePath
-    ) return null;
+    if (planSourceLocatorRegister({
+      epoch,
+      liveEpoch: this.#epoch,
+      sourcePath,
+      liveSourcePath: this.#sourcePath,
+      projectId,
+      documentId,
+      samePath,
+    }).kind === "reject") return null;
     this.#projectId = String(projectId);
     this.#documentId = String(documentId);
     const requested = normalizedOpenTarget(
@@ -201,13 +207,12 @@ export class ProjectSession {
     openTarget = null,
   }) {
     const nextSourcePath = normalizedPath(sourcePath);
-    if (
-      !nextSourcePath
-      || (
-        previousSourcePath
-        && !samePath(previousSourcePath, this.#sourcePath)
-      )
-    ) return null;
+    if (planSourceLocatorTransition({
+      nextSourcePath,
+      previousSourcePath,
+      liveSourcePath: this.#sourcePath,
+      samePath,
+    }).kind === "reject") return null;
     this.#queries.clear();
     this.#epoch += 1;
     this.#sourcePath = nextSourcePath;

@@ -1,4 +1,12 @@
 import { isBridgeRequestError } from "./bridge-client.js";
+import { planProjectCloseAbort, planProjectCloseHydration, planProjectCloseIdentity } from "./project/close-plan.js";
+import { planProjectOpen } from "./project/open-intent.js";
+import {
+  planProjectSwitchAfterCanvas,
+  planProjectSwitchAfterDrain,
+  planProjectSwitchEntry,
+  planProjectSwitchFence,
+} from "./project/switch-plan.js";
 
 const SHA256 = /^sha256:[a-f0-9]{64}$/u;
 const SWITCH_DEADLINE_MS = 15_000;
@@ -560,8 +568,9 @@ export class ProjectWorkflow {
   }
 
   async prepareSwitch({ fromDeferred = false } = {}) {
-    if (this.#disposed) {
-      return blocked("PROJECT_WORKFLOW_DISPOSED", "项目切换工作流已经停止。");
+    const disposedPlan = planProjectSwitchEntry({ disposed: this.#disposed });
+    if (disposedPlan.kind === "reject") {
+      return blocked(disposedPlan.code, disposedPlan.reason);
     }
     if (!fromDeferred) {
       const deferred = this.#deferCanvasCommand(
@@ -577,16 +586,22 @@ export class ProjectWorkflow {
       const hardBlocker = this.#drainCoordinator
         .inspect("switch")
         .find((status) => status.state === "blocked");
-      if (hardBlocker) {
-        return blocked("PROJECT_SWITCH_BLOCKED", hardBlocker.reason);
+      const entry = planProjectSwitchEntry({
+        drainBlockedReason: hardBlocker?.reason || null,
+        projectLoadError: Boolean(this.projectLoadError),
+        runLocked: this.#runSession.activeLocked,
+        hasHistoryAction: this.#documentWorkflow.hasHistoryAction,
+      });
+      if (entry.kind === "reject") {
+        return blocked(entry.code, entry.reason);
       }
-      if (this.projectLoadError) {
+      if (entry.action === "reset-failed") {
         this.#commentWorkflow.resetForProjectTransition();
         this.#draftSession.deactivate();
         this.#documentWorkflow.resetForProjectTransition();
         return succeeded({ operationId });
       }
-      if (this.#runSession.activeLocked) {
+      if (entry.action === "drain-run-lock") {
         const drained = await this.#drainCoordinator.drain("switch", {
           deadlineAt: this.#clock.now() + SWITCH_DEADLINE_MS,
         });
@@ -594,7 +609,7 @@ export class ProjectWorkflow {
           ? succeeded({ operationId })
           : blocked("PROJECT_SWITCH_DRAIN_BLOCKED", drained.reason);
       }
-      if (this.#documentWorkflow.hasHistoryAction) {
+      if (entry.kind === "wait") {
         const historyOutcome = await this.#documentWorkflow.waitForHistoryAction();
         if (historyOutcome.status !== "succeeded") {
           return blocked(
@@ -613,10 +628,14 @@ export class ProjectWorkflow {
             trigger: "project-switch",
           })
         : null;
-      if (shouldCommitCanvas && (!committed || !committed.ok)) {
-        const reason = committed?.reason || "请点回文字完成输入，再切换项目。";
-        this.#canvasPort.showCommitBlocked?.(reason);
-        return blocked("PROJECT_SWITCH_NATIVE_EDIT", reason);
+      const fencePlan = planProjectSwitchFence({
+        needsCanvasCommit: shouldCommitCanvas,
+        fenceOk: Boolean(committed?.ok),
+        fenceReason: committed?.reason,
+      });
+      if (fencePlan.kind === "reject") {
+        this.#canvasPort.showCommitBlocked?.(fencePlan.reason);
+        return blocked(fencePlan.code, fencePlan.reason);
       }
 
       const cutoffRevision = this.#documentSession.editRevision;
@@ -626,50 +645,46 @@ export class ProjectWorkflow {
       if (!drained.ok) {
         return blocked("PROJECT_SWITCH_DRAIN_BLOCKED", drained.reason);
       }
-      if (
-        this.#documentSession.editRevision !== cutoffRevision
-        || this.#documentSession.pendingWrite
-        || this.#documentSession.flushPromise
-        || this.#documentWorkflow.hasHistoryAction
-      ) {
-        return blocked(
-          "PROJECT_SWITCH_SOURCE_CHANGED",
-          "当前 HTML 在切换边界后仍有修改尚未安全写回。",
-        );
+      const afterDrain = planProjectSwitchAfterDrain({
+        editRevision: this.#documentSession.editRevision,
+        cutoffRevision,
+        pendingWrite: Boolean(this.#documentSession.pendingWrite),
+        flushInFlight: Boolean(this.#documentSession.flushPromise),
+        hasHistoryAction: this.#documentWorkflow.hasHistoryAction,
+      });
+      if (afterDrain.kind === "reject") {
+        return blocked(afterDrain.code, afterDrain.reason);
       }
       if (shouldCommitCanvas) {
         const canvasOutcome = await this.#documentWorkflow.ensureCurrentCanvas({
           context: this.#projectSession.context || undefined,
         });
-        if (canvasOutcome.status !== "succeeded") {
-          return blocked(
-            "PROJECT_SWITCH_CANVAS_UNVERIFIED",
-            canvasOutcome.reason || "当前画布尚未完成自动恢复。",
-          );
+        const canvasPlan = planProjectSwitchAfterCanvas({
+          needsCanvasCommit: true,
+          canvasOk: canvasOutcome.status === "succeeded",
+          canvasReason: canvasOutcome.reason,
+        });
+        if (canvasPlan.kind === "reject") {
+          return blocked(canvasPlan.code, canvasPlan.reason);
         }
         committed = this.#canvasPort.fencePendingEdit({
           resumeEditing: false,
           trigger: "project-switch",
         });
-        if (!committed || !committed.ok) {
-          return blocked(
-            "PROJECT_SWITCH_FINAL_FENCE",
-            committed?.reason || "当前画布尚未完成最终安全收口。",
-          );
+        const afterCanvas = planProjectSwitchAfterCanvas({
+          needsCanvasCommit: true,
+          canvasOk: true,
+          finalFenceOk: Boolean(committed?.ok),
+          finalFenceReason: committed?.reason,
+          sourcePath: this.#projectSession.sourcePath,
+          lastPersistedRevision: this.#documentSession.lastPersistedRevision,
+          cutoffRevision,
+          committedSourceSha256: committed?.sourceSha256,
+          documentSourceSha256: this.#documentSession.sourceSha256,
+        });
+        if (afterCanvas.kind === "reject") {
+          return blocked(afterCanvas.code, afterCanvas.reason);
         }
-      }
-      if (
-        this.#projectSession.sourcePath
-        && committed
-        && (
-          this.#documentSession.lastPersistedRevision !== cutoffRevision
-          || this.#documentSession.sourceSha256 !== committed.sourceSha256
-        )
-      ) {
-        return blocked(
-          "PROJECT_SWITCH_SOURCE_MISMATCH",
-          "当前 HTML 与画布的最终身份不一致。",
-        );
       }
       return succeeded({ operationId });
     } catch (cause) {
@@ -700,14 +715,16 @@ export class ProjectWorkflow {
     fromDeferred = false,
     transactionId = null,
   } = {}) {
-    if (this.#snapshot.close.phase === "ready") {
-      return blocked(
-        "PROJECT_OPEN_CLOSE_COMMITTED",
-        "当前窗口正在关闭，新的 HTML 将由下一次启动接收。",
-      );
+    const openIntent = planProjectOpen({
+      closePhase: this.#snapshot.close.phase,
+      kind,
+      openMode: this.#projectOpenPort.mode(),
+    });
+    if (openIntent.kind === "reject") {
+      return blocked(openIntent.code, openIntent.reason);
     }
-    if (kind === "startup") return this.#openStartup({ transactionId });
-    if (kind === "local" && this.#projectOpenPort.mode() === "browser-file") {
+    if (openIntent.action === "startup") return this.#openStartup({ transactionId });
+    if (openIntent.action === "browser-picker") {
       // Request the hidden file input in this same user-activation turn.
       // Awaiting prepareSwitch() first yields past the click, so Chromium
       // silently ignores input.click() and encoding-error "重新选择" cannot
@@ -995,14 +1012,15 @@ export class ProjectWorkflow {
   }
 
   async prepareClose({ requestId, deadlineAt } = {}) {
-    const closeRequestId = String(requestId || "");
-    if (!closeRequestId || !Number.isFinite(Number(deadlineAt))) {
+    const identityPlan = planProjectCloseIdentity({ requestId, deadlineAt });
+    if (identityPlan.kind === "reject") {
       return {
         ready: false,
-        reason: "桌面关闭请求缺少完整身份。",
-        presentation: "native",
+        reason: identityPlan.reason,
+        presentation: identityPlan.presentation,
       };
     }
+    const closeRequestId = String(requestId || "");
     let imposedEditorFreeze = false;
     let frozenHtml = null;
     let frozenSourceSha256 = null;
@@ -1032,39 +1050,32 @@ export class ProjectWorkflow {
     try {
       const projectOpenBlock = await drainProjectOpenSessions();
       if (projectOpenBlock) return projectOpenBlock;
-      if (this.projectHydrating) {
-        if (projectOpenInFlight()) {
-          return inAppBlock("HTML 打开仍未安全完成，已取消关闭。");
-        }
-        const draftState = this.#draftSession.inspect();
-        if (this.#policies.canCloseDuringHydration({
+      const hydrationPlan = planProjectCloseHydration({
+        projectOpenInFlight: projectOpenInFlight(),
+        projectHydrating: this.projectHydrating,
+        canCloseDuringHydration: this.projectHydrating && this.#policies.canCloseDuringHydration({
           projectHydrating: true,
           viewTransitioning: this.#viewStatePort.isTransitioning(),
           submissionPending: this.#runSession.submissionPending,
           persistState: this.#documentSession.persistState,
           pendingWrite: Boolean(this.#documentSession.pendingWrite),
           flushInProgress: Boolean(this.#documentSession.flushPromise),
-          draftPending: draftState.pending,
-          draftFlushInProgress: draftState.writing,
+          draftPending: this.#draftSession.inspect().pending,
+          draftFlushInProgress: this.#draftSession.inspect().writing,
           editRevision: this.#documentSession.editRevision,
           lastPersistedRevision: this.#documentSession.lastPersistedRevision,
-        })) {
-          ready = true;
-          return { ready: true };
-        }
-        return inAppBlock("项目状态尚未读取完成，已取消关闭以避免覆盖未知编辑状态。");
-      }
-      if (this.projectLoadError) {
-        if (projectOpenInFlight()) {
-          return inAppBlock("HTML 打开仍未安全完成，已取消关闭。");
-        }
-        if (
+        }),
+        projectLoadError: Boolean(this.projectLoadError),
+        pendingDirty: Boolean(
           this.#documentSession.pendingWrite
           || this.#documentSession.flushPromise
           || this.#documentWorkflow.hasHistoryAction
-        ) {
-          return inAppBlock("项目读取失败且仍有待恢复的 HTML 修改，请先重试读取或导出副本。");
-        }
+        ),
+      });
+      if (hydrationPlan.kind === "reject") {
+        return inAppBlock(hydrationPlan.reason);
+      }
+      if (hydrationPlan.action === "allow-hydration" || hydrationPlan.action === "allow-load-error") {
         ready = true;
         return { ready: true };
       }
@@ -1134,11 +1145,12 @@ export class ProjectWorkflow {
           return inAppBlock(reason);
         }
       }
-      if (lifecycle.abortedRequestIds.has(closeRequestId)) {
-        return inAppBlock("桌面外壳已取消本次关闭。");
-      }
-      if (projectOpenInFlight()) {
-        return inAppBlock("HTML 打开在关闭核对期间开始，已取消本次关闭。");
+      const abortPlan = planProjectCloseAbort({
+        aborted: lifecycle.abortedRequestIds.has(closeRequestId),
+        projectOpenInFlight: projectOpenInFlight(),
+      });
+      if (abortPlan.kind === "reject") {
+        return inAppBlock(abortPlan.reason);
       }
       ready = true;
       this.#setClose("ready", closeRequestId);

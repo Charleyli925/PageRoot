@@ -329,6 +329,7 @@
       "id": "test-policy",
       "patterns": [
         "^scripts/test-(?:gate|gate-resume|node-group)(?:-core)?\\.mjs$",
+        "^scripts/capability-context\\.(?:mjs|json)$",
         "^scripts/gate-smoke-suites\\.mjs$",
         "^tests/e2e/smoke-tags\\.mjs$",
         "^tests/test-impact-map\\.json$",
@@ -462,7 +463,9 @@
       "id": "comment-workflow",
       "patterns": [
         "^app/application/comment-workflow(?:-codecs)?\\.(?:js|d\\.ts)$",
-        "^tests/comment-workflow\\.test\\.mjs$"
+        "^app/application/comment/commit-plan\\.(?:js|d\\.ts)$",
+        "^tests/comment-workflow\\.test\\.mjs$",
+        "^tests/comment-commit-plan\\.test\\.mjs$"
       ],
       "suites": [
         "typecheck",
@@ -470,6 +473,7 @@
       ],
       "nodeTests": [
         "tests/comment-workflow.test.mjs",
+        "tests/comment-commit-plan.test.mjs",
         "tests/comment-session.test.mjs",
         "tests/draft-session.test.mjs",
         "tests/attachment-selection.test.mjs",
@@ -495,13 +499,17 @@
       "id": "document-workflow",
       "patterns": [
         "^app/application/document-workflow(?:-codecs)?\\.(?:js|d\\.ts)$",
-        "^tests/document-workflow\\.test\\.mjs$"
+        "^app/application/document/save-plan\\.(?:js|d\\.ts)$",
+        "^app/application/verified-project-context\\.(?:js|d\\.ts)$",
+        "^tests/document-workflow\\.test\\.mjs$",
+        "^tests/document-save-plan\\.test\\.mjs$"
       ],
       "suites": [
         "typecheck"
       ],
       "nodeTests": [
         "tests/document-workflow.test.mjs",
+        "tests/document-save-plan.test.mjs",
         "tests/document-session.test.mjs",
         "tests/recovery-store.test.mjs",
         "tests/source-history-session.test.mjs",
@@ -532,7 +540,8 @@
       "id": "project-session",
       "patterns": [
         "^app/application/(?:external-file-open-session|local-action-outcomes|project-application-session|project-query-fence|project-session)\\.(?:js|d\\.ts)$",
-        "^bridge/project-context-service\\.mjs$"
+        "^bridge/project-context-service\\.mjs$",
+        "^app/application/project/source-locator-plan\\.(?:js|d\\.ts)$"
       ],
       "suites": [
         "typecheck"
@@ -543,7 +552,8 @@
         "tests/project-application-session.test.mjs",
         "tests/project-context-service.test.mjs",
         "tests/project-query-fence.test.mjs",
-        "tests/project-session.test.mjs"
+        "tests/project-session.test.mjs",
+        "tests/project-plan.test.mjs"
       ]
     },
     {
@@ -575,7 +585,10 @@
         "^tests/e2e/electron/electron-workbench-tabs\\.spec\\.mjs$",
         "^tests/(?:browser-document-session|document-surface-cache-session|workbench-(?:navigation-workflow|tabs-(?:session|state|persistence-coordinator)))\\.test\\.mjs$"
       ],
-      "suites": ["typecheck", "electron-smoke"],
+      "suites": [
+        "typecheck",
+        "electron-smoke"
+      ],
       "nodeTests": [
         "tests/workbench-tabs-session.test.mjs",
         "tests/browser-document-session.test.mjs",
@@ -593,7 +606,10 @@
         "^app/application/browser-file-tab-identity\\.(?:js|d\\.ts)$",
         "^tests/browser-file-tab-identity\\.test\\.mjs$"
       ],
-      "suites": ["typecheck", "browser-smoke"],
+      "suites": [
+        "typecheck",
+        "browser-smoke"
+      ],
       "nodeTests": [
         "tests/browser-file-tab-identity.test.mjs",
         "tests/project-workflow.test.mjs"
@@ -629,7 +645,9 @@
       "id": "project-workflow",
       "patterns": [
         "^app/application/project-workflow\\.(?:js|d\\.ts)$",
-        "^tests/project-workflow\\.test\\.mjs$"
+        "^app/application/project/(?:open-intent|switch-plan|close-plan)\\.(?:js|d\\.ts)$",
+        "^tests/project-workflow\\.test\\.mjs$",
+        "^tests/project-plan\\.test\\.mjs$"
       ],
       "suites": [
         "typecheck",
@@ -637,6 +655,7 @@
       ],
       "nodeTests": [
         "tests/project-workflow.test.mjs",
+        "tests/project-plan.test.mjs",
         "tests/comment-workflow.test.mjs",
         "tests/project-session.test.mjs",
         "tests/external-file-open-session.test.mjs",
@@ -655,7 +674,9 @@
       "id": "run-workflow",
       "patterns": [
         "^app/application/run-workflow(?:-codecs)?\\.(?:js|d\\.ts)$",
-        "^tests/run-workflow\\.test\\.mjs$"
+        "^app/application/run/submit-plan\\.(?:js|d\\.ts)$",
+        "^tests/run-workflow\\.test\\.mjs$",
+        "^tests/run-submit-plan\\.test\\.mjs$"
       ],
       "suites": [
         "typecheck",
@@ -663,6 +684,7 @@
       ],
       "nodeTests": [
         "tests/run-workflow.test.mjs",
+        "tests/run-submit-plan.test.mjs",
         "tests/run-session.test.mjs",
         "tests/run-lifecycle.test.mjs",
         "tests/qoder-handoff.test.mjs",
@@ -687,7 +709,9 @@
       "id": "version-workflow",
       "patterns": [
         "^app/application/version-workflow\\.(?:js|d\\.ts)$",
-        "^tests/version-workflow\\.test\\.mjs$"
+        "^app/application/version/review-plan\\.(?:js|d\\.ts)$",
+        "^tests/version-workflow\\.test\\.mjs$",
+        "^tests/version-review-plan\\.test\\.mjs$"
       ],
       "suites": [
         "typecheck",
@@ -695,6 +719,7 @@
       ],
       "nodeTests": [
         "tests/version-workflow.test.mjs",
+        "tests/version-review-plan.test.mjs",
         "tests/version-session.test.mjs",
         "tests/version-history-records.test.mjs",
         "tests/run-session.test.mjs"
@@ -836,7 +861,7 @@
         "^scripts/architecture-budget\\.json$",
         "^tests/architecture-boundaries\\.test\\.mjs$",
         "^tests/fixtures/architecture-boundaries/",
-        "^(?:CONTRIBUTING|docs/(?:ARCHITECTURE|ARCHITECTURE_CONTRACT|COMPATIBILITY|INTERACTION_FLOW|STATE_OWNERSHIP|ENGINEERING_STANDARDS|SECURITY_MODEL|RUNTIME_VISUAL_CONTRACT|WORKBENCH_ORCHESTRATION_REFACTOR_PLAN))\\.md$",
+        "^(?:CONTRIBUTING|docs/(?:ARCHITECTURE|ARCHITECTURE_CONTRACT|COMPATIBILITY|INTERACTION_FLOW|STATE_OWNERSHIP|ARCHITECTURE_MAP|GUARD_LEDGER|ENGINEERING_STANDARDS|SECURITY_MODEL|RUNTIME_VISUAL_CONTRACT|WORKBENCH_ORCHESTRATION_REFACTOR_PLAN))\\.md$",
         "^docs/decisions/(?:0003-session-ownership-and-mutation-outcomes|0004-v2-editable-islands|0007-independent-interactive-preview|0008-safe-presentation-actions-in-edit-mode|0009-persistent-source-patch-history|0011-workbench-session-decomposition|0012-id-first-project-context|0013-edit-runtime-visual-projection|0015-safe-host-fallback-and-direct-text-nodes|0016-owner-controlled-review-runtime-capture|0017-shared-runtime-snapshot-owner|0018-source-transaction-kernel|0019-workspace-controller-orchestration|0021-review-runtime-visual-comparison-noise-tolerance|0022-edit-one-shot-author-runtime|0025-edit-direct-one-shot-runtime|0031-qoder-acp-v1-spike|0032-qoder-acp-agent-bridge|0039-provider-neutral-agent-runtime|0040-provider-neutral-persistence-and-conversation-v2|0041-codex-app-server-execution-staging|0042-codex-app-server-candidate-execution|0043-enable-packaged-codex-candidate-execution|0044-visible-first-html-open|0045-byte-bounded-tab-and-review-display-caches)\\.md$"
       ],
       "suites": [
@@ -903,7 +928,7 @@
     {
       "id": "canvas-overlay-owner",
       "patterns": [
-        "^app/components/(?:HtmlInteractionPreview(?:\\.module)?|html-canvas-(?:comment-layout|page-view|style-inspector|selection-chrome))\\.(?:tsx|ts|css)$"
+        "^app/components/(?:HtmlInteractionPreview(?:\\.module)?|html-canvas-(?:comment-layout|page-view|style-inspector|selection-chrome(?:-contract)?))\\.(?:tsx|ts|css)$"
       ],
       "suites": [
         "typecheck",
@@ -959,7 +984,7 @@
     {
       "id": "v2-island-controller",
       "patterns": [
-        "^app/components/(?:HtmlCanvasEditor(?:\\.types)?|HtmlDisplaySurface(?:\\.module)?|html-preview-sandbox|use-preview-resource-base)\\.(?:tsx|ts|js|css|d\\.ts)$"
+        "^app/components/(?:HtmlCanvasEditor(?:\\.types)?|HtmlDisplaySurface(?:\\.module)?|html-canvas-selection-chrome(?:-contract)?|html-preview-sandbox|use-preview-resource-base)\\.(?:tsx|ts|js|css|d\\.ts)$"
       ],
       "suites": [
         "typecheck",
@@ -980,7 +1005,7 @@
         "^app/application/edit-author-runtime-session\\.(?:js|d\\.ts)$",
         "^app/domain/edit-runtime-contract\\.(?:js|d\\.ts)$",
         "^app/domain/runtime-snapshot-hosts\\.(?:js|d\\.ts)$",
-        "^app/components/(?:HtmlCanvasEditor(?:\\.types)?|HtmlDisplaySurface(?:\\.module)?|html-preview-sandbox)\\.(?:tsx|ts|js|css|d\\.ts)$",
+        "^app/components/(?:HtmlCanvasEditor(?:\\.types)?|HtmlDisplaySurface(?:\\.module)?|html-canvas-selection-chrome(?:-contract)?|html-preview-sandbox)\\.(?:tsx|ts|js|css|d\\.ts)$",
         "^app/workbench\\.tsx$",
         "^desktop/(?:edit-runtime-bootstrap|edit-runtime-protocol|edit-runtime-preparation-fence)\\.mjs$",
         "^desktop/main\\.mjs$",
@@ -1142,7 +1167,7 @@
     {
       "id": "review-ui-state",
       "patterns": [
-        "^app/workbench/(?:AiReviewWorkspace|comment-rail-view|file-header-view|handoff-view|presentation|project-files-view|review-state|workbench-header-shell)\\.(?:ts|tsx)$",
+        "^app/workbench/(?:AiReviewWorkspace|comment-rail-view|comment-rail-contract|file-header-view|handoff-view|presentation|project-files-view|review-state|workbench-header-shell)\\.(?:ts|tsx)$",
         "^app/workbench/ai-review-workspace\\.module\\.css$"
       ],
       "suites": [
@@ -1178,7 +1203,7 @@
       "id": "workbench-orchestration",
       "patterns": [
         "^app/workbench\\.tsx$",
-        "^app/workbench/(?:comment-rail-view|file-header-view|project-files-view)\\.tsx$",
+        "^app/workbench/(?:comment-rail-view|comment-rail-contract|file-header-view|project-files-view)\\.(?:ts|tsx)$",
         "^app/workbench/ExternalHtmlOpenDialog\\.tsx$",
         "^app/workbench/external-html-open-dialog\\.module\\.css$",
         "^app/workbench/(?:browser-io|comment-model|project-model|record-model|types)\\.ts$"

@@ -74,7 +74,7 @@ Inspect the selected task coverage without running it:
 npm run gate:plan -- --base origin/main
 ```
 
-The compact JSON lists changed files, matched owners, Node tests, capability canaries and estimated fan-out. Width warnings are informational. After an environment flake on the same source hash, resume with `npm run gate:task -- --resume <run-id>`; reuse requires an identical HEAD tree, dirty change-set, base, package-lock, Node version, platform, suite commands and surviving build artifacts. Ready/release/candidate/artifact complete proofs never resume.
+The compact JSON lists changed files, matched owners, Node tests, capability canaries, estimated fan-out, and a capability-context reading set (`entryInterfaces`, `owners`, `implementationFiles`, `focusedTests`, `requiredDocs`, `estimatedContextBytes`) from `scripts/capability-context.json`. Width warnings are informational. After an environment flake on the same source hash, resume with `npm run gate:task -- --resume <run-id>`; reuse requires an identical HEAD tree, dirty change-set, base, package-lock, Node version, platform, suite commands and surviving build artifacts. Ready/release/candidate/artifact complete proofs never resume.
 
 ### Audit and retire
 
@@ -143,6 +143,12 @@ classification and rerun policy live in
 
 ## Latest installer source rule
 
+Every successful installer handoff, formal or developer preview, must include
+every associated Pull Request with its current GitHub status. When the user asks
+for the latest installer without a source override, include the latest head of every
+applicable PageRoot Pull Request that was not explicitly excluded.
+
+
 开发者说“生成最新的安装包”、“生成最新的开发者测试安装包”或等价表述时，
 默认范围不是“当前分支”，而是“最新 `origin/main` + 当前开发范围
 内所有未被开发者明确排除的相关 PR 最新代码”。合并、开放、Draft 或关
@@ -193,6 +199,7 @@ Behavior and its documentation form one change. Use this routing table:
 | Change Request, Attempt, completion, version or schema | `docs/CHANGE_REQUEST_PROTOCOL.md`, schemas, fixtures and compatibility tests |
 | Development commands, CI or test ownership | `docs/DEVELOPMENT.md`, `tests/TEST_STRATEGY.md`, test impact map |
 | Git or collaboration behavior | `docs/GIT_WORKFLOW.md`, `CONTRIBUTING.md`, `AGENTS.md` when the permanent rule changes |
+| Architecture capability routing or user-visible guards | `docs/ARCHITECTURE_MAP.md`, `docs/GUARD_LEDGER.md`, `docs/ENGINEERING_STANDARDS.md` |
 | Packaging, provenance, signing or publication | `docs/RELEASING.md`, `CHANGELOG.md` |
 | Dependency policy or advisory exception | `docs/DEPENDENCY_SECURITY.md` |
 | Public/private source boundary | `docs/OPEN_SOURCE_BOUNDARY.md`, notices, contribution or security policies as applicable |

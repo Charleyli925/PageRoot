@@ -40,9 +40,11 @@ the historical synthetic-spike decision.
 
 ## Boundaries
 
-- `docs/ARCHITECTURE_CONTRACT.md` is the normative dependency, state-ownership,
-  asynchronous outcome and drain contract. `docs/STATE_OWNERSHIP.md` names the
-  sole owner of each mutable fact.
+- `docs/ARCHITECTURE_MAP.md` is the default capability map (owners and
+  entry files). `docs/ARCHITECTURE_CONTRACT.md` is the normative dependency,
+  state-ownership, asynchronous outcome and drain contract.
+  `docs/STATE_OWNERSHIP.md` names the sole owner of each mutable fact.
+  `docs/GUARD_LEDGER.md` records user-visible blocks and their defense class.
 - `app/` owns the visual workbench, source mapping and direct-edit transaction model.
 - `desktop/` owns privileged filesystem access, windows, lifecycle, update checks, usage telemetry and safe IPC exposure.
 - `bridge/` owns the local Bridge, protocol finalization, AI candidate assessment and packaged runtime modules.

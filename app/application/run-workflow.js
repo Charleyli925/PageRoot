@@ -1,4 +1,5 @@
 import { isBridgeRequestError } from "./bridge-client.js";
+import { planRunSubmit, planRunSubmitEntry } from "./run/submit-plan.js";
 import { createRunWorkflowCodecs } from "./run-workflow-codecs.js";
 import { AgentCatalogState } from "./agent-provider-catalog.js";
 import {
@@ -590,8 +591,9 @@ export class RunWorkflow {
     deadlineAt = this.#clock.now() + 60_000,
     deliveryMode = "clipboard",
   } = {}) {
-    if (this.#disposed) {
-      return blocked("RUN_WORKFLOW_DISPOSED", "本轮任务工作流已经停止。");
+    const entryPlan = planRunSubmitEntry({ disposed: this.#disposed });
+    if (entryPlan.kind === "reject") {
+      return blocked(entryPlan.code, entryPlan.reason);
     }
     let frozenAgentDelivery;
     try {
@@ -606,26 +608,25 @@ export class RunWorkflow {
     }
     const sourcePath = this.#projectSession.sourcePath;
     const context = copyContext(this.#projectSession.context);
-    if (!sourcePath || !context) {
-      return blocked("RUN_SUBMISSION_PROJECT_UNAVAILABLE", "请先打开并建立当前 HTML 的项目资料。");
-    }
-    if (this.#runSession.submissionPending || this.#runSession.activeLocked) {
-      return blocked("RUN_SUBMISSION_LOCKED", "当前项目正在处理上一轮要求。");
-    }
-    if (
-      this.#commentSession.composerTarget
-      && (
-        this.#commentSession.composerDraft.trim()
-        || this.#commentSession.composerAttachments.length > 0
-      )
-    ) {
-      return blocked("RUN_SUBMISSION_COMMENT_DRAFT", "还有一条评论未保存。");
-    }
-    if (
-      this.#commentSession.editSession
-      && this.#codecs.commentEditSessionHasChanges(this.#commentSession.editSession)
-    ) {
-      return blocked("RUN_SUBMISSION_COMMENT_EDIT", "还有一条评论编辑尚未保存。");
+    const submitPlan = planRunSubmit({
+      sourcePath,
+      context,
+      submissionPending: this.#runSession.submissionPending,
+      activeLocked: this.#runSession.activeLocked,
+      hasComposerDraft: Boolean(
+        this.#commentSession.composerTarget
+        && (
+          this.#commentSession.composerDraft.trim()
+          || this.#commentSession.composerAttachments.length > 0
+        )
+      ),
+      hasDirtyEdit: Boolean(
+        this.#commentSession.editSession
+        && this.#codecs.commentEditSessionHasChanges(this.#commentSession.editSession)
+      ),
+    });
+    if (submitPlan.kind === "reject") {
+      return blocked(submitPlan.code, submitPlan.reason);
     }
     const committed = this.#canvasPort.fencePendingEdit({
       resumeEditing: false,

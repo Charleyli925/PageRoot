@@ -2,7 +2,55 @@
 
 This document is normative for implementation shape. Product requirements
 still come from the routed product documents; architecture and state ownership
-come from `ARCHITECTURE_CONTRACT.md` and `STATE_OWNERSHIP.md`.
+come from `ARCHITECTURE_MAP.md`, `ARCHITECTURE_CONTRACT.md` and
+`STATE_OWNERSHIP.md`. Defense class and user-visible blocks are recorded in
+`GUARD_LEDGER.md`.
+
+## Defense classes
+
+Classify a failure by whether it is irreversible. P1-A (#191) is the
+presentation template: enter native editing first, then validate with stale
+hash, patch scope and MutationObserver rollback. Notification policy
+`silent-recover` is the reversible-coordination template. P1-B CAS is the
+authority-boundary template: one verified realpath cache per `#serial()` turn,
+re-checked on the next turn.
+
+### Authority boundary — fail-closed
+
+Wrong-disk writes, mistaken AI adoption, wrong Version activation, destructive
+deletes and wrong published packages. Validate the same fact at most three
+times: at ingress, after an external await, and immediately before irreversible
+commit. Do not re-normalize, realpath, hash and compare in every function.
+`Verified*Context` objects live only inside one operation; they are not a
+Session or Registry authority.
+
+### Reversible coordination — converge automatically
+
+Stale queries, expired Canvas acknowledgements, catalog refresh failures,
+rebuildable projections and Bridge replies that can be reread. Discard the old
+result, reread authority, rebuild, retry once within a bound, or degrade. Do
+not show a dialog, lock the canvas, or ask the user to retry an internal
+uncertainty. An unknown mutation queries authority before retry; a bounded
+retry that cannot change the precondition is a loop, not recovery.
+
+### Presentation and edit eligibility — fail-open
+
+Layout preflight, hover/outline trust, Review runtime capture, comment-marker
+location and UI projection lag. Let the user continue. Enter edit first.
+Keep a comment whose target failed, marked for relink. Hide a failed outline;
+do not forbid editing.
+
+User confirmation is reserved for deleting a project, discarding edits that
+cannot be autosaved, explicitly overwriting an external change, and
+unrecoverable identity or permission changes.
+
+Do not remove an irreversible authority-boundary protection unless an
+equivalent protection remains. Reversible interaction, presentation and
+preflight blocks may move to post-validation, automatic repair or degradation
+when tests and a recovery path exist. Record the decision in `GUARD_LEDGER.md`.
+
+Line-count ceilings in `scripts/architecture-budget.json` are observational.
+They are not an acceptance goal. Do not split a file only to lower `maxLines`.
 
 ## Prefer invariants over patches
 
@@ -41,7 +89,8 @@ and leaves all decisions in the caller is prohibited.
 
 Large source-fidelity engines are not split merely to reduce line count. A
 split must create a real invariant boundary and preserve byte, Selection, IME
-and transaction coverage. New product persistence or lifecycle behavior may
+and transaction coverage. Prefer a narrow command interface and mutually
+exclusive view-model states over another file cut. New product persistence or lifecycle behavior may
 not be added directly to `workbench.tsx`, `HtmlCanvasEditor.tsx`,
 `IslandEditingController.ts` or `workspace-bridge.mjs`; first introduce or use
 the owning application/domain/service module. The retired V1 controller and

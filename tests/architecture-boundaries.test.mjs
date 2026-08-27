@@ -247,3 +247,16 @@ test("countReactHooks counts generic-typed hook calls a regex would miss", () =>
 // never blocks CI or merge (see ARCHITECTURE_CONTRACT.md > Complexity budget
 // ratchet). Advisory notices are printed by scripts/check-architecture.mjs
 // alongside the gate output.
+
+test("architecture gate does not freeze private implementation field names", async () => {
+  const gate = await readFile(
+    new URL("../scripts/check-architecture.mjs", import.meta.url),
+    "utf8",
+  );
+  assert.doesNotMatch(gate, /#registrationPromise/u);
+  assert.doesNotMatch(gate, /#observeSessionSnapshots/u);
+  assert.doesNotMatch(gate, /pinCloseRevision/u);
+  assert.doesNotMatch(gate, /#hydrationGeneration/u);
+  assert.doesNotMatch(gate, /#uploadCount/u);
+  assert.doesNotMatch(gate, /new\s+WorkbenchTabsSession\s*\(/u);
+});

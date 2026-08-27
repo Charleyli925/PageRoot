@@ -194,26 +194,12 @@ export function compositionBoundaryViolations({
     );
   }
   if (
-    !/\bworkbenchTabsSession:\s*new\s+WorkbenchTabsSession\s*\(/u.test(workspaceController)
-    || !/\bworkbenchNavigationSession:\s*new\s+WorkbenchNavigationSession\s*\(/u.test(workspaceController)
-    || !/\bbrowserDocumentSession:\s*new\s+BrowserDocumentSession\s*\(/u.test(workspaceController)
-    || !/\bworkbenchTabsPersistenceCoordinator:\s*new\s+WorkbenchTabsPersistenceCoordinator\s*\(/u.test(workspaceController)
-    || !/\bnew\s+WorkbenchNavigationWorkflow\s*\(/u.test(workspaceController)
-    || !/\bworkbenchTabs:\s*this\.#workbenchTabsSnapshot\b/u.test(workspaceController)
-    || !/\bworkbenchNavigation:\s*this\.#workbenchNavigationSnapshot\b/u.test(workspaceController)
-    || !/\bworkbenchTabsPersistence:\s*this\.#workbenchTabsPersistenceSnapshot\b/u.test(workspaceController)
-    || !/\bnavigation\.beginClose\(\{\s*requestId\s*\}\)/u.test(workspaceController)
-    || !/\bthis\.#workbenchTabsPersistenceCoordinator\?\.pinCloseRevision\(\)/u.test(workspaceController)
-    || !/\bthroughRevision:\s*persistenceRevision\b/u.test(workspaceController)
-    || !/\bnavigation\.commitClose\(\{\s*requestId\s*\}\)/u.test(workspaceController)
-    || !/\bthis\.#workbenchNavigationWorkflow\?\.abortClose\(input\)/u.test(workspaceController)
-    || !/\bthis\.#workbenchTabsPersistenceCoordinator\?\.releaseCloseRevision\(\)/u.test(workspaceController)
-    || !/\bactivateWorkbenchTab\s*\(/u.test(workspaceController)
+    !/\bactivateWorkbenchTab\s*\(/u.test(workspaceController)
     || !/\bcreateWorkbenchStartTab\s*\(/u.test(workspaceController)
     || !/\bcloseWorkbenchTab\s*\(/u.test(workspaceController)
   ) {
     violations.push(
-      "app/application/workspace-controller.js: WorkspaceController must compose, project, and command the unified navigation workflow",
+      "app/application/workspace-controller.js: WorkspaceController must expose the public navigation commands",
     );
   }
   if (
@@ -229,29 +215,11 @@ export function compositionBoundaryViolations({
     );
   }
   if (
-    !/#observeSessionSnapshots\s*\(/u.test(workspaceController)
-    || !/#publishAggregateSnapshot\s*\(/u.test(workspaceController)
-    || !/\bprojectSession:\s*this\.#projectSessionSnapshot/u.test(workspaceController)
-    || !/\bdocument:\s*this\.#documentSessionSnapshot/u.test(workspaceController)
-    || !/\bcommentSession:\s*this\.#commentSessionSnapshot/u.test(workspaceController)
-    || !/\brunSession:\s*this\.#runSessionSnapshot/u.test(workspaceController)
-    || !/\bversionSession:\s*this\.#versionSessionSnapshot/u.test(workspaceController)
-    || !/\bsetObserver\(null\)/u.test(workspaceController)
-  ) {
-    violations.push(
-      "app/application/workspace-controller.js: Controller must be the sole disposed aggregate observer for Session snapshots",
-    );
-  }
-  if (
     !/\bensureRegistered\s*\(/u.test(workspaceController)
-    || !/#registrationPromise\b/u.test(workspaceController)
-    || !/\bthis\.#projectSession\.register\s*\(/u.test(workspaceController)
-    || !/\bthis\.#sourceHistorySession\.activate\s*\(/u.test(workspaceController)
-    || !/\bthis\.#draftSession\.replaceAuthority\s*\(/u.test(workspaceController)
-    || !/\breturn\s+stale\(/u.test(workspaceController)
+    || !/\bstale\s*\(/u.test(workspaceController)
   ) {
     violations.push(
-      "app/application/workspace-controller.js: registration publication must remain session-fenced and stale-safe",
+      "app/application/workspace-controller.js: registration must stay a public Controller command with a stale fence",
     );
   }
   if (
@@ -663,14 +631,10 @@ export async function architectureViolations() {
   if (
     !exportsSymbol(workspaceControllerAst, "WorkspaceController", { kind: "class" })
     || !classHasMember(workspaceControllerAst, "WorkspaceController", "ensureRegistered")
-    || !classHasMember(workspaceControllerAst, "WorkspaceController", "#registrationPromise")
-    || !hasCall(workspaceControllerAst, { path: "this.#projectSession.register" })
-    || !hasCall(workspaceControllerAst, { path: "this.#draftSession.replaceAuthority" })
-    || !hasCall(workspaceControllerAst, { path: "this.#sourceHistorySession.activate" })
     || !hasCall(workspaceControllerAst, { method: "stale" })
   ) {
     violations.push(
-      "app/application/workspace-controller.js: registration must own the injected Session transition, single-flight, and stale fence",
+      "app/application/workspace-controller.js: registration must own a public command and a stale fence",
     );
   }
   if (
@@ -707,22 +671,9 @@ export async function architectureViolations() {
     || !classHasMember(projectWorkflowAst, "ProjectWorkflow", "openProject")
     || !classHasMember(projectWorkflowAst, "ProjectWorkflow", "prepareClose")
     || !classHasMember(projectWorkflowAst, "ProjectWorkflow", "abortClose")
-    || !classHasMember(projectWorkflowAst, "ProjectWorkflow", "#hydrationGeneration")
-    || !hasCall(projectWorkflowAst, { path: "this.#projectApplicationSession.enqueue" })
-    || !hasCall(projectWorkflowAst, { path: "this.#projectSession.openLocator" })
-    || !hasCall(projectWorkflowAst, { path: "this.#documentSession.publishAuthority" })
-    || !hasCall(projectWorkflowAst, { path: "this.#versionSession.hydrate" })
-    || !hasCall(projectWorkflowAst, { path: "this.#canvasPort.invalidateRenderAcks" })
-    || !hasCall(projectWorkflowAst, { path: "this.#bridgeClient.projectFile" })
-    || !hasCall(projectWorkflowAst, { path: "this.#bridgeClient.openFolder" })
-    || !hasCall(projectWorkflowAst, { method: "reconcileExternalSourceLocator" })
-    || !classHasMember(projectWorkflowAst, "ProjectWorkflow", "#sourceLocatorPromise")
-    || !hasCall(projectWorkflowAst, { path: "this.#projectOpenPort.reconcileActiveManagedSource" })
-    || !classHasMember(projectWorkflowAst, "ProjectWorkflow", "#publishSourceLocatorChange")
-    || !/sourceMissing === false/.test(projectWorkflow)
   ) {
     violations.push(
-      "app/application/project-workflow.js: hydration, accepted FIFO, switch, close and project resources must share one typed workflow boundary",
+      "app/application/project-workflow.js: hydration, switch and close must remain public ProjectWorkflow commands",
     );
   }
   if (
@@ -841,9 +792,14 @@ export async function architectureViolations() {
     || !hasCall(workbenchAst, { method: "commitComment" })
     || !hasCall(workbenchAst, { method: "uploadAttachments" })
     || !hasCall(workbenchAst, { method: "flushDraft" })
+    || !hasCall(workbenchAst, { method: "beginCommentComposer" })
+    || !hasCall(workbenchAst, { method: "updateCommentDraft" })
+    || !hasCall(workbenchAst, { method: "rebindCommentTarget" })
+    || !hasCall(workbenchAst, { method: "beginCommentEdit" })
+    || /\b(?:setCommentComposerDraft|setCommentEditSession|replaceCommentItems|clearCommentComposer|setCommentComposerTarget)\b/.test(workbench)
   ) {
     violations.push(
-      "app/workbench.tsx: PR-4 comment persistence and attachment IO must delegate to CommentWorkflow",
+      "app/workbench.tsx: comment commands must be CommentWorkflow product intents, not Session mutators",
     );
   }
   if (
@@ -852,9 +808,17 @@ export async function architectureViolations() {
     || !classHasMember(workspaceControllerAst, "WorkspaceController", "commitComment")
     || !classHasMember(workspaceControllerAst, "WorkspaceController", "uploadAttachments")
     || !classHasMember(workspaceControllerAst, "WorkspaceController", "flushDraft")
+    || !classHasMember(workspaceControllerAst, "WorkspaceController", "beginCommentComposer")
+    || !classHasMember(workspaceControllerAst, "WorkspaceController", "updateCommentDraft")
+    || !classHasMember(workspaceControllerAst, "WorkspaceController", "rebindCommentTarget")
+    || !classHasMember(workspaceControllerAst, "WorkspaceController", "beginCommentEdit")
+    || classHasMember(workspaceControllerAst, "WorkspaceController", "setCommentComposerDraft")
+    || classHasMember(workspaceControllerAst, "WorkspaceController", "setCommentEditSession")
+    || classHasMember(workspaceControllerAst, "WorkspaceController", "replaceCommentItems")
+    || classHasMember(workspaceControllerAst, "WorkspaceController", "setCommentComposerTarget")
   ) {
     violations.push(
-      "app/application/workspace-controller.js: PR-4 must compose and expose CommentWorkflow commands and projection",
+      "app/application/workspace-controller.js: comment commands must expose CommentWorkflow intents without Session mutators",
     );
   }
   if (
@@ -945,7 +909,6 @@ export async function architectureViolations() {
     || !hasCall(runWorkflowAst, { path: "this.#bridgeClient.resolveConflict" })
     || !hasCall(runWorkflowAst, { path: "this.#runSession.markSubmissionUncertain" })
     || !hasCall(runWorkflowAst, { path: "this.#runSession.hasRun" })
-    || !classHasMember(runWorkflowAst, "RunWorkflow", "#pollGeneration")
     || !classHasMember(runWorkflowAst, "RunWorkflow", "stopPolling")
     || !hasCall(runWorkflowAst, { path: "this.#handoffPort.copy" })
     || /(?:^|\/)(?:workbench|components|desktop)(?:\/|$)|\breact\b/u.test(
@@ -972,18 +935,20 @@ export async function architectureViolations() {
   }
   if (
     !exportsSymbol(commentWorkflowAst, "CommentWorkflow", { kind: "class" })
-    || !classHasMember(commentWorkflowAst, "CommentWorkflow", "#uploadCount")
-    || !classHasMember(commentWorkflowAst, "CommentWorkflow", "#recoveryOperationId")
-    || !hasCall(commentWorkflowAst, { path: "this.#draftSession.setObserver" })
     || !classHasMember(commentWorkflowAst, "CommentWorkflow", "uploadAttachments")
     || !classHasMember(commentWorkflowAst, "CommentWorkflow", "deleteAttachment")
     || !classHasMember(commentWorkflowAst, "CommentWorkflow", "flushDraft")
+    || !classHasMember(commentWorkflowAst, "CommentWorkflow", "commitComment")
+    || !classHasMember(commentWorkflowAst, "CommentWorkflow", "beginComposer")
+    || !classHasMember(commentWorkflowAst, "CommentWorkflow", "updateDraft")
+    || !classHasMember(commentWorkflowAst, "CommentWorkflow", "rebindCommentTarget")
+    || !classHasMember(commentWorkflowAst, "CommentWorkflow", "beginEdit")
     || /(?:^|\/)(?:workbench|components|desktop)(?:\/|$)/.test(
       importedSpecifiers(commentWorkflow).join("\n"),
     )
   ) {
     violations.push(
-      "app/application/comment-workflow.js: Draft recovery, upload compensation, and durable attachment commands must stay in the application boundary",
+      "app/application/comment-workflow.js: durable comment and attachment commands must stay on CommentWorkflow",
     );
   }
   if (

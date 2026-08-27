@@ -13,6 +13,10 @@ import {
   selectGatePlan,
   validateImpactMap,
 } from "../scripts/test-gate-core.mjs";
+import {
+  loadCapabilityContextMap,
+  selectCapabilityContext,
+} from "../scripts/capability-context.mjs";
 import { CI_HEALTH_WORKFLOW_INPUTS } from "../scripts/ci-health-report.mjs";
 import { nodeTestGroups } from "../scripts/test-node-group.mjs";
 
@@ -423,6 +427,7 @@ test("version workflow changes retain candidate, history, Canvas and AI coverage
   assert.deepEqual(plan.selectedNodeTests, [
     "tests/run-session.test.mjs",
     "tests/version-history-records.test.mjs",
+    "tests/version-review-plan.test.mjs",
     "tests/version-session.test.mjs",
     "tests/version-workflow.test.mjs",
   ]);
@@ -889,4 +894,39 @@ test("gate plans expose owner provenance and width warnings without failing", ()
   const compact = compactGatePlan(plan);
   assert.deepEqual(compact.changedFiles, ["bridge/project-file-repository.mjs"]);
   assert.ok(compact.warnings.some((warning) => warning.code === "leaf-file-node-fanout"));
+});
+
+test("gate:plan capability-context is a separate reading set and is not stored in the impact map", () => {
+  const capabilityMap = loadCapabilityContextMap();
+  const comments = selectCapabilityContext({
+    changedFiles: ["app/application/comment-workflow.js"],
+    map: capabilityMap,
+    productRoot,
+  });
+  assert.deepEqual(comments.domains, ["comments"]);
+  assert.ok(comments.entryInterfaces.includes("app/workbench/comment-rail-contract.ts"));
+  assert.ok(comments.owners.includes("CommentWorkflow"));
+  assert.ok(comments.implementationFiles.includes("app/application/comment/commit-plan.js"));
+  assert.ok(comments.focusedTests.includes("tests/comment-workflow.test.mjs"));
+  assert.ok(comments.requiredDocs.includes("docs/ARCHITECTURE_MAP.md"));
+  assert.ok(comments.estimatedContextBytes > 0);
+
+  const unknown = selectCapabilityContext({
+    changedFiles: ["README.md"],
+    map: capabilityMap,
+    productRoot,
+  });
+  assert.deepEqual(unknown.domains, []);
+  assert.equal(unknown.estimatedContextBytes, 0);
+
+  const compact = compactGatePlan({
+    changedFiles: ["app/application/comment-workflow.js"],
+    matchedOwners: ["comment-workflow"],
+    selectedNodeTests: ["tests/comment-workflow.test.mjs"],
+    capabilityContext: comments,
+  });
+  assert.deepEqual(compact.capabilityContext.domains, ["comments"]);
+  assert.equal(compact.capabilityContext.estimatedContextBytes, comments.estimatedContextBytes);
+  assert.equal("capabilityContext" in map, false);
+  assert.equal(JSON.stringify(map).includes("estimatedContextBytes"), false);
 });

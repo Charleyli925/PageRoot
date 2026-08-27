@@ -564,3 +564,90 @@ test("an unknown Draft POST reconciles authority without a second mutation", asy
   assert.ok(attempted);
   assert.equal(harness.draftSession.revision, 1);
 });
+
+test("beginComposer and updateDraft are the only writer for a new comment draft", () => {
+  const harness = createHarness();
+  const started = harness.workflow.beginComposer({
+    target: target("target_composer"),
+    commentId: "comment_new",
+  });
+  assert.equal(started.status, "succeeded");
+  assert.equal(harness.commentSession.composerCommentId, "comment_new");
+  assert.equal(harness.commentSession.composerTarget.id, "target_composer");
+  assert.equal(harness.commentSession.composerDraft, "");
+
+  const drafted = harness.workflow.updateDraft("请改标题");
+  assert.equal(drafted.status, "succeeded");
+  assert.equal(harness.commentSession.composerDraft, "请改标题");
+
+  const resumed = harness.workflow.beginComposer({
+    target: target("target_composer_2"),
+    commentId: "comment_new",
+    resume: true,
+  });
+  assert.equal(resumed.status, "succeeded");
+  assert.equal(harness.commentSession.composerDraft, "请改标题");
+  assert.equal(harness.commentSession.composerTarget.id, "target_composer_2");
+});
+
+test("rebindCommentTarget is the unique comment-location commit path", () => {
+  const harness = createHarness();
+  harness.commentSession.setComments([{
+    commentId: "comment_rebind",
+    createdAt: "2026-08-11T00:00:00.000Z",
+    updatedAt: "2026-08-11T00:00:00.000Z",
+    target: target("target_old"),
+    text: "位置失效",
+    baseVersionId: "V1",
+  }]);
+
+  const outcome = harness.workflow.rebindCommentTarget({
+    commentId: "comment_rebind",
+    target: { ...target("target_new"), resolution: "exact" },
+  });
+  assert.equal(outcome.status, "succeeded");
+  assert.equal(outcome.value.target.id, "target_old");
+  assert.equal(outcome.value.target.selector, "main p");
+  assert.equal(harness.commentSession.comments[0].target.id, "target_old");
+  assert.equal(outcome.value.comment.target.resolution, "exact");
+});
+
+test("beginEdit and confirmEdit keep an exclusive editing session", () => {
+  const harness = createHarness();
+  harness.commentSession.setComments([{
+    commentId: "comment_edit_intent",
+    createdAt: "2026-08-11T00:00:00.000Z",
+    updatedAt: "2026-08-11T00:00:00.000Z",
+    target: target("target_edit_intent"),
+    text: "原评论",
+    baseVersionId: "V1",
+  }]);
+
+  const started = harness.workflow.beginEdit({ commentId: "comment_edit_intent" });
+  assert.equal(started.status, "succeeded");
+  assert.equal(harness.commentSession.editSession.commentId, "comment_edit_intent");
+  assert.equal(harness.commentSession.editSession.draftText, "原评论");
+
+  const drafted = harness.workflow.updateEditDraft("改后的评论");
+  assert.equal(drafted.status, "succeeded");
+  assert.equal(harness.commentSession.editSession.draftText, "改后的评论");
+
+  const confirmed = harness.workflow.confirmEdit({ commentId: "comment_edit_intent" });
+  assert.equal(confirmed.status, "succeeded");
+  assert.equal(harness.commentSession.editSession, null);
+  assert.equal(harness.commentSession.comments[0].text, "改后的评论");
+});
+
+test("missing edit or comment targets fail closed on intent commands", () => {
+  const harness = createHarness();
+  assert.equal(harness.workflow.beginComposer({}).status, "blocked");
+  assert.equal(harness.workflow.rebindCommentTarget({
+    commentId: "missing",
+    target: target(),
+  }).status, "blocked");
+  assert.equal(
+    harness.workflow.beginEdit({ commentId: "missing" }).status,
+    "blocked",
+  );
+  assert.equal(harness.workflow.updateEditDraft("x").status, "blocked");
+});

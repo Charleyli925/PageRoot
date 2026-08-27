@@ -1,0 +1,242 @@
+{
+  "schemaVersion": 1,
+  "domains": [
+    {
+      "id": "comments",
+      "patterns": [
+        "^app/application/comment(?:-workflow|-session|-workflow-codecs)?",
+        "^app/application/comment/",
+        "^app/workbench/comment-rail",
+        "^tests/comment-"
+      ],
+      "entryInterfaces": [
+        "app/workbench/comment-rail-contract.ts",
+        "app/application/comment-workflow.js"
+      ],
+      "owners": [
+        "CommentSession",
+        "CommentWorkflow"
+      ],
+      "implementationFiles": [
+        "app/application/comment-workflow.js",
+        "app/application/comment-session.js",
+        "app/application/comment/commit-plan.js",
+        "app/workbench/comment-rail-contract.ts",
+        "app/workbench/comment-rail-view.tsx"
+      ],
+      "focusedTests": [
+        "tests/comment-workflow.test.mjs",
+        "tests/comment-commit-plan.test.mjs",
+        "tests/comment-session.test.mjs"
+      ],
+      "requiredDocs": [
+        "docs/ARCHITECTURE_MAP.md",
+        "docs/GUARD_LEDGER.md"
+      ]
+    },
+    {
+      "id": "document-save",
+      "patterns": [
+        "^app/application/document-workflow",
+        "^app/application/document/",
+        "^app/application/verified-project-context",
+        "^app/application/document-session",
+        "^tests/document-"
+      ],
+      "entryInterfaces": [
+        "app/application/document/save-plan.js",
+        "app/application/verified-project-context.js"
+      ],
+      "owners": [
+        "DocumentSession",
+        "DocumentWorkflow"
+      ],
+      "implementationFiles": [
+        "app/application/document-workflow.js",
+        "app/application/document-session.js",
+        "app/application/document/save-plan.js",
+        "app/application/verified-project-context.js"
+      ],
+      "focusedTests": [
+        "tests/document-workflow.test.mjs",
+        "tests/document-save-plan.test.mjs",
+        "tests/document-session.test.mjs"
+      ],
+      "requiredDocs": [
+        "docs/ARCHITECTURE_MAP.md",
+        "docs/ARCHITECTURE_CONTRACT.md"
+      ]
+    },
+    {
+      "id": "project-lifecycle",
+      "patterns": [
+        "^app/application/project-workflow",
+        "^app/application/project-session",
+        "^app/application/project/",
+        "^app/application/project-application-session",
+        "^app/application/external-file-open",
+        "^tests/project-",
+        "^tests/external-file-open",
+        "^tests/desktop-close-recovery"
+      ],
+      "entryInterfaces": [
+        "app/application/project/open-intent.js",
+        "app/application/project/switch-plan.js",
+        "app/application/project/close-plan.js",
+        "app/application/project-workflow.js"
+      ],
+      "owners": [
+        "ProjectSession",
+        "ProjectWorkflow"
+      ],
+      "implementationFiles": [
+        "app/application/project-workflow.js",
+        "app/application/project-session.js",
+        "app/application/project/open-intent.js",
+        "app/application/project/switch-plan.js",
+        "app/application/project/close-plan.js",
+        "app/application/project/source-locator-plan.js"
+      ],
+      "focusedTests": [
+        "tests/project-workflow.test.mjs",
+        "tests/project-plan.test.mjs",
+        "tests/project-session.test.mjs"
+      ],
+      "requiredDocs": [
+        "docs/ARCHITECTURE_MAP.md",
+        "docs/INTERACTION_FLOW.md",
+        "docs/GUARD_LEDGER.md"
+      ]
+    },
+    {
+      "id": "canvas-selection",
+      "patterns": [
+        "^app/components/html-canvas-selection-chrome",
+        "^app/components/HtmlCanvasEditor",
+        "^app/components/html-canvas-pointer-capability",
+        "^tests/html-canvas-",
+        "^tests/canvas-pointer"
+      ],
+      "entryInterfaces": [
+        "app/components/html-canvas-selection-chrome-contract.ts"
+      ],
+      "owners": [
+        "EditAuthorRuntimeSession",
+        "HtmlCanvasEditor"
+      ],
+      "implementationFiles": [
+        "app/components/html-canvas-selection-chrome-contract.ts",
+        "app/components/html-canvas-selection-chrome.tsx",
+        "app/components/HtmlCanvasEditor.tsx"
+      ],
+      "focusedTests": [
+        "tests/html-canvas-capability-hover.test.mjs",
+        "tests/canvas-pointer-capability.test.mjs"
+      ],
+      "requiredDocs": [
+        "docs/ARCHITECTURE_MAP.md",
+        "docs/ENGINEERING_STANDARDS.md"
+      ]
+    },
+    {
+      "id": "run-and-review",
+      "patterns": [
+        "^app/application/run-workflow",
+        "^app/application/run-session",
+        "^app/application/version-workflow",
+        "^app/application/version-session",
+        "^app/workbench/AiReviewWorkspace",
+        "^tests/run-",
+        "^tests/version-"
+      ],
+      "entryInterfaces": [
+        "app/application/run-workflow.js",
+        "app/application/version-workflow.js"
+      ],
+      "owners": [
+        "RunSession",
+        "RunWorkflow",
+        "VersionSession",
+        "VersionWorkflow"
+      ],
+      "implementationFiles": [
+        "app/application/run-workflow.js",
+        "app/application/version-workflow.js",
+        "app/application/run/submit-plan.js",
+        "app/application/version/review-plan.js"
+      ],
+      "focusedTests": [
+        "tests/run-workflow.test.mjs",
+        "tests/version-workflow.test.mjs",
+        "tests/run-submit-plan.test.mjs",
+        "tests/version-review-plan.test.mjs"
+      ],
+      "requiredDocs": [
+        "docs/ARCHITECTURE_MAP.md",
+        "docs/CHANGE_REQUEST_PROTOCOL.md"
+      ]
+    },
+    {
+      "id": "navigation-tabs",
+      "patterns": [
+        "^app/application/workbench-navigation",
+        "^app/application/workbench-tabs",
+        "^app/application/browser-document",
+        "^tests/workbench-navigation",
+        "^tests/workbench-tabs"
+      ],
+      "entryInterfaces": [
+        "app/application/workbench-navigation-workflow.js"
+      ],
+      "owners": [
+        "WorkbenchTabsSession",
+        "WorkbenchNavigationSession",
+        "WorkbenchNavigationWorkflow"
+      ],
+      "implementationFiles": [
+        "app/application/workbench-navigation-workflow.js"
+      ],
+      "focusedTests": [
+        "tests/workbench-navigation-workflow.test.mjs"
+      ],
+      "requiredDocs": [
+        "docs/ARCHITECTURE_MAP.md",
+        "docs/INTERACTION_FLOW.md"
+      ]
+    },
+    {
+      "id": "architecture-policy",
+      "patterns": [
+        "^docs/ARCHITECTURE",
+        "^docs/GUARD_LEDGER",
+        "^docs/ENGINEERING_STANDARDS",
+        "^scripts/check-architecture",
+        "^scripts/architecture-",
+        "^scripts/capability-context",
+        "^tests/architecture-boundaries"
+      ],
+      "entryInterfaces": [
+        "docs/ARCHITECTURE_MAP.md",
+        "scripts/check-architecture.mjs"
+      ],
+      "owners": [
+        "architecture-gate"
+      ],
+      "implementationFiles": [
+        "scripts/check-architecture.mjs",
+        "scripts/capability-context.mjs",
+        "scripts/capability-context.json"
+      ],
+      "focusedTests": [
+        "tests/architecture-boundaries.test.mjs",
+        "tests/test-gate-selection.test.mjs"
+      ],
+      "requiredDocs": [
+        "docs/ARCHITECTURE_MAP.md",
+        "docs/ARCHITECTURE_CONTRACT.md",
+        "docs/GUARD_LEDGER.md",
+        "docs/ENGINEERING_STANDARDS.md"
+      ]
+    }
+  ]
+}

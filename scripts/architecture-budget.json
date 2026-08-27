@@ -5,9 +5,11 @@
     "the architecture check output. If a change genuinely needs to grow a file,",
     "raise the number here in the SAME pull request: that keeps growth a",
     "conscious, visible, reviewed decision instead of silent drift.",
-    "The intent is downward — when a file shrinks, lower its numbers so the",
-    "ceiling follows it down. Only files with a demonstrated regrowth risk are",
-    "listed; this is deliberately not applied to every large file.",
+    "Lowering these numbers is not an acceptance goal. Do not split a file only",
+    "to reduce maxLines. Prefer a narrower command surface and exclusive view",
+    "states over another mechanical file cut.",
+    "Only files with a demonstrated regrowth risk are listed; this is",
+    "deliberately not applied to every large file.",
     "Metrics: maxLines = physical line count; maxHooks = total React hook calls",
     "(counted structurally by scripts/architecture-ast-query.mjs). maxHooks only",
     "applies to React modules; a non-React file lists maxLines alone.",
@@ -15,11 +17,11 @@
   ],
   "files": {
     "app/workbench.tsx": {
-      "maxLines": 8474,
+      "maxLines": 8479,
       "maxHooks": 336
     },
     "app/components/HtmlCanvasEditor.tsx": {
-      "maxLines": 5279
+      "maxLines": 5293
     },
     "bridge/project-file-repository.mjs": {
       "maxLines": 5657

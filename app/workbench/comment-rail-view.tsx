@@ -1,11 +1,7 @@
 "use client";
 
 import {
-  type ClipboardEvent,
   type CSSProperties,
-  type Dispatch,
-  type RefObject,
-  type SetStateAction,
 } from "react";
 import { CaretRightIcon } from "@phosphor-icons/react/dist/csr/CaretRight";
 import { ChatCircleTextIcon } from "@phosphor-icons/react/dist/csr/ChatCircleText";
@@ -17,224 +13,120 @@ import { PlusIcon } from "@phosphor-icons/react/dist/csr/Plus";
 import { TrashIcon } from "@phosphor-icons/react/dist/csr/Trash";
 import { XIcon } from "@phosphor-icons/react/dist/csr/X";
 
-import type {
-  HtmlCanvasCommentLayoutState,
-  HtmlCanvasSelection,
-} from "../components/HtmlCanvasEditor";
 import { shouldSubmitCommentOnEnter } from "../lib/comment-rail-layout.js";
 import { insertionLabel } from "./comment-model";
+import {
+  composerViewFields,
+  type CommentRailActions,
+  type CommentRailModel,
+} from "./comment-rail-contract";
 import { CommentAttachmentStrip } from "./presentation";
 import { formatTime } from "./project-model";
-import type { RelinkNoticeCopy } from "./comment-relink-model.js";
-import type {
-  CommentAttachment,
-  CommentEditSession,
-  CommentItem,
-  DirectEditEvent,
-  OtherTabCommentEntry,
-} from "./types";
 
-type CommentTargetLayout = HtmlCanvasCommentLayoutState["targets"][number];
-
-export type OtherTabCommentGroup = {
-  key: string;
-  label: string;
-  entries: OtherTabCommentEntry[];
-};
-
-export type CommentAttachmentTarget = {
-  kind: "composer" | "comment";
-  commentId: string;
-};
+export type { CommentAttachmentTarget, OtherTabCommentGroup } from "./comment-rail-contract";
 
 export type CommentRailViewProps = {
-  commentsPanelRef: RefObject<HTMLElement | null>;
-  commentsHeaderRef: RefObject<HTMLElement | null>;
-  composerRef: RefObject<HTMLTextAreaElement | null>;
-  commentEditRef: RefObject<HTMLTextAreaElement | null>;
-  viewMode: "current" | "history";
-  commentLayoutReady: boolean;
-  commentLayoutAuthority: {
-    viewContextGeneration: number;
-    textEditing: boolean;
-  };
-  commentRailMinimumOffset: number;
-  commentRailFollowsFocus: boolean;
-  canvasDocumentHeight: number;
-  commentRailContentHeight: number;
-  commentRailOffset: number;
-  commentRailMinimumTop: number;
-  visibleCommentItems: CommentItem[];
-  draftInCurrentTab: boolean;
-  hasUnsavedCommentEdit: boolean;
-  otherTabCommentEntryCount: number;
-  otherTabCommentsOpen: boolean;
-  otherTabCommentsContextKey: string;
-  composerOpen: boolean;
-  draftTarget: HtmlCanvasSelection | null;
-  interactionLocked: boolean;
-  unfinishedEditedComment: CommentItem | null | undefined;
-  otherTabCommentGroups: OtherTabCommentGroup[];
-  activeCommentCount: number;
-  changeEvents: DirectEditEvent[];
-  composerInCurrentTab: boolean;
-  composerTop: number | undefined;
-  focusedCommentId: string | null;
-  relinkRailCardVisible: boolean;
-  relinkCardCopy: RelinkNoticeCopy;
-  relinkCardActive: boolean;
-  projectLoadError: string | null | undefined;
-  draftTargetScope: string;
-  attachmentUploadCount: number;
-  draftTargetCanSave: boolean;
-  composerMeasurementKey: string;
-  draft: string;
-  draftCommentId: string | null;
-  relinkingTarget: string | null;
-  draftAttachments: CommentAttachment[];
-  attachmentObjectUrls: Record<string, string>;
-  pendingDeleteCommentId: string | null;
-  hasCollapsedCommentDraft: boolean;
-  draftRecoveryTop: number | undefined;
-  draftRecoveryMeasurementKey: string;
-  expectedCommentLayoutTargetIds: string[];
-  sortedVisibleCommentItems: CommentItem[];
-  renderedVisibleCommentItems: CommentItem[];
-  editingCommentId: string | null;
-  commentEditSession: CommentEditSession | null;
-  commentTargetLayouts: Record<string, CommentTargetLayout>;
-  selection: HtmlCanvasSelection | null;
-  commentMeasurementKeys: Record<string, string | undefined>;
-  visibleCommentPositions: Record<string, number | undefined>;
-  commentEditDraft: string;
-  commentEditAttachments: CommentAttachment[];
-  openGlobalCommentComposer: () => void;
-  resumeCurrentComposer: () => void;
-  resumeCommentEdit: (commentId: string) => void;
-  setExpandedOtherTabCommentsKey: Dispatch<SetStateAction<string>>;
-  setComposerOpen: Dispatch<SetStateAction<boolean>>;
-  setPendingDeleteCommentId: Dispatch<SetStateAction<string | null>>;
-  focusCommentTarget: (target: HtmlCanvasSelection, commentId: string) => void;
-  startUnsafeTargetRelink: () => void;
-  cancelTargetRelink: () => void;
-  onRetryProjectHydration: () => void;
-  closeCommentComposer: () => void;
-  beginTargetRelink: (itemId: string) => void;
-  onComposerDraftChange: (value: string) => void;
-  onComposerPaste: (event: ClipboardEvent<HTMLTextAreaElement>) => void;
-  addComment: () => void | Promise<void>;
-  ensureAttachmentObjectUrl: (attachment: CommentAttachment) => Promise<string> | void;
-  openAttachmentPreview: (attachment: CommentAttachment) => void | Promise<void>;
-  downloadAttachment: (attachment: CommentAttachment) => void | Promise<void>;
-  removeComposerAttachment: (attachment: CommentAttachment) => void;
-  discardCurrentComposer: () => void;
-  openAttachmentPicker: (
-    target: CommentAttachmentTarget,
-    accept?: "all" | "image",
-  ) => void;
-  commentTargetIsLocatable: (target: HtmlCanvasSelection) => boolean;
-  updateCommentEditDraft: (value: string) => void;
-  cancelCommentEdit: () => void;
-  confirmCommentEdit: (commentId: string) => void;
-  pasteImages: (
-    event: ClipboardEvent<HTMLTextAreaElement>,
-    target: CommentAttachmentTarget,
-  ) => void;
-  removeCommentAttachment: (commentId: string, attachment: CommentAttachment) => void;
-  queueReviewCommentFocus: (target: HtmlCanvasSelection, commentId: string) => void;
-  deleteComment: (commentId: string) => void;
-  beginCommentEdit: (comment: CommentItem, focusText?: boolean) => boolean;
+  model: CommentRailModel;
+  actions: CommentRailActions;
 };
 
 export function CommentRailView({
-  commentsPanelRef,
-  commentsHeaderRef,
-  composerRef,
-  commentEditRef,
-  viewMode,
-  commentLayoutReady,
-  commentLayoutAuthority,
-  commentRailMinimumOffset,
-  commentRailFollowsFocus,
-  canvasDocumentHeight,
-  commentRailContentHeight,
-  commentRailOffset,
-  commentRailMinimumTop,
-  visibleCommentItems,
-  draftInCurrentTab,
-  hasUnsavedCommentEdit,
-  otherTabCommentEntryCount,
-  otherTabCommentsOpen,
-  otherTabCommentsContextKey,
-  composerOpen,
-  draftTarget,
-  interactionLocked,
-  unfinishedEditedComment,
-  otherTabCommentGroups,
-  activeCommentCount,
-  changeEvents,
-  composerInCurrentTab,
-  composerTop,
-  focusedCommentId,
-  relinkRailCardVisible,
-  relinkCardCopy,
-  relinkCardActive,
-  projectLoadError,
-  draftTargetScope,
-  attachmentUploadCount,
-  draftTargetCanSave,
-  composerMeasurementKey,
-  draft,
-  draftCommentId,
-  relinkingTarget,
-  draftAttachments,
-  attachmentObjectUrls,
-  pendingDeleteCommentId,
-  hasCollapsedCommentDraft,
-  draftRecoveryTop,
-  draftRecoveryMeasurementKey,
-  expectedCommentLayoutTargetIds,
-  sortedVisibleCommentItems,
-  renderedVisibleCommentItems,
-  editingCommentId,
-  commentEditSession,
-  commentTargetLayouts,
-  selection,
-  commentMeasurementKeys,
-  visibleCommentPositions,
-  commentEditDraft,
-  commentEditAttachments,
-  openGlobalCommentComposer,
-  resumeCurrentComposer,
-  resumeCommentEdit,
-  setExpandedOtherTabCommentsKey,
-  setComposerOpen,
-  setPendingDeleteCommentId,
-  focusCommentTarget,
-  startUnsafeTargetRelink,
-  cancelTargetRelink,
-  onRetryProjectHydration,
-  closeCommentComposer,
-  beginTargetRelink,
-  onComposerDraftChange,
-  onComposerPaste,
-  addComment,
-  ensureAttachmentObjectUrl,
-  openAttachmentPreview,
-  downloadAttachment,
-  removeComposerAttachment,
-  discardCurrentComposer,
-  openAttachmentPicker,
-  commentTargetIsLocatable,
-  updateCommentEditDraft,
-  cancelCommentEdit,
-  confirmCommentEdit,
-  pasteImages,
-  removeCommentAttachment,
-  queueReviewCommentFocus,
-  deleteComment,
-  beginCommentEdit,
+  model,
+  actions,
 }: CommentRailViewProps) {
+  const {
+    commentsPanelRef,
+    commentsHeaderRef,
+    composerRef,
+    commentEditRef,
+    viewMode,
+    commentLayoutReady,
+    commentLayoutAuthority,
+    commentRailMinimumOffset,
+    commentRailFollowsFocus,
+    canvasDocumentHeight,
+    commentRailContentHeight,
+    commentRailOffset,
+    commentRailMinimumTop,
+    visibleCommentItems,
+    draftInCurrentTab,
+    hasUnsavedCommentEdit,
+    otherTabCommentEntryCount,
+    otherTabCommentsOpen,
+    otherTabCommentsContextKey,
+    interactionLocked,
+    unfinishedEditedComment,
+    otherTabCommentGroups,
+    activeCommentCount,
+    changeEvents,
+    composerInCurrentTab,
+    composerTop,
+    focusedCommentId,
+    relinkRailCardVisible,
+    relinkCardCopy,
+    relinkCardActive,
+    projectLoadError,
+    draftTargetScope,
+    attachmentUploadCount,
+    draftTargetCanSave,
+    composerMeasurementKey,
+    attachmentObjectUrls,
+    pendingDeleteCommentId,
+    draftRecoveryTop,
+    draftRecoveryMeasurementKey,
+    expectedCommentLayoutTargetIds,
+    sortedVisibleCommentItems,
+    renderedVisibleCommentItems,
+    commentTargetLayouts,
+    selection,
+    commentMeasurementKeys,
+    visibleCommentPositions,
+  } = model;
+  const {
+    composerOpen,
+    draftTarget,
+    draft,
+    draftCommentId,
+    draftAttachments,
+    hasCollapsedCommentDraft,
+    editingCommentId,
+    commentEditSession,
+    commentEditDraft,
+    commentEditAttachments,
+    relinkingTarget,
+  } = composerViewFields(model.composer);
+  const {
+    openGlobalCommentComposer,
+    resumeCurrentComposer,
+    resumeCommentEdit,
+    setExpandedOtherTabCommentsKey,
+    setComposerOpen,
+    setPendingDeleteCommentId,
+    focusCommentTarget,
+    startUnsafeTargetRelink,
+    cancelTargetRelink,
+    onRetryProjectHydration,
+    closeCommentComposer,
+    beginTargetRelink,
+    updateDraft: onComposerDraftChange,
+    onComposerPaste,
+    commit: addComment,
+    ensureAttachmentObjectUrl,
+    openAttachmentPreview,
+    downloadAttachment,
+    removeComposerAttachment,
+    discardCurrentComposer,
+    openAttachmentPicker,
+    commentTargetIsLocatable,
+    updateCommentEditDraft,
+    cancelCommentEdit,
+    confirmEdit: confirmCommentEdit,
+    pasteImages,
+    removeCommentAttachment,
+    queueReviewCommentFocus,
+    deleteComment,
+    beginEdit: beginCommentEdit,
+  } = actions;
   return (
           <aside
             ref={commentsPanelRef}

@@ -944,27 +944,7 @@ export class WorkspaceController {
   }
 
   replaceCommentWorkingCopy(input) {
-    return this.#commentSession.update(input);
-  }
-
-  replaceCommentItems(comments) {
-    return this.#commentSession.setComments(comments);
-  }
-
-  setCommentComposerTarget(target) {
-    return this.#commentSession.setComposerTarget(target);
-  }
-
-  setCommentComposerDraft(draft) {
-    return this.#commentSession.setComposerDraft(draft);
-  }
-
-  setCommentEditSession(session) {
-    return this.#commentSession.setEditSession(session);
-  }
-
-  clearCommentComposer() {
-    return this.#commentSession.clearComposer();
+    return this.#requireCommentWorkflow().applyWorkingCopy(input);
   }
 
   clearCompletedRun() {
@@ -1504,6 +1484,46 @@ export class WorkspaceController {
 
   queueDraft() {
     return this.#requireCommentWorkflow().queueDraft();
+  }
+
+  beginCommentComposer(input) {
+    return this.#requireCommentWorkflow().beginComposer(input);
+  }
+
+  updateCommentDraft(draft) {
+    return this.#requireCommentWorkflow().updateDraft(draft);
+  }
+
+  rebindCommentComposer(target) {
+    return this.#requireCommentWorkflow().rebindComposerTarget(target);
+  }
+
+  cancelCommentComposer() {
+    return this.#requireCommentWorkflow().clearComposer();
+  }
+
+  beginCommentEdit(input) {
+    return this.#requireCommentWorkflow().beginEdit(input);
+  }
+
+  updateCommentEditDraft(draftText) {
+    return this.#requireCommentWorkflow().updateEditDraft(draftText);
+  }
+
+  clearCommentEdit() {
+    return this.#requireCommentWorkflow().clearEditSession();
+  }
+
+  rebindCommentTarget(input) {
+    return this.#requireCommentWorkflow().rebindCommentTarget(input);
+  }
+
+  applyCommentItems(comments) {
+    return this.#requireCommentWorkflow().applyCommentItems(comments);
+  }
+
+  confirmCommentEdit(input) {
+    return this.#requireCommentWorkflow().confirmEdit(input);
   }
 
   flushDraft(input) {

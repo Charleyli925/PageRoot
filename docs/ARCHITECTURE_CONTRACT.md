@@ -816,11 +816,12 @@ not applied to every large file:
   raise the number in the same change — but a budget notice never fails the
   gate, CI or merge, and no test asserts the ceilings. Growth is allowed, but
   it must be a conscious, reviewed decision rather than silent drift.
-- The intent is downward. When a file shrinks, the check prints a hint to lower
-  its ceiling to the new value so the ratchet follows the file down.
-- Prefer moving logic out over raising a ceiling. The budget serves the goal of
-  a thinner presentation layer; it must never become a reason to block a
-  legitimate change or to contort code purely to satisfy a number.
+- Lowering a ceiling is not an acceptance goal. Do not split a module only to
+  reduce `maxLines`.
+- When a file shrinks for a real invariant boundary, the check may hint to
+  lower the ceiling; that hint is observational.
+- Prefer a narrower public command surface over moving lines to a new file
+  that still exports the same illegal state combinations.
 
 The budget is a trend brake, not a design target. There is no enforced descent
 schedule; the numbers track real progress, they do not mandate it.
