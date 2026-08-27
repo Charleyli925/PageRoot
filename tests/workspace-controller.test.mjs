@@ -489,6 +489,36 @@ test("workspace controller is the sole aggregate Session observer and disconnect
   unsubscribe();
 });
 
+test("comments capability publishes only comment snapshots with stable commands", () => {
+  const harness = createHarness();
+  const capability = harness.controller.comments;
+  const commands = capability.commands;
+  const snapshots = [];
+  const unsubscribe = capability.subscribe(() => {
+    snapshots.push(capability.getSnapshot());
+  });
+  const initial = capability.getSnapshot();
+
+  harness.documentSession.setPendingWrite({ revision: 1 });
+  assert.equal(capability.getSnapshot(), initial);
+  assert.equal(snapshots.length, 0);
+
+  harness.commentSession.setComposerDraft("local draft");
+  assert.equal(snapshots.length, 1);
+  assert.equal(snapshots[0].workingCopy, harness.commentSession.snapshot);
+  assert.equal(snapshots[0].workingCopy.composerDraft, "local draft");
+  assert.equal(snapshots[0].persistence, null);
+  assert.equal(harness.controller.comments, capability);
+  assert.equal(harness.controller.comments.commands, commands);
+  assert.ok(Object.isFrozen(snapshots[0]));
+  assert.ok(Object.isFrozen(commands));
+
+  unsubscribe();
+  harness.commentSession.setComposerDraft("after unsubscribe");
+  assert.equal(snapshots.length, 1);
+  harness.controller.dispose();
+});
+
 test("workspace controller owns one Edit runtime attempt per source path and canvas generation", async () => {
   const html = [
     "<!doctype html><html><body>",

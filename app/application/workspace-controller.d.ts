@@ -69,6 +69,11 @@ import type {
 export type {
   AgentSelectionControllerCapability,
   AiConversationControllerCapability,
+  CapabilityFacet,
+  CommentAttachmentTarget,
+  CommentControllerCapability,
+  CommentControllerCapabilitySnapshot,
+  CommentControllerCommands,
   ConversationControllerCapability,
   CommandOutcome,
   DocumentSurfaceControllerCapability,
@@ -376,6 +381,7 @@ export function createRuntimeWorkspaceController(
 // production renderer must use createRuntimeWorkspaceController instead.
 export class WorkspaceController {
   constructor(options: WorkspaceControllerConstruction);
+  readonly comments: import("./workspace-controller-capabilities.js").CommentControllerCapability;
   getSnapshot(): import("./workspace-controller-capabilities.js").WorkspaceControllerSnapshot;
   openConversation(
     context: import("./conversation-session.js").ConversationContext | null,

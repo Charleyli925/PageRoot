@@ -7,7 +7,10 @@ import type {
   DocumentSurfaceCacheSnapshot,
 } from "./document-surface-cache-session.js";
 import type { CommentSessionSnapshot } from "./comment-session.js";
-import type { CommentWorkflowSnapshot } from "./comment-workflow.js";
+import type {
+  CommentWorkflowOutcome,
+  CommentWorkflowSnapshot,
+} from "./comment-workflow.js";
 import type { EditAuthorRuntimeSnapshot } from "./edit-author-runtime-session.js";
 import type { FirstEditGuideSnapshot } from "./first-edit-guide-session.js";
 import type { ProjectRulesSnapshot } from "./project-rules-session.js";
@@ -83,6 +86,90 @@ export interface WorkspaceSnapshotReader {
   getSnapshot(): WorkspaceControllerSnapshot;
 }
 
+export type CapabilityFacet<TSnapshot, TCommands> = Readonly<{
+  getSnapshot(): TSnapshot;
+  subscribe(listener: () => void): () => void;
+  commands: Readonly<TCommands>;
+}>;
+
+export type CommentControllerCapabilitySnapshot<
+  TComment = unknown,
+  TEvent = unknown,
+  TAttachment = unknown,
+  TTarget = unknown,
+  TEditSession = unknown,
+> = Readonly<{
+  workingCopy: CommentSessionSnapshot<
+    TComment,
+    TEvent,
+    TAttachment,
+    TTarget,
+    TEditSession
+  > | null;
+  persistence: CommentWorkflowSnapshot | null;
+}>;
+
+export type CommentAttachmentTarget = Readonly<{
+  kind: "composer" | "comment";
+  commentId: string;
+}>;
+
+export interface CommentControllerCommands {
+  beginComposer(input: Readonly<{
+    target: unknown;
+    commentId?: string;
+    resume?: boolean;
+  }>): CommentWorkflowOutcome;
+  updateDraft(draft: string): CommentWorkflowOutcome;
+  rebindComposerTarget(target: unknown): CommentWorkflowOutcome;
+  cancelComposer(): CommentWorkflowOutcome;
+  beginEdit(input: Readonly<{ commentId: string }>): CommentWorkflowOutcome;
+  updateEditDraft(draftText: string): CommentWorkflowOutcome;
+  clearEdit(): CommentWorkflowOutcome;
+  rebindTarget(input: Readonly<{
+    commentId: string;
+    target: unknown;
+  }>): CommentWorkflowOutcome;
+  confirmEdit(input: Readonly<{ commentId: string }>): CommentWorkflowOutcome;
+  flush(input?: Readonly<Record<string, unknown>>): Promise<CommentWorkflowOutcome>;
+  commit(input?: Readonly<{ commentId?: string }>): Promise<CommentWorkflowOutcome>;
+  delete(input: Readonly<{ commentId: string }>): CommentWorkflowOutcome;
+  discardComposer(): CommentWorkflowOutcome;
+  cancelEdit(input?: Readonly<{ commentId?: string }>): CommentWorkflowOutcome;
+  removeComposerAttachment(
+    input: Readonly<{ attachmentId: string }>,
+  ): CommentWorkflowOutcome;
+  removeEditAttachment(input: Readonly<{
+    commentId: string;
+    attachmentId: string;
+  }>): CommentWorkflowOutcome;
+  uploadAttachments(input: Readonly<{
+    files: readonly unknown[];
+    target: CommentAttachmentTarget;
+    source: "clipboard" | "file-picker";
+    persistence: string;
+  }>): Promise<CommentWorkflowOutcome>;
+  readAttachment(input: Readonly<{ attachment: unknown }>): Promise<
+    CommentWorkflowOutcome<Blob>
+  >;
+}
+
+export type CommentControllerCapability<
+  TComment = unknown,
+  TEvent = unknown,
+  TAttachment = unknown,
+  TTarget = unknown,
+  TEditSession = unknown,
+> = CapabilityFacet<
+  CommentControllerCapabilitySnapshot<
+    TComment,
+    TEvent,
+    TAttachment,
+    TTarget,
+    TEditSession
+  >,
+  CommentControllerCommands
+>;
 export interface ConversationControllerCapability {
   openConversation(context: ConversationContext | null): Promise<unknown>;
   closeConversation(): void;

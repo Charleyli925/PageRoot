@@ -29,7 +29,7 @@ the Bridge client, construct Sessions, or own debounce, polling, or drain.
 | --- | --- | --- | --- |
 | Navigation and tabs | `WorkbenchTabsSession`, `WorkbenchNavigationSession`, `BrowserDocumentSession` | `WorkbenchNavigationWorkflow` | `app/application/workbench-navigation-workflow.js`, `app/workbench.tsx` tab strip |
 | Document save | `DocumentSession` | `DocumentWorkflow` | `document-workflow.js`, `document/save-plan.js`, `verified-project-context.js` |
-| Comments | `CommentSession` | `CommentWorkflow` | `comment-workflow.js`, `comment/commit-plan.js`, `comment-rail-contract.ts`, `comment-rail-view.tsx` |
+| Comments | `CommentSession` | `CommentWorkflow` | `workspace-controller-capabilities.d.ts` (`controller.comments`), `comment-workflow.js`, `comment/commit-plan.js`, `comment-rail-container.tsx`, `comment-canvas-port.js`, `comment-rail-view.tsx` |
 | Attachments | Draft attachment repository | `CommentWorkflow` | `comment-workflow.js` upload/read/delete |
 | Run and AI request | `RunSession` | `RunWorkflow` | `run-workflow.js`, `run/submit-plan.js` |
 | Review and Candidate | `VersionSession` (projection) | `VersionWorkflow` prepare/accept | `app/workbench/AiReviewWorkspace.tsx` |
@@ -53,7 +53,7 @@ add a second Controller.
 
 | Task | Read first |
 | --- | --- |
-| Comments UI or composer | this map, `CommentWorkflow`, `CommentSession`, `comment-rail-contract.ts`, `comment-rail-view.tsx`, comment tests |
+| Comments UI or composer | this map, `workspace-controller-capabilities.d.ts`, `CommentWorkflow`, `CommentSession`, `comment-rail-container.tsx`, `comment-canvas-port.js`, `comment-rail-contract.ts`, focused comment tests |
 | Save / autosave / conflict | this map, `DocumentWorkflow`, `DocumentSession`, P1-B CAS in `ProjectFileRepository` |
 | Open / switch / tabs / close | this map, `WorkbenchNavigationWorkflow`, `ProjectWorkflow`, `project/*.js` plans, `INTERACTION_FLOW.md` |
 | AI submit / cancel / review | this map, `RunWorkflow`, `VersionWorkflow`, `CHANGE_REQUEST_PROTOCOL.md` |
@@ -74,6 +74,30 @@ Do not add checks for `#privateField`, private method names, or “this call
 text must appear in this file”. Public outcome tests own those invariants.
 Line-count ceilings are observational; they are not a reason to split files.
 
+## Comment render boundary
+
+```text
+CommentSession + CommentWorkflow
+  -> WorkspaceController.comments { getSnapshot, subscribe, commands }
+    -> CommentRailContainer
+      -> stable CommentRailView model/actions
+
+HtmlCanvasEditor selection + source-tagged target geometry
+  -> commentCanvasPort
+    -> CommentRailContainer
+```
+
+`CommentSession` keeps immutable collection identities when only draft text
+changes. `CommentRailContainer` owns capability-local subscriptions, disclosure,
+delete confirmation, composer/edit refs, the attachment picker, card measurement,
+virtualization, rail scrolling and reveal/focus timing. `commentCanvasPort`
+stabilizes disposable cross-region presentation: Canvas selection, layout authority,
+target geometry, document height, composer/edit/focus disclosure and relink/picker
+intents; it never owns comment facts. Workbench's aggregate
+subscription may suppress composer-text and edit-text-only revisions; saved
+comments, attachment structure, persistence errors and every non-comment
+capability still invalidate the composition root.
+
 ## Capability-context for `gate:plan`
 
 `npm run gate:plan` also prints a capability reading set from
@@ -81,4 +105,3 @@ Line-count ceilings are observational; they are not a reason to split files.
 `tests/test-impact-map.json`. Impact-map owners choose tests; capability-context
 chooses what to read: `entryInterfaces`, `owners`, `implementationFiles`,
 `focusedTests`, `requiredDocs` and `estimatedContextBytes`.
-

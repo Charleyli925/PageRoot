@@ -168,14 +168,31 @@ aggregate snapshot through its fixed `getSnapshot()`/`subscribe()` contract and
 forwards typed workflow events through `subscribeEvents()`; it does not create a
 second mutable store. It owns the unique `DrainCoordinator`, protocol Sessions,
 and Project, Comment, Run, Version and Workbench Tabs workflow composition.
+Capability facets such as `controller.comments` are stable views of this same
+Controller instance. A facet exposes only `getSnapshot`, `subscribe` and typed
+business commands; it neither stores copied facts nor exposes another
+capability. React capability containers subscribe to facets directly so local
+draft or focus updates do not publish through the Workbench composition root.
+The aggregate contract remains available during migration and for genuinely
+cross-capability presentation.
+
+Comment geometry is a disposable presentation port, not Controller or Session
+state. `HtmlCanvasEditor` publishes source-tagged layout snapshots to one stable
+`commentCanvasPort`; `CommentRailContainer` alone subscribes, owns composer/edit
+disclosure, delete confirmation and file-input refs, measures cards, virtualizes
+the rail and routes paired reveal/focus/relink intents. Workbench may issue a
+typed presentation intent or read the latest target status inside a user command,
+but it must not subscribe its composition render to comment presentation changes.
 The Tabs snapshot is part of the same aggregate; startup restore, Registry
 reconciliation and tab persistence enter through Controller-owned commands and
 narrow host ports, never React refs or effects. `DocumentSession`
 may derive `hasPendingWrite` and `isFlushing` for that snapshot, but neither a
 pending-write payload nor a Promise crosses into Workbench.
 
-Workbench owns only presentation state and narrow host adapters. It receives
-the aggregate snapshot and Controller commands, never a business Session or the
+Workbench owns only cross-capability presentation state and narrow host
+adapters. Capability-local presentation state belongs in its container.
+Workbench receives the aggregate snapshot, stable facets and Controller
+commands, never a business Session or the
 Bridge client. Its direct-Bridge allowance is exactly 0: the checked architecture
 gate permits no `bridgeClient.*` call, generic Bridge-command escape, business
 Session/Workflow construction or Session ref in Workbench. The gate also forbids React,

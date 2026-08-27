@@ -11,6 +11,7 @@ import type {
   CommentItem,
   DirectEditEvent,
   OtherTabCommentEntry,
+  CanvasMode,
 } from "./types";
 
 export type OtherTabCommentGroup = {
@@ -64,6 +65,7 @@ export type CommentRailModel = {
   draftInCurrentTab: boolean;
   hasUnsavedCommentEdit: boolean;
   otherTabCommentEntryCount: number;
+  otherTabCommentsContextKey: string;
   otherTabCommentsOpen: boolean;
   interactionLocked: boolean;
   unfinishedEditedComment: CommentItem | null | undefined;
@@ -92,6 +94,23 @@ export type CommentRailModel = {
   selection: HtmlCanvasSelection | null;
   commentMeasurementKeys: Record<string, string | undefined>;
   visibleCommentPositions: Record<string, number | undefined>;
+};
+
+export type CommentRailContainerContext = {
+  reviewStageRef: RefObject<HTMLDivElement | null>;
+  canvasMode: CanvasMode;
+  viewMode: "current" | "history";
+  expectedCommentLayoutSourceSha256: string;
+  activePageViewGeneration: number;
+  visibleCommentItems: CommentItem[];
+  activeCommentCount: number;
+  changeEvents: DirectEditEvent[];
+  interactionLocked: boolean;
+  unfinishedEditedComment: CommentItem | null | undefined;
+  unsafeRelinkCommentItems: CommentItem[];
+  projectLoadError: string | null | undefined;
+  otherTabCommentsContextKey: string;
+  attachmentObjectUrls: Record<string, string>;
 };
 
 export type CommentRailActions = {
@@ -133,6 +152,21 @@ export type CommentRailActions = {
   queueReviewCommentFocus: (target: HtmlCanvasSelection, commentId: string) => void;
   deleteComment: (commentId: string) => void;
   beginEdit: (comment: CommentItem, focusText?: boolean) => boolean;
+};
+
+export type CommentRailHostActions = Omit<
+  CommentRailActions,
+  | "toggleOtherTabComments"
+  | "collapseOtherTabComments"
+  | "requestDeleteComment"
+  | "clearDeleteRequest"
+  | "hideCommentComposer"
+> & {
+  uploadAttachments: (
+    files: File[],
+    target: CommentAttachmentTarget,
+    source: "clipboard" | "file-picker",
+  ) => void | Promise<void>;
 };
 
 export {

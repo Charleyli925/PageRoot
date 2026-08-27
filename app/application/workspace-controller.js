@@ -282,6 +282,11 @@ export class WorkspaceController {
   #projectSessionSnapshot = null;
   #documentSessionSnapshot = null;
   #commentSessionSnapshot = null;
+  #commentsCapabilitySnapshot = Object.freeze({
+    workingCopy: null,
+    persistence: null,
+  });
+  #commentsCapabilityListeners = new Set();
   #runSessionSnapshot = null;
   #versionSessionSnapshot = null;
   #editRuntimeSnapshot = null;
@@ -315,6 +320,8 @@ export class WorkspaceController {
   #registrationPromise = null;
   #registrationSequence = 0;
   #disposed = false;
+
+  comments;
 
   constructor({
     bridgeClient,
@@ -425,6 +432,40 @@ export class WorkspaceController {
     this.#versionSessionSnapshot = versionSession.snapshot;
     this.#editRuntimeSnapshot = this.#editRuntimeSession.snapshot;
     this.#firstEditGuideSnapshot = this.#firstEditGuideSession.snapshot;
+    this.#commentsCapabilitySnapshot = Object.freeze({
+      workingCopy: this.#commentSessionSnapshot,
+      persistence: null,
+    });
+    this.comments = Object.freeze({
+      getSnapshot: () => this.#commentsCapabilitySnapshot,
+      subscribe: (listener) => {
+        if (typeof listener !== "function") {
+          throw new TypeError("Comments capability listener must be a function.");
+        }
+        this.#commentsCapabilityListeners.add(listener);
+        return () => this.#commentsCapabilityListeners.delete(listener);
+      },
+      commands: Object.freeze({
+        beginComposer: (input) => this.beginCommentComposer(input),
+        updateDraft: (draft) => this.updateCommentDraft(draft),
+        rebindComposerTarget: (target) => this.rebindCommentComposer(target),
+        cancelComposer: () => this.cancelCommentComposer(),
+        beginEdit: (input) => this.beginCommentEdit(input),
+        updateEditDraft: (draftText) => this.updateCommentEditDraft(draftText),
+        clearEdit: () => this.clearCommentEdit(),
+        rebindTarget: (input) => this.rebindCommentTarget(input),
+        confirmEdit: (input) => this.confirmCommentEdit(input),
+        flush: (input) => this.flushDraft(input),
+        commit: (input) => this.commitComment(input),
+        delete: (input) => this.deleteComment(input),
+        discardComposer: () => this.discardCommentComposer(),
+        cancelEdit: (input) => this.cancelCommentEdit(input),
+        removeComposerAttachment: (input) => this.removeComposerAttachment(input),
+        removeEditAttachment: (input) => this.removeCommentEditAttachment(input),
+        uploadAttachments: (input) => this.uploadAttachments(input),
+        readAttachment: (input) => this.readAttachment(input),
+      }),
+    });
     this.#codecs = createWorkspaceControllerCodecs(codecs);
     this.#hashPort = ports.hash;
     this.#recoveryPort = ports.recovery || { replace: () => {} };
@@ -897,6 +938,7 @@ export class WorkspaceController {
     this.#documentWorkflow = null;
     this.#listeners.clear();
     this.#eventListeners.clear();
+    this.#commentsCapabilityListeners.clear();
   }
 
   get hasDocumentHistoryAction() {
@@ -1720,6 +1762,7 @@ export class WorkspaceController {
   }
 
   #publishAggregateSnapshot() {
+    this.#publishCommentsCapabilitySnapshot();
     this.#snapshot = Object.freeze({
       registration: this.#registration,
       projectSession: this.#projectSessionSnapshot,
@@ -1746,6 +1789,26 @@ export class WorkspaceController {
         listener(this.#snapshot);
       } catch {
         // Presentation listeners cannot affect application authority.
+      }
+    }
+  }
+
+  #publishCommentsCapabilitySnapshot() {
+    const workingCopy = this.#commentSessionSnapshot;
+    const persistence = this.#commentWorkflow?.getSnapshot() || null;
+    if (
+      this.#commentsCapabilitySnapshot.workingCopy === workingCopy
+      && this.#commentsCapabilitySnapshot.persistence === persistence
+    ) return;
+    this.#commentsCapabilitySnapshot = Object.freeze({
+      workingCopy,
+      persistence,
+    });
+    for (const listener of this.#commentsCapabilityListeners) {
+      try {
+        listener();
+      } catch {
+        // Capability presentation cannot affect application authority.
       }
     }
   }
