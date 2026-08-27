@@ -7,10 +7,16 @@ import {
   closeQoderAvailability,
   createQoderAcpE2ECommand,
   createSourceFixture,
+  existsSync,
   launchPageRoot,
   managedProjectRoots,
   openQoderAvailability,
+  path,
+  readFileSync,
+  realpathSync,
+  readdirSync,
   removeSourceFixture,
+  stopPageRoot,
 } from "./ai-closed-loop-helpers.mjs";
 
 test("Qoder ACP Agent Bridge reaches review without clipboard or automatic adoption", {

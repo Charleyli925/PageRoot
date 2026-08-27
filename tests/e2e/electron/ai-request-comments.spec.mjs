@@ -1,13 +1,26 @@
 import { expect, test } from "@playwright/test";
 import {
   ORIGINAL_TEXT,
+  activateNativeEdit,
+  caseSelector,
   chooseClipboardDelivery,
   closePageRootGracefully,
   createSourceFixture,
+  loadedDiskFrame,
   launchPageRoot,
   managedProjectRoots,
+  mkdtempSync,
+  openRailGlobalCommentComposer,
+  path,
+  readFileSync,
+  realpathSync,
   removeSourceFixture,
   rewriteWorkspaceDraftComment,
+  seedLegacyV3Project,
+  setTextSelection,
+  stopPageRoot,
+  tmpdir,
+  waitForProjectReady,
   workspaceContainsDraftComment,
 } from "./ai-closed-loop-helpers.mjs";
 

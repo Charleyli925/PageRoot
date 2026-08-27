@@ -12,6 +12,7 @@ import {
   removeIsolatedUserData,
   removeSourceFixture,
   renameSync,
+  sameDesktopSourcePath,
   stopPageRoot,
   waitForActiveSourcePath,
   waitForTitleStem,

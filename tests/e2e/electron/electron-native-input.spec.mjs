@@ -24,6 +24,7 @@ import {
   recordedInputEvents,
   rememberCurrentNativeHost,
   removeIsolatedUserData,
+  removeValidatedTemporaryDirectory,
   replaceEditableIslandBytes,
   replaceUniqueBytes,
   replayApplePinyinStyledWrapperCommit,

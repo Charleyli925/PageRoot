@@ -15,6 +15,7 @@ import {
   path,
   readFileSync,
   removeIsolatedUserData,
+  removeValidatedTemporaryDirectory,
   setTextSelection,
   sha256,
   stopPageRoot,

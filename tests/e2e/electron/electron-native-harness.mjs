@@ -82,6 +82,7 @@ export {
   closePageRootGracefully,
   launchPageRoot,
   openRailGlobalCommentComposer,
+  removeValidatedTemporaryDirectory,
   sendToMainRenderer,
   stopPageRoot,
 };
@@ -526,4 +527,3 @@ export async function readManagedManifest(sourcePath) {
     "utf8",
   ));
 }
-

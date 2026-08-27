@@ -20,6 +20,7 @@ import {
   removeIsolatedUserData,
   removeSourceFixture,
   requestDirectoryCount,
+  removeValidatedTemporaryDirectory,
   sendToMainRenderer,
   setTextSelection,
   stopPageRoot,

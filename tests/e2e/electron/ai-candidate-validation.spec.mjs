@@ -5,9 +5,13 @@ import {
   addCommentAndSubmit,
   closePageRootGracefully,
   createSourceFixture,
+  existsSync,
   launchPageRoot,
+  path,
+  readFileSync,
   removeSourceFixture,
   runOfficialFinalizer,
+  stopPageRoot,
   workingHtmlFiles,
   writeAiOutput,
 } from "./ai-closed-loop-helpers.mjs";
