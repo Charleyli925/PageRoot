@@ -501,10 +501,12 @@ export default function AiReviewWorkspace({
   const runtimeVisualOwnerDocumentsRef = useRef<ReviewDocuments | null>(null);
   const runtimeVisualResolutionRef = useRef<ReviewRuntimeVisualResult | null>(null);
   const runtimeVisualViewportRef = useRef<ReviewRuntimeVisualViewport | null>(null);
-  const runtimeVisualStaticReadyRef = useRef<{
+  const runtimeVisualReadinessRef = useRef<{
     documents: ReviewDocuments;
     sides: Set<ReviewSide>;
+    paintedSides: Set<ReviewSide>;
     started: boolean;
+    captureTimer: number | null;
   } | null>(null);
   const reviewFrameReadyRef = useRef<Record<ReviewSide, {
     documents: ReviewDocuments;
@@ -864,6 +866,7 @@ export default function AiReviewWorkspace({
       resolveRuntimeVisuals(allUnverified());
       return;
     }
+    performance.mark("pageroot:review:runtime-visual-capture-start");
     const viewport = runtimeVisualViewportRef.current || Object.freeze({
       width: Math.max(320, Math.min(4_096, Math.round(window.innerWidth || 1_280))),
       height: Math.max(320, Math.min(2_400, Math.round(window.innerHeight || 900))),
@@ -914,13 +917,33 @@ export default function AiReviewWorkspace({
         runtimeVisualOwnerDocumentsRef.current !== documents
         || runtimeVisualResolutionRef.current?.documents === documents
       ) return;
+      performance.mark("pageroot:review:runtime-visual-capture-settled");
       resolveRuntimeVisuals(verdicts);
     }).catch(() => {
       if (runtimeVisualOwnerDocumentsRef.current === documents) {
+        performance.mark("pageroot:review:runtime-visual-capture-settled");
         resolveRuntimeVisuals(allUnverified());
       }
     });
   }, [documents, resolveRuntimeVisuals]);
+
+  const scheduleOwnerRuntimeVisualCapture = useCallback(() => {
+    const readiness = runtimeVisualReadinessRef.current;
+    if (
+      readiness?.documents !== documents
+      || readiness.started
+      || readiness.paintedSides.size !== 2
+    ) return;
+    readiness.started = true;
+    // Runtime visual comparison is optional evidence. Give the two visible
+    // review frames a quiet compositor turn before opening hidden authored
+    // capture windows, so validation cannot contend with first useful content.
+    readiness.captureTimer = window.setTimeout(() => {
+      if (runtimeVisualReadinessRef.current !== readiness) return;
+      readiness.captureTimer = null;
+      requestOwnerRuntimeVisualCapture();
+    }, 250);
+  }, [documents, requestOwnerRuntimeVisualCapture]);
 
   useLayoutEffect(() => {
     runtimeVisualOwnerDocumentsRef.current = documents;
@@ -928,11 +951,14 @@ export default function AiReviewWorkspace({
       width: Math.max(320, Math.min(4_096, Math.round(window.innerWidth || 1_280))),
       height: Math.max(320, Math.min(2_400, Math.round(window.innerHeight || 900))),
     });
-    runtimeVisualStaticReadyRef.current = {
+    const readiness = {
       documents,
       sides: new Set<ReviewSide>(),
+      paintedSides: new Set<ReviewSide>(),
       started: false,
+      captureTimer: null as number | null,
     };
+    runtimeVisualReadinessRef.current = readiness;
     reviewFrameReadyRef.current = {
       before: null,
       after: null,
@@ -961,27 +987,29 @@ export default function AiReviewWorkspace({
       };
       drainRegisteredFrames();
       return () => {
+        if (readiness.captureTimer !== null) window.clearTimeout(readiness.captureTimer);
         closeReviewCommentChannel();
         closeRuntimeProjectionChannel();
         if (runtimeVisualOwnerDocumentsRef.current === documents) {
           runtimeVisualOwnerDocumentsRef.current = null;
           runtimeVisualViewportRef.current = null;
         }
-        if (runtimeVisualStaticReadyRef.current?.documents === documents) {
-          runtimeVisualStaticReadyRef.current = null;
+        if (runtimeVisualReadinessRef.current?.documents === documents) {
+          runtimeVisualReadinessRef.current = null;
         }
       };
     }
     drainRegisteredFrames();
     return () => {
+      if (readiness.captureTimer !== null) window.clearTimeout(readiness.captureTimer);
       closeReviewCommentChannel();
       closeRuntimeProjectionChannel();
       if (runtimeVisualOwnerDocumentsRef.current === documents) {
         runtimeVisualOwnerDocumentsRef.current = null;
         runtimeVisualViewportRef.current = null;
       }
-      if (runtimeVisualStaticReadyRef.current?.documents === documents) {
-        runtimeVisualStaticReadyRef.current = null;
+      if (runtimeVisualReadinessRef.current?.documents === documents) {
+        runtimeVisualReadinessRef.current = null;
       }
     };
   }, [
@@ -1253,18 +1281,29 @@ export default function AiReviewWorkspace({
             gestureId: owner.gestureId,
           });
         }
-        const staticReady = runtimeVisualStaticReadyRef.current;
+        const staticReady = runtimeVisualReadinessRef.current;
         if (staticReady?.documents === documents) {
+          const wasReady = staticReady.sides.size === 2;
           staticReady.sides.add(message.side);
-          if (staticReady.sides.size === 2 && !staticReady.started) {
-            staticReady.started = true;
-            requestOwnerRuntimeVisualCapture();
+          if (!wasReady && staticReady.sides.size === 2) {
+            performance.mark("pageroot:review:frames-static-ready");
           }
         }
         const resolved = runtimeVisualResolutionRef.current;
         if (resolved?.documents === documents) {
           commitRuntimeVisualFrame(message.side, resolved);
           return;
+        }
+        return;
+      }
+      if (message.type === "first-paint-ready") {
+        const readiness = runtimeVisualReadinessRef.current;
+        if (readiness?.documents !== documents) return;
+        const wasReady = readiness.paintedSides.size === 2;
+        readiness.paintedSides.add(message.side);
+        if (!wasReady && readiness.paintedSides.size === 2) {
+          performance.mark("pageroot:review:frames-first-paint-ready");
+          scheduleOwnerRuntimeVisualCapture();
         }
         return;
       }
@@ -1376,6 +1415,7 @@ export default function AiReviewWorkspace({
     selectChange,
     sendState,
     sessionId,
+    scheduleOwnerRuntimeVisualCapture,
     updateCommentScrollTransform,
   ]);
 

@@ -302,7 +302,7 @@ export async function architectureViolations() {
     if (
       /\b(?:localStorage|sessionStorage)\b/.test(source)
       && file !== "app/application/recovery-store.js"
-      && file !== "app/components/HtmlInteractionPreview.tsx"
+      && file !== "app/lib/opaque-sandbox-storage.js"
     ) {
       violations.push(`${file}: browser persistence belongs to recovery-store`);
     }

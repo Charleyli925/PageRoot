@@ -370,6 +370,14 @@ async function renderedSnapshot(frame) {
         return { ready, signature, width: canvas.width, height: canvas.height };
       });
     const svgFacts = [...document.querySelectorAll("svg")]
+      // Review draws its own full-page masks and annotation outlines as SVG.
+      // They are UI chrome, not authored charts, and waiting for their empty
+      // transition shells made a fully visible page look unfinished forever.
+      .filter((svg) => !svg.closest(
+        "[data-pageroot-review-projection-layer], [data-pageroot-review-transition-mask]",
+      ) && !svg.matches(
+        "[data-pageroot-review-mask-layer], [data-pageroot-review-overlay-shape-svg]",
+      ))
       .filter(visibleRect)
       .filter((svg) => {
         const rect = svg.getBoundingClientRect();
@@ -878,6 +886,14 @@ async function exerciseReviewAndAccept() {
     label: "dual review pages visible",
   });
   results.review.dualPagesVisibleMs = round(performance.now() - openStarted);
+  await waitUntil(async () => Promise.all([
+    before.locator("html").getAttribute("data-pageroot-review-first-paint-ready"),
+    after.locator("html").getAttribute("data-pageroot-review-first-paint-ready"),
+  ]).then((values) => values.every((value) => value === "true")), {
+    timeout: 45_000,
+    label: "dual review pages first paint ready",
+  });
+  results.review.dualPagesFirstPaintReadyMs = round(performance.now() - openStarted);
   const [beforeRendered, afterRendered] = await Promise.all([
     waitForRenderedContent(() => before, openStarted, {
       label: "review before page full HTML and charts",

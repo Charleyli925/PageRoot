@@ -28,6 +28,7 @@ import {
 import {
   reviewRegionAnnotations,
 } from "../../lib/review-region-annotation.js";
+import { OPAQUE_SANDBOX_STORAGE_BOOTSTRAP } from "../../lib/opaque-sandbox-storage.js";
 import {
   alignReviewTextEvidenceDotRows,
   reviewTextEvidenceGraphemeEnd,
@@ -291,6 +292,10 @@ function reviewBootstrap(
   const runtimeProjectionInitialBindings = Object.freeze(
     ${serializedBootstrapPayload(runtimeProjectionBindings)},
   );
+  // A script-enabled opaque sandbox intentionally has no durable origin. The
+  // shared bootstrap supplies one frame-local compatibility surface so an
+  // authored chart cannot abort merely by reading storage.
+  ${OPAQUE_SANDBOX_STORAGE_BOOTSTRAP}
   const reviewTextEvidenceGraphemeEnd = ${reviewTextEvidenceGraphemeEnd.toString()};
   const reviewTextEvidenceIsPunctuationCode = ${reviewTextEvidenceIsPunctuationCode.toString()};
   const reviewTextEvidenceMarkGeometry = ${reviewTextEvidenceMarkGeometry.toString()};
@@ -310,6 +315,7 @@ function reviewBootstrap(
   const runtimeVisualBoolean = Boolean;
   const runtimeVisualMathFloor = Math.floor.bind(Math);
   const runtimeVisualSetTimeout = window.setTimeout.bind(window);
+  const runtimeVisualRequestAnimationFrame = window.requestAnimationFrame.bind(window);
   const runtimeVisualArrayPush = runtimeVisualBindCall(Array.prototype.push);
   const runtimeVisualArrayForEach = runtimeVisualBindCall(Array.prototype.forEach);
   const runtimeVisualArrayJoin = runtimeVisualBindCall(Array.prototype.join);
@@ -3132,6 +3138,12 @@ function reviewBootstrap(
   const announceReady = () => post("ready", {
     height: Math.max(document.documentElement.scrollHeight, document.body?.scrollHeight || 0),
   });
+  const announceFirstPaintReady = () => {
+    document.documentElement.dataset.pagerootReviewFirstPaintReady = "true";
+    post("first-paint-ready", {
+      height: Math.max(document.documentElement.scrollHeight, document.body?.scrollHeight || 0),
+    });
+  };
   const ready = async () => {
     closeInitialBindings();
     // Static facts are independently complete. Runtime projection may arrive
@@ -3143,6 +3155,13 @@ function reviewBootstrap(
     // the captured native timer so the parent can replay its static state.
     runtimeVisualSetTimeout(announceReady, 64);
     scheduleLayoutReport(true);
+    // Let authored DOMContentLoaded work and one complete browser paint win
+    // before Review starts its optional hidden runtime-visual owner. Two RAFs
+    // distinguish iframe load from content actually reaching the compositor;
+    // optional font completion continues independently below.
+    runtimeVisualRequestAnimationFrame(() => (
+      runtimeVisualRequestAnimationFrame(announceFirstPaintReady)
+    ));
     document.fonts?.ready?.then(() => {
       scheduleOverlayRender();
       scheduleLayoutReport();

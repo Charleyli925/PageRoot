@@ -17,6 +17,7 @@ import {
   type PageViewContext,
   type RawPageViewSnapshot,
 } from "../lib/page-view-context.js";
+import { OPAQUE_SANDBOX_STORAGE_BOOTSTRAP } from "../lib/opaque-sandbox-storage.js";
 import {
   SOURCE_NODE_ATTRIBUTE,
   buildSourceIndex,
@@ -90,44 +91,6 @@ const INDEPENDENT_PREVIEW_SANDBOX =
 const SRCDOC_PREVIEW_SANDBOX =
   "allow-scripts allow-forms allow-modals allow-popups allow-downloads";
 
-const PREVIEW_STORAGE_BOOTSTRAP = String.raw`
-  const createMemoryStorage = () => {
-    const values = new Map();
-    return {
-      get length() {
-        return values.size;
-      },
-      clear() {
-        values.clear();
-      },
-      getItem(key) {
-        const normalizedKey = String(key);
-        return values.has(normalizedKey) ? values.get(normalizedKey) : null;
-      },
-      key(index) {
-        return Array.from(values.keys())[Number(index)] ?? null;
-      },
-      removeItem(key) {
-        values.delete(String(key));
-      },
-      setItem(key, value) {
-        values.set(String(key), String(value));
-      },
-    };
-  };
-
-  for (const name of ["localStorage", "sessionStorage"]) {
-    try {
-      void window[name].length;
-    } catch {
-      Object.defineProperty(window, name, {
-        configurable: true,
-        value: createMemoryStorage(),
-      });
-    }
-  }
-`;
-
 function previewBootstrapJavaScript({
   channelToken,
   sourceSha256,
@@ -152,7 +115,7 @@ function previewBootstrapJavaScript({
 (() => {
   "use strict";
   const config = ${config};
-  ${PREVIEW_STORAGE_BOOTSTRAP}
+  ${OPAQUE_SANDBOX_STORAGE_BOOTSTRAP}
 
   const capture = () => {
     const entries = [];
