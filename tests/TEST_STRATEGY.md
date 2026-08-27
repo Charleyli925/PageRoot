@@ -115,6 +115,22 @@ loading surface 确认前不调用窄 port、同代不因 autosave/评论重试�
 Workbench 只确认已提交 loading surface、传入窄 port 并消费快照。Node 测试证明晚到 observer
   在 `dispose()` 后不再发布；Document snapshot 只投影 `hasPendingWrite`/`isFlushing`，
   不泄露写入内容或 Promise。Workbench 只能订阅该 aggregate snapshot 与 event stream。
+- `WorkbenchNavigationSession/Workflow` + `WorkbenchTabsSession`：Node 直接证明单一 admission/receipt 顺序、`projectId + documentId` 去重、多开始页、
+  活动 Start 原位承载新文档/去重已有文档、较多标签仍保持顺序与身份去重且不设产品数量上限、状态投影、关闭不删业务权威、close/activate 竞态 fail-closed，以及 Start 和文档
+  激活严格按 `ProjectWorkflow.prepareSwitch` 的 native fence/drain → Registry 打开 → 新 epoch
+  身份挂载 → hydration/Canvas settle 顺序；相同旧身份不得提前完成。Registry-before-hydrate 与
+  hydrate-before-Registry 都必须得到相同标题/缺失项结果。持久化测试拒绝 title/path/HTML/Hash
+  和未知字段，验证 `activeTabId:null`、原子替换与无效文件 fail-closed；Electron 证明 Left/Right/
+  Home/End 的 roving focus、键盘关闭后的活动标签焦点、Start 冷重启抑制 activePath、Start→Registry 原位打开、Registry 标题恢复及 unmounted outlet 安全关闭。
+- Accepted ProjectApplication 的慢 A/快 B Node 联测把真实 `project-applied`
+  事件同步投影到同一 `WorkbenchTabsSession`，必须同时保留 A/B、只聚焦 B 且不重复；pending
+  registered switch 的展示事件不得替代 `WorkbenchNavigationWorkflow` 的同步应用回执。
+- Browser-file identity Node 测试证明版本化 metadata/content 摘要重选稳定、同内容异名不混同且不携带
+  path/HTML/Hash 权威；ProjectWorkflow→TabsSession 联测证明 Start 原位成为文档、重复打开仍只有一个标签。
+- 外部打开 FIFO：Main mailbox Node 测试证明队首在 renderer 显式 ack 前不消费、不发送后继；renderer
+  Session/ProjectWorkflow 测试证明两个未登记 OS 请求依次显示确认，并覆盖接受、取消、拒绝与 deferred
+  的回执顺序；另证明直接/终态/确认后 ack 失败只重试同一回执且不重复打开或提交，以及关闭会逐个取消并回执全部排队确认。preload 合同只暴露 opaque requestId
+  的 accept/ack，不暴露路径权威。
 - Bridge 集成环境：每个真实 Bridge 测试各自创建临时 root、workspace、sources、端口、子进程与 stdout/stderr；同一测试可为重启恢复顺序启动新进程，但不同测试绝不共享 workspace 或长寿命 Bridge。环境默认携带配置的 Bridge auth token，测试缺失/错误 token 时必须显式关闭或覆盖它；HTTP/连接失败保留 response text 与 Bridge 日志，不重试 mutation。
 - Agent Host/Policy contract：公共 owner 位于 `scripts/agent/policies/` 与 `scripts/agent/hosts/`；`tests/agent-provider-contract.test.mjs` 证明公共层只产生通用 Agent error/brand，旧 façade 在边界映射回既有 provider/transport error name、code 与 copy，并以 source literal gate 阻止 provider/transport ownership 回流。Discussion capability 和非 execution ticket 必须 fail-closed。`tests/qoder-acp-spike-client.test.mjs` 属于 Node integration owner，只使用合成 HTML、隔离的真实 v4 `ProjectFileRepository`、进程内 fake ACP Agent 与官方 finalizer。oracle 必须独立证明外部封存的 manifest Hash、精确 readOrder/role/media type、单一 Candidate 写路径与原子 no-replace 发布、无 shell 的精确 finalizer、session/permission/terminal 绑定、completion/output Hash、runtime authority drift、macOS `/var` realpath alias、事件/prompt 边界、timeout cancel 后拒绝晚到写入/finalizer、Agent 早退出与孤儿进程组清理，以及 Candidate ready 后 Working Copy 全量状态、manifest 和 Version 快照均未变化。
 - Product Agent Bridge：`tests/agent-provider-contract.test.mjs` 使用无用户路径/秘密的合成 provider/runtime fixture，拥有 legacy `qoder-acp` → `qoder`/`acp` 唯一 registry 分派、内部 installation digest/capabilities ticket、未知 provider/runtime fail-closed，以及 availability/preflight/start 的旧公开投影。`tests/agent-bridge-service.test.mjs` 拥有只读本地检查不运行 Qoder、同进程安装后重读、npmrc/nvm/Volta/fnm/mise 发现、非法包不误报未安装、trusted-local consent、使用前检查、一次性 execution ticket、最终 spawn identity、不泄露 command/path、持久 crash lease、task-keyed 幂等、取消、restart-interrupted、retry output refusal 与公开错误脱敏。`tests/run-workflow.test.mjs` 证明只读检查零 Request/冻结/剪贴板、`agentDelivery: qoder-acp`、Execution 投影、安装与登录引导剪贴板隔离、About 检查不授权稍后发送、同一发送意图的 ticket 只供紧接着的 Agent 启动复用，以及预检失败不解锁一张从未锁定的 Canvas。`tests/agent-bridge-workspace.test.mjs` 必须启动真实 Bridge 与 fake ACP 子进程，证明自动完成只产生 pending-review Candidate、Working Copy/Version 不变，取消先终止 Qoder 再 durable cancel，以及 Bridge 强杀后同 Request 重启被 fence、旧 Request 取消后才能重新发送。`tests/desktop-preload-ipc.test.mjs` 证明 preload 不暴露 Agent executable/spawn/command/path capability。Electron AI closed-loop 必须额外证明自动模式不接触剪贴板、不自动 Adoption，并能进入真实 Review UI；未登录时原弹窗保持、复制任务始终可用、零 Request 且 About 同状态。package owner必须递归拒绝 symlink/特殊文件，并用打包 Helper、打包 Bridge、fake ACP 与打包 finalizer 证明 pending-review 闭环及 SDK/Zod 精确运行时闭包。`npm run spike:qoder-acp` 的真实账号/网络探测仅是额外开发证据，失败或成功都不进入自动门禁；ACP allowlist 也不得被描述成 Qoder 本地进程的 OS 沙箱。

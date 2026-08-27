@@ -167,7 +167,10 @@ Document, Comment, Run and Version Sessions. It exposes their immutable
 aggregate snapshot through its fixed `getSnapshot()`/`subscribe()` contract and
 forwards typed workflow events through `subscribeEvents()`; it does not create a
 second mutable store. It owns the unique `DrainCoordinator`, protocol Sessions,
-and Project, Comment, Run and Version workflow composition. `DocumentSession`
+and Project, Comment, Run, Version and Workbench Tabs workflow composition.
+The Tabs snapshot is part of the same aggregate; startup restore, Registry
+reconciliation and tab persistence enter through Controller-owned commands and
+narrow host ports, never React refs or effects. `DocumentSession`
 may derive `hasPendingWrite` and `isFlushing` for that snapshot, but neither a
 pending-write payload nor a Promise crosses into Workbench.
 
@@ -175,8 +178,42 @@ Workbench owns only presentation state and narrow host adapters. It receives
 the aggregate snapshot and Controller commands, never a business Session or the
 Bridge client. Its direct-Bridge allowance is exactly 0: the checked architecture
 gate permits no `bridgeClient.*` call, generic Bridge-command escape, business
-Session construction or Session ref in Workbench. The gate also forbids React,
+Session/Workflow construction or Session ref in Workbench. The gate also forbids React,
 Workbench, component or desktop imports from Application composition code.
+
+Workbench navigation has one application transaction contract. Startup restore,
+local/recent/Registry selection, tab activation, browser file continuation, OS
+external FIFO delivery and confirmation continuations enter the same admission
+order. Each admitted intent owns one `transactionId` and moves through:
+
+```text
+idle -> admitted -> preparing -> awaiting-user/opening
+     -> applied(identity, epoch, application receipt)
+     -> hydrating -> canvas-verified -> committed -> idle
+```
+
+`ProjectWorkflow` calls the synchronous navigation application port while the
+new Project/Document authority is being published. A non-null transaction must
+first pass the navigation workflow's live transaction/application-generation
+authorization; mismatched, expired or terminal transactions are rejected before
+any Controller Session changes. A null transaction remains the explicit legal
+path for an authority refresh. The returned receipt is the
+only authority for tab mutation, hydration and Canvas settlement;
+`project-applied` remains presentation information and React may not infer an
+application from any-pending state. A pre-applied failure restores the captured
+tab authority without changing the Controller. After apply, a failure either
+restores Controller and tabs from the same receipt or retains both on that
+identity as committed-error. A close may cancel an awaiting-user prompt, but it
+must wait for committing, applied, hydrating, finalizing and acknowledgement
+work to reach a terminal receipt. Cold-start priority is explicit OS external
+FIFO, persisted active tab, `activePath` compatibility, then Start.
+
+Desktop close synchronously freezes that admission stream before its first
+await. The freeze spans navigation-idle settlement, a pinned tabs-persistence
+revision, and the ProjectWorkflow close drain. Ready keeps the freeze through
+final exit; blocked or aborted close releases it, including final-exit abort IPC,
+before navigation retry. External FIFO acknowledgement requires a correlated
+terminal navigation outcome and never treats a missing terminal as success.
 
 An asynchronous result may update state only when its complete identity is
 current:

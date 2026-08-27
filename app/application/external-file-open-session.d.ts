@@ -31,6 +31,7 @@ export type ExternalFileOpenSnapshot = Readonly<{
     | "attention";
   activeRequestId: string | null;
   queuedRequestId: string | null;
+  queuedRequestIds: readonly string[];
   deferredRequestId: string | null;
   deferredSequence: number;
   confirmation: ExternalHtmlOpenConfirmation | null;

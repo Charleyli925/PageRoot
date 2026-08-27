@@ -128,3 +128,23 @@ test("project application session settles waiters and stale-closes them on dispo
     result: "stale",
   });
 });
+
+test("terminal cancellation retires a deferred application before any later resume", async () => {
+  const session = new ProjectApplicationSession();
+  let executions = 0;
+  const execute = async () => {
+    executions += 1;
+    return "deferred";
+  };
+  assert.equal(session.enqueue(application("expired"), execute), true);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(session.snapshot.status, "deferred");
+  assert.equal(session.cancel("application_expired"), true);
+  assert.deepEqual(await session.waitFor("application_expired"), {
+    applicationId: "application_expired",
+    result: "stale",
+  });
+  assert.equal(session.snapshot.status, "idle");
+  assert.equal(session.resume(execute), false);
+  assert.equal(executions, 1);
+});

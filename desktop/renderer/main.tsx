@@ -60,6 +60,7 @@ declare global {
       onExternalOpenRequested: (
         listener: (request: ExternalOpenRequest) => void,
       ) => () => void;
+      getInitialExternalOpen: () => Promise<ExternalOpenRequest | null>;
       relaunch: () => Promise<{ relaunched: boolean }>;
       openUserNotice: () => Promise<{ opened: boolean }>;
     };

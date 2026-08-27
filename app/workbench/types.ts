@@ -14,6 +14,8 @@ export type HtmlProject = {
   html: string;
   sha256: string;
   lastModifiedAt?: string;
+  projectId?: string;
+  documentId?: string;
   openKind?: "project";
 };
 
@@ -152,6 +154,10 @@ export type DesktopProjectsApi = {
   openRecent: (sourcePath: string) => Promise<HtmlOpenResult>;
   forgetRecent?: (sourcePath: string) => Promise<{ sourcePath: string }>;
   acceptExternalOpen?: (requestId: string) => Promise<HtmlOpenResult>;
+  acknowledgeExternalOpen?: (requestId: string) => Promise<{
+    acknowledged: boolean;
+    requestId: string;
+  }>;
   commitPreparedHtmlOpen?: (payload: {
     requestId: string;
     action: "import-new" | "continue-current" | "open-managed";
@@ -165,6 +171,19 @@ export type DesktopProjectsApi = {
     rolledBack: boolean;
     project?: HtmlProject | null;
   }>;
+};
+
+export type DesktopWorkbenchTabsApi = {
+  get: () => Promise<{
+    version: 1;
+    activeTabId: string | null;
+    tabs: Array<{
+      tabId: string;
+      projectId: string;
+      documentId: string;
+    }>;
+  } | null>;
+  set: (state: Record<string, unknown>) => Promise<Record<string, unknown>>;
 };
 
 export type QoderHandoffResult = {
@@ -244,6 +263,7 @@ export type DesktopUpdatesApi = {
 declare global {
   interface Window {
     htmlAIProjects?: DesktopProjectsApi;
+    htmlAIWorkbenchTabs?: DesktopWorkbenchTabsApi;
     htmlAIIntegrations?: DesktopIntegrationsApi;
     htmlAIUpdates?: DesktopUpdatesApi;
     htmlAIEdit?: {
@@ -390,7 +410,8 @@ export type ToastAction =
   | { id: "retry-history"; label: string; direction?: "undo" | "redo" }
   | { id: "open-project"; label: string; sourcePath: string }
   | { id: "retry-project-open"; label: string; sourcePath?: string }
-  | { id: "retry-external-project-open"; label: string }
+  | { id: "retry-project-hydration"; label: string }
+  | { id: "retry-external-project-open"; label: string; requestId?: string }
   | { id: "retry-project-application"; label: string }
   | {
       id: "open-attachment-picker";

@@ -108,12 +108,19 @@ function copyProject(value) {
   }
   const sourcePath = value.sourcePath ? String(value.sourcePath) : null;
   const sha256 = value.sha256 ? String(value.sha256) : null;
+  const projectId = String(value.projectId || "");
+  const documentId = String(value.documentId || "");
+  const hasIdentity = (
+    /^project_[A-Za-z0-9_-]+$/.test(projectId)
+    && /^doc_[A-Za-z0-9_-]+$/.test(documentId)
+  );
   return Object.freeze({
     ...(value.path ? { path: String(value.path) } : {}),
     name: value.name,
     sourcePath,
     html: value.html,
     sha256,
+    ...(hasIdentity ? { projectId, documentId } : {}),
     ...(value.lastModifiedAt
       ? { lastModifiedAt: String(value.lastModifiedAt) }
       : {}),
@@ -223,6 +230,8 @@ export class ProjectWorkflow {
   #projectOpenPort;
   #viewStatePort;
   #recentRunsPort;
+  #navigationPort;
+  #externalNavigationTransactions = new Map();
   #policies;
   #scheduler;
   #clock;
@@ -236,6 +245,7 @@ export class ProjectWorkflow {
   #pendingOpen = null;
   #browserOpenOperationId = null;
   #openConfirmation = null;
+  #externalAckPending = new Map();
   #renamePromise = null;
   #sourceLocatorPromise = null;
   #pendingLocatorReconcile = null;
@@ -243,6 +253,7 @@ export class ProjectWorkflow {
   #locatorRetryHandle = null;
   #registeredProjectsRefresh = null;
   #reconcileScheduled = false;
+  #pollWaiters = new Set();
   #disposed = false;
   #closeLifecycle = {
     preparingRequestId: null,
@@ -411,6 +422,7 @@ export class ProjectWorkflow {
     this.#projectOpenPort = ports.projectOpen;
     this.#viewStatePort = ports.viewState;
     this.#recentRunsPort = ports.recentRuns;
+    this.#navigationPort = ports.navigation || null;
     this.#policies = policies;
     this.#scheduler = scheduler;
     this.#clock = clock;
@@ -458,6 +470,8 @@ export class ProjectWorkflow {
     }
     this.#locatorRetryHandle = null;
     this.#pendingLocatorReconcile = null;
+    for (const waiter of [...this.#pollWaiters]) waiter.resolve(false);
+    this.#externalAckPending.clear();
     this.#externalFileOpenSession.setObserver(null);
     this.#projectApplicationSession.setObserver(null);
     this.#externalFileOpenSession.dispose();
@@ -465,6 +479,7 @@ export class ProjectWorkflow {
     for (const name of [
       "external-file-open",
       "project-application",
+      "project-picker",
       "project-hydration",
       "view-transition",
       "submission",
@@ -586,7 +601,9 @@ export class ProjectWorkflow {
         }
       }
 
-      const shouldCommitCanvas = !this.#isHistoryView();
+      const canvasIsMounted = typeof this.#canvasPort.isMounted !== "function"
+        || this.#canvasPort.isMounted();
+      const shouldCommitCanvas = !this.#isHistoryView() && canvasIsMounted;
       let committed = shouldCommitCanvas
         ? this.#canvasPort.fencePendingEdit({
             resumeEditing: false,
@@ -667,6 +684,7 @@ export class ProjectWorkflow {
     sourcePath,
     projectId,
     fromDeferred = false,
+    transactionId = null,
   } = {}) {
     if (this.#snapshot.close.phase === "ready") {
       return blocked(
@@ -674,7 +692,7 @@ export class ProjectWorkflow {
         "当前窗口正在关闭，新的 HTML 将由下一次启动接收。",
       );
     }
-    if (kind === "startup") return this.#openStartup();
+    if (kind === "startup") return this.#openStartup({ transactionId });
     const operationId = this.#nextOpenOperation();
     this.#setOpen("opening", operationId, null);
     try {
@@ -707,7 +725,7 @@ export class ProjectWorkflow {
           return succeeded({ operationId, opened: false });
         }
         if (result.kind === "confirmation") {
-          this.#presentOpenConfirmation(result.confirmation);
+          this.#presentOpenConfirmation(result.confirmation, transactionId);
           return succeeded({
             operationId,
             opened: false,
@@ -732,6 +750,7 @@ export class ProjectWorkflow {
             kind,
             sourcePath: sourcePath || null,
             projectId: projectId || null,
+            transactionId,
           });
           this.#setOpen("deferred", null, kind);
           return switchOutcome;
@@ -741,6 +760,7 @@ export class ProjectWorkflow {
           kind,
           operationId,
           sourcePath: sourcePath || null,
+          transactionId,
         });
         if (!accepted) {
           return rejected(
@@ -748,7 +768,7 @@ export class ProjectWorkflow {
             "无法安排当前 HTML 的安全切换。",
           );
         }
-        return succeeded({ operationId, opened: true });
+        return succeeded({ operationId, applicationId: accepted, opened: true });
       }
 
       const switchOutcome = await this.prepareSwitch({ fromDeferred });
@@ -763,6 +783,7 @@ export class ProjectWorkflow {
           kind,
           sourcePath: sourcePath || null,
           projectId: projectId || null,
+          transactionId,
         });
         this.#setOpen("deferred", null, kind);
         return switchOutcome;
@@ -780,6 +801,7 @@ export class ProjectWorkflow {
         kind,
         operationId,
         sourcePath: sourcePath || null,
+        transactionId,
       });
       if (!accepted) {
         return rejected(
@@ -787,7 +809,7 @@ export class ProjectWorkflow {
           "无法安排当前 HTML 的安全切换。",
         );
       }
-      return succeeded({ operationId, opened: true });
+      return succeeded({ operationId, applicationId: accepted, opened: true });
     } catch (cause) {
       const reason = projectErrorMessage(
         this.#codecs,
@@ -813,7 +835,7 @@ export class ProjectWorkflow {
     }
   }
 
-  acceptBrowserProject({ operationId, project } = {}) {
+  acceptBrowserProject({ operationId, project, transactionId = null } = {}) {
     if (this.#snapshot.close.phase === "ready") {
       return blocked(
         "PROJECT_OPEN_CLOSE_COMMITTED",
@@ -828,6 +850,7 @@ export class ProjectWorkflow {
         kind: "browser-file",
         operationId: this.#nextOpenOperation(),
         sourcePath: null,
+        transactionId,
       });
     }
     if (!operationId || operationId !== this.#browserOpenOperationId) {
@@ -838,10 +861,11 @@ export class ProjectWorkflow {
       kind: "browser-file",
       operationId,
       sourcePath: null,
+      transactionId,
     });
     this.#setOpen("idle", null, null);
     return accepted
-      ? succeeded({ operationId, accepted: true })
+      ? succeeded({ operationId, applicationId: accepted, accepted: true, opened: true })
       : rejected("PROJECT_APPLICATION_REJECTED", "无法安排当前 HTML 的安全切换。");
   }
 
@@ -849,6 +873,7 @@ export class ProjectWorkflow {
     kind = "accepted",
     operationId = this.#nextOpenOperation(),
     sourcePath = null,
+    transactionId = null,
   } = {}) {
     if (this.#snapshot.close.phase === "ready") {
       return blocked(
@@ -860,9 +885,10 @@ export class ProjectWorkflow {
       kind,
       operationId,
       sourcePath,
+      transactionId,
     });
     return accepted
-      ? succeeded({ operationId, accepted: true })
+      ? succeeded({ operationId, applicationId: accepted, accepted: true, opened: true })
       : rejected("PROJECT_APPLICATION_REJECTED", "无法安排当前 HTML 的安全切换。");
   }
 
@@ -877,10 +903,17 @@ export class ProjectWorkflow {
     if (!request) {
       return rejected("EXTERNAL_PROJECT_REQUEST_INVALID", "外部 HTML 请求身份无效。");
     }
+    if (value?.transactionId) {
+      this.#externalNavigationTransactions.set(
+        request.requestId,
+        String(value.transactionId),
+      );
+    }
     const accepted = this.#externalFileOpenSession.enqueue(
       request,
       (next, options) => this.#openExternalProject(next, options),
     );
+    if (!accepted) this.#externalNavigationTransactions.delete(request.requestId);
     if (accepted) this.#pendingOpen = null;
     this.#publishSnapshot();
     return accepted
@@ -906,6 +939,10 @@ export class ProjectWorkflow {
       : blocked("PROJECT_APPLICATION_NOT_DEFERRED", "没有等待继续的 HTML 切换。");
   }
 
+  cancelProjectApplication(applicationId) {
+    return this.#projectApplicationSession.cancel(applicationId, "stale");
+  }
+
   reconcileDeferred() {
     if (this.#disposed) return;
     const switchBlocked = this.#drainCoordinator
@@ -927,7 +964,12 @@ export class ProjectWorkflow {
         execute: (request, options) => this.#openExternalProject(request, options),
       });
       if (retry === "action-required") {
-        this.#emit({ type: "external-project-open-deferred" });
+        const requestId = this.#externalFileOpenSession.snapshot.deferredRequestId;
+        this.#emit({
+          type: "external-project-open-deferred",
+          requestId,
+          ackPending: Boolean(requestId && this.#externalAckPending.has(requestId)),
+        });
       }
       return;
     }
@@ -1017,7 +1059,13 @@ export class ProjectWorkflow {
           return inAppBlock("当前撤销或重做没有安全完成，已取消关闭。");
         }
       }
-      if (!this.#isHistoryView() && !this.#runSession.activeLocked) {
+      const canvasIsMounted = typeof this.#canvasPort.isMounted !== "function"
+        || this.#canvasPort.isMounted();
+      if (
+        !this.#isHistoryView()
+        && !this.#runSession.activeLocked
+        && canvasIsMounted
+      ) {
         const frozen = this.#canvasPort.freeze();
         if (!frozen) {
           return inAppBlock("编辑画布尚未就绪，已取消关闭以避免丢失文字草稿。");
@@ -1984,19 +2032,7 @@ export class ProjectWorkflow {
         }
         return { state: "resolved" };
       },
-      drain: async () => {
-        if (this.#openConfirmation) {
-          this.cancelExternalOpen({
-            requestId: this.#openConfirmation.requestId,
-          });
-        }
-        await this.#waitUntil(
-          () => (
-            this.#externalFileOpenSession.snapshot.status === "idle"
-            && !this.#openConfirmation
-          ),
-        );
-      },
+      drain: ({ deadlineAt }) => this.#drainExternalOpenForClose(deadlineAt),
     });
     this.#drainCoordinator.replace("project-application", {
       label: "等待已接收的 HTML 切换完成",
@@ -2007,8 +2043,9 @@ export class ProjectWorkflow {
         state: "pending",
         reason: "已接收的 HTML 仍在完成安全切换。",
       } : { state: "resolved" },
-      drain: () => this.#waitUntil(
+      drain: ({ deadlineAt }) => this.#waitUntil(
         () => this.#projectApplicationSession.snapshot.status === "idle",
+        deadlineAt,
       ),
     });
     this.#drainCoordinator.replace("project-picker", {
@@ -2019,8 +2056,9 @@ export class ProjectWorkflow {
         state: "pending",
         reason: "本地 HTML 选择仍在等待结果。",
       } : { state: "resolved" },
-      drain: () => this.#waitUntil(
+      drain: ({ deadlineAt }) => this.#waitUntil(
         () => this.#snapshot.open.phase !== "opening",
+        deadlineAt,
       ),
     });
     this.#drainCoordinator.replace("project-hydration", {
@@ -2062,7 +2100,10 @@ export class ProjectWorkflow {
         state: "pending",
         reason: "内部 AI 的冻结 Request 尚未安全建立。",
       } : { state: "resolved" },
-      drain: () => this.#waitUntil(() => !this.#runSession.submissionPending),
+      drain: ({ deadlineAt }) => this.#waitUntil(
+        () => !this.#runSession.submissionPending,
+        deadlineAt,
+      ),
     });
     this.#drainCoordinator.replace("attachments", {
       label: "等待附件添加完成",
@@ -2150,7 +2191,7 @@ export class ProjectWorkflow {
     });
   }
 
-  async #openStartup() {
+  async #openStartup({ transactionId = null } = {}) {
     const operationId = this.#nextOpenOperation();
     const startupOpenSequence = this.#openSequence;
     this.#setOpen("opening", operationId, null);
@@ -2197,7 +2238,7 @@ export class ProjectWorkflow {
       }
       const result = asOpenResult(active);
       if (result.kind === "confirmation") {
-        this.#presentOpenConfirmation(result.confirmation);
+        this.#presentOpenConfirmation(result.confirmation, transactionId);
         return succeeded({
           operationId,
           opened: false,
@@ -2211,17 +2252,19 @@ export class ProjectWorkflow {
             "当前窗口正在关闭，没有接收新的 HTML。",
           );
         }
-        if (!this.#enqueueAcceptedProject(result.project, {
+        const accepted = this.#enqueueAcceptedProject(result.project, {
           kind: "startup",
           operationId,
           sourcePath: result.project.sourcePath || null,
-        })) {
+          transactionId,
+        });
+        if (!accepted) {
           return rejected(
             "PROJECT_APPLICATION_REJECTED",
             "无法安排当前 HTML 的安全切换。",
           );
         }
-        return succeeded({ operationId, opened: true });
+        return succeeded({ operationId, applicationId: accepted, opened: true });
       }
       return succeeded({ operationId, opened: false });
     } catch (cause) {
@@ -2277,10 +2320,13 @@ export class ProjectWorkflow {
     }
     let canvasFrozen = false;
     let applied = false;
+    const canvasIsMounted = typeof this.#canvasPort.isMounted !== "function"
+      || this.#canvasPort.isMounted();
     if (
       this.#projectSession.sourcePath
       && !this.projectLoadError
       && !this.#isHistoryView()
+      && canvasIsMounted
     ) {
       const cutoff = this.#documentSession.editRevision;
       const frozen = this.#canvasPort.freeze(
@@ -2303,7 +2349,11 @@ export class ProjectWorkflow {
       }
     }
     try {
-      this.#applyProject(project);
+      const applicationApplied = this.#applyProject(project, {
+        applicationId: application.applicationId,
+        transactionId: metadata.transactionId || null,
+      });
+      if (!applicationApplied) return "stale";
       applied = true;
       const epoch = this.#projectSession.epoch;
       // Accepted-result FIFO owns synchronous publication order, not remote
@@ -2374,7 +2424,15 @@ export class ProjectWorkflow {
 
   async #openExternalProject(request, { isSuperseded }) {
     if (isSuperseded()) return "complete";
+    if (this.#externalAckPending.has(request.requestId)) {
+      return await this.#retryPendingExternalAck(request.requestId)
+        ? "complete"
+        : "deferred";
+    }
     const operationId = this.#nextOpenOperation();
+    const navigationTransactionId = this.#externalNavigationTransactions.get(
+      request.requestId,
+    ) || null;
     try {
       if (typeof this.#projectOpenPort.acceptExternal !== "function") {
         const reason = "当前 PageRoot 版本缺少外部文件打开通道，请重新安装最新版本。";
@@ -2383,7 +2441,18 @@ export class ProjectWorkflow {
           requestId: request.requestId,
           reason,
         });
-        return "complete";
+        const acknowledged = await this.#ackWithCompletion(
+          request.requestId,
+          { kind: "session" },
+        );
+        if (acknowledged && navigationTransactionId) {
+          this.#emit({
+            type: "project-navigation-terminal-failed",
+            transactionId: navigationTransactionId,
+            reason,
+          });
+        }
+        return acknowledged ? "complete" : "deferred";
       }
       const opened = await this.#projectOpenPort.acceptExternal(request.requestId);
       if (isSuperseded() || this.#snapshot.close.phase === "ready") return "complete";
@@ -2393,7 +2462,7 @@ export class ProjectWorkflow {
           request.requestId,
           result.confirmation,
         );
-        this.#presentOpenConfirmation(result.confirmation);
+        this.#presentOpenConfirmation(result.confirmation, navigationTransactionId);
         return "awaiting-confirmation";
       }
       if (result.kind !== "project") {
@@ -2402,12 +2471,41 @@ export class ProjectWorkflow {
       const switchOutcome = await this.prepareSwitch();
       if (switchOutcome.status !== "succeeded") return "deferred";
       if (isSuperseded()) return "complete";
-      if (!this.#enqueueAcceptedProject(result.project, {
+      const applicationId = this.#enqueueAcceptedProject(result.project, {
         kind: "external",
         operationId,
         sourcePath: result.project.sourcePath || null,
-      })) {
+        transactionId: navigationTransactionId,
+      });
+      if (!applicationId) {
         throw new Error("无法安排外部 HTML 的安全切换。");
+      }
+      if (
+        navigationTransactionId
+        && typeof this.#navigationPort?.waitForTerminal === "function"
+      ) {
+        const terminal = await this.#navigationPort.waitForTerminal(navigationTransactionId);
+        if (
+          !terminal
+          || terminal.transactionId !== navigationTransactionId
+          || !terminal.outcome
+          || !["succeeded", "rejected", "blocked", "stale", "unknown"]
+            .includes(String(terminal.outcome.status || ""))
+          || (
+            terminal.receipt?.applicationId
+            && terminal.receipt.applicationId !== applicationId
+          )
+        ) {
+          return "deferred";
+        }
+        if (!terminal.receipt && terminal.outcome.status !== "succeeded") {
+          this.#projectApplicationSession.cancel(applicationId, "stale");
+        }
+      } else {
+        await this.#projectApplicationSession.waitFor(applicationId);
+      }
+      if (!await this.#ackWithCompletion(request.requestId, { kind: "session" })) {
+        return "deferred";
       }
     } catch (cause) {
       if (!isSuperseded()) {
@@ -2422,12 +2520,26 @@ export class ProjectWorkflow {
             "文件可能已移动、暂时不可读，或不是完整的 HTML 页面；当前项目仍保持打开。",
           ),
         });
+        if (!await this.#ackWithCompletion(request.requestId, { kind: "session" })) {
+          return "deferred";
+        }
+        if (navigationTransactionId) {
+          this.#emit({
+            type: "project-navigation-terminal-failed",
+            transactionId: navigationTransactionId,
+            reason: projectErrorMessage(
+              this.#codecs,
+              cause,
+              "文件可能已移动、暂时不可读，或不是完整的 HTML 页面。",
+            ),
+          });
+        }
       }
     }
     return "complete";
   }
 
-  #presentOpenConfirmation(descriptor) {
+  #presentOpenConfirmation(descriptor, transactionId = null) {
     const confirmation = copyOpenConfirmation({
       ...descriptor,
       deleteOriginal: false,
@@ -2442,6 +2554,11 @@ export class ProjectWorkflow {
     }
     this.#openConfirmation = confirmation;
     this.#publishSnapshot();
+    this.#emit({
+      type: "project-open-confirmation-presented",
+      requestId: confirmation.requestId,
+      transactionId: transactionId ? String(transactionId) : null,
+    });
     return true;
   }
 
@@ -2465,6 +2582,71 @@ export class ProjectWorkflow {
     void this.#projectOpenPort.cancelPrepared(requestId);
   }
 
+  async #ackExternalOpen(requestId) {
+    if (typeof this.#projectOpenPort.ackExternal !== "function") return true;
+    try {
+      await this.#projectOpenPort.ackExternal(requestId);
+      return true;
+    } catch (cause) {
+      this.#emit({
+        type: "external-open-ack-failed",
+        requestId,
+        confirmation: this.#confirmationRequiresExternalAck(requestId),
+        reason: projectErrorMessage(
+          this.#codecs,
+          cause,
+          "外部 HTML 已处理，但下一个打开请求尚未解锁。",
+        ),
+      });
+      return false;
+    }
+  }
+
+  #confirmationRequiresExternalAck(requestId) {
+    const snapshot = this.#externalFileOpenSession.snapshot;
+    return snapshot.status === "awaiting-confirmation"
+      && snapshot.activeRequestId === String(requestId || "");
+  }
+
+  #applyExternalAckCompletion(requestId, completion) {
+    this.#externalNavigationTransactions.delete(String(requestId || ""));
+    if (completion.kind === "cancel-confirmation") {
+      if (completion.external === true) {
+        this.#externalFileOpenSession.cancelConfirmation(requestId);
+      }
+      if (this.#openConfirmation?.requestId === requestId) {
+        this.#clearOpenConfirmation();
+      }
+      return succeeded({ canceled: true, requestId });
+    }
+    if (completion.kind === "complete-confirmation") {
+      if (completion.external === true) {
+        this.#externalFileOpenSession.completeConfirmation(requestId);
+      }
+      if (this.#openConfirmation?.requestId === requestId) {
+        this.#clearOpenConfirmation();
+      }
+      this.#emit(completion.event);
+      return succeeded(completion.value);
+    }
+    return succeeded({ requestId, acknowledged: true });
+  }
+
+  async #ackWithCompletion(requestId, completion) {
+    if (!await this.#ackExternalOpen(requestId)) {
+      this.#externalAckPending.set(requestId, Object.freeze({ ...completion }));
+      return null;
+    }
+    this.#externalAckPending.delete(requestId);
+    return this.#applyExternalAckCompletion(requestId, completion);
+  }
+
+  async #retryPendingExternalAck(requestId) {
+    const completion = this.#externalAckPending.get(requestId);
+    if (!completion) return null;
+    return this.#ackWithCompletion(requestId, completion);
+  }
+
   setExternalOpenDeleteOriginal({ requestId, deleteOriginal } = {}) {
     const confirmation = this.#openConfirmation;
     if (!confirmation || confirmation.requestId !== String(requestId || "")) {
@@ -2484,21 +2666,41 @@ export class ProjectWorkflow {
     return succeeded({ deleteOriginal: deleteOriginal === true });
   }
 
-  cancelExternalOpen({ requestId } = {}) {
+  async cancelExternalOpen({ requestId } = {}) {
+    const requestedId = String(requestId || "");
+    if (this.#externalAckPending.has(requestedId)) {
+      return await this.#retryPendingExternalAck(requestedId) || rejected(
+        "EXTERNAL_OPEN_ACK_REJECTED",
+        "这次打开已取消，但下一个 Finder 请求尚未解锁。",
+      );
+    }
     const confirmation = this.#openConfirmation;
     if (!confirmation || confirmation.requestId !== String(requestId || "")) {
       return stale({ requestId: String(requestId || "") });
     }
     this.#cancelPreparedIntent(confirmation.requestId);
-    this.#externalFileOpenSession.cancelConfirmation(confirmation.requestId);
-    this.#clearOpenConfirmation();
-    return succeeded({ canceled: true, requestId: confirmation.requestId });
+    const completion = {
+      kind: "cancel-confirmation",
+      external: this.#confirmationRequiresExternalAck(confirmation.requestId),
+    };
+    const completed = completion.external
+      ? await this.#ackWithCompletion(confirmation.requestId, completion)
+      : this.#applyExternalAckCompletion(confirmation.requestId, completion);
+    if (!completed) {
+      this.#setOpenConfirmation({ ...confirmation, busy: false });
+      return rejected(
+        "EXTERNAL_OPEN_ACK_REJECTED",
+        "这次打开已取消，但下一个 Finder 请求尚未解锁。",
+      );
+    }
+    return completed;
   }
 
   async confirmExternalOpen({
     requestId,
     action,
     deleteOriginal = false,
+    transactionId = null,
   } = {}) {
     if (action === "view-initial") {
       return rejected(
@@ -2509,6 +2711,12 @@ export class ProjectWorkflow {
     const confirmation = this.#openConfirmation;
     if (!confirmation || confirmation.requestId !== String(requestId || "")) {
       return stale({ requestId: String(requestId || "") });
+    }
+    if (this.#externalAckPending.has(confirmation.requestId)) {
+      return await this.#retryPendingExternalAck(confirmation.requestId) || rejected(
+        "EXTERNAL_OPEN_ACK_REJECTED",
+        "HTML 已完成打开，但下一个 Finder 请求尚未解锁。",
+      );
     }
     if (
       confirmation.classification === "new-external"
@@ -2574,7 +2782,18 @@ export class ProjectWorkflow {
           code: "EXTERNAL_OPEN_COMMIT_INVALID",
         });
       }
-      this.#applyProject(project);
+      const applicationApplied = this.#applyProject(project, {
+        applicationId: `prepared-${confirmation.requestId}`,
+        transactionId,
+      });
+      if (!applicationApplied) {
+        if (typeof this.#projectOpenPort.rollbackPrepared === "function") {
+          await this.#projectOpenPort.rollbackPrepared(confirmation.requestId);
+        }
+        throw Object.assign(new Error("这次导航已经结束，迟到的 HTML 不会替换当前页面。"), {
+          code: "WORKBENCH_NAVIGATION_STALE_APPLICATION",
+        });
+      }
       const epoch = this.#projectSession.epoch;
       try {
         const [, hydrated] = await Promise.all([
@@ -2627,22 +2846,39 @@ export class ProjectWorkflow {
         );
         disposition = finalized?.disposition || "kept";
       }
-      this.#externalFileOpenSession.completeConfirmation(confirmation.requestId);
-      this.#clearOpenConfirmation();
-      this.#emit({
-        type: "external-open-completed",
-        requestId: confirmation.requestId,
-        action,
-        imported: action === "import-new",
-        disposition,
-        visibleV1FileName: confirmation.visibleV1FileName,
-        sourcePath: project.sourcePath,
-      });
-      return succeeded({
-        requestId: confirmation.requestId,
-        opened: true,
-        disposition,
-      });
+      const completion = {
+        kind: "complete-confirmation",
+        external: this.#confirmationRequiresExternalAck(confirmation.requestId),
+        event: Object.freeze({
+          type: "external-open-completed",
+          requestId: confirmation.requestId,
+          action,
+          imported: action === "import-new",
+          disposition,
+          visibleV1FileName: confirmation.visibleV1FileName,
+          sourcePath: project.sourcePath,
+        }),
+        value: Object.freeze({
+          requestId: confirmation.requestId,
+          opened: true,
+          disposition,
+        }),
+      };
+      const completed = completion.external
+        ? await this.#ackWithCompletion(confirmation.requestId, completion)
+        : this.#applyExternalAckCompletion(confirmation.requestId, completion);
+      if (!completed) {
+        this.#setOpenConfirmation({
+          ...confirmation,
+          deleteOriginal: shouldDelete,
+          busy: false,
+        });
+        return rejected(
+          "EXTERNAL_OPEN_ACK_REJECTED",
+          "HTML 已完成打开，但下一个 Finder 请求尚未解锁。",
+        );
+      }
+      return completed;
     } catch (cause) {
       const reclassified = cause?.details?.confirmation
         || cause?.confirmation;
@@ -2654,7 +2890,7 @@ export class ProjectWorkflow {
         });
         if (next) {
           this.#externalFileOpenSession.presentConfirmation(next.requestId, next);
-          this.#presentOpenConfirmation(next);
+          this.#presentOpenConfirmation(next, transactionId);
           this.#emit({
             type: "external-open-reclassified",
             requestId: next.requestId,
@@ -2691,6 +2927,8 @@ export class ProjectWorkflow {
   }
 
   retryExternalOpen({ requestId } = {}) {
+    const pending = this.#externalAckPending.get(String(requestId || ""));
+    if (pending) return this.#retryPendingExternalAck(String(requestId || ""));
     const confirmation = this.#openConfirmation;
     if (!confirmation || confirmation.requestId !== String(requestId || "")) {
       return Promise.resolve(stale({ requestId: String(requestId || "") }));
@@ -2704,7 +2942,23 @@ export class ProjectWorkflow {
     });
   }
 
-  #applyProject(project) {
+  #applyProject(project, {
+    applicationId = null,
+    transactionId = null,
+  } = {}) {
+    const receivedTransactionId = transactionId ? String(transactionId) : null;
+    const authorization = this.#navigationPort?.authorizeProjectApplication?.({
+      transactionId: receivedTransactionId,
+      applicationId,
+    }) || null;
+    if (receivedTransactionId && authorization?.accepted !== true) {
+      this.#emit({
+        type: "project-application-stale",
+        transactionId: receivedTransactionId,
+        applicationId: applicationId ? String(applicationId) : null,
+      });
+      return false;
+    }
     this.#markHydrationStage("apply-start");
     const outgoingRun = this.#runSession.activeRun;
     const outgoingSourcePath = this.#projectSession.sourcePath;
@@ -2757,11 +3011,19 @@ export class ProjectWorkflow {
     if (project.sourcePath) this.#runSession.clearResult(project.sourcePath);
     this.#pendingOpen = null;
     this.#markHydrationStage("apply-authority:canvas-reset");
+    const applicationReceipt = this.#navigationPort?.applyProject?.({
+      transactionId,
+      applicationId,
+      project,
+      epoch: locator.epoch,
+      activeLocked: this.#runSession.activeLocked,
+    }) || null;
     this.#emit({
       type: "project-applied",
       project,
       epoch: locator.epoch,
       activeLocked: this.#runSession.activeLocked,
+      applicationReceipt,
     });
     this.#markHydrationStage("apply-authority:published");
     this.#canvasPort.applyPageViewContext?.(null);
@@ -2769,6 +3031,7 @@ export class ProjectWorkflow {
     if (!this.#runSession.activeLocked) this.#canvasPort.unlock?.();
     this.#markHydrationStage("apply-authority:unlocked");
     this.#markHydrationStage("apply-complete");
+    return true;
   }
 
   async #hydrateWorkspace({ sourcePath, epoch, sourceTransitionToken }) {
@@ -3579,18 +3842,59 @@ export class ProjectWorkflow {
     });
   }
 
-  #waitUntil(predicate) {
-    if (predicate()) return Promise.resolve();
+  #waitUntil(predicate, deadlineAt) {
+    if (predicate()) return Promise.resolve(true);
+    const deadline = Number(deadlineAt);
+    if (this.#disposed || !Number.isFinite(deadline) || this.#clock.now() >= deadline) {
+      return Promise.resolve(false);
+    }
     return new Promise((resolve) => {
+      const waiter = {
+        timer: null,
+        resolve: (value) => {
+          if (!this.#pollWaiters.delete(waiter)) return;
+          if (waiter.timer !== null && typeof this.#scheduler.clearTimeout === "function") {
+            this.#scheduler.clearTimeout(waiter.timer);
+          }
+          resolve(value);
+        },
+      };
       const poll = () => {
         if (predicate()) {
-          resolve();
+          waiter.resolve(true);
           return;
         }
-        this.#scheduler.setTimeout(poll, 40);
+        if (this.#disposed || this.#clock.now() >= deadline) {
+          waiter.resolve(false);
+          return;
+        }
+        waiter.timer = this.#scheduler.setTimeout(poll, Math.min(40, deadline - this.#clock.now()));
       };
-      this.#scheduler.setTimeout(poll, 40);
+      this.#pollWaiters.add(waiter);
+      waiter.timer = this.#scheduler.setTimeout(poll, Math.min(40, deadline - this.#clock.now()));
     });
+  }
+
+  async #drainExternalOpenForClose(deadlineAt) {
+    while (this.#clock.now() < Number(deadlineAt)) {
+      const confirmation = this.#openConfirmation;
+      if (confirmation) {
+        const canceled = await this.cancelExternalOpen({
+          requestId: confirmation.requestId,
+        });
+        if (canceled.status !== "succeeded") {
+          await new Promise((resolve) => this.#scheduler.setTimeout(resolve, 40));
+        }
+        continue;
+      }
+      if (this.#externalFileOpenSession.snapshot.status === "idle") return true;
+      const settled = await this.#waitUntil(() => (
+        Boolean(this.#openConfirmation)
+        || this.#externalFileOpenSession.snapshot.status === "idle"
+      ), deadlineAt);
+      if (!settled) return false;
+    }
+    return false;
   }
 
   #dependencyOutcome(outcome, identity, fallbackCode, fallbackReason) {
