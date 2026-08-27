@@ -100,10 +100,6 @@ export async function prepareReviewAnalysis({
   if (cached) return cached;
   onShell?.(buildReviewShellDocuments(beforeHtml, candidate.content, {
     sessionId,
-    sourceSha256BySide: {
-      before: candidate.baseSnapshotSha256,
-      after: candidate.sha256,
-    },
     sourcePath: candidate.sourcePath,
     externalBootstrap,
   }));
@@ -118,10 +114,6 @@ export async function prepareReviewAnalysis({
       sessionId,
       documents: await buildReviewDocumentsAsync(beforeHtml, candidate.content, {
         sessionId,
-        sourceSha256BySide: {
-          before: candidate.baseSnapshotSha256,
-          after: candidate.sha256,
-        },
         sourcePath: candidate.sourcePath,
         externalBootstrap,
         comments: reviewComments,
@@ -217,10 +209,6 @@ export default function ReviewAnalysisPrewarm({
           sessionId,
           documents: await buildReviewDocumentsAsync(html, candidate.content, {
             sessionId,
-            sourceSha256BySide: {
-              before: candidate.baseSnapshotSha256,
-              after: candidate.sha256,
-            },
             sourcePath: candidate.sourcePath,
             externalBootstrap,
             comments: reviewComments,

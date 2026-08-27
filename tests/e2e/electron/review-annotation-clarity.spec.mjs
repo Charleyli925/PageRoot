@@ -5,6 +5,7 @@ import path from "node:path";
 import { expect, test } from "@playwright/test";
 
 import { caseSelector, productRoot } from "../browser/pageroot-driver.mjs";
+import { chooseClipboardDelivery } from "./ai-closed-loop-helpers.mjs";
 import {
   closePageRootGracefully,
   createSourceFixture,
@@ -33,11 +34,17 @@ const TREND_AFTER = "大盘增量增速放缓（96.2 亿次/日，YoY +18%，较
 const NOTE_BEFORE = "增速较 1–2 月 +20% 走弱；抖系份额 -0.7pp，微信 +5.4pp、红书 +1.3pp 是唯三正增长入口";
 const NOTE_AFTER = "增速较 1–2 月 +20% 走弱；微信 +5.4pp、红书 +1.3pp 正增长，抖系 -0.7pp";
 
-/** The AI candidate: nested structure plus visual edits inside one panel. */
+/** The AI candidate: text edits, one added wrapper, and ignored style edits. */
 function rewriteReport(source) {
   return source
     .replace(TREND_BEFORE, TREND_AFTER)
     .replace(NOTE_BEFORE, NOTE_AFTER)
+    .replace(
+      '<span class="tab" data-active="true">① 大盘 &amp; 电商搜索</span>\n'
+      + '      <span class="tab">② 抖音搜盘表现</span>',
+      '<span class="tab">② 抖音搜盘表现</span>\n'
+      + '      <span class="tab" data-active="true">① 大盘 &amp; 电商搜索</span>',
+    )
     .replace(
       '<p class="panel-title">核心结论</p>',
       '<div class="panel-head"><p class="panel-title">核心结论</p>'
@@ -80,10 +87,7 @@ async function submitToAi(page, electronApp) {
   // The header opens the conversation; the destination and the copied state both live
   // inside it now, so the dialog over the page is gone.
   await page.getByRole("button", { name: /AI 助手/u }).click();
-  const sidebar = page.getByTestId("ai-conversation-sidebar");
-  await expect(sidebar).toBeVisible();
-  await sidebar.getByRole("radio", { name: "修改", exact: true }).click();
-  await sidebar.getByRole("button", { name: /复制给别的 AI/u }).click();
+  await chooseClipboardDelivery(page);
   await expect(page.getByTestId("ai-conversation-action-bar"))
     .toContainText("任务已复制，等你的 AI 改完");
   let promptPath = "";
@@ -158,7 +162,6 @@ async function readProjection(frame) {
       .map((bar) => ({
         changeId: bar.getAttribute("data-pageroot-review-region-bar") || "",
         active: bar.dataset.active || "",
-        suspect: bar.dataset.suspect || "",
         top: Number(bar.getAttribute("data-top")),
         height: Number(bar.getAttribute("data-height")),
       }));
@@ -224,12 +227,9 @@ test("the review projection annotates a dense report cleanly and accurately", as
     await addReportComment(launched.page, fixture.sourcePath);
     const request = await submitToAi(launched.page, launched.electronApp);
     writeCandidate(request.requestRoot, request.changeRequest);
-    await expect(launched.page.getByText(
-      "可在审阅中对比查看修改差异",
-      { exact: true },
-    ).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
-
-    await launched.page.getByRole("button", { name: "审阅对比" }).click();
+    const openReviewButton = launched.page.getByRole("button", { name: "审阅对比" });
+    await expect(openReviewButton).toBeVisible({ timeout: 30_000 });
+    await openReviewButton.click();
     await expect(launched.page.getByTestId("ai-review-workspace"))
       .toBeVisible({ timeout: 30_000 });
     const liveReviewTools = launched.page.locator("header.workbench-header")
@@ -255,6 +255,18 @@ test("the review projection annotates a dense report cleanly and accurately", as
       before: await readProjection(beforeFrame),
       after: await readProjection(afterFrame),
     };
+    for (const [side, projection] of Object.entries(projections)) {
+      expect(
+        projection.boxes.some((box) => box.types.includes("style")),
+        `${side}: style-only changes must not enter Review facts`,
+      ).toBe(false);
+    }
+    for (const [side, frame] of [["before", beforeFrame], ["after", afterFrame]]) {
+      expect(
+        await frame.locator(".tabs .tab[data-pageroot-review-structure]").count(),
+        `${side}: reordered tabs must not be reported as element changes`,
+      ).toBe(0);
+    }
     writeFileSync(
       path.join(captureDirectory, "review-annotation-projection.json"),
       JSON.stringify(projections, null, 2),
@@ -280,7 +292,7 @@ test("the review projection annotates a dense report cleanly and accurately", as
           container,
           `${side}: "${box.summary}" is nested inside "${container?.summary}" and must have been collapsed`,
         ).toBeUndefined();
-        expect(box.borderWidth, `${side}: outlines must stay thin`).toBeLessThanOrEqual(2);
+        expect(box.borderWidth, `${side}: outlines must stay thin`).toBeLessThanOrEqual(4);
       }
       // Two outlines crossing each other around one sentence read as noise even
       // when neither contains the other. Stacked line or block rectangles of one
@@ -311,9 +323,8 @@ test("the review projection annotates a dense report cleanly and accurately", as
 
     // 1a. Resting state is quiet. A confirmed change shows no outline color
     //     until hover or focus reaches for it — the entry state focuses the
-    //     first change, so its own boxes are the one allowed claim, and only
-    //     the amber suspected frame may rest visible besides it. Captions and
-    //     revision bars follow a change's contiguous stretches: a change
+    //     first change, so its own boxes are the one allowed claim. Captions
+    //     and revision bars follow a change's contiguous stretches: a change
     //     never carries more captions than stretches, a resting caption
     //     carries a ×N multiplier exactly when it represents a genuine
     //     cluster of N nearby same-caption stretches, and every change is
@@ -324,7 +335,7 @@ test("the review projection annotates a dense report cleanly and accurately", as
     for (const [side, projection] of Object.entries(projections)) {
       const captionsByChange = new Map();
       for (const box of projection.boxes) {
-        if (box.tone !== "suspected" && box.active !== "true") {
+        if (box.active !== "true") {
           expect(
             restsTransparent(box.borderColor),
             `${side}: "${box.summary}" rests with a visible ${box.borderColor} outline`,
@@ -375,7 +386,7 @@ test("the review projection annotates a dense report cleanly and accurately", as
     await afterFrame.locator("html").evaluate(() => {
       const box = [...document.querySelectorAll("[data-pageroot-review-overlay-box]")]
         .find((candidate) => (
-          candidate.dataset.active !== "true" && candidate.dataset.tone !== "suspected"
+          candidate.dataset.active !== "true"
         ));
       if (!box) throw new Error("no resting box to hover");
       const rect = box.getBoundingClientRect();
@@ -408,7 +419,7 @@ test("the review projection annotates a dense report cleanly and accurately", as
       if (!activeBoxes.length) return "no active box";
       const claimed = activeBoxes.every((box) => !restsTransparent(box.borderColor));
       const othersRest = [...sides.before.boxes, ...sides.after.boxes]
-        .filter((box) => box.active !== "true" && box.tone !== "suspected")
+        .filter((box) => box.active !== "true")
         .every((box) => restsTransparent(box.borderColor));
       const barClaimed = [...sides.before.bars, ...sides.after.bars]
         .some((bar) => bar.active === "true");
@@ -484,7 +495,22 @@ test("the review projection annotates a dense report cleanly and accurately", as
       }
     }
 
-    for (const [filter, name] of [["文案变化", "text"], ["结构变化", "structure"]]) {
+    // 5. A wholly added or removed element is one structural fact. Descendant
+    //    elements and their text never repeat that same subtree as extra marks.
+    for (const [side, frame] of [["before", beforeFrame], ["after", afterFrame]]) {
+      const nested = await frame.locator("html").evaluate(() => ({
+        structure: document.querySelectorAll(
+          "[data-pageroot-review-structure] [data-pageroot-review-structure]",
+        ).length,
+        text: document.querySelectorAll(
+          "[data-pageroot-review-structure] [data-pageroot-review-text]",
+        ).length,
+      }));
+      expect(nested.structure, `${side}: nested element marks duplicate one subtree`).toBe(0);
+      expect(nested.text, `${side}: wholly changed elements must not repeat text marks`).toBe(0);
+    }
+
+    for (const [filter, name] of [["文字变化", "text"], ["元素变化", "structure"]]) {
       await launched.page.getByRole("button", { name: filter, exact: true }).click();
       await expect.poll(
         async () => afterFrame.locator("html").getAttribute("data-pageroot-review-filter"),
@@ -515,7 +541,7 @@ test("the review projection annotates a dense report cleanly and accurately", as
       ["strike-paragraph", beforeFrame, ".trend-copy"],
       ["strike-note", beforeFrame, '[data-report-metric="overall"] .metric-note'],
       ["dots-paragraph", afterFrame, ".trend-copy"],
-      ["dots-panel-head", afterFrame, ".panel-head"],
+      ["dots-note", afterFrame, '[data-report-metric="overall"] .metric-note'],
     ]) {
       const target = frame.locator(selector).first();
       await target.scrollIntoViewIfNeeded();

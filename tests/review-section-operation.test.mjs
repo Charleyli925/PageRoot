@@ -62,20 +62,9 @@ test("mixed evidence keeps the type-derived wording instead of naming half the c
     assert.equal(
       reviewSectionChangeOperation([structureMark("added"), structureMark(tone)]),
       null,
-      `in-place or move evidence (${tone}) disqualifies an insertion claim`,
+      `unknown structural evidence (${tone}) disqualifies an insertion claim`,
     );
   });
-});
-
-test("a reflow disqualifies an exclusive insertion claim", () => {
-  // Regression: a paragraph that both gained a sentence and lost a <br> would
-  // otherwise read as 新增内容 and hide the reflow, which carries its own
-  // caption (换行调整) in this vocabulary.
-  assert.equal(
-    reviewSectionChangeOperation([structureMark("added"), textMark("layout")]),
-    null,
-  );
-  assert.equal(reviewSectionChangeOperation([textMark("layout")]), null);
 });
 
 test("evidence-free and content-neutral marks decide nothing", () => {

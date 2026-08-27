@@ -92,8 +92,6 @@ const TASK_OWNER_CASES = [
     nodeTests: [
       "tests/review-badge-aggregation.test.mjs",
       "tests/review-projection-facts.test.mjs",
-      "tests/runtime-snapshot-hosts.test.mjs",
-      "tests/runtime-visual-contract.test.mjs",
     ],
     suites: [
       "typecheck",
@@ -104,7 +102,7 @@ const TASK_OWNER_CASES = [
       "build-desktop",
       "ai-review-smoke",
     ],
-    directOwners: ["tests/review-badge-aggregation.test.mjs", "tests/runtime-visual-contract.test.mjs"],
+    directOwners: ["tests/review-badge-aggregation.test.mjs", "tests/review-projection-facts.test.mjs"],
     unrelatedOwners: [
       "tests/desktop-package.test.mjs",
       "tests/desktop-preload-ipc.test.mjs",
@@ -117,8 +115,6 @@ const TASK_OWNER_CASES = [
     nodeTests: [
       "tests/review-badge-aggregation.test.mjs",
       "tests/review-projection-facts.test.mjs",
-      "tests/runtime-snapshot-hosts.test.mjs",
-      "tests/runtime-visual-contract.test.mjs",
     ],
     suites: [
       "typecheck",
@@ -129,7 +125,7 @@ const TASK_OWNER_CASES = [
       "build-desktop",
       "ai-review-smoke",
     ],
-    directOwners: ["tests/review-badge-aggregation.test.mjs", "tests/runtime-visual-contract.test.mjs"],
+    directOwners: ["tests/review-badge-aggregation.test.mjs", "tests/review-projection-facts.test.mjs"],
     unrelatedOwners: [
       "tests/desktop-package.test.mjs",
       "tests/desktop-preload-ipc.test.mjs",
@@ -171,27 +167,7 @@ const TASK_OWNER_CASES = [
     unrelatedOwners: [
       "tests/desktop-file-writer.test.mjs",
       "tests/desktop-package.test.mjs",
-      "tests/review-runtime-capture-owner.test.mjs",
     ],
-  },
-  {
-    file: "desktop/runtime-visual-capture-owner.mjs",
-    nodeTests: [
-      "tests/review-runtime-capture-owner.test.mjs",
-      "tests/review-runtime-visual.test.mjs",
-      "tests/runtime-snapshot-hosts.test.mjs",
-      "tests/runtime-visual-contract.test.mjs",
-    ],
-    suites: [
-      "typecheck",
-      "lint",
-      "node-targeted",
-      "build-desktop",
-      "electron-editing-smoke",
-      "ai-review-smoke",
-    ],
-    directOwners: ["tests/review-runtime-capture-owner.test.mjs"],
-    unrelatedOwners: ["tests/application-update.test.mjs", "tests/source-rename.test.mjs"],
   },
   {
     file: "bridge/workspace-bridge.mjs",
@@ -211,7 +187,7 @@ const TASK_OWNER_CASES = [
     ],
     suites: ["typecheck", "lint", "node-targeted", "build-desktop", "ai-run-lifecycle-smoke"],
     directOwners: ["tests/workspace-bridge.test.mjs"],
-    unrelatedOwners: ["tests/desktop-package.test.mjs", "tests/review-runtime-capture-owner.test.mjs"],
+    unrelatedOwners: ["tests/desktop-package.test.mjs", "tests/application-update.test.mjs"],
   },
   {
     file: "bridge/project-file-repository.mjs",
@@ -230,7 +206,7 @@ const TASK_OWNER_CASES = [
     ],
     suites: ["typecheck", "lint", "node-targeted", "build-desktop", "ai-review-smoke"],
     directOwners: ["tests/project-registry-and-open.test.mjs"],
-    unrelatedOwners: ["tests/desktop-package.test.mjs", "tests/review-runtime-capture-owner.test.mjs"],
+    unrelatedOwners: ["tests/desktop-package.test.mjs", "tests/application-update.test.mjs"],
   },
   {
     file: "bridge/project-file-repository/path-safety.mjs",
@@ -241,7 +217,6 @@ const TASK_OWNER_CASES = [
     directOwners: ["tests/project-path-security-and-locks.test.mjs"],
     unrelatedOwners: [
       "tests/desktop-package.test.mjs",
-      "tests/review-runtime-capture-owner.test.mjs",
       "tests/project-registry-and-open.test.mjs",
     ],
   },
@@ -254,7 +229,7 @@ const TASK_OWNER_CASES = [
     ],
     suites: ["typecheck", "lint", "node-targeted"],
     directOwners: ["tests/bridge-test-environment.test.mjs"],
-    unrelatedOwners: ["tests/desktop-package.test.mjs", "tests/review-runtime-capture-owner.test.mjs"],
+    unrelatedOwners: ["tests/desktop-package.test.mjs", "tests/application-update.test.mjs"],
   },
 ];
 

@@ -191,8 +191,6 @@ export function createWindowLifecycle(ctx) {
     });
     mainWindow.on("closed", () => {
       ctx.applicationUpdate?.stopAutomaticChecks();
-      ctx.reviewRuntimeSnapshotCaptureController?.dispose();
-      ctx.reviewRuntimeSnapshotCaptureController = null;
       ctx.editRuntimeProtocolController?.dispose();
       ctx.editRuntimeProtocolController = null;
       ctx.previewProtocolController?.dispose();

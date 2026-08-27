@@ -24,12 +24,11 @@ import {
   assertReviewAcceptPersistence,
   assertReviewChangeOutline,
   assertReviewControlDefaults,
-  assertRuntimeVisualSupplement,
+  assertReviewHasNoRuntimeVisualSupplement,
   caseSelector,
   candidateHtmlFiles,
   closePageRootGracefully,
   createSourceFixture,
-  decodePngPixels,
   existsSync,
   focusChangeById,
   fixtureBuffer,
@@ -133,12 +132,6 @@ ${REVIEW_MASK_UNION_BEFORE}
     <button type="button" id="review-counter" data-review-counter>交互计数 <span>0</span></button>
     <input id="review-sync-input" aria-label="审阅同步输入" value="">
     <div class="panel" id="review-p1" data-review-tab-panel="one">
-      <section data-review-runtime-snapshot>
-        <h2>运行态 Snapshot</h2>
-        <canvas id="review-runtime-snapshot-canvas" width="320" height="96"></canvas>
-        <canvas id="review-runtime-static-box-canvas" width="120" height="36" style="border: 1px solid #9aaec2"></canvas>
-        <div id="review-runtime-snapshot-host" data-runtime-snapshot-host></div>
-      </section>
       <article id="review-tab-one-overview"><h2>标签一概览</h2><p>第一块完整内容</p></article>
       <article id="review-tab-one-detail"><h2>标签一详情</h2><p>第二块完整内容</p></article>
     </div>
@@ -185,21 +178,6 @@ ${REVIEW_MASK_UNION_BEFORE}
           panel.style.display = index === activeIndex ? "block" : "none";
         });
       }
-      const runtimeSnapshotVariant = "before";
-      const runtimeSnapshotColor = runtimeSnapshotVariant === "before" ? "#9aaec2" : "#6d5ce7";
-      const runtimeSnapshotWidth = runtimeSnapshotVariant === "before" ? 144 : 238;
-      const runtimeSnapshotCanvas = document.querySelector("#review-runtime-snapshot-canvas");
-      const runtimeSnapshotContext = runtimeSnapshotCanvas.getContext("2d");
-      runtimeSnapshotContext.fillStyle = "#f5f3ff";
-      runtimeSnapshotContext.fillRect(0, 0, 320, 96);
-      runtimeSnapshotContext.fillStyle = runtimeSnapshotColor;
-      runtimeSnapshotContext.fillRect(24, 20, runtimeSnapshotWidth, 56);
-      const runtimeStaticBoxCanvas = document.querySelector("#review-runtime-static-box-canvas");
-      const runtimeStaticBoxContext = runtimeStaticBoxCanvas.getContext("2d");
-      runtimeStaticBoxContext.fillStyle = runtimeSnapshotColor;
-      runtimeStaticBoxContext.fillRect(8, 8, runtimeSnapshotVariant === "before" ? 48 : 88, 20);
-      const runtimeSnapshotHost = document.querySelector("#review-runtime-snapshot-host");
-      runtimeSnapshotHost.innerHTML = '<svg viewBox="0 0 320 96" width="320" height="96" aria-label="运行态 SVG"><rect x="24" y="20" width="' + runtimeSnapshotWidth + '" height="56" fill="' + runtimeSnapshotColor + '"></rect></svg>';
       document.documentElement.dataset.reviewFixtureReady = "true";
     </script>
   </main>`,
@@ -252,14 +230,6 @@ ${REVIEW_MASK_UNION_BEFORE}
         .replace(ORIGINAL_TEXT, UPDATED_TEXT)
         .replace(REVIEW_METRIC_BEFORE_CSS, REVIEW_METRIC_AFTER_CSS)
         .replace(REVIEW_MASK_UNION_BEFORE, REVIEW_MASK_UNION_AFTER)
-        .replace(
-          'const runtimeSnapshotVariant = "before";',
-          'const runtimeSnapshotVariant = "after";',
-        )
-        .replace(
-          'style="border: 1px solid #9aaec2"',
-          'style="border: 3px solid #6d5ce7"',
-        )
         .replace(
           "      <div data-review-regression-summary>",
           `      <div data-review-added-chart>
@@ -449,7 +419,7 @@ ${REVIEW_MASK_UNION_BEFORE}
       .toHaveAttribute("data-review-fixture-ready", "true");
     await expect(afterReviewFrame.locator("html"))
       .toHaveAttribute("data-review-fixture-ready", "true");
-    const initialRuntimeVisualSupplement = await assertRuntimeVisualSupplement(
+    await assertReviewHasNoRuntimeVisualSupplement(
       launched.page,
       beforeReviewFrame,
       afterReviewFrame,
@@ -622,13 +592,6 @@ ${REVIEW_MASK_UNION_BEFORE}
           });
       })),
     ).then((states) => states.every(Boolean))).toBe(true);
-    for (const [sideIndex, frame] of [beforeReviewFrame, afterReviewFrame].entries()) {
-      for (const factId of initialRuntimeVisualSupplement.localRuntimeFactIdsBySide[sideIndex]) {
-        await expect(frame.locator(
-          `[data-pageroot-review-overlay-box][data-pageroot-review-fact="${factId}"]`,
-        )).toHaveCount(0);
-      }
-    }
     await beforeReviewFrame.getByRole("button", { name: "审阅标签一" })
       .evaluate((button) => button.click());
     await expect(beforeReviewFrame.locator('[data-review-tab-panel="one"]'))
@@ -640,7 +603,7 @@ ${REVIEW_MASK_UNION_BEFORE}
         !document.documentElement.hasAttribute("data-pageroot-review-transitioning")
       ))),
     ).then((states) => states.every(Boolean))).toBe(true);
-    await assertRuntimeVisualSupplement(
+    await assertReviewHasNoRuntimeVisualSupplement(
       launched.page,
       beforeReviewFrame,
       afterReviewFrame,
@@ -822,7 +785,7 @@ ${REVIEW_MASK_UNION_BEFORE}
         animations: "disabled",
       });
     }
-    await launched.page.getByRole("button", { name: "文案变化" }).click();
+    await launched.page.getByRole("button", { name: "文字变化" }).click();
     await expect.poll(async () => beforeReviewFrame.locator("html").getAttribute(
       "data-pageroot-review-filter",
     )).toBe("text");
@@ -846,7 +809,7 @@ ${REVIEW_MASK_UNION_BEFORE}
     // A target that still matches the new filter keeps the user's position.
     await launched.page.getByRole("button", { name: "下一处变化" }).click();
     await expect(changeNavigator.locator("strong")).toHaveText("2");
-    await launched.page.getByRole("button", { name: "文案变化" }).click();
+    await launched.page.getByRole("button", { name: "文字变化" }).click();
     await expect(changeNavigator.locator("strong")).toHaveText("2");
     await launched.page.getByRole("button", { name: "上一处变化" }).click();
     await expect(changeNavigator.locator("strong")).toHaveText("1");
@@ -857,22 +820,10 @@ ${REVIEW_MASK_UNION_BEFORE}
       '[data-pageroot-review-text="added"]',
     ).filter({ hasText: UPDATED_TEXT })).toBeVisible();
     const deletedPriority = beforeReviewFrame.locator(
-      '[data-pageroot-review-text="removed"]',
-    ).filter({ hasText: /优先顺序/u });
+      '[data-review-priority][data-pageroot-review-structure="removed"]',
+    );
     await expect(deletedPriority).toHaveCount(1);
-    await expect.poll(() => deletedPriority.evaluate(
-      (element) => getComputedStyle(element).textDecorationLine,
-    )).toBe("none");
-    await expect.poll(() => deletedPriority.evaluate(
-      (element) => getComputedStyle(element).color,
-    )).toBe(await deletedPriority.evaluate(
-      (element) => getComputedStyle(element.parentElement).color,
-    ));
-    await expect.poll(() => deletedPriority.evaluate(
-      (element) => getComputedStyle(element).fontSize,
-    )).toBe(await deletedPriority.evaluate(
-      (element) => getComputedStyle(element.parentElement).fontSize,
-    ));
+    await expect(deletedPriority.locator("[data-pageroot-review-text]")).toHaveCount(0);
     await expect.poll(() => beforeReviewFrame.locator(
       '[data-pageroot-review-text-mark="removed"]',
     ).count()).toBeGreaterThan(0);
@@ -1223,12 +1174,11 @@ ${REVIEW_MASK_UNION_BEFORE}
       });
     }
     await expect(afterReviewFrame.locator(
-      '[data-review-added-chart] [data-pageroot-review-text="added"]',
-    ).filter({ hasText: "实验效果概览" })).toHaveCount(1);
+      '[data-review-added-chart][data-pageroot-review-structure="added"]',
+    )).toHaveCount(1);
     await expect(afterReviewFrame.locator(
-      '[data-review-added-chart] [data-pageroot-review-text="added"]',
-    ).filter({ hasText: "实验效果概览" }))
-      .toHaveAttribute("data-pageroot-review-summary", "新增内容");
+      '[data-review-added-chart] [data-pageroot-review-text]',
+    )).toHaveCount(0);
     await expect(beforeReviewFrame.locator(
       '[data-review-reference] [data-pageroot-review-text-context="removed"]',
     )).toHaveCount(0);
@@ -1334,10 +1284,10 @@ ${REVIEW_MASK_UNION_BEFORE}
       '[data-review-list-items] [data-pageroot-review-text]',
     )).toHaveCount(0);
     await expect(afterReviewFrame.locator(
-      '[data-review-list-items] [data-pageroot-review-text="added"]',
-    )).toHaveText("后续观察新增商品");
+      '[data-review-added-list-item][data-pageroot-review-structure="added"]',
+    )).toHaveCount(1);
     await expect(afterReviewFrame.locator(
-      '[data-review-list-items] li:not([data-review-added-list-item]) [data-pageroot-review-text]',
+      '[data-review-list-items] [data-pageroot-review-text]',
     )).toHaveCount(0);
     await expect(beforeReviewFrame.locator(
       '[data-review-nested-list] [data-pageroot-review-text], [data-review-nested-list][data-pageroot-review-structure]',
@@ -1349,78 +1299,11 @@ ${REVIEW_MASK_UNION_BEFORE}
       '[data-review-brand-table] [data-pageroot-review-text]',
     )).toHaveCount(0);
     await expect(afterReviewFrame.locator(
-      '[data-review-brand-row="added"] [data-pageroot-review-text="added"]',
-    )).toHaveCount(3);
-    const addedRowGroups = await afterReviewFrame.locator(
-      '[data-review-brand-row="added"] [data-pageroot-review-text="added"]',
-    ).evaluateAll((markers) => [...new Set(markers.map((marker) => (
-      marker.getAttribute("data-pageroot-review-text-group")
-    )))].filter(Boolean));
-    expect(addedRowGroups).toHaveLength(3);
-    const addedRowSemanticOwners = await afterReviewFrame.locator(
-      '[data-review-brand-row="added"] [data-pageroot-review-text="added"]',
-    ).evaluateAll((markers) => [...new Set(markers.map((marker) => (
-      marker.getAttribute("data-pageroot-review-semantic-owner")
-    )))].filter(Boolean));
-    expect(addedRowSemanticOwners).toEqual([addedRowSemanticOwner]);
-    const addedRowFrames = afterReviewFrame.locator(
-      `[data-pageroot-review-overlay-box][data-tone="text-added"][data-pageroot-review-semantic-owner="${addedRowSemanticOwners[0]}"]`,
-    );
-    const addedRowRangeRectCount = await afterReviewFrame.locator(
-      '[data-review-brand-row="added"] [data-pageroot-review-text="added"]',
-    ).evaluateAll((markers) => markers.reduce((total, marker) => {
-      const range = document.createRange();
-      range.selectNodeContents(marker);
-      const count = [...range.getClientRects()]
-        .filter((rect) => rect.width > 1 && rect.height > 1).length;
-      range.detach();
-      return total + count;
-    }, 0));
-    expect(addedRowRangeRectCount).toBeGreaterThan(3);
-    await expect(addedRowFrames).toHaveCount(addedRowGroups.length);
-    const addedRowFrameState = await addedRowFrames.evaluateAll((frames) => {
-      const row = document.querySelector('[data-review-brand-row="added"]');
-      if (!row) return { matches: false, reason: "row-missing" };
-      const rowRect = row.getBoundingClientRect();
-      const details = frames.map((frame) => {
-        const rect = frame.getBoundingClientRect();
-        const geometryOwnerId = frame.getAttribute("data-pageroot-review-geometry-owner");
-        const geometryOwner = [...document.querySelectorAll(
-          '[data-pageroot-review-geometry-owner="' + geometryOwnerId + '"]',
-        )].find((candidate) => (
-          candidate.matches("td, th")
-          && !candidate.hasAttribute("data-pageroot-review-text")
-        ));
-        const ownerRect = geometryOwner?.getBoundingClientRect();
-        return {
-          matches: ["text-phrase", "text-line", "text-block"].includes(
-            frame.getAttribute("data-scope") || "",
-          )
-          && frame.getAttribute("data-shaped") !== "true"
-          && frame.getAttribute("data-pageroot-review-fragment-count") === "1"
-          && Boolean(ownerRect)
-          && rect.left >= ownerRect.left - 4
-          && rect.right <= ownerRect.right + 4
-          && rect.left >= rowRect.left - 4
-          && rect.top >= rowRect.top - 4
-          && rect.right <= rowRect.right + 4,
-          scope: frame.getAttribute("data-scope"),
-          rect: [rect.left, rect.top, rect.right, rect.bottom],
-          ownerRect: ownerRect
-            ? [ownerRect.left, ownerRect.top, ownerRect.right, ownerRect.bottom]
-            : null,
-          rowRect: [rowRect.left, rowRect.top, rowRect.right, rowRect.bottom],
-        };
-      });
-      return { matches: details.every((detail) => detail.matches), details };
-    });
-    expect(
-      addedRowFrameState.matches,
-      JSON.stringify(addedRowFrameState.details, null, 2),
-    ).toBe(true);
-    expect(addedRowFrameState.details.filter((detail) => (
-      detail.scope === "text-block"
-    ))).toHaveLength(1);
+      '[data-review-brand-row="added"] [data-pageroot-review-text]',
+    )).toHaveCount(0);
+    await expect(afterReviewFrame.locator(
+      '[data-review-brand-row="added"][data-pageroot-review-structure="added"]',
+    )).toHaveCount(1);
     await expect(afterReviewFrame.locator(
       '[data-review-brand-row]:not([data-review-brand-row="added"]) [data-pageroot-review-text]',
     )).toHaveCount(0);
@@ -1430,47 +1313,6 @@ ${REVIEW_MASK_UNION_BEFORE}
     await expect(afterReviewFrame.locator(
       '[data-review-layout-only] [data-pageroot-review-text], [data-review-layout-only] [data-pageroot-review-text-context]',
     )).toHaveCount(0);
-    const layoutProjectionFactsBySide = await Promise.all(
-      [beforeReviewFrame, afterReviewFrame].map((frame) => frame.locator(
-        "[data-review-layout-only]",
-      ).evaluate((element) => JSON.parse(
-        element.getAttribute("data-pageroot-review-projection-facts") || "[]",
-      ))),
-    );
-    layoutProjectionFactsBySide.forEach((facts) => {
-      const boxFact = facts.find((fact) => (
-        fact.type === "style" && fact.scope === "box" && fact.operation !== "layout"
-      ));
-      const layoutFact = facts.find((fact) => (
-        fact.type === "style" && fact.operation === "layout"
-      ));
-      expect(boxFact).toMatchObject({ summary: "视觉调整" });
-      expect(layoutFact).toMatchObject({ scope: "content", summary: "换行调整" });
-      expect(layoutFact.id).not.toBe(boxFact.id);
-      expect(layoutFact.semanticOwnerId).toBe(boxFact.semanticOwnerId);
-      expect(layoutFact.geometryOwnerId).toBe(boxFact.geometryOwnerId);
-    });
-    const [beforeLayoutFacts, afterLayoutFacts] = layoutProjectionFactsBySide;
-    const beforeLayoutChangeId = await beforeReviewFrame.locator(
-      "[data-review-layout-only]",
-    ).getAttribute("data-pageroot-review-marker");
-    const afterLayoutChangeId = await afterReviewFrame.locator(
-      "[data-review-layout-only]",
-    ).getAttribute("data-pageroot-review-marker");
-    expect(beforeLayoutChangeId).toBeTruthy();
-    expect(afterLayoutChangeId).toBeTruthy();
-    const beforeLayoutBoxFact = beforeLayoutFacts.find((fact) => (
-      fact.type === "style" && fact.scope === "box" && fact.operation !== "layout"
-    ));
-    const beforeLayoutFact = beforeLayoutFacts.find((fact) => (
-      fact.type === "style" && fact.operation === "layout"
-    ));
-    const afterLayoutBoxFact = afterLayoutFacts.find((fact) => (
-      fact.type === "style" && fact.scope === "box" && fact.operation !== "layout"
-    ));
-    const afterLayoutFact = afterLayoutFacts.find((fact) => (
-      fact.type === "style" && fact.operation === "layout"
-    ));
     const crossLineMarker = afterReviewFrame.locator(
       '[data-review-cross-line] [data-pageroot-review-text="added"]',
     );
@@ -1599,18 +1441,6 @@ ${REVIEW_MASK_UNION_BEFORE}
         };
       }, tone)).toMatchObject({ matches: true });
     }
-    const addedChartChangeId = await afterReviewFrame.locator(
-      "[data-review-added-chart] [data-pageroot-review-marker]",
-    ).first().getAttribute("data-pageroot-review-marker");
-    expect(addedChartChangeId).toBeTruthy();
-    // The added chart's vocabulary is anchored on its records; a caption for
-    // it renders on its own stretch or a same-caption cluster representative.
-    await expect(afterReviewFrame.locator(
-      `[data-pageroot-review-overlay-box="${addedChartChangeId}"]`,
-    ).first()).toHaveAttribute("data-summary", /新增内容/u);
-    await expect(afterReviewFrame.locator(
-      "[data-pageroot-review-overlay-label]",
-    ).filter({ hasText: /新增内容/u }).first()).toBeVisible();
     const warningRemovedText = await beforeReviewFrame.locator(
       '[data-review-warning] [data-pageroot-review-text="removed"]',
     ).allTextContents();
@@ -1709,257 +1539,7 @@ ${REVIEW_MASK_UNION_BEFORE}
     await expect.poll(async () => afterReviewFrame.locator("html").getAttribute(
       "data-pageroot-review-filter",
     )).toBe("all");
-    const maskUnionStage = afterReviewFrame.locator("[data-review-mask-stage]");
-    const readMaskUnionState = () => afterReviewFrame.locator("html").evaluate(() => {
-      const rect = (element) => {
-        if (!element) return null;
-        const value = element.getBoundingClientRect();
-        return {
-          left: value.left,
-          top: value.top,
-          right: value.right,
-          bottom: value.bottom,
-          width: value.width,
-          height: value.height,
-        };
-      };
-      const stage = document.querySelector("[data-review-mask-stage]");
-      const alpha = document.querySelector('[data-review-mask-fact="alpha"]');
-      const beta = document.querySelector('[data-review-mask-fact="beta"]');
-      const alphaOwner = alpha?.getAttribute("data-pageroot-review-style-owner") || "";
-      const betaOwner = beta?.getAttribute("data-pageroot-review-style-owner") || "";
-      const holeForOwner = (owner) => [...document.querySelectorAll(
-        "[data-pageroot-review-mask-owner]",
-      )].find((element) => (
-        element.getAttribute("data-pageroot-review-mask-owner") === owner
-      )) || null;
-      const mask = document.querySelector("[data-pageroot-review-mask]");
-      const background = document.querySelector("[data-pageroot-review-mask-background]");
-      const dim = document.querySelector("[data-pageroot-review-mask-dim]");
-      const computed = (element) => element ? {
-        display: getComputedStyle(element).display,
-        fill: getComputedStyle(element).fill,
-        fillOpacity: getComputedStyle(element).fillOpacity,
-        stroke: getComputedStyle(element).stroke,
-        opacity: getComputedStyle(element).opacity,
-        filter: getComputedStyle(element).filter,
-        transform: getComputedStyle(element).transform,
-        pointerEvents: getComputedStyle(element).pointerEvents,
-      } : null;
-      return {
-        stage: rect(stage),
-        alpha: rect(alpha),
-        beta: rect(beta),
-        alphaOwner,
-        betaOwner,
-        alphaHole: holeForOwner(alphaOwner) ? {
-          d: holeForOwner(alphaOwner)?.getAttribute("d"),
-          parent: holeForOwner(alphaOwner)?.parentElement?.getAttribute("data-pageroot-review-mask"),
-          computed: computed(holeForOwner(alphaOwner)),
-        } : null,
-        betaHole: holeForOwner(betaOwner) ? {
-          d: holeForOwner(betaOwner)?.getAttribute("d"),
-          parent: holeForOwner(betaOwner)?.parentElement?.getAttribute("data-pageroot-review-mask"),
-          computed: computed(holeForOwner(betaOwner)),
-        } : null,
-        mask: mask ? {
-          id: mask.id,
-          units: mask.getAttribute("maskUnits"),
-          contentUnits: mask.getAttribute("maskContentUnits"),
-          type: mask.getAttribute("mask-type"),
-          computed: computed(mask),
-        } : null,
-        background: background ? { computed: computed(background) } : null,
-        dim: dim ? {
-          mask: dim.getAttribute("mask"),
-          computed: computed(dim),
-        } : null,
-      };
-    });
-    await maskUnionStage.scrollIntoViewIfNeeded();
-    await expect.poll(async () => {
-      const state = await readMaskUnionState();
-      return Boolean(
-        state.stage
-        && state.alpha
-        && state.beta
-        && state.alphaOwner
-        && state.betaOwner
-        && state.alphaOwner !== state.betaOwner
-        && state.alphaHole?.d
-        && state.betaHole?.d
-        && state.mask?.id
-        && state.dim?.mask === `url(#${state.mask?.id})`,
-      );
-    }).toBe(true);
-    const maskUnionState = await readMaskUnionState();
-    expect(maskUnionState.mask).toMatchObject({
-      units: "userSpaceOnUse",
-      contentUnits: "userSpaceOnUse",
-      type: "luminance",
-      computed: {
-        display: "block",
-        opacity: "1",
-        filter: "none",
-        transform: "none",
-        pointerEvents: "none",
-      },
-    });
-    expect(maskUnionState.mask?.id).not.toBe("pageroot-review-mask-forged");
-    expect(maskUnionState.alphaHole).toMatchObject({
-      parent: "true",
-      computed: {
-        display: "block",
-        fill: "rgb(0, 0, 0)",
-        stroke: "none",
-        opacity: "1",
-        filter: "none",
-        transform: "none",
-        pointerEvents: "none",
-      },
-    });
-    expect(maskUnionState.betaHole).toMatchObject({ parent: "true" });
-    expect(maskUnionState.background).toMatchObject({
-      computed: { fill: "rgb(255, 255, 255)", stroke: "none" },
-    });
-    expect(maskUnionState.dim).toMatchObject({
-      computed: {
-        display: "block",
-        fill: "rgb(255, 255, 255)",
-        fillOpacity: "0.82",
-        stroke: "none",
-        opacity: "1",
-        filter: "none",
-        transform: "none",
-        pointerEvents: "none",
-      },
-    });
-    // Pixel sampling maps in-frame CSS coordinates onto an element screenshot,
-    // so it must read the canvas at 1:1 instead of the scaled entry default.
-    await launched.page.getByRole("button", { name: "原始大小", exact: true }).click();
-    await expect(launched.page.getByRole("button", { name: "原始大小", exact: true }))
-      .toHaveAttribute("aria-pressed", "true");
-    const captureMaskUnionPixels = async () => {
-      const screenshot = decodePngPixels(await maskUnionStage.screenshot({
-        animations: "disabled",
-      }));
-      const state = await readMaskUnionState();
-      if (!state.stage || !state.alpha || !state.beta) {
-        throw new Error("Mask-union fixture geometry is unavailable.");
-      }
-      const overlap = {
-        left: Math.max(state.alpha.left, state.beta.left),
-        top: Math.max(state.alpha.top, state.beta.top),
-        right: Math.min(state.alpha.right, state.beta.right),
-        bottom: Math.min(state.alpha.bottom, state.beta.bottom),
-      };
-      if (overlap.right - overlap.left < 24 || overlap.bottom - overlap.top < 24) {
-        throw new Error("Mask-union fixture no longer overlaps.");
-      }
-      const pixelAt = (point) => screenshot.pixelAt(
-        (point.x - state.stage.left) * screenshot.width / state.stage.width,
-        (point.y - state.stage.top) * screenshot.height / state.stage.height,
-      );
-      return {
-        alpha: pixelAt({ x: state.alpha.left + 28, y: state.alpha.top + 28 }),
-        beta: pixelAt({ x: state.beta.right - 28, y: state.beta.bottom - 28 }),
-        overlap: pixelAt({
-          x: (overlap.left + overlap.right) / 2,
-          y: (overlap.top + overlap.bottom) / 2,
-        }),
-        outside: pixelAt({ x: state.stage.left + 12, y: state.stage.top + 12 }),
-      };
-    };
-    const maxChannelDistance = (left, right) => Math.max(...left.map((value, index) => (
-      Math.abs(value - right[index])
-    )));
-    const atEighteen = await captureMaskUnionPixels();
-    expect(maxChannelDistance(atEighteen.alpha, atEighteen.beta)).toBeLessThan(8);
-    expect(maxChannelDistance(atEighteen.alpha, atEighteen.overlap)).toBeLessThan(8);
-    expect(atEighteen.alpha[1]).toBeLessThan(80);
-    expect(atEighteen.alpha[2]).toBeLessThan(80);
-    expect(atEighteen.outside[1]).toBeGreaterThan(180);
-    expect(atEighteen.outside[2]).toBeGreaterThan(180);
-    const maskUnionOwnerSelector = [
-      `[data-pageroot-review-mask-owner="${maskUnionState.alphaOwner}"]`,
-      `[data-pageroot-review-mask-owner="${maskUnionState.betaOwner}"]`,
-    ].join(", ");
-    const maskUnionOverlaySelector = [
-      `[data-pageroot-review-overlay-owner="${maskUnionState.alphaOwner}"]`,
-      `[data-pageroot-review-overlay-owner="${maskUnionState.betaOwner}"]`,
-    ].join(", ");
-    for (const [buttonName, expectedCount] of [
-      ["文案变化", 0],
-      ["结构变化", 0],
-      ["视觉变化", 2],
-      ["全部变化", 2],
-    ]) {
-      await launched.page.getByRole("button", { name: buttonName }).click();
-      await expect(afterReviewFrame.locator(maskUnionOwnerSelector)).toHaveCount(expectedCount);
-      await expect(afterReviewFrame.locator(maskUnionOverlaySelector)).toHaveCount(expectedCount);
-    }
-    // Switching to a type filter lands navigation on its first matching
-    // change — here the mask fixture itself — and a focused change claims its
-    // boxes with a faint violet tint. The remaining captures are a pure dim
-    // contract, so park navigation back on the page overview and wait for the
-    // claimed boxes to rest before sampling pixels.
-    await launched.page.getByRole("button", { name: "整页" }).click();
-    await expect.poll(async () => afterReviewFrame.locator("html").getAttribute(
-      "data-pageroot-review-focus",
-    )).toBe("all");
-    await expect.poll(async () => afterReviewFrame.locator(
-      '[data-pageroot-review-overlay-box][data-active="true"]',
-    ).count()).toBe(0);
-    await launched.page.getByRole("slider", {
-      name: "非修改区域上下文可见度",
-    }).fill("0");
-    await expect.poll(async () => Number(await beforeReviewFrame.locator("html").evaluate(
-      (element) => element.style.getPropertyValue("--pageroot-review-context-opacity"),
-    ))).toBe(0);
-    await expect.poll(() => beforeReviewFrame.locator(
-      '[data-pageroot-review-mask-dim]',
-    ).getAttribute("fill-opacity")).toBe("1");
-    await expect(afterReviewFrame.locator(
-      '[data-pageroot-review-mask-dim]',
-    )).toHaveAttribute("fill-opacity", "1");
-    const atZero = await captureMaskUnionPixels();
-    expect(Math.min(...atZero.outside)).toBeGreaterThan(245);
-    expect(maxChannelDistance(atZero.alpha, atZero.overlap)).toBeLessThan(8);
-    await launched.page.getByRole("slider", {
-      name: "非修改区域上下文可见度",
-    }).fill("50");
-    await expect.poll(async () => Number(await beforeReviewFrame.locator("html").evaluate(
-      (element) => element.style.getPropertyValue("--pageroot-review-context-opacity"),
-    ))).toBeCloseTo(0.5, 4);
-    await expect.poll(() => beforeReviewFrame.locator(
-      '[data-pageroot-review-mask-dim]',
-    ).getAttribute("fill-opacity")).toBe("0.5");
-    await expect(afterReviewFrame.locator(
-      '[data-pageroot-review-mask-dim]',
-    )).toHaveAttribute("fill-opacity", "0.5");
-    const atFifty = await captureMaskUnionPixels();
-    expect(atFifty.outside[1]).toBeGreaterThan(70);
-    expect(atFifty.outside[1]).toBeLessThan(190);
-    expect(maxChannelDistance(atFifty.alpha, atFifty.overlap)).toBeLessThan(8);
-    await launched.page.getByRole("slider", {
-      name: "非修改区域上下文可见度",
-    }).fill("100");
-    await expect.poll(async () => Number(await beforeReviewFrame.locator("html").evaluate(
-      (element) => element.style.getPropertyValue("--pageroot-review-context-opacity"),
-    ))).toBe(1);
-    await expect.poll(() => beforeReviewFrame.locator(
-      '[data-pageroot-review-mask-dim]',
-    ).getAttribute("fill-opacity")).toBe("0");
-    await expect(afterReviewFrame.locator(
-      '[data-pageroot-review-mask-dim]',
-    )).toHaveAttribute("fill-opacity", "0");
-    const atHundred = await captureMaskUnionPixels();
-    expect(maxChannelDistance(atHundred.outside, atHundred.alpha)).toBeLessThan(8);
-    expect(maxChannelDistance(atHundred.alpha, atHundred.overlap)).toBeLessThan(8);
-    await launched.page.getByRole("slider", {
-      name: "非修改区域上下文可见度",
-    }).fill("18");
-    await launched.page.getByRole("button", { name: "文案变化" }).click();
+    await launched.page.getByRole("button", { name: "文字变化" }).click();
     await expect.poll(async () => afterReviewFrame.locator("html").getAttribute(
       "data-pageroot-review-filter",
     )).toBe("text");
@@ -2004,7 +1584,7 @@ ${REVIEW_MASK_UNION_BEFORE}
     await expect.poll(() => afterReviewFrame.locator(
       `[data-pageroot-review-overlay-box="${ebitaChangeId}"]`,
     ).count()).toBeGreaterThan(0);
-    await beforeCounter.click();
+    await beforeCounter.evaluate((button) => button.click());
     await expect(afterCounter).toHaveAttribute("data-count", "3");
     // The outline item that used to select this change lived in the content map.
     await launched.page.getByRole("button", { name: "下一处变化" }).click();
@@ -2019,18 +1599,6 @@ ${REVIEW_MASK_UNION_BEFORE}
     await expect.poll(async () => beforeReviewFrame.locator("html").getAttribute(
       "data-pageroot-review-filter",
     )).toBe("all");
-    await expect(beforeReviewFrame.locator(
-      `[data-pageroot-review-overlay-box="${beforeLayoutChangeId}"][data-pageroot-review-fact="style:${beforeLayoutBoxFact.id}"]`,
-    )).toHaveCount(1);
-    await expect(beforeReviewFrame.locator(
-      `[data-pageroot-review-overlay-box="${beforeLayoutChangeId}"][data-pageroot-review-fact="style:${beforeLayoutFact.id}"]`,
-    )).toHaveCount(1);
-    await expect(afterReviewFrame.locator(
-      `[data-pageroot-review-overlay-box="${afterLayoutChangeId}"][data-pageroot-review-fact="style:${afterLayoutBoxFact.id}"]`,
-    )).toHaveCount(1);
-    await expect(afterReviewFrame.locator(
-      `[data-pageroot-review-overlay-box="${afterLayoutChangeId}"][data-pageroot-review-fact="style:${afterLayoutFact.id}"]`,
-    )).toHaveCount(1);
     await expect(launched.page.locator('[data-view="split"]')).toBeVisible();
     await expect(beforeReviewFrame.locator('[data-review-tab-panel="one"]'))
       .toBeVisible();
@@ -2050,7 +1618,7 @@ ${REVIEW_MASK_UNION_BEFORE}
     expect(navigatorReachedSecondPanel).toBe(true);
     await expect(afterReviewFrame.locator('[data-review-tab-panel="two"]'))
       .toBeVisible();
-    await launched.page.getByRole("button", { name: "结构变化" }).click();
+    await launched.page.getByRole("button", { name: "元素变化" }).click();
     await expect.poll(async () => beforeReviewFrame.locator("html").getAttribute(
       "data-pageroot-review-filter",
     )).toBe("structure");
@@ -2100,183 +1668,15 @@ ${REVIEW_MASK_UNION_BEFORE}
     await expect(afterReviewFrame.locator(
       '[data-review-mixed-copy] [data-pageroot-review-structure], [data-review-break-layout] [data-pageroot-review-structure], [data-review-ebita-copy] [data-pageroot-review-structure]',
     )).toHaveCount(0);
-    await launched.page.getByRole("button", { name: "视觉变化" }).click();
-    await expect.poll(async () => afterReviewFrame.locator("html").getAttribute(
-      "data-pageroot-review-filter",
-    )).toBe("style");
-    await expect(afterReviewFrame.locator("[data-pageroot-review-style]").first())
-      .toBeVisible();
-    for (const [frame, tone] of [
-      [beforeReviewFrame, "before"],
-      [afterReviewFrame, "after"],
-    ]) {
-      // A paired atomic child may change presentation, but that must not turn
-      // its stable parent (or the paired SVG itself) into a structure replace.
+    for (const frame of [beforeReviewFrame, afterReviewFrame]) {
+      await expect(frame.locator("[data-pageroot-review-style]")).toHaveCount(0);
       await expect(frame.locator(
-        '[data-review-atomic-media][data-pageroot-review-structure], [data-review-atomic-paired][data-pageroot-review-structure]',
+        '[data-review-layout-only][data-pageroot-review-marker], [data-review-layout-only][data-pageroot-review-structure], [data-review-layout-only][data-pageroot-review-projection-facts]',
       )).toHaveCount(0);
-      for (const selector of [
-        "[data-review-atomic-paired]",
-        "[data-review-atomic-input]",
-      ]) {
-        const atomicElement = frame.locator(`${selector}[data-pageroot-review-style="${tone}"]`);
-        await expect(atomicElement).toHaveCount(1);
-        const owner = await atomicElement.getAttribute("data-pageroot-review-style-owner");
-        expect(owner).toBeTruthy();
-        await expect(frame.locator(
-          `[data-pageroot-review-overlay-owner="${owner}"][data-tone="style"]`,
-        )).toHaveCount(1);
-        await expect(frame.locator(
-          `[data-pageroot-review-mask-owner="${owner}"]`,
-        )).toHaveCount(1);
-      }
+      await expect(frame.locator(
+        '[data-review-metrics] [data-pageroot-review-marker], [data-review-mask-stage] [data-pageroot-review-marker]',
+      )).toHaveCount(0);
     }
-    await expect(beforeReviewFrame.locator(
-      '[data-review-layout-only][data-pageroot-review-style="before"]',
-    )).toHaveAttribute("data-pageroot-review-style-scope", "box");
-    await expect(afterReviewFrame.locator(
-      '[data-review-layout-only][data-pageroot-review-style="after"]',
-    )).toHaveAttribute("data-pageroot-review-style-scope", "box");
-    const boxStyleFrame = afterReviewFrame.locator(
-      `[data-pageroot-review-overlay-box="${afterLayoutChangeId}"][data-tone="style"][data-pageroot-review-fact="style:${afterLayoutBoxFact.id}"]`,
-    );
-    const layoutStyleFrame = afterReviewFrame.locator(
-      `[data-pageroot-review-overlay-box="${afterLayoutChangeId}"][data-tone="style"][data-pageroot-review-fact="style:${afterLayoutFact.id}"]`,
-    );
-    await expect(boxStyleFrame).toHaveCount(1);
-    await expect(layoutStyleFrame).toHaveCount(1);
-    await expect(boxStyleFrame).toHaveAttribute("data-scope", "box");
-    await expect(layoutStyleFrame).toHaveAttribute("data-scope", "content");
-    // One change region carries one caption composing its kinds per
-    // contiguous stretch; the stretch count follows layout and zoom, so the
-    // contract is the caption vocabulary, not a fixed count. Resting form
-    // composes the kinds; the focused form adds per-kind fact counts; a
-    // resting cluster representative may append one trailing ×N.
-    const layoutChangeCaption = afterReviewFrame.locator(
-      `[data-pageroot-review-overlay-box="${afterLayoutChangeId}"] [data-pageroot-review-overlay-label]`,
-    );
-    await expect.poll(() => layoutChangeCaption.count()).toBeGreaterThan(0);
-    await expect.poll(() => layoutChangeCaption.evaluateAll((labels) => labels.every((label) => (
-      /^(?:视觉调整|换行调整|新增内容|综合调整)(?: ×\d+)?(?: · (?:视觉调整|换行调整|新增内容)(?: ×\d+)?)?(?: ×\d+)?$/u
-    ).test(label.textContent?.trim() || "")))).toBe(true);
-    await expect(layoutStyleFrame).toHaveAttribute("data-summary", "换行调整");
-    await expect(boxStyleFrame).toHaveAttribute("data-summary", "视觉调整");
-    await expect.poll(() => layoutStyleFrame.evaluate((frame) => {
-      const owner = document.querySelector("[data-review-layout-only]");
-      if (!owner) return false;
-      const frameRect = frame.getBoundingClientRect();
-      const ownerRect = owner.getBoundingClientRect();
-      return frameRect.left >= ownerRect.left - 4
-        && frameRect.top >= ownerRect.top - 4
-        && frameRect.right <= ownerRect.right + 4
-        && frameRect.bottom <= ownerRect.bottom + 4;
-    })).toBe(true);
-    await expect(afterReviewFrame.locator(
-      '[data-pageroot-review-overlay-box][data-tone="style"]',
-    ).first()).toBeAttached();
-    // A style box either rests transparent or, while its change is focused,
-    // claims the single violet accent.
-    await expect.poll(() => afterReviewFrame.locator(
-      '[data-pageroot-review-overlay-box][data-tone="style"]',
-    ).first().evaluate((element) => {
-      const shape = element.querySelector("[data-pageroot-review-overlay-shape]");
-      return shape ? getComputedStyle(shape).stroke : getComputedStyle(element).borderTopColor;
-    }))
-      .toMatch(/^(?:rgba\(0, 0, 0, 0\)|rgb\(109, 92, 231\))$/u);
-    await expect(beforeReviewFrame.locator(
-      '[data-review-regression-summary][data-pageroot-review-style], [data-review-regression-summary] [data-pageroot-review-style]',
-    )).toHaveCount(0);
-    await expect(afterReviewFrame.locator(
-      '[data-review-regression-summary][data-pageroot-review-style], [data-review-regression-summary] [data-pageroot-review-style]',
-    )).toHaveCount(0);
-    await expect(beforeReviewFrame.locator('[data-review-tab-panel="two"]'))
-      .toBeVisible();
-    await expect(afterReviewFrame.locator('[data-review-tab-panel="two"]'))
-      .toBeVisible();
-    await expect(afterReviewFrame.locator(
-      '[data-pageroot-review-overlay-box][data-tone="style"] [data-pageroot-review-overlay-label]',
-    ).filter({ hasText: /^视觉调整/u }).first()).toBeVisible();
-    await expect.poll(async () => Promise.all(
-      [beforeReviewFrame, afterReviewFrame].map((frame) => frame.locator("html").evaluate(() => {
-        const copy = document.querySelector("[data-review-inherited-copy]");
-        if (!copy || copy.getAttribute("data-pageroot-review-style-scope") !== "content") {
-          return false;
-        }
-        const owner = copy.getAttribute("data-pageroot-review-style-owner");
-        const overlay = [...document.querySelectorAll("[data-pageroot-review-overlay-owner]")]
-          .find((candidate) => candidate.getAttribute("data-pageroot-review-overlay-owner") === owner);
-        if (!owner || !overlay || overlay.getAttribute("data-scope") !== "content") return false;
-        const copyRect = copy.getBoundingClientRect();
-        const overlayRect = overlay.getBoundingClientRect();
-        return overlayRect.left >= copyRect.left - 4
-          && overlayRect.top >= copyRect.top - 4
-          && overlayRect.right <= copyRect.right + 4
-          && overlayRect.bottom <= copyRect.bottom + 4
-          && overlayRect.width < copyRect.width * .75
-          && overlayRect.height < copyRect.height * .75;
-      })),
-    ).then((states) => states.every(Boolean))).toBe(true);
-    await expect.poll(async () => Promise.all(
-      [beforeReviewFrame, afterReviewFrame].map((frame) => frame.locator("html").evaluate(() => {
-        const card = document.querySelector("[data-review-logical-card]");
-        if (!card || card.getAttribute("data-pageroot-review-style-scope") !== "box") return false;
-        const owner = card.getAttribute("data-pageroot-review-style-owner");
-        const overlay = [...document.querySelectorAll("[data-pageroot-review-overlay-owner]")]
-          .find((candidate) => candidate.getAttribute("data-pageroot-review-overlay-owner") === owner);
-        if (!owner || !overlay || overlay.getAttribute("data-scope") !== "box") return false;
-        const cardRect = card.getBoundingClientRect();
-        const overlayRect = overlay.getBoundingClientRect();
-        return Math.abs(overlayRect.left - (cardRect.left - 3)) < .75
-          && Math.abs(overlayRect.top - (cardRect.top - 3)) < .75
-          && Math.abs(overlayRect.width - (cardRect.width + 6)) < .75
-          && Math.abs(overlayRect.height - (cardRect.height + 6)) < .75;
-      })),
-    ).then((states) => states.every(Boolean))).toBe(true);
-    await expect.poll(async () => Promise.all(
-      [beforeReviewFrame, afterReviewFrame].map((frame) => frame.locator("html").evaluate(() => {
-        const cards = [...document.querySelectorAll("[data-review-metric]")];
-        if (cards.length !== 3) return false;
-        const owners = cards.map((card) => (
-          card.getAttribute("data-pageroot-review-style-owner") || ""
-        ));
-        if (owners.some((owner) => !owner) || new Set(owners).size !== cards.length) return false;
-        return cards.every((card, index) => {
-          const owner = owners[index];
-          const overlays = [...document.querySelectorAll(
-            '[data-pageroot-review-overlay-owner]',
-          )].filter((candidate) => (
-            candidate.getAttribute("data-pageroot-review-overlay-owner") === owner
-          ));
-          const holes = [...document.querySelectorAll(
-            '[data-pageroot-review-mask-owner]',
-          )].filter((candidate) => (
-            candidate.getAttribute("data-pageroot-review-mask-owner") === owner
-          ));
-          if (overlays.length !== 1 || holes.length !== 1) return false;
-          const overlay = overlays[0];
-          const hole = holes[0];
-          const cardRect = card.getBoundingClientRect();
-          const overlayRect = overlay.getBoundingClientRect();
-          const expectedDocumentLeft = cardRect.left + scrollX - 3;
-          const expectedDocumentTop = cardRect.top + scrollY - 3;
-          const expectedWidth = cardRect.width + 6;
-          const expectedHeight = cardRect.height + 6;
-          return card.getAttribute("data-pageroot-review-style-scope") === "box"
-            && overlay.getAttribute("data-scope") === "box"
-            && overlay.getAttribute("data-shaped") !== "true"
-            && overlay.getAttribute("data-pageroot-review-fragment-count") === "1"
-            && Math.abs(overlayRect.left - (cardRect.left - 3)) < .75
-            && Math.abs(overlayRect.top - (cardRect.top - 3)) < .75
-            && Math.abs(overlayRect.width - expectedWidth) < .75
-            && Math.abs(overlayRect.height - expectedHeight) < .75
-            && Math.abs(Number(hole.getAttribute("data-left")) - expectedDocumentLeft) < .75
-            && Math.abs(Number(hole.getAttribute("data-top")) - expectedDocumentTop) < .75
-            && Math.abs(Number(hole.getAttribute("data-width")) - expectedWidth) < .75
-            && Math.abs(Number(hole.getAttribute("data-height")) - expectedHeight) < .75
-            && Boolean(hole.getAttribute("d"));
-        });
-      })),
-    ).then((states) => states.every(Boolean))).toBe(true);
     await launched.page.getByRole("button", {
       name: "只看修改前",
     }).click();
@@ -2284,7 +1684,7 @@ ${REVIEW_MASK_UNION_BEFORE}
     await expect(launched.page.locator('section[data-side="after"]')).toHaveAttribute("hidden", "");
     await expect.poll(async () => beforeReviewFrame.locator("html").getAttribute(
       "data-pageroot-review-filter",
-    )).toBe("style");
+    )).toBe("structure");
     // Switching to a single page must widen it to the space available, never leave it at
     // the split width. Alignment of the right edges was the old way to say that, but it
     // silently assumed the scroll area is wider than the page: at 100% zoom a page wider
@@ -2302,7 +1702,7 @@ ${REVIEW_MASK_UNION_BEFORE}
     await expect(launched.page.locator('[data-view="split"]')).toBeVisible();
     await expect.poll(async () => beforeReviewFrame.locator("html").getAttribute(
       "data-pageroot-review-filter",
-    )).toBe("style");
+    )).toBe("structure");
     const wholePageButton = launched.page.getByRole("button", {
       name: "双页对比",
     });

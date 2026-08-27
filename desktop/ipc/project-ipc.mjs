@@ -3,7 +3,6 @@ export function registerProjectIpc({
   trustedProject,
   PROJECT_CHANNELS,
   PREVIEW_CHANNELS,
-  REVIEW_RUNTIME_SNAPSHOT_CHANNELS,
   EDIT_RUNTIME_CHANNELS,
   handlers,
 }) {
@@ -84,13 +83,6 @@ export function registerProjectIpc({
     ),
   );
   ipcMain.handle(
-    REVIEW_RUNTIME_SNAPSHOT_CHANNELS.capture,
-    trustedProject(
-      handlers.captureReviewRuntimeSnapshot,
-      "review_runtime_snapshot_capture",
-    ),
-  );
-  ipcMain.handle(
     EDIT_RUNTIME_CHANNELS.prepare,
     trustedProject(handlers.prepareEditAuthorRuntime, "edit_runtime_prepare"),
   );
@@ -103,12 +95,10 @@ export function registerProjectIpc({
 export function unregisterProjectIpc({
   ipcMain,
   PROJECT_CHANNELS,
-  REVIEW_RUNTIME_SNAPSHOT_CHANNELS,
   EDIT_RUNTIME_CHANNELS,
 }) {
   for (const channel of [
     ...Object.values(PROJECT_CHANNELS),
-    ...Object.values(REVIEW_RUNTIME_SNAPSHOT_CHANNELS),
     ...Object.values(EDIT_RUNTIME_CHANNELS),
   ]) {
     ipcMain.removeHandler(channel);

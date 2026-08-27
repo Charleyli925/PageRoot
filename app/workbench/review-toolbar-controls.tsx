@@ -11,7 +11,6 @@ import {
   GitDiffIcon,
   LinkBreakIcon,
   LinkIcon,
-  PaletteIcon,
   TextTIcon,
   TreeStructureIcon,
 } from "@phosphor-icons/react";
@@ -25,9 +24,8 @@ import type {
 
 const FILTER_LABELS: Record<ReviewChangeFilter, string> = {
   all: "全部",
-  text: "文案",
-  structure: "结构",
-  style: "视觉",
+  text: "文字",
+  structure: "元素",
 };
 
 function handleSegmentedKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
@@ -123,7 +121,7 @@ export function ReviewToolbarControls({
       </label>
 
       <div className="toolbar-control-group toolbar-filter-group" role="group" aria-label="变化审阅">
-        {(["all", "text", "structure", "style"] as ReviewChangeFilter[]).map((mode) => (
+        {(["all", "text", "structure"] as ReviewChangeFilter[]).map((mode) => (
           <button
             key={mode}
             type="button"
@@ -137,7 +135,6 @@ export function ReviewToolbarControls({
             {mode === "all" ? <GitDiffIcon aria-hidden="true" size={14} weight="duotone" /> : null}
             {mode === "text" ? <TextTIcon aria-hidden="true" size={14} weight="bold" /> : null}
             {mode === "structure" ? <TreeStructureIcon aria-hidden="true" size={14} weight="duotone" /> : null}
-            {mode === "style" ? <PaletteIcon aria-hidden="true" size={14} weight="duotone" /> : null}
           </button>
         ))}
       </div>

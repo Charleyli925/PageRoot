@@ -313,12 +313,9 @@ services.
 | Canvas selection chrome, comment markers, hover hints and edit toolbar presentation | `app/components/html-canvas-selection-chrome.tsx`; snapshots and callbacks only, no source or editing authority |
 | Volatile desktop preview sessions and contained local-asset serving | `desktop/preview-protocol.mjs` |
 | Imported project's original sibling-asset directory | `desktop/imported-asset-root.mjs` plus Main `html-projects.json` |
-| Edit one-shot candidate limits, source-host contract and direct-frame grant | `app/domain/edit-runtime-contract.js`, `app/application/edit-author-runtime-session.js` |
+| Edit one-shot candidate limits, source-host discovery and direct-frame grant | `app/domain/edit-runtime-contract.js`, `app/domain/runtime-snapshot-hosts.js`, `app/application/edit-author-runtime-session.js` |
 | Isolated Edit author-resource closure, contained static-asset/script serving and one-use bootstrap | `desktop/edit-runtime-protocol.mjs`, `desktop/edit-runtime-bootstrap.mjs` |
 | Source-backed preview/edit display-state filtering, rebinding and safe action resolution | `app/lib/page-view-context.js` |
-| Review source-host discovery and Review-only capture request shape | `app/domain/runtime-snapshot-hosts.js`, `app/components/desktop-runtime-snapshot-api.ts` |
-| Review runtime-snapshot limits, source/session envelope, PNG and visible-text-hash validation | `app/domain/runtime-visual-contract.js`, `app/lib/runtime-visual-snapshots.js` |
-| Sandboxed offscreen page execution and bounded bitmap capture for Review | `desktop/runtime-visual-capture-owner.mjs` |
 | Run lifecycle decoding and transition policy | `app/domain/run-lifecycle.js` |
 | Request freeze/persisted-boundary validation, authority reconciliation, run polling, cancellation, conflict commands and confirmed handoff | `app/application/run-workflow.js` |
 | Workbench pure record/comment/project/version/browser helpers | `app/workbench/*-model.ts`, `app/workbench/browser-io.ts` |
@@ -331,10 +328,8 @@ services.
 | Formal AI review state transitions | `app/workbench/review-state.ts` |
 | Bounded pure sibling alignment for semantic review units | `app/lib/review-semantic-alignment.js` |
 | Typed, per-element review projection fact normalization and filtering | `app/lib/review-projection-facts.js` |
-| Review-specific strict text/raster-tolerant snapshot comparison and marker merge | `app/lib/review-runtime-visual.js` |
-| Review runtime-capture migration interface and capture identity | `app/workbench/review-runtime-capture-adapter.ts` |
-| Formal AI review analysis, first-bootstrap exact-element binding, additive static/runtime fact union, global mask and overlay projection | `app/workbench/review-document.ts` orchestrates `app/workbench/review/` pipeline modules (parse, semantic pairing, structure/style/text diffs, comment binding, runtime projection, serialize) |
-| Formal AI review composition, private runtime-projection port lifecycle and isolated-frame coordination | `app/workbench/AiReviewWorkspace.tsx` |
+| Formal AI review text and element-presence analysis, first-bootstrap exact comment binding, global mask and overlay projection | `app/workbench/review-document.ts` orchestrates `app/workbench/review/` pipeline modules (parse, semantic pairing, element-presence diff, text diff, comment binding, projection and serialize) |
+| Formal AI review composition, private comment/projection port lifecycle and isolated-frame coordination | `app/workbench/AiReviewWorkspace.tsx` |
 
 The V2 source-fidelity path remains a protected core: `SourceIndex`,
 `TargetResolver`, `editable-island`, direct-text-node normalization, `IslandEditingController`,

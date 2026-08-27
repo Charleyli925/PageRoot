@@ -1,33 +1,10 @@
-import { RUNTIME_VISUAL_CONTRACT } from "./runtime-visual-contract.js";
 import { EDIT_AUTHOR_RUNTIME_BUDGET } from "./edit-runtime-contract.js";
 import { buildSourceIndex } from "../lib/source-index.js";
 import {
   createTargetRef,
-  resolveTargetRef,
 } from "../lib/target-resolver.js";
 
-export const RUNTIME_SNAPSHOT_HOST_LIMIT =
-  RUNTIME_VISUAL_CONTRACT.pageBudget.visualLimit;
-// Enumeration may look further than the per-page capture budget so a caller
-// can prioritize comment-anchored hosts before truncating to the budget.
-export const RUNTIME_SNAPSHOT_HOST_ENUMERATION_LIMIT =
-  RUNTIME_VISUAL_CONTRACT.candidateLimit;
 export const EDIT_RUNTIME_HOST_LIMIT = EDIT_AUTHOR_RUNTIME_BUDGET.hostCount;
-
-const DIRECT_HOST_KINDS = new Map([
-  ["canvas", "canvas"],
-  ["svg", "svg"],
-]);
-const STABLE_HOST_TAGS = new Set([
-  "article",
-  "aside",
-  "div",
-  "figure",
-  "li",
-  "main",
-  "section",
-  "span",
-]);
 const EDIT_RUNTIME_DANGEROUS_HOST_TAGS = new Set([
   "audio",
   "base",
@@ -98,31 +75,6 @@ function elementPath(index, element) {
   return current?.tagName === "html" ? Object.freeze(path) : null;
 }
 
-function elementAtPath(index, path) {
-  const root = index.elements.find((element) => (
-    element.tagName === "html" && !element.parentId
-  ));
-  if (!root) return null;
-  let current = root;
-  for (const position of path) {
-    let sourcePosition = position;
-    if (
-      current.tagName === "html"
-      && !current.childElementIds.some((nodeId) => (
-        index.byNodeId.get(nodeId)?.tagName === "head"
-      ))
-    ) {
-      if (position === 0) return null;
-      sourcePosition = position - 1;
-    }
-    const childId = current.childElementIds[sourcePosition];
-    const child = childId ? index.byNodeId.get(childId) : null;
-    if (!child || child.type !== "element") return null;
-    current = child;
-  }
-  return current;
-}
-
 function sourceContentIsEmpty(index, element) {
   if (!element?.contentRange) return false;
   const content = index.source.slice(
@@ -175,45 +127,6 @@ function stableBinding(index, element) {
   return uniqueClassBinding(index, element) || Object.freeze([]);
 }
 
-function hostDescriptor(index, element) {
-  if (!element || element.type !== "element") return null;
-  const directKind = DIRECT_HOST_KINDS.get(element.tagName);
-  const binding = stableBinding(index, element);
-  const kind = directKind || (
-    STABLE_HOST_TAGS.has(element.tagName)
-    && sourceContentIsEmpty(index, element)
-    && binding.length > 0
-      ? "host"
-      : null
-  );
-  if (!kind) return null;
-  const path = elementPath(index, element);
-  if (!path) return null;
-  let hostTargetRef;
-  try {
-    hostTargetRef = createTargetRef(index, element, { level: "subregion" });
-  } catch {
-    return null;
-  }
-  return Object.freeze({
-    sourceNodeId: element.nodeId,
-    kind,
-    hostTargetRef: Object.freeze({ ...hostTargetRef }),
-    binding: Object.freeze({
-      path,
-      tagName: element.tagName,
-      kind,
-      identityAttributes: binding,
-    }),
-  });
-}
-
-/**
- * Edit uses a separate source-empty-host rule. Review stays on its strict
- * historical allowlist; this path rejects global/executable host surfaces
- * while still requiring one unique source binding before runtime descendants
- * may be created inside the host.
- */
 function editRuntimeHostDescriptor(index, element) {
   const directKind = DIRECT_HOST_KINDS.get(element?.tagName);
   const directHostIsEligible = (
@@ -249,36 +162,6 @@ function editRuntimeHostDescriptor(index, element) {
   });
 }
 
-function compatibleHost(beforeHost, afterHost) {
-  return Boolean(afterHost)
-    && beforeHost.kind === afterHost.kind
-    && beforeHost.binding.tagName === afterHost.binding.tagName;
-}
-
-function pairedAfterHost(beforeHost, afterIndex) {
-  try {
-    const resolution = resolveTargetRef(afterIndex, beforeHost.hostTargetRef);
-    if (
-      resolution.resolution !== "ambiguous"
-      && resolution.resolution !== "orphaned"
-      && resolution.target?.type === "element"
-    ) {
-      const afterHost = hostDescriptor(afterIndex, resolution.target);
-      if (compatibleHost(beforeHost, afterHost)) return afterHost;
-    }
-  } catch {
-    // A source host that cannot be rebound is intentionally omitted.
-  }
-
-  // Direct authored Canvas/SVG roots remain useful even without a stable
-  // attribute. Their exact source-element path is a conservative fallback;
-  // ordinary source-empty containers never use this positional route.
-  if (beforeHost.kind === "host") return null;
-  const atSamePath = elementAtPath(afterIndex, beforeHost.binding.path);
-  const afterHost = hostDescriptor(afterIndex, atSamePath);
-  return compatibleHost(beforeHost, afterHost) ? afterHost : null;
-}
-
 function normalizedHostBinding(host) {
   const binding = host?.binding;
   if (!binding) return null;
@@ -295,7 +178,7 @@ function normalizedHostBinding(host) {
  * request carries source-backed binding data only; target references remain in
  * trusted renderer memory.
  */
-export function runtimeSnapshotCaptureCandidate(key, host) {
+export function editRuntimeCaptureCandidate(key, host) {
   const binding = normalizedHostBinding(host);
   if (
     typeof key !== "string"
@@ -310,47 +193,6 @@ export function runtimeSnapshotCaptureCandidate(key, host) {
     identityAttributes: Object.freeze(
       binding.identityAttributes.map(([name, value]) => Object.freeze([name, value])),
     ),
-  });
-}
-
-/**
- * Enumerates only source-backed Canvas/SVG roots and source-empty hosts with a
- * unique stable attribute. Pairing starts from a before-side TargetRef; no
- * runtime DOM selector, script parser, comment scope or computed selector is
- * involved in candidate discovery.
- */
-export function resolveRuntimeSnapshotHosts({
-  beforeHtml,
-  afterHtml,
-  beforeIndex: suppliedBeforeIndex = null,
-  afterIndex: suppliedAfterIndex = null,
-  maximum = RUNTIME_SNAPSHOT_HOST_LIMIT,
-} = {}) {
-  if (typeof beforeHtml !== "string" || typeof afterHtml !== "string") return null;
-  let beforeIndex;
-  let afterIndex;
-  try {
-    beforeIndex = sourceIndexFor(beforeHtml, suppliedBeforeIndex);
-    afterIndex = sourceIndexFor(afterHtml, suppliedAfterIndex);
-  } catch {
-    return null;
-  }
-  const limit = Number.isSafeInteger(maximum)
-    ? Math.max(0, Math.min(RUNTIME_SNAPSHOT_HOST_ENUMERATION_LIMIT, maximum))
-    : RUNTIME_SNAPSHOT_HOST_LIMIT;
-  const hosts = [];
-  for (const element of beforeIndex.elements) {
-    if (hosts.length >= limit) break;
-    const before = hostDescriptor(beforeIndex, element);
-    if (!before) continue;
-    const after = pairedAfterHost(before, afterIndex);
-    if (!after) continue;
-    hosts.push(Object.freeze({ before, after }));
-  }
-  return Object.freeze({
-    beforeIndex,
-    afterIndex,
-    hosts: Object.freeze(hosts),
   });
 }
 

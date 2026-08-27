@@ -1,15 +1,14 @@
-const FACT_TYPES = new Set(["text", "structure", "style"]);
+const FACT_TYPES = new Set(["text", "structure"]);
 const FACT_SCOPES = new Set([
   "text",
   "text-phrase",
   "text-line",
   "text-block",
   "element",
-  "box",
-  "content",
 ]);
-const FACT_OPERATIONS = new Set(["none", "insert", "delete", "replace", "layout"]);
+const FACT_OPERATIONS = new Set(["none", "insert", "delete", "replace"]);
 const FACT_TONES = new Set(["added", "removed"]);
+const FACT_STRUCTURE_CHANGES = new Set(["added", "removed"]);
 const FACT_KEY_PATTERN = /^[a-z0-9:_-]{1,160}$/iu;
 export const REVIEW_PROJECTION_FACTS_PER_ELEMENT_LIMIT = 24;
 const MAX_SUMMARY_LENGTH = 80;
@@ -49,7 +48,6 @@ export function normalizeReviewProjectionFact(value) {
   const scope = typeof value.scope === "string" && FACT_SCOPES.has(value.scope)
     ? value.scope
     : undefined;
-  const ownerKey = optionalKey(value.ownerKey);
   const operation = typeof value.operation === "string" && FACT_OPERATIONS.has(value.operation)
     ? value.operation
     : undefined;
@@ -57,12 +55,14 @@ export function normalizeReviewProjectionFact(value) {
     ? value.tone
     : undefined;
   const textGroup = optionalKey(value.textGroup);
-  const structureChange = optionalKey(value.structureChange);
+  const structureChange = typeof value.structureChange === "string"
+    && FACT_STRUCTURE_CHANGES.has(value.structureChange)
+    ? value.structureChange
+    : undefined;
   const summary = optionalSummary(value.summary);
 
   if (geometryOwnerId) fact.geometryOwnerId = geometryOwnerId;
   if (scope) fact.scope = scope;
-  if (ownerKey) fact.ownerKey = ownerKey;
   if (operation) fact.operation = operation;
   if (tone) fact.tone = tone;
   if (textGroup) fact.textGroup = textGroup;

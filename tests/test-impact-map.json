@@ -911,8 +911,8 @@
         "^scripts/architecture-budget\\.json$",
         "^tests/architecture-boundaries\\.test\\.mjs$",
         "^tests/fixtures/architecture-boundaries/",
-        "^(?:CONTRIBUTING|docs/(?:ARCHITECTURE|ARCHITECTURE_CONTRACT|COMPATIBILITY|INTERACTION_FLOW|STATE_OWNERSHIP|ARCHITECTURE_MAP|GUARD_LEDGER|ENGINEERING_STANDARDS|SECURITY_MODEL|RUNTIME_VISUAL_CONTRACT|WORKBENCH_ORCHESTRATION_REFACTOR_PLAN))\\.md$",
-        "^docs/decisions/(?:0003-session-ownership-and-mutation-outcomes|0004-v2-editable-islands|0007-independent-interactive-preview|0008-safe-presentation-actions-in-edit-mode|0009-persistent-source-patch-history|0011-workbench-session-decomposition|0012-id-first-project-context|0013-edit-runtime-visual-projection|0015-safe-host-fallback-and-direct-text-nodes|0016-owner-controlled-review-runtime-capture|0017-shared-runtime-snapshot-owner|0018-source-transaction-kernel|0019-workspace-controller-orchestration|0021-review-runtime-visual-comparison-noise-tolerance|0022-edit-one-shot-author-runtime|0025-edit-direct-one-shot-runtime|0031-qoder-acp-v1-spike|0032-qoder-acp-agent-bridge|0039-provider-neutral-agent-runtime|0040-provider-neutral-persistence-and-conversation-v2|0041-codex-app-server-execution-staging|0042-codex-app-server-candidate-execution|0043-enable-packaged-codex-candidate-execution|0044-visible-first-html-open|0045-byte-bounded-tab-and-review-display-caches|0050-review-first-paint-before-runtime-evidence)\\.md$"
+        "^(?:CONTRIBUTING|docs/(?:ARCHITECTURE|ARCHITECTURE_CONTRACT|COMPATIBILITY|INTERACTION_FLOW|STATE_OWNERSHIP|ARCHITECTURE_MAP|GUARD_LEDGER|ENGINEERING_STANDARDS|SECURITY_MODEL|WORKBENCH_ORCHESTRATION_REFACTOR_PLAN))\\.md$",
+        "^docs/decisions/(?:0003-session-ownership-and-mutation-outcomes|0004-v2-editable-islands|0007-independent-interactive-preview|0008-safe-presentation-actions-in-edit-mode|0009-persistent-source-patch-history|0011-workbench-session-decomposition|0012-id-first-project-context|0013-edit-runtime-visual-projection|0015-safe-host-fallback-and-direct-text-nodes|0016-owner-controlled-review-runtime-capture|0017-shared-runtime-snapshot-owner|0018-source-transaction-kernel|0019-workspace-controller-orchestration|0021-review-runtime-visual-comparison-noise-tolerance|0022-edit-one-shot-author-runtime|0025-edit-direct-one-shot-runtime|0029-review-runtime-visual-tri-state-verdict|0030-review-runtime-projection-tolerates-host-mutation|0031-(?:qoder-acp-v1-spike|review-capture-frozen-chart-scripts)|0032-qoder-acp-agent-bridge|0039-provider-neutral-agent-runtime|0040-provider-neutral-persistence-and-conversation-v2|0041-codex-app-server-execution-staging|0042-codex-app-server-candidate-execution|0043-enable-packaged-codex-candidate-execution|0044-visible-first-html-open|0045-byte-bounded-tab-and-review-display-caches|0046-review-core-text-and-element-diff)\\.md$"
       ],
       "suites": [
         "typecheck"
@@ -1123,18 +1123,6 @@
       ]
     },
     {
-      "id": "review-style-owner",
-      "patterns": [
-        "^app/workbench/review/style-diff\\.ts$"
-      ],
-      "suites": [
-        "typecheck"
-      ],
-      "nodeTests": [
-        "tests/review-badge-aggregation.test.mjs"
-      ]
-    },
-    {
       "id": "review-comment-binding-owner",
       "patterns": [
         "^app/lib/(?:review-comment-source-map|review-region-annotation)\\.(?:d\\.ts|js)$",
@@ -1161,7 +1149,7 @@
       "nodeTests": []
     },
     {
-      "id": "review-runtime-visual-owner",
+      "id": "review-projection-owner",
       "patterns": [
         "^app/workbench/review/runtime-projection\\.ts$"
       ],
@@ -1169,7 +1157,7 @@
         "typecheck"
       ],
       "nodeTests": [
-        "tests/review-runtime-visual.test.mjs"
+        "tests/review-projection-facts.test.mjs"
       ]
     },
     {
@@ -1187,29 +1175,7 @@
       ],
       "nodeTests": [
         "tests/review-badge-aggregation.test.mjs",
-        "tests/review-projection-facts.test.mjs",
-        "tests/runtime-snapshot-hosts.test.mjs",
-        "tests/runtime-visual-contract.test.mjs"
-      ]
-    },
-    {
-      "id": "review-runtime-capture",
-      "patterns": [
-        "^app/domain/(?:runtime-snapshot-hosts|runtime-visual-contract)\\.(?:d\\.ts|js)$",
-        "^app/lib/(?:review-runtime-visual|runtime-visual-snapshots)\\.(?:d\\.ts|js)$",
-        "^app/workbench/review-runtime-capture-adapter\\.ts$",
-        "^app/components/desktop-runtime-snapshot-api\\.ts$"
-      ],
-      "suites": [
-        "typecheck",
-        "browser-review-smoke",
-        "ai-review-smoke"
-      ],
-      "nodeTests": [
-        "tests/review-runtime-capture-owner.test.mjs",
-        "tests/review-runtime-visual.test.mjs",
-        "tests/runtime-snapshot-hosts.test.mjs",
-        "tests/runtime-visual-contract.test.mjs"
+        "tests/review-projection-facts.test.mjs"
       ]
     },
     {
@@ -1557,22 +1523,6 @@
         "tests/active-managed-locator.test.mjs",
         "tests/source-rename.test.mjs",
         "tests/startup-performance-timeline.test.mjs"
-      ]
-    },
-    {
-      "id": "desktop-runtime-capture",
-      "patterns": [
-        "^desktop/runtime-visual-capture-owner\\.mjs$"
-      ],
-      "suites": [
-        "electron-editing-smoke",
-        "ai-review-smoke"
-      ],
-      "nodeTests": [
-        "tests/review-runtime-capture-owner.test.mjs",
-        "tests/review-runtime-visual.test.mjs",
-        "tests/runtime-snapshot-hosts.test.mjs",
-        "tests/runtime-visual-contract.test.mjs"
       ]
     },
     {

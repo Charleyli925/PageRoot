@@ -1,21 +1,11 @@
 import type {
-  RuntimeSnapshotCaptureCandidate,
-} from "../../domain/runtime-snapshot-hosts.js";
-import type {
-  ReviewRuntimeVisualCandidate,
-} from "../../lib/review-runtime-visual.js";
-import type {
   ReviewSemanticAlignmentMatch,
 } from "../../lib/review-semantic-alignment.js";
 import type {
   ReviewTextChangeOperation,
 } from "../../lib/review-text-diff.js";
 import type { CommentItem } from "../types";
-import type {
-  ReviewRuntimeVisualCaptureIdentity,
-} from "../review-runtime-capture-adapter";
-
-export type ReviewFilter = "all" | "text" | "structure" | "style";
+export type ReviewFilter = "all" | "text" | "structure";
 export type ReviewChangeType = Exclude<ReviewFilter, "all">;
 export type ReviewSide = "before" | "after";
 
@@ -24,12 +14,10 @@ export type ReviewChange = {
   label: string;
   helper: string;
   types: ReviewChangeType[];
-  suspected?: boolean;
   beforePresent: boolean;
   afterPresent: boolean;
   panelKey?: string;
   panelPath?: string[];
-  movement?: { from: number; to: number };
 };
 
 export type ReviewOutlineItem = {
@@ -41,7 +29,6 @@ export type ReviewOutlineItem = {
   panelKey?: string;
   panelPath?: string[];
   types: ReviewChangeType[];
-  movement?: { from: number; to: number };
 };
 
 export type ReviewDocuments = {
@@ -51,10 +38,6 @@ export type ReviewDocuments = {
   bootstrapFallbackJavaScript: Record<ReviewSide, string>;
   changes: ReviewChange[];
   outline: ReviewOutlineItem[];
-  runtimeVisualCandidates: ReviewRuntimeVisualCandidate[];
-  runtimeVisualCaptureCandidates: Record<ReviewSide, RuntimeSnapshotCaptureCandidate[]>;
-  runtimeVisualSourceHtml: Record<ReviewSide, string>;
-  runtimeVisualCaptureIdentity: ReviewRuntimeVisualCaptureIdentity;
   commentGroups: ReviewCommentGroup[];
   commentTargets: ReviewCommentTarget[];
 };
@@ -76,7 +59,6 @@ export type ReviewCommentTarget = {
 
 export type ReviewDocumentBuildOptions = {
   sessionId: string;
-  sourceSha256BySide: Record<ReviewSide, string>;
   sourcePath?: string;
   externalBootstrap?: boolean;
   comments?: readonly CommentItem[];
@@ -106,7 +88,6 @@ export type SectionPair = {
   after: Element | null;
   beforeIndex: number;
   afterIndex: number;
-  moved?: boolean;
 };
 
 export type ReviewBootstrapElementBinding = {
@@ -119,16 +100,6 @@ export type ReviewBootstrapElementBinding = {
 
 export type ReviewCommentBootstrapBinding = ReviewBootstrapElementBinding & {
   sourceNodeId: string;
-};
-
-export type ReviewRuntimeBootstrapBinding = ReviewBootstrapElementBinding & {
-  candidateKey: string;
-};
-
-export type ReviewRuntimeVisualAnnotations = {
-  candidates: ReviewRuntimeVisualCandidate[];
-  captureCandidates: Record<ReviewSide, RuntimeSnapshotCaptureCandidate[]>;
-  bindings: Record<ReviewSide, ReviewRuntimeBootstrapBinding[]>;
 };
 
 export type ReviewSemanticUnitKind =
@@ -158,7 +129,6 @@ export type ReviewSemanticPairNode = {
   before: ReviewSemanticUnit | null;
   after: ReviewSemanticUnit | null;
   match: ReviewSemanticAlignmentMatch;
-  moved: boolean;
   semanticOwnerId: string;
   geometryOwnerId: string;
   structureFallback: boolean;

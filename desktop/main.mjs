@@ -1,13 +1,11 @@
 import {
   app,
-  BrowserWindow,
   clipboard,
   dialog,
   ipcMain,
   Menu,
   net,
   protocol,
-  session as electronSession,
   shell,
   utilityProcess,
 } from "electron";
@@ -142,12 +140,6 @@ import {
   EDIT_AUTHOR_RUNTIME_CONTRACT_VERSION,
   isEditRuntimeRequestId,
 } from "../app/domain/edit-runtime-contract.js";
-import {
-  createRuntimeSnapshotCaptureController,
-} from "./runtime-visual-capture-owner.mjs";
-import {
-  createReviewRuntimeFrozenScriptStore,
-} from "./review-runtime-frozen-scripts.mjs";
 import {
   createEditRuntimePreparationFence,
 } from "./edit-runtime-preparation-fence.mjs";
@@ -291,9 +283,6 @@ const PREVIEW_CHANNELS = Object.freeze({
   createSession: "html-preview:create-session",
   revokeSession: "html-preview:revoke-session",
 });
-const REVIEW_RUNTIME_SNAPSHOT_CHANNELS = Object.freeze({
-  capture: "html-review-runtime-snapshots:capture",
-});
 const EDIT_RUNTIME_CHANNELS = Object.freeze({
   prepare: "html-edit-runtime:prepare",
   revoke: "html-edit-runtime:revoke",
@@ -325,7 +314,6 @@ let usageTelemetry = null;
 let workspaceFailurePrompt = null;
 let managedWelcomeRegistration = null;
 let previewProtocolController = null;
-let reviewRuntimeSnapshotCaptureController = null;
 let editRuntimeProtocolController = null;
 const editRuntimePreparationFence = createEditRuntimePreparationFence();
 const sourceFileWatcher = createSourceFileWatcher({
@@ -344,12 +332,6 @@ const desktopRuntime = {
   get isQuitting() { return isQuitting; },
   get finalExitStarted() { return finalExitStarted; },
   get applicationUpdate() { return applicationUpdate; },
-  get reviewRuntimeSnapshotCaptureController() {
-    return reviewRuntimeSnapshotCaptureController;
-  },
-  set reviewRuntimeSnapshotCaptureController(value) {
-    reviewRuntimeSnapshotCaptureController = value;
-  },
   get editRuntimeProtocolController() { return editRuntimeProtocolController; },
   set editRuntimeProtocolController(value) { editRuntimeProtocolController = value; },
   get previewProtocolController() { return previewProtocolController; },
@@ -467,46 +449,6 @@ function ensureEditRuntimeProtocolController() {
     editRuntimeProtocolController.install();
   }
   return editRuntimeProtocolController;
-}
-
-function ensureReviewRuntimeSnapshotCaptureController() {
-  if (!reviewRuntimeSnapshotCaptureController) {
-    reviewRuntimeSnapshotCaptureController = createRuntimeSnapshotCaptureController({
-      BrowserWindowClass: BrowserWindow,
-      createSession: async (payload) => {
-        const sourcePath = await currentActivePath();
-        return ensurePreviewProtocolController().createSession({
-          ...payload,
-          ...(sourcePath ? { sourcePath } : {}),
-        });
-      },
-      revokeSession: (sessionId) => (
-        Promise.resolve(
-          ensurePreviewProtocolController().revokeSession(sessionId),
-        )
-      ),
-      createIsolatedSession: (partition) => {
-        const isolatedSession = electronSession.fromPartition(partition);
-        ensurePreviewProtocolController().installFor(isolatedSession.protocol);
-        return isolatedSession;
-      },
-      async releaseIsolatedSession(isolatedSession) {
-        await Promise.all([
-          Promise.resolve(isolatedSession.clearStorageData?.()).catch(() => undefined),
-          Promise.resolve(
-            isolatedSession.protocol?.unhandle?.("pageroot-preview"),
-          ).catch(() => undefined),
-          Promise.resolve(
-            isolatedSession.protocol?.unhandle?.("https"),
-          ).catch(() => undefined),
-        ]);
-      },
-      frozenChartScripts: createReviewRuntimeFrozenScriptStore({
-        netFetch: (url, options) => net.fetch(url, options),
-      }),
-    });
-  }
-  return reviewRuntimeSnapshotCaptureController;
 }
 
 function telemetryFingerprint(value) {
@@ -1971,10 +1913,6 @@ const createPreviewSession = createPreviewSessionOperation({
   },
 });
 
-const captureReviewRuntimeSnapshot = (payload) => (
-  ensureReviewRuntimeSnapshotCaptureController().capture(payload)
-);
-
 async function prepareEditAuthorRuntime(payload) {
   const activeSourcePath = await currentActivePath();
   if (!activeSourcePath) throw new Error("Edit runtime requires an active source path.");
@@ -3400,7 +3338,6 @@ function registerProjectIpc() {
     trustedProject,
     PROJECT_CHANNELS,
     PREVIEW_CHANNELS,
-    REVIEW_RUNTIME_SNAPSHOT_CHANNELS,
     EDIT_RUNTIME_CHANNELS,
     handlers: {
       getActiveProject,
@@ -3431,7 +3368,6 @@ function registerProjectIpc() {
       revokePreviewSession: (sessionId) => (
         ensurePreviewProtocolController().revokeSession(sessionId)
       ),
-      captureReviewRuntimeSnapshot,
       prepareEditAuthorRuntime,
       revokeEditAuthorRuntime,
     },
@@ -3698,7 +3634,6 @@ function unregisterIpc() {
   unregisterProjectIpc({
     ipcMain,
     PROJECT_CHANNELS,
-    REVIEW_RUNTIME_SNAPSHOT_CHANNELS,
     EDIT_RUNTIME_CHANNELS,
   });
   unregisterAgentIpc({ ipcMain, INTEGRATION_CHANNELS });

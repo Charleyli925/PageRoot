@@ -7,7 +7,7 @@ import {
 } from "../domain/edit-runtime-contract.js";
 import {
   resolveEditRuntimeHosts,
-  runtimeSnapshotCaptureCandidate,
+  editRuntimeCaptureCandidate,
 } from "../domain/runtime-snapshot-hosts.js";
 
 function isRecord(value) {
@@ -172,7 +172,7 @@ export class EditAuthorRuntimeSession {
     if (!resolved?.hosts.length) return Object.freeze([]);
     const candidates = [];
     for (const host of resolved.hosts) {
-      const candidate = runtimeSnapshotCaptureCandidate(
+      const candidate = editRuntimeCaptureCandidate(
         "edit-runtime-" + String(candidates.length + 1),
         host,
       );

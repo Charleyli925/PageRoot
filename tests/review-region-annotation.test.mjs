@@ -25,7 +25,6 @@ test("nearby records of one change group into one cluster with union bounds", ()
     [60, 40, 300, 110],
   );
   assert.equal(regions[0].changeId, "c1");
-  assert.equal(regions[0].suspected, false);
 });
 
 test("far-apart parts of one change form their own clusters with own captions", () => {
@@ -126,15 +125,6 @@ test("nearby records merge into one cluster, distant parts keep their own", () =
       { top: 400, bottom: 430 },
     ],
   );
-});
-
-test("a suspected record marks the whole region suspected", () => {
-  const regions = reviewRegionAnnotations([
-    record({ tone: "suspected", summary: "疑似有改动" }),
-  ]);
-  assert.equal(regions[0].suspected, true);
-  assert.equal(regions[0].summary, "疑似有改动");
-  assert.equal(regions[0].detail, "疑似有改动");
 });
 
 test("records without identity or finite geometry are ignored", () => {

@@ -96,16 +96,6 @@ PageRoot edits local files and renders user-controlled HTML, so its default poli
   interaction. Edit must not answer a security concern by converting to PNG.
   Remaining low-cost boundaries: no directory listing or project path on the
   edit-runtime protocol, no popup, no worker, no top-level navigation.
-- Desktop Review runtime snapshot capture is one narrow IPC capability. The
-  main process revalidates exact source HTML/SHA and a bounded
-  source-host binding, owns one hidden sandboxed BrowserWindow with Node
-  disabled, denies navigation, popups and webviews, and destroys the window plus
-  preview session after each capture or superseding request. Every page-realm
-  evaluation and bitmap operation is bounded by the shared owner deadline;
-  authored clocks cannot keep the window alive. It returns only bounded PNG
-  bytes plus validated dimensions/content SHA/byte length and a bounded
-  SHA-256 of normalized visible DOM/SVG text, never raw runtime text, HTML,
-  SVG, script state, TargetRefs or filesystem data.
 - Strict schemas, frozen inputs and identity/Hash/path checks before accepting
   AI output; complete-document and non-empty-body checks remain protocol
   boundaries. Authored scripts, handlers, executable URLs and refresh directives
@@ -361,52 +351,7 @@ popup, download, modal or host IPC capability. Parent-side capture also blocks
 anchor navigation and form submission, nested iframes receive an empty sandbox,
 and refresh/CSP meta directives are removed only from the disposable review copy
 so they cannot navigate the frame or suppress the trusted review bootstrap.
-Runtime-chart evidence is enabled only through the managed desktop owner.
-The authored review iframe remains presentation-only: it has no runtime capture
-request, screenshot result or host capability. A parser-blocking managed
-bootstrap may hold exact-element runtime bindings and one private projection
-`MessagePort` in closure. The port is a separate namespace and lifecycle from
-the before-only comment port, is transferred only after a random challenge is
-consumed by the earliest capture listener, and accepts only the current contract
-version, session, side and full source SHA. It carries `{candidateKey, changeId}`
-facts, never PNGs or TargetRefs. Candidate keys/bindings are absent from authored
-HTML, DOM attributes, ordinary window messages and later bootstrap fetches.
-For every capture, Electron main creates a fresh non-persistent partition and
-hidden sandboxed window that can load only its expected `pageroot-preview:` URL.
-Permissions, navigation, popups, downloads, webviews and all non-preview
-network requests are denied. The authored page receives no source path, Bridge,
-preload, Node or filesystem capability; when an active desktop document needs
-relative assets, main supplies only its declared, contained source-relative
-allowlist to the ephemeral preview. Inline/browser review remains static-only.
-
-Entering review does not change `project.json.sourcePath`, the current Canvas,
-the immutable Version or the activation transaction, and runtime interaction
-state is never serialized. The renderer accepts a snapshot result only when its
-envelope matches contract version, capture session, side and full source SHA.
-Candidates come only from the frozen `SourceHostResolver`: direct Canvas/SVG
-roots or source-empty stable hosts. TargetRefs remain in trusted renderer
-memory. The first private bootstrap response alone contains a path plus complete
-narrow fingerprint for each accepted exact host; the managed preview consumes
-that response once and serves an unbound fallback thereafter. An omitted,
-malformed, late or failed owner result leaves static Review authoritative.
-
-Before scripts run, the owner validates the source path/tag/identity. Its
-isolated-world program then confirms that same runtime host and, for a stable
-container, visible Canvas/SVG paint, and hashes a bounded normalized sequence
-of visible DOM/SVG text without returning the text itself. It performs one rect
-pass and at most one bounded PNG capture per host. Renderer memory revalidates
-PNG bytes, dimensions, hash and aggregate limits. It treats layout and the
-text hash strictly; only an equal-text PNG mismatch reaches the one local mean
-absolute RGB comparison, whose `0.04` budget rejects encoder/tile noise. The
-owner deadline is scheduled in main, so page-controlled promises or timers
-cannot extend it.
-
-Runtime projection never queries an outline for geometry and never writes a
-runtime marker or fact attribute to the source DOM. The bootstrap retains the
-original bound `Element` and a disposable `Map<Element, facts[]>`; a replaced,
-disconnected or fingerprint-drifted target contributes no runtime rectangle.
-Static facts remain independently complete and are not removed by empty,
-invalid or failed runtime delivery.
+Review facts come only from the two frozen HTML documents. The review renderer has no screenshot owner, runtime-capture IPC, PNG envelope, pixel parser or runtime binding. It reports precise text evidence and outermost element presence; movement, attributes, CSS, layout, wrapping and runtime drawing produce no Review fact.
 
 Comment location remains separately private. Each source-resolved local target
 may use an opaque initial-bootstrap binding: an element path plus a narrow
@@ -418,10 +363,7 @@ key-to-target mapping only to the before bootstrap over a challenged private
 from document bytes and later bootstrap reads. A unique source `id`, `data-*`,
 `name`, or `aria-label` is only a safe fallback; missing, ambiguous, replaced or
 disconnected targets omit the comment marker rather than rebinding by guess.
-This capability cannot discover or authorize runtime snapshots. Capture results
-are compared once; no replay/confirmation pair, script analysis or
-comment-group discovery exists. Navigation, cancellation, timeout, invalid PNG or
-cleanup failure destroys the window and revokes the ephemeral session. The user
+This capability cannot discover or authorize additional Review facts. The user
 still invokes the existing fail-closed ready-version activation path through
 “直接打开” or the review confirmation “打开 AI 修改后”.
 

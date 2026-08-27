@@ -1,4 +1,4 @@
-export type RuntimeSnapshotHostKind = "canvas" | "svg" | "host";
+export type RuntimeSnapshotHostKind = "host";
 
 export type RuntimeSnapshotTargetRef = Readonly<{
   targetId: string;
@@ -23,11 +23,6 @@ export type RuntimeSnapshotHost = Readonly<{
   binding: RuntimeSnapshotOwnerBinding;
 }>;
 
-export type RuntimeSnapshotHostPair = Readonly<{
-  before: RuntimeSnapshotHost;
-  after: RuntimeSnapshotHost;
-}>;
-
 export type RuntimeSnapshotCaptureCandidate = Readonly<{
   key: string;
   path: readonly number[];
@@ -36,21 +31,7 @@ export type RuntimeSnapshotCaptureCandidate = Readonly<{
   identityAttributes: readonly (readonly [string, string])[];
 }>;
 
-export const RUNTIME_SNAPSHOT_HOST_LIMIT: 32;
-export const RUNTIME_SNAPSHOT_HOST_ENUMERATION_LIMIT: 128;
 export const EDIT_RUNTIME_HOST_LIMIT: 32;
-
-export function resolveRuntimeSnapshotHosts(options?: {
-  beforeHtml?: string;
-  afterHtml?: string;
-  beforeIndex?: unknown;
-  afterIndex?: unknown;
-  maximum?: number;
-}): Readonly<{
-  beforeIndex: unknown;
-  afterIndex: unknown;
-  hosts: readonly RuntimeSnapshotHostPair[];
-}> | null;
 
 export function resolveEditRuntimeHosts(options?: {
   html?: string;
@@ -61,7 +42,7 @@ export function resolveEditRuntimeHosts(options?: {
   hosts: readonly RuntimeSnapshotHost[];
 }> | null;
 
-export function runtimeSnapshotCaptureCandidate(
+export function editRuntimeCaptureCandidate(
   key: string,
   host: RuntimeSnapshotHost,
 ): RuntimeSnapshotCaptureCandidate | null;

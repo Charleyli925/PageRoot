@@ -11,7 +11,6 @@ export type ReviewRegionRecord = {
 
 export type ReviewRegionAnnotation = {
   changeId: string;
-  suspected: boolean;
   left: number;
   top: number;
   right: number;

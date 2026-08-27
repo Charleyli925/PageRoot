@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -33,10 +32,6 @@ function complexHtml(sectionCount, changed) {
   </style></head><body><main>${sections}</main></body></html>`;
 }
 
-function sourceSha256(value) {
-  return `sha256:${createHash("sha256").update(value).digest("hex")}`;
-}
-
 try {
   await build({
     configFile: false,
@@ -64,15 +59,10 @@ try {
     for (const sectionCount of [120, 300, 600]) {
       const beforeHtml = complexHtml(sectionCount, false);
       const afterHtml = complexHtml(sectionCount, true);
-      const sourceSha256BySide = {
-        before: sourceSha256(beforeHtml),
-        after: sourceSha256(afterHtml),
-      };
       const result = await page.evaluate(async ({
         before,
         after,
         count,
-        sourceSha256BySide,
       }) => {
         performance.clearMeasures();
         const timerGaps = [];
@@ -86,7 +76,6 @@ try {
         const review = await globalThis.PageRootReviewBenchmark
           .buildReviewDocumentsAsync(before, after, {
             sessionId: `review-benchmark-${count}`,
-            sourceSha256BySide,
             sourcePath: "/tmp/pageroot-complex-review.html",
             externalBootstrap: false,
             comments: [],
@@ -113,7 +102,6 @@ try {
         before: beforeHtml,
         after: afterHtml,
         count: sectionCount,
-        sourceSha256BySide,
       });
       const expectedChanges = Math.ceil(sectionCount / 11);
       if (result.changes !== expectedChanges) {

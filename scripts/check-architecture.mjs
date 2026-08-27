@@ -1266,12 +1266,11 @@ export async function architectureViolations() {
       "desktop: Edit runtime capture owner cannot return to production",
     );
   }
-  const reviewCaptureOwner = desktopFiles.find((filePath) => (
-    relative(filePath).includes("runtime-visual-capture-owner")
-  ));
-  if (!reviewCaptureOwner) {
+  if (desktopFiles.some((filePath) => (
+    /(?:review-runtime|runtime-visual-capture-owner)/u.test(relative(filePath))
+  ))) {
     violations.push(
-      "desktop/runtime-visual-capture-owner.mjs must remain the Review-only capture owner",
+      "desktop: retired Review runtime visual capture owners cannot return to production",
     );
   }
 

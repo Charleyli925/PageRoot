@@ -9,38 +9,39 @@ import {
   useRef,
   useState,
   useSyncExternalStore,
+  type CSSProperties,
   type ReactNode,
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 import { createPortal } from "react-dom";
+import { BrowsersIcon } from "@phosphor-icons/react/dist/csr/Browsers";
+import { CaretDownIcon } from "@phosphor-icons/react/dist/csr/CaretDown";
+import { CaretLeftIcon } from "@phosphor-icons/react/dist/csr/CaretLeft";
+import { CaretRightIcon } from "@phosphor-icons/react/dist/csr/CaretRight";
+import { CaretUpIcon } from "@phosphor-icons/react/dist/csr/CaretUp";
 import { CheckCircleIcon } from "@phosphor-icons/react/dist/csr/CheckCircle";
 import { ClockCounterClockwiseIcon } from "@phosphor-icons/react/dist/csr/ClockCounterClockwise";
+import { CornersOutIcon } from "@phosphor-icons/react/dist/csr/CornersOut";
+import { EyeIcon } from "@phosphor-icons/react/dist/csr/Eye";
 import { FileHtmlIcon } from "@phosphor-icons/react/dist/csr/FileHtml";
+import { GitDiffIcon } from "@phosphor-icons/react/dist/csr/GitDiff";
+import { LinkBreakIcon } from "@phosphor-icons/react/dist/csr/LinkBreak";
+import { LinkIcon } from "@phosphor-icons/react/dist/csr/Link";
+import { TextTIcon } from "@phosphor-icons/react/dist/csr/TextT";
+import { TreeStructureIcon } from "@phosphor-icons/react/dist/csr/TreeStructure";
 import { WarningCircleIcon } from "@phosphor-icons/react/dist/csr/WarningCircle";
 
 import {
+  REVIEW_STRUCTURE_TONE_COLOR,
   type ReviewCommentGroup,
   type ReviewDocuments,
   type ReviewSide,
 } from "./review-document";
-import type {
-  ReviewRuntimeSnapshotCaptureResult,
-} from "../components/desktop-runtime-snapshot-api";
 import ReadOnlyCommentMarker from "../components/ReadOnlyCommentMarker";
 import {
-  acceptRuntimeVisualSnapshots,
-  mergeReviewRuntimeVisualChanges,
-} from "../lib/review-runtime-visual.js";
-import type {
-  ReviewRuntimeVisualMarker,
-  ReviewRuntimeVisualVerdicts,
-} from "../lib/review-runtime-visual.js";
-import {
-  classifyReviewRuntimeVisualCandidateKeys,
-} from "./review-runtime-capture-adapter";
-import {
-  acceptedRuntimeVisualEnvelope,
-} from "../domain/runtime-visual-contract.js";
+  REVIEW_TEXT_EVIDENCE_ADDED_COLOR,
+  REVIEW_TEXT_EVIDENCE_REMOVED_COLOR,
+} from "../lib/review-text-evidence-marks.js";
 import {
   ReviewScrollCoordinator,
   followerReviewScrollLeft,
@@ -68,24 +69,6 @@ type ReviewDesktopSessionResult = {
   sessions: ReviewDesktopSessions | null;
   failed: boolean;
 };
-type ReviewRuntimeVisualResult = {
-  documents: ReviewDocuments;
-  changes: ReviewDocuments["changes"];
-  outline: ReviewDocuments["outline"];
-  markers: ReviewRuntimeVisualMarker[];
-};
-type ReviewRuntimeProjectionChannel = {
-  documents: ReviewDocuments;
-  frame: HTMLIFrameElement;
-  port: MessagePort;
-  delivered: boolean;
-};
-type ReviewRuntimeProjectionChannelRequest = {
-  documents: ReviewDocuments;
-  frame: HTMLIFrameElement;
-  challenge: string;
-};
-type ReviewRuntimeVisualViewport = Readonly<{ width: number; height: number }>;
 type ReviewCommentLayout = {
   key: string;
   left: number;
@@ -96,10 +79,17 @@ type ReviewCommentLayout = {
 };
 
 const FILTER_LABELS: Record<ReviewChangeFilter, string> = {
-  all: "全部变化",
-  text: "文案",
-  structure: "结构",
-  style: "视觉",
+  all: "全部",
+  text: "文字",
+  structure: "元素",
+};
+
+// Legend dots reuse the canvas diff tones so the toolbar explains the marks
+// users already see on the pages: removed/added text and element changes.
+const FILTER_TONE_COLORS: Record<ReviewChangeFilter, string[]> = {
+  all: [],
+  text: [REVIEW_TEXT_EVIDENCE_REMOVED_COLOR, REVIEW_TEXT_EVIDENCE_ADDED_COLOR],
+  structure: [REVIEW_STRUCTURE_TONE_COLOR],
 };
 
 const PAGE_VIEW_LABELS: Record<ReviewPageView, string> = {
@@ -112,10 +102,8 @@ const subscribeHydration = () => () => {};
 
 type ReviewMessage = {
   source?: string;
-  contractVersion?: number;
   sessionId?: string;
   side?: ReviewSide;
-  sourceSha256?: string;
   type?: string;
   top?: number;
   left?: number;
@@ -210,7 +198,6 @@ function ReviewDocumentPane({
   label,
   zoom,
   onFrame,
-  onFrameLoad,
   onScale,
   onViewport,
   onHorizontalScroll,
@@ -226,7 +213,6 @@ function ReviewDocumentPane({
   label: string;
   zoom: ReviewZoomMode;
   onFrame: (side: ReviewSide, frame: HTMLIFrameElement | null) => void;
-  onFrameLoad: (side: ReviewSide, frame: HTMLIFrameElement) => void;
   onScale: (side: ReviewSide, scale: number) => void;
   onViewport: (side: ReviewSide, viewport: HTMLDivElement | null) => void;
   onHorizontalScroll: (side: ReviewSide) => void;
@@ -370,7 +356,6 @@ function ReviewDocumentPane({
               const frame = event.currentTarget;
               if (iframeRef.current !== frame) return;
               if (viewportRef.current) viewportRef.current.scrollLeft = 0;
-              onFrameLoad(side, frame);
             }}
           />
           {commentGroups.length ? (
@@ -452,15 +437,10 @@ export default function AiReviewWorkspace({
   const toolbarHost = embedded && hydrated
     ? document.getElementById("workbench-review-tools-slot")
     : null;
+  const [toolbarPinned, setToolbarPinned] = useState(true);
   const [confirmationAction, setConfirmationAction] = useState<ConfirmationAction | null>(null);
   const [desktopSessionResult, setDesktopSessionResult] =
     useState<ReviewDesktopSessionResult | null>(null);
-  const [runtimeVisualResult, setRuntimeVisualResult] =
-    useState<ReviewRuntimeVisualResult | null>(null);
-  const [runtimeProjectionDelivery, setRuntimeProjectionDelivery] = useState<{
-    documents: ReviewDocuments | null;
-    sides: ReadonlySet<ReviewSide>;
-  }>({ documents: null, sides: new Set<ReviewSide>() });
   const [commentLayoutState, setCommentLayoutState] = useState<{
     documents: ReviewDocuments;
     layouts: ReviewCommentLayout[];
@@ -498,16 +478,6 @@ export default function AiReviewWorkspace({
     afterCommit: Array<() => void>;
     timer: number | null;
   } | null>(null);
-  const runtimeVisualOwnerDocumentsRef = useRef<ReviewDocuments | null>(null);
-  const runtimeVisualResolutionRef = useRef<ReviewRuntimeVisualResult | null>(null);
-  const runtimeVisualViewportRef = useRef<ReviewRuntimeVisualViewport | null>(null);
-  const runtimeVisualReadinessRef = useRef<{
-    documents: ReviewDocuments;
-    sides: Set<ReviewSide>;
-    paintedSides: Set<ReviewSide>;
-    started: boolean;
-    captureTimer: number | null;
-  } | null>(null);
   const reviewFrameReadyRef = useRef<Record<ReviewSide, {
     documents: ReviewDocuments;
     frame: HTMLIFrameElement;
@@ -517,18 +487,6 @@ export default function AiReviewWorkspace({
   });
   const reviewCommentPortRef = useRef<MessagePort | null>(null);
   const reviewCommentChannelChallengeRef = useRef<string | null>(null);
-  const runtimeProjectionChannelRef = useRef<Record<
-    ReviewSide,
-    ReviewRuntimeProjectionChannel | null
-  >>({ before: null, after: null });
-  const runtimeProjectionChannelRequestRef = useRef<Record<
-    ReviewSide,
-    ReviewRuntimeProjectionChannelRequest | null
-  >>({ before: null, after: null });
-  const runtimeProjectionLoadedFrameRef = useRef<Record<
-    ReviewSide,
-    HTMLIFrameElement | null
-  >>({ before: null, after: null });
   const reviewStateRef = useRef({ filter, focus, transparency, pagePresentationPath });
   const scrollModeRef = useRef(scrollMode);
   useLayoutEffect(() => {
@@ -543,11 +501,8 @@ export default function AiReviewWorkspace({
   const reviewCommentLayouts = commentLayoutState.documents === documents
     ? commentLayoutState.layouts
     : [];
-  const activeRuntimeVisualResult = runtimeVisualResult?.documents === documents
-    ? runtimeVisualResult
-    : null;
-  const reviewChanges = activeRuntimeVisualResult?.changes || documents.changes;
-  const reviewOutline = activeRuntimeVisualResult?.outline || documents.outline;
+  const reviewChanges = documents.changes;
+  const reviewOutline = documents.outline;
   const navigableChanges = useMemo(() => (
     filter === "all"
       ? reviewChanges
@@ -573,24 +528,6 @@ export default function AiReviewWorkspace({
     }
     reviewCommentPortRef.current = null;
     reviewCommentChannelChallengeRef.current = null;
-  }, []);
-
-  const closeRuntimeProjectionChannel = useCallback((side?: ReviewSide) => {
-    const sides: ReviewSide[] = side ? [side] : ["before", "after"];
-    sides.forEach((targetSide) => {
-      runtimeProjectionChannelRef.current[targetSide]?.port.close();
-      runtimeProjectionChannelRef.current[targetSide] = null;
-      runtimeProjectionChannelRequestRef.current[targetSide] = null;
-    });
-  }, []);
-
-  const clearRuntimeProjectionDelivery = useCallback((side: ReviewSide) => {
-    setRuntimeProjectionDelivery((current) => {
-      if (!current.sides.has(side)) return current;
-      const sides = new Set(current.sides);
-      sides.delete(side);
-      return { documents: current.documents, sides };
-    });
   }, []);
 
   const updateCommentScrollTransform = useCallback((
@@ -690,19 +627,6 @@ export default function AiReviewWorkspace({
     });
   }, [documents.changes, hydrated]);
 
-  useEffect(() => {
-    if (
-      !activeRuntimeVisualResult
-      || documents.changes.length > 0
-      || reviewStateRef.current.focus !== "all"
-      || !reviewChanges[0]
-    ) return;
-    dispatchReviewState({
-      type: "set-navigation-target",
-      value: reviewChanges[0].id,
-    });
-  }, [activeRuntimeVisualResult, documents.changes.length, reviewChanges]);
-
   const sendState = useCallback((side?: ReviewSide) => {
     const state = reviewStateRef.current;
     const sides: ReviewSide[] = side ? [side] : ["before", "after"];
@@ -718,66 +642,6 @@ export default function AiReviewWorkspace({
       });
     });
   }, [sessionId]);
-
-  const commitRuntimeVisualFrame = useCallback((
-    side: ReviewSide,
-    result: ReviewRuntimeVisualResult,
-  ) => {
-    const channel = runtimeProjectionChannelRef.current[side];
-    if (
-      channel?.documents === result.documents
-      && channel.frame === framesRef.current[side]
-      && !channel.delivered
-    ) {
-      channel.delivered = true;
-      channel.port.postMessage({
-        source: "pageroot-ai-review-runtime-projection",
-        contractVersion: result.documents.runtimeVisualCaptureIdentity.contractVersion,
-        sessionId: result.documents.runtimeVisualCaptureIdentity.sessionId,
-        side,
-        sourceSha256: result.documents.runtimeVisualCaptureIdentity.sourceSha256BySide[side],
-        type: "runtime-projection-facts",
-        markers: result.markers,
-      });
-      channel.port.close();
-      setRuntimeProjectionDelivery((current) => {
-        const sides = current.documents === result.documents
-          ? new Set(current.sides)
-          : new Set<ReviewSide>();
-        if (sides.has(side)) return current;
-        sides.add(side);
-        return { documents: result.documents, sides };
-      });
-    }
-    sendState(side);
-    const currentFocus = reviewStateRef.current.focus;
-    if (currentFocus === "all") return;
-    const selectedChange = result.changes.find((change) => change.id === currentFocus);
-    if (!selectedChange) return;
-    postToFrame(framesRef.current[side], sessionId, {
-      type: "focus-change",
-      changeId: currentFocus,
-      panelKey: selectedChange.panelKey,
-      panelPath: selectedChange.panelPath,
-      behavior: "auto",
-    });
-  }, [sendState, sessionId]);
-
-  const resolveRuntimeVisuals = useCallback((verdicts: ReviewRuntimeVisualVerdicts) => {
-    if (runtimeVisualResolutionRef.current?.documents === documents) return;
-    const merged = mergeReviewRuntimeVisualChanges(documents, verdicts);
-    const result: ReviewRuntimeVisualResult = {
-      documents,
-      changes: [...merged.changes],
-      outline: [...merged.outline],
-      markers: [...merged.markers],
-    };
-    runtimeVisualResolutionRef.current = result;
-    setRuntimeVisualResult(result);
-    (["before", "after"] as ReviewSide[]).forEach((side) => {
-      commitRuntimeVisualFrame(side, result);
-    });
-  }, [commitRuntimeVisualFrame, documents]);
 
   const prepareReviewCommentFrame = useCallback((
     side: ReviewSide,
@@ -798,178 +662,12 @@ export default function AiReviewWorkspace({
     });
   }, [documents.commentTargets, sessionId]);
 
-  const prepareRuntimeVisualFrame = useCallback((
-    side: ReviewSide,
-    frame: HTMLIFrameElement,
-  ) => {
-    if (
-      runtimeVisualOwnerDocumentsRef.current !== documents
-      || !documents.runtimeVisualCandidates.length
-      || runtimeProjectionChannelRef.current[side]
-      || runtimeProjectionChannelRequestRef.current[side]
-    ) return;
-    const challenge = createReviewCapabilityChallenge();
-    if (!challenge) return;
-    runtimeProjectionChannelRequestRef.current[side] = {
-      documents,
-      frame,
-      challenge,
-    };
-    const captureIdentity = documents.runtimeVisualCaptureIdentity;
-    postToFrame(frame, sessionId, {
-      contractVersion: captureIdentity.contractVersion,
-      side,
-      sourceSha256: captureIdentity.sourceSha256BySide[side],
-      type: "request-runtime-projection-channel",
-      challenge,
-    });
-    const resolved = runtimeVisualResolutionRef.current;
-    if (resolved?.documents === documents) {
-      commitRuntimeVisualFrame(side, resolved);
-    }
-  }, [commitRuntimeVisualFrame, documents, sessionId]);
-
-  const handleRuntimeProjectionFrameLoad = useCallback((
-    side: ReviewSide,
-    frame: HTMLIFrameElement,
-  ) => {
-    if (framesRef.current[side] !== frame) return;
-    // The first child ready message may race this first top-level load. Both
-    // paths may prepare the same guarded request, but only a later load on the
-    // same iframe Element represents a new browsing-context lifecycle whose
-    // old transferred port must be closed.
-    if (runtimeProjectionLoadedFrameRef.current[side] === frame) {
-      clearRuntimeProjectionDelivery(side);
-      closeRuntimeProjectionChannel(side);
-    } else {
-      runtimeProjectionLoadedFrameRef.current[side] = frame;
-    }
-    prepareRuntimeVisualFrame(side, frame);
-  }, [clearRuntimeProjectionDelivery, closeRuntimeProjectionChannel, prepareRuntimeVisualFrame]);
-
-  const requestOwnerRuntimeVisualCapture = useCallback(() => {
-    if (
-      runtimeVisualOwnerDocumentsRef.current !== documents
-      || runtimeVisualResolutionRef.current?.documents === documents
-    ) return;
-    const candidateKeys = new Set(documents.runtimeVisualCandidates.map(({ key }) => key));
-    // Without pixel evidence nothing may dim as "verified unchanged": every
-    // candidate falls back to the honest suspected presentation instead.
-    const allUnverified = (): ReviewRuntimeVisualVerdicts => Object.freeze({
-      changedKeys: Object.freeze([]),
-      unverifiedKeys: Object.freeze(
-        documents.runtimeVisualCandidates.map(({ key }) => key),
-      ),
-    });
-    const captureApi = window.htmlAIReviewRuntimeSnapshots;
-    if (!captureApi) {
-      resolveRuntimeVisuals(allUnverified());
-      return;
-    }
-    performance.mark("pageroot:review:runtime-visual-capture-start");
-    const viewport = runtimeVisualViewportRef.current || Object.freeze({
-      width: Math.max(320, Math.min(4_096, Math.round(window.innerWidth || 1_280))),
-      height: Math.max(320, Math.min(2_400, Math.round(window.innerHeight || 900))),
-    });
-    runtimeVisualViewportRef.current = viewport;
-    const captureSide = async (side: ReviewSide) => {
-      const candidates = documents.runtimeVisualCaptureCandidates[side];
-      const expected = {
-        sessionId: documents.runtimeVisualCaptureIdentity.sessionId,
-        sourceSha256: documents.runtimeVisualCaptureIdentity.sourceSha256BySide[side],
-      };
-      if (!candidates.length) return [];
-      try {
-        const capture: ReviewRuntimeSnapshotCaptureResult = await captureApi.capture({
-          contractVersion: documents.runtimeVisualCaptureIdentity.contractVersion,
-          captureSessionId: expected.sessionId,
-          sourceSha256: expected.sourceSha256,
-          side,
-          html: documents.runtimeVisualSourceHtml[side],
-          candidates,
-          viewport,
-        });
-        if (capture?.outcome !== "captured") return [];
-        const envelope = acceptedRuntimeVisualEnvelope(capture.envelope, expected);
-        return envelope
-          ? acceptRuntimeVisualSnapshots(
-              capture.envelope.runtimeVisualSnapshots,
-              candidateKeys,
-            ) || []
-          : [];
-      } catch {
-        return [];
-      }
-    };
-    // Keep the one before/after pair bounded, but do not make two hidden
-    // offscreen Electron renderers compete for their short owner deadline.
-    void (async () => {
-      const before = await captureSide("before");
-      const after = await captureSide("after");
-      const verdicts = await classifyReviewRuntimeVisualCandidateKeys({
-        candidates: documents.runtimeVisualCandidates,
-        before,
-        after,
-      });
-      return { verdicts };
-    })().then(({ verdicts }) => {
-      if (
-        runtimeVisualOwnerDocumentsRef.current !== documents
-        || runtimeVisualResolutionRef.current?.documents === documents
-      ) return;
-      performance.mark("pageroot:review:runtime-visual-capture-settled");
-      resolveRuntimeVisuals(verdicts);
-    }).catch(() => {
-      if (runtimeVisualOwnerDocumentsRef.current === documents) {
-        performance.mark("pageroot:review:runtime-visual-capture-settled");
-        resolveRuntimeVisuals(allUnverified());
-      }
-    });
-  }, [documents, resolveRuntimeVisuals]);
-
-  const scheduleOwnerRuntimeVisualCapture = useCallback(() => {
-    const readiness = runtimeVisualReadinessRef.current;
-    if (
-      readiness?.documents !== documents
-      || readiness.started
-      || readiness.paintedSides.size !== 2
-    ) return;
-    readiness.started = true;
-    // Runtime visual comparison is optional evidence. Give the two visible
-    // review frames a quiet compositor turn before opening hidden authored
-    // capture windows, so validation cannot contend with first useful content.
-    readiness.captureTimer = window.setTimeout(() => {
-      if (runtimeVisualReadinessRef.current !== readiness) return;
-      readiness.captureTimer = null;
-      requestOwnerRuntimeVisualCapture();
-    }, 250);
-  }, [documents, requestOwnerRuntimeVisualCapture]);
-
   useLayoutEffect(() => {
-    runtimeVisualOwnerDocumentsRef.current = documents;
-    runtimeVisualViewportRef.current = Object.freeze({
-      width: Math.max(320, Math.min(4_096, Math.round(window.innerWidth || 1_280))),
-      height: Math.max(320, Math.min(2_400, Math.round(window.innerHeight || 900))),
-    });
-    const readiness = {
-      documents,
-      sides: new Set<ReviewSide>(),
-      paintedSides: new Set<ReviewSide>(),
-      started: false,
-      captureTimer: null as number | null,
-    };
-    runtimeVisualReadinessRef.current = readiness;
     reviewFrameReadyRef.current = {
       before: null,
       after: null,
     };
-    runtimeProjectionLoadedFrameRef.current = {
-      before: null,
-      after: null,
-    };
     closeReviewCommentChannel();
-    closeRuntimeProjectionChannel();
-    runtimeVisualResolutionRef.current = null;
     const drainRegisteredFrames = () => {
       (["before", "after"] as ReviewSide[]).forEach((side) => {
         const frame = framesRef.current[side];
@@ -978,47 +676,14 @@ export default function AiReviewWorkspace({
         prepareReviewCommentFrame(side, frame);
       });
     };
-    if (!documents.runtimeVisualCandidates.length) {
-      runtimeVisualResolutionRef.current = {
-        documents,
-        changes: documents.changes,
-        outline: documents.outline,
-        markers: [],
-      };
-      drainRegisteredFrames();
-      return () => {
-        if (readiness.captureTimer !== null) window.clearTimeout(readiness.captureTimer);
-        closeReviewCommentChannel();
-        closeRuntimeProjectionChannel();
-        if (runtimeVisualOwnerDocumentsRef.current === documents) {
-          runtimeVisualOwnerDocumentsRef.current = null;
-          runtimeVisualViewportRef.current = null;
-        }
-        if (runtimeVisualReadinessRef.current?.documents === documents) {
-          runtimeVisualReadinessRef.current = null;
-        }
-      };
-    }
     drainRegisteredFrames();
     return () => {
-      if (readiness.captureTimer !== null) window.clearTimeout(readiness.captureTimer);
       closeReviewCommentChannel();
-      closeRuntimeProjectionChannel();
-      if (runtimeVisualOwnerDocumentsRef.current === documents) {
-        runtimeVisualOwnerDocumentsRef.current = null;
-        runtimeVisualViewportRef.current = null;
-      }
-      if (runtimeVisualReadinessRef.current?.documents === documents) {
-        runtimeVisualReadinessRef.current = null;
-      }
     };
   }, [
     closeReviewCommentChannel,
-    closeRuntimeProjectionChannel,
     documents,
     prepareReviewCommentFrame,
-    prepareRuntimeVisualFrame,
-    resolveRuntimeVisuals,
   ]);
 
   const finishPagePresentation = useCallback((epoch: number) => {
@@ -1229,43 +894,11 @@ export default function AiReviewWorkspace({
         });
         return;
       }
-      if (message.type === "runtime-projection-channel") {
-        const port = event.ports.length === 1 ? event.ports[0] : null;
-        const request = runtimeProjectionChannelRequestRef.current[message.side];
-        const captureIdentity = documents.runtimeVisualCaptureIdentity;
-        if (
-          !port
-          || request?.documents !== documents
-          || request.frame !== framesRef.current[message.side]
-          || typeof message.challenge !== "string"
-          || message.challenge !== request.challenge
-          || message.contractVersion !== captureIdentity.contractVersion
-          || message.sourceSha256 !== captureIdentity.sourceSha256BySide[message.side]
-          || runtimeProjectionChannelRef.current[message.side]
-        ) {
-          port?.close();
-          return;
-        }
-        runtimeProjectionChannelRequestRef.current[message.side] = null;
-        runtimeProjectionChannelRef.current[message.side] = {
-          documents,
-          frame: request.frame,
-          port,
-          delivered: false,
-        };
-        port.start();
-        const resolved = runtimeVisualResolutionRef.current;
-        if (resolved?.documents === documents) {
-          commitRuntimeVisualFrame(message.side, resolved);
-        }
-        return;
-      }
       if (message.type === "ready") {
         const frame = framesRef.current[message.side];
         if (frame) {
           reviewFrameReadyRef.current[message.side] = { documents, frame };
           prepareReviewCommentFrame(message.side, frame);
-          prepareRuntimeVisualFrame(message.side, frame);
           if (
             reviewFrameReadyRef.current.before?.documents === documents
             && reviewFrameReadyRef.current.after?.documents === documents
@@ -1280,30 +913,6 @@ export default function AiReviewWorkspace({
             leader: owner.leader,
             gestureId: owner.gestureId,
           });
-        }
-        const staticReady = runtimeVisualReadinessRef.current;
-        if (staticReady?.documents === documents) {
-          const wasReady = staticReady.sides.size === 2;
-          staticReady.sides.add(message.side);
-          if (!wasReady && staticReady.sides.size === 2) {
-            performance.mark("pageroot:review:frames-static-ready");
-          }
-        }
-        const resolved = runtimeVisualResolutionRef.current;
-        if (resolved?.documents === documents) {
-          commitRuntimeVisualFrame(message.side, resolved);
-          return;
-        }
-        return;
-      }
-      if (message.type === "first-paint-ready") {
-        const readiness = runtimeVisualReadinessRef.current;
-        if (readiness?.documents !== documents) return;
-        const wasReady = readiness.paintedSides.size === 2;
-        readiness.paintedSides.add(message.side);
-        if (!wasReady && readiness.paintedSides.size === 2) {
-          performance.mark("pageroot:review:frames-first-paint-ready");
-          scheduleOwnerRuntimeVisualCapture();
         }
         return;
       }
@@ -1402,20 +1011,16 @@ export default function AiReviewWorkspace({
     window.addEventListener("message", handleMessage);
     return () => window.removeEventListener("message", handleMessage);
   }, [
-    commitRuntimeVisualFrame,
     coordinatePagePresentation,
     documents,
     finishPagePresentation,
     prepareReviewCommentFrame,
-    prepareRuntimeVisualFrame,
     relayHorizontalWheel,
-    requestOwnerRuntimeVisualCapture,
     reviewChanges,
     reviewOutline,
     selectChange,
     sendState,
     sessionId,
-    scheduleOwnerRuntimeVisualCapture,
     updateCommentScrollTransform,
   ]);
 
@@ -1424,12 +1029,9 @@ export default function AiReviewWorkspace({
       reviewFrameReadyRef.current[side] = null;
       setFramesReady(false);
       initialFocusRef.current = false;
-      runtimeProjectionLoadedFrameRef.current[side] = null;
-      clearRuntimeProjectionDelivery(side);
-      closeRuntimeProjectionChannel(side);
     }
     framesRef.current[side] = frame;
-  }, [clearRuntimeProjectionDelivery, closeRuntimeProjectionChannel]);
+  }, []);
 
   const registerViewport = useCallback((side: ReviewSide, viewport: HTMLDivElement | null) => {
     viewportsRef.current[side] = viewport;
@@ -1493,6 +1095,30 @@ export default function AiReviewWorkspace({
     selectChange(navigableChanges[nextIndex].id);
   }, [activeIndex, navigableChanges, selectChange]);
 
+  const handleSegmentedKeyDown = useCallback((event: ReactKeyboardEvent<HTMLButtonElement>) => {
+    const buttons = [...(event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>(
+      "button:not(:disabled)",
+    ) || [])];
+    const currentIndex = buttons.indexOf(event.currentTarget);
+    if (currentIndex < 0 || !buttons.length) return;
+
+    let targetIndex: number | null = null;
+    if (event.key === "ArrowRight" || event.key === "ArrowDown") {
+      targetIndex = (currentIndex + 1) % buttons.length;
+    } else if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
+      targetIndex = (currentIndex - 1 + buttons.length) % buttons.length;
+    } else if (event.key === "Home") {
+      targetIndex = 0;
+    } else if (event.key === "End") {
+      targetIndex = buttons.length - 1;
+    }
+
+    if (targetIndex === null) return;
+    event.preventDefault();
+    buttons[targetIndex].focus();
+    buttons[targetIndex].click();
+  }, []);
+
   const openConfirmation = useCallback((
     action: ConfirmationAction,
     trigger: HTMLButtonElement,
@@ -1541,24 +1167,6 @@ export default function AiReviewWorkspace({
       className={styles.reviewRoot}
       data-embedded={embedded ? "true" : undefined}
       data-testid="ai-review-workspace"
-      data-review-runtime-visual-state={
-        !documents.runtimeVisualCandidates.length
-          ? "not-required"
-          : activeRuntimeVisualResult
-            ? "resolved"
-            : "pending"
-      }
-      data-review-runtime-visual-marker-count={
-        activeRuntimeVisualResult?.markers.length
-      }
-      data-review-runtime-visual-delivery={
-        !documents.runtimeVisualCandidates.length
-          ? "not-required"
-          : runtimeProjectionDelivery.documents === documents
-              && runtimeProjectionDelivery.sides.size === 2
-            ? "complete"
-            : "pending"
-      }
     >
       {!embedded ? <WorkbenchHeaderShell
         className={styles.reviewHeader}
@@ -1687,7 +1295,196 @@ export default function AiReviewWorkspace({
         className={styles.reviewMain}
         inert={confirmationAction ? true : undefined}
       >
-        <section className={styles.canvasReview}>
+        <section
+          className={styles.canvasReview}
+          data-toolbar-open={!embedded && toolbarPinned ? "true" : undefined}
+        >
+          {!embedded ? <div className={styles.canvasToolbarDock}>
+            <div className={styles.canvasToolbar}>
+              <div className={styles.canvasReviewTitle}>
+                <span className={styles.canvasReviewIcon}><EyeIcon aria-hidden="true" size={20} weight="duotone" /></span>
+                <span>
+                  <strong>审阅模式</strong>
+                  <small>
+                    {filter === "all"
+                      ? `${reviewChanges.length} 个变化区域`
+                      : `${navigableChanges.length}/${reviewChanges.length} 个变化区域`}
+                  </small>
+                </span>
+              </div>
+
+              <div className={`${styles.reviewModeControl} ${styles.pagePreviewControl}`}>
+                <span className={styles.toolbarFieldLabel}>页面预览</span>
+                <div
+                  className={styles.segmented}
+                  data-items="3"
+                  role="group"
+                  aria-label="页面预览"
+                >
+                  <button
+                    type="button"
+                    aria-label="双页对比（修改前与 AI 修改后）"
+                    title="双页对比"
+                    aria-pressed={canvasView === "split"}
+                    onClick={() => selectPreviewMode("split")}
+                    onKeyDown={handleSegmentedKeyDown}
+                  >
+                    <BrowsersIcon aria-hidden="true" size={14} weight="duotone" />
+                    <span className={styles.previewButtonLabel}><span>双页</span></span>
+                  </button>
+                  <button
+                    type="button"
+                    aria-label={`单独查看修改前 ${beforeLabel}`}
+                    aria-pressed={canvasView === "before"}
+                    onClick={() => selectPreviewMode("before")}
+                    onKeyDown={handleSegmentedKeyDown}
+                  >
+                    <CaretLeftIcon aria-hidden="true" size={14} weight="bold" />
+                    <span className={styles.previewButtonLabel}><span>左页</span><small>修改前</small></span>
+                  </button>
+                  <button
+                    type="button"
+                    aria-label={`单独查看 AI 修改后 ${afterLabel}`}
+                    aria-pressed={canvasView === "after"}
+                    onClick={() => selectPreviewMode("after")}
+                    onKeyDown={handleSegmentedKeyDown}
+                  >
+                    <CaretRightIcon aria-hidden="true" size={14} weight="bold" />
+                    <span className={styles.previewButtonLabel}><span>右页</span><small>修改后</small></span>
+                  </button>
+                </div>
+              </div>
+
+              <div className={styles.transparencyField}>
+                <span className={styles.toolbarFieldLabel}>
+                  <span>上下文可见度</span><output>{transparency}%</output>
+                </span>
+                <label className={styles.transparencyControl}>
+                  <input
+                    type="range"
+                    min="0"
+                    max="100"
+                    step="1"
+                    value={transparency}
+                    aria-label="非修改区域上下文可见度"
+                    title="调整非修改区域的可见度"
+                    style={{ "--mask-position": `${transparency}%` } as CSSProperties}
+                    onInput={(event) => dispatchReviewState({
+                      type: "set-context-visibility",
+                      value: Number(event.currentTarget.value),
+                    })}
+                  />
+                </label>
+              </div>
+
+              <div className={styles.reviewModeControl}>
+                <span className={styles.toolbarFieldLabel}>变化审阅</span>
+                <div
+                  className={styles.segmented}
+                  data-items="3"
+                  role="group"
+                  aria-label="变化审阅"
+                >
+                  {(["all", "text", "structure"] as ReviewChangeFilter[]).map((mode) => (
+                    <button
+                      key={mode}
+                      type="button"
+                      aria-label={mode === "all" ? "查看全部变化" : `${FILTER_LABELS[mode]}变化`}
+                      aria-pressed={filter === mode}
+                      onClick={() => selectReviewMode(mode)}
+                      onKeyDown={handleSegmentedKeyDown}
+                    >
+                      {mode === "all" ? <GitDiffIcon aria-hidden="true" size={14} weight="duotone" /> : null}
+                      {mode === "text" ? <TextTIcon aria-hidden="true" size={14} weight="bold" /> : null}
+                      {mode === "structure" ? <TreeStructureIcon aria-hidden="true" size={14} weight="duotone" /> : null}
+                      <span>{FILTER_LABELS[mode]}</span>
+                      {FILTER_TONE_COLORS[mode].length ? (
+                        <span className={styles.filterTones} aria-hidden="true">
+                          {FILTER_TONE_COLORS[mode].map((color) => (
+                            <span key={color} style={{ background: color }} />
+                          ))}
+                        </span>
+                      ) : null}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className={styles.canvasToolGroup}>
+                <div className={styles.toolbarField}>
+                  <span className={styles.toolbarFieldLabel}>滚动方式</span>
+                  <div className={styles.scrollSwitch} aria-label="滚动方式">
+                    <button type="button" aria-label="同步滚动" aria-pressed={scrollMode === "linked"} onClick={() => dispatchReviewState({ type: "set-scroll-mode", value: "linked" })}>
+                      <LinkIcon aria-hidden="true" size={12} weight="bold" /><span>同步</span>
+                    </button>
+                    <button type="button" aria-label="独立滚动" aria-pressed={scrollMode === "independent"} onClick={() => dispatchReviewState({ type: "set-scroll-mode", value: "independent" })}>
+                      <LinkBreakIcon aria-hidden="true" size={12} weight="bold" /><span>独立</span>
+                    </button>
+                  </div>
+                </div>
+                <div className={styles.toolbarField}>
+                  <span className={styles.toolbarFieldLabel}>画布缩放</span>
+                  <div className={styles.zoomSwitch} aria-label="画布缩放">
+                    <button type="button" aria-pressed={zoom === "fit"} onClick={() => dispatchReviewState({ type: "set-zoom-mode", value: "fit" })}>
+                      <CornersOutIcon aria-hidden="true" size={12} /><span>适应</span>
+                    </button>
+                    <button type="button" aria-pressed={zoom === "actual"} onClick={() => dispatchReviewState({ type: "set-zoom-mode", value: "actual" })}>100%</button>
+                  </div>
+                <div className={styles.changeNavigator} aria-label="逐处查看变化">
+                  <button
+                    type="button"
+                    aria-label="上一处变化"
+                    disabled={!navigableChanges.length}
+                    onClick={() => navigate(-1)}
+                  >
+                    <CaretUpIcon aria-hidden="true" size={11} weight="bold" />
+                  </button>
+                  <span>
+                    <strong>{activeIndex >= 0 ? activeIndex + 1 : 0}</strong>
+                    <small>/{navigableChanges.length}</small>
+                  </span>
+                  <button
+                    type="button"
+                    aria-label="下一处变化"
+                    disabled={!navigableChanges.length}
+                    onClick={() => navigate(1)}
+                  >
+                    <CaretDownIcon aria-hidden="true" size={11} weight="bold" />
+                  </button>
+                  {/*
+                    * The way back out of a single change. Returning to the whole page used
+                    * to live in the content map, so removing the map left a reviewer who
+                    * had focused one change with no way to see the page as a whole again.
+                    */}
+                  <button
+                    type="button"
+                    aria-label="完整页面"
+                    aria-pressed={focus === "all"}
+                    onClick={() => dispatchReviewState({
+                      type: "set-navigation-target",
+                      value: "all",
+                    })}
+                  >
+                    整页
+                  </button>
+                </div>
+                </div>
+              </div>
+            </div>
+            <button
+              className={styles.canvasToolbarHandle}
+              type="button"
+              aria-expanded={toolbarPinned}
+              aria-label={toolbarPinned ? "收起审阅工具" : "显示并固定审阅工具"}
+              onClick={() => setToolbarPinned((current) => !current)}
+            >
+              {toolbarPinned
+                ? <CaretUpIcon aria-hidden="true" size={12} weight="bold" />
+                : <CaretDownIcon aria-hidden="true" size={12} weight="bold" />}
+              <span>审阅工具</span>
+            </button>
+          </div> : null}
+
           <div className={styles.canvasReviewBody}>
             {!navigableChanges.length ? (
               <div className={styles.emptyFilterNotice} role="status">
@@ -1703,7 +1500,6 @@ export default function AiReviewWorkspace({
                 label={beforeLabel}
                 zoom={zoom}
                 onFrame={registerFrame}
-                onFrameLoad={handleRuntimeProjectionFrameLoad}
                 onScale={updateScale}
                 onViewport={registerViewport}
                 onHorizontalScroll={handleHorizontalScroll}
@@ -1720,7 +1516,6 @@ export default function AiReviewWorkspace({
                 label={afterLabel}
                 zoom={zoom}
                 onFrame={registerFrame}
-                onFrameLoad={handleRuntimeProjectionFrameLoad}
                 onScale={updateScale}
                 onViewport={registerViewport}
                 onHorizontalScroll={handleHorizontalScroll}
