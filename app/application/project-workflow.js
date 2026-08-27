@@ -2,6 +2,12 @@ import { isBridgeRequestError } from "./bridge-client.js";
 import { planProjectCloseAbort, planProjectCloseHydration, planProjectCloseIdentity } from "./project/close-plan.js";
 import { planProjectOpen } from "./project/open-intent.js";
 import {
+  acquireProjectOpenWorkspace,
+  inspectProjectOpenProjection,
+  prepareProjectOpenCore,
+  resolveProjectOpenSource,
+} from "./project/open-operation-procedure.js";
+import {
   planProjectSwitchAfterCanvas,
   planProjectSwitchAfterDrain,
   planProjectSwitchEntry,
@@ -145,6 +151,12 @@ function initialSnapshot(externalFileOpenSession, projectApplicationSession) {
       generation: 0,
       epoch: 0,
       sourcePath: null,
+      error: null,
+    }),
+    supplemental: Object.freeze({
+      phase: "idle",
+      operationId: null,
+      snapshotRevision: null,
       error: null,
     }),
     switch: Object.freeze({ phase: "idle", operationId: null }),
@@ -3136,52 +3148,49 @@ export class ProjectWorkflow {
     const rollback = this.#captureHydrationAuthority();
     let publicationStarted = false;
     const operationId = this.#nextOperationId("hydration");
+    this.#setSupplemental({ phase: "loading", operationId });
     try {
       this.#markHydrationStage("workspace-request", operationId);
       if (this.projectHydrating && !transitionAuthorized) {
         throw new Error("这次项目读取缺少与当前项目一致的源码切换令牌。");
       }
-      const payload = await this.#bridgeClient.workspace(activeSource, { operationId });
+      const acquired = await acquireProjectOpenWorkspace({
+        bridgeClient: this.#bridgeClient,
+        sourcePath: activeSource,
+        operationId,
+        isCurrent: queryIsCurrent,
+      });
+      if (acquired.kind === "stale") {
+        return stale({ operationId, epoch: activeEpoch, sourcePath: activeSource });
+      }
+      const { envelope } = acquired;
+      const payload = envelope.core;
+      const supplementalPayload = envelope.supplemental;
       this.#markHydrationStage(
         "workspace-response",
         operationId,
-        this.#codecs.isRecord(payload.performanceTiming)
-          ? payload.performanceTiming
+        this.#codecs.isRecord(envelope.performanceTiming)
+          ? envelope.performanceTiming
           : null,
       );
       if (!queryIsCurrent()) return stale({ operationId, epoch: activeEpoch, sourcePath: activeSource });
 
-      const nextProjectId = String(payload.projectId || "");
-      const nextDocumentId = String(payload.documentId || "");
-      const canonicalSourcePath = String(
-        payload.sourcePath
-        || (this.#codecs.isRecord(payload.current) ? payload.current.path : "")
-        || activeSource,
-      );
-      const workspaceHash = String(payload.currentHtmlSha256 || "");
-      if (workspaceHash && !SHA256.test(workspaceHash)) {
-        throw new Error("项目状态返回的源 HTML Hash 无效。");
-      }
-      const openTarget = this.#codecs.isRecord(payload.openTarget)
-        ? payload.openTarget
-        : null;
-      if (
-        hasExactOpeningAuthority
-        && (
-          nextProjectId !== this.#projectSession.projectId
-          || nextDocumentId !== this.#projectSession.documentId
-          || workspaceHash !== openingDocument.sourceSha256
-          || !openTarget
-          || String(openTarget.projectId || "") !== openingTarget.projectId
-          || String(openTarget.documentId || "") !== openingTarget.documentId
-          || String(openTarget.workingCopyId || "") !== openingTarget.workingCopyId
-          || String(openTarget.versionId || "") !== openingTarget.versionId
-          || String(openTarget.sourceSha256 || "") !== openingTarget.sourceSha256
-          || !this.#codecs.sameSourcePath(openTarget.exactSourcePath, activeSource)
-        )
-      ) {
-        throw new Error("项目在首屏显示后发生变化，已保持只读；请重新打开该文件。");
-      }
+      const preparedCore = prepareProjectOpenCore({
+        core: payload,
+        activeSource,
+        exactOpeningAuthority: hasExactOpeningAuthority ? {
+          projectId: this.#projectSession.projectId,
+          documentId: this.#projectSession.documentId,
+          sourceSha256: openingDocument.sourceSha256,
+          openTarget: openingTarget,
+        } : null,
+        sameSourcePath: this.#codecs.sameSourcePath,
+      });
+      const nextProjectId = preparedCore.projectId;
+      const nextDocumentId = preparedCore.documentId;
+      const canonicalSourcePath = preparedCore.canonicalSourcePath;
+      const workspaceHash = preparedCore.sourceSha256;
+      const openTarget = preparedCore.openTarget;
       let preparedTransition = null;
       if (!this.#codecs.sameSourcePath(canonicalSourcePath, activeSource)) {
         if (!mustAdoptSource) {
@@ -3217,26 +3226,28 @@ export class ProjectWorkflow {
         mustAdoptSource = true;
       }
 
-      const projectRecord = this.#codecs.isRecord(payload.project) ? payload.project : {};
-      const workspacePaths = this.#codecs.isRecord(payload.paths) ? payload.paths : {};
+      const projectRecord = this.#codecs.isRecord(supplementalPayload.project)
+        ? supplementalPayload.project
+        : {};
+      const workspacePaths = this.#codecs.isRecord(supplementalPayload.paths)
+        ? supplementalPayload.paths
+        : {};
       const currentDocument = this.#documentSession.snapshot;
-      const currentHtmlHash = hasExactOpeningAuthority
-        ? currentDocument.sourceSha256
-        : await this.#hashPort.sha256(currentDocument.html);
+      const projection = await inspectProjectOpenProjection({
+        document: currentDocument,
+        hashPort: this.#hashPort,
+        workspaceSha256: workspaceHash,
+        hasExactOpeningAuthority,
+        pendingWrite: this.#documentSession.pendingWrite,
+        flushInFlight: this.#documentSession.flushPromise,
+      });
       if (!queryIsCurrent()) return stale({ operationId, epoch: activeEpoch, sourcePath: activeSource });
-      const currentDocumentClean = Boolean(
-        currentDocument.persistState === "idle"
-        && currentDocument.editRevision === currentDocument.lastPersistedRevision
-        && !this.#documentSession.pendingWrite
-        && !this.#documentSession.flushPromise
-      );
-      const cleanProjectionMismatch = Boolean(
-        currentDocumentClean && workspaceHash && currentHtmlHash !== workspaceHash
-      );
+      const currentDocumentClean = projection.clean;
+      const cleanProjectionMismatch = projection.cleanMismatch;
       let authoritativeHtml = currentDocument.html;
       let authoritativeHash = currentDocument.sourceSha256 || workspaceHash;
       let authoritativeLastModifiedAt = String(payload.lastModifiedAt || "");
-      let sourcePayload = null;
+      let legacyVersionAuthority = null;
       if (preparedTransition?.activatedProject) {
         authoritativeHtml = preparedTransition.activatedProject.html;
         authoritativeHash = preparedTransition.activatedProject.sha256;
@@ -3247,28 +3258,24 @@ export class ProjectWorkflow {
         );
       } else if (mustAdoptSource || cleanProjectionMismatch) {
         mustAdoptSource = true;
-        this.#markHydrationStage("source-request", operationId);
-        sourcePayload = await this.#bridgeClient.source(canonicalSourcePath);
-        this.#markHydrationStage("source-response", operationId);
-        if (!queryIsCurrent()) return stale({ operationId, epoch: activeEpoch, sourcePath: activeSource });
-        if (
-          String(sourcePayload.projectId || "") !== nextProjectId
-          || String(sourcePayload.documentId || "") !== nextDocumentId
-        ) {
-          throw new Error("读取期间源文件身份发生变化，已保持只读；请重新打开该文件。");
+        const resolvedSource = await resolveProjectOpenSource({
+          core: payload,
+          bridgeClient: this.#bridgeClient,
+          canonicalSourcePath,
+          hashPort: this.#hashPort,
+          expectedSourceSha256: workspaceHash,
+          projectId: nextProjectId,
+          documentId: nextDocumentId,
+          isCurrent: queryIsCurrent,
+          markStage: (stage) => this.#markHydrationStage(stage, operationId),
+        });
+        if (resolvedSource.stale || !queryIsCurrent()) {
+          return stale({ operationId, epoch: activeEpoch, sourcePath: activeSource });
         }
-        authoritativeHtml = String(sourcePayload.content || "");
-        authoritativeHash = String(sourcePayload.sha256 || "");
-        if (
-          !authoritativeHash
-          || await this.#hashPort.sha256(authoritativeHtml) !== authoritativeHash
-          || (workspaceHash && authoritativeHash !== workspaceHash)
-        ) {
-          throw new Error("源 HTML 内容与服务端 Hash 不一致，已拒绝开放编辑。");
-        }
-        authoritativeLastModifiedAt = String(
-          sourcePayload.lastModifiedAt || payload.lastModifiedAt || "",
-        );
+        authoritativeHtml = String(resolvedSource.content || "");
+        authoritativeHash = String(resolvedSource.sourceSha256 || "");
+        authoritativeLastModifiedAt = String(resolvedSource.lastModifiedAt || "");
+        legacyVersionAuthority = resolvedSource.legacyVersionAuthority;
       } else if (currentDocumentClean && workspaceHash) {
         authoritativeHash = workspaceHash;
       } else if (
@@ -3282,16 +3289,15 @@ export class ProjectWorkflow {
       if (!queryIsCurrent()) return stale({ operationId, epoch: activeEpoch, sourcePath: activeSource });
 
       const publishVersion = () => this.#versionSession.hydrate({
-        versions: this.#codecs.versionsFromWorkspace(payload),
+        versions: [],
         latestVersionId: payload.latestVersionId,
         currentBasedOnVersionId:
-          sourcePayload?.currentBasedOnVersionId || payload.currentBasedOnVersionId,
+          legacyVersionAuthority?.currentBasedOnVersionId || payload.currentBasedOnVersionId,
         currentExactVersionId:
-          sourcePayload?.currentExactVersionId || payload.currentExactVersionId,
+          legacyVersionAuthority?.currentExactVersionId || payload.currentExactVersionId,
         restoredFromVersionId:
-          sourcePayload?.restoredFromVersionId
-          || payload.restoredFromVersionId
-          || projectRecord.restoredFromVersionId,
+          legacyVersionAuthority?.restoredFromVersionId
+          || payload.restoredFromVersionId,
       });
       let context = null;
       this.#markHydrationStage("publication-start", operationId);
@@ -3364,19 +3370,6 @@ export class ProjectWorkflow {
       const draftRecord = this.#codecs.draftAuthorityFromWorkspace(payload);
       const serverDraftRevision = this.#codecs.authoritativeDraftRevision(draftRecord);
       let recoveredEvents = this.#commentSession.changeEvents;
-      if (
-        nextProjectId
-        && nextDocumentId
-        && authoritativeHash
-        && this.#codecs.isRecord(payload.sourceHistory)
-      ) {
-        this.#documentWorkflow.activateSourceHistory({
-          context,
-          sourceSha256: authoritativeHash,
-          history: payload.sourceHistory,
-          preservePending: Boolean(this.#documentSession.pendingWrite),
-        });
-      }
       if (!this.#draftSession.isActive(context) || serverDraftRevision >= this.#draftSession.revision) {
         this.#draftSession.activate(context, serverDraftRevision, draftRecord);
         const recovered = this.#commentWorkflow.recoverDraft({
@@ -3547,22 +3540,86 @@ export class ProjectWorkflow {
         sourcePath: activeSource,
         error: null,
       });
-      this.#emit({
-        type: "project-hydrated",
-        context,
-        projectName: projectRecord.displayName ? String(projectRecord.displayName) : null,
-        projectRecordsPath: String(
-          workspacePaths.projectRecords || payload.projectRoot || "",
-        ) || null,
-        lastModifiedAt: authoritativeLastModifiedAt || null,
-        showHandoff,
-      });
-      this.#markHydrationStage("ready", operationId);
+      publicationStarted = false;
+      this.#emit({ type: "project-core-ready", context, operationId });
+      this.#markHydrationStage("core-ready", operationId);
       if (sourceBoundaryFrozen && !recoveredAutosaveConflict && !this.#runSession.activeLocked) {
         this.#canvasPort.requestFrame?.(() => this.#canvasPort.unlock?.());
       }
-      return succeeded({ context, hydrated: true });
+      await Promise.resolve();
+      if (!queryIsCurrent()) {
+        return succeeded({ context, hydrated: true, supplemental: false, stale: true });
+      }
+      try {
+        const supplementalVersions = this.#codecs.versionsFromWorkspace(supplementalPayload);
+        if (
+          nextProjectId
+          && nextDocumentId
+          && authoritativeHash
+          && this.#codecs.isRecord(supplementalPayload.sourceHistory)
+        ) {
+          this.#documentWorkflow.activateSourceHistory({
+            context,
+            sourceSha256: authoritativeHash,
+            history: supplementalPayload.sourceHistory,
+            preservePending: Boolean(this.#documentSession.pendingWrite),
+          });
+        }
+        this.#versionSession.updateAuthority({ versions: supplementalVersions });
+        if (!queryIsCurrent()) {
+          return succeeded({ context, hydrated: true, supplemental: false, stale: true });
+        }
+        this.#setSupplemental({
+          phase: "ready",
+          operationId,
+          snapshotRevision: envelope.snapshotRevision,
+        });
+        this.#emit({
+          type: "project-hydrated",
+          context,
+          projectName: projectRecord.displayName ? String(projectRecord.displayName) : null,
+          projectRecordsPath: String(
+            workspacePaths.projectRecords || payload.projectRoot || "",
+          ) || null,
+          lastModifiedAt: authoritativeLastModifiedAt || null,
+          showHandoff,
+        });
+        this.#markHydrationStage("supplemental-ready", operationId);
+        this.#markHydrationStage("ready", operationId);
+        return succeeded({ context, hydrated: true, supplemental: true });
+      } catch (supplementalCause) {
+        const reason = projectErrorMessage(
+          this.#codecs,
+          supplementalCause,
+          "项目辅助资料暂时无法读取。",
+        );
+        this.#setSupplemental({
+          phase: "failed",
+          operationId,
+          snapshotRevision: envelope.snapshotRevision,
+          error: reason,
+        });
+        this.#emit({
+          type: "project-supplemental-failed",
+          context,
+          operationId,
+          reason,
+        });
+        this.#markHydrationStage("supplemental-failed", operationId);
+        return succeeded({ context, hydrated: true, supplemental: false });
+      }
     } catch (cause) {
+      if (this.#snapshot.supplemental.operationId === operationId) {
+        this.#setSupplemental({
+          phase: "failed",
+          operationId,
+          error: projectErrorMessage(
+            this.#codecs,
+            cause,
+            "项目 Core 状态暂时无法读取。",
+          ),
+        });
+      }
       if (
         publicationStarted
         && activeEpoch === this.#projectSession.epoch
@@ -3602,6 +3659,12 @@ export class ProjectWorkflow {
         ),
       );
     } finally {
+      if (
+        this.#snapshot.supplemental.operationId === operationId
+        && this.#snapshot.supplemental.phase === "loading"
+      ) {
+        this.#setSupplemental({ phase: "idle" });
+      }
       if (
         transitionAuthorized
         && this.projectHydrating
@@ -4018,6 +4081,19 @@ export class ProjectWorkflow {
         generation: this.#hydrationGeneration,
         epoch: Number(epoch) || 0,
         sourcePath: sourcePath ? String(sourcePath) : null,
+        error: error ? String(error) : null,
+      }),
+    });
+    this.#notify();
+  }
+
+  #setSupplemental({ phase, operationId = null, snapshotRevision = null, error = null }) {
+    this.#snapshot = Object.freeze({
+      ...this.#snapshot,
+      supplemental: Object.freeze({
+        phase,
+        operationId: operationId ? String(operationId) : null,
+        snapshotRevision: snapshotRevision ? String(snapshotRevision) : null,
         error: error ? String(error) : null,
       }),
     });

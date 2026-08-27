@@ -15,6 +15,10 @@ export type BridgeClient = {
     sourcePath: string,
     options?: { operationId?: string },
   ): Promise<BridgeJson>;
+  workspaceEnvelope(
+    sourcePath: string,
+    options?: { operationId?: string },
+  ): Promise<BridgeJson>;
   source(
     sourcePath: string,
     options?: { timeoutMs?: number },

@@ -38,6 +38,12 @@ export type ProjectHydrationSnapshot = Readonly<{
 
 export type ProjectWorkflowSnapshot = Readonly<{
   hydration: ProjectHydrationSnapshot;
+  supplemental: Readonly<{
+    phase: "idle" | "loading" | "ready" | "failed";
+    operationId: string | null;
+    snapshotRevision: string | null;
+    error: string | null;
+  }>;
   switch: Readonly<{
     phase: "idle" | "preparing";
     operationId: string | null;
@@ -94,7 +100,7 @@ export type ProjectWorkflowConstruction = Readonly<{
   bridgeClient: Pick<
     BridgeClient,
     "workspace" | "source" | "conflictCandidate" | "projectFile" | "openFolder"
-  >;
+  > & Partial<Pick<BridgeClient, "workspaceEnvelope">>;
   projectSession: ProjectSession;
   documentSession: DocumentSession;
   commentSession: CommentSession;

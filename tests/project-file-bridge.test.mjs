@@ -48,6 +48,20 @@ test("project-file PR1 import switches to V1 before the queued save and leaves e
   assert.match(ensured.body.sourcePath, /external-V1\.htm$/u);
   assert.equal(ensured.body.openTarget.workingCopyId, "work_ver_0001");
   assert.equal(Number.isFinite(ensured.body.performanceTiming.workspaceTotalMs), true);
+  const envelope = await bridge.requestJson(
+    `/workspace?sourcePath=${encodeURIComponent(ensured.body.sourcePath)}&operationId=hydration_bridge_1&shape=core-supplemental`,
+  );
+  assert.equal(envelope.response.status, 200, JSON.stringify(envelope.body));
+  assert.equal(envelope.body.workspaceEnvelopeVersion, 1);
+  assert.equal(envelope.body.operationId, "hydration_bridge_1");
+  assert.equal(envelope.body.core.content, original);
+  assert.equal(envelope.body.core.sourceSha256, ensured.body.sourceSha256);
+  assert.equal(envelope.body.supplemental.operationId, "hydration_bridge_1");
+  assert.equal(
+    envelope.body.supplemental.snapshotRevision,
+    envelope.body.snapshotRevision,
+  );
+  assert.ok(Array.isArray(envelope.body.supplemental.versions));
   assert.equal(await readFile(sourcePath, "utf8"), original);
 
   const edited = html("queued first edit");
