@@ -113,6 +113,13 @@ const TASK_OWNER_CASES = [
     ],
   },
   {
+    file: "app/globals.css",
+    nodeTests: ["tests/workbench-css.test.mjs"],
+    suites: ["typecheck", "node-targeted", "build-web", "browser-editing-smoke"],
+    directOwners: ["tests/workbench-css.test.mjs"],
+    unrelatedOwners: ["tests/application-update.test.mjs", "tests/notification-policy.test.mjs"],
+  },
+  {
     file: "desktop/application-update.mjs",
     nodeTests: ["tests/application-update.test.mjs"],
     suites: ["typecheck", "lint", "node-targeted", "build-desktop", "electron-editing-smoke"],
