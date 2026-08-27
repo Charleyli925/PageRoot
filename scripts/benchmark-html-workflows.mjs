@@ -69,7 +69,7 @@ const executablePath = path.join(
 const qaToken = "【PageRoot 性能测试编辑】";
 const reviewMarker = "PageRoot-Real-HTML-Review-Performance-Marker";
 const results = {
-  schemaVersion: 2,
+  schemaVersion: 3,
   startedAt: new Date().toISOString(),
   sourceCommit: options.commit || execFileSync(
     "git",
@@ -268,6 +268,36 @@ async function activeContentReady({ expectedStem = "", timeout = 45_000 } = {}) 
     ));
   }, { timeout, label: `visible HTML content ${expectedStem}` });
   return { editor, iframe };
+}
+
+async function firstUsefulDocumentVisible({ expectedStem = "", timeout = 45_000 } = {}) {
+  if (expectedStem) {
+    await waitUntil(async () => {
+      const project = await activeProject();
+      return project?.sourcePath && path.basename(project.sourcePath).includes(expectedStem);
+    }, { timeout, label: `active project display ${expectedStem}` });
+  }
+  await waitUntil(async () => {
+    const display = launched.page.getByTestId("html-display-surface")
+      .filter({ visible: true })
+      .first();
+    if (
+      await display.isVisible().catch(() => false)
+      && await display.getAttribute("data-display-ready").catch(() => null) === "true"
+    ) return true;
+    const editor = launched.page.getByTestId("html-canvas-editor")
+      .filter({ visible: true })
+      .first();
+    if (!await editor.isVisible().catch(() => false)) return false;
+    const iframe = editor.locator('iframe[title*="HTML"]').first();
+    const handle = await iframe.elementHandle().catch(() => null);
+    const frame = await handle?.contentFrame();
+    if (!frame || frame.isDetached()) return false;
+    return frame.locator("body").evaluate((body) => (
+      body.getClientRects().length > 0
+      && (body.innerText || body.textContent || "").trim().length > 20
+    )).catch(() => false);
+  }, { timeout, label: `first useful document visible ${expectedStem}` });
 }
 
 async function finishActiveReadiness(editor, timeout = 45_000) {
@@ -470,8 +500,14 @@ async function openThroughInput(source, ordinal) {
   if (pendingImport === "confirm") {
     await importButton.click();
   }
-  const { editor } = await activeContentReady({ expectedStem: source.stem });
-  const visibleMs = performance.now() - started;
+  const displayReadyPromise = firstUsefulDocumentVisible({ expectedStem: source.stem })
+    .then(() => performance.now() - started);
+  const editorReadyPromise = activeContentReady({ expectedStem: source.stem })
+    .then((value) => ({ ...value, editReadyMs: performance.now() - started }));
+  const [displayReadyMs, { editor, editReadyMs }] = await Promise.all([
+    displayReadyPromise,
+    editorReadyPromise,
+  ]);
   const renderedPromise = waitForRenderedContent(
     () => currentEditorFrame(launched.page),
     started,
@@ -507,7 +543,9 @@ async function openThroughInput(source, ordinal) {
     ordinal,
     fileName: path.basename(source.original),
     sourceBytes: statSync(source.original).size,
-    visibleMs: round(visibleMs),
+    visibleMs: round(displayReadyMs),
+    displayReadyMs: round(displayReadyMs),
+    editReadyMs: round(editReadyMs),
     textVisibleMs: rendered.textVisibleMs,
     allChartsReadyMs: rendered.allChartsReadyMs,
     fullContentReadyMs: rendered.fullContentReadyMs,
@@ -524,6 +562,8 @@ async function openThroughInput(source, ordinal) {
     ordinal: sample.ordinal,
     fileName: sample.fileName,
     visibleMs: sample.visibleMs,
+    displayReadyMs: sample.displayReadyMs,
+    editReadyMs: sample.editReadyMs,
     textVisibleMs: sample.textVisibleMs,
     allChartsReadyMs: sample.allChartsReadyMs,
     fullContentReadyMs: sample.fullContentReadyMs,
@@ -815,8 +855,17 @@ async function exerciseReviewAndAccept() {
     return project?.sourcePath && project.sourcePath !== oldSourcePath
       && await workspace.count() === 0;
   }, { timeout: 45_000, label: "review accepted and new HTML opened" });
-  await activeContentReady({ timeout: 45_000 });
-  results.review.acceptToNewHtmlMs = round(performance.now() - acceptStarted);
+  const acceptDisplayPromise = firstUsefulDocumentVisible({ timeout: 45_000 })
+    .then(() => performance.now() - acceptStarted);
+  const acceptEditorPromise = activeContentReady({ timeout: 45_000 })
+    .then(() => performance.now() - acceptStarted);
+  const [acceptDisplayReadyMs, acceptEditReadyMs] = await Promise.all([
+    acceptDisplayPromise,
+    acceptEditorPromise,
+  ]);
+  results.review.acceptDisplayReadyMs = round(acceptDisplayReadyMs);
+  results.review.acceptEditReadyMs = round(acceptEditReadyMs);
+  results.review.acceptToNewHtmlMs = round(acceptEditReadyMs);
   results.review.acceptedRendered = await waitForRenderedContent(
     () => currentEditorFrame(page),
     acceptStarted,
@@ -861,8 +910,19 @@ async function openAfterAccept(source) {
     }, { timeout: 15_000, label: "post-accept picker handoff" });
   }
   if (pendingImport === "confirm") await importButton.click();
-  const { editor } = await activeContentReady({ expectedStem: source.stem, timeout: 45_000 });
-  results.acceptThenOpen.visibleMs = round(performance.now() - started);
+  const displayPromise = firstUsefulDocumentVisible({
+    expectedStem: source.stem,
+    timeout: 45_000,
+  }).then(() => performance.now() - started);
+  const editorPromise = activeContentReady({ expectedStem: source.stem, timeout: 45_000 })
+    .then((value) => ({ ...value, editReadyMs: performance.now() - started }));
+  const [displayReadyMs, { editor, editReadyMs }] = await Promise.all([
+    displayPromise,
+    editorPromise,
+  ]);
+  results.acceptThenOpen.visibleMs = round(displayReadyMs);
+  results.acceptThenOpen.displayReadyMs = round(displayReadyMs);
+  results.acceptThenOpen.editReadyMs = round(editReadyMs);
   results.acceptThenOpen.rendered = await waitForRenderedContent(
     () => currentEditorFrame(page),
     started,
@@ -990,6 +1050,8 @@ try {
 
   results.openingSummary = {
     visible: summarize(results.opening.map((sample) => sample.visibleMs)),
+    displayReady: summarize(results.opening.map((sample) => sample.displayReadyMs)),
+    editReady: summarize(results.opening.map((sample) => sample.editReadyMs)),
     textVisible: summarize(results.opening.map((sample) => sample.textVisibleMs)),
     allChartsReady: summarize(results.opening
       .map((sample) => sample.allChartsReadyMs)

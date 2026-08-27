@@ -7,7 +7,7 @@ import {
   EDIT_RUNTIME_SOURCE_MARKER_ATTRIBUTE,
   collectEditRuntimeScripts,
   editRuntimeProtocolUrl,
-  isEditRuntimeEchartsCandidate,
+  isEditRuntimeVisualCandidate,
   isEditRuntimeExecutionId,
   isEditRuntimeSessionId,
 } from "../domain/edit-runtime-contract.js";
@@ -146,9 +146,14 @@ function sourceContentIsEmpty(element) {
 }
 
 function runtimeHostMatches(element, binding) {
+  const tagName = String(binding?.tagName || "").toLowerCase();
+  const canvasTextFallback = tagName === "canvas"
+    && Array.from(element?.childNodes || []).every((node) => (
+      node.nodeType === Node.COMMENT_NODE || node.nodeType === Node.TEXT_NODE
+    ));
   return element instanceof Element
-    && element.tagName.toLowerCase() === String(binding?.tagName || "").toLowerCase()
-    && sourceContentIsEmpty(element)
+    && element.tagName.toLowerCase() === tagName
+    && (sourceContentIsEmpty(element) || canvasTextFallback)
     && Array.isArray(binding?.identityAttributes)
     && binding.identityAttributes.length > 0
     && binding.identityAttributes.every(([name, value]) => (
@@ -236,7 +241,7 @@ export function prepareOneShotRuntimeFrameDocument(
   if (
     scriptContract.unsupportedReason
     || scriptContract.executableScripts.length < 1
-    || !isEditRuntimeEchartsCandidate(source)
+    || !isEditRuntimeVisualCandidate(source)
   ) return null;
   const sanitized = sanitizePreviewDocument(source, baseUrl);
   if (typeof DOMParser === "undefined") return null;

@@ -24,7 +24,7 @@ import {
   writeFileSync,
 } from "./electron-native-harness.mjs";
 
-test("Electron keeps runtime visuals in Preview and source-backed static content in Edit", {
+test("Electron keeps bounded visuals in first Edit and full interaction in Preview", {
   tag: ["@gate-smoke","@smoke-editing"],
 }, async () => {
   const sourceDirectory = mkdtempSync(
@@ -176,11 +176,15 @@ test("Electron keeps runtime visuals in Preview and source-backed static content
       "preview-tab-copy",
     );
 
-    await expect(editFrame.locator("#runtime-canvas canvas")).toHaveCount(0);
-    await expect(editFrame.locator("#runtime-svg svg")).toHaveCount(0);
-    await expect(editFrame.locator("[data-runtime-row]")).toHaveCount(0);
-    await expect(editFrame.locator("#direct-runtime-svg rect")).toHaveCount(0);
+    await expect(editFrame.locator("#runtime-canvas canvas")).toHaveCount(1);
+    await expect(editFrame.locator("#runtime-svg svg")).toHaveCount(1);
+    await expect(editFrame.locator("[data-runtime-row]")).toHaveCount(2);
+    await expect(editFrame.locator("#direct-runtime-svg rect")).toHaveCount(1);
     await expect(editFrame.locator("[data-pageroot-readonly-visual]")).toHaveCount(0);
+    await expect(editFrame.locator("html"))
+      .toHaveAttribute("data-pageroot-edit-runtime-frozen", "true");
+    await expect(launched.page.locator("[data-runtime-bootstrap-count=\"1\"]"))
+      .toHaveCount(1);
     expect(readFileSync(sourcePath)).toEqual(originalSource);
 
     await launched.page.getByRole("button", {
@@ -236,10 +240,12 @@ test("Electron keeps runtime visuals in Preview and source-backed static content
     await expect(resumedEditFrame.locator("#panel-two")).toHaveClass(/active/u);
     await expect(resumedEditFrame.locator("#panel-one")).toBeHidden();
     await expect(resumedEditFrame.locator("#static-chart")).toBeVisible();
-    await expect(resumedEditFrame.locator("#runtime-canvas canvas")).toHaveCount(0);
-    await expect(resumedEditFrame.locator("#runtime-svg svg")).toHaveCount(0);
-    await expect(resumedEditFrame.locator("[data-runtime-chart]")).toHaveCount(0);
+    await expect(resumedEditFrame.locator("#runtime-canvas canvas")).toHaveCount(1);
+    await expect(resumedEditFrame.locator("#runtime-svg svg")).toHaveCount(1);
+    await expect(resumedEditFrame.locator("[data-runtime-chart]")).toHaveCount(1);
     await expect(resumedEditFrame.locator("[data-pageroot-readonly-visual]")).toHaveCount(0);
+    await expect(launched.page.locator("[data-runtime-bootstrap-count=\"1\"]"))
+      .toHaveCount(1);
     expect(readFileSync(sourcePath)).toEqual(originalSource);
 
     await activateNativeEdit(resumedEditFrame, "preview-tab-copy");
@@ -763,6 +769,118 @@ test("Electron Edit preserves imported source-relative ECharts assets and native
     removeValidatedTemporaryDirectory(
       sourceDirectory,
       "pageroot-edit-runtime-source-e2e-",
+    );
+  }
+});
+
+test("Electron Edit completes bounded Canvas and empty-SVG author paint without source leakage", {
+  tag: ["@gate-smoke", "@smoke-editing"],
+}, async () => {
+  const sourceDirectory = mkdtempSync(
+    path.join(tmpdir(), "pageroot-custom-visual-runtime-e2e-"),
+  );
+  const sourcePath = path.join(sourceDirectory, "custom-visual-runtime.html");
+  const source = `<!doctype html>
+<html><head><meta charset="utf-8"><title>Custom visual runtime</title></head>
+<body>
+  <button id="theme-toggle" aria-pressed="false">Theme</button>
+  <canvas id="custom-canvas" width="240" height="120">Canvas fallback text</canvas>
+  <svg id="custom-svg" style="width:240px;height:120px"></svg>
+  <p data-native-case="custom-runtime-editable">自定义图表旁的正文仍可编辑。</p>
+  <script>
+    window.__PAGEROOT_CUSTOM_VISUAL_EXECUTIONS__ =
+      (window.__PAGEROOT_CUSTOM_VISUAL_EXECUTIONS__ || 0) + 1;
+    document.documentElement.dataset.theme = "dark";
+    document.body.style.background = "rgb(1, 2, 3)";
+    document.getElementById("theme-toggle").setAttribute("aria-pressed", "true");
+    const canvas = document.getElementById("custom-canvas");
+    canvas.width = 480;
+    canvas.height = 240;
+    const context = canvas.getContext("2d");
+    context.fillStyle = "rgb(37, 99, 235)";
+    context.fillRect(0, 0, 180, 90);
+    const svg = document.getElementById("custom-svg");
+    svg.setAttribute("viewBox", "0 0 240 120");
+    svg.setAttribute("preserveAspectRatio", "none");
+    svg.innerHTML = '<rect width="240" height="120" fill="#7c3aed"></rect>';
+  </script>
+</body></html>`;
+  const sourceSha256 = sha256(source);
+  writeFileSync(sourcePath, source, "utf8");
+
+  let electronApp = null;
+  let isolatedUserData = null;
+  try {
+    const launched = await launchPageRoot({ activeSourcePath: sourcePath });
+    electronApp = launched.electronApp;
+    isolatedUserData = launched.isolatedUserData;
+    const { frame } = await loadedDiskFrame(
+      launched.page,
+      sourcePath,
+      "custom-runtime-editable",
+    );
+
+    await expect.poll(() => frame.evaluate(() => {
+      const canvas = document.getElementById("custom-canvas");
+      const context = canvas?.getContext("2d", { willReadFrequently: true });
+      const pixel = context?.getImageData(20, 20, 1, 1).data || [];
+      const svg = document.getElementById("custom-svg");
+      return {
+        executions: window.__PAGEROOT_CUSTOM_VISUAL_EXECUTIONS__ || 0,
+        canvasPixel: Array.from(pixel),
+        canvasSize: [canvas?.width, canvas?.height],
+        rootTheme: document.documentElement.getAttribute("data-theme"),
+        bodyStyle: document.body.getAttribute("style"),
+        themePressed: document.getElementById("theme-toggle")?.getAttribute("aria-pressed"),
+        svgRuntimeRects: svg?.querySelectorAll(
+          ':scope > svg[data-pageroot-edit-runtime-owned="runtime-svg-surface"] rect',
+        ).length || 0,
+        outerViewBox: svg?.getAttribute("viewBox"),
+        innerViewBox: svg?.querySelector(":scope > svg")?.getAttribute("viewBox"),
+        frozen: document.documentElement.getAttribute("data-pageroot-edit-runtime-frozen"),
+        snapshots: document.querySelectorAll(
+          "img[data-pageroot-edit-runtime-snapshot], img[src^='data:image/png']",
+        ).length,
+      };
+    }), { timeout: 6_000 }).toEqual({
+      executions: 1,
+      canvasPixel: [37, 99, 235, 255],
+      canvasSize: [480, 240],
+      rootTheme: null,
+      bodyStyle: null,
+      themePressed: "false",
+      svgRuntimeRects: 1,
+      outerViewBox: null,
+      innerViewBox: "0 0 240 120",
+      frozen: "true",
+      snapshots: 0,
+    });
+    await expect(launched.page.locator("[data-runtime-bootstrap-count=\"1\"]"))
+      .toHaveCount(1);
+    await expect(launched.page.getByTestId("html-canvas-editor"))
+      .toHaveAttribute("data-render-verified", "true");
+    expect(await launched.page.evaluate(() => performance.getEntriesByName(
+      "pageroot:canvas:render-verified",
+    ).at(-1)?.detail?.content)).toBe("runtime-complete");
+    expect(sha256(readFileSync(sourcePath, "utf8"))).toBe(sourceSha256);
+
+    const managedSourcePath = await managedWorkingCopyPath(launched.page, sourcePath);
+    await activateNativeEdit(frame, "custom-runtime-editable");
+    await setTextSelection(frame, "custom-runtime-editable", 0);
+    await launched.page.keyboard.insertText("原位");
+    await expect.poll(() => readFileSync(managedSourcePath, "utf8"))
+      .toContain("原位自定义图表旁的正文仍可编辑。");
+    expect(readFileSync(managedSourcePath, "utf8")).not.toMatch(
+      /data-pageroot-edit-runtime|runtime-svg-surface/u,
+    );
+    expect(sha256(readFileSync(sourcePath, "utf8"))).toBe(sourceSha256);
+  } finally {
+    if (electronApp && isolatedUserData) {
+      await stopPageRoot(electronApp, isolatedUserData);
+    }
+    removeValidatedTemporaryDirectory(
+      sourceDirectory,
+      "pageroot-custom-visual-runtime-e2e-",
     );
   }
 });

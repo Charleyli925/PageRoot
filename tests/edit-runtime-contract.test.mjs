@@ -8,6 +8,7 @@ import {
   collectEditRuntimeScripts,
   editRuntimeProtocolUrl,
   isEditRuntimeEchartsCandidate,
+  isEditRuntimeVisualCandidate,
   isEditRuntimeExecutionId,
   isEditRuntimeFrameToken,
   isEditRuntimeProtocolUrl,
@@ -60,13 +61,22 @@ test("direct Edit runtime keeps module and dynamic imports outside its boundary"
   );
 });
 
-test("direct Edit runtime remains ECharts-only", () => {
+test("direct Edit runtime keeps ECharts compatibility and admits explicit Canvas/SVG paint", () => {
   assert.equal(isEditRuntimeEchartsCandidate(
     '<main id="chart"></main><script src="./vendor/echarts.min.js"></script><script>echarts.init(document.querySelector("#chart"))</script>',
   ), true);
   assert.equal(isEditRuntimeEchartsCandidate(
     '<main id="chart"></main><script>document.querySelector("#chart").append(document.createElement("canvas"))</script>',
   ), false);
+  assert.equal(isEditRuntimeVisualCandidate(
+    '<canvas id="chart">fallback</canvas><script>document.querySelector("#chart").getContext("2d").fillRect(0,0,10,10)</script>',
+  ), true);
+  assert.equal(isEditRuntimeVisualCandidate(
+    '<svg id="chart"></svg><script>document.querySelector("#chart").setAttribute("viewBox", "0 0 10 10")</script>',
+  ), true);
+  assert.equal(isEditRuntimeVisualCandidate(
+    '<main id="app"></main><script>document.querySelector("#app").addEventListener("click", () => {})</script>',
+  ), false, "ordinary application scripts stay outside the visual runtime boundary");
 });
 
 test("direct Edit runtime grants use one session and one execution identity", () => {

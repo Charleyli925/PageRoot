@@ -10,8 +10,8 @@ import {
   EDIT_RUNTIME_PROTOCOL_SCHEME,
   collectEditRuntimeScripts,
   editRuntimeProtocolUrl,
-  hasEditRuntimeEchartsSignal,
-  isEditRuntimeEchartsCandidate,
+  hasEditRuntimeVisualSignal,
+  isEditRuntimeVisualCandidate,
   isEditRuntimeExecutionId,
   isEditRuntimeSessionId,
   unsupportedEditRuntimeProgramReason,
@@ -200,11 +200,16 @@ function validateBoundHosts(documentNode, bindings) {
   if (!root) throw new TypeError("Edit runtime source has no document root.");
   for (const binding of bindings) {
     const element = childAtPath(root, binding.path);
+    const sourceEmpty = sourceContentIsEmpty(element);
+    const canvasTextFallback = binding.tagName === "canvas"
+      && (element?.childNodes || []).every((node) => (
+        node.nodeName === "#text" || node.nodeName === "#comment"
+      ));
     if (
       !element
       || String(element.tagName || "").toLowerCase() !== binding.tagName
-      || !sourceContentIsEmpty(element)
-    ) throw new TypeError("Edit runtime host binding is not source-empty.");
+      || (!sourceEmpty && !canvasTextFallback)
+    ) throw new TypeError("Edit runtime host binding is not an approved visual surface.");
     const attributes = attributesFor(element);
     if (!binding.identityAttributes.every(([name, expected]) => (
       attributes.get(name) === expected
@@ -403,7 +408,7 @@ async function fixedAuthorScripts({
   ) throw new TypeError("Edit runtime script count is invalid.");
   const scripts = [];
   let totalBytes = 0;
-  let containsEchartsSignal = isEditRuntimeEchartsCandidate(html);
+  let containsVisualSignal = isEditRuntimeVisualCandidate(html);
   for (const descriptor of contract.executableScripts) {
     const bytes = descriptor.src
       ? (permittedEchartsUrl(descriptor.src)
@@ -427,7 +432,7 @@ async function fixedAuthorScripts({
     if (programReason) {
       throw new TypeError("Edit runtime script is unsupported: " + programReason + ".");
     }
-    containsEchartsSignal ||= hasEditRuntimeEchartsSignal(program);
+    containsVisualSignal ||= hasEditRuntimeVisualSignal(program);
     totalBytes += bytes.byteLength;
     if (totalBytes > EDIT_AUTHOR_RUNTIME_BUDGET.aggregateScriptBytes) {
       throw new TypeError("Edit runtime script aggregate exceeds the byte budget.");
@@ -439,8 +444,8 @@ async function fixedAuthorScripts({
       available: true,
     }));
   }
-  if (!containsEchartsSignal) {
-    throw new TypeError("Edit runtime requires an ECharts candidate source.");
+  if (!containsVisualSignal) {
+    throw new TypeError("Edit runtime requires an explicit visual paint candidate.");
   }
   const digest = createHash("sha256");
   for (const script of scripts) {

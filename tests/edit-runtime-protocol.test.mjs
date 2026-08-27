@@ -174,6 +174,47 @@ test("direct protocol keeps CSP instead of keyword-rejecting fetch and workers",
   );
 });
 
+test("direct protocol admits contained custom visual bytes but rejects non-visual programs", async (t) => {
+  const temporaryRoot = await mkdtemp(path.join(tmpdir(), "pageroot-edit-runtime-custom-"));
+  t.after(() => rm(temporaryRoot, { recursive: true, force: true }));
+  const sourcePath = path.join(temporaryRoot, "custom.html");
+  const canvasHtml = [
+    '<!doctype html><html><body><canvas id="chart-host">fallback</canvas>',
+    '<script>document.querySelector("#chart-host").getContext("2d").fillRect(0,0,10,10)</script>',
+    "</body></html>",
+  ].join("");
+  await writeFile(sourcePath, canvasHtml);
+  const controller = createEditRuntimeProtocolController({
+    protocolApi: { handle() {} },
+    netFetch: async () => new Response("unexpected", { status: 500 }),
+    randomSessionId: () => "c".repeat(32),
+    randomExecutionId: () => "d".repeat(24),
+  });
+  const bindings = [{
+    key: "edit-runtime-1",
+    path: [1, 0],
+    tagName: "canvas",
+    identityAttributes: [["id", "chart-host"]],
+  }];
+  const session = await controller.createSession({
+    html: canvasHtml,
+    sourcePath,
+    bindings,
+  });
+  assert.equal(session.scriptCount, 1);
+  assert.equal(session.byteLength > 0, true);
+
+  const nonVisualHtml = canvasHtml.replace(
+    'document.querySelector("#chart-host").getContext("2d").fillRect(0,0,10,10)',
+    'document.querySelector("#chart-host").addEventListener("click", () => {})',
+  );
+  await writeFile(sourcePath, nonVisualHtml);
+  await assert.rejects(
+    controller.createSession({ html: nonVisualHtml, sourcePath, bindings }),
+    /explicit visual paint candidate/u,
+  );
+});
+
 test("direct protocol never serves a capture HTML document and consumes bootstrap once", async (t) => {
   const temporaryRoot = await mkdtemp(path.join(tmpdir(), "pageroot-edit-runtime-document-"));
   t.after(() => rm(temporaryRoot, { recursive: true, force: true }));

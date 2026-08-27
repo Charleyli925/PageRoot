@@ -215,11 +215,16 @@ function hostDescriptor(index, element) {
  * may be created inside the host.
  */
 function editRuntimeHostDescriptor(index, element) {
+  const directKind = DIRECT_HOST_KINDS.get(element?.tagName);
+  const directHostIsEligible = (
+    directKind === "canvas" && element.childElementIds.length === 0
+  )
+    || (directKind === "svg" && sourceContentIsEmpty(index, element));
   if (
     !element
     || element.type !== "element"
     || EDIT_RUNTIME_DANGEROUS_HOST_TAGS.has(element.tagName)
-    || !sourceContentIsEmpty(index, element)
+    || (directKind ? !directHostIsEligible : !sourceContentIsEmpty(index, element))
   ) return null;
   const binding = stableBinding(index, element);
   if (!binding.length) return null;
@@ -233,12 +238,12 @@ function editRuntimeHostDescriptor(index, element) {
   }
   return Object.freeze({
     sourceNodeId: element.nodeId,
-    kind: "host",
+    kind: directKind || "host",
     hostTargetRef: Object.freeze({ ...hostTargetRef }),
     binding: Object.freeze({
       path,
       tagName: element.tagName,
-      kind: "host",
+      kind: directKind || "host",
       identityAttributes: binding,
     }),
   });

@@ -78,7 +78,9 @@ export function collectEditRuntimeScripts(html: string): Readonly<{
   unsupportedReason: string | null;
 }>;
 export function hasEditRuntimeEchartsSignal(source: string): boolean;
+export function hasEditRuntimeVisualSignal(source: string): boolean;
 export function isEditRuntimeEchartsCandidate(html: string): boolean;
+export function isEditRuntimeVisualCandidate(html: string): boolean;
 export function unsupportedEditRuntimeProgramReason(source: string): string | null;
 export function editRuntimeSourceMarker(path: readonly number[]): string | null;
 export function isEditRuntimeSessionId(value: unknown): boolean;

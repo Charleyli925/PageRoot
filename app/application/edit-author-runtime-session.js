@@ -2,7 +2,7 @@ import {
   EDIT_AUTHOR_RUNTIME_BUDGET,
   EDIT_AUTHOR_RUNTIME_CONTRACT_VERSION,
   collectEditRuntimeScripts,
-  isEditRuntimeEchartsCandidate,
+  isEditRuntimeVisualCandidate,
   isEditRuntimeSourceSha256,
 } from "../domain/edit-runtime-contract.js";
 import {
@@ -252,7 +252,7 @@ export class EditAuthorRuntimeSession {
       scriptContract.unsupportedReason
       || scriptContract.executableScripts.length < 1
       || scriptContract.executableScripts.length > EDIT_AUTHOR_RUNTIME_BUDGET.scriptCount
-      || !isEditRuntimeEchartsCandidate(identity.html)
+      || !isEditRuntimeVisualCandidate(identity.html)
     ) {
       this.#emit({
         phase: "static",
