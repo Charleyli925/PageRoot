@@ -89,6 +89,7 @@ const results = {
   editing: {},
   preview: {},
   switching: {},
+  cacheBudget: {},
   review: {},
   acceptThenOpen: {},
   memory: [],
@@ -623,22 +624,53 @@ async function requestLocalHtmlOpen(page) {
 async function cacheState() {
   return launched.page.evaluate(() => {
     const root = document.querySelector('[data-testid="workbench-document-surface-cache"]');
+    const numberAttribute = (name) => Number(root?.getAttribute(name) || 0);
     return {
       surfaceCount: root?.querySelectorAll("[data-tab-id]").length || 0,
       iframeCount: root?.querySelectorAll("iframe").length || 0,
       hotTabIds: [...(root?.querySelectorAll("[data-tab-id]") || [])]
         .map((entry) => entry.getAttribute("data-tab-id")),
       visible: root?.getAttribute("data-visible") || null,
+      visibleTabId: root?.getAttribute("data-visible-tab-id") || null,
+      hotCount: numberAttribute("data-hot-count"),
+      warmCount: numberAttribute("data-warm-count"),
+      coldCount: numberAttribute("data-cold-count"),
+      cachedBytes: numberAttribute("data-cache-bytes"),
+      limits: {
+        maxHotEntries: numberAttribute("data-max-hot-entries"),
+        maxEntries: numberAttribute("data-max-cache-entries"),
+        maxBytes: numberAttribute("data-max-cache-bytes"),
+      },
     };
   });
+}
+
+function assertCacheBudget(snapshot, label) {
+  assert(snapshot.limits.maxHotEntries > 0, `${label}: cache diagnostics are missing`);
+  assert.equal(snapshot.surfaceCount, snapshot.hotCount, `${label}: Hot DOM count drifted`);
+  assert.equal(snapshot.iframeCount, snapshot.hotCount, `${label}: live iframe count drifted`);
+  assert(
+    snapshot.hotCount <= snapshot.limits.maxHotEntries,
+    `${label}: mounted hot surfaces exceeded the resource budget`,
+  );
+  assert(
+    snapshot.hotCount + snapshot.warmCount <= snapshot.limits.maxEntries,
+    `${label}: retained projections exceeded the entry budget`,
+  );
+  assert(
+    snapshot.cachedBytes <= snapshot.limits.maxBytes,
+    `${label}: retained projections exceeded the byte budget`,
+  );
 }
 
 async function switchTo(index) {
   const tabs = launched.page.getByRole("tablist", { name: "已打开的 HTML" }).getByRole("tab");
   const tab = tabs.nth(index);
   const label = (await tab.innerText()).trim();
+  const tabId = String(await tab.getAttribute("id") || "").replace(/^workbench-tab-/u, "");
   const beforeAdds = await launched.page.evaluate(() => Number(window.__qaIframeAdds || 0));
   const beforeRemoves = await launched.page.evaluate(() => Number(window.__qaIframeRemoves || 0));
+  const cacheTimelineStartedAt = await launched.page.evaluate(() => performance.now());
   const started = performance.now();
   await tab.click();
   await waitUntil(
@@ -663,6 +695,17 @@ async function switchTo(index) {
   const elapsedMs = rendered.fullContentReadyMs ?? rendered.observationMs;
   const afterAdds = await launched.page.evaluate(() => Number(window.__qaIframeAdds || 0));
   const afterRemoves = await launched.page.evaluate(() => Number(window.__qaIframeRemoves || 0));
+  const cacheHandoff = await launched.page.evaluate(({ minimumStartTime, expectedTabId }) => {
+    const matching = (name) => performance.getEntriesByName(name, "mark")
+      .filter((entry) => entry.startTime >= minimumStartTime)
+      .find((entry) => entry.detail?.tabId === expectedTabId);
+    const visible = matching("pageroot:tab-cache:visible-ready");
+    const completed = matching("pageroot:tab-cache:handoff-complete");
+    return {
+      visibleReadyMs: visible ? visible.startTime - minimumStartTime : null,
+      handoffCompleteMs: completed ? completed.startTime - minimumStartTime : null,
+    };
+  }, { minimumStartTime: cacheTimelineStartedAt, expectedTabId: tabId });
   return {
     index,
     label,
@@ -670,6 +713,12 @@ async function switchTo(index) {
     textVisibleMs: rendered.textVisibleMs,
     allChartsReadyMs: rendered.allChartsReadyMs,
     renderFacts: rendered.snapshot,
+    cachedDisplayReadyMs: cacheHandoff.visibleReadyMs === null
+      ? null
+      : round(cacheHandoff.visibleReadyMs),
+    cacheHandoffCompleteMs: cacheHandoff.handoffCompleteMs === null
+      ? null
+      : round(cacheHandoff.handoffCompleteMs),
     iframeAdds: afterAdds - beforeAdds,
     iframeRemoves: afterRemoves - beforeRemoves,
   };
@@ -681,6 +730,12 @@ async function runSwitchBatch(label, indices) {
   const elapsed = samples.map((sample) => sample.elapsedMs);
   const summary = {
     ...summarize(elapsed),
+    cachedDisplayReady: summarize(samples
+      .map((sample) => sample.cachedDisplayReadyMs)
+      .filter((value) => value !== null)),
+    cacheHandoffComplete: summarize(samples
+      .map((sample) => sample.cacheHandoffCompleteMs)
+      .filter((value) => value !== null)),
     iframeAdds: samples.reduce((sum, sample) => sum + sample.iframeAdds, 0),
     iframeRemoves: samples.reduce((sum, sample) => sum + sample.iframeRemoves, 0),
     cache: await cacheState(),
@@ -1068,6 +1123,8 @@ try {
   const tabCount = await launched.page.getByRole("tablist", { name: "已打开的 HTML" })
     .getByRole("tab").count();
   assert.equal(tabCount, 20);
+  results.cacheBudget.after20Opens = await cacheState();
+  assertCacheBudget(results.cacheBudget.after20Opens, "20 opens");
   await launched.page.screenshot({
     path: path.join(screenshotsRoot, "03-twenty-tabs-real-html.png"),
     animations: "disabled",
@@ -1077,6 +1134,8 @@ try {
     "20-tabs-stress-40-switches",
     Array.from({ length: 40 }, (_, index) => (index * 7) % 20),
   );
+  results.cacheBudget.after40Switches = await cacheState();
+  assertCacheBudget(results.cacheBudget.after40Switches, "40 switches");
   await rendererMemory("20-tabs-after-stress");
 
   await switchTo(0);

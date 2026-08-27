@@ -155,10 +155,40 @@ test("Electron browser A to B to A reopens exact in-memory HTML and deduplicates
     await expect(frame.locator(caseSelector("list-item"))).toHaveText("Browser memory B");
     await expect(tabs.filter({ hasText: "browser-memory-b" })).toHaveCount(1);
     await expect(tabs).toHaveCount(afterA + 1);
-    await tabs.filter({ hasText: "browser-memory-a" }).click();
+    const cachedA = tabs.filter({ hasText: "browser-memory-a" });
+    const cachedATabId = String(await cachedA.getAttribute("id"))
+      .replace(/^workbench-tab-/u, "");
+    await launched.page.evaluate(() => {
+      performance.clearMarks("pageroot:tab-cache:visible-ready");
+      performance.clearMarks("pageroot:tab-cache:handoff-complete");
+    });
+    await cachedA.click();
     frame = await waitForBrowserText("Browser memory A");
     await expect(frame.locator(caseSelector("list-item"))).toHaveText("Browser memory A");
     await expect(tabs).toHaveCount(afterA + 1);
+    await expect.poll(() => launched.page.evaluate((tabId) => {
+      const mark = (name) => performance.getEntriesByName(name, "mark")
+        .find((entry) => entry.detail?.tabId === tabId)?.startTime || null;
+      return {
+        visible: mark("pageroot:tab-cache:visible-ready"),
+        handoff: mark("pageroot:tab-cache:handoff-complete"),
+      };
+    }, cachedATabId), { timeout: 30_000 }).toMatchObject({
+      visible: expect.any(Number),
+      handoff: expect.any(Number),
+    });
+    const cacheTiming = await launched.page.evaluate((tabId) => {
+      const mark = (name) => performance.getEntriesByName(name, "mark")
+        .find((entry) => entry.detail?.tabId === tabId)?.startTime || null;
+      return {
+        visible: mark("pageroot:tab-cache:visible-ready"),
+        handoff: mark("pageroot:tab-cache:handoff-complete"),
+      };
+    }, cachedATabId);
+    expect(cacheTiming.visible).toBeLessThan(cacheTiming.handoff);
+    const cacheRoot = launched.page.getByTestId("workbench-document-surface-cache");
+    await expect(cacheRoot).toHaveAttribute("data-hot-count", "3");
+    await expect(cacheRoot).toHaveAttribute("data-max-hot-entries", "3");
 
     await htmlInput.setInputFiles(projectA.sourcePath);
     frame = await waitForBrowserText("Browser memory A");

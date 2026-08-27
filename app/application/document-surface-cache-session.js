@@ -1,6 +1,9 @@
+// A live iframe is materially more expensive than its source string. Keep only
+// the three most recent projections mounted, while retaining enough byte-bounded
+// source projections for a realistic 20-tab workbench to avoid a cold flash.
 const DEFAULT_MAX_HOT_ENTRIES = 3;
-const DEFAULT_MAX_WARM_ENTRIES = 8;
-const DEFAULT_MAX_BYTES = 48 * 1024 * 1024;
+const DEFAULT_MAX_WARM_ENTRIES = 20;
+const DEFAULT_MAX_BYTES = 32 * 1024 * 1024;
 const MAX_PRESENTATION_CONTEXT_CHARS = 64 * 1024;
 const SHA256 = /^sha256:[a-f0-9]{64}$/u;
 
@@ -39,17 +42,34 @@ function freezeEntry(entry, hot) {
   });
 }
 
-function frozenSnapshot(revision, entries, hotIds, totalBytes) {
+function frozenSnapshot(revision, entries, hotIds, tabIds, totalBytes, limits) {
   const hot = new Set(hotIds);
+  const entryIds = new Set(entries.map((entry) => entry.tabId));
   return Object.freeze({
     revision,
     entries: Object.freeze(entries.map((entry) => freezeEntry(entry, hot.has(entry.tabId)))),
     hotTabIds: Object.freeze([...hotIds]),
+    warmTabIds: Object.freeze(entries
+      .filter((entry) => !hot.has(entry.tabId))
+      .map((entry) => entry.tabId)),
+    coldTabIds: Object.freeze(tabIds.filter((tabId) => !entryIds.has(tabId))),
     totalBytes,
+    limits: Object.freeze({ ...limits }),
   });
 }
 
-export const INITIAL_DOCUMENT_SURFACE_CACHE_SNAPSHOT = frozenSnapshot(0, [], [], 0);
+export const INITIAL_DOCUMENT_SURFACE_CACHE_SNAPSHOT = frozenSnapshot(
+  0,
+  [],
+  [],
+  [],
+  0,
+  {
+    maxHotEntries: DEFAULT_MAX_HOT_ENTRIES,
+    maxEntries: DEFAULT_MAX_WARM_ENTRIES,
+    maxBytes: DEFAULT_MAX_BYTES,
+  },
+);
 
 /**
  * Owns disposable, read-only tab display projections. Entries never authorize
@@ -60,6 +80,7 @@ export class DocumentSurfaceCacheSession {
   #listeners = new Set();
   #entries = new Map();
   #hotIds = [];
+  #tabIds = [];
   #totalBytes = 0;
   #revision = 0;
   #snapshot = INITIAL_DOCUMENT_SURFACE_CACHE_SNAPSHOT;
@@ -78,6 +99,11 @@ export class DocumentSurfaceCacheSession {
       Math.round(Number(maxWarmEntries)) || this.#maxHotEntries,
     );
     this.#maxBytes = Math.max(1, Math.round(Number(maxBytes)) || 1);
+    this.#snapshot = frozenSnapshot(0, [], [], [], 0, {
+      maxHotEntries: this.#maxHotEntries,
+      maxEntries: this.#maxWarmEntries,
+      maxBytes: this.#maxBytes,
+    });
   }
 
   get snapshot() {
@@ -111,6 +137,8 @@ export class DocumentSurfaceCacheSession {
       || document?.canvasAuthority?.status !== "verified"
       || document.canvasAuthority.renderedSha256 !== sourceSha256
     ) return null;
+
+    if (!this.#tabIds.includes(tabId)) this.#tabIds = [...this.#tabIds, tabId];
 
     const normalizedContext = presentationContext(presentation.pageViewContext);
     const contentBytes = Math.max(1, 2 * html.length + 2 * sourcePath.length + 512);
@@ -184,8 +212,11 @@ export class DocumentSurfaceCacheSession {
   }
 
   reconcile(tabIds) {
-    const retained = new Set(Array.isArray(tabIds) ? tabIds.map(String) : []);
-    let changed = false;
+    const normalizedTabIds = Array.isArray(tabIds) ? tabIds.map(String) : [];
+    const retained = new Set(normalizedTabIds);
+    let changed = normalizedTabIds.length !== this.#tabIds.length
+      || normalizedTabIds.some((tabId, index) => this.#tabIds[index] !== tabId);
+    this.#tabIds = normalizedTabIds;
     for (const [tabId, entry] of this.#entries) {
       if (retained.has(tabId)) continue;
       this.#entries.delete(tabId);
@@ -202,9 +233,10 @@ export class DocumentSurfaceCacheSession {
   }
 
   clear() {
-    if (!this.#entries.size && !this.#hotIds.length) return;
+    if (!this.#entries.size && !this.#hotIds.length && !this.#tabIds.length) return;
     this.#entries.clear();
     this.#hotIds = [];
+    this.#tabIds = [];
     this.#totalBytes = 0;
     this.#publish();
   }
@@ -239,7 +271,13 @@ export class DocumentSurfaceCacheSession {
       this.#revision,
       [...this.#entries.values()],
       this.#hotIds,
+      this.#tabIds,
       this.#totalBytes,
+      {
+        maxHotEntries: this.#maxHotEntries,
+        maxEntries: this.#maxWarmEntries,
+        maxBytes: this.#maxBytes,
+      },
     );
     for (const listener of this.#listeners) {
       try {

@@ -824,7 +824,9 @@ export class WorkspaceController {
           if (this.#disposed) return;
           this.#workbenchTabsSnapshot = snapshot;
           this.#documentSurfaceCacheSession?.reconcile(
-            snapshot.tabs.map((tab) => tab.tabId),
+            snapshot.tabs
+              .filter((tab) => tab.kind === "document")
+              .map((tab) => tab.tabId),
           );
           this.#refreshDocumentSurfaceCache();
           this.#publishAggregateSnapshot();
