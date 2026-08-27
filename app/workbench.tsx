@@ -6162,78 +6162,19 @@ export default function Workbench() {
   const generateRequest = useCallback(async (
     deliveryMode: AgentDeliveryMode, fromDeferred = false,
   ) => {
-    if (!fromDeferred) deferredEditorReplayRef.current.agentDeliveryMode = deliveryMode;
-    const currentRun = currentRunSessionSnapshot();
-    const currentProject = currentProjectSessionSnapshot();
-    const currentDocument = currentDocumentSessionSnapshot();
-    const currentComments = currentCommentSessionSnapshot();
-    if (currentRun.submissionPending) return;
-    const submissionSourcePath = currentProject.sourcePath;
-    if (!submissionSourcePath) {
-      if (typeof window !== "undefined" && !window.htmlAIProjects) return;
-      void openProject();
-      return;
-    }
-    if (
-      !workspaceController
-      || projectHydrating
-      || projectLoadError
-      || isViewTransitioning()
-      || viewMode === "history"
-      || currentDocument.persistState === "failed"
-      || currentDocument.persistState === "conflict"
-    ) return;
-    if (currentRun.activeLocked) {
-      openProcessPanel();
-      void workspaceControllerRef.current?.dismissFirstEditGuide();
-      return;
-    }
-    if (
-      currentComments.composerTarget
-      && (
-        currentComments.composerDraft.trim()
-        || currentComments.composerAttachments.length > 0
-      )
-    ) {
-      setToast({
-        title: "还有一条评论未保存",
-        message: "请先点击“评论”保存；保存后仍可修改，再发送本轮要求。",
-        tone: "warning",
-        sticky: true,
-        disposition: "direct-action",
-        dedupeKey: "unfinished-comment-draft",
-        action: { id: "resume-draft", label: "继续填写" },
-      });
-      return;
-    }
-    const unfinishedEdit = currentComments.editSession;
-    if (unfinishedEdit && commentEditSessionHasChanges(unfinishedEdit)) {
-      showUnfinishedCommentEditNotice(unfinishedEdit);
-      return;
-    }
-    if (
-      !fromDeferred
-      && deferEditorCommand(
-        "ai-handoff",
-        () => deferredEditorReplayRef.current.generateRequest?.(),
-      )
-    ) return;
-
-    const outcome = await requiredWorkspaceController(workspaceController)
-      .submitRequest({
-        projectName,
-        previousVersionId: latestVersionId,
-        basedOnVersionId: currentBasedOnVersionId,
-        deadlineAt: Date.now() + 60_000,
-        deliveryMode,
-      });
-    if (outcome.status === "succeeded" || outcome.status === "stale") return outcome;
-    if (outcome.status === "unknown") {
-      openProcessPanel();
-      void workspaceControllerRef.current?.dismissFirstEditGuide();
-      return outcome;
-    }
-    if (outcome.status === "blocked") {
+    const presentRunSubmissionFailure = (outcome: { code: string; reason: string }) => {
+      if (outcome.code === "RUN_SUBMISSION_COMMENT_DRAFT") {
+        setToast({
+          title: "还有一条评论未保存",
+          message: "请先点击“评论”保存；保存后仍可修改，再发送本轮要求。",
+          tone: "warning",
+          sticky: true,
+          disposition: "direct-action",
+          dedupeKey: "unfinished-comment-draft",
+          action: { id: "resume-draft", label: "继续填写" },
+        });
+        return;
+      }
       if (outcome.code === "RUN_SUBMISSION_COMMENT_EDIT") {
         const currentEdit = currentCommentSessionSnapshot().editSession;
         if (currentEdit) showUnfinishedCommentEditNotice(currentEdit);
@@ -6281,27 +6222,83 @@ export default function Workbench() {
         });
         return;
       }
+      if (
+        deliveryMode === "managed-agent"
+        && workspaceControllerRef.current
+          ?.getSnapshot().run?.qoderAvailability.status !== "ready"
+      ) return;
+      const registrationFailure = outcome.code === "PROJECT_REGISTRATION_REJECTED"
+        || outcome.code === "PROJECT_REGISTRATION_UNKNOWN"
+        || outcome.code === "RUN_SUBMISSION_REGISTRATION_INVALID";
+      setToast({
+        title: registrationFailure ? "项目记录尚未建立" : "暂时无法发送本轮要求",
+        message: outcome.reason,
+        tone: registrationFailure ? "warning" : "error",
+        sticky: true,
+        disposition: "direct-action",
+        dedupeKey: registrationFailure ? "project-registration" : "run-submission-failed",
+        action: {
+          id: "retry-submit",
+          label: registrationFailure ? "重新建立并发送" : "重新发送",
+        },
+      });
+    };
+    if (!fromDeferred) deferredEditorReplayRef.current.agentDeliveryMode = deliveryMode;
+    const currentRun = currentRunSessionSnapshot();
+    const currentProject = currentProjectSessionSnapshot();
+    const currentDocument = currentDocumentSessionSnapshot();
+    if (currentRun.submissionPending) return;
+    const submissionSourcePath = currentProject.sourcePath;
+    if (!submissionSourcePath) {
+      if (typeof window !== "undefined" && !window.htmlAIProjects) return;
+      void openProject();
+      return;
     }
     if (
-      deliveryMode === "managed-agent"
-      && requiredWorkspaceController(workspaceController)
-        .getSnapshot().run?.qoderAvailability.status !== "ready"
-    ) return outcome;
-    const registrationFailure = outcome.code === "PROJECT_REGISTRATION_REJECTED"
-      || outcome.code === "PROJECT_REGISTRATION_UNKNOWN"
-      || outcome.code === "RUN_SUBMISSION_REGISTRATION_INVALID";
-    setToast({
-      title: registrationFailure ? "项目记录尚未建立" : "暂时无法发送本轮要求",
-      message: outcome.reason,
-      tone: registrationFailure ? "warning" : "error",
-      sticky: true,
-      disposition: "direct-action",
-      dedupeKey: registrationFailure ? "project-registration" : "run-submission-failed",
-      action: {
-        id: "retry-submit",
-        label: registrationFailure ? "重新建立并发送" : "重新发送",
-      },
-    });
+      !workspaceController
+      || projectHydrating
+      || projectLoadError
+      || isViewTransitioning()
+      || viewMode === "history"
+      || currentDocument.persistState === "failed"
+      || currentDocument.persistState === "conflict"
+    ) return;
+    if (currentRun.activeLocked) {
+      presentRunSubmissionFailure({ code: "RUN_SUBMISSION_LOCKED", reason: "当前项目正在处理上一轮要求。" });
+      return;
+    }
+    const submissionPlan = workspaceController.planRunSubmission();
+    if (
+      submissionPlan.kind === "reject"
+      && ["RUN_SUBMISSION_COMMENT_DRAFT", "RUN_SUBMISSION_COMMENT_EDIT"]
+        .includes(submissionPlan.code)
+    ) {
+      presentRunSubmissionFailure(submissionPlan);
+      return;
+    }
+    if (
+      !fromDeferred
+      && deferEditorCommand(
+        "ai-handoff",
+        () => deferredEditorReplayRef.current.generateRequest?.(),
+      )
+    ) return;
+
+    const outcome = await requiredWorkspaceController(workspaceController)
+      .submitRequest({
+        projectName,
+        previousVersionId: latestVersionId,
+        basedOnVersionId: currentBasedOnVersionId,
+        deadlineAt: Date.now() + 60_000,
+        deliveryMode,
+      });
+    if (outcome.status === "succeeded" || outcome.status === "stale") return outcome;
+    if (outcome.status === "unknown") {
+      openProcessPanel();
+      void workspaceControllerRef.current?.dismissFirstEditGuide();
+      return outcome;
+    }
+    presentRunSubmissionFailure(outcome);
     return outcome;
   }, [
     currentBasedOnVersionId,
@@ -6312,11 +6309,13 @@ export default function Workbench() {
     deferEditorCommand,
     latestVersionId,
     openProject,
+    openProcessPanel,
     isViewTransitioning,
     projectHydrating,
     projectLoadError,
     projectName,
     requestComposerFocus,
+    setToast,
     showUnfinishedCommentEditNotice,
     viewMode,
     workspaceController,

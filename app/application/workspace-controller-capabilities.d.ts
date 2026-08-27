@@ -15,6 +15,7 @@ import type { ProjectContext, ProjectSessionSnapshot } from "./project-session.j
 import type { ProjectWorkflowSnapshot } from "./project-workflow.js";
 import type { RunSessionSnapshot } from "./run-session.js";
 import type { RunWorkflowOutcome, RunWorkflowSnapshot } from "./run-workflow.js";
+import type { RunSubmitPlan } from "./run/submit-plan.js";
 import type { VersionSessionSnapshot } from "./version-session.js";
 import type {
   VersionReviewCandidate,
@@ -96,6 +97,10 @@ export interface ReviewPreparationControllerCapability extends WorkspaceSnapshot
   prepareReviewCandidate(input: {
     run?: ActiveRun | null;
   }): Promise<VersionWorkflowOutcome<VersionReviewCandidate>>;
+}
+
+export interface RunSubmissionControllerCapability {
+  planRunSubmission(): RunSubmitPlan;
 }
 
 export interface DocumentSurfaceControllerCapability extends WorkspaceSnapshotReader {

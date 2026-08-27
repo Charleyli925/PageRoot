@@ -63,10 +63,6 @@ import type { BrowserDocumentSession } from "./browser-document-session.js";
 import type { DocumentSurfaceCacheSession } from "./document-surface-cache-session.js";
 import type { WorkbenchTabsPersistenceCoordinator } from "./workbench-tabs-persistence-coordinator.js";
 import type {
-  AiConversationControllerCapability,
-  DocumentSurfaceControllerCapability,
-  NavigationWorkflowControllerCapability,
-  ReviewPreparationControllerCapability,
   CommandOutcome,
 } from "./workspace-controller-capabilities.js";
 
@@ -80,6 +76,7 @@ export type {
   OperationIdentity,
   RecoveryIntent,
   ReviewPreparationControllerCapability,
+  RunSubmissionControllerCapability,
   WorkspaceControllerSnapshot,
   WorkspaceSnapshotReader,
 } from "./workspace-controller-capabilities.js";
@@ -377,14 +374,13 @@ export function createRuntimeWorkspaceController(
 
 // The class retains injected construction for isolated Application tests. The
 // production renderer must use createRuntimeWorkspaceController instead.
-export interface WorkspaceController
-  extends AiConversationControllerCapability,
-    ReviewPreparationControllerCapability,
-    DocumentSurfaceControllerCapability,
-    NavigationWorkflowControllerCapability {}
-
 export class WorkspaceController {
   constructor(options: WorkspaceControllerConstruction);
+  getSnapshot(): import("./workspace-controller-capabilities.js").WorkspaceControllerSnapshot;
+  openConversation(
+    context: import("./conversation-session.js").ConversationContext | null,
+  ): Promise<unknown>;
+  closeConversation(): void;
   updateConversationDraftText(text: string): void;
   updateConversationDraftIntent(intent: string): void;
   flushConversationDraft(): Promise<void>;
@@ -402,6 +398,15 @@ export class WorkspaceController {
     documentId: string,
     status: WorkbenchTabStatus,
   ): WorkbenchTabsSnapshot | null;
+  updateDocumentSurfacePresentation(
+    tabId: string,
+    presentation?: Readonly<Record<string, unknown>>,
+  ): import("./document-surface-cache-session.js").DocumentSurfaceCacheEntry | null;
+  subscribe(
+    listener: (
+      snapshot: import("./workspace-controller-capabilities.js").WorkspaceControllerSnapshot,
+    ) => void,
+  ): () => void;
   subscribeEvents(listener: (event: WorkspaceEvent) => void): () => void;
   readonly projectHydrating: boolean;
   readonly projectLoadError: string | null;
@@ -552,12 +557,17 @@ export class WorkspaceController {
     deadlineAt?: number;
     deliveryMode?: "clipboard" | "managed-agent" | string;
   }): Promise<RunWorkflowOutcome>;
+  planRunSubmission(): import("./run/submit-plan.js").RunSubmitPlan;
+  selectAgent(
+    selection: import("../domain/agent-provider-state.js").AgentSelection,
+  ): import("../domain/agent-provider-state.js").AgentSelection;
   refreshQoderAvailability(): Promise<RunWorkflowOutcome>;
   checkQoderUsability(): Promise<RunWorkflowOutcome>;
   copyQoderGuidance(input: {
     kind: import("../domain/agent-provider-state.js").AgentProviderGuidanceKind;
   }): Promise<RunWorkflowOutcome>;
   refreshAgentAvailability(): Promise<RunWorkflowOutcome>;
+  checkAgentUsability(): Promise<RunWorkflowOutcome>;
   copyAgentGuidance(input: {
     kind: import("../domain/agent-provider-state.js").AgentProviderGuidanceKind;
   }): Promise<RunWorkflowOutcome>;
@@ -582,6 +592,11 @@ export class WorkspaceController {
     run?: import("../domain/run-lifecycle.js").ActiveRun | null;
     action: "adopt-ai" | "keep-external";
   }): Promise<RunWorkflowOutcome>;
+  prepareReviewCandidate(input: {
+    run?: import("../domain/run-lifecycle.js").ActiveRun | null;
+  }): Promise<VersionWorkflowOutcome<
+    import("./version-workflow.js").VersionReviewCandidate
+  >>;
   activateReadyVersion(input: {
     run?: import("../domain/run-lifecycle.js").ActiveRun | null;
     reviewLease?: Readonly<{ operationKey: string; beforeHtml: string }> | null;

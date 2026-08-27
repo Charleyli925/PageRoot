@@ -15,6 +15,7 @@ import type {
   AgentCatalogState,
   AgentProviderPresentation,
 } from "./agent-provider-catalog.js";
+import type { RunSubmitPlan } from "./run/submit-plan.js";
 
 export type RunWorkflowOutcome<T = unknown> =
   | Readonly<{ status: "succeeded"; value: T }>
@@ -142,6 +143,7 @@ export class RunWorkflow {
   copyQoderGuidance(input: {
     kind: AgentProviderGuidanceKind;
   }): Promise<RunWorkflowOutcome<{ kind: AgentProviderGuidanceKind; copied: true }>>;
+  planSubmission(): RunSubmitPlan;
   submit(input?: {
     projectName?: string;
     previousVersionId?: string | null;
