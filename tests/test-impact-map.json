@@ -579,7 +579,7 @@
         "^app/application/workbench-(?:tabs-(?:session|persistence-coordinator)|navigation-(?:session|workflow))\\.(?:js|d\\.ts)$",
         "^app/application/document-surface-cache-session\\.(?:js|d\\.ts)$",
         "^app/application/browser-document-session\\.(?:js|d\\.ts)$",
-        "^app/workbench/(?:WorkbenchChrome|WorkbenchDocumentSurfaceCache|document-surface-presentation)\\.(?:tsx|ts)$",
+        "^app/workbench/(?:WorkbenchChrome|WorkbenchDocumentSurfaceCache|document-surface-presentation|performance-timeline)\\.(?:tsx|ts)$",
         "^app/workbench/workbench-document-surface-cache\\.module\\.css$",
         "^desktop/workbench-tabs-state\\.mjs$",
         "^tests/e2e/electron/electron-workbench-tabs\\.spec\\.mjs$",
@@ -1428,7 +1428,8 @@
     {
       "id": "desktop-lifecycle",
       "patterns": [
-        "^desktop/(?:bridge-startup|bridge-shutdown|close-recovery|app-lifecycle)\\.mjs$"
+        "^desktop/(?:bridge-startup|bridge-shutdown|close-recovery|app-lifecycle|startup-performance-timeline)\\.mjs$",
+        "^tests/startup-performance-timeline\\.test\\.mjs$"
       ],
       "suites": [
         "electron-recovery-smoke"
@@ -1437,7 +1438,8 @@
         "tests/bridge-shutdown.test.mjs",
         "tests/bridge-startup.test.mjs",
         "tests/desktop-close-recovery.test.mjs",
-        "tests/electron-window-policy.test.mjs"
+        "tests/electron-window-policy.test.mjs",
+        "tests/startup-performance-timeline.test.mjs"
       ]
     },
     {
@@ -1487,7 +1489,8 @@
         "tests/product-contract.test.mjs",
         "tests/source-file-watch.test.mjs",
         "tests/active-managed-locator.test.mjs",
-        "tests/source-rename.test.mjs"
+        "tests/source-rename.test.mjs",
+        "tests/startup-performance-timeline.test.mjs"
       ]
     },
     {
@@ -1739,10 +1742,11 @@
       "id": "project-file-lifecycle",
       "patterns": [
         "^bridge/project-file-(?:repository|finalizer)\\.mjs$",
-        "^bridge/project-file-repository/(?:constants|errors)\\.mjs$",
+        "^bridge/project-file-repository/(?:constants|errors|workspace-performance-timing)\\.mjs$",
         "^tests/project-file-(?:finalizer|bridge|schema)\\.test\\.mjs$",
         "^tests/project-file-repository(?:-harness|\\.integration\\.test)\\.mjs$",
-        "^tests/project-(?:registry-and-open|working-copy-save|candidate-promotion|request-authority|ai-task-projection|path-security-and-locks)\\.test\\.mjs$"
+        "^tests/project-(?:registry-and-open|working-copy-save|candidate-promotion|request-authority|ai-task-projection|path-security-and-locks)\\.test\\.mjs$",
+        "^tests/workspace-performance-timing\\.test\\.mjs$"
       ],
       "suites": [
         "ai-review-smoke"
@@ -1757,7 +1761,8 @@
         "tests/project-file-repository.integration.test.mjs",
         "tests/project-file-finalizer.test.mjs",
         "tests/project-file-bridge.test.mjs",
-        "tests/project-file-schema.test.mjs"
+        "tests/project-file-schema.test.mjs",
+        "tests/workspace-performance-timing.test.mjs"
       ]
     },
     {

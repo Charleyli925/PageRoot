@@ -179,9 +179,13 @@ export function createBridgeClient({
   );
 
   return Object.freeze({
-    workspace: (sourcePath) => query(
+    workspace: (sourcePath, { operationId } = {}) => query(
       "/workspace",
-      { sourcePath, projectStorageVersion: PROJECT_FILE_STORAGE_VERSION },
+      {
+        sourcePath,
+        projectStorageVersion: PROJECT_FILE_STORAGE_VERSION,
+        operationId,
+      },
       "本地项目记录不可用。",
     ),
     source: (sourcePath, { timeoutMs = DEFAULT_READ_TIMEOUT_MS } = {}) => query(

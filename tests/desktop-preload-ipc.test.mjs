@@ -8,7 +8,7 @@ import {
   PROJECT_IPC_VERSION,
 } from "../desktop/export-copy.mjs";
 
-async function loadPreloadApis(invoke, { env = {} } = {}) {
+async function loadPreloadApis(invoke, { env = {}, search = "" } = {}) {
   const source = await readFile(
     new URL("../desktop/preload.mjs", import.meta.url),
     "utf8",
@@ -35,7 +35,7 @@ async function loadPreloadApis(invoke, { env = {} } = {}) {
   };
   const context = vm.createContext({
     console,
-    location: { search: "" },
+    location: { search },
     URLSearchParams,
     process: { env },
     require(specifier) {
@@ -88,6 +88,35 @@ test("preload declares one immutable desktop runtime capability manifest", async
   assert.equal(runtime.capabilities.closeCoordination, "electron-handshake");
   assert.equal(runtime.capabilities.interactivePreview, "independent-url");
   assert.equal(Object.isFrozen(runtime.capabilities), true);
+});
+
+test("preload exposes only validated content-free startup timing", async () => {
+  const startupTiming = encodeURIComponent(JSON.stringify({
+    schemaVersion: 1,
+    timeOriginUnixMs: 1_000,
+    marks: [
+      { stage: "process-start", atUnixMs: 1_001 },
+      { stage: "bridge-ready", atUnixMs: 1_020 },
+      { stage: "invalid stage", atUnixMs: 1_030 },
+    ],
+  }));
+  const { runtime } = await loadPreloadApis(
+    async () => success(null),
+    { search: `?startupTiming=${startupTiming}` },
+  );
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(runtime.diagnostics.startupTiming)),
+    {
+      schemaVersion: 1,
+      timeOriginUnixMs: 1_000,
+      marks: [
+        { stage: "process-start", atUnixMs: 1_001 },
+        { stage: "bridge-ready", atUnixMs: 1_020 },
+      ],
+    },
+  );
+  assert.equal(Object.isFrozen(runtime.diagnostics), true);
+  assert.equal(Object.isFrozen(runtime.diagnostics.startupTiming.marks), true);
 });
 
 test("preload exposes no Agent executable, spawn, command, or path capability", async () => {

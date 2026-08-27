@@ -22,6 +22,9 @@ import {
   ProjectFileRepositoryError,
 } from "../bridge/project-file-repository.mjs";
 import {
+  WORKSPACE_PERFORMANCE_TIMING_FIELDS,
+} from "../bridge/project-file-repository/workspace-performance-timing.mjs";
+import {
   fixture,
   html,
   importSource,
@@ -118,6 +121,29 @@ test("a legacy v4 Runtime without historyActivation opens as null and normalizes
   });
   assert.equal(saved.versionCreated, false);
   assert.equal((await json(runtimePath)).historyActivation, null);
+});
+
+test("workspace reports complete non-authoritative repository stage timing", async (t) => {
+  const value = await fixture(t);
+  const imported = await importSource(value, "timed-workspace.html");
+  const restarted = new ProjectFileRepository({
+    projectsRoot: value.projects,
+  });
+
+  const workspace = await restarted.workspace({
+    sourcePath: imported.target.exactSourcePath,
+  });
+
+  assert.deepEqual(
+    Object.keys(workspace.performanceTiming),
+    [...WORKSPACE_PERFORMANCE_TIMING_FIELDS],
+  );
+  for (const valueMs of Object.values(workspace.performanceTiming)) {
+    assert.equal(Number.isFinite(valueMs), true);
+    assert.ok(valueMs >= 0);
+  }
+  assert.ok(workspace.performanceTiming.workspaceTotalMs > 0);
+  assert.equal(workspace.content, html("V1"));
 });
 
 test("the Registry alone determines catalog membership and secure project opens", async (t) => {
