@@ -39,7 +39,6 @@ test("top toolbar keeps the approved restrained visual contract", async () => {
   const css = await readWorkbenchCascadeCss();
 
   const header = lastCssRule(css, ".workbench-header");
-  assert.match(header, /z-index:\s*80/u);
   assert.match(header, /background:\s*rgb\(253 252 249 \/ 92%\)/u);
   assert.match(header, /box-shadow:\s*none/u);
   assert.match(header, /backdrop-filter:\s*blur\(18px\) saturate\(116%\)/u);
@@ -62,6 +61,17 @@ test("top toolbar keeps the approved restrained visual contract", async () => {
   assert.match(sendButton, /height:\s*34px/u);
   assert.match(sendButton, /margin-left:\s*10px/u);
   assert.match(sendButton, /box-shadow:\s*0 2px 5px rgb\(65 57 166 \/ 14%\)/u);
+});
+
+test("embedded review stays in the content row instead of covering the header", async () => {
+  const css = await readWorkbenchCascadeCss();
+  const stage = css.match(/\.workbench > \.review-scroll-stage \{[\s\S]*?\}/u);
+  assert.ok(stage, "missing .workbench > .review-scroll-stage rule");
+  assert.match(stage[0], /position:\s*relative/u);
+  assert.doesNotMatch(stage[0], /overflow:\s*hidden/u);
+
+  const header = lastCssRule(css, ".workbench-header");
+  assert.doesNotMatch(header, /z-index:\s*80/u);
 });
 
 test("a hover tooltip stays pointer-scoped and yields to the surface it opened", async () => {

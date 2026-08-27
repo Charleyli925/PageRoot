@@ -140,7 +140,6 @@
 }
 
 .workbench > .workbench-header {
-  z-index: 80;
   padding: 20px 14px 8px 18px;
 }
 
@@ -181,6 +180,7 @@
 }
 
 .workbench > .review-scroll-stage {
+  position: relative;
   padding-left: 40px;
 }
 
