@@ -43,8 +43,9 @@ test.describe("notification recovery paths", () => {
     );
     await expect(notice).toHaveAttribute("role", "status");
     await expect(notice).toHaveAttribute("aria-live", "polite");
-    await expect(page.getByText("notification-recovery", { exact: true }).first())
-      .toBeVisible();
+    await expect(page.getByRole("tablist", { name: "已打开的 HTML" })
+      .getByRole("tab").filter({ hasText: "notification-recovery" }))
+      .toHaveCount(1);
 
     const chooserPromise = page.waitForEvent("filechooser");
     const retry = notice.getByRole("button", { name: "重新选择" });
@@ -57,8 +58,9 @@ test.describe("notification recovery paths", () => {
       buffer: fixtureBuffer("complex-layout.html"),
     });
 
-    await expect(page.getByText("recovered-utf8", { exact: true }).first())
-      .toBeVisible();
+    await expect(page.getByRole("tablist", { name: "已打开的 HTML" })
+      .getByRole("tab").filter({ hasText: "recovered-utf8" }))
+      .toHaveCount(1);
     await expect(notice).toHaveCount(0);
   });
 
@@ -83,8 +85,9 @@ test.describe("notification recovery paths", () => {
     await page.keyboard.press("Enter");
 
     await expect(notice).toHaveCount(0);
-    await expect(page.getByText("notification-recovery", { exact: true }).first())
-      .toBeVisible();
+    await expect(page.getByRole("tablist", { name: "已打开的 HTML" })
+      .getByRole("tab").filter({ hasText: "notification-recovery" }))
+      .toHaveCount(1);
   });
 
   test("a full attachment batch leads back to removable attachments before retry", async ({

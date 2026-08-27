@@ -686,7 +686,7 @@ test("Electron rapid project switching and immediate close preserve the last nat
   }
 });
 
-test("Electron follows a same-directory Finder rename then a title-bar rename", async () => {
+test("Electron follows a same-directory Finder rename and keeps the selected tab synchronized", async () => {
   const fixture = createSourceFixture("finder-rename-sync.html");
   let electronApp = null;
   let isolatedUserData = null;
@@ -773,20 +773,14 @@ test("Electron follows a same-directory Finder rename then a title-bar rename", 
       "Finder 改名后评论仍保留。",
     );
 
-    await launched.page.getByRole("button", { name: /重命名文件/u }).click();
-    const renameInput = launched.page.getByRole("textbox", { name: "文件名（不含后缀）" });
-    await expect(renameInput).toBeFocused();
-    await renameInput.fill("pageroot-renamed-V1");
-    await renameInput.press("Enter");
-    const pagerootPath = path.join(
-      path.dirname(finderPath),
-      "pageroot-renamed-V1.html",
-    );
-    await waitForTitleStem(launched.page, "pageroot-renamed-V1");
-    await expect.poll(() => existsSync(pagerootPath)).toBe(true);
-    const finalManifest = await readManagedManifest(pagerootPath);
+    await expect(launched.page.getByRole("tablist", { name: "已打开的 HTML" })
+      .getByRole("tab").filter({ hasText: "Finder 新名字-V1" }))
+      .toHaveCount(1);
+    await expect(launched.page.getByRole("button", { name: /重命名文件/u }))
+      .toHaveCount(0);
+    const finalManifest = await readManagedManifest(finderPath);
     expect(finalManifest.versions.length).toBe(beforeVersionCount);
-    expect(readFileSync(pagerootPath, "utf8")).toContain("定位后仍可编辑。");
+    expect(readFileSync(finderPath, "utf8")).toContain("定位后仍可编辑。");
     await expect(launched.page.locator(".comment-card").filter({
       hasText: "Finder 改名后评论仍保留。",
     })).toHaveCount(1);
@@ -798,7 +792,7 @@ test("Electron follows a same-directory Finder rename then a title-bar rename", 
   }
 });
 
-test("Electron follows a title-bar rename, then Finder, then another title-bar rename", async () => {
+test("Electron keeps project identity after Finder rename without restoring title-bar rename", async () => {
   const fixture = createSourceFixture("title-bar-finder-loop.html");
   let electronApp = null;
   let isolatedUserData = null;
@@ -823,35 +817,16 @@ test("Electron follows a title-bar rename, then Finder, then another title-bar r
     };
     const projectDirectory = path.dirname(managedSourcePath);
 
-    await launched.page.getByRole("button", { name: /重命名文件/u }).click();
-    const firstInput = launched.page.getByRole("textbox", { name: "文件名（不含后缀）" });
-    await expect(firstInput).toBeFocused();
-    await firstInput.fill("title-first-V1");
-    await firstInput.press("Enter");
-    const titleBarPath = path.join(projectDirectory, "title-first-V1.html");
-    await waitForTitleStem(launched.page, "title-first-V1");
-    await expect.poll(() => existsSync(titleBarPath)).toBe(true);
-    await waitForActiveSourcePath(launched.page, titleBarPath);
-    await expect(launched.page.locator("#window-file-rename-error")).toHaveCount(0);
-
-    const finderName = "finder-second-V1.html";
-    const finderPath = path.join(projectDirectory, finderName);
-    renameSync(titleBarPath, finderPath);
-    await waitForTitleStem(launched.page, path.basename(finderName, ".html"));
-    await waitForActiveSourcePath(launched.page, finderPath);
-    await expect(launched.page.locator("#window-file-rename-error")).toHaveCount(0);
-
-    await launched.page.getByRole("button", { name: /重命名文件/u }).click();
-    const secondInput = launched.page.getByRole("textbox", { name: "文件名（不含后缀）" });
-    await expect(secondInput).toBeFocused();
-    await expect(secondInput).toHaveValue("finder-second-V1");
-    await secondInput.fill("title-third-V1");
-    await secondInput.press("Enter");
-    const finalPath = path.join(projectDirectory, "title-third-V1.html");
-    await waitForTitleStem(launched.page, "title-third-V1");
-    await expect.poll(() => existsSync(finalPath)).toBe(true);
+    const finalFinderName = "finder-final-V1.html";
+    const finalPath = path.join(projectDirectory, finalFinderName);
+    renameSync(managedSourcePath, finalPath);
+    await waitForTitleStem(launched.page, path.basename(finalFinderName, ".html"));
     await waitForActiveSourcePath(launched.page, finalPath);
-    await expect(launched.page.locator("#window-file-rename-error")).toHaveCount(0);
+    await expect(launched.page.getByRole("tablist", { name: "已打开的 HTML" })
+      .getByRole("tab").filter({ hasText: "finder-final-V1" }))
+      .toHaveCount(1);
+    await expect(launched.page.getByRole("button", { name: /重命名文件/u }))
+      .toHaveCount(0);
 
     const afterWorkspace = await bridgeJson(
       launched.page,
@@ -864,7 +839,7 @@ test("Electron follows a title-bar rename, then Finder, then another title-bar r
       .toBe(beforeIds.workingCopyId);
     const afterManifest = await readManagedManifest(finalPath);
     expect(afterManifest.workingCopies[0].sourceRelativePath)
-      .toBe("title-third-V1.html");
+      .toBe(finalFinderName);
   } finally {
     if (electronApp && isolatedUserData) {
       await stopPageRoot(electronApp, isolatedUserData);
