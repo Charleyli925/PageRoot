@@ -609,6 +609,15 @@ function createSyntheticAgent(fixture, observed) {
     })
     .onRequest(acp.methods.agent.session.prompt, async ({ params, client }) => {
       observed.prompt = params;
+      for (const text of observed.visibleTextChunks || []) {
+        await client.notify(acp.methods.client.session.update, {
+          sessionId,
+          update: {
+            sessionUpdate: "agent_message_chunk",
+            content: { type: "text", text },
+          },
+        });
+      }
       for (let index = 0; index < (observed.updateCount || 1); index += 1) {
         await client.notify(acp.methods.client.session.update, {
           sessionId,
@@ -831,6 +840,36 @@ test("ACP session progress retains and publishes only a bounded update prefix", 
   assert.equal(result.droppedUpdateCount, 8);
   assert.equal(events.filter((event) => event.kind === "session-update").length, 512);
   assert.equal(events.filter((event) => event.kind === "session-updates-truncated").length, 1);
+});
+
+test("ACP execution projects public Agent messages and marks a bounded text tail", async (t) => {
+  const fixture = await createFixture(t);
+  const observed = {
+    visibleTextChunks: [
+      "先读取冻结任务。\u0000",
+      "再写入 Candidate。",
+      "x".repeat((64 * 1024) + 32),
+    ],
+  };
+  const events = [];
+  const result = await runAcpTask({
+    connection: createSyntheticAgent(fixture, observed),
+    policy: fixture.policy,
+    prompt: "Complete the visible-text fixture.",
+    onEvent: (event) => events.push(event),
+    startupTimeoutMs: 1_000,
+    turnTimeoutMs: 4_000,
+  });
+
+  assert.equal(result.visibleText.startsWith("先读取冻结任务。再写入 Candidate。"), true);
+  assert.equal(result.visibleText.includes("\u0000"), false);
+  assert.equal(Buffer.byteLength(result.visibleText, "utf8"), 64 * 1024);
+  assert.equal(result.visibleTextTruncated, true);
+  assert.deepEqual(
+    events.filter((event) => event.kind === "visible-text").map((event) => event.text).slice(0, 2),
+    ["先读取冻结任务。", "再写入 Candidate。"],
+  );
+  assert.equal(events.filter((event) => event.kind === "visible-text-truncated").length, 1);
 });
 
 test("ACP stdio transport completes the same synthetic Candidate contract", async (t) => {

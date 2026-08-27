@@ -664,12 +664,20 @@ export default function Workbench() {
   const agentPresentation = frozenProvider?.presentation ?? {
     displayName: frozenAgentSelection?.providerId || "Agent",
     agentName: frozenAgentSelection?.providerId || "Agent",
+    logoSrc: null,
     settingsSupported: false,
     localReadDisclosure: undefined,
     restartLabel: `重新启动 ${frozenAgentSelection?.providerId || "Agent"}`,
     restartSupported: false,
     stopLabel: `停止 ${frozenAgentSelection?.providerId || "Agent"} 并继续编辑`,
     frozenPreviewDetail: `这是本轮冻结并交给 ${frozenAgentSelection?.providerId || "Agent"} 的只读内容`,
+  };
+  const sidebarAgentPresentation = {
+    providerId: frozenAgentSelection?.providerId || "agent",
+    displayName: agentPresentation.displayName || frozenAgentSelection?.providerId || "Agent",
+    agentName: agentPresentation.agentName || agentPresentation.displayName
+      || frozenAgentSelection?.providerId || "Agent",
+    logoSrc: typeof agentPresentation.logoSrc === "string" ? agentPresentation.logoSrc : null,
   };
   const frozenModelId = frozenAgentSelection?.resolvedModelId
     || frozenAgentSelection?.requestedModelId
@@ -794,10 +802,12 @@ export default function Workbench() {
     agentLocalReadDisclosure: typeof agentPresentation.localReadDisclosure === "string"
       ? agentPresentation.localReadDisclosure
       : null,
+    agentPresentation: sidebarAgentPresentation,
     agentChoices: agentProviderChoices,
     selectedAgentChoiceId,
     // The header's mode comes from Request authority, not from a local guess.
     activeRun: runSnapshot.activeRun,
+    activeHandoff: runSnapshot.activeHandoff,
     submissionPending: runSnapshot.submissionPending,
     // Review is the same workbench with a different Canvas: the thread stays
     // docked and read-only instead of disappearing and coming back.
@@ -1256,10 +1266,10 @@ export default function Workbench() {
           },
         },
         scheduler: {
-          setInterval: (callback: () => void, delayMs: number) => (
-            window.setInterval(callback, delayMs)
+          setTimeout: (callback: () => void, delayMs: number) => (
+            window.setTimeout(callback, delayMs)
           ),
-          clearInterval: (handle: unknown) => window.clearInterval(handle as number),
+          clearTimeout: (handle: unknown) => window.clearTimeout(handle as number),
         },
       },
       versionWorkflow: {
@@ -1386,7 +1396,7 @@ export default function Workbench() {
     useState<readonly string[]>([]);
   const [runtimeCapabilitiesReady, setRuntimeCapabilitiesReady] = useState(false);
   const [browserPreviewOnly, setBrowserPreviewOnly] = useState(false);
-  const qoderHandoffState = runSnapshot.activeHandoff;
+  const agentHandoffState = runSnapshot.activeHandoff;
   const [updateResult, setUpdateResult] =
     useState<ApplicationUpdateResult | null>(null);
   const [aboutOpen, setAboutOpen] = useState(false);
@@ -2443,16 +2453,16 @@ export default function Workbench() {
     [versions, viewingVersionId],
   );
   const runInProgress = projectLocked;
-  const currentQoderHandoffStatus = (
+  const currentAgentHandoffStatus = (
     activeRun?.sourcePath
     && activeRun.requestId
-    && sameLocalSourcePath(qoderHandoffState?.sourcePath, activeRun.sourcePath)
-    && qoderHandoffState?.requestId === activeRun.requestId
-    && qoderHandoffState.attemptId === activeRun.attemptId
+    && sameLocalSourcePath(agentHandoffState?.sourcePath, activeRun.sourcePath)
+    && agentHandoffState?.requestId === activeRun.requestId
+    && agentHandoffState.attemptId === activeRun.attemptId
   )
-    ? qoderHandoffState.status
+    ? agentHandoffState.status
     : "idle";
-  const currentAgentDeliveryState = currentQoderHandoffStatus === "idle" ? null : qoderHandoffState;
+  const currentAgentDeliveryState = currentAgentHandoffStatus === "idle" ? null : agentHandoffState;
   const currentAgentDeliveryMode =
     currentAgentDeliveryState?.mode || activeRun?.agentDelivery?.mode || "clipboard";
   const handoffCancellationNeedsConfirmation = Boolean(
@@ -6702,7 +6712,7 @@ export default function Workbench() {
   );
   const handoffCopyFailed = Boolean(
     activeRun && currentAgentDeliveryState?.retryable !== false
-    && ["failed", "interrupted"].includes(currentQoderHandoffStatus)
+    && ["failed", "interrupted"].includes(currentAgentHandoffStatus)
     && ["submitting", "processing", "ready"].includes(activeRun.status),
   );
   const checkingRun = Boolean(
@@ -6711,7 +6721,7 @@ export default function Workbench() {
   );
   const processPresentation = deriveRunProgressPresentation(
     activeRun,
-    currentAgentDeliveryState || currentQoderHandoffStatus,
+    currentAgentDeliveryState || currentAgentHandoffStatus,
   );
   const processPanelEyebrow = processPresentation.header?.eyebrow
     || "等待AI返回结果";
@@ -7195,7 +7205,7 @@ export default function Workbench() {
 
   const aiAssistantEntry = (
     <AgentDeliveryButton
-      status={currentQoderHandoffStatus}
+      status={currentAgentHandoffStatus}
       attention={Boolean(activeRun?.candidateVersionLabel) || runInProgress}
       disabled={generating || projectHydrating || Boolean(projectLoadError)
         || viewTransitioning || viewMode === "history" || browserPreviewOnly}
@@ -7260,7 +7270,6 @@ export default function Workbench() {
               onAction={handleAiDecision}
           runSteps={processSteps}
           deliveryMode={currentAgentDeliveryMode}
-          agentText={currentAgentDeliveryState?.visibleText || ""}
         />
       ) : null}
     />
@@ -7714,7 +7723,6 @@ export default function Workbench() {
               onAction={handleAiDecision}
               runSteps={processSteps}
               deliveryMode={currentAgentDeliveryMode}
-              agentText={currentAgentDeliveryState?.visibleText || ""}
             />
           </aside>
         ) : null}
@@ -7946,7 +7954,7 @@ export default function Workbench() {
             pendingRunOutcome={pendingRunOutcome}
             pendingReconcileBusy={pendingReconcileBusy}
             handoffCopyFailed={handoffCopyFailed}
-            currentQoderHandoffStatus={currentQoderHandoffStatus}
+            currentAgentHandoffStatus={currentAgentHandoffStatus}
             currentDeliveryMode={currentAgentDeliveryMode}
             agentPresentation={agentPresentation}
             cancelling={cancelling}

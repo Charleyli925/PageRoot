@@ -112,6 +112,11 @@ export function createAgentEventReducer({
         state.visibleText = appended.text;
         state.textTruncated ||= appended.truncated;
       }
+      if (event.kind === "visible-text-truncated") {
+        // A runtime can hit its byte-based public-text boundary before this
+        // character-based reducer reaches its own cap.
+        state.textTruncated = true;
+      }
       if (state.retainedEvents.length < eventLimit) {
         state.retainedEvents.push(event);
       } else if (NON_DROPPABLE_KINDS.has(event.kind)) {

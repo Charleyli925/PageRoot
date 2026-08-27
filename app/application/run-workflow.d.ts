@@ -102,9 +102,14 @@ export type RunWorkflowConstruction = Readonly<{
     hash: Readonly<{ sha256(html: string): Promise<string> }>;
   }>;
   scheduler?: Readonly<{
-    setInterval(callback: () => void, delayMs: number): unknown;
-    clearInterval(handle: unknown): void;
+    setTimeout(callback: () => void, delayMs: number): unknown;
+    clearTimeout(handle: unknown): void;
   }>;
+  visibility?: Readonly<{
+    visibilityState?: string;
+    addEventListener?(type: "visibilitychange", listener: () => void): void;
+    removeEventListener?(type: "visibilitychange", listener: () => void): void;
+  }> | null;
   clock: Readonly<{ now(): number }>;
   agentCatalog?: AgentCatalogState | null;
 }>;

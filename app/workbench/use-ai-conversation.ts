@@ -7,6 +7,7 @@ import type { ConversationSessionSnapshot } from "../application/conversation-se
 import type { QoderAvailabilitySnapshot } from "../domain/qoder-availability.js";
 import type { ActiveRun } from "../domain/run-lifecycle.js";
 import type { AgentSelection } from "../domain/agent-provider-state.js";
+import type { RunHandoffState } from "../application/run-session.js";
 import {
   conversationLoadedForView,
   sidebarStateFromRun,
@@ -34,6 +35,12 @@ export type UseAiConversationOptions = {
   agentSettingsName?: string | null;
   agentSettingsSupported?: boolean;
   agentLocalReadDisclosure?: string | null;
+  agentPresentation?: Readonly<{
+    providerId: string;
+    displayName: string;
+    agentName: string;
+    logoSrc: string | null;
+  }> | null;
   agentChoices?: readonly Readonly<{
     id: string;
     label: string;
@@ -42,6 +49,7 @@ export type UseAiConversationOptions = {
   }>[];
   selectedAgentChoiceId?: string | null;
   activeRun: ActiveRun | null;
+  activeHandoff?: RunHandoffState | null;
   submissionPending?: boolean;
   reviewing?: boolean;
   canvasMode: "edit" | "preview";
@@ -68,13 +76,15 @@ export function useAiConversation({
   conversation,
   qoderAvailability,
   agentModelDisplayName = null,
-  agentActionName = "Qoder",
-  agentSettingsName = "Qoder CLI",
+  agentActionName = "Agent",
+  agentSettingsName = "Agent",
   agentSettingsSupported = true,
   agentLocalReadDisclosure = null,
+  agentPresentation = null,
   agentChoices = [],
   selectedAgentChoiceId = null,
   activeRun,
+  activeHandoff = null,
   submissionPending = false,
   reviewing = false,
   canvasMode,
@@ -176,7 +186,7 @@ export function useAiConversation({
     state,
     title: conversation?.title ?? "",
     messages: conversation?.messages ?? [],
-    // Qoder's availability is the model catalog's readiness: one owner supplies
+    // The selected Agent's availability is the model catalog's readiness: one owner supplies
     // both, so the Composer can never claim ready while the Agent is not.
     catalogStatus: (qoderAvailability?.status ?? "unavailable") as SidebarCatalogStatus,
     modelDisplayName: agentModelDisplayName,
@@ -184,6 +194,7 @@ export function useAiConversation({
     agentSettingsName,
     agentSettingsSupported,
     agentLocalReadDisclosure,
+    agentPresentation,
     modelChoiceCount: agentChoices.length,
     modelChoices: agentChoices.map(({ id, label, detail }) => ({ id, label, detail })),
     selectedModelChoiceId: selectedAgentChoiceId,
@@ -194,6 +205,14 @@ export function useAiConversation({
     candidateStatus: activeRun?.candidateAssessment?.status ?? null,
     failureMessage: activeRun?.error ?? null,
     pendingCommentCount,
+    agentText: activeHandoff?.visibleText || "",
+    agentTextTruncated: activeHandoff?.textTruncated === true,
+    agentStartedAt: activeHandoff?.startedAt || null,
+    agentUpdatedAt: activeHandoff?.updatedAt || null,
+    runKey: activeRun
+      ? `${activeRun.requestId}:${activeRun.attemptId}`
+      : submissionPending ? `pending:${projectId}:${documentId}` : null,
+    runCommentCount: activeRun?.commentCount ?? pendingCommentCount,
     // An explicit allowlist of settled loads (see conversationLoadedForView):
     // the empty-state copy must never appear before the load settles, because
     // the session drops draft writes until it has published a conversation.
@@ -212,8 +231,14 @@ export function useAiConversation({
     agentSettingsName,
     agentSettingsSupported,
     agentLocalReadDisclosure,
+    agentPresentation,
     agentChoices,
     selectedAgentChoiceId,
+    activeHandoff,
+    activeRun,
+    projectId,
+    documentId,
+    submissionPending,
     pendingCommentCount,
     onSend,
     onCopyTask,

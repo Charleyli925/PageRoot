@@ -33,6 +33,12 @@ if (pidFileArgument) {
   writeFileSync(pidFileArgument.slice("--pid-file=".length), `${process.pid}\n`, "utf8");
 }
 const hang = process.argv.includes("--hang");
+const visibleText = process.argv.includes("--visible-text");
+const visibleTextGateArgument = process.argv.find((argument) => argument.startsWith("--visible-text-gate-ms="));
+const visibleTextGateMs = Math.max(
+  0,
+  Math.min(5_000, Number.parseInt(visibleTextGateArgument?.slice("--visible-text-gate-ms=".length) || "0", 10) || 0),
+);
 
 const sessionId = "session_pageroot_e2e_qoder";
 let requestRoot = "";
@@ -69,6 +75,20 @@ const app = acp.agent({ name: "pageroot-e2e-qoder" })
   })
   .onRequest(acp.methods.agent.session.prompt, async ({ params, client }) => {
     if (hang) return new Promise(() => {});
+    if (visibleText) {
+      for (const text of ["正在读取冻结任务。", "正在写入 Candidate。", "正在等待校验。"]) {
+        await client.notify(acp.methods.client.session.update, {
+          sessionId,
+          update: {
+            sessionUpdate: "agent_message_chunk",
+            content: { type: "text", text },
+          },
+        });
+        if (visibleTextGateMs > 0) {
+          await new Promise((resolve) => setTimeout(resolve, visibleTextGateMs));
+        }
+      }
+    }
     const changeRequest = await client.request(acp.methods.client.fs.readTextFile, {
       sessionId,
       path: `${requestRoot}/change-request.json`,

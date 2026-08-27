@@ -26,7 +26,7 @@ import type {
 import { insertionLabel } from "./comment-model";
 import type {
   CommentItem,
-  QoderHandoffUiStatus,
+  AgentHandoffUiStatus,
 } from "./types";
 
 export function processStepStatusLabel(state: string): string {
@@ -366,7 +366,7 @@ export function HandoffFooter({
   pendingRunOutcome,
   pendingReconcileBusy,
   handoffCopyFailed,
-  currentQoderHandoffStatus,
+  currentAgentHandoffStatus,
   currentDeliveryMode,
   agentPresentation,
   cancelling,
@@ -391,7 +391,7 @@ export function HandoffFooter({
   pendingRunOutcome: boolean;
   pendingReconcileBusy: boolean;
   handoffCopyFailed: boolean;
-  currentQoderHandoffStatus: QoderHandoffUiStatus | "idle";
+  currentAgentHandoffStatus: AgentHandoffUiStatus | "idle";
   currentDeliveryMode: "clipboard" | "managed-agent";
   agentPresentation: Readonly<{
     restartLabel?: string;
@@ -453,8 +453,8 @@ export function HandoffFooter({
               type="button"
               disabled={
                 !activeRun.handoffMessage
-                || currentQoderHandoffStatus === "copying"
-                || currentQoderHandoffStatus === "starting"
+                || currentAgentHandoffStatus === "copying"
+                || currentAgentHandoffStatus === "starting"
               }
               onClick={onSend}
             >
@@ -544,14 +544,14 @@ export function HandoffFooter({
             disabled={
               cancelling
               || activeRun.requestId === "pending"
-              || currentQoderHandoffStatus === "cancelling"
+              || currentAgentHandoffStatus === "cancelling"
             }
             onClick={onRequestEnd}
           >
             <ArrowCounterClockwiseIcon aria-hidden="true" size={17} weight="bold" />
             {cancelling
               ? "正在结束本轮…"
-              : ["failed", "interrupted"].includes(currentQoderHandoffStatus)
+              : ["failed", "interrupted"].includes(currentAgentHandoffStatus)
                 ? "结束本轮并返回编辑"
                 : agentPresentation.stopLabel || "停止 Agent 并继续编辑"}
           </button>
@@ -572,7 +572,7 @@ export function HandoffFooter({
             disabled={
               cancelling
               || activeRun.requestId === "pending"
-              || currentQoderHandoffStatus === "copying"
+              || currentAgentHandoffStatus === "copying"
             }
             onClick={onRequestEnd}
           >
@@ -596,14 +596,14 @@ export function HandoffFooter({
             type="button"
             disabled={
               !activeRun.handoffMessage
-              || currentQoderHandoffStatus === "copying"
+              || currentAgentHandoffStatus === "copying"
             }
             onClick={onSend}
           >
             <CopyIcon aria-hidden="true" size={18} weight="bold" />
-            {currentQoderHandoffStatus === "copying"
+            {currentAgentHandoffStatus === "copying"
               ? "正在复制并核对…"
-              : currentQoderHandoffStatus === "failed"
+              : currentAgentHandoffStatus === "failed"
                 ? "重新复制本轮要求"
                 : "再次复制本轮要求"}
           </button>

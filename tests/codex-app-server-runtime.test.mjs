@@ -119,6 +119,26 @@ test("Codex App Server executes one ephemeral sandboxed turn before the fixed fi
   });
 });
 
+test("Codex App Server emits only public message deltas as execution narration", async () => {
+  await runtimeFixture("streaming", async ({ launch, events }) => {
+    // The gate runs this beside filesystem-heavy provider tests; this fixture
+    // still proves one finite turn, so avoid treating scheduler contention as
+    // a false protocol timeout.
+    launch.turnTimeoutMs = 2_000;
+    const result = await runCodexAppServerTask(launch);
+    assert.equal(result.status, "completed");
+    const narration = events
+      .filter((event) => event.kind === "visible-text")
+      .map((event) => event.text)
+      .join("");
+    assert.equal(
+      narration,
+      "先读取冻结任务。再写入 Candidate。最后等待校验。正在修改页面。",
+    );
+    assert.equal(narration.includes("推理不能进入"), false);
+  });
+});
+
 test("the verified native Codex snapshot executes independently of the package path", async () => {
   const installation = await resolveBundledCodexInstallation();
   const prepared = await prepareVerifiedCodexExecutable({

@@ -172,11 +172,6 @@
   color: #fff;
 }
 
-.message[data-actor="qoder"] .avatar {
-  background: rgb(32 29 49 / 10%);
-  color: #43414f;
-}
-
 .actor {
   color: #8a8797;
   font-size: 10px;
@@ -210,6 +205,53 @@
 .interrupted {
   color: #8a8797;
   font-size: 10px;
+}
+
+.agentAvatar {
+  overflow: hidden;
+  background: rgb(32 29 49 / 10%);
+  color: #43414f;
+}
+
+.agentAvatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.messageMeta {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 16px;
+  color: #9a97a4;
+  font-size: 10px;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.message:hover .messageMeta,
+.message:focus-within .messageMeta {
+  opacity: 1;
+}
+
+.messageMeta button {
+  min-height: 20px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #6b6878;
+  font: inherit;
+  font-weight: 680;
+}
+
+.messageMeta button:hover {
+  color: #201d31;
+}
+
+.messageMeta button:focus-visible {
+  outline: 2px solid rgb(90 85 223 / 45%);
+  outline-offset: 2px;
 }
 
 /*
@@ -471,6 +513,19 @@
   row-gap: 4px;
 }
 
+.runSummary {
+  row-gap: 3px;
+}
+
+.runSummaryDetail {
+  color: #8a8797;
+  font-size: 11px;
+}
+
+.liveStatus {
+  color: #201d31;
+}
+
 .runActivityLabel {
   color: #8a8797;
   font-size: 10px;
@@ -518,49 +573,37 @@
 }
 
 
-/*
- * What Qoder says while it works (ADR 0037). Subordinate to the stage list above
- * it: one text button, no border, no fill — collapsing it must feel lighter than
- * reading it. Nothing here competes with the accent on the running stage.
- */
-.narration {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  margin-top: 2px;
-}
-
-.narrationToggle {
-  align-self: flex-start;
-  padding: 0;
-  border: 0;
-  background: none;
-  color: #6b6878;
-  font-size: 11px;
-  cursor: pointer;
-}
-
-.narrationToggle:hover {
-  color: #201d31;
-}
-
 .narrationText {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  /*
-   * No left inset: that 18px was there to clear the stage dots, and with the dots
-   * gone it only narrowed an already narrow column. English prose then broke one
-   * word per line and became unreadable, so long words may break instead.
-   */
+  min-width: 0;
   color: #55525f;
   font-size: 12px;
   line-height: 1.55;
   overflow-wrap: break-word;
+  white-space: pre-wrap;
 }
 
-.narrationText p {
-  margin: 0;
-  white-space: pre-wrap;
+.unseenContent {
+  position: sticky;
+  bottom: 8px;
+  align-self: center;
+  min-height: 28px;
+  padding: 0 10px;
+  border: 1px solid rgb(81 71 220 / 24%);
+  border-radius: 999px;
+  background: rgb(255 255 255 / 96%);
+  box-shadow: 0 4px 14px rgb(32 29 49 / 12%);
+  color: #5147dc;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.unseenContent:focus-visible {
+  outline: 3px solid rgb(90 85 223 / 32%);
+  outline-offset: 2px;
+}
+
+.bottomSentinel {
+  width: 1px;
+  height: 1px;
+  flex: none;
 }
