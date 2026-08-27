@@ -376,7 +376,10 @@ export async function architectureViolations() {
     }
   }
 
-  const scriptFiles = await sourceFiles(path.join(PRODUCT_ROOT, "scripts"));
+  const scriptFiles = [
+    ...(await sourceFiles(path.join(PRODUCT_ROOT, "scripts"))),
+    ...(await sourceFiles(path.join(PRODUCT_ROOT, "bridge"))),
+  ];
   for (const filePath of scriptFiles) {
     const file = relative(filePath);
     const source = await readFile(filePath, "utf8");
@@ -393,7 +396,7 @@ export async function architectureViolations() {
         source,
       )
       && ![
-        "scripts/draft-service.mjs",
+        "bridge/draft-service.mjs",
         "scripts/check-architecture.mjs",
       ].includes(file)
     ) {
@@ -402,19 +405,19 @@ export async function architectureViolations() {
   }
 
   const workspaceBridge = await readFile(
-    path.join(PRODUCT_ROOT, "scripts", "workspace-bridge.mjs"),
+    path.join(PRODUCT_ROOT, "bridge", "workspace-bridge.mjs"),
     "utf8",
   );
   const sourceTransactionService = await readFile(
-    path.join(PRODUCT_ROOT, "scripts", "source-transaction-service.mjs"),
+    path.join(PRODUCT_ROOT, "bridge", "source-transaction-service.mjs"),
     "utf8",
   );
   const workspaceBridgeAst = parseModule(
-    path.join(PRODUCT_ROOT, "scripts", "workspace-bridge.mjs"),
+    path.join(PRODUCT_ROOT, "bridge", "workspace-bridge.mjs"),
     workspaceBridge,
   );
   const sourceTransactionServiceAst = parseModule(
-    path.join(PRODUCT_ROOT, "scripts", "source-transaction-service.mjs"),
+    path.join(PRODUCT_ROOT, "bridge", "source-transaction-service.mjs"),
     sourceTransactionService,
   );
   if (
@@ -426,7 +429,7 @@ export async function architectureViolations() {
     || hasCall(workspaceBridgeAst, { method: "loadMutationContext" })
   ) {
     violations.push(
-      "scripts/workspace-bridge.mjs: must not import or call the retired v3 registry, SourceTransaction, or source-history journal",
+      "bridge/workspace-bridge.mjs: must not import or call the retired v3 registry, SourceTransaction, or source-history journal",
     );
   }
   if (
@@ -434,7 +437,7 @@ export async function architectureViolations() {
     || !hasCall(workspaceBridgeAst, { method: "saveProjectFileAutosave" })
   ) {
     violations.push(
-      "scripts/workspace-bridge.mjs: /autosave must delegate to ProjectFileRepository",
+      "bridge/workspace-bridge.mjs: /autosave must delegate to ProjectFileRepository",
     );
   }
   if (
@@ -442,7 +445,7 @@ export async function architectureViolations() {
     || /\bwriteSourceHistory\s*\(/.test(workspaceBridge)
   ) {
     violations.push(
-      "scripts/workspace-bridge.mjs: current-source writer belongs to ProjectFileRepository",
+      "bridge/workspace-bridge.mjs: current-source writer belongs to ProjectFileRepository",
     );
   }
   if (
@@ -452,7 +455,7 @@ export async function architectureViolations() {
     || !hasCall(sourceTransactionServiceAst, { method: "writeSourceHistory" })
   ) {
     violations.push(
-      "scripts/source-transaction-service.mjs: SourceTransaction must own commit, recovery, and source-history application",
+      "bridge/source-transaction-service.mjs: SourceTransaction must own commit, recovery, and source-history application",
     );
   }
 

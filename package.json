@@ -207,195 +207,195 @@
     "npmRebuild": false,
     "extraResources": [
       {
-        "from": "scripts/workspace-bridge.mjs",
+        "from": "bridge/workspace-bridge.mjs",
         "to": "bridge/workspace-bridge.mjs"
       },
       {
-        "from": "scripts/workspace-bridge-shutdown.mjs",
+        "from": "bridge/workspace-bridge-shutdown.mjs",
         "to": "bridge/workspace-bridge-shutdown.mjs"
       },
       {
-        "from": "scripts/agent-bridge-service.mjs",
+        "from": "bridge/agent-bridge-service.mjs",
         "to": "bridge/agent-bridge-service.mjs"
       },
       {
-        "from": "scripts/agent/agent-runtime-coordinator.mjs",
+        "from": "bridge/agent/agent-runtime-coordinator.mjs",
         "to": "bridge/agent/agent-runtime-coordinator.mjs"
       },
       {
-        "from": "scripts/agent/agent-session-projector.mjs",
+        "from": "bridge/agent/agent-session-projector.mjs",
         "to": "bridge/agent/agent-session-projector.mjs"
       },
       {
-        "from": "scripts/agent/agent-lease-store.mjs",
+        "from": "bridge/agent/agent-lease-store.mjs",
         "to": "bridge/agent/agent-lease-store.mjs"
       },
       {
-        "from": "scripts/agent/agent-events.mjs",
+        "from": "bridge/agent/agent-events.mjs",
         "to": "bridge/agent/agent-events.mjs"
       },
       {
-        "from": "scripts/agent/agent-errors.mjs",
+        "from": "bridge/agent/agent-errors.mjs",
         "to": "bridge/agent/agent-errors.mjs"
       },
       {
-        "from": "scripts/agent/providers/agent-provider-contract.mjs",
+        "from": "bridge/agent/providers/agent-provider-contract.mjs",
         "to": "bridge/agent/providers/agent-provider-contract.mjs"
       },
       {
-        "from": "scripts/agent/providers/provider-registry.mjs",
+        "from": "bridge/agent/providers/provider-registry.mjs",
         "to": "bridge/agent/providers/provider-registry.mjs"
       },
       {
-        "from": "scripts/agent/providers/qoder-provider.mjs",
+        "from": "bridge/agent/providers/qoder-provider.mjs",
         "to": "bridge/agent/providers/qoder-provider.mjs"
       },
       {
-        "from": "scripts/agent/providers/codex-provider.mjs",
+        "from": "bridge/agent/providers/codex-provider.mjs",
         "to": "bridge/agent/providers/codex-provider.mjs"
       },
       {
-        "from": "scripts/agent/runtimes/agent-runtime-contract.mjs",
+        "from": "bridge/agent/runtimes/agent-runtime-contract.mjs",
         "to": "bridge/agent/runtimes/agent-runtime-contract.mjs"
       },
       {
-        "from": "scripts/agent/runtimes/runtime-registry.mjs",
+        "from": "bridge/agent/runtimes/runtime-registry.mjs",
         "to": "bridge/agent/runtimes/runtime-registry.mjs"
       },
       {
-        "from": "scripts/agent/runtimes/acp-runtime.mjs",
+        "from": "bridge/agent/runtimes/acp-runtime.mjs",
         "to": "bridge/agent/runtimes/acp-runtime.mjs"
       },
       {
-        "from": "scripts/agent/runtimes/codex-app-server-client.mjs",
+        "from": "bridge/agent/runtimes/codex-app-server-client.mjs",
         "to": "bridge/agent/runtimes/codex-app-server-client.mjs"
       },
       {
-        "from": "scripts/agent/runtimes/codex-app-server-runtime.mjs",
+        "from": "bridge/agent/runtimes/codex-app-server-runtime.mjs",
         "to": "bridge/agent/runtimes/codex-app-server-runtime.mjs"
       },
       {
-        "from": "scripts/agent/policies/execution-policy.mjs",
+        "from": "bridge/agent/policies/execution-policy.mjs",
         "to": "bridge/agent/policies/execution-policy.mjs"
       },
       {
-        "from": "scripts/agent/hosts/execution-host.mjs",
+        "from": "bridge/agent/hosts/execution-host.mjs",
         "to": "bridge/agent/hosts/execution-host.mjs"
       },
       {
-        "from": "scripts/qoder-acp-client.mjs",
+        "from": "bridge/qoder-acp-client.mjs",
         "to": "bridge/qoder-acp-client.mjs"
       },
       {
-        "from": "scripts/finalize-attempt.mjs",
+        "from": "bridge/finalize-attempt.mjs",
         "to": "bridge/finalize-attempt.mjs"
       },
       {
-        "from": "scripts/lifecycle-core.mjs",
+        "from": "bridge/lifecycle-core.mjs",
         "to": "bridge/lifecycle-core.mjs"
       },
       {
-        "from": "scripts/project-file-repository.mjs",
+        "from": "bridge/project-file-repository.mjs",
         "to": "bridge/project-file-repository.mjs"
       },
       {
-        "from": "scripts/project-file-repository/constants.mjs",
+        "from": "bridge/project-file-repository/constants.mjs",
         "to": "bridge/project-file-repository/constants.mjs"
       },
       {
-        "from": "scripts/project-file-repository/errors.mjs",
+        "from": "bridge/project-file-repository/errors.mjs",
         "to": "bridge/project-file-repository/errors.mjs"
       },
       {
-        "from": "scripts/project-file-repository/identity.mjs",
+        "from": "bridge/project-file-repository/identity.mjs",
         "to": "bridge/project-file-repository/identity.mjs"
       },
       {
-        "from": "scripts/project-file-repository/path-safety.mjs",
+        "from": "bridge/project-file-repository/path-safety.mjs",
         "to": "bridge/project-file-repository/path-safety.mjs"
       },
       {
-        "from": "scripts/project-file-repository/registry.mjs",
+        "from": "bridge/project-file-repository/registry.mjs",
         "to": "bridge/project-file-repository/registry.mjs"
       },
       {
-        "from": "scripts/project-file-repository/request-draft.mjs",
+        "from": "bridge/project-file-repository/request-draft.mjs",
         "to": "bridge/project-file-repository/request-draft.mjs"
       },
       {
-        "from": "scripts/project-file-repository/version-candidate.mjs",
+        "from": "bridge/project-file-repository/version-candidate.mjs",
         "to": "bridge/project-file-repository/version-candidate.mjs"
       },
       {
-        "from": "scripts/project-file-repository/working-copy.mjs",
+        "from": "bridge/project-file-repository/working-copy.mjs",
         "to": "bridge/project-file-repository/working-copy.mjs"
       },
       {
-        "from": "scripts/ai-task-projection.mjs",
+        "from": "bridge/ai-task-projection.mjs",
         "to": "bridge/ai-task-projection.mjs"
       },
       {
-        "from": "scripts/project-file-finalizer.mjs",
+        "from": "bridge/project-file-finalizer.mjs",
         "to": "bridge/project-file-finalizer.mjs"
       },
       {
-        "from": "scripts/user-supplement-core.mjs",
+        "from": "bridge/user-supplement-core.mjs",
         "to": "bridge/user-supplement-core.mjs"
       },
       {
-        "from": "scripts/record-user-supplement.mjs",
+        "from": "bridge/record-user-supplement.mjs",
         "to": "bridge/record-user-supplement.mjs"
       },
-    {
-      "from": "scripts/html-source-parser.mjs",
-      "to": "bridge/html-source-parser.mjs"
-    },
-    {
-      "from": "scripts/candidate-assessment.mjs",
-      "to": "bridge/candidate-assessment.mjs"
-    },
       {
-        "from": "scripts/candidate-assessment-decoder.mjs",
+        "from": "bridge/html-source-parser.mjs",
+        "to": "bridge/html-source-parser.mjs"
+      },
+      {
+        "from": "bridge/candidate-assessment.mjs",
+        "to": "bridge/candidate-assessment.mjs"
+      },
+      {
+        "from": "bridge/candidate-assessment-decoder.mjs",
         "to": "bridge/candidate-assessment-decoder.mjs"
       },
       {
-        "from": "scripts/target-identity.mjs",
+        "from": "bridge/target-identity.mjs",
         "to": "bridge/target-identity.mjs"
       },
       {
-        "from": "scripts/product-contract.mjs",
+        "from": "bridge/product-contract.mjs",
         "to": "bridge/product-contract.mjs"
       },
       {
-        "from": "scripts/attachment-storage.mjs",
+        "from": "bridge/attachment-storage.mjs",
         "to": "bridge/attachment-storage.mjs"
       },
       {
-        "from": "scripts/draft-aggregate.mjs",
+        "from": "bridge/draft-aggregate.mjs",
         "to": "bridge/draft-aggregate.mjs"
       },
       {
-        "from": "scripts/draft-service.mjs",
+        "from": "bridge/draft-service.mjs",
         "to": "bridge/draft-service.mjs"
       },
       {
-        "from": "scripts/draft-command-decoder.mjs",
+        "from": "bridge/draft-command-decoder.mjs",
         "to": "bridge/draft-command-decoder.mjs"
       },
       {
-        "from": "scripts/source-history-service.mjs",
+        "from": "bridge/source-history-service.mjs",
         "to": "bridge/source-history-service.mjs"
       },
       {
-        "from": "scripts/conversation-repository.mjs",
+        "from": "bridge/conversation-repository.mjs",
         "to": "bridge/conversation-repository.mjs"
       },
       {
-        "from": "scripts/source-transaction-service.mjs",
+        "from": "bridge/source-transaction-service.mjs",
         "to": "bridge/source-transaction-service.mjs"
       },
       {
-        "from": "scripts/project-context-service.mjs",
+        "from": "bridge/project-context-service.mjs",
         "to": "bridge/project-context-service.mjs"
       },
       {

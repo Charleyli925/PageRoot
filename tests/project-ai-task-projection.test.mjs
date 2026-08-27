@@ -13,7 +13,7 @@ import test from "node:test";
 import {
   ProjectFileRepository,
   ProjectFileRepositoryError,
-} from "../scripts/project-file-repository.mjs";
+} from "../bridge/project-file-repository.mjs";
 import {
   fixture,
   html,

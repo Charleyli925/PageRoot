@@ -212,8 +212,8 @@ does not change that trust statement. The sole provider registry maps legacy
 closed. Provider/runtime IDs, the opaque installation digest and capabilities
 remain inside the Bridge ticket, and preload exposes no executable, spawn,
 command or path capability. One restricted driver serves execution policy
-through the provider-neutral modules under `scripts/agent/policies/` and
-`scripts/agent/hosts/`. Only the execution Host is registered, and every turn
+through the provider-neutral modules under `bridge/agent/policies/` and
+`bridge/agent/hosts/`. Only the execution Host is registered, and every turn
 must prove completion. It checks the runtime-sealed manifest Hash, exact current
 Request layout, frozen file identities, single Candidate path and exact
 official finalizer; every other ACP filesystem and terminal request is rejected.

@@ -190,7 +190,7 @@ const TASK_OWNER_CASES = [
     unrelatedOwners: ["tests/application-update.test.mjs", "tests/source-rename.test.mjs"],
   },
   {
-    file: "scripts/workspace-bridge.mjs",
+    file: "bridge/workspace-bridge.mjs",
     nodeTests: [
       "tests/attachment-storage.test.mjs",
       "tests/candidate-assessment.test.mjs",
@@ -210,7 +210,7 @@ const TASK_OWNER_CASES = [
     unrelatedOwners: ["tests/desktop-package.test.mjs", "tests/review-runtime-capture-owner.test.mjs"],
   },
   {
-    file: "scripts/project-file-repository.mjs",
+    file: "bridge/project-file-repository.mjs",
     nodeTests: [
       "tests/project-ai-task-projection.test.mjs",
       "tests/project-candidate-promotion.test.mjs",
@@ -228,7 +228,7 @@ const TASK_OWNER_CASES = [
     unrelatedOwners: ["tests/desktop-package.test.mjs", "tests/review-runtime-capture-owner.test.mjs"],
   },
   {
-    file: "scripts/project-file-repository/path-safety.mjs",
+    file: "bridge/project-file-repository/path-safety.mjs",
     nodeTests: [
       "tests/project-path-security-and-locks.test.mjs",
     ],
@@ -708,7 +708,7 @@ test("Qoder ACP transport changes select Qoder and ACP owners without the packag
   const plan = selectGatePlan({
     map,
     lane: "task",
-    changedFiles: ["scripts/qoder-acp-client.mjs"],
+    changedFiles: ["bridge/qoder-acp-client.mjs"],
   });
   assert.deepEqual(suiteIds(plan), [
     "typecheck",
@@ -866,27 +866,27 @@ test("gate plans expose owner provenance and width warnings without failing", ()
   const raw = selectGatePlan({
     map,
     lane: "task",
-    changedFiles: ["scripts/project-file-repository.mjs"],
+    changedFiles: ["bridge/project-file-repository.mjs"],
   });
   const plan = annotateGatePlan(raw, {
     map,
     inventoryFiles: [
-      "scripts/project-file-repository.mjs",
-      "scripts/project-file-repository/path-safety.mjs",
-      "scripts/agent-bridge-service.mjs",
+      "bridge/project-file-repository.mjs",
+      "bridge/project-file-repository/path-safety.mjs",
+      "bridge/agent-bridge-service.mjs",
     ],
     tagCounts: {
       "ai:@smoke-review": 3,
     },
   });
   assert.ok(plan.matchedOwners.includes("project-file-lifecycle"));
-  assert.equal(plan.fileMatches[0].file, "scripts/project-file-repository.mjs");
+  assert.equal(plan.fileMatches[0].file, "bridge/project-file-repository.mjs");
   assert.ok(plan.nodeTestOrigins["tests/project-registry-and-open.test.mjs"].length > 0);
   assert.ok(plan.runtimeCanaries.includes("ai-review-smoke"));
   assert.equal(plan.estimatedFanout.aiTests, 3);
   assert.ok(plan.selectedNodeTests.length > GATE_WIDTH_LIMITS.leafFileNodeTests);
   assert.ok(plan.warnings.some((warning) => warning.code === "leaf-file-node-fanout"));
   const compact = compactGatePlan(plan);
-  assert.deepEqual(compact.changedFiles, ["scripts/project-file-repository.mjs"]);
+  assert.deepEqual(compact.changedFiles, ["bridge/project-file-repository.mjs"]);
   assert.ok(compact.warnings.some((warning) => warning.code === "leaf-file-node-fanout"));
 });

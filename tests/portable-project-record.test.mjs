@@ -10,8 +10,8 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-import { sha256 } from "../scripts/lifecycle-core.mjs";
-import { ProjectFileRepository } from "../scripts/project-file-repository.mjs";
+import { sha256 } from "../bridge/lifecycle-core.mjs";
+import { ProjectFileRepository } from "../bridge/project-file-repository.mjs";
 
 // manifest.json travels with the project directory: a user who copies or
 // synchronises that folder carries it verbatim to another machine. Every member

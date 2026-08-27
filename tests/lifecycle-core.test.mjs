@@ -12,7 +12,7 @@ import {
   findUnexpectedAttemptEntry,
   findUnexpectedAttemptOutputEntry,
   sha256,
-} from "../scripts/lifecycle-core.mjs";
+} from "../bridge/lifecycle-core.mjs";
 
 test("atomic writes support a 255-byte output filename", async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "pageroot-atomic-write-"));

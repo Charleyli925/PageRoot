@@ -114,7 +114,7 @@ records.
 `candidate-assessment.v1.schema.json` requires document-health and continuity
 evidence. The retired `health.executableSurfaceUnchanged` and `executable`
 members remain optional only so immutable Developer Preview history can be
-read. `scripts/candidate-assessment-decoder.mjs` verifies the record against
+read. `bridge/candidate-assessment-decoder.mjs` verifies the record against
 sealed HTML and all four Hashes, normalizes those fields out in memory, and
 never lets them affect current status, review routing or adoption. Current
 writers do not emit them; archived outcomes remain terminal and history is

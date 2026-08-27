@@ -15,8 +15,8 @@ import path from "node:path";
 
 import { expect } from "@playwright/test";
 
-import { sha256 } from "../../../scripts/lifecycle-core.mjs";
-import { ProjectFileRepository } from "../../../scripts/project-file-repository.mjs";
+import { sha256 } from "../../../bridge/lifecycle-core.mjs";
+import { ProjectFileRepository } from "../../../bridge/project-file-repository.mjs";
 
 import {
   activateNativeEdit,

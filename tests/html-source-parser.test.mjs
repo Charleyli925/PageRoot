@@ -7,7 +7,7 @@ import {
   metaContentByName,
   parseHtmlSource,
   rawStartTagAttributes,
-} from "../scripts/html-source-parser.mjs";
+} from "../bridge/html-source-parser.mjs";
 
 test("document identity comes only from a real explicit head meta", () => {
   const html = `<!doctype html>

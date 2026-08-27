@@ -32,9 +32,9 @@ import {
   runAcpTask,
   runQoderAcpTask,
   runVerifiedQoderJavaScript,
-} from "../scripts/qoder-acp-client.mjs";
-import { sha256 } from "../scripts/lifecycle-core.mjs";
-import { ProjectFileRepository } from "../scripts/project-file-repository.mjs";
+} from "../bridge/qoder-acp-client.mjs";
+import { sha256 } from "../bridge/lifecycle-core.mjs";
+import { ProjectFileRepository } from "../bridge/project-file-repository.mjs";
 
 const IDENTITIES = Object.freeze({
   requestId: "req_aaaaaaaaaaaaaaaa",
@@ -1116,7 +1116,7 @@ process.stdout.write(JSON.stringify({
   await chmod(executable, 0o755);
   const clientModuleUrl = pathToFileURL(path.join(
     productRoot,
-    "scripts",
+    "bridge",
     "qoder-acp-client.mjs",
   )).href;
   await writeFile(runner, `import { readFile, realpath, stat } from "node:fs/promises";

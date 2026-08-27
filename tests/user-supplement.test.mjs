@@ -12,7 +12,7 @@ import {
   recordUserSupplement,
   sealUserSupplementForAttempt,
   validateUserSupplementArchive,
-} from "../scripts/lifecycle-core.mjs";
+} from "../bridge/lifecycle-core.mjs";
 
 const PROJECT_ID = "project_0123456789abcdef";
 const DOCUMENT_ID = "doc_0123456789abcdef";

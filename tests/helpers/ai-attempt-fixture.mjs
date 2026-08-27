@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 
 const execFileAsync = promisify(execFile);
 const productRoot = fileURLToPath(new URL("../../", import.meta.url));
-const finalizerScript = join(productRoot, "scripts", "finalize-attempt.mjs");
+const finalizerScript = join(productRoot, "bridge", "finalize-attempt.mjs");
 const attemptOutputPathPattern = /^output\/(?:V1\.\d+|[^\u0000-\u001f\u007f/\\\\]+-V1\.\d+)\.html$/u;
 
 function assertRunIdentity(run) {

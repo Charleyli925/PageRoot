@@ -9,7 +9,7 @@ import {
 } from "./helpers/bridge-test-environment.mjs";
 
 const productRoot = fileURLToPath(new URL("../", import.meta.url));
-const workspaceBridgeScript = join(productRoot, "scripts", "workspace-bridge.mjs");
+const workspaceBridgeScript = join(productRoot, "bridge", "workspace-bridge.mjs");
 
 test("workspace Bridge local imports stay inside the packaged Bridge dependency closure", async () => {
   const [bridgeSource, packageSource] = await Promise.all([
@@ -19,10 +19,9 @@ test("workspace Bridge local imports stay inside the packaged Bridge dependency 
   const packageJson = JSON.parse(packageSource);
   const packagedScripts = new Set(
     packageJson.build.extraResources.flatMap((entry) => {
-      const from = String(entry.from || "");
       const to = String(entry.to || "");
-      return from.startsWith("scripts/") && to.startsWith("bridge/")
-        ? [from.slice("scripts/".length)]
+      return to.startsWith("bridge/")
+        ? [to.slice("bridge/".length)]
         : [];
     }),
   );

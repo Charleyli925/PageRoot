@@ -49,13 +49,13 @@ boundary.
 ## Product Qoder ACP Agent Bridge
 
 The packaged Bridge owns the product session through
-`scripts/agent/agent-runtime-coordinator.mjs`; the old Service exports only
+`bridge/agent/agent-runtime-coordinator.mjs`; the old Service exports only
 delegate existing routes. Its sole provider registry maps legacy
-`qoder-acp` to `scripts/agent/providers/qoder-provider.mjs` and the `acp`
-runtime in `scripts/agent/runtimes/acp-runtime.mjs`; unknown provider/runtime
-IDs fail closed. The restricted Host Ports now live in `scripts/agent/hosts/`,
-while frozen execution policy lives in `scripts/agent/policies/`.
-`scripts/qoder-acp-client.mjs` retains the legacy transport façade and exact
+`qoder-acp` to `bridge/agent/providers/qoder-provider.mjs` and the `acp`
+runtime in `bridge/agent/runtimes/acp-runtime.mjs`; unknown provider/runtime
+IDs fail closed. The restricted Host Ports now live in `bridge/agent/hosts/`,
+while frozen execution policy lives in `bridge/agent/policies/`.
+`bridge/qoder-acp-client.mjs` retains the legacy transport façade and exact
 compatibility exports without a second policy brand. The
 renderer can request only `POST /agent/preflight` and `POST /agent/start` with
 registered task identity, the fixed `qoder-acp` driver, explicit

@@ -10,12 +10,12 @@ import {
 } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
-import { sha256 } from "../scripts/lifecycle-core.mjs";
+import { sha256 } from "../bridge/lifecycle-core.mjs";
 import { createDeviceIdentifier } from "../shared/provenance.mjs";
 import {
   ProjectFileRepository,
   ProjectFileRepositoryError,
-} from "../scripts/project-file-repository.mjs";
+} from "../bridge/project-file-repository.mjs";
 import {
   fixture,
   html,

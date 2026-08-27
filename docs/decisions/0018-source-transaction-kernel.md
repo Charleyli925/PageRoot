@@ -20,7 +20,7 @@ action. AI Version publication is a different immutable protocol.
 
 ## Decision
 
-- `scripts/source-transaction-service.mjs` is the sole Bridge owner of the
+- `bridge/source-transaction-service.mjs` is the sole Bridge owner of the
   current-source commit/recovery kernel.
 - Both routes retain only their decode, input validation, action/revision
   policy and response encoding, then supply an already-validated transaction

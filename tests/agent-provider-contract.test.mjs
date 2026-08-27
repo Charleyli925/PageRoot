@@ -5,24 +5,24 @@ import test from "node:test";
 import {
   AgentBridgeService,
   TRUSTED_LOCAL_AGENT_POLICY_VERSION,
-} from "../scripts/agent-bridge-service.mjs";
-import { createProviderRegistry } from "../scripts/agent/providers/provider-registry.mjs";
-import { createRuntimeRegistry } from "../scripts/agent/runtimes/runtime-registry.mjs";
+} from "../bridge/agent-bridge-service.mjs";
+import { createProviderRegistry } from "../bridge/agent/providers/provider-registry.mjs";
+import { createRuntimeRegistry } from "../bridge/agent/runtimes/runtime-registry.mjs";
 import {
   classifyQoderRunFailure,
   normalizeQoderRuntimeError,
   normalizedQoderPreflightError,
-} from "../scripts/agent/providers/qoder-provider.mjs";
+} from "../bridge/agent/providers/qoder-provider.mjs";
 import {
   acpDriverProfile,
   createRestrictedQoderAcpHost,
   loadQoderAcpTaskPolicy,
-} from "../scripts/qoder-acp-client.mjs";
-import { createExecutionHost } from "../scripts/agent/hosts/execution-host.mjs";
+} from "../bridge/qoder-acp-client.mjs";
+import { createExecutionHost } from "../bridge/agent/hosts/execution-host.mjs";
 import {
   AGENT_POLICY_BRAND,
   loadExecutionPolicy,
-} from "../scripts/agent/policies/execution-policy.mjs";
+} from "../bridge/agent/policies/execution-policy.mjs";
 import { createSyntheticQoderProviderFixture } from "./fixtures/agent-provider/qoder-provider.mjs";
 
 const IDENTITY = Object.freeze({
@@ -84,8 +84,8 @@ test("shared policy brand stays neutral while the legacy facade preserves errors
 
 test("shared host and policy sources contain no provider or transport ownership literals", async () => {
   const sources = await Promise.all([
-    "../scripts/agent/policies/execution-policy.mjs",
-    "../scripts/agent/hosts/execution-host.mjs",
+    "../bridge/agent/policies/execution-policy.mjs",
+    "../bridge/agent/hosts/execution-host.mjs",
   ].map((relativePath) => readFile(new URL(relativePath, import.meta.url), "utf8")));
   const forbidden = /qoder|codex|acp|app-server/iu;
   for (const source of sources) assert.doesNotMatch(source, forbidden);
@@ -276,7 +276,7 @@ test("provider boundary normalizes ACP raw failures before coordinator ownership
     assert.equal(normalizeQoderRuntimeError(cause).code, canonical);
   }
   const coordinatorSource = await readFile(
-    new URL("../scripts/agent/agent-runtime-coordinator.mjs", import.meta.url),
+    new URL("../bridge/agent/agent-runtime-coordinator.mjs", import.meta.url),
     "utf8",
   );
   assert.doesNotMatch(coordinatorSource, /\bACP_/u);

@@ -3,7 +3,7 @@
 - 测量时间：2026-08-10T09:46:44.565Z
 - Frozen main：`31e3bea58a5124cd56c87119e459877968de5109`（tree `71f443a8542edf67317c104082a69fbaa23e8f99`）
 - Candidate：`3b3a2bc0dc34156700311ff7f80182635fd7ea33`（tree `2b0563c44d6e0712e37a347c41ba8ca9fc605670`）
-- Candidate production diff：app/workbench.tsx、app/workbench/browser-io.ts、scripts/workspace-bridge.mjs
+- Candidate production diff：app/workbench.tsx、app/workbench/browser-io.ts、bridge/workspace-bridge.mjs
 - Harness commit：`3b3a2bc0dc34156700311ff7f80182635fd7ea33`
 - Baseline evidence：`docs/PERSISTENCE_PERFORMANCE_DECISION.md`
 - Final outcome：无收益的生产、测试和 benchmark 实验已在最终重基前撤回；最终分支只保留此 checkpoint 报告。

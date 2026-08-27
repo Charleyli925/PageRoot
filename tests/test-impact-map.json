@@ -515,7 +515,7 @@
         "^app/application/(?:draft-session|drain-coordinator)\\.(?:js|d\\.ts)$",
         "^app/domain/draft-aggregate\\.(?:js|d\\.ts)$",
         "^shared/draft-aggregate\\.mjs$",
-        "^scripts/(?:draft-aggregate|draft-command-decoder|draft-service)\\.mjs$"
+        "^bridge/(?:draft-aggregate|draft-command-decoder|draft-service)\\.mjs$"
       ],
       "suites": [
         "typecheck"
@@ -532,7 +532,7 @@
       "id": "project-session",
       "patterns": [
         "^app/application/(?:external-file-open-session|local-action-outcomes|project-application-session|project-query-fence|project-session)\\.(?:js|d\\.ts)$",
-        "^scripts/project-context-service\\.mjs$"
+        "^bridge/project-context-service\\.mjs$"
       ],
       "suites": [
         "typecheck"
@@ -685,7 +685,7 @@
         "^app/application/source-history-session\\.(?:js|d\\.ts)$",
         "^app/domain/source-history\\.(?:js|d\\.ts)$",
         "^shared/source-history\\.mjs$",
-        "^scripts/source-(?:history|transaction)-service\\.mjs$"
+        "^bridge/source-(?:history|transaction)-service\\.mjs$"
       ],
       "suites": [
         "typecheck"
@@ -700,7 +700,7 @@
       "patterns": [
         "^shared/conversation\\.mjs$",
         "^tests/conversation-v2\\.test\\.mjs$",
-        "^scripts/conversation-repository\\.mjs$",
+        "^bridge/conversation-repository\\.mjs$",
         "^schemas/conversation(?:-index|-draft)?\\.v[12]\\.schema\\.json$"
       ],
       "suites": [],
@@ -1462,7 +1462,7 @@
     {
       "id": "agent-provider-registry",
       "patterns": [
-        "^scripts/agent/providers/(?:provider-registry|agent-provider-contract)\\.mjs$",
+        "^bridge/agent/providers/(?:provider-registry|agent-provider-contract)\\.mjs$",
         "^app/application/agent-provider-catalog\\.(?:js|d\\.ts)$",
         "^app/domain/agent-provider-state\\.(?:js|d\\.ts)$"
       ],
@@ -1477,8 +1477,9 @@
     {
       "id": "agent-provider-qoder",
       "patterns": [
-        "^scripts/agent/providers/qoder-provider\\.mjs$",
-        "^scripts/qoder-acp-(?:client|spike(?:-client)?)\\.mjs$",
+        "^bridge/agent/providers/qoder-provider\\.mjs$",
+        "^bridge/qoder-acp-client\\.mjs$",
+        "^scripts/qoder-acp-spike(?:-client)?\\.mjs$",
         "^app/components/QoderAvailabilityCard\\.tsx$",
         "^app/domain/qoder-availability\\.(?:js|d\\.ts)$"
       ],
@@ -1494,7 +1495,7 @@
     {
       "id": "agent-provider-codex",
       "patterns": [
-        "^scripts/agent/providers/codex-provider\\.mjs$"
+        "^bridge/agent/providers/codex-provider\\.mjs$"
       ],
       "suites": [
         "typecheck",
@@ -1508,7 +1509,7 @@
     {
       "id": "agent-runtime-acp",
       "patterns": [
-        "^scripts/agent/runtimes/(?:acp-runtime|agent-runtime-contract|runtime-registry)\\.mjs$"
+        "^bridge/agent/runtimes/(?:acp-runtime|agent-runtime-contract|runtime-registry)\\.mjs$"
       ],
       "suites": [
         "typecheck",
@@ -1521,7 +1522,7 @@
     {
       "id": "agent-runtime-codex-app-server",
       "patterns": [
-        "^scripts/agent/runtimes/codex-app-server-(?:client|runtime)\\.mjs$",
+        "^bridge/agent/runtimes/codex-app-server-(?:client|runtime)\\.mjs$",
         "^scripts/codex-app-server-preflight\\.mjs$",
         "^tests/fixtures/codex-app-server"
       ],
@@ -1537,7 +1538,7 @@
     {
       "id": "agent-runtime-coordinator",
       "patterns": [
-        "^scripts/agent/(?:agent-runtime-coordinator|agent-events|agent-errors|agent-lease-store|agent-session-projector)\\.mjs$"
+        "^bridge/agent/(?:agent-runtime-coordinator|agent-events|agent-errors|agent-lease-store|agent-session-projector)\\.mjs$"
       ],
       "suites": [
         "typecheck",
@@ -1554,7 +1555,7 @@
     {
       "id": "agent-host-policy",
       "patterns": [
-        "^scripts/agent/(?:policies/execution-policy|hosts/execution-host)\\.mjs$"
+        "^bridge/agent/(?:policies/execution-policy|hosts/execution-host)\\.mjs$"
       ],
       "suites": [
         "typecheck"
@@ -1596,7 +1597,7 @@
     {
       "id": "agent-runtime-provider-bridge",
       "patterns": [
-        "^scripts/agent-bridge-service\\.mjs$",
+        "^bridge/agent-bridge-service\\.mjs$",
         "^app/application/bridge-client\\.(?:js|d\\.ts)$",
         "^tests/(?:agent-bridge-(?:service|workspace))\\.test\\.mjs$",
         "^tests/fixtures/(?:agent-provider/|packaged-agent-bridge-runner)"
@@ -1614,7 +1615,7 @@
     {
       "id": "project-path-safety-owner",
       "patterns": [
-        "^scripts/project-file-repository/path-safety\\.mjs$"
+        "^bridge/project-file-repository/path-safety\\.mjs$"
       ],
       "suites": [
         "typecheck"
@@ -1626,7 +1627,7 @@
     {
       "id": "project-registry-owner",
       "patterns": [
-        "^scripts/project-file-repository/(?:registry|identity)\\.mjs$"
+        "^bridge/project-file-repository/(?:registry|identity)\\.mjs$"
       ],
       "suites": [
         "typecheck"
@@ -1638,7 +1639,7 @@
     {
       "id": "project-working-copy-owner",
       "patterns": [
-        "^scripts/project-file-repository/working-copy\\.mjs$"
+        "^bridge/project-file-repository/working-copy\\.mjs$"
       ],
       "suites": [
         "typecheck"
@@ -1650,7 +1651,7 @@
     {
       "id": "project-candidate-owner",
       "patterns": [
-        "^scripts/project-file-repository/version-candidate\\.mjs$"
+        "^bridge/project-file-repository/version-candidate\\.mjs$"
       ],
       "suites": [
         "typecheck"
@@ -1662,7 +1663,7 @@
     {
       "id": "project-request-owner",
       "patterns": [
-        "^scripts/project-file-repository/request-draft\\.mjs$"
+        "^bridge/project-file-repository/request-draft\\.mjs$"
       ],
       "suites": [
         "typecheck"
@@ -1675,8 +1676,8 @@
     {
       "id": "project-file-lifecycle",
       "patterns": [
-        "^scripts/project-file-(?:repository|finalizer)\\.mjs$",
-        "^scripts/project-file-repository/(?:constants|errors)\\.mjs$",
+        "^bridge/project-file-(?:repository|finalizer)\\.mjs$",
+        "^bridge/project-file-repository/(?:constants|errors)\\.mjs$",
         "^tests/project-file-(?:finalizer|bridge|schema)\\.test\\.mjs$",
         "^tests/project-file-repository(?:-harness|\\.integration\\.test)\\.mjs$",
         "^tests/project-(?:registry-and-open|working-copy-save|candidate-promotion|request-authority|ai-task-projection|path-security-and-locks)\\.test\\.mjs$"
@@ -1726,7 +1727,7 @@
     {
       "id": "bridge-lifecycle",
       "patterns": [
-        "^scripts/(?:workspace-bridge(?:-shutdown)?|lifecycle-core|finalize-attempt|record-user-supplement|user-supplement-core|candidate-assessment(?:-decoder)?|html-source-parser|attachment-storage|product-contract|target-identity)\\.mjs$"
+        "^bridge/(?:workspace-bridge(?:-shutdown)?|lifecycle-core|finalize-attempt|record-user-supplement|user-supplement-core|candidate-assessment(?:-decoder)?|html-source-parser|attachment-storage|product-contract|target-identity)\\.mjs$"
       ],
       "suites": [
         "ai-run-lifecycle-smoke"

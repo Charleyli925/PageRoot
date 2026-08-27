@@ -21,7 +21,7 @@
     "app/components/HtmlCanvasEditor.tsx": {
       "maxLines": 5279
     },
-    "scripts/project-file-repository.mjs": {
+    "bridge/project-file-repository.mjs": {
       "maxLines": 5658
     }
   }

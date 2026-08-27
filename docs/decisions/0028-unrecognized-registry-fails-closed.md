@@ -16,7 +16,7 @@ across Bridge processes, plus a hash-named backup of the original bytes.
 Three facts about that shape were established from Git history rather than
 assumption:
 
-- `scripts/project-file-repository.mjs` does not exist in `v0.9.8`, the newest
+- `bridge/project-file-repository.mjs` does not exist in `v0.9.8`, the newest
   tag. The V4 project files have never been part of a tagged release.
 - The shape was introduced by `4fe5eb7` at 2026-08-14 15:04 and the migration
   for it landed in `379523b` at 2026-08-14 21:17 — a window of 6h13m on `main`.
