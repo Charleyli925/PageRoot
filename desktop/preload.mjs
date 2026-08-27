@@ -40,6 +40,7 @@ const appChannels = Object.freeze({
   workspaceRecoveryReady: "html-app:workspace-recovery-ready",
   externalOpenRequested: "html-app:external-open-requested",
   externalOpenReady: "html-app:external-open-ready",
+  bridgeReady: "html-app:bridge-ready",
   relaunch: "html-app:relaunch",
   openUserNotice: "html-app:open-user-notice",
 });
@@ -83,6 +84,7 @@ const editChannels = Object.freeze({
 });
 const PROJECT_IPC_PROTOCOL = "html-ai-project-result";
 const PROJECT_IPC_VERSION = 1;
+let bridgeConnectionWait = null;
 
 function projectOperationError(payload) {
   const message = typeof payload?.message === "string" && payload.message.trim()
@@ -103,6 +105,7 @@ function projectOperationError(payload) {
 }
 
 async function invokeProject(channel, ...args) {
+  if (bridgeConnectionWait) await bridgeConnectionWait;
   let result;
   try {
     result = await ipcRenderer.invoke(channel, ...args);
@@ -253,9 +256,17 @@ const query = new URLSearchParams(globalThis.location.search);
 const bridgePort = query.get("bridgePort") || "";
 const bridgeAuthToken = query.get("bridgeAuthToken") || "";
 const appVersion = query.get("appVersion") || "";
-function startupTimingFromQuery(value) {
+let releaseBridgeConnectionWait = null;
+if (query.get("bridgeDeferred") === "1" && !bridgePort) {
+  bridgeConnectionWait = new Promise((resolve) => {
+    releaseBridgeConnectionWait = resolve;
+  });
+}
+function startupTimingFromValue(value) {
   try {
-    const parsed = JSON.parse(String(value || "null"));
+    const parsed = typeof value === "string"
+      ? JSON.parse(String(value || "null"))
+      : value;
     if (
       !parsed
       || typeof parsed !== "object"
@@ -285,7 +296,28 @@ function startupTimingFromQuery(value) {
     return null;
   }
 }
-const startupTiming = startupTimingFromQuery(query.get("startupTiming"));
+let startupTiming = startupTimingFromValue(query.get("startupTiming"));
+function bridgeConnectionFrom(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const port = String(value.bridgePort || "");
+  const token = String(value.bridgeAuthToken || "");
+  const version = String(value.appVersion || appVersion || "");
+  if (!/^\d{1,5}$/u.test(port) || Number(port) < 1 || Number(port) > 65_535) return null;
+  if (!/^[A-Za-z0-9_-]{32,128}$/u.test(token)) return null;
+  return Object.freeze({ bridgePort: port, bridgeAuthToken: token, appVersion: version });
+}
+let bridgeConnection = bridgeConnectionFrom({ bridgePort, bridgeAuthToken, appVersion });
+const bridgeReadyListeners = new Set();
+ipcRenderer.on(appChannels.bridgeReady, (_event, payload) => {
+  const next = bridgeConnectionFrom(payload);
+  if (!next) return;
+  bridgeConnection = next;
+  startupTiming = startupTimingFromValue(payload?.startupTiming) || startupTiming;
+  releaseBridgeConnectionWait?.();
+  releaseBridgeConnectionWait = null;
+  bridgeConnectionWait = null;
+  for (const listener of bridgeReadyListeners) listener(next);
+});
 const runtimeCapabilities = Object.freeze({
   sourceEditing: "enabled",
   projectOpening: "desktop-dialog",
@@ -297,6 +329,13 @@ const runtimeConfig = Object.freeze({
   bridgePort,
   bridgeAuthToken,
   appVersion,
+  getBridgeConnection: () => bridgeConnection,
+  onBridgeReady: (listener) => {
+    if (typeof listener !== "function") throw new TypeError("listener must be a function.");
+    bridgeReadyListeners.add(listener);
+    return () => bridgeReadyListeners.delete(listener);
+  },
+  getStartupTiming: () => startupTiming,
   capabilities: runtimeCapabilities,
   diagnostics: Object.freeze({ startupTiming }),
 });

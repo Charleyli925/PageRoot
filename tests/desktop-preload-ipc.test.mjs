@@ -90,6 +90,46 @@ test("preload declares one immutable desktop runtime capability manifest", async
   assert.equal(Object.isFrozen(runtime.capabilities), true);
 });
 
+test("preload publishes one validated Bridge connection without reloading the shell", async () => {
+  let projectInvocations = 0;
+  const loaded = await loadPreloadApis(async () => {
+    projectInvocations += 1;
+    return success(null);
+  }, { search: "?bridgeDeferred=1" });
+  assert.equal(loaded.runtime.getBridgeConnection(), null);
+  const pendingProject = loaded.projects.getActiveProject();
+  await Promise.resolve();
+  assert.equal(projectInvocations, 0);
+  const received = [];
+  const unsubscribe = loaded.runtime.onBridgeReady((connection) => received.push(connection));
+  loaded.emit("html-app:bridge-ready", {
+    bridgePort: "43179",
+    bridgeAuthToken: "a".repeat(43),
+    appVersion: "0.9.8",
+    startupTiming: {
+      schemaVersion: 1,
+      timeOriginUnixMs: 1_000,
+      marks: [{ stage: "bridge-ready", atUnixMs: 1_020 }],
+    },
+  });
+  assert.deepEqual(JSON.parse(JSON.stringify(loaded.runtime.getBridgeConnection())), {
+    bridgePort: "43179",
+    bridgeAuthToken: "a".repeat(43),
+    appVersion: "0.9.8",
+  });
+  assert.equal(received.length, 1);
+  assert.equal(Object.isFrozen(received[0]), true);
+  assert.equal(loaded.runtime.getStartupTiming().marks[0].stage, "bridge-ready");
+  await pendingProject;
+  assert.equal(projectInvocations, 1);
+  loaded.emit("html-app:bridge-ready", {
+    bridgePort: "70000",
+    bridgeAuthToken: "unsafe",
+  });
+  assert.equal(received.length, 1);
+  unsubscribe();
+});
+
 test("preload exposes only validated content-free startup timing", async () => {
   const startupTiming = encodeURIComponent(JSON.stringify({
     schemaVersion: 1,

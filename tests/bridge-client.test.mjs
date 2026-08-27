@@ -3,8 +3,43 @@ import test from "node:test";
 
 import {
   createBridgeClient,
+  createRuntimeBridgeClient,
   isBridgeRequestError,
 } from "../app/application/bridge-client.js";
+
+test("runtime Bridge client resolves the preload-published shell connection", async () => {
+  const previousWindow = globalThis.window;
+  const previousFetch = globalThis.fetch;
+  const requests = [];
+  try {
+    globalThis.window = {
+      location: { search: "" },
+      htmlAIRuntime: {
+        bridgePort: "",
+        bridgeAuthToken: "",
+        getBridgeConnection: () => ({
+          bridgePort: "43179",
+          bridgeAuthToken: "runtime-token",
+        }),
+      },
+    };
+    globalThis.fetch = async (input, init) => {
+      requests.push({ input: String(input), init });
+      return new Response(JSON.stringify({ projectId: "project_runtime" }), { status: 200 });
+    };
+    const client = createRuntimeBridgeClient();
+    await client.workspace("/tmp/runtime.html");
+    assert.match(requests[0].input, /^http:\/\/127\.0\.0\.1:43179\/workspace/u);
+    assert.equal(
+      new Headers(requests[0].init.headers).get("x-html-ai-bridge-token"),
+      "runtime-token",
+    );
+  } finally {
+    if (previousWindow === undefined) delete globalThis.window;
+    else globalThis.window = previousWindow;
+    globalThis.fetch = previousFetch;
+  }
+});
 
 test("Bridge client preserves structured conflict details", async () => {
   const client = createBridgeClient({

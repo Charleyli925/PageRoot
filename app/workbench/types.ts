@@ -279,6 +279,24 @@ declare global {
       bridgePort: string;
       bridgeAuthToken: string;
       appVersion: string;
+      getBridgeConnection?: () => Readonly<{
+        bridgePort: string;
+        bridgeAuthToken: string;
+        appVersion: string;
+      }> | null;
+      onBridgeReady?: (listener: (connection: Readonly<{
+        bridgePort: string;
+        bridgeAuthToken: string;
+        appVersion: string;
+      }>) => void) => () => void;
+      getStartupTiming?: () => Readonly<{
+        schemaVersion: 1;
+        timeOriginUnixMs: number;
+        marks: ReadonlyArray<Readonly<{
+          stage: string;
+          atUnixMs: number;
+        }>>;
+      }> | null;
       capabilities?: RuntimeCapabilities;
       diagnostics?: Readonly<{
         startupTiming: Readonly<{

@@ -393,14 +393,18 @@ export function createBridgeClient({
 }
 
 export function createRuntimeBridgeClient() {
+  const runtime = typeof window === "undefined" ? null : window.htmlAIRuntime;
+  const connection = runtime?.getBridgeConnection?.() || null;
   const port = typeof window === "undefined"
     ? "4317"
-    : window.htmlAIRuntime?.bridgePort
+    : connection?.bridgePort
+      || runtime?.bridgePort
       || new URLSearchParams(window.location.search).get("bridgePort")
       || "4317";
   const authToken = typeof window === "undefined"
     ? ""
-    : window.htmlAIRuntime?.bridgeAuthToken
+    : connection?.bridgeAuthToken
+      || runtime?.bridgeAuthToken
       || new URLSearchParams(window.location.search).get("bridgeAuthToken")
       || "";
   return createBridgeClient({

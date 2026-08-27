@@ -1037,7 +1037,9 @@ try {
     userDataPrefix: "pageroot-native-e2e-htmlperf-",
   });
   results.startup = await launched.page.evaluate(() => ({
-    desktop: window.htmlAIRuntime?.diagnostics?.startupTiming || null,
+    desktop: window.htmlAIRuntime?.getStartupTiming?.()
+      || window.htmlAIRuntime?.diagnostics?.startupTiming
+      || null,
     rendererTimeOriginUnixMs: performance.timeOrigin,
     paintEntries: performance.getEntriesByType("paint").map((entry) => ({
       name: entry.name,

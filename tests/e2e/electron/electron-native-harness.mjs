@@ -193,8 +193,10 @@ export async function managedWorkingCopyPath(page, externalSourcePath) {
 
 export async function bridgeJson(page, pathname, { method = "GET", body = null } = {}) {
   const runtime = await page.evaluate(() => ({
-    port: window.htmlAIRuntime?.bridgePort || "",
-    token: window.htmlAIRuntime?.bridgeAuthToken || "",
+    port: window.htmlAIRuntime?.getBridgeConnection?.()?.bridgePort
+      || window.htmlAIRuntime?.bridgePort || "",
+    token: window.htmlAIRuntime?.getBridgeConnection?.()?.bridgeAuthToken
+      || window.htmlAIRuntime?.bridgeAuthToken || "",
   }));
   if (!runtime.port || !runtime.token) {
     throw new Error("Electron did not expose a usable Bridge connection.");

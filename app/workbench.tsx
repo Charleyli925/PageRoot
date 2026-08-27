@@ -206,9 +206,8 @@ import {
 } from "./workbench/document-surface-presentation";
 import { markProjectApplied, markProjectHydrationStage, RendererStartupPerformance } from "./workbench/performance-timeline";
 import type { ReviewDocuments } from "./workbench/review-document";
-import {
-  WorkbenchHeaderShell,
-} from "./workbench/workbench-header-shell";
+import { useRuntimeBridgeConnectionReady } from "./workbench/runtime-bridge-connection";
+import { WorkbenchHeaderShell } from "./workbench/workbench-header-shell";
 import { WorkbenchTabBarContainer } from "./workbench/workbench-navigation-container";
 import {
   activeRunOperationKey,
@@ -784,11 +783,11 @@ export default function Workbench() {
     || versionTransitioningRef.current
     || renameTransitioningRef.current
   ), []);
-  const versionTransitioning =
-    (workspaceControllerSnapshot?.version?.navigation.phase || "idle") !== "idle";
+  const versionTransitioning = (workspaceControllerSnapshot?.version?.navigation.phase || "idle") !== "idle";
   const renameTransitioning =
     workspaceControllerSnapshot?.project?.rename?.phase === "renaming";
   const viewTransitioning = sourceTransitioning || versionTransitioning || renameTransitioning;
+  const bridgeConnectionReady = useRuntimeBridgeConnectionReady();
   useEffect(() => {
     renameTransitioningRef.current = renameTransitioning;
   }, [renameTransitioning]);
@@ -796,6 +795,7 @@ export default function Workbench() {
     setCanvasRenderAcks({ edit: null, preview: null });
   }, []);
   useLayoutEffect(() => {
+    if (!bridgeConnectionReady) return undefined;
     const editRuntimeApi: DesktopEditRuntimeApi | undefined = window.htmlAIEditRuntime;
     const uiPreferencesApi: DesktopUiPreferencesApi | undefined = window.htmlAIUiPreferences;
     const controller = createRuntimeWorkspaceController({
@@ -1229,7 +1229,7 @@ export default function Workbench() {
       setWorkspaceController((current) => current === controller ? null : current);
       controller.dispose();
     };
-  }, [deferEditorCommand, invalidateCanvasRenderAcks, isViewTransitioning, projectPanelPort]);
+  }, [bridgeConnectionReady, deferEditorCommand, invalidateCanvasRenderAcks, isViewTransitioning, projectPanelPort]);
   const invalidateEditCanvasRenderAck = useCallback(() => {
     setCanvasRenderAcks((current) => (
       current.edit ? { ...current, edit: null } : current

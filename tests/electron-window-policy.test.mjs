@@ -81,16 +81,16 @@ test("Electron automation stays backgrounded unless foreground debugging is expl
   }
 });
 
-test("window construction never waits for the Bridge utility process", async () => {
+test("window loads the real renderer shell before Bridge readiness", async () => {
   const mainProcess = await readFile(sourceUrl("../desktop/app-lifecycle.mjs"), "utf8");
   const createWindow = mainProcess.slice(
     mainProcess.indexOf("async function createWindow()"),
   );
   assert.ok(createWindow.startsWith("async function createWindow()"));
 
-  // The Bridge boots a separate Node process and only the renderer URL needs its
-  // endpoint. Starting it without awaiting keeps protocol installation, window
-  // construction and IPC registration off the boot's critical path.
+  // The renderer shell must begin navigating before the utility process can
+  // occupy the startup critical path. Its endpoint arrives later over preload
+  // IPC, without a second navigation.
   const startCall = createWindow.indexOf("const bridgeStartup = startBridge();");
   assert.notEqual(startCall, -1);
   assert.doesNotMatch(createWindow, /const port = await startBridge\(\);/u);
@@ -101,17 +101,38 @@ test("window construction never waits for the Bridge utility process", async () 
 
   const windowConstruction = createWindow.indexOf("mainWindow = new BrowserWindow({");
   const registerIpc = createWindow.indexOf("registerProjectIpc();");
+  const loadRenderer = createWindow.indexOf("const shellLoad = mainWindow.loadFile(rendererPath()");
+  const awaitShell = createWindow.indexOf("await shellLoad;");
   const awaitBridge = createWindow.indexOf("const port = await bridgeStartup;");
-  const loadRenderer = createWindow.indexOf("await mainWindow.loadFile(rendererPath()");
-  for (const offset of [windowConstruction, registerIpc, awaitBridge, loadRenderer]) {
+  const publishConnection = createWindow.indexOf("ctx.APP_CHANNELS.bridgeReady");
+  for (const offset of [windowConstruction, registerIpc, loadRenderer, awaitShell, awaitBridge, publishConnection]) {
     assert.notEqual(offset, -1);
   }
-  assert.ok(startCall < windowConstruction);
-  assert.ok(windowConstruction < awaitBridge);
-  assert.ok(registerIpc < awaitBridge);
-  // The renderer query string still carries the verified endpoint, so the await
-  // has to settle before the load and nowhere earlier.
-  assert.ok(awaitBridge < loadRenderer);
+  assert.ok(windowConstruction < registerIpc);
+  assert.ok(registerIpc < loadRenderer);
+  assert.ok(loadRenderer < startCall);
+  assert.ok(startCall < awaitShell);
+  assert.ok(awaitShell < awaitBridge);
+  assert.ok(awaitBridge < publishConnection);
+  assert.equal(createWindow.match(/\.loadFile\(/gu)?.length, 2);
+  assert.match(createWindow, /bridge-connection-published/u);
+});
+
+test("usage telemetry starts only after the renderer is ready to show", async () => {
+  const [mainProcess, appLifecycle] = await Promise.all([
+    readFile(sourceUrl("../desktop/main.mjs"), "utf8"),
+    readFile(sourceUrl("../desktop/app-lifecycle.mjs"), "utf8"),
+  ]);
+  const coldStart = mainProcess.slice(mainProcess.indexOf("app.whenReady().then"));
+  assert.doesNotMatch(
+    coldStart.slice(0, coldStart.indexOf("await createWindow();")),
+    /initializeUsageTelemetry/u,
+  );
+  assert.match(
+    appLifecycle,
+    /once\("ready-to-show"[\s\S]*?window-ready-to-show[\s\S]*?startUsageTelemetryAfterFirstPaint/u,
+  );
+  assert.match(mainProcess, /telemetry-failed/u);
 });
 
 test("final-exit IPC unregister and close-abort registration include workbench tabs", async () => {
