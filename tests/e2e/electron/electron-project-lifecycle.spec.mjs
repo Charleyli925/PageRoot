@@ -534,7 +534,7 @@ test("Electron v4 registry only recovers Finder rename and protects moved copies
   }
 });
 
-test("Electron safely renames the managed V1 without starting a new project", {
+test("Electron keeps managed V1 identity in the selected tab and retires title-bar rename", {
   tag: ["@gate-smoke","@smoke-project-lifecycle"],
 }, async () => {
   const launched = await launchPageRoot();
@@ -559,7 +559,6 @@ test("Electron safely renames the managed V1 without starting a new project", {
     ).toBe(true);
     expect(path.basename(managedOriginalPath)).toBe("欢迎来到源页-V1.html");
     const projectRoot = path.dirname(managedOriginalPath);
-    const renamedPath = path.join(projectRoot, "我的页面-V1.html");
     const originalBytes = readFileSync(externalOriginalPath);
     const originalManifest = JSON.parse(readFileSync(
       path.join(projectRoot, ".pageroot", "manifest.json"),
@@ -567,67 +566,33 @@ test("Electron safely renames the managed V1 without starting a new project", {
     ));
     const projectId = originalManifest.projectId;
 
-    const title = launched.page.getByRole("button", {
-      name: "重命名文件 欢迎来到源页-V1",
-      exact: true,
-    });
-    await expect(title).toBeVisible();
-    await title.click();
-    const input = launched.page.getByRole("textbox", {
-      name: "文件名（不含后缀）",
-      exact: true,
-    });
-    await expect(input).toHaveValue("欢迎来到源页-V1");
-    await expect(input.locator("..")).toContainText(".html");
-    await input.fill("我的页面-V1");
-    const header = launched.page.locator("header.workbench-header");
-    await expect(header).toHaveAttribute("data-file-renaming", "true");
-    const fileHeader = launched.page.locator(".window-file");
-    const fileHeaderBox = await fileHeader.boundingBox();
-    expect(fileHeaderBox).not.toBeNull();
-    await fileHeader.click({
-      position: {
-        x: fileHeaderBox.width - 8,
-        y: fileHeaderBox.height / 2,
-      },
-    });
-
-    await expect(input).toHaveCount(0);
-    await expect(header).not.toHaveAttribute("data-file-renaming", "true");
-    await expect.poll(
-      async () => (
-        await launched.page.evaluate(() => window.htmlAIProjects?.getActiveProject())
-      )?.sourcePath,
-      { timeout: 20_000 },
-    ).toBe(renamedPath);
-    await expect(launched.page.getByRole("button", {
-      name: "重命名文件 我的页面-V1",
-      exact: true,
-    })).toBeVisible();
+    await expect(titleStemLocator(launched.page)).toHaveText("欢迎来到源页-V1.html");
+    await expect(launched.page.getByRole("button", { name: /重命名文件/u }))
+      .toHaveCount(0);
+    await expect(launched.page.getByRole("textbox", { name: "文件名（不含后缀）" }))
+      .toHaveCount(0);
     expect(readFileSync(externalOriginalPath)).toEqual(originalBytes);
-    expect(existsSync(managedOriginalPath)).toBe(false);
-    expect(readFileSync(renamedPath)).toEqual(originalBytes);
+    expect(readFileSync(managedOriginalPath)).toEqual(originalBytes);
 
     const state = JSON.parse(
       readFileSync(path.join(launched.isolatedUserData, "html-projects.json"), "utf8"),
     );
     expect(state.version).toBe(2);
-    expect(state.activePath).toBe(renamedPath);
-    expect(state.recent[0].path).toBe(renamedPath);
+    expect(state.activePath).toBe(managedOriginalPath);
+    expect(state.recent[0].path).toBe(managedOriginalPath);
     expect(state.pendingRename).toBeNull();
-    expect(state.lastRename.sourcePath).toBe(renamedPath);
 
-    const renamedManifest = JSON.parse(readFileSync(
+    const currentManifest = JSON.parse(readFileSync(
       path.join(projectRoot, ".pageroot", "manifest.json"),
       "utf8",
     ));
-    expect(renamedManifest.projectId).toBe(projectId);
-    expect(renamedManifest.documentId).toBe(originalManifest.documentId);
-    expect(renamedManifest.workingCopies).toEqual(expect.arrayContaining([
+    expect(currentManifest.projectId).toBe(projectId);
+    expect(currentManifest.documentId).toBe(originalManifest.documentId);
+    expect(currentManifest.workingCopies).toEqual(expect.arrayContaining([
       expect.objectContaining({
         workingCopyId: "work_ver_0001",
-        sourceRelativePath: "我的页面-V1.html",
-        preferredFileStem: "我的页面",
+        sourceRelativePath: "欢迎来到源页-V1.html",
+        preferredFileStem: "欢迎来到源页",
         preferredExtension: ".html",
       }),
     ]));
@@ -672,11 +637,7 @@ test("Electron rapid project switching and immediate close preserve the last nat
       projectA.sourcePath,
     );
 
-    await firstLaunch.page.getByRole("button", { name: "打开新的本地 HTML" }).click();
-    await firstLaunch.page.locator(".recent-file-row")
-      .filter({ hasText: "close-switch-b.html" })
-      .click();
-    await loadedDiskFrame(firstLaunch.page, projectB.sourcePath, "list-item");
+    await openRecentProject(firstLaunch.page, projectB.sourcePath);
     await expect.poll(
       () => readFileSync(projectAWorkingCopyPath, "utf8"),
       { timeout: 20_000 },
@@ -951,7 +912,7 @@ test("Electron keeps PageRoot bytes when Finder renames and edits the same file"
   }
 });
 
-test("Electron does not follow a copied Working Copy or leave the title stuck after a real rename error", async () => {
+test("Electron does not follow a copied Working Copy or expose the retired title-bar rename", async () => {
   const fixture = createSourceFixture("finder-rename-copy.html");
   let electronApp = null;
   let isolatedUserData = null;
@@ -978,16 +939,9 @@ test("Electron does not follow a copied Working Copy or leave the title stuck af
       if (current?.sourcePath !== managedSourcePath) return current?.sourcePath || "";
       return Date.now() >= copyDeadline ? managedSourcePath : "";
     }).toBe(managedSourcePath);
-    await expect(titleStemLocator(launched.page)).toHaveText(originalStem);
-
-    await launched.page.getByRole("button", { name: /重命名文件/u }).click();
-    const renameInput = launched.page.getByRole("textbox", { name: "文件名（不含后缀）" });
-    await renameInput.fill("bad/name");
-    await launched.page.locator("[data-persist-state]").first().click({ force: true });
-    await expect(launched.page.locator("#window-file-rename-error")).toBeVisible();
-    await launched.page.locator("body").click({ position: { x: 12, y: 12 }, force: true });
-    await expect(launched.page.getByRole("button", { name: /重命名文件/u })).toBeVisible();
-    await expect(titleStemLocator(launched.page)).toHaveText(originalStem);
+    await expect(titleStemLocator(launched.page)).toContainText(originalStem);
+    await expect(launched.page.getByRole("button", { name: /重命名文件/u }))
+      .toHaveCount(0);
     expect(existsSync(managedSourcePath)).toBe(true);
   } finally {
     if (electronApp && isolatedUserData) {
@@ -997,7 +951,7 @@ test("Electron does not follow a copied Working Copy or leave the title stuck af
   }
 });
 
-test("Electron follows a same-parent project folder rename then a title-bar rename", async () => {
+test("Electron follows a same-parent project folder rename without restoring title-bar rename", async () => {
   const fixture = createSourceFixture("finder-folder-rename.html");
   let electronApp = null;
   let isolatedUserData = null;
@@ -1010,11 +964,6 @@ test("Electron follows a same-parent project folder rename then a title-bar rena
       launched.page,
       fixture.sourcePath,
     );
-    const beforeWorkspace = await bridgeJson(
-      launched.page,
-      `/workspace?sourcePath=${encodeURIComponent(managedSourcePath)}`,
-    );
-    const beforeTarget = beforeWorkspace.body?.openTarget || beforeWorkspace.body;
     const projectRoot = path.dirname(managedSourcePath);
     const renamedRoot = path.join(path.dirname(projectRoot), "Finder 项目文件夹");
     const relocatedPath = path.join(renamedRoot, path.basename(managedSourcePath));
@@ -1026,21 +975,9 @@ test("Electron follows a same-parent project folder rename then a title-bar rena
       path.basename(managedSourcePath, path.extname(managedSourcePath)),
     );
 
-    await launched.page.getByRole("button", { name: /重命名文件/u }).click();
-    const renameInput = launched.page.getByRole("textbox", { name: "文件名（不含后缀）" });
-    await expect(renameInput).toBeFocused();
-    await renameInput.fill("folder-renamed-V1");
-    await renameInput.press("Enter");
-    const pagerootPath = path.join(renamedRoot, "folder-renamed-V1.html");
-    await waitForTitleStem(launched.page, "folder-renamed-V1");
-    await expect.poll(() => existsSync(pagerootPath)).toBe(true);
-    const afterWorkspace = await bridgeJson(
-      launched.page,
-      `/workspace?sourcePath=${encodeURIComponent(pagerootPath)}`,
-    );
-    const afterTarget = afterWorkspace.body?.openTarget || afterWorkspace.body;
-    expect(afterTarget.projectId).toBe(beforeTarget.projectId);
-    expect(afterTarget.workingCopyId).toBe(beforeTarget.workingCopyId);
+    await expect(launched.page.getByRole("button", { name: /重命名文件/u }))
+      .toHaveCount(0);
+    expect(existsSync(relocatedPath)).toBe(true);
   } finally {
     if (electronApp && isolatedUserData) {
       await stopPageRoot(electronApp, isolatedUserData);
@@ -1077,7 +1014,7 @@ test("Electron does not follow a Working Copy moved out of the registered projec
       }
       return Date.now() >= moveDeadline ? "stayed" : "";
     }).toBe("stayed");
-    await expect(titleStemLocator(launched.page)).toHaveText(originalStem);
+    await expect(titleStemLocator(launched.page)).toContainText(originalStem);
     expect(existsSync(escapedPath)).toBe(true);
     expect(existsSync(managedSourcePath)).toBe(false);
   } finally {

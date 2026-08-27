@@ -75,11 +75,10 @@ test("a pre-load review navigation falls back without trusting the replacement p
       "审阅画布未能安全载入，可返回 AI 修改前后重试。",
       { exact: true },
     )).toHaveCount(0);
-    await launched.page.getByRole("button", {
-      name: "收起审阅工具",
-    }).click();
-    await expect(launched.page.getByRole("button", { name: "显示并固定审阅工具" }))
-      .toBeVisible();
+    await expect(launched.page.locator("header.workbench-header")
+      .getByLabel("审阅工具", { exact: true })).toBeVisible();
+    await expect(launched.page.getByRole("button", { name: "收起审阅工具" }))
+      .toHaveCount(0);
   } finally {
     await stopPageRoot(launched.electronApp, launched.isolatedUserData);
     removeSourceFixture(fixture.sourceDirectory);

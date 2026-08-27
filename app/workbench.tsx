@@ -41,7 +41,6 @@ import { useAiConversation } from "./workbench/use-ai-conversation";
 import NoticeBar from "./components/NoticeBar";
 import RestartUpdateDialog from "./components/RestartUpdateDialog";
 import ExternalHtmlOpenDialog from "./workbench/ExternalHtmlOpenDialog";
-import OpenHtmlDialog from "./workbench/OpenHtmlDialog";
 import {
   MAX_ATTACHMENT_BYTES,
   MAX_COMMENT_ATTACHMENTS,
@@ -208,13 +207,11 @@ import {
 import {
   WorkbenchGlobalSidebar,
   WorkbenchStartPage,
-  WorkbenchStartToolbar,
   WorkbenchTabBar,
 } from "./workbench/WorkbenchChrome";
 import {
   activeRunOperationKey,
   currentWorkingCopyPresentation,
-  fileExtension,
   fileStem,
   formatProjectTimestamp,
   formatTime,
@@ -239,7 +236,6 @@ import {
 } from "./workbench/version-model";
 import type {
   ApplicationUpdateResult,
-  BackgroundProjectResult,
   CanvasMode,
   CloseAbortedDetail,
   CloseReadiness,
@@ -543,12 +539,6 @@ export default function Workbench() {
   const resumeSubmissionAfterRelinkRef = useRef(false);
   const normalizeCurrentGlobalCommentsRef = useRef<() => CommentItem[]>(() => []);
   const projectRulesEditorRef = useRef<HTMLTextAreaElement | null>(null);
-  const fileRenameInputRef = useRef<HTMLInputElement | null>(null);
-  const openHtmlButtonRef = useRef<HTMLButtonElement | null>(null);
-  const fileRenameEditingRef = useRef(false);
-  const fileRenameBusyRef = useRef(false);
-  const fileRenameErrorRef = useRef("");
-  const fileRenameOriginalStemRef = useRef("");
   const automaticProjectRegistrationRef = useRef("");
   const projectRecordsPreparationRef = useRef("");
 
@@ -629,10 +619,6 @@ export default function Workbench() {
   const [projectRecordsPath, setProjectRecordsPath] =
     useState<string | null>(null);
   const [lastModifiedAt, setLastModifiedAt] = useState<string | null>(null);
-  const [fileRenameEditing, setFileRenameEditing] = useState(false);
-  const [fileRenameBusy, setFileRenameBusy] = useState(false);
-  const [fileRenameDraft, setFileRenameDraft] = useState("");
-  const [fileRenameError, setFileRenameError] = useState("");
   const [recentProjects, setRecentProjects] = useState<RecentProject[]>([]);
   const [registeredProjects, setRegisteredProjects] = useState<RegisteredProject[]>([]);
   const [recentProjectsError, setRecentProjectsError] = useState("");
@@ -708,16 +694,9 @@ export default function Workbench() {
     ?? INITIAL_QODER_AVAILABILITY;
   const aboutQoderAvailability = agentCatalogSnapshot?.providers?.qoder?.availability
     ?? INITIAL_QODER_AVAILABILITY;
-  const backgroundProjectResults = useMemo(
-    () => new Map<string, BackgroundProjectResult>(
-      runSnapshot.backgroundResults,
-    ),
-    [runSnapshot.backgroundResults],
-  );
   const [previewAttachment, setPreviewAttachment] = useState<CommentAttachment | null>(null);
   const [composerOpen, setComposerOpen] = useState(false);
   const [drawer, setDrawer] = useState<Drawer>(null);
-  const [openHtmlDialogOpen, setOpenHtmlDialogOpen] = useState(false);
   const [selectedVersionId, setSelectedVersionId] = useState<string | null>(null);
   const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
   const [pendingDeleteCommentId, setPendingDeleteCommentId] = useState<string | null>(null);
@@ -2657,13 +2636,16 @@ export default function Workbench() {
   const updateBadgeLabel = updateDownloaded ? "重启更新" : "New!";
   const currentSourceFileName =
     localFileNameFromSourcePath(sourcePath) || projectName;
-  const currentSourceFileExtension = fileExtension(currentSourceFileName);
-  const currentSourceFileStem = fileStem(currentSourceFileName);
   useEffect(() => {
     if (!workspaceController || !projectId || !documentId) return;
     const tabId = `document:${projectId}:${documentId}`;
     const projected = workspaceController.getSnapshot().workbenchTabs;
     if (!projected?.tabs.some((tab) => tab.tabId === tabId)) return;
+    workspaceController.updateWorkbenchTabTitle(
+      projectId,
+      documentId,
+      currentSourceFileName,
+    );
     workspaceController.updateWorkbenchTabStatus(
       projectId,
       documentId,
@@ -2676,7 +2658,7 @@ export default function Workbench() {
             : "normal",
     );
   }, [
-    currentSourceFileStem,
+    currentSourceFileName,
     documentId,
     persistState,
     projectId,
@@ -2686,30 +2668,12 @@ export default function Workbench() {
     runInProgress,
     workspaceController,
   ]);
-  const canOfferFileRename = Boolean(
-    sourcePath
-    && sourceSha256
-    && typeof window !== "undefined"
-    && window.htmlAIProjects?.renameHtml
-    && runtimeCapabilitiesReady
-    && !browserPreviewOnly
-    && !runInProgress
-    && !projectHydrating
-    && !projectLoadError
-    && !workspaceIssue
-    && !viewTransitioning
-    && viewMode === "current"
-    && persistState === "idle"
-    && editRevision === lastPersistedRevision
-  );
   const interactionLocked = runInProgress
     || browserPreviewOnly
     || projectHydrating
     || Boolean(projectLoadError)
     || Boolean(workspaceIssue)
     || viewTransitioning
-    || fileRenameEditing
-    || fileRenameBusy
     || persistState === "conflict"
     || viewMode === "history";
   const firstEditGuideVisible =
@@ -3572,28 +3536,6 @@ export default function Workbench() {
       });
   }, [workspaceController]);
 
-  const refreshRecents = useCallback(async () => {
-    if (!workspaceController) return;
-    await workspaceController.refreshRecentProjects();
-  }, [workspaceController]);
-
-  const forgetRecentProject = useCallback(async (recentSourcePath: string) => {
-    const api = window.htmlAIProjects;
-    if (!api?.forgetRecent) return;
-    try {
-      await api.forgetRecent(recentSourcePath);
-      setRecentProjects((current) => current.filter(
-        (project) => project.sourcePath !== recentSourcePath,
-      ));
-      setRecentProjectsError("");
-    } catch (cause) {
-      setRecentProjectsError(productErrorMessage(
-        cause,
-        "这条最近打开记录暂时无法移除，可以重试。",
-      ));
-    }
-  }, []);
-
   const refreshWorkspace = useCallback(async (
     sourceOverride?: string | null,
     epochOverride?: number,
@@ -4282,164 +4224,6 @@ export default function Workbench() {
     flushAutosave,
     workspaceController,
   ]);
-
-  const cancelFileRename = useCallback(() => {
-    if (fileRenameBusyRef.current) return;
-    fileRenameEditingRef.current = false;
-    fileRenameErrorRef.current = "";
-    fileRenameOriginalStemRef.current = "";
-    setFileRenameEditing(false);
-    setFileRenameError("");
-    setFileRenameDraft("");
-  }, []);
-
-  const beginFileRename = useCallback(() => {
-    if (
-      !canOfferFileRename
-      || fileRenameEditingRef.current
-      || fileRenameBusyRef.current
-      || editorRef.current?.hasPendingNativeEdit()
-      || currentDocumentSessionSnapshot().hasPendingWrite
-      || currentDocumentSessionSnapshot().isFlushing
-      || workspaceController?.hasDocumentHistoryAction
-      || currentDocumentSessionSnapshot().editRevision
-        !== currentDocumentSessionSnapshot().lastPersistedRevision
-    ) return;
-    fileRenameEditingRef.current = true;
-    fileRenameErrorRef.current = "";
-    fileRenameOriginalStemRef.current = currentSourceFileStem;
-    setFileRenameEditing(true);
-    setFileRenameDraft(currentSourceFileStem);
-    setFileRenameError("");
-    window.requestAnimationFrame(() => {
-      fileRenameInputRef.current?.focus();
-      fileRenameInputRef.current?.select();
-    });
-  }, [
-    canOfferFileRename,
-    currentDocumentSessionSnapshot,
-    currentSourceFileStem,
-    workspaceController?.hasDocumentHistoryAction,
-  ]);
-
-  const commitFileRename = useCallback(async () => {
-    if (!fileRenameEditingRef.current || fileRenameBusyRef.current) return;
-    if (
-      !workspaceController
-      || !canOfferFileRename
-    ) {
-      fileRenameErrorRef.current = "当前状态还不能重命名，请等待文件安全保存。";
-      setFileRenameError(fileRenameErrorRef.current);
-      return;
-    }
-
-    fileRenameBusyRef.current = true;
-    setFileRenameBusy(true);
-    fileRenameErrorRef.current = "";
-    setFileRenameError("");
-    try {
-      const controller = requiredWorkspaceController(workspaceController);
-      const reconciled = await controller.observeExternalSourceChange({
-        reason: "rename",
-      });
-      if (reconciled.status === "rejected" || reconciled.status === "unknown") {
-        throw Object.assign(
-          new Error(
-            ("reason" in reconciled && reconciled.reason)
-              || "当前工作文件暂时无法核对位置，PageRoot 没有切换路径。",
-          ),
-          { code: "code" in reconciled ? reconciled.code : undefined },
-        );
-      }
-      if (reconciled.status === "blocked") {
-        throw new Error(
-          ("reason" in reconciled && reconciled.reason)
-            || "当前状态还不能重命名，请等待文件安全保存。",
-        );
-      }
-      const recoveredStem = reconciled.status === "succeeded"
-        && typeof reconciled.value?.projectName === "string"
-        ? reconciled.value.projectName
-        : "";
-      if (recoveredStem) setProjectName(recoveredStem);
-      const typedStem = fileRenameDraft.normalize("NFC").trim();
-      const originalStem = fileRenameOriginalStemRef.current.normalize("NFC").trim();
-      if (
-        reconciled.status === "succeeded"
-        && reconciled.value?.relocated
-        && typedStem === originalStem
-        && recoveredStem
-        && recoveredStem !== typedStem
-      ) {
-        fileRenameEditingRef.current = false;
-        fileRenameErrorRef.current = "";
-        fileRenameOriginalStemRef.current = "";
-        setFileRenameEditing(false);
-        setFileRenameDraft("");
-        setFileRenameError("");
-        return;
-      }
-      const outcome = await controller.renameProjectSource({ stem: fileRenameDraft });
-      if (outcome.status !== "succeeded") {
-        throw Object.assign(
-          new Error(
-            outcome.status === "unknown"
-              ? "文件名已经修改，但项目状态还没有完成刷新。"
-              : ("reason" in outcome && outcome.reason)
-                || "文件名没有修改，请检查名称后重试。",
-          ),
-          { code: "code" in outcome ? outcome.code : undefined },
-        );
-      }
-      if (outcome.value.projectName) setProjectName(outcome.value.projectName);
-      setLastModifiedAt(outcome.value.lastModifiedAt || null);
-      fileRenameEditingRef.current = false;
-      fileRenameErrorRef.current = "";
-      fileRenameOriginalStemRef.current = "";
-      setFileRenameEditing(false);
-      setFileRenameDraft("");
-      setFileRenameError("");
-    } catch (cause) {
-      const message = productErrorMessage(
-        cause,
-        "文件名没有修改，请检查名称后重试。",
-      );
-      fileRenameErrorRef.current = message;
-      setFileRenameError(message);
-    } finally {
-      fileRenameBusyRef.current = false;
-      setFileRenameBusy(false);
-    }
-  }, [
-    canOfferFileRename,
-    fileRenameDraft,
-    workspaceController,
-  ]);
-
-  useEffect(() => {
-    if (
-      fileRenameEditing
-      && !fileRenameBusy
-      && !canOfferFileRename
-    ) cancelFileRename();
-  }, [
-    canOfferFileRename,
-    cancelFileRename,
-    fileRenameBusy,
-    fileRenameEditing,
-  ]);
-
-  useEffect(() => {
-    if (!fileRenameEditing || fileRenameBusy) return undefined;
-    const onPointerDown = (event: PointerEvent) => {
-      if (!fileRenameErrorRef.current) return;
-      const field = fileRenameInputRef.current?.closest(".window-file-rename-field");
-      if (field instanceof Element && field.contains(event.target as Node)) return;
-      cancelFileRename();
-    };
-    document.addEventListener("pointerdown", onPointerDown, true);
-    return () => document.removeEventListener("pointerdown", onPointerDown, true);
-  }, [cancelFileRename, fileRenameBusy, fileRenameEditing]);
 
   const showProjectRecordsInFolder = useCallback(async () => {
     const context = workspaceControllerRef.current?.getCurrentProjectContext();
@@ -6846,9 +6630,7 @@ export default function Workbench() {
       : "正在确认当前画布…";
   const saveStatusLabel = browserPreviewOnly
     ? "操作不会保存"
-    : fileRenameBusy
-      ? "正在重命名…"
-      : persistState !== "idle"
+    : persistState !== "idle"
         ? persistLabel
         : viewMode === "history"
           ? "历史版本 · 只读"
@@ -6932,15 +6714,6 @@ export default function Workbench() {
     && typeof window !== "undefined"
     && window.htmlAIProjects?.openInDefaultBrowser,
   );
-  const visibleRecentProjects = recentProjects
-    .filter((project) => !sameLocalSourcePath(project.sourcePath, sourcePath))
-    .slice(0, 6);
-  const recentProjectStatus = (projectSourcePath: string): BackgroundProjectResult | null => {
-    const recorded = [...backgroundProjectResults.entries()].find(
-      ([key]) => sameLocalSourcePath(key, projectSourcePath),
-    )?.[1];
-    return recorded || null;
-  };
   const runBasisLabel = activeRun?.basedOnVersionId
     ? safeVersionLabel(activeRun.basedOnVersionId)
     : currentBasedOnVersionId
@@ -7581,30 +7354,16 @@ export default function Workbench() {
         onSelect={selectWorkbenchTab}
         onClose={closeWorkbenchTab}
         onNew={createWorkbenchStartTab}
+        sidebarOpen={globalSidebarOpen}
+        onToggleSidebar={() => {
+          setGlobalSidebarOpen(true);
+          void workspaceController?.refreshRecentProjects();
+          void workspaceController?.refreshRegisteredProjects();
+        }}
       />
-      {startPageActive ? (
-        <WorkbenchStartToolbar onOpenSidebar={() => setGlobalSidebarOpen(true)} />
-      ) : null}
-      <WorkbenchHeaderShell
-        data-file-renaming={fileRenameEditing ? "true" : undefined}
-      >
+      {!startPageActive ? <WorkbenchHeaderShell>
         <WorkbenchFileHeaderView
-          fileRenameInputRef={fileRenameInputRef}
-          openHtmlButtonRef={openHtmlButtonRef}
-          updateActionVisible={updateActionVisible}
-          updateDownloaded={updateDownloaded}
-          updateDownloading={updateDownloading}
-          updateResult={updateResult}
-          updateBadgeLabel={updateBadgeLabel}
-          fileRenameEditing={fileRenameEditing}
-          fileRenameBusy={fileRenameBusy}
-          fileRenameError={fileRenameError}
-          fileRenameDraft={fileRenameDraft}
-          currentSourceFileStem={currentSourceFileStem}
-          currentSourceFileExtension={currentSourceFileExtension}
           currentSourceFileName={currentSourceFileName}
-          canOfferFileRename={canOfferFileRename}
-          openHtmlDialogOpen={openHtmlDialogOpen}
           canOpenCurrentHtmlInDefaultBrowser={canOpenCurrentHtmlInDefaultBrowser}
           persistState={persistState}
           editRevision={editRevision}
@@ -7616,42 +7375,6 @@ export default function Workbench() {
           canvasAuthority={canvasAuthority}
           visibleCanvasAck={visibleCanvasAck}
           saveStatusLabel={saveStatusLabel}
-          onOpenAbout={openAboutPageRoot}
-          onDownloadOrRestartUpdate={() => {
-            if (updateDownloaded) {
-              setRestartUpdateOpen(true);
-            } else if (updateResult?.status === "available") {
-              void downloadAvailableUpdate();
-            }
-          }}
-          onFileRenameBlur={() => {
-            if (fileRenameErrorRef.current) {
-              cancelFileRename();
-              return;
-            }
-            void commitFileRename();
-          }}
-          onFileRenameChange={(value) => {
-            setFileRenameDraft(value);
-            if (fileRenameError) {
-              fileRenameErrorRef.current = "";
-              setFileRenameError("");
-            }
-          }}
-          onFileRenameKeyDown={(event) => {
-            if (event.key === "Enter") {
-              event.preventDefault();
-              void commitFileRename();
-            } else if (event.key === "Escape") {
-              event.preventDefault();
-              cancelFileRename();
-            }
-          }}
-          onBeginFileRename={beginFileRename}
-          onOpenHtmlDialog={() => {
-            setOpenHtmlDialogOpen(true);
-            void refreshRecents();
-          }}
           onOpenInDefaultBrowser={() => void openCurrentHtmlInDefaultBrowser()}
           onShowProjectRecordsInFolder={() => void showProjectRecordsInFolder()}
           onShowProjectInFolder={() => void showProjectInFolder()}
@@ -7674,7 +7397,7 @@ export default function Workbench() {
           drawer={drawer}
           recentRunOutcome={recentRunOutcome}
           terminalRun={terminalRun}
-          readyReviewOverlay={readyReviewOverlay}
+          reviewActive={Boolean(readyReviewOverlay)}
           aiAssistantEntry={aiAssistantEntry}
           onSelectEdit={() => {
             if (externalSourcePreview) {
@@ -7766,7 +7489,7 @@ export default function Workbench() {
             if (target) void uploadAttachments(files, target, "file-picker");
           }}
         />
-      </WorkbenchHeaderShell>
+      </WorkbenchHeaderShell> : null}
 
       {startupIssue ? (
         <section className="startup-issue" role="alert">
@@ -7910,6 +7633,7 @@ export default function Workbench() {
         open={globalSidebarOpen}
         recentProjects={recentProjects}
         registeredProjects={registeredProjects}
+        projectsError={recentProjectsError}
         onToggle={() => {
           setGlobalSidebarOpen((open) => !open);
           void workspaceController?.refreshRecentProjects();
@@ -7919,6 +7643,19 @@ export default function Workbench() {
         onOpenRecent={(recentSourcePath) => void openProject(recentSourcePath)}
         onOpenRegistered={openRegisteredWorkbenchProject}
         onOpenCurrentProject={() => setDrawer("files")}
+        updateActionVisible={updateActionVisible}
+        updateDownloaded={updateDownloaded}
+        updateDownloading={updateDownloading}
+        updateResult={updateResult}
+        updateBadgeLabel={updateBadgeLabel}
+        onOpenAbout={openAboutPageRoot}
+        onDownloadOrRestartUpdate={() => {
+          if (updateDownloaded) {
+            setRestartUpdateOpen(true);
+          } else if (updateResult?.status === "available") {
+            void downloadAvailableUpdate();
+          }
+        }}
       />
       <WorkbenchDocumentSurfaceCache
         snapshot={documentSurfaceCacheSnapshot}
@@ -8346,44 +8083,13 @@ export default function Workbench() {
             void workspaceController?.cancelExternalOpen({
               requestId: openConfirmation.requestId,
             });
-            openHtmlButtonRef.current?.focus();
           }}
           onConfirm={(action) => {
             void workspaceController?.confirmExternalOpen({
               requestId: openConfirmation.requestId,
               action,
               deleteOriginal: openConfirmation.deleteOriginal === true,
-            }).finally(() => {
-              openHtmlButtonRef.current?.focus();
             });
-          }}
-        />
-      ) : null}
-
-      {openHtmlDialogOpen && !openConfirmation ? (
-        <OpenHtmlDialog
-          anchorRef={openHtmlButtonRef}
-          recentProjects={visibleRecentProjects}
-          recentProjectsError={recentProjectsError}
-          actionsDisabled={attachmentUploadCount > 0}
-          canForgetRecent={
-            typeof window !== "undefined"
-            && Boolean(window.htmlAIProjects?.forgetRecent)
-          }
-          statusForSource={recentProjectStatus}
-          onOpenLocal={() => {
-            setOpenHtmlDialogOpen(false);
-            void openProject();
-          }}
-          onOpenRecent={(recentSourcePath) => {
-            setOpenHtmlDialogOpen(false);
-            void openProject(recentSourcePath);
-          }}
-          onForgetRecent={(recentSourcePath) => void forgetRecentProject(recentSourcePath)}
-          onRetryRecents={() => void refreshRecents()}
-          onClose={() => {
-            setOpenHtmlDialogOpen(false);
-            openHtmlButtonRef.current?.focus();
           }}
         />
       ) : null}
