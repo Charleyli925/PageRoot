@@ -4,6 +4,36 @@ import { generatedReviewBootstrap } from "../../helpers/generated-review-bootstr
 
 const SOURCE_SHA256 = `sha256:${"a".repeat(64)}`;
 
+test("opaque Review storage fallback lets authored Canvas reach first paint without persistence @gate-smoke @smoke-review", async ({ page }) => {
+  const bootstrap = generatedReviewBootstrap([], [], "before")
+    .replace(/<\/script/giu, "<\\/script");
+  const srcdoc = `<!doctype html><html><head><script>${bootstrap}</script></head><body>
+    <canvas id="chart" width="160" height="80"></canvas>
+    <script>
+      document.documentElement.dataset.previousStorage = localStorage.getItem("theme") || "empty";
+      localStorage.setItem("theme", "dark");
+      const context = document.querySelector("#chart").getContext("2d");
+      context.fillStyle = "#695ce7";
+      context.fillRect(0, 0, 160, 80);
+      document.documentElement.dataset.authoredCanvasReady = "true";
+    </script>
+  </body></html>`;
+  await page.setContent('<iframe id="review-frame" sandbox="allow-scripts"></iframe>');
+  await page.locator("#review-frame").evaluate((frame, html) => {
+    frame.srcdoc = html;
+  }, srcdoc);
+  const frame = page.frameLocator("#review-frame");
+  await expect(frame.locator("html")).toHaveAttribute("data-previous-storage", "empty");
+  await expect(frame.locator("html")).toHaveAttribute("data-authored-canvas-ready", "true");
+  await expect(frame.locator("html")).toHaveAttribute(
+    "data-pageroot-review-first-paint-ready",
+    "true",
+  );
+  await expect.poll(() => frame.locator("#chart").evaluate((canvas) => (
+    canvas.getContext("2d").getImageData(8, 8, 1, 1).data[3]
+  ))).toBe(255);
+});
+
 function sourceBoxSignature(values = {}) {
   return JSON.stringify([
     ["class", values.class ?? null],

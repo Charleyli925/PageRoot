@@ -443,6 +443,13 @@ direct source Canvas/SVG roots and source-empty hosts with a unique stable
 source binding. It does not infer candidates from JavaScript, runtime DOM,
 computed selectors, comments, arbitrary HTML or `tbody`.
 
+Review publishes static before/after content and first-paint readiness before
+starting optional runtime-visual capture. Its script-enabled frames keep an
+opaque origin; a shared frame-local memory Storage compatibility bootstrap may
+prevent ordinary authored chart scripts from aborting, but grants no durable or
+shared storage. Hidden capture starts only after both visible frames have had a
+compositor turn and never gates navigation, return or Candidate acceptance.
+
 The main-process owner creates one hidden authored-page window and preview
 session per active Review capture; replacement, timeout and disposal destroy
 both. It accepts only exact source HTML/SHA, `before`/`after` side, viewport and

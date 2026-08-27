@@ -18,6 +18,7 @@ import {
 import {
   reviewRegionAnnotations,
 } from "../../app/lib/review-region-annotation.js";
+import { OPAQUE_SANDBOX_STORAGE_BOOTSTRAP } from "../../app/lib/opaque-sandbox-storage.js";
 
 const reviewRuntimeProjection = await readFile(
   new URL("../../app/workbench/review/runtime-projection.ts", import.meta.url),
@@ -80,6 +81,7 @@ export function generatedReviewBootstrap(
     reviewBadgeFactCount,
     aggregateReviewBadgeLabels,
     reviewRegionAnnotations,
+    OPAQUE_SANDBOX_STORAGE_BOOTSTRAP,
   });
   // The bootstrap receives its helpers as `${fn.toString()}` injections, so a
   // new injection that is not also provided here fails deep inside the vm with a
