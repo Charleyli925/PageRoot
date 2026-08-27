@@ -49,6 +49,9 @@ export default function HtmlDisplaySurface({
         srcDoc={frameHtml}
         sandbox=""
         referrerPolicy="no-referrer"
+        onLoad={() => {
+          performance.mark("pageroot:document:static-frame-loaded");
+        }}
       />
     </div>
   );

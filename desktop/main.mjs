@@ -85,6 +85,7 @@ import { registerAgentIpc, unregisterAgentIpc } from "./ipc/agent-ipc.mjs";
 import { registerUpdateIpc, unregisterUpdateIpc } from "./ipc/update-ipc.mjs";
 import { registerWindowIpc, unregisterWindowIpc } from "./ipc/window-ipc.mjs";
 import { createWindowLifecycle } from "./app-lifecycle.mjs";
+import { createStartupPerformanceTimeline } from "./startup-performance-timeline.mjs";
 import {
   closeAbortPayload,
   normalizeCloseResult,
@@ -162,6 +163,7 @@ import {
 
 // electron-updater is CommonJS; the default import is the supported ESM bridge.
 const { autoUpdater } = electronUpdater;
+const startupPerformanceTimeline = createStartupPerformanceTimeline();
 
 registerPreviewProtocolScheme(protocol);
 registerEditRuntimeProtocolScheme(protocol);
@@ -355,6 +357,8 @@ const desktopRuntime = {
   directory,
   bridgeAuthToken,
   APP_CHANNELS,
+  markStartupStage: (stage) => startupPerformanceTimeline.mark(stage),
+  startupTimingSnapshot: () => startupPerformanceTimeline.snapshot(),
 };
 const {
   presentMainWindow,
@@ -3983,6 +3987,7 @@ function deviceIdentity() {
 }
 
 async function launchBridge() {
+  startupPerformanceTimeline.mark("bridge-start");
   const [port, workspace, device] = await Promise.all([
     findAvailablePort(),
     workspacePath(),
@@ -4049,11 +4054,13 @@ async function launchBridge() {
     }
     bridgePort = port;
     ready = true;
+    startupPerformanceTimeline.mark("bridge-ready");
     return port;
   } catch (error) {
     // If the child is still alive, keep its handle so the coordinated fatal
     // shutdown can request a graceful stop instead of orphaning the process.
     bridgePort = null;
+    startupPerformanceTimeline.mark("bridge-failed");
     captureUsage("runtime_fault", {
       process: "bridge",
       kind: "bridge_start",
@@ -4133,6 +4140,7 @@ if (!hasSingleInstanceLock) {
   });
 
   app.whenReady().then(async () => {
+    startupPerformanceTimeline.mark("app-ready");
     if (
       process.platform === "darwin"
       && app.dock
@@ -4142,7 +4150,9 @@ if (!hasSingleInstanceLock) {
     }
     installApplicationMenu();
     ensureApplicationUpdateController();
+    startupPerformanceTimeline.mark("telemetry-start");
     await initializeUsageTelemetry();
+    startupPerformanceTimeline.mark("telemetry-ready");
     await createWindow();
   }).catch(async (error) => {
     captureUsage("runtime_fault", {

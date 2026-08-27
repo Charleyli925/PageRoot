@@ -34,6 +34,8 @@ test("project-file PR1 import switches to V1 before the queued save and leaves e
   );
   assert.equal(preview.response.status, 200);
   assert.equal(preview.body.registered, false);
+  assert.equal(Number.isFinite(preview.body.performanceTiming.bridgeWorkspaceTotalMs), true);
+  assert.ok(preview.body.performanceTiming.bridgeWorkspaceTotalMs >= 0);
 
   const ensured = await postJson(bridge, "/project/ensure", {
     sourcePath,
@@ -45,6 +47,7 @@ test("project-file PR1 import switches to V1 before the queued save and leaves e
   assert.equal(ensured.body.imported, true);
   assert.match(ensured.body.sourcePath, /external-V1\.htm$/u);
   assert.equal(ensured.body.openTarget.workingCopyId, "work_ver_0001");
+  assert.equal(Number.isFinite(ensured.body.performanceTiming.workspaceTotalMs), true);
   assert.equal(await readFile(sourcePath, "utf8"), original);
 
   const edited = html("queued first edit");
