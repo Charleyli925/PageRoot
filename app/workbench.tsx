@@ -4944,8 +4944,11 @@ export default function Workbench() {
     const outcome = controller.beginCommentEdit({ commentId: comment.commentId });
     if (outcome.status !== "succeeded") return false;
     const nextSession = (outcome.value as { session: CommentEditSession }).session;
-    commentCanvasPort.setEditingCommentId(comment.commentId);
+    // Move focus first. The presentation port is observed synchronously, so
+    // publishing `editingCommentId` while the previously focused card is still
+    // current can make the clean-edit guard retire this brand-new session.
     queueReviewCommentFocus(comment.target, comment.commentId);
+    commentCanvasPort.setEditingCommentId(comment.commentId);
     if (focusText) {
       commentCanvasPort.requestCommentEditFocus(
         comment.commentId,
@@ -5023,8 +5026,8 @@ export default function Workbench() {
     commentEditResumePendingRef.current = targetVisible
       ? null
       : current.commentId;
-    if (targetVisible) commentCanvasPort.setEditingCommentId(current.commentId);
     queueReviewCommentFocus(nextTarget, current.commentId);
+    if (targetVisible) commentCanvasPort.setEditingCommentId(current.commentId);
     if (toastRef.current?.dedupeKey === "unfinished-comment-edit") {
       setToast(null);
     }

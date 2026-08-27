@@ -123,10 +123,11 @@ export const CommentRailContainer = memo(function CommentRailContainer({
     canvasPort.getSnapshot,
   );
   const workingCopy = snapshot.workingCopy;
+  const workingCopyEditSession = workingCopy?.editSession ?? null;
   const composer = deriveComposerState({
     relinkingTarget: canvasSnapshot.relinkingTarget,
     editingCommentId: canvasSnapshot.editingCommentId,
-    commentEditSession: workingCopy?.editSession ?? null,
+    commentEditSession: workingCopyEditSession,
     commentEditDraft: workingCopy?.editSession?.draftText ?? "",
     commentEditAttachments: workingCopy?.editSession?.draftAttachments ?? [],
     composerOpen: canvasSnapshot.composerOpen,
@@ -299,7 +300,7 @@ export const CommentRailContainer = memo(function CommentRailContainer({
   const hasUnsavedCommentEdit = Boolean(
     context.viewMode === "current"
     && context.unfinishedEditedComment
-    && commentEditSessionHasChanges(commentEditSession),
+    && commentEditSessionHasChanges(workingCopyEditSession),
   );
   const relinkRailCardVisible = Boolean(
     commentLayoutReady
