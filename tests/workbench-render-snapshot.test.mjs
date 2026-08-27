@@ -124,4 +124,8 @@ test("other capability snapshots always publish to Workbench", () => {
     ...before,
     runSession: Object.freeze({ revision: 2 }),
   })), false);
+  assert.equal(sameWorkbenchRenderSnapshot(before, snapshot({
+    ...before,
+    futureCapability: Object.freeze({ revision: 1 }),
+  })), false);
 });

@@ -30,26 +30,6 @@ function sameCommentPersistencePresentation(left, right) {
     && left.draft?.error === right.draft?.error;
 }
 
-const NON_COMMENT_SNAPSHOT_FIELDS = Object.freeze([
-  "registration",
-  "projectSession",
-  "document",
-  "runSession",
-  "versionSession",
-  "editRuntime",
-  "firstEditGuide",
-  "projectRules",
-  "project",
-  "run",
-  "version",
-  "conversation",
-  "workbenchTabs",
-  "documentSurfaceCache",
-  "workbenchTabsReady",
-  "workbenchNavigation",
-  "workbenchTabsPersistence",
-]);
-
 /**
  * The composition root does not render comment text drafts. Keep those
  * high-frequency facts on the comments capability subscription while still
@@ -59,10 +39,11 @@ const NON_COMMENT_SNAPSHOT_FIELDS = Object.freeze([
 export function sameWorkbenchRenderSnapshot(previous, next) {
   if (previous === next) return true;
   if (!previous || !next) return false;
-  for (const field of NON_COMMENT_SNAPSHOT_FIELDS) {
-    if (!Object.is(previous[field], next[field])) return false;
-  }
-  return sameCommentWorkingCopyStructure(
+  return sameObjectFieldsExcept(
+    previous,
+    next,
+    new Set(["commentSession", "comment"]),
+  ) && sameCommentWorkingCopyStructure(
     previous.commentSession,
     next.commentSession,
   ) && sameCommentPersistencePresentation(previous.comment, next.comment);
