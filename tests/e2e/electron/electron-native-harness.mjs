@@ -137,10 +137,11 @@ export async function openRecentProject(
     await visibleToast.getByRole("button", { name: "关闭提醒" }).click();
     await expect(visibleToast).toBeHidden();
   }
-  await page.getByRole("button", { name: "打开新的本地 HTML" }).click();
-  await page.locator(".recent-file-row")
-    .filter({ hasText: recentName })
-    .click();
+  const sidebar = page.locator(".workbench-global-sidebar");
+  if (await sidebar.getAttribute("data-open") !== "true") {
+    await page.getByRole("button", { name: "展开左侧边栏" }).click();
+  }
+  await sidebar.getByRole("button", { name: recentName, exact: true }).click();
   return loadedDiskFrame(page, sourcePath, caseId);
 }
 
@@ -483,11 +484,13 @@ export function sameDesktopSourcePath(left, right) {
 }
 
 export function titleStemLocator(page) {
-  return page.locator(".window-file-title-row strong").first();
+  return page.locator(
+    '.workbench-tab[data-selected="true"] button[role="tab"] > span:last-child',
+  ).first();
 }
 
 export async function waitForTitleStem(page, stem) {
-  await expect(titleStemLocator(page)).toHaveText(stem, { timeout: 30_000 });
+  await expect(titleStemLocator(page)).toContainText(stem, { timeout: 30_000 });
 }
 
 export async function waitForActiveSourcePath(page, expectedPath) {

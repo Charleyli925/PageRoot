@@ -35,32 +35,51 @@ async function readWorkbenchCascadeCss() {
   return parts.join("");
 }
 
-test("top toolbar keeps the approved restrained visual contract", async () => {
+test("top toolbar keeps one compact cross-mode visual contract", async () => {
   const css = await readWorkbenchCascadeCss();
 
   const header = lastCssRule(css, ".workbench-header");
-  assert.match(header, /background:\s*rgb\(253 252 249 \/ 92%\)/u);
+  assert.match(header, /height:\s*var\(--notice-header-height\)/u);
+  assert.match(header, /padding:\s*5px 10px/u);
+  assert.match(header, /background:\s*rgb\(253 252 249 \/ 96%\)/u);
   assert.match(header, /box-shadow:\s*none/u);
-  assert.match(header, /backdrop-filter:\s*blur\(18px\) saturate\(116%\)/u);
+  assert.match(header, /backdrop-filter:\s*none/u);
 
   const modeFrame = lastCssRule(css, ".canvas-mode-switch");
-  assert.match(modeFrame, /width:\s*147px/u);
+  assert.match(modeFrame, /width:\s*180px/u);
   assert.match(modeFrame, /height:\s*34px/u);
-  assert.match(modeFrame, /padding:\s*2\.5px/u);
-  assert.match(modeFrame, /border:\s*1px solid rgb\(46 43 58 \/ 7\.5%\)/u);
-  assert.match(modeFrame, /background:\s*transparent/u);
+  assert.match(modeFrame, /grid-template-columns:\s*repeat\(3, 1fr\)/u);
+  assert.match(modeFrame, /padding:\s*2px/u);
+  assert.match(modeFrame, /border:\s*1px solid rgb\(46 43 58 \/ 8%\)/u);
 
   const selectedLayer = lastCssRule(css, ".canvas-mode-switch::before");
-  assert.match(selectedLayer, /top:\s*1\.5px/u);
-  assert.match(selectedLayer, /width:\s*70px/u);
-  assert.match(selectedLayer, /height:\s*29px/u);
-  assert.match(selectedLayer, /background:\s*rgb\(91 82 219 \/ 7\.5%\)/u);
-  assert.doesNotMatch(selectedLayer, /backdrop-filter|box-shadow|(?:^|\n)\s*border:/u);
+  assert.match(selectedLayer, /display:\s*none/u);
 
-  const sendButton = lastCssRule(css, ".header-actions .header-send-button");
-  assert.match(sendButton, /height:\s*34px/u);
-  assert.match(sendButton, /margin-left:\s*10px/u);
-  assert.match(sendButton, /box-shadow:\s*0 2px 5px rgb\(65 57 166 \/ 14%\)/u);
+  const sendButton = css.match(
+    /\.header-actions \.header-send-button,\n\.workbench-review-tools-slot > \.header-send-button \{[\s\S]*?\}/u,
+  );
+  assert.ok(sendButton, "missing shared send/review decision button rule");
+  assert.match(sendButton[0], /height:\s*32px/u);
+  assert.match(sendButton[0], /margin:\s*0/u);
+  assert.match(sendButton[0], /box-shadow:\s*0 2px 5px rgb\(65 57 166 \/ 13%\)/u);
+});
+
+test("global sidebar owns the full shell column and start page has no card surface", async () => {
+  const css = await readWorkbenchCascadeCss();
+
+  assert.match(
+    css,
+    /\.workbench\[data-left-sidebar="open"\] \{\s*--workbench-sidebar-width:\s*264px/u,
+  );
+
+  const sidebar = lastCssRule(css, ".workbench-global-sidebar");
+  assert.match(sidebar, /grid-column:\s*1/u);
+  assert.match(sidebar, /grid-row:\s*1 \/ 4/u);
+  assert.doesNotMatch(sidebar, /position:\s*fixed/u);
+
+  const startContent = lastCssRule(css, ".workbench-start-content");
+  assert.match(startContent, /width:\s*min\(520px, 100%\)/u);
+  assert.doesNotMatch(startContent, /border|box-shadow|background/u);
 });
 
 test("embedded review stays in the content row instead of covering the header", async () => {

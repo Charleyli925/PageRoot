@@ -398,6 +398,11 @@ export class WorkspaceController {
     documentId: string,
     status: WorkbenchTabStatus,
   ): WorkbenchTabsSnapshot | null;
+  updateWorkbenchTabTitle(
+    projectId: string,
+    documentId: string,
+    title: string,
+  ): WorkbenchTabsSnapshot | null;
   updateDocumentSurfacePresentation(
     tabId: string,
     presentation?: Readonly<Record<string, unknown>>,

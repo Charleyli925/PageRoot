@@ -43,6 +43,7 @@ export class WorkbenchTabsSession {
   commitDocument(input: { tabId: string; projectId: string; documentId: string; title: string }): WorkbenchTabsSnapshot | null;
   cancelSwitch(tabId: string): WorkbenchTabsSnapshot;
   updateStatus(projectId: string, documentId: string, status: WorkbenchTabStatus): WorkbenchTabsSnapshot;
+  updateTitle(projectId: string, documentId: string, title: string): WorkbenchTabsSnapshot;
   reconcileRegisteredProjects(projects: readonly unknown[]): Readonly<{
     snapshot: WorkbenchTabsSnapshot;
     missing: readonly WorkbenchTab[];
