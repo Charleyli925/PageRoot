@@ -448,7 +448,7 @@ async function openThroughInput(source, ordinal) {
   await launched.electronApp.evaluate(({ dialog }, sourcePath) => {
     dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [sourcePath] });
   }, source.copyPath);
-  await launched.page.getByRole("button", { name: "打开新的本地 HTML", exact: true }).click();
+  await requestLocalHtmlOpen(launched.page);
   const importButton = launched.page.getByRole("button", { name: "导入并打开" });
   const openLocalButton = launched.page.locator(".open-local-button");
   let pendingImport = await waitUntil(async () => {
@@ -522,6 +522,24 @@ async function openThroughInput(source, ordinal) {
   results.opening.push(sample);
   console.log("OPEN", JSON.stringify(sample));
   return sample;
+}
+
+async function requestLocalHtmlOpen(page) {
+  const legacy = page.getByRole("button", { name: "打开新的本地 HTML", exact: true });
+  if (await legacy.isVisible().catch(() => false)) {
+    await legacy.click();
+    return;
+  }
+  const startPage = page.getByRole("button", { name: "从 Finder 打开 HTML", exact: true });
+  if (await startPage.isVisible().catch(() => false)) {
+    await startPage.click();
+    return;
+  }
+  const expandSidebar = page.getByRole("button", { name: "展开左侧边栏", exact: true });
+  if (await expandSidebar.isVisible().catch(() => false)) await expandSidebar.click();
+  await page.locator(".workbench-global-sidebar")
+    .getByRole("button", { name: "打开 HTML", exact: true })
+    .click();
 }
 
 async function cacheState() {
@@ -813,7 +831,7 @@ async function openAfterAccept(source) {
     dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [sourcePath] });
   }, source.copyPath);
   const started = performance.now();
-  await page.getByRole("button", { name: "打开新的本地 HTML", exact: true }).click();
+  await requestLocalHtmlOpen(page);
   const importButton = page.getByRole("button", { name: "导入并打开" });
   const openLocalButton = page.locator(".open-local-button");
   let pendingImport = await waitUntil(async () => {
