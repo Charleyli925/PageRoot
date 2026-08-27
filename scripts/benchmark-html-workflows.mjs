@@ -283,17 +283,22 @@ async function firstUsefulDocumentVisible({ expectedStem = "", timeout = 45_000 
       .first();
     if (
       await display.isVisible().catch(() => false)
-      && await display.getAttribute("data-display-ready").catch(() => null) === "true"
+      && await display.getAttribute("data-display-ready", { timeout: 50 })
+        .catch(() => null) === "true"
     ) return true;
     const editor = launched.page.getByTestId("html-canvas-editor")
       .filter({ visible: true })
       .first();
     if (!await editor.isVisible().catch(() => false)) return false;
-    if (await editor.getAttribute("data-render-verified").catch(() => null) === "true") {
+    if (
+      await editor.getAttribute("data-render-verified", { timeout: 50 })
+        .catch(() => null) === "true"
+    ) {
       return true;
     }
     const iframe = editor.locator('iframe[title*="HTML"]').first();
-    const handle = await iframe.elementHandle().catch(() => null);
+    if (await iframe.count() < 1) return false;
+    const handle = await iframe.elementHandle({ timeout: 50 }).catch(() => null);
     const frame = await handle?.contentFrame();
     if (!frame || frame.isDetached()) return false;
     return frame.locator("body").evaluate((body) => (
