@@ -43,6 +43,7 @@ function oneShotRuntimeBootstrap(config) {
     resizeObserver: window.ResizeObserver,
     intersectionObserver: window.IntersectionObserver,
     createElement: Document.prototype.createElement,
+    createElementNS: Document.prototype.createElementNS,
     documentOpen: Document.prototype.open,
     documentWrite: Document.prototype.write,
     messageChannel: window.MessageChannel,
@@ -137,7 +138,16 @@ function oneShotRuntimeBootstrap(config) {
     for (const attribute of Array.from(element.attributes)) {
       const name = String(attribute.name || "").toLowerCase();
       if (name.startsWith("data-pageroot-edit-runtime-")) continue;
-      if (ignoreStyle && name === "style") continue;
+      if (
+        ignoreStyle
+        && (
+          name === "style"
+          || (
+            element.tagName.toLowerCase() === "canvas"
+            && (name === "width" || name === "height")
+          )
+        )
+      ) continue;
       if (
         name === "_echarts_instance_"
         || name === "data-ecid"
@@ -147,6 +157,10 @@ function oneShotRuntimeBootstrap(config) {
     }
     return values.sort().join("\u0000");
   };
+  const authoredAttributeSnapshot = (element) => Array.from(element.attributes)
+    .filter((attribute) => !String(attribute.name || "").toLowerCase()
+      .startsWith("data-pageroot-edit-runtime-"))
+    .map((attribute) => [attribute.name, String(attribute.value || "")]);
   const styleSnapshot = (element) => {
     if (!(element instanceof Element) || !element.style) return [];
     return Array.from(element.style).map((property) => [
@@ -220,17 +234,70 @@ function oneShotRuntimeBootstrap(config) {
         hosts.set(hostKey, {
           tagName: element.tagName.toLowerCase(),
           marker,
+          authoredAttributes: authoredAttributeSnapshot(element),
         });
       }
       nodes.set(marker, {
         tagName: element.tagName.toLowerCase(),
         parentMarker: parentMarker(element),
         attributes: sourceAttributes(element, approvedHost),
+        authoredAttributes: authoredAttributeSnapshot(element),
         hostStyle: approvedHost ? styleSnapshot(element) : null,
       });
     }
     if (!hosts.size) violation("no-approved-host");
     return { nodes, hosts, text: textSnapshot() };
+  };
+  const restoreAuthoredAttributes = (element, authoredAttributes) => {
+    const authoredNames = new Set(authoredAttributes.map(([name]) => name));
+    for (const attribute of Array.from(element.attributes)) {
+      const name = String(attribute.name || "");
+      if (
+        name.toLowerCase().startsWith("data-pageroot-edit-runtime-")
+        || authoredNames.has(name)
+      ) continue;
+      element.removeAttribute(name);
+    }
+    for (const [name, value] of authoredAttributes) element.setAttribute(name, value);
+  };
+  const restoreNonHostSourceAttributes = () => {
+    const before = state.baseline;
+    if (!before) return;
+    for (const element of sourceNodes()) {
+      if (element.hasAttribute(hostAttribute)) continue;
+      const record = before.nodes.get(element.getAttribute(sourceAttribute));
+      if (record) restoreAuthoredAttributes(element, record.authoredAttributes);
+    }
+  };
+  const normalizeDirectSvgHosts = () => {
+    const before = state.baseline;
+    if (!before) return;
+    for (const [key, record] of before.hosts) {
+      if (record.tagName !== "svg") continue;
+      const host = Array.from(document.querySelectorAll(hostSelector)).find((element) => (
+        element.getAttribute(hostAttribute) === key
+      ));
+      if (!(host instanceof SVGElement)) continue;
+      const runtimeNodes = Array.from(host.childNodes).filter((node) => (
+        !(node instanceof Element) || !node.hasAttribute(sourceAttribute)
+      ));
+      const viewBox = host.getAttribute("viewBox");
+      const preserveAspectRatio = host.getAttribute("preserveAspectRatio");
+      restoreAuthoredAttributes(host, record.authoredAttributes);
+      if (!runtimeNodes.length) continue;
+      const inner = native.createElementNS.call(
+        document,
+        "http://www.w3.org/2000/svg",
+        "svg",
+      );
+      inner.setAttribute(ownedAttribute, "runtime-svg-surface");
+      inner.setAttribute("width", "100%");
+      inner.setAttribute("height", "100%");
+      if (viewBox) inner.setAttribute("viewBox", viewBox);
+      if (preserveAspectRatio) inner.setAttribute("preserveAspectRatio", preserveAspectRatio);
+      for (const node of runtimeNodes) inner.appendChild(node);
+      host.appendChild(inner);
+    }
   };
   const sealRuntimeNode = (element) => {
     try {
@@ -409,6 +476,8 @@ function oneShotRuntimeBootstrap(config) {
     } catch {
       violation("animation-freeze-failed");
     }
+    restoreNonHostSourceAttributes();
+    normalizeDirectSvgHosts();
     state.result = Object.freeze({
       ...audit(),
       contractVersion: config.contractVersion,

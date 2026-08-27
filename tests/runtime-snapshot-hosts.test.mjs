@@ -99,11 +99,13 @@ test("host enumeration may exceed the capture budget so callers can prioritize, 
   );
 });
 
-test("Edit runtime admits only uniquely bound empty non-global hosts", () => {
+test("Edit runtime admits stable empty hosts plus direct Canvas and empty SVG surfaces", () => {
   const html = [
     "<!doctype html><html><body>",
     '<main id="chart-host"></main>',
     '<svg id="svg-host"></svg>',
+    '<canvas id="canvas-host">author fallback</canvas>',
+    '<svg id="non-empty-svg"><text>authored</text></svg>',
     '<table><tbody id="table-host"></tbody></table>',
     '<div class="unique-runtime-host"></div>',
     '<div id="not-empty">author text</div>',
@@ -117,7 +119,7 @@ test("Edit runtime admits only uniquely bound empty non-global hosts", () => {
   assert.equal(EDIT_RUNTIME_HOST_LIMIT, 32);
   assert.deepEqual(
     resolved.hosts.map((host) => host.binding.tagName),
-    ["main", "svg", "tbody", "div"],
+    ["main", "svg", "canvas", "tbody", "div"],
   );
   assert.equal(
     resolved.hosts.every((host) => host.binding.identityAttributes.length === 1),
@@ -125,6 +127,10 @@ test("Edit runtime admits only uniquely bound empty non-global hosts", () => {
   );
   assert.equal(
     resolved.hosts.some((host) => ["body", "script"].includes(host.binding.tagName)),
+    false,
+  );
+  assert.equal(
+    resolved.hosts.some((host) => host.binding.identityAttributes[0]?.[1] === "non-empty-svg"),
     false,
   );
 });

@@ -4132,7 +4132,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     }
     renderedSourceHtmlRef.current = frameSourceHtmlRef.current;
     containerRef.current?.setAttribute("data-render-verified", "true");
-    performance.mark("pageroot:canvas:render-verified");
+    performance.mark("pageroot:canvas:render-verified", { detail: Object.freeze({ content: runtimeFrame ? "runtime-complete" : "static-complete" }) });
     fencedDocumentCleanupRef.current();
 
     let editorStyle = documentNode.head.querySelector<HTMLStyleElement>(`style[${EDITOR_STYLE_ATTRIBUTE}]`);

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, type CSSProperties } from "react";
+import { useMemo, useState, type CSSProperties } from "react";
 
 import {
   baseHrefFromSourcePath,
@@ -33,12 +33,14 @@ export default function HtmlDisplaySurface({
     () => sanitizePreviewDocument(html, resourceBase || fallbackBase),
     [fallbackBase, html, resourceBase],
   );
+  const [loadedFrameHtml, setLoadedFrameHtml] = useState<string | null>(null);
 
   return (
     <div
       className={styles.surface}
       style={{ "--html-display-height": height } as CSSProperties}
       data-testid="html-display-surface"
+      data-display-ready={loadedFrameHtml === frameHtml ? "true" : "false"}
     >
       <div className={styles.status} role="status">
         {status}
@@ -50,6 +52,7 @@ export default function HtmlDisplaySurface({
         sandbox=""
         referrerPolicy="no-referrer"
         onLoad={() => {
+          setLoadedFrameHtml(frameHtml);
           performance.mark("pageroot:document:static-frame-loaded");
         }}
       />

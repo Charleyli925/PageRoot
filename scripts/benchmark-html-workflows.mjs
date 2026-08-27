@@ -69,7 +69,7 @@ const executablePath = path.join(
 const qaToken = "【PageRoot 性能测试编辑】";
 const reviewMarker = "PageRoot-Real-HTML-Review-Performance-Marker";
 const results = {
-  schemaVersion: 2,
+  schemaVersion: 3,
   startedAt: new Date().toISOString(),
   sourceCommit: options.commit || execFileSync(
     "git",
@@ -270,6 +270,44 @@ async function activeContentReady({ expectedStem = "", timeout = 45_000 } = {}) 
   return { editor, iframe };
 }
 
+async function firstUsefulDocumentVisible({ expectedStem = "", timeout = 45_000 } = {}) {
+  if (expectedStem) {
+    await waitUntil(async () => {
+      const project = await activeProject();
+      return project?.sourcePath && path.basename(project.sourcePath).includes(expectedStem);
+    }, { timeout, label: `active project display ${expectedStem}` });
+  }
+  await waitUntil(async () => {
+    const display = launched.page.getByTestId("html-display-surface")
+      .filter({ visible: true })
+      .first();
+    if (
+      await display.isVisible().catch(() => false)
+      && await display.getAttribute("data-display-ready", { timeout: 50 })
+        .catch(() => null) === "true"
+    ) return true;
+    const editor = launched.page.getByTestId("html-canvas-editor")
+      .filter({ visible: true })
+      .first();
+    if (!await editor.isVisible().catch(() => false)) return false;
+    if (
+      await editor.getAttribute("data-render-verified", { timeout: 50 })
+        .catch(() => null) === "true"
+    ) {
+      return true;
+    }
+    const iframe = editor.locator('iframe[title*="HTML"]').first();
+    if (await iframe.count() < 1) return false;
+    const handle = await iframe.elementHandle({ timeout: 50 }).catch(() => null);
+    const frame = await handle?.contentFrame();
+    if (!frame || frame.isDetached()) return false;
+    return frame.locator("body").evaluate((body) => (
+      body.getClientRects().length > 0
+      && (body.innerText || body.textContent || "").trim().length > 20
+    )).catch(() => false);
+  }, { timeout, label: `first useful document visible ${expectedStem}` });
+}
+
 async function finishActiveReadiness(editor, timeout = 45_000) {
   await waitUntil(
     () => editor.getAttribute("data-render-verified").then((value) => value === "true"),
@@ -353,7 +391,26 @@ async function renderedSnapshot(frame) {
         ready: element.childElementCount > 0 || (element.textContent || "").trim().length > 0,
         signature: `${element.childElementCount}:${element.innerHTML.length}`,
       }));
-    const chartFacts = [...canvasFacts, ...svgFacts, ...chartContainers];
+    const runtimeVisualHosts = [...document.querySelectorAll(
+      "[data-pageroot-edit-runtime-host]",
+    )]
+      .filter(visibleRect)
+      .map((element) => {
+        const ownedNodes = element.querySelectorAll(
+          "[data-pageroot-edit-runtime-owned]",
+        ).length;
+        return {
+          ready: ownedNodes > 0,
+          signature: `${ownedNodes}:${element.innerHTML.length}`,
+        };
+      })
+      .filter((fact) => fact.ready);
+    const chartFacts = [
+      ...canvasFacts,
+      ...svgFacts,
+      ...chartContainers,
+      ...runtimeVisualHosts,
+    ];
     const body = document.body;
     return {
       readyState: document.readyState,
@@ -369,6 +426,7 @@ async function renderedSnapshot(frame) {
       canvasCount: canvasFacts.length,
       svgChartCount: svgFacts.length,
       chartContainerCount: chartContainers.length,
+      runtimeVisualHostCount: runtimeVisualHosts.length,
     };
   });
 }
@@ -470,8 +528,14 @@ async function openThroughInput(source, ordinal) {
   if (pendingImport === "confirm") {
     await importButton.click();
   }
-  const { editor } = await activeContentReady({ expectedStem: source.stem });
-  const visibleMs = performance.now() - started;
+  const displayReadyPromise = firstUsefulDocumentVisible({ expectedStem: source.stem })
+    .then(() => performance.now() - started);
+  const editorReadyPromise = activeContentReady({ expectedStem: source.stem })
+    .then((value) => ({ ...value, editReadyMs: performance.now() - started }));
+  const [displayReadyMs, { editor, editReadyMs }] = await Promise.all([
+    displayReadyPromise,
+    editorReadyPromise,
+  ]);
   const renderedPromise = waitForRenderedContent(
     () => currentEditorFrame(launched.page),
     started,
@@ -507,7 +571,9 @@ async function openThroughInput(source, ordinal) {
     ordinal,
     fileName: path.basename(source.original),
     sourceBytes: statSync(source.original).size,
-    visibleMs: round(visibleMs),
+    visibleMs: round(displayReadyMs),
+    displayReadyMs: round(displayReadyMs),
+    editReadyMs: round(editReadyMs),
     textVisibleMs: rendered.textVisibleMs,
     allChartsReadyMs: rendered.allChartsReadyMs,
     fullContentReadyMs: rendered.fullContentReadyMs,
@@ -524,6 +590,8 @@ async function openThroughInput(source, ordinal) {
     ordinal: sample.ordinal,
     fileName: sample.fileName,
     visibleMs: sample.visibleMs,
+    displayReadyMs: sample.displayReadyMs,
+    editReadyMs: sample.editReadyMs,
     textVisibleMs: sample.textVisibleMs,
     allChartsReadyMs: sample.allChartsReadyMs,
     fullContentReadyMs: sample.fullContentReadyMs,
@@ -815,8 +883,17 @@ async function exerciseReviewAndAccept() {
     return project?.sourcePath && project.sourcePath !== oldSourcePath
       && await workspace.count() === 0;
   }, { timeout: 45_000, label: "review accepted and new HTML opened" });
-  await activeContentReady({ timeout: 45_000 });
-  results.review.acceptToNewHtmlMs = round(performance.now() - acceptStarted);
+  const acceptDisplayPromise = firstUsefulDocumentVisible({ timeout: 45_000 })
+    .then(() => performance.now() - acceptStarted);
+  const acceptEditorPromise = activeContentReady({ timeout: 45_000 })
+    .then(() => performance.now() - acceptStarted);
+  const [acceptDisplayReadyMs, acceptEditReadyMs] = await Promise.all([
+    acceptDisplayPromise,
+    acceptEditorPromise,
+  ]);
+  results.review.acceptDisplayReadyMs = round(acceptDisplayReadyMs);
+  results.review.acceptEditReadyMs = round(acceptEditReadyMs);
+  results.review.acceptToNewHtmlMs = round(acceptEditReadyMs);
   results.review.acceptedRendered = await waitForRenderedContent(
     () => currentEditorFrame(page),
     acceptStarted,
@@ -828,6 +905,9 @@ async function exerciseReviewAndAccept() {
 
 async function openAfterAccept(source) {
   const page = launched.page;
+  const beforeOpenProject = await activeProject();
+  const beforeOpenSourcePath = beforeOpenProject?.sourcePath || null;
+  assert(beforeOpenSourcePath, "post-accept open requires one active source identity");
   const tabs = page.getByRole("tablist", { name: "已打开的 HTML" }).getByRole("tab");
   const beforeClose = await tabs.count();
   assert.equal(beforeClose, 20);
@@ -848,7 +928,7 @@ async function openAfterAccept(source) {
     if (await openLocalButton.isVisible().catch(() => false)) return "picker";
     if (await importButton.isVisible().catch(() => false)) return "confirm";
     const project = await activeProject();
-    if (project?.sourcePath && path.basename(project.sourcePath).includes(source.stem)) return "opened";
+    if (project?.sourcePath && project.sourcePath !== beforeOpenSourcePath) return "opened";
     return "";
   }, { timeout: 15_000, label: "post-accept open handoff" });
   if (pendingImport === "picker") {
@@ -856,13 +936,27 @@ async function openAfterAccept(source) {
     pendingImport = await waitUntil(async () => {
       if (await importButton.isVisible().catch(() => false)) return "confirm";
       const project = await activeProject();
-      if (project?.sourcePath && path.basename(project.sourcePath).includes(source.stem)) return "opened";
+      if (project?.sourcePath && project.sourcePath !== beforeOpenSourcePath) return "opened";
       return "";
     }, { timeout: 15_000, label: "post-accept picker handoff" });
   }
   if (pendingImport === "confirm") await importButton.click();
-  const { editor } = await activeContentReady({ expectedStem: source.stem, timeout: 45_000 });
-  results.acceptThenOpen.visibleMs = round(performance.now() - started);
+  await waitUntil(async () => {
+    const project = await activeProject();
+    return project?.sourcePath && project.sourcePath !== beforeOpenSourcePath;
+  }, { timeout: 45_000, label: "post-accept active source transition" });
+  const displayPromise = firstUsefulDocumentVisible({
+    timeout: 45_000,
+  }).then(() => performance.now() - started);
+  const editorPromise = activeContentReady({ timeout: 45_000 })
+    .then((value) => ({ ...value, editReadyMs: performance.now() - started }));
+  const [displayReadyMs, { editor, editReadyMs }] = await Promise.all([
+    displayPromise,
+    editorPromise,
+  ]);
+  results.acceptThenOpen.visibleMs = round(displayReadyMs);
+  results.acceptThenOpen.displayReadyMs = round(displayReadyMs);
+  results.acceptThenOpen.editReadyMs = round(editReadyMs);
   results.acceptThenOpen.rendered = await waitForRenderedContent(
     () => currentEditorFrame(page),
     started,
@@ -872,6 +966,10 @@ async function openAfterAccept(source) {
     },
   );
   await finishActiveReadiness(editor);
+  const openedProject = await activeProject();
+  assert.notEqual(openedProject?.sourcePath, beforeOpenSourcePath);
+  assert.equal(openedProject?.html, readFileSync(source.original, "utf8"));
+  results.acceptThenOpen.activeSourcePath = openedProject.sourcePath;
   results.acceptThenOpen.readyMs = round(performance.now() - started);
   results.acceptThenOpen.finalTabCount = await tabs.count();
   assert.equal(results.acceptThenOpen.finalTabCount, 20);
@@ -990,6 +1088,8 @@ try {
 
   results.openingSummary = {
     visible: summarize(results.opening.map((sample) => sample.visibleMs)),
+    displayReady: summarize(results.opening.map((sample) => sample.displayReadyMs)),
+    editReady: summarize(results.opening.map((sample) => sample.editReadyMs)),
     textVisible: summarize(results.opening.map((sample) => sample.textVisibleMs)),
     allChartsReady: summarize(results.opening
       .map((sample) => sample.allChartsReadyMs)

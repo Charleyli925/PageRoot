@@ -243,6 +243,32 @@ export function hasEditRuntimeEchartsSignal(source) {
 }
 
 /**
+ * Recognizes only author programs that explicitly paint a visual surface.
+ * This is intentionally narrower than "has a script": ordinary interaction,
+ * analytics and application scripts never qualify for the direct Edit path.
+ */
+export function hasEditRuntimeVisualSignal(source) {
+  const value = String(source || "");
+  if (hasEditRuntimeEchartsSignal(value)) return true;
+  const canvasSignal = (
+    /\bgetContext\s*\(\s*["'](?:2d|webgl2?|bitmaprenderer)["']/iu.test(value)
+    || /\bcreateElement\s*\(\s*["']canvas["']\s*\)/iu.test(value)
+  );
+  const svgSignal = (
+    /\bcreateElementNS\s*\(/u.test(value)
+    && (
+      /http:\/\/www\.w3\.org\/2000\/svg/iu.test(value)
+      || /\bcreateElementNS\s*\([^,]+,\s*["'](?:svg|g|path|rect|circle|ellipse|line|polyline|polygon|text|tspan|defs|linearGradient|radialGradient|stop|clipPath|mask|use)["']/iu.test(value)
+    )
+  );
+  return canvasSignal || svgSignal;
+}
+
+function hasEditRuntimeSvgHostMutationSignal(source) {
+  return /\bsetAttribute\s*\(\s*["']viewBox["']/u.test(String(source || ""));
+}
+
+/**
  * Edit does not grant arbitrary script execution. A classic-script document
  * needs an explicit ECharts library or initializer signal before preparation.
  */
@@ -252,6 +278,22 @@ export function isEditRuntimeEchartsCandidate(html) {
     && contract.executableScripts.some((script) => (
       hasEditRuntimeEchartsSignal(script.src || "")
       || hasEditRuntimeEchartsSignal(script.inline)
+    ));
+}
+
+/**
+ * A bounded visual candidate is an ordered classic-script document with an
+ * explicit ECharts, Canvas or SVG paint signal. Script presence alone is not
+ * sufficient to cross the direct Edit runtime boundary.
+ */
+export function isEditRuntimeVisualCandidate(html) {
+  const contract = collectEditRuntimeScripts(html);
+  const hasAuthoredSvgRoot = /<svg(?:[\t\n\f\r />])/iu.test(String(html || ""));
+  return !contract.unsupportedReason
+    && contract.executableScripts.some((script) => (
+      hasEditRuntimeVisualSignal(script.src || "")
+      || hasEditRuntimeVisualSignal(script.inline)
+      || (hasAuthoredSvgRoot && hasEditRuntimeSvgHostMutationSignal(script.inline))
     ));
 }
 

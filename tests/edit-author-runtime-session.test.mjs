@@ -260,3 +260,36 @@ test("failed preparation silently reaches static fallback", async () => {
   assert.equal(session.snapshot.grant, null);
   assert.equal(session.snapshot.lastOutcome, "prepare-failed");
 });
+
+test("explicit Canvas and SVG paint candidates use the same single preparation owner", async () => {
+  for (const visualProgram of [
+    'document.querySelector("#chart-host").append(document.createElement("canvas"))',
+    'document.querySelector("#chart-host").setAttribute("viewBox", "0 0 10 10")',
+  ]) {
+    const requests = [];
+    const session = new EditAuthorRuntimeSession({
+      port: {
+        prepare: async (request) => {
+          requests.push(request);
+          return success(request);
+        },
+        revoke: async () => {},
+      },
+    });
+    const html = HTML.replace(
+      '<main id="chart-host" style="width:640px;height:360px"></main>',
+      visualProgram.includes("viewBox")
+        ? '<svg id="chart-host" style="width:640px;height:360px"></svg>'
+        : '<main id="chart-host" style="width:640px;height:360px"></main>',
+    ).replace(
+      'echarts.init(document.querySelector("#chart-host"))',
+      visualProgram,
+    );
+    session.refresh(input({ html }));
+    assert.equal(session.snapshot.phase, "preparing");
+    assert.equal(session.startPreparation(input({ html })), true);
+    await flushAsync();
+    assert.equal(requests.length, 1);
+    assert.equal(session.snapshot.phase, "ready");
+  }
+});
