@@ -176,10 +176,15 @@ import {
   WorkbenchHeaderToolbar,
 } from "./workbench/file-header-view";
 import {
-  ProjectFilesConsole,
-  ProjectFilesFooter,
-  ProjectFilesHeader,
-} from "./workbench/project-files-view";
+  ProjectPanelContainer,
+  WorkbenchGlobalSidebarContainer,
+  WorkbenchStartPageContainer,
+  type ProjectCatalogCapability,
+  type ProjectPanelCapability,
+  type ProjectPanelContext,
+  type ProjectPanelHostActions,
+} from "./workbench/project-panel-container";
+import { createProjectPanelPort } from "./workbench/project-panel-port.js";
 import {
   PreviewNavigationBanner,
 } from "./workbench/presentation";
@@ -206,8 +211,6 @@ import {
   WorkbenchHeaderShell,
 } from "./workbench/workbench-header-shell";
 import {
-  WorkbenchGlobalSidebar,
-  WorkbenchStartPage,
   WorkbenchTabBar,
 } from "./workbench/WorkbenchChrome";
 import {
@@ -249,13 +252,11 @@ import type {
   PersistState,
   PrepareCloseDetail,
   ProjectContext,
-  RecentProject,
   RegisteredProject,
   StartupIssue,
   Toast,
   ToastAction,
   Version,
-  WorkspaceFileView,
   WorkspaceIssue,
 } from "./workbench/types";
 
@@ -282,18 +283,6 @@ type CanvasRenderAck = Readonly<{
 
 type CanvasRenderAcks = Readonly<Record<CanvasMode, CanvasRenderAck | null>>;
 
-const EMPTY_PROJECT_RULES_SNAPSHOT = {
-  open: false,
-  path: "PROJECT.md",
-  content: "",
-  savedContent: "",
-  loading: false,
-  error: "",
-  saving: false,
-  saveError: "",
-  compositionActive: false,
-  editorGeneration: 0,
-} as const;
 const INITIAL_RUN_SNAPSHOT: RunSessionSnapshot = {
   activeSourcePath: null,
   activeRun: null,
@@ -467,6 +456,7 @@ export default function Workbench() {
   const fenceAndFreezeCurrentCanvasRef = useRef(fenceAndFreezeCurrentCanvas);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [commentCanvasPort] = useState(createCommentCanvasPort);
+  const [projectPanelPort] = useState(createProjectPanelPort);
   const reviewStageRef = useRef<HTMLDivElement>(null);
   const commentCounter = useRef(1);
   const commentEditResumePendingRef = useRef<string | null>(null);
@@ -501,7 +491,6 @@ export default function Workbench() {
   const interruptionPresenceRef = useRef(new Map<string, boolean>());
   const resumeSubmissionAfterRelinkRef = useRef(false);
   const normalizeCurrentGlobalCommentsRef = useRef<() => CommentItem[]>(() => []);
-  const projectRulesEditorRef = useRef<HTMLTextAreaElement | null>(null);
   const automaticProjectRegistrationRef = useRef("");
   const projectRecordsPreparationRef = useRef("");
 
@@ -582,9 +571,6 @@ export default function Workbench() {
   const [projectRecordsPath, setProjectRecordsPath] =
     useState<string | null>(null);
   const [lastModifiedAt, setLastModifiedAt] = useState<string | null>(null);
-  const [recentProjects, setRecentProjects] = useState<RecentProject[]>([]);
-  const [registeredProjects, setRegisteredProjects] = useState<RegisteredProject[]>([]);
-  const [recentProjectsError, setRecentProjectsError] = useState("");
   const commentCapabilitySnapshot = workspaceController
     ? (workspaceController.comments as CommentRailCapability).getSnapshot()
     : null;
@@ -666,25 +652,8 @@ export default function Workbench() {
     ?? INITIAL_QODER_AVAILABILITY;
   const [previewAttachment, setPreviewAttachment] = useState<CommentAttachment | null>(null);
   const [drawer, setDrawer] = useState<Drawer>(null);
-  const [selectedVersionId, setSelectedVersionId] = useState<string | null>(null);
   const [handoffPreviewOpen, setHandoffPreviewOpen] = useState(false);
-  const [fileView, setFileView] = useState<WorkspaceFileView | null>(null);
-  const projectRulesSnapshot = workspaceControllerSnapshot?.projectRules
-    ?? EMPTY_PROJECT_RULES_SNAPSHOT;
-  const activeFileView = projectRulesSnapshot.open
-    ? {
-        path: projectRulesSnapshot.path,
-        content: projectRulesSnapshot.content,
-        savedContent: projectRulesSnapshot.savedContent,
-        loading: projectRulesSnapshot.loading,
-        ...(projectRulesSnapshot.error ? { error: projectRulesSnapshot.error } : {}),
-      }
-    : fileView?.path === "PROJECT.md" ? null : fileView;
-  const projectRulesEditorGeneration = projectRulesSnapshot.editorGeneration;
-  const projectRulesCompositionActive =
-    projectRulesSnapshot.compositionActive;
-  const projectRulesSaving = projectRulesSnapshot.saving;
-  const projectRulesSaveError = projectRulesSnapshot.saveError;
+  const projectRulesSnapshot = workspaceControllerSnapshot?.projectRules ?? null;
   const [projectRecordsPreparing, setProjectRecordsPreparing] = useState(false);
   const [projectRecordsError, setProjectRecordsError] = useState("");
   const versionSnapshot = (
@@ -985,17 +954,7 @@ export default function Workbench() {
         errorMessage: productErrorMessage,
         presentation: {
           restoreEditor: ({ settle }: { settle: () => void }) => {
-            // Retire the exact textarea that owns macOS marked text. A late
-            // composition input from that detached control can no longer
-            // overwrite the explicit restore result.
-            window.requestAnimationFrame(() => {
-              window.requestAnimationFrame(() => {
-                settle();
-                const editor = projectRulesEditorRef.current;
-                editor?.focus({ preventScroll: true });
-                editor?.setSelectionRange(editor.value.length, editor.value.length);
-              });
-            });
+            projectPanelPort.requestEditorRestore(settle);
           },
         },
         scheduler: {
@@ -1277,7 +1236,7 @@ export default function Workbench() {
       setWorkspaceController((current) => current === controller ? null : current);
       controller.dispose();
     };
-  }, [deferEditorCommand, invalidateCanvasRenderAcks, isViewTransitioning]);
+  }, [deferEditorCommand, invalidateCanvasRenderAcks, isViewTransitioning, projectPanelPort]);
   const invalidateEditCanvasRenderAck = useCallback(() => {
     setCanvasRenderAcks((current) => (
       current.edit ? { ...current, edit: null } : current
@@ -1868,7 +1827,6 @@ export default function Workbench() {
           ),
         ));
         setDrawer(null);
-        setFileView(null);
         const reviewStage = reviewStageRef.current;
         if (reviewStage && typeof reviewStage.scrollTo === "function") {
           try {
@@ -1908,34 +1866,6 @@ export default function Workbench() {
           setCanvasMode("edit");
           openProcessPanel();
         }
-        return;
-      }
-      if (projectEvent.type === "project-recents-loaded") {
-        setRecentProjects(
-          Array.isArray(projectEvent.projects)
-            ? projectEvent.projects as RecentProject[]
-            : [],
-        );
-        setRecentProjectsError("");
-        return;
-      }
-      if (projectEvent.type === "project-recents-failed") {
-        setRecentProjectsError(String(
-          projectEvent.reason || "最近打开记录暂时无法读取。",
-        ));
-        return;
-      }
-      if (projectEvent.type === "project-catalog-loaded") {
-        const projects = Array.isArray(projectEvent.projects)
-          ? projectEvent.projects as RegisteredProject[]
-          : [];
-        setRegisteredProjects(projects);
-        return;
-      }
-      if (projectEvent.type === "project-catalog-failed") {
-        setRecentProjectsError(String(
-          projectEvent.reason || "项目目录暂时无法读取。",
-        ));
         return;
       }
       if (projectEvent.type === "project-startup-failed") {
@@ -2267,16 +2197,6 @@ export default function Workbench() {
       captureUsageEvent("module_viewed", { module: "about" }, projectId || undefined);
     }
   }, [aboutOpen, projectId]);
-
-  useEffect(() => {
-    if (activeFileView?.path === "PROJECT.md") {
-      captureUsageEvent(
-        "module_viewed",
-        { module: "project_rules" },
-        projectId || undefined,
-      );
-    }
-  }, [activeFileView?.path, projectId]);
 
   useEffect(() => {
     const localScope = projectId || usageFingerprint(sourcePath || "unregistered");
@@ -5282,123 +5202,6 @@ export default function Workbench() {
     visibleCommentItems,
   ]);
 
-  const readWorkspaceFile = useCallback(async (
-    relativePath: string,
-    context: ProjectContext,
-  ): Promise<string> => {
-    const outcome = await requiredWorkspaceController(workspaceController)
-      .readProjectFile({ context, relativePath });
-    if (outcome.status === "succeeded") return outcome.value.content;
-    if (outcome.status === "stale") {
-      throw new Error("项目已切换，没有显示旧项目文件。");
-    }
-    throw new Error(outcome.reason);
-  }, [workspaceController]);
-
-  const viewFile = useCallback(async (path: string) => {
-    const context = captureProjectContext();
-    if (!context) return;
-    if (path === "PROJECT.md") {
-      await requiredWorkspaceController(workspaceController).openProjectRules({
-        context,
-      });
-      return;
-    }
-    const closedRules = await requiredWorkspaceController(workspaceController)
-      .closeProjectRules();
-    if (closedRules.status !== "succeeded") return;
-    setFileView({
-      path,
-      content: "正在读取…",
-      savedContent: "正在读取…",
-      loading: true,
-    });
-    try {
-      const content = await readWorkspaceFile(path, context);
-      if (!isCurrentProjectContext(context)) return;
-      setFileView({ path, content, savedContent: content, loading: false });
-    } catch (cause) {
-      if (!isCurrentProjectContext(context)) return;
-      setFileView({
-        path,
-        content: "",
-        savedContent: "",
-        loading: false,
-        error: productErrorMessage(
-          cause,
-          "项目文件暂时无法读取；未显示任何可编辑的替代内容。",
-        ),
-      });
-    }
-  }, [
-    captureProjectContext,
-    isCurrentProjectContext,
-    readWorkspaceFile,
-    workspaceController,
-  ]);
-
-  const beginProjectRulesComposition = useCallback((
-    target: HTMLTextAreaElement,
-  ) => {
-    workspaceController?.beginProjectRulesComposition({
-      target,
-      baselineValue: target.value,
-    });
-  }, [workspaceController]);
-
-  const finishProjectRulesComposition = useCallback((
-    target: HTMLTextAreaElement,
-  ) => {
-    workspaceController?.finishProjectRulesComposition({ target });
-  }, [workspaceController]);
-
-  useEffect(() => {
-    if (drawer === "files" && activeFileView?.path === "PROJECT.md") return;
-    workspaceController?.leaveProjectRulesEditor();
-  }, [activeFileView?.path, drawer, workspaceController]);
-
-  const restoreProjectRules = useCallback(() => {
-    workspaceController?.restoreProjectRules();
-  }, [workspaceController]);
-
-  const saveProjectRules = useCallback(async (): Promise<boolean> => {
-    const outcome = await requiredWorkspaceController(workspaceController)
-      .saveProjectRules();
-    return outcome.status === "succeeded";
-  }, [workspaceController]);
-
-  const closeFileView = useCallback(async (): Promise<boolean> => {
-    if (projectRulesSnapshot.open) {
-      const outcome = await requiredWorkspaceController(workspaceController)
-        .closeProjectRules();
-      if (outcome.status !== "succeeded") return false;
-    }
-    setFileView(null);
-    return true;
-  }, [projectRulesSnapshot.open, workspaceController]);
-
-  // The rules row is a disclosure inside the console, so opening it loads the
-  // file and collapsing it runs the same unsaved-changes guard as before.
-  const projectRulesOpen = Boolean(projectRulesSnapshot.open);
-  // “已保存” stays silent until the user actually edits the rules and that edit
-  // lands on disk, so an untouched project shows no status at all. Reset on both
-  // directions of the disclosure instead of in an effect.
-  const [projectRulesEdited, setProjectRulesEdited] = useState(false);
-  const toggleProjectRules = useCallback(async () => {
-    setProjectRulesEdited(false);
-    if (projectRulesOpen) {
-      await closeFileView();
-      return;
-    }
-    await viewFile("PROJECT.md");
-  }, [closeFileView, projectRulesOpen, viewFile]);
-
-  const projectRulesSavedNotice = projectRulesEdited
-    && projectRulesOpen
-    && !projectRulesSaving
-    && !projectRulesSaveError
-    && projectRulesSnapshot.content === projectRulesSnapshot.savedContent;
-
   const revealAiTaskInFinder = useCallback(async () => {
     const activeSourcePath = currentProjectSessionSnapshot().sourcePath;
     const revealAiTask = window.htmlAIProjects?.revealAiTask;
@@ -6127,31 +5930,6 @@ export default function Workbench() {
       persistedSaveState: currentWorkingCopy.saveState,
     })
     : null;
-  const displayedVersions = currentWorkingCopy && currentWorkingCopyStatus
-    ? versions.map((version) => (
-      version.id === currentWorkingCopy.id
-        ? { ...version, ...currentWorkingCopyStatus }
-        : version
-    ))
-    : versions;
-  // The console always has one version in focus: the explicit selection, else
-  // the version the user is editing from, else the newest one.
-  const consoleVersion = displayedVersions.find(
-    (version) => version.id === selectedVersionId,
-  )
-    ?? displayedVersions.find(
-      (version) => version.id === currentBasedOnVersionId,
-    )
-    ?? displayedVersions[0]
-    ?? null;
-  const consoleVersionParentId = consoleVersion
-    ? consoleVersion.basedOnVersionId || consoleVersion.previousVersionId
-    : null;
-  const consoleVersionParent = consoleVersionParentId
-    ? displayedVersions.find(
-      (version) => version.id === consoleVersionParentId,
-    ) ?? null
-    : null;
   const projectStatus = projectStatusProjection({
     currentBasedOnVersionId,
     currentExactVersionId,
@@ -6327,7 +6105,7 @@ export default function Workbench() {
         return;
       case "review-project-rules":
         setDrawer("files");
-        if (activeFileView?.path !== "PROJECT.md") void viewFile("PROJECT.md");
+        projectPanelPort.requestOpenRules();
         return;
       case "resume-draft":
         setCanvasMode("edit");
@@ -6547,6 +6325,65 @@ export default function Workbench() {
     updateCommentEditDraft,
     uploadAttachments,
   ]);
+  const projectPanelCapability = workspaceController
+    ? workspaceController.projects as ProjectPanelCapability
+    : null;
+  const projectCatalogCapability = workspaceController
+    ? workspaceController.projectCatalog as ProjectCatalogCapability
+    : null;
+  const projectPanelContext = useMemo<ProjectPanelContext>(() => ({
+    projectName,
+    browserPreviewOnly,
+    saveStatusLabel,
+    persistState,
+    runInProgress,
+    projectRecordsPreparing,
+    projectRecordsError,
+    projectHydrating,
+    projectLoadError,
+    workspaceIssue,
+    viewTransitioning,
+    canShowCurrentFileInFolder,
+    attachmentObjectUrls,
+  }), [
+    attachmentObjectUrls,
+    browserPreviewOnly,
+    canShowCurrentFileInFolder,
+    persistState,
+    projectHydrating,
+    projectLoadError,
+    projectName,
+    projectRecordsError,
+    projectRecordsPreparing,
+    runInProgress,
+    saveStatusLabel,
+    viewTransitioning,
+    workspaceIssue,
+  ]);
+  const projectPanelActions = useMemo<ProjectPanelHostActions>(() => ({
+    onShowInFolder: showProjectInFolder,
+    onExport: exportCurrentHtml,
+    onClose: () => setDrawer(null),
+    prepareProjectRecords,
+    ensureAttachmentObjectUrl,
+    openAttachmentPreview,
+    downloadAttachment,
+    viewHistoryVersion,
+    onRulesViewed: () => captureUsageEvent(
+      "module_viewed",
+      { module: "project_rules" },
+      projectId || undefined,
+    ),
+  }), [
+    downloadAttachment,
+    ensureAttachmentObjectUrl,
+    exportCurrentHtml,
+    openAttachmentPreview,
+    prepareProjectRecords,
+    projectId,
+    showProjectInFolder,
+    viewHistoryVersion,
+  ]);
 
   return (
     <>
@@ -6586,8 +6423,8 @@ export default function Workbench() {
         sidebarOpen={globalSidebarOpen}
         onToggleSidebar={() => {
           setGlobalSidebarOpen(true);
-          void workspaceController?.refreshRecentProjects();
-          void workspaceController?.refreshRegisteredProjects();
+          void projectCatalogCapability?.commands.refreshRecents();
+          void projectCatalogCapability?.commands.refreshRegistered();
         }}
       />
       {!startPageActive ? <WorkbenchHeaderShell>
@@ -6846,15 +6683,11 @@ export default function Workbench() {
         />
       ) : null}
 
-      <WorkbenchGlobalSidebar
+      {projectCatalogCapability ? <WorkbenchGlobalSidebarContainer
+        capability={projectCatalogCapability}
         open={globalSidebarOpen}
-        recentProjects={recentProjects}
-        registeredProjects={registeredProjects}
-        projectsError={recentProjectsError}
         onToggle={() => {
           setGlobalSidebarOpen((open) => !open);
-          void workspaceController?.refreshRecentProjects();
-          void workspaceController?.refreshRegisteredProjects();
         }}
         onOpenLocal={() => void openProject()}
         onOpenRecent={(recentSourcePath) => void openProject(recentSourcePath)}
@@ -6873,21 +6706,20 @@ export default function Workbench() {
             void downloadAvailableUpdate();
           }
         }}
-      />
+      /> : null}
       <WorkbenchDocumentSurfaceCache
         snapshot={documentSurfaceCacheSnapshot}
         pendingTabId={pendingCachedSurface?.tabId || null}
         height="var(--comment-canvas-height, 760px)"
       />
-      {startPageActive ? (
-        <WorkbenchStartPage
+      {startPageActive && projectCatalogCapability ? (
+        <WorkbenchStartPageContainer
+          capability={projectCatalogCapability}
           activeTabId={activeWorkbenchTab.tabId}
-          recentProjects={recentProjects}
           onOpenLocal={() => void openProject()}
           onOpenRecent={(recentSourcePath) => void openProject(recentSourcePath)}
           onOpenSidebar={() => {
             setGlobalSidebarOpen(true);
-            void workspaceController?.refreshRegisteredProjects();
           }}
         />
       ) : (
@@ -7060,62 +6892,16 @@ export default function Workbench() {
             panelEyebrow={processPanelEyebrow}
             panelTitle={processPanelTitle}
           />
-        ) : drawer ? (
-          <ProjectFilesHeader
-            projectName={projectName}
-            browserPreviewOnly={browserPreviewOnly}
-            saveStatusLabel={saveStatusLabel}
-            versions={versions}
-            canShowCurrentFileInFolder={canShowCurrentFileInFolder}
-            onShowInFolder={() => void showProjectInFolder()}
-            onExport={() => void exportCurrentHtml()}
-            onClose={() => setDrawer(null)}
+        ) : drawer === "files" && projectPanelCapability ? (
+          <ProjectPanelContainer
+            capability={projectPanelCapability}
+            panelPort={projectPanelPort}
+            context={projectPanelContext}
+            actions={projectPanelActions}
           />
         ) : null}
-        <div className="drawer-body">
-          {drawer === "files" ? (
-            <ProjectFilesConsole
-              projectRulesOpen={projectRulesOpen}
-              projectId={projectId}
-              projectRecordsPreparing={projectRecordsPreparing}
-              projectRecordsError={projectRecordsError}
-              projectRulesSavedNotice={projectRulesSavedNotice}
-              activeFileView={activeFileView}
-              runInProgress={runInProgress}
-              projectRulesEditorGeneration={projectRulesEditorGeneration}
-              projectRulesEditorRef={projectRulesEditorRef}
-              projectRulesSaveError={projectRulesSaveError}
-              projectRulesSaving={projectRulesSaving}
-              projectRulesCompositionActive={projectRulesCompositionActive}
-              versions={versions}
-              displayedVersions={displayedVersions}
-              consoleVersion={consoleVersion}
-              currentBasedOnVersionId={currentBasedOnVersionId}
-              consoleVersionParent={consoleVersionParent}
-              latestVersionId={latestVersionId}
-              viewingVersionId={viewingVersionId}
-              attachmentObjectUrls={attachmentObjectUrls}
-              toggleProjectRules={toggleProjectRules}
-              prepareProjectRecords={prepareProjectRecords}
-              viewFile={viewFile}
-              beginProjectRulesComposition={beginProjectRulesComposition}
-              finishProjectRulesComposition={finishProjectRulesComposition}
-              onProjectRulesChange={(content) => {
-                setProjectRulesEdited(true);
-                workspaceController?.updateProjectRules({
-                  content,
-                });
-              }}
-              restoreProjectRules={restoreProjectRules}
-              saveProjectRules={saveProjectRules}
-              setSelectedVersionId={setSelectedVersionId}
-              ensureAttachmentObjectUrl={ensureAttachmentObjectUrl}
-              openAttachmentPreview={openAttachmentPreview}
-              downloadAttachment={downloadAttachment}
-            />
-          ) : null}
-
-          {drawer === "handoff" ? (
+        {drawer === "handoff" ? (
+          <div className="drawer-body">
             <HandoffPanel
               activeRun={activeRun}
               terminalRun={terminalRun}
@@ -7136,18 +6922,7 @@ export default function Workbench() {
               }}
               onCancelRun={requestActiveRunEnd}
             />
-          ) : null}
-        </div>
-        {drawer === "files" ? (
-          <ProjectFilesFooter
-            consoleVersion={consoleVersion}
-            runInProgress={runInProgress}
-            projectHydrating={projectHydrating}
-            projectLoadError={projectLoadError}
-            workspaceIssue={workspaceIssue}
-            viewTransitioning={viewTransitioning}
-            viewHistoryVersion={viewHistoryVersion}
-          />
+          </div>
         ) : null}
         {drawer === "handoff" && activeRun ? (
           <HandoffFooter

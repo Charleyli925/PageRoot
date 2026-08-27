@@ -89,6 +89,7 @@
         "^app/application/project/",
         "^app/application/project-application-session",
         "^app/application/external-file-open",
+        "^app/workbench/project-panel-",
         "^tests/project-",
         "^tests/external-file-open",
         "^tests/desktop-close-recovery"
@@ -100,11 +101,14 @@
         "app/application/project/switch-plan.d.ts",
         "app/application/project/close-plan.d.ts",
         "app/application/project/source-locator-plan.d.ts",
-        "app/application/workspace-controller-capabilities.d.ts"
+        "app/application/workspace-controller-capabilities.d.ts",
+        "app/workbench/project-panel-port.d.ts"
       ],
       "owners": [
         "ProjectSession",
-        "ProjectWorkflow"
+        "ProjectWorkflow",
+        "WorkspaceController projects capability",
+        "ProjectPanelContainer"
       ],
       "implementationFiles": [
         "app/application/project-workflow.js",
@@ -112,12 +116,17 @@
         "app/application/project/open-intent.js",
         "app/application/project/switch-plan.js",
         "app/application/project/close-plan.js",
-        "app/application/project/source-locator-plan.js"
+        "app/application/project/source-locator-plan.js",
+        "app/workbench/project-panel-port.js",
+        "app/workbench/project-panel-container.tsx"
       ],
       "focusedTests": [
         "tests/project-workflow.test.mjs",
         "tests/project-plan.test.mjs",
-        "tests/project-session.test.mjs"
+        "tests/project-session.test.mjs",
+        "tests/project-panel-port.test.mjs",
+        "tests/workbench-render-snapshot.test.mjs",
+        "tests/workspace-controller.test.mjs"
       ],
       "requiredDocs": [
         "docs/ARCHITECTURE_MAP.md",

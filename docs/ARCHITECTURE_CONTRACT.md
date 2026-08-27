@@ -168,7 +168,8 @@ aggregate snapshot through its fixed `getSnapshot()`/`subscribe()` contract and
 forwards typed workflow events through `subscribeEvents()`; it does not create a
 second mutable store. It owns the unique `DrainCoordinator`, protocol Sessions,
 and Project, Comment, Run, Version and Workbench Tabs workflow composition.
-Capability facets such as `controller.comments` are stable views of this same
+Capability facets such as `controller.comments`, `controller.projects` and
+the narrow `controller.projectCatalog` projection are stable views of this same
 Controller instance. A facet exposes only `getSnapshot`, `subscribe` and typed
 business commands; it neither stores copied facts nor exposes another
 capability. React capability containers subscribe to facets directly so local
@@ -183,6 +184,11 @@ disclosure, delete confirmation and file-input refs, measures cards, virtualizes
 the rail and routes paired reveal/focus/relink intents. Workbench may issue a
 typed presentation intent or read the latest target status inside a user command,
 but it must not subscribe its composition render to comment presentation changes.
+`ProjectPanelContainer` subscribes `controller.projects` and owns PROJECT.md
+editor refs, disclosure, saved notices and version selection. Sidebar and Start
+subscribe `controller.projectCatalog` independently; catalog consumers therefore
+do not commit when rules text changes. `projectPanelPort` carries only disposable
+open/focus intents and never project facts.
 The Tabs snapshot is part of the same aggregate; startup restore, Registry
 reconciliation and tab persistence enter through Controller-owned commands and
 narrow host ports, never React refs or effects. `DocumentSession`

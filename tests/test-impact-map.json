@@ -592,6 +592,24 @@
       ]
     },
     {
+      "id": "project-capability-boundary",
+      "patterns": [
+        "^app/workbench/(?:project-panel-container|project-panel-port|workspace-render-snapshot)\\.(?:d\\.ts|js|tsx)$",
+        "^tests/(?:project-panel-port|workbench-render-snapshot)\\.test\\.mjs$"
+      ],
+      "suites": [
+        "typecheck",
+        "electron-project-lifecycle-smoke"
+      ],
+      "nodeTests": [
+        "tests/project-panel-port.test.mjs",
+        "tests/project-rules-session.test.mjs",
+        "tests/project-rules-workflow.test.mjs",
+        "tests/workbench-render-snapshot.test.mjs",
+        "tests/workspace-controller.test.mjs"
+      ]
+    },
+    {
       "id": "workbench-tabs",
       "patterns": [
         "^app/application/workbench-(?:tabs-(?:session|persistence-coordinator)|navigation-(?:session|workflow))\\.(?:js|d\\.ts)$",

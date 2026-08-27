@@ -34,7 +34,7 @@ the Bridge client, construct Sessions, or own debounce, polling, or drain.
 | Run and AI request | `RunSession` | `RunWorkflow` | `run-workflow.js`, `run/submit-plan.js` |
 | Review and Candidate | `VersionSession` (projection) | `VersionWorkflow` prepare/accept | `app/workbench/AiReviewWorkspace.tsx` |
 | Version and history | `VersionSession` | `VersionWorkflow` | `version-workflow.js`, `version/review-plan.js` |
-| Project rules | `ProjectRulesSession` | `ProjectRulesWorkflow` | `app/application/project-rules-workflow.js` |
+| Project panel and rules | `ProjectSession`, `ProjectRulesSession`, `VersionSession` | `ProjectWorkflow`, `ProjectRulesWorkflow` | `workspace-controller-capabilities.d.ts` (`controller.projects`, `controller.projectCatalog`), `project-panel-container.tsx`, `project-panel-port.js`, `project-files-view.tsx` |
 | Canvas edit runtime | `EditAuthorRuntimeSession` | Canvas / `DocumentWorkflow` | `HtmlCanvasEditor.tsx`, `html-canvas-selection-chrome-contract.ts` |
 | Preview | disposable preview session | Desktop preview protocol | `desktop/` preview owner, `HtmlInteractionPreview` |
 | Project open / switch / close | `ProjectSession` | `ProjectWorkflow` | `project-workflow.js`, `project/open-intent.js`, `project/switch-plan.js`, `project/close-plan.js`, `project/source-locator-plan.js` |
@@ -97,6 +97,29 @@ intents; it never owns comment facts. Workbench's aggregate
 subscription may suppress composer-text and edit-text-only revisions; saved
 comments, attachment structure, persistence errors and every non-comment
 capability still invalidate the composition root.
+
+## Project render boundary
+
+```text
+ProjectSession + ProjectWorkflow + ProjectRulesWorkflow + VersionSession
+  -> WorkspaceController.projects { getSnapshot, subscribe, commands }
+    -> ProjectPanelContainer
+      -> ProjectFilesHeader / ProjectFilesConsole / ProjectFilesFooter
+
+ProjectWorkflow catalog events
+  -> WorkspaceController.projectCatalog { getSnapshot, subscribe, commands }
+    -> sidebar/start-page catalog containers
+
+ProjectRulesWorkflow restore intent
+  -> projectPanelPort
+    -> ProjectPanelContainer editor ref
+```
+
+`ProjectPanelContainer` owns version selection, PROJECT.md disclosure/edit
+presentation, saved notices and its textarea ref. The catalog projection is
+separate so PROJECT.md typing cannot wake Start or the global sidebar. Workbench
+keeps only cross-capability hydration/error context, drawer composition and host
+actions such as export, Finder reveal and history activation.
 
 ## Capability-context for `gate:plan`
 

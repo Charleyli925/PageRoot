@@ -118,6 +118,28 @@ test("editing text alone stays local while attachment edits publish", () => {
   assert.equal(sameWorkbenchRenderSnapshot(before, attachmentEdit), false);
 });
 
+test("PROJECT.md typing stays in the project container while save structure publishes", () => {
+  const rules = Object.freeze({
+    open: true,
+    content: "before",
+    savedContent: "before",
+    saving: false,
+    saveError: "",
+  });
+  const before = snapshot({ projectRules: rules });
+  const typed = snapshot({
+    ...before,
+    projectRules: { ...rules, content: "after" },
+  });
+  const saving = snapshot({
+    ...before,
+    projectRules: { ...rules, content: "after", saving: true },
+  });
+
+  assert.equal(sameWorkbenchRenderSnapshot(before, typed), true);
+  assert.equal(sameWorkbenchRenderSnapshot(before, saving), false);
+});
+
 test("other capability snapshots always publish to Workbench", () => {
   const before = snapshot();
   assert.equal(sameWorkbenchRenderSnapshot(before, snapshot({

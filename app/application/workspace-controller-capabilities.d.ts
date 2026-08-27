@@ -170,6 +170,73 @@ export type CommentControllerCapability<
   >,
   CommentControllerCommands
 >;
+
+export type ProjectCatalogCapabilitySnapshot<
+  TRecent = unknown,
+  TRegistered = unknown,
+> = Readonly<{
+  recent: ReadonlyArray<TRecent>;
+  registered: ReadonlyArray<TRegistered>;
+  error: string;
+}>;
+
+export interface ProjectCatalogControllerCommands {
+  refreshRecents(): Promise<import("./project-workflow.js").ProjectWorkflowOutcome<{
+    projects: unknown[];
+  }>>;
+  refreshRegistered(): Promise<import("./project-workflow.js").ProjectWorkflowOutcome<{
+    projects: unknown[];
+  }>>;
+}
+
+export type ProjectCatalogControllerCapability<
+  TRecent = unknown,
+  TRegistered = unknown,
+> = CapabilityFacet<
+  ProjectCatalogCapabilitySnapshot<TRecent, TRegistered>,
+  ProjectCatalogControllerCommands
+>;
+
+export type ProjectControllerCapabilitySnapshot<TVersion = unknown> = Readonly<{
+  session: ProjectSessionSnapshot | null;
+  workflow: ProjectWorkflowSnapshot | null;
+  rules: ProjectRulesSnapshot | null;
+  versions: VersionSessionSnapshot<TVersion> | null;
+}>;
+
+export interface ProjectControllerCommands {
+  readFile(relativePath: string): Promise<import("./project-workflow.js").ProjectWorkflowOutcome<{
+    content: string;
+  }>>;
+  openRules(): Promise<import("./project-rules-workflow.js").ProjectRulesWorkflowOutcome<{
+    opened: boolean;
+    reused?: boolean;
+  }>>;
+  updateRules(content: string): import("./project-rules-workflow.js").ProjectRulesWorkflowOutcome<{
+    updated: boolean;
+  }>;
+  beginRulesComposition(target: unknown, baselineValue: string): number | null;
+  finishRulesComposition(target: unknown): boolean;
+  leaveRulesEditor(): boolean;
+  restoreRules(): import("./project-rules-workflow.js").ProjectRulesWorkflowOutcome<{
+    restored: boolean;
+    editorGeneration: number;
+  }>;
+  saveRules(): Promise<import("./project-rules-workflow.js").ProjectRulesWorkflowOutcome<{
+    saved: boolean;
+    reconciled?: boolean;
+  }>>;
+  closeRules(): Promise<import("./project-rules-workflow.js").ProjectRulesWorkflowOutcome<{
+    closed: boolean;
+  }>>;
+}
+
+export type ProjectControllerCapability<
+  TVersion = unknown,
+> = CapabilityFacet<
+  ProjectControllerCapabilitySnapshot<TVersion>,
+  ProjectControllerCommands
+>;
 export interface ConversationControllerCapability {
   openConversation(context: ConversationContext | null): Promise<unknown>;
   closeConversation(): void;
