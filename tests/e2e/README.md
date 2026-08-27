@@ -94,7 +94,8 @@ same final commit and content hash recorded by the automated gate report.
 - `native-dom-source.spec.mjs`: byte-exact UTF-8 replacement, BOM/CRLF,
   entities/quotes/comments/duplicate attributes, exact forward bytes, and
   blocked source-reversal shortcuts.
-- `electron-project-lifecycle.spec.mjs`, `electron-edit-runtime.spec.mjs`,
+- `electron-project-lifecycle.spec.mjs`, `electron-workbench-tabs.spec.mjs`,
+  `electron-edit-runtime.spec.mjs`,
   `electron-native-input.spec.mjs`, `electron-comments-and-rules.spec.mjs`
   and `electron-source-recovery.spec.mjs`: the same real native editing path
   in the shipped Chromium environment, plus temporary-disk checkpoint/autosave,

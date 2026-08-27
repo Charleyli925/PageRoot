@@ -25,6 +25,7 @@ const channels = Object.freeze({
   openRecent: "html-projects:open-recent",
   forgetRecent: "html-projects:forget-recent",
   acceptExternalOpen: "html-projects:accept-external-open",
+  acknowledgeExternalOpen: "html-projects:ack-external-open",
   commitPreparedHtmlOpen: "html-projects:commit-prepared-open",
   cancelPreparedHtmlOpen: "html-projects:cancel-prepared-open",
   finalizePreparedHtmlOpen: "html-projects:finalize-prepared-open",
@@ -60,6 +61,10 @@ const usageChannels = Object.freeze({
 const uiPreferenceChannels = Object.freeze({
   get: "html-ui-preferences:get",
   record: "html-ui-preferences:record",
+});
+const workbenchTabChannels = Object.freeze({
+  get: "html-workbench-tabs:get",
+  set: "html-workbench-tabs:set",
 });
 const previewChannels = Object.freeze({
   createSession: "html-preview:create-session",
@@ -160,6 +165,10 @@ const projectsApi = Object.freeze({
   forgetRecent: (sourcePath) => invokeProject(channels.forgetRecent, sourcePath),
   acceptExternalOpen: (requestId) => invokeProject(
     channels.acceptExternalOpen,
+    { requestId },
+  ),
+  acknowledgeExternalOpen: (requestId) => invokeProject(
+    channels.acknowledgeExternalOpen,
     { requestId },
   ),
   commitPreparedHtmlOpen: (payload) => invokeProject(
@@ -424,6 +433,10 @@ const appLifecycleApi = Object.freeze({
       ipcRenderer.removeListener(appChannels.externalOpenRequested, registered);
     };
   },
+  getInitialExternalOpen: async () => {
+    const payload = await ipcRenderer.invoke(appChannels.externalOpenReady);
+    return normalizedExternalOpenRequest(payload);
+  },
   relaunch: () => ipcRenderer.invoke(appChannels.relaunch),
   openUserNotice: () => invokeProject(appChannels.openUserNotice),
 });
@@ -475,6 +488,10 @@ const uiPreferencesApi = Object.freeze({
     });
   },
 });
+const workbenchTabsApi = Object.freeze({
+  get: () => invokeProject(workbenchTabChannels.get),
+  set: (state) => invokeProject(workbenchTabChannels.set, state),
+});
 const historyRequestListeners = new Map();
 const editApi = Object.freeze({
   onHistoryRequested: (listener) => {
@@ -522,4 +539,5 @@ const exposeUiPreferences = !(
 if (exposeUiPreferences) {
   contextBridge.exposeInMainWorld("htmlAIUiPreferences", uiPreferencesApi);
 }
+contextBridge.exposeInMainWorld("htmlAIWorkbenchTabs", workbenchTabsApi);
 contextBridge.exposeInMainWorld("htmlAIEdit", editApi);

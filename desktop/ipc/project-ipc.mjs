@@ -47,6 +47,12 @@ export function registerProjectIpc({
     PROJECT_CHANNELS.acceptExternalOpen,
     trustedProject(handlers.acceptExternalFileOpen, "external_open"),
   );
+  if (PROJECT_CHANNELS.acknowledgeExternalOpen) {
+    ipcMain.handle(
+      PROJECT_CHANNELS.acknowledgeExternalOpen,
+      trustedProject(handlers.acknowledgeExternalFileOpen, "external_open_ack"),
+    );
+  }
   ipcMain.handle(
     PROJECT_CHANNELS.commitPreparedHtmlOpen,
     trustedProject(handlers.commitPreparedHtmlOpen, "prepared_open_commit"),

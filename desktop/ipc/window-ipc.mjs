@@ -6,6 +6,7 @@ export function registerWindowIpc({
   EDIT_CHANNELS,
   UI_PREFERENCE_CHANNELS,
   USAGE_CHANNELS,
+  WORKBENCH_TAB_CHANNELS,
   openUserNotice,
   reportCloseResult,
   acknowledgeWorkspaceRecoveryReady,
@@ -14,6 +15,8 @@ export function registerWindowIpc({
   applyNativeHistory,
   getUiPreferences,
   recordUiPreference,
+  getWorkbenchTabs,
+  setWorkbenchTabs,
   assertTrustedEvent,
   captureUsageFromRenderer,
 }) {
@@ -46,6 +49,16 @@ export function registerWindowIpc({
     UI_PREFERENCE_CHANNELS.record,
     trustedProject(recordUiPreference, "ui_preferences_record"),
   );
+  if (WORKBENCH_TAB_CHANNELS) {
+    ipcMain.handle(
+      WORKBENCH_TAB_CHANNELS.get,
+      trustedProject(getWorkbenchTabs, "workbench_tabs_get"),
+    );
+    ipcMain.handle(
+      WORKBENCH_TAB_CHANNELS.set,
+      trustedProject(setWorkbenchTabs, "workbench_tabs_set"),
+    );
+  }
   ipcMain.on(USAGE_CHANNELS.capture, (event, payload) => {
     try {
       assertTrustedEvent(event);
@@ -62,9 +75,11 @@ export function unregisterWindowIpc({
   EDIT_CHANNELS,
   UI_PREFERENCE_CHANNELS,
   USAGE_CHANNELS,
+  WORKBENCH_TAB_CHANNELS,
 }) {
   for (const channel of [
     ...Object.values(UI_PREFERENCE_CHANNELS),
+    ...Object.values(WORKBENCH_TAB_CHANNELS || {}),
     APP_CHANNELS.closeResult,
     APP_CHANNELS.workspaceRecoveryReady,
     APP_CHANNELS.externalOpenReady,

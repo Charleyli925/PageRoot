@@ -19,6 +19,8 @@ export type ProjectWorkflowOutcome<T = Record<string, unknown>> =
 
 export type ProjectWorkflowProject = Readonly<{
   name: string;
+  projectId?: string;
+  documentId?: string;
   sourcePath: string | null;
   html: string;
   sha256?: string | null;
@@ -112,6 +114,14 @@ export type ProjectWorkflowConstruction = Readonly<{
     recentRuns: Readonly<{
       hydrate(projects: unknown[], activeSourcePath: string | null): void | Promise<void>;
     }>;
+    navigation?: Readonly<{
+      authorizeProjectApplication(input: Readonly<Record<string, unknown>>): Readonly<{
+        accepted: boolean;
+        kind: string;
+      }>;
+      applyProject(input: Readonly<Record<string, unknown>>): Readonly<Record<string, unknown>>;
+      waitForTerminal?(transactionId: string): Promise<Readonly<Record<string, unknown>> | null>;
+    }>;
   }>;
   policies: object;
   scheduler?: Readonly<{
@@ -131,30 +141,36 @@ export class ProjectWorkflow {
   refreshWorkspace(input?: Record<string, unknown>): Promise<ProjectWorkflowOutcome>;
   retryHydration(): Promise<ProjectWorkflowOutcome>;
   prepareSwitch(input?: { fromDeferred?: boolean }): Promise<ProjectWorkflowOutcome>;
+  requestBrowserFilePicker(): string | null;
   openProject(input?: {
     kind?: "local" | "recent" | "registered" | "startup";
     sourcePath?: string | null;
     projectId?: string | null;
     fromDeferred?: boolean;
+    transactionId?: string | null;
   }): Promise<ProjectWorkflowOutcome>;
   acceptProject(
     project: ProjectWorkflowProject,
-    input?: { kind?: string; operationId?: string; sourcePath?: string | null },
+    input?: { kind?: string; operationId?: string; sourcePath?: string | null; transactionId?: string | null },
   ): ProjectWorkflowOutcome;
+  cancelProjectApplication(applicationId: string): boolean;
   acceptBrowserProject(input: {
     operationId?: string;
     project: ProjectWorkflowProject;
+    transactionId?: string | null;
   }): ProjectWorkflowOutcome;
   acceptExternalProject(input: {
     requestId: string;
     sourcePath?: string;
+    transactionId?: string;
   }): ProjectWorkflowOutcome;
   confirmExternalOpen(input?: {
     requestId?: string;
     action?: string;
     deleteOriginal?: boolean;
+    transactionId?: string | null;
   }): Promise<ProjectWorkflowOutcome>;
-  cancelExternalOpen(input?: { requestId?: string }): ProjectWorkflowOutcome;
+  cancelExternalOpen(input?: { requestId?: string }): Promise<ProjectWorkflowOutcome>;
   setExternalOpenDeleteOriginal(input?: {
     requestId?: string;
     deleteOriginal?: boolean;

@@ -113,3 +113,17 @@ test("window construction never waits for the Bridge utility process", async () 
   // has to settle before the load and nowhere earlier.
   assert.ok(awaitBridge < loadRenderer);
 });
+
+test("final-exit IPC unregister and close-abort registration include workbench tabs", async () => {
+  const [mainProcess, windowIpc, projectIpc] = await Promise.all([
+    readFile(sourceUrl("../desktop/main.mjs"), "utf8"),
+    readFile(sourceUrl("../desktop/ipc/window-ipc.mjs"), "utf8"),
+    readFile(sourceUrl("../desktop/ipc/project-ipc.mjs"), "utf8"),
+  ]);
+  assert.match(mainProcess, /WORKBENCH_TAB_CHANNELS/u);
+  assert.match(mainProcess, /restoreFinalExit:[\s\S]*?registerProjectIpc\(\)/u);
+  assert.match(windowIpc, /WORKBENCH_TAB_CHANNELS\.get/u);
+  assert.match(windowIpc, /WORKBENCH_TAB_CHANNELS\.set/u);
+  assert.match(windowIpc, /\.\.\.Object\.values\(WORKBENCH_TAB_CHANNELS/u);
+  assert.match(projectIpc, /acknowledgeExternalOpen/u);
+});

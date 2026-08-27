@@ -267,8 +267,9 @@ services.
 | --- | --- |
 | Bridge routes, timeouts and structured outcomes | `app/application/bridge-client.js` |
 | Runtime Bridge/Session/workflow composition, aggregate frozen snapshot and application event stream | `createRuntimeWorkspaceController()` and `WorkspaceController` in `app/application/workspace-controller.js` |
+| Browser-workbench navigation and tabs | `createRuntimeWorkspaceController()` constructs one `WorkbenchNavigationSession` and one `WorkbenchTabsSession`; `WorkspaceController` owns their `WorkbenchNavigationWorkflow`, startup arbitration, Registry reconciliation, aggregate projection and commands. Every startup/restore, local/recent, registered/sidebar/tab, browser-file, OS-external and confirmation intent enters one ordered admission stream with a transaction ID. Before mutating Controller Sessions, `ProjectWorkflow` must synchronously authorize any non-null transaction/application generation and then obtain its matching application receipt; null identifies a legal authority refresh, while mismatched or terminal identity is stale. `project-applied` is informational only. Pre-apply failure restores the captured tab authority, while a post-apply failure either restores both Controller and tabs from the same receipt or retains the aligned document as committed-error. Desktop close freezes this admission stream before its first await, pins one persistence revision through Project close, retains the freeze when ready, and releases it on abort/retry. `app/workbench/WorkbenchChrome.tsx` is presentation only. |
 | Open/registered project identity, session generation and late-query fencing | `app/application/project-session.js` |
-| External OS/QoderWork HTML-open delivery, opaque request deduplication, read-only A/B/C classification, Prepared Intent, committed-exit one-shot handoff, cold-start native failure presentation from stable product codes, whole project-open transition ordering, monotonic deferred-transition notification, blocker-gated/manual safe-switch retry, accepted-result FIFO and final renderer fence | `desktop/external-file-open.mjs`, `desktop/prepared-html-open.mjs`, `desktop/project-open-queue.mjs`, `app/application/external-file-open-session.js`, `app/application/project-application-session.js` |
+| External OS/QoderWork HTML-open FIFO delivery with explicit renderer acknowledgement, opaque request deduplication, read-only A/B/C classification, Prepared Intent, committed-exit one-shot handoff, cold-start native failure presentation from stable product codes, whole project-open transition ordering, blocker-gated deferred head retention, request-keyed ack-only retry, accepted-result FIFO and final renderer fence | `desktop/external-file-open.mjs`, `desktop/prepared-html-open.mjs`, `desktop/project-open-queue.mjs`, `app/application/external-file-open-session.js`, `app/application/project-application-session.js` |
 | First-open and already-imported confirmation prompt | `app/workbench/ExternalHtmlOpenDialog.tsx`, projected from `ProjectWorkflow` |
 | Current source bytes, Hash, revisions, persistence projection, source-write single flight and Canvas authority generation | `app/application/document-session.js` |
 | Renderer draft revision, pending operations and reconciliation | `app/application/draft-session.js` |
@@ -356,6 +357,20 @@ editing authority; `IslandEditingController` and `SourcePatchEngine` remain
 the only production text and source-mutation route.
 
 ## Persistence
+
+Desktop tab restoration uses a separate validated `workbench-tabs.json`. Its
+strict version-1 schema contains only tab IDs and durable `projectId +
+documentId` pairs; titles are refreshed from the Registry projection after
+open. It never persists source paths, HTML, Hashes or AI authority. Writes use
+same-directory temporary creation plus atomic rename. `html-projects.json`
+continues to own `activePath` compatibility. Any valid tabs record suppresses
+that compatibility startup: `activeTabId: null` restores Start, while a stored
+active document remains pending until Registry open, a newer Controller epoch,
+hydration and Canvas verification succeed. Registry-title/missing-item
+reconciliation and restore ordering live below React in `WorkspaceController`:
+the Controller reads tabs first, requests the Registry catalog when needed,
+removes missing items with an actionable Finder recovery event, and activates
+the pending identity through its owned workflow.
 
 Direct edits form ordered revisions and are written through a single queue. Every write checks the expected source Hash, uses a same-directory temporary file and atomic replacement, then rereads the result. External modification causes a fail-closed conflict.
 

@@ -1,5 +1,6 @@
 @import "./styles/tokens-and-base.css";
 @import "./styles/workbench-shell.css";
+@import "./styles/workbench-tabs.css";
 @import "./styles/review-v5.css";
 @import "./styles/review-v51.css";
 @import "./styles/review-v52-canvas.css";

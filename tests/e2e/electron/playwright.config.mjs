@@ -7,7 +7,7 @@ const productRoot = path.resolve(currentDirectory, "../../..");
 
 export default defineConfig({
   testDir: currentDirectory,
-  testMatch: /(?:electron-(?:project-lifecycle|edit-runtime|native-input|comments-and-rules|source-recovery)|conflict-force-unlock)\.spec\.mjs/,
+  testMatch: /(?:electron-(?:project-lifecycle|workbench-tabs|edit-runtime|native-input|comments-and-rules|source-recovery)|conflict-force-unlock)\.spec\.mjs/,
   outputDir: path.join(productRoot, "output/playwright/native-dom-electron/results"),
   workers: 1,
   // CI absorbs one transient Electron launch/hydration stall per test. Local

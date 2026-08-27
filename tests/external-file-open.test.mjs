@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  createExternalFileOpenDeliveryCoordinator,
   createExternalFileOpenExitHandoff,
   createExternalFileOpenMailbox,
   externalOpenFailurePresentation,
@@ -103,7 +104,7 @@ test("native external-open failures use stable product errors instead of raw pat
   );
 });
 
-test("an external open received after committed shutdown is handed to the next launch once", () => {
+test("external opens received after committed shutdown are handed to the next launch in order", () => {
   const filesystem = createMemoryFilesystem();
   const handoffPath = "/Users/demo/Library/Application Support/PageRoot/external-open-handoff.json";
   const createHandoff = () => createExternalFileOpenExitHandoff({
@@ -125,11 +126,8 @@ test("an external open received after committed shutdown is handed to the next l
   );
 
   const restarted = createHandoff();
-  assert.equal(
-    restarted.take(),
-    "/Users/demo/Qoder 输出/latest.htm",
-    "the next process receives the validated latest external path",
-  );
+  assert.equal(restarted.take(), "/Users/demo/Qoder 输出/first.html");
+  assert.equal(restarted.take(), "/Users/demo/Qoder 输出/latest.htm");
   assert.equal(restarted.take(), null, "a consumed handoff cannot replay twice");
   assert.equal(filesystem.files.size, 0, "the one-shot record is removed after claim");
 });
@@ -152,7 +150,7 @@ test("an invalid shutdown handoff is discarded before it gains file authority", 
   assert.equal(filesystem.files.has(handoffPath), false);
 });
 
-test("external open mailbox authorizes only its latest opaque request", () => {
+test("external open mailbox preserves every opaque request in FIFO order", () => {
   let nextId = 0;
   const mailbox = createExternalFileOpenMailbox({
     createRequestId: () => `external_${++nextId}`,
@@ -162,11 +160,145 @@ test("external open mailbox authorizes only its latest opaque request", () => {
   const second = mailbox.publish("/Users/demo/second.htm");
 
   assert.equal(first.requestId, "external_1");
+  assert.deepEqual(mailbox.peek(), first);
+  assert.equal(mailbox.consume(second.requestId), null);
+  assert.deepEqual(mailbox.consume(first.requestId), first);
   assert.deepEqual(mailbox.peek(), second);
-  assert.equal(mailbox.consume(first.requestId), null);
   assert.deepEqual(mailbox.consume(second.requestId), second);
   assert.equal(mailbox.peek(), null);
   assert.equal(mailbox.consume(second.requestId), null);
+});
+
+test("external open mailbox holds its head until the renderer explicitly acknowledges it", async () => {
+  let nextId = 0;
+  const mailbox = createExternalFileOpenMailbox({
+    createRequestId: () => `external_${++nextId}`,
+    platform: "darwin",
+  });
+  const first = mailbox.publish("/Users/demo/first.html");
+  const second = mailbox.publish("/Users/demo/second.html");
+  let opens = 0;
+  const opening = mailbox.begin(first.requestId, async () => {
+    opens += 1;
+    return { openKind: "confirmation", requestId: first.requestId };
+  });
+  assert.ok(opening);
+  assert.equal(mailbox.begin(second.requestId, async () => null), null);
+  assert.deepEqual(await opening, { openKind: "confirmation", requestId: first.requestId });
+  assert.equal(opens, 1);
+  assert.deepEqual(mailbox.peek(), first, "preparing a confirmation must not consume the head");
+  assert.deepEqual(
+    await mailbox.begin(first.requestId, async () => { opens += 1; }),
+    { openKind: "confirmation", requestId: first.requestId },
+    "a renderer retry reuses the in-flight result",
+  );
+  assert.equal(opens, 1);
+  assert.equal(mailbox.acknowledge(second.requestId), null);
+  assert.deepEqual(mailbox.acknowledge(first.requestId), first);
+  assert.deepEqual(mailbox.peek(), second);
+});
+
+function createDeliveryHarness() {
+  let nextId = 0;
+  const mailbox = createExternalFileOpenMailbox({
+    createRequestId: () => `external_${++nextId}`,
+    platform: "darwin",
+  });
+  const delivery = createExternalFileOpenDeliveryCoordinator();
+  const events = [];
+  const deliverHead = () => {
+    const head = mailbox.peek();
+    if (!head || !delivery.shouldDeliver(head.requestId)) return false;
+    events.push(`deliver:${head.requestId}`);
+    delivery.markDelivered(head.requestId);
+    return true;
+  };
+  const acknowledge = (requestId) => {
+    const consumed = mailbox.acknowledge(requestId);
+    if (!consumed) return false;
+    delivery.acknowledge(requestId);
+    deliverHead();
+    return true;
+  };
+  const abortClose = (authority) => {
+    if (delivery.markCloseAborted(authority)) events.push(`abort:${authority.generation}`);
+    delivery.releaseBarrier(authority);
+    delivery.abortClose(authority);
+    deliverHead();
+  };
+  return { mailbox, delivery, events, deliverHead, acknowledge, abortClose };
+}
+
+test("external delivery protocol matrix keeps close abort ahead of the mailbox head", () => {
+  const harness = createDeliveryHarness();
+  const close = harness.delivery.beginClose("close-request-0001");
+  const first = harness.mailbox.publish("/Users/demo/A.html");
+  assert.deepEqual(harness.delivery.invalidateClose(), close);
+  assert.equal(harness.deliverHead(), false, "the close barrier must withhold A");
+  assert.deepEqual(harness.events, []);
+
+  harness.abortClose(close);
+  assert.deepEqual(harness.events, [
+    `abort:${close.generation}`,
+    `deliver:${first.requestId}`,
+  ]);
+});
+
+test("external delivery protocol matrix admits A B C with one abort and exact ACK progression", () => {
+  const harness = createDeliveryHarness();
+  const close = harness.delivery.beginClose("close-request-0002");
+  const requests = ["A", "B", "C"].map((name) => {
+    const request = harness.mailbox.publish(`/Users/demo/${name}.html`);
+    assert.deepEqual(harness.delivery.invalidateClose(), close);
+    harness.deliverHead();
+    return request;
+  });
+  assert.deepEqual(harness.events, []);
+  harness.abortClose(close);
+  harness.abortClose(close);
+  harness.deliverHead();
+  assert.deepEqual(harness.events, [
+    `abort:${close.generation}`,
+    `deliver:${requests[0].requestId}`,
+  ]);
+  assert.equal(harness.acknowledge(requests[1].requestId), false);
+  assert.deepEqual(harness.mailbox.peek(), requests[0]);
+  assert.equal(harness.acknowledge(requests[0].requestId), true);
+  assert.deepEqual(harness.events.at(-1), `deliver:${requests[1].requestId}`);
+  assert.equal(harness.acknowledge(requests[1].requestId), true);
+  assert.deepEqual(harness.events.at(-1), `deliver:${requests[2].requestId}`);
+});
+
+test("external delivery protocol matrix retains the head across renderer loss and reload", () => {
+  const harness = createDeliveryHarness();
+  const first = harness.mailbox.publish("/Users/demo/A.html");
+  harness.mailbox.publish("/Users/demo/B.html");
+  assert.equal(harness.deliverHead(), true);
+  assert.equal(harness.deliverHead(), false);
+  harness.delivery.beginRendererLoad();
+  assert.equal(harness.deliverHead(), true);
+  assert.deepEqual(harness.events, [
+    `deliver:${first.requestId}`,
+    `deliver:${first.requestId}`,
+  ]);
+});
+
+test("external delivery protocol matrix releases only the matching close generation", () => {
+  const harness = createDeliveryHarness();
+  const firstClose = harness.delivery.beginClose("close-request-0003");
+  harness.mailbox.publish("/Users/demo/A.html");
+  harness.delivery.invalidateClose();
+  assert.equal(harness.delivery.releaseBarrier({
+    requestId: firstClose.requestId,
+    generation: firstClose.generation + 1,
+  }), false);
+  assert.equal(harness.deliverHead(), false);
+  harness.abortClose(firstClose);
+
+  const secondClose = harness.delivery.beginClose("close-request-0004");
+  assert.ok(secondClose.generation > firstClose.generation);
+  assert.equal(harness.delivery.commitClose(secondClose), true);
+  assert.equal(harness.delivery.invalidateClose(), null);
 });
 
 test("external open mailbox serializes accepted active-project mutations", async () => {

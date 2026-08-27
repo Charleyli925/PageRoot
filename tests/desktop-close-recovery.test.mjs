@@ -114,6 +114,53 @@ test("every final-exit intent fails closed before file watching is stopped", () 
   );
 });
 
+test("Main orders close abort, barrier release, handoff restore and one mailbox-head sender", () => {
+  const source = readFileSync(path.join(productRoot, "desktop", "main.mjs"), "utf8");
+  const publish = source.slice(
+    source.indexOf("function publishExternalFileOpen(filePath)"),
+    source.indexOf("async function openExternalFileRequest"),
+  );
+  assert.ok(publish.indexOf("externalFileOpenMailbox.publish(filePath)")
+    < publish.indexOf("interruptCloseForExternalOpen()"));
+  assert.ok(publish.indexOf("interruptCloseForExternalOpen()")
+    < publish.indexOf("deliverExternalMailboxHead()"));
+
+  const abort = source.slice(
+    source.indexOf("function finishCloseAbort("),
+    source.indexOf("async function stopBridgeGracefully"),
+  );
+  assert.ok(abort.indexOf("notifyRendererCloseAbortedOnce(authority, error)")
+    < abort.indexOf("externalFileOpenDelivery.releaseBarrier(authority)"));
+  assert.ok(abort.indexOf("externalFileOpenDelivery.releaseBarrier(authority)")
+    < abort.indexOf("resumeDeferredExternalFileOpenAfterExitAbort()"));
+
+  const handoff = source.slice(
+    source.indexOf("function resumeDeferredExternalFileOpenAfterExitAbort()"),
+    source.indexOf("function publishExternalFileOpen(filePath)"),
+  );
+  assert.ok(handoff.indexOf("externalFileOpenExitHandoff.take()")
+    < handoff.indexOf("externalFileOpenMailbox.publish(sourcePath)"));
+  assert.ok(handoff.indexOf("externalFileOpenMailbox.publish(sourcePath)")
+    < handoff.indexOf("deliverExternalMailboxHead()"));
+
+  const finalRestore = source.slice(
+    source.indexOf("restoreFinalExit: async (error) =>"),
+    source.indexOf("if (restartError) throw restartError;"),
+  );
+  const registerIpcOffset = finalRestore.indexOf("registerProjectIpc()");
+  const reopenExternalAdmissionOffset = finalRestore.indexOf("isQuitting = false;");
+  const finishAbortOffset = finalRestore.indexOf(
+    "finishCloseAbort(coordinatedCloseAuthority, error",
+  );
+  assert.ok(registerIpcOffset < reopenExternalAdmissionOffset);
+  assert.ok(reopenExternalAdmissionOffset < finishAbortOffset);
+  assert.equal(
+    [...source.matchAll(/APP_CHANNELS\.externalOpenRequested,/gu)].length,
+    1,
+    "every external-open push must pass through deliverExternalMailboxHead",
+  );
+});
+
 test("desktop shutdown outlives the Bridge Agent cleanup budget", () => {
   const mainSource = readFileSync(path.join(productRoot, "desktop", "main.mjs"), "utf8");
   const coordinatorSource = readFileSync(

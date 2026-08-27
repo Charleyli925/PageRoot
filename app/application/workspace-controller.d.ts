@@ -68,6 +68,21 @@ import type {
   VersionReviewCandidate,
   VersionWorkflowSnapshot,
 } from "./version-workflow.js";
+import type {
+  WorkbenchTabStatus,
+  WorkbenchTabsSession,
+  WorkbenchTabsSnapshot,
+} from "./workbench-tabs-session.js";
+import type {
+  WorkbenchNavigationSession,
+  WorkbenchNavigationSnapshot,
+} from "./workbench-navigation-session.js";
+import type { WorkbenchNavigationOutcome } from "./workbench-navigation-workflow.js";
+import type { BrowserDocumentSession } from "./browser-document-session.js";
+import type {
+  WorkbenchTabsPersistenceCoordinator,
+  WorkbenchTabsPersistenceSnapshot,
+} from "./workbench-tabs-persistence-coordinator.js";
 
 export type OperationIdentity = Readonly<{
   operationId: string;
@@ -113,6 +128,10 @@ export type WorkspaceControllerSnapshot = Readonly<{
   run: RunWorkflowSnapshot | null;
   version: VersionWorkflowSnapshot | null;
   conversation: ConversationSessionSnapshot | null;
+  workbenchTabs: WorkbenchTabsSnapshot | null;
+  workbenchTabsReady: boolean;
+  workbenchNavigation: WorkbenchNavigationSnapshot | null;
+  workbenchTabsPersistence: WorkbenchTabsPersistenceSnapshot | null;
 }>;
 
 export type WorkspaceEvent =
@@ -127,6 +146,20 @@ export type WorkspaceEvent =
   | Readonly<{
       type: "draft-authority-rebound";
       context: ProjectContext;
+    }>
+  | Readonly<{
+      type: "workbench-tabs-persistence-failed";
+      reason: string;
+    }>
+  | Readonly<{
+      type: "workbench-tabs-restore-missing";
+      missing: ReadonlyArray<Record<string, unknown>>;
+    }>
+  | Readonly<{
+      type: "workbench-tabs-restore-failed";
+      tabId: string;
+      committed: boolean;
+      reason: string;
     }>
   | Readonly<{
       type:
@@ -243,6 +276,10 @@ export type WorkspaceControllerConstruction = Readonly<{
   versionSession: VersionSession;
   sourceHistorySession: SourceHistorySession;
   conversationSession?: ConversationSession | null;
+  workbenchTabsSession?: WorkbenchTabsSession | null;
+  workbenchNavigationSession?: WorkbenchNavigationSession | null;
+  browserDocumentSession?: BrowserDocumentSession | null;
+  workbenchTabsPersistenceCoordinator?: WorkbenchTabsPersistenceCoordinator | null;
   codecs: WorkspaceControllerCodecs;
   ports: Readonly<{
     hash: HashPort;
@@ -251,6 +288,20 @@ export type WorkspaceControllerConstruction = Readonly<{
     projectSource?: ProjectSourceActivationPort;
     editRuntime?: EditAuthorRuntimePort;
     uiPreferences?: FirstEditGuidePort;
+    workbenchTabs?: Readonly<{
+      get(): Promise<unknown>;
+      set(value: Readonly<Record<string, unknown>>): Promise<unknown>;
+    }>;
+    navigation?: Readonly<{
+      subscribeExternalOpen(listener: (request: {
+        requestId: string;
+        sourcePath?: string;
+      }) => void): (() => void) | void;
+      readInitialExternalOpen?(): Promise<{
+        requestId: string;
+        sourcePath?: string;
+      } | null>;
+    }>;
   }>;
   documentWorkflow?: Readonly<{
     codecs: DocumentWorkflowCodecs;
@@ -385,6 +436,20 @@ export class WorkspaceController {
   updateConversationDraftText(text: string): void;
   updateConversationDraftIntent(intent: string): void;
   flushConversationDraft(): Promise<void>;
+  activateWorkbenchTab(tabId: string, input?: { deadlineMs?: number }): Promise<WorkbenchNavigationOutcome>;
+  createWorkbenchStartTab(): Promise<WorkbenchNavigationOutcome>;
+  closeWorkbenchTab(tabId: string): Promise<WorkbenchNavigationOutcome>;
+  openRegisteredWorkbenchProject(input: {
+    projectId: string;
+    documentId: string;
+    title: string;
+    status?: WorkbenchTabStatus;
+  }): Promise<WorkbenchNavigationOutcome>;
+  updateWorkbenchTabStatus(
+    projectId: string,
+    documentId: string,
+    status: WorkbenchTabStatus,
+  ): WorkbenchTabsSnapshot | null;
   subscribe(
     listener: (snapshot: WorkspaceControllerSnapshot) => void,
   ): () => void;
@@ -426,7 +491,7 @@ export class WorkspaceController {
   retryProjectHydration(): Promise<ProjectWorkflowOutcome>;
   prepareProjectSwitch(input?: {
     fromDeferred?: boolean;
-  }): Promise<ProjectWorkflowOutcome>;
+  }): Promise<WorkbenchNavigationOutcome>;
   openProject(input?: {
     kind?: "local" | "recent" | "registered" | "startup";
     sourcePath?: string | null;
@@ -440,22 +505,22 @@ export class WorkspaceController {
   acceptBrowserProject(input: {
     operationId?: string;
     project: ProjectWorkflowProject;
-  }): ProjectWorkflowOutcome;
+  }): Promise<WorkbenchNavigationOutcome>;
   acceptExternalProject(input: {
     requestId: string;
     sourcePath?: string;
-  }): ProjectWorkflowOutcome;
+  }): Promise<WorkbenchNavigationOutcome>;
   confirmExternalOpen(input?: {
     requestId?: string;
     action?: string;
     deleteOriginal?: boolean;
-  }): Promise<ProjectWorkflowOutcome>;
-  cancelExternalOpen(input?: { requestId?: string }): ProjectWorkflowOutcome;
+  }): Promise<WorkbenchNavigationOutcome>;
+  cancelExternalOpen(input?: { requestId?: string }): Promise<WorkbenchNavigationOutcome>;
   setExternalOpenDeleteOriginal(input?: {
     requestId?: string;
     deleteOriginal?: boolean;
   }): ProjectWorkflowOutcome;
-  retryExternalOpen(input?: { requestId?: string }): Promise<ProjectWorkflowOutcome>;
+  retryExternalOpen(input?: { requestId?: string }): Promise<WorkbenchNavigationOutcome>;
   acknowledgeEditCanvas(input?: {
     generation?: number;
     renderedSha256?: string | null;

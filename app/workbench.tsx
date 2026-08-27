@@ -94,6 +94,7 @@ import {
   type QoderGuidanceKind,
 } from "./domain/qoder-availability.js";
 import { createWorkspaceControllerCodecs } from "./application/workspace-controller-codecs.js";
+import { createBrowserFileTabIdentity } from "./application/browser-file-tab-identity.js";
 import type { CommentSessionSnapshot } from "./application/comment-session.js";
 import type { DocumentSessionSnapshot } from "./application/document-session.js";
 import { runLocalUserAction } from "./application/local-action-outcomes.js";
@@ -105,6 +106,10 @@ import type { PageViewContext } from "./lib/page-view-context.js";
 import type { ProjectSessionSnapshot } from "./application/project-session.js";
 import type { RunOperationKind, RunSessionSnapshot } from "./application/run-session.js";
 import type { VersionSessionSnapshot } from "./application/version-session.js";
+import {
+  INITIAL_WORKBENCH_TABS_SNAPSHOT,
+  type WorkbenchTab,
+} from "./application/workbench-tabs-session.js";
 import type { SourceHistoryDirection } from "./domain/source-history.js";
 import {
   EDIT_AUTHOR_RUNTIME_VERIFICATION_DEADLINE_MS,
@@ -189,6 +194,12 @@ import {
   WorkbenchHeaderShell,
 } from "./workbench/workbench-header-shell";
 import {
+  WorkbenchGlobalSidebar,
+  WorkbenchStartPage,
+  WorkbenchStartToolbar,
+  WorkbenchTabBar,
+} from "./workbench/WorkbenchChrome";
+import {
   activeRunOperationKey,
   currentWorkingCopyPresentation,
   fileExtension,
@@ -231,6 +242,7 @@ import type {
   PrepareCloseDetail,
   ProjectContext,
   RecentProject,
+  RegisteredProject,
   StartupIssue,
   Toast,
   ToastAction,
@@ -291,6 +303,7 @@ const INITIAL_EXTERNAL_FILE_OPEN_SNAPSHOT = {
   status: "idle" as const,
   activeRequestId: null,
   queuedRequestId: null,
+  queuedRequestIds: [],
   deferredRequestId: null,
   deferredSequence: 0,
   confirmation: null,
@@ -435,6 +448,7 @@ function documentEditFailureReason(outcome: DocumentEditOutcome): string {
 }
 
 export default function Workbench() {
+  const [globalSidebarOpen, setGlobalSidebarOpen] = useState(false);
   const editorRef = useRef<HtmlCanvasEditorHandle>(null);
   const interactionPreviewRef = useRef<HtmlInteractionPreviewHandle>(null);
   const previewToEditPendingRef = useRef(false);
@@ -555,6 +569,8 @@ export default function Workbench() {
     useState<WorkspaceControllerSnapshot | null>(null);
   const [workspaceController, setWorkspaceController] =
     useState<WorkspaceController | null>(null);
+  const workbenchTabsSnapshot = workspaceControllerSnapshot?.workbenchTabs
+    ?? INITIAL_WORKBENCH_TABS_SNAPSHOT;
   const [importedCanvasBase, setImportedCanvasBase] = useState<{
     managedSourcePath: string;
     externalSourcePath: string;
@@ -629,6 +645,7 @@ export default function Workbench() {
   const [fileRenameDraft, setFileRenameDraft] = useState("");
   const [fileRenameError, setFileRenameError] = useState("");
   const [recentProjects, setRecentProjects] = useState<RecentProject[]>([]);
+  const [registeredProjects, setRegisteredProjects] = useState<RegisteredProject[]>([]);
   const [recentProjectsError, setRecentProjectsError] = useState("");
   const [selection, setSelection] = useState<HtmlCanvasSelection | null>(null);
   const commentSnapshot = (
@@ -923,6 +940,26 @@ export default function Workbench() {
       ports: {
         hash: { sha256: browserSha256 },
         canvas: { invalidateRenderAcks: invalidateCanvasRenderAcks },
+        ...(window.htmlAIWorkbenchTabs ? {
+          workbenchTabs: {
+            get: () => window.htmlAIWorkbenchTabs!.get(),
+            set: (value: Readonly<Record<string, unknown>>) => (
+              window.htmlAIWorkbenchTabs!.set(value)
+            ),
+          },
+        } : {}),
+        ...(window.htmlAIAppLifecycle?.onExternalOpenRequested ? {
+          navigation: {
+            subscribeExternalOpen: (listener: (request: {
+              requestId: string;
+              sourcePath?: string;
+            }) => void) => window.htmlAIAppLifecycle!.onExternalOpenRequested(listener),
+            readInitialExternalOpen: () => (
+              window.htmlAIAppLifecycle!.getInitialExternalOpen?.()
+              ?? Promise.resolve(null)
+            ),
+          },
+        } : {}),
         projectSource: {
           activateManagedWorkingCopy: async (input: {
             previousSourcePath: string;
@@ -1071,6 +1108,7 @@ export default function Workbench() {
           hash: { sha256: browserSha256 },
           canvas: {
             invalidateRenderAcks: invalidateCanvasRenderAcks,
+            isMounted: () => Boolean(editorRef.current),
             deferCommand: (
               kind: string,
               run: () => void,
@@ -1129,6 +1167,11 @@ export default function Workbench() {
               const accept = window.htmlAIProjects?.acceptExternalOpen;
               if (!accept) throw new Error("当前 PageRoot 版本缺少外部文件打开通道。");
               return accept(requestId);
+            },
+            ackExternal: async (requestId: string) => {
+              const acknowledge = window.htmlAIProjects?.acknowledgeExternalOpen;
+              if (!acknowledge) return { acknowledged: true, requestId };
+              return acknowledge(requestId);
             },
             commitPrepared: async (payload: {
               requestId: string;
@@ -1471,6 +1514,64 @@ export default function Workbench() {
         }
         return;
       }
+      if (event.type === "workbench-tabs-restore-missing") {
+        const missingValue = (event as { missing?: unknown }).missing;
+        const missing = Array.isArray(missingValue) ? missingValue : [];
+        setGlobalSidebarOpen(true);
+        setToast({
+          title: missing.length === 1
+            ? "无法恢复一个 HTML"
+            : `无法恢复 ${missing.length} 个 HTML`,
+          message: "项目可能已移动或删除。已保留可用标签，可从 Finder 重新打开。",
+          tone: "warning",
+          sticky: true,
+          disposition: "background-result",
+          dedupeKey: "workbench-restored-projects-missing",
+          action: { id: "retry-project-open", label: "从 Finder 重新打开" },
+        });
+        return;
+      }
+      if (event.type === "workbench-tabs-persistence-failed") {
+        setToast({
+          title: "标签页状态未安全保存",
+          message: String(event.reason || "当前窗口会保持开启，请重试后再关闭。"),
+          tone: "error",
+          sticky: true,
+          disposition: "background-result",
+          dedupeKey: "workbench-tabs-persistence-failed",
+        });
+        return;
+      }
+      if (event.type === "workbench-tabs-restore-failed") {
+        const failure = event as { tabId?: unknown; committed?: unknown; reason?: unknown };
+        if (failure.committed === true) {
+          setToast({
+            title: "HTML 已打开，但恢复未完成",
+            message: String(
+              failure.reason || "当前标签和 Controller 身份已对齐，请重试权威读取。",
+            ),
+            tone: "error",
+            sticky: true,
+            disposition: "direct-action",
+            dedupeKey: `workbench-restore-settle-failed:${String(failure.tabId || "")}`,
+            action: { id: "retry-project-hydration", label: "重试恢复" },
+          });
+        } else {
+          setGlobalSidebarOpen(true);
+          setToast({
+            title: "无法恢复这个 HTML",
+            message: String(
+              failure.reason || "项目可能已移动或删除，请从 Finder 重新打开。",
+            ),
+            tone: "warning",
+            sticky: true,
+            disposition: "background-result",
+            dedupeKey: `workbench-restore-failed:${String(failure.tabId || "")}`,
+            action: { id: "retry-project-open", label: "从 Finder 重新打开" },
+          });
+        }
+        return;
+      }
       if (event.type === "external-open-completed") {
         const openEvent = event as Readonly<{
           imported?: boolean;
@@ -1499,6 +1600,28 @@ export default function Workbench() {
               sourcePath: openEvent.sourcePath,
             },
           } : {}),
+        });
+        return;
+      }
+      if (event.type === "external-open-ack-failed") {
+        const ackEvent = event as Readonly<{
+          requestId?: string;
+          confirmation?: boolean;
+          reason?: string;
+        }>;
+        if (!ackEvent.confirmation || !ackEvent.requestId) return;
+        setToast({
+          title: "HTML 已处理，等待 Finder 回执",
+          message: ackEvent.reason || "回执暂时发送失败；重试只会发送回执，不会重复打开 HTML。",
+          tone: "warning",
+          sticky: true,
+          disposition: "direct-action",
+          dedupeKey: `external-open-ack:${ackEvent.requestId}`,
+          action: {
+            id: "retry-external-project-open",
+            label: "重试回执",
+            requestId: ackEvent.requestId,
+          },
         });
         return;
       }
@@ -1731,6 +1854,10 @@ export default function Workbench() {
         lastModifiedAt?: unknown;
         showHandoff?: unknown;
         contentChanged?: unknown;
+        activeLocked?: unknown;
+        epoch?: unknown;
+        requestId?: unknown;
+        ackPending?: unknown;
       }>;
       if (projectEvent.type === "project-hydration-stage") {
         markProjectHydrationStage(String(projectEvent.stage || ""));
@@ -1864,6 +1991,19 @@ export default function Workbench() {
         ));
         return;
       }
+      if (projectEvent.type === "project-catalog-loaded") {
+        const projects = Array.isArray(projectEvent.projects)
+          ? projectEvent.projects as RegisteredProject[]
+          : [];
+        setRegisteredProjects(projects);
+        return;
+      }
+      if (projectEvent.type === "project-catalog-failed") {
+        setRecentProjectsError(String(
+          projectEvent.reason || "项目目录暂时无法读取。",
+        ));
+        return;
+      }
       if (projectEvent.type === "project-startup-failed") {
         setStartupIssue({
           title: "上次打开的 HTML 无法恢复",
@@ -1891,14 +2031,22 @@ export default function Workbench() {
         return;
       }
       if (projectEvent.type === "external-project-open-deferred") {
+        const ackPending = projectEvent.ackPending === true;
         setToast({
-          title: "暂不能切换到 QoderWork 中的 HTML",
-          message: "当前画布仍在安全恢复；已保留当前 HTML。恢复后可手动重试打开。",
+          title: ackPending
+            ? "HTML 已处理，等待 Finder 回执"
+            : "暂不能切换到 QoderWork 中的 HTML",
+          message: ackPending
+            ? "回执暂时发送失败；重试只会发送回执，不会重复打开 HTML。"
+            : "当前画布仍在安全恢复；已保留当前 HTML。恢复后可手动重试打开。",
           tone: "warning",
           sticky: true,
           disposition: "direct-action",
           dedupeKey: "external-project-open-deferred",
-          action: { id: "retry-external-project-open", label: "重试打开" },
+          action: {
+            id: "retry-external-project-open",
+            label: ackPending ? "重试回执" : "重试打开",
+          },
         });
         return;
       }
@@ -2492,6 +2640,33 @@ export default function Workbench() {
     localFileNameFromSourcePath(sourcePath) || projectName;
   const currentSourceFileExtension = fileExtension(currentSourceFileName);
   const currentSourceFileStem = fileStem(currentSourceFileName);
+  useEffect(() => {
+    if (!workspaceController || !projectId || !documentId) return;
+    const tabId = `document:${projectId}:${documentId}`;
+    const projected = workspaceController.getSnapshot().workbenchTabs;
+    if (!projected?.tabs.some((tab) => tab.tabId === tabId)) return;
+    workspaceController.updateWorkbenchTabStatus(
+      projectId,
+      documentId,
+      projectLoadError || persistState === "failed" || persistState === "conflict"
+        ? "error"
+        : readyReviewSession
+          ? "review-ready"
+          : runInProgress
+            ? "processing"
+            : "normal",
+    );
+  }, [
+    currentSourceFileStem,
+    documentId,
+    persistState,
+    projectId,
+    projectLoadError,
+    projectName,
+    readyReviewSession,
+    runInProgress,
+    workspaceController,
+  ]);
   const canOfferFileRename = Boolean(
     sourcePath
     && sourceSha256
@@ -3415,11 +3590,6 @@ export default function Workbench() {
     });
   }, [workspaceController]);
   useEffect(() => {
-    if (!workspaceController || !window.htmlAIProjects) return;
-    void workspaceController.openProject({ kind: "startup" });
-  }, [workspaceController]);
-
-  useEffect(() => {
     if (!toast) {
       noticeDeadlineRef.current = null;
       return;
@@ -3853,6 +4023,95 @@ export default function Workbench() {
       sourcePath: recentPath || null,
     });
   }, [workspaceController]);
+  const presentWorkbenchTabOutcome = useCallback((outcome: unknown) => {
+    if (!outcome || typeof outcome !== "object" || (outcome as { status?: string }).status === "succeeded") return;
+    const result = outcome as { reason?: string; code?: string };
+    setToast({
+      title: result.code === "WORKBENCH_TAB_SWITCH_BUSY"
+        ? "标签页正在切换"
+        : "暂时无法完成标签页操作",
+      message: result.reason || "请稍后重试。",
+      tone: "warning",
+      sticky: false,
+      dedupeKey: `workbench-tab:${result.code || "rejected"}`,
+    });
+  }, [setToast]);
+  const selectWorkbenchTab = useCallback((tab: WorkbenchTab) => {
+    if (!workspaceController) return;
+    void workspaceController.activateWorkbenchTab(tab.tabId).then((outcome) => {
+      presentWorkbenchTabOutcome(outcome);
+    });
+  }, [presentWorkbenchTabOutcome, workspaceController]);
+  const createWorkbenchStartTab = useCallback(() => {
+    if (!workspaceController) return;
+    void workspaceController.createWorkbenchStartTab().then((outcome) => {
+      presentWorkbenchTabOutcome(outcome);
+    });
+  }, [presentWorkbenchTabOutcome, workspaceController]);
+  const closeWorkbenchTab = useCallback((tab: WorkbenchTab) => {
+    if (!workspaceController) return;
+    void workspaceController.closeWorkbenchTab(tab.tabId).then((outcome) => {
+      presentWorkbenchTabOutcome(outcome);
+      const snapshot = workspaceController.getSnapshot().workbenchTabs
+        ?? INITIAL_WORKBENCH_TABS_SNAPSHOT;
+      const active = snapshot.tabs.find(
+        (item) => item.tabId === snapshot.activeTabId,
+      );
+      if (outcome.status === "succeeded" && active) {
+        window.requestAnimationFrame(() => {
+          document.getElementById(`workbench-tab-${active.tabId}`)?.focus();
+        });
+      }
+    });
+  }, [presentWorkbenchTabOutcome, workspaceController]);
+  const openRegisteredWorkbenchProject = useCallback((project: RegisteredProject) => {
+    if (!workspaceController || !project.documentId || project.availability !== "ready") return;
+    void workspaceController.openRegisteredWorkbenchProject({
+      projectId: project.projectId,
+      documentId: project.documentId,
+      title: project.projectName,
+    }).then((outcome) => {
+      presentWorkbenchTabOutcome(outcome);
+    });
+  }, [presentWorkbenchTabOutcome, workspaceController]);
+  useEffect(() => {
+    const handleWorkbenchShortcut = (event: KeyboardEvent) => {
+      const command = event.metaKey || event.ctrlKey;
+      if (!command || event.altKey) return;
+      if (event.key.toLowerCase() === "t") {
+        event.preventDefault();
+        createWorkbenchStartTab();
+        return;
+      }
+      if (event.key.toLowerCase() === "w") {
+        const active = workbenchTabsSnapshot.tabs.find(
+          (tab) => tab.tabId === workbenchTabsSnapshot.activeTabId,
+        );
+        if (!active) return;
+        event.preventDefault();
+        closeWorkbenchTab(active);
+        return;
+      }
+      const numeric = Number(event.key);
+      if (Number.isInteger(numeric) && numeric >= 1 && numeric <= 9) {
+        const tab = workbenchTabsSnapshot.tabs[numeric - 1];
+        if (!tab) return;
+        event.preventDefault();
+        selectWorkbenchTab(tab);
+        return;
+      }
+      if (event.key === "Tab" && workbenchTabsSnapshot.tabs.length > 1) {
+        event.preventDefault();
+        const snapshot = workbenchTabsSnapshot;
+        const currentIndex = snapshot.tabs.findIndex((tab) => tab.tabId === snapshot.activeTabId);
+        const direction = event.shiftKey ? -1 : 1;
+        const nextIndex = (currentIndex + direction + snapshot.tabs.length) % snapshot.tabs.length;
+        selectWorkbenchTab(snapshot.tabs[nextIndex]);
+      }
+    };
+    window.addEventListener("keydown", handleWorkbenchShortcut);
+    return () => window.removeEventListener("keydown", handleWorkbenchShortcut);
+  }, [closeWorkbenchTab, createWorkbenchStartTab, selectWorkbenchTab, workbenchTabsSnapshot]);
 
   const resumeDeferredProjectApplication = useCallback(() => (
     workspaceController?.resumeDeferredProjectApplication().status === "succeeded"
@@ -3861,15 +4120,6 @@ export default function Workbench() {
   const resumeDeferredExternalProject = useCallback(() => (
     workspaceController?.resumeDeferredExternalProject().status === "succeeded"
   ), [workspaceController]);
-
-  useEffect(() => {
-    if (!workspaceController) return undefined;
-    const lifecycle = window.htmlAIAppLifecycle;
-    if (!lifecycle?.onExternalOpenRequested) return undefined;
-    return lifecycle.onExternalOpenRequested((request) => {
-      workspaceController.acceptExternalProject(request);
-    });
-  }, [workspaceController]);
 
   useEffect(() => {
     workspaceController?.reconcileProjectTransitions();
@@ -3888,6 +4138,7 @@ export default function Workbench() {
     projectSnapshot,
     runSnapshot,
     viewTransitioning,
+    workbenchTabsSnapshot.revision,
     workspaceController,
   ]);
   useEffect(() => {
@@ -4202,13 +4453,22 @@ export default function Workbench() {
         fatal: true,
         ignoreBOM: true,
       }).decode(await file.arrayBuffer());
+      const sourceSha256 = await browserSha256(fileHtml);
+      const tabIdentity = await createBrowserFileTabIdentity({
+        name: file.name,
+        size: file.size,
+        lastModified: file.lastModified,
+        sourceSha256,
+        sha256: browserSha256,
+      });
       workspaceController.acceptBrowserProject({
         operationId,
         project: {
+          ...tabIdentity,
           name: file.name,
           sourcePath: null,
           html: fileHtml,
-          sha256: await browserSha256(fileHtml),
+          sha256: sourceSha256,
         },
       });
     } catch (cause) {
@@ -7110,11 +7370,27 @@ export default function Workbench() {
         );
         return;
       case "open-project":
-      case "retry-project-open":
         void openProject(action.sourcePath);
         return;
+      case "retry-project-open":
+        if (!action.sourcePath && fileInputRef.current) {
+          // Keep this click in the toast's user-activation turn. Navigation
+          // admission may still be busy finishing the current HTML, and a
+          // queued input.click() is ignored by Chromium.
+          fileInputRef.current.click();
+          return;
+        }
+        void openProject(action.sourcePath);
+        return;
+      case "retry-project-hydration":
+        void workspaceController?.retryProjectHydration();
+        return;
       case "retry-external-project-open":
-        void resumeDeferredExternalProject();
+        if (action.requestId) {
+          void workspaceController?.retryExternalOpen({ requestId: action.requestId });
+        } else {
+          void resumeDeferredExternalProject();
+        }
         return;
       case "retry-project-application":
         void resumeDeferredProjectApplication();
@@ -7228,6 +7504,7 @@ export default function Workbench() {
   // both preview sessions (and retitle the header) mid-accept for nothing.
   const readyReviewOverlay = readyReviewSession ? (
     <AiReviewWorkspace
+      embedded
       fileName={
         localFileNameFromSourcePath(readyReviewSession.sourcePath)
         || currentSourceFileName
@@ -7274,11 +7551,19 @@ export default function Workbench() {
       ) : null}
     />
   ) : null;
+  const activeWorkbenchTab = workbenchTabsSnapshot.tabs.find(
+    (tab) => tab.tabId === workbenchTabsSnapshot.activeTabId,
+  ) || workbenchTabsSnapshot.tabs[0];
+  const startPageActive = activeWorkbenchTab?.kind === "start"
+    && typeof window !== "undefined"
+    && Boolean(window.htmlAIProjects);
 
   return (
     <>
       <main
         className="workbench"
+        data-start-page={startPageActive ? "true" : undefined}
+        data-left-sidebar={globalSidebarOpen ? "open" : "collapsed"}
         data-round-state={runInProgress ? "processing" : viewMode}
         data-canvas-mode={canvasMode}
         data-handoff-preview={runInProgress && handoffPreviewOpen ? "true" : undefined}
@@ -7292,8 +7577,16 @@ export default function Workbench() {
                 : "unbound"
         }
         aria-label="HTML AI 可视化编辑工作台"
-        inert={readyReviewSession ? true : undefined}
       >
+      <WorkbenchTabBar
+        snapshot={workbenchTabsSnapshot}
+        onSelect={selectWorkbenchTab}
+        onClose={closeWorkbenchTab}
+        onNew={createWorkbenchStartTab}
+      />
+      {startPageActive ? (
+        <WorkbenchStartToolbar onOpenSidebar={() => setGlobalSidebarOpen(true)} />
+      ) : null}
       <WorkbenchHeaderShell
         data-file-renaming={fileRenameEditing ? "true" : undefined}
       >
@@ -7615,8 +7908,47 @@ export default function Workbench() {
         />
       ) : null}
 
-      <div ref={reviewStageRef} className="review-scroll-stage">
-        <section className="canvas-column" aria-label="页面画布">
+      <WorkbenchGlobalSidebar
+        open={globalSidebarOpen}
+        recentProjects={recentProjects}
+        registeredProjects={registeredProjects}
+        onToggle={() => {
+          setGlobalSidebarOpen((open) => !open);
+          void workspaceController?.refreshRecentProjects();
+          void workspaceController?.refreshRegisteredProjects();
+        }}
+        onOpenLocal={() => void openProject()}
+        onOpenRecent={(recentSourcePath) => void openProject(recentSourcePath)}
+        onOpenRegistered={openRegisteredWorkbenchProject}
+        onOpenCurrentProject={() => setDrawer("files")}
+      />
+      {startPageActive ? (
+        <WorkbenchStartPage
+          activeTabId={activeWorkbenchTab.tabId}
+          recentProjects={recentProjects}
+          onOpenLocal={() => void openProject()}
+          onOpenRecent={(recentSourcePath) => void openProject(recentSourcePath)}
+          onOpenSidebar={() => {
+            setGlobalSidebarOpen(true);
+            void workspaceController?.refreshRegisteredProjects();
+          }}
+        />
+      ) : (
+      <div
+        id="workbench-content-outlet"
+        role="tabpanel"
+        aria-labelledby={`workbench-tab-${activeWorkbenchTab.tabId}`}
+        ref={reviewStageRef}
+        className="review-scroll-stage"
+        data-review-active={readyReviewOverlay ? "true" : undefined}
+      >
+        {readyReviewOverlay}
+        <section
+          className="canvas-column"
+          aria-label="页面画布"
+          inert={readyReviewOverlay ? true : undefined}
+          aria-hidden={readyReviewOverlay ? true : undefined}
+        >
           <div
             className="canvas-edit-surface"
             hidden={canvasMode !== "edit"}
@@ -7827,6 +8159,7 @@ export default function Workbench() {
           />
         ) : null}
       </div>
+      )}
 
       {previewAttachment && attachmentObjectUrls[previewAttachment.attachmentId] ? (
         <AttachmentLightbox
@@ -8002,7 +8335,7 @@ export default function Workbench() {
             });
           }}
           onCancel={() => {
-            workspaceController?.cancelExternalOpen({
+            void workspaceController?.cancelExternalOpen({
               requestId: openConfirmation.requestId,
             });
             openHtmlButtonRef.current?.focus();
@@ -8132,7 +8465,6 @@ export default function Workbench() {
           void workspaceControllerRef.current?.dismissFirstEditGuide();
         }}
       />
-      {readyReviewOverlay}
     </>
   );
 }

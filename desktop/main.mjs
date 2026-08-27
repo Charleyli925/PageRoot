@@ -56,11 +56,16 @@ import {
 } from "./bridge-startup.mjs";
 import { createOpenInDefaultBrowserOperation } from "./open-in-default-browser.mjs";
 import {
+  createExternalFileOpenDeliveryCoordinator,
   createExternalFileOpenExitHandoff,
   createExternalFileOpenMailbox,
   externalOpenFailurePresentation,
   externalHtmlPathsFromArgv,
 } from "./external-file-open.mjs";
+import {
+  readWorkbenchTabsState,
+  writeWorkbenchTabsState,
+} from "./workbench-tabs-state.mjs";
 import {
   assertCommitAction,
   assertExactPayload,
@@ -237,6 +242,7 @@ const PROJECT_CHANNELS = Object.freeze({
   openRecent: "html-projects:open-recent",
   forgetRecent: "html-projects:forget-recent",
   acceptExternalOpen: "html-projects:accept-external-open",
+  acknowledgeExternalOpen: "html-projects:ack-external-open",
   commitPreparedHtmlOpen: "html-projects:commit-prepared-open",
   cancelPreparedHtmlOpen: "html-projects:cancel-prepared-open",
   finalizePreparedHtmlOpen: "html-projects:finalize-prepared-open",
@@ -254,6 +260,10 @@ const APP_CHANNELS = Object.freeze({
   externalOpenReady: "html-app:external-open-ready",
   relaunch: "html-app:relaunch",
   openUserNotice: "html-app:open-user-notice",
+});
+const WORKBENCH_TAB_CHANNELS = Object.freeze({
+  get: "html-workbench-tabs:get",
+  set: "html-workbench-tabs:set",
 });
 const INTEGRATION_CHANNELS = Object.freeze({
   qoderHandoff: "html-integrations:qoder-handoff",
@@ -302,10 +312,10 @@ let isQuitting = false;
 let finalExitStarted = false;
 let closeRequest = null;
 let coordinatedExit = null;
-let closeAttemptGeneration = 0;
 let projectIpcRegistered = false;
 let projectState = null;
 let stateWriteQueue = Promise.resolve();
+let workbenchTabsWriteQueue = Promise.resolve();
 let latestUpdateResult = null;
 let applicationUpdate = null;
 let usageTelemetry = null;
@@ -423,6 +433,7 @@ async function recoverWatchedManagedSource(info) {
 let activeImportedAssetSourcePath = null;
 const workspaceRecoveryMailbox = createWorkspaceRecoveryMailbox();
 const externalFileOpenMailbox = createExternalFileOpenMailbox();
+const externalFileOpenDelivery = createExternalFileOpenDeliveryCoordinator();
 const preparedHtmlOpenStore = createPreparedHtmlOpenStore();
 const externalFileOpenExitHandoff = createExternalFileOpenExitHandoff({
   handoffPath: path.join(app.getPath("userData"), "external-open-handoff.json"),
@@ -893,6 +904,15 @@ function persistProjectState() {
   return stateWriteQueue;
 }
 
+function persistWorkbenchTabsState(payload) {
+  const writeState = () => writeWorkbenchTabsState({
+    userDataPath: app.getPath("userData"),
+    state: payload,
+  });
+  workbenchTabsWriteQueue = workbenchTabsWriteQueue.then(writeState, writeState);
+  return workbenchTabsWriteQueue;
+}
+
 async function restoreActiveImportedAssetSource(projectSourcePath) {
   const state = await loadProjectState();
   const record = await importedAssetRootForProjectPath(
@@ -1025,16 +1045,34 @@ async function readHtmlProject(filePath) {
   });
 }
 
+function projectWithIdentity(project, identity) {
+  const projectId = String(identity?.projectId || "");
+  const documentId = String(identity?.documentId || "");
+  if (
+    !project
+    || !/^project_[A-Za-z0-9_-]+$/.test(projectId)
+    || !/^doc_[A-Za-z0-9_-]+$/.test(documentId)
+  ) return project;
+  return Object.freeze({ ...project, projectId, documentId });
+}
+
 function taggedProject(project) {
   if (!project || typeof project.name !== "string" || typeof project.html !== "string") {
     return null;
   }
+  const projectId = String(project.projectId || "");
+  const documentId = String(project.documentId || "");
+  const hasIdentity = (
+    /^project_[A-Za-z0-9_-]+$/.test(projectId)
+    && /^doc_[A-Za-z0-9_-]+$/.test(documentId)
+  );
   return Object.freeze({
     openKind: "project",
     name: project.name,
     html: project.html,
     sourcePath: project.sourcePath || null,
     sha256: project.sha256 || null,
+    ...(hasIdentity ? { projectId, documentId } : {}),
     ...(project.lastModifiedAt ? { lastModifiedAt: String(project.lastModifiedAt) } : {}),
     ...(project.path ? { path: String(project.path) } : {}),
   });
@@ -1133,7 +1171,7 @@ async function prepareOrOpenFromPath(sourcePath, { requestId } = {}) {
   if (classified.kind === "managed-project") {
     const project = await readHtmlProject(canonicalPath);
     await activateProject(project.sourcePath);
-    return taggedProject(project);
+    return taggedProject(projectWithIdentity(project, classified.openTarget));
   }
   const nextRequestId = String(requestId || "");
   const reusable = preparedHtmlOpenStore.findPreparedBySourcePath(canonicalPath);
@@ -1173,20 +1211,47 @@ function focusMainWindow() {
   return presentMainWindow();
 }
 
+function sameCloseAuthority(left, right) {
+  return Boolean(
+    left
+    && right
+    && left.requestId === right.requestId
+    && left.generation === right.generation,
+  );
+}
+
+function deliverExternalMailboxHead() {
+  if (!rendererHasLoaded || !rendererCanReceive()) return false;
+  const request = externalFileOpenMailbox.peek();
+  if (!request || !externalFileOpenDelivery.shouldDeliver(request.requestId)) return false;
+  try {
+    mainWindow.webContents.send(
+      APP_CHANNELS.externalOpenRequested,
+      publicMailboxRequest(request),
+    );
+  } catch {
+    return false;
+  }
+  externalFileOpenDelivery.markDelivered(request.requestId);
+  return true;
+}
+
 function interruptCloseForExternalOpen() {
-  if (!coordinatedExit || isQuitting || finalExitStarted) return false;
-  closeAttemptGeneration += 1;
-  if (!closeRequest) return true;
+  if (!coordinatedExit || isQuitting || finalExitStarted) return null;
+  const authority = externalFileOpenDelivery.invalidateClose();
+  if (!authority || !closeRequest) return authority;
   const pending = closeRequest;
+  if (!sameCloseAuthority(pending.closeAuthority, authority)) return authority;
   closeRequest = null;
   clearTimeout(pending.timeout);
   pending.resolve({
     requestId: pending.requestId,
+    closeGeneration: authority.generation,
     ready: false,
     reason: "收到新的外部 HTML 打开请求，已取消关闭。",
     presentation: "in-app",
   });
-  return true;
+  return authority;
 }
 
 function deferExternalFileOpenUntilNextLaunch(filePath) {
@@ -1201,24 +1266,24 @@ function deferExternalFileOpenUntilNextLaunch(filePath) {
 
 function resumeDeferredExternalFileOpenAfterExitAbort() {
   if (isQuitting || finalExitStarted) return;
-  const sourcePath = externalFileOpenExitHandoff.take();
-  if (sourcePath) publishExternalFileOpen(sourcePath);
+  let restored = false;
+  for (let sourcePath = externalFileOpenExitHandoff.take(); sourcePath; sourcePath = externalFileOpenExitHandoff.take()) {
+    externalFileOpenMailbox.publish(sourcePath);
+    restored = true;
+  }
+  if (restored) focusMainWindow();
+  deliverExternalMailboxHead();
 }
 
 function publishExternalFileOpen(filePath) {
   if (isQuitting || finalExitStarted) {
     return deferExternalFileOpenUntilNextLaunch(filePath);
   }
-  interruptCloseForExternalOpen();
   try {
     const request = externalFileOpenMailbox.publish(filePath);
+    interruptCloseForExternalOpen();
     focusMainWindow();
-    if (rendererHasLoaded && mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send(
-        APP_CHANNELS.externalOpenRequested,
-        publicMailboxRequest(request),
-      );
-    }
+    deliverExternalMailboxHead();
     return request;
   } catch (error) {
     if (app.isReady()) showExternalOpenError(error);
@@ -1247,14 +1312,48 @@ async function acceptExternalFileOpen(payload) {
       "外部 HTML 打开请求无效。",
     );
   }
-  const request = externalFileOpenMailbox.consume(payload.requestId);
+  const request = externalFileOpenMailbox.peek();
   if (!request) {
     throw new ProjectFileError(
       "EXTERNAL_OPEN_REQUEST_EXPIRED",
       "这次外部打开请求已经失效，请从 QoderWork 再点一次 PageRoot。",
     );
   }
-  return projectOpenQueue.run(() => openExternalFileRequest(request));
+  if (request.requestId !== payload.requestId) {
+    throw new ProjectFileError(
+      "EXTERNAL_OPEN_REQUEST_OUT_OF_ORDER",
+      "请先完成前一个外部 HTML 打开请求。",
+    );
+  }
+  const begun = externalFileOpenMailbox.begin(
+    request.requestId,
+    (next) => projectOpenQueue.run(() => openExternalFileRequest(next)),
+  );
+  if (!begun) {
+    throw new ProjectFileError(
+      "EXTERNAL_OPEN_REQUEST_BUSY",
+      "前一个外部 HTML 仍在等待处理。",
+    );
+  }
+  return begun;
+}
+
+function acknowledgeExternalFileOpen(payload) {
+  assertExactPayload(payload, ["requestId"], {
+    code: "INVALID_EXTERNAL_OPEN_ACK",
+    message: "外部 HTML 打开回执无效。",
+  });
+  const requestId = String(payload.requestId || "");
+  const consumed = externalFileOpenMailbox.acknowledge(requestId);
+  if (!consumed) {
+    throw new ProjectFileError(
+      "EXTERNAL_OPEN_ACK_OUT_OF_ORDER",
+      "外部 HTML 打开回执与队首请求不一致。",
+    );
+  }
+  externalFileOpenDelivery.acknowledge(requestId);
+  deliverExternalMailboxHead();
+  return { acknowledged: true, requestId };
 }
 
 async function currentActivePath() {
@@ -1361,10 +1460,10 @@ async function ensureBridgeProjectRegistered(project) {
       importedAssetSourcePath: projectSourceIdentity,
     });
     managedWelcomeRegistration = `${workspaceSourceIdentity}\0${importedProject.sha256}`;
-    return importedProject;
+    return projectWithIdentity(importedProject, workspace);
   }
   managedWelcomeRegistration = `${projectSourceIdentity}\0${project.sha256}`;
-  return project;
+  return projectWithIdentity(project, workspace);
 }
 
 async function getActiveProject() {
@@ -1516,7 +1615,7 @@ async function importExternalViaBridge(sourcePath, expectedSourceSha256) {
   });
   await activateProject(importedProject.sourcePath);
   return {
-    project: importedProject,
+    project: projectWithIdentity(importedProject, workspace),
     imported: workspace.imported === true,
   };
 }
@@ -1597,6 +1696,7 @@ async function commitPreparedHtmlOpenOperation(payload) {
         );
       }
       project = await readHtmlProject(targetPath);
+      project = projectWithIdentity(project, classified.openTarget || classified);
       await rememberAndBindImportedAssetSource({
         originalPath: intent.sourcePath,
         projectSourcePath: project.sourcePath,
@@ -1611,6 +1711,7 @@ async function commitPreparedHtmlOpenOperation(payload) {
       imported = importedResult.imported;
     } else if (action === "open-managed") {
       project = await readHtmlProject(intent.sourcePath);
+      project = projectWithIdentity(project, classified.openTarget || classified);
       await activateProject(project.sourcePath);
     } else {
       assertCommitAction({
@@ -3185,7 +3286,10 @@ async function openRegisteredProject(projectIdInput) {
     await persistProjectState();
     await restoreActiveImportedAssetSource(sourcePath);
     sourceFileWatcher.watch(sourcePath);
-    return project;
+    return projectWithIdentity(project, {
+      projectId,
+      documentId: target.documentId,
+    });
   });
 }
 
@@ -3317,6 +3421,7 @@ function registerProjectIpc() {
       openRecent,
       forgetRecentProject,
       acceptExternalFileOpen,
+      acknowledgeExternalFileOpen,
       commitPreparedHtmlOpen,
       cancelPreparedHtmlOpen,
       finalizePreparedHtmlOpen,
@@ -3356,6 +3461,7 @@ function registerProjectIpc() {
     EDIT_CHANNELS,
     UI_PREFERENCE_CHANNELS,
     USAGE_CHANNELS,
+    WORKBENCH_TAB_CHANNELS,
     openUserNotice,
     reportCloseResult,
     acknowledgeWorkspaceRecoveryReady: () => ({
@@ -3383,6 +3489,10 @@ function registerProjectIpc() {
       userDataPath: app.getPath("userData"),
       action: payload?.action,
     }),
+    getWorkbenchTabs: () => readWorkbenchTabsState({
+      userDataPath: app.getPath("userData"),
+    }),
+    setWorkbenchTabs: (payload) => persistWorkbenchTabsState(payload),
     assertTrustedEvent,
     captureUsageFromRenderer: (payload) => usageTelemetry?.captureFromRenderer(payload),
   });
@@ -3436,7 +3546,10 @@ async function reportCloseResult(payload) {
   const pending = closeRequest;
   closeRequest = null;
   clearTimeout(pending.timeout);
-  pending.resolve(result);
+  pending.resolve({
+    ...result,
+    closeGeneration: pending.closeAuthority.generation,
+  });
   return { accepted: true };
 }
 
@@ -3444,6 +3557,7 @@ function requestRendererClose(reason) {
   if (!mainWindow || mainWindow.isDestroyed()) {
     return Promise.resolve({
       requestId: null,
+      closeGeneration: null,
       ready: true,
       reason: null,
       presentation: null,
@@ -3454,6 +3568,7 @@ function requestRendererClose(reason) {
   if (!rendererHasLoaded) {
     return Promise.resolve({
       requestId: null,
+      closeGeneration: null,
       ready: true,
       reason: null,
       presentation: null,
@@ -3462,6 +3577,16 @@ function requestRendererClose(reason) {
   if (closeRequest) return closeRequest.promise;
 
   const requestId = randomUUID();
+  const closeAuthority = externalFileOpenDelivery.beginClose(requestId);
+  if (!closeAuthority) {
+    return Promise.resolve({
+      requestId,
+      closeGeneration: null,
+      ready: false,
+      reason: "另一个关闭世代仍在协调。",
+      presentation: "in-app",
+    });
+  }
   const deadlineAt = Date.now() + RENDERER_CLOSE_TIMEOUT_MS;
   let resolveRequest;
   const promise = new Promise((resolve) => {
@@ -3472,6 +3597,7 @@ function requestRendererClose(reason) {
     closeRequest = null;
     resolveRequest({
       requestId,
+      closeGeneration: closeAuthority.generation,
       ready: false,
       reason: "等待编辑器写入完成超时。请保持应用开启，确认自动保存状态后再关闭。",
       presentation: "native",
@@ -3482,11 +3608,19 @@ function requestRendererClose(reason) {
     promise,
     resolve: resolveRequest,
     timeout,
+    closeAuthority,
   };
   if (!rendererCanReceive()) {
     // No frame to ask, so there is nothing to wait for: settle instead of hanging on
     // a reply that can never arrive.
-    resolveRequest({ ok: true, requestId, reason: "renderer-unavailable" });
+    closeRequest = null;
+    clearTimeout(timeout);
+    resolveRequest({
+      ready: true,
+      requestId,
+      closeGeneration: closeAuthority.generation,
+      reason: "renderer-unavailable",
+    });
     return promise;
   }
   mainWindow.webContents.send(APP_CHANNELS.prepareClose, {
@@ -3513,6 +3647,29 @@ function notifyRendererCloseAborted(requestId, error) {
   const payload = closeAbortPayload(requestId, error);
   if (!payload || !rendererCanReceive()) return;
   mainWindow.webContents.send(APP_CHANNELS.closeAborted, payload);
+}
+
+function closeAuthorityFromResult(result) {
+  const requestId = String(result?.requestId || "");
+  const generation = Number(result?.closeGeneration);
+  if (!requestId || !Number.isSafeInteger(generation) || generation <= 0) return null;
+  return Object.freeze({ requestId, generation });
+}
+
+function notifyRendererCloseAbortedOnce(authority, error) {
+  if (!authority || !externalFileOpenDelivery.markCloseAborted(authority)) return false;
+  notifyRendererCloseAborted(authority.requestId, error);
+  return true;
+}
+
+function finishCloseAbort(authority, error, { restoreHandoff = false } = {}) {
+  notifyRendererCloseAbortedOnce(authority, error);
+  if (authority) {
+    externalFileOpenDelivery.releaseBarrier(authority);
+    externalFileOpenDelivery.abortClose(authority);
+  }
+  if (restoreHandoff) resumeDeferredExternalFileOpenAfterExitAbort();
+  else deliverExternalMailboxHead();
 }
 
 async function stopBridgeGracefully() {
@@ -3551,6 +3708,7 @@ function unregisterIpc() {
     EDIT_CHANNELS,
     UI_PREFERENCE_CHANNELS,
     USAGE_CHANNELS,
+    WORKBENCH_TAB_CHANNELS,
   });
   projectIpcRegistered = false;
 }
@@ -3580,12 +3738,16 @@ async function coordinateApplicationExit(reason, intent = "quit") {
   if (coordinatedExit) return coordinatedExit;
   const exitIntent = EXIT_INTENTS[intent];
   if (!exitIntent) throw new TypeError(`Unsupported exit intent: ${intent}`);
+  let coordinatedCloseAuthority = null;
   coordinatedExit = (async () => {
-    const closeAttempt = closeAttemptGeneration;
     const result = await requestRendererClose(reason);
-    if (closeAttempt !== closeAttemptGeneration) {
-      notifyRendererCloseAborted(
-        result.requestId,
+    coordinatedCloseAuthority = closeAuthorityFromResult(result);
+    if (
+      coordinatedCloseAuthority
+      && !externalFileOpenDelivery.isCurrent(coordinatedCloseAuthority)
+    ) {
+      finishCloseAbort(
+        coordinatedCloseAuthority,
         "收到新的外部 HTML 打开请求，已取消关闭。",
       );
       presentMainWindow();
@@ -3604,7 +3766,7 @@ async function coordinateApplicationExit(reason, intent = "quit") {
         result: "unknown",
         surface: interruptionSurface,
       });
-      notifyRendererCloseAborted(result.requestId, result.reason);
+      finishCloseAbort(coordinatedCloseAuthority, result.reason);
       if (!nativeBlock) {
         presentMainWindow();
         captureUsage("interruption_changed", {
@@ -3640,14 +3802,30 @@ async function coordinateApplicationExit(reason, intent = "quit") {
       return false;
     }
 
+    if (
+      coordinatedCloseAuthority
+      && !externalFileOpenDelivery.commitClose(coordinatedCloseAuthority)
+    ) {
+      finishCloseAbort(
+        coordinatedCloseAuthority,
+        "关闭核对已经失效，已返回当前页面。",
+      );
+      presentMainWindow();
+      coordinatedExit = null;
+      return false;
+    }
+
     isQuitting = true;
     const watchedSourcePath = sourceFileWatcher.watchedPath;
-    await stateWriteQueue.catch(() => {});
+    await Promise.all([
+      stateWriteQueue.catch(() => {}),
+      workbenchTabsWriteQueue.catch(() => {}),
+    ]);
     await stopBridgeOrNotifyCloseAborted({
       requestId: result.requestId,
       stopBridge: stopBridgeGracefully,
       notifyCloseAborted: (payload) => {
-        notifyRendererCloseAborted(payload.requestId, payload.reason);
+        notifyRendererCloseAbortedOnce(coordinatedCloseAuthority, payload.reason);
       },
     });
     // Keep file-authority monitoring alive until the Bridge has proved every
@@ -3677,7 +3855,6 @@ async function coordinateApplicationExit(reason, intent = "quit") {
       },
       restoreFinalExit: async (error) => {
         finalExitStarted = false;
-        isQuitting = false;
         let restartError = null;
         try {
           await startBridge();
@@ -3685,10 +3862,19 @@ async function coordinateApplicationExit(reason, intent = "quit") {
         } catch (caught) {
           restartError = caught;
         } finally {
-          registerProjectIpc();
-          if (watchedSourcePath) sourceFileWatcher.watch(watchedSourcePath);
-          notifyRendererCloseAborted(result.requestId, error);
-          resumeDeferredExternalFileOpenAfterExitAbort();
+          try {
+            registerProjectIpc();
+            if (watchedSourcePath) sourceFileWatcher.watch(watchedSourcePath);
+          } finally {
+            // Keep late native paths in the durable handoff until restored
+            // infrastructure has sent the exact close abort and released its
+            // delivery barrier. No external head may reach the renderer in
+            // the middle of final-exit recovery.
+            isQuitting = false;
+            finishCloseAbort(coordinatedCloseAuthority, error, {
+              restoreHandoff: true,
+            });
+          }
         }
         if (restartError) throw restartError;
       },
@@ -3697,7 +3883,9 @@ async function coordinateApplicationExit(reason, intent = "quit") {
   })().catch((error) => {
     coordinatedExit = null;
     isQuitting = false;
-    resumeDeferredExternalFileOpenAfterExitAbort();
+    finishCloseAbort(coordinatedCloseAuthority, error, {
+      restoreHandoff: true,
+    });
     if (e2eNativeDialogsSuppressed) {
       reportSuppressedNativeDialog(
         exitIntent.errorTitle,
@@ -3928,6 +4116,7 @@ desktopRuntime.captureUsage = captureUsage;
 desktopRuntime.telemetryReasonCode = telemetryReasonCode;
 desktopRuntime.coordinateApplicationExit = coordinateApplicationExit;
 
+
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
 
 app.on("open-file", (event, filePath) => {
@@ -3943,10 +4132,14 @@ if (!hasSingleInstanceLock) {
   // command line to the owner and must leave this record for the authoritative
   // next launch. Keep ordinary argv opens in the same sequence so a newer
   // launch argument still supersedes an older committed-exit handoff.
+  const deferredExternalPaths = [];
+  for (let sourcePath = externalFileOpenExitHandoff.take(); sourcePath; sourcePath = externalFileOpenExitHandoff.take()) {
+    deferredExternalPaths.push(sourcePath);
+  }
   for (const sourcePath of [
-    externalFileOpenExitHandoff.take(),
+    ...deferredExternalPaths,
     ...externalHtmlPathsFromArgv(process.argv.slice(1)),
-  ].filter(Boolean)) {
+  ]) {
     externalFileOpenMailbox.publish(sourcePath);
   }
 
