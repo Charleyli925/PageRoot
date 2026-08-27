@@ -744,7 +744,43 @@ test("source rename settles before the catalog refresh and never downgrades on c
 
 test("a Registry project open routes only its projectId through the desktop authority", async (t) => {
   const openedProjectIds = [];
+  let fenceCount = 0;
+  const projectId = "project_catalog_b";
+  const documentId = "doc_catalog_b";
+  const openTarget = {
+    projectId,
+    documentId,
+    projectRootPath: "/tmp/PageRoot/B",
+    targetKind: "working-copy",
+    workingCopyId: "work_ver_0001",
+    versionId: "ver_0001",
+    exactSourcePath: B_PATH,
+    sourceSha256: sha256(B_HTML),
+  };
   const harness = createHarness({
+    bridge: {
+      async workspace() {
+        return {
+          ...workspacePayload(B_PATH, B_HTML),
+          projectId,
+          documentId,
+          openTarget,
+        };
+      },
+      async source() {
+        throw new Error("exact registered open must not read source twice");
+      },
+    },
+    canvas: {
+      fencePendingEdit() {
+        fenceCount += 1;
+        return {
+          ok: true,
+          html: harness.documentSession.html,
+          sourceSha256: harness.documentSession.sourceSha256,
+        };
+      },
+    },
     projectOpen: {
       async openRegistered(projectId) {
         openedProjectIds.push(projectId);
@@ -753,6 +789,9 @@ test("a Registry project open routes only its projectId through the desktop auth
           sourcePath: B_PATH,
           html: B_HTML,
           sha256: sha256(B_HTML),
+          projectId,
+          documentId,
+          openTarget,
         };
       },
       async listRegistered() {
@@ -778,6 +817,8 @@ test("a Registry project open routes only its projectId through the desktop auth
   );
   assert.deepEqual(openedProjectIds, ["project_catalog_b"]);
   assert.equal(harness.documentSession.html, B_HTML);
+  assert.equal(harness.calls.filter(([kind]) => kind === "source").length, 0);
+  assert.equal(fenceCount, 2, "the outgoing Canvas is fenced by one prepareSwitch only");
 });
 
 test("a Registry project opens from Start without fencing an unmounted Canvas", async (t) => {

@@ -5,6 +5,7 @@ export type WorkbenchNavigationPhase =
   | "awaiting-user"
   | "opening"
   | "applied"
+  | "display-ready"
   | "hydrating"
   | "canvas-verified"
   | "committed";

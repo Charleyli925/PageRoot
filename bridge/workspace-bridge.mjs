@@ -484,6 +484,8 @@ async function registeredProjectOpen(projectId) {
       documentId: resolved.target.documentId,
       sourcePath: resolved.target.exactSourcePath,
       sourceSha256: resolved.sourceSha256,
+      content: resolved.html,
+      lastModifiedAt: resolved.lastModifiedAt,
       openTarget: resolved.target,
     };
   } catch (cause) {

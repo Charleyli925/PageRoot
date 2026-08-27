@@ -118,7 +118,10 @@ Workbench 只确认已提交 loading surface、传入窄 port 并消费快照。
 - `WorkbenchNavigationSession/Workflow` + `WorkbenchTabsSession`：Node 直接证明单一 admission/receipt 顺序、`projectId + documentId` 去重、多开始页、
   活动 Start 原位承载新文档/去重已有文档、较多标签仍保持顺序与身份去重且不设产品数量上限、状态投影、关闭不删业务权威、close/activate 竞态 fail-closed，以及 Start 和文档
   激活严格按 `ProjectWorkflow.prepareSwitch` 的 native fence/drain → Registry 打开 → 新 epoch
-  身份挂载 → hydration/Canvas settle 顺序；相同旧身份不得提前完成。Registry-before-hydrate 与
+  身份挂载 → display-ready 提交，hydration/Canvas settle 作为后台就绪继续；相同旧身份不得提前完成。
+  测试必须证明水合仍 pending 时下一标签可以进入、旧水合按 epoch 退休、后台失败只标记标签并锁住
+  编辑。已登记项目的 exact open envelope 必须证明 Renderer 水合不再重复 `/source`，干净且 generation/
+  Hash 完全一致的 verified Canvas 必须证明不会重复 render fence。Registry-before-hydrate 与
   hydrate-before-Registry 都必须得到相同标题/缺失项结果。持久化测试拒绝 title/path/HTML/Hash
   和未知字段，验证 `activeTabId:null`、原子替换与无效文件 fail-closed；Electron 证明 Left/Right/
   Home/End 的 roving focus、键盘关闭后的活动标签焦点、Start 冷重启抑制 activePath、Start→Registry 原位打开、Registry 标题恢复及 unmounted outlet 安全关闭。

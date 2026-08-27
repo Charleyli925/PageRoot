@@ -3497,18 +3497,15 @@ export class ProjectFileRepository {
     const id = assertId(projectId, PROJECT_ID, "projectId");
     const loaded = await this.#loadRegisteredProject({ projectId: id });
     const workingCopy = await this.#activeRegisteredWorkingCopy(loaded);
-    // This bootstrap identity intentionally contains no source bytes. The
-    // shared mutation resolver reads them only after it has recovered a
-    // supported same-root Finder rename by the Working Copy file identity.
+    // Resolve the exact Working Copy and bytes once after safe Finder-rename
+    // recovery; the OpenTarget and source travel as one immutable envelope.
     const resolved = await this.#resolveMutationTarget({
       projectId: loaded.project.projectId,
       documentId: loaded.project.documentId,
       projectRootPath: loaded.paths.projectRootPath,
       workingCopyId: workingCopy.workingCopyId,
     });
-    // The returned source bytes and digest form the Repository side of the
-    // exact Project/Document/OpenTarget/HTML/Hash tuple; Desktop repeats it
-    // before publishing a new Session.
+    // Desktop validates this exact identity tuple without re-reading HTML.
     const version = resolved.manifest.versions.find(
       (entry) => entry.versionId === resolved.workingCopy.versionId,
     );
@@ -3529,6 +3526,8 @@ export class ProjectFileRepository {
         sourceSha256: resolved.source.sha256,
       }),
       sourceSha256: resolved.source.sha256,
+      html: resolved.source.html,
+      lastModifiedAt: resolved.source.lastModifiedAt,
     };
   }
 

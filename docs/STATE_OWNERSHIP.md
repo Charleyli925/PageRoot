@@ -161,9 +161,12 @@ Rules:
   asks the existing `ProjectWorkflow.openProject(kind=registered)` to run its
   canonical `prepareSwitch`/drain/Canvas fence, rejects pre-open matching
   identity, then mounts only a newer aggregate Project epoch. The operation
-  remains locked until hydration, accepted-result FIFO and Canvas verification
-  settle. A failure after identity commit remains attached to the mounted target
-  tab and offers hydration retry; it is never handled as pre-commit cleanup.
+  commits its user-facing admission as soon as the correlated application has
+  published exact display bytes. Hydration, accepted-result FIFO and Canvas
+  verification remain background readiness owned by `ProjectWorkflow` and the
+  close drain. A failure after display readiness remains attached to the mounted
+  target tab, keeps editing closed and offers hydration retry; it is never
+  handled as a failed open or pre-commit cleanup.
   Start activation calls the same canonical `prepareSwitch`; only then
   does it unmount the document outlet while retaining `runtimeOwnerTabId`, so
   close/quit obligations remain owned by the same Controller. Close and activate

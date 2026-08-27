@@ -16,6 +16,7 @@ export type HtmlProject = {
   lastModifiedAt?: string;
   projectId?: string;
   documentId?: string;
+  openTarget?: Record<string, unknown>;
   openKind?: "project";
 };
 

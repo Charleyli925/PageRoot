@@ -3207,6 +3207,9 @@ async function openRegisteredProject(projectIdInput) {
       || !target.projectRootPath
       || !/^sha256:[a-f0-9]{64}$/u.test(String(payload.sourceSha256 || ""))
       || target.sourceSha256 !== payload.sourceSha256
+      || typeof payload.content !== "string"
+      || typeof payload.lastModifiedAt !== "string"
+      || !payload.lastModifiedAt
     ) {
       throw new ProjectFileError(
         "REGISTERED_PROJECT_TARGET_INVALID",
@@ -3226,41 +3229,19 @@ async function openRegisteredProject(projectIdInput) {
       );
     }
 
-    // The Renderer supplied only projectId.  Re-read the exact source through
-    // the Bridge immediately before Desktop reads bytes, then bind all five
-    // members of the Project/Document/OpenTarget/HTML/Hash tuple before any
-    // Project-state or Session publication can occur.
-    const workspace = await fetchBridgeJson(
-      `/workspace?sourcePath=${encodeURIComponent(sourcePath)}&projectStorageVersion=4.0.0`,
-    );
-    const verifiedTarget = workspace.openTarget;
-    if (
-      workspace.projectId !== projectId
-      || workspace.documentId !== target.documentId
-      || workspace.currentHtmlSha256 !== payload.sourceSha256
-      || !verifiedTarget
-      || verifiedTarget.targetKind !== "working-copy"
-      || verifiedTarget.projectId !== projectId
-      || verifiedTarget.documentId !== target.documentId
-      || verifiedTarget.workingCopyId !== target.workingCopyId
-      || verifiedTarget.versionId !== target.versionId
-      || verifiedTarget.sourceSha256 !== payload.sourceSha256
-      || typeof verifiedTarget.projectRootPath !== "string"
-      || path.resolve(verifiedTarget.projectRootPath) !== path.resolve(target.projectRootPath)
-      || await existingPathIdentity(verifiedTarget.exactSourcePath) !== sourcePath
-    ) {
-      throw new ProjectFileError(
-        "REGISTERED_PROJECT_IDENTITY_MISMATCH",
-        "项目目录在打开前发生变化，当前项目没有切换。",
-      );
-    }
-    const project = await readHtmlProject(sourcePath);
-    if (project.sha256 !== payload.sourceSha256) {
-      throw new ProjectFileError(
-        "REGISTERED_PROJECT_HASH_MISMATCH",
-        "项目 HTML 在读取期间发生变化，当前项目没有切换。",
-      );
-    }
+    // Renderer supplied only projectId. Repository has already resolved the
+    // Registry, recovered the Working Copy locator and read the exact bytes in
+    // one serialized operation. Keep that tuple intact here; repeating
+    // /workspace and readHtmlProject delayed first paint and widened the race
+    // window without adding a stronger authority boundary.
+    const project = Object.freeze({
+      sourcePath,
+      path: sourcePath,
+      name: path.basename(sourcePath),
+      html: payload.content,
+      sha256: payload.sourceSha256,
+      lastModifiedAt: payload.lastModifiedAt,
+    });
     const state = await loadProjectState();
     const recentIdentities = await Promise.all(state.recent.map(async (entry) => ({
       entry,
@@ -3269,7 +3250,7 @@ async function openRegisteredProject(projectIdInput) {
     state.activePath = sourcePath;
     state.lastManagedActivation = null;
     state.activeManagedLocator = activeManagedLocatorForActivatedPath(
-      verifiedTarget,
+      target,
       sourcePath,
       payload.sourceSha256,
     );
@@ -3286,9 +3267,9 @@ async function openRegisteredProject(projectIdInput) {
     await persistProjectState();
     await restoreActiveImportedAssetSource(sourcePath);
     sourceFileWatcher.watch(sourcePath);
-    return projectWithIdentity(project, {
-      projectId,
-      documentId: target.documentId,
+    return Object.freeze({
+      ...projectWithIdentity(project, target),
+      openTarget: Object.freeze({ ...target }),
     });
   });
 }
