@@ -15,10 +15,12 @@ test("Electron automation stays backgrounded unless foreground debugging is expl
   ];
   const [
     mainProcess,
+    appLifecycle,
     appFixture,
     ...productSuites
   ] = await Promise.all([
     readFile(sourceUrl("../desktop/main.mjs"), "utf8"),
+    readFile(sourceUrl("../desktop/app-lifecycle.mjs"), "utf8"),
     readFile(sourceUrl("./e2e/electron/helpers/electron-app-launch.mjs"), "utf8"),
     ...nativeSpecFiles.map((file) => readFile(sourceUrl(file), "utf8")),
     readFile(sourceUrl("./e2e/electron/ai-closed-loop-helpers.mjs"), "utf8"),
@@ -29,19 +31,20 @@ test("Electron automation stays backgrounded unless foreground debugging is expl
   const preflightMain = productSuites.at(-1);
   const nativeAndAiSuites = productSuites.slice(0, -2);
 
+  const desktopSource = `${mainProcess}\n${appLifecycle}`;
   assert.match(mainProcess, /PAGEROOT_E2E_FOREGROUND === "1"/u);
   // 后台 E2E 不再使用 accessory 激活策略彻底隐藏应用：Dock 图标保留，
   // 窗口仍默认不显示，只有用户主动点击 Dock 图标才调到前台。
-  assert.doesNotMatch(mainProcess, /setActivationPolicy\("accessory"\)/u);
+  assert.doesNotMatch(desktopSource, /setActivationPolicy\("accessory"\)/u);
   assert.match(mainProcess, /app\.on\("activate"/u);
   assert.match(mainProcess, /presentMainWindow\(\{ userInitiated: true \}\)/u);
-  assert.match(mainProcess, /show:\s*e2eWindowForeground/u);
+  assert.match(appLifecycle, /show:\s*e2eWindowForeground/u);
   assert.match(
     mainProcess,
     /const e2eNativeDialogsSuppressed = Boolean\(e2eUserDataPath\);/u,
   );
   assert.match(
-    mainProcess,
+    appLifecycle,
     /function presentMainWindow\(\{ userInitiated = false \} = \{\}\)[\s\S]*?e2eWindowRunsInBackground[\s\S]*?return false;/u,
   );
   // 即使显式前台观察 E2E，自动触发的原生弹窗也必须走日志拦截，
@@ -79,7 +82,7 @@ test("Electron automation stays backgrounded unless foreground debugging is expl
 });
 
 test("window construction never waits for the Bridge utility process", async () => {
-  const mainProcess = await readFile(sourceUrl("../desktop/main.mjs"), "utf8");
+  const mainProcess = await readFile(sourceUrl("../desktop/app-lifecycle.mjs"), "utf8");
   const createWindow = mainProcess.slice(
     mainProcess.indexOf("async function createWindow()"),
   );

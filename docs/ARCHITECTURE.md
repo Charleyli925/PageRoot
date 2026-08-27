@@ -298,7 +298,7 @@ services.
 | Same-directory source rename, operation journal and durable active/recent path rebase | `desktop/source-rename.mjs` |
 | Directory-change hint, live source-file early warning and non-authoritative active managed locator cache | `desktop/source-file-watch.mjs`, `desktop/active-managed-locator.mjs` |
 | Renderer source-rename and Finder locator rebase, Hash/identity fence, lost-response reconciliation and synchronous Project/Document/Run publication | `app/application/project-workflow.js` through its narrow `ProjectOpenPort.renameSource` / `reconcileActiveManagedSource` |
-| Known-source Finder reveal | narrow project IPC in `desktop/main.mjs` |
+| Known-source Finder reveal | narrow project IPC in `desktop/ipc/project-ipc.mjs`, composed from `desktop/main.mjs` |
 | Validated default-browser HTML launch | `desktop/open-in-default-browser.mjs`, behind `desktop/project-ipc-security.mjs` sender authority |
 | Pseudonymous identity, strict event schemas, local queue and PostHog delivery | `desktop/usage-telemetry.mjs` |
 | Install-level first-real-HTML guide status and built-in welcome identity | `desktop/ui-preferences.mjs`, `app/application/first-edit-guide-session.js` |

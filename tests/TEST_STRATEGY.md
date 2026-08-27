@@ -25,7 +25,7 @@
 
 ## 影响映射所有权
 
-`edit` 和 `task` 按生产所有权选择直接 Node oracle：一个文件只进入它实际实现或调用的 owner；一个文件确实跨两个 owner 时，选择器安全地取两者并集。精确规则必须从通用规则中排除，不能再用宽泛目录正则把整个 Session、Workbench 子模块或 Desktop 目录绑成一个桶。新增或移动测试时，同步更新其生产 owner 的精确 `nodeTests` 列表和 `tests/test-gate-selection.test.mjs` 的选择回归；顶层 Node 测试始终至少运行自身，且本所有权基线中的 owned test 不扩张到整组。无法建立精确 owner 的代码继续走既有 `node-core` fallback。无论 edit/task 如何收窄，`release` 的完整 suite 与 prerequisite 顺序都不变。
+`edit` 和 `task` 按生产所有权选择直接 Node oracle：一个文件只进入它实际实现或调用的 owner；一个文件确实跨两个 owner 时，选择器安全地取两者并集。精确规则必须从通用规则中排除，不能再用宽泛目录正则把整个 Session、Workbench 子模块或 Desktop 目录绑成一个桶。Canvas、Review、Agent、Repository 和 Desktop IPC 已按叶子模块拆开：叶子算法或 IPC 文件只接通自己的 Node oracle（必要时再加一个能力 canary）；`HtmlCanvasEditor.tsx`、`review-document.ts` 编排器和 `desktop/main.mjs` 组合层仍可保留较宽并集。新增或移动测试时，同步更新其生产 owner 的精确 `nodeTests` 列表和 `tests/test-gate-selection.test.mjs` 的选择回归；顶层 Node 测试始终至少运行自身，且本所有权基线中的 owned test 不扩张到整组。无法建立精确 owner 的代码继续走既有 `node-core` fallback。无论 edit/task 如何收窄，`release` 的完整 suite 与 prerequisite 顺序都不变。
 
 “最新安装包”的多 PR 源码组合是打包前的 Git 流程：门禁只验证当前干净
 Tree，不在测试执行期间自动合并分支。组合 Tree 含任何未合并 PR 时，

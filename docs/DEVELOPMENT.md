@@ -148,7 +148,10 @@ these files when validating a local ownership change instead of inferring
 selection from command duration. When changing `tests/test-impact-map.json`, run
 `node --test tests/test-gate-selection.test.mjs` before the ordinary gate. The
 selection contract keeps direct-owner coverage narrow while the `release` lane
-remains a fixed complete suite. Task canaries are Playwright tags such as
+remains a fixed complete suite. Canvas pointer/selection/overlay, Review
+algorithm files, Agent provider/runtime leaves, Repository internals and
+Desktop IPC modules each have their own owner so a leaf change does not
+reselect the old wide union. Task canaries are Playwright tags such as
 `@smoke-editing`; the original global `@gate-smoke` union remains the `main`
 lane smoke. Ready PRs still run `node-full`, `browser-full`, `electron-full`,
 `ai-closed-loop` and `real-html`.

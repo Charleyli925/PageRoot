@@ -836,9 +836,91 @@
       ]
     },
     {
+      "id": "canvas-pointer-owner",
+      "patterns": [
+        "^app/components/html-canvas-pointer-(?:hit|capability|proof)\\.(?:ts|js|d\\.ts)$",
+        "^app/components/html-canvas-capability-hover\\.(?:js|d\\.ts)$"
+      ],
+      "suites": [
+        "typecheck",
+        "browser-editing-smoke"
+      ],
+      "nodeTests": [
+        "tests/canvas-pointer-capability.test.mjs",
+        "tests/html-canvas-capability-hover.test.mjs"
+      ]
+    },
+    {
+      "id": "canvas-selection-owner",
+      "patterns": [
+        "^app/components/html-canvas-selection\\.ts$"
+      ],
+      "suites": [
+        "typecheck",
+        "browser-editing-smoke"
+      ],
+      "nodeTests": [
+        "tests/source-text-map.test.mjs"
+      ]
+    },
+    {
+      "id": "canvas-overlay-owner",
+      "patterns": [
+        "^app/components/(?:HtmlInteractionPreview(?:\\.module)?|html-canvas-(?:page-view|style-inspector|selection-chrome))\\.(?:tsx|ts|css)$"
+      ],
+      "suites": [
+        "typecheck",
+        "browser-editing-smoke"
+      ],
+      "nodeTests": [
+        "tests/page-view-context.test.mjs"
+      ]
+    },
+    {
+      "id": "canvas-preview-sync-owner",
+      "patterns": [
+        "^app/components/html-canvas-preview-sync\\.ts$"
+      ],
+      "suites": [
+        "typecheck",
+        "browser-editing-smoke"
+      ],
+      "nodeTests": [
+        "tests/align-preview-source-surface.test.mjs"
+      ]
+    },
+    {
+      "id": "canvas-native-edit-owner",
+      "patterns": [
+        "^app/components/(?:IslandEditingController|native-edit-types|native-layout-fingerprint)\\.ts$"
+      ],
+      "suites": [
+        "typecheck",
+        "browser-editing-smoke",
+        "electron-editing-smoke"
+      ],
+      "nodeTests": [
+        "tests/editable-island.test.mjs",
+        "tests/native-layout-guard.test.mjs"
+      ]
+    },
+    {
+      "id": "canvas-runtime-owner",
+      "patterns": [
+        "^app/components/(?:html-canvas-(?:dom|interaction|internal-types)|desktop-edit-runtime-api)\\.(?:ts)$"
+      ],
+      "suites": [
+        "typecheck",
+        "electron-editing-smoke"
+      ],
+      "nodeTests": [
+        "tests/edit-runtime-contract.test.mjs"
+      ]
+    },
+    {
       "id": "v2-island-controller",
       "patterns": [
-        "^app/components/(?:HtmlCanvasEditor(?:\\.types)?|HtmlInteractionPreview|desktop-(?:runtime-snapshot|preview)-api|html-canvas-(?:dom|interaction|internal-types|page-view|preview-sync|selection|selection-chrome|style-inspector|pointer-hit|pointer-capability)|IslandEditingController|native-edit-types|native-layout-fingerprint|html-preview-sandbox|use-preview-resource-base)\\.(?:tsx|ts|js|d\\.ts)$"
+        "^app/components/(?:HtmlCanvasEditor(?:\\.types)?|html-preview-sandbox|use-preview-resource-base)\\.(?:tsx|ts|js|d\\.ts)$"
       ],
       "suites": [
         "typecheck",
@@ -859,7 +941,7 @@
         "^app/application/edit-author-runtime-session\\.(?:js|d\\.ts)$",
         "^app/domain/edit-runtime-contract\\.(?:js|d\\.ts)$",
         "^app/domain/runtime-snapshot-hosts\\.(?:js|d\\.ts)$",
-        "^app/components/(?:HtmlCanvasEditor(?:\\.types)?|desktop-edit-runtime-api|html-canvas-interaction|html-preview-sandbox)\\.(?:tsx|ts|js|d\\.ts)$",
+        "^app/components/(?:HtmlCanvasEditor(?:\\.types)?|html-preview-sandbox)\\.(?:tsx|ts|js|d\\.ts)$",
         "^app/workbench\\.tsx$",
         "^desktop/(?:edit-runtime-bootstrap|edit-runtime-protocol|edit-runtime-preparation-fence)\\.mjs$",
         "^desktop/main\\.mjs$",
@@ -897,11 +979,76 @@
       ]
     },
     {
-      "id": "review-document-analysis",
+      "id": "review-text-owner",
       "patterns": [
-        "^app/lib/(?:review-(?:projection-facts|semantic-alignment|text-diff|text-evidence-marks|badge-aggregation|region-annotation)|review-comment-source-map)\\.(?:d\\.ts|js)$",
+        "^app/lib/review-text-(?:diff|evidence-marks)\\.(?:d\\.ts|js)$",
+        "^app/workbench/review/text-diff\\.ts$"
+      ],
+      "suites": [
+        "typecheck"
+      ],
+      "nodeTests": [
+        "tests/review-text-diff.test.mjs",
+        "tests/review-text-evidence-marks.test.mjs"
+      ]
+    },
+    {
+      "id": "review-semantic-owner",
+      "patterns": [
+        "^app/lib/review-semantic-alignment\\.(?:d\\.ts|js)$",
+        "^app/workbench/review/semantic-pairing\\.ts$"
+      ],
+      "suites": [
+        "typecheck"
+      ],
+      "nodeTests": [
+        "tests/review-semantic-alignment.test.mjs"
+      ]
+    },
+    {
+      "id": "review-style-owner",
+      "patterns": [
+        "^app/workbench/review/style-diff\\.ts$"
+      ],
+      "suites": [
+        "typecheck"
+      ],
+      "nodeTests": [
+        "tests/review-badge-aggregation.test.mjs"
+      ]
+    },
+    {
+      "id": "review-comment-binding-owner",
+      "patterns": [
+        "^app/lib/(?:review-comment-source-map|review-region-annotation)\\.(?:d\\.ts|js)$",
+        "^app/workbench/review/comment-binding\\.ts$"
+      ],
+      "suites": [
+        "typecheck"
+      ],
+      "nodeTests": [
+        "tests/review-comment-source-map.test.mjs",
+        "tests/review-region-annotation.test.mjs"
+      ]
+    },
+    {
+      "id": "review-runtime-visual-owner",
+      "patterns": [
+        "^app/workbench/review/runtime-projection\\.ts$"
+      ],
+      "suites": [
+        "typecheck"
+      ],
+      "nodeTests": [
+        "tests/review-runtime-visual.test.mjs"
+      ]
+    },
+    {
+      "id": "review-document-orchestrator",
+      "patterns": [
+        "^app/lib/(?:review-(?:projection-facts|badge-aggregation))\\.(?:d\\.ts|js)$",
         "^app/workbench/review-document\\.ts$",
-        "^app/workbench/review/.+\\.ts$",
+        "^app/workbench/review/(?:parse|serialize|structure-diff|tones|types|constants)\\.ts$",
         "^scripts/benchmark-review-analysis\\.mjs$"
       ],
       "suites": [
@@ -911,13 +1058,7 @@
       ],
       "nodeTests": [
         "tests/review-badge-aggregation.test.mjs",
-        "tests/review-comment-source-map.test.mjs",
         "tests/review-projection-facts.test.mjs",
-        "tests/review-region-annotation.test.mjs",
-        "tests/review-runtime-visual.test.mjs",
-        "tests/review-semantic-alignment.test.mjs",
-        "tests/review-text-diff.test.mjs",
-        "tests/review-text-evidence-marks.test.mjs",
         "tests/runtime-snapshot-hosts.test.mjs",
         "tests/runtime-visual-contract.test.mjs"
       ]
@@ -1070,25 +1211,24 @@
       "id": "first-real-html-guide",
       "patterns": [
         "^app/application/first-edit-guide-session\\.(?:js|d\\.ts)$",
-        "^app/components/(?:FirstEditGuideCard(?:\\.module)?|html-canvas-pointer-(?:proof|capability|hit)|html-canvas-capability-hover|desktop-ui-preferences-api)\\.(?:tsx|ts|js|d\\.ts|css)$",
+        "^app/components/(?:FirstEditGuideCard(?:\\.module)?|desktop-ui-preferences-api)\\.(?:tsx|ts|js|d\\.ts|css)$",
         "^app/workbench\\.tsx$",
         "^desktop/ui-preferences\\.mjs$",
-        "^tests/(?:first-edit-guide-session|ui-preferences|canvas-pointer-capability|html-canvas-capability-hover)\\.test\\.mjs$"
+        "^tests/(?:first-edit-guide-session|ui-preferences)\\.test\\.mjs$"
       ],
       "suites": [
         "typecheck"
       ],
       "nodeTests": [
-        "tests/canvas-pointer-capability.test.mjs",
         "tests/first-edit-guide-session.test.mjs",
-        "tests/html-canvas-capability-hover.test.mjs",
         "tests/ui-preferences.test.mjs"
       ]
     },
     {
       "id": "desktop-update",
       "patterns": [
-        "^desktop/application-update\\.mjs$"
+        "^desktop/application-update\\.mjs$",
+        "^desktop/ipc/update-ipc\\.mjs$"
       ],
       "suites": [
         "electron-editing-smoke"
@@ -1207,7 +1347,7 @@
     {
       "id": "desktop-lifecycle",
       "patterns": [
-        "^desktop/(?:bridge-startup|bridge-shutdown|close-recovery)\\.mjs$"
+        "^desktop/(?:bridge-startup|bridge-shutdown|close-recovery|app-lifecycle)\\.mjs$"
       ],
       "suites": [
         "electron-recovery-smoke"
@@ -1215,13 +1355,41 @@
       "nodeTests": [
         "tests/bridge-shutdown.test.mjs",
         "tests/bridge-startup.test.mjs",
-        "tests/desktop-close-recovery.test.mjs"
+        "tests/desktop-close-recovery.test.mjs",
+        "tests/electron-window-policy.test.mjs"
+      ]
+    },
+    {
+      "id": "desktop-ipc-project",
+      "patterns": [
+        "^desktop/ipc/project-ipc\\.mjs$"
+      ],
+      "suites": [
+        "electron-project-lifecycle-smoke"
+      ],
+      "nodeTests": [
+        "tests/desktop-preload-ipc.test.mjs"
+      ]
+    },
+    {
+      "id": "desktop-ipc-window",
+      "patterns": [
+        "^desktop/ipc/window-ipc\\.mjs$"
+      ],
+      "suites": [
+        "electron-recovery-smoke"
+      ],
+      "nodeTests": [
+        "tests/desktop-close-recovery.test.mjs",
+        "tests/electron-window-policy.test.mjs",
+        "tests/desktop-preload-ipc.test.mjs"
       ]
     },
     {
       "id": "desktop-main-preload",
       "patterns": [
         "^desktop/(?:main|preload|product-contract|product-links|source-file-watch)\\.mjs$",
+        "^desktop/ipc/trusted-ipc\\.mjs$",
         "^tests/source-file-watch\\.test\\.mjs$",
         "^desktop/renderer/(?:index\\.html|main\\.tsx)$",
         "^desktop/vite\\.config\\.ts$"
@@ -1260,7 +1428,8 @@
     {
       "id": "desktop-ai-handoff",
       "patterns": [
-        "^desktop/(?:main|qoder-handoff|product-contract)\\.mjs$"
+        "^desktop/(?:qoder-handoff|product-contract)\\.mjs$",
+        "^desktop/ipc/agent-ipc\\.mjs$"
       ],
       "suites": [
         "electron-agent-smoke",
@@ -1272,50 +1441,223 @@
       ]
     },
     {
-      "id": "agent-runtime-provider-bridge",
+      "id": "agent-provider-registry",
       "patterns": [
-        "^scripts/(?:agent-bridge-service|workspace-bridge-shutdown|qoder-acp-(?:client|spike(?:-client)?)|codex-app-server-preflight|verify-codex-runtime-lock|verify-packaged-artifact)\\.mjs$",
-        "^scripts/agent/(?:[a-z0-9-]+|(?:providers|runtimes|policies|hosts)/[a-z0-9-]+)\\.mjs$",
-        "^schemas/codex-app-server\\.runtime-lock\\.json$",
-        "^shared/(?:agent-delivery|agent-feature-gates)\\.mjs$",
-        "^app/application/(?:agent-provider-catalog|bridge-client|run-(?:session|workflow)|workspace-controller)\\.(?:js|d\\.ts)$",
-        "^app/components/(?:AboutPageRootDialog|AgentDeliveryButton|AgentProviderCard|QoderAvailabilityCard)\\.tsx$",
-        "^app/domain/(?:agent-provider-state|qoder-availability)\\.(?:js|d\\.ts)$",
-        "^tests/(?:agent-delivery-codec|agent-runtime-coordinator|agent-provider-contract|agent-bridge-(?:service|workspace)|codex-(?:provider-contract|app-server-runtime|candidate-authority)|qoder-acp-spike-client)\\.test\\.mjs$",
-        "^tests/fixtures/(?:agent-provider/|codex-app-server|qoder-acp-agent|packaged-agent-bridge-runner)"
+        "^scripts/agent/providers/(?:provider-registry|agent-provider-contract)\\.mjs$",
+        "^app/application/agent-provider-catalog\\.(?:js|d\\.ts)$",
+        "^app/domain/agent-provider-state\\.(?:js|d\\.ts)$"
+      ],
+      "suites": [
+        "typecheck"
+      ],
+      "nodeTests": [
+        "tests/agent-provider-catalog.test.mjs",
+        "tests/agent-provider-contract.test.mjs"
+      ]
+    },
+    {
+      "id": "agent-provider-qoder",
+      "patterns": [
+        "^scripts/agent/providers/qoder-provider\\.mjs$",
+        "^scripts/qoder-acp-(?:client|spike(?:-client)?)\\.mjs$",
+        "^app/components/QoderAvailabilityCard\\.tsx$",
+        "^app/domain/qoder-availability\\.(?:js|d\\.ts)$"
       ],
       "suites": [
         "typecheck",
-        "dependency-audit",
-        "build-desktop",
+        "ai-provider-smoke"
+      ],
+      "nodeTests": [
+        "tests/qoder-acp-spike-client.test.mjs",
+        "tests/agent-provider-contract.test.mjs"
+      ]
+    },
+    {
+      "id": "agent-provider-codex",
+      "patterns": [
+        "^scripts/agent/providers/codex-provider\\.mjs$"
+      ],
+      "suites": [
+        "typecheck",
+        "ai-provider-smoke"
+      ],
+      "nodeTests": [
+        "tests/codex-provider-contract.test.mjs",
+        "tests/agent-provider-contract.test.mjs"
+      ]
+    },
+    {
+      "id": "agent-runtime-acp",
+      "patterns": [
+        "^scripts/agent/runtimes/(?:acp-runtime|agent-runtime-contract|runtime-registry)\\.mjs$"
+      ],
+      "suites": [
+        "typecheck",
+        "ai-provider-smoke"
+      ],
+      "nodeTests": [
+        "tests/qoder-acp-spike-client.test.mjs"
+      ]
+    },
+    {
+      "id": "agent-runtime-codex-app-server",
+      "patterns": [
+        "^scripts/agent/runtimes/codex-app-server-(?:client|runtime)\\.mjs$",
+        "^scripts/codex-app-server-preflight\\.mjs$",
+        "^tests/fixtures/codex-app-server"
+      ],
+      "suites": [
+        "typecheck",
+        "ai-provider-smoke"
+      ],
+      "nodeTests": [
+        "tests/codex-app-server-runtime.test.mjs",
+        "tests/codex-candidate-authority.test.mjs"
+      ]
+    },
+    {
+      "id": "agent-runtime-coordinator",
+      "patterns": [
+        "^scripts/agent/(?:agent-runtime-coordinator|agent-events|agent-errors|agent-lease-store|agent-session-projector)\\.mjs$"
+      ],
+      "suites": [
+        "typecheck",
+        "ai-run-lifecycle-smoke"
+      ],
+      "nodeTests": [
+        "tests/agent-runtime-coordinator.test.mjs",
+        "tests/agent-bridge-service.test.mjs",
+        "tests/run-workflow.test.mjs",
+        "tests/run-session.test.mjs",
+        "tests/run-lifecycle.test.mjs"
+      ]
+    },
+    {
+      "id": "agent-host-policy",
+      "patterns": [
+        "^scripts/agent/(?:policies/execution-policy|hosts/execution-host)\\.mjs$"
+      ],
+      "suites": [
+        "typecheck"
+      ],
+      "nodeTests": [
+        "tests/agent-bridge-workspace.test.mjs"
+      ]
+    },
+    {
+      "id": "agent-package-closure",
+      "patterns": [
+        "^scripts/verify-codex-runtime-lock\\.mjs$",
+        "^schemas/codex-app-server\\.runtime-lock\\.json$"
+      ],
+      "suites": [
+        "dependency-audit"
+      ],
+      "nodeTests": [
+        "tests/desktop-package.test.mjs",
+        "tests/codex-app-server-runtime.test.mjs"
+      ]
+    },
+    {
+      "id": "agent-renderer-projection",
+      "patterns": [
+        "^app/components/(?:AboutPageRootDialog|AgentDeliveryButton|AgentProviderCard)\\.tsx$",
+        "^shared/(?:agent-delivery|agent-feature-gates)\\.mjs$"
+      ],
+      "suites": [
+        "typecheck",
+        "electron-agent-smoke"
+      ],
+      "nodeTests": [
+        "tests/agent-provider-card.test.mjs",
+        "tests/agent-delivery-codec.test.mjs",
+        "tests/agent-model-catalog.test.mjs"
+      ]
+    },
+    {
+      "id": "agent-runtime-provider-bridge",
+      "patterns": [
+        "^scripts/agent-bridge-service\\.mjs$",
+        "^app/application/bridge-client\\.(?:js|d\\.ts)$",
+        "^tests/(?:agent-bridge-(?:service|workspace))\\.test\\.mjs$",
+        "^tests/fixtures/(?:agent-provider/|packaged-agent-bridge-runner)"
+      ],
+      "suites": [
+        "typecheck",
         "electron-agent-smoke",
         "ai-provider-smoke"
       ],
       "nodeTests": [
-        "tests/agent-provider-contract.test.mjs",
-        "tests/codex-provider-contract.test.mjs",
-        "tests/codex-app-server-runtime.test.mjs",
-        "tests/codex-candidate-authority.test.mjs",
-        "tests/agent-provider-card.test.mjs",
-        "tests/agent-provider-catalog.test.mjs",
-        "tests/agent-delivery-codec.test.mjs",
-        "tests/agent-runtime-coordinator.test.mjs",
         "tests/agent-bridge-service.test.mjs",
-        "tests/agent-model-catalog.test.mjs",
-        "tests/agent-bridge-workspace.test.mjs",
-        "tests/qoder-acp-spike-client.test.mjs",
-        "tests/run-workflow.test.mjs",
-        "tests/run-session.test.mjs",
-        "tests/run-lifecycle.test.mjs",
-        "tests/workspace-bridge.test.mjs",
-        "tests/desktop-package.test.mjs"
+        "tests/agent-bridge-workspace.test.mjs"
+      ]
+    },
+    {
+      "id": "project-path-safety-owner",
+      "patterns": [
+        "^scripts/project-file-repository/path-safety\\.mjs$"
+      ],
+      "suites": [
+        "typecheck"
+      ],
+      "nodeTests": [
+        "tests/project-path-security-and-locks.test.mjs"
+      ]
+    },
+    {
+      "id": "project-registry-owner",
+      "patterns": [
+        "^scripts/project-file-repository/(?:registry|identity)\\.mjs$"
+      ],
+      "suites": [
+        "typecheck"
+      ],
+      "nodeTests": [
+        "tests/project-registry-and-open.test.mjs"
+      ]
+    },
+    {
+      "id": "project-working-copy-owner",
+      "patterns": [
+        "^scripts/project-file-repository/working-copy\\.mjs$"
+      ],
+      "suites": [
+        "typecheck"
+      ],
+      "nodeTests": [
+        "tests/project-working-copy-save.test.mjs"
+      ]
+    },
+    {
+      "id": "project-candidate-owner",
+      "patterns": [
+        "^scripts/project-file-repository/version-candidate\\.mjs$"
+      ],
+      "suites": [
+        "typecheck"
+      ],
+      "nodeTests": [
+        "tests/project-candidate-promotion.test.mjs"
+      ]
+    },
+    {
+      "id": "project-request-owner",
+      "patterns": [
+        "^scripts/project-file-repository/request-draft\\.mjs$"
+      ],
+      "suites": [
+        "typecheck"
+      ],
+      "nodeTests": [
+        "tests/project-request-authority.test.mjs",
+        "tests/project-ai-task-projection.test.mjs"
       ]
     },
     {
       "id": "project-file-lifecycle",
       "patterns": [
         "^scripts/project-file-(?:repository|finalizer)\\.mjs$",
-        "^scripts/project-file-repository/.+\\.mjs$",
+        "^scripts/project-file-repository/(?:constants|errors)\\.mjs$",
         "^tests/project-file-(?:finalizer|bridge|schema)\\.test\\.mjs$",
         "^tests/project-file-repository(?:-harness|\\.integration\\.test)\\.mjs$",
         "^tests/project-(?:registry-and-open|working-copy-save|candidate-promotion|request-authority|ai-task-projection|path-security-and-locks)\\.test\\.mjs$"
