@@ -1,0 +1,219 @@
+import type { ClipboardEvent, Dispatch, RefObject, SetStateAction } from "react";
+
+import type {
+  HtmlCanvasCommentLayoutState,
+  HtmlCanvasSelection,
+} from "../components/HtmlCanvasEditor";
+import type { RelinkNoticeCopy } from "./comment-relink-model.js";
+import type {
+  CommentAttachment,
+  CommentEditSession,
+  CommentItem,
+  DirectEditEvent,
+  OtherTabCommentEntry,
+} from "./types";
+
+export type OtherTabCommentGroup = {
+  key: string;
+  label: string;
+  entries: OtherTabCommentEntry[];
+};
+
+export type CommentAttachmentTarget = {
+  kind: "composer" | "comment";
+  commentId: string;
+};
+
+export type CommentDraft = {
+  text: string;
+  commentId: string | null;
+  attachments: CommentAttachment[];
+};
+
+export type ComposerState =
+  | { kind: "closed"; collapsedDraft: CommentDraft | null }
+  | { kind: "new"; target: HtmlCanvasSelection; draft: CommentDraft }
+  | {
+    kind: "editing";
+    commentId: string;
+    draft: CommentDraft;
+    session: CommentEditSession;
+  }
+  | { kind: "relinking"; commentId: string };
+
+export type CommentRailModel = {
+  composer: ComposerState;
+  commentsPanelRef: RefObject<HTMLElement | null>;
+  commentsHeaderRef: RefObject<HTMLElement | null>;
+  composerRef: RefObject<HTMLTextAreaElement | null>;
+  commentEditRef: RefObject<HTMLTextAreaElement | null>;
+  viewMode: "current" | "history";
+  commentLayoutReady: boolean;
+  commentLayoutAuthority: {
+    viewContextGeneration: number;
+    textEditing: boolean;
+  };
+  commentRailMinimumOffset: number;
+  commentRailFollowsFocus: boolean;
+  canvasDocumentHeight: number;
+  commentRailContentHeight: number;
+  commentRailOffset: number;
+  commentRailMinimumTop: number;
+  visibleCommentItems: CommentItem[];
+  draftInCurrentTab: boolean;
+  hasUnsavedCommentEdit: boolean;
+  otherTabCommentEntryCount: number;
+  otherTabCommentsOpen: boolean;
+  otherTabCommentsContextKey: string;
+  interactionLocked: boolean;
+  unfinishedEditedComment: CommentItem | null | undefined;
+  otherTabCommentGroups: OtherTabCommentGroup[];
+  activeCommentCount: number;
+  changeEvents: DirectEditEvent[];
+  composerInCurrentTab: boolean;
+  composerTop: number | undefined;
+  focusedCommentId: string | null;
+  relinkRailCardVisible: boolean;
+  relinkCardCopy: RelinkNoticeCopy;
+  relinkCardActive: boolean;
+  projectLoadError: string | null | undefined;
+  draftTargetScope: string;
+  attachmentUploadCount: number;
+  draftTargetCanSave: boolean;
+  composerMeasurementKey: string;
+  attachmentObjectUrls: Record<string, string>;
+  pendingDeleteCommentId: string | null;
+  draftRecoveryTop: number | undefined;
+  draftRecoveryMeasurementKey: string;
+  expectedCommentLayoutTargetIds: string[];
+  sortedVisibleCommentItems: CommentItem[];
+  renderedVisibleCommentItems: CommentItem[];
+  commentTargetLayouts: Record<string, HtmlCanvasCommentLayoutState["targets"][number]>;
+  selection: HtmlCanvasSelection | null;
+  commentMeasurementKeys: Record<string, string | undefined>;
+  visibleCommentPositions: Record<string, number | undefined>;
+};
+
+export type CommentRailActions = {
+  openGlobalCommentComposer: () => void;
+  resumeCurrentComposer: () => void;
+  resumeCommentEdit: (commentId: string) => void;
+  setExpandedOtherTabCommentsKey: Dispatch<SetStateAction<string>>;
+  setComposerOpen: Dispatch<SetStateAction<boolean>>;
+  setPendingDeleteCommentId: Dispatch<SetStateAction<string | null>>;
+  focusCommentTarget: (target: HtmlCanvasSelection, commentId: string) => void;
+  startUnsafeTargetRelink: () => void;
+  cancelTargetRelink: () => void;
+  onRetryProjectHydration: () => void;
+  closeCommentComposer: () => void;
+  beginTargetRelink: (itemId: string) => void;
+  updateDraft: (value: string) => void;
+  onComposerPaste: (event: ClipboardEvent<HTMLTextAreaElement>) => void;
+  commit: () => void | Promise<void>;
+  ensureAttachmentObjectUrl: (attachment: CommentAttachment) => Promise<string> | void;
+  openAttachmentPreview: (attachment: CommentAttachment) => void | Promise<void>;
+  downloadAttachment: (attachment: CommentAttachment) => void | Promise<void>;
+  removeComposerAttachment: (attachment: CommentAttachment) => void;
+  discardCurrentComposer: () => void;
+  openAttachmentPicker: (
+    target: CommentAttachmentTarget,
+    accept?: "all" | "image",
+  ) => void;
+  commentTargetIsLocatable: (target: HtmlCanvasSelection) => boolean;
+  updateCommentEditDraft: (value: string) => void;
+  cancelCommentEdit: () => void;
+  confirmEdit: (commentId: string) => void;
+  pasteImages: (
+    event: ClipboardEvent<HTMLTextAreaElement>,
+    target: CommentAttachmentTarget,
+  ) => void;
+  removeCommentAttachment: (commentId: string, attachment: CommentAttachment) => void;
+  queueReviewCommentFocus: (target: HtmlCanvasSelection, commentId: string) => void;
+  deleteComment: (commentId: string) => void;
+  beginEdit: (comment: CommentItem, focusText?: boolean) => boolean;
+};
+
+export function deriveComposerState(input: {
+  relinkingTarget: string | null;
+  editingCommentId: string | null;
+  commentEditSession: CommentEditSession | null;
+  commentEditDraft: string;
+  commentEditAttachments: CommentAttachment[];
+  composerOpen: boolean;
+  draftTarget: HtmlCanvasSelection | null;
+  draft: string;
+  draftCommentId: string | null;
+  draftAttachments: CommentAttachment[];
+  hasCollapsedCommentDraft: boolean;
+}): ComposerState {
+  if (input.relinkingTarget) {
+    return { kind: "relinking", commentId: input.relinkingTarget };
+  }
+  if (input.editingCommentId && input.commentEditSession) {
+    return {
+      kind: "editing",
+      commentId: input.editingCommentId,
+      draft: {
+        text: input.commentEditDraft,
+        commentId: input.editingCommentId,
+        attachments: input.commentEditAttachments,
+      },
+      session: input.commentEditSession,
+    };
+  }
+  if (input.composerOpen && input.draftTarget) {
+    return {
+      kind: "new",
+      target: input.draftTarget,
+      draft: {
+        text: input.draft,
+        commentId: input.draftCommentId,
+        attachments: input.draftAttachments,
+      },
+    };
+  }
+  return {
+    kind: "closed",
+    collapsedDraft: input.hasCollapsedCommentDraft
+      ? {
+        text: input.draft,
+        commentId: input.draftCommentId,
+        attachments: input.draftAttachments,
+      }
+      : null,
+  };
+}
+
+export function composerViewFields(composer: ComposerState) {
+  return {
+    composerOpen: composer.kind === "new",
+    draftTarget: composer.kind === "new" ? composer.target : null,
+    draft: composer.kind === "new"
+      ? composer.draft.text
+      : composer.kind === "closed"
+        ? composer.collapsedDraft?.text || ""
+        : composer.kind === "editing"
+          ? composer.draft.text
+          : "",
+    draftCommentId: composer.kind === "new"
+      ? composer.draft.commentId
+      : composer.kind === "closed"
+        ? composer.collapsedDraft?.commentId || null
+        : composer.kind === "editing"
+          ? composer.commentId
+          : null,
+    draftAttachments: composer.kind === "new"
+      ? composer.draft.attachments
+      : composer.kind === "closed"
+        ? composer.collapsedDraft?.attachments || []
+        : composer.kind === "editing"
+          ? composer.draft.attachments
+          : [],
+    hasCollapsedCommentDraft: composer.kind === "closed" && Boolean(composer.collapsedDraft),
+    editingCommentId: composer.kind === "editing" ? composer.commentId : null,
+    commentEditSession: composer.kind === "editing" ? composer.session : null,
+    commentEditDraft: composer.kind === "editing" ? composer.draft.text : "",
+    commentEditAttachments: composer.kind === "editing" ? composer.draft.attachments : [],
+    relinkingTarget: composer.kind === "relinking" ? composer.commentId : null,
+  };
+}

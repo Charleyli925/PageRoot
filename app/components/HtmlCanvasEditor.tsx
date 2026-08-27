@@ -161,6 +161,10 @@ import {
   type HtmlCanvasCommentMarker,
   type HtmlCanvasEditFeedback,
 } from "./html-canvas-selection-chrome";
+import {
+  deriveCapabilityHoverState,
+  deriveSelectionOverlay,
+} from "./html-canvas-selection-chrome-contract";
 import type {
   HtmlCanvasCommentedTarget,
   HtmlCanvasCommitResult,
@@ -5157,118 +5161,128 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         )}
       />
       <HtmlCanvasSelectionChrome
-        canvasTransitionActive={canvasTransitionActive}
-        selectionCapabilitySpoken={selectionCapability ? selectionCapability.spoken : ""}
-        interactionLocked={interactionLocked}
-        selection={selection}
-        selectedOutlineStyle={selectedOutlineStyle}
-        showHoverOutline={showHoverOutline}
-        showHoverHint={showHoverHint}
-        hoverOutlineStyle={hoverOutlineStyle}
-        hoverHintStyle={hoverHintStyle}
-        hoverHintPlacement={hoverHintPlacement}
-        hoverChrome={hoverChrome}
-        hoverHintMeasureRef={hoverHintMeasureRef}
-        editFeedback={editFeedback}
-        reloadActionLabel={reloadActionLabel}
-        editFeedbackActionAvailable={editFeedbackActionAvailable}
-        renderedMode={renderedMode}
-        commentMarkers={commentMarkers}
-        toolbarVisible={toolbarVisible}
-        overlayPosition={overlayPosition}
-        toolbarRef={toolbarRef}
-        hasTextRange={hasTextRange}
-        isEditing={isEditing}
-        toolbarStyle={toolbarStyle}
-        selectedPagePresentationAction={selectedPagePresentationAction}
-        readOnly={readOnly}
-        selectedNativeEditAvailable={selectedNativeEditAvailable}
-        selectedStyle={selectedStyle}
-        textFormatRequiresSelection={textFormatRequiresSelection}
-        enableReorder={enableReorder}
-        moveAvailability={moveAvailability}
-        spacingMenuRef={spacingMenuRef}
-        spacingMenuOpen={spacingMenuOpen}
-        usageProjectId={usageProjectId}
-        usageCapture={usageCapture}
-        onHoverHintPointerDown={(event) => {
-          hoverHintPointerInsideRef.current = true;
-          event.preventDefault();
-          event.stopPropagation();
+        model={{
+          hover: deriveCapabilityHoverState({
+            enabled: pointerCapabilityHoverEnabled,
+            hoverChrome,
+            hoverTargetIsSelected,
+            isEditing,
+            interactionLocked,
+            outlineStyle: hoverOutlineStyle,
+            hintStyle: hoverHintStyle,
+            hintPlacement: hoverHintPlacement,
+          }),
+          overlay: deriveSelectionOverlay({
+            selection,
+            outlineStyle: selectedOutlineStyle,
+          }),
+          canvasTransitionActive,
+          selectionCapabilitySpoken: selectionCapability ? selectionCapability.spoken : "",
+          interactionLocked,
+          hoverHintMeasureRef,
+          editFeedback,
+          reloadActionLabel,
+          editFeedbackActionAvailable,
+          renderedMode,
+          commentMarkers,
+          toolbarVisible,
+          overlayPosition,
+          toolbarRef,
+          hasTextRange,
+          isEditing,
+          toolbarStyle,
+          selectedPagePresentationAction,
+          readOnly,
+          selectedNativeEditAvailable,
+          selectedStyle,
+          textFormatRequiresSelection,
+          enableReorder,
+          moveAvailability,
+          spacingMenuRef,
+          spacingMenuOpen,
+          usageProjectId,
+          usageCapture,
         }}
-        onHoverHintPointerEnter={() => {
-          hoverHintPointerInsideRef.current = true;
-        }}
-        onHoverHintPointerLeave={() => {
-          hoverHintPointerInsideRef.current = false;
-          hoverControllerRef.current?.hide();
-        }}
-        onHoverHintClick={(event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          const capability = hoverChrome.capability;
-          if (!interactionLocked && capability) {
+        actions={{
+          onHoverHintPointerDown: (event) => {
+            hoverHintPointerInsideRef.current = true;
+            event.preventDefault();
+            event.stopPropagation();
+          },
+          onHoverHintPointerEnter: () => {
+            hoverHintPointerInsideRef.current = true;
+          },
+          onHoverHintPointerLeave: () => {
+            hoverHintPointerInsideRef.current = false;
             hoverControllerRef.current?.hide();
-            selectElement(capability.selectionElement);
-          }
-        }}
-        onEditFeedbackAction={handleEditFeedbackAction}
-        onDismissEditFeedback={() => setEditFeedback(null)}
-        onPauseEditFeedback={setEditFeedbackPaused}
-        onSelectCommentMarker={(markerSelection) => {
-          if (lockedRef.current) return;
-          // The marker was clicked at the user's current Canvas position.
-          // Keep that viewport stable; navigation from the comment rail can
-          // still opt into revealing the paired target.
-          selectTarget(markerSelection, { reveal: false, showToolbar: true });
-        }}
-        onToolbarKeyDown={handleToolbarKeyDown}
-        onToolbarPointerDownCapture={(event) => {
-          const activeNativeEdit = activeNativeEditRef.current;
-          if (!activeNativeEdit) return;
-          if (activeNativeEdit.session.isComposing()) {
-            // Moving focus from the authored iframe to this outer toolbar
-            // makes Chromium/macOS end the live IME composition and expose
-            // its intermediate pinyin as ordinary DOM text. Keep the native
-            // editor focused while allowing the button click to enqueue its
-            // explicit command.
+          },
+          onHoverHintClick: (event) => {
             event.preventDefault();
-            return;
-          }
-          retainNativeEditFocusRef.current = {
-            session: activeNativeEdit.session,
-            lease: { ...activeNativeEdit.lease },
-          };
-        }}
-        onToolbarMouseDownCapture={(event) => {
-          if (activeNativeEditRef.current?.session.isComposing()) {
-            // The focus default is attached to mousedown in Chromium. Keep
-            // this fallback even when pointerdown compatibility changes.
-            event.preventDefault();
-          }
-        }}
-        onExecutePresentationAction={() => {
-          if (selection) executePagePresentationAction(selection);
-        }}
-        onComment={() => {
-          if (lockedRef.current || !selection) return;
-          const openComment = () => {
-            if (activeNativeEditRef.current) {
-              const committed = finishNativeEditing(true, "manual");
-              if (!committed.ok) return;
+            event.stopPropagation();
+            const capability = hoverChrome.capability;
+            if (!interactionLocked && capability) {
+              hoverControllerRef.current?.hide();
+              selectElement(capability.selectionElement);
             }
-            requestCommentForTarget(selection);
-          };
-          if (deferNativeCommandRef.current("comment", openComment)) return;
-          openComment();
-        }}
-        onStartEditing={() => {
-          startEditing();
-        }}
-        onApplyInlineStyle={applyInlineStyle}
-        onMoveSelected={moveSelected}
-        onToggleSpacingMenu={() => {
-          setSpacingMenuOpen((open) => !open);
+          },
+          onEditFeedbackAction: handleEditFeedbackAction,
+          onDismissEditFeedback: () => setEditFeedback(null),
+          onPauseEditFeedback: setEditFeedbackPaused,
+          onSelectCommentMarker: (markerSelection) => {
+            if (lockedRef.current) return;
+            // The marker was clicked at the user's current Canvas position.
+            // Keep that viewport stable; navigation from the comment rail can
+            // still opt into revealing the paired target.
+            selectTarget(markerSelection, { reveal: false, showToolbar: true });
+          },
+          onToolbarKeyDown: handleToolbarKeyDown,
+          onToolbarPointerDownCapture: (event) => {
+            const activeNativeEdit = activeNativeEditRef.current;
+            if (!activeNativeEdit) return;
+            if (activeNativeEdit.session.isComposing()) {
+              // Moving focus from the authored iframe to this outer toolbar
+              // makes Chromium/macOS end the live IME composition and expose
+              // its intermediate pinyin as ordinary DOM text. Keep the native
+              // editor focused while allowing the button click to enqueue its
+              // explicit command.
+              event.preventDefault();
+              return;
+            }
+            retainNativeEditFocusRef.current = {
+              session: activeNativeEdit.session,
+              lease: { ...activeNativeEdit.lease },
+            };
+          },
+          onToolbarMouseDownCapture: (event) => {
+            if (activeNativeEditRef.current?.session.isComposing()) {
+              // The focus default is attached to mousedown in Chromium. Keep
+              // this fallback even when pointerdown compatibility changes.
+              event.preventDefault();
+            }
+          },
+          onExecutePresentationAction: () => {
+            if (selection) executePagePresentationAction(selection);
+          },
+          onComment: () => {
+            if (lockedRef.current || !selection) return;
+            const openComment = () => {
+              if (activeNativeEditRef.current) {
+                const committed = finishNativeEditing(true, "manual");
+                if (!committed.ok) return;
+              }
+              requestCommentForTarget(selection);
+            };
+            if (deferNativeCommandRef.current("comment", openComment)) return;
+            openComment();
+          },
+          onStartEditing: () => {
+            startEditing();
+          },
+          onApplyInlineStyle: applyInlineStyle,
+          onMoveSelected: moveSelected,
+          onToggleSpacingMenu: () => {
+            setSpacingMenuOpen((open) => !open);
+          },
         }}
       />
     </div>

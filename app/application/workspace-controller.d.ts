@@ -488,12 +488,7 @@ export class WorkspaceController {
   reloadDocumentCanvas(): DocumentSessionSnapshot;
   replaceCommentWorkingCopy(
     input: Record<string, unknown>,
-  ): CommentSessionSnapshot;
-  replaceCommentItems(comments: unknown[]): CommentSessionSnapshot;
-  setCommentComposerTarget(target: unknown): CommentSessionSnapshot;
-  setCommentComposerDraft(draft: string): CommentSessionSnapshot;
-  setCommentEditSession(session: unknown): CommentSessionSnapshot;
-  clearCommentComposer(): CommentSessionSnapshot;
+  ): CommentWorkflowOutcome;
   clearCompletedRun(): boolean;
   dismissActiveRun(): import("../domain/run-lifecycle.js").ActiveRun | null;
   reopenRecentRunOutcome(sourcePath: string | null | undefined): boolean;
@@ -709,6 +704,19 @@ export class WorkspaceController {
   }): DocumentWorkflowOutcome<{ active: boolean }>;
   waitForDocumentHistoryAction(): Promise<DocumentWorkflowOutcome<{ idle: boolean }>>;
   queueDraft(): CommentWorkflowOutcome;
+  beginCommentComposer(input?: Record<string, unknown>): CommentWorkflowOutcome;
+  updateCommentDraft(draft: string): CommentWorkflowOutcome;
+  rebindCommentComposer(target: unknown): CommentWorkflowOutcome;
+  cancelCommentComposer(): CommentWorkflowOutcome;
+  beginCommentEdit(input: { commentId: string }): CommentWorkflowOutcome;
+  updateCommentEditDraft(draftText: string): CommentWorkflowOutcome;
+  clearCommentEdit(): CommentWorkflowOutcome;
+  rebindCommentTarget(input: {
+    commentId: string;
+    target: unknown;
+  }): CommentWorkflowOutcome;
+  applyCommentItems(comments: unknown[]): CommentWorkflowOutcome;
+  confirmCommentEdit(input: { commentId: string }): CommentWorkflowOutcome;
   flushDraft(input?: Record<string, unknown>): Promise<CommentWorkflowOutcome>;
   commitComment(input?: { commentId?: string }): Promise<CommentWorkflowOutcome>;
   editComment(input: { commentId: string }): CommentWorkflowOutcome;

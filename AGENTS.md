@@ -1,6 +1,8 @@
 # PageRoot agent guidance
 
-This repository is the complete public source boundary for PageRoot. Keep this file short: follow the rules below, then read only the task-specific documents listed under Progressive disclosure.
+This repository is the complete public source boundary for PageRoot. Keep this
+file short: follow the rules below, then read only the task-specific documents
+listed under Progressive disclosure.
 
 ## Repository and authorization boundary
 
@@ -14,61 +16,42 @@ This repository is the complete public source boundary for PageRoot. Keep this f
 ## Standard task lifecycle
 
 1. Run `npm run task:status` and inspect `git status -sb` before editing.
-2. From the clean primary `main` worktree, run `npm run task:start -- <prefix/short-name>`. It keeps the primary worktree on `main` and creates an isolated checkout under the shared `.codex-worktrees/` directory. Allowed prefixes are `agent/`, `feature/`, `fix/`, `docs/`, `test/`, `integration/`, `refactor/`, `chore/` and `recovery/`.
+2. From the clean primary `main` worktree, run `npm run task:start -- <prefix/short-name>`. It keeps the primary worktree on `main` and creates an isolated checkout under the shared `.codex-worktrees/` directory. Allowed prefixes are `agent/`, `feature/`, `fix/`, `docs/`, `test/`, `integration/`, `refactor/`, `chore/` and `recovery/`. If the primary checkout is dirty, create an isolated worktree from `origin/main` instead of stashing.
 3. Keep the diff focused. Add tests and documentation in the same change when behavior, contracts, commands or public expectations change.
 4. While editing, use `npm run gate:edit`. Before publishing a branch, run `npm run task:finish`.
 5. Review `git diff`, stage only intentional paths, review `git diff --cached`, then commit and push the task branch.
-6. Open every PR as Draft. Ordinary Draft pushes run only impact-selected `pr-feedback` (`gate:edit`) in `ci.yml`. Marking the PR Ready, opening it already Ready, or adding the `full-gate` label starts the complete source matrix; `release-gate` is the sole required merge check. Codex review is requested automatically on that full-gate path, shown on the PR, and never blocks merge. A later commit on a Ready PR reruns the complete matrix for the new head. PR size is advisory only. Squash-merge only with explicit authorization.
-7. End every task with: branch, commit, changed-file summary, tests run and results, documentation impact, PR/Release links, and whether the worktree is clean. After merge, run the read-only `npm run task:audit` from the primary worktree and retire only the exact merged task with an explicit `task:retire --apply`.
+6. Open every PR as Draft. Ordinary Draft pushes run only impact-selected `pr-feedback`. Ready or the `full-gate` label starts the complete source matrix; `release-gate` is the sole required merge check. Codex review is informational and never blocks merge. Squash-merge only with explicit authorization.
+7. End every task with: branch, commit, changed-file summary, tests run and results, documentation impact, PR/Release links, and whether the worktree is clean. After merge, run `npm run task:audit` from the primary worktree and retire only the exact merged task with `task:retire --apply`.
 
-For command behavior, authorization levels, worktrees and reporting format, read `docs/CODEX_WORKFLOW.md`.
+Command behavior, installer composition, and reporting format: `docs/CODEX_WORKFLOW.md`.
+Release, packaging, and Candidate publication: `docs/RELEASING.md`.
 
-## Test and release ladder
-
-- Focused edit feedback: `npm run gate:edit`
-- Completed task: `npm run task:finish` (runs `gate:task` against `origin/main`)
-- Complete clean source candidate: `npm run gate:release:auto`
-- Verified arm64 installer candidate: `npm run release:mac`
-
-Every successful installer handoff, formal or developer preview, must include
-an exact package-content report in the user reply: artifact identity and hash,
-the source range, every associated Pull Request with its current GitHub status
-and a one-sentence change summary, plus any direct commits with no PR. Generate
-or refresh `package-delivery-report.md` after the package checks; if live PR
-metadata cannot be obtained, the installer handoff is incomplete.
-
-When the user asks for the "latest installer" or "latest developer test
-installer" without a source override, resolve the package source before
-building: start from current `origin/main` and include the latest head of every
-applicable PageRoot Pull Request that the user has not explicitly excluded,
-regardless of whether it is merged, open, draft or closed without merge. Use a
-temporary `integration/` branch for unmerged heads; never mutate or merge the
-source PRs as a side effect. Do not silently omit a conflicting or unavailable
-head. Any package containing unmerged PR code is a Developer Preview and is
-not release-eligible; a formal candidate still requires reviewed `main` only.
-
-The release and artifact gates require a clean committed tree. Any source change invalidates earlier release evidence. Draft Pull Request updates run impact-selected feedback only. Ready (or the `full-gate` label) starts the complete source matrix; `release-gate` joins baseline, source lanes and any packaging dry run, then attests the exact tree. Codex review is informational and is not a merge hard gate. `main` verifies exact Tree/version/PR attestation and does not rerun source tests. The manual `Release Candidate` workflow uses `gate:candidate-app:auto` after CI has authenticated a fresh successful PR gate for the identical Git tree and version. The separate `Release` workflow then verifies and publishes those exact candidate bytes and creates the immutable tag; it never rebuilds during publication. Packaging scripts and Developer Preview are arm64-only. Release only from reviewed `main` using `docs/RELEASING.md`.
+Local gates: `npm run gate:edit` while editing; `npm run task:finish` before publishing.
 
 ## Product invariants
 
 - Current HTML bytes are authoritative. Preview DOM is disposable and must never be serialized back as the persistence source.
 - Visual edits use minimal source patches and preserve unrelated bytes, native selection, IME composition and source identity.
-- Direct source edits still fail closed on ambiguous targets, stale hashes, external writes, invalid patch scope, identity failures and unsafe paths.
+- Irreversible source commits fail closed on ambiguous targets, stale hashes, external writes, invalid patch scope, identity failures and unsafe paths. Layout preflight, outline and other presentation checks must not refuse edit entry.
 - Privileged filesystem behavior stays behind the Electron/Bridge boundary with narrow validated IPC.
-- AI output remains untrusted until protocol, identity, hash, path and complete-HTML checks pass. Authored scripts are part of the user's requested HTML and must never be classified, compared or blocked merely because they changed. Frozen comment targets guide generation and review; they are not a pixel- or subtree-exact Version acceptance boundary. Weak page continuity forces review instead of failing an otherwise usable candidate.
-- QoderWork handoff remains clipboard-only unless the user explicitly authorizes a different product boundary. The only currently authorized automatic path is ADR 0032's per-task `trusted-local-agent-v1` Qoder ACP driver; it does not authorize other providers, OS-sandbox claims or Candidate auto-adoption.
+- AI output remains untrusted until protocol, identity, hash, path and complete-HTML checks pass. Authored scripts are part of the user's requested HTML. Weak page continuity forces review instead of failing an otherwise usable candidate.
+- QoderWork handoff remains clipboard-only unless the user explicitly authorizes a different product boundary. The only currently authorized automatic path is ADR 0032's per-task `trusted-local-agent-v1` Qoder ACP driver.
 - Tests and fixtures use synthetic data only. Never commit real user HTML, attachments, project records, credentials, personal paths, logs or generated binaries.
 
 ## Progressive disclosure
 
-Read only the documents needed for the task:
+Read only the documents needed for the task. Start architecture work at
+`docs/ARCHITECTURE_MAP.md`; read full state ownership only when crossing owners
+or persistence.
 
 | Task area | Required source |
 | --- | --- |
 | Git, branches, commits, recovery, multi-PR package composition | `docs/GIT_WORKFLOW.md` |
-| Codex task automation and final reports | `docs/CODEX_WORKFLOW.md` |
+| Codex task automation, installer composition and final reports | `docs/CODEX_WORKFLOW.md` |
 | Development environment and test lanes | `docs/DEVELOPMENT.md`, then `tests/TEST_STRATEGY.md` when test ownership changes |
-| Architecture, state, source patches, persistence, IPC | `docs/ARCHITECTURE.md`, `docs/ARCHITECTURE_CONTRACT.md`, `docs/STATE_OWNERSHIP.md`, `docs/ENGINEERING_STANDARDS.md`, `docs/SECURITY_MODEL.md` |
+| Architecture capability map | `docs/ARCHITECTURE_MAP.md` |
+| Cross-owner contracts, source patches, persistence, IPC | `docs/ARCHITECTURE.md`, `docs/ARCHITECTURE_CONTRACT.md`, `docs/STATE_OWNERSHIP.md`, `docs/ENGINEERING_STANDARDS.md`, `docs/SECURITY_MODEL.md` |
+| User-visible blocking guards | `docs/GUARD_LEDGER.md` |
 | User flows, state or UI behavior | `docs/INTERACTION_FLOW.md`, plus the relevant focused policy document |
 | UI visual language, styling standards, design QA process | `docs/DESIGN_LANGUAGE.md`, then the root `design-qa.md` log when recording QA evidence |
 | First-open import confirmation | `docs/IMPORT_CONFIRMATION_PRD.md`, then `docs/IMPORT_CONFIRMATION_PLAN.md` when implementing |
@@ -86,23 +69,32 @@ When code makes a routed document inaccurate, update that document in the same P
 
 ## Code Review Rules
 
-### Source fidelity and persistence
+Classify a failure by whether it is irreversible. Do not treat every fail-closed check as sacred.
 
-- Flag any path that serializes preview DOM, rewrites unrelated HTML bytes, bypasses SourcePatchEngine, weakens stale-source checks, or makes concurrent writes last-writer-wins.
-- Require negative and compatibility coverage for changes to target resolution, source mapping, atomic writes, selection or IME behavior.
-- Require one named owner, an asynchronous outcome model and a drain-boundary
-  decision for every new mutable or persisted state. `npm run
-  architecture:check` must pass; never bypass it with a new view-level Bridge
-  call, browser-storage write or duplicated compatibility branch.
+Do not remove an irreversible authority-boundary protection unless an equivalent protection remains. For reversible interaction, presentation and preflight boundaries, a change may move a front-door block to post-validation, automatic repair or degradation when tests and a recovery path exist.
 
-### Trust and protocol boundaries
+### Authority boundary (fail-closed)
 
-- Flag widened renderer, IPC, filesystem, managed-path or AI-output authority without explicit validation and fail-closed tests.
+Protects against wrong-disk writes, mistaken AI adoption, wrong Version activation, destructive deletes and wrong published packages. Same fact: validate at most at ingress, after an await, and immediately before irreversible commit.
+
+- Flag any path that serializes preview DOM, rewrites unrelated HTML bytes, bypasses SourcePatchEngine, drops stale-hash or identity checks at a commit boundary, or makes concurrent writes last-writer-wins.
+- Require negative and compatibility coverage for target resolution, source mapping, atomic writes, selection or IME behavior.
+- Require one named owner, an asynchronous outcome model and a drain-boundary decision for every new mutable or persisted state. `npm run architecture:check` must pass; never bypass it with a new view-level Bridge call, browser-storage write or duplicated compatibility branch.
+
+### Reversible coordination (converge automatically)
+
+Stale queries, expired Canvas acknowledgements, catalog refresh failures, lost Bridge replies that can be reread, and expired projections must discard the old result, reread authority, rebuild, retry once within a bound, or degrade. They must not become a dialog, a locked canvas, or a user-owned retry for internal uncertainty.
+
+### Presentation and edit eligibility (fail-open)
+
+Layout preflight, hover/outline trust, Review runtime capture completeness, comment-marker location and UI projection lag must not refuse the user. Enter edit first; validate afterwards with MutationObserver, patch scope and the source commit. Keep a comment whose target failed, marked for relink. Hide a failed outline; do not forbid editing.
+
+### Trust, protocol and release
+
+- Flag widened renderer, IPC, filesystem, managed-path or AI-output authority without explicit validation and fail-closed tests at the irreversible boundary.
 - Protocol or schema changes require synchronized schemas, fixtures, compatibility notes, validators and tests.
 - QoderWork automation beyond clipboard-only handoff is a product and security boundary change; changes outside ADR 0032's fixed Qoder ACP contract require new explicit authorization.
-
-### Release and public boundary
-
 - Flag committed secrets, personal paths, real user files, build output, installers or private operational records.
 - Flag packages that cannot be traced to one clean commit/tree, publishing before all gates pass, or mutation of an existing tag or Release asset.
+- User confirmation is for destructive deletes, discarding unsavable edits, explicit overwrite of external changes, and unrecoverable identity or permission changes. An uncertain async receipt is not a confirmation dialog.
 - Review rules complement tests, branch protection and human acceptance; they do not replace them.

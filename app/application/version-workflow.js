@@ -1,4 +1,5 @@
 import { isBridgeRequestError } from "./bridge-client.js";
+import { planVersionActivate, planVersionPrepareReview } from "./version/review-plan.js";
 
 const SHA256 = /^sha256:[a-f0-9]{64}$/u;
 
@@ -321,18 +322,16 @@ export class VersionWorkflow {
   }
 
   async prepareReviewCandidate({ run } = {}) {
-    if (this.#disposed) {
-      return blocked("VERSION_WORKFLOW_DISPOSED", "版本工作流已经停止。");
-    }
     const ready = this.#readyRun(run);
-    if (!ready) {
-      return blocked("VERSION_REVIEW_PRECONDITION", "当前没有可安全审阅的候选版本。");
-    }
-    if (!SHA256.test(String(ready.baseSnapshotSha256 || ""))) {
-      return rejected(
-        "VERSION_REVIEW_BASE_HASH_INVALID",
-        "当前候选缺少可核验的冻结源文件 Hash。",
-      );
+    const reviewPlan = planVersionPrepareReview({
+      disposed: this.#disposed,
+      ready: Boolean(ready),
+      baseHashOk: Boolean(ready && SHA256.test(String(ready.baseSnapshotSha256 || ""))),
+    });
+    if (reviewPlan.kind === "reject") {
+      return reviewPlan.code === "VERSION_REVIEW_BASE_HASH_INVALID"
+        ? rejected(reviewPlan.code, reviewPlan.reason)
+        : blocked(reviewPlan.code, reviewPlan.reason);
     }
     const operationId = this.#nextOperationId("review");
     const generation = ++this.#reviewGeneration;
@@ -398,12 +397,13 @@ export class VersionWorkflow {
     reviewLease = null,
     fromDeferred = false,
   } = {}) {
-    if (this.#disposed) {
-      return blocked("VERSION_WORKFLOW_DISPOSED", "版本工作流已经停止。");
-    }
     const ready = this.#readyRun(run);
-    if (!ready) {
-      return blocked("VERSION_ACTIVATION_PRECONDITION", "当前没有可确认打开的候选版本。");
+    const entryPlan = planVersionActivate({
+      disposed: this.#disposed,
+      ready: Boolean(ready),
+    });
+    if (entryPlan.kind === "reject") {
+      return blocked(entryPlan.code, entryPlan.reason);
     }
     try {
       // Validate the persisted ready record before the explicit mutation. A
@@ -418,11 +418,12 @@ export class VersionWorkflow {
         "当前候选的完成资料不完整，不能打开。",
       );
     }
-    if (this.#projectWorkflow.projectHydrating) {
-      return blocked(
-        "VERSION_ACTIVATION_PROJECT_UNAVAILABLE",
-        "项目状态仍在读取，不能打开候选版本。",
-      );
+    const hydratePlan = planVersionActivate({
+      ready: true,
+      projectHydrating: this.#projectWorkflow.projectHydrating,
+    });
+    if (hydratePlan.kind === "reject") {
+      return blocked(hydratePlan.code, hydratePlan.reason);
     }
     if (!fromDeferred) {
       const deferred = this.#deferCanvasCommand(

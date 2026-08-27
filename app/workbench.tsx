@@ -171,6 +171,7 @@ import {
   unsafeRelinkComments,
 } from "./workbench/comment-relink-model.js";
 import { CommentRailView } from "./workbench/comment-rail-view";
+import { deriveComposerState } from "./workbench/comment-rail-contract";
 import {
   WorkbenchFileHeaderView,
   WorkbenchHeaderToolbar,
@@ -3534,7 +3535,7 @@ export default function Workbench() {
     const nextComments = currentComments.comments.map(
       (comment) => normalizedById.get(comment.commentId) || comment,
     );
-    workspaceControllerRef.current?.replaceCommentItems(nextComments);
+    workspaceControllerRef.current?.applyCommentItems(nextComments);
     return nextComments.filter(commentHasContent);
   }, [currentCommentSessionSnapshot]);
   useEffect(() => {
@@ -5243,7 +5244,7 @@ export default function Workbench() {
     setPendingDeleteCommentId(null);
     setEditingCommentId(null);
     if (!commentEditSessionHasChanges(currentComments.editSession)) {
-      workspaceControllerRef.current?.setCommentEditSession(null);
+      workspaceControllerRef.current?.clearCommentEdit();
       commentEditResumePendingRef.current = null;
     }
     editorRef.current?.clearSelection();
@@ -5275,7 +5276,7 @@ export default function Workbench() {
       const nextTarget = currentTarget
         ? { ...target, id: currentTarget.id }
         : target;
-      controller?.setCommentComposerTarget(nextTarget);
+      controller?.rebindCommentComposer(nextTarget);
       setSelection(nextTarget);
       relinkingTargetRef.current = null;
       relinkSelectionArmedRef.current = false;
@@ -5294,17 +5295,19 @@ export default function Workbench() {
       setRelinkingTarget(null);
       return false;
     }
-    const nextTarget = { ...target, id: current.target.id };
-    const nextComments = currentComments.comments.map((comment) => (
-      comment.commentId === relinkingId
-        ? {
-            ...comment,
-            target: nextTarget,
-            updatedAt: new Date().toISOString(),
-          }
-        : comment
-    ));
-    controller?.replaceCommentItems(nextComments);
+    const rebound = controller?.rebindCommentTarget({
+      commentId: relinkingId,
+      target,
+    });
+    if (rebound?.status !== "succeeded") {
+      return false;
+    }
+    const nextTarget = (rebound.value as {
+      target: HtmlCanvasSelection;
+    }).target;
+    const nextComments = (rebound.value as {
+      comments: CommentItem[];
+    }).comments;
     setSelection(nextTarget);
     relinkingTargetRef.current = null;
     relinkSelectionArmedRef.current = false;
@@ -5362,7 +5365,7 @@ export default function Workbench() {
 
   const clearCurrentComposer = useCallback(() => {
     composerFocusPendingRef.current = false;
-    workspaceControllerRef.current?.clearCommentComposer();
+    workspaceControllerRef.current?.cancelCommentComposer();
     setComposerOpen(false);
     setPendingDeleteCommentId(null);
     updateFocusedComment(null);
@@ -5377,7 +5380,7 @@ export default function Workbench() {
     }
     const located = editorRef.current?.select(target, { showToolbar: false });
     const nextTarget = located || target;
-    workspaceControllerRef.current?.setCommentComposerTarget(nextTarget);
+    workspaceControllerRef.current?.rebindCommentComposer(nextTarget);
     setSelection(nextTarget);
     updateFocusedComment(null);
     setPendingDeleteCommentId(null);
@@ -5430,6 +5433,11 @@ export default function Workbench() {
       || viewMode === "history"
     ) return;
     if (!canSaveCommentTarget(target)) {
+      if (!currentComments.composerTarget) {
+        const nextCommentId = recordId("comment", commentCounter.current++);
+        controller.beginCommentComposer({ target, commentId: nextCommentId });
+      }
+      beginTargetRelink("__composer");
       return;
     }
     const currentEdit = currentComments.editSession;
@@ -5438,7 +5446,7 @@ export default function Workbench() {
       return;
     }
     if (currentEdit) {
-      controller.setCommentEditSession(null);
+      controller.clearCommentEdit();
       commentEditResumePendingRef.current = null;
       setEditingCommentId(null);
     }
@@ -5469,20 +5477,19 @@ export default function Workbench() {
     const resumesRecoveredDraft = currentComments.composerTarget?.id === target.id;
     if (!resumesRecoveredDraft) {
       const nextCommentId = recordId("comment", commentCounter.current++);
-      controller.replaceCommentWorkingCopy({
-        composerDraft: "",
-        composerCommentId: nextCommentId,
-        composerAttachments: [],
-        composerTarget: target,
+      controller.beginCommentComposer({
+        target,
+        commentId: nextCommentId,
       });
     } else if (!currentComments.composerCommentId) {
       const nextCommentId = recordId("comment", commentCounter.current++);
-      controller.replaceCommentWorkingCopy({
-        composerCommentId: nextCommentId,
-        composerTarget: target,
+      controller.beginCommentComposer({
+        target,
+        commentId: nextCommentId,
+        resume: true,
       });
     } else {
-      controller.setCommentComposerTarget(target);
+      controller.rebindCommentComposer(target);
     }
     updateFocusedComment(null);
     setComposerOpen(true);
@@ -5503,6 +5510,7 @@ export default function Workbench() {
     showUnfinishedCommentEditNotice,
     updateFocusedComment,
     viewMode,
+    beginTargetRelink,
   ]);
 
   const openGlobalCommentComposer = useCallback(() => {
@@ -5603,6 +5611,7 @@ export default function Workbench() {
       return;
     }
     if (!canSaveCommentTarget(draftTarget)) {
+      beginTargetRelink("__composer");
       return;
     }
     if (!draft.trim() && draftAttachments.length === 0) {
@@ -5664,6 +5673,7 @@ export default function Workbench() {
     updateFocusedComment,
     viewMode,
     workspaceController,
+    beginTargetRelink,
   ]);
 
   const queueReviewCommentFocus = useCallback((
@@ -5709,18 +5719,9 @@ export default function Workbench() {
       showUnfinishedCommentEditNotice(currentSession);
       return false;
     }
-    const nextSession = (
-      currentSession?.commentId === comment.commentId
-        ? currentSession
-        : {
-            commentId: comment.commentId,
-            baselineText: comment.text,
-            baselineAttachments: [...(comment.attachments ?? [])],
-            draftText: comment.text,
-            draftAttachments: [...(comment.attachments ?? [])],
-          }
-    );
-    controller.setCommentEditSession(nextSession);
+    const outcome = controller.beginCommentEdit({ commentId: comment.commentId });
+    if (outcome.status !== "succeeded") return false;
+    const nextSession = (outcome.value as { session: CommentEditSession }).session;
     setPendingDeleteCommentId(null);
     setEditingCommentId(comment.commentId);
     queueReviewCommentFocus(comment.target, comment.commentId);
@@ -5782,7 +5783,7 @@ export default function Workbench() {
       (comment) => comment.commentId === session.commentId,
     );
     if (!current) {
-      controller?.setCommentEditSession(null);
+      controller?.clearCommentEdit();
       commentEditResumePendingRef.current = null;
       setEditingCommentId(null);
       return;
@@ -5817,10 +5818,8 @@ export default function Workbench() {
   ]);
 
   const updateCommentEditDraft = useCallback((draftText: string) => {
-    const current = currentCommentSessionSnapshot().editSession;
-    if (!current) return;
-    const nextSession = { ...current, draftText };
-    workspaceControllerRef.current?.setCommentEditSession(nextSession);
+    if (!currentCommentSessionSnapshot().editSession) return;
+    workspaceControllerRef.current?.updateCommentEditDraft(draftText);
   }, [currentCommentSessionSnapshot]);
 
   const confirmCommentEdit = useCallback((commentId: string) => {
@@ -5832,7 +5831,7 @@ export default function Workbench() {
       return;
     }
     if (attachmentUploadCount > 0) return;
-    const outcome = workspaceController?.editComment({ commentId });
+    const outcome = workspaceController?.confirmCommentEdit({ commentId });
     if (outcome?.status !== "succeeded") return;
     commentEditResumePendingRef.current = null;
     setEditingCommentId(null);
@@ -5890,7 +5889,7 @@ export default function Workbench() {
       (comment) => comment.commentId === session.commentId,
     );
     if (!editedComment) {
-      workspaceControllerRef.current?.setCommentEditSession(null);
+      workspaceControllerRef.current?.clearCommentEdit();
       commentEditResumePendingRef.current = null;
       const frame = window.requestAnimationFrame(() => {
         setEditingCommentId(null);
@@ -8064,101 +8063,107 @@ export default function Workbench() {
 
         {canvasMode === "edit" ? (
           <CommentRailView
-            commentsPanelRef={commentsPanelRef}
-            commentsHeaderRef={commentsHeaderRef}
-            composerRef={composerRef}
-            commentEditRef={commentEditRef}
-            viewMode={viewMode}
-            commentLayoutReady={commentLayoutReady}
-            commentLayoutAuthority={commentLayoutAuthority}
-            commentRailMinimumOffset={commentRailMinimumOffset}
-            commentRailFollowsFocus={commentRailFollowsFocus}
-            canvasDocumentHeight={canvasDocumentHeight}
-            commentRailContentHeight={commentRailContentHeight}
-            commentRailOffset={commentRailOffset}
-            commentRailMinimumTop={commentRailMinimumTop}
-            visibleCommentItems={visibleCommentItems}
-            draftInCurrentTab={draftInCurrentTab}
-            hasUnsavedCommentEdit={hasUnsavedCommentEdit}
-            otherTabCommentEntryCount={otherTabCommentEntryCount}
-            otherTabCommentsOpen={otherTabCommentsOpen}
-            otherTabCommentsContextKey={otherTabCommentsContextKey}
-            composerOpen={composerOpen}
-            draftTarget={draftTarget}
-            interactionLocked={interactionLocked}
-            unfinishedEditedComment={unfinishedEditedComment}
-            otherTabCommentGroups={otherTabCommentGroups}
-            activeCommentCount={activeCommentCount}
-            changeEvents={changeEvents}
-            composerInCurrentTab={composerInCurrentTab}
-            composerTop={composerTop}
-            focusedCommentId={focusedCommentId}
-            relinkRailCardVisible={relinkRailCardVisible}
-            relinkCardCopy={relinkCardCopy}
-            relinkCardActive={relinkCardActive}
-            projectLoadError={projectLoadError}
-            draftTargetScope={draftTargetScope}
-            attachmentUploadCount={attachmentUploadCount}
-            draftTargetCanSave={draftTargetCanSave}
-            composerMeasurementKey={composerMeasurementKey}
-            draft={draft}
-            draftCommentId={draftCommentId}
-            relinkingTarget={relinkingTarget}
-            draftAttachments={draftAttachments}
-            attachmentObjectUrls={attachmentObjectUrls}
-            pendingDeleteCommentId={pendingDeleteCommentId}
-            hasCollapsedCommentDraft={hasCollapsedCommentDraft}
-            draftRecoveryTop={draftRecoveryTop}
-            draftRecoveryMeasurementKey={draftRecoveryMeasurementKey}
-            expectedCommentLayoutTargetIds={expectedCommentLayoutTargetIds}
-            sortedVisibleCommentItems={sortedVisibleCommentItems}
-            renderedVisibleCommentItems={renderedVisibleCommentItems}
-            editingCommentId={editingCommentId}
-            commentEditSession={commentEditSession}
-            commentTargetLayouts={commentTargetLayouts}
-            selection={selection}
-            commentMeasurementKeys={commentMeasurementKeys}
-            visibleCommentPositions={visibleCommentPositions}
-            commentEditDraft={commentEditDraft}
-            commentEditAttachments={commentEditAttachments}
-            openGlobalCommentComposer={openGlobalCommentComposer}
-            resumeCurrentComposer={resumeCurrentComposer}
-            resumeCommentEdit={resumeCommentEdit}
-            setExpandedOtherTabCommentsKey={setExpandedOtherTabCommentsKey}
-            setComposerOpen={setComposerOpen}
-            setPendingDeleteCommentId={setPendingDeleteCommentId}
-            focusCommentTarget={focusCommentTarget}
-            startUnsafeTargetRelink={startUnsafeTargetRelink}
-            cancelTargetRelink={cancelTargetRelink}
-            onRetryProjectHydration={() => {
-              void workspaceController?.retryProjectHydration();
+            model={{
+              composer: deriveComposerState({
+                relinkingTarget,
+                editingCommentId,
+                commentEditSession,
+                commentEditDraft,
+                commentEditAttachments,
+                composerOpen,
+                draftTarget,
+                draft,
+                draftCommentId,
+                draftAttachments,
+                hasCollapsedCommentDraft,
+              }),
+              commentsPanelRef,
+              commentsHeaderRef,
+              composerRef,
+              commentEditRef,
+              viewMode,
+              commentLayoutReady,
+              commentLayoutAuthority,
+              commentRailMinimumOffset,
+              commentRailFollowsFocus,
+              canvasDocumentHeight,
+              commentRailContentHeight,
+              commentRailOffset,
+              commentRailMinimumTop,
+              visibleCommentItems,
+              draftInCurrentTab,
+              hasUnsavedCommentEdit,
+              otherTabCommentEntryCount,
+              otherTabCommentsOpen,
+              otherTabCommentsContextKey,
+              interactionLocked,
+              unfinishedEditedComment,
+              otherTabCommentGroups,
+              activeCommentCount,
+              changeEvents,
+              composerInCurrentTab,
+              composerTop,
+              focusedCommentId,
+              relinkRailCardVisible,
+              relinkCardCopy,
+              relinkCardActive,
+              projectLoadError,
+              draftTargetScope,
+              attachmentUploadCount,
+              draftTargetCanSave,
+              composerMeasurementKey,
+              attachmentObjectUrls,
+              pendingDeleteCommentId,
+              draftRecoveryTop,
+              draftRecoveryMeasurementKey,
+              expectedCommentLayoutTargetIds,
+              sortedVisibleCommentItems,
+              renderedVisibleCommentItems,
+              commentTargetLayouts,
+              selection,
+              commentMeasurementKeys,
+              visibleCommentPositions,
             }}
-            closeCommentComposer={closeCommentComposer}
-            beginTargetRelink={beginTargetRelink}
-            onComposerDraftChange={(value) => {
-              workspaceControllerRef.current?.setCommentComposerDraft(value);
+            actions={{
+              openGlobalCommentComposer,
+              resumeCurrentComposer,
+              resumeCommentEdit,
+              setExpandedOtherTabCommentsKey,
+              setComposerOpen,
+              setPendingDeleteCommentId,
+              focusCommentTarget,
+              startUnsafeTargetRelink,
+              cancelTargetRelink,
+              onRetryProjectHydration: () => {
+                void workspaceController?.retryProjectHydration();
+              },
+              closeCommentComposer,
+              beginTargetRelink,
+              updateDraft: (value) => {
+                workspaceControllerRef.current?.updateCommentDraft(value);
+              },
+              onComposerPaste: (event) => {
+                const commentId = draftCommentId
+                  || currentCommentSessionSnapshot().composerCommentId;
+                if (commentId) pasteImages(event, { kind: "composer", commentId });
+              },
+              commit: addComment,
+              ensureAttachmentObjectUrl,
+              openAttachmentPreview,
+              downloadAttachment,
+              removeComposerAttachment,
+              discardCurrentComposer,
+              openAttachmentPicker,
+              commentTargetIsLocatable,
+              updateCommentEditDraft,
+              cancelCommentEdit,
+              confirmEdit: confirmCommentEdit,
+              pasteImages,
+              removeCommentAttachment,
+              queueReviewCommentFocus,
+              deleteComment,
+              beginEdit: beginCommentEdit,
             }}
-            onComposerPaste={(event) => {
-              const commentId = draftCommentId
-                || currentCommentSessionSnapshot().composerCommentId;
-              if (commentId) pasteImages(event, { kind: "composer", commentId });
-            }}
-            addComment={addComment}
-            ensureAttachmentObjectUrl={ensureAttachmentObjectUrl}
-            openAttachmentPreview={openAttachmentPreview}
-            downloadAttachment={downloadAttachment}
-            removeComposerAttachment={removeComposerAttachment}
-            discardCurrentComposer={discardCurrentComposer}
-            openAttachmentPicker={openAttachmentPicker}
-            commentTargetIsLocatable={commentTargetIsLocatable}
-            updateCommentEditDraft={updateCommentEditDraft}
-            cancelCommentEdit={cancelCommentEdit}
-            confirmCommentEdit={confirmCommentEdit}
-            pasteImages={pasteImages}
-            removeCommentAttachment={removeCommentAttachment}
-            queueReviewCommentFocus={queueReviewCommentFocus}
-            deleteComment={deleteComment}
-            beginCommentEdit={beginCommentEdit}
           />
         ) : null}
       </div>

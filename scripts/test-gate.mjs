@@ -14,6 +14,10 @@ import {
   selectGatePlan,
   validateImpactMap,
 } from "./test-gate-core.mjs";
+import {
+  loadCapabilityContextMap,
+  selectCapabilityContext,
+} from "./capability-context.mjs";
 import { CAPABILITY_SMOKE_SUITES, countTagOccurrences } from "./gate-smoke-suites.mjs";
 import {
   assertResumeCompatible,
@@ -410,16 +414,23 @@ async function main() {
   }
   const inventory = await inventoryFiles();
   const tagCounts = await smokeTagCounts(inventory);
-  const plan = annotateGatePlan(
-    omitMissingNodeTests(
-      assertFullyAutomatedPlan(selectGatePlan({ map, lane: selectionLane, changedFiles: files })),
-      (file) => {
-        const absolute = path.resolve(productRoot, file);
-        return absolute.startsWith(`${productRoot}${path.sep}`) && existsSync(absolute);
-      },
+  const plan = {
+    ...annotateGatePlan(
+      omitMissingNodeTests(
+        assertFullyAutomatedPlan(selectGatePlan({ map, lane: selectionLane, changedFiles: files })),
+        (file) => {
+          const absolute = path.resolve(productRoot, file);
+          return absolute.startsWith(`${productRoot}${path.sep}`) && existsSync(absolute);
+        },
+      ),
+      { map, inventoryFiles: inventory, tagCounts },
     ),
-    { map, inventoryFiles: inventory, tagCounts },
-  );
+    capabilityContext: selectCapabilityContext({
+      changedFiles: files,
+      map: loadCapabilityContextMap(),
+      productRoot,
+    }),
+  };
   const repository = await repositoryEvidence(files);
   const packageJson = JSON.parse(await readFile(path.join(productRoot, "package.json"), "utf8"));
   const developerPreviewIdentity = options.lane === "developer-package"

@@ -1,6 +1,7 @@
 import { createDraftOperationId, isDraftOperationId, rebaseDraftMutation } from "../domain/draft-aggregate.js";
 import { isBridgeRequestError } from "./bridge-client.js";
 import { createCommentWorkflowCodecs } from "./comment-workflow-codecs.js";
+import { planCommentCommit } from "./comment/commit-plan.js";
 
 function frozenItems(value) {
   return Object.freeze(Array.isArray(value) ? [...value] : []);
@@ -441,23 +442,175 @@ export class CommentWorkflow {
     return this.#drainSnapshot(write);
   }
 
-  async commitComment({ commentId } = {}) {
-    const composer = composerState(this.#commentSession);
-    const target = composer.target;
+  beginComposer({ target, commentId, resume = false } = {}) {
+    if (this.#disposed) {
+      return blocked("COMMENT_WORKFLOW_DISPOSED", "评论工作流已停止。");
+    }
     if (!target) {
       return blocked("COMMENT_TARGET_MISSING", "请先选择要评论的内容。");
     }
-    if (!String(target.resolution || "") || target.resolution !== "exact") {
-      return blocked("COMMENT_TARGET_UNSAFE", "当前评论位置需要重新选择后才能保存。");
+    const nextCommentId = String(
+      commentId || this.#commentSession.composerCommentId || this.#nextCommentId(),
+    );
+    if (resume) {
+      this.#commentSession.update({
+        ...(this.#commentSession.composerCommentId
+          ? {}
+          : { composerCommentId: nextCommentId }),
+        composerTarget: target,
+      });
+    } else {
+      this.#commentSession.update({
+        composerDraft: "",
+        composerCommentId: nextCommentId,
+        composerAttachments: [],
+        composerTarget: target,
+      });
     }
-    if (this.#uploadCount > 0) {
-      return blocked("ATTACHMENT_UPLOAD_PENDING", "请等待附件添加完成后再保存评论。");
+    return succeeded({
+      target: this.#commentSession.composerTarget,
+      commentId: this.#commentSession.composerCommentId,
+    });
+  }
+
+  updateDraft(draft) {
+    if (this.#disposed) {
+      return blocked("COMMENT_WORKFLOW_DISPOSED", "评论工作流已停止。");
     }
+    this.#commentSession.setComposerDraft(String(draft ?? ""));
+    return succeeded({ draft: this.#commentSession.composerDraft });
+  }
+
+  rebindComposerTarget(target) {
+    if (this.#disposed) {
+      return blocked("COMMENT_WORKFLOW_DISPOSED", "评论工作流已停止。");
+    }
+    if (!target) {
+      return blocked("COMMENT_TARGET_MISSING", "请先选择要评论的内容。");
+    }
+    this.#commentSession.setComposerTarget(target);
+    return succeeded({ target: this.#commentSession.composerTarget });
+  }
+
+  clearComposer() {
+    if (this.#disposed) {
+      return blocked("COMMENT_WORKFLOW_DISPOSED", "评论工作流已停止。");
+    }
+    this.#commentSession.clearComposer();
+    return succeeded({});
+  }
+
+  beginEdit({ commentId } = {}) {
+    if (this.#disposed) {
+      return blocked("COMMENT_WORKFLOW_DISPOSED", "评论工作流已停止。");
+    }
+    const current = this.#commentSession.comments.find(
+      (comment) => comment.commentId === commentId,
+    );
+    if (!current) {
+      return blocked("COMMENT_MISSING", "这条评论已经不存在。");
+    }
+    const existing = this.#commentSession.editSession;
+    if (existing?.commentId === commentId) {
+      return succeeded({ session: existing });
+    }
+    const nextSession = {
+      commentId: current.commentId,
+      baselineText: current.text,
+      baselineAttachments: [...(current.attachments ?? [])],
+      draftText: current.text,
+      draftAttachments: [...(current.attachments ?? [])],
+    };
+    this.#commentSession.setEditSession(nextSession);
+    return succeeded({ session: nextSession });
+  }
+
+  updateEditDraft(draftText) {
+    if (this.#disposed) {
+      return blocked("COMMENT_WORKFLOW_DISPOSED", "评论工作流已停止。");
+    }
+    const current = this.#commentSession.editSession;
+    if (!current) {
+      return blocked("COMMENT_EDIT_MISSING", "当前评论修改已经失效。");
+    }
+    const nextSession = { ...current, draftText: String(draftText ?? "") };
+    this.#commentSession.setEditSession(nextSession);
+    return succeeded({ session: nextSession });
+  }
+
+  clearEditSession() {
+    if (this.#disposed) {
+      return blocked("COMMENT_WORKFLOW_DISPOSED", "评论工作流已停止。");
+    }
+    this.#commentSession.setEditSession(null);
+    return succeeded({});
+  }
+
+  rebindCommentTarget({ commentId, target } = {}) {
+    if (this.#disposed) {
+      return blocked("COMMENT_WORKFLOW_DISPOSED", "评论工作流已停止。");
+    }
+    if (!commentId || !target) {
+      return blocked("COMMENT_TARGET_MISSING", "请先选择要评论的内容。");
+    }
+    const current = this.#commentSession.comments.find(
+      (comment) => comment.commentId === commentId,
+    );
+    if (!current) {
+      return blocked("COMMENT_MISSING", "这条评论已经不存在。");
+    }
+    const nextTarget = { ...target, id: current.target.id };
+    const nextComments = this.#commentSession.comments.map((comment) => (
+      comment.commentId === commentId
+        ? {
+            ...comment,
+            target: nextTarget,
+            updatedAt: safeDate(this.#clock.now()),
+          }
+        : comment
+    ));
+    this.#commentSession.setComments(nextComments);
+    return succeeded({
+      comment: nextComments.find((comment) => comment.commentId === commentId),
+      comments: nextComments,
+      target: nextTarget,
+    });
+  }
+
+  applyCommentItems(comments) {
+    if (this.#disposed) {
+      return blocked("COMMENT_WORKFLOW_DISPOSED", "评论工作流已停止。");
+    }
+    this.#commentSession.setComments(comments);
+    return succeeded({ comments: this.#commentSession.comments });
+  }
+
+  applyWorkingCopy(input) {
+    if (this.#disposed) {
+      return blocked("COMMENT_WORKFLOW_DISPOSED", "评论工作流已停止。");
+    }
+    return succeeded(this.#commentSession.update(input));
+  }
+
+  confirmEdit(input) {
+    return this.editComment(input);
+  }
+
+  async commitComment({ commentId } = {}) {
+    const composer = composerState(this.#commentSession);
+    const commitPlan = planCommentCommit({
+      disposed: this.#disposed,
+      target: composer.target,
+      uploadCount: this.#uploadCount,
+      text: composer.draft,
+      attachmentCount: composer.attachments.length,
+    });
+    if (commitPlan.kind === "reject") {
+      return blocked(commitPlan.code, commitPlan.reason);
+    }
+    const target = composer.target;
     const text = composer.draft.trim();
     const attachments = [...composer.attachments];
-    if (!text && attachments.length === 0) {
-      return blocked("COMMENT_EMPTY", "请输入评论内容或添加附件。");
-    }
     const sourcePath = this.#projectSession.sourcePath;
     if (sourcePath) {
       const registered = await this.#ensureRegistered({ sourcePath });

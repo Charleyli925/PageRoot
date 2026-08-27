@@ -1,5 +1,13 @@
 import { isBridgeRequestError } from "./bridge-client.js";
 import { createDocumentWorkflowCodecs } from "./document-workflow-codecs.js";
+import {
+  planDocumentEnqueue,
+  planDocumentSave,
+} from "./document/save-plan.js";
+import {
+  copyProjectContext as copyContext,
+  verifyProjectContext,
+} from "./verified-project-context.js";
 
 const AUTOSAVE_DELAY_MS = 100;
 const SHA256 = /^sha256:[a-f0-9]{64}$/u;
@@ -87,27 +95,6 @@ function sameOpenRoute(left, right, sameSourcePath) {
     && sameSourcePath(left.exactSourcePath || left.sourcePath, right.exactSourcePath || right.sourcePath)
     && Number(left.sessionEpoch ?? left.epoch) === Number(right.sessionEpoch ?? right.epoch)
   );
-}
-
-function copyContext(context) {
-  if (!context) return null;
-  const epoch = Number(context.epoch);
-  const projectId = String(context.projectId || "");
-  const documentId = String(context.documentId || "");
-  const sourcePath = String(context.sourcePath || "");
-  if (!Number.isSafeInteger(epoch) || !sourcePath) return null;
-  const target = context.projectRootPath && context.targetKind
-    ? {
-      projectRootPath: String(context.projectRootPath),
-      targetKind: String(context.targetKind),
-      workingCopyId: context.workingCopyId ? String(context.workingCopyId) : null,
-      versionId: context.versionId ? String(context.versionId) : null,
-      exactSourcePath: String(context.exactSourcePath || sourcePath),
-      sourceSha256: String(context.sourceSha256 || ""),
-      sessionEpoch: Number(context.sessionEpoch ?? epoch),
-    }
-    : {};
-  return Object.freeze({ epoch, projectId, documentId, sourcePath, ...target });
 }
 
 function invalidAcknowledgement(message, code) {
@@ -346,14 +333,12 @@ export class DocumentWorkflow {
   }
 
   enqueueEdit({ html, mutation, sourceTransaction, context } = {}) {
-    if (this.#disposed) {
-      return blocked("DOCUMENT_WORKFLOW_DISPOSED", "文档持久化工作流已经停止。");
-    }
-    if (this.#documentSession.persistState === "conflict") {
-      return blocked(
-        "DOCUMENT_PERSISTENCE_CONFLICT",
-        "当前 HTML 与外部文件存在冲突，请先选择要保留的版本。",
-      );
+    const enqueuePlan = planDocumentEnqueue({
+      disposed: this.#disposed,
+      persistState: this.#documentSession.persistState,
+    });
+    if (enqueuePlan.kind === "reject") {
+      return blocked(enqueuePlan.code, enqueuePlan.reason);
     }
     const writeContext = this.#writeContext(context);
     const nextHtml = String(html ?? "");
@@ -429,13 +414,14 @@ export class DocumentWorkflow {
   }
 
   async flush({ throughRevision } = {}) {
-    if (this.#disposed) {
-      return blocked("DOCUMENT_WORKFLOW_DISPOSED", "文档持久化工作流已经停止。");
+    const disposedPlan = planDocumentSave({ disposed: this.#disposed });
+    if (disposedPlan.kind === "reject") {
+      return blocked(disposedPlan.code, disposedPlan.reason);
     }
     this.#clearAutosaveTimer();
     const cutoff = throughRevision === undefined ? undefined : revision(throughRevision);
     const currentPromise = this.#documentSession.flushPromise;
-    if (currentPromise) {
+    if (planDocumentSave({ flushInFlight: Boolean(currentPromise) }).kind === "wait") {
       const outcome = await currentPromise;
       if (!outcome || outcome.status !== "succeeded") return outcome || blocked(
         "DOCUMENT_FLUSH_UNKNOWN",
@@ -448,14 +434,17 @@ export class DocumentWorkflow {
     }
 
     this.#reconstructPendingWrite();
-    if (!this.#documentSession.pendingWrite) {
-      return this.#documentSession.editRevision
-        <= this.#documentSession.lastPersistedRevision
-        ? succeeded({ revision: this.#documentSession.lastPersistedRevision, idle: true })
-        : blocked(
-          "DOCUMENT_SOURCE_UNBOUND",
-          "当前编辑尚未绑定本地 HTML，无法写回源文件。",
-        );
+    const savePlan = planDocumentSave({
+      disposed: this.#disposed,
+      pendingWrite: this.#documentSession.pendingWrite,
+      editRevision: this.#documentSession.editRevision,
+      lastPersistedRevision: this.#documentSession.lastPersistedRevision,
+    });
+    if (savePlan.kind === "reject") {
+      return blocked(savePlan.code, savePlan.reason);
+    }
+    if (savePlan.action === "idle") {
+      return succeeded({ revision: savePlan.revision, idle: true });
     }
 
     const promise = this.#runFlush(cutoff);
@@ -1192,16 +1181,10 @@ export class DocumentWorkflow {
   }
 
   #isCurrent(context) {
-    const normalized = copyContext(context);
-    if (!normalized || this.#disposed) return false;
-    if (normalized.projectId && normalized.documentId) {
-      return this.#projectSession.matches(normalized);
-    }
-    return Number(this.#projectSession.epoch) === normalized.epoch
-      && this.#codecs.sameSourcePath(
-        this.#projectSession.sourcePath,
-        normalized.sourcePath,
-      );
+    return Boolean(verifyProjectContext(context, this.#projectSession, {
+      disposed: this.#disposed,
+      sameSourcePath: this.#codecs.sameSourcePath,
+    }));
   }
 
   #nextOperationId(kind) {

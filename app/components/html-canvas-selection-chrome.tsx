@@ -2,160 +2,92 @@
 
 import type {
   CSSProperties,
-  KeyboardEvent as ReactKeyboardEvent,
-  MouseEvent as ReactMouseEvent,
-  PointerEvent as ReactPointerEvent,
-  RefObject,
 } from "react";
 import { ArrowDownIcon } from "@phosphor-icons/react/dist/csr/ArrowDown";
 import { ArrowUpIcon } from "@phosphor-icons/react/dist/csr/ArrowUp";
 
-import type { PagePresentationAction } from "../lib/page-view-context.js";
 import {
   isPageRootSelection,
-  type MoveAvailability,
 } from "./html-canvas-selection";
-import type {
-  EditableStyleProperty,
-  SelectedStyle,
-} from "./html-canvas-style-inspector";
-import type {
-  CanvasCapabilityHoverSnapshot,
-  CanvasHoverHintPlacement,
-} from "./html-canvas-capability-hover";
-import NoticeBar, { type NoticeUsageCapture } from "./NoticeBar";
-import type {
-  HtmlCanvasInteractionMode,
-  HtmlCanvasSelection,
-} from "./HtmlCanvasEditor.types";
+import {
+  selectionChromeViewFields,
+  type SelectionChromeActions,
+  type SelectionChromeModel,
+} from "./html-canvas-selection-chrome-contract";
+import NoticeBar from "./NoticeBar";
 import styles from "./HtmlCanvasEditor.module.css";
 
-export type HtmlCanvasCommentMarker = {
-  key: string;
-  selection: HtmlCanvasSelection;
-  count?: number;
-  label?: string;
-  placement?: "target-corner" | "tab-side";
-  left: number;
-  top: number;
-};
-
-export type HtmlCanvasEditFeedback = {
-  code: string;
-  title: string;
-  message: string;
-  tone: "warning" | "error";
-  sticky: boolean;
-  recovery: "reload" | "none";
-};
+export type {
+  HtmlCanvasCommentMarker,
+  HtmlCanvasEditFeedback,
+} from "./html-canvas-selection-chrome-contract";
 
 export type HtmlCanvasSelectionChromeProps = {
-  canvasTransitionActive: boolean;
-  selectionCapabilitySpoken: string;
-  interactionLocked: boolean;
-  selection: HtmlCanvasSelection | null;
-  selectedOutlineStyle: CSSProperties | undefined;
-  showHoverOutline: boolean;
-  showHoverHint: boolean;
-  hoverOutlineStyle: CSSProperties | undefined;
-  hoverHintStyle: CSSProperties | undefined;
-  hoverHintPlacement: CanvasHoverHintPlacement | undefined;
-  hoverChrome: CanvasCapabilityHoverSnapshot;
-  hoverHintMeasureRef: RefObject<HTMLDivElement | null>;
-  editFeedback: HtmlCanvasEditFeedback | null;
-  reloadActionLabel: string;
-  editFeedbackActionAvailable: boolean;
-  renderedMode: HtmlCanvasInteractionMode;
-  commentMarkers: readonly HtmlCanvasCommentMarker[];
-  toolbarVisible: boolean;
-  overlayPosition: { toolbarLeft: number; toolbarTop: number } | null;
-  toolbarRef: RefObject<HTMLDivElement | null>;
-  hasTextRange: boolean;
-  isEditing: boolean;
-  toolbarStyle: CSSProperties | undefined;
-  selectedPagePresentationAction: PagePresentationAction | null;
-  readOnly: boolean;
-  selectedNativeEditAvailable: boolean;
-  selectedStyle: SelectedStyle;
-  textFormatRequiresSelection: boolean;
-  enableReorder: boolean;
-  moveAvailability: MoveAvailability;
-  spacingMenuRef: RefObject<HTMLDetailsElement | null>;
-  spacingMenuOpen: boolean;
-  usageProjectId?: string;
-  usageCapture?: NoticeUsageCapture;
-  onHoverHintPointerDown: (event: ReactPointerEvent<HTMLDivElement>) => void;
-  onHoverHintPointerEnter: () => void;
-  onHoverHintPointerLeave: () => void;
-  onHoverHintClick: (event: ReactMouseEvent<HTMLDivElement>) => void;
-  onEditFeedbackAction: () => void;
-  onDismissEditFeedback: () => void;
-  onPauseEditFeedback: (paused: boolean) => void;
-  onSelectCommentMarker: (selection: HtmlCanvasSelection) => void;
-  onToolbarKeyDown: (event: ReactKeyboardEvent<HTMLDivElement>) => void;
-  onToolbarPointerDownCapture: (event: ReactPointerEvent<HTMLDivElement>) => void;
-  onToolbarMouseDownCapture: (event: ReactMouseEvent<HTMLDivElement>) => void;
-  onExecutePresentationAction: () => void;
-  onComment: () => void;
-  onStartEditing: () => void;
-  onApplyInlineStyle: (property: EditableStyleProperty, value: string) => void;
-  onMoveSelected: (direction: "up" | "down") => void;
-  onToggleSpacingMenu: () => void;
+  model: SelectionChromeModel;
+  actions: SelectionChromeActions;
 };
 
 export function HtmlCanvasSelectionChrome({
-  canvasTransitionActive,
-  selectionCapabilitySpoken,
-  interactionLocked,
-  selection,
-  selectedOutlineStyle,
-  showHoverOutline,
-  showHoverHint,
-  hoverOutlineStyle,
-  hoverHintStyle,
-  hoverHintPlacement,
-  hoverChrome,
-  hoverHintMeasureRef,
-  editFeedback,
-  reloadActionLabel,
-  editFeedbackActionAvailable,
-  renderedMode,
-  commentMarkers,
-  toolbarVisible,
-  overlayPosition,
-  toolbarRef,
-  hasTextRange,
-  isEditing,
-  toolbarStyle,
-  selectedPagePresentationAction,
-  readOnly,
-  selectedNativeEditAvailable,
-  selectedStyle,
-  textFormatRequiresSelection,
-  enableReorder,
-  moveAvailability,
-  spacingMenuRef,
-  spacingMenuOpen,
-  usageProjectId,
-  usageCapture,
-  onHoverHintPointerDown,
-  onHoverHintPointerEnter,
-  onHoverHintPointerLeave,
-  onHoverHintClick,
-  onEditFeedbackAction,
-  onDismissEditFeedback,
-  onPauseEditFeedback,
-  onSelectCommentMarker,
-  onToolbarKeyDown,
-  onToolbarPointerDownCapture,
-  onToolbarMouseDownCapture,
-  onExecutePresentationAction,
-  onComment,
-  onStartEditing,
-  onApplyInlineStyle,
-  onMoveSelected,
-  onToggleSpacingMenu,
+  model,
+  actions,
 }: HtmlCanvasSelectionChromeProps) {
+  const {
+    canvasTransitionActive,
+    selectionCapabilitySpoken,
+    interactionLocked,
+    hoverHintMeasureRef,
+    editFeedback,
+    reloadActionLabel,
+    editFeedbackActionAvailable,
+    renderedMode,
+    commentMarkers,
+    toolbarVisible,
+    overlayPosition,
+    toolbarRef,
+    hasTextRange,
+    isEditing,
+    toolbarStyle,
+    selectedPagePresentationAction,
+    readOnly,
+    selectedNativeEditAvailable,
+    selectedStyle,
+    textFormatRequiresSelection,
+    enableReorder,
+    moveAvailability,
+    spacingMenuRef,
+    spacingMenuOpen,
+    usageProjectId,
+    usageCapture,
+  } = model;
+  const {
+    showHoverOutline,
+    showHoverHint,
+    hoverOutlineStyle,
+    hoverHintStyle,
+    hoverHintPlacement,
+    hoverCapability,
+    selection,
+    selectedOutlineStyle,
+  } = selectionChromeViewFields(model);
+  const {
+    onHoverHintPointerDown,
+    onHoverHintPointerEnter,
+    onHoverHintPointerLeave,
+    onHoverHintClick,
+    onEditFeedbackAction,
+    onDismissEditFeedback,
+    onPauseEditFeedback,
+    onSelectCommentMarker,
+    onToolbarKeyDown,
+    onToolbarPointerDownCapture,
+    onToolbarMouseDownCapture,
+    onExecutePresentationAction,
+    onComment,
+    onStartEditing,
+    onApplyInlineStyle,
+    onMoveSelected,
+    onToggleSpacingMenu,
+  } = actions;
   return (
     <>
       <div
@@ -184,14 +116,14 @@ export function HtmlCanvasSelectionChrome({
           aria-hidden="true"
         />
       ) : null}
-      {showHoverOutline && showHoverHint && hoverHintStyle && hoverChrome.capability ? (
+      {showHoverOutline && showHoverHint && hoverHintStyle && hoverCapability ? (
         <>
           <div
             ref={hoverHintMeasureRef}
             className={`${styles.hoverHint} ${styles.hoverHintMeasure}`}
             aria-hidden="true"
           >
-            {hoverChrome.capability.hint}
+            {hoverCapability.hint}
           </div>
           <div
             className={styles.hoverHint}
@@ -200,13 +132,13 @@ export function HtmlCanvasSelectionChrome({
             data-html-canvas-preserve-selection="true"
             style={hoverHintStyle}
             role="button"
-            aria-label={hoverChrome.capability.hint}
+            aria-label={hoverCapability.hint}
             onPointerDown={onHoverHintPointerDown}
             onPointerEnter={onHoverHintPointerEnter}
             onPointerLeave={onHoverHintPointerLeave}
             onClick={onHoverHintClick}
           >
-            {hoverChrome.capability.hint}
+            {hoverCapability.hint}
           </div>
         </>
       ) : null}

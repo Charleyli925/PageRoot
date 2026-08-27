@@ -74,7 +74,7 @@ Inspect the selected task coverage without running it:
 npm run gate:plan -- --base origin/main
 ```
 
-The compact JSON lists changed files, matched owners, Node tests, capability canaries and estimated fan-out. Width warnings are informational. After an environment flake on the same source hash, resume with `npm run gate:task -- --resume <run-id>`; reuse requires an identical HEAD tree, dirty change-set, base, package-lock, Node version, platform, suite commands and surviving build artifacts. Ready/release/candidate/artifact complete proofs never resume.
+The compact JSON lists changed files, matched owners, Node tests, capability canaries, estimated fan-out, and a capability-context reading set (`entryInterfaces`, `owners`, `implementationFiles`, `focusedTests`, `requiredDocs`, `estimatedContextBytes`) from `scripts/capability-context.json`. Width warnings are informational. After an environment flake on the same source hash, resume with `npm run gate:task -- --resume <run-id>`; reuse requires an identical HEAD tree, dirty change-set, base, package-lock, Node version, platform, suite commands and surviving build artifacts. Ready/release/candidate/artifact complete proofs never resume.
 
 ### Audit and retire
 
@@ -193,6 +193,7 @@ Behavior and its documentation form one change. Use this routing table:
 | Change Request, Attempt, completion, version or schema | `docs/CHANGE_REQUEST_PROTOCOL.md`, schemas, fixtures and compatibility tests |
 | Development commands, CI or test ownership | `docs/DEVELOPMENT.md`, `tests/TEST_STRATEGY.md`, test impact map |
 | Git or collaboration behavior | `docs/GIT_WORKFLOW.md`, `CONTRIBUTING.md`, `AGENTS.md` when the permanent rule changes |
+| Architecture capability routing or user-visible guards | `docs/ARCHITECTURE_MAP.md`, `docs/GUARD_LEDGER.md`, `docs/ENGINEERING_STANDARDS.md` |
 | Packaging, provenance, signing or publication | `docs/RELEASING.md`, `CHANGELOG.md` |
 | Dependency policy or advisory exception | `docs/DEPENDENCY_SECURITY.md` |
 | Public/private source boundary | `docs/OPEN_SOURCE_BOUNDARY.md`, notices, contribution or security policies as applicable |
