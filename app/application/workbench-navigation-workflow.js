@@ -596,8 +596,8 @@ export class WorkbenchNavigationWorkflow {
         "HTML 打开成功，但缺少应用回执。",
       ) };
     }
-    this.#session.transition(active.transactionId, "hydrating", { receipt: active.receipt });
-    this.#session.transition(active.transactionId, "canvas-verified", { receipt: active.receipt });
+    this.#session.transition(active.transactionId, "display-ready", { receipt: active.receipt });
+    void this.#monitorSettlement(active.receipt, 15_000);
     return { outcome, receipt: active.receipt };
   }
 
@@ -623,23 +623,20 @@ export class WorkbenchNavigationWorkflow {
         "HTML 已接收打开请求，但应用回执未在时限内到达。",
       ) };
     }
-    this.#session.transition(active.transactionId, "hydrating", { receipt });
-    const settled = await this.#waitForSettlement(active, receipt, deadlineMs);
-    if (!settled.ok) {
-      if (receipt.projectId && receipt.documentId) {
-        this.#tabs.updateStatus(receipt.projectId, receipt.documentId, "error");
-      }
-      return {
-        outcome: rejected(
-          settled.code,
-          settled.reason,
-          { committed: true, tabId: receipt.tabId },
-        ),
-        receipt,
-      };
-    }
-    this.#session.transition(active.transactionId, "canvas-verified", { receipt });
+    // The correlated application receipt means the exact HTML bytes are now
+    // published. Release the user-facing admission here; hydration and Canvas
+    // verification continue as independently fenced readiness work.
+    this.#session.transition(active.transactionId, "display-ready", { receipt });
+    void this.#monitorSettlement(receipt, deadlineMs);
     return { outcome: succeeded({ ...outcome.value, receipt }), receipt };
+  }
+
+  async #monitorSettlement(receipt, deadlineMs) {
+    const settled = await this.#waitForSettlement(null, receipt, deadlineMs);
+    if (settled.stale) return;
+    if (!settled.ok && receipt.projectId && receipt.documentId) {
+      this.#tabs.updateStatus(receipt.projectId, receipt.documentId, "error");
+    }
   }
 
   async #finishExternalWhenApplied(active) {
@@ -717,7 +714,7 @@ export class WorkbenchNavigationWorkflow {
         settled = true;
         if (timer !== null) this.#clearTimer(timer);
         unsubscribe();
-        active.cancelSettlementWait = null;
+        if (active) active.cancelSettlementWait = null;
         resolve(value);
       };
       const inspect = (snapshot) => {
@@ -737,7 +734,10 @@ export class WorkbenchNavigationWorkflow {
           && !project?.projectId
           && Number(project?.epoch) === receipt.epoch,
         );
-        if (!sessionAligned && !browserMemoryAligned) return;
+        if (!sessionAligned && !browserMemoryAligned) {
+          if (Number(project?.epoch) > receipt.epoch) settle({ ok: false, stale: true });
+          return;
+        }
         const hydration = snapshot?.project?.hydration;
         if (hydration?.phase === "failed" && Number(hydration.epoch) === receipt.epoch) {
           settle({
@@ -767,11 +767,13 @@ export class WorkbenchNavigationWorkflow {
         settle({ ok: true });
       };
       unsubscribe = this.#controller.subscribe(inspect);
-      active.cancelSettlementWait = () => settle({
-        ok: false,
-        code: "WORKBENCH_NAVIGATION_DISPOSED",
-        reason: "导航已停止。",
-      });
+      if (active) {
+        active.cancelSettlementWait = () => settle({
+          ok: false,
+          code: "WORKBENCH_NAVIGATION_DISPOSED",
+          reason: "导航已停止。",
+        });
+      }
       inspect(this.#controller.getSnapshot());
       if (!settled) timer = this.#setTimer(() => {
         settle({

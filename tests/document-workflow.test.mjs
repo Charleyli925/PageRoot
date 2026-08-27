@@ -1254,6 +1254,29 @@ test("ensureCurrentCanvas records verified authority after a successful render",
   });
 });
 
+test("ensureCurrentCanvas reuses an exact clean verified Canvas without another render fence", async () => {
+  const html = "<!doctype html><html><body><p>one</p></body></html>";
+  let verifyCalls = 0;
+  const harness = createHarness({
+    html,
+    canvasOverrides: {
+      async verifyRendered() {
+        verifyCalls += 1;
+      },
+    },
+  });
+  assert.equal((await harness.workflow.ensureCurrentCanvas({
+    context: harness.context,
+  })).status, "succeeded");
+
+  const reused = await harness.workflow.ensureCurrentCanvas({
+    context: harness.context,
+  });
+  assert.equal(reused.status, "succeeded");
+  assert.equal(reused.value.reusedCanvasAuthority, true);
+  assert.equal(verifyCalls, 1);
+});
+
 test("ensureCurrentCanvas fails closed when the canvas cannot render", async () => {
   const html = "<!doctype html><html><body><p>one</p></body></html>";
   const harness = createHarness({
@@ -1271,4 +1294,3 @@ test("ensureCurrentCanvas fails closed when the canvas cannot render", async () 
   assert.equal(harness.documentSession.canvasAuthority.status, "failed");
   assert.equal(harness.documentSession.canvasAuthority.generation, 0);
 });
-

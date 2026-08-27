@@ -12,9 +12,9 @@ import {
 } from "react";
 import { ClockCounterClockwiseIcon } from "@phosphor-icons/react/dist/csr/ClockCounterClockwise";
 import { EyeIcon } from "@phosphor-icons/react/dist/csr/Eye";
-
 import AttachmentLightbox from "./components/AttachmentLightbox";
 import HtmlCanvasEditor from "./components/HtmlCanvasEditor";
+import HtmlDisplaySurface from "./components/HtmlDisplaySurface";
 import type {
   HtmlCanvasCommentLayoutState,
   HtmlCanvasEditRuntimeLoadOutcome,
@@ -1409,9 +1409,10 @@ export default function Workbench() {
     && isActiveRunOperationBusy("poll"),
   );
   // Opening is not complete until the source has either proved its existing
-  // v4 binding or been imported as a new V1. Keeping this in the same
-  // hydration fence prevents comments, edits, renames, and native commands
-  // from racing an automatic V4 registration on a just-opened HTML.
+  // v4 binding or been imported as a new V1. Keep the whole open/application/
+  // hydration interval behind one interaction fence: ProjectWorkflow may then
+  // reuse its first canonical prepareSwitch instead of repeating the drain
+  // after the trusted Desktop read returns.
   const projectRegistrationPending = Boolean(
     workspaceController
     && sourcePath
@@ -1420,6 +1421,8 @@ export default function Workbench() {
   );
   const projectHydrating =
     workspaceControllerSnapshot?.project?.hydration.phase === "hydrating"
+    || workspaceControllerSnapshot?.project?.open.phase === "opening"
+    || projectApplicationSnapshot.status !== "idle"
     || projectRegistrationPending;
   const projectLoadError =
     workspaceControllerSnapshot?.project?.hydration.phase === "failed"
@@ -7958,7 +7961,7 @@ export default function Workbench() {
               <div className="canvas-loading" role="status">正在识别运行环境…</div>
             ) : !browserPreviewOnly ? (
               editRuntimePreparing ? (
-                <div className="canvas-loading" role="status">正在载入源码画布…</div>
+                <HtmlDisplaySurface html={html} sourcePath={canvasSourcePath} height={`${canvasDocumentHeight}px`} />
               ) : (
                 <HtmlCanvasEditor
                   key={`editor-authority-${canvasGeneration}`}

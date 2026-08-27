@@ -189,7 +189,10 @@ order. Each admitted intent owns one `transactionId` and moves through:
 ```text
 idle -> admitted -> preparing -> awaiting-user/opening
      -> applied(identity, epoch, application receipt)
-     -> hydrating -> canvas-verified -> committed -> idle
+     -> display-ready -> committed -> idle
+
+background readiness after display-ready:
+     -> hydrating -> canvas-verified/edit-ready -> context-ready
 ```
 
 `ProjectWorkflow` calls the synchronous navigation application port while the
@@ -198,15 +201,25 @@ first pass the navigation workflow's live transaction/application-generation
 authorization; mismatched, expired or terminal transactions are rejected before
 any Controller Session changes. A null transaction remains the explicit legal
 path for an authority refresh. The returned receipt is the
-only authority for tab mutation, hydration and Canvas settlement;
+only authority for tab mutation and the start of background hydration and
+Canvas settlement;
 `project-applied` remains presentation information and React may not infer an
 application from any-pending state. A pre-applied failure restores the captured
-tab authority without changing the Controller. After apply, a failure either
-restores Controller and tabs from the same receipt or retains both on that
-identity as committed-error. A close may cancel an awaiting-user prompt, but it
+tab authority without changing the Controller. Once the exact bytes are
+display-ready, navigation is successful; a later hydration or Canvas failure
+retains the tab, marks its readiness error and keeps edit authority closed. A
+failure inside a still-atomic Prepared Intent may restore Controller and tabs
+from the same receipt. A close may cancel an awaiting-user prompt, but it
 must wait for committing, applied, hydrating, finalizing and acknowledgement
 work to reach a terminal receipt. Cold-start priority is explicit OS external
 FIFO, persisted active tab, `activePath` compatibility, then Start.
+
+Registered-project opening uses one Repository-produced immutable open envelope
+for the exact `Project + Document + OpenTarget + path + HTML + Hash` tuple.
+Desktop must not repeat `/workspace` and a filesystem HTML read before Renderer
+publication. Renderer workspace hydration may skip `/source` and a repeated
+content hash only when the live `/workspace` identity and Hash exactly match
+that opening envelope; every mismatch remains fail-closed and read-only.
 
 Desktop close synchronously freezes that admission stream before its first
 await. The freeze spans navigation-idle settlement, a pinned tabs-persistence

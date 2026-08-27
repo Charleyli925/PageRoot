@@ -738,7 +738,6 @@ export class DocumentWorkflow {
   async ensureCurrentCanvas({ context } = {}) {
     const activeContext = copyContext(context) || this.#projectSession.context;
     let expectedHtml = this.#documentSession.html;
-    let expectedSha256 = await this.#hashPort.sha256(expectedHtml);
     const clean = Boolean(
       activeContext
       && this.#documentSession.persistState === "idle"
@@ -746,6 +745,21 @@ export class DocumentWorkflow {
       && !this.#documentSession.pendingWrite
       && !this.#documentSession.flushPromise,
     );
+    const canvasAuthority = this.#documentSession.canvasAuthority;
+    if (
+      clean
+      && this.#documentSession.sourceSha256
+      && canvasAuthority.status === "verified"
+      && canvasAuthority.generation === this.#documentSession.canvasGeneration
+      && canvasAuthority.renderedSha256 === this.#documentSession.sourceSha256
+    ) {
+      return succeeded({
+        html: expectedHtml,
+        sourceSha256: this.#documentSession.sourceSha256,
+        reusedCanvasAuthority: true,
+      });
+    }
+    let expectedSha256 = await this.#hashPort.sha256(expectedHtml);
     try {
       if (
         activeContext

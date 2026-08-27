@@ -110,6 +110,8 @@ test("the Bridge exposes every Registry member and opens one only by projectId",
   assert.equal(opened.body.openTarget.workingCopyId, "work_ver_0001");
   assert.equal(opened.body.sourcePath, b.body.sourcePath);
   assert.equal(opened.body.sourceSha256, opened.body.openTarget.sourceSha256);
+  assert.equal(opened.body.content, html("B"));
+  assert.equal(typeof opened.body.lastModifiedAt, "string");
 
   const finderRenamedWorkingCopy = join(
     b.body.projectRoot,
@@ -967,4 +969,3 @@ test("open-classification is read-only and returns A/B/C without source keys or 
   assert.equal(knownAfterEdit.body.openTarget.workingCopyId, "work_ver_0001");
   assert.deepEqual(await readFile(registryFile), registryBefore);
 });
-

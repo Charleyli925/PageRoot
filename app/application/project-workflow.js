@@ -121,6 +121,9 @@ function copyProject(value) {
     html: value.html,
     sha256,
     ...(hasIdentity ? { projectId, documentId } : {}),
+    ...(value.openTarget && typeof value.openTarget === "object" && !Array.isArray(value.openTarget)
+      ? { openTarget: Object.freeze({ ...value.openTarget }) }
+      : {}),
     ...(value.lastModifiedAt
       ? { lastModifiedAt: String(value.lastModifiedAt) }
       : {}),
@@ -771,6 +774,7 @@ export class ProjectWorkflow {
           operationId,
           sourcePath: sourcePath || null,
           transactionId,
+          switchPrepared: true,
         });
         if (!accepted) {
           return rejected(
@@ -812,6 +816,7 @@ export class ProjectWorkflow {
         operationId,
         sourcePath: sourcePath || null,
         transactionId,
+        switchPrepared: true,
       });
       if (!accepted) {
         return rejected(
@@ -2313,7 +2318,10 @@ export class ProjectWorkflow {
     // epoch 0 has no previously opened renderer authority to drain or fence.
     // Startup still enters the accepted-result FIFO, but its first publication
     // must not depend on an edit Canvas that only mounts for an opened locator.
-    if (this.#projectSession.epoch > 0) {
+    // openProject marks its open/application interval as interaction-locked
+    // before the first prepareSwitch. Accepted projects from other ingress
+    // paths still need the canonical fence here.
+    if (this.#projectSession.epoch > 0 && metadata.switchPrepared !== true) {
       const switchOutcome = await this.prepareSwitch();
       if (switchOutcome.status !== "succeeded") {
         return "deferred";
@@ -2804,6 +2812,11 @@ export class ProjectWorkflow {
           code: "WORKBENCH_NAVIGATION_STALE_APPLICATION",
         });
       }
+      // The Prepared Intent is durably committed and its exact bytes have been
+      // published. Retire the modal now so the user can see the new HTML while
+      // hydration, Canvas verification, optional trash and external ACK finish.
+      // A later fail-closed rollback restores the same confirmation below.
+      this.#clearOpenConfirmation();
       const epoch = this.#projectSession.epoch;
       try {
         const [, hydrated] = await Promise.all([
@@ -2998,6 +3011,28 @@ export class ProjectWorkflow {
       }
     }
     const locator = this.#projectSession.openLocator(project.sourcePath || null);
+    if (
+      project.sourcePath
+      && project.sha256
+      && project.projectId
+      && project.documentId
+      && project.openTarget
+      && String(project.openTarget.projectId || "") === project.projectId
+      && String(project.openTarget.documentId || "") === project.documentId
+      && String(project.openTarget.sourceSha256 || "") === project.sha256
+      && this.#codecs.sameSourcePath(
+        project.openTarget.exactSourcePath,
+        project.sourcePath,
+      )
+    ) {
+      this.#projectSession.register({
+        epoch: locator.epoch,
+        sourcePath: project.sourcePath,
+        projectId: project.projectId,
+        documentId: project.documentId,
+        openTarget: project.openTarget,
+      });
+    }
     this.#runSession.activate(project.sourcePath || null);
     this.#documentWorkflow.resetForProjectTransition();
     this.#documentSession.reset({
@@ -3066,8 +3101,21 @@ export class ProjectWorkflow {
       && sourceTransitionToken === this.#projectSession.epoch
       && this.projectHydrating,
     );
+    const openingTarget = this.#projectSession.openTarget;
+    const openingDocument = this.#documentSession.snapshot;
+    const hasExactOpeningAuthority = Boolean(
+      transitionAuthorized
+      && openingTarget
+      && this.#projectSession.projectId
+      && this.#projectSession.documentId
+      && openingDocument.sourceSha256
+      && openingTarget.projectId === this.#projectSession.projectId
+      && openingTarget.documentId === this.#projectSession.documentId
+      && openingTarget.sourceSha256 === openingDocument.sourceSha256
+      && this.#codecs.sameSourcePath(openingTarget.exactSourcePath, activeSource)
+    );
     let sourceBoundaryFrozen = false;
-    let mustAdoptSource = transitionAuthorized;
+    let mustAdoptSource = transitionAuthorized && !hasExactOpeningAuthority;
     let recoveredAutosaveConflict = false;
     const rollback = this.#captureHydrationAuthority();
     let publicationStarted = false;
@@ -3095,6 +3143,23 @@ export class ProjectWorkflow {
       const openTarget = this.#codecs.isRecord(payload.openTarget)
         ? payload.openTarget
         : null;
+      if (
+        hasExactOpeningAuthority
+        && (
+          nextProjectId !== this.#projectSession.projectId
+          || nextDocumentId !== this.#projectSession.documentId
+          || workspaceHash !== openingDocument.sourceSha256
+          || !openTarget
+          || String(openTarget.projectId || "") !== openingTarget.projectId
+          || String(openTarget.documentId || "") !== openingTarget.documentId
+          || String(openTarget.workingCopyId || "") !== openingTarget.workingCopyId
+          || String(openTarget.versionId || "") !== openingTarget.versionId
+          || String(openTarget.sourceSha256 || "") !== openingTarget.sourceSha256
+          || !this.#codecs.sameSourcePath(openTarget.exactSourcePath, activeSource)
+        )
+      ) {
+        throw new Error("项目在首屏显示后发生变化，已保持只读；请重新打开该文件。");
+      }
       let preparedTransition = null;
       if (!this.#codecs.sameSourcePath(canonicalSourcePath, activeSource)) {
         if (!mustAdoptSource) {
@@ -3133,7 +3198,9 @@ export class ProjectWorkflow {
       const projectRecord = this.#codecs.isRecord(payload.project) ? payload.project : {};
       const workspacePaths = this.#codecs.isRecord(payload.paths) ? payload.paths : {};
       const currentDocument = this.#documentSession.snapshot;
-      const currentHtmlHash = await this.#hashPort.sha256(currentDocument.html);
+      const currentHtmlHash = hasExactOpeningAuthority
+        ? currentDocument.sourceSha256
+        : await this.#hashPort.sha256(currentDocument.html);
       if (!queryIsCurrent()) return stale({ operationId, epoch: activeEpoch, sourcePath: activeSource });
       const currentDocumentClean = Boolean(
         currentDocument.persistState === "idle"

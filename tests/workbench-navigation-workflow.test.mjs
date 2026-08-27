@@ -129,7 +129,7 @@ function fixture({
       applicationId,
       project,
       epoch,
-      activeLocked: false,
+      activeLocked: options.activeLocked === true,
     });
     return { applicationId, receipt, epoch };
   };
@@ -220,7 +220,7 @@ for (const intent of ["startup", "local", "recent", "registered"]) {
     assert.equal(harness.navigation.snapshot.phase, "idle");
     assert.deepEqual(
       harness.phases.filter((phase) => phase.transactionId === receipt.transactionId).map((phase) => phase.phase),
-      ["admitted", "preparing", "opening", "applied", "hydrating", "canvas-verified", "committed"],
+      ["admitted", "preparing", "opening", "applied", "display-ready", "committed"],
     );
   });
 }
@@ -316,7 +316,7 @@ for (const ingress of DIRECT_FAILURE_CASES) {
     assertAlignedNavigation(harness, A);
   });
 
-  test(`post-apply failure matrix commits aligned B error: ${ingress.name}`, async () => {
+  test(`post-display readiness failure keeps aligned B visible: ${ingress.name}`, async () => {
     const harness = fixture({
       open: async ({ apply }) => {
         const applied = apply(B, { hydration: "failed", error: "post-apply" });
@@ -325,9 +325,13 @@ for (const ingress of DIRECT_FAILURE_CASES) {
     });
     ingress.setup?.(harness);
     const outcome = await ingress.action(harness);
-    assert.equal(outcome.status, "rejected");
-    assert.equal(outcome.committed, true);
+    assert.equal(outcome.status, "succeeded");
+    await nextTurn();
     assertAlignedNavigation(harness, B);
+    assert.equal(
+      harness.tabs.snapshot.tabs.find((tab) => tab.projectId === B.projectId)?.status,
+      "error",
+    );
   });
 }
 
@@ -536,7 +540,7 @@ test("browser pre-apply rejection restores the prior in-memory authority", async
   assert.equal(harness.tabs.snapshot.activeTabId, `document:${A.projectId}:${A.documentId}`);
 });
 
-test("browser post-apply failure keeps the accepted bytes and aligned committed-error tab", async () => {
+test("browser post-display failure keeps the accepted bytes and marks readiness error", async () => {
   const browserDocuments = new BrowserDocumentSession();
   const browserB = {
     ...B,
@@ -552,8 +556,8 @@ test("browser post-apply failure keeps the accepted bytes and aligned committed-
     },
   });
   const outcome = await harness.workflow.acceptBrowserProject({ project: browserB });
-  assert.equal(outcome.status, "rejected");
-  assert.equal(outcome.committed, true);
+  assert.equal(outcome.status, "succeeded");
+  await nextTurn();
   assert.equal(browserDocuments.resolve(B.projectId, B.documentId).html, "browser B");
   assertAlignedNavigation(harness, B);
 });
@@ -576,8 +580,7 @@ test("external pre-apply and post-apply failures preserve the phase contract", a
   assert.equal(accepted.status, "succeeded");
   await nextTurn();
   const terminal = await post.workflow.waitForTerminal(post.navigation.snapshot.lastReceipt.transactionId);
-  assert.equal(terminal.outcome.status, "rejected");
-  assert.equal(terminal.outcome.committed, true);
+  assert.equal(terminal.outcome.status, "succeeded");
   assertAlignedNavigation(post, B);
 });
 
@@ -671,7 +674,7 @@ test("pre-apply failure restores the exact prior tab and controller alignment", 
   assert.equal(harness.controller.getSnapshot().projectSession.projectId, A.projectId);
 });
 
-test("post-apply failure is committed-error and keeps tab/controller on the receipt identity", async () => {
+test("post-display failure keeps the visible receipt identity and marks the tab", async () => {
   const harness = fixture({
     open: async ({ apply }) => {
       const applied = apply(B, { hydration: "failed", error: "hydrate failed" });
@@ -679,11 +682,14 @@ test("post-apply failure is committed-error and keeps tab/controller on the rece
     },
   });
   const outcome = await harness.workflow.openProject({ kind: "local" });
-  assert.equal(outcome.status, "rejected");
-  assert.equal(outcome.committed, true);
-  assert.equal(harness.tabs.snapshot.activeTabId, outcome.tabId);
+  assert.equal(outcome.status, "succeeded");
+  await nextTurn();
+  assert.equal(harness.tabs.snapshot.activeTabId, outcome.value.receipt.tabId);
   assert.equal(harness.controller.getSnapshot().projectSession.projectId, B.projectId);
-  assert.equal(harness.tabs.snapshot.tabs.find((tab) => tab.tabId === outcome.tabId).status, "error");
+  assert.equal(
+    harness.tabs.snapshot.tabs.find((tab) => tab.tabId === outcome.value.receipt.tabId).status,
+    "error",
+  );
 });
 
 test("same-tick A then B is admitted in ordinal order without busy rejection", async () => {
@@ -707,6 +713,55 @@ test("same-tick A then B is admitted in ordinal order without busy rejection", a
   assert.deepEqual(harness.calls, ["open:recent:/B.html", "open:recent:/C.html"]);
   assert.equal(harness.tabs.snapshot.activeTabId, `document:${C.projectId}:${C.documentId}`);
   assert.equal(harness.navigation.snapshot.admissionOrdinal, 2);
+});
+
+test("display-ready releases the next tab admission while prior hydration is still pending", async () => {
+  const harness = fixture({
+    open: async ({ input, apply }) => {
+      const project = input.projectId === B.projectId ? B : C;
+      const applied = apply(project, {
+        hydration: project === B ? "hydrating" : "idle",
+        canvas: project === B ? "pending" : "verified",
+      });
+      return {
+        status: "succeeded",
+        value: { opened: true, applicationId: applied.applicationId },
+      };
+    },
+  });
+  harness.tabs.bindDocument({ ...B, title: B.name, focus: false });
+  harness.tabs.bindDocument({ ...C, title: C.name, focus: false });
+
+  const first = await harness.workflow.activateTab(`document:${B.projectId}:${B.documentId}`);
+  assert.equal(first.status, "succeeded");
+  assert.equal(harness.controller.getSnapshot().project.hydration.phase, "hydrating");
+
+  const second = await harness.workflow.activateTab(`document:${C.projectId}:${C.documentId}`);
+  assert.equal(second.status, "succeeded");
+  assertAlignedNavigation(harness, C);
+  assert.deepEqual(harness.calls, [
+    `open:registered:${B.projectId}`,
+    `open:registered:${C.projectId}`,
+  ]);
+});
+
+test("background readiness success does not erase an active processing tab status", async () => {
+  const harness = fixture({
+    open: async ({ apply }) => {
+      const applied = apply(B, { activeLocked: true });
+      return {
+        status: "succeeded",
+        value: { opened: true, applicationId: applied.applicationId },
+      };
+    },
+  });
+  const outcome = await harness.workflow.openProject({ kind: "local" });
+  assert.equal(outcome.status, "succeeded");
+  await nextTurn();
+  assert.equal(
+    harness.tabs.snapshot.tabs.find((tab) => tab.projectId === B.projectId)?.status,
+    "processing",
+  );
 });
 
 const INTERLEAVING_CASES = [
