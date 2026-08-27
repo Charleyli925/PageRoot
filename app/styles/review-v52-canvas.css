@@ -1,0 +1,75 @@
+/* --------------------------------------------------------------------------
+   PageRoot V5.2 — paired comment focus and edge-to-edge review canvas
+   -------------------------------------------------------------------------- */
+
+.canvas-column {
+  padding: 0;
+}
+
+.canvas-edit-surface > [data-testid="html-canvas-editor"] {
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.comments-panel.comment-rail {
+  border-left: 0;
+}
+
+.rail-comment-composer,
+.comment-rail-content > .comment-card {
+  transform: translate3d(0, var(--comment-rail-offset), 0);
+  transition:
+    transform 320ms cubic-bezier(0.22, 1, 0.36, 1),
+    border-color 180ms ease,
+    box-shadow 180ms ease,
+    background-color 180ms ease;
+  will-change: transform;
+}
+
+.comments-panel[data-rail-following="true"] .rail-comment-composer,
+.comments-panel[data-rail-following="true"] .comment-rail-content > .comment-card {
+  transition-duration: 300ms, 180ms, 180ms, 180ms;
+}
+
+.rail-comment-composer[data-focused="true"] {
+  z-index: 4;
+  border-color: #c5c2f1;
+  border-left-color: #8d88e8;
+  background: #fff;
+  box-shadow:
+    0 18px 38px rgb(90 85 223 / 9%),
+    0 0 0 4px rgb(90 85 223 / 8%);
+  animation: review-focus-arrive 420ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.comment-rail-content > .comment-card[data-focused="true"],
+.comment-rail-content > .comment-card[data-editing="true"],
+.comment-rail-content > .comment-card[data-editing="true"]:hover,
+.comment-rail-content > .comment-card[data-editing="true"]:focus-within,
+.comment-rail-content > .comment-card:focus-visible {
+  z-index: 4;
+  border-color: #8f8ae8;
+  border-left-color: var(--indigo);
+  outline: 0;
+  background: #fff;
+  box-shadow:
+    inset 3px 0 0 var(--indigo),
+    0 15px 32px rgb(90 85 223 / 11%);
+  animation: none;
+}
+
+.rail-comment-composer[data-focused="true"]::before,
+.comment-rail-content > .comment-card[data-focused="true"]::before {
+  width: 22px;
+  background: #aaa6ec;
+}
+
+@keyframes review-focus-arrive {
+  from {
+    box-shadow:
+      0 20px 46px rgb(90 85 223 / 12%),
+      0 0 0 8px rgb(90 85 223 / 11%);
+  }
+}
+

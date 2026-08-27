@@ -946,6 +946,22 @@
       ]
     },
     {
+      "id": "workbench-global-css",
+      "patterns": [
+        "^app/globals\\.css$",
+        "^app/styles/.+\\.css$",
+        "^docs/DESIGN_LANGUAGE\\.md$",
+        "^tests/workbench-css\\.test\\.mjs$"
+      ],
+      "suites": [
+        "typecheck",
+        "browser-editing-smoke"
+      ],
+      "nodeTests": [
+        "tests/workbench-css.test.mjs"
+      ]
+    },
+    {
       "id": "review-ui-state",
       "patterns": [
         "^app/workbench/(?:AiReviewWorkspace|comment-rail-view|file-header-view|handoff-view|presentation|project-files-view|review-state|workbench-header-shell)\\.(?:ts|tsx)$",

@@ -1,0 +1,988 @@
+/* Project resources, rules editor, and signed application update affordance */
+
+.window-file-update-badge {
+  position: absolute;
+  z-index: 3;
+  top: 26px;
+  left: 50%;
+  width: 60px;
+  min-width: 44px;
+  min-height: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--red);
+  box-shadow: none;
+  font-size: 9px;
+  font-style: italic;
+  font-weight: 720;
+  line-height: 1;
+  text-align: center;
+  white-space: nowrap;
+  cursor: pointer;
+  transform: translateX(-50%);
+  transition: none;
+}
+
+.window-file-update-badge > span {
+  min-height: 13px;
+  display: inline-grid;
+  place-items: center;
+  padding: 0 2px;
+  border: 1px solid rgb(190 76 73 / 24%);
+  border-radius: 999px;
+  background: rgb(255 250 249 / 97%);
+  box-shadow: 0 2px 6px rgb(95 50 47 / 10%);
+  letter-spacing: -0.01em;
+}
+
+.window-file-update-badge:hover:not(:disabled),
+.window-file-update-badge:focus-visible {
+  border: 0;
+  background: transparent;
+  color: var(--red);
+  outline: 0;
+  transform: translateX(-50%);
+}
+
+.window-file-update-badge:hover:not(:disabled) > span,
+.window-file-update-badge:focus-visible > span {
+  border-color: rgb(190 76 73 / 42%);
+  background: #fff;
+  box-shadow: 0 3px 8px rgb(95 50 47 / 14%);
+}
+
+.window-file-update-badge:disabled {
+  opacity: 1;
+  cursor: default;
+}
+
+.header-send-button[data-handoff-status="failed"] {
+  background: #8c554f;
+  box-shadow: none;
+}
+
+.project-advanced {
+  padding-top: 4px;
+  border-top: 1px solid #eceef1;
+}
+
+.project-advanced > summary {
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 5px 3px;
+  border-radius: 10px;
+  color: #454750;
+  cursor: pointer;
+  list-style: none;
+  transition: color 150ms ease, background-color 150ms ease;
+}
+
+.project-advanced > summary::-webkit-details-marker {
+  display: none;
+}
+
+.project-advanced > summary:hover {
+  background: #f7f8fa;
+  color: #27282e;
+}
+
+.project-advanced > summary:focus-visible,
+.project-resource-row:focus-visible,
+.project-file-back:focus-visible,
+.header-update-badge:focus-visible {
+  outline: 2px solid #8f8ae4;
+  outline-offset: 2px;
+}
+
+.project-advanced > summary > span {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.project-advanced > summary strong {
+  color: inherit;
+  font-size: 10px;
+  font-weight: 720;
+  letter-spacing: -0.01em;
+}
+
+.project-advanced > summary small {
+  color: #92949d;
+  font-size: 9px;
+  font-weight: 520;
+}
+
+.project-advanced > summary > svg {
+  flex: none;
+  color: #92949d;
+  transition: transform 160ms ease;
+}
+
+.project-advanced[open] > summary > svg {
+  transform: rotate(90deg);
+}
+
+.project-advanced > .project-resource-list {
+  overflow: hidden;
+  display: grid;
+  gap: 0;
+  margin-top: 7px;
+  border: 1px solid #e4e6ea;
+  border-radius: 14px;
+  background: #fff;
+}
+
+.project-advanced .project-resource-row {
+  width: 100%;
+  min-height: 62px;
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) auto 14px;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 11px;
+  border: 0;
+  border-bottom: 1px solid #eef0f2;
+  border-radius: 0;
+  background: #fff;
+  color: #51535c;
+  text-align: left;
+  transition: color 150ms ease, background-color 150ms ease;
+}
+
+.project-advanced .project-resource-row:last-child {
+  border-bottom: 0;
+}
+
+.project-advanced .project-resource-row:hover:not(:disabled) {
+  border-color: #eef0f2;
+  background: #f8f8fc;
+  color: #403bb9;
+}
+
+.project-advanced .project-resource-row:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+.project-resource-icon {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+  background: #f0efff;
+  color: var(--indigo);
+}
+
+.project-resource-copy {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.project-resource-copy strong {
+  overflow: hidden;
+  color: #33343b;
+  font-size: 10px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-resource-copy small {
+  overflow: hidden;
+  color: #898b94;
+  font-size: 9px;
+  font-weight: 520;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-resource-meta {
+  flex: none;
+  overflow: hidden;
+  padding: 3px 6px;
+  border-radius: 999px;
+  background: #f2f3f5;
+  color: #747680;
+  font-size: 9px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-resource-meta[data-state="ready"] {
+  background: #eaf5ef;
+  color: #2e7456;
+}
+
+.project-resource-meta[data-state="locked"] {
+  background: #f7f0df;
+  color: #856823;
+}
+
+.project-resource-row > svg {
+  color: #92949d;
+}
+
+/* ---- Current-project console ------------------------------------------- */
+
+:root {
+  /* Branch rails: one indigo family at four depths, so a fork stays readable
+     without introducing a second accent colour. */
+  --version-lane-0: #3f36c6;
+  --version-lane-1: #6c62e0;
+  --version-lane-2: #9a93ea;
+  --version-lane-3: #b7b0f0;
+}
+
+.project-panel-header {
+  gap: 12px;
+}
+
+.project-panel-meta {
+  display: inline-flex !important;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted) !important;
+  font-size: 11px !important;
+}
+
+.project-panel-meta > span {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--green);
+}
+
+.project-panel-actions {
+  flex: none;
+  /* `.drawer-header > div` is a grid by default, which would stack these. */
+  display: flex !important;
+  align-items: center;
+  gap: 8px;
+}
+
+.project-panel-action {
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgb(255 255 255 / 70%);
+  color: #54565f;
+  font-size: 11px;
+  font-weight: 620;
+  white-space: nowrap;
+  transition:
+    color 150ms ease,
+    background-color 150ms ease,
+    border-color 150ms ease;
+}
+
+.project-panel-action > svg {
+  color: var(--muted);
+}
+
+.project-panel-action:hover {
+  border-color: #cfc9f5;
+  background: #fff;
+  color: var(--indigo-deep);
+}
+
+.project-panel-action:hover > svg {
+  color: var(--indigo);
+}
+
+.project-console {
+  min-width: 0;
+  min-height: 0;
+  /* Without a definite height the console grows past the drawer body, and any
+     scrollIntoView then shifts the whole panel (leaving the detail pane blank).
+     Filling the body keeps both columns as the only scrollers. */
+  height: 100%;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+/* The console owns its own scrolling: the tree and the detail each scroll
+   independently, so scrolling the tree can never push the detail out of view.
+   That requires the drawer body to stop being the scroller. */
+.side-drawer[data-drawer="files"] > .drawer-body {
+  overflow: hidden;
+  min-height: 0;
+  padding: 0 20px;
+}
+
+.project-rules-row {
+  border-bottom: 1px solid var(--line-soft);
+}
+
+/* An expanded rules editor must not squeeze the tree out of the console. */
+.project-rules-row[data-open="true"] {
+  overflow-y: auto;
+  max-height: 52%;
+}
+
+.project-rules-summary {
+  width: 100%;
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 12px 4px;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  text-align: left;
+}
+
+.project-rules-summary > svg:first-child {
+  color: var(--indigo);
+}
+
+.project-rules-summary > strong {
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.project-rules-summary > small {
+  color: var(--faint);
+  font-size: 11px;
+}
+
+.project-rules-summary > svg:last-child {
+  margin-left: auto;
+  color: var(--faint);
+  transition: transform 150ms ease;
+}
+
+.project-rules-row[data-open="true"] .project-rules-summary > svg:last-child {
+  transform: rotate(90deg);
+}
+
+.project-rules-summary:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+.project-rules-saved {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: auto;
+  color: var(--green);
+  font-size: 11px;
+  font-style: normal;
+}
+
+.project-rules-saved > span {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.project-rules-saved ~ svg {
+  margin-left: 10px !important;
+}
+
+.project-rules-editor {
+  display: grid;
+  gap: 8px;
+  padding: 0 4px 14px;
+}
+
+/* The inline disclosure shares the console with the version tree, so the
+   editor keeps a workable but bounded height instead of the 360px it used
+   when it owned the whole panel. */
+.project-rules-editor > .project-file-editor {
+  min-height: 190px;
+  max-height: 34vh;
+}
+
+.project-console-body {
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 320px minmax(0, 1fr);
+}
+
+.version-tree-column {
+  min-height: 0;
+  overflow-y: auto;
+  padding: 12px 10px 18px;
+  margin-left: -20px;
+  border-right: 1px solid var(--line-soft);
+  background: rgb(251 250 247 / 55%);
+}
+
+.version-tree-heading {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 8px 10px;
+  color: var(--muted);
+  font-size: 10.5px;
+  font-weight: 680;
+}
+
+.version-tree-heading > span {
+  color: var(--faint);
+  font-weight: 600;
+}
+
+.version-tree-empty,
+.version-detail-placeholder {
+  margin: 0;
+  color: var(--faint);
+  font-size: 11.5px;
+  line-height: 1.7;
+}
+
+.version-tree-empty {
+  padding: 8px;
+}
+
+.version-detail-placeholder {
+  padding: 24px;
+}
+
+.version-tree {
+  position: relative;
+}
+
+.version-tree-rail {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+}
+
+.version-tree-rail path {
+  fill: none;
+  stroke-width: 1.8;
+}
+
+.version-tree-node {
+  fill: #fff;
+  stroke-width: 2;
+}
+
+.version-tree-rows {
+  position: relative;
+}
+
+.version-tree-row {
+  width: 100%;
+  height: 38px;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding-right: 10px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--ink);
+  text-align: left;
+}
+
+.version-tree-row:hover {
+  background: rgb(255 255 255 / 70%);
+}
+
+.version-tree-row[data-selected="true"] {
+  background: #fff;
+  box-shadow: 0 1px 5px rgb(30 32 39 / 9%);
+}
+
+.version-tree-ordinal {
+  min-width: 26px;
+  flex: none;
+  color: var(--indigo-deep);
+  font-size: 11px;
+  font-weight: 780;
+}
+
+.version-tree-title {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 560;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.version-tree-row[data-selected="true"] .version-tree-title {
+  font-weight: 680;
+}
+
+.version-tree-row > time {
+  flex: none;
+  color: var(--faint);
+  font-size: 9.5px;
+}
+
+.version-tree-flag {
+  flex: none;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: var(--indigo-soft);
+  color: var(--indigo-deep);
+  font-size: 8.5px;
+  font-weight: 760;
+}
+
+.version-detail-column {
+  min-height: 0;
+  overflow-y: auto;
+  padding: 20px 24px 12px;
+}
+
+.version-detail {
+  display: grid;
+  gap: 0;
+}
+
+.version-detail-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 13px;
+  padding: 0;
+  border: 0;
+}
+
+.version-detail-badge {
+  width: 44px;
+  height: 44px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border-radius: 13px;
+  background: linear-gradient(140deg, #6f61f2, #4136c4);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 800;
+  box-shadow: 0 7px 18px rgb(76 51 219 / 24%);
+}
+
+.version-detail-identity {
+  min-width: 0;
+  flex: 1;
+  display: grid;
+  gap: 5px;
+}
+
+.version-detail-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.version-detail-heading > strong {
+  font-size: 16px;
+  font-weight: 740;
+  letter-spacing: -0.015em;
+}
+
+.version-detail-flag {
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: var(--indigo-soft);
+  color: var(--indigo-deep);
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 760;
+}
+
+.version-detail-identity > small {
+  color: var(--faint);
+  font-size: 11.5px;
+}
+
+.version-detail-lineage {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 14px;
+  padding: 10px 12px;
+  border-radius: 11px;
+  background: rgb(240 239 249 / 70%);
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.version-detail-lineage > svg {
+  flex: none;
+  color: var(--indigo);
+}
+
+.version-detail-lineage > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.version-detail-lineage strong {
+  color: var(--ink);
+  font-weight: 650;
+}
+
+.version-detail-lineage > button {
+  min-height: 26px;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-left: auto;
+  padding: 0 4px;
+  border: 0;
+  background: transparent;
+  color: var(--indigo-deep);
+  font-size: 11.5px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.version-detail-notice {
+  margin: 12px 0 0;
+  padding: 10px 12px;
+  border-radius: 11px;
+  background: #f7f0df;
+  color: #856823;
+  font-size: 11.5px;
+  line-height: 1.65;
+}
+
+.version-detail-group {
+  margin-top: 17px;
+}
+
+.version-detail-group > header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.version-detail-group > header > svg {
+  color: var(--indigo);
+}
+
+.version-detail-group > header > strong {
+  font-size: 12px;
+  font-weight: 720;
+}
+
+.version-detail-count {
+  min-width: 16px;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--indigo);
+  color: #fff;
+  font-size: 9px;
+  font-weight: 740;
+}
+
+.version-detail-records {
+  display: grid;
+  gap: 10px;
+}
+
+.version-detail-comment {
+  display: grid;
+  gap: 3px;
+  padding-left: 12px;
+  border-left: 2px solid #d9d4f6;
+}
+
+.version-detail-comment > strong {
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 680;
+}
+
+.version-detail-comment > p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.version-detail-comment > small {
+  color: var(--faint);
+  font-size: 10.5px;
+}
+
+.version-detail-empty {
+  margin: 0;
+  color: var(--faint);
+  font-size: 11.5px;
+}
+
+.version-detail-edit {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 12px;
+}
+
+.version-detail-edit > del {
+  color: var(--faint);
+  text-decoration: line-through;
+}
+
+.version-detail-edit > ins {
+  padding: 2px 8px;
+  border-radius: 7px;
+  background: var(--indigo-soft);
+  color: var(--indigo-deep);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.version-detail-edit > svg {
+  flex: none;
+  color: var(--faint);
+}
+
+.version-detail-edit > small {
+  margin-left: auto;
+  color: var(--faint);
+  font-size: 10.5px;
+  white-space: nowrap;
+}
+
+.project-console-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 14px 24px 18px;
+  border-top: 1px solid var(--line-soft);
+  background: rgb(255 255 255 / 40%);
+}
+
+.project-console-primary {
+  min-height: 42px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 18px;
+  border: 1px solid var(--indigo);
+  border-radius: 11px;
+  background: var(--indigo);
+  color: #fff;
+  font-size: 12.5px;
+  font-weight: 660;
+  box-shadow: 0 9px 22px rgb(76 69 211 / 20%);
+}
+
+.project-console-primary:hover:not(:disabled) {
+  background: var(--indigo-deep);
+}
+
+.project-console-primary:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+  box-shadow: none;
+}
+
+@media (max-width: 940px) {
+  .project-console-body {
+    grid-template-columns: 250px minmax(0, 1fr);
+  }
+
+  .version-detail-column {
+    padding: 16px 16px 12px;
+  }
+}
+
+.file-view[data-editable="true"] {
+  grid-template-rows: auto auto auto minmax(300px, 1fr) auto;
+  gap: 12px;
+}
+
+.file-view > .project-file-back {
+  min-height: 30px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 7px 0 4px;
+  border-radius: 8px;
+  color: #73757e;
+  font-size: 9px;
+}
+
+.project-file-back > svg {
+  transform: rotate(180deg);
+}
+
+.project-rules-heading {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 11px;
+  padding: 4px 2px 2px;
+}
+
+.project-rules-heading > .project-resource-icon {
+  width: 38px;
+  height: 38px;
+}
+
+.project-rules-heading > span:nth-child(2) {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.project-rules-heading small {
+  color: #8b8d96;
+  font-size: 9px;
+}
+
+.project-rules-heading strong {
+  color: #2c2d33;
+  font-size: 14px;
+  font-weight: 730;
+  letter-spacing: -0.02em;
+}
+
+.project-rules-heading em {
+  padding: 4px 7px;
+  border-radius: 999px;
+  background: #eaf5ef;
+  color: #2f7457;
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 720;
+  white-space: nowrap;
+}
+
+.project-rules-heading em[data-state="dirty"] {
+  background: #f7f0df;
+  color: #856823;
+}
+
+.project-rules-heading em[data-state="locked"] {
+  background: #f0f1f4;
+  color: #6f717a;
+}
+
+.project-rules-heading em[data-state="loading"] {
+  background: #f0efff;
+  color: var(--indigo);
+}
+
+.file-view .project-file-note {
+  margin: 0;
+  padding: 10px 11px;
+  border: 1px solid #e2e0f7;
+  border-radius: 10px;
+  background: #f8f7ff;
+  color: #65627f;
+  font-size: 9px;
+  line-height: 1.65;
+}
+
+.file-view .project-file-editor {
+  min-height: 300px;
+  resize: none;
+  padding: 13px 14px;
+  border-color: #e0e2e6;
+  border-radius: 12px;
+  background: #fbfbfc;
+  color: #3f4148;
+  font-size: 10px;
+  line-height: 1.75;
+  transition: border-color 150ms ease, background-color 150ms ease, box-shadow 150ms ease;
+}
+
+.file-view .project-file-editor:hover:not(:disabled) {
+  border-color: #d1d2d9;
+}
+
+.file-view .project-file-editor:focus {
+  border-color: #aaa6e9;
+  background: #fff;
+  box-shadow: 0 0 0 3px rgb(90 85 223 / 7%);
+}
+
+.file-view .project-file-editor:disabled {
+  background: #f3f4f6;
+  color: #6f7179;
+  cursor: not-allowed;
+  opacity: 0.74;
+}
+
+.file-view .project-file-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 8px;
+  padding-top: 2px;
+}
+
+.project-file-save-error {
+  margin: 0;
+  color: #984c45;
+  font-size: 10px;
+  line-height: 1.55;
+}
+
+.project-file-actions > small {
+  overflow: hidden;
+  color: #92949d;
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-view .project-file-actions button {
+  min-height: 34px;
+  padding-inline: 11px;
+  border-color: #e0e2e6;
+  border-radius: 9px;
+  background: #fff;
+  font-size: 9px;
+  font-weight: 680;
+}
+
+@media (max-width: 940px) {
+  .project-resource-meta {
+    display: none;
+  }
+
+  .project-advanced .project-resource-row,
+  .files-panel > .project-rule-card {
+    grid-template-columns: 34px minmax(0, 1fr) 14px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .window-file-update-badge,
+  .project-advanced > summary,
+  .project-advanced > summary > svg,
+  .project-resource-row,
+  .project-file-editor {
+    transition: none;
+  }
+}
+
