@@ -289,6 +289,9 @@ async function firstUsefulDocumentVisible({ expectedStem = "", timeout = 45_000 
       .filter({ visible: true })
       .first();
     if (!await editor.isVisible().catch(() => false)) return false;
+    if (await editor.getAttribute("data-render-verified").catch(() => null) === "true") {
+      return true;
+    }
     const iframe = editor.locator('iframe[title*="HTML"]').first();
     const handle = await iframe.elementHandle().catch(() => null);
     const frame = await handle?.contentFrame();
