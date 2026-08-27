@@ -29,6 +29,7 @@
         "app/workbench/comment-canvas-port.js",
         "app/workbench/comment-rail-container.tsx",
         "app/workbench/comment-rail-contract.ts",
+        "app/workbench/comment-rail-state.js",
         "app/workbench/comment-rail-view.tsx"
       ],
       "focusedTests": [

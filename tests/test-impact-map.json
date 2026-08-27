@@ -485,7 +485,7 @@
     {
       "id": "comment-capability-boundary",
       "patterns": [
-        "^app/workbench/(?:comment-rail-container|comment-canvas-port|workspace-render-snapshot)\\.(?:d\\.ts|js|tsx)$",
+        "^app/workbench/(?:comment-rail-container|comment-rail-state|comment-canvas-port|workspace-render-snapshot)\\.(?:d\\.ts|js|tsx)$",
         "^tests/(?:comment-canvas-port|workbench-render-snapshot)\\.test\\.mjs$"
       ],
       "suites": [
