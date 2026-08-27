@@ -143,6 +143,12 @@ classification and rerun policy live in
 
 ## Latest installer source rule
 
+Every successful installer handoff, formal or developer preview, must include
+every associated Pull Request with its current GitHub status. When the user asks
+for the latest installer without a source override, include the latest head of every
+applicable PageRoot Pull Request that was not explicitly excluded.
+
+
 开发者说“生成最新的安装包”、“生成最新的开发者测试安装包”或等价表述时，
 默认范围不是“当前分支”，而是“最新 `origin/main` + 当前开发范围
 内所有未被开发者明确排除的相关 PR 最新代码”。合并、开放、Draft 或关

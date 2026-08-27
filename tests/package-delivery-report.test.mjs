@@ -217,8 +217,9 @@ test("installer workflows generate a live delivery report after package verifica
   assert.match(candidate, /package-delivery-report\.mjs/u);
   assert.match(candidate, /output\/package-delivery/u);
   assert.match(release, /package-delivery-report\.mjs/u);
-  assert.match(agentGuide, /every associated Pull Request/u);
-  assert.match(agentGuide, /latest head of every[\s\S]*applicable PageRoot Pull Request/u);
+  assert.match(agentGuide, /docs\/CODEX_WORKFLOW\.md/u);
+  assert.match(codexWorkflow, /every associated Pull Request/u);
+  assert.match(codexWorkflow, /latest head of every[\s\S]*applicable PageRoot Pull Request/u);
   assert.match(releasing, /Mandatory installer delivery report/u);
   assert.match(releasing, /Default source set for a latest installer/u);
   assert.match(releasing, /Any selected unmerged Pull Request[\s\S]*Developer Preview/u);

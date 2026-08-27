@@ -28,6 +28,7 @@ export type CommentDraft = {
   text: string;
   commentId: string | null;
   attachments: CommentAttachment[];
+  target: HtmlCanvasSelection | null;
 };
 
 export type ComposerState =
@@ -157,6 +158,7 @@ export function deriveComposerState(input: {
         text: input.commentEditDraft,
         commentId: input.editingCommentId,
         attachments: input.commentEditAttachments,
+        target: null,
       },
       session: input.commentEditSession,
     };
@@ -169,6 +171,7 @@ export function deriveComposerState(input: {
         text: input.draft,
         commentId: input.draftCommentId,
         attachments: input.draftAttachments,
+        target: input.draftTarget,
       },
     };
   }
@@ -179,6 +182,7 @@ export function deriveComposerState(input: {
         text: input.draft,
         commentId: input.draftCommentId,
         attachments: input.draftAttachments,
+        target: input.draftTarget,
       }
       : null,
   };
@@ -187,7 +191,11 @@ export function deriveComposerState(input: {
 export function composerViewFields(composer: ComposerState) {
   return {
     composerOpen: composer.kind === "new",
-    draftTarget: composer.kind === "new" ? composer.target : null,
+    draftTarget: composer.kind === "new"
+      ? composer.target
+      : composer.kind === "closed"
+        ? composer.collapsedDraft?.target || null
+        : null,
     draft: composer.kind === "new"
       ? composer.draft.text
       : composer.kind === "closed"
