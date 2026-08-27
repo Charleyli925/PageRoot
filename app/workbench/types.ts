@@ -412,7 +412,7 @@ export type UserSupplementRecord = {
 export type PersistState = "idle" | "preview-dirty" | "queued" | "writing" | "failed" | "conflict";
 export type ViewMode = "current" | "history";
 export type CanvasMode = "edit" | "preview";
-export type Drawer = "files" | "handoff" | null;
+export type Drawer = "files" | null;
 export type ToastTone = "success" | "info" | "warning" | "error";
 export type ToastDisposition =
   | "silent-recover"

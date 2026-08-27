@@ -144,6 +144,7 @@ export function WorkbenchHeaderToolbar({
   recentRunOutcome,
   terminalRun,
   reviewActive,
+  aiConversationVisible,
   aiAssistantEntry,
   onSelectEdit,
   onSelectPreview,
@@ -162,6 +163,7 @@ export function WorkbenchHeaderToolbar({
   recentRunOutcome: unknown;
   terminalRun: unknown;
   reviewActive: boolean;
+  aiConversationVisible: boolean;
   aiAssistantEntry: ReactNode;
   onSelectEdit: () => void;
   onSelectPreview: () => void;
@@ -244,7 +246,7 @@ export function WorkbenchHeaderToolbar({
             <button
               className="recent-run-button"
               type="button"
-              aria-expanded={drawer === "handoff"}
+              aria-expanded={aiConversationVisible}
               onClick={reopenRecentRunOutcome}
             >
               <ClockCounterClockwiseIcon

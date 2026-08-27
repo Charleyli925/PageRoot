@@ -304,6 +304,18 @@ export class WorkspaceController {
   #projectsCapabilityListeners = new Set();
   #projectCatalogSnapshot = projectCatalogSnapshot();
   #projectCatalogListeners = new Set();
+  #runsCapabilitySnapshot = Object.freeze({
+    session: null,
+    workflow: null,
+  });
+  #runsCapabilityListeners = new Set();
+  #navigationCapabilitySnapshot = Object.freeze({
+    tabs: null,
+    ready: false,
+    workflow: null,
+    persistence: null,
+  });
+  #navigationCapabilityListeners = new Set();
   #runSessionSnapshot = null;
   #versionSessionSnapshot = null;
   #editRuntimeSnapshot = null;
@@ -343,6 +355,10 @@ export class WorkspaceController {
   projects;
 
   projectCatalog;
+
+  runs;
+
+  navigation;
 
   constructor({
     bridgeClient,
@@ -535,6 +551,42 @@ export class WorkspaceController {
         return () => this.#projectCatalogListeners.delete(listener);
       },
       commands: projectCatalogCommands,
+    });
+    this.runs = Object.freeze({
+      getSnapshot: () => this.#runsCapabilitySnapshot,
+      subscribe: (listener) => {
+        if (typeof listener !== "function") {
+          throw new TypeError("Runs capability listener must be a function.");
+        }
+        this.#runsCapabilityListeners.add(listener);
+        return () => this.#runsCapabilityListeners.delete(listener);
+      },
+      commands: Object.freeze({
+        dismiss: () => this.dismissActiveRun(),
+        reopenRecentOutcome: (sourcePath) => this.reopenRecentRunOutcome(sourcePath),
+        copyHandoff: (input) => this.copyRunHandoff(input),
+        startAgent: (input) => this.startRunAgent(input),
+        cancel: (input) => this.cancelRun(input),
+        resolveConflict: (input) => this.resolveRunConflict(input),
+        prepareReview: (input) => this.prepareReviewCandidate(input),
+        activateReadyVersion: (input) => this.activateReadyVersion(input),
+      }),
+    });
+    this.navigation = Object.freeze({
+      getSnapshot: () => this.#navigationCapabilitySnapshot,
+      subscribe: (listener) => {
+        if (typeof listener !== "function") {
+          throw new TypeError("Navigation capability listener must be a function.");
+        }
+        this.#navigationCapabilityListeners.add(listener);
+        return () => this.#navigationCapabilityListeners.delete(listener);
+      },
+      commands: Object.freeze({
+        activateTab: (tabId, input) => this.activateWorkbenchTab(tabId, input),
+        createStartTab: () => this.createWorkbenchStartTab(),
+        closeTab: (tabId) => this.closeWorkbenchTab(tabId),
+        openRegisteredProject: (input) => this.openRegisteredWorkbenchProject(input),
+      }),
     });
     this.#codecs = createWorkspaceControllerCodecs(codecs);
     this.#hashPort = ports.hash;
@@ -1012,6 +1064,8 @@ export class WorkspaceController {
     this.#commentsCapabilityListeners.clear();
     this.#projectsCapabilityListeners.clear();
     this.#projectCatalogListeners.clear();
+    this.#runsCapabilityListeners.clear();
+    this.#navigationCapabilityListeners.clear();
   }
 
   get hasDocumentHistoryAction() {
@@ -1837,6 +1891,8 @@ export class WorkspaceController {
   #publishAggregateSnapshot() {
     this.#publishCommentsCapabilitySnapshot();
     this.#publishProjectsCapabilitySnapshot();
+    this.#publishRunsCapabilitySnapshot();
+    this.#publishNavigationCapabilitySnapshot();
     this.#snapshot = Object.freeze({
       registration: this.#registration,
       projectSession: this.#projectSessionSnapshot,
@@ -1906,6 +1962,48 @@ export class WorkspaceController {
         listener();
       } catch {
         // Project presentation cannot affect application authority.
+      }
+    }
+  }
+
+  #publishRunsCapabilitySnapshot() {
+    const next = {
+      session: this.#runSessionSnapshot,
+      workflow: this.#runSnapshot,
+    };
+    if (
+      this.#runsCapabilitySnapshot.session === next.session
+      && this.#runsCapabilitySnapshot.workflow === next.workflow
+    ) return;
+    this.#runsCapabilitySnapshot = Object.freeze(next);
+    for (const listener of this.#runsCapabilityListeners) {
+      try {
+        listener();
+      } catch {
+        // Run presentation cannot affect workflow authority.
+      }
+    }
+  }
+
+  #publishNavigationCapabilitySnapshot() {
+    const next = {
+      tabs: this.#workbenchTabsSnapshot,
+      ready: this.#workbenchTabsReady,
+      workflow: this.#workbenchNavigationSnapshot,
+      persistence: this.#workbenchTabsPersistenceSnapshot,
+    };
+    if (
+      this.#navigationCapabilitySnapshot.tabs === next.tabs
+      && this.#navigationCapabilitySnapshot.ready === next.ready
+      && this.#navigationCapabilitySnapshot.workflow === next.workflow
+      && this.#navigationCapabilitySnapshot.persistence === next.persistence
+    ) return;
+    this.#navigationCapabilitySnapshot = Object.freeze(next);
+    for (const listener of this.#navigationCapabilityListeners) {
+      try {
+        listener();
+      } catch {
+        // Navigation presentation cannot affect workflow authority.
       }
     }
   }

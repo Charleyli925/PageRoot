@@ -2,8 +2,12 @@ import type {
   AiConversationControllerCapability,
   CommentControllerCapability,
   DocumentSurfaceControllerCapability,
+  NavigationControllerCapability,
   NavigationWorkflowControllerCapability,
+  ProjectCatalogControllerCapability,
+  ProjectControllerCapability,
   ReviewPreparationControllerCapability,
+  RunControllerCapability,
   RunSubmissionControllerCapability,
   WorkspaceController,
   WorkspaceSnapshotReader,
@@ -13,16 +17,24 @@ declare const controller: WorkspaceController;
 declare const conversation: AiConversationControllerCapability;
 declare const comments: CommentControllerCapability;
 declare const documentSurface: DocumentSurfaceControllerCapability;
+declare const navigationFacet: NavigationControllerCapability;
 declare const navigation: NavigationWorkflowControllerCapability;
+declare const projectCatalog: ProjectCatalogControllerCapability;
+declare const projects: ProjectControllerCapability;
 declare const review: ReviewPreparationControllerCapability;
+declare const runs: RunControllerCapability;
 declare const runSubmission: RunSubmissionControllerCapability;
 declare const snapshotReader: WorkspaceSnapshotReader;
 
 const conversationView: AiConversationControllerCapability = controller;
 const commentsView: CommentControllerCapability = controller.comments;
 const documentSurfaceView: DocumentSurfaceControllerCapability = controller;
+const navigationFacetView: NavigationControllerCapability = controller.navigation;
 const navigationView: NavigationWorkflowControllerCapability = controller;
+const projectCatalogView: ProjectCatalogControllerCapability = controller.projectCatalog;
+const projectsView: ProjectControllerCapability = controller.projects;
 const reviewView: ReviewPreparationControllerCapability = controller;
+const runsView: RunControllerCapability = controller.runs;
 const runSubmissionView: RunSubmissionControllerCapability = controller;
 const snapshotView: WorkspaceSnapshotReader = controller;
 
@@ -33,8 +45,14 @@ void comments.subscribe(() => undefined);
 comments.commands.updateDraft("draft");
 void documentSurface.getSnapshot();
 void documentSurface.updateDocumentSurfacePresentation("tab-1");
+void navigationFacet.getSnapshot();
+void navigationFacet.commands.createStartTab();
 void navigation.subscribe(() => undefined);
+void projectCatalog.commands.refreshRecents();
+void projects.commands.openRules();
 void review.prepareReviewCandidate({ run: null });
+void runs.getSnapshot();
+void runs.commands.cancel({ run: null });
 void runSubmission.planRunSubmission();
 void snapshotReader.getSnapshot();
 
@@ -50,13 +68,21 @@ review.selectAgent({ providerId: "qoder", runtimeId: "acp" });
 runSubmission.updateCommentDraft("draft");
 // @ts-expect-error navigation cannot reach low-level document persistence.
 navigation.flushDocument();
+// @ts-expect-error the navigation facet cannot cancel a run.
+navigationFacet.commands.cancel({ run: null });
+// @ts-expect-error the run facet cannot edit PROJECT.md.
+runs.commands.updateRules("# rules");
 // @ts-expect-error snapshot readers cannot subscribe to controller changes.
 snapshotReader.subscribe(() => undefined);
 
 void conversationView;
 void commentsView;
 void documentSurfaceView;
+void navigationFacetView;
 void navigationView;
+void projectCatalogView;
+void projectsView;
 void reviewView;
+void runsView;
 void runSubmissionView;
 void snapshotView;

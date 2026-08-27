@@ -237,6 +237,69 @@ export type ProjectControllerCapability<
   ProjectControllerCapabilitySnapshot<TVersion>,
   ProjectControllerCommands
 >;
+
+export type RunControllerCapabilitySnapshot = Readonly<{
+  session: RunSessionSnapshot | null;
+  workflow: RunWorkflowSnapshot | null;
+}>;
+
+export interface RunControllerCommands {
+  dismiss(): ActiveRun | null;
+  reopenRecentOutcome(sourcePath: string | null | undefined): boolean;
+  copyHandoff(input?: { run?: ActiveRun | null }): Promise<RunWorkflowOutcome>;
+  startAgent(input?: { run?: ActiveRun | null }): Promise<RunWorkflowOutcome>;
+  cancel(input?: {
+    run?: ActiveRun | null;
+    agentMayBeRunning?: boolean;
+    reason?: string;
+  }): Promise<RunWorkflowOutcome>;
+  resolveConflict(input: {
+    run?: ActiveRun | null;
+    action: "adopt-ai" | "keep-external";
+  }): Promise<RunWorkflowOutcome>;
+  prepareReview(input: {
+    run?: ActiveRun | null;
+  }): Promise<VersionWorkflowOutcome<VersionReviewCandidate>>;
+  activateReadyVersion(input: {
+    run?: ActiveRun | null;
+    reviewLease?: Readonly<{
+      operationKey: string;
+      beforeHtml: string;
+    }> | null;
+  }): Promise<VersionWorkflowOutcome>;
+}
+
+export type RunControllerCapability = CapabilityFacet<
+  RunControllerCapabilitySnapshot,
+  RunControllerCommands
+>;
+
+export type NavigationControllerCapabilitySnapshot = Readonly<{
+  tabs: WorkbenchTabsSnapshot | null;
+  ready: boolean;
+  workflow: WorkbenchNavigationSnapshot | null;
+  persistence: WorkbenchTabsPersistenceSnapshot | null;
+}>;
+
+export interface NavigationControllerCommands {
+  activateTab(
+    tabId: string,
+    input?: { deadlineMs?: number },
+  ): Promise<import("./workbench-navigation-workflow.js").WorkbenchNavigationOutcome>;
+  createStartTab(): Promise<import("./workbench-navigation-workflow.js").WorkbenchNavigationOutcome>;
+  closeTab(tabId: string): Promise<import("./workbench-navigation-workflow.js").WorkbenchNavigationOutcome>;
+  openRegisteredProject(input: {
+    projectId: string;
+    documentId: string;
+    title: string;
+    status?: import("./workbench-tabs-session.js").WorkbenchTabStatus;
+  }): Promise<import("./workbench-navigation-workflow.js").WorkbenchNavigationOutcome>;
+}
+
+export type NavigationControllerCapability = CapabilityFacet<
+  NavigationControllerCapabilitySnapshot,
+  NavigationControllerCommands
+>;
 export interface ConversationControllerCapability {
   openConversation(context: ConversationContext | null): Promise<unknown>;
   closeConversation(): void;

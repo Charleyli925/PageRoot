@@ -140,6 +140,42 @@ test("PROJECT.md typing stays in the project container while save structure publ
   assert.equal(sameWorkbenchRenderSnapshot(before, saving), false);
 });
 
+test("Agent narration stays in the run outlet while lifecycle changes publish", () => {
+  const handoff = Object.freeze({
+    status: "running",
+    phase: "agent-message",
+    visibleText: "first",
+    textTruncated: false,
+    updatedAt: "2026-08-28T00:00:00.000Z",
+  });
+  const runSession = Object.freeze({
+    activeRun: Object.freeze({ requestId: "run_1", attemptId: "attempt_1" }),
+    activeHandoff: handoff,
+  });
+  const before = snapshot({ runSession });
+  const narrated = snapshot({
+    ...before,
+    runSession: {
+      ...runSession,
+      activeHandoff: {
+        ...handoff,
+        visibleText: "first second",
+        updatedAt: "2026-08-28T00:00:01.000Z",
+      },
+    },
+  });
+  const completed = snapshot({
+    ...before,
+    runSession: {
+      ...runSession,
+      activeHandoff: { ...handoff, status: "completed" },
+    },
+  });
+
+  assert.equal(sameWorkbenchRenderSnapshot(before, narrated), true);
+  assert.equal(sameWorkbenchRenderSnapshot(before, completed), false);
+});
+
 test("other capability snapshots always publish to Workbench", () => {
   const before = snapshot();
   assert.equal(sameWorkbenchRenderSnapshot(before, snapshot({

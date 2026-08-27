@@ -122,12 +122,10 @@ test("a no-change result returns to editing and remains reopenable", async () =>
       .toBeVisible({ timeout: 30_000 });
     await expect(launched.page.getByRole("button", { name: /AI 助手/u }))
       .toBeEnabled();
-    // The settled round is not the active run after restart: the header's
-    // recent-outcome control restores it — and switches the canvas to editing,
-    // which hides the conversation. Opening the conversation again states the
-    // no-change decision once more.
+    // The settled round is not the active run after restart. The header's
+    // recent-outcome control restores it and opens its one presentation owner:
+    // the conversation. A second AI-assistant click must not be required.
     await launched.page.getByRole("button", { name: "上轮处理" }).click();
-    await launched.page.getByRole("button", { name: /AI 助手/u }).click();
     const reopenedBar = launched.page.getByTestId("ai-conversation-action-bar");
     await expect(reopenedBar.getByText("这次没有产生有效变化", { exact: true }))
       .toBeVisible({ timeout: 30_000 });

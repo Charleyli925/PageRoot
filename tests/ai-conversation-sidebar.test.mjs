@@ -375,12 +375,32 @@ test("the header's mode is derived from Request authority, not guessed", () => {
     ).label,
     "结果 · 无变化",
   );
+  assert.equal(sidebarStateFromRun({ activeRun: { status: "error" } }), "run-error");
 
   // Reviewing wins: the review surface is read-only whatever the run says.
   assert.equal(
     sidebarStateFromRun({ activeRun: { status: "processing" }, reviewing: true }),
     "review-view",
   );
+});
+
+test("conflict and failed results keep their recovery decisions in the conversation", () => {
+  const conflict = sidebarActionBar({
+    state: "ready-to-open",
+    runStatus: "awaiting-conflict-resolution",
+  });
+  assert.deepEqual(
+    conflict.actions.map((action) => action.id),
+    ["adopt-ai", "keep-external"],
+  );
+
+  const failure = sidebarActionBar({
+    state: "run-error",
+    runStatus: "error",
+    failureMessage: "Candidate validation failed",
+  });
+  assert.equal(failure.title, "Candidate validation failed");
+  assert.equal(failure.actions[0].id, "return-editing");
 });
 
 test("the Composer sends only the page-comment modification", () => {

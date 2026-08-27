@@ -615,7 +615,7 @@
         "^app/application/workbench-(?:tabs-(?:session|persistence-coordinator)|navigation-(?:session|workflow))\\.(?:js|d\\.ts)$",
         "^app/application/document-surface-cache-session\\.(?:js|d\\.ts)$",
         "^app/application/browser-document-session\\.(?:js|d\\.ts)$",
-        "^app/workbench/(?:WorkbenchChrome|WorkbenchDocumentSurfaceCache|document-surface-presentation|performance-timeline)\\.(?:tsx|ts)$",
+        "^app/workbench/(?:WorkbenchChrome|WorkbenchDocumentSurfaceCache|document-surface-presentation|performance-timeline|workbench-navigation-container)\\.(?:tsx|ts)$",
         "^app/workbench/workbench-document-surface-cache\\.module\\.css$",
         "^desktop/workbench-tabs-state\\.mjs$",
         "^tests/e2e/electron/electron-workbench-tabs\\.spec\\.mjs$",
@@ -852,6 +852,7 @@
       "patterns": [
         "^app/workbench/ai-conversation-model\\.(?:js|d\\.ts)$",
         "^app/workbench/AiConversationSidebar\\.tsx$",
+        "^app/workbench/run-conversation-outlet\\.tsx$",
         "^app/workbench/ai-conversation-sidebar\\.module\\.css$",
         "^app/workbench/use-ai-conversation\\.ts$"
       ],
@@ -859,7 +860,9 @@
         "typecheck"
       ],
       "nodeTests": [
-        "tests/ai-conversation-sidebar.test.mjs"
+        "tests/ai-conversation-sidebar.test.mjs",
+        "tests/workbench-render-snapshot.test.mjs",
+        "tests/workspace-controller.test.mjs"
       ]
     },
     {
@@ -1216,7 +1219,7 @@
     {
       "id": "review-ui-state",
       "patterns": [
-        "^app/workbench/(?:AiReviewWorkspace|comment-rail-view|comment-rail-contract|file-header-view|handoff-view|presentation|project-files-view|review-state|review-toolbar-controls|workbench-header-shell)\\.(?:ts|tsx)$",
+        "^app/workbench/(?:AiReviewWorkspace|comment-rail-view|comment-rail-contract|file-header-view|presentation|project-files-view|review-state|review-toolbar-controls|run-conversation-outlet|workbench-header-shell)\\.(?:ts|tsx)$",
         "^app/workbench/ai-review-workspace\\.module\\.css$"
       ],
       "suites": [
@@ -1252,7 +1255,7 @@
       "id": "workbench-orchestration",
       "patterns": [
         "^app/workbench\\.tsx$",
-        "^app/workbench/(?:comment-rail-view|comment-rail-contract|file-header-view|project-files-view)\\.(?:ts|tsx)$",
+        "^app/workbench/(?:comment-rail-view|comment-rail-contract|file-header-view|project-files-view|run-conversation-outlet|workbench-navigation-container)\\.(?:ts|tsx)$",
         "^tests/comment-rail-contract\\.test\\.mjs$",
         "^app/workbench/ExternalHtmlOpenDialog\\.tsx$",
         "^app/workbench/external-html-open-dialog\\.module\\.css$",

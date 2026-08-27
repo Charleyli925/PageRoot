@@ -6,6 +6,7 @@ export type SidebarState =
   | "ready-to-open"
   | "review-view"
   | "promoting"
+  | "run-error"
   | "no-change";
 
 export type SidebarIntent = "modify" | "continue";
@@ -98,6 +99,7 @@ export function conversationLoadedForView(conversation: {
 
 export function sidebarActionBar(options?: {
   state?: string;
+  runStatus?: string | null;
   candidateVersionLabel?: string | null;
   candidateStatus?: string | null;
   failureMessage?: string | null;

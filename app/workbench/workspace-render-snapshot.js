@@ -34,6 +34,22 @@ function sameProjectRulesStructure(left, right) {
   return sameObjectFieldsExcept(left, right, new Set(["content"]));
 }
 
+function sameRunHandoffStructure(left, right) {
+  return sameObjectFieldsExcept(
+    left,
+    right,
+    new Set(["visibleText", "textTruncated", "updatedAt"]),
+  );
+}
+
+function sameRunSessionStructure(left, right) {
+  return sameObjectFieldsExcept(
+    left,
+    right,
+    new Set(["activeHandoff"]),
+  ) && sameRunHandoffStructure(left?.activeHandoff, right?.activeHandoff);
+}
+
 /**
  * The composition root does not render comment text drafts. Keep those
  * high-frequency facts on the comments capability subscription while still
@@ -46,12 +62,15 @@ export function sameWorkbenchRenderSnapshot(previous, next) {
   return sameObjectFieldsExcept(
     previous,
     next,
-    new Set(["commentSession", "comment", "projectRules"]),
+    new Set(["commentSession", "comment", "projectRules", "runSession"]),
   ) && sameCommentWorkingCopyStructure(
     previous.commentSession,
     next.commentSession,
   ) && sameCommentPersistencePresentation(
     previous.comment,
     next.comment,
-  ) && sameProjectRulesStructure(previous.projectRules, next.projectRules);
+  ) && sameProjectRulesStructure(
+    previous.projectRules,
+    next.projectRules,
+  ) && sameRunSessionStructure(previous.runSession, next.runSession);
 }
