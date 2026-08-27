@@ -2382,6 +2382,7 @@ export class ProjectWorkflow {
       const applicationApplied = this.#applyProject(project, {
         applicationId: application.applicationId,
         transactionId: metadata.transactionId || null,
+        operationId: metadata.operationId || null,
       });
       if (!applicationApplied) return "stale";
       applied = true;
@@ -2815,6 +2816,7 @@ export class ProjectWorkflow {
       const applicationApplied = this.#applyProject(project, {
         applicationId: `prepared-${confirmation.requestId}`,
         transactionId,
+        operationId: `prepared-${confirmation.requestId}`,
       });
       if (!applicationApplied) {
         if (typeof this.#projectOpenPort.rollbackPrepared === "function") {
@@ -2980,6 +2982,7 @@ export class ProjectWorkflow {
   #applyProject(project, {
     applicationId = null,
     transactionId = null,
+    operationId = null,
   } = {}) {
     const receivedTransactionId = transactionId ? String(transactionId) : null;
     const authorization = this.#navigationPort?.authorizeProjectApplication?.({
@@ -2994,7 +2997,7 @@ export class ProjectWorkflow {
       });
       return false;
     }
-    this.#markHydrationStage("apply-start");
+    this.#markHydrationStage("apply-start", operationId);
     const outgoingRun = this.#runSession.activeRun;
     const outgoingSourcePath = this.#projectSession.sourcePath;
     if (
@@ -3057,17 +3060,17 @@ export class ProjectWorkflow {
       sourcePath: project.sourcePath || null,
       error: null,
     });
-    this.#markHydrationStage("apply-authority");
+    this.#markHydrationStage("apply-authority", operationId);
     this.#commentWorkflow.resetForProjectTransition();
     this.#draftSession.deactivate();
     this.#projectRulesWorkflow.resetForProjectTransition();
     this.#commentSession.reset();
     this.#versionSession.reset();
-    this.#markHydrationStage("apply-authority:sessions-reset");
+    this.#markHydrationStage("apply-authority:sessions-reset", operationId);
     this.#canvasPort.invalidateRenderAcks?.();
     if (project.sourcePath) this.#runSession.clearResult(project.sourcePath);
     this.#pendingOpen = null;
-    this.#markHydrationStage("apply-authority:canvas-reset");
+    this.#markHydrationStage("apply-authority:canvas-reset", operationId);
     const applicationReceipt = this.#navigationPort?.applyProject?.({
       transactionId,
       applicationId,
@@ -3081,13 +3084,14 @@ export class ProjectWorkflow {
       epoch: locator.epoch,
       activeLocked: this.#runSession.activeLocked,
       applicationReceipt,
+      operationId: operationId ? String(operationId) : null,
     });
-    this.#markHydrationStage("apply-authority:published");
+    this.#markHydrationStage("apply-authority:published", operationId);
     this.#canvasPort.applyPageViewContext?.(null);
     this.#canvasPort.clearSelection?.();
     if (!this.#runSession.activeLocked) this.#canvasPort.unlock?.();
-    this.#markHydrationStage("apply-authority:unlocked");
-    this.#markHydrationStage("apply-complete");
+    this.#markHydrationStage("apply-authority:unlocked", operationId);
+    this.#markHydrationStage("apply-complete", operationId);
     return true;
   }
 
@@ -3133,12 +3137,18 @@ export class ProjectWorkflow {
     let publicationStarted = false;
     const operationId = this.#nextOperationId("hydration");
     try {
-      this.#markHydrationStage("workspace-request");
+      this.#markHydrationStage("workspace-request", operationId);
       if (this.projectHydrating && !transitionAuthorized) {
         throw new Error("这次项目读取缺少与当前项目一致的源码切换令牌。");
       }
-      const payload = await this.#bridgeClient.workspace(activeSource);
-      this.#markHydrationStage("workspace-response");
+      const payload = await this.#bridgeClient.workspace(activeSource, { operationId });
+      this.#markHydrationStage(
+        "workspace-response",
+        operationId,
+        this.#codecs.isRecord(payload.performanceTiming)
+          ? payload.performanceTiming
+          : null,
+      );
       if (!queryIsCurrent()) return stale({ operationId, epoch: activeEpoch, sourcePath: activeSource });
 
       const nextProjectId = String(payload.projectId || "");
@@ -3237,9 +3247,9 @@ export class ProjectWorkflow {
         );
       } else if (mustAdoptSource || cleanProjectionMismatch) {
         mustAdoptSource = true;
-        this.#markHydrationStage("source-request");
+        this.#markHydrationStage("source-request", operationId);
         sourcePayload = await this.#bridgeClient.source(canonicalSourcePath);
-        this.#markHydrationStage("source-response");
+        this.#markHydrationStage("source-response", operationId);
         if (!queryIsCurrent()) return stale({ operationId, epoch: activeEpoch, sourcePath: activeSource });
         if (
           String(sourcePayload.projectId || "") !== nextProjectId
@@ -3284,7 +3294,7 @@ export class ProjectWorkflow {
           || projectRecord.restoredFromVersionId,
       });
       let context = null;
-      this.#markHydrationStage("publication-start");
+      this.#markHydrationStage("publication-start", operationId);
       publicationStarted = true;
       if (preparedTransition) {
         context = this.commitGeneratedSourceTransition({
@@ -3323,7 +3333,7 @@ export class ProjectWorkflow {
         }
         publishVersion();
       }
-      this.#markHydrationStage("publication-committed");
+      this.#markHydrationStage("publication-committed", operationId);
       if (!context) return stale({ operationId, epoch: activeEpoch, sourcePath: activeSource });
       activeSource = context.sourcePath;
       activeEpoch = context.epoch;
@@ -3517,7 +3527,7 @@ export class ProjectWorkflow {
       if (mustAdoptSource) {
         const expectedHtml = this.#documentSession.html;
         const expectedHash = await this.#hashPort.sha256(expectedHtml);
-        this.#markHydrationStage("verify-rendered");
+        this.#markHydrationStage("verify-rendered", operationId);
         await this.#canvasPort.verifyRendered?.(expectedHtml, expectedHash, context);
         if (!this.#projectSession.matches(context)) return stale(context);
       }
@@ -3547,7 +3557,7 @@ export class ProjectWorkflow {
         lastModifiedAt: authoritativeLastModifiedAt || null,
         showHandoff,
       });
-      this.#markHydrationStage("ready");
+      this.#markHydrationStage("ready", operationId);
       if (sourceBoundaryFrozen && !recoveredAutosaveConflict && !this.#runSession.activeLocked) {
         this.#canvasPort.requestFrame?.(() => this.#canvasPort.unlock?.());
       }
@@ -3579,7 +3589,7 @@ export class ProjectWorkflow {
         });
         this.#canvasPort.invalidateRenderAcks?.();
         this.#emit({ type: "project-hydration-failed", reason });
-        this.#markHydrationStage("failed");
+        this.#markHydrationStage("failed", operationId);
       }
       return this.#outcomeFromCause(
         operationId,
@@ -3604,7 +3614,7 @@ export class ProjectWorkflow {
           sourcePath: activeSource,
           error: null,
         });
-        this.#markHydrationStage("released");
+        this.#markHydrationStage("released", operationId);
       }
     }
   }
@@ -4082,8 +4092,13 @@ export class ProjectWorkflow {
     return this.#versionSession.snapshot.viewMode === "history";
   }
 
-  #markHydrationStage(stage) {
-    this.#emit({ type: "project-hydration-stage", stage: String(stage) });
+  #markHydrationStage(stage, operationId = null, timing = null) {
+    this.#emit({
+      type: "project-hydration-stage",
+      stage: String(stage),
+      operationId: operationId ? String(operationId) : null,
+      timing: this.#codecs.isRecord(timing) ? Object.freeze({ ...timing }) : null,
+    });
   }
 
   #nextOperationId(prefix) {

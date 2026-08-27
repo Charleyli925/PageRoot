@@ -204,6 +204,7 @@ import {
   readyVersionPublicationMatches,
   restoreCachedDocumentPresentation,
 } from "./workbench/document-surface-presentation";
+import { markProjectApplied, markProjectHydrationStage, RendererStartupPerformance } from "./workbench/performance-timeline";
 import type { ReviewDocuments } from "./workbench/review-document";
 import {
   WorkbenchHeaderShell,
@@ -400,11 +401,6 @@ function commentMeasurementKey(
     hash = Math.imul(hash, 16_777_619);
   }
   return `${itemKey}::${text.length}-${(hash >>> 0).toString(36)}`;
-}
-
-function markProjectHydrationStage(stage: string): void {
-  if (typeof window === "undefined") return;
-  window.__PAGEROOT_HYDRATION_STAGE__ = stage;
 }
 
 const WELCOME_PROJECT = {
@@ -1845,6 +1841,7 @@ export default function Workbench() {
         code?: unknown;
         kind?: unknown;
         operationId?: unknown;
+        timing?: unknown;
         sourcePath?: unknown;
         projects?: unknown;
         projectName?: unknown;
@@ -1858,7 +1855,7 @@ export default function Workbench() {
         ackPending?: unknown;
       }>;
       if (projectEvent.type === "project-hydration-stage") {
-        markProjectHydrationStage(String(projectEvent.stage || ""));
+        markProjectHydrationStage(String(projectEvent.stage || ""), projectEvent.operationId, projectEvent.timing);
         return;
       }
       if (projectEvent.type === "project-browser-file-requested") {
@@ -1871,6 +1868,7 @@ export default function Workbench() {
       }
       if (projectEvent.type === "project-applied") {
         const project = projectEvent.project as HtmlProject;
+        markProjectApplied(projectEvent.operationId, projectEvent.epoch);
         setStartupIssue(null);
         setProjectName(project.name);
         setProjectRecordsPath(null);
@@ -7513,6 +7511,7 @@ export default function Workbench() {
 
   return (
     <>
+      <RendererStartupPerformance />
       <ReviewAnalysisPrewarm
         session={reviewAnalysisSession}
         controller={workspaceController}

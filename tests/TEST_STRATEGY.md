@@ -288,6 +288,18 @@ Workbench 只确认已提交 loading surface、传入窄 port 并消费快照。
   request/response bytes、renderer/Bridge RSS、renderer rAF gap 和明确的
   `skip-12` 或 `authorize-12-pr1` 决策；不同 SHA、并行负载或旧诊断样本
   不得混合。
+
+- 完整 HTML 工作流性能诊断：`npm run benchmark:html-workflows -- --app
+  <Developer Preview.app> --html-dir <真实 HTML 目录> --output <隔离输出目录>
+  --commit <精确 SHA> --label <样本标签>` 串行测量打开、编辑、Preview、
+  最多 20 标签切换、Review、采纳和采纳后再打开。它必须使用新打包 App、
+  隔离 userData 和源文件字节级副本，并在结束时重新计算每个原文件 SHA。
+  HTML 正文出现、受支持图表真实绘制、Project hydration、Canvas authority
+  和整页稳定是不同完成边界；不得用 `readyState`、PageRoot ready 或静态
+  iframe 代替图表完成。结果保留 Desktop 启动 mark、同一 hydration
+  operation 的 Bridge/Repository 阶段计时、iframe churn、逐进程内存、
+  长任务和最多 50 条错误样本。对比两个提交时必须在同一机器串行运行，
+  使用同一 HTML 清单和相同测试顺序，不混入其他 PR。
   除其明确的 harness、报告与命令元数据外，任何受版本控制的运行时输入
   相对 `origin/main` 的变化都会在测量前拒绝；Electron autosave、dirty
   switch 与 dirty close 都必须按完整预期 HTML 字节比较，不能只验证 token

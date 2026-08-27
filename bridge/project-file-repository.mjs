@@ -13,6 +13,10 @@ import {
 import path from "node:path";
 
 import {
+  WorkspacePerformanceTiming,
+} from "./project-file-repository/workspace-performance-timing.mjs";
+
+import {
   ensureDirectory,
   exists,
   jsonText,
@@ -323,7 +327,13 @@ export class ProjectFileRepository {
   }
 
   async workspace({ sourcePath } = {}) {
-    return this.#serial(() => this.#workspace({ sourcePath }));
+    const performanceTiming = new WorkspacePerformanceTiming();
+    return this.#serial(async () => {
+      performanceTiming.markDequeued();
+      const workspace = await this.#workspace({ sourcePath, performanceTiming });
+      if (!workspace) return null;
+      return { ...workspace, performanceTiming: performanceTiming.snapshot() };
+    });
   }
 
   async forceUnlockWorkingCopy({ sourcePath } = {}) {
@@ -596,24 +606,33 @@ export class ProjectFileRepository {
     );
   }
 
-  async #workspace({ sourcePath, adoptExternalConflict = false }) {
+  async #workspace({
+    sourcePath,
+    adoptExternalConflict = false,
+    performanceTiming = new WorkspacePerformanceTiming(),
+  }) {
     // A save can park the visible source in its private recovery directory
     // between two no-replace publishes. Recover the registered project before
     // resolving the requested HTML so a crash in that narrow interval does
     // not make the transaction unreachable merely because its visible name is
     // temporarily absent.
     const registered = await this.#registeredProjectForSource(sourcePath);
+    performanceTiming.checkpoint("registryResolveMs");
     if (registered) {
       await this.#recoverProject(registered.paths.projectRootPath);
     }
+    performanceTiming.checkpoint("recoveryMs");
     let target = await this.#resolveOpenTarget({ sourcePath });
+    performanceTiming.checkpoint("registryResolveMs");
     if (!target) return null;
     // A Promotion transaction means the user already chose adoption.  Resume
     // it before exposing any workspace facts, so a crash cannot leave a
     // half-Version between Candidate review and a formal Version.
     const recovered = await this.#recoverProject(target.projectRootPath);
+    performanceTiming.checkpoint("recoveryMs");
     if (recovered.length > 0) {
       target = await this.#resolveOpenTarget({ sourcePath });
+      performanceTiming.checkpoint("registryResolveMs");
       if (!target) return null;
     }
     const loaded = await this.#loadRegisteredProject({
@@ -621,6 +640,7 @@ export class ProjectFileRepository {
       documentId: target.documentId,
       declaredProjectRootPath: target.projectRootPath,
     });
+    performanceTiming.checkpoint("projectReloadMs");
     const workingCopy = target.workingCopyId
       ? loaded.manifest.workingCopies.find(
         (entry) => entry.workingCopyId === target.workingCopyId,
@@ -689,9 +709,11 @@ export class ProjectFileRepository {
     const terminalAiTask = !activeRequest && loaded.runtime.lastAiTask
       ? await this.#terminalAiTaskForLoaded(loaded)
       : null;
+    performanceTiming.checkpoint("stateFilesReadMs");
     const source = await readHtmlFile(target.exactSourcePath, "managed HTML", {
       projectRootPath: loaded.paths.projectRootPath,
     });
+    performanceTiming.checkpoint("sourceReadMs");
     let workingCopyRecovered = false;
     if (workingCopy && state && target.targetKind === "working-copy") {
       let reconciliation;
@@ -723,6 +745,7 @@ export class ProjectFileRepository {
         );
       }
     }
+    performanceTiming.checkpoint("workingCopyReconcileMs");
     // The active Working Copy can be reconciled from a clean external edit
     // immediately above. Build this public list only after that mutation so
     // the first hydration never returns a stale differsFromBase projection.
@@ -744,7 +767,8 @@ export class ProjectFileRepository {
         saveState: workingCopyState.saveState,
       });
     }
-    return {
+    performanceTiming.checkpoint("workingCopyScanMs");
+    const result = {
       target,
       project: structuredClone(loaded.project),
       manifest: structuredClone(loaded.manifest),
@@ -767,6 +791,8 @@ export class ProjectFileRepository {
       sourceSha256: source.sha256,
       lastModifiedAt: source.lastModifiedAt,
     };
+    performanceTiming.checkpoint("workspaceSerializeMs");
+    return result;
   }
 
   async #reconcileExternalWorkingCopyState({ loaded, workingCopy, state, source }) {

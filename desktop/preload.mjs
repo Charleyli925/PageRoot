@@ -253,6 +253,39 @@ const query = new URLSearchParams(globalThis.location.search);
 const bridgePort = query.get("bridgePort") || "";
 const bridgeAuthToken = query.get("bridgeAuthToken") || "";
 const appVersion = query.get("appVersion") || "";
+function startupTimingFromQuery(value) {
+  try {
+    const parsed = JSON.parse(String(value || "null"));
+    if (
+      !parsed
+      || typeof parsed !== "object"
+      || parsed.schemaVersion !== 1
+      || !Array.isArray(parsed.marks)
+    ) return null;
+    const marks = parsed.marks.slice(0, 32).flatMap((entry) => {
+      if (
+        !entry
+        || typeof entry !== "object"
+        || !/^[a-z][a-z0-9-]{0,63}$/u.test(String(entry.stage || ""))
+        || !Number.isFinite(Number(entry.atUnixMs))
+      ) return [];
+      return [Object.freeze({
+        stage: String(entry.stage),
+        atUnixMs: Number(entry.atUnixMs),
+      })];
+    });
+    return Object.freeze({
+      schemaVersion: 1,
+      timeOriginUnixMs: Number.isFinite(Number(parsed.timeOriginUnixMs))
+        ? Number(parsed.timeOriginUnixMs)
+        : 0,
+      marks: Object.freeze(marks),
+    });
+  } catch {
+    return null;
+  }
+}
+const startupTiming = startupTimingFromQuery(query.get("startupTiming"));
 const runtimeCapabilities = Object.freeze({
   sourceEditing: "enabled",
   projectOpening: "desktop-dialog",
@@ -265,6 +298,7 @@ const runtimeConfig = Object.freeze({
   bridgeAuthToken,
   appVersion,
   capabilities: runtimeCapabilities,
+  diagnostics: Object.freeze({ startupTiming }),
 });
 
 const previewApi = Object.freeze({

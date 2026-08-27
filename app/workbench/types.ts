@@ -280,8 +280,24 @@ declare global {
       bridgeAuthToken: string;
       appVersion: string;
       capabilities?: RuntimeCapabilities;
+      diagnostics?: Readonly<{
+        startupTiming: Readonly<{
+          schemaVersion: 1;
+          timeOriginUnixMs: number;
+          marks: ReadonlyArray<Readonly<{
+            stage: string;
+            atUnixMs: number;
+          }>>;
+        }> | null;
+      }>;
     };
     __PAGEROOT_HYDRATION_STAGE__?: string;
+    __PAGEROOT_PERFORMANCE_TIMELINE__?: ReadonlyArray<Readonly<{
+      stage: string;
+      startTime: number;
+      operationId: string | null;
+      timing: Readonly<Record<string, number>>;
+    }>>;
   }
 }
 
