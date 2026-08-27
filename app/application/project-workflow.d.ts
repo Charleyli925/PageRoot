@@ -141,6 +141,7 @@ export class ProjectWorkflow {
   refreshWorkspace(input?: Record<string, unknown>): Promise<ProjectWorkflowOutcome>;
   retryHydration(): Promise<ProjectWorkflowOutcome>;
   prepareSwitch(input?: { fromDeferred?: boolean }): Promise<ProjectWorkflowOutcome>;
+  requestBrowserFilePicker(): string | null;
   openProject(input?: {
     kind?: "local" | "recent" | "registered" | "startup";
     sourcePath?: string | null;

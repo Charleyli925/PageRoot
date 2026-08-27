@@ -2630,6 +2630,33 @@ test("browser local open requests the hidden picker without draining first", asy
   assert.equal(harness.projectSession.sourcePath, OLD_PATH);
 });
 
+test("a direct browser file after an abandoned picker still enters the accepted FIFO", async (t) => {
+  const harness = createHarness({
+    projectOpen: {
+      mode: () => "browser-file",
+    },
+  });
+  t.after(() => harness.workflow.dispose());
+
+  const requested = harness.workflow.requestBrowserFilePicker();
+  assert.equal(typeof requested, "string");
+  assert.notEqual(requested, "");
+
+  const outcome = harness.workflow.acceptBrowserProject({
+    project: {
+      projectId: "project_browser_recovered",
+      documentId: "doc_browser_recovered",
+      name: "recovered-utf8.html",
+      sourcePath: null,
+      html: A_HTML,
+      sha256: sha256(A_HTML),
+    },
+  });
+  assert.equal(outcome.status, "succeeded");
+  assert.equal(outcome.value.accepted, true);
+  assert.notEqual(outcome.value.operationId, requested);
+});
+
 test("cancelling the local picker does not drain the current project", async (t) => {
   let fenced = 0;
   const harness = createHarness({

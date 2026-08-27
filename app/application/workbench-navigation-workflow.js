@@ -51,6 +51,7 @@ export class WorkbenchNavigationWorkflow {
   #setTimer;
   #clearTimer;
   #admissionTail = Promise.resolve();
+  #busy = false;
   #active = null;
   #ordinal = 0;
   #disposed = false;
@@ -85,6 +86,27 @@ export class WorkbenchNavigationWorkflow {
 
   openProject(input = {}) {
     const kind = String(input.kind || "local");
+    const pickerId = kind === "local" && !input.sourcePath
+      ? this.#projectWorkflow.requestBrowserFilePicker?.() || null
+      : null;
+    if (pickerId) {
+      if (
+        this.#active?.continuation === "browser-file"
+        && this.#session.snapshot.phase === "awaiting-user"
+      ) {
+        return Promise.resolve(succeeded({ operationId: pickerId, awaitingFile: true }));
+      }
+      return this.#admit({ kind, sourcePath: null }, (active) => {
+        active.continuation = "browser-file";
+        this.#session.transition(active.transactionId, "preparing");
+        this.#session.transition(active.transactionId, "opening");
+        this.#session.transition(active.transactionId, "awaiting-user");
+        return {
+          suspended: true,
+          outcome: succeeded({ operationId: pickerId, awaitingFile: true }),
+        };
+      });
+    }
     if (
       kind === "local"
       && this.#active?.continuation === "browser-file"
@@ -700,11 +722,22 @@ export class WorkbenchNavigationWorkflow {
       };
       const inspect = (snapshot) => {
         const project = snapshot?.projectSession;
-        if (
-          project?.projectId !== receipt.projectId
-          || project?.documentId !== receipt.documentId
-          || Number(project?.epoch) !== receipt.epoch
-        ) return;
+        const sessionAligned = Boolean(
+          project?.projectId
+          && project.projectId === receipt.projectId
+          && project.documentId === receipt.documentId
+          && Number(project.epoch) === receipt.epoch,
+        );
+        // In-memory browser HTML has no disk locator, so ProjectSession keeps
+        // an empty projectId after openLocator(null). Settlement still has to
+        // complete or the next picker/accept stays queued behind this one.
+        const browserMemoryAligned = Boolean(
+          receipt.projectId
+          && !project?.sourcePath
+          && !project?.projectId
+          && Number(project?.epoch) === receipt.epoch,
+        );
+        if (!sessionAligned && !browserMemoryAligned) return;
         const hydration = snapshot?.project?.hydration;
         if (hydration?.phase === "failed" && Number(hydration.epoch) === receipt.epoch) {
           settle({
@@ -755,58 +788,77 @@ export class WorkbenchNavigationWorkflow {
     let release;
     const completion = new Promise((resolve) => { release = resolve; });
     this.#admissionTail = predecessor.then(() => completion);
-    return predecessor.then(async () => {
-      if (this.#disposed) {
+    // Browser-file `input.click()` must run in the same user-activation turn.
+    // Queuing an idle admission behind `predecessor.then()` yields a microtask,
+    // so Chromium silently ignores the click and encoding-error "重新选择"
+    // cannot reopen the picker.
+    if (!this.#busy) {
+      return this.#beginAdmission(intent, execute, release);
+    }
+    return predecessor.then(() => this.#beginAdmission(intent, execute, release));
+  }
+
+  #beginAdmission(intent, execute, release) {
+    if (this.#disposed) {
+      release();
+      return rejected("WORKBENCH_NAVIGATION_DISPOSED", "导航已停止。");
+    }
+    if (this.#closeFreeze) {
+      release();
+      return rejected(
+        "WORKBENCH_NAVIGATION_CLOSE_FROZEN",
+        "窗口正在完成关闭核对，暂不接收新的 HTML 导航。",
+      );
+    }
+    this.#busy = true;
+    this.#ordinal += 1;
+    const id = transactionId(this.#ordinal, this.#clock.now());
+    const active = {
+      transactionId: id,
+      intent: Object.freeze({ ...intent }),
+      priorTabs: this.#tabs.captureAuthority(),
+      priorController: this.#controller.getSnapshot()?.projectSession || null,
+      receipt: null,
+      expectedTabId: null,
+      requestId: null,
+      continuation: null,
+      browserAuthority: null,
+      applicationId: null,
+      applicationAuthorityOpen: true,
+      cancelReceiptWait: null,
+      cancelSettlementWait: null,
+      release: () => {
+        this.#busy = false;
         release();
-        return rejected("WORKBENCH_NAVIGATION_DISPOSED", "导航已停止。");
-      }
-      if (this.#closeFreeze) {
-        release();
-        return rejected(
-          "WORKBENCH_NAVIGATION_CLOSE_FROZEN",
-          "窗口正在完成关闭核对，暂不接收新的 HTML 导航。",
-        );
-      }
-      this.#ordinal += 1;
-      const id = transactionId(this.#ordinal, this.#clock.now());
-      const active = {
-        transactionId: id,
-        intent: Object.freeze({ ...intent }),
-        priorTabs: this.#tabs.captureAuthority(),
-        priorController: this.#controller.getSnapshot()?.projectSession || null,
-        receipt: null,
-        expectedTabId: null,
-        requestId: null,
-        continuation: null,
-        browserAuthority: null,
-        applicationId: null,
-        applicationAuthorityOpen: true,
-        cancelReceiptWait: null,
-        cancelSettlementWait: null,
-        release,
-      };
-      active.terminalPromise = new Promise((resolve) => {
-        active.resolveTerminal = resolve;
-      });
-      this.#active = active;
-      this.#session.admit({
-        transactionId: id,
-        intent: active.intent,
-        admissionOrdinal: this.#ordinal,
-      });
-      try {
-        const result = await execute(active);
-        if (result?.suspended) return result.outcome;
-        return this.#complete(active, result);
-      } catch (cause) {
-        return this.#complete(active, {
+      },
+    };
+    active.terminalPromise = new Promise((resolve) => {
+      active.resolveTerminal = resolve;
+    });
+    this.#active = active;
+    this.#session.admit({
+      transactionId: id,
+      intent: active.intent,
+      admissionOrdinal: this.#ordinal,
+    });
+    try {
+      return Promise.resolve(execute(active)).then(
+        (result) => (result?.suspended ? result.outcome : this.#complete(active, result)),
+        (cause) => this.#complete(active, {
           outcome: rejected(
             "WORKBENCH_NAVIGATION_REJECTED",
             String(cause?.message || cause || "导航失败。"),
           ),
-        });
-      }
-    });
+        }),
+      );
+    } catch (cause) {
+      return this.#complete(active, {
+        outcome: rejected(
+          "WORKBENCH_NAVIGATION_REJECTED",
+          String(cause?.message || cause || "导航失败。"),
+        ),
+      });
+    }
   }
 
   #continue(active, execute) {

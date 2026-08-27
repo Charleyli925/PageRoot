@@ -7370,7 +7370,16 @@ export default function Workbench() {
         );
         return;
       case "open-project":
+        void openProject(action.sourcePath);
+        return;
       case "retry-project-open":
+        if (!action.sourcePath && fileInputRef.current) {
+          // Keep this click in the toast's user-activation turn. Navigation
+          // admission may still be busy finishing the current HTML, and a
+          // queued input.click() is ignored by Chromium.
+          fileInputRef.current.click();
+          return;
+        }
         void openProject(action.sourcePath);
         return;
       case "retry-project-hydration":

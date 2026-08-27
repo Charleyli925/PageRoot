@@ -39,6 +39,7 @@ test("top toolbar keeps the approved restrained visual contract", async () => {
   const css = await readWorkbenchCascadeCss();
 
   const header = lastCssRule(css, ".workbench-header");
+  assert.match(header, /z-index:\s*80/u);
   assert.match(header, /background:\s*rgb\(253 252 249 \/ 92%\)/u);
   assert.match(header, /box-shadow:\s*none/u);
   assert.match(header, /backdrop-filter:\s*blur\(18px\) saturate\(116%\)/u);

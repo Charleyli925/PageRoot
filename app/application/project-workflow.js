@@ -679,6 +679,17 @@ export class ProjectWorkflow {
     }
   }
 
+  requestBrowserFilePicker() {
+    if (this.#disposed || this.#snapshot.close.phase === "ready") return null;
+    if (this.#projectOpenPort.mode() !== "browser-file") return null;
+    const operationId = this.#nextOpenOperation();
+    this.#setOpen("opening", operationId, null);
+    this.#pendingOpen = null;
+    this.#browserOpenOperationId = operationId;
+    this.#emit({ type: "project-browser-file-requested", operationId });
+    return operationId;
+  }
+
   async openProject({
     kind = "local",
     sourcePath,
@@ -693,23 +704,22 @@ export class ProjectWorkflow {
       );
     }
     if (kind === "startup") return this.#openStartup({ transactionId });
+    if (kind === "local" && this.#projectOpenPort.mode() === "browser-file") {
+      // Request the hidden file input in this same user-activation turn.
+      // Awaiting prepareSwitch() first yields past the click, so Chromium
+      // silently ignores input.click() and encoding-error "重新选择" cannot
+      // reopen the picker. The accepted-project FIFO still fences on apply.
+      const operationId = this.requestBrowserFilePicker();
+      return operationId
+        ? succeeded({ operationId, awaitingFile: true })
+        : blocked(
+          "PROJECT_OPEN_CLOSE_COMMITTED",
+          "当前窗口正在关闭，新的 HTML 将由下一次启动接收。",
+        );
+    }
     const operationId = this.#nextOpenOperation();
     this.#setOpen("opening", operationId, null);
     try {
-      if (
-        kind === "local"
-        && this.#projectOpenPort.mode() === "browser-file"
-      ) {
-        // Request the hidden file input in this same user-activation turn.
-        // Awaiting prepareSwitch() first yields past the click, so Chromium
-        // silently ignores input.click() and encoding-error "重新选择" cannot
-        // reopen the picker. The accepted-project FIFO still fences on apply.
-        this.#pendingOpen = null;
-        this.#browserOpenOperationId = operationId;
-        this.#emit({ type: "project-browser-file-requested", operationId });
-        return succeeded({ operationId, awaitingFile: true });
-      }
-
       if (kind === "local" || kind === "recent") {
         const opened = kind === "recent"
           ? await this.#projectOpenPort.openRecent(String(sourcePath || ""))
@@ -842,10 +852,10 @@ export class ProjectWorkflow {
         "当前窗口正在关闭，没有接收新的 HTML。",
       );
     }
-    if (!operationId && !this.#browserOpenOperationId) {
-      // A trusted hidden file input can be populated directly (for example by
-      // accessibility automation) without the real picker command. It still
-      // enters the accepted FIFO, whose executor repeats the full switch fence.
+    if (!operationId) {
+      // Direct hidden-input population (Playwright, encoding-error 重新选择)
+      // is trusted even if an earlier picker command left a pending operation.
+      this.#browserOpenOperationId = null;
       return this.acceptProject(project, {
         kind: "browser-file",
         operationId: this.#nextOpenOperation(),
@@ -853,7 +863,7 @@ export class ProjectWorkflow {
         transactionId,
       });
     }
-    if (!operationId || operationId !== this.#browserOpenOperationId) {
+    if (operationId !== this.#browserOpenOperationId) {
       return stale({ operationId: String(operationId || ""), kind: "browser-file" });
     }
     this.#browserOpenOperationId = null;

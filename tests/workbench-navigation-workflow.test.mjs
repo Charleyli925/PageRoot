@@ -80,6 +80,7 @@ function fixture({
   cancel,
   acceptExternal,
   acceptBrowser,
+  requestPicker = null,
   browserDocuments = null,
   tabsPersistence = null,
   clock = { now: () => 1_000 },
@@ -140,6 +141,12 @@ function fixture({
     async prepareSwitch() {
       calls.push("prepare");
       return { status: "succeeded", value: {} };
+    },
+    requestBrowserFilePicker() {
+      if (!requestPicker) return null;
+      const operationId = requestPicker({ calls });
+      calls.push(`picker:${operationId || ""}`);
+      return operationId || null;
     },
     async openProject(input) {
       calls.push(`open:${input.kind}:${input.projectId || input.sourcePath || ""}`);
@@ -323,6 +330,106 @@ for (const ingress of DIRECT_FAILURE_CASES) {
     assertAlignedNavigation(harness, B);
   });
 }
+
+test("a busy navigation still requests the browser picker in the same gesture turn", async () => {
+  const pickerOps = [];
+  let releaseOpen;
+  const gate = new Promise((resolve) => { releaseOpen = resolve; });
+  const harness = fixture({
+    requestPicker: () => {
+      const operationId = `picker-${pickerOps.length + 1}`;
+      pickerOps.push(operationId);
+      return operationId;
+    },
+    open: async ({ apply }) => {
+      await gate;
+      const applied = apply(B);
+      return { status: "succeeded", value: { opened: true, applicationId: applied.applicationId } };
+    },
+  });
+  const first = harness.workflow.openProject({ kind: "recent", sourcePath: "/B.html" });
+  await nextTurn();
+  pickerOps.length = 0;
+  const second = harness.workflow.openProject({ kind: "local" });
+  assert.deepEqual(pickerOps, ["picker-1"]);
+  assert.equal(harness.navigation.snapshot.phase, "opening");
+  releaseOpen();
+  assert.equal((await first).status, "succeeded");
+  const requested = await second;
+  assert.equal(requested.status, "succeeded");
+  assert.equal(requested.value.awaitingFile, true);
+  assert.equal(harness.navigation.snapshot.phase, "awaiting-user");
+});
+
+test("in-memory browser HTML settlement does not require a disk projectId", async () => {
+  const harness = fixture({
+    acceptBrowser: ({ input, apply, publish }) => {
+      const applied = apply(input.project);
+      publish({
+        projectSession: {
+          projectId: "",
+          documentId: "",
+          epoch: applied.epoch,
+          sourcePath: null,
+        },
+        project: {
+          hydration: { phase: "idle", epoch: applied.epoch, error: null },
+          projectApplication: {
+            status: "idle",
+            activeApplicationId: null,
+            queuedApplicationId: null,
+          },
+        },
+        document: {
+          canvasAuthority: { status: "verified", error: null },
+        },
+      });
+      return { status: "succeeded", value: { opened: true, applicationId: applied.applicationId } };
+    },
+  });
+  const outcome = await harness.workflow.acceptBrowserProject({ project: B });
+  assert.equal(outcome.status, "succeeded");
+  assert.equal(harness.navigation.snapshot.phase, "idle");
+});
+
+test("idle browser local open starts ProjectWorkflow in the same turn as the gesture", async () => {
+  const harness = fixture({
+    open: ({ input }) => ({
+      status: "succeeded",
+      value: { operationId: `picker-${input.transactionId}`, awaitingFile: true },
+    }),
+  });
+  const pending = harness.workflow.openProject({ kind: "local" });
+  assert.equal(
+    harness.calls.includes("open:local:"),
+    true,
+    "picker admission must not wait for a microtask, or Chromium drops the user gesture",
+  );
+  const requested = await pending;
+  assert.equal(requested.status, "succeeded");
+  assert.equal(harness.navigation.snapshot.phase, "awaiting-user");
+});
+
+test("retrying an abandoned browser picker starts the next request in the same turn", async () => {
+  const harness = fixture({
+    open: ({ input }) => ({
+      status: "succeeded",
+      value: { operationId: `picker-${input.transactionId}`, awaitingFile: true },
+    }),
+  });
+  await harness.workflow.openProject({ kind: "local" });
+  assert.equal(harness.navigation.snapshot.phase, "awaiting-user");
+  harness.calls.length = 0;
+  const pending = harness.workflow.openProject({ kind: "local" });
+  assert.equal(
+    harness.calls.includes("open:local:"),
+    true,
+    "encoding-error retry must reopen the picker in the same click turn",
+  );
+  const requested = await pending;
+  assert.equal(requested.status, "succeeded");
+  assert.equal(harness.navigation.snapshot.phase, "awaiting-user");
+});
 
 test("browser picker continuation retains its admitted transaction and exact application receipt", async () => {
   const harness = fixture({
