@@ -16,7 +16,6 @@ import AttachmentLightbox from "./components/AttachmentLightbox";
 import HtmlCanvasEditor from "./components/HtmlCanvasEditor";
 import HtmlDisplaySurface from "./components/HtmlDisplaySurface";
 import type {
-  HtmlCanvasCommentLayoutState,
   HtmlCanvasEditRuntimeLoadOutcome,
   HtmlCanvasEditorHandle,
   HtmlCanvasMutation,
@@ -49,15 +48,7 @@ import {
 } from "./lib/attachment-selection.js";
 import {
   commentMarkerGroupKey,
-  virtualizedCommentIds,
 } from "./lib/comment-virtualization.js";
-import {
-  computeAlignedRailOffset,
-  computeCommentRailMinimumOffset,
-  layoutCommentRailItems,
-  routeCommentRailWheel,
-  stabilizeCommentTargetLayouts,
-} from "./lib/comment-rail-layout.js";
 import {
   auditEventKey,
   removeAcknowledgedAuditEvents,
@@ -166,11 +157,9 @@ import {
   uniqueTargets,
 } from "./workbench/comment-model";
 import {
-  relinkNoticeCopy,
   unsafeCommentTargetsNotice,
   unsafeRelinkComments,
 } from "./workbench/comment-relink-model.js";
-import { CommentRailView } from "./workbench/comment-rail-view";
 import {
   CommentRailContainer,
   type CommentRailCapability,
@@ -179,7 +168,7 @@ import { createCommentCanvasPort } from "./workbench/comment-canvas-port";
 import {
   deriveComposerState,
   type CommentRailActions,
-  type CommentRailModel,
+  type CommentRailContainerContext,
 } from "./workbench/comment-rail-contract";
 import {
   sameWorkbenchRenderSnapshot,
@@ -261,7 +250,6 @@ import type {
   DirectEditEvent,
   Drawer,
   HtmlProject,
-  OtherTabCommentEntry,
   PersistState,
   PrepareCloseDetail,
   ProjectContext,
@@ -401,19 +389,6 @@ type ReadyReviewSession = {
   afterLabel: string;
 };
 
-function commentMeasurementKey(
-  itemKey: string,
-  layoutState: unknown,
-): string {
-  const text = JSON.stringify(layoutState);
-  let hash = 2_166_136_261;
-  for (let index = 0; index < text.length; index += 1) {
-    hash ^= text.charCodeAt(index);
-    hash = Math.imul(hash, 16_777_619);
-  }
-  return `${itemKey}::${text.length}-${(hash >>> 0).toString(36)}`;
-}
-
 function markProjectHydrationStage(stage: string): void {
   if (typeof window === "undefined") return;
   window.__PAGEROOT_HYDRATION_STAGE__ = stage;
@@ -506,22 +481,11 @@ export default function Workbench() {
     kind: "composer" | "comment";
     commentId: string;
   } | null>(null);
-  const composerRef = useRef<HTMLTextAreaElement>(null);
-  const composerFocusPendingRef = useRef(false);
   const commentEditRef = useRef<HTMLTextAreaElement>(null);
-  const commentsPanelRef = useRef<HTMLElement>(null);
-  const commentsHeaderRef = useRef<HTMLElement>(null);
   const reviewStageRef = useRef<HTMLDivElement>(null);
   const commentCounter = useRef(1);
   const focusedCommentIdRef = useRef<string | null>(null);
   const commentEditResumePendingRef = useRef<string | null>(null);
-  const commentRailOffsetRef = useRef(0);
-  const commentRailMinimumOffsetRef = useRef(0);
-  const reviewRevealRequestRef = useRef(0);
-  const reviewRevealPendingRef = useRef<{
-    target: HtmlCanvasSelection;
-    itemKey: string;
-  } | null>(null);
   const pagePresentationScrollRequestRef = useRef(0);
   const [reviewAnalysisSession] = useState(
     () => new ReviewAnalysisSession<PreparedReviewDocuments>({
@@ -742,23 +706,7 @@ export default function Workbench() {
   const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
   const [pendingDeleteCommentId, setPendingDeleteCommentId] = useState<string | null>(null);
   const [handoffPreviewOpen, setHandoffPreviewOpen] = useState(false);
-  const [commentRailHeight, setCommentRailHeight] = useState(0);
-  const [commentCardHeights, setCommentCardHeights] = useState<Record<string, number>>({});
-  const [commentTargetLayouts, setCommentTargetLayouts] = useState<
-    Record<string, HtmlCanvasCommentLayoutState["targets"][number]>
-  >({});
-  const [commentLayoutAuthority, setCommentLayoutAuthority] = useState({
-    sourceSha256: "",
-    viewContextGeneration: -1,
-    targetIdsKey: "",
-    ready: false,
-    textEditing: false,
-  });
-  const [commentHeaderHeight, setCommentHeaderHeight] = useState(62);
-  const [commentViewport, setCommentViewport] = useState({ top: 0, height: 800 });
   const [focusedCommentId, setFocusedCommentId] = useState<string | null>(null);
-  const [commentRailOffset, setCommentRailOffset] = useState(0);
-  const [commentRailFollowsFocus, setCommentRailFollowsFocus] = useState(false);
   const [fileView, setFileView] = useState<WorkspaceFileView | null>(null);
   const projectRulesSnapshot = workspaceControllerSnapshot?.projectRules
     ?? EMPTY_PROJECT_RULES_SNAPSHOT;
@@ -1943,22 +1891,9 @@ export default function Workbench() {
         relinkSelectionArmedRef.current = false;
         resumeSubmissionAfterRelinkRef.current = false;
         setRelinkingTarget(null);
-        setCommentCardHeights({});
-        setCommentRailHeight(0);
-        commentRailOffsetRef.current = 0;
-        setCommentRailOffset(0);
-        setCommentRailFollowsFocus(false);
-        setCommentTargetLayouts({});
-        setCommentLayoutAuthority({
-          sourceSha256: "",
-          viewContextGeneration: -1,
-          targetIdsKey: "",
-          ready: false,
-          textEditing: false,
-        });
+        commentCanvasPort.resetLayout();
         focusedCommentIdRef.current = null;
         setFocusedCommentId(null);
-        reviewRevealRequestRef.current += 1;
         setCanvasMode(
           runtimeCapabilitiesRef.current.sourceEditing !== "enabled"
             ? "preview"
@@ -2819,11 +2754,6 @@ export default function Workbench() {
         (comment) => comment.commentId === commentEditSession.commentId,
       ) ?? null
     : null;
-  const hasUnsavedCommentEdit = Boolean(
-    viewMode === "current"
-    && unfinishedEditedComment
-    && commentEditSessionHasChanges(commentEditSession),
-  );
   const interactionPreviewHtml = useMemo(() => {
     if (externalSourcePreview?.html) return externalSourcePreview.html;
     if (!browserPreviewOnly || projectName !== WELCOME_PROJECT_NAME) return html;
@@ -2891,182 +2821,12 @@ export default function Workbench() {
     && draftTarget
     && (draft.trim() || draftAttachments.length > 0),
   );
-  const expectedCommentLayoutTargetIds = useMemo(() => [...new Set([
-    ...visibleCommentItems.map((comment) => comment.target.id),
-    ...(
-      (hasCommentDraft || composerOpen) && draftTarget
-        ? [draftTarget.id]
-        : []
-    ),
-  ])].sort(), [
-    composerOpen,
-    draftTarget,
-    hasCommentDraft,
-    visibleCommentItems,
-  ]);
-  const expectedCommentLayoutTargetIdsKey =
-    expectedCommentLayoutTargetIds.join("\u0000");
-  const commentLayoutReady = Boolean(
-    canvasMode === "edit"
-    && commentLayoutAuthority.ready
-    && (
-      commentLayoutAuthority.textEditing
-      || !expectedCommentLayoutSourceSha256
-      || commentLayoutAuthority.sourceSha256
-        === expectedCommentLayoutSourceSha256
-    )
-    && commentLayoutAuthority.viewContextGeneration
-      === (activePageViewContext?.generation ?? 0)
-    && commentLayoutAuthority.targetIdsKey
-      === expectedCommentLayoutTargetIdsKey
-    && expectedCommentLayoutTargetIds.every(
-      (targetId) => Boolean(commentTargetLayouts[targetId]),
-    )
-  );
-  const draftTargetLayout = draftTarget
-    ? commentTargetLayouts[draftTarget.id]
-    : undefined;
-  const draftTargetInOtherTab = Boolean(
-    draftTarget?.tagName !== "body"
-    && draftTargetLayout?.status === "hidden"
-    && draftTargetLayout.tabGroupKey,
-  );
-  const draftInOtherTab = hasCommentDraft && draftTargetInOtherTab;
-  const draftTargetInCurrentTab = Boolean(
-    draftTarget && !draftTargetInOtherTab,
-  );
-  const draftInCurrentTab = hasCommentDraft && draftTargetInCurrentTab;
-  const composerInCurrentTab = composerOpen && draftTargetInCurrentTab;
-  const commentTargetTops = useMemo(() => Object.fromEntries(
-    Object.entries(commentTargetLayouts)
-      .filter(([, layout]) => (
-        layout.status === "visible"
-        && Number.isFinite(layout.top)
-      ))
-      .map(([targetId, layout]) => [targetId, layout.top as number]),
-  ), [commentTargetLayouts]);
-  const otherTabCommentItems = useMemo(() => visibleCommentItems.filter(
-    (comment) => {
-      const layout = commentTargetLayouts[comment.target.id];
-      return Boolean(
-        comment.target.tagName !== "body"
-        && layout?.status === "hidden"
-        && layout.tabGroupKey
-      );
-    },
-  ), [commentTargetLayouts, visibleCommentItems]);
-  const otherTabCommentIds = useMemo(
-    () => new Set(otherTabCommentItems.map((comment) => comment.commentId)),
-    [otherTabCommentItems],
-  );
-  const railCommentItems = useMemo(
-    () => visibleCommentItems.filter(
-      (comment) => !otherTabCommentIds.has(comment.commentId),
-    ),
-    [otherTabCommentIds, visibleCommentItems],
-  );
-  const otherTabCommentGroups = useMemo(() => {
-    const grouped = new Map<string, {
-      key: string;
-      label: string;
-      entries: OtherTabCommentEntry[];
-    }>();
-    const appendEntry = (
-      key: string,
-      label: string,
-      entry: OtherTabCommentEntry,
-    ) => {
-      const current = grouped.get(key);
-      if (current) current.entries.push(entry);
-      else grouped.set(key, { key, label, entries: [entry] });
-    };
-    for (const comment of otherTabCommentItems) {
-      const layout = commentTargetLayouts[comment.target.id];
-      const key = layout?.tabGroupKey || comment.target.id;
-      appendEntry(
-        key,
-        layout?.tabGroupLabel || "其他标签页",
-        {
-          kind: "saved",
-          key: comment.commentId,
-          target: comment.target,
-          comment,
-          previewText: comment.text.trim()
-            || `已添加 ${(comment.attachments ?? []).length} 个附件`,
-        },
-      );
-    }
-    if (draftInOtherTab && draftTarget && draftTargetLayout?.tabGroupKey) {
-      appendEntry(
-        draftTargetLayout.tabGroupKey,
-        draftTargetLayout.tabGroupLabel || "其他标签页",
-        {
-          kind: "draft",
-          key: "__composer",
-          target: draftTarget,
-          previewText: draft.trim()
-            || `已添加 ${draftAttachments.length} 个附件`,
-        },
-      );
-    }
-    return [...grouped.values()].map((group) => ({
-      ...group,
-      entries: [...group.entries].sort((left, right) => {
-        const sameTarget = (
-          commentMarkerGroupKey(left.target)
-          === commentMarkerGroupKey(right.target)
-        );
-        if (sameTarget) {
-          if (left.kind !== right.kind) return left.kind === "saved" ? -1 : 1;
-          if (left.kind === "saved" && right.kind === "saved") {
-            return left.comment.createdAt.localeCompare(right.comment.createdAt);
-          }
-          return 0;
-        }
-        const position = (
-          (left.target.sourceAnchor?.startOffset ?? Number.MAX_SAFE_INTEGER)
-          - (right.target.sourceAnchor?.startOffset ?? Number.MAX_SAFE_INTEGER)
-        );
-        if (position !== 0) return position;
-        if (left.kind !== right.kind) return left.kind === "saved" ? -1 : 1;
-        if (left.kind === "saved" && right.kind === "saved") {
-          return left.comment.createdAt.localeCompare(right.comment.createdAt);
-        }
-        return 0;
-      }),
-    }));
-  }, [
-    commentTargetLayouts,
-    draft,
-    draftAttachments.length,
-    draftInOtherTab,
-    draftTarget,
-    draftTargetLayout,
-    otherTabCommentItems,
-  ]);
-  const otherTabCommentEntryCount = (
-    otherTabCommentItems.length + (draftInOtherTab ? 1 : 0)
-  );
-  const relinkRailCardVisible = Boolean(
-    commentLayoutReady
-    && viewMode === "current"
-    && !interactionLocked
-    && unsafeRelinkCommentItems.length > 0,
-  );
-  // The relink card is an absolutely placed rail-status-card; while it is up,
-  // comment cards start below it instead of underneath it.
-  const commentRailMinimumTop = Math.max(82, 14 + commentHeaderHeight + 16)
-    + (relinkRailCardVisible ? 96 : 0);
-  const commentViewportBucket = Math.floor(commentViewport.top / 600);
   useEffect(() => {
     pageViewDocumentKeyRef.current = pageViewDocumentKey;
   }, [pageViewDocumentKey]);
   useEffect(() => {
     focusedCommentIdRef.current = focusedCommentId;
   }, [focusedCommentId]);
-  useEffect(() => {
-    commentRailOffsetRef.current = commentRailOffset;
-  }, [commentRailOffset]);
   useEffect(() => {
     const capabilities = resolveRuntimeCapabilities({
       runtimeConfig: window.htmlAIRuntime,
@@ -3087,205 +2847,6 @@ export default function Workbench() {
     }
     attachmentObjectUrlsRef.current.clear();
   }, []);
-
-  const handleCommentLayout = useCallback((layout: HtmlCanvasCommentLayoutState) => {
-    const targetIdsKey = layout.targetIds.join("\u0000");
-    setCommentLayoutAuthority((current) => {
-      const next = (
-        layout.textEditing
-        && !layout.ready
-        && current.ready
-      )
-        ? { ...current, textEditing: true }
-        : {
-            sourceSha256: layout.sourceSha256,
-            viewContextGeneration: layout.viewContextGeneration,
-            targetIdsKey,
-            ready: layout.ready,
-            textEditing: layout.textEditing,
-          };
-      return (
-        current.sourceSha256 === next.sourceSha256
-        && current.viewContextGeneration === next.viewContextGeneration
-        && current.targetIdsKey === next.targetIdsKey
-        && current.ready === next.ready
-        && current.textEditing === next.textEditing
-      ) ? current : next;
-    });
-    if (!layout.ready) return;
-    setCommentRailHeight((current) => (
-      Math.abs(current - layout.contentHeight) > 1 ? layout.contentHeight : current
-    ));
-    const measuredLayouts = Object.fromEntries(
-      layout.targets.map((target) => [target.targetId, target]),
-    );
-    setCommentTargetLayouts((current) => {
-      // A keyed Canvas source replacement can briefly report no geometry.
-      // Retain only the current target set's last proven layouts until the
-      // replacement frame reports authoritative coordinates; project
-      // transitions clear this cache explicitly.
-      const measuredOrRetainedLayouts = Object.fromEntries(
-        layout.targetIds.flatMap((targetId) => {
-          const next = measuredLayouts[targetId] || current[targetId];
-          return next ? [[targetId, next]] : [];
-        }),
-      );
-      const nextLayouts = stabilizeCommentTargetLayouts({
-        previous: current,
-        next: measuredOrRetainedLayouts,
-        textEditing: layout.textEditing,
-      });
-      const currentEntries = Object.entries(current);
-      const nextEntries = Object.entries(nextLayouts);
-      if (
-        currentEntries.length === nextEntries.length
-        && nextEntries.every(([targetId, next]) => {
-          const previous = current[targetId];
-          return previous?.top === next.top
-            && previous?.height === next.height
-            && previous?.status === next.status
-            && previous?.resolution === next.resolution
-            && previous?.tabGroupKey === next.tabGroupKey
-            && previous?.tabGroupLabel === next.tabGroupLabel;
-        })
-      ) return current;
-      return nextLayouts;
-    });
-  }, []);
-
-  useEffect(() => {
-    const stage = reviewStageRef.current;
-    if (!stage) return undefined;
-    let frame = 0;
-    const updateViewport = () => {
-      window.cancelAnimationFrame(frame);
-      frame = window.requestAnimationFrame(() => {
-        const next = {
-          top: Math.max(0, stage.scrollTop),
-          height: Math.max(1, stage.clientHeight),
-        };
-        setCommentViewport((current) => (
-          current.top === next.top && current.height === next.height
-            ? current
-            : next
-        ));
-      });
-    };
-    const observer = typeof ResizeObserver === "undefined"
-      ? null
-      : new ResizeObserver(updateViewport);
-    observer?.observe(stage);
-    stage.addEventListener("scroll", updateViewport, { passive: true });
-    updateViewport();
-    return () => {
-      window.cancelAnimationFrame(frame);
-      observer?.disconnect();
-      stage.removeEventListener("scroll", updateViewport);
-    };
-  }, []);
-
-  useEffect(() => {
-    const header = commentsHeaderRef.current;
-    if (!header || typeof ResizeObserver === "undefined") return undefined;
-    const update = () => {
-      const next = Math.ceil(header.getBoundingClientRect().height);
-      setCommentHeaderHeight((current) => (
-        next > 0 && next !== current ? next : current
-      ));
-    };
-    const observer = new ResizeObserver(update);
-    observer.observe(header);
-    update();
-    return () => observer.disconnect();
-  }, [canvasMode]);
-
-  useLayoutEffect(() => {
-    const root = commentsPanelRef.current;
-    if (!root || typeof ResizeObserver === "undefined") return undefined;
-    const update = () => {
-      const nodes = [
-        ...root.querySelectorAll<HTMLElement>("[data-comment-measure]"),
-      ];
-      const measured = Object.fromEntries(nodes.map((node) => [
-        String(
-          node.dataset.commentMeasureKey
-          || commentMeasurementKey(
-            String(node.dataset.commentMeasure),
-            { compatibility: true },
-          )
-        ),
-        Math.ceil(node.getBoundingClientRect().height),
-      ]));
-      const activeKeys = new Set([
-        ...railCommentItems.map((comment) => comment.commentId),
-        ...(composerInCurrentTab ? ["__composer"] : []),
-        ...(
-          draftInCurrentTab
-          && !composerOpen
-            ? ["__draft_recovery"]
-            : []
-        ),
-      ]);
-      setCommentCardHeights((current) => {
-        const next = Object.fromEntries(
-          Object.entries({ ...current, ...measured })
-            .filter(([key]) => activeKeys.has(key.split("::", 1)[0])),
-        );
-        const entries = Object.entries(next);
-        if (
-          Object.keys(current).length === entries.length
-          && entries.every(([key, height]) => current[key] === height)
-        ) return current;
-        return next;
-      });
-    };
-    const observer = new ResizeObserver(update);
-    const observed = new Set<HTMLElement>();
-    const refreshObservedNodes = () => {
-      const nodes = new Set([
-        ...root.querySelectorAll<HTMLElement>("[data-comment-measure]"),
-      ]);
-      for (const node of observed) {
-        if (nodes.has(node)) continue;
-        observer.unobserve(node);
-        observed.delete(node);
-      }
-      for (const node of nodes) {
-        if (observed.has(node)) continue;
-        observed.add(node);
-        observer.observe(node);
-      }
-      update();
-    };
-    const mutationObserver = typeof MutationObserver === "undefined"
-      ? null
-      : new MutationObserver(refreshObservedNodes);
-    mutationObserver?.observe(root, {
-      attributes: true,
-      attributeFilter: ["data-comment-measure-key"],
-      childList: true,
-      subtree: true,
-    });
-    refreshObservedNodes();
-    return () => {
-      mutationObserver?.disconnect();
-      observer.disconnect();
-    };
-  }, [
-    attachmentObjectUrls,
-    composerInCurrentTab,
-    composerOpen,
-    draft,
-    draftAttachments,
-    draftInCurrentTab,
-    draftTarget,
-    editingCommentId,
-    pendingDeleteCommentId,
-    relinkingTarget,
-    commentViewport.height,
-    commentViewportBucket,
-    railCommentItems,
-  ]);
 
   const commentedTargets = useMemo(() => {
     const grouped = new Map<string, {
@@ -5157,111 +4718,12 @@ export default function Workbench() {
     target: HtmlCanvasSelection,
     itemKey: string,
   ) => {
-    reviewRevealPendingRef.current = { target, itemKey };
-    const requestId = ++reviewRevealRequestRef.current;
-    window.requestAnimationFrame(() => {
-      window.requestAnimationFrame(() => {
-        if (requestId !== reviewRevealRequestRef.current) return;
-        const stage = reviewStageRef.current;
-        const rail = commentsPanelRef.current;
-        if (!stage || !rail) return;
-        if (!itemKey) {
-          commentRailOffsetRef.current = 0;
-          setCommentRailFollowsFocus(false);
-          setCommentRailOffset(0);
-          reviewRevealPendingRef.current = null;
-          return;
-        }
-        const item = [...rail.querySelectorAll<HTMLElement>("[data-comment-measure]")]
-          .find((node) => node.dataset.commentMeasure === itemKey);
-        const targetTop = target.tagName === "body"
-          ? commentRailMinimumTop
-          : commentTargetTops[target.id];
-        if (!Number.isFinite(targetTop)) return;
-        if (!item) return;
-        const safeTargetTop = Math.max(
-          commentRailMinimumTop,
-          targetTop as number,
-        );
-        const itemTop = item?.offsetTop ?? safeTargetTop;
-        const nextRailOffset = computeAlignedRailOffset({
-          targetTop: safeTargetTop,
-          cardTop: itemTop,
-          minimumTop: commentRailMinimumTop,
-        });
-        commentRailOffsetRef.current = nextRailOffset;
-        setCommentRailFollowsFocus(true);
-        setCommentRailOffset(nextRailOffset);
-        const desiredTop = Math.max(
-          0,
-          safeTargetTop - commentRailMinimumTop - 10,
-        );
-        const maxTop = Math.max(0, stage.scrollHeight - stage.clientHeight);
-        const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-        stage.scrollTo({
-          top: Math.min(desiredTop, maxTop),
-          behavior: reduceMotion ? "auto" : "smooth",
-        });
-        if (requestId === reviewRevealRequestRef.current) {
-          reviewRevealPendingRef.current = null;
-        }
-      });
-    });
-  }, [commentRailMinimumTop, commentTargetTops]);
+    commentCanvasPort.requestReveal(target, itemKey);
+  }, [commentCanvasPort]);
 
   const requestComposerFocus = useCallback(() => {
-    composerFocusPendingRef.current = true;
-    const composer = composerRef.current;
-    if (!composer || composer.disabled) return;
-    composerFocusPendingRef.current = false;
-    composer.focus({ preventScroll: true });
-  }, []);
-
-  useEffect(() => {
-    if (canvasMode !== "edit") return undefined;
-    const rail = commentsPanelRef.current;
-    if (!rail) return undefined;
-    const handleWheel = (event: WheelEvent) => {
-      const stage = reviewStageRef.current;
-      if (!stage) return;
-      event.preventDefault();
-      event.stopPropagation();
-      const currentRailOffset = commentRailOffsetRef.current;
-      const routed = routeCommentRailWheel({
-        pageScrollTop: stage.scrollTop,
-        pageMaxScrollTop: Math.max(
-          0,
-          stage.scrollHeight - stage.clientHeight,
-        ),
-        railOffset: currentRailOffset,
-        railMinOffset: commentRailMinimumOffsetRef.current,
-        deltaY: event.deltaY,
-      });
-      if (Math.abs(routed.railOffset - currentRailOffset) > 0.01) {
-        commentRailOffsetRef.current = routed.railOffset;
-        setCommentRailFollowsFocus(false);
-        setCommentRailOffset(routed.railOffset);
-      }
-      if (Math.abs(routed.pageScrollTop - stage.scrollTop) > 0.01) {
-        stage.scrollTop = routed.pageScrollTop;
-      }
-    };
-    rail.addEventListener("wheel", handleWheel, { passive: false });
-    return () => rail.removeEventListener("wheel", handleWheel);
-  }, [canvasMode]);
-
-  useEffect(() => {
-    if (
-      canvasMode === "edit"
-      && (focusedCommentId || composerOpen || editingCommentId)
-    ) return undefined;
-    const frame = window.requestAnimationFrame(() => {
-      commentRailOffsetRef.current = 0;
-      setCommentRailFollowsFocus(false);
-      setCommentRailOffset(0);
-    });
-    return () => window.cancelAnimationFrame(frame);
-  }, [canvasMode, composerOpen, editingCommentId, focusedCommentId]);
+    commentCanvasPort.requestComposerFocus();
+  }, [commentCanvasPort]);
 
   const beginTargetRelink = useCallback((itemId: string) => {
     const currentComments = currentCommentSessionSnapshot();
@@ -5393,7 +4855,6 @@ export default function Workbench() {
   }, [beginTargetRelink, submissionRelinkPending, unsafeRelinkCommentItems]);
 
   const clearCurrentComposer = useCallback(() => {
-    composerFocusPendingRef.current = false;
     workspaceControllerRef.current?.cancelCommentComposer();
     setComposerOpen(false);
     setPendingDeleteCommentId(null);
@@ -5606,7 +5067,6 @@ export default function Workbench() {
       relinkSelectionArmedRef.current = false;
       setRelinkingTarget(null);
     }
-    composerFocusPendingRef.current = false;
     setComposerOpen(false);
     setPendingDeleteCommentId(null);
     updateFocusedComment(null);
@@ -5825,9 +5285,10 @@ export default function Workbench() {
     );
     const nextTarget = located || current.target;
     commentCanvasPort.setSelection(nextTarget);
+    const targetLayouts = commentCanvasPort.getSnapshot().targetLayouts;
     const targetVisible = (
       current.target.tagName === "body"
-      || commentTargetLayouts[current.target.id]?.status === "visible"
+      || targetLayouts[current.target.id]?.status === "visible"
     );
     commentEditResumePendingRef.current = targetVisible
       ? null
@@ -5844,7 +5305,6 @@ export default function Workbench() {
     }
   }, [
     commentCanvasPort,
-    commentTargetLayouts,
     currentCommentSessionSnapshot,
     queueReviewCommentFocus,
   ]);
@@ -5928,7 +5388,8 @@ export default function Workbench() {
       });
       return () => window.cancelAnimationFrame(frame);
     }
-    const targetStatus = commentTargetLayouts[editedComment.target.id]?.status;
+    const targetStatus = commentCanvasPort.getSnapshot()
+      .targetLayouts[editedComment.target.id]?.status;
     const leftEditingContext = (
       canvasMode !== "edit"
       || targetStatus === "hidden"
@@ -5953,8 +5414,8 @@ export default function Workbench() {
   }, [
     cancelCommentEdit,
     canvasMode,
+    commentCanvasPort,
     commentEditSession,
-    commentTargetLayouts,
     currentCommentSessionSnapshot,
     editingCommentId,
     focusedCommentId,
@@ -5979,7 +5440,7 @@ export default function Workbench() {
     }
     const targetVisible = (
       current.target.tagName === "body"
-      || commentTargetLayouts[current.target.id]?.status === "visible"
+      || commentCanvasPort.getSnapshot().targetLayouts[current.target.id]?.status === "visible"
     );
     if (!targetVisible) return;
     commentEditResumePendingRef.current = null;
@@ -5990,9 +5451,48 @@ export default function Workbench() {
     });
   }, [
     canvasMode,
+    commentCanvasPort,
     commentEditSession,
-    commentTargetLayouts,
     currentCommentSessionSnapshot,
+    queueReviewCommentFocus,
+  ]);
+
+  useEffect(() => commentCanvasPort.subscribe(() => {
+    if (canvasMode !== "edit") return;
+    const currentComments = currentCommentSessionSnapshot();
+    const session = currentComments.editSession;
+    if (!session) return;
+    const current = currentComments.comments.find(
+      (comment) => comment.commentId === session.commentId,
+    );
+    if (!current) return;
+    const targetStatus = commentCanvasPort.getSnapshot()
+      .targetLayouts[current.target.id]?.status;
+    const pendingId = commentEditResumePendingRef.current;
+    if (
+      pendingId === session.commentId
+      && (current.target.tagName === "body" || targetStatus === "visible")
+    ) {
+      commentEditResumePendingRef.current = null;
+      setEditingCommentId(current.commentId);
+      queueReviewCommentFocus(current.target, current.commentId);
+      window.requestAnimationFrame(() => {
+        commentEditRef.current?.focus({ preventScroll: true });
+      });
+      return;
+    }
+    if (editingCommentId !== session.commentId || targetStatus !== "hidden") return;
+    if (!commentEditSessionHasChanges(session)) {
+      window.requestAnimationFrame(() => cancelCommentEdit(false));
+    } else {
+      window.requestAnimationFrame(() => setEditingCommentId(null));
+    }
+  }), [
+    cancelCommentEdit,
+    canvasMode,
+    commentCanvasPort,
+    currentCommentSessionSnapshot,
+    editingCommentId,
     queueReviewCommentFocus,
   ]);
 
@@ -6014,9 +5514,7 @@ export default function Workbench() {
   }, [commentCanvasPort, queueReviewPairReveal, updateFocusedComment]);
 
   const handleCanvasSelection = useCallback((target: HtmlCanvasSelection | null) => {
-    commentRailOffsetRef.current = 0;
-    setCommentRailFollowsFocus(false);
-    setCommentRailOffset(0);
+    commentCanvasPort.resetRail();
     commentCanvasPort.setSelection(target);
     if (!target) {
       if (!composerOpen) updateFocusedComment(null);
@@ -7009,348 +6507,12 @@ export default function Workbench() {
   const processSummaryDetail = processPresentation.summaryDetail;
   const processStatusLabel = processPresentation.statusLabel;
   const processSteps = processPresentation.steps;
-  const draftTargetScope = !draftTarget
-    ? "尚未选择"
-    : draftTarget.tagName === "body"
-      ? "全局评论"
-      : draftTarget.level === "module"
-      ? "整个模块"
-      : draftTarget.level === "insertion"
-        ? "添加位置"
-        : "页面内容";
-  const hasCollapsedCommentDraft = Boolean(
-    draftInCurrentTab
-    && draftTarget
-    && !composerOpen
-  );
   const commentTargetIsLocatable = useCallback((target: HtmlCanvasSelection): boolean => {
-    const layout = commentTargetLayouts[target.id];
+    const layout = commentCanvasPort.getSnapshot().targetLayouts[target.id];
     const resolution = layout?.resolution ?? target.resolution;
     return layout?.status !== "missing"
       && (resolution === "exact" || resolution === "rebound");
-  }, [commentTargetLayouts]);
-  const draftTargetCanSave = Boolean(
-    draftTarget
-    && commentTargetLayouts[draftTarget.id]?.status !== "missing"
-    && (commentTargetLayouts[draftTarget.id]?.resolution ?? draftTarget.resolution)
-      === "exact"
-  );
-  const commentRailTargetTops = useMemo(() => {
-    if (!commentLayoutReady) return {};
-    const targets = [
-      ...railCommentItems.map((comment) => comment.target),
-      ...(
-        (composerInCurrentTab || hasCollapsedCommentDraft) && draftTarget
-          ? [draftTarget]
-          : []
-      ),
-    ];
-    const measuredGroupTops = new Map<string, number>();
-    for (const target of targets) {
-      const layout = commentTargetLayouts[target.id];
-      const measuredTop = (
-        target.tagName === "body"
-        || layout?.status === "missing"
-      )
-        ? commentRailMinimumTop
-        : commentTargetTops[target.id];
-      if (!Number.isFinite(measuredTop)) continue;
-      const groupKey = commentMarkerGroupKey(target);
-      measuredGroupTops.set(
-        groupKey,
-        Math.min(
-          measuredGroupTops.get(groupKey) ?? Number.MAX_SAFE_INTEGER,
-          measuredTop as number,
-        ),
-      );
-    }
-    return Object.fromEntries(targets.flatMap((target) => {
-      const top = measuredGroupTops.get(commentMarkerGroupKey(target));
-      return Number.isFinite(top) ? [[target.id, top as number]] : [];
-    }));
-  }, [
-    commentLayoutReady,
-    commentRailMinimumTop,
-    commentTargetLayouts,
-    commentTargetTops,
-    composerInCurrentTab,
-    draftTarget,
-    hasCollapsedCommentDraft,
-    railCommentItems,
-  ]);
-  const sortedVisibleCommentItems = useMemo(() => {
-    if (!commentLayoutReady) return [];
-    return railCommentItems
-      .flatMap((comment, index) => {
-        const targetTop = comment.target.tagName === "body"
-          ? commentRailMinimumTop
-          : commentRailTargetTops[comment.target.id];
-        if (!Number.isFinite(targetTop)) return [];
-        return [{
-          comment,
-          index,
-          scopeRank: comment.target.tagName === "body" ? 0 : 1,
-          targetTop: targetTop as number,
-        }];
-      })
-      .sort((left, right) => (
-        left.scopeRank - right.scopeRank
-        || left.targetTop - right.targetTop
-        || left.comment.createdAt.localeCompare(right.comment.createdAt)
-        || left.index - right.index
-      ))
-      .map(({ comment }) => comment);
-  }, [
-    commentLayoutReady,
-    commentRailMinimumTop,
-    commentRailTargetTops,
-    railCommentItems,
-  ]);
-  const commentMeasurementKeys = useMemo(() => Object.fromEntries(
-    sortedVisibleCommentItems.map((comment) => {
-      const layout = commentTargetLayouts[comment.target.id];
-      const resolution = layout?.resolution ?? comment.target.resolution;
-      const locatable = layout?.status !== "missing"
-        && (resolution === "exact" || resolution === "rebound");
-      return [comment.commentId, commentMeasurementKey(comment.commentId, {
-        resolution,
-        locatable,
-        editable: viewMode === "current" && !interactionLocked,
-        editing: editingCommentId === comment.commentId,
-        deleting: pendingDeleteCommentId === comment.commentId,
-        relinking: relinkingTarget === comment.commentId,
-        text: comment.text,
-        attachments: (comment.attachments ?? []).map((attachment) => ({
-          id: attachment.attachmentId,
-          kind: attachment.kind,
-          bytes: attachment.byteLength,
-        })),
-      })];
-    }),
-  ), [
-    commentTargetLayouts,
-    editingCommentId,
-    interactionLocked,
-    pendingDeleteCommentId,
-    relinkingTarget,
-    sortedVisibleCommentItems,
-    viewMode,
-  ]);
-  const composerMeasurementKey = useMemo(() => commentMeasurementKey(
-    "__composer",
-    {
-      canSave: draftTargetCanSave,
-      deleting: pendingDeleteCommentId === "__composer",
-      relinking: relinkingTarget === "__composer",
-      text: draft,
-      attachments: draftAttachments.map((attachment) => ({
-        id: attachment.attachmentId,
-        kind: attachment.kind,
-        bytes: attachment.byteLength,
-      })),
-      uploading: attachmentUploadCount > 0,
-    },
-  ), [
-    attachmentUploadCount,
-    draft,
-    draftAttachments,
-    draftTargetCanSave,
-    pendingDeleteCommentId,
-    relinkingTarget,
-  ]);
-  const draftRecoveryMeasurementKey = useMemo(() => commentMeasurementKey(
-    "__draft_recovery",
-    {
-      text: draft,
-      attachments: draftAttachments.length,
-    },
-  ), [draft, draftAttachments.length]);
-  const commentRailLayout = useMemo(() => {
-    const items: Array<{
-      key: string;
-      measurementKey: string;
-      targetTop: number;
-      fallbackHeight: number;
-      order: number;
-      scopeRank: number;
-    }> = sortedVisibleCommentItems.map((comment, index) => {
-      const imageCount = (comment.attachments ?? []).filter(
-        (attachment) => attachment.kind === "image",
-      ).length;
-      const fileCount = (comment.attachments ?? []).length - imageCount;
-      const textLines = Math.max(1, Math.ceil((comment.text.length || 18) / 25));
-      const imageRows = Math.ceil(imageCount / 3);
-      return {
-        key: comment.commentId,
-        measurementKey: commentMeasurementKeys[comment.commentId],
-        targetTop: comment.target.tagName === "body"
-          ? commentRailMinimumTop
-          : commentRailTargetTops[comment.target.id],
-        fallbackHeight:
-          104
-          + textLines * 19
-          + imageRows * 78
-          + fileCount * 48
-          + (!commentTargetIsLocatable(comment.target) && viewMode === "current" ? 70 : 0)
-          + (editingCommentId === comment.commentId ? 92 : 0)
-          + (pendingDeleteCommentId === comment.commentId ? 46 : 0),
-        order: index + 1,
-        scopeRank: comment.target.tagName === "body" ? 0 : 1,
-      };
-    });
-    const draftTargetTop = draftTarget?.tagName === "body"
-      ? commentRailMinimumTop
-      : draftTarget
-        ? commentRailTargetTops[draftTarget.id]
-        : undefined;
-    if (
-      composerInCurrentTab
-      && draftTarget
-      && Number.isFinite(draftTargetTop)
-    ) {
-      items.push({
-        key: "__composer",
-        measurementKey: composerMeasurementKey,
-        targetTop: draftTargetTop as number,
-        fallbackHeight:
-          276
-          + (!draftTargetCanSave ? 70 : 0)
-          + (pendingDeleteCommentId === "__composer" ? 46 : 0),
-        order: Number.MAX_SAFE_INTEGER,
-        scopeRank: draftTarget.tagName === "body" ? 0 : 1,
-      });
-    }
-    if (
-      hasCollapsedCommentDraft
-      && draftTarget
-      && Number.isFinite(draftTargetTop)
-    ) {
-      items.push({
-        key: "__draft_recovery",
-        measurementKey: draftRecoveryMeasurementKey,
-        targetTop: draftTargetTop as number,
-        fallbackHeight: 142,
-        order: Number.MAX_SAFE_INTEGER,
-        scopeRank: draftTarget.tagName === "body" ? 0 : 1,
-      });
-    }
-    const layout = layoutCommentRailItems({
-      minimumTop: commentRailMinimumTop,
-      gap: 20,
-      items: items.map((item) => ({
-        key: item.key,
-        targetTop: item.targetTop,
-        height:
-          commentCardHeights[item.measurementKey]
-          || item.fallbackHeight,
-        order: item.order,
-        scopeRank: item.scopeRank,
-      })),
-    });
-    return {
-      ...layout,
-      composerTop: layout.positions.__composer,
-      draftRecoveryTop: layout.positions.__draft_recovery,
-    };
-  }, [
-    commentCardHeights,
-    commentMeasurementKeys,
-    commentRailMinimumTop,
-    commentRailTargetTops,
-    commentTargetIsLocatable,
-    composerMeasurementKey,
-    composerInCurrentTab,
-    draftRecoveryMeasurementKey,
-    draftTarget,
-    draftTargetCanSave,
-    editingCommentId,
-    hasCollapsedCommentDraft,
-    pendingDeleteCommentId,
-    sortedVisibleCommentItems,
-    viewMode,
-  ]);
-  const visibleCommentPositions = commentRailLayout.positions;
-  const renderedCommentIds = useMemo(() => virtualizedCommentIds({
-    ids: sortedVisibleCommentItems.map((comment) => comment.commentId),
-    positions: commentRailLayout.positions,
-    heights: commentRailLayout.heights,
-    viewportTop: Math.max(0, commentViewport.top - commentRailOffset),
-    viewportHeight: commentViewport.height,
-    forcedIds: [
-      focusedCommentId,
-      editingCommentId,
-      pendingDeleteCommentId,
-    ].filter((value): value is string => Boolean(value)),
-  }), [
-    commentRailLayout.heights,
-    commentRailLayout.positions,
-    commentViewport.height,
-    commentViewport.top,
-    commentRailOffset,
-    editingCommentId,
-    focusedCommentId,
-    pendingDeleteCommentId,
-    sortedVisibleCommentItems,
-  ]);
-  const renderedVisibleCommentItems = useMemo(
-    () => sortedVisibleCommentItems.filter(
-      (comment) => renderedCommentIds.has(comment.commentId),
-    ),
-    [renderedCommentIds, sortedVisibleCommentItems],
-  );
-  const composerTop = commentRailLayout.composerTop;
-  const draftRecoveryTop = commentRailLayout.draftRecoveryTop;
-  useLayoutEffect(() => {
-    if (
-      !composerFocusPendingRef.current
-      || !composerInCurrentTab
-      || !commentLayoutReady
-      || !Number.isFinite(composerTop)
-      || interactionLocked
-    ) return;
-    requestComposerFocus();
-  }, [
-    commentLayoutReady,
-    composerInCurrentTab,
-    composerTop,
-    interactionLocked,
-    requestComposerFocus,
-  ]);
-  useEffect(() => {
-    if (!commentLayoutReady) return;
-    const pending = reviewRevealPendingRef.current;
-    if (!pending) return;
-    queueReviewPairReveal(pending.target, pending.itemKey);
-  }, [
-    commentLayoutReady,
-    commentTargetTops,
-    composerTop,
-    draftRecoveryTop,
-    queueReviewPairReveal,
-    renderedVisibleCommentItems,
-  ]);
-  const canvasDocumentHeight = Math.max(
-    760,
-    Math.ceil(commentRailHeight || 0),
-  );
-  const commentRailContentHeight = Math.max(
-    canvasDocumentHeight,
-    commentRailLayout.bottom + 24,
-  );
-  const commentRailMinimumOffset = computeCommentRailMinimumOffset({
-    contentBottom: commentRailLayout.bottom + 14,
-    viewportBottom: canvasDocumentHeight - 14,
-  });
-  useLayoutEffect(() => {
-    commentRailMinimumOffsetRef.current = commentRailMinimumOffset;
-    const currentOffset = commentRailOffsetRef.current;
-    if (
-      commentRailFollowsFocus
-      || currentOffset >= commentRailMinimumOffset
-    ) return;
-    commentRailOffsetRef.current = commentRailMinimumOffset;
-    setCommentRailOffset(commentRailMinimumOffset);
-  }, [commentRailFollowsFocus, commentRailMinimumOffset]);
+  }, [commentCanvasPort]);
   const returnToEditingFromTerminalRun = () => {
     workspaceControllerRef.current?.dismissActiveRun();
     setHandoffPreviewOpen(false);
@@ -7590,7 +6752,9 @@ export default function Workbench() {
       || currentCommentSessionSnapshot().composerCommentId;
     if (commentId) pasteImages(event, { kind: "composer", commentId });
   }, [currentCommentSessionSnapshot, draftCommentId, pasteImages]);
-  const commentRailModel: CommentRailModel = {
+  const commentRailContext: CommentRailContainerContext = {
+    reviewStageRef,
+    commentEditRef,
     composer: deriveComposerState({
       relinkingTarget,
       editingCommentId,
@@ -7602,54 +6766,28 @@ export default function Workbench() {
       draft,
       draftCommentId,
       draftAttachments,
-      hasCollapsedCommentDraft,
+      hasCollapsedCommentDraft: Boolean(
+        draftTarget
+        && !composerOpen
+        && (draft.trim() || draftAttachments.length > 0)
+      ),
     }),
-    commentsPanelRef,
-    commentsHeaderRef,
-    composerRef,
-    commentEditRef,
+    canvasMode,
     viewMode,
-    commentLayoutReady,
-    commentLayoutAuthority,
-    commentRailMinimumOffset,
-    commentRailFollowsFocus,
-    canvasDocumentHeight,
-    commentRailContentHeight,
-    commentRailOffset,
-    commentRailMinimumTop,
+    expectedCommentLayoutSourceSha256,
+    activePageViewGeneration: activePageViewContext?.generation ?? 0,
     visibleCommentItems,
-    draftInCurrentTab,
-    hasUnsavedCommentEdit,
-    otherTabCommentEntryCount,
-    otherTabCommentsContextKey,
-    otherTabCommentsOpen: false,
-    interactionLocked,
-    unfinishedEditedComment,
-    otherTabCommentGroups,
     activeCommentCount,
     changeEvents,
-    composerInCurrentTab,
-    composerTop,
-    focusedCommentId,
-    relinkRailCardVisible,
-    relinkCardCopy: relinkNoticeCopy(unsafeRelinkCommentItems),
+    interactionLocked,
+    unfinishedEditedComment,
+    unsafeRelinkCommentItems,
     relinkCardActive,
     projectLoadError,
-    draftTargetScope,
-    attachmentUploadCount,
-    draftTargetCanSave,
-    composerMeasurementKey,
+    otherTabCommentsContextKey,
     attachmentObjectUrls,
     pendingDeleteCommentId,
-    draftRecoveryTop,
-    draftRecoveryMeasurementKey,
-    expectedCommentLayoutTargetIds,
-    sortedVisibleCommentItems,
-    renderedVisibleCommentItems,
-    commentTargetLayouts,
-    selection: null,
-    commentMeasurementKeys,
-    visibleCommentPositions,
+    focusedCommentId,
   };
   const commentRailActions = useMemo<CommentRailActions>(() => ({
     openGlobalCommentComposer,
@@ -8089,7 +7227,8 @@ export default function Workbench() {
       />
       <WorkbenchDocumentSurfaceCache
         snapshot={documentSurfaceCacheSnapshot}
-        pendingTabId={pendingCachedSurface?.tabId || null} height={`${canvasDocumentHeight}px`}
+        pendingTabId={pendingCachedSurface?.tabId || null}
+        height="var(--comment-canvas-height, 760px)"
       />
       {startPageActive ? (
         <WorkbenchStartPage
@@ -8127,14 +7266,18 @@ export default function Workbench() {
               <div className="canvas-loading" role="status">正在识别运行环境…</div>
             ) : !browserPreviewOnly ? (
               editRuntimePreparing ? (
-                <HtmlDisplaySurface html={html} sourcePath={canvasSourcePath} height={`${canvasDocumentHeight}px`} />
+                <HtmlDisplaySurface
+                  html={html}
+                  sourcePath={canvasSourcePath}
+                  height="var(--comment-canvas-height, 760px)"
+                />
               ) : (
                 <HtmlCanvasEditor
                   key={`editor-authority-${canvasGeneration}`}
                   ref={editorRef}
                   html={html}
                   sourcePath={canvasSourcePath}
-                  height={`${canvasDocumentHeight}px`}
+                  height="var(--comment-canvas-height, 760px)"
                   onChange={handleCanvasChange}
                   onInteraction={() => {
                     if (relinkingTargetRef.current) {
@@ -8157,7 +7300,7 @@ export default function Workbench() {
                       outcome,
                     });
                   }}
-                  onCommentLayout={handleCommentLayout}
+                  onCommentLayout={commentCanvasPort.publishLayout}
                   onSelect={handleCanvasSelection}
                   onRequestComment={openCommentComposer}
                   onRequestFlush={requestUserFlush}
@@ -8228,20 +7371,13 @@ export default function Workbench() {
           </aside>
         ) : null}
 
-        {canvasMode === "edit" ? (
-          workspaceController ? (
-            <CommentRailContainer
-              capability={workspaceController.comments as CommentRailCapability}
-              canvasPort={commentCanvasPort}
-              model={commentRailModel}
-              actions={commentRailActions}
-            />
-          ) : (
-            <CommentRailView
-              model={commentRailModel}
-              actions={commentRailActions}
-            />
-          )
+        {canvasMode === "edit" && workspaceController ? (
+          <CommentRailContainer
+            capability={workspaceController.comments as CommentRailCapability}
+            canvasPort={commentCanvasPort}
+            context={commentRailContext}
+            actions={commentRailActions}
+          />
         ) : null}
       </div>
       )}

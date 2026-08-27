@@ -175,6 +175,13 @@ capability. React capability containers subscribe to facets directly so local
 draft or focus updates do not publish through the Workbench composition root.
 The aggregate contract remains available during migration and for genuinely
 cross-capability presentation.
+
+Comment geometry is a disposable presentation port, not Controller or Session
+state. `HtmlCanvasEditor` publishes source-tagged layout snapshots to one stable
+`commentCanvasPort`; `CommentRailContainer` alone subscribes, measures cards,
+virtualizes the rail and routes paired reveal/focus. Workbench may issue a
+typed reveal/reset intent or read the latest target status inside a user
+command, but it must not subscribe its composition render to geometry changes.
 The Tabs snapshot is part of the same aggregate; startup restore, Registry
 reconciliation and tab persistence enter through Controller-owned commands and
 narrow host ports, never React refs or effects. `DocumentSession`

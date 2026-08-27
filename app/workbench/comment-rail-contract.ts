@@ -11,6 +11,7 @@ import type {
   CommentItem,
   DirectEditEvent,
   OtherTabCommentEntry,
+  CanvasMode,
 } from "./types";
 
 export type OtherTabCommentGroup = {
@@ -93,6 +94,28 @@ export type CommentRailModel = {
   selection: HtmlCanvasSelection | null;
   commentMeasurementKeys: Record<string, string | undefined>;
   visibleCommentPositions: Record<string, number | undefined>;
+};
+
+export type CommentRailContainerContext = {
+  reviewStageRef: RefObject<HTMLDivElement | null>;
+  commentEditRef: RefObject<HTMLTextAreaElement | null>;
+  composer: ComposerState;
+  canvasMode: CanvasMode;
+  viewMode: "current" | "history";
+  expectedCommentLayoutSourceSha256: string;
+  activePageViewGeneration: number;
+  visibleCommentItems: CommentItem[];
+  activeCommentCount: number;
+  changeEvents: DirectEditEvent[];
+  interactionLocked: boolean;
+  unfinishedEditedComment: CommentItem | null | undefined;
+  unsafeRelinkCommentItems: CommentItem[];
+  relinkCardActive: boolean;
+  projectLoadError: string | null | undefined;
+  otherTabCommentsContextKey: string;
+  attachmentObjectUrls: Record<string, string>;
+  pendingDeleteCommentId: string | null;
+  focusedCommentId: string | null;
 };
 
 export type CommentRailActions = {

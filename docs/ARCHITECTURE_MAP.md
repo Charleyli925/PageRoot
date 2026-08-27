@@ -82,15 +82,16 @@ CommentSession + CommentWorkflow
     -> CommentRailContainer
       -> stable CommentRailView model/actions
 
-HtmlCanvasEditor selection
+HtmlCanvasEditor selection + source-tagged target geometry
   -> commentCanvasPort
     -> CommentRailContainer
 ```
 
 `CommentSession` keeps immutable collection identities when only draft text
-changes. `CommentRailContainer` owns capability-local subscriptions and
-presentation-only disclosure state. `commentCanvasPort` carries disposable
-Canvas presentation signals and never comment facts. Workbench's aggregate
+changes. `CommentRailContainer` owns capability-local subscriptions, disclosure,
+card measurement, virtualization, rail scrolling and reveal/focus timing.
+`commentCanvasPort` stabilizes disposable Canvas selection, layout authority,
+target geometry and document height; it never owns comment facts. Workbench's aggregate
 subscription may suppress composer-text and edit-text-only revisions; saved
 comments, attachment structure, persistence errors and every non-comment
 capability still invalidate the composition root.
