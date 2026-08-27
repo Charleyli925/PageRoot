@@ -166,8 +166,10 @@ import {
 import {
   deriveCapabilityHoverState,
   deriveSelectionOverlay,
+  stabilizeSelectionChromeProjection,
   type SelectionChromeActions,
   type SelectionChromeModel,
+  type SelectionChromeProjection,
 } from "./html-canvas-selection-chrome-contract";
 import type {
   HtmlCanvasCommentedTarget,
@@ -489,6 +491,15 @@ type FinishNativeEditingOptions = {
 
 type SourcePatchCommand = Parameters<typeof planSourcePatch>[0];
 type SourcePatchPlan = NonNullable<ReturnType<typeof planSourcePatch>>;
+type PagePresentationActionCache = {
+  target: HtmlCanvasSelection;
+  sourceIndex: ReturnType<typeof buildSourceIndex>;
+  sourceHtml: string;
+  documentKey: string;
+  generation: number;
+  currentContext: PageViewContext | null;
+  action: PagePresentationAction | null;
+};
 
 const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProps>(function HtmlCanvasEditor(
   {
@@ -538,6 +549,8 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   const containerRef = useRef<HTMLDivElement>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const hoverHintMeasureRef = useRef<HTMLDivElement>(null);
+  const selectionChromeProjectionRef = useRef<SelectionChromeProjection | null>(null);
+  const pagePresentationActionCacheRef = useRef<PagePresentationActionCache | null>(null);
   const frameWrittenHtmlRef = useRef<string | null>(null);
   const connectFrameRef = useRef<(
     iframe: HTMLIFrameElement,
@@ -3784,14 +3797,36 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       || !sourceIndex
       || sourceIndex.source !== frameSourceHtmlRef.current
     ) return null;
-    return createPagePresentationAction({
-      html: frameSourceHtmlRef.current,
+    const sourceHtml = frameSourceHtmlRef.current;
+    const generation = frameLoadGenerationRef.current;
+    const currentContext = pageViewContextRef.current;
+    const cached = pagePresentationActionCacheRef.current;
+    if (
+      cached?.target === target
+      && cached.sourceIndex === sourceIndex
+      && cached.sourceHtml === sourceHtml
+      && cached.documentKey === documentKey
+      && cached.generation === generation
+      && cached.currentContext === currentContext
+    ) return cached.action;
+    const action = createPagePresentationAction({
+      html: sourceHtml,
       sourceIndex,
       documentKey,
-      generation: frameLoadGenerationRef.current,
-      currentContext: pageViewContextRef.current,
+      generation,
+      currentContext,
       targetRef: sourceTargetRefForSelection(target),
     });
+    pagePresentationActionCacheRef.current = {
+      target,
+      sourceIndex,
+      sourceHtml,
+      documentKey,
+      generation,
+      currentContext,
+      action,
+    };
+    return action;
   }, []);
 
   const executePagePresentationAction = useCallback((
@@ -5121,6 +5156,18 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     && !interactionLocked
     && selection
   ) ? resolvePagePresentationAction(selection) : null;
+  const selectionChromeProjection = stabilizeSelectionChromeProjection(
+    selectionChromeProjectionRef.current,
+    {
+      toolbarStyle,
+      selectedOutlineStyle,
+      hoverOutlineStyle,
+      hoverHintStyle,
+      hoverHintPlacement,
+      selectedPagePresentationAction,
+    },
+  );
+  selectionChromeProjectionRef.current = selectionChromeProjection;
   const textFormatRequiresSelection = isEditing && !hasTextRange;
   const handleEditFeedbackAction = useCallback(() => {
     const recovery = editFeedback?.recovery;
@@ -5216,13 +5263,13 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       hoverTargetIsSelected,
       isEditing,
       interactionLocked,
-      outlineStyle: hoverOutlineStyle,
-      hintStyle: hoverHintStyle,
-      hintPlacement: hoverHintPlacement,
+      outlineStyle: selectionChromeProjection.hoverOutlineStyle,
+      hintStyle: selectionChromeProjection.hoverHintStyle,
+      hintPlacement: selectionChromeProjection.hoverHintPlacement,
     }),
     overlay: deriveSelectionOverlay({
       selection,
-      outlineStyle: selectedOutlineStyle,
+      outlineStyle: selectionChromeProjection.selectedOutlineStyle,
     }),
     canvasTransitionActive,
     selectionCapabilitySpoken: selectionCapability ? selectionCapability.spoken : "",
@@ -5238,8 +5285,8 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     toolbarRef,
     hasTextRange,
     isEditing,
-    toolbarStyle,
-    selectedPagePresentationAction,
+    toolbarStyle: selectionChromeProjection.toolbarStyle,
+    selectedPagePresentationAction: selectionChromeProjection.selectedPagePresentationAction,
     readOnly,
     selectedNativeEditAvailable,
     selectedStyle,
@@ -5258,9 +5305,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     enableReorder,
     hasTextRange,
     hoverChrome,
-    hoverHintPlacement,
-    hoverHintStyle,
-    hoverOutlineStyle,
     hoverTargetIsSelected,
     interactionLocked,
     isEditing,
@@ -5271,14 +5315,12 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     reloadActionLabel,
     renderedMode,
     selectedNativeEditAvailable,
-    selectedOutlineStyle,
-    selectedPagePresentationAction,
+    selectionChromeProjection,
     selectedStyle,
     selection,
     selectionCapability,
     spacingMenuOpen,
     textFormatRequiresSelection,
-    toolbarStyle,
     toolbarVisible,
     usageCapture,
     usageProjectId,

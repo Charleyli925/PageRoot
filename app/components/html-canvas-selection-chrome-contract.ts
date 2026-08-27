@@ -112,6 +112,62 @@ export type SelectionChromeActions = {
   onToggleSpacingMenu: () => void;
 };
 
+export type SelectionChromeProjection = Readonly<{
+  toolbarStyle?: CSSProperties;
+  selectedOutlineStyle?: CSSProperties;
+  hoverOutlineStyle?: CSSProperties;
+  hoverHintStyle?: CSSProperties;
+  hoverHintPlacement?: CanvasHoverHintPlacement;
+  selectedPagePresentationAction: PagePresentationAction | null;
+}>;
+
+function sameScalarRecord<T extends object>(
+  left: T | undefined,
+  right: T | undefined,
+): boolean {
+  if (left === right) return true;
+  if (!left || !right) return false;
+  const leftKeys = Object.keys(left);
+  const rightKeys = Object.keys(right);
+  const leftRecord = left as Readonly<Record<string, unknown>>;
+  const rightRecord = right as Readonly<Record<string, unknown>>;
+  return leftKeys.length === rightKeys.length
+    && leftKeys.every(
+      (key) => Object.hasOwn(rightRecord, key) && Object.is(leftRecord[key], rightRecord[key]),
+    );
+}
+
+export function stabilizeSelectionChromeProjection(
+  previous: SelectionChromeProjection | null,
+  next: SelectionChromeProjection,
+): SelectionChromeProjection {
+  if (!previous) return next;
+  const projection: SelectionChromeProjection = {
+    toolbarStyle: sameScalarRecord(previous.toolbarStyle, next.toolbarStyle)
+      ? previous.toolbarStyle
+      : next.toolbarStyle,
+    selectedOutlineStyle: sameScalarRecord(
+      previous.selectedOutlineStyle,
+      next.selectedOutlineStyle,
+    ) ? previous.selectedOutlineStyle : next.selectedOutlineStyle,
+    hoverOutlineStyle: sameScalarRecord(previous.hoverOutlineStyle, next.hoverOutlineStyle)
+      ? previous.hoverOutlineStyle
+      : next.hoverOutlineStyle,
+    hoverHintStyle: sameScalarRecord(previous.hoverHintStyle, next.hoverHintStyle)
+      ? previous.hoverHintStyle
+      : next.hoverHintStyle,
+    hoverHintPlacement: sameScalarRecord(
+      previous.hoverHintPlacement,
+      next.hoverHintPlacement,
+    ) ? previous.hoverHintPlacement : next.hoverHintPlacement,
+    selectedPagePresentationAction: next.selectedPagePresentationAction,
+  };
+  return Object.keys(projection).every(
+    (key) => projection[key as keyof SelectionChromeProjection]
+      === previous[key as keyof SelectionChromeProjection],
+  ) ? previous : projection;
+}
+
 export function deriveCapabilityHoverState(input: {
   enabled: boolean;
   hoverChrome: CanvasCapabilityHoverSnapshot;

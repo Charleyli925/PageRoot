@@ -11,6 +11,8 @@
         "^tests/comment-"
       ],
       "entryInterfaces": [
+        "app/application/comment-workflow.d.ts",
+        "app/application/comment-session.d.ts",
         "app/workbench/comment-rail-contract.ts",
         "app/application/comment/commit-plan.d.ts",
         "app/application/workspace-controller-capabilities.d.ts"
@@ -46,6 +48,8 @@
         "^tests/document-"
       ],
       "entryInterfaces": [
+        "app/application/document-workflow.d.ts",
+        "app/application/document-session.d.ts",
         "app/application/document/save-plan.d.ts",
         "app/application/verified-project-context.d.ts",
         "app/application/workspace-controller-capabilities.d.ts"
@@ -83,9 +87,12 @@
         "^tests/desktop-close-recovery"
       ],
       "entryInterfaces": [
+        "app/application/project-workflow.d.ts",
+        "app/application/project-session.d.ts",
         "app/application/project/open-intent.d.ts",
         "app/application/project/switch-plan.d.ts",
         "app/application/project/close-plan.d.ts",
+        "app/application/project/source-locator-plan.d.ts",
         "app/application/workspace-controller-capabilities.d.ts"
       ],
       "owners": [
@@ -121,7 +128,9 @@
         "^tests/canvas-pointer"
       ],
       "entryInterfaces": [
-        "app/components/html-canvas-selection-chrome-contract.ts"
+        "app/components/html-canvas-selection-chrome-contract.ts",
+        "app/components/HtmlCanvasEditor.types.ts",
+        "app/application/edit-author-runtime-session.d.ts"
       ],
       "owners": [
         "EditAuthorRuntimeSession",
@@ -153,6 +162,10 @@
         "^tests/version-"
       ],
       "entryInterfaces": [
+        "app/application/run-workflow.d.ts",
+        "app/application/run-session.d.ts",
+        "app/application/version-workflow.d.ts",
+        "app/application/version-session.d.ts",
         "app/application/run/submit-plan.d.ts",
         "app/application/version/review-plan.d.ts",
         "app/application/workspace-controller-capabilities.d.ts"
@@ -191,6 +204,8 @@
       ],
       "entryInterfaces": [
         "app/application/workbench-navigation-workflow.d.ts",
+        "app/application/workbench-navigation-session.d.ts",
+        "app/application/workbench-tabs-session.d.ts",
         "app/application/workspace-controller-capabilities.d.ts"
       ],
       "owners": [

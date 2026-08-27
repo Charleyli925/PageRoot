@@ -910,8 +910,15 @@ test("gate:plan capability-context schema v2 exposes contract-first and implemen
   assert.deepEqual(comments.domains, ["comments"]);
   assert.equal(comments.defaultLevel, "contract");
   assert.ok(comments.owners.includes("CommentWorkflow"));
-  assert.ok(comments.contract.files.includes("app/workbench/comment-rail-contract.ts"));
-  assert.ok(comments.contract.files.includes("app/application/workspace-controller-capabilities.d.ts"));
+  for (const ownerContract of [
+    "app/application/comment-workflow.d.ts",
+    "app/application/comment-session.d.ts",
+    "app/workbench/comment-rail-contract.ts",
+    "app/application/comment/commit-plan.d.ts",
+    "app/application/workspace-controller-capabilities.d.ts",
+  ]) {
+    assert.ok(comments.contract.files.includes(ownerContract));
+  }
   assert.ok(!comments.contract.files.includes("app/application/comment-workflow.js"));
   assert.ok(comments.implementation.files.includes("app/application/comment-workflow.js"));
   assert.ok(comments.implementation.files.includes("app/application/comment/commit-plan.js"));
@@ -921,20 +928,56 @@ test("gate:plan capability-context schema v2 exposes contract-first and implemen
   assert.ok(comments.implementation.estimatedBytes > comments.contract.estimatedBytes);
   assert.ok(comments.contract.files.every((file) => comments.implementation.files.includes(file)));
 
-  for (const changedFile of [
-    "app/application/project-workflow.js",
-    "app/application/run-workflow.js",
-    "app/application/version-workflow.js",
-    "app/application/workbench-navigation-workflow.js",
-  ]) {
+  const ownerContractsByChangedFile = new Map([
+    ["app/application/document-workflow.js", [
+      "app/application/document-workflow.d.ts",
+      "app/application/document-session.d.ts",
+      "app/application/document/save-plan.d.ts",
+      "app/application/verified-project-context.d.ts",
+      "app/application/workspace-controller-capabilities.d.ts",
+    ]],
+    ["app/application/project-workflow.js", [
+      "app/application/project-workflow.d.ts",
+      "app/application/project-session.d.ts",
+      "app/application/project/open-intent.d.ts",
+      "app/application/project/switch-plan.d.ts",
+      "app/application/project/close-plan.d.ts",
+      "app/application/project/source-locator-plan.d.ts",
+      "app/application/workspace-controller-capabilities.d.ts",
+    ]],
+    ["app/application/run-workflow.js", [
+      "app/application/run-workflow.d.ts",
+      "app/application/run-session.d.ts",
+      "app/application/version-workflow.d.ts",
+      "app/application/version-session.d.ts",
+      "app/application/run/submit-plan.d.ts",
+      "app/application/version/review-plan.d.ts",
+      "app/application/workspace-controller-capabilities.d.ts",
+    ]],
+    ["app/application/workbench-navigation-workflow.js", [
+      "app/application/workbench-navigation-workflow.d.ts",
+      "app/application/workbench-navigation-session.d.ts",
+      "app/application/workbench-tabs-session.d.ts",
+      "app/application/workspace-controller-capabilities.d.ts",
+    ]],
+    ["app/components/HtmlCanvasEditor.tsx", [
+      "app/components/html-canvas-selection-chrome-contract.ts",
+      "app/components/HtmlCanvasEditor.types.ts",
+      "app/application/edit-author-runtime-session.d.ts",
+    ]],
+  ]);
+  for (const [changedFile, ownerContracts] of ownerContractsByChangedFile) {
     const context = selectCapabilityContext({
       changedFiles: [changedFile],
       map: capabilityMap,
       productRoot,
     });
-    assert.ok(context.contract.files.includes("app/application/workspace-controller-capabilities.d.ts"));
+    for (const ownerContract of ownerContracts) {
+      assert.ok(context.contract.files.includes(ownerContract));
+    }
     assert.ok(!context.contract.files.some((file) => /workflow\.js$/u.test(file)));
     assert.ok(context.implementation.files.includes(changedFile));
+    assert.ok(context.contract.estimatedBytes < context.implementation.estimatedBytes);
   }
 
   const unknown = selectCapabilityContext({

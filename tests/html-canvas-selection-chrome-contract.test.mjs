@@ -5,6 +5,7 @@ import {
   deriveCapabilityHoverState,
   deriveSelectionOverlay,
   selectionChromeViewFields,
+  stabilizeSelectionChromeProjection,
 } from "../app/components/html-canvas-selection-chrome-contract.ts";
 
 const selection = Object.freeze({
@@ -113,5 +114,65 @@ test("deriveSelectionOverlay and view fields cover every union branch", () => {
   assert.equal(
     selectionChromeViewFields({ hover: withoutHint, overlay: none }).showHoverHint,
     false,
+  );
+});
+
+test("selection chrome projection reuses equal geometry and invalidates changed geometry", () => {
+  const presentationAction = {
+    kind: "toggle-details",
+    label: "收起内容",
+    isCurrent: false,
+    nextContext: null,
+  };
+  const first = stabilizeSelectionChromeProjection(null, {
+    toolbarStyle: { left: 11, top: 12 },
+    selectedOutlineStyle: { left: 1, top: 2, width: 3, height: 4 },
+    hoverOutlineStyle: { left: 5, top: 6, width: 7, height: 8 },
+    hoverHintStyle: { left: 9, top: 10, maxWidth: 96 },
+    hoverHintPlacement: { left: 9, top: 10, width: 96, placement: "below" },
+    selectedPagePresentationAction: presentationAction,
+  });
+  const equal = stabilizeSelectionChromeProjection(first, {
+    toolbarStyle: { left: 11, top: 12 },
+    selectedOutlineStyle: { left: 1, top: 2, width: 3, height: 4 },
+    hoverOutlineStyle: { left: 5, top: 6, width: 7, height: 8 },
+    hoverHintStyle: { left: 9, top: 10, maxWidth: 96 },
+    hoverHintPlacement: { left: 9, top: 10, width: 96, placement: "below" },
+    selectedPagePresentationAction: presentationAction,
+  });
+  assert.equal(equal, first);
+  assert.equal(equal.toolbarStyle, first.toolbarStyle);
+  assert.equal(equal.selectedOutlineStyle, first.selectedOutlineStyle);
+  assert.equal(equal.hoverOutlineStyle, first.hoverOutlineStyle);
+  assert.equal(equal.hoverHintStyle, first.hoverHintStyle);
+  assert.equal(equal.hoverHintPlacement, first.hoverHintPlacement);
+  assert.equal(
+    equal.selectedPagePresentationAction,
+    first.selectedPagePresentationAction,
+  );
+
+  for (const [field, changedValue] of [
+    ["toolbarStyle", { ...first.toolbarStyle, left: 12 }],
+    ["selectedOutlineStyle", { ...first.selectedOutlineStyle, width: 4 }],
+    ["hoverOutlineStyle", { ...first.hoverOutlineStyle, height: 9 }],
+    ["hoverHintStyle", { ...first.hoverHintStyle, maxWidth: 97 }],
+    ["hoverHintPlacement", { ...first.hoverHintPlacement, top: 11 }],
+  ]) {
+    const changed = stabilizeSelectionChromeProjection(first, {
+      ...first,
+      [field]: changedValue,
+    });
+    assert.notEqual(changed, first, field);
+    assert.notEqual(changed[field], first[field], field);
+  }
+
+  const changedAction = stabilizeSelectionChromeProjection(first, {
+    ...first,
+    selectedPagePresentationAction: { ...presentationAction },
+  });
+  assert.notEqual(changedAction, first);
+  assert.notEqual(
+    changedAction.selectedPagePresentationAction,
+    first.selectedPagePresentationAction,
   );
 });
