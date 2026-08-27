@@ -732,7 +732,7 @@ Converting the gate away from ordered source-string matching exposed renderer
 behaviors whose ordering guarantees are now asserted only structurally (call
 presence), because the repository has no DOM test harness for
 `HtmlCanvasEditor.tsx`. Native deferred-command arbitration now has a Node
-unit test on `html-canvas-native-commands.ts` (system work blocked by a pending
+unit test on `html-canvas-native-commands.js` (system work blocked by a pending
 user-explicit command, supersede, and stale-lease drain). The remaining items
 still need Electron/Playwright behavior coverage:
 

@@ -449,11 +449,11 @@ export async function architectureViolations() {
     "utf8",
   );
   const canvasFrame = await readFile(
-    path.join(PRODUCT_ROOT, "app", "components", "html-canvas-frame.ts"),
+    path.join(PRODUCT_ROOT, "app", "components", "html-canvas-frame.js"),
     "utf8",
   );
   const canvasNativeCommands = await readFile(
-    path.join(PRODUCT_ROOT, "app", "components", "html-canvas-native-commands.ts"),
+    path.join(PRODUCT_ROOT, "app", "components", "html-canvas-native-commands.js"),
     "utf8",
   );
   const firstEditGuideCard = await readFile(
@@ -1186,7 +1186,7 @@ export async function architectureViolations() {
     canvasEditor,
   );
   const canvasNativeCommandsAst = parseModule(
-    path.join(PRODUCT_ROOT, "app", "components", "html-canvas-native-commands.ts"),
+    path.join(PRODUCT_ROOT, "app", "components", "html-canvas-native-commands.js"),
     canvasNativeCommands,
   );
   // Structural facts only. The ordered statement sequence these blocks used to
@@ -1209,7 +1209,7 @@ export async function architectureViolations() {
     !hasCall(canvasNativeCommandsAst, { path: "active.session.queuePendingCommand" })
   ) {
     violations.push(
-      "app/components/html-canvas-native-commands.ts: native command arbitration must reject lower-priority system work before the controller queue",
+      "app/components/html-canvas-native-commands.js: native command arbitration must reject lower-priority system work before the controller queue",
     );
   }
 

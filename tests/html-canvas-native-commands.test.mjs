@@ -4,7 +4,7 @@ import test from "node:test";
 import {
   NativeDeferredCommandQueue,
   nativeEditLeasesMatch,
-} from "../app/components/html-canvas-native-commands.ts";
+} from "../app/components/html-canvas-native-commands.js";
 
 function lease(overrides = {}) {
   return {

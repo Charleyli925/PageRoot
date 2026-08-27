@@ -1,20 +1,9 @@
 import {
   EDIT_AUTHOR_RUNTIME_CONTRACT_VERSION,
   EDIT_RUNTIME_HOST_ATTRIBUTE,
-  type EditRuntimeGrant,
 } from "../domain/edit-runtime-contract.js";
 
-export type RuntimeFrameContext = {
-  verificationToken: string;
-  grant: EditRuntimeGrant;
-  elementGeneration: number;
-  settled: boolean;
-};
-
-export function sameRuntimeGrant(
-  left: EditRuntimeGrant | null | undefined,
-  right: EditRuntimeGrant | null | undefined,
-): boolean {
+export function sameRuntimeGrant(left, right) {
   return Boolean(
     left
     && right
@@ -25,49 +14,38 @@ export function sameRuntimeGrant(
   );
 }
 
-export function frameDocumentMatchesExpected(
-  iframe: HTMLIFrameElement,
-  expectedFrameHtml: string,
-  writtenHtml: string | null,
-): boolean {
+export function frameDocumentMatchesExpected(iframe, expectedFrameHtml, writtenHtml) {
   return iframe.srcdoc === expectedFrameHtml || writtenHtml === expectedFrameHtml;
 }
 
-export function isRuntimeFrameFrozenResult(
-  value: unknown,
-  frame: RuntimeFrameContext,
-): boolean {
+export function isRuntimeFrameFrozenResult(value, frame) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
-  const result = value as Record<string, unknown>;
   if (
-    result.state !== "frozen"
-    || result.reason !== null
-    || result.contractVersion !== EDIT_AUTHOR_RUNTIME_CONTRACT_VERSION
-    || result.executionId !== frame.grant.executionId
-    || result.sessionId !== frame.grant.sessionId
-    || !Array.isArray(result.hostKeys)
-    || result.hostKeys.length !== frame.grant.hosts.length
+    value.state !== "frozen"
+    || value.reason !== null
+    || value.contractVersion !== EDIT_AUTHOR_RUNTIME_CONTRACT_VERSION
+    || value.executionId !== frame.grant.executionId
+    || value.sessionId !== frame.grant.sessionId
+    || !Array.isArray(value.hostKeys)
+    || value.hostKeys.length !== frame.grant.hosts.length
   ) return false;
   const expected = new Set(frame.grant.hosts.map((host) => host.key));
-  const received = new Set<string>();
-  for (const key of result.hostKeys) {
+  const received = new Set();
+  for (const key of value.hostKeys) {
     if (typeof key !== "string" || !expected.has(key) || received.has(key)) return false;
     received.add(key);
   }
   return received.size === expected.size;
 }
 
-export function hostHasAuthorPaint(element: Element | null): boolean {
+export function hostHasAuthorPaint(element) {
   if (!element || element.nodeType !== 1) return false;
   const tag = element.tagName.toLowerCase();
   if (tag === "canvas" || tag === "svg") return true;
   return Boolean(element.querySelector("canvas, svg"));
 }
 
-export function runtimeFrameKeepsAuthorPaint(
-  documentNode: Document,
-  frame: RuntimeFrameContext,
-): boolean {
+export function runtimeFrameKeepsAuthorPaint(documentNode, frame) {
   if (documentNode.querySelectorAll("img[data-pageroot-edit-runtime-snapshot]").length > 0) {
     return false;
   }

@@ -8,7 +8,7 @@ import {
   isRuntimeFrameFrozenResult,
   runtimeFrameKeepsAuthorPaint,
   sameRuntimeGrant,
-} from "../app/components/html-canvas-frame.ts";
+} from "../app/components/html-canvas-frame.js";
 
 function grant(overrides = {}) {
   return {

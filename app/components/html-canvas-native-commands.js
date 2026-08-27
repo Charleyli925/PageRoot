@@ -1,42 +1,4 @@
-import type {
-  NativeDeferredCommandAuthority,
-  NativeDeferredCommandDiscardReason,
-  NativeDeferredCommandOptions,
-} from "./HtmlCanvasEditor.types";
-import type {
-  NativeEditLeaseStamp,
-  NativeEditQueueCommandResult,
-  NativeEditQueuedCommand,
-} from "./native-edit-types";
-
-export type NativeCommandSessionPort = {
-  queuePendingCommand(request: {
-    kind: string;
-    authority?: NativeDeferredCommandAuthority;
-    payload?: unknown;
-  }): NativeEditQueueCommandResult;
-  takePendingCommand(): NativeEditQueuedCommand | null;
-};
-
-export type NativeDeferredCommandContext = {
-  session: NativeCommandSessionPort;
-  lease: NativeEditLeaseStamp;
-};
-
-export type PendingNativeCommandCallback = {
-  sequence: number;
-  kind: string;
-  authority: NativeDeferredCommandAuthority;
-  session: NativeCommandSessionPort;
-  lease: NativeEditLeaseStamp;
-  run: () => void;
-  onDiscard?: (reason: NativeDeferredCommandDiscardReason) => void;
-};
-
-export function nativeEditLeasesMatch(
-  left: NativeEditLeaseStamp | null,
-  right: NativeEditLeaseStamp,
-): boolean {
+export function nativeEditLeasesMatch(left, right) {
   return Boolean(
     left
     && left.sessionId === right.sessionId
@@ -46,10 +8,7 @@ export function nativeEditLeasesMatch(
   );
 }
 
-function notifyDiscard(
-  callback: PendingNativeCommandCallback | null,
-  reason: NativeDeferredCommandDiscardReason,
-): void {
+function notifyDiscard(callback, reason) {
   if (!callback?.onDiscard) return;
   try {
     callback.onDiscard(reason);
@@ -60,10 +19,10 @@ function notifyDiscard(
 }
 
 export class NativeDeferredCommandQueue {
-  #pending: PendingNativeCommandCallback | null = null;
-  #scheduled: PendingNativeCommandCallback | null = null;
+  #pending = null;
+  #scheduled = null;
 
-  discardPendingNativeCommands(reason: NativeDeferredCommandDiscardReason): void {
+  discardPendingNativeCommands(reason) {
     const pending = this.#pending;
     const scheduled = this.#scheduled;
     this.#pending = null;
@@ -74,13 +33,7 @@ export class NativeDeferredCommandQueue {
     }
   }
 
-  deferNativeCommand(
-    kind: string,
-    run: () => void,
-    payload: unknown,
-    options: NativeDeferredCommandOptions,
-    active: NativeDeferredCommandContext | null,
-  ): boolean {
+  deferNativeCommand(kind, run, payload, options, active) {
     if (!active) return false;
     const authority = options.authority ?? "user-explicit";
     const incumbent = this.#pending ?? this.#scheduled;
@@ -111,10 +64,7 @@ export class NativeDeferredCommandQueue {
     return true;
   }
 
-  takeReplayableNativeCommandForCompletedSession(
-    active: NativeDeferredCommandContext,
-    currentLease: NativeEditLeaseStamp | null,
-  ): PendingNativeCommandCallback | null {
+  takeReplayableNativeCommandForCompletedSession(active, currentLease) {
     const pending = this.#pending;
     const scheduled = this.#scheduled;
     const callback = pending ?? scheduled;
@@ -139,10 +89,7 @@ export class NativeDeferredCommandQueue {
     return callback;
   }
 
-  scheduleReplay(
-    callback: PendingNativeCommandCallback,
-    schedule: (run: () => void) => void,
-  ): void {
+  scheduleReplay(callback, schedule) {
     this.#scheduled = callback;
     schedule(() => {
       if (this.#scheduled !== callback) return;
@@ -151,14 +98,7 @@ export class NativeDeferredCommandQueue {
     });
   }
 
-  drainPendingNativeCommand(
-    session: NativeCommandSessionPort,
-    context: {
-      getActive: () => NativeDeferredCommandContext | null;
-      getCurrentLease: () => NativeEditLeaseStamp | null;
-      schedule: (run: () => void) => void;
-    },
-  ): void {
+  drainPendingNativeCommand(session, context) {
     const active = context.getActive();
     const pending = this.#pending;
     if (
