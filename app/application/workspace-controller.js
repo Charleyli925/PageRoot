@@ -4,6 +4,7 @@ import { CommentWorkflow } from "./comment-workflow.js";
 import { BrowserDocumentSession } from "./browser-document-session.js";
 import { DocumentSession } from "./document-session.js";
 import { DocumentWorkflow } from "./document-workflow.js";
+import { DocumentSurfaceCacheSession } from "./document-surface-cache-session.js";
 import { EditAuthorRuntimeSession } from "./edit-author-runtime-session.js";
 import { FirstEditGuideSession } from "./first-edit-guide-session.js";
 import { DraftSession } from "./draft-session.js";
@@ -179,6 +180,7 @@ export function createRuntimeWorkspaceController({
     sourceHistorySession: new SourceHistorySession(),
     conversationSession: new ConversationSession(),
     workbenchTabsSession: new WorkbenchTabsSession(),
+    documentSurfaceCacheSession: new DocumentSurfaceCacheSession(),
     workbenchNavigationSession: new WorkbenchNavigationSession(),
     browserDocumentSession: new BrowserDocumentSession(),
     workbenchTabsPersistenceCoordinator: new WorkbenchTabsPersistenceCoordinator({
@@ -258,6 +260,9 @@ export class WorkspaceController {
   #versionWorkflow = null;
   #versionWorkflowUnsubscribe = null;
   #workbenchTabsSession = null;
+  #documentSurfaceCacheSession = null;
+  #documentSurfaceCacheUnsubscribe = null;
+  #documentSurfaceCacheSnapshot = null;
   #browserDocumentSession = null;
   #workbenchTabsPersistenceCoordinator = null;
   #workbenchTabsPersistenceUnsubscribe = null;
@@ -300,6 +305,7 @@ export class WorkspaceController {
     run: null,
     version: null,
     workbenchTabs: null,
+    documentSurfaceCache: null,
     workbenchTabsReady: false,
     workbenchNavigation: null,
     workbenchTabsPersistence: null,
@@ -320,6 +326,7 @@ export class WorkspaceController {
     sourceHistorySession,
     conversationSession = null,
     workbenchTabsSession = null,
+    documentSurfaceCacheSession = null,
     workbenchNavigationSession = null,
     browserDocumentSession = null,
     workbenchTabsPersistenceCoordinator = null,
@@ -388,6 +395,8 @@ export class WorkspaceController {
     this.#sourceHistorySession = sourceHistorySession;
     this.#workbenchTabsSession = workbenchTabsSession;
     this.#workbenchTabsSnapshot = workbenchTabsSession?.snapshot || null;
+    this.#documentSurfaceCacheSession = documentSurfaceCacheSession;
+    this.#documentSurfaceCacheSnapshot = documentSurfaceCacheSession?.snapshot || null;
     this.#browserDocumentSession = browserDocumentSession;
     this.#workbenchTabsPersistenceCoordinator = workbenchTabsPersistenceCoordinator;
     this.#workbenchTabsPersistenceSnapshot = workbenchTabsPersistenceCoordinator?.snapshot || null;
@@ -633,6 +642,7 @@ export class WorkspaceController {
         this.#workbenchNavigationWorkflow = new WorkbenchNavigationWorkflow({
           session: this.#workbenchNavigationSession,
           tabs: this.#workbenchTabsSession,
+          surfaceCache: this.#documentSurfaceCacheSession,
           projectWorkflow: this.#projectWorkflow,
           controller: this,
           browserDocuments: this.#browserDocumentSession,
@@ -649,8 +659,18 @@ export class WorkspaceController {
         this.#workbenchTabsUnsubscribe = this.#workbenchTabsSession.subscribe((snapshot) => {
           if (this.#disposed) return;
           this.#workbenchTabsSnapshot = snapshot;
+          this.#documentSurfaceCacheSession?.reconcile(
+            snapshot.tabs.map((tab) => tab.tabId),
+          );
+          this.#refreshDocumentSurfaceCache();
           this.#publishAggregateSnapshot();
         });
+        this.#documentSurfaceCacheUnsubscribe =
+          this.#documentSurfaceCacheSession?.subscribe((snapshot) => {
+            if (this.#disposed) return;
+            this.#documentSurfaceCacheSnapshot = snapshot;
+            this.#publishAggregateSnapshot();
+          }) || null;
         this.#workbenchTabsPersistenceUnsubscribe =
           this.#workbenchTabsPersistenceCoordinator?.subscribe((snapshot) => {
             if (this.#disposed) return;
@@ -829,6 +849,8 @@ export class WorkspaceController {
     this.#versionWorkflow = null;
     this.#workbenchTabsUnsubscribe?.();
     this.#workbenchTabsUnsubscribe = null;
+    this.#documentSurfaceCacheUnsubscribe?.();
+    this.#documentSurfaceCacheUnsubscribe = null;
     this.#workbenchTabsPersistenceUnsubscribe?.();
     this.#workbenchTabsPersistenceUnsubscribe = null;
     this.#workbenchNavigationUnsubscribe?.();
@@ -838,6 +860,8 @@ export class WorkspaceController {
     this.#workbenchNavigationSession = null;
     this.#workbenchTabsPersistenceCoordinator?.dispose();
     this.#workbenchTabsPersistenceCoordinator = null;
+    this.#documentSurfaceCacheSession?.dispose();
+    this.#documentSurfaceCacheSession = null;
     this.#browserDocumentSession?.dispose();
     this.#browserDocumentSession = null;
     this.#externalOpenUnsubscribe?.();
@@ -991,6 +1015,10 @@ export class WorkspaceController {
 
   updateWorkbenchTabStatus(projectId, documentId, status) {
     return this.#workbenchTabsSession?.updateStatus(projectId, documentId, status) || null;
+  }
+
+  updateDocumentSurfacePresentation(tabId, presentation) {
+    return this.#documentSurfaceCacheSession?.updatePresentation(tabId, presentation) || null;
   }
 
   async #initializeWorkbenchTabs() {
@@ -1680,6 +1708,7 @@ export class WorkspaceController {
       version: this.#versionSnapshot,
       conversation: this.#conversationSnapshot,
       workbenchTabs: this.#workbenchTabsSnapshot,
+      documentSurfaceCache: this.#documentSurfaceCacheSnapshot,
       workbenchTabsReady: this.#workbenchTabsReady,
       workbenchNavigation: this.#workbenchNavigationSnapshot,
       workbenchTabsPersistence: this.#workbenchTabsPersistenceSnapshot,
@@ -1710,12 +1739,14 @@ export class WorkspaceController {
       if (this.#disposed) return;
       this.#projectSessionSnapshot = snapshot;
       this.#refreshEditAuthorRuntime();
+      this.#refreshDocumentSurfaceCache();
       this.#publishAggregateSnapshot();
     });
     this.#documentSession.setObserver((snapshot) => {
       if (this.#disposed) return;
       this.#documentSessionSnapshot = snapshot;
       this.#refreshEditAuthorRuntime();
+      this.#refreshDocumentSurfaceCache();
       this.#publishAggregateSnapshot();
     });
     this.#commentSession.setObserver((snapshot) => {
@@ -1750,6 +1781,23 @@ export class WorkspaceController {
         && document.persistState === "idle"
       ),
     });
+  }
+
+  #refreshDocumentSurfaceCache() {
+    const activeTab = this.#workbenchTabsSnapshot?.tabs.find((tab) => (
+      tab.kind === "document"
+      && tab.tabId === this.#workbenchTabsSnapshot.activeTabId
+    ));
+    if (!activeTab) return null;
+    return this.#documentSurfaceCacheSession?.capture({
+      tab: activeTab,
+      project: {
+        ...this.#projectSessionSnapshot,
+        projectId: this.#projectSessionSnapshot?.projectId || activeTab.projectId,
+        documentId: this.#projectSessionSnapshot?.documentId || activeTab.documentId,
+      },
+      document: this.#documentSessionSnapshot,
+    }) || null;
   }
 
   #isCurrentLocator(identity) {

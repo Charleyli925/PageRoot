@@ -2,7 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-08-27
-- Scope: foreground opening and tab navigation; mounted multi-document caching is deferred
+- Scope: foreground opening and tab navigation; caching follow-up is ADR 0045
 
 ## Decision
 

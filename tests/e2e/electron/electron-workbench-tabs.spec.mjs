@@ -32,6 +32,8 @@ test("Electron tab keyboard navigation manages focus and a persisted Start suppr
     await firstLaunch.page.getByRole("button", { name: "新标签页" }).click();
     await firstLaunch.page.getByRole("button", { name: "新标签页" }).click();
     await expect(tablist.getByRole("tab")).toHaveCount(3);
+    await expect(firstLaunch.page.getByTestId("workbench-document-surface-cache")
+      .locator("[data-tab-id] iframe")).toHaveCount(1);
 
     const documentTab = tablist.getByRole("tab").nth(0);
     const firstStart = tablist.getByRole("tab").nth(1);
@@ -153,7 +155,6 @@ test("Electron browser A to B to A reopens exact in-memory HTML and deduplicates
     await expect(frame.locator(caseSelector("list-item"))).toHaveText("Browser memory B");
     await expect(tabs.filter({ hasText: "browser-memory-b" })).toHaveCount(1);
     await expect(tabs).toHaveCount(afterA + 1);
-
     await tabs.filter({ hasText: "browser-memory-a" }).click();
     frame = await waitForBrowserText("Browser memory A");
     await expect(frame.locator(caseSelector("list-item"))).toHaveText("Browser memory A");
@@ -193,6 +194,11 @@ test("Electron restores multiple Registry tabs, the persisted active document, a
     const firstTabs = first.page.getByRole("tablist", { name: "已打开的 HTML" }).getByRole("tab");
     await expect(firstTabs).toHaveCount(2);
     await expect(firstTabs.filter({ hasText: "registry-restart-b" })).toHaveAttribute("aria-selected", "true");
+    const cachedSurfaces = first.page.getByTestId("workbench-document-surface-cache")
+      .locator("[data-tab-id]");
+    await expect(cachedSurfaces).toHaveCount(2, { timeout: 30_000 });
+    await expect(cachedSurfaces.locator("iframe")).toHaveCount(2);
+    await expect(cachedSurfaces.locator("iframe").first()).toHaveAttribute("sandbox", "");
     const tabsStatePath = path.join(first.isolatedUserData, "workbench-tabs.json");
     await expect.poll(() => {
       try {

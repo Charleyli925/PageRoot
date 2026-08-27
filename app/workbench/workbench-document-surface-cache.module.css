@@ -1,0 +1,30 @@
+.cache {
+  grid-column: 1 / -1;
+  grid-row: 3;
+  min-width: 0;
+  min-height: 0;
+  height: 0;
+  overflow: hidden;
+  visibility: hidden;
+}
+
+.cache[data-visible="true"] {
+  z-index: 4;
+  height: 100%;
+  padding: 18px 18px 28px 58px;
+  overflow-y: auto;
+  background: var(--panel);
+  visibility: visible;
+}
+
+.entry {
+  min-width: 0;
+}
+
+.cache[data-visible="true"] .entry {
+  pointer-events: none;
+}
+
+.entry[hidden] {
+  display: none;
+}

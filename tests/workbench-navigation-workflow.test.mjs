@@ -83,6 +83,7 @@ function fixture({
   requestPicker = null,
   browserDocuments = null,
   tabsPersistence = null,
+  surfaceCache = null,
   clock = { now: () => 1_000 },
   setTimer,
   clearTimer,
@@ -190,6 +191,7 @@ function fixture({
   workflow = new WorkbenchNavigationWorkflow({
     session: navigation,
     tabs,
+    surfaceCache,
     projectWorkflow,
     controller,
     browserDocuments,
@@ -200,6 +202,23 @@ function fixture({
   });
   return { tabs, navigation, phases, calls, controller, projectWorkflow, workflow, publish, apply };
 }
+
+test("tab activation touches the target cache and captures only the prior document projection", async () => {
+  const cacheCalls = [];
+  const surfaceCache = {
+    touch(tabId) { cacheCalls.push(["touch", tabId]); },
+    capture(input) { cacheCalls.push(["capture", input.tab.tabId]); },
+    remove(tabId) { cacheCalls.push(["remove", tabId]); },
+  };
+  const harness = fixture({ surfaceCache });
+  harness.tabs.bindDocument({ ...B, title: B.name, focus: false });
+  const outcome = await harness.workflow.activateTab(`document:${B.projectId}:${B.documentId}`);
+  assert.equal(outcome.status, "succeeded");
+  assert.deepEqual(cacheCalls.slice(0, 2), [
+    ["touch", `document:${B.projectId}:${B.documentId}`],
+    ["capture", `document:${A.projectId}:${A.documentId}`],
+  ]);
+});
 
 for (const intent of ["startup", "local", "recent", "registered"]) {
   test(`${intent} uses one correlated transaction receipt and terminal identity`, async () => {

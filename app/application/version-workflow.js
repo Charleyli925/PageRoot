@@ -1032,6 +1032,18 @@ export class VersionWorkflow {
     if (!context || !this.#projectSession.matches(context)) return stale(this.#runIdentity(run));
     perfMark("pageroot:accept:commit-end");
 
+    // Durable promotion and complete Session publication are the user-facing
+    // cut. Canvas verification remains mandatory, but it warms the sole edit
+    // surface after the committed bytes are already eligible for display.
+    this.#emitEvent({
+      type: "version-activation-published",
+      context,
+      operationKey: this.#codecs.operationKey(run),
+      candidateLabel: completion.candidateLabel,
+      committedSourcePath: resolvedCommittedSourcePath,
+      lastModifiedAt,
+    });
+
     await this.#canvasPort.verifyRendered(content, versionSha256, context);
     perfMark("pageroot:accept:canvas-verified");
     if (!this.#projectSession.matches(context)) return stale(context);

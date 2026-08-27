@@ -13,6 +13,7 @@ type HtmlDisplaySurfaceProps = {
   html: string;
   sourcePath?: string;
   height?: string;
+  status?: string;
 };
 
 /**
@@ -24,6 +25,7 @@ export default function HtmlDisplaySurface({
   html,
   sourcePath,
   height = "720px",
+  status = "页面已打开，编辑能力正在准备…",
 }: HtmlDisplaySurfaceProps) {
   const fallbackBase = baseHrefFromSourcePath(sourcePath);
   const { resourceBase } = usePreviewResourceBase(html, sourcePath, false);
@@ -39,7 +41,7 @@ export default function HtmlDisplaySurface({
       data-testid="html-display-surface"
     >
       <div className={styles.status} role="status">
-        页面已打开，编辑能力正在准备…
+        {status}
       </div>
       <iframe
         className={styles.frame}

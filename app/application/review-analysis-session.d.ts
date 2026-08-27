@@ -12,6 +12,7 @@ export class ReviewAnalysisSession<T = unknown> {
       isCancelled: () => boolean;
     }>) => T | Promise<T>;
   }): Promise<T>;
+  peek(key: string): T | null;
   cancel(): void;
   clear(): void;
   dispose(): void;

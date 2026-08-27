@@ -31,6 +31,9 @@ test("review analysis yields, coalesces identical work, and caches bounded resul
   yielded = true;
   assert.equal(await first, await duplicate);
   assert.equal(computes, 1);
+  assert.equal(session.peek("first")?.key, "first");
+  session.cancel();
+  assert.equal(session.peek("first")?.key, "first");
   assert.equal((await session.analyze({
     key: "first",
     compute: () => {
@@ -57,6 +60,7 @@ test("review analysis yields, coalesces identical work, and caches bounded resul
   });
   assert.equal(computes, 2);
   session.dispose();
+  assert.equal(session.peek("first"), null);
 });
 
 test("review analysis rejects superseded work before it starts", async () => {

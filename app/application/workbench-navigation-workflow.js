@@ -43,6 +43,7 @@ export function workbenchNavigationOutcomeHasCommittedDocument(outcome) {
 export class WorkbenchNavigationWorkflow {
   #session;
   #tabs;
+  #surfaceCache;
   #projectWorkflow;
   #controller;
   #browserDocuments;
@@ -62,6 +63,7 @@ export class WorkbenchNavigationWorkflow {
   constructor({
     session,
     tabs,
+    surfaceCache = null,
     projectWorkflow,
     controller,
     browserDocuments = null,
@@ -75,6 +77,7 @@ export class WorkbenchNavigationWorkflow {
     }
     this.#session = session;
     this.#tabs = tabs;
+    this.#surfaceCache = surfaceCache;
     this.#projectWorkflow = projectWorkflow;
     this.#controller = controller;
     this.#browserDocuments = browserDocuments;
@@ -162,6 +165,7 @@ export class WorkbenchNavigationWorkflow {
       const closing = snapshot.tabs[index];
       if (snapshot.activeTabId !== tabId) {
         this.#tabs.close(tabId);
+        this.#surfaceCache?.remove(tabId);
         if (closing.kind === "document") {
           this.#browserDocuments?.remove(closing.projectId, closing.documentId);
         }
@@ -177,6 +181,7 @@ export class WorkbenchNavigationWorkflow {
       const activated = await this.#activateTab(active, next.tabId, {});
       if (activated.outcome.status !== "succeeded") return activated;
       this.#tabs.close(tabId);
+      this.#surfaceCache?.remove(tabId);
       if (closing.kind === "document") {
         this.#browserDocuments?.remove(closing.projectId, closing.documentId);
       }
@@ -517,6 +522,7 @@ export class WorkbenchNavigationWorkflow {
       return { outcome: succeeded({ unchanged: true }) };
     }
     const current = this.#tabs.resolveTab(this.#tabs.snapshot.activeTabId);
+    this.#surfaceCache?.touch(target.tabId);
     active.expectedTabId = target.tabId;
     this.#tabs.beginSwitch(target.tabId);
     this.#session.transition(active.transactionId, "preparing");
@@ -534,6 +540,7 @@ export class WorkbenchNavigationWorkflow {
           String(prepared?.reason || "当前 HTML 尚未安全收口。"),
         ) };
       }
+      if (current?.kind === "document") this.#captureCurrentSurface(current);
       const committed = this.#tabs.commitStart(target.tabId);
       if (!committed) return { outcome: rejected(
         "WORKBENCH_TAB_COMMIT_REJECTED",
@@ -551,6 +558,7 @@ export class WorkbenchNavigationWorkflow {
       this.#session.transition(active.transactionId, "canvas-verified", { receipt });
       return { outcome: succeeded({ tabId: target.tabId }), receipt };
     }
+    if (current?.kind === "document") this.#captureCurrentSurface(current);
     this.#session.transition(active.transactionId, "opening");
     const browserProject = this.#browserDocuments?.resolve(target.projectId, target.documentId);
     const outcome = browserProject
@@ -564,6 +572,15 @@ export class WorkbenchNavigationWorkflow {
         transactionId: active.transactionId,
       });
     return this.#finishOpened(active, outcome, { deadlineMs });
+  }
+
+  #captureCurrentSurface(tab) {
+    const snapshot = this.#controller.getSnapshot();
+    return this.#surfaceCache?.capture({
+      tab,
+      project: snapshot?.projectSession,
+      document: snapshot?.document,
+    }) || null;
   }
 
   async #confirm(active, input) {
