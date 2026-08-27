@@ -293,6 +293,8 @@ export function createQoderAcpE2ECommand(directory, {
   pidFile = null,
   authRequired = false,
   capacityUnavailable = false,
+  visibleText = false,
+  visibleTextGateMs = 0,
 } = {}) {
   const command = path.join(directory, "pageroot-qoder-acp-e2e");
   const agent = path.join(productRoot, "tests", "fixtures", "qoder-acp-agent.mjs");
@@ -301,12 +303,26 @@ export function createQoderAcpE2ECommand(directory, {
     pidFile ? `--pid-file=${pidFile}` : null,
     authRequired ? "--auth-required" : null,
     capacityUnavailable ? "--capacity-unavailable" : null,
+    visibleText ? "--visible-text" : null,
+    visibleTextGateMs > 0 ? `--visible-text-gate-ms=${visibleTextGateMs}` : null,
   ].filter(Boolean).map(shellQuote).join(" ");
   writeFileSync(
     command,
     `#!/bin/sh\nexec ${shellQuote(process.execPath)} ${shellQuote(agent)}${
       fixtureArgs ? ` ${fixtureArgs}` : ""
     } "$@"\n`,
+    { encoding: "utf8", mode: 0o755 },
+  );
+  chmodSync(command, 0o755);
+  return command;
+}
+
+export function createCodexAppServerE2ECommand(directory) {
+  const command = path.join(directory, "pageroot-codex-app-server-e2e");
+  const server = path.join(productRoot, "tests", "fixtures", "codex-app-server-execution.mjs");
+  writeFileSync(
+    command,
+    `#!/bin/sh\nexec ${shellQuote(process.execPath)} ${shellQuote(server)} "$@"\n`,
     { encoding: "utf8", mode: 0o755 },
   );
   chmodSync(command, 0o755);
@@ -976,4 +992,3 @@ export async function assertReviewAcceptPersistence({
   expect(readFileSync(opened.sourcePath, "utf8")).toContain(expectedText);
   return opened;
 }
-

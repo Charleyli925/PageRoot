@@ -82,9 +82,9 @@ const TASK_OWNER_CASES = [
       "lint",
       "node-targeted",
       "build-web",
-      "browser-smoke",
+      "browser-review-smoke",
       "build-desktop",
-      "ai-smoke",
+      "ai-review-smoke",
     ],
     directOwners: ["tests/review-text-diff.test.mjs", "tests/runtime-visual-contract.test.mjs"],
     unrelatedOwners: [
@@ -183,13 +183,19 @@ const TASK_OWNER_CASES = [
   {
     file: "scripts/project-file-repository/path-safety.mjs",
     nodeTests: [
+      "tests/project-ai-task-projection.test.mjs",
+      "tests/project-candidate-promotion.test.mjs",
       "tests/project-file-bridge.test.mjs",
       "tests/project-file-finalizer.test.mjs",
-      "tests/project-file-repository.test.mjs",
+      "tests/project-file-repository.integration.test.mjs",
       "tests/project-file-schema.test.mjs",
+      "tests/project-path-security-and-locks.test.mjs",
+      "tests/project-registry-and-open.test.mjs",
+      "tests/project-request-authority.test.mjs",
+      "tests/project-working-copy-save.test.mjs",
     ],
-    suites: ["typecheck", "lint", "node-targeted", "build-desktop", "ai-smoke"],
-    directOwners: ["tests/project-file-repository.test.mjs"],
+    suites: ["typecheck", "lint", "node-targeted", "build-desktop", "ai-review-smoke"],
+    directOwners: ["tests/project-path-security-and-locks.test.mjs"],
     unrelatedOwners: ["tests/desktop-package.test.mjs", "tests/review-runtime-capture-owner.test.mjs"],
   },
   {
@@ -534,14 +540,13 @@ test("Workbench and review surfaces route to architecture or observable runtime 
     changedFiles: ["app/workbench/comment-rail-view.tsx"],
   });
   assert.deepEqual(commentRail.selectedNodeTests, [
-    "tests/architecture-boundaries.test.mjs",
     "tests/project-rules-workflow.test.mjs",
     "tests/project-workflow.test.mjs",
     "tests/source-rename.test.mjs",
   ]);
-  assert.ok(suiteIds(commentRail).includes("browser-smoke"));
-  assert.ok(suiteIds(commentRail).includes("electron-smoke"));
-  assert.ok(suiteIds(commentRail).includes("ai-smoke"));
+  assert.ok(suiteIds(commentRail).includes("browser-editing-smoke"));
+  assert.ok(suiteIds(commentRail).includes("electron-editing-smoke"));
+  assert.ok(suiteIds(commentRail).includes("ai-review-smoke"));
 
   const bootstrap = selectGatePlan({
     map,

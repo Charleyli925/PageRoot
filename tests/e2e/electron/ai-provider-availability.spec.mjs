@@ -5,6 +5,7 @@ import {
   candidateHtmlFiles,
   chooseModifyIntent,
   closeQoderAvailability,
+  createCodexAppServerE2ECommand,
   createQoderAcpE2ECommand,
   createSourceFixture,
   existsSync,
@@ -19,12 +20,15 @@ import {
   stopPageRoot,
 } from "./ai-closed-loop-helpers.mjs";
 
-test("Qoder ACP Agent Bridge reaches review without clipboard or automatic adoption", {
+test("Qoder ACP Agent Bridge streams public execution text without clipboard or automatic adoption", {
   tag: ["@smoke-provider"],
 }, async () => {
   test.setTimeout(180_000);
   const fixture = createSourceFixture("qoder-acp-agent-bridge.html");
-  const qoderCommand = createQoderAcpE2ECommand(fixture.sourceDirectory);
+  const qoderCommand = createQoderAcpE2ECommand(fixture.sourceDirectory, {
+    visibleText: true,
+    visibleTextGateMs: 700,
+  });
   const launched = await launchPageRoot({
     activeSourcePath: fixture.sourcePath,
     injectedEnv: {
@@ -54,6 +58,20 @@ test("Qoder ACP Agent Bridge reaches review without clipboard or automatic adopt
     await expect(deliveryDialog.getByText("可信本机 Agent 提示", { exact: true }))
       .toHaveCount(0);
     await deliveryDialog.getByRole("button", { name: /交给 Qoder 修改/u }).click();
+
+    const narration = launched.page.getByTestId("ai-conversation-narration-message");
+    await expect(narration).toBeVisible({ timeout: 60_000 });
+    await expect(narration).toHaveCount(1);
+    await expect(narration).toContainText("正在读取冻结任务。");
+    await expect(narration).not.toContainText("正在等待校验。");
+    await expect(narration).toContainText(
+      "正在读取冻结任务。正在写入 Candidate。正在等待校验。",
+      { timeout: 60_000 },
+    );
+    await expect(narration.getByRole("button", { name: "复制" })).toBeVisible();
+    await expect(narration).not.toContainText("Build PageRoot Candidate");
+    await expect(launched.page.getByTestId("ai-conversation-run-summary"))
+      .toContainText("本轮修改已提交");
 
     await expect(launched.page.getByTestId("ai-conversation-action-bar"))
       .toContainText("等待你的决定", { timeout: 60_000 });
@@ -88,6 +106,93 @@ test("Qoder ACP Agent Bridge reaches review without clipboard or automatic adopt
     expect(readFileSync(workingCopyPath, "utf8")).not.toContain(
       "data-pageroot-qoder-acp",
     );
+  } finally {
+    await stopPageRoot(launched.electronApp, launched.isolatedUserData);
+    removeSourceFixture(fixture.sourceDirectory);
+  }
+});
+
+test("Codex App Server shares the public execution stream and retains its frozen identity", async () => {
+  test.setTimeout(180_000);
+  const fixture = createSourceFixture("codex-app-server-agent-bridge.html");
+  const codexCommand = createCodexAppServerE2ECommand(fixture.sourceDirectory);
+  const qoderCommand = createQoderAcpE2ECommand(fixture.sourceDirectory);
+  const launched = await launchPageRoot({
+    activeSourcePath: fixture.sourcePath,
+    injectedEnv: {
+      PAGEROOT_QODER_ACP_ALLOW_TEST_COMMAND: "1",
+      PAGEROOT_QODER_ACP_COMMAND: qoderCommand,
+      PAGEROOT_E2E_CODEX_APP_SERVER_ALLOW_TEST_COMMAND: "1",
+      PAGEROOT_E2E_CODEX_APP_SERVER_COMMAND: codexCommand,
+      PAGEROOT_E2E_CODEX_STREAM_GATE_MS: "700",
+    },
+  });
+  try {
+    const workingCopyPath = await addComment(
+      launched.page,
+      fixture.sourcePath,
+      "请完成 Codex App Server 自动闭环，但不要直接覆盖当前 HTML。",
+    );
+    await launched.page.getByRole("button", { name: /AI 助手/u }).click();
+    const sidebar = await chooseModifyIntent(launched.page);
+    await expect(sidebar.getByTestId("ai-conversation-model"))
+      .toHaveAttribute("aria-expanded", "false", { timeout: 60_000 });
+    await sidebar.getByTestId("ai-conversation-model").click();
+    const agentChoices = sidebar.getByRole("listbox", { name: "选择本轮 Agent" });
+    await expect(agentChoices).toBeVisible();
+    await expect(agentChoices).toContainText("Codex");
+    await agentChoices.getByRole("option", { name: /Codex/u }).click();
+    await expect(sidebar.getByTestId("ai-conversation-delivery-disclosure"))
+      .toContainText("Codex 修改时可能读取这台 Mac 上的本机文件。", { timeout: 60_000 });
+    await expect(sidebar.getByRole("button", { name: /交给 Codex 修改/u }))
+      .toBeEnabled({ timeout: 60_000 });
+    await sidebar.getByRole("button", { name: /交给 Codex 修改/u }).click();
+
+    const narration = launched.page.getByTestId("ai-conversation-narration-message");
+    await expect(narration).toBeVisible({ timeout: 60_000 });
+    await expect(narration).toHaveCount(1);
+    await expect(narration).toContainText("先读取冻结任务。");
+    await expect(narration).not.toContainText("最后等待校验。");
+    await expect(narration).toContainText("Codex", { timeout: 10_000 });
+    await expect(narration.locator("img")).toHaveCount(0);
+    await expect(narration).not.toContainText("这段推理不能进入 Stemmio 侧栏。");
+
+    // Switching the idle selection cannot rename or redirect the Request already running.
+    await sidebar.getByTestId("ai-conversation-model").click();
+    await sidebar.getByRole("option", { name: "Qoder" }).click();
+    await expect(narration).toContainText("Codex");
+    await expect(narration).toContainText(
+      "先读取冻结任务。再写入 Candidate。最后等待校验。",
+      { timeout: 60_000 },
+    );
+    await expect(launched.page.getByTestId("ai-conversation-action-bar"))
+      .toContainText("等待你的决定", { timeout: 60_000 });
+    expect(readFileSync(fixture.sourcePath).equals(fixture.original)).toBe(true);
+    expect(readFileSync(workingCopyPath, "utf8")).not.toContain(
+      "data-pageroot-codex-app-server",
+    );
+
+    const projectRoot = managedProjectRoots(launched.workspace).find(
+      (root) => realpathSync(workingCopyPath).startsWith(
+        `${realpathSync(root)}${path.sep}`,
+      ),
+    );
+    expect(projectRoot).toBeTruthy();
+    const projectRecord = JSON.parse(readFileSync(
+      path.join(projectRoot, ".pageroot", "project.json"),
+      "utf8",
+    ));
+    const candidates = candidateHtmlFiles(
+      launched.workspace,
+      projectRecord.projectId,
+    );
+    expect(candidates).toHaveLength(1);
+    expect(readFileSync(candidates[0], "utf8"))
+      .toContain('data-pageroot-codex-app-server="e2e"');
+
+    await launched.page.getByRole("button", { name: "审阅对比" }).click();
+    await expect(launched.page.getByTestId("ai-review-workspace"))
+      .toBeVisible({ timeout: 30_000 });
   } finally {
     await stopPageRoot(launched.electronApp, launched.isolatedUserData);
     removeSourceFixture(fixture.sourceDirectory);
