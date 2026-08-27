@@ -19,7 +19,7 @@
       "maxHooks": 317
     },
     "app/components/HtmlCanvasEditor.tsx": {
-      "maxLines": 5742
+      "maxLines": 5279
     },
     "scripts/project-file-repository.mjs": {
       "maxLines": 5658

@@ -1,0 +1,584 @@
+/* --------------------------------------------------------------------------
+   PageRoot V5.1 — one calm review surface, one scroll context
+   -------------------------------------------------------------------------- */
+
+.workbench {
+  --notice-header-height: 88px;
+  --notice-rail-width: 376px;
+
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: var(--notice-header-height) minmax(0, 1fr);
+  overflow: hidden;
+  background: var(--panel);
+}
+
+.workbench-header {
+  min-height: var(--notice-header-height);
+  align-items: end;
+  padding: 30px 16px 12px 22px;
+  background: rgb(255 255 255 / 96%);
+}
+
+.window-file {
+  min-width: 0;
+  align-self: end;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.window-file-icon-cluster {
+  position: relative;
+  width: 60px;
+  height: 42px;
+  flex: none;
+  align-self: center;
+  display: block;
+}
+
+.window-file-icon {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid #e0defb;
+  border-radius: 10px;
+  background: var(--indigo-soft);
+  color: var(--indigo-deep);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 78%);
+  cursor: pointer;
+  transform: translate(-50%, -50%);
+  transition:
+    border-color 150ms ease,
+    background-color 150ms ease,
+    box-shadow 150ms ease;
+}
+
+.window-file-about-button:hover {
+  border-color: #c9c5f4;
+  background: #f1efff;
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 86%),
+    0 5px 12px rgb(90 85 223 / 10%);
+}
+
+.window-file-about-button:focus-visible {
+  outline: 2px solid rgb(90 85 223 / 46%);
+  outline-offset: 2px;
+}
+
+.window-file-copy {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.window-file-copy > strong {
+  max-width: min(500px, 38vw);
+  font-size: 17px;
+  font-weight: 740;
+  line-height: 1.12;
+  letter-spacing: -0.025em;
+}
+
+.file-meta {
+  gap: 8px;
+  color: #777a84;
+  font-size: 11px;
+  font-style: italic;
+  line-height: 1.25;
+}
+
+.file-version-label,
+.window-file-folder-action {
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: #f0f1f4;
+  color: #666975;
+  font-family: inherit;
+  font-size: inherit;
+  font-style: inherit;
+  font-weight: 650;
+  line-height: inherit;
+  white-space: nowrap;
+}
+
+.window-file-folder-action {
+  flex: none;
+}
+
+.file-version-label {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.file-version-label.project-status-facts {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  max-width: min(520px, 46vw);
+  flex: 0 1 auto;
+  overflow-x: auto;
+  text-overflow: clip;
+  scrollbar-width: none;
+}
+
+.file-version-label.project-status-facts::-webkit-scrollbar {
+  display: none;
+}
+
+.file-version-label.project-status-facts > span + span::before {
+  margin-right: 4px;
+  color: #a1a3ac;
+  content: "·";
+}
+
+.save-status {
+  color: #6f7773;
+  font-weight: 560;
+}
+
+.save-status > span {
+  width: 7px;
+  height: 7px;
+}
+
+.window-file-folder-action {
+  appearance: none;
+  position: relative;
+  flex: none;
+  border: 0;
+  box-shadow: none;
+  text-decoration: none;
+  transition:
+    background-color 150ms ease,
+    color 150ms ease;
+}
+
+.window-file-folder-action:hover {
+  background: #e5e6ea;
+  color: #565966;
+}
+
+.window-file-folder-action:active {
+  background: #dddfe4;
+  color: #4f525e;
+}
+
+.header-actions {
+  align-self: end;
+}
+
+.review-scroll-stage {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  min-width: 0;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 376px;
+  align-items: start;
+  background: var(--panel);
+  overscroll-behavior: contain;
+  overflow-anchor: none;
+  scrollbar-gutter: stable;
+}
+
+.workbench[data-canvas-mode="preview"] .review-scroll-stage {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+/*
+ * When the AI conversation sidebar is docked in preview, the stage becomes two
+ * columns: the previewed page and the sidebar. A docked aside, never a modal —
+ * the user keeps scrolling the preview beside it.
+ */
+.workbench[data-canvas-mode="preview"] .review-scroll-stage:has(> .ai-conversation-aside) {
+  grid-template-columns: minmax(0, 1fr) clamp(340px, 30vw, 460px);
+}
+
+.ai-conversation-aside {
+  /*
+   * Both coordinates are named explicitly. Leaving the column to auto-placement
+   * put the sidebar on a new row below the canvas, which turned a docked side
+   * panel into a full-width bottom bar and left the right third of the window
+   * empty. It spans every row of the stage and stretches, because sharing only
+   * the canvas row left it starting half way down the window.
+   */
+  grid-column: 2;
+  grid-row: 1 / -1;
+  align-self: stretch;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+/*
+ * Below the minimum comfortable canvas width the sidebar takes over the stage
+ * rather than squeezing both to unusable widths.
+ */
+@media (max-width: 1024px) {
+  .workbench[data-canvas-mode="preview"] .review-scroll-stage:has(> .ai-conversation-aside) {
+    grid-template-columns: 0 minmax(0, 1fr);
+  }
+}
+
+.workbench[data-canvas-mode="preview"] {
+  --notice-rail-width: 0px;
+}
+
+.canvas-column {
+  grid-column: auto;
+  grid-row: auto;
+  min-width: 0;
+  min-height: 100%;
+  padding: 18px 0 28px 18px;
+  background: transparent;
+}
+
+.workbench[data-canvas-mode="preview"] .canvas-column {
+  grid-column: auto;
+}
+
+.canvas-edit-surface {
+  height: auto;
+}
+
+.canvas-edit-surface > div {
+  height: var(--html-canvas-height);
+}
+
+.canvas-edit-surface > [data-testid="html-canvas-editor"] {
+  overflow: hidden;
+  border-color: #e3e5e9;
+  border-radius: 18px;
+  background: #fff;
+  box-shadow:
+    0 18px 48px rgb(28 30 38 / 7%),
+    0 2px 8px rgb(28 30 38 / 3%);
+}
+
+.comments-panel.comment-rail {
+  grid-column: auto;
+  grid-row: auto;
+  min-width: 0;
+  min-height: 0;
+  height: var(--comment-rail-height);
+  max-height: var(--comment-rail-height);
+  align-self: start;
+  overflow-x: visible;
+  overflow-y: clip;
+  border-left-color: #e7e9ed;
+  background: var(--panel);
+  overscroll-behavior: auto;
+}
+
+.comment-rail-content {
+  min-height: 100%;
+}
+
+.rail-comment-composer {
+  min-height: 268px;
+  padding: 16px;
+  border: 1px solid #e2e3e8;
+  border-left: 1px solid #d9d7f6;
+  border-radius: 17px;
+  box-shadow: 0 15px 34px rgb(28 30 38 / 6%);
+}
+
+.rail-comment-composer::before,
+.comment-rail-content > .comment-card::before {
+  background: #dedcf6;
+}
+
+.rail-comment-composer textarea {
+  border-color: #e6e7eb;
+  background: #fbfbfc;
+  box-shadow: none;
+}
+
+.rail-comment-composer textarea:focus {
+  border-color: #ceccf2;
+  background: #fff;
+  box-shadow: 0 0 0 2px rgb(90 85 223 / 5%);
+}
+
+.rail-comment-composer textarea:focus-visible {
+  outline: 2px solid rgb(90 85 223 / 10%);
+  outline-offset: 1px;
+}
+
+.comment-card .comment-edit-textarea {
+  padding: 12px 13px 13px;
+  border: 0;
+  border-radius: 10px;
+  outline: 0;
+  background: #f5f6f8;
+  color: #393b44;
+  font-size: 14px;
+  line-height: 1.65;
+  box-shadow: inset 0 -2px 0 transparent;
+  transition:
+    background-color 120ms ease,
+    box-shadow 120ms ease;
+}
+
+.comment-card .comment-edit-textarea:focus,
+.comment-card .comment-edit-textarea:focus-visible {
+  border: 0;
+  outline: 0;
+  background: #f7f7fb;
+  box-shadow: inset 0 -2px 0 #8f8ae8;
+}
+
+.comment-rail-content > .comment-card {
+  min-height: 0;
+  padding: 15px 16px 13px;
+  border: 1px solid #e6e7eb;
+  border-left: 1px solid #dedcf6;
+  border-radius: 16px;
+  box-shadow: 0 12px 27px rgb(28 30 38 / 5%);
+}
+
+.comment-rail-content > .comment-card:hover {
+  border-color: #dcdee4;
+  border-left-color: #cbc8ef;
+  box-shadow: 0 14px 30px rgb(28 30 38 / 6%);
+}
+
+.comment-rail-content > .comment-card[data-selected="true"] {
+  border-color: #d4d2f3;
+  border-left-color: #aaa6ec;
+  box-shadow: 0 15px 32px rgb(90 85 223 / 7%);
+}
+
+.comment-card-tools {
+  gap: 9px;
+}
+
+.comment-card-tools .comment-tool-button:focus-visible,
+.composer-footer-tools .comment-tool-button:focus-visible {
+  outline: 2px solid #8d88e8;
+  outline-offset: 1px;
+}
+
+.comment-tool-button.cancel-edit {
+  border-color: #f0d2cf;
+  background: #fff8f7;
+  color: #ab4e49;
+}
+
+.comment-tool-button.confirm-edit {
+  border-color: #cfe7dc;
+  background: #f4fbf7;
+  color: #2f7c5c;
+}
+
+.comment-delete-confirm {
+  min-height: 50px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 12px;
+  padding: 9px 10px 9px 12px;
+  border: 1px solid #eed5d2;
+  border-radius: 11px;
+  background: #fff8f7;
+  color: #8f4541;
+}
+
+.comment-delete-confirm > span {
+  font-size: 10px;
+  font-weight: 680;
+}
+
+.comment-delete-confirm > div {
+  display: flex;
+  gap: 7px;
+}
+
+.comment-delete-confirm button {
+  min-height: 30px;
+  padding: 0 10px;
+  border: 1px solid #e1e2e7;
+  border-radius: 8px;
+  background: #fff;
+  color: #666873;
+  font-size: 9px;
+  font-weight: 680;
+}
+
+.comment-delete-confirm .confirm-delete {
+  border-color: #d99690;
+  background: #a94d47;
+  color: #fff;
+}
+
+/*
+ * The previewed page stays fully legible while a round runs: it is the thing the
+ * user is waiting on, and the conversation beside it already says what is happening
+ * and that this page will not be overwritten.
+ */
+
+.history-view-banner.preview-navigation-banner {
+  z-index: 29;
+  overflow: visible;
+  will-change: transform;
+  transition:
+    transform 360ms cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 240ms ease;
+}
+
+.history-view-banner.preview-navigation-banner::after {
+  position: absolute;
+  bottom: 0;
+  left: 50%;
+  width: 58px;
+  height: 2px;
+  border-radius: 999px;
+  background: currentcolor;
+  content: "";
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(-50%);
+  transition: opacity 160ms ease;
+}
+
+.history-view-banner.preview-navigation-banner[data-collapsed="true"] {
+  box-shadow: none;
+  transform: translateY(-100%);
+  transition-duration: 280ms, 180ms;
+  transition-timing-function: cubic-bezier(0.4, 0, 1, 1), ease;
+}
+
+.history-view-banner.preview-navigation-banner[data-collapsed="true"]::after {
+  opacity: 0.45;
+}
+
+.history-view-banner .preview-banner-reveal {
+  position: absolute;
+  right: 0;
+  bottom: -16px;
+  left: 0;
+  width: 100%;
+  min-height: 0;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.history-view-banner[data-collapsed="true"] .preview-banner-reveal {
+  pointer-events: auto;
+}
+
+.history-view-banner .preview-banner-reveal:focus-visible {
+  border-radius: 999px;
+  background: rgb(90 85 223 / 8%);
+  opacity: 1;
+  outline: 2px solid rgb(90 85 223 / 38%);
+  outline-offset: -2px;
+}
+
+.side-drawer[data-drawer="handoff"] {
+  top: 50%;
+  right: auto;
+  bottom: auto;
+  left: 50%;
+  width: min(1040px, calc(100vw - 96px));
+  max-width: none;
+  height: min(760px, calc(100vh - 96px));
+  max-height: none;
+  margin: 0;
+  transform: translate(-50%, calc(-50% + 12px)) scale(0.985);
+  transform-origin: center;
+}
+
+.side-drawer[data-drawer="handoff"].open {
+  transform: translate(-50%, -50%) scale(1);
+}
+
+@media (max-width: 1180px) {
+  .workbench {
+    --notice-rail-width: 352px;
+  }
+
+  .workbench[data-canvas-mode="preview"] {
+    --notice-rail-width: 0px;
+  }
+
+  .review-scroll-stage {
+    grid-template-columns: minmax(0, 1fr) 352px;
+  }
+
+  .source-conflict-banner,
+  .history-view-banner {
+    right: 370px;
+  }
+
+}
+
+@media (max-width: 940px) {
+  .workbench {
+    --notice-rail-width: 320px;
+  }
+
+  .workbench[data-canvas-mode="preview"] {
+    --notice-rail-width: 0px;
+  }
+
+  .workbench-header {
+    padding: 30px 12px 12px 20px;
+  }
+
+  .review-scroll-stage {
+    grid-template-columns: minmax(0, 1fr) 320px;
+  }
+
+  .window-file-copy {
+    gap: 2px;
+  }
+
+  .window-file-copy > strong {
+    max-width: 220px;
+    font-size: 16px;
+  }
+
+  .file-version-label {
+    max-width: 128px;
+  }
+
+  .canvas-column {
+    padding-left: 12px;
+  }
+
+  .side-drawer[data-drawer="handoff"] {
+    width: calc(100vw - 36px);
+    height: calc(100vh - 48px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .review-scroll-stage,
+  .preview-navigation-banner,
+  .preview-navigation-banner::after,
+  .side-drawer[data-drawer="handoff"],
+  .window-file-folder-action {
+    scroll-behavior: auto;
+    transition: none;
+  }
+}
+

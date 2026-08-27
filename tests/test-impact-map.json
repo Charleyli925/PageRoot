@@ -866,7 +866,7 @@
     {
       "id": "canvas-overlay-owner",
       "patterns": [
-        "^app/components/(?:HtmlInteractionPreview(?:\\.module)?|html-canvas-(?:page-view|style-inspector|selection-chrome))\\.(?:tsx|ts|css)$"
+        "^app/components/(?:HtmlInteractionPreview(?:\\.module)?|html-canvas-(?:comment-layout|page-view|style-inspector|selection-chrome))\\.(?:tsx|ts|css)$"
       ],
       "suites": [
         "typecheck",
@@ -892,7 +892,7 @@
     {
       "id": "canvas-native-edit-owner",
       "patterns": [
-        "^app/components/(?:IslandEditingController|native-edit-types|native-layout-fingerprint)\\.ts$"
+        "^app/components/(?:IslandEditingController|native-edit-types|native-layout-fingerprint|html-canvas-native-commands)\\.(?:ts|js|d\\.ts)$"
       ],
       "suites": [
         "typecheck",
@@ -901,20 +901,22 @@
       ],
       "nodeTests": [
         "tests/editable-island.test.mjs",
+        "tests/html-canvas-native-commands.test.mjs",
         "tests/native-layout-guard.test.mjs"
       ]
     },
     {
       "id": "canvas-runtime-owner",
       "patterns": [
-        "^app/components/(?:html-canvas-(?:dom|interaction|internal-types)|desktop-edit-runtime-api)\\.(?:ts)$"
+        "^app/components/(?:html-canvas-(?:dom|frame|interaction|internal-types)|desktop-edit-runtime-api)\\.(?:ts|js|d\\.ts)$"
       ],
       "suites": [
         "typecheck",
         "electron-editing-smoke"
       ],
       "nodeTests": [
-        "tests/edit-runtime-contract.test.mjs"
+        "tests/edit-runtime-contract.test.mjs",
+        "tests/html-canvas-frame.test.mjs"
       ]
     },
     {
@@ -946,7 +948,7 @@
         "^desktop/(?:edit-runtime-bootstrap|edit-runtime-protocol|edit-runtime-preparation-fence)\\.mjs$",
         "^desktop/main\\.mjs$",
         "^docs/decisions/0025-edit-direct-one-shot-runtime\\.md$",
-        "^tests/(?:edit-author-runtime-session|edit-runtime-bootstrap|edit-runtime-preparation-fence|edit-runtime-contract|edit-runtime-protocol)\\.test\\.mjs$"
+        "^tests/(?:edit-author-runtime-session|edit-runtime-bootstrap|edit-runtime-preparation-fence|edit-runtime-contract|edit-runtime-protocol|html-canvas-frame)\\.test\\.mjs$"
       ],
       "suites": [
         "typecheck",
@@ -960,6 +962,7 @@
         "tests/edit-runtime-protocol.test.mjs",
         "tests/runtime-snapshot-hosts.test.mjs",
         "tests/html-preview-sandbox.test.mjs",
+        "tests/html-canvas-frame.test.mjs",
         "tests/workspace-controller.test.mjs",
         "tests/desktop-preload-ipc.test.mjs"
       ]
@@ -1081,6 +1084,22 @@
         "tests/review-runtime-visual.test.mjs",
         "tests/runtime-snapshot-hosts.test.mjs",
         "tests/runtime-visual-contract.test.mjs"
+      ]
+    },
+    {
+      "id": "workbench-global-css",
+      "patterns": [
+        "^app/globals\\.css$",
+        "^app/styles/.+\\.css$",
+        "^docs/DESIGN_LANGUAGE\\.md$",
+        "^tests/workbench-css\\.test\\.mjs$"
+      ],
+      "suites": [
+        "typecheck",
+        "browser-editing-smoke"
+      ],
+      "nodeTests": [
+        "tests/workbench-css.test.mjs"
       ]
     },
     {

@@ -48,6 +48,42 @@ const TASK_OWNER_CASES = [
     ],
   },
   {
+    file: "app/components/html-canvas-frame.js",
+    nodeTests: [
+      "tests/edit-runtime-contract.test.mjs",
+      "tests/html-canvas-frame.test.mjs",
+    ],
+    suites: ["typecheck", "lint", "node-targeted", "build-desktop", "electron-editing-smoke"],
+    directOwners: ["tests/html-canvas-frame.test.mjs"],
+    unrelatedOwners: [
+      "tests/editable-island.test.mjs",
+      "tests/html-preview-sandbox.test.mjs",
+      "tests/first-edit-guide-session.test.mjs",
+    ],
+  },
+  {
+    file: "app/components/html-canvas-native-commands.js",
+    nodeTests: [
+      "tests/editable-island.test.mjs",
+      "tests/html-canvas-native-commands.test.mjs",
+      "tests/native-layout-guard.test.mjs",
+    ],
+    suites: [
+      "typecheck",
+      "lint",
+      "node-targeted",
+      "build-web",
+      "browser-editing-smoke",
+      "build-desktop",
+      "electron-editing-smoke",
+    ],
+    directOwners: ["tests/html-canvas-native-commands.test.mjs"],
+    unrelatedOwners: [
+      "tests/html-preview-sandbox.test.mjs",
+      "tests/first-edit-guide-session.test.mjs",
+    ],
+  },
+  {
     file: "app/workbench/review-document.ts",
     nodeTests: [
       "tests/review-badge-aggregation.test.mjs",
@@ -115,6 +151,13 @@ const TASK_OWNER_CASES = [
       "tests/run-session.test.mjs",
       "tests/version-session.test.mjs",
     ],
+  },
+  {
+    file: "app/globals.css",
+    nodeTests: ["tests/workbench-css.test.mjs"],
+    suites: ["typecheck", "node-targeted", "build-web", "browser-editing-smoke"],
+    directOwners: ["tests/workbench-css.test.mjs"],
+    unrelatedOwners: ["tests/application-update.test.mjs", "tests/notification-policy.test.mjs"],
   },
   {
     file: "desktop/application-update.mjs",
@@ -483,6 +526,7 @@ test("Workbench and review surfaces route to architecture or observable runtime 
     "tests/edit-runtime-preparation-fence.test.mjs",
     "tests/edit-runtime-protocol.test.mjs",
     "tests/first-edit-guide-session.test.mjs",
+    "tests/html-canvas-frame.test.mjs",
     "tests/html-preview-sandbox.test.mjs",
     "tests/project-rules-workflow.test.mjs",
     "tests/project-workflow.test.mjs",

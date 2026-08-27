@@ -1,0 +1,294 @@
+/* --------------------------------------------------------------------------
+   Approved comment hierarchy — paper cards, one elevated composer
+   -------------------------------------------------------------------------- */
+
+.comment-rail-content > .comment-card,
+.comment-rail-content > .comment-card:hover,
+.comment-rail-content > .comment-card[data-selected="true"] {
+  border: 1px solid #e3e4e8;
+  background: #fff;
+  box-shadow: none;
+}
+
+.comment-rail-content > .comment-card:hover {
+  border-color: #d6d7dd;
+}
+
+.comment-rail-content > .comment-card[data-selected="true"] {
+  border-color: #dddde5;
+  background: #fdfdff;
+}
+
+.comment-rail-content > .comment-card[data-focused="true"],
+.comment-rail-content > .comment-card[data-focused="true"]:hover,
+.comment-rail-content > .comment-card[data-focused="true"]:focus-within,
+.comment-rail-content > .comment-card[data-editing="true"],
+.comment-rail-content > .comment-card[data-editing="true"]:hover,
+.comment-rail-content > .comment-card[data-editing="true"]:focus-within {
+  z-index: 4;
+  border-color: #dedee8;
+  outline: 0;
+  background: #f9f8ff;
+  box-shadow: inset 2px 0 0 var(--indigo);
+  animation: none;
+}
+
+.comment-rail-content > .comment-card:focus-visible {
+  border-color: #dedee8;
+  outline: 2px solid rgb(90 85 223 / 24%);
+  outline-offset: 1px;
+  background: #f9f8ff;
+  box-shadow: inset 2px 0 0 var(--indigo);
+}
+
+.comment-rail-content > .comment-card[data-focused="true"] > p,
+.comment-rail-content > .comment-card[data-editing="true"] > p {
+  color: #30323a;
+}
+
+.comment-rail-content > .comment-card::before,
+.comment-rail-content > .comment-card[data-focused="true"]::before,
+.rail-comment-composer::before,
+.rail-comment-composer[data-focused="true"]::before {
+  width: 15px;
+  background: #dddceb;
+}
+
+.rail-comment-composer,
+.rail-comment-composer:hover,
+.rail-comment-composer:focus-within,
+.rail-comment-composer[data-focused="true"] {
+  z-index: 5;
+  border: 1px solid #d9d9e4;
+  background: rgb(255 255 255 / 98%);
+  box-shadow:
+    0 18px 42px rgb(42 40 84 / 12%),
+    0 2px 8px rgb(42 44 55 / 5%);
+  animation: none;
+}
+
+.rail-comment-composer textarea,
+.rail-comment-composer textarea:focus,
+.rail-comment-composer textarea:focus-visible {
+  min-height: 108px;
+  padding: 11px 12px 12px;
+  border: 0;
+  border-radius: 10px;
+  outline: 0;
+  background: #f5f6f8;
+  color: #393c46;
+  font-size: 14px;
+  line-height: 1.62;
+  box-shadow: inset 0 -2px 0 transparent;
+}
+
+.rail-comment-composer textarea:focus,
+.rail-comment-composer textarea:focus-visible {
+  background: #f7f7fa;
+  box-shadow: inset 0 -2px 0 #746ee3;
+}
+
+.comment-card-footer {
+  height: 29px;
+}
+
+.comment-card:hover .comment-card-footer,
+.comment-card:focus-within .comment-card-footer,
+.comment-card[data-focused="true"] .comment-card-footer,
+.comment-card[data-editing="true"] .comment-card-footer {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.comment-card-tools,
+.composer-footer-tools {
+  gap: 3px;
+}
+
+.rail-comment-composer .composer-actions {
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.rail-comment-composer .composer-footer-tools {
+  gap: 8px;
+}
+
+.comment-card-tools .comment-tool-button,
+.composer-footer-tools .comment-tool-button,
+.rail-comment-composer > header .comment-tool-button,
+.rail-comment-composer .add-comment-button {
+  width: 29px;
+  height: 29px;
+  min-height: 29px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #666872;
+  box-shadow: none;
+}
+
+.comment-card-tools .comment-tool-button:hover:not(:disabled),
+.composer-footer-tools .comment-tool-button:hover:not(:disabled),
+.rail-comment-composer > header .comment-tool-button:hover:not(:disabled),
+.rail-comment-composer .add-comment-button:hover:not(:disabled) {
+  border: 0;
+  background: rgb(90 85 223 / 6%);
+  color: #514cda;
+  box-shadow: none;
+}
+
+.comment-card-tools .comment-tool-button.danger:hover:not(:disabled),
+.composer-footer-tools .comment-tool-button.danger:hover:not(:disabled) {
+  border: 0;
+  background: rgb(169 77 71 / 6%);
+  color: #a14d49;
+}
+
+.rail-comment-composer .add-comment-button:disabled {
+  border: 0;
+  background: transparent;
+  color: #a7a9b1;
+  opacity: 0.62;
+}
+
+.rail-comment-composer .add-comment-button:not(:disabled) {
+  color: var(--indigo);
+}
+
+.comment-tool-button.cancel-edit,
+.comment-tool-button.confirm-edit {
+  border-color: transparent;
+  background: transparent;
+  color: #666872;
+}
+
+.comment-tool-button.cancel-edit:hover:not(:disabled),
+.comment-tool-button.confirm-edit:hover:not(:disabled) {
+  border-color: transparent;
+  background: rgb(90 85 223 / 6%);
+  color: #514cda;
+}
+
+.comment-delete-confirm {
+  min-height: 29px;
+  margin-top: 6px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: #777983;
+}
+
+.comment-delete-confirm > div {
+  gap: 12px;
+}
+
+.comment-delete-confirm button,
+.comment-delete-confirm .confirm-delete {
+  min-height: 29px;
+  padding: 0 2px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: #6f717b;
+  transition: color 120ms ease;
+}
+
+.comment-delete-confirm button:hover,
+.comment-delete-confirm button:focus-visible {
+  border: 0;
+  background: transparent;
+  color: #3f4149;
+}
+
+.comment-delete-confirm .confirm-delete {
+  color: #ad5b53;
+}
+
+.comment-delete-confirm .confirm-delete:hover,
+.comment-delete-confirm .confirm-delete:focus-visible {
+  color: #913d36;
+}
+
+.composer-delete-confirm {
+  min-height: 36px;
+  margin-top: 11px;
+}
+
+.workbench[data-canvas-mode="preview"] .review-scroll-stage {
+  overflow: hidden;
+}
+
+.workbench[data-canvas-mode="preview"] .canvas-column {
+  height: 100%;
+  min-height: 0;
+  padding: 0;
+  position: relative;
+}
+
+.side-drawer[data-drawer="handoff"] > .drawer-body {
+  min-height: 0;
+  display: grid;
+  overflow: hidden;
+}
+
+.side-drawer[data-drawer="handoff"] .handoff-panel {
+  height: 100%;
+  min-height: 0;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  overflow: hidden;
+}
+
+.side-drawer[data-drawer="handoff"] .processing-content {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.side-drawer[data-drawer="handoff"] .round-detail-panel {
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.side-drawer[data-drawer="handoff"] .timeline-panel {
+  height: 100%;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.side-drawer[data-drawer="handoff"] .round-detail-panel {
+  align-self: stretch;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+}
+
+.side-drawer[data-drawer="handoff"] .round-comment-list {
+  min-height: 0;
+  max-height: none;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.side-drawer[data-drawer="handoff"] .processing-decisions {
+  min-height: 0;
+  max-height: 112px;
+  overflow-y: auto;
+}
+
+@media (max-width: 940px) {
+  .canvas-column {
+    padding: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rail-comment-composer,
+  .comment-rail-content > .comment-card,
+  .comment-card-footer {
+    transition: none;
+    animation: none;
+  }
+}
+
