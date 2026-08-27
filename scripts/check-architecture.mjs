@@ -448,6 +448,14 @@ export async function architectureViolations() {
     path.join(PRODUCT_ROOT, "app", "components", "HtmlCanvasEditor.tsx"),
     "utf8",
   );
+  const canvasFrame = await readFile(
+    path.join(PRODUCT_ROOT, "app", "components", "html-canvas-frame.ts"),
+    "utf8",
+  );
+  const canvasNativeCommands = await readFile(
+    path.join(PRODUCT_ROOT, "app", "components", "html-canvas-native-commands.ts"),
+    "utf8",
+  );
   const firstEditGuideCard = await readFile(
     path.join(PRODUCT_ROOT, "app", "components", "FirstEditGuideCard.tsx"),
     "utf8",
@@ -1073,9 +1081,10 @@ export async function architectureViolations() {
     || !canvasEditor.includes("allow-scripts")
     || !canvasEditor.includes("EDIT_RUNTIME_FROZEN_ATTRIBUTE")
     || !canvasEditor.includes("runtimeFrameKeepsAuthorPaint")
-    || !canvasEditor.includes("hostHasAuthorPaint")
-    || !canvasEditor.includes("frame.grant.hosts.some")
+    || !canvasFrame.includes("hostHasAuthorPaint")
+    || !canvasFrame.includes("frame.grant.hosts.some")
     || canvasEditor.includes("frame.grant.hosts.every")
+    || canvasFrame.includes("frame.grant.hosts.every")
     || !canvasEditor.includes("alignPreviewSourceSurface")
     || !canvasEditor.includes("previewHostStillMounted")
     || !canvasEditor.includes('active.mode === "text-fragment"')
@@ -1086,6 +1095,7 @@ export async function architectureViolations() {
     || !canvasEditor.includes("frameReloadRequired && !settledRuntimeFrame")
     || canvasEditor.includes('img[src^="data:image/png"]')
     || /pngBase64|static-runtime-snapshot|mountFrozenRuntimeSnapshots|object-fit:\s*fill/u.test(canvasEditor)
+    || /pngBase64|static-runtime-snapshot|mountFrozenRuntimeSnapshots/u.test(canvasFrame)
   ) {
     violations.push(
       "app/components/HtmlCanvasEditor.tsx: one-shot runtime frames must execute once in the final iframe, keep real canvas/svg, and never mount PNG substitutes",
@@ -1175,6 +1185,10 @@ export async function architectureViolations() {
     path.join(PRODUCT_ROOT, "app", "components", "HtmlCanvasEditor.tsx"),
     canvasEditor,
   );
+  const canvasNativeCommandsAst = parseModule(
+    path.join(PRODUCT_ROOT, "app", "components", "html-canvas-native-commands.ts"),
+    canvasNativeCommands,
+  );
   // Structural facts only. The ordered statement sequence these blocks used to
   // assert is behavior; it is tracked as E2E behavior debt (see
   // docs/ARCHITECTURE_CONTRACT.md), not matched as source strings here.
@@ -1192,10 +1206,10 @@ export async function architectureViolations() {
   }
 
   if (
-    !hasCall(canvasEditorAst, { path: "active.session.queuePendingCommand" })
+    !hasCall(canvasNativeCommandsAst, { path: "active.session.queuePendingCommand" })
   ) {
     violations.push(
-      "app/components/HtmlCanvasEditor.tsx: native command arbitration must reject lower-priority system work before the controller queue",
+      "app/components/html-canvas-native-commands.ts: native command arbitration must reject lower-priority system work before the controller queue",
     );
   }
 

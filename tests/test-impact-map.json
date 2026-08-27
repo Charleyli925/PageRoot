@@ -838,7 +838,8 @@
     {
       "id": "v2-island-controller",
       "patterns": [
-        "^app/components/(?:HtmlCanvasEditor(?:\\.types)?|HtmlInteractionPreview|desktop-(?:runtime-snapshot|preview)-api|html-canvas-(?:dom|interaction|internal-types|page-view|preview-sync|selection|selection-chrome|style-inspector|pointer-hit|pointer-capability)|IslandEditingController|native-edit-types|native-layout-fingerprint|html-preview-sandbox|use-preview-resource-base)\\.(?:tsx|ts|js|d\\.ts)$"
+        "^app/components/(?:HtmlCanvasEditor(?:\\.types)?|HtmlInteractionPreview|desktop-(?:runtime-snapshot|preview)-api|html-canvas-(?:comment-layout|dom|frame|interaction|internal-types|native-commands|page-view|preview-sync|selection|selection-chrome|style-inspector|pointer-hit|pointer-capability)|IslandEditingController|native-edit-types|native-layout-fingerprint|html-preview-sandbox|use-preview-resource-base)\\.(?:tsx|ts|js|d\\.ts)$",
+        "^tests/html-canvas-native-commands\\.test\\.mjs$"
       ],
       "suites": [
         "typecheck",
@@ -850,6 +851,7 @@
         "tests/editable-island.test.mjs",
         "tests/source-text-map.test.mjs",
         "tests/native-layout-guard.test.mjs",
+        "tests/html-canvas-native-commands.test.mjs",
         "tests/html-preview-sandbox.test.mjs"
       ]
     },
@@ -859,12 +861,12 @@
         "^app/application/edit-author-runtime-session\\.(?:js|d\\.ts)$",
         "^app/domain/edit-runtime-contract\\.(?:js|d\\.ts)$",
         "^app/domain/runtime-snapshot-hosts\\.(?:js|d\\.ts)$",
-        "^app/components/(?:HtmlCanvasEditor(?:\\.types)?|desktop-edit-runtime-api|html-canvas-interaction|html-preview-sandbox)\\.(?:tsx|ts|js|d\\.ts)$",
+        "^app/components/(?:HtmlCanvasEditor(?:\\.types)?|desktop-edit-runtime-api|html-canvas-(?:frame|interaction)|html-preview-sandbox)\\.(?:tsx|ts|js|d\\.ts)$",
         "^app/workbench\\.tsx$",
         "^desktop/(?:edit-runtime-bootstrap|edit-runtime-protocol|edit-runtime-preparation-fence)\\.mjs$",
         "^desktop/main\\.mjs$",
         "^docs/decisions/0025-edit-direct-one-shot-runtime\\.md$",
-        "^tests/(?:edit-author-runtime-session|edit-runtime-bootstrap|edit-runtime-preparation-fence|edit-runtime-contract|edit-runtime-protocol)\\.test\\.mjs$"
+        "^tests/(?:edit-author-runtime-session|edit-runtime-bootstrap|edit-runtime-preparation-fence|edit-runtime-contract|edit-runtime-protocol|html-canvas-frame)\\.test\\.mjs$"
       ],
       "suites": [
         "typecheck",
@@ -878,6 +880,7 @@
         "tests/edit-runtime-protocol.test.mjs",
         "tests/runtime-snapshot-hosts.test.mjs",
         "tests/html-preview-sandbox.test.mjs",
+        "tests/html-canvas-frame.test.mjs",
         "tests/workspace-controller.test.mjs",
         "tests/desktop-preload-ipc.test.mjs"
       ]

@@ -502,6 +502,7 @@ test("Workbench and review surfaces route to architecture or observable runtime 
     "tests/edit-runtime-protocol.test.mjs",
     "tests/first-edit-guide-session.test.mjs",
     "tests/html-canvas-capability-hover.test.mjs",
+    "tests/html-canvas-frame.test.mjs",
     "tests/html-preview-sandbox.test.mjs",
     "tests/project-rules-workflow.test.mjs",
     "tests/project-workflow.test.mjs",
