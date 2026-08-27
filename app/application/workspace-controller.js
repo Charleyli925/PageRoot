@@ -1342,6 +1342,10 @@ export class WorkspaceController {
     return this.#requireRunWorkflow().submit(input);
   }
 
+  planRunSubmission() {
+    return this.#requireRunWorkflow().planSubmission();
+  }
+
   selectAgent(selection) {
     return this.#requireRunWorkflow().selectAgent(selection);
   }

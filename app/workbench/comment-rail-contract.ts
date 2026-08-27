@@ -1,4 +1,4 @@
-import type { ClipboardEvent, Dispatch, RefObject, SetStateAction } from "react";
+import type { ClipboardEvent, RefObject } from "react";
 
 import type {
   HtmlCanvasCommentLayoutState,
@@ -65,7 +65,6 @@ export type CommentRailModel = {
   hasUnsavedCommentEdit: boolean;
   otherTabCommentEntryCount: number;
   otherTabCommentsOpen: boolean;
-  otherTabCommentsContextKey: string;
   interactionLocked: boolean;
   unfinishedEditedComment: CommentItem | null | undefined;
   otherTabCommentGroups: OtherTabCommentGroup[];
@@ -99,9 +98,11 @@ export type CommentRailActions = {
   openGlobalCommentComposer: () => void;
   resumeCurrentComposer: () => void;
   resumeCommentEdit: (commentId: string) => void;
-  setExpandedOtherTabCommentsKey: Dispatch<SetStateAction<string>>;
-  setComposerOpen: Dispatch<SetStateAction<boolean>>;
-  setPendingDeleteCommentId: Dispatch<SetStateAction<string | null>>;
+  toggleOtherTabComments: () => void;
+  collapseOtherTabComments: () => void;
+  hideCommentComposer: () => void;
+  requestDeleteComment: (commentId: string) => void;
+  clearDeleteRequest: () => void;
   focusCommentTarget: (target: HtmlCanvasSelection, commentId: string) => void;
   startUnsafeTargetRelink: () => void;
   cancelTargetRelink: () => void;
@@ -134,94 +135,7 @@ export type CommentRailActions = {
   beginEdit: (comment: CommentItem, focusText?: boolean) => boolean;
 };
 
-export function deriveComposerState(input: {
-  relinkingTarget: string | null;
-  editingCommentId: string | null;
-  commentEditSession: CommentEditSession | null;
-  commentEditDraft: string;
-  commentEditAttachments: CommentAttachment[];
-  composerOpen: boolean;
-  draftTarget: HtmlCanvasSelection | null;
-  draft: string;
-  draftCommentId: string | null;
-  draftAttachments: CommentAttachment[];
-  hasCollapsedCommentDraft: boolean;
-}): ComposerState {
-  if (input.relinkingTarget) {
-    return { kind: "relinking", commentId: input.relinkingTarget };
-  }
-  if (input.editingCommentId && input.commentEditSession) {
-    return {
-      kind: "editing",
-      commentId: input.editingCommentId,
-      draft: {
-        text: input.commentEditDraft,
-        commentId: input.editingCommentId,
-        attachments: input.commentEditAttachments,
-        target: null,
-      },
-      session: input.commentEditSession,
-    };
-  }
-  if (input.composerOpen && input.draftTarget) {
-    return {
-      kind: "new",
-      target: input.draftTarget,
-      draft: {
-        text: input.draft,
-        commentId: input.draftCommentId,
-        attachments: input.draftAttachments,
-        target: input.draftTarget,
-      },
-    };
-  }
-  return {
-    kind: "closed",
-    collapsedDraft: input.hasCollapsedCommentDraft
-      ? {
-        text: input.draft,
-        commentId: input.draftCommentId,
-        attachments: input.draftAttachments,
-        target: input.draftTarget,
-      }
-      : null,
-  };
-}
-
-export function composerViewFields(composer: ComposerState) {
-  return {
-    composerOpen: composer.kind === "new",
-    draftTarget: composer.kind === "new"
-      ? composer.target
-      : composer.kind === "closed"
-        ? composer.collapsedDraft?.target || null
-        : null,
-    draft: composer.kind === "new"
-      ? composer.draft.text
-      : composer.kind === "closed"
-        ? composer.collapsedDraft?.text || ""
-        : composer.kind === "editing"
-          ? composer.draft.text
-          : "",
-    draftCommentId: composer.kind === "new"
-      ? composer.draft.commentId
-      : composer.kind === "closed"
-        ? composer.collapsedDraft?.commentId || null
-        : composer.kind === "editing"
-          ? composer.commentId
-          : null,
-    draftAttachments: composer.kind === "new"
-      ? composer.draft.attachments
-      : composer.kind === "closed"
-        ? composer.collapsedDraft?.attachments || []
-        : composer.kind === "editing"
-          ? composer.draft.attachments
-          : [],
-    hasCollapsedCommentDraft: composer.kind === "closed" && Boolean(composer.collapsedDraft),
-    editingCommentId: composer.kind === "editing" ? composer.commentId : null,
-    commentEditSession: composer.kind === "editing" ? composer.session : null,
-    commentEditDraft: composer.kind === "editing" ? composer.draft.text : "",
-    commentEditAttachments: composer.kind === "editing" ? composer.draft.attachments : [],
-    relinkingTarget: composer.kind === "relinking" ? composer.commentId : null,
-  };
-}
+export {
+  composerViewFields,
+  deriveComposerState,
+} from "./comment-rail-state.js";

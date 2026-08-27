@@ -1,7 +1,8 @@
 "use client";
 
-import type {
-  CSSProperties,
+import {
+  memo,
+  type CSSProperties,
 } from "react";
 import { ArrowDownIcon } from "@phosphor-icons/react/dist/csr/ArrowDown";
 import { ArrowUpIcon } from "@phosphor-icons/react/dist/csr/ArrowUp";
@@ -27,7 +28,7 @@ export type HtmlCanvasSelectionChromeProps = {
   actions: SelectionChromeActions;
 };
 
-export function HtmlCanvasSelectionChrome({
+export const HtmlCanvasSelectionChrome = memo(function HtmlCanvasSelectionChrome({
   model,
   actions,
 }: HtmlCanvasSelectionChromeProps) {
@@ -476,4 +477,4 @@ export function HtmlCanvasSelectionChrome({
       ) : null}
     </>
   );
-}
+});

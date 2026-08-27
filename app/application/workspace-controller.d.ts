@@ -2,7 +2,6 @@ import type { BridgeClient } from "./bridge-client.js";
 import type {
   AttachmentBinaryPort,
   CommentWorkflowOutcome,
-  CommentWorkflowSnapshot,
 } from "./comment-workflow.js";
 import type { CommentWorkflowCodecs } from "./comment-workflow-codecs.js";
 import type {
@@ -11,22 +10,14 @@ import type {
   DocumentWorkflowRecoveryStore,
 } from "./document-workflow.js";
 import type { DocumentWorkflowCodecs } from "./document-workflow-codecs.js";
-import type { CommentSession, CommentSessionSnapshot } from "./comment-session.js";
-import type {
-  ConversationContext,
-  ConversationSession,
-  ConversationSessionSnapshot,
-} from "./conversation-session.js";
+import type { CommentSession } from "./comment-session.js";
+import type { ConversationSession } from "./conversation-session.js";
 import type {
   DocumentSession,
-  DocumentSessionSnapshot,
   PersistedBoundaryResult,
 } from "./document-session.js";
 import type { DraftSession } from "./draft-session.js";
-import type {
-  EditAuthorRuntimePort,
-  EditAuthorRuntimeSnapshot,
-} from "./edit-author-runtime-session.js";
+import type { EditAuthorRuntimePort } from "./edit-author-runtime-session.js";
 import type {
   FirstEditGuideEligibilityInput,
   FirstEditGuidePort,
@@ -35,109 +26,60 @@ import type {
 import type {
   ProjectContext,
   ProjectSession,
-  ProjectSessionSnapshot,
 } from "./project-session.js";
 import type {
   ProjectRulesPresentationPort,
   ProjectRulesScheduler,
   ProjectRulesWorkflowOutcome,
 } from "./project-rules-workflow.js";
-import type { ProjectRulesSnapshot } from "./project-rules-session.js";
 import type { RecoveryStore } from "./recovery-store.js";
-import type { RunSessionSnapshot } from "./run-session.js";
 import type { SourceHistorySession } from "./source-history-session.js";
-import type { VersionSession, VersionSessionSnapshot } from "./version-session.js";
+import type { VersionSession } from "./version-session.js";
 import type {
   ProjectWorkflowConstruction,
   ProjectWorkflowEvent,
   ProjectWorkflowOutcome,
   ProjectWorkflowProject,
-  ProjectWorkflowSnapshot,
 } from "./project-workflow.js";
 import type {
   RunWorkflowCodecs,
   RunWorkflowEvent,
   RunWorkflowOutcome,
-  RunWorkflowSnapshot,
 } from "./run-workflow.js";
 import type {
   VersionWorkflowCanvasPort,
   VersionWorkflowCodecs,
   VersionWorkflowEvent,
   VersionWorkflowOutcome,
-  VersionReviewCandidate,
-  VersionWorkflowSnapshot,
 } from "./version-workflow.js";
 import type {
   WorkbenchTabStatus,
   WorkbenchTabsSession,
   WorkbenchTabsSnapshot,
 } from "./workbench-tabs-session.js";
-import type {
-  WorkbenchNavigationSession,
-  WorkbenchNavigationSnapshot,
-} from "./workbench-navigation-session.js";
+import type { WorkbenchNavigationSession } from "./workbench-navigation-session.js";
 import type { WorkbenchNavigationOutcome } from "./workbench-navigation-workflow.js";
 import type { BrowserDocumentSession } from "./browser-document-session.js";
+import type { DocumentSurfaceCacheSession } from "./document-surface-cache-session.js";
+import type { WorkbenchTabsPersistenceCoordinator } from "./workbench-tabs-persistence-coordinator.js";
 import type {
-  DocumentSurfaceCacheSession,
-  DocumentSurfaceCacheSnapshot,
-} from "./document-surface-cache-session.js";
-import type {
-  WorkbenchTabsPersistenceCoordinator,
-  WorkbenchTabsPersistenceSnapshot,
-} from "./workbench-tabs-persistence-coordinator.js";
+  CommandOutcome,
+} from "./workspace-controller-capabilities.js";
 
-export type OperationIdentity = Readonly<{
-  operationId: string;
-  epoch: number;
-  sourcePath: string;
-  expectedSourceSha256: string | null;
-}>;
-
-export type RecoveryIntent = Readonly<{
-  kind: string;
-  operationId?: string;
-}>;
-
-export type CommandOutcome<T> =
-  | Readonly<{ status: "succeeded"; value: T }>
-  | Readonly<{
-      status: "blocked";
-      code: string;
-      reason: string;
-      recovery?: RecoveryIntent;
-    }>
-  | Readonly<{ status: "rejected"; code: string; reason: string }>
-  | Readonly<{ status: "unknown"; operationId: string; reason: string }>
-  | Readonly<{ status: "stale"; identity: OperationIdentity }>;
-
-export type WorkspaceControllerSnapshot = Readonly<{
-  registration: Readonly<{
-    phase: "idle" | "registering";
-    operationId: string | null;
-    identity: OperationIdentity | null;
-    outcome: CommandOutcome<ProjectContext> | null;
-  }>;
-  projectSession: ProjectSessionSnapshot | null;
-  document: DocumentSessionSnapshot | null;
-  commentSession: CommentSessionSnapshot | null;
-  runSession: RunSessionSnapshot | null;
-  versionSession: VersionSessionSnapshot | null;
-  editRuntime: EditAuthorRuntimeSnapshot | null;
-  firstEditGuide: FirstEditGuideSnapshot | null;
-  comment: CommentWorkflowSnapshot | null;
-  projectRules: ProjectRulesSnapshot | null;
-  project: ProjectWorkflowSnapshot | null;
-  run: RunWorkflowSnapshot | null;
-  version: VersionWorkflowSnapshot | null;
-  conversation: ConversationSessionSnapshot | null;
-  workbenchTabs: WorkbenchTabsSnapshot | null;
-  documentSurfaceCache: DocumentSurfaceCacheSnapshot | null;
-  workbenchTabsReady: boolean;
-  workbenchNavigation: WorkbenchNavigationSnapshot | null;
-  workbenchTabsPersistence: WorkbenchTabsPersistenceSnapshot | null;
-}>;
+export type {
+  AgentSelectionControllerCapability,
+  AiConversationControllerCapability,
+  ConversationControllerCapability,
+  CommandOutcome,
+  DocumentSurfaceControllerCapability,
+  NavigationWorkflowControllerCapability,
+  OperationIdentity,
+  RecoveryIntent,
+  ReviewPreparationControllerCapability,
+  RunSubmissionControllerCapability,
+  WorkspaceControllerSnapshot,
+  WorkspaceSnapshotReader,
+} from "./workspace-controller-capabilities.js";
 
 export type WorkspaceEvent =
   | Readonly<{
@@ -434,9 +376,9 @@ export function createRuntimeWorkspaceController(
 // production renderer must use createRuntimeWorkspaceController instead.
 export class WorkspaceController {
   constructor(options: WorkspaceControllerConstruction);
-  getSnapshot(): WorkspaceControllerSnapshot;
+  getSnapshot(): import("./workspace-controller-capabilities.js").WorkspaceControllerSnapshot;
   openConversation(
-    context: ConversationContext | null,
+    context: import("./conversation-session.js").ConversationContext | null,
   ): Promise<unknown>;
   closeConversation(): void;
   updateConversationDraftText(text: string): void;
@@ -466,7 +408,9 @@ export class WorkspaceController {
     presentation?: Readonly<Record<string, unknown>>,
   ): import("./document-surface-cache-session.js").DocumentSurfaceCacheEntry | null;
   subscribe(
-    listener: (snapshot: WorkspaceControllerSnapshot) => void,
+    listener: (
+      snapshot: import("./workspace-controller-capabilities.js").WorkspaceControllerSnapshot,
+    ) => void,
   ): () => void;
   subscribeEvents(listener: (event: WorkspaceEvent) => void): () => void;
   readonly projectHydrating: boolean;
@@ -618,6 +562,7 @@ export class WorkspaceController {
     deadlineAt?: number;
     deliveryMode?: "clipboard" | "managed-agent" | string;
   }): Promise<RunWorkflowOutcome>;
+  planRunSubmission(): import("./run/submit-plan.js").RunSubmitPlan;
   selectAgent(
     selection: import("../domain/agent-provider-state.js").AgentSelection,
   ): import("../domain/agent-provider-state.js").AgentSelection;
@@ -654,7 +599,9 @@ export class WorkspaceController {
   }): Promise<RunWorkflowOutcome>;
   prepareReviewCandidate(input: {
     run?: import("../domain/run-lifecycle.js").ActiveRun | null;
-  }): Promise<VersionWorkflowOutcome<VersionReviewCandidate>>;
+  }): Promise<VersionWorkflowOutcome<
+    import("./version-workflow.js").VersionReviewCandidate
+  >>;
   activateReadyVersion(input: {
     run?: import("../domain/run-lifecycle.js").ActiveRun | null;
     reviewLease?: Readonly<{ operationKey: string; beforeHtml: string }> | null;

@@ -343,12 +343,10 @@ export function annotateGatePlan(plan, { map, inventoryFiles = [], tagCounts = {
 export function compactGatePlan(plan) {
   const capabilityContext = plan.capabilityContext || {
     domains: [],
-    entryInterfaces: [],
+    defaultLevel: "contract",
     owners: [],
-    implementationFiles: [],
-    focusedTests: [],
-    requiredDocs: [],
-    estimatedContextBytes: 0,
+    contract: { files: [], estimatedBytes: 0 },
+    implementation: { files: [], estimatedBytes: 0 },
   };
   return {
     changedFiles: plan.changedFiles,
@@ -366,12 +364,16 @@ export function compactGatePlan(plan) {
     })),
     capabilityContext: {
       domains: capabilityContext.domains || [],
-      entryInterfaces: capabilityContext.entryInterfaces || [],
+      defaultLevel: capabilityContext.defaultLevel || "contract",
       owners: capabilityContext.owners || [],
-      implementationFiles: capabilityContext.implementationFiles || [],
-      focusedTests: capabilityContext.focusedTests || [],
-      requiredDocs: capabilityContext.requiredDocs || [],
-      estimatedContextBytes: Number(capabilityContext.estimatedContextBytes) || 0,
+      contract: {
+        files: capabilityContext.contract?.files || [],
+        estimatedBytes: Number(capabilityContext.contract?.estimatedBytes) || 0,
+      },
+      implementation: {
+        files: capabilityContext.implementation?.files || [],
+        estimatedBytes: Number(capabilityContext.implementation?.estimatedBytes) || 0,
+      },
     },
   };
 }

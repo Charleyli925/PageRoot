@@ -36,6 +36,10 @@ test("Qoder compatibility actions stay pinned to the Qoder workflow", () => {
     source,
     /copyQoderGuidance\(input\) \{\s+return this\.#requireRunWorkflow\(\)\.copyQoderGuidance\(input\);\s+\}/u,
   );
+  assert.match(
+    source,
+    /planRunSubmission\(\) \{\s+return this\.#requireRunWorkflow\(\)\.planSubmission\(\);\s+\}/u,
+  );
 });
 
 test("workspace close freezes navigation before awaiting and pins the final tabs revision", () => {

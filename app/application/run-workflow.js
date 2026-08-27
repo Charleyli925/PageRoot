@@ -1,6 +1,7 @@
 import { isBridgeRequestError } from "./bridge-client.js";
 import { planRunSubmit, planRunSubmitEntry } from "./run/submit-plan.js";
 import { createRunWorkflowCodecs } from "./run-workflow-codecs.js";
+import { verifyProjectContext } from "./verified-project-context.js";
 import { AgentCatalogState } from "./agent-provider-catalog.js";
 import {
   CLIPBOARD_DELIVERY_MODE,
@@ -584,6 +585,10 @@ export class RunWorkflow {
     }
   }
 
+  planSubmission() {
+    return this.#captureSubmissionPlan().plan;
+  }
+
   async submit({
     projectName = "未命名页面",
     previousVersionId = this.#versionSession.snapshot.latestVersionId,
@@ -606,28 +611,11 @@ export class RunWorkflow {
     } catch {
       return rejected("RUN_DELIVERY_MODE_INVALID", "选择的 Agent 交接方式无效。");
     }
-    const sourcePath = this.#projectSession.sourcePath;
-    const context = copyContext(this.#projectSession.context);
-    const submitPlan = planRunSubmit({
-      sourcePath,
-      context,
-      submissionPending: this.#runSession.submissionPending,
-      activeLocked: this.#runSession.activeLocked,
-      hasComposerDraft: Boolean(
-        this.#commentSession.composerTarget
-        && (
-          this.#commentSession.composerDraft.trim()
-          || this.#commentSession.composerAttachments.length > 0
-        )
-      ),
-      hasDirtyEdit: Boolean(
-        this.#commentSession.editSession
-        && this.#codecs.commentEditSessionHasChanges(this.#commentSession.editSession)
-      ),
-    });
+    const { context, plan: submitPlan } = this.#captureSubmissionPlan();
     if (submitPlan.kind === "reject") {
       return blocked(submitPlan.code, submitPlan.reason);
     }
+    const sourcePath = context.sourcePath;
     const committed = this.#canvasPort.fencePendingEdit({
       resumeEditing: false,
       trigger: "ai",
@@ -671,12 +659,11 @@ export class RunWorkflow {
         sourcePath: context.sourcePath,
         expectedSourceSha256: this.#documentSession.sourceSha256,
       });
+      if (!this.#isCurrentContext(context)) return stale(context);
       if (registered?.status !== "succeeded") return registered || rejected(
         "RUN_SUBMISSION_REGISTRATION_INVALID",
         "项目资料初始化没有返回可验证结果。",
       );
-      if (!this.#isCurrentContext(context)) return stale(context);
-
       comments = this.#commentsForSubmission();
       const registeredCommentOutcome = this.#validateComments(comments);
       if (registeredCommentOutcome) return registeredCommentOutcome;
@@ -698,7 +685,8 @@ export class RunWorkflow {
         return stale(context);
       }
       const frozenHash = await this.#hashPort.sha256(String(frozen.html || ""));
-      if (frozenHash !== frozen.sourceSha256 || !this.#isCurrentContext(context)) {
+      const hashContextCurrent = this.#isCurrentContext(context);
+      if (frozenHash !== frozen.sourceSha256 || !hashContextCurrent) {
         this.#canvasPort.unlock();
         return rejected(
           "RUN_SUBMISSION_FREEZE_HASH_MISMATCH",
@@ -744,6 +732,12 @@ export class RunWorkflow {
       });
 
       const drained = await this.#drain({ boundary: "submit", deadlineAt });
+      if (!this.#isCurrentContext(context)) {
+        throw responseError(
+          "RUN_SUBMISSION_CONTEXT_STALE",
+          "冻结边界内的项目身份已经变化，本轮不会发送。",
+        );
+      }
       if (
         !drained?.ok
         || this.#documentSession.lastPersistedRevision !== freezeCutoffRevision
@@ -814,8 +808,20 @@ export class RunWorkflow {
       const operationId = this.#codecs.operationKey(pendingRun);
       let dispatched = false;
       try {
+        if (!this.#isCurrentContext(context)) {
+          throw responseError(
+            "RUN_SUBMISSION_CONTEXT_STALE",
+            "建立 Request 前项目身份已经变化，本轮不会发送。",
+          );
+        }
         dispatched = true;
         const payload = await this.#bridgeClient.createRequest(request);
+        if (!this.#isCurrentContext(context)) {
+          throw responseError(
+            "RUN_SUBMISSION_CONTEXT_STALE",
+            "Request 返回时项目身份已经变化，正在只读核对结果。",
+          );
+        }
         const run = this.#runFromRequestPayload(payload);
         if (!run || !this.#runMatchesContext(run, context)) {
           throw responseError(
@@ -852,6 +858,7 @@ export class RunWorkflow {
           sourcePath: context.sourcePath,
           reserveRecoveredAgentStart: frozenAgentDelivery.mode === MANAGED_AGENT_MODE,
         });
+        if (!this.#isCurrentContext(context)) return stale(context);
         if (reconciled.status === "succeeded") {
           durableRun = reconciled.value.run || null;
           reservedAgentStartKey = reconciled.value.reservedAgentStartKey || null;
@@ -891,8 +898,10 @@ export class RunWorkflow {
           preflightId: agentPreflight.preflightId,
           agentStartReserved: true,
         });
+        if (!this.#isCurrentContext(context)) return stale(context);
       } else if (durableRun.handoffMessage) {
         await this.copyHandoff({ run: durableRun });
+        if (!this.#isCurrentContext(context)) return stale(context);
       }
       return succeeded({ run: durableRun });
     } catch (cause) {
@@ -1737,12 +1746,44 @@ export class RunWorkflow {
     );
   }
 
-  #isCurrentContext(context) {
-    return Boolean(
-      !this.#disposed
-      && context
-      && this.#projectSession.matches(context),
+  #captureSubmissionPlan() {
+    const entryPlan = planRunSubmitEntry({ disposed: this.#disposed });
+    if (entryPlan.kind === "reject") {
+      return Object.freeze({ context: null, plan: entryPlan });
+    }
+    const context = verifyProjectContext(
+      this.#projectSession.context,
+      this.#projectSession,
+      {
+        disposed: this.#disposed,
+        sameSourcePath: this.#codecs.sameSourcePath,
+      },
     );
+    const plan = planRunSubmit({
+      sourcePath: this.#projectSession.sourcePath,
+      context,
+      submissionPending: this.#runSession.submissionPending,
+      activeLocked: this.#runSession.activeLocked,
+      hasComposerDraft: Boolean(
+        this.#commentSession.composerTarget
+        && (
+          this.#commentSession.composerDraft.trim()
+          || this.#commentSession.composerAttachments.length > 0
+        )
+      ),
+      hasDirtyEdit: Boolean(
+        this.#commentSession.editSession
+        && this.#codecs.commentEditSessionHasChanges(this.#commentSession.editSession)
+      ),
+    });
+    return Object.freeze({ context, plan });
+  }
+
+  #isCurrentContext(context) {
+    return Boolean(verifyProjectContext(context, this.#projectSession, {
+      disposed: this.#disposed,
+      sameSourcePath: this.#codecs.sameSourcePath,
+    }));
   }
 
   #isCurrentRun(run) {

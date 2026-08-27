@@ -348,6 +348,73 @@ test("submit freezes the exact source, creates one Request, and confirms handoff
   assert.equal(harness.calls.createRequest.length, 1);
 });
 
+test("submission planning is side-effect free and derives current comment authority", () => {
+  const harness = createHarness();
+
+  const ready = harness.workflow.planSubmission();
+  assert.deepEqual(ready, { kind: "ready" });
+  assert.equal(Object.isFrozen(ready), true);
+  assert.equal(harness.calls.fence, 0);
+  assert.equal(harness.calls.freeze, 0);
+  assert.equal(harness.calls.createRequest.length, 0);
+
+  harness.commentSession.update({
+    composerTarget: { id: "target_draft" },
+    composerDraft: "unsaved",
+  });
+  assert.equal(
+    harness.workflow.planSubmission().code,
+    "RUN_SUBMISSION_COMMENT_DRAFT",
+  );
+  harness.commentSession.update({
+    composerTarget: null,
+    composerDraft: "",
+    editSession: { commentId: "comment_001", dirty: true },
+  });
+  assert.equal(
+    harness.workflow.planSubmission().code,
+    "RUN_SUBMISSION_COMMENT_EDIT",
+  );
+  assert.equal(harness.calls.fence, 0);
+  assert.equal(harness.calls.createRequest.length, 0);
+  harness.workflow.dispose();
+});
+
+test("submit keeps its frozen context and revalidates after the drain await", async () => {
+  const drainEntered = deferred();
+  const drainResult = deferred();
+  const harness = createHarness({
+    drain: async () => {
+      drainEntered.resolve();
+      return drainResult.promise;
+    },
+  });
+  const events = [];
+  harness.workflow.subscribeEvents((event) => events.push(event));
+
+  const submitted = harness.workflow.submit();
+  await drainEntered.promise;
+  harness.projectSession.openLocator(SOURCE_B);
+  harness.projectSession.register({
+    epoch: harness.projectSession.epoch,
+    sourcePath: SOURCE_B,
+    projectId: "project_b",
+    documentId: "document_b",
+  });
+  drainResult.resolve({ ok: true });
+
+  const outcome = await submitted;
+  assert.equal(outcome.status, "rejected");
+  assert.equal(outcome.code, "RUN_SUBMISSION_CONTEXT_STALE");
+  assert.equal(harness.calls.createRequest.length, 0);
+  assert.equal(
+    events.find((event) => event.type === "run-submission-started")?.context.sourcePath,
+    SOURCE_A,
+  );
+  assert.equal(harness.projectSession.sourcePath, SOURCE_B);
+  harness.workflow.dispose();
+});
+
 test("an unknown create Request response only reads workspace authority and never replays POST", async () => {
   const durable = runRecord();
   let createCount = 0;

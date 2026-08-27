@@ -1,7 +1,7 @@
 import type { WorkbenchNavigationSession, WorkbenchNavigationReceipt } from "./workbench-navigation-session.js";
 import type { WorkbenchTabsSession, WorkbenchTabStatus } from "./workbench-tabs-session.js";
 import type { ProjectWorkflow, ProjectWorkflowOutcome, ProjectWorkflowProject } from "./project-workflow.js";
-import type { WorkspaceController } from "./workspace-controller.js";
+import type { NavigationWorkflowControllerCapability } from "./workspace-controller-capabilities.js";
 import type { BrowserDocumentSession } from "./browser-document-session.js";
 import type { WorkbenchTabsPersistenceCoordinator } from "./workbench-tabs-persistence-coordinator.js";
 import type { DocumentSurfaceCacheSession } from "./document-surface-cache-session.js";
@@ -21,7 +21,7 @@ export class WorkbenchNavigationWorkflow {
     tabs: WorkbenchTabsSession;
     surfaceCache?: DocumentSurfaceCacheSession | null;
     projectWorkflow: ProjectWorkflow;
-    controller: WorkspaceController;
+    controller: NavigationWorkflowControllerCapability;
     browserDocuments?: BrowserDocumentSession | null;
     tabsPersistence?: WorkbenchTabsPersistenceCoordinator | null;
     clock?: Readonly<{ now(): number }>;

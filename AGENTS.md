@@ -38,6 +38,12 @@ Local gates: `npm run gate:edit` while editing; `npm run task:finish` before pub
 - QoderWork handoff remains clipboard-only unless the user explicitly authorizes a different product boundary. The only currently authorized automatic path is ADR 0032's per-task `trusted-local-agent-v1` Qoder ACP driver.
 - Tests and fixtures use synthetic data only. Never commit real user HTML, attachments, project records, credentials, personal paths, logs or generated binaries.
 
+1. Keep the architecture small, explicit, and internally consistent; prefer the smallest coherent solution and avoid speculative abstractions, compatibility layers, or parallel flows.
+2. Give every module and piece of mutable state one clear responsibility and owner, with predictable dependency direction and minimal hidden coupling.
+3. Optimize for local reasoning through clear names, types, contracts, visible control flow, predictable file locations, and comments that explain why.
+4. Keep changes narrowly scoped, extend existing patterns instead of creating parallel implementations, and avoid unrelated refactoring.
+5. Verify changed behavior with focused tests and update architecture documentation whenever ownership, interfaces, lifecycle, or data flow changes.
+
 ## Progressive disclosure
 
 Read only the documents needed for the task. Start architecture work at

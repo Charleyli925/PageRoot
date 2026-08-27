@@ -18,8 +18,11 @@ export function loadCapabilityContextMap(mapPath = CAPABILITY_CONTEXT_MAP_PATH) 
   if (!map || typeof map !== "object" || Array.isArray(map)) {
     throw new TypeError("Capability-context map must be an object.");
   }
-  if (map.schemaVersion !== 1) {
+  if (map.schemaVersion !== 2) {
     throw new Error("Unsupported capability-context schemaVersion.");
+  }
+  if (map.defaultLevel !== "contract") {
+    throw new Error("Capability-context schema v2 must be contract-first.");
   }
   if (!Array.isArray(map.domains) || map.domains.length === 0) {
     throw new Error("Capability-context map needs domains.");
@@ -39,13 +42,24 @@ export function loadCapabilityContextMap(mapPath = CAPABILITY_CONTEXT_MAP_PATH) 
 export function emptyCapabilityContext() {
   return {
     domains: [],
-    entryInterfaces: [],
+    defaultLevel: "contract",
     owners: [],
-    implementationFiles: [],
-    focusedTests: [],
-    requiredDocs: [],
-    estimatedContextBytes: 0,
+    contract: { files: [], estimatedBytes: 0 },
+    implementation: { files: [], estimatedBytes: 0 },
   };
+}
+
+function estimatedBytes(files, productRoot) {
+  const root = path.resolve(productRoot);
+  const rootPrefix = `${root}${path.sep}`;
+  let total = 0;
+  for (const file of files) {
+    const absolute = path.resolve(root, file);
+    if (absolute !== root && !absolute.startsWith(rootPrefix)) continue;
+    if (!existsSync(absolute)) continue;
+    total += statSync(absolute).size;
+  }
+  return total;
 }
 
 export function selectCapabilityContext({
@@ -68,28 +82,23 @@ export function selectCapabilityContext({
   const implementationFiles = union("implementationFiles");
   const focusedTests = union("focusedTests");
   const requiredDocs = union("requiredDocs");
-  const readingSet = uniqueSorted([
+  const implementation = uniqueSorted([
     ...entryInterfaces,
     ...implementationFiles,
     ...focusedTests,
     ...requiredDocs,
   ]);
-  const root = path.resolve(productRoot);
-  const rootPrefix = `${root}${path.sep}`;
-  let estimatedContextBytes = 0;
-  for (const file of readingSet) {
-    const absolute = path.resolve(root, file);
-    if (absolute !== root && !absolute.startsWith(rootPrefix)) continue;
-    if (!existsSync(absolute)) continue;
-    estimatedContextBytes += statSync(absolute).size;
-  }
   return {
     domains: matched.map((domain) => domain.id),
-    entryInterfaces,
+    defaultLevel: map.defaultLevel,
     owners,
-    implementationFiles,
-    focusedTests,
-    requiredDocs,
-    estimatedContextBytes,
+    contract: {
+      files: entryInterfaces,
+      estimatedBytes: estimatedBytes(entryInterfaces, productRoot),
+    },
+    implementation: {
+      files: implementation,
+      estimatedBytes: estimatedBytes(implementation, productRoot),
+    },
   };
 }

@@ -112,63 +112,18 @@ export type SelectionChromeActions = {
   onToggleSpacingMenu: () => void;
 };
 
-export function deriveCapabilityHoverState(input: {
-  enabled: boolean;
-  hoverChrome: CanvasCapabilityHoverSnapshot;
-  hoverTargetIsSelected: boolean;
-  isEditing: boolean;
-  interactionLocked: boolean;
-  outlineStyle?: CSSProperties;
-  hintStyle?: CSSProperties;
-  hintPlacement?: CanvasHoverHintPlacement;
-}): CapabilityHoverState {
-  if (
-    !input.enabled
-    || !input.hoverChrome.outline
-    || !input.hoverChrome.capability
-    || input.hoverTargetIsSelected
-    || input.isEditing
-    || input.interactionLocked
-    || !input.outlineStyle
-  ) {
-    return { kind: "off" };
-  }
-  return {
-    kind: "preview",
-    capability: input.hoverChrome.capability,
-    outlineStyle: input.outlineStyle,
-    hint: input.hoverChrome.hint && input.hintStyle && input.hintPlacement
-      ? {
-        style: input.hintStyle,
-        placement: input.hintPlacement,
-      }
-      : null,
-  };
-}
+export type SelectionChromeProjection = Readonly<{
+  toolbarStyle?: CSSProperties;
+  selectedOutlineStyle?: CSSProperties;
+  hoverOutlineStyle?: CSSProperties;
+  hoverHintStyle?: CSSProperties;
+  hoverHintPlacement?: CanvasHoverHintPlacement;
+  selectedPagePresentationAction: PagePresentationAction | null;
+}>;
 
-export function deriveSelectionOverlay(input: {
-  selection: HtmlCanvasSelection | null;
-  outlineStyle?: CSSProperties;
-}): SelectionOverlayState {
-  if (!input.selection) return { kind: "none" };
-  return {
-    kind: "target",
-    selection: input.selection,
-    outlineStyle: input.outlineStyle,
-  };
-}
-
-export function selectionChromeViewFields(model: SelectionChromeModel) {
-  const hover = model.hover;
-  const overlay = model.overlay;
-  return {
-    showHoverOutline: hover.kind === "preview",
-    showHoverHint: hover.kind === "preview" && Boolean(hover.hint),
-    hoverOutlineStyle: hover.kind === "preview" ? hover.outlineStyle : undefined,
-    hoverHintStyle: hover.kind === "preview" ? hover.hint?.style : undefined,
-    hoverHintPlacement: hover.kind === "preview" ? hover.hint?.placement : undefined,
-    hoverCapability: hover.kind === "preview" ? hover.capability : null,
-    selection: overlay.kind === "target" ? overlay.selection : null,
-    selectedOutlineStyle: overlay.kind === "target" ? overlay.outlineStyle : undefined,
-  };
-}
+export {
+  deriveCapabilityHoverState,
+  deriveSelectionOverlay,
+  selectionChromeViewFields,
+  stabilizeSelectionChromeProjection,
+} from "./html-canvas-selection-chrome-state.js";
