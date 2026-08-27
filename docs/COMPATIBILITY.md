@@ -48,11 +48,11 @@ level, not per file: `runtime-state.json` is preserved at its root and in
   the identity the writer just computed and pin the schema version forever. The
   stored Draft envelope had the reverse order and was corrected.
 - Proof: `tests/source-history.test.mjs`, `tests/draft-service.test.mjs` and
-  `tests/project-file-repository.test.mjs` each assert the round trip and each
+  `tests/project-working-copy-save.test.mjs` each assert the round trip and each
   fails without the corresponding production change.
   `tests/source-history.test.mjs` also asserts that an unknown member never
   rescues an invalid required member, and
-  `tests/project-file-repository.test.mjs` pins both the Draft envelope defect
+  `tests/project-working-copy-save.test.mjs` pins both the Draft envelope defect
   and the authored `fileIdentity` boundary.
 - Direction: this protects builds from this change onward only. A build released
   before it still refuses or discards a newer member. Any release that adds a
@@ -123,7 +123,7 @@ level, not per file: `runtime-state.json` is preserved at its root and in
 - Disk persistence read/write: none. A refused Registry keeps its exact bytes,
   and Project, Working Copy, Version, Draft, comment, attachment and HTML are
   untouched, so re-importing rebuilds the Registry.
-- Historical proof: `tests/project-file-repository.test.mjs` asserts that an
+- Historical proof: `tests/project-registry-and-open.test.mjs` asserts that an
   unrecognized shape fails closed across read, classify and import without
   changing the Registry bytes, the managed HTML, or creating a backup directory.
 - Decision: `docs/decisions/0028-unrecognized-registry-fails-closed.md`
@@ -140,7 +140,7 @@ level, not per file: `runtime-state.json` is preserved at its root and in
   rewriting timestamps or bytes merely because it was classified.
 - Decoder and canonical output: none. Missing pairs stay unbound and are not
   guessed from filename or Hash. Duplicate keys fail closed.
-- Historical proof: `tests/project-file-repository.test.mjs` and
+- Historical proof: `tests/project-registry-and-open.test.mjs` and
   `tests/project-file-bridge.test.mjs`.
 - Disk persistence read/write: read-only for classification; writes occur only
   on a successful new import under the current Registry write lock.

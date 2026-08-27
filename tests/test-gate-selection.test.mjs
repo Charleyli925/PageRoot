@@ -5,7 +5,10 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 import {
+  annotateGatePlan,
   assertFullyAutomatedPlan,
+  compactGatePlan,
+  GATE_WIDTH_LIMITS,
   omitMissingNodeTests,
   selectGatePlan,
   validateImpactMap,
@@ -26,7 +29,7 @@ const TASK_OWNER_CASES = [
   {
     file: "app/lib/comment-rail-layout.js",
     nodeTests: ["tests/comment-rail-layout.test.mjs"],
-    suites: ["typecheck", "lint", "node-targeted", "build-web", "browser-smoke"],
+    suites: ["typecheck", "lint", "node-targeted", "build-web", "browser-comments-smoke"],
     directOwners: ["tests/comment-rail-layout.test.mjs"],
     unrelatedOwners: ["tests/application-update.test.mjs", "tests/notification-policy.test.mjs"],
   },
@@ -49,9 +52,9 @@ const TASK_OWNER_CASES = [
       "lint",
       "node-targeted",
       "build-web",
-      "browser-smoke",
+      "browser-review-smoke",
       "build-desktop",
-      "ai-smoke",
+      "ai-review-smoke",
     ],
     directOwners: ["tests/review-text-diff.test.mjs", "tests/runtime-visual-contract.test.mjs"],
     unrelatedOwners: [
@@ -79,9 +82,9 @@ const TASK_OWNER_CASES = [
       "lint",
       "node-targeted",
       "build-web",
-      "browser-smoke",
+      "browser-review-smoke",
       "build-desktop",
-      "ai-smoke",
+      "ai-review-smoke",
     ],
     directOwners: ["tests/review-text-diff.test.mjs", "tests/runtime-visual-contract.test.mjs"],
     unrelatedOwners: [
@@ -93,7 +96,7 @@ const TASK_OWNER_CASES = [
   {
     file: "app/components/NoticeBar.tsx",
     nodeTests: ["tests/notification-policy.test.mjs"],
-    suites: ["typecheck", "lint", "node-targeted", "build-web", "browser-smoke"],
+    suites: ["typecheck", "lint", "node-targeted", "build-web", "browser-notification-smoke"],
     directOwners: ["tests/notification-policy.test.mjs"],
     unrelatedOwners: ["tests/architecture-boundaries.test.mjs", "tests/html-preview-sandbox.test.mjs"],
   },
@@ -112,7 +115,7 @@ const TASK_OWNER_CASES = [
   {
     file: "desktop/application-update.mjs",
     nodeTests: ["tests/application-update.test.mjs"],
-    suites: ["typecheck", "lint", "node-targeted", "build-desktop", "electron-smoke"],
+    suites: ["typecheck", "lint", "node-targeted", "build-desktop", "electron-editing-smoke"],
     directOwners: ["tests/application-update.test.mjs"],
     unrelatedOwners: [
       "tests/desktop-file-writer.test.mjs",
@@ -133,8 +136,8 @@ const TASK_OWNER_CASES = [
       "lint",
       "node-targeted",
       "build-desktop",
-      "electron-smoke",
-      "ai-smoke",
+      "electron-editing-smoke",
+      "ai-review-smoke",
     ],
     directOwners: ["tests/review-runtime-capture-owner.test.mjs"],
     unrelatedOwners: ["tests/application-update.test.mjs", "tests/source-rename.test.mjs"],
@@ -155,32 +158,44 @@ const TASK_OWNER_CASES = [
       "tests/user-supplement.test.mjs",
       "tests/workspace-bridge.test.mjs",
     ],
-    suites: ["typecheck", "lint", "node-targeted", "build-desktop", "ai-smoke"],
+    suites: ["typecheck", "lint", "node-targeted", "build-desktop", "ai-run-lifecycle-smoke"],
     directOwners: ["tests/workspace-bridge.test.mjs"],
     unrelatedOwners: ["tests/desktop-package.test.mjs", "tests/review-runtime-capture-owner.test.mjs"],
   },
   {
     file: "scripts/project-file-repository.mjs",
     nodeTests: [
+      "tests/project-ai-task-projection.test.mjs",
+      "tests/project-candidate-promotion.test.mjs",
       "tests/project-file-bridge.test.mjs",
       "tests/project-file-finalizer.test.mjs",
-      "tests/project-file-repository.test.mjs",
+      "tests/project-file-repository.integration.test.mjs",
       "tests/project-file-schema.test.mjs",
+      "tests/project-path-security-and-locks.test.mjs",
+      "tests/project-registry-and-open.test.mjs",
+      "tests/project-request-authority.test.mjs",
+      "tests/project-working-copy-save.test.mjs",
     ],
-    suites: ["typecheck", "lint", "node-targeted", "build-desktop", "ai-smoke"],
-    directOwners: ["tests/project-file-repository.test.mjs"],
+    suites: ["typecheck", "lint", "node-targeted", "build-desktop", "ai-review-smoke"],
+    directOwners: ["tests/project-registry-and-open.test.mjs"],
     unrelatedOwners: ["tests/desktop-package.test.mjs", "tests/review-runtime-capture-owner.test.mjs"],
   },
   {
     file: "scripts/project-file-repository/path-safety.mjs",
     nodeTests: [
+      "tests/project-ai-task-projection.test.mjs",
+      "tests/project-candidate-promotion.test.mjs",
       "tests/project-file-bridge.test.mjs",
       "tests/project-file-finalizer.test.mjs",
-      "tests/project-file-repository.test.mjs",
+      "tests/project-file-repository.integration.test.mjs",
       "tests/project-file-schema.test.mjs",
+      "tests/project-path-security-and-locks.test.mjs",
+      "tests/project-registry-and-open.test.mjs",
+      "tests/project-request-authority.test.mjs",
+      "tests/project-working-copy-save.test.mjs",
     ],
-    suites: ["typecheck", "lint", "node-targeted", "build-desktop", "ai-smoke"],
-    directOwners: ["tests/project-file-repository.test.mjs"],
+    suites: ["typecheck", "lint", "node-targeted", "build-desktop", "ai-review-smoke"],
+    directOwners: ["tests/project-path-security-and-locks.test.mjs"],
     unrelatedOwners: ["tests/desktop-package.test.mjs", "tests/review-runtime-capture-owner.test.mjs"],
   },
   {
@@ -209,9 +224,9 @@ test("edit and task gates select deterministic impact-based coverage", () => {
     "lint",
     "node-targeted",
     "build-web",
-    "browser-smoke",
+    "browser-editing-smoke",
     "build-desktop",
-    "electron-smoke",
+    "electron-editing-smoke",
   ]);
 });
 
@@ -275,7 +290,7 @@ test("owner rules select only the direct regression coverage for representative 
     }
     totalNodeTests += plan.selectedNodeTests.length;
   }
-  assert.ok(totalNodeTests <= 57, `representative ownership selected ${totalNodeTests} Node tests`);
+  assert.ok(totalNodeTests <= 70, `representative ownership selected ${totalNodeTests} Node tests`);
 });
 
 test("Candidate runtime seals map schema changes to every producer and boundary consumer", () => {
@@ -285,7 +300,13 @@ test("Candidate runtime seals map schema changes to every producer and boundary 
     changedFiles: ["schemas/project-runtime-state.v4.schema.json"],
   });
   for (const owner of [
-    "tests/project-file-repository.test.mjs",
+    "tests/project-registry-and-open.test.mjs",
+    "tests/project-working-copy-save.test.mjs",
+    "tests/project-candidate-promotion.test.mjs",
+    "tests/project-request-authority.test.mjs",
+    "tests/project-ai-task-projection.test.mjs",
+    "tests/project-path-security-and-locks.test.mjs",
+    "tests/project-file-repository.integration.test.mjs",
     "tests/project-file-finalizer.test.mjs",
     "tests/project-file-bridge.test.mjs",
     "tests/project-file-schema.test.mjs",
@@ -301,8 +322,8 @@ test("Candidate runtime seals map schema changes to every producer and boundary 
     "lint",
     "node-targeted",
     "build-desktop",
-    "electron-smoke",
-    "ai-smoke",
+    "electron-project-lifecycle-smoke",
+    "ai-review-smoke",
   ]);
 });
 
@@ -345,8 +366,9 @@ test("a file with two direct owners safely unions their coverage", () => {
     "lint",
     "node-targeted",
     "build-desktop",
-    "electron-smoke",
-    "ai-smoke",
+    "electron-editing-smoke",
+    "electron-agent-smoke",
+    "ai-review-smoke",
   ]);
 });
 
@@ -357,7 +379,6 @@ test("version workflow changes retain candidate, history, Canvas and AI coverage
     changedFiles: ["app/application/version-workflow.js"],
   });
   assert.deepEqual(plan.selectedNodeTests, [
-    "tests/architecture-boundaries.test.mjs",
     "tests/run-session.test.mjs",
     "tests/version-history-records.test.mjs",
     "tests/version-session.test.mjs",
@@ -367,11 +388,8 @@ test("version workflow changes retain candidate, history, Canvas and AI coverage
     "typecheck",
     "lint",
     "node-targeted",
-    "build-web",
-    "browser-smoke",
     "build-desktop",
-    "electron-smoke",
-    "ai-smoke",
+    "ai-review-smoke",
   ]);
 });
 
@@ -475,7 +493,6 @@ test("Workbench and review surfaces route to architecture or observable runtime 
     changedFiles: ["app/workbench.tsx"],
   });
   assert.deepEqual(workbench.selectedNodeTests, [
-    "tests/architecture-boundaries.test.mjs",
     "tests/canvas-pointer-capability.test.mjs",
     "tests/desktop-preload-ipc.test.mjs",
     "tests/edit-author-runtime-session.test.mjs",
@@ -498,10 +515,10 @@ test("Workbench and review surfaces route to architecture or observable runtime 
     "lint",
     "node-targeted",
     "build-web",
-    "browser-smoke",
+    "browser-editing-smoke",
     "build-desktop",
-    "electron-smoke",
-    "ai-smoke",
+    "electron-editing-smoke",
+    "ai-review-smoke",
   ]);
 
   const reviewUi = selectGatePlan({
@@ -514,7 +531,7 @@ test("Workbench and review surfaces route to architecture or observable runtime 
     "typecheck",
     "lint",
     "build-desktop",
-    "ai-smoke",
+    "ai-review-smoke",
   ]);
 
   const commentRail = selectGatePlan({
@@ -523,14 +540,13 @@ test("Workbench and review surfaces route to architecture or observable runtime 
     changedFiles: ["app/workbench/comment-rail-view.tsx"],
   });
   assert.deepEqual(commentRail.selectedNodeTests, [
-    "tests/architecture-boundaries.test.mjs",
     "tests/project-rules-workflow.test.mjs",
     "tests/project-workflow.test.mjs",
     "tests/source-rename.test.mjs",
   ]);
-  assert.ok(suiteIds(commentRail).includes("browser-smoke"));
-  assert.ok(suiteIds(commentRail).includes("electron-smoke"));
-  assert.ok(suiteIds(commentRail).includes("ai-smoke"));
+  assert.ok(suiteIds(commentRail).includes("browser-editing-smoke"));
+  assert.ok(suiteIds(commentRail).includes("electron-editing-smoke"));
+  assert.ok(suiteIds(commentRail).includes("ai-review-smoke"));
 
   const bootstrap = selectGatePlan({
     map,
@@ -542,7 +558,7 @@ test("Workbench and review surfaces route to architecture or observable runtime 
     "typecheck",
     "lint",
     "build-web",
-    "browser-smoke",
+    "browser-review-smoke",
   ]);
 });
 
@@ -589,9 +605,9 @@ test("the shared fixture driver schedules both browser and Electron smoke", () =
     "typecheck",
     "lint",
     "build-web",
-    "browser-smoke",
+    "browser-editing-smoke",
     "build-desktop",
-    "electron-smoke",
+    "electron-editing-smoke",
   ]);
 });
 
@@ -606,8 +622,8 @@ test("the shared Electron app fixture schedules Native and AI smoke with its cle
     "lint",
     "node-targeted",
     "build-desktop",
-    "electron-smoke",
-    "ai-smoke",
+    "electron-editing-smoke",
+    "ai-review-smoke",
   ]);
   assert.ok(plan.selectedNodeTests.includes("tests/electron-app-fixture.test.mjs"));
   assert.ok(plan.selectedNodeTests.includes("tests/electron-window-policy.test.mjs"));
@@ -657,8 +673,8 @@ test("desktop handoff changes select Electron and deterministic AI closed-loop c
     "lint",
     "node-targeted",
     "build-desktop",
-    "electron-smoke",
-    "ai-smoke",
+    "electron-agent-smoke",
+    "ai-review-smoke",
   ]);
   assert.ok(plan.selectedNodeTests.includes("tests/qoder-handoff.test.mjs"));
 });
@@ -675,8 +691,8 @@ test("Agent runtime provider changes select product, package, and closed-loop ow
     "dependency-audit",
     "node-targeted",
     "build-desktop",
-    "electron-smoke",
-    "ai-smoke",
+    "electron-agent-smoke",
+    "ai-provider-smoke",
   ]);
   assert.deepEqual(plan.selectedNodeTests, [
     "tests/agent-bridge-service.test.mjs",
@@ -700,15 +716,16 @@ test("Agent runtime provider changes select product, package, and closed-loop ow
 });
 
 test("notification, comment, and presentation Browser owners select their own smoke lane", () => {
-  for (const file of [
-    "tests/e2e/browser/native-dom-notification-recovery.spec.mjs",
-    "tests/e2e/browser/native-dom-comment-tabs.spec.mjs",
-    "tests/e2e/browser/native-dom-presentation-actions.spec.mjs",
-  ]) {
+  const cases = [
+    ["tests/e2e/browser/native-dom-notification-recovery.spec.mjs", "browser-notification-smoke"],
+    ["tests/e2e/browser/native-dom-comment-tabs.spec.mjs", "browser-comments-smoke"],
+    ["tests/e2e/browser/native-dom-presentation-actions.spec.mjs", "browser-editing-smoke"],
+  ];
+  for (const [file, canary] of cases) {
     const plan = selectGatePlan({ map, lane: "task", changedFiles: [file] });
     assert.deepEqual(
       suiteIds(plan),
-      ["typecheck", "lint", "build-web", "browser-smoke"],
+      ["typecheck", "lint", "build-web", canary],
       file,
     );
     assert.deepEqual(plan.selectedNodeTests, [], file);
@@ -812,4 +829,55 @@ test("Node groups partition every top-level test exactly once outside full", asy
       "source-patch-engine.test.mjs",
     ],
   );
+});
+
+test("ordinary production files do not rerun architecture-boundaries Node tests", () => {
+  for (const file of [
+    "app/application/version-workflow.js",
+    "app/application/workspace-controller.js",
+    "app/components/HtmlCanvasEditor.tsx",
+  ]) {
+    const plan = selectGatePlan({ map, lane: "edit", changedFiles: [file] });
+    assert.equal(
+      plan.selectedNodeTests.includes("tests/architecture-boundaries.test.mjs"),
+      false,
+      file,
+    );
+  }
+  const architecture = selectGatePlan({
+    map,
+    lane: "edit",
+    changedFiles: ["scripts/check-architecture.mjs"],
+  });
+  assert.ok(architecture.selectedNodeTests.includes("tests/architecture-boundaries.test.mjs"));
+});
+
+test("gate plans expose owner provenance and width warnings without failing", () => {
+  const raw = selectGatePlan({
+    map,
+    lane: "task",
+    changedFiles: ["scripts/qoder-acp-client.mjs"],
+  });
+  const plan = annotateGatePlan(raw, {
+    map,
+    inventoryFiles: [
+      "scripts/qoder-acp-client.mjs",
+      "scripts/agent-bridge-service.mjs",
+      "app/application/run-workflow.js",
+    ],
+    tagCounts: {
+      "electron:@smoke-agent": 1,
+      "ai:@smoke-provider": 3,
+    },
+  });
+  assert.ok(plan.matchedOwners.includes("agent-runtime-provider-bridge"));
+  assert.equal(plan.fileMatches[0].file, "scripts/qoder-acp-client.mjs");
+  assert.ok(plan.nodeTestOrigins["tests/qoder-acp-spike-client.test.mjs"].length > 0);
+  assert.ok(plan.runtimeCanaries.includes("ai-provider-smoke"));
+  assert.equal(plan.estimatedFanout.aiTests, 3);
+  assert.ok(plan.selectedNodeTests.length > GATE_WIDTH_LIMITS.leafFileNodeTests);
+  assert.ok(plan.warnings.some((warning) => warning.code === "leaf-file-node-fanout"));
+  const compact = compactGatePlan(plan);
+  assert.deepEqual(compact.changedFiles, ["scripts/qoder-acp-client.mjs"]);
+  assert.ok(compact.warnings.some((warning) => warning.code === "leaf-file-node-fanout"));
 });

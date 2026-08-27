@@ -1,0 +1,529 @@
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  readdirSync,
+  renameSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+
+import { expect } from "@playwright/test";
+
+import { sha256 } from "../../../scripts/lifecycle-core.mjs";
+import { ProjectFileRepository } from "../../../scripts/project-file-repository.mjs";
+
+import {
+  activateNativeEdit,
+  caseSelector,
+  currentEditorFrame,
+  documentToken,
+  fixtureBuffer,
+  geometrySnapshot,
+  installInputRecorder,
+  keyShortcut,
+  loadFixture,
+  nativeEditingState,
+  recordedInputEvents,
+  replaceEditableIslandBytes,
+  replaceUniqueBytes,
+  setTextSelection,
+  withBomAndCrLf,
+} from "../browser/pageroot-driver.mjs";
+import {
+  closePageRootGracefully,
+  createSourceFixture as createSharedSourceFixture,
+  launchPageRoot,
+  loadedDiskFrame as loadDiskFrame,
+  openRailGlobalCommentComposer,
+  removeValidatedTemporaryDirectory,
+  removeSourceFixture as removeSharedSourceFixture,
+  sendToMainRenderer,
+  stopPageRoot,
+  waitForProjectReady as waitForSharedProjectReady,
+} from "./helpers/pageroot-app-fixture.mjs";
+
+export {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  readdirSync,
+  renameSync,
+  symlinkSync,
+  writeFileSync,
+};
+export { tmpdir, path, expect, sha256, ProjectFileRepository };
+export {
+  activateNativeEdit,
+  caseSelector,
+  currentEditorFrame,
+  documentToken,
+  fixtureBuffer,
+  geometrySnapshot,
+  installInputRecorder,
+  keyShortcut,
+  loadFixture,
+  nativeEditingState,
+  recordedInputEvents,
+  replaceEditableIslandBytes,
+  replaceUniqueBytes,
+  setTextSelection,
+  withBomAndCrLf,
+};
+export {
+  closePageRootGracefully,
+  launchPageRoot,
+  openRailGlobalCommentComposer,
+  removeValidatedTemporaryDirectory,
+  sendToMainRenderer,
+  stopPageRoot,
+};
+
+export const ORIGINAL_LIST_TEXT = "列表项中的文字保持项目符号和缩进。";
+
+export function removeIsolatedUserData(isolatedUserData) {
+  removeValidatedTemporaryDirectory(isolatedUserData, "pageroot-native-e2e-");
+}
+
+export function createSourceFixture(
+  fileName = "generated-native-e2e.html",
+  transform = (source) => source,
+) {
+  return createSharedSourceFixture({ fileName, transform });
+}
+
+export function removeSourceFixture(sourceDirectory) {
+  removeSharedSourceFixture(sourceDirectory);
+}
+
+export async function waitForProjectReady(page, timeout = 60_000) {
+  return waitForSharedProjectReady(page, { timeout, includeFailureDetail: true });
+}
+
+// The destination is chosen in the AI conversation now, not in a dialog over the page.
+export async function chooseClipboardDelivery(page) {
+  const sidebar = page.getByTestId("ai-conversation-sidebar");
+  await expect(sidebar).toBeVisible();
+  await expect(sidebar.getByTestId("ai-conversation-intent")).toHaveCount(0);
+  await expect(sidebar.getByTestId("ai-conversation-input")).toHaveCount(0);
+  await sidebar.getByRole("button", { name: /复制给别的 AI/u }).click();
+}
+
+export async function loadedDiskFrame(page, sourcePath, caseId) {
+  return loadDiskFrame(page, sourcePath, {
+    expectedCase: caseId,
+    includeEditor: true,
+    timeout: 60_000,
+  });
+}
+
+export async function openRecentProject(
+  page,
+  sourcePath,
+  caseId = "list-item",
+  recentName = path.basename(sourcePath),
+) {
+  const visibleToast = page.locator(".toast.show");
+  await visibleToast.waitFor({ state: "visible", timeout: 2_000 }).catch(() => {});
+  if (await visibleToast.isVisible()) {
+    await visibleToast.getByRole("button", { name: "关闭提醒" }).click();
+    await expect(visibleToast).toBeHidden();
+  }
+  await page.getByRole("button", { name: "打开新的本地 HTML" }).click();
+  await page.locator(".recent-file-row")
+    .filter({ hasText: recentName })
+    .click();
+  return loadedDiskFrame(page, sourcePath, caseId);
+}
+
+export async function waitForFreshDiskFrame(page, previousDocumentToken, caseId) {
+  await expect.poll(async () => {
+    try {
+      return await documentToken(page);
+    } catch {
+      return previousDocumentToken;
+    }
+  }).not.toBe(previousDocumentToken);
+  const frame = await currentEditorFrame(page);
+  await frame.waitForFunction(
+    (selector) => Boolean(document.querySelector(selector)),
+    caseSelector(caseId),
+  );
+  await expect.poll(() => nativeEditingState(page, caseId)).toMatchObject({
+    targetIsActive: true,
+    contenteditable: "true",
+    isContentEditable: true,
+    activeCase: caseId,
+    selectionInside: true,
+  });
+  return frame;
+}
+
+export async function managedWorkingCopyPath(page, externalSourcePath) {
+  await waitForProjectReady(page);
+  const externalPath = realpathSync(externalSourcePath);
+  const extension = path.extname(externalPath);
+  const expectedWorkingCopyName = `${path.basename(externalPath, extension)}-V1${extension}`;
+  let active = null;
+  await expect.poll(async () => {
+    active = await page.evaluate(() => window.htmlAIProjects?.getActiveProject());
+    const sourcePath = active?.sourcePath || "";
+    if (!sourcePath) return "";
+    try {
+      const canonical = realpathSync(sourcePath);
+      return path.basename(canonical) === expectedWorkingCopyName
+        ? canonical
+        : "";
+    } catch {
+      return "";
+    }
+  }).not.toBe("");
+  expect(active?.sourcePath).toBeTruthy();
+  return active.sourcePath;
+}
+
+export async function bridgeJson(page, pathname, { method = "GET", body = null } = {}) {
+  const runtime = await page.evaluate(() => ({
+    port: window.htmlAIRuntime?.bridgePort || "",
+    token: window.htmlAIRuntime?.bridgeAuthToken || "",
+  }));
+  if (!runtime.port || !runtime.token) {
+    throw new Error("Electron did not expose a usable Bridge connection.");
+  }
+  const response = await fetch(`http://127.0.0.1:${runtime.port}${pathname}`, {
+    method,
+    headers: {
+      "X-HTML-AI-Bridge-Token": runtime.token,
+      ...(body ? { "content-type": "application/json" } : {}),
+    },
+    ...(body ? { body: JSON.stringify(body) } : {}),
+  });
+  return {
+    status: response.status,
+    body: await response.json().catch(() => null),
+  };
+}
+
+export async function rememberCurrentNativeHost(page, caseId) {
+  const iframe = page
+    .getByTestId("html-canvas-editor")
+    .filter({ visible: true })
+    .first()
+    .locator('iframe[title*="HTML"]');
+  await iframe.evaluate((frameElement, selector) => {
+    window.__PAGEROOT_ELECTRON_RETIRED_NATIVE_HOST__ =
+      frameElement.contentDocument?.querySelector(selector) || null;
+  }, caseSelector(caseId));
+}
+
+export async function retiredNativeHostState(page) {
+  return page.evaluate(() => {
+    const host = window.__PAGEROOT_ELECTRON_RETIRED_NATIVE_HOST__;
+    if (!host || host.nodeType !== 1) {
+      throw new Error("Electron source-authority fence lost the retired native host reference.");
+    }
+    const state = {
+      contenteditable: host.getAttribute("contenteditable"),
+      editingMarker: host.getAttribute("data-html-canvas-editing"),
+    };
+    delete window.__PAGEROOT_ELECTRON_RETIRED_NATIVE_HOST__;
+    return state;
+  });
+}
+
+export async function expectCheckpointPersisted(page, afterRevision) {
+  const indicator = page.locator("[data-persist-state]").first();
+  await expect.poll(async () => indicator.evaluate((element, minimumRevision) => {
+    const editRevision = Number(element.getAttribute("data-edit-revision"));
+    const persistedRevision = Number(
+      element.getAttribute("data-persisted-revision"),
+    );
+    return {
+      state: element.getAttribute("data-persist-state"),
+      editRevision,
+      persistedRevision,
+      error: document.querySelector(".source-conflict-banner span")?.textContent || "",
+      synchronized:
+        Number.isSafeInteger(editRevision)
+        && editRevision > minimumRevision
+        && editRevision === persistedRevision,
+    };
+  }, afterRevision), { timeout: 30_000 }).toMatchObject({
+    state: "idle",
+    error: "",
+    synchronized: true,
+  });
+  return Number(await indicator.getAttribute("data-persisted-revision"));
+}
+
+export async function clickEditHistoryMenu(electronApp, page, direction) {
+  const mainRendererUrl = page.url();
+  await electronApp.evaluate(
+    ({ BrowserWindow, Menu }, { requestedDirection, rendererUrl }) => {
+      const menu = Menu.getApplicationMenu();
+      const expectedLabel = requestedDirection === "undo" ? "撤销" : "重做";
+      const editMenu = menu?.items.find((item) => (
+        item.submenu?.items.some(
+          (candidate) => candidate.label === expectedLabel,
+        )
+      ));
+      const item = editMenu?.submenu?.items.find(
+        (candidate) => candidate.label === expectedLabel,
+      );
+      if (!item?.click) {
+        throw new Error(`Edit > ${expectedLabel} is not installed.`);
+      }
+      const mainWindow = BrowserWindow.getAllWindows().find((candidate) => (
+        candidate.webContents.getURL() === rendererUrl
+      ));
+      if (!mainWindow) {
+        throw new Error("PageRoot main BrowserWindow is unavailable for Edit history.");
+      }
+      item.click(item, mainWindow, {});
+    },
+    { requestedDirection: direction, rendererUrl: mainRendererUrl },
+  );
+}
+
+export async function addCanvasComment(page, frame, caseId, text) {
+  await page.keyboard.press("Escape");
+  const target = frame.locator(caseSelector(caseId));
+  await target.scrollIntoViewIfNeeded();
+  await target.click();
+  const commentButton = page.getByRole("button", { name: /给.+留评论/u })
+    .filter({ visible: true })
+    .first();
+  await expect(commentButton).toBeVisible();
+  await commentButton.click();
+  await page.getByRole("textbox", { name: "评论内容" }).fill(text);
+  await page.getByRole("button", { name: "评论", exact: true }).click();
+  const card = page.locator(".comment-card").filter({ hasText: text });
+  await expect(card).toHaveCount(1);
+  await expect(card).toHaveAttribute("data-resolution", /^(?:exact|rebound)$/u);
+  return card;
+}
+
+export const ECHARTS_STUB = `window.echarts = {
+  init(host) {
+    host.style.userSelect = "none";
+    host.style.webkitTapHighlightColor = "rgba(0, 0, 0, 0)";
+    host.style.position = "relative";
+    const canvas = document.createElement("canvas");
+    canvas.width = 640;
+    canvas.height = 360;
+    canvas.dataset.echartsRuntime = "true";
+    const context = canvas.getContext("2d");
+    context.fillStyle = "rgb(1, 2, 3)";
+    context.fillRect(0, 0, 640, 360);
+    host.append(canvas);
+    return { setOption() { window.__PAGEROOT_ECHARTS_AUTHOR_SETTLED__ = true; } };
+  }
+};`;
+
+export async function assertFrozenRuntimeRetained(page, frame, baseline) {
+  expect(frame.isDetached()).toBe(false);
+  expect(await documentToken(page)).toBe(baseline.document);
+  await expect(page.locator("[data-runtime-bootstrap-count=\"1\"]")).toHaveCount(1);
+  const canvas = await page.locator("[data-persist-state]").first().evaluate((element) => ({
+    canvasGeneration: element.getAttribute("data-canvas-generation"),
+  }));
+  expect(canvas.canvasGeneration).toBe(baseline.canvasGeneration);
+  expect(await frame.evaluate(() => ({
+    rendererAuthorExecutions: window.__PAGEROOT_ECHARTS_AUTHOR_EXECUTIONS__,
+    chartCount: document.querySelectorAll("#chart-host canvas[data-echarts-runtime=true]").length,
+    frozenSnapshotCount: document.querySelectorAll(
+      "#chart-host img[data-pageroot-edit-runtime-snapshot]",
+    ).length,
+    dataImagePngCount: document.querySelectorAll('img[src^="data:image/png"]').length,
+    frozen: document.documentElement.getAttribute("data-pageroot-edit-runtime-frozen"),
+  }))).toEqual({
+    rendererAuthorExecutions: 1,
+    chartCount: 1,
+    frozenSnapshotCount: 0,
+    dataImagePngCount: 0,
+    frozen: "true",
+  });
+}
+
+export function requestDirectoryCount(workspace) {
+  const projectsRoot = path.join(workspace, "projects");
+  const legacyCount = !existsSync(projectsRoot) ? 0 : readdirSync(projectsRoot).reduce((total, projectDirectoryName) => {
+    const requestsRoot = path.join(
+      projectsRoot,
+      projectDirectoryName,
+      "requests",
+    );
+    return total + (
+      existsSync(requestsRoot)
+        ? readdirSync(requestsRoot).filter((entry) => !entry.startsWith(".")).length
+        : 0
+    );
+  }, 0);
+  const managedProjectsRoot = path.join(path.dirname(workspace), "project-files");
+  if (!existsSync(managedProjectsRoot)) return legacyCount;
+  return legacyCount + readdirSync(managedProjectsRoot, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && !entry.name.startsWith("."))
+    .reduce((total, entry) => {
+      const requestsRoot = path.join(
+        managedProjectsRoot,
+        entry.name,
+        ".pageroot",
+        "requests",
+      );
+      return total + (
+        existsSync(requestsRoot)
+          ? readdirSync(requestsRoot).filter((name) => !name.startsWith(".")).length
+          : 0
+      );
+    }, 0);
+}
+
+export function workspaceContainsDraftComment(workspace, text) {
+  const projectsRoot = path.join(workspace, "projects");
+  const legacyContains = existsSync(projectsRoot) && readdirSync(projectsRoot).some((projectDirectoryName) => {
+    const draftPath = path.join(
+      projectsRoot,
+      projectDirectoryName,
+      "draft",
+      "annotations.json",
+    );
+    if (!existsSync(draftPath)) return false;
+    const draft = JSON.parse(readFileSync(draftPath, "utf8"));
+    return Array.isArray(draft.comments)
+      && draft.comments.some((comment) => comment.text === text);
+  });
+  if (legacyContains) return true;
+  const managedProjectsRoot = path.join(path.dirname(workspace), "project-files");
+  if (!existsSync(managedProjectsRoot)) return false;
+  return readdirSync(managedProjectsRoot, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && !entry.name.startsWith("."))
+    .some((entry) => {
+      const draftsRoot = path.join(
+        managedProjectsRoot,
+        entry.name,
+        ".pageroot",
+        "drafts",
+      );
+      return existsSync(draftsRoot) && readdirSync(draftsRoot)
+        .filter((name) => name.endsWith(".json"))
+        .some((name) => {
+          const draft = JSON.parse(readFileSync(path.join(draftsRoot, name), "utf8"));
+          return Array.isArray(draft.comments)
+            && draft.comments.some((comment) => comment.text === text);
+        });
+    });
+}
+
+export async function replayApplePinyinStyledWrapperCommit(frame, caseId) {
+  const target = frame.locator(caseSelector(caseId));
+  const originalText = await target.textContent();
+  const wordStart = originalText.indexOf("Word");
+  if (wordStart < 0) throw new Error("Apple Pinyin fixture word is missing.");
+  await setTextSelection(frame, caseId, wordStart, wordStart + 4);
+  await target.evaluate((element) => {
+    const dispatchCompositionInput = (data) => {
+      element.dispatchEvent(new InputEvent("beforeinput", {
+        bubbles: true,
+        cancelable: false,
+        data,
+        inputType: "insertCompositionText",
+        isComposing: true,
+      }));
+      element.dispatchEvent(new InputEvent("input", {
+        bubbles: true,
+        data,
+        inputType: "insertCompositionText",
+        isComposing: true,
+      }));
+    };
+    const authoredEm = element.querySelector("em");
+    if (!(authoredEm instanceof HTMLElement)) {
+      throw new Error("Authored em wrapper is missing.");
+    }
+    element.dispatchEvent(new CompositionEvent("compositionstart", {
+      bubbles: true,
+      data: "Word",
+    }));
+    authoredEm.textContent = "ni";
+    dispatchCompositionInput("ni");
+    const temporaryItalic = document.createElement("i");
+    temporaryItalic.textContent = "ni hao";
+    authoredEm.replaceWith(temporaryItalic);
+    dispatchCompositionInput("ni hao");
+    temporaryItalic.textContent = "你好";
+    dispatchCompositionInput("你好");
+    element.dispatchEvent(new CompositionEvent("compositionend", {
+      bubbles: true,
+      data: "你好",
+    }));
+  });
+}
+
+export function comparableDesktopPath(value) {
+  const resolved = path.resolve(String(value || "")).normalize("NFC");
+  if (resolved === "/private/var" || resolved.startsWith("/private/var/")) {
+    return resolved.slice("/private".length);
+  }
+  if (resolved === "/private/tmp" || resolved.startsWith("/private/tmp/")) {
+    return resolved.slice("/private".length);
+  }
+  return resolved;
+}
+
+export function sameDesktopSourcePath(left, right) {
+  return comparableDesktopPath(left) === comparableDesktopPath(right);
+}
+
+export function titleStemLocator(page) {
+  return page.locator(".window-file-title-row strong").first();
+}
+
+export async function waitForTitleStem(page, stem) {
+  await expect(titleStemLocator(page)).toHaveText(stem, { timeout: 30_000 });
+}
+
+export async function waitForActiveSourcePath(page, expectedPath) {
+  await expect.poll(async () => {
+    try {
+      const active = await page.evaluate(() => (
+        window.htmlAIProjects?.getActiveProject()
+      ));
+      return sameDesktopSourcePath(active?.sourcePath, expectedPath);
+    } catch {
+      return false;
+    }
+  }).toBe(true);
+}
+
+export async function readDesktopProjectState(isolatedUserData) {
+  return JSON.parse(readFileSync(
+    path.join(isolatedUserData, "html-projects.json"),
+    "utf8",
+  ));
+}
+
+export async function waitForDesktopActivePath(isolatedUserData, expectedPath) {
+  await expect.poll(async () => {
+    try {
+      const state = await readDesktopProjectState(isolatedUserData);
+      return sameDesktopSourcePath(state.activePath, expectedPath);
+    } catch {
+      return false;
+    }
+  }, { timeout: 30_000 }).toBe(true);
+}
+
+export async function readManagedManifest(sourcePath) {
+  return JSON.parse(readFileSync(
+    path.join(path.dirname(sourcePath), ".pageroot", "manifest.json"),
+    "utf8",
+  ));
+}

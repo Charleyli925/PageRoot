@@ -68,6 +68,14 @@ npm run gate:task -- --base origin/main
 
 The comparison base is fixed to `origin/main`; `task:finish` does not accept a custom `--base`. This prevents a newer branch ref from hiding earlier task commits from impact selection. The command covers committed, staged, unstaged and untracked task files, rejects source changes that occur while the gate is running, then prints a final repository report. It does not stage, commit, push, merge or release; the agent must still inspect and intentionally perform those actions.
 
+Inspect the selected task coverage without running it:
+
+```bash
+npm run gate:plan -- --base origin/main
+```
+
+The compact JSON lists changed files, matched owners, Node tests, capability canaries and estimated fan-out. Width warnings are informational. After an environment flake on the same source hash, resume with `npm run gate:task -- --resume <run-id>`; reuse requires an identical HEAD tree, dirty change-set, base, package-lock, Node version, platform, suite commands and surviving build artifacts. Ready/release/candidate/artifact complete proofs never resume.
+
 ### Audit and retire
 
 Run the read-only lifecycle audit from the primary checkout:

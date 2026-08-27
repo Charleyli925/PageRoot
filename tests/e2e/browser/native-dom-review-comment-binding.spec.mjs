@@ -102,7 +102,9 @@ async function parsedReviewCommentLayouts(page, {
   }, { sessionId: "review-session", side: "before", commentTargets });
 }
 
-test("path-only review comments bind against a real parsed DOM", async ({ page }) => {
+test("path-only review comments bind against a real parsed DOM", {
+  tag: ["@gate-smoke","@smoke-review"],
+}, async ({ page }) => {
   const binding = {
     sourceNodeId: "element:1:1:div",
     path: [1, 0, 0],
@@ -125,7 +127,9 @@ test("path-only review comments bind against a real parsed DOM", async ({ page }
   ))).toBe(true);
 });
 
-test("source-backed comment IDs survive an authored RegExp exec mutation", async ({ page }) => {
+test("source-backed comment IDs survive an authored RegExp exec mutation", {
+  tag: ["@gate-smoke","@smoke-comments"],
+}, async ({ page }) => {
   const binding = {
     sourceNodeId: "element:1:1:div",
     path: [1, 0, 0],
@@ -149,7 +153,9 @@ test("source-backed comment IDs survive an authored RegExp exec mutation", async
   ))).toBe(true);
 });
 
-test("review comment keys survive an authored String replace mutation", async ({ page }) => {
+test("review comment keys survive an authored String replace mutation", {
+  tag: ["@gate-smoke","@smoke-review"],
+}, async ({ page }) => {
   const binding = {
     sourceNodeId: "element:1:1:div",
     path: [1, 0, 0],
@@ -173,7 +179,9 @@ test("review comment keys survive an authored String replace mutation", async ({
   ))).toBe(true);
 });
 
-test("path-only review comments fail closed when the parsed path and tag diverge", async ({ page }) => {
+test("path-only review comments fail closed when the parsed path and tag diverge", {
+  tag: ["@gate-smoke","@smoke-review"],
+}, async ({ page }) => {
   const binding = {
     sourceNodeId: "element:1:1:div",
     path: [1, 0, 0],
@@ -200,7 +208,9 @@ test("path-only review comments fail closed when the parsed path and tag diverge
   ))).toBe(false);
 });
 
-test("path-only review comments fail closed when a same-tag parser decoy shifts the target", async ({ page }) => {
+test("path-only review comments fail closed when a same-tag parser decoy shifts the target", {
+  tag: ["@gate-smoke","@smoke-review"],
+}, async ({ page }) => {
   const binding = {
     sourceNodeId: "element:1:1:div",
     path: [1, 0, 0],
@@ -227,7 +237,9 @@ test("path-only review comments fail closed when a same-tag parser decoy shifts 
   ))).toBe(false);
 });
 
-test("path-only review comments keep a bound target when a later same-tag node is unrelated", async ({ page }) => {
+test("path-only review comments keep a bound target when a later same-tag node is unrelated", {
+  tag: ["@gate-smoke","@smoke-review"],
+}, async ({ page }) => {
   const binding = {
     sourceNodeId: "element:1:1:div",
     path: [1, 0, 0],
@@ -252,7 +264,9 @@ test("path-only review comments keep a bound target when a later same-tag node i
   ))).toBe(true);
 });
 
-test("identical path-only comment siblings keep their separate frozen paths", async ({ page }) => {
+test("identical path-only comment siblings keep their separate frozen paths", {
+  tag: ["@gate-smoke","@smoke-review"],
+}, async ({ page }) => {
   const bindings = [0, 1].map((index) => ({
     sourceNodeId: `element:1:${index + 1}:div`,
     path: [1, 0, index],
@@ -281,7 +295,9 @@ test("identical path-only comment siblings keep their separate frozen paths", as
   ))).toBe(true);
 });
 
-test("mixed-shape path-only comment decoys fail closed", async ({ page }) => {
+test("mixed-shape path-only comment decoys fail closed", {
+  tag: ["@gate-smoke","@smoke-review"],
+}, async ({ page }) => {
   const bindings = [
     {
       sourceNodeId: "element:1:1:div",

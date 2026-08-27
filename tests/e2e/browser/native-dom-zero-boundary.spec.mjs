@@ -35,7 +35,9 @@ async function attemptDirectEdit(frame, id) {
   return doubleClickRenderedText(frame, id);
 }
 
-test("visible empty inline boundary stays structurally intact while surrounding text remains editable", async ({ page }) => {
+test("visible empty inline boundary stays structurally intact while surrounding text remains editable", {
+  tag: ["@gate-smoke","@smoke-editing"],
+}, async ({ page }) => {
   const { frame } = await openBoundaryFixture(page);
   const target = await attemptDirectEdit(frame, "visible-empty-boundary");
 

@@ -35,7 +35,9 @@
     },
     "node-integration": {
       "description": "Run Bridge, filesystem, schema, lifecycle and rendered-output integration tests.",
-      "prerequisites": ["build-web"]
+      "prerequisites": [
+        "build-web"
+      ]
     },
     "node-package": {
       "description": "Run package manifest and packaged-artifact verifier contracts.",
@@ -47,79 +49,184 @@
     },
     "node-full": {
       "description": "Run every top-level Node test exactly once.",
-      "prerequisites": ["build-web"]
+      "prerequisites": [
+        "build-web"
+      ]
     },
     "browser-smoke": {
-      "description": "Run a small stable cross-section of V2 editable-island input, source-byte, formatting and history behavior.",
-      "prerequisites": ["build-web"]
+      "description": "Union of original Browser canaries selected by @gate-smoke. Ready PRs still run browser-full.",
+      "prerequisites": [
+        "build-web"
+      ]
     },
     "browser-full": {
       "description": "Run the complete real Chromium editing suite with retries disabled.",
-      "prerequisites": ["build-web"]
+      "prerequisites": [
+        "build-web"
+      ]
     },
     "real-html": {
       "description": "Run the discovery-based real-HTML island byte/geometry oracle and the opt-in all-host operation census.",
-      "prerequisites": ["build-web"]
+      "prerequisites": [
+        "build-web"
+      ]
     },
     "electron-smoke": {
-      "description": "Run stable real Electron authored-DOM and persisted-composition smoke tests.",
-      "prerequisites": ["build-desktop"]
+      "description": "Union of original Electron canaries selected by @gate-smoke. Ready PRs still run electron-full.",
+      "prerequisites": [
+        "build-desktop"
+      ]
     },
     "electron-full": {
       "description": "Run the complete Electron editing suite, including disk persistence and cold reopen.",
-      "prerequisites": ["build-desktop"]
+      "prerequisites": [
+        "build-desktop"
+      ]
     },
     "ai-closed-loop": {
       "description": "Run the deterministic Electron comment-to-AI finalizer closed loop and failure paths.",
-      "prerequisites": ["build-desktop"]
+      "prerequisites": [
+        "build-desktop"
+      ]
     },
     "ai-smoke": {
-      "description": "Run one deterministic review/activation loop and one broad related-edit regression path.",
-      "prerequisites": ["build-desktop"]
+      "description": "Union of original AI closed-loop canaries selected by @gate-smoke.",
+      "prerequisites": [
+        "build-desktop"
+      ]
+    },
+    "browser-editing-smoke": {
+      "description": "Capability canary for native editing, source bytes, IME and island entry.",
+      "prerequisites": [
+        "build-web"
+      ]
+    },
+    "browser-comments-smoke": {
+      "description": "Capability canary for comment rail, targeting and tab grouping.",
+      "prerequisites": [
+        "build-web"
+      ]
+    },
+    "browser-review-smoke": {
+      "description": "Capability canary for review comment binding and runtime projection.",
+      "prerequisites": [
+        "build-web"
+      ]
+    },
+    "browser-notification-smoke": {
+      "description": "Capability canary for notice recovery, keyboard dismissal and page preservation.",
+      "prerequisites": [
+        "build-web"
+      ]
+    },
+    "electron-editing-smoke": {
+      "description": "Capability canary for authored DOM input, Edit runtime freeze and persisted composition.",
+      "prerequisites": [
+        "build-desktop"
+      ]
+    },
+    "electron-project-lifecycle-smoke": {
+      "description": "Capability canary for import, project switch and Finder rename.",
+      "prerequisites": [
+        "build-desktop"
+      ]
+    },
+    "electron-recovery-smoke": {
+      "description": "Capability canary for crash, replaced Working Copy and external-write recovery.",
+      "prerequisites": [
+        "build-desktop"
+      ]
+    },
+    "electron-agent-smoke": {
+      "description": "Capability canary for desktop Agent delivery from a real first-launch path.",
+      "prerequisites": [
+        "build-desktop"
+      ]
+    },
+    "ai-review-smoke": {
+      "description": "Capability canary for pending review, related-edit acceptance and candidate adoption.",
+      "prerequisites": [
+        "build-desktop"
+      ]
+    },
+    "ai-provider-smoke": {
+      "description": "Capability canary for Agent provider availability and ACP runtime wiring.",
+      "prerequisites": [
+        "build-desktop"
+      ]
+    },
+    "ai-run-lifecycle-smoke": {
+      "description": "Capability canary for Request identity, unknown outcome and clipboard-failure recovery.",
+      "prerequisites": [
+        "build-desktop"
+      ]
     },
     "package-build": {
       "description": "Build the requested macOS candidate without rebuilding the renderer.",
-      "prerequisites": ["build-desktop"]
+      "prerequisites": [
+        "build-desktop"
+      ]
     },
     "developer-package-build": {
       "description": "Build one distinctly named and versioned ad-hoc macOS developer preview DMG from the exact clean tree.",
-      "prerequisites": ["build-desktop"]
+      "prerequisites": [
+        "build-desktop"
+      ]
     },
     "developer-packaged-verify": {
       "description": "Verify developer preview identity, app.asar, Bridge resources, schemas, ad-hoc signature and DMG integrity.",
-      "prerequisites": ["developer-package-build"]
+      "prerequisites": [
+        "developer-package-build"
+      ]
     },
     "developer-packaged-startup": {
       "description": "Launch the developer preview with isolated data and prove app name, version, first window, readiness and clean exit.",
-      "prerequisites": ["developer-packaged-verify"]
+      "prerequisites": [
+        "developer-packaged-verify"
+      ]
     },
     "developer-package-report": {
       "description": "Bind the developer installer to its exact source range and current GitHub Pull Request inventory for delivery.",
-      "prerequisites": ["developer-packaged-startup"]
+      "prerequisites": [
+        "developer-packaged-startup"
+      ]
     },
     "candidate-app-build": {
       "description": "Assemble the formal candidate app without Developer ID signing or Apple notarization.",
-      "prerequisites": ["build-desktop"]
+      "prerequisites": [
+        "build-desktop"
+      ]
     },
     "candidate-app-verify": {
       "description": "Verify candidate app contents and dependency closure before release credentials are used.",
-      "prerequisites": ["candidate-app-build"]
+      "prerequisites": [
+        "candidate-app-build"
+      ]
     },
     "candidate-app-runtime": {
       "description": "Run the full packaged runtime oracle against the verified pre-sign candidate app.",
-      "prerequisites": ["candidate-app-verify"]
+      "prerequisites": [
+        "candidate-app-verify"
+      ]
     },
     "packaged-runtime": {
       "description": "Launch the packaged .app with isolated data and verify source bytes, stale-draft reconciliation and clean close/reopen.",
-      "prerequisites": ["package-build"]
+      "prerequisites": [
+        "package-build"
+      ]
     },
     "packaged-verify": {
       "description": "Verify app.asar, Bridge resources, schemas, signature, DMG integrity and read-only mount contents.",
-      "prerequisites": ["package-build"]
+      "prerequisites": [
+        "package-build"
+      ]
     },
     "package-delivery-report": {
       "description": "Bind the formal installer to its exact source range and current GitHub Pull Request inventory for delivery.",
-      "prerequisites": ["packaged-runtime", "packaged-verify"]
+      "prerequisites": [
+        "packaged-runtime",
+        "packaged-verify"
+      ]
     }
   },
   "lanes": {
@@ -147,11 +254,25 @@
         "node-integration",
         "node-package",
         "browser-smoke",
+        "browser-editing-smoke",
+        "browser-comments-smoke",
+        "browser-review-smoke",
+        "browser-notification-smoke",
         "real-html",
         "electron-smoke",
-        "ai-smoke"
+        "electron-editing-smoke",
+        "electron-project-lifecycle-smoke",
+        "electron-recovery-smoke",
+        "electron-agent-smoke",
+        "ai-smoke",
+        "ai-review-smoke",
+        "ai-provider-smoke",
+        "ai-run-lifecycle-smoke"
       ],
-      "alwaysForCode": ["typecheck", "lint"]
+      "alwaysForCode": [
+        "typecheck",
+        "lint"
+      ]
     },
     "main": {
       "description": "Optional diagnostic smoke for an exact main tree; automatic post-merge CI uses provenance verification only.",
@@ -207,12 +328,18 @@
     {
       "id": "test-policy",
       "patterns": [
-        "^scripts/test-(?:gate|node-group)(?:-core)?\\.mjs$",
+        "^scripts/test-(?:gate|gate-resume|node-group)(?:-core)?\\.mjs$",
+        "^scripts/gate-smoke-suites\\.mjs$",
+        "^tests/e2e/smoke-tags\\.mjs$",
         "^tests/test-impact-map\\.json$",
-        "^tests/test-gate-selection\\.test\\.mjs$"
+        "^tests/test-gate-selection\\.test\\.mjs$",
+        "^tests/test-gate-resume\\.test\\.mjs$"
       ],
       "suites": [],
-      "nodeTests": ["tests/test-gate-selection.test.mjs"]
+      "nodeTests": [
+        "tests/test-gate-selection.test.mjs",
+        "tests/test-gate-resume.test.mjs"
+      ]
     },
     {
       "id": "source-gate-provenance",
@@ -222,7 +349,9 @@
         "^\\.github/workflows/(?:ci|ci-health|developer-preview|release|release-candidate|release-dry-run)\\.yml$"
       ],
       "suites": [],
-      "nodeTests": ["tests/source-gate-provenance.test.mjs"]
+      "nodeTests": [
+        "tests/source-gate-provenance.test.mjs"
+      ]
     },
     {
       "id": "pr-review-policy",
@@ -233,7 +362,9 @@
         "^\\.github/workflows/ci\\.yml$"
       ],
       "suites": [],
-      "nodeTests": ["tests/pr-review-policy.test.mjs"]
+      "nodeTests": [
+        "tests/pr-review-policy.test.mjs"
+      ]
     },
     {
       "id": "pr-candidate-classification",
@@ -243,7 +374,9 @@
         "^\\.github/workflows/(?:ci|release-dry-run)\\.yml$"
       ],
       "suites": [],
-      "nodeTests": ["tests/classify-pr-candidate.test.mjs"]
+      "nodeTests": [
+        "tests/classify-pr-candidate.test.mjs"
+      ]
     },
     {
       "id": "ci-evidence",
@@ -255,7 +388,10 @@
         "^\\.github/workflows/(?:ci|developer-preview|release|release-candidate|release-dry-run)\\.yml$"
       ],
       "suites": [],
-      "nodeTests": ["tests/ci-evidence.test.mjs", "tests/playwright-flaky-summary.test.mjs"]
+      "nodeTests": [
+        "tests/ci-evidence.test.mjs",
+        "tests/playwright-flaky-summary.test.mjs"
+      ]
     },
     {
       "id": "ci-health-report",
@@ -278,7 +414,9 @@
         "^\\.github/workflows/(?:release|release-candidate)\\.yml$"
       ],
       "suites": [],
-      "nodeTests": ["tests/release-candidate-provenance.test.mjs"]
+      "nodeTests": [
+        "tests/release-candidate-provenance.test.mjs"
+      ]
     },
     {
       "id": "task-workflow",
@@ -292,19 +430,33 @@
         "^tests/task-workflow\\.test\\.mjs$"
       ],
       "suites": [],
-      "nodeTests": ["tests/task-workflow.test.mjs"]
+      "nodeTests": [
+        "tests/task-workflow.test.mjs"
+      ]
     },
     {
       "id": "bridge-client",
-      "patterns": ["^app/application/bridge-client\\.(?:js|d\\.ts)$"],
-      "suites": ["typecheck"],
-      "nodeTests": ["tests/bridge-client.test.mjs"]
+      "patterns": [
+        "^app/application/bridge-client\\.(?:js|d\\.ts)$"
+      ],
+      "suites": [
+        "typecheck"
+      ],
+      "nodeTests": [
+        "tests/bridge-client.test.mjs"
+      ]
     },
     {
       "id": "comment-session",
-      "patterns": ["^app/application/comment-session\\.(?:js|d\\.ts)$"],
-      "suites": ["typecheck"],
-      "nodeTests": ["tests/comment-session.test.mjs"]
+      "patterns": [
+        "^app/application/comment-session\\.(?:js|d\\.ts)$"
+      ],
+      "suites": [
+        "typecheck"
+      ],
+      "nodeTests": [
+        "tests/comment-session.test.mjs"
+      ]
     },
     {
       "id": "comment-workflow",
@@ -312,7 +464,10 @@
         "^app/application/comment-workflow(?:-codecs)?\\.(?:js|d\\.ts)$",
         "^tests/comment-workflow\\.test\\.mjs$"
       ],
-      "suites": ["typecheck", "browser-smoke", "electron-smoke", "ai-smoke"],
+      "suites": [
+        "typecheck",
+        "browser-comments-smoke"
+      ],
       "nodeTests": [
         "tests/comment-workflow.test.mjs",
         "tests/comment-session.test.mjs",
@@ -320,8 +475,7 @@
         "tests/attachment-selection.test.mjs",
         "tests/attachment-storage.test.mjs",
         "tests/drain-coordinator.test.mjs",
-        "tests/project-workflow.test.mjs",
-        "tests/architecture-boundaries.test.mjs"
+        "tests/project-workflow.test.mjs"
       ]
     },
     {
@@ -329,7 +483,9 @@
       "patterns": [
         "^app/application/(?:document-session|recovery-store)\\.(?:js|d\\.ts)$"
       ],
-      "suites": ["typecheck"],
+      "suites": [
+        "typecheck"
+      ],
       "nodeTests": [
         "tests/document-session.test.mjs",
         "tests/recovery-store.test.mjs"
@@ -341,7 +497,9 @@
         "^app/application/document-workflow(?:-codecs)?\\.(?:js|d\\.ts)$",
         "^tests/document-workflow\\.test\\.mjs$"
       ],
-      "suites": ["typecheck"],
+      "suites": [
+        "typecheck"
+      ],
       "nodeTests": [
         "tests/document-workflow.test.mjs",
         "tests/document-session.test.mjs",
@@ -359,7 +517,9 @@
         "^shared/draft-aggregate\\.mjs$",
         "^scripts/(?:draft-aggregate|draft-command-decoder|draft-service)\\.mjs$"
       ],
-      "suites": ["typecheck"],
+      "suites": [
+        "typecheck"
+      ],
       "nodeTests": [
         "tests/compatibility-decoders.test.mjs",
         "tests/draft-aggregate.test.mjs",
@@ -374,7 +534,9 @@
         "^app/application/(?:external-file-open-session|local-action-outcomes|project-application-session|project-query-fence|project-session)\\.(?:js|d\\.ts)$",
         "^scripts/project-context-service\\.mjs$"
       ],
-      "suites": ["typecheck"],
+      "suites": [
+        "typecheck"
+      ],
       "nodeTests": [
         "tests/external-file-open-session.test.mjs",
         "tests/local-action-outcomes.test.mjs",
@@ -390,13 +552,15 @@
         "^app/application/project-rules-(?:session|workflow)\\.(?:js|d\\.ts)$",
         "^tests/project-rules-(?:session|workflow)\\.test\\.mjs$"
       ],
-      "suites": ["typecheck", "electron-smoke"],
+      "suites": [
+        "typecheck",
+        "electron-project-lifecycle-smoke"
+      ],
       "nodeTests": [
         "tests/project-rules-session.test.mjs",
         "tests/project-rules-workflow.test.mjs",
         "tests/project-workflow.test.mjs",
-        "tests/drain-coordinator.test.mjs",
-        "tests/architecture-boundaries.test.mjs"
+        "tests/drain-coordinator.test.mjs"
       ]
     },
     {
@@ -405,7 +569,11 @@
         "^app/application/workspace-controller(?:-codecs)?\\.(?:js|d\\.ts)$",
         "^tests/workspace-controller\\.test\\.mjs$"
       ],
-      "suites": ["typecheck", "browser-smoke", "electron-smoke"],
+      "suites": [
+        "typecheck",
+        "browser-editing-smoke",
+        "electron-editing-smoke"
+      ],
       "nodeTests": [
         "tests/workspace-controller.test.mjs",
         "tests/comment-workflow.test.mjs",
@@ -418,8 +586,7 @@
         "tests/version-session.test.mjs",
         "tests/version-workflow.test.mjs",
         "tests/source-history-session.test.mjs",
-        "tests/run-workflow.test.mjs",
-        "tests/architecture-boundaries.test.mjs"
+        "tests/run-workflow.test.mjs"
       ]
     },
     {
@@ -428,7 +595,10 @@
         "^app/application/project-workflow\\.(?:js|d\\.ts)$",
         "^tests/project-workflow\\.test\\.mjs$"
       ],
-      "suites": ["typecheck", "electron-smoke"],
+      "suites": [
+        "typecheck",
+        "electron-project-lifecycle-smoke"
+      ],
       "nodeTests": [
         "tests/project-workflow.test.mjs",
         "tests/comment-workflow.test.mjs",
@@ -451,14 +621,16 @@
         "^app/application/run-workflow(?:-codecs)?\\.(?:js|d\\.ts)$",
         "^tests/run-workflow\\.test\\.mjs$"
       ],
-      "suites": ["typecheck", "browser-smoke", "electron-smoke", "ai-smoke"],
+      "suites": [
+        "typecheck",
+        "ai-run-lifecycle-smoke"
+      ],
       "nodeTests": [
         "tests/run-workflow.test.mjs",
         "tests/run-session.test.mjs",
         "tests/run-lifecycle.test.mjs",
         "tests/qoder-handoff.test.mjs",
-        "tests/drain-coordinator.test.mjs",
-        "tests/architecture-boundaries.test.mjs"
+        "tests/drain-coordinator.test.mjs"
       ]
     },
     {
@@ -467,7 +639,9 @@
         "^app/application/run-session\\.(?:js|d\\.ts)$",
         "^app/domain/run-lifecycle\\.(?:js|d\\.ts)$"
       ],
-      "suites": ["typecheck"],
+      "suites": [
+        "typecheck"
+      ],
       "nodeTests": [
         "tests/run-lifecycle.test.mjs",
         "tests/run-session.test.mjs"
@@ -479,13 +653,15 @@
         "^app/application/version-workflow\\.(?:js|d\\.ts)$",
         "^tests/version-workflow\\.test\\.mjs$"
       ],
-      "suites": ["typecheck", "browser-smoke", "electron-smoke", "ai-smoke"],
+      "suites": [
+        "typecheck",
+        "ai-review-smoke"
+      ],
       "nodeTests": [
         "tests/version-workflow.test.mjs",
         "tests/version-session.test.mjs",
         "tests/version-history-records.test.mjs",
-        "tests/run-session.test.mjs",
-        "tests/architecture-boundaries.test.mjs"
+        "tests/run-session.test.mjs"
       ]
     },
     {
@@ -495,7 +671,9 @@
         "^app/workbench/(?:version-model|version-compatibility-decoder)\\.(?:js|ts)$",
         "^shared/direct-edit-compatibility\\.mjs$"
       ],
-      "suites": ["typecheck"],
+      "suites": [
+        "typecheck"
+      ],
       "nodeTests": [
         "tests/compatibility-decoders.test.mjs",
         "tests/version-session.test.mjs"
@@ -509,7 +687,9 @@
         "^shared/source-history\\.mjs$",
         "^scripts/source-(?:history|transaction)-service\\.mjs$"
       ],
-      "suites": ["typecheck"],
+      "suites": [
+        "typecheck"
+      ],
       "nodeTests": [
         "tests/source-history.test.mjs",
         "tests/source-history-session.test.mjs"
@@ -527,8 +707,8 @@
       "nodeTests": [
         "tests/conversation-repository.test.mjs",
         "tests/conversation-bridge.test.mjs",
-        "tests/conversation-forward-compat.test.mjs"
-        ,"tests/conversation-v2.test.mjs"
+        "tests/conversation-forward-compat.test.mjs",
+        "tests/conversation-v2.test.mjs"
       ]
     },
     {
@@ -536,7 +716,9 @@
       "patterns": [
         "^app/application/conversation-(?:session|workflow)\\.(?:js|d\\.ts)$"
       ],
-      "suites": ["typecheck"],
+      "suites": [
+        "typecheck"
+      ],
       "nodeTests": [
         "tests/conversation-workflow.test.mjs"
       ]
@@ -549,7 +731,9 @@
         "^app/components/read-only-comment-marker\\.module\\.css$",
         "^app/components/HtmlInteractionPreview\\.(?:tsx|module\\.css)$"
       ],
-      "suites": ["typecheck"],
+      "suites": [
+        "typecheck"
+      ],
       "nodeTests": [
         "tests/preview-comment-markers.test.mjs",
         "tests/review-comment-source-map.test.mjs"
@@ -563,40 +747,64 @@
         "^app/workbench/ai-conversation-sidebar\\.module\\.css$",
         "^app/workbench/use-ai-conversation\\.ts$"
       ],
-      "suites": ["typecheck"],
+      "suites": [
+        "typecheck"
+      ],
       "nodeTests": [
         "tests/ai-conversation-sidebar.test.mjs"
       ]
     },
     {
       "id": "comment-relink",
-      "patterns": ["^app/workbench/comment-relink-model\\.(?:js|d\\.ts)$"],
-      "suites": ["typecheck"],
+      "patterns": [
+        "^app/workbench/comment-relink-model\\.(?:js|d\\.ts)$"
+      ],
+      "suites": [
+        "typecheck"
+      ],
       "nodeTests": [
         "tests/comment-relink.test.mjs"
       ]
     },
     {
       "id": "runtime-capabilities",
-      "patterns": ["^app/application/runtime-capabilities\\.(?:js|d\\.ts)$"],
-      "suites": ["typecheck"],
-      "nodeTests": ["tests/runtime-capabilities.test.mjs"]
+      "patterns": [
+        "^app/application/runtime-capabilities\\.(?:js|d\\.ts)$"
+      ],
+      "suites": [
+        "typecheck"
+      ],
+      "nodeTests": [
+        "tests/runtime-capabilities.test.mjs"
+      ]
     },
     {
       "id": "review-analysis-session",
-      "patterns": ["^app/application/review-analysis-session\\.(?:js|d\\.ts)$"],
-      "suites": ["typecheck", "ai-smoke"],
-      "nodeTests": ["tests/review-analysis-session.test.mjs"]
+      "patterns": [
+        "^app/application/review-analysis-session\\.(?:js|d\\.ts)$"
+      ],
+      "suites": [
+        "typecheck",
+        "ai-review-smoke"
+      ],
+      "nodeTests": [
+        "tests/review-analysis-session.test.mjs"
+      ]
     },
     {
       "id": "architecture-contract",
       "patterns": [
         "^scripts/check-architecture\\.mjs$",
+        "^scripts/architecture-ast-query\\.mjs$",
+        "^scripts/architecture-budget\\.json$",
+        "^tests/architecture-boundaries\\.test\\.mjs$",
         "^tests/fixtures/architecture-boundaries/",
         "^(?:CONTRIBUTING|docs/(?:ARCHITECTURE|ARCHITECTURE_CONTRACT|COMPATIBILITY|INTERACTION_FLOW|STATE_OWNERSHIP|ENGINEERING_STANDARDS|SECURITY_MODEL|RUNTIME_VISUAL_CONTRACT|WORKBENCH_ORCHESTRATION_REFACTOR_PLAN))\\.md$",
         "^docs/decisions/(?:0003-session-ownership-and-mutation-outcomes|0004-v2-editable-islands|0007-independent-interactive-preview|0008-safe-presentation-actions-in-edit-mode|0009-persistent-source-patch-history|0011-workbench-session-decomposition|0012-id-first-project-context|0013-edit-runtime-visual-projection|0015-safe-host-fallback-and-direct-text-nodes|0016-owner-controlled-review-runtime-capture|0017-shared-runtime-snapshot-owner|0018-source-transaction-kernel|0019-workspace-controller-orchestration|0021-review-runtime-visual-comparison-noise-tolerance|0022-edit-one-shot-author-runtime|0025-edit-direct-one-shot-runtime|0031-qoder-acp-v1-spike|0032-qoder-acp-agent-bridge|0039-provider-neutral-agent-runtime|0040-provider-neutral-persistence-and-conversation-v2|0041-codex-app-server-execution-staging|0042-codex-app-server-candidate-execution|0043-enable-packaged-codex-candidate-execution)\\.md$"
       ],
-      "suites": ["typecheck"],
+      "suites": [
+        "typecheck"
+      ],
       "nodeTests": [
         "tests/architecture-boundaries.test.mjs",
         "tests/project-rules-workflow.test.mjs",
@@ -609,7 +817,11 @@
         "^app/lib/(?:align-preview-source-surface|canvas-target-rebind|editable-island|native-dom-logical-index|page-(?:presentation-dom|view-context)|source-(?:index|patch-core|patch-engine|text-map)|target-resolver|native-(?:edit-capability|edit-policy))\\.(?:js|ts|d\\.ts)$",
         "^scripts/(?:source-index|target-resolver)\\.mjs$"
       ],
-      "suites": ["typecheck", "browser-smoke", "electron-smoke"],
+      "suites": [
+        "typecheck",
+        "browser-editing-smoke",
+        "electron-editing-smoke"
+      ],
       "nodeTests": [
         "tests/align-preview-source-surface.test.mjs",
         "tests/canvas-target-rebind.test.mjs",
@@ -628,10 +840,13 @@
       "patterns": [
         "^app/components/(?:HtmlCanvasEditor(?:\\.types)?|HtmlInteractionPreview|desktop-(?:runtime-snapshot|preview)-api|html-canvas-(?:dom|interaction|internal-types|page-view|preview-sync|selection|selection-chrome|style-inspector|pointer-hit|pointer-capability)|IslandEditingController|native-edit-types|native-layout-fingerprint|html-preview-sandbox|use-preview-resource-base)\\.(?:tsx|ts|js|d\\.ts)$"
       ],
-      "suites": ["typecheck", "browser-smoke", "electron-smoke"],
+      "suites": [
+        "typecheck",
+        "browser-editing-smoke",
+        "electron-editing-smoke"
+      ],
       "nodeTests": [
         "tests/align-preview-source-surface.test.mjs",
-        "tests/architecture-boundaries.test.mjs",
         "tests/editable-island.test.mjs",
         "tests/source-text-map.test.mjs",
         "tests/native-layout-guard.test.mjs",
@@ -651,7 +866,10 @@
         "^docs/decisions/0025-edit-direct-one-shot-runtime\\.md$",
         "^tests/(?:edit-author-runtime-session|edit-runtime-bootstrap|edit-runtime-preparation-fence|edit-runtime-contract|edit-runtime-protocol)\\.test\\.mjs$"
       ],
-      "suites": ["typecheck", "electron-smoke"],
+      "suites": [
+        "typecheck",
+        "electron-editing-smoke"
+      ],
       "nodeTests": [
         "tests/edit-author-runtime-session.test.mjs",
         "tests/edit-runtime-bootstrap.test.mjs",
@@ -661,8 +879,7 @@
         "tests/runtime-snapshot-hosts.test.mjs",
         "tests/html-preview-sandbox.test.mjs",
         "tests/workspace-controller.test.mjs",
-        "tests/desktop-preload-ipc.test.mjs",
-        "tests/architecture-boundaries.test.mjs"
+        "tests/desktop-preload-ipc.test.mjs"
       ]
     },
     {
@@ -671,7 +888,10 @@
         "^app/lib/comment-rail-layout\\.js$",
         "^tests/comment-rail-layout\\.test\\.mjs$"
       ],
-      "suites": ["typecheck", "browser-smoke"],
+      "suites": [
+        "typecheck",
+        "browser-comments-smoke"
+      ],
       "nodeTests": [
         "tests/comment-rail-layout.test.mjs"
       ]
@@ -684,7 +904,11 @@
         "^app/workbench/review/.+\\.ts$",
         "^scripts/benchmark-review-analysis\\.mjs$"
       ],
-      "suites": ["typecheck", "browser-smoke", "ai-smoke"],
+      "suites": [
+        "typecheck",
+        "browser-review-smoke",
+        "ai-review-smoke"
+      ],
       "nodeTests": [
         "tests/review-badge-aggregation.test.mjs",
         "tests/review-comment-source-map.test.mjs",
@@ -706,7 +930,11 @@
         "^app/workbench/review-runtime-capture-adapter\\.ts$",
         "^app/components/desktop-runtime-snapshot-api\\.ts$"
       ],
-      "suites": ["typecheck", "browser-smoke", "ai-smoke"],
+      "suites": [
+        "typecheck",
+        "browser-review-smoke",
+        "ai-review-smoke"
+      ],
       "nodeTests": [
         "tests/review-runtime-capture-owner.test.mjs",
         "tests/review-runtime-visual.test.mjs",
@@ -720,7 +948,10 @@
         "^app/workbench/(?:AiReviewWorkspace|comment-rail-view|file-header-view|handoff-view|presentation|project-files-view|review-state|workbench-header-shell)\\.(?:ts|tsx)$",
         "^app/workbench/ai-review-workspace\\.module\\.css$"
       ],
-      "suites": ["typecheck", "ai-smoke"],
+      "suites": [
+        "typecheck",
+        "ai-review-smoke"
+      ],
       "nodeTests": []
     },
     {
@@ -728,15 +959,22 @@
       "patterns": [
         "^app/lib/review-scroll-sync\\.(?:d\\.ts|js)$"
       ],
-      "suites": ["typecheck", "ai-smoke"],
-      "nodeTests": ["tests/review-scroll-sync.test.mjs"]
+      "suites": [
+        "typecheck",
+        "ai-review-smoke"
+      ],
+      "nodeTests": [
+        "tests/review-scroll-sync.test.mjs"
+      ]
     },
     {
       "id": "review-bootstrap-browser",
       "patterns": [
         "^tests/helpers/generated-review-bootstrap\\.mjs$"
       ],
-      "suites": ["browser-smoke"],
+      "suites": [
+        "browser-review-smoke"
+      ],
       "nodeTests": []
     },
     {
@@ -748,9 +986,13 @@
         "^app/workbench/external-html-open-dialog\\.module\\.css$",
         "^app/workbench/(?:browser-io|comment-model|project-model|record-model|types)\\.ts$"
       ],
-      "suites": ["typecheck", "browser-smoke", "electron-smoke", "ai-smoke"],
+      "suites": [
+        "typecheck",
+        "browser-editing-smoke",
+        "electron-editing-smoke",
+        "ai-review-smoke"
+      ],
       "nodeTests": [
-        "tests/architecture-boundaries.test.mjs",
         "tests/project-rules-workflow.test.mjs",
         "tests/project-workflow.test.mjs",
         "tests/source-rename.test.mjs"
@@ -758,15 +1000,27 @@
     },
     {
       "id": "workbench-audit-events",
-      "patterns": ["^app/lib/audit-events\\.js$"],
-      "suites": ["typecheck"],
-      "nodeTests": ["tests/audit-events.test.mjs"]
+      "patterns": [
+        "^app/lib/audit-events\\.js$"
+      ],
+      "suites": [
+        "typecheck"
+      ],
+      "nodeTests": [
+        "tests/audit-events.test.mjs"
+      ]
     },
     {
       "id": "workbench-direct-edit-events",
-      "patterns": ["^app/lib/direct-edit-events\\.js$"],
-      "suites": ["typecheck"],
-      "nodeTests": ["tests/direct-edit-events.test.mjs"]
+      "patterns": [
+        "^app/lib/direct-edit-events\\.js$"
+      ],
+      "suites": [
+        "typecheck"
+      ],
+      "nodeTests": [
+        "tests/direct-edit-events.test.mjs"
+      ]
     },
     {
       "id": "notification-ui",
@@ -776,7 +1030,10 @@
         "^app/lib/notification-policy\\.js$",
         "^tests/notification-contract\\.typecheck\\.ts$"
       ],
-      "suites": ["typecheck", "browser-smoke"],
+      "suites": [
+        "typecheck",
+        "browser-notification-smoke"
+      ],
       "nodeTests": [
         "tests/notification-policy.test.mjs"
       ]
@@ -787,7 +1044,10 @@
         "^app/components/(?:AboutPageRootDialog|CancelAiRunDialog|RestartUpdateDialog)\\.tsx$",
         "^app/(?:page|layout)\\.tsx$"
       ],
-      "suites": ["typecheck", "browser-smoke"],
+      "suites": [
+        "typecheck",
+        "browser-editing-smoke"
+      ],
       "nodeTests": []
     },
     {
@@ -799,8 +1059,12 @@
         "^docs/USAGE_TELEMETRY\\.md$",
         "^PRIVACY\\.md$"
       ],
-      "suites": ["typecheck"],
-      "nodeTests": ["tests/usage-telemetry.test.mjs"]
+      "suites": [
+        "typecheck"
+      ],
+      "nodeTests": [
+        "tests/usage-telemetry.test.mjs"
+      ]
     },
     {
       "id": "first-real-html-guide",
@@ -811,7 +1075,9 @@
         "^desktop/ui-preferences\\.mjs$",
         "^tests/(?:first-edit-guide-session|ui-preferences|canvas-pointer-capability|html-canvas-capability-hover)\\.test\\.mjs$"
       ],
-      "suites": ["typecheck"],
+      "suites": [
+        "typecheck"
+      ],
       "nodeTests": [
         "tests/canvas-pointer-capability.test.mjs",
         "tests/first-edit-guide-session.test.mjs",
@@ -821,16 +1087,24 @@
     },
     {
       "id": "desktop-update",
-      "patterns": ["^desktop/application-update\\.mjs$"],
-      "suites": ["electron-smoke"],
-      "nodeTests": ["tests/application-update.test.mjs"]
+      "patterns": [
+        "^desktop/application-update\\.mjs$"
+      ],
+      "suites": [
+        "electron-editing-smoke"
+      ],
+      "nodeTests": [
+        "tests/application-update.test.mjs"
+      ]
     },
     {
       "id": "desktop-project-storage",
       "patterns": [
         "^desktop/(?:project-files|welcome-project-content)\\.mjs$"
       ],
-      "suites": ["electron-smoke"],
+      "suites": [
+        "electron-project-lifecycle-smoke"
+      ],
       "nodeTests": [
         "tests/desktop-file-writer.test.mjs",
         "tests/export-copy.test.mjs",
@@ -844,7 +1118,9 @@
       "patterns": [
         "^desktop/(?:source-rename|source-file-watch|active-managed-locator)\\.mjs$"
       ],
-      "suites": ["electron-smoke"],
+      "suites": [
+        "electron-project-lifecycle-smoke"
+      ],
       "nodeTests": [
         "tests/source-rename.test.mjs",
         "tests/source-file-watch.test.mjs",
@@ -853,9 +1129,15 @@
     },
     {
       "id": "desktop-export-copy",
-      "patterns": ["^desktop/export-copy\\.mjs$"],
-      "suites": ["electron-smoke"],
-      "nodeTests": ["tests/export-copy.test.mjs"]
+      "patterns": [
+        "^desktop/export-copy\\.mjs$"
+      ],
+      "suites": [
+        "electron-project-lifecycle-smoke"
+      ],
+      "nodeTests": [
+        "tests/export-copy.test.mjs"
+      ]
     },
     {
       "id": "desktop-external-file-open",
@@ -863,7 +1145,9 @@
         "^desktop/external-file-open\\.mjs$",
         "^desktop/prepared-html-open\\.mjs$"
       ],
-      "suites": ["electron-smoke"],
+      "suites": [
+        "electron-project-lifecycle-smoke"
+      ],
       "nodeTests": [
         "tests/external-file-open.test.mjs",
         "tests/prepared-html-open.test.mjs"
@@ -871,16 +1155,24 @@
     },
     {
       "id": "desktop-open-in-default-browser",
-      "patterns": ["^desktop/open-in-default-browser\\.mjs$"],
-      "suites": ["electron-smoke"],
-      "nodeTests": ["tests/open-in-default-browser.test.mjs"]
+      "patterns": [
+        "^desktop/open-in-default-browser\\.mjs$"
+      ],
+      "suites": [
+        "electron-project-lifecycle-smoke"
+      ],
+      "nodeTests": [
+        "tests/open-in-default-browser.test.mjs"
+      ]
     },
     {
       "id": "desktop-project-security",
       "patterns": [
         "^desktop/project-(?:ipc-security|path-policy)\\.mjs$"
       ],
-      "suites": ["electron-smoke"],
+      "suites": [
+        "electron-project-lifecycle-smoke"
+      ],
       "nodeTests": [
         "tests/desktop-project-path-policy.test.mjs",
         "tests/open-in-default-browser.test.mjs"
@@ -888,9 +1180,15 @@
     },
     {
       "id": "desktop-project-open-queue",
-      "patterns": ["^desktop/project-open-queue\\.mjs$"],
-      "suites": ["electron-smoke"],
-      "nodeTests": ["tests/project-open-queue.test.mjs"]
+      "patterns": [
+        "^desktop/project-open-queue\\.mjs$"
+      ],
+      "suites": [
+        "electron-project-lifecycle-smoke"
+      ],
+      "nodeTests": [
+        "tests/project-open-queue.test.mjs"
+      ]
     },
     {
       "id": "desktop-preview",
@@ -898,7 +1196,9 @@
         "^desktop/preview-protocol\\.mjs$",
         "^desktop/imported-asset-root\\.mjs$"
       ],
-      "suites": ["electron-smoke"],
+      "suites": [
+        "electron-editing-smoke"
+      ],
       "nodeTests": [
         "tests/preview-protocol.test.mjs",
         "tests/imported-asset-root.test.mjs"
@@ -909,7 +1209,9 @@
       "patterns": [
         "^desktop/(?:bridge-startup|bridge-shutdown|close-recovery)\\.mjs$"
       ],
-      "suites": ["electron-smoke"],
+      "suites": [
+        "electron-recovery-smoke"
+      ],
       "nodeTests": [
         "tests/bridge-shutdown.test.mjs",
         "tests/bridge-startup.test.mjs",
@@ -924,7 +1226,9 @@
         "^desktop/renderer/(?:index\\.html|main\\.tsx)$",
         "^desktop/vite\\.config\\.ts$"
       ],
-      "suites": ["electron-smoke"],
+      "suites": [
+        "electron-editing-smoke"
+      ],
       "nodeTests": [
         "tests/bridge-shutdown.test.mjs",
         "tests/bridge-startup.test.mjs",
@@ -939,8 +1243,13 @@
     },
     {
       "id": "desktop-runtime-capture",
-      "patterns": ["^desktop/runtime-visual-capture-owner\\.mjs$"],
-      "suites": ["electron-smoke", "ai-smoke"],
+      "patterns": [
+        "^desktop/runtime-visual-capture-owner\\.mjs$"
+      ],
+      "suites": [
+        "electron-editing-smoke",
+        "ai-review-smoke"
+      ],
       "nodeTests": [
         "tests/review-runtime-capture-owner.test.mjs",
         "tests/review-runtime-visual.test.mjs",
@@ -950,8 +1259,13 @@
     },
     {
       "id": "desktop-ai-handoff",
-      "patterns": ["^desktop/(?:main|qoder-handoff|product-contract)\\.mjs$"],
-      "suites": ["electron-smoke", "ai-smoke"],
+      "patterns": [
+        "^desktop/(?:main|qoder-handoff|product-contract)\\.mjs$"
+      ],
+      "suites": [
+        "electron-agent-smoke",
+        "ai-review-smoke"
+      ],
       "nodeTests": [
         "tests/qoder-handoff.test.mjs",
         "tests/product-contract.test.mjs"
@@ -970,7 +1284,13 @@
         "^tests/(?:agent-delivery-codec|agent-runtime-coordinator|agent-provider-contract|agent-bridge-(?:service|workspace)|codex-(?:provider-contract|app-server-runtime|candidate-authority)|qoder-acp-spike-client)\\.test\\.mjs$",
         "^tests/fixtures/(?:agent-provider/|codex-app-server|qoder-acp-agent|packaged-agent-bridge-runner)"
       ],
-      "suites": ["typecheck", "dependency-audit", "build-desktop", "electron-smoke", "ai-smoke"],
+      "suites": [
+        "typecheck",
+        "dependency-audit",
+        "build-desktop",
+        "electron-agent-smoke",
+        "ai-provider-smoke"
+      ],
       "nodeTests": [
         "tests/agent-provider-contract.test.mjs",
         "tests/codex-provider-contract.test.mjs",
@@ -996,11 +1316,21 @@
       "patterns": [
         "^scripts/project-file-(?:repository|finalizer)\\.mjs$",
         "^scripts/project-file-repository/.+\\.mjs$",
-        "^tests/project-file-(?:repository|finalizer|bridge|schema)\\.test\\.mjs$"
+        "^tests/project-file-(?:finalizer|bridge|schema)\\.test\\.mjs$",
+        "^tests/project-file-repository(?:-harness|\\.integration\\.test)\\.mjs$",
+        "^tests/project-(?:registry-and-open|working-copy-save|candidate-promotion|request-authority|ai-task-projection|path-security-and-locks)\\.test\\.mjs$"
       ],
-      "suites": ["ai-smoke"],
+      "suites": [
+        "ai-review-smoke"
+      ],
       "nodeTests": [
-        "tests/project-file-repository.test.mjs",
+        "tests/project-registry-and-open.test.mjs",
+        "tests/project-working-copy-save.test.mjs",
+        "tests/project-candidate-promotion.test.mjs",
+        "tests/project-request-authority.test.mjs",
+        "tests/project-ai-task-projection.test.mjs",
+        "tests/project-path-security-and-locks.test.mjs",
+        "tests/project-file-repository.integration.test.mjs",
         "tests/project-file-finalizer.test.mjs",
         "tests/project-file-bridge.test.mjs",
         "tests/project-file-schema.test.mjs"
@@ -1011,9 +1341,18 @@
       "patterns": [
         "^schemas/project-runtime-state\\.v4\\.schema\\.json$"
       ],
-      "suites": ["electron-smoke", "ai-smoke"],
+      "suites": [
+        "electron-project-lifecycle-smoke",
+        "ai-review-smoke"
+      ],
       "nodeTests": [
-        "tests/project-file-repository.test.mjs",
+        "tests/project-registry-and-open.test.mjs",
+        "tests/project-working-copy-save.test.mjs",
+        "tests/project-candidate-promotion.test.mjs",
+        "tests/project-request-authority.test.mjs",
+        "tests/project-ai-task-projection.test.mjs",
+        "tests/project-path-security-and-locks.test.mjs",
+        "tests/project-file-repository.integration.test.mjs",
         "tests/project-file-finalizer.test.mjs",
         "tests/project-file-bridge.test.mjs",
         "tests/project-file-schema.test.mjs",
@@ -1028,7 +1367,9 @@
       "patterns": [
         "^scripts/(?:workspace-bridge(?:-shutdown)?|lifecycle-core|finalize-attempt|record-user-supplement|user-supplement-core|candidate-assessment(?:-decoder)?|html-source-parser|attachment-storage|product-contract|target-identity)\\.mjs$"
       ],
-      "suites": ["ai-smoke"],
+      "suites": [
+        "ai-run-lifecycle-smoke"
+      ],
       "nodeTests": [
         "tests/workspace-bridge.test.mjs",
         "tests/lifecycle-core.test.mjs",
@@ -1070,7 +1411,13 @@
         "tests/targeted-change-schema.test.mjs",
         "tests/workspace-bridge.test.mjs",
         "tests/project-file-schema.test.mjs",
-        "tests/project-file-repository.test.mjs"
+        "tests/project-registry-and-open.test.mjs",
+        "tests/project-working-copy-save.test.mjs",
+        "tests/project-candidate-promotion.test.mjs",
+        "tests/project-request-authority.test.mjs",
+        "tests/project-ai-task-projection.test.mjs",
+        "tests/project-path-security-and-locks.test.mjs",
+        "tests/project-file-repository.integration.test.mjs"
       ]
     },
     {
@@ -1082,8 +1429,12 @@
         "^tests/dependency-audit-policy\\.test\\.mjs$",
         "^docs/DEPENDENCY_SECURITY\\.md$"
       ],
-      "suites": ["dependency-audit"],
-      "nodeTests": ["tests/dependency-audit-policy.test.mjs"]
+      "suites": [
+        "dependency-audit"
+      ],
+      "nodeTests": [
+        "tests/dependency-audit-policy.test.mjs"
+      ]
     },
     {
       "id": "application-update-config",
@@ -1106,7 +1457,9 @@
         "^CHANGELOG\\.md$"
       ],
       "suites": [],
-      "nodeTests": ["tests/release-notes.test.mjs"]
+      "nodeTests": [
+        "tests/release-notes.test.mjs"
+      ]
     },
     {
       "id": "package-manifest-contract",
@@ -1143,7 +1496,9 @@
         "^tests/packaged-artifact-gate\\.test\\.mjs$"
       ],
       "suites": [],
-      "nodeTests": ["tests/packaged-artifact-gate.test.mjs"]
+      "nodeTests": [
+        "tests/packaged-artifact-gate.test.mjs"
+      ]
     },
     {
       "id": "release-evidence-fixtures",
@@ -1170,7 +1525,9 @@
         "^\\.github/workflows/(?:release-candidate|release-dry-run)\\.yml$"
       ],
       "suites": [],
-      "nodeTests": ["tests/release-app-stage.test.mjs"]
+      "nodeTests": [
+        "tests/release-app-stage.test.mjs"
+      ]
     },
     {
       "id": "developer-preview-delivery",
@@ -1180,7 +1537,9 @@
         "^\\.github/workflows/developer-preview\\.yml$"
       ],
       "suites": [],
-      "nodeTests": ["tests/developer-preview-package.test.mjs"]
+      "nodeTests": [
+        "tests/developer-preview-package.test.mjs"
+      ]
     },
     {
       "id": "package-delivery-report",
@@ -1190,7 +1549,9 @@
         "^\\.github/workflows/(?:developer-preview|release-candidate|release)\\.yml$"
       ],
       "suites": [],
-      "nodeTests": ["tests/package-delivery-report.test.mjs"]
+      "nodeTests": [
+        "tests/package-delivery-report.test.mjs"
+      ]
     },
     {
       "id": "release-provenance",
@@ -1199,7 +1560,9 @@
         "^tests/release-provenance\\.test\\.mjs$"
       ],
       "suites": [],
-      "nodeTests": ["tests/release-provenance.test.mjs"]
+      "nodeTests": [
+        "tests/release-provenance.test.mjs"
+      ]
     },
     {
       "id": "real-html-e2e",
@@ -1207,27 +1570,71 @@
         "^tests/e2e/browser/real-complex-html\\.gate\\.mjs$",
         "^tests/e2e/browser/playwright\\.real-html\\.config\\.mjs$"
       ],
-      "suites": ["real-html"],
+      "suites": [
+        "real-html"
+      ],
       "nodeTests": []
     },
     {
       "id": "browser-e2e",
       "patterns": [
-        "^tests/e2e/browser/(?!real-complex-html\\.gate|playwright\\.real-html\\.config).*\\.mjs$"
+        "^tests/e2e/browser/(?!real-complex-html\\.gate|playwright\\.real-html\\.config|native-dom-(?:notification-recovery|comment-tabs|comment-stress|compound-value-comment|review-comment-binding|runtime-projection-binding)).*\\.mjs$"
       ],
-      "suites": ["browser-smoke"],
+      "suites": [
+        "browser-editing-smoke"
+      ],
+      "nodeTests": []
+    },
+    {
+      "id": "browser-e2e-comments",
+      "patterns": [
+        "^tests/e2e/browser/native-dom-(?:comment-tabs|comment-stress|compound-value-comment)\\.spec\\.mjs$"
+      ],
+      "suites": [
+        "browser-comments-smoke"
+      ],
+      "nodeTests": []
+    },
+    {
+      "id": "browser-e2e-review",
+      "patterns": [
+        "^tests/e2e/browser/native-dom-(?:review-comment-binding|runtime-projection-binding)\\.spec\\.mjs$"
+      ],
+      "suites": [
+        "browser-review-smoke"
+      ],
+      "nodeTests": []
+    },
+    {
+      "id": "browser-e2e-notification",
+      "patterns": [
+        "^tests/e2e/browser/native-dom-notification-recovery\\.spec\\.mjs$"
+      ],
+      "suites": [
+        "browser-notification-smoke"
+      ],
       "nodeTests": []
     },
     {
       "id": "shared-browser-electron-e2e-driver",
-      "patterns": ["^tests/e2e/browser/pageroot-driver\\.mjs$"],
-      "suites": ["browser-smoke", "electron-smoke"],
+      "patterns": [
+        "^tests/e2e/browser/pageroot-driver\\.mjs$"
+      ],
+      "suites": [
+        "browser-editing-smoke",
+        "electron-editing-smoke"
+      ],
       "nodeTests": []
     },
     {
       "id": "browser-fixtures",
-      "patterns": ["^tests/fixtures/native-dom/.*"],
-      "suites": ["browser-smoke", "real-html"],
+      "patterns": [
+        "^tests/fixtures/native-dom/.*"
+      ],
+      "suites": [
+        "browser-editing-smoke",
+        "real-html"
+      ],
       "nodeTests": []
     },
     {
@@ -1241,18 +1648,27 @@
     {
       "id": "electron-e2e",
       "patterns": [
-        "^tests/e2e/electron/(?!ai-handoff-closed-loop|packaged-(?:runtime|startup)-smoke\\.spec|playwright\\.packaged(?:-startup)?\\.config).*\\.mjs$"
+        "^tests/e2e/electron/(?!ai-|packaged-(?:runtime|startup)-smoke\\.spec|playwright\\.packaged(?:-startup)?\\.config).*\\.mjs$"
       ],
-      "suites": ["electron-smoke"],
-      "nodeTests": ["tests/electron-window-policy.test.mjs"]
+      "suites": [
+        "electron-editing-smoke"
+      ],
+      "nodeTests": [
+        "tests/electron-window-policy.test.mjs"
+      ]
     },
     {
       "id": "electron-app-fixture",
       "patterns": [
-        "^tests/e2e/electron/helpers/pageroot-app-fixture\\.mjs$"
+        "^tests/e2e/electron/helpers/(?:pageroot-app-fixture|electron-(?:app-launch|project-fixture|project-ready|comment-driver|legacy-project-fixture|safe-cleanup))\\.mjs$"
       ],
-      "suites": ["electron-smoke", "ai-smoke"],
-      "nodeTests": ["tests/electron-app-fixture.test.mjs"]
+      "suites": [
+        "electron-editing-smoke",
+        "ai-review-smoke"
+      ],
+      "nodeTests": [
+        "tests/electron-app-fixture.test.mjs"
+      ]
     },
     {
       "id": "electron-app-fixture-contract",
@@ -1260,16 +1676,21 @@
         "^tests/electron-app-fixture\\.test\\.mjs$"
       ],
       "suites": [],
-      "nodeTests": ["tests/electron-app-fixture.test.mjs"]
+      "nodeTests": [
+        "tests/electron-app-fixture.test.mjs"
+      ]
     },
     {
       "id": "ai-e2e",
       "patterns": [
-        "^tests/e2e/electron/ai-handoff-closed-loop\\.spec\\.mjs$",
+        "^tests/e2e/electron/ai-(?:review-adoption|provider-availability|run-lifecycle|candidate-validation|request-comments)\\.spec\\.mjs$",
+        "^tests/e2e/electron/ai-closed-loop-helpers\\.mjs$",
         "^tests/e2e/electron/playwright\\.ai-(?:closed-loop|smoke)\\.config\\.mjs$",
         "^tests/ai-smoke-config\\.test\\.mjs$"
       ],
-      "suites": ["ai-smoke"],
+      "suites": [
+        "ai-review-smoke"
+      ],
       "nodeTests": [
         "tests/ai-smoke-config.test.mjs",
         "tests/electron-window-policy.test.mjs"
@@ -1278,6 +1699,8 @@
   ],
   "fallback": {
     "codePattern": "\\.(?:cjs|mjs|js|jsx|ts|tsx|json)$",
-    "suites": ["node-core"]
+    "suites": [
+      "node-core"
+    ]
   }
 }

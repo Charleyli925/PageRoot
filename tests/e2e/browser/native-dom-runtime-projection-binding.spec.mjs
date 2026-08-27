@@ -254,7 +254,9 @@ async function postReviewState(page, filter = "all") {
   }, { reviewFilter: filter });
 }
 
-test("runtime projection binds exact hosts and adds facts without outline geometry", async ({ page }) => {
+test("runtime projection binds exact hosts and adds facts without outline geometry", {
+  tag: ["@gate-smoke","@smoke-review"],
+}, async ({ page }) => {
   const frame = await installRuntimeProjectionFrame(page);
   await postRuntimeFacts(page, [
     { candidateKey: "runtime-host-1", changeId: "change-1", verdict: "changed" },
@@ -352,7 +354,9 @@ test("runtime projection binds exact hosts and adds facts without outline geomet
   await expect.poll(() => staticTextBox.count()).toBeGreaterThan(0);
 });
 
-test("hostile authored listeners cannot observe or forge runtime projection capability", async ({ page }) => {
+test("hostile authored listeners cannot observe or forge runtime projection capability", {
+  tag: ["@gate-smoke","@smoke-review"],
+}, async ({ page }) => {
   const frame = await installRuntimeProjectionFrame(page);
   await expect.poll(() => page.evaluate(() => window.runtimeProjectionTest.forgedResponses))
     .toBe(1);
@@ -376,7 +380,9 @@ test("hostile authored listeners cannot observe or forge runtime projection capa
   expect(JSON.stringify(leaked)).not.toContain("runtime-host-2");
 });
 
-test("comment and runtime bindings keep separate ports in the same first bootstrap", async ({ page }) => {
+test("comment and runtime bindings keep separate ports in the same first bootstrap", {
+  tag: ["@gate-smoke","@smoke-review"],
+}, async ({ page }) => {
   const frame = await installRuntimeProjectionFrame(page, { withCommentBinding: true });
   expect(await page.evaluate(() => (
     window.runtimeProjectionTest.commentPort !== window.runtimeProjectionTest.port
@@ -401,7 +407,9 @@ test("comment and runtime bindings keep separate ports in the same first bootstr
   ))).toBe(false);
 });
 
-test("empty runtime projection preserves static facts", async ({ page }) => {
+test("empty runtime projection preserves static facts", {
+  tag: ["@gate-smoke","@smoke-review"],
+}, async ({ page }) => {
   const frame = await installRuntimeProjectionFrame(page);
   const staticTextBox = frame.locator(
     '[data-pageroot-review-overlay-box][data-pageroot-review-fact="text:static-text"]',
@@ -414,7 +422,9 @@ test("empty runtime projection preserves static facts", async ({ page }) => {
   )).toHaveCount(0);
 });
 
-test("cross-session side and source runtime results preserve static facts", async ({ page }) => {
+test("cross-session side and source runtime results preserve static facts", {
+  tag: ["@gate-smoke","@smoke-review"],
+}, async ({ page }) => {
   const invalidEnvelopes = [
     { sessionId: "review-session-stale" },
     { side: "after" },
@@ -438,7 +448,9 @@ test("cross-session side and source runtime results preserve static facts", asyn
   }
 });
 
-test("parser-time target replacement fails closed without rebinding", async ({ page }) => {
+test("parser-time target replacement fails closed without rebinding", {
+  tag: ["@gate-smoke","@smoke-review"],
+}, async ({ page }) => {
   const frame = await installRuntimeProjectionFrame(page, { replaceBeforeReady: true });
   await postRuntimeFacts(page, [{ candidateKey: "runtime-host-2", changeId: "change-1", verdict: "changed" }]);
   await expect(frame.locator(

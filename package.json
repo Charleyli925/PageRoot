@@ -70,6 +70,7 @@
     "task:sync-main": "node scripts/task-workflow.mjs sync-main",
     "task:policy": "node scripts/task-workflow.mjs policy",
     "gate:edit": "node scripts/test-gate.mjs edit",
+    "gate:plan": "node scripts/test-gate.mjs plan",
     "gate:task": "node scripts/test-gate.mjs task",
     "gate:main:auto": "node scripts/test-gate.mjs main",
     "gate:release:auto": "node scripts/test-gate.mjs release",

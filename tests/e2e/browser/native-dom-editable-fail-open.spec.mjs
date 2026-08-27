@@ -53,7 +53,9 @@ async function editorFeedbackCopy(page, editor) {
   return `${detail || ""}\n${notices.join("\n")}`;
 }
 
-test("layout fingerprint CSS no longer blocks native edit entry", async ({ page }) => {
+test("layout fingerprint CSS no longer blocks native edit entry", {
+  tag: ["@gate-smoke","@smoke-editing"],
+}, async ({ page }) => {
   const { editor, frame } = await openFixture(page);
   const target = await activateNativeEdit(frame, "layout-css");
   await expect(target).toHaveAttribute("contenteditable", "true");
@@ -65,7 +67,9 @@ test("layout fingerprint CSS no longer blocks native edit entry", async ({ page 
   await expect(target).toContainText("可进");
 });
 
-test("style-boundary and empty-inline place a caret instead of refusing", async ({ page }) => {
+test("style-boundary and empty-inline place a caret instead of refusing", {
+  tag: ["@gate-smoke","@smoke-editing"],
+}, async ({ page }) => {
   const { editor, frame } = await openFixture(page);
 
   const mixed = await activateNativeEdit(frame, "style-boundary");
@@ -86,7 +90,9 @@ test("style-boundary and empty-inline place a caret instead of refusing", async 
   expect(await editorFeedbackCopy(page, editor)).not.toMatch(blockedCopy);
 });
 
-test("canvas text mismatch remounts from source then enters", async ({ page }) => {
+test("canvas text mismatch remounts from source then enters", {
+  tag: ["@gate-smoke","@smoke-editing"],
+}, async ({ page }) => {
   const { editor, frame } = await openFixture(page);
   const previewTarget = frame.locator(caseSelector("text-mismatch"));
   await previewTarget.evaluate((element) => {
@@ -105,7 +111,9 @@ test("canvas text mismatch remounts from source then enters", async ({ page }) =
   await expect(target).toContainText("已进");
 });
 
-test("complex parent prefers an exact text-fragment instead of comment-only", async ({ page }) => {
+test("complex parent prefers an exact text-fragment instead of comment-only", {
+  tag: ["@gate-smoke","@smoke-editing"],
+}, async ({ page }) => {
   const { editor, frame } = await openFixture(page);
   const parent = frame.locator(caseSelector("complex-parent"));
   const point = await parent.evaluate((element) => {
@@ -151,7 +159,9 @@ test("complex parent prefers an exact text-fragment instead of comment-only", as
   expect(exported).not.toMatch(/>裸文本<span data-keep="tail">/u);
 });
 
-test("unauthorized island mutation still rolls back after fail-open entry", async ({ page }) => {
+test("unauthorized island mutation still rolls back after fail-open entry", {
+  tag: ["@gate-smoke","@smoke-editing"],
+}, async ({ page }) => {
   const { editor, frame } = await openFixture(page);
   const target = await activateNativeEdit(frame, "layout-css");
   await setTextSelection(frame, "layout-css", "排版".length);
@@ -162,7 +172,9 @@ test("unauthorized island mutation still rolls back after fail-open entry", asyn
   await expect.poll(() => editor.getAttribute("data-edit-block-detail")).toContain("编辑之外");
 });
 
-test("fail-open entry still writes only the selected island bytes", async ({ page }) => {
+test("fail-open entry still writes only the selected island bytes", {
+  tag: ["@gate-smoke","@smoke-editing"],
+}, async ({ page }) => {
   const { frame } = await openFixture(page);
   const target = await activateNativeEdit(frame, "layout-css");
   await setTextSelection(frame, "layout-css", "排版指纹文字".length);

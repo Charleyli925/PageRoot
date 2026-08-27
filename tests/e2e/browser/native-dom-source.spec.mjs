@@ -44,7 +44,9 @@ test.beforeEach(async ({ page }) => {
   await page.goto("/");
 });
 
-test("one text edit changes only the authorized UTF-8 bytes, including BOM and CRLF", async ({ page }) => {
+test("one text edit changes only the authorized UTF-8 bytes, including BOM and CRLF", {
+  tag: ["@gate-smoke","@smoke-editing"],
+}, async ({ page }) => {
   const original = withBomAndCrLf(fixtureBuffer("source-fidelity.html"));
   const expected = replaceEditableIslandBytes(
     original,
@@ -67,7 +69,9 @@ test("one text edit changes only the authorized UTF-8 bytes, including BOM and C
   expect(sha256(actual), "exported byte hash").toBe(sha256(expected));
 });
 
-test("source reversal shortcuts are blocked and never change committed bytes", async ({ page }) => {
+test("source reversal shortcuts are blocked and never change committed bytes", {
+  tag: ["@gate-smoke","@smoke-editing"],
+}, async ({ page }) => {
   const original = withBomAndCrLf(fixtureBuffer("source-fidelity.html"));
   const expected = replaceEditableIslandBytes(
     original,
