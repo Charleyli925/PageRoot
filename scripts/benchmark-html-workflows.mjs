@@ -787,8 +787,8 @@ async function exerciseReviewAndAccept() {
     after: await after.locator("[data-pageroot-review-overlay-box]").count(),
   };
   const modes = [
-    { key: "beforeOnly", name: /^(?:只看修改前|单独查看修改前)$/u },
-    { key: "afterOnly", name: /^(?:只看修改后|单独查看 AI 修改后)$/u },
+    { key: "beforeOnly", name: /^(?:只看修改前|单独查看修改前(?: .+)?)$/u },
+    { key: "afterOnly", name: /^(?:只看修改后|单独查看 AI 修改后(?: .+)?)$/u },
     { key: "split", name: /^双页对比(?:（修改前与 AI 修改后）)?$/u },
   ];
   results.review.modeSwitchMs = {};
