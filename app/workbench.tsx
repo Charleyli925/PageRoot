@@ -202,6 +202,7 @@ import {
   rememberActiveDocumentPresentation,
   readyVersionPublicationMatches,
   restoreCachedDocumentPresentation,
+  useDocumentSurfaceHandoff,
 } from "./workbench/document-surface-presentation";
 import { markProjectApplied, markProjectHydrationStage, RendererStartupPerformance } from "./workbench/performance-timeline";
 import type { ReviewDocuments } from "./workbench/review-document";
@@ -6144,10 +6145,7 @@ export default function Workbench() {
   const startPageActive = activeWorkbenchTab?.kind === "start"
     && typeof window !== "undefined"
     && Boolean(window.htmlAIProjects);
-  const pendingCachedSurface = documentSurfaceCacheSnapshot.entries.find(
-    (entry) => entry.tier === "hot"
-      && entry.tabId === workbenchTabsSnapshot.pendingTabId,
-  ) || null;
+  const { visibleCachedSurface, retainPresentedTab, completeHandoff } = useDocumentSurfaceHandoff({ cache: documentSurfaceCacheSnapshot, tabs: workbenchTabsSnapshot, sourceSha256, renderedSourceSha256: canvasMode === "preview" && canvasRenderAcks.preview?.generation === canvasGeneration ? canvasRenderAcks.preview.sha256 : renderedContentSha256, canvasAuthority, canvasGeneration });
   const retryProjectHydrationFromCommentRail = useCallback(() => {
     void workspaceController?.retryProjectHydration();
   }, [workspaceController]);
@@ -6617,8 +6615,8 @@ export default function Workbench() {
         }}
       /> : null}
       <WorkbenchDocumentSurfaceCache
-        snapshot={documentSurfaceCacheSnapshot}
-        pendingTabId={pendingCachedSurface?.tabId || null}
+        snapshot={documentSurfaceCacheSnapshot} visibleTabId={visibleCachedSurface?.tabId || null}
+        onVisibleReady={retainPresentedTab} onHandoffComplete={completeHandoff}
         height="var(--comment-canvas-height, 760px)"
       />
       {startPageActive && projectCatalogCapability ? (
@@ -6649,8 +6647,9 @@ export default function Workbench() {
         >
           <div
             className="canvas-edit-surface"
-            hidden={canvasMode !== "edit" || Boolean(pendingCachedSurface)}
-            aria-hidden={canvasMode !== "edit" || Boolean(pendingCachedSurface)}
+            hidden={canvasMode !== "edit"}
+            aria-hidden={canvasMode !== "edit" || Boolean(visibleCachedSurface)}
+            inert={visibleCachedSurface ? true : undefined}
           >
             {!runtimeCapabilitiesReady ? (
               <div className="canvas-loading" role="status">正在识别运行环境…</div>
@@ -6734,7 +6733,7 @@ export default function Workbench() {
               )
             ) : null}
           </div>
-          {canvasMode === "preview" && !pendingCachedSurface ? (
+          {canvasMode === "preview" ? (
             <HtmlInteractionPreview
               key={`preview-authority-${canvasGeneration}`}
               ref={interactionPreviewRef}
@@ -6745,6 +6744,7 @@ export default function Workbench() {
               comments={comments}
               transport={interactivePreviewTransport}
               onReady={handlePreviewReady}
+              presentationCovered={Boolean(visibleCachedSurface)}
             />
           ) : null}
         </section>

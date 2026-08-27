@@ -5,7 +5,7 @@ import {
   DocumentSurfaceCacheSession,
 } from "../app/application/document-surface-cache-session.js";
 
-const hash = (digit) => `sha256:${digit.repeat(64)}`;
+const hash = (digit) => `sha256:${String(digit).slice(-1).repeat(64)}`;
 
 function capture(session, id, html = `<p>${id}</p>`) {
   return session.capture({
@@ -84,6 +84,13 @@ test("surface cache keeps three hot mounted entries and byte-bounded warm LRU en
   assert.equal(presented.scrollTop, 420);
   assert.equal(presented.pageViewContext.panel, "details");
   assert.equal(Object.isFrozen(presented.pageViewContext), true);
+  assert.deepEqual(session.snapshot.warmTabIds, ["document:project_b:doc_b"]);
+  assert.deepEqual(session.snapshot.coldTabIds, []);
+  assert.deepEqual(session.snapshot.limits, {
+    maxHotEntries: 3,
+    maxEntries: 5,
+    maxBytes: 10_000,
+  });
 });
 
 test("surface cache eviction makes old tabs cold without changing tab identity", () => {
@@ -103,4 +110,22 @@ test("surface cache eviction makes old tabs cold without changing tab identity",
   assert.deepEqual(session.snapshot.entries.map((entry) => entry.tabId), [
     "document:project_c:doc_c",
   ]);
+});
+
+test("surface cache reports evicted document identities as cold under the default 20-tab budget", () => {
+  const session = new DocumentSurfaceCacheSession();
+  const tabIds = Array.from({ length: 21 }, (_, index) => (
+    `document:project_${index}:doc_${index}`
+  ));
+  session.reconcile(tabIds);
+  for (let index = 0; index < 21; index += 1) capture(session, String(index));
+
+  assert.equal(session.snapshot.hotTabIds.length, 2);
+  assert.equal(session.snapshot.warmTabIds.length, 18);
+  assert.deepEqual(session.snapshot.coldTabIds, ["document:project_0:doc_0"]);
+  assert.deepEqual(session.snapshot.limits, {
+    maxHotEntries: 2,
+    maxEntries: 20,
+    maxBytes: 32 * 1024 * 1024,
+  });
 });

@@ -16,7 +16,14 @@ export type DocumentSurfaceCacheSnapshot = Readonly<{
   revision: number;
   entries: readonly DocumentSurfaceCacheEntry[];
   hotTabIds: readonly string[];
+  warmTabIds: readonly string[];
+  coldTabIds: readonly string[];
   totalBytes: number;
+  limits: Readonly<{
+    maxHotEntries: number;
+    maxEntries: number;
+    maxBytes: number;
+  }>;
 }>;
 
 export const INITIAL_DOCUMENT_SURFACE_CACHE_SNAPSHOT: DocumentSurfaceCacheSnapshot;

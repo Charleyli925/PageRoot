@@ -51,6 +51,7 @@ type HtmlInteractionPreviewProps = {
   comments?: readonly unknown[];
   onInteraction?: () => void;
   onReady?: (sourceSha256: string | null) => void;
+  presentationCovered?: boolean;
 };
 
 type DesktopPreviewSession = {
@@ -438,6 +439,7 @@ const HtmlInteractionPreview = forwardRef<
   comments,
   onInteraction,
   onReady,
+  presentationCovered = false,
 }, forwardedRef) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
@@ -631,6 +633,8 @@ const HtmlInteractionPreview = forwardRef<
       className={styles.preview}
       style={{ "--preview-height": height } as CSSProperties}
       onPointerDown={onInteraction}
+      aria-hidden={presentationCovered || undefined}
+      inert={presentationCovered || undefined}
     >
       <div className={styles.statusBar} role="status">
         <span>{statusLabel}</span>
