@@ -80,6 +80,10 @@ import type {
 import type { WorkbenchNavigationOutcome } from "./workbench-navigation-workflow.js";
 import type { BrowserDocumentSession } from "./browser-document-session.js";
 import type {
+  DocumentSurfaceCacheSession,
+  DocumentSurfaceCacheSnapshot,
+} from "./document-surface-cache-session.js";
+import type {
   WorkbenchTabsPersistenceCoordinator,
   WorkbenchTabsPersistenceSnapshot,
 } from "./workbench-tabs-persistence-coordinator.js";
@@ -129,6 +133,7 @@ export type WorkspaceControllerSnapshot = Readonly<{
   version: VersionWorkflowSnapshot | null;
   conversation: ConversationSessionSnapshot | null;
   workbenchTabs: WorkbenchTabsSnapshot | null;
+  documentSurfaceCache: DocumentSurfaceCacheSnapshot | null;
   workbenchTabsReady: boolean;
   workbenchNavigation: WorkbenchNavigationSnapshot | null;
   workbenchTabsPersistence: WorkbenchTabsPersistenceSnapshot | null;
@@ -277,6 +282,7 @@ export type WorkspaceControllerConstruction = Readonly<{
   sourceHistorySession: SourceHistorySession;
   conversationSession?: ConversationSession | null;
   workbenchTabsSession?: WorkbenchTabsSession | null;
+  documentSurfaceCacheSession?: DocumentSurfaceCacheSession | null;
   workbenchNavigationSession?: WorkbenchNavigationSession | null;
   browserDocumentSession?: BrowserDocumentSession | null;
   workbenchTabsPersistenceCoordinator?: WorkbenchTabsPersistenceCoordinator | null;
@@ -450,6 +456,10 @@ export class WorkspaceController {
     documentId: string,
     status: WorkbenchTabStatus,
   ): WorkbenchTabsSnapshot | null;
+  updateDocumentSurfacePresentation(
+    tabId: string,
+    presentation?: Readonly<Record<string, unknown>>,
+  ): import("./document-surface-cache-session.js").DocumentSurfaceCacheEntry | null;
   subscribe(
     listener: (snapshot: WorkspaceControllerSnapshot) => void,
   ): () => void;

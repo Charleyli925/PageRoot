@@ -451,6 +451,99 @@ export function buildReviewDocuments(
   return step.value;
 }
 
+/**
+ * Builds the minimum safe formal-review transport before semantic diffing.
+ * It preserves the same authored-page sandbox/bootstrap contract as the full
+ * review, but intentionally carries no change, comment or runtime facts.
+ */
+export function buildReviewShellDocuments(
+  beforeHtml: string,
+  afterHtml: string,
+  options: ReviewDocumentBuildOptions,
+): ReviewDocuments {
+  const runtimeVisualCaptureIdentity = createReviewRuntimeVisualCaptureIdentity({
+    sessionId: options.sessionId,
+    sourceSha256BySide: options.sourceSha256BySide,
+  });
+  if (typeof DOMParser === "undefined") {
+    return {
+      before: beforeHtml,
+      after: afterHtml,
+      bootstrapJavaScript: {
+        before: reviewBootstrap(
+          runtimeVisualCaptureIdentity.sessionId,
+          "before",
+          runtimeVisualCaptureIdentity.sourceSha256BySide.before,
+        ),
+        after: reviewBootstrap(
+          runtimeVisualCaptureIdentity.sessionId,
+          "after",
+          runtimeVisualCaptureIdentity.sourceSha256BySide.after,
+        ),
+      },
+      bootstrapFallbackJavaScript: {
+        before: reviewBootstrap(
+          runtimeVisualCaptureIdentity.sessionId,
+          "before",
+          runtimeVisualCaptureIdentity.sourceSha256BySide.before,
+        ),
+        after: reviewBootstrap(
+          runtimeVisualCaptureIdentity.sessionId,
+          "after",
+          runtimeVisualCaptureIdentity.sourceSha256BySide.after,
+        ),
+      },
+      changes: [],
+      outline: [],
+      runtimeVisualCandidates: [],
+      runtimeVisualCaptureCandidates: { before: [], after: [] },
+      runtimeVisualSourceHtml: { before: beforeHtml, after: afterHtml },
+      runtimeVisualCaptureIdentity,
+      commentGroups: [],
+      commentTargets: [],
+    };
+  }
+  const parser = new DOMParser();
+  const beforeDocument = parser.parseFromString(beforeHtml, "text/html");
+  const afterDocument = parser.parseFromString(afterHtml, "text/html");
+  clearReservedReviewMarkup(beforeDocument);
+  clearReservedReviewMarkup(afterDocument);
+  const preparedBefore = prepareDocument(
+    beforeDocument,
+    "before",
+    runtimeVisualCaptureIdentity,
+    options.sourcePath,
+    options.externalBootstrap,
+  );
+  const preparedAfter = prepareDocument(
+    afterDocument,
+    "after",
+    runtimeVisualCaptureIdentity,
+    options.sourcePath,
+    options.externalBootstrap,
+  );
+  return {
+    before: preparedBefore.html,
+    after: preparedAfter.html,
+    bootstrapJavaScript: {
+      before: preparedBefore.bootstrapJavaScript,
+      after: preparedAfter.bootstrapJavaScript,
+    },
+    bootstrapFallbackJavaScript: {
+      before: preparedBefore.bootstrapFallbackJavaScript,
+      after: preparedAfter.bootstrapFallbackJavaScript,
+    },
+    changes: [],
+    outline: [],
+    runtimeVisualCandidates: [],
+    runtimeVisualCaptureCandidates: { before: [], after: [] },
+    runtimeVisualSourceHtml: { before: beforeHtml, after: afterHtml },
+    runtimeVisualCaptureIdentity,
+    commentGroups: [],
+    commentTargets: [],
+  };
+}
+
 function yieldReviewAnalysisTask(): Promise<void> {
   return new Promise((resolve) => globalThis.setTimeout(resolve, 0));
 }

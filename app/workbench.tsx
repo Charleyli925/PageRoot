@@ -110,6 +110,9 @@ import {
   INITIAL_WORKBENCH_TABS_SNAPSHOT,
   type WorkbenchTab,
 } from "./application/workbench-tabs-session.js";
+import {
+  INITIAL_DOCUMENT_SURFACE_CACHE_SNAPSHOT,
+} from "./application/document-surface-cache-session.js";
 import type { SourceHistoryDirection } from "./domain/source-history.js";
 import {
   EDIT_AUTHOR_RUNTIME_VERIFICATION_DEADLINE_MS,
@@ -186,10 +189,18 @@ import {
   HandoffPanel,
 } from "./workbench/handoff-view";
 import AiReviewWorkspace from "./workbench/AiReviewWorkspace";
+import WorkbenchDocumentSurfaceCache from "./workbench/WorkbenchDocumentSurfaceCache";
+import ReviewAnalysisPrewarm, {
+  prepareReviewAnalysis,
+  preparedReviewByteSize,
+  type PreparedReviewDocuments,
+} from "./workbench/ReviewAnalysisPrewarm";
 import {
-  buildReviewDocumentsAsync,
-  type ReviewDocuments,
-} from "./workbench/review-document";
+  rememberActiveDocumentPresentation,
+  readyVersionPublicationMatches,
+  restoreCachedDocumentPresentation,
+} from "./workbench/document-surface-presentation";
+import type { ReviewDocuments } from "./workbench/review-document";
 import {
   WorkbenchHeaderShell,
 } from "./workbench/workbench-header-shell";
@@ -377,31 +388,6 @@ type ReadyReviewSession = {
   afterLabel: string;
 };
 
-type PreparedReviewDocuments = {
-  operationKey: string;
-  beforeHtml: string;
-  afterHtml: string;
-  sourcePath: string;
-  commentsKey: string;
-  sessionId: string;
-  documents: ReviewDocuments;
-};
-
-function preparedReviewByteSize(prepared: PreparedReviewDocuments): number {
-  return 2 * (
-    prepared.beforeHtml.length
-    + prepared.afterHtml.length
-    + prepared.commentsKey.length
-    + prepared.documents.before.length
-    + prepared.documents.after.length
-    + prepared.documents.bootstrapJavaScript.before.length
-    + prepared.documents.bootstrapJavaScript.after.length
-    + prepared.documents.bootstrapFallbackJavaScript.before.length
-    + prepared.documents.bootstrapFallbackJavaScript.after.length
-    + JSON.stringify(prepared.documents.commentTargets).length
-  );
-}
-
 function commentMeasurementKey(
   itemKey: string,
   layoutState: unknown,
@@ -523,8 +509,8 @@ export default function Workbench() {
     itemKey: string;
   } | null>(null);
   const pagePresentationScrollRequestRef = useRef(0);
-  const reviewAnalysisSessionRef = useRef(
-    new ReviewAnalysisSession<PreparedReviewDocuments>({
+  const [reviewAnalysisSession] = useState(
+    () => new ReviewAnalysisSession<PreparedReviewDocuments>({
       estimateSize: preparedReviewByteSize,
     }),
   );
@@ -571,6 +557,8 @@ export default function Workbench() {
     useState<WorkspaceController | null>(null);
   const workbenchTabsSnapshot = workspaceControllerSnapshot?.workbenchTabs
     ?? INITIAL_WORKBENCH_TABS_SNAPSHOT;
+  const documentSurfaceCacheSnapshot = workspaceControllerSnapshot?.documentSurfaceCache
+    ?? INITIAL_DOCUMENT_SURFACE_CACHE_SNAPSHOT;
   const [importedCanvasBase, setImportedCanvasBase] = useState<{
     managedSourcePath: string;
     externalSourcePath: string;
@@ -1664,6 +1652,29 @@ export default function Workbench() {
         });
         return;
       }
+      if (event.type === "version-activation-published") {
+        const publication = event as Readonly<{ context?: ProjectContext | null; operationKey?: string; lastModifiedAt?: string }>;
+        if (
+          !publication.context
+          || !workspaceController.matchesCurrentProjectContext(publication.context)
+        ) return;
+        const review = readyReviewSession;
+        if (!review || review.operationKey === publication.operationKey) {
+          setReadyReviewSession(null);
+          performance.mark("pageroot:accept:overlay-closed");
+        }
+        setLastModifiedAt(publication.lastModifiedAt || null);
+        setSelection(null);
+        setComposerOpen(false);
+        commentEditResumePendingRef.current = null;
+        setEditingCommentId(null);
+        setPreviewAttachment(null);
+        setHandoffPreviewOpen(false);
+        setCanvasMode("edit");
+        setDrawer(null);
+        performance.mark("pageroot:accept:ui-published");
+        return;
+      }
       if (event.type === "attachment-cleanup-failed") {
         const attachmentEvent = event as Readonly<{
           context?: ProjectContext | null;
@@ -1881,8 +1892,12 @@ export default function Workbench() {
         setProjectRecordsPath(null);
         setLastModifiedAt(project.lastModifiedAt || null);
         setSelection(null);
-        setPageViewContext(null);
-        reviewAnalysisSessionRef.current.clear();
+        restoreCachedDocumentPresentation({
+          controller: workspaceController, project, setPageViewContext,
+          setCanvasMode, stage: reviewStageRef.current,
+        });
+        // Exact identity keys let tab changes cancel work without purging cache.
+        reviewAnalysisSession.cancel();
         setComposerOpen(false);
         for (const url of attachmentObjectUrlsRef.current.values()) {
           try {
@@ -2277,8 +2292,8 @@ export default function Workbench() {
       unsubscribe();
       unsubscribeSnapshot();
     };
-  }, [setSourceViewTransitioning, workspaceController]);
-  useEffect(() => () => reviewAnalysisSessionRef.current.dispose(), []);
+  }, [readyReviewSession, reviewAnalysisSession, setSourceViewTransitioning, workspaceController]);
+  useEffect(() => () => reviewAnalysisSession.dispose(), [reviewAnalysisSession]);
   const reportInterruptionPresence = useCallback((
     interruptionCode: string,
     present: boolean,
@@ -4041,10 +4056,20 @@ export default function Workbench() {
   }, [setToast]);
   const selectWorkbenchTab = useCallback((tab: WorkbenchTab) => {
     if (!workspaceController) return;
+    rememberActiveDocumentPresentation({ controller: workspaceController,
+      tabs: workbenchTabsSnapshot, canvasMode,
+      pageViewContext: activePageViewContext,
+      scrollTop: reviewStageRef.current?.scrollTop || 0 });
     void workspaceController.activateWorkbenchTab(tab.tabId).then((outcome) => {
       presentWorkbenchTabOutcome(outcome);
     });
-  }, [presentWorkbenchTabOutcome, workspaceController]);
+  }, [
+    activePageViewContext,
+    canvasMode,
+    presentWorkbenchTabOutcome,
+    workbenchTabsSnapshot,
+    workspaceController,
+  ]);
   const createWorkbenchStartTab = useCallback(() => {
     if (!workspaceController) return;
     void workspaceController.createWorkbenchStartTab().then((outcome) => {
@@ -6346,10 +6371,12 @@ export default function Workbench() {
       performance.mark("pageroot:accept:activated");
       if (outcome.status !== "succeeded") {
         if (outcome.status !== "stale") {
-          openProcessPanel();
+          const published = readyVersionPublicationMatches(workspaceController, run);
+          if (!published) openProcessPanel();
           setToast({
-            title: "最新版暂时无法打开",
-            message: outcome.reason,
+            title: published ? "新版本已提交，编辑画布仍在准备" : "最新版暂时无法打开",
+            message: published ? `${outcome.reason} 已提交的 HTML 保持可见，完成恢复前不会开放编辑。`
+              : outcome.reason,
             tone: outcome.status === "blocked" ? "warning" : "error",
             sticky: outcome.status !== "blocked",
             disposition: "background-result",
@@ -6513,69 +6540,29 @@ export default function Workbench() {
       ) {
         throw new Error("当前冻结 HTML 已发生变化，无法开始安全对比。");
       }
-      const reviewComments = currentCommentSessionSnapshot().comments
-        .filter(commentHasContent)
-        .map((comment) => ({
-          ...comment,
-          target: {
-            ...comment.target,
-            ...(comment.target.sourceAnchor
-              ? { sourceAnchor: { ...comment.target.sourceAnchor } }
-              : {}),
-            ...(comment.target.fingerprint
-              ? {
-                  fingerprint: {
-                    ...comment.target.fingerprint,
-                    stableAttributes: {
-                      ...comment.target.fingerprint.stableAttributes,
-                    },
-                    ancestorFingerprint: [
-                      ...comment.target.fingerprint.ancestorFingerprint,
-                    ],
-                  },
-                }
-              : {}),
-            ...(comment.target.boundingBox
-              ? { boundingBox: { ...comment.target.boundingBox } }
-              : {}),
-          },
-          ...(comment.attachments?.length
-            ? { attachments: comment.attachments.map((item) => ({ ...item })) }
-            : {}),
-        }));
-      const commentsKey = JSON.stringify(reviewComments);
       const externalBootstrap = Boolean(window.htmlAIPreview);
-      const reviewCacheKey = [
-        operationKey,
-        candidate.baseSnapshotSha256,
-        candidate.sha256,
-        candidate.sourcePath,
-        externalBootstrap ? "external" : "inline",
-        await browserSha256(commentsKey),
-      ].join("\u0000");
-      const preparedReview = await reviewAnalysisSessionRef.current.analyze({
-        key: reviewCacheKey,
-        compute: async ({ isCancelled }) => {
-          const sessionId = `review-${Date.now().toString(36)}-${++reviewSessionSequenceRef.current}`;
-          const documents = await buildReviewDocumentsAsync(frozenHtml, candidate.content, {
-            sessionId,
-            sourceSha256BySide: {
-              before: candidate.baseSnapshotSha256,
-              after: candidate.sha256,
-            },
-            sourcePath: candidate.sourcePath,
-            externalBootstrap,
-            comments: reviewComments,
-          }, { isCancelled });
-          return {
-            operationKey,
-            beforeHtml: frozenHtml,
-            afterHtml: candidate.content,
-            sourcePath: candidate.sourcePath,
-            commentsKey,
-            sessionId,
-            documents,
-          };
+      const sessionId = `review-${Date.now().toString(36)}-${++reviewSessionSequenceRef.current}`;
+      const beforeLabel = run.basedOnVersionId
+        ? safeVersionLabel(run.basedOnVersionId)
+        : "当前版本";
+      const afterLabel = String(
+        run.readyPayload.candidateDisplayVersionLabel
+        || safeVersionLabel(run.candidateVersionId),
+      );
+      const preparedReview = await prepareReviewAnalysis({
+        session: reviewAnalysisSession,
+        candidate,
+        beforeHtml: frozenHtml,
+        comments: currentCommentSessionSnapshot().comments,
+        externalBootstrap,
+        sessionId,
+        onShell: (documents) => {
+          if (!isCurrentProjectContext(reviewContext)) return;
+          setReadyReviewSession({ operationKey, sessionId, documents,
+            beforeHtml: frozenHtml, sourcePath: candidate.sourcePath,
+            beforeLabel, afterLabel });
+          setDrawer(null);
+          performance.mark("pageroot:review:shell-visible");
         },
       });
       const analyzedRun = currentRunSessionSnapshot().activeRun;
@@ -6591,13 +6578,8 @@ export default function Workbench() {
         documents: preparedReview.documents,
         beforeHtml: frozenHtml,
         sourcePath: preparedReview.sourcePath,
-        beforeLabel: run.basedOnVersionId
-          ? safeVersionLabel(run.basedOnVersionId)
-          : "当前版本",
-        afterLabel: String(
-          run.readyPayload.candidateDisplayVersionLabel
-          || safeVersionLabel(run.candidateVersionId),
-        ),
+        beforeLabel,
+        afterLabel,
       });
       setDrawer(null);
     } catch (cause) {
@@ -6621,6 +6603,7 @@ export default function Workbench() {
     currentRunSessionSnapshot,
     fenceAndFreezeCurrentCanvas,
     isCurrentProjectContext,
+    reviewAnalysisSession,
     reviewPreparing,
     workspaceController,
   ]);
@@ -7560,9 +7543,22 @@ export default function Workbench() {
   const startPageActive = activeWorkbenchTab?.kind === "start"
     && typeof window !== "undefined"
     && Boolean(window.htmlAIProjects);
+  const pendingCachedSurface = documentSurfaceCacheSnapshot.entries.find(
+    (entry) => entry.tier === "hot"
+      && entry.tabId === workbenchTabsSnapshot.pendingTabId,
+  ) || null;
 
   return (
     <>
+      <ReviewAnalysisPrewarm
+        session={reviewAnalysisSession}
+        controller={workspaceController}
+        activeRun={activeRun} projectId={projectId} documentId={documentId}
+        sourceSha256={sourceSha256} editRevision={editRevision}
+        lastPersistedRevision={lastPersistedRevision} persistState={persistState}
+        html={html} comments={comments} projectHydrating={projectHydrating}
+        projectLoadError={projectLoadError}
+      />
       <main
         className="workbench"
         data-start-page={startPageActive ? "true" : undefined}
@@ -7925,6 +7921,10 @@ export default function Workbench() {
         onOpenRegistered={openRegisteredWorkbenchProject}
         onOpenCurrentProject={() => setDrawer("files")}
       />
+      <WorkbenchDocumentSurfaceCache
+        snapshot={documentSurfaceCacheSnapshot}
+        pendingTabId={pendingCachedSurface?.tabId || null} height={`${canvasDocumentHeight}px`}
+      />
       {startPageActive ? (
         <WorkbenchStartPage
           activeTabId={activeWorkbenchTab.tabId}
@@ -7954,8 +7954,8 @@ export default function Workbench() {
         >
           <div
             className="canvas-edit-surface"
-            hidden={canvasMode !== "edit"}
-            aria-hidden={canvasMode !== "edit"}
+            hidden={canvasMode !== "edit" || Boolean(pendingCachedSurface)}
+            aria-hidden={canvasMode !== "edit" || Boolean(pendingCachedSurface)}
           >
             {!runtimeCapabilitiesReady ? (
               <div className="canvas-loading" role="status">正在识别运行环境…</div>
@@ -8035,7 +8035,7 @@ export default function Workbench() {
               )
             ) : null}
           </div>
-          {canvasMode === "preview" ? (
+          {canvasMode === "preview" && !pendingCachedSurface ? (
             <HtmlInteractionPreview
               key={`preview-authority-${canvasGeneration}`}
               ref={interactionPreviewRef}

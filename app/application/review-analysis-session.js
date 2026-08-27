@@ -108,6 +108,11 @@ export class ReviewAnalysisSession {
     return promise;
   }
 
+  peek(key) {
+    if (typeof key !== "string" || !key) return null;
+    return this.#cached(key);
+  }
+
   cancel() {
     this.#generation += 1;
     this.#pending = null;

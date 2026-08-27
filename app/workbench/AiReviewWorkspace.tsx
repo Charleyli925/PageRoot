@@ -706,11 +706,12 @@ export default function AiReviewWorkspace({
   }, [documents]);
 
   useEffect(() => {
-    if (!hydrated || reviewInitializedRef.current) return;
+    if (!hydrated || !documents.changes[0]) return;
+    if (reviewInitializedRef.current && reviewStateRef.current.focus !== "all") return;
     reviewInitializedRef.current = true;
     dispatchReviewState({
       type: "set-navigation-target",
-      value: documents.changes[0]?.id || "all",
+      value: documents.changes[0].id,
     });
   }, [documents.changes, hydrated]);
 

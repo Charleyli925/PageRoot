@@ -4,6 +4,7 @@ import type { ProjectWorkflow, ProjectWorkflowOutcome, ProjectWorkflowProject } 
 import type { WorkspaceController } from "./workspace-controller.js";
 import type { BrowserDocumentSession } from "./browser-document-session.js";
 import type { WorkbenchTabsPersistenceCoordinator } from "./workbench-tabs-persistence-coordinator.js";
+import type { DocumentSurfaceCacheSession } from "./document-surface-cache-session.js";
 export type WorkbenchNavigationOutcome = ProjectWorkflowOutcome<Record<string, unknown>> & Readonly<{
   committed?: boolean;
   tabId?: string;
@@ -18,6 +19,7 @@ export class WorkbenchNavigationWorkflow {
   constructor(input: {
     session: WorkbenchNavigationSession;
     tabs: WorkbenchTabsSession;
+    surfaceCache?: DocumentSurfaceCacheSession | null;
     projectWorkflow: ProjectWorkflow;
     controller: WorkspaceController;
     browserDocuments?: BrowserDocumentSession | null;

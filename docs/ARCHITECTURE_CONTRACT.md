@@ -439,6 +439,13 @@ disposable; a trusted 25th distinct fact is an explicit analysis failure, while
 an oversized serialized payload fails closed rather than being treated as a
 complete review.
 
+Exact completed review entries survive unrelated tab applications; only stale
+in-flight analysis is cancelled. Candidate-ready state may prewarm the same
+cache key. An uncached explicit Review first publishes a minimally prepared
+sandbox/bootstrap shell with no change, comment or runtime facts, then replaces
+it with complete analyzed documents. The shell is presentation only and cannot
+approve, promote or alter either source.
+
 Formal Review has an optional, narrower runtime-snapshot supplement. One
 `SourceHostResolver` pairs only direct source Canvas/SVG roots and source-empty
 stable hosts from `SourceIndex`/`TargetRef`; it does not use changed-script

@@ -497,6 +497,32 @@ test("activation validates all content and synchronously publishes every Session
   assert.equal(harness.calls.catalogAfterSettlement.length, 1);
 });
 
+test("activation publishes committed display identity before Canvas verification settles", async () => {
+  const canvasGate = deferred();
+  const publication = deferred();
+  const harness = createHarness({
+    verifyRendered: async (html) => {
+      if (html === CANDIDATE_HTML) await canvasGate.promise;
+    },
+  });
+  const run = readyRun();
+  harness.runSession.trackRun(run, { activate: "always" });
+  harness.workflow.subscribeEvents((event) => {
+    if (event.type === "version-activation-published") publication.resolve(event);
+  });
+
+  const activation = harness.workflow.activateReadyVersion({ run });
+  const event = await publication.promise;
+  assert.equal(event.operationKey, operationKey(run));
+  assert.equal(event.context.sourcePath, SOURCE_A);
+  assert.equal(harness.documentSession.html, CANDIDATE_HTML);
+  assert.equal(harness.runSession.activeRun?.status, "ready-to-open");
+
+  canvasGate.resolve();
+  assert.equal((await activation).status, "succeeded");
+  assert.equal(harness.runSession.activeRun?.status, "complete");
+});
+
 test("activation keeps the Canvas locked when rendered-byte verification fails", async () => {
   const harness = createHarness({
     verifyRendered: async (html) => {
