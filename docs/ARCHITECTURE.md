@@ -303,6 +303,9 @@ services.
 | Pseudonymous identity, strict event schemas, local queue and PostHog delivery | `desktop/usage-telemetry.mjs` |
 | Install-level first-real-HTML guide status and built-in welcome identity | `desktop/ui-preferences.mjs`, `app/application/first-edit-guide-session.js` |
 | Preview sanitization and verified frame injection | `app/components/html-preview-sandbox.js` |
+| Canvas one-shot runtime frame identity, frozen-result verification and author-paint retention | `app/components/html-canvas-frame.js`; `HtmlCanvasEditor` still owns iframe mount/reload |
+| Native deferred-command arbitration (user-explicit vs system, lease matching, stale drain) | `app/components/html-canvas-native-commands.js`; the editor supplies the live session/lease and still retires the queue before host replacement |
+| Canvas comment-target measurement, insertion-point and marker layout | `app/components/html-canvas-comment-layout.ts`; disposable geometry only |
 | Canvas selection chrome, comment markers, hover hints and edit toolbar presentation | `app/components/html-canvas-selection-chrome.tsx`; snapshots and callbacks only, no source or editing authority |
 | Volatile desktop preview sessions and contained local-asset serving | `desktop/preview-protocol.mjs` |
 | Imported project's original sibling-asset directory | `desktop/imported-asset-root.mjs` plus Main `html-projects.json` |
@@ -341,7 +344,10 @@ scopes.
 `HtmlCanvasEditor.tsx` remains the Canvas coordinator. Parsing, DOM
 instrumentation, interaction policy, preview synchronization, selection,
 source-backed page view and style inspection live in the adjacent
-`html-canvas-*.ts` modules. Selection chrome, comment markers, hover hints and
+`html-canvas-*.ts` modules. One-shot runtime frame verification lives in
+`html-canvas-frame.js`. Native deferred-command arbitration lives in
+`html-canvas-native-commands.js`. Comment-target geometry lives in
+`html-canvas-comment-layout.ts`. Selection chrome, comment markers, hover hints and
 the edit toolbar are presented by `html-canvas-selection-chrome.tsx`; they
 receive snapshots and callbacks only. Those helpers do not gain a second source or
 editing authority; `IslandEditingController` and `SourcePatchEngine` remain

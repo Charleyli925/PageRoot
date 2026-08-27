@@ -728,16 +728,16 @@ by matching its source text.
 
 #### Review behavior test debt
 
-Converting the gate away from ordered source-string matching exposed three
-renderer behaviors whose ordering guarantees are now asserted only
-structurally (call presence), because the repository has no DOM test harness for
-`HtmlCanvasEditor.tsx`. Each needs Electron/Playwright behavior coverage:
+Converting the gate away from ordered source-string matching exposed renderer
+behaviors whose ordering guarantees are now asserted only structurally (call
+presence), because the repository has no DOM test harness for
+`HtmlCanvasEditor.tsx`. Native deferred-command arbitration now has a Node
+unit test on `html-canvas-native-commands.js` (system work blocked by a pending
+user-explicit command, supersede, and stale-lease drain). The remaining items
+still need Electron/Playwright behavior coverage:
 
 - Canvas fail-closed freeze: a source transition must abort when
   `freezeNow()` fails or returns bytes that differ from the live source.
-- Native command arbitration: a lower-priority `system` command must be
-  rejected before it reaches the controller queue when a `user-explicit`
-  command is pending.
 - Canonical host replacement: the native lease must be disposed before the
   authored DOM host is replaced.
 

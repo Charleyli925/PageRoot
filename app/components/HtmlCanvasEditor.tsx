@@ -16,12 +16,10 @@ import { flushSync } from "react-dom";
 
 import {
   EDIT_AUTHOR_RUNTIME_BUDGET,
-  EDIT_AUTHOR_RUNTIME_CONTRACT_VERSION,
   EDIT_RUNTIME_FROZEN_ATTRIBUTE,
   EDIT_RUNTIME_HOST_ATTRIBUTE,
   EDIT_RUNTIME_RESULT_ATTRIBUTE,
   isEditRuntimeFrameToken,
-  type EditRuntimeGrant,
 } from "../domain/edit-runtime-contract.js";
 import {
   createPagePresentationAction,
@@ -32,7 +30,6 @@ import {
   SOURCE_NODE_ATTRIBUTE,
   applyPatchPlan,
   buildSourceIndex,
-  createInsertionPointTargetRef,
   createTargetRef,
   instrumentPreviewHtml,
   planSourcePatch,
@@ -67,7 +64,6 @@ import {
   sameNativeLayout,
   sameNativeTextStyle,
 } from "./native-layout-fingerprint";
-import { selectorForElement } from "./html-canvas-dom";
 import {
   STYLE_PROPERTY_CONFIGS,
   TEXT_RANGE_EDITABLE_PROPERTIES,
@@ -77,13 +73,10 @@ import {
   type SelectedStyle,
 } from "./html-canvas-style-inspector";
 import {
-  defaultGlobalCommentElement,
   deterministicOperationTargetUpdate,
   deterministicTargetUpdates,
-  inferSelectionLevel,
   isPageRootElement,
   isPageRootSelection,
-  readableLabel,
   selectionForElement,
   selectionFromRefreshedTarget,
   sourceMoveAvailability,
@@ -104,9 +97,25 @@ import {
   isRenderedCommentTarget,
   naturalDocumentContentHeight,
   sortedCommentLayoutTargetIds,
-  tabAssociationForElement,
   tabAssociations,
 } from "./html-canvas-page-view";
+import {
+  frameDocumentMatchesExpected,
+  isRuntimeFrameFrozenResult,
+  runtimeFrameKeepsAuthorPaint,
+  sameRuntimeGrant,
+  type RuntimeFrameContext,
+} from "./html-canvas-frame";
+import {
+  NativeDeferredCommandQueue,
+  nativeEditLeasesMatch,
+} from "./html-canvas-native-commands";
+import {
+  layoutCommentMarkers,
+  layoutInsertionPoints,
+  measureCommentTargetLayouts,
+  type InsertionPoint,
+} from "./html-canvas-comment-layout";
 import {
   adoptCanonicalHistoryIslandInPlace,
   canonicalNativeHostPreview,
@@ -165,7 +174,6 @@ import type {
   HtmlCanvasSelectionLevel,
   HtmlCanvasSourceTransaction,
   HtmlCanvasTargetResolution,
-  NativeDeferredCommandAuthority,
   NativeDeferredCommandDiscardReason,
   NativeDeferredCommandOptions,
 } from "./HtmlCanvasEditor.types";
@@ -416,16 +424,6 @@ function canvasTargetOutlineStyle(
   return chrome.outline;
 }
 
-type InsertionPoint = {
-  selection: HtmlCanvasSelection;
-  anchorElement: HTMLElement;
-  kind: "page-start" | "boundary";
-  left: number;
-  top: number;
-  width: number;
-};
-
-
 type ActiveNativeEdit = {
   mode: "editable-island" | "text-fragment";
   rootElement: HTMLElement;
@@ -446,16 +444,6 @@ type ActiveNativeEdit = {
     sourceRevision: string;
     hostId: string;
   };
-};
-
-type PendingNativeCommandCallback = {
-  sequence: number;
-  kind: string;
-  authority: NativeDeferredCommandAuthority;
-  session: IslandEditingController;
-  lease: ActiveNativeEdit["lease"];
-  run: () => void;
-  onDiscard?: (reason: NativeDeferredCommandDiscardReason) => void;
 };
 
 type RetainedNativeEditFocus = {
@@ -479,19 +467,6 @@ type PendingNativeEditResume = NativeEditFenceBookmark & {
 
 type NativeFormatShortcut = "bold" | "italic" | "underline";
 
-function nativeEditLeasesMatch(
-  left: ActiveNativeEdit["lease"] | null,
-  right: ActiveNativeEdit["lease"],
-): boolean {
-  return Boolean(
-    left
-    && left.sessionId === right.sessionId
-    && left.domGeneration === right.domGeneration
-    && left.sourceRevision === right.sourceRevision
-    && left.hostId === right.hostId
-  );
-}
-
 type NativeEditCommitResult = {
   ok: boolean;
   mutation: HtmlCanvasMutation | null;
@@ -506,83 +481,6 @@ type FinishNativeEditingOptions = {
 
 type SourcePatchCommand = Parameters<typeof planSourcePatch>[0];
 type SourcePatchPlan = NonNullable<ReturnType<typeof planSourcePatch>>;
-
-type RuntimeFrameContext = {
-  verificationToken: string;
-  grant: EditRuntimeGrant;
-  elementGeneration: number;
-  settled: boolean;
-};
-
-function sameRuntimeGrant(
-  left: EditRuntimeGrant | null | undefined,
-  right: EditRuntimeGrant | null | undefined,
-): boolean {
-  return Boolean(
-    left
-    && right
-    && left.sessionId === right.sessionId
-    && left.executionId === right.executionId
-    && left.sourceSha256 === right.sourceSha256
-    && left.canvasGeneration === right.canvasGeneration,
-  );
-}
-
-function frameDocumentMatchesExpected(
-  iframe: HTMLIFrameElement,
-  expectedFrameHtml: string,
-  writtenHtml: string | null,
-): boolean {
-  return iframe.srcdoc === expectedFrameHtml || writtenHtml === expectedFrameHtml;
-}
-
-function isRuntimeFrameFrozenResult(
-  value: unknown,
-  frame: RuntimeFrameContext,
-): boolean {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
-  const result = value as Record<string, unknown>;
-  if (
-    result.state !== "frozen"
-    || result.reason !== null
-    || result.contractVersion !== EDIT_AUTHOR_RUNTIME_CONTRACT_VERSION
-    || result.executionId !== frame.grant.executionId
-    || result.sessionId !== frame.grant.sessionId
-    || !Array.isArray(result.hostKeys)
-    || result.hostKeys.length !== frame.grant.hosts.length
-  ) return false;
-  const expected = new Set(frame.grant.hosts.map((host) => host.key));
-  const received = new Set<string>();
-  for (const key of result.hostKeys) {
-    if (typeof key !== "string" || !expected.has(key) || received.has(key)) return false;
-    received.add(key);
-  }
-  return received.size === expected.size;
-}
-
-function hostHasAuthorPaint(element: Element | null): boolean {
-  if (!element || element.nodeType !== 1) return false;
-  const tag = element.tagName.toLowerCase();
-  if (tag === "canvas" || tag === "svg") return true;
-  return Boolean(element.querySelector("canvas, svg"));
-}
-
-function runtimeFrameKeepsAuthorPaint(
-  documentNode: Document,
-  frame: RuntimeFrameContext,
-): boolean {
-  if (documentNode.querySelectorAll("img[data-pageroot-edit-runtime-snapshot]").length > 0) {
-    return false;
-  }
-  // Host discovery includes every source-empty unique binding, not only
-  // charts. Unused empty hosts must not discard a frozen author canvas.
-  return frame.grant.hosts.some((host) => {
-    const element = documentNode.querySelector(
-      `[${EDIT_RUNTIME_HOST_ATTRIBUTE}="${host.key}"]`,
-    );
-    return hostHasAuthorPaint(element);
-  });
-}
 
 const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProps>(function HtmlCanvasEditor(
   {
@@ -643,8 +541,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   const selectedSourceSelectionRef = useRef<HtmlCanvasSelection | null>(null);
   const activeTextRangeRef = useRef<ActiveTextRange | null>(null);
   const activeNativeEditRef = useRef<ActiveNativeEdit | null>(null);
-  const pendingNativeCommandCallbackRef = useRef<PendingNativeCommandCallback | null>(null);
-  const scheduledNativeCommandCallbackRef = useRef<PendingNativeCommandCallback | null>(null);
+  const nativeCommandQueueRef = useRef(new NativeDeferredCommandQueue());
   const deferNativeCommandRef = useRef<(
     kind: string,
     run: () => void,
@@ -1261,76 +1158,12 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       return;
     }
     const commentTabAssociations = tabAssociations(documentNode);
-    const commentLayouts = layoutTargets.map((target) => {
-      const missing = (resolution: HtmlCanvasTargetResolution) => ({
-        targetId: target.id,
-        status: "missing" as const,
-        resolution,
-      });
-      try {
-        let targetElement: HTMLElement | null = null;
-        let targetResolution: HtmlCanvasTargetResolution = target.resolution;
-        if (isPageRootSelection(target)) {
-          targetElement = defaultGlobalCommentElement(documentNode);
-          targetResolution = "exact";
-        } else {
-          const sourceIndex = sourceIndexRef.current;
-          const resolution = sourceIndex
-            ? resolveTargetRef(sourceIndex, sourceTargetRefForSelection(target))
-            : null;
-          targetResolution = (
-            resolution?.resolution ?? "orphaned"
-          ) as HtmlCanvasTargetResolution;
-          if (resolution?.target?.type !== "element") return missing(targetResolution);
-          const escapedNodeId = String(resolution.target.nodeId)
-            .replace(/\\/g, "\\\\")
-            .replace(/"/g, '\\"');
-          targetElement = documentNode.querySelector<HTMLElement>(
-            `[${SOURCE_NODE_ATTRIBUTE}="${escapedNodeId}"]`,
-          );
-        }
-        if (!targetElement) return missing(targetResolution);
-        const targetRect = targetElement.getBoundingClientRect();
-        const visible = isRenderedCommentTarget(targetElement);
-        const tabAssociation = tabAssociationForElement(
-          targetElement,
-          commentTabAssociations,
-        );
-        if (!visible) {
-          return tabAssociation
-            ? {
-                targetId: target.id,
-                status: "hidden" as const,
-                resolution: targetResolution,
-                tabGroupKey: tabAssociation.key,
-                tabGroupLabel: tabAssociation.label,
-              }
-            : {
-                targetId: target.id,
-                status: "hidden" as const,
-                resolution: targetResolution,
-              };
-        }
-        const top = targetRect.top + scrollTop;
-        if (!Number.isFinite(top) || !Number.isFinite(targetRect.height)) {
-          return missing(targetResolution);
-        }
-        return {
-          targetId: target.id,
-          status: "visible" as const,
-          resolution: targetResolution,
-          top: Math.max(0, top),
-          height: Math.max(0, targetRect.height),
-          ...(tabAssociation
-            ? {
-                tabGroupKey: tabAssociation.key,
-                tabGroupLabel: tabAssociation.label,
-              }
-            : {}),
-        };
-      } catch {
-        return missing("orphaned");
-      }
+    const commentLayouts = measureCommentTargetLayouts({
+      documentNode,
+      layoutTargets,
+      sourceIndex: sourceIndexRef.current,
+      scrollTop,
+      commentTabAssociations,
     });
     const commentLayoutsByTargetId = new Map(
       commentLayouts.map((layout) => [layout.targetId, layout]),
@@ -1380,220 +1213,28 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       setOverlayPosition(null);
     }
 
-    const moduleParents = new Set<HTMLElement>();
-    documentNode.body.querySelectorAll<HTMLElement>("*").forEach((candidate) => {
-      if (inferSelectionLevel(candidate) === "module" && candidate.parentElement) {
-        moduleParents.add(candidate.parentElement);
-      }
+    const insertionLayout = layoutInsertionPoints({
+      documentNode,
+      sourceIndex: sourceIndexRef.current,
+      frameOffsetLeft,
+      frameOffsetTop,
+      frameWidth,
+      frameHeight,
     });
-
-    const dedupedInsertionPoints = new Map<string, InsertionPoint>();
-    moduleParents.forEach((parent) => {
-      const children = Array.from(parent.children).filter(
-        (child): child is HTMLElement => child instanceof documentNode.defaultView!.HTMLElement,
-      );
-      const parentSelector = selectorForElement(parent);
-      const sourceIndex = sourceIndexRef.current;
-      const parentNodeId = parent.getAttribute(SOURCE_NODE_ATTRIBUTE);
-
-      const addBoundary = (
-        moduleElement: HTMLElement,
-        beforeSibling: HTMLElement | null,
-        boundaryTop: number,
-        label: string,
-      ) => {
-        const beforeSiblingNodeId = beforeSibling?.getAttribute(SOURCE_NODE_ATTRIBUTE) || null;
-        let insertionTargetRef: ReturnType<typeof createInsertionPointTargetRef> | null = null;
-        if (sourceIndex && parentNodeId && (!beforeSibling || beforeSiblingNodeId)) {
-          try {
-            insertionTargetRef = createInsertionPointTargetRef(sourceIndex, {
-              parentId: parentNodeId,
-              beforeSiblingId: beforeSiblingNodeId,
-              label,
-            });
-          } catch {
-            insertionTargetRef = null;
-          }
-        }
-        const moduleRect = moduleElement.getBoundingClientRect();
-        const adjacentRect = beforeSibling && inferSelectionLevel(beforeSibling) === "module"
-          ? beforeSibling.getBoundingClientRect()
-          : null;
-        const leftInFrame = Math.max(
-          8,
-          adjacentRect ? Math.min(moduleRect.left, adjacentRect.left) : moduleRect.left,
-        );
-        const rightInFrame = Math.min(
-          frameWidth - 8,
-          adjacentRect ? Math.max(moduleRect.right, adjacentRect.right) : moduleRect.right,
-        );
-        const fallbackBoundary = beforeSiblingNodeId || `end_${parentSelector}`;
-        const fallbackTargetId = `target_insertion_${encodeURIComponent(parentSelector)}_${encodeURIComponent(fallbackBoundary)}`;
-        const selectionValue: HtmlCanvasSelection = {
-          id: insertionTargetRef?.targetId || fallbackTargetId,
-          label,
-          selector: insertionTargetRef?.selector || parentSelector,
-          level: "insertion",
-          tagName: "insertion",
-          text: "",
-          resolution: insertionTargetRef ? "exact" : "orphaned",
-          ...(insertionTargetRef?.sourceAnchor
-            ? { sourceAnchor: insertionTargetRef.sourceAnchor }
-            : {}),
-          ...(insertionTargetRef?.fingerprint
-            ? { fingerprint: insertionTargetRef.fingerprint }
-            : {}),
-        };
-        const point: InsertionPoint = {
-          selection: selectionValue,
-          anchorElement: beforeSibling || moduleElement,
-          kind: "boundary",
-          left: frameOffsetLeft + leftInFrame,
-          top: frameOffsetTop + boundaryTop,
-          width: Math.max(120, rightInFrame - leftInFrame),
-        };
-        const boundaryKey = insertionTargetRef?.sourceAnchor
-          ? `${insertionTargetRef.selector}:${insertionTargetRef.sourceAnchor.startOffset}`
-          : fallbackTargetId;
-        if (!dedupedInsertionPoints.has(boundaryKey)) {
-          dedupedInsertionPoints.set(boundaryKey, point);
-        }
-      };
-
-      children.forEach((moduleElement, childIndex) => {
-        if (inferSelectionLevel(moduleElement) !== "module") return;
-        const moduleRect = moduleElement.getBoundingClientRect();
-        const previousElement = children[childIndex - 1] || null;
-        const nextElement = children[childIndex + 1] || null;
-        const previousModuleRect = previousElement && inferSelectionLevel(previousElement) === "module"
-          ? previousElement.getBoundingClientRect()
-          : null;
-        const beforeTop = previousModuleRect && moduleRect.top >= previousModuleRect.bottom - 3
-          ? previousModuleRect.bottom + (moduleRect.top - previousModuleRect.bottom) / 2
-          : moduleRect.top;
-        const beforeLabel = previousElement && inferSelectionLevel(previousElement) === "module"
-          ? `在「${readableLabel(previousElement)}」与「${readableLabel(moduleElement)}」之间`
-          : `在「${readableLabel(moduleElement)}」之前`;
-        addBoundary(moduleElement, moduleElement, beforeTop, beforeLabel);
-
-        // Consecutive modules share one boundary: the next module's "before"
-        // point is also this module's "after" point.
-        if (nextElement && inferSelectionLevel(nextElement) === "module") return;
-        addBoundary(
-          moduleElement,
-          nextElement,
-          moduleRect.bottom,
-          `在「${readableLabel(moduleElement)}」之后`,
-        );
-      });
-    });
-
-    const sourceDistinctInsertionPoints = [...dedupedInsertionPoints.values()].sort(
-      (left, right) => left.top - right.top || left.left - right.left,
-    );
-    const allInsertionPoints = sourceDistinctInsertionPoints.filter((point, pointIndex, points) => (
-      !points.slice(0, pointIndex).some((existing) => {
-        if (Math.abs(existing.top - point.top) > 3) return false;
-        const overlap = Math.min(existing.left + existing.width, point.left + point.width)
-          - Math.max(existing.left, point.left);
-        return overlap >= Math.min(existing.width, point.width) * 0.8;
-      })
-    ));
-    const pageStartPoint = allInsertionPoints[0];
-    if (pageStartPoint) {
-      pageStartPoint.kind = "page-start";
-      pageStartPoint.selection = {
-        ...pageStartPoint.selection,
-        label: "在页面顶部添加内容建议",
-      };
-    }
-    const nextInsertionPoints = allInsertionPoints.flatMap((point) => {
-      const topInFrame = point.top - frameOffsetTop;
-      if (topInFrame < -12 || topInFrame > frameHeight + 12) return [];
-      return [{
-        ...point,
-        // The first/last boundary must remain fully visible inside the clipped editor.
-        top: frameOffsetTop + Math.max(20, Math.min(frameHeight - 20, topInFrame)),
-      }];
-    });
-    insertionPointsRef.current = allInsertionPoints;
-    setInsertionPoints(nextInsertionPoints);
-
-    const nextCommentMarkers: HtmlCanvasCommentMarker[] = [];
-    commentedTargetsRef.current.forEach((rawTarget, targetIndex) => {
-      if (rawTarget.showMarker === false) return;
-      const target = rawTarget.target;
-      if (commentLayoutsByTargetId.get(target.id)?.status !== "visible") return;
-      let targetElement: HTMLElement | null = null;
-      try {
-        const sourceIndex = sourceIndexRef.current;
-        const resolution = sourceIndex
-          ? resolveTargetRef(sourceIndex, sourceTargetRefForSelection(target))
-          : null;
-        if (resolution?.target?.type === "element") {
-          const escapedNodeId = String(resolution.target.nodeId)
-            .replace(/\\/g, "\\\\")
-            .replace(/"/g, '\\"');
-          targetElement = documentNode.querySelector<HTMLElement>(
-            `[${SOURCE_NODE_ATTRIBUTE}="${escapedNodeId}"]`,
-          );
-        }
-      } catch {
-        targetElement = null;
-      }
-      if (!targetElement) return;
-      const targetRect = targetElement.getBoundingClientRect();
-      if (targetRect.bottom < 0 || targetRect.top > frameHeight) return;
-      const isGlobalPageTarget = isPageRootElement(targetElement)
-        && target.level === "module";
-      const tabControl = commentTabAssociations.find((association) => (
-        association.control === targetElement
-        || association.control.contains(targetElement)
-      ))?.control ?? null;
-      const markerAnchorRect = tabControl?.getBoundingClientRect() ?? targetRect;
-      nextCommentMarkers.push({
-        key: target.id || `${target.selector}:${targetIndex}`,
-        selection: selectionForElement(targetElement, sourceIndexRef.current, target),
-        count: rawTarget.count,
-        label: rawTarget.label,
-        placement: tabControl ? "tab-side" : "target-corner",
-        left: isGlobalPageTarget
-          ? Math.max(18, Math.min(containerRect.width - 28, frameOffsetLeft + 18))
-          : tabControl
-            ? Math.max(
-                18,
-                Math.min(
-                  containerRect.width - 28,
-                  frameOffsetLeft + markerAnchorRect.right + 10,
-                ),
-              )
-            : Math.max(
-                18,
-                Math.min(
-                  containerRect.width - 28,
-                  frameOffsetLeft + targetRect.right - 12,
-                ),
-              ),
-        top: isGlobalPageTarget
-          ? Math.max(18, Math.min(containerRect.height - 18, frameOffsetTop + 18))
-          : tabControl
-            ? Math.max(
-                18,
-                Math.min(
-                  containerRect.height - 18,
-                  frameOffsetTop + markerAnchorRect.top - 4,
-                ),
-              )
-            : Math.max(
-                18,
-                Math.min(
-                  containerRect.height - 18,
-                  frameOffsetTop + targetRect.top - 10,
-                ),
-              ),
-      });
-    });
-    setCommentMarkers(nextCommentMarkers);
+    insertionPointsRef.current = insertionLayout.allInsertionPoints;
+    setInsertionPoints(insertionLayout.visibleInsertionPoints);
+    setCommentMarkers(layoutCommentMarkers({
+      documentNode,
+      commentedTargets: commentedTargetsRef.current,
+      commentLayoutsByTargetId,
+      commentTabAssociations,
+      sourceIndex: sourceIndexRef.current,
+      frameHeight,
+      frameOffsetLeft,
+      frameOffsetTop,
+      containerWidth: containerRect.width,
+      containerHeight: containerRect.height,
+    }));
   }, []);
 
   const observeSelectedElement = useCallback(
@@ -2193,57 +1834,10 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     nativeEditCheckpointTimerRef.current = null;
   }, []);
 
-  const discardNativeCommandCallback = useCallback((
-    callback: PendingNativeCommandCallback | null,
-    reason: NativeDeferredCommandDiscardReason,
-  ) => {
-    if (!callback?.onDiscard) return;
-    try {
-      callback.onDiscard(reason);
-    } catch {
-      // Cancellation notification is bookkeeping only. It must never revive a
-      // stale command or interrupt the source-authority session teardown.
-    }
-  }, []);
-
   const discardPendingNativeCommands = useCallback((
     reason: NativeDeferredCommandDiscardReason,
   ) => {
-    const pending = pendingNativeCommandCallbackRef.current;
-    const scheduled = scheduledNativeCommandCallbackRef.current;
-    pendingNativeCommandCallbackRef.current = null;
-    scheduledNativeCommandCallbackRef.current = null;
-    discardNativeCommandCallback(pending, reason);
-    if (scheduled && scheduled !== pending) {
-      discardNativeCommandCallback(scheduled, reason);
-    }
-  }, [discardNativeCommandCallback]);
-
-  const takeReplayableNativeCommandForCompletedSession = useCallback((
-    active: ActiveNativeEdit,
-  ): PendingNativeCommandCallback | null => {
-    const pending = pendingNativeCommandCallbackRef.current;
-    const scheduled = scheduledNativeCommandCallbackRef.current;
-    const callback = pending ?? scheduled;
-    if (
-      !callback
-      || callback.authority !== "user-explicit"
-      || callback.session !== active.session
-      || !nativeEditLeasesMatch(currentNativeEditLeaseRef.current, callback.lease)
-      || !nativeEditLeasesMatch(active.lease, callback.lease)
-    ) return null;
-    if (callback === pending) {
-      const command = active.session.takePendingCommand();
-      if (
-        !command
-        || command.sequence !== callback.sequence
-        || command.kind !== callback.kind
-      ) return null;
-      pendingNativeCommandCallbackRef.current = null;
-    } else {
-      scheduledNativeCommandCallbackRef.current = null;
-    }
-    return callback;
+    nativeCommandQueueRef.current.discardPendingNativeCommands(reason);
   }, []);
 
   const deferNativeCommand = useCallback((
@@ -2253,81 +1847,24 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     options: NativeDeferredCommandOptions = {},
   ): boolean => {
     const active = activeNativeEditRef.current;
-    if (!active) return false;
-    const authority = options.authority ?? "user-explicit";
-    const incumbent = pendingNativeCommandCallbackRef.current
-      ?? scheduledNativeCommandCallbackRef.current;
-    if (authority === "system" && incumbent?.authority === "user-explicit") {
-      try {
-        options.onDiscard?.("blocked-by-user-command");
-      } catch {
-        // A lower-priority system callback is already fully discarded.
-      }
-      return true;
-    }
-    const queued = active.session.queuePendingCommand({
+    return nativeCommandQueueRef.current.deferNativeCommand(
       kind,
-      authority,
-      payload,
-    });
-    if (!queued.queued) return false;
-    discardPendingNativeCommands("superseded");
-    pendingNativeCommandCallbackRef.current = {
-      sequence: queued.sequence,
-      kind,
-      authority,
-      session: active.session,
-      lease: { ...active.lease },
       run,
-      onDiscard: options.onDiscard,
-    };
-    return true;
-  }, [discardPendingNativeCommands]);
+      payload,
+      options,
+      active ? { session: active.session, lease: active.lease } : null,
+    );
+  }, []);
   deferNativeCommandRef.current = deferNativeCommand;
 
   drainPendingNativeCommandRef.current = (session) => {
-    const active = activeNativeEditRef.current;
-    const pending = pendingNativeCommandCallbackRef.current;
-    if (
-      !active
-      || !pending
-      || active.session !== session
-      || pending.session !== session
-      || !nativeEditLeasesMatch(currentNativeEditLeaseRef.current, pending.lease)
-      || !nativeEditLeasesMatch(active.lease, pending.lease)
-    ) {
-      if (pending?.session === session) {
-        pendingNativeCommandCallbackRef.current = null;
-        discardNativeCommandCallback(pending, "stale-session");
-      }
-      return;
-    }
-    const command = session.takePendingCommand();
-    if (!command || command.sequence !== pending.sequence || command.kind !== pending.kind) {
-      if (command) {
-        pendingNativeCommandCallbackRef.current = null;
-        discardNativeCommandCallback(pending, "stale-session");
-      }
-      return;
-    }
-    pendingNativeCommandCallbackRef.current = null;
-    scheduledNativeCommandCallbackRef.current = pending;
-    window.queueMicrotask(() => {
-      const current = activeNativeEditRef.current;
-      if (
-        scheduledNativeCommandCallbackRef.current !== pending
-        || !current
-        || current.session !== session
-        || !nativeEditLeasesMatch(currentNativeEditLeaseRef.current, pending.lease)
-      ) {
-        if (scheduledNativeCommandCallbackRef.current === pending) {
-          scheduledNativeCommandCallbackRef.current = null;
-          discardNativeCommandCallback(pending, "stale-session");
-        }
-        return;
-      }
-      scheduledNativeCommandCallbackRef.current = null;
-      pending.run();
+    nativeCommandQueueRef.current.drainPendingNativeCommand(session, {
+      getActive: () => {
+        const active = activeNativeEditRef.current;
+        return active ? { session: active.session, lease: active.lease } : null;
+      },
+      getCurrentLease: () => currentNativeEditLeaseRef.current,
+      schedule: (run) => window.queueMicrotask(run),
     });
   };
 
@@ -2694,16 +2231,17 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         : { ok: true, mutation: null };
       if (!committed.ok) return committed;
       const completedUserCommand = replayQueuedUserCommand
-        ? takeReplayableNativeCommandForCompletedSession(active)
+        ? nativeCommandQueueRef.current.takeReplayableNativeCommandForCompletedSession(
+          { session: active.session, lease: active.lease },
+          currentNativeEditLeaseRef.current,
+        )
         : null;
       const replayCompletedUserCommand = () => {
         if (!completedUserCommand) return;
-        scheduledNativeCommandCallbackRef.current = completedUserCommand;
-        window.queueMicrotask(() => {
-          if (scheduledNativeCommandCallbackRef.current !== completedUserCommand) return;
-          scheduledNativeCommandCallbackRef.current = null;
-          completedUserCommand.run();
-        });
+        nativeCommandQueueRef.current.scheduleReplay(
+          completedUserCommand,
+          (run) => window.queueMicrotask(run),
+        );
       };
       const source = frameSourceHtmlRef.current;
       const target = active.target;
@@ -2796,7 +2334,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     discardPendingNativeCommands,
     loadFrameSource,
     observeSelectedElement,
-    takeReplayableNativeCommandForCompletedSession,
     updateMoveAvailability,
     updateOverlayPosition,
     updateSelectedStyle,
