@@ -30,6 +30,10 @@ function sameCommentPersistencePresentation(left, right) {
     && left.draft?.error === right.draft?.error;
 }
 
+function sameProjectRulesStructure(left, right) {
+  return sameObjectFieldsExcept(left, right, new Set(["content"]));
+}
+
 /**
  * The composition root does not render comment text drafts. Keep those
  * high-frequency facts on the comments capability subscription while still
@@ -42,9 +46,12 @@ export function sameWorkbenchRenderSnapshot(previous, next) {
   return sameObjectFieldsExcept(
     previous,
     next,
-    new Set(["commentSession", "comment"]),
+    new Set(["commentSession", "comment", "projectRules"]),
   ) && sameCommentWorkingCopyStructure(
     previous.commentSession,
     next.commentSession,
-  ) && sameCommentPersistencePresentation(previous.comment, next.comment);
+  ) && sameCommentPersistencePresentation(
+    previous.comment,
+    next.comment,
+  ) && sameProjectRulesStructure(previous.projectRules, next.projectRules);
 }

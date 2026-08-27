@@ -103,6 +103,14 @@ function registrationErrorCode(cause) {
   return "PROJECT_REGISTRATION_REJECTED";
 }
 
+function projectCatalogSnapshot({ recent = [], registered = [], error = "" } = {}) {
+  return Object.freeze({
+    recent: Object.freeze(Array.isArray(recent) ? [...recent] : []),
+    registered: Object.freeze(Array.isArray(registered) ? [...registered] : []),
+    error: String(error || ""),
+  });
+}
+
 export class WorkspaceRegistrationError extends Error {
   constructor(outcome) {
     super(outcome.reason);
@@ -287,6 +295,15 @@ export class WorkspaceController {
     persistence: null,
   });
   #commentsCapabilityListeners = new Set();
+  #projectsCapabilitySnapshot = Object.freeze({
+    session: null,
+    workflow: null,
+    rules: null,
+    versions: null,
+  });
+  #projectsCapabilityListeners = new Set();
+  #projectCatalogSnapshot = projectCatalogSnapshot();
+  #projectCatalogListeners = new Set();
   #runSessionSnapshot = null;
   #versionSessionSnapshot = null;
   #editRuntimeSnapshot = null;
@@ -322,6 +339,10 @@ export class WorkspaceController {
   #disposed = false;
 
   comments;
+
+  projects;
+
+  projectCatalog;
 
   constructor({
     bridgeClient,
@@ -465,6 +486,55 @@ export class WorkspaceController {
         uploadAttachments: (input) => this.uploadAttachments(input),
         readAttachment: (input) => this.readAttachment(input),
       }),
+    });
+    const projectCatalogCommands = Object.freeze({
+      refreshRecents: () => this.refreshRecentProjects(),
+      refreshRegistered: () => this.refreshRegisteredProjects(),
+    });
+    this.projects = Object.freeze({
+      getSnapshot: () => this.#projectsCapabilitySnapshot,
+      subscribe: (listener) => {
+        if (typeof listener !== "function") {
+          throw new TypeError("Projects capability listener must be a function.");
+        }
+        this.#projectsCapabilityListeners.add(listener);
+        return () => this.#projectsCapabilityListeners.delete(listener);
+      },
+      commands: Object.freeze({
+        readFile: (relativePath) => this.readProjectFile({ relativePath }),
+        openRules: () => {
+          const context = this.getCurrentProjectContext();
+          if (!context) {
+            return Promise.resolve(blocked(
+              "PROJECT_CONTEXT_REQUIRED",
+              "当前项目身份尚未完成初始化。",
+            ));
+          }
+          return this.openProjectRules({ context });
+        },
+        updateRules: (content) => this.updateProjectRules({ content }),
+        beginRulesComposition: (target, baselineValue) => (
+          this.beginProjectRulesComposition({ target, baselineValue })
+        ),
+        finishRulesComposition: (target) => (
+          this.finishProjectRulesComposition({ target })
+        ),
+        leaveRulesEditor: () => this.leaveProjectRulesEditor(),
+        restoreRules: () => this.restoreProjectRules(),
+        saveRules: () => this.saveProjectRules(),
+        closeRules: () => this.closeProjectRules(),
+      }),
+    });
+    this.projectCatalog = Object.freeze({
+      getSnapshot: () => this.#projectCatalogSnapshot,
+      subscribe: (listener) => {
+        if (typeof listener !== "function") {
+          throw new TypeError("Project catalog listener must be a function.");
+        }
+        this.#projectCatalogListeners.add(listener);
+        return () => this.#projectCatalogListeners.delete(listener);
+      },
+      commands: projectCatalogCommands,
     });
     this.#codecs = createWorkspaceControllerCodecs(codecs);
     this.#hashPort = ports.hash;
@@ -676,6 +746,7 @@ export class WorkspaceController {
           if (event?.type === "project-catalog-loaded") {
             void this.#reconcileAndRestoreWorkbenchTabs(event.projects);
           }
+          this.#updateProjectCatalogFromEvent(event);
           this.#emitEvent(event);
         },
       );
@@ -939,6 +1010,8 @@ export class WorkspaceController {
     this.#listeners.clear();
     this.#eventListeners.clear();
     this.#commentsCapabilityListeners.clear();
+    this.#projectsCapabilityListeners.clear();
+    this.#projectCatalogListeners.clear();
   }
 
   get hasDocumentHistoryAction() {
@@ -1763,6 +1836,7 @@ export class WorkspaceController {
 
   #publishAggregateSnapshot() {
     this.#publishCommentsCapabilitySnapshot();
+    this.#publishProjectsCapabilitySnapshot();
     this.#snapshot = Object.freeze({
       registration: this.#registration,
       projectSession: this.#projectSessionSnapshot,
@@ -1809,6 +1883,67 @@ export class WorkspaceController {
         listener();
       } catch {
         // Capability presentation cannot affect application authority.
+      }
+    }
+  }
+
+  #publishProjectsCapabilitySnapshot() {
+    const next = {
+      session: this.#projectSessionSnapshot,
+      workflow: this.#projectSnapshot,
+      rules: this.#projectRulesSnapshot,
+      versions: this.#versionSessionSnapshot,
+    };
+    if (
+      this.#projectsCapabilitySnapshot.session === next.session
+      && this.#projectsCapabilitySnapshot.workflow === next.workflow
+      && this.#projectsCapabilitySnapshot.rules === next.rules
+      && this.#projectsCapabilitySnapshot.versions === next.versions
+    ) return;
+    this.#projectsCapabilitySnapshot = Object.freeze(next);
+    for (const listener of this.#projectsCapabilityListeners) {
+      try {
+        listener();
+      } catch {
+        // Project presentation cannot affect application authority.
+      }
+    }
+  }
+
+  #updateProjectCatalogFromEvent(event) {
+    if (!event || typeof event !== "object") return;
+    const current = this.#projectCatalogSnapshot;
+    if (event.type === "project-recents-loaded") {
+      this.#projectCatalogSnapshot = projectCatalogSnapshot({
+        recent: event.projects,
+        registered: current.registered,
+      });
+    } else if (event.type === "project-recents-failed") {
+      this.#projectCatalogSnapshot = projectCatalogSnapshot({
+        recent: current.recent,
+        registered: current.registered,
+        error: event.reason || "最近打开记录暂时无法读取。",
+      });
+    } else if (event.type === "project-catalog-loaded") {
+      this.#projectCatalogSnapshot = projectCatalogSnapshot({
+        recent: current.recent,
+        registered: event.projects,
+        error: current.error,
+      });
+    } else if (event.type === "project-catalog-failed") {
+      this.#projectCatalogSnapshot = projectCatalogSnapshot({
+        recent: current.recent,
+        registered: current.registered,
+        error: event.reason || "项目目录暂时无法读取。",
+      });
+    } else {
+      return;
+    }
+    for (const listener of this.#projectCatalogListeners) {
+      try {
+        listener();
+      } catch {
+        // Catalog presentation cannot affect project authority.
       }
     }
   }

@@ -74,6 +74,12 @@ export type {
   CommentControllerCapability,
   CommentControllerCapabilitySnapshot,
   CommentControllerCommands,
+  ProjectCatalogCapabilitySnapshot,
+  ProjectCatalogControllerCapability,
+  ProjectCatalogControllerCommands,
+  ProjectControllerCapability,
+  ProjectControllerCapabilitySnapshot,
+  ProjectControllerCommands,
   ConversationControllerCapability,
   CommandOutcome,
   DocumentSurfaceControllerCapability,
@@ -382,6 +388,8 @@ export function createRuntimeWorkspaceController(
 export class WorkspaceController {
   constructor(options: WorkspaceControllerConstruction);
   readonly comments: import("./workspace-controller-capabilities.js").CommentControllerCapability;
+  readonly projects: import("./workspace-controller-capabilities.js").ProjectControllerCapability;
+  readonly projectCatalog: import("./workspace-controller-capabilities.js").ProjectCatalogControllerCapability;
   getSnapshot(): import("./workspace-controller-capabilities.js").WorkspaceControllerSnapshot;
   openConversation(
     context: import("./conversation-session.js").ConversationContext | null,

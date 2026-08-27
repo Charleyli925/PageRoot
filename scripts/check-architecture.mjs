@@ -471,6 +471,10 @@ export async function architectureViolations() {
     path.join(PRODUCT_ROOT, "app", "workbench.tsx"),
     "utf8",
   );
+  const projectPanelContainer = await readFile(
+    path.join(PRODUCT_ROOT, "app", "workbench", "project-panel-container.tsx"),
+    "utf8",
+  );
   const canvasEditor = await readFile(
     path.join(PRODUCT_ROOT, "app", "components", "HtmlCanvasEditor.tsx"),
     "utf8",
@@ -592,6 +596,10 @@ export async function architectureViolations() {
     path.join(PRODUCT_ROOT, "app", "workbench.tsx"),
     workbench,
   );
+  const projectPanelContainerAst = parseModule(
+    path.join(PRODUCT_ROOT, "app", "workbench", "project-panel-container.tsx"),
+    projectPanelContainer,
+  );
   const workspaceControllerAst = parseModule(
     path.join(PRODUCT_ROOT, "app", "application", "workspace-controller.js"),
     workspaceController,
@@ -684,7 +692,7 @@ export async function architectureViolations() {
     || !hasCall(workbenchAst, { method: "onExternalOpenRequested" })
     || !classHasMember(workspaceControllerAst, "WorkspaceController", "acceptExternalProject")
     || !hasCall(workbenchAst, { path: "workspaceController.acceptBrowserProject" })
-    || !hasCall(workbenchAst, { method: "readProjectFile" })
+    || !hasCall(workspaceControllerAst, { path: "this.readProjectFile" })
     || !hasCall(workbenchAst, { method: "openProjectRecords" })
     || !/\bonSourceFileChanged\b/.test(workbench)
     || !hasCall(workbenchAst, { method: "observeExternalSourceChange" })
@@ -873,10 +881,10 @@ export async function architectureViolations() {
   }
   if (
     !hasObjectProperty(workbenchAst, "projectRulesWorkflow", { valueKind: "object" })
-    || !hasCall(workbenchAst, { method: "openProjectRules" })
-    || !hasCall(workbenchAst, { method: "updateProjectRules" })
-    || !hasCall(workbenchAst, { method: "saveProjectRules" })
-    || !hasCall(workbenchAst, { method: "closeProjectRules" })
+    || !hasCall(projectPanelContainerAst, { path: "capability.commands.openRules" })
+    || !hasCall(projectPanelContainerAst, { path: "capability.commands.updateRules" })
+    || !hasCall(projectPanelContainerAst, { path: "capability.commands.saveRules" })
+    || !hasCall(projectPanelContainerAst, { path: "capability.commands.closeRules" })
     || /\b(?:projectRulesSessionRef|saveProjectRulesRef|PROJECT_RULES_AUTOSAVE_DELAY_MS)\b/.test(workbench)
   ) {
     violations.push(
