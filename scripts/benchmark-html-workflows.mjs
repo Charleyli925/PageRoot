@@ -1036,6 +1036,11 @@ try {
     firstWindowTimeout: 30_000,
     userDataPrefix: "pageroot-native-e2e-htmlperf-",
   });
+  await launched.page.waitForFunction(
+    () => Boolean(window.htmlAIRuntime?.getBridgeConnection?.()),
+    undefined,
+    { timeout: 30_000 },
+  );
   results.startup = await launched.page.evaluate(() => ({
     desktop: window.htmlAIRuntime?.getStartupTiming?.()
       || window.htmlAIRuntime?.diagnostics?.startupTiming
