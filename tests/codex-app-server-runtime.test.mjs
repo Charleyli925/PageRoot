@@ -10,10 +10,10 @@ import {
   createCodexAppServerRuntime,
   prepareVerifiedCodexExecutable,
   runCodexAppServerTask,
-} from "../scripts/agent/runtimes/codex-app-server-runtime.mjs";
-import { createDefaultProviderRegistry } from "../scripts/agent/providers/provider-registry.mjs";
-import { resolveBundledCodexInstallation } from "../scripts/agent/providers/codex-provider.mjs";
-import { terminateManagedProcess } from "../scripts/agent/hosts/execution-host.mjs";
+} from "../bridge/agent/runtimes/codex-app-server-runtime.mjs";
+import { createDefaultProviderRegistry } from "../bridge/agent/providers/provider-registry.mjs";
+import { resolveBundledCodexInstallation } from "../bridge/agent/providers/codex-provider.mjs";
+import { terminateManagedProcess } from "../bridge/agent/hosts/execution-host.mjs";
 import { promisify } from "node:util";
 
 const fixture = fileURLToPath(new URL("./fixtures/codex-app-server-execution.mjs", import.meta.url));

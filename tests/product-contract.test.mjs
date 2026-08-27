@@ -14,13 +14,13 @@ import {
   isPositionalSelector,
   isStalePositionalTarget,
   matchingFingerprintPrefixCount,
-} from "../scripts/target-identity.mjs";
+} from "../bridge/target-identity.mjs";
 
 test("desktop and Bridge share one HTML budget with an explicit JSON envelope budget", async () => {
   const [main, projectFiles, bridge, packageText, afterPack] = await Promise.all([
     readFile(new URL("../desktop/main.mjs", import.meta.url), "utf8"),
     readFile(new URL("../desktop/project-files.mjs", import.meta.url), "utf8"),
-    readFile(new URL("../scripts/workspace-bridge.mjs", import.meta.url), "utf8"),
+    readFile(new URL("../bridge/workspace-bridge.mjs", import.meta.url), "utf8"),
     readFile(new URL("../package.json", import.meta.url), "utf8"),
     readFile(new URL("../desktop/after-pack.mjs", import.meta.url), "utf8"),
   ]);
@@ -111,12 +111,12 @@ test("Prompt, protocol, helper, and finalizer agree on frozen input plus control
     interactionFlow,
     productRequirements,
   ] = await Promise.all([
-    readFile(new URL("../scripts/workspace-bridge.mjs", import.meta.url), "utf8"),
-    readFile(new URL("../scripts/project-file-repository.mjs", import.meta.url), "utf8").then(async (facade) => (
+    readFile(new URL("../bridge/workspace-bridge.mjs", import.meta.url), "utf8"),
+    readFile(new URL("../bridge/project-file-repository.mjs", import.meta.url), "utf8").then(async (facade) => (
       facade
-      + await readFile(new URL("../scripts/project-file-repository/request-draft.mjs", import.meta.url), "utf8")
+      + await readFile(new URL("../bridge/project-file-repository/request-draft.mjs", import.meta.url), "utf8")
     )),
-    readFile(new URL("../scripts/lifecycle-core.mjs", import.meta.url), "utf8"),
+    readFile(new URL("../bridge/lifecycle-core.mjs", import.meta.url), "utf8"),
     readFile(new URL("../docs/CHANGE_REQUEST_PROTOCOL.md", import.meta.url), "utf8"),
     readFile(new URL("../docs/INTERACTION_FLOW.md", import.meta.url), "utf8"),
     readFile(new URL("../docs/MVP_PRD.md", import.meta.url), "utf8"),

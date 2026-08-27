@@ -26,5 +26,5 @@ function shutdown(code = 0) {
 process.on("SIGINT", () => shutdown(0));
 process.on("SIGTERM", () => shutdown(0));
 
-start(process.execPath, ["scripts/workspace-bridge.mjs"], "workspace bridge");
+start(process.execPath, ["bridge/workspace-bridge.mjs"], "workspace bridge");
 start("npm", ["exec", "--", "vinext", "dev"], "vinext");

@@ -8,7 +8,7 @@ import {
 } from "./helpers/bridge-test-environment.mjs";
 import {
   finalizeProjectFileAttempt,
-} from "../scripts/project-file-finalizer.mjs";
+} from "../bridge/project-file-finalizer.mjs";
 
 function html(label) {
   return `<!doctype html><html><head><title>${label}</title></head><body><h1>${label}</h1></body></html>`;

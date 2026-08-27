@@ -105,9 +105,9 @@ The renderer's main workspace facts are partitioned as follows:
   runtime dispatch point. The Qoder provider owns installation, version,
   login/model preflight and raw-error normalization. Unknown IDs fail closed;
   opaque installation facts, digests and capabilities stay inside the ticket;
-- Bridge Agent Host/Policy Ports: `scripts/agent/policies/` owns the execution
+- Bridge Agent Host/Policy Ports: `bridge/agent/policies/` owns the execution
   policy and freezes all readable files, output/completion paths,
-  runtime authority and finalizer authority. `scripts/agent/hosts/` owns the
+  runtime authority and finalizer authority. `bridge/agent/hosts/` owns the
   single-output Execution surface, including cancellation fencing, completion proof and managed terminal
   cleanup. Provider/runtime code may invoke these ports but cannot choose their
   paths, command, success criteria or durable outcome;
@@ -748,7 +748,7 @@ still need Electron/Playwright behavior coverage:
 `scripts/architecture-budget.json` records a line count and total React-hook
 count ceiling for files with a demonstrated regrowth risk (currently
 `app/workbench.tsx`, `app/components/HtmlCanvasEditor.tsx` and
-`scripts/project-file-repository.mjs`). The gate counts hooks structurally, so generic-typed calls such as
+`bridge/project-file-repository.mjs`). The gate counts hooks structurally, so generic-typed calls such as
 `useState<T>()` are included.
 
 This is a guardrail against silent drift, not a hard cap, and it is deliberately

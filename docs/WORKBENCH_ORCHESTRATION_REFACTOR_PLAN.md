@@ -404,7 +404,7 @@ Application 层不得直接访问 React ref 或 `window.*`。Controller 通过�
 
 明确不改：
 
-- `scripts/workspace-bridge.mjs` 的路由和 SourceTransaction 实现；
+- `bridge/workspace-bridge.mjs` 的路由和 SourceTransaction 实现；
 - `desktop/main.mjs`、preload 和项目打开主进程队列的协议；
 - `HtmlCanvasEditor` 的 SourcePatch/Editable Island 内核；
 - AI review 分析性能与动态加载；

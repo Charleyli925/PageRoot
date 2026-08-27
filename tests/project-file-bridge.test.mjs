@@ -8,9 +8,9 @@ import {
 } from "./helpers/bridge-test-environment.mjs";
 import {
   finalizeProjectFileAttempt,
-} from "../scripts/project-file-finalizer.mjs";
-import { ProjectFileRepository } from "../scripts/project-file-repository.mjs";
-import { sha256 } from "../scripts/lifecycle-core.mjs";
+} from "../bridge/project-file-finalizer.mjs";
+import { ProjectFileRepository } from "../bridge/project-file-repository.mjs";
+import { sha256 } from "../bridge/lifecycle-core.mjs";
 
 function html(label) {
   return `<!doctype html><html><head><title>${label}</title></head><body><h1>${label}</h1></body></html>`;

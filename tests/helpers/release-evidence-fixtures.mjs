@@ -392,8 +392,8 @@ export async function createSyntheticAppBundle(t, {
   )));
   await Promise.all(BRIDGE_FILES.map((fileName) => writeFixtureFile(
     productRoot,
-    "scripts/" + fileName,
-    "fixture:scripts/" + fileName + "\n",
+    "bridge/" + fileName,
+    "fixture:bridge/" + fileName + "\n",
   )));
   await Promise.all([
     writeFixtureFile(
@@ -489,7 +489,7 @@ export async function createSyntheticAppBundle(t, {
     ...BRIDGE_FILES.map(async (fileName) => {
       const sourcePath = fileName === "product-contract.mjs"
         ? "desktop/" + fileName
-        : "scripts/" + fileName;
+        : "bridge/" + fileName;
       const destination = path.join(resourcesPath, "bridge", fileName);
       await mkdir(path.dirname(destination), { recursive: true });
       await copyFile(path.join(productRoot, sourcePath), destination);

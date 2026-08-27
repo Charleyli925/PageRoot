@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { createAgentEventReducer } from "../scripts/agent/agent-events.mjs";
+import { createAgentEventReducer } from "../bridge/agent/agent-events.mjs";
 import {
   AgentRuntimeCoordinator,
   TRUSTED_LOCAL_AGENT_POLICY_VERSION,
-} from "../scripts/agent/agent-runtime-coordinator.mjs";
+} from "../bridge/agent/agent-runtime-coordinator.mjs";
 
 const IDENTITY = Object.freeze({
   projectId: `project_${"a".repeat(16)}`,

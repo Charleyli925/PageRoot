@@ -1,7 +1,7 @@
 import { sha256 } from "@noble/hashes/sha2.js";
 import { bytesToHex } from "@noble/hashes/utils.js";
 
-import { parseHtmlSource } from "../../scripts/html-source-parser.mjs";
+import { parseHtmlSource } from "../../bridge/html-source-parser.mjs";
 
 export const SOURCE_NODE_ATTRIBUTE = "data-html-ai-source-node-id";
 

@@ -8,17 +8,17 @@ import {
 } from "../app/workbench/version-compatibility-decoder.js";
 import {
   assessHtmlCandidate,
-} from "../scripts/candidate-assessment.mjs";
+} from "../bridge/candidate-assessment.mjs";
 import {
   decodeCandidateAssessmentRecord,
   decodeHistoricalCandidateAssessment,
-} from "../scripts/candidate-assessment-decoder.mjs";
+} from "../bridge/candidate-assessment-decoder.mjs";
 import {
   decodeDraftCommandOperationId,
-} from "../scripts/draft-command-decoder.mjs";
+} from "../bridge/draft-command-decoder.mjs";
 import {
   applyDraftCommand,
-} from "../scripts/draft-service.mjs";
+} from "../bridge/draft-service.mjs";
 import {
   decodeDirectEditIdentity,
 } from "../shared/direct-edit-compatibility.mjs";

@@ -16,9 +16,9 @@
 v3 目录、字段和样本不构成 v4 兼容 Reader 或迁移要求。
 
 v3 Attempt / finalizer CLI `--workspace` / `--project-id` 是历史归档。当前
-受支持的官方 finalizer 入口是 `scripts/finalize-attempt.mjs --project-root`
+受支持的官方 finalizer 入口是 `bridge/finalize-attempt.mjs --project-root`
 → `finalizeProjectFileAttempt`。Bridge 不再创建或完成 v3 Attempt。
-v3 supplement CLI `--workspace` 同样归档；`scripts/record-user-supplement.mjs --project-root`
+v3 supplement CLI `--workspace` 同样归档；`bridge/record-user-supplement.mjs --project-root`
 只对给定项目目录写入，不再读取 `project-registry.json`。
 
 v3 在其历史切换边界内不兼容 v1/v2；新写入不得沿用以下旧路径：

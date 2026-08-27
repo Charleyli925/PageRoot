@@ -4,9 +4,9 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { sha256 } from "../scripts/lifecycle-core.mjs";
-import { TRUSTED_LOCAL_AGENT_POLICY_VERSION } from "../scripts/agent-bridge-service.mjs";
-import { loadQoderAcpTaskPolicy } from "../scripts/qoder-acp-client.mjs";
+import { sha256 } from "../bridge/lifecycle-core.mjs";
+import { TRUSTED_LOCAL_AGENT_POLICY_VERSION } from "../bridge/agent-bridge-service.mjs";
+import { loadQoderAcpTaskPolicy } from "../bridge/qoder-acp-client.mjs";
 import { createBridgeTestEnvironment } from "./helpers/bridge-test-environment.mjs";
 
 const fixtureAgent = fileURLToPath(new URL("./fixtures/qoder-acp-agent.mjs", import.meta.url));

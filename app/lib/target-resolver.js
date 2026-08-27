@@ -3,7 +3,7 @@ import {
   normalizeSourceText,
   sourceSha256,
 } from "./source-index.js";
-import { isPositionalSelector } from "../../scripts/target-identity.mjs";
+import { isPositionalSelector } from "../../bridge/target-identity.mjs";
 
 const TARGET_LEVELS = new Set([
   "module",

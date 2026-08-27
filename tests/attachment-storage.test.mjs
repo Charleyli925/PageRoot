@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { constants as fsConstants } from "node:fs";
 import test from "node:test";
 
-import { freezeLocalAttachment } from "../scripts/attachment-storage.mjs";
+import { freezeLocalAttachment } from "../bridge/attachment-storage.mjs";
 
 test("attachment snapshots prefer an exclusive APFS copy-on-write clone", async () => {
   const calls = [];

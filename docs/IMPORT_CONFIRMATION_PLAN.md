@@ -56,7 +56,7 @@ Desktop read/activate 外部原稿
 
 ### 1.3 Registry 已有外部源证据，但恢复条件过窄
 
-`scripts/project-file-repository.mjs` 当前导入会写：
+`bridge/project-file-repository.mjs` 当前导入会写：
 
 ```text
 project record:
@@ -264,7 +264,7 @@ Canvas failed、应用退出、Renderer 销毁、request 被替换、Hash 漂移
 
 测试必须独立计算期望 Hash，不能调用被测 source-key helper生成 oracle。
 
-### 4.3 `scripts/project-file-repository.mjs`：规范化外部源
+### 4.3 `bridge/project-file-repository.mjs`：规范化外部源
 
 抽出私有纯/窄函数，建议：
 
@@ -285,7 +285,7 @@ Canvas failed、应用退出、Renderer 销毁、request 被替换、Hash 漂移
 - 导入前、发布前仍重读 Hash；
 - 不把 canonical 外部 path 写入项目 HTML 或对用户内容做字节改写。
 
-### 4.4 `scripts/project-file-repository.mjs`：长期关联解析
+### 4.4 `bridge/project-file-repository.mjs`：长期关联解析
 
 新增私有方法：
 
@@ -313,7 +313,7 @@ Canvas failed、应用退出、Renderer 销毁、request 被替换、Hash 漂移
 - V1 必须存在、ordinal=1、snapshot Hash 等于 `importSourceSha256`；不成立则绑定损坏，不能新建项目替代；
 - 多 claim 是完整性错误，不自动选最近项目、目录名最像或 Hash 相同的项目。
 
-### 4.5 `scripts/project-file-repository.mjs`：当前 Registry mutation lock
+### 4.5 `bridge/project-file-repository.mjs`：当前 Registry mutation lock
 
 现有 `#serial()` 只串行一个 Repository 实例；PRD 的同源唯一性需要跨实例也成立。新增当前 Registry 事务锁，不能复用“只迁移旧 shape”的 legacy lock语义。
 
@@ -389,7 +389,7 @@ classifyOpenPath({ sourcePath })
 
 `visibleV1FileName` 必须调用与导入完全相同的 `safeProjectName / htmlExtension / visibleFileName(..., 1)`；不得为预览文件名调用 `#allocateProjectRoot` 或创建目录。
 
-### 4.8 `scripts/workspace-bridge.mjs`
+### 4.8 `bridge/workspace-bridge.mjs`
 
 新增 authenticated read-only route，建议：
 
@@ -960,11 +960,11 @@ Ready/full-gate：完整 source matrix；Desktop/IPC/Bridge/Schema/Electron 风�
 
 | 文件 / 函数 | 修改 | 不变量 | 测试 |
 |---|---|---|---|
-| `scripts/project-file-repository.mjs` `#recoveredImportTarget` | 替换为长期 binding resolver | 不依赖V1干净/latest/active V1 | edited/promoted/history WC reopen |
+| `bridge/project-file-repository.mjs` `#recoveredImportTarget` | 替换为长期 binding resolver | 不依赖V1干净/latest/active V1 | edited/promoted/history WC reopen |
 | 同文件 `#importExternal` | 已绑定先返回；新源才导入 | 同源最多一个项目 | same-source concurrency/failpoints |
 | 同文件 Registry writes | current mutation lock + latest reread | 跨实例不丢写 | two repositories |
 | 同文件 `classifyOpenPath` | A/B/C只读分类 | 分类零磁盘变化 | registry byte equality |
-| `scripts/workspace-bridge.mjs` | read-only classification route | 路径不进query/响应 | bridge auth/DTO |
+| `bridge/workspace-bridge.mjs` | read-only classification route | 路径不进query/响应 | bridge auth/DTO |
 | `desktop/external-file-open.mjs` | Prepared Intent + receipt | raw path仅Main；幂等 | state-machine unit |
 | `desktop/main.mjs` open functions | prepare不activate；commit才activate | 确认前active/recent不变 | project-open queue/Electron |
 | `desktop/preload.mjs` | 窄prepare/commit/cancel/finalize | Renderer不能传删除path | preload IPC |

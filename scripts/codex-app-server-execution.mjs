@@ -3,10 +3,10 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-import { createCodexProvider } from "./agent/providers/codex-provider.mjs";
-import { runCodexAppServerTask } from "./agent/runtimes/codex-app-server-runtime.mjs";
-import { sha256 } from "./lifecycle-core.mjs";
-import { ProjectFileRepository } from "./project-file-repository.mjs";
+import { createCodexProvider } from "../bridge/agent/providers/codex-provider.mjs";
+import { runCodexAppServerTask } from "../bridge/agent/runtimes/codex-app-server-runtime.mjs";
+import { sha256 } from "../bridge/lifecycle-core.mjs";
+import { ProjectFileRepository } from "../bridge/project-file-repository.mjs";
 import { normalizeAgentDelivery } from "../shared/agent-delivery.mjs";
 
 const sourceHtml = `<!doctype html>

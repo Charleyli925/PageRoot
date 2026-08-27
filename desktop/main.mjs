@@ -3408,7 +3408,7 @@ function findAvailablePort() {
 function bridgeScriptPath() {
   return app.isPackaged
     ? path.join(process.resourcesPath, "bridge", "workspace-bridge.mjs")
-    : path.join(directory, "..", "scripts", "workspace-bridge.mjs");
+    : path.join(directory, "..", "bridge", "workspace-bridge.mjs");
 }
 
 function rendererPath() {

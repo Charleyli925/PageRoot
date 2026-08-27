@@ -24,12 +24,12 @@ import {
   captureQoderAcpReviewBoundary,
   loadQoderAcpTaskPolicy,
   runQoderAcpTask,
-} from "./qoder-acp-client.mjs";
-import { sha256 } from "./lifecycle-core.mjs";
-import { ProjectFileRepository } from "./project-file-repository.mjs";
+} from "../bridge/qoder-acp-client.mjs";
+import { sha256 } from "../bridge/lifecycle-core.mjs";
+import { ProjectFileRepository } from "../bridge/project-file-repository.mjs";
 
 const productRoot = fileURLToPath(new URL("../", import.meta.url));
-const finalizerPath = fileURLToPath(new URL("./finalize-attempt.mjs", import.meta.url));
+const finalizerPath = fileURLToPath(new URL("../bridge/finalize-attempt.mjs", import.meta.url));
 const reportPath = path.join(productRoot, "output", "qoder-acp-spike", "report.json");
 const candidateMarker = "data-pageroot-qoder-acp=\"verified\"";
 const MAX_RETAINED_EVENTS = 2_048;

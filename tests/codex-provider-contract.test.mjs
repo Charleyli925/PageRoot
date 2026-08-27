@@ -11,10 +11,10 @@ import {
   codexInstallationDigest,
   createCodexProvider,
   resolveBundledCodexInstallation,
-} from "../scripts/agent/providers/codex-provider.mjs";
-import { probeCodexAppServer } from "../scripts/agent/runtimes/codex-app-server-client.mjs";
+} from "../bridge/agent/providers/codex-provider.mjs";
+import { probeCodexAppServer } from "../bridge/agent/runtimes/codex-app-server-client.mjs";
 import { verifyCodexRuntimeLock } from "../scripts/verify-codex-runtime-lock.mjs";
-import { createDefaultProviderRegistry } from "../scripts/agent/providers/provider-registry.mjs";
+import { createDefaultProviderRegistry } from "../bridge/agent/providers/provider-registry.mjs";
 
 const repositoryRoot = fileURLToPath(new URL("../", import.meta.url));
 const fakeServer = fileURLToPath(new URL("./fixtures/codex-app-server.mjs", import.meta.url));

@@ -16,7 +16,7 @@ import { inflateSync } from "node:zlib";
 
 import { expect } from "@playwright/test";
 
-import { sha256 } from "../../../scripts/lifecycle-core.mjs";
+import { sha256 } from "../../../bridge/lifecycle-core.mjs";
 import {
   activateNativeEdit,
   caseSelector,

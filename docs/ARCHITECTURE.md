@@ -45,7 +45,8 @@ the historical synthetic-spike decision.
   sole owner of each mutable fact.
 - `app/` owns the visual workbench, source mapping and direct-edit transaction model.
 - `desktop/` owns privileged filesystem access, windows, lifecycle, update checks, usage telemetry and safe IPC exposure.
-- `scripts/` owns the local Bridge, protocol finalization, AI candidate assessment, direct-edit/legacy scope evidence and automated gates.
+- `bridge/` owns the local Bridge, protocol finalization, AI candidate assessment and packaged runtime modules.
+- `scripts/` owns automated gates, packaging, CLI and developer spikes.
 - `schemas/` defines persisted and exchanged records. `fixtures/` proves strict current and legacy behavior.
 - Preview DOM is disposable. It is never a persistence source.
 - Current-source and generated-Version changes use prepare-then-publish: all
@@ -274,23 +275,23 @@ services.
 | Renderer comment working copy, composer and saved-comment edit projection | `app/application/comment-session.js` |
 | Active/background runs, Agent delivery projection, background outcomes, submission lifecycle locks and operation locks | `app/application/run-session.js` |
 | Renderer Agent catalog, provider-keyed availability/guidance, selection-keyed use-time check and submission sequencing | `app/application/agent-provider-catalog.js`, `app/domain/agent-provider-state.js` and `app/application/run-workflow.js`; `qoder-availability.js` and `QoderAvailabilityCard.tsx` are compatibility wrappers only. Delivery and About consume the same `WorkspaceController` snapshot, and neither card receives command, version, path or npm prefix |
-| Provider-neutral dispatch, provider/runtime/security-profile/execution-purpose tickets, process/session lifetime, canonical events, cancellation-before-durable-Request and shutdown drain | `scripts/agent/agent-runtime-coordinator.mjs` plus provider/runtime registries; legacy Services are stateless façades and durable Request/Candidate authority remains in `ProjectFileRepository` |
-| Trusted-local Qoder installation discovery, package/version/login/model preflight, error classification and ACP launch descriptor | `scripts/agent/providers/qoder-provider.mjs`; legacy `qoder-acp` is mapped only by the provider registry and its external projection remains compatible |
-| Pinned Codex package identity and real App Server auth/model preflight | `scripts/agent/providers/codex-provider.mjs`, `scripts/agent/runtimes/codex-app-server-client.mjs` and `schemas/codex-app-server.runtime-lock.json`; packaged verification binds the wrapper, architecture-specific native package, runtime manifest and executable version before the default catalog may expose Codex |
+| Provider-neutral dispatch, provider/runtime/security-profile/execution-purpose tickets, process/session lifetime, canonical events, cancellation-before-durable-Request and shutdown drain | `bridge/agent/agent-runtime-coordinator.mjs` plus provider/runtime registries; legacy Services are stateless façades and durable Request/Candidate authority remains in `ProjectFileRepository` |
+| Trusted-local Qoder installation discovery, package/version/login/model preflight, error classification and ACP launch descriptor | `bridge/agent/providers/qoder-provider.mjs`; legacy `qoder-acp` is mapped only by the provider registry and its external projection remains compatible |
+| Pinned Codex package identity and real App Server auth/model preflight | `bridge/agent/providers/codex-provider.mjs`, `bridge/agent/runtimes/codex-app-server-client.mjs` and `schemas/codex-app-server.runtime-lock.json`; packaged verification binds the wrapper, architecture-specific native package, runtime manifest and executable version before the default catalog may expose Codex |
 | Gated Codex App Server execution to unique Candidate | `codex-app-server-runtime.mjs` owns one ephemeral sandboxed turn and confirmed cleanup; `codex-provider.mjs` owns model-bound launch and Codex-only prompt; the existing Execution Host alone invokes and verifies the fixed finalizer. `shared/agent-feature-gates.mjs` enables `codexExecution` while leaving `codexDiscussion` false; disabling that one source fact is the immediate rollback |
-| Provider-neutral ACP launch and immutable standard event envelope | `scripts/agent/runtimes/acp-runtime.mjs`; transport compatibility remains in `scripts/qoder-acp-client.mjs` |
-| Frozen execution policy and single-output client-mediated Host Port | `scripts/agent/policies/` and `scripts/agent/hosts/`; these constrain only requests made through the ACP Client Host, never native filesystem/command actions inside an Agent process |
+| Provider-neutral ACP launch and immutable standard event envelope | `bridge/agent/runtimes/acp-runtime.mjs`; transport compatibility remains in `bridge/qoder-acp-client.mjs` |
+| Frozen execution policy and single-output client-mediated Host Port | `bridge/agent/policies/` and `bridge/agent/hosts/`; these constrain only requests made through the ACP Client Host, never native filesystem/command actions inside an Agent process |
 | Immutable Version projection and history-view transition | `app/application/version-session.js` |
 | `PROJECT.md` editor working copy, generation, composition fence and save projection facts | `app/application/project-rules-session.js` |
 | `PROJECT.md` Bridge read/write, 700ms autosave, unknown-write reconciliation, close/switch drain and editor-restore host port | `app/application/project-rules-workflow.js`, composed by `WorkspaceController` |
 | Renderer source-history context, pending Patch operations and action intent | `app/application/source-history-session.js` |
 | Pure comment/edit-event/tombstone transition rules | `shared/draft-aggregate.mjs` |
 | Pure source-history validation, cursor transitions and exact Patch replay | `shared/source-history.mjs`, re-exported through `app/domain/source-history.js` |
-| Bridge-side draft command validation and CAS | `scripts/draft-service.mjs` |
-| Bridge-side source-history repository, autosave preparation and action application | `scripts/source-history-service.mjs` |
-| Bridge-side current-source commit/recovery WAL, same-directory replacement, history application, metadata settlement and exactly-once audit outbox | `scripts/source-transaction-service.mjs` |
-| Bridge-side registered command identity and source-observation classification | `scripts/project-context-service.mjs` |
-| Durable Project File Registry, Working Copy CAS, Version/Candidate and Request/Draft records | `scripts/project-file-repository.mjs` façade over `scripts/project-file-repository/` internals (path safety, Registry, Working Copy CAS, Version/Candidate, Request/Draft). Callers keep importing the façade; there is no second persistence owner |
+| Bridge-side draft command validation and CAS | `bridge/draft-service.mjs` |
+| Bridge-side source-history repository, autosave preparation and action application | `bridge/source-history-service.mjs` |
+| Bridge-side current-source commit/recovery WAL, same-directory replacement, history application, metadata settlement and exactly-once audit outbox | `bridge/source-transaction-service.mjs` |
+| Bridge-side registered command identity and source-observation classification | `bridge/project-context-service.mjs` |
+| Durable Project File Registry, Working Copy CAS, Version/Candidate and Request/Draft records | `bridge/project-file-repository.mjs` façade over `bridge/project-file-repository/` internals (path safety, Registry, Working Copy CAS, Version/Candidate, Request/Draft). Callers keep importing the façade; there is no second persistence owner |
 | Close, switch, submit and history obligations | `app/application/drain-coordinator.js` |
 | Late query rejection and monotonic draft reads | `app/application/project-query-fence.js` |
 | Crash-only browser recovery | `app/application/recovery-store.js` |
@@ -361,7 +362,7 @@ Direct edits form ordered revisions and are written through a single queue. Ever
 `/autosave` retains its own transport decoding and revision checks, then
 delegates the current-source write to `ProjectFileRepository`. Path safety,
 Registry, Working Copy CAS, Version/Candidate and Request/Draft helpers live
-under `scripts/project-file-repository/`; the façade remains the only public
+under `bridge/project-file-repository/`; the façade remains the only public
 module and the only persistence owner. The v3 Bridge
 `SourceTransaction` kernel and `history/source-operations.json` journal are
 not on the live open path. `/source-history/action` returns the current source
