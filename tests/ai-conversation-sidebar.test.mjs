@@ -659,11 +659,13 @@ test("live Agent narration carries its bounded-text fact and local timestamp", (
   });
   assert.equal(progress.narrationTruncated, true);
   assert.equal(progress.liveLabel, "Codex 正在修改");
+  const eventTimestamp = "2026-08-26T12:04:00.000Z";
+  const now = Date.parse("2026-08-26T12:14:00.000Z");
+  const localEvent = new Date(eventTimestamp);
+  const expectedLocalTime = `${String(localEvent.getHours()).padStart(2, "0")}:${String(localEvent.getMinutes()).padStart(2, "0")}`;
   assert.equal(
-    sidebarTimestampLabel("2026-08-26T03:04:00.000Z", {
-      now: Date.parse("2026-08-26T12:00:00.000Z"),
-    }),
-    "11:04",
+    sidebarTimestampLabel(eventTimestamp, { now }),
+    expectedLocalTime,
   );
   assert.equal(sidebarTimestampLabel("not-a-date"), null);
 });
