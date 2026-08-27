@@ -6,10 +6,10 @@ function frozenItems(value) {
   return Object.freeze(Array.isArray(value) ? [...value] : []);
 }
 
-function deletedIds(value) {
-  return [...new Set(
+function frozenDeletedIds(value) {
+  return Object.freeze([...new Set(
     [...(value || [])].map(String).filter(Boolean),
-  )];
+  )]);
 }
 
 function initialSnapshot() {
@@ -45,17 +45,7 @@ export class CommentSession {
   }
 
   #emit(next) {
-    this.#snapshot = Object.freeze({
-      ...next,
-      comments: frozenItems(next.comments),
-      changeEvents: frozenItems(next.changeEvents),
-      deletedCommentIds: frozenItems(deletedIds(next.deletedCommentIds)),
-      composerDraft: String(next.composerDraft || ""),
-      composerCommentId: optionalId(next.composerCommentId),
-      composerAttachments: frozenItems(next.composerAttachments),
-      composerTarget: next.composerTarget || null,
-      editSession: next.editSession || null,
-    });
+    this.#snapshot = Object.freeze(next);
     try {
       this.#observer?.(this.#snapshot);
     } catch {
@@ -84,23 +74,34 @@ export class CommentSession {
     composerAttachments,
     composerTarget,
     editSession,
-  }) {
-    const next = { ...this.#snapshot };
-    if (comments !== undefined) next.comments = comments;
-    if (changeEvents !== undefined) next.changeEvents = changeEvents;
-    if (deletedCommentIds !== undefined) {
-      next.deletedCommentIds = deletedIds(deletedCommentIds);
-    }
-    if (composerDraft !== undefined) next.composerDraft = composerDraft;
-    if (composerCommentId !== undefined) {
-      next.composerCommentId = composerCommentId;
-    }
-    if (composerAttachments !== undefined) {
-      next.composerAttachments = composerAttachments;
-    }
-    if (composerTarget !== undefined) next.composerTarget = composerTarget;
-    if (editSession !== undefined) next.editSession = editSession;
-    this.#emit(next);
+  } = {}) {
+    const current = this.#snapshot;
+    this.#emit({
+      comments: comments === undefined
+        ? current.comments
+        : frozenItems(comments),
+      changeEvents: changeEvents === undefined
+        ? current.changeEvents
+        : frozenItems(changeEvents),
+      deletedCommentIds: deletedCommentIds === undefined
+        ? current.deletedCommentIds
+        : frozenDeletedIds(deletedCommentIds),
+      composerDraft: composerDraft === undefined
+        ? current.composerDraft
+        : String(composerDraft || ""),
+      composerCommentId: composerCommentId === undefined
+        ? current.composerCommentId
+        : optionalId(composerCommentId),
+      composerAttachments: composerAttachments === undefined
+        ? current.composerAttachments
+        : frozenItems(composerAttachments),
+      composerTarget: composerTarget === undefined
+        ? current.composerTarget
+        : composerTarget || null,
+      editSession: editSession === undefined
+        ? current.editSession
+        : editSession || null,
+    });
     return this.#snapshot;
   }
 

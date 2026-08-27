@@ -172,10 +172,18 @@ import {
 } from "./workbench/comment-relink-model.js";
 import { CommentRailView } from "./workbench/comment-rail-view";
 import {
+  CommentRailContainer,
+  type CommentRailCapability,
+} from "./workbench/comment-rail-container";
+import { createCommentCanvasPort } from "./workbench/comment-canvas-port";
+import {
   deriveComposerState,
   type CommentRailActions,
   type CommentRailModel,
 } from "./workbench/comment-rail-contract";
+import {
+  sameWorkbenchRenderSnapshot,
+} from "./workbench/workspace-render-snapshot.js";
 import {
   WorkbenchFileHeaderView,
   WorkbenchHeaderToolbar,
@@ -492,6 +500,7 @@ export default function Workbench() {
   }, []);
   const fenceAndFreezeCurrentCanvasRef = useRef(fenceAndFreezeCurrentCanvas);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [commentCanvasPort] = useState(createCommentCanvasPort);
   const attachmentInputRef = useRef<HTMLInputElement>(null);
   const attachmentInputTargetRef = useRef<{
     kind: "composer" | "comment";
@@ -556,7 +565,7 @@ export default function Workbench() {
   const automaticProjectRegistrationRef = useRef("");
   const projectRecordsPreparationRef = useRef("");
 
-  const [workspaceControllerSnapshot, setWorkspaceControllerSnapshot] =
+  const [workspaceControllerSnapshot, setWorkspaceControllerSnapshotState] =
     useState<WorkspaceControllerSnapshot | null>(null);
   const [workspaceController, setWorkspaceController] =
     useState<WorkspaceController | null>(null);
@@ -640,9 +649,12 @@ export default function Workbench() {
   const [recentProjects, setRecentProjects] = useState<RecentProject[]>([]);
   const [registeredProjects, setRegisteredProjects] = useState<RegisteredProject[]>([]);
   const [recentProjectsError, setRecentProjectsError] = useState("");
-  const [selection, setSelection] = useState<HtmlCanvasSelection | null>(null);
+  const commentCapabilitySnapshot = workspaceController
+    ? (workspaceController.comments as CommentRailCapability).getSnapshot()
+    : null;
   const commentSnapshot = (
-    workspaceControllerSnapshot?.commentSession as CommentSessionSnapshot<
+    commentCapabilitySnapshot?.workingCopy
+    ?? workspaceControllerSnapshot?.commentSession as CommentSessionSnapshot<
       CommentItem,
       DirectEditEvent,
       CommentAttachment,
@@ -659,9 +671,13 @@ export default function Workbench() {
   const commentEditSession = commentSnapshot.editSession;
   const [attachmentObjectUrls, setAttachmentObjectUrls] = useState<Record<string, string>>({});
   const attachmentUploadCount =
-    workspaceControllerSnapshot?.comment?.attachmentUploadCount ?? 0;
+    commentCapabilitySnapshot?.persistence?.attachmentUploadCount
+    ?? workspaceControllerSnapshot?.comment?.attachmentUploadCount
+    ?? 0;
   const draftPersistError =
-    workspaceControllerSnapshot?.comment?.draft.error ?? "";
+    commentCapabilitySnapshot?.persistence?.draft.error
+    ?? workspaceControllerSnapshot?.comment?.draft.error
+    ?? "";
   const runSnapshot = workspaceControllerSnapshot?.runSession
     ?? INITIAL_RUN_SNAPSHOT;
   const agentCatalogSnapshot = workspaceControllerSnapshot?.run?.agentCatalog ?? null;
@@ -739,7 +755,6 @@ export default function Workbench() {
     textEditing: false,
   });
   const [commentHeaderHeight, setCommentHeaderHeight] = useState(62);
-  const [expandedOtherTabCommentsKey, setExpandedOtherTabCommentsKey] = useState("");
   const [commentViewport, setCommentViewport] = useState({ top: 0, height: 800 });
   const [focusedCommentId, setFocusedCommentId] = useState<string | null>(null);
   const [commentRailOffset, setCommentRailOffset] = useState(0);
@@ -1345,7 +1360,7 @@ export default function Workbench() {
     });
     workspaceControllerRef.current = controller;
     setWorkspaceController(controller);
-    setWorkspaceControllerSnapshot(controller.getSnapshot());
+    setWorkspaceControllerSnapshotState(controller.getSnapshot());
     return () => {
       if (workspaceControllerRef.current === controller) {
         workspaceControllerRef.current = null;
@@ -1482,6 +1497,13 @@ export default function Workbench() {
   );
   useEffect(() => {
     if (!workspaceController) return undefined;
+    const setWorkspaceControllerSnapshot = (
+      snapshot: WorkspaceControllerSnapshot,
+    ) => {
+      setWorkspaceControllerSnapshotState((current) => (
+        sameWorkbenchRenderSnapshot(current, snapshot) ? current : snapshot
+      ));
+    };
     const unsubscribeSnapshot = workspaceController.subscribe(
       setWorkspaceControllerSnapshot,
     );
@@ -1669,7 +1691,7 @@ export default function Workbench() {
           performance.mark("pageroot:accept:overlay-closed");
         }
         setLastModifiedAt(publication.lastModifiedAt || null);
-        setSelection(null);
+        commentCanvasPort.setSelection(null);
         setComposerOpen(false);
         commentEditResumePendingRef.current = null;
         setEditingCommentId(null);
@@ -1896,7 +1918,7 @@ export default function Workbench() {
         setProjectName(project.name);
         setProjectRecordsPath(null);
         setLastModifiedAt(project.lastModifiedAt || null);
-        setSelection(null);
+        commentCanvasPort.setSelection(null);
         restoreCachedDocumentPresentation({
           controller: workspaceController, project, setPageViewContext,
           setCanvasMode, stage: reviewStageRef.current,
@@ -2297,7 +2319,13 @@ export default function Workbench() {
       unsubscribe();
       unsubscribeSnapshot();
     };
-  }, [readyReviewSession, reviewAnalysisSession, setSourceViewTransitioning, workspaceController]);
+  }, [
+    commentCanvasPort,
+    readyReviewSession,
+    reviewAnalysisSession,
+    setSourceViewTransitioning,
+    workspaceController,
+  ]);
   useEffect(() => () => reviewAnalysisSession.dispose(), [reviewAnalysisSession]);
   const reportInterruptionPresence = useCallback((
     interruptionCode: string,
@@ -2822,9 +2850,6 @@ export default function Workbench() {
     pageViewDocumentKey,
     activePageViewContext?.generation ?? 0,
   ].join(":");
-  const otherTabCommentsOpen = (
-    expandedOtherTabCommentsKey === otherTabCommentsContextKey
-  );
   const acceptPageViewContext = useCallback((
     nextContext: PageViewContext | null,
     documentKey: string,
@@ -5250,7 +5275,7 @@ export default function Workbench() {
       commentEditResumePendingRef.current = null;
     }
     editorRef.current?.clearSelection();
-    setSelection(null);
+    commentCanvasPort.setSelection(null);
     if (itemId !== "__composer") {
       updateFocusedComment(itemId);
       const comment = currentComments.comments.find(
@@ -5259,6 +5284,7 @@ export default function Workbench() {
       if (comment) queueReviewPairReveal(comment.target, itemId);
     }
   }, [
+    commentCanvasPort,
     currentCommentSessionSnapshot,
     queueReviewPairReveal,
     updateFocusedComment,
@@ -5279,7 +5305,7 @@ export default function Workbench() {
         ? { ...target, id: currentTarget.id }
         : target;
       controller?.rebindCommentComposer(nextTarget);
-      setSelection(nextTarget);
+      commentCanvasPort.setSelection(nextTarget);
       relinkingTargetRef.current = null;
       relinkSelectionArmedRef.current = false;
       setRelinkingTarget(null);
@@ -5310,7 +5336,7 @@ export default function Workbench() {
     const nextComments = (rebound.value as {
       comments: CommentItem[];
     }).comments;
-    setSelection(nextTarget);
+    commentCanvasPort.setSelection(nextTarget);
     relinkingTargetRef.current = null;
     relinkSelectionArmedRef.current = false;
     setRelinkingTarget(null);
@@ -5336,6 +5362,7 @@ export default function Workbench() {
     return true;
   }, [
     beginTargetRelink,
+    commentCanvasPort,
     currentCommentSessionSnapshot,
     queueReviewPairReveal,
     requestComposerFocus,
@@ -5383,7 +5410,7 @@ export default function Workbench() {
     const located = editorRef.current?.select(target, { showToolbar: false });
     const nextTarget = located || target;
     workspaceControllerRef.current?.rebindCommentComposer(nextTarget);
-    setSelection(nextTarget);
+    commentCanvasPort.setSelection(nextTarget);
     updateFocusedComment(null);
     setPendingDeleteCommentId(null);
     setComposerOpen(true);
@@ -5394,6 +5421,7 @@ export default function Workbench() {
     requestComposerFocus();
   }, [
     beginTargetRelink,
+    commentCanvasPort,
     currentCommentSessionSnapshot,
     queueReviewPairReveal,
     requestComposerFocus,
@@ -5475,7 +5503,7 @@ export default function Workbench() {
       });
       return;
     }
-    setSelection(target);
+    commentCanvasPort.setSelection(target);
     const resumesRecoveredDraft = currentComments.composerTarget?.id === target.id;
     if (!resumesRecoveredDraft) {
       const nextCommentId = recordId("comment", commentCounter.current++);
@@ -5499,6 +5527,7 @@ export default function Workbench() {
     requestComposerFocus();
   }, [
     attachmentUploadCount,
+    commentCanvasPort,
     currentCommentSessionSnapshot,
     currentDocumentSessionSnapshot,
     currentRunSessionSnapshot,
@@ -5533,7 +5562,7 @@ export default function Workbench() {
     };
     const wasRelinking = Boolean(relinkingTargetRef.current);
     editorRef.current?.clearSelection();
-    setSelection(null);
+    commentCanvasPort.setSelection(null);
     if (wasRelinking) {
       relinkSelectionArmedRef.current = true;
       finishTargetRelink(globalTarget);
@@ -5541,6 +5570,7 @@ export default function Workbench() {
     }
     openCommentComposer(globalTarget);
   }, [
+    commentCanvasPort,
     finishTargetRelink,
     interactionLocked,
     openCommentComposer,
@@ -5600,6 +5630,11 @@ export default function Workbench() {
     const currentRun = currentRunSessionSnapshot();
     const currentDocument = currentDocumentSessionSnapshot();
     const currentComments = currentCommentSessionSnapshot();
+    const currentDraftTarget = currentComments.composerTarget;
+    const currentDraft = currentComments.composerDraft;
+    const currentDraftAttachments = currentComments.composerAttachments;
+    const currentAttachmentUploadCount = workspaceController
+      ?.comments.getSnapshot().persistence?.attachmentUploadCount ?? 0;
     if (
       currentRun.activeLocked
       || projectHydrating
@@ -5608,21 +5643,20 @@ export default function Workbench() {
       || currentDocument.persistState === "conflict"
       || viewMode === "history"
     ) return;
-    if (!draftTarget) {
+    if (!currentDraftTarget) {
       editorRef.current?.clearSelection();
       return;
     }
-    if (!canSaveCommentTarget(draftTarget)) {
+    if (!canSaveCommentTarget(currentDraftTarget)) {
       beginTargetRelink("__composer");
       return;
     }
-    if (!draft.trim() && draftAttachments.length === 0) {
+    if (!currentDraft.trim() && currentDraftAttachments.length === 0) {
       requestComposerFocus();
       return;
     }
-    if (attachmentUploadCount > 0) return;
+    if (currentAttachmentUploadCount > 0) return;
     const commentId = currentComments.composerCommentId
-      || draftCommentId
       || recordId("comment", commentCounter.current++);
     const outcome = await requiredWorkspaceController(workspaceController)
       .commitComment({ commentId });
@@ -5658,11 +5692,6 @@ export default function Workbench() {
       has_file: (comment.attachments ?? []).some((attachment) => attachment.kind === "file"),
     }, currentProjectSessionSnapshot().projectId || undefined);
   }, [
-    draft,
-    draftAttachments,
-    draftCommentId,
-    draftTarget,
-    attachmentUploadCount,
     currentCommentSessionSnapshot,
     currentDocumentSessionSnapshot,
     currentProjectSessionSnapshot,
@@ -5795,7 +5824,7 @@ export default function Workbench() {
       { showToolbar: false },
     );
     const nextTarget = located || current.target;
-    setSelection(nextTarget);
+    commentCanvasPort.setSelection(nextTarget);
     const targetVisible = (
       current.target.tagName === "body"
       || commentTargetLayouts[current.target.id]?.status === "visible"
@@ -5814,6 +5843,7 @@ export default function Workbench() {
       });
     }
   }, [
+    commentCanvasPort,
     commentTargetLayouts,
     currentCommentSessionSnapshot,
     queueReviewCommentFocus,
@@ -5971,7 +6001,7 @@ export default function Workbench() {
     commentId: string,
   ) => {
     if (!canLocateTarget(target)) {
-      setSelection(target);
+      commentCanvasPort.setSelection(target);
       updateFocusedComment(commentId);
       queueReviewPairReveal(target, commentId);
       return;
@@ -5979,15 +6009,15 @@ export default function Workbench() {
     updateFocusedComment(commentId);
     const located = editorRef.current?.select(target, { showToolbar: false });
     const nextTarget = located || target;
-    setSelection(nextTarget);
+    commentCanvasPort.setSelection(nextTarget);
     queueReviewPairReveal(nextTarget, commentId);
-  }, [queueReviewPairReveal, updateFocusedComment]);
+  }, [commentCanvasPort, queueReviewPairReveal, updateFocusedComment]);
 
   const handleCanvasSelection = useCallback((target: HtmlCanvasSelection | null) => {
     commentRailOffsetRef.current = 0;
     setCommentRailFollowsFocus(false);
     setCommentRailOffset(0);
-    setSelection(target);
+    commentCanvasPort.setSelection(target);
     if (!target) {
       if (!composerOpen) updateFocusedComment(null);
       return;
@@ -6015,6 +6045,7 @@ export default function Workbench() {
     // Explicit navigation from a comment card still reveals its Canvas target.
     updateFocusedComment(nextComment.commentId);
   }, [
+    commentCanvasPort,
     composerOpen,
     finishTargetRelink,
     updateFocusedComment,
@@ -6424,7 +6455,7 @@ export default function Workbench() {
         return;
       }
       setLastModifiedAt(result.lastModifiedAt || null);
-      setSelection(null);
+      commentCanvasPort.setSelection(null);
       setComposerOpen(false);
       commentEditResumePendingRef.current = null;
       setEditingCommentId(null);
@@ -6489,6 +6520,7 @@ export default function Workbench() {
     }
   }, [
     activeRun,
+    commentCanvasPort,
     currentProjectSessionSnapshot,
     currentRunSessionSnapshot,
     readyReviewSession,
@@ -7558,7 +7590,7 @@ export default function Workbench() {
       || currentCommentSessionSnapshot().composerCommentId;
     if (commentId) pasteImages(event, { kind: "composer", commentId });
   }, [currentCommentSessionSnapshot, draftCommentId, pasteImages]);
-  const commentRailModel = useMemo<CommentRailModel>(() => ({
+  const commentRailModel: CommentRailModel = {
     composer: deriveComposerState({
       relinkingTarget,
       editingCommentId,
@@ -7589,7 +7621,8 @@ export default function Workbench() {
     draftInCurrentTab,
     hasUnsavedCommentEdit,
     otherTabCommentEntryCount,
-    otherTabCommentsOpen,
+    otherTabCommentsContextKey,
+    otherTabCommentsOpen: false,
     interactionLocked,
     unfinishedEditedComment,
     otherTabCommentGroups,
@@ -7614,72 +7647,16 @@ export default function Workbench() {
     sortedVisibleCommentItems,
     renderedVisibleCommentItems,
     commentTargetLayouts,
-    selection,
+    selection: null,
     commentMeasurementKeys,
     visibleCommentPositions,
-  }), [
-    activeCommentCount,
-    attachmentObjectUrls,
-    attachmentUploadCount,
-    canvasDocumentHeight,
-    changeEvents,
-    commentEditDraft,
-    commentEditSession,
-    commentLayoutAuthority,
-    commentLayoutReady,
-    commentMeasurementKeys,
-    commentRailContentHeight,
-    commentRailFollowsFocus,
-    commentRailMinimumOffset,
-    commentRailMinimumTop,
-    commentRailOffset,
-    commentTargetLayouts,
-    composerInCurrentTab,
-    composerMeasurementKey,
-    composerOpen,
-    composerTop,
-    draft,
-    draftAttachments,
-    draftCommentId,
-    draftInCurrentTab,
-    draftRecoveryMeasurementKey,
-    draftRecoveryTop,
-    draftTarget,
-    draftTargetCanSave,
-    draftTargetScope,
-    editingCommentId,
-    expectedCommentLayoutTargetIds,
-    focusedCommentId,
-    hasCollapsedCommentDraft,
-    hasUnsavedCommentEdit,
-    interactionLocked,
-    otherTabCommentEntryCount,
-    otherTabCommentGroups,
-    otherTabCommentsOpen,
-    pendingDeleteCommentId,
-    projectLoadError,
-    relinkCardActive,
-    relinkRailCardVisible,
-    relinkingTarget,
-    renderedVisibleCommentItems,
-    selection,
-    sortedVisibleCommentItems,
-    unfinishedEditedComment,
-    unsafeRelinkCommentItems,
-    viewMode,
-    visibleCommentItems,
-    visibleCommentPositions,
-  ]);
+  };
   const commentRailActions = useMemo<CommentRailActions>(() => ({
     openGlobalCommentComposer,
     resumeCurrentComposer,
     resumeCommentEdit,
-    toggleOtherTabComments: () => {
-      setExpandedOtherTabCommentsKey((current) => (
-        current === otherTabCommentsContextKey ? "" : otherTabCommentsContextKey
-      ));
-    },
-    collapseOtherTabComments: () => setExpandedOtherTabCommentsKey(""),
+    toggleOtherTabComments: () => {},
+    collapseOtherTabComments: () => {},
     hideCommentComposer: () => setComposerOpen(false),
     requestDeleteComment: (commentId) => setPendingDeleteCommentId(commentId),
     clearDeleteRequest: () => setPendingDeleteCommentId(null),
@@ -7724,7 +7701,6 @@ export default function Workbench() {
     openAttachmentPicker,
     openAttachmentPreview,
     openGlobalCommentComposer,
-    otherTabCommentsContextKey,
     pasteImages,
     pasteIntoCommentComposer,
     queueReviewCommentFocus,
@@ -7920,7 +7896,7 @@ export default function Workbench() {
               editorRef.current?.clearSelection();
               setPageViewContext(null);
               editorRef.current?.applyPageViewContext(null);
-              setSelection(null);
+              commentCanvasPort.setSelection(null);
               updateFocusedComment(null);
               setCanvasMode("preview");
             };
@@ -8253,10 +8229,19 @@ export default function Workbench() {
         ) : null}
 
         {canvasMode === "edit" ? (
-          <CommentRailView
-            model={commentRailModel}
-            actions={commentRailActions}
-          />
+          workspaceController ? (
+            <CommentRailContainer
+              capability={workspaceController.comments as CommentRailCapability}
+              canvasPort={commentCanvasPort}
+              model={commentRailModel}
+              actions={commentRailActions}
+            />
+          ) : (
+            <CommentRailView
+              model={commentRailModel}
+              actions={commentRailActions}
+            />
+          )
         ) : null}
       </div>
       )}

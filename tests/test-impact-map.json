@@ -483,6 +483,24 @@
       ]
     },
     {
+      "id": "comment-capability-boundary",
+      "patterns": [
+        "^app/workbench/(?:comment-rail-container|comment-canvas-port|workspace-render-snapshot)\\.(?:d\\.ts|js|tsx)$",
+        "^tests/(?:comment-canvas-port|workbench-render-snapshot)\\.test\\.mjs$"
+      ],
+      "suites": [
+        "typecheck",
+        "browser-comments-smoke",
+        "electron-editing-smoke"
+      ],
+      "nodeTests": [
+        "tests/comment-canvas-port.test.mjs",
+        "tests/comment-session.test.mjs",
+        "tests/workbench-render-snapshot.test.mjs",
+        "tests/workspace-controller.test.mjs"
+      ]
+    },
+    {
       "id": "document-session",
       "patterns": [
         "^app/application/(?:document-session|recovery-store)\\.(?:js|d\\.ts)$"

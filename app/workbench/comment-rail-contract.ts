@@ -64,6 +64,7 @@ export type CommentRailModel = {
   draftInCurrentTab: boolean;
   hasUnsavedCommentEdit: boolean;
   otherTabCommentEntryCount: number;
+  otherTabCommentsContextKey: string;
   otherTabCommentsOpen: boolean;
   interactionLocked: boolean;
   unfinishedEditedComment: CommentItem | null | undefined;

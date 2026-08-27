@@ -7,15 +7,16 @@
       "patterns": [
         "^app/application/comment(?:-workflow|-session|-workflow-codecs)?",
         "^app/application/comment/",
-        "^app/workbench/comment-rail",
+        "^app/workbench/comment-(?:rail|canvas)",
         "^tests/comment-"
       ],
       "entryInterfaces": [
         "app/application/comment-workflow.d.ts",
         "app/application/comment-session.d.ts",
+        "app/application/workspace-controller-capabilities.d.ts",
+        "app/workbench/comment-canvas-port.d.ts",
         "app/workbench/comment-rail-contract.ts",
-        "app/application/comment/commit-plan.d.ts",
-        "app/application/workspace-controller-capabilities.d.ts"
+        "app/application/comment/commit-plan.d.ts"
       ],
       "owners": [
         "CommentSession",
@@ -25,16 +26,21 @@
         "app/application/comment-workflow.js",
         "app/application/comment-session.js",
         "app/application/comment/commit-plan.js",
+        "app/workbench/comment-canvas-port.js",
+        "app/workbench/comment-rail-container.tsx",
         "app/workbench/comment-rail-contract.ts",
         "app/workbench/comment-rail-view.tsx"
       ],
       "focusedTests": [
         "tests/comment-workflow.test.mjs",
         "tests/comment-commit-plan.test.mjs",
-        "tests/comment-session.test.mjs"
+        "tests/comment-session.test.mjs",
+        "tests/comment-canvas-port.test.mjs",
+        "tests/workbench-render-snapshot.test.mjs"
       ],
       "requiredDocs": [
         "docs/ARCHITECTURE_MAP.md",
+        "docs/ARCHITECTURE_CONTRACT.md",
         "docs/GUARD_LEDGER.md"
       ]
     },

@@ -48,6 +48,39 @@ test("workflow subscriptions observe the same atomic snapshot without replacing 
   assert.equal(session.composerDraft, "next draft");
 });
 
+test("draft-only updates preserve unrelated immutable collection identities", () => {
+  const session = new CommentSession();
+  const externalComments = [{ commentId: "comment_one" }];
+  const externalEvents = [{ eventId: "event_one" }];
+  const externalAttachments = [{ attachmentId: "attachment_one" }];
+  session.update({
+    comments: externalComments,
+    changeEvents: externalEvents,
+    deletedCommentIds: ["comment_two"],
+    composerAttachments: externalAttachments,
+  });
+  const before = session.snapshot;
+
+  session.setComposerDraft("next draft");
+
+  assert.notEqual(session.snapshot, before);
+  assert.equal(session.snapshot.comments, before.comments);
+  assert.equal(session.snapshot.changeEvents, before.changeEvents);
+  assert.equal(session.snapshot.deletedCommentIds, before.deletedCommentIds);
+  assert.equal(session.snapshot.composerAttachments, before.composerAttachments);
+  assert.ok(Object.isFrozen(session.snapshot.comments));
+  assert.ok(Object.isFrozen(session.snapshot.changeEvents));
+  assert.ok(Object.isFrozen(session.snapshot.deletedCommentIds));
+  assert.ok(Object.isFrozen(session.snapshot.composerAttachments));
+
+  externalComments.push({ commentId: "comment_three" });
+  externalEvents.push({ eventId: "event_two" });
+  externalAttachments.push({ attachmentId: "attachment_two" });
+  assert.equal(session.comments.length, 1);
+  assert.equal(session.changeEvents.length, 1);
+  assert.equal(session.composerAttachments.length, 1);
+});
+
 test("comment deletion tombstones can only change through session methods", () => {
   const session = new CommentSession();
   assert.equal(session.markDeleted("comment_one"), true);
