@@ -1591,17 +1591,11 @@ export default function Workbench() {
       }
       if (runEvent.type === "run-submission-uncertain") {
         if (runEvent.current) {
-          setCanvasMode("preview");
-          revealAiConversation();
           void workspaceControllerRef.current?.dismissFirstEditGuide();
         }
         return;
       }
       if (runEvent.type === "run-submission-failed") {
-        if (runEvent.current && runEvent.run) {
-          setCanvasMode("preview");
-          revealAiConversation();
-        }
         return;
       }
       if (runEvent.type === "run-handoff-failed") {
@@ -1634,8 +1628,6 @@ export default function Workbench() {
             });
             return;
           }
-          setCanvasMode("preview");
-          revealAiConversation();
           setToast({
             title: "Qoder CLI 没有完成本轮",
             message: runEvent.message
@@ -1666,16 +1658,8 @@ export default function Workbench() {
           ) {
             // A finished round is reported by the conversation: the sidebar moves to
             // "结果 · 等待决定" and its action bar carries the decision. Only the
-            // states the user cannot act on from there still raise the drawer, and
-            // they raise it because the details live nowhere else.
-            if (
-              state === "error"
-              || state === "awaiting-conflict-resolution"
-              || state === "recovering-transaction"
-            ) {
-              setCanvasMode("preview");
-              revealAiConversation();
-            }
+            // Exceptional states stay in the same conversation when it is open;
+            // background projects must never navigate the visible project.
             if (state === "ready-to-open" && toastRef.current?.dedupeKey === "ai-submit") {
               setToast(null);
             }
@@ -1849,8 +1833,7 @@ export default function Workbench() {
         );
         if (projectEvent.showHandoff) {
           setHandoffPreviewOpen(false);
-          setCanvasMode("preview");
-          revealAiConversation();
+          setCanvasMode("edit");
         }
         return;
       }
