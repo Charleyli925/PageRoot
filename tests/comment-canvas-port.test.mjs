@@ -103,4 +103,13 @@ test("comment canvas port sequences reveal, rail reset and composer focus intent
   port.requestComposerFocus();
   assert.equal(port.getSnapshot().railResetRevision, 1);
   assert.equal(port.getSnapshot().composerFocusRevision, 1);
+
+  port.requestCommentEditFocus("comment_edit", true);
+  const editFocus = port.getSnapshot().editFocusRequest;
+  assert.equal(editFocus.commentId, "comment_edit");
+  assert.equal(editFocus.select, true);
+  port.settleCommentEditFocus(editFocus.requestId + 1);
+  assert.equal(port.getSnapshot().editFocusRequest, editFocus);
+  port.settleCommentEditFocus(editFocus.requestId);
+  assert.equal(port.getSnapshot().editFocusRequest, null);
 });

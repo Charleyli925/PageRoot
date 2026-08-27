@@ -98,7 +98,6 @@ export type CommentRailModel = {
 
 export type CommentRailContainerContext = {
   reviewStageRef: RefObject<HTMLDivElement | null>;
-  commentEditRef: RefObject<HTMLTextAreaElement | null>;
   composer: ComposerState;
   canvasMode: CanvasMode;
   viewMode: "current" | "history";
@@ -114,7 +113,6 @@ export type CommentRailContainerContext = {
   projectLoadError: string | null | undefined;
   otherTabCommentsContextKey: string;
   attachmentObjectUrls: Record<string, string>;
-  pendingDeleteCommentId: string | null;
   focusedCommentId: string | null;
 };
 
@@ -158,6 +156,14 @@ export type CommentRailActions = {
   deleteComment: (commentId: string) => void;
   beginEdit: (comment: CommentItem, focusText?: boolean) => boolean;
 };
+
+export type CommentRailHostActions = Omit<
+  CommentRailActions,
+  | "toggleOtherTabComments"
+  | "collapseOtherTabComments"
+  | "requestDeleteComment"
+  | "clearDeleteRequest"
+>;
 
 export {
   composerViewFields,

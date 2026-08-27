@@ -32,6 +32,7 @@ import {
   type CommentDraft,
   type CommentRailActions,
   type CommentRailContainerContext,
+  type CommentRailHostActions,
   type CommentRailModel,
   type ComposerState,
   type OtherTabCommentGroup,
@@ -155,11 +156,12 @@ export const CommentRailContainer = memo(function CommentRailContainer({
   capability: CommentRailCapability;
   canvasPort: CommentCanvasPort;
   context: CommentRailContainerContext;
-  actions: CommentRailActions;
+  actions: CommentRailHostActions;
 }) {
   const commentsPanelRef = useRef<HTMLElement>(null);
   const commentsHeaderRef = useRef<HTMLElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
+  const commentEditRef = useRef<HTMLTextAreaElement>(null);
   const handledComposerFocusRevisionRef = useRef(0);
   const commentRailOffsetRef = useRef(0);
   const commentRailMinimumOffsetRef = useRef(0);
@@ -169,6 +171,7 @@ export const CommentRailContainer = memo(function CommentRailContainer({
   const [commentRailOffset, setCommentRailOffset] = useState(0);
   const [commentRailFollowsFocus, setCommentRailFollowsFocus] = useState(false);
   const [expandedOtherTabCommentsKey, setExpandedOtherTabCommentsKey] = useState("");
+  const [pendingDeleteCommentId, setPendingDeleteCommentId] = useState<string | null>(null);
   const snapshot = useSyncExternalStore(
     capability.subscribe,
     capability.getSnapshot,
@@ -430,7 +433,7 @@ export const CommentRailContainer = memo(function CommentRailContainer({
           && (resolution === "exact" || resolution === "rebound"),
         editable: context.viewMode === "current" && !context.interactionLocked,
         editing: editingCommentId === comment.commentId,
-        deleting: context.pendingDeleteCommentId === comment.commentId,
+        deleting: pendingDeleteCommentId === comment.commentId,
         relinking: relinkingTarget === comment.commentId,
         text: comment.text,
         attachments: (comment.attachments ?? []).map((attachment) => ({
@@ -442,7 +445,7 @@ export const CommentRailContainer = memo(function CommentRailContainer({
     }),
   ), [
     context.interactionLocked,
-    context.pendingDeleteCommentId,
+    pendingDeleteCommentId,
     context.viewMode,
     editingCommentId,
     relinkingTarget,
@@ -453,7 +456,7 @@ export const CommentRailContainer = memo(function CommentRailContainer({
     "__composer",
     {
       canSave: draftTargetCanSave,
-      deleting: context.pendingDeleteCommentId === "__composer",
+      deleting: pendingDeleteCommentId === "__composer",
       relinking: relinkingTarget === "__composer",
       text: draft,
       attachments: draftAttachments.map((attachment) => ({
@@ -465,7 +468,7 @@ export const CommentRailContainer = memo(function CommentRailContainer({
     },
   ), [
     attachmentUploadCount,
-    context.pendingDeleteCommentId,
+    pendingDeleteCommentId,
     draft,
     draftAttachments,
     draftTargetCanSave,
@@ -496,7 +499,7 @@ export const CommentRailContainer = memo(function CommentRailContainer({
             + fileCount * 48
             + (!isLocatable(comment.target) && context.viewMode === "current" ? 70 : 0)
             + (editingCommentId === comment.commentId ? 92 : 0)
-            + (context.pendingDeleteCommentId === comment.commentId ? 46 : 0),
+            + (pendingDeleteCommentId === comment.commentId ? 46 : 0),
         order: index + 1,
         scopeRank: comment.target.tagName === "body" ? 0 : 1,
       };
@@ -513,7 +516,7 @@ export const CommentRailContainer = memo(function CommentRailContainer({
         height: commentCardHeights[composerMeasurementKey]
           || 276
             + (!draftTargetCanSave ? 70 : 0)
-            + (context.pendingDeleteCommentId === "__composer" ? 46 : 0),
+            + (pendingDeleteCommentId === "__composer" ? 46 : 0),
         order: Number.MAX_SAFE_INTEGER,
         scopeRank: draftTarget.tagName === "body" ? 0 : 1,
       });
@@ -540,7 +543,7 @@ export const CommentRailContainer = memo(function CommentRailContainer({
     commentRailTargetTops,
     composerInCurrentTab,
     composerMeasurementKey,
-    context.pendingDeleteCommentId,
+    pendingDeleteCommentId,
     context.viewMode,
     draftRecoveryMeasurementKey,
     draftTarget,
@@ -559,7 +562,7 @@ export const CommentRailContainer = memo(function CommentRailContainer({
     forcedIds: [
       context.focusedCommentId,
       editingCommentId,
-      context.pendingDeleteCommentId,
+      pendingDeleteCommentId,
     ].filter((value): value is string => Boolean(value)),
   }), [
     commentRailLayout.heights,
@@ -568,7 +571,7 @@ export const CommentRailContainer = memo(function CommentRailContainer({
     commentViewport.height,
     commentViewport.top,
     context.focusedCommentId,
-    context.pendingDeleteCommentId,
+    pendingDeleteCommentId,
     editingCommentId,
     sortedVisibleCommentItems,
   ]);
@@ -831,12 +834,22 @@ export const CommentRailContainer = memo(function CommentRailContainer({
     context.interactionLocked,
   ]);
 
+  useLayoutEffect(() => {
+    const request = canvasSnapshot.editFocusRequest;
+    if (!request || request.commentId !== editingCommentId) return;
+    const editor = commentEditRef.current;
+    if (!editor || editor.disabled) return;
+    editor.focus({ preventScroll: true });
+    if (request.select) editor.select();
+    canvasPort.settleCommentEditFocus(request.requestId);
+  }, [canvasPort, canvasSnapshot.editFocusRequest, editingCommentId]);
+
   const model = useMemo<CommentRailModel>(() => ({
     composer,
     commentsPanelRef,
     commentsHeaderRef,
     composerRef,
-    commentEditRef: context.commentEditRef,
+    commentEditRef,
     viewMode: context.viewMode,
     commentLayoutReady,
     commentLayoutAuthority,
@@ -870,7 +883,7 @@ export const CommentRailContainer = memo(function CommentRailContainer({
     draftTargetCanSave,
     composerMeasurementKey,
     attachmentObjectUrls: context.attachmentObjectUrls,
-    pendingDeleteCommentId: context.pendingDeleteCommentId,
+    pendingDeleteCommentId,
     draftRecoveryTop: commentRailLayout.draftRecoveryTop,
     draftRecoveryMeasurementKey,
     expectedCommentLayoutTargetIds,
@@ -901,11 +914,10 @@ export const CommentRailContainer = memo(function CommentRailContainer({
     context.activeCommentCount,
     context.attachmentObjectUrls,
     context.changeEvents,
-    context.commentEditRef,
     context.focusedCommentId,
     context.interactionLocked,
     context.otherTabCommentsContextKey,
-    context.pendingDeleteCommentId,
+    pendingDeleteCommentId,
     context.projectLoadError,
     context.relinkCardActive,
     context.unfinishedEditedComment,
@@ -939,6 +951,12 @@ export const CommentRailContainer = memo(function CommentRailContainer({
       ));
     },
     collapseOtherTabComments: () => setExpandedOtherTabCommentsKey(""),
+    requestDeleteComment: (commentId) => setPendingDeleteCommentId(commentId),
+    clearDeleteRequest: () => setPendingDeleteCommentId(null),
+    deleteComment: (commentId) => {
+      setPendingDeleteCommentId(null);
+      actions.deleteComment(commentId);
+    },
   }), [actions, capability, context.otherTabCommentsContextKey]);
 
   return <CommentRailView model={model} actions={liveActions} />;

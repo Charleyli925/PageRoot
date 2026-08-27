@@ -23,6 +23,11 @@ export type CommentCanvasSnapshot = Readonly<{
   }> | null;
   railResetRevision: number;
   composerFocusRevision: number;
+  editFocusRequest: Readonly<{
+    requestId: number;
+    commentId: string;
+    select: boolean;
+  }> | null;
 }>;
 
 export type CommentCanvasPort = Readonly<{
@@ -35,6 +40,8 @@ export type CommentCanvasPort = Readonly<{
   settleReveal: (requestId: number) => void;
   resetRail: () => void;
   requestComposerFocus: () => void;
+  requestCommentEditFocus: (commentId: string, select?: boolean) => void;
+  settleCommentEditFocus: (requestId: number) => void;
 }>;
 
 export function createCommentCanvasPort(): CommentCanvasPort;

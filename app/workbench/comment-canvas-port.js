@@ -16,6 +16,7 @@ const EMPTY_COMMENT_CANVAS_SNAPSHOT = Object.freeze({
   revealRequest: null,
   railResetRevision: 0,
   composerFocusRevision: 0,
+  editFocusRequest: null,
 });
 
 function applyCanvasHeight(height) {
@@ -56,6 +57,7 @@ export function createCommentCanvasPort() {
   let snapshot = EMPTY_COMMENT_CANVAS_SNAPSHOT;
   const listeners = new Set();
   let revealSequence = 0;
+  let editFocusSequence = 0;
   const publish = (next) => {
     if (snapshot === next) return;
     snapshot = Object.freeze(next);
@@ -139,6 +141,7 @@ export function createCommentCanvasPort() {
         targetLayouts: Object.freeze({}),
         canvasDocumentHeight: 760,
         revealRequest: null,
+        editFocusRequest: null,
         railResetRevision: snapshot.railResetRevision + 1,
       });
     },
@@ -167,6 +170,20 @@ export function createCommentCanvasPort() {
         ...snapshot,
         composerFocusRevision: snapshot.composerFocusRevision + 1,
       });
+    },
+    requestCommentEditFocus(commentId, select = false) {
+      publish({
+        ...snapshot,
+        editFocusRequest: Object.freeze({
+          requestId: ++editFocusSequence,
+          commentId,
+          select,
+        }),
+      });
+    },
+    settleCommentEditFocus(requestId) {
+      if (snapshot.editFocusRequest?.requestId !== requestId) return;
+      publish({ ...snapshot, editFocusRequest: null });
     },
   });
 }
