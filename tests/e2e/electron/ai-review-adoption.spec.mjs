@@ -417,33 +417,25 @@ ${REVIEW_MASK_UNION_BEFORE}
     await expect(reviewAiEntry).toHaveCount(1);
     await reviewAiEntry.click();
     await expect(launched.page.getByTestId("ai-conversation-sidebar")).toBeVisible();
-    // 审阅工具默认展开，并且浮在两页之上：展开或收起都不能把页面上下推动。
-    const collapseToolbarHandle = launched.page.getByRole("button", {
-      name: "收起审阅工具",
-    });
-    await expect(collapseToolbarHandle).toBeVisible();
+    // 审阅工具固定复用工作台顶栏，不再在画布内提供第二套浮动条或收起把手。
+    await expect(launched.page.getByRole("button", { name: "收起审阅工具" }))
+      .toHaveCount(0);
+    await expect(launched.page.getByRole("button", { name: "显示并固定审阅工具" }))
+      .toHaveCount(0);
+    const sharedHeader = launched.page.locator("header.workbench-header");
+    const liveReviewTools = sharedHeader.getByLabel("审阅工具", { exact: true });
+    await expect(liveReviewTools).toBeVisible();
     const beforePaneHeader = launched.page.locator(
       'section[data-side="before"] > header',
     );
-    // 展开的工具浮层盖在页头之上，把手底边因此落在页头顶边之下。
     await expect.poll(async () => {
-      const [toolbarHandleBox, beforePaneHeaderBox] = await Promise.all([
-        collapseToolbarHandle.boundingBox(),
+      const [sharedHeaderBox, beforePaneHeaderBox] = await Promise.all([
+        sharedHeader.boundingBox(),
         beforePaneHeader.boundingBox(),
       ]);
-      if (!toolbarHandleBox || !beforePaneHeaderBox) return 0;
-      return toolbarHandleBox.y + toolbarHandleBox.height - beforePaneHeaderBox.y;
-    }).toBeGreaterThan(0);
-    const pinnedPaneHeaderTop = (await beforePaneHeader.boundingBox())?.y ?? -1;
-    await collapseToolbarHandle.click();
-    await expect(launched.page.getByRole("button", {
-      name: "显示并固定审阅工具",
-    })).toBeVisible();
-    await expect.poll(async () => {
-      const collapsedPaneHeaderBox = await beforePaneHeader.boundingBox();
-      if (!collapsedPaneHeaderBox) return -100;
-      return Math.abs(collapsedPaneHeaderBox.y - pinnedPaneHeaderTop);
-    }).toBeLessThanOrEqual(1);
+      if (!sharedHeaderBox || !beforePaneHeaderBox) return -1;
+      return beforePaneHeaderBox.y - (sharedHeaderBox.y + sharedHeaderBox.height);
+    }).toBeGreaterThanOrEqual(0);
     const beforeReviewFrame = launched.page.frameLocator(
       'iframe[title^="修改前"]',
     );
@@ -575,11 +567,8 @@ ${REVIEW_MASK_UNION_BEFORE}
     )).toHaveCount(2);
     await reviewCommentMarker.blur();
     await expect(reviewCommentBubble).toBeHidden();
-    // 接下来要操作工具栏控件，先把浮层重新展开。
-    await launched.page.getByRole("button", {
-      name: "显示并固定审阅工具",
-    }).click();
-    await expect(collapseToolbarHandle).toBeVisible();
+    // 接下来继续操作始终固定在工作台顶栏中的审阅控件。
+    await expect(liveReviewTools).toBeVisible();
     await expect(beforeReviewFrame.locator('[data-review-tab-panel="two"]'))
       .toBeHidden();
     await beforeReviewFrame.getByRole("button", { name: "审阅标签二" })
@@ -845,14 +834,10 @@ ${REVIEW_MASK_UNION_BEFORE}
     const changeNavigator = launched.page.getByRole("button", { name: "下一处变化" })
       .locator("xpath=..");
     await expect(changeNavigator.locator("strong")).toHaveText("1");
-    // Toolbar, navigator and content map must count the same regions, so the
-    // filtered toolbar total has to equal the navigator total.
-    const filteredRegionTotal = (await changeNavigator.locator("small").textContent())
-      ?.replace("/", "") || "";
+    // The unified toolbar owns the filtered region total.
+    const filteredRegionTotal = (await changeNavigator.locator("span").textContent())
+      ?.split("/")[1] || "";
     expect(Number(filteredRegionTotal)).toBeGreaterThan(0);
-    await expect(launched.page.locator("small").filter({
-      hasText: new RegExp(`^${filteredRegionTotal}/\\d+ 个变化区域$`, "u"),
-    })).toHaveCount(1);
     const filteredFocusChangeId = await beforeReviewFrame.locator("html")
       .getAttribute("data-pageroot-review-focus");
     await expect(beforeReviewFrame.locator(
@@ -1720,7 +1705,7 @@ ${REVIEW_MASK_UNION_BEFORE}
         && box.path === holes[index].path
       ));
     }).toBe(true);
-    await launched.page.getByRole("button", { name: "查看全部变化" }).click();
+    await launched.page.getByRole("button", { name: "全部变化" }).click();
     await expect.poll(async () => afterReviewFrame.locator("html").getAttribute(
       "data-pageroot-review-filter",
     )).toBe("all");
@@ -1851,8 +1836,8 @@ ${REVIEW_MASK_UNION_BEFORE}
     });
     // Pixel sampling maps in-frame CSS coordinates onto an element screenshot,
     // so it must read the canvas at 1:1 instead of the scaled entry default.
-    await launched.page.getByRole("button", { name: "100%", exact: true }).click();
-    await expect(launched.page.getByRole("button", { name: "100%", exact: true }))
+    await launched.page.getByRole("button", { name: "原始大小", exact: true }).click();
+    await expect(launched.page.getByRole("button", { name: "原始大小", exact: true }))
       .toHaveAttribute("aria-pressed", "true");
     const captureMaskUnionPixels = async () => {
       const screenshot = decodePngPixels(await maskUnionStage.screenshot({
@@ -1907,7 +1892,7 @@ ${REVIEW_MASK_UNION_BEFORE}
       ["文案变化", 0],
       ["结构变化", 0],
       ["视觉变化", 2],
-      ["查看全部变化", 2],
+      ["全部变化", 2],
     ]) {
       await launched.page.getByRole("button", { name: buttonName }).click();
       await expect(afterReviewFrame.locator(maskUnionOwnerSelector)).toHaveCount(expectedCount);
@@ -1918,7 +1903,7 @@ ${REVIEW_MASK_UNION_BEFORE}
     // boxes with a faint violet tint. The remaining captures are a pure dim
     // contract, so park navigation back on the page overview and wait for the
     // claimed boxes to rest before sampling pixels.
-    await launched.page.getByRole("button", { name: "完整页面" }).click();
+    await launched.page.getByRole("button", { name: "整页" }).click();
     await expect.poll(async () => afterReviewFrame.locator("html").getAttribute(
       "data-pageroot-review-focus",
     )).toBe("all");
@@ -2030,7 +2015,7 @@ ${REVIEW_MASK_UNION_BEFORE}
     await expect(launched.page.getByRole("slider", {
       name: "非修改区域上下文可见度",
     })).toHaveValue("18");
-    await launched.page.getByRole("button", { name: "查看全部变化" }).click();
+    await launched.page.getByRole("button", { name: "全部变化" }).click();
     await expect.poll(async () => beforeReviewFrame.locator("html").getAttribute(
       "data-pageroot-review-filter",
     )).toBe("all");
@@ -2053,7 +2038,7 @@ ${REVIEW_MASK_UNION_BEFORE}
       .toBeVisible();
     const nextChangeButton = launched.page.getByRole("button", { name: "下一处变化" });
     const totalChanges = Number((await nextChangeButton.locator("xpath=..")
-      .locator("small").textContent())?.replace("/", "") || 0);
+      .locator("span").textContent())?.split("/")[1] || 0);
     let navigatorReachedSecondPanel = false;
     for (let index = 0; index < totalChanges; index += 1) {
       await nextChangeButton.click();
@@ -2293,7 +2278,7 @@ ${REVIEW_MASK_UNION_BEFORE}
       })),
     ).then((states) => states.every(Boolean))).toBe(true);
     await launched.page.getByRole("button", {
-      name: /单独查看修改前/,
+      name: "只看修改前",
     }).click();
     await expect(launched.page.locator('[data-view="before"]')).toBeVisible();
     await expect(launched.page.locator('section[data-side="after"]')).toHaveAttribute("hidden", "");
@@ -2312,31 +2297,31 @@ ${REVIEW_MASK_UNION_BEFORE}
       return (frame.x + frame.width) - (viewport.x + viewport.width);
     }).toBeGreaterThanOrEqual(-2);
     await launched.page.getByRole("button", {
-      name: "双页对比（修改前与 AI 修改后）",
+      name: "双页对比",
     }).click();
     await expect(launched.page.locator('[data-view="split"]')).toBeVisible();
     await expect.poll(async () => beforeReviewFrame.locator("html").getAttribute(
       "data-pageroot-review-filter",
     )).toBe("style");
     const wholePageButton = launched.page.getByRole("button", {
-      name: "双页对比（修改前与 AI 修改后）",
+      name: "双页对比",
     });
     await wholePageButton.focus();
     await wholePageButton.press("ArrowRight");
     await expect(launched.page.locator('[data-view="before"]')).toBeVisible();
     const leftPageButton = launched.page.getByRole("button", {
-      name: /单独查看修改前/u,
+      name: "只看修改前",
     });
     await expect(leftPageButton).toBeFocused();
     await leftPageButton.press("ArrowLeft");
     await expect(launched.page.locator('[data-view="split"]')).toBeVisible();
     await expect(wholePageButton).toBeFocused();
     await launched.page.getByRole("button", {
-      name: /单独查看 AI 修改后/,
+      name: "只看修改后",
     }).click();
     await expect(launched.page.locator('[data-view="after"]')).toBeVisible();
     await expect(launched.page.locator('section[data-side="before"]')).toHaveAttribute("hidden", "");
-    await launched.page.getByRole("button", { name: "查看全部变化" }).click();
+    await launched.page.getByRole("button", { name: "全部变化" }).click();
     await expect(launched.page.locator('[data-view="after"]')).toBeVisible();
     await expect.poll(async () => beforeReviewFrame.locator("html").getAttribute(
       "data-pageroot-review-filter",
@@ -2442,8 +2427,8 @@ ${REVIEW_MASK_UNION_BEFORE}
       const paragraph = inspect("[data-review-scope-promotion]", "text-block", 9, 9);
       return { matches: line.matches && paragraph.matches, line, paragraph };
     });
-    await launched.page.getByRole("button", { name: "适应", exact: true }).click();
-    await expect(launched.page.getByRole("button", { name: "适应", exact: true }))
+    await launched.page.getByRole("button", { name: "适应画布", exact: true }).click();
+    await expect(launched.page.getByRole("button", { name: "适应画布", exact: true }))
       .toHaveAttribute("aria-pressed", "true");
     // At "适应" the counter-scaled captions reach further, so same-caption
     // regions whose anchors crowd must collapse into one counted
@@ -2472,8 +2457,8 @@ ${REVIEW_MASK_UNION_BEFORE}
     await expect.poll(crossLineProjectionState).toMatchObject({ matches: true });
     await expect.poll(promotedScopeProjectionState).toMatchObject({ matches: true });
     await expect.poll(() => assertOverlayMaskEquivalence(afterReviewFrame)).toBe(true);
-    await launched.page.getByRole("button", { name: "100%", exact: true }).click();
-    await expect(launched.page.getByRole("button", { name: "100%", exact: true }))
+    await launched.page.getByRole("button", { name: "原始大小", exact: true }).click();
+    await expect(launched.page.getByRole("button", { name: "原始大小", exact: true }))
       .toHaveAttribute("aria-pressed", "true");
     await expect.poll(crossLineProjectionState).toMatchObject({ matches: true });
     await expect.poll(promotedScopeProjectionState).toMatchObject({ matches: true });
@@ -2780,7 +2765,7 @@ ${REVIEW_MASK_UNION_BEFORE}
       });
     }
     await launched.page.getByRole("button", {
-      name: "采纳 AI 修改",
+      name: "采纳修改",
     }).click();
     await expect(launched.page.getByRole("dialog", {
       name: /采纳 AI 修改后（.+）？/u,
@@ -2811,7 +2796,7 @@ ${REVIEW_MASK_UNION_BEFORE}
             panelText: panel.textContent?.slice(0, 120) || "",
             reviewPresent: Boolean(review),
             drawer: document.querySelector(".side-drawer")?.getAttribute("data-drawer") || "",
-            sourceTitle: document.querySelector(".window-file-title-row strong")?.textContent || "",
+            sourceTitle: document.querySelector('.workbench-tab[data-selected="true"] button[role="tab"] > span:last-child')?.textContent || "",
           });
         }
         const disconnectedFrames = reviewCoversWindow
@@ -2822,7 +2807,7 @@ ${REVIEW_MASK_UNION_BEFORE}
             .filter((frame) => frame.isConnected);
           window.__pagerootHandoffFlashEvents.push({
             reviewFramesRemounted: disconnectedFrames.length,
-            sourceTitle: document.querySelector(".window-file-title-row strong")?.textContent || "",
+            sourceTitle: document.querySelector('.workbench-tab[data-selected="true"] button[role="tab"] > span:last-child')?.textContent || "",
           });
         }
       });
@@ -2867,11 +2852,11 @@ ${REVIEW_MASK_UNION_BEFORE}
         filePaths: [sourcePath],
       });
     }, pickerSourcePath);
-    await launched.page.getByRole("button", {
-      name: "打开新的本地 HTML",
-      exact: true,
-    }).click();
-    await launched.page.locator(".open-local-button").click();
+    const sidebar = launched.page.locator(".workbench-global-sidebar");
+    if (await sidebar.getAttribute("data-open") !== "true") {
+      await launched.page.getByRole("button", { name: "展开左侧边栏" }).click();
+    }
+    await sidebar.getByRole("button", { name: "打开 HTML", exact: true }).click();
     const pickerFrame = await loadedDiskFrame(
       launched.page,
       pickerSourcePath,
@@ -3017,7 +3002,7 @@ test("returning from review restores the editable pre-AI version and preserves t
     await launched.page.getByRole("button", { name: "审阅对比" }).click();
     await expect(launched.page.getByTestId("ai-review-workspace"))
       .toBeVisible({ timeout: 30_000 });
-    await launched.page.getByRole("button", { name: "返回 AI 修改前" }).click();
+    await launched.page.getByRole("button", { name: "返回修改前" }).click();
     const dialog = launched.page.getByRole("dialog", {
       name: /返回 AI 修改前（版本 \d+）？/u,
     });
@@ -3228,9 +3213,12 @@ test("a rewrite outside <main> is still reviewed", {
     await expect(afterReviewFrame.locator(
       '[data-review-outside-main] [data-pageroot-review-text="added"]',
     ).filter({ hasText: "一致" }).first()).toBeVisible();
-    // Review is embedded in the shared Workbench shell. Its one top-level
-    // header icon keeps the same meaning without duplicating a Review header.
-    await launched.page.getByRole("button", { name: "关于源页" }).click();
+    // 品牌与 About 入口由全局侧边栏统一承担，审阅页不复制同形顶栏图标。
+    const sidebar = launched.page.locator(".workbench-global-sidebar");
+    if (await sidebar.getAttribute("data-open") !== "true") {
+      await launched.page.getByRole("button", { name: "展开左侧边栏" }).click();
+    }
+    await sidebar.getByRole("button", { name: "源页", exact: true }).click();
     await expect(launched.page.getByRole("button", { name: "关闭关于源页" }))
       .toBeVisible({ timeout: 15_000 });
     await launched.page.getByRole("button", { name: "关闭关于源页" }).click();

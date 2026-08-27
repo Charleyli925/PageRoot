@@ -170,7 +170,6 @@ export type CommentControllerCapability<
   >,
   CommentControllerCommands
 >;
-
 export interface ConversationControllerCapability {
   openConversation(context: ConversationContext | null): Promise<unknown>;
   closeConversation(): void;

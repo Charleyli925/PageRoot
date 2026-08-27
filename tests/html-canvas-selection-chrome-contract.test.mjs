@@ -6,7 +6,7 @@ import {
   deriveSelectionOverlay,
   selectionChromeViewFields,
   stabilizeSelectionChromeProjection,
-} from "../app/components/html-canvas-selection-chrome-contract.ts";
+} from "../app/components/html-canvas-selection-chrome-state.js";
 
 const selection = Object.freeze({
   id: "target_1",

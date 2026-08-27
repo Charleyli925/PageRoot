@@ -54,7 +54,7 @@ export function createWindowLifecycle(ctx) {
       ...(process.platform === "darwin"
         ? {
             titleBarStyle: "hiddenInset",
-            trafficLightPosition: { x: 18, y: 15 },
+            trafficLightPosition: { x: 14, y: 14 },
           }
         : {}),
       ...(!app.isPackaged

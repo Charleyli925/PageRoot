@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import test from "node:test";
 
 import {
@@ -22,6 +22,21 @@ import {
 
 test("renderer, WorkspaceController, domain, and Bridge dependency boundaries stay enforced", async () => {
   assert.deepEqual(await architectureViolations(), []);
+});
+
+test("plain Node test modules never import TypeScript runtime files", async () => {
+  const testsDirectory = new URL("./", import.meta.url);
+  const testFiles = (await readdir(testsDirectory))
+    .filter((name) => name.endsWith(".test.mjs"))
+    .sort();
+  const violations = [];
+  for (const name of testFiles) {
+    const source = await readFile(new URL(name, testsDirectory), "utf8");
+    if (/\b(?:from\s*|import\s*\()\s*["'][^"']+\.tsx?["']/u.test(source)) {
+      violations.push(name);
+    }
+  }
+  assert.deepEqual(violations, []);
 });
 
 async function fixture(name) {

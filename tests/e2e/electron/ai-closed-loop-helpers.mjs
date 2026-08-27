@@ -336,7 +336,12 @@ export function createCodexAppServerE2ECommand(directory) {
 // Qoder availability moved out of the delivery dialog and into 关于源页; that card is
 // where installation, login and readiness are surfaced now.
 export async function openQoderAvailability(page) {
-  await page.getByRole("button", { name: "关于源页" }).click();
+  const sidebar = page.locator(".workbench-global-sidebar");
+  if (await sidebar.getAttribute("data-open") !== "true") {
+    await page.getByRole("button", { name: "展开左侧边栏" }).click();
+  }
+  await expect(sidebar).toHaveAttribute("data-open", "true");
+  await sidebar.getByRole("button", { name: "源页", exact: true }).click();
   const card = page.getByRole("dialog").locator(".about-agent-section");
   await expect(card).toBeVisible();
   return card;
@@ -478,10 +483,14 @@ export async function openRecentProject(page, sourcePath, options) {
   const activeBefore = await page.evaluate(
     async () => (await window.htmlAIProjects?.getActiveProject())?.sourcePath || "",
   );
-  await page.getByRole("button", { name: "打开新的本地 HTML" }).click();
-  await page.locator(".recent-file-row")
-    .filter({ hasText: path.basename(sourcePath) })
-    .click();
+  const sidebar = page.locator(".workbench-global-sidebar");
+  if (await sidebar.getAttribute("data-open") !== "true") {
+    await page.getByRole("button", { name: "展开左侧边栏" }).click();
+  }
+  await sidebar.getByRole("button", {
+    name: path.basename(sourcePath),
+    exact: true,
+  }).click();
   await waitForProjectReady(page);
   await expect.poll(async () => {
     const active = await page.evaluate(
@@ -754,11 +763,11 @@ export async function assertReviewControlDefaults(page, beforeReviewFrame) {
   })).toHaveValue("18");
   await expect(page.locator('[data-view="split"]')).toBeVisible();
   await expect(page.getByRole("button", {
-    name: "双页对比（修改前与 AI 修改后）",
+    name: "双页对比",
   })).toHaveAttribute("aria-pressed", "true");
-  await expect(page.getByRole("button", { name: "查看全部变化" }))
+  await expect(page.getByRole("button", { name: "全部变化" }))
     .toHaveAttribute("aria-pressed", "true");
-  await expect(page.getByRole("button", { name: "适应", exact: true }))
+  await expect(page.getByRole("button", { name: "适应画布", exact: true }))
     .toHaveAttribute("aria-pressed", "true");
 }
 

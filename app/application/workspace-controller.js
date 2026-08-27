@@ -1039,6 +1039,10 @@ export class WorkspaceController {
     return this.#workbenchTabsSession?.updateStatus(projectId, documentId, status) || null;
   }
 
+  updateWorkbenchTabTitle(projectId, documentId, title) {
+    return this.#workbenchTabsSession?.updateTitle(projectId, documentId, title) || null;
+  }
+
   updateDocumentSurfacePresentation(tabId, presentation) {
     return this.#documentSurfaceCacheSession?.updatePresentation(tabId, presentation) || null;
   }

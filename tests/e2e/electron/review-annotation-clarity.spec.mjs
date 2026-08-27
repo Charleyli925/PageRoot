@@ -232,10 +232,11 @@ test("the review projection annotates a dense report cleanly and accurately", as
     await launched.page.getByRole("button", { name: "审阅对比" }).click();
     await expect(launched.page.getByTestId("ai-review-workspace"))
       .toBeVisible({ timeout: 30_000 });
-    const collapseToolbarHandle = launched.page.getByRole("button", {
-      name: "收起审阅工具",
-    });
-    await expect(collapseToolbarHandle).toBeVisible();
+    const liveReviewTools = launched.page.locator("header.workbench-header")
+      .getByLabel("审阅工具", { exact: true });
+    await expect(liveReviewTools).toBeVisible();
+    await expect(launched.page.getByRole("button", { name: "收起审阅工具" }))
+      .toHaveCount(0);
     const beforeFrame = launched.page.frameLocator('iframe[title^="修改前"]');
     const afterFrame = launched.page.frameLocator('iframe[title^="修改后"]');
     await expect.poll(
@@ -499,19 +500,17 @@ test("the review projection annotates a dense report cleanly and accurately", as
     // dots are only a few pixels tall, so a whole-window capture cannot show
     // whether the red rule reads as dashes or the green row sits level. Element
     // screenshots would be misplaced by the canvas scale transform, so clip the
-    // page using layout coordinates and read the canvas at 100%. The review
-    // toolbar floats over the pages, so collapse it before clipping.
-    await launched.page.getByRole("button", { name: "查看全部变化" }).click();
+    // page using layout coordinates and read the canvas at 100%. The shared
+    // review toolbar is outside the page region and does not alter the clip.
+    await launched.page.getByRole("button", { name: "全部变化" }).click();
     await expect.poll(
       async () => afterFrame.locator("html").getAttribute("data-pageroot-review-filter"),
       { timeout: 15_000 },
     ).toBe("all");
-    await launched.page.getByRole("button", { name: "100%", exact: true }).click();
-    await expect(launched.page.getByRole("button", { name: "100%", exact: true }))
+    await launched.page.getByRole("button", { name: "原始大小", exact: true }).click();
+    await expect(launched.page.getByRole("button", { name: "原始大小", exact: true }))
       .toHaveAttribute("aria-pressed", "true");
-    await collapseToolbarHandle.click();
-    await expect(launched.page.getByRole("button", { name: "显示并固定审阅工具" }))
-      .toBeVisible();
+    await expect(liveReviewTools).toBeVisible();
     for (const [label, frame, selector] of [
       ["strike-paragraph", beforeFrame, ".trend-copy"],
       ["strike-note", beforeFrame, '[data-report-metric="overall"] .metric-note'],

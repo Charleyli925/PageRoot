@@ -1198,7 +1198,7 @@
     {
       "id": "review-ui-state",
       "patterns": [
-        "^app/workbench/(?:AiReviewWorkspace|comment-rail-view|comment-rail-contract|file-header-view|handoff-view|presentation|project-files-view|review-state|workbench-header-shell)\\.(?:ts|tsx)$",
+        "^app/workbench/(?:AiReviewWorkspace|comment-rail-view|comment-rail-contract|file-header-view|handoff-view|presentation|project-files-view|review-state|review-toolbar-controls|workbench-header-shell)\\.(?:ts|tsx)$",
         "^app/workbench/ai-review-workspace\\.module\\.css$"
       ],
       "suites": [

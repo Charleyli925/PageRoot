@@ -374,6 +374,23 @@ export class WorkbenchTabsSession {
     return changed ? this.#publish({ ...this.#snapshot, tabs }) : this.#snapshot;
   }
 
+  updateTitle(projectId, documentId, title) {
+    const normalizedTitle = String(title || "").trim();
+    if (!normalizedTitle) return this.#snapshot;
+    let changed = false;
+    const tabs = this.#snapshot.tabs.map((tab) => {
+      if (
+        tab.kind !== "document"
+        || tab.projectId !== projectId
+        || tab.documentId !== documentId
+        || tab.title === normalizedTitle
+      ) return tab;
+      changed = true;
+      return freezeTab({ ...tab, title: normalizedTitle });
+    });
+    return changed ? this.#publish({ ...this.#snapshot, tabs }) : this.#snapshot;
+  }
+
   reconcileRegisteredProjects(projects) {
     const registry = new Map();
     for (const project of Array.isArray(projects) ? projects : []) {

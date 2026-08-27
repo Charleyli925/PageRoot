@@ -83,6 +83,18 @@ test("AI background status and Candidate adoption remain on the same project doc
   assert.equal(session.snapshot.tabs.find((tab) => tab.tabId === tabId).title, "Alpha Candidate.html");
 });
 
+test("a Finder rename updates the document tab title without changing its identity", () => {
+  const session = new WorkbenchTabsSession();
+  session.bindDocument(a);
+  const tabId = session.snapshot.activeTabId;
+  session.updateTitle(a.projectId, a.documentId, "Alpha renamed.html");
+  const tab = session.snapshot.tabs.find((candidate) => candidate.tabId === tabId);
+  assert.equal(tab.title, "Alpha renamed.html");
+  assert.equal(session.snapshot.activeTabId, tabId);
+  assert.equal(session.snapshot.mountedDocumentTabId, tabId);
+  assert.equal(session.snapshot.runtimeOwnerTabId, tabId);
+});
+
 test("staging a registered project from active Start reuses the blank slot", () => {
   const session = new WorkbenchTabsSession();
   session.createStart({ focus: true });
