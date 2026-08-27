@@ -35,7 +35,6 @@ import FirstEditGuideCard from "./components/FirstEditGuideCard";
 import HtmlInteractionPreview, {
   type HtmlInteractionPreviewHandle,
 } from "./components/HtmlInteractionPreview";
-import AiConversationSidebar from "./workbench/AiConversationSidebar";
 import { useAiConversation } from "./workbench/use-ai-conversation";
 import NoticeBar from "./components/NoticeBar";
 import RestartUpdateDialog from "./components/RestartUpdateDialog";
@@ -75,6 +74,10 @@ import type {
   WorkspaceController,
   WorkspaceControllerSnapshot,
 } from "./application/workspace-controller.js";
+import type {
+  NavigationControllerCapability,
+  RunControllerCapability,
+} from "./application/workspace-controller-capabilities.js";
 import { createCommentWorkflowCodecs } from "./application/comment-workflow-codecs.js";
 import type { DocumentWorkflowOutcome } from "./application/document-workflow.js";
 import { createDocumentWorkflowCodecs } from "./application/document-workflow-codecs.js";
@@ -94,11 +97,11 @@ import {
 } from "./application/review-analysis-session.js";
 import type { PageViewContext } from "./lib/page-view-context.js";
 import type { ProjectSessionSnapshot } from "./application/project-session.js";
-import type { RunOperationKind, RunSessionSnapshot } from "./application/run-session.js";
+import type { RunSessionSnapshot } from "./application/run-session.js";
 import type { VersionSessionSnapshot } from "./application/version-session.js";
 import {
   INITIAL_WORKBENCH_TABS_SNAPSHOT,
-  type WorkbenchTab,
+  type WorkbenchTabsSnapshot,
 } from "./application/workbench-tabs-session.js";
 import {
   INITIAL_DOCUMENT_SURFACE_CACHE_SNAPSHOT,
@@ -122,7 +125,6 @@ import {
 import {
   activeRunFromRecord,
   canonicalLifecycleState,
-  deriveRunProgressPresentation,
   isLockedLifecycleState,
   type ActiveRun,
   type LifecycleState,
@@ -188,11 +190,7 @@ import { createProjectPanelPort } from "./workbench/project-panel-port.js";
 import {
   PreviewNavigationBanner,
 } from "./workbench/presentation";
-import {
-  HandoffDrawerHeader,
-  HandoffFooter,
-  HandoffPanel,
-} from "./workbench/handoff-view";
+import { RunConversationOutlet } from "./workbench/run-conversation-outlet";
 import AiReviewWorkspace from "./workbench/AiReviewWorkspace";
 import WorkbenchDocumentSurfaceCache from "./workbench/WorkbenchDocumentSurfaceCache";
 import ReviewAnalysisPrewarm, {
@@ -210,9 +208,7 @@ import type { ReviewDocuments } from "./workbench/review-document";
 import {
   WorkbenchHeaderShell,
 } from "./workbench/workbench-header-shell";
-import {
-  WorkbenchTabBar,
-} from "./workbench/WorkbenchChrome";
+import { WorkbenchTabBarContainer } from "./workbench/workbench-navigation-container";
 import {
   activeRunOperationKey,
   currentWorkingCopyPresentation,
@@ -498,6 +494,12 @@ export default function Workbench() {
     useState<WorkspaceControllerSnapshot | null>(null);
   const [workspaceController, setWorkspaceController] =
     useState<WorkspaceController | null>(null);
+  const runCapability = workspaceController
+    ? workspaceController.runs as RunControllerCapability
+    : null;
+  const navigationCapability = workspaceController
+    ? workspaceController.navigation as NavigationControllerCapability
+    : null;
   const workbenchTabsSnapshot = workspaceControllerSnapshot?.workbenchTabs
     ?? INITIAL_WORKBENCH_TABS_SNAPSHOT;
   const documentSurfaceCacheSnapshot = workspaceControllerSnapshot?.documentSurfaceCache
@@ -673,17 +675,6 @@ export default function Workbench() {
   const [readyReviewSession, setReadyReviewSession] =
     useState<ReadyReviewSession | null>(null);
 
-  /*
-   * The process panel is out of the user flow: every stage, every decision and every
-   * failure message now lives in the AI conversation, and a panel thrown over the
-   * page duplicated all of it. The component and its drawer branch are left intact
-   * so flipping this one flag brings it back; nothing in the flow depends on it.
-   */
-  const PROCESS_PANEL_IN_FLOW = false;
-  const openProcessPanel = useCallback(() => {
-    if (PROCESS_PANEL_IN_FLOW) setDrawer("handoff");
-  }, [PROCESS_PANEL_IN_FLOW]);
-
   // The decision bar acts through a ref: its handlers are defined further down,
   // and the conversation hook is composed before them.
 
@@ -732,6 +723,7 @@ export default function Workbench() {
     onDeliverModification: (mode) => generateRequestRef.current?.(mode),
     onOpenAgentSettings: openAgentSettings,
   });
+  const revealAiConversation = aiConversation.reveal;
   // The run-event effect reports a submitted round by opening the thread. It is
   // reached through a ref so that effect keeps its curated dependency list.
   const editRuntimeSnapshot = workspaceControllerSnapshot?.editRuntime ?? null;
@@ -1272,18 +1264,6 @@ export default function Workbench() {
   const recentRunOutcome = runSnapshot.recentOutcome;
   const projectLocked = runSnapshot.activeLocked;
   const generating = runSnapshot.activeSubmission?.phase === "preparing";
-  const activeRunOperation = activeRun ? activeRunOperationKey(activeRun) : "";
-  const isActiveRunOperationBusy = (kind: RunOperationKind) => (
-    runSnapshot.operationKeys.some(([operation, key]) => (
-      operation === kind && key === activeRunOperation
-    ))
-  );
-  const cancelling = isActiveRunOperationBusy("cancel");
-  const resolvingConflict = isActiveRunOperationBusy("resolve");
-  const pendingReconcileBusy = Boolean(
-    activeRun?.requestId === "pending"
-    && isActiveRunOperationBusy("poll"),
-  );
   // Opening is not complete until the source has either proved its existing
   // v4 binding or been imported as a new V1. Keep the whole open/application/
   // hydration interval behind one interaction fence: ProjectWorkflow may then
@@ -1604,20 +1584,24 @@ export default function Workbench() {
           setHandoffPreviewOpen(false);
           // Reported in the thread, not by a drawer over the page.
           setCanvasMode("preview");
-          aiConversation.reveal();
+          revealAiConversation();
           void workspaceControllerRef.current?.dismissFirstEditGuide();
         }
         return;
       }
       if (runEvent.type === "run-submission-uncertain") {
         if (runEvent.current) {
-          openProcessPanel();
+          setCanvasMode("preview");
+          revealAiConversation();
           void workspaceControllerRef.current?.dismissFirstEditGuide();
         }
         return;
       }
       if (runEvent.type === "run-submission-failed") {
-        if (runEvent.current && runEvent.run) openProcessPanel();
+        if (runEvent.current && runEvent.run) {
+          setCanvasMode("preview");
+          revealAiConversation();
+        }
         return;
       }
       if (runEvent.type === "run-handoff-failed") {
@@ -1650,7 +1634,8 @@ export default function Workbench() {
             });
             return;
           }
-          openProcessPanel();
+          setCanvasMode("preview");
+          revealAiConversation();
           setToast({
             title: "Qoder CLI 没有完成本轮",
             message: runEvent.message
@@ -1688,7 +1673,8 @@ export default function Workbench() {
               || state === "awaiting-conflict-resolution"
               || state === "recovering-transaction"
             ) {
-              openProcessPanel();
+              setCanvasMode("preview");
+              revealAiConversation();
             }
             if (state === "ready-to-open" && toastRef.current?.dedupeKey === "ai-submit") {
               setToast(null);
@@ -1863,8 +1849,8 @@ export default function Workbench() {
         );
         if (projectEvent.showHandoff) {
           setHandoffPreviewOpen(false);
-          setCanvasMode("edit");
-          openProcessPanel();
+          setCanvasMode("preview");
+          revealAiConversation();
         }
         return;
       }
@@ -2142,6 +2128,7 @@ export default function Workbench() {
     commentCanvasPort,
     readyReviewSession,
     reviewAnalysisSession,
+    revealAiConversation,
     setSourceViewTransitioning,
     workspaceController,
   ]);
@@ -3466,92 +3453,29 @@ export default function Workbench() {
       dedupeKey: `workbench-tab:${result.code || "rejected"}`,
     });
   }, [setToast]);
-  const selectWorkbenchTab = useCallback((tab: WorkbenchTab) => {
+  const rememberWorkbenchTabPresentation = useCallback((
+    tabs: WorkbenchTabsSnapshot,
+  ) => {
     if (!workspaceController) return;
     rememberActiveDocumentPresentation({ controller: workspaceController,
-      tabs: workbenchTabsSnapshot, canvasMode,
+      tabs, canvasMode,
       pageViewContext: activePageViewContext,
       scrollTop: reviewStageRef.current?.scrollTop || 0 });
-    void workspaceController.activateWorkbenchTab(tab.tabId).then((outcome) => {
-      presentWorkbenchTabOutcome(outcome);
-    });
   }, [
     activePageViewContext,
     canvasMode,
-    presentWorkbenchTabOutcome,
-    workbenchTabsSnapshot,
     workspaceController,
   ]);
-  const createWorkbenchStartTab = useCallback(() => {
-    if (!workspaceController) return;
-    void workspaceController.createWorkbenchStartTab().then((outcome) => {
-      presentWorkbenchTabOutcome(outcome);
-    });
-  }, [presentWorkbenchTabOutcome, workspaceController]);
-  const closeWorkbenchTab = useCallback((tab: WorkbenchTab) => {
-    if (!workspaceController) return;
-    void workspaceController.closeWorkbenchTab(tab.tabId).then((outcome) => {
-      presentWorkbenchTabOutcome(outcome);
-      const snapshot = workspaceController.getSnapshot().workbenchTabs
-        ?? INITIAL_WORKBENCH_TABS_SNAPSHOT;
-      const active = snapshot.tabs.find(
-        (item) => item.tabId === snapshot.activeTabId,
-      );
-      if (outcome.status === "succeeded" && active) {
-        window.requestAnimationFrame(() => {
-          document.getElementById(`workbench-tab-${active.tabId}`)?.focus();
-        });
-      }
-    });
-  }, [presentWorkbenchTabOutcome, workspaceController]);
   const openRegisteredWorkbenchProject = useCallback((project: RegisteredProject) => {
-    if (!workspaceController || !project.documentId || project.availability !== "ready") return;
-    void workspaceController.openRegisteredWorkbenchProject({
+    if (!navigationCapability || !project.documentId || project.availability !== "ready") return;
+    void navigationCapability.commands.openRegisteredProject({
       projectId: project.projectId,
       documentId: project.documentId,
       title: project.projectName,
     }).then((outcome) => {
       presentWorkbenchTabOutcome(outcome);
     });
-  }, [presentWorkbenchTabOutcome, workspaceController]);
-  useEffect(() => {
-    const handleWorkbenchShortcut = (event: KeyboardEvent) => {
-      const command = event.metaKey || event.ctrlKey;
-      if (!command || event.altKey) return;
-      if (event.key.toLowerCase() === "t") {
-        event.preventDefault();
-        createWorkbenchStartTab();
-        return;
-      }
-      if (event.key.toLowerCase() === "w") {
-        const active = workbenchTabsSnapshot.tabs.find(
-          (tab) => tab.tabId === workbenchTabsSnapshot.activeTabId,
-        );
-        if (!active) return;
-        event.preventDefault();
-        closeWorkbenchTab(active);
-        return;
-      }
-      const numeric = Number(event.key);
-      if (Number.isInteger(numeric) && numeric >= 1 && numeric <= 9) {
-        const tab = workbenchTabsSnapshot.tabs[numeric - 1];
-        if (!tab) return;
-        event.preventDefault();
-        selectWorkbenchTab(tab);
-        return;
-      }
-      if (event.key === "Tab" && workbenchTabsSnapshot.tabs.length > 1) {
-        event.preventDefault();
-        const snapshot = workbenchTabsSnapshot;
-        const currentIndex = snapshot.tabs.findIndex((tab) => tab.tabId === snapshot.activeTabId);
-        const direction = event.shiftKey ? -1 : 1;
-        const nextIndex = (currentIndex + direction + snapshot.tabs.length) % snapshot.tabs.length;
-        selectWorkbenchTab(snapshot.tabs[nextIndex]);
-      }
-    };
-    window.addEventListener("keydown", handleWorkbenchShortcut);
-    return () => window.removeEventListener("keydown", handleWorkbenchShortcut);
-  }, [closeWorkbenchTab, createWorkbenchStartTab, selectWorkbenchTab, workbenchTabsSnapshot]);
+  }, [navigationCapability, presentWorkbenchTabOutcome]);
 
   const resumeDeferredProjectApplication = useCallback(() => (
     workspaceController?.resumeDeferredProjectApplication().status === "succeeded"
@@ -4225,7 +4149,10 @@ export default function Workbench() {
 
   const requestUserFlush = useCallback((fromDeferred = false) => {
     if (interactionLocked) {
-      if (runInProgress) openProcessPanel();
+      if (runInProgress) {
+        setCanvasMode("preview");
+        revealAiConversation();
+      }
       return;
     }
     if (
@@ -4246,7 +4173,13 @@ export default function Workbench() {
       return;
     }
     void flushAutosave();
-  }, [deferEditorCommand, flushAutosave, interactionLocked, runInProgress]);
+  }, [
+    deferEditorCommand,
+    flushAutosave,
+    interactionLocked,
+    revealAiConversation,
+    runInProgress,
+  ]);
   useEffect(() => {
     deferredEditorReplayRef.current.requestUserFlush = () => requestUserFlush(true);
   }, [requestUserFlush]);
@@ -4658,7 +4591,10 @@ export default function Workbench() {
 
   const openGlobalCommentComposer = useCallback(() => {
     if (interactionLocked) {
-      if (runInProgress) openProcessPanel();
+      if (runInProgress) {
+        setCanvasMode("preview");
+        revealAiConversation();
+      }
       return;
     }
     setCanvasMode("edit");
@@ -4686,6 +4622,7 @@ export default function Workbench() {
     finishTargetRelink,
     interactionLocked,
     openCommentComposer,
+    revealAiConversation,
     runInProgress,
   ]);
 
@@ -5269,7 +5206,8 @@ export default function Workbench() {
         return;
       }
       if (outcome.code === "RUN_SUBMISSION_LOCKED") {
-        openProcessPanel();
+        setCanvasMode("preview");
+        revealAiConversation();
         void workspaceControllerRef.current?.dismissFirstEditGuide();
         return;
       }
@@ -5357,7 +5295,8 @@ export default function Workbench() {
       });
     if (outcome.status === "succeeded" || outcome.status === "stale") return outcome;
     if (outcome.status === "unknown") {
-      openProcessPanel();
+      setCanvasMode("preview");
+      revealAiConversation();
       void workspaceControllerRef.current?.dismissFirstEditGuide();
       return outcome;
     }
@@ -5372,7 +5311,7 @@ export default function Workbench() {
     deferEditorCommand,
     latestVersionId,
     openProject,
-    openProcessPanel,
+    revealAiConversation,
     isViewTransitioning,
     projectHydrating,
     projectLoadError,
@@ -5410,6 +5349,7 @@ export default function Workbench() {
     if (
       !run
       || !workspaceController
+      || !runCapability
       || run.status !== "ready-to-open"
       || !run.readyPayload
       || (
@@ -5421,8 +5361,7 @@ export default function Workbench() {
     performance.mark("pageroot:accept:start");
     setOpeningReadyVersion(true);
     try {
-      const outcome = await requiredWorkspaceController(workspaceController)
-        .activateReadyVersion({
+      const outcome = await runCapability.commands.activateReadyVersion({
           run,
           reviewLease: readyReviewSession?.operationKey === operationKey
             ? {
@@ -5435,7 +5374,10 @@ export default function Workbench() {
       if (outcome.status !== "succeeded") {
         if (outcome.status !== "stale") {
           const published = readyVersionPublicationMatches(workspaceController, run);
-          if (!published) openProcessPanel();
+          if (!published) {
+            setCanvasMode("preview");
+            revealAiConversation();
+          }
           setToast({
             title: published ? "新版本已提交，编辑画布仍在准备" : "最新版暂时无法打开",
             message: published ? `${outcome.reason} 已提交的 HTML 保持可见，完成恢复前不会开放编辑。`
@@ -5498,7 +5440,6 @@ export default function Workbench() {
       performance.mark("pageroot:accept:ui-committed");
       if (result.protocolViolation) {
         const warning = "内部 AI 的临时输出在最终化后又被修改；已提交版本本身未受影响。";
-        openProcessPanel();
         setToast({
           title: `${result.candidateLabel} 已打开，但需要检查`,
           message: `${warning} 新版本内容已经核对一致；详情已保留在本轮处理记录中。`,
@@ -5556,6 +5497,8 @@ export default function Workbench() {
     currentProjectSessionSnapshot,
     currentRunSessionSnapshot,
     readyReviewSession,
+    revealAiConversation,
+    runCapability,
     workspaceController,
   ]);
 
@@ -5564,14 +5507,14 @@ export default function Workbench() {
     if (
       !run
       || !workspaceController
+      || !runCapability
       || run.status !== "ready-to-open"
       || !run.readyPayload
       || reviewPreparing
     ) return;
     setReviewPreparing(true);
     try {
-      const outcome = await requiredWorkspaceController(workspaceController)
-        .prepareReviewCandidate({ run });
+      const outcome = await runCapability.commands.prepareReview({ run });
       if (outcome.status !== "succeeded") {
         if (outcome.status === "stale") return;
         throw new Error(outcome.reason);
@@ -5669,6 +5612,7 @@ export default function Workbench() {
     isCurrentProjectContext,
     reviewAnalysisSession,
     reviewPreparing,
+    runCapability,
     workspaceController,
   ]);
 
@@ -5701,14 +5645,14 @@ export default function Workbench() {
     agentMayBeRunning?: boolean;
     reason?: string;
   } = {}) => {
-    if (!activeRun || !workspaceController) return false;
-    const outcome = await requiredWorkspaceController(workspaceController).cancelRun({
+    if (!activeRun || !runCapability) return false;
+    const outcome = await runCapability.commands.cancel({
       run: activeRun,
       agentMayBeRunning,
       reason,
     });
     return outcome.status === "succeeded";
-  }, [activeRun, workspaceController]);
+  }, [activeRun, runCapability]);
 
   const requestActiveRunEnd = useCallback(() => {
     if (!activeRun) return;
@@ -5727,12 +5671,14 @@ export default function Workbench() {
     if (
       !activeRun
       || activeRun.status !== "awaiting-conflict-resolution"
-      || !workspaceController
+      || !runCapability
     ) return;
-    const outcome = await requiredWorkspaceController(workspaceController)
-      .resolveRunConflict({ run: activeRun, action });
+    const outcome = await runCapability.commands.resolveConflict({ run: activeRun, action });
     if (outcome.status !== "succeeded") {
-      if (outcome.status !== "stale") openProcessPanel();
+      if (outcome.status !== "stale") {
+        setCanvasMode("preview");
+        revealAiConversation();
+      }
       return;
     }
     const result = outcome.value as {
@@ -5757,7 +5703,8 @@ export default function Workbench() {
   }, [
     activeRun,
     reloadCurrentSource,
-    workspaceController,
+    revealAiConversation,
+    runCapability,
   ]);
 
   const viewHistoryVersion = useCallback(async (version: Version) => {
@@ -5953,13 +5900,6 @@ export default function Workbench() {
     && typeof window !== "undefined"
     && window.htmlAIProjects?.showInFolder,
   );
-  const canRevealAiTask = Boolean(
-    activeRun
-    && activeRun.requestId !== "pending"
-    && activeRun.requestPath
-    && typeof window !== "undefined"
-    && window.htmlAIProjects?.revealAiTask,
-  );
   const canOpenProjectRootInFolder = Boolean(
     projectRecordsPath
     && workspaceController
@@ -5970,59 +5910,23 @@ export default function Workbench() {
     && typeof window !== "undefined"
     && window.htmlAIProjects?.openInDefaultBrowser,
   );
-  const runBasisLabel = activeRun?.basedOnVersionId
-    ? safeVersionLabel(activeRun.basedOnVersionId)
-    : currentBasedOnVersionId
-      ? safeVersionLabel(currentBasedOnVersionId)
-      : "初始内容";
-  const runSubmittedLabel = activeRun?.submittedAt
-    ? formatTime(activeRun.submittedAt, true)
-    : "正在提交";
   const pendingRunOutcome = Boolean(
     activeRun?.requestId === "pending" && projectLocked,
   );
   const terminalRun = Boolean(
     activeRun && ["error", "no-change"].includes(activeRun.status) && !pendingRunOutcome,
   );
-  const handoffCopyFailed = Boolean(
-    activeRun && currentAgentDeliveryState?.retryable !== false
-    && ["failed", "interrupted"].includes(currentAgentHandoffStatus)
-    && ["submitting", "processing", "ready"].includes(activeRun.status),
-  );
-  const checkingRun = Boolean(
-    activeRun
-    && ["validating", "committing", "recovering-transaction"].includes(activeRun.status),
-  );
-  const processPresentation = deriveRunProgressPresentation(
-    activeRun,
-    currentAgentDeliveryState || currentAgentHandoffStatus,
-  );
-  const processPanelEyebrow = processPresentation.header?.eyebrow
-    || "等待AI返回结果";
-  const processPanelTitle = processPresentation.header?.title
-    || "暂无进行中的 AI 任务";
-  const processSummaryTitle = processPresentation.summaryTitle;
-  const processSummaryDetail = processPresentation.summaryDetail;
-  const processStatusLabel = processPresentation.statusLabel;
-  const processSteps = processPresentation.steps;
   const commentTargetIsLocatable = useCallback((target: HtmlCanvasSelection): boolean => {
     const layout = commentCanvasPort.getSnapshot().targetLayouts[target.id];
     const resolution = layout?.resolution ?? target.resolution;
     return layout?.status !== "missing"
       && (resolution === "exact" || resolution === "rebound");
   }, [commentCanvasPort]);
-  const returnToEditingFromTerminalRun = () => {
-    workspaceControllerRef.current?.dismissActiveRun();
-    setHandoffPreviewOpen(false);
-    setCanvasMode("edit");
-    setDrawer(null);
-    editorRef.current?.unlockNow?.();
-  };
   const reopenRecentRunOutcome = () => {
-    if (!workspaceControllerRef.current?.reopenRecentRunOutcome(sourcePath)) return;
+    if (!runCapability?.commands.reopenRecentOutcome(sourcePath)) return;
     setHandoffPreviewOpen(false);
-    setCanvasMode("edit");
-    openProcessPanel();
+    setCanvasMode("preview");
+    revealAiConversation();
   };
   const handleToastAction = (action: ToastAction) => {
     setToast(null);
@@ -6040,7 +5944,7 @@ export default function Workbench() {
         return;
       case "open-handoff":
         setCanvasMode("preview");
-        aiConversation.reveal();
+        revealAiConversation();
         return;
       case "retry-history":
         void requestSourceHistoryAction(
@@ -6130,13 +6034,25 @@ export default function Workbench() {
   const handleAiDecision = useCallback((actionId: string) => {
     if (actionId === "review") { void reviewReadyResult(); return; }
     if (actionId === "adopt") { void activateReadyResult(); return; }
+    if (actionId === "adopt-ai" || actionId === "keep-external") {
+      void resolveAiConflict(actionId);
+      return;
+    }
+    if (actionId === "return-editing" || actionId === "dismiss") {
+      workspaceControllerRef.current?.runs.commands.dismiss();
+      setHandoffPreviewOpen(false);
+      setCanvasMode("edit");
+      setDrawer(null);
+      editorRef.current?.unlockNow?.();
+      return;
+    }
     if (actionId === "recopy") {
-      const controller = workspaceControllerRef.current;
+      const controller = workspaceControllerRef.current?.runs;
       if (!controller || !activeRun) return;
       // Copying is invisible by nature: without a word the user cannot tell an
       // successful re-copy from a dead button.
       void (async () => {
-        const outcome = await controller.copyRunHandoff({ run: activeRun });
+        const outcome = await controller.commands.copyHandoff({ run: activeRun });
         setToast(outcome && outcome.status === "succeeded"
           ? {
             title: "本轮要求已复制",
@@ -6154,8 +6070,15 @@ export default function Workbench() {
       })();
       return;
     }
-    if (actionId === "cancel" || actionId === "dismiss") requestActiveRunEnd();
-  }, [activateReadyResult, activeRun, requestActiveRunEnd, reviewReadyResult, setToast]);
+    if (actionId === "cancel") requestActiveRunEnd();
+  }, [
+    activateReadyResult,
+    activeRun,
+    requestActiveRunEnd,
+    resolveAiConflict,
+    reviewReadyResult,
+    setToast,
+  ]);
 
   const aiAssistantEntry = (
     <AgentDeliveryButton
@@ -6171,7 +6094,7 @@ export default function Workbench() {
         setCanvasMode("preview");
         // Opening is navigation. New actions on this surface are modifications;
         // historical conversation messages remain readable above them.
-        aiConversation.reveal();
+        revealAiConversation();
       }}
     />
   );
@@ -6219,11 +6142,14 @@ export default function Workbench() {
       }}
       onRevealAiTask={() => void revealAiTaskInFinder()}
       assistantEntry={aiAssistantEntry}
-      sidebar={aiConversation.visible ? (
-        <AiConversationSidebar
-          {...aiConversation.sidebarProps}
-              onAction={handleAiDecision}
-          runSteps={processSteps}
+      sidebar={aiConversation.visible && runCapability ? (
+        <RunConversationOutlet
+          capability={runCapability}
+          sidebarProps={{
+            ...aiConversation.sidebarProps,
+            onAction: handleAiDecision,
+          }}
+          reviewing
           deliveryMode={currentAgentDeliveryMode}
         />
       ) : null}
@@ -6415,18 +6341,17 @@ export default function Workbench() {
         }
         aria-label="HTML AI 可视化编辑工作台"
       >
-      <WorkbenchTabBar
-        snapshot={workbenchTabsSnapshot}
-        onSelect={selectWorkbenchTab}
-        onClose={closeWorkbenchTab}
-        onNew={createWorkbenchStartTab}
+      {navigationCapability ? <WorkbenchTabBarContainer
+        capability={navigationCapability}
         sidebarOpen={globalSidebarOpen}
         onToggleSidebar={() => {
           setGlobalSidebarOpen(true);
           void projectCatalogCapability?.commands.refreshRecents();
           void projectCatalogCapability?.commands.refreshRegistered();
         }}
-      />
+        onBeforeSelect={rememberWorkbenchTabPresentation}
+        onOutcome={presentWorkbenchTabOutcome}
+      /> : null}
       {!startPageActive ? <WorkbenchHeaderShell>
         <WorkbenchFileHeaderView
           currentSourceFileName={currentSourceFileName}
@@ -6464,6 +6389,7 @@ export default function Workbench() {
           recentRunOutcome={recentRunOutcome}
           terminalRun={terminalRun}
           reviewActive={Boolean(readyReviewOverlay)}
+          aiConversationVisible={aiConversation.visible}
           aiAssistantEntry={aiAssistantEntry}
           onSelectEdit={() => {
             if (externalSourcePreview) {
@@ -6657,8 +6583,8 @@ export default function Workbench() {
           actionLabel="返回等待处理"
           onAction={() => {
             setHandoffPreviewOpen(false);
-            setCanvasMode("edit");
-            openProcessPanel();
+            setCanvasMode("preview");
+            revealAiConversation();
           }}
         />
       ) : viewMode === "history" ? (
@@ -6840,13 +6766,15 @@ export default function Workbench() {
           ) : null}
         </section>
 
-        {aiConversation.visible && !readyReviewOverlay ? (
+        {aiConversation.visible && !readyReviewOverlay && runCapability ? (
           <aside className="ai-conversation-aside" aria-label="AI 助手侧栏">
-            {/* Steps are computed below the hook, so they are handed in here. */}
-            <AiConversationSidebar
-              {...aiConversation.sidebarProps}
-              onAction={handleAiDecision}
-              runSteps={processSteps}
+            <RunConversationOutlet
+              capability={runCapability}
+              sidebarProps={{
+                ...aiConversation.sidebarProps,
+                onAction: handleAiDecision,
+              }}
+              reviewing={false}
               deliveryMode={currentAgentDeliveryMode}
             />
           </aside>
@@ -6876,94 +6804,21 @@ export default function Workbench() {
         className={`drawer-overlay${drawer ? " show" : ""}`}
         data-drawer={drawer || undefined}
         aria-hidden="true"
-        onClick={() => {
-          if (drawer !== "handoff") setDrawer(null);
-        }}
+        onClick={() => setDrawer(null)}
       />
       <aside
         className={`side-drawer${drawer ? " open" : ""}`}
         data-drawer={drawer || undefined}
         inert={!drawer}
         role="dialog"
-        aria-label={drawer === "files" ? "当前项目" : "本轮处理"}
+        aria-label="当前项目"
       >
-        {drawer === "handoff" ? (
-          <HandoffDrawerHeader
-            panelEyebrow={processPanelEyebrow}
-            panelTitle={processPanelTitle}
-          />
-        ) : drawer === "files" && projectPanelCapability ? (
+        {drawer === "files" && projectPanelCapability ? (
           <ProjectPanelContainer
             capability={projectPanelCapability}
             panelPort={projectPanelPort}
             context={projectPanelContext}
             actions={projectPanelActions}
-          />
-        ) : null}
-        {drawer === "handoff" ? (
-          <div className="drawer-body">
-            <HandoffPanel
-              activeRun={activeRun}
-              terminalRun={terminalRun}
-              processSummaryTitle={processSummaryTitle}
-              processSummaryDetail={processSummaryDetail}
-              processStatusLabel={processStatusLabel}
-              processSteps={processSteps}
-              activeCommentCount={activeCommentCount}
-              activeCommentItems={activeCommentItems}
-              runBasisLabel={runBasisLabel}
-              runSubmittedLabel={runSubmittedLabel}
-              pendingRunOutcome={pendingRunOutcome}
-              canRevealAiTask={canRevealAiTask}
-              onRevealAiTask={() => void revealAiTaskInFinder()}
-              onRetrySubmission={() => {
-                workspaceControllerRef.current?.dismissActiveRun();
-                void generateRequest(deferredEditorReplayRef.current.agentDeliveryMode);
-              }}
-              onCancelRun={requestActiveRunEnd}
-            />
-          </div>
-        ) : null}
-        {drawer === "handoff" && activeRun ? (
-          <HandoffFooter
-            activeRun={activeRun}
-            reviewPreparing={reviewPreparing}
-            openingReadyVersion={openingReadyVersion}
-            pendingRunOutcome={pendingRunOutcome}
-            pendingReconcileBusy={pendingReconcileBusy}
-            handoffCopyFailed={handoffCopyFailed}
-            currentAgentHandoffStatus={currentAgentHandoffStatus}
-            currentDeliveryMode={currentAgentDeliveryMode}
-            agentPresentation={agentPresentation}
-            cancelling={cancelling}
-            resolvingConflict={resolvingConflict}
-            checkingRun={checkingRun}
-            terminalRun={terminalRun}
-            canRevealAiTask={canRevealAiTask}
-            onReviewReadyResult={() => void reviewReadyResult()}
-            onActivateReadyResult={() => void activateReadyResult()}
-            onSend={() => {
-              if (!workspaceController) return;
-              if (currentAgentDeliveryMode === "managed-agent") {
-                void workspaceController.startRunAgent({ run: activeRun });
-              } else if (currentAgentDeliveryMode === "clipboard") {
-                void workspaceController.copyRunHandoff({ run: activeRun });
-              }
-            }}
-            onCopyFallback={() => {
-              if (!workspaceController) return;
-              void workspaceController.copyRunHandoff({ run: activeRun });
-            }}
-            onCancel={requestActiveRunEnd}
-            onResolveConflict={(choice) => void resolveAiConflict(choice)}
-            onRevealAiTask={() => void revealAiTaskInFinder()}
-            onReturnToEditing={returnToEditingFromTerminalRun}
-            onRequestEnd={requestActiveRunEnd}
-            onPreviewSentHtml={() => {
-              setHandoffPreviewOpen(true);
-              setCanvasMode("preview");
-              setDrawer(null);
-            }}
           />
         ) : null}
       </aside>

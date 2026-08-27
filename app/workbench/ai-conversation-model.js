@@ -22,6 +22,7 @@ const SIDEBAR_STATES = new Set([
   "ready-to-open",
   "review-view",
   "promoting",
+  "run-error",
 ]);
 
 const INTENT_MODIFY = "modify";
@@ -75,6 +76,10 @@ const MODE_PRESENTATION = Object.freeze({
     label: "结果 · 等待决定",
     detail: "当前仍是修改前页面。",
   },
+  "run-error": {
+    label: "结果 · 需要处理",
+    detail: "当前页面没有被覆盖。",
+  },
   // A round that produced nothing new: the round is over, but it is still this
   // thread's fact to state, not a return to the idle preview.
   "no-change": {
@@ -102,6 +107,7 @@ const RUN_STATUS_TO_SIDEBAR_STATE = Object.freeze({
   // without this row the sidebar falls back to preview-ready and the
   // no-change action bar below becomes unreachable dead copy.
   "no-change": "no-change",
+  error: "run-error",
 });
 
 export function sidebarStateFromRun({
@@ -309,11 +315,31 @@ export function conversationLoadedForView(conversation) {
  */
 export function sidebarActionBar({
   state,
+  runStatus = null,
   candidateVersionLabel = null,
   candidateStatus = null,
   failureMessage = null,
   deliveryMode = "managed-agent",
 } = {}) {
+  if (runStatus === "awaiting-conflict-resolution") {
+    return {
+      kind: "decision",
+      title: "源文件在 AI 处理期间发生了外部修改",
+      detail: "请选择采用 AI 候选，或保留磁盘上的外部 HTML。",
+      actions: [
+        { id: "adopt-ai", label: "采用 AI 结果", tone: "primary" },
+        { id: "keep-external", label: "保留外部 HTML", tone: "quiet" },
+      ],
+    };
+  }
+  if (state === "run-error") {
+    return {
+      kind: "blocked",
+      title: failureMessage || "AI 输出没有通过安全校验",
+      detail: "当前页面和评论仍保持原样。",
+      actions: [{ id: "return-editing", label: "返回编辑", tone: "quiet" }],
+    };
+  }
   if (state === "ready-to-open" || state === "review-view") {
     if (candidateStatus === "blocked") {
       return {
@@ -473,6 +499,14 @@ export function sidebarSendState({
     };
   }
   if (state === "ready-to-open") {
+    return {
+      kind: "status",
+      canSend: false,
+      label: "先处理当前结果",
+      reason: null,
+    };
+  }
+  if (state === "run-error") {
     return {
       kind: "status",
       canSend: false,

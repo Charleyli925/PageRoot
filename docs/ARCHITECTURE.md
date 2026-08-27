@@ -327,7 +327,7 @@ services.
 | File title, rename, update badge and save-status presentation | `app/workbench/file-header-view.tsx` |
 | Comment rail presentation | `app/workbench/comment-rail-view.tsx` |
 | Project files drawer presentation | `app/workbench/project-files-view.tsx` |
-| AI handoff drawer presentation | `app/workbench/handoff-view.tsx` |
+| AI run conversation and live narration presentation | `app/workbench/run-conversation-outlet.tsx`, `app/workbench/AiConversationSidebar.tsx` |
 | Formal AI review state transitions | `app/workbench/review-state.ts` |
 | Bounded pure sibling alignment for semantic review units | `app/lib/review-semantic-alignment.js` |
 | Typed, per-element review projection fact normalization and filtering | `app/lib/review-projection-facts.js` |

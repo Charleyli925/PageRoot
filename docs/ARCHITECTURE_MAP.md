@@ -27,11 +27,11 @@ the Bridge client, construct Sessions, or own debounce, polling, or drain.
 
 | Domain | Fact owner | Operation owner | Entry |
 | --- | --- | --- | --- |
-| Navigation and tabs | `WorkbenchTabsSession`, `WorkbenchNavigationSession`, `BrowserDocumentSession` | `WorkbenchNavigationWorkflow` | `app/application/workbench-navigation-workflow.js`, `app/workbench.tsx` tab strip |
+| Navigation and tabs | `WorkbenchTabsSession`, `WorkbenchNavigationSession`, `BrowserDocumentSession` | `WorkbenchNavigationWorkflow` | `workspace-controller-capabilities.d.ts` (`controller.navigation`), `workbench-navigation-container.tsx` |
 | Document save | `DocumentSession` | `DocumentWorkflow` | `document-workflow.js`, `document/save-plan.js`, `verified-project-context.js` |
 | Comments | `CommentSession` | `CommentWorkflow` | `workspace-controller-capabilities.d.ts` (`controller.comments`), `comment-workflow.js`, `comment/commit-plan.js`, `comment-rail-container.tsx`, `comment-canvas-port.js`, `comment-rail-view.tsx` |
 | Attachments | Draft attachment repository | `CommentWorkflow` | `comment-workflow.js` upload/read/delete |
-| Run and AI request | `RunSession` | `RunWorkflow` | `run-workflow.js`, `run/submit-plan.js` |
+| Run and AI request | `RunSession` | `RunWorkflow` | `workspace-controller-capabilities.d.ts` (`controller.runs`), `run-workflow.js`, `run/submit-plan.js`, `run-conversation-outlet.tsx` |
 | Review and Candidate | `VersionSession` (projection) | `VersionWorkflow` prepare/accept | `app/workbench/AiReviewWorkspace.tsx` |
 | Version and history | `VersionSession` | `VersionWorkflow` | `version-workflow.js`, `version/review-plan.js` |
 | Project panel and rules | `ProjectSession`, `ProjectRulesSession`, `VersionSession` | `ProjectWorkflow`, `ProjectRulesWorkflow` | `workspace-controller-capabilities.d.ts` (`controller.projects`, `controller.projectCatalog`), `project-panel-container.tsx`, `project-panel-port.js`, `project-files-view.tsx` |
@@ -120,6 +120,28 @@ presentation, saved notices and its textarea ref. The catalog projection is
 separate so PROJECT.md typing cannot wake Start or the global sidebar. Workbench
 keeps only cross-capability hydration/error context, drawer composition and host
 actions such as export, Finder reveal and history activation.
+
+## Run and navigation render boundaries
+
+```text
+RunSession + RunWorkflow
+  -> WorkspaceController.runs { getSnapshot, subscribe, commands }
+    -> RunConversationOutlet
+      -> AiConversationSidebar
+
+WorkbenchTabsSession + WorkbenchNavigationWorkflow
+  -> WorkspaceController.navigation { getSnapshot, subscribe, commands }
+    -> WorkbenchTabBarContainer
+```
+
+Agent narration, truncation and narration timestamps are high-frequency
+presentation facts. The Run outlet subscribes them directly; Workbench wakes
+only when run identity, lifecycle, handoff phase or error structure changes.
+The retired Handoff drawer has no parallel lifecycle or recovery UI: progress,
+candidate decisions, conflict resolution and terminal failure recovery all live
+in the conversation. The Tabs container owns keyboard selection/close/new and
+focus restoration, while Workbench retains only the active-outlet composition
+and the host callback that snapshots page presentation before a switch.
 
 ## Capability-context for `gate:plan`
 

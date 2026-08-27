@@ -475,6 +475,14 @@ export async function architectureViolations() {
     path.join(PRODUCT_ROOT, "app", "workbench", "project-panel-container.tsx"),
     "utf8",
   );
+  const runConversationOutlet = await readFile(
+    path.join(PRODUCT_ROOT, "app", "workbench", "run-conversation-outlet.tsx"),
+    "utf8",
+  );
+  const navigationContainer = await readFile(
+    path.join(PRODUCT_ROOT, "app", "workbench", "workbench-navigation-container.tsx"),
+    "utf8",
+  );
   const canvasEditor = await readFile(
     path.join(PRODUCT_ROOT, "app", "components", "HtmlCanvasEditor.tsx"),
     "utf8",
@@ -599,6 +607,10 @@ export async function architectureViolations() {
   const projectPanelContainerAst = parseModule(
     path.join(PRODUCT_ROOT, "app", "workbench", "project-panel-container.tsx"),
     projectPanelContainer,
+  );
+  const navigationContainerAst = parseModule(
+    path.join(PRODUCT_ROOT, "app", "workbench", "workbench-navigation-container.tsx"),
+    navigationContainer,
   );
   const workspaceControllerAst = parseModule(
     path.join(PRODUCT_ROOT, "app", "application", "workspace-controller.js"),
@@ -930,9 +942,10 @@ export async function architectureViolations() {
   if (
     !hasObjectProperty(workbenchAst, "runWorkflow", { valueKind: "object" })
     || !hasCall(workbenchAst, { method: "submitRequest" })
-    || !hasCall(workbenchAst, { method: "copyRunHandoff" })
-    || !hasCall(workbenchAst, { method: "cancelRun" })
-    || !hasCall(workbenchAst, { method: "resolveRunConflict" })
+    || !hasCall(workbenchAst, { method: "copyHandoff" })
+    || !hasCall(workbenchAst, { method: "cancel" })
+    || !hasCall(workbenchAst, { method: "resolveConflict" })
+    || !/\buseSyncExternalStore\s*\(\s*capability\.subscribe/u.test(runConversationOutlet)
     || /\bbridgeClient\.(?:workspace|createRequest|status|cancelActiveRun|resolveConflict)\s*\(/.test(workbench)
     || /\b(?:processRunStatus|reconcilePendingRun|sendToQoderWork|hydrateRecentProjectRuns)\b/.test(workbench)
     || /const\s+timer\s*=\s*window\.setInterval\(/.test(workbench)
@@ -1030,8 +1043,8 @@ export async function architectureViolations() {
   if (
     bridgeCalls.length !== 0
     || !hasObjectProperty(workbenchAst, "versionWorkflow", { valueKind: "object" })
-    || !hasCall(workbenchAst, { method: "prepareReviewCandidate" })
-    || !hasCall(workbenchAst, { method: "activateReadyVersion" })
+    || !hasCall(workbenchAst, { path: "runCapability.commands.prepareReview" })
+    || !hasCall(workbenchAst, { path: "runCapability.commands.activateReadyVersion" })
     || !hasCall(workbenchAst, { method: "viewHistory" })
     || !hasCall(workbenchAst, { method: "returnToCurrent" })
     || !hasCall(workbenchAst, { method: "continueEditingHistoryVersion" })
@@ -1039,6 +1052,17 @@ export async function architectureViolations() {
   ) {
     violations.push(
       "app/workbench.tsx: PR-6 Version IO and navigation ownership must delegate to WorkspaceController; Workbench keeps only review presentation and outcome mapping",
+    );
+  }
+
+  if (
+    !hasCall(navigationContainerAst, { method: "activateTab" })
+    || !hasCall(navigationContainerAst, { method: "createStartTab" })
+    || !hasCall(navigationContainerAst, { method: "closeTab" })
+    || !/\buseSyncExternalStore\s*\(\s*capability\.subscribe/u.test(navigationContainer)
+  ) {
+    violations.push(
+      "app/workbench/workbench-navigation-container.tsx: tabs must subscribe to controller.navigation and route typed navigation commands",
     );
   }
 

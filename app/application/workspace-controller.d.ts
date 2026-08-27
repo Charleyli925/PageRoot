@@ -80,6 +80,12 @@ export type {
   ProjectControllerCapability,
   ProjectControllerCapabilitySnapshot,
   ProjectControllerCommands,
+  RunControllerCapability,
+  RunControllerCapabilitySnapshot,
+  RunControllerCommands,
+  NavigationControllerCapability,
+  NavigationControllerCapabilitySnapshot,
+  NavigationControllerCommands,
   ConversationControllerCapability,
   CommandOutcome,
   DocumentSurfaceControllerCapability,
@@ -390,6 +396,8 @@ export class WorkspaceController {
   readonly comments: import("./workspace-controller-capabilities.js").CommentControllerCapability;
   readonly projects: import("./workspace-controller-capabilities.js").ProjectControllerCapability;
   readonly projectCatalog: import("./workspace-controller-capabilities.js").ProjectCatalogControllerCapability;
+  readonly runs: import("./workspace-controller-capabilities.js").RunControllerCapability;
+  readonly navigation: import("./workspace-controller-capabilities.js").NavigationControllerCapability;
   getSnapshot(): import("./workspace-controller-capabilities.js").WorkspaceControllerSnapshot;
   openConversation(
     context: import("./conversation-session.js").ConversationContext | null,

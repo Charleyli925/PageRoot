@@ -59,6 +59,7 @@ export type AiConversationSidebarProps = {
   selectedModelChoiceId?: string | null;
   candidateVersionLabel?: string | null;
   candidateStatus?: string | null;
+  runStatus?: string | null;
   failureMessage?: string | null;
   contextLabel?: string | null;
   pendingCommentCount?: number;
@@ -141,6 +142,7 @@ export default function AiConversationSidebar({
   selectedModelChoiceId = null,
   candidateVersionLabel = null,
   candidateStatus = null,
+  runStatus = null,
   failureMessage = null,
   contextLabel = null,
   pendingCommentCount = 0,
@@ -184,12 +186,13 @@ export default function AiConversationSidebar({
   const actionBar = useMemo(
     () => sidebarActionBar({
       state,
+      runStatus,
       candidateVersionLabel,
       candidateStatus,
       failureMessage,
       deliveryMode,
     }),
-    [candidateStatus, candidateVersionLabel, deliveryMode, failureMessage, state],
+    [candidateStatus, candidateVersionLabel, deliveryMode, failureMessage, runStatus, state],
   );
   const send = sidebarSendState({
     state,

@@ -168,8 +168,9 @@ aggregate snapshot through its fixed `getSnapshot()`/`subscribe()` contract and
 forwards typed workflow events through `subscribeEvents()`; it does not create a
 second mutable store. It owns the unique `DrainCoordinator`, protocol Sessions,
 and Project, Comment, Run, Version and Workbench Tabs workflow composition.
-Capability facets such as `controller.comments`, `controller.projects` and
-the narrow `controller.projectCatalog` projection are stable views of this same
+Capability facets such as `controller.comments`, `controller.projects`,
+`controller.runs`, `controller.navigation` and the narrow
+`controller.projectCatalog` projection are stable views of this same
 Controller instance. A facet exposes only `getSnapshot`, `subscribe` and typed
 business commands; it neither stores copied facts nor exposes another
 capability. React capability containers subscribe to facets directly so local
@@ -189,9 +190,14 @@ editor refs, disclosure, saved notices and version selection. Sidebar and Start
 subscribe `controller.projectCatalog` independently; catalog consumers therefore
 do not commit when rules text changes. `projectPanelPort` carries only disposable
 open/focus intents and never project facts.
-The Tabs snapshot is part of the same aggregate; startup restore, Registry
-reconciliation and tab persistence enter through Controller-owned commands and
-narrow host ports, never React refs or effects. `DocumentSession`
+`RunConversationOutlet` subscribes `controller.runs`; public Agent narration
+and its timestamps therefore commit only the conversation region. Workbench's
+aggregate comparator still publishes run identity, lifecycle, phase and error
+changes needed by cross-capability locks and navigation.
+`WorkbenchTabBarContainer` subscribes `controller.navigation` and owns tab
+commands, keyboard shortcuts and post-close focus restoration. Startup restore,
+Registry reconciliation and tab persistence enter through Controller-owned
+commands and narrow host ports, never React refs or Workbench effects. `DocumentSession`
 may derive `hasPendingWrite` and `isFlushing` for that snapshot, but neither a
 pending-write payload nor a Promise crosses into Workbench.
 

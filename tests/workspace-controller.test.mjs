@@ -269,7 +269,7 @@ function createProjectRulesHarness() {
     },
     clock: { now: () => 1_726_000_000_000 },
   });
-  return { context, controller, get persisted() { return persisted; } };
+  return { context, controller, runSession, get persisted() { return persisted; } };
 }
 
 test("workspace controller accepts its injected test Session set and publishes canonical authority", async () => {
@@ -557,6 +557,49 @@ test("projects capability publishes project facts without waking its catalog pro
 
   unsubscribeProjects();
   unsubscribeCatalog();
+  harness.controller.dispose();
+});
+
+test("runs and navigation are stable capability facets over Controller authority", () => {
+  const harness = createProjectRulesHarness();
+  const runs = harness.controller.runs;
+  const navigation = harness.controller.navigation;
+  const publications = [];
+  const unsubscribe = runs.subscribe(() => publications.push(runs.getSnapshot()));
+  const activeRun = {
+    sourcePath: SOURCE_PATH,
+    requestId: "request_capability",
+    attemptId: "attempt_capability",
+    status: "processing",
+  };
+
+  harness.runSession.setActiveRun(activeRun);
+  harness.runSession.publishHandoff({
+    sourcePath: SOURCE_PATH,
+    requestId: activeRun.requestId,
+    attemptId: activeRun.attemptId,
+    status: "running",
+    visibleText: "Agent is working",
+  });
+
+  assert.equal(runs.getSnapshot().session?.activeRun, activeRun);
+  assert.equal(
+    runs.getSnapshot().session?.activeHandoff?.visibleText,
+    "Agent is working",
+  );
+  assert.equal(publications.length >= 2, true);
+  assert.equal(harness.controller.runs, runs);
+  assert.equal(harness.controller.navigation, navigation);
+  assert.ok(Object.isFrozen(runs.commands));
+  assert.ok(Object.isFrozen(navigation.commands));
+  assert.deepEqual(navigation.getSnapshot(), {
+    tabs: null,
+    ready: false,
+    workflow: null,
+    persistence: null,
+  });
+
+  unsubscribe();
   harness.controller.dispose();
 });
 
