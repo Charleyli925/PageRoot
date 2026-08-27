@@ -78,7 +78,14 @@ async function bridgeJson(page, pathname, {
   sourcePath,
   body,
 } = {}) {
-  const runtime = await page.evaluate(() => window.htmlAIRuntime);
+  await page.waitForFunction(
+    () => Boolean(window.htmlAIRuntime?.getBridgeConnection?.()),
+    undefined,
+    { timeout: 30_000 },
+  );
+  const runtime = await page.evaluate(() => (
+    window.htmlAIRuntime?.getBridgeConnection?.() || window.htmlAIRuntime
+  ));
   const url = new URL(`http://127.0.0.1:${runtime.bridgePort}${pathname}`);
   if (sourcePath) url.searchParams.set("sourcePath", sourcePath);
   const response = await fetch(url, {

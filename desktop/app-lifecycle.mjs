@@ -28,17 +28,6 @@ export function createWindowLifecycle(ctx) {
       rendererPath,
     } = ctx;
     ctx.markStartupStage?.("window-create-start");
-    // Only the renderer URL needs the Bridge endpoint. Protocol installation,
-    // external-file adoption, window construction and IPC registration do not,
-    // so let the utility process boot alongside them instead of ahead of them.
-    // startBridge is idempotent and deduplicates concurrent starts, so awaiting
-    // it again below costs nothing once the boot has already settled. No IPC
-    // handler can observe a missing port either: the renderer that would call
-    // one is loaded after the await, and fetchBridgeJson still fails closed.
-    const bridgeStartup = startBridge();
-    // Claim the rejection now so a throw between here and the await below cannot
-    // surface as an unhandled rejection; the awaited promise still rejects.
-    bridgeStartup.catch(() => {});
     ctx.ensurePreviewProtocolController();
     await ctx.adoptPendingExternalFileAtStartup();
     ctx.markStartupStage?.("external-open-adopted");
@@ -193,6 +182,7 @@ export function createWindowLifecycle(ctx) {
     mainWindow.once("ready-to-show", () => {
       ctx.markStartupStage?.("window-ready-to-show");
       presentMainWindow();
+      void ctx.startUsageTelemetryAfterFirstPaint?.();
     });
     mainWindow.on("close", (event) => {
       if (ctx.finalExitStarted) return;
@@ -211,6 +201,23 @@ export function createWindowLifecycle(ctx) {
       ctx.mainWindow = null;
     });
 
+    ctx.markStartupStage?.("renderer-shell-load-start");
+    ctx.rendererLoadQuery = {
+      appVersion: app.getVersion(),
+      bridgeDeferred: "1",
+      startupTiming: JSON.stringify(ctx.startupTimingSnapshot?.() || null),
+    };
+    const shellLoad = mainWindow.loadFile(rendererPath(), {
+      query: ctx.rendererLoadQuery,
+    });
+    // Start the utility process only after the real renderer shell has begun
+    // navigating. The two then progress together without making first paint
+    // depend on Bridge readiness.
+    const bridgeStartup = startBridge();
+    bridgeStartup.catch(() => {});
+    await shellLoad;
+    ctx.markStartupStage?.("renderer-shell-loaded");
+
     const port = await bridgeStartup;
     ctx.markStartupStage?.("bridge-await-finished");
     /*
@@ -219,14 +226,20 @@ export function createWindowLifecycle(ctx) {
      * query values, and a window that comes back without them renders nothing at all —
      * which is the blank white window users were left staring at.
      */
-    ctx.markStartupStage?.("renderer-load-start");
     ctx.rendererLoadQuery = {
       bridgePort: String(port),
       bridgeAuthToken: ctx.bridgeAuthToken,
       appVersion: app.getVersion(),
       startupTiming: JSON.stringify(ctx.startupTimingSnapshot?.() || null),
     };
-    await mainWindow.loadFile(rendererPath(), { query: ctx.rendererLoadQuery });
+    if (mainWindow.isDestroyed()) return;
+    ctx.markStartupStage?.("bridge-connection-published");
+    mainWindow.webContents.send(ctx.APP_CHANNELS.bridgeReady, {
+      bridgePort: String(port),
+      bridgeAuthToken: ctx.bridgeAuthToken,
+      appVersion: app.getVersion(),
+      startupTiming: ctx.startupTimingSnapshot?.() || null,
+    });
   }
 
   return { presentMainWindow, createWindow };

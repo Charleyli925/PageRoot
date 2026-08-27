@@ -1036,8 +1036,15 @@ try {
     firstWindowTimeout: 30_000,
     userDataPrefix: "pageroot-native-e2e-htmlperf-",
   });
+  await launched.page.waitForFunction(
+    () => Boolean(window.htmlAIRuntime?.getBridgeConnection?.()),
+    undefined,
+    { timeout: 30_000 },
+  );
   results.startup = await launched.page.evaluate(() => ({
-    desktop: window.htmlAIRuntime?.diagnostics?.startupTiming || null,
+    desktop: window.htmlAIRuntime?.getStartupTiming?.()
+      || window.htmlAIRuntime?.diagnostics?.startupTiming
+      || null,
     rendererTimeOriginUnixMs: performance.timeOrigin,
     paintEntries: performance.getEntriesByType("paint").map((entry) => ({
       name: entry.name,
@@ -1047,6 +1054,32 @@ try {
       .filter((entry) => entry.name.startsWith("pageroot:renderer:"))
       .map((entry) => ({ name: entry.name, startTime: entry.startTime })),
   }));
+  const desktopStartupMarks = Object.fromEntries(
+    (results.startup.desktop?.marks || []).map((entry) => [entry.stage, entry.atUnixMs]),
+  );
+  const firstPaint = results.startup.paintEntries
+    .find((entry) => entry.name === "first-paint");
+  const firstPaintUnixMs = Number(results.startup.rendererTimeOriginUnixMs)
+    + Number(firstPaint?.startTime);
+  assert(
+    desktopStartupMarks["renderer-shell-load-start"] < desktopStartupMarks["bridge-start"],
+    "renderer shell navigation must begin before Bridge startup",
+  );
+  assert(
+    firstPaintUnixMs < desktopStartupMarks["bridge-ready"],
+    "renderer first paint must not wait for Bridge readiness",
+  );
+  assert(
+    desktopStartupMarks["telemetry-start"] >= desktopStartupMarks["window-ready-to-show"],
+    "usage telemetry must start after the window is ready to show",
+  );
+  results.startup.summary = {
+    processToFirstPaintMs: round(firstPaintUnixMs - desktopStartupMarks["process-start"]),
+    firstPaintLeadOverBridgeMs: round(desktopStartupMarks["bridge-ready"] - firstPaintUnixMs),
+    processToBridgeReadyMs: round(
+      desktopStartupMarks["bridge-ready"] - desktopStartupMarks["process-start"],
+    ),
+  };
   launched.page.on("pageerror", (error) => {
     results.faults.pageErrors.count += 1;
     if (results.faults.pageErrors.samples.length < 50) {

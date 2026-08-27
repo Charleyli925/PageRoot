@@ -136,7 +136,11 @@ test("packaged app preserves identity and imports external HTML as V1 across sta
     await page.evaluate(() => new Promise((resolve) => {
       requestAnimationFrame(() => requestAnimationFrame(resolve));
     }));
-    const runtime = await page.evaluate(() => window.htmlAIRuntime);
+    const runtime = await page.evaluate(() => ({
+      appVersion: window.htmlAIRuntime?.appVersion || "",
+      connection: window.htmlAIRuntime?.getBridgeConnection?.() || null,
+      startupTiming: window.htmlAIRuntime?.getStartupTiming?.() || null,
+    }));
     expect(runtime?.appVersion).toBe(expectedIdentity.version);
     const runtimeIdentity = await electronApp.evaluate(({ app }) => ({
       name: app.getName(),
@@ -152,9 +156,15 @@ test("packaged app preserves identity and imports external HTML as V1 across sta
       name: expectedIdentity.name,
       version: expectedIdentity.version,
     });
-    expect(runtime?.bridgePort).toMatch(/^[1-9]\d{0,4}$/u);
-    expect(Number(runtime?.bridgePort)).toBeGreaterThan(0);
-    expect(Number(runtime?.bridgePort)).toBeLessThanOrEqual(65_535);
+    expect(runtime.connection?.bridgePort).toMatch(/^[1-9]\d{0,4}$/u);
+    expect(Number(runtime.connection?.bridgePort)).toBeGreaterThan(0);
+    expect(Number(runtime.connection?.bridgePort)).toBeLessThanOrEqual(65_535);
+    const startupStages = runtime.startupTiming?.marks.map((mark) => mark.stage) || [];
+    expect(startupStages.indexOf("renderer-shell-load-start"))
+      .toBeLessThan(startupStages.indexOf("bridge-start"));
+    expect(startupStages.indexOf("renderer-shell-loaded"))
+      .toBeLessThan(startupStages.indexOf("bridge-await-finished"));
+    expect(startupStages).toContain("bridge-connection-published");
     await expect.poll(
       async () => (await page.evaluate(
         () => window.htmlAIProjects?.getActiveProject(),

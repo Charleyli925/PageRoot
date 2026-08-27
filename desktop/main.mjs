@@ -260,6 +260,7 @@ const APP_CHANNELS = Object.freeze({
   workspaceRecoveryReady: "html-app:workspace-recovery-ready",
   externalOpenRequested: "html-app:external-open-requested",
   externalOpenReady: "html-app:external-open-ready",
+  bridgeReady: "html-app:bridge-ready",
   relaunch: "html-app:relaunch",
   openUserNotice: "html-app:open-user-notice",
 });
@@ -359,6 +360,7 @@ const desktopRuntime = {
   APP_CHANNELS,
   markStartupStage: (stage) => startupPerformanceTimeline.mark(stage),
   startupTimingSnapshot: () => startupPerformanceTimeline.snapshot(),
+  startUsageTelemetryAfterFirstPaint,
 };
 const {
   presentMainWindow,
@@ -566,6 +568,20 @@ async function initializeUsageTelemetry() {
     fetchImpl: (url, options) => net.fetch(url, options),
   });
   await usageTelemetry.start();
+}
+
+let startupTelemetryPromise = null;
+function startUsageTelemetryAfterFirstPaint() {
+  if (startupTelemetryPromise) return startupTelemetryPromise;
+  startupPerformanceTimeline.mark("telemetry-start");
+  startupTelemetryPromise = initializeUsageTelemetry().then(() => {
+    startupPerformanceTimeline.mark("telemetry-ready");
+    return true;
+  }).catch(() => {
+    startupPerformanceTimeline.mark("telemetry-failed");
+    return false;
+  });
+  return startupTelemetryPromise;
 }
 
 process.on("uncaughtExceptionMonitor", (error) => {
@@ -4150,9 +4166,6 @@ if (!hasSingleInstanceLock) {
     }
     installApplicationMenu();
     ensureApplicationUpdateController();
-    startupPerformanceTimeline.mark("telemetry-start");
-    await initializeUsageTelemetry();
-    startupPerformanceTimeline.mark("telemetry-ready");
     await createWindow();
   }).catch(async (error) => {
     captureUsage("runtime_fault", {
