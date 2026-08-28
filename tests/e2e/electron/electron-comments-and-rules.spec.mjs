@@ -854,7 +854,9 @@ test("Electron shell keeps the global rail fixed while the context inspector swa
       ),
     ))).toBe(376);
 
-    await launched.page.getByRole("button", { name: "收起 AI 助手" }).click();
+    const aiToggle = launched.page.getByRole("button", { name: "AI 助手", exact: true });
+    await expect(aiToggle).toHaveAttribute("aria-expanded", "true");
+    await aiToggle.click();
     await expect(launched.page.getByTestId("ai-conversation-sidebar")).toHaveCount(0);
     await launched.page.getByRole("button", { name: "编辑", exact: true }).click();
     await expect(stage).toHaveAttribute("data-inspector", "comments");
