@@ -21,10 +21,14 @@ The cache holds at most eight HTML entries and 48 MiB. Tab count remains
 unlimited because eviction removes only the projection, not the tab. A cache
 entry is admitted only when Document revision is fully persisted and the
 current Canvas has verified the identical source SHA-256. Selecting a cached
-tab may display that inert frame immediately, but the normal registered-project
+tab may display that safe scroll-only frame immediately, but the normal registered-project
 open, Registry/OpenTarget validation, source read, hydration and Canvas gates
 still run. Cached bytes never become Source, save, Version or export authority.
 Restart persistence remains identity-only.
+After restart, a trusted read-only Registry projection may repopulate the active
+display cache before normal activation and then prewarm inactive tabs while the
+app is idle. Those bytes remain presentation-only and are never persisted with
+the tab identities.
 
 Formal Review retains its existing exact operation/base/candidate/path/comment
 cache entries across tab applications. Candidate-ready state may precompute one

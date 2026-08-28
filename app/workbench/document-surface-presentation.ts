@@ -17,6 +17,7 @@ export function useDocumentSurfaceHandoff({
   renderedSourceSha256,
   canvasAuthority,
   canvasGeneration,
+  controller,
 }: {
   cache: DocumentSurfaceCacheSnapshot;
   tabs: WorkbenchTabsSnapshot;
@@ -28,10 +29,13 @@ export function useDocumentSurfaceHandoff({
     renderedSha256?: string | null;
   }> | null;
   canvasGeneration: number;
+  controller: DocumentSurfaceControllerCapability | null;
 }): {
   visibleCachedSurface: DocumentSurfaceCacheEntry | null;
   retainPresentedTab: (tabId: string) => void;
   completeHandoff: (tabId: string) => void;
+  updateVisibleScroll: (tabId: string, scrollTop: number) => void;
+  markFirstScroll: (tabId: string, scrollTop: number) => void;
 } {
   const pending = cache.entries.find((entry) => (
     entry.tier === "hot" && entry.tabId === tabs.pendingTabId
@@ -47,14 +51,26 @@ export function useDocumentSurfaceHandoff({
   ) || canvasAuthority?.status === "failed";
   const retainPresentedTab = useCallback((tabId: string) => {
     setRetainedTabId(tabId);
-  }, []);
+    const entry = controller?.getSnapshot().documentSurfaceCache?.entries
+      .find((candidate) => candidate.tabId === tabId);
+    if (entry) controller?.confirmDocumentSurfaceReady(tabId, entry.sourceSha256);
+  }, [controller]);
   const completeHandoff = useCallback((tabId: string) => {
     setRetainedTabId((current) => current === tabId ? null : current);
   }, []);
+  const updateVisibleScroll = useCallback((tabId: string, scrollTop: number) => {
+    controller?.updateDocumentSurfacePresentation(tabId, { scrollTop });
+  }, [controller]);
+  const markFirstScroll = useCallback((tabId: string, scrollTop: number) => {
+    controller?.deferDocumentSurfacePrewarm();
+    performance.mark("pageroot:tab-cache:first-scroll-response", {
+      detail: Object.freeze({ tabId, scrollTop }),
+    });
+  }, [controller]);
   let visibleCachedSurface: DocumentSurfaceCacheEntry | null = pending;
   if (!visibleCachedSurface && active?.kind === "document" && retainedTabId && !terminal) {
-    // Keep the inert cached page above the newly committed Canvas until that
-    // exact Canvas generation verifies. Authority still mounts underneath.
+    // Keep the scroll-only cached page above the newly committed Canvas until
+    // that exact Canvas generation verifies. Authority still mounts underneath.
     visibleCachedSurface = cache.entries.find((entry) => (
       entry.tier === "hot"
       && entry.tabId === retainedTabId
@@ -64,7 +80,13 @@ export function useDocumentSurfaceHandoff({
       && entry.sourceSha256 === sourceSha256
     )) || null;
   }
-  return { visibleCachedSurface, retainPresentedTab, completeHandoff };
+  return {
+    visibleCachedSurface,
+    retainPresentedTab,
+    completeHandoff,
+    updateVisibleScroll,
+    markFirstScroll,
+  };
 }
 
 export function readyVersionPublicationMatches(

@@ -12,6 +12,7 @@ import {
   planProjectSwitchAfterDrain,
   planProjectSwitchEntry,
   planProjectSwitchFence,
+  planProjectSwitchValidationLease,
 } from "./project/switch-plan.js";
 
 const SHA256 = /^sha256:[a-f0-9]{64}$/u;
@@ -595,8 +596,8 @@ export class ProjectWorkflow {
     const operationId = this.#nextOperationId("switch");
     this.#setSwitch("preparing", operationId);
     try {
-      const hardBlocker = this.#drainCoordinator
-        .inspect("switch")
+      const switchObligations = this.#drainCoordinator.inspect("switch");
+      const hardBlocker = switchObligations
         .find((status) => status.state === "blocked");
       const entry = planProjectSwitchEntry({
         drainBlockedReason: hardBlocker?.reason || null,
@@ -629,6 +630,30 @@ export class ProjectWorkflow {
             "当前撤销或重做没有安全完成。",
           );
         }
+      }
+
+      const document = this.#documentSession.snapshot;
+      const validationLease = planProjectSwitchValidationLease({
+        obligationsResolved: switchObligations.every((status) => status.state === "resolved"),
+        hasPendingNativeEdit: Boolean(this.#canvasPort.hasPendingNativeEdit?.()),
+        hasHistoryAction: this.#documentWorkflow.hasHistoryAction,
+        persistState: document.persistState,
+        pendingWrite: document.hasPendingWrite,
+        flushInFlight: document.isFlushing,
+        editRevision: document.editRevision,
+        lastPersistedRevision: document.lastPersistedRevision,
+        sourcePath: this.#projectSession.sourcePath,
+        sourceSha256: document.sourceSha256,
+        canvasStatus: document.canvasAuthority?.status,
+        renderedSha256: document.canvasAuthority?.renderedSha256,
+      });
+      if (entry.action === "continue" && validationLease.action === "reuse-verified") {
+        this.#emit({
+          type: "project-switch-validation-reused",
+          operationId,
+          sourceSha256: document.sourceSha256,
+        });
+        return succeeded({ operationId, validationLease: "reused" });
       }
 
       const canvasIsMounted = typeof this.#canvasPort.isMounted !== "function"

@@ -17,6 +17,21 @@ export function planProjectSwitchFence(input?: {
   fenceReason?: string;
 }): ProjectSwitchPlan;
 
+export function planProjectSwitchValidationLease(input?: {
+  obligationsResolved?: boolean;
+  hasPendingNativeEdit?: boolean;
+  hasHistoryAction?: boolean;
+  persistState?: string;
+  pendingWrite?: boolean;
+  flushInFlight?: boolean;
+  editRevision?: number;
+  lastPersistedRevision?: number;
+  sourcePath?: string;
+  sourceSha256?: string;
+  canvasStatus?: string;
+  renderedSha256?: string;
+}): Readonly<{ kind: "ready"; action: "reuse-verified" | "full-check" }>;
+
 export function planProjectSwitchAfterDrain(input?: {
   editRevision?: number;
   cutoffRevision?: number;

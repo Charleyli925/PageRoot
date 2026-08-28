@@ -204,7 +204,7 @@ import {
   restoreCachedDocumentPresentation,
   useDocumentSurfaceHandoff,
 } from "./workbench/document-surface-presentation";
-import { markProjectApplied, markProjectHydrationStage, RendererStartupPerformance } from "./workbench/performance-timeline";
+import { markDocumentSurfacePrewarmed, markProjectApplied, markProjectHydrationStage, RendererStartupPerformance } from "./workbench/performance-timeline";
 import type { ReviewDocuments } from "./workbench/review-document";
 import { useRuntimeBridgeConnectionReady } from "./workbench/runtime-bridge-connection";
 import { WorkbenchHeaderShell } from "./workbench/workbench-header-shell";
@@ -1027,6 +1027,11 @@ export default function Workbench() {
             getActive: async () => window.htmlAIProjects?.getActiveProject() ?? null,
             listRecent: async () => window.htmlAIProjects?.listRecentProjects() ?? [],
             listRegistered: async () => window.htmlAIProjects?.listRegisteredProjects?.() ?? [],
+            readRegisteredProjection: async (registeredProjectId: string) => {
+              const read = window.htmlAIProjects?.readRegisteredProjectProjection;
+              if (!read) throw new Error("当前 PageRoot 版本缺少项目展示预热通道。");
+              return read(registeredProjectId);
+            },
             openRegistered: async (registeredProjectId: string) => {
               const open = window.htmlAIProjects?.openRegisteredProject;
               if (!open) throw new Error("当前 PageRoot 版本缺少项目目录打开通道。");
@@ -1737,9 +1742,20 @@ export default function Workbench() {
         epoch?: unknown;
         requestId?: unknown;
         ackPending?: unknown;
+        tabId?: unknown;
+        sourceSha256?: unknown;
+        hot?: unknown;
       }>;
       if (projectEvent.type === "project-hydration-stage") {
         markProjectHydrationStage(String(projectEvent.stage || ""), projectEvent.operationId, projectEvent.timing);
+        return;
+      }
+      if (projectEvent.type === "document-surface-prewarmed") {
+        markDocumentSurfacePrewarmed(
+          projectEvent.tabId,
+          projectEvent.sourceSha256,
+          projectEvent.hot,
+        );
         return;
       }
       if (projectEvent.type === "project-browser-file-requested") {
@@ -3441,10 +3457,15 @@ export default function Workbench() {
     tabs: WorkbenchTabsSnapshot,
   ) => {
     if (!workspaceController) return;
+    const activeTabId = tabs.activeTabId;
+    const cachedScrollTop = workspaceController.getSnapshot().documentSurfaceCache?.entries
+      .find((entry) => entry.tabId === activeTabId)?.scrollTop;
     rememberActiveDocumentPresentation({ controller: workspaceController,
       tabs, canvasMode,
       pageViewContext: activePageViewContext,
-      scrollTop: reviewStageRef.current?.scrollTop || 0 });
+      scrollTop: canvasMode === "edit"
+        ? editorRef.current?.getScrollTop() || 0
+        : cachedScrollTop ?? reviewStageRef.current?.scrollTop ?? 0 });
   }, [
     activePageViewContext,
     canvasMode,
@@ -6145,7 +6166,7 @@ export default function Workbench() {
   const startPageActive = activeWorkbenchTab?.kind === "start"
     && typeof window !== "undefined"
     && Boolean(window.htmlAIProjects);
-  const { visibleCachedSurface, retainPresentedTab, completeHandoff } = useDocumentSurfaceHandoff({ cache: documentSurfaceCacheSnapshot, tabs: workbenchTabsSnapshot, sourceSha256, renderedSourceSha256: canvasMode === "preview" && canvasRenderAcks.preview?.generation === canvasGeneration ? canvasRenderAcks.preview.sha256 : renderedContentSha256, canvasAuthority, canvasGeneration });
+  const { visibleCachedSurface, retainPresentedTab, completeHandoff, updateVisibleScroll, markFirstScroll } = useDocumentSurfaceHandoff({ cache: documentSurfaceCacheSnapshot, tabs: workbenchTabsSnapshot, sourceSha256, renderedSourceSha256: canvasMode === "preview" && canvasRenderAcks.preview?.generation === canvasGeneration ? canvasRenderAcks.preview.sha256 : renderedContentSha256, canvasAuthority, canvasGeneration, controller: workspaceController });
   const retryProjectHydrationFromCommentRail = useCallback(() => {
     void workspaceController?.retryProjectHydration();
   }, [workspaceController]);
@@ -6617,6 +6638,8 @@ export default function Workbench() {
       <WorkbenchDocumentSurfaceCache
         snapshot={documentSurfaceCacheSnapshot} visibleTabId={visibleCachedSurface?.tabId || null}
         onVisibleReady={retainPresentedTab} onHandoffComplete={completeHandoff}
+        onVisibleScroll={updateVisibleScroll}
+        onFirstScroll={markFirstScroll}
         height="var(--comment-canvas-height, 760px)"
       />
       {startPageActive && projectCatalogCapability ? (
@@ -6669,6 +6692,7 @@ export default function Workbench() {
                   height="var(--comment-canvas-height, 760px)"
                   onChange={handleCanvasChange}
                   onInteraction={() => {
+                    workspaceControllerRef.current?.deferDocumentSurfacePrewarm();
                     if (commentCanvasPort.getSnapshot().relinkingTarget) {
                       commentCanvasPort.armRelinkSelection();
                     }
@@ -6714,6 +6738,7 @@ export default function Workbench() {
                   pageViewContext={activePageViewContext}
                   pageViewDocumentKey={pageViewDocumentKey}
                   onPageViewContextChange={acceptPageViewContext}
+                  initialScrollTop={visibleCachedSurface?.scrollTop}
                   locked={
                     runInProgress
                     || projectHydrating
@@ -6743,8 +6768,15 @@ export default function Workbench() {
               height="100%"
               comments={comments}
               transport={interactivePreviewTransport}
+              onInteraction={() => workspaceControllerRef.current?.deferDocumentSurfacePrewarm()}
               onReady={handlePreviewReady}
               presentationCovered={Boolean(visibleCachedSurface)}
+              initialScrollTop={visibleCachedSurface?.scrollTop}
+              onScrollTopChange={(scrollTop) => {
+                if (activeWorkbenchTab.kind === "document") {
+                  updateVisibleScroll(activeWorkbenchTab.tabId, scrollTop);
+                }
+              }}
             />
           ) : null}
         </section>

@@ -432,6 +432,10 @@ test("preload exposes Registry catalog reads and projectId-only opens", async ()
     projectName: "报告",
     availability: "ready",
   }]);
+  assert.equal(
+    (await api.readRegisteredProjectProjection("project_0123456789abcdef")).sourcePath,
+    "/Users/demo/Documents/PageRoot/项目/报告/报告-V1.html",
+  );
   assert.deepEqual(
     await api.openRegisteredProject("project_0123456789abcdef"),
     {
@@ -442,6 +446,7 @@ test("preload exposes Registry catalog reads and projectId-only opens", async ()
   );
   assert.deepEqual(calls, [
     ["html-projects:list-registered"],
+    ["html-projects:read-registered-projection", "project_0123456789abcdef"],
     ["html-projects:open-registered", "project_0123456789abcdef"],
   ]);
 });

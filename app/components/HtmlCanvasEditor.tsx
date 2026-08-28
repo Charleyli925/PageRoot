@@ -108,6 +108,7 @@ import {
   sameRuntimeGrant,
   type RuntimeFrameContext,
 } from "./html-canvas-frame";
+import { useCanvasPresentationScroll } from "./html-canvas-presentation-scroll";
 import {
   NativeDeferredCommandQueue,
   nativeEditLeasesMatch,
@@ -535,6 +536,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     pageViewContext = null,
     pageViewDocumentKey = "",
     onPageViewContextChange,
+    initialScrollTop,
     pointerCapabilityHoverEnabled = true,
   },
   forwardedRef,
@@ -701,6 +703,11 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     elementGeneration: 0,
     runtime: false,
   }));
+  const { getScrollTop, restoreInitialScroll, scrollToTop } = useCanvasPresentationScroll({
+    iframeRef,
+    frameGeneration: frameRender.elementGeneration,
+    initialScrollTop,
+  });
   const [canvasTransitionActive, setCanvasTransitionActive] = useState(false);
   const [selection, setSelection] = useState<HtmlCanvasSelection | null>(null);
   const [overlayPosition, setOverlayPosition] = useState<OverlayPosition | null>(null);
@@ -3891,6 +3898,8 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     () => ({
       getSourceHtml: () => frameSourceHtmlRef.current,
       getRenderedSourceHtml: () => renderedSourceHtmlRef.current,
+      getScrollTop,
+      scrollToTop,
       checkpointPendingEdit,
       fencePendingEdit,
       commitPendingEdit,
@@ -3919,11 +3928,13 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       commitPendingEdit,
       deferNativeCommand,
       freezeNow,
+      getScrollTop,
       moveSelected,
       adoptHistorySource,
       cancelHistoryAction,
       selectTarget,
       showCommitBlocked,
+      scrollToTop,
       startEditing,
       unlockNow,
     ],
@@ -5388,10 +5399,10 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         sandbox={frameRender.runtime
           ? "allow-same-origin allow-scripts"
           : "allow-same-origin"}
-        onLoad={(event) => connectFrame(
-          event.currentTarget,
-          frameRender.elementGeneration,
-        )}
+        onLoad={(event) => {
+          connectFrame(event.currentTarget, frameRender.elementGeneration);
+          restoreInitialScroll();
+        }}
       />
       <HtmlCanvasSelectionChrome
         model={selectionChromeModel}

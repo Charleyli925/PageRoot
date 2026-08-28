@@ -13,12 +13,16 @@ export default function WorkbenchDocumentSurfaceCache({
   visibleTabId,
   onVisibleReady,
   onHandoffComplete,
+  onVisibleScroll,
+  onFirstScroll,
   height,
 }: {
   snapshot: DocumentSurfaceCacheSnapshot;
   visibleTabId: string | null;
   onVisibleReady: (tabId: string) => void;
   onHandoffComplete: (tabId: string) => void;
+  onVisibleScroll: (tabId: string, scrollTop: number) => void;
+  onFirstScroll: (tabId: string, scrollTop: number) => void;
   height: string;
 }) {
   const rootRef = useRef<HTMLDivElement>(null);
@@ -40,6 +44,7 @@ export default function WorkbenchDocumentSurfaceCache({
     let frame = 0;
     let observer: MutationObserver | null = null;
     let marked = false;
+    let scrollableMarked = false;
     const markWhenReady = () => {
       const entry = [...(root?.querySelectorAll<HTMLElement>("[data-tab-id]") || [])]
         .find((candidate) => candidate.dataset.tabId === visibleTabId);
@@ -52,7 +57,13 @@ export default function WorkbenchDocumentSurfaceCache({
         });
         onVisibleReady(visibleTabId);
       }
-      return true;
+      if (!scrollableMarked && surface.dataset.scrollableReady === "true") {
+        scrollableMarked = true;
+        performance.mark("pageroot:tab-cache:scrollable-ready", {
+          detail: Object.freeze({ tabId: visibleTabId }),
+        });
+      }
+      return scrollableMarked;
     };
     frame = window.requestAnimationFrame(() => {
       if (markWhenReady()) return;
@@ -91,6 +102,7 @@ export default function WorkbenchDocumentSurfaceCache({
           className={styles.entry}
           data-tier={entry.tier}
           data-tab-id={entry.tabId}
+          data-scroll-top={entry.scrollTop}
           hidden={entry.tabId !== visibleTabId}
           key={entry.tabId}
         >
@@ -98,7 +110,10 @@ export default function WorkbenchDocumentSurfaceCache({
             html={entry.html}
             sourcePath={entry.sourcePath}
             height={height}
-            status="已显示缓存页面，正在核对最新内容…"
+            status={null}
+            initialScrollTop={entry.scrollTop}
+            onScrollTopChange={(scrollTop) => onVisibleScroll(entry.tabId, scrollTop)}
+            onFirstScroll={(scrollTop) => onFirstScroll(entry.tabId, scrollTop)}
           />
         </div>
       ))}

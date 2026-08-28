@@ -12,17 +12,13 @@
   z-index: 4;
   height: 100%;
   padding: 18px 18px 28px 58px;
-  overflow-y: auto;
+  overflow: hidden;
   background: var(--panel);
   visibility: visible;
 }
 
 .entry {
   min-width: 0;
-}
-
-.cache[data-visible="true"] .entry {
-  pointer-events: none;
 }
 
 .entry[hidden] {

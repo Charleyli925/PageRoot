@@ -232,6 +232,7 @@ const PROJECT_CHANNELS = Object.freeze({
   revealAiTask: "html-projects:reveal-ai-task",
   listRecentProjects: "html-projects:list-recent",
   listRegisteredProjects: "html-projects:list-registered",
+  readRegisteredProjectProjection: "html-projects:read-registered-projection",
   openRegisteredProject: "html-projects:open-registered",
   openRecent: "html-projects:open-recent",
   forgetRecent: "html-projects:forget-recent",
@@ -3145,61 +3146,70 @@ async function listRegisteredProjects() {
     ));
 }
 
+async function readRegisteredProjectProjection(projectIdInput) {
+  const projectId = assertRegisteredProjectId(projectIdInput);
+  const payload = await fetchBridgeJson(
+    `/registered-project/open?projectId=${encodeURIComponent(projectId)}`,
+  );
+  const target = payload.openTarget;
+  if (
+    !target
+    || typeof target !== "object"
+    || target.targetKind !== "working-copy"
+    || target.projectId !== projectId
+    || payload.projectId !== projectId
+    || !/^doc_[a-f0-9]{16,64}$/u.test(String(target.documentId || ""))
+    || !/^work_ver_\d{4,}$/u.test(String(target.workingCopyId || ""))
+    || !/^ver_\d{4,}$/u.test(String(target.versionId || ""))
+    || typeof target.projectRootPath !== "string"
+    || !target.projectRootPath
+    || !/^sha256:[a-f0-9]{64}$/u.test(String(payload.sourceSha256 || ""))
+    || target.sourceSha256 !== payload.sourceSha256
+    || typeof payload.content !== "string"
+    || typeof payload.lastModifiedAt !== "string"
+    || !payload.lastModifiedAt
+  ) {
+    throw new ProjectFileError(
+      "REGISTERED_PROJECT_TARGET_INVALID",
+      "项目目录未返回可安全打开的工作文件。",
+    );
+  }
+  const requestedSourcePath = assertHtmlPath(payload.sourcePath, "sourcePath");
+  const targetSourcePath = assertHtmlPath(target.exactSourcePath, "openTarget.exactSourcePath");
+  const [sourcePath, exactTargetPath] = await Promise.all([
+    existingPathIdentity(requestedSourcePath),
+    existingPathIdentity(targetSourcePath),
+  ]);
+  if (sourcePath !== exactTargetPath) {
+    throw new ProjectFileError(
+      "REGISTERED_PROJECT_PATH_MISMATCH",
+      "项目目录目标路径与经过验证的工作文件不一致。",
+    );
+  }
+
+  // Renderer supplied only projectId. Repository has already resolved the
+  // Registry, recovered the Working Copy locator and read the exact bytes in
+  // one serialized operation. Keep that tuple intact here; repeating
+  // /workspace and readHtmlProject delayed first paint and widened the race
+  // window without adding a stronger authority boundary.
+  const project = Object.freeze({
+    sourcePath,
+    path: sourcePath,
+    name: path.basename(sourcePath),
+    html: payload.content,
+    sha256: payload.sourceSha256,
+    lastModifiedAt: payload.lastModifiedAt,
+  });
+  return Object.freeze({
+    ...projectWithIdentity(project, target),
+    openTarget: Object.freeze({ ...target }),
+  });
+}
+
 async function openRegisteredProject(projectIdInput) {
   return projectOpenQueue.run(async () => {
-    const projectId = assertRegisteredProjectId(projectIdInput);
-    const payload = await fetchBridgeJson(
-      `/registered-project/open?projectId=${encodeURIComponent(projectId)}`,
-    );
-    const target = payload.openTarget;
-    if (
-      !target
-      || typeof target !== "object"
-      || target.targetKind !== "working-copy"
-      || target.projectId !== projectId
-      || payload.projectId !== projectId
-      || !/^doc_[a-f0-9]{16,64}$/u.test(String(target.documentId || ""))
-      || !/^work_ver_\d{4,}$/u.test(String(target.workingCopyId || ""))
-      || !/^ver_\d{4,}$/u.test(String(target.versionId || ""))
-      || typeof target.projectRootPath !== "string"
-      || !target.projectRootPath
-      || !/^sha256:[a-f0-9]{64}$/u.test(String(payload.sourceSha256 || ""))
-      || target.sourceSha256 !== payload.sourceSha256
-      || typeof payload.content !== "string"
-      || typeof payload.lastModifiedAt !== "string"
-      || !payload.lastModifiedAt
-    ) {
-      throw new ProjectFileError(
-        "REGISTERED_PROJECT_TARGET_INVALID",
-        "项目目录未返回可安全打开的工作文件。",
-      );
-    }
-    const requestedSourcePath = assertHtmlPath(payload.sourcePath, "sourcePath");
-    const targetSourcePath = assertHtmlPath(target.exactSourcePath, "openTarget.exactSourcePath");
-    const [sourcePath, exactTargetPath] = await Promise.all([
-      existingPathIdentity(requestedSourcePath),
-      existingPathIdentity(targetSourcePath),
-    ]);
-    if (sourcePath !== exactTargetPath) {
-      throw new ProjectFileError(
-        "REGISTERED_PROJECT_PATH_MISMATCH",
-        "项目目录目标路径与经过验证的工作文件不一致。",
-      );
-    }
-
-    // Renderer supplied only projectId. Repository has already resolved the
-    // Registry, recovered the Working Copy locator and read the exact bytes in
-    // one serialized operation. Keep that tuple intact here; repeating
-    // /workspace and readHtmlProject delayed first paint and widened the race
-    // window without adding a stronger authority boundary.
-    const project = Object.freeze({
-      sourcePath,
-      path: sourcePath,
-      name: path.basename(sourcePath),
-      html: payload.content,
-      sha256: payload.sourceSha256,
-      lastModifiedAt: payload.lastModifiedAt,
-    });
+    const project = await readRegisteredProjectProjection(projectIdInput);
+    const { sourcePath, openTarget: target } = project;
     const state = await loadProjectState();
     const recentIdentities = await Promise.all(state.recent.map(async (entry) => ({
       entry,
@@ -3210,7 +3220,7 @@ async function openRegisteredProject(projectIdInput) {
     state.activeManagedLocator = activeManagedLocatorForActivatedPath(
       target,
       sourcePath,
-      payload.sourceSha256,
+      project.sha256,
     );
     state.recent = [
       {
@@ -3225,10 +3235,7 @@ async function openRegisteredProject(projectIdInput) {
     await persistProjectState();
     await restoreActiveImportedAssetSource(sourcePath);
     sourceFileWatcher.watch(sourcePath);
-    return Object.freeze({
-      ...projectWithIdentity(project, target),
-      openTarget: Object.freeze({ ...target }),
-    });
+    return project;
   });
 }
 
@@ -3355,6 +3362,7 @@ function registerProjectIpc() {
       revealAiTask,
       listRecentProjects,
       listRegisteredProjects,
+      readRegisteredProjectProjection,
       openRegisteredProject,
       openRecent,
       forgetRecentProject,
