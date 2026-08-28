@@ -506,6 +506,39 @@ test("startup publishes the initial active project without fencing a nonexistent
   assert.equal(harness.projectSession.context.projectId, `project_${slug(A_PATH)}`);
 });
 
+test("a clean exact Canvas validation lease skips the leave-side drain", async (t) => {
+  const harness = createHarness();
+  t.after(() => harness.workflow.dispose());
+  assert.equal(harness.documentSession.confirmCanvas({
+    generation: 0,
+    renderedSha256: sha256(OLD_HTML),
+  }), true);
+
+  const outcome = await harness.workflow.prepareSwitch();
+  assert.equal(outcome.status, "succeeded");
+  assert.equal(outcome.value.validationLease, "reused");
+  assert.equal(harness.fenceCount, 0);
+  assert.equal(
+    harness.events.some((event) => event.type === "project-switch-validation-reused"),
+    true,
+  );
+});
+
+test("a dirty document cannot reuse the Canvas validation lease", async (t) => {
+  const harness = createHarness();
+  t.after(() => harness.workflow.dispose());
+  harness.documentSession.confirmCanvas({
+    generation: 0,
+    renderedSha256: sha256(OLD_HTML),
+  });
+  harness.documentSession.beginEdit(OLD_HTML.replace("old", "dirty"));
+
+  const outcome = await harness.workflow.prepareSwitch();
+  assert.equal(outcome.status, "succeeded");
+  assert.equal(outcome.value.validationLease, undefined);
+  assert.ok(harness.fenceCount > 0);
+});
+
 test("a startup catalog read cannot delay or supersede a newer local open", async (t) => {
   let resolveActive;
   let catalogRequested = false;

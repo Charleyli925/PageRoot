@@ -708,9 +708,11 @@ async function switchTo(index) {
       .filter((entry) => entry.startTime >= minimumStartTime)
       .find((entry) => entry.detail?.tabId === expectedTabId);
     const visible = matching("pageroot:tab-cache:visible-ready");
+    const scrollable = matching("pageroot:tab-cache:scrollable-ready");
     const completed = matching("pageroot:tab-cache:handoff-complete");
     return {
       visibleReadyMs: visible ? visible.startTime - minimumStartTime : null,
+      scrollableReadyMs: scrollable ? scrollable.startTime - minimumStartTime : null,
       handoffCompleteMs: completed ? completed.startTime - minimumStartTime : null,
     };
   }, { minimumStartTime: cacheTimelineStartedAt, expectedTabId: tabId });
@@ -724,6 +726,9 @@ async function switchTo(index) {
     cachedDisplayReadyMs: cacheHandoff.visibleReadyMs === null
       ? null
       : round(cacheHandoff.visibleReadyMs),
+    cachedScrollableReadyMs: cacheHandoff.scrollableReadyMs === null
+      ? null
+      : round(cacheHandoff.scrollableReadyMs),
     cacheHandoffCompleteMs: cacheHandoff.handoffCompleteMs === null
       ? null
       : round(cacheHandoff.handoffCompleteMs),
@@ -740,6 +745,9 @@ async function runSwitchBatch(label, indices) {
     ...summarize(elapsed),
     cachedDisplayReady: summarize(samples
       .map((sample) => sample.cachedDisplayReadyMs)
+      .filter((value) => value !== null)),
+    cachedScrollableReady: summarize(samples
+      .map((sample) => sample.cachedScrollableReadyMs)
       .filter((value) => value !== null)),
     cacheHandoffComplete: summarize(samples
       .map((sample) => sample.cacheHandoffCompleteMs)

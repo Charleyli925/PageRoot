@@ -35,6 +35,20 @@ export function markProjectApplied(operationId: unknown, epoch: unknown): void {
   });
 }
 
+export function markDocumentSurfacePrewarmed(
+  tabId: unknown,
+  sourceSha256: unknown,
+  hot: unknown,
+): void {
+  performance.mark("pageroot:tab-cache:prewarmed", {
+    detail: Object.freeze({
+      tabId: tabId ? String(tabId) : null,
+      sourceSha256: sourceSha256 ? String(sourceSha256) : null,
+      hot: hot === true,
+    }),
+  });
+}
+
 export function RendererStartupPerformance() {
   useEffect(() => {
     performance.mark("pageroot:renderer:shell-mounted");

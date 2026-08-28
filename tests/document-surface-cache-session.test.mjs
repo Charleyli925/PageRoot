@@ -84,6 +84,16 @@ test("surface cache keeps three hot mounted entries and byte-bounded warm LRU en
   assert.equal(presented.scrollTop, 420);
   assert.equal(presented.pageViewContext.panel, "details");
   assert.equal(Object.isFrozen(presented.pageViewContext), true);
+  const scrolled = session.updatePresentation("document:project_a:doc_a", {
+    scrollTop: 840,
+  });
+  assert.equal(scrolled.canvasMode, "preview");
+  assert.equal(scrolled.pageViewContext.panel, "details");
+  assert.equal(scrolled.scrollTop, 840);
+  const recaptured = capture(session, "a");
+  assert.equal(recaptured.canvasMode, "preview");
+  assert.equal(recaptured.pageViewContext.panel, "details");
+  assert.equal(recaptured.scrollTop, 840);
   assert.deepEqual(session.snapshot.warmTabIds, ["document:project_b:doc_b"]);
   assert.deepEqual(session.snapshot.coldTabIds, []);
   assert.deepEqual(session.snapshot.limits, {
@@ -91,6 +101,42 @@ test("surface cache keeps three hot mounted entries and byte-bounded warm LRU en
     maxEntries: 5,
     maxBytes: 10_000,
   });
+});
+
+test("surface cache admits trusted Registry projections without creating document authority", () => {
+  const session = new DocumentSurfaceCacheSession();
+  const tab = {
+    tabId: "document:project_a:doc_a",
+    kind: "document",
+    projectId: "project_a",
+    documentId: "doc_a",
+  };
+  session.reconcile([tab.tabId]);
+  const warm = session.captureProjection({
+    tab,
+    project: {
+      projectId: "project_a",
+      documentId: "doc_a",
+      sourcePath: "/tmp/a.html",
+      sha256: hash("a"),
+      html: "<main>prewarmed</main>",
+    },
+  });
+  assert.equal(warm.tier, "warm");
+  assert.equal(session.snapshot.hotTabIds.length, 0);
+  const hot = session.captureProjection({
+    tab,
+    hot: true,
+    project: {
+      projectId: "project_a",
+      documentId: "doc_a",
+      sourcePath: "/tmp/a.html",
+      sha256: hash("a"),
+      html: "<main>prewarmed</main>",
+    },
+  });
+  assert.equal(hot.tier, "hot");
+  assert.deepEqual(session.snapshot.hotTabIds, [tab.tabId]);
 });
 
 test("surface cache eviction makes old tabs cold without changing tab identity", () => {

@@ -27,8 +27,8 @@ the higher overlap-handoff churn remains separately visible in the benchmark.
 
 The cache now publishes three explicit projection tiers:
 
-- **Hot**: at most three recent exact projections may keep inert, script-disabled
-  display iframes mounted. Three is the hard live-surface budget, independent of
+- **Hot**: at most three recent exact projections may keep script-disabled,
+  scroll-only display iframes mounted. Three is the hard live-surface budget, independent of
   how small the HTML strings are.
 - **Warm**: Hot and Warm together retain at most twenty exact HTML projections;
   after the three Hot entries, up to seventeen remain as frozen in-memory bytes
@@ -42,19 +42,22 @@ Warm plus Hot source projections are bounded to 32 MiB. The snapshot exposes
 hot, warm and cold identities plus the effective limits so diagnostics and the
 packaged benchmark can prove the budget instead of inferring it from DOM count.
 
-When a cached tab is selected, its inert display surface remains above the new
+When a cached tab is selected, its scrollable display surface remains above the new
 authoritative Canvas until the exact Canvas generation and source Hash are
 verified. The real editor or Preview mounts underneath immediately; cached
 presentation never delays hydration, Canvas verification or input readiness.
-The handoff emits distinct `visible-ready` and `handoff-complete` timing marks.
+The handoff emits distinct `visible-ready`, `scrollable-ready`, first-scroll and
+`handoff-complete` timing marks.
 
 ## Authority constraints
 
 - Cache bytes never enter DocumentSession, Source, save, export or Version
   authority.
-- Dirty, flushing, failed or Canvas-unverified documents remain inadmissible.
-- A cached surface stays sandboxed without scripts and cannot receive pointer
-  input.
+- Dirty, flushing, failed or Canvas-unverified active documents remain
+  inadmissible. A trusted read-only Registry projection may prewarm an inactive
+  tab but never grants edit or persistence authority.
+- A cached surface stays sandboxed without scripts, form submission, link
+  activation or editing. It accepts only native scrolling and text selection.
 - Every activation still uses WorkbenchNavigationWorkflow and ProjectWorkflow.
 - Eviction never closes, reorders or changes the active identity of a tab.
 
@@ -64,6 +67,6 @@ The handoff emits distinct `visible-ready` and `handoff-complete` timing marks.
 - the twenty-first retained document becomes Cold without losing its tab;
 - 20-open and 40-switch packaged runs remain within live, entry and byte limits;
 - a cached surface becomes visible before the authoritative Canvas handoff and
-  is retired only after exact Canvas verification;
+  accepts scroll input before it is retired after exact Canvas verification;
 - edit, preview, review, acceptance, close, restart and source integrity remain
   governed by their existing owners.

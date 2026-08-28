@@ -12,6 +12,7 @@ import {
   planProjectSwitchAfterDrain,
   planProjectSwitchEntry,
   planProjectSwitchFence,
+  planProjectSwitchValidationLease,
 } from "../app/application/project/switch-plan.js";
 
 test("project open plan rejects a closing window and classifies the remaining intents", () => {
@@ -51,6 +52,32 @@ test("project switch fence and after-drain plans reject unverified native edits"
     editRevision: 1,
     cutoffRevision: 1,
   }).kind, "ready");
+});
+
+test("project switch reuses only a clean exact Canvas validation lease", () => {
+  const exact = {
+    obligationsResolved: true,
+    persistState: "idle",
+    editRevision: 4,
+    lastPersistedRevision: 4,
+    sourcePath: "/tmp/a.html",
+    sourceSha256: "sha256:aaa",
+    canvasStatus: "verified",
+    renderedSha256: "sha256:aaa",
+  };
+  assert.equal(planProjectSwitchValidationLease(exact).action, "reuse-verified");
+  assert.equal(planProjectSwitchValidationLease({
+    ...exact,
+    obligationsResolved: false,
+  }).action, "full-check");
+  assert.equal(planProjectSwitchValidationLease({
+    ...exact,
+    hasPendingNativeEdit: true,
+  }).action, "full-check");
+  assert.equal(planProjectSwitchValidationLease({
+    ...exact,
+    renderedSha256: "sha256:bbb",
+  }).action, "full-check");
 });
 
 test("project switch after-canvas plan fail-closes canvas first and does not require a fence until canvas is ok", () => {
