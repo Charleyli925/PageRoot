@@ -1,7 +1,7 @@
 // A live iframe is materially more expensive than its source string. Keep only
-// the three most recent projections mounted, while retaining enough byte-bounded
+// the five most recent projections mounted, while retaining enough byte-bounded
 // source projections for a realistic 20-tab workbench to avoid a cold flash.
-const DEFAULT_MAX_HOT_ENTRIES = 3;
+const DEFAULT_MAX_HOT_ENTRIES = 5;
 const DEFAULT_MAX_WARM_ENTRIES = 20;
 const DEFAULT_MAX_BYTES = 32 * 1024 * 1024;
 const MAX_PRESENTATION_CONTEXT_CHARS = 64 * 1024;

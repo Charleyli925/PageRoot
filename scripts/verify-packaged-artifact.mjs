@@ -192,6 +192,7 @@ export const REQUIRED_APP_SOURCE_FILES = [
   "desktop/preview-protocol.mjs",
   "desktop/imported-asset-root.mjs",
   "desktop/edit-runtime-bootstrap.mjs",
+  "desktop/edit-runtime-library-store.mjs",
   "desktop/edit-runtime-protocol.mjs",
   "desktop/edit-runtime-preparation-fence.mjs",
   "app/domain/edit-runtime-contract.js",
@@ -957,6 +958,13 @@ export async function verifyAppBundle({
       path.join(productRoot, fileName),
       path.join(resourcesPath, fileName),
       fileName,
+    );
+  }
+  for (const fileName of ["echarts.min.js", "LICENSE", "NOTICE"]) {
+    await assertFilesEqual(
+      path.join(productRoot, "node_modules", "echarts", fileName === "echarts.min.js" ? "dist/echarts.min.js" : fileName),
+      path.join(resourcesPath, "edit-runtime-libraries", "echarts", "5.5.0", fileName),
+      `bundled ECharts 5.5.0 ${fileName}`,
     );
   }
 

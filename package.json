@@ -85,6 +85,7 @@
     "@noble/hashes": "2.2.0",
     "@openai/codex": "0.149.1",
     "@phosphor-icons/react": "2.1.10",
+    "echarts": "5.5.0",
     "electron-updater": "6.8.9",
     "entities": "8.0.0",
     "next": "16.3.0",
@@ -194,6 +195,7 @@
       "desktop/preview-protocol.mjs",
       "desktop/imported-asset-root.mjs",
       "desktop/edit-runtime-bootstrap.mjs",
+      "desktop/edit-runtime-library-store.mjs",
       "desktop/edit-runtime-protocol.mjs",
       "desktop/edit-runtime-preparation-fence.mjs",
       "app/domain/edit-runtime-contract.js",
@@ -204,6 +206,18 @@
     ],
     "npmRebuild": false,
     "extraResources": [
+      {
+        "from": "node_modules/echarts/dist/echarts.min.js",
+        "to": "edit-runtime-libraries/echarts/5.5.0/echarts.min.js"
+      },
+      {
+        "from": "node_modules/echarts/LICENSE",
+        "to": "edit-runtime-libraries/echarts/5.5.0/LICENSE"
+      },
+      {
+        "from": "node_modules/echarts/NOTICE",
+        "to": "edit-runtime-libraries/echarts/5.5.0/NOTICE"
+      },
       {
         "from": "bridge/workspace-bridge.mjs",
         "to": "bridge/workspace-bridge.mjs"

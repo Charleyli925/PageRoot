@@ -53,8 +53,13 @@ test("dependency audit policy rejects new and expired advisories", () => {
   assert.deepEqual(result.expired.map((item) => item.source), ["1"]);
 });
 
-test("resolved production advisories leave no active exception", () => {
-  assert.deepEqual(acceptedAdvisories, {});
+test("the ECharts 5.5.0 CDN pin has a dated XSS exception", () => {
+  assert.deepEqual(acceptedAdvisories, {
+    1122144: {
+      url: "https://github.com/advisories/GHSA-fgmj-fm8m-jvvx",
+      expiresOn: "2026-11-28",
+    },
+  });
 });
 
 test("Dependabot keeps coupled React updates together and defers automatic majors", () => {

@@ -1,0 +1,10 @@
+.pool,
+.entry {
+  display: block;
+  min-width: 0;
+  width: 100%;
+}
+
+.entry[hidden] {
+  display: none;
+}

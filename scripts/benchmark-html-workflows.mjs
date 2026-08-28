@@ -632,6 +632,7 @@ async function requestLocalHtmlOpen(page) {
 async function cacheState() {
   return launched.page.evaluate(() => {
     const root = document.querySelector('[data-testid="workbench-document-surface-cache"]');
+    const runtimePool = document.querySelector('[data-testid="workbench-document-canvas-pool"]');
     const numberAttribute = (name) => Number(root?.getAttribute(name) || 0);
     return {
       surfaceCount: root?.querySelectorAll("[data-tab-id]").length || 0,
@@ -648,6 +649,11 @@ async function cacheState() {
         maxHotEntries: numberAttribute("data-max-hot-entries"),
         maxEntries: numberAttribute("data-max-cache-entries"),
         maxBytes: numberAttribute("data-max-cache-bytes"),
+      },
+      runtimeHot: {
+        count: Number(runtimePool?.getAttribute("data-runtime-hot-count") || 0),
+        limit: Number(runtimePool?.getAttribute("data-runtime-hot-limit") || 0),
+        iframeCount: runtimePool?.querySelectorAll("iframe").length || 0,
       },
     };
   });
@@ -668,6 +674,15 @@ function assertCacheBudget(snapshot, label) {
   assert(
     snapshot.cachedBytes <= snapshot.limits.maxBytes,
     `${label}: retained projections exceeded the byte budget`,
+  );
+  assert(
+    snapshot.runtimeHot.count <= snapshot.runtimeHot.limit,
+    `${label}: retained runtime canvases exceeded the resource budget`,
+  );
+  assert.equal(
+    snapshot.runtimeHot.iframeCount,
+    snapshot.runtimeHot.count,
+    `${label}: retained runtime iframe count drifted`,
   );
 }
 
@@ -710,10 +725,12 @@ async function switchTo(index) {
     const visible = matching("pageroot:tab-cache:visible-ready");
     const scrollable = matching("pageroot:tab-cache:scrollable-ready");
     const completed = matching("pageroot:tab-cache:handoff-complete");
+    const runtimeHot = matching("pageroot:runtime-hot:visible-ready");
     return {
       visibleReadyMs: visible ? visible.startTime - minimumStartTime : null,
       scrollableReadyMs: scrollable ? scrollable.startTime - minimumStartTime : null,
       handoffCompleteMs: completed ? completed.startTime - minimumStartTime : null,
+      runtimeHotReadyMs: runtimeHot ? runtimeHot.startTime - minimumStartTime : null,
     };
   }, { minimumStartTime: cacheTimelineStartedAt, expectedTabId: tabId });
   return {
@@ -732,6 +749,9 @@ async function switchTo(index) {
     cacheHandoffCompleteMs: cacheHandoff.handoffCompleteMs === null
       ? null
       : round(cacheHandoff.handoffCompleteMs),
+    runtimeHotReadyMs: cacheHandoff.runtimeHotReadyMs === null
+      ? null
+      : round(cacheHandoff.runtimeHotReadyMs),
     iframeAdds: afterAdds - beforeAdds,
     iframeRemoves: afterRemoves - beforeRemoves,
   };
@@ -751,6 +771,9 @@ async function runSwitchBatch(label, indices) {
       .filter((value) => value !== null)),
     cacheHandoffComplete: summarize(samples
       .map((sample) => sample.cacheHandoffCompleteMs)
+      .filter((value) => value !== null)),
+    runtimeHotReady: summarize(samples
+      .map((sample) => sample.runtimeHotReadyMs)
       .filter((value) => value !== null)),
     iframeAdds: samples.reduce((sum, sample) => sum + sample.iframeAdds, 0),
     iframeRemoves: samples.reduce((sum, sample) => sum + sample.iframeRemoves, 0),

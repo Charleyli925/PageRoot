@@ -17,16 +17,15 @@ export const EDIT_AUTHOR_RUNTIME_BUDGET = Object.freeze({
   declaredAssetBytes: 2 * 1024 * 1024,
   hostCount: 32,
   sourceNodeCount: 4_096,
-  runtimeSettleMs: 1_200,
+  runtimeQuietFrames: 2,
   runtimeDeadlineMs: 4_000,
   orphanSessionTtlMs: 60_000,
 });
 
 // Main first bounds immutable resource preparation. The visible Edit iframe
-// then has one bounded deadline to execute, settle and freeze. The Workbench
-// may acknowledge an Edit canvas only after both serial phases have had their
-// one permitted deadline, plus one bounded scheduling/acknowledgement margin.
-// This is not a retry budget and is not a capture budget.
+// freezes as soon as its approved visual hosts report a real paint followed by
+// quiet animation frames. runtimeDeadlineMs is only a fail-safe for hostile or
+// broken author code; it is never a minimum wait and never hides static HTML.
 export const EDIT_AUTHOR_RUNTIME_VERIFICATION_DEADLINE_MS = (
   EDIT_AUTHOR_RUNTIME_BUDGET.runtimeDeadlineMs * 2
 ) + 1_000;

@@ -285,6 +285,7 @@ export class WorkspaceController {
   #externalOpenUnsubscribe = null;
   #navigationHostPort = null;
   #documentProjectionPort = null;
+  #runtimeProjectionPrewarmPort = null;
   #surfaceFramePort = null;
   #surfacePrewarmScheduler = null;
   #surfacePrewarmTimer = null;
@@ -454,6 +455,7 @@ export class WorkspaceController {
     this.#navigationHostPort = ports.navigation || null;
     this.#documentProjectionPort = projectWorkflow?.ports?.projectOpen
       ?.readRegisteredProjection || null;
+    this.#runtimeProjectionPrewarmPort = ports.editRuntime?.prewarmRegistered || null;
     this.#surfaceFramePort = projectWorkflow?.ports?.canvas?.requestFrame || null;
     this.#surfacePrewarmScheduler = projectWorkflow?.scheduler || {
       setTimeout: (callback, delayMs) => globalThis.setTimeout(callback, delayMs),
@@ -1057,6 +1059,7 @@ export class WorkspaceController {
     this.#workbenchTabsPersistenceCoordinator = null;
     this.#documentSurfaceCacheSession?.dispose();
     this.#documentSurfaceCacheSession = null;
+    this.#runtimeProjectionPrewarmPort = null;
     this.#browserDocumentSession?.dispose();
     this.#browserDocumentSession = null;
     this.#externalOpenUnsubscribe?.();
@@ -1113,6 +1116,10 @@ export class WorkspaceController {
 
   startEditAuthorRuntimePreparation(input) {
     return this.#editRuntimeSession?.startPreparation(input) || false;
+  }
+
+  reusePreparedEditAuthorRuntime(input) {
+    return this.#editRuntimeSession?.reusePrepared(input) || false;
   }
 
   beginEditAuthorRuntime(input) {
@@ -1374,6 +1381,13 @@ export class WorkspaceController {
         sourceSha256: admitted.sourceSha256,
         hot: admitted.tier === "hot",
       });
+      if (
+        typeof this.#runtimeProjectionPrewarmPort === "function"
+        && /\becharts\b/iu.test(admitted.html)
+      ) {
+        await Promise.resolve(this.#runtimeProjectionPrewarmPort(tab.projectId))
+          .catch(() => null);
+      }
     }
     return admitted;
   }

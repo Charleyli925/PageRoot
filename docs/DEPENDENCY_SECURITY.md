@@ -8,9 +8,13 @@ Dependabot checks monthly. Coupled React packages are updated together, and mino
 
 ## Temporary reviewed exceptions
 
-There are no active exceptions. Each future exception needs its own mandatory
-review date and must be removed in the same Pull Request that introduces a
-verified compatible fix.
+`echarts` 5.5.0 remains pinned because PageRoot resolves exact cdnjs/jsDelivr/unpkg
+5.5.0 minified URLs to packaged bytes. GHSA-fgmj-fm8m-jvvx (CVE-2026-45249) is a
+Lines-series tooltip XSS fixed only in 6.1.0, a major bump that would miss those
+URLs. The minified file loads only inside the one-shot author iframe, which
+already executes untrusted author scripts under ADR 0025. Review by 2026-11-28;
+do not treat this exception as permission to widen packaged runtime or renderer
+reachability.
 
 ## Reviewed fixes
 

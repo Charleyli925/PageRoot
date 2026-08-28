@@ -195,6 +195,8 @@ import { deriveWorkbenchInspector } from "./workbench/inspector-presentation.js"
 import { RunConversationOutlet } from "./workbench/run-conversation-outlet";
 import { WorkbenchReviewOverlay } from "./workbench/workbench-review-overlay";
 import WorkbenchDocumentSurfaceCache from "./workbench/WorkbenchDocumentSurfaceCache";
+import WorkbenchDocumentCanvasPool from "./workbench/WorkbenchDocumentCanvasPool";
+import { useRuntimeCanvasResidency } from "./workbench/use-runtime-canvas-residency";
 import ReviewAnalysisPrewarm, {
   prepareReviewAnalysis,
   preparedReviewByteSize,
@@ -712,7 +714,6 @@ export default function Workbench() {
     pendingCommentCount: comments.length,
     /*
      * The same submission the header button performs. One owner, two surfaces.
-     *
      * Reached through a ref because generateRequest is declared far below this call.
      * Naming it directly here left React Compiler with a call to a function it had not
      * yet analysed, so it had to assume that call could mutate anything — and that
@@ -723,44 +724,21 @@ export default function Workbench() {
     onOpenAgentSettings: openAgentSettings,
   });
   const revealAiConversation = aiConversation.reveal;
-  // The run-event effect reports a submitted round by opening the thread. It is
-  // reached through a ref so that effect keeps its curated dependency list.
   const editRuntimeSnapshot = workspaceControllerSnapshot?.editRuntime ?? null;
-  const editRuntimePhase = editRuntimeSnapshot?.phase || "static";
-  const editRuntimePreparing = (
-    canvasMode === "edit"
-    && editRuntimeSnapshot?.phase === "preparing"
-  );
-  const editRuntimeRenderPending = (
-    canvasMode === "edit"
-    && ["preparing", "ready", "running"].includes(editRuntimePhase)
-  );
-  const editRuntimeGrant = (
-    canvasMode === "edit"
-    && ["ready", "running", "settled"].includes(editRuntimeSnapshot?.phase || "")
-  ) ? editRuntimeSnapshot?.grant ?? null : null;
-  useLayoutEffect(() => {
-    const sourceSha256 = editRuntimeSnapshot?.sourceSha256;
-    const runtimeCanvasGeneration = editRuntimeSnapshot?.canvasGeneration;
-    if (
-      !editRuntimePreparing
-      || !sourceSha256
-      || typeof runtimeCanvasGeneration !== "number"
-      || !Number.isSafeInteger(runtimeCanvasGeneration)
-    ) return;
-    // This runs after the preparing snapshot has committed the loading surface
-    // and retired any static editor. The Session alone still owns the one
-    // attempt; Workbench only acknowledges that it is safe to start it.
-    workspaceControllerRef.current?.startEditAuthorRuntimePreparation({
-      sourceSha256,
-      canvasGeneration: runtimeCanvasGeneration,
-    });
-  }, [
-    editRuntimePreparing,
-    editRuntimeSnapshot?.canvasGeneration,
-    editRuntimeSnapshot?.sourcePath,
-    editRuntimeSnapshot?.sourceSha256,
-  ]);
+  const runtimeCanvasResidency = useRuntimeCanvasResidency({
+    tabIds: workbenchTabsSnapshot.tabs.map((tab) => tab.tabId),
+    activeTabId: workbenchTabsSnapshot.activeTabId, activeSourceSha256: sourceSha256,
+    activeCanvasGeneration: canvasGeneration, canvasMode, editRuntimeSnapshot,
+    startPreparation: (input) => workspaceControllerRef.current?.startEditAuthorRuntimePreparation(input),
+    reusePreparation: (input) => workspaceControllerRef.current?.reusePreparedEditAuthorRuntime(input),
+  });
+  const {
+    keys: retainedCanvasKeys, retain: retainRuntimeCanvas, evict: evictRuntimeCanvas,
+    activeRetained: retainedRuntimeForActiveDocument,
+    runtimePhase: editRuntimePhase,
+    runtimePreparing: editRuntimePreparing, runtimeRenderPending: editRuntimeRenderPending,
+    runtimeGrant: editRuntimeGrant,
+  } = runtimeCanvasResidency;
   const [pageViewContext, setPageViewContext] =
     useState<PageViewContext | null>(null);
   const [interactivePreviewTransport, setInteractivePreviewTransport] =
@@ -860,6 +838,10 @@ export default function Workbench() {
         ...(editRuntimeApi ? {
           editRuntime: {
             prepare: (request) => editRuntimeApi.prepare(request),
+            prewarmRegistered: (registeredProjectId) => (
+              editRuntimeApi.prewarmRegistered?.(registeredProjectId)
+              ?? Promise.resolve(null)
+            ),
             revoke: (sessionId) => editRuntimeApi.revoke(sessionId),
           },
         } : {}),
@@ -1247,17 +1229,25 @@ export default function Workbench() {
     if (generation !== currentDocumentSessionSnapshot().canvasGeneration) return false;
     if (surface === "edit") {
       if (!sha256) return false;
-      return workspaceControllerRef.current?.acknowledgeEditCanvas({
+      const acknowledged = workspaceControllerRef.current?.acknowledgeEditCanvas({
         generation,
         renderedSha256: sha256,
       }) === true;
+      if (acknowledged) {
+        const snapshot = currentControllerSnapshot();
+        const activeTab = snapshot?.workbenchTabs?.tabs.find((tab) => (
+          tab.kind === "document" && tab.tabId === snapshot.workbenchTabs?.activeTabId
+        ));
+        if (activeTab) retainRuntimeCanvas(activeTab.tabId, sha256, generation);
+      }
+      return acknowledged;
     }
     setCanvasRenderAcks((current) => ({
       ...current,
       preview: sha256 ? { generation, sha256 } : null,
     }));
     return true;
-  }, [currentDocumentSessionSnapshot]);
+  }, [currentControllerSnapshot, currentDocumentSessionSnapshot, retainRuntimeCanvas]);
   const renderedContentSha256 =
     canvasRenderAcks.edit?.generation === canvasGeneration
       ? canvasRenderAcks.edit.sha256
@@ -6195,6 +6185,8 @@ export default function Workbench() {
     && typeof window !== "undefined"
     && Boolean(window.htmlAIProjects);
   const { visibleCachedSurface, retainPresentedTab, completeHandoff, updateVisibleScroll, markFirstScroll } = useDocumentSurfaceHandoff({ cache: documentSurfaceCacheSnapshot, tabs: workbenchTabsSnapshot, sourceSha256, renderedSourceSha256: canvasMode === "preview" && canvasRenderAcks.preview?.generation === canvasGeneration ? canvasRenderAcks.preview.sha256 : renderedContentSha256, canvasAuthority, canvasGeneration, controller: workspaceController });
+  const activeRuntimeCanvasUsable = retainedRuntimeForActiveDocument;
+  const effectiveVisibleCachedSurface = canvasMode === "edit" && activeRuntimeCanvasUsable ? null : visibleCachedSurface;
   const retryProjectHydrationFromCommentRail = useCallback(() => {
     void workspaceController?.retryProjectHydration();
   }, [workspaceController]);
@@ -6632,7 +6624,7 @@ export default function Workbench() {
         }}
       /> : null}
       <WorkbenchDocumentSurfaceCache
-        snapshot={documentSurfaceCacheSnapshot} visibleTabId={visibleCachedSurface?.tabId || null}
+        snapshot={documentSurfaceCacheSnapshot} visibleTabId={effectiveVisibleCachedSurface?.tabId || null}
         onVisibleReady={retainPresentedTab} onHandoffComplete={completeHandoff}
         onVisibleScroll={updateVisibleScroll}
         onFirstScroll={markFirstScroll}
@@ -6668,21 +6660,31 @@ export default function Workbench() {
           <div
             className="canvas-edit-surface"
             hidden={canvasMode !== "edit"}
-            aria-hidden={canvasMode !== "edit" || Boolean(visibleCachedSurface)}
-            inert={visibleCachedSurface ? true : undefined}
+            aria-hidden={canvasMode !== "edit" || Boolean(effectiveVisibleCachedSurface)}
+            inert={effectiveVisibleCachedSurface ? true : undefined}
           >
             {!runtimeCapabilitiesReady ? (
               <div className="canvas-loading" role="status">正在识别运行环境…</div>
             ) : !browserPreviewOnly ? (
-              editRuntimePreparing ? (
+              <>
+              {editRuntimePreparing && !activeRuntimeCanvasUsable ? (
                 <HtmlDisplaySurface
                   html={html}
                   sourcePath={canvasSourcePath}
                   height="var(--comment-canvas-height, 760px)"
                 />
-              ) : (
-                <HtmlCanvasEditor
-                  key={`editor-authority-${canvasGeneration}`}
+              ) : null}
+              <WorkbenchDocumentCanvasPool
+                  activeTabId={activeWorkbenchTab.kind === "document"
+                    ? activeWorkbenchTab.tabId
+                    : null}
+                  activeSourceSha256={sourceSha256} activeCanvasGeneration={canvasGeneration}
+                  retainedTabIds={retainedCanvasKeys.map((entry) => entry.tabId)}
+                  onEvict={evictRuntimeCanvas}
+                  activeElement={editRuntimePreparing && !activeRuntimeCanvasUsable
+                    ? null
+                    : <HtmlCanvasEditor
+                  key={`editor-authority-${activeWorkbenchTab.tabId}-${canvasGeneration}`}
                   ref={editorRef}
                   html={html}
                   sourcePath={canvasSourcePath}
@@ -6709,6 +6711,7 @@ export default function Workbench() {
                       canvasGeneration: grant.canvasGeneration,
                       outcome,
                     });
+                    if (outcome === "ready" && activeWorkbenchTab.kind === "document") retainRuntimeCanvas(activeWorkbenchTab.tabId, grant.sourceSha256, grant.canvasGeneration);
                   }}
                   onCommentLayout={commentCanvasPort.publishLayout}
                   onSelect={handleCanvasSelection}
@@ -6735,7 +6738,7 @@ export default function Workbench() {
                   pageViewContext={activePageViewContext}
                   pageViewDocumentKey={pageViewDocumentKey}
                   onPageViewContextChange={acceptPageViewContext}
-                  initialScrollTop={visibleCachedSurface?.scrollTop}
+                  initialScrollTop={effectiveVisibleCachedSurface?.scrollTop}
                   locked={
                     runInProgress
                     || projectHydrating
@@ -6751,8 +6754,9 @@ export default function Workbench() {
                       : "editing"}
                   enableReorder={!interactionLocked}
                   pointerCapabilityHoverEnabled={!isBuiltInWelcomePage}
+                />}
                 />
-              )
+              </>
             ) : null}
           </div>
           {canvasMode === "preview" ? (

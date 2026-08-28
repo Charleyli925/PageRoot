@@ -433,8 +433,10 @@ static Edit and the one-shot ECharts path. The renderer neither supplies nor
 learns that original path; the Working Copy remains source authority. The
 binding survives continue-current, restart, working-copy switches and optional
 original-HTML trash while sibling files remain in that directory.
-The final frame executes once, waits the fixed settle interval, then stops
-tracked runtime activity and audits source-node identity/text/attributes plus
+The final frame executes once, disables its disposable initial ECharts
+animation, then freezes after real paint and two quiet frames; the deadline is
+only a broken-script fallback. It stops tracked runtime activity and audits
+source-node identity/text/attributes plus
 host containment before installing Canvas interaction. An approved empty host
 may add only absent ECharts layout declarations (`position: relative`,
 `user-select: none`, transparent `-webkit-tap-highlight-color`, or a positive
@@ -443,9 +445,11 @@ its authored declarations and every other
 attribute remain exact. Runtime descendants are
 display-only and map to their approved source host. They never become a
 `SourcePatch`, Source HTML, save, Version, export, Request or AI input. Any
-prepare, load, audit or deadline failure selects the ordinary static frame;
-there is no Edit cache, bitmap/Blob projection, hidden probe, background
-promotion or post-interaction iframe replacement.
+prepare, load, audit or deadline failure selects the ordinary static frame.
+Workbench may retain five already verified iframe documents and prewarm exact
+immutable script bytes for registered tabs. Those caches are inert presentation
+or resource facts only: there is no bitmap/Blob projection, hidden execution
+probe, source promotion or post-interaction iframe replacement.
 
 Review has no runtime-snapshot owner or PNG evidence path. It compares only the
 frozen before/after HTML and emits bounded text facts plus outermost

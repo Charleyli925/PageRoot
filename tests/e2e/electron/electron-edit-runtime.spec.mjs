@@ -773,6 +773,63 @@ test("Electron Edit preserves imported source-relative ECharts assets and native
   }
 });
 
+test("Electron Edit renders CDN ECharts from the bundled 5.5.0 library without a fixed settle", {
+  tag: ["@gate-smoke", "@smoke-editing"],
+}, async () => {
+  const sourceDirectory = mkdtempSync(
+    path.join(tmpdir(), "pageroot-bundled-echarts-runtime-e2e-"),
+  );
+  const sourcePath = path.join(sourceDirectory, "bundled-echarts-report.html");
+  const source = `<!doctype html>
+<html><head><meta charset="utf-8"><title>Bundled ECharts</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/echarts/5.5.0/echarts.min.js"></script>
+</head><body>
+<main id="chart-host" style="width:640px;height:360px"></main>
+<p data-native-case="bundled-echarts-copy">内置图表库旁的正文。</p>
+<script>
+window.__PAGEROOT_BUNDLED_ECHARTS_EXECUTIONS__ =
+  (window.__PAGEROOT_BUNDLED_ECHARTS_EXECUTIONS__ || 0) + 1;
+const chart = echarts.init(document.getElementById("chart-host"));
+chart.setOption({
+  xAxis:{type:"category",data:["A","B","C"]},
+  yAxis:{type:"value"},
+  series:[{type:"bar",data:[3,7,5]}]
+});
+</script></body></html>`;
+  writeFileSync(sourcePath, source, "utf8");
+  let electronApp = null;
+  let isolatedUserData = null;
+  try {
+    const launched = await launchPageRoot({ activeSourcePath: sourcePath });
+    electronApp = launched.electronApp;
+    isolatedUserData = launched.isolatedUserData;
+    const { frame } = await loadedDiskFrame(
+      launched.page,
+      sourcePath,
+      "bundled-echarts-copy",
+    );
+    await expect(frame.locator("#chart-host canvas")).toHaveCount(1);
+    expect(await frame.evaluate(() => (
+      window.__PAGEROOT_BUNDLED_ECHARTS_EXECUTIONS__
+    ))).toBe(1);
+    await expect(launched.page.getByTestId("html-canvas-editor").filter({ visible: true }))
+      .toHaveAttribute("data-runtime-library-origins", /bundled/u);
+    expect(await launched.page.evaluate(() => (
+      performance.getEntriesByName("pageroot:canvas:render-verified", "mark")
+        .at(-1)?.detail?.content
+    ))).toBe("runtime-complete");
+    expect(sha256(readFileSync(sourcePath, "utf8"))).toBe(sha256(source));
+  } finally {
+    if (electronApp && isolatedUserData) {
+      await stopPageRoot(electronApp, isolatedUserData);
+    }
+    removeValidatedTemporaryDirectory(
+      sourceDirectory,
+      "pageroot-bundled-echarts-runtime-e2e-",
+    );
+  }
+});
+
 test("Electron Edit completes bounded Canvas and empty-SVG author paint without source leakage", {
   tag: ["@gate-smoke", "@smoke-editing"],
 }, async () => {

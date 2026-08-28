@@ -5380,7 +5380,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       style={containerStyle}
       data-testid="html-canvas-editor"
       data-locked={interactionLocked ? "true" : undefined}
-      data-interaction-mode={renderedMode}
+      data-interaction-mode={renderedMode} data-runtime-library-origins={editRuntimeGrant?.libraryOrigins?.join(",") || undefined}
       aria-readonly={readOnly || interactionLocked}
     >
       <iframe
