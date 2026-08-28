@@ -345,6 +345,24 @@ test("the review projection annotates a dense report cleanly and accurately", as
       path: path.join(captureDirectory, "review-annotation-all.png"),
       animations: "disabled",
     });
+    if (process.env.PAGEROOT_CAPTURE_TOOLBAR_CLEANUP) {
+      const visibleToast = launched.page.locator(".toast.show");
+      await visibleToast.waitFor({ state: "visible", timeout: 2_000 }).catch(() => {});
+      if (await visibleToast.isVisible().catch(() => false)) {
+        await visibleToast.getByRole("button", { name: "关闭提醒" }).click();
+        await expect(visibleToast).toBeHidden();
+      }
+      const toolbarCaptureDirectory = path.resolve(
+        productRoot,
+        process.env.PAGEROOT_CAPTURE_TOOLBAR_CLEANUP_DIR
+          || path.join("output", "design-qa", "toolbar-cleanup"),
+      );
+      mkdirSync(toolbarCaptureDirectory, { recursive: true });
+      await launched.page.screenshot({
+        path: path.join(toolbarCaptureDirectory, "05-review-toolbar.png"),
+        animations: "disabled",
+      });
+    }
 
     const projections = {
       before: await readProjection(beforeFrame),

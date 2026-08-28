@@ -648,11 +648,16 @@ test("Electron shell keeps the global rail fixed while the context inspector swa
     expect(Math.abs(editGeometry.comments.width - editGeometry.inspectorWidth))
       .toBeLessThanOrEqual(0.5);
     if (process.env.PAGEROOT_CAPTURE_TOOLBAR_CLEANUP) {
-      const captureDirectory = path.join(
+      const visibleToast = launched.page.locator(".toast.show");
+      await visibleToast.waitFor({ state: "visible", timeout: 2_000 }).catch(() => {});
+      if (await visibleToast.isVisible().catch(() => false)) {
+        await visibleToast.getByRole("button", { name: "关闭提醒" }).click();
+        await expect(visibleToast).toBeHidden();
+      }
+      const captureDirectory = path.resolve(
         process.cwd(),
-        "output",
-        "design-qa",
-        "toolbar-cleanup",
+        process.env.PAGEROOT_CAPTURE_TOOLBAR_CLEANUP_DIR
+          || path.join("output", "design-qa", "toolbar-cleanup"),
       );
       mkdirSync(captureDirectory, { recursive: true });
       await launched.page.screenshot({

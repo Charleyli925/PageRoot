@@ -1072,6 +1072,11 @@
   border-radius: 12px;
 }
 
+.qoder-card-brand[data-fallback="true"] {
+  color: #5a55c9;
+  background: #f0efff;
+}
+
 .qoder-card-copy {
   min-width: 0;
 }
