@@ -55,6 +55,8 @@ type HtmlInteractionPreviewProps = {
   onInteraction?: () => void;
   onReady?: (sourceSha256: string | null) => void;
   presentationCovered?: boolean;
+  initialScrollTop?: number;
+  onScrollTopChange?: (scrollTop: number) => void;
 };
 
 type DesktopPreviewSession = {
@@ -86,6 +88,8 @@ const CAPTURE_REQUEST_TYPE = "pageroot-page-view-context-request";
 const CAPTURE_RESPONSE_TYPE = "pageroot-page-view-context-response";
 const COMMENT_MEASURE_REQUEST_TYPE = "pageroot-preview-comment-measure-request";
 const COMMENT_LAYOUT_RESPONSE_TYPE = "pageroot-preview-comment-layout";
+const SCROLL_REQUEST_TYPE = "pageroot-preview-scroll-request";
+const SCROLL_EVENT_TYPE = "pageroot-preview-scroll";
 const CAPTURE_TIMEOUT_MS = 1_200;
 const MAX_CAPTURED_ELEMENTS = 512;
 const INDEPENDENT_PREVIEW_SANDBOX =
@@ -110,6 +114,8 @@ function previewBootstrapJavaScript({
     responseType: CAPTURE_RESPONSE_TYPE,
     commentRequestType: COMMENT_MEASURE_REQUEST_TYPE,
     commentLayoutType: COMMENT_LAYOUT_RESPONSE_TYPE,
+    scrollRequestType: SCROLL_REQUEST_TYPE,
+    scrollEventType: SCROLL_EVENT_TYPE,
     maxElements: MAX_CAPTURED_ELEMENTS,
     maxCommentTargets: MAX_PREVIEW_COMMENT_GROUPS,
   }).replace(/</gu, "\\u003c");
@@ -205,6 +211,43 @@ function previewBootstrapJavaScript({
       snapshot: capture(),
     }, "*");
   });
+
+  window.addEventListener("message", (event) => {
+    const payload = event.data;
+    if (
+      event.source !== window.parent
+      || !payload
+      || payload.type !== config.scrollRequestType
+      || payload.channelToken !== config.channelToken
+    ) return;
+    window.scrollTo({
+      top: Math.max(0, Number(payload.scrollTop) || 0),
+      left: window.scrollX,
+      behavior: "auto",
+    });
+  });
+  let scrollFrame = 0;
+  let scrollTimer = 0;
+  let lastScrollPublishedAt = 0;
+  const publishScroll = () => {
+    scrollFrame = 0;
+    const elapsed = performance.now() - lastScrollPublishedAt;
+    if (elapsed < 100) {
+      window.clearTimeout(scrollTimer);
+      scrollTimer = window.setTimeout(publishScroll, 100 - elapsed);
+      return;
+    }
+    lastScrollPublishedAt = performance.now();
+    window.parent.postMessage({
+      type: config.scrollEventType,
+      channelToken: config.channelToken,
+      scrollTop: Math.max(0, Number(window.scrollY) || 0),
+    }, "*");
+  };
+  window.addEventListener("scroll", () => {
+    if (scrollFrame) return;
+    scrollFrame = window.requestAnimationFrame(publishScroll);
+  }, { passive: true });
 
   // Read-only comment markers. The host resolves which source nodes carry a
   // comment and asks only for their positions; no comment text ever enters the
@@ -405,8 +448,14 @@ const HtmlInteractionPreview = forwardRef<
   onInteraction,
   onReady,
   presentationCovered = false,
+  initialScrollTop,
+  onScrollTopChange,
 }, forwardedRef) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
+  const onScrollTopChangeRef = useRef(onScrollTopChange);
+  useEffect(() => {
+    onScrollTopChangeRef.current = onScrollTopChange;
+  }, [onScrollTopChange]);
   const viewportRef = useRef<HTMLDivElement>(null);
   const sessionGenerationRef = useRef(0);
   const [reloadRevision, setReloadRevision] = useState(0);
@@ -589,6 +638,31 @@ const HtmlInteractionPreview = forwardRef<
     prepared.channelToken,
     reload,
   ]);
+
+  useEffect(() => {
+    if (!frameReady || !Number.isFinite(Number(initialScrollTop))) return;
+    iframeRef.current?.contentWindow?.postMessage({
+      type: SCROLL_REQUEST_TYPE,
+      channelToken: prepared.channelToken,
+      scrollTop: Math.max(0, Number(initialScrollTop)),
+    }, "*");
+  }, [frameReady, initialScrollTop, prepared.channelToken]);
+
+  useEffect(() => {
+    if (!frameReady) return undefined;
+    const frameWindow = iframeRef.current?.contentWindow;
+    const receiveScroll = (event: MessageEvent) => {
+      const payload = event.data;
+      if (
+        event.source !== frameWindow
+        || payload?.type !== SCROLL_EVENT_TYPE
+        || payload?.channelToken !== prepared.channelToken
+      ) return;
+      onScrollTopChangeRef.current?.(Math.max(0, Number(payload.scrollTop) || 0));
+    };
+    window.addEventListener("message", receiveScroll);
+    return () => window.removeEventListener("message", receiveScroll);
+  }, [frameReady, prepared.channelToken]);
 
   const frameSource = independentTransport
     ? desktopSession?.url

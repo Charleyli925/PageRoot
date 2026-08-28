@@ -17,11 +17,11 @@
   ],
   "files": {
     "app/workbench.tsx": {
-      "maxLines": 6923,
+      "maxLines": 6954,
       "maxHooks": 251
     },
     "app/components/HtmlCanvasEditor.tsx": {
-      "maxLines": 5405
+      "maxLines": 5416
     },
     "bridge/project-file-repository.mjs": {
       "maxLines": 5683

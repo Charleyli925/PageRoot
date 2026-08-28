@@ -36,6 +36,12 @@ export function registerProjectIpc({
     PROJECT_CHANNELS.listRegisteredProjects,
     trustedProject(handlers.listRegisteredProjects),
   );
+  if (PROJECT_CHANNELS.readRegisteredProjectProjection) {
+    ipcMain.handle(
+      PROJECT_CHANNELS.readRegisteredProjectProjection,
+      trustedProject(handlers.readRegisteredProjectProjection),
+    );
+  }
   ipcMain.handle(
     PROJECT_CHANNELS.openRegisteredProject,
     trustedProject(handlers.openRegisteredProject),

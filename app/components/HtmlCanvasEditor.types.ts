@@ -161,6 +161,10 @@ export type HtmlCanvasEditorHandle = {
   getSourceHtml: () => string;
   /** Exact source string whose sanitized representation has finished loading in the iframe. */
   getRenderedSourceHtml: () => string | null;
+  /** Current scroll coordinate inside the authored iframe viewport. */
+  getScrollTop: () => number;
+  /** Restores the authored iframe viewport without changing source. */
+  scrollToTop: (scrollTop: number) => boolean;
   /** Commits delivered native input while keeping the live editing session active. */
   checkpointPendingEdit: () => HtmlCanvasCommitResult;
   /** Retires the editable DOM, reloads canonical source, and optionally resumes editing. */
@@ -276,6 +280,8 @@ export type HtmlCanvasEditorProps = {
     context: PageViewContext | null,
     documentKey: string,
   ) => boolean;
+  /** Presentation-only viewport restored while a cached surface hands off. */
+  initialScrollTop?: number;
   /** Continuous pointer-capability hover; off on the built-in welcome page. */
   pointerCapabilityHoverEnabled?: boolean;
 };

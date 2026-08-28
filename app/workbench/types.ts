@@ -151,6 +151,7 @@ export type DesktopProjectsApi = {
   readHtml?: (sourcePath: string) => Promise<HtmlProject>;
   listRecentProjects: () => Promise<RecentProject[]>;
   listRegisteredProjects?: () => Promise<RegisteredProject[]>;
+  readRegisteredProjectProjection?: (projectId: string) => Promise<HtmlProject>;
   openRegisteredProject?: (projectId: string) => Promise<HtmlProject>;
   openRecent: (sourcePath: string) => Promise<HtmlOpenResult>;
   forgetRecent?: (sourcePath: string) => Promise<{ sourcePath: string }>;

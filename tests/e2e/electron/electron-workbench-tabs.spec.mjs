@@ -123,7 +123,18 @@ test("Electron browser A to B to A reopens exact in-memory HTML and deduplicates
   test.setTimeout(180_000);
   const projectA = createSourceFixture(
     "browser-memory-a.html",
-    (source) => source.replace(ORIGINAL_LIST_TEXT, "Browser memory A"),
+    (source) => source
+      .replace(ORIGINAL_LIST_TEXT, "Browser memory A")
+      .replace("</body>", `
+        <div style="height: 2400px" data-testid="scroll-depth">scroll depth</div>
+        <a id="cache-disabled-link" href="https://example.com/should-not-open">disabled link</a>
+        <canvas id="cache-scroll-chart" width="320" height="120"></canvas>
+        <script>
+          setTimeout(() => {
+            document.getElementById("cache-scroll-chart").getContext("2d").fillRect(0, 0, 80, 40);
+          }, 600);
+        </script>
+      </body>`),
   );
   const projectB = createSourceFixture(
     "browser-memory-b.html",
@@ -158,11 +169,35 @@ test("Electron browser A to B to A reopens exact in-memory HTML and deduplicates
     const cachedA = tabs.filter({ hasText: "browser-memory-a" });
     const cachedATabId = String(await cachedA.getAttribute("id"))
       .replace(/^workbench-tab-/u, "");
+    const cachedAFrame = launched.page.getByTestId("workbench-document-surface-cache")
+      .locator(`[data-tab-id="${cachedATabId}"] iframe`);
+    const cachedAHandle = await cachedAFrame.elementHandle();
+    const cachedADocument = await cachedAHandle.contentFrame();
+    expect(cachedADocument).not.toBeNull();
+    await expect(cachedAFrame).toHaveCSS("pointer-events", "auto");
+    await expect(cachedAFrame.locator("xpath=..")).toHaveCSS("pointer-events", "auto");
+    await expect(cachedADocument.locator("script").last())
+      .toHaveAttribute("type", "application/x-html-canvas-disabled");
+    await expect(cachedADocument.locator("#cache-disabled-link"))
+      .toHaveCSS("pointer-events", "none");
     await launched.page.evaluate(() => {
       performance.clearMarks("pageroot:tab-cache:visible-ready");
       performance.clearMarks("pageroot:tab-cache:handoff-complete");
     });
     await cachedA.click();
+    const visibleCacheFrame = launched.page.getByTestId("workbench-document-surface-cache")
+      .locator(`[data-tab-id="${cachedATabId}"]:not([hidden]) iframe`);
+    await expect(visibleCacheFrame).toBeVisible({ timeout: 5_000 });
+    const visibleScrollFacts = await cachedADocument.evaluate(() => ({
+      scrollTop: (() => {
+        window.scrollTo({ top: 720, behavior: "auto" });
+        return window.scrollY;
+      })(),
+      scrollHeight: document.scrollingElement?.scrollHeight || 0,
+      clientHeight: document.scrollingElement?.clientHeight || 0,
+    }));
+    expect(visibleScrollFacts.scrollHeight).toBeGreaterThan(visibleScrollFacts.clientHeight);
+    expect(visibleScrollFacts.scrollTop).toBeGreaterThan(0);
     frame = await waitForBrowserText("Browser memory A");
     await expect(frame.locator(caseSelector("list-item"))).toHaveText("Browser memory A");
     await expect(tabs).toHaveCount(afterA + 1);
@@ -228,7 +263,8 @@ test("Electron restores multiple Registry tabs, the persisted active document, a
       .locator("[data-tab-id]");
     await expect(cachedSurfaces).toHaveCount(2, { timeout: 30_000 });
     await expect(cachedSurfaces.locator("iframe")).toHaveCount(2);
-    await expect(cachedSurfaces.locator("iframe").first()).toHaveAttribute("sandbox", "");
+    await expect(cachedSurfaces.locator("iframe").first())
+      .toHaveAttribute("sandbox", "allow-same-origin");
     const tabsStatePath = path.join(first.isolatedUserData, "workbench-tabs.json");
     await expect.poll(() => {
       try {
@@ -252,6 +288,29 @@ test("Electron restores multiple Registry tabs, the persisted active document, a
     await expect(restoredTabs.filter({ hasText: "registry-restart-a" })).toHaveCount(1);
     await expect(restoredTabs.filter({ hasText: "registry-restart-b" })).toHaveCount(1);
     await expect(restoredTabs.filter({ hasText: "registry-restart-b" })).toHaveAttribute("aria-selected", "true");
+    const restoredCache = restored.page.getByTestId("workbench-document-surface-cache");
+    await expect(restoredCache.locator("[data-tab-id]")).toHaveCount(1, { timeout: 30_000 });
+    await expect(restoredCache).toHaveAttribute("data-warm-count", "1", { timeout: 30_000 });
+    const readStartupPresentation = () => restored.page.evaluate(() => ({
+      projected: performance.getEntriesByName("pageroot:tab-cache:prewarmed", "mark")
+        .find((entry) => entry.detail?.hot === true)?.startTime || null,
+      visible: performance.getEntriesByName("pageroot:tab-cache:visible-ready", "mark")[0]
+        ?.startTime || null,
+      verified: (() => {
+        return performance.getEntriesByName("pageroot:canvas:render-verified", "mark")
+          .at(-1)?.startTime || null;
+      })(),
+    }));
+    await expect.poll(readStartupPresentation).toMatchObject({
+      projected: expect.any(Number),
+      verified: expect.any(Number),
+    });
+    const startupPresentation = await readStartupPresentation();
+    expect(startupPresentation.projected).toBeLessThan(startupPresentation.verified);
+    if (startupPresentation.visible !== null) {
+      expect(startupPresentation.visible).toBeLessThan(startupPresentation.verified);
+    }
+
     await closePageRootGracefully(restored.electronApp, restored.page);
     restoredClosed = true;
 

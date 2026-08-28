@@ -49,6 +49,37 @@ export function planProjectSwitchFence({
   return Object.freeze({ kind: "ready" });
 }
 
+export function planProjectSwitchValidationLease({
+  obligationsResolved = false,
+  hasPendingNativeEdit = false,
+  hasHistoryAction = false,
+  persistState = "idle",
+  pendingWrite = false,
+  flushInFlight = false,
+  editRevision = 0,
+  lastPersistedRevision = 0,
+  sourcePath = "",
+  sourceSha256 = "",
+  canvasStatus = "idle",
+  renderedSha256 = "",
+} = {}) {
+  const reusable = obligationsResolved
+    && !hasPendingNativeEdit
+    && !hasHistoryAction
+    && persistState === "idle"
+    && !pendingWrite
+    && !flushInFlight
+    && Number(editRevision) === Number(lastPersistedRevision)
+    && Boolean(sourcePath)
+    && Boolean(sourceSha256)
+    && canvasStatus === "verified"
+    && String(renderedSha256) === String(sourceSha256);
+  return Object.freeze({
+    kind: "ready",
+    action: reusable ? "reuse-verified" : "full-check",
+  });
+}
+
 export function planProjectSwitchAfterDrain({
   editRevision = 0,
   cutoffRevision = 0,
