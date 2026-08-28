@@ -35,6 +35,8 @@ working reports executed the same chart again.
    documents. Inactive entries are hidden, inert, read-only and locked. An exact
    `(tabId, sourceSha256)` hit cancels a duplicate runtime preparation and may
    become interactive only after ProjectWorkflow republishes current authority.
+   A matching `canvasGeneration` with a different SHA is not a hit: persist and
+   native-edit resume still replace that document.
 6. `DocumentSurfaceCacheSession`, the runtime iframe pool and the library store
    remain presentation/resource caches. None owns Session facts, operation IDs,
    source commits, snapshots or rollback.

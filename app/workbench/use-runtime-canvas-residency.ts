@@ -90,13 +90,6 @@ export function useRuntimeCanvasResidency({
       && entry.sourceSha256 === activeSourceSha256
     )),
   ), [activeSourceSha256, activeTabId, keys]);
-  const activeLiveCanvas = useMemo(() => Boolean(
-    activeTabId
-    && keys.some((entry) => (
-      entry.tabId === activeTabId
-      && entry.canvasGeneration === activeCanvasGeneration
-    )),
-  ), [activeCanvasGeneration, activeTabId, keys]);
   const runtimePhase = editRuntimeSnapshot?.phase ?? "static";
   const runtimePreparing = canvasMode === "edit" && runtimePhase === "preparing";
   const runtimeRenderPending = canvasMode === "edit"
@@ -142,7 +135,6 @@ export function useRuntimeCanvasResidency({
     retain,
     evict,
     activeRetained,
-    activeLiveCanvas,
     runtimePhase,
     runtimePreparing,
     runtimeRenderPending,

@@ -734,7 +734,7 @@ export default function Workbench() {
   });
   const {
     keys: retainedCanvasKeys, retain: retainRuntimeCanvas, evict: evictRuntimeCanvas,
-    activeRetained: retainedRuntimeForActiveDocument, activeLiveCanvas: liveRuntimeForActiveCanvas,
+    activeRetained: retainedRuntimeForActiveDocument,
     runtimePhase: editRuntimePhase,
     runtimePreparing: editRuntimePreparing, runtimeRenderPending: editRuntimeRenderPending,
     runtimeGrant: editRuntimeGrant,
@@ -6185,7 +6185,7 @@ export default function Workbench() {
     && typeof window !== "undefined"
     && Boolean(window.htmlAIProjects);
   const { visibleCachedSurface, retainPresentedTab, completeHandoff, updateVisibleScroll, markFirstScroll } = useDocumentSurfaceHandoff({ cache: documentSurfaceCacheSnapshot, tabs: workbenchTabsSnapshot, sourceSha256, renderedSourceSha256: canvasMode === "preview" && canvasRenderAcks.preview?.generation === canvasGeneration ? canvasRenderAcks.preview.sha256 : renderedContentSha256, canvasAuthority, canvasGeneration, controller: workspaceController });
-  const activeRuntimeCanvasUsable = retainedRuntimeForActiveDocument || liveRuntimeForActiveCanvas;
+  const activeRuntimeCanvasUsable = retainedRuntimeForActiveDocument;
   const effectiveVisibleCachedSurface = canvasMode === "edit" && activeRuntimeCanvasUsable ? null : visibleCachedSurface;
   const retryProjectHydrationFromCommentRail = useCallback(() => {
     void workspaceController?.retryProjectHydration();

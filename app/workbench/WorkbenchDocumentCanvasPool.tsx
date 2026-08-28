@@ -120,6 +120,10 @@ export default function WorkbenchDocumentCanvasPool({
     });
   }, [activeSourceSha256, activeTabId, snapshots]);
 
+  if (activeElement) {
+    return <div className={styles.pool}><div className={styles.entry}>{activeElement}</div></div>;
+  }
+
   if (!activeTabId && activeElement) {
     return (
       <div className={styles.pool} data-testid="workbench-document-canvas-pool" data-runtime-hot-count={0} data-runtime-hot-limit={DOCUMENT_CANVAS_POOL_MINIMUM}>
@@ -151,15 +155,7 @@ export default function WorkbenchDocumentCanvasPool({
         );
         if (!snapshot) return null;
         const active = tabId === activeTabId && Boolean(activeElement);
-        const preserveActiveDocument = active && (
-          snapshot.sourceSha256 === activeSourceSha256
-          || snapshot.canvasGeneration === activeCanvasGeneration
-        );
-        const element = active && activeElement
-          ? cloneElement(activeElement, {
-            key: preserveActiveDocument ? snapshot.element.key : activeElement.key,
-          })
-          : snapshot.element;
+        const element = active && activeElement ? activeElement : snapshot.element;
         return (
           <div
             className={styles.entry}
