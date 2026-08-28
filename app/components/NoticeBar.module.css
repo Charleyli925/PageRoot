@@ -53,10 +53,10 @@
 .viewport {
   position: fixed;
   top: calc(var(--notice-header-height, 88px) + 16px);
-  left: calc((100vw - var(--notice-rail-width, 376px)) / 2);
+  left: calc((100vw - var(--workbench-inspector-width, 376px)) / 2);
   width: min(
     520px,
-    calc(100vw - var(--notice-rail-width, 376px) - 28px)
+    calc(100vw - var(--workbench-inspector-width, 376px) - 28px)
   );
   pointer-events: auto;
 }

@@ -1292,7 +1292,7 @@ export default function AiReviewWorkspace({
       ) : null}
 
       <main
-        className={styles.reviewMain}
+        className={`${styles.reviewMain}${sidebar ? ` ${styles.reviewMainWithSidebar}` : ""}`}
         inert={confirmationAction ? true : undefined}
       >
         <section

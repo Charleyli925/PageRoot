@@ -2,20 +2,10 @@
    PageRoot V5.1 — one calm review surface, one scroll context
    -------------------------------------------------------------------------- */
 
-.workbench {
-  --notice-header-height: 88px;
-  --notice-rail-width: 376px;
-
-  grid-template-columns: minmax(0, 1fr);
-  grid-template-rows: var(--notice-header-height) minmax(0, 1fr);
-  overflow: hidden;
-  background: var(--panel);
-}
-
 .workbench-header {
-  min-height: var(--notice-header-height);
-  align-items: end;
-  padding: 30px 16px 12px 22px;
+  min-height: 0;
+  align-items: center;
+  padding: 0 16px 0 22px;
   background: rgb(255 255 255 / 96%);
 }
 
@@ -175,77 +165,11 @@
   align-self: end;
 }
 
-.review-scroll-stage {
-  grid-column: 1 / -1;
-  grid-row: 2;
-  min-width: 0;
-  min-height: 0;
-  overflow-x: hidden;
-  overflow-y: auto;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 376px;
-  align-items: start;
-  background: var(--panel);
-  overscroll-behavior: contain;
-  overflow-anchor: none;
-  scrollbar-gutter: stable;
-}
-
-.workbench[data-canvas-mode="preview"] .review-scroll-stage {
-  grid-template-columns: minmax(0, 1fr);
-}
-
-/*
- * When the AI conversation sidebar is docked in preview, the stage becomes two
- * columns: the previewed page and the sidebar. A docked aside, never a modal —
- * the user keeps scrolling the preview beside it.
- */
-.workbench[data-canvas-mode="preview"] .review-scroll-stage:has(> .ai-conversation-aside) {
-  grid-template-columns: minmax(0, 1fr) clamp(340px, 30vw, 460px);
-}
-
-.ai-conversation-aside {
-  /*
-   * Both coordinates are named explicitly. Leaving the column to auto-placement
-   * put the sidebar on a new row below the canvas, which turned a docked side
-   * panel into a full-width bottom bar and left the right third of the window
-   * empty. It spans every row of the stage and stretches, because sharing only
-   * the canvas row left it starting half way down the window.
-   */
-  grid-column: 2;
-  grid-row: 1 / -1;
-  align-self: stretch;
-  min-width: 0;
-  min-height: 0;
-  height: 100%;
-  overflow: hidden;
-}
-
-/*
- * Below the minimum comfortable canvas width the sidebar takes over the stage
- * rather than squeezing both to unusable widths.
- */
-@media (max-width: 1024px) {
-  .workbench[data-canvas-mode="preview"] .review-scroll-stage:has(> .ai-conversation-aside) {
-    grid-template-columns: 0 minmax(0, 1fr);
-  }
-}
-
-.workbench[data-canvas-mode="preview"] {
-  --notice-rail-width: 0px;
-}
-
 .canvas-column {
-  grid-column: auto;
-  grid-row: auto;
   min-width: 0;
   min-height: 100%;
   padding: 18px 0 28px 18px;
   background: transparent;
-}
-
-.workbench[data-canvas-mode="preview"] .canvas-column {
-  grid-column: auto;
 }
 
 .canvas-edit-surface {
@@ -267,8 +191,6 @@
 }
 
 .comments-panel.comment-rail {
-  grid-column: auto;
-  grid-row: auto;
   min-width: 0;
   min-height: 0;
   height: var(--comment-rail-height);
@@ -512,18 +434,6 @@
 }
 
 @media (max-width: 1180px) {
-  .workbench {
-    --notice-rail-width: 352px;
-  }
-
-  .workbench[data-canvas-mode="preview"] {
-    --notice-rail-width: 0px;
-  }
-
-  .review-scroll-stage {
-    grid-template-columns: minmax(0, 1fr) 352px;
-  }
-
   .source-conflict-banner,
   .history-view-banner {
     right: 370px;
@@ -532,20 +442,8 @@
 }
 
 @media (max-width: 940px) {
-  .workbench {
-    --notice-rail-width: 320px;
-  }
-
-  .workbench[data-canvas-mode="preview"] {
-    --notice-rail-width: 0px;
-  }
-
   .workbench-header {
     padding: 30px 12px 12px 20px;
-  }
-
-  .review-scroll-stage {
-    grid-template-columns: minmax(0, 1fr) 320px;
   }
 
   .window-file-copy {
@@ -581,4 +479,3 @@
     transition: none;
   }
 }
-

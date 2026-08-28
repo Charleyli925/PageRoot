@@ -1,13 +1,179 @@
-/* Next-version shell: one compact macOS title/project bar, edge-to-edge
-   canvas, and a flatter review rail. */
+/* --------------------------------------------------------------------------
+   Workbench shell geometry owner
+
+   The outer grid is intentionally boring: the global rail is column one and
+   the document workbench is column two. Canvas and context inspectors are
+   laid out only inside the document stage below.
+   -------------------------------------------------------------------------- */
 .workbench {
-  grid-template-rows: 56px minmax(0, 1fr);
-  grid-template-columns: minmax(0, 1fr) 360px;
+  --workbench-tabbar-height: 40px;
+  --workbench-header-height: 48px;
+  --notice-header-height: var(--workbench-header-height);
+  --workbench-sidebar-width: 0px;
+  --workbench-inspector-width: 376px;
+
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: var(--workbench-sidebar-width) minmax(0, 1fr);
+  grid-template-rows:
+    var(--workbench-tabbar-height)
+    var(--workbench-header-height)
+    minmax(0, 1fr);
+  overflow: hidden;
   background: #f5f4f1;
+  transition: grid-template-columns 180ms cubic-bezier(.22, 1, .36, 1);
+}
+
+.workbench[data-left-sidebar="open"] {
+  --workbench-sidebar-width: 264px;
+}
+
+@media (max-width: 1120px) {
+  .workbench[data-left-sidebar="open"] {
+    --workbench-sidebar-width: 240px;
+  }
+}
+
+.workbench > .workbench-tabbar {
+  -webkit-app-region: drag;
+  position: relative;
+  z-index: 82;
+  grid-column: 2;
+  grid-row: 1;
+  min-width: 0;
+  overflow: hidden;
+  border-bottom: 1px solid rgb(43 40 53 / 8%);
+  background: #efeff2;
+}
+
+.workbench > .workbench-header {
+  grid-column: 2;
+  grid-row: 2;
+  grid-template-columns: minmax(0, 250px) minmax(0, 1fr);
+  height: 100%;
+  min-height: 0;
+}
+
+.workbench > .workbench-header > .header-actions {
+  min-width: 0;
+  width: 100%;
+  justify-self: stretch;
+}
+
+.workbench > .review-scroll-stage,
+.workbench > [data-testid="ai-review-workspace"] {
+  grid-column: 2;
+  grid-row: 3;
+  min-width: 0;
+  min-height: 0;
+}
+
+.workbench > .workbench-start-page {
+  grid-column: 2;
+  grid-row: 2 / 4;
+}
+
+.workbench > .workbench-global-sidebar {
+  grid-column: 1;
+  grid-row: 1 / 4;
+}
+
+/* The stage is the only place where a context inspector may consume width. */
+.workbench > .review-scroll-stage {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+  overflow-x: hidden;
+  overflow-y: auto;
+  background: var(--panel);
+  overscroll-behavior: contain;
+  overflow-anchor: none;
+  scrollbar-gutter: stable;
+}
+
+.workbench > .review-scroll-stage[data-inspector="comments"],
+.workbench > .review-scroll-stage[data-inspector="ai"] {
+  grid-template-columns: minmax(0, 1fr) var(--workbench-inspector-width);
+}
+
+.workbench > .review-scroll-stage[data-inspector="none"],
+.workbench > .review-scroll-stage[data-inspector="review"] {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.workbench > .review-scroll-stage > .canvas-column {
+  grid-column: 1;
+  grid-row: 1;
+  min-width: 0;
+  min-height: 100%;
+}
+
+.workbench > .review-scroll-stage[data-inspector="comments"] > .comments-panel.comment-rail,
+.workbench > .review-scroll-stage[data-inspector="ai"] > .ai-conversation-aside {
+  grid-column: 2;
+  grid-row: 1;
+  min-width: 0;
+  min-height: 0;
+  align-self: stretch;
+  height: 100%;
+}
+
+.workbench > .review-scroll-stage[data-inspector="comments"] > .comments-panel.comment-rail {
+  overflow-x: visible;
+  overflow-y: auto;
+}
+
+.workbench > .review-scroll-stage[data-inspector="ai"] > .ai-conversation-aside {
+  overflow: hidden;
+}
+
+.workbench[data-canvas-mode="preview"] > .review-scroll-stage {
+  overflow: hidden;
+}
+
+.workbench[data-canvas-mode="preview"] > .review-scroll-stage > .canvas-column {
+  height: 100%;
+  min-height: 0;
+  padding: 0;
+  position: relative;
+}
+
+/* A narrow document area overlays the inspector instead of shrinking the page. */
+@media (max-width: 1120px) {
+  .workbench > .review-scroll-stage[data-inspector="comments"],
+  .workbench > .review-scroll-stage[data-inspector="ai"] {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .workbench > .review-scroll-stage[data-inspector="comments"] > .comments-panel.comment-rail,
+  .workbench > .review-scroll-stage[data-inspector="ai"] > .ai-conversation-aside {
+    position: absolute;
+    z-index: 24;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: var(--workbench-inspector-width);
+    height: auto;
+    max-height: none;
+    grid-column: auto;
+    grid-row: auto;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .workbench {
+    transition: none;
+  }
 }
 
 .workbench-header {
-  min-height: 56px;
+  min-height: 0;
   padding: 0 14px 0 82px;
   border-bottom-color: #e5e3dd;
   background: rgb(251 250 247 / 94%);
@@ -599,20 +765,12 @@
 }
 
 @media (max-width: 1120px) {
-  .workbench {
-    grid-template-columns: minmax(0, 1fr) 330px;
-  }
-
   .side-drawer[data-drawer="handoff"] {
     width: 330px;
   }
 }
 
 @media (max-width: 900px) {
-  .workbench {
-    grid-template-columns: minmax(0, 1fr) 300px;
-  }
-
   .side-drawer[data-drawer="handoff"] {
     width: 300px;
   }
@@ -621,4 +779,3 @@
     padding-left: 74px;
   }
 }
-
