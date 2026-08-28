@@ -217,13 +217,8 @@ ${REVIEW_MASK_UNION_BEFORE}
     // The stages are narrated in the conversation now; the process panel is out of the
     // user flow, so its board no longer exists to assert against.
     const runProgress = launched.page.getByTestId("ai-conversation-run-progress");
-    await expect(runProgress.locator("li")).toHaveCount(4);
-    const aiProgressStep = runProgress
-      .locator("li")
-      .filter({ hasText: "等待 AI 完成" });
-    await expect(
-      aiProgressStep,
-    ).toHaveAttribute("data-step-state", "current");
+    await expect(runProgress).toContainText("等待你的 AI 完成修改");
+    await expect(runProgress.locator("li")).toHaveCount(0);
     writeAiOutput(request.requestRoot, (base) => {
       expect(base.match(new RegExp(ORIGINAL_TEXT, "gu"))).toHaveLength(1);
       return base
@@ -358,10 +353,7 @@ ${REVIEW_MASK_UNION_BEFORE}
     const readyDecision = launched.page.getByTestId("ai-conversation-action-bar");
     await expect(readyDecision).toBeVisible({ timeout: 30_000 });
     await expect(readyDecision).toContainText("等待你的决定");
-    await expect(runProgress).toContainText("新版本已准备好");
-    await expect(
-      aiProgressStep,
-    ).toHaveAttribute("data-step-state", "done");
+    await expect(runProgress).toHaveCount(0);
     const pending = await launched.page.evaluate(
       () => window.htmlAIProjects?.getActiveProject(),
     );
@@ -380,11 +372,13 @@ ${REVIEW_MASK_UNION_BEFORE}
     const reviewSidebar = reviewWorkspace.getByTestId("ai-conversation-sidebar");
     await expect(launched.page.getByTestId("ai-conversation-sidebar")).toHaveCount(1);
     await expect(reviewSidebar).toBeVisible();
-    await reviewSidebar.getByRole("button", { name: "收起 AI 助手" }).click();
+    const reviewAiEntry = launched.page.getByRole("button", { name: "AI 助手" });
+    await expect(reviewAiEntry).toHaveAttribute("aria-expanded", "true");
+    await reviewAiEntry.click();
     await expect(reviewSidebar).toHaveCount(0);
     await expect(launched.page.getByTestId("review-show-conversation")).toHaveCount(0);
-    const reviewAiEntry = launched.page.getByRole("button", { name: "AI 助手" });
     await expect(reviewAiEntry).toHaveCount(1);
+    await expect(reviewAiEntry).toHaveAttribute("aria-expanded", "false");
     await reviewAiEntry.click();
     await expect(launched.page.getByTestId("ai-conversation-sidebar")).toBeVisible();
     // 审阅工具固定复用工作台顶栏，不再在画布内提供第二套浮动条或收起把手。

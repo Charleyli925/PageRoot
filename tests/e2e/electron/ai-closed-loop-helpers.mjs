@@ -412,7 +412,7 @@ export async function addCommentAndSubmit(
     .getByText("任务已复制，等你的 AI 改完", { exact: true }))
     .toBeVisible();
   await expect(page.getByTestId("ai-conversation-run-progress"))
-    .toContainText("等待 AI 完成");
+    .toContainText("等待你的 AI 完成修改");
   let promptPath = "";
   await expect.poll(async () => {
     const copied = await electronApp.evaluate(({ clipboard }) => clipboard.readText());

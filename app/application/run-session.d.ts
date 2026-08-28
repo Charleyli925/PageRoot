@@ -10,6 +10,12 @@ export type RunSubmission = {
   phase: RunSubmissionPhase;
 };
 
+export type RunVisibleTextUpdate = Readonly<{
+  id: string;
+  sequence: number;
+  text: string;
+}>;
+
 export type RunHandoffState = {
   sourcePath: string;
   requestId: string;
@@ -31,6 +37,8 @@ export type RunHandoffState = {
   agentName?: string | null;
   /** What the Agent said while working (ADR 0037); narration with no authority. */
   visibleText?: string;
+  /** Stable public message rows. Hidden reasoning and tool events never enter this list. */
+  visibleTextUpdates?: readonly RunVisibleTextUpdate[];
   textTruncated?: boolean;
   agentVersion?: string | null;
   startedAt?: string | null;

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { createAgentEventReducer } from "../bridge/agent/agent-events.mjs";
+import { publicVisibleTextUpdates } from "../bridge/agent/agent-session-projector.mjs";
 import {
   AgentRuntimeCoordinator,
   TRUSTED_LOCAL_AGENT_POLICY_VERSION,
@@ -291,6 +292,36 @@ test("canonical visible-text truncation facts survive a byte-limited runtime", (
   assert.equal(result.projection.textTruncated, true);
 });
 
+test("public Agent text keeps message boundaries without exposing non-text events", () => {
+  const updates = publicVisibleTextUpdates([
+    { eventId: "one", sequence: 1, kind: "visible-text", messageId: "message-a", text: "正在" },
+    { eventId: "two", sequence: 2, kind: "visible-text", messageId: "message-a", text: "读取页面。" },
+    { eventId: "hidden", sequence: 3, kind: "reasoning", text: "隐藏推理" },
+    { eventId: "three", sequence: 4, kind: "visible-text", text: "正在修改标题。" },
+    { eventId: "four", sequence: 5, kind: "visible-text", text: "正在检查布局。" },
+  ]);
+  assert.deepEqual(updates, [
+    { id: "message:message-a:0", sequence: 2, text: "正在读取页面。" },
+    { id: "three:0", sequence: 4, text: "正在修改标题。" },
+    { id: "four:0", sequence: 5, text: "正在检查布局。" },
+  ]);
+  assert.equal(updates.some((update) => update.text.includes("隐藏推理")), false);
+});
+
+test("explicit public paragraphs remain separate without terminal punctuation", () => {
+  assert.deepEqual(publicVisibleTextUpdates([
+    {
+      kind: "visible-text",
+      eventId: "visible-paragraphs",
+      sequence: 1,
+      text: "第一段标题\n\n第二段内容",
+    },
+  ]), [
+    { id: "visible-paragraphs:0", sequence: 1, text: "第一段标题" },
+    { id: "visible-paragraphs:1", sequence: 1, text: "第二段内容" },
+  ]);
+});
+
 test("execution status projects only public Agent text with frozen provider identity", async () => {
   const finish = deferred();
   const coordinator = new AgentRuntimeCoordinator({
@@ -325,6 +356,10 @@ test("execution status projects only public Agent text with frozen provider iden
   assert.equal(running.agentName, "Synthetic Agent");
   assert.equal(running.state, "running");
   assert.equal(running.visibleText, "正在读取冻结任务。正在写入 Candidate。");
+  assert.deepEqual(running.visibleTextUpdates.map((update) => update.text), [
+    "正在读取冻结任务。",
+    "正在写入 Candidate。",
+  ]);
   assert.equal(running.textTruncated, true);
   assert.equal(running.visibleText.includes("隐藏推理"), false);
   assert.equal(running.eventCount, 5);

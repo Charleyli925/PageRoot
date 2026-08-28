@@ -1190,6 +1190,11 @@ test("recursive polling is single-flight and speeds up only after public Agent t
       phase: "reading-task",
       agentName: "runtime-internal-name",
       visibleText: "正在读取冻结任务。",
+      visibleTextUpdates: [{
+        id: "message-read",
+        sequence: 3,
+        text: "正在读取冻结任务。",
+      }],
       updatedAt: "2026-08-11T00:00:00.000Z",
     },
   });
@@ -1198,6 +1203,11 @@ test("recursive polling is single-flight and speeds up only after public Agent t
   const [nextTimer] = harness.scheduler.ids();
   assert.equal(harness.scheduler.delay(nextTimer), 250);
   assert.equal(harness.runSession.activeHandoff?.visibleText, "正在读取冻结任务。");
+  assert.deepEqual(harness.runSession.activeHandoff?.visibleTextUpdates, [{
+    id: "message-read",
+    sequence: 3,
+    text: "正在读取冻结任务。",
+  }]);
   assert.equal(harness.runSession.activeHandoff?.providerId, "codex");
   assert.equal(harness.runSession.activeHandoff?.agentName, "Codex");
   harness.workflow.dispose();

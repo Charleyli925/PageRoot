@@ -856,7 +856,18 @@ export async function runAcpTask({
           // Capture the Agent's own words before the update is reduced to a
           // summary. A mode with no text budget appends nothing.
           const chunk = visibleText.append(visibleTextChunk(message.update));
-          if (chunk) onEvent(Object.freeze({ kind: "visible-text", text: chunk }));
+          if (chunk) {
+            const messageId = String(
+              message.update?.messageId
+              || message.update?.message_id
+              || "",
+            ).trim();
+            onEvent(Object.freeze({
+              kind: "visible-text",
+              text: chunk,
+              ...(messageId ? { messageId } : {}),
+            }));
+          }
           if (visibleText.truncated && !visibleTextTruncationReported) {
             visibleTextTruncationReported = true;
             onEvent(Object.freeze({ kind: "visible-text-truncated" }));

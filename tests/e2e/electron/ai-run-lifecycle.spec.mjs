@@ -6,6 +6,7 @@ import {
   addCommentAndSubmit,
   caseSelector,
   chooseClipboardDelivery,
+  chooseModifyIntent,
   closePageRootGracefully,
   createSourceFixture,
   existsSync,
@@ -53,10 +54,8 @@ test("a clipboard handoff failure keeps the frozen Request recoverable", {
     await chooseClipboardDelivery(launched.page);
     // The failure is said by the round's own timeline, and the remedy is the
     // action bar's re-copy action. The clipboard is left untouched.
-    await expect(launched.page.getByTestId("ai-conversation-run-progress")
-      .locator("li[data-step-state=\"error\"]")
-      .filter({ hasText: "交接内容尚未复制" }))
-      .toBeVisible();
+    await expect(launched.page.getByTestId("ai-conversation-action-bar"))
+      .toContainText("任务还没复制成功");
     expect(await launched.electronApp.evaluate(({ clipboard }) => clipboard.readText()))
       .toBe(clipboardSentinel);
     // Retrying goes through the bar's own remedy, and it must not create a
@@ -93,10 +92,8 @@ test("a failed handoff in project A does not block project B or replace its stat
     await chooseClipboardDelivery(launched.page);
     // The failure is said by the round's own timeline, and it must not have
     // produced a second request.
-    await expect(launched.page.getByTestId("ai-conversation-run-progress")
-      .locator("li[data-step-state=\"error\"]")
-      .filter({ hasText: "交接内容尚未复制" }))
-      .toBeVisible({ timeout: 30_000 });
+    await expect(launched.page.getByTestId("ai-conversation-action-bar"))
+      .toContainText("任务还没复制成功", { timeout: 30_000 });
     await expect.poll(
       () => requestDirectoryCount(launched.workspace),
       { timeout: 20_000 },
@@ -118,10 +115,8 @@ test("a failed handoff in project A does not block project B or replace its stat
     await chooseClipboardDelivery(launched.page);
     // B fails on its own round: the same error step appears for B, and the
     // request count says the two failures are two separate rounds.
-    await expect(launched.page.getByTestId("ai-conversation-run-progress")
-      .locator("li[data-step-state=\"error\"]")
-      .filter({ hasText: "交接内容尚未复制" }))
-      .toBeVisible({ timeout: 30_000 });
+    await expect(launched.page.getByTestId("ai-conversation-action-bar"))
+      .toContainText("任务还没复制成功", { timeout: 30_000 });
     await expect.poll(
       () => requestDirectoryCount(launched.workspace),
       { timeout: 20_000 },
@@ -131,17 +126,13 @@ test("a failed handoff in project A does not block project B or replace its stat
     // Each project keeps its own failed state: reopening A still shows A's round
     // stuck at the same error — not B's failure and not a clean slate.
     await launched.page.getByRole("button", { name: /AI 助手/u }).click();
-    await expect(launched.page.getByTestId("ai-conversation-run-progress")
-      .locator("li[data-step-state=\"error\"]")
-      .filter({ hasText: "交接内容尚未复制" }))
-      .toBeVisible();
+    await expect(launched.page.getByTestId("ai-conversation-action-bar"))
+      .toContainText("任务还没复制成功");
 
     await openRecentProject(launched.page, projectB.sourcePath, { editable: false });
     await launched.page.getByRole("button", { name: /AI 助手/u }).click();
-    await expect(launched.page.getByTestId("ai-conversation-run-progress")
-      .locator("li[data-step-state=\"error\"]")
-      .filter({ hasText: "交接内容尚未复制" }))
-      .toBeVisible();
+    await expect(launched.page.getByTestId("ai-conversation-action-bar"))
+      .toContainText("任务还没复制成功");
     expect(readFileSync(projectA.sourcePath).equals(projectA.original)).toBe(true);
     expect(readFileSync(projectB.sourcePath).equals(projectB.original)).toBe(true);
   } finally {
@@ -160,10 +151,9 @@ test("a rapid double click creates exactly one durable Request", {
   try {
     await launched.electronApp.evaluate(({ clipboard }) => clipboard.clear());
     await addComment(launched.page, fixture.sourcePath);
-    await launched.page.getByRole("button", { name: /AI 助手/u }).dblclick({
-      delay: 0,
-    });
-    await chooseClipboardDelivery(launched.page);
+    await launched.page.getByRole("button", { name: /AI 助手/u }).click();
+    const sidebar = await chooseModifyIntent(launched.page);
+    await sidebar.getByTestId("ai-conversation-copy-task").dblclick({ delay: 0 });
     await expect(launched.page.getByTestId("ai-conversation-action-bar")
       .getByText("任务已复制，等你的 AI 改完", { exact: true })).toBeVisible();
     await expect.poll(
@@ -204,9 +194,8 @@ test("ending a copied run still warns after restart and blocks late finalization
      * contract needs is that the handoff step is the one carrying the round.
      */
     await launched.page.getByRole("button", { name: /AI 助手/u }).click();
-    await expect(launched.page.getByTestId("ai-conversation-run-progress")
-      .locator("li").filter({ hasText: "准备并复制" }))
-      .toBeVisible();
+    const runProgress = launched.page.getByTestId("ai-conversation-run-progress");
+    await expect(runProgress).toBeVisible();
     const endRound = launched.page.getByTestId("ai-conversation-action-bar")
       .getByRole("button", { name: "结束本轮" });
     await expect(endRound).toBeEnabled();
@@ -330,7 +319,7 @@ test("an unknown Request outcome stays fail-closed and reconciles automatically"
     const pendingRunProgress = launched.page
       .getByTestId("ai-conversation-run-progress");
     await expect(pendingRunProgress).toBeVisible({ timeout: 30_000 });
-    await expect(pendingRunProgress.locator("li")).toHaveCount(4);
+    await expect(pendingRunProgress.locator("li")).toHaveCount(0);
     await expect(launched.page.getByRole("button", { name: "立即重新核对" }))
       .toHaveCount(0);
     await expect(launched.page.getByRole("button", { name: "重新打开源页" }).first())

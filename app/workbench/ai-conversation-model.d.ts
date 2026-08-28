@@ -13,7 +13,6 @@ export type SidebarIntent = "modify" | "continue";
 
 export type SidebarModePresentation = {
   label: string;
-  detail: string;
 };
 
 export type SidebarMessage = {
@@ -104,6 +103,7 @@ export function sidebarActionBar(options?: {
   candidateStatus?: string | null;
   failureMessage?: string | null;
   deliveryMode?: "managed-agent" | "clipboard";
+  handoffStatus?: string | null;
 }): SidebarActionBar | null;
 
 export type SidebarRunProgressStep = {
@@ -118,8 +118,8 @@ export type SidebarRunProgress = {
   headline: string | null;
   /** What the Agent is saying while it works; null when it has said nothing. */
   narration: string | null;
-  /** The same words split into the paragraphs the Agent actually wrote. */
-  narrationBlocks: readonly string[] | null;
+  /** Stable public message rows under one Agent identity. */
+  narrationUpdates: readonly Readonly<{ id: string; text: string }>[] | null;
   /** Whether an upstream public-text boundary omitted a suffix. */
   narrationTruncated: boolean;
   /** The stage actually running, for callers that need to name it. */
@@ -131,17 +131,13 @@ export function sidebarRunProgress(options?: {
   state?: string;
   steps?: readonly unknown[];
   agentText?: string;
+  agentUpdates?: readonly unknown[];
   agentTextTruncated?: boolean;
 }): SidebarRunProgress | null;
 
 export function sidebarTimestampLabel(
   value: unknown,
   options?: { now?: number },
-): string | null;
-
-export function sidebarDeliveryDisclosure(
-  intent?: SidebarIntent | string,
-  options?: { agentName?: string; localReadDisclosure?: string | null },
 ): string | null;
 
 export function sidebarSendState(options?: {
@@ -168,17 +164,17 @@ export function sidebarStateFromRun(options?: {
   reviewing?: boolean;
 }): string;
 
-export type SidebarModelLine = {
+export type SidebarAgentLine = {
   kind: "checking" | "name";
   text: string;
   choosable: boolean;
 };
 
-export function sidebarModelLine(options?: {
+export function sidebarAgentLine(options?: {
   catalogStatus?: SidebarCatalogStatus;
-  modelDisplayName?: string | null;
-  modelChoiceCount?: number;
-}): SidebarModelLine | null;
+  agentDisplayName?: string | null;
+  agentChoiceCount?: number;
+}): SidebarAgentLine | null;
 
 export const SIDEBAR_STATES: ReadonlySet<string>;
 export const INTENT_MODIFY: "modify";

@@ -42,7 +42,7 @@ export const RunConversationOutlet = memo(function RunConversationOutlet({
   });
   const progress = deriveRunProgressPresentation(
     activeRun,
-    currentHandoff?.status || "idle",
+    currentHandoff || "idle",
   );
 
   return (
@@ -54,9 +54,13 @@ export const RunConversationOutlet = memo(function RunConversationOutlet({
       candidateStatus={activeRun?.candidateAssessment?.status ?? null}
       failureMessage={activeRun?.errorDetail || activeRun?.error || null}
       agentText={currentHandoff?.visibleText || ""}
+      agentUpdates={currentHandoff?.visibleTextUpdates || []}
       agentTextTruncated={currentHandoff?.textTruncated === true}
+      agentWorking={currentHandoff?.mode === "managed-agent"
+        && ["starting", "running"].includes(currentHandoff.status)}
       agentStartedAt={currentHandoff?.startedAt || null}
       agentUpdatedAt={currentHandoff?.updatedAt || null}
+      handoffStatus={currentHandoff?.status || null}
       runKey={activeRun
         ? `${activeRun.requestId}:${activeRun.attemptId}`
         : runSession?.submissionPending

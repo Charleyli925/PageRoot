@@ -9,6 +9,7 @@ import { defaultAgentLeaseStore } from "./agent-lease-store.mjs";
 import {
   executionPhaseForEvent,
   publicExecutionSession,
+  publicVisibleTextUpdates,
 } from "./agent-session-projector.mjs";
 import { createDefaultProviderRegistry } from "./providers/provider-registry.mjs";
 import {
@@ -450,7 +451,10 @@ export class AgentRuntimeCoordinator {
     if (textField) {
       entry[textField] = reduced.projection.visibleText;
       if (textField === "replyText") entry.replyTruncated = reduced.projection.textTruncated;
-      if (textField === "visibleText") entry.textTruncated = reduced.projection.textTruncated;
+      if (textField === "visibleText") {
+        entry.visibleTextUpdates = publicVisibleTextUpdates(reduced.projection.retainedEvents);
+        entry.textTruncated = reduced.projection.textTruncated;
+      }
     }
     if (reduced.event.kind === "initialized") {
       if (["starting", "running"].includes(entry.state)) entry.state = "running";
@@ -619,6 +623,7 @@ export class AgentRuntimeCoordinator {
       controller,
       promise: null,
       visibleText: "",
+      visibleTextUpdates: [],
       textTruncated: false,
     };
     this.#executionSessions.set(key, entry);
@@ -717,6 +722,7 @@ export class AgentRuntimeCoordinator {
       agentVersion: null,
       eventCount: 0,
       visibleText: "",
+      visibleTextUpdates: [],
       textTruncated: false,
       retryable: false,
       errorCode: "AGENT_RESTART_RECOVERY_REQUIRED",
