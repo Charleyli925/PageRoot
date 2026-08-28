@@ -538,6 +538,56 @@ test("Electron shell keeps the global rail fixed while the context inspector swa
       return Math.abs(element.getBoundingClientRect().width - targetWidth);
     })).toBeLessThanOrEqual(0.5);
 
+    const expandedToggle = launched.page.getByRole("button", { name: "收起左侧边栏" });
+    const expandedToggleBox = await expandedToggle.boundingBox();
+    const moreButton = launched.page.getByRole("button", { name: "更多", exact: true });
+    await moreButton.click();
+    const moreMenu = launched.page.getByRole("menu", { name: "更多操作" });
+    await expect(moreMenu).toBeVisible();
+    expect(await moreMenu.evaluate((element) => element.parentElement === document.body)).toBe(true);
+    await expect(moreMenu.getByRole("menuitem", { name: "在 Finder 中显示" })).toBeVisible();
+    await expect(moreMenu.getByRole("menuitem", { name: "在默认浏览器中打开" })).toBeVisible();
+    await expect(moreMenu.getByRole("menuitem", { name: "导出当前 HTML…" })).toBeVisible();
+    await launched.page.keyboard.press("ArrowDown");
+    await expect(moreMenu.getByRole("menuitem", { name: "在默认浏览器中打开" })).toBeFocused();
+    await launched.page.keyboard.press("Escape");
+    await expect(moreMenu).toHaveCount(0);
+    await expect(moreButton).toBeFocused();
+
+    await expandedToggle.hover();
+    await expect(launched.page.getByRole("tooltip")).toHaveText("收起左侧边栏");
+    const tooltip = launched.page.getByRole("tooltip");
+    const tooltipBox = await tooltip.boundingBox();
+    const tabbarBox = await launched.page.locator(".workbench-tabbar").boundingBox();
+    expect(await tooltip.evaluate((element) => element.parentElement === document.body)).toBe(true);
+    expect(tooltipBox).not.toBeNull();
+    expect(tabbarBox).not.toBeNull();
+    expect(tooltipBox?.y || 0).toBeGreaterThanOrEqual((tabbarBox?.bottom || 0) - 1);
+
+    await expandedToggle.click();
+    const collapsedToggle = launched.page.getByRole("button", { name: "展开左侧边栏" });
+    await expect(collapsedToggle).toBeVisible();
+    const collapsedToggleBox = await collapsedToggle.boundingBox();
+    expect(expandedToggleBox).not.toBeNull();
+    expect(collapsedToggleBox).not.toBeNull();
+    await expect.poll(async () => {
+      const box = await collapsedToggle.boundingBox();
+      return box ? Math.abs(box.x - (expandedToggleBox?.x || 0)) : Number.POSITIVE_INFINITY;
+    }).toBeLessThanOrEqual(0.5);
+    await expect.poll(async () => {
+      const box = await collapsedToggle.boundingBox();
+      return box ? Math.abs(box.y - (expandedToggleBox?.y || 0)) : Number.POSITIVE_INFINITY;
+    }).toBeLessThanOrEqual(0.5);
+    await collapsedToggle.click();
+    await expect(sidebar).toHaveAttribute("data-open", "true");
+    await expect.poll(() => sidebar.evaluate((element) => {
+      const workbench = element.closest(".workbench");
+      const targetWidth = workbench
+        ? Number.parseFloat(getComputedStyle(workbench).getPropertyValue("--workbench-sidebar-width"))
+        : 0;
+      return Math.abs(element.getBoundingClientRect().width - targetWidth);
+    })).toBeLessThanOrEqual(0.5);
+
     const readGeometry = () => launched.page.evaluate(() => {
       const readRect = (selector) => {
         const element = document.querySelector(selector);
@@ -615,6 +665,15 @@ test("Electron shell keeps the global rail fixed while the context inspector swa
     const previewGeometry = await readGeometry();
     assertShellGeometry(previewGeometry);
     assertLeftRailStable(previewGeometry, editGeometry);
+    const previewSurface = launched.page.getByTestId("html-interaction-preview");
+    const previewReloadRevision = Number(await previewSurface.getAttribute("data-reload-revision"));
+    const refreshButton = launched.page.getByRole("button", { name: "刷新预览" });
+    await expect(refreshButton).toBeEnabled();
+    await refreshButton.click();
+    await expect(previewSurface).toHaveAttribute(
+      "data-reload-revision",
+      String(previewReloadRevision + 1),
+    );
     expect(Math.abs(
       previewGeometry.canvas.width - editGeometry.canvas.width - editGeometry.inspectorWidth,
     )).toBeLessThanOrEqual(2);

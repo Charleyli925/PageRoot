@@ -209,6 +209,7 @@ function ReviewDocumentPane({
   visible,
   commentGroups,
   commentLayouts,
+  reloadRevision,
 }: {
   side: ReviewSide;
   html: string;
@@ -224,6 +225,7 @@ function ReviewDocumentPane({
   visible: boolean;
   commentGroups: readonly ReviewCommentGroup[];
   commentLayouts: readonly ReviewCommentLayout[];
+  reloadRevision: number;
 }) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
@@ -339,7 +341,7 @@ function ReviewDocumentPane({
         >
           <iframe
             ref={assignFrame}
-            key={independentTransport ? frameUrl || `${side}-pending` : side}
+            key={`${side}-${reloadRevision}-${independentTransport ? frameUrl || "pending" : "srcdoc"}`}
             {...(independentTransport
               ? { src: frameUrl || "about:blank" }
               : { srcDoc: html })}
@@ -395,6 +397,7 @@ export default function AiReviewWorkspace({
   assistantEntry = null,
   sidebar = null,
   embedded = false,
+  reloadRevision = 0,
 }: {
   fileName: string;
   beforeLabel: string;
@@ -419,6 +422,8 @@ export default function AiReviewWorkspace({
   sidebar?: ReactNode;
   /** Uses the Workbench header and mounts only the review content outlet. */
   embedded?: boolean;
+  /** Re-mounts both comparison frames without creating a second review state. */
+  reloadRevision?: number;
 }) {
   const fileTitle = fileName.replace(/\.(?:html?|xhtml)$/iu, "") || fileName;
   const hydrated = useSyncExternalStore(subscribeHydration, () => true, () => false);
@@ -1253,6 +1258,7 @@ export default function AiReviewWorkspace({
     <div
       className={styles.reviewRoot}
       data-embedded={embedded ? "true" : undefined}
+      data-reload-revision={reloadRevision}
       data-testid="ai-review-workspace"
     >
       {!embedded ? <WorkbenchHeaderShell
@@ -1596,6 +1602,7 @@ export default function AiReviewWorkspace({
                 visible={canvasView === "split" || canvasView === "before"}
                 commentGroups={documents.commentGroups}
                 commentLayouts={reviewCommentLayouts}
+                reloadRevision={reloadRevision}
               />
               <ReviewDocumentPane
                 side="after"
@@ -1612,6 +1619,7 @@ export default function AiReviewWorkspace({
                 visible={canvasView === "split" || canvasView === "after"}
                 commentGroups={[]}
                 commentLayouts={[]}
+                reloadRevision={reloadRevision}
               />
             </div>
 

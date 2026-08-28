@@ -1,7 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { ArrowSquareOutIcon } from "@phosphor-icons/react/dist/csr/ArrowSquareOut";
+import { ArrowClockwiseIcon } from "@phosphor-icons/react/dist/csr/ArrowClockwise";
 import { CheckCircleIcon } from "@phosphor-icons/react/dist/csr/CheckCircle";
 import { ClockCounterClockwiseIcon } from "@phosphor-icons/react/dist/csr/ClockCounterClockwise";
 import { EyeIcon } from "@phosphor-icons/react/dist/csr/Eye";
@@ -14,17 +14,15 @@ import type {
   PersistState,
 } from "./types";
 import { ReviewToolbarControls } from "./review-toolbar-controls";
+import { WorkbenchMoreMenu, type WorkbenchMoreMenuProps } from "./workbench-more-menu";
 import { WorkbenchHeaderActions } from "./workbench-header-shell";
+import { WorkbenchTooltipHost } from "./workbench-tooltip";
 
 export type WorkbenchFileHeaderViewProps = {
-  currentSourceFileName: string;
-  canOpenCurrentHtmlInDefaultBrowser: boolean;
   persistState: PersistState;
   editRevision: number;
   lastPersistedRevision: number;
   headerStatusFacts: string[];
-  canOpenProjectRootInFolder: boolean;
-  canShowCurrentFileInFolder: boolean;
   canvasGeneration: number;
   canvasAuthority: {
     status: string;
@@ -34,98 +32,57 @@ export type WorkbenchFileHeaderViewProps = {
     sha256: string | null;
   } | null | undefined;
   saveStatusLabel: string;
-  onOpenInDefaultBrowser: () => void;
-  onShowProjectRecordsInFolder: () => void;
-  onShowProjectInFolder: () => void;
+  saveStatusQuiet: boolean;
   onRetryCanvasVerification: () => void;
 };
 
 export function WorkbenchFileHeaderView({
-  currentSourceFileName,
-  canOpenCurrentHtmlInDefaultBrowser,
   persistState,
   editRevision,
   lastPersistedRevision,
   headerStatusFacts,
-  canOpenProjectRootInFolder,
-  canShowCurrentFileInFolder,
   canvasGeneration,
   canvasAuthority,
   visibleCanvasAck,
   saveStatusLabel,
-  onOpenInDefaultBrowser,
-  onShowProjectRecordsInFolder,
-  onShowProjectInFolder,
+  saveStatusQuiet,
   onRetryCanvasVerification,
 }: WorkbenchFileHeaderViewProps) {
   return (
-    <div className="window-file" aria-label="当前文档状态与文件操作">
+    <div className="window-file" aria-label="当前文档保存状态">
       <span className="file-meta">
-              {headerStatusFacts.length ? (
-                <span className="file-version-label project-status-facts">
-                  {headerStatusFacts.map((fact) => (
-                    <span key={fact}>{fact}</span>
-                  ))}
-                </span>
-              ) : null}
-              {canOpenProjectRootInFolder ? (
-                <button
-                  className="window-file-quick-action"
-                  type="button"
-                  data-tooltip="在文件夹中打开项目"
-                  aria-label="在文件夹中打开当前项目文件夹"
-                  onClick={onShowProjectRecordsInFolder}
-                >
-                  <FolderOpenIcon aria-hidden="true" size={15} weight="duotone" />
-                </button>
-              ) : canShowCurrentFileInFolder ? (
-                <button
-                  className="window-file-quick-action"
-                  type="button"
-                  data-tooltip="在文件夹中打开"
-                  aria-label={`在文件夹中打开 ${currentSourceFileName}`}
-                  onClick={onShowProjectInFolder}
-                >
-                  <FolderOpenIcon aria-hidden="true" size={15} weight="duotone" />
-                </button>
-              ) : null}
-              <button
-                className="window-file-quick-action"
-                type="button"
-                data-tooltip="在默认浏览器中打开"
-                aria-label={`在默认浏览器中打开 ${currentSourceFileName}`}
-                disabled={
-                  !canOpenCurrentHtmlInDefaultBrowser
-                  || persistState !== "idle"
-                  || editRevision !== lastPersistedRevision
-                }
-                onClick={onOpenInDefaultBrowser}
-              >
-                <ArrowSquareOutIcon aria-hidden="true" size={15} weight="bold" />
-              </button>
-              <span
-                className="save-status"
-                data-persist-state={persistState}
-                data-edit-revision={editRevision}
-                data-persisted-revision={lastPersistedRevision}
-                data-canvas-generation={canvasGeneration}
-                data-canvas-authority={canvasAuthority?.status}
-                data-render-generation={visibleCanvasAck?.generation}
-                data-rendered-sha256={visibleCanvasAck?.sha256 || undefined}
-                role={canvasAuthority?.status === "failed" ? "button" : "status"}
-                aria-live="polite"
-                tabIndex={canvasAuthority?.status === "failed" ? 0 : undefined}
-                onClick={canvasAuthority?.status === "failed" ? onRetryCanvasVerification : undefined}
-                onKeyDown={canvasAuthority?.status === "failed" ? (event) => {
-                  if (event.key === "Enter" || event.key === " ") {
-                    event.preventDefault();
-                    onRetryCanvasVerification();
-                  }
-                } : undefined}
-              >
-                <span aria-hidden="true" />
-                {saveStatusLabel}
-              </span>
+        {headerStatusFacts.length ? (
+          <span className="file-version-label project-status-facts">
+            {headerStatusFacts.map((fact) => (
+              <span key={fact}>{fact}</span>
+            ))}
+          </span>
+        ) : null}
+        <span
+          className="save-status"
+          data-persist-state={persistState}
+          data-edit-revision={editRevision}
+          data-persisted-revision={lastPersistedRevision}
+          data-canvas-generation={canvasGeneration}
+          data-canvas-authority={canvasAuthority?.status}
+          data-render-generation={visibleCanvasAck?.generation}
+          data-rendered-sha256={visibleCanvasAck?.sha256 || undefined}
+          data-quiet={saveStatusQuiet ? "true" : undefined}
+          data-tooltip={saveStatusQuiet ? saveStatusLabel : undefined}
+          role={canvasAuthority?.status === "failed" ? "button" : "status"}
+          aria-live="polite"
+          tabIndex={canvasAuthority?.status === "failed" ? 0 : undefined}
+          onClick={canvasAuthority?.status === "failed" ? onRetryCanvasVerification : undefined}
+          onKeyDown={canvasAuthority?.status === "failed" ? (event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              onRetryCanvasVerification();
+            }
+          } : undefined}
+        >
+          <span aria-hidden="true" />
+          <span className="save-status-copy">{saveStatusLabel}</span>
+        </span>
       </span>
     </div>
   );
@@ -144,10 +101,17 @@ export function WorkbenchHeaderToolbar({
   recentRunOutcome,
   terminalRun,
   reviewActive,
+  reviewAvailable,
+  reviewPreparing,
+  refreshAvailable,
   aiConversationVisible,
   aiAssistantEntry,
+  fileStatus,
+  moreMenu,
   onSelectEdit,
   onSelectPreview,
+  onOpenReview,
+  onRefreshCanvas,
   onToggleProjectPanel,
   reopenRecentRunOutcome,
 }: {
@@ -163,14 +127,22 @@ export function WorkbenchHeaderToolbar({
   recentRunOutcome: unknown;
   terminalRun: unknown;
   reviewActive: boolean;
+  reviewAvailable: boolean;
+  reviewPreparing: boolean;
+  refreshAvailable: boolean;
   aiConversationVisible: boolean;
   aiAssistantEntry: ReactNode;
+  fileStatus: ReactNode;
+  moreMenu: WorkbenchMoreMenuProps;
   onSelectEdit: () => void;
   onSelectPreview: () => void;
+  onOpenReview: () => void;
+  onRefreshCanvas: () => void;
   onToggleProjectPanel: () => void;
   reopenRecentRunOutcome: () => void;
 }) {
   return (
+    <>
         <WorkbenchHeaderActions aria-label="模式、审阅、项目和文件操作">
           <div
             className="canvas-mode-switch"
@@ -207,7 +179,7 @@ export function WorkbenchHeaderToolbar({
                 ? "只读运行页面自身的脚本和交互；操作不会保存"
                 : interactionLocked
                   ? "当前状态只能使用编辑画布"
-                  : "运行页面自身的脚本和交互"}
+                  : undefined}
               onClick={onSelectPreview}
             >
               <EyeIcon aria-hidden="true" size={16} weight="bold" />
@@ -216,11 +188,25 @@ export function WorkbenchHeaderToolbar({
             <button
               type="button"
               aria-pressed={reviewActive}
-              disabled
-              data-tooltip={reviewActive ? "正在审阅 AI 修改" : "有待审阅修改时自动可用"}
+              aria-label={reviewActive
+                ? "审阅，正在审阅 AI 修改"
+                : reviewAvailable
+                  ? "审阅，有 AI 修改待查看"
+                  : "审阅"}
+              disabled={reviewActive || reviewPreparing || !reviewAvailable}
+              data-review-available={reviewAvailable ? "true" : undefined}
+              data-tooltip={reviewActive
+                ? "正在审阅 AI 修改"
+                : reviewPreparing
+                  ? "正在准备审阅…"
+                  : reviewAvailable
+                    ? undefined
+                    : "有待审阅修改时自动可用"}
+              onClick={onOpenReview}
             >
               <CheckCircleIcon aria-hidden="true" size={15} weight="duotone" />
               审阅
+              {reviewAvailable ? <span className="review-attention-dot" aria-hidden="true" /> : null}
             </button>
           </div>
           <span className="toolbar-section-divider" aria-hidden="true" />
@@ -232,6 +218,22 @@ export function WorkbenchHeaderToolbar({
             {!reviewActive ? <ReviewToolbarControls disabled /> : null}
           </div>
           <span className="toolbar-section-divider" aria-hidden="true" />
+          {fileStatus}
+          <span className="toolbar-flex-spacer" aria-hidden="true" />
+          <button
+            className="workbench-refresh-button"
+            type="button"
+            aria-label={reviewActive ? "刷新审阅画布" : canvasMode === "preview" ? "刷新预览" : "刷新画布"}
+            disabled={!refreshAvailable}
+            data-tooltip={reviewActive
+              ? "刷新审阅画布"
+              : canvasMode === "preview"
+                ? "刷新预览"
+                : "进入预览或审阅后可刷新"}
+            onClick={onRefreshCanvas}
+          >
+            <ArrowClockwiseIcon aria-hidden="true" size={17} weight="bold" />
+          </button>
           <button
             className="project-button"
             type="button"
@@ -257,8 +259,10 @@ export function WorkbenchHeaderToolbar({
               上轮处理
             </button>
           ) : null}
-          <span className="toolbar-flex-spacer" aria-hidden="true" />
           {aiAssistantEntry}
+          <WorkbenchMoreMenu {...moreMenu} />
         </WorkbenchHeaderActions>
+      <WorkbenchTooltipHost />
+    </>
   );
 }

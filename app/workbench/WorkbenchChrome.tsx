@@ -25,6 +25,29 @@ export function nextWorkbenchTabIndex(
   return null;
 }
 
+export function SidebarToggle({
+  expanded,
+  onClick,
+}: {
+  expanded: boolean;
+  onClick: () => void;
+}) {
+  const label = expanded ? "收起左侧边栏" : "展开左侧边栏";
+  return (
+    <button
+      className="workbench-sidebar-toggle"
+      type="button"
+      aria-expanded={expanded}
+      aria-label={label}
+      data-sidebar-toggle={expanded ? "expanded" : "collapsed"}
+      data-tooltip={label}
+      onClick={onClick}
+    >
+      <SidebarSimpleIcon aria-hidden="true" size={16} weight="duotone" />
+    </button>
+  );
+}
+
 export function WorkbenchTabBar({
   snapshot,
   onSelect,
@@ -52,15 +75,7 @@ export function WorkbenchTabBar({
   return (
     <nav className="workbench-tabbar" aria-label="已打开的 HTML">
       {!sidebarOpen ? (
-        <button
-          className="workbench-collapsed-sidebar-toggle"
-          type="button"
-          aria-label="展开左侧边栏"
-          data-tooltip="展开左侧边栏"
-          onClick={onToggleSidebar}
-        >
-          <SidebarSimpleIcon aria-hidden="true" size={16} weight="duotone" />
-        </button>
+        <SidebarToggle expanded={false} onClick={onToggleSidebar} />
       ) : null}
       <div
         className="workbench-tablist"
@@ -224,9 +239,7 @@ export function WorkbenchGlobalSidebar({
       {open ? (
         <>
           <div className="workbench-sidebar-titlebar">
-            <button className="workbench-sidebar-toggle" type="button" aria-expanded="true" aria-label="收起左侧边栏" data-tooltip="收起左侧边栏" onClick={onToggle}>
-              <SidebarSimpleIcon aria-hidden="true" size={16} weight="duotone" />
-            </button>
+            <SidebarToggle expanded onClick={onToggle} />
           </div>
           <div className="workbench-sidebar-product">
             <button type="button" onClick={onOpenAbout}>

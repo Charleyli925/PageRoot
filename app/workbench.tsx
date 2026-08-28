@@ -666,6 +666,7 @@ export default function Workbench() {
   const viewMode = versionSnapshot.viewMode;
   const [canvasMode, setCanvasMode] = useState<CanvasMode>("edit");
   const aiSourceFileName = localFileNameFromSourcePath(sourcePath) || projectName;
+  const [canvasReloadRevision, setCanvasReloadRevision] = useState(0);
   // The AI conversation sidebar. All of its React state lives in this hook, so
   // the Workbench gains one hook call and no extra budget.
   // Declared before the conversation hook because the sidebar stays docked
@@ -2479,7 +2480,7 @@ export default function Workbench() {
       documentId,
       projectLoadError || persistState === "failed" || persistState === "conflict"
         ? "error"
-        : readyReviewSession
+        : readyReviewSession || activeRun?.status === "ready-to-open"
           ? "review-ready"
           : runInProgress
             ? "processing"
@@ -2493,6 +2494,7 @@ export default function Workbench() {
     projectLoadError,
     projectName,
     readyReviewSession,
+    activeRun?.status,
     runInProgress,
     workspaceController,
   ]);
@@ -5872,8 +5874,10 @@ export default function Workbench() {
       : null,
   });
   const headerStatusFacts = browserPreviewOnly
-    ? ["浏览器预览 · 只读"]
-    : [...projectStatus.facts];
+    ? []
+    : projectStatus.facts.filter((fact) => (
+      fact === "正在看历史（只读）" || fact === "保存失败"
+    ));
   const canShowCurrentFileInFolder = Boolean(
     sourcePath
     && typeof window !== "undefined"
@@ -5888,6 +5892,37 @@ export default function Workbench() {
     sourcePath
     && typeof window !== "undefined"
     && window.htmlAIProjects?.openInDefaultBrowser,
+  );
+  const reviewAvailable = Boolean(
+    activeRun?.status === "ready-to-open"
+    && activeRun.readyPayload
+    && !readyReviewSession
+    && !reviewPreparing,
+  );
+  const canShowInFinder = canOpenProjectRootInFolder || canShowCurrentFileInFolder;
+  const canOpenCurrentHtml = Boolean(
+    canOpenCurrentHtmlInDefaultBrowser
+    && persistState === "idle"
+    && editRevision === lastPersistedRevision,
+  );
+  const canExportCurrentHtml = Boolean(
+    workspaceController
+    && !projectHydrating
+    && !projectLoadError
+    && !viewTransitioning,
+  );
+  const canReloadCurrentSource = Boolean(
+    sourcePath
+    && viewMode === "current"
+    && persistState === "idle"
+    && editRevision === lastPersistedRevision
+    && !runInProgress
+    && !projectHydrating
+    && !projectLoadError
+    && !workspaceIssue
+    && !externalSourcePreview
+    && !viewTransitioning
+    && !workspaceController?.hasDocumentHistoryAction,
   );
   const pendingRunOutcome = Boolean(
     activeRun?.requestId === "pending" && projectLocked,
@@ -6137,6 +6172,7 @@ export default function Workbench() {
           deliveryMode={currentAgentDeliveryMode}
         />
       ) : null}
+      reloadRevision={canvasReloadRevision}
     />
   ) : null;
   const workbenchInspector = deriveWorkbenchInspector({ canvasMode, aiVisible: aiConversation.visible && Boolean(runCapability) && !readyReviewSession, reviewVisible: Boolean(readyReviewSession), commentsAvailable: Boolean(workspaceController) });
@@ -6335,29 +6371,6 @@ export default function Workbench() {
         onOutcome={presentWorkbenchTabOutcome}
       /> : null}
       {!startPageActive ? <WorkbenchHeaderShell>
-        <WorkbenchFileHeaderView
-          currentSourceFileName={currentSourceFileName}
-          canOpenCurrentHtmlInDefaultBrowser={canOpenCurrentHtmlInDefaultBrowser}
-          persistState={persistState}
-          editRevision={editRevision}
-          lastPersistedRevision={lastPersistedRevision}
-          headerStatusFacts={headerStatusFacts}
-          canOpenProjectRootInFolder={canOpenProjectRootInFolder}
-          canShowCurrentFileInFolder={canShowCurrentFileInFolder}
-          canvasGeneration={canvasGeneration}
-          canvasAuthority={canvasAuthority}
-          visibleCanvasAck={visibleCanvasAck}
-          saveStatusLabel={saveStatusLabel}
-          onOpenInDefaultBrowser={() => void openCurrentHtmlInDefaultBrowser()}
-          onShowProjectRecordsInFolder={() => void showProjectRecordsInFolder()}
-          onShowProjectInFolder={() => void showProjectInFolder()}
-          onRetryCanvasVerification={() => {
-            void workspaceController?.retryCanvasVerification({
-              context: captureProjectContext() || undefined,
-            });
-          }}
-        />
-
         <WorkbenchHeaderToolbar
           runInProgress={runInProgress}
           canvasMode={canvasMode}
@@ -6371,8 +6384,47 @@ export default function Workbench() {
           recentRunOutcome={recentRunOutcome}
           terminalRun={terminalRun}
           reviewActive={Boolean(readyReviewOverlay)}
+          reviewAvailable={reviewAvailable}
+          reviewPreparing={reviewPreparing}
+          refreshAvailable={Boolean(
+            (canvasMode === "preview" || readyReviewOverlay)
+            && !projectHydrating
+            && !projectLoadError
+            && !viewTransitioning,
+          )}
           aiConversationVisible={aiConversation.visible}
           aiAssistantEntry={aiAssistantEntry}
+          fileStatus={
+            <WorkbenchFileHeaderView
+              persistState={persistState}
+              editRevision={editRevision}
+              lastPersistedRevision={lastPersistedRevision}
+              headerStatusFacts={headerStatusFacts}
+              canvasGeneration={canvasGeneration}
+              canvasAuthority={canvasAuthority}
+              visibleCanvasAck={visibleCanvasAck}
+              saveStatusLabel={saveStatusLabel}
+              saveStatusQuiet={browserPreviewOnly || isSafelySaved}
+              onRetryCanvasVerification={() => {
+                void workspaceController?.retryCanvasVerification({
+                  context: captureProjectContext() || undefined,
+                });
+              }}
+            />
+          }
+          moreMenu={{
+            canShowInFolder: canShowInFinder,
+            onShowInFolder: () => {
+              if (canOpenProjectRootInFolder) void showProjectRecordsInFolder();
+              else void showProjectInFolder();
+            },
+            canOpenInBrowser: canOpenCurrentHtml,
+            onOpenInBrowser: () => void openCurrentHtmlInDefaultBrowser(),
+            canExportCurrentHtml,
+            onExportCurrentHtml: () => void exportCurrentHtml(),
+            canReloadCurrentSource,
+            onReloadCurrentSource: () => void reloadCurrentSource(),
+          }}
           onSelectEdit={() => {
             if (externalSourcePreview) {
               returnToEditingFromExternalPreview();
@@ -6432,6 +6484,16 @@ export default function Workbench() {
             };
             if (deferEditorCommand("project-switch", enterPreview)) return;
             enterPreview();
+          }}
+          onOpenReview={() => {
+            if (reviewAvailable) void reviewReadyResult();
+          }}
+          onRefreshCanvas={() => {
+            if (readyReviewOverlay) {
+              setCanvasReloadRevision((revision) => revision + 1);
+              return;
+            }
+            if (canvasMode === "preview") interactionPreviewRef.current?.reload();
           }}
           onToggleProjectPanel={() => {
             const openProjectPanel = () => {
