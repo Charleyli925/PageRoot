@@ -122,8 +122,10 @@ finalizer CLI `--workspace` / `--project-id` is gone; `--project-root` remains.
 
 ## What P1-B changes, and why
 
-P1-B sits on P0-B. It does not change the four save-status strings, island
-undo granularity, or the conflict-panel copy.
+P1-B sits on P0-B. It does not change island undo granularity or the
+conflict-panel copy. The former four save-status strings are no longer rendered
+in the top toolbar; persistence and conflict facts remain owned by the document
+workflow and the existing recovery surfaces.
 
 **Why the second 700ms wait is gone.** Native-edit checkpoints already wait
 `NATIVE_EDIT_CHECKPOINT_DELAY_MS = 700` before producing a source patch.
@@ -184,4 +186,3 @@ ported. Diffing them against `origin/main` showed they would revert #186 copy,
 personal `/Users/lizexuan/` path. Unique work from that tree was already on
 `main` (#186, #193). A recoverable patch is local only
 (`/tmp/pageroot-product-22-dirty-20260815.patch`) and is not committed.
-

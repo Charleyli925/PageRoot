@@ -869,9 +869,15 @@ async function runElectronSession(runRoot, sizeMiB, sequence, sampleIndex) {
       startRendererGapMonitor(launched.page),
       rendererPid(electronApp, launched.rendererUrl).then(observeRss),
     ]);
-    await launched.page.getByRole("button", { name: "项目", exact: true }).click();
+    const sidebar = launched.page.locator(".workbench-global-sidebar");
+    if (await sidebar.getAttribute("data-open") !== "true") {
+      await launched.page.getByRole("button", { name: "展开左侧边栏" }).click();
+    }
     const switchStartedAt = performance.now();
-    await launched.page.locator(".recent-file-row").filter({ hasText: path.basename(sourceB) }).click();
+    await sidebar.locator(".sidebar-project-row")
+      .filter({ hasText: path.basename(sourceB, path.extname(sourceB)) })
+      .first()
+      .click();
     const liveB = await waitForLiveSourcePath(launched.page);
     await currentFrame(launched.page, liveB, token(6_000));
     const dirtySwitchDurationMs = Number(formatNumber(performance.now() - switchStartedAt));

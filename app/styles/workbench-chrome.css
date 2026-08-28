@@ -205,8 +205,6 @@ body {
 }
 
 .workbench-header .workbench-toolbar-actions > button:not(.header-send-button):hover:not(:disabled),
-.workbench-header .workbench-toolbar-actions > .project-button:hover:not(:disabled),
-.workbench-header .workbench-toolbar-actions > .project-button[aria-expanded="true"],
 .workbench-header .workbench-toolbar-actions > .recent-run-button:hover:not(:disabled),
 .workbench-header .workbench-toolbar-actions > .recent-run-button[aria-expanded="true"],
 .workbench-header .workbench-toolbar-actions .workbench-more-menu-trigger:hover:not(:disabled),
@@ -238,69 +236,8 @@ body {
   align-self: center;
 }
 
-.workbench-toolbar-status .window-file {
-  max-width: 100%;
-}
-
 .window-file .file-meta {
   color: var(--chrome-muted);
-}
-
-.window-file .save-status {
-  min-width: 0;
-  max-width: 260px;
-  color: #4f675d;
-}
-
-.window-file .save-status > span:first-child {
-  background: #46a26f;
-}
-
-.window-file .save-status > .save-status-copy {
-  width: auto;
-  height: auto;
-  flex: 0 1 auto;
-  background: transparent;
-  box-shadow: none;
-}
-
-.window-file .save-status[data-canvas-authority="pending"] > span:first-child,
-.window-file .save-status[data-persist-state="writing"] > span:first-child,
-.window-file .save-status[data-persist-state="queued"] > span:first-child {
-  background: #7567b8;
-}
-
-.window-file .save-status[data-persist-state="failed"] > span:first-child,
-.window-file .save-status[data-persist-state="conflict"] > span:first-child,
-.window-file .save-status[data-canvas-authority="failed"] > span:first-child {
-  background: #c15c56;
-}
-
-.window-file .save-status[data-quiet="true"] {
-  width: 14px;
-  height: 24px;
-  justify-content: center;
-  gap: 0;
-  padding: 0;
-  overflow: visible;
-  cursor: default;
-}
-
-.window-file .save-status[data-quiet="true"] .save-status-copy {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  white-space: nowrap;
-  border: 0;
-}
-
-.window-file .save-status:focus-visible {
-  outline: 2px solid var(--chrome-focus);
-  outline-offset: 2px;
 }
 
 /* A generous but quiet hit strip makes both dividers discoverable without
@@ -342,7 +279,7 @@ body {
 .workbench-resizer:hover,
 .workbench-resizer:focus-visible,
 .workbench[data-resizing] .workbench-resizer {
-  background: rgb(78 78 91 / 4%);
+  background: transparent;
 }
 
 .workbench-resizer:focus-visible {
@@ -351,29 +288,19 @@ body {
 }
 
 .workbench-resizer-grip {
-  width: 4px;
-  height: 28px;
+  width: 1px;
+  height: 100%;
+  min-height: 1px;
   display: grid;
-  align-content: center;
-  justify-items: center;
-  gap: 3px;
-  border-radius: 999px;
-  background: rgb(78 78 91 / 8%);
-  transition: background-color 140ms ease, height 140ms ease;
-}
-
-.workbench-resizer-grip > span {
-  width: 2px;
-  height: 2px;
-  border-radius: 50%;
-  background: currentcolor;
+  border-radius: 0;
+  background: #a9a8ae;
+  transition: background-color 140ms ease;
 }
 
 .workbench-resizer:hover .workbench-resizer-grip,
 .workbench-resizer:focus-visible .workbench-resizer-grip,
 .workbench[data-resizing] .workbench-resizer-grip {
-  height: 36px;
-  background: rgb(112 108 153 / 20%);
+  background: #8e8d94;
 }
 
 .workbench[data-resizing="sidebar"] .workbench-resizer-inspector,
@@ -385,7 +312,8 @@ body {
   transition: none;
 }
 
-.workbench-refresh-button {
+.workbench-refresh-button,
+.workbench-more-menu-trigger {
   width: 30px;
   height: 30px;
   min-height: 30px;
@@ -396,7 +324,15 @@ body {
   border: 0;
   border-radius: 8px;
   background: transparent;
-  color: var(--chrome-muted);
+  color: #55565f;
+}
+
+.workbench-refresh-button > svg,
+.workbench-more-menu-trigger > svg {
+  width: 20px;
+  height: 20px;
+  flex: none;
+  color: currentcolor;
 }
 
 .workbench-refresh-button:hover:not(:disabled),
@@ -433,7 +369,6 @@ body {
   border: 0;
   border-radius: 8px;
   background: transparent;
-  color: var(--chrome-muted);
 }
 
 .workbench-more-menu-trigger:hover:not(:disabled),
@@ -554,11 +489,5 @@ body {
   .workbench-resizer,
   .workbench-resizer-grip {
     transition: none;
-  }
-
-  .window-file .save-status[data-canvas-authority="pending"] > span:first-child,
-  .window-file .save-status[data-persist-state="writing"] > span:first-child,
-  .window-file .save-status[data-persist-state="queued"] > span:first-child {
-    animation: none;
   }
 }

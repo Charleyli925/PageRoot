@@ -52,7 +52,6 @@ function createHarness({
   initialContent = "# Original",
   read = null,
   write = null,
-  presentation = null,
 } = {}) {
   const projectSession = new ProjectSession();
   projectSession.openLocator(SOURCE_PATH);
@@ -91,13 +90,6 @@ function createHarness({
     runSession,
     projectRulesSession,
     errorMessage: (cause, fallback) => String(cause?.message || fallback),
-    ports: {
-      presentation: presentation || {
-        restoreEditor({ settle }) {
-          settle();
-        },
-      },
-    },
     scheduler,
     clock: { now: () => Date.parse("2026-08-12T00:00:00.000Z") },
   });
@@ -213,15 +205,8 @@ test("late PROJECT.md reads are stale and cannot replace the next project", asyn
   assert.equal(harness.workflow.getSnapshot().content, "# Next project");
 });
 
-test("restore delegates native-editor retirement to the narrow presentation port", async () => {
-  let settleRestore = null;
-  const harness = createHarness({
-    presentation: {
-      restoreEditor({ settle }) {
-        settleRestore = settle;
-      },
-    },
-  });
+test("restore retires the composition inside ProjectRulesSession", async () => {
+  const harness = createHarness();
   await harness.workflow.open({ context: harness.context });
   harness.workflow.updateContent({ content: "draft" });
   const target = {};
@@ -232,10 +217,9 @@ test("restore delegates native-editor retirement to the narrow presentation port
   assert.equal(harness.workflow.getSnapshot().content, "# Original");
   assert.equal(
     harness.workflow.updateContent({ content: "late marked text" }).status,
-    "blocked",
+    "succeeded",
   );
-  assert.equal(typeof settleRestore, "function");
-  settleRestore();
+  assert.equal(harness.workflow.getSnapshot().content, "late marked text");
   assert.equal(harness.workflow.getSnapshot().compositionActive, false);
 });
 

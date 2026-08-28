@@ -31,7 +31,7 @@ test("Electron tab keyboard navigation manages focus and a persisted Start suppr
     await loadedDiskFrame(firstLaunch.page, fixture.sourcePath, "list-item");
     await expect(firstLaunch.page.getByRole("button", { name: "导入并打开" }))
       .toBeHidden({ timeout: 30_000 });
-    const tablist = firstLaunch.page.getByRole("tablist", { name: "已打开的 HTML" });
+    const tablist = firstLaunch.page.getByRole("tablist", { name: "已打开的页面" });
     await expect(tablist.getByRole("tab")).toHaveCount(1);
     await firstLaunch.page.getByRole("button", { name: "新标签页" }).click();
     await firstLaunch.page.getByRole("button", { name: "新标签页" }).click();
@@ -78,7 +78,7 @@ test("Electron tab keyboard navigation manages focus and a persisted Start suppr
     await closePageRootGracefully(firstLaunch.electronApp, firstLaunch.page);
     firstClosed = true;
     reopened = await launchPageRoot({ isolatedUserData: firstLaunch.isolatedUserData });
-    const reopenedTabs = reopened.page.getByRole("tablist", { name: "已打开的 HTML" });
+    const reopenedTabs = reopened.page.getByRole("tablist", { name: "已打开的页面" });
     await expect(reopenedTabs.getByRole("tab")).toHaveCount(2);
     await expect(reopenedTabs.getByRole("tab").nth(0)).toHaveAttribute("aria-selected", "true");
     await expect(reopened.page.locator("main.workbench")).toHaveAttribute("data-start-page", "true");
@@ -176,7 +176,7 @@ test("Electron browser A to B to A reopens exact in-memory HTML and deduplicates
       window.__qaRuntimeDocumentToken = crypto.randomUUID();
       return window.__qaRuntimeDocumentToken;
     });
-    const tabs = launched.page.getByRole("tablist", { name: "已打开的 HTML" }).getByRole("tab");
+    const tabs = launched.page.getByRole("tablist", { name: "已打开的页面" }).getByRole("tab");
     await expect(tabs.filter({ hasText: "browser-memory-a" })).toHaveCount(1);
     const afterA = await tabs.count();
 
@@ -277,7 +277,7 @@ test("Electron restores multiple Registry tabs, the persisted active document, a
   try {
     await loadedDiskFrame(first.page, projectA.sourcePath, "list-item");
     await openRecentProject(first.page, projectB.sourcePath);
-    const firstTabs = first.page.getByRole("tablist", { name: "已打开的 HTML" }).getByRole("tab");
+    const firstTabs = first.page.getByRole("tablist", { name: "已打开的页面" }).getByRole("tab");
     await expect(firstTabs).toHaveCount(2);
     await expect(firstTabs.filter({ hasText: "registry-restart-b" })).toHaveAttribute("aria-selected", "true");
     const cachedSurfaces = first.page.getByTestId("workbench-document-surface-cache")
@@ -305,7 +305,7 @@ test("Electron restores multiple Registry tabs, the persisted active document, a
 
     restored = await launchPageRoot({ isolatedUserData: first.isolatedUserData });
     await loadedDiskFrame(restored.page, projectB.sourcePath, "list-item");
-    const restoredTabs = restored.page.getByRole("tablist", { name: "已打开的 HTML" }).getByRole("tab");
+    const restoredTabs = restored.page.getByRole("tablist", { name: "已打开的页面" }).getByRole("tab");
     await expect(restoredTabs.filter({ hasText: "registry-restart-a" })).toHaveCount(1);
     await expect(restoredTabs.filter({ hasText: "registry-restart-b" })).toHaveCount(1);
     await expect(restoredTabs.filter({ hasText: "registry-restart-b" })).toHaveAttribute("aria-selected", "true");
@@ -340,7 +340,7 @@ test("Electron restores multiple Registry tabs, the persisted active document, a
       externalSourcePaths: [projectC.sourcePath],
     });
     await loadedDiskFrame(external.page, projectC.sourcePath, "list-item");
-    const externalTabs = external.page.getByRole("tablist", { name: "已打开的 HTML" }).getByRole("tab");
+    const externalTabs = external.page.getByRole("tablist", { name: "已打开的页面" }).getByRole("tab");
     await expect(externalTabs.filter({ hasText: "external-cold-priority-c" }))
       .toHaveAttribute("aria-selected", "true");
   } finally {
@@ -413,7 +413,7 @@ test("Electron sidebar opens an imported historical version in the existing proj
       window.htmlAIProjects?.getActiveProject()?.projectId || null
     ))).toBe(beforeExpansion);
 
-    const tabs = launched.page.getByRole("tablist", { name: "已打开的 HTML" }).getByRole("tab");
+    const tabs = launched.page.getByRole("tablist", { name: "已打开的页面" }).getByRole("tab");
     await expect(tabs).toHaveCount(1);
     await importedProject.locator(".sidebar-version-file").first().click();
     await expect(tabs).toHaveCount(2, { timeout: 60_000 });

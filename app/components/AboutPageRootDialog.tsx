@@ -6,249 +6,34 @@ import {
   type MouseEvent,
 } from "react";
 import { ArrowSquareOutIcon } from "@phosphor-icons/react/dist/csr/ArrowSquareOut";
-import { CheckCircleIcon } from "@phosphor-icons/react/dist/csr/CheckCircle";
-import { CloudArrowDownIcon } from "@phosphor-icons/react/dist/csr/CloudArrowDown";
 import { GithubLogoIcon } from "@phosphor-icons/react/dist/csr/GithubLogo";
 import { XIcon } from "@phosphor-icons/react/dist/csr/X";
 
-import type {
-  AgentProviderAvailabilitySnapshot,
-  AgentProviderGuidanceKind,
-  AgentSelection,
-} from "../domain/agent-provider-state.js";
-import type { AgentProviderCardPresentation } from "./AgentProviderCard";
-import AgentProviderCard from "./AgentProviderCard";
+import { architectureLabel } from "./update-presentation";
 
-export type AboutApplicationUpdateStatus =
-  | "idle"
-  | "checking"
-  | "available"
-  | "downloading"
-  | "downloaded"
-  | "installing"
-  | "current"
-  | "unsupported"
-  | "unavailable";
-
-export type AboutApplicationUpdateResult = {
-  status: AboutApplicationUpdateStatus;
-  currentVersion: string;
-  latestVersion: string | null;
-  architecture: string;
-  downloadPercent: number | null;
-  publishedAt: string | null;
-};
-
-export type AboutAgentCard = Readonly<{
-  selection: AgentSelection;
-  presentation: AgentProviderCardPresentation;
-  availability: AgentProviderAvailabilitySnapshot;
-}>;
-
-export type AboutOpenSource = "default" | "agent-settings";
-
-type AboutPageRootDialogProps = {
+export type AboutPageRootDialogProps = {
   open: boolean;
   appVersion: string;
-  updateResult: AboutApplicationUpdateResult | null;
-  updatesAvailable: boolean;
-  manualCheckPending: boolean;
-  manualCheckFailed: boolean;
+  architecture?: string | null;
   repositoryOpenFailed: boolean;
-  releaseNotesOpenFailed: boolean;
   userNoticeOpenFailed: boolean;
-  agentCards: readonly AboutAgentCard[];
-  source?: AboutOpenSource;
   onClose: () => void;
-  onCheckForUpdates: () => void;
-  onDownloadUpdate: () => void;
-  onRequestRestart: () => void;
-  onOpenReleaseNotes: () => void;
   onOpenRepository: () => void;
   onOpenUserNotice: () => void;
-  onCheckUsability: (selection: AgentSelection) => Promise<AboutAgentOutcome>;
-  onCopyGuidance: (
-    kind: AgentProviderGuidanceKind,
-    selection: AgentSelection,
-  ) => Promise<AboutAgentOutcome>;
-  onInstall: (selection: AgentSelection) => Promise<AboutAgentOutcome>;
 };
-
-type AboutAgentOutcome = Readonly<{
-  status: string;
-  reason?: string;
-}> | null | undefined;
-
-type UpdatePresentation = {
-  tone: "neutral" | "checking" | "current" | "available" | "ready" | "unavailable";
-  title: string;
-  detail: string;
-};
-
-function architectureLabel(architecture: string | null | undefined): string {
-  if (architecture === "arm64") return "Apple silicon";
-  if (architecture === "x64") return "Intel";
-  return "macOS";
-}
-
-function updatePresentation({
-  result,
-  updatesAvailable,
-  manualCheckPending,
-  manualCheckFailed,
-}: {
-  result: AboutApplicationUpdateResult | null;
-  updatesAvailable: boolean;
-  manualCheckPending: boolean;
-  manualCheckFailed: boolean;
-}): UpdatePresentation {
-  if (!updatesAvailable) {
-    return {
-      tone: "neutral",
-      title: "浏览器预览不检查应用更新",
-      detail: "自动更新只在正式签名的 macOS 应用中启用。",
-    };
-  }
-  if (manualCheckFailed) {
-    return {
-      tone: "unavailable",
-      title: "本机更新服务暂时不可用",
-      detail: "当前编辑不受影响，可以稍后重新检查。",
-    };
-  }
-  if (!result) {
-    return {
-      tone: "checking",
-      title: "正在读取更新状态",
-      detail: "源页正在连接本机更新服务。",
-    };
-  }
-  if (manualCheckPending || result.status === "checking") {
-    return {
-      tone: "checking",
-      title: "正在检查更新",
-      detail: "正在核对 GitHub 上最新的正式版本。",
-    };
-  }
-  if (result.status === "current") {
-    return {
-      tone: "current",
-      title: "当前已是最新版本",
-      detail: `PageRoot ${result.currentVersion} 已是最新的正式版本。`,
-    };
-  }
-  if (result.status === "available") {
-    return {
-      tone: "available",
-      title: `PageRoot ${result.latestVersion || "新版本"} 可以下载`,
-      detail: "点击下载后仍可继续编辑；下载完成时再决定是否重启。",
-    };
-  }
-  if (result.status === "downloading") {
-    return {
-      tone: "available",
-      title: `正在下载 PageRoot ${result.latestVersion || "新版本"}`,
-      detail: "你可以继续编辑；下载完成后源页会询问是否现在重启。",
-    };
-  }
-  if (result.status === "downloaded") {
-    return {
-      tone: "ready",
-      title: `PageRoot ${result.latestVersion || "新版本"} 已准备好`,
-      detail: "重启前会先确认当前编辑、评论和项目资料已经安全写入。",
-    };
-  }
-  if (result.status === "installing") {
-    return {
-      tone: "ready",
-      title: "源页即将重新打开",
-      detail: "新版本安装完成后会自动回到源页。",
-    };
-  }
-  if (result.status === "unavailable") {
-    return {
-      tone: "unavailable",
-      title: "暂时无法连接更新服务",
-      detail: "当前编辑不受影响，可以稍后重新检查。",
-    };
-  }
-  if (result.status === "unsupported") {
-    return {
-      tone: "neutral",
-      title: "当前构建不检查应用更新",
-      detail: "自动更新只在正式签名的 macOS 应用中启用。",
-    };
-  }
-  return {
-    tone: "neutral",
-    title: "自动更新已开启",
-    detail: "启动后会检查一次；应用保持打开时，每 4 小时检查一次。",
-  };
-}
 
 export default function AboutPageRootDialog({
   open,
   appVersion,
-  updateResult,
-  updatesAvailable,
-  manualCheckPending,
-  manualCheckFailed,
+  architecture,
   repositoryOpenFailed,
-  releaseNotesOpenFailed,
   userNoticeOpenFailed,
-  agentCards,
-  source = "default",
   onClose,
-  onCheckForUpdates,
-  onDownloadUpdate,
-  onRequestRestart,
-  onOpenReleaseNotes,
   onOpenRepository,
   onOpenUserNotice,
-  onCheckUsability,
-  onCopyGuidance,
-  onInstall,
 }: AboutPageRootDialogProps) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
-  const recoveryActionRef = useRef<HTMLButtonElement>(null);
-  const agentCardsRef = useRef(agentCards);
-  useEffect(() => {
-    agentCardsRef.current = agentCards;
-  }, [agentCards]);
-  const presentation = updatePresentation({
-    result: updateResult,
-    updatesAvailable,
-    manualCheckPending,
-    manualCheckFailed,
-  });
-  const checking = manualCheckPending || updateResult?.status === "checking";
-  const downloaded = updateResult?.status === "downloaded";
-  const available = updateResult?.status === "available";
-  const installing = updateResult?.status === "installing";
-  const downloading = updateResult?.status === "downloading";
-  const canCheck = (
-    updatesAvailable
-    && !checking
-    && !available
-    && !downloaded
-    && !installing
-    && !downloading
-    && updateResult?.status !== "unsupported"
-  );
-  const actionLabel = downloaded
-    ? "重启更新"
-    : available
-      ? "下载更新"
-      : installing
-        ? "正在重启…"
-        : downloading
-          ? "正在下载…"
-          : checking
-            ? "正在检查…"
-            : canCheck
-              ? "立即检查"
-              : "仅正式版可用";
 
   useEffect(() => {
     const dialog = dialogRef.current;
@@ -259,64 +44,9 @@ export default function AboutPageRootDialog({
       dialog.close();
     }
     if (!open) return undefined;
-
-    let active = true;
-    let checkInFlight = false;
-    let lastCheckStartedAt = 0;
-    let lastCheckGuidance = agentCardsRef.current
-      .map((card) => card.availability.guidanceCopied)
-      .join("|");
-    const requestCheck = (force = false) => {
-      if (!active) return;
-      const cards = agentCardsRef.current;
-      if (!force && cards.every((card) => (
-        card.availability.status === "ready" || card.availability.status === "checking"
-      ))) return;
-      const now = Date.now();
-      const guidanceKey = cards.map((card) => card.availability.guidanceCopied).join("|");
-      const guidanceChanged = guidanceKey !== lastCheckGuidance;
-      if (
-        checkInFlight
-        || (!guidanceChanged && now - lastCheckStartedAt < 1_500)
-      ) return;
-      lastCheckStartedAt = now;
-      lastCheckGuidance = guidanceKey;
-      checkInFlight = true;
-      Promise.all(cards.map((card) => Promise.resolve(onCheckUsability(card.selection))))
-        .catch(() => undefined)
-        .finally(() => {
-          checkInFlight = false;
-        });
-    };
-
-    // Opening About always performs a real check. A focus/visibility return only
-    // rechecks unresolved states, and the local guard coalesces the two browser
-    // events into one request. RunWorkflow still owns the cross-surface promise.
-    requestCheck(true);
-    const handleReturnToApp = () => {
-      if (document.visibilityState === "visible") requestCheck();
-    };
-    window.addEventListener("focus", handleReturnToApp);
-    document.addEventListener("visibilitychange", handleReturnToApp);
-    const focusFrame = requestAnimationFrame(() => {
-      if (source === "agent-settings") recoveryActionRef.current?.focus();
-      else closeButtonRef.current?.focus();
-    });
-    return () => {
-      active = false;
-      window.removeEventListener("focus", handleReturnToApp);
-      document.removeEventListener("visibilitychange", handleReturnToApp);
-      cancelAnimationFrame(focusFrame);
-    };
-  }, [onCheckUsability, open, source]);
-
-  useEffect(() => {
-    if (!open || source !== "agent-settings") return undefined;
-    const focusFrame = requestAnimationFrame(() => {
-      recoveryActionRef.current?.focus();
-    });
+    const focusFrame = requestAnimationFrame(() => closeButtonRef.current?.focus());
     return () => cancelAnimationFrame(focusFrame);
-  }, [open, agentCards, source]);
+  }, [open]);
 
   const handleBackdropPointer = (event: MouseEvent<HTMLDialogElement>) => {
     if (event.target === event.currentTarget) onClose();
@@ -355,78 +85,15 @@ export default function AboutPageRootDialog({
             <p id="about-pageroot-description">
               源码级本地 HTML 编辑器。
               <br />
-              所见即可改，AI Agent 无缝接力。
+              所见即可改，源文件始终可追溯。
             </p>
           </div>
         </header>
 
         <div className="about-product-meta" aria-label="应用信息">
-          <span>版本 {appVersion || updateResult?.currentVersion || "—"}</span>
-          <span>{architectureLabel(updateResult?.architecture)}</span>
+          <span>版本 {appVersion || "—"}</span>
+          <span>{architectureLabel(architecture)}</span>
         </div>
-
-        <section className="about-agent-section" aria-labelledby="about-agent-title">
-          <h3 id="about-agent-title">AI Agent</h3>
-          {agentCards.map((card, index) => (
-            <AgentProviderCard
-              key={`${card.selection.providerId}:${card.selection.runtimeId}`}
-              availability={card.availability}
-              presentation={card.presentation}
-              surface="about"
-              actionButtonRef={index === 0 ? recoveryActionRef : undefined}
-              onCopyGuidance={(kind) => onCopyGuidance(kind, card.selection)}
-              onInstall={() => onInstall(card.selection)}
-            />
-          ))}
-        </section>
-
-        <section
-          className="about-update-card"
-          data-tone={presentation.tone}
-          aria-labelledby="about-update-title"
-        >
-          <div className="about-update-icon" aria-hidden="true">
-            {presentation.tone === "ready" ? (
-              <CheckCircleIcon size={23} weight="fill" />
-            ) : (
-              <CloudArrowDownIcon size={23} weight="duotone" />
-            )}
-          </div>
-          <div className="about-update-column">
-            <div className="about-update-copy" aria-live="polite" aria-atomic="true">
-              <strong id="about-update-title">{presentation.title}</strong>
-              <p>{presentation.detail}</p>
-            </div>
-            <button
-              className="about-release-notes"
-              type="button"
-              title="在浏览器中查看这个版本的更新内容"
-              onClick={onOpenReleaseNotes}
-            >
-              <span>查看更新内容</span>
-              <ArrowSquareOutIcon aria-hidden="true" size={11} weight="bold" />
-            </button>
-          </div>
-          <button
-            className="about-update-action"
-            type="button"
-            disabled={!canCheck && !available && !downloaded}
-            onClick={
-              downloaded
-                ? onRequestRestart
-                : available
-                  ? onDownloadUpdate
-                  : onCheckForUpdates
-            }
-          >
-            {actionLabel}
-          </button>
-        </section>
-        {releaseNotesOpenFailed ? (
-          <p className="about-link-error" role="alert">
-            更新内容页面没有打开，请检查网络后重试。
-          </p>
-        ) : null}
 
         <button
           className="about-github-link"

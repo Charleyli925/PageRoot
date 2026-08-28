@@ -305,8 +305,8 @@ ${REVIEW_TEXT_EVIDENCE_MARKER_CSS}
     box-shadow: 0 4px 14px rgb(30 25 70 / 14%) !important;
   }
 
-  /* One page-edge revision bar per change region: a constant-width quiet
-     position index that pairs with the content map and the navigator. */
+  /* One page-edge revision bar per change region: the quiet, clickable focus
+     entry point that remains after the toolbar sequence navigator is removed. */
   [data-pageroot-review-region-bar] {
     position: absolute !important;
     z-index: 2 !important;

@@ -29,7 +29,7 @@ Unknown providers and runtimes fail closed. Packaged Codex App Server modules
 remain unregistered. Renderer
 `AgentCatalogState` owns provider-keyed availability, the canonical selected
 selection and selection-keyed preflight cache. `RunWorkflow` exposes the same
-projection to the delivery surface and About. The
+projection to the delivery surface and Settings. The
 Qoder provider owns the disk-only standalone-package check and the complete
 use-time version/login/model preflight; the provider-neutral Bridge does not
 know installation paths or version rules. The ACP runtime then starts
@@ -253,7 +253,7 @@ services.
 | Renderer draft revision, pending operations and reconciliation | `app/application/draft-session.js` |
 | Renderer comment working copy, composer and saved-comment edit projection | `app/application/comment-session.js` |
 | Active/background runs, Agent delivery projection, background outcomes, submission lifecycle locks and operation locks | `app/application/run-session.js` |
-| Renderer Agent catalog, provider-keyed availability/guidance, selection-keyed use-time check and submission sequencing | `app/application/agent-provider-catalog.js`, `app/domain/agent-provider-state.js` and `app/application/run-workflow.js`; `qoder-availability.js` and `QoderAvailabilityCard.tsx` are compatibility wrappers only. Delivery and About consume the same `WorkspaceController` snapshot plus the Bridge public catalog projection (`installable` / `installSource` / `installState`). Neither card receives command, version, path or npm prefix |
+| Renderer Agent catalog, provider-keyed availability/guidance, selection-keyed use-time check and submission sequencing | `app/application/agent-provider-catalog.js`, `app/domain/agent-provider-state.js` and `app/application/run-workflow.js`; `qoder-availability.js` and `QoderAvailabilityCard.tsx` are compatibility wrappers only. Delivery and Settings consume the same `WorkspaceController` snapshot plus the Bridge public catalog projection (`installable` / `installSource` / `installState`). About is product-information only. Neither card receives command, version, path or npm prefix |
 | Product ACP allowlist, managed-install inventory, in-flight install jobs and install drain | `bridge/agent/catalog/agent-catalog.mjs` and `bridge/agent/catalog/agent-installer.mjs`; Coordinator does not own install. Qoder and Codex ACP are installable shipped entries. Codex App Server modules remain packaged-unregistered |
 | Provider-neutral dispatch, provider/runtime/security-profile/execution-purpose tickets, process/session lifetime, canonical events, cancellation-before-durable-Request and shutdown drain | `bridge/agent/agent-runtime-coordinator.mjs` plus provider/runtime registries; legacy Services are stateless façades and durable Request/Candidate authority remains in `ProjectFileRepository` |
 | Trusted-local Qoder installation discovery, package/version/login/model preflight, error classification and ACP launch descriptor | `bridge/agent/providers/qoder-provider.mjs`; user CLI discovery still wins over a PageRoot-managed copy; an invalid user installation is not treated as missing. Legacy `qoder-acp` is mapped only by the provider registry and its external projection remains compatible |
@@ -297,10 +297,10 @@ services.
 | Request freeze/persisted-boundary validation, authority reconciliation, run polling, cancellation, conflict commands and confirmed handoff | `app/application/run-workflow.js` |
 | Workbench pure record/comment/project/version/browser helpers | `app/workbench/*-model.ts`, `app/workbench/browser-io.ts` |
 | History, attachment and preview presentation | `app/workbench/presentation.tsx` |
-| Workbench visual cascade | `app/globals.css` is import-only; `app/styles/*.css` load in fixed order (tokens/base, shell, review V5/V5.1/V5.2 canvas, comment hierarchy, project resources, about/chrome, top toolbar). Later layers override earlier ones; the two `:root` blocks stay split |
-| File title, rename, update badge and save-status presentation | `app/workbench/file-header-view.tsx` |
+| Workbench visual cascade | `app/globals.css` is import-only; `app/styles/*.css` load in fixed order (tokens/base, shell, review V5/V5.1/V5.2 canvas, comment hierarchy, project/sidebar context, about/chrome, top toolbar). Later layers override earlier ones; the two `:root` blocks stay split |
+| File title, rename and file-action presentation | `app/workbench/file-header-view.tsx` |
 | Comment rail presentation | `app/workbench/comment-rail-view.tsx` |
-| Project files drawer presentation | `app/workbench/project-files-view.tsx` |
+| Project context/sidebar presentation and settings tab | `app/workbench/WorkbenchChrome.tsx`, `app/workbench/workbench-sidebar-container.tsx`, `app/components/SettingsPage.tsx` |
 | AI run conversation and live narration presentation | `app/workbench/run-conversation-outlet.tsx`, `app/workbench/AiConversationSidebar.tsx` |
 | Formal AI review state transitions | `app/workbench/review-state.ts` |
 | Bounded pure sibling alignment for semantic review units | `app/lib/review-semantic-alignment.js` |
@@ -545,7 +545,7 @@ channel checks, the startup-plus-four-hour schedule, coalesced manual checks,
 download progress and downloaded-install readiness. It exposes only immutable
 status snapshots and narrow check/download/install intents through preload IPC. The
 renderer can also request the fixed project repository URL, but cannot supply
-an arbitrary external URL. The About surface may request the packaged user
+an arbitrary external URL. The Settings surface may request the packaged user
 notice through one app-level IPC intent; the main process resolves the fixed
 resource name for development or the signed app bundle, and the renderer cannot
 supply a local path. A renderer download intent is accepted only while

@@ -312,7 +312,6 @@ test("workspace controller accepts its injected test Session set and publishes c
   assert.deepEqual(harness.events, [{
     type: "registration-published",
     context,
-    projectRecordsPath: "/tmp/PageRoot/project_registration",
     projectName: "Canonical project",
     canonicalSourceAdopted: true,
   }]);
@@ -520,47 +519,6 @@ test("comments capability publishes only comment snapshots with stable commands"
   unsubscribe();
   harness.commentSession.setComposerDraft("after unsubscribe");
   assert.equal(snapshots.length, 1);
-  harness.controller.dispose();
-});
-
-test("projects capability publishes project facts without waking its catalog projection", async () => {
-  const harness = createProjectRulesHarness();
-  const capability = harness.controller.projects;
-  const commands = capability.commands;
-  const catalog = harness.controller.projectCatalog;
-  const projectSnapshots = [];
-  let catalogPublications = 0;
-  const unsubscribeProjects = capability.subscribe(() => {
-    projectSnapshots.push(capability.getSnapshot());
-  });
-  const unsubscribeCatalog = catalog.subscribe(() => {
-    catalogPublications += 1;
-  });
-  const initial = capability.getSnapshot();
-
-  assert.equal(initial.session?.projectId, "project_rules_controller");
-  assert.equal(initial.rules?.open, false);
-  assert.equal(initial.versions?.viewMode, "current");
-  assert.deepEqual(catalog.getSnapshot(), {
-    recent: [],
-    registered: [],
-    error: "",
-  });
-
-  assert.equal((await commands.openRules()).status, "succeeded");
-  assert.equal(commands.updateRules("# Capability rules").status, "succeeded");
-  assert.equal(capability.getSnapshot().rules?.content, "# Capability rules");
-  assert.equal(projectSnapshots.length >= 2, true);
-  assert.equal(catalogPublications, 0);
-  assert.equal(harness.controller.projects, capability);
-  assert.equal(harness.controller.projects.commands, commands);
-  assert.equal(harness.controller.projectCatalog, catalog);
-  assert.ok(Object.isFrozen(capability.getSnapshot()));
-  assert.ok(Object.isFrozen(commands));
-  assert.ok(Object.isFrozen(catalog.getSnapshot()));
-
-  unsubscribeProjects();
-  unsubscribeCatalog();
   harness.controller.dispose();
 });
 

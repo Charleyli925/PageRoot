@@ -35,11 +35,20 @@ test("the legacy Qoder card is a presentation-only wrapper over the neutral card
   ]) assert.ok(card.includes(contract), contract);
 });
 
-test("About keeps its open, return-to-app and action-focus fences", async () => {
-  const about = await source("../app/components/AboutPageRootDialog.tsx");
-  assert.match(about, /(?:window\.)?requestAnimationFrame/u);
-  assert.match(about, /document\.visibilityState === "visible"/u);
-  assert.match(about, /window\.addEventListener\("focus"/u);
-  assert.match(about, /document\.addEventListener\("visibilitychange"/u);
-  assert.match(about, /recoveryActionRef\.current\?\.focus\(\)/u);
+test("About is product information while Settings owns Agent checks and update controls", async () => {
+  const [about, settings] = await Promise.all([
+    source("../app/components/AboutPageRootDialog.tsx"),
+    source("../app/components/SettingsPage.tsx"),
+  ]);
+  assert.match(about, /源码级本地 HTML 编辑器/u);
+  assert.doesNotMatch(about, /about-agent-section|Agent|更新|检查更新|Qoder/u);
+  assert.match(settings, /AI Agent/u);
+  assert.match(settings, /软件更新/u);
+  assert.match(settings, /document\.visibilityState === "visible"/u);
+  assert.match(settings, /window\.addEventListener\("focus"/u);
+  assert.match(settings, /document\.addEventListener\("visibilitychange"/u);
+  assert.match(settings, /agentActionRef\.current\?\.focus\(\)/u);
+  assert.match(settings, /onCheckForUpdates/u);
+  assert.match(settings, /onDownloadUpdate/u);
+  assert.match(settings, /onRequestRestart/u);
 });

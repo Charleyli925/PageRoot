@@ -16,7 +16,6 @@ test("each local side effect runs once per user intent and leaves a visible reco
   assert.deepEqual(LOCAL_USER_ACTION_KINDS, [
     "show-source-in-folder",
     "open-source-in-browser",
-    "open-project-records",
     "reveal-request-folder",
     "reveal-ai-task",
     "reveal-version-file",

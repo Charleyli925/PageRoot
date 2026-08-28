@@ -5,7 +5,7 @@ import {
   AgentCatalogState,
   CODEX_AGENT_PROVIDER,
   QODER_AGENT_PROVIDER,
-  aboutAgentCardsFromCatalog,
+  agentProviderCardsFromCatalog,
   defaultAgentProviders,
 } from "../app/application/agent-provider-catalog.js";
 import {
@@ -33,7 +33,7 @@ test("the source-owned hard gate exposes Codex through the shared Agent chooser"
   assert.equal(CODEX_AGENT_PROVIDER.runtimeId, "acp");
   assert.equal(CODEX_AGENT_PROVIDER.securityProfile, "client-mediated");
   assert.equal(
-    aboutAgentCardsFromCatalog({
+    agentProviderCardsFromCatalog({
       providers: {
         qoder: {
           ...QODER_AGENT_PROVIDER,
@@ -45,8 +45,8 @@ test("the source-owned hard gate exposes Codex through the shared Agent chooser"
   );
 });
 
-test("About cards include every installable provider without provider-id branches", () => {
-  const cards = aboutAgentCardsFromCatalog({
+test("Settings cards include every installable provider without provider-id branches", () => {
+  const cards = agentProviderCardsFromCatalog({
     providers: {
       qoder: {
         ...QODER_AGENT_PROVIDER,

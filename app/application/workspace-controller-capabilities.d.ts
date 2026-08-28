@@ -202,47 +202,6 @@ export type ProjectCatalogControllerCapability<
   ProjectCatalogControllerCommands
 >;
 
-export type ProjectControllerCapabilitySnapshot<TVersion = unknown> = Readonly<{
-  session: ProjectSessionSnapshot | null;
-  workflow: ProjectWorkflowSnapshot | null;
-  rules: ProjectRulesSnapshot | null;
-  versions: VersionSessionSnapshot<TVersion> | null;
-}>;
-
-export interface ProjectControllerCommands {
-  readFile(relativePath: string): Promise<import("./project-workflow.js").ProjectWorkflowOutcome<{
-    content: string;
-  }>>;
-  openRules(): Promise<import("./project-rules-workflow.js").ProjectRulesWorkflowOutcome<{
-    opened: boolean;
-    reused?: boolean;
-  }>>;
-  updateRules(content: string): import("./project-rules-workflow.js").ProjectRulesWorkflowOutcome<{
-    updated: boolean;
-  }>;
-  beginRulesComposition(target: unknown, baselineValue: string): number | null;
-  finishRulesComposition(target: unknown): boolean;
-  leaveRulesEditor(): boolean;
-  restoreRules(): import("./project-rules-workflow.js").ProjectRulesWorkflowOutcome<{
-    restored: boolean;
-    editorGeneration: number;
-  }>;
-  saveRules(): Promise<import("./project-rules-workflow.js").ProjectRulesWorkflowOutcome<{
-    saved: boolean;
-    reconciled?: boolean;
-  }>>;
-  closeRules(): Promise<import("./project-rules-workflow.js").ProjectRulesWorkflowOutcome<{
-    closed: boolean;
-  }>>;
-}
-
-export type ProjectControllerCapability<
-  TVersion = unknown,
-> = CapabilityFacet<
-  ProjectControllerCapabilitySnapshot<TVersion>,
-  ProjectControllerCommands
->;
-
 export type RunControllerCapabilitySnapshot = Readonly<{
   session: RunSessionSnapshot | null;
   workflow: RunWorkflowSnapshot | null;
@@ -292,6 +251,7 @@ export interface NavigationControllerCommands {
     input?: { deadlineMs?: number },
   ): Promise<import("./workbench-navigation-workflow.js").WorkbenchNavigationOutcome>;
   createStartTab(): Promise<import("./workbench-navigation-workflow.js").WorkbenchNavigationOutcome>;
+  createSettingsTab(): Promise<import("./workbench-navigation-workflow.js").WorkbenchNavigationOutcome>;
   closeTab(tabId: string): Promise<import("./workbench-navigation-workflow.js").WorkbenchNavigationOutcome>;
   openRegisteredProject(input: {
     projectId: string;

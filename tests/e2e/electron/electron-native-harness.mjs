@@ -341,10 +341,6 @@ export async function assertFrozenRuntimeRetained(page, frame, baseline) {
   expect(frame.isDetached()).toBe(false);
   expect(await documentToken(page)).toBe(baseline.document);
   await expect(page.locator("[data-runtime-bootstrap-count=\"1\"]")).toHaveCount(1);
-  const canvas = await page.locator("[data-persist-state]").first().evaluate((element) => ({
-    canvasGeneration: element.getAttribute("data-canvas-generation"),
-  }));
-  expect(canvas.canvasGeneration).toBe(baseline.canvasGeneration);
   expect(await frame.evaluate(() => ({
     rendererAuthorExecutions: window.__PAGEROOT_ECHARTS_AUTHOR_EXECUTIONS__,
     chartCount: document.querySelectorAll("#chart-host canvas[data-echarts-runtime=true]").length,

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, type Ref } from "react";
+import { CodeIcon } from "@phosphor-icons/react/dist/csr/Code";
 
 import type {
   AgentProviderAvailabilitySnapshot,
@@ -28,7 +29,7 @@ export type AgentProviderCardPresentation = Readonly<{
 export type AgentProviderCardProps = {
   availability: AgentProviderAvailabilitySnapshot;
   presentation: AgentProviderCardPresentation;
-  surface: "delivery" | "about";
+  surface: "delivery" | "about" | "settings";
   disabled?: boolean;
   actionButtonRef?: Ref<HTMLButtonElement>;
   onCopyGuidance: (kind: AgentProviderGuidanceKind) => Promise<AgentActionOutcome>;
@@ -97,11 +98,17 @@ export default function AgentProviderCard({
       aria-busy={checking || installing}
     >
       <div className="qoder-card-summary">
-        <span className="qoder-card-brand" aria-hidden="true">
+        <span
+          className="qoder-card-brand"
+          data-fallback={!provider.logoSrc ? "true" : undefined}
+          aria-hidden="true"
+        >
           {provider.logoSrc ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img src={provider.logoSrc} alt="" />
-          ) : null}
+          ) : (
+            <CodeIcon size={22} weight="bold" />
+          )}
         </span>
         <span className="qoder-card-copy">
           <strong>{provider.displayName}</strong>

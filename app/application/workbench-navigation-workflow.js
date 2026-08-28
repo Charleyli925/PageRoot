@@ -157,6 +157,18 @@ export class WorkbenchNavigationWorkflow {
     });
   }
 
+  createSettings() {
+    return this.#admit({ kind: "create-settings" }, async (active) => {
+      const before = new Set(this.#tabs.snapshot.tabs.map((tab) => tab.tabId));
+      this.#tabs.createSettings({ focus: false });
+      const created = this.#tabs.snapshot.tabs.find((tab) => !before.has(tab.tabId))
+        || this.#tabs.snapshot.tabs.find((tab) => tab.kind === "settings");
+      return created
+        ? this.#activateTab(active, created.tabId, {})
+        : { outcome: rejected("WORKBENCH_SETTINGS_CREATE_FAILED", "无法打开设置。") };
+    });
+  }
+
   closeTab(tabId) {
     return this.#admit({ kind: "close-tab", tabId: String(tabId || "") }, async (active) => {
       const snapshot = this.#tabs.snapshot;
@@ -526,12 +538,12 @@ export class WorkbenchNavigationWorkflow {
     active.expectedTabId = target.tabId;
     this.#tabs.beginSwitch(target.tabId);
     this.#session.transition(active.transactionId, "preparing");
-    if (target.kind === "start") {
+    if (target.kind === "start" || target.kind === "settings") {
       // Start -> Start changes presentation focus only. The retained document
       // controller was already fenced and unmounted by the first Start
       // activation, so a second drain would incorrectly let a transient React
       // view transition reject a valid queued new-tab command.
-      const prepared = current?.kind === "start"
+      const prepared = current?.kind === "start" || current?.kind === "settings"
         ? succeeded()
         : await this.#projectWorkflow.prepareSwitch();
       if (prepared?.status !== "succeeded") {
@@ -541,7 +553,9 @@ export class WorkbenchNavigationWorkflow {
         ) };
       }
       if (current?.kind === "document") this.#captureCurrentSurface(current);
-      const committed = this.#tabs.commitStart(target.tabId);
+      const committed = target.kind === "start"
+        ? this.#tabs.commitStart(target.tabId)
+        : this.#tabs.commitSettings(target.tabId);
       if (!committed) return { outcome: rejected(
         "WORKBENCH_TAB_COMMIT_REJECTED",
         "标签页状态已变化，没有离开当前 HTML。",
@@ -553,12 +567,44 @@ export class WorkbenchNavigationWorkflow {
         documentId: null,
         epoch: Number(this.#controller.getSnapshot()?.projectSession?.epoch) || 0,
         tabId: target.tabId,
-        kind: "start",
+        kind: target.kind,
       });
       this.#session.transition(active.transactionId, "canvas-verified", { receipt });
       return { outcome: succeeded({ tabId: target.tabId }), receipt };
     }
     if (current?.kind === "document") this.#captureCurrentSurface(current);
+    if (
+      current?.kind === "settings"
+      && this.#tabs.snapshot.runtimeOwnerTabId === target.tabId
+    ) {
+      const currentProject = this.#controller.getSnapshot()?.projectSession;
+      if (
+        currentProject?.projectId === target.projectId
+        && currentProject.documentId === target.documentId
+      ) {
+        const committed = this.#tabs.commitDocument({
+          tabId: target.tabId,
+          projectId: target.projectId,
+          documentId: target.documentId,
+          title: target.title,
+        });
+        if (!committed) return { outcome: rejected(
+          "WORKBENCH_TAB_COMMIT_REJECTED",
+          "标签页状态已变化，没有离开设置。",
+        ) };
+        const receipt = Object.freeze({
+          transactionId: active.transactionId,
+          applicationId: null,
+          projectId: target.projectId,
+          documentId: target.documentId,
+          epoch: Number(currentProject.epoch) || 0,
+          tabId: target.tabId,
+          kind: "document",
+        });
+        this.#session.transition(active.transactionId, "canvas-verified", { receipt });
+        return { outcome: succeeded({ tabId: target.tabId }), receipt };
+      }
+    }
     this.#session.transition(active.transactionId, "opening");
     const browserProject = this.#browserDocuments?.resolve(target.projectId, target.documentId);
     const outcome = browserProject

@@ -456,7 +456,6 @@ export type UserSupplementRecord = {
 export type PersistState = "idle" | "preview-dirty" | "queued" | "writing" | "failed" | "conflict";
 export type ViewMode = "current" | "history";
 export type CanvasMode = "edit" | "preview";
-export type Drawer = "files" | null;
 export type ToastTone = "success" | "info" | "warning" | "error";
 export type ToastDisposition =
   | "silent-recover"
@@ -487,7 +486,6 @@ export type ToastAction =
     }
   | { id: "relaunch-app"; label: string }
   | { id: "retry-draft-persist"; label: string }
-  | { id: "review-project-rules"; label: string }
   | { id: "retry-submit"; label: string }
   | { id: "resume-draft"; label: string }
   | { id: "resume-comment-edit"; label: string; commentId: string }

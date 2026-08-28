@@ -26,7 +26,6 @@ async function readWorkbenchCascadeCss() {
     "./styles/review-v51.css",
     "./styles/review-v52-canvas.css",
     "./styles/comment-hierarchy.css",
-    "./styles/project-resources.css",
     "./styles/about-and-chrome.css",
     "./styles/top-toolbar.css",
     "./styles/workbench-chrome.css",
@@ -91,6 +90,26 @@ test("global sidebar owns the full shell column and start page has no card surfa
   const startContent = lastCssRule(css, ".workbench-start-content");
   assert.match(startContent, /width:\s*min\(520px, 100%\)/u);
   assert.doesNotMatch(startContent, /border|box-shadow|background/u);
+
+  const footer = lastCssRule(css, ".workbench-sidebar-footer");
+  assert.match(footer, /display:\s*flex/u);
+  assert.match(footer, /justify-content:\s*flex-end/u);
+  const settings = lastCssRule(css, ".workbench-sidebar-settings");
+  assert.match(settings, /width:\s*30px/u);
+  assert.match(settings, /height:\s*30px/u);
+  assert.match(settings, /margin-left:\s*auto/u);
+});
+
+test("removed project/status/review navigation surfaces have no CSS or import owner", async () => {
+  const css = await readWorkbenchCascadeCss();
+  for (const retired of [
+    "project-resources.css",
+    "\.workbench-toolbar-status",
+    "\.toolbar-change-navigator",
+    "\.side-drawer",
+    "\.drawer-overlay",
+    "\.project-panel-title",
+  ]) assert.doesNotMatch(css, new RegExp(retired, "u"), retired);
 });
 
 test("embedded review stays in the content row instead of covering the header", async () => {

@@ -526,15 +526,6 @@ export default function AiReviewWorkspace({
   const activeChange = focus === "all"
     ? null
     : reviewChanges.find((change) => change.id === focus) || null;
-  /*
-   * Stepping through changes one at a time is its own capability, independent of the
-   * content map it used to sit beside. Removing the map took this with it, which left
-   * the reviewer with no way to walk the changes in order.
-   */
-  const activeIndex = activeChange
-    ? navigableChanges.findIndex((change) => change.id === activeChange.id)
-    : -1;
-
   const closeReviewCommentChannel = useCallback(() => {
     const port = reviewCommentPortRef.current;
     if (port) {
@@ -912,9 +903,8 @@ export default function AiReviewWorkspace({
   // Selecting the first change on entry only set the navigation target, so the
   // rail and the map both said 「正在看…」 while the two pages stayed at the top
   // showing dimmed context. A reviewer's first impression was therefore that
-  // nothing had changed, and they had to press 「下一处变化」 to reach the change
-  // the header already claimed they were looking at. Positioning goes through
-  // selectChange so it takes exactly the path that button takes, including the
+  // nothing had changed. Positioning goes through selectChange so it takes the
+  // same path as an explicit marker selection, including the
   // panel coordination a change inside a collapsed tab needs.
   // Initialization belongs to one documents/session pair. A replacement must
   // neither inherit the previous pair's target nor reset this flag when one of
@@ -1175,18 +1165,6 @@ export default function AiReviewWorkspace({
   const selectPreviewMode = useCallback((mode: ReviewPageView) => {
     dispatchReviewState({ type: "set-page-view", value: mode });
   }, []);
-
-
-
-
-  const navigate = useCallback((direction: -1 | 1) => {
-    if (!navigableChanges.length) return;
-    const currentIndex = activeIndex >= 0 ? activeIndex : (direction > 0 ? -1 : 0);
-    const nextIndex = (currentIndex + direction + navigableChanges.length)
-      % navigableChanges.length;
-    selectChange(navigableChanges[nextIndex].id);
-  }, [activeIndex, navigableChanges, selectChange]);
-
   const handleSegmentedKeyDown = useCallback((event: ReactKeyboardEvent<HTMLButtonElement>) => {
     const buttons = [...(event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>(
       "button:not(:disabled)",
@@ -1283,10 +1261,6 @@ export default function AiReviewWorkspace({
             </div>
             <span className="file-meta">
               <span className="file-version-label">审阅 AI 候选</span>
-              <span className="save-status" data-persist-state="idle" role="status">
-                <span aria-hidden="true" />
-                只读对比 · 尚未采用
-              </span>
             </span>
           </div>
         </div>
@@ -1322,8 +1296,6 @@ export default function AiReviewWorkspace({
             contextVisibility={transparency}
             scrollMode={scrollMode}
             zoomMode={zoom}
-            activeIndex={activeIndex}
-            changeCount={navigableChanges.length}
             onPageViewChange={selectPreviewMode}
             onChangeFilter={selectReviewMode}
             onContextVisibilityChange={(value) => dispatchReviewState({
@@ -1338,17 +1310,7 @@ export default function AiReviewWorkspace({
               type: "set-zoom-mode",
               value,
             })}
-            onNavigate={navigate}
-            onShowWholePage={() => dispatchReviewState({
-              type: "set-navigation-target",
-              value: "all",
-            })}
           />
-          <span className="unified-review-status" role="status">
-            {filter === "all"
-              ? `${reviewChanges.length} 个变化`
-              : `${navigableChanges.length}/${reviewChanges.length} 个变化`}
-          </span>
           <button
             className="recent-run-button review-return-button"
             type="button"
@@ -1398,11 +1360,7 @@ export default function AiReviewWorkspace({
                 <span className={styles.canvasReviewIcon}><EyeIcon aria-hidden="true" size={20} weight="duotone" /></span>
                 <span>
                   <strong>审阅模式</strong>
-                  <small>
-                    {filter === "all"
-                      ? `${reviewChanges.length} 个变化区域`
-                      : `${navigableChanges.length}/${reviewChanges.length} 个变化区域`}
-                  </small>
+                  <small>前后版本对比</small>
                 </span>
               </div>
 
@@ -1523,44 +1481,6 @@ export default function AiReviewWorkspace({
                     </button>
                     <button type="button" aria-pressed={zoom === "actual"} onClick={() => dispatchReviewState({ type: "set-zoom-mode", value: "actual" })}>100%</button>
                   </div>
-                <div className={styles.changeNavigator} aria-label="逐处查看变化">
-                  <button
-                    type="button"
-                    aria-label="上一处变化"
-                    disabled={!navigableChanges.length}
-                    onClick={() => navigate(-1)}
-                  >
-                    <CaretUpIcon aria-hidden="true" size={11} weight="bold" />
-                  </button>
-                  <span>
-                    <strong>{activeIndex >= 0 ? activeIndex + 1 : 0}</strong>
-                    <small>/{navigableChanges.length}</small>
-                  </span>
-                  <button
-                    type="button"
-                    aria-label="下一处变化"
-                    disabled={!navigableChanges.length}
-                    onClick={() => navigate(1)}
-                  >
-                    <CaretDownIcon aria-hidden="true" size={11} weight="bold" />
-                  </button>
-                  {/*
-                    * The way back out of a single change. Returning to the whole page used
-                    * to live in the content map, so removing the map left a reviewer who
-                    * had focused one change with no way to see the page as a whole again.
-                    */}
-                  <button
-                    type="button"
-                    aria-label="完整页面"
-                    aria-pressed={focus === "all"}
-                    onClick={() => dispatchReviewState({
-                      type: "set-navigation-target",
-                      value: "all",
-                    })}
-                  >
-                    整页
-                  </button>
-                </div>
                 </div>
               </div>
             </div>

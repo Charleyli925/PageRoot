@@ -542,6 +542,14 @@ export function sidebarSendState({
     };
   }
   if (catalogStatus === "checking") {
+    if (agentSettingsSupported) {
+      return {
+        kind: "open-agent-settings",
+        canSend: false,
+        label: `设置 ${boundedAgentSettingsName}`,
+        reason: null,
+      };
+    }
     return {
       kind: "status",
       canSend: false,

@@ -7,16 +7,15 @@ import {
   chooseClipboardDelivery,
   closePageRootGracefully,
   createSourceFixture,
-  existsSync,
   fixtureBuffer,
   launchPageRoot,
   loadedDiskFrame,
   managedWorkingCopyPath,
+  mkdirSync,
   mkdtempSync,
   openRailGlobalCommentComposer,
   path,
   readFileSync,
-  readdirSync,
   removeIsolatedUserData,
   removeSourceFixture,
   requestDirectoryCount,
@@ -214,71 +213,6 @@ test("Electron preview mounts the modification-only AI sidebar across reopen", a
   }
 });
 
-test("project resources drain edited rules before leaving", async () => {
-  const fixture = createSourceFixture("project-resources.html");
-  const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
-  try {
-    const { frame } = await loadedDiskFrame(launched.page, fixture.sourcePath, "list-item");
-    const projectCount = () => {
-      const projectsRoot = path.join(path.dirname(launched.workspace), "project-files");
-      return existsSync(projectsRoot)
-        ? readdirSync(projectsRoot).filter((entry) => !entry.startsWith(".")).length
-        : 0;
-    };
-    expect(projectCount()).toBe(1);
-    await addCanvasComment(
-      launched.page,
-      frame,
-      "list-item",
-      "创建受管项目后再编辑项目资料。",
-    );
-    const managedSourcePath = await managedWorkingCopyPath(launched.page, fixture.sourcePath);
-    await loadedDiskFrame(launched.page, managedSourcePath, "list-item");
-    const projectRoot = path.dirname(managedSourcePath);
-    expect(projectCount()).toBe(1);
-    await launched.page.getByRole("button", { name: "项目", exact: true }).click();
-    expect(projectCount()).toBe(1);
-    // The rules row is a disclosure inside the console: it expands in place
-    // instead of navigating away from the version tree.
-    const rulesButton = launched.page.getByRole("button", {
-      name: /项目规则.*每次 AI Agent 修改本项目 HTML 都会读取/u,
-    });
-    await expect(rulesButton).toBeVisible();
-    await expect(rulesButton).toHaveAttribute("aria-expanded", "false");
-    await rulesButton.click();
-    await expect(rulesButton).toHaveAttribute("aria-expanded", "true");
-    await expect(launched.page.getByText(
-      "修改会自动保存。每次发送至 Qoder 时，源页都会把这份规则与本轮要求一起交接；规则只影响后续任务，不会修改当前 HTML。",
-      { exact: true },
-    )).toBeVisible();
-    const rulesEditor = launched.page.getByRole("textbox", { name: "项目长期规则" });
-    await expect(rulesEditor).toBeEnabled();
-    const originalRules = await rulesEditor.inputValue();
-    const updatedRules = `${originalRules}\n\n- 测试自动保存保护`;
-    await rulesEditor.fill(updatedRules);
-    const projectRulesPath = path.join(projectRoot, "PROJECT.md");
-    await expect.poll(
-      () => readFileSync(projectRulesPath, "utf8"),
-      { timeout: 20_000 },
-    ).toBe(updatedRules);
-    // Only a real edit that reached disk announces itself.
-    await expect(launched.page.getByText("项目规则已保存", { exact: true }))
-      .toBeVisible();
-
-    await rulesEditor.fill(`${updatedRules}\n- 这行只用于验证还原`);
-    await launched.page.getByRole("button", { name: "还原修改" }).click();
-    await expect(rulesEditor).toHaveValue(updatedRules);
-    // Collapsing keeps the console open, so the version tree stays in place.
-    await rulesButton.click();
-    await expect(rulesButton).toHaveAttribute("aria-expanded", "false");
-    await expect(rulesEditor).toHaveCount(0);
-    await expect(launched.page.getByText("版本树", { exact: true })).toBeVisible();
-    expect(readFileSync(fixture.sourcePath).equals(fixture.original)).toBe(true);
-  } finally {
-    await stopPageRoot(launched.electronApp, launched.isolatedUserData);
-    removeSourceFixture(fixture.sourceDirectory);
-  }
-});
 
 // Unquarantined and hardened by the #281 product fix: the relink action now
 // lives on the persistent comment-rail card instead of a toast button, which
@@ -403,12 +337,21 @@ test("multiple orphaned comments relink in sequence and resume the original send
   }
 });
 
-test("automatic update actions keep the sidebar product geometry and About lifecycle", async () => {
+test("automatic update actions keep the sidebar product geometry and split About from Settings", async () => {
   const fixture = createSourceFixture("update-indicator.html");
-  const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
+    const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
   try {
     await loadedDiskFrame(launched.page, fixture.sourcePath, "list-item");
     const sidebar = launched.page.locator(".workbench-global-sidebar");
+    const toolbarCleanupOutput = process.env.PAGEROOT_CAPTURE_TOOLBAR_CLEANUP
+      ? path.resolve(
+        process.env.PAGEROOT_CAPTURE_TOOLBAR_CLEANUP_DIR
+          || path.join(process.cwd(), "output", "design-qa", "toolbar-cleanup"),
+      )
+      : null;
+    if (toolbarCleanupOutput) {
+      mkdirSync(toolbarCleanupOutput, { recursive: true });
+    }
     if (await sidebar.getAttribute("data-open") !== "true") {
       await launched.page.getByRole("button", { name: "展开左侧边栏" }).click();
     }
@@ -465,6 +408,18 @@ test("automatic update actions keep the sidebar product geometry and About lifec
     };
 
     const noUpdateGeometry = await captureSidebarProduct({ badgeExpected: false });
+    if (toolbarCleanupOutput) {
+      const visibleToast = launched.page.locator(".toast.show");
+      await visibleToast.waitFor({ state: "visible", timeout: 2_000 }).catch(() => {});
+      if (await visibleToast.isVisible().catch(() => false)) {
+        await visibleToast.getByRole("button", { name: "关闭提醒" }).click();
+        await expect(visibleToast).toBeHidden();
+      }
+      await launched.page.screenshot({
+        path: path.join(toolbarCleanupOutput, "01-sidebar-header.png"),
+        animations: "disabled",
+      });
+    }
     const updateStatus = {
       currentVersion: "0.8.6",
       latestVersion: "9.9.9",
@@ -486,9 +441,38 @@ test("automatic update actions keep the sidebar product geometry and About lifec
     await sidebar.getByRole("button", { name: "源页", exact: true }).click();
     await expect(launched.page.getByRole("dialog", { name: "源页" }))
       .toBeVisible();
-    await launched.page.getByRole("button", { name: "关闭关于源页" }).click();
+    await expect(launched.page.getByRole("dialog", { name: "源页" })
+      .getByRole("heading", { name: "AI Agent" })).toHaveCount(0);
+    await expect(launched.page.getByRole("dialog", { name: "源页" })
+      .getByRole("heading", { name: "软件更新" })).toHaveCount(0);
+    const aboutDialog = launched.page.getByRole("dialog", { name: "源页" });
+    if (toolbarCleanupOutput) {
+      await launched.page.screenshot({
+        path: path.join(toolbarCleanupOutput, "02-about.png"),
+        animations: "disabled",
+      });
+    }
+    await aboutDialog.getByRole("button", { name: "关闭关于源页" }).press("Escape");
     await expect(launched.page.locator("dialog.about-dialog[open]"))
       .toHaveCount(0);
+    await expect(sidebar.getByRole("button", { name: "源页", exact: true })).toBeFocused();
+
+    await sidebar.getByRole("button", { name: "设置", exact: true }).click();
+    const settings = launched.page.locator(".workbench-settings-page");
+    await expect(settings).toBeVisible();
+    await expect(settings.getByRole("heading", { name: "AI Agent" })).toBeVisible();
+    await expect(settings.getByRole("heading", { name: "软件更新" })).toBeVisible();
+    await expect(settings.getByRole("button", { name: "下载更新" })).toBeVisible();
+    await expect(settings.getByRole("button", { name: "关闭设置" })).toBeFocused();
+    if (toolbarCleanupOutput) {
+      await launched.page.screenshot({
+        path: path.join(toolbarCleanupOutput, "03-settings.png"),
+        animations: "disabled",
+      });
+    }
+    await settings.getByRole("button", { name: "关闭设置" }).press("Escape");
+    await expect(settings).toHaveCount(0);
+    await expect(sidebar.getByRole("button", { name: "设置", exact: true })).toBeFocused();
 
     await sendToMainRenderer(
       launched.electronApp,
@@ -663,6 +647,24 @@ test("Electron shell keeps the global rail fixed while the context inspector swa
     expect(editGeometry.comments).not.toBeNull();
     expect(Math.abs(editGeometry.comments.width - editGeometry.inspectorWidth))
       .toBeLessThanOrEqual(0.5);
+    if (process.env.PAGEROOT_CAPTURE_TOOLBAR_CLEANUP) {
+      const visibleToast = launched.page.locator(".toast.show");
+      await visibleToast.waitFor({ state: "visible", timeout: 2_000 }).catch(() => {});
+      if (await visibleToast.isVisible().catch(() => false)) {
+        await visibleToast.getByRole("button", { name: "关闭提醒" }).click();
+        await expect(visibleToast).toBeHidden();
+      }
+      const captureDirectory = path.resolve(
+        process.cwd(),
+        process.env.PAGEROOT_CAPTURE_TOOLBAR_CLEANUP_DIR
+          || path.join("output", "design-qa", "toolbar-cleanup"),
+      );
+      mkdirSync(captureDirectory, { recursive: true });
+      await launched.page.screenshot({
+        path: path.join(captureDirectory, "04-comments-top.png"),
+        animations: "disabled",
+      });
+    }
 
     await launched.page.getByRole("button", { name: "预览", exact: true }).click();
     await expect(launched.page.locator('iframe[title="HTML 交互预览"]'))
@@ -743,7 +745,7 @@ test("Electron shell keeps the global rail fixed while the context inspector swa
         return { left: box.left, right: box.right, top: box.top, bottom: box.bottom };
       };
       const controls = [...document.querySelectorAll(
-        ".workbench-header .header-actions button, .workbench-header .save-status",
+        ".workbench-header .header-actions button",
       )].filter((element) => {
         const box = element.getBoundingClientRect();
         return box.width > 0 && box.height > 0 && getComputedStyle(element).display !== "none";
@@ -876,80 +878,6 @@ test("Electron shell keeps the global rail fixed while the context inspector swa
   }
 });
 
-test("PROJECT.md read failure never becomes editable data and recovers in place", async () => {
-  test.setTimeout(60_000);
-  const sourceDirectory = mkdtempSync(path.join(tmpdir(), "pageroot-native-source-e2e-"));
-  const sourcePath = path.join(sourceDirectory, "project-rules-recovery.html");
-  writeFileSync(sourcePath, fixtureBuffer("complex-layout.html"));
-  const isolatedUserData = mkdtempSync(path.join(tmpdir(), "pageroot-native-e2e-"));
-  let electronApp = null;
-  try {
-    const launched = await launchPageRoot({
-      isolatedUserData,
-      activeSourcePath: sourcePath,
-    });
-    electronApp = launched.electronApp;
-    const { frame } = await loadedDiskFrame(launched.page, sourcePath, "list-item");
-    await addCanvasComment(
-      launched.page,
-      frame,
-      "list-item",
-      "创建受管项目以验证项目规则读取失败。",
-    );
-    const managedSourcePath = await managedWorkingCopyPath(launched.page, sourcePath);
-    await loadedDiskFrame(launched.page, managedSourcePath, "list-item");
-
-    await launched.page.getByRole("button", { name: "项目", exact: true }).click();
-    const projectRules = launched.page.getByRole("button", {
-      name: /项目规则/u,
-    });
-    await expect(projectRules).toBeEnabled({ timeout: 20_000 });
-
-    const projectFileRoute = "**/file?**";
-    const rejectProjectRulesRead = async (route) => {
-      const url = new URL(route.request().url());
-      if (url.searchParams.get("path") === "PROJECT.md") {
-        await route.fulfill({
-          status: 503,
-          contentType: "application/json",
-          body: JSON.stringify({
-            ok: false,
-            error: { message: "测试注入：项目规则暂时不可读。" },
-          }),
-        });
-        return;
-      }
-      await route.continue();
-    };
-    await launched.page.route(projectFileRoute, rejectProjectRulesRead);
-
-    await projectRules.click();
-    const failure = launched.page.getByRole("alert")
-      .filter({ hasText: "内容没有读取成功" });
-    await expect(failure).toBeVisible();
-    await expect(failure).toContainText("项目规则暂时不可读");
-    await expect(launched.page.getByRole("textbox", { name: "项目长期规则" }))
-      .toHaveCount(0);
-    await expect(failure.getByRole("button", { name: "重试读取" })).toBeVisible();
-    // The console stays put, so the version tree is still alongside the failure.
-    await expect(launched.page.getByText("版本树", { exact: true })).toBeVisible();
-
-    await launched.page.unroute(projectFileRoute, rejectProjectRulesRead);
-    await failure.getByRole("button", { name: "重试读取" }).click();
-    const editor = launched.page.getByRole("textbox", { name: "项目长期规则" });
-    await expect(editor).toBeVisible();
-    await expect(editor).not.toHaveValue(/测试注入|文件尚未生成/u);
-  } finally {
-    if (electronApp) {
-      await stopPageRoot(electronApp, isolatedUserData, { cleanup: false });
-    }
-    removeIsolatedUserData(isolatedUserData);
-    removeValidatedTemporaryDirectory(
-      sourceDirectory,
-      "pageroot-native-source-e2e-",
-    );
-  }
-});
 
 test("workspace failure keeps the current page visible with export and relaunch paths", async () => {
   const sourceDirectory = mkdtempSync(path.join(tmpdir(), "pageroot-native-source-e2e-"));

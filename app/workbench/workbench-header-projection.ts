@@ -3,7 +3,6 @@ export function deriveWorkbenchHeaderCapabilities(
   hasReadyPayload: boolean,
   hasReadyReviewSession: boolean,
   reviewPreparing: boolean,
-  canOpenProjectRootInFolder: boolean,
   canShowCurrentFileInFolder: boolean,
   canOpenCurrentHtmlInDefaultBrowser: boolean,
   persistState: string,
@@ -27,7 +26,7 @@ export function deriveWorkbenchHeaderCapabilities(
       && !hasReadyReviewSession
       && !reviewPreparing,
     ),
-    canShowInFinder: canOpenProjectRootInFolder || canShowCurrentFileInFolder,
+    canShowInFinder: canShowCurrentFileInFolder,
     canOpenCurrentHtml: Boolean(
       canOpenCurrentHtmlInDefaultBrowser
       && persistState === "idle"

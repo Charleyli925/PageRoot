@@ -357,37 +357,44 @@ export function createCodexAppServerE2ECommand(directory) {
 }
 
 // The destination is chosen in the AI conversation now; the dialog over the page is gone.
-// A specific change is reached by stepping the change navigator: the content map that
-// used to list them is gone. Bounded, so a change that never focuses fails the test
-// instead of looping forever.
-// Qoder availability moved out of the delivery dialog and into 关于源页; that card is
-// where installation, login and readiness are surfaced now.
+// A specific change is reached by clicking its page marker. This keeps the E2E helper
+// aligned with the review contract: markers locate changes, while the toolbar only
+// controls filtering and view state.
+// Qoder availability lives in the tabbed Settings page; About remains product-only.
 export async function openQoderAvailability(page) {
   const sidebar = page.locator(".workbench-global-sidebar");
   if (await sidebar.getAttribute("data-open") !== "true") {
     await page.getByRole("button", { name: "展开左侧边栏" }).click();
   }
   await expect(sidebar).toHaveAttribute("data-open", "true");
-  await sidebar.getByRole("button", { name: "源页", exact: true }).click();
-  const card = page.getByRole("dialog").locator(".about-agent-section");
+  await sidebar.getByRole("button", { name: "设置", exact: true }).click();
+  const card = page.locator(".workbench-settings-page").locator(".qoder-availability-card").first();
   await expect(card).toBeVisible();
   return card;
 }
 
 export async function closeQoderAvailability(page) {
-  await page.getByRole("button", { name: "关闭关于源页" }).click();
+  await page.getByRole("button", { name: "关闭设置" }).click();
 }
 
 export async function focusChangeById(page, frame, changeId) {
-  const next = page.getByRole("button", { name: "下一处变化" });
-  for (let step = 0; step < 40; step += 1) {
-    const focused = await frame.locator("html")
-      .getAttribute("data-pageroot-review-focus");
-    if (focused === changeId) return;
-    await next.click();
-    await page.waitForTimeout(120);
+  const selector = `[data-pageroot-review-region-bar="${changeId}"]`;
+  const candidates = [
+    frame.locator(selector),
+    page.frameLocator('iframe[title^="修改前"]').locator(selector),
+    page.frameLocator('iframe[title^="修改后"]').locator(selector),
+  ];
+  let marker = candidates[0];
+  for (const candidate of candidates) {
+    if (await candidate.count() > 0 && await candidate.first().isVisible().catch(() => false)) {
+      marker = candidate.first();
+      break;
+    }
   }
-  throw new Error(`Change ${changeId} never became focused.`);
+  await expect(marker).toBeVisible();
+  await marker.click();
+  await expect.poll(async () => frame.locator("html")
+    .getAttribute("data-pageroot-review-focus")).toBe(changeId);
 }
 
 export async function chooseModifyIntent(page) {

@@ -70,7 +70,7 @@ export function agentProviderCardPresentation(provider: AgentProviderDescriptor 
     login: Readonly<{ label: string; copiedLabel: string }>;
   }>;
 }>;
-export function aboutAgentCardsFromCatalog(snapshot: AgentCatalogSnapshot | null | undefined): readonly Readonly<{
+export function agentProviderCardsFromCatalog(snapshot: AgentCatalogSnapshot | null | undefined): readonly Readonly<{
   selection: AgentSelection;
   presentation: ReturnType<typeof agentProviderCardPresentation>;
   availability: AgentProviderAvailabilitySnapshot;

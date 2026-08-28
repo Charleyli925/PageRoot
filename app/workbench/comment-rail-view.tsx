@@ -48,6 +48,7 @@ export const CommentRailView = memo(function CommentRailView({
     canvasDocumentHeight,
     commentRailContentHeight,
     commentRailOffset,
+    commentRailStatusTop,
     commentRailMinimumTop,
     visibleCommentItems,
     draftInCurrentTab,
@@ -352,6 +353,7 @@ export const CommentRailView = memo(function CommentRailView({
                 role="status"
                 aria-label="评论需要重新定位"
                 data-html-canvas-preserve-selection="true"
+                style={{ top: `${commentRailStatusTop}px` }}
               >
                 <span>
                   <strong>{relinkCardCopy.title}</strong>
@@ -369,7 +371,11 @@ export const CommentRailView = memo(function CommentRailView({
               </section>
             ) : null}
             {projectLoadError ? (
-              <section className="round-lock-card rail-status-card" aria-label="项目读取失败">
+              <section
+                className="round-lock-card rail-status-card"
+                aria-label="项目读取失败"
+                style={{ top: `${commentRailStatusTop}px` }}
+              >
                 <strong>当前项目暂不可编辑</strong>
                 <span>{projectLoadError}</span>
                 <button type="button" onClick={onRetryProjectHydration}>重试读取</button>

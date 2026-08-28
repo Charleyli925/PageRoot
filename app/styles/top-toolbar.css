@@ -44,32 +44,6 @@
   white-space: nowrap;
 }
 
-.window-file .file-version-label.project-status-facts {
-  min-width: 0;
-  max-width: 118px;
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  overflow: hidden;
-  padding: 0;
-  border-radius: 0;
-  background: transparent;
-  color: #85828b;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.window-file .file-version-label.project-status-facts > span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.window-file .file-version-label.project-status-facts > span + span::before {
-  margin-right: 3px;
-  color: #aaa7ae;
-  content: "·";
-}
-
 .window-file-quick-action {
   position: relative;
   width: 30px;
@@ -92,26 +66,6 @@
 
 .window-file-quick-action:disabled {
   opacity: .34;
-}
-
-.window-file .save-status {
-  min-width: 0;
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  overflow: hidden;
-  padding: 0 4px;
-  color: #65726c;
-  font-weight: 590;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.window-file .save-status > span {
-  width: 6px;
-  height: 6px;
-  flex: none;
-  box-shadow: none;
 }
 
 .header-actions {
@@ -159,14 +113,6 @@
 .workbench-toolbar-actions {
   flex: none;
   gap: 4px;
-  overflow: hidden;
-}
-
-.workbench-toolbar-status {
-  min-width: 0;
-  max-width: 180px;
-  display: flex;
-  align-items: center;
   overflow: hidden;
 }
 
@@ -263,8 +209,7 @@
   opacity: .42;
 }
 
-.toolbar-control-group,
-.toolbar-change-navigator {
+.toolbar-control-group {
   height: 30px;
   flex: none;
   display: inline-flex;
@@ -276,8 +221,7 @@
   background: rgb(43 40 53 / 2.5%);
 }
 
-.toolbar-control-group button,
-.toolbar-change-navigator button {
+.toolbar-control-group button {
   position: relative;
   min-width: 24px;
   height: 24px;
@@ -295,22 +239,18 @@
 }
 
 .toolbar-control-group button:hover:not(:disabled),
-.toolbar-change-navigator button:hover:not(:disabled),
-.toolbar-control-group button:focus-visible,
-.toolbar-change-navigator button:focus-visible {
+.toolbar-control-group button:focus-visible {
   background: rgb(88 80 170 / 7%);
   color: #4e496e;
 }
 
-.toolbar-control-group button[aria-pressed="true"],
-.toolbar-change-navigator button[aria-pressed="true"] {
+.toolbar-control-group button[aria-pressed="true"] {
   background: #fff;
   color: #5d58a7;
   box-shadow: 0 1px 2px rgb(43 40 53 / 8%);
 }
 
-.toolbar-control-group button:disabled,
-.toolbar-change-navigator button:disabled {
+.toolbar-control-group button:disabled {
   cursor: not-allowed;
 }
 
@@ -336,31 +276,6 @@
   accent-color: #625d9f;
 }
 
-.toolbar-change-navigator {
-  gap: 0;
-}
-
-.toolbar-change-navigator > span {
-  min-width: 32px;
-  color: #7a7780;
-  font-size: 9px;
-  text-align: center;
-}
-
-.toolbar-change-navigator .toolbar-whole-page {
-  min-width: 34px;
-}
-
-.unified-review-status {
-  flex: none;
-  padding: 0 4px;
-  color: #7c7883;
-  font-size: 9px;
-  font-weight: 620;
-  white-space: nowrap;
-}
-
-.header-actions .project-button,
 .header-actions .recent-run-button,
 .workbench-review-tools-slot > .recent-run-button {
   height: 32px;
@@ -381,8 +296,6 @@
   white-space: nowrap;
 }
 
-.header-actions .project-button:hover:not(:disabled),
-.header-actions .project-button[aria-expanded="true"],
 .header-actions .recent-run-button:hover:not(:disabled),
 .header-actions .recent-run-button[aria-expanded="true"],
 .workbench-review-tools-slot > .recent-run-button:hover:not(:disabled) {
@@ -423,10 +336,6 @@
 }
 
 @media (max-width: 1260px) {
-  .window-file .file-version-label.project-status-facts {
-    display: none;
-  }
-
   .window-file {
     max-width: 138px;
   }
@@ -456,18 +365,6 @@
 
   .workbench-toolbar-actions .recent-run-button {
     display: none;
-  }
-
-  .workbench-toolbar-status {
-    max-width: 24px;
-  }
-
-  .workbench-toolbar-status .window-file {
-    max-width: 24px;
-  }
-
-  .workbench-toolbar-status .file-meta {
-    gap: 0;
   }
 
   .workbench-toolbar-center .unified-review-tools[data-disabled="true"] {

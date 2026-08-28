@@ -28,7 +28,6 @@ import type {
   ProjectSession,
 } from "./project-session.js";
 import type {
-  ProjectRulesPresentationPort,
   ProjectRulesScheduler,
   ProjectRulesWorkflowOutcome,
 } from "./project-rules-workflow.js";
@@ -77,9 +76,6 @@ export type {
   ProjectCatalogCapabilitySnapshot,
   ProjectCatalogControllerCapability,
   ProjectCatalogControllerCommands,
-  ProjectControllerCapability,
-  ProjectControllerCapabilitySnapshot,
-  ProjectControllerCommands,
   RunControllerCapability,
   RunControllerCapabilitySnapshot,
   RunControllerCommands,
@@ -102,7 +98,6 @@ export type WorkspaceEvent =
   | Readonly<{
       type: "registration-published";
       context: ProjectContext;
-      projectRecordsPath: string | null;
       projectName: string | null;
       imported?: boolean;
       canonicalSourceAdopted: boolean;
@@ -222,7 +217,6 @@ export type WorkspaceControllerConstruction = Readonly<{
     | "sourcePreview"
     | "sourceStat"
     | "projectFile"
-    | "openFolder"
     | "attachment"
     | "saveAttachment"
     | "deleteAttachment"
@@ -288,7 +282,6 @@ export type WorkspaceControllerConstruction = Readonly<{
   projectRulesWorkflow?: Readonly<{
     runSession: import("./run-session.js").RunSession;
     errorMessage?: (cause: unknown, fallback: string) => string;
-    presentation?: ProjectRulesPresentationPort;
     scheduler?: ProjectRulesScheduler;
   }>;
   projectWorkflow?: Pick<
@@ -396,7 +389,6 @@ export function createRuntimeWorkspaceController(
 export class WorkspaceController {
   constructor(options: WorkspaceControllerConstruction);
   readonly comments: import("./workspace-controller-capabilities.js").CommentControllerCapability;
-  readonly projects: import("./workspace-controller-capabilities.js").ProjectControllerCapability;
   readonly projectCatalog: import("./workspace-controller-capabilities.js").ProjectCatalogControllerCapability;
   readonly runs: import("./workspace-controller-capabilities.js").RunControllerCapability;
   readonly navigation: import("./workspace-controller-capabilities.js").NavigationControllerCapability;
@@ -410,6 +402,7 @@ export class WorkspaceController {
   flushConversationDraft(): Promise<void>;
   activateWorkbenchTab(tabId: string, input?: { deadlineMs?: number }): Promise<WorkbenchNavigationOutcome>;
   createWorkbenchStartTab(): Promise<WorkbenchNavigationOutcome>;
+  createWorkbenchSettingsTab(): Promise<WorkbenchNavigationOutcome>;
   closeWorkbenchTab(tabId: string): Promise<WorkbenchNavigationOutcome>;
   openRegisteredWorkbenchProject(input: {
     projectId: string;
@@ -536,13 +529,6 @@ export class WorkspaceController {
     obligation?: string;
     reason?: string;
   }>>;
-  readProjectFile(input?: {
-    context?: ProjectContext;
-    relativePath?: string;
-  }): Promise<ProjectWorkflowOutcome<{ content: string }>>;
-  openProjectRecords(input?: {
-    context?: ProjectContext;
-  }): Promise<ProjectWorkflowOutcome<{ opened: boolean }>>;
   refreshRecentProjects(): Promise<ProjectWorkflowOutcome<{ projects: unknown[] }>>;
   refreshRegisteredProjects(): Promise<ProjectWorkflowOutcome<{ projects: unknown[] }>>;
   openProjectRules(input: {

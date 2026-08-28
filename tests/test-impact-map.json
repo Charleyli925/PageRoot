@@ -592,17 +592,16 @@
       ]
     },
     {
-      "id": "project-capability-boundary",
+      "id": "project-surface-boundary",
       "patterns": [
-        "^app/workbench/(?:project-panel-container|project-panel-port|workspace-render-snapshot)\\.(?:d\\.ts|js|tsx)$",
-        "^tests/(?:project-panel-port|workbench-render-snapshot)\\.test\\.mjs$"
+        "^app/workbench/(?:workbench-sidebar-container|project-version-tree|workspace-render-snapshot)\\.(?:d\\.ts|js|tsx)$",
+        "^tests/workbench-render-snapshot\\.test\\.mjs$"
       ],
       "suites": [
         "typecheck",
         "electron-project-lifecycle-smoke"
       ],
       "nodeTests": [
-        "tests/project-panel-port.test.mjs",
         "tests/project-rules-session.test.mjs",
         "tests/project-rules-workflow.test.mjs",
         "tests/workbench-render-snapshot.test.mjs",
@@ -1197,7 +1196,7 @@
     {
       "id": "review-ui-state",
       "patterns": [
-        "^app/workbench/(?:AiReviewWorkspace|comment-rail-view|comment-rail-contract|file-header-view|presentation|project-files-view|review-state|review-toolbar-controls|run-conversation-outlet|workbench-header-shell)\\.(?:ts|tsx)$",
+        "^app/workbench/(?:AiReviewWorkspace|comment-rail-view|comment-rail-contract|file-header-view|presentation|review-state|review-toolbar-controls|run-conversation-outlet|workbench-header-shell)\\.(?:ts|tsx)$",
         "^app/workbench/ai-review-workspace\\.module\\.css$"
       ],
       "suites": [
@@ -1233,7 +1232,7 @@
       "id": "workbench-orchestration",
       "patterns": [
         "^app/workbench\\.tsx$",
-        "^app/workbench/(?:comment-rail-view|comment-rail-contract|file-header-view|project-files-view|run-conversation-outlet|workbench-navigation-container)\\.(?:ts|tsx)$",
+        "^app/workbench/(?:comment-rail-view|comment-rail-contract|file-header-view|run-conversation-outlet|workbench-navigation-container)\\.(?:ts|tsx)$",
         "^tests/comment-rail-contract\\.test\\.mjs$",
         "^app/workbench/ExternalHtmlOpenDialog\\.tsx$",
         "^app/workbench/external-html-open-dialog\\.module\\.css$",

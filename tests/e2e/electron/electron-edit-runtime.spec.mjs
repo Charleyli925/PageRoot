@@ -7,6 +7,7 @@ import {
   caseSelector,
   currentEditorFrame,
   documentToken,
+  expectCheckpointPersisted,
   fixtureBuffer,
   launchPageRoot,
   loadedDiskFrame,
@@ -608,15 +609,7 @@ test("Electron Edit preserves imported source-relative ECharts assets and native
         /(?=.*user-select: none)(?=.*transform: scale\(0\.75\))/u,
       ),
     });
-    await expect(launched.page.locator(".save-status")).toHaveText("已安全保存");
-    const renderState = await launched.page.locator(".save-status").evaluate((element) => ({
-      canvasGeneration: element.getAttribute("data-canvas-generation"),
-      renderGeneration: element.getAttribute("data-render-generation"),
-      renderedSha256: element.getAttribute("data-rendered-sha256"),
-    }));
-    expect(renderState.canvasGeneration).toEqual(expect.any(String));
-    expect(renderState.renderGeneration).toBe(renderState.canvasGeneration);
-    expect(renderState.renderedSha256).toBe(sourceSha256);
+    await expect(launched.page.locator(".save-status")).toHaveCount(0);
     await expect(launched.page.locator("[data-runtime-bootstrap-count=\"1\"]")).toHaveCount(1);
     expect(sha256(readFileSync(sourcePath, "utf8"))).toBe(sourceSha256);
     const runtimeDocument = await documentToken(frame);
@@ -669,30 +662,13 @@ test("Electron Edit preserves imported source-relative ECharts assets and native
     });
     await expect(launched.page.locator("[data-runtime-bootstrap-count=\"1\"]")).toHaveCount(1);
     expect(await documentToken(launched.page)).toBe(runtimeDocument);
-    const runtimeCanvasState = await launched.page.locator("[data-persist-state]").first().evaluate(
-      (element) => ({
-        canvasGeneration: element.getAttribute("data-canvas-generation"),
-        editRevision: element.getAttribute("data-edit-revision"),
-        persistedRevision: element.getAttribute("data-persisted-revision"),
-      }),
-    );
-
     await addCanvasComment(
       launched.page,
       frame,
       "runtime-editable",
       "运行时图表旁的原生评论。",
     );
-    expect({
-      document: await documentToken(launched.page),
-      canvas: await launched.page.locator("[data-persist-state]").first().evaluate(
-        (element) => ({
-          canvasGeneration: element.getAttribute("data-canvas-generation"),
-          editRevision: element.getAttribute("data-edit-revision"),
-          persistedRevision: element.getAttribute("data-persisted-revision"),
-        }),
-      ),
-    }).toEqual({ document: runtimeDocument, canvas: runtimeCanvasState });
+    expect(await documentToken(launched.page)).toBe(runtimeDocument);
 
     const editable = await activateNativeEdit(frame, "runtime-editable");
     await expect(editable).toHaveAttribute("contenteditable", "true");
@@ -703,7 +679,7 @@ test("Electron Edit preserves imported source-relative ECharts assets and native
     expect(sha256(readFileSync(sourcePath, "utf8"))).toBe(sourceSha256);
     expect(readFileSync(sourcePath, "utf8")).toBe(source);
     await launched.page.keyboard.press(process.platform === "darwin" ? "Meta+S" : "Control+S");
-    await expect(launched.page.locator(".save-status")).toHaveText("已安全保存");
+    await expect(launched.page.locator(".save-status")).toHaveCount(0);
     await expect(launched.page.locator("[data-runtime-bootstrap-count=\"1\"]")).toHaveCount(1);
     expect(await documentToken(launched.page)).toBe(runtimeDocument);
     expect(frame.isDetached()).toBe(false);
@@ -729,7 +705,7 @@ test("Electron Edit preserves imported source-relative ECharts assets and native
       await frame.locator(caseSelector("runtime-editable")).getAttribute("contenteditable")
     )).not.toBe("true");
     await launched.page.keyboard.press(process.platform === "darwin" ? "Meta+S" : "Control+S");
-    await expect(launched.page.locator(".save-status")).toHaveText("已安全保存");
+    await expect(launched.page.locator(".save-status")).toHaveCount(0);
     await expect(launched.page.locator("[data-runtime-bootstrap-count=\"1\"]")).toHaveCount(1);
     expect(await documentToken(launched.page)).toBe(runtimeDocument);
     expect(frame.isDetached()).toBe(false);
@@ -741,7 +717,7 @@ test("Electron Edit preserves imported source-relative ECharts assets and native
       "结束编辑后的精确定位评论。",
     );
     await launched.page.keyboard.press(process.platform === "darwin" ? "Meta+S" : "Control+S");
-    await expect(launched.page.locator(".save-status")).toHaveText("已安全保存");
+    await expect(launched.page.locator(".save-status")).toHaveCount(0);
     await expect(launched.page.locator("[data-runtime-bootstrap-count=\"1\"]")).toHaveCount(1);
     expect(await documentToken(launched.page)).toBe(runtimeDocument);
     expect(frame.isDetached()).toBe(false);
@@ -998,11 +974,10 @@ test("Electron Edit keeps frozen one-shot iframe through structural line-break a
       frozen: "true",
       bootstrapCount: 1,
     });
-    await expect(launched.page.locator(".save-status")).toHaveText("已安全保存");
+    await expect(launched.page.locator(".save-status")).toHaveCount(0);
     const baseline = {
       document: await documentToken(launched.page),
-      canvasGeneration: await launched.page.locator("[data-persist-state]").first()
-        .evaluate((element) => element.getAttribute("data-canvas-generation")),
+      persistedRevision: await expectCheckpointPersisted(launched.page, -1),
     };
 
     const editable = await activateNativeEdit(frame, "runtime-editable");
@@ -1017,7 +992,8 @@ test("Electron Edit keeps frozen one-shot iframe through structural line-break a
         ? "detached"
         : await frame.locator(caseSelector("runtime-editable")).getAttribute("contenteditable")
     )).not.toBe("true");
-    await expect(launched.page.locator(".save-status")).toHaveText("已安全保存");
+    await expect(launched.page.locator(".save-status")).toHaveCount(0);
+    await expectCheckpointPersisted(launched.page, baseline.persistedRevision);
     await assertFrozenRuntimeRetained(launched.page, frame, baseline);
     expect(readFileSync(managedSourcePath, "utf8")).toMatch(/<br\s*\/?>/u);
 
@@ -1028,7 +1004,8 @@ test("Electron Edit keeps frozen one-shot iframe through structural line-break a
     await expect.poll(() => readFileSync(managedSourcePath, "utf8")).toMatch(
       new RegExp(`${siblingText}[\\s\\S]*${editableText}`, "u"),
     );
-    await expect(launched.page.locator(".save-status")).toHaveText("已安全保存");
+    await expect(launched.page.locator(".save-status")).toHaveCount(0);
+    await expectCheckpointPersisted(launched.page, baseline.persistedRevision);
     await assertFrozenRuntimeRetained(launched.page, frame, baseline);
     expect(readFileSync(managedSourcePath, "utf8")).not.toMatch(
       /data-pageroot-edit-runtime|data-echarts-runtime/u,
@@ -1355,7 +1332,7 @@ test("Electron Edit rejects unsafe ECharts host styling without persisting it", 
       runtimeCanvasCount: 0,
       hostStyle: expect.stringMatching(/width:\s*640px.*height:\s*360px/u),
     });
-    await expect(launched.page.locator(".save-status")).toHaveText("已安全保存");
+    await expect(launched.page.locator(".save-status")).toHaveCount(0);
     expect(sha256(readFileSync(sourcePath, "utf8"))).toBe(sourceSha256);
     expect(readFileSync(sourcePath, "utf8")).toBe(source);
   } finally {
@@ -1432,7 +1409,7 @@ test("Electron Edit records same-origin parent access as an accepted direct-runt
       dataImagePngCount: 0,
       frozen: "true",
     });
-    await expect(launched.page.locator(".save-status")).toHaveText("已安全保存");
+    await expect(launched.page.locator(".save-status")).toHaveCount(0);
     const editable = await activateNativeEdit(frame, "runtime-isolated-editable");
     await expect(editable).toHaveAttribute("contenteditable", "true");
     expect(sha256(readFileSync(sourcePath, "utf8"))).toBe(sourceSha256);

@@ -522,6 +522,24 @@ ${REVIEW_MASK_UNION_BEFORE}
         animations: "disabled",
       });
     }
+    if (process.env.PAGEROOT_CAPTURE_TOOLBAR_CLEANUP) {
+      const visibleToast = launched.page.locator(".toast.show");
+      await visibleToast.waitFor({ state: "visible", timeout: 2_000 }).catch(() => {});
+      if (await visibleToast.isVisible().catch(() => false)) {
+        await visibleToast.getByRole("button", { name: "关闭提醒" }).click();
+        await expect(visibleToast).toBeHidden();
+      }
+      const captureDirectory = path.resolve(
+        productRoot,
+        process.env.PAGEROOT_CAPTURE_TOOLBAR_CLEANUP_DIR
+          || path.join("output", "design-qa", "toolbar-cleanup"),
+      );
+      mkdirSync(captureDirectory, { recursive: true });
+      await launched.page.screenshot({
+        path: path.join(captureDirectory, "05-review-toolbar.png"),
+        animations: "disabled",
+      });
+    }
     await launched.page.locator('section[data-side="before"] > header').hover();
     await expect(reviewCommentBubble).toBeHidden();
 
@@ -796,27 +814,22 @@ ${REVIEW_MASK_UNION_BEFORE}
     await expect.poll(async () => beforeReviewFrame.locator("html").getAttribute(
       "data-pageroot-review-focus",
     )).not.toBe("all");
-    // Switching the filter must land on the first matching change instead of
-    // leaving the navigator on an unmatched target with an empty viewport.
-    const changeNavigator = launched.page.getByRole("button", { name: "下一处变化" })
-      .locator("xpath=..");
-    await expect(changeNavigator.locator("strong")).toHaveText("1");
-    // The unified toolbar owns the filtered region total.
-    const filteredRegionTotal = (await changeNavigator.locator("span").textContent())
-      ?.split("/")[1] || "";
-    expect(Number(filteredRegionTotal)).toBeGreaterThan(0);
+    // Switching the filter must select the first matching marker instead of
+    // leaving an unmatched target with an empty viewport.
     const filteredFocusChangeId = await beforeReviewFrame.locator("html")
       .getAttribute("data-pageroot-review-focus");
+    expect(filteredFocusChangeId).toBeTruthy();
     await expect(beforeReviewFrame.locator(
       `[data-pageroot-review-overlay-box="${filteredFocusChangeId}"]`,
     )).not.toHaveCount(0);
-    // A target that still matches the new filter keeps the user's position.
-    await launched.page.getByRole("button", { name: "下一处变化" }).click();
-    await expect(changeNavigator.locator("strong")).toHaveText("2");
+    await expect(beforeReviewFrame.locator(
+      `[data-pageroot-review-region-bar="${filteredFocusChangeId}"]`,
+    )).toBeVisible();
+    // Re-selecting the same filter keeps the user's position; page markers
+    // remain the explicit way to move to another change.
     await launched.page.getByRole("button", { name: "文字变化" }).click();
-    await expect(changeNavigator.locator("strong")).toHaveText("2");
-    await launched.page.getByRole("button", { name: "上一处变化" }).click();
-    await expect(changeNavigator.locator("strong")).toHaveText("1");
+    await expect.poll(async () => beforeReviewFrame.locator("html")
+      .getAttribute("data-pageroot-review-focus")).toBe(filteredFocusChangeId);
     await expect(beforeReviewFrame.locator(
       '[data-pageroot-review-text="removed"]',
     ).filter({ hasText: ORIGINAL_TEXT })).toBeVisible();
@@ -1548,13 +1561,12 @@ ${REVIEW_MASK_UNION_BEFORE}
       "data-pageroot-review-filter",
     )).toBe("text");
     // The content map is removed, so its outline, group counts and drawer geometry have
-    // nothing left to assert. What still matters is the focus behaviour below, and a
-    // change is reached by stepping the change navigator instead of picking it off a map.
-    await focusChangeById(launched.page, afterReviewFrame, anchorOnlyChangeId);
+    // nothing left to assert. Page markers remain the explicit focus entry point.
+    await focusChangeById(launched.page, beforeReviewFrame, anchorOnlyChangeId);
     await expect.poll(async () => afterReviewFrame.locator("html").getAttribute(
       "data-pageroot-review-focus",
     )).toBe(anchorOnlyChangeId);
-    await expect.poll(() => afterReviewFrame.locator("html").evaluate(() => {
+    await expect.poll(() => beforeReviewFrame.locator("html").evaluate(() => {
       const anchor = document.querySelector("[data-review-anchor-only]");
       if (!anchor) return false;
       const targetNode = [...anchor.childNodes].find((node) => (
@@ -1601,8 +1613,8 @@ ${REVIEW_MASK_UNION_BEFORE}
     ).count()).toBeGreaterThan(0);
     await beforeCounter.evaluate((button) => button.click());
     await expect(afterCounter).toHaveAttribute("data-count", "3");
-    // The outline item that used to select this change lived in the content map.
-    await launched.page.getByRole("button", { name: "下一处变化" }).click();
+    // The authored counter is unrelated to the review sequence controls and
+    // remains a separate page interaction synchronized across both frames.
     await expect.poll(async () => beforeReviewFrame.locator("html").getAttribute(
       "data-pageroot-review-filter",
     )).toBe("text");
@@ -2184,22 +2196,12 @@ ${REVIEW_MASK_UNION_BEFORE}
         '[data-testid="ai-review-workspace"] iframe',
       ));
       window.__pagerootHandoffObserver = new MutationObserver(() => {
-        const panel = document.querySelector(".handoff-panel");
         const review = document.querySelector('[data-testid="ai-review-workspace"]');
         const reviewCoversWindow = Boolean(
           review
           && review.getClientRects().length > 0
           && getComputedStyle(review).position === "fixed",
         );
-        if (panel && panel.getClientRects().length > 0 && !reviewCoversWindow) {
-          window.__pagerootSawHandoffFlash = true;
-          window.__pagerootHandoffFlashEvents.push({
-            panelText: panel.textContent?.slice(0, 120) || "",
-            reviewPresent: Boolean(review),
-            drawer: document.querySelector(".side-drawer")?.getAttribute("data-drawer") || "",
-            sourceTitle: document.querySelector('.workbench-tab[data-selected="true"] button[role="tab"] > span:last-child')?.textContent || "",
-          });
-        }
         const disconnectedFrames = reviewCoversWindow
           ? window.__pagerootReviewAcceptFrames.filter((frame) => !frame.isConnected)
           : [];
@@ -2229,22 +2231,18 @@ ${REVIEW_MASK_UNION_BEFORE}
       window.__pagerootHandoffObserver?.disconnect();
       return window.__pagerootHandoffFlashEvents;
     })).toEqual([]);
-    await expect(launched.page.locator(".handoff-panel").filter({ visible: true }))
-      .toHaveCount(0);
+    await expect(launched.page.locator(".side-drawer")).toHaveCount(0);
     const openedFrame = await loadedDiskFrame(launched.page, opened.sourcePath);
     await expect(openedFrame.locator(caseSelector("list-item")))
       .toHaveText(UPDATED_TEXT);
 
-    await expect(launched.page.locator(".save-status"))
-      .toHaveText("已安全保存", { timeout: 30_000 });
     await launched.page.getByRole("button", { name: "预览", exact: true }).click();
     const previewFrame = launched.page.frameLocator(
       'iframe[title="HTML 交互预览"]',
     );
     await expect(previewFrame.locator(caseSelector("list-item")))
       .toHaveText(UPDATED_TEXT, { timeout: 30_000 });
-    await expect(launched.page.locator(".save-status"))
-      .toHaveText("已安全保存", { timeout: 30_000 });
+    await expect(launched.page.locator(".save-status")).toHaveCount(0);
     await launched.page.getByRole("button", { name: "编辑", exact: true }).click();
 
     await launched.electronApp.evaluate(({ dialog }, sourcePath) => {

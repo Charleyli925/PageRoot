@@ -650,6 +650,15 @@ export async function launchPageRoot({
   firstWindowTimeout = DEFAULT_MAIN_WINDOW_TIMEOUT,
   diagnosticTimeout: diagnosticOperationTimeout = DEFAULT_DIAGNOSTIC_OPERATION_TIMEOUT,
 } = {}) {
+  const packagedAppPath = process.env.PAGEROOT_PACKAGED_APP_PATH || null;
+  const packagedExecutable = packagedAppPath
+    ? path.join(
+      packagedAppPath,
+      "Contents",
+      "MacOS",
+      path.basename(packagedAppPath, ".app"),
+    )
+    : null;
   const isolatedUserData = existingUserData || mkdtempSync(
     path.join(tmpdir(), userDataPrefix),
   );
@@ -660,8 +669,10 @@ export async function launchPageRoot({
     seedActiveDiskProject(isolatedUserData, activeSourcePath, recentSourcePaths);
   }
   const electronApp = await electronLauncher({
-    executablePath: electronExecutable,
-    args: [path.join(productRoot, "desktop/main.mjs"), ...externalSourcePaths],
+    executablePath: packagedExecutable || electronExecutable,
+    args: packagedExecutable
+      ? externalSourcePaths
+      : [path.join(productRoot, "desktop/main.mjs"), ...externalSourcePaths],
     cwd: productRoot,
     env: {
       ...process.env,
@@ -930,7 +941,7 @@ export async function loadedDiskFrame(
   }
   await expect(page.locator('[aria-label="项目读取失败"]')).toHaveCount(0);
   await expect(page.getByRole("button", { name: "项目", exact: true }))
-    .toBeEnabled({ timeout });
+    .toHaveCount(0);
   if (editable) {
     const globalCommentButton = page.locator('aside[aria-label="本轮评论"]')
       .getByRole("button", { name: "全局评论", exact: true });
