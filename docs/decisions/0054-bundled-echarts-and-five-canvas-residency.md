@@ -29,6 +29,8 @@ working reports executed the same chart again.
    initial ECharts animation, observes the instance paint, and freezes after two
    quiet animation frames. One-shot timeout/animation work drains by completion.
    The four-second deadline remains only as a broken-script safety fallback.
+   ECharts stays on the exact 5.5.0 CDN bytes; GHSA-fgmj-fm8m-jvvx is a dated
+   reviewed exception because 6.1.0 would miss those URLs.
 5. Workbench retains the five most recently verified `HtmlCanvasEditor` iframe
    documents. Inactive entries are hidden, inert, read-only and locked. An exact
    `(tabId, sourceSha256)` hit cancels a duplicate runtime preparation and may
