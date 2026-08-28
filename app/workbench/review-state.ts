@@ -31,7 +31,7 @@ export const DEFAULT_REVIEW_STATE: ReviewState = {
   navigationTarget: "all",
   pagePresentationPath: [],
   scrollMode: "linked",
-  zoomMode: "fit",
+  zoomMode: "actual",
 };
 
 export function reduceReviewState(

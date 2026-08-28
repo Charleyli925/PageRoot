@@ -767,8 +767,32 @@ export async function assertReviewControlDefaults(page, beforeReviewFrame) {
   })).toHaveAttribute("aria-pressed", "true");
   await expect(page.getByRole("button", { name: "全部变化" }))
     .toHaveAttribute("aria-pressed", "true");
-  await expect(page.getByRole("button", { name: "适应画布", exact: true }))
+  await expect(page.getByRole("button", { name: "原始大小", exact: true }))
     .toHaveAttribute("aria-pressed", "true");
+  await expect.poll(async () => {
+    const footprint = await beforeReviewFrame.locator(
+      '[data-pageroot-review-overlay-box][data-active="true"]',
+    ).first().evaluate((box) => ({
+      left: Number(box.getAttribute("data-left")),
+      right: Number(box.getAttribute("data-left")) + Number(box.getAttribute("data-width")),
+      top: Number(box.getAttribute("data-top")),
+      bottom: Number(box.getAttribute("data-top")) + Number(box.getAttribute("data-height")),
+      scrollTop: scrollY,
+      viewportHeight: innerHeight,
+    })).catch(() => null);
+    if (!footprint) return false;
+    if (
+      footprint.bottom <= footprint.scrollTop
+      || footprint.top >= footprint.scrollTop + footprint.viewportHeight
+    ) return false;
+    return page.locator('[aria-label="修改前画布滚动区"]').evaluate((viewport, geometry) => {
+      const frame = viewport.querySelector("iframe");
+      if (!frame || frame.offsetWidth <= 0) return false;
+      const scale = frame.getBoundingClientRect().width / frame.offsetWidth;
+      return geometry.right * scale > viewport.scrollLeft
+        && geometry.left * scale < viewport.scrollLeft + viewport.clientWidth;
+    }, footprint);
+  }, { timeout: 30_000 }).toBe(true);
 }
 
 export async function assertReviewChangeOutline(beforeReviewFrame, afterReviewFrame) {
@@ -811,9 +835,22 @@ export async function assertOverlayMaskEquivalence(frame) {
   return frame.locator("html").evaluate(() => {
     const boxes = [...document.querySelectorAll("[data-pageroot-review-overlay-box]")];
     const holes = [...document.querySelectorAll("[data-pageroot-review-mask-hole]")];
+    const width = Math.max(innerWidth, document.documentElement.scrollWidth);
+    const height = Math.max(innerHeight, document.documentElement.scrollHeight);
+    const insideDocument = (element) => {
+      const left = Number(element.getAttribute("data-left"));
+      const top = Number(element.getAttribute("data-top"));
+      const elementWidth = Number(element.getAttribute("data-width"));
+      const elementHeight = Number(element.getAttribute("data-height"));
+      return left >= 0 && top >= 0
+        && left + elementWidth <= width
+        && top + elementHeight <= height;
+    };
     return boxes.length === holes.length && boxes.every((box, index) => {
       const hole = holes[index];
-      return Math.abs(Number(box.getAttribute("data-left")) - Number(hole.getAttribute("data-left"))) < .02
+      return insideDocument(box)
+        && insideDocument(hole)
+        && Math.abs(Number(box.getAttribute("data-left")) - Number(hole.getAttribute("data-left"))) < .02
         && Math.abs(Number(box.getAttribute("data-top")) - Number(hole.getAttribute("data-top"))) < .02
         && Math.abs(Number(box.getAttribute("data-width")) - Number(hole.getAttribute("data-width"))) < .02
         && Math.abs(Number(box.getAttribute("data-height")) - Number(hole.getAttribute("data-height"))) < .02

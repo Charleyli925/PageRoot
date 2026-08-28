@@ -127,6 +127,7 @@ function reviewBootstrap(
   const RuntimeVisualString = String;
   const runtimeVisualBoolean = Boolean;
   const runtimeVisualMathFloor = Math.floor.bind(Math);
+  const runtimeVisualNumberIsFinite = Number.isFinite.bind(Number);
   const runtimeVisualSetTimeout = window.setTimeout.bind(window);
   const runtimeVisualArrayPush = runtimeVisualBindCall(Array.prototype.push);
   const runtimeVisualArrayForEach = runtimeVisualBindCall(Array.prototype.forEach);
@@ -1050,7 +1051,7 @@ function reviewBootstrap(
     activeScrollCommand = { commandId, top: resolvedTop, left: resolvedLeft };
     return activeScrollCommand;
   };
-  const scrollToReviewRect = (rect) => {
+  const scrollToReviewRect = (rect, behavior = "auto") => {
     if (!rect || rect.height <= 0 || !Number.isFinite(rect.top)) return false;
     const token = "focus-" + Date.now() + "-" + Math.random();
     const top = clamp(
@@ -1059,12 +1060,12 @@ function reviewBootstrap(
       maximumScrollTop(),
     );
     const command = recordFocusScrollCommand(token, top, scrollX);
-    scrollTo({ top: command.top, left: command.left, behavior: "auto" });
+    scrollTo({ top: command.top, left: command.left, behavior });
     return true;
   };
-  const scrollIntoReviewTarget = (target) => {
+  const scrollIntoReviewTarget = (target, behavior = "auto") => {
     const token = "focus-" + Date.now() + "-" + Math.random();
-    target.scrollIntoView({ block: "start", behavior: "auto" });
+    target.scrollIntoView({ block: "start", behavior });
     recordFocusScrollCommand(token);
   };
   const anchorTextNodes = (anchor) => {
@@ -1166,19 +1167,51 @@ function reviewBootstrap(
       }
     });
   };
-  const focusChangeTarget = (changeId, target, panelPath) => {
+  const focusChangeTarget = (changeId, target, panelPath, behavior = "auto") => {
     revealTarget(target, panelPath);
     requestAnimationFrame(() => {
+      const reportHorizontalFootprint = (rect, documentSpace = false) => {
+        if (!rect) return;
+        const left = Number(rect.left) + (documentSpace ? 0 : scrollX);
+        const right = Number(rect.right) + (documentSpace ? 0 : scrollX);
+        const maximum = Math.max(
+          innerWidth,
+          document.documentElement.scrollWidth,
+          document.body?.scrollWidth || 0,
+        );
+        if (
+          !runtimeVisualNumberIsFinite(left)
+          || !runtimeVisualNumberIsFinite(right)
+          || left < 0
+          || right < left
+          || right > maximum
+        ) return;
+        post("focus-horizontal-footprint", { changeId, left, right });
+      };
       const visibleBox = document.querySelector(
         '[data-pageroot-review-overlay-box="' + changeId + '"]',
       );
-      if (visibleBox && scrollToReviewRect(visibleBox.getBoundingClientRect())) return;
+      if (visibleBox) {
+        reportHorizontalFootprint({
+          left: visibleBox.getAttribute("data-left"),
+          right: Number(visibleBox.getAttribute("data-left"))
+            + Number(visibleBox.getAttribute("data-width")),
+        }, true);
+        if (scrollToReviewRect(visibleBox.getBoundingClientRect(), behavior)) return;
+      }
       const anchors = [...document.querySelectorAll(
         '[data-pageroot-review-anchor-change="' + changeId + '"]',
       )];
-      if (anchors.some((anchor) => scrollToReviewRect(collapsedAnchorRect(anchor, changeId)))) return;
-      if (target && !scrollToReviewRect(target.getBoundingClientRect())) {
-        scrollIntoReviewTarget(target);
+      for (const anchor of anchors) {
+        const rect = collapsedAnchorRect(anchor, changeId);
+        if (!rect) continue;
+        reportHorizontalFootprint(rect);
+        if (scrollToReviewRect(rect, behavior)) return;
+      }
+      if (target) {
+        const rect = target.getBoundingClientRect();
+        reportHorizontalFootprint(rect);
+        if (!scrollToReviewRect(rect, behavior)) scrollIntoReviewTarget(target, behavior);
       }
     });
   };
@@ -1320,15 +1353,16 @@ function reviewBootstrap(
       outer.element === inner.element
       || !outer.element.contains(inner.element)
       || !recordContains(outer, inner)
+      || outer.changeId !== inner.changeId
+      || outer.semanticOwnerId !== inner.semanticOwnerId
+      || outer.factIdentity !== inner.factIdentity
+      || outer.tone !== "structure"
+      || inner.tone !== "structure"
     ) return false;
-    // A structure that is wholly new or wholly gone already accounts for every
-    // fact inside it, so an inner outline repeats what the outer one said.
-    if (
-      outer.tone === "structure"
-      && (outer.structureChange === "added" || outer.structureChange === "removed")
-    ) return true;
-    // Two nested element outlines of one change say the same thing twice.
-    return outer.tone === "structure" && inner.tone === "structure";
+    // Containment is only a rendering dedupe for repeated records of the same
+    // structure fact. An independently owned nested fact remains independently
+    // visible even when its rectangle sits wholly inside another change.
+    return true;
   };
   const recordsAreClose = (left, right, gap = 10) => {
     const horizontalOverlap = Math.max(0, Math.min(left.right, right.right) - Math.max(left.left, right.left));
@@ -2065,11 +2099,9 @@ function reviewBootstrap(
     const nonTextRecords = minimalRecords.filter((record) => (
       record.tone !== "text-added" && record.tone !== "text-removed"
     ));
-    // An outer outline already localizes every change inside it, so a second and
-    // third outline drawn around nested descendants of the same change add no
-    // locative information and read as visual noise. Collapse the redundant ones
-    // (see recordNestsWithin for exactly which nestings qualify) and let the
-    // badge count carry how many facts that one box now stands for.
+    // Collapse only duplicate geometry records for the same structure fact.
+    // Containment alone is never evidence that an independently owned nested
+    // fact is redundant.
     const containedRecords = mergeConnectedRecords(
       [...nonTextRecords].sort((left, right) => (
         (right.right - right.left) * (right.bottom - right.top)
@@ -2106,6 +2138,46 @@ function reviewBootstrap(
         summary: allModeSummary(record.types, record.summary),
       }));
     }
+    const inset = overlayInset;
+    // Measure the authored document after the previous projection layer has
+    // been removed. The projection may consume this width but must never grow
+    // it: an inset at the right edge must not create horizontal scrolling.
+    const documentWidth = Math.max(
+      innerWidth,
+      document.documentElement.scrollWidth,
+      document.body?.scrollWidth || 0,
+    );
+    const height = Math.max(innerHeight, documentHeight());
+    merged = merged.flatMap((record) => {
+      const renderFragments = (record.fragments || [{
+        left: record.left,
+        top: record.top,
+        right: record.right,
+        bottom: record.bottom,
+      }]).map((fragment) => ({
+        left: clamp(fragment.left - inset, 0, documentWidth),
+        top: clamp(fragment.top - inset, 0, height),
+        right: clamp(fragment.right + inset, 0, documentWidth),
+        bottom: clamp(fragment.bottom + inset, 0, height),
+      })).filter((fragment) => (
+        fragment.right - fragment.left > 0
+        && fragment.bottom - fragment.top > 0
+      ));
+      if (!renderFragments.length) return [];
+      const left = Math.min(...renderFragments.map((fragment) => fragment.left));
+      const top = Math.min(...renderFragments.map((fragment) => fragment.top));
+      const right = Math.max(...renderFragments.map((fragment) => fragment.right));
+      const bottom = Math.max(...renderFragments.map((fragment) => fragment.bottom));
+      return [{
+        ...record,
+        left,
+        top,
+        right,
+        bottom,
+        renderFragments,
+        pathData: unionPath(renderFragments),
+      }];
+    });
     // One contiguous stretch of a change carries one caption and one
     // page-edge revision bar. A change may touch places far apart on the
     // page, so captions and bars follow its spatial clusters instead of one
@@ -2151,13 +2223,6 @@ function reviewBootstrap(
       });
     });
     overlayElementsByChange = new RuntimeVisualMap();
-    const inset = overlayInset;
-    const documentWidth = Math.max(
-      innerWidth,
-      document.documentElement.scrollWidth,
-      document.body?.scrollWidth || 0,
-    );
-    const height = Math.max(innerHeight, documentHeight());
     const layer = document.createElement("div");
     layer.setAttribute("data-pageroot-review-projection-layer", "true");
     layer.style.setProperty("width", documentWidth + "px", "important");
@@ -2209,21 +2274,6 @@ function reviewBootstrap(
     resetMaskPrimitive(maskBackground, "#ffffff");
     mask.append(maskBackground);
     merged.forEach((record) => {
-      const horizontalInset = inset;
-      const fragments = (record.fragments || [{
-        left: record.left,
-        top: record.top,
-        right: record.right,
-        bottom: record.bottom,
-      }]).map((fragment) => ({
-        left: fragment.left - horizontalInset,
-        top: fragment.top - inset,
-        right: fragment.right + horizontalInset,
-        bottom: fragment.bottom + inset,
-      }));
-      const pathData = unionPath(fragments);
-      record.renderFragments = fragments;
-      record.pathData = pathData;
       const hole = document.createElementNS(namespace, "path");
       hole.setAttribute("data-pageroot-review-mask-hole", record.changeId);
       hole.setAttribute("data-pageroot-review-semantic-owner", record.semanticOwnerId || "");
@@ -2236,13 +2286,11 @@ function reviewBootstrap(
       if (record.ownerKey) {
         hole.setAttribute("data-pageroot-review-mask-owner", record.ownerKey);
       }
-      const left = record.left - horizontalInset;
-      const top = record.top - inset;
-      const width = record.right - record.left + horizontalInset * 2;
-      const holeHeight = record.bottom - record.top + inset * 2;
-      hole.setAttribute("d", pathData);
-      hole.setAttribute("data-left", String(left));
-      hole.setAttribute("data-top", String(top));
+      const width = record.right - record.left;
+      const holeHeight = record.bottom - record.top;
+      hole.setAttribute("d", record.pathData);
+      hole.setAttribute("data-left", String(record.left));
+      hole.setAttribute("data-top", String(record.top));
       hole.setAttribute("data-width", String(width));
       hole.setAttribute("data-height", String(holeHeight));
       hole.setAttribute("fill", "#000000");
@@ -2371,7 +2419,6 @@ function reviewBootstrap(
       layer.append(marksSvg);
     }
     merged.forEach((record) => {
-      const horizontalInset = inset;
       const box = document.createElement("div");
       box.setAttribute("data-pageroot-review-overlay-box", record.changeId);
       box.setAttribute("data-pageroot-review-semantic-owner", record.semanticOwnerId || "");
@@ -2395,10 +2442,10 @@ function reviewBootstrap(
       );
       const active = currentState.focus !== "all" && currentState.focus === record.changeId;
       box.dataset.active = active ? "true" : "false";
-      const left = record.left - horizontalInset;
-      const top = record.top - inset;
-      const width = record.right - record.left + horizontalInset * 2;
-      const boxHeight = record.bottom - record.top + inset * 2;
+      const left = record.left;
+      const top = record.top;
+      const width = record.right - record.left;
+      const boxHeight = record.bottom - record.top;
       box.style.setProperty("left", left + "px", "important");
       box.style.setProperty("top", top + "px", "important");
       box.style.setProperty("width", width + "px", "important");
@@ -2530,7 +2577,12 @@ function reviewBootstrap(
     if (message.type === "focus-change") {
       const changeId = String(message.changeId || "").replace(/[^a-z0-9-]/gi, "");
       const target = document.querySelector('[data-pageroot-review-id="' + changeId + '"]');
-      focusChangeTarget(changeId, target, message.panelPath?.length ? message.panelPath : message.panelKey);
+      focusChangeTarget(
+        changeId,
+        target,
+        message.panelPath?.length ? message.panelPath : message.panelKey,
+        message.behavior === "smooth" ? "smooth" : "auto",
+      );
     }
     if (message.type === "focus-outline") {
       const outlineId = String(message.outlineId || "").replace(/[^a-z0-9-]/gi, "");
