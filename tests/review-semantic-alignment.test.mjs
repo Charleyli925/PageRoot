@@ -203,6 +203,42 @@ test("duplicate relocation titles remain ambiguous instead of being guessed", ()
   assert.equal(pairs.filter((pair) => pair.afterIndex === null).length, 2);
 });
 
+test("an exact duplicate does not make its changed relocation peer look unique", () => {
+  const relocationKey = "panel:retail\u0000container:DIV\u0000metric\u0000重复卡片";
+  const exact = unit("重复卡片的稳定内容", {
+    kind: "container:DIV",
+    exactSignature: "duplicate-exact",
+    relocationKey,
+  });
+  const pairs = alignReviewSemanticUnits(
+    [
+      exact,
+      unit("北方仓储周转红线", {
+        kind: "container:DIV",
+        exactSignature: "changed-before",
+        relocationKey,
+      }),
+    ],
+    [
+      exact,
+      unit("海外广告买量策略", {
+        kind: "container:DIV",
+        exactSignature: "changed-after",
+        relocationKey,
+      }),
+    ],
+  );
+
+  assert.deepEqual(matchedPairs(pairs).map(({ beforeIndex, afterIndex, match }) => (
+    { beforeIndex, afterIndex, match }
+  )), [{ beforeIndex: 0, afterIndex: 0, match: "exact-signature" }]);
+  assert.deepEqual(
+    pairs.filter((pair) => pair.afterIndex === null).map((pair) => pair.beforeIndex),
+    [1],
+  );
+  assert.deepEqual(unmatchedAfter(pairs), [1]);
+});
+
 test("an ordinary insertion stays unmatched without disturbing stable siblings", () => {
   const before = [unit("项目甲"), unit("项目乙")];
   const after = [before[0], unit("普通新增"), before[1]];

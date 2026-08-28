@@ -65,6 +65,27 @@ function collectStrongPairs(before, after) {
       pairs.push({ beforeIndex, afterIndex, match });
     });
   };
+  const collectGloballyUnique = (keyForUnit, match) => {
+    // Relocation ambiguity is a property of the complete sibling inventories,
+    // not merely the indexes left after stronger matching. If one duplicate is
+    // consumed by stable-id/exact-signature first, its changed peer must not be
+    // promoted into an apparently unique relocation pair.
+    const beforeIndexes = uniqueIndexes(before, keyForUnit);
+    const afterIndexes = uniqueIndexes(after, keyForUnit);
+    beforeIndexes.forEach((beforeIndex, key) => {
+      const afterIndex = afterIndexes.get(key);
+      if (
+        beforeIndex === null
+        || afterIndex === null
+        || afterIndex === undefined
+        || usedBefore.has(beforeIndex)
+        || usedAfter.has(afterIndex)
+      ) return;
+      usedBefore.add(beforeIndex);
+      usedAfter.add(afterIndex);
+      pairs.push({ beforeIndex, afterIndex, match });
+    });
+  };
   collect(identityKey, "stable-id");
   collect(exactKey, "exact-signature");
   // A unique card-like title can preserve identity when a card crosses an
@@ -72,7 +93,7 @@ function collectStrongPairs(before, after) {
   // edited. This is pairing evidence only: callers continue to receive a
   // weighted match and no movement fact. Duplicate keys remain ambiguous via
   // uniqueIndexes and are deliberately left to the ordinary alignment path.
-  collect(relocationKey, "weighted");
+  collectGloballyUnique(relocationKey, "weighted");
   return { pairs, usedBefore, usedAfter };
 }
 
