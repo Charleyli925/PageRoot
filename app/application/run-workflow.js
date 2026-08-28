@@ -508,16 +508,17 @@ export class RunWorkflow {
     }
   }
 
-  async checkAgentUsability() {
-    const displayName = this.#agentCatalog.presentation().displayName || "Agent";
+  async checkAgentUsability(selection = this.#agentCatalog.freezeSelected()) {
+    const frozen = selection || this.#agentCatalog.freezeSelected();
+    const displayName = this.#agentCatalog.presentation(frozen).displayName || "Agent";
+    if (!frozen) return rejected("AGENT_PROVIDER_UNSUPPORTED", `${displayName} 不可用。`);
     if (this.#disposed) {
       return blocked("RUN_WORKFLOW_DISPOSED", `${displayName} 状态检查已经停止。`);
     }
     try {
-      const selection = this.#agentCatalog.freezeSelected();
-      const preflight = await this.#agentCatalog.preflight(selection, { force: true });
+      const preflight = await this.#agentCatalog.preflight(frozen, { force: true });
       this.#agentCatalog.discardTicket(preflight);
-      return succeeded({ availability: this.#agentCatalog.availability() });
+      return succeeded({ availability: this.#agentCatalog.availability(frozen) });
     } catch (cause) {
       return rejected(
         errorCode(cause, "AGENT_PREFLIGHT_FAILED"),
@@ -526,12 +527,15 @@ export class RunWorkflow {
     }
   }
 
-  async copyAgentGuidance({ kind } = {}) {
+  async copyAgentGuidance({ kind, selection } = {}) {
     if (kind !== "install" && kind !== "login") {
       return rejected("AGENT_GUIDANCE_INVALID", "选择的 Agent 引导无效。");
     }
     try {
-      const result = await this.#agentCatalog.copyGuidance(kind);
+      const result = await this.#agentCatalog.copyGuidance(
+        kind,
+        selection || this.#agentCatalog.freezeSelected(),
+      );
       return succeeded(result);
     } catch (cause) {
       return rejected(
@@ -613,7 +617,7 @@ export class RunWorkflow {
       const refreshed = await this.#agentCatalog.install(frozen);
       if (this.#disposed) return stale({ kind: "agent-install" });
       if (String(refreshed?.result?.status || "") === "ready") {
-        return this.checkAgentUsability();
+        return this.checkAgentUsability(frozen);
       }
       return succeeded({ availability: this.#agentCatalog.availability(frozen) });
     } catch (cause) {

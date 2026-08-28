@@ -67,6 +67,7 @@ const BRIDGE_FILES = [
   "agent/providers/provider-registry.mjs",
   "agent/providers/qoder-provider.mjs",
   "agent/providers/codex-provider.mjs",
+  "agent/providers/codex-acp-provider.mjs",
   "agent/catalog/agent-catalog.mjs",
   "agent/catalog/agent-installer.mjs",
   "agent/catalog/qoder-managed-release.mjs",

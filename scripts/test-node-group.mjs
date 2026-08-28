@@ -31,6 +31,7 @@ const PACKAGE_TESTS = new Set([
 const INTEGRATION_TESTS = new Set([
   "agent-catalog.test.mjs",
   "agent-installer.test.mjs",
+  "codex-acp-provider.test.mjs",
   "acp-runtime.test.mjs",
   "agent-provider-contract.test.mjs",
   "agent-runtime-coordinator.test.mjs",

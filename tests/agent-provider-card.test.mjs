@@ -41,5 +41,5 @@ test("About keeps its open, return-to-app and action-focus fences", async () => 
   assert.match(about, /document\.visibilityState === "visible"/u);
   assert.match(about, /window\.addEventListener\("focus"/u);
   assert.match(about, /document\.addEventListener\("visibilitychange"/u);
-  assert.match(about, /qoderActionRef\.current\?\.focus\(\)/u);
+  assert.match(about, /recoveryActionRef\.current\?\.focus\(\)/u);
 });

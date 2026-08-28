@@ -55,6 +55,26 @@ export const CODEX_AGENT_PROVIDER: AgentProviderDescriptor;
 export function defaultAgentProviders(options?: {
   codexExecution?: boolean;
 }): readonly AgentProviderDescriptor[];
+export function agentProviderCardPresentation(provider: AgentProviderDescriptor | AgentProviderEntry): Readonly<{
+  displayName: string;
+  logoSrc: string | null;
+  cardClassName: string;
+  primaryActionDataAttribute: string | null;
+  availability: (value: AgentProviderAvailabilitySnapshot) => Readonly<{
+    statusLabel: string;
+    detail: string;
+    tone: "ready" | "checking" | "attention";
+  }>;
+  actions: Readonly<{
+    install: Readonly<{ label: string; copiedLabel: string }>;
+    login: Readonly<{ label: string; copiedLabel: string }>;
+  }>;
+}>;
+export function aboutAgentCardsFromCatalog(snapshot: AgentCatalogSnapshot | null | undefined): readonly Readonly<{
+  selection: AgentSelection;
+  presentation: ReturnType<typeof agentProviderCardPresentation>;
+  availability: AgentProviderAvailabilitySnapshot;
+}>[];
 export class AgentCatalogState {
   constructor(options?: {
     bridgeClient: BridgeClient;

@@ -1727,8 +1727,8 @@ export class WorkspaceController {
     return this.#requireRunWorkflow().refreshAgentAvailability();
   }
 
-  checkAgentUsability() {
-    return this.#requireRunWorkflow().checkAgentUsability();
+  checkAgentUsability(selection) {
+    return this.#requireRunWorkflow().checkAgentUsability(selection);
   }
 
   copyAgentGuidance(input) {

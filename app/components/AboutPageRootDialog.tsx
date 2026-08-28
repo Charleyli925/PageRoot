@@ -12,10 +12,12 @@ import { GithubLogoIcon } from "@phosphor-icons/react/dist/csr/GithubLogo";
 import { XIcon } from "@phosphor-icons/react/dist/csr/X";
 
 import type {
-  QoderAvailabilitySnapshot,
-  QoderGuidanceKind,
-} from "../domain/qoder-availability.js";
-import QoderAvailabilityCard from "./QoderAvailabilityCard";
+  AgentProviderAvailabilitySnapshot,
+  AgentProviderGuidanceKind,
+  AgentSelection,
+} from "../domain/agent-provider-state.js";
+import type { AgentProviderCardPresentation } from "./AgentProviderCard";
+import AgentProviderCard from "./AgentProviderCard";
 
 export type AboutApplicationUpdateStatus =
   | "idle"
@@ -37,6 +39,12 @@ export type AboutApplicationUpdateResult = {
   publishedAt: string | null;
 };
 
+export type AboutAgentCard = Readonly<{
+  selection: AgentSelection;
+  presentation: AgentProviderCardPresentation;
+  availability: AgentProviderAvailabilitySnapshot;
+}>;
+
 export type AboutOpenSource = "default" | "agent-settings";
 
 type AboutPageRootDialogProps = {
@@ -49,7 +57,7 @@ type AboutPageRootDialogProps = {
   repositoryOpenFailed: boolean;
   releaseNotesOpenFailed: boolean;
   userNoticeOpenFailed: boolean;
-  qoderAvailability: QoderAvailabilitySnapshot;
+  agentCards: readonly AboutAgentCard[];
   source?: AboutOpenSource;
   onClose: () => void;
   onCheckForUpdates: () => void;
@@ -58,12 +66,15 @@ type AboutPageRootDialogProps = {
   onOpenReleaseNotes: () => void;
   onOpenRepository: () => void;
   onOpenUserNotice: () => void;
-  onCheckQoderUsability: () => Promise<AboutQoderOutcome>;
-  onCopyQoderGuidance: (kind: QoderGuidanceKind) => Promise<AboutQoderOutcome>;
-  onInstallQoder: () => Promise<AboutQoderOutcome>;
+  onCheckUsability: (selection: AgentSelection) => Promise<AboutAgentOutcome>;
+  onCopyGuidance: (
+    kind: AgentProviderGuidanceKind,
+    selection: AgentSelection,
+  ) => Promise<AboutAgentOutcome>;
+  onInstall: (selection: AgentSelection) => Promise<AboutAgentOutcome>;
 };
 
-type AboutQoderOutcome = Readonly<{
+type AboutAgentOutcome = Readonly<{
   status: string;
   reason?: string;
 }> | null | undefined;
@@ -185,7 +196,7 @@ export default function AboutPageRootDialog({
   repositoryOpenFailed,
   releaseNotesOpenFailed,
   userNoticeOpenFailed,
-  qoderAvailability,
+  agentCards,
   source = "default",
   onClose,
   onCheckForUpdates,
@@ -194,17 +205,17 @@ export default function AboutPageRootDialog({
   onOpenReleaseNotes,
   onOpenRepository,
   onOpenUserNotice,
-  onCheckQoderUsability,
-  onCopyQoderGuidance,
-  onInstallQoder,
+  onCheckUsability,
+  onCopyGuidance,
+  onInstall,
 }: AboutPageRootDialogProps) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
-  const qoderActionRef = useRef<HTMLButtonElement>(null);
-  const qoderAvailabilityRef = useRef(qoderAvailability);
+  const recoveryActionRef = useRef<HTMLButtonElement>(null);
+  const agentCardsRef = useRef(agentCards);
   useEffect(() => {
-    qoderAvailabilityRef.current = qoderAvailability;
-  }, [qoderAvailability]);
+    agentCardsRef.current = agentCards;
+  }, [agentCards]);
   const presentation = updatePresentation({
     result: updateResult,
     updatesAvailable,
@@ -252,23 +263,26 @@ export default function AboutPageRootDialog({
     let active = true;
     let checkInFlight = false;
     let lastCheckStartedAt = 0;
-    let lastCheckGuidance = qoderAvailabilityRef.current.guidanceCopied;
+    let lastCheckGuidance = agentCardsRef.current
+      .map((card) => card.availability.guidanceCopied)
+      .join("|");
     const requestCheck = (force = false) => {
       if (!active) return;
-      const status = qoderAvailabilityRef.current.status;
-      if (!force && (status === "ready" || status === "checking")) return;
+      const cards = agentCardsRef.current;
+      if (!force && cards.every((card) => (
+        card.availability.status === "ready" || card.availability.status === "checking"
+      ))) return;
       const now = Date.now();
-      const guidanceChanged = (
-        qoderAvailabilityRef.current.guidanceCopied !== lastCheckGuidance
-      );
+      const guidanceKey = cards.map((card) => card.availability.guidanceCopied).join("|");
+      const guidanceChanged = guidanceKey !== lastCheckGuidance;
       if (
         checkInFlight
         || (!guidanceChanged && now - lastCheckStartedAt < 1_500)
       ) return;
       lastCheckStartedAt = now;
-      lastCheckGuidance = qoderAvailabilityRef.current.guidanceCopied;
+      lastCheckGuidance = guidanceKey;
       checkInFlight = true;
-      Promise.resolve(onCheckQoderUsability())
+      Promise.all(cards.map((card) => Promise.resolve(onCheckUsability(card.selection))))
         .catch(() => undefined)
         .finally(() => {
           checkInFlight = false;
@@ -285,7 +299,7 @@ export default function AboutPageRootDialog({
     window.addEventListener("focus", handleReturnToApp);
     document.addEventListener("visibilitychange", handleReturnToApp);
     const focusFrame = requestAnimationFrame(() => {
-      if (source === "agent-settings") qoderActionRef.current?.focus();
+      if (source === "agent-settings") recoveryActionRef.current?.focus();
       else closeButtonRef.current?.focus();
     });
     return () => {
@@ -294,15 +308,15 @@ export default function AboutPageRootDialog({
       document.removeEventListener("visibilitychange", handleReturnToApp);
       cancelAnimationFrame(focusFrame);
     };
-  }, [onCheckQoderUsability, open, source]);
+  }, [onCheckUsability, open, source]);
 
   useEffect(() => {
     if (!open || source !== "agent-settings") return undefined;
     const focusFrame = requestAnimationFrame(() => {
-      qoderActionRef.current?.focus();
+      recoveryActionRef.current?.focus();
     });
     return () => cancelAnimationFrame(focusFrame);
-  }, [open, qoderAvailability.guidanceCopied, qoderAvailability.status, source]);
+  }, [open, agentCards, source]);
 
   const handleBackdropPointer = (event: MouseEvent<HTMLDialogElement>) => {
     if (event.target === event.currentTarget) onClose();
@@ -353,13 +367,17 @@ export default function AboutPageRootDialog({
 
         <section className="about-agent-section" aria-labelledby="about-agent-title">
           <h3 id="about-agent-title">AI Agent</h3>
-          <QoderAvailabilityCard
-            availability={qoderAvailability}
-            surface="about"
-            actionButtonRef={qoderActionRef}
-            onCopyGuidance={onCopyQoderGuidance}
-            onInstall={onInstallQoder}
-          />
+          {agentCards.map((card, index) => (
+            <AgentProviderCard
+              key={`${card.selection.providerId}:${card.selection.runtimeId}`}
+              availability={card.availability}
+              presentation={card.presentation}
+              surface="about"
+              actionButtonRef={index === 0 ? recoveryActionRef : undefined}
+              onCopyGuidance={(kind) => onCopyGuidance(kind, card.selection)}
+              onInstall={() => onInstall(card.selection)}
+            />
+          ))}
         </section>
 
         <section

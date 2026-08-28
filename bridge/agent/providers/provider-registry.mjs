@@ -5,9 +5,8 @@ import {
   assertProviderTicket,
 } from "./agent-provider-contract.mjs";
 import { createQoderProvider } from "./qoder-provider.mjs";
-import { createCodexProvider } from "./codex-provider.mjs";
+import { createCodexAcpProvider } from "./codex-acp-provider.mjs";
 import { createAcpRuntime } from "../runtimes/acp-runtime.mjs";
-import { createCodexAppServerRuntime } from "../runtimes/codex-app-server-runtime.mjs";
 import { createRuntimeRegistry } from "../runtimes/runtime-registry.mjs";
 import {
   normalizeAgentDelivery,
@@ -326,10 +325,8 @@ export function createDefaultProviderRegistry({
   policyLoader,
   runTask,
   codexExecution = AGENT_FEATURE_GATES.codexExecution,
-  codexInstallationResolver,
-  codexProbeRunner,
-  codexPolicyLoader,
-  codexRunTask,
+  codexCommandResolver,
+  codexPreflightRunner,
   agentCatalog,
   agentsRoot,
   installerOptions,
@@ -346,14 +343,10 @@ export function createDefaultProviderRegistry({
     managedCandidates: () => catalog.managedCommandCandidates("qoder"),
   })];
   if (codexExecution === true) {
-    runtimes.push(createCodexAppServerRuntime({
-      ...(codexRunTask ? { runTask: codexRunTask } : {}),
-    }));
-    providers.push(createCodexProvider({
-      executionEnabled: true,
-      ...(codexInstallationResolver ? { installationResolver: codexInstallationResolver } : {}),
-      ...(codexProbeRunner ? { probeRunner: codexProbeRunner } : {}),
-      ...(codexPolicyLoader ? { policyLoader: codexPolicyLoader } : {}),
+    providers.push(createCodexAcpProvider({
+      ...(codexCommandResolver ? { commandResolver: codexCommandResolver } : {}),
+      ...(codexPreflightRunner ? { preflightRunner: codexPreflightRunner } : {}),
+      managedCandidates: () => catalog.managedCommandCandidates("codex"),
     }));
   }
   const runtimeRegistry = createRuntimeRegistry(runtimes);

@@ -1567,6 +1567,7 @@
       "nodeTests": [
         "tests/agent-catalog.test.mjs",
         "tests/agent-installer.test.mjs",
+        "tests/codex-acp-provider.test.mjs",
         "tests/agent-provider-contract.test.mjs"
       ]
     },
@@ -1599,6 +1600,21 @@
       ],
       "nodeTests": [
         "tests/codex-provider-contract.test.mjs",
+        "tests/agent-provider-contract.test.mjs"
+      ]
+    },
+    {
+      "id": "agent-provider-codex-acp",
+      "patterns": [
+        "^bridge/agent/providers/codex-acp-provider\\.mjs$",
+        "^tests/fixtures/codex-acp-agent\\.mjs$"
+      ],
+      "suites": [
+        "typecheck",
+        "ai-provider-smoke"
+      ],
+      "nodeTests": [
+        "tests/codex-acp-provider.test.mjs",
         "tests/agent-provider-contract.test.mjs"
       ]
     },

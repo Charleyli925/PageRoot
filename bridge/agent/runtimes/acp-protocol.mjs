@@ -16,6 +16,7 @@ const SAFE_ACP_ENVIRONMENT_NAMES = Object.freeze(new Set([
   "LC_ALL",
   "LOGNAME",
   "NO_COLOR",
+  "NODE_PATH",
   "PATH",
   "SHELL",
   "TERM",

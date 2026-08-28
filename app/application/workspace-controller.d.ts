@@ -600,9 +600,12 @@ export class WorkspaceController {
     selection?: import("../domain/agent-provider-state.js").AgentSelection | null,
   ): Promise<RunWorkflowOutcome>;
   refreshAgentAvailability(): Promise<RunWorkflowOutcome>;
-  checkAgentUsability(): Promise<RunWorkflowOutcome>;
+  checkAgentUsability(
+    selection?: import("../domain/agent-provider-state.js").AgentSelection,
+  ): Promise<RunWorkflowOutcome>;
   copyAgentGuidance(input: {
     kind: import("../domain/agent-provider-state.js").AgentProviderGuidanceKind;
+    selection?: import("../domain/agent-provider-state.js").AgentSelection;
   }): Promise<RunWorkflowOutcome>;
   reconcileRunSubmission(input?: {
     sourcePath?: string | null;

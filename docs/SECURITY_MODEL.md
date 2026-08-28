@@ -240,29 +240,26 @@ Quit, relaunch and update installation also fail closed: the Bridge stays alive
 and the desktop app remains open unless all owned Agent cleanup is confirmed.
 
 Every provider, ticket and launch descriptor freezes one `securityProfile`.
-The installed Qoder mapping is `client-mediated`: the Host modules can allow
-or deny only file and terminal requests sent through the ACP Client Host. They
-do not constrain native file or command operations performed inside the Agent
-process. The source-owned `codexExecution` gate registers the sole
-`agent-native` mapping: the pinned, packaged Codex App Server. Its security gate
-revalidates the executable identity after preflight and launches one fresh
-ephemeral thread with approval `never`; strict configuration disables MCP,
-skills, plugins, apps, Web/browser/computer use, memories and subagents. The
-turn uses a workspace-write sandbox rooted only at the Request output directory,
-with tool network access disabled and the system temporary roots excluded. Any
-permission request, unsupported App Server request, unconfirmed process-group
-cleanup, write residue beside the unique Candidate or fixed-finalizer failure
-fails closed before Candidate publication. Unknown or mixed ticket/launch
-profiles fail closed, and any future `agent-native` provider requires its own
-sandbox conformance and security gate before registration.
+The installed Qoder and Codex ACP mappings are `client-mediated`: the Host
+modules can allow or deny only file and terminal requests sent through the ACP
+Client Host. They do not constrain native file or command operations performed
+inside the Agent process. There is no registered `agent-native` mapping after
+the Codex ACP cut-over. The packaged-unregistered App Server modules still describe
+one fresh ephemeral thread with approval `never`; strict configuration disables
+MCP, skills, plugins, apps, Web/browser/computer use, memories and subagents.
+The turn uses a workspace-write sandbox rooted only at the Request output
+directory, with tool network access disabled and the system temporary roots
+excluded. Any permission request, unsupported App Server request, unconfirmed
+process-group cleanup, write residue beside the unique Candidate or
+fixed-finalizer failure fails closed before Candidate publication. Unknown or
+mixed ticket/launch profiles fail closed, and any future registered
+`agent-native` provider requires its own sandbox conformance and security gate
+before registration.
 
-The Codex profile is still a trusted-local-Agent boundary, not hostile-process
-isolation. Codex runs with the signed-in user's OS identity, may read local files
-that identity can access, and uses the Codex service for the user-authorized
-task; the packaged privacy notices disclose those facts. The sandbox constrains
-the configured tool write/network surface and Stemmio verifies the only accepted
-output, but those controls must not be described as revoking the process's native
-read authority or as preventing Codex service traffic.
+The Codex ACP profile is still a trusted-local-Agent boundary, not
+hostile-process isolation. Codex runs with the signed-in user's OS identity,
+may read local files that identity can access, and uses the Codex service for
+the user-authorized task; the packaged privacy notices disclose those facts.
 
 Discussion is not an authorized Agent surface. The Bridge has no discussion
 routes, policy, Host, snapshot or session owner, and provider capabilities and

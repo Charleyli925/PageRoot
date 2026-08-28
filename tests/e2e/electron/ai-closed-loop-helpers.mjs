@@ -317,6 +317,33 @@ export function createQoderAcpE2ECommand(directory, {
   return command;
 }
 
+export function createCodexAcpE2ECommand(directory, {
+  hang = false,
+  pidFile = null,
+  authRequired = false,
+  visibleText = false,
+  visibleTextGateMs = 0,
+} = {}) {
+  const command = path.join(directory, "pageroot-codex-acp-e2e");
+  const agent = path.join(productRoot, "tests", "fixtures", "codex-acp-agent.mjs");
+  const fixtureArgs = [
+    hang ? "--hang" : null,
+    pidFile ? `--pid-file=${pidFile}` : null,
+    authRequired ? "--auth-required" : null,
+    visibleText ? "--visible-text" : null,
+    visibleTextGateMs > 0 ? `--visible-text-gate-ms=${visibleTextGateMs}` : null,
+  ].filter(Boolean).map(shellQuote).join(" ");
+  writeFileSync(
+    command,
+    `#!/bin/sh\nexec ${shellQuote(process.execPath)} ${shellQuote(agent)}${
+      fixtureArgs ? ` ${fixtureArgs}` : ""
+    } "$@"\n`,
+    { encoding: "utf8", mode: 0o755 },
+  );
+  chmodSync(command, 0o755);
+  return command;
+}
+
 export function createCodexAppServerE2ECommand(directory) {
   const command = path.join(directory, "pageroot-codex-app-server-e2e");
   const server = path.join(productRoot, "tests", "fixtures", "codex-app-server-execution.mjs");

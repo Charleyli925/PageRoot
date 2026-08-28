@@ -21,10 +21,12 @@ Comments + frozen input
 ```
 
 The product Agent Bridge is Bridge-owned and never owns Request, Candidate,
-Version or Working Copy state. A user may explicitly choose a managed Qoder ACP
-session or the existing clipboard fallback for each task. Internally, the sole
-provider registry maps legacy `qoder-acp` to the `qoder` provider and `acp`
-runtime; unknown providers and runtimes fail closed. Renderer
+Version or Working Copy state. A user may explicitly choose a managed Qoder or
+Codex ACP session or the existing clipboard fallback for each task. Internally,
+the sole provider registry maps legacy `qoder-acp` to the `qoder` provider and
+the shared `acp` runtime; Codex uses the same runtime with `providerId: "codex"`.
+Unknown providers and runtimes fail closed. Packaged Codex App Server modules
+remain unregistered. Renderer
 `AgentCatalogState` owns provider-keyed availability, the canonical selected
 selection and selection-keyed preflight cache. `RunWorkflow` exposes the same
 projection to the delivery surface and About. The
@@ -252,11 +254,11 @@ services.
 | Renderer comment working copy, composer and saved-comment edit projection | `app/application/comment-session.js` |
 | Active/background runs, Agent delivery projection, background outcomes, submission lifecycle locks and operation locks | `app/application/run-session.js` |
 | Renderer Agent catalog, provider-keyed availability/guidance, selection-keyed use-time check and submission sequencing | `app/application/agent-provider-catalog.js`, `app/domain/agent-provider-state.js` and `app/application/run-workflow.js`; `qoder-availability.js` and `QoderAvailabilityCard.tsx` are compatibility wrappers only. Delivery and About consume the same `WorkspaceController` snapshot plus the Bridge public catalog projection (`installable` / `installSource` / `installState`). Neither card receives command, version, path or npm prefix |
-| Product ACP allowlist, managed-install inventory, in-flight install jobs and install drain | `bridge/agent/catalog/agent-catalog.mjs` and `bridge/agent/catalog/agent-installer.mjs`; Coordinator does not own install. Qoder is the only installable shipped entry; Codex App Server stays bundled with `installable: false` |
+| Product ACP allowlist, managed-install inventory, in-flight install jobs and install drain | `bridge/agent/catalog/agent-catalog.mjs` and `bridge/agent/catalog/agent-installer.mjs`; Coordinator does not own install. Qoder and Codex ACP are installable shipped entries. Codex App Server modules remain packaged-unregistered |
 | Provider-neutral dispatch, provider/runtime/security-profile/execution-purpose tickets, process/session lifetime, canonical events, cancellation-before-durable-Request and shutdown drain | `bridge/agent/agent-runtime-coordinator.mjs` plus provider/runtime registries; legacy Services are stateless façades and durable Request/Candidate authority remains in `ProjectFileRepository` |
 | Trusted-local Qoder installation discovery, package/version/login/model preflight, error classification and ACP launch descriptor | `bridge/agent/providers/qoder-provider.mjs`; user CLI discovery still wins over a PageRoot-managed copy; an invalid user installation is not treated as missing. Legacy `qoder-acp` is mapped only by the provider registry and its external projection remains compatible |
-| Pinned Codex package identity and real App Server auth/model preflight | `bridge/agent/providers/codex-provider.mjs`, `bridge/agent/runtimes/codex-app-server-client.mjs` and `schemas/codex-app-server.runtime-lock.json`; packaged verification binds the wrapper, architecture-specific native package, runtime manifest and executable version before the default catalog may expose Codex |
-| Gated Codex App Server execution to unique Candidate | `codex-app-server-runtime.mjs` owns one ephemeral sandboxed turn and confirmed cleanup; `codex-provider.mjs` owns model-bound launch and Codex-only prompt; the existing Execution Host alone invokes and verifies the fixed finalizer. `shared/agent-feature-gates.mjs` enables `codexExecution` while leaving `codexDiscussion` false; disabling that one source fact is the immediate rollback |
+| Codex ACP installation discovery, pinned adapter+native closure, ACP initialize/session probe and client-mediated launch | `bridge/agent/providers/codex-acp-provider.mjs`; reuses the shared `acp` runtime; never points `CODEX_PATH` at packaged `@openai/codex` |
+| Packaged-unregistered Codex App Server modules | `bridge/agent/providers/codex-provider.mjs`, `bridge/agent/runtimes/codex-app-server-client.mjs`, `codex-app-server-runtime.mjs` and `schemas/codex-app-server.runtime-lock.json` remain in extraResources but are not registered |
 | Provider-neutral ACP protocol, process supervisor and immutable standard event envelope | `bridge/agent/runtimes/acp-runtime.mjs`, `acp-protocol.mjs`, `acp-process.mjs` and `acp-verified-javascript.mjs`; `bridge/qoder-acp-client.mjs` is a compatibility façade |
 | Frozen execution policy and single-output client-mediated Host Port | `bridge/agent/policies/` and `bridge/agent/hosts/`; these constrain only requests made through the ACP Client Host, never native filesystem/command actions inside an Agent process |
 | Immutable Version projection and history-view transition | `app/application/version-session.js` |
