@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
+import { deriveWorkbenchInspector } from "../app/workbench/inspector-presentation.js";
+
 function lastCssRule(css, selector) {
   const marker = `${selector} {`;
   const start = css.lastIndexOf(marker);
@@ -71,10 +73,10 @@ test("global sidebar owns the full shell column and start page has no card surfa
     css,
     /\.workbench\[data-left-sidebar="open"\] \{\s*--workbench-sidebar-width:\s*264px/u,
   );
-
   const sidebar = lastCssRule(css, ".workbench-global-sidebar");
-  assert.match(sidebar, /grid-column:\s*1/u);
-  assert.match(sidebar, /grid-row:\s*1 \/ 4/u);
+  const shell = lastCssRule(css, ".workbench > .workbench-global-sidebar");
+  assert.match(shell, /grid-column:\s*1/u);
+  assert.match(shell, /grid-row:\s*1 \/ 4/u);
   assert.doesNotMatch(sidebar, /position:\s*fixed/u);
 
   const startContent = lastCssRule(css, ".workbench-start-content");
@@ -116,4 +118,69 @@ test("a hover tooltip stays pointer-scoped and yields to the surface it opened",
       > css.lastIndexOf("[data-tooltip]:focus-visible::after"),
     "the opened-trigger suppression must follow every tooltip reveal rule",
   );
+});
+
+test("the shell owns the outer grid and one fixed inspector contract", async () => {
+  const stylesUrl = new URL("../app/styles/", import.meta.url);
+  const [tokens, shell, tabs, reviewV5, reviewV51, reviewModule, noticeBar, workbench] =
+    await Promise.all([
+      readFile(new URL("tokens-and-base.css", stylesUrl), "utf8"),
+      readFile(new URL("workbench-shell.css", stylesUrl), "utf8"),
+      readFile(new URL("workbench-tabs.css", stylesUrl), "utf8"),
+      readFile(new URL("review-v5.css", stylesUrl), "utf8"),
+      readFile(new URL("review-v51.css", stylesUrl), "utf8"),
+      readFile(new URL("../app/workbench/ai-review-workspace.module.css", import.meta.url), "utf8"),
+      readFile(new URL("../app/components/NoticeBar.module.css", import.meta.url), "utf8"),
+      readFile(new URL("../app/workbench.tsx", import.meta.url), "utf8"),
+    ]);
+  const outerGridRule = /\.workbench(?:\[[^\]]+\])?\s*\{[^}]*grid-template-(?:columns|rows)/u;
+
+  assert.match(shell, /--workbench-inspector-width:\s*376px/u);
+  assert.match(
+    shell,
+    /grid-template-columns:\s*var\(--workbench-sidebar-width\)\s+minmax\(0, 1fr\)/u,
+  );
+  assert.match(
+    shell,
+    /\.workbench > \.workbench-header\s*\{[\s\S]*?grid-template-columns:\s*minmax\(0, 250px\)\s+minmax\(0, 1fr\)/u,
+  );
+  assert.match(
+    shell,
+    /\.workbench > \.workbench-header > \.header-actions\s*\{[\s\S]*?justify-self:\s*stretch/u,
+  );
+  assert.match(
+    shell,
+    /\.workbench > \.review-scroll-stage\[data-inspector="comments"\][\s\S]*?var\(--workbench-inspector-width\)/u,
+  );
+  assert.match(
+    shell,
+    /\.workbench > \.review-scroll-stage\[data-inspector="ai"\][\s\S]*?position: absolute/u,
+  );
+  assert.doesNotMatch(tokens, outerGridRule);
+  assert.doesNotMatch(tabs, outerGridRule);
+  assert.doesNotMatch(reviewV5, outerGridRule);
+  assert.doesNotMatch(reviewV51, outerGridRule);
+  assert.doesNotMatch(tabs, /--workbench-sidebar-width:\s*240px/u);
+  assert.doesNotMatch(reviewModule, /:has\(/u);
+  assert.doesNotMatch(noticeBar, /--notice-rail-width/u);
+  assert.match(noticeBar, /--workbench-inspector-width/u);
+  assert.equal((workbench.match(/data-inspector=\{workbenchInspector\}/gu) || []).length, 1);
+
+  assert.equal(deriveWorkbenchInspector({
+    canvasMode: "edit",
+    commentsAvailable: true,
+  }), "comments");
+  assert.equal(deriveWorkbenchInspector({
+    canvasMode: "preview",
+    aiVisible: true,
+  }), "ai");
+  assert.equal(deriveWorkbenchInspector({
+    canvasMode: "preview",
+    aiVisible: true,
+    reviewVisible: true,
+  }), "review");
+  assert.equal(deriveWorkbenchInspector({
+    canvasMode: "edit",
+    commentsAvailable: false,
+  }), "none");
 });

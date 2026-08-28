@@ -518,6 +518,176 @@ test("automatic update actions keep the sidebar product geometry and About lifec
   }
 });
 
+test("Electron shell keeps the global rail fixed while the context inspector swaps", async () => {
+  test.setTimeout(90_000);
+  const fixture = createSourceFixture("workbench-shell-geometry.html");
+  const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
+  try {
+    await loadedDiskFrame(launched.page, fixture.sourcePath, "list-item");
+    const stage = launched.page.locator(".review-scroll-stage");
+    const sidebar = launched.page.locator(".workbench-global-sidebar");
+    if (await sidebar.getAttribute("data-open") !== "true") {
+      await launched.page.getByRole("button", { name: "展开左侧边栏" }).click();
+    }
+    await expect(sidebar).toHaveAttribute("data-open", "true");
+    await expect.poll(() => sidebar.evaluate((element) => {
+      const workbench = element.closest(".workbench");
+      const targetWidth = workbench
+        ? Number.parseFloat(getComputedStyle(workbench).getPropertyValue("--workbench-sidebar-width"))
+        : 0;
+      return Math.abs(element.getBoundingClientRect().width - targetWidth);
+    })).toBeLessThanOrEqual(0.5);
+
+    const readGeometry = () => launched.page.evaluate(() => {
+      const readRect = (selector) => {
+        const element = document.querySelector(selector);
+        if (!element) return null;
+        const box = element.getBoundingClientRect();
+        return {
+          left: box.left,
+          right: box.right,
+          top: box.top,
+          bottom: box.bottom,
+          width: box.width,
+          height: box.height,
+        };
+      };
+      const workbench = document.querySelector("main.workbench");
+      const styles = workbench ? getComputedStyle(workbench) : null;
+      const reviewStage = document.querySelector(".review-scroll-stage");
+      const comments = document.querySelector(".review-scroll-stage > .comments-panel.comment-rail");
+      const ai = document.querySelector(".review-scroll-stage > .ai-conversation-aside");
+      return {
+        workbench: readRect("main.workbench"),
+        sidebar: readRect(".workbench-global-sidebar"),
+        tabbar: readRect(".workbench-tabbar"),
+        header: readRect(".workbench-header"),
+        stage: readRect(".review-scroll-stage"),
+        canvas: readRect(".review-scroll-stage > .canvas-column"),
+        comments: readRect(".review-scroll-stage > .comments-panel.comment-rail"),
+        ai: readRect(".review-scroll-stage > .ai-conversation-aside"),
+        inspector: reviewStage?.dataset.inspector || null,
+        commentsPosition: comments ? getComputedStyle(comments).position : null,
+        aiPosition: ai ? getComputedStyle(ai).position : null,
+        viewportWidth: window.innerWidth,
+        documentWidth: Math.max(document.documentElement.scrollWidth, document.body?.scrollWidth || 0),
+        sidebarWidth: Number.parseFloat(
+          styles?.getPropertyValue("--workbench-sidebar-width") || "0",
+        ),
+        inspectorWidth: Number.parseFloat(
+          styles?.getPropertyValue("--workbench-inspector-width") || "0",
+        ),
+      };
+    });
+    const assertShellGeometry = (geometry) => {
+      for (const key of ["workbench", "sidebar", "tabbar", "header", "stage", "canvas"]) {
+        expect(geometry[key], `missing ${key} geometry`).not.toBeNull();
+      }
+      expect(Math.abs(geometry.sidebar.width - geometry.sidebarWidth)).toBeLessThanOrEqual(0.5);
+      expect(Math.abs(geometry.tabbar.left - geometry.sidebar.right)).toBeLessThanOrEqual(0.5);
+      expect(Math.abs(geometry.header.left - geometry.sidebar.right)).toBeLessThanOrEqual(0.5);
+      expect(Math.abs(geometry.stage.left - geometry.sidebar.right)).toBeLessThanOrEqual(0.5);
+      expect(Math.abs(geometry.stage.right - geometry.workbench.right)).toBeLessThanOrEqual(0.5);
+      expect(Math.abs(geometry.sidebar.right - geometry.stage.left)).toBeLessThanOrEqual(0.5);
+    };
+    const assertLeftRailStable = (geometry, reference) => {
+      for (const key of ["sidebar", "tabbar", "header", "stage"]) {
+        expect(Math.abs(geometry[key].left - reference[key].left), `${key} moved`).toBeLessThanOrEqual(0.5);
+      }
+      expect(Math.abs(geometry.sidebar.width - reference.sidebar.width)).toBeLessThanOrEqual(0.5);
+    };
+
+    await expect(stage).toHaveAttribute("data-inspector", "comments");
+    await expect(launched.page.locator(".review-scroll-stage > .comments-panel.comment-rail"))
+      .toBeVisible();
+    const editGeometry = await readGeometry();
+    assertShellGeometry(editGeometry);
+    expect(editGeometry.comments).not.toBeNull();
+    expect(Math.abs(editGeometry.comments.width - editGeometry.inspectorWidth))
+      .toBeLessThanOrEqual(0.5);
+
+    await launched.page.getByRole("button", { name: "预览", exact: true }).click();
+    await expect(launched.page.locator('iframe[title="HTML 交互预览"]'))
+      .toBeVisible();
+    await expect(stage).toHaveAttribute("data-inspector", "none");
+    await expect(launched.page.locator(".review-scroll-stage > .comments-panel.comment-rail"))
+      .toHaveCount(0);
+    const previewGeometry = await readGeometry();
+    assertShellGeometry(previewGeometry);
+    assertLeftRailStable(previewGeometry, editGeometry);
+    expect(Math.abs(
+      previewGeometry.canvas.width - editGeometry.canvas.width - editGeometry.inspectorWidth,
+    )).toBeLessThanOrEqual(2);
+
+    await launched.page.getByRole("button", { name: "编辑", exact: true }).click();
+    await expect(stage).toHaveAttribute("data-inspector", "comments");
+    const reopenedEditGeometry = await readGeometry();
+    assertShellGeometry(reopenedEditGeometry);
+    assertLeftRailStable(reopenedEditGeometry, editGeometry);
+
+    await launched.page.getByRole("button", { name: "预览", exact: true }).click();
+    await expect(launched.page.locator('iframe[title="HTML 交互预览"]'))
+      .toBeVisible();
+    await launched.page.getByRole("button", { name: "AI 助手", exact: true }).click();
+    await expect(launched.page.getByTestId("ai-conversation-sidebar")).toBeVisible();
+    await expect(stage).toHaveAttribute("data-inspector", "ai");
+    const aiGeometry = await readGeometry();
+    assertShellGeometry(aiGeometry);
+    assertLeftRailStable(aiGeometry, editGeometry);
+    expect(aiGeometry.ai).not.toBeNull();
+    expect(Math.abs(aiGeometry.ai.width - editGeometry.comments.width))
+      .toBeLessThanOrEqual(0.5);
+
+    const originalWindowBounds = await launched.electronApp.evaluate(({ BrowserWindow }) => {
+      const window = BrowserWindow.getAllWindows().find((candidate) => (
+        candidate.webContents.getURL().includes("/dist-desktop/renderer/")
+        || candidate.getTitle() === "源页"
+      ));
+      return window?.getBounds() || null;
+    });
+    await launched.electronApp.evaluate(({ BrowserWindow }, bounds) => {
+      const window = BrowserWindow.getAllWindows().find((candidate) => (
+        candidate.webContents.getURL().includes("/dist-desktop/renderer/")
+        || candidate.getTitle() === "源页"
+      ));
+      window?.setBounds(bounds, false);
+    }, { ...(originalWindowBounds || {}), width: 1024, height: 768 });
+    await expect.poll(() => launched.page.evaluate(() => window.innerWidth))
+      .toBeLessThanOrEqual(1120);
+    await expect.poll(() => sidebar.evaluate((element) => {
+      const workbench = element.closest(".workbench");
+      const targetWidth = workbench
+        ? Number.parseFloat(getComputedStyle(workbench).getPropertyValue("--workbench-sidebar-width"))
+        : 0;
+      return Math.abs(element.getBoundingClientRect().width - targetWidth);
+    })).toBeLessThanOrEqual(0.5);
+    const narrowAiGeometry = await readGeometry();
+    assertShellGeometry(narrowAiGeometry);
+    expect(narrowAiGeometry.sidebarWidth).toBe(240);
+    expect(narrowAiGeometry.aiPosition).toBe("absolute");
+    expect(narrowAiGeometry.documentWidth - narrowAiGeometry.viewportWidth)
+      .toBeLessThanOrEqual(1);
+
+    await launched.page.getByRole("button", { name: "收起 AI 助手" }).click();
+    await expect(launched.page.getByTestId("ai-conversation-sidebar")).toHaveCount(0);
+    await launched.page.getByRole("button", { name: "编辑", exact: true }).click();
+    await expect(stage).toHaveAttribute("data-inspector", "comments");
+    await expect(launched.page.locator(".review-scroll-stage > .comments-panel.comment-rail"))
+      .toBeVisible();
+    const narrowCommentsGeometry = await readGeometry();
+    assertShellGeometry(narrowCommentsGeometry);
+    expect(narrowCommentsGeometry.commentsPosition).toBe("absolute");
+    expect(Math.abs(
+      narrowCommentsGeometry.comments.width - narrowCommentsGeometry.inspectorWidth,
+    )).toBeLessThanOrEqual(0.5);
+    expect(narrowCommentsGeometry.documentWidth - narrowCommentsGeometry.viewportWidth)
+      .toBeLessThanOrEqual(1);
+  } finally {
+    await stopPageRoot(launched.electronApp, launched.isolatedUserData);
+    removeSourceFixture(fixture.sourceDirectory);
+  }
+});
+
 test("PROJECT.md read failure never becomes editable data and recovers in place", async () => {
   test.setTimeout(60_000);
   const sourceDirectory = mkdtempSync(path.join(tmpdir(), "pageroot-native-source-e2e-"));
