@@ -264,9 +264,8 @@ function permittedEchartsUrl(value) {
   }
 }
 
-// The Review snapshot owner freezes the same allowlisted chart-library
-// scripts before capturing, so the allowlist and the bounded fetcher have
-// exactly one implementation.
+// Edit's one-shot author runtime uses the allowlisted chart-library scripts.
+// Review is static-only and has no runtime capture path.
 export { permittedEchartsUrl };
 
 function remoteScriptTimeoutError() {

@@ -1203,7 +1203,8 @@ Candidate、执行明确 activation 和当前/历史 source publication。
 - background project Version 完成不切换当前 Canvas，只记录结果；
 - history 始终只读，不增加历史回写/恢复为当前 route；
 - navigation 失败恢复 prior Document + Version view，并重新核对 Canvas；
-- runtime review evidence 仍是 disposable supplement，不进入 activation authority。
+- Review runtime evidence 已由 ADR 0046 移除；静态 Review 投影仍是 disposable
+  presentation，不进入 activation authority。
 
 ### 12.5 验收标准
 

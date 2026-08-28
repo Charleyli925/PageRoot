@@ -1,4 +1,4 @@
-export type RuntimeSnapshotHostKind = "host";
+export type RuntimeSnapshotHostKind = "canvas" | "svg" | "host";
 
 export type RuntimeSnapshotTargetRef = Readonly<{
   targetId: string;

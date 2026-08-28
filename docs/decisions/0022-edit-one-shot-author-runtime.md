@@ -2,7 +2,7 @@
 
 - Status: Superseded by [ADR 0025](0025-edit-direct-one-shot-runtime.md)
 - Date: 2026-08-14
-- Amends: the Edit-only restriction in ADR 0017; Review snapshot behavior is unchanged
+- Amends: the Edit-only restriction in ADR 0017; Review is now static-only per ADR 0046
 
 This document is retained as history. It records the isolated-capture / PNG
 handoff that shipped, including the hidden BrowserWindow and script-disabled

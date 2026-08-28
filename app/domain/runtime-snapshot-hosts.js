@@ -5,6 +5,10 @@ import {
 } from "../lib/target-resolver.js";
 
 export const EDIT_RUNTIME_HOST_LIMIT = EDIT_AUTHOR_RUNTIME_BUDGET.hostCount;
+const DIRECT_HOST_KINDS = new Map([
+  ["canvas", "canvas"],
+  ["svg", "svg"],
+]);
 const EDIT_RUNTIME_DANGEROUS_HOST_TAGS = new Set([
   "audio",
   "base",

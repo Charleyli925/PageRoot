@@ -1,8 +1,12 @@
 # ADR 0050: Review paints authored content before optional runtime evidence
 
-- Status: Accepted
+- Status: Superseded by ADR 0046
 - Date: 2026-08-28
 - Scope: formal Review rendering, runtime-visual capture and real-HTML performance evidence
+
+> Historical note: this ADR recorded the short-lived runtime-visual Review
+> supplement. ADR 0046 removed that supplement; current Review is static-only
+> and does not schedule runtime capture or use runtime evidence for diff facts.
 
 ## Decision
 
