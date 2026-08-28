@@ -61,14 +61,14 @@ test("run progress exposes four user stages instead of internal validation steps
     processing.map(({ label, state }) => ({ label, state })),
     [
       { label: "已准备并复制", state: "done" },
-      { label: "等待 AI 完成", state: "current" },
-      { label: "正在校验并保存", state: "pending" },
-      { label: "结果", state: "pending" },
+      { label: "等待你的 AI 完成修改", state: "current" },
+      { label: "正在检查 AI 修改结果", state: "pending" },
+      { label: "等待 AI 修改完成", state: "pending" },
     ],
   );
   assert.equal(
     processing[2].detail,
-    "等待 AI 完成后自动校验并写入本地",
+    "检查通过后才可以审阅和采用",
   );
 
   const copyFailure = deriveRunProgressSteps({
@@ -117,8 +117,8 @@ test("run progress keeps completion, validation, and result facts separate", () 
     ready.map(({ state }) => state),
     ["done", "done", "done", "current"],
   );
-  assert.equal(ready[3].label, "新版本已准备好");
-  assert.equal(ready[3].detail, "旧版未被覆盖，等待你审阅或直接打开");
+  assert.equal(ready[3].label, "AI 修改已完成，可以审阅");
+  assert.equal(ready[3].detail, "审阅后决定是否采用");
 
   const continuityAttention = deriveRunProgressSteps({
     requestId: "req_0001",
@@ -235,10 +235,10 @@ test("run presentation copy follows the four stages and keeps exception actions 
     {
       header: {
         eyebrow: "AI返回结果",
-        title: "可在审阅中对比查看修改差异",
+        title: "AI 修改已完成，可以审阅",
       },
-      statusLabel: "等待确认打开",
-      summaryTitle: "AI 改好了，先对照再决定用哪一版",
+      statusLabel: "等待决定",
+      summaryTitle: "审阅后决定是否采用",
       summaryDetail: "不会直接替换当前页面。",
     },
   );
@@ -251,10 +251,10 @@ test("run presentation copy follows the four stages and keeps exception actions 
     {
       header: {
         eyebrow: "AI返回结果",
-        title: "可在审阅中对比查看修改差异",
+        title: "AI 修改已完成，可以审阅",
       },
       statusLabel: "请先审阅",
-      summaryTitle: "AI 改好了，先对照再决定用哪一版",
+      summaryTitle: "审阅后决定是否采用",
       summaryDetail: "HTML 可以打开，但与上一版的共同特征较少，不会直接替换当前页面",
     },
   );
@@ -335,7 +335,7 @@ test("managed Agent progress is provider-neutral and never claims Candidate read
   });
   assert.equal(running.header.title, "Codex 正在读取本轮任务…");
   assert.equal(running.statusLabel, "正在处理");
-  assert.equal(running.steps[0].label, "Codex 已启动");
+  assert.equal(running.steps[0].label, "已将修改要求交给 Codex");
   assert.equal(running.steps[1].state, "current");
   assert.equal(running.steps[3].state, "pending");
 

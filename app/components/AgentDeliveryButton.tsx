@@ -23,13 +23,15 @@ export function AgentDeliveryButton({
   status,
   disabled,
   attention = false,
-  onOpen,
+  expanded = false,
+  onToggle,
 }: {
   status: string;
   disabled: boolean;
   /** The conversation holds something the user has not dealt with yet. */
   attention?: boolean;
-  onOpen: () => void;
+  expanded?: boolean;
+  onToggle: () => void;
 }) {
   return (
     <button
@@ -37,8 +39,11 @@ export function AgentDeliveryButton({
       type="button"
       data-handoff-status={status}
       data-attention={attention ? "true" : undefined}
+      data-expanded={expanded ? "true" : undefined}
+      aria-expanded={expanded}
+      aria-controls="ai-assistant-sidebar"
       disabled={disabled}
-      onClick={onOpen}
+      onClick={onToggle}
     >
       <ChatCircleTextIcon aria-hidden="true" size={15} weight="fill" />
       <span>{TRIGGER_LABEL}</span>

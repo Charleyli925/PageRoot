@@ -10,12 +10,11 @@ import {
 
 import {
   sidebarActionBar,
+  sidebarAgentLine,
   sidebarActorInitial,
   sidebarMessageStream,
-  sidebarModelLine,
   sidebarModePresentation,
   sidebarResolvedIntent,
-  sidebarDeliveryDisclosure,
   sidebarRunProgress,
   sidebarSendState,
   sidebarCopyTaskState,
@@ -45,18 +44,17 @@ export type AiConversationSidebarProps = {
   title: string;
   messages: readonly unknown[];
   catalogStatus?: SidebarCatalogStatus;
-  modelDisplayName?: string | null;
+  agentDisplayName?: string | null;
   agentActionName?: string | null;
   agentSettingsName?: string | null;
   agentSettingsSupported?: boolean;
-  agentLocalReadDisclosure?: string | null;
-  modelChoiceCount?: number;
-  modelChoices?: readonly Readonly<{
+  agentChoiceCount?: number;
+  agentChoices?: readonly Readonly<{
     id: string;
     label: string;
-    detail?: string | null;
+    logoSrc?: string | null;
   }>[];
-  selectedModelChoiceId?: string | null;
+  selectedAgentChoiceId?: string | null;
   candidateVersionLabel?: string | null;
   candidateStatus?: string | null;
   runStatus?: string | null;
@@ -68,15 +66,17 @@ export type AiConversationSidebarProps = {
   onSend?: () => void;
   onAction?: (actionId: string) => void;
   onOpenAgentSettings?: () => void;
-  onOpenModelChoices?: () => void;
-  onSelectModelChoice?: (choiceId: string) => void;
-  onCollapse?: () => void;
+  onSelectAgentChoice?: (choiceId: string) => void;
   /** Hands the same round to the clipboard instead of the local Agent. */
   onCopyTask?: () => void;
   /** What the selected Agent is saying while it works (ADR 0037). */
   agentText?: string;
+  /** Stable public message rows from canonical visible-text events. */
+  agentUpdates?: readonly unknown[];
   /** True only when a bounded public-text projection omitted a suffix. */
   agentTextTruncated?: boolean;
+  /** A managed Agent is actively thinking or processing this round. */
+  agentWorking?: boolean;
   agentStartedAt?: string | null;
   agentUpdatedAt?: string | null;
   /** A frozen Request identity, used solely to follow the round the user started. */
@@ -92,6 +92,9 @@ export type AiConversationSidebarProps = {
   deliveryMode?: "managed-agent" | "clipboard";
   /** The run's own progress steps, so a round in flight reads inside the thread. */
   runSteps?: readonly unknown[];
+  /** User-facing name of the HTML this round belongs to. */
+  sourceFileName?: string | null;
+  handoffStatus?: string | null;
 };
 
 type CopyFeedback = Readonly<{
@@ -122,7 +125,33 @@ function AgentAvatar({
   }
   return (
     <span className={`${styles.avatar} ${styles.agentAvatar}`} aria-hidden="true">
-      {sidebarActorInitial("agent")}
+      {presentation?.agentName?.trim().charAt(0).toUpperCase() || sidebarActorInitial("agent")}
+    </span>
+  );
+}
+
+function PageRootAvatar() {
+  return (
+    <span className={`${styles.avatar} ${styles.pageRootAvatar}`} aria-hidden="true">
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src="./brand-logo.png" alt="" />
+    </span>
+  );
+}
+
+function AgentChoiceMark({
+  label,
+  logoSrc,
+}: {
+  label: string;
+  logoSrc?: string | null;
+}) {
+  return (
+    <span className={styles.agentChoiceMark} aria-hidden="true">
+      {logoSrc ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={logoSrc} alt="" />
+      ) : label.trim().charAt(0).toUpperCase() || "A"}
     </span>
   );
 }
@@ -132,14 +161,13 @@ export default function AiConversationSidebar({
   title,
   messages,
   catalogStatus = "ready",
-  modelDisplayName = null,
+  agentDisplayName = null,
   agentActionName = "Agent",
   agentSettingsName = "Agent",
   agentSettingsSupported = true,
-  agentLocalReadDisclosure = null,
-  modelChoiceCount = 0,
-  modelChoices = [],
-  selectedModelChoiceId = null,
+  agentChoiceCount = 0,
+  agentChoices = [],
+  selectedAgentChoiceId = null,
   candidateVersionLabel = null,
   candidateStatus = null,
   runStatus = null,
@@ -151,26 +179,30 @@ export default function AiConversationSidebar({
   onSend,
   onAction,
   onOpenAgentSettings,
-  onOpenModelChoices,
-  onSelectModelChoice,
-  onCollapse,
+  onSelectAgentChoice,
   onCopyTask,
   deliveryMode = "managed-agent",
   agentText = "",
+  agentUpdates = [],
   agentTextTruncated = false,
+  agentWorking = false,
   agentStartedAt = null,
   agentUpdatedAt = null,
   runKey = null,
   runCommentCount = null,
   agentPresentation = null,
   runSteps = [],
+  sourceFileName = null,
+  handoffStatus = null,
 }: AiConversationSidebarProps) {
-  const [modelChoicesOpen, setModelChoicesOpen] = useState(false);
+  const [agentChoicesOpen, setAgentChoicesOpen] = useState(false);
   const [hasUnseenContent, setHasUnseenContent] = useState(false);
   const [copyFeedback, setCopyFeedback] = useState<CopyFeedback>(null);
   const streamRef = useRef<HTMLDivElement | null>(null);
   const bottomSentinelRef = useRef<HTMLDivElement | null>(null);
   const liveMessageRef = useRef<HTMLElement | null>(null);
+  const agentSelectorRef = useRef<HTMLDivElement | null>(null);
+  const agentSelectorButtonRef = useRef<HTMLButtonElement | null>(null);
   const followingRef = useRef(true);
   const contentKeyRef = useRef<string | null>(null);
   const runKeyRef = useRef<string | null>(null);
@@ -191,8 +223,17 @@ export default function AiConversationSidebar({
       candidateStatus,
       failureMessage,
       deliveryMode,
+      handoffStatus,
     }),
-    [candidateStatus, candidateVersionLabel, deliveryMode, failureMessage, runStatus, state],
+    [
+      candidateStatus,
+      candidateVersionLabel,
+      deliveryMode,
+      failureMessage,
+      handoffStatus,
+      runStatus,
+      state,
+    ],
   );
   const send = sidebarSendState({
     state,
@@ -213,35 +254,48 @@ export default function AiConversationSidebar({
     pendingCommentCount,
     agentName: resolvedAgentActionName,
   });
-  const disclosure = sidebarDeliveryDisclosure(activeIntent, {
-    agentName: resolvedAgentActionName,
-    localReadDisclosure: agentLocalReadDisclosure,
-  });
   const runProgress = sidebarRunProgress({
     state,
     steps: runSteps,
     agentText,
+    agentUpdates,
     agentTextTruncated,
   });
-  const modelLine = sidebarModelLine({
+  const agentLine = sidebarAgentLine({
     catalogStatus,
-    modelDisplayName,
-    modelChoiceCount,
+    agentDisplayName,
+    agentChoiceCount,
   });
+  const resolvedFileName = sourceFileName?.trim() || "当前 HTML";
+  const contextContents = `${Math.max(0, Number(runCommentCount ?? pendingCommentCount) || 0)} 条评论、当前 HTML 和项目规则`;
   const runSummary = runKey
     ? runKey.startsWith("pending:")
-      ? { title: "正在确认本轮任务是否已创建…", detail: null }
-      : {
-          title: "本轮修改已提交",
-          detail: `${Math.max(0, Number(runCommentCount ?? pendingCommentCount) || 0)} 条评论 · 当前 HTML · 项目规则`,
+      ? {
+          title: `正在准备“${resolvedFileName}”`,
+          detail: `正在整理${contextContents}。`,
         }
+      : deliveryMode === "managed-agent" && handoffStatus
+        ? {
+            title: `已将“${resolvedFileName}”交给 ${resolvedAgentActionName}`,
+            detail: `发送了${contextContents}。`,
+          }
+        : deliveryMode === "clipboard" && handoffStatus === "copied"
+          ? {
+              title: `已复制“${resolvedFileName}”的修改要求`,
+              detail: `包含${contextContents}。`,
+            }
+          : {
+              title: `已准备“${resolvedFileName}”的修改要求`,
+              detail: `包含${contextContents}。`,
+            }
     : null;
   const liveTimestamp = sidebarTimestampLabel(agentUpdatedAt || agentStartedAt);
   const contentKey = [
     runKey || "",
     state,
     runProgress?.liveLabel || runProgress?.headline || "",
-    runProgress?.narration || "",
+    runProgress?.narrationUpdates?.map((update) => `${update.id}:${update.text.length}`).join(",") || "",
+    agentWorking ? "working" : "idle",
     runProgress?.narrationTruncated ? "truncated" : "",
     actionBar?.kind || "",
     actionBar?.title || "",
@@ -296,6 +350,27 @@ export default function AiConversationSidebar({
   }, []);
 
   useEffect(() => {
+    if (!agentChoicesOpen) return undefined;
+    const closeOnOutsidePointer = (event: PointerEvent) => {
+      if (!agentSelectorRef.current?.contains(event.target as Node)) {
+        setAgentChoicesOpen(false);
+      }
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      setAgentChoicesOpen(false);
+      agentSelectorButtonRef.current?.focus();
+    };
+    document.addEventListener("pointerdown", closeOnOutsidePointer, true);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnOutsidePointer, true);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [agentChoicesOpen]);
+
+  useEffect(() => {
     if (runKey && runKey !== runKeyRef.current) {
       followingRef.current = true;
       setHasUnseenContent(false);
@@ -327,6 +402,7 @@ export default function AiConversationSidebar({
 
   return (
     <aside
+      id="ai-assistant-sidebar"
       className={styles.sidebar}
       aria-label="AI 助手"
       data-state={state}
@@ -339,21 +415,10 @@ export default function AiConversationSidebar({
             {mode.label}
           </span>
         </div>
-        <p className={styles.modeDetail}>{mode.detail}</p>
-        {contextLabel ? (
+        {sourceFileName || contextLabel ? (
           <p className={styles.context} data-testid="ai-conversation-context">
-            {contextLabel}
+            {sourceFileName ? `当前文件 · ${sourceFileName}` : contextLabel}
           </p>
-        ) : null}
-        {onCollapse ? (
-          <button
-            type="button"
-            className={styles.collapse}
-            onClick={onCollapse}
-            aria-label="收起 AI 助手"
-          >
-            收起
-          </button>
         ) : null}
       </header>
 
@@ -390,9 +455,13 @@ export default function AiConversationSidebar({
                 data-status={message.status}
                 data-testid="ai-conversation-message"
               >
-                <span className={styles.avatar} aria-hidden="true">
-                  {sidebarActorInitial(message.actor)}
-                </span>
+                {message.actor === "pageroot" ? (
+                  <PageRootAvatar />
+                ) : (
+                  <span className={styles.avatar} aria-hidden="true">
+                    {sidebarActorInitial(message.actor)}
+                  </span>
+                )}
                 <span className={styles.actor}>{message.actorLabel}</span>
                 <p className={styles.text}>{message.text}</p>
                 {timestamp || message.text ? (
@@ -423,9 +492,7 @@ export default function AiConversationSidebar({
             data-testid="ai-conversation-run-summary"
             aria-label="本轮任务摘要"
           >
-            <span className={styles.avatar} aria-hidden="true">
-              {sidebarActorInitial("pageroot")}
-            </span>
+            <PageRootAvatar />
             <span className={styles.actor}>PageRoot</span>
             <p className={styles.text}>{runSummary.title}</p>
             {runSummary.detail ? <small className={styles.runSummaryDetail}>{runSummary.detail}</small> : null}
@@ -438,7 +505,7 @@ export default function AiConversationSidebar({
           * (ADR 0037 §4). The selected Agent's public words follow in their
           * own stable article, so the two speakers never blur together.
           */}
-        {runProgress ? (
+        {runProgress?.liveLabel || runProgress?.headline ? (
           <section
             className={`${styles.message} ${styles.runActivity}`}
             data-actor="pageroot"
@@ -446,41 +513,27 @@ export default function AiConversationSidebar({
             data-testid="ai-conversation-run-progress"
             aria-label="本轮进度"
           >
-            <span className={styles.avatar} aria-hidden="true">
-              {sidebarActorInitial("pageroot")}
-            </span>
+            <PageRootAvatar />
             {/*
               * PageRoot states the stages from the run's durable status (ADR 0037 §4).
               * Signing them with an Agent name made the Agent look like the author of
               * PageRoot's own bookkeeping, and put the brand mark on the wrong speaker.
             */}
             <span className={styles.actor}>PageRoot</span>
-            {runProgress.liveLabel || runProgress.headline ? (
-              <p
-                className={`${styles.text} ${styles.liveStatus}`}
-                role="status"
-                aria-live="polite"
-                aria-atomic="true"
-              >
-                {runProgress.liveLabel || runProgress.headline}
-              </p>
-            ) : null}
-            <ol className={styles.runSteps}>
-              {runProgress.steps.map((step) => (
-                <li key={step.key} data-step-state={step.state}>
-                  {step.label}
-                  {step.detail ? (
-                    <span className={styles.runStepDetail}>{step.detail}</span>
-                  ) : null}
-                </li>
-              ))}
-            </ol>
+            <p
+              className={`${styles.text} ${styles.liveStatus}`}
+              role="status"
+              aria-live="polite"
+              aria-atomic="true"
+            >
+              {runProgress.liveLabel || runProgress.headline}
+            </p>
           </section>
         ) : null}
 
         {/* Public Agent narration grows in one stable article. It is presentation
             evidence only and never changes Candidate authority. */}
-        {runProgress?.narration ? (
+        {runProgress?.narrationUpdates || agentWorking ? (
           <article
             ref={liveMessageRef}
             className={styles.message}
@@ -491,13 +544,33 @@ export default function AiConversationSidebar({
           >
             <AgentAvatar presentation={agentPresentation} />
             <span className={styles.actor}>{resolvedAgentActionName}</span>
-            <div
-              className={styles.narrationText}
-              data-testid="ai-conversation-narration"
-            >
-              {runProgress.narration}
-            </div>
-            {liveTimestamp || runProgress.narration ? (
+            {runProgress?.narrationUpdates ? (
+              <div
+                className={styles.narrationText}
+                data-testid="ai-conversation-narration"
+              >
+                {runProgress.narrationUpdates.map((update) => (
+                  <p key={update.id} className={styles.narrationLine}>{update.text}</p>
+                ))}
+              </div>
+            ) : null}
+            {agentWorking ? (
+              <span
+                className={styles.thinking}
+                role="status"
+                aria-live="polite"
+                aria-label={`${resolvedAgentActionName} 正在思考和处理`}
+                data-testid="ai-conversation-thinking"
+              >
+                <span aria-hidden="true">Thinking</span>
+                <span className={styles.thinkingDots} aria-hidden="true">
+                  <i />
+                  <i />
+                  <i />
+                </span>
+              </span>
+            ) : null}
+            {liveTimestamp || runProgress?.narration ? (
               <div className={styles.messageMeta}>
                 {liveTimestamp ? (
                   <time dateTime={agentUpdatedAt || agentStartedAt || undefined}>
@@ -506,13 +579,13 @@ export default function AiConversationSidebar({
                 ) : null}
                 <button
                   type="button"
-                  onClick={() => copyMessage("live-agent", runProgress.narration || "")}
+                  onClick={() => copyMessage("live-agent", runProgress?.narration || "")}
                 >
                   {copyFeedback?.key === "live-agent" ? copyFeedback.label : "复制"}
                 </button>
               </div>
             ) : null}
-            {runProgress.narrationTruncated ? (
+            {runProgress?.narrationTruncated ? (
               <small className={styles.truncated}>部分输出已省略</small>
             ) : null}
           </article>
@@ -532,8 +605,17 @@ export default function AiConversationSidebar({
             data-testid="ai-conversation-action-bar"
             aria-label="当前待决定"
           >
-            <span className={styles.avatarSpacer} aria-hidden="true" />
-            {actionBar.title ? <strong>{actionBar.title}</strong> : null}
+            <PageRootAvatar />
+            <span className={styles.actor}>PageRoot</span>
+            {actionBar.title ? (
+              <strong
+                {...(actionBar.kind === "decision"
+                  ? { role: "status", "aria-live": "polite", "aria-atomic": "true" }
+                  : {})}
+              >
+                {actionBar.title}
+              </strong>
+            ) : null}
             {actionBar.detail ? <p>{actionBar.detail}</p> : null}
             {actionBar.actions.length > 0 ? (
               <div className={styles.actions}>
@@ -567,144 +649,125 @@ export default function AiConversationSidebar({
       </div>
 
       <div className={styles.composer} data-testid="ai-conversation-composer">
-        <div className={styles.composerTop}>
-          {/*
-            * The model is a quiet inline affordance, and it says nothing when
-            * PageRoot has not actually read a model. With a single usable model it
-            * is plain text: offering a dropdown that opens onto one item would
-            * promise a choice the user does not have.
-            */}
-          {modelLine?.choosable ? (
-            <button
-              type="button"
-              className={styles.model}
-              data-testid="ai-conversation-model"
-              onClick={() => {
-                setModelChoicesOpen((value) => !value);
-                onOpenModelChoices?.();
-              }}
-              aria-expanded={modelChoicesOpen}
-              aria-haspopup="listbox"
-              aria-label={`当前模型 ${modelLine.text}，点击切换`}
-            >
-              {modelLine.text}
-              <span aria-hidden="true">▾</span>
-            </button>
-          ) : modelLine ? (
-            <span className={styles.modelStatic} data-testid="ai-conversation-model">
-              {modelLine.text}
-            </span>
-          ) : null}
-        </div>
-
-        {modelChoicesOpen && modelChoices.length > 1 ? (
-          <div
-            className={styles.modelChoices}
-            role="listbox"
-            aria-label="选择本轮 Agent"
-            data-testid="ai-conversation-model-choices"
-          >
-            {modelChoices.map((choice) => (
-              <button
-                key={choice.id}
-                type="button"
-                role="option"
-                aria-selected={choice.id === selectedModelChoiceId}
-                className={styles.modelChoice}
-                onClick={() => {
-                  onSelectModelChoice?.(choice.id);
-                  setModelChoicesOpen(false);
-                }}
-              >
-                <strong>{choice.label}</strong>
-                {choice.detail ? <span>{choice.detail}</span> : null}
-              </button>
-            ))}
-          </div>
-        ) : null}
-
         {/*
           * The round's context summary belongs to the Composer, not to the fact
           * stream: it changes as the user works and must never be persisted as
           * a message.
           */}
-        {activeIntent === "modify" ? (
+        {(state === "preview-ready" || state === "no-change") && activeIntent === "modify" ? (
           <p
             className={styles.contextSummary}
             data-testid="ai-conversation-context-summary"
           >
-            {`本轮将包含：${pendingCommentCount} 条评论 · 当前 HTML · 项目规则`}
+            {`将发送：${pendingCommentCount} 条评论 · 当前 HTML · 项目规则`}
           </p>
         ) : null}
-        {disclosure ? (
-          <p
-            className={styles.deliveryDisclosure}
-            data-testid="ai-conversation-delivery-disclosure"
-          >
-            {disclosure}
-          </p>
-        ) : null}
-        {activeIntent === "continue" ? (
-          <p
-            className={styles.contextSummary}
-            data-testid="ai-conversation-context-summary"
-          >
-            需要先采用当前结果，才能在它的基础上继续修改。修改前版本、本轮对话和候选记录都会保留。
+        {(state === "preview-ready" || state === "no-change") && send.reason ? (
+          <p className={styles.sendReason} data-testid="ai-conversation-send-reason">
+            {send.reason}
           </p>
         ) : null}
 
         <div className={styles.composerActions}>
-          {/*
-            * A blocked send always says why. Greying the button out with no
-            * explanation leaves the user without a next step.
-            */}
-          {send.reason ? (
-            <span className={styles.sendReason} data-testid="ai-conversation-send-reason">
-              {send.reason}
-            </span>
+          <div ref={agentSelectorRef} className={styles.agentSelector}>
+            {agentLine?.choosable ? (
+              <button
+                ref={agentSelectorButtonRef}
+                id="ai-conversation-agent-selector"
+                type="button"
+                className={styles.agentTrigger}
+                data-testid="ai-conversation-agent"
+                onClick={() => setAgentChoicesOpen((value) => !value)}
+                aria-expanded={agentChoicesOpen}
+                aria-controls="ai-conversation-agent-choices"
+                aria-label={`当前 Agent ${agentLine.text}，点击切换`}
+              >
+                <AgentChoiceMark label={agentLine.text} logoSrc={agentPresentation?.logoSrc} />
+                <span>{agentLine.text}</span>
+                <span className={styles.agentChevron} aria-hidden="true">▾</span>
+              </button>
+            ) : agentLine ? (
+              <span className={styles.agentStatic} data-testid="ai-conversation-agent">
+                <AgentChoiceMark label={agentLine.text} logoSrc={agentPresentation?.logoSrc} />
+                <span>{agentLine.text}</span>
+              </span>
+            ) : null}
+
+            {agentChoicesOpen && agentChoices.length > 1 ? (
+              <div
+                id="ai-conversation-agent-choices"
+                className={styles.agentChoices}
+                aria-label="选择 Agent"
+                data-testid="ai-conversation-agent-choices"
+              >
+                {agentChoices.map((choice) => (
+                  <button
+                    key={choice.id}
+                    type="button"
+                    aria-pressed={choice.id === selectedAgentChoiceId}
+                    className={styles.agentChoice}
+                    onPointerDown={(event) => {
+                      // Keep focus on the trigger for pointer selection. The
+                      // option disappears after selection, so letting the browser
+                      // focus it first would drop focus back to body.
+                      event.preventDefault();
+                    }}
+                    onClick={() => {
+                      agentSelectorButtonRef.current?.focus();
+                      onSelectAgentChoice?.(choice.id);
+                      setAgentChoicesOpen(false);
+                    }}
+                  >
+                    <AgentChoiceMark label={choice.label} logoSrc={choice.logoSrc} />
+                    <strong>{choice.label}</strong>
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </div>
+
+          {state === "preview-ready" || state === "no-change" ? (
+            <div className={styles.deliveryActions}>
+              {activeIntent === "modify" && onCopyTask ? (
+                <button
+                  type="button"
+                  className={styles.copyTask}
+                  data-testid="ai-conversation-copy-task"
+                  disabled={!copyTask.canCopy}
+                  onClick={() => onCopyTask()}
+                >
+                  复制给别的 AI
+                </button>
+              ) : null}
+              {send.kind === "status" ? (
+                send.label ? (
+                  <span
+                    className={styles.sendStatus}
+                    data-testid="ai-conversation-agent-status"
+                    aria-live="polite"
+                  >
+                    {send.label}
+                  </span>
+                ) : null
+              ) : (
+                <button
+                  type="button"
+                  className={styles.send}
+                  data-testid="ai-conversation-send"
+                  disabled={send.kind === "send" && !send.canSend}
+                  onClick={() => {
+                    if (send.kind === "open-agent-settings") {
+                      onOpenAgentSettings?.();
+                      return;
+                    }
+                    onSend?.();
+                  }}
+                >
+                  {send.label}
+                </button>
+              )}
+            </div>
           ) : null}
-          {/*
-            * The clipboard path from the old delivery dialog, kept as a quiet
-            * alternative beside the primary action instead of a question asked
-            * before anything happens. Same round, same payload, different
-            * destination.
-            */}
-          {activeIntent === "modify" && onCopyTask ? (
-            <button
-              type="button"
-              className={styles.copyTask}
-              data-testid="ai-conversation-copy-task"
-              disabled={!copyTask.canCopy}
-              onClick={() => onCopyTask()}
-            >
-              复制给别的 AI
-            </button>
-          ) : null}
-          {send.kind === "status" ? (
-            <span
-              className={styles.sendStatus}
-              data-testid="ai-conversation-agent-status"
-              aria-live="polite"
-            >
-              {send.label}
-            </span>
-          ) : (
-            <button
-              type="button"
-              className={styles.send}
-              data-testid="ai-conversation-send"
-              disabled={send.kind === "send" && !send.canSend}
-              onClick={() => {
-                if (send.kind === "open-agent-settings") {
-                  onOpenAgentSettings?.();
-                  return;
-                }
-                onSend?.();
-              }}
-            >
-              {activeIntent === "continue" ? "采纳并继续" : send.label}
-            </button>
-          )}
         </div>
       </div>
     </aside>

@@ -30,11 +30,10 @@ export type UseAiConversationOptions = {
   controllerRef: { current: AiConversationControllerCapability | null };
   conversation: ConversationSessionSnapshot | null;
   qoderAvailability: QoderAvailabilitySnapshot | null;
-  agentModelDisplayName?: string | null;
+  agentDisplayName?: string | null;
   agentActionName?: string | null;
   agentSettingsName?: string | null;
   agentSettingsSupported?: boolean;
-  agentLocalReadDisclosure?: string | null;
   agentPresentation?: Readonly<{
     providerId: string;
     displayName: string;
@@ -44,7 +43,7 @@ export type UseAiConversationOptions = {
   agentChoices?: readonly Readonly<{
     id: string;
     label: string;
-    detail?: string | null;
+    logoSrc?: string | null;
     selection: AgentSelection;
   }>[];
   selectedAgentChoiceId?: string | null;
@@ -56,6 +55,7 @@ export type UseAiConversationOptions = {
   projectId: string;
   documentId: string;
   sourcePath: string;
+  sourceFileName?: string | null;
   pendingCommentCount: number;
   /**
    * Hands this round of comments to the Agent or to the clipboard. Owned by the
@@ -75,11 +75,10 @@ export function useAiConversation({
   controllerRef,
   conversation,
   qoderAvailability,
-  agentModelDisplayName = null,
+  agentDisplayName = null,
   agentActionName = "Agent",
   agentSettingsName = "Agent",
   agentSettingsSupported = true,
-  agentLocalReadDisclosure = null,
   agentPresentation = null,
   agentChoices = [],
   selectedAgentChoiceId = null,
@@ -91,6 +90,7 @@ export function useAiConversation({
   projectId,
   documentId,
   sourcePath,
+  sourceFileName = null,
   pendingCommentCount,
   onDeliverModification,
   onDecision,
@@ -161,8 +161,6 @@ export function useAiConversation({
     setOpen(true);
   }, []);
 
-  const onCollapse = useCallback(() => setOpen(false), []);
-
   const onSend = useCallback(() => {
     onDeliverModification?.("managed-agent");
   }, [onDeliverModification]);
@@ -176,7 +174,7 @@ export function useAiConversation({
     onDeliverModification?.("clipboard");
   }, [onDeliverModification]);
 
-  const onSelectModelChoice = useCallback((choiceId: string) => {
+  const onSelectAgentChoice = useCallback((choiceId: string) => {
     const choice = agentChoices.find((candidate) => candidate.id === choiceId);
     if (!choice) return;
     controllerRef.current?.selectAgent(choice.selection);
@@ -189,16 +187,15 @@ export function useAiConversation({
     // The selected Agent's availability is the model catalog's readiness: one owner supplies
     // both, so the Composer can never claim ready while the Agent is not.
     catalogStatus: (qoderAvailability?.status ?? "unavailable") as SidebarCatalogStatus,
-    modelDisplayName: agentModelDisplayName,
+    agentDisplayName,
     agentActionName,
     agentSettingsName,
     agentSettingsSupported,
-    agentLocalReadDisclosure,
     agentPresentation,
-    modelChoiceCount: agentChoices.length,
-    modelChoices: agentChoices.map(({ id, label, detail }) => ({ id, label, detail })),
-    selectedModelChoiceId: selectedAgentChoiceId,
-    onSelectModelChoice,
+    agentChoiceCount: agentChoices.length,
+    agentChoices: agentChoices.map(({ id, label, logoSrc }) => ({ id, label, logoSrc })),
+    selectedAgentChoiceId,
+    onSelectAgentChoice,
     // The decision bar needs to name the version it is deciding about, and the
     // assessment decides whether adopting without looking is offered at all.
     candidateVersionLabel: activeRun?.candidateVersionLabel ?? null,
@@ -206,13 +203,18 @@ export function useAiConversation({
     failureMessage: activeRun?.error ?? null,
     pendingCommentCount,
     agentText: activeHandoff?.visibleText || "",
+    agentUpdates: activeHandoff?.visibleTextUpdates || [],
     agentTextTruncated: activeHandoff?.textTruncated === true,
+    agentWorking: activeHandoff?.mode === "managed-agent"
+      && ["starting", "running"].includes(activeHandoff.status),
     agentStartedAt: activeHandoff?.startedAt || null,
     agentUpdatedAt: activeHandoff?.updatedAt || null,
     runKey: activeRun
       ? `${activeRun.requestId}:${activeRun.attemptId}`
       : submissionPending ? `pending:${projectId}:${documentId}` : null,
     runCommentCount: activeRun?.commentCount ?? pendingCommentCount,
+    sourceFileName,
+    handoffStatus: activeHandoff?.status || null,
     // An explicit allowlist of settled loads (see conversationLoadedForView):
     // the empty-state copy must never appear before the load settles, because
     // the session drops draft writes until it has published a conversation.
@@ -220,17 +222,15 @@ export function useAiConversation({
     onSend,
     onCopyTask,
     onAction: onDecision,
-    onCollapse,
     onOpenAgentSettings,
   }), [
     state,
     conversation,
     qoderAvailability,
-    agentModelDisplayName,
+    agentDisplayName,
     agentActionName,
     agentSettingsName,
     agentSettingsSupported,
-    agentLocalReadDisclosure,
     agentPresentation,
     agentChoices,
     selectedAgentChoiceId,
@@ -238,14 +238,14 @@ export function useAiConversation({
     activeRun,
     projectId,
     documentId,
+    sourceFileName,
     submissionPending,
     pendingCommentCount,
     onSend,
     onCopyTask,
     onDecision,
-    onCollapse,
     onOpenAgentSettings,
-    onSelectModelChoice,
+    onSelectAgentChoice,
   ]);
 
   return { open, visible, toggle, reveal, sidebarProps };

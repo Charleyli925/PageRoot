@@ -2645,3 +2645,57 @@ Date: 2026-08-27
 - [x] Real isolated Electron interaction and screenshot evidence captured.
 
 final result: passed
+
+---
+
+# AI assistant conversation redesign
+
+Date: 2026-08-28
+
+## Comparison target
+
+- User references:
+  - `/var/folders/jx/w52403cs2hx39vwhd1sb3tg80000gn/T/codex-clipboard-9854588a-06d5-434b-a124-545c4154b746.png` for the unreadable cumulative Agent text wall.
+  - `/var/folders/jx/w52403cs2hx39vwhd1sb3tg80000gn/T/codex-clipboard-764fd582-dddb-450f-bfa6-736ee0269b5e.png` and `/var/folders/jx/w52403cs2hx39vwhd1sb3tg80000gn/T/codex-clipboard-65981b4e-3c80-4a9b-b053-68f097ca88aa.png` for the duplicate collapse control, repeated PageRoot notices, ambiguous result copy, and unsigned decision.
+  - `/var/folders/jx/w52403cs2hx39vwhd1sb3tg80000gn/T/codex-clipboard-58c8460f-de8b-4b42-82ea-18851b4df198.png` for the oversized Agent selector disclosure.
+- Rendered implementation:
+  - `output/design-qa/ai-assistant-redesign/qoder-processing-thinking.png`
+  - `output/design-qa/ai-assistant-redesign/qoder-result-ready.png`
+  - `output/design-qa/ai-assistant-redesign/agent-selector-open.png`
+
+## Viewport and states
+
+- Isolated Electron window: `1440 x 960` CSS pixels at 2x device scale; screenshots are `2880 x 1920` PNGs.
+- Processing: PageRoot identifies the exact HTML and sent context, then states the reliable current stage. Three Qoder public updates appear as separate rows under one Qoder identity, followed by a bounded animated `Thinking` line.
+- Result: the completed-stage duplicate is removed. PageRoot alone signs `版本 2 等待你的决定` with its logo and actions; Agent narration remains readable above it.
+- Agent chooser: the menu contains only logo plus Agent name, opens above the footer, closes on outside click, and leaves the left selector and right delivery actions vertically centered.
+- Header: there is no internal collapse button; the single top `AI 助手` entry completes the open, close, and reopen cycle in preview and review.
+
+## Functional and visual checks
+
+- Canonical Qoder events rendered as three rows; Codex token deltas from one public message stayed in one row and its next public message became a second row. Hidden reasoning was absent.
+- `Thinking` was visible during both managed-Agent runs and absent after the terminal decision appeared. Reduced-motion CSS disables its animation while retaining the status text.
+- The stream remained at the newest content after both narration growth and the result action; user-upscroll protection and the `有新进展` recovery affordance remain intact.
+- No document-level horizontal overflow, sidebar clipping, or Composer clipping was present. The Agent selector and delivery action centers differed by at most one CSS pixel.
+- The dropdown cleared the long local-file disclosure and did not clip behind the Composer or preview.
+- Typography, neutral surfaces, 22px speaker marks, 8px narration rhythm, violet PageRoot accent, and compact 30px footer controls form one restrained visual system.
+
+## Findings
+
+- The first visual pass exposed a state-projection error: after managed handoff, PageRoot could still say `正在准备本轮资料`. The outlet now passes the complete handoff fact, so the visible stage correctly reads `Qoder 正在修改页面` or the matching Agent name.
+- The second pass exposed a redundant settled PageRoot line beside the decision. It was removed while retaining Agent narration and the signed version decision.
+- Independent review found three accessibility/content-boundary gaps: punctuation-free explicit paragraphs could rejoin, the chooser used incomplete `listbox` semantics, and the Candidate decision had no isolated announcement. Explicit paragraph boundaries now persist, the chooser is a normal button group with stable focus through Agent checks, and the visible decision title is a polite atomic status.
+- No remaining P0, P1, or P2 visual, interaction, accessibility, clipping, or stacking issue was found in the three final states.
+
+## Checklist
+
+- [x] Public Agent updates read line by line under one identity.
+- [x] Dynamic `Thinking` appears only while the Agent is working.
+- [x] New content follows the bottom without stealing a user-upscrolled viewport.
+- [x] PageRoot names the file, sent context, current reliable stage, and final decision.
+- [x] The PageRoot decision has both brand mark and actor name.
+- [x] One top-level AI assistant toggle owns open and close.
+- [x] Agent chooser is compact, dismissible, correctly layered, and aligned with actions.
+- [x] Removed copy does not appear in app or Electron contracts.
+
+final result: passed

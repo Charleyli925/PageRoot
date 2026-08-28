@@ -49,42 +49,33 @@ const ACTOR_LABELS = Object.freeze({
 
 const MODE_PRESENTATION = Object.freeze({
   "preview-ready": {
-    label: "修改 · 待发送",
-    detail: "按页面评论发起修改，结果先进入审阅。",
+    label: "待发送",
   },
   "preparing-delivery": {
-    label: "修改 · 准备中",
-    detail: "正在冻结本轮评论和页面内容。",
+    label: "准备中",
   },
   processing: {
-    label: "执行 · 写入候选",
-    detail: "当前页面不会被直接覆盖。",
+    label: "处理中",
   },
   validating: {
-    label: "执行 · 写入候选",
-    detail: "当前页面不会被直接覆盖。",
+    label: "检查结果",
   },
   "ready-to-open": {
-    label: "结果 · 等待决定",
-    detail: "当前仍是修改前页面。",
+    label: "待决定",
   },
   "review-view": {
-    label: "审阅 · 只读",
-    detail: "采纳后才能在结果基础上继续修改。",
+    label: "审阅中",
   },
   promoting: {
-    label: "结果 · 等待决定",
-    detail: "当前仍是修改前页面。",
+    label: "采用中",
   },
   "run-error": {
-    label: "结果 · 需要处理",
-    detail: "当前页面没有被覆盖。",
+    label: "需要处理",
   },
   // A round that produced nothing new: the round is over, but it is still this
   // thread's fact to state, not a return to the idle preview.
   "no-change": {
-    label: "结果 · 无变化",
-    detail: "评论和当前页面都保持原样。",
+    label: "无变化",
   },
 });
 
@@ -131,7 +122,7 @@ export function sidebarStateFromRun({
  * Only the states where a round is actually moving return an entry. A settled
  * round is represented by its result, not by a frozen checklist.
  */
-const MAX_NARRATION_BLOCKS = 40;
+const MAX_NARRATION_BLOCKS = 80;
 
 const RUN_PROGRESS_STATES = Object.freeze([
   "preparing-delivery",
@@ -149,6 +140,7 @@ export function sidebarRunProgress({
   state,
   steps = [],
   agentText = "",
+  agentUpdates = [],
   agentTextTruncated = false,
 } = {}) {
   if (!RUN_PROGRESS_STATES.includes(String(state))) return null;
@@ -175,17 +167,31 @@ export function sidebarRunProgress({
   const liveStep = projected.find((step) => step.state === "current") || null;
   // ADR 0037: the Agent narrates, PageRoot states the stage. The prose is an
   // annotation on the stage actually running and never claims a stage is done.
-  // The Agent speaks in chunks and PageRoot concatenates them, so the raw buffer is
-  // one wall of text. Splitting on blank lines restores the paragraphs it actually
-  // wrote; the count is capped so a chatty Agent cannot grow the DOM without limit.
+  // Canonical visible-text events preserve the Agent's public message boundaries.
+  // A blank-line split remains only for sessions recovered from the older cumulative
+  // text contract; the count matches the Bridge projection's bounded DOM budget.
   const narration = typeof agentText === "string" ? agentText.trim() : "";
-  const narrationBlocks = narration
-    ? Object.freeze(narration
+  const projectedUpdates = [];
+  const seenUpdateIds = new Set();
+  for (const update of Array.isArray(agentUpdates) ? agentUpdates.slice(0, MAX_NARRATION_BLOCKS) : []) {
+    if (!update || typeof update !== "object") continue;
+    const id = String(update.id || "").trim().slice(0, 200);
+    const text = String(update.text || "").trim();
+    if (!id || !text || seenUpdateIds.has(id)) continue;
+    seenUpdateIds.add(id);
+    projectedUpdates.push(Object.freeze({ id, text }));
+  }
+  const fallbackBlocks = narration
+    ? narration
       .split(/\n{2,}/u)
       .map((block) => block.trim())
       .filter(Boolean)
-      .slice(0, MAX_NARRATION_BLOCKS))
-    : null;
+      .slice(0, MAX_NARRATION_BLOCKS)
+      .map((text, index) => Object.freeze({ id: `legacy:${index}`, text }))
+    : [];
+  const narrationUpdates = projectedUpdates.length > 0 ? projectedUpdates : fallbackBlocks;
+  const narrationText = narration || projectedUpdates.map((update) => update.text).join("");
+  const decisionOwnsSettledStatus = state === "ready-to-open" || state === "review-view";
   return Object.freeze({
     steps: Object.freeze(projected),
     // Only a failure gets its own line. The list already shows which step is live at
@@ -194,10 +200,13 @@ export function sidebarRunProgress({
     headline: failedStep?.label ?? null,
     // Public Agent narration is projected separately from PageRoot's lifecycle
     // facts. It never grants Candidate authority.
-    narration: narration || null,
-    narrationBlocks: narrationBlocks && narrationBlocks.length > 0 ? narrationBlocks : null,
+    narration: narrationText || null,
+    narrationUpdates: narrationUpdates.length > 0 ? Object.freeze(narrationUpdates) : null,
     narrationTruncated: agentTextTruncated === true,
-    liveLabel: liveStep?.label ?? null,
+    // Once a Candidate decision exists, its signed PageRoot message is the sole
+    // settled-status line. Keeping the completed progress step beside it repeated
+    // the same fact and recreated the PageRoot message pile this UI removes.
+    liveLabel: decisionOwnsSettledStatus ? null : liveStep?.label ?? null,
     tone: failedStep ? "attention" : "quiet",
   });
 }
@@ -320,6 +329,7 @@ export function sidebarActionBar({
   candidateStatus = null,
   failureMessage = null,
   deliveryMode = "managed-agent",
+  handoffStatus = null,
 } = {}) {
   if (runStatus === "awaiting-conflict-resolution") {
     return {
@@ -345,13 +355,14 @@ export function sidebarActionBar({
       return {
         kind: "blocked",
         title: failureMessage || "本轮没有可采用的结果",
-        detail: "当前仍是修改前页面。",
+        detail: "这次修改没有通过检查。",
         actions: [{ id: "dismiss", label: "结束本轮", tone: "quiet" }],
       };
     }
     const title = candidateVersionLabel
       ? `${candidateVersionLabel} 等待你的决定`
-      : "结果等待你的决定";
+      : "AI 修改已完成";
+    const decisionDetail = "你可以先看变化，也可以直接采用。";
     // An `attention` candidate offers review only: adopting a large change
     // without looking at it is not a choice PageRoot should offer.
     // Already comparing: offering 「审阅对比」 here would point at the screen the user
@@ -363,7 +374,7 @@ export function sidebarActionBar({
         title,
         detail: candidateStatus === "attention"
           ? "这次变化较大，核对后再决定。"
-          : "看完就可以决定。",
+          : decisionDetail,
         actions: [{ id: "adopt", label: "采纳这一版", tone: "primary" }],
       };
     }
@@ -371,14 +382,14 @@ export function sidebarActionBar({
       return {
         kind: "decision",
         title,
-        detail: "这次变化较大，先看看再决定。",
+        detail: "这次变化较大，先对比审阅。",
         actions: [{ id: "review", label: "审阅对比", tone: "primary" }],
       };
     }
     return {
       kind: "decision",
       title,
-      detail: "你可以先看变化，也可以直接采用。",
+      detail: decisionDetail,
       actions: [
         { id: "review", label: "审阅对比", tone: "primary" },
         { id: "adopt", label: "直接采用", tone: "quiet" },
@@ -392,6 +403,17 @@ export function sidebarActionBar({
     // happening, and the user would lose the one action they actually need — the
     // task back on the clipboard if the paste went wrong.
     if (deliveryMode === "clipboard") {
+      if (handoffStatus === "failed") {
+        return {
+          kind: "blocked",
+          title: "任务还没复制成功",
+          detail: "本轮要求已保留，可以重新复制。",
+          actions: [
+            { id: "recopy", label: "再次复制", tone: "quiet" },
+            { id: "cancel", label: "结束本轮", tone: "quiet" },
+          ],
+        };
+      }
       return {
         kind: "progress",
         title: "任务已复制，等你的 AI 改完",
@@ -449,17 +471,6 @@ export function sidebarActionBar({
  * button that acts on it, so the user reads it without being interrupted by a
  * modal first.
  */
-export function sidebarDeliveryDisclosure(intent, {
-  agentName = "Agent",
-  localReadDisclosure = null,
-} = {}) {
-  if (intent !== INTENT_MODIFY) return null;
-  if (typeof localReadDisclosure === "string" && localReadDisclosure.trim()) {
-    return `${localReadDisclosure.trim()} 本轮结果先进入审阅。`;
-  }
-  return `${String(agentName || "Agent").trim() || "Agent"} 会读取本轮 HTML、评论和附件；结果先进入审阅。`;
-}
-
 export function sidebarSendState({
   state,
   catalogStatus = "ready",
@@ -483,8 +494,8 @@ export function sidebarSendState({
     return {
       kind: "status",
       canSend: false,
-      label: "发送",
-      reason: "正在审阅 AI 候选，采纳或返回后可继续对话",
+      label: "",
+      reason: null,
     };
   }
   // Lifecycle authority wins over provider availability. While a Request is
@@ -502,7 +513,7 @@ export function sidebarSendState({
     return {
       kind: "status",
       canSend: false,
-      label: "先处理当前结果",
+      label: "",
       reason: null,
     };
   }
@@ -510,7 +521,7 @@ export function sidebarSendState({
     return {
       kind: "status",
       canSend: false,
-      label: "先处理当前结果",
+      label: "",
       reason: null,
     };
   }
@@ -612,8 +623,8 @@ export function sidebarSendState({
     return {
       kind: "send",
       canSend: false,
-      label: "发送",
-      reason: "先采用当前结果才能继续修改",
+      label: "",
+      reason: null,
     };
   }
   return { kind: "send", canSend: false, label: "发送", reason: null };
@@ -642,14 +653,14 @@ export function sidebarCopyTaskState({
   if (state === "review-view") {
     return {
       canCopy: false,
-      reason: "正在审阅 AI 候选，采纳或返回后可继续对话",
+      reason: null,
     };
   }
   if (state === "preparing-delivery") {
     return { canCopy: false, reason: "正在冻结本轮评论和页面内容" };
   }
   if (state === "ready-to-open") {
-    return { canCopy: false, reason: "先处理当前结果" };
+    return { canCopy: false, reason: null };
   }
   if (state === "processing" || state === "validating") {
     return { canCopy: false, reason: `${boundedAgentName} 完成本轮后可发送` };
@@ -680,22 +691,22 @@ export function sidebarCopyTaskState({
  *
  * Returns null when the line should not render at all.
  */
-export function sidebarModelLine({
+export function sidebarAgentLine({
   catalogStatus = "ready",
-  modelDisplayName = null,
-  modelChoiceCount = 0,
+  agentDisplayName = null,
+  agentChoiceCount = 0,
 } = {}) {
-  if (catalogStatus === "checking") {
-    return Object.freeze({ kind: "checking", text: "正在读取模型…", choosable: false });
+  const name = typeof agentDisplayName === "string" ? agentDisplayName.trim() : "";
+  if (catalogStatus === "checking" && !name) {
+    return Object.freeze({ kind: "checking", text: "正在连接 Agent…", choosable: false });
   }
-  const name = typeof modelDisplayName === "string" ? modelDisplayName.trim() : "";
   if (!name) return null;
   return Object.freeze({
-    kind: "name",
+    kind: catalogStatus === "checking" ? "checking" : "name",
     text: name,
     // A picker is offered only when there is a real choice to make. PRD §10.1
     // forbids a dropdown that opens onto a single item.
-    choosable: Number(modelChoiceCount) > 1,
+    choosable: Number(agentChoiceCount) > 1,
   });
 }
 

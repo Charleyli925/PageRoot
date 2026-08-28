@@ -78,7 +78,9 @@ export function deriveRunProgressPresentation(
         mode?: "clipboard" | "managed-agent";
         status: string;
         phase?: string;
+        agentName?: string | null;
         errorMessage?: string | null;
+        retryable?: boolean;
       }>,
 ): RunProgressPresentation;
 
@@ -106,7 +108,9 @@ export function deriveRunProgressSteps(
         mode?: "clipboard" | "managed-agent";
         status: string;
         phase?: string;
+        agentName?: string | null;
         errorMessage?: string | null;
+        retryable?: boolean;
       }>,
 ): RunProgressStep[];
 

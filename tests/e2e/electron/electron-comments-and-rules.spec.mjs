@@ -180,7 +180,7 @@ test("Electron preview mounts the modification-only AI sidebar across reopen", a
     const sidebar = launched.page.getByTestId("ai-conversation-sidebar");
     await expect(sidebar).toBeVisible();
     await expect(launched.page.getByTestId("ai-conversation-mode"))
-      .toHaveText("修改 · 待发送");
+      .toHaveText("待发送");
     // The preview iframe stays alive beside the sidebar — not replaced by a modal.
     await expect(launched.page.locator('iframe[title="HTML 交互预览"]'))
       .toBeVisible();
@@ -196,11 +196,12 @@ test("Electron preview mounts the modification-only AI sidebar across reopen", a
       .toContainText("1 条评论");
 
     // Collapsing and reopening keeps the same single-purpose product surface.
-    await launched.page.getByRole("button", { name: "收起 AI 助手" }).click();
+    await openToggle.click();
     await expect(sidebar).toHaveCount(0);
-    await launched.page.getByRole("button", { name: "AI 助手" }).click();
+    await expect(openToggle).toHaveAttribute("aria-expanded", "false");
+    await openToggle.click();
     await expect(launched.page.getByTestId("ai-conversation-mode"))
-      .toHaveText("修改 · 待发送", { timeout: 15_000 });
+      .toHaveText("待发送", { timeout: 15_000 });
     await expect(launched.page.getByTestId("ai-conversation-input")).toHaveCount(0);
   } finally {
     if (electronApp && isolatedUserData) {

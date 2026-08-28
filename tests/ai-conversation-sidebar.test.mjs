@@ -3,13 +3,12 @@ import test from "node:test";
 
 import {
   FORBIDDEN_MESSAGE_KEYS,
+  sidebarAgentLine,
   conversationLoadedForView,
   conversationReadyForDocument,
   sidebarActionBar,
   sidebarActorInitial,
-  sidebarDeliveryDisclosure,
   sidebarMessageStream,
-  sidebarModelLine,
   sidebarModePresentation,
   sidebarResolvedIntent,
   sidebarSendState,
@@ -77,6 +76,7 @@ test("the action bar is derived from product state, never from a message", () =>
   });
   assert.equal(pending.kind, "decision");
   assert.equal(pending.title, "候选版本 5 等待你的决定");
+  assert.equal(pending.detail, "你可以先看变化，也可以直接采用。");
   assert.deepEqual(pending.actions.map((action) => action.id), ["review", "adopt"]);
 
   const running = sidebarActionBar({ state: "processing" });
@@ -289,7 +289,7 @@ test("Candidate decisions and in-flight delivery win over Agent setup", () => {
     assert.deepEqual(decision, {
       kind: "status",
       canSend: false,
-      label: "先处理当前结果",
+      label: "",
       reason: null,
     });
 
@@ -305,36 +305,37 @@ test("Candidate decisions and in-flight delivery win over Agent setup", () => {
   }
 });
 
-test("mode copy separates who may write from who may only read", () => {
-  assert.equal(sidebarModePresentation("preview-ready").label, "修改 · 待发送");
-  assert.equal(sidebarModePresentation("processing").label, "执行 · 写入候选");
-  assert.equal(sidebarModePresentation("ready-to-open").label, "结果 · 等待决定");
-  assert.equal(sidebarModePresentation("review-view").label, "审阅 · 只读");
-  // An unknown state falls back to the most restrictive copy.
-  assert.equal(sidebarModePresentation("unknown-state").label, "修改 · 待发送");
+test("mode copy stays short and names only the current user-facing state", () => {
+  assert.equal(sidebarModePresentation("preview-ready").label, "待发送");
+  assert.equal(sidebarModePresentation("processing").label, "处理中");
+  assert.equal(sidebarModePresentation("ready-to-open").label, "待决定");
+  assert.equal(sidebarModePresentation("review-view").label, "审阅中");
+  assert.equal(sidebarModePresentation("unknown-state").label, "待发送");
 });
 
-test("the model line names a model only when one is actually known", () => {
-  // Reading: say so.
-  assert.deepEqual(sidebarModelLine({ catalogStatus: "checking" }), {
-    kind: "checking", text: "正在读取模型…", choosable: false,
+test("the Agent selector names only the Agent and opens only for a real choice", () => {
+  assert.deepEqual(sidebarAgentLine({ catalogStatus: "checking" }), {
+    kind: "checking", text: "正在连接 Agent…", choosable: false,
+  });
+  assert.deepEqual(sidebarAgentLine({
+    catalogStatus: "checking",
+    agentDisplayName: "Codex",
+    agentChoiceCount: 2,
+  }), {
+    kind: "checking", text: "Codex", choosable: true,
   });
 
-  // Nothing read yet: stay silent rather than assert a fact about the account.
-  assert.equal(sidebarModelLine({ catalogStatus: "ready" }), null);
-  assert.equal(sidebarModelLine({ catalogStatus: "ready", modelDisplayName: "   " }), null);
-  // The unavailable cases explain themselves on the send button.
-  assert.equal(sidebarModelLine({ catalogStatus: "auth-required" }), null);
-  assert.equal(sidebarModelLine({ catalogStatus: "not-installed" }), null);
-  assert.equal(sidebarModelLine({ catalogStatus: "unavailable" }), null);
+  assert.equal(sidebarAgentLine({ catalogStatus: "ready" }), null);
+  assert.equal(sidebarAgentLine({ catalogStatus: "ready", agentDisplayName: "   " }), null);
+  assert.equal(sidebarAgentLine({ catalogStatus: "auth-required" }), null);
+  assert.equal(sidebarAgentLine({ catalogStatus: "not-installed" }), null);
+  assert.equal(sidebarAgentLine({ catalogStatus: "unavailable" }), null);
 
-  // One known model is plain text: a dropdown onto a single item is forbidden.
-  const single = sidebarModelLine({ modelDisplayName: "Qoder-Default", modelChoiceCount: 1 });
-  assert.equal(single.text, "Qoder-Default");
+  const single = sidebarAgentLine({ agentDisplayName: "Qoder", agentChoiceCount: 1 });
+  assert.equal(single.text, "Qoder");
   assert.equal(single.choosable, false);
 
-  // A picker is only offered when there is a real choice.
-  const many = sidebarModelLine({ modelDisplayName: "Qoder-Default", modelChoiceCount: 3 });
+  const many = sidebarAgentLine({ agentDisplayName: "Codex", agentChoiceCount: 3 });
   assert.equal(many.choosable, true);
 });
 
@@ -350,7 +351,7 @@ test("the header's mode is derived from Request authority, not guessed", () => {
     sidebarModePresentation(
       sidebarStateFromRun({ activeRun: { status: "processing" } }),
     ).label,
-    "执行 · 写入候选",
+    "处理中",
   );
 
   assert.equal(sidebarStateFromRun({ activeRun: { status: "submitting" } }), "preparing-delivery");
@@ -373,7 +374,7 @@ test("the header's mode is derived from Request authority, not guessed", () => {
     sidebarModePresentation(
       sidebarStateFromRun({ activeRun: { status: "no-change" } }),
     ).label,
-    "结果 · 无变化",
+    "无变化",
   );
   assert.equal(sidebarStateFromRun({ activeRun: { status: "error" } }), "run-error");
 
@@ -436,7 +437,7 @@ test("the Composer sends only the page-comment modification", () => {
   });
   assert.equal(continued.canSend, false);
   assert.equal(continued.kind, "status");
-  assert.equal(continued.label, "先处理当前结果");
+  assert.equal(continued.label, "");
   assert.equal(continued.reason, null);
 });
 
@@ -475,16 +476,20 @@ test("copying still needs a quiet round with comments to freeze", () => {
   const queued = sidebarCopyTaskState({ state: "preview-ready", queued: true, pendingCommentCount: 2 });
   assert.equal(queued.canCopy, false);
   assert.equal(queued.reason, "正在等待上一个任务完成");
-  for (const state of ["preparing-delivery", "processing", "validating", "promoting", "ready-to-open"]) {
+  for (const state of ["preparing-delivery", "processing", "validating", "promoting"]) {
     const running = sidebarCopyTaskState({ state, pendingCommentCount: 2 });
     assert.equal(running.canCopy, false, `${state} must block copying`);
     assert.ok(running.reason, `${state} must say why copying is unavailable`);
   }
+  assert.deepEqual(
+    sidebarCopyTaskState({ state: "ready-to-open", pendingCommentCount: 2 }),
+    { canCopy: false, reason: null },
+  );
 
   // Review is read-only: the decision bar owns the next step there.
   const reviewing = sidebarCopyTaskState({ state: "review-view", pendingCommentCount: 2 });
   assert.equal(reviewing.canCopy, false);
-  assert.ok(reviewing.reason);
+  assert.equal(reviewing.reason, null);
 
   // Settled without a change keeps the comments, so the user may re-send.
   const settled = sidebarCopyTaskState({ state: "no-change", pendingCommentCount: 2 });
@@ -502,13 +507,10 @@ test("the review Canvas keeps the thread on screen but refuses a new round", () 
     hasText: true,
   });
   assert.equal(send.canSend, false);
-  assert.equal(send.reason, "正在审阅 AI 候选，采纳或返回后可继续对话");
+  assert.equal(send.reason, null);
 
-  // Being unable to type is not the same as being told nothing: the mode line
-  // still explains what this surface is.
   const mode = sidebarModePresentation("review-view");
-  assert.equal(mode.label, "审阅 · 只读");
-  assert.equal(mode.detail, "采纳后才能在结果基础上继续修改。");
+  assert.equal(mode.label, "审阅中");
 });
 
 test("review refuses a round even when the model catalog is still checking", () => {
@@ -519,25 +521,7 @@ test("review refuses a round even when the model catalog is still checking", () 
     catalogStatus: "checking",
     hasText: true,
   });
-  assert.equal(send.reason, "正在审阅 AI 候选，采纳或返回后可继续对话");
-});
-
-test("the delivery disclosure moves out of the dialog and onto the modify intent", () => {
-  // The sentence the old modal used to carry now sits beside the button that acts
-  // on it, so the user is informed without being interrupted first.
-  assert.equal(
-    sidebarDeliveryDisclosure("modify"),
-    "Agent 会读取本轮 HTML、评论和附件；结果先进入审阅。",
-  );
-  assert.equal(
-    sidebarDeliveryDisclosure("modify", {
-      agentName: "Codex",
-      localReadDisclosure: "Codex 修改时可能读取这台 Mac 上的本机文件。",
-    }),
-    "Codex 修改时可能读取这台 Mac 上的本机文件。 本轮结果先进入审阅。",
-  );
-
-  assert.equal(sidebarDeliveryDisclosure("continue"), null);
+  assert.equal(send.reason, null);
 });
 
 test("a queued round blocks the modify intent instead of stacking a second Request", () => {
@@ -602,13 +586,12 @@ test("progress belongs to a moving round only", () => {
 
 test("the idle mode describes the only available modification action", () => {
   const pending = sidebarModePresentation("preview-ready");
-  assert.equal(pending.label, "修改 · 待发送");
-  assert.equal(pending.detail, "按页面评论发起修改，结果先进入审阅。");
+  assert.equal(pending.label, "待发送");
 
   // Once a round exists, its durable status wins again — the intent cannot dress
   // a running execution up as something pending.
-  assert.equal(sidebarModePresentation("processing").label, "执行 · 写入候选");
-  assert.equal(sidebarModePresentation("review-view").label, "审阅 · 只读");
+  assert.equal(sidebarModePresentation("processing").label, "处理中");
+  assert.equal(sidebarModePresentation("review-view").label, "审阅中");
 });
 
 test("the clipboard round says what is actually happening and keeps the task reachable", () => {
@@ -631,6 +614,15 @@ test("the clipboard round says what is actually happening and keeps the task rea
 
   // And the clipboard detail no longer repeats the header sentence either.
   assert.equal(clipboard.detail, "粘贴给任意能读写本机文件的 AI。");
+
+  const copyFailure = sidebarActionBar({
+    state: "processing",
+    deliveryMode: "clipboard",
+    handoffStatus: "failed",
+  });
+  assert.equal(copyFailure.title, "任务还没复制成功");
+  assert.equal(copyFailure.detail, "本轮要求已保留，可以重新复制。");
+  assert.deepEqual(copyFailure.actions.map((action) => action.id), ["recopy", "cancel"]);
 
   // The decision is the same for both destinations: a candidate is a candidate.
   for (const mode of ["clipboard", "managed-agent"]) {
@@ -695,36 +687,36 @@ test("public Agent narration remains available with the completed Candidate deci
     state: "ready-to-open",
     steps: [
       { key: "agent", label: "Codex 已完成", state: "done" },
-      { key: "result", label: "新版本已准备好", state: "current" },
+      { key: "result", label: "AI 修改已完成，可以审阅", state: "current" },
     ],
     agentText: "Candidate 已交给 PageRoot 校验。",
   });
   assert.equal(progress.narration, "Candidate 已交给 PageRoot 校验。");
-  assert.equal(progress.liveLabel, "新版本已准备好");
+  assert.equal(progress.liveLabel, null);
 });
 
-test("the Agent's chunks read as the paragraphs it wrote, not one wall of text", () => {
+test("canonical Agent updates render as stable rows under one Agent identity", () => {
   const steps = [{ key: "agent", label: "等待 AI 完成", state: "current" }];
   const progress = sidebarRunProgress({
     state: "processing",
     steps,
-    agentText: "先读清单和依赖文件。\n\n再写候选 HTML。\n\n\n最后调用 finalizer。",
+    agentText: "先读清单和依赖文件。再写候选 HTML。",
+    agentUpdates: [
+      { id: "update-1", sequence: 1, text: "先读清单和依赖文件。" },
+      { id: "update-2", sequence: 2, text: "再写候选 HTML。" },
+    ],
   });
 
-  // PageRoot concatenates the Agent's chunks, so the blank lines it wrote are the
-  // only paragraph boundaries there are. Blank runs of any length collapse to one.
-  assert.deepEqual(progress.narrationBlocks, [
-    "先读清单和依赖文件。",
-    "再写候选 HTML。",
-    "最后调用 finalizer。",
+  assert.deepEqual(progress.narrationUpdates, [
+    { id: "update-1", text: "先读清单和依赖文件。" },
+    { id: "update-2", text: "再写候选 HTML。" },
   ]);
 
-  // A single paragraph is still one block, so the view has one shape to render.
   assert.deepEqual(
-    sidebarRunProgress({ state: "processing", steps, agentText: "只有一句。" }).narrationBlocks,
-    ["只有一句。"],
+    sidebarRunProgress({ state: "processing", steps, agentText: "只有一句。" }).narrationUpdates,
+    [{ id: "legacy:0", text: "只有一句。" }],
   );
-  assert.equal(sidebarRunProgress({ state: "processing", steps }).narrationBlocks, null);
+  assert.equal(sidebarRunProgress({ state: "processing", steps }).narrationUpdates, null);
 });
 
 test("every speaker has an avatar mark, so the thread reads as a chat", () => {

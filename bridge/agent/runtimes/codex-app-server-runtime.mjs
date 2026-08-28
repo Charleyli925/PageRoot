@@ -222,7 +222,12 @@ function eventForNotification(message, identifiers) {
   if (params.threadId && identifiers.threadId && params.threadId !== identifiers.threadId) return null;
   if (params.turnId && identifiers.turnId && params.turnId !== identifiers.turnId) return null;
   if (message.method === "item/agentMessage/delta" && typeof params.delta === "string") {
-    return Object.freeze({ kind: "visible-text", text: params.delta });
+    const messageId = String(params.itemId || params.item?.id || "").trim();
+    return Object.freeze({
+      kind: "visible-text",
+      text: params.delta,
+      ...(messageId ? { messageId } : {}),
+    });
   }
   if (message.method === "item/started") {
     const type = String(params.item?.type || "");

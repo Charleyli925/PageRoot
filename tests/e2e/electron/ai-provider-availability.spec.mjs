@@ -11,14 +11,22 @@ import {
   existsSync,
   launchPageRoot,
   managedProjectRoots,
+  mkdirSync,
   openQoderAvailability,
   path,
+  productRoot,
   readFileSync,
   realpathSync,
   readdirSync,
   removeSourceFixture,
   stopPageRoot,
 } from "./ai-closed-loop-helpers.mjs";
+
+const AI_ASSISTANT_VISUAL_OUTPUT = path.join(
+  productRoot,
+  "output/design-qa/ai-assistant-redesign",
+);
+mkdirSync(AI_ASSISTANT_VISUAL_OUTPUT, { recursive: true });
 
 test("Qoder ACP Agent Bridge streams public execution text without clipboard or automatic adoption", {
   tag: ["@smoke-provider"],
@@ -42,18 +50,26 @@ test("Qoder ACP Agent Bridge streams public execution text without clipboard or 
       ({ clipboard }, value) => clipboard.writeText(value),
       clipboardSentinel,
     );
+    await launched.electronApp.evaluate(({ clipboard }) => {
+      const originalWriteText = clipboard.writeText.bind(clipboard);
+      globalThis.__pageRootE2EClipboardWrites = [];
+      clipboard.writeText = (value, type) => {
+        globalThis.__pageRootE2EClipboardWrites.push({ value, type: type || null });
+        return originalWriteText(value, type);
+      };
+    });
     const workingCopyPath = await addComment(
       launched.page,
       fixture.sourcePath,
       "请完成 Qoder ACP 自动闭环，但不要直接覆盖当前 HTML。",
     );
     await launched.page.getByRole("button", { name: /AI 助手/u }).click();
-    // Destination, disclosure and the local-Agent action all live in the conversation.
+    // Destination and the local-Agent action live in one compact Composer row.
     const deliveryDialog = await chooseModifyIntent(launched.page);
-    await expect(deliveryDialog.getByText(
-      "Qoder 会读取本轮 HTML、评论和附件；结果先进入审阅。",
-      { exact: true },
-    )).toBeVisible();
+    await expect(deliveryDialog.getByTestId("ai-conversation-agent"))
+      .toContainText("Qoder");
+    await expect(deliveryDialog.getByTestId("ai-conversation-context-summary"))
+      .toContainText("1 条评论 · 当前 HTML · 项目规则");
     await expect(deliveryDialog.getByText("AGENT BRIDGE", { exact: true })).toHaveCount(0);
     await expect(deliveryDialog.getByText("可信本机 Agent 提示", { exact: true }))
       .toHaveCount(0);
@@ -62,21 +78,72 @@ test("Qoder ACP Agent Bridge streams public execution text without clipboard or 
     const narration = launched.page.getByTestId("ai-conversation-narration-message");
     await expect(narration).toBeVisible({ timeout: 60_000 });
     await expect(narration).toHaveCount(1);
+    await expect(launched.page.getByTestId("ai-conversation-thinking")).toBeVisible();
     await expect(narration).toContainText("正在读取冻结任务。");
     await expect(narration).not.toContainText("正在等待校验。");
     await expect(narration).toContainText(
       "正在读取冻结任务。正在写入 Candidate。正在等待校验。",
       { timeout: 60_000 },
     );
+    await expect(narration.getByTestId("ai-conversation-narration").locator("p"))
+      .toHaveCount(3);
+    await expect(launched.page.getByTestId("ai-conversation-thinking")).toBeVisible();
+    await expect.poll(() => launched.page.getByTestId("ai-conversation-stream").evaluate(
+      (stream) => Math.round(stream.scrollHeight - stream.clientHeight - stream.scrollTop),
+    )).toBeLessThanOrEqual(1);
+    await launched.page.screenshot({
+      path: path.join(AI_ASSISTANT_VISUAL_OUTPUT, "qoder-processing-thinking.png"),
+      fullPage: false,
+      animations: "disabled",
+    });
     await expect(narration.getByRole("button", { name: "复制" })).toBeVisible();
     await expect(narration).not.toContainText("Build PageRoot Candidate");
     await expect(launched.page.getByTestId("ai-conversation-run-summary"))
-      .toContainText("本轮修改已提交");
+      .toContainText("已将“qoder-acp-agent-bridge-V1.html”交给 Qoder");
+    await expect(launched.page.getByTestId("ai-conversation-run-summary"))
+      .toContainText("发送了1 条评论、当前 HTML 和项目规则");
 
     await expect(launched.page.getByTestId("ai-conversation-action-bar"))
       .toContainText("等待你的决定", { timeout: 60_000 });
-    expect(await launched.electronApp.evaluate(({ clipboard }) => clipboard.readText()))
-      .toBe(clipboardSentinel);
+    await expect(launched.page.getByTestId("ai-conversation-thinking")).toHaveCount(0);
+    await expect.poll(() => launched.page.getByTestId("ai-conversation-stream").evaluate(
+      (stream) => Math.round(stream.scrollHeight - stream.clientHeight - stream.scrollTop),
+    )).toBeLessThanOrEqual(1);
+    const readyGeometry = await launched.page.evaluate(() => {
+      const sidebar = document.querySelector('[data-testid="ai-conversation-sidebar"]');
+      const composer = document.querySelector('[data-testid="ai-conversation-composer"]');
+      const selector = document.querySelector('[data-testid="ai-conversation-agent"]');
+      const actions = document.querySelector('[data-testid="ai-conversation-copy-task"]')
+        ?.parentElement;
+      const bounds = (element) => element?.getBoundingClientRect() || null;
+      return {
+        viewport: { width: window.innerWidth, height: window.innerHeight },
+        documentOverflowX: document.documentElement.scrollWidth
+          > document.documentElement.clientWidth,
+        sidebar: bounds(sidebar),
+        composer: bounds(composer),
+        selector: bounds(selector),
+        actions: bounds(actions),
+      };
+    });
+    expect(readyGeometry.documentOverflowX).toBe(false);
+    expect(readyGeometry.sidebar.right).toBeLessThanOrEqual(readyGeometry.viewport.width);
+    expect(readyGeometry.composer.bottom).toBeLessThanOrEqual(readyGeometry.viewport.height);
+    if (readyGeometry.actions) {
+      const selectorCenter = readyGeometry.selector.top + readyGeometry.selector.height / 2;
+      const actionsCenter = readyGeometry.actions.top + readyGeometry.actions.height / 2;
+      expect(Math.abs(selectorCenter - actionsCenter)).toBeLessThanOrEqual(1);
+    }
+    await launched.page.screenshot({
+      path: path.join(AI_ASSISTANT_VISUAL_OUTPUT, "qoder-result-ready.png"),
+      fullPage: false,
+      animations: "disabled",
+    });
+    // Observe PageRoot's Electron clipboard API directly instead of reading the
+    // shared system clipboard, which another desktop app may legitimately change.
+    expect(await launched.electronApp.evaluate(
+      () => globalThis.__pageRootE2EClipboardWrites,
+    )).toEqual([]);
     expect(readFileSync(fixture.sourcePath).equals(fixture.original)).toBe(true);
     expect(readFileSync(workingCopyPath, "utf8")).not.toContain(
       "data-pageroot-qoder-acp",
@@ -135,15 +202,31 @@ test("Codex App Server shares the public execution stream and retains its frozen
     );
     await launched.page.getByRole("button", { name: /AI 助手/u }).click();
     const sidebar = await chooseModifyIntent(launched.page);
-    await expect(sidebar.getByTestId("ai-conversation-model"))
+    await expect(sidebar.getByTestId("ai-conversation-agent"))
       .toHaveAttribute("aria-expanded", "false", { timeout: 60_000 });
-    await sidebar.getByTestId("ai-conversation-model").click();
-    const agentChoices = sidebar.getByRole("listbox", { name: "选择本轮 Agent" });
+    await sidebar.getByTestId("ai-conversation-agent").click();
+    const agentChoices = sidebar.getByTestId("ai-conversation-agent-choices");
     await expect(agentChoices).toBeVisible();
     await expect(agentChoices).toContainText("Codex");
-    await agentChoices.getByRole("option", { name: /Codex/u }).click();
-    await expect(sidebar.getByTestId("ai-conversation-delivery-disclosure"))
-      .toContainText("Codex 修改时可能读取这台 Mac 上的本机文件。", { timeout: 60_000 });
+    await expect(agentChoices).not.toContainText("本机文件");
+    await launched.page.screenshot({
+      path: path.join(AI_ASSISTANT_VISUAL_OUTPUT, "agent-selector-open.png"),
+      fullPage: false,
+      animations: "disabled",
+    });
+    await sidebar.getByTestId("ai-conversation-mode").click();
+    await expect(agentChoices).toHaveCount(0);
+    await sidebar.getByTestId("ai-conversation-agent").click();
+    await launched.page.keyboard.press("Tab");
+    await expect(agentChoices.getByRole("button", { name: "Qoder" })).toBeFocused();
+    await launched.page.keyboard.press("Escape");
+    await expect(agentChoices).toHaveCount(0);
+    await expect(sidebar.getByTestId("ai-conversation-agent")).toBeFocused();
+    await sidebar.getByTestId("ai-conversation-agent").click();
+    await agentChoices.getByRole("button", { name: /Codex/u }).click();
+    await expect(sidebar.getByTestId("ai-conversation-agent"))
+      .toContainText("Codex", { timeout: 60_000 });
+    await expect(sidebar.getByTestId("ai-conversation-agent")).toBeFocused();
     await expect(sidebar.getByRole("button", { name: /交给 Codex 修改/u }))
       .toBeEnabled({ timeout: 60_000 });
     await sidebar.getByRole("button", { name: /交给 Codex 修改/u }).click();
@@ -151,6 +234,7 @@ test("Codex App Server shares the public execution stream and retains its frozen
     const narration = launched.page.getByTestId("ai-conversation-narration-message");
     await expect(narration).toBeVisible({ timeout: 60_000 });
     await expect(narration).toHaveCount(1);
+    await expect(launched.page.getByTestId("ai-conversation-thinking")).toBeVisible();
     await expect(narration).toContainText("先读取冻结任务。");
     await expect(narration).not.toContainText("最后等待校验。");
     await expect(narration).toContainText("Codex", { timeout: 10_000 });
@@ -158,15 +242,23 @@ test("Codex App Server shares the public execution stream and retains its frozen
     await expect(narration).not.toContainText("这段推理不能进入 Stemmio 侧栏。");
 
     // Switching the idle selection cannot rename or redirect the Request already running.
-    await sidebar.getByTestId("ai-conversation-model").click();
-    await sidebar.getByRole("option", { name: "Qoder" }).click();
+    await sidebar.getByTestId("ai-conversation-agent").click();
+    await sidebar.getByRole("button", { name: "Qoder" }).click();
     await expect(narration).toContainText("Codex");
     await expect(narration).toContainText(
       "先读取冻结任务。再写入 Candidate。最后等待校验。",
       { timeout: 60_000 },
     );
+    await expect(narration.getByTestId("ai-conversation-narration").locator("p"))
+      .toHaveCount(2);
     await expect(launched.page.getByTestId("ai-conversation-action-bar"))
       .toContainText("等待你的决定", { timeout: 60_000 });
+    const decisionAnnouncement = launched.page
+      .getByTestId("ai-conversation-action-bar")
+      .getByRole("status");
+    await expect(decisionAnnouncement).toHaveText(/版本 2 等待你的决定/u);
+    await expect(decisionAnnouncement).toHaveAttribute("aria-live", "polite");
+    await expect(launched.page.getByTestId("ai-conversation-thinking")).toHaveCount(0);
     expect(readFileSync(fixture.sourcePath).equals(fixture.original)).toBe(true);
     expect(readFileSync(workingCopyPath, "utf8")).not.toContain(
       "data-pageroot-codex-app-server",

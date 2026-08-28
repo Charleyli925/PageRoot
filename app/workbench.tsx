@@ -629,19 +629,15 @@ export default function Workbench() {
       || frozenAgentSelection?.providerId || "Agent",
     logoSrc: typeof agentPresentation.logoSrc === "string" ? agentPresentation.logoSrc : null,
   };
-  const frozenModelId = frozenAgentSelection?.resolvedModelId
-    || frozenAgentSelection?.requestedModelId
+  const agentDisplayName = agentPresentation.agentName
+    || agentPresentation.displayName
+    || frozenAgentSelection?.providerId
     || null;
-  const agentModelDisplayName = frozenModelId
-    ? `${agentPresentation.agentName || frozenAgentSelection?.providerId || "Agent"} · ${frozenModelId}`
-    : agentPresentation.agentName || frozenAgentSelection?.providerId || null;
   const agentProviderChoices = Object.values(agentCatalogSnapshot?.providers ?? {}).map(
     (provider) => ({
       id: `${provider.providerId}:${provider.runtimeId}`,
       label: provider.presentation.agentName || provider.presentation.displayName,
-      detail: typeof provider.presentation.localReadDisclosure === "string"
-        ? provider.presentation.localReadDisclosure
-        : null,
+      logoSrc: provider.presentation.logoSrc,
       selection: provider.selection,
     }),
   );
@@ -668,6 +664,7 @@ export default function Workbench() {
   const currentExactVersionId = versionSnapshot.currentExactVersionId;
   const viewMode = versionSnapshot.viewMode;
   const [canvasMode, setCanvasMode] = useState<CanvasMode>("edit");
+  const aiSourceFileName = localFileNameFromSourcePath(sourcePath) || projectName;
   // The AI conversation sidebar. All of its React state lives in this hook, so
   // the Workbench gains one hook call and no extra budget.
   // Declared before the conversation hook because the sidebar stays docked
@@ -689,13 +686,10 @@ export default function Workbench() {
     controllerRef: workspaceControllerRef,
     conversation: workspaceControllerSnapshot?.conversation ?? null,
     qoderAvailability,
-    agentModelDisplayName,
+    agentDisplayName,
     agentActionName: agentPresentation.agentName || agentPresentation.displayName,
     agentSettingsName: agentPresentation.displayName || agentPresentation.agentName,
     agentSettingsSupported: agentPresentation.settingsSupported !== false,
-    agentLocalReadDisclosure: typeof agentPresentation.localReadDisclosure === "string"
-      ? agentPresentation.localReadDisclosure
-      : null,
     agentPresentation: sidebarAgentPresentation,
     agentChoices: agentProviderChoices,
     selectedAgentChoiceId,
@@ -710,6 +704,7 @@ export default function Workbench() {
     projectId: projectId ?? "",
     documentId: documentId ?? "",
     sourcePath: sourcePath ?? "",
+    sourceFileName: aiSourceFileName,
     pendingCommentCount: comments.length,
     /*
      * The same submission the header button performs. One owner, two surfaces.
@@ -2467,8 +2462,7 @@ export default function Workbench() {
   const updateDownloaded = updateResult?.status === "downloaded";
   const updateDownloading = updateResult?.status === "downloading";
   const updateBadgeLabel = updateDownloaded ? "重启更新" : "New!";
-  const currentSourceFileName =
-    localFileNameFromSourcePath(sourcePath) || projectName;
+  const currentSourceFileName = aiSourceFileName;
   useEffect(() => {
     if (!workspaceController || !projectId || !documentId) return;
     const tabId = `document:${projectId}:${documentId}`;
@@ -6068,16 +6062,21 @@ export default function Workbench() {
     <AgentDeliveryButton
       status={currentAgentHandoffStatus}
       attention={Boolean(activeRun?.candidateVersionLabel) || runInProgress}
-      disabled={generating || projectHydrating || Boolean(projectLoadError)
-        || viewTransitioning || viewMode === "history" || browserPreviewOnly}
-      onOpen={() => {
-        // One meaning: show the conversation. It carries the stages, the Agent's
-        // words and the decision, and it docks in preview or review.
+      disabled={!aiConversation.visible && (
+        generating || projectHydrating || Boolean(projectLoadError)
+        || viewTransitioning || viewMode === "history" || browserPreviewOnly
+      )}
+      expanded={aiConversation.visible}
+      onToggle={() => {
+        // The toolbar entry owns both directions: a second click returns the
+        // page space without adding a duplicate close control inside the sidebar.
+        if (aiConversation.visible) {
+          aiConversation.toggle();
+          return;
+        }
         setDrawer(null);
         setHandoffPreviewOpen(false);
         setCanvasMode("preview");
-        // Opening is navigation. New actions on this surface are modifications;
-        // historical conversation messages remain readable above them.
         revealAiConversation();
       }}
     />

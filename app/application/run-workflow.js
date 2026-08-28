@@ -138,6 +138,22 @@ function agentHandoffState(run, session) {
     "cancelled",
   ].includes(state)) return null;
   const selection = deliveryForRun(run)?.selection || null;
+  const visibleTextUpdates = [];
+  let visibleTextLength = 0;
+  for (const update of Array.isArray(session?.visibleTextUpdates)
+    ? session.visibleTextUpdates.slice(0, 80)
+    : []) {
+    if (!update || typeof update !== "object") continue;
+    const id = String(update.id || "").trim().slice(0, 200);
+    const text = String(update.text || "");
+    const sequence = Number(update.sequence);
+    if (!id || !text || !Number.isSafeInteger(sequence) || sequence < 0) continue;
+    const remaining = (64 * 1024) - visibleTextLength;
+    if (remaining <= 0) break;
+    const boundedText = text.slice(0, remaining);
+    visibleTextLength += boundedText.length;
+    visibleTextUpdates.push(Object.freeze({ id, sequence, text: boundedText }));
+  }
   return {
     sourcePath: run.sourcePath,
     requestId: run.requestId,
@@ -156,6 +172,7 @@ function agentHandoffState(run, session) {
     // ADR 0037: narration only. It reaches the view so the user can see what the
     // Agent is doing, and it carries no authority over the Candidate.
     visibleText: typeof session.visibleText === "string" ? session.visibleText : "",
+    visibleTextUpdates: Object.freeze(visibleTextUpdates),
     textTruncated: session.textTruncated === true,
     startedAt: typeof session.startedAt === "string" ? session.startedAt : null,
     updatedAt: typeof session.updatedAt === "string" ? session.updatedAt : null,
@@ -1201,6 +1218,7 @@ export class RunWorkflow {
         agentName: presentation.agentName || presentation.displayName || "Agent",
         agentVersion: null,
         visibleText: "",
+        visibleTextUpdates: [],
         textTruncated: false,
         startedAt: null,
         updatedAt: null,

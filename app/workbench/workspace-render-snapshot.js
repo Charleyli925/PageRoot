@@ -38,7 +38,7 @@ function sameRunHandoffStructure(left, right) {
   return sameObjectFieldsExcept(
     left,
     right,
-    new Set(["visibleText", "textTruncated", "updatedAt"]),
+    new Set(["visibleText", "visibleTextUpdates", "textTruncated", "updatedAt"]),
   );
 }
 

@@ -153,7 +153,7 @@ function deriveRunProgressCopy({
       `${agentName} 需要处理`,
       interrupted ? `${agentName} 会话已中断` : `${agentName} 没有完成本轮`,
       interrupted ? "会话已中断" : "执行失败",
-      "本轮 Request 与当前 HTML 均已保留",
+      "本轮要求与当前 HTML 均已保留",
       handoff.errorMessage || (recoveryRequired
         ? "请结束旧 Request，再重新发送本轮要求。"
         : `可重新启动 ${agentName}，或复制本轮任务给其他 Agent。`),
@@ -190,9 +190,9 @@ function deriveRunProgressCopy({
     const continuityNeedsReview = run.candidateAssessment?.status === "attention";
     return progressPresentationCopy(
       "AI返回结果",
-      "可在审阅中对比查看修改差异",
-      continuityNeedsReview ? "请先审阅" : "等待确认打开",
-      "AI 改好了，先对照再决定用哪一版",
+      "AI 修改已完成，可以审阅",
+      continuityNeedsReview ? "请先审阅" : "等待决定",
+      "审阅后决定是否采用",
       continuityNeedsReview
         ? "HTML 可以打开，但与上一版的共同特征较少，不会直接替换当前页面"
         : "不会直接替换当前页面。",
@@ -219,10 +219,10 @@ function deriveRunProgressCopy({
   if (status === "processing" && agentMode && agentCompleted) {
     return progressPresentationCopy(
       "正在确认结果",
-      `${agentName} 已返回，PageRoot 正在核对 Candidate`,
+      `${agentName} 已返回，PageRoot 正在检查修改结果`,
       "正在确认结果",
       "当前 HTML 仍未被替换",
-      "只有官方完成记录和 Candidate 校验通过后才会进入审阅。",
+      "检查通过后才会进入审阅。",
     );
   }
   if (status === "processing" && agentMode && agentRunning) {
@@ -230,8 +230,8 @@ function deriveRunProgressCopy({
       launching: [`正在启动 ${agentName}…`, "正在冻结本轮 HTML、评论和项目规则"],
       "starting-session": [`正在连接 ${agentName}…`, "正在建立本轮受管会话"],
       "reading-task": [`${agentName} 正在读取本轮任务…`, "只读冻结 HTML、评论、附件与项目规则"],
-      "writing-candidate": [`${agentName} 正在修改并写入候选版本…`, "当前 HTML 不会被直接覆盖"],
-      finalizing: [`${agentName} 正在完成本轮修改…`, "PageRoot 将独立核对完成记录和 Candidate"],
+      "writing-candidate": [`${agentName} 正在修改页面…`, "当前 HTML 不会被直接覆盖"],
+      finalizing: [`${agentName} 正在整理修改结果…`, "PageRoot 将独立检查返回的页面"],
       "awaiting-validation": ["Agent 已返回，正在校验并保存…", "当前 HTML 不会被直接覆盖"],
       cancelling: [`正在停止 ${agentName}…`, "停止完成前本轮仍保持锁定"],
     }[handoff.phase] || [`${agentName} 正在处理…`, "PageRoot 正在接收受管 Agent 进度"];
@@ -239,7 +239,7 @@ function deriveRunProgressCopy({
       agentName,
       phaseCopy[0],
       handoffStatus === "starting" ? "正在启动" : "正在处理",
-      "页面暂时只能看",
+      "修改要求已发送",
       phaseCopy[1],
     );
   }
@@ -279,7 +279,7 @@ function deriveRunProgressStepsFromContext({
   const steps = [
     progressStep(
       "handoff",
-      agentDelivery ? `启动 ${agentName}` : "正在准备并复制",
+      agentDelivery ? `正在把修改要求交给 ${agentName}` : "正在准备本轮资料",
       agentDelivery
         ? handoffStatus === "starting"
           ? `正在连接 ${agentName}`
@@ -293,7 +293,7 @@ function deriveRunProgressStepsFromContext({
     ),
     progressStep(
       "ai",
-      "等待 AI 完成",
+      agentDelivery ? `${agentName} 正在修改页面` : "等待你的 AI 完成修改",
       agentDelivery
         ? agentRunning
           ? `${agentName} 正在执行本轮要求`
@@ -307,11 +307,11 @@ function deriveRunProgressStepsFromContext({
     ),
     progressStep(
       "validation",
-      "正在校验并保存",
-      "等待 AI 完成后自动校验并写入本地",
+      "正在检查 AI 修改结果",
+      "检查通过后才可以审阅和采用",
       "pending",
     ),
-    progressStep("result", "结果", "等待前序步骤完成", "pending"),
+    progressStep("result", "等待 AI 修改完成", "等待前面的处理完成", "pending"),
   ];
   const [handoffStep, aiStep, validationStep, resultStep] = steps;
 
@@ -359,13 +359,13 @@ function deriveRunProgressStepsFromContext({
   if (agentDelivery && (agentRunning || agentCompleted)) {
     Object.assign(
       handoffStep,
-      progressStep("handoff", `${agentName} 已启动`, "受管会话已建立", "done"),
+      progressStep("handoff", `已将修改要求交给 ${agentName}`, "发送内容已固定", "done"),
     );
   }
   if (completionObserved) {
     Object.assign(
       aiStep,
-      progressStep("ai", "等待 AI 完成", "已收到完成记录", "done"),
+      progressStep("ai", `${agentName} 已完成修改`, "已收到修改结果", "done"),
     );
   } else if (status === "error") {
     aiStep.detail = "未收到完成记录，本轮已停止";
@@ -390,7 +390,7 @@ function deriveRunProgressStepsFromContext({
   } else if (status === "no-change") {
     validationStep.detail = "校验完成，未发现有效差异";
     validationStep.state = "done";
-    resultStep.label = "无需创建新版本";
+    resultStep.label = "本轮没有产生变化";
     resultStep.detail = "当前 HTML 保持不变";
     resultStep.state = "neutral";
   } else if (status === "ready-to-open") {
@@ -400,17 +400,17 @@ function deriveRunProgressStepsFromContext({
       : "HTML 健康检查与版本连续性检查完成";
     validationStep.state = continuityNeedsReview ? "attention" : "done";
     resultStep.label = continuityNeedsReview
-      ? "候选版本已保留"
-      : "新版本已准备好";
+      ? "AI 修改已保留，请先审阅"
+      : "AI 修改已完成，可以审阅";
     resultStep.detail = continuityNeedsReview
       ? "页面变化较大，请先对比审阅再决定是否采用"
-      : "旧版未被覆盖，等待你审阅或直接打开";
+      : "审阅后决定是否采用";
     resultStep.state = "current";
   } else if (status === "complete") {
     validationStep.detail = "HTML 健康检查与版本连续性检查完成";
     validationStep.state = "done";
-    resultStep.label = "最新版已打开";
-    resultStep.detail = "当前画布已切换到新版本";
+    resultStep.label = "已采用 AI 修改";
+    resultStep.detail = "当前画布已切换到采用后的页面";
     resultStep.state = "done";
   } else if (status === "validating") {
     validationStep.detail = "正在检查 HTML 是否可用并核对上一版连续性";
