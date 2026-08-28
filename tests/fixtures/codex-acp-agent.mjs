@@ -40,22 +40,22 @@ const app = acp.agent({ name: "pageroot-e2e-codex" })
   .onRequest(acp.methods.agent.initialize, () => ({
     protocolVersion: acp.PROTOCOL_VERSION,
     agentCapabilities: { loadSession: false },
-    authMethods: authRequired ? [{ id: "chatgpt", name: "ChatGPT" }] : [],
+    authMethods: [
+      { id: "chatgpt", name: "ChatGPT" },
+      { id: "codex-api-key", name: "Codex API key" },
+    ],
     agentInfo: {
       name: "pageroot-e2e-codex",
       title: "PageRoot E2E Codex",
       version: "1.7.0",
     },
-    models: authRequired ? [] : [{ id: "gpt-synthetic", displayName: "GPT Synthetic", isDefault: true }],
   }))
   .onRequest(acp.methods.agent.session.new, ({ params }) => {
     if (authRequired) {
-      const error = new Error("Not logged in. Login required.");
-      error.code = "AUTH_REQUIRED";
-      throw error;
+      throw acp.RequestError.authRequired(undefined, "Not logged in. Login required.");
     }
     requestRoot = params.cwd;
-    return { sessionId, models: [{ id: "gpt-synthetic", isDefault: true }] };
+    return { sessionId, models: [{ id: "gpt-synthetic", displayName: "GPT Synthetic", isDefault: true }] };
   })
   .onRequest(acp.methods.agent.session.prompt, async ({ params, client }) => {
     if (hang) return new Promise(() => {});

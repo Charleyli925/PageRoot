@@ -160,9 +160,9 @@ const CODEX_ACP_CLOSURE = Object.freeze([
   }),
   frozenNpmPackage({
     packageName: "is-wsl",
-    version: "3.1.0",
-    integrity: "sha512-UcVfVfaK4Sc4m7X3dUSoHoozQGBEFeDC+zVo06t98xe8CzHSZZBekNXH+tu0NalHolcJ/QAGqS46Hef7QXBIMw==",
-    tarballUrl: "https://registry.npmjs.org/is-wsl/-/is-wsl-3.1.0.tgz",
+    version: "3.1.1",
+    integrity: "sha512-e6rvdUCiQCAuumZslxRJWR/Doq4VpPR82kqclvcS0efgt430SlGIk05vdCN58+VrzgtIcfNODjozVielycD4Sw==",
+    tarballUrl: "https://registry.npmjs.org/is-wsl/-/is-wsl-3.1.1.tgz",
   }),
   frozenNpmPackage({
     packageName: "define-lazy-prop",
@@ -196,9 +196,9 @@ const CODEX_ACP_CLOSURE = Object.freeze([
   }),
   frozenNpmPackage({
     packageName: "default-browser-id",
-    version: "5.0.0",
-    integrity: "sha512-A6p/pu/6fyBcA1TRz/GqWYPViplrftcW2gZC9q79ngNCKAeR/X3gcEdXQHl4KNXV+3wgIJ1CPkJQ3IHM6lcsyA==",
-    tarballUrl: "https://registry.npmjs.org/default-browser-id/-/default-browser-id-5.0.0.tgz",
+    version: "5.0.1",
+    integrity: "sha512-x1VCxdX4t+8wVfd1so/9w+vQ4vx7lKd2Qp5tDRutErwmR85OgmfX7RlLRMWafRMY7hbEiXIbudNrjOAPa/hL8Q==",
+    tarballUrl: "https://registry.npmjs.org/default-browser-id/-/default-browser-id-5.0.1.tgz",
   }),
   frozenNpmPackage({
     packageName: "run-applescript",

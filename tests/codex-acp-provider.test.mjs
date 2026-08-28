@@ -29,6 +29,35 @@ function isolatedEnvironment(home) {
   };
 }
 
+async function probeCommand(root, extraArgs = "") {
+  const command = path.join(root, extraArgs ? "codex-acp-probe-auth" : "codex-acp-probe");
+  await writeFile(
+    command,
+    `#!/bin/sh\nexec ${JSON.stringify(process.execPath)} ${JSON.stringify(fixtureAgent)}${
+      extraArgs ? ` ${extraArgs}` : ""
+    } "$@"\n`,
+    { mode: 0o755 },
+  );
+  await chmod(command, 0o755);
+  const resolved = await realpath(command);
+  const information = await lstat(resolved);
+  return Object.freeze({
+    command: resolved,
+    version: null,
+    identity: Object.freeze({
+      dev: information.dev,
+      ino: information.ino,
+      nlink: information.nlink,
+      size: information.size,
+      mtimeMs: information.mtimeMs,
+      sha256: sha256(await readFile(resolved)),
+    }),
+    source: "e2e-override",
+    nodeModulesRoot: null,
+    nativeIdentity: null,
+  });
+}
+
 async function writeManagedCodex(agentsRoot, version = "1.7.0") {
   const packageRoot = path.join(agentsRoot, "codex", version, "package");
   const command = path.join(packageRoot, "dist", "index.js");
@@ -157,32 +186,16 @@ test("an invalid user installation is not treated as missing and does not fall t
 });
 
 test("ACP probe completes initialize, model catalog and cleanup", async (t) => {
-  const root = await isolatedHome(t);
-  const command = path.join(root, "codex-acp-probe");
-  await writeFile(
-    command,
-    `#!/bin/sh\nexec ${JSON.stringify(process.execPath)} ${JSON.stringify(fixtureAgent)} "$@"\n`,
-    { mode: 0o755 },
-  );
-  await chmod(command, 0o755);
-  const resolved = await realpath(command);
-  const information = await lstat(resolved);
-  const evidence = await probeCodexAcp({
-    command: resolved,
-    version: null,
-    identity: Object.freeze({
-      dev: information.dev,
-      ino: information.ino,
-      nlink: information.nlink,
-      size: information.size,
-      mtimeMs: information.mtimeMs,
-      sha256: sha256(await readFile(resolved)),
-    }),
-    source: "e2e-override",
-    nodeModulesRoot: null,
-    nativeIdentity: null,
-  }, process.env);
+  const evidence = await probeCodexAcp(await probeCommand(await isolatedHome(t)), process.env);
   assert.equal(evidence.protocol, "acp");
+  assert.equal(evidence.authMode, "ready");
   assert.ok(evidence.modelCount >= 1);
   assert.equal(evidence.models[0].id.startsWith("codex:"), true);
+});
+
+test("ACP probe classifies missing ChatGPT login as auth-required", async (t) => {
+  await assert.rejects(
+    probeCodexAcp(await probeCommand(await isolatedHome(t), "--auth-required"), process.env),
+    (error) => error?.code === "CODEX_AUTH_REQUIRED",
+  );
 });

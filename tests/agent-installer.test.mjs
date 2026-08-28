@@ -336,5 +336,13 @@ test("the shipped Codex catalog entry is installable", async () => {
   assert.equal(CODEX_ACP_MANAGED_RELEASE.installable, true);
   assert.equal(CODEX_ACP_MANAGED_RELEASE.runtimeId, "acp");
   assert.equal(CODEX_ACP_MANAGED_RELEASE.distribution.packageName, "@agentclientprotocol/codex-acp");
-  assert.ok(CODEX_ACP_MANAGED_RELEASE.distribution.closure.length > 0);
+  assert.equal(
+    CODEX_ACP_MANAGED_RELEASE.distribution.managedRelease.integrity,
+    "sha512-+nUhAJyunx8Zc7r3jjLPoMPPUkkk02TmBIosln4l+ugRNUOdNQAMm6toZo7xb+mF1yM5zxJB83qvy/bPmOTaaw==",
+  );
+  const closure = CODEX_ACP_MANAGED_RELEASE.distribution.closure;
+  assert.ok(closure.some((item) => item.packageName === "@openai/codex" && item.version === "0.148.0"));
+  assert.ok(closure.some((item) => item.nodeModulesPath === "@openai/codex-darwin-arm64"));
+  assert.equal(closure.find((item) => item.packageName === "is-wsl")?.version, "3.1.1");
+  assert.equal(closure.find((item) => item.packageName === "default-browser-id")?.version, "5.0.1");
 });

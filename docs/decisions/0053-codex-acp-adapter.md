@@ -44,7 +44,11 @@ Discovery still follows ADR 0032: valid user `codex-acp` → managed copy →
 `not-installed`. An invalid user install is not treated as missing.
 
 Login remains a copied CLI instruction (`codex login` / ChatGPT). There is no
-in-app OAuth.
+in-app OAuth. Preflight runs ACP `initialize` then `session/new`. Codex always
+advertises ChatGPT/API-key `authMethods` while logged in, so their presence is
+not a login failure. Missing login is classified only when `session/new`
+returns JSON-RPC `-32000` (`auth_required`) or process text matches the auth
+failure pattern. PageRoot still does not send `authenticate`.
 
 ## Consequences
 

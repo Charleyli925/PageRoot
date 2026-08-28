@@ -34,6 +34,7 @@ const MAX_PUBLIC_MODELS = 40;
 const SAFE_MODEL_ID = /^[A-Za-z0-9][A-Za-z0-9._/:+-]{0,79}$/u;
 const SAFE_REASONING = /^[A-Za-z0-9][A-Za-z0-9._-]{0,39}$/u;
 const AUTH_FAILURE_PATTERN = /not logged in|sign in|login required|unauthenticated|auth required|chatgpt login/iu;
+const ACP_AUTH_REQUIRED_CODE = -32000;
 
 function fail(code, message, options) {
   throw agentProviderError(code, message, options);
@@ -403,9 +404,15 @@ function namespacedModels(rawModels) {
   return Object.freeze(models);
 }
 
-function classifyCodexAcpFailure(cause) {
+function isCodexAcpAuthFailure(cause) {
+  const jsonrpcCode = Number(cause?.jsonrpcCode ?? cause?.error?.code);
+  if (jsonrpcCode === ACP_AUTH_REQUIRED_CODE) return true;
   const combined = `${cause?.stdout || ""}\n${cause?.stderr || ""}\n${cause?.message || ""}`;
-  if (AUTH_FAILURE_PATTERN.test(combined)) return "CODEX_AUTH_REQUIRED";
+  return AUTH_FAILURE_PATTERN.test(combined);
+}
+
+function classifyCodexAcpFailure(cause) {
+  if (isCodexAcpAuthFailure(cause)) return "CODEX_AUTH_REQUIRED";
   if (cause?.killed || cause?.code === "ETIMEDOUT" || cause?.signal === "SIGTERM") {
     return "CODEX_PREFLIGHT_TIMEOUT";
   }
@@ -529,9 +536,8 @@ async function readNdjsonResponse(child, requestId, timeoutMs) {
     };
     const onClose = () => {
       cleanup();
-      reject(Object.assign(new Error("Codex ACP probe exited before initialize completed."), {
+      reject(Object.assign(new Error("Codex ACP probe exited before the response completed."), {
         code: "CODEX_PREFLIGHT_FAILED",
-        stderr: "",
       }));
     };
     child.stdout?.setEncoding("utf8");
@@ -597,9 +603,6 @@ export async function probeCodexAcp(command, environment = process.env) {
     if (!/codex/iu.test(agentName)) {
       fail("ACP_AGENT_IDENTITY_MISMATCH", "The selected ACP executable did not identify itself as Codex.");
     }
-    const authMethods = Array.isArray(initialized.result?.authMethods)
-      ? initialized.result.authMethods
-      : [];
     const sessionId = 2;
     child.stdin.write(`${JSON.stringify({
       jsonrpc: "2.0",
@@ -614,8 +617,10 @@ export async function probeCodexAcp(command, environment = process.env) {
     if (session.error) {
       const error = new Error(session.error.message || "Codex ACP session failed.");
       error.stderr = `${stderr}\n${session.error.message || ""}`;
-      fail(classifyCodexAcpFailure(error), session.error.message || "Codex ACP session failed.", {
-        status: classifyCodexAcpFailure(error) === "CODEX_AUTH_REQUIRED" ? 401 : 503,
+      error.jsonrpcCode = session.error.code;
+      const code = classifyCodexAcpFailure(error);
+      fail(code, session.error.message || "Codex ACP session failed.", {
+        status: code === "CODEX_AUTH_REQUIRED" ? 401 : 503,
       });
     }
     const models = namespacedModels(
@@ -625,22 +630,20 @@ export async function probeCodexAcp(command, environment = process.env) {
       || session.result?.availableModels
       || [],
     );
-    if (models.length === 0 && authMethods.length > 0) {
-      fail("CODEX_AUTH_REQUIRED", "Codex 尚未登录。", { status: 401 });
-    }
+    const publicModels = models.length > 0 ? models : Object.freeze([Object.freeze({
+      id: "codex:default",
+      providerModelId: "default",
+      displayName: "Codex",
+      reasoningEfforts: Object.freeze([]),
+      defaultReasoningEffort: null,
+      isDefault: true,
+    })]);
     return Object.freeze({
       version: command.version || cleanProviderText(agentInfo.version, 80) || null,
       protocol: "acp",
-      authMode: authMethods.length > 0 ? "cli" : "ready",
-      modelCount: models.length,
-      models: models.length > 0 ? models : Object.freeze([Object.freeze({
-        id: "codex:default",
-        providerModelId: "default",
-        displayName: "Codex",
-        reasoningEfforts: Object.freeze([]),
-        defaultReasoningEffort: null,
-        isDefault: true,
-      })]),
+      authMode: "ready",
+      modelCount: publicModels.length,
+      models: publicModels,
     });
   } catch (cause) {
     const code = cause?.code === "ACP_PROCESS_CLEANUP_UNCONFIRMED"
@@ -784,7 +787,10 @@ export function createCodexAcpProvider({
       });
     },
     classifyRunFailure(cause) {
-      if (AUTH_FAILURE_PATTERN.test(`${cause?.message || ""}\n${cause?.agentStderr || ""}`)) {
+      if (isCodexAcpAuthFailure({
+        ...cause,
+        stderr: `${cause?.stderr || ""}\n${cause?.agentStderr || ""}`,
+      })) {
         return "CODEX_AUTH_REQUIRED";
       }
       return cleanProviderText(cause?.code, 120) || "CODEX_ACP_RUN_FAILED";

@@ -103,7 +103,9 @@ The renderer's main workspace facts are partitioned as follows:
 - Bridge Agent provider/runtime registries: the provider registry is the sole
   legacy-driver/provider dispatch point and the runtime registry is the sole
   runtime dispatch point. The Qoder provider owns installation identity,
-  version, login/model preflight and raw-error normalization. Unknown IDs fail
+  version, login/model preflight and raw-error normalization. The Codex ACP
+  provider owns the same facts for `providerId: "codex"`; missing login is
+  `session/new` JSON-RPC `-32000`, not advertised `authMethods`. Unknown IDs fail
   closed; opaque installation facts, digests and capabilities stay inside the
   ticket;
 - Bridge Agent catalog/installer: `AgentCatalog` owns the product ACP
