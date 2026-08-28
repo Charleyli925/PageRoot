@@ -4,7 +4,6 @@ import {
   cloneElement,
   useEffect,
   useLayoutEffect,
-  useRef,
   useState,
   useSyncExternalStore,
   type ReactElement,
@@ -90,21 +89,21 @@ export default function WorkbenchDocumentCanvasPool({
   const [session] = useState(() => new CanvasSnapshotSession());
   const snapshots = useSyncExternalStore(session.subscribe, session.getSnapshot, session.getSnapshot);
   const noChange = () => {};
-  const previousActiveTabIdRef = useRef(activeTabId);
-  const reusedActiveTabIdRef = useRef<string | null>(null);
-  if (previousActiveTabIdRef.current !== activeTabId) {
-    reusedActiveTabIdRef.current = activeTabId && snapshots.some((entry) => entry.tabId === activeTabId)
-      ? activeTabId
-      : null;
-    previousActiveTabIdRef.current = activeTabId;
-  }
-  if (
-    reusedActiveTabIdRef.current
-    && snapshots.find((entry) => entry.tabId === reusedActiveTabIdRef.current)?.sourceSha256 !== activeSourceSha256
+  const [trackedActiveTabId, setTrackedActiveTabId] = useState(activeTabId);
+  const [reusedActiveTabId, setReusedActiveTabId] = useState<string | null>(null);
+  if (trackedActiveTabId !== activeTabId) {
+    setTrackedActiveTabId(activeTabId);
+    setReusedActiveTabId(
+      activeTabId && snapshots.some((entry) => entry.tabId === activeTabId)
+        ? activeTabId
+        : null,
+    );
+  } else if (
+    reusedActiveTabId
+    && snapshots.find((entry) => entry.tabId === reusedActiveTabId)?.sourceSha256 !== activeSourceSha256
   ) {
-    reusedActiveTabIdRef.current = null;
+    setReusedActiveTabId(null);
   }
-  const reusedActiveTabId = reusedActiveTabIdRef.current;
 
   useLayoutEffect(() => {
     if (activeTabId && activeSourceSha256 && activeElement) {
