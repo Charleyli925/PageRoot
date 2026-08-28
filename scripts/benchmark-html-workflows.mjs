@@ -228,16 +228,30 @@ async function rendererMemory(label) {
     iframeAdds: Number(window.__qaIframeAdds || 0),
     iframeRemoves: Number(window.__qaIframeRemoves || 0),
   }));
+  const resources = await runtimeResourceSnapshot();
+  const charts = await chartCompletenessSnapshot();
   const totalWorkingSetMb = processMetrics.reduce(
     (sum, metric) => sum + metric.workingSetKb,
+    0,
+  ) / 1024;
+  const totalPeakWorkingSetMb = processMetrics.reduce(
+    (sum, metric) => sum + metric.peakWorkingSetKb,
     0,
   ) / 1024;
   const snapshot = {
     label,
     totalWorkingSetMb: round(totalWorkingSetMb),
+    totalPeakWorkingSetMb: round(totalPeakWorkingSetMb),
     processCount: processMetrics.length,
     renderer,
     processMetrics,
+    resources,
+    charts,
+    faults: {
+      pageErrors: results.faults.pageErrors.count,
+      consoleErrors: results.faults.consoleErrors.count,
+      crashes: results.faults.crashes,
+    },
   };
   results.memory.push(snapshot);
   return snapshot;
@@ -438,6 +452,89 @@ async function renderedSnapshot(frame) {
       runtimeVisualHostCount: runtimeVisualHosts.length,
     };
   });
+}
+
+async function runtimeResourceSnapshot() {
+  return launched.page.evaluate(() => {
+    const surfaceCache = document.querySelector(
+      '[data-testid="workbench-document-surface-cache"]',
+    );
+    const runtimePool = document.querySelector(
+      '[data-testid="workbench-document-canvas-pool"]',
+    );
+    const reviewWorkspace = document.querySelector('[data-testid="ai-review-workspace"]');
+    const numberAttribute = (element, name) => Number(element?.getAttribute(name) || 0);
+    return {
+      iframeCount: document.querySelectorAll("iframe").length,
+      review: {
+        mounted: Boolean(reviewWorkspace),
+        iframeCount: reviewWorkspace?.querySelectorAll("iframe").length || 0,
+      },
+      documentSurfaceCache: {
+        mounted: Boolean(surfaceCache),
+        surfaceCount: surfaceCache?.querySelectorAll("[data-tab-id]").length || 0,
+        iframeCount: surfaceCache?.querySelectorAll("iframe").length || 0,
+        hotCount: numberAttribute(surfaceCache, "data-hot-count"),
+        warmCount: numberAttribute(surfaceCache, "data-warm-count"),
+        cachedBytes: numberAttribute(surfaceCache, "data-cache-bytes"),
+      },
+      runtimeHot: {
+        count: numberAttribute(runtimePool, "data-runtime-hot-count"),
+        limit: numberAttribute(runtimePool, "data-runtime-hot-limit"),
+        iframeCount: runtimePool?.querySelectorAll("iframe").length || 0,
+      },
+    };
+  });
+}
+
+async function chartCompletenessSnapshot() {
+  const pages = [];
+  const capture = async (label, frame) => {
+    try {
+      const snapshot = await renderedSnapshot(frame);
+      pages.push({
+        label,
+        chartCount: snapshot.chartCount,
+        readyChartCount: snapshot.readyChartCount,
+        complete: snapshot.chartCount === 0
+          || snapshot.readyChartCount === snapshot.chartCount,
+        renderFacts: snapshot,
+      });
+    } catch (error) {
+      pages.push({
+        label,
+        chartCount: null,
+        readyChartCount: null,
+        complete: false,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  };
+  const reviewWorkspace = launched.page.getByTestId("ai-review-workspace");
+  if (await reviewWorkspace.count() > 0) {
+    await Promise.all([
+      capture("review-before", launched.page.frameLocator('iframe[title^="修改前"]')),
+      capture("review-after", launched.page.frameLocator('iframe[title^="修改后"]')),
+    ]);
+  } else {
+    const editor = launched.page.getByTestId("html-canvas-editor")
+      .filter({ visible: true })
+      .first();
+    const editorFrame = editor.locator('iframe[title*="HTML"]');
+    if (await editor.count() > 0 && await editorFrame.count() > 0) {
+      try {
+        await capture("active-editor", await currentEditorFrame(launched.page));
+      } catch {
+        // A launch checkpoint can legitimately have no authored document yet.
+      }
+    }
+  }
+  return {
+    pageCount: pages.length,
+    completePageCount: pages.filter((page) => page.complete).length,
+    incompletePages: pages.filter((page) => !page.complete),
+    pages,
+  };
 }
 
 async function waitForRenderedContent(frameResolver, started, {
@@ -659,7 +756,7 @@ async function cacheState() {
   });
 }
 
-function assertCacheBudget(snapshot, label) {
+function assertCacheBudget(snapshot, label, { minimumRuntimeHotCount = 0 } = {}) {
   assert(snapshot.limits.maxHotEntries > 0, `${label}: cache diagnostics are missing`);
   assert.equal(snapshot.surfaceCount, snapshot.hotCount, `${label}: Hot DOM count drifted`);
   assert.equal(snapshot.iframeCount, snapshot.hotCount, `${label}: live iframe count drifted`);
@@ -679,10 +776,35 @@ function assertCacheBudget(snapshot, label) {
     snapshot.runtimeHot.count <= snapshot.runtimeHot.limit,
     `${label}: retained runtime canvases exceeded the resource budget`,
   );
+  assert(
+    snapshot.runtimeHot.count >= minimumRuntimeHotCount,
+    `${label}: retained runtime canvases fell below the ${minimumRuntimeHotCount}-canvas floor`,
+  );
   assert.equal(
     snapshot.runtimeHot.iframeCount,
     snapshot.runtimeHot.count,
     `${label}: retained runtime iframe count drifted`,
+  );
+}
+
+function assertReviewResourcesReleased(snapshot) {
+  assert.equal(
+    snapshot.resources.review.mounted,
+    false,
+    "accept: Review workspace remained mounted after adoption",
+  );
+  assert.equal(
+    snapshot.resources.review.iframeCount,
+    0,
+    "accept: Review iframes remained mounted after adoption",
+  );
+  assert(
+    snapshot.resources.runtimeHot.count <= snapshot.resources.runtimeHot.limit,
+    "accept: runtime hot canvases exceeded the five-canvas budget",
+  );
+  assert(
+    snapshot.resources.runtimeHot.count >= 5,
+    "accept: adoption shrank the five-canvas hot runtime pool",
   );
 }
 
@@ -956,6 +1078,22 @@ async function exerciseReviewAndAccept() {
     before: await before.locator("[data-pageroot-review-overlay-box]").count(),
     after: await after.locator("[data-pageroot-review-overlay-box]").count(),
   };
+  const reviewMemory = await rendererMemory("review-dual-page");
+  assert.equal(
+    reviewMemory.resources.review.iframeCount,
+    2,
+    "review-dual-page: expected both Review iframes to be mounted",
+  );
+  assert.equal(
+    reviewMemory.charts.pageCount,
+    2,
+    "review-dual-page: expected chart evidence from both Review pages",
+  );
+  assert.equal(
+    reviewMemory.charts.completePageCount,
+    2,
+    "review-dual-page: one or more Review pages has incomplete charts",
+  );
   const modes = [
     { key: "beforeOnly", name: /^(?:只看修改前|单独查看修改前(?: .+)?)$/u },
     { key: "afterOnly", name: /^(?:只看修改后|单独查看 AI 修改后(?: .+)?)$/u },
@@ -1003,6 +1141,8 @@ async function exerciseReviewAndAccept() {
   );
   results.review.acceptedSourcePath = (await activeProject()).sourcePath;
   assert(readFileSync(results.review.acceptedSourcePath, "utf8").includes(reviewMarker));
+  const acceptMemory = await rendererMemory("accept");
+  assertReviewResourcesReleased(acceptMemory);
 }
 
 async function openAfterAccept(source) {
@@ -1193,7 +1333,11 @@ try {
     }
     if (count === 5) {
       await runSwitchBatch("5-tabs", [0, 2, 4, 1, 3, 0]);
-      await rendererMemory("5-tabs");
+      const fiveTabMemory = await rendererMemory("5-tabs");
+      assert(
+        fiveTabMemory.resources.runtimeHot.count >= 5,
+        "5-tabs: hot runtime pool did not reach the five-canvas floor",
+      );
     }
     if (count === 10) {
       await runSwitchBatch("10-tabs", [0, 4, 9, 2, 7, 0]);
@@ -1204,7 +1348,9 @@ try {
     .getByRole("tab").count();
   assert.equal(tabCount, 20);
   results.cacheBudget.after20Opens = await cacheState();
-  assertCacheBudget(results.cacheBudget.after20Opens, "20 opens");
+  assertCacheBudget(results.cacheBudget.after20Opens, "20 opens", {
+    minimumRuntimeHotCount: 5,
+  });
   await launched.page.screenshot({
     path: path.join(screenshotsRoot, "03-twenty-tabs-real-html.png"),
     animations: "disabled",
@@ -1215,14 +1361,15 @@ try {
     Array.from({ length: 40 }, (_, index) => (index * 7) % 20),
   );
   results.cacheBudget.after40Switches = await cacheState();
-  assertCacheBudget(results.cacheBudget.after40Switches, "40 switches");
+  assertCacheBudget(results.cacheBudget.after40Switches, "40 switches", {
+    minimumRuntimeHotCount: 5,
+  });
   await rendererMemory("20-tabs-after-stress");
 
   await switchTo(0);
   await exerciseReviewAndAccept();
-  await rendererMemory("20-tabs-after-review-accept");
   await openAfterAccept(copiedSources[20]);
-  await rendererMemory("20-tabs-after-accept-and-new-open");
+  await rendererMemory("post-accept-open");
   results.performanceTimeline = await rendererPerformanceTimeline();
 
   results.openingSummary = {

@@ -289,6 +289,11 @@ Workbench 只确认已提交 loading surface、传入窄 port 并消费快照。
   operation 的 Bridge/Repository 阶段计时、iframe churn、逐进程内存、
   长任务和最多 50 条错误样本。对比两个提交时必须在同一机器串行运行，
   使用同一 HTML 清单和相同测试顺序，不混入其他 PR。
+  内存检查点至少保留 `launch`、`5-tabs`、`20-tabs-after-stress`、
+  `review-dual-page`、`accept` 和 `post-accept-open`；每个检查点同时记录
+  当前/峰值工作集、热画布与 Review iframe 资源、图表完整度、page error、
+  console error 和 renderer crash。采纳后必须证明 Review workspace/iframe
+  已卸载且五个热 Edit Canvas 的资源预算仍未收缩。
   除其明确的 harness、报告与命令元数据外，任何受版本控制的运行时输入
   相对 `origin/main` 的变化都会在测量前拒绝；Electron autosave、dirty
   switch 与 dirty close 都必须按完整预期 HTML 字节比较，不能只验证 token

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { execFile, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   appendFile,
@@ -11,6 +11,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import path from "node:path";
+import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 
 import { officialStableTags } from "./developer-preview.mjs";
@@ -23,6 +24,8 @@ const STABLE_TAG_PATTERN = /^v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/u;
 const REPOSITORY_PATTERN = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/u;
 const GITHUB_COMMAND_ATTEMPTS = 3;
 const GITHUB_COMMAND_TIMEOUT_MS = 30_000;
+export const GITHUB_METADATA_CONCURRENCY = 8;
+export const DEFAULT_PACKAGE_DELIVERY_DEADLINE_MS = 8 * 60 * 1000;
 const FAILED_CHECK_CONCLUSIONS = new Set([
   "ACTION_REQUIRED",
   "CANCELLED",
@@ -31,6 +34,74 @@ const FAILED_CHECK_CONCLUSIONS = new Set([
   "STALE",
   "TIMED_OUT",
 ]);
+const execFileAsync = promisify(execFile);
+
+export class PackageDeliveryReportTimeoutError extends Error {
+  constructor({
+    deadlineMs,
+    phase,
+    completed,
+    total,
+    current,
+  }) {
+    const progress = Number.isFinite(total)
+      ? ` (${completed}/${total}; current ${current || "unknown"})`
+      : "";
+    super(
+      `Package delivery report exceeded its ${deadlineMs} ms deadline during ${phase}${progress}. `
+      + "GitHub metadata is incomplete; rerun with a narrower range or a larger --deadline-ms.",
+    );
+    this.name = "PackageDeliveryReportTimeoutError";
+    this.code = "PACKAGE_DELIVERY_REPORT_TIMEOUT";
+    this.deadlineMs = deadlineMs;
+    this.phase = phase;
+    this.completed = completed;
+    this.total = total;
+    this.current = current || null;
+  }
+}
+
+function normalizeDeadlineMs(value = DEFAULT_PACKAGE_DELIVERY_DEADLINE_MS) {
+  const deadlineMs = Number(value);
+  assert(
+    Number.isSafeInteger(deadlineMs) && deadlineMs > 0,
+    "package delivery deadline must be a positive integer in milliseconds",
+  );
+  return deadlineMs;
+}
+
+function normalizeConcurrency(value = GITHUB_METADATA_CONCURRENCY) {
+  const concurrency = Number(value);
+  assert(
+    Number.isSafeInteger(concurrency) && concurrency > 0,
+    "GitHub metadata concurrency must be a positive integer",
+  );
+  return concurrency;
+}
+
+function timeoutError({ deadlineMs, phase, completed, total, current }) {
+  return new PackageDeliveryReportTimeoutError({
+    deadlineMs,
+    phase,
+    completed,
+    total,
+    current,
+  });
+}
+
+function assertBeforeDeadline({
+  deadlineAt,
+  deadlineMs,
+  phase,
+  completed = 0,
+  total = 0,
+  current = null,
+  now = Date.now,
+}) {
+  if (Number.isFinite(deadlineAt) && now() >= deadlineAt) {
+    throw timeoutError({ deadlineMs, phase, completed, total, current });
+  }
+}
 
 function commandOutput(command, arguments_, {
   cwd = productRoot,
@@ -82,13 +153,89 @@ export function retryTransientGitHubCommand(run, {
   throw new Error("GitHub command retry invariant failed.");
 }
 
-function githubJson(arguments_, root) {
-  const output = retryTransientGitHubCommand(
-    () => commandOutput("gh", arguments_, {
+export async function retryTransientGitHubCommandAsync(run, {
+  attempts = GITHUB_COMMAND_ATTEMPTS,
+  onRetry = () => {},
+  deadlineAt = Number.POSITIVE_INFINITY,
+  deadlineMs = DEFAULT_PACKAGE_DELIVERY_DEADLINE_MS,
+  phase = "GitHub metadata",
+  progress = {},
+  now = Date.now,
+} = {}) {
+  if (typeof run !== "function") throw new TypeError("GitHub command runner must be a function.");
+  if (!Number.isInteger(attempts) || attempts < 1) {
+    throw new TypeError("GitHub command attempts must be a positive integer.");
+  }
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    const remainingMs = Number.isFinite(deadlineAt)
+      ? deadlineAt - now()
+      : GITHUB_COMMAND_TIMEOUT_MS;
+    if (remainingMs <= 0) {
+      throw timeoutError({
+        deadlineMs,
+        phase,
+        completed: progress.completed || 0,
+        total: progress.total || 0,
+        current: progress.current,
+      });
+    }
+    try {
+      return await run({
+        timeout: Math.max(1, Math.min(GITHUB_COMMAND_TIMEOUT_MS, remainingMs)),
+      });
+    } catch (cause) {
+      if (now() >= deadlineAt) {
+        throw timeoutError({
+          deadlineMs,
+          phase,
+          completed: progress.completed || 0,
+          total: progress.total || 0,
+          current: progress.current,
+        });
+      }
+      if (attempt === attempts || !isTransientGitHubCommandFailure(cause)) throw cause;
+      onRetry({ attempt, nextAttempt: attempt + 1, attempts });
+    }
+  }
+  throw new Error("GitHub command retry invariant failed.");
+}
+
+async function commandOutputAsync(command, arguments_, {
+  cwd = productRoot,
+  timeout,
+  signal,
+} = {}) {
+  const result = await execFileAsync(command, arguments_, {
+    cwd,
+    encoding: "utf8",
+    env: process.env,
+    maxBuffer: 20 * 1024 * 1024,
+    ...(timeout === undefined ? {} : { timeout }),
+    ...(signal ? { signal } : {}),
+  });
+  return result.stdout.trim();
+}
+
+async function githubJsonAsync(arguments_, root, {
+  deadlineAt,
+  deadlineMs,
+  phase,
+  progress,
+  signal,
+  now = Date.now,
+} = {}) {
+  const output = await retryTransientGitHubCommandAsync(
+    ({ timeout }) => commandOutputAsync("gh", arguments_, {
       cwd: root,
-      timeout: GITHUB_COMMAND_TIMEOUT_MS,
+      timeout,
+      signal,
     }),
     {
+      deadlineAt,
+      deadlineMs,
+      phase,
+      progress,
+      now,
       onRetry({ nextAttempt, attempts }) {
         console.warn(
           `Transient GitHub transport failure; retrying delivery evidence (${nextAttempt}/${attempts}).`,
@@ -306,19 +453,157 @@ function pullRequestRecord(detail, commitShas) {
   });
 }
 
-function collectPullRequests({ root, repository, commits }) {
+function reportProgress({ phase, current, completed, total }) {
+  console.error(
+    `Package delivery report: ${phase} ${completed}/${total}; current ${current || "none"}.`,
+  );
+}
+
+async function mapWithConcurrency(items, concurrency, worker) {
+  const results = new Array(items.length);
+  let nextIndex = 0;
+  const consume = async () => {
+    while (true) {
+      const index = nextIndex;
+      nextIndex += 1;
+      if (index >= items.length) return;
+      results[index] = await worker(items[index], index);
+    }
+  };
+  await Promise.all(
+    Array.from({ length: Math.min(items.length, concurrency) }, () => consume()),
+  );
+  return results;
+}
+
+export async function collectPullRequests({
+  root,
+  repository,
+  commits,
+  concurrency = GITHUB_METADATA_CONCURRENCY,
+  deadlineAt = null,
+  deadlineMs = DEFAULT_PACKAGE_DELIVERY_DEADLINE_MS,
+  now = Date.now,
+  onProgress = reportProgress,
+  requestJson = null,
+}) {
+  assert.ok(Array.isArray(commits), "package report commits must be an array");
+  const normalizedConcurrency = normalizeConcurrency(concurrency);
+  const normalizedDeadlineMs = normalizeDeadlineMs(deadlineMs);
+  const startedAt = now();
+  const scanDeadlineAt = Number.isFinite(deadlineAt)
+    ? Number(deadlineAt)
+    : startedAt + normalizedDeadlineMs;
+  const abortController = new AbortController();
+  const request = typeof requestJson === "function"
+    ? requestJson
+    : (arguments_, context) => githubJsonAsync(arguments_, root, context);
+  const responseCache = new Map();
+  let githubRequestCount = 0;
+  let cacheHitCount = 0;
+  const progress = {
+    phase: "commit metadata",
+    current: null,
+    completed: 0,
+    total: commits.length,
+  };
+  const emitProgress = (phase, current, completed, total) => {
+    progress.phase = phase;
+    progress.current = current;
+    progress.completed = completed;
+    progress.total = total;
+    try {
+      onProgress(Object.freeze({ ...progress }));
+    } catch {
+      // Progress reporting is diagnostic and must not change report correctness.
+    }
+  };
+  const requestCached = (arguments_, context) => {
+    const key = JSON.stringify(arguments_);
+    const cached = responseCache.get(key);
+    if (cached) {
+      cacheHitCount += 1;
+      return cached;
+    }
+    githubRequestCount += 1;
+    const pending = Promise.resolve()
+      .then(() => request(arguments_, context))
+      .catch((cause) => {
+        responseCache.delete(key);
+        throw cause;
+      });
+    responseCache.set(key, pending);
+    return pending;
+  };
+  const requestContext = (phase) => ({
+    deadlineAt: scanDeadlineAt,
+    deadlineMs: normalizedDeadlineMs,
+    phase,
+    progress,
+    signal: abortController.signal,
+    now,
+  });
+  const handleFailure = (cause) => {
+    if (cause instanceof PackageDeliveryReportTimeoutError) throw cause;
+    if (now() >= scanDeadlineAt) {
+      throw timeoutError({
+        deadlineMs: normalizedDeadlineMs,
+        phase: progress.phase,
+        completed: progress.completed,
+        total: progress.total,
+        current: progress.current,
+      });
+    }
+    throw cause;
+  };
+
+  let associatedByCommit;
+  try {
+    associatedByCommit = await mapWithConcurrency(
+      commits,
+      normalizedConcurrency,
+      async (commit) => {
+        const current = commit.sha.slice(0, 12);
+        emitProgress("commit metadata", current, progress.completed, commits.length);
+        assertBeforeDeadline({
+          deadlineAt: scanDeadlineAt,
+          deadlineMs: normalizedDeadlineMs,
+          phase: "commit metadata",
+          completed: progress.completed,
+          total: commits.length,
+          current,
+          now,
+        });
+        try {
+          const associated = await requestCached([
+            "api",
+            "-H",
+            "Accept: application/vnd.github+json",
+            `/repos/${repository}/commits/${commit.sha}/pulls`,
+          ], requestContext("commit metadata"));
+          assert.ok(
+            Array.isArray(associated),
+            "GitHub commit Pull Request response must be an array",
+          );
+          const numbers = [...new Set(
+            associated.map((entry) => entry?.number).filter(Number.isInteger),
+          )].sort((left, right) => left - right);
+          progress.completed += 1;
+          emitProgress("commit metadata", current, progress.completed, commits.length);
+          return { commit, numbers };
+        } catch (cause) {
+          return handleFailure(cause);
+        }
+      },
+    );
+  } catch (cause) {
+    abortController.abort();
+    return handleFailure(cause);
+  }
+
   const commitToPullRequests = new Map();
   const pullRequestToCommits = new Map();
-  for (const commit of commits) {
-    const associated = githubJson([
-      "api",
-      "-H",
-      "Accept: application/vnd.github+json",
-      `/repos/${repository}/commits/${commit.sha}/pulls`,
-    ], root);
-    assert.ok(Array.isArray(associated), "GitHub commit Pull Request response must be an array");
-    const numbers = [...new Set(associated.map((entry) => entry?.number).filter(Number.isInteger))]
-      .sort((left, right) => left - right);
+  for (const { commit, numbers } of associatedByCommit) {
     commitToPullRequests.set(commit.sha, numbers);
     for (const number of numbers) {
       const shas = pullRequestToCommits.get(number) || new Set();
@@ -338,26 +623,80 @@ function collectPullRequests({ root, repository, commits }) {
     "headRefOid",
     "mergedAt",
   ].join(",");
-  const pullRequests = [...pullRequestToCommits.entries()]
-    .sort(([left], [right]) => left - right)
-    .map(([number, shas]) => pullRequestRecord(
-      githubJson([
-        "pr",
-        "view",
-        String(number),
-        "--repo",
-        repository,
-        "--json",
-        fields,
-      ], root),
-      shas,
-    ));
+  const pullRequestEntries = [...pullRequestToCommits.entries()]
+    .sort(([left], [right]) => left - right);
+  progress.completed = 0;
+  progress.total = pullRequestEntries.length;
+  if (pullRequestEntries.length === 0) {
+    emitProgress("Pull Request metadata", null, 0, 0);
+  }
+  let pullRequests;
+  try {
+    pullRequests = await mapWithConcurrency(
+      pullRequestEntries,
+      normalizedConcurrency,
+      async ([number, shas]) => {
+        const current = `#${number}`;
+        emitProgress(
+          "Pull Request metadata",
+          current,
+          progress.completed,
+          pullRequestEntries.length,
+        );
+        assertBeforeDeadline({
+          deadlineAt: scanDeadlineAt,
+          deadlineMs: normalizedDeadlineMs,
+          phase: "Pull Request metadata",
+          completed: progress.completed,
+          total: pullRequestEntries.length,
+          current,
+          now,
+        });
+        try {
+          const detail = await requestCached([
+            "pr",
+            "view",
+            String(number),
+            "--repo",
+            repository,
+            "--json",
+            fields,
+          ], requestContext("Pull Request metadata"));
+          const record = pullRequestRecord(detail, shas);
+          progress.completed += 1;
+          emitProgress(
+            "Pull Request metadata",
+            current,
+            progress.completed,
+            pullRequestEntries.length,
+          );
+          return record;
+        } catch (cause) {
+          return handleFailure(cause);
+        }
+      },
+    );
+  } catch (cause) {
+    abortController.abort();
+    return handleFailure(cause);
+  }
   return {
     commits: commits.map((commit) => ({
       ...commit,
       pullRequestNumbers: commitToPullRequests.get(commit.sha) || [],
     })),
     pullRequests,
+    scan: Object.freeze({
+      deadlineMs: normalizedDeadlineMs,
+      concurrency: normalizedConcurrency,
+      elapsedMs: Math.max(0, now() - startedAt),
+      commitMetadataRequested: commits.length,
+      commitMetadataCompleted: commits.length,
+      pullRequestMetadataRequested: pullRequestEntries.length,
+      pullRequestMetadataCompleted: pullRequestEntries.length,
+      githubRequestCount,
+      cacheHitCount,
+    }),
   };
 }
 
@@ -373,6 +712,7 @@ export function createPackageDeliverySnapshot({
   additions,
   deletions,
   pullRequests,
+  scan = null,
   generatedAt,
 }) {
   assert.match(kind ?? "", /^(?:developer-preview|formal)$/u, "unsupported package kind");
@@ -403,6 +743,7 @@ export function createPackageDeliverySnapshot({
       directCommits,
     },
     pullRequests,
+    ...(scan ? { scan } : {}),
   });
 }
 
@@ -418,6 +759,9 @@ export function renderPackageDeliveryMarkdown(report) {
     `- 内容范围：\`${report.source.baseTag}..${report.source.commitSha.slice(0, 12)}\``,
     `- 变更规模：${report.source.commitCount} 个提交、${report.source.changedFileCount} 个文件（+${report.source.additions} / -${report.source.deletions}）`,
     `- SHA-256：\`${report.artifact.sha256}\``,
+    ...(report.scan ? [
+      `- GitHub 元数据扫描：${report.scan.commitMetadataCompleted}/${report.scan.commitMetadataRequested} 个提交、${report.scan.pullRequestMetadataCompleted}/${report.scan.pullRequestMetadataRequested} 个 PR；${report.scan.concurrency} 并发，截止 ${report.scan.deadlineMs} ms`,
+    ] : []),
     "",
     "### 关联 PR",
     "",
@@ -471,8 +815,12 @@ export async function writePackageDeliveryReport({
   baseTag: explicitBaseTag = null,
   repository: explicitRepository = null,
   outputDirectory = null,
+  deadlineMs = DEFAULT_PACKAGE_DELIVERY_DEADLINE_MS,
   now = new Date(),
 }) {
+  const normalizedDeadlineMs = normalizeDeadlineMs(deadlineMs);
+  const scanStartedAt = Date.now();
+  const scanDeadlineAt = scanStartedAt + normalizedDeadlineMs;
   const dirty = gitOutput(root, ["status", "--porcelain", "--untracked-files=all"]);
   assert.equal(dirty, "", "package delivery report requires a clean committed source tree");
   const headSha = gitOutput(root, ["rev-parse", "HEAD"]);
@@ -486,13 +834,31 @@ export async function writePackageDeliveryReport({
   });
   const commits = commitsInRange(root, baseTag);
   const diff = diffSummary(root, baseTag);
-  const github = collectPullRequests({ root, repository, commits });
+  const github = await collectPullRequests({
+    root,
+    repository,
+    commits,
+    deadlineAt: scanDeadlineAt,
+    deadlineMs: normalizedDeadlineMs,
+  });
   const artifact = await artifactRecord({
     root,
     artifactPath,
     version,
     architecture,
   });
+  const currentHeadSha = gitOutput(root, ["rev-parse", "HEAD"]);
+  const currentTreeSha = gitOutput(root, ["rev-parse", "HEAD^{tree}"]);
+  assert.equal(
+    currentHeadSha,
+    headSha,
+    "source HEAD changed while creating the package delivery report; rerun on the exact package commit",
+  );
+  assert.equal(
+    currentTreeSha,
+    treeSha,
+    "source Tree changed while creating the package delivery report; rerun on the exact package commit",
+  );
   const report = createPackageDeliverySnapshot({
     kind,
     artifact,
@@ -505,6 +871,7 @@ export async function writePackageDeliveryReport({
     additions: diff.additions,
     deletions: diff.deletions,
     pullRequests: github.pullRequests,
+    scan: github.scan,
     generatedAt: now.toISOString(),
   });
   const managedOutput = assertManagedPath(
@@ -530,7 +897,7 @@ export async function writePackageDeliveryReport({
   return { report, jsonPath, markdownPath };
 }
 
-function parseArguments(argv) {
+export function parseArguments(argv) {
   const options = {
     kind: null,
     artifactPath: null,
@@ -539,6 +906,7 @@ function parseArguments(argv) {
     baseTag: null,
     repository: null,
     outputDirectory: null,
+    deadlineMs: DEFAULT_PACKAGE_DELIVERY_DEADLINE_MS,
   };
   while (argv.length > 0) {
     const argument = argv.shift();
@@ -551,6 +919,7 @@ function parseArguments(argv) {
     else if (argument === "--base-tag") options.baseTag = value;
     else if (argument === "--repository") options.repository = value;
     else if (argument === "--output") options.outputDirectory = value;
+    else if (argument === "--deadline-ms") options.deadlineMs = normalizeDeadlineMs(value);
     else throw new Error(`Unknown package delivery argument: ${argument}`);
   }
   if (!options.kind || !options.artifactPath || !options.version || !options.architecture) {
