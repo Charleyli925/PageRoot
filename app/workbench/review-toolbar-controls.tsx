@@ -74,7 +74,7 @@ export function ReviewToolbarControls({
   changeFilter = "all",
   contextVisibility = 18,
   scrollMode = "linked",
-  zoomMode = "fit",
+  zoomMode = "actual",
   activeIndex = -1,
   changeCount = 0,
   onPageViewChange,

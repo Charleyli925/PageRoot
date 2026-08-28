@@ -122,6 +122,8 @@ type ReviewMessage = {
   commentLayouts?: unknown;
   challenge?: unknown;
   changeId?: string;
+  behavior?: ScrollBehavior;
+  right?: number;
 };
 
 const MAX_REVIEW_COMMENT_COORDINATE = 10_000_000;
@@ -448,9 +450,16 @@ export default function AiReviewWorkspace({
   const continueReviewButtonRef = useRef<HTMLButtonElement>(null);
   const confirmationTriggerRef = useRef<HTMLButtonElement | null>(null);
   const confirmDialogRef = useRef<HTMLElement>(null);
-  const reviewInitializedRef = useRef(false);
-  const initialFocusRef = useRef(false);
-  const [framesReady, setFramesReady] = useState(false);
+  const reviewInitializationRef = useRef<{
+    documents: ReviewDocuments;
+    sessionId: string;
+    targetId: string;
+    located: boolean;
+  } | null>(null);
+  const [framesReadyFor, setFramesReadyFor] = useState<{
+    documents: ReviewDocuments;
+    sessionId: string;
+  } | null>(null);
   const framesRef = useRef<Record<ReviewSide, HTMLIFrameElement | null>>({
     before: null,
     after: null,
@@ -465,6 +474,7 @@ export default function AiReviewWorkspace({
     after: null,
   });
   const horizontalRelayFrameRef = useRef(0);
+  const horizontalFocusSidesRef = useRef(new Set<ReviewSide>());
   const scrollCoordinatorRef = useRef<ReviewScrollCoordinator | null>(null);
   const frameScrollPositionsRef = useRef<Record<ReviewSide, { top: number; left: number }>>({
     before: { top: 0, left: 0 },
@@ -576,6 +586,44 @@ export default function AiReviewWorkspace({
     });
   }, []);
 
+  const focusHorizontalFootprint = useCallback((
+    side: ReviewSide,
+    left: number,
+    right: number,
+    mirrorFollower: boolean,
+  ) => {
+    if (
+      !Number.isFinite(left)
+      || !Number.isFinite(right)
+      || left < 0
+      || right < left
+      || right > MAX_REVIEW_COMMENT_COORDINATE
+    ) return;
+    const viewport = viewportsRef.current[side];
+    if (!viewport) return;
+    const scale = scalesRef.current[side];
+    const maximum = Math.max(0, viewport.scrollWidth - viewport.clientWidth);
+    const center = ((left + right) / 2) * scale;
+    const target = Math.max(0, Math.min(maximum, center - viewport.clientWidth / 2));
+    horizontalFocusSidesRef.current.add(side);
+    viewport.scrollLeft = target;
+    const focusedSides: ReviewSide[] = [side];
+    if (mirrorFollower && scrollModeRef.current === "linked") {
+      const followerSide: ReviewSide = side === "before" ? "after" : "before";
+      const follower = viewportsRef.current[followerSide];
+      if (follower) {
+        const followerMaximum = Math.max(0, follower.scrollWidth - follower.clientWidth);
+        const normalized = maximum > 0 ? target / maximum : 0;
+        horizontalFocusSidesRef.current.add(followerSide);
+        follower.scrollLeft = normalized * followerMaximum;
+        focusedSides.push(followerSide);
+      }
+    }
+    window.requestAnimationFrame(() => focusedSides.forEach((focusedSide) => {
+      horizontalFocusSidesRef.current.delete(focusedSide);
+    }));
+  }, []);
+
   useEffect(() => {
     const coordinator = new ReviewScrollCoordinator({
       requestFrame: (callback) => window.requestAnimationFrame(callback),
@@ -617,15 +665,25 @@ export default function AiReviewWorkspace({
     scrollCoordinatorRef.current?.reset();
   }, [documents]);
 
-  useEffect(() => {
-    if (!hydrated || !documents.changes[0]) return;
-    if (reviewInitializedRef.current && reviewStateRef.current.focus !== "all") return;
-    reviewInitializedRef.current = true;
+  useLayoutEffect(() => {
+    const targetId = documents.changes[0]?.id || "all";
+    reviewInitializationRef.current = {
+      documents,
+      sessionId,
+      targetId,
+      located: targetId === "all",
+    };
+    reviewStateRef.current = {
+      ...reviewStateRef.current,
+      focus: targetId,
+      pagePresentationPath: [],
+    };
     dispatchReviewState({
       type: "set-navigation-target",
-      value: documents.changes[0].id,
+      value: targetId,
     });
-  }, [documents.changes, hydrated]);
+    dispatchReviewState({ type: "set-page-presentation", value: [] });
+  }, [documents, sessionId]);
 
   const sendState = useCallback((side?: ReviewSide) => {
     const state = reviewStateRef.current;
@@ -822,7 +880,10 @@ export default function AiReviewWorkspace({
     return () => window.cancelAnimationFrame(focusFrame);
   }, [confirmationAction]);
 
-  const selectChange = useCallback((changeId: string) => {
+  const selectChange = useCallback((
+    changeId: string,
+    behavior: ScrollBehavior = "smooth",
+  ) => {
     const selectedChange = reviewChanges.find((change) => change.id === changeId);
     dispatchReviewState({ type: "set-navigation-target", value: changeId });
     const focusChange = () => {
@@ -832,7 +893,7 @@ export default function AiReviewWorkspace({
           changeId,
           panelKey: selectedChange?.panelKey,
           panelPath: selectedChange?.panelPath,
-          behavior: "smooth",
+          behavior,
         });
       });
     };
@@ -850,15 +911,26 @@ export default function AiReviewWorkspace({
   // the header already claimed they were looking at. Positioning goes through
   // selectChange so it takes exactly the path that button takes, including the
   // panel coordination a change inside a collapsed tab needs.
-  // Reading the target from a ref meant this never retried: when the frames
-  // become ready before the first change is chosen, the ref still held "all" and
-  // a ref change cannot re-run an effect. The target is therefore the state.
+  // Initialization belongs to one documents/session pair. A replacement must
+  // neither inherit the previous pair's target nor reset this flag when one of
+  // its iframe elements is registered again. The first positioning is instant
+  // so entering Review does not animate all the way down from the page top;
+  // explicit navigation keeps the normal smooth behavior.
   useEffect(() => {
-    if (!framesReady || initialFocusRef.current) return;
-    if (focus === "all" || !reviewChanges.some((change) => change.id === focus)) return;
-    initialFocusRef.current = true;
-    selectChange(focus);
-  }, [focus, framesReady, reviewChanges, selectChange]);
+    const initialization = reviewInitializationRef.current;
+    if (
+      !framesReadyFor
+      || framesReadyFor.documents !== documents
+      || framesReadyFor.sessionId !== sessionId
+      || !initialization
+      || initialization.documents !== documents
+      || initialization.sessionId !== sessionId
+      || initialization.located
+      || !reviewChanges.some((change) => change.id === initialization.targetId)
+    ) return;
+    initialization.located = true;
+    selectChange(initialization.targetId, "auto");
+  }, [documents, framesReadyFor, reviewChanges, selectChange, sessionId]);
 
   useLayoutEffect(() => {
     const handleMessage = (event: MessageEvent<ReviewMessage>) => {
@@ -902,7 +974,7 @@ export default function AiReviewWorkspace({
           if (
             reviewFrameReadyRef.current.before?.documents === documents
             && reviewFrameReadyRef.current.after?.documents === documents
-          ) setFramesReady(true);
+          ) setFramesReadyFor({ documents, sessionId });
         }
         sendState(message.side);
         const owner = scrollCoordinatorRef.current?.snapshot();
@@ -935,6 +1007,21 @@ export default function AiReviewWorkspace({
       }
       if (message.type === "wheel-horizontal") {
         relayHorizontalWheel(message.side, Number(message.deltaX || 0));
+        return;
+      }
+      if (message.type === "focus-horizontal-footprint") {
+        const changeId = typeof message.changeId === "string" ? message.changeId : "";
+        const selectedChange = reviewChanges.find((change) => change.id === changeId);
+        if (
+          changeId !== reviewStateRef.current.focus
+          || !selectedChange
+        ) return;
+        focusHorizontalFootprint(
+          message.side,
+          Number(message.left),
+          Number(message.right),
+          !selectedChange.beforePresent || !selectedChange.afterPresent,
+        );
         return;
       }
       if (message.type === "scroll-position") {
@@ -1014,6 +1101,7 @@ export default function AiReviewWorkspace({
     coordinatePagePresentation,
     documents,
     finishPagePresentation,
+    focusHorizontalFootprint,
     prepareReviewCommentFrame,
     relayHorizontalWheel,
     reviewChanges,
@@ -1027,8 +1115,7 @@ export default function AiReviewWorkspace({
   const registerFrame = useCallback((side: ReviewSide, frame: HTMLIFrameElement | null) => {
     if (framesRef.current[side] !== frame) {
       reviewFrameReadyRef.current[side] = null;
-      setFramesReady(false);
-      initialFocusRef.current = false;
+      setFramesReadyFor(null);
     }
     framesRef.current[side] = frame;
   }, []);
@@ -1056,7 +1143,7 @@ export default function AiReviewWorkspace({
   }, [sessionId, updateCommentScrollTransform]);
 
   const handleHorizontalScroll = useCallback((side: ReviewSide) => {
-    if (scrollModeRef.current !== "linked") return;
+    if (scrollModeRef.current !== "linked" || horizontalFocusSidesRef.current.has(side)) return;
     const source = viewportsRef.current[side];
     const followerSide: ReviewSide = side === "before" ? "after" : "before";
     const follower = viewportsRef.current[followerSide];

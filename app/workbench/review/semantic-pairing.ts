@@ -8,6 +8,7 @@ import {
 import {
   classTokens,
   createReviewSignatureCache,
+  directHeading,
   exactSubtreeSignature,
   GENERIC_REVIEW_TEXT_CLASSES,
   hasClassRole,
@@ -261,6 +262,42 @@ export function semanticUnitText(unit: ReviewSemanticUnit): string {
   return normalizedText(unit.element);
 }
 
+const REVIEW_RELOCATABLE_CARD_ROLES = ["card", "tile", "metric", "kpi", "stat"];
+
+function relocationLabel(element: Element): string {
+  const heading = directHeading(element);
+  if (heading) return normalizedText(heading);
+  const label = [...element.querySelectorAll(":scope > [class], :scope > header [class]")]
+    .find((candidate) => (
+      hasClassRole(candidate, ["label", "name", "title", "heading"])
+      && !hasClassRole(candidate, ["note", "meta", "sub", "subtitle"])
+      && normalizedText(candidate).length > 0
+    ));
+  return label ? normalizedText(label) : "";
+}
+
+function semanticRelocationKey(
+  element: Element,
+  unitKind: string,
+  signatures: ReviewSignatureCache,
+): string | null {
+  const relocatable = element.matches("section, article")
+    || hasClassRole(element, REVIEW_RELOCATABLE_CARD_ROLES);
+  if (!relocatable) return null;
+  const label = relocationLabel(element);
+  if (!label) return null;
+  const panelScope = panelPathForElement(element).join("\u0001") || "document";
+  return [
+    "card-relocation",
+    panelScope,
+    unitKind,
+    element.namespaceURI || "",
+    element.localName.toLowerCase(),
+    selfCompatibilitySignature(element, signatures),
+    label,
+  ].join("\u0000");
+}
+
 export function semanticUnitDescriptor(
   unit: ReviewSemanticUnit,
   parentKey: string,
@@ -289,6 +326,7 @@ export function semanticUnitDescriptor(
       unit.element,
       signatures,
     )}`,
+    relocationKey: semanticRelocationKey(unit.element, unit.kind, signatures),
     affinities: [
       ...classTokens(unit.element).filter((token) => !GENERIC_REVIEW_TEXT_CLASSES.has(token)),
       ...(numberedPrefix ? [`number:${numberedPrefix}`] : []),
@@ -437,6 +475,7 @@ export function sectionElementDescriptor(
     stableId: stableElementIdentity(element, signatures),
     exactSignature: exactSubtreeSignature(element, signatures),
     compatibilitySignature: selfCompatibilitySignature(element, signatures),
+    relocationKey: semanticRelocationKey(element, "section", signatures),
     parentKey,
   };
 }

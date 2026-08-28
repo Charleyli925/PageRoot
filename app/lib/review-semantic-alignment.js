@@ -34,6 +34,11 @@ function compatibilityKey(unit) {
     : null;
 }
 
+function relocationKey(unit) {
+  const key = String(unit.relocationKey || "").trim();
+  return key || null;
+}
+
 function uniqueIndexes(items, keyForUnit, excluded = new Set()) {
   const indexes = new Map();
   items.forEach((unit, index) => {
@@ -62,6 +67,12 @@ function collectStrongPairs(before, after) {
   };
   collect(identityKey, "stable-id");
   collect(exactKey, "exact-signature");
+  // A unique card-like title can preserve identity when a card crosses an
+  // otherwise monotonic sibling interval while its internal copy or markup is
+  // edited. This is pairing evidence only: callers continue to receive a
+  // weighted match and no movement fact. Duplicate keys remain ambiguous via
+  // uniqueIndexes and are deliberately left to the ordinary alignment path.
+  collect(relocationKey, "weighted");
   return { pairs, usedBefore, usedAfter };
 }
 

@@ -158,6 +158,51 @@ test("a reordered exact signature is not promoted into a movement fact", () => {
   assert.ok(matchedPairs(pairs).every((pair) => !("moved" in pair)));
 });
 
+test("a uniquely titled card remains paired when it moves and its internals change", () => {
+  const jdRelocation = "panel:retail\u0000container:DIV\u0000metric\u0000京东零售经营利润";
+  const before = [
+    unit("京东零售经营利润 135 亿元 -3.3% 旧单行说明", {
+      kind: "container:DIV",
+      exactSignature: "jd-before",
+      relocationKey: jdRelocation,
+    }),
+    unit("稳定卡片", { exactSignature: "stable-card" }),
+  ];
+  const after = [
+    before[1],
+    unit("京东零售经营利润 135 亿元 -3.3% 新的多行说明与内部标记", {
+      kind: "container:DIV",
+      exactSignature: "jd-after",
+      relocationKey: jdRelocation,
+    }),
+  ];
+  const pairs = alignReviewSemanticUnits(before, after);
+
+  assert.deepEqual(
+    matchedPairs(pairs).map((pair) => (
+      [pair.beforeIndex, pair.afterIndex, pair.match]
+    )).sort((left, right) => left[0] - right[0]),
+    [[0, 1, "weighted"], [1, 0, "exact-signature"]],
+  );
+  assert.ok(pairs.every((pair) => !("moved" in pair)));
+});
+
+test("duplicate relocation titles remain ambiguous instead of being guessed", () => {
+  const duplicate = (text, exactSignature) => unit(text, {
+    kind: "container:DIV",
+    exactSignature,
+    relocationKey: "panel:retail\u0000container:DIV\u0000metric\u0000重复指标",
+  });
+  const pairs = alignReviewSemanticUnits(
+    [duplicate("北方仓储周转红线", "before-a"), duplicate("南区门店库存阈值", "before-b")],
+    [duplicate("海外广告买量策略", "after-b"), duplicate("研发费用资本化口径", "after-a")],
+  );
+
+  assert.equal(matchedPairs(pairs).length, 0);
+  assert.equal(pairs.filter((pair) => pair.beforeIndex === null).length, 2);
+  assert.equal(pairs.filter((pair) => pair.afterIndex === null).length, 2);
+});
+
 test("an ordinary insertion stays unmatched without disturbing stable siblings", () => {
   const before = [unit("项目甲"), unit("项目乙")];
   const after = [before[0], unit("普通新增"), before[1]];

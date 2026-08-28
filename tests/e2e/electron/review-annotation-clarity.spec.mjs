@@ -33,12 +33,34 @@ const TREND_BEFORE = "内容平台搜索挤压传统搜索引擎与传统电商�
 const TREND_AFTER = "大盘增量增速放缓（96.2 亿次/日，YoY +18%，较 1&amp;2 月 +20% 回落 2pp），但结构变化加剧：抖系份额收缩，微信、小红书接棒增长。";
 const NOTE_BEFORE = "增速较 1–2 月 +20% 走弱；抖系份额 -0.7pp，微信 +5.4pp、红书 +1.3pp 是唯三正增长入口";
 const NOTE_AFTER = "增速较 1–2 月 +20% 走弱；微信 +5.4pp、红书 +1.3pp 正增长，抖系 -0.7pp";
+const ORDINARY_MODULE_BEFORE = "    <div class=\"ordinary-module\" data-review-ordinary-replacement><h2>普通标题</h2><p>北方仓储周转红线</p></div>";
+const ORDINARY_MODULE_AFTER = "    <div class=\"ordinary-module\" data-review-ordinary-replacement><h2>普通标题</h2><p>海外广告买量策略</p></div>";
+const JD_CARD_BEFORE = `        <div class="metric" data-report-metric="jd-retail-profit">
+          <div class="metric-label">京东零售经营利润</div>
+          <div class="metric-value">135<span class="metric-unit">亿元</span> <span class="up">-3.3%</span></div>
+          <p class="metric-note" data-review-jd-note>零售基本盘保持韧性；利润率仍需观察。</p>
+        </div>`;
+const JD_CARD_AFTER = `        <div class="metric" data-report-metric="jd-retail-profit">
+          <div class="metric-label">京东零售经营利润</div>
+          <div class="metric-value">135<span class="metric-unit">亿元</span> <span class="up">-3.3%</span></div>
+          <ul class="metric-note" data-review-jd-note><li>零售基本盘保持韧性；</li><li>利润率仍需观察。</li></ul>
+        </div>`;
 
 /** The AI candidate: text edits, one added wrapper, and ignored style edits. */
 function rewriteReport(source) {
   return source
+    .replace("边缘旧值", "边缘新值")
+    .replace(`${ORDINARY_MODULE_BEFORE}\n`, "")
     .replace(TREND_BEFORE, TREND_AFTER)
     .replace(NOTE_BEFORE, NOTE_AFTER)
+    .replace(
+      `${JD_CARD_BEFORE}\n        <div class="metric" data-report-metric="overall">`,
+      `        <div class="metric" data-report-metric="overall">`,
+    )
+    .replace(
+      "        </div>\n        <div class=\"metric\" data-report-metric=\"commerce\">",
+      `        </div>\n${JD_CARD_AFTER}\n        <div class="metric" data-report-metric="commerce">`,
+    )
     .replace(
       '<span class="tab" data-active="true">① 大盘 &amp; 电商搜索</span>\n'
       + '      <span class="tab">② 抖音搜盘表现</span>',
@@ -56,6 +78,12 @@ function rewriteReport(source) {
       + "      .panel-caption { margin: 2px 0 0; color: #8b8fa3; font-size: 12px; }\n"
       + "      .metric { border-left-width: 3px; border-left-color: #6d5ce7; }\n"
       + "      .panel-title { margin: 0;",
+    )
+    .replace(
+      "  </body>",
+      `${ORDINARY_MODULE_AFTER}\n`
+      + "    <aside data-review-edge-added style=\"position:absolute!important;right:0!important;top:900px!important;width:48px;height:32px\">"
+      + "<span>边缘新增</span></aside>\n  </body>",
     );
 }
 
@@ -76,7 +104,14 @@ async function addReportComment(page, sourcePath) {
   await commentButton.click();
   const composer = page.getByRole("textbox", { name: "评论内容" });
   await composer.fill("把核心结论和趋势段落改写得更紧凑，其他地方保持不变。");
-  await page.getByRole("button", { name: "评论", exact: true }).click();
+  const submitComment = page.getByRole("button", { name: "评论", exact: true });
+  await expect(submitComment).toBeEnabled();
+  // This spec exercises Review, not CommentRail pointer routing. The current
+  // shell's scroll stage can transiently cover the fixed composer in native
+  // hit-testing even though the button is visible and enabled, so invoke the
+  // same button activation directly and keep the setup independent of that
+  // unrelated geometry contract.
+  await submitComment.evaluate((button) => button.click());
   await expect(composer).toBeHidden({ timeout: 45_000 });
   await expect(page.getByRole("complementary", { name: "本轮评论" }))
     .toHaveAttribute("data-layout-ready", "true", { timeout: 45_000 });
@@ -143,6 +178,8 @@ async function readProjection(frame) {
       .map((box) => ({
         changeId: box.getAttribute("data-pageroot-review-overlay-box") || "",
         owner: box.getAttribute("data-pageroot-review-semantic-owner") || "",
+        fact: box.getAttribute("data-pageroot-review-fact") || "",
+        path: box.getAttribute("data-path") || "",
         tone: box.dataset.tone || "",
         types: box.dataset.types || "",
         scope: box.dataset.scope || "",
@@ -157,6 +194,17 @@ async function readProjection(frame) {
         top: Number(box.getAttribute("data-top")),
         width: Number(box.getAttribute("data-width")),
         height: Number(box.getAttribute("data-height")),
+      }));
+    const holes = [...document.querySelectorAll("[data-pageroot-review-mask-hole]")]
+      .map((hole) => ({
+        changeId: hole.getAttribute("data-pageroot-review-mask-hole") || "",
+        owner: hole.getAttribute("data-pageroot-review-semantic-owner") || "",
+        fact: hole.getAttribute("data-pageroot-review-fact") || "",
+        path: hole.getAttribute("d") || "",
+        left: Number(hole.getAttribute("data-left")),
+        top: Number(hole.getAttribute("data-top")),
+        width: Number(hole.getAttribute("data-width")),
+        height: Number(hole.getAttribute("data-height")),
       }));
     const bars = [...document.querySelectorAll("[data-pageroot-review-region-bar]")]
       .map((bar) => ({
@@ -208,8 +256,49 @@ async function readProjection(frame) {
         node = walker.nextNode();
       }
     });
-    return { boxes, bars, strikes, dots, glyphs, marked };
+    const maskLayer = document.querySelector("[data-pageroot-review-mask-layer]");
+    return {
+      boxes,
+      holes,
+      bars,
+      strikes,
+      dots,
+      glyphs,
+      marked,
+      documentWidth: Math.max(innerWidth, document.documentElement.scrollWidth),
+      documentHeight: Math.max(innerHeight, document.documentElement.scrollHeight),
+      authoredDocumentWidth: Number(maskLayer?.getAttribute("width")),
+      authoredDocumentHeight: Number(maskLayer?.getAttribute("height")),
+    };
   });
+}
+
+async function activeFootprintVisibleInOuterViewport(page, frame, side) {
+  const footprint = await frame.locator(
+    '[data-pageroot-review-overlay-box][data-active="true"]',
+  ).first().evaluate((box) => ({
+    left: Number(box.getAttribute("data-left")),
+    right: Number(box.getAttribute("data-left")) + Number(box.getAttribute("data-width")),
+    top: Number(box.getAttribute("data-top")),
+    bottom: Number(box.getAttribute("data-top")) + Number(box.getAttribute("data-height")),
+    scrollTop: scrollY,
+    viewportHeight: innerHeight,
+  })).catch(() => null);
+  if (!footprint) return true;
+  if (
+    footprint.bottom <= footprint.scrollTop
+    || footprint.top >= footprint.scrollTop + footprint.viewportHeight
+  ) return false;
+  return page.locator(`[aria-label="${side === "before" ? "修改前" : "修改后"}画布滚动区"]`)
+    .evaluate((viewport, geometry) => {
+      const frameElement = viewport.querySelector("iframe");
+      if (!frameElement || frameElement.offsetWidth <= 0) return false;
+      const scale = frameElement.getBoundingClientRect().width / frameElement.offsetWidth;
+      const left = geometry.left * scale;
+      const right = geometry.right * scale;
+      return right > viewport.scrollLeft
+        && left < viewport.scrollLeft + viewport.clientWidth;
+    }, footprint);
 }
 
 test("the review projection annotates a dense report cleanly and accurately", async () => {
@@ -243,6 +332,12 @@ test("the review projection annotates a dense report cleanly and accurately", as
       async () => afterFrame.locator("[data-pageroot-review-overlay-box]").count(),
       { timeout: 30_000 },
     ).toBeGreaterThan(0);
+    await expect(launched.page.getByRole("button", { name: "原始大小", exact: true }))
+      .toHaveAttribute("aria-pressed", "true");
+    await expect.poll(async () => Promise.all([
+      activeFootprintVisibleInOuterViewport(launched.page, beforeFrame, "before"),
+      activeFootprintVisibleInOuterViewport(launched.page, afterFrame, "after"),
+    ]).then((visible) => visible.every(Boolean)), { timeout: 30_000 }).toBe(true);
 
     const captureDirectory = path.join(productRoot, "output", "design-qa");
     mkdirSync(captureDirectory, { recursive: true });
@@ -257,9 +352,38 @@ test("the review projection annotates a dense report cleanly and accurately", as
     };
     for (const [side, projection] of Object.entries(projections)) {
       expect(
+        projection.documentWidth,
+        `${side}: projection chrome must not widen the authored document`,
+      ).toBeLessThanOrEqual(projection.authoredDocumentWidth + 0.01);
+      expect(
         projection.boxes.some((box) => box.types.includes("style")),
         `${side}: style-only changes must not enter Review facts`,
       ).toBe(false);
+      expect(projection.boxes.length, `${side}: every box needs exactly one mask hole`)
+        .toBe(projection.holes.length);
+      projection.boxes.forEach((box, index) => {
+        const hole = projection.holes[index];
+        for (const [kind, geometry] of [["box", box], ["hole", hole]]) {
+          expect(geometry.left, `${side}: ${kind} ${box.changeId} crosses the left edge`)
+            .toBeGreaterThanOrEqual(0);
+          expect(geometry.top, `${side}: ${kind} ${box.changeId} crosses the top edge`)
+            .toBeGreaterThanOrEqual(0);
+          expect(
+            geometry.left + geometry.width,
+            `${side}: ${kind} ${box.changeId} crosses the right edge`,
+          ).toBeLessThanOrEqual(projection.authoredDocumentWidth);
+          expect(
+            geometry.top + geometry.height,
+            `${side}: ${kind} ${box.changeId} crosses the bottom edge`,
+          ).toBeLessThanOrEqual(projection.authoredDocumentHeight);
+        }
+        expect(hole.left, `${side}: box/hole left`).toBeCloseTo(box.left, 5);
+        expect(hole.top, `${side}: box/hole top`).toBeCloseTo(box.top, 5);
+        expect(hole.width, `${side}: box/hole width`).toBeCloseTo(box.width, 5);
+        expect(hole.height, `${side}: box/hole height`).toBeCloseTo(box.height, 5);
+        expect(hole.path, `${side}: box/hole canonical path`)
+          .toBe(box.path);
+      });
     }
     for (const [side, frame] of [["before", beforeFrame], ["after", afterFrame]]) {
       expect(
@@ -267,6 +391,92 @@ test("the review projection annotates a dense report cleanly and accurately", as
         `${side}: reordered tabs must not be reported as element changes`,
       ).toBe(0);
     }
+    for (const [side, frame] of [["before", beforeFrame], ["after", afterFrame]]) {
+      const jdEvidence = await frame.locator('[data-report-metric="jd-retail-profit"]')
+        .evaluate((card) => {
+          const markerText = [...card.querySelectorAll("[data-pageroot-review-text]")]
+            .map((marker) => marker.textContent || "").join("");
+          const note = card.querySelector("[data-review-jd-note]");
+          return {
+            cardStructure: card.hasAttribute("data-pageroot-review-structure"),
+            stableCopyMarked: ["京东零售经营利润", "135", "-3.3%"]
+              .some((value) => markerText.includes(value)),
+            noteStructure: note?.getAttribute("data-pageroot-review-structure") || "",
+            descendantStructure: note?.querySelectorAll("[data-pageroot-review-structure]").length || 0,
+            descendantText: note?.querySelectorAll("[data-pageroot-review-text]").length || 0,
+          };
+        });
+      expect(jdEvidence.cardStructure, `${side}: the relocated JD card must stay paired`)
+        .toBe(false);
+      expect(jdEvidence.stableCopyMarked, `${side}: stable JD title/value must not be text evidence`)
+        .toBe(false);
+      expect(jdEvidence.noteStructure, `${side}: only the changed bottom wrapper is structural`)
+        .toBe(side === "before" ? "removed" : "added");
+      expect(jdEvidence.descendantStructure, `${side}: JD bottom subtree has duplicate structure facts`)
+        .toBe(0);
+      expect(jdEvidence.descendantText, `${side}: JD bottom subtree has duplicate text facts`)
+        .toBe(0);
+    }
+    for (const [side, frame] of [["before", beforeFrame], ["after", afterFrame]]) {
+      const ordinary = await frame.locator("[data-review-ordinary-replacement]")
+        .evaluate((element) => ({
+          structure: element.getAttribute("data-pageroot-review-structure") || "",
+          descendantText: element.querySelectorAll("[data-pageroot-review-text]").length,
+          descendantStructure: element.querySelectorAll("[data-pageroot-review-structure]").length,
+        }));
+      expect(ordinary.structure, `${side}: ordinary titled div must not earn relocation identity`)
+        .toBe(side === "before" ? "removed" : "added");
+      expect(ordinary.descendantText, `${side}: unmatched ordinary div repeats text facts`).toBe(0);
+      expect(ordinary.descendantStructure, `${side}: unmatched ordinary div repeats structure facts`).toBe(0);
+    }
+    const edgeOwner = await afterFrame.locator("[data-review-edge-added]")
+      .getAttribute("data-pageroot-review-semantic-owner");
+    const edgeChangeId = await afterFrame.locator("[data-review-edge-added]")
+      .getAttribute("data-pageroot-review-marker");
+    const edgeBox = projections.after.boxes.find((box) => (
+      box.changeId === edgeChangeId
+      && box.owner === edgeOwner
+      && box.types.includes("structure")
+    ));
+    expect(edgeBox, "right-edge addition must produce one structural footprint").toBeTruthy();
+    const edgeElementGeometry = await afterFrame.locator("[data-review-edge-added]")
+      .evaluate((element) => {
+        const rect = element.getBoundingClientRect();
+        return {
+          left: rect.left + scrollX,
+          right: rect.right + scrollX,
+          position: getComputedStyle(element).position,
+          authoredStyle: element.getAttribute("style") || "",
+        };
+      });
+    expect(
+      edgeBox.left + edgeBox.width,
+      `right-edge structural footprint must clamp to the authored edge: ${JSON.stringify({ edgeBox, edgeElementGeometry })}`,
+    ).toBeCloseTo(projections.after.authoredDocumentWidth, 5);
+
+    expect(edgeChangeId).toBeTruthy();
+    const outerViewports = {
+      before: launched.page.getByLabel("修改前画布滚动区", { exact: true }),
+      after: launched.page.getByLabel("修改后画布滚动区", { exact: true }),
+    };
+    await Promise.all(Object.values(outerViewports).map((viewport) => (
+      viewport.evaluate((element) => { element.scrollLeft = 0; })
+    )));
+    await afterFrame.locator(
+      `[data-pageroot-review-overlay-box="${edgeChangeId}"] [data-pageroot-review-overlay-label]`,
+    ).evaluate((label) => label.click());
+    await expect.poll(async () => Promise.all(Object.values(outerViewports).map((viewport) => (
+      viewport.evaluate((element) => ({
+        left: element.scrollLeft,
+        maximum: element.scrollWidth - element.clientWidth,
+      }))
+    ))).then(([before, after]) => ({
+      moved: before.left > 0 && after.left > 0,
+      ratioDelta: Math.abs(
+        before.left / Math.max(1, before.maximum)
+        - after.left / Math.max(1, after.maximum),
+      ),
+    })), { timeout: 15_000 }).toMatchObject({ moved: true, ratioDelta: 0 });
     writeFileSync(
       path.join(captureDirectory, "review-annotation-projection.json"),
       JSON.stringify(projections, null, 2),
@@ -498,14 +708,22 @@ test("the review projection annotates a dense report cleanly and accurately", as
     // 5. A wholly added or removed element is one structural fact. Descendant
     //    elements and their text never repeat that same subtree as extra marks.
     for (const [side, frame] of [["before", beforeFrame], ["after", afterFrame]]) {
-      const nested = await frame.locator("html").evaluate(() => ({
-        structure: document.querySelectorAll(
-          "[data-pageroot-review-structure] [data-pageroot-review-structure]",
-        ).length,
-        text: document.querySelectorAll(
-          "[data-pageroot-review-structure] [data-pageroot-review-text]",
-        ).length,
-      }));
+      const nested = await frame.locator("html").evaluate(() => {
+        const whollyChanged = [...document.querySelectorAll(
+          '[data-pageroot-review-structure="added"], [data-pageroot-review-structure="removed"]',
+        )];
+        return {
+          whollyChanged: whollyChanged.length,
+          structure: whollyChanged.reduce((count, root) => (
+            count + root.querySelectorAll("[data-pageroot-review-structure]").length
+          ), 0),
+          text: whollyChanged.reduce((count, root) => (
+            count + root.querySelectorAll("[data-pageroot-review-text]").length
+          ), 0),
+        };
+      });
+      expect(nested.whollyChanged, `${side}: fixture must exercise a wholly changed subtree`)
+        .toBeGreaterThan(0);
       expect(nested.structure, `${side}: nested element marks duplicate one subtree`).toBe(0);
       expect(nested.text, `${side}: wholly changed elements must not repeat text marks`).toBe(0);
     }
