@@ -4,6 +4,7 @@ import {
   cloneElement,
   useEffect,
   useLayoutEffect,
+  useRef,
   useState,
   useSyncExternalStore,
   type ReactElement,
@@ -89,6 +90,21 @@ export default function WorkbenchDocumentCanvasPool({
   const [session] = useState(() => new CanvasSnapshotSession());
   const snapshots = useSyncExternalStore(session.subscribe, session.getSnapshot, session.getSnapshot);
   const noChange = () => {};
+  const previousActiveTabIdRef = useRef(activeTabId);
+  const reusedActiveTabIdRef = useRef<string | null>(null);
+  if (previousActiveTabIdRef.current !== activeTabId) {
+    reusedActiveTabIdRef.current = activeTabId && snapshots.some((entry) => entry.tabId === activeTabId)
+      ? activeTabId
+      : null;
+    previousActiveTabIdRef.current = activeTabId;
+  }
+  if (
+    reusedActiveTabIdRef.current
+    && snapshots.find((entry) => entry.tabId === reusedActiveTabIdRef.current)?.sourceSha256 !== activeSourceSha256
+  ) {
+    reusedActiveTabIdRef.current = null;
+  }
+  const reusedActiveTabId = reusedActiveTabIdRef.current;
 
   useLayoutEffect(() => {
     if (activeTabId && activeSourceSha256 && activeElement) {
@@ -101,15 +117,15 @@ export default function WorkbenchDocumentCanvasPool({
     }
   }, [activeCanvasGeneration, activeElement, activeSourceSha256, activeTabId, session]);
   useLayoutEffect(() => {
-    const allowedTabIds = activeTabId && activeElement
-      ? [activeTabId, ...retainedTabIds.filter((tabId) => tabId !== activeTabId)]
-        .slice(0, DOCUMENT_CANVAS_POOL_MINIMUM)
-      : retainedTabIds.slice(0, DOCUMENT_CANVAS_POOL_MINIMUM);
+    const allowedTabIds = [
+      ...(activeTabId ? [activeTabId] : []),
+      ...retainedTabIds.filter((tabId) => tabId !== activeTabId),
+    ].slice(0, DOCUMENT_CANVAS_POOL_MINIMUM);
     for (const snapshot of snapshots) {
       if (!allowedTabIds.includes(snapshot.tabId)) onEvict(snapshot.tabId);
     }
     session.reconcile(allowedTabIds);
-  }, [activeElement, activeTabId, onEvict, retainedTabIds, session, snapshots]);
+  }, [activeTabId, onEvict, retainedTabIds, session, snapshots]);
 
   useEffect(() => {
     if (!activeTabId || !activeSourceSha256) return;
@@ -119,10 +135,6 @@ export default function WorkbenchDocumentCanvasPool({
       detail: Object.freeze({ tabId: activeTabId, sourceSha256: activeSourceSha256 }),
     });
   }, [activeSourceSha256, activeTabId, snapshots]);
-
-  if (activeElement) {
-    return <div className={styles.pool}><div className={styles.entry}>{activeElement}</div></div>;
-  }
 
   if (!activeTabId && activeElement) {
     return (
@@ -139,7 +151,19 @@ export default function WorkbenchDocumentCanvasPool({
     )),
     ...(activeTabId && activeElement && !snapshotByTabId.has(activeTabId) ? [activeTabId] : []),
   ].slice(0, DOCUMENT_CANVAS_POOL_MINIMUM);
-  if (!renderTabIds.length) return null;
+  if (!renderTabIds.length) {
+    if (!activeElement) return null;
+    return (
+      <div
+        className={styles.pool}
+        data-testid="workbench-document-canvas-pool"
+        data-runtime-hot-count={0}
+        data-runtime-hot-limit={DOCUMENT_CANVAS_POOL_MINIMUM}
+      >
+        <div className={styles.entry} data-runtime-hot-active="true">{activeElement}</div>
+      </div>
+    );
+  }
   return (
     <div
       className={styles.pool}
@@ -155,27 +179,30 @@ export default function WorkbenchDocumentCanvasPool({
         );
         if (!snapshot) return null;
         const active = tabId === activeTabId && Boolean(activeElement);
-        const element = active && activeElement ? activeElement : snapshot.element;
         return (
           <div
             className={styles.entry}
             data-runtime-hot-tab-id={tabId}
             data-runtime-hot-active={active ? "true" : undefined}
-            hidden={!active}
-            inert={!active ? true : undefined}
-            aria-hidden={!active}
+            hidden={active ? undefined : true}
+            inert={active ? undefined : true}
+            aria-hidden={active ? undefined : true}
             key={tabId}
           >
-            {active ? element : cloneElement(element as ReactElement<InactiveCanvasProps>, {
-              ref: null,
-              locked: true,
-              readOnly: true,
-              onChange: noChange,
-              onInteraction: noChange,
-              onSelect: noChange,
-              onRequestComment: noChange,
-              onPageViewContextChange: noChange,
-            })}
+            {active && activeElement
+              ? (reusedActiveTabId === tabId
+                  ? cloneElement(snapshot.element, activeElement.props as InactiveCanvasProps)
+                  : activeElement)
+              : cloneElement(snapshot.element as ReactElement<InactiveCanvasProps>, {
+                ref: null,
+                locked: true,
+                readOnly: true,
+                onChange: noChange,
+                onInteraction: noChange,
+                onSelect: noChange,
+                onRequestComment: noChange,
+                onPageViewContextChange: noChange,
+              })}
           </div>
         );
       })}
