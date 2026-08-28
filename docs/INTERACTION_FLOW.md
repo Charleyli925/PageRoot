@@ -887,7 +887,7 @@ AI 候选通过检查并进入待打开状态后，正常连续性候选显示�
 审阅分析只读取冻结的修改前/修改后 HTML，不执行候选来生成差异，也没有 Review 专用截图、像素比较、主进程 owner 或 IPC。位置、顺序、属性、CSS、排版、换行、computed style、Canvas/SVG 像素和其他运行态呈现都不进入变化集合；页面脚本可以继续用于左右交互预览，但它产生的 DOM 或绘制结果不是审阅事实。
 
 1. 分析器只生成 `text` 与 `structure` 两类事实。文字使用 `insert/delete/replace` 和两侧独立的 `evidenceRanges`、`phraseGroups`、`anchorOffset`；`evidenceRanges` 是唯一字符级证据。正文相同的纯换行或排版变化生成零事实。
-2. 语义配对保持父级、单元类型和标签边界；重复、多解候选不猜。稳定兄弟之间唯一一个同父级、同标签、同自身结构签名的元素即使全文重写也继续配对，以便生成文字 diff。对同一 panel 内的 card/tile/metric/kpi/stat 式卡片或语义 section，唯一的稳定标题/label 与自身 compatibility 可作为不包含具体 parent wrapper 的 relocation key：它允许卡片跨同级顺序且内部 markup/说明同时改变时仍建立普通 weighted 对应，但绝不生成 movement 事实。未被显式身份或完整内容等更强证据消解的 relocation key 重复仍是歧义，必须保持未配对；普通段落不得因此跨 parent 配对。新增或删除的逻辑文字行（例如编号 `<br>` 行）是文字事实，不冒充元素。
+2. 语义配对默认只在已配对父级的兄弟之间进行，并保持单元类型和标签边界；重复、多解候选不猜。稳定兄弟之间唯一一个同父级、同标签、同自身结构签名的元素即使全文重写也继续配对，以便生成文字 diff。唯一允许跨父级的例外是 `semantic-pairing` 定义的真实 `section/article` 元素，或具有 card/tile/metric/kpi/stat 角色的卡片单元：它必须同时具有稳定标题/label、相容的自身 compatibility，且 relocation key 在当前冻结文档配对范围内全局唯一。该例外只用于确认两侧是同一元素，以保留其内部的 text/structure facts，仍只产生普通 weighted 对应，绝不生成 movement 事实。relocation key 在任一侧重复或出现其他歧义时必须保持 unmatched；普通段落不得因此跨父级配对。新增或删除的逻辑文字行（例如编号 `<br>` 行）是文字事实，不冒充元素。
 3. 真正只在一侧存在的元素写成 `新增元素` 或 `删除元素`。只标最外层 unmatched 子树；后代元素和后代文字不重复打标。新增/删除 `li`、`tr`、卡片或区块在全部与元素筛选中只有一个外层元素框，文字筛选不显示其内部逐字证据。
 4. 字符证据与可读范围只在布局时汇合。文字 marker 使用 `Range.getClientRects()` 生成短语、行或最小段落矩形；最终框必须是干净的轴对齐矩形并完整包含字符证据。元素事实使用元素自身的 border box。原始几何统一外扩 3px 后必须在 `[0, documentWidth] × [0, documentHeight]` 内钳制成唯一 canonical render footprint；框、遮罩孔、复合路径与对外 `data-*` 几何全部消费这同一份边界内结果。投影层不得为容纳 inset 放大 `documentWidth` 或制造新的横向滚动。
 5. 标签词表固定为：文字 `新增内容 / 删除内容 / 文本调整 / 段落改写`，元素 `新增元素 / 删除元素`。相邻同名标签可聚合为 `{说明} ×N`，但不改变事实、框、透明孔和可导航区域数。
@@ -911,10 +911,10 @@ AI 候选通过检查并进入待打开状态后，正常连续性候选显示�
 
 #### 静态事实配对与完整性
 
-静态配对只在已配对父级的兄弟之间进行：唯一显式 `id` 或受支持的稳定
+静态配对默认只在已配对父级的兄弟之间进行：唯一显式 `id` 或受支持的稳定
 `data-*` 才可作为身份；完整子树签名只用来跳过完全未变的分支；自身的非展示
 属性签名才可让唯一的空 Canvas、SVG、媒体、表单或容器成为候选。`class`、位置
-和跨父级相似性都不是身份，多解保持 unmatched。可信分析若需要向同一元素加入
+和跨父级相似性本身都不是身份，多解保持 unmatched。跨父级只有上述全局唯一 relocation key 例外：它仅限真实 `section/article` 或 card/tile/metric/kpi/stat 角色单元，必须具有稳定标题/label 和自身 compatibility，只保留同一元素内部的 text/structure facts，不产生 movement fact；重复或歧义仍保持 unmatched。可信分析若需要向同一元素加入
 第 25 个不同 canonical fact，整个分析明确失败；解析端的事实和字节预算仍
 fail-closed，绝不把未访问或未投影部分当作未变化。
 
