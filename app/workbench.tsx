@@ -175,7 +175,7 @@ import {
 } from "./workbench/workspace-render-snapshot.js";
 import {
   WorkbenchFileHeaderView,
-  WorkbenchHeaderToolbar,
+  WorkbenchHeaderView,
 } from "./workbench/file-header-view";
 import {
   ProjectPanelContainer,
@@ -192,7 +192,7 @@ import {
 } from "./workbench/presentation";
 import { deriveWorkbenchInspector } from "./workbench/inspector-presentation.js";
 import { RunConversationOutlet } from "./workbench/run-conversation-outlet";
-import AiReviewWorkspace from "./workbench/AiReviewWorkspace";
+import { WorkbenchReviewOverlay } from "./workbench/workbench-review-overlay";
 import WorkbenchDocumentSurfaceCache from "./workbench/WorkbenchDocumentSurfaceCache";
 import ReviewAnalysisPrewarm, {
   prepareReviewAnalysis,
@@ -208,8 +208,10 @@ import {
 import { markProjectApplied, markProjectHydrationStage, RendererStartupPerformance } from "./workbench/performance-timeline";
 import type { ReviewDocuments } from "./workbench/review-document";
 import { useRuntimeBridgeConnectionReady } from "./workbench/runtime-bridge-connection";
-import { WorkbenchHeaderShell } from "./workbench/workbench-header-shell";
 import { WorkbenchTabBarContainer } from "./workbench/workbench-navigation-container";
+import { WorkbenchResizer } from "./workbench/workbench-resizer";
+import { createWorkbenchModeHandlers } from "./workbench/workbench-mode-handlers";
+import { deriveWorkbenchHeaderCapabilities } from "./workbench/workbench-header-projection";
 import {
   activeRunOperationKey,
   currentWorkingCopyPresentation,
@@ -407,6 +409,7 @@ export default function Workbench() {
   const deferredEditorReplayRef = useRef<{
     exportCurrentHtml?: () => void;
     reloadCurrentSource?: () => void;
+    reloadReview?: () => void;
     requestUserFlush?: () => void;
     requestSourceHistoryAction?: (
       direction: SourceHistoryDirection,
@@ -666,7 +669,6 @@ export default function Workbench() {
   const viewMode = versionSnapshot.viewMode;
   const [canvasMode, setCanvasMode] = useState<CanvasMode>("edit");
   const aiSourceFileName = localFileNameFromSourcePath(sourcePath) || projectName;
-  const [canvasReloadRevision, setCanvasReloadRevision] = useState(0);
   // The AI conversation sidebar. All of its React state lives in this hook, so
   // the Workbench gains one hook call and no extra budget.
   // Declared before the conversation hook because the sidebar stays docked
@@ -5893,36 +5895,19 @@ export default function Workbench() {
     && typeof window !== "undefined"
     && window.htmlAIProjects?.openInDefaultBrowser,
   );
-  const reviewAvailable = Boolean(
-    activeRun?.status === "ready-to-open"
-    && activeRun.readyPayload
-    && !readyReviewSession
-    && !reviewPreparing,
-  );
-  const canShowInFinder = canOpenProjectRootInFolder || canShowCurrentFileInFolder;
-  const canOpenCurrentHtml = Boolean(
-    canOpenCurrentHtmlInDefaultBrowser
-    && persistState === "idle"
-    && editRevision === lastPersistedRevision,
-  );
-  const canExportCurrentHtml = Boolean(
-    workspaceController
-    && !projectHydrating
-    && !projectLoadError
-    && !viewTransitioning,
-  );
-  const canReloadCurrentSource = Boolean(
-    sourcePath
-    && viewMode === "current"
-    && persistState === "idle"
-    && editRevision === lastPersistedRevision
-    && !runInProgress
-    && !projectHydrating
-    && !projectLoadError
-    && !workspaceIssue
-    && !externalSourcePreview
-    && !viewTransitioning
-    && !workspaceController?.hasDocumentHistoryAction,
+  const {
+    reviewAvailable,
+    canShowInFinder,
+    canOpenCurrentHtml,
+    canExportCurrentHtml,
+    canReloadCurrentSource,
+  } = deriveWorkbenchHeaderCapabilities(
+    activeRun?.status, Boolean(activeRun?.readyPayload), Boolean(readyReviewSession),
+    reviewPreparing, canOpenProjectRootInFolder, canShowCurrentFileInFolder,
+    canOpenCurrentHtmlInDefaultBrowser, persistState, editRevision, lastPersistedRevision,
+    Boolean(workspaceController), projectHydrating, Boolean(projectLoadError),
+    viewTransitioning, sourcePath, viewMode, runInProgress, Boolean(workspaceIssue),
+    Boolean(externalSourcePreview), Boolean(workspaceController?.hasDocumentHistoryAction),
   );
   const pendingRunOutcome = Boolean(
     activeRun?.requestId === "pending" && projectLocked,
@@ -6118,47 +6103,42 @@ export default function Workbench() {
     />
   );
 
+  const createModeHandlers = () => createWorkbenchModeHandlers({
+    externalSourcePreview: Boolean(externalSourcePreview),
+    canvasMode,
+    browserPreviewOnly,
+    interactionLocked,
+    previewToEditPendingRef,
+    pageViewDocumentKeyRef,
+    interactionPreviewRef,
+    editorRef,
+    returnToEditingFromExternalPreview,
+    setPageViewContext,
+    invalidateEditCanvasRenderAck,
+    commentCanvasPort,
+    updateFocusedComment,
+    setCanvasMode,
+    deferEditorCommand,
+    isViewTransitioning,
+  });
+  const onSelectEdit = () => createModeHandlers().onSelectEdit();
+  const onSelectPreview = () => createModeHandlers().onSelectPreview();
+
   // The review compares immutable snapshots prepared against the
   // pre-promotion source identity. Accepting promotes the Working Copy to a
   // new path while this overlay is still visible; the live path would rebuild
   // both preview sessions (and retitle the header) mid-accept for nothing.
   const readyReviewOverlay = readyReviewSession ? (
-    <AiReviewWorkspace
-      embedded
-      fileName={
-        localFileNameFromSourcePath(readyReviewSession.sourcePath)
-        || currentSourceFileName
-      }
-      beforeLabel={readyReviewSession.beforeLabel}
-      afterLabel={readyReviewSession.afterLabel}
-      sessionId={readyReviewSession.sessionId}
-      documents={readyReviewSession.documents}
-      sourcePath={readyReviewSession.sourcePath || undefined}
+    <WorkbenchReviewOverlay
+      session={readyReviewSession}
+      fileName={localFileNameFromSourcePath(readyReviewSession.sourcePath) || currentSourceFileName}
       accepting={openingReadyVersion}
-      error={activeRun?.status === "ready-to-open" ? activeRun.error : undefined}
-      notice={activeRun?.candidateAssessment?.status === "attention"
-        ? "这个候选可以打开，但与上一版的共同特征较少。请重点核对整页内容，再决定是否接受。"
-        : undefined}
+      activeRunError={activeRun?.status === "ready-to-open" ? activeRun.error : undefined}
+      candidateAssessmentAttention={activeRun?.candidateAssessment?.status === "attention"}
       onAbout={openAboutPageRoot}
-      onReturnBefore={() => {
-        void (async () => {
-          const restored = await cancelActiveRun({
-            reason: "declined-ai-candidate-after-review",
-          });
-          if (!restored) return;
-          setToast({
-            title: `已返回 AI 修改前的${readyReviewSession.beforeLabel}`,
-            message: `${readyReviewSession.afterLabel} 与本轮记录仍已保留；当前页面可直接继续编辑。`,
-            tone: "success",
-            dedupeKey: "ready-version-returned-before",
-          });
-        })();
-      }}
-      onAccept={() => {
-        void activateReadyResult({
-          reviewed: true,
-        });
-      }}
+      onCancelBefore={cancelActiveRun}
+      onNotify={setToast}
+      onAccept={() => void activateReadyResult({ reviewed: true })}
       onRevealAiTask={() => void revealAiTaskInFinder()}
       assistantEntry={aiAssistantEntry}
       sidebar={aiConversation.visible && runCapability ? (
@@ -6172,7 +6152,15 @@ export default function Workbench() {
           deliveryMode={currentAgentDeliveryMode}
         />
       ) : null}
-      reloadRevision={canvasReloadRevision}
+      registerReload={(reload) => {
+        const previous = deferredEditorReplayRef.current.reloadReview;
+        deferredEditorReplayRef.current.reloadReview = reload;
+        return () => {
+          if (deferredEditorReplayRef.current.reloadReview === reload) {
+            deferredEditorReplayRef.current.reloadReview = previous;
+          }
+        };
+      }}
     />
   ) : null;
   const workbenchInspector = deriveWorkbenchInspector({ canvasMode, aiVisible: aiConversation.visible && Boolean(runCapability) && !readyReviewSession, reviewVisible: Boolean(readyReviewSession), commentsAvailable: Boolean(workspaceController) });
@@ -6370,8 +6358,8 @@ export default function Workbench() {
         onBeforeSelect={rememberWorkbenchTabPresentation}
         onOutcome={presentWorkbenchTabOutcome}
       /> : null}
-      {!startPageActive ? <WorkbenchHeaderShell>
-        <WorkbenchHeaderToolbar
+      {!startPageActive ? <>
+        <WorkbenchHeaderView
           runInProgress={runInProgress}
           canvasMode={canvasMode}
           browserPreviewOnly={browserPreviewOnly}
@@ -6425,72 +6413,14 @@ export default function Workbench() {
             canReloadCurrentSource,
             onReloadCurrentSource: () => void reloadCurrentSource(),
           }}
-          onSelectEdit={() => {
-            if (externalSourcePreview) {
-              returnToEditingFromExternalPreview();
-              return;
-            }
-            if (canvasMode !== "preview") {
-              setCanvasMode("edit");
-              return;
-            }
-            if (previewToEditPendingRef.current) return;
-            previewToEditPendingRef.current = true;
-            const expectedDocumentKey = pageViewDocumentKeyRef.current;
-            const captureContext = interactionPreviewRef.current
-              ?.capturePageViewContext() ?? Promise.resolve(null);
-            void captureContext
-              .catch(() => null)
-              .then((capturedContext) => {
-                if (
-                  pageViewDocumentKeyRef.current !== expectedDocumentKey
-                  || isViewTransitioning()
-                ) return;
-                const nextContext = (
-                  capturedContext?.documentKey === expectedDocumentKey
-                ) ? capturedContext : null;
-                setPageViewContext(nextContext);
-                editorRef.current?.applyPageViewContext(nextContext);
-                invalidateEditCanvasRenderAck();
-                setCanvasMode("edit");
-              })
-              .finally(() => {
-                previewToEditPendingRef.current = false;
-              });
-          }}
-          onSelectPreview={() => {
-            if (!browserPreviewOnly && interactionLocked) return;
-            if (browserPreviewOnly) {
-              setCanvasMode("preview");
-              return;
-            }
-            const enterPreview = () => {
-              const committed = editorRef.current?.fencePendingEdit({
-                resumeEditing: false,
-                trigger: "manual",
-              });
-              if (!committed || !committed.ok) {
-                editorRef.current?.showCommitBlocked(
-                  committed?.reason || "请点回文字完成输入，再进入预览。",
-                );
-                return;
-              }
-              editorRef.current?.clearSelection();
-              setPageViewContext(null);
-              editorRef.current?.applyPageViewContext(null);
-              commentCanvasPort.setSelection(null);
-              updateFocusedComment(null);
-              setCanvasMode("preview");
-            };
-            if (deferEditorCommand("project-switch", enterPreview)) return;
-            enterPreview();
-          }}
+          onSelectEdit={onSelectEdit}
+          onSelectPreview={onSelectPreview}
           onOpenReview={() => {
             if (reviewAvailable) void reviewReadyResult();
           }}
           onRefreshCanvas={() => {
             if (readyReviewOverlay) {
-              setCanvasReloadRevision((revision) => revision + 1);
+              deferredEditorReplayRef.current.reloadReview?.();
               return;
             }
             if (canvasMode === "preview") interactionPreviewRef.current?.reload();
@@ -6513,7 +6443,7 @@ export default function Workbench() {
           accept=".html,.htm,text/html"
           onChange={(event) => void handleBrowserFile(event)}
         />
-      </WorkbenchHeaderShell> : null}
+      </> : null}
 
       {startupIssue ? (
         <section className="startup-issue" role="alert">
@@ -6815,6 +6745,7 @@ export default function Workbench() {
 
         {workbenchInspector === "ai" && runCapability ? (
           <aside className="ai-conversation-aside" aria-label="AI 助手侧栏">
+            <WorkbenchResizer kind="inspector" />
             <RunConversationOutlet
               capability={runCapability}
               sidebarProps={{

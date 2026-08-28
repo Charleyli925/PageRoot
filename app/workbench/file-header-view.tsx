@@ -15,7 +15,10 @@ import type {
 } from "./types";
 import { ReviewToolbarControls } from "./review-toolbar-controls";
 import { WorkbenchMoreMenu, type WorkbenchMoreMenuProps } from "./workbench-more-menu";
-import { WorkbenchHeaderActions } from "./workbench-header-shell";
+import {
+  WorkbenchHeaderActions,
+  WorkbenchHeaderShell,
+} from "./workbench-header-shell";
 import { WorkbenchTooltipHost } from "./workbench-tooltip";
 
 export type WorkbenchFileHeaderViewProps = {
@@ -88,6 +91,34 @@ export function WorkbenchFileHeaderView({
   );
 }
 
+export type WorkbenchHeaderToolbarProps = {
+  runInProgress: boolean;
+  canvasMode: CanvasMode;
+  browserPreviewOnly: boolean;
+  viewMode: string;
+  interactionLocked: boolean;
+  projectHydrating: boolean;
+  viewTransitioning: boolean;
+  attachmentUploadCount: number;
+  drawer: Drawer;
+  recentRunOutcome: unknown;
+  terminalRun: unknown;
+  reviewActive: boolean;
+  reviewAvailable: boolean;
+  reviewPreparing: boolean;
+  refreshAvailable: boolean;
+  aiConversationVisible: boolean;
+  aiAssistantEntry: ReactNode;
+  fileStatus: ReactNode;
+  moreMenu: WorkbenchMoreMenuProps;
+  onSelectEdit: () => void;
+  onSelectPreview: () => void;
+  onOpenReview: () => void;
+  onRefreshCanvas: () => void;
+  onToggleProjectPanel: () => void;
+  reopenRecentRunOutcome: () => void;
+};
+
 export function WorkbenchHeaderToolbar({
   runInProgress,
   canvasMode,
@@ -114,155 +145,142 @@ export function WorkbenchHeaderToolbar({
   onRefreshCanvas,
   onToggleProjectPanel,
   reopenRecentRunOutcome,
-}: {
-  runInProgress: boolean;
-  canvasMode: CanvasMode;
-  browserPreviewOnly: boolean;
-  viewMode: string;
-  interactionLocked: boolean;
-  projectHydrating: boolean;
-  viewTransitioning: boolean;
-  attachmentUploadCount: number;
-  drawer: Drawer;
-  recentRunOutcome: unknown;
-  terminalRun: unknown;
-  reviewActive: boolean;
-  reviewAvailable: boolean;
-  reviewPreparing: boolean;
-  refreshAvailable: boolean;
-  aiConversationVisible: boolean;
-  aiAssistantEntry: ReactNode;
-  fileStatus: ReactNode;
-  moreMenu: WorkbenchMoreMenuProps;
-  onSelectEdit: () => void;
-  onSelectPreview: () => void;
-  onOpenReview: () => void;
-  onRefreshCanvas: () => void;
-  onToggleProjectPanel: () => void;
-  reopenRecentRunOutcome: () => void;
-}) {
+}: WorkbenchHeaderToolbarProps) {
   return (
     <>
         <WorkbenchHeaderActions aria-label="模式、审阅、项目和文件操作">
-          <div
-            className="canvas-mode-switch"
-            role="group"
-            aria-label="工作模式"
-            data-mode={reviewActive ? "review" : canvasMode}
-            data-tooltip={runInProgress ? "本轮还在进行，结束或采纳后可回到编辑" : undefined}
-          >
-            <button
-              type="button"
-              aria-pressed={!reviewActive && canvasMode === "edit"}
-              disabled={reviewActive || browserPreviewOnly || runInProgress || viewMode === "history"}
-              data-tooltip={
-                browserPreviewOnly
-                  ? "浏览器预览为只读模式"
-                  : reviewActive
-                    ? "完成审阅后可继续编辑"
-                  : runInProgress
-                    ? "本轮还在进行，结束或采纳后可回到编辑"
-                    : undefined
-              }
-              onClick={onSelectEdit}
+          <div className="workbench-toolbar-primary">
+            <div
+              className="canvas-mode-switch"
+              role="group"
+              aria-label="工作模式"
+              data-mode={reviewActive ? "review" : canvasMode}
+              data-tooltip={runInProgress ? "本轮还在进行，结束或采纳后可回到编辑" : undefined}
             >
-              <PencilSimpleIcon aria-hidden="true" size={16} weight="bold" />
-              编辑
-            </button>
-            <button
-              type="button"
-              aria-pressed={!reviewActive && canvasMode === "preview"}
-              disabled={reviewActive || (!browserPreviewOnly && interactionLocked)}
-              data-tooltip={reviewActive
-                ? "完成审阅后可继续预览"
-                : browserPreviewOnly
-                ? "只读运行页面自身的脚本和交互；操作不会保存"
-                : interactionLocked
-                  ? "当前状态只能使用编辑画布"
-                  : undefined}
-              onClick={onSelectPreview}
-            >
-              <EyeIcon aria-hidden="true" size={16} weight="bold" />
-              预览
-            </button>
-            <button
-              type="button"
-              aria-pressed={reviewActive}
-              aria-label={reviewActive
-                ? "审阅，正在审阅 AI 修改"
-                : reviewAvailable
-                  ? "审阅，有 AI 修改待查看"
-                  : "审阅"}
-              disabled={reviewActive || reviewPreparing || !reviewAvailable}
-              data-review-available={reviewAvailable ? "true" : undefined}
-              data-tooltip={reviewActive
-                ? "正在审阅 AI 修改"
-                : reviewPreparing
-                  ? "正在准备审阅…"
+              <button
+                type="button"
+                aria-pressed={!reviewActive && canvasMode === "edit"}
+                disabled={reviewActive || browserPreviewOnly || runInProgress || viewMode === "history"}
+                data-tooltip={
+                  browserPreviewOnly
+                    ? "浏览器预览为只读模式"
+                    : reviewActive
+                      ? "完成审阅后可继续编辑"
+                    : runInProgress
+                      ? "本轮还在进行，结束或采纳后可回到编辑"
+                      : undefined
+                }
+                onClick={onSelectEdit}
+              >
+                <PencilSimpleIcon aria-hidden="true" size={16} weight="bold" />
+                编辑
+              </button>
+              <button
+                type="button"
+                aria-pressed={!reviewActive && canvasMode === "preview"}
+                disabled={reviewActive || (!browserPreviewOnly && interactionLocked)}
+                data-tooltip={reviewActive
+                  ? "完成审阅后可继续预览"
+                  : browserPreviewOnly
+                  ? "只读运行页面自身的脚本和交互；操作不会保存"
+                  : interactionLocked
+                    ? "当前状态只能使用编辑画布"
+                    : undefined}
+                onClick={onSelectPreview}
+              >
+                <EyeIcon aria-hidden="true" size={16} weight="bold" />
+                预览
+              </button>
+              <button
+                type="button"
+                aria-pressed={reviewActive}
+                aria-label={reviewActive
+                  ? "审阅，正在审阅 AI 修改"
                   : reviewAvailable
-                    ? undefined
-                    : "有待审阅修改时自动可用"}
-              onClick={onOpenReview}
+                    ? "审阅，有 AI 修改待查看"
+                    : "审阅"}
+                disabled={reviewActive || reviewPreparing || !reviewAvailable}
+                data-review-available={reviewAvailable ? "true" : undefined}
+                data-tooltip={reviewActive
+                  ? "正在审阅 AI 修改"
+                  : reviewPreparing
+                    ? "正在准备审阅…"
+                    : reviewAvailable
+                      ? undefined
+                      : "有待审阅修改时自动可用"}
+                onClick={onOpenReview}
+              >
+                <CheckCircleIcon aria-hidden="true" size={15} weight="duotone" />
+                审阅
+                {reviewAvailable ? <span className="review-attention-dot" aria-hidden="true" /> : null}
+              </button>
+            </div>
+          </div>
+          <div className="workbench-toolbar-center">
+            <span className="toolbar-section-divider" aria-hidden="true" />
+            <div
+              id="workbench-review-tools-slot"
+              className="workbench-review-tools-slot"
+              aria-label="审阅工具与结果操作"
             >
-              <CheckCircleIcon aria-hidden="true" size={15} weight="duotone" />
-              审阅
-              {reviewAvailable ? <span className="review-attention-dot" aria-hidden="true" /> : null}
-            </button>
+              {!reviewActive ? <ReviewToolbarControls disabled /> : null}
+            </div>
+            <span className="toolbar-section-divider" aria-hidden="true" />
           </div>
-          <span className="toolbar-section-divider" aria-hidden="true" />
-          <div
-            id="workbench-review-tools-slot"
-            className="workbench-review-tools-slot"
-            aria-label="审阅工具与结果操作"
-          >
-            {!reviewActive ? <ReviewToolbarControls disabled /> : null}
-          </div>
-          <span className="toolbar-section-divider" aria-hidden="true" />
-          {fileStatus}
-          <span className="toolbar-flex-spacer" aria-hidden="true" />
-          <button
-            className="workbench-refresh-button"
-            type="button"
-            aria-label={reviewActive ? "刷新审阅画布" : canvasMode === "preview" ? "刷新预览" : "刷新画布"}
-            disabled={!refreshAvailable}
-            data-tooltip={reviewActive
-              ? "刷新审阅画布"
-              : canvasMode === "preview"
-                ? "刷新预览"
-                : "进入预览或审阅后可刷新"}
-            onClick={onRefreshCanvas}
-          >
-            <ArrowClockwiseIcon aria-hidden="true" size={17} weight="bold" />
-          </button>
-          <button
-            className="project-button"
-            type="button"
-            aria-expanded={drawer === "files"}
-            disabled={projectHydrating || viewTransitioning || attachmentUploadCount > 0}
-            onClick={onToggleProjectPanel}
-          >
-            <FolderOpenIcon aria-hidden="true" size={18} weight="duotone" />
-            项目
-          </button>
-          {recentRunOutcome && !runInProgress && !terminalRun ? (
+          <div className="workbench-toolbar-actions">
+            <div className="workbench-toolbar-status">{fileStatus}</div>
             <button
-              className="recent-run-button"
+              className="workbench-refresh-button"
               type="button"
-              aria-expanded={aiConversationVisible}
-              onClick={reopenRecentRunOutcome}
+              aria-label={reviewActive ? "刷新审阅画布" : canvasMode === "preview" ? "刷新预览" : "刷新画布"}
+              disabled={!refreshAvailable}
+              data-tooltip={reviewActive
+                ? "刷新审阅画布"
+                : canvasMode === "preview"
+                  ? "刷新预览"
+                  : "进入预览或审阅后可刷新"}
+              onClick={onRefreshCanvas}
             >
-              <ClockCounterClockwiseIcon
-                aria-hidden="true"
-                size={18}
-                weight="duotone"
-              />
-              上轮处理
+              <ArrowClockwiseIcon aria-hidden="true" size={17} weight="bold" />
             </button>
-          ) : null}
-          {aiAssistantEntry}
-          <WorkbenchMoreMenu {...moreMenu} />
+            <button
+              className="project-button"
+              type="button"
+              aria-expanded={drawer === "files"}
+              disabled={projectHydrating || viewTransitioning || attachmentUploadCount > 0}
+              onClick={onToggleProjectPanel}
+            >
+              <FolderOpenIcon aria-hidden="true" size={18} weight="duotone" />
+              项目
+            </button>
+            {recentRunOutcome && !runInProgress && !terminalRun ? (
+              <button
+                className="recent-run-button"
+                type="button"
+                aria-expanded={aiConversationVisible}
+                onClick={reopenRecentRunOutcome}
+              >
+                <ClockCounterClockwiseIcon
+                  aria-hidden="true"
+                  size={18}
+                  weight="duotone"
+                />
+                上轮处理
+              </button>
+            ) : null}
+            {aiAssistantEntry}
+            <WorkbenchMoreMenu {...moreMenu} />
+          </div>
         </WorkbenchHeaderActions>
       <WorkbenchTooltipHost />
     </>
+  );
+}
+
+export function WorkbenchHeaderView(props: WorkbenchHeaderToolbarProps) {
+  return (
+    <WorkbenchHeaderShell>
+      <WorkbenchHeaderToolbar {...props} />
+    </WorkbenchHeaderShell>
   );
 }

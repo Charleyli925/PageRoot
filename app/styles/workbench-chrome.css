@@ -7,24 +7,24 @@
    -------------------------------------------------------------------------- */
 
 .workbench {
-  --chrome-page-surface: #f3f3f5;
-  --chrome-sidebar-surface: rgb(237 236 244 / 88%);
-  --chrome-tabbar-surface: rgb(231 230 238 / 92%);
-  --chrome-toolbar-surface: rgb(245 244 248 / 94%);
-  --chrome-inspector-surface: rgb(239 238 246 / 96%);
+  --chrome-page-surface: #f4f4f5;
+  --chrome-sidebar-surface: rgb(239 239 243 / 72%);
+  --chrome-tabbar-surface: rgb(237 237 241 / 84%);
+  --chrome-toolbar-surface: rgb(247 247 249 / 90%);
+  --chrome-inspector-surface: rgb(243 243 247 / 92%);
   --chrome-canvas-surface: #fff;
-  --chrome-divider: rgb(42 39 57 / 10%);
-  --chrome-text: #3f3c49;
-  --chrome-muted: #716d7b;
-  --chrome-accent: #625a9e;
-  --chrome-hover: rgb(91 83 143 / 6%);
-  --chrome-active: rgb(91 83 143 / 11%);
-  --chrome-focus: rgb(91 79 173 / 58%);
+  --chrome-divider: rgb(42 42 49 / 9%);
+  --chrome-text: #414148;
+  --chrome-muted: #73737c;
+  --chrome-accent: #706c99;
+  --chrome-hover: rgb(78 78 91 / 6%);
+  --chrome-active: rgb(78 78 91 / 10%);
+  --chrome-focus: rgb(91 82 157 / 58%);
   background: var(--chrome-page-surface);
 }
 
 body {
-  background-color: #f3f3f5;
+  background-color: #f4f4f5;
   background-image: none;
 }
 
@@ -34,6 +34,11 @@ body {
   background: var(--chrome-tabbar-surface);
   -webkit-backdrop-filter: blur(22px) saturate(112%);
   backdrop-filter: blur(22px) saturate(112%);
+}
+
+.workbench > .workbench-header > .header-actions {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
 }
 
 .workbench > .workbench-header {
@@ -193,24 +198,27 @@ body {
 }
 
 .workbench-header .canvas-mode-switch button:focus-visible,
-.workbench-header .header-actions > button:focus-visible,
+.workbench-header .header-actions button:focus-visible,
 .workbench-header .workbench-more-menu-trigger:focus-visible {
   outline: 2px solid var(--chrome-focus);
   outline-offset: 2px;
 }
 
-.workbench-header .header-actions > button:not(.header-send-button):hover:not(:disabled),
-.workbench-header .header-actions > .project-button:hover:not(:disabled),
-.workbench-header .header-actions > .project-button[aria-expanded="true"],
-.workbench-header .header-actions > .recent-run-button:hover:not(:disabled),
-.workbench-header .header-actions > .recent-run-button[aria-expanded="true"] {
+.workbench-header .workbench-toolbar-actions > button:not(.header-send-button):hover:not(:disabled),
+.workbench-header .workbench-toolbar-actions > .project-button:hover:not(:disabled),
+.workbench-header .workbench-toolbar-actions > .project-button[aria-expanded="true"],
+.workbench-header .workbench-toolbar-actions > .recent-run-button:hover:not(:disabled),
+.workbench-header .workbench-toolbar-actions > .recent-run-button[aria-expanded="true"],
+.workbench-header .workbench-toolbar-actions .workbench-more-menu-trigger:hover:not(:disabled),
+.workbench-header .workbench-toolbar-actions .workbench-more-menu-trigger[aria-expanded="true"] {
   background: var(--chrome-hover) !important;
   box-shadow: none;
   color: var(--chrome-text) !important;
   transform: none;
 }
 
-.workbench-header .header-actions > button:not(.header-send-button):active:not(:disabled) {
+.workbench-header .workbench-toolbar-actions > button:not(.header-send-button):active:not(:disabled),
+.workbench-header .workbench-toolbar-actions .workbench-more-menu-trigger:active:not(:disabled) {
   background: var(--chrome-active) !important;
   transform: none;
 }
@@ -228,6 +236,10 @@ body {
   max-width: none;
   flex: none;
   align-self: center;
+}
+
+.workbench-toolbar-status .window-file {
+  max-width: 100%;
 }
 
 .window-file .file-meta {
@@ -289,6 +301,88 @@ body {
 .window-file .save-status:focus-visible {
   outline: 2px solid var(--chrome-focus);
   outline-offset: 2px;
+}
+
+/* A generous but quiet hit strip makes both dividers discoverable without
+   adding another visible chrome column. The grip itself remains small. */
+.workbench-resizer {
+  -webkit-app-region: no-drag;
+  position: absolute;
+  z-index: 90;
+  top: 0;
+  bottom: 0;
+  width: 18px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--chrome-muted);
+  cursor: col-resize;
+  opacity: 0;
+  touch-action: none;
+  transition: opacity 140ms ease, background-color 140ms ease;
+}
+
+.workbench-resizer-sidebar {
+  right: 0;
+}
+
+.workbench-resizer-inspector {
+  left: 0;
+}
+
+.workbench-resizer:hover,
+.workbench-resizer:focus-visible,
+.workbench-resizer:active,
+.workbench[data-resizing] .workbench-resizer {
+  opacity: 1;
+}
+
+.workbench-resizer:hover,
+.workbench-resizer:focus-visible,
+.workbench[data-resizing] .workbench-resizer {
+  background: rgb(78 78 91 / 4%);
+}
+
+.workbench-resizer:focus-visible {
+  outline: 2px solid var(--chrome-focus);
+  outline-offset: -2px;
+}
+
+.workbench-resizer-grip {
+  width: 4px;
+  height: 28px;
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: 3px;
+  border-radius: 999px;
+  background: rgb(78 78 91 / 8%);
+  transition: background-color 140ms ease, height 140ms ease;
+}
+
+.workbench-resizer-grip > span {
+  width: 2px;
+  height: 2px;
+  border-radius: 50%;
+  background: currentcolor;
+}
+
+.workbench-resizer:hover .workbench-resizer-grip,
+.workbench-resizer:focus-visible .workbench-resizer-grip,
+.workbench[data-resizing] .workbench-resizer-grip {
+  height: 36px;
+  background: rgb(112 108 153 / 20%);
+}
+
+.workbench[data-resizing="sidebar"] .workbench-resizer-inspector,
+.workbench[data-resizing="inspector"] .workbench-resizer-sidebar {
+  pointer-events: none;
+}
+
+.workbench[data-resizing] {
+  transition: none;
 }
 
 .workbench-refresh-button {
@@ -353,11 +447,11 @@ body {
 }
 
 .workbench-more-menu {
-  --chrome-divider: rgb(42 39 57 / 10%);
-  --chrome-text: #3f3c49;
-  --chrome-hover: rgb(91 83 143 / 6%);
-  --chrome-active: rgb(91 83 143 / 11%);
-  --chrome-accent: #625a9e;
+  --chrome-divider: rgb(42 42 49 / 9%);
+  --chrome-text: #414148;
+  --chrome-hover: rgb(78 78 91 / 6%);
+  --chrome-active: rgb(78 78 91 / 10%);
+  --chrome-accent: #706c99;
   position: fixed;
   z-index: 1000;
   width: 220px;
@@ -367,8 +461,8 @@ body {
   padding: 6px;
   border: 1px solid var(--chrome-divider);
   border-radius: 10px;
-  background: rgb(248 247 251 / 98%);
-  box-shadow: 0 10px 26px rgb(42 39 57 / 14%), 0 2px 6px rgb(42 39 57 / 7%);
+  background: rgb(250 250 252 / 98%);
+  box-shadow: 0 10px 26px rgb(42 42 49 / 12%), 0 2px 6px rgb(42 42 49 / 6%);
   -webkit-backdrop-filter: blur(20px) saturate(118%);
   backdrop-filter: blur(20px) saturate(118%);
 }
@@ -456,7 +550,9 @@ body {
 
 @media (prefers-reduced-motion: reduce) {
   .workbench-sidebar-toggle,
-  .workbench-tooltip-overlay {
+  .workbench-tooltip-overlay,
+  .workbench-resizer,
+  .workbench-resizer-grip {
     transition: none;
   }
 

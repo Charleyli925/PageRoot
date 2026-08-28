@@ -75,7 +75,10 @@ test("global sidebar owns the full shell column and start page has no card surfa
     css,
     /\.workbench\[data-left-sidebar="open"\] \{\s*--workbench-sidebar-width:\s*264px/u,
   );
-  assert.match(css, /--chrome-sidebar-surface:\s*rgb\(237 236 244 \/ 88%\)/u);
+  assert.match(css, /--chrome-sidebar-surface:\s*rgb\(239 239 243 \/ 72%\)/u);
+  assert.match(css, /\.workbench-toolbar-primary,\n\.workbench-toolbar-center,\n\.workbench-toolbar-actions \{/u);
+  assert.match(css, /grid-template-columns:\s*180px minmax\(0, 1fr\) auto/u);
+  assert.match(css, /\.workbench-resizer\s*\{[\s\S]*?-webkit-app-region:\s*no-drag/u);
   assert.match(css, /\.workbench-sidebar-titlebar\s*\{[\s\S]*?border-bottom:\s*0/u);
   assert.match(css, /\.workbench-tooltip-overlay\s*\{[\s\S]*?position:\s*fixed/u);
   const sidebar = lastCssRule(css, ".workbench-global-sidebar");

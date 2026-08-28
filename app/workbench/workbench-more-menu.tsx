@@ -129,7 +129,12 @@ export function WorkbenchMoreMenu({
         return;
       }
       if (event.key === "Tab") {
-        setOpen(false);
+        // The menu is portalled to body, so allowing the browser's default Tab
+        // order would jump past the trigger to the first document tab. Return
+        // to the owning control first; the next Tab then follows the toolbar's
+        // normal order (and Shift+Tab follows it in reverse).
+        event.preventDefault();
+        close();
         return;
       }
       const currentIndex = visibleItems.findIndex(

@@ -11,6 +11,7 @@ import {
 } from "@phosphor-icons/react";
 import type { WorkbenchTab, WorkbenchTabsSnapshot } from "../application/workbench-tabs-session.js";
 import type { ApplicationUpdateResult, RecentProject, RegisteredProject } from "./types";
+import { WorkbenchResizer } from "./workbench-resizer";
 
 export function nextWorkbenchTabIndex(
   key: string,
@@ -282,6 +283,7 @@ export function WorkbenchGlobalSidebar({
             </button>
           ))}
           </div>
+          <WorkbenchResizer kind="sidebar" />
         </>
       ) : null}
     </aside>
