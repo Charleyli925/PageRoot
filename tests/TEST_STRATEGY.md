@@ -84,11 +84,9 @@ step summary 里。
   aggregate snapshot/event stream。Workbench 只保留 file input、host adapter 和
   Outcome/Event 的展示映射；专项 Node 集与完整 Electron 套件共同证明真实
   close/open/hydration 路径。
-- `ProjectRulesWorkflow`：fake Bridge、Scheduler、Project/Run Session 与窄
-  presentation port 验证 `PROJECT.md` 的 700ms debounce、保存中继续输入时的完整 drain、
-  unknown-write 单次 authority reconciliation、late read/write stale fence、run lock、
-  dispose timer fence 与显式还原先退役原生输入节点。`ProjectRulesSession` 只验证 working
-  copy/composition/save projection；Workbench 只投影 Controller snapshot 并转发 intent。
+- `ProjectRulesWorkflow`：fake Bridge、Scheduler 与 Project/Run Session 验证 `PROJECT.md` 的
+  700ms debounce、保存中继续输入时的完整 drain、unknown-write 单次 authority
+  reconciliation、late read/write stale fence、run lock、dispose timer fence 与显式还原先退役原生输入节点。`ProjectRulesSession` 只验证 working copy/composition/save projection；Workbench 只转发规则工作流 intent，不再消费独立的规则展示 Facet。
 - `CommentWorkflow`：fake Bridge、RecoveryStore 和现有 Comment/Draft Session 证明
   lazy registration、单次 Draft 持久化、附件部分成功、跨项目迟到上传补偿、编辑取消
   仅删除 staged 附件，以及 unknown Draft POST 只通过 authority query 收敛而不重复
@@ -98,7 +96,7 @@ step summary 里。
   Document/Comment Session 证明 source freeze 与 persisted SHA/revision 边界、一次
   Request、unknown POST 只读 authority reconciliation、A/B 并行 polling、dispose
   late-callback fence、取消/冲突 scoped identity，以及 clipboard failure 后只重试复制。
-  Workbench 只保留 intent 和 Outcome/Event 的 Drawer/Toast 映射，不持有 poll timer 或
+  Workbench 只保留 intent 和 Outcome/Event 的 Toast 映射，不持有 poll timer 或
   run mutation I/O。
 - `VersionWorkflow`：fake Bridge、Project/Document/Version/Run Session 与 Canvas/Hash
   Port 证明 Review candidate 只读且不可变、明确 activation 的完整 identity/hash/time
@@ -139,7 +137,7 @@ Workbench 只确认已提交 loading surface、传入窄 port 并消费快照。
   的 accept/ack，不暴露路径权威。
 - Bridge 集成环境：每个真实 Bridge 测试各自创建临时 root、workspace、sources、端口、子进程与 stdout/stderr；同一测试可为重启恢复顺序启动新进程，但不同测试绝不共享 workspace 或长寿命 Bridge。环境默认携带配置的 Bridge auth token，测试缺失/错误 token 时必须显式关闭或覆盖它；HTTP/连接失败保留 response text 与 Bridge 日志，不重试 mutation。
 - Agent Host/Policy contract：公共 owner 位于 `bridge/agent/policies/` 与 `bridge/agent/hosts/`；`tests/agent-provider-contract.test.mjs` 证明公共层只产生通用 Agent error/brand，旧 façade 在边界映射回既有 provider/transport error name、code 与 copy，并以 source literal gate 阻止 provider/transport ownership 回流。Discussion capability 和非 execution ticket 必须 fail-closed。`tests/qoder-acp-spike-client.test.mjs` 属于 Node integration owner，只使用合成 HTML、隔离的真实 v4 `ProjectFileRepository`、进程内 fake ACP Agent 与官方 finalizer。oracle 必须独立证明外部封存的 manifest Hash、精确 readOrder/role/media type、单一 Candidate 写路径与原子 no-replace 发布、无 shell 的精确 finalizer、session/permission/terminal 绑定、completion/output Hash、runtime authority drift、macOS `/var` realpath alias、事件/prompt 边界、timeout cancel 后拒绝晚到写入/finalizer、Agent 早退出与孤儿进程组清理，以及 Candidate ready 后 Working Copy 全量状态、manifest 和 Version 快照均未变化。
-- Product Agent Bridge：`tests/agent-provider-contract.test.mjs` 使用无用户路径/秘密的合成 provider/runtime fixture，拥有 legacy `qoder-acp` → `qoder`/`acp` 唯一 registry 分派、内部 installation digest/capabilities ticket、未知 provider/runtime fail-closed，以及 availability/preflight/start 的旧公开投影。`tests/agent-bridge-service.test.mjs` 拥有只读本地检查不运行 Qoder、同进程安装后重读、npmrc/nvm/Volta/fnm/mise 发现、非法包不误报未安装、trusted-local consent、使用前检查、一次性 execution ticket、最终 spawn identity、不泄露 command/path、持久 crash lease、task-keyed 幂等、取消、restart-interrupted、retry output refusal 与公开错误脱敏。`tests/run-workflow.test.mjs` 证明只读检查零 Request/冻结/剪贴板、`agentDelivery: qoder-acp`、Execution 投影、安装与登录引导剪贴板隔离、About 检查不授权稍后发送、同一发送意图的 ticket 只供紧接着的 Agent 启动复用，以及预检失败不解锁一张从未锁定的 Canvas。`tests/agent-bridge-workspace.test.mjs` 必须启动真实 Bridge 与 fake ACP 子进程，证明自动完成只产生 pending-review Candidate、Working Copy/Version 不变，取消先终止 Qoder 再 durable cancel，以及 Bridge 强杀后同 Request 重启被 fence、旧 Request 取消后才能重新发送。`tests/desktop-preload-ipc.test.mjs` 证明 preload 不暴露 Agent executable/spawn/command/path capability。Electron AI closed-loop 必须额外证明自动模式不接触剪贴板、不自动 Adoption，并能进入真实 Review UI；未登录时原弹窗保持、复制任务始终可用、零 Request 且 About 同状态。package owner必须递归拒绝 symlink/特殊文件，并用打包 Helper、打包 Bridge、fake ACP 与打包 finalizer 证明 pending-review 闭环及 SDK/Zod 精确运行时闭包。`npm run spike:qoder-acp` 的真实账号/网络探测仅是额外开发证据，失败或成功都不进入自动门禁；ACP allowlist 也不得被描述成 Qoder 本地进程的 OS 沙箱。
+- Product Agent Bridge：`tests/agent-provider-contract.test.mjs` 使用无用户路径/秘密的合成 provider/runtime fixture，拥有 legacy `qoder-acp` → `qoder`/`acp` 唯一 registry 分派、内部 installation digest/capabilities ticket、未知 provider/runtime fail-closed，以及 availability/preflight/start 的旧公开投影。`tests/agent-bridge-service.test.mjs` 拥有只读本地检查不运行 Qoder、同进程安装后重读、npmrc/nvm/Volta/fnm/mise 发现、非法包不误报未安装、trusted-local consent、使用前检查、一次性 execution ticket、最终 spawn identity、不泄露 command/path、持久 crash lease、task-keyed 幂等、取消、restart-interrupted、retry output refusal 与公开错误脱敏。`tests/run-workflow.test.mjs` 证明只读检查零 Request/冻结/剪贴板、`agentDelivery: qoder-acp`、Execution 投影、安装与登录引导剪贴板隔离、Settings 检查不授权稍后发送、同一发送意图的 ticket 只供紧接着的 Agent 启动复用，以及预检失败不解锁一张从未锁定的 Canvas。`tests/agent-bridge-workspace.test.mjs` 必须启动真实 Bridge 与 fake ACP 子进程，证明自动完成只产生 pending-review Candidate、Working Copy/Version 不变，取消先终止 Qoder 再 durable cancel，以及 Bridge 强杀后同 Request 重启被 fence、旧 Request 取消后才能重新发送。`tests/desktop-preload-ipc.test.mjs` 证明 preload 不暴露 Agent executable/spawn/command/path capability。Electron AI closed-loop 必须额外证明自动模式不接触剪贴板、不自动 Adoption，并能进入真实 Review UI；未登录时 Settings 保持、复制任务始终可用、零 Request 且 About 保持产品信息。package owner必须递归拒绝 symlink/特殊文件，并用打包 Helper、打包 Bridge、fake ACP 与打包 finalizer 证明 pending-review 闭环及 SDK/Zod 精确运行时闭包。`npm run spike:qoder-acp` 的真实账号/网络探测仅是额外开发证据，失败或成功都不进入自动门禁；ACP allowlist 也不得被描述成 Qoder 本地进程的 OS 沙箱。
 - Schema 与 scope 的纯函数矩阵继续独立拥有 strict union、identity/path/hash drift、TargetRef/topology 与 guidance 判定；真实 lifecycle 集成只证明产物 bundle、official finalizer、ready/attention 和 activation 的持久化边界。SourceTransaction failpoint 表逐 case 保留独立的 disk、runtime、history 与 audit exactly-once oracle，不以最终 200 取代 commit-point 断言。
 - 外部源绑定：Repository Node 测试按能力拆在 `tests/project-registry-and-open.test.mjs`、`tests/project-working-copy-save.test.mjs`、`tests/project-candidate-promotion.test.mjs`、`tests/project-request-authority.test.mjs`、`tests/project-ai-task-projection.test.mjs`、`tests/project-path-security-and-locks.test.mjs` 与少量跨模块 `tests/project-file-repository.integration.test.mjs`。它们共同拥有编辑/晋升/历史 Working Copy 后重开、Hash 变化仍保持 B、同内容另一路径仍为 C、跨实例同源唯一与异源不丢写、多 claim 失败关闭、损坏绑定不降级为 C，以及当前 Registry 写锁的活/死 owner。`tests/project-file-bridge.test.mjs` 拥有 `/project/open-classification` 的 A/B/C DTO、无副作用和禁止回传 source key/原稿绝对路径。分类测试必须独立计算期望 Hash，不能调用被测 source-key helper 当 oracle。
 - 导入确认与 Prepared Intent：`tests/prepared-html-open.test.mjs` 拥有公开 descriptor 不含路径、commit action 拒绝 `view-initial`、幂等 commit/finalize、较新请求取消旧 intent，以及同一原稿路径复用已 prepared/committing 的 intent。`tests/external-open-copy.test.mjs` 拥有“已经导入”确认框里版本句子的出现判定：版本一致、序号缺失或不可解析、工作稿领先于最新版时都必须为空，只有工作稿落后于最新正式版本时才给出两个真实序号和落点。`tests/project-workflow.test.mjs` 拥有确认前零 switch、冷启动 epoch 0 确认不围栏不存在的 Canvas、Canvas 失败不 finalize 删除、以及“打开之前的项目”不再导入。`tests/workspace-controller.test.mjs` 在要求 ProjectWorkflow 之前拒绝 `view-initial`。`tests/document-session.test.mjs` 与 `tests/document-workflow.test.mjs` 拥有 Canvas pending/verified/failed 与 verify 失败关闭。Electron 夹具先识别确认框再接受 `ready`；欢迎页已 ready 后仍短等确认 overlay，再点“导入并打开”或“打开之前的项目”，不得设置 `SKIP_IMPORT_CONFIRM`。`packaged-startup-smoke` 对 argv 与运行中 `open-file` 同样先驱动确认框，再断言 managed V1。不得把确认 descriptor 的空 `sourcePath` 当成已导入成功。
@@ -240,7 +238,7 @@ Workbench 只确认已提交 loading surface、传入窄 port 并消费快照。
   unknown reconcile、missing finalizer、malformed HTML、broad related、activation
   failure；legacy global comment 的跨重启恢复仍处在兼容窗口，继续保留为独立
   Electron 场景。Native Electron 拥有 rapid switch/close 的真实 DOM 与磁盘 oracle；
-  project rules/drain 与 update/About 均由其更窄的 Node/Preload/UI owner 覆盖。首个
+  project rules/drain 与 update/Settings 均由其更窄的 Node/Preload/UI owner 覆盖。首个
   review/accept 场景的 geometry helper
   必须把每个表驱动 case 的 fixture、filter/page/context、change type、element/Range
   owner、frame/mask count、tolerance 与负例写全；表只能消除样板，不能合并不同
@@ -252,8 +250,7 @@ Workbench 只确认已提交 loading surface、传入窄 port 并消费快照。
   | --- | --- |
   | first project registration 的 global comment | `comment-rail-layout`: `global comments stay before local comments regardless of canvas position`；Browser `native-dom-comment-stress`: `comments virtualize immediately above the threshold and remain navigable`（首个保存等待 lazy registration committed） |
   | multiple orphan relink | Native Electron: `multiple orphaned comments relink in sequence and resume the original send`（两个 orphan target 依次选择后只恢复一次 send） |
-  | project resources/drain | Native Electron: `project resources drain edited rules before leaving`（从 Rules UI 离开时通过 Bridge 保存精确字节）；Node owners 仍覆盖 DraftSession 与 read-only inspector |
-  | update/About | Native Electron: `automatic update actions keep the header geometry and About lifecycle`（update badge、About/restart dialog 与 header placement）；Node/Preload owners 继续覆盖 update protocol |
+  | update/Settings | Native Electron: `automatic update actions keep the sidebar product geometry and split About from Settings`（update badge、About/restart dialog 与 Settings lifecycle）；Node/Preload owners 继续覆盖 update protocol |
   | rapid switch/close | `tests/e2e/electron/electron-project-lifecycle.spec.mjs` |
   | workbench tabs / Start / browser-memory / Registry restore | `tests/e2e/electron/electron-workbench-tabs.spec.mjs` |
 
@@ -314,7 +311,7 @@ Workbench 只确认已提交 loading surface、传入窄 port 并消费快照。
 - 审阅滚动回归必须直接证明页面概览会递增手势代次、取消待执行跟随帧并保留语义映射；评论布局契约还必须接受超出 100,000px 的有限长文档坐标，同时继续拒绝非有限值和超过安全上限的坐标。
 - 评论标记必须覆盖无 `id`、`data-*`、`name`、`aria-label` 的 class-only 普通目标；私有绑定、评论正文和 locator map 不进入 authored HTML 或后续 bootstrap，恶意作者 listener 不能抢先伪造评论端口。
 - 应用更新：Node 用伪 updater 证明 stable-only、点击后单次下载、差分开启、普通退出不安装、仅 downloaded 状态可安装和错误降级；Preload/Workbench 合同证明状态快照、下载/安装意图、无 Canvas 完成横幅与重启确认保持窄边界。
-- 本地外部动作：五类 Finder/默认浏览器/项目记录入口由 Node 以真实调用计数证明一次用户意图只执行一次副作用，失败会保留可见错误和可用项目，等待超过旧 retry delay 也不会重放；第二次调用只能来自新的用户意图。Bridge 的只读 GET/HEAD 重试保留在 transport 层，`openFolder` 等命令不复用它。默认浏览器打开还直接执行主进程操作与 sender 权限门，证明 malformed、非 HTML、未知项目、非普通文件和非可信 frame 均不会调用 shell；Workbench 合同只补充证明精确 edit revision 的围栏、写回和 IPC 顺序。
+- 本地外部动作：Finder、默认浏览器和项目文件外部动作由 Node 以真实调用计数证明一次用户意图只执行一次副作用，失败会保留可见错误和可用项目，等待超过旧 retry delay 也不会重放；第二次调用只能来自新的用户意图。Bridge 的只读 GET/HEAD 重试保留在 transport 层，`openFolder` 等命令不复用它。默认浏览器打开还直接执行主进程操作与 sender 权限门，证明 malformed、非 HTML、未知项目、非普通文件和非可信 frame 均不会调用 shell；Workbench 合同只补充证明精确 edit revision 的围栏、写回和 IPC 顺序。
 - 使用数据：Node 使用伪网络端点证明安装 ID 持久、会话 ID 轮换、
   项目 ID 只以 HMAC 假名出现、编辑聚合、队列上限和失败重试。负向样本
   必须同时注入 HTML、评论、Prompt、附件名、文件路径和原始异常，最终

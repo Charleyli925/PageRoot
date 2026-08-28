@@ -3,10 +3,8 @@
 import type { CSSProperties, KeyboardEvent } from "react";
 import {
   BrowsersIcon,
-  CaretDownIcon,
   CaretLeftIcon,
   CaretRightIcon,
-  CaretUpIcon,
   CornersOutIcon,
   GitDiffIcon,
   LinkBreakIcon,
@@ -57,15 +55,11 @@ export type ReviewToolbarControlsProps = {
   contextVisibility?: number;
   scrollMode?: ReviewScrollMode;
   zoomMode?: ReviewZoomMode;
-  activeIndex?: number;
-  changeCount?: number;
   onPageViewChange?: (value: ReviewPageView) => void;
   onChangeFilter?: (value: ReviewChangeFilter) => void;
   onContextVisibilityChange?: (value: number) => void;
   onScrollModeChange?: (value: ReviewScrollMode) => void;
   onZoomModeChange?: (value: ReviewZoomMode) => void;
-  onNavigate?: (direction: -1 | 1) => void;
-  onShowWholePage?: () => void;
 };
 
 export function ReviewToolbarControls({
@@ -75,15 +69,11 @@ export function ReviewToolbarControls({
   contextVisibility = 18,
   scrollMode = "linked",
   zoomMode = "actual",
-  activeIndex = -1,
-  changeCount = 0,
   onPageViewChange,
   onChangeFilter,
   onContextVisibilityChange,
   onScrollModeChange,
   onZoomModeChange,
-  onNavigate,
-  onShowWholePage,
 }: ReviewToolbarControlsProps) {
   const unavailableReason = disabled ? "进入审阅模式后可用" : undefined;
   return (
@@ -155,16 +145,6 @@ export function ReviewToolbarControls({
         <button className="toolbar-actual-size" type="button" aria-label="原始大小" data-tooltip="原始大小" aria-pressed={zoomMode === "actual"} disabled={disabled} onClick={() => onZoomModeChange?.("actual")}>100%</button>
       </div>
 
-      <div className="toolbar-change-navigator" role="group" aria-label="逐处查看变化">
-        <button type="button" aria-label="上一处变化" data-tooltip="上一处变化" disabled={disabled || changeCount === 0} onClick={() => onNavigate?.(-1)}>
-          <CaretUpIcon aria-hidden="true" size={11} weight="bold" />
-        </button>
-        <span aria-live="polite"><strong>{activeIndex >= 0 ? activeIndex + 1 : 0}</strong>/{changeCount}</span>
-        <button type="button" aria-label="下一处变化" data-tooltip="下一处变化" disabled={disabled || changeCount === 0} onClick={() => onNavigate?.(1)}>
-          <CaretDownIcon aria-hidden="true" size={11} weight="bold" />
-        </button>
-        <button className="toolbar-whole-page" type="button" disabled={disabled} onClick={onShowWholePage}>整页</button>
-      </div>
     </div>
   );
 }

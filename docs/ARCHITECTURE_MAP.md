@@ -34,7 +34,7 @@ the Bridge client, construct Sessions, or own debounce, polling, or drain.
 | Run and AI request | `RunSession` | `RunWorkflow` | `workspace-controller-capabilities.d.ts` (`controller.runs`), `run-workflow.js`, `run/submit-plan.js`, `run-conversation-outlet.tsx` |
 | Review and Candidate | `VersionSession` (projection) | `VersionWorkflow` prepare/accept | `app/workbench/AiReviewWorkspace.tsx` |
 | Version and history | `VersionSession` | `VersionWorkflow` | `version-workflow.js`, `version/review-plan.js` |
-| Project panel and rules | `ProjectSession`, `ProjectRulesSession`, `VersionSession` | `ProjectWorkflow`, `ProjectRulesWorkflow` | `workspace-controller-capabilities.d.ts` (`controller.projects`, `controller.projectCatalog`), `project-panel-container.tsx`, `project-panel-port.js`, `project-files-view.tsx` |
+| Project context and version navigation | `ProjectSession`, `ProjectRulesSession`, `VersionSession` | `ProjectWorkflow`, `ProjectRulesWorkflow` | `workspace-controller-capabilities.d.ts` (`controller.projectCatalog`), `workbench-sidebar-container.tsx`, `WorkbenchChrome.tsx` |
 | Canvas edit runtime | `EditAuthorRuntimeSession` | Canvas / `DocumentWorkflow` | `HtmlCanvasEditor.tsx`, `html-canvas-selection-chrome-contract.ts` |
 | Preview | disposable preview session | Desktop preview protocol | `desktop/` preview owner, `HtmlInteractionPreview` |
 | Project open / switch / close | `ProjectSession` | `ProjectWorkflow` | `project-workflow.js`, `project/open-intent.js`, `project/switch-plan.js`, `project/close-plan.js`, `project/source-locator-plan.js` |
@@ -102,24 +102,18 @@ capability still invalidate the composition root.
 
 ```text
 ProjectSession + ProjectWorkflow + ProjectRulesWorkflow + VersionSession
-  -> WorkspaceController.projects { getSnapshot, subscribe, commands }
-    -> ProjectPanelContainer
-      -> ProjectFilesHeader / ProjectFilesConsole / ProjectFilesFooter
-
-ProjectWorkflow catalog events
   -> WorkspaceController.projectCatalog { getSnapshot, subscribe, commands }
-    -> sidebar/start-page catalog containers
-
-ProjectRulesWorkflow restore intent
-  -> projectPanelPort
-    -> ProjectPanelContainer editor ref
+    -> WorkbenchGlobalSidebarContainer / StartPage catalog containers
+      -> current-project context and version-tree navigation
 ```
 
-`ProjectPanelContainer` owns version selection, PROJECT.md disclosure/edit
-presentation, saved notices and its textarea ref. The catalog projection is
-separate so PROJECT.md typing cannot wake Start or the global sidebar. Workbench
-keeps only cross-capability hydration/error context, drawer composition and host
-actions such as export, Finder reveal and history activation.
+The global sidebar owns the visible project context, safe project switching and
+the fixed settings entry. It is not a project management drawer: PROJECT.md
+editing, version-detail presentation, export/Finder actions and history-preview
+entry points are not rendered there. `ProjectRulesSession` and
+`ProjectRulesWorkflow` remain fact and lifecycle owners for persistence and
+close/switch safety; no disposable project-panel port or presentation facet
+crosses into Workbench.
 
 ## Run and navigation render boundaries
 

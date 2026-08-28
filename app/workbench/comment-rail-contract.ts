@@ -60,6 +60,7 @@ export type CommentRailModel = {
   canvasDocumentHeight: number;
   commentRailContentHeight: number;
   commentRailOffset: number;
+  commentRailStatusTop: number;
   commentRailMinimumTop: number;
   visibleCommentItems: CommentItem[];
   draftInCurrentTab: boolean;

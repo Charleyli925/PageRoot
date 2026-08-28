@@ -26,9 +26,8 @@ import type {
 } from "./components/HtmlCanvasEditor";
 import type { DesktopEditRuntimeApi } from "./components/desktop-edit-runtime-api";
 import type { DesktopUiPreferencesApi } from "./components/desktop-ui-preferences-api";
-import AboutPageRootDialog, {
-  type AboutOpenSource,
-} from "./components/AboutPageRootDialog";
+import AboutPageRootDialog from "./components/AboutPageRootDialog";
+import SettingsPage from "./components/SettingsPage";
 import { AgentDeliveryButton, type AgentDeliveryMode } from "./components/AgentDeliveryButton";
 import CancelAiRunDialog from "./components/CancelAiRunDialog";
 import FirstEditGuideCard from "./components/FirstEditGuideCard";
@@ -85,7 +84,7 @@ import { createRunWorkflowCodecs } from "./application/run-workflow-codecs.js";
 import {
   INITIAL_QODER_AVAILABILITY,
 } from "./domain/qoder-availability.js";
-import { aboutAgentCardsFromCatalog } from "./application/agent-provider-catalog.js";
+import { agentProviderCardsFromCatalog } from "./application/agent-provider-catalog.js";
 import { createWorkspaceControllerCodecs } from "./application/workspace-controller-codecs.js";
 import { createBrowserFileTabIdentity } from "./application/browser-file-tab-identity.js";
 import type { CommentSessionSnapshot } from "./application/comment-session.js";
@@ -175,19 +174,13 @@ import {
   sameWorkbenchRenderSnapshot,
 } from "./workbench/workspace-render-snapshot.js";
 import {
-  WorkbenchFileHeaderView,
   WorkbenchHeaderView,
 } from "./workbench/file-header-view";
 import {
-  ProjectPanelContainer,
   WorkbenchGlobalSidebarContainer,
   WorkbenchStartPageContainer,
   type ProjectCatalogCapability,
-  type ProjectPanelCapability,
-  type ProjectPanelContext,
-  type ProjectPanelHostActions,
-} from "./workbench/project-panel-container";
-import { createProjectPanelPort } from "./workbench/project-panel-port.js";
+} from "./workbench/workbench-sidebar-container";
 import {
   PreviewNavigationBanner,
 } from "./workbench/presentation";
@@ -217,13 +210,10 @@ import { createWorkbenchModeHandlers } from "./workbench/workbench-mode-handlers
 import { deriveWorkbenchHeaderCapabilities } from "./workbench/workbench-header-projection";
 import {
   activeRunOperationKey,
-  currentWorkingCopyPresentation,
   fileStem,
-  formatProjectTimestamp,
   formatTime,
   localFileNameFromSourcePath,
   projectMarkdown,
-  projectStatusProjection,
   safeVersionLabel,
   sameLocalSourcePath,
 } from "./workbench/project-model";
@@ -250,7 +240,6 @@ import type {
   CommentEditSession,
   CommentItem,
   DirectEditEvent,
-  Drawer,
   HtmlProject,
   PersistState,
   PrepareCloseDetail,
@@ -469,7 +458,6 @@ export default function Workbench() {
   const fenceAndFreezeCurrentCanvasRef = useRef(fenceAndFreezeCurrentCanvas);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [commentCanvasPort] = useState(createCommentCanvasPort);
-  const [projectPanelPort] = useState(createProjectPanelPort);
   const reviewStageRef = useRef<HTMLDivElement>(null);
   const commentCounter = useRef(1);
   const commentEditResumePendingRef = useRef<string | null>(null);
@@ -505,8 +493,9 @@ export default function Workbench() {
   const resumeSubmissionAfterRelinkRef = useRef(false);
   const normalizeCurrentGlobalCommentsRef = useRef<() => CommentItem[]>(() => []);
   const automaticProjectRegistrationRef = useRef("");
-  const projectRecordsPreparationRef = useRef("");
+  const projectRegistrationPreparationRef = useRef("");
   const pendingSidebarHistoryRef = useRef<ProjectVersionSummary | null>(null);
+  const overlayReturnFocusRef = useRef<HTMLElement | null>(null);
 
   const [workspaceControllerSnapshot, setWorkspaceControllerSnapshotState] =
     useState<WorkspaceControllerSnapshot | null>(null);
@@ -588,9 +577,6 @@ export default function Workbench() {
   )
     ? importedCanvasBase.externalSourcePath
     : sourcePath || undefined;
-  const [projectRecordsPath, setProjectRecordsPath] =
-    useState<string | null>(null);
-  const [lastModifiedAt, setLastModifiedAt] = useState<string | null>(null);
   const [lastSafeWriteAt, setLastSafeWriteAt] = useState<string | null>(null);
   const commentCapabilitySnapshot = workspaceController
     ? (workspaceController.comments as CommentRailCapability).getSnapshot()
@@ -665,13 +651,10 @@ export default function Workbench() {
     : null;
   const qoderAvailability = workspaceControllerSnapshot?.run?.qoderAvailability
     ?? INITIAL_QODER_AVAILABILITY;
-  const aboutAgentCards = aboutAgentCardsFromCatalog(agentCatalogSnapshot);
+  const agentCards = agentProviderCardsFromCatalog(agentCatalogSnapshot);
   const [previewAttachment, setPreviewAttachment] = useState<CommentAttachment | null>(null);
-  const [drawer, setDrawer] = useState<Drawer>(null);
   const [handoffPreviewOpen, setHandoffPreviewOpen] = useState(false);
-  const projectRulesSnapshot = workspaceControllerSnapshot?.projectRules ?? null;
-  const [projectRecordsPreparing, setProjectRecordsPreparing] = useState(false);
-  const [projectRecordsError, setProjectRecordsError] = useState("");
+  const [projectRegistrationError, setProjectRegistrationError] = useState("");
   const versionSnapshot = (
     workspaceControllerSnapshot?.versionSession as VersionSessionSnapshot<Version> | null
   ) ?? INITIAL_VERSION_SNAPSHOT;
@@ -679,7 +662,6 @@ export default function Workbench() {
   const latestVersionId = versionSnapshot.latestVersionId;
   const currentBasedOnVersionId =
     versionSnapshot.currentBasedOnVersionId;
-  const currentExactVersionId = versionSnapshot.currentExactVersionId;
   const viewMode = versionSnapshot.viewMode;
   const [canvasMode, setCanvasMode] = useState<CanvasMode>("edit");
   const aiSourceFileName = localFileNameFromSourcePath(sourcePath) || projectName;
@@ -938,11 +920,6 @@ export default function Workbench() {
       },
       projectRulesWorkflow: {
         errorMessage: productErrorMessage,
-        presentation: {
-          restoreEditor: ({ settle }: { settle: () => void }) => {
-            projectPanelPort.requestEditorRestore(settle);
-          },
-        },
         scheduler: {
           setTimeout: (callback: () => void, delayMs: number) => (
             window.setTimeout(callback, delayMs)
@@ -1232,7 +1209,7 @@ export default function Workbench() {
       setWorkspaceController((current) => current === controller ? null : current);
       controller.dispose();
     };
-  }, [bridgeConnectionReady, deferEditorCommand, invalidateCanvasRenderAcks, isViewTransitioning, projectPanelPort]);
+  }, [bridgeConnectionReady, deferEditorCommand, invalidateCanvasRenderAcks, isViewTransitioning]);
   const invalidateEditCanvasRenderAck = useCallback(() => {
     setCanvasRenderAcks((current) => (
       current.edit ? { ...current, edit: null } : current
@@ -1285,7 +1262,7 @@ export default function Workbench() {
     workspaceController
     && sourcePath
     && (!projectId || !documentId)
-    && !projectRecordsError,
+    && !projectRegistrationError,
   );
   const projectHydrating =
     workspaceControllerSnapshot?.project?.hydration.phase === "hydrating"
@@ -1295,7 +1272,7 @@ export default function Workbench() {
   const projectLoadError =
     workspaceControllerSnapshot?.project?.hydration.phase === "failed"
       ? workspaceControllerSnapshot.project.hydration.error
-      : projectRecordsError || null;
+      : projectRegistrationError || null;
   const [startupIssue, setStartupIssue] = useState<StartupIssue | null>(null);
   const [workspaceIssue, setWorkspaceIssue] = useState<WorkspaceIssue | null>(null);
   const [cancelRunConfirmationKey, setCancelRunConfirmationKey] =
@@ -1313,7 +1290,8 @@ export default function Workbench() {
   const [updateResult, setUpdateResult] =
     useState<ApplicationUpdateResult | null>(null);
   const [aboutOpen, setAboutOpen] = useState(false);
-  const [aboutOpenSource, setAboutOpenSource] = useState<AboutOpenSource>("default");
+  const [settingsInitialFocus, setSettingsInitialFocus] =
+    useState<"close" | "agent">("close");
   const [restartUpdateOpen, setRestartUpdateOpen] = useState(false);
   const [applicationVersion, setApplicationVersion] = useState("");
   const [desktopUpdatesAvailable, setDesktopUpdatesAvailable] = useState(false);
@@ -1346,7 +1324,6 @@ export default function Workbench() {
   const [externalSourcePreview, setExternalSourcePreview] = useState<{
     html: string;
     sourceSha256: string;
-    lastModifiedAt: string;
   } | null>(null);
   const noticeIdentity = toast
     ? `${toast.dedupeKey || ""}\n${toast.title}\n${toast.message}`
@@ -1370,15 +1347,12 @@ export default function Workbench() {
       if (event.type === "registration-published") {
         const registrationEvent = event as Readonly<{
           context: ProjectContext;
-          projectRecordsPath: string | null;
           projectName: string | null;
           imported?: boolean;
           workingCopyRecovered?: boolean;
         }>;
         if (!workspaceController.matchesCurrentProjectContext(registrationEvent.context)) return;
-        setProjectRecordsPath(registrationEvent.projectRecordsPath);
-        setProjectRecordsPreparing(false);
-        setProjectRecordsError("");
+        setProjectRegistrationError("");
         if (registrationEvent.projectName) setProjectName(registrationEvent.projectName);
         if (registrationEvent.workingCopyRecovered) {
           setToast({
@@ -1539,7 +1513,7 @@ export default function Workbench() {
         return;
       }
       if (event.type === "version-activation-published") {
-        const publication = event as Readonly<{ context?: ProjectContext | null; operationKey?: string; lastModifiedAt?: string }>;
+        const publication = event as Readonly<{ context?: ProjectContext | null; operationKey?: string }>;
         if (
           !publication.context
           || !workspaceController.matchesCurrentProjectContext(publication.context)
@@ -1553,14 +1527,12 @@ export default function Workbench() {
           setReadyReviewSession(null);
           performance.mark("pageroot:accept:overlay-closed");
         }
-        setLastModifiedAt(publication.lastModifiedAt || null);
         commentCanvasPort.setSelection(null);
         commentEditResumePendingRef.current = null;
         commentCanvasPort.setEditingCommentId(null);
         setPreviewAttachment(null);
         setHandoffPreviewOpen(false);
         setCanvasMode("edit");
-        setDrawer(null);
         performance.mark("pageroot:accept:ui-published");
         return;
       }
@@ -1598,7 +1570,7 @@ export default function Workbench() {
       if (runEvent.type === "run-submission-started" || runEvent.type === "run-submitted") {
         if (runEvent.current) {
           setHandoffPreviewOpen(false);
-          // Reported in the thread, not by a drawer over the page.
+          // Reported in the thread, not as a duplicate toolbar status.
           setCanvasMode("preview");
           revealAiConversation();
           void workspaceControllerRef.current?.dismissFirstEditGuide();
@@ -1664,7 +1636,6 @@ export default function Workbench() {
           if (state === "cancelled") {
             setHandoffPreviewOpen(false);
             setCanvasMode("edit");
-            setDrawer(null);
           } else if (
             state === "ready-to-open"
             || state === "no-change"
@@ -1711,7 +1682,6 @@ export default function Workbench() {
         if (runEvent.current) {
           setHandoffPreviewOpen(false);
           setCanvasMode("edit");
-          setDrawer(null);
         }
         if (runEvent.agentMayBeRunning && runEvent.run) {
           setToast({
@@ -1744,8 +1714,6 @@ export default function Workbench() {
         sourcePath?: unknown;
         projects?: unknown;
         projectName?: unknown;
-        projectRecordsPath?: unknown;
-        lastModifiedAt?: unknown;
         lastSavedAt?: unknown;
         showHandoff?: unknown;
         contentChanged?: unknown;
@@ -1782,8 +1750,6 @@ export default function Workbench() {
         markProjectApplied(projectEvent.operationId, projectEvent.epoch);
         setStartupIssue(null);
         setProjectName(project.name);
-        setProjectRecordsPath(null);
-        setLastModifiedAt(project.lastModifiedAt || null);
         setLastSafeWriteAt(null);
         if (
           pendingSidebarHistoryRef.current
@@ -1821,8 +1787,7 @@ export default function Workbench() {
             : "edit",
         );
         setSourceViewTransitioning(false);
-        setProjectRecordsPreparing(false);
-        setProjectRecordsError("");
+        setProjectRegistrationError("");
         setOpeningReadyVersion(Boolean(
           workspaceController.getSnapshot().runSession?.activeRun
           && workspaceController.getSnapshot().runSession?.operationKeys.some(
@@ -1834,7 +1799,6 @@ export default function Workbench() {
             ),
           ),
         ));
-        setDrawer(null);
         const reviewStage = reviewStageRef.current;
         if (reviewStage && typeof reviewStage.scrollTo === "function") {
           try {
@@ -1859,16 +1823,6 @@ export default function Workbench() {
         if (typeof projectEvent.projectName === "string" && projectEvent.projectName) {
           setProjectName(projectEvent.projectName);
         }
-        setProjectRecordsPath(
-          typeof projectEvent.projectRecordsPath === "string"
-            ? projectEvent.projectRecordsPath
-            : null,
-        );
-        setLastModifiedAt(
-          typeof projectEvent.lastModifiedAt === "string"
-            ? projectEvent.lastModifiedAt
-            : null,
-        );
         if (projectEvent.showHandoff) {
           setHandoffPreviewOpen(false);
           setCanvasMode("edit");
@@ -2021,9 +1975,6 @@ export default function Workbench() {
         if (typeof projectEvent.projectName === "string" && projectEvent.projectName) {
           setProjectName(projectEvent.projectName);
         }
-        if (typeof projectEvent.lastModifiedAt === "string") {
-          setLastModifiedAt(projectEvent.lastModifiedAt);
-        }
         if (
           projectEvent.type === "project-source-relocated"
           && projectEvent.contentChanged !== true
@@ -2041,7 +1992,6 @@ export default function Workbench() {
       const documentEvent = event as Readonly<{
         type: string;
         context?: ProjectContext;
-        lastModifiedAt?: unknown;
         lastSavedAt?: unknown;
         events?: unknown;
         mutation?: HtmlCanvasMutation;
@@ -2121,19 +2071,6 @@ export default function Workbench() {
         });
       }
       if (
-        [
-          "document-persisted",
-          "document-authority-reloaded",
-          "document-authority-repaired",
-          "document-boundary-reconciled",
-          "document-history-applied",
-        ].includes(documentEvent.type)
-        && typeof documentEvent.lastModifiedAt === "string"
-        && documentEvent.lastModifiedAt
-      ) {
-        setLastModifiedAt(documentEvent.lastModifiedAt);
-      }
-      if (
         documentEvent.type === "document-persisted"
         && typeof documentEvent.lastSavedAt === "string"
         && documentEvent.lastSavedAt
@@ -2193,14 +2130,6 @@ export default function Workbench() {
       view_mode: viewMode,
     }, projectId || undefined);
   }, [projectId, sourcePath, viewMode]);
-
-  useEffect(() => {
-    if (drawer) {
-      captureUsageEvent("module_viewed", {
-        module: drawer === "files" ? "project_files" : drawer,
-      }, projectId || undefined);
-    }
-  }, [drawer, projectId]);
 
   useEffect(() => {
     captureUsageEvent("module_viewed", {
@@ -2341,21 +2270,29 @@ export default function Workbench() {
     }
   }, []);
 
-  const openAboutPageRoot = useCallback((source: AboutOpenSource = "default") => {
+  const openAboutPageRoot = useCallback(() => {
+    const active = document.activeElement;
+    if (active instanceof HTMLElement) overlayReturnFocusRef.current = active;
     setManualUpdateCheckFailed(false);
     setRepositoryOpenFailed(false);
     setReleaseNotesOpenFailed(false);
     setUserNoticeOpenFailed(false);
-    setAboutOpenSource(source);
     setAboutOpen(true);
   }, []);
 
+  const openSettingsPage = useCallback((initialFocus: "close" | "agent" = "close") => {
+    const active = document.activeElement;
+    if (active instanceof HTMLElement) overlayReturnFocusRef.current = active;
+    setSettingsInitialFocus(initialFocus);
+    void navigationCapability?.commands.createSettingsTab();
+  }, [navigationCapability]);
+
   useEffect(() => {
-    openAgentSettingsRef.current = () => openAboutPageRoot("agent-settings");
+    openAgentSettingsRef.current = () => openSettingsPage("agent");
     return () => {
       openAgentSettingsRef.current = null;
     };
-  }, [openAboutPageRoot]);
+  }, [openSettingsPage]);
 
   useEffect(() => {
     const lifecycle = window.htmlAIAppLifecycle;
@@ -2435,7 +2372,14 @@ export default function Workbench() {
 
   const closeAboutPageRoot = useCallback(() => {
     setAboutOpen(false);
-    setAboutOpenSource("default");
+    window.requestAnimationFrame(() => {
+      const returnFocus = overlayReturnFocusRef.current;
+      if (returnFocus && document.contains(returnFocus)) returnFocus.focus();
+      else document.querySelector<HTMLElement>(
+        ".workbench-sidebar-product > button:first-child",
+      )?.focus();
+      overlayReturnFocusRef.current = null;
+    });
   }, []);
 
   const downloadAvailableUpdate = useCallback(async () => {
@@ -2792,10 +2736,9 @@ export default function Workbench() {
       || (currentProject.projectId && currentProject.documentId)
     ) return;
     const preparationKey = `${epoch}\0${activeSource}`;
-    projectRecordsPreparationRef.current = preparationKey;
+    projectRegistrationPreparationRef.current = preparationKey;
     let registrationPublished = false;
-    setProjectRecordsPreparing(true);
-    setProjectRecordsError("");
+    setProjectRegistrationError("");
     try {
       const registered = registrationContextFromOutcome(
         await requiredWorkspaceController(workspaceController).ensureRegistered(),
@@ -2830,7 +2773,7 @@ export default function Workbench() {
           activeSource,
         )
       ) return;
-      setProjectRecordsError(productErrorMessage(
+      setProjectRegistrationError(productErrorMessage(
         cause,
         "项目资料暂时无法建立；当前 HTML 和评论仍保留，可在这里重试。",
       ));
@@ -2840,7 +2783,7 @@ export default function Workbench() {
         settledProject.projectId && settledProject.documentId,
       );
       if (
-        projectRecordsPreparationRef.current === preparationKey
+        projectRegistrationPreparationRef.current === preparationKey
         && (
           registrationPublished
           || hasSettledProjectBinding
@@ -2850,7 +2793,6 @@ export default function Workbench() {
           )
         )
       ) {
-        setProjectRecordsPreparing(false);
       }
     }
   }, [currentProjectSessionSnapshot, workspaceController]);
@@ -3087,15 +3029,6 @@ export default function Workbench() {
     }, remaining);
     return () => window.clearTimeout(timeout);
   }, [currentProjectSessionSnapshot, noticeIdentity, noticeTimerPaused, toast]);
-
-  useEffect(() => {
-    if (!drawer || previewAttachment) return;
-    const closeDrawer = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && !event.defaultPrevented) setDrawer(null);
-    };
-    window.addEventListener("keydown", closeDrawer);
-    return () => window.removeEventListener("keydown", closeDrawer);
-  }, [drawer, previewAttachment]);
 
   const rememberAttachmentObjectUrl = useCallback((
     attachmentId: string,
@@ -3532,7 +3465,6 @@ export default function Workbench() {
     projectApplicationSnapshot.deferredSequence,
     projectHydrating,
     projectLoadError,
-    projectRulesSnapshot,
     projectSnapshot,
     runSnapshot,
     viewTransitioning,
@@ -3637,7 +3569,7 @@ export default function Workbench() {
         title: "无法在默认浏览器中打开",
         message: productErrorMessage(
           cause,
-          "请确认顶部显示“已同步更新”后重试；当前项目仍保持打开。",
+          "请确认修改已写入源 HTML 后重试；当前项目仍保持打开。",
         ),
         tone: "warning",
         disposition: "background-result",
@@ -3651,34 +3583,6 @@ export default function Workbench() {
     flushAutosave,
     workspaceController,
   ]);
-
-  const showProjectRecordsInFolder = useCallback(async () => {
-    const context = workspaceControllerRef.current?.getCurrentProjectContext();
-    if (!context || !projectRecordsPath || !workspaceController) return;
-    await runLocalUserAction({
-      kind: "open-project-records",
-      invoke: async () => {
-        const outcome = await workspaceController.openProjectRecords({ context });
-        if (outcome.status !== "succeeded") {
-          throw new Error(
-            outcome.status === "stale"
-              ? "项目已切换，没有打开旧项目记录。"
-              : outcome.reason,
-          );
-        }
-      },
-      onFailure: (cause: unknown) => setToast({
-        title: "项目记录暂时无法打开",
-        message: productErrorMessage(
-          cause,
-          "项目记录仍保留在本地，可以重新尝试。",
-        ),
-        tone: "warning",
-        disposition: "background-result",
-        dedupeKey: "show-project-records-error",
-      }),
-    });
-  }, [projectRecordsPath, workspaceController]);
 
   const handleBrowserFile = useCallback(async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.currentTarget.files?.[0];
@@ -4020,8 +3924,6 @@ export default function Workbench() {
       if (outcome.status !== "succeeded") {
         throw new Error(outcome.reason);
       }
-      const lastModified = String(outcome.value.lastModifiedAt || "");
-      if (lastModified) setLastModifiedAt(lastModified);
       await refreshWorkspace(context.sourcePath, context.epoch);
       if (
         sourceTransitionOperationRef.current !== operationId
@@ -4084,7 +3986,6 @@ export default function Workbench() {
     setExternalSourcePreview({
       html: String(outcome.value.html || ""),
       sourceSha256: String(outcome.value.sourceSha256 || ""),
-      lastModifiedAt: String(outcome.value.lastModifiedAt || ""),
     });
     setHandoffPreviewOpen(false);
     setCanvasMode("preview");
@@ -4138,8 +4039,6 @@ export default function Workbench() {
         throw new Error(outcome.reason);
       }
       setExternalSourcePreview(null);
-      const lastModified = String(outcome.value.lastModifiedAt || "");
-      if (lastModified) setLastModifiedAt(lastModified);
       await refreshWorkspace(context.sourcePath, context.epoch);
       setCanvasMode("edit");
       setToast({
@@ -4471,7 +4370,6 @@ export default function Workbench() {
     resumeSubmissionAfterRelinkRef.current = submissionRelinkPending;
     beginTargetRelink(unsafeRelinkCommentItems[0].commentId);
     setCanvasMode("edit");
-    setDrawer(null);
   }, [beginTargetRelink, submissionRelinkPending, unsafeRelinkCommentItems]);
 
   const clearCurrentComposer = useCallback(() => {
@@ -4632,7 +4530,6 @@ export default function Workbench() {
       return;
     }
     setCanvasMode("edit");
-    setDrawer(null);
     const globalTarget: HtmlCanvasSelection = {
       id: "target_global_page",
       label: "整个页面",
@@ -5434,15 +5331,13 @@ export default function Workbench() {
         protocolViolation: boolean;
         aiCompletedAt: string;
         committedSourcePath: string;
-        lastModifiedAt: string;
         verificationWarning?: string;
       };
       if (readyReviewSession?.operationKey === operationKey) {
         // The canvas already acknowledged the verified Version bytes inside
-        // activateReadyVersion, so the overlay teardown, drawer close and
+        // activateReadyVersion, so the overlay teardown and
         // mode switch below can land in one React commit: a single visual
         // cut instead of a multi-frame cascade.
-        setDrawer(null);
         setReadyReviewSession(null);
         performance.mark("pageroot:accept:overlay-closed");
       }
@@ -5466,7 +5361,6 @@ export default function Workbench() {
         });
         return;
       }
-      setLastModifiedAt(result.lastModifiedAt || null);
       commentCanvasPort.setSelection(null);
       commentCanvasPort.setComposerOpen(false);
       commentEditResumePendingRef.current = null;
@@ -5474,7 +5368,6 @@ export default function Workbench() {
       setPreviewAttachment(null);
       setHandoffPreviewOpen(false);
       setCanvasMode("edit");
-      setDrawer(null);
       performance.mark("pageroot:accept:ui-committed");
       if (result.protocolViolation) {
         const warning = "内部 AI 的临时输出在最终化后又被修改；已提交版本本身未受影响。";
@@ -5607,7 +5500,6 @@ export default function Workbench() {
           setReadyReviewSession({ operationKey, sessionId, documents,
             beforeHtml: frozenHtml, sourcePath: candidate.sourcePath,
             beforeLabel, afterLabel });
-          setDrawer(null);
           performance.mark("pageroot:review:shell-visible");
         },
       });
@@ -5627,7 +5519,6 @@ export default function Workbench() {
         beforeLabel,
         afterLabel,
       });
-      setDrawer(null);
     } catch (cause) {
       if (cause instanceof ReviewAnalysisCancelledError) return;
       setToast({
@@ -5761,7 +5652,6 @@ export default function Workbench() {
     const outcome = await requiredWorkspaceController(workspaceController)
       .viewHistory({ version, context, deadlineAt: Date.now() + 15_000 });
     if (outcome.status === "succeeded") {
-      setDrawer(null);
       editorRef.current?.clearSelection();
       return true;
     }
@@ -5790,8 +5680,6 @@ export default function Workbench() {
     const outcome = await requiredWorkspaceController(workspaceController)
       .returnToCurrent({ context });
     if (outcome.status === "succeeded") {
-      const lastModifiedAt = String(outcome.value.lastModifiedAt || "");
-      if (lastModifiedAt) setLastModifiedAt(lastModifiedAt);
       return;
     }
     if (outcome.status === "stale") return;
@@ -5850,10 +5738,7 @@ export default function Workbench() {
       void returnToCurrent();
       return;
     }
-    if (!navigationCapability || !projectId || !documentId) {
-      setDrawer("files");
-      return;
-    }
+    if (!navigationCapability || !projectId || !documentId) return;
     void navigationCapability.commands.openRegisteredProject({
       projectId,
       documentId,
@@ -5991,9 +5876,6 @@ export default function Workbench() {
         context,
       });
     if (outcome.status === "succeeded") {
-      const lastModifiedAt = String(outcome.value.lastModifiedAt || "");
-      if (lastModifiedAt) setLastModifiedAt(lastModifiedAt);
-      setDrawer(null);
       editorRef.current?.clearSelection();
       return;
     }
@@ -6016,102 +5898,11 @@ export default function Workbench() {
     workspaceController,
   ]);
 
-  const persistLabel = workspaceController?.hasDocumentHistoryAction
-    ? "正在撤销或重做…"
-    : persistState === "writing"
-    ? "正在更新文件…"
-    : persistState === "queued"
-      ? "正在更新文件…"
-      : persistState === "preview-dirty"
-        ? "仅预览 · 修改尚未绑定本地文件"
-      : persistState === "conflict"
-        ? "检测到外部修改 · 未覆盖原文件"
-        : persistState === "failed"
-          ? "文件更新失败 · 尚未写入磁盘"
-          : sourcePath
-            ? `已同步更新${lastModifiedAt ? ` · ${formatProjectTimestamp(lastModifiedAt)}` : ""}`
-            : browserPreviewOnly
-              ? "浏览器预览 · 只读"
-              : "内置介绍页 · 打开本地 HTML 后开始编辑";
   const canvasAuthority = documentSnapshot.canvasAuthority;
-  const visibleCanvasAck = canvasMode === "preview"
-    ? canvasRenderAcks.preview
-    : (
-      canvasAuthority?.status === "verified"
-        ? {
-          generation: canvasAuthority.generation,
-          sha256: canvasAuthority.renderedSha256,
-        }
-        : null
-    );
-  const isSafelySaved = Boolean(
-    sourcePath
-    && sourceSha256
-    && viewMode === "current"
-    && persistState === "idle"
-    && editRevision === lastPersistedRevision
-    && !projectHydrating
-    && !projectLoadError
-    && !viewTransitioning
-    && canvasAuthority?.status === "verified"
-    && canvasAuthority.generation === canvasGeneration
-    && canvasAuthority.renderedSha256 === sourceSha256
-  );
-  const safeSaveLabel = canvasAuthority?.status === "failed"
-    ? "画布确认失败 · 重试"
-    : isSafelySaved
-      ? "已安全保存"
-      : "正在确认当前画布…";
-  const saveStatusLabel = browserPreviewOnly
-    ? "操作不会保存"
-    : persistState !== "idle"
-        ? persistLabel
-        : viewMode === "history"
-          ? "历史版本 · 只读"
-          : sourcePath
-            ? safeSaveLabel
-            : persistLabel;
-  const currentWorkingCopy = versions.find(
-    (version) => version.id === currentBasedOnVersionId,
-  ) || null;
-  const currentWorkingCopyStatus = currentWorkingCopy
-    ? currentWorkingCopyPresentation({
-      currentBasedOnVersionId,
-      currentExactVersionId,
-      persistState,
-      persistedDiffersFromBase: currentWorkingCopy.differsFromBase === true,
-      persistedSaveState: currentWorkingCopy.saveState,
-    })
-    : null;
-  const projectStatus = projectStatusProjection({
-    currentBasedOnVersionId,
-    currentExactVersionId,
-    latestVersionId,
-    viewMode,
-    viewingVersionId,
-    persistState,
-    hasLocalModifications: currentWorkingCopyStatus?.differsFromBase === true,
-    candidate: activeRun
-      ? {
-        versionId: activeRun.candidateVersionId || null,
-        status: activeRun.status,
-      }
-      : null,
-  });
-  const headerStatusFacts = browserPreviewOnly
-    ? []
-    : projectStatus.facts.filter((fact) => (
-      fact === "正在看历史（只读）" || fact === "保存失败"
-    ));
   const canShowCurrentFileInFolder = Boolean(
     sourcePath
     && typeof window !== "undefined"
     && window.htmlAIProjects?.showInFolder,
-  );
-  const canOpenProjectRootInFolder = Boolean(
-    projectRecordsPath
-    && workspaceController
-    && typeof window !== "undefined",
   );
   const canOpenCurrentHtmlInDefaultBrowser = Boolean(
     sourcePath
@@ -6126,7 +5917,7 @@ export default function Workbench() {
     canReloadCurrentSource,
   } = deriveWorkbenchHeaderCapabilities(
     activeRun?.status, Boolean(activeRun?.readyPayload), Boolean(readyReviewSession),
-    reviewPreparing, canOpenProjectRootInFolder, canShowCurrentFileInFolder,
+    reviewPreparing, canShowCurrentFileInFolder,
     canOpenCurrentHtmlInDefaultBrowser, persistState, editRevision, lastPersistedRevision,
     Boolean(workspaceController), projectHydrating, Boolean(projectLoadError),
     viewTransitioning, sourcePath, viewMode, runInProgress, Boolean(workspaceIssue),
@@ -6229,18 +6020,12 @@ export default function Workbench() {
       case "retry-draft-persist":
         void workspaceController?.flushDraft();
         return;
-      case "review-project-rules":
-        setDrawer("files");
-        projectPanelPort.requestOpenRules();
-        return;
       case "resume-draft":
         setCanvasMode("edit");
-        setDrawer(null);
         resumeCurrentComposer();
         return;
       case "resume-comment-edit":
         setCanvasMode("edit");
-        setDrawer(null);
         window.requestAnimationFrame(() => {
           resumeCommentEdit(action.commentId);
         });
@@ -6251,7 +6036,7 @@ export default function Workbench() {
     }
   };
 
-  // Same authority the process drawer used, reached from the conversation so the
+  // Same authority the process view used, reached from the conversation so the
   // decision no longer requires a panel over the page.
   const handleAiDecision = useCallback((actionId: string) => {
     if (actionId === "review") { void reviewReadyResult(); return; }
@@ -6264,7 +6049,6 @@ export default function Workbench() {
       workspaceControllerRef.current?.runs.commands.dismiss();
       setHandoffPreviewOpen(false);
       setCanvasMode("edit");
-      setDrawer(null);
       editorRef.current?.unlockNow?.();
       return;
     }
@@ -6318,7 +6102,6 @@ export default function Workbench() {
           aiConversation.toggle();
           return;
         }
-        setDrawer(null);
         setHandoffPreviewOpen(false);
         setCanvasMode("preview");
         revealAiConversation();
@@ -6390,9 +6173,23 @@ export default function Workbench() {
   const activeWorkbenchTab = workbenchTabsSnapshot.tabs.find(
     (tab) => tab.tabId === workbenchTabsSnapshot.activeTabId,
   ) || workbenchTabsSnapshot.tabs[0];
+  const settingsPageActive = activeWorkbenchTab?.kind === "settings";
   const startPageActive = activeWorkbenchTab?.kind === "start"
     && typeof window !== "undefined"
     && Boolean(window.htmlAIProjects);
+  const closeSettingsPage = useCallback(() => {
+    if (!settingsPageActive || !activeWorkbenchTab || !navigationCapability) return;
+    void navigationCapability.commands.closeTab(activeWorkbenchTab.tabId).then((outcome) => {
+      presentWorkbenchTabOutcome(outcome);
+      if (outcome.status !== "succeeded") return;
+      window.requestAnimationFrame(() => {
+        const returnFocus = overlayReturnFocusRef.current;
+        if (returnFocus && document.contains(returnFocus)) returnFocus.focus();
+        else document.querySelector<HTMLElement>(".workbench-sidebar-settings")?.focus();
+        overlayReturnFocusRef.current = null;
+      });
+    });
+  }, [activeWorkbenchTab, navigationCapability, presentWorkbenchTabOutcome, settingsPageActive]);
   const { visibleCachedSurface, retainPresentedTab, completeHandoff, updateVisibleScroll, markFirstScroll } = useDocumentSurfaceHandoff({ cache: documentSurfaceCacheSnapshot, tabs: workbenchTabsSnapshot, sourceSha256, renderedSourceSha256: canvasMode === "preview" && canvasRenderAcks.preview?.generation === canvasGeneration ? canvasRenderAcks.preview.sha256 : renderedContentSha256, canvasAuthority, canvasGeneration, controller: workspaceController });
   const activeRuntimeCanvasUsable = retainedRuntimeForActiveDocument;
   const effectiveVisibleCachedSurface = canvasMode === "edit" && activeRuntimeCanvasUsable ? null : visibleCachedSurface;
@@ -6482,9 +6279,6 @@ export default function Workbench() {
     updateCommentEditDraft,
     uploadAttachments,
   ]);
-  const projectPanelCapability = workspaceController
-    ? workspaceController.projects as ProjectPanelCapability
-    : null;
   const projectCatalogCapability = workspaceController
     ? workspaceController.projectCatalog as ProjectCatalogCapability
     : null;
@@ -6513,60 +6307,6 @@ export default function Workbench() {
     sourcePath,
     versions,
   ]);
-  const projectPanelContext = useMemo<ProjectPanelContext>(() => ({
-    projectName,
-    browserPreviewOnly,
-    saveStatusLabel,
-    persistState,
-    runInProgress,
-    projectRecordsPreparing,
-    projectRecordsError,
-    projectHydrating,
-    projectLoadError,
-    workspaceIssue,
-    viewTransitioning,
-    canShowCurrentFileInFolder,
-    attachmentObjectUrls,
-  }), [
-    attachmentObjectUrls,
-    browserPreviewOnly,
-    canShowCurrentFileInFolder,
-    persistState,
-    projectHydrating,
-    projectLoadError,
-    projectName,
-    projectRecordsError,
-    projectRecordsPreparing,
-    runInProgress,
-    saveStatusLabel,
-    viewTransitioning,
-    workspaceIssue,
-  ]);
-  const projectPanelActions = useMemo<ProjectPanelHostActions>(() => ({
-    onShowInFolder: showProjectInFolder,
-    onExport: exportCurrentHtml,
-    onClose: () => setDrawer(null),
-    prepareProjectRecords,
-    ensureAttachmentObjectUrl,
-    openAttachmentPreview,
-    downloadAttachment,
-    viewHistoryVersion,
-    onRulesViewed: () => captureUsageEvent(
-      "module_viewed",
-      { module: "project_rules" },
-      projectId || undefined,
-    ),
-  }), [
-    downloadAttachment,
-    ensureAttachmentObjectUrl,
-    exportCurrentHtml,
-    openAttachmentPreview,
-    prepareProjectRecords,
-    projectId,
-    showProjectInFolder,
-    viewHistoryVersion,
-  ]);
-
   return (
     <>
       <RendererStartupPerformance />
@@ -6582,10 +6322,17 @@ export default function Workbench() {
       <main
         className="workbench"
         data-start-page={startPageActive ? "true" : undefined}
+        data-settings-page={settingsPageActive ? "true" : undefined}
         data-left-sidebar={globalSidebarOpen ? "open" : "collapsed"}
         data-round-state={runInProgress ? "processing" : viewMode}
         data-canvas-mode={canvasMode}
         data-handoff-preview={runInProgress && handoffPreviewOpen ? "true" : undefined}
+        data-persist-state={persistState}
+        data-edit-revision={String(editRevision)}
+        data-persisted-revision={String(lastPersistedRevision)}
+        data-canvas-generation={String(canvasGeneration)}
+        data-render-generation={String(canvasGeneration)}
+        data-rendered-sha256={renderedContentSha256 || undefined}
         data-project-state={
           projectLoadError
             ? "failed"
@@ -6608,17 +6355,13 @@ export default function Workbench() {
         onBeforeSelect={rememberWorkbenchTabPresentation}
         onOutcome={presentWorkbenchTabOutcome}
       /> : null}
-      {!startPageActive ? <>
+      {!startPageActive && !settingsPageActive ? <>
         <WorkbenchHeaderView
           runInProgress={runInProgress}
           canvasMode={canvasMode}
           browserPreviewOnly={browserPreviewOnly}
           viewMode={viewMode}
           interactionLocked={interactionLocked}
-          projectHydrating={projectHydrating}
-          viewTransitioning={viewTransitioning}
-          attachmentUploadCount={attachmentUploadCount}
-          drawer={drawer}
           recentRunOutcome={recentRunOutcome}
           terminalRun={terminalRun}
           reviewActive={Boolean(readyReviewOverlay)}
@@ -6632,30 +6375,9 @@ export default function Workbench() {
           )}
           aiConversationVisible={aiConversation.visible}
           aiAssistantEntry={aiAssistantEntry}
-          fileStatus={
-            <WorkbenchFileHeaderView
-              persistState={persistState}
-              editRevision={editRevision}
-              lastPersistedRevision={lastPersistedRevision}
-              headerStatusFacts={headerStatusFacts}
-              canvasGeneration={canvasGeneration}
-              canvasAuthority={canvasAuthority}
-              visibleCanvasAck={visibleCanvasAck}
-              saveStatusLabel={saveStatusLabel}
-              saveStatusQuiet={browserPreviewOnly || isSafelySaved}
-              onRetryCanvasVerification={() => {
-                void workspaceController?.retryCanvasVerification({
-                  context: captureProjectContext() || undefined,
-                });
-              }}
-            />
-          }
           moreMenu={{
             canShowInFolder: canShowInFinder,
-            onShowInFolder: () => {
-              if (canOpenProjectRootInFolder) void showProjectRecordsInFolder();
-              else void showProjectInFolder();
-            },
+            onShowInFolder: () => void showProjectInFolder(),
             canOpenInBrowser: canOpenCurrentHtml,
             onOpenInBrowser: () => void openCurrentHtmlInDefaultBrowser(),
             canExportCurrentHtml,
@@ -6675,15 +6397,6 @@ export default function Workbench() {
             }
             if (canvasMode === "preview") interactionPreviewRef.current?.reload();
           }}
-          onToggleProjectPanel={() => {
-            const openProjectPanel = () => {
-              setDrawer((current) => (
-                current === "files" ? null : "files"
-              ));
-            };
-            if (deferEditorCommand("project-files", openProjectPanel)) return;
-            openProjectPanel();
-          }}
           reopenRecentRunOutcome={reopenRecentRunOutcome}
         />
         <input
@@ -6695,7 +6408,7 @@ export default function Workbench() {
         />
       </> : null}
 
-      {startupIssue ? (
+      {!settingsPageActive && startupIssue ? (
         <section className="startup-issue" role="alert">
           <div>
             <strong>{startupIssue.title}</strong>
@@ -6710,7 +6423,7 @@ export default function Workbench() {
         </section>
       ) : null}
 
-      {workspaceIssue ? (
+      {!settingsPageActive && workspaceIssue ? (
         <section className="source-conflict-banner workspace-unavailable-banner" role="alert">
           <div>
             <strong>{workspaceIssue.title}</strong>
@@ -6725,7 +6438,8 @@ export default function Workbench() {
         </section>
       ) : null}
 
-      {!workspaceIssue
+      {!settingsPageActive
+      && !workspaceIssue
       && !externalSourcePreview
       && (persistState === "conflict" || persistState === "failed") ? (
         <section className="source-conflict-banner" role="alert">
@@ -6762,7 +6476,8 @@ export default function Workbench() {
         </section>
       ) : null}
 
-      {!workspaceIssue
+      {!settingsPageActive
+      && !workspaceIssue
       && persistState !== "conflict"
       && persistState !== "failed"
       && draftPersistError ? (
@@ -6780,7 +6495,7 @@ export default function Workbench() {
         </section>
       ) : null}
 
-      {externalSourcePreview ? (
+      {!settingsPageActive && externalSourcePreview ? (
         <PreviewNavigationBanner
           key={`external-${externalSourcePreview.sourceSha256}`}
           icon={<EyeIcon aria-hidden="true" size={18} weight="duotone" />}
@@ -6851,6 +6566,7 @@ export default function Workbench() {
         updateResult={updateResult}
         updateBadgeLabel={updateBadgeLabel}
         onOpenAbout={openAboutPageRoot}
+        onOpenSettings={() => openSettingsPage("close")}
         onDownloadOrRestartUpdate={() => {
           if (updateDownloaded) {
             setRestartUpdateOpen(true);
@@ -6866,7 +6582,28 @@ export default function Workbench() {
         onFirstScroll={markFirstScroll}
         height="var(--comment-canvas-height, 760px)"
       />
-      {startPageActive && projectCatalogCapability ? (
+      {settingsPageActive ? (
+        <SettingsPage
+          activeTabId={activeWorkbenchTab.tabId}
+          initialFocus={settingsInitialFocus}
+          appVersion={applicationVersion}
+          currentAgentName={agentPresentation.agentName || agentPresentation.displayName}
+          updateResult={updateResult}
+          updatesAvailable={desktopUpdatesAvailable}
+          manualCheckPending={manualUpdateCheckPending}
+          manualCheckFailed={manualUpdateCheckFailed}
+          releaseNotesOpenFailed={releaseNotesOpenFailed}
+          agentCards={agentCards}
+          onClose={closeSettingsPage}
+          onCheckForUpdates={() => void checkForApplicationUpdates()}
+          onDownloadUpdate={() => void downloadAvailableUpdate()}
+          onRequestRestart={() => setRestartUpdateOpen(true)}
+          onOpenReleaseNotes={() => void openReleaseNotes()}
+          onCheckUsability={checkAgentUsability}
+          onCopyGuidance={copyAgentGuidance}
+          onInstall={installAgent}
+        />
+      ) : startPageActive && projectCatalogCapability ? (
         <WorkbenchStartPageContainer
           capability={projectCatalogCapability}
           activeTabId={activeWorkbenchTab.tabId}
@@ -7053,29 +6790,6 @@ export default function Workbench() {
         />
       ) : null}
 
-      <div
-        className={`drawer-overlay${drawer ? " show" : ""}`}
-        data-drawer={drawer || undefined}
-        aria-hidden="true"
-        onClick={() => setDrawer(null)}
-      />
-      <aside
-        className={`side-drawer${drawer ? " open" : ""}`}
-        data-drawer={drawer || undefined}
-        inert={!drawer}
-        role="dialog"
-        aria-label="当前项目"
-      >
-        {drawer === "files" && projectPanelCapability ? (
-          <ProjectPanelContainer
-            capability={projectPanelCapability}
-            panelPort={projectPanelPort}
-            context={projectPanelContext}
-            actions={projectPanelActions}
-          />
-        ) : null}
-      </aside>
-
       {openConfirmation ? (
         <ExternalHtmlOpenDialog key={openConfirmation.requestId}
           confirmation={openConfirmation}
@@ -7132,28 +6846,12 @@ export default function Workbench() {
       <AboutPageRootDialog
         open={aboutOpen}
         appVersion={applicationVersion}
-        updateResult={updateResult}
-        updatesAvailable={desktopUpdatesAvailable}
-        manualCheckPending={manualUpdateCheckPending}
-        manualCheckFailed={manualUpdateCheckFailed}
+        architecture={updateResult?.architecture}
         repositoryOpenFailed={repositoryOpenFailed}
-        releaseNotesOpenFailed={releaseNotesOpenFailed}
         userNoticeOpenFailed={userNoticeOpenFailed}
-        agentCards={aboutAgentCards}
-        source={aboutOpenSource}
         onClose={closeAboutPageRoot}
-        onCheckForUpdates={() => void checkForApplicationUpdates()}
-        onDownloadUpdate={() => void downloadAvailableUpdate()}
-        onRequestRestart={() => {
-          setAboutOpen(false);
-          setRestartUpdateOpen(true);
-        }}
-        onOpenReleaseNotes={() => void openReleaseNotes()}
         onOpenRepository={() => void openProjectRepository()}
         onOpenUserNotice={() => void openUserNotice()}
-        onCheckUsability={checkAgentUsability}
-        onCopyGuidance={copyAgentGuidance}
-        onInstall={installAgent}
       />
 
       {toast ? (

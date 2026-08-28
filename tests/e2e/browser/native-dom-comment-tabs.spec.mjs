@@ -935,7 +935,6 @@ test("comment card hover keeps geometry stable while focus aligns one unchanged 
     (nodes) => nodes.map((node) => node.getAttribute("data-comment-measure")),
   );
   await cards[1].hover();
-  await page.getByRole("button", { name: "项目", exact: true }).hover();
   const secondBefore = await cards[1].boundingBox();
   const thirdBefore = await cards[2].boundingBox();
   await cards[1].hover();

@@ -218,9 +218,9 @@ test("Agent connection recovery is an explicit sidebar action, not a send", () =
     hasText: true,
   });
   assert.deepEqual(checking, {
-    kind: "status",
+    kind: "open-agent-settings",
     canSend: false,
-    label: "正在连接 Agent…",
+    label: "设置 Agent",
     reason: null,
   });
 

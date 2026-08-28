@@ -347,7 +347,7 @@ async function loadRealHtml(page, sourcePath, source, { navigate = true } = {}) 
   const fileInput = page.locator('input[type="file"][accept*=".html"]').first();
   await fileInput.waitFor({ state: "attached" });
   await fileInput.setInputFiles({ name, mimeType: "text/html", buffer: source });
-  await page.getByRole("tablist", { name: "已打开的 HTML" })
+  await page.getByRole("tablist", { name: "已打开的页面" })
     .getByRole("tab").filter({ hasText: displayName }).first()
     .waitFor({ state: "visible" });
   if (previousToken) {

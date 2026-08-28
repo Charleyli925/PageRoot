@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import type { AiConversationControllerCapability } from "../application/workspace-controller-capabilities.js";
 import type { ConversationSessionSnapshot } from "../application/conversation-session.js";
@@ -64,10 +64,11 @@ export type UseAiConversationOptions = {
   onDeliverModification?: (mode: "managed-agent" | "clipboard") => void;
   /**
    * Acts on the decision bar. Without this the bar renders buttons that do
-   * nothing, which is why the process drawer could not be removed before now.
+   * nothing, which is why the conversation sidebar must remain the owner of the
+   * visible decision actions.
    */
   onDecision?: (actionId: string) => void;
-  /** Opens About's Qoder settings without sending or clearing the draft. */
+  /** Opens Settings' Agent section without sending or clearing the draft. */
   onOpenAgentSettings?: () => void;
 };
 
@@ -102,10 +103,6 @@ export function useAiConversation({
   // read-only there: see sidebarSendState(reviewing).
   const active = (canvasMode === "preview" || reviewing) && Boolean(sourcePath);
   const visible = active && open;
-  const agentAvailabilityRef = useRef(qoderAvailability);
-  useEffect(() => {
-    agentAvailabilityRef.current = qoderAvailability;
-  }, [qoderAvailability]);
 
   // Load when the sidebar becomes visible for a Document and close it on any
   // identity change or when it stops being visible.
@@ -125,37 +122,9 @@ export function useAiConversation({
     };
   }, [visible, projectId, documentId, sourcePath, controllerRef]);
 
-  // Opening the sidebar and switching the in-place Agent chooser both run the
-  // selected Provider's real preflight. In-flight checks are keyed by Provider
-  // selection so a slow Qoder check cannot suppress a newly selected Codex
-  // check (or vice versa). Returning from an external login retries the same
-  // selected Provider without adding a separate connection surface. The
-  // AgentCatalog is the single in-flight owner; duplicating its promise map in
-  // the view can strand a Provider at `checking` after switch-away/switch-back.
-  useEffect(() => {
-    if (!visible || !selectedAgentChoiceId) return undefined;
-    const controller = controllerRef.current;
-    if (!controller) return undefined;
-    const requestAgentCheck = (force = false) => {
-      const status = agentAvailabilityRef.current?.status;
-      if (!force && (status === "ready" || status === "checking")) return;
-      void Promise.resolve(controller.checkAgentUsability()).catch(() => undefined);
-    };
-    requestAgentCheck(true);
-    const handleReturnToApp = () => {
-      if (document.visibilityState === "visible") requestAgentCheck();
-    };
-    window.addEventListener("focus", handleReturnToApp);
-    document.addEventListener("visibilitychange", handleReturnToApp);
-    return () => {
-      window.removeEventListener("focus", handleReturnToApp);
-      document.removeEventListener("visibilitychange", handleReturnToApp);
-    };
-  }, [visible, selectedAgentChoiceId, controllerRef]);
-
   const toggle = useCallback(() => setOpen((value) => !value), []);
   // Submitting a round makes this the surface that reports it, so the workbench
-  // opens the thread instead of raising the process drawer over the page.
+  // keeps the conversation thread visible beside the page.
   //
   const reveal = useCallback(() => {
     setOpen(true);

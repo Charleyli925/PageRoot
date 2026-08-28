@@ -615,10 +615,10 @@ test("the review projection annotates a dense report cleanly and accurately", as
       '[data-pageroot-review-overlay-box][data-hover="true"]',
     ).count(), { timeout: 10_000 }).toBe(0);
 
-    // 1c. Focus claims the outline: navigating to a change colors its own
+    // 1c. Focus claims the outline: clicking a page marker colors its own
     //     boxes and highlights its revision bar while every other confirmed
     //     change stays at rest.
-    await launched.page.getByRole("button", { name: "下一处变化" }).click();
+    await afterFrame.locator("[data-pageroot-review-region-bar]").first().click();
     await expect.poll(async () => {
       const sides = {
         before: await readProjection(beforeFrame),

@@ -445,7 +445,7 @@ export const DEFAULT_PROJECT_HTML = `<!doctype html>
 
       <aside class="notice">
         <div><strong>这张欢迎页本身，就是一次完整的 AI Agent 协作与审阅入口。</strong><span>双击即可直接编辑，也可以选中内容添加评论；AI 返回后，点击“审阅对比”即可从这张页面体验修改前后对照。</span></div>
-        <em>从顶部「项目」打开其他 HTML</em>
+        <em>从左侧栏打开或切换 HTML</em>
       </aside>
     </div>
 

@@ -154,7 +154,7 @@
 
 .workbench-global-sidebar[data-open="true"] {
   display: grid;
-  grid-template-rows: var(--workbench-tabbar-height) auto minmax(0, 1fr);
+  grid-template-rows: var(--workbench-tabbar-height) auto minmax(0, 1fr) auto;
 }
 
 .workbench-sidebar-titlebar {
@@ -191,7 +191,7 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 14px 14px 8px;
+  padding: 9px 14px 8px;
 }
 
 .workbench-sidebar-product > button:first-child {
@@ -241,6 +241,40 @@
   gap: 3px;
   padding: 4px 10px 18px;
   overflow-y: auto;
+}
+
+.workbench-sidebar-footer {
+  min-width: 0;
+  display: flex;
+  justify-content: flex-end;
+  padding: 8px 28px 10px 14px;
+  border-top: 1px solid rgb(43 40 53 / 6%);
+  background: inherit;
+}
+
+.workbench-sidebar-settings {
+  width: 30px;
+  height: 30px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  margin-left: auto;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #77757f;
+}
+
+.workbench-sidebar-settings:hover,
+.workbench-sidebar-settings:focus-visible {
+  background: rgb(43 40 53 / 7%);
+  color: #3f3d46;
+}
+
+.workbench-sidebar-settings:focus-visible {
+  outline: 2px solid var(--chrome-focus, rgb(91 82 157 / 58%));
+  outline-offset: 2px;
 }
 
 .workbench-sidebar-body > strong {

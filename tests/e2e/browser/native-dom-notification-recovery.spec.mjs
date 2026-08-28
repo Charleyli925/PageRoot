@@ -43,7 +43,7 @@ test.describe("notification recovery paths", () => {
     );
     await expect(notice).toHaveAttribute("role", "status");
     await expect(notice).toHaveAttribute("aria-live", "polite");
-    await expect(page.getByRole("tablist", { name: "已打开的 HTML" })
+    await expect(page.getByRole("tablist", { name: "已打开的页面" })
       .getByRole("tab").filter({ hasText: "notification-recovery" }))
       .toHaveCount(1);
 
@@ -58,7 +58,7 @@ test.describe("notification recovery paths", () => {
       buffer: fixtureBuffer("complex-layout.html"),
     });
 
-    await expect(page.getByRole("tablist", { name: "已打开的 HTML" })
+    await expect(page.getByRole("tablist", { name: "已打开的页面" })
       .getByRole("tab").filter({ hasText: "recovered-utf8" }))
       .toHaveCount(1);
     await expect(notice).toHaveCount(0);
@@ -85,7 +85,7 @@ test.describe("notification recovery paths", () => {
     await page.keyboard.press("Enter");
 
     await expect(notice).toHaveCount(0);
-    await expect(page.getByRole("tablist", { name: "已打开的 HTML" })
+    await expect(page.getByRole("tablist", { name: "已打开的页面" })
       .getByRole("tab").filter({ hasText: "notification-recovery" }))
       .toHaveCount(1);
   });

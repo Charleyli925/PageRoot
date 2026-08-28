@@ -277,7 +277,7 @@ export function agentProviderCardPresentation(provider) {
   });
 }
 
-export function aboutAgentCardsFromCatalog(snapshot) {
+export function agentProviderCardsFromCatalog(snapshot) {
   return Object.freeze(Object.values(snapshot?.providers ?? {})
     .filter((provider) => (
       provider.installable === true

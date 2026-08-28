@@ -471,8 +471,8 @@ export async function architectureViolations() {
     path.join(PRODUCT_ROOT, "app", "workbench.tsx"),
     "utf8",
   );
-  const projectPanelContainer = await readFile(
-    path.join(PRODUCT_ROOT, "app", "workbench", "project-panel-container.tsx"),
+  const workbenchSidebarContainer = await readFile(
+    path.join(PRODUCT_ROOT, "app", "workbench", "workbench-sidebar-container.tsx"),
     "utf8",
   );
   const runConversationOutlet = await readFile(
@@ -614,9 +614,9 @@ export async function architectureViolations() {
     path.join(PRODUCT_ROOT, "app", "workbench.tsx"),
     workbench,
   );
-  const projectPanelContainerAst = parseModule(
-    path.join(PRODUCT_ROOT, "app", "workbench", "project-panel-container.tsx"),
-    projectPanelContainer,
+  const workbenchSidebarContainerAst = parseModule(
+    path.join(PRODUCT_ROOT, "app", "workbench", "workbench-sidebar-container.tsx"),
+    workbenchSidebarContainer,
   );
   const navigationContainerAst = parseModule(
     path.join(PRODUCT_ROOT, "app", "workbench", "workbench-navigation-container.tsx"),
@@ -695,8 +695,8 @@ export async function architectureViolations() {
     || !constructsClass(workspaceControllerAst, "ExternalFileOpenSession")
     || !constructsClass(workspaceControllerAst, "ProjectApplicationSession")
     || !classHasMember(workspaceControllerAst, "WorkspaceController", "prepareClose")
-    || !classHasMember(workspaceControllerAst, "WorkspaceController", "readProjectFile")
-    || !classHasMember(workspaceControllerAst, "WorkspaceController", "openProjectRecords")
+    || classHasMember(workspaceControllerAst, "WorkspaceController", "readProjectFile")
+    || classHasMember(workspaceControllerAst, "WorkspaceController", "openProjectRecords")
     || !classHasMember(workspaceControllerAst, "WorkspaceController", "observeExternalSourceChange")
     || !hasCall(workspaceControllerAst, { method: "reconcileExternalSourceLocator" })
   ) {
@@ -740,8 +740,8 @@ export async function architectureViolations() {
     || !hasCall(workbenchAst, { method: "onExternalOpenRequested" })
     || !classHasMember(workspaceControllerAst, "WorkspaceController", "acceptExternalProject")
     || !hasCall(workbenchAst, { path: "workspaceController.acceptBrowserProject" })
-    || !hasCall(workspaceControllerAst, { path: "this.readProjectFile" })
-    || !hasCall(workbenchAst, { method: "openProjectRecords" })
+    || classHasMember(workspaceControllerAst, "WorkspaceController", "readProjectFile")
+    || classHasMember(workspaceControllerAst, "WorkspaceController", "openProjectRecords")
     || !/\bonSourceFileChanged\b/.test(workbench)
     || !hasCall(workbenchAst, { method: "observeExternalSourceChange" })
     || !hasObjectProperty(workbenchAst, "sourceMissing")
@@ -909,7 +909,7 @@ export async function architectureViolations() {
     || !hasCall(projectRulesWorkflowAst, { path: "this.#bridgeClient.updateProjectFile" })
     || !classHasMember(projectRulesWorkflowAst, "ProjectRulesWorkflow", "resetForProjectTransition")
     || !classHasMember(projectRulesWorkflowAst, "ProjectRulesWorkflow", "drain")
-    || !hasCall(projectRulesWorkflowAst, { path: "this.#presentationPort.restoreEditor" })
+    || !hasCall(projectRulesWorkflowAst, { path: "this.#projectRulesSession.settleRestore" })
     || /(?:^|\/)(?:workbench|components|desktop)(?:\/|$)|\breact\b/u.test(
       importedSpecifiers(projectRulesWorkflow).join("\n"),
     )
@@ -929,10 +929,8 @@ export async function architectureViolations() {
   }
   if (
     !hasObjectProperty(workbenchAst, "projectRulesWorkflow", { valueKind: "object" })
-    || !hasCall(projectPanelContainerAst, { path: "capability.commands.openRules" })
-    || !hasCall(projectPanelContainerAst, { path: "capability.commands.updateRules" })
-    || !hasCall(projectPanelContainerAst, { path: "capability.commands.saveRules" })
-    || !hasCall(projectPanelContainerAst, { path: "capability.commands.closeRules" })
+    || !hasCall(workbenchAst, { path: "navigationCapability.commands.createSettingsTab" })
+    || !hasCall(workbenchSidebarContainerAst, { path: "capability.commands.loadVersionSummaries" })
     || /\b(?:projectRulesSessionRef|saveProjectRulesRef|PROJECT_RULES_AUTOSAVE_DELAY_MS)\b/.test(workbench)
   ) {
     violations.push(

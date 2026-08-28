@@ -57,13 +57,13 @@ test("server-renders the public workbench without retired hosting or editor surf
   for (const entryPoint of [
     "编辑",
     "预览",
-    "项目",
     // The header opens the conversation and no longer narrates the round, so its label
     // is fixed rather than describing what is missing before a send.
     "AI 助手",
   ]) {
     assert.match(html, new RegExp(entryPoint, "u"));
   }
+  assert.doesNotMatch(html, /顶部项目|项目面板|打开项目/u);
   // CommentRailContainer owns a client-only controller capability. Its local
   // snapshot and presentation state intentionally do not render from the
   // server-side Workbench shell.

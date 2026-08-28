@@ -99,7 +99,7 @@ export type PreparedGeneratedSourceTransition = PreparedManagedSourceTransition;
 export type ProjectWorkflowConstruction = Readonly<{
   bridgeClient: Pick<
     BridgeClient,
-    "workspace" | "source" | "conflictCandidate" | "projectFile" | "openFolder"
+    "workspace" | "source" | "conflictCandidate"
   > & Partial<Pick<BridgeClient, "workspaceEnvelope">>;
   projectSession: ProjectSession;
   documentSession: DocumentSession;
@@ -206,13 +206,6 @@ export class ProjectWorkflow {
     obligation?: string;
     reason?: string;
   }>>;
-  readProjectFile(input?: {
-    context?: ProjectContext;
-    relativePath?: string;
-  }): Promise<ProjectWorkflowOutcome<{ content: string }>>;
-  openProjectRecords(input?: {
-    context?: ProjectContext;
-  }): Promise<ProjectWorkflowOutcome<{ opened: boolean }>>;
   refreshRecents(): Promise<ProjectWorkflowOutcome<{ projects: unknown[] }>>;
   refreshRegisteredProjects(): Promise<ProjectWorkflowOutcome<{ projects: unknown[] }>>;
   loadRegisteredProjectVersionSummaries(projectId: string): Promise<ProjectWorkflowOutcome<{

@@ -33,7 +33,6 @@ import {
   stopPageRoot,
   tmpdir,
   waitForFreshDiskFrame,
-  waitForProjectReady,
   withBomAndCrLf,
   writeFileSync,
 } from "./electron-native-harness.mjs";
@@ -479,84 +478,6 @@ test("Electron keeps the active text selection and comment anchors stable after 
   }
 });
 
-test("Electron native field undo consumes a live composition without leaving interim pinyin", {
-  tag: ["@gate-smoke","@smoke-editing"],
-}, async () => {
-  test.setTimeout(60_000);
-  const launched = await launchPageRoot();
-  try {
-    await waitForProjectReady(launched.page);
-    await launched.page.getByRole("button", { name: "项目", exact: true }).click();
-    await launched.page.locator(".project-rules-summary").click();
-    const projectRules = launched.page.getByRole("textbox", {
-      name: "项目长期规则",
-      exact: true,
-    });
-    await expect(projectRules).toBeEnabled();
-    const originalRules = await projectRules.inputValue();
-    await projectRules.evaluate((element) => {
-      element.focus();
-      element.setSelectionRange(element.value.length, element.value.length);
-    });
-    const cdp = await launched.page.context().newCDPSession(launched.page);
-    await cdp.send("Input.imeSetComposition", {
-      text: "shui",
-      selectionStart: 4,
-      selectionEnd: 4,
-    });
-    await cdp.send("Input.imeSetComposition", {
-      text: "shuifei",
-      selectionStart: 7,
-      selectionEnd: 7,
-    });
-    await cdp.send("Input.insertText", { text: "水费" });
-    await expect(projectRules).toHaveValue(`${originalRules}水费`);
-
-    await launched.page.keyboard.press(keyShortcut("Z"));
-    await expect(projectRules).toHaveValue(originalRules);
-    await expect(projectRules).not.toHaveValue(/shui|shuifei/u);
-
-    await projectRules.evaluate((element) => {
-      element.focus();
-      element.setSelectionRange(element.value.length, element.value.length);
-    });
-    await cdp.send("Input.imeSetComposition", {
-      text: "dianfei",
-      selectionStart: 7,
-      selectionEnd: 7,
-    });
-    await expect(projectRules).toHaveValue(`${originalRules}dianfei`);
-    const restoreRules = launched.page.getByRole("button", { name: "还原修改" });
-    await expect(restoreRules).toBeEnabled();
-    await projectRules.evaluate((element) => {
-      window.__PAGEROOT_RETIRED_PROJECT_RULES_EDITOR__ = element;
-    });
-    await restoreRules.click();
-    await launched.page.evaluate((lateValue) => {
-      const retired = window.__PAGEROOT_RETIRED_PROJECT_RULES_EDITOR__;
-      const valueSetter = Object.getOwnPropertyDescriptor(
-        HTMLTextAreaElement.prototype,
-        "value",
-      )?.set;
-      valueSetter?.call(retired, lateValue);
-      retired?.dispatchEvent(new InputEvent("input", {
-        bubbles: true,
-        data: "dianfei",
-        inputType: "insertCompositionText",
-        isComposing: true,
-      }));
-      retired?.dispatchEvent(new CompositionEvent("compositionend", {
-        bubbles: true,
-        data: "dianfei",
-      }));
-      delete window.__PAGEROOT_RETIRED_PROJECT_RULES_EDITOR__;
-    }, `${originalRules}dianfei`);
-    await expect(projectRules).toHaveValue(originalRules);
-    await expect(projectRules).not.toHaveValue(/dianfei/u);
-  } finally {
-    await stopPageRoot(launched.electronApp, launched.isolatedUserData);
-  }
-});
 
 test("Electron persists an Apple Pinyin boundary composition with left affinity", {
   tag: ["@gate-smoke","@smoke-editing"],

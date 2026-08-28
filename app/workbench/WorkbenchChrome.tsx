@@ -12,6 +12,7 @@ import {
   CaretRightIcon,
   FileHtmlIcon,
   FolderOpenIcon,
+  GearSixIcon,
   PlusIcon,
   SidebarSimpleIcon,
   XIcon,
@@ -99,14 +100,14 @@ export function WorkbenchTabBar({
   }, [snapshot.activeTabId]);
 
   return (
-    <nav className="workbench-tabbar" aria-label="已打开的 HTML">
+    <nav className="workbench-tabbar" aria-label="已打开的页面">
       {!sidebarOpen ? (
         <SidebarToggle expanded={false} onClick={onToggleSidebar} />
       ) : null}
       <div
         className="workbench-tablist"
         role="tablist"
-        aria-label="已打开的 HTML"
+        aria-label="已打开的页面"
         aria-orientation="horizontal"
       >
         {snapshot.tabs.map((tab) => {
@@ -243,6 +244,7 @@ export function WorkbenchGlobalSidebar({
   updateResult,
   updateBadgeLabel,
   onOpenAbout,
+  onOpenSettings,
   onDownloadOrRestartUpdate,
 }: {
   open: boolean;
@@ -265,6 +267,7 @@ export function WorkbenchGlobalSidebar({
   updateResult: ApplicationUpdateResult | null | undefined;
   updateBadgeLabel: string;
   onOpenAbout: () => void;
+  onOpenSettings: () => void;
   onDownloadOrRestartUpdate: () => void;
 }) {
   const [expandedProjectKey, setExpandedProjectKey] = useState<string | null>(
@@ -447,6 +450,17 @@ export function WorkbenchGlobalSidebar({
               )}
             </section>
           </div>
+          <footer className="workbench-sidebar-footer">
+            <button
+              className="workbench-sidebar-settings"
+              type="button"
+              aria-label="设置"
+              data-tooltip="设置"
+              onClick={onOpenSettings}
+            >
+              <GearSixIcon aria-hidden="true" size={20} weight="bold" />
+            </button>
+          </footer>
           <WorkbenchResizer kind="sidebar" />
         </>
       ) : null}

@@ -207,12 +207,6 @@ function createHarness({
           : OLD_HTML;
       return sourcePayload(sourcePath, html);
     },
-    async projectFile(_sourcePath, relativePath) {
-      return { content: `file:${relativePath}` };
-    },
-    async openFolder() {
-      return { ok: true };
-    },
     async conflictCandidate() {
       return {};
     },
@@ -2136,43 +2130,6 @@ test("a stuck immutable hydration can close without waiting for the remote read"
   });
   assert.deepEqual(readiness, { ready: true });
   assert.equal(harness.unlockCount, unlocksBeforeClose);
-});
-
-test("load, source-integrity and project-resource races preserve current authority", async (t) => {
-  let resolveProjectFile;
-  const harness = createHarness({
-    bridge: {
-      async workspace(sourcePath) {
-        if (sourcePath === OLD_PATH) throw new Error("workspace unavailable");
-        return workspacePayload(sourcePath, B_HTML);
-      },
-      projectFile: () => new Promise((resolve) => {
-        resolveProjectFile = resolve;
-      }),
-    },
-  });
-  t.after(() => harness.workflow.dispose());
-
-  const failed = await harness.workflow.refreshWorkspace({
-    sourcePath: OLD_PATH,
-    epoch: harness.projectSession.epoch,
-  });
-  assert.equal(failed.status, "rejected");
-  assert.equal(harness.workflow.projectLoadError, "workspace unavailable");
-  assert.equal(harness.documentSession.html, OLD_HTML);
-  assert.equal(harness.projectSession.context.projectId, "project_old");
-
-  const context = harness.projectSession.context;
-  const reading = harness.workflow.readProjectFile({
-    context,
-    relativePath: "REQUESTS/index.json",
-  });
-  await waitFor(() => Boolean(resolveProjectFile));
-  harness.projectSession.openLocator(B_PATH);
-  resolveProjectFile({ content: "old project bytes" });
-  const resource = await reading;
-  assert.equal(resource.status, "stale");
-  assert.equal(harness.projectSession.sourcePath, B_PATH);
 });
 
 test("a Canvas acknowledgement failure rolls the hydration publication back", async (t) => {

@@ -64,6 +64,12 @@ test("Qoder ACP Agent Bridge streams public execution text without clipboard or 
       "请完成 Qoder ACP 自动闭环，但不要直接覆盖当前 HTML。",
     );
     await launched.page.getByRole("button", { name: /AI 助手/u }).click();
+    // Availability checks now belong to Settings. Return to the conversation
+    // only after the selected Agent has a fresh readiness result.
+    const qoderSettingsCard = await openQoderAvailability(launched.page);
+    await expect(qoderSettingsCard.getByText("已连接", { exact: true }))
+      .toBeVisible({ timeout: 60_000 });
+    await closeQoderAvailability(launched.page);
     // Destination and the local-Agent action live in one compact Composer row.
     const deliveryDialog = await chooseModifyIntent(launched.page);
     await expect(deliveryDialog.getByTestId("ai-conversation-agent"))
@@ -231,6 +237,12 @@ test("Codex ACP shares the public execution stream and retains its frozen identi
     await expect(sidebar.getByTestId("ai-conversation-agent"))
       .toContainText("Codex", { timeout: 60_000 });
     await expect(sidebar.getByTestId("ai-conversation-agent")).toBeFocused();
+    await openQoderAvailability(launched.page);
+    const settingsPage = launched.page.locator(".workbench-settings-page");
+    await expect(settingsPage.locator(".codex-availability-card")
+      .getByText("已连接", { exact: true }))
+      .toBeVisible({ timeout: 60_000 });
+    await settingsPage.getByRole("button", { name: "关闭设置" }).click();
     await expect(sidebar.getByRole("button", { name: /交给 Codex 修改/u }))
       .toBeEnabled({ timeout: 60_000 });
     await sidebar.getByRole("button", { name: /交给 Codex 修改/u }).click();
@@ -295,7 +307,7 @@ test("Codex ACP shares the public execution stream and retains its frozen identi
   }
 });
 
-test("Qoder login entry opens About without restoring a Discussion composer", async () => {
+test("Qoder settings entry opens Settings without restoring a Discussion composer", async () => {
   test.setTimeout(120_000);
   const fixture = createSourceFixture("qoder-auth-required.html");
   const qoderCommand = createQoderAcpE2ECommand(fixture.sourceDirectory, {
@@ -324,31 +336,31 @@ test("Qoder login entry opens About without restoring a Discussion composer", as
     await expect(sidebar).toBeVisible();
     await expect(sidebar.getByTestId("ai-conversation-input")).toHaveCount(0);
     await expect(sidebar.getByTestId("ai-conversation-intent")).toHaveCount(0);
-    await expect(sidebar.getByRole("button", { name: "登录 Qoder CLI" }))
+    await expect(sidebar.getByRole("button", { name: "设置 Qoder CLI" }))
       .toBeVisible();
     await launched.page.screenshot({
       path: path.join(QODER_VISUAL_OUTPUT, "real-sidebar-login.png"),
       fullPage: false,
     });
-    await sidebar.getByRole("button", { name: "登录 Qoder CLI" }).click();
+    await sidebar.getByRole("button", { name: "设置 Qoder CLI" }).click();
 
-    const about = launched.page.getByRole("dialog", { name: "源页" });
-    await expect(about).toBeVisible();
-    await expect(about.getByRole("heading", { name: "AI Agent" })).toBeVisible();
-    await expect(about.getByText("Qoder CLI", { exact: true })).toBeVisible();
-    await expect(about.getByText("需要登录", { exact: true })).toBeVisible();
-    await expect(about.getByRole("button", { name: "复制指令粘贴至 Agent" }))
+    const settings = launched.page.locator(".workbench-settings-page");
+    await expect(settings).toBeVisible();
+    await expect(settings.getByRole("heading", { name: "AI Agent" })).toBeVisible();
+    await expect(settings.getByText("Qoder CLI", { exact: true })).toBeVisible();
+    await expect(settings.getByText("需要登录", { exact: true })).toBeVisible({ timeout: 30_000 });
+    await expect(settings.getByRole("button", { name: "复制指令粘贴至 Agent" }))
       .toBeVisible();
-    await about.screenshot({
-      path: path.join(QODER_VISUAL_OUTPUT, "real-about-login.png"),
+    await settings.screenshot({
+      path: path.join(QODER_VISUAL_OUTPUT, "real-settings-login.png"),
       animations: "disabled",
     });
     expect(requestPosts).toBe(0);
-    await about.getByRole("button", { name: "复制指令粘贴至 Agent" }).click();
-    await expect(about.getByText("等待登录", { exact: true })).toBeVisible();
-    await expect(about.getByRole("button", { name: "重新复制" })).toBeVisible();
-    await about.screenshot({
-      path: path.join(QODER_VISUAL_OUTPUT, "real-about-waiting-login.png"),
+    await settings.getByRole("button", { name: "复制指令粘贴至 Agent" }).click();
+    await expect(settings.getByText("等待登录", { exact: true })).toBeVisible();
+    await expect(settings.getByRole("button", { name: "重新复制" })).toBeVisible();
+    await settings.screenshot({
+      path: path.join(QODER_VISUAL_OUTPUT, "real-settings-waiting-login.png"),
       animations: "disabled",
     });
     expect(await launched.electronApp.evaluate(({ clipboard }) => clipboard.readText()))
@@ -357,8 +369,8 @@ test("Qoder login entry opens About without restoring a Discussion composer", as
 
     await closeQoderAvailability(launched.page);
     await expect(sidebar.getByTestId("ai-conversation-input")).toHaveCount(0);
-    await openQoderAvailability(launched.page);
-    await expect(about.getByText("等待登录", { exact: true })).toBeVisible();
+    const reopenedSettingsCard = await openQoderAvailability(launched.page);
+    await expect(reopenedSettingsCard.getByText("等待登录", { exact: true })).toBeVisible();
     expect(requestPosts).toBe(0);
     expect(readFileSync(fixture.sourcePath).equals(fixture.original)).toBe(true);
   } finally {
@@ -391,7 +403,7 @@ test("Qoder installed while PageRoot is open refreshes in place and continues on
     );
     await launched.page.getByRole("button", { name: /AI 助手/u }).click();
     const deliveryDialog = await openQoderAvailability(launched.page);
-    const qoderCard = deliveryDialog.locator(".qoder-availability-card");
+    const qoderCard = deliveryDialog;
     await expect(qoderCard.getByText("未安装", { exact: true })).toBeVisible();
     await expect(qoderCard.getByRole("button", { name: "安装 Qoder CLI" })).toBeVisible();
     expect(requestPosts).toBe(0);
@@ -402,7 +414,7 @@ test("Qoder installed while PageRoot is open refreshes in place and continues on
       document.dispatchEvent(new Event("visibilitychange"));
     });
     await expect(qoderCard.getByText("已连接", { exact: true })).toBeVisible();
-    // The About card only observes availability; continuing the round is the
+    // The Settings card only observes availability; continuing the round is the
     // conversation's own send action.
     expect(requestPosts).toBe(0);
 
@@ -443,15 +455,15 @@ test("Qoder capacity exhaustion stays unavailable without recovery buttons or a 
       "额度不足时仍然不应创建本轮任务。",
     );
     await launched.page.getByRole("button", { name: /AI 助手/u }).click();
-    const aboutSection = await openQoderAvailability(launched.page);
+    const settingsSection = await openQoderAvailability(launched.page);
     await expect(
-      aboutSection.getByText("暂不可用 · Qoder 额度已用完", { exact: true }),
+      settingsSection.getByText("暂不可用 · Qoder 额度已用完", { exact: true }),
     ).toBeVisible();
-    await expect(aboutSection.getByRole("button", { name: /检测|重新/u })).toHaveCount(0);
+    await expect(settingsSection.getByRole("button", { name: /检测|重新/u })).toHaveCount(0);
     expect(requestPosts).toBe(0);
     await launched.page.evaluate(() => window.dispatchEvent(new Event("focus")));
     await expect(
-      aboutSection.getByText("暂不可用 · Qoder 额度已用完", { exact: true }),
+      settingsSection.getByText("暂不可用 · Qoder 额度已用完", { exact: true }),
     ).toBeVisible();
     expect(requestPosts).toBe(0);
     expect(readFileSync(fixture.sourcePath).equals(fixture.original)).toBe(true);
@@ -494,8 +506,12 @@ test("Qoder ACP polling waits for start and a managed stop kills the Agent", {
     );
     const workingBefore = readFileSync(workingCopyPath);
     await launched.page.getByRole("button", { name: /AI 助手/u }).click();
-    // The round is started from the conversation itself; the About card only
+    // The round is started from the conversation itself; the Settings card only
     // observes availability and never launches the Agent.
+    const qoderSettingsCard = await openQoderAvailability(launched.page);
+    await expect(qoderSettingsCard.getByText("已连接", { exact: true }))
+      .toBeVisible({ timeout: 60_000 });
+    await closeQoderAvailability(launched.page);
     await chooseModifyIntent(launched.page);
     await launched.page.getByRole("button", { name: "交给 Qoder 修改" }).click();
 

@@ -74,8 +74,6 @@ test("Electron first launch imports the welcome HTML as V1 and sends its comment
     ).toBe(true);
     expect(path.basename(managedWelcomePath)).toBe("欢迎来到源页-V1.html");
     await expect(launched.page.locator('[aria-label="项目读取失败"]')).toHaveCount(0);
-    await expect(launched.page.getByRole("button", { name: "项目", exact: true }))
-      .toBeEnabled({ timeout: 30_000 });
     const globalCommentButton = launched.page.locator('aside[aria-label="本轮评论"]')
       .getByRole("button", { name: "全局评论", exact: true });
     await expect(globalCommentButton)
@@ -773,7 +771,7 @@ test("Electron follows a same-directory Finder rename and keeps the selected tab
       "Finder 改名后评论仍保留。",
     );
 
-    await expect(launched.page.getByRole("tablist", { name: "已打开的 HTML" })
+    await expect(launched.page.getByRole("tablist", { name: "已打开的页面" })
       .getByRole("tab").filter({ hasText: "Finder 新名字-V1" }))
       .toHaveCount(1);
     await expect(launched.page.getByRole("button", { name: /重命名文件/u }))
@@ -822,7 +820,7 @@ test("Electron keeps project identity after Finder rename without restoring titl
     renameSync(managedSourcePath, finalPath);
     await waitForTitleStem(launched.page, path.basename(finalFinderName, ".html"));
     await waitForActiveSourcePath(launched.page, finalPath);
-    await expect(launched.page.getByRole("tablist", { name: "已打开的 HTML" })
+    await expect(launched.page.getByRole("tablist", { name: "已打开的页面" })
       .getByRole("tab").filter({ hasText: "finder-final-V1" }))
       .toHaveCount(1);
     await expect(launched.page.getByRole("button", { name: /重命名文件/u }))

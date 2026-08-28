@@ -178,8 +178,8 @@ aggregate snapshot through its fixed `getSnapshot()`/`subscribe()` contract and
 forwards typed workflow events through `subscribeEvents()`; it does not create a
 second mutable store. It owns the unique `DrainCoordinator`, protocol Sessions,
 and Project, Comment, Run, Version and Workbench Tabs workflow composition.
-Capability facets such as `controller.comments`, `controller.projects`,
-`controller.runs`, `controller.navigation` and the narrow
+Capability facets such as `controller.comments`, `controller.runs`,
+`controller.navigation` and the narrow
 `controller.projectCatalog` projection are stable views of this same
 Controller instance. A facet exposes only `getSnapshot`, `subscribe` and typed
 business commands; it neither stores copied facts nor exposes another
@@ -195,11 +195,14 @@ disclosure, delete confirmation and file-input refs, measures cards, virtualizes
 the rail and routes paired reveal/focus/relink intents. Workbench may issue a
 typed presentation intent or read the latest target status inside a user command,
 but it must not subscribe its composition render to comment presentation changes.
-`ProjectPanelContainer` subscribes `controller.projects` and owns PROJECT.md
-editor refs, disclosure, saved notices and version selection. Sidebar and Start
-subscribe `controller.projectCatalog` independently; catalog consumers therefore
-do not commit when rules text changes. `projectPanelPort` carries only disposable
-open/focus intents and never project facts.
+`WorkbenchGlobalSidebarContainer` and the Start surface subscribe
+`controller.projectCatalog` independently and render only project identity,
+open/switch actions and the existing version-tree context. There is no
+user-facing project management panel, `controller.projects` presentation facet
+or `projectPanelPort`. `ProjectRulesSession` and `ProjectRulesWorkflow` retain
+the durable rules facts and safe lifecycle commands, but rules editing,
+version-detail presentation, Finder/export actions and history-preview entry
+points are not exposed through a drawer or a React editor container.
 `RunConversationOutlet` subscribes `controller.runs`; public Agent narration
 and its timestamps therefore commit only the conversation region. Workbench's
 aggregate comparator still publishes run identity, lifecycle, phase and error

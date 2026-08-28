@@ -83,6 +83,24 @@ test("AI background status and Candidate adoption remain on the same project doc
   assert.equal(session.snapshot.tabs.find((tab) => tab.tabId === tabId).title, "Alpha Candidate.html");
 });
 
+test("settings is a singleton presentation tab and preserves the document runtime owner", () => {
+  const session = new WorkbenchTabsSession();
+  session.bindDocument(a);
+  const documentTabId = session.snapshot.activeTabId;
+
+  const first = session.createSettings({ focus: true });
+  const settingsTab = first.tabs.find((tab) => tab.kind === "settings");
+  assert.ok(settingsTab);
+  assert.equal(first.activeTabId, settingsTab.tabId);
+  assert.equal(first.mountedDocumentTabId, null);
+  assert.equal(first.runtimeOwnerTabId, documentTabId);
+
+  const second = session.createSettings({ focus: true });
+  assert.equal(second.tabs.filter((tab) => tab.kind === "settings").length, 1);
+  assert.equal(second.activeTabId, settingsTab.tabId);
+  assert.equal(second.runtimeOwnerTabId, documentTabId);
+});
+
 test("a Finder rename updates the document tab title without changing its identity", () => {
   const session = new WorkbenchTabsSession();
   session.bindDocument(a);

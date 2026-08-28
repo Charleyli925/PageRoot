@@ -303,13 +303,6 @@ export class WorkspaceController {
     persistence: null,
   });
   #commentsCapabilityListeners = new Set();
-  #projectsCapabilitySnapshot = Object.freeze({
-    session: null,
-    workflow: null,
-    rules: null,
-    versions: null,
-  });
-  #projectsCapabilityListeners = new Set();
   #projectCatalogSnapshot = projectCatalogSnapshot();
   #projectCatalogListeners = new Set();
   #runsCapabilitySnapshot = Object.freeze({
@@ -359,8 +352,6 @@ export class WorkspaceController {
   #disposed = false;
 
   comments;
-
-  projects;
 
   projectCatalog;
 
@@ -524,40 +515,6 @@ export class WorkspaceController {
       refreshRegistered: () => this.refreshRegisteredProjects(),
       loadVersionSummaries: (projectId) => this.loadRegisteredProjectVersionSummaries(projectId),
     });
-    this.projects = Object.freeze({
-      getSnapshot: () => this.#projectsCapabilitySnapshot,
-      subscribe: (listener) => {
-        if (typeof listener !== "function") {
-          throw new TypeError("Projects capability listener must be a function.");
-        }
-        this.#projectsCapabilityListeners.add(listener);
-        return () => this.#projectsCapabilityListeners.delete(listener);
-      },
-      commands: Object.freeze({
-        readFile: (relativePath) => this.readProjectFile({ relativePath }),
-        openRules: () => {
-          const context = this.getCurrentProjectContext();
-          if (!context) {
-            return Promise.resolve(blocked(
-              "PROJECT_CONTEXT_REQUIRED",
-              "当前项目身份尚未完成初始化。",
-            ));
-          }
-          return this.openProjectRules({ context });
-        },
-        updateRules: (content) => this.updateProjectRules({ content }),
-        beginRulesComposition: (target, baselineValue) => (
-          this.beginProjectRulesComposition({ target, baselineValue })
-        ),
-        finishRulesComposition: (target) => (
-          this.finishProjectRulesComposition({ target })
-        ),
-        leaveRulesEditor: () => this.leaveProjectRulesEditor(),
-        restoreRules: () => this.restoreProjectRules(),
-        saveRules: () => this.saveProjectRules(),
-        closeRules: () => this.closeProjectRules(),
-      }),
-    });
     this.projectCatalog = Object.freeze({
       getSnapshot: () => this.#projectCatalogSnapshot,
       subscribe: (listener) => {
@@ -601,6 +558,7 @@ export class WorkspaceController {
       commands: Object.freeze({
         activateTab: (tabId, input) => this.activateWorkbenchTab(tabId, input),
         createStartTab: () => this.createWorkbenchStartTab(),
+        createSettingsTab: () => this.createWorkbenchSettingsTab(),
         closeTab: (tabId) => this.closeWorkbenchTab(tabId),
         openRegisteredProject: (input) => this.openRegisteredWorkbenchProject(input),
       }),
@@ -724,9 +682,6 @@ export class WorkspaceController {
         runSession: projectWorkflow?.runSession || projectRulesWorkflow.runSession,
         projectRulesSession: new ProjectRulesSession(),
         errorMessage: projectRulesWorkflow.errorMessage,
-        ports: {
-          presentation: projectRulesWorkflow.presentation,
-        },
         scheduler: projectRulesWorkflow.scheduler,
         clock,
       });
@@ -1097,7 +1052,6 @@ export class WorkspaceController {
     this.#listeners.clear();
     this.#eventListeners.clear();
     this.#commentsCapabilityListeners.clear();
-    this.#projectsCapabilityListeners.clear();
     this.#projectCatalogListeners.clear();
     this.#runsCapabilityListeners.clear();
     this.#navigationCapabilityListeners.clear();
@@ -1188,6 +1142,11 @@ export class WorkspaceController {
 
   createWorkbenchStartTab() {
     return this.#workbenchNavigationWorkflow?.createStart()
+      || Promise.resolve(rejected("WORKBENCH_TABS_UNAVAILABLE", "标签页尚未完成初始化。"));
+  }
+
+  createWorkbenchSettingsTab() {
+    return this.#workbenchNavigationWorkflow?.createSettings()
       || Promise.resolve(rejected("WORKBENCH_TABS_UNAVAILABLE", "标签页尚未完成初始化。"));
   }
 
@@ -1650,14 +1609,6 @@ export class WorkspaceController {
     return this.#requireProjectWorkflow().drainCloseFallback(input);
   }
 
-  readProjectFile(input) {
-    return this.#requireProjectWorkflow().readProjectFile(input);
-  }
-
-  openProjectRecords(input) {
-    return this.#requireProjectWorkflow().openProjectRecords(input);
-  }
-
   refreshRecentProjects() {
     return this.#requireProjectWorkflow().refreshRecents();
   }
@@ -2101,7 +2052,6 @@ export class WorkspaceController {
 
   #publishAggregateSnapshot() {
     this.#publishCommentsCapabilitySnapshot();
-    this.#publishProjectsCapabilitySnapshot();
     this.#publishRunsCapabilitySnapshot();
     this.#publishNavigationCapabilitySnapshot();
     this.#snapshot = Object.freeze({
@@ -2150,29 +2100,6 @@ export class WorkspaceController {
         listener();
       } catch {
         // Capability presentation cannot affect application authority.
-      }
-    }
-  }
-
-  #publishProjectsCapabilitySnapshot() {
-    const next = {
-      session: this.#projectSessionSnapshot,
-      workflow: this.#projectSnapshot,
-      rules: this.#projectRulesSnapshot,
-      versions: this.#versionSessionSnapshot,
-    };
-    if (
-      this.#projectsCapabilitySnapshot.session === next.session
-      && this.#projectsCapabilitySnapshot.workflow === next.workflow
-      && this.#projectsCapabilitySnapshot.rules === next.rules
-      && this.#projectsCapabilitySnapshot.versions === next.versions
-    ) return;
-    this.#projectsCapabilitySnapshot = Object.freeze(next);
-    for (const listener of this.#projectsCapabilityListeners) {
-      try {
-        listener();
-      } catch {
-        // Project presentation cannot affect application authority.
       }
     }
   }
@@ -2465,7 +2392,6 @@ export class WorkspaceController {
       const projectRecord = this.#codecs.isRecord(payload.project)
         ? payload.project
         : {};
-      const paths = this.#codecs.isRecord(payload.paths) ? payload.paths : {};
       const openTarget = this.#codecs.isRecord(payload.openTarget)
         ? payload.openTarget
         : null;
@@ -2632,9 +2558,6 @@ export class WorkspaceController {
       this.#emitEvent({
         type: "registration-published",
         context: registeredContext,
-        projectRecordsPath: String(
-          paths.projectRecords || payload.projectRoot || "",
-        ) || null,
         projectName: projectRecord.displayName
           ? String(projectRecord.displayName)
           : null,

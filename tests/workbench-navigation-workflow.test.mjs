@@ -670,6 +670,36 @@ test("same-tick new Start tabs focus the last admitted tab without a second docu
   assert.deepEqual(harness.calls.filter((call) => call === "prepare"), ["prepare"]);
 });
 
+test("settings opens once, returns to the retained document without reopening ProjectWorkflow", async () => {
+  const harness = fixture();
+  const opened = await harness.workflow.createSettings();
+  assert.equal(opened.status, "succeeded");
+  assert.equal(opened.value.tabId, "settings:1");
+  assert.equal(harness.navigation.snapshot.lastReceipt.kind, "settings");
+  assert.equal(harness.tabs.snapshot.activeTabId, "settings:1");
+  assert.equal(harness.tabs.snapshot.mountedDocumentTabId, null);
+  assert.equal(harness.tabs.snapshot.runtimeOwnerTabId, `document:${A.projectId}:${A.documentId}`);
+
+  const reopened = await harness.workflow.createSettings();
+  assert.equal(reopened.status, "succeeded");
+  assert.equal(harness.tabs.snapshot.tabs.filter((tab) => tab.kind === "settings").length, 1);
+
+  const returned = await harness.workflow.activateTab(`document:${A.projectId}:${A.documentId}`);
+  assert.equal(returned.status, "succeeded");
+  assert.equal(harness.navigation.snapshot.lastReceipt.kind, "document");
+  assert.equal(harness.tabs.snapshot.activeTabId, `document:${A.projectId}:${A.documentId}`);
+  assert.equal(harness.calls.some((call) => call === `open:registered:${A.projectId}`), false);
+
+  const settingsTab = harness.tabs.snapshot.tabs.find((tab) => tab.kind === "settings");
+  assert.ok(settingsTab);
+  await harness.workflow.activateTab(settingsTab.tabId);
+  const closed = await harness.workflow.closeTab(settingsTab.tabId);
+  assert.equal(closed.status, "succeeded");
+  assert.equal(harness.tabs.snapshot.tabs.some((tab) => tab.kind === "settings"), false);
+  assert.equal(harness.tabs.snapshot.activeTabId, `document:${A.projectId}:${A.documentId}`);
+  assert.equal(harness.calls.some((call) => call === `open:registered:${A.projectId}`), false);
+});
+
 test("external admission completes only after the correlated application and terminal settlement", async () => {
   const harness = fixture();
   const accepted = await harness.workflow.acceptExternalProject({ requestId: "external-B" });

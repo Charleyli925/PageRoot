@@ -182,11 +182,7 @@ export function WorkbenchResizer({ kind }: WorkbenchResizerProps) {
         handle.setAttribute("aria-valuenow", String(next));
       }}
     >
-      <span className="workbench-resizer-grip" aria-hidden="true">
-        <span />
-        <span />
-        <span />
-      </span>
+      <span className="workbench-resizer-grip" aria-hidden="true" />
     </div>
   );
 }

@@ -605,7 +605,7 @@ async function waitForRenderedContent(frameResolver, started, {
 }
 
 async function openThroughInput(source, ordinal) {
-  const beforeTabs = await launched.page.getByRole("tablist", { name: "已打开的 HTML" })
+  const beforeTabs = await launched.page.getByRole("tablist", { name: "已打开的页面" })
     .getByRole("tab").count();
   const started = performance.now();
   const rendererStartedAt = await launched.page.evaluate(() => performance.now());
@@ -651,7 +651,7 @@ async function openThroughInput(source, ordinal) {
     },
   );
   const tabCountPromise = waitUntil(async () => (
-    await launched.page.getByRole("tablist", { name: "已打开的 HTML" })
+    await launched.page.getByRole("tablist", { name: "已打开的页面" })
       .getByRole("tab").count()
   ) >= Math.min(ordinal, beforeTabs + 1), {
     timeout: 45_000,
@@ -687,7 +687,7 @@ async function openThroughInput(source, ordinal) {
     verifiedMs: round(verifiedMs),
     readyMs: round(readyMs),
     activeSourcePath: project.sourcePath,
-    tabCount: await launched.page.getByRole("tablist", { name: "已打开的 HTML" })
+    tabCount: await launched.page.getByRole("tablist", { name: "已打开的页面" })
       .getByRole("tab").count(),
     performanceTimeline: await rendererPerformanceTimeline(rendererStartedAt),
   };
@@ -809,7 +809,7 @@ function assertReviewResourcesReleased(snapshot) {
 }
 
 async function switchTo(index) {
-  const tabs = launched.page.getByRole("tablist", { name: "已打开的 HTML" }).getByRole("tab");
+  const tabs = launched.page.getByRole("tablist", { name: "已打开的页面" }).getByRole("tab");
   const tab = tabs.nth(index);
   const label = (await tab.innerText()).trim();
   const tabId = String(await tab.getAttribute("id") || "").replace(/^workbench-tab-/u, "");
@@ -935,10 +935,6 @@ async function exerciseEditAndPreview() {
   await waitUntil(
     () => readFileSync(projectBeforeSave.sourcePath, "utf8").includes(qaToken),
     { timeout: 30_000, label: "edited source persistence" },
-  );
-  await waitUntil(
-    () => page.locator(".save-status").textContent().then((text) => text?.includes("已安全保存")),
-    { timeout: 30_000, label: "safe save status" },
   );
   results.editing.saveMs = round(performance.now() - saveStarted);
   results.editing.sourcePath = projectBeforeSave.sourcePath;
@@ -1150,7 +1146,7 @@ async function openAfterAccept(source) {
   const beforeOpenProject = await activeProject();
   const beforeOpenSourcePath = beforeOpenProject?.sourcePath || null;
   assert(beforeOpenSourcePath, "post-accept open requires one active source identity");
-  const tabs = page.getByRole("tablist", { name: "已打开的 HTML" }).getByRole("tab");
+  const tabs = page.getByRole("tablist", { name: "已打开的页面" }).getByRole("tab");
   const beforeClose = await tabs.count();
   assert.equal(beforeClose, 20);
   const lastContainer = page.locator(".workbench-tab").nth(beforeClose - 1);
@@ -1312,7 +1308,7 @@ try {
   for (let index = 0; index < 20; index += 1) {
     await openThroughInput(copiedSources[index], index + 1);
     if (index === 0) {
-      const initialTabs = launched.page.getByRole("tablist", { name: "已打开的 HTML" })
+      const initialTabs = launched.page.getByRole("tablist", { name: "已打开的页面" })
         .getByRole("tab");
       if (await initialTabs.count() === 2) {
         await launched.page.locator(".workbench-tab").first()
@@ -1344,7 +1340,7 @@ try {
       await rendererMemory("10-tabs");
     }
   }
-  const tabCount = await launched.page.getByRole("tablist", { name: "已打开的 HTML" })
+    const tabCount = await launched.page.getByRole("tablist", { name: "已打开的页面" })
     .getByRole("tab").count();
   assert.equal(tabCount, 20);
   results.cacheBudget.after20Opens = await cacheState();

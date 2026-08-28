@@ -310,8 +310,6 @@ export class ProjectWorkflow {
       !bridgeClient
       || typeof bridgeClient.workspace !== "function"
       || typeof bridgeClient.source !== "function"
-      || typeof bridgeClient.projectFile !== "function"
-      || typeof bridgeClient.openFolder !== "function"
     ) {
       throw new TypeError("ProjectWorkflow requires its project Bridge methods.");
     }
@@ -1271,53 +1269,6 @@ export class ProjectWorkflow {
     return this.#drainCoordinator.drain("close", {
       deadlineAt: Number(deadlineAt) || this.#clock.now() + 3_000,
     });
-  }
-
-  async readProjectFile({ context, relativePath } = {}) {
-    const activeContext = context || this.#projectSession.context;
-    if (!activeContext || !this.#projectSession.matches(activeContext)) {
-      return blocked("PROJECT_CONTEXT_REQUIRED", "当前项目身份尚未完成初始化。");
-    }
-    try {
-      const payload = await this.#bridgeClient.projectFile(
-        activeContext.sourcePath,
-        String(relativePath || ""),
-      );
-      if (!this.#projectSession.matches(activeContext)) return stale(activeContext);
-      return succeeded({ content: String(payload.content || "") });
-    } catch (cause) {
-      return this.#outcomeFromCause(
-        this.#nextOperationId("project-file"),
-        cause,
-        "PROJECT_FILE_REJECTED",
-        "项目文件暂时无法读取。",
-      );
-    }
-  }
-
-  async openProjectRecords({ context } = {}) {
-    const activeContext = context || this.#projectSession.context;
-    if (!activeContext || !this.#projectSession.matches(activeContext)) {
-      return blocked("PROJECT_CONTEXT_REQUIRED", "当前项目身份尚未完成初始化。");
-    }
-    const operationId = this.#nextOperationId("project-folder");
-    try {
-      const payload = await this.#bridgeClient.openFolder({
-        sourcePath: activeContext.sourcePath,
-      });
-      if (!this.#projectSession.matches(activeContext)) return stale(activeContext);
-      if (payload.ok === false) {
-        return rejected("PROJECT_FOLDER_REJECTED", "无法打开项目记录。");
-      }
-      return succeeded({ opened: true });
-    } catch (cause) {
-      return this.#outcomeFromCause(
-        operationId,
-        cause,
-        "PROJECT_FOLDER_REJECTED",
-        "项目记录暂时无法打开。",
-      );
-    }
   }
 
   async refreshRecents() {
@@ -3273,9 +3224,6 @@ export class ProjectWorkflow {
       const projectRecord = this.#codecs.isRecord(supplementalPayload.project)
         ? supplementalPayload.project
         : {};
-      const workspacePaths = this.#codecs.isRecord(supplementalPayload.paths)
-        ? supplementalPayload.paths
-        : {};
       const currentDocument = this.#documentSession.snapshot;
       const projection = await inspectProjectOpenProjection({
         document: currentDocument,
@@ -3622,9 +3570,6 @@ export class ProjectWorkflow {
           type: "project-hydrated",
           context,
           projectName: projectRecord.displayName ? String(projectRecord.displayName) : null,
-          projectRecordsPath: String(
-            workspacePaths.projectRecords || payload.projectRoot || "",
-          ) || null,
           lastModifiedAt: authoritativeLastModifiedAt || null,
           showHandoff,
         });

@@ -66,7 +66,6 @@ export function noticeUsageCode(dedupeKey?: string): string {
     "project-registration",
     "reveal-request-folder",
     "show-project-in-folder-error",
-    "show-project-records-error",
     "source-reload",
     "submit-blocked",
     "unfinished-comment-draft",

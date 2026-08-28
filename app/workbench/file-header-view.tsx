@@ -5,14 +5,9 @@ import { ArrowClockwiseIcon } from "@phosphor-icons/react/dist/csr/ArrowClockwis
 import { CheckCircleIcon } from "@phosphor-icons/react/dist/csr/CheckCircle";
 import { ClockCounterClockwiseIcon } from "@phosphor-icons/react/dist/csr/ClockCounterClockwise";
 import { EyeIcon } from "@phosphor-icons/react/dist/csr/Eye";
-import { FolderOpenIcon } from "@phosphor-icons/react/dist/csr/FolderOpen";
 import { PencilSimpleIcon } from "@phosphor-icons/react/dist/csr/PencilSimple";
 
-import type {
-  CanvasMode,
-  Drawer,
-  PersistState,
-} from "./types";
+import type { CanvasMode } from "./types";
 import { ReviewToolbarControls } from "./review-toolbar-controls";
 import { WorkbenchMoreMenu, type WorkbenchMoreMenuProps } from "./workbench-more-menu";
 import {
@@ -21,86 +16,12 @@ import {
 } from "./workbench-header-shell";
 import { WorkbenchTooltipHost } from "./workbench-tooltip";
 
-export type WorkbenchFileHeaderViewProps = {
-  persistState: PersistState;
-  editRevision: number;
-  lastPersistedRevision: number;
-  headerStatusFacts: string[];
-  canvasGeneration: number;
-  canvasAuthority: {
-    status: string;
-  } | null | undefined;
-  visibleCanvasAck: {
-    generation: number;
-    sha256: string | null;
-  } | null | undefined;
-  saveStatusLabel: string;
-  saveStatusQuiet: boolean;
-  onRetryCanvasVerification: () => void;
-};
-
-export function WorkbenchFileHeaderView({
-  persistState,
-  editRevision,
-  lastPersistedRevision,
-  headerStatusFacts,
-  canvasGeneration,
-  canvasAuthority,
-  visibleCanvasAck,
-  saveStatusLabel,
-  saveStatusQuiet,
-  onRetryCanvasVerification,
-}: WorkbenchFileHeaderViewProps) {
-  return (
-    <div className="window-file" aria-label="当前文档保存状态">
-      <span className="file-meta">
-        {headerStatusFacts.length ? (
-          <span className="file-version-label project-status-facts">
-            {headerStatusFacts.map((fact) => (
-              <span key={fact}>{fact}</span>
-            ))}
-          </span>
-        ) : null}
-        <span
-          className="save-status"
-          data-persist-state={persistState}
-          data-edit-revision={editRevision}
-          data-persisted-revision={lastPersistedRevision}
-          data-canvas-generation={canvasGeneration}
-          data-canvas-authority={canvasAuthority?.status}
-          data-render-generation={visibleCanvasAck?.generation}
-          data-rendered-sha256={visibleCanvasAck?.sha256 || undefined}
-          data-quiet={saveStatusQuiet ? "true" : undefined}
-          data-tooltip={saveStatusQuiet ? saveStatusLabel : undefined}
-          role={canvasAuthority?.status === "failed" ? "button" : "status"}
-          aria-live="polite"
-          tabIndex={canvasAuthority?.status === "failed" ? 0 : undefined}
-          onClick={canvasAuthority?.status === "failed" ? onRetryCanvasVerification : undefined}
-          onKeyDown={canvasAuthority?.status === "failed" ? (event) => {
-            if (event.key === "Enter" || event.key === " ") {
-              event.preventDefault();
-              onRetryCanvasVerification();
-            }
-          } : undefined}
-        >
-          <span aria-hidden="true" />
-          <span className="save-status-copy">{saveStatusLabel}</span>
-        </span>
-      </span>
-    </div>
-  );
-}
-
 export type WorkbenchHeaderToolbarProps = {
   runInProgress: boolean;
   canvasMode: CanvasMode;
   browserPreviewOnly: boolean;
   viewMode: string;
   interactionLocked: boolean;
-  projectHydrating: boolean;
-  viewTransitioning: boolean;
-  attachmentUploadCount: number;
-  drawer: Drawer;
   recentRunOutcome: unknown;
   terminalRun: unknown;
   reviewActive: boolean;
@@ -109,13 +30,11 @@ export type WorkbenchHeaderToolbarProps = {
   refreshAvailable: boolean;
   aiConversationVisible: boolean;
   aiAssistantEntry: ReactNode;
-  fileStatus: ReactNode;
   moreMenu: WorkbenchMoreMenuProps;
   onSelectEdit: () => void;
   onSelectPreview: () => void;
   onOpenReview: () => void;
   onRefreshCanvas: () => void;
-  onToggleProjectPanel: () => void;
   reopenRecentRunOutcome: () => void;
 };
 
@@ -125,10 +44,6 @@ export function WorkbenchHeaderToolbar({
   browserPreviewOnly,
   viewMode,
   interactionLocked,
-  projectHydrating,
-  viewTransitioning,
-  attachmentUploadCount,
-  drawer,
   recentRunOutcome,
   terminalRun,
   reviewActive,
@@ -137,18 +52,16 @@ export function WorkbenchHeaderToolbar({
   refreshAvailable,
   aiConversationVisible,
   aiAssistantEntry,
-  fileStatus,
   moreMenu,
   onSelectEdit,
   onSelectPreview,
   onOpenReview,
   onRefreshCanvas,
-  onToggleProjectPanel,
   reopenRecentRunOutcome,
 }: WorkbenchHeaderToolbarProps) {
   return (
     <>
-        <WorkbenchHeaderActions aria-label="模式、审阅、项目和文件操作">
+      <WorkbenchHeaderActions aria-label="模式、审阅和文件操作">
           <div className="workbench-toolbar-primary">
             <div
               className="canvas-mode-switch"
@@ -228,7 +141,6 @@ export function WorkbenchHeaderToolbar({
             <span className="toolbar-section-divider" aria-hidden="true" />
           </div>
           <div className="workbench-toolbar-actions">
-            <div className="workbench-toolbar-status">{fileStatus}</div>
             <button
               className="workbench-refresh-button"
               type="button"
@@ -241,17 +153,7 @@ export function WorkbenchHeaderToolbar({
                   : "进入预览或审阅后可刷新"}
               onClick={onRefreshCanvas}
             >
-              <ArrowClockwiseIcon aria-hidden="true" size={17} weight="bold" />
-            </button>
-            <button
-              className="project-button"
-              type="button"
-              aria-expanded={drawer === "files"}
-              disabled={projectHydrating || viewTransitioning || attachmentUploadCount > 0}
-              onClick={onToggleProjectPanel}
-            >
-              <FolderOpenIcon aria-hidden="true" size={18} weight="duotone" />
-              项目
+              <ArrowClockwiseIcon aria-hidden="true" size={20} weight="bold" />
             </button>
             {recentRunOutcome && !runInProgress && !terminalRun ? (
               <button
@@ -271,7 +173,7 @@ export function WorkbenchHeaderToolbar({
             {aiAssistantEntry}
             <WorkbenchMoreMenu {...moreMenu} />
           </div>
-        </WorkbenchHeaderActions>
+      </WorkbenchHeaderActions>
       <WorkbenchTooltipHost />
     </>
   );

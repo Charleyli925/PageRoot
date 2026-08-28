@@ -12,7 +12,7 @@ import AgentProviderCard from "./AgentProviderCard";
 type QoderActionOutcome = Readonly<{ status: string; reason?: string }> | null | undefined;
 type QoderAvailabilityCardProps = {
   availability: QoderAvailabilitySnapshot;
-  surface: "delivery" | "about";
+  surface: "delivery" | "about" | "settings";
   disabled?: boolean;
   actionButtonRef?: Ref<HTMLButtonElement>;
   onCopyGuidance: (kind: QoderGuidanceKind) => Promise<QoderActionOutcome>;

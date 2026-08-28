@@ -28,7 +28,7 @@ export type AgentProviderCardPresentation = Readonly<{
 export type AgentProviderCardProps = {
   availability: AgentProviderAvailabilitySnapshot;
   presentation: AgentProviderCardPresentation;
-  surface: "delivery" | "about";
+  surface: "delivery" | "about" | "settings";
   disabled?: boolean;
   actionButtonRef?: Ref<HTMLButtonElement>;
   onCopyGuidance: (kind: AgentProviderGuidanceKind) => Promise<AgentActionOutcome>;

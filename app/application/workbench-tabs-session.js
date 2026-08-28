@@ -17,6 +17,15 @@ function startTab(tabId = "start:1") {
   });
 }
 
+function settingsTab(tabId = "settings:1") {
+  return freezeTab({
+    tabId,
+    kind: "settings",
+    title: "设置",
+    status: "normal",
+  });
+}
+
 function normalizedDocumentTab(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const projectId = String(value.projectId || "");
@@ -163,6 +172,30 @@ export class WorkbenchTabsSession {
     });
   }
 
+  createSettings({ focus = true } = {}) {
+    const existing = this.#snapshot.tabs.find((tab) => tab.kind === "settings");
+    if (existing) {
+      return this.#publish({
+        ...this.#snapshot,
+        activeTabId: focus ? existing.tabId : this.#snapshot.activeTabId,
+        pendingTabId: null,
+        mountedDocumentTabId: focus ? null : this.#snapshot.mountedDocumentTabId,
+        runtimeOwnerTabId: this.#snapshot.runtimeOwnerTabId,
+      });
+    }
+    let sequence = 1;
+    const ids = new Set(this.#snapshot.tabs.map((tab) => tab.tabId));
+    while (ids.has(`settings:${sequence}`)) sequence += 1;
+    const tab = settingsTab(`settings:${sequence}`);
+    return this.#publish({
+      tabs: [...this.#snapshot.tabs, tab],
+      activeTabId: focus ? tab.tabId : this.#snapshot.activeTabId,
+      pendingTabId: null,
+      mountedDocumentTabId: focus ? null : this.#snapshot.mountedDocumentTabId,
+      runtimeOwnerTabId: this.#snapshot.runtimeOwnerTabId,
+    });
+  }
+
   bindDocument({ projectId, documentId, title, status = "normal", focus = true }) {
     const tab = normalizedDocumentTab({
       tabId: `document:${projectId}:${documentId}`,
@@ -265,7 +298,7 @@ export class WorkbenchTabsSession {
   beginSwitch(tabId) {
     const target = this.resolveTab(tabId);
     if (!target) return null;
-    if (target.kind === "start") return this.#publish({
+    if (target.kind === "start" || target.kind === "settings") return this.#publish({
       ...this.#snapshot,
       pendingTabId: target.tabId,
     });
@@ -289,6 +322,19 @@ export class WorkbenchTabsSession {
       activeTabId: tabId,
       pendingTabId: null,
       mountedDocumentTabId: null,
+    });
+  }
+
+  commitSettings(tabId) {
+    const target = this.#snapshot.tabs.find((tab) => tab.tabId === tabId && tab.kind === "settings");
+    if (!target || this.#snapshot.pendingTabId !== tabId) return null;
+    this.#pendingPriorStatus = null;
+    return this.#publish({
+      ...this.#snapshot,
+      activeTabId: tabId,
+      pendingTabId: null,
+      mountedDocumentTabId: null,
+      runtimeOwnerTabId: this.#snapshot.runtimeOwnerTabId,
     });
   }
 

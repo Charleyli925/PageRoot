@@ -762,7 +762,7 @@ test("local Qoder discovery never creates a green state without a real preflight
   harness.workflow.dispose();
 });
 
-test("an About usability check does not authorize a later Qoder submission", async () => {
+test("a Settings usability check does not authorize a later Qoder submission", async () => {
   const harness = createHarness();
 
   const checked = await harness.workflow.checkQoderUsability();
@@ -781,7 +781,7 @@ test("an About usability check does not authorize a later Qoder submission", asy
   harness.workflow.dispose();
 });
 
-test("About keeps checking and guiding Qoder while Codex is selected", async () => {
+test("Settings keeps checking and guiding Qoder while Codex is selected", async () => {
   const harness = createHarness();
   const codex = harness.workflow.getSnapshot().agentCatalog.providers.codex.selection;
   harness.workflow.selectAgent(codex);
@@ -802,7 +802,7 @@ test("About keeps checking and guiding Qoder while Codex is selected", async () 
   harness.workflow.dispose();
 });
 
-test("About rechecks the resolved current Qoder selection", async () => {
+test("Settings rechecks the resolved current Qoder selection", async () => {
   const authError = Object.assign(new Error("Qoder CLI 尚未登录。"), {
     code: "QODER_AUTH_REQUIRED",
   });

@@ -150,7 +150,6 @@ export const CommentRailContainer = memo(function CommentRailContainer({
     draft,
     draftAttachments,
     editingCommentId,
-    commentEditSession,
     relinkingTarget,
   } = composerViewFields(composer);
   const attachmentUploadCount = snapshot.persistence?.attachmentUploadCount ?? 0;
@@ -308,7 +307,8 @@ export const CommentRailContainer = memo(function CommentRailContainer({
     && !context.interactionLocked
     && context.unsafeRelinkCommentItems.length > 0,
   );
-  const commentRailMinimumTop = Math.max(82, 14 + commentHeaderHeight + 16)
+  const commentRailStatusTop = Math.max(78, commentHeaderHeight + 16);
+  const commentRailMinimumTop = commentRailStatusTop
     + (relinkRailCardVisible ? 96 : 0);
   const isLocatable = useCallback((target: HtmlCanvasSelection): boolean => {
     const layout = targetLayouts[target.id];
@@ -871,6 +871,7 @@ export const CommentRailContainer = memo(function CommentRailContainer({
     canvasDocumentHeight,
     commentRailContentHeight,
     commentRailOffset,
+    commentRailStatusTop,
     commentRailMinimumTop,
     visibleCommentItems: context.visibleCommentItems,
     draftInCurrentTab,
@@ -924,6 +925,7 @@ export const CommentRailContainer = memo(function CommentRailContainer({
     commentRailMinimumOffset,
     commentRailMinimumTop,
     commentRailOffset,
+    commentRailStatusTop,
     composer,
     composerInCurrentTab,
     composerMeasurementKey,

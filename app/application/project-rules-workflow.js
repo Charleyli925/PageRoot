@@ -75,8 +75,6 @@ export class ProjectRulesWorkflow {
 
   #errorMessage;
 
-  #presentationPort;
-
   #scheduler;
 
   #clock;
@@ -107,7 +105,6 @@ export class ProjectRulesWorkflow {
     errorMessage = (cause, fallback) => (
       cause instanceof Error && cause.message ? cause.message : fallback
     ),
-    ports = {},
     scheduler = globalThis,
     clock,
   } = {}) {
@@ -147,20 +144,11 @@ export class ProjectRulesWorkflow {
     if (!clock || typeof clock.now !== "function") {
       throw new TypeError("ProjectRulesWorkflow requires a ClockPort.");
     }
-    if (ports.presentation && typeof ports.presentation.restoreEditor !== "function") {
-      throw new TypeError("ProjectRulesWorkflow PresentationPort must restore the editor.");
-    }
-
     this.#bridgeClient = bridgeClient;
     this.#projectSession = projectSession;
     this.#runSession = runSession;
     this.#projectRulesSession = projectRulesSession;
     this.#errorMessage = errorMessage;
-    this.#presentationPort = ports.presentation || {
-      restoreEditor({ settle }) {
-        settle();
-      },
-    };
     this.#scheduler = scheduler;
     this.#clock = clock;
     this.#snapshot = projectRulesSession.snapshot;
@@ -282,14 +270,7 @@ export class ProjectRulesWorkflow {
         this.#projectRulesSession.settleRestore(restore.compositionEpoch);
       }
     };
-    try {
-      this.#presentationPort.restoreEditor({
-        editorGeneration: restore.editorGeneration,
-        settle,
-      });
-    } catch {
-      settle();
-    }
+    settle();
     return succeeded({ restored: true, editorGeneration: restore.editorGeneration });
   }
 

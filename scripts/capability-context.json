@@ -89,7 +89,6 @@
         "^app/application/project/",
         "^app/application/project-application-session",
         "^app/application/external-file-open",
-        "^app/workbench/project-panel-",
         "^tests/project-",
         "^tests/external-file-open",
         "^tests/desktop-close-recovery"
@@ -102,13 +101,13 @@
         "app/application/project/close-plan.d.ts",
         "app/application/project/source-locator-plan.d.ts",
         "app/application/workspace-controller-capabilities.d.ts",
-        "app/workbench/project-panel-port.d.ts"
+        "app/workbench/workbench-sidebar-container.tsx"
       ],
       "owners": [
         "ProjectSession",
         "ProjectWorkflow",
-        "WorkspaceController projects capability",
-        "ProjectPanelContainer"
+        "ProjectRulesWorkflow",
+        "WorkbenchGlobalSidebarContainer"
       ],
       "implementationFiles": [
         "app/application/project-workflow.js",
@@ -117,14 +116,13 @@
         "app/application/project/switch-plan.js",
         "app/application/project/close-plan.js",
         "app/application/project/source-locator-plan.js",
-        "app/workbench/project-panel-port.js",
-        "app/workbench/project-panel-container.tsx"
+        "app/workbench/workbench-sidebar-container.tsx",
+        "app/workbench/project-version-tree.tsx"
       ],
       "focusedTests": [
         "tests/project-workflow.test.mjs",
         "tests/project-plan.test.mjs",
         "tests/project-session.test.mjs",
-        "tests/project-panel-port.test.mjs",
         "tests/workbench-render-snapshot.test.mjs",
         "tests/workspace-controller.test.mjs"
       ],

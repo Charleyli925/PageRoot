@@ -107,38 +107,6 @@
   text-overflow: ellipsis;
 }
 
-.file-version-label.project-status-facts {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  min-width: 0;
-  max-width: min(520px, 46vw);
-  flex: 0 1 auto;
-  overflow-x: auto;
-  text-overflow: clip;
-  scrollbar-width: none;
-}
-
-.file-version-label.project-status-facts::-webkit-scrollbar {
-  display: none;
-}
-
-.file-version-label.project-status-facts > span + span::before {
-  margin-right: 4px;
-  color: #a1a3ac;
-  content: "·";
-}
-
-.save-status {
-  color: #6f7773;
-  font-weight: 560;
-}
-
-.save-status > span {
-  width: 7px;
-  height: 7px;
-}
-
 .window-file-folder-action {
   appearance: none;
   position: relative;
@@ -415,23 +383,6 @@
   outline-offset: -2px;
 }
 
-.side-drawer[data-drawer="handoff"] {
-  top: 50%;
-  right: auto;
-  bottom: auto;
-  left: 50%;
-  width: min(1040px, calc(100vw - 96px));
-  max-width: none;
-  height: min(760px, calc(100vh - 96px));
-  max-height: none;
-  margin: 0;
-  transform: translate(-50%, calc(-50% + 12px)) scale(0.985);
-  transform-origin: center;
-}
-
-.side-drawer[data-drawer="handoff"].open {
-  transform: translate(-50%, -50%) scale(1);
-}
 
 @media (max-width: 1180px) {
   .source-conflict-banner,
@@ -463,17 +414,12 @@
     padding-left: 12px;
   }
 
-  .side-drawer[data-drawer="handoff"] {
-    width: calc(100vw - 36px);
-    height: calc(100vh - 48px);
-  }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .review-scroll-stage,
   .preview-navigation-banner,
   .preview-navigation-banner::after,
-  .side-drawer[data-drawer="handoff"],
   .window-file-folder-action {
     scroll-behavior: auto;
     transition: none;

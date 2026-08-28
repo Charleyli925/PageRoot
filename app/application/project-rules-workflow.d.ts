@@ -21,13 +21,6 @@ export type ProjectRulesWorkflowOutcome<T = Record<string, unknown>> =
       }>;
     }>;
 
-export type ProjectRulesPresentationPort = Readonly<{
-  restoreEditor(input: {
-    editorGeneration: number;
-    settle(): void;
-  }): void;
-}>;
-
 export type ProjectRulesScheduler = Readonly<{
   setTimeout(callback: () => void, delayMs: number): unknown;
   clearTimeout(handle: unknown): void;
@@ -50,7 +43,6 @@ export type ProjectRulesWorkflowConstruction = Readonly<{
   runSession: RunSession;
   projectRulesSession: ProjectRulesSession;
   errorMessage?: (cause: unknown, fallback: string) => string;
-  ports?: Readonly<{ presentation?: ProjectRulesPresentationPort }>;
   scheduler?: ProjectRulesScheduler;
   clock: Readonly<{ now(): number }>;
 }>;

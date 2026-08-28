@@ -331,41 +331,6 @@ test("IME confirmation replays at the frozen left-style caret", {
   );
 });
 
-test("a repeated header command waits for composition and replays only once", {
-  tag: ["@gate-smoke","@smoke-editing"],
-}, async ({ page }) => {
-  const { frame } = await openFixture(page);
-  const target = await activateNativeEdit(frame, "plain");
-  await setTextSelection(frame, "plain", 0);
-  await target.evaluate((element) => {
-    element.dispatchEvent(new CompositionEvent("compositionstart", {
-      bubbles: true,
-      data: "",
-    }));
-  });
-
-  const projectButton = page.getByRole("button", { name: "项目", exact: true });
-  await projectButton.evaluate((button) => button.click());
-  await expect(projectButton).toHaveAttribute("aria-expanded", "false");
-  await projectButton.evaluate((button) => button.click());
-  await expect(projectButton).toHaveAttribute("aria-expanded", "false");
-
-  try {
-    await target.evaluate((element) => {
-      element.dispatchEvent(new CompositionEvent("compositionend", {
-        bubbles: true,
-        data: "",
-      }));
-    });
-  } catch (error) {
-    if (!/Frame was detached|Execution context was destroyed/u.test(String(error))) {
-      throw error;
-    }
-  }
-
-  await expect(projectButton).toHaveAttribute("aria-expanded", "true");
-});
-
 test("out-of-band mutation restores the last safe draft without an edit-blocked notice", {
   tag: ["@gate-smoke", "@smoke-editing"],
 }, async ({ page }) => {

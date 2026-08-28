@@ -5,7 +5,6 @@ import type {
   NavigationControllerCapability,
   NavigationWorkflowControllerCapability,
   ProjectCatalogControllerCapability,
-  ProjectControllerCapability,
   ReviewPreparationControllerCapability,
   RunControllerCapability,
   RunSubmissionControllerCapability,
@@ -20,7 +19,6 @@ declare const documentSurface: DocumentSurfaceControllerCapability;
 declare const navigationFacet: NavigationControllerCapability;
 declare const navigation: NavigationWorkflowControllerCapability;
 declare const projectCatalog: ProjectCatalogControllerCapability;
-declare const projects: ProjectControllerCapability;
 declare const review: ReviewPreparationControllerCapability;
 declare const runs: RunControllerCapability;
 declare const runSubmission: RunSubmissionControllerCapability;
@@ -32,7 +30,6 @@ const documentSurfaceView: DocumentSurfaceControllerCapability = controller;
 const navigationFacetView: NavigationControllerCapability = controller.navigation;
 const navigationView: NavigationWorkflowControllerCapability = controller;
 const projectCatalogView: ProjectCatalogControllerCapability = controller.projectCatalog;
-const projectsView: ProjectControllerCapability = controller.projects;
 const reviewView: ReviewPreparationControllerCapability = controller;
 const runsView: RunControllerCapability = controller.runs;
 const runSubmissionView: RunSubmissionControllerCapability = controller;
@@ -49,7 +46,6 @@ void navigationFacet.getSnapshot();
 void navigationFacet.commands.createStartTab();
 void navigation.subscribe(() => undefined);
 void projectCatalog.commands.refreshRecents();
-void projects.commands.openRules();
 void review.prepareReviewCandidate({ run: null });
 void runs.getSnapshot();
 void runs.commands.cancel({ run: null });
@@ -81,7 +77,6 @@ void documentSurfaceView;
 void navigationFacetView;
 void navigationView;
 void projectCatalogView;
-void projectsView;
 void reviewView;
 void runsView;
 void runSubmissionView;

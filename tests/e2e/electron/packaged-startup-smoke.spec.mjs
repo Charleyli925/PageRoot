@@ -128,8 +128,6 @@ test("packaged app preserves identity and imports external HTML as V1 across sta
     await expect(page).toHaveTitle("源页");
     await expect(page.locator("main.workbench")).toBeVisible();
     await waitForProjectReady(page, { timeout: 60_000 });
-    await expect(page.getByRole("button", { name: "项目", exact: true }))
-      .toBeEnabled({ timeout: 30_000 });
     await expect(
       page.getByTestId("html-canvas-editor").filter({ visible: true }).first(),
     ).toHaveAttribute("data-render-verified", "true", { timeout: 30_000 });

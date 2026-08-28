@@ -1,7 +1,6 @@
 export const LOCAL_USER_ACTION_KINDS = Object.freeze([
   "show-source-in-folder",
   "open-source-in-browser",
-  "open-project-records",
   "reveal-request-folder",
   "reveal-ai-task",
   "reveal-version-file",
