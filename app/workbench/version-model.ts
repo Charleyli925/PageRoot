@@ -162,6 +162,10 @@ export function versionsFromWorkspace(
         validationReview: null,
         candidateAssessment: null,
         workingCopyId: raw.workingCopyId ? String(raw.workingCopyId) : null,
+        displayFileName: raw.displayFileName ? String(raw.displayFileName) : undefined,
+        modifiedAt: raw.modifiedAt ? String(raw.modifiedAt) : undefined,
+        isActiveWorkingCopy: raw.isActiveWorkingCopy === true,
+        isLatestOfficial: raw.isLatestOfficial === true,
         differsFromBase: raw.differsFromBase === true,
         saveState: ["saved", "saving", "failed"].includes(String(raw.saveState || ""))
           ? String(raw.saveState) as Version["saveState"]
@@ -216,6 +220,10 @@ export function versionsFromWorkspace(
         raw.candidateAssessment,
       ),
       workingCopyId: raw.workingCopyId ? String(raw.workingCopyId) : null,
+      displayFileName: raw.displayFileName ? String(raw.displayFileName) : undefined,
+      modifiedAt: raw.modifiedAt ? String(raw.modifiedAt) : undefined,
+      isActiveWorkingCopy: raw.isActiveWorkingCopy === true,
+      isLatestOfficial: raw.isLatestOfficial === true,
       differsFromBase: raw.differsFromBase === true,
       saveState: ["saved", "saving", "failed"].includes(String(raw.saveState || ""))
         ? String(raw.saveState) as Version["saveState"]

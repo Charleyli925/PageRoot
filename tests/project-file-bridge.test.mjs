@@ -152,6 +152,54 @@ test("the Bridge exposes every Registry member and opens one only by projectId",
   assert.equal(invalid.response.status, 400);
 });
 
+test("the Bridge exposes content-free version summaries without rewriting a renamed Working Copy", async (t) => {
+  const environment = await createBridgeTestEnvironment(t, {
+    prefix: "pageroot-project-file-version-summary-",
+  });
+  const sourcePath = await environment.createSource("summary.html", html("summary"));
+  const bridge = await environment.start({
+    HTML_AI_PROJECT_FILES_ROOT: join(environment.root, "project-files"),
+  });
+  const preview = await bridge.requestJson(
+    `/workspace?sourcePath=${encodeURIComponent(sourcePath)}&projectStorageVersion=4.0.0`,
+  );
+  const ensured = await postJson(bridge, "/project/ensure", {
+    sourcePath,
+    expectedSourceSha256: preview.body.currentHtmlSha256,
+    projectStorageVersion: "4.0.0",
+  });
+  assert.equal(ensured.response.status, 200, JSON.stringify(ensured.body));
+  const manifestPath = join(ensured.body.projectRoot, ".pageroot", "manifest.json");
+  const manifestBeforeRename = await readFile(manifestPath);
+  const renamed = join(ensured.body.projectRoot, "summary renamed.html");
+  await rename(ensured.body.sourcePath, renamed);
+
+  const summaries = await bridge.requestJson(
+    `/registered-project/versions?projectId=${encodeURIComponent(ensured.body.projectId)}`,
+  );
+  assert.equal(summaries.response.status, 200, JSON.stringify(summaries.body));
+  assert.equal(summaries.body.projectId, ensured.body.projectId);
+  assert.equal(summaries.body.documentId, ensured.body.documentId);
+  assert.equal(summaries.body.versions.length, 1);
+  assert.deepEqual(summaries.body.versions[0], {
+    projectId: ensured.body.projectId,
+    documentId: ensured.body.documentId,
+    versionId: "ver_0001",
+    ordinal: 1,
+    basedOnVersionId: null,
+    previousVersionId: null,
+    displayFileName: "summary renamed.html",
+    modifiedAt: summaries.body.versions[0].modifiedAt,
+    isActiveWorkingCopy: true,
+    isLatestOfficial: true,
+  });
+  assert.equal(typeof summaries.body.versions[0].modifiedAt, "string");
+  assert.equal(Object.hasOwn(summaries.body.versions[0], "content"), false);
+  assert.equal(Object.hasOwn(summaries.body.versions[0], "comments"), false);
+  assert.equal(Object.hasOwn(summaries.body.versions[0], "attachments"), false);
+  assert.deepEqual(await readFile(manifestPath), manifestBeforeRename);
+});
+
 test("a v4 client treats a pre-v4 project as a fresh V1 import", async (t) => {
   const environment = await createBridgeTestEnvironment(t, {
     prefix: "pageroot-project-file-pre-v4-",

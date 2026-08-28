@@ -237,6 +237,10 @@ export class ProjectFileRepository {
     return this.#serial(() => this.#listRegisteredProjects());
   }
 
+  async listRegisteredProjectVersionSummaries({ projectId } = {}) {
+    return this.#serial(() => this.#listRegisteredProjectVersionSummaries({ projectId }));
+  }
+
   async resolveRegisteredProjectOpenTarget({ projectId } = {}) {
     return this.#serial(() => this.#resolveRegisteredProjectOpenTarget({ projectId }));
   }
@@ -3444,6 +3448,9 @@ export class ProjectFileRepository {
       latestOfficialVersionId: null,
       hasPendingCandidate: false,
       availability,
+      availabilityReason: availability === "ready"
+        ? null
+        : "项目记录或当前工作文件暂时无法核对。",
     };
   }
 
@@ -3472,21 +3479,18 @@ export class ProjectFileRepository {
     const rows = [];
     for (const [projectId, record] of Object.entries(registry.projects)) {
       try {
-        // Catalog availability must use the same controlled Working Copy
-        // recovery as an actual open. Reading the old manifest path first
-        // would mark a safely Finder-renamed HTML unavailable before its
-        // stable file identity can rebind the manifest.
-        const opened = await this.#resolveRegisteredProjectOpenTarget({ projectId });
         const loaded = await this.#loadRegisteredProject({ projectId });
-        const workingCopy = loaded.manifest.workingCopies.find(
-          (entry) => entry.workingCopyId === opened.target.workingCopyId,
+        const workingCopy = await this.#activeRegisteredWorkingCopy(loaded);
+        // Catalog reads validate the exact regular file identity and recover a
+        // Finder rename, but intentionally do not read HTML bytes. Opening the
+        // project later still performs the complete source/hash validation.
+        const resolved = await this.#resolveWorkingCopyPath(loaded, workingCopy);
+        await this.#rebindWorkingCopyPath(
+          loaded,
+          workingCopy,
+          resolved.exactSourcePath,
+          resolved.sourceInformation,
         );
-        if (!workingCopy) {
-          throw new ProjectFileRepositoryError(
-            "ACTIVE_WORKING_COPY_UNKNOWN",
-            "The registered project active Working Copy is unknown.",
-          );
-        }
         const state = await readJsonFile(
           workingCopyStatePath(loaded.paths, workingCopy),
           "active Working Copy state",
@@ -3499,24 +3503,70 @@ export class ProjectFileRepository {
           projectName: path.basename(loaded.paths.projectRootPath),
           registeredProjectRootPath: loaded.paths.projectRootPath,
           activeWorkingCopyId: workingCopy.workingCopyId,
-          activeSourcePath: opened.target.exactSourcePath,
+          activeSourcePath: resolved.exactSourcePath,
           currentBasedOnVersionId: workingCopy.basedOnVersionId,
           latestOfficialVersionId: loaded.manifest.latestOfficialVersionId,
           hasPendingCandidate: loaded.runtime.activeCandidateId !== null,
           availability: "ready",
+          availabilityReason: null,
         });
       } catch (cause) {
-        rows.push(this.#registeredProjectCatalogFallback(
+        const fallback = this.#registeredProjectCatalogFallback(
           projectId,
           record,
           registeredProjectCatalogAvailability(cause),
-        ));
+        );
+        fallback.availabilityReason = cause?.message || fallback.availabilityReason;
+        rows.push(fallback);
       }
     }
     return rows.sort((left, right) => (
       left.projectName.localeCompare(right.projectName, "zh-CN")
       || left.projectId.localeCompare(right.projectId)
     ));
+  }
+
+  async #listRegisteredProjectVersionSummaries({ projectId }) {
+    const id = assertId(projectId, PROJECT_ID, "projectId");
+    const loaded = await this.#loadRegisteredProject({ projectId: id });
+    const activeWorkingCopy = await this.#activeRegisteredWorkingCopy(loaded);
+    const resolvedActive = await this.#resolveWorkingCopyPath(loaded, activeWorkingCopy);
+    const activeState = await readJsonFile(
+      workingCopyStatePath(loaded.paths, activeWorkingCopy),
+      "active Working Copy state",
+      { projectRootPath: loaded.paths.projectRootPath },
+    );
+    assertWorkingCopyState(activeState, loaded, activeWorkingCopy);
+    const versions = loaded.manifest.versions.map((version) => {
+      const workingCopy = loaded.manifest.workingCopies.find(
+        (entry) => entry.versionId === version.versionId,
+      );
+      const isActiveWorkingCopy = workingCopy?.workingCopyId === activeWorkingCopy.workingCopyId;
+      const displayFileName = isActiveWorkingCopy
+        ? path.basename(resolvedActive.exactSourcePath)
+        : path.basename(workingCopy?.sourceRelativePath || `版本-${version.ordinal}.html`);
+      return {
+        projectId: loaded.project.projectId,
+        documentId: loaded.project.documentId,
+        versionId: version.versionId,
+        ordinal: version.ordinal,
+        basedOnVersionId: version.basedOnVersionId || null,
+        previousVersionId: version.previousVersionId || null,
+        displayFileName,
+        // Only the live Working Copy has a mutable timestamp. Historical
+        // Version timestamps come from the immutable manifest record.
+        modifiedAt: isActiveWorkingCopy
+          ? String(activeState.lastSavedAt || version.createdAt)
+          : String(version.createdAt),
+        isActiveWorkingCopy,
+        isLatestOfficial: version.versionId === loaded.manifest.latestOfficialVersionId,
+      };
+    });
+    return {
+      projectId: loaded.project.projectId,
+      documentId: loaded.project.documentId,
+      versions,
+    };
   }
 
   async #resolveRegisteredProjectOpenTarget({ projectId }) {
@@ -3744,6 +3794,56 @@ export class ProjectFileRepository {
       "manifest.json",
     );
     return true;
+  }
+
+  async #resolveWorkingCopyPath(loaded, workingCopy, label = "Working Copy") {
+    let exactSourcePath = workingCopySourcePath(loaded.paths, workingCopy);
+    let sourceInformation = await regularInformation(exactSourcePath, label, {
+      projectRootPath: loaded.paths.projectRootPath,
+    });
+    if (
+      sourceInformation
+      && !sameFileIdentity(
+        workingCopy.fileIdentity,
+        copyFileIdentity(sourceInformation),
+      )
+    ) {
+      // A path alone is not enough for a catalog projection: a replacement
+      // HTML at the old name must not be presented as this managed Working
+      // Copy. Fall through to the identity-based Finder recovery instead.
+      sourceInformation = null;
+    }
+    if (!sourceInformation) {
+      const recoveredPath = await this.#findWorkingCopyByFileIdentity(
+        loaded.paths.projectRootPath,
+        workingCopy.fileIdentity,
+      );
+      if (!recoveredPath) {
+        throw new ProjectFileRepositoryError(
+          "WORKING_COPY_UNAVAILABLE",
+          "The Working Copy HTML is temporarily unavailable; PageRoot did not write outside its registered path.",
+          { workingCopyId: workingCopy.workingCopyId },
+        );
+      }
+      exactSourcePath = recoveredPath;
+      sourceInformation = await regularInformation(exactSourcePath, label, {
+        projectRootPath: loaded.paths.projectRootPath,
+      });
+    }
+    if (
+      !sourceInformation
+      || !sameFileIdentity(
+        workingCopy.fileIdentity,
+        copyFileIdentity(sourceInformation),
+      )
+    ) {
+      throw new ProjectFileRepositoryError(
+        "WORKING_COPY_UNAVAILABLE",
+        "The Working Copy HTML disappeared while PageRoot was recovering its registered path.",
+        { workingCopyId: workingCopy.workingCopyId },
+      );
+    }
+    return { exactSourcePath, sourceInformation };
   }
 
   async #resolveWorkingCopySource(loaded, workingCopy, label = "Working Copy") {

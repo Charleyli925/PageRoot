@@ -240,6 +240,7 @@ import {
   changesFromDraftRecords,
   versionsFromWorkspace,
 } from "./workbench/version-model";
+import { projectVersionSummariesFromVersions } from "./workbench/project-version-tree-model";
 import type {
   ApplicationUpdateResult,
   CanvasMode,
@@ -255,6 +256,7 @@ import type {
   PrepareCloseDetail,
   ProjectContext,
   RegisteredProject,
+  ProjectVersionSummary,
   StartupIssue,
   Toast,
   ToastAction,
@@ -381,6 +383,14 @@ const WELCOME_PROJECT = {
   sourcePath: null as string | null,
 };
 
+function currentProjectNameFromFile(
+  sourcePath: string | null,
+  projectName: string,
+): string {
+  const fileName = localFileNameFromSourcePath(sourcePath) || projectName;
+  return fileStem(fileName).replace(/-V\d+$/u, "") || "当前项目";
+}
+
 function requiredWorkspaceController(
   controller: WorkspaceController | null,
 ): WorkspaceController {
@@ -496,6 +506,7 @@ export default function Workbench() {
   const normalizeCurrentGlobalCommentsRef = useRef<() => CommentItem[]>(() => []);
   const automaticProjectRegistrationRef = useRef("");
   const projectRecordsPreparationRef = useRef("");
+  const pendingSidebarHistoryRef = useRef<ProjectVersionSummary | null>(null);
 
   const [workspaceControllerSnapshot, setWorkspaceControllerSnapshotState] =
     useState<WorkspaceControllerSnapshot | null>(null);
@@ -580,6 +591,7 @@ export default function Workbench() {
   const [projectRecordsPath, setProjectRecordsPath] =
     useState<string | null>(null);
   const [lastModifiedAt, setLastModifiedAt] = useState<string | null>(null);
+  const [lastSafeWriteAt, setLastSafeWriteAt] = useState<string | null>(null);
   const commentCapabilitySnapshot = workspaceController
     ? (workspaceController.comments as CommentRailCapability).getSnapshot()
     : null;
@@ -1008,6 +1020,11 @@ export default function Workbench() {
             getActive: async () => window.htmlAIProjects?.getActiveProject() ?? null,
             listRecent: async () => window.htmlAIProjects?.listRecentProjects() ?? [],
             listRegistered: async () => window.htmlAIProjects?.listRegisteredProjects?.() ?? [],
+            listRegisteredVersionSummaries: async (registeredProjectId: string) => {
+              const list = window.htmlAIProjects?.listRegisteredProjectVersionSummaries;
+              if (!list) throw new Error("当前 PageRoot 版本缺少项目版本摘要通道。");
+              return list(registeredProjectId);
+            },
             readRegisteredProjection: async (registeredProjectId: string) => {
               const read = window.htmlAIProjects?.readRegisteredProjectProjection;
               if (!read) throw new Error("当前 PageRoot 版本缺少项目展示预热通道。");
@@ -1729,6 +1746,7 @@ export default function Workbench() {
         projectName?: unknown;
         projectRecordsPath?: unknown;
         lastModifiedAt?: unknown;
+        lastSavedAt?: unknown;
         showHandoff?: unknown;
         contentChanged?: unknown;
         activeLocked?: unknown;
@@ -1766,6 +1784,16 @@ export default function Workbench() {
         setProjectName(project.name);
         setProjectRecordsPath(null);
         setLastModifiedAt(project.lastModifiedAt || null);
+        setLastSafeWriteAt(null);
+        if (
+          pendingSidebarHistoryRef.current
+          && (
+            pendingSidebarHistoryRef.current.projectId !== project.projectId
+            || pendingSidebarHistoryRef.current.documentId !== project.documentId
+          )
+        ) {
+          pendingSidebarHistoryRef.current = null;
+        }
         commentCanvasPort.setSelection(null);
         restoreCachedDocumentPresentation({
           controller: workspaceController, project, setPageViewContext,
@@ -2014,6 +2042,7 @@ export default function Workbench() {
         type: string;
         context?: ProjectContext;
         lastModifiedAt?: unknown;
+        lastSavedAt?: unknown;
         events?: unknown;
         mutation?: HtmlCanvasMutation;
         code?: unknown;
@@ -2103,6 +2132,13 @@ export default function Workbench() {
         && documentEvent.lastModifiedAt
       ) {
         setLastModifiedAt(documentEvent.lastModifiedAt);
+      }
+      if (
+        documentEvent.type === "document-persisted"
+        && typeof documentEvent.lastSavedAt === "string"
+        && documentEvent.lastSavedAt
+      ) {
+        setLastSafeWriteAt(documentEvent.lastSavedAt);
       }
       if (documentEvent.type === "document-recovery-queued") {
         setToast({
@@ -3464,15 +3500,15 @@ export default function Workbench() {
     canvasMode,
     workspaceController,
   ]);
-  const openRegisteredWorkbenchProject = useCallback((project: RegisteredProject) => {
-    if (!navigationCapability || !project.documentId || project.availability !== "ready") return;
-    void navigationCapability.commands.openRegisteredProject({
+  const openRegisteredWorkbenchProject = useCallback(async (project: RegisteredProject) => {
+    if (!navigationCapability || !project.documentId || project.availability !== "ready") return null;
+    const outcome = await navigationCapability.commands.openRegisteredProject({
       projectId: project.projectId,
       documentId: project.documentId,
       title: project.projectName,
-    }).then((outcome) => {
-      presentWorkbenchTabOutcome(outcome);
     });
+    presentWorkbenchTabOutcome(outcome);
+    return outcome;
   }, [navigationCapability, presentWorkbenchTabOutcome]);
 
   const resumeDeferredProjectApplication = useCallback(() => (
@@ -5719,17 +5755,17 @@ export default function Workbench() {
       || projectLoadError
       || isViewTransitioning()
       || !workspaceController
-    ) return;
+    ) return null;
     const context = captureProjectContext();
-    if (!context) return;
+    if (!context) return null;
     const outcome = await requiredWorkspaceController(workspaceController)
       .viewHistory({ version, context, deadlineAt: Date.now() + 15_000 });
     if (outcome.status === "succeeded") {
       setDrawer(null);
       editorRef.current?.clearSelection();
-      return;
+      return true;
     }
-    if (outcome.status === "stale") return;
+    if (outcome.status === "stale") return false;
     setToast({
       title: "无法打开这个历史版本",
       message: outcome.reason,
@@ -5737,6 +5773,7 @@ export default function Workbench() {
       disposition: "background-result",
       dedupeKey: "history-navigation",
     });
+    return false;
   }, [
     captureProjectContext,
     isViewTransitioning,
@@ -5770,6 +5807,170 @@ export default function Workbench() {
     isViewTransitioning,
     projectLoadError,
     workspaceController,
+  ]);
+
+  const sidebarSummaryVersion = useCallback((summary: ProjectVersionSummary): Version => {
+    const existing = versions.find((version) => version.id === summary.versionId);
+    if (existing) return existing;
+    return {
+      id: summary.versionId,
+      ordinal: summary.ordinal,
+      label: `版本 ${summary.ordinal}`,
+      summary: "",
+      generatedAt: summary.modifiedAt,
+      source: summary.ordinal === 1 ? "初始页面" : "内部 AI",
+      requirement: null,
+      contentSha256: "",
+      previousVersionId: summary.previousVersionId || null,
+      basedOnVersionId: summary.basedOnVersionId || null,
+      requestId: null,
+      attemptId: null,
+      committed: true,
+      comments: [],
+      directEdits: [],
+      supplements: [],
+      validationReview: null,
+      candidateAssessment: null,
+      workingCopyId: null,
+      displayFileName: summary.displayFileName,
+      modifiedAt: summary.modifiedAt,
+      isActiveWorkingCopy: summary.isActiveWorkingCopy,
+      isLatestOfficial: summary.isLatestOfficial,
+      differsFromBase: false,
+      saveState: null,
+    };
+  }, [versions]);
+
+  const openCurrentSidebarVersion = useCallback((summary: ProjectVersionSummary) => {
+    if (!summary.isActiveWorkingCopy) {
+      void viewHistoryVersion(sidebarSummaryVersion(summary));
+      return;
+    }
+    if (viewMode === "history") {
+      void returnToCurrent();
+      return;
+    }
+    if (!navigationCapability || !projectId || !documentId) {
+      setDrawer("files");
+      return;
+    }
+    void navigationCapability.commands.openRegisteredProject({
+      projectId,
+      documentId,
+      title: currentProjectNameFromFile(sourcePath, projectName),
+    }).then((outcome) => {
+      presentWorkbenchTabOutcome(outcome);
+    });
+  }, [
+    documentId,
+    navigationCapability,
+    presentWorkbenchTabOutcome,
+    projectId,
+    projectName,
+    returnToCurrent,
+    sidebarSummaryVersion,
+    sourcePath,
+    viewMode,
+    viewHistoryVersion,
+  ]);
+
+  const openRegisteredSidebarVersion = useCallback((
+    project: RegisteredProject,
+    summary: ProjectVersionSummary,
+  ) => {
+    if (summary.isActiveWorkingCopy) {
+      if (
+        project.projectId === projectId
+        && project.documentId === documentId
+        && viewMode === "history"
+      ) {
+        void returnToCurrent();
+        return;
+      }
+      void openRegisteredWorkbenchProject(project);
+      return;
+    }
+    if (
+      project.projectId === projectId
+      && project.documentId === documentId
+    ) {
+      void viewHistoryVersion(sidebarSummaryVersion(summary));
+      return;
+    }
+    pendingSidebarHistoryRef.current = summary;
+    void openRegisteredWorkbenchProject(project).then((outcome) => {
+      if (
+        outcome
+        && outcome.status !== "succeeded"
+        && outcome.committed !== true
+        && pendingSidebarHistoryRef.current?.versionId === summary.versionId
+      ) {
+        pendingSidebarHistoryRef.current = null;
+      }
+    });
+  }, [
+    documentId,
+    openRegisteredWorkbenchProject,
+    projectId,
+    returnToCurrent,
+    sidebarSummaryVersion,
+    viewMode,
+    viewHistoryVersion,
+  ]);
+
+  useEffect(() => {
+    const pending = pendingSidebarHistoryRef.current;
+    if (!pending) return;
+    if (
+      !projectId
+      || !documentId
+      || pending.projectId !== projectId
+      || pending.documentId !== documentId
+      || projectHydrating
+      || viewTransitioning
+      || !versions.some((version) => version.id === pending.versionId)
+    ) return;
+    if (projectLoadError) {
+      pendingSidebarHistoryRef.current = null;
+      return;
+    }
+    let cancelled = false;
+    const retryDelay = () => new Promise<void>((resolve) => {
+      window.setTimeout(resolve, 50);
+    });
+    const openPendingHistory = async () => {
+      const deadlineAt = Date.now() + 15_000;
+      while (!cancelled && Date.now() < deadlineAt) {
+        while (!cancelled && isViewTransitioning() && Date.now() < deadlineAt) {
+          await retryDelay();
+        }
+        if (cancelled) return;
+        const current = pendingSidebarHistoryRef.current;
+        if (!current || current.versionId !== pending.versionId) return;
+        const opened = await viewHistoryVersion(sidebarSummaryVersion(current));
+        if (opened !== null) {
+          if (pendingSidebarHistoryRef.current?.versionId === current.versionId) {
+            pendingSidebarHistoryRef.current = null;
+          }
+          return;
+        }
+        await retryDelay();
+      }
+    };
+    void openPendingHistory();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    documentId,
+    isViewTransitioning,
+    projectHydrating,
+    projectId,
+    projectLoadError,
+    sidebarSummaryVersion,
+    versions,
+    viewTransitioning,
+    viewHistoryVersion,
   ]);
 
   const continueEditingHistoryVersion = useCallback(async () => {
@@ -6287,6 +6488,31 @@ export default function Workbench() {
   const projectCatalogCapability = workspaceController
     ? workspaceController.projectCatalog as ProjectCatalogCapability
     : null;
+  const currentProjectDisplayName = currentProjectNameFromFile(sourcePath, projectName);
+  const currentProjectSidebarVersions = useMemo(() => (
+    projectId && documentId
+      ? projectVersionSummariesFromVersions(
+        versions,
+        projectId,
+        documentId,
+        localFileNameFromSourcePath(sourcePath) || projectName,
+        {
+          activeVersionId: currentBasedOnVersionId,
+          latestVersionId,
+          activeModifiedAt: lastSafeWriteAt,
+        },
+      )
+      : []
+  ), [
+    currentBasedOnVersionId,
+    documentId,
+    lastSafeWriteAt,
+    latestVersionId,
+    projectId,
+    projectName,
+    sourcePath,
+    versions,
+  ]);
   const projectPanelContext = useMemo<ProjectPanelContext>(() => ({
     projectName,
     browserPreviewOnly,
@@ -6610,13 +6836,15 @@ export default function Workbench() {
       {projectCatalogCapability ? <WorkbenchGlobalSidebarContainer
         capability={projectCatalogCapability}
         open={globalSidebarOpen}
+        currentProjectId={projectId}
+        currentProjectName={currentProjectDisplayName}
+        currentProjectVersions={currentProjectSidebarVersions}
         onToggle={() => {
           setGlobalSidebarOpen((open) => !open);
         }}
         onOpenLocal={() => void openProject()}
-        onOpenRecent={(recentSourcePath) => void openProject(recentSourcePath)}
-        onOpenRegistered={openRegisteredWorkbenchProject}
-        onOpenCurrentProject={() => setDrawer("files")}
+        onOpenCurrentVersion={openCurrentSidebarVersion}
+        onOpenRegisteredVersion={openRegisteredSidebarVersion}
         updateActionVisible={updateActionVisible}
         updateDownloaded={updateDownloaded}
         updateDownloading={updateDownloading}

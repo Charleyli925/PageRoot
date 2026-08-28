@@ -522,6 +522,7 @@ export class WorkspaceController {
     const projectCatalogCommands = Object.freeze({
       refreshRecents: () => this.refreshRecentProjects(),
       refreshRegistered: () => this.refreshRegisteredProjects(),
+      loadVersionSummaries: (projectId) => this.loadRegisteredProjectVersionSummaries(projectId),
     });
     this.projects = Object.freeze({
       getSnapshot: () => this.#projectsCapabilitySnapshot,
@@ -1663,6 +1664,10 @@ export class WorkspaceController {
 
   refreshRegisteredProjects() {
     return this.#requireProjectWorkflow().refreshRegisteredProjects();
+  }
+
+  loadRegisteredProjectVersionSummaries(projectId) {
+    return this.#requireProjectWorkflow().loadRegisteredProjectVersionSummaries(projectId);
   }
 
   openProjectRules(input) {

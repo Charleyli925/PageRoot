@@ -30,6 +30,7 @@ async function readWorkbenchCascadeCss() {
     "./styles/about-and-chrome.css",
     "./styles/top-toolbar.css",
     "./styles/workbench-chrome.css",
+    "./styles/project-sidebar.css",
   ]);
   assert.equal(entry.trim(), imports.map((file) => `@import "${file}";`).join("\n"));
   const parts = await Promise.all(imports.map((file) => (

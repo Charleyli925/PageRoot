@@ -21,6 +21,7 @@ const channels = Object.freeze({
   revealAiTask: "html-projects:reveal-ai-task",
   listRecentProjects: "html-projects:list-recent",
   listRegisteredProjects: "html-projects:list-registered",
+  listRegisteredProjectVersionSummaries: "html-projects:list-registered-version-summaries",
   readRegisteredProjectProjection: "html-projects:read-registered-projection",
   openRegisteredProject: "html-projects:open-registered",
   openRecent: "html-projects:open-recent",
@@ -159,6 +160,10 @@ const projectsApi = Object.freeze({
   revealAiTask: (payload) => invokeProject(channels.revealAiTask, payload),
   listRecentProjects: () => invokeProject(channels.listRecentProjects),
   listRegisteredProjects: () => invokeProject(channels.listRegisteredProjects),
+  listRegisteredProjectVersionSummaries: (projectId) => invokeProject(
+    channels.listRegisteredProjectVersionSummaries,
+    projectId,
+  ),
   readRegisteredProjectProjection: (projectId) => invokeProject(
     channels.readRegisteredProjectProjection,
     projectId,

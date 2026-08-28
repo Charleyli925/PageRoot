@@ -1,7 +1,14 @@
 "use client";
 
-import { useEffect, useRef } from "react";
 import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import {
+  CaretDownIcon,
   CaretRightIcon,
   FileHtmlIcon,
   FolderOpenIcon,
@@ -10,8 +17,26 @@ import {
   XIcon,
 } from "@phosphor-icons/react";
 import type { WorkbenchTab, WorkbenchTabsSnapshot } from "../application/workbench-tabs-session.js";
-import type { ApplicationUpdateResult, RecentProject, RegisteredProject } from "./types";
+import type {
+  ApplicationUpdateResult,
+  ProjectVersionSummary,
+  RecentProject,
+  RegisteredProject,
+} from "./types";
+import {
+  ProjectVersionTree,
+  ProjectVersionTreeSkeleton,
+  type ProjectVersionLoadResult,
+} from "./project-version-tree";
 import { WorkbenchResizer } from "./workbench-resizer";
+
+const CURRENT_PROJECT_TREE_KEY = "__current_project__";
+
+type ProjectVersionLoadState = ProjectVersionLoadResult & Readonly<{
+  status: "loading" | "ready" | "error";
+}>;
+
+export type { ProjectVersionLoadResult };
 
 export function nextWorkbenchTabIndex(
   key: string,
@@ -202,14 +227,16 @@ export function WorkbenchStartPage({
 
 export function WorkbenchGlobalSidebar({
   open,
-  recentProjects,
   registeredProjects,
   projectsError,
+  currentProjectId,
+  currentProjectName,
+  currentProjectVersions,
   onToggle,
   onOpenLocal,
-  onOpenRecent,
-  onOpenRegistered,
-  onOpenCurrentProject,
+  onOpenCurrentVersion,
+  onOpenRegisteredVersion,
+  loadProjectVersions,
   updateActionVisible,
   updateDownloaded,
   updateDownloading,
@@ -219,14 +246,19 @@ export function WorkbenchGlobalSidebar({
   onDownloadOrRestartUpdate,
 }: {
   open: boolean;
-  recentProjects: RecentProject[];
   registeredProjects: RegisteredProject[];
   projectsError?: string;
+  currentProjectId: string | null;
+  currentProjectName: string;
+  currentProjectVersions: readonly ProjectVersionSummary[];
   onToggle: () => void;
   onOpenLocal: () => void;
-  onOpenRecent: (sourcePath: string) => void;
-  onOpenRegistered: (project: RegisteredProject) => void;
-  onOpenCurrentProject: () => void;
+  onOpenCurrentVersion: (version: ProjectVersionSummary) => void;
+  onOpenRegisteredVersion: (
+    project: RegisteredProject,
+    version: ProjectVersionSummary,
+  ) => void;
+  loadProjectVersions: (projectId: string) => Promise<ProjectVersionLoadResult>;
   updateActionVisible: boolean;
   updateDownloaded: boolean;
   updateDownloading: boolean;
@@ -235,6 +267,85 @@ export function WorkbenchGlobalSidebar({
   onOpenAbout: () => void;
   onDownloadOrRestartUpdate: () => void;
 }) {
+  const [expandedProjectKey, setExpandedProjectKey] = useState<string | null>(
+    () => currentProjectId ? CURRENT_PROJECT_TREE_KEY : null,
+  );
+  const [versionStates, setVersionStates] = useState<Record<string, ProjectVersionLoadState>>({});
+  const requestTokensRef = useRef(new Map<string, number>());
+  const previousCurrentProjectIdRef = useRef(currentProjectId);
+
+  useEffect(() => {
+    const previousProjectId = previousCurrentProjectIdRef.current;
+    previousCurrentProjectIdRef.current = currentProjectId;
+    if (
+      currentProjectId
+      && currentProjectId !== previousProjectId
+    ) {
+      setExpandedProjectKey(CURRENT_PROJECT_TREE_KEY);
+    }
+  }, [currentProjectId]);
+
+  const importedProjects = useMemo(
+    () => registeredProjects
+      .filter((project) => project.projectId !== currentProjectId)
+      .slice(0, 12),
+    [currentProjectId, registeredProjects],
+  );
+
+  const loadImportedProject = useCallback(async (
+    project: RegisteredProject,
+    retry = false,
+  ) => {
+    const existing = versionStates[project.projectId];
+    if (!retry && (existing?.status === "loading" || existing?.status === "ready")) return;
+    const token = (requestTokensRef.current.get(project.projectId) || 0) + 1;
+    requestTokensRef.current.set(project.projectId, token);
+    if (project.availability !== "ready" || !project.documentId) {
+      setVersionStates((current) => ({
+        ...current,
+        [project.projectId]: {
+          status: "error",
+          versions: [],
+          reason: project.availabilityReason || "项目内容暂不可用。",
+        },
+      }));
+      return;
+    }
+    setVersionStates((current) => ({
+      ...current,
+      [project.projectId]: { status: "loading", versions: [] },
+    }));
+    try {
+      const result = await loadProjectVersions(project.projectId);
+      if (requestTokensRef.current.get(project.projectId) !== token) return;
+      setVersionStates((current) => ({
+        ...current,
+        [project.projectId]: result.reason && !result.versions.length
+          ? { ...result, status: "error" }
+          : { ...result, status: "ready" },
+      }));
+    } catch (cause) {
+      if (requestTokensRef.current.get(project.projectId) !== token) return;
+      setVersionStates((current) => ({
+        ...current,
+        [project.projectId]: {
+          status: "error",
+          versions: [],
+          reason: cause instanceof Error ? cause.message : "项目版本摘要暂时无法读取。",
+        },
+      }));
+    }
+  }, [loadProjectVersions, versionStates]);
+
+  const toggleImportedProject = useCallback((project: RegisteredProject) => {
+    if (expandedProjectKey === project.projectId) {
+      setExpandedProjectKey(null);
+      return;
+    }
+    setExpandedProjectKey(project.projectId);
+    void loadImportedProject(project);
+  }, [expandedProjectKey, loadImportedProject]);
+
   return (
     <aside className="workbench-global-sidebar" data-open={open ? "true" : undefined} aria-label="全局项目" inert={!open}>
       {open ? (
@@ -265,23 +376,76 @@ export function WorkbenchGlobalSidebar({
             ) : null}
           </div>
           <div className="workbench-sidebar-body">
-          <button type="button" onClick={onOpenLocal}><PlusIcon aria-hidden="true" size={14} weight="bold" />打开 HTML</button>
-          <button type="button" onClick={onOpenCurrentProject}><FolderOpenIcon aria-hidden="true" size={15} weight="duotone" />当前项目</button>
-          <strong>已登记项目</strong>
-          {projectsError ? <span className="workbench-sidebar-error" role="status">{projectsError}</span> : null}
-          {registeredProjects.slice(0, 12).map((project) => (
-            <button type="button" key={project.projectId} disabled={project.availability !== "ready" || !project.documentId} onClick={() => onOpenRegistered(project)}>
-              <FileHtmlIcon aria-hidden="true" size={14} weight="duotone" />
-              <span>{project.projectName}</span>
-            </button>
-          ))}
-          <strong>最近打开</strong>
-          {recentProjects.slice(0, 8).map((project) => (
-            <button type="button" key={project.sourcePath} onClick={() => onOpenRecent(project.sourcePath)}>
-              <FileHtmlIcon aria-hidden="true" size={14} weight="duotone" />
-              <span>{project.name}</span>
-            </button>
-          ))}
+            <button type="button" onClick={onOpenLocal}><PlusIcon aria-hidden="true" size={14} weight="bold" />打开 HTML</button>
+            <section className="sidebar-project-section" aria-labelledby="sidebar-current-project-heading">
+              <h2 id="sidebar-current-project-heading">当前项目</h2>
+              <button
+                className="sidebar-project-row sidebar-project-row-current"
+                type="button"
+                aria-expanded={Boolean(currentProjectId) && expandedProjectKey === CURRENT_PROJECT_TREE_KEY}
+                disabled={!currentProjectId}
+                onClick={() => setExpandedProjectKey(
+                  expandedProjectKey === CURRENT_PROJECT_TREE_KEY ? null : CURRENT_PROJECT_TREE_KEY,
+                )}
+              >
+                {expandedProjectKey === CURRENT_PROJECT_TREE_KEY
+                  ? <CaretDownIcon aria-hidden="true" size={13} weight="bold" />
+                  : <CaretRightIcon aria-hidden="true" size={13} weight="bold" />}
+                <span className="sidebar-project-name">{currentProjectName || "尚未打开项目"}</span>
+                <span className="sidebar-project-current-label">当前</span>
+              </button>
+              {currentProjectId && expandedProjectKey === CURRENT_PROJECT_TREE_KEY ? (
+                <ProjectVersionTree
+                  key={currentProjectId}
+                  versions={currentProjectVersions}
+                  onOpenVersion={onOpenCurrentVersion}
+                />
+              ) : null}
+            </section>
+            <section className="sidebar-project-section" aria-labelledby="sidebar-imported-project-heading">
+              <h2 id="sidebar-imported-project-heading">已导入项目</h2>
+              {projectsError ? <span className="workbench-sidebar-error" role="status">{projectsError}</span> : null}
+              {importedProjects.length ? importedProjects.map((project) => {
+                const expanded = expandedProjectKey === project.projectId;
+                const state = versionStates[project.projectId];
+                return (
+                  <div className="sidebar-imported-project" key={project.projectId}>
+                    <button
+                      className="sidebar-project-row"
+                      type="button"
+                      aria-expanded={expanded}
+                      data-availability={project.availability}
+                      onClick={() => toggleImportedProject(project)}
+                    >
+                      {expanded
+                        ? <CaretDownIcon aria-hidden="true" size={13} weight="bold" />
+                        : <CaretRightIcon aria-hidden="true" size={13} weight="bold" />}
+                      <span className="sidebar-project-name">{project.projectName}</span>
+                      {project.hasPendingCandidate ? (
+                        <span className="sidebar-project-pending" aria-label="有候选待审阅" title="有候选待审阅" />
+                      ) : null}
+                    </button>
+                    {expanded ? (
+                      !state || state.status === "loading" ? (
+                        <ProjectVersionTreeSkeleton />
+                      ) : state.status === "error" ? (
+                        <div className="sidebar-project-load-error" role="status">
+                          <span>{state.reason || "项目版本摘要暂时无法读取。"}</span>
+                          <button type="button" onClick={() => void loadImportedProject(project, true)}>重试</button>
+                        </div>
+                      ) : (
+                        <ProjectVersionTree
+                          versions={state.versions}
+                          onOpenVersion={(version) => onOpenRegisteredVersion(project, version)}
+                        />
+                      )
+                    ) : null}
+                  </div>
+                );
+              }) : (
+                <span className="sidebar-project-empty">暂无其他已导入项目</span>
+              )}
+            </section>
           </div>
           <WorkbenchResizer kind="sidebar" />
         </>

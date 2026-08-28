@@ -1544,6 +1544,7 @@ export class DocumentWorkflow {
       revision: persistedRevision,
       sourceSha256,
       lastModifiedAt: String(payload.lastModifiedAt || ""),
+      lastSavedAt: String(payload.lastSavedAt || ""),
     });
     return acknowledgedContext;
   }

@@ -187,6 +187,11 @@ export interface ProjectCatalogControllerCommands {
   refreshRegistered(): Promise<import("./project-workflow.js").ProjectWorkflowOutcome<{
     projects: unknown[];
   }>>;
+  loadVersionSummaries(projectId: string): Promise<import("./project-workflow.js").ProjectWorkflowOutcome<{
+    projectId: string;
+    documentId: string;
+    versions: unknown[];
+  }>>;
 }
 
 export type ProjectCatalogControllerCapability<
