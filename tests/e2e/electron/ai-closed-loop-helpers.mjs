@@ -510,11 +510,12 @@ export async function openRecentProject(page, sourcePath, options) {
   const activeBefore = await page.evaluate(
     async () => (await window.htmlAIProjects?.getActiveProject())?.sourcePath || "",
   );
-  const sidebar = page.locator(".workbench-global-sidebar");
-  if (await sidebar.getAttribute("data-open") !== "true") {
-    await page.getByRole("button", { name: "展开左侧边栏" }).click();
+  const startPage = page.locator(".workbench-start-page").filter({ visible: true }).first();
+  if (!await startPage.isVisible().catch(() => false)) {
+    await page.getByRole("button", { name: "新标签页" }).click();
   }
-  await sidebar.getByRole("button", {
+  await startPage.waitFor({ state: "visible" });
+  await startPage.getByRole("button", {
     name: path.basename(sourcePath),
     exact: true,
   }).click();

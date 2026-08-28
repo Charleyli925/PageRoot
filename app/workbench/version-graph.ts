@@ -61,36 +61,62 @@ function lineageParent(version: VersionLineageInput): string | null {
 export function versionGraphLayout(
   versions: ReadonlyArray<VersionLineageInput>,
 ): VersionGraphLayout {
-  // Oldest first: a tree reads downward from the import, and a fork must be
-  // drawn after the version it forked from.
-  const ordered = [...versions].sort((a, b) => a.ordinal - b.ordinal);
+  // Build a real pre-order tree rather than sorting every Version globally.
+  // This keeps a parent's complete subtree together: when V4 is a second child
+  // of V2, it is rendered after V2's V3/V5/... branch instead of being pulled
+  // upward merely because its ordinal is smaller than a later descendant.
+  const byId = new Map(versions.map((version) => [version.id, version]));
+  const children = new Map<string, VersionLineageInput[]>();
+  const roots: VersionLineageInput[] = [];
+  for (const version of versions) {
+    const parent = lineageParent(version);
+    if (parent && byId.has(parent)) {
+      const siblings = children.get(parent) || [];
+      siblings.push(version);
+      children.set(parent, siblings);
+    } else {
+      roots.push(version);
+    }
+  }
+  const sortByOrdinal = (left: VersionLineageInput, right: VersionLineageInput) => (
+    left.ordinal - right.ordinal || left.id.localeCompare(right.id)
+  );
+  roots.sort(sortByOrdinal);
+  for (const siblings of children.values()) siblings.sort(sortByOrdinal);
+  const ordered: VersionLineageInput[] = [];
+  const visited = new Set<string>();
+  const visit = (version: VersionLineageInput) => {
+    if (visited.has(version.id)) return;
+    visited.add(version.id);
+    ordered.push(version);
+    for (const child of children.get(version.id) || []) visit(child);
+  };
+  for (const root of roots) visit(root);
+  // Malformed or forward-compatible records with a cycle/duplicate parent do
+  // not disappear from the read-only view. Keep their deterministic ordinal
+  // order, but never invent a connector for an unseen parent.
+  [...versions].sort(sortByOrdinal).forEach((version) => visit(version));
+
   const rowOf = new Map<string, number>();
   const laneOf = new Map<string, number>();
-  const laneTip = new Map<number, string>();
   const rows: VersionGraphRow[] = [];
   const segments: VersionGraphSegment[] = [];
   const edges: VersionGraphEdge[] = [];
-  let laneCount = 0;
+  let nextLane = 0;
 
-  ordered.forEach((version, row) => {
+  // A first child continues its parent's vertical rail. Every additional
+  // child gets a new rail immediately to the right. Pre-order traversal means
+  // each branch is completely drawn before its sibling's elbow, so rails and
+  // elbows never cross.
+  const append = (version: VersionLineageInput, lane: number) => {
+    const row = rows.length;
     const parent = lineageParent(version);
-    let lane: number | null = null;
-    if (parent) {
-      for (const [candidate, tip] of laneTip) {
-        if (tip === parent) {
-          lane = candidate;
-          break;
-        }
-      }
-    }
-    if (lane === null) {
-      // Continuing the parent's lane is impossible, so this version starts its
-      // own lane. Lanes are never reused, which keeps connectors untangled.
-      lane = 0;
-      while (laneTip.has(lane)) lane += 1;
-      const parentLane = parent === null ? undefined : laneOf.get(parent);
-      const parentRow = parent === null ? undefined : rowOf.get(parent);
-      if (parentLane !== undefined && parentRow !== undefined) {
+    const parentRow = parent === null ? undefined : rowOf.get(parent);
+    const parentLane = parent === null ? undefined : laneOf.get(parent);
+    if (parentRow !== undefined && parentLane !== undefined) {
+      if (lane === parentLane) {
+        segments.push(Object.freeze({ lane, fromRow: parentRow, toRow: row }));
+      } else {
         edges.push(Object.freeze({
           fromVersionId: parent as string,
           toVersionId: version.id,
@@ -100,29 +126,35 @@ export function versionGraphLayout(
           toRow: row,
         }));
       }
-    } else {
-      const parentRow = rowOf.get(parent as string);
-      if (parentRow !== undefined) {
-        segments.push(Object.freeze({ lane, fromRow: parentRow, toRow: row }));
-      }
     }
-    laneTip.set(lane, version.id);
     laneOf.set(version.id, lane);
     rowOf.set(version.id, row);
-    laneCount = Math.max(laneCount, lane + 1);
     rows.push(Object.freeze({
       versionId: version.id,
       ordinal: version.ordinal,
       lane,
       row,
     }));
-  });
+    const descendants = children.get(version.id) || [];
+    descendants.forEach((child, index) => {
+      const childLane = index === 0 ? lane : nextLane++;
+      append(child, childLane);
+    });
+  };
+
+  for (const root of roots) append(root, nextLane++);
+  // `ordered` contains any records not reachable from a root. Render them as
+  // separate roots to keep the layout total without claiming a parent link.
+  for (const version of ordered) {
+    if (rowOf.has(version.id)) continue;
+    append(version, nextLane++);
+  }
 
   return Object.freeze({
     rows: Object.freeze(rows),
     segments: Object.freeze(segments),
     edges: Object.freeze(edges),
-    laneCount,
+    laneCount: nextLane,
   });
 }
 

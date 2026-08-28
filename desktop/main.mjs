@@ -233,6 +233,7 @@ const PROJECT_CHANNELS = Object.freeze({
   revealAiTask: "html-projects:reveal-ai-task",
   listRecentProjects: "html-projects:list-recent",
   listRegisteredProjects: "html-projects:list-registered",
+  listRegisteredProjectVersionSummaries: "html-projects:list-registered-version-summaries",
   readRegisteredProjectProjection: "html-projects:read-registered-projection",
   openRegisteredProject: "html-projects:open-registered",
   openRecent: "html-projects:open-recent",
@@ -3080,6 +3081,55 @@ function assertRegisteredProjectCatalogRow(value) {
     latestOfficialVersionId: ready ? String(value.latestOfficialVersionId) : null,
     hasPendingCandidate: value.hasPendingCandidate === true,
     availability,
+    availabilityReason: typeof value.availabilityReason === "string"
+      ? value.availabilityReason
+      : null,
+  });
+}
+
+function assertRegisteredProjectVersionSummary(value, projectId, documentId) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new ProjectFileError(
+      "REGISTERED_PROJECT_VERSIONS_INVALID",
+      "项目版本摘要包含无效记录。",
+    );
+  }
+  const versionId = String(value.versionId || "");
+  const ordinal = Number(value.ordinal);
+  const basedOnVersionId = value.basedOnVersionId ? String(value.basedOnVersionId) : null;
+  const previousVersionId = value.previousVersionId ? String(value.previousVersionId) : null;
+  const displayFileName = String(value.displayFileName || "");
+  const modifiedAt = String(value.modifiedAt || "");
+  if (
+    value.projectId !== projectId
+    || value.documentId !== documentId
+    || !/^ver_\d{4,}$/u.test(versionId)
+    || !Number.isSafeInteger(ordinal)
+    || ordinal < 1
+    || (basedOnVersionId !== null && !/^ver_\d{4,}$/u.test(basedOnVersionId))
+    || (previousVersionId !== null && !/^ver_\d{4,}$/u.test(previousVersionId))
+    || !/^[^/\\\u0000-\u001f]{1,255}\.html?$/iu.test(displayFileName)
+    || !modifiedAt
+    || Number.isNaN(Date.parse(modifiedAt))
+    || typeof value.isActiveWorkingCopy !== "boolean"
+    || typeof value.isLatestOfficial !== "boolean"
+  ) {
+    throw new ProjectFileError(
+      "REGISTERED_PROJECT_VERSIONS_INVALID",
+      "项目版本摘要包含无效字段。",
+    );
+  }
+  return Object.freeze({
+    projectId,
+    documentId,
+    versionId,
+    ordinal,
+    basedOnVersionId,
+    previousVersionId,
+    displayFileName,
+    modifiedAt,
+    isActiveWorkingCopy: value.isActiveWorkingCopy,
+    isLatestOfficial: value.isLatestOfficial,
   });
 }
 
@@ -3160,6 +3210,31 @@ async function listRegisteredProjects() {
       || left.projectName.localeCompare(right.projectName, "zh-CN")
       || left.projectId.localeCompare(right.projectId)
     ));
+}
+
+async function listRegisteredProjectVersionSummaries(projectIdInput) {
+  const projectId = assertRegisteredProjectId(projectIdInput);
+  const payload = await fetchBridgeJson(
+    `/registered-project/versions?projectId=${encodeURIComponent(projectId)}`,
+  );
+  const documentId = String(payload.documentId || "");
+  if (
+    payload.projectId !== projectId
+    || !/^doc_[a-f0-9]{16,64}$/u.test(documentId)
+    || !Array.isArray(payload.versions)
+  ) {
+    throw new ProjectFileError(
+      "REGISTERED_PROJECT_VERSIONS_INVALID",
+      "项目目录未返回可展示的版本摘要。",
+    );
+  }
+  return Object.freeze({
+    projectId,
+    documentId,
+    versions: Object.freeze(payload.versions.map((version) => (
+      assertRegisteredProjectVersionSummary(version, projectId, documentId)
+    ))),
+  });
 }
 
 async function readRegisteredProjectProjection(projectIdInput) {
@@ -3401,6 +3476,7 @@ function registerProjectIpc() {
       revealAiTask,
       listRecentProjects,
       listRegisteredProjects,
+      listRegisteredProjectVersionSummaries,
       readRegisteredProjectProjection,
       openRegisteredProject,
       openRecent,

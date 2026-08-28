@@ -56,7 +56,21 @@ export type RegisteredProject = {
   latestOfficialVersionId: string | null;
   hasPendingCandidate: boolean;
   availability: "ready" | "unavailable" | "invalid";
+  availabilityReason?: string | null;
   lastOpenedAt: number | null;
+};
+
+export type ProjectVersionSummary = {
+  projectId: string;
+  documentId: string;
+  versionId: string;
+  ordinal: number;
+  basedOnVersionId: string | null;
+  previousVersionId?: string | null;
+  displayFileName: string;
+  modifiedAt: string;
+  isActiveWorkingCopy: boolean;
+  isLatestOfficial: boolean;
 };
 
 export type DesktopProjectsApi = {
@@ -151,6 +165,13 @@ export type DesktopProjectsApi = {
   readHtml?: (sourcePath: string) => Promise<HtmlProject>;
   listRecentProjects: () => Promise<RecentProject[]>;
   listRegisteredProjects?: () => Promise<RegisteredProject[]>;
+  listRegisteredProjectVersionSummaries?: (
+    projectId: string,
+  ) => Promise<{
+    projectId: string;
+    documentId: string;
+    versions: ProjectVersionSummary[];
+  }>;
   readRegisteredProjectProjection?: (projectId: string) => Promise<HtmlProject>;
   openRegisteredProject?: (projectId: string) => Promise<HtmlProject>;
   openRecent: (sourcePath: string) => Promise<HtmlOpenResult>;
@@ -405,6 +426,10 @@ export type Version = {
   validationReview: ValidationReview | null;
   candidateAssessment: CandidateAssessment | null;
   workingCopyId?: string | null;
+  displayFileName?: string;
+  modifiedAt?: string;
+  isActiveWorkingCopy?: boolean;
+  isLatestOfficial?: boolean;
   differsFromBase?: boolean;
   saveState?: "saved" | "saving" | "failed" | null;
 };

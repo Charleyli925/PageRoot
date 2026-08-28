@@ -1,18 +1,22 @@
 import { expect, test } from "@playwright/test";
 import {
   ORIGINAL_LIST_TEXT,
+  ProjectFileRepository,
   caseSelector,
   closePageRootGracefully,
   createSourceFixture,
   currentEditorFrame,
   launchPageRoot,
   loadedDiskFrame,
+  managedWorkingCopyPath,
   openRecentProject,
   path,
   readFileSync,
   removeIsolatedUserData,
   removeSourceFixture,
+  sha256,
   stopPageRoot,
+  waitForProjectReady,
 } from "./electron-native-harness.mjs";
 
 test("Electron tab keyboard navigation manages focus and a persisted Start suppresses activePath restart", {
@@ -81,18 +85,23 @@ test("Electron tab keyboard navigation manages focus and a persisted Start suppr
     await expect(reopened.page.locator("main.workbench")).toHaveAttribute("data-project-state", "unbound");
     await expect(reopenedTabs.getByRole("tab").nth(1)).not.toHaveText("HTML");
 
-    const restoredTitle = (await reopenedTabs.getByRole("tab").nth(1).innerText()).trim();
     await reopened.page.getByRole("button", { name: "查看现有项目" }).click();
-    await reopened.page.getByRole("button", { name: restoredTitle, exact: true }).click();
+    const sidebar = reopened.page.locator(".workbench-global-sidebar");
+    await sidebar.getByRole("button", {
+      name: path.basename(fixture.sourcePath, path.extname(fixture.sourcePath)),
+      exact: true,
+    }).click();
+    await sidebar.locator(".sidebar-version-file").first().click();
     await expect(reopenedTabs.getByRole("tab")).toHaveCount(1, { timeout: 60_000 });
     await expect(reopenedTabs.getByRole("tab").first()).toHaveAttribute("aria-selected", "true");
     await loadedDiskFrame(reopened.page, fixture.sourcePath, "list-item");
+    const documentTitle = (await reopenedTabs.getByRole("tab").first().innerText()).trim();
 
     await reopened.page.getByRole("button", { name: "新标签页" }).click();
     await expect(reopenedTabs.getByRole("tab")).toHaveCount(2);
     const activeStart = reopenedTabs.getByRole("tab").nth(1);
     await expect(activeStart).toHaveAttribute("aria-selected", "true");
-    const inactiveClose = reopened.page.getByRole("button", { name: `关闭 ${restoredTitle}` });
+    const inactiveClose = reopened.page.getByRole("button", { name: `关闭 ${documentTitle}` });
     await inactiveClose.focus();
     await inactiveClose.press("Enter");
     await expect(reopenedTabs.getByRole("tab")).toHaveCount(1);
@@ -347,5 +356,83 @@ test("Electron restores multiple Registry tabs, the persisted active document, a
     removeSourceFixture(projectA.sourceDirectory);
     removeSourceFixture(projectB.sourceDirectory);
     removeSourceFixture(projectC.sourceDirectory);
+  }
+});
+
+test("Electron sidebar opens an imported historical version in the existing project tab", {
+  tag: ["@gate-smoke","@smoke-project-lifecycle"],
+}, async () => {
+  test.setTimeout(180_000);
+  const projectA = createSourceFixture("sidebar-history-a.html");
+  const projectB = createSourceFixture("sidebar-history-b.html");
+  const launched = await launchPageRoot({ activeSourcePath: projectA.sourcePath });
+  try {
+    await loadedDiskFrame(launched.page, projectA.sourcePath, "list-item");
+    await waitForProjectReady(launched.page);
+    const managedAPath = await managedWorkingCopyPath(launched.page, projectA.sourcePath);
+    const projectsRoot = path.dirname(path.dirname(managedAPath));
+    const repository = new ProjectFileRepository({ projectsRoot });
+    const imported = await repository.importExternal({
+      sourcePath: projectB.sourcePath,
+      expectedSourceSha256: sha256(readFileSync(projectB.sourcePath)),
+    });
+    let target = imported.target;
+    for (const [ordinal, title] of [[2, "sidebar history V2"], [3, "sidebar history V3"]]) {
+      const candidate = await repository.createCandidate({
+        target,
+        requestId: `req_sidebar_history_${ordinal}`,
+        candidateId: `candidate_sidebar_history_${ordinal}_0001`,
+        html: `<!doctype html><html><head><title>${title}</title></head><body><h1>${title}</h1></body></html>`,
+        expectedSourceSha256: target.sourceSha256,
+      });
+      const promoted = await repository.promoteCandidate({
+        target,
+        candidateId: candidate.candidate.candidateId,
+      });
+      expect(promoted.promoted).toBe(true);
+      target = promoted.target;
+    }
+
+    await launched.page.getByRole("button", { name: "展开左侧边栏" }).click();
+    const sidebar = launched.page.locator(".workbench-global-sidebar");
+    await expect(sidebar).toHaveAttribute("data-open", "true");
+    await expect(sidebar.locator(".sidebar-project-section").first()
+      .locator(".sidebar-project-row")).toHaveAttribute("aria-expanded", "true");
+    const beforeExpansion = await launched.page.evaluate(() => (
+      window.htmlAIProjects?.getActiveProject()?.projectId || null
+    ));
+    const importedProject = sidebar.locator(".sidebar-imported-project")
+      .filter({ hasText: "sidebar-history-b" })
+      .first();
+    await expect(importedProject).toBeVisible();
+    await importedProject.locator(".sidebar-project-row").click();
+    await expect(importedProject.locator(".sidebar-version-file")).toHaveCount(3, {
+      timeout: 30_000,
+    });
+    expect(await launched.page.evaluate(() => (
+      window.htmlAIProjects?.getActiveProject()?.projectId || null
+    ))).toBe(beforeExpansion);
+
+    const tabs = launched.page.getByRole("tablist", { name: "已打开的 HTML" }).getByRole("tab");
+    await expect(tabs).toHaveCount(1);
+    await importedProject.locator(".sidebar-version-file").first().click();
+    await expect(tabs).toHaveCount(2, { timeout: 60_000 });
+    await expect(tabs.filter({ hasText: "sidebar-history-b" }))
+      .toHaveAttribute("aria-selected", "true", { timeout: 60_000 });
+    await expect.poll(() => sidebar.locator(".sidebar-version-tree").count())
+      .toBeGreaterThan(0);
+    await expect.poll(() => launched.page.locator(".preview-navigation-banner").count(), {
+      timeout: 60_000,
+    }).toBe(1);
+    await expect(launched.page.locator(".preview-navigation-banner").first())
+      .toContainText("正在浏览");
+
+    await sidebar.locator(".sidebar-project-section").first()
+      .locator(".sidebar-version-file").first().click();
+    await expect(tabs).toHaveCount(2);
+  } finally {
+    await stopPageRoot(launched.electronApp, launched.isolatedUserData);
+    removeSourceFixture(projectA.sourceDirectory);
+    removeSourceFixture(projectB.sourceDirectory);
   }
 });

@@ -27,6 +27,7 @@ import type {
   PersistState,
   RecentProject,
   RegisteredProject,
+  ProjectVersionSummary,
   Version,
   WorkspaceIssue,
 } from "./types";
@@ -35,6 +36,7 @@ import {
   WorkbenchStartPage,
 } from "./WorkbenchChrome";
 import type { ApplicationUpdateResult } from "./types";
+import type { ProjectVersionLoadResult } from "./project-version-tree";
 
 const EMPTY_RULES = Object.freeze({
   open: false,
@@ -91,7 +93,7 @@ export type ProjectPanelHostActions = Readonly<{
   ensureAttachmentObjectUrl(attachment: CommentAttachment): Promise<string>;
   openAttachmentPreview(attachment: CommentAttachment): void | Promise<void>;
   downloadAttachment(attachment: CommentAttachment): void | Promise<void>;
-  viewHistoryVersion(version: Version): void | Promise<void>;
+  viewHistoryVersion(version: Version): void | Promise<void | boolean | null>;
   onRulesViewed(): void;
 }>;
 
@@ -280,7 +282,9 @@ export const ProjectPanelContainer = memo(function ProjectPanelContainer({
         projectLoadError={context.projectLoadError}
         workspaceIssue={context.workspaceIssue}
         viewTransitioning={context.viewTransitioning}
-        viewHistoryVersion={actions.viewHistoryVersion}
+        viewHistoryVersion={(version) => {
+          void actions.viewHistoryVersion(version);
+        }}
       />
     </>
   );
@@ -292,11 +296,16 @@ export const WorkbenchGlobalSidebarContainer = memo(function WorkbenchGlobalSide
 }: {
   capability: ProjectCatalogCapability;
   open: boolean;
+  currentProjectId: string | null;
+  currentProjectName: string;
+  currentProjectVersions: readonly ProjectVersionSummary[];
   onToggle(): void;
   onOpenLocal(): void;
-  onOpenRecent(sourcePath: string): void;
-  onOpenRegistered(project: RegisteredProject): void;
-  onOpenCurrentProject(): void;
+  onOpenCurrentVersion(version: ProjectVersionSummary): void;
+  onOpenRegisteredVersion(
+    project: RegisteredProject,
+    version: ProjectVersionSummary,
+  ): void;
   updateActionVisible: boolean;
   updateDownloaded: boolean;
   updateDownloading: boolean;
@@ -310,12 +319,31 @@ export const WorkbenchGlobalSidebarContainer = memo(function WorkbenchGlobalSide
     capability.getSnapshot,
     capability.getSnapshot,
   );
+  const loadProjectVersions = useCallback(async (
+    projectId: string,
+  ): Promise<ProjectVersionLoadResult> => {
+    const outcome = await capability.commands.loadVersionSummaries(projectId);
+    if (outcome.status === "succeeded") {
+      const value = outcome.value as { versions?: unknown };
+      return {
+        versions: Array.isArray(value.versions)
+          ? value.versions as ProjectVersionSummary[]
+          : [],
+      };
+    }
+    return {
+      versions: [],
+      reason: "reason" in outcome && typeof outcome.reason === "string"
+        ? outcome.reason
+        : "项目版本摘要暂时无法读取。",
+    };
+  }, [capability]);
   return (
     <WorkbenchGlobalSidebar
       {...props}
-      recentProjects={[...catalog.recent]}
       registeredProjects={[...catalog.registered]}
       projectsError={catalog.error}
+      loadProjectVersions={loadProjectVersions}
       onToggle={() => {
         props.onToggle();
         if (!props.open) {

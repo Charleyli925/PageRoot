@@ -326,7 +326,7 @@ export function VersionTreeList({
         {layout.rows.map((row) => {
           const version = byId.get(row.versionId);
           if (!version) return null;
-          const title = versionTitle(version, versions);
+          const title = version.displayFileName || `版本-${version.ordinal}.html`;
           const editingBase = version.id === editingBaseVersionId;
           return (
             <button
@@ -338,13 +338,12 @@ export function VersionTreeList({
               style={{ paddingLeft: `${railWidth + 6}px` }}
               onClick={() => onSelect(version.id)}
             >
-              <span className="version-tree-ordinal">V{version.ordinal}</span>
               <span className="version-tree-title" title={title}>{title}</span>
               {editingBase ? (
                 <span className="version-tree-flag">当前</span>
               ) : (
-                <time dateTime={version.generatedAt}>
-                  {formatTime(version.generatedAt)}
+                <time dateTime={version.modifiedAt || version.generatedAt}>
+                  {formatTime(version.modifiedAt || version.generatedAt)}
                 </time>
               )}
             </button>

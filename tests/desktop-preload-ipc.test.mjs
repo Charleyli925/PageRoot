@@ -435,6 +435,12 @@ test("preload exposes Registry catalog reads and projectId-only opens", async ()
         projectName: "报告",
         availability: "ready",
       }]
+      : args[0] === "html-projects:list-registered-version-summaries"
+        ? {
+          projectId: args[1],
+          documentId: "doc_0123456789abcdef",
+          versions: [],
+        }
       : {
         sourcePath: "/Users/demo/Documents/PageRoot/项目/报告/报告-V1.html",
         html: "<!doctype html><html><body>报告</body></html>",
@@ -447,6 +453,14 @@ test("preload exposes Registry catalog reads and projectId-only opens", async ()
     projectName: "报告",
     availability: "ready",
   }]);
+  assert.deepEqual(
+    await api.listRegisteredProjectVersionSummaries("project_0123456789abcdef"),
+    {
+      projectId: "project_0123456789abcdef",
+      documentId: "doc_0123456789abcdef",
+      versions: [],
+    },
+  );
   assert.equal(
     (await api.readRegisteredProjectProjection("project_0123456789abcdef")).sourcePath,
     "/Users/demo/Documents/PageRoot/项目/报告/报告-V1.html",
@@ -461,6 +475,7 @@ test("preload exposes Registry catalog reads and projectId-only opens", async ()
   );
   assert.deepEqual(calls, [
     ["html-projects:list-registered"],
+    ["html-projects:list-registered-version-summaries", "project_0123456789abcdef"],
     ["html-projects:read-registered-projection", "project_0123456789abcdef"],
     ["html-projects:open-registered", "project_0123456789abcdef"],
   ]);

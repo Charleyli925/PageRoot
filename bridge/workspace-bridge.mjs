@@ -411,6 +411,7 @@ function projectFileHttpError(cause) {
         "UNSUPPORTED_REGISTRY_SCHEMA",
         "UNREGISTERED_PROJECT_ROOT",
         "WORKING_COPY_STATE_INVALID",
+        "REGISTERED_PROJECT_VERSIONS_INVALID",
       ]).has(code)
         ? 422
         : 500;
@@ -430,6 +431,22 @@ async function registeredProjectCatalog() {
     return {
       ok: true,
       projects: await projectFileRepository.listRegisteredProjects(),
+    };
+  } catch (cause) {
+    throw projectFileHttpError(cause);
+  }
+}
+
+async function registeredProjectVersionSummaries(projectId) {
+  try {
+    const summary = await projectFileRepository.listRegisteredProjectVersionSummaries({
+      projectId: registeredProjectId(projectId),
+    });
+    return {
+      ok: true,
+      projectId: summary.projectId,
+      documentId: summary.documentId,
+      versions: summary.versions,
     };
   } catch (cause) {
     throw projectFileHttpError(cause);
@@ -529,9 +546,16 @@ function projectFileTargetFromBody(body = {}) {
 
 function projectFileVersionRows(workspace, requirements = new Map()) {
   return workspace.manifest.versions.map((version) => {
-    const workingCopy = Array.isArray(workspace.workingCopies)
+    const workingCopy = Array.isArray(workspace.manifest.workingCopies)
+      ? workspace.manifest.workingCopies.find((entry) => entry.versionId === version.versionId)
+      : null;
+    const workingCopyProjection = Array.isArray(workspace.workingCopies)
       ? workspace.workingCopies.find((entry) => entry.versionId === version.versionId)
       : null;
+    const isActiveWorkingCopy = Boolean(
+      workingCopy
+      && workspace.workingCopy?.workingCopyId === workingCopy.workingCopyId,
+    );
     return {
       schemaVersion: "4.0.0",
       ...version,
@@ -546,8 +570,18 @@ function projectFileVersionRows(workspace, requirements = new Map()) {
       // import and for rounds whose records are gone.
       requirement: requirements.get(version.versionId) || null,
       workingCopyId: workingCopy?.workingCopyId || null,
-      differsFromBase: workingCopy?.differsFromBase === true,
-      saveState: workingCopy?.saveState || null,
+      displayFileName: workingCopy?.sourceRelativePath
+        ? path.basename(workingCopy.sourceRelativePath)
+        : `版本-${version.ordinal}.html`,
+      // Version timestamps are immutable. The active Working Copy is the one
+      // exception: show its last successful PageRoot write, never Finder mtime.
+      modifiedAt: isActiveWorkingCopy
+        ? String(workspace.workingCopyState?.lastSavedAt || version.createdAt)
+        : version.createdAt,
+      isActiveWorkingCopy,
+      isLatestOfficial: version.versionId === workspace.manifest.latestOfficialVersionId,
+      differsFromBase: workingCopyProjection?.differsFromBase === true,
+      saveState: workingCopyProjection?.saveState || null,
     };
   });
 }
@@ -1009,6 +1043,7 @@ async function saveProjectFileAutosave(body) {
     sourceSha256: saved.currentSha256,
     currentHtmlSha256: saved.currentSha256,
     lastModifiedAt: next.lastModifiedAt,
+    lastSavedAt: String(state.workingCopyState?.lastSavedAt || saved.lastSavedAt || ""),
     persistedRevision: saved.lastPersistedRevision,
     lastPersistedRevision: saved.lastPersistedRevision,
     versionCreated: false,
@@ -2457,6 +2492,14 @@ async function route(request, response) {
   }
   if (request.method === "GET" && url.pathname === "/registered-projects") {
     sendJson(response, 200, await registeredProjectCatalog());
+    return;
+  }
+  if (request.method === "GET" && url.pathname === "/registered-project/versions") {
+    sendJson(
+      response,
+      200,
+      await registeredProjectVersionSummaries(url.searchParams.get("projectId")),
+    );
     return;
   }
   if (request.method === "GET" && url.pathname === "/registered-project/open") {

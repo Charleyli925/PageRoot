@@ -223,6 +223,32 @@ test("the Registry alone determines catalog membership and secure project opens"
   );
 });
 
+test("registered version summaries stay content-free and expose the safe active filename", async (t) => {
+  const value = await fixture(t);
+  const imported = await importSource(value, "summary repository.html");
+  const summary = await value.repository.listRegisteredProjectVersionSummaries({
+    projectId: imported.target.projectId,
+  });
+  assert.equal(summary.projectId, imported.target.projectId);
+  assert.equal(summary.documentId, imported.target.documentId);
+  assert.equal(summary.versions.length, 1);
+  assert.deepEqual(summary.versions[0], {
+    projectId: imported.target.projectId,
+    documentId: imported.target.documentId,
+    versionId: "ver_0001",
+    ordinal: 1,
+    basedOnVersionId: null,
+    previousVersionId: null,
+    displayFileName: "summary repository-V1.html",
+    modifiedAt: summary.versions[0].modifiedAt,
+    isActiveWorkingCopy: true,
+    isLatestOfficial: true,
+  });
+  assert.equal(Object.hasOwn(summary.versions[0], "content"), false);
+  assert.equal(Object.hasOwn(summary.versions[0], "comments"), false);
+  assert.equal(Object.hasOwn(summary.versions[0], "attachments"), false);
+});
+
 test("reading a current V4 Registry never rewrites its bytes", async (t) => {
   const value = await fixture(t);
   await importSource(value, "current-registry.html");

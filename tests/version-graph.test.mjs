@@ -125,17 +125,21 @@ test("the documented 20-version history resolves to four lanes and three forks",
     version(20, 19),
   ]);
   assert.equal(layout.laneCount, 4);
+  assert.deepEqual(
+    layout.rows.map((row) => row.ordinal),
+    [1, 2, 3, 4, 5, 6, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 7, 8, 9, 10],
+  );
   const lanes = laneByVersion(layout);
   assert.deepEqual(
     [lanes.v1, lanes.v2, lanes.v3, lanes.v4, lanes.v5, lanes.v6],
     [0, 0, 0, 0, 0, 0],
   );
-  assert.deepEqual([lanes.v7, lanes.v8, lanes.v9, lanes.v10], [1, 1, 1, 1]);
-  assert.deepEqual([lanes.v11, lanes.v16, lanes.v18], [2, 2, 2]);
-  assert.deepEqual([lanes.v19, lanes.v20], [3, 3]);
+  assert.deepEqual([lanes.v7, lanes.v8, lanes.v9, lanes.v10], [3, 3, 3, 3]);
+  assert.deepEqual([lanes.v11, lanes.v16, lanes.v18], [1, 1, 1]);
+  assert.deepEqual([lanes.v19, lanes.v20], [2, 2]);
   assert.deepEqual(
     layout.edges.map((edge) => [edge.fromVersionId, edge.toVersionId]),
-    [["v3", "v7"], ["v4", "v11"], ["v16", "v19"]],
+    [["v4", "v11"], ["v16", "v19"], ["v3", "v7"]],
   );
   // A fork always moves outward, so drawn connectors never cross back.
   for (const edge of layout.edges) {

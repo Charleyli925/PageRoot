@@ -137,11 +137,12 @@ export async function openRecentProject(
     await visibleToast.getByRole("button", { name: "关闭提醒" }).click();
     await expect(visibleToast).toBeHidden();
   }
-  const sidebar = page.locator(".workbench-global-sidebar");
-  if (await sidebar.getAttribute("data-open") !== "true") {
-    await page.getByRole("button", { name: "展开左侧边栏" }).click();
+  const startPage = page.locator(".workbench-start-page").filter({ visible: true }).first();
+  if (!await startPage.isVisible().catch(() => false)) {
+    await page.getByRole("button", { name: "新标签页" }).click();
   }
-  await sidebar.getByRole("button", { name: recentName, exact: true }).click();
+  await startPage.waitFor({ state: "visible" });
+  await startPage.getByRole("button", { name: recentName, exact: true }).click();
   return loadedDiskFrame(page, sourcePath, caseId);
 }
 

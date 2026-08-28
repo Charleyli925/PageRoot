@@ -1348,6 +1348,25 @@ export class ProjectWorkflow {
     return this.#registeredProjectsRefresh;
   }
 
+  async loadRegisteredProjectVersionSummaries(projectId) {
+    if (typeof this.#projectOpenPort.listRegisteredVersionSummaries !== "function") {
+      return succeeded({ projectId: String(projectId || ""), documentId: "", versions: [] });
+    }
+    try {
+      const summary = await this.#projectOpenPort.listRegisteredVersionSummaries(
+        String(projectId || ""),
+      );
+      return succeeded(summary);
+    } catch (cause) {
+      const reason = projectErrorMessage(
+        this.#codecs,
+        cause,
+        "项目版本摘要暂时无法读取。",
+      );
+      return rejected("PROJECT_VERSION_SUMMARIES_REJECTED", reason);
+    }
+  }
+
   async #refreshRegisteredProjects() {
     try {
       const projects = await this.#projectOpenPort.listRegistered();

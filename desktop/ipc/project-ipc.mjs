@@ -36,6 +36,10 @@ export function registerProjectIpc({
     PROJECT_CHANNELS.listRegisteredProjects,
     trustedProject(handlers.listRegisteredProjects),
   );
+  ipcMain.handle(
+    PROJECT_CHANNELS.listRegisteredProjectVersionSummaries,
+    trustedProject(handlers.listRegisteredProjectVersionSummaries),
+  );
   if (PROJECT_CHANNELS.readRegisteredProjectProjection) {
     ipcMain.handle(
       PROJECT_CHANNELS.readRegisteredProjectProjection,
