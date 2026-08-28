@@ -895,9 +895,9 @@ async function exerciseReviewAndAccept() {
   });
   results.review.dualPagesVisibleMs = round(performance.now() - openStarted);
   await waitUntil(async () => Promise.all([
-    before.locator("html").getAttribute("data-pageroot-review-first-paint-ready"),
-    after.locator("html").getAttribute("data-pageroot-review-first-paint-ready"),
-  ]).then((values) => values.every((value) => value === "true")), {
+    before.locator("html").evaluate((html) => html.ownerDocument.readyState),
+    after.locator("html").evaluate((html) => html.ownerDocument.readyState),
+  ]).then((values) => values.every((value) => value === "complete")), {
     timeout: 45_000,
     label: "dual review pages first paint ready",
   });
