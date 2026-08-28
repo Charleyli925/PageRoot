@@ -482,6 +482,11 @@ sandbox/bootstrap shell with no change, comment or runtime facts, then replaces
 it with complete analyzed documents. The shell is presentation only and cannot
 approve, promote or alter either source.
 
+Successful Candidate adoption and stale Review invalidation clear the prepared
+document cache immediately. Unmounting the Review workspace then releases its
+paired preview sessions and iframes; the five verified Edit canvases remain the
+separate hot-resource budget.
+
 Formal Review has no runtime-snapshot supplement. The trusted
 `AiReviewWorkspace` begins with the immutable static document pair and keeps
 the analysis, navigation, masking and acceptance paths display-only. Inline

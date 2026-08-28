@@ -170,6 +170,13 @@ impact selection schedules `build-web` before running it.
 
 The developer-preview, release and artifact lanes stop if the worktree is dirty or if HEAD/tree changes during the run. Test reports are written to the ignored `output/test-runs/` directory; successful installer lanes additionally write `package-delivery-report.json` and `.md` below `output/`. The final report step requires live GitHub PR metadata and fails the installer handoff if it cannot enumerate the exact tag-to-commit range. Package commands always build the exact current clean Tree; they do not discover or merge other PRs. For an unqualified "latest" package request, prepare the required `origin/main` plus non-excluded-PR integration Tree first as documented in `docs/GIT_WORKFLOW.md`. `package:developer` is never called by another lane: run it only after an explicit developer request. Its ad-hoc, unnotarized DMG is retained for short installation feedback and is never release-eligible. See `docs/DEVELOPER_PREVIEW_PLAYBOOK.md`.
 
+The package delivery report resolves commit-to-PR metadata with at most eight
+concurrent requests and an in-run response cache. It prints the current item
+and completed/total count to stderr, stops after an eight-minute overall
+deadline by default, and accepts `--deadline-ms` for a deliberately chosen
+override. Before writing the report it rechecks the exact source HEAD and Tree
+so a slow metadata scan cannot silently describe a different package.
+
 Desktop development and Electron E2E disable live update checks. The pure
 application-update controller is covered by Node tests; the Release Candidate
 lane owns the installed-App, Developer ID, notarization, signed-App checkpoint,

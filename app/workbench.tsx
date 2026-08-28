@@ -1529,6 +1529,10 @@ export default function Workbench() {
         ) return;
         const review = readyReviewSession;
         if (!review || review.operationKey === publication.operationKey) {
+          // Prepared Review documents contain both HTML copies, bootstrap
+          // scripts and comment targets. Once the Candidate is adopted, the
+          // new source authority must release that comparison graph.
+          reviewAnalysisSession.clear();
           setReadyReviewSession(null);
           performance.mark("pageroot:accept:overlay-closed");
         }
@@ -5387,6 +5391,7 @@ export default function Workbench() {
         }
         return;
       }
+      reviewAnalysisSession.clear();
       const result = outcome.value as {
         current: boolean;
         candidateLabel: string;
@@ -5494,6 +5499,7 @@ export default function Workbench() {
     currentProjectSessionSnapshot,
     currentRunSessionSnapshot,
     readyReviewSession,
+    reviewAnalysisSession,
     revealAiConversation,
     runCapability,
     workspaceController,
@@ -5623,6 +5629,7 @@ export default function Workbench() {
     ) {
       if (openingReadyVersion) return;
       const frame = window.requestAnimationFrame(() => {
+        reviewAnalysisSession.clear();
         setReadyReviewSession(null);
       });
       return () => window.cancelAnimationFrame(frame);
@@ -5633,6 +5640,7 @@ export default function Workbench() {
     currentRunSessionSnapshot,
     openingReadyVersion,
     readyReviewSession,
+    reviewAnalysisSession,
   ]);
 
   const cancelActiveRun = useCallback(async ({

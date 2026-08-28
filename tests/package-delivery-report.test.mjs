@@ -5,10 +5,15 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 import {
+  collectPullRequests,
   createPackageDeliverySnapshot,
+  DEFAULT_PACKAGE_DELIVERY_DEADLINE_MS,
   isTransientGitHubCommandFailure,
+  PackageDeliveryReportTimeoutError,
+  parseArguments,
   pullRequestStatusLabel,
   renderPackageDeliveryMarkdown,
+  retryTransientGitHubCommandAsync,
   retryTransientGitHubCommand,
   selectPackageBaseline,
   summarizeStatusChecks,
@@ -61,6 +66,115 @@ test("delivery evidence retries only bounded GitHub transport failures", () => {
     throw new Error("GitHub request failed: EOF");
   }, { attempts: 2 }), /EOF/u);
   assert.equal(exhaustedAttempts, 2);
+});
+
+test("delivery metadata is cached, bounded-concurrent and reports progress", async () => {
+  const commitA = "a".repeat(40);
+  const commitB = "b".repeat(40);
+  const calls = [];
+  const progress = [];
+  const result = await collectPullRequests({
+    root: productRoot,
+    repository: "Charleyli925/PageRoot",
+    commits: [
+      { sha: commitA, subject: "first" },
+      { sha: commitB, subject: "second" },
+      { sha: commitA, subject: "duplicate input for cache" },
+    ],
+    concurrency: 2,
+    deadlineMs: 5_000,
+    onProgress: (event) => progress.push(event),
+    requestJson: async (arguments_) => {
+      calls.push(arguments_);
+      if (arguments_[0] === "api") return [{ number: 10 }];
+      return {
+        number: 10,
+        url: "https://github.com/Charleyli925/PageRoot/pull/10",
+        title: "Cached metadata",
+        state: "MERGED",
+        isDraft: false,
+        mergeStateStatus: "CLEAN",
+        reviewDecision: "APPROVED",
+        statusCheckRollup: [],
+        headRefOid: commitB,
+        mergedAt: "2026-08-28T00:00:00Z",
+      };
+    },
+  });
+
+  assert.equal(calls.filter((arguments_) => arguments_[0] === "api").length, 2);
+  assert.equal(calls.filter((arguments_) => arguments_[0] === "pr").length, 1);
+  assert.deepEqual(result.commits.map((commit) => commit.pullRequestNumbers), [[10], [10], [10]]);
+  assert.deepEqual(result.pullRequests[0].commitShas, [commitA, commitB]);
+  assert.equal(result.scan.commitMetadataRequested, 3);
+  assert.equal(result.scan.commitMetadataCompleted, 3);
+  assert.equal(result.scan.pullRequestMetadataCompleted, 1);
+  assert.equal(result.scan.githubRequestCount, 3);
+  assert.equal(result.scan.cacheHitCount, 1);
+  assert.equal(result.scan.concurrency, 2);
+  assert(progress.some((event) => event.phase === "commit metadata" && event.total === 3));
+  assert(progress.some((event) => event.phase === "Pull Request metadata" && event.completed === 1));
+});
+
+test("delivery metadata has an explicit overall deadline and useful timeout progress", async () => {
+  const commitSha = "c".repeat(40);
+  await assert.rejects(
+    collectPullRequests({
+      root: productRoot,
+      repository: "Charleyli925/PageRoot",
+      commits: [{ sha: commitSha, subject: "deadline" }],
+      deadlineAt: Date.now() - 1,
+      deadlineMs: 123,
+      onProgress: () => {},
+      requestJson: async () => [],
+    }),
+    (error) => {
+      assert(error instanceof PackageDeliveryReportTimeoutError);
+      assert.equal(error.code, "PACKAGE_DELIVERY_REPORT_TIMEOUT");
+      assert.match(error.message, /0\/1/u);
+      assert.match(error.message, /current c{12}/u);
+      return true;
+    },
+  );
+});
+
+test("delivery report keeps retrying transient async metadata inside its deadline", async () => {
+  let attempts = 0;
+  const retries = [];
+  assert.equal(
+    await retryTransientGitHubCommandAsync(async () => {
+      attempts += 1;
+      if (attempts === 1) throw Object.assign(new Error("transport EOF"), { code: "ECONNRESET" });
+      return "ok";
+    }, {
+      deadlineAt: Date.now() + 5_000,
+      deadlineMs: 5_000,
+      onRetry: (retry) => retries.push(retry),
+    }),
+    "ok",
+  );
+  assert.equal(attempts, 2);
+  assert.deepEqual(retries.map(({ nextAttempt }) => nextAttempt), [2]);
+});
+
+test("package delivery arguments expose the bounded default and an override", () => {
+  const options = parseArguments([
+    "--kind", "formal",
+    "--artifact", "release/PageRoot.dmg",
+    "--version", "0.9.8",
+    "--architecture", "arm64",
+    "--deadline-ms", "12345",
+  ]);
+  assert.equal(options.deadlineMs, 12345);
+  assert.equal(
+    parseArguments([
+      "--kind", "formal",
+      "--artifact", "release/PageRoot.dmg",
+      "--version", "0.9.8",
+      "--architecture", "arm64",
+    ]).deadlineMs,
+    DEFAULT_PACKAGE_DELIVERY_DEADLINE_MS,
+  );
 });
 
 test("formal reports use the prior stable tag when packaging an exact tagged commit", () => {
@@ -180,6 +294,14 @@ test("delivery Markdown reports exact package bytes, every PR and direct commits
     additions: 120,
     deletions: 4,
     pullRequests,
+    scan: {
+      deadlineMs: 480000,
+      concurrency: 8,
+      commitMetadataRequested: 2,
+      commitMetadataCompleted: 2,
+      pullRequestMetadataRequested: 1,
+      pullRequestMetadataCompleted: 1,
+    },
     generatedAt: "2026-08-04T06:00:00.000Z",
   });
   const markdown = renderPackageDeliveryMarkdown(report);
@@ -188,6 +310,7 @@ test("delivery Markdown reports exact package bytes, every PR and direct commits
   assert.match(markdown, /\[#84\]\(https:\/\/github\.com\/Charleyli925\/PageRoot\/pull\/84\)/u);
   assert.match(markdown, /开放 · 可审查 · 合并受阻 · 检查失败/u);
   assert.match(markdown, /chore: direct package adjustment/u);
+  assert.match(markdown, /GitHub 元数据扫描：2\/2 个提交、1\/1 个 PR；8 并发/u);
 });
 
 test("installer workflows generate a live delivery report after package verification", async () => {

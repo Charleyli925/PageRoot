@@ -78,6 +78,31 @@ test("review analysis rejects superseded work before it starts", async () => {
   assert.equal(computed, false);
 });
 
+test("clearing a review session releases completed prepared documents", async () => {
+  const session = new ReviewAnalysisSession();
+  let computes = 0;
+  await session.analyze({
+    key: "adopted-review",
+    compute: () => {
+      computes += 1;
+      return { html: "candidate" };
+    },
+  });
+  assert.deepEqual(session.peek("adopted-review"), { html: "candidate" });
+
+  session.clear();
+  assert.equal(session.peek("adopted-review"), null);
+  await session.analyze({
+    key: "adopted-review",
+    compute: () => {
+      computes += 1;
+      return { html: "next-candidate" };
+    },
+  });
+  assert.equal(computes, 2);
+  assert.deepEqual(session.peek("adopted-review"), { html: "next-candidate" });
+});
+
 test("review analysis translates cancellation during asynchronous compute", async () => {
   const session = new ReviewAnalysisSession();
   let release;
