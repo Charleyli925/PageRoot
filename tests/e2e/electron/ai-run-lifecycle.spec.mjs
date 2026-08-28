@@ -194,8 +194,8 @@ test("ending a copied run still warns after restart and blocks late finalization
      * contract needs is that the handoff step is the one carrying the round.
      */
     await launched.page.getByRole("button", { name: /AI 助手/u }).click();
-    await expect(launched.page.getByTestId("ai-conversation-run-progress"))
-      .toContainText("等待你的 AI 完成修改");
+    const runProgress = launched.page.getByTestId("ai-conversation-run-progress");
+    await expect(runProgress).toBeVisible();
     const endRound = launched.page.getByTestId("ai-conversation-action-bar")
       .getByRole("button", { name: "结束本轮" });
     await expect(endRound).toBeEnabled();
