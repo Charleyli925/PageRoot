@@ -307,7 +307,7 @@ export interface ConversationControllerCapability {
 
 export interface AgentSelectionControllerCapability {
   selectAgent(selection: AgentSelection): AgentSelection;
-  checkAgentUsability(): Promise<RunWorkflowOutcome>;
+  checkAgentUsability(selection?: AgentSelection): Promise<RunWorkflowOutcome>;
 }
 
 export interface ReviewPreparationControllerCapability extends WorkspaceSnapshotReader {

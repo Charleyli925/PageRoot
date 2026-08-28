@@ -885,9 +885,8 @@ test("one-click Qoder install refreshes availability and only then preflights", 
   assert.equal(harness.calls.createRequest.length, 0);
   assert.equal(harness.workflow.getSnapshot().qoderAvailability.status, "ready");
   const codex = harness.workflow.getSnapshot().agentCatalog.providers.codex.selection;
-  const rejected = await harness.workflow.installAgent(codex);
-  assert.equal(rejected.status, "rejected");
-  assert.equal(rejected.code, "AGENT_INSTALL_UNSUPPORTED");
+  const alsoInstalled = await harness.workflow.installAgent(codex);
+  assert.equal(alsoInstalled.status, "succeeded");
   harness.workflow.dispose();
 });
 
@@ -1212,7 +1211,7 @@ test("recursive polling is single-flight and speeds up only after public Agent t
     status: "processing",
     agentSession: {
       providerId: "codex",
-      runtimeId: "app-server",
+      runtimeId: "acp",
       state: "running",
       phase: "reading-task",
       agentName: "runtime-internal-name",

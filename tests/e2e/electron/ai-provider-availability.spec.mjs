@@ -5,7 +5,7 @@ import {
   candidateHtmlFiles,
   chooseModifyIntent,
   closeQoderAvailability,
-  createCodexAppServerE2ECommand,
+  createCodexAcpE2ECommand,
   createQoderAcpE2ECommand,
   createSourceFixture,
   existsSync,
@@ -179,26 +179,30 @@ test("Qoder ACP Agent Bridge streams public execution text without clipboard or 
   }
 });
 
-test("Codex App Server shares the public execution stream and retains its frozen identity", async () => {
+test("Codex ACP shares the public execution stream and retains its frozen identity", {
+  tag: ["@smoke-provider"],
+}, async () => {
   test.setTimeout(180_000);
-  const fixture = createSourceFixture("codex-app-server-agent-bridge.html");
-  const codexCommand = createCodexAppServerE2ECommand(fixture.sourceDirectory);
+  const fixture = createSourceFixture("codex-acp-agent-bridge.html");
+  const codexCommand = createCodexAcpE2ECommand(fixture.sourceDirectory, {
+    visibleText: true,
+    visibleTextGateMs: 700,
+  });
   const qoderCommand = createQoderAcpE2ECommand(fixture.sourceDirectory);
   const launched = await launchPageRoot({
     activeSourcePath: fixture.sourcePath,
     injectedEnv: {
       PAGEROOT_QODER_ACP_ALLOW_TEST_COMMAND: "1",
       PAGEROOT_QODER_ACP_COMMAND: qoderCommand,
-      PAGEROOT_E2E_CODEX_APP_SERVER_ALLOW_TEST_COMMAND: "1",
-      PAGEROOT_E2E_CODEX_APP_SERVER_COMMAND: codexCommand,
-      PAGEROOT_E2E_CODEX_STREAM_GATE_MS: "700",
+      PAGEROOT_CODEX_ACP_ALLOW_TEST_COMMAND: "1",
+      PAGEROOT_CODEX_ACP_COMMAND: codexCommand,
     },
   });
   try {
     const workingCopyPath = await addComment(
       launched.page,
       fixture.sourcePath,
-      "请完成 Codex App Server 自动闭环，但不要直接覆盖当前 HTML。",
+      "请完成 Codex ACP 自动闭环，但不要直接覆盖当前 HTML。",
     );
     await launched.page.getByRole("button", { name: /AI 助手/u }).click();
     const sidebar = await chooseModifyIntent(launched.page);
@@ -250,7 +254,7 @@ test("Codex App Server shares the public execution stream and retains its frozen
       { timeout: 60_000 },
     );
     await expect(narration.getByTestId("ai-conversation-narration").locator("p"))
-      .toHaveCount(2);
+      .toHaveCount(3);
     await expect(launched.page.getByTestId("ai-conversation-action-bar"))
       .toContainText("等待你的决定", { timeout: 60_000 });
     const decisionAnnouncement = launched.page
@@ -261,7 +265,7 @@ test("Codex App Server shares the public execution stream and retains its frozen
     await expect(launched.page.getByTestId("ai-conversation-thinking")).toHaveCount(0);
     expect(readFileSync(fixture.sourcePath).equals(fixture.original)).toBe(true);
     expect(readFileSync(workingCopyPath, "utf8")).not.toContain(
-      "data-pageroot-codex-app-server",
+      "data-pageroot-codex-acp",
     );
 
     const projectRoot = managedProjectRoots(launched.workspace).find(
@@ -280,7 +284,7 @@ test("Codex App Server shares the public execution stream and retains its frozen
     );
     expect(candidates).toHaveLength(1);
     expect(readFileSync(candidates[0], "utf8"))
-      .toContain('data-pageroot-codex-app-server="e2e"');
+      .toContain('data-pageroot-codex-acp="e2e"');
 
     await launched.page.getByRole("button", { name: "审阅对比" }).click();
     await expect(launched.page.getByTestId("ai-review-workspace"))
@@ -387,8 +391,9 @@ test("Qoder installed while PageRoot is open refreshes in place and continues on
     );
     await launched.page.getByRole("button", { name: /AI 助手/u }).click();
     const deliveryDialog = await openQoderAvailability(launched.page);
-    await expect(deliveryDialog.getByText("未安装", { exact: true })).toBeVisible();
-    await expect(deliveryDialog.getByRole("button", { name: "安装 Qoder CLI" })).toBeVisible();
+    const qoderCard = deliveryDialog.locator(".qoder-availability-card");
+    await expect(qoderCard.getByText("未安装", { exact: true })).toBeVisible();
+    await expect(qoderCard.getByRole("button", { name: "安装 Qoder CLI" })).toBeVisible();
     expect(requestPosts).toBe(0);
 
     createQoderAcpE2ECommand(fixture.sourceDirectory);
@@ -396,7 +401,7 @@ test("Qoder installed while PageRoot is open refreshes in place and continues on
       window.dispatchEvent(new Event("focus"));
       document.dispatchEvent(new Event("visibilitychange"));
     });
-    await expect(deliveryDialog.getByText("已连接", { exact: true })).toBeVisible();
+    await expect(qoderCard.getByText("已连接", { exact: true })).toBeVisible();
     // The About card only observes availability; continuing the round is the
     // conversation's own send action.
     expect(requestPosts).toBe(0);

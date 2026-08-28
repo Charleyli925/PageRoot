@@ -57,6 +57,7 @@ const QODER_PRESENTATION = Object.freeze({
   settingsSupported: true,
   stopLabel: "停止 Qoder 并继续编辑",
   frozenPreviewDetail: "这是本轮冻结并交给 Qoder CLI 的只读内容",
+  installLabel: "安装 Qoder CLI",
 });
 
 const AGENT_SECURITY_PROFILES = new Set(["client-mediated", "agent-native"]);
@@ -95,12 +96,21 @@ export const QODER_AGENT_PROVIDER = Object.freeze({
 
 const CODEX_FAILURE_REASONS = Object.freeze({
   CODEX_INSTALLATION_MISSING: "not-installed",
+  CODEX_COMMAND_NOT_FOUND: "not-installed",
+  AGENT_COMMAND_NOT_FOUND: "not-installed",
   CODEX_AUTH_REQUIRED: "auth-required",
   CODEX_APP_SERVER_TIMEOUT: "timeout",
   CODEX_TURN_TIMEOUT: "timeout",
+  CODEX_PREFLIGHT_TIMEOUT: "timeout",
+  AGENT_PREFLIGHT_TIMEOUT: "timeout",
   CODEX_INSTALLATION_CHANGED: "restart-required",
+  CODEX_COMMAND_CHANGED: "restart-required",
+  AGENT_INSTALLATION_CHANGED: "restart-required",
   CODEX_VERSION_MISMATCH: "invalid-installation",
   CODEX_INSTALLATION_UNTRUSTED: "invalid-installation",
+  CODEX_COMMAND_UNTRUSTED: "invalid-installation",
+  CODEX_VERSION_UNSUPPORTED: "invalid-installation",
+  AGENT_INSTALLATION_UNTRUSTED: "invalid-installation",
 });
 
 const CODEX_PRESENTATION = Object.freeze({
@@ -109,11 +119,13 @@ const CODEX_PRESENTATION = Object.freeze({
   logoSrc: null,
   cardClassName: "codex-availability-card",
   primaryActionDataAttribute: "data-codex-primary",
+  guidancePurposePrefix: "codex",
+  installLabel: "安装 Codex",
   readyDetail: "真实预检已完成，可直接交给 Codex 修改",
-  notInstalledDetail: "当前 Stemmio 安装不包含受支持的 Codex runtime。",
-  authRequiredDetail: "请先在 Codex 中完成登录，再回到 Stemmio 重试。",
-  invalidInstallationDetail: "内置 Codex runtime 未通过固定版本与完整性校验。",
-  restartRequiredDetail: "内置 Codex runtime 已发生变化，请重新打开 Stemmio。",
+  notInstalledDetail: "如需从 PageRoot 直接发送，还需要安装 Codex。",
+  authRequiredDetail: "完成 Codex 登录后即可直接发送。",
+  invalidInstallationDetail: "当前安装不是 PageRoot 支持的独立 Codex ACP。",
+  restartRequiredDetail: "Codex ACP 已发生变化，重新打开 PageRoot 后即可继续。",
   checkingDetail: "正在检查 Codex…",
   timeoutDetail: "Codex 预检没有在规定时间内完成。",
   startUnavailable: "当前 Request 还不能启动 Codex。",
@@ -127,15 +139,32 @@ const CODEX_PRESENTATION = Object.freeze({
   localReadDisclosure: "Codex 修改时可能读取这台 Mac 上的本机文件。",
 });
 
+function codexGuidanceInstruction(kind) {
+  if (kind === "login") {
+    return [
+      "请帮我完成这台 Mac 上独立 Codex CLI 的官方登录流程。",
+      "使用 Codex 官方支持的登录入口 `codex login`；登录 ChatGPT 账号后再回到 PageRoot。",
+      "完成浏览器登录后，验证 `codex-acp` 能正常启动。",
+      "不要修改 PageRoot，也不要修改当前项目。完成后只告诉我登录和可用性验证结果。",
+    ].join("\n");
+  }
+  return [
+    "请帮我在这台 Mac 上准备 PageRoot 支持的独立 Codex ACP。",
+    "使用官方 npm 包 `@agentclientprotocol/codex-acp`，不要改用 PageRoot 安装包内的 bundled Codex。",
+    "安装后使用 `codex login` 完成登录。",
+    "不要修改 PageRoot，也不要修改当前项目。完成后只告诉我安装、版本、登录和可用性验证结果。",
+  ].join("\n");
+}
+
 export const CODEX_AGENT_PROVIDER = Object.freeze({
   providerId: "codex",
-  runtimeId: "app-server",
-  securityProfile: "agent-native",
+  runtimeId: "acp",
+  securityProfile: "client-mediated",
   trustPolicyVersion: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
-  installable: false,
-  selection: Object.freeze({
+  installable: true,
+  selection: freezeAgentSelection(Object.freeze({
     providerId: "codex",
-    runtimeId: "app-server",
+    runtimeId: "acp",
     requestedModelId: null,
     resolvedModelId: null,
     reasoning: Object.freeze({
@@ -143,11 +172,12 @@ export const CODEX_AGENT_PROVIDER = Object.freeze({
       applied: null,
       resolution: "provider-default",
     }),
-  }),
+  })),
   presentation: CODEX_PRESENTATION,
   failureReason(code) {
     return CODEX_FAILURE_REASONS[String(code || "")] || "service-unavailable";
   },
+  guidanceInstruction: codexGuidanceInstruction,
 });
 
 export function defaultAgentProviders({
@@ -156,6 +186,109 @@ export function defaultAgentProviders({
   return Object.freeze(codexExecution
     ? [QODER_AGENT_PROVIDER, CODEX_AGENT_PROVIDER]
     : [QODER_AGENT_PROVIDER]);
+}
+
+export function agentAvailabilityCardPresentation(presentation, availability) {
+  const status = availability?.status || "checking";
+  if (status === "ready") {
+    return Object.freeze({
+      statusLabel: "已连接",
+      detail: presentation.readyDetail,
+      tone: "ready",
+    });
+  }
+  if (status === "not-installed") {
+    return Object.freeze({
+      statusLabel: "未安装",
+      detail: presentation.notInstalledDetail,
+      tone: "attention",
+    });
+  }
+  if (status === "auth-required") {
+    const waitingForLogin = availability?.guidanceCopied === "login";
+    return Object.freeze({
+      statusLabel: waitingForLogin ? "等待登录" : "需要登录",
+      detail: waitingForLogin
+        ? "完成登录后返回源页，系统会自动复检。"
+        : presentation.authRequiredDetail,
+      tone: "attention",
+    });
+  }
+  if (availability?.reason === "invalid-installation") {
+    return Object.freeze({
+      statusLabel: "无法使用当前安装",
+      detail: presentation.invalidInstallationDetail,
+      tone: "attention",
+    });
+  }
+  if (availability?.reason === "restart-required") {
+    return Object.freeze({
+      statusLabel: "请重新打开 PageRoot",
+      detail: presentation.restartRequiredDetail,
+      tone: "attention",
+    });
+  }
+  if (status === "checking") {
+    return Object.freeze({
+      statusLabel: "检测中",
+      detail: presentation.checkingDetail,
+      tone: "checking",
+    });
+  }
+  if (availability?.reason === "account-capacity") {
+    return Object.freeze({
+      statusLabel: presentation.capacityStatusLabel || "暂不可用 · 额度已用完",
+      detail: presentation.capacityDetail || "当前账号没有可用模型容量。",
+      tone: "attention",
+    });
+  }
+  if (availability?.reason === "timeout") {
+    return Object.freeze({
+      statusLabel: "暂不可用 · 连接超时",
+      detail: presentation.timeoutDetail,
+      tone: "attention",
+    });
+  }
+  return Object.freeze({
+    statusLabel: "暂不可用 · 连接没有完成",
+    detail: "本轮任务尚未创建，当前页面不受影响。",
+    tone: "attention",
+  });
+}
+
+export function agentProviderCardPresentation(provider) {
+  const presentation = provider?.presentation || {};
+  return Object.freeze({
+    displayName: presentation.displayName,
+    logoSrc: presentation.logoSrc || null,
+    cardClassName: presentation.cardClassName,
+    primaryActionDataAttribute: presentation.primaryActionDataAttribute || null,
+    availability: (availability) => agentAvailabilityCardPresentation(presentation, availability),
+    actions: Object.freeze({
+      install: Object.freeze({
+        label: presentation.installLabel || `安装 ${presentation.agentName || presentation.displayName}`,
+        copiedLabel: "重新安装",
+      }),
+      login: Object.freeze({
+        label: "复制指令粘贴至 Agent",
+        copiedLabel: "重新复制",
+      }),
+    }),
+  });
+}
+
+export function aboutAgentCardsFromCatalog(snapshot) {
+  return Object.freeze(Object.values(snapshot?.providers ?? {})
+    .filter((provider) => (
+      provider.installable === true
+      || provider.availability?.status === "auth-required"
+      || provider.availability?.status === "not-installed"
+    ))
+    .map((provider) => Object.freeze({
+      selection: provider.selection,
+      presentation: agentProviderCardPresentation(provider),
+      availability: provider.availability,
+    })));
 }
 
 function frozenProviderEntry(descriptor, previous = null) {

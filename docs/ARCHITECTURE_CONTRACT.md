@@ -103,15 +103,18 @@ The renderer's main workspace facts are partitioned as follows:
 - Bridge Agent provider/runtime registries: the provider registry is the sole
   legacy-driver/provider dispatch point and the runtime registry is the sole
   runtime dispatch point. The Qoder provider owns installation identity,
-  version, login/model preflight and raw-error normalization. Unknown IDs fail
+  version, login/model preflight and raw-error normalization. The Codex ACP
+  provider owns the same facts for `providerId: "codex"`; missing login is
+  `session/new` JSON-RPC `-32000`, not advertised `authMethods`. Unknown IDs fail
   closed; opaque installation facts, digests and capabilities stay inside the
   ticket;
 - Bridge Agent catalog/installer: `AgentCatalog` owns the product ACP
   allowlist, public provider projection and managed-command candidates.
   `AgentInstaller` owns in-flight install jobs, atomic verified layout under
   `userData/agents` and shutdown drain. Coordinator does not own install. This
-  is a product allowlist, not a live public registry; Qoder is the only
-  installable shipped ACP entry, and Codex App Server is not installable;
+  is a product allowlist, not a live public registry; Qoder and Codex ACP are
+  the installable shipped ACP entries. Codex App Server modules remain in the
+  package but are not registered;
 - Bridge Agent Host/Policy Ports: `bridge/agent/policies/` owns the execution
   policy and freezes all readable files, output/completion paths,
   runtime authority and finalizer authority. `bridge/agent/hosts/` owns the
@@ -120,14 +123,14 @@ The renderer's main workspace facts are partitioned as follows:
   paths, command, success criteria or durable outcome;
   these Ports constrain only requests mediated through the ACP Client Host.
   They are not a sandbox for native filesystem or command operations performed
-  by an Agent process. The sole registered `agent-native` provider is the
-  source-gated, pinned Codex App Server: one fresh ephemeral thread, approval
-  `never`, disabled MCP/skills/plugins/apps/Web/subagents, tool network disabled,
-  a Request-output-only workspace-write root, fixed finalizer, unique Candidate
-  acceptance and confirmed process-group cleanup. It remains a trusted local
-  process with the signed-in user's native read authority; any other
-  `agent-native` provider requires a separate sandbox conformance and security
-  gate before registration;
+  by an Agent process. After the Codex ACP cut-over there is no registered `agent-native` provider.
+  The packaged-unregistered Codex App Server modules still describe one fresh ephemeral thread, approval `never`, disabled
+  MCP/skills/plugins/apps/Web/subagents, tool network disabled, a
+  Request-output-only workspace-write root, fixed finalizer, unique Candidate
+  acceptance and confirmed process-group cleanup; they remain a trusted local
+  process with the signed-in user's native read authority until a later
+  iteration deletes them. Any future registered `agent-native` provider
+  requires a separate sandbox conformance and security gate before registration;
 - `VersionSession`: immutable Version records plus the current/history
   projection facts;
 - `VersionWorkflow`: Version operation identity/generation, Bridge version

@@ -49,9 +49,9 @@ jobs and shutdown drain. The coordinator does not own install. Public HTTP adds
 preflight/start/cancel/availability shapes stay compatible.
 
 The ACP runtime is the shared protocol plus process supervisor. Qoder retains
-discovery, `--acp` launch, expected agent name and verified JS identity. The
-next increment is `codex-acp` on this catalog/runtime, not an expansion of the
-private App Server.
+discovery, `--acp` launch, expected agent name and verified JS identity. Codex
+now also uses this catalog/runtime (`docs/decisions/0053-codex-acp-adapter.md`);
+the private App Server remains packaged-unregistered until it is deleted.
 
 ## Consequences
 

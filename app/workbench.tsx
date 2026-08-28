@@ -84,8 +84,8 @@ import { createDocumentWorkflowCodecs } from "./application/document-workflow-co
 import { createRunWorkflowCodecs } from "./application/run-workflow-codecs.js";
 import {
   INITIAL_QODER_AVAILABILITY,
-  type QoderGuidanceKind,
 } from "./domain/qoder-availability.js";
+import { aboutAgentCardsFromCatalog } from "./application/agent-provider-catalog.js";
 import { createWorkspaceControllerCodecs } from "./application/workspace-controller-codecs.js";
 import { createBrowserFileTabIdentity } from "./application/browser-file-tab-identity.js";
 import type { CommentSessionSnapshot } from "./application/comment-session.js";
@@ -107,6 +107,7 @@ import {
   INITIAL_DOCUMENT_SURFACE_CACHE_SNAPSHOT,
 } from "./application/document-surface-cache-session.js";
 import type { SourceHistoryDirection } from "./domain/source-history.js";
+import type { AgentSelection } from "./domain/agent-provider-state.js";
 import {
   EDIT_AUTHOR_RUNTIME_VERIFICATION_DEADLINE_MS,
 } from "./domain/edit-runtime-contract.js";
@@ -650,8 +651,7 @@ export default function Workbench() {
     : null;
   const qoderAvailability = workspaceControllerSnapshot?.run?.qoderAvailability
     ?? INITIAL_QODER_AVAILABILITY;
-  const aboutQoderAvailability = agentCatalogSnapshot?.providers?.qoder?.availability
-    ?? INITIAL_QODER_AVAILABILITY;
+  const aboutAgentCards = aboutAgentCardsFromCatalog(agentCatalogSnapshot);
   const [previewAttachment, setPreviewAttachment] = useState<CommentAttachment | null>(null);
   const [drawer, setDrawer] = useState<Drawer>(null);
   const [handoffPreviewOpen, setHandoffPreviewOpen] = useState(false);
@@ -5326,14 +5326,14 @@ export default function Workbench() {
     viewMode,
     workspaceController,
   ]);
-  const checkQoderUsability = useCallback(async () => (
-    workspaceController?.checkQoderUsability() ?? null
+  const checkAgentUsability = useCallback(async (selection?: AgentSelection) => (
+    workspaceController?.checkAgentUsability(selection) ?? null
   ), [workspaceController]);
-  const copyQoderGuidance = useCallback(async (kind: QoderGuidanceKind) => (
-    workspaceController?.copyQoderGuidance({ kind }) ?? null
+  const copyAgentGuidance = useCallback(async (kind: "install" | "login", selection?: AgentSelection) => (
+    workspaceController?.copyAgentGuidance({ kind, selection }) ?? null
   ), [workspaceController]);
-  const installQoder = useCallback(async () => (
-    workspaceController?.installQoder() ?? null
+  const installAgent = useCallback(async (selection?: AgentSelection | null) => (
+    workspaceController?.installAgent(selection) ?? null
   ), [workspaceController]);
   useEffect(() => {
     deferredEditorReplayRef.current.generateRequest = () => {
@@ -6899,7 +6899,7 @@ export default function Workbench() {
         repositoryOpenFailed={repositoryOpenFailed}
         releaseNotesOpenFailed={releaseNotesOpenFailed}
         userNoticeOpenFailed={userNoticeOpenFailed}
-        qoderAvailability={aboutQoderAvailability}
+        agentCards={aboutAgentCards}
         source={aboutOpenSource}
         onClose={closeAboutPageRoot}
         onCheckForUpdates={() => void checkForApplicationUpdates()}
@@ -6911,9 +6911,9 @@ export default function Workbench() {
         onOpenReleaseNotes={() => void openReleaseNotes()}
         onOpenRepository={() => void openProjectRepository()}
         onOpenUserNotice={() => void openUserNotice()}
-        onCheckQoderUsability={checkQoderUsability}
-        onCopyQoderGuidance={copyQoderGuidance}
-        onInstallQoder={installQoder}
+        onCheckUsability={checkAgentUsability}
+        onCopyGuidance={copyAgentGuidance}
+        onInstall={installAgent}
       />
 
       {toast ? (

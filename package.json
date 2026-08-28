@@ -253,6 +253,10 @@
         "to": "bridge/agent/providers/codex-provider.mjs"
       },
       {
+        "from": "bridge/agent/providers/codex-acp-provider.mjs",
+        "to": "bridge/agent/providers/codex-acp-provider.mjs"
+      },
+      {
         "from": "bridge/agent/catalog/agent-catalog.mjs",
         "to": "bridge/agent/catalog/agent-catalog.mjs"
       },

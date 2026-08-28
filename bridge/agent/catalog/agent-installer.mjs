@@ -15,8 +15,12 @@ import path from "node:path";
 import { promisify } from "node:util";
 
 import { agentProviderError } from "../providers/agent-provider-contract.mjs";
+import { validateNpmCodexAcpCommand } from "../providers/codex-acp-provider.mjs";
 import { validateNpmQoderCommand } from "../providers/qoder-provider.mjs";
-import { assertInstallableCatalogEntry } from "./qoder-managed-release.mjs";
+import {
+  assertInstallableCatalogEntry,
+  closurePackagesForInstall,
+} from "./qoder-managed-release.mjs";
 
 const execFileAsync = promisify(execFile);
 const INSTALL_STATES = Object.freeze(["idle", "installing", "failed", "cancelling"]);
@@ -71,8 +75,7 @@ export function createAgentInstaller({
     });
   }
 
-  async function downloadTarball(entry, signal) {
-    const release = entry.distribution.managedRelease;
+  async function downloadTarball(release, signal) {
     const expected = decodeNpmIntegrity(release.integrity);
     const response = await fetchImpl(release.tarballUrl, { signal }).catch((cause) => {
       if (signal?.aborted) {
@@ -89,6 +92,18 @@ export function createAgentInstaller({
       fail("AGENT_INSTALL_INTEGRITY_MISMATCH", "下载的 Agent 安装包与钉死完整性不一致。");
     }
     return bytes;
+  }
+
+  async function unpackRelease(release, destination, signal, label) {
+    const tarball = await downloadTarball(release, signal);
+    const archivePath = path.join(path.dirname(destination), `${label}.tgz`);
+    await writeFile(archivePath, tarball, { mode: 0o600 });
+    await mkdir(destination, { recursive: true, mode: 0o755 });
+    await extractArchive({
+      archivePath,
+      destination,
+      signal,
+    });
   }
 
   return {
@@ -119,16 +134,24 @@ export function createAgentInstaller({
       job.promise = (async () => {
         const staging = await mkdtemp(path.join(os.tmpdir(), `pageroot-agent-install-${entry.providerId}-`));
         try {
-          const tarball = await downloadTarball(entry, controller.signal);
-          const archivePath = path.join(staging, "package.tgz");
-          await writeFile(archivePath, tarball, { mode: 0o600 });
           const unpacked = path.join(staging, "unpacked");
           await mkdir(unpacked, { recursive: true, mode: 0o755 });
-          await extractArchive({
-            archivePath,
-            destination: unpacked,
-            signal: controller.signal,
-          });
+          await unpackRelease(
+            entry.distribution.managedRelease,
+            unpacked,
+            controller.signal,
+            "package",
+          );
+          let depIndex = 0;
+          for (const dependency of closurePackagesForInstall(entry)) {
+            depIndex += 1;
+            const depUnpacked = path.join(staging, `dep-${depIndex}`);
+            await unpackRelease(dependency, depUnpacked, controller.signal, `dep-${depIndex}`);
+            const destination = path.join(unpacked, "node_modules", ...String(dependency.nodeModulesPath).split("/"));
+            await mkdir(path.dirname(destination), { recursive: true, mode: 0o755 });
+            await rename(path.join(depUnpacked, "package"), destination);
+          }
+          await protectTree(unpacked);
           const command = path.join(unpacked, entry.distribution.executableRelativePath);
           await validateInstallation(command, entry);
           const version = entry.distribution.managedRelease.version;
@@ -282,14 +305,20 @@ async function promoteInstallation(unpacked, destination) {
 }
 
 async function defaultValidateInstallation(command, entry) {
-  if (entry.providerId !== "qoder") {
-    fail("AGENT_INSTALL_UNSUPPORTED", "This Agent cannot be installed from PageRoot.", { status: 409 });
-  }
+  const packageName = entry.distribution?.packageName;
   let resolved;
   try {
-    resolved = await validateNpmQoderCommand(command);
+    if (packageName === "@qoder-ai/qodercli") {
+      resolved = await validateNpmQoderCommand(command);
+    } else if (packageName === "@agentclientprotocol/codex-acp") {
+      resolved = await validateNpmCodexAcpCommand(command, {
+        expectedVersion: entry.distribution?.managedRelease?.version,
+      });
+    } else {
+      fail("AGENT_INSTALL_UNSUPPORTED", "This Agent cannot be installed from PageRoot.", { status: 409 });
+    }
   } catch (cause) {
-    if (String(cause?.code || "").startsWith("QODER_")) {
+    if (String(cause?.code || "").startsWith("QODER_") || String(cause?.code || "").startsWith("CODEX_")) {
       fail("AGENT_INSTALL_UNTRUSTED", "Installed Agent package did not pass identity checks.", {
         cause,
         status: 409,

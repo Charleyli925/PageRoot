@@ -672,27 +672,27 @@ Request 持久化后，Repository 才能基于冻结 Prompt 建立 `AI任务/<�
   已输入文本。没有评论时按钮说明去哪里写，而不是只变灰。
 
 About 与 AI 对话侧栏共用同一份 `checking / ready / not-installed / auth-required /
-unavailable` 状态。打开 About 或侧栏立即进入“检测中”并执行真实 Qoder preflight；窗口
-从外部终端返回时，只要状态尚未 `ready`，`focus` 与 `visibilitychange` 会合并为一次自动
-复检。检测、复制登录指令和打开 About 不运行 Request、不冻结 HTML、不
+unavailable` 状态。打开 About 或侧栏立即进入“检测中”并执行当前选中 Agent 的真实
+preflight；窗口从外部终端返回时，只要状态尚未 `ready`，`focus` 与 `visibilitychange`
+会合并为一次自动复检。检测、复制登录指令和打开 About 不运行 Request、不冻结 HTML、不
 改变评论或草稿。未安装时的一键安装只写入 PageRoot 管理目录，同样不创建 Request。弱的 `/agent/availability` 只证明可信 CLI 可被发现，永远不能直接生成
-绿色状态；只有 `qodercli --version` 与 `qodercli --list-models` 的完整预检成功才显示
-“已连接”。
+绿色状态；只有该 Agent 的完整预检成功才显示“已连接”。
 
 状态区保持统一的 140px 控制槽，只在需要用户恢复时显示动作：
 
 - 检测中：只显示“检测中”，不显示按钮；
 - 已连接：只显示“已连接”，不显示重新检测；
-- 未安装：显示“未安装”和“安装 Qoder CLI”；安装中显示“正在安装…”；失败后可重试，不再把复制 npm 指令当作唯一恢复；
+- 未安装：显示“未安装”和“安装 Qoder CLI”或“安装 Codex”；安装中显示“正在安装…”；失败后可重试，不再把复制 npm 指令当作唯一恢复；
 - 需要登录：显示“需要登录”和“复制指令粘贴至 Agent”；复制成功后原位变为“等待登录”
   与“重新复制”，用户即使没有点击复制按钮而在终端自行登录，返回源页也会自动复检；
 - 额度不足、连接超时或其他不可用：保留“暂不可用 · …”的准确原因，不显示恢复按钮，
   也不显示绿色状态；安装或版本校验失败继续显示安装不可用/需要重新打开源页的原因。
 
-主界面的右下角在 `auth-required` 时显示可点击的“登录 Qoder CLI”，在 `not-installed`
-时显示“设置 Qoder CLI”；点击只打开 About 的 Qoder 区域并把安装或登录动作聚焦，不调用发送、
-不清空对话输入、不关闭侧栏。`unavailable` 只显示原因状态；“复制给别的 AI”仍由评论
-状态决定，不继承 Qoder 的 gating。发送前仍重新取得本轮 preflight，不能复用几分钟前的
+主界面的右下角在 `auth-required` 时显示可点击的登录入口，在 `not-installed`
+时显示对应 Agent 的设置入口；点击只打开 About 的 AI Agent 区域并把安装或登录动作聚焦，不调用发送、
+不清空对话输入、不关闭侧栏。About 对每个可安装或需登录恢复的 provider 渲染通用
+`AgentProviderCard`。`unavailable` 只显示原因状态；“复制给别的 AI”仍由评论
+状态决定，不继承 Agent 的 gating。发送前仍重新取得本轮 preflight，不能复用几分钟前的
 `ready`。
 
 预期的安装、登录、版本、容量、超时或网络失败不使用全局通知。未知错误也不得映射成

@@ -5,6 +5,7 @@ import {
   AgentCatalogState,
   CODEX_AGENT_PROVIDER,
   QODER_AGENT_PROVIDER,
+  aboutAgentCardsFromCatalog,
   defaultAgentProviders,
 } from "../app/application/agent-provider-catalog.js";
 import {
@@ -28,7 +29,44 @@ test("the source-owned hard gate exposes Codex through the shared Agent chooser"
     "Codex 修改时可能读取这台 Mac 上的本机文件。",
   );
   assert.equal(QODER_AGENT_PROVIDER.installable, true);
-  assert.equal(CODEX_AGENT_PROVIDER.installable, false);
+  assert.equal(CODEX_AGENT_PROVIDER.installable, true);
+  assert.equal(CODEX_AGENT_PROVIDER.runtimeId, "acp");
+  assert.equal(CODEX_AGENT_PROVIDER.securityProfile, "client-mediated");
+  assert.equal(
+    aboutAgentCardsFromCatalog({
+      providers: {
+        qoder: {
+          ...QODER_AGENT_PROVIDER,
+          availability: { status: "unavailable", reason: "account-capacity" },
+        },
+      },
+    })[0].presentation.availability({ status: "unavailable", reason: "account-capacity" }).statusLabel,
+    "暂不可用 · Qoder 额度已用完",
+  );
+});
+
+test("About cards include every installable provider without provider-id branches", () => {
+  const cards = aboutAgentCardsFromCatalog({
+    providers: {
+      qoder: {
+        ...QODER_AGENT_PROVIDER,
+        availability: { status: "ready" },
+      },
+      blocked: {
+        providerId: "blocked",
+        installable: false,
+        selection: selection("blocked"),
+        presentation: { displayName: "Blocked" },
+        availability: { status: "unavailable" },
+      },
+      codex: {
+        ...CODEX_AGENT_PROVIDER,
+        availability: { status: "not-installed" },
+      },
+    },
+  });
+  assert.deepEqual(cards.map((card) => card.selection.providerId), ["qoder", "codex"]);
+  assert.equal(cards[1].presentation.actions.install.label, "安装 Codex");
 });
 
 function selection(providerId, {
@@ -330,7 +368,7 @@ test("descriptor runtime and security profile stay part of dispatch authority", 
 test("a provider-resolved default model becomes the selected durable execution authority", async () => {
   const requested = freezeAgentSelection({
     providerId: "codex",
-    runtimeId: "app-server",
+    runtimeId: "acp",
     requestedModelId: null,
     resolvedModelId: null,
     reasoning: { requested: null, applied: null, resolution: "provider-default" },
@@ -341,8 +379,8 @@ test("a provider-resolved default model becomes the selected durable execution a
   });
   const codex = Object.freeze({
     ...provider("codex", requested),
-    runtimeId: "app-server",
-    securityProfile: "agent-native",
+    runtimeId: "acp",
+    securityProfile: "client-mediated",
     selection: requested,
   });
   const catalog = new AgentCatalogState({
@@ -352,7 +390,7 @@ test("a provider-resolved default model becomes the selected durable execution a
           status: "ready",
           preflightId: "ticket_codex_default",
           selection: resolved,
-          securityProfile: "agent-native",
+          securityProfile: "client-mediated",
           expiresAt: new Date(20_000).toISOString(),
         };
       },
@@ -369,7 +407,7 @@ test("a provider-resolved default model becomes the selected durable execution a
 test("a resolved default model stays pinned during later preflight", async () => {
   const pinned = freezeAgentSelection({
     providerId: "codex",
-    runtimeId: "app-server",
+    runtimeId: "acp",
     requestedModelId: null,
     resolvedModelId: "codex:model-a",
     reasoning: { requested: null, applied: null, resolution: "provider-default" },
@@ -380,8 +418,8 @@ test("a resolved default model stays pinned during later preflight", async () =>
   });
   const codex = Object.freeze({
     ...provider("codex", pinned),
-    runtimeId: "app-server",
-    securityProfile: "agent-native",
+    runtimeId: "acp",
+    securityProfile: "client-mediated",
     selection: pinned,
   });
   const catalog = new AgentCatalogState({
@@ -391,7 +429,7 @@ test("a resolved default model stays pinned during later preflight", async () =>
           status: "ready",
           preflightId: "ticket_changed_default",
           selection: changed,
-          securityProfile: "agent-native",
+          securityProfile: "client-mediated",
           expiresAt: new Date(20_000).toISOString(),
         };
       },
@@ -410,6 +448,10 @@ test("a resolved default model stays pinned during later preflight", async () =>
 
 test("one-click install is gated to installable providers and then refreshes availability", async () => {
   const qoder = freezeAgentSelection(QODER_AGENT_PROVIDER.selection);
+  const blocked = Object.freeze({
+    ...provider("blocked"),
+    installable: false,
+  });
   const calls = [];
   const catalog = new AgentCatalogState({
     bridgeClient: {
@@ -439,12 +481,12 @@ test("one-click install is gated to installable providers and then refreshes ava
         };
       },
     },
-    providers: [QODER_AGENT_PROVIDER, CODEX_AGENT_PROVIDER],
+    providers: [QODER_AGENT_PROVIDER, blocked, CODEX_AGENT_PROVIDER],
     selected: qoder,
     clock: { now: () => 10 },
   });
   await assert.rejects(
-    catalog.install(freezeAgentSelection(CODEX_AGENT_PROVIDER.selection)),
+    catalog.install(blocked.selection),
     (error) => error?.code === "AGENT_INSTALL_UNSUPPORTED",
   );
   const refreshed = await catalog.install(qoder);

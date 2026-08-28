@@ -128,11 +128,12 @@ export class RunWorkflow {
   refreshAgentAvailability(): Promise<RunWorkflowOutcome<{
     availability: AgentProviderAvailabilitySnapshot;
   }>>;
-  checkAgentUsability(): Promise<RunWorkflowOutcome<{
+  checkAgentUsability(selection?: AgentSelection | null): Promise<RunWorkflowOutcome<{
     availability: AgentProviderAvailabilitySnapshot;
   }>>;
   copyAgentGuidance(input: {
     kind: AgentProviderGuidanceKind;
+    selection?: AgentSelection | null;
   }): Promise<RunWorkflowOutcome<{ kind: AgentProviderGuidanceKind; copied: true }>>;
   refreshQoderAvailability(): Promise<RunWorkflowOutcome<{
     availability: AgentProviderAvailabilitySnapshot;
