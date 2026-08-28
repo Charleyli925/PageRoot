@@ -3961,6 +3961,7 @@ async function launchBridge() {
       HTML_AI_BRIDGE_PORT: String(port),
       HTML_AI_DEVICE_ID: device.deviceId,
       HTML_AI_WORKSPACE: workspace,
+      HTML_AI_AGENTS_ROOT: path.join(app.getPath("userData"), "agents"),
     },
     serviceName: "HTML AI Workspace Bridge",
     stdio: "pipe",

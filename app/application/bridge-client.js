@@ -313,6 +313,17 @@ export function createBridgeClient({
       "Qoder CLI 预检没有完成。",
       DEFAULT_REQUEST_TIMEOUT_MS,
     ),
+    installAgent: (body) => command(
+      "/agent/install",
+      body,
+      "Agent 安装没有完成。",
+      180_000,
+    ),
+    cancelAgentInstall: (body) => command(
+      "/agent/install/cancel",
+      body,
+      "Agent 安装停止结果暂时无法确认。",
+    ),
     startAgent: (body) => command(
       "/agent/start",
       body,

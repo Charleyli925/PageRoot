@@ -19,7 +19,7 @@ test("the legacy Qoder card is a presentation-only wrapper over the neutral card
     'logoSrc: "./qoder-logo.png"',
     'cardClassName: "qoder-availability-card"',
     'primaryActionDataAttribute: "data-qoder-primary"',
-    '复制安装指令至 Agent',
+    '安装 Qoder CLI',
     '复制指令粘贴至 Agent',
   ]) assert.match(wrapper, new RegExp(literal, "u"));
 
@@ -31,6 +31,7 @@ test("the legacy Qoder card is a presentation-only wrapper over the neutral card
     "ref={actionButtonRef}",
     "{...primaryActionData}",
     '正在复制…',
+    '正在安装…',
   ]) assert.ok(card.includes(contract), contract);
 });
 

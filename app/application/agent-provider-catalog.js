@@ -84,6 +84,7 @@ export const QODER_AGENT_PROVIDER = Object.freeze({
   runtimeId: "acp",
   securityProfile: "client-mediated",
   trustPolicyVersion: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
+  installable: true,
   selection: freezeAgentSelection(defaultManagedAgentDelivery().selection),
   presentation: QODER_PRESENTATION,
   failureReason(code) {
@@ -131,6 +132,7 @@ export const CODEX_AGENT_PROVIDER = Object.freeze({
   runtimeId: "app-server",
   securityProfile: "agent-native",
   trustPolicyVersion: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
+  installable: false,
   selection: Object.freeze({
     providerId: "codex",
     runtimeId: "app-server",
@@ -159,6 +161,9 @@ export function defaultAgentProviders({
 function frozenProviderEntry(descriptor, previous = null) {
   return Object.freeze({
     ...descriptor,
+    installable: descriptor.installable === true,
+    installSource: previous?.installSource || descriptor.installSource || "none",
+    installState: previous?.installState || descriptor.installState || "idle",
     availability: previous?.availability || INITIAL_AGENT_PROVIDER_AVAILABILITY,
     installationDigest: previous?.installationDigest || null,
   });
@@ -372,6 +377,7 @@ export class AgentCatalogState {
         this.#disposed
         || this.#generationByProvider.get(frozen.providerId) !== generation
       ) return null;
+      await this.#applyPublicCatalog();
       const availability = agentProviderAvailabilityFromLocalResult(
         result,
         previous,
@@ -557,6 +563,36 @@ export class AgentCatalogState {
     return deleted;
   }
 
+  async install(selection = this.freezeSelected()) {
+    const frozen = freezeAgentSelection(selection);
+    const provider = this.provider(frozen);
+    if (!provider) throw this.#unsupportedProvider(frozen.providerId);
+    if (provider.installable !== true) {
+      throw Object.assign(new Error("This Agent cannot be installed from PageRoot."), {
+        code: "AGENT_INSTALL_UNSUPPORTED",
+      });
+    }
+    if (typeof this.#bridgeClient.installAgent !== "function") {
+      throw Object.assign(new Error("Agent install is unavailable."), {
+        code: "AGENT_INSTALL_UNSUPPORTED",
+      });
+    }
+    this.#patchProvider(frozen.providerId, { installState: "installing" });
+    this.#setAvailability(frozen.providerId, checkingAgentProviderAvailability(provider.availability));
+    try {
+      await this.#bridgeClient.installAgent({ providerId: frozen.providerId });
+      this.#patchProvider(frozen.providerId, {
+        installState: "idle",
+        installSource: "managed",
+      });
+      return this.refreshAvailability(frozen);
+    } catch (cause) {
+      this.#patchProvider(frozen.providerId, { installState: "failed" });
+      await this.refreshAvailability(frozen).catch(() => null);
+      throw cause;
+    }
+  }
+
   async copyGuidance(kind, selection = this.freezeSelected()) {
     const frozen = freezeAgentSelection(selection);
     const provider = this.provider(frozen);
@@ -608,7 +644,38 @@ export class AgentCatalogState {
     }, {
       availability: provider.availability,
       installationDigest: installationDigest || null,
+      installSource: provider.installSource,
+      installState: provider.installState,
     }));
+  }
+
+  #patchProvider(providerId, patch) {
+    const provider = this.#providers.get(providerId);
+    if (!provider) return;
+    this.#providers.set(providerId, Object.freeze({ ...provider, ...patch }));
+    this.#publish();
+  }
+
+  async #applyPublicCatalog() {
+    if (typeof this.#bridgeClient.agentProviders !== "function") return;
+    const listed = await this.#bridgeClient.agentProviders().catch(() => null);
+    const providers = Array.isArray(listed?.providers) ? listed.providers : [];
+    for (const item of providers) {
+      const providerId = String(item?.providerId || "");
+      const current = this.#providers.get(providerId);
+      if (!current) continue;
+      this.#providers.set(providerId, Object.freeze({
+        ...current,
+        installable: item.installable === true,
+        installSource: item.installSource === "user" || item.installSource === "managed"
+          ? item.installSource
+          : "none",
+        installState: ["idle", "installing", "failed", "cancelling"].includes(item.installState)
+          ? item.installState
+          : current.installState || "idle",
+      }));
+    }
+    this.#publish();
   }
 
   #setAvailability(providerId, availability) {

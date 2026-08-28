@@ -236,7 +236,7 @@ test("Bridge client requests a Core/Supplemental workspace with one operation id
   assert.equal(requestedUrl.searchParams.get("operationId"), "hydration_123");
 });
 
-test("Bridge client exposes the five neutral Agent routes and keeps availability alias", async () => {
+test("Bridge client exposes the Agent catalog, install and execution routes", async () => {
   const requests = [];
   const client = createBridgeClient({
     baseUrl: "http://127.0.0.1:4317",
@@ -246,6 +246,8 @@ test("Bridge client exposes the five neutral Agent routes and keeps availability
     },
   });
   await client.agentProviders();
+  await client.installAgent({ providerId: "qoder" });
+  await client.cancelAgentInstall({ providerId: "qoder" });
   await client.preflightAgent({ selection: {} });
   await client.startAgent({ selection: {} });
   await client.agentStatus("/tmp/page.html", "req_1", "attempt_001");
@@ -256,6 +258,8 @@ test("Bridge client exposes the five neutral Agent routes and keeps availability
   await client.qoderAvailability();
   assert.deepEqual(requests.map(({ url, method }) => [method, url.pathname]), [
     ["GET", "/agent/providers"],
+    ["POST", "/agent/install"],
+    ["POST", "/agent/install/cancel"],
     ["POST", "/agent/preflight"],
     ["POST", "/agent/start"],
     ["GET", "/agent/status"],

@@ -27,6 +27,8 @@ test("the source-owned hard gate exposes Codex through the shared Agent chooser"
     CODEX_AGENT_PROVIDER.presentation.localReadDisclosure,
     "Codex 修改时可能读取这台 Mac 上的本机文件。",
   );
+  assert.equal(QODER_AGENT_PROVIDER.installable, true);
+  assert.equal(CODEX_AGENT_PROVIDER.installable, false);
 });
 
 function selection(providerId, {
@@ -404,4 +406,51 @@ test("a resolved default model stays pinned during later preflight", async () =>
     (error) => error?.code === "AGENT_PREFLIGHT_SELECTION_MISMATCH",
   );
   assert.deepEqual(catalog.freezeSelected(), pinned);
+});
+
+test("one-click install is gated to installable providers and then refreshes availability", async () => {
+  const qoder = freezeAgentSelection(QODER_AGENT_PROVIDER.selection);
+  const calls = [];
+  const catalog = new AgentCatalogState({
+    bridgeClient: {
+      async preflightAgent() {
+        return {
+          status: "ready",
+          preflightId: "ticket_after_install",
+          selection: qoder,
+          expiresAt: new Date(20_000).toISOString(),
+        };
+      },
+      async installAgent(body) {
+        calls.push(body);
+        return { ok: true, providerId: "qoder", installSource: "managed" };
+      },
+      async agentAvailability() {
+        return { status: "ready" };
+      },
+      async agentProviders() {
+        return {
+          providers: [{
+            providerId: "qoder",
+            installable: true,
+            installSource: "managed",
+            installState: "idle",
+          }],
+        };
+      },
+    },
+    providers: [QODER_AGENT_PROVIDER, CODEX_AGENT_PROVIDER],
+    selected: qoder,
+    clock: { now: () => 10 },
+  });
+  await assert.rejects(
+    catalog.install(freezeAgentSelection(CODEX_AGENT_PROVIDER.selection)),
+    (error) => error?.code === "AGENT_INSTALL_UNSUPPORTED",
+  );
+  const refreshed = await catalog.install(qoder);
+  assert.deepEqual(calls, [{ providerId: "qoder" }]);
+  assert.equal(refreshed.result.status, "ready");
+  assert.equal(refreshed.availability.status, "checking");
+  assert.equal(catalog.provider(qoder).installSource, "managed");
+  assert.equal(catalog.provider(qoder).installState, "idle");
 });

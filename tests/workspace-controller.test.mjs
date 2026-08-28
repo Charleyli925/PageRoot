@@ -38,6 +38,10 @@ test("Qoder compatibility actions stay pinned to the Qoder workflow", () => {
   );
   assert.match(
     source,
+    /installQoder\(\) \{\s+return this\.#requireRunWorkflow\(\)\.installQoder\(\);\s+\}/u,
+  );
+  assert.match(
+    source,
     /planRunSubmission\(\) \{\s+return this\.#requireRunWorkflow\(\)\.planSubmission\(\);\s+\}/u,
   );
 });

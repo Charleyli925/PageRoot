@@ -253,6 +253,18 @@
         "to": "bridge/agent/providers/codex-provider.mjs"
       },
       {
+        "from": "bridge/agent/catalog/agent-catalog.mjs",
+        "to": "bridge/agent/catalog/agent-catalog.mjs"
+      },
+      {
+        "from": "bridge/agent/catalog/agent-installer.mjs",
+        "to": "bridge/agent/catalog/agent-installer.mjs"
+      },
+      {
+        "from": "bridge/agent/catalog/qoder-managed-release.mjs",
+        "to": "bridge/agent/catalog/qoder-managed-release.mjs"
+      },
+      {
         "from": "bridge/agent/runtimes/agent-runtime-contract.mjs",
         "to": "bridge/agent/runtimes/agent-runtime-contract.mjs"
       },
@@ -263,6 +275,18 @@
       {
         "from": "bridge/agent/runtimes/acp-runtime.mjs",
         "to": "bridge/agent/runtimes/acp-runtime.mjs"
+      },
+      {
+        "from": "bridge/agent/runtimes/acp-protocol.mjs",
+        "to": "bridge/agent/runtimes/acp-protocol.mjs"
+      },
+      {
+        "from": "bridge/agent/runtimes/acp-process.mjs",
+        "to": "bridge/agent/runtimes/acp-process.mjs"
+      },
+      {
+        "from": "bridge/agent/runtimes/acp-verified-javascript.mjs",
+        "to": "bridge/agent/runtimes/acp-verified-javascript.mjs"
       },
       {
         "from": "bridge/agent/runtimes/codex-app-server-client.mjs",

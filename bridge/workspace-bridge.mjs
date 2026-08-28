@@ -1557,6 +1557,27 @@ async function agentProviders() {
   return agentBridgeService.providers();
 }
 
+async function installAgent(body) {
+  const providerId = String(body?.providerId || "").trim();
+  const result = await agentBridgeService.install(providerId);
+  return Object.freeze({
+    ok: true,
+    providerId: result.providerId,
+    installSource: result.installSource,
+    installState: "idle",
+  });
+}
+
+async function cancelAgentInstall(body) {
+  const providerId = String(body?.providerId || "").trim();
+  const snapshot = await agentBridgeService.cancelInstall(providerId);
+  return Object.freeze({
+    ok: true,
+    providerId: snapshot.providerId,
+    installState: snapshot.installState,
+  });
+}
+
 async function startAgent(body) {
   const target = await projectFileTargetForBody(body);
   if (!target) throw projectNotFoundError();
@@ -2580,6 +2601,16 @@ async function route(request, response) {
   }
   if (request.method === "GET" && url.pathname === "/agent/providers") {
     sendJson(response, 200, await agentProviders());
+    return;
+  }
+  if (request.method === "POST" && url.pathname === "/agent/install") {
+    const body = await readBody(request);
+    sendJson(response, 202, await installAgent(body));
+    return;
+  }
+  if (request.method === "POST" && url.pathname === "/agent/install/cancel") {
+    const body = await readBody(request);
+    sendJson(response, 200, await cancelAgentInstall(body));
     return;
   }
   if (request.method === "POST" && url.pathname === "/agent/preflight") {

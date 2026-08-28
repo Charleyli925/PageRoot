@@ -23,6 +23,9 @@ export type AgentProviderDescriptor = Readonly<{
   runtimeId: string;
   securityProfile: "client-mediated" | "agent-native";
   trustPolicyVersion: string;
+  installable?: boolean;
+  installSource?: "user" | "managed" | "none";
+  installState?: "idle" | "installing" | "failed" | "cancelling";
   selection: AgentSelection;
   presentation: AgentProviderPresentation;
   failureReason?: (code: unknown) => string;
@@ -83,6 +86,7 @@ export class AgentCatalogState {
     installationDigest?: string | null;
   }): Promise<AgentPreflight>;
   discardTicket(preflight: AgentPreflight): boolean;
+  install(selection?: AgentSelection | null): Promise<unknown>;
   copyGuidance(kind: "install" | "login", selection?: AgentSelection | null): Promise<unknown>;
 }
 export const AgentProviderCatalog: typeof AgentCatalogState;

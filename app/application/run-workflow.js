@@ -602,6 +602,49 @@ export class RunWorkflow {
     }
   }
 
+  async installAgent(selection = this.#agentCatalog.freezeSelected()) {
+    const frozen = selection || this.#agentCatalog.freezeSelected();
+    const displayName = this.#agentCatalog.presentation(frozen).displayName || "Agent";
+    if (!frozen) return rejected("AGENT_PROVIDER_UNSUPPORTED", `${displayName} 不可用。`);
+    if (this.#disposed) {
+      return blocked("RUN_WORKFLOW_DISPOSED", `${displayName} 安装已经停止。`);
+    }
+    try {
+      const refreshed = await this.#agentCatalog.install(frozen);
+      if (this.#disposed) return stale({ kind: "agent-install" });
+      if (String(refreshed?.result?.status || "") === "ready") {
+        return this.checkAgentUsability();
+      }
+      return succeeded({ availability: this.#agentCatalog.availability(frozen) });
+    } catch (cause) {
+      return rejected(
+        errorCode(cause, "AGENT_INSTALL_FAILED"),
+        this.#codecs.errorMessage(cause, `暂时无法安装 ${displayName}。`),
+      );
+    }
+  }
+
+  async installQoder() {
+    const selection = this.#qoderSelection();
+    if (!selection) return rejected("AGENT_PROVIDER_UNSUPPORTED", "Qoder CLI 不可用。");
+    if (this.#disposed) {
+      return blocked("RUN_WORKFLOW_DISPOSED", "Qoder CLI 安装已经停止。");
+    }
+    try {
+      const refreshed = await this.#agentCatalog.install(selection);
+      if (this.#disposed) return stale({ kind: "agent-install" });
+      if (String(refreshed?.result?.status || "") === "ready") {
+        return this.checkQoderUsability();
+      }
+      return succeeded({ availability: this.#agentCatalog.availability(selection) });
+    } catch (cause) {
+      return rejected(
+        errorCode(cause, "AGENT_INSTALL_FAILED"),
+        this.#codecs.errorMessage(cause, "暂时无法安装 Qoder CLI。"),
+      );
+    }
+  }
+
   planSubmission() {
     return this.#captureSubmissionPlan().plan;
   }

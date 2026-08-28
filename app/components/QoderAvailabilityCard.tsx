@@ -16,6 +16,7 @@ type QoderAvailabilityCardProps = {
   disabled?: boolean;
   actionButtonRef?: Ref<HTMLButtonElement>;
   onCopyGuidance: (kind: QoderGuidanceKind) => Promise<QoderActionOutcome>;
+  onInstall?: () => Promise<QoderActionOutcome>;
 };
 
 const QODER_CARD_PRESENTATION = Object.freeze({
@@ -26,8 +27,8 @@ const QODER_CARD_PRESENTATION = Object.freeze({
   availability: qoderAvailabilityPresentation,
   actions: Object.freeze({
     install: Object.freeze({
-      label: "复制安装指令至 Agent",
-      copiedLabel: "复制安装指令至 Agent",
+      label: "安装 Qoder CLI",
+      copiedLabel: "重新安装",
     }),
     login: Object.freeze({
       label: "复制指令粘贴至 Agent",

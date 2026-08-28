@@ -102,9 +102,16 @@ The renderer's main workspace facts are partitioned as follows:
   official finalizer plus Repository status path can publish a Candidate;
 - Bridge Agent provider/runtime registries: the provider registry is the sole
   legacy-driver/provider dispatch point and the runtime registry is the sole
-  runtime dispatch point. The Qoder provider owns installation, version,
-  login/model preflight and raw-error normalization. Unknown IDs fail closed;
-  opaque installation facts, digests and capabilities stay inside the ticket;
+  runtime dispatch point. The Qoder provider owns installation identity,
+  version, login/model preflight and raw-error normalization. Unknown IDs fail
+  closed; opaque installation facts, digests and capabilities stay inside the
+  ticket;
+- Bridge Agent catalog/installer: `AgentCatalog` owns the product ACP
+  allowlist, public provider projection and managed-command candidates.
+  `AgentInstaller` owns in-flight install jobs, atomic verified layout under
+  `userData/agents` and shutdown drain. Coordinator does not own install. This
+  is a product allowlist, not a live public registry; Qoder is the only
+  installable shipped ACP entry, and Codex App Server is not installable;
 - Bridge Agent Host/Policy Ports: `bridge/agent/policies/` owns the execution
   policy and freezes all readable files, output/completion paths,
   runtime authority and finalizer authority. `bridge/agent/hosts/` owns the
