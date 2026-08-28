@@ -190,6 +190,7 @@ import { createProjectPanelPort } from "./workbench/project-panel-port.js";
 import {
   PreviewNavigationBanner,
 } from "./workbench/presentation";
+import { deriveWorkbenchInspector } from "./workbench/inspector-presentation.js";
 import { RunConversationOutlet } from "./workbench/run-conversation-outlet";
 import AiReviewWorkspace from "./workbench/AiReviewWorkspace";
 import WorkbenchDocumentSurfaceCache from "./workbench/WorkbenchDocumentSurfaceCache";
@@ -6138,6 +6139,7 @@ export default function Workbench() {
       ) : null}
     />
   ) : null;
+  const workbenchInspector = deriveWorkbenchInspector({ canvasMode, aiVisible: aiConversation.visible && Boolean(runCapability) && !readyReviewSession, reviewVisible: Boolean(readyReviewSession), commentsAvailable: Boolean(workspaceController) });
   const activeWorkbenchTab = workbenchTabsSnapshot.tabs.find(
     (tab) => tab.tabId === workbenchTabsSnapshot.activeTabId,
   ) || workbenchTabsSnapshot.tabs[0];
@@ -6635,6 +6637,7 @@ export default function Workbench() {
         aria-labelledby={`workbench-tab-${activeWorkbenchTab.tabId}`}
         ref={reviewStageRef}
         className="review-scroll-stage"
+        data-inspector={workbenchInspector}
         data-review-active={readyReviewOverlay ? "true" : undefined}
       >
         {readyReviewOverlay}
@@ -6748,7 +6751,7 @@ export default function Workbench() {
           ) : null}
         </section>
 
-        {aiConversation.visible && !readyReviewOverlay && runCapability ? (
+        {workbenchInspector === "ai" && runCapability ? (
           <aside className="ai-conversation-aside" aria-label="AI 助手侧栏">
             <RunConversationOutlet
               capability={runCapability}
@@ -6762,7 +6765,7 @@ export default function Workbench() {
           </aside>
         ) : null}
 
-        {canvasMode === "edit" && workspaceController ? (
+        {workbenchInspector === "comments" && workspaceController ? (
           <CommentRailContainer
             capability={workspaceController.comments as CommentRailCapability}
             canvasPort={commentCanvasPort}

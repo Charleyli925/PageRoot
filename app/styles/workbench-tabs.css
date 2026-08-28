@@ -1,38 +1,5 @@
-/* --------------------------------------------------------------------------
-   Browser workbench shell: native title controls, tabs, one global sidebar
-   and one mounted document outlet.
-   -------------------------------------------------------------------------- */
-
-.workbench,
-.workbench:has(> .workbench-tabbar) {
-  --workbench-tabbar-height: 40px;
-  --notice-header-height: 48px;
-  --workbench-sidebar-width: 0px;
-  grid-template-columns: var(--workbench-sidebar-width) minmax(0, 1fr);
-  grid-template-rows:
-    var(--workbench-tabbar-height)
-    var(--notice-header-height)
-    minmax(0, 1fr);
-  background: var(--panel);
-  transition: grid-template-columns 180ms cubic-bezier(.22, 1, .36, 1);
-}
-
-.workbench[data-left-sidebar="open"] {
-  --workbench-sidebar-width: 264px;
-}
-
-.workbench-tabbar,
-.workbench:has(> .workbench-tabbar) > .workbench-tabbar {
-  -webkit-app-region: drag;
-  position: relative;
-  z-index: 82;
-  grid-column: 2;
-  grid-row: 1;
-  min-width: 0;
-  overflow: hidden;
-  border-bottom: 1px solid rgb(43 40 53 / 8%);
-  background: #efeff2;
-}
+/* Browser workbench tabs and global sidebar visuals. Shell placement lives in
+   workbench-shell.css so mode changes cannot replace the outer grid. */
 
 .workbench-collapsed-sidebar-toggle {
   -webkit-app-region: no-drag;
@@ -177,8 +144,6 @@
 .workbench-global-sidebar {
   position: relative;
   z-index: 84;
-  grid-column: 1;
-  grid-row: 1 / 4;
   min-width: 0;
   min-height: 0;
   display: none;
@@ -324,25 +289,7 @@
   line-height: 1.45;
 }
 
-.workbench:has(> .workbench-tabbar) > .workbench-header {
-  grid-column: 2;
-  grid-row: 2;
-}
-
-.workbench:has(> .workbench-tabbar) > .review-scroll-stage,
-.workbench:has(> .workbench-tabbar) > [data-testid="ai-review-workspace"] {
-  grid-column: 2;
-  grid-row: 3;
-}
-
-.workbench > .review-scroll-stage {
-  position: relative;
-  padding-left: 0;
-}
-
 .workbench-start-page {
-  grid-column: 2;
-  grid-row: 2 / 4;
   min-width: 0;
   min-height: 0;
   display: grid;
@@ -449,16 +396,4 @@
 .workbench-start-recents > button:hover,
 .workbench-start-recents > button:focus-visible {
   background: rgb(83 76 112 / 6%);
-}
-
-@media (max-width: 1120px) {
-  .workbench[data-left-sidebar="open"] {
-    --workbench-sidebar-width: 240px;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .workbench {
-    transition: none;
-  }
 }

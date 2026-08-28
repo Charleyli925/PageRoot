@@ -1,5 +1,5 @@
 .reviewRoot {
-  --notice-header-height: 88px;
+  --notice-header-height: var(--workbench-review-header-height, 88px);
   position: fixed;
   z-index: 300;
   inset: 0;
@@ -109,9 +109,10 @@
  * preview Canvas already uses: the page on the left, the thread on the right at
  * the same width. One workbench, different Canvas — not a separate place.
  */
-.reviewMain:has(> .reviewSidebar) {
+.reviewMainWithSidebar {
+  position: relative;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) clamp(340px, 30vw, 460px);
+  grid-template-columns: minmax(0, 1fr) var(--workbench-inspector-width, 376px);
 }
 
 .reviewSidebar {
@@ -122,14 +123,20 @@
   overflow: hidden;
 }
 
-/* Below the comfortable comparison width the candidate keeps the whole stage. */
-@media (max-width: 1024px) {
-  .reviewMain:has(> .reviewSidebar) {
+/* Below the comfortable comparison width the conversation overlays the stage. */
+@media (max-width: 1120px) {
+  .reviewMainWithSidebar {
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .reviewSidebar {
-    display: none;
+  .reviewMainWithSidebar .reviewSidebar {
+    position: absolute;
+    z-index: 24;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: var(--workbench-inspector-width, 376px);
+    height: auto;
   }
 }
 
