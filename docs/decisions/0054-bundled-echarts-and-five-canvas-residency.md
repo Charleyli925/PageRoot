@@ -1,4 +1,4 @@
-# ADR 0053: bundle common ECharts bytes and retain five exact frozen Canvases
+# ADR 0054: bundle common ECharts bytes and retain five exact frozen Canvases
 
 ## Status
 
