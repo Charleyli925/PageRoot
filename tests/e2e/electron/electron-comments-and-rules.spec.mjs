@@ -538,6 +538,64 @@ test("Electron shell keeps the global rail fixed while the context inspector swa
       return Math.abs(element.getBoundingClientRect().width - targetWidth);
     })).toBeLessThanOrEqual(0.5);
 
+    const expandedToggle = launched.page.getByRole("button", { name: "收起左侧边栏" });
+    const expandedToggleBox = await expandedToggle.boundingBox();
+    const moreButton = launched.page.getByRole("button", { name: "更多", exact: true });
+    await moreButton.click();
+    const moreMenu = launched.page.getByRole("menu", { name: "更多操作" });
+    await expect(moreMenu).toBeVisible();
+    expect(await moreMenu.evaluate((element) => element.parentElement === document.body)).toBe(true);
+    await expect(moreMenu.getByRole("menuitem", { name: "在 Finder 中显示" })).toBeVisible();
+    await expect(moreMenu.getByRole("menuitem", { name: "在默认浏览器中打开" })).toBeVisible();
+    await expect(moreMenu.getByRole("menuitem", { name: "导出当前 HTML…" })).toBeVisible();
+    await expect(moreMenu.getByRole("menuitem", { name: "在 Finder 中显示" })).toBeFocused();
+    await launched.page.keyboard.press("Tab");
+    await expect(moreMenu).toHaveCount(0);
+    await expect(moreButton).toBeFocused();
+
+    await moreButton.click();
+    await expect(moreMenu).toBeVisible();
+    await expect(moreMenu.getByRole("menuitem", { name: "在 Finder 中显示" })).toBeFocused();
+    await launched.page.keyboard.press("ArrowDown");
+    await expect(moreMenu.getByRole("menuitem", { name: "在默认浏览器中打开" })).toBeFocused();
+    await launched.page.keyboard.press("Escape");
+    await expect(moreMenu).toHaveCount(0);
+    await expect(moreButton).toBeFocused();
+
+    await expandedToggle.hover();
+    await expect(launched.page.getByRole("tooltip")).toHaveText("收起左侧边栏");
+    const tooltip = launched.page.getByRole("tooltip");
+    const tooltipBox = await tooltip.boundingBox();
+    const tabbarBox = await launched.page.locator(".workbench-tabbar").boundingBox();
+    expect(await tooltip.evaluate((element) => element.parentElement === document.body)).toBe(true);
+    expect(tooltipBox).not.toBeNull();
+    expect(tabbarBox).not.toBeNull();
+    expect(tooltipBox?.y || 0).toBeGreaterThanOrEqual((tabbarBox?.bottom || 0) - 1);
+
+    await expandedToggle.click();
+    const collapsedToggle = launched.page.getByRole("button", { name: "展开左侧边栏" });
+    await expect(collapsedToggle).toBeVisible();
+    const collapsedToggleBox = await collapsedToggle.boundingBox();
+    expect(expandedToggleBox).not.toBeNull();
+    expect(collapsedToggleBox).not.toBeNull();
+    await expect.poll(async () => {
+      const box = await collapsedToggle.boundingBox();
+      return box ? Math.abs(box.x - (expandedToggleBox?.x || 0)) : Number.POSITIVE_INFINITY;
+    }).toBeLessThanOrEqual(0.5);
+    await expect.poll(async () => {
+      const box = await collapsedToggle.boundingBox();
+      return box ? Math.abs(box.y - (expandedToggleBox?.y || 0)) : Number.POSITIVE_INFINITY;
+    }).toBeLessThanOrEqual(0.5);
+    await collapsedToggle.click();
+    await expect(sidebar).toHaveAttribute("data-open", "true");
+    await expect.poll(() => sidebar.evaluate((element) => {
+      const workbench = element.closest(".workbench");
+      const targetWidth = workbench
+        ? Number.parseFloat(getComputedStyle(workbench).getPropertyValue("--workbench-sidebar-width"))
+        : 0;
+      return Math.abs(element.getBoundingClientRect().width - targetWidth);
+    })).toBeLessThanOrEqual(0.5);
+
     const readGeometry = () => launched.page.evaluate(() => {
       const readRect = (selector) => {
         const element = document.querySelector(selector);
@@ -615,6 +673,15 @@ test("Electron shell keeps the global rail fixed while the context inspector swa
     const previewGeometry = await readGeometry();
     assertShellGeometry(previewGeometry);
     assertLeftRailStable(previewGeometry, editGeometry);
+    const previewSurface = launched.page.getByTestId("html-interaction-preview");
+    const previewReloadRevision = Number(await previewSurface.getAttribute("data-reload-revision"));
+    const refreshButton = launched.page.getByRole("button", { name: "刷新预览" });
+    await expect(refreshButton).toBeEnabled();
+    await refreshButton.click();
+    await expect(previewSurface).toHaveAttribute(
+      "data-reload-revision",
+      String(previewReloadRevision + 1),
+    );
     expect(Math.abs(
       previewGeometry.canvas.width - editGeometry.canvas.width - editGeometry.inspectorWidth,
     )).toBeLessThanOrEqual(2);
@@ -668,6 +735,141 @@ test("Electron shell keeps the global rail fixed while the context inspector swa
     expect(narrowAiGeometry.documentWidth - narrowAiGeometry.viewportWidth)
       .toBeLessThanOrEqual(1);
 
+    const toolbarGeometry = await launched.page.evaluate(() => {
+      const rect = (selector) => {
+        const element = document.querySelector(selector);
+        if (!element) return null;
+        const box = element.getBoundingClientRect();
+        return { left: box.left, right: box.right, top: box.top, bottom: box.bottom };
+      };
+      const controls = [...document.querySelectorAll(
+        ".workbench-header .header-actions button, .workbench-header .save-status",
+      )].filter((element) => {
+        const box = element.getBoundingClientRect();
+        return box.width > 0 && box.height > 0 && getComputedStyle(element).display !== "none";
+      }).map((element) => {
+        const box = element.getBoundingClientRect();
+        return {
+          label: element.getAttribute("aria-label") || element.textContent?.trim() || element.tagName,
+          left: box.left,
+          right: box.right,
+          top: box.top,
+          bottom: box.bottom,
+        };
+      });
+      const intersections = [];
+      for (let index = 0; index < controls.length; index += 1) {
+        for (let next = index + 1; next < controls.length; next += 1) {
+          const first = controls[index];
+          const second = controls[next];
+          if (first.left < second.right && second.left < first.right
+            && first.top < second.bottom && second.top < first.bottom) {
+            intersections.push([first.label, second.label]);
+          }
+        }
+      }
+      return {
+        groups: [
+          rect(".workbench-toolbar-primary"),
+          rect(".workbench-toolbar-center"),
+          rect(".workbench-toolbar-actions"),
+        ],
+        controls,
+        intersections,
+        innerWidth: window.innerWidth,
+        documentWidth: Math.max(document.documentElement.scrollWidth, document.body?.scrollWidth || 0),
+      };
+    });
+    expect(toolbarGeometry.intersections).toEqual([]);
+    expect(toolbarGeometry.documentWidth - toolbarGeometry.innerWidth).toBeLessThanOrEqual(1);
+    expect(toolbarGeometry.groups.every((group) => group)).toBe(true);
+    for (let index = 0; index < toolbarGeometry.groups.length - 1; index += 1) {
+      expect(toolbarGeometry.groups[index].right)
+        .toBeLessThanOrEqual(toolbarGeometry.groups[index + 1].left + 0.5);
+    }
+
+    const shellWidthBeforeResize = await launched.page.evaluate(() => ({
+      width: document.querySelector("main.workbench")?.getBoundingClientRect().width || 0,
+      innerWidth: window.innerWidth,
+    }));
+    const sidebarResizer = launched.page.getByTestId("workbench-resizer-sidebar");
+    await expect(sidebarResizer).toBeVisible();
+    const sidebarResizerBox = await sidebarResizer.boundingBox();
+    expect(sidebarResizerBox).not.toBeNull();
+    await launched.page.mouse.move(
+      (sidebarResizerBox?.x || 0) + (sidebarResizerBox?.width || 0) / 2,
+      (sidebarResizerBox?.y || 0) + 400,
+    );
+    const sidebarWidthBeforeResize = narrowAiGeometry.sidebarWidth;
+    await launched.page.mouse.down();
+    await launched.page.mouse.move(
+      (sidebarResizerBox?.x || 0) + (sidebarResizerBox?.width || 0) / 2 + 32,
+      (sidebarResizerBox?.y || 0) + 400,
+      { steps: 4 },
+    );
+    await launched.page.mouse.up();
+    await expect.poll(() => launched.page.evaluate(() => Number.parseFloat(
+      getComputedStyle(document.querySelector("main.workbench")).getPropertyValue(
+        "--workbench-sidebar-width",
+      ),
+    ))).toBeGreaterThan(sidebarWidthBeforeResize + 24);
+    const shellWidthAfterResize = await launched.page.evaluate(() => ({
+      width: document.querySelector("main.workbench")?.getBoundingClientRect().width || 0,
+      innerWidth: window.innerWidth,
+    }));
+    expect(Math.abs(shellWidthAfterResize.width - shellWidthBeforeResize.width)).toBeLessThanOrEqual(0.5);
+    expect(shellWidthAfterResize.innerWidth).toBe(shellWidthBeforeResize.innerWidth);
+    await sidebarResizer.dblclick();
+    await expect.poll(() => launched.page.evaluate(() => Number.parseFloat(
+      getComputedStyle(document.querySelector("main.workbench")).getPropertyValue(
+        "--workbench-sidebar-width",
+      ),
+    ))).toBe(240);
+
+    const inspectorResizer = launched.page.getByTestId("workbench-resizer-inspector");
+    await expect(inspectorResizer).toBeVisible();
+    const inspectorResizerBox = await inspectorResizer.boundingBox();
+    expect(inspectorResizerBox).not.toBeNull();
+    const inspectorWidthBeforeResize = narrowAiGeometry.inspectorWidth;
+    await launched.page.mouse.move(
+      (inspectorResizerBox?.x || 0) + (inspectorResizerBox?.width || 0) / 2,
+      (inspectorResizerBox?.y || 0) + 400,
+    );
+    await launched.page.mouse.down();
+    await launched.page.mouse.move(
+      (inspectorResizerBox?.x || 0) + (inspectorResizerBox?.width || 0) / 2 - 32,
+      (inspectorResizerBox?.y || 0) + 400,
+      { steps: 4 },
+    );
+    await launched.page.mouse.up();
+    await expect.poll(() => launched.page.evaluate(() => Number.parseFloat(
+      getComputedStyle(document.querySelector("main.workbench")).getPropertyValue(
+        "--workbench-inspector-width",
+      ),
+    ))).toBeGreaterThan(inspectorWidthBeforeResize + 24);
+    await inspectorResizer.dblclick();
+    await expect.poll(() => launched.page.evaluate(() => Number.parseFloat(
+      getComputedStyle(document.querySelector("main.workbench")).getPropertyValue(
+        "--workbench-inspector-width",
+      ),
+    ))).toBe(376);
+
+    const aiToggle = launched.page.getByRole("button", { name: "AI 助手", exact: true });
+    await expect(aiToggle).toHaveAttribute("aria-expanded", "true");
+    await aiToggle.click();
+    await expect(launched.page.getByTestId("ai-conversation-sidebar")).toHaveCount(0);
+    await launched.page.getByRole("button", { name: "编辑", exact: true }).click();
+    await expect(stage).toHaveAttribute("data-inspector", "comments");
+    await expect(launched.page.locator(".review-scroll-stage > .comments-panel.comment-rail"))
+      .toBeVisible();
+    const narrowCommentsGeometry = await readGeometry();
+    assertShellGeometry(narrowCommentsGeometry);
+    expect(narrowCommentsGeometry.commentsPosition).toBe("absolute");
+    expect(Math.abs(
+      narrowCommentsGeometry.comments.width - narrowCommentsGeometry.inspectorWidth,
+    )).toBeLessThanOrEqual(0.5);
+    expect(narrowCommentsGeometry.documentWidth - narrowCommentsGeometry.viewportWidth)
+      .toBeLessThanOrEqual(1);
   } finally {
     await stopPageRoot(launched.electronApp, launched.isolatedUserData);
     removeSourceFixture(fixture.sourceDirectory);

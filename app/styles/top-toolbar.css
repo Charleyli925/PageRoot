@@ -127,6 +127,49 @@
   scrollbar-width: none;
 }
 
+.workbench-toolbar-primary,
+.workbench-toolbar-center,
+.workbench-toolbar-actions {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+}
+
+.workbench-toolbar-primary {
+  flex: none;
+}
+
+.workbench-toolbar-center {
+  flex: 1 1 auto;
+  overflow: hidden;
+}
+
+.workbench-toolbar-center .workbench-review-tools-slot {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+
+.workbench-toolbar-center .workbench-review-tools-slot::-webkit-scrollbar {
+  display: none;
+}
+
+.workbench-toolbar-actions {
+  flex: none;
+  gap: 4px;
+  overflow: hidden;
+}
+
+.workbench-toolbar-status {
+  min-width: 0;
+  max-width: 180px;
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+}
+
 .header-actions::-webkit-scrollbar {
   display: none;
 }
@@ -317,8 +360,8 @@
   white-space: nowrap;
 }
 
-.header-actions > .project-button,
-.header-actions > .recent-run-button,
+.header-actions .project-button,
+.header-actions .recent-run-button,
 .workbench-review-tools-slot > .recent-run-button {
   height: 32px;
   min-height: 32px;
@@ -338,10 +381,10 @@
   white-space: nowrap;
 }
 
-.header-actions > .project-button:hover:not(:disabled),
-.header-actions > .project-button[aria-expanded="true"],
-.header-actions > .recent-run-button:hover:not(:disabled),
-.header-actions > .recent-run-button[aria-expanded="true"],
+.header-actions .project-button:hover:not(:disabled),
+.header-actions .project-button[aria-expanded="true"],
+.header-actions .recent-run-button:hover:not(:disabled),
+.header-actions .recent-run-button[aria-expanded="true"],
 .workbench-review-tools-slot > .recent-run-button:hover:not(:disabled) {
   background: rgb(43 40 51 / 5%) !important;
   color: #2f2e35 !important;
@@ -386,6 +429,49 @@
 
   .window-file {
     max-width: 138px;
+  }
+}
+
+/* At the narrowest supported desktop width the right-side actions stay
+   complete while the middle review tools become the only scrollable region.
+   Disabled review controls have no useful action in Edit or Preview, so they
+   leave that region entirely instead of colliding with save, refresh or AI. */
+@media (max-width: 1120px) {
+  .header-actions {
+    display: grid;
+    grid-template-columns: 180px minmax(0, 1fr) auto;
+    gap: 3px;
+    overflow: hidden;
+  }
+
+  .workbench-toolbar-primary,
+  .workbench-toolbar-center,
+  .workbench-toolbar-actions {
+    min-width: 0;
+  }
+
+  .workbench-toolbar-actions {
+    gap: 2px;
+  }
+
+  .workbench-toolbar-actions .recent-run-button {
+    display: none;
+  }
+
+  .workbench-toolbar-status {
+    max-width: 24px;
+  }
+
+  .workbench-toolbar-status .window-file {
+    max-width: 24px;
+  }
+
+  .workbench-toolbar-status .file-meta {
+    gap: 0;
+  }
+
+  .workbench-toolbar-center .unified-review-tools[data-disabled="true"] {
+    display: none;
   }
 }
 

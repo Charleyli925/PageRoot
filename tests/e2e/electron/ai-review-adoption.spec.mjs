@@ -369,6 +369,16 @@ ${REVIEW_MASK_UNION_BEFORE}
     await launched.page.getByRole("button", { name: "审阅对比" }).click();
     const reviewWorkspace = launched.page.getByTestId("ai-review-workspace");
     await expect(reviewWorkspace).toBeVisible({ timeout: 30_000 });
+    const reviewReloadRevision = Number(
+      await reviewWorkspace.getAttribute("data-reload-revision"),
+    );
+    const reviewRefreshButton = launched.page.getByRole("button", { name: "刷新审阅画布" });
+    await expect(reviewRefreshButton).toBeEnabled();
+    await reviewRefreshButton.click();
+    await expect(reviewWorkspace).toHaveAttribute(
+      "data-reload-revision",
+      String(reviewReloadRevision + 1),
+    );
     const reviewSidebar = reviewWorkspace.getByTestId("ai-conversation-sidebar");
     await expect(launched.page.getByTestId("ai-conversation-sidebar")).toHaveCount(1);
     await expect(reviewSidebar).toBeVisible();
