@@ -29,6 +29,7 @@ async function readWorkbenchCascadeCss() {
     "./styles/project-resources.css",
     "./styles/about-and-chrome.css",
     "./styles/top-toolbar.css",
+    "./styles/workbench-chrome.css",
   ]);
   assert.equal(entry.trim(), imports.map((file) => `@import "${file}";`).join("\n"));
   const parts = await Promise.all(imports.map((file) => (
@@ -40,19 +41,20 @@ async function readWorkbenchCascadeCss() {
 test("top toolbar keeps one compact cross-mode visual contract", async () => {
   const css = await readWorkbenchCascadeCss();
 
-  const header = lastCssRule(css, ".workbench-header");
-  assert.match(header, /height:\s*var\(--notice-header-height\)/u);
-  assert.match(header, /padding:\s*5px 10px/u);
-  assert.match(header, /background:\s*rgb\(253 252 249 \/ 96%\)/u);
-  assert.match(header, /box-shadow:\s*none/u);
-  assert.match(header, /backdrop-filter:\s*none/u);
+  const header = lastCssRule(css, ".workbench > .workbench-header");
+  assert.match(header, /grid-template-columns:\s*minmax\(0, 1fr\)/u);
+  assert.match(header, /background:\s*var\(--chrome-toolbar-surface\)/u);
+  assert.match(
+    css,
+    /\.workbench > \.workbench-tabbar,\n\.workbench > \.workbench-header \{[\s\S]*?backdrop-filter:\s*blur\(22px\)/u,
+  );
 
   const modeFrame = lastCssRule(css, ".canvas-mode-switch");
   assert.match(modeFrame, /width:\s*180px/u);
   assert.match(modeFrame, /height:\s*34px/u);
   assert.match(modeFrame, /grid-template-columns:\s*repeat\(3, 1fr\)/u);
   assert.match(modeFrame, /padding:\s*2px/u);
-  assert.match(modeFrame, /border:\s*1px solid rgb\(46 43 58 \/ 8%\)/u);
+  assert.match(modeFrame, /border-color:\s*var\(--chrome-divider\)/u);
 
   const selectedLayer = lastCssRule(css, ".canvas-mode-switch::before");
   assert.match(selectedLayer, /display:\s*none/u);
@@ -73,6 +75,9 @@ test("global sidebar owns the full shell column and start page has no card surfa
     css,
     /\.workbench\[data-left-sidebar="open"\] \{\s*--workbench-sidebar-width:\s*264px/u,
   );
+  assert.match(css, /--chrome-sidebar-surface:\s*rgb\(237 236 244 \/ 88%\)/u);
+  assert.match(css, /\.workbench-sidebar-titlebar\s*\{[\s\S]*?border-bottom:\s*0/u);
+  assert.match(css, /\.workbench-tooltip-overlay\s*\{[\s\S]*?position:\s*fixed/u);
   const sidebar = lastCssRule(css, ".workbench-global-sidebar");
   const shell = lastCssRule(css, ".workbench > .workbench-global-sidebar");
   assert.match(shell, /grid-column:\s*1/u);

@@ -25,8 +25,12 @@ test.beforeEach(async ({ page }) => {
 test("pure browser use stays in a formal read-only preview", {
   tag: ["@gate-smoke","@smoke-editing"],
 }, async ({ page }) => {
-  await expect(page.getByText("浏览器预览 · 只读", { exact: true })).toBeVisible();
-  await expect(page.getByText("操作不会保存", { exact: true })).toBeVisible();
+  // Preview no longer spends a second row on an informational banner. Its
+  // no-save status remains in the accessible live region and is quiet in the
+  // toolbar until an actionable failure needs to be shown.
+  await expect(page.locator('[class*="statusBar"]')).toHaveCount(0);
+  await expect(page.locator(".save-status[data-quiet=\"true\"]")).toBeVisible();
+  await expect(page.locator(".save-status")).toContainText("操作不会保存");
   await expect(page.getByRole("button", { name: "编辑", exact: true })).toBeDisabled();
   await expect(page.getByRole("button", { name: "预览", exact: true }))
     .toHaveAttribute("aria-pressed", "true");

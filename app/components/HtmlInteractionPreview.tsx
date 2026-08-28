@@ -2,6 +2,7 @@
 
 import {
   forwardRef,
+  useCallback,
   useEffect,
   useImperativeHandle,
   useMemo,
@@ -36,6 +37,7 @@ import styles from "./HtmlInteractionPreview.module.css";
 
 export type HtmlInteractionPreviewHandle = {
   capturePageViewContext: () => Promise<PageViewContext | null>;
+  reload: () => void;
 };
 
 type HtmlInteractionPreviewProps = {
@@ -413,6 +415,13 @@ const HtmlInteractionPreview = forwardRef<
   const [loadFailed, setLoadFailed] = useState(false);
   const [commentLayouts, setCommentLayouts] = useState<PreviewCommentLayout[]>([]);
   const independentTransport = transport === "independent-url";
+  const reload = useCallback(() => {
+    setFrameReady(false);
+    setLoadFailed(false);
+    setCommentLayouts([]);
+    onReady?.(null);
+    setReloadRevision((revision) => revision + 1);
+  }, [onReady]);
   const prepared = useMemo(
     () => preparePreviewDocument(html, {
       baseUrl: independentTransport
@@ -531,6 +540,7 @@ const HtmlInteractionPreview = forwardRef<
   ]);
 
   useImperativeHandle(forwardedRef, () => ({
+    reload,
     capturePageViewContext: () => new Promise<PageViewContext | null>((resolve) => {
       const iframe = iframeRef.current;
       const frameWindow = iframe?.contentWindow;
@@ -577,6 +587,7 @@ const HtmlInteractionPreview = forwardRef<
     html,
     loadFailed,
     prepared.channelToken,
+    reload,
   ]);
 
   const frameSource = independentTransport
@@ -585,33 +596,16 @@ const HtmlInteractionPreview = forwardRef<
   const frameSandbox = independentTransport
     ? INDEPENDENT_PREVIEW_SANDBOX
     : SRCDOC_PREVIEW_SANDBOX;
-  const statusLabel = loadFailed
-    ? "预览模式 · 页面没有成功载入"
-    : frameReady
-      ? "预览模式 · 页面操作不会保存"
-      : "预览模式 · 正在载入页面…";
-
   return (
     <div
       className={styles.preview}
+      data-reload-revision={reloadRevision}
+      data-testid="html-interaction-preview"
       style={{ "--preview-height": height } as CSSProperties}
       onPointerDown={onInteraction}
       aria-hidden={presentationCovered || undefined}
       inert={presentationCovered || undefined}
     >
-      <div className={styles.statusBar} role="status">
-        <span>{statusLabel}</span>
-        <button
-          type="button"
-          onClick={() => {
-            setFrameReady(false);
-            onReady?.(null);
-            setReloadRevision((revision) => revision + 1);
-          }}
-        >
-          重新载入
-        </button>
-      </div>
       <div className={styles.viewport} ref={viewportRef}>
         <iframe
           ref={iframeRef}

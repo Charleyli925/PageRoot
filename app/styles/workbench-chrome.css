@@ -1,0 +1,468 @@
+/* --------------------------------------------------------------------------
+   Workbench chrome surfaces and interaction states.
+
+   Geometry remains owned by workbench-shell.css. These tokens only describe
+   the material around the authored HTML so the document stays the visual
+   centre while tabs, toolbar, sidebar, and inspectors share one temperature.
+   -------------------------------------------------------------------------- */
+
+.workbench {
+  --chrome-page-surface: #f3f3f5;
+  --chrome-sidebar-surface: rgb(237 236 244 / 88%);
+  --chrome-tabbar-surface: rgb(231 230 238 / 92%);
+  --chrome-toolbar-surface: rgb(245 244 248 / 94%);
+  --chrome-inspector-surface: rgb(239 238 246 / 96%);
+  --chrome-canvas-surface: #fff;
+  --chrome-divider: rgb(42 39 57 / 10%);
+  --chrome-text: #3f3c49;
+  --chrome-muted: #716d7b;
+  --chrome-accent: #625a9e;
+  --chrome-hover: rgb(91 83 143 / 6%);
+  --chrome-active: rgb(91 83 143 / 11%);
+  --chrome-focus: rgb(91 79 173 / 58%);
+  background: var(--chrome-page-surface);
+}
+
+body {
+  background-color: #f3f3f5;
+  background-image: none;
+}
+
+.workbench > .workbench-tabbar,
+.workbench > .workbench-header {
+  border-color: var(--chrome-divider);
+  background: var(--chrome-tabbar-surface);
+  -webkit-backdrop-filter: blur(22px) saturate(112%);
+  backdrop-filter: blur(22px) saturate(112%);
+}
+
+.workbench > .workbench-header {
+  grid-template-columns: minmax(0, 1fr);
+  background: var(--chrome-toolbar-surface);
+}
+
+.workbench > .workbench-header > .header-actions {
+  grid-column: 1;
+}
+
+.workbench > .review-scroll-stage {
+  background: var(--chrome-page-surface);
+}
+
+.workbench > .review-scroll-stage > .canvas-column {
+  background: var(--chrome-canvas-surface);
+}
+
+.workbench-global-sidebar,
+.workbench-sidebar-titlebar {
+  background: var(--chrome-sidebar-surface);
+  -webkit-backdrop-filter: blur(22px) saturate(112%);
+  backdrop-filter: blur(22px) saturate(112%);
+}
+
+.workbench-global-sidebar {
+  border-right-color: var(--chrome-divider);
+}
+
+.workbench-sidebar-titlebar {
+  border-bottom: 0;
+}
+
+.workbench-start-page {
+  background: var(--chrome-page-surface);
+}
+
+.workbench > .review-scroll-stage[data-inspector="comments"] > .comments-panel.comment-rail,
+.workbench > .review-scroll-stage[data-inspector="ai"] > .ai-conversation-aside {
+  border-color: var(--chrome-divider);
+  background: var(--chrome-inspector-surface);
+  -webkit-backdrop-filter: blur(22px) saturate(112%);
+  backdrop-filter: blur(22px) saturate(112%);
+}
+
+.workbench > .review-scroll-stage[data-inspector="ai"] > .ai-conversation-aside > * {
+  border-color: var(--chrome-divider);
+  background: var(--chrome-inspector-surface);
+}
+
+/* The collapsed and expanded buttons are one visual component. Only their
+   containing shell decides where the same 28px control is anchored. */
+.workbench-sidebar-toggle {
+  -webkit-app-region: no-drag;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--chrome-muted);
+  transition: background-color 140ms ease, color 140ms ease;
+}
+
+.workbench > .workbench-tabbar > .workbench-sidebar-toggle {
+  position: absolute;
+  z-index: 2;
+  top: 6px;
+  left: 86px;
+}
+
+.workbench-sidebar-titlebar > .workbench-sidebar-toggle {
+  margin-left: 86px;
+}
+
+.workbench-sidebar-toggle:hover:not(:disabled),
+.workbench-sidebar-toggle:active:not(:disabled) {
+  background: var(--chrome-hover);
+  color: var(--chrome-text);
+}
+
+.workbench-sidebar-toggle:active:not(:disabled) {
+  background: var(--chrome-active);
+}
+
+.workbench-sidebar-toggle:focus-visible {
+  outline: 2px solid var(--chrome-focus);
+  outline-offset: 2px;
+}
+
+/* Browser-like tabs use the toolbar surface for the selected document instead
+   of a separate warm card. */
+.workbench-tab {
+  color: var(--chrome-muted);
+}
+
+.workbench-tab[data-selected="true"] {
+  border-color: var(--chrome-divider);
+  background: var(--chrome-toolbar-surface);
+  color: var(--chrome-text);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 36%);
+}
+
+.workbench-tab:not([data-selected="true"]):hover {
+  background: var(--chrome-hover);
+}
+
+.workbench-tab-status {
+  background: #46a26f;
+}
+
+.workbench-tab[data-status="review-ready"] .workbench-tab-status {
+  background: #7567b8;
+  box-shadow: 0 0 0 3px rgb(117 103 184 / 12%);
+}
+
+.workbench-tab-close:hover,
+.workbench-tab-close:focus-visible,
+.workbench-new-tab:hover,
+.workbench-new-tab:focus-visible {
+  background: var(--chrome-hover);
+  color: var(--chrome-text);
+}
+
+/* The mode selector and the review tools keep their footprint in every mode. */
+.workbench-header .canvas-mode-switch {
+  width: 180px;
+  height: 34px;
+  grid-template-columns: repeat(3, 1fr);
+  padding: 2px;
+  border-color: var(--chrome-divider);
+  background: var(--chrome-hover);
+}
+
+.workbench-header .canvas-mode-switch button:hover:not(:disabled) {
+  background: var(--chrome-hover);
+  box-shadow: none;
+  color: var(--chrome-text);
+  transform: none;
+}
+
+.workbench-header .canvas-mode-switch button[aria-pressed="true"],
+.workbench-header .canvas-mode-switch button[aria-pressed="true"]:hover,
+.workbench-header .canvas-mode-switch button[aria-pressed="true"]:disabled {
+  background: var(--chrome-toolbar-surface);
+  color: var(--chrome-text);
+  box-shadow: inset 0 0 0 1px rgb(91 83 143 / 16%), 0 1px 2px rgb(42 39 57 / 8%);
+}
+
+.workbench-header .canvas-mode-switch button:active:not(:disabled) {
+  background: var(--chrome-active);
+  box-shadow: none;
+}
+
+.workbench-header .canvas-mode-switch button:focus-visible,
+.workbench-header .header-actions > button:focus-visible,
+.workbench-header .workbench-more-menu-trigger:focus-visible {
+  outline: 2px solid var(--chrome-focus);
+  outline-offset: 2px;
+}
+
+.workbench-header .header-actions > button:not(.header-send-button):hover:not(:disabled),
+.workbench-header .header-actions > .project-button:hover:not(:disabled),
+.workbench-header .header-actions > .project-button[aria-expanded="true"],
+.workbench-header .header-actions > .recent-run-button:hover:not(:disabled),
+.workbench-header .header-actions > .recent-run-button[aria-expanded="true"] {
+  background: var(--chrome-hover) !important;
+  box-shadow: none;
+  color: var(--chrome-text) !important;
+  transform: none;
+}
+
+.workbench-header .header-actions > button:not(.header-send-button):active:not(:disabled) {
+  background: var(--chrome-active) !important;
+  transform: none;
+}
+
+.review-attention-dot {
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: 50%;
+  background: #7567b8;
+  box-shadow: 0 0 0 3px rgb(117 103 184 / 12%);
+}
+
+.window-file {
+  max-width: none;
+  flex: none;
+  align-self: center;
+}
+
+.window-file .file-meta {
+  color: var(--chrome-muted);
+}
+
+.window-file .save-status {
+  min-width: 0;
+  max-width: 260px;
+  color: #4f675d;
+}
+
+.window-file .save-status > span:first-child {
+  background: #46a26f;
+}
+
+.window-file .save-status > .save-status-copy {
+  width: auto;
+  height: auto;
+  flex: 0 1 auto;
+  background: transparent;
+  box-shadow: none;
+}
+
+.window-file .save-status[data-canvas-authority="pending"] > span:first-child,
+.window-file .save-status[data-persist-state="writing"] > span:first-child,
+.window-file .save-status[data-persist-state="queued"] > span:first-child {
+  background: #7567b8;
+}
+
+.window-file .save-status[data-persist-state="failed"] > span:first-child,
+.window-file .save-status[data-persist-state="conflict"] > span:first-child,
+.window-file .save-status[data-canvas-authority="failed"] > span:first-child {
+  background: #c15c56;
+}
+
+.window-file .save-status[data-quiet="true"] {
+  width: 14px;
+  height: 24px;
+  justify-content: center;
+  gap: 0;
+  padding: 0;
+  overflow: visible;
+  cursor: default;
+}
+
+.window-file .save-status[data-quiet="true"] .save-status-copy {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.window-file .save-status:focus-visible {
+  outline: 2px solid var(--chrome-focus);
+  outline-offset: 2px;
+}
+
+.workbench-refresh-button {
+  width: 30px;
+  height: 30px;
+  min-height: 30px;
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--chrome-muted);
+}
+
+.workbench-refresh-button:hover:not(:disabled),
+.workbench-refresh-button:active:not(:disabled) {
+  background: var(--chrome-hover);
+  color: var(--chrome-text);
+  transform: none;
+}
+
+.workbench-refresh-button:active:not(:disabled) {
+  background: var(--chrome-active);
+}
+
+.workbench-refresh-button:disabled {
+  cursor: not-allowed;
+  opacity: .38;
+}
+
+/* The menu is portalled to document.body; it therefore remains visible even
+   though the header itself owns a horizontal scroll container. */
+.workbench-more-menu-wrap {
+  position: relative;
+  flex: none;
+  display: inline-flex;
+}
+
+.workbench-more-menu-trigger {
+  width: 30px;
+  height: 30px;
+  min-height: 30px;
+  display: inline-grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--chrome-muted);
+}
+
+.workbench-more-menu-trigger:hover:not(:disabled),
+.workbench-more-menu-trigger:active:not(:disabled) {
+  background: var(--chrome-hover);
+  color: var(--chrome-text);
+}
+
+.workbench-more-menu-trigger:active:not(:disabled) {
+  background: var(--chrome-active);
+}
+
+.workbench-more-menu {
+  --chrome-divider: rgb(42 39 57 / 10%);
+  --chrome-text: #3f3c49;
+  --chrome-hover: rgb(91 83 143 / 6%);
+  --chrome-active: rgb(91 83 143 / 11%);
+  --chrome-accent: #625a9e;
+  position: fixed;
+  z-index: 1000;
+  width: 220px;
+  max-width: calc(100vw - 16px);
+  display: grid;
+  gap: 2px;
+  padding: 6px;
+  border: 1px solid var(--chrome-divider);
+  border-radius: 10px;
+  background: rgb(248 247 251 / 98%);
+  box-shadow: 0 10px 26px rgb(42 39 57 / 14%), 0 2px 6px rgb(42 39 57 / 7%);
+  -webkit-backdrop-filter: blur(20px) saturate(118%);
+  backdrop-filter: blur(20px) saturate(118%);
+}
+
+.workbench-more-menu-entry {
+  display: grid;
+  gap: 5px;
+}
+
+.workbench-more-menu-divider {
+  height: 1px;
+  margin: 4px 3px;
+  background: var(--chrome-divider);
+}
+
+.workbench-more-menu-entry > button {
+  min-width: 0;
+  min-height: 32px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--chrome-text);
+  font-size: 11px;
+  font-weight: 590;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.workbench-more-menu-entry > button:hover,
+.workbench-more-menu-entry > button:focus-visible {
+  background: var(--chrome-hover);
+  color: var(--chrome-text);
+  outline: none;
+}
+
+.workbench-more-menu-entry > button:active {
+  background: var(--chrome-active);
+}
+
+.workbench-more-menu-entry > button > svg {
+  flex: none;
+  color: var(--chrome-accent);
+}
+
+/* Workbench tooltips are rendered by WorkbenchTooltipHost below the clipping
+   layer. Keep the old pseudo-tooltip for non-workbench surfaces only. */
+.workbench-header [data-tooltip]::after,
+.workbench-tabbar [data-tooltip]::after,
+.workbench-sidebar-titlebar [data-tooltip]::after {
+  display: none !important;
+  content: none !important;
+}
+
+.workbench-tooltip-overlay {
+  position: fixed;
+  z-index: 1100;
+  max-width: min(280px, calc(100vw - 24px));
+  padding: 6px 8px;
+  border: 1px solid rgb(42 39 57 / 14%);
+  border-radius: 7px;
+  background: rgb(47 44 59 / 96%);
+  color: #fff;
+  box-shadow: 0 5px 14px rgb(42 39 57 / 16%);
+  font-size: 10px;
+  font-weight: 560;
+  line-height: 1.35;
+  pointer-events: none;
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+
+@media (max-width: 900px) {
+  .workbench-header .header-actions {
+    gap: 3px;
+  }
+
+  .workbench-header .workbench-review-tools-slot {
+    gap: 3px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .workbench-sidebar-toggle,
+  .workbench-tooltip-overlay {
+    transition: none;
+  }
+
+  .window-file .save-status[data-canvas-authority="pending"] > span:first-child,
+  .window-file .save-status[data-persist-state="writing"] > span:first-child,
+  .window-file .save-status[data-persist-state="queued"] > span:first-child {
+    animation: none;
+  }
+}
