@@ -124,26 +124,6 @@ test("no text evidence produces no operation, anchor, or visible footprint", () 
   });
 });
 
-test("layout-only changes carry no red or green text evidence", () => {
-  const plan = readableReviewTextFootprintPlan("正文保持不变", "正文保持不变", {
-    before: [],
-    after: [],
-    layout: true,
-  });
-
-  assert.equal(plan.operation, "layout");
-  assert.deepEqual(plan.before, {
-    evidenceRanges: [],
-    phraseGroups: [],
-    anchorOffset: null,
-  });
-  assert.deepEqual(plan.after, {
-    evidenceRanges: [],
-    phraseGroups: [],
-    anchorOffset: null,
-  });
-});
-
 test("a shared standalone Han word at the same clause edge stays unchanged", () => {
   assert.deepEqual(compare("在增长。", "在下降。"), {
     before: ["增长"],

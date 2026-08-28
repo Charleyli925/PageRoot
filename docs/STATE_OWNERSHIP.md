@@ -56,11 +56,8 @@
 | Current preview/edit display context, safe reveal transition and per-surface render acknowledgement | Workbench page-view context state | none; source-bound in-memory projection tagged by `DocumentSession` Canvas generation and rendered source Hash | `HtmlCanvasEditor`, `HtmlInteractionPreview`, save-status projection and toolbar |
 | One-shot Edit author-runtime identity, presentation-gated direct prepare grant, phase and final outcome | `EditAuthorRuntimeSession`, composed by `WorkspaceController`; Main owns the bounded replay/admission fence | none; one disposable `(sourcePath, canvasGeneration)` attempt, at most two Main-admitted overlap captures to tolerate Managed V1 activation and one revokeable resource session | Workbench loading-surface acknowledgement, initial-frame choice and `HtmlCanvasEditor` load/settle callbacks |
 | Imported project's original sibling-asset directory | Main `importedAssetRoots` in `userData/html-projects.json` plus process `activeImportedAssetSourcePath` | desktop project state keyed by project root; renderer never receives the original path | preview protocol, edit-runtime protocol and the script-disabled Edit iframe resource base |
-| Review runtime-snapshot limits, page budget, owner deadline, envelope and PNG/visible-text-hash parser | `runtime-visual-contract.js` and `runtime-visual-snapshots.js`; consumers may validate but not redeclare either | none; frozen process-local contract only | Review pair, shared owner and hostile-page gates |
 | AI review page view, change filter, context visibility, navigation target, canonical page-presentation path, scroll mode and zoom mode | `AiReviewWorkspace` review reducer | none; disposable state bound to the frozen before/after pair | review toolbar, content map and isolated review frames |
-| AI review semantic sibling pair graph, typed change facts (including multiple independent facts on one prepared element), disposable fact/semantic/geometry owner IDs, prepared immutable review documents and canonical frame/mask geometry | Cancellable `ReviewAnalysisSession` plus `review-document` analyzer (`app/workbench/review/` pipeline), ready-review session and isolated-frame projection runtime | none; byte-bounded multi-entry cache keyed only by exact operation/source/comment identity; fact identities are analysis-only and never persisted | review outline, semantic frames and context mask |
-| Review runtime snapshot request, temporary owner window/session, deadline/cancellation, bounded PNG snapshots and visible-text hash | Electron main `RuntimeSnapshotOwner`; `AiReviewWorkspace` is the sole consumer | none; exact-source, side/session-fenced in-memory decisions; TargetRefs remain in trusted renderer memory, raw DOM/text never leaves the owner and PNGs remain disposable presentation bytes | effective Review changes/outline and static review-frame presentation |
-| Review runtime projection binding, challenged port lifecycle and additive facts | `review-document` first bootstrap owns exact per-side `Element` bindings and `Map<Element, facts[]>`; `AiReviewWorkspace` owns the current side/session/source-SHA-fenced private ports and latest owner result | none; first-bootstrap-only bindings and disposable frame memory, cleared on document/frame/unmount lifecycle | exact-host runtime rectangles unioned with, but unable to delete, static review facts; outline remains navigation-only |
+| AI review semantic sibling pair graph, text and element-presence facts, disposable fact/semantic/geometry owner IDs, prepared immutable review documents and canonical frame/mask geometry | Cancellable `ReviewAnalysisSession` plus `review-document` analyzer (`app/workbench/review/` pipeline), ready-review session and isolated-frame projection runtime | none; byte-bounded multi-entry cache keyed only by exact operation/source/comment identity; fact identities are analysis-only and never persisted | review outline, semantic frames and context mask |
 | AI review Tab/disclosure/control presentation state and transition epoch | Parent `AiReviewWorkspace` presentation coordinator; either frame may propose an intent | none; disposable parent state plus frame projection only | both review frames, content map and overlay/mask projection |
 | Frozen review comment set and read-only before-page marker projection | Ready-review session owns comment text; `review-document` resolves opaque targets during analysis, strips temporary review attributes, and carries source-node bindings only in the parser-blocking first private bootstrap response; trusted `AiReviewWorkspace` delivers targets only through a challenged private port, then joins anonymous viewport geometry and renders it | none beyond the immutable Request/Draft evidence already frozen for the run | trusted review host above the before frame only; authored frames never receive comment text, comment keys, a comment marker, or a source-node/locator map in HTML or later bootstrap source |
 | Current source-backed comment resolution, visibility, coordinates, marker eligibility and natural document height | `html-canvas-comment-layout` measurement owned by `HtmlCanvasEditor`, stabilized by `commentCanvasPort` | none; disposable snapshot tagged by rendered source Hash, applied page-view generation and exact target-ID set | `CommentRailContainer` and the inherited Canvas-height CSS variable; Workbench root does not subscribe |
@@ -266,8 +263,8 @@ Rules:
   `projectId` and `documentId`.
 - Runtime features are declared independently. The presence of a project-picker
   API never implies source-edit or attachment-persistence authority.
-- Interactive-preview sessions, page-view context, the direct one-shot Edit
-  author-runtime session and Review runtime snapshots are disposable. They do
+- Interactive-preview sessions, page-view context and the direct one-shot Edit
+  author-runtime session are disposable. They do
   not participate in save, switch, submit or close drains, and cannot become a
   second copy of the source HTML. Desktop `pageroot-preview` sessions are owned
   by the preview protocol controller: Edit static sibling-asset sessions
@@ -308,26 +305,11 @@ Rules:
   unpair a stable ancestor, and an ambiguous empty sibling never gains a
   positional identity. Trusted fact generation reports an overflow instead of
   silently publishing a partial fact set.
-- The Review runtime-snapshot path starts only from source-backed candidates:
-  direct Canvas/SVG roots or source-empty stable hosts paired by
-  `SourceHostResolver`. It never derives candidates from scripts, comment
-  metadata, selectors, arbitrary HTML/`tbody` or runtime DOM.
-  `AiReviewWorkspace` presents static Review first and issues one
-  `before`/`after` pair. Authored frames have no runtime request or result
-  capability, and Edit never requests a runtime snapshot.
-  `RuntimeSnapshotOwner` alone creates the temporary non-persistent partition,
-  preview session and hidden sandboxed window. It revalidates the raw source
-  binding, confirms the same runtime host and visible Canvas/SVG paint in an
-  isolated world, then takes one rect pass, hashes bounded visible DOM/SVG text
-  without returning it, and takes at most one bounded screenshot per host. Main
-  owns the deadline, cancellation and cleanup. PNG bytes/hash, dimensions and
-  aggregate limits are revalidated in trusted renderer memory. Layout and the
-  visible-text hash are strict; equal-text PNG hash differences require a local
-  mean absolute RGB error above `0.04`, so small encoder/tile raster noise does
-  not become a fact. One captured before/after difference may merge an opaque
-  marker into the existing static presentation; anything unavailable, malformed,
-  timed out or late leaves static Review unchanged. No confirmation pair,
-  coordinator or persistence authority exists.
+- Review facts are static and analysis-local. Only precise text evidence and
+  outermost element presence may enter the fact set; movement, attributes,
+  style, layout, wrapping and runtime drawing have no owner and create no fact.
+  Main, preload and authored frames expose no Review capture or screenshot
+  capability.
 - `CommentSession` is a renderer working copy, not durable Draft authority.
   Runtime state is likewise not a second copy of draft contents: it carries
   lifecycle state and a revisioned pointer to the draft repository.

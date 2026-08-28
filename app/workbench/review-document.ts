@@ -8,16 +8,11 @@ import {
   prepareReviewCommentSourceProjection,
 } from "../lib/review-comment-source-map.js";
 import {
-  createReviewRuntimeVisualCaptureIdentity,
-} from "./review-runtime-capture-adapter";
-import {
   annotateReviewComments,
   clearReviewCommentScopeAttributes,
   reviewCommentBootstrapBindings,
 } from "./review/comment-binding";
 import {
-  REVIEW_COMMENT_GLOBAL_ATTRIBUTE,
-  REVIEW_COMMENT_KEY_ATTRIBUTE,
   REVIEW_PROJECTION_FACTS_ATTRIBUTE,
 } from "./review/constants";
 import {
@@ -28,15 +23,11 @@ import {
   clearReservedReviewMarkup,
   helperText,
   normalizedMarkup,
-  ancestorMarkupSignature,
   panelPathForElement,
   regionGroupLabel,
   reviewProjectionFactsForElement,
-  reviewStylesheetSignature,
-  sourceElementsByNodeId,
 } from "./review/parse";
 import {
-  annotateRuntimeVisualCandidates,
   reviewBootstrap,
 } from "./review/runtime-projection";
 import {
@@ -50,10 +41,6 @@ import {
   markStructureDifferenceSteps,
 } from "./review/structure-diff";
 import {
-  markStyleDifferences,
-  semanticLayoutPairs,
-} from "./review/style-diff";
-import {
   markSemanticTextDifferences,
 } from "./review/text-diff";
 import type {
@@ -62,15 +49,12 @@ import type {
   ReviewDocumentBuildOptions,
   ReviewDocuments,
   ReviewOutlineItem,
-  ReviewRuntimeVisualAnnotations,
   ReviewSemanticPairGraph,
   SectionPair,
 } from "./review/types";
 
 export {
   REVIEW_STRUCTURE_TONE_COLOR,
-  REVIEW_STYLE_TONE_COLOR,
-  REVIEW_SUSPECTED_TONE_COLOR,
 } from "./review/tones";
 export type {
   ReviewChange,
@@ -87,17 +71,11 @@ export type {
 function* changeTypesForSemanticGraphSteps(
   graph: ReviewSemanticPairGraph,
 ): Generator<"semantic-row", ReviewChangeType[], void> {
-  // Style inspection still runs against the unwrapped source DOM. The same
-  // layout planner identifies visual-only pairs first; text marking consumes
-  // it again below to avoid fabricating red/green evidence.
-  const layoutPairs = semanticLayoutPairs(graph);
   const structureChanged = yield* markStructureDifferenceSteps(graph);
-  const styleChanged = markStyleDifferences(graph, layoutPairs);
   const textMarking = markSemanticTextDifferences(graph);
   return [
     ...(textMarking.changed ? ["text" as const] : []),
     ...(structureChanged ? ["structure" as const] : []),
-    ...(styleChanged ? ["style" as const] : []),
   ];
 }
 
@@ -123,7 +101,6 @@ function attachChangeMarkerMetadata(
     const markerElements = [root, ...root.querySelectorAll("*")].filter((element) => (
       element.hasAttribute("data-pageroot-review-text")
       || element.hasAttribute("data-pageroot-review-structure")
-      || element.hasAttribute("data-pageroot-review-style")
       || element.hasAttribute(REVIEW_PROJECTION_FACTS_ATTRIBUTE)
     ));
     markerElements.forEach((element, index) => {
@@ -134,7 +111,6 @@ function attachChangeMarkerMetadata(
         || textOperation === "insert"
         || textOperation === "delete"
         || textOperation === "replace"
-        || textOperation === "layout"
         ? textOperation
         : null;
       const textSummary = textMarker
@@ -168,7 +144,7 @@ function attachChangeMarkerMetadata(
         const semanticOwnerId = element.getAttribute("data-pageroot-review-semantic-owner")
           || `fallback-owner-${changeId}-structure-${index + 1}`;
         const geometryOwnerId = element.getAttribute("data-pageroot-review-geometry-owner") || "";
-        const structureChange = element.getAttribute("data-pageroot-review-structure") || "changed";
+      const structureChange = element.getAttribute("data-pageroot-review-structure") || "changed";
         facts = appendTrustedReviewProjectionFact(facts, {
           id: `structure-${semanticOwnerId}-${structureChange}`,
           type: "structure",
@@ -176,23 +152,13 @@ function attachChangeMarkerMetadata(
           ...(geometryOwnerId ? { geometryOwnerId } : {}),
           scope: "element",
           structureChange,
-          summary: structureChange === "from" || structureChange === "to"
-            ? "位置调整"
-            : "结构调整",
+          summary: structureChange === "added" ? "新增元素" : "删除元素",
         });
       }
       const markerTypes = [...new Set(facts.map((fact) => fact.type))] as ReviewChangeType[];
       const textFact = facts.find((fact) => fact.type === "text");
-      const visualFact = facts.find((fact) => (
-        fact.type === "style" && fact.operation !== "layout"
-      ));
-      const layoutFact = facts.find((fact) => (
-        fact.type === "style" && fact.operation === "layout"
-      ));
       const structureFact = facts.find((fact) => fact.type === "structure");
       const summary = textFact?.summary
-        || visualFact?.summary
-        || layoutFact?.summary
         || structureFact?.summary
         || helper;
       element.setAttribute("data-pageroot-review-marker", changeId);
@@ -210,44 +176,32 @@ function* buildReviewDocumentSteps(
   afterHtml: string,
   options: ReviewDocumentBuildOptions,
 ): Generator<string, ReviewDocuments, void> {
-  const runtimeVisualCaptureIdentity = createReviewRuntimeVisualCaptureIdentity({
-    sessionId: options.sessionId,
-    sourceSha256BySide: options.sourceSha256BySide,
-  });
   if (typeof DOMParser === "undefined") {
     return {
       before: beforeHtml,
       after: afterHtml,
       bootstrapJavaScript: {
         before: reviewBootstrap(
-          runtimeVisualCaptureIdentity.sessionId,
+          options.sessionId,
           "before",
-          runtimeVisualCaptureIdentity.sourceSha256BySide.before,
         ),
         after: reviewBootstrap(
-          runtimeVisualCaptureIdentity.sessionId,
+          options.sessionId,
           "after",
-          runtimeVisualCaptureIdentity.sourceSha256BySide.after,
         ),
       },
       bootstrapFallbackJavaScript: {
         before: reviewBootstrap(
-          runtimeVisualCaptureIdentity.sessionId,
+          options.sessionId,
           "before",
-          runtimeVisualCaptureIdentity.sourceSha256BySide.before,
         ),
         after: reviewBootstrap(
-          runtimeVisualCaptureIdentity.sessionId,
+          options.sessionId,
           "after",
-          runtimeVisualCaptureIdentity.sourceSha256BySide.after,
         ),
       },
       changes: [],
       outline: [],
-      runtimeVisualCandidates: [],
-      runtimeVisualCaptureCandidates: { before: [], after: [] },
-      runtimeVisualSourceHtml: { before: beforeHtml, after: afterHtml },
-      runtimeVisualCaptureIdentity,
       commentGroups: [],
       commentTargets: [],
     };
@@ -260,8 +214,6 @@ function* buildReviewDocumentSteps(
   const afterDocument = parser.parseFromString(afterSourceProjection.html, "text/html");
   clearReservedReviewMarkup(beforeDocument, beforeSourceProjection.projected);
   clearReservedReviewMarkup(afterDocument, afterSourceProjection.projected);
-  const beforeSourceElements = sourceElementsByNodeId(beforeDocument);
-  const afterSourceElements = sourceElementsByNodeId(afterDocument);
   yield "parse";
   const commentAnnotations = annotateReviewComments(
     beforeDocument,
@@ -288,21 +240,15 @@ function* buildReviewDocumentSteps(
   const pairs = pairSections(beforeSections, afterSections);
   const changes: ReviewChange[] = [];
   const outline: ReviewOutlineItem[] = [];
-  const stylesheetsMatch = reviewStylesheetSignature(beforeDocument)
-    === reviewStylesheetSignature(afterDocument);
   yield "section-pairing";
 
   for (const [pairIndex, pair] of pairs.entries()) {
     const outlineId = `outline-${outline.length + 1}`;
     const label = changeLabel(pair.before, pair.after, pairIndex);
     const exactStablePair = Boolean(
-      !pair.moved
-      && stylesheetsMatch
-      && pair.before
+      pair.before
       && pair.after
       && normalizedMarkup(pair.before) === normalizedMarkup(pair.after)
-      && ancestorMarkupSignature(pair.before)
-        === ancestorMarkupSignature(pair.after),
     );
     let types: ReviewChangeType[] = [];
     if (!exactStablePair) {
@@ -319,9 +265,6 @@ function* buildReviewDocumentSteps(
       ? helperText(types, Boolean(pair.before), Boolean(pair.after), pair)
       : "本轮未修改";
     if (changeId) attachChangeMarkerMetadata(pair, changeId, helper);
-    const movement = pair.moved
-      ? { from: pair.beforeIndex + 1, to: pair.afterIndex + 1 }
-      : undefined;
     const panelPath = panelPathForElement(pair.after).length
       ? panelPathForElement(pair.after)
       : panelPathForElement(pair.before);
@@ -346,7 +289,6 @@ function* buildReviewDocumentSteps(
         afterPresent: Boolean(pair.after),
         ...(panelKey ? { panelKey } : {}),
         ...(panelPath.length ? { panelPath } : {}),
-        ...(movement ? { movement } : {}),
       });
     }
     const preferredElement = pair.after || pair.before;
@@ -360,34 +302,10 @@ function* buildReviewDocumentSteps(
       ...(changeId ? { changeId } : {}),
       ...(panelKey ? { panelKey } : {}),
       ...(panelPath.length ? { panelPath } : {}),
-      ...(movement ? { movement } : {}),
     });
     if ((pairIndex + 1) % 24 === 0) yield "change-annotation";
   }
 
-  const runtimeVisualAnnotations: ReviewRuntimeVisualAnnotations = options.externalBootstrap
-    ? annotateRuntimeVisualCandidates({
-        beforeHtml,
-        afterHtml,
-        beforeIndex: beforeSourceProjection.sourceIndex,
-        afterIndex: afterSourceProjection.sourceIndex,
-        beforeSourceElements,
-        afterSourceElements,
-        outline,
-        // Comment scope attributes are still present here; they are cleared
-        // right after candidate annotation and before serialization. A global
-        // page comment anchors on <body> and must not mark every host as
-        // commented, so only element-anchored comment scopes qualify.
-        commentAnchors: [...beforeDocument.querySelectorAll(
-          `[${REVIEW_COMMENT_KEY_ATTRIBUTE}]:not([${REVIEW_COMMENT_GLOBAL_ATTRIBUTE}])`,
-        )],
-      })
-    : {
-        candidates: [],
-        captureCandidates: { before: [], after: [] },
-        bindings: { before: [], after: [] },
-      };
-  const runtimeVisualCandidates = runtimeVisualAnnotations.candidates;
   // Comment attributes are analyzer-only scope hints. Bind every resolved
   // source target in the private first bootstrap, then remove the hints before
   // either document is serialized or can be read back by authored page code.
@@ -396,26 +314,22 @@ function* buildReviewDocumentSteps(
     reviewCommentTargets,
   );
   clearReviewCommentScopeAttributes(beforeDocument);
-  yield "runtime-candidates";
-
   const preparedBefore = prepareDocument(
     beforeDocument,
     "before",
-    runtimeVisualCaptureIdentity,
+    options.sessionId,
     options.sourcePath,
     options.externalBootstrap,
     reviewCommentBindings,
-    runtimeVisualAnnotations.bindings.before,
   );
   yield "prepare-before";
   const preparedAfter = prepareDocument(
     afterDocument,
     "after",
-    runtimeVisualCaptureIdentity,
+    options.sessionId,
     options.sourcePath,
     options.externalBootstrap,
     [],
-    runtimeVisualAnnotations.bindings.after,
   );
   yield "prepare-after";
   return {
@@ -431,10 +345,6 @@ function* buildReviewDocumentSteps(
     },
     changes,
     outline,
-    runtimeVisualCandidates,
-    runtimeVisualCaptureCandidates: runtimeVisualAnnotations.captureCandidates,
-    runtimeVisualSourceHtml: { before: beforeHtml, after: afterHtml },
-    runtimeVisualCaptureIdentity,
     commentGroups,
     commentTargets: reviewCommentTargets,
   };
@@ -461,44 +371,20 @@ export function buildReviewShellDocuments(
   afterHtml: string,
   options: ReviewDocumentBuildOptions,
 ): ReviewDocuments {
-  const runtimeVisualCaptureIdentity = createReviewRuntimeVisualCaptureIdentity({
-    sessionId: options.sessionId,
-    sourceSha256BySide: options.sourceSha256BySide,
-  });
   if (typeof DOMParser === "undefined") {
     return {
       before: beforeHtml,
       after: afterHtml,
       bootstrapJavaScript: {
-        before: reviewBootstrap(
-          runtimeVisualCaptureIdentity.sessionId,
-          "before",
-          runtimeVisualCaptureIdentity.sourceSha256BySide.before,
-        ),
-        after: reviewBootstrap(
-          runtimeVisualCaptureIdentity.sessionId,
-          "after",
-          runtimeVisualCaptureIdentity.sourceSha256BySide.after,
-        ),
+        before: reviewBootstrap(options.sessionId, "before"),
+        after: reviewBootstrap(options.sessionId, "after"),
       },
       bootstrapFallbackJavaScript: {
-        before: reviewBootstrap(
-          runtimeVisualCaptureIdentity.sessionId,
-          "before",
-          runtimeVisualCaptureIdentity.sourceSha256BySide.before,
-        ),
-        after: reviewBootstrap(
-          runtimeVisualCaptureIdentity.sessionId,
-          "after",
-          runtimeVisualCaptureIdentity.sourceSha256BySide.after,
-        ),
+        before: reviewBootstrap(options.sessionId, "before"),
+        after: reviewBootstrap(options.sessionId, "after"),
       },
       changes: [],
       outline: [],
-      runtimeVisualCandidates: [],
-      runtimeVisualCaptureCandidates: { before: [], after: [] },
-      runtimeVisualSourceHtml: { before: beforeHtml, after: afterHtml },
-      runtimeVisualCaptureIdentity,
       commentGroups: [],
       commentTargets: [],
     };
@@ -511,14 +397,14 @@ export function buildReviewShellDocuments(
   const preparedBefore = prepareDocument(
     beforeDocument,
     "before",
-    runtimeVisualCaptureIdentity,
+    options.sessionId,
     options.sourcePath,
     options.externalBootstrap,
   );
   const preparedAfter = prepareDocument(
     afterDocument,
     "after",
-    runtimeVisualCaptureIdentity,
+    options.sessionId,
     options.sourcePath,
     options.externalBootstrap,
   );
@@ -535,10 +421,6 @@ export function buildReviewShellDocuments(
     },
     changes: [],
     outline: [],
-    runtimeVisualCandidates: [],
-    runtimeVisualCaptureCandidates: { before: [], after: [] },
-    runtimeVisualSourceHtml: { before: beforeHtml, after: afterHtml },
-    runtimeVisualCaptureIdentity,
     commentGroups: [],
     commentTargets: [],
   };
@@ -579,7 +461,6 @@ export async function buildReviewDocumentsAsync(
     "section-pairing",
     "semantic-row",
     "change-annotation",
-    "runtime-candidates",
     "prepare-before",
     "prepare-after",
     "complete",

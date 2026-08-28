@@ -109,7 +109,7 @@ step summary 里。
 - `WorkspaceController`：runtime factory 是生产组合的唯一入口；它构造唯一的 Bridge
   client、共享 RunSession、`EditAuthorRuntimeSession` 与各业务 Session，并作为唯一
   application aggregate observer 生成冻结的 Project/Document/Comment/Run/Version/Edit
-runtime snapshot。Edit runtime 的纯 Session 测试证明键仅为
+  aggregate snapshot。Edit runtime 的纯 Session 测试证明键仅为
 `(sourcePath, canvasGeneration)`、非权威源码随后变为权威时仍可开始一次、准备
 loading surface 确认前不调用窄 port、同代不因 autosave/评论重试、旧结果只撤销；
 Workbench 只确认已提交 loading surface、传入窄 port 并消费快照。Node 测试证明晚到 observer
@@ -151,14 +151,7 @@ Workbench 只确认已提交 loading surface、传入窄 port 并消费快照。
 - Browser 冒烟：固定覆盖脚本隔离、源码字节、可编辑岛、源码权威围栏和能力降级五类关键风险；完整 Browser 包含全部活动 V2 回归。裸文本片段结束会话后必须仍能把工具条/快捷键格式写入源码，不能把已拆除的 fragment 宿主当成失连而阻断。V1 的 per-keystroke tracker、FormatSkeleton 和 IME tail 状态机实现及测试已从仓库删除；V2 岛内字节 oracle、输入矩阵和 composition 快照用例是唯一产品合同。
 - Electron 冒烟：固定覆盖真实 authored DOM 输入和一次带磁盘持久化的 composition；完整 Electron 保留保存、关闭重开和逐字节 forward 结果等全部路径。
 - Electron 产品套件默认使用隐藏、禁止后台节流的 BrowserWindow，不抢键盘焦点；后台模式保留 macOS Dock 图标，点击图标可手动调出窗口查看或再次最小化；自动触发的原生弹窗在所有 E2E 模式下一律拦截并写入测试日志，即使显式设置 `PAGEROOT_E2E_FOREGROUND=1` 观察窗口也不会出现系统弹窗。CI 环境预检保留可见但不聚焦的 accessory 窗口，用于证明 WindowServer 绘制能力。
-- 交互预览、Edit one-shot ECharts 与 Review Runtime Snapshot：Node 证明 Review 的
-  source-host resolver 只接受
-  direct Canvas/SVG 与唯一稳定的 source-empty 宿主，删除/歧义/类型冲突、任意
-  HTML/`tbody`、computed selector 和脚本依赖猜测都 fail-closed。owner 测试拥有
-  Review-only 窄请求、source SHA/绑定、isolated world、一次 rect/PNG、PNG
-  SHA/像素/字节预算、可见 DOM/SVG 文字哈希、deadline 和 cleanup。Node 还直接
-  覆盖文字/数字哈希严格变化，以及同文字单次 PNG 的 RGB 误差预算不会把微小
-  栅格噪声判作变化。Electron 用一份合成报告证明普通 Edit
+- 交互预览与 Edit one-shot ECharts：Electron 用一份合成报告证明普通 Edit
   不请求或挂载运行态位图，Preview 中同一 Canvas/SVG 正常运行，
   authored inline SVG 仍在 Edit 原生可见且源文件字节不变；另一个本地 ECharts
   用例证明导入后的 V1 仍从 Main 绑定的原始同目录资源根冻结直接资源闭包、一次
@@ -228,15 +221,11 @@ Workbench 只确认已提交 loading surface、传入窄 port 并消费快照。
   Node oracle 必须分别覆盖唯一空 Canvas/SVG/表单/容器的兼容配对、重复
   class-only 空节点保持 unmatched、深层子变化不拆稳定祖先，以及第 25 个
   trusted projection fact 明确失败；解析端超限仍必须 fail-closed。
-  Runtime Snapshot 投影的 Node oracle 必须保留每个 changed candidate key，
-  即使多个候选共享同一 outline 也不得去重。真实 Chromium 另证明每侧首个
-  bootstrap 的私有 key→`Element` 绑定、`sessionId + side + sourceSha256` 端口
-  fence、同元素静态/运行态 facts 加法合并、同 outline 多宿主独立 border box、
-  普通 window message 无权注入，以及替换、断连、fingerprint 漂移时不回退
-  outline；作者 capture listener 不得看到 challenge、port 或 candidate key。
-  Electron AI 闭环必须确认 Canvas/SVG 运行态差异框命中精确宿主而非 section，
-  并覆盖隐藏 Tab 在既有 presentation epoch 稳定后重测。Capture owner、preload、
-  IPC 与 package 测试只作回归证明，PR-C 不修改这些 owner。
+  Review 的负向边界由 Node 与 Electron 共同锁定：`style`、`layout`、movement 和
+  runtime facts 在 projection 边界 fail-closed；preload、IPC、package allowlist 与
+  artifact verifier 均不存在 Review capture owner。真实 Electron 证明纯样式、
+  换行、Canvas/SVG 绘制和兄弟重排生成零变化，同时精确文字、元素新增/删除、
+  评论、Tab 与采纳仍可用。
 - Electron E2E 夹具与场景归属：`tests/e2e/electron/helpers/pageroot-app-fixture.mjs` 是兼容 re-export。能力实现分别在 `electron-app-launch.mjs`、`electron-project-fixture.mjs`、`electron-project-ready.mjs`、`electron-comment-driver.mjs`、`electron-legacy-project-fixture.mjs` 与 `electron-safe-cleanup.mjs`。它们只拥有独立 userData/workspace/source、隐藏窗口启动、Bridge 路径、close-first
   cleanup、诊断输出和已加载 frame；不包含产品断言、整条用户流程或自动重试。
   启动或 hydration 未就绪时，fixture 必须记录主 frame、Workbench/
@@ -307,38 +296,18 @@ Workbench 只确认已提交 loading surface、传入窄 port 并消费快照。
   立即截取，不能混入后续 switch、close、监控停止或 byte oracle 的耗时。
   任务级跑正常闭环和一个硬失败代表场景；
   发布级覆盖复制失败、缺失 finalizer、非法 HTML、版本激活失败与终态
-  返回/重开。正式 Electron 审阅用例还必须证明默认“双页 + 全部变化 +
-  18%”、页面/筛选/可见度/导航彼此独立、左右单页和双页均铺满可用
-  Canvas、完全相同文字不被标记、叶子级精确文字差异、重复短文案和中间
-  插入结构不会错配、未修改指标卡不产生文案/结构/视觉假阳性、新增字符
-  逐字显示绿色实点/删除字符逐字显示红色虚线删除线/文字范围统一紫色实线/
-  结构蓝框/视觉紫框、每个语义变化组只有一个简短标注且整块新增统一为
-  “新增内容”、单字框具有受行边界限制的最小可读宽度、局部跨行修改生成
-  独立普通短语框而非锯齿多边形、三组短语或 60% 首尾证据跨度提升为完整
-  行框、至少三行且 75% 行已提升时只生成一个“段落改写”文本块框、每个
-  字符证据都被最终范围框包含、整卡背景/
-  边框/前景色同时变化时每张卡只生成一个贴合完整 border box 的普通矩形
-  且相邻卡片不融合、`block-size` 仍归属完整盒子、仅继承文字颜色变化时
-  直接测量文字 Range 而不框容器、每个最终框与遮罩透明孔几何一致、
-  页面自身的 `svg` / `div` 规则不能改写投影几何或遮罩外观、
-  导航区域不画框、内容型连通 marker 融合且自身未变化的祖先嵌套框删除、
-  盒子级视觉 owner 支配内部视觉子框、全部变化同处多类型只显示一个融合框、具体结构/
-  视觉说明、内容地图、上下导航与左右页点击共用显式/索引式 Tab 识别并
-  双向揭示隐藏 Tab、切换期间旧框不残留且虚化无空档、安全按钮和表单在
-  同步或独立滚动下均能左右双向同步、0/50/100 上下文可见度、横向联动、
-  不同高度下按区域进度对齐、单帧只消费最新位置、快速上下反向后不追赶
-  旧目标、左右换侧后旧代次失效、短页顶/底边界不强拉长页且顶端无反向
-  回跳、修改前页“评”字悬停气泡只读且修改后页不重复、分段控件键盘移动、
-  工具栏不遮挡页面标题、确认弹窗文案/焦点/按钮层级、返回修改前直接恢复
-  编辑且保留评论与候选文件，以及确认打开全程不显示等待 AI 页面。
-  同一正式 Electron 用例覆盖支持范围内的 source-empty host、直接 Canvas/SVG、静态审阅优先呈现，以及 owner 失败或迟到时不改变静态数量、文本、TargetRef 或 UI。Node 覆盖 SourceHostResolver 的唯一配对、删除/歧义/类型冲突的静默省略，owner 的窄请求、原始 source SHA/绑定验证、isolated world、一次 rect/PNG、PNG/像素/字节预算、deadline 和 cleanup。Browser 另外证明点击页面 padding 与 App 空白会一起结束编辑、选区和工具栏。测试自动生成受控 AI 输出并执行正式 finalizer，不等待外部模型或真人接力。
-- Review Runtime Snapshot：Review 通过其唯一 owner、请求 envelope 和 PNG parser 完成一个 before/after pair。Electron 回归验证静态审阅先呈现，owner 失败或迟到不改变静态审阅；作者页不能读取 candidate binding、TargetRef、截图或 owner 结果。新 owner 文件必须在 package allowlist、packaged artifact gate 和启动 smoke 中出现。
-- 运行态视觉合同只有一个 Review-only 生产声明：Node 直接验证 contract、32 个 Snapshot 上限、1500ms owner deadline、完整 source SHA 与 contractVersion + sessionId + side 封包；Review 的生产者、消费者不得各自重复边界。测试覆盖 direct Canvas/SVG、source-empty 稳定宿主、删除/歧义/类型冲突、超大 PNG、可见文字哈希不泄露原文、同文字截图的 RGB 噪声预算、无限脚本与 navigation/popup/download/permission 拒绝。任意脚本因果、computed selector、评论范围分组、第二轮确认和 hostile 组合矩阵不再是候选 oracle。
-- 评论标记必须覆盖无 `id`、`data-*`、`name`、`aria-label` 的 class-only 普通目标：即使作者插入或重排同标签兄弟，before bootstrap 也必须仅凭首个私有响应中的冻结源 `sourceNodeId` 路径/指纹绑定解析器创建的原元素并保留 marker。测试还必须证明 HTML、后续 bootstrap 读取和作者可枚举 DOM 均不含该绑定、评论正文、评论 key 或定位映射；恶意作者脚本读取当前页面或 bootstrap 地址后仍不得产生伪造 marker。恶意的作者 capture listener 即使尝试读取 challenge、以同一 challenge 伪造评论端口，也既看不到评论 channel 请求，也收不到 `comment-targets`。
-- Review 只比较一个冻结的 before/after owner pair。任一侧 unavailable、无效、超时、取消或迟到时静默省略该 marker，不影响静态审阅或其他已验证候选；不为动画、随机或任意 hostile 行为启动第二轮取证。
+  返回/重开。正式 Electron 审阅用例必须证明默认“双页 + 全部变化 + 18%”、
+  `全部 / 文字 / 元素` 工具栏、页面/筛选/可见度/导航彼此独立、左右单页和
+  双页均铺满 Canvas，以及采纳和返回修改前的持久化边界。
+  Node 直接覆盖精确字符范围、纯插入/删除镜像、完全重写 singleton 的兼容配对、
+  重复多解不猜、超预算有界退化，以及 projection 只接受 `text/structure` 与
+  `added/removed`。真实 Electron 证明文字替换保留红色删除虚线与绿色逐字实点；
+  真正新增/删除的 `li/tr/卡片/区块` 只显示一个最外层“新增元素 / 删除元素”框，
+  内部元素和文字零重复；新增编号 `<br>` 行仍是文字事实；纯样式、换行、
+  Canvas/SVG 绘制和兄弟重排生成零变化。框与遮罩孔保持同一 canonical geometry，
+  评论、Tab、同步/独立滚动、缩放和采纳闭环继续运行。
 - 审阅滚动回归必须直接证明页面概览会递增手势代次、取消待执行跟随帧并保留语义映射；评论布局契约还必须接受超出 100,000px 的有限长文档坐标，同时继续拒绝非有限值和超过安全上限的坐标。
-- 文案差异算法由 Node 直接用字符范围 oracle 验证：覆盖有意义标点前后的独立替换、纯插入、纯删除、稳定句首词、短中文块的字符级辅助配对、超长无标点文本中的多处远距离精确修改、短间隔归组和稳定句拆分，以及“品均基本持平”替换为“单品效率整体稳定，增幅仅+0.10%”时不能用偶然相同的“品”抵消增删。纯插入/纯删除必须严格镜像，并分别断言 operation、两侧 `evidenceRanges`、语义 `phraseGroups`、无证据侧的不可见 anchor；规划结果不得再携带 `textScope`、`textDensity` 或事实层 block/sentence 决策。仅换行变化使用 layout operation，且两侧均无红绿文字 evidence。语义对齐另以独立 Node oracle 覆盖头/中/尾新增、重复编号与表格类目、多解不猜、显式 ID 移动、普通插入不误判移动、稳定前后边界中的长插入、前后镜像，以及超过 60,000 DP 单元后的有限前瞻回退；结果必须保持父级边界和单调顺序。Electron 正式闭环必须按最终 geometry 验证：编号行修改前零 marker/框/孔/标签、修改后只有第四行；纯删除修改后零框零孔，但内容地图导航落到 collapsed Range 上下文而不是 section 顶；同一元素上的 box-style 与 layout 必须作为两个独立投影事实，分别产生自己的 canonical frame 和 mask hole，且互不覆盖；直接同父级的图片、SVG、Canvas 和输入控件必须作为原子语义单元保留，新增/删除生成自身结构事实，唯一稳定身份的样式变化进入视觉配对而稳定文字邻居零误报；新增表格行在全部模式只有一个 `tr` 框、结构模式只有父行框、文案模式只显示 cell 内 Range 范围，旧重复行零误报。窄 cell 跨行、四行文字、嵌套 inline/列表、authored marker/`div`/`svg` 样式、适应与 100% 缩放、单双页和主窗口 resize 后都必须重新测量；逐字新增实点与删除线必须保持精确，短语/完整行/段落提升分别覆盖三组短语、60% 跨度和三行 75% 阈值，所有文字范围框必须完整包含字符证据、保持一个干净矩形且同组只有一个标签；overlay 与 mask hole 的数量、坐标和 path 逐项相同。
-- 遮罩投影必须另有真实 Electron 像素 oracle：两个不同 canonical facts 的部分重叠纯色夹具中，两个单孔与重叠区均保持清晰，孔外在 0/18/50/100 context visibility 下正确虚化；`all/text/structure/style` 的筛选应与框同步刷新。测试还验证 session/side/projection-epoch 唯一的 SVG luminance mask、white-background/black-hole 语义、mask units，以及 hostile `svg path`、`mask rect`、通用 `path/rect` CSS 和同名前缀 id 均不能污染受管遮罩。不得用 `isPointInFill` 或 DOM attached 断言取代该渲染 oracle。
+- 评论标记必须覆盖无 `id`、`data-*`、`name`、`aria-label` 的 class-only 普通目标；私有绑定、评论正文和 locator map 不进入 authored HTML 或后续 bootstrap，恶意作者 listener 不能抢先伪造评论端口。
 - 应用更新：Node 用伪 updater 证明 stable-only、点击后单次下载、差分开启、普通退出不安装、仅 downloaded 状态可安装和错误降级；Preload/Workbench 合同证明状态快照、下载/安装意图、无 Canvas 完成横幅与重启确认保持窄边界。
 - 本地外部动作：五类 Finder/默认浏览器/项目记录入口由 Node 以真实调用计数证明一次用户意图只执行一次副作用，失败会保留可见错误和可用项目，等待超过旧 retry delay 也不会重放；第二次调用只能来自新的用户意图。Bridge 的只读 GET/HEAD 重试保留在 transport 层，`openFolder` 等命令不复用它。默认浏览器打开还直接执行主进程操作与 sender 权限门，证明 malformed、非 HTML、未知项目、非普通文件和非可信 frame 均不会调用 shell；Workbench 合同只补充证明精确 edit revision 的围栏、写回和 IPC 顺序。
 - 使用数据：Node 使用伪网络端点证明安装 ID 持久、会话 ID 轮换、
@@ -411,14 +380,6 @@ Browser 测试继续证明 SourcePatch forward/inverse 和各编辑入口，但�
 合成 V2 矩阵必须覆盖段首/段中/段尾、非空行内样式交界、注释和文字两侧的不可变原子；代表宿主至少包括标题、段落、列表项、链接、按钮、表格单元格、`pre/code` 和竖排文字。独立 oracle 检查岛外字节完全不变、岛内结果等于受约束的最小规范化、既有语义/注释/原子未改变。IME 用例冻结输入前 Selection，并证明最终候选只在该锚点插入一次。
 
 当前自动化能证明 Chromium/Electron composition 事件序列、Apple 拼音临时 wrapper 轨迹、取消/迟到事件、持久化和 canonical reconcile。它不能诚实证明第三方 macOS 输入法候选窗本身。该能力在出现可无人值守、可复现并有机器 oracle 的 OS 级驱动前只登记为覆盖边界，不设人工门禁，也不伪装成已自动验证。
-
-## 审阅运行态视觉误报普查
-
-`npm run census:review-runtime-visual` 在真实 Electron 下驱动生产捕获 owner 与生产判定函数，测量「图表本不该变却被判确认变化」的比率。它不属于任何门禁层，是一条按需运行的测量车道：这类缺陷此前反复复发，正是因为每次修复都只有人工抽检、无法证伪。
-
-场景来自 `tests/fixtures/review-runtime-chart-scenarios.mjs`，全部为合成页面，且必须同时包含 `unchanged` 与 `changed` 两类期望——只有 `unchanged` 会让「什么都不报」的实现拿满分，只有 `changed` 则测不到误报。`tests/review-runtime-chart-scenarios.test.mjs` 在 node 层锁住 fixture 的宿主绑定契约；一旦路径漂移或宿主不再是源码空元素，捕获会全部返回 unavailable，普查就会在「测空」的状态下显示为干净。
-
-方法、基线与成因归属见 `docs/REVIEW_RUNTIME_VISUAL_CENSUS.md`。改动捕获时序、滚动或判定阈值时，必须用同一命令给出改动前后的对比数字，并同时报告误报与漏报两侧。
 
 ## 证据与新增测试准入
 

@@ -57,7 +57,7 @@ function collectStrongPairs(before, after) {
       if (beforeIndex === null || afterIndex === null || afterIndex === undefined) return;
       usedBefore.add(beforeIndex);
       usedAfter.add(afterIndex);
-      pairs.push({ beforeIndex, afterIndex, match, moved: false });
+      pairs.push({ beforeIndex, afterIndex, match });
     });
   };
   collect(identityKey, "stable-id");
@@ -92,28 +92,6 @@ function longestIncreasingPairSet(pairs) {
     cursor = previous[cursor];
   }
   return selected;
-}
-
-function markMovedStrongPairs(pairs) {
-  const stableOrder = longestIncreasingPairSet(pairs);
-  const beforeOrder = [...pairs].sort((left, right) => (
-    left.beforeIndex - right.beforeIndex || left.afterIndex - right.afterIndex
-  ));
-  const afterOrder = [...pairs].sort((left, right) => (
-    left.afterIndex - right.afterIndex || left.beforeIndex - right.beforeIndex
-  ));
-  const beforeRank = new Map(beforeOrder.map((pair, index) => [pair, index]));
-  const afterRank = new Map(afterOrder.map((pair, index) => [pair, index]));
-  pairs.forEach((pair) => {
-    // Exact equality can prove that two units are the same content, but only
-    // an explicit stable identity is allowed to turn a changed sibling rank
-    // into a user-visible movement fact. The LIS remains only an alignment
-    // anchor: a transposition has two moved stable identities, not an
-    // arbitrary one selected as the anchor.
-    pair.moved = pair.match === "stable-id"
-      && beforeRank.get(pair) !== afterRank.get(pair);
-  });
-  return stableOrder;
 }
 
 function sharedAffinityCount(before, after) {
@@ -185,6 +163,18 @@ function weightedPairScore(before, after) {
     + Math.min(72, sharedAffinities * 24);
 }
 
+function singletonReplacementIsCompatible(before, after) {
+  if (!before || !after) return false;
+  if (before.kind !== after.kind) return false;
+  if (normalizedParent(before) !== normalizedParent(after)) return false;
+  if (identityKey(before) || identityKey(after)) return false;
+  const beforeCompatibility = compatibilityKey(before);
+  return Boolean(
+    beforeCompatibility
+    && beforeCompatibility === compatibilityKey(after),
+  );
+}
+
 function uniqueBestCandidates(before, after) {
   const scores = Array.from({ length: before.length }, () => new Float64Array(after.length));
   const beforeBest = Array.from({ length: before.length }, () => ({ score: Number.NEGATIVE_INFINITY, count: 0 }));
@@ -225,6 +215,23 @@ function uniqueBestCandidates(before, after) {
 function matrixIntervalPairs(before, after, beforeIndexes, afterIndexes) {
   const beforeUnits = beforeIndexes.map((index) => before[index]);
   const afterUnits = afterIndexes.map((index) => after[index]);
+  // Stable siblings on both sides can isolate one authored element whose copy
+  // was completely rewritten. Text similarity then has no anchor, but treating
+  // the slot as one removal plus one insertion would hide the text comparison
+  // behind two element marks. A singleton interval with the same own structural
+  // signature is the only positional fallback: repeated or multi-item ranges
+  // remain unmatched instead of being guessed.
+  if (
+    beforeUnits.length === 1
+    && afterUnits.length === 1
+    && singletonReplacementIsCompatible(beforeUnits[0], afterUnits[0])
+  ) {
+    return [{
+      beforeIndex: beforeIndexes[0],
+      afterIndex: afterIndexes[0],
+      match: "weighted",
+    }];
+  }
   const candidateScore = uniqueBestCandidates(beforeUnits, afterUnits);
   const columnCount = afterUnits.length + 1;
   const scores = new Float64Array((beforeUnits.length + 1) * columnCount);
@@ -253,12 +260,12 @@ function matrixIntervalPairs(before, after, beforeIndexes, afterIndexes) {
   let afterIndex = 0;
   while (beforeIndex < beforeUnits.length || afterIndex < afterUnits.length) {
     if (beforeIndex >= beforeUnits.length) {
-      pairs.push({ beforeIndex: null, afterIndex: afterIndexes[afterIndex], match: "unmatched", moved: false });
+      pairs.push({ beforeIndex: null, afterIndex: afterIndexes[afterIndex], match: "unmatched" });
       afterIndex += 1;
       continue;
     }
     if (afterIndex >= afterUnits.length) {
-      pairs.push({ beforeIndex: beforeIndexes[beforeIndex], afterIndex: null, match: "unmatched", moved: false });
+      pairs.push({ beforeIndex: beforeIndexes[beforeIndex], afterIndex: null, match: "unmatched" });
       beforeIndex += 1;
       continue;
     }
@@ -268,15 +275,14 @@ function matrixIntervalPairs(before, after, beforeIndexes, afterIndexes) {
         beforeIndex: beforeIndexes[beforeIndex],
         afterIndex: afterIndexes[afterIndex],
         match: "weighted",
-        moved: false,
       });
       beforeIndex += 1;
       afterIndex += 1;
     } else if (decision === 1) {
-      pairs.push({ beforeIndex: beforeIndexes[beforeIndex], afterIndex: null, match: "unmatched", moved: false });
+      pairs.push({ beforeIndex: beforeIndexes[beforeIndex], afterIndex: null, match: "unmatched" });
       beforeIndex += 1;
     } else {
-      pairs.push({ beforeIndex: null, afterIndex: afterIndexes[afterIndex], match: "unmatched", moved: false });
+      pairs.push({ beforeIndex: null, afterIndex: afterIndexes[afterIndex], match: "unmatched" });
       afterIndex += 1;
     }
   }
@@ -366,37 +372,36 @@ function boundedIntervalPairs(before, after, beforeIndexes, afterIndexes, lookah
     );
     if (match) {
       while (beforeCursor < match.beforeOffset) {
-        pairs.push({ beforeIndex: beforeIndexes[beforeCursor], afterIndex: null, match: "unmatched", moved: false });
+        pairs.push({ beforeIndex: beforeIndexes[beforeCursor], afterIndex: null, match: "unmatched" });
         beforeCursor += 1;
       }
       while (afterCursor < match.afterOffset) {
-        pairs.push({ beforeIndex: null, afterIndex: afterIndexes[afterCursor], match: "unmatched", moved: false });
+        pairs.push({ beforeIndex: null, afterIndex: afterIndexes[afterCursor], match: "unmatched" });
         afterCursor += 1;
       }
       pairs.push({
         beforeIndex: beforeIndexes[beforeCursor],
         afterIndex: afterIndexes[afterCursor],
         match: "weighted",
-        moved: false,
       });
       beforeCursor += 1;
       afterCursor += 1;
       continue;
     }
     if (afterIndexes.length - afterCursor > beforeIndexes.length - beforeCursor) {
-      pairs.push({ beforeIndex: null, afterIndex: afterIndexes[afterCursor], match: "unmatched", moved: false });
+      pairs.push({ beforeIndex: null, afterIndex: afterIndexes[afterCursor], match: "unmatched" });
       afterCursor += 1;
     } else {
-      pairs.push({ beforeIndex: beforeIndexes[beforeCursor], afterIndex: null, match: "unmatched", moved: false });
+      pairs.push({ beforeIndex: beforeIndexes[beforeCursor], afterIndex: null, match: "unmatched" });
       beforeCursor += 1;
     }
   }
   while (beforeCursor < beforeIndexes.length) {
-    pairs.push({ beforeIndex: beforeIndexes[beforeCursor], afterIndex: null, match: "unmatched", moved: false });
+    pairs.push({ beforeIndex: beforeIndexes[beforeCursor], afterIndex: null, match: "unmatched" });
     beforeCursor += 1;
   }
   while (afterCursor < afterIndexes.length) {
-    pairs.push({ beforeIndex: null, afterIndex: afterIndexes[afterCursor], match: "unmatched", moved: false });
+    pairs.push({ beforeIndex: null, afterIndex: afterIndexes[afterCursor], match: "unmatched" });
     afterCursor += 1;
   }
   return pairs;
@@ -422,7 +427,7 @@ export function alignReviewSemanticUnits(before, after, options = {}) {
   );
   const lookahead = Math.max(1, Math.trunc(options.lookahead || DEFAULT_LOOKAHEAD));
   const strong = collectStrongPairs(before, after);
-  const stableOrder = markMovedStrongPairs(strong.pairs);
+  const stableOrder = longestIncreasingPairSet(strong.pairs);
   const stableAnchors = strong.pairs
     .filter((pair) => stableOrder.has(pair))
     .sort((left, right) => left.beforeIndex - right.beforeIndex);

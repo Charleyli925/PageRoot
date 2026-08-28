@@ -71,9 +71,6 @@ const previewChannels = Object.freeze({
   createSession: "html-preview:create-session",
   revokeSession: "html-preview:revoke-session",
 });
-const reviewRuntimeSnapshotChannels = Object.freeze({
-  capture: "html-review-runtime-snapshots:capture",
-});
 const editRuntimeChannels = Object.freeze({
   prepare: "html-edit-runtime:prepare",
   revoke: "html-edit-runtime:revoke",
@@ -348,13 +345,6 @@ const previewApi = Object.freeze({
   ),
 });
 
-const reviewRuntimeSnapshotApi = Object.freeze({
-  capture: (payload) => invokeProject(
-    reviewRuntimeSnapshotChannels.capture,
-    payload,
-  ),
-});
-
 const editRuntimeApi = Object.freeze({
   prepare: (payload) => invokeProject(editRuntimeChannels.prepare, payload),
   revoke: (sessionId) => invokeProject(editRuntimeChannels.revoke, sessionId),
@@ -596,7 +586,6 @@ contextBridge.exposeInMainWorld("htmlAIProjects", projectsApi);
 contextBridge.exposeInMainWorld("htmlAIIntegrations", integrationsApi);
 contextBridge.exposeInMainWorld("htmlAIUpdates", updatesApi);
 contextBridge.exposeInMainWorld("htmlAIPreview", previewApi);
-contextBridge.exposeInMainWorld("htmlAIReviewRuntimeSnapshots", reviewRuntimeSnapshotApi);
 contextBridge.exposeInMainWorld("htmlAIEditRuntime", editRuntimeApi);
 contextBridge.exposeInMainWorld("htmlAIRuntime", runtimeConfig);
 contextBridge.exposeInMainWorld("htmlAIAppLifecycle", appLifecycleApi);

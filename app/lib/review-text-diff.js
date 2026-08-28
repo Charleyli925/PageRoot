@@ -411,7 +411,7 @@ export function readableReviewTextFootprintPlan(
   const afterRanges = mergeReviewTextRanges(differences.after || []);
   const operation = beforeRanges.length
     ? afterRanges.length ? "replace" : "delete"
-    : afterRanges.length ? "insert" : differences.layout ? "layout" : "none";
+    : afterRanges.length ? "insert" : "none";
   return {
     operation,
     before: {

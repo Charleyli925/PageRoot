@@ -437,28 +437,14 @@ prepare, load, audit or deadline failure selects the ordinary static frame;
 there is no Edit cache, bitmap/Blob projection, hidden probe, background
 promotion or post-interaction iframe replacement.
 
-Review alone uses one `SourceHostResolver`, one narrow owner request schema,
-one `RuntimeSnapshotOwner` and one trusted PNG parser. The resolver admits only
-direct source Canvas/SVG roots and source-empty hosts with a unique stable
-source binding. It does not infer candidates from JavaScript, runtime DOM,
-computed selectors, comments, arbitrary HTML or `tbody`.
-
-Review publishes static before/after content and first-paint readiness before
-starting optional runtime-visual capture. Its script-enabled frames keep an
-opaque origin; a shared frame-local memory Storage compatibility bootstrap may
-prevent ordinary authored chart scripts from aborting, but grants no durable or
-shared storage. Hidden capture starts only after both visible frames have had a
-compositor turn and never gates navigation, return or Candidate acceptance.
-
-The main-process owner creates one hidden authored-page window and preview
-session per active Review capture; replacement, timeout and disposal destroy
-both. It accepts only exact source HTML/SHA, `before`/`after` side, viewport and
-frozen bindings, then confirms the host in an isolated world before bounded PNG
-capture. A PNG has no drain, persistence, review-diff, source-history or AI
-authority. The renderer request never carries a project path. For an active
-desktop document, main may supply the preview protocol with only that
-document's declared, contained relative-asset allowlist; the authored page
-still receives no filesystem or project capability.
+Review has no runtime-snapshot owner or PNG evidence path. It compares only the
+frozen before/after HTML and emits bounded text facts plus outermost
+element-presence facts. Its script-enabled frames may keep an opaque origin and
+use a frame-local memory Storage compatibility bootstrap so ordinary authored
+scripts do not abort, but that compatibility surface grants no durable or
+shared storage and produces no Review facts. Position, order, attributes, CSS,
+layout, computed style, Canvas/SVG pixels and runtime-discovered nodes remain
+outside the Review contract.
 
 Prepared formal-review documents are owned by a cancellable
 `ReviewAnalysisSession` keyed to exact operation/source/comment identity. Its
@@ -482,50 +468,18 @@ sandbox/bootstrap shell with no change, comment or runtime facts, then replaces
 it with complete analyzed documents. The shell is presentation only and cannot
 approve, promote or alter either source.
 
-Formal Review has an optional, narrower runtime-snapshot supplement. One
-`SourceHostResolver` pairs only direct source Canvas/SVG roots and source-empty
-stable hosts from `SourceIndex`/`TargetRef`; it does not use changed-script
-causality, computed selectors, comment scope or runtime DOM guessing. The
-trusted `AiReviewWorkspace` begins static Review immediately and, after both
-frames are ready, sends exact HTML, side-specific source SHA, viewport and those
-frozen bindings through one narrow preload call. Inline/browser review remains
-static-only.
+Formal Review has no runtime-snapshot supplement. The trusted
+`AiReviewWorkspace` begins with the immutable static document pair and keeps
+the analysis, navigation, masking and acceptance paths display-only. Inline
+and browser Review use the same static contract.
 
 Comment location remains a separate private capability. An opaque initial
 bootstrap binding may identify a frozen before target for comment geometry, but
-it neither reaches authored markup nor authorizes runtime host discovery.
-Electron's one-use `RuntimeSnapshotOwner` owns capture. It validates the raw
-source path/tag/identity, creates a non-persistent preview session and hidden
-sandboxed window, denies navigation/popups/downloads/webviews/permissions and
-non-preview requests, and reads the exact rendered host only in an isolated
-world. A source-empty host must contain visible Canvas/SVG paint. One rect pass
-and at most one `capturePage` PNG per host are bounded by the shared contract;
-the owner validates PNG shape, and trusted renderer memory validates bytes,
-dimensions, SHA-256 and aggregate budgets. Raw DOM/node handles never cross the
-owner boundary, and no TargetRef or PNG enters either review frame.
-
-The one before/after snapshot pair is compared once. Captured layout dimensions
-and the owner-isolated visible DOM/SVG-text hash are strict. When both match,
-different PNG hashes are decoded only in trusted renderer memory and emit an
-opaque `{candidateKey, changeId}` fact only above the fixed `0.04` mean absolute
-RGB-channel error budget; byte/encoder variance and small raster tile noise do
-not emit a fact. Raw text never leaves the owner, and this path has no OCR,
-script causality or second pair.
-The candidate key maps back to an exact per-side source `Element` captured by
-the first parser-blocking bootstrap from a path plus complete narrow
-fingerprint. The trusted parent transfers the result through a distinct random-
-challenge private port fenced by contract version, session, side and full
-source SHA. Candidate keys/bindings never enter authored HTML, DOM attributes,
-ordinary window messages or later bootstrap reads. The bootstrap stores runtime
-facts only in a disposable `Map<Element, facts[]>` and unions them with static
-serialized facts; outline IDs stay navigation-only. Replacement, disconnect or
-fingerprint drift removes that runtime fact without outline fallback. A missing
-desktop API, unmapped host, malformed envelope, timeout, cancellation or late
-result is a silent static-only outcome. There is no second fresh pair,
-confirmation coordinator, runtime UI or Review cache. Edit does
-not invoke the resolver or owner and has no snapshot state; its separate
-one-shot author-runtime session is governed by ADR 0025 and cannot consume
-Review bindings, PNGs or facts. Edit screenshot/capture/projection count must
+it neither reaches authored markup nor authorizes runtime host discovery. No
+TargetRef, source binding or runtime output enters either review frame's
+authored HTML or the Review fact list. Edit does not invoke any Review resolver
+or owner and has no Review snapshot state; its separate one-shot author-runtime
+session is governed by ADR 0025. Edit screenshot/capture/projection count must
 be 0.
 
 For each Review side and active filter, overlay frames and context masking

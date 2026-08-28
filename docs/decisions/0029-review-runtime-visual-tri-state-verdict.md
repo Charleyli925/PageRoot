@@ -1,6 +1,6 @@
 # ADR 0029: Review runtime visual comparison uses a tri-state verdict
 
-- Status: Accepted
+- Status: Superseded by ADR 0046
 - Date: 2026-08-20
 - Extends: ADR 0021
 

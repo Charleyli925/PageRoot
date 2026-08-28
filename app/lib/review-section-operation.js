@@ -17,11 +17,6 @@ const TEXT_INSERT = "insert";
 const TEXT_DELETE = "delete";
 const STRUCTURE_ADDED = "added";
 const STRUCTURE_REMOVED = "removed";
-// "none" is the only text operation that carries no change at all. "layout"
-// looks harmless but has its own caption (换行调整) in this vocabulary, so a
-// section that both gains content and reflows is not a pure insertion.
-// A footprint is only ever labelled "layout" when nothing textual changed, so
-// treating it as disqualifying never swallows a genuine insertion.
 const NEUTRAL_TEXT_OPERATIONS = new Set(["", "none"]);
 
 /**
@@ -37,8 +32,8 @@ const NEUTRAL_TEXT_OPERATIONS = new Set(["", "none"]);
  * The answer is deliberately exclusive. "新增内容" and "…调整" are alternatives
  * in this vocabulary rather than labels that stack, so a section reports an
  * insertion only when every change it contains is one. A section that both
- * gains and loses content, or that carries any rewrite, reflow, in-place or
- * move evidence, keeps the type-derived wording — claiming "新增内容" there
+ * gains and loses content, or that carries any rewrite or unknown evidence,
+ * keeps the type-derived wording — claiming "新增内容" there
  * would describe one part of the change and hide the rest.
  */
 export function reviewSectionChangeOperation(marks) {

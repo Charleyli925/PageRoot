@@ -35,8 +35,9 @@ retry that cannot change the precondition is a loop, not recovery.
 
 ### Presentation and edit eligibility — fail-open
 
-Layout preflight, hover/outline trust, Review runtime capture, comment-marker
-location and UI projection lag. Let the user continue. Enter edit first.
+Layout preflight, hover/outline trust, Review annotation projection,
+comment-marker location and UI projection lag. Let the user continue. Enter
+edit first.
 Keep a comment whose target failed, marked for relink. Hide a failed outline;
 do not forbid editing.
 

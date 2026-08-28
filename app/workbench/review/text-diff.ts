@@ -6,12 +6,8 @@ import {
 import {
   flattenReviewSemanticPairs,
 } from "./semantic-pairing";
-import {
-  sameBreakLayout,
-} from "./parse";
 import type {
   ReviewSemanticPairGraph,
-  ReviewSemanticPairNode,
   ReviewSemanticUnit,
   ReviewTextEvidenceGroup,
   ReviewTextInventory,
@@ -129,35 +125,6 @@ export function markSemanticTextFootprintOwner(
   );
 }
 
-export function markSemanticAllText(
-  pair: ReviewSemanticPairNode,
-  unit: ReviewSemanticUnit,
-  tone: "removed" | "added",
-  groupId: string,
-): boolean {
-  const inventory = unit.inventory;
-  if (!inventory?.text.trim()) return false;
-  const differences = tone === "added"
-    ? { before: [], after: [{ start: 0, end: inventory.text.length }] }
-    : { before: [{ start: 0, end: inventory.text.length }], after: [] };
-  const plan = readableReviewTextFootprintPlan(
-    tone === "added" ? "" : inventory.text,
-    tone === "added" ? inventory.text : "",
-    differences,
-  );
-  const side = tone === "added" ? plan.after : plan.before;
-  const group: ReviewTextEvidenceGroup = {
-    id: groupId,
-    ranges: side.phraseGroups.flat(),
-    operation: plan.operation,
-    semanticOwnerId: pair.semanticOwnerId,
-    geometryOwnerId: pair.geometryOwnerId,
-  };
-  markSemanticTextFootprintOwner(unit, [group]);
-  wrapTextRanges(inventory, [group], tone);
-  return true;
-}
-
 export function markSemanticTextDifferences(graph: ReviewSemanticPairGraph): {
   changed: boolean;
 } {
@@ -168,28 +135,25 @@ export function markSemanticTextDifferences(graph: ReviewSemanticPairGraph): {
     const afterInventory = pair.after?.inventory || null;
     if (!beforeInventory && !afterInventory) return;
     const groupBase = `text-${++groupSequence}`;
-    if (!beforeInventory && pair.after) {
-      changed = markSemanticAllText(pair, pair.after, "added", `${groupBase}-1`) || changed;
-      return;
-    }
-    if (!afterInventory && pair.before) {
-      changed = markSemanticAllText(pair, pair.before, "removed", `${groupBase}-1`) || changed;
-      return;
-    }
-    if (!beforeInventory || !afterInventory || !pair.before || !pair.after) return;
-    const layoutChanged = !sameBreakLayout(beforeInventory, afterInventory);
-    const differences = beforeInventory.text === afterInventory.text
+    // Whole-element insertion and deletion are represented once by the outer
+    // element marker. One-sided logical text units such as an added <br> line
+    // remain text evidence because no element was added or removed.
+    const insideWholeElementChange = Boolean(
+      pair.before?.element.closest("[data-pageroot-review-structure]")
+      || pair.after?.element.closest("[data-pageroot-review-structure]"),
+    );
+    if (insideWholeElementChange) return;
+    const beforeText = beforeInventory?.text || "";
+    const afterText = afterInventory?.text || "";
+    const differences = beforeText === afterText
       ? { before: [], after: [] }
-      : sentenceAwareTextDifferences(beforeInventory.text, afterInventory.text);
+      : sentenceAwareTextDifferences(beforeText, afterText);
     const plan = readableReviewTextFootprintPlan(
-      beforeInventory.text,
-      afterInventory.text,
-      { ...differences, layout: layoutChanged },
+      beforeText,
+      afterText,
+      differences,
     );
     if (plan.operation === "none") return;
-    if (plan.operation === "layout") {
-      return;
-    }
     const createGroups = (
       ranges: TextRange[][],
       geometryOwnerId: string,
@@ -202,22 +166,22 @@ export function markSemanticTextDifferences(graph: ReviewSemanticPairGraph): {
     }));
     const beforeGroups = createGroups(plan.before.phraseGroups, pair.geometryOwnerId);
     const afterGroups = createGroups(plan.after.phraseGroups, pair.geometryOwnerId);
-    if (beforeGroups.length) {
+    if (beforeGroups.length && pair.before && beforeInventory) {
       markSemanticTextFootprintOwner(pair.before, beforeGroups);
       wrapTextRanges(beforeInventory, beforeGroups, "removed");
       changed = true;
-    } else if (plan.before.anchorOffset !== null) {
+    } else if (plan.before.anchorOffset !== null && pair.before && beforeInventory) {
       markTextAnchor(
         pair.before.element,
         `${groupBase}-1`,
         reviewTextAnchorOffset(pair.before.element, beforeInventory) + plan.before.anchorOffset,
       );
     }
-    if (afterGroups.length) {
+    if (afterGroups.length && pair.after && afterInventory) {
       markSemanticTextFootprintOwner(pair.after, afterGroups);
       wrapTextRanges(afterInventory, afterGroups, "added");
       changed = true;
-    } else if (plan.after.anchorOffset !== null) {
+    } else if (plan.after.anchorOffset !== null && pair.after && afterInventory) {
       markTextAnchor(
         pair.after.element,
         `${groupBase}-1`,

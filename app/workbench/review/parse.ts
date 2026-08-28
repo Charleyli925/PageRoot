@@ -71,7 +71,6 @@ export function reviewTextInventory(element: Element | null): ReviewTextInventor
 
 export const normalizedTextCache = new WeakMap<Element, string>();
 export const normalizedMarkupCache = new WeakMap<Element, string>();
-export const visualSignatureCache = new WeakMap<Element, string>();
 export const classTokenCache = new WeakMap<Element, string[]>();
 export const conciseTextCache = new WeakMap<Element, string>();
 
@@ -122,7 +121,7 @@ export function ancestorMarkupSignature(element: Element): string {
   return ancestors.join("\u001e");
 }
 
-export const VISUAL_ATTRIBUTE_NAMES = new Set([
+export const PRESENTATION_ATTRIBUTE_NAMES = new Set([
   "align",
   "aria-hidden",
   "bgcolor",
@@ -186,7 +185,7 @@ export function reviewAttributeRole(attribute: Attr): ReviewAttributeRole {
   const name = attribute.name.toLowerCase();
   if (name.startsWith("data-pageroot-")) return "disposable";
   if (REVIEW_STABLE_IDENTITY_ATTRIBUTE_NAMES.has(name)) return "stable-identity";
-  if (VISUAL_ATTRIBUTE_NAMES.has(name)) return "presentation";
+  if (PRESENTATION_ATTRIBUTE_NAMES.has(name)) return "presentation";
   return "structural";
 }
 
@@ -240,26 +239,6 @@ export function exactSubtreeSignature(element: Element, signatures: ReviewSignat
     .replace(/>\s+</gu, "><")
     .trim();
   signatures.exactSubtree.set(element, value);
-  return value;
-}
-
-export function normalizedCss(value: string): string {
-  return value
-    .replace(/\/\*[\s\S]*?\*\//g, "")
-    .replace(/\s+/g, " ")
-    .replace(/\s*([:;,{}>+~])\s*/g, "$1")
-    .trim();
-}
-
-export function elementVisualSignature(element: Element): string {
-  const cached = visualSignatureCache.get(element);
-  if (cached !== undefined) return cached;
-  const value = [...element.attributes]
-    .filter((attribute) => VISUAL_ATTRIBUTE_NAMES.has(attribute.name.toLowerCase()))
-    .sort((left, right) => left.name.localeCompare(right.name))
-    .map((attribute) => `${attribute.name.toLowerCase()}=${attribute.value}`)
-    .join("\u001f");
-  visualSignatureCache.set(element, value);
   return value;
 }
 
@@ -759,16 +738,15 @@ export function helperText(
   afterPresent: boolean,
   pair?: SectionPair,
 ): string {
-  if (!beforePresent) return "新增内容";
-  if (!afterPresent) return "删除内容";
+  if (!beforePresent) return "新增元素";
+  if (!afterPresent) return "删除元素";
   // A section that exists on both sides can still be a pure insertion or
   // removal inside itself; presence alone cannot express that.
   const operation = pair ? reviewSectionChangeOperation(sectionChangeMarks(pair)) : null;
-  if (operation === "insert") return "新增内容";
-  if (operation === "delete") return "删除内容";
-  if (pair?.moved && types.length === 1 && types[0] === "structure") return "位置调整";
+  if (operation === "insert") return "新增元素";
+  if (operation === "delete") return "删除元素";
   const labels = types.map((type) => (
-    type === "text" ? "文本" : type === "structure" ? "结构" : "视觉"
+    type === "text" ? "文字" : "元素"
   ));
   return `${[...new Set(labels)].join("、")}调整`;
 }
@@ -892,11 +870,6 @@ export const GENERIC_REVIEW_TEXT_CLASSES = new Set([
     "active", "card", "col", "column", "container", "content", "grid", "item",
     "main", "panel", "row", "section", "selected", "wrap", "wrapper",
 ]);
-
-export function sameBreakLayout(before: ReviewTextInventory, after: ReviewTextInventory): boolean {
-  return before.breakOffsets.length === after.breakOffsets.length
-    && before.breakOffsets.every((offset, index) => offset === after.breakOffsets[index]);
-}
 
 export function reviewProjectionFactsForElement(element: Element): ReviewProjectionFact[] {
   return parseReviewProjectionFacts(element.getAttribute(REVIEW_PROJECTION_FACTS_ATTRIBUTE));

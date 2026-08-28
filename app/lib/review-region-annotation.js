@@ -32,7 +32,6 @@
 /**
  * @typedef {Object} ReviewRegionAnnotation
  * @property {string} changeId
- * @property {boolean} suspected
  * @property {number} left
  * @property {number} top
  * @property {number} right
@@ -130,10 +129,8 @@ export function reviewRegionAnnotations(records, options = {}) {
   });
   return clusters.map((cluster) => {
     const kinds = [];
-    let suspected = false;
     let carrier = cluster.entries[0];
     cluster.entries.forEach((entry) => {
-      suspected = suspected || entry.record.tone === "suspected";
       if (
         entry.top < carrier.top
         || (entry.top === carrier.top && entry.left < carrier.left)
@@ -159,7 +156,6 @@ export function reviewRegionAnnotations(records, options = {}) {
     )).join(" · ") || summary;
     return {
       changeId: cluster.changeId,
-      suspected,
       left: cluster.left,
       top: cluster.top,
       right: cluster.right,

@@ -8,7 +8,6 @@ import {
 import {
   classTokens,
   createReviewSignatureCache,
-  elementVisualSignature,
   exactSubtreeSignature,
   GENERIC_REVIEW_TEXT_CLASSES,
   hasClassRole,
@@ -336,7 +335,6 @@ export function* buildReviewSemanticPairGraphSteps(
     before: ReviewSemanticUnit | null,
     after: ReviewSemanticUnit | null,
     match: ReviewSemanticAlignmentMatch,
-    moved: boolean,
     inheritedOwnerId?: string,
   ): Generator<"semantic-row", ReviewSemanticPairNode, void> {
     const ownerId = inheritedOwnerId || semanticOwner();
@@ -344,7 +342,6 @@ export function* buildReviewSemanticPairGraphSteps(
       before,
       after,
       match,
-      moved,
       semanticOwnerId: ownerId,
       geometryOwnerId: geometryOwner(before?.element || null, after?.element || null),
       structureFallback: false,
@@ -357,7 +354,6 @@ export function* buildReviewSemanticPairGraphSteps(
           before ? child : null,
           after ? child : null,
           "unmatched",
-          false,
           ownerId,
         ));
       }
@@ -379,10 +375,10 @@ export function* buildReviewSemanticPairGraphSteps(
     ) {
       node.structureFallback = true;
       for (const child of before.children) {
-        node.children.push(yield* createPair(child, null, "unmatched", false, ownerId));
+        node.children.push(yield* createPair(child, null, "unmatched", ownerId));
       }
       for (const child of after.children) {
-        node.children.push(yield* createPair(null, child, "unmatched", false, ownerId));
+        node.children.push(yield* createPair(null, child, "unmatched", ownerId));
       }
       semanticRowsSinceYield += 1;
       if (semanticRowsSinceYield >= 24) {
@@ -401,7 +397,6 @@ export function* buildReviewSemanticPairGraphSteps(
         childPair.beforeIndex === null ? null : before.children[childPair.beforeIndex],
         childPair.afterIndex === null ? null : after.children[childPair.afterIndex],
         childPair.match,
-        childPair.moved,
       ));
     }
     if (node.before?.kind === "table-row" || node.before?.kind === "list-item"
@@ -422,7 +417,6 @@ export function* buildReviewSemanticPairGraphSteps(
       beforeRoot,
       afterRoot,
       beforeRoot && afterRoot ? "weighted" : "unmatched",
-      Boolean(pair.moved),
     ),
     signatures,
   };
@@ -432,11 +426,7 @@ export function flattenReviewSemanticPairs(root: ReviewSemanticPairNode): Review
   return [root, ...root.children.flatMap(flattenReviewSemanticPairs)];
 }
 
-export function selfPresentationSignature(element: Element): string {
-  return elementVisualSignature(element);
-}
-
-export function visualElementDescriptor(
+export function sectionElementDescriptor(
   element: Element,
   parentKey: string,
   signatures: ReviewSignatureCache,
@@ -449,52 +439,6 @@ export function visualElementDescriptor(
     compatibilitySignature: selfCompatibilitySignature(element, signatures),
     parentKey,
   };
-}
-
-/**
- * Element-level visual analysis deliberately shares the semantic matching
- * kernel. It only ever receives direct children of an already paired parent,
- * so it cannot turn an unrelated page descendant into a visual counterpart.
- */
-export function alignElementSiblings(
-  before: Element[],
-  after: Element[],
-  signatures: ReviewSignatureCache,
-): Map<Element, Element> {
-  const parentKey = "paired-element-siblings";
-  const assignments = new Map<Element, Element>();
-  const pairs = alignReviewSemanticUnits(
-    before.map((element) => visualElementDescriptor(element, parentKey, signatures)),
-    after.map((element) => visualElementDescriptor(element, parentKey, signatures)),
-  );
-  pairs.forEach((pair) => {
-    if (pair.beforeIndex === null || pair.afterIndex === null) return;
-    assignments.set(before[pair.beforeIndex], after[pair.afterIndex]);
-  });
-  return assignments;
-}
-
-export function pairedVisualElements(
-  beforeRoot: Element,
-  afterRoot: Element,
-  signatures: ReviewSignatureCache,
-): Array<{ before: Element; after: Element }> {
-  const pairs: Array<{ before: Element; after: Element }> = [{
-    before: beforeRoot,
-    after: afterRoot,
-  }];
-  for (let cursor = 0; cursor < pairs.length; cursor += 1) {
-    const pair = pairs[cursor];
-    const siblings = alignElementSiblings(
-      [...pair.before.children],
-      [...pair.after.children],
-      signatures,
-    );
-    siblings.forEach((afterElement, beforeElement) => {
-      pairs.push({ before: beforeElement, after: afterElement });
-    });
-  }
-  return pairs;
 }
 
 export function semanticElementName(element: Element): string {
@@ -525,13 +469,12 @@ export function pairSections(before: Element[], after: Element[]): SectionPair[]
       : `section-document${panelContext}`;
   };
   return alignReviewSemanticUnits(
-    before.map((element) => visualElementDescriptor(element, parentKey(element), signatures)),
-    after.map((element) => visualElementDescriptor(element, parentKey(element), signatures)),
+    before.map((element) => sectionElementDescriptor(element, parentKey(element), signatures)),
+    after.map((element) => sectionElementDescriptor(element, parentKey(element), signatures)),
   ).map((pair) => ({
     before: pair.beforeIndex === null ? null : before[pair.beforeIndex],
     after: pair.afterIndex === null ? null : after[pair.afterIndex],
     beforeIndex: pair.beforeIndex ?? -1,
     afterIndex: pair.afterIndex ?? -1,
-    ...(pair.moved ? { moved: true } : {}),
   }));
 }

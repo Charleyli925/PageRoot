@@ -1,26 +1,4 @@
 import {
-  runtimeSnapshotCaptureCandidate,
-  RUNTIME_SNAPSHOT_HOST_ENUMERATION_LIMIT,
-  resolveRuntimeSnapshotHosts,
-} from "../../domain/runtime-snapshot-hosts.js";
-import type {
-  RuntimeSnapshotCaptureCandidate,
-} from "../../domain/runtime-snapshot-hosts.js";
-import {
-  RUNTIME_VISUAL_CONTRACT,
-  RUNTIME_VISUAL_CONTRACT_VERSION,
-} from "../../domain/runtime-visual-contract.js";
-import {
-  REVIEW_PROJECTION_FACTS_PER_ELEMENT_LIMIT,
-} from "../../lib/review-projection-facts.js";
-import { REVIEW_RUNTIME_VISUAL_CANDIDATE_LIMIT } from "../../lib/review-runtime-visual.js";
-import type {
-  ReviewRuntimeVisualCandidate,
-} from "../../lib/review-runtime-visual.js";
-import {
-  REVIEW_SOURCE_NODE_ATTRIBUTE,
-} from "../../lib/review-comment-source-map.js";
-import {
   aggregateReviewBadgeLabels,
   reviewBadgeFactCount,
   reviewBadgeLabelText,
@@ -35,19 +13,13 @@ import {
   reviewTextEvidenceIsPunctuationCode,
   reviewTextEvidenceMarkGeometry,
 } from "../../lib/review-text-evidence-marks.js";
-import { buildSourceIndex } from "../../lib/source-patch-core.js";
 import {
-  REVIEW_RUNTIME_VISUAL_SOURCE_BOX_ATTRIBUTES,
+  REVIEW_BOOTSTRAP_IDENTITY_ATTRIBUTE_LIMIT,
+  REVIEW_COMMENT_BINDING_SOURCE_BOX_ATTRIBUTES,
 } from "./constants";
-import {
-  reviewProjectionFactsForElement,
-} from "./parse";
 import type {
   ReviewBootstrapElementBinding,
   ReviewCommentBootstrapBinding,
-  ReviewOutlineItem,
-  ReviewRuntimeBootstrapBinding,
-  ReviewRuntimeVisualAnnotations,
   ReviewSide,
 } from "./types";
 
@@ -72,7 +44,7 @@ export function reviewBootstrapElementBinding(
   if (current !== root) return null;
   const nonReviewAttributes = [...element.attributes].filter((attribute) => (
     !attribute.name.startsWith("data-pageroot-")
-    && !REVIEW_RUNTIME_VISUAL_SOURCE_BOX_ATTRIBUTES.includes(attribute.name)
+    && !REVIEW_COMMENT_BINDING_SOURCE_BOX_ATTRIBUTES.includes(attribute.name)
   ));
   const identityAttributePriority = (name: string) => {
     if (name === "id") return 0;
@@ -91,12 +63,12 @@ export function reviewBootstrapElementBinding(
       || leftName.localeCompare(rightName)
       || leftValue.localeCompare(rightValue)
     ))
-    .slice(0, RUNTIME_VISUAL_CONTRACT.identityAttributeLimit);
+    .slice(0, REVIEW_BOOTSTRAP_IDENTITY_ATTRIBUTE_LIMIT);
   // A truncated fingerprint is never evidence of identity. Even an id/name
   // anchor can be shared by an authored parser decoy while an omitted
   // attribute distinguishes the real source target, so drop every binding
   // that cannot be represented completely.
-  if (nonReviewAttributes.length > RUNTIME_VISUAL_CONTRACT.identityAttributeLimit) return null;
+  if (nonReviewAttributes.length > REVIEW_BOOTSTRAP_IDENTITY_ATTRIBUTE_LIMIT) return null;
   const identityText = includeIdentityText
     ? (element.textContent || "").replace(/\s+/gu, " ").trim().slice(0, 1024)
     : "";
@@ -104,7 +76,7 @@ export function reviewBootstrapElementBinding(
     path,
     tagName: element.tagName,
     sourceBoxSignature: JSON.stringify(
-      REVIEW_RUNTIME_VISUAL_SOURCE_BOX_ATTRIBUTES.map((attribute) => [
+      REVIEW_COMMENT_BINDING_SOURCE_BOX_ATTRIBUTES.map((attribute) => [
         attribute,
         element.getAttribute(attribute),
       ]),
@@ -114,183 +86,24 @@ export function reviewBootstrapElementBinding(
   };
 }
 
-export function sourceElementsByNodeId(document: Document): Map<string, Element> {
-  const elements = new Map<string, Element>();
-  document.querySelectorAll(`[${REVIEW_SOURCE_NODE_ATTRIBUTE}]`).forEach((element) => {
-    const sourceNodeId = element.getAttribute(REVIEW_SOURCE_NODE_ATTRIBUTE);
-    if (sourceNodeId) elements.set(sourceNodeId, element);
-  });
-  return elements;
-}
-
-export function runtimeOutlineId(element: Element): string | null {
-  return element.closest("[data-pageroot-outline-id]")
-    ?.getAttribute("data-pageroot-outline-id") || null;
-}
-
-export function exactHostHasEquivalentBoxStyleFact(
-  beforeElement: Element,
-  afterElement: Element,
-): boolean {
-  const boxStyleFacts = (element: Element) => reviewProjectionFactsForElement(element).filter((fact) => (
-    fact.type === "style"
-    && fact.scope === "box"
-    && fact.operation !== "layout"
-  ));
-  // Fact IDs and semantic owners are disposable analysis identities. For the
-  // same exact source host, shared geometry ownership plus the same box scope
-  // is the canonical evidence that runtime geometry would be redundant.
-  const afterFacts = boxStyleFacts(afterElement);
-  return boxStyleFacts(beforeElement).some((beforeFact) => (
-    Boolean(beforeFact.geometryOwnerId)
-    && afterFacts.some((afterFact) => (
-      afterFact.geometryOwnerId === beforeFact.geometryOwnerId
-    ))
-  ));
-}
-
-export function annotateRuntimeVisualCandidates({
-  beforeHtml,
-  afterHtml,
-  beforeIndex,
-  afterIndex,
-  beforeSourceElements,
-  afterSourceElements,
-  outline,
-  commentAnchors = [],
-}: {
-  beforeHtml: string;
-  afterHtml: string;
-  beforeIndex: ReturnType<typeof buildSourceIndex> | null;
-  afterIndex: ReturnType<typeof buildSourceIndex> | null;
-  beforeSourceElements: ReadonlyMap<string, Element>;
-  afterSourceElements: ReadonlyMap<string, Element>;
-  outline: readonly ReviewOutlineItem[];
-  commentAnchors?: readonly Element[];
-}): ReviewRuntimeVisualAnnotations {
-  const captureCandidates: Record<ReviewSide, RuntimeSnapshotCaptureCandidate[]> = {
-    before: [],
-    after: [],
-  };
-  const bindings: Record<ReviewSide, ReviewRuntimeBootstrapBinding[]> = {
-    before: [],
-    after: [],
-  };
-  const resolved = resolveRuntimeSnapshotHosts({
-    beforeHtml,
-    afterHtml,
-    beforeIndex,
-    afterIndex,
-    maximum: RUNTIME_SNAPSHOT_HOST_ENUMERATION_LIMIT,
-  });
-  if (!resolved) return { candidates: [], captureCandidates, bindings };
-  const outlineById = new Map(outline.map((item) => [item.id, item]));
-  const hostIsCommented = (hostElement: Element) => commentAnchors.some((anchor) => (
-    anchor.contains(hostElement) || hostElement.contains(anchor)
-  ));
-  type RuntimeHostSelection = {
-    before: (typeof resolved.hosts)[number]["before"];
-    after: (typeof resolved.hosts)[number]["after"];
-    beforeElement: Element;
-    afterElement: Element;
-    outlineItem: ReviewOutlineItem;
-    commented: boolean;
-  };
-  const selections: RuntimeHostSelection[] = [];
-  resolved.hosts.forEach(({ before, after }) => {
-    const beforeElement = beforeSourceElements.get(before.sourceNodeId);
-    const afterElement = afterSourceElements.get(after.sourceNodeId);
-    if (!beforeElement || !afterElement) return;
-    // Outline ids are positional, so inserting or deleting one section renumbers
-    // every section after it. Requiring the two sides to share an outline id
-    // therefore dropped every chart below an insertion: on one authored page a
-    // single added section took all twelve charts from verified to silently
-    // unverified. Pairing is decided by the host's own identity instead, which is
-    // the same identity the capture owner binds on and is unique by construction.
-    // Attribution then follows the after side, where the reviewer is looking, so
-    // the verdict lands on the section that actually contains the chart.
-    const afterOutlineId = runtimeOutlineId(afterElement);
-    if (!afterOutlineId) return;
-    const outlineItem = outlineById.get(afterOutlineId);
-    if (!outlineItem) return;
-    if (exactHostHasEquivalentBoxStyleFact(beforeElement, afterElement)) return;
-    selections.push({
-      before,
-      after,
-      beforeElement,
-      afterElement,
-      outlineItem,
-      commented: hostIsCommented(beforeElement),
-    });
-  });
-  // Comment-anchored hosts are the regions the user explicitly cares about,
-  // so they claim the bounded capture budget (and the owner-side pixel/byte
-  // budgets, which drain in request order) before uncommented hosts. The sort
-  // is stable: source order is preserved within each priority group.
-  const prioritized = [
-    ...selections.filter((selection) => selection.commented),
-    ...selections.filter((selection) => !selection.commented),
-  ].slice(0, REVIEW_RUNTIME_VISUAL_CANDIDATE_LIMIT);
-  const candidates: ReviewRuntimeVisualCandidate[] = [];
-  prioritized.forEach(({ before, after, beforeElement, afterElement, outlineItem, commented }) => {
-    const key = `runtime-host-${candidates.length + 1}`;
-    const changeId = outlineItem.changeId || `runtime-change-${outlineItem.id}`;
-    const beforeCaptureCandidate = runtimeSnapshotCaptureCandidate(key, before);
-    const afterCaptureCandidate = runtimeSnapshotCaptureCandidate(key, after);
-    const beforeBinding = reviewBootstrapElementBinding(beforeElement.ownerDocument, beforeElement);
-    const afterBinding = reviewBootstrapElementBinding(afterElement.ownerDocument, afterElement);
-    if (
-      !beforeCaptureCandidate
-      || !afterCaptureCandidate
-      || !beforeBinding
-      || !afterBinding
-    ) return;
-    captureCandidates.before.push(beforeCaptureCandidate);
-    captureCandidates.after.push(afterCaptureCandidate);
-    bindings.before.push({ candidateKey: key, ...beforeBinding });
-    bindings.after.push({ candidateKey: key, ...afterBinding });
-    candidates.push({
-      key,
-      outlineId: outlineItem.id,
-      changeId,
-      label: outlineItem.label,
-      sourceHostTargetRefs: {
-        before: before.hostTargetRef,
-        after: after.hostTargetRef,
-      },
-      ...(commented ? { commented: true } : {}),
-      ...(outlineItem.panelKey ? { panelKey: outlineItem.panelKey } : {}),
-      ...(outlineItem.panelPath?.length ? { panelPath: [...outlineItem.panelPath] } : {}),
-    });
-  });
-  return { candidates, captureCandidates, bindings };
-}
-
 function reviewBootstrap(
   sessionId: string,
   side: ReviewSide,
-  sourceSha256: string,
   reviewCommentBindings: readonly ReviewCommentBootstrapBinding[] = [],
-  runtimeProjectionBindings: readonly ReviewRuntimeBootstrapBinding[] = [],
 ): string {
   const serializedBootstrapPayload = (value: unknown) => (
     JSON.stringify(value).replace(/</gu, "\\u003c")
   );
   return String.raw`
 (() => {
-  const runtimeVisualContractVersion = ${RUNTIME_VISUAL_CONTRACT_VERSION};
   const sessionId = ${JSON.stringify(sessionId)};
   const side = ${JSON.stringify(side)};
-  const sourceSha256 = ${JSON.stringify(sourceSha256)};
   // This first managed script binds private projection targets before authored
   // scripts execute. The binding payload is available only through the first
   // one-shot bootstrap response; authored markup and ordinary window messages
   // never receive source identities, candidate keys, or screenshots.
   const reviewCommentInitialBindings = Object.freeze(
     ${serializedBootstrapPayload(reviewCommentBindings)},
-  );
-  const runtimeProjectionInitialBindings = Object.freeze(
-    ${serializedBootstrapPayload(runtimeProjectionBindings)},
   );
   // A script-enabled opaque sandbox intentionally has no durable origin. The
   // shared bootstrap supplies one frame-local compatibility surface so an
@@ -315,7 +128,6 @@ function reviewBootstrap(
   const runtimeVisualBoolean = Boolean;
   const runtimeVisualMathFloor = Math.floor.bind(Math);
   const runtimeVisualSetTimeout = window.setTimeout.bind(window);
-  const runtimeVisualRequestAnimationFrame = window.requestAnimationFrame.bind(window);
   const runtimeVisualArrayPush = runtimeVisualBindCall(Array.prototype.push);
   const runtimeVisualArrayForEach = runtimeVisualBindCall(Array.prototype.forEach);
   const runtimeVisualArrayJoin = runtimeVisualBindCall(Array.prototype.join);
@@ -463,63 +275,41 @@ function reviewBootstrap(
   const reviewParent = parent;
   const postToParent = reviewParent.postMessage.bind(reviewParent);
   const runtimeVisualAddEventListener = addEventListener.bind(window);
-  // Comment lookup and runtime projection use distinct capabilities, ports,
-  // namespaces, and lifecycles. Neither capability appears in authored markup.
+  // Comment lookup uses a private capability port that never appears in
+  // authored markup or ordinary window messages.
   const reviewCommentChannel = side === "before" && typeof MessageChannel === "function"
-    ? new MessageChannel()
-    : null;
-  const runtimeProjectionChannel = runtimeProjectionInitialBindings.length
-    && typeof MessageChannel === "function"
     ? new MessageChannel()
     : null;
   const stopImmediateMessagePropagation = Function.prototype.call.bind(
     Event.prototype.stopImmediatePropagation,
   );
   let reviewCommentChannelTransferred = false;
-  let runtimeProjectionChannelTransferred = false;
   let reviewCommentTargets = [];
   let pendingReviewCommentChannelChallenge = null;
-  let pendingRuntimeProjectionChannelChallenge = null;
   let privateChannelRequestsReady = false;
   const capturePrivateChannelRequest = (event) => {
     const message = event.data;
     const requestsCommentChannel = message?.type === "request-review-comment-channel";
-    const requestsRuntimeProjectionChannel = message?.type
-      === "request-runtime-projection-channel";
     if (
       !event.isTrusted
       || event.source !== reviewParent
       || !message
       || message.source !== "pageroot-ai-review-parent"
       || message.sessionId !== sessionId
-      || (!requestsCommentChannel && !requestsRuntimeProjectionChannel)
-      || (
-        requestsRuntimeProjectionChannel
-        && (
-          message.contractVersion !== runtimeVisualContractVersion
-          || message.side !== side
-          || message.sourceSha256 !== sourceSha256
-        )
-      )
+      || !requestsCommentChannel
     ) return;
     // This listener is installed by the first owned script with capture=true.
     // It consumes the capability challenge before authored capture listeners can
     // observe it or race a forged port back to the parent.
     stopImmediateMessagePropagation(event);
-    if (requestsCommentChannel) {
-      pendingReviewCommentChannelChallenge = message.challenge;
-    } else {
-      pendingRuntimeProjectionChannelChallenge = message.challenge;
-    }
+    pendingReviewCommentChannelChallenge = message.challenge;
     if (privateChannelRequestsReady) drainPrivateChannelRequests();
   };
   runtimeVisualAddEventListener("message", capturePrivateChannelRequest, { capture: true });
   const post = (type, extra = {}) => postToParent({
     source: "pageroot-ai-review",
-    contractVersion: runtimeVisualContractVersion,
     sessionId,
     side,
-    sourceSha256,
     type,
     ...extra,
   }, "*");
@@ -530,38 +320,16 @@ function reviewBootstrap(
     reviewCommentChannelTransferred = true;
     postToParent({
       source: "pageroot-ai-review",
-      contractVersion: runtimeVisualContractVersion,
       sessionId,
       side,
-      sourceSha256,
       type: "review-comment-channel",
       challenge,
     }, "*", [reviewCommentChannel.port2]);
   };
-  const transferRuntimeProjectionChannel = (rawChallenge) => {
-    const challenge = RuntimeVisualString(rawChallenge || "");
-    if (runtimeVisualRegExpExec(/^[a-f0-9]{32}$/u, challenge) === null) return;
-    if (!runtimeProjectionChannel || runtimeProjectionChannelTransferred) return;
-    runtimeProjectionChannelTransferred = true;
-    postToParent({
-      source: "pageroot-ai-review",
-      contractVersion: runtimeVisualContractVersion,
-      sessionId,
-      side,
-      sourceSha256,
-      type: "runtime-projection-channel",
-      challenge,
-    }, "*", [runtimeProjectionChannel.port2]);
-  };
   const drainPrivateChannelRequests = () => {
     const commentChallenge = pendingReviewCommentChannelChallenge;
-    const runtimeProjectionChallenge = pendingRuntimeProjectionChannelChallenge;
     pendingReviewCommentChannelChallenge = null;
-    pendingRuntimeProjectionChannelChallenge = null;
     if (commentChallenge !== null) transferReviewCommentChannel(commentChallenge);
-    if (runtimeProjectionChallenge !== null) {
-      transferRuntimeProjectionChannel(runtimeProjectionChallenge);
-    }
   };
   privateChannelRequestsReady = true;
   drainPrivateChannelRequests();
@@ -600,22 +368,14 @@ function reviewBootstrap(
       .map(safeKey)
       .filter(Boolean),
   )];
-  const runtimeVisualSourceBoxAttributes = ${JSON.stringify(REVIEW_RUNTIME_VISUAL_SOURCE_BOX_ATTRIBUTES)};
-  const runtimeVisualCandidateLimit = ${REVIEW_RUNTIME_VISUAL_CANDIDATE_LIMIT};
-  const runtimeProjectionFactLimit = ${REVIEW_PROJECTION_FACTS_PER_ELEMENT_LIMIT};
-  const runtimeVisualIdentityAttributeLimit = ${RUNTIME_VISUAL_CONTRACT.identityAttributeLimit};
+  const runtimeVisualSourceBoxAttributes = ${JSON.stringify(REVIEW_COMMENT_BINDING_SOURCE_BOX_ATTRIBUTES)};
+  const runtimeVisualIdentityAttributeLimit = ${REVIEW_BOOTSTRAP_IDENTITY_ATTRIBUTE_LIMIT};
   const reviewCommentSourceNodeIdPattern = /^element:\d+:\d+:[a-z][a-z0-9:-]{0,127}$/iu;
   const safeReviewCommentSourceNodeId = (value) => {
     const sourceNodeId = RuntimeVisualString(value || "");
     return sourceNodeId.length <= 256
       && runtimeVisualRegExpExec(reviewCommentSourceNodeIdPattern, sourceNodeId) !== null
       ? sourceNodeId
-      : "";
-  };
-  const safeRuntimeProjectionCandidateKey = (value) => {
-    const candidateKey = RuntimeVisualString(value || "");
-    return candidateKey.length <= 160 && safeKey(candidateKey) === candidateKey
-      ? candidateKey
       : "";
   };
   const runtimeVisualSourceBoxSignature = (host) => runtimeVisualStringify(
@@ -767,7 +527,6 @@ function reviewBootstrap(
   const createPrivateInitialBindingRegistry = (
     initialBindings,
     bindingId,
-    strictOriginalElement = false,
   ) => {
     const identityElements = new RuntimeVisualMap();
     const deferredBindings = new RuntimeVisualMap();
@@ -803,20 +562,6 @@ function reviewBootstrap(
       const id = bindingId(binding);
       if (!id || runtimeVisualSetHas(invalidBindingIds, id)) return;
       if (observedElement !== null) {
-        if (strictOriginalElement) {
-          if (
-            !runtimeVisualInitialBindingPathMatches(observedElement, binding)
-            || !runtimeVisualInitialBindingMatches(observedElement, binding)
-            || !runtimeVisualInitialBindingSourceBoxMatches(observedElement, binding)
-          ) return;
-          const existing = runtimeVisualMapGet(identityElements, id);
-          if (existing && existing !== observedElement) {
-            runtimeVisualSetAdd(invalidBindingIds, id);
-            return;
-          }
-          if (!existing) runtimeVisualMapSet(identityElements, id, observedElement);
-          return;
-        }
         const identityAttributes = runtimeVisualInitialBindingIdentityAttributes(binding);
         const identityText = typeof binding?.identityText === "string"
           ? RuntimeVisualString(binding.identityText)
@@ -856,20 +601,11 @@ function reviewBootstrap(
         runtimeVisualMapSet(deferredBindings, binding, true);
         return;
       }
-      const element = strictOriginalElement
-        ? runtimeVisualInitialBindingPathElement(binding?.path)
-        : runtimeVisualInitialBindingElement(
-            binding,
-            !runtimeVisualMapHas(deferredBindings, binding),
-          );
+      const element = runtimeVisualInitialBindingElement(
+        binding,
+        !runtimeVisualMapHas(deferredBindings, binding),
+      );
       if (!element) return;
-      if (
-        strictOriginalElement
-        && (
-          !runtimeVisualInitialBindingMatches(element, binding)
-          || !runtimeVisualInitialBindingSourceBoxMatches(element, binding)
-        )
-      ) return;
       const existing = runtimeVisualMapGet(identityElements, id);
       if (existing && existing !== element) {
         runtimeVisualSetAdd(invalidBindingIds, id);
@@ -885,11 +621,9 @@ function reviewBootstrap(
       if (runtimeVisualMapHas(deferredBindings, binding)) capture(binding);
     });
     return {
-      initialBindings,
       identityElements,
       deferredBindings,
       invalidBindingIds,
-      bindingById,
       captureAll,
       captureDeferred,
     };
@@ -898,17 +632,9 @@ function reviewBootstrap(
     reviewCommentInitialBindings,
     (binding) => safeReviewCommentSourceNodeId(binding?.sourceNodeId),
   );
-  const runtimeProjectionBindingRegistry = createPrivateInitialBindingRegistry(
-    runtimeProjectionInitialBindings,
-    (binding) => safeRuntimeProjectionCandidateKey(binding?.candidateKey),
-    true,
-  );
   const reviewCommentIdentityElements = reviewCommentBindingRegistry.identityElements;
   const reviewCommentDeferredBindings = reviewCommentBindingRegistry.deferredBindings;
   const reviewCommentInvalidSourceNodeIds = reviewCommentBindingRegistry.invalidBindingIds;
-  const runtimeTargetByCandidateKey = runtimeProjectionBindingRegistry.identityElements;
-  const runtimeBindingByCandidateKey = runtimeProjectionBindingRegistry.bindingById;
-  const runtimeInvalidCandidateKeys = runtimeProjectionBindingRegistry.invalidBindingIds;
   let privateInitialBindingsBootstrapped = false;
   let privateInitialBindingsClosed = false;
   const captureInitialBindings = (records = []) => {
@@ -916,7 +642,6 @@ function reviewBootstrap(
     if (!privateInitialBindingsBootstrapped) {
       privateInitialBindingsBootstrapped = true;
       reviewCommentBindingRegistry.captureAll();
-      runtimeProjectionBindingRegistry.captureAll();
     }
     runtimeVisualArrayForEach(records, (record) => {
       if (runtimeVisualMutationRecordType(record) !== "childList") return;
@@ -932,13 +657,11 @@ function reviewBootstrap(
         );
         runtimeVisualArrayForEach(addedElements, (element) => {
           reviewCommentBindingRegistry.captureAll(element);
-          runtimeProjectionBindingRegistry.captureAll(element);
         });
       }
     });
   };
   const initialBindingObserver = reviewCommentInitialBindings.length
-    || runtimeProjectionInitialBindings.length
     ? new RuntimeVisualMutationObserver(captureInitialBindings)
     : null;
   if (initialBindingObserver && runtimeVisualDocumentRoot) {
@@ -957,108 +680,9 @@ function reviewBootstrap(
     if (!initialBindingObserver || privateInitialBindingsClosed) return;
     drainInitialBindings();
     reviewCommentBindingRegistry.captureDeferred();
-    runtimeProjectionBindingRegistry.captureDeferred();
     runtimeVisualMutationObserverDisconnect(initialBindingObserver);
     privateInitialBindingsClosed = true;
   };
-  let runtimeProjectionFactsByElement = new RuntimeVisualMap();
-  // Fact intake and overlay rendering run after authored scripts. Chart
-  // libraries routinely mutate their own host (ECharts writes inline style,
-  // an instance attribute and canvas children into the bound element), so the
-  // source-box signature is only enforced while the parser-blocking bootstrap
-  // captures the reference — before authored scripts execute. Here the frozen
-  // reference itself is the identity: the element must still be connected and
-  // keep its tag plus frozen identity attributes. Replacement or removal
-  // still drops the fact; the page mutating its own chart host must not.
-  const runtimeProjectionTargetIsCurrent = (candidateKey, element) => {
-    const binding = runtimeVisualMapGet(runtimeBindingByCandidateKey, candidateKey);
-    return runtimeVisualIsInstance(RuntimeVisualElement, element)
-      && !runtimeVisualSetHas(runtimeInvalidCandidateKeys, candidateKey)
-      && runtimeVisualNodeIsConnected(element)
-      && runtimeVisualInitialBindingMatches(element, binding);
-  };
-  const applyRuntimeProjectionFacts = (rawMarkers) => {
-    const nextFactsByElement = new RuntimeVisualMap();
-    const markers = runtimeVisualArrayIsArray(rawMarkers)
-      && rawMarkers.length <= runtimeVisualCandidateLimit
-      ? rawMarkers
-      : [];
-    const seenCandidateKeys = new RuntimeVisualSet();
-    let valid = runtimeVisualArrayIsArray(rawMarkers)
-      && rawMarkers.length <= runtimeVisualCandidateLimit;
-    for (let markerIndex = 0; valid && markerIndex < markers.length; markerIndex += 1) {
-      const marker = markers[markerIndex];
-      const rawCandidateKey = typeof marker?.candidateKey === "string"
-        ? marker.candidateKey
-        : "";
-      const rawChangeId = typeof marker?.changeId === "string" ? marker.changeId : "";
-      const rawVerdict = typeof marker?.verdict === "string" ? marker.verdict : "";
-      const candidateKey = safeRuntimeProjectionCandidateKey(rawCandidateKey);
-      const changeId = safeKey(rawChangeId);
-      if (
-        !candidateKey
-        || rawCandidateKey !== candidateKey
-        || !changeId
-        || rawChangeId !== changeId
-        || (rawVerdict !== "changed" && rawVerdict !== "suspected")
-        || runtimeVisualSetHas(seenCandidateKeys, candidateKey)
-        || !runtimeVisualMapHas(runtimeBindingByCandidateKey, candidateKey)
-      ) {
-        valid = false;
-        break;
-      }
-      runtimeVisualSetAdd(seenCandidateKeys, candidateKey);
-      const element = runtimeVisualMapGet(runtimeTargetByCandidateKey, candidateKey);
-      if (!runtimeProjectionTargetIsCurrent(candidateKey, element)) continue;
-      const ownerKey = "runtime-projection-" + (markerIndex + 1);
-      const facts = runtimeVisualMapGet(nextFactsByElement, element) || [];
-      if (facts.length >= runtimeProjectionFactLimit) {
-        valid = false;
-        break;
-      }
-      const suspected = rawVerdict === "suspected";
-      const fact = {
-        id: ownerKey,
-        type: "style",
-        semanticOwnerId: ownerKey,
-        geometryOwnerId: ownerKey,
-        ownerKey,
-        scope: "box",
-        summary: suspected ? "疑似有改动" : "视觉调整",
-        changeId,
-        candidateKey,
-      };
-      if (suspected) fact.suspected = true;
-      runtimeVisualArrayPush(facts, fact);
-      runtimeVisualMapSet(nextFactsByElement, element, facts);
-    }
-    runtimeProjectionFactsByElement = valid
-      ? nextFactsByElement
-      : new RuntimeVisualMap();
-    initialProjectionCommitted = true;
-    scheduleOverlayRender();
-    scheduleLayoutReport(true);
-  };
-  if (runtimeProjectionChannel) {
-    let runtimeProjectionCommitReceived = false;
-    runtimeProjectionChannel.port1.onmessage = (event) => {
-      if (runtimeProjectionCommitReceived) return;
-      runtimeProjectionCommitReceived = true;
-      const message = event.data;
-      if (
-        message
-        && message.source === "pageroot-ai-review-runtime-projection"
-        && message.contractVersion === runtimeVisualContractVersion
-        && message.sessionId === sessionId
-        && message.side === side
-        && message.sourceSha256 === sourceSha256
-        && message.type === "runtime-projection-facts"
-      ) applyRuntimeProjectionFacts(message.markers);
-      runtimeProjectionChannel.port1.onmessage = null;
-      runtimeProjectionChannel.port1.close();
-    };
-    runtimeProjectionChannel.port1.start();
-  }
   const isSafePanelControl = (element) => element instanceof Element && element.matches(
     '[data-pageroot-review-panel-control="true"]',
   );
@@ -1592,34 +1216,31 @@ function reviewBootstrap(
   const normalizeProjectionFact = (value) => {
     if (!value || typeof value !== "object" || Array.isArray(value)) return null;
     const id = safeProjectionFactKey(value.id);
-    const type = value.type === "text" || value.type === "structure" || value.type === "style"
+    const type = value.type === "text" || value.type === "structure"
       ? value.type
       : "";
     const semanticOwnerId = safeProjectionFactKey(value.semanticOwnerId);
     if (!id || !type || !semanticOwnerId) return null;
     const fact = { id, type, semanticOwnerId };
     const geometryOwnerId = safeProjectionFactKey(value.geometryOwnerId);
-    const ownerKey = safeProjectionFactKey(value.ownerKey);
     const textGroup = safeProjectionFactKey(value.textGroup);
     const structureChange = safeProjectionFactKey(value.structureChange);
-    const scope = ["text", "text-phrase", "text-line", "text-block", "element", "box", "content"]
+    const scope = ["text", "text-phrase", "text-line", "text-block", "element"]
       .includes(value.scope)
       ? value.scope
       : "";
-    const operation = ["none", "insert", "delete", "replace", "layout"].includes(value.operation)
+    const operation = ["none", "insert", "delete", "replace"].includes(value.operation)
       ? value.operation
       : "";
     const tone = value.tone === "added" || value.tone === "removed" ? value.tone : "";
     const summary = safeProjectionSummary(value.summary);
     if (geometryOwnerId) fact.geometryOwnerId = geometryOwnerId;
-    if (ownerKey) fact.ownerKey = ownerKey;
     if (textGroup) fact.textGroup = textGroup;
     if (structureChange) fact.structureChange = structureChange;
     if (scope) fact.scope = scope;
     if (operation) fact.operation = operation;
     if (tone) fact.tone = tone;
     if (summary) fact.summary = summary;
-    if (value.suspected === true) fact.suspected = true;
     return fact;
   };
   const projectionFactIdentity = (fact) => [
@@ -1678,21 +1299,8 @@ function reviewBootstrap(
         ...(geometryOwnerId ? { geometryOwnerId } : {}),
         scope: "element",
         structureChange,
-        summary: element.getAttribute("data-pageroot-review-summary") || "结构调整",
-      });
-    }
-    if (markerTypes(element).includes("style")) {
-      const ownerKey = element.getAttribute("data-pageroot-review-style-owner")
-        || ("style-owner-" + fallbackSequence);
-      facts.push({
-        id: ownerKey,
-        type: "style",
-        semanticOwnerId,
-        ...(geometryOwnerId ? { geometryOwnerId } : {}),
-        ownerKey,
-        scope: element.getAttribute("data-pageroot-review-style-scope") || "content",
-        operation: element.getAttribute("data-pageroot-review-operation") || "",
-        summary: element.getAttribute("data-pageroot-review-summary") || "视觉调整",
+        summary: element.getAttribute("data-pageroot-review-summary")
+          || (structureChange === "added" ? "新增元素" : "删除元素"),
       });
     }
     return facts.map(normalizeProjectionFact).filter(Boolean);
@@ -1719,9 +1327,7 @@ function reviewBootstrap(
       outer.tone === "structure"
       && (outer.structureChange === "added" || outer.structureChange === "removed")
     ) return true;
-    // Two nested structural outlines of one change say the same thing twice.
-    // An independent visual fact keeps its own outline: a box-level owner must
-    // not swallow a descendant's own presentation change.
+    // Two nested element outlines of one change say the same thing twice.
     return outer.tone === "structure" && inner.tone === "structure";
   };
   const recordsAreClose = (left, right, gap = 10) => {
@@ -1784,14 +1390,11 @@ function reviewBootstrap(
         bottom: record.bottom,
       }]
     )));
-    const boxOwner = records.find((record) => (
-      record.tone === "style" && record.scope === "box" && record.ownerKey
-    ));
     const factCount = new Set(records.map((record) => record.factIdentity)).size;
     return {
       ...records[0],
-      ownerKey: boxOwner?.ownerKey || records[0].ownerKey || "",
-      scope: boxOwner ? "box" : records[0].scope,
+      ownerKey: records[0].ownerKey || "",
+      scope: records[0].scope,
       labelPrimary: records.some((record) => record.labelPrimary !== false),
       labelCount: Math.max(reviewBadgeFactCount(records[0]), factCount),
       fragments,
@@ -1822,15 +1425,11 @@ function reviewBootstrap(
     return merged;
   };
   const allModeSummary = (types, summary) => {
-    if (summary === "新增内容" || summary === "删除内容") return summary;
+    if (summary === "新增元素" || summary === "删除元素") return summary;
     if (types.length === 1 && summary) return summary;
-    if (types.length > 2) return "综合调整";
-    if (types.includes("text") && types.includes("style")) return "文本、视觉调整";
-    if (types.includes("text") && types.includes("structure")) return "文本、结构调整";
-    if (types.includes("structure") && types.includes("style")) return "结构、视觉调整";
-    if (types.includes("text")) return "文本调整";
-    if (types.includes("structure")) return "结构调整";
-    if (types.includes("style")) return "视觉调整";
+    if (types.includes("text") && types.includes("structure")) return "文字、元素调整";
+    if (types.includes("text")) return "文字调整";
+    if (types.includes("structure")) return "元素调整";
     return "内容调整";
   };
   const roundedCoordinate = (value) => Math.round(value * 4) / 4;
@@ -1917,7 +1516,7 @@ function reviewBootstrap(
     }
     return false;
   };
-  const contentStyleRects = (element, respectGeometryOwners = false) => {
+  const contentTextRects = (element, respectGeometryOwners = false) => {
     const rects = [];
     const ownerId = element.getAttribute("data-pageroot-review-geometry-owner") || "";
     const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
@@ -2032,7 +1631,7 @@ function reviewBootstrap(
     right: Math.max(...rects.map((rect) => rect.right)),
     bottom: Math.max(...rects.map((rect) => rect.bottom)),
   } : null;
-  const ownerContentRecords = (owner) => contentStyleRects(owner, true)
+  const ownerContentRecords = (owner) => contentTextRects(owner, true)
     .filter((rect) => rect.width > 1 && rect.height > 1)
     .map((rect) => ({
       left: rect.left + scrollX,
@@ -2363,12 +1962,6 @@ function reviewBootstrap(
         appendProjectionEntry(element, changeId, fact);
       });
     });
-    runtimeVisualMapForEach(runtimeProjectionFactsByElement, (facts, element) => {
-      runtimeVisualArrayForEach(facts, (fact) => {
-        if (!runtimeProjectionTargetIsCurrent(fact.candidateKey, element)) return;
-        appendProjectionEntry(element, fact.changeId, fact);
-      });
-    });
     runtimeVisualMapForEach(projectionEntriesByElement, (entries, element) => {
       runtimeVisualArrayForEach(entries, ({ changeId, fact }) => {
         if (filter !== "all" && fact.type !== filter) return;
@@ -2401,32 +1994,24 @@ function reviewBootstrap(
             }));
             return;
           }
-          const scope = fact.scope || (fact.type === "style" ? "content" : "element");
-          const rects = fact.type === "style" && scope === "content"
-            ? contentStyleRects(element)
-            : [element.getBoundingClientRect()];
-          const structureChange = fact.type === "structure" ? fact.structureChange || "" : "";
-          const summary = fact.summary || (fact.type === "style"
-            ? (fact.operation === "layout" ? "换行调整" : "视觉调整")
-            : (structureChange === "from" || structureChange === "to"
-              ? "位置调整"
-              : "结构调整"));
-          // A suspected runtime host keeps the style type for filtering but
-          // renders in its own tone: it is an unverified hint, not a claim.
-          const overlayTone = fact.suspected ? "suspected" : fact.type;
-          rects.forEach((rect) => records.push({
+          const scope = "element";
+          const structureChange = fact.structureChange || "";
+          const summary = fact.summary || (structureChange === "added"
+            ? "新增元素"
+            : "删除元素");
+          [element.getBoundingClientRect()].forEach((rect) => records.push({
             element,
             changeId,
             semanticOwnerId,
             geometryOwnerId,
             factKey,
             factIdentity,
-            ownerKey: fact.ownerKey || "",
+            ownerKey: "",
             structureChange,
             scope,
             summary,
-            tone: overlayTone,
-            tones: [overlayTone],
+            tone: "structure",
+            tones: ["structure"],
             types: [fact.type],
             left: rect.left + scrollX,
             top: rect.top + scrollY,
@@ -2459,23 +2044,8 @@ function reviewBootstrap(
         && candidate.semanticOwnerId === record.semanticOwnerId
       ))
     ));
-    const dominantStyleBoxes = ownerFilteredRecords.filter((record) => (
-      record.tone === "style" && record.scope === "box"
-    ));
     const minimalRecords = ownerFilteredRecords.filter((record, index) => {
       if (record.tone === "text-added" || record.tone === "text-removed") return true;
-      if (record.tone === "style") {
-        const dominatedByBoxOwner = dominantStyleBoxes.some((candidate) => (
-          candidate !== record
-          && candidate.changeId === record.changeId
-          && candidate.semanticOwnerId === record.semanticOwnerId
-          && candidate.ownerKey === record.ownerKey
-          && candidate.element.contains(record.element)
-          && recordContains(candidate, record)
-        ));
-        if (dominatedByBoxOwner) return false;
-        if (record.scope === "box") return true;
-      }
       return !ownerFilteredRecords.some((candidate, candidateIndex) => {
         if (
           index === candidateIndex
@@ -2546,9 +2116,7 @@ function reviewBootstrap(
     // always keeps its own captions.
     const badgeUiScale = 1 / Math.max(.32, Math.min(1, Number(currentState.scale || 1)));
     const regions = reviewRegionAnnotations(
-      side === "before"
-        ? merged.filter((record) => record.tone !== "suspected")
-        : merged,
+      merged,
       { clusterGap: 28 * badgeUiScale },
     );
     const labelledAnchors = aggregateReviewBadgeLabels(regions.map((region) => ({
@@ -2803,10 +2371,6 @@ function reviewBootstrap(
       layer.append(marksSvg);
     }
     merged.forEach((record) => {
-      // The before page never draws the suspected frame: the amber hint lives
-      // on the after page only, while both sides keep the dim exemption so the
-      // reader can compare the chart directly.
-      if (record.tone === "suspected" && side === "before") return;
       const horizontalInset = inset;
       const box = document.createElement("div");
       box.setAttribute("data-pageroot-review-overlay-box", record.changeId);
@@ -2886,7 +2450,6 @@ function reviewBootstrap(
       const regionElements = runtimeVisualMapGet(overlayElementsByChange, region.changeId) || [];
       const bar = document.createElement("div");
       bar.setAttribute("data-pageroot-review-region-bar", region.changeId);
-      if (region.suspected) bar.dataset.suspect = "true";
       bar.dataset.active = focusedRegion ? "true" : "false";
       const barTop = Math.max(0, region.top - inset);
       const barHeight = Math.max(8 * badgeUiScale, region.bottom + inset - barTop);
@@ -3138,12 +2701,6 @@ function reviewBootstrap(
   const announceReady = () => post("ready", {
     height: Math.max(document.documentElement.scrollHeight, document.body?.scrollHeight || 0),
   });
-  const announceFirstPaintReady = () => {
-    document.documentElement.dataset.pagerootReviewFirstPaintReady = "true";
-    post("first-paint-ready", {
-      height: Math.max(document.documentElement.scrollHeight, document.body?.scrollHeight || 0),
-    });
-  };
   const ready = async () => {
     closeInitialBindings();
     // Static facts are independently complete. Runtime projection may arrive
@@ -3155,13 +2712,6 @@ function reviewBootstrap(
     // the captured native timer so the parent can replay its static state.
     runtimeVisualSetTimeout(announceReady, 64);
     scheduleLayoutReport(true);
-    // Let authored DOMContentLoaded work and one complete browser paint win
-    // before Review starts its optional hidden runtime-visual owner. Two RAFs
-    // distinguish iframe load from content actually reaching the compositor;
-    // optional font completion continues independently below.
-    runtimeVisualRequestAnimationFrame(() => (
-      runtimeVisualRequestAnimationFrame(announceFirstPaintReady)
-    ));
     document.fonts?.ready?.then(() => {
       scheduleOverlayRender();
       scheduleLayoutReport();

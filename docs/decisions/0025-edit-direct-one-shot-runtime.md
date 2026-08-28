@@ -3,7 +3,7 @@
 - Status: Accepted
 - Date: 2026-08-15
 - Supersedes: [ADR 0022](0022-edit-one-shot-author-runtime.md) for Edit presentation
-- Does not change: Review isolated PNG capture ([ADR 0016](0016-owner-controlled-review-runtime-capture.md), [ADR 0017](0017-shared-runtime-snapshot-owner.md)); Preview author-script execution ([ADR 0007](0007-independent-interactive-preview.md))
+- Does not change: Review's static-only fact contract ([ADR 0046](0046-review-core-text-and-element-diff.md)); Preview author-script execution ([ADR 0007](0007-independent-interactive-preview.md))
 
 This ADR is a product constraint above implementation and security-review
 opinions. Changing it requires explicit product-owner authorization. A later
@@ -165,7 +165,7 @@ Window-size rules:
   ordinary static Edit once.
 - Edit screenshot/capture/projection count must be 0. There is no Edit-only
   hidden `BrowserWindow`, no `desktop/edit-runtime-capture-owner.mjs`, and no
-  `capturePage()` on the Edit path. Review keeps its isolated capture owner.
+  `capturePage()` on the Edit path. Review has no isolated capture owner.
   Preview keeps its existing author-script execution.
 - Runtime descendants are not editable, not focusable and never SourcePatch
   targets. Selection and comments map back to the unique empty source host.

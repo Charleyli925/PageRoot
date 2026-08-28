@@ -17,8 +17,7 @@ export type ReviewTextChangeOperation =
   | "none"
   | "insert"
   | "delete"
-  | "replace"
-  | "layout";
+  | "replace";
 
 export type ReviewTextChangeSide = {
   evidenceRanges: ReviewTextRange[];
@@ -38,7 +37,6 @@ export function readableReviewTextFootprintPlan(
   differences: {
     before: readonly ReviewTextRange[];
     after: readonly ReviewTextRange[];
-    layout?: boolean;
   },
 ): ReadableReviewTextFootprintPlan;
 

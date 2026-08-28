@@ -56,8 +56,6 @@ async function loadPreloadApis(invoke, { env = {}, search = "" } = {}) {
     usage: exposed.get("htmlAIUsage"),
     uiPreferences: exposed.get("htmlAIUiPreferences"),
     preview: exposed.get("htmlAIPreview"),
-    reviewRuntimeSnapshots: exposed.get("htmlAIReviewRuntimeSnapshots"),
-    runtimeSnapshots: exposed.get("htmlAIRuntimeSnapshots"),
     editRuntime: exposed.get("htmlAIEditRuntime"),
     edit: exposed.get("htmlAIEdit"),
     sent,
@@ -170,31 +168,6 @@ test("preload exposes no Agent executable, spawn, command, or path capability", 
     }
   };
   for (const [name, value] of Object.entries(worlds)) visit(value, name);
-});
-
-test("preload exposes one narrow Review-only Runtime Snapshot capture method", async () => {
-  const calls = [];
-  const { reviewRuntimeSnapshots, runtimeSnapshots } = await loadPreloadApis(async (...args) => {
-    calls.push(args);
-    return success({ outcome: "failed", reason: "capture-failed" });
-  });
-  const payload = {
-    contractVersion: 2,
-    captureSessionId: "review-owner-session-0001",
-    sourceSha256: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-    side: "before",
-    html: "<!doctype html><main></main>",
-    candidates: [],
-    viewport: { width: 960, height: 640 },
-  };
-
-  assert.deepEqual(
-    await reviewRuntimeSnapshots.capture(payload),
-    { outcome: "failed", reason: "capture-failed" },
-  );
-  assert.deepEqual(calls, [["html-review-runtime-snapshots:capture", payload]]);
-  assert.deepEqual(Object.keys(reviewRuntimeSnapshots), ["capture"]);
-  assert.equal(runtimeSnapshots, undefined);
 });
 
 test("preload exposes one narrow one-shot Edit runtime preparation port", async () => {

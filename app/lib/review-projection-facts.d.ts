@@ -1,13 +1,11 @@
-export type ReviewProjectionFactType = "text" | "structure" | "style";
+export type ReviewProjectionFactType = "text" | "structure";
 
 export type ReviewProjectionFactScope =
   | "text"
   | "text-phrase"
   | "text-line"
   | "text-block"
-  | "element"
-  | "box"
-  | "content";
+  | "element";
 
 export type ReviewProjectionFact = {
   id: string;
@@ -15,11 +13,10 @@ export type ReviewProjectionFact = {
   semanticOwnerId: string;
   geometryOwnerId?: string;
   scope?: ReviewProjectionFactScope;
-  ownerKey?: string;
-  operation?: "none" | "insert" | "delete" | "replace" | "layout";
+  operation?: "none" | "insert" | "delete" | "replace";
   tone?: "added" | "removed";
   textGroup?: string;
-  structureChange?: string;
+  structureChange?: "added" | "removed";
   summary?: string;
 };
 

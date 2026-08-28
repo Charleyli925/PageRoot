@@ -31,7 +31,7 @@ test("head, middle, and tail insertions preserve every stable sibling", async (c
       const pairs = alignReviewSemanticUnits(before, after);
       assert.deepEqual(unmatchedAfter(pairs), [insertion]);
       assert.equal(matchedPairs(pairs).length, before.length);
-      assert.ok(matchedPairs(pairs).every((pair) => pair.moved === false));
+      assert.ok(matchedPairs(pairs).every((pair) => !("moved" in pair)));
     });
   }
 });
@@ -129,7 +129,7 @@ test("repeated empty class-only nodes remain unmatched instead of becoming posit
   assert.equal(pairs.filter((pair) => pair.afterIndex === null).length, 2);
 });
 
-test("only a unique stable identity can establish an explicit move", () => {
+test("reordered stable identities remain paired without creating a movement fact", () => {
   const before = [
     unit("项目甲", { stableId: "a" }),
     unit("项目乙", { stableId: "b" }),
@@ -139,11 +139,12 @@ test("only a unique stable identity can establish an explicit move", () => {
   const pairs = alignReviewSemanticUnits(before, after);
 
   assert.deepEqual(
-    matchedPairs(pairs).filter((pair) => pair.moved).map((pair) => (
+    matchedPairs(pairs).map((pair) => (
       [pair.beforeIndex, pair.afterIndex, pair.match]
     )).sort((left, right) => left[0] - right[0]),
-    [[0, 1, "stable-id"], [1, 0, "stable-id"]],
+    [[0, 1, "stable-id"], [1, 0, "stable-id"], [2, 2, "stable-id"]],
   );
+  assert.ok(pairs.every((pair) => !("moved" in pair)));
 });
 
 test("a reordered exact signature is not promoted into a movement fact", () => {
@@ -154,16 +155,16 @@ test("a reordered exact signature is not promoted into a movement fact", () => {
   const pairs = alignReviewSemanticUnits(before, [before[1], before[0]]);
 
   assert.equal(matchedPairs(pairs).length, 2);
-  assert.ok(matchedPairs(pairs).every((pair) => pair.moved === false));
+  assert.ok(matchedPairs(pairs).every((pair) => !("moved" in pair)));
 });
 
-test("an ordinary insertion without identity is never reported as movement", () => {
+test("an ordinary insertion stays unmatched without disturbing stable siblings", () => {
   const before = [unit("项目甲"), unit("项目乙")];
   const after = [before[0], unit("普通新增"), before[1]];
   const pairs = alignReviewSemanticUnits(before, after);
 
   assert.deepEqual(unmatchedAfter(pairs), [1]);
-  assert.ok(pairs.every((pair) => pair.moved === false));
+  assert.ok(pairs.every((pair) => !("moved" in pair)));
 });
 
 test("stable text boundaries keep a long middle insertion paired", () => {
@@ -174,11 +175,47 @@ test("stable text boundaries keep a long middle insertion paired", () => {
     })],
   );
 
-  assert.deepEqual(matchedPairs(pairs).map(({ beforeIndex, afterIndex, moved }) => ({
+  assert.deepEqual(matchedPairs(pairs).map(({ beforeIndex, afterIndex }) => ({
     beforeIndex,
     afterIndex,
-    moved,
-  })), [{ beforeIndex: 0, afterIndex: 0, moved: false }]);
+  })), [{ beforeIndex: 0, afterIndex: 0 }]);
+});
+
+test("a completely rewritten singleton keeps the same compatible element", () => {
+  const pairs = alignReviewSemanticUnits(
+    [unit("旧文案完全不同", {
+      kind: "list-item:LI",
+      compatibilitySignature: "list-item\u0000:LI\u0000li",
+      parentKey: "list:primary",
+    })],
+    [unit("自动闭环验收通过", {
+      kind: "list-item:LI",
+      compatibilitySignature: "list-item\u0000:LI\u0000li",
+      parentKey: "list:primary",
+    })],
+  );
+
+  assert.deepEqual(matchedPairs(pairs).map(({ beforeIndex, afterIndex, match }) => ({
+    beforeIndex,
+    afterIndex,
+    match,
+  })), [{ beforeIndex: 0, afterIndex: 0, match: "weighted" }]);
+});
+
+test("a singleton with different own structure stays an element replacement", () => {
+  const pairs = alignReviewSemanticUnits(
+    [unit("天气晴朗", {
+      kind: "list-item:LI",
+      compatibilitySignature: "list-item\u0000:LI\u0000li:data-role=old",
+    })],
+    [unit("自动闭环", {
+      kind: "list-item:LI",
+      compatibilitySignature: "list-item\u0000:LI\u0000li:data-role=new",
+    })],
+  );
+
+  assert.equal(matchedPairs(pairs).length, 0);
+  assert.deepEqual(unmatchedAfter(pairs), [0]);
 });
 
 test("swapping before and after mirrors every pair and insertion", () => {
@@ -187,10 +224,10 @@ test("swapping before and after mirrors every pair and insertion", () => {
   const forward = alignReviewSemanticUnits(before, after);
   const reverse = alignReviewSemanticUnits(after, before);
   const normalizedForward = forward.map((pair) => (
-    `${pair.beforeIndex ?? "x"}:${pair.afterIndex ?? "x"}:${pair.match}:${pair.moved}`
+    `${pair.beforeIndex ?? "x"}:${pair.afterIndex ?? "x"}:${pair.match}`
   )).sort();
   const normalizedReverse = reverse.map((pair) => (
-    `${pair.afterIndex ?? "x"}:${pair.beforeIndex ?? "x"}:${pair.match}:${pair.moved}`
+    `${pair.afterIndex ?? "x"}:${pair.beforeIndex ?? "x"}:${pair.match}`
   )).sort();
 
   assert.deepEqual(normalizedReverse, normalizedForward);

@@ -1,6 +1,6 @@
 # ADR 0031: Review capture serves allowlisted chart scripts from frozen bytes
 
-- Status: Accepted
+- Status: Superseded by ADR 0046
 - Date: 2026-08-20
 - Extends: ADR 0029
 

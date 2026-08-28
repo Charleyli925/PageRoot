@@ -3,9 +3,6 @@ import {
   REVIEW_TEXT_EVIDENCE_MARKER_CSS,
   REVIEW_TEXT_EVIDENCE_REMOVED_COLOR,
 } from "../../lib/review-text-evidence-marks.js";
-import type {
-  ReviewRuntimeVisualCaptureIdentity,
-} from "../review-runtime-capture-adapter";
 import {
   REVIEW_BASE_ATTRIBUTE,
   REVIEW_BOOTSTRAP_ATTRIBUTE,
@@ -17,12 +14,9 @@ import {
 } from "./runtime-projection";
 import {
   REVIEW_STRUCTURE_TONE_COLOR,
-  REVIEW_STYLE_TONE_COLOR,
-  REVIEW_SUSPECTED_TONE_COLOR,
 } from "./tones";
 import type {
   ReviewCommentBootstrapBinding,
-  ReviewRuntimeBootstrapBinding,
   ReviewSide,
 } from "./types";
 
@@ -57,9 +51,7 @@ export const REVIEW_DOCUMENT_STYLE = String.raw`
   }
 
   html[data-pageroot-review-filter="all"] [data-pageroot-review-marker-types~="structure"],
-  html[data-pageroot-review-filter="all"] [data-pageroot-review-marker-types~="style"],
-  html[data-pageroot-review-filter="structure"] [data-pageroot-review-marker-types~="structure"],
-  html[data-pageroot-review-filter="style"] [data-pageroot-review-marker-types~="style"] {
+  html[data-pageroot-review-filter="structure"] [data-pageroot-review-marker-types~="structure"] {
     position: relative !important;
     outline: calc(1.5px * var(--pageroot-review-ui-scale)) dashed ${REVIEW_STRUCTURE_TONE_COLOR} !important;
     outline-offset: calc(2px * var(--pageroot-review-ui-scale)) !important;
@@ -69,15 +61,7 @@ export const REVIEW_DOCUMENT_STYLE = String.raw`
     outline-color: ${REVIEW_STRUCTURE_TONE_COLOR} !important;
   }
 
-  html[data-pageroot-review-filter="style"] [data-pageroot-review-marker-types~="style"] {
-    outline-color: ${REVIEW_STYLE_TONE_COLOR} !important;
-  }
-
 ${REVIEW_TEXT_EVIDENCE_MARKER_CSS}
-
-  html[data-pageroot-review-filter="style"] [data-pageroot-review-marker-types~="style"] {
-    box-shadow: none !important;
-  }
 
   html[data-pageroot-review-overlays="true"] [data-pageroot-review-marker] {
     outline: none !important;
@@ -226,25 +210,8 @@ ${REVIEW_TEXT_EVIDENCE_MARKER_CSS}
   }
 
   [data-pageroot-review-overlay-box][data-active="true"] {
-    border-color: ${REVIEW_STYLE_TONE_COLOR} !important;
+    border-color: ${REVIEW_STRUCTURE_TONE_COLOR} !important;
     background: rgb(109 92 231 / 4%) !important;
-  }
-
-  /* The amber suspected frame is an unverified-visibility hint, not a
-     confirmed claim; it never goes quiet. */
-  [data-pageroot-review-overlay-box][data-tone="suspected"] {
-    border-style: dashed !important;
-    border-color: ${REVIEW_SUSPECTED_TONE_COLOR} !important;
-    background: transparent !important;
-  }
-
-  [data-pageroot-review-overlay-box][data-tone="suspected"][data-active="true"] {
-    background: rgb(217 119 6 / 6%) !important;
-  }
-
-  [data-pageroot-review-overlay-box][data-tone="suspected"] [data-pageroot-review-overlay-label] {
-    border-color: rgb(217 119 6 / 32%) !important;
-    color: #b45309 !important;
   }
 
   [data-pageroot-review-overlay-box][data-shaped="true"] {
@@ -289,12 +256,7 @@ ${REVIEW_TEXT_EVIDENCE_MARKER_CSS}
   }
 
   [data-pageroot-review-overlay-box][data-active="true"] [data-pageroot-review-overlay-shape] {
-    stroke: ${REVIEW_STYLE_TONE_COLOR} !important;
-  }
-
-  [data-pageroot-review-overlay-box][data-tone="suspected"] [data-pageroot-review-overlay-shape] {
-    stroke: ${REVIEW_SUSPECTED_TONE_COLOR} !important;
-    stroke-dasharray: calc(5px * var(--pageroot-review-ui-scale)) calc(4px * var(--pageroot-review-ui-scale)) !important;
+    stroke: ${REVIEW_STRUCTURE_TONE_COLOR} !important;
   }
 
   [data-pageroot-review-overlay-label] {
@@ -355,7 +317,7 @@ ${REVIEW_TEXT_EVIDENCE_MARKER_CSS}
     border: 0 !important;
     border-radius: calc(2px * var(--pageroot-review-ui-scale)) !important;
     outline: none !important;
-    background: ${REVIEW_STYLE_TONE_COLOR} !important;
+    background: ${REVIEW_STRUCTURE_TONE_COLOR} !important;
     box-shadow: none !important;
     opacity: .5 !important;
     filter: none !important;
@@ -372,14 +334,6 @@ ${REVIEW_TEXT_EVIDENCE_MARKER_CSS}
   [data-pageroot-review-region-bar][data-active="true"] {
     opacity: 1 !important;
     box-shadow: 0 0 0 calc(2.5px * var(--pageroot-review-ui-scale)) rgb(109 92 231 / 14%) !important;
-  }
-
-  [data-pageroot-review-region-bar][data-suspect="true"] {
-    background: ${REVIEW_SUSPECTED_TONE_COLOR} !important;
-  }
-
-  [data-pageroot-review-region-bar][data-suspect="true"][data-active="true"] {
-    box-shadow: 0 0 0 calc(2.5px * var(--pageroot-review-ui-scale)) rgb(217 119 6 / 14%) !important;
   }
 
   [data-pageroot-review-transition-mask] {
@@ -466,11 +420,10 @@ export function baseHrefFromSourcePath(sourcePath?: string): string | undefined 
 export function prepareDocument(
   document: Document,
   side: ReviewSide,
-  captureIdentity: ReviewRuntimeVisualCaptureIdentity,
+  sessionId: string,
   sourcePath?: string,
   externalBootstrap = false,
   reviewCommentBindings: readonly ReviewCommentBootstrapBinding[] = [],
-  runtimeProjectionBindings: readonly ReviewRuntimeBootstrapBinding[] = [],
 ): {
   html: string;
   bootstrapJavaScript: string;
@@ -502,16 +455,13 @@ export function prepareDocument(
   const bootstrap = document.createElement("script");
   bootstrap.setAttribute(REVIEW_BOOTSTRAP_ATTRIBUTE, "true");
   const bootstrapJavaScript = reviewBootstrap(
-    captureIdentity.sessionId,
+    sessionId,
     side,
-    captureIdentity.sourceSha256BySide[side],
     reviewCommentBindings,
-    runtimeProjectionBindings,
   );
   const bootstrapFallbackJavaScript = reviewBootstrap(
-    captureIdentity.sessionId,
+    sessionId,
     side,
-    captureIdentity.sourceSha256BySide[side],
   );
   if (externalBootstrap) {
     bootstrap.src = REVIEW_BOOTSTRAP_PATH;

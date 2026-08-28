@@ -1,6 +1,6 @@
 # ADR 0017: Review-only runtime snapshot owner
 
-- Status: Accepted; the historical Edit restriction is amended by ADR 0022
+- Status: Superseded by ADR 0046; the historical Edit restriction remains amended by ADR 0022
 - Date: 2026-08-10
 
 ## Context

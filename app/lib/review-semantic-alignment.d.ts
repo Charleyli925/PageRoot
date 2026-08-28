@@ -21,7 +21,6 @@ export type ReviewSemanticAlignmentPair = {
   beforeIndex: number | null;
   afterIndex: number | null;
   match: ReviewSemanticAlignmentMatch;
-  moved: boolean;
 };
 
 export type ReviewSemanticAlignmentOptions = {

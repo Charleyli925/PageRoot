@@ -27,7 +27,6 @@ const reviewRuntimeProjection = await readFile(
 
 export function generatedReviewBootstrap(
   reviewCommentBindings = [],
-  runtimeProjectionBindings = [],
   side = "before",
 ) {
   const sourceFile = ts.createSourceFile(
@@ -52,21 +51,8 @@ export function generatedReviewBootstrap(
     },
   ).outputText;
   const context = vm.createContext({
-    RUNTIME_VISUAL_CONTRACT_VERSION: 2,
-    RUNTIME_VISUAL_CONTRACT: {
-      identityAttributeLimit: 24,
-      pageBudget: {
-        hostAtoms: 4_096,
-        atoms: 8_192,
-        nodes: 8_192,
-        canvasPixels: 4_194_304,
-        hostValueLength: 200_000,
-        valueLength: 400_000,
-      },
-    },
-    REVIEW_PROJECTION_FACTS_PER_ELEMENT_LIMIT: 24,
-    REVIEW_RUNTIME_VISUAL_CANDIDATE_LIMIT: 128,
-    REVIEW_RUNTIME_VISUAL_SOURCE_BOX_ATTRIBUTES: [
+    REVIEW_BOOTSTRAP_IDENTITY_ATTRIBUTE_LIMIT: 24,
+    REVIEW_COMMENT_BINDING_SOURCE_BOX_ATTRIBUTES: [
       "class",
       "height",
       "hidden",
@@ -100,8 +86,6 @@ export function generatedReviewBootstrap(
   return context.reviewBootstrap(
     "review-session",
     side,
-    `sha256:${"a".repeat(64)}`,
     reviewCommentBindings,
-    runtimeProjectionBindings,
   );
 }
