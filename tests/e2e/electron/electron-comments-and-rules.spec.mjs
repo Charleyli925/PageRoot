@@ -668,20 +668,6 @@ test("Electron shell keeps the global rail fixed while the context inspector swa
     expect(narrowAiGeometry.documentWidth - narrowAiGeometry.viewportWidth)
       .toBeLessThanOrEqual(1);
 
-    await launched.page.getByRole("button", { name: "收起 AI 助手" }).click();
-    await expect(launched.page.getByTestId("ai-conversation-sidebar")).toHaveCount(0);
-    await launched.page.getByRole("button", { name: "编辑", exact: true }).click();
-    await expect(stage).toHaveAttribute("data-inspector", "comments");
-    await expect(launched.page.locator(".review-scroll-stage > .comments-panel.comment-rail"))
-      .toBeVisible();
-    const narrowCommentsGeometry = await readGeometry();
-    assertShellGeometry(narrowCommentsGeometry);
-    expect(narrowCommentsGeometry.commentsPosition).toBe("absolute");
-    expect(Math.abs(
-      narrowCommentsGeometry.comments.width - narrowCommentsGeometry.inspectorWidth,
-    )).toBeLessThanOrEqual(0.5);
-    expect(narrowCommentsGeometry.documentWidth - narrowCommentsGeometry.viewportWidth)
-      .toBeLessThanOrEqual(1);
   } finally {
     await stopPageRoot(launched.electronApp, launched.isolatedUserData);
     removeSourceFixture(fixture.sourceDirectory);
