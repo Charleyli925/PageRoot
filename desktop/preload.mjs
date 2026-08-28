@@ -74,6 +74,7 @@ const previewChannels = Object.freeze({
 });
 const editRuntimeChannels = Object.freeze({
   prepare: "html-edit-runtime:prepare",
+  prewarmRegistered: "html-edit-runtime:prewarm-registered",
   revoke: "html-edit-runtime:revoke",
 });
 const editChannels = Object.freeze({
@@ -352,6 +353,10 @@ const previewApi = Object.freeze({
 
 const editRuntimeApi = Object.freeze({
   prepare: (payload) => invokeProject(editRuntimeChannels.prepare, payload),
+  prewarmRegistered: (projectId) => invokeProject(
+    editRuntimeChannels.prewarmRegistered,
+    projectId,
+  ),
   revoke: (sessionId) => invokeProject(editRuntimeChannels.revoke, sessionId),
 });
 

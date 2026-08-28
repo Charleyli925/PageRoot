@@ -113,7 +113,7 @@ test("direct protocol serves one immutable resource session and consumes executi
     + "/.pageroot/bootstrap/" + EXECUTION_ID + ".js";
   const bootstrap = await handler(new Request(bootstrapUrl));
   assert.equal(bootstrap.status, 200);
-  assert.match(await bootstrap.text(), /runtimeSettleMs/u);
+  assert.match(await bootstrap.text(), /runtimeQuietFrames/u);
   assert.equal((await handler(new Request(bootstrapUrl))).status, 404);
 
   const firstAuthor = await handler(new Request(
@@ -252,7 +252,7 @@ test("direct protocol never serves a capture HTML document and consumes bootstra
   const bootstrapUrl = `pageroot-edit-runtime://${session.sessionId}/.pageroot/bootstrap/${session.executionId}.js`;
   const bootstrap = await handler(new Request(bootstrapUrl));
   assert.equal(bootstrap.status, 200);
-  assert.match(await bootstrap.text(), /runtimeSettleMs/u);
+  assert.match(await bootstrap.text(), /runtimeQuietFrames/u);
   assert.equal((await handler(new Request(bootstrapUrl))).status, 404);
 });
 
@@ -286,6 +286,39 @@ test("direct protocol streams a headerless allowlisted ECharts response within t
   assert.equal(session.scriptCount, 2);
   assert.ok(observedSignal instanceof AbortSignal);
   assert.equal(observedSignal.aborted, false);
+});
+
+test("registered projection prewarm retains five or more source-bound remote script preparations", async (t) => {
+  const temporaryRoot = await mkdtemp(path.join(tmpdir(), "pageroot-edit-runtime-prewarm-"));
+  t.after(() => rm(temporaryRoot, { recursive: true, force: true }));
+  const sourcePath = path.join(temporaryRoot, "report.html");
+  await writeFile(sourcePath, REMOTE_ECHARTS_HTML);
+  let fetches = 0;
+  const controller = createEditRuntimeProtocolController({
+    protocolApi: { handle() {} },
+    netFetch: async () => {
+      fetches += 1;
+      return new Response("window.echarts={init(){return {}}};", { status: 200 });
+    },
+    randomSessionId: () => "8".repeat(32),
+    randomExecutionId: () => "9".repeat(24),
+    preparedScriptEntries: 5,
+  });
+
+  const prewarmed = await controller.prewarmScripts({
+    html: REMOTE_ECHARTS_HTML,
+    sourcePath,
+  });
+  assert.equal(prewarmed.scriptCount, 2);
+  assert.deepEqual(prewarmed.libraryOrigins, ["network", "inline"]);
+  assert.equal(controller.preparedScriptCount(), 1);
+  const session = await controller.createSession({
+    html: REMOTE_ECHARTS_HTML,
+    sourcePath,
+    bindings: BINDINGS,
+  });
+  assert.equal(session.resourceSha256, prewarmed.resourceSha256);
+  assert.equal(fetches, 1, "active preparation reuses exact source-bound prewarm bytes");
 });
 
 test("direct protocol cancels a headerless ECharts stream as soon as it exceeds the fixed byte cap", async (t) => {

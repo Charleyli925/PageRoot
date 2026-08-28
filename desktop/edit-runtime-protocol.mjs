@@ -391,6 +391,7 @@ async function fixedAuthorScripts({
   html,
   sourceRoot,
   netFetch,
+  runtimeLibraryStore,
   readFileImpl,
   realpathImpl,
   statImpl,
@@ -409,20 +410,32 @@ async function fixedAuthorScripts({
   let totalBytes = 0;
   let containsVisualSignal = isEditRuntimeVisualCandidate(html);
   for (const descriptor of contract.executableScripts) {
-    const bytes = descriptor.src
-      ? (permittedEchartsUrl(descriptor.src)
-        ? await fetchFixedEchartsBytes(
-            descriptor.src,
-            netFetch,
-            preparationDeadlineAt,
-            preparationSignal,
-          )
-        : await resolveLocalScript(sourceRoot, descriptor.src, {
-            readFileImpl,
-            realpathImpl,
-            statImpl,
-          }))
-      : Buffer.from(descriptor.inline, "utf8");
+    let libraryOrigin = descriptor.src ? "local" : "inline";
+    let bytes;
+    if (descriptor.src && permittedEchartsUrl(descriptor.src)) {
+      const fetchRemote = () => fetchFixedEchartsBytes(
+        descriptor.src,
+        netFetch,
+        preparationDeadlineAt,
+        preparationSignal,
+      );
+      if (runtimeLibraryStore?.load) {
+        const loaded = await runtimeLibraryStore.load(descriptor.src, fetchRemote);
+        bytes = loaded.bytes;
+        libraryOrigin = loaded.origin;
+      } else {
+        bytes = await fetchRemote();
+        libraryOrigin = "network";
+      }
+    } else if (descriptor.src) {
+      bytes = await resolveLocalScript(sourceRoot, descriptor.src, {
+        readFileImpl,
+        realpathImpl,
+        statImpl,
+      });
+    } else {
+      bytes = Buffer.from(descriptor.inline, "utf8");
+    }
     if (bytes.byteLength < 1 || bytes.byteLength > EDIT_AUTHOR_RUNTIME_BUDGET.scriptBytes) {
       throw new TypeError("Edit runtime script exceeds the byte budget.");
     }
@@ -440,6 +453,7 @@ async function fixedAuthorScripts({
       index: descriptor.index,
       bytes,
       sha256: "sha256:" + createHash("sha256").update(bytes).digest("hex"),
+      libraryOrigin,
       available: true,
     }));
   }
@@ -496,6 +510,7 @@ export function registerEditRuntimeProtocolScheme(protocolApi) {
 export function createEditRuntimeProtocolController({
   protocolApi,
   netFetch,
+  runtimeLibraryStore = null,
   now = () => Date.now(),
   randomSessionId = () => randomBytes(16).toString("hex"),
   randomExecutionId = () => randomBytes(12).toString("hex"),
@@ -506,6 +521,7 @@ export function createEditRuntimeProtocolController({
   collectDeclaredAssets = collectDeclaredPreviewAssets,
   orphanSessionTtlMs = EDIT_AUTHOR_RUNTIME_BUDGET.orphanSessionTtlMs,
   runtimePreparationDeadlineMs = EDIT_AUTHOR_RUNTIME_BUDGET.runtimeDeadlineMs,
+  preparedScriptEntries = 8,
 } = {}) {
   if (!protocolApi || typeof protocolApi.handle !== "function") {
     throw new TypeError("Edit runtime protocol requires protocol.handle.");
@@ -518,6 +534,7 @@ export function createEditRuntimeProtocolController({
     Math.round(Number(runtimePreparationDeadlineMs)) || EDIT_AUTHOR_RUNTIME_BUDGET.runtimeDeadlineMs,
   ));
   const sessions = new Map();
+  const preparedScripts = new Map();
   const installedProtocols = new WeakSet();
   const allocate = (create, predicate) => {
     for (let attempt = 0; attempt < 32; attempt += 1) {
@@ -531,6 +548,81 @@ export function createEditRuntimeProtocolController({
     for (const [id, session] of sessions) {
       if (session.createdAt < cutoff) sessions.delete(id);
     }
+  };
+  const preparedScriptKey = (source, sourceRoot) => createHash("sha256")
+    .update(sourceRoot)
+    .update("\0")
+    .update(source)
+    .digest("hex");
+  const rememberPreparedScripts = (key, value) => {
+    preparedScripts.delete(key);
+    preparedScripts.set(key, value);
+    while (preparedScripts.size > Math.max(5, Number(preparedScriptEntries) || 8)) {
+      preparedScripts.delete(preparedScripts.keys().next().value);
+    }
+    return value;
+  };
+  const prepareScripts = async ({
+    source,
+    sourceRoot,
+    preparationController,
+    preparationDeadlineAt,
+  }) => {
+    const key = preparedScriptKey(source, sourceRoot);
+    const scriptContract = collectEditRuntimeScripts(source);
+    const cacheable = !scriptContract.unsupportedReason
+      && scriptContract.executableScripts.every((descriptor) => (
+        !descriptor.src || permittedEchartsUrl(descriptor.src)
+      ));
+    const retained = cacheable ? preparedScripts.get(key) : null;
+    if (retained) return rememberPreparedScripts(key, retained);
+    const frozen = await settleWithinRuntimeDeadline(
+      () => fixedAuthorScripts({
+        html: source,
+        sourceRoot,
+        netFetch,
+        runtimeLibraryStore,
+        readFileImpl,
+        realpathImpl,
+        statImpl,
+        preparationDeadlineAt,
+        preparationSignal: preparationController.signal,
+      }),
+      preparationController,
+      preparationDeadlineAt,
+      runtimePreparationTimeoutError,
+    );
+    return cacheable ? rememberPreparedScripts(key, frozen) : frozen;
+  };
+  const prewarmScripts = async ({ html, sourcePath } = {}) => {
+    const source = typeof html === "string" ? html : null;
+    if (!source || utf8Bytes(source) > EDIT_AUTHOR_RUNTIME_BUDGET.htmlBytes) {
+      throw new TypeError("Edit runtime prewarm source is invalid or too large.");
+    }
+    const preparationController = new AbortController();
+    const preparationDeadlineAt = Date.now() + boundedRuntimePreparationDeadlineMs;
+    const sourceRoot = await settleWithinRuntimeDeadline(
+      () => resolveSourceRoot(sourcePath),
+      preparationController,
+      preparationDeadlineAt,
+      runtimePreparationTimeoutError,
+    );
+    if (!sourceRoot) throw new TypeError("Edit runtime prewarm requires a known source path.");
+    const frozen = await prepareScripts({
+      source,
+      sourceRoot,
+      preparationController,
+      preparationDeadlineAt,
+    });
+    return Object.freeze({
+      sourceSha256: "sha256:" + createHash("sha256").update(source).digest("hex"),
+      resourceSha256: frozen.resourceSha256,
+      scriptCount: frozen.scripts.length,
+      byteLength: frozen.byteLength,
+      libraryOrigins: Object.freeze([
+        ...new Set(frozen.scripts.map((script) => script.libraryOrigin)),
+      ]),
+    });
   };
   const createSession = async ({ html, sourcePath, bindings } = {}) => {
     const source = typeof html === "string" ? html : null;
@@ -549,21 +641,12 @@ export function createEditRuntimeProtocolController({
       runtimePreparationTimeoutError,
     );
     if (!sourceRoot) throw new TypeError("Edit runtime requires a known local source path.");
-    const frozenScripts = await settleWithinRuntimeDeadline(
-      () => fixedAuthorScripts({
-        html: source,
-        sourceRoot,
-        netFetch,
-        readFileImpl,
-        realpathImpl,
-        statImpl,
-        preparationDeadlineAt,
-        preparationSignal: preparationController.signal,
-      }),
+    const frozenScripts = await prepareScripts({
+      source,
+      sourceRoot,
       preparationController,
       preparationDeadlineAt,
-      runtimePreparationTimeoutError,
-    );
+    });
     const declaredAssets = await settleWithinRuntimeDeadline(
       () => collectDeclaredAssets({
         html: source,
@@ -602,6 +685,9 @@ export function createEditRuntimeProtocolController({
       scriptCount: frozenScripts.scripts.length,
       resourceSha256: frozenScripts.resourceSha256,
       byteLength: frozenScripts.byteLength,
+      libraryOrigins: Object.freeze([
+        ...new Set(frozenScripts.scripts.map((script) => script.libraryOrigin)),
+      ]),
       bindings: normalizedBindings,
     });
   };
@@ -699,9 +785,14 @@ export function createEditRuntimeProtocolController({
     install: () => installFor(protocolApi),
     installFor,
     createSession,
+    prewarmScripts,
     revokeSession,
-    dispose: () => sessions.clear(),
+    dispose: () => {
+      sessions.clear();
+      preparedScripts.clear();
+    },
     sessionCount: () => sessions.size,
+    preparedScriptCount: () => preparedScripts.size,
     handleRequest,
   });
 }

@@ -69,6 +69,8 @@ function oneShotRuntimeBootstrap(config) {
     ports: new Set(),
     baseline: null,
     preflightStyle: null,
+    chartInstances: new Map(),
+    echartsPatched: false,
     result: null,
   };
   const runtimeForbiddenTags = new Set([
@@ -500,7 +502,14 @@ function oneShotRuntimeBootstrap(config) {
     };
     window.setTimeout = function(callback, delay, ...args) {
       if (state.frozen) return 0;
-      const timer = native.setTimeout(callback, delay, ...args);
+      let timer = 0;
+      const invoke = (...callbackArgs) => {
+        state.timeouts.delete(timer);
+        return typeof callback === "function"
+          ? callback(...callbackArgs)
+          : undefined;
+      };
+      timer = native.setTimeout(invoke, delay, ...args);
       state.timeouts.add(timer);
       return timer;
     };
@@ -520,7 +529,11 @@ function oneShotRuntimeBootstrap(config) {
     };
     window.requestAnimationFrame = function(callback) {
       if (state.frozen) return 0;
-      const frame = native.requestAnimationFrame(callback);
+      let frame = 0;
+      frame = native.requestAnimationFrame((timestamp) => {
+        state.animationFrames.delete(frame);
+        callback(timestamp);
+      });
       state.animationFrames.add(frame);
       return frame;
     };
@@ -630,8 +643,110 @@ function oneShotRuntimeBootstrap(config) {
   const nextFrame = () => new Promise((resolve) => {
     native.requestAnimationFrame(() => resolve());
   });
-  const settle = () => new Promise((resolve) => {
-    native.setTimeout(resolve, config.runtimeSettleMs);
+  const installEchartsReadiness = () => {
+    const api = window.echarts;
+    if (state.echartsPatched || !api || typeof api.init !== "function") return;
+    const nativeInit = api.init;
+    api.init = function(...args) {
+      const instance = nativeInit.apply(this, args);
+      if (!instance || typeof instance !== "object") return instance;
+      const record = {
+        finished: false,
+        painted: false,
+        host: args[0] instanceof Element ? args[0] : null,
+      };
+      state.chartInstances.set(instance, record);
+      if (typeof instance.on === "function") {
+        try {
+          instance.on("finished", () => {
+            record.finished = true;
+            record.painted = true;
+          });
+        } catch {}
+      }
+      if (typeof instance.setOption === "function") {
+        const nativeSetOption = instance.setOption;
+        instance.setOption = function(option, ...rest) {
+          record.finished = false;
+          const immediate = option && typeof option === "object" && !Array.isArray(option)
+            ? {
+                ...option,
+                animation: false,
+                animationDuration: 0,
+                animationDurationUpdate: 0,
+              }
+            : option;
+          const result = nativeSetOption.call(this, immediate, ...rest);
+          native.requestAnimationFrame(() => {
+            try {
+              const host = typeof instance.getDom === "function"
+                ? instance.getDom()
+                : record.host;
+              record.painted = Boolean(host?.querySelector?.("canvas,svg"));
+              if (record.painted) record.finished = true;
+            } catch {}
+          });
+          return result;
+        };
+      }
+      return instance;
+    };
+    state.echartsPatched = true;
+  };
+  const visualSignature = () => Array.from(document.querySelectorAll(hostSelector))
+    .map((host) => {
+      const surfaces = host.matches("canvas,svg")
+        ? [host]
+        : Array.from(host.querySelectorAll("canvas,svg"));
+      return surfaces.map((surface) => {
+        const rect = surface.getBoundingClientRect();
+        return [
+          surface.tagName,
+          Math.round(rect.width),
+          Math.round(rect.height),
+          Number(surface.width || 0),
+          Number(surface.height || 0),
+          surface.childNodes.length,
+        ].join(":");
+      }).join("|");
+    })
+    .join("||");
+  const chartsReady = () => {
+    if (!state.chartInstances.size) return true;
+    return Array.from(state.chartInstances.values()).every((record) => (
+      record.finished && record.painted
+    ));
+  };
+  const waitForUsefulPaint = () => new Promise((resolve) => {
+    let priorSignature = "";
+    let quietFrames = 0;
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      resolve();
+    };
+    const safetyTimer = native.setTimeout(finish, config.runtimeSafetyDeadlineMs);
+    const inspect = () => {
+      if (settled) return;
+      const signature = visualSignature();
+      const asyncWorkReady = state.chartInstances.size
+        ? chartsReady()
+        : state.timeouts.size === 0 && state.animationFrames.size === 0;
+      if (signature && signature === priorSignature && asyncWorkReady) {
+        quietFrames += 1;
+      } else {
+        quietFrames = 0;
+      }
+      priorSignature = signature;
+      if (quietFrames >= config.runtimeQuietFrames) {
+        native.clearTimeout(safetyTimer);
+        finish();
+        return;
+      }
+      native.requestAnimationFrame(inspect);
+    };
+    native.requestAnimationFrame(inspect);
   });
   const begin = async () => {
     if (state.phase !== "booting") return;
@@ -656,14 +771,13 @@ function oneShotRuntimeBootstrap(config) {
           break;
         }
         await loadOne(scriptId, origin);
+        installEchartsReadiness();
       }
-      await nextFrame();
-      await settle();
       await nextFrame();
       try {
         window.dispatchEvent(new Event("resize"));
       } catch {}
-      await nextFrame();
+      await waitForUsefulPaint();
       await Promise.resolve();
     } catch {
       violation("author-script-failed");
@@ -684,7 +798,6 @@ function oneShotRuntimeBootstrap(config) {
 export function createEditRuntimeBootstrap({
   executionId,
   sessionId,
-  runtimeSettleMs = EDIT_AUTHOR_RUNTIME_BUDGET.runtimeSettleMs,
 } = {}) {
   if (!/^[a-f0-9]{24}$/u.test(String(executionId || ""))) {
     throw new TypeError("Edit runtime bootstrap requires an execution identity.");
@@ -696,10 +809,8 @@ export function createEditRuntimeBootstrap({
     contractVersion: EDIT_AUTHOR_RUNTIME_CONTRACT_VERSION,
     executionId: String(executionId).toLowerCase(),
     sessionId: String(sessionId).toLowerCase(),
-    runtimeSettleMs: Math.max(0, Math.min(
-      EDIT_AUTHOR_RUNTIME_BUDGET.runtimeDeadlineMs,
-      Math.floor(Number(runtimeSettleMs) || 0),
-    )),
+    runtimeQuietFrames: EDIT_AUTHOR_RUNTIME_BUDGET.runtimeQuietFrames,
+    runtimeSafetyDeadlineMs: EDIT_AUTHOR_RUNTIME_BUDGET.runtimeDeadlineMs,
     sourceNodeCount: EDIT_AUTHOR_RUNTIME_BUDGET.sourceNodeCount,
     attributes: {
       source: EDIT_RUNTIME_SOURCE_MARKER_ATTRIBUTE,

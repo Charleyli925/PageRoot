@@ -10,7 +10,7 @@ export const EDIT_AUTHOR_RUNTIME_BUDGET: Readonly<{
   declaredAssetBytes: number;
   hostCount: number;
   sourceNodeCount: number;
-  runtimeSettleMs: number;
+  runtimeQuietFrames: number;
   runtimeDeadlineMs: number;
   orphanSessionTtlMs: number;
 }>;
@@ -39,6 +39,7 @@ export type EditRuntimeGrant = Readonly<{
   executionId: string;
   sourceSha256: string;
   resourceSha256: string;
+  libraryOrigins?: readonly ("bundled" | "disk-cache" | "network" | "local" | "inline")[];
   scriptCount: number;
   byteLength: number;
   canvasGeneration: number;

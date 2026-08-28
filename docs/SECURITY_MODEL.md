@@ -89,7 +89,11 @@ PageRoot edits local files and renders user-controlled HTML, so its default poli
   animations and MessageChannel ports, then audits source fidelity; the real
   Canvas/SVG stays in that
   iframe. Same-origin `window.parent` access is a known, explicitly accepted
-  product risk (ADR 0025): author scripts in that iframe can reach
+  product risk. Exact ECharts 5.5.0 minified CDN references use the packaged,
+  SHA-verified library; other allowlisted versions use verified private
+  content-addressed blobs. These resource caches never carry source or Session
+  authority. Under the accepted product risk in ADR 0025, author scripts in
+  that iframe can reach
   renderer-exposed contextBridge APIs on the parent. The iframe itself still
   has no Node integration and no preload or IPC sender of its own. Capture
   failure or audit rejection revokes the session and renders static Edit before

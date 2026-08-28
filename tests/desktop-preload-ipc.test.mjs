@@ -181,6 +181,9 @@ test("preload exposes one narrow one-shot Edit runtime preparation port", async 
         executionId: "abcdefabcdefabcdefabcdef",
       });
     }
+    if (args[0] === "html-edit-runtime:prewarm-registered") {
+      return success({ projectId: args[1], libraryOrigins: ["bundled"] });
+    }
     return success({ revoked: true });
   });
   const payload = {
@@ -197,15 +200,27 @@ test("preload exposes one narrow one-shot Edit runtime preparation port", async 
     executionId: "abcdefabcdefabcdefabcdef",
   });
   assert.deepEqual(calls[0], ["html-edit-runtime:prepare", payload]);
+  assert.deepEqual(await editRuntime.prewarmRegistered("project_demo"), {
+    projectId: "project_demo",
+    libraryOrigins: ["bundled"],
+  });
+  assert.deepEqual(calls[1], [
+    "html-edit-runtime:prewarm-registered",
+    "project_demo",
+  ]);
   assert.deepEqual(
     await editRuntime.revoke("0123456789abcdef0123456789abcdef"),
     { revoked: true },
   );
-  assert.deepEqual(calls[1], [
+  assert.deepEqual(calls[2], [
     "html-edit-runtime:revoke",
     "0123456789abcdef0123456789abcdef",
   ]);
-  assert.deepEqual(Object.keys(editRuntime).sort(), ["prepare", "revoke"]);
+  assert.deepEqual(Object.keys(editRuntime).sort(), [
+    "prepare",
+    "prewarmRegistered",
+    "revoke",
+  ]);
 });
 
 test("preload exposes one narrow UI-preferences get/record port", async () => {

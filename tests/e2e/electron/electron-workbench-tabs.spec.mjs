@@ -140,6 +140,10 @@ test("Electron browser A to B to A reopens exact in-memory HTML and deduplicates
     "browser-memory-b.html",
     (source) => source.replace(ORIGINAL_LIST_TEXT, "Browser memory B"),
   );
+  const additionalProjects = ["C", "D", "E"].map((suffix) => createSourceFixture(
+    `browser-memory-${suffix.toLowerCase()}.html`,
+    (source) => source.replace(ORIGINAL_LIST_TEXT, `Browser memory ${suffix}`),
+  ));
   const launched = await launchPageRoot();
   try {
     const htmlInput = launched.page.locator('input[type="file"][accept*=".html"]').first();
@@ -155,8 +159,14 @@ test("Electron browser A to B to A reopens exact in-memory HTML and deduplicates
       return currentEditorFrame(launched.page);
     };
     await htmlInput.setInputFiles(projectA.sourcePath);
+    await expect(launched.page.getByTestId("html-canvas-editor").filter({ visible: true }).first())
+      .toHaveAttribute("data-render-verified", "true", { timeout: 30_000 });
     let frame = await waitForBrowserText("Browser memory A");
     await expect(frame.locator(caseSelector("list-item"))).toHaveText("Browser memory A");
+    const runtimeDocumentToken = await frame.evaluate(() => {
+      window.__qaRuntimeDocumentToken = crypto.randomUUID();
+      return window.__qaRuntimeDocumentToken;
+    });
     const tabs = launched.page.getByRole("tablist", { name: "已打开的 HTML" }).getByRole("tab");
     await expect(tabs.filter({ hasText: "browser-memory-a" })).toHaveCount(1);
     const afterA = await tabs.count();
@@ -180,61 +190,63 @@ test("Electron browser A to B to A reopens exact in-memory HTML and deduplicates
       .toHaveAttribute("type", "application/x-html-canvas-disabled");
     await expect(cachedADocument.locator("#cache-disabled-link"))
       .toHaveCSS("pointer-events", "none");
+    for (const [index, project] of additionalProjects.entries()) {
+      const suffix = ["C", "D", "E"][index];
+      await htmlInput.setInputFiles(project.sourcePath);
+      frame = await waitForBrowserText(`Browser memory ${suffix}`);
+    }
+    await expect(tabs).toHaveCount(afterA + 4);
+    await expect(launched.page.getByTestId("workbench-document-canvas-pool"))
+      .toHaveAttribute("data-runtime-hot-count", "5");
     await launched.page.evaluate(() => {
       performance.clearMarks("pageroot:tab-cache:visible-ready");
       performance.clearMarks("pageroot:tab-cache:handoff-complete");
+      performance.clearMarks("pageroot:runtime-hot:visible-ready");
     });
     await cachedA.click();
-    const visibleCacheFrame = launched.page.getByTestId("workbench-document-surface-cache")
-      .locator(`[data-tab-id="${cachedATabId}"]:not([hidden]) iframe`);
-    await expect(visibleCacheFrame).toBeVisible({ timeout: 5_000 });
-    const visibleScrollFacts = await cachedADocument.evaluate(() => ({
-      scrollTop: (() => {
-        window.scrollTo({ top: 720, behavior: "auto" });
-        return window.scrollY;
-      })(),
-      scrollHeight: document.scrollingElement?.scrollHeight || 0,
-      clientHeight: document.scrollingElement?.clientHeight || 0,
-    }));
+    const visibleRuntimeFrame = launched.page.getByTestId("workbench-document-canvas-pool")
+      .locator(`[data-runtime-hot-tab-id="${cachedATabId}"]:not([hidden]) iframe`);
+    await expect(visibleRuntimeFrame).toBeVisible({ timeout: 5_000 });
+    const visibleRuntimeHandle = await visibleRuntimeFrame.elementHandle();
+    const visibleRuntimeDocument = await visibleRuntimeHandle.contentFrame();
+    expect(visibleRuntimeDocument).not.toBeNull();
+    expect(await visibleRuntimeDocument.evaluate(() => window.__qaRuntimeDocumentToken))
+      .toBe(runtimeDocumentToken);
+    const visibleScrollFacts = await launched.page.locator("#workbench-content-outlet")
+      .evaluate((stage) => ({
+        scrollTop: (() => {
+          stage.scrollTo({ top: 720, behavior: "auto" });
+          return stage.scrollTop;
+        })(),
+        scrollHeight: stage.scrollHeight,
+        clientHeight: stage.clientHeight,
+      }));
     expect(visibleScrollFacts.scrollHeight).toBeGreaterThan(visibleScrollFacts.clientHeight);
     expect(visibleScrollFacts.scrollTop).toBeGreaterThan(0);
     frame = await waitForBrowserText("Browser memory A");
     await expect(frame.locator(caseSelector("list-item"))).toHaveText("Browser memory A");
-    await expect(tabs).toHaveCount(afterA + 1);
-    await expect.poll(() => launched.page.evaluate((tabId) => {
-      const mark = (name) => performance.getEntriesByName(name, "mark")
-        .find((entry) => entry.detail?.tabId === tabId)?.startTime || null;
-      return {
-        visible: mark("pageroot:tab-cache:visible-ready"),
-        handoff: mark("pageroot:tab-cache:handoff-complete"),
-      };
-    }, cachedATabId), { timeout: 30_000 }).toMatchObject({
-      visible: expect.any(Number),
-      handoff: expect.any(Number),
-    });
-    const cacheTiming = await launched.page.evaluate((tabId) => {
-      const mark = (name) => performance.getEntriesByName(name, "mark")
-        .find((entry) => entry.detail?.tabId === tabId)?.startTime || null;
-      return {
-        visible: mark("pageroot:tab-cache:visible-ready"),
-        handoff: mark("pageroot:tab-cache:handoff-complete"),
-      };
-    }, cachedATabId);
-    expect(cacheTiming.visible).toBeLessThan(cacheTiming.handoff);
+    await expect(tabs).toHaveCount(afterA + 4);
+    await expect.poll(() => launched.page.evaluate((tabId) => (
+      performance.getEntriesByName("pageroot:runtime-hot:visible-ready", "mark")
+        .find((entry) => entry.detail?.tabId === tabId)?.startTime || null
+    ), cachedATabId), { timeout: 30_000 }).toEqual(expect.any(Number));
+    const runtimePool = launched.page.getByTestId("workbench-document-canvas-pool");
+    await expect(runtimePool).toHaveAttribute("data-runtime-hot-limit", "5");
     const cacheRoot = launched.page.getByTestId("workbench-document-surface-cache");
-    await expect(cacheRoot).toHaveAttribute("data-hot-count", "3");
-    await expect(cacheRoot).toHaveAttribute("data-max-hot-entries", "3");
+    await expect(cacheRoot).toHaveAttribute("data-hot-count", "5");
+    await expect(cacheRoot).toHaveAttribute("data-max-hot-entries", "5");
 
     await htmlInput.setInputFiles(projectA.sourcePath);
     frame = await waitForBrowserText("Browser memory A");
     await expect(frame.locator(caseSelector("list-item"))).toHaveText("Browser memory A");
     await expect(tabs.filter({ hasText: "browser-memory-a" })).toHaveCount(1);
     await expect(tabs.filter({ hasText: "browser-memory-b" })).toHaveCount(1);
-    await expect(tabs).toHaveCount(afterA + 1);
+    await expect(tabs).toHaveCount(afterA + 4);
   } finally {
     await stopPageRoot(launched.electronApp, launched.isolatedUserData);
     removeSourceFixture(projectA.sourceDirectory);
     removeSourceFixture(projectB.sourceDirectory);
+    additionalProjects.forEach((project) => removeSourceFixture(project.sourceDirectory));
   }
 });
 

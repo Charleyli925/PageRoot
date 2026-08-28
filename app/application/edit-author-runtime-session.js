@@ -54,6 +54,9 @@ function sameKey(left, right) {
 }
 
 function normalizedGrant(value, request) {
+  const allowedLibraryOrigins = new Set([
+    "bundled", "disk-cache", "network", "local", "inline",
+  ]);
   if (
     !isRecord(value)
     || value.contractVersion !== EDIT_AUTHOR_RUNTIME_CONTRACT_VERSION
@@ -69,6 +72,13 @@ function normalizedGrant(value, request) {
     || value.byteLength > EDIT_AUTHOR_RUNTIME_BUDGET.aggregateScriptBytes
     || value.canvasGeneration !== request.canvasGeneration
     || !Array.isArray(value.hosts)
+    || (
+      value.libraryOrigins !== undefined
+      && (
+        !Array.isArray(value.libraryOrigins)
+        || value.libraryOrigins.some((origin) => !allowedLibraryOrigins.has(origin))
+      )
+    )
   ) return null;
   const expected = new Map(request.hosts.map((host) => [host.key, host]));
   const hosts = [];
@@ -93,6 +103,7 @@ function normalizedGrant(value, request) {
     resourceSha256: String(value.resourceSha256).toLowerCase(),
     scriptCount: value.scriptCount,
     byteLength: value.byteLength,
+    libraryOrigins: Object.freeze([...(value.libraryOrigins || [])]),
     canvasGeneration: request.canvasGeneration,
     hosts: Object.freeze(hosts),
   });
@@ -346,6 +357,28 @@ export class EditAuthorRuntimeSession {
         || !sameKey(this.#identity, identity)
       ) return;
       this.#transitionToStatic("static-fallback", "prepare-failed", identity);
+    });
+    return true;
+  }
+
+  reusePrepared({ sourceSha256, canvasGeneration } = {}) {
+    const normalizedSha = String(sourceSha256 || "").toLowerCase();
+    if (
+      this.#disposed
+      || !this.#identity
+      || !["preparing", "ready"].includes(this.#snapshot.phase)
+      || this.#identity.sourceSha256 !== normalizedSha
+      || this.#identity.canvasGeneration !== canvasGeneration
+    ) return false;
+    this.#attemptGeneration += 1;
+    this.#pendingPreparation = null;
+    this.#revoke(this.#snapshot.grant);
+    this.#emit({
+      phase: "settled",
+      sourceSha256: this.#identity.sourceSha256,
+      sourcePath: this.#identity.sourcePath,
+      canvasGeneration: this.#identity.canvasGeneration,
+      lastOutcome: "retained-runtime",
     });
     return true;
   }

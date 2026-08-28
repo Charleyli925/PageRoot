@@ -26,7 +26,11 @@ test("one-shot bootstrap freezes author async work and performs one final source
   assert.match(source, /document-replacement/u);
   assert.match(source, /runtime-node-outside-host/u);
   assert.match(source, /pointer-events/u);
-  assert.match(source, /runtimeSettleMs/u);
+  assert.match(source, /runtimeQuietFrames/u);
+  assert.match(source, /installEchartsReadiness/u);
+  assert.match(source, /animationDurationUpdate/u);
+  assert.match(source, /waitForUsefulPaint/u);
+  assert.doesNotMatch(source, /runtimeSettleMs/u);
   assert.match(source, /data-pageroot-edit-runtime-frozen/u);
   assert.match(source, /data-pageroot-edit-runtime-result/u);
   assert.doesNotMatch(source, /window\.fetch\s*=/u);

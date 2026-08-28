@@ -55,7 +55,7 @@ test("surface cache admits only exact persisted and Canvas-verified projections"
   assert.equal(session.snapshot.entries.length, 1);
 });
 
-test("surface cache keeps three hot mounted entries and byte-bounded warm LRU entries", () => {
+test("surface cache honors an explicit three-entry hot override and byte-bounded warm LRU entries", () => {
   const session = new DocumentSurfaceCacheSession({
     maxHotEntries: 3,
     maxWarmEntries: 5,
@@ -166,11 +166,11 @@ test("surface cache reports evicted document identities as cold under the defaul
   session.reconcile(tabIds);
   for (let index = 0; index < 21; index += 1) capture(session, String(index));
 
-  assert.equal(session.snapshot.hotTabIds.length, 3);
-  assert.equal(session.snapshot.warmTabIds.length, 17);
+  assert.equal(session.snapshot.hotTabIds.length, 5);
+  assert.equal(session.snapshot.warmTabIds.length, 15);
   assert.deepEqual(session.snapshot.coldTabIds, ["document:project_0:doc_0"]);
   assert.deepEqual(session.snapshot.limits, {
-    maxHotEntries: 3,
+    maxHotEntries: 5,
     maxEntries: 20,
     maxBytes: 32 * 1024 * 1024,
   });

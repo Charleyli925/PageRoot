@@ -136,6 +136,7 @@ import {
   createEditRuntimeProtocolController,
   registerEditRuntimeProtocolScheme,
 } from "./edit-runtime-protocol.mjs";
+import { createEditRuntimeLibraryStore } from "./edit-runtime-library-store.mjs";
 import {
   EDIT_AUTHOR_RUNTIME_CONTRACT_VERSION,
   isEditRuntimeRequestId,
@@ -286,6 +287,7 @@ const PREVIEW_CHANNELS = Object.freeze({
 });
 const EDIT_RUNTIME_CHANNELS = Object.freeze({
   prepare: "html-edit-runtime:prepare",
+  prewarmRegistered: "html-edit-runtime:prewarm-registered",
   revoke: "html-edit-runtime:revoke",
 });
 const EDIT_CHANNELS = Object.freeze({
@@ -443,9 +445,22 @@ function ensurePreviewProtocolController() {
 
 function ensureEditRuntimeProtocolController() {
   if (!editRuntimeProtocolController) {
+    const bundledEchartsPath = app.isPackaged
+      ? path.join(
+          process.resourcesPath,
+          "edit-runtime-libraries",
+          "echarts",
+          "5.5.0",
+          "echarts.min.js",
+        )
+      : path.resolve(directory, "../node_modules/echarts/dist/echarts.min.js");
     editRuntimeProtocolController = createEditRuntimeProtocolController({
       protocolApi: protocol,
       netFetch: (url, options) => net.fetch(url, options),
+      runtimeLibraryStore: createEditRuntimeLibraryStore({
+        userDataPath: app.getPath("userData"),
+        bundledEchartsPath,
+      }),
     });
     editRuntimeProtocolController.install();
   }
@@ -1972,6 +1987,7 @@ async function prepareEditAuthorRuntime(payload) {
       executionId: session.executionId,
       sourceSha256: activeSource.sha256,
       resourceSha256: session.resourceSha256,
+      libraryOrigins: session.libraryOrigins,
       scriptCount: session.scriptCount,
       byteLength: session.byteLength,
       canvasGeneration: payload.canvasGeneration,
@@ -3206,6 +3222,29 @@ async function readRegisteredProjectProjection(projectIdInput) {
   });
 }
 
+async function prewarmRegisteredEditRuntime(projectIdInput) {
+  const project = await readRegisteredProjectProjection(projectIdInput);
+  const prepared = await ensureEditRuntimeProtocolController().prewarmScripts({
+    html: project.html,
+    sourcePath: project.sourcePath,
+  });
+  if (prepared.sourceSha256 !== project.sha256) {
+    throw new ProjectFileError(
+      "EDIT_RUNTIME_PREWARM_HASH_MISMATCH",
+      "后台准备的图表资源与已验证工作文件不一致。",
+    );
+  }
+  return Object.freeze({
+    projectId: project.projectId,
+    documentId: project.documentId,
+    sourceSha256: project.sha256,
+    resourceSha256: prepared.resourceSha256,
+    scriptCount: prepared.scriptCount,
+    byteLength: prepared.byteLength,
+    libraryOrigins: prepared.libraryOrigins,
+  });
+}
+
 async function openRegisteredProject(projectIdInput) {
   return projectOpenQueue.run(async () => {
     const project = await readRegisteredProjectProjection(projectIdInput);
@@ -3377,6 +3416,7 @@ function registerProjectIpc() {
         ensurePreviewProtocolController().revokeSession(sessionId)
       ),
       prepareEditAuthorRuntime,
+      prewarmRegisteredEditRuntime,
       revokeEditAuthorRuntime,
     },
   });
