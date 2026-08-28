@@ -228,6 +228,14 @@ Pre-Request version/model probes use the same bounded process-group cleanup.
 An unconfirmed probe descendant creates no Request but remains a non-prunable
 Bridge-level fence, so later preflight and application shutdown both fail
 closed rather than forgetting an unowned local process.
+
+PageRoot may also keep a product-managed ACP install under Application Support
+`agents/<providerId>/<version>/` (Electron `userData`, overridable with
+`HTML_AI_AGENTS_ROOT`). That tree is written only by the Bridge installer after
+npm integrity and package-identity checks. It is not a user document root, not
+a Request workspace, and not visible to the renderer as a path. A user-installed
+CLI still wins when it passes the current identity checks; an invalid user
+installation is never silently replaced by the managed copy.
 Quit, relaunch and update installation also fail closed: the Bridge stays alive
 and the desktop app remains open unless all owned Agent cleanup is confirmed.
 

@@ -14,6 +14,7 @@ import {
   TRUSTED_LOCAL_AGENT_POLICY_VERSION,
 } from "../../../shared/agent-delivery.mjs";
 import { AGENT_FEATURE_GATES } from "../../../shared/agent-feature-gates.mjs";
+import { createAgentCatalog, defaultAgentsRoot } from "../catalog/agent-catalog.mjs";
 
 function unsupportedDriver() {
   throw agentProviderError(
@@ -329,12 +330,20 @@ export function createDefaultProviderRegistry({
   codexProbeRunner,
   codexPolicyLoader,
   codexRunTask,
+  agentCatalog,
+  agentsRoot,
+  installerOptions,
 } = {}) {
+  const catalog = agentCatalog || createAgentCatalog({
+    agentsRoot: agentsRoot || defaultAgentsRoot(),
+    ...(installerOptions ? { installerOptions } : {}),
+  });
   const runtimes = [createAcpRuntime({ ...(runTask ? { runTask } : {}) })];
   const providers = [createQoderProvider({
     ...(commandResolver ? { commandResolver } : {}),
     ...(preflightRunner ? { preflightRunner } : {}),
     ...(policyLoader ? { policyLoader } : {}),
+    managedCandidates: () => catalog.managedCommandCandidates("qoder"),
   })];
   if (codexExecution === true) {
     runtimes.push(createCodexAppServerRuntime({
@@ -348,9 +357,40 @@ export function createDefaultProviderRegistry({
     }));
   }
   const runtimeRegistry = createRuntimeRegistry(runtimes);
-  return createProviderRegistry({
+  const registry = createProviderRegistry({
     providers,
     runtimeRegistry,
+  });
+  return Object.freeze({
+    ...registry,
+    agentCatalog: catalog,
+    async publicCatalog({ environment = process.env } = {}) {
+      const projected = [];
+      for (const item of registry.catalog()) {
+        let installSource = "none";
+        try {
+          const { provider } = registry.resolveSelection({
+            providerId: item.providerId,
+            runtimeId: item.runtimeId,
+            requestedModelId: null,
+            resolvedModelId: null,
+            reasoning: Object.freeze({
+              requested: null,
+              applied: null,
+              resolution: "provider-default",
+            }),
+          });
+          const installation = await provider.resolveInstallation({ environment });
+          if (installation?.installSource === "user" || installation?.installSource === "managed") {
+            installSource = installation.installSource;
+          }
+        } catch {
+          installSource = "none";
+        }
+        projected.push(catalog.publicProvider(item, { installSource }));
+      }
+      return Object.freeze(projected);
+    },
   });
 }
 

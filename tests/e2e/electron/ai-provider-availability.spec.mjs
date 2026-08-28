@@ -388,9 +388,7 @@ test("Qoder installed while PageRoot is open refreshes in place and continues on
     await launched.page.getByRole("button", { name: /AI 助手/u }).click();
     const deliveryDialog = await openQoderAvailability(launched.page);
     await expect(deliveryDialog.getByText("未安装", { exact: true })).toBeVisible();
-    await deliveryDialog.getByRole("button", { name: "复制安装指令至 Agent" }).click();
-    await expect(deliveryDialog.getByRole("button", { name: "复制安装指令至 Agent" }))
-      .toBeVisible();
+    await expect(deliveryDialog.getByRole("button", { name: "安装 Qoder CLI" })).toBeVisible();
     expect(requestPosts).toBe(0);
 
     createQoderAcpE2ECommand(fixture.sourceDirectory);

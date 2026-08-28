@@ -22,12 +22,39 @@ export class AgentBridgeService {
 
   get runtimeCoordinator() { return this.#coordinator; }
 
-  providers() {
+  async providers() {
+    const listed = typeof this.#coordinator.publicProviderCatalog === "function"
+      ? await this.#coordinator.publicProviderCatalog({ environment: process.env })
+      : this.#coordinator.providerCatalog();
     return Object.freeze({
       ok: true,
-      providers: this.#coordinator.providerCatalog(),
+      providers: listed,
       trustPolicyVersion: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
     });
+  }
+
+  install(providerId) {
+    const catalog = this.#coordinator.agentCatalog;
+    if (!catalog || typeof catalog.install !== "function") {
+      throw new AgentBridgeError(
+        "AGENT_INSTALL_UNSUPPORTED",
+        "This Agent cannot be installed from PageRoot.",
+        { status: 409 },
+      );
+    }
+    return catalog.install(providerId);
+  }
+
+  cancelInstall(providerId) {
+    const catalog = this.#coordinator.agentCatalog;
+    if (!catalog || typeof catalog.cancelInstall !== "function") {
+      throw new AgentBridgeError(
+        "AGENT_INSTALL_UNSUPPORTED",
+        "This Agent cannot be installed from PageRoot.",
+        { status: 409 },
+      );
+    }
+    return catalog.cancelInstall(providerId);
   }
 
   assertSelection(selection, purpose) {

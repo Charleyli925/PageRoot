@@ -1,12 +1,9 @@
-import { runQoderAcpTask } from "../../qoder-acp-client.mjs";
 import { assertAgentSecurityProfile } from "../providers/agent-provider-contract.mjs";
 import { defineAgentRuntime } from "./agent-runtime-contract.mjs";
+import { runAcpProcessTask } from "./acp-process.mjs";
 
 export function thinAcpRuntimeEvent(event) {
   if (!event || typeof event !== "object" || Array.isArray(event)) return null;
-  // The hardened ACP client already bounds and sanitizes event fields. The
-  // runtime boundary makes the envelope immutable and drops non-events without
-  // assigning provider meaning to the standard ACP progress vocabulary.
   return Object.freeze({ ...event });
 }
 
@@ -28,11 +25,7 @@ function acpCancellationSignal(signal) {
   return controller.signal;
 }
 
-// PR1 keeps the already-hardened process and host implementation in its
-// existing module. This adapter is the provider-neutral runtime boundary: it
-// accepts one verified launch descriptor and owns no provider discovery,
-// version, login, model or error-classification rule.
-export function createAcpRuntime({ runTask = runQoderAcpTask } = {}) {
+export function createAcpRuntime({ runTask = runAcpProcessTask } = {}) {
   if (typeof runTask !== "function") {
     throw new TypeError("ACP runtime requires a task runner.");
   }

@@ -48,6 +48,8 @@ export type BridgeClient = {
   qoderAvailability(input?: BridgeJson): Promise<BridgeJson>;
   agentProviders(): Promise<BridgeJson>;
   preflightAgent(body: BridgeJson): Promise<BridgeJson>;
+  installAgent(body: BridgeJson): Promise<BridgeJson>;
+  cancelAgentInstall(body: BridgeJson): Promise<BridgeJson>;
   startAgent(body: BridgeJson): Promise<BridgeJson>;
   agentStatus(
     sourcePath: string,

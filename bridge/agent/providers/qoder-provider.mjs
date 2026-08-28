@@ -289,7 +289,7 @@ async function fileIdentity(filePath) {
   }
 }
 
-async function validateNpmQoderCommand(candidate) {
+export async function validateNpmQoderCommand(candidate) {
   let executable;
   try {
     executable = await realpath(candidate);
@@ -336,12 +336,14 @@ async function validateNpmQoderCommand(candidate) {
     version: manifest.version,
     identity,
     source: "verified-npm-package",
+    installSource: "user",
   });
 }
 
 export async function resolveQoderAcpCommand({
   environment = process.env,
   homeDirectory = os.homedir(),
+  managedCandidates = async () => [],
 } = {}) {
   const configured = cleanProviderText(environment.PAGEROOT_QODER_ACP_COMMAND, 4_096);
   const testOverride = configured
@@ -361,6 +363,7 @@ export async function resolveQoderAcpCommand({
       version: null,
       identity: await fileIdentity(executable),
       source: "e2e-override",
+      installSource: "none",
     });
   }
 
@@ -368,7 +371,34 @@ export async function resolveQoderAcpCommand({
   for (const candidate of await commandCandidates(environment, homeDirectory)) {
     try {
       const resolved = await validateNpmQoderCommand(candidate);
-      if (resolved) return resolved;
+      if (resolved) {
+        return Object.freeze({
+          ...resolved,
+          installSource: "user",
+        });
+      }
+    } catch (cause) {
+      if (cause instanceof AgentProviderError) {
+        discoveredError ||= cause;
+        continue;
+      }
+      throw cause;
+    }
+  }
+  if (discoveredError) throw discoveredError;
+
+  if (typeof managedCandidates !== "function") {
+    fail("QODER_COMMAND_NOT_FOUND", "没有找到独立安装的 Qoder CLI。", { status: 404 });
+  }
+  for (const candidate of await managedCandidates()) {
+    try {
+      const resolved = await validateNpmQoderCommand(candidate);
+      if (resolved) {
+        return Object.freeze({
+          ...resolved,
+          installSource: "managed",
+        });
+      }
     } catch (cause) {
       if (cause instanceof AgentProviderError) {
         discoveredError ||= cause;
@@ -464,6 +494,7 @@ export function createQoderProvider({
   commandResolver = resolveQoderAcpCommand,
   preflightRunner = preflightQoder,
   policyLoader = loadQoderAcpTaskPolicy,
+  managedCandidates,
 } = {}) {
   if (
     typeof commandResolver !== "function"
@@ -472,6 +503,9 @@ export function createQoderProvider({
   ) {
     throw new TypeError("Qoder provider dependencies are invalid.");
   }
+  const resolveInstallation = typeof managedCandidates === "function"
+    ? (input) => commandResolver({ ...input, managedCandidates })
+    : commandResolver;
   return defineAgentProvider({
     providerId: QODER_PROVIDER_ID,
     displayName: "Qoder",
@@ -484,7 +518,7 @@ export function createQoderProvider({
       execution: true,
       modelCatalog: true,
     },
-    resolveInstallation: ({ environment }) => commandResolver({ environment }),
+    resolveInstallation: ({ environment }) => resolveInstallation({ environment }),
     preflight: (installation, { environment }) => preflightRunner(installation, environment),
     assertInstallationUnchanged: assertQoderInstallationUnchanged,
     installationDigest,

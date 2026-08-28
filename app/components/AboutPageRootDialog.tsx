@@ -60,6 +60,7 @@ type AboutPageRootDialogProps = {
   onOpenUserNotice: () => void;
   onCheckQoderUsability: () => Promise<AboutQoderOutcome>;
   onCopyQoderGuidance: (kind: QoderGuidanceKind) => Promise<AboutQoderOutcome>;
+  onInstallQoder: () => Promise<AboutQoderOutcome>;
 };
 
 type AboutQoderOutcome = Readonly<{
@@ -195,6 +196,7 @@ export default function AboutPageRootDialog({
   onOpenUserNotice,
   onCheckQoderUsability,
   onCopyQoderGuidance,
+  onInstallQoder,
 }: AboutPageRootDialogProps) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
@@ -356,6 +358,7 @@ export default function AboutPageRootDialog({
             surface="about"
             actionButtonRef={qoderActionRef}
             onCopyGuidance={onCopyQoderGuidance}
+            onInstall={onInstallQoder}
           />
         </section>
 

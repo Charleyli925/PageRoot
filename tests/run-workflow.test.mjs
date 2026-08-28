@@ -864,6 +864,33 @@ test("Qoder guidance copy is isolated from Request and Canvas authority", async 
   harness.workflow.dispose();
 });
 
+test("one-click Qoder install refreshes availability and only then preflights", async () => {
+  const installCalls = [];
+  const harness = createHarness({
+    bridge: {
+      async installAgent(request) {
+        installCalls.push(request);
+        return { ok: true, providerId: "qoder", installSource: "managed" };
+      },
+      async qoderAvailability() {
+        return { status: "ready" };
+      },
+    },
+  });
+  const installed = await harness.workflow.installQoder();
+  assert.equal(installed.status, "succeeded");
+  assert.deepEqual(installCalls, [{ providerId: "qoder" }]);
+  assert.equal(harness.calls.preflight.length, 1);
+  assert.equal(harness.calls.handoff.length, 0);
+  assert.equal(harness.calls.createRequest.length, 0);
+  assert.equal(harness.workflow.getSnapshot().qoderAvailability.status, "ready");
+  const codex = harness.workflow.getSnapshot().agentCatalog.providers.codex.selection;
+  const rejected = await harness.workflow.installAgent(codex);
+  assert.equal(rejected.status, "rejected");
+  assert.equal(rejected.code, "AGENT_INSTALL_UNSUPPORTED");
+  harness.workflow.dispose();
+});
+
 test("a successful use-time check retires the one-time install continuation marker", async () => {
   const harness = createHarness();
 

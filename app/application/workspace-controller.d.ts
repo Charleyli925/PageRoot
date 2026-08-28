@@ -595,6 +595,10 @@ export class WorkspaceController {
   copyQoderGuidance(input: {
     kind: import("../domain/agent-provider-state.js").AgentProviderGuidanceKind;
   }): Promise<RunWorkflowOutcome>;
+  installQoder(): Promise<RunWorkflowOutcome>;
+  installAgent(
+    selection?: import("../domain/agent-provider-state.js").AgentSelection | null,
+  ): Promise<RunWorkflowOutcome>;
   refreshAgentAvailability(): Promise<RunWorkflowOutcome>;
   checkAgentUsability(): Promise<RunWorkflowOutcome>;
   copyAgentGuidance(input: {

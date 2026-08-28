@@ -1556,6 +1556,21 @@
       ]
     },
     {
+      "id": "agent-catalog-installer",
+      "patterns": [
+        "^bridge/agent/catalog/"
+      ],
+      "suites": [
+        "typecheck",
+        "ai-provider-smoke"
+      ],
+      "nodeTests": [
+        "tests/agent-catalog.test.mjs",
+        "tests/agent-installer.test.mjs",
+        "tests/agent-provider-contract.test.mjs"
+      ]
+    },
+    {
       "id": "agent-provider-qoder",
       "patterns": [
         "^bridge/agent/providers/qoder-provider\\.mjs$",
@@ -1590,14 +1605,15 @@
     {
       "id": "agent-runtime-acp",
       "patterns": [
-        "^bridge/agent/runtimes/(?:acp-runtime|agent-runtime-contract|runtime-registry)\\.mjs$"
+        "^bridge/agent/runtimes/(?:acp-runtime|acp-protocol|acp-process|acp-verified-javascript|agent-runtime-contract|runtime-registry)\\.mjs$"
       ],
       "suites": [
         "typecheck",
         "ai-provider-smoke"
       ],
       "nodeTests": [
-        "tests/qoder-acp-spike-client.test.mjs"
+        "tests/qoder-acp-spike-client.test.mjs",
+        "tests/acp-runtime.test.mjs"
       ]
     },
     {

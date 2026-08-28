@@ -48,16 +48,17 @@ fields crosses the existing HTTP/session projection; renderer callers still
 see `driver: qoder-acp` and the established safe fields only.
 
 The Qoder provider retains the exact ADR 0032 installation and trust rules. The
-ACP runtime is deliberately thin in this phase: it delegates to the existing
-hardened ACP process/host implementation while owning the immutable standard
-event adapter. Restricted execution/discussion hosts and filesystem policy stay
-in `qoder-acp-client.mjs`; their PR2 extraction is not part of this decision.
+ACP runtime owns the protocol state machine, detached process-group supervisor
+and immutable standard event adapter. `qoder-acp-client.mjs` remains a
+compatibility façade for legacy names, error copy and spike tests. Restricted
+execution hosts and filesystem policy live in `bridge/agent/policies/` and
+`bridge/agent/hosts/`.
 PR3 converges Run/Discussion coordination in `AgentRuntimeCoordinator`; the old
 Service classes remain stateless compatibility façades.
 
-The immediately following PR2 completes that planned extraction without
-changing this decision: `scripts/agent/policies/` now owns the one branded
-execution/discussion policy family, and `scripts/agent/hosts/` owns the two
+The immediately following PR2 completed that planned extraction without
+changing this decision: `bridge/agent/policies/` owns the one branded
+execution policy family, and `bridge/agent/hosts/` owns the
 permission-separated Host Ports. `qoder-acp-client.mjs` retains the legacy
 exports as compatibility adapters and owns the legacy error name/code/copy
 mapping as well as transport/provider behavior.

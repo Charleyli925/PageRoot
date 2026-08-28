@@ -32,6 +32,7 @@ export type AgentProviderCardProps = {
   disabled?: boolean;
   actionButtonRef?: Ref<HTMLButtonElement>;
   onCopyGuidance: (kind: AgentProviderGuidanceKind) => Promise<AgentActionOutcome>;
+  onInstall?: () => Promise<AgentActionOutcome>;
 };
 
 function actionForAvailability(
@@ -54,12 +55,14 @@ export default function AgentProviderCard({
   disabled = false,
   actionButtonRef,
   onCopyGuidance,
+  onInstall,
 }: AgentProviderCardProps) {
   const [pendingAction, setPendingAction] = useState<AgentProviderGuidanceKind | null>(null);
   const [actionError, setActionError] = useState("");
   const presentation = provider.availability(availability);
   const action = actionForAvailability(availability, provider);
   const checking = availability.status === "checking";
+  const installing = pendingAction === "install";
   const actionLabel = action && availability.guidanceCopied === action.kind
     ? action.copiedLabel
     : action?.label;
@@ -67,16 +70,19 @@ export default function AgentProviderCard({
     ? { [provider.primaryActionDataAttribute]: "true" }
     : {};
 
-  const copyGuidance = async (kind: AgentProviderGuidanceKind) => {
+  const runAction = async (kind: AgentProviderGuidanceKind) => {
     if (pendingAction || disabled) return;
     setPendingAction(kind);
     setActionError("");
+    const install = kind === "install" && typeof onInstall === "function";
     try {
-      const outcome = await onCopyGuidance(kind);
+      const outcome = install ? await onInstall() : await onCopyGuidance(kind);
       const succeeded = Boolean(outcome && ["succeeded", "stale"].includes(outcome.status));
-      if (!succeeded) setActionError("指令暂时无法复制，请重试。");
+      if (!succeeded) {
+        setActionError(install ? "安装没有完成，请重试。" : "指令暂时无法复制，请重试。");
+      }
     } catch {
-      setActionError("指令暂时无法复制，请重试。");
+      setActionError(install ? "安装没有完成，请重试。" : "指令暂时无法复制，请重试。");
     } finally {
       setPendingAction(null);
     }
@@ -88,7 +94,7 @@ export default function AgentProviderCard({
       data-status={availability.status}
       data-surface={surface}
       data-tone={presentation.tone}
-      aria-busy={checking}
+      aria-busy={checking || installing}
     >
       <div className="qoder-card-summary">
         <span className="qoder-card-brand" aria-hidden="true">
@@ -116,10 +122,12 @@ export default function AgentProviderCard({
               type="button"
               {...primaryActionData}
               disabled={Boolean(pendingAction) || disabled}
-              aria-label={actionLabel}
-              onClick={() => void copyGuidance(action.kind)}
+              aria-label={installing ? "正在安装…" : actionLabel}
+              onClick={() => void runAction(action.kind)}
             >
-              {pendingAction === action.kind ? "正在复制…" : actionLabel}
+              {pendingAction === action.kind
+                ? (action.kind === "install" ? "正在安装…" : "正在复制…")
+                : actionLabel}
             </button>
           ) : null}
           {actionError ? (

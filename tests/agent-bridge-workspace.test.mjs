@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { chmod, readFile, readdir, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
@@ -339,4 +339,33 @@ test("Bridge crash fences an interrupted Qoder Request from restart and clipboar
   assert.equal(requestDirectories.filter((name) => name.startsWith("req_")).length, 1);
   assert.equal(await readFile(value.externalSourcePath, "utf8"), value.sourceHtml);
   assert.equal(await readFile(value.ensured.sourcePath, "utf8"), value.sourceHtml);
+});
+
+test("public Agent catalog exposes installable Qoder without paths and rejects Codex install", async (t) => {
+  const environment = await createBridgeTestEnvironment(t, {
+    prefix: "pageroot-agent-catalog-",
+  });
+  const home = path.join(environment.root, "home");
+  const bin = path.join(environment.root, "bin");
+  await mkdir(home, { recursive: true });
+  await mkdir(bin, { recursive: true });
+  const bridge = await environment.start({
+    HTML_AI_AGENTS_ROOT: path.join(environment.root, "agents"),
+    HOME: home,
+    PATH: bin,
+    NPM_CONFIG_PREFIX: path.join(environment.root, "missing-prefix"),
+  });
+  const listed = await bridge.requestJson("/agent/providers");
+  assert.equal(listed.response.status, 200, JSON.stringify(listed.body));
+  const qoder = listed.body.providers.find((item) => item.providerId === "qoder");
+  const serialized = JSON.stringify(listed.body);
+  assert.equal(qoder.installable, true);
+  assert.equal(qoder.installSource, "none");
+  assert.equal(qoder.installState, "idle");
+  assert.equal(serialized.includes(environment.root), false);
+  assert.equal(serialized.includes("command"), false);
+  assert.equal(serialized.includes("stderr"), false);
+  const codexInstall = await bridge.postJson("/agent/install", { providerId: "codex" });
+  assert.equal(codexInstall.response.status, 404, JSON.stringify(codexInstall.body));
+  assert.equal(codexInstall.body.error.code, "AGENT_PROVIDER_UNSUPPORTED");
 });

@@ -57,10 +57,12 @@ IDs fail closed. The restricted Host Ports now live in `bridge/agent/hosts/`,
 while frozen execution policy lives in `bridge/agent/policies/`.
 `bridge/qoder-acp-client.mjs` retains the legacy transport façade and exact
 compatibility exports without a second policy brand. The
-renderer can request only `POST /agent/preflight` and `POST /agent/start` with
+renderer can request `POST /agent/preflight` and `POST /agent/start` with
 registered task identity, the fixed `qoder-acp` driver, explicit
-`trusted-local-agent-v1` consent and an opaque short-lived ticket. It cannot
-provide a command, cwd, environment or filesystem path policy.
+`trusted-local-agent-v1` consent and an opaque short-lived ticket. When Qoder
+is not installed it may also `POST /agent/install` for the catalog-pinned
+managed copy. It cannot provide a command, cwd, environment or filesystem path
+policy.
 
 `GET /agent/availability` is the separate disk-only status route used whenever
 delivery or About opens. It re-runs protected package discovery without

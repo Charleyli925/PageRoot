@@ -159,6 +159,9 @@ export class AgentRuntimeCoordinator {
     terminalSessionTtlMs = TERMINAL_SESSION_TTL_MS,
     maxRetainedSessions = MAX_RETAINED_SESSIONS,
     redeemCommandTicket,
+    agentCatalog,
+    agentsRoot,
+    installerOptions,
   } = {}) {
     if (resolveTask !== undefined && typeof resolveTask !== "function") {
       throw new TypeError("AgentRuntimeCoordinator requires a task authority resolver.");
@@ -191,6 +194,9 @@ export class AgentRuntimeCoordinator {
       ...(codexProbeRunner ? { codexProbeRunner } : {}),
       ...(codexPolicyLoader ? { codexPolicyLoader } : {}),
       ...(codexRunTask ? { codexRunTask } : {}),
+      ...(agentCatalog ? { agentCatalog } : {}),
+      ...(agentsRoot ? { agentsRoot } : {}),
+      ...(installerOptions ? { installerOptions } : {}),
     });
     this.#leaseStore = leaseStore;
     this.#cancelTimeoutMs = cancelTimeoutMs;
@@ -208,6 +214,17 @@ export class AgentRuntimeCoordinator {
 
   providerCatalog() {
     return this.#providerRegistry.catalog();
+  }
+
+  publicProviderCatalog(options) {
+    if (typeof this.#providerRegistry.publicCatalog === "function") {
+      return this.#providerRegistry.publicCatalog(options);
+    }
+    return this.#providerRegistry.catalog();
+  }
+
+  get agentCatalog() {
+    return this.#providerRegistry.agentCatalog || null;
   }
 
   assertSelection(selection, purpose) {
@@ -835,6 +852,17 @@ export class AgentRuntimeCoordinator {
           "无法确认 Agent 进程已停止；为避免失去控制，本次退出已取消。",
           { status: 503 },
         );
+      }
+      const catalog = this.#providerRegistry.agentCatalog;
+      if (catalog && typeof catalog.drain === "function") {
+        const drained = await catalog.drain({ timeoutMs: this.#cancelTimeoutMs }).catch(() => false);
+        if (drained !== true) {
+          failAgentRuntime(
+            "AGENT_INSTALL_DRAIN_UNCONFIRMED",
+            "无法确认 Agent 安装已停止；为避免失去控制，本次退出已取消。",
+            { status: 503 },
+          );
+        }
       }
       this.#shutdownConfirmed = true;
     })();

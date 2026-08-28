@@ -5332,6 +5332,9 @@ export default function Workbench() {
   const copyQoderGuidance = useCallback(async (kind: QoderGuidanceKind) => (
     workspaceController?.copyQoderGuidance({ kind }) ?? null
   ), [workspaceController]);
+  const installQoder = useCallback(async () => (
+    workspaceController?.installQoder() ?? null
+  ), [workspaceController]);
   useEffect(() => {
     deferredEditorReplayRef.current.generateRequest = () => {
       void generateRequest(deferredEditorReplayRef.current.agentDeliveryMode, true);
@@ -6910,6 +6913,7 @@ export default function Workbench() {
         onOpenUserNotice={() => void openUserNotice()}
         onCheckQoderUsability={checkQoderUsability}
         onCopyQoderGuidance={copyQoderGuidance}
+        onInstallQoder={installQoder}
       />
 
       {toast ? (

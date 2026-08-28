@@ -143,6 +143,12 @@ export class RunWorkflow {
   copyQoderGuidance(input: {
     kind: AgentProviderGuidanceKind;
   }): Promise<RunWorkflowOutcome<{ kind: AgentProviderGuidanceKind; copied: true }>>;
+  installAgent(selection?: AgentSelection | null): Promise<RunWorkflowOutcome<{
+    availability: AgentProviderAvailabilitySnapshot;
+  }>>;
+  installQoder(): Promise<RunWorkflowOutcome<{
+    availability: AgentProviderAvailabilitySnapshot;
+  }>>;
   planSubmission(): RunSubmitPlan;
   submit(input?: {
     projectName?: string;
