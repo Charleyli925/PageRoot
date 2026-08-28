@@ -120,16 +120,19 @@
   grid-row: 1;
   min-width: 0;
   min-height: 0;
-  align-self: stretch;
-  height: 100%;
 }
 
 .workbench > .review-scroll-stage[data-inspector="comments"] > .comments-panel.comment-rail {
+  align-self: start;
+  height: var(--comment-rail-height);
+  max-height: var(--comment-rail-height);
   overflow-x: visible;
-  overflow-y: auto;
+  overflow-y: clip;
 }
 
 .workbench > .review-scroll-stage[data-inspector="ai"] > .ai-conversation-aside {
+  align-self: stretch;
+  height: 100%;
   overflow: hidden;
 }
 

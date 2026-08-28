@@ -670,6 +670,37 @@ export const CommentRailContainer = memo(function CommentRailContainer({
     setCommentRailOffset(commentRailMinimumOffset);
   }, [commentRailFollowsFocus, commentRailMinimumOffset]);
 
+  useLayoutEffect(() => {
+    if (
+      !composerInCurrentTab
+      || !commentLayoutReady
+      || !draftTarget
+      || !Number.isFinite(commentRailLayout.composerTop)
+    ) return;
+    const targetTop = draftTarget.tagName === "body"
+      ? commentRailMinimumTop
+      : commentRailTargetTops[draftTarget.id];
+    if (!Number.isFinite(targetTop)) return;
+    const nextRailOffset = computeAlignedRailOffset({
+      targetTop: Math.max(commentRailMinimumTop, targetTop as number),
+      cardTop: commentRailLayout.composerTop as number,
+      minimumTop: commentRailMinimumTop,
+    });
+    if (Math.abs(commentRailOffsetRef.current - nextRailOffset) > 0.01) {
+      commentRailOffsetRef.current = nextRailOffset;
+      setCommentRailOffset(nextRailOffset);
+    }
+    if (!commentRailFollowsFocus) setCommentRailFollowsFocus(true);
+  }, [
+    commentLayoutReady,
+    commentRailFollowsFocus,
+    commentRailLayout.composerTop,
+    commentRailMinimumTop,
+    commentRailTargetTops,
+    composerInCurrentTab,
+    draftTarget,
+  ]);
+
   useEffect(() => {
     const rail = commentsPanelRef.current;
     if (context.canvasMode !== "edit" || !rail) return undefined;
@@ -740,11 +771,14 @@ export const CommentRailContainer = memo(function CommentRailContainer({
         const targetTop = request.target.tagName === "body"
           ? commentRailMinimumTop
           : commentTargetTops[request.target.id];
-        if (!Number.isFinite(targetTop) || !item) return;
+        const cardTop = request.itemKey === "__composer"
+          ? commentRailLayout.composerTop
+          : item?.offsetTop;
+        if (!Number.isFinite(targetTop) || !Number.isFinite(cardTop)) return;
         const safeTargetTop = Math.max(commentRailMinimumTop, targetTop as number);
         const nextRailOffset = computeAlignedRailOffset({
           targetTop: safeTargetTop,
-          cardTop: item.offsetTop ?? safeTargetTop,
+          cardTop: cardTop as number,
           minimumTop: commentRailMinimumTop,
         });
         commentRailOffsetRef.current = nextRailOffset;
@@ -768,6 +802,7 @@ export const CommentRailContainer = memo(function CommentRailContainer({
     canvasPort,
     canvasSnapshot.revealRequest,
     commentLayoutReady,
+    commentRailLayout.composerTop,
     commentRailMinimumTop,
     commentTargetTops,
     context.reviewStageRef,
