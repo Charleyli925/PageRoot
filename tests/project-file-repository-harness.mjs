@@ -12,7 +12,7 @@ import { sha256 } from "../bridge/lifecycle-core.mjs";
 import { ProjectFileRepository } from "../bridge/project-file-repository.mjs";
 
 export function html(label) {
-  return `<!doctype html><html><head><title>${label}</title></head><body><h1>${label}</h1></body></html>`;
+  return `<!doctype html><html data-pageroot-id="pr1_11111111111141118111111111111111"><head data-pageroot-id="pr1_22222222222242229222222222222222"><title data-pageroot-id="pr1_3333333333334333a333333333333333">${label}</title></head><body data-pageroot-id="pr1_4444444444444444b444444444444444"><h1 data-pageroot-id="pr1_55555555555545558555555555555555">${label}</h1></body></html>`;
 }
 
 export async function json(filePath) {
@@ -46,7 +46,12 @@ export async function importSource(fixtureValue, name = "原文件.html", conten
     expectedSourceSha256: sha256(buffer),
   });
   assert.equal(imported.imported, true);
-  return { sourcePath, buffer, target: imported.target };
+  return {
+    sourcePath,
+    buffer,
+    importSourceSha256: imported.importSourceSha256,
+    target: imported.target,
+  };
 }
 
 export async function promoteNextVersion(repository, target, label) {

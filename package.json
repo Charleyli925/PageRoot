@@ -456,6 +456,10 @@
         "to": "shared/provenance.mjs"
       },
       {
+        "from": "shared/pageroot-element-identity.mjs",
+        "to": "shared/pageroot-element-identity.mjs"
+      },
+      {
         "from": "node_modules/parse5",
         "to": "node_modules/parse5",
         "filter": [
@@ -612,6 +616,7 @@
           "conversation-draft.v1.schema.json",
           "conversation-draft.v2.schema.json",
           "input-manifest.v1.schema.json",
+          "pageroot-element-identity.v1.schema.json",
           "project-state.v3.schema.json",
           "project-identity.v4.schema.json",
           "project-registry.v4.schema.json",
@@ -621,6 +626,7 @@
           "runtime-state.v3.schema.json",
           "scope-report.v1.schema.json",
           "source-history.v1.schema.json",
+          "source-element-identity-migration.v1.schema.json",
           "user-supplement.v1.schema.json",
           "version-manifest.v3.schema.json",
           "version-transaction.v1.schema.json",

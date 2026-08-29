@@ -13,11 +13,22 @@ import {
   sha256,
   syncDirectory,
 } from "../lifecycle-core.mjs";
+import {
+  parseHtmlSource,
+  rawStartTagAttributes,
+} from "../html-source-parser.mjs";
+import {
+  PAGEROOT_ELEMENT_ID_ATTRIBUTE,
+  PAGEROOT_ELEMENT_ID_SCHEMA_VERSION,
+  generatePagerootElementId,
+  isValidPagerootElementId,
+} from "../../shared/pageroot-element-identity.mjs";
 
 import {
   PROJECT_FILE_SCHEMA_VERSION,
   SAVE_RECOVERY_ID,
   SHA256,
+  SOURCE_ELEMENT_IDENTITY_MIGRATION_RECOVERY_ID,
   WORKING_COPY_ID,
   WORKING_COPY_SAVE_STATES,
 } from "./constants.mjs";
@@ -37,6 +48,257 @@ import {
   resolveRelative,
   validStateTimestamp,
 } from "./path-safety.mjs";
+
+const HTML_WHITESPACE = /[\t\n\f\r ]/u;
+
+export const SOURCE_ELEMENT_IDENTITY_MIGRATION_TRANSACTION_SCHEMA_VERSION = "1.0.0";
+
+function startTagClosingDelimiterOffset(source, startTag) {
+  let cursor = startTag.endOffset - 1;
+  while (cursor > startTag.startOffset && HTML_WHITESPACE.test(source[cursor])) {
+    cursor -= 1;
+  }
+  if (source[cursor] !== ">") return null;
+  cursor -= 1;
+  while (cursor > startTag.startOffset && HTML_WHITESPACE.test(source[cursor])) {
+    cursor -= 1;
+  }
+  return source[cursor] === "/" ? cursor : startTag.endOffset - 1;
+}
+
+export function inspectSourceElementIdentity(html) {
+  const source = String(html);
+  const parsed = parseHtmlSource(source);
+  const elements = parsed.elements.flatMap((token) => {
+    const startTag = token.node?.sourceCodeLocation?.startTag;
+    if (
+      !Number.isInteger(startTag?.startOffset)
+      || !Number.isInteger(startTag?.endOffset)
+      || startTag.startOffset < 0
+      || startTag.endOffset <= startTag.startOffset
+      || startTag.endOffset > source.length
+    ) {
+      return [];
+    }
+    const closingDelimiterOffset = startTagClosingDelimiterOffset(source, startTag);
+    if (!Number.isInteger(closingDelimiterOffset)) {
+      throw new ProjectFileRepositoryError(
+        "SOURCE_ELEMENT_IDENTITY_RANGE_INVALID",
+        "A source element start tag cannot be safely identified.",
+        { tagName: token.name, startOffset: startTag.startOffset },
+      );
+    }
+    const identityAttributes = rawStartTagAttributes(source, startTag).filter(
+      (attribute) => attribute.name === PAGEROOT_ELEMENT_ID_ATTRIBUTE,
+    );
+    return [{
+      tagName: token.name,
+      startOffset: startTag.startOffset,
+      endOffset: startTag.endOffset,
+      closingDelimiterOffset,
+      identityAttributes,
+      pagerootId: identityAttributes.length === 1
+        ? identityAttributes[0].rawValue
+        : null,
+    }];
+  });
+
+  const issues = [];
+  const claims = new Map();
+  const missing = [];
+  for (const element of elements) {
+    if (element.identityAttributes.length === 0) {
+      missing.push(element);
+      continue;
+    }
+    if (element.identityAttributes.length !== 1) {
+      issues.push({
+        code: "PAGEROOT_ID_ATTRIBUTE_REPEATED",
+        tagName: element.tagName,
+        startOffset: element.startOffset,
+      });
+      continue;
+    }
+    if (!isValidPagerootElementId(element.pagerootId)) {
+      issues.push({
+        code: "PAGEROOT_ID_INVALID_FORMAT",
+        tagName: element.tagName,
+        startOffset: element.startOffset,
+        value: element.pagerootId,
+      });
+      continue;
+    }
+    const matching = claims.get(element.pagerootId) ?? [];
+    matching.push(element);
+    claims.set(element.pagerootId, matching);
+  }
+  for (const [pagerootId, matching] of claims) {
+    if (matching.length < 2) continue;
+    issues.push({
+      code: "PAGEROOT_ID_DUPLICATE_VALUE",
+      pagerootId,
+      tagNames: matching.map((element) => element.tagName),
+      startOffsets: matching.map((element) => element.startOffset),
+    });
+  }
+  return {
+    schemaVersion: PAGEROOT_ELEMENT_ID_SCHEMA_VERSION,
+    attributeName: PAGEROOT_ELEMENT_ID_ATTRIBUTE,
+    valid: issues.length === 0,
+    complete: issues.length === 0 && missing.length === 0,
+    status: issues.length > 0
+      ? "invalid"
+      : missing.length === 0
+        ? "complete"
+        : claims.size === 0
+          ? "absent"
+          : "partial",
+    totalElementCount: elements.length,
+    identifiedElementCount: elements.length - missing.length,
+    missingElementCount: missing.length,
+    elements,
+    missing,
+    claimedIds: new Set(claims.keys()),
+    issues,
+    parseErrors: parsed.parseErrors,
+  };
+}
+
+export function materializeSourceElementIdentity(html, {
+  randomUUIDFactory = randomUUID,
+} = {}) {
+  const source = String(html);
+  const inspection = inspectSourceElementIdentity(source);
+  if (!inspection.valid) {
+    throw new ProjectFileRepositoryError(
+      "SOURCE_ELEMENT_IDENTITY_INVALID",
+      "The Working Copy contains malformed or duplicated PageRoot element identities.",
+      { issues: inspection.issues },
+    );
+  }
+  if (inspection.complete) {
+    return {
+      html: source,
+      buffer: Buffer.from(source, "utf8"),
+      changed: false,
+      addedElementCount: 0,
+      identity: inspection,
+    };
+  }
+
+  const allocated = new Set(inspection.claimedIds);
+  const insertions = inspection.missing.map((element) => {
+    let pagerootId = null;
+    for (let attempt = 0; attempt < 64; attempt += 1) {
+      const candidate = generatePagerootElementId(randomUUIDFactory);
+      if (!allocated.has(candidate)) {
+        pagerootId = candidate;
+        allocated.add(candidate);
+        break;
+      }
+    }
+    if (!pagerootId) {
+      throw new ProjectFileRepositoryError(
+        "SOURCE_ELEMENT_IDENTITY_ALLOCATION_FAILED",
+        "A unique PageRoot element identity could not be allocated.",
+      );
+    }
+    return {
+      offset: element.closingDelimiterOffset,
+      value: ` ${PAGEROOT_ELEMENT_ID_ATTRIBUTE}="${pagerootId}"`,
+    };
+  }).sort((left, right) => right.offset - left.offset);
+
+  let nextHtml = source;
+  for (const insertion of insertions) {
+    nextHtml = nextHtml.slice(0, insertion.offset)
+      + insertion.value
+      + nextHtml.slice(insertion.offset);
+  }
+  const nextIdentity = inspectSourceElementIdentity(nextHtml);
+  if (!nextIdentity.complete) {
+    throw new ProjectFileRepositoryError(
+      "SOURCE_ELEMENT_IDENTITY_MATERIALIZATION_FAILED",
+      "The materialized Working Copy does not have a complete identity set.",
+      { issues: nextIdentity.issues },
+    );
+  }
+  return {
+    html: nextHtml,
+    buffer: Buffer.from(nextHtml, "utf8"),
+    changed: true,
+    addedElementCount: insertions.length,
+    identity: nextIdentity,
+  };
+}
+
+export function materializeIdentityPreservingSave(currentHtml, nextHtml, options = {}) {
+  const currentIdentity = inspectSourceElementIdentity(currentHtml);
+  if (!currentIdentity.complete) {
+    throw new ProjectFileRepositoryError(
+      "SOURCE_ELEMENT_IDENTITY_LOST",
+      "The current Working Copy lost or corrupted its persistent source element identities.",
+      { issues: currentIdentity.issues },
+    );
+  }
+  const nextIdentity = inspectSourceElementIdentity(nextHtml);
+  if (!nextIdentity.valid) {
+    throw new ProjectFileRepositoryError(
+      "SOURCE_ELEMENT_IDENTITY_LOST",
+      "The save would corrupt persistent source element identities.",
+      { issues: nextIdentity.issues },
+    );
+  }
+  const lostIds = [...currentIdentity.claimedIds].filter(
+    (pagerootId) => !nextIdentity.claimedIds.has(pagerootId),
+  );
+  if (lostIds.length > 0) {
+    throw new ProjectFileRepositoryError(
+      "SOURCE_ELEMENT_IDENTITY_LOST",
+      "The save would remove persistent identities from existing source elements.",
+      { lostIds },
+    );
+  }
+  return materializeSourceElementIdentity(nextHtml, options);
+}
+
+export function sourceElementIdentityMigrationRecoveryPaths(
+  paths,
+  workingCopyIdValue,
+  identitySchemaVersion,
+  recoveryId,
+) {
+  const workingCopy = assertId(workingCopyIdValue, WORKING_COPY_ID, "workingCopyId");
+  if (identitySchemaVersion !== PAGEROOT_ELEMENT_ID_SCHEMA_VERSION) {
+    throw new ProjectFileRepositoryError(
+      "IDENTITY_MIGRATION_INVALID",
+      "The source element identity migration schema is unsupported.",
+    );
+  }
+  const id = String(recoveryId || "");
+  const prefix = `identity_${workingCopy}_v${identitySchemaVersion}_`;
+  if (
+    !SOURCE_ELEMENT_IDENTITY_MIGRATION_RECOVERY_ID.test(id)
+    || !id.startsWith(prefix)
+  ) {
+    throw new ProjectFileRepositoryError(
+      "IDENTITY_MIGRATION_INVALID",
+      "The source element identity recovery location is invalid.",
+    );
+  }
+  const operationRoot = path.join(paths.recoveryRoot, id);
+  if (!pathInside(paths.recoveryRoot, operationRoot)) {
+    throw new ProjectFileRepositoryError(
+      "PATH_ESCAPES_PROJECT",
+      "The source element identity recovery location escapes recovery/.",
+    );
+  }
+  return {
+    operationRoot,
+    previousPath: path.join(operationRoot, "previous.html"),
+    nextPath: path.join(operationRoot, "next.html"),
+  };
+}
 
 export function saveRecoveryPaths(paths, workingCopyIdValue, revision, recoveryId) {
   const normalizedRevision = Number.isSafeInteger(Number(revision)) && Number(revision) >= 0
@@ -174,6 +436,10 @@ export function assertWorkingCopyState(state, loaded, workingCopy) {
     || !validRevision(state.lastPersistedRevision)
     || !validStateTimestamp(state.lastSavedAt)
     || !validStateTimestamp(state.lastOpenedAt)
+    || (
+      state.sourceElementIdentitySchemaVersion !== undefined
+      && state.sourceElementIdentitySchemaVersion !== PAGEROOT_ELEMENT_ID_SCHEMA_VERSION
+    )
   ) {
     throw new ProjectFileRepositoryError(
       "WORKING_COPY_STATE_INVALID",

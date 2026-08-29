@@ -6,8 +6,11 @@ Only the files listed below are product contracts and package inputs.
 
 - `pageroot-element-identity.v1.schema.json` defines the value written to the
   sole persistent PageRoot-owned HTML attribute, `data-pageroot-id`. The schema
-  does not authorize writing that attribute; migration and save transactions
-  remain separate contracts.
+  does not itself authorize writing that attribute.
+- `source-element-identity-migration.v1.schema.json` is the strict recoverable
+  transaction that authorizes a registered managed Working Copy to materialize
+  that identity once. It seals before/after Hashes and recovery paths; it never
+  covers historical Versions, external originals or Runtime DOM.
 
 ## Unknown members in mutable records
 
@@ -107,6 +110,7 @@ records.
 - `working-copy-state.v4.schema.json`
 - `candidate.v4.schema.json`
 - `promotion-transaction.v4.schema.json`
+- `source-element-identity-migration.v1.schema.json`
 
 The Registry is the canonical write whitelist for v4. It records only direct
 children of the configured project root, the registered root path, a root

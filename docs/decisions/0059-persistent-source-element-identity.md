@@ -38,10 +38,10 @@ opened.
    are reported as absent or partial compatibility state. Repeated attributes,
    malformed values and duplicate values are reported with exact source ranges
    and never guessed into the map.
-5. Parsing and indexing are read-only. This decision does not authorize ID
-   injection, Working Copy migration, historical Version rewriting, target
-   conversion, Runtime serialization or save-path changes. Those require later
-   dependent decisions and transactions.
+5. Parsing and indexing remain read-only. ADR 0060 separately authorizes the
+   Repository-owned Working Copy migration; this decision still does not
+   authorize historical Version rewriting, target conversion or Runtime
+   serialization.
 
 ## Consequences
 
@@ -53,8 +53,8 @@ opened.
   of mixing stable and heuristic identity without noticing.
 - ID values are intentionally opaque and are not ordered. Version ordering,
   document lineage and source position remain separate facts.
-- The follow-up Working Copy migration must use CAS, atomic writing and recovery,
-  and must not rewrite immutable historical Versions.
+- ADR 0060 implements the follow-up Working Copy migration with CAS, atomic
+  writing and recovery without rewriting immutable historical Versions.
 
 ## Rejected alternatives
 

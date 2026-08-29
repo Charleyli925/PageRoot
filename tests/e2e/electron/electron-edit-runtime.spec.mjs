@@ -577,7 +577,10 @@ test("Electron Edit preserves imported source-relative ECharts assets and native
     }
     const managedSourcePath = activeProject.sourcePath;
     expect(managedSourcePath).not.toBe(sourcePath);
-    expect(activeProject.html).toBe(source);
+    expect(activeProject.html.replace(
+      / data-pageroot-id="pr1_[a-f0-9]{32}"/gu,
+      "",
+    )).toBe(source);
     await expect.poll(() => frame.evaluate(() => ({
       rendererAuthorExecutions: window.__PAGEROOT_ECHARTS_AUTHOR_EXECUTIONS__ || 0,
       chartCount: document.querySelectorAll("#chart-host canvas[data-echarts-runtime=true]").length,
@@ -985,7 +988,7 @@ test("Electron Edit keeps frozen one-shot iframe through structural line-break a
     await setTextSelection(frame, "runtime-editable", editableText.length);
     await launched.page.keyboard.press("Enter");
     await expect.poll(() => editable.evaluate((element) => element.innerHTML))
-      .toContain("<br>");
+      .toMatch(/<br data-pageroot-id="pr1_[a-f0-9]{32}">/u);
     await launched.page.keyboard.press("Escape");
     await expect.poll(async () => (
       frame.isDetached()
@@ -995,7 +998,9 @@ test("Electron Edit keeps frozen one-shot iframe through structural line-break a
     await expect(launched.page.locator(".save-status")).toHaveCount(0);
     await expectCheckpointPersisted(launched.page, baseline.persistedRevision);
     await assertFrozenRuntimeRetained(launched.page, frame, baseline);
-    expect(readFileSync(managedSourcePath, "utf8")).toMatch(/<br\s*\/?>/u);
+    expect(readFileSync(managedSourcePath, "utf8")).toMatch(
+      /<br data-pageroot-id="pr1_[a-f0-9]{32}">/u,
+    );
 
     await frame.locator(caseSelector("runtime-editable")).click();
     const moveDown = launched.page.getByRole("button", { name: "下移" });
@@ -1175,7 +1180,10 @@ test("Electron Edit drains MessageChannel callbacks before accepting the frozen 
       document.querySelector("[data-native-case=runtime-message-probe]")?.textContent || ""
     ))).toBe(probeText);
     const savedSource = readFileSync(activeProject.sourcePath, "utf8");
-    expect(savedSource).toContain(`data-native-case="runtime-message-probe">${probeText}</p>`);
+    expect(savedSource).toMatch(new RegExp(
+      `data-native-case="runtime-message-probe" data-pageroot-id="pr1_[a-f0-9]{32}">${probeText}</p>`,
+      "u",
+    ));
     expect(savedSource).not.toContain("端口在冻结后改写了源码文字");
     expect(frame.isDetached()).toBe(false);
     await expect(launched.page.locator("[data-runtime-bootstrap-count=\"1\"]")).toHaveCount(1);

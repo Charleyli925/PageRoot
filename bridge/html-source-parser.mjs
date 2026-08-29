@@ -50,7 +50,7 @@ export function rawStartTagAttributes(source, location) {
     }
     const name = raw.slice(nameStart, cursor).toLowerCase();
     while (cursor < raw.length && /\s/u.test(raw[cursor])) cursor += 1;
-    let value = "";
+    let rawValue = "";
     if (raw[cursor] === "=") {
       cursor += 1;
       while (cursor < raw.length && /\s/u.test(raw[cursor])) cursor += 1;
@@ -61,7 +61,7 @@ export function rawStartTagAttributes(source, location) {
         cursor += 1;
         const valueStart = cursor;
         while (cursor < raw.length && raw[cursor] !== quote) cursor += 1;
-        value = raw.slice(valueStart, cursor);
+        rawValue = raw.slice(valueStart, cursor);
         if (raw[cursor] === quote) cursor += 1;
       } else {
         const valueStart = cursor;
@@ -71,10 +71,14 @@ export function rawStartTagAttributes(source, location) {
         ) {
           cursor += 1;
         }
-        value = raw.slice(valueStart, cursor);
+        rawValue = raw.slice(valueStart, cursor);
       }
     }
-    attributes.push({ name, value: decodeHTMLAttribute(value) });
+    attributes.push({
+      name,
+      rawValue,
+      value: decodeHTMLAttribute(rawValue),
+    });
   }
   return attributes;
 }

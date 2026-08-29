@@ -1,6 +1,6 @@
 # Architecture Decision Records
 
-<!-- adr-history-max: 0059 -->
+<!-- adr-history-max: 0060 -->
 <!-- adr-history-gaps: 0020 -->
 
 This is the default reading path for decisions that still constrain PageRoot.
@@ -10,7 +10,7 @@ Historical and superseded decisions remain available from the archive index.
 
 The repository has one historical gap, `0020`, which is intentionally never
 reused. The four collisions found in the first curation pass were assigned
-`0055` through `0058`; future ADRs must use the next number above `0059`.
+`0055` through `0058`; future ADRs must use the next number above `0060`.
 
 ## Active decisions
 
@@ -57,6 +57,7 @@ reused. The four collisions found in the first curation pass were assigned
 | 0057 | [Mutable records preserve unknown members instead of dropping or refusing them](0057-forward-compatible-record-members.md) | Living |
 | 0058 | [Bounded Canvas and SVG programs may complete the visible Edit document](0058-bounded-canvas-svg-edit-runtime.md) | Living |
 | 0059 | [Source elements use a persistent PageRoot identity](0059-persistent-source-element-identity.md) | Living |
+| 0060 | [Managed Working Copies materialize source element identity once](0060-working-copy-source-element-identity-migration.md) | Living |
 
 ## Reading guide
 

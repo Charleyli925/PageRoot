@@ -137,6 +137,7 @@ const PACKAGED_MODULES = [
 const SHARED_FILES = [
   "draft-aggregate.mjs",
   "direct-edit-compatibility.mjs",
+  "pageroot-element-identity.mjs",
   "provenance.mjs",
   "source-history.mjs",
   "conversation.mjs",
@@ -158,6 +159,7 @@ const SCHEMA_FILES = [
   "conversation-draft.v1.schema.json",
   "conversation-draft.v2.schema.json",
   "input-manifest.v1.schema.json",
+  "pageroot-element-identity.v1.schema.json",
   "project-state.v3.schema.json",
   "project-identity.v4.schema.json",
   "project-registry.v4.schema.json",
@@ -167,6 +169,7 @@ const SCHEMA_FILES = [
   "runtime-state.v3.schema.json",
   "scope-report.v1.schema.json",
   "source-history.v1.schema.json",
+  "source-element-identity-migration.v1.schema.json",
   "user-supplement.v1.schema.json",
   "version-manifest.v3.schema.json",
   "version-transaction.v1.schema.json",

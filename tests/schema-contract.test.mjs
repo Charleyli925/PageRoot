@@ -1020,7 +1020,7 @@ test(
       prefix: "html-ai-schema-export-",
     });
     const initialHtml =
-      "<!doctype html><html><head><meta charset=\"utf-8\"><title>合同</title></head><body><main id=\"main\"><h1>合同</h1></main></body></html>";
+      "<!doctype html><html data-pageroot-id=\"pr1_11111111111141118111111111111111\"><head data-pageroot-id=\"pr1_22222222222242229222222222222222\"><meta charset=\"utf-8\" data-pageroot-id=\"pr1_3333333333334333a333333333333333\"><title data-pageroot-id=\"pr1_4444444444444444b444444444444444\">合同</title></head><body data-pageroot-id=\"pr1_55555555555545558555555555555555\"><main id=\"main\" data-pageroot-id=\"pr1_66666666666646669666666666666666\"><h1 data-pageroot-id=\"pr1_7777777777774777a777777777777777\">合同</h1></main></body></html>";
     const sourcePath = await environment.createSource("contract.html", initialHtml);
     const bridge = await environment.start();
 
@@ -1074,7 +1074,7 @@ test(
     assert.equal(submitted.response.status, 201, JSON.stringify(submitted.body));
     const run = submitted.body;
     const generatedHtml =
-      "<!doctype html><html><head><meta charset=\"utf-8\"><title>合同</title></head><body><main id=\"main\"><h1>合同</h1><p id=\"verified\">验证通过</p></main></body></html>";
+      "<!doctype html><html data-pageroot-id=\"pr1_11111111111141118111111111111111\"><head data-pageroot-id=\"pr1_22222222222242229222222222222222\"><meta charset=\"utf-8\" data-pageroot-id=\"pr1_3333333333334333a333333333333333\"><title data-pageroot-id=\"pr1_4444444444444444b444444444444444\">合同</title></head><body data-pageroot-id=\"pr1_55555555555545558555555555555555\"><main id=\"main\" data-pageroot-id=\"pr1_66666666666646669666666666666666\"><h1 data-pageroot-id=\"pr1_7777777777774777a777777777777777\">合同</h1><p id=\"verified\" data-pageroot-id=\"pr1_8888888888884888b888888888888888\">验证通过</p></main></body></html>";
     await writeAttemptOutput(run, generatedHtml);
     await runOfficialFinalizer(environment.workspace, run);
     const completed = await readStatus(bridge, {

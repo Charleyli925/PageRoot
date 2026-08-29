@@ -1,5 +1,6 @@
 import { parseFragment, serialize, serializeOuter } from "parse5";
 
+import { PAGEROOT_ELEMENT_ID_ATTRIBUTE } from "./pageroot-element-identity.js";
 import { resolveTargetRef } from "./target-resolver.js";
 
 const HTML_NAMESPACE = "http://www.w3.org/1999/xhtml";
@@ -130,6 +131,7 @@ function childNodesFor(node) {
 
 function isRuntimeAttribute(name) {
   const normalized = String(name ?? "").toLowerCase();
+  if (normalized === PAGEROOT_ELEMENT_ID_ATTRIBUTE) return false;
   return RUNTIME_ATTRIBUTE_NAMES.has(normalized)
     || RUNTIME_ATTRIBUTE_PREFIXES.some((prefix) => normalized.startsWith(prefix));
 }
@@ -145,7 +147,10 @@ function isProtectedAttribute(name) {
 function isImmutableAtomNode(node, tagName, attributes) {
   if (IMMUTABLE_ATOM_TAGS.has(tagName)) return true;
   if (tagName === "br") return false;
-  return childNodesFor(node).length === 0 && attributes.length > 0;
+  const authoredAttributes = attributes.filter(
+    (attribute) => attribute.name !== PAGEROOT_ELEMENT_ID_ATTRIBUTE,
+  );
+  return childNodesFor(node).length === 0 && authoredAttributes.length > 0;
 }
 
 function normalizedAttributes(node) {
@@ -174,6 +179,7 @@ function protectedAttributeInventory(
   { authoredInlineAtomKeys = null } = {},
 ) {
   const inventory = new Map();
+  const identities = new Map();
   const atomInventory = new Map();
   const comments = new Map();
   const visit = (node) => {
@@ -193,6 +199,11 @@ function protectedAttributeInventory(
         return;
       }
       for (const attribute of attributes) {
+        if (attribute.name === PAGEROOT_ELEMENT_ID_ATTRIBUTE) {
+          const key = attribute.value;
+          identities.set(key, (identities.get(key) ?? 0) + 1);
+          continue;
+        }
         if (!isProtectedAttribute(attribute.name)) continue;
         const key = `${tagName}\0${attribute.name}\0${attribute.value}`;
         inventory.set(key, (inventory.get(key) ?? 0) + 1);
@@ -210,7 +221,7 @@ function protectedAttributeInventory(
     for (const child of childNodesFor(node)) visit(child);
   };
   visit(root);
-  return { inventory, atomInventory, comments };
+  return { inventory, identities, atomInventory, comments };
 }
 
 function assertInventoryDoesNotGrow(next, baseline, code, message) {
@@ -228,6 +239,14 @@ function assertInventoryMatches(next, baseline, code, message) {
     const baselineCount = baseline.get(key) ?? 0;
     if (nextCount !== baselineCount) {
       fail(code, message, { key, baselineCount, nextCount });
+    }
+  }
+}
+
+function assertInventoryPreserved(next, baseline, code, message) {
+  for (const [key, count] of baseline) {
+    if ((next.get(key) ?? 0) !== count) {
+      fail(code, message, { key, baselineCount: count, nextCount: next.get(key) ?? 0 });
     }
   }
 }
@@ -275,6 +294,12 @@ export function normalizeEditableIslandHtml(
     baselineInventory.inventory,
     "EDITABLE_ISLAND_PROTECTED_ATTRIBUTE_ADDED",
     "Direct text editing cannot add identity, navigation, data or event attributes.",
+  );
+  assertInventoryPreserved(
+    nextInventory.identities,
+    baselineInventory.identities,
+    "EDITABLE_ISLAND_PERSISTENT_ID_CHANGED",
+    "Direct text editing cannot change or remove persistent element identities.",
   );
   assertInventoryMatches(
     nextInventory.atomInventory,

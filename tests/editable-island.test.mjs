@@ -107,6 +107,26 @@ test("editable island admits mixed inline markup, empty text and hard breaks", (
   assert.equal(emptied.html, "<button></button>");
 });
 
+test("editable island preserves persistent IDs while allowing identified new inline structure", () => {
+  const strongId = "pr1_11111111111141118111111111111111";
+  const breakId = "pr1_22222222222242229222222222222222";
+  const baseline = `<strong data-pageroot-id="${strongId}">原文</strong><em data-pageroot-id="pr1_3333333333334333a333333333333333"></em>`;
+  assert.equal(
+    normalizeEditableIslandHtml(
+      `<strong data-pageroot-id="${strongId}">新文</strong><br data-pageroot-id="${breakId}"><em data-pageroot-id="pr1_3333333333334333a333333333333333"></em>`,
+      { baselineInnerHtml: baseline },
+    ),
+    `<strong data-pageroot-id="${strongId}">新文</strong><br data-pageroot-id="${breakId}"><em data-pageroot-id="pr1_3333333333334333a333333333333333"></em>`,
+  );
+  assertIslandError(
+    "EDITABLE_ISLAND_PERSISTENT_ID_CHANGED",
+    () => normalizeEditableIslandHtml(
+      `<strong data-pageroot-id="pr1_4444444444444444b444444444444444">新文</strong>`,
+      { baselineInnerHtml: `<strong data-pageroot-id="${strongId}">原文</strong>` },
+    ),
+  );
+});
+
 test("editable island edits a nested-list heading while preserving the child list as an atom", () => {
   const html = [
     "<main><ol><li>",

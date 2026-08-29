@@ -40,6 +40,9 @@ import {
   normalizeAgentDelivery,
   normalizeNewAgentDelivery,
 } from "../shared/agent-delivery.mjs";
+import {
+  PAGEROOT_ELEMENT_ID_SCHEMA_VERSION,
+} from "../shared/pageroot-element-identity.mjs";
 
 import {
   CURRENT_REGISTRY_WRITE_LOCK_GRACE_MS,
@@ -137,8 +140,13 @@ import {
   assertWorkingCopyState,
   compareAndSwapWorkingCopyFile,
   draftRelativePathFor,
+  inspectSourceElementIdentity,
+  materializeIdentityPreservingSave,
+  materializeSourceElementIdentity,
   publicOpenTarget,
   saveRecoveryPaths,
+  SOURCE_ELEMENT_IDENTITY_MIGRATION_TRANSACTION_SCHEMA_VERSION,
+  sourceElementIdentityMigrationRecoveryPaths,
   workingCopySourcePath,
   workingCopyStatePath,
 } from "./project-file-repository/working-copy.mjs";
@@ -714,7 +722,7 @@ export class ProjectFileRepository {
       ? await this.#terminalAiTaskForLoaded(loaded)
       : null;
     performanceTiming.checkpoint("stateFilesReadMs");
-    const source = await readHtmlFile(target.exactSourcePath, "managed HTML", {
+    let source = await readHtmlFile(target.exactSourcePath, "managed HTML", {
       projectRootPath: loaded.paths.projectRootPath,
     });
     performanceTiming.checkpoint("sourceReadMs");
@@ -750,6 +758,25 @@ export class ProjectFileRepository {
       }
     }
     performanceTiming.checkpoint("workingCopyReconcileMs");
+    let workingCopyIdentityMigrated = false;
+    let workingCopyIdentityAdopted = false;
+    if (workingCopy && state && target.targetKind === "working-copy") {
+      const identityMigration = await this.#ensureSourceElementIdentity({
+        loaded,
+        workingCopy,
+        state,
+        source,
+      });
+      source = identityMigration.source;
+      state = identityMigration.state;
+      workingCopyIdentityMigrated = identityMigration.migrated;
+      workingCopyIdentityAdopted = identityMigration.adopted;
+      target = Object.freeze({
+        ...target,
+        sourceSha256: source.sha256,
+      });
+    }
+    performanceTiming.checkpoint("workingCopyIdentityMs");
     // The active Working Copy can be reconciled from a clean external edit
     // immediately above. Build this public list only after that mutation so
     // the first hydration never returns a stale differsFromBase projection.
@@ -791,6 +818,8 @@ export class ProjectFileRepository {
         ? this.#publicRequest(terminalAiTask.record, loaded.paths.projectRootPath)
         : null,
       workingCopyRecovered,
+      workingCopyIdentityMigrated,
+      workingCopyIdentityAdopted,
       content: source.html,
       sourceSha256: source.sha256,
       lastModifiedAt: source.lastModifiedAt,
@@ -871,6 +900,408 @@ export class ProjectFileRepository {
       await this.#writeRuntime(loaded);
     }
     return { state: nextState, recovered: true };
+  }
+
+  #assertSourceElementIdentityMigrationTransaction(loaded, transaction) {
+    if (!isObject(transaction)) {
+      throw new ProjectFileRepositoryError(
+        "IDENTITY_MIGRATION_INVALID",
+        "The source element identity migration record is missing.",
+      );
+    }
+    const workingCopy = loaded.manifest.workingCopies.find(
+      (entry) => entry.workingCopyId === transaction.workingCopyId,
+    );
+    if (
+      transaction.schemaVersion
+        !== SOURCE_ELEMENT_IDENTITY_MIGRATION_TRANSACTION_SCHEMA_VERSION
+      || transaction.kind !== "source-element-identity-migration"
+      || !["prepared", "committed"].includes(transaction.state)
+      || transaction.projectId !== loaded.project.projectId
+      || transaction.documentId !== loaded.project.documentId
+      || !workingCopy
+      || transaction.sourceRelativePath !== workingCopy.sourceRelativePath
+      || transaction.identitySchemaVersion !== PAGEROOT_ELEMENT_ID_SCHEMA_VERSION
+      || !SHA256.test(String(transaction.expectedSourceSha256 || ""))
+      || !SHA256.test(String(transaction.targetSourceSha256 || ""))
+      || !Number.isSafeInteger(transaction.addedElementCount)
+      || transaction.addedElementCount < 0
+      || !validStateTimestamp(transaction.preparedAt)
+      || (
+        transaction.state === "committed"
+        && (
+          ![
+            "migrated",
+            "adopted-existing",
+            "recovered",
+            "rolled-back-incomplete-staging",
+            "source-changed-before-cas",
+          ].includes(transaction.outcome)
+          || !validStateTimestamp(transaction.committedAt)
+        )
+      )
+    ) {
+      throw new ProjectFileRepositoryError(
+        "IDENTITY_MIGRATION_INVALID",
+        "The source element identity migration does not match its Working Copy authority.",
+        { workingCopyId: transaction.workingCopyId || null },
+      );
+    }
+    const recoveryPaths = sourceElementIdentityMigrationRecoveryPaths(
+      loaded.paths,
+      workingCopy.workingCopyId,
+      transaction.identitySchemaVersion,
+      transaction.recoveryId,
+    );
+    const expectedPreviousRelativePath = path.relative(
+      loaded.paths.projectRootPath,
+      recoveryPaths.previousPath,
+    ).replaceAll(path.sep, "/");
+    const expectedNextRelativePath = path.relative(
+      loaded.paths.projectRootPath,
+      recoveryPaths.nextPath,
+    ).replaceAll(path.sep, "/");
+    if (
+      transaction.previousRelativePath !== expectedPreviousRelativePath
+      || transaction.nextRelativePath !== expectedNextRelativePath
+    ) {
+      throw new ProjectFileRepositoryError(
+        "IDENTITY_MIGRATION_INVALID",
+        "The source element identity migration recovery paths do not match its recovery ID.",
+        { workingCopyId: transaction.workingCopyId },
+      );
+    }
+    return { workingCopy, recoveryPaths };
+  }
+
+  async #commitSourceElementIdentityMetadata({
+    loaded,
+    workingCopy,
+    state,
+    source,
+  }) {
+    const identity = inspectSourceElementIdentity(source.html);
+    if (!identity.complete) {
+      throw new ProjectFileRepositoryError(
+        "SOURCE_ELEMENT_IDENTITY_INVALID",
+        "The migrated Working Copy does not have a complete source identity set.",
+        { issues: identity.issues },
+      );
+    }
+    workingCopy.fileIdentity = copyFileIdentity(source.information);
+    const nextState = {
+      ...state,
+      schemaVersion: PROJECT_FILE_SCHEMA_VERSION,
+      projectId: loaded.project.projectId,
+      documentId: loaded.project.documentId,
+      workingCopyId: workingCopy.workingCopyId,
+      currentSha256: source.sha256,
+      differsFromBase: source.sha256 !== state.baseSha256,
+      saveState: "saved",
+      lastSavedAt: nowIso(this.#clock),
+      sourceElementIdentitySchemaVersion: PAGEROOT_ELEMENT_ID_SCHEMA_VERSION,
+    };
+    await atomicWriteProjectJson(
+      loaded.paths.projectRootPath,
+      workingCopyStatePath(loaded.paths, workingCopy),
+      nextState,
+      "Working Copy state",
+    );
+    await atomicWriteProjectJson(
+      loaded.paths.projectRootPath,
+      loaded.paths.manifestPath,
+      loaded.manifest,
+      "manifest.json",
+    );
+    return nextState;
+  }
+
+  async #finishSourceElementIdentityMigration({
+    loaded,
+    transactionPath,
+    transaction,
+    recoveryPaths,
+    outcome,
+  }) {
+    const current = await readJsonFile(
+      transactionPath,
+      "source element identity migration",
+      { projectRootPath: loaded.paths.projectRootPath },
+    );
+    await atomicWriteProjectJson(
+      loaded.paths.projectRootPath,
+      transactionPath,
+      {
+        ...(current || transaction),
+        state: "committed",
+        outcome,
+        committedAt: nowIso(this.#clock),
+      },
+      "source element identity migration",
+    );
+    await rm(recoveryPaths.operationRoot, { recursive: true, force: true }).catch(() => {});
+    await syncDirectory(loaded.paths.recoveryRoot).catch(() => {});
+  }
+
+  async #ensureSourceElementIdentity({ loaded, workingCopy, state, source }) {
+    assertWorkingCopyState(state, loaded, workingCopy);
+    const identity = inspectSourceElementIdentity(source.html);
+    const alreadyMigrated = state.sourceElementIdentitySchemaVersion
+      === PAGEROOT_ELEMENT_ID_SCHEMA_VERSION;
+    if (alreadyMigrated) {
+      if (!identity.complete) {
+        throw new ProjectFileRepositoryError(
+          "SOURCE_ELEMENT_IDENTITY_LOST",
+          "The Working Copy lost or corrupted its persistent source element identities.",
+          { workingCopyId: workingCopy.workingCopyId, issues: identity.issues },
+        );
+      }
+      return { source, state, migrated: false, adopted: false };
+    }
+    if (state.saveState !== "saved") {
+      throw new ProjectFileRepositoryError(
+        "IDENTITY_MIGRATION_BLOCKED",
+        "The Working Copy identity cannot migrate while its save state is unresolved.",
+        { workingCopyId: workingCopy.workingCopyId, saveState: state.saveState },
+      );
+    }
+    const materialized = materializeSourceElementIdentity(source.html);
+    const nextSha256 = sha256(materialized.buffer);
+    const recoveryId = `identity_${workingCopy.workingCopyId}_v${PAGEROOT_ELEMENT_ID_SCHEMA_VERSION}_${randomUUID().replaceAll("-", "")}`;
+    const recoveryPaths = sourceElementIdentityMigrationRecoveryPaths(
+      loaded.paths,
+      workingCopy.workingCopyId,
+      PAGEROOT_ELEMENT_ID_SCHEMA_VERSION,
+      recoveryId,
+    );
+    await ensureProjectDirectory(
+      loaded.paths.projectRootPath,
+      recoveryPaths.operationRoot,
+      "source element identity recovery directory",
+    );
+    const transactionPath = path.join(loaded.paths.transactionsRoot, `${recoveryId}.json`);
+    const transaction = {
+      schemaVersion: SOURCE_ELEMENT_IDENTITY_MIGRATION_TRANSACTION_SCHEMA_VERSION,
+      kind: "source-element-identity-migration",
+      state: "prepared",
+      projectId: loaded.project.projectId,
+      documentId: loaded.project.documentId,
+      workingCopyId: workingCopy.workingCopyId,
+      sourceRelativePath: workingCopy.sourceRelativePath,
+      identitySchemaVersion: PAGEROOT_ELEMENT_ID_SCHEMA_VERSION,
+      expectedSourceSha256: source.sha256,
+      targetSourceSha256: nextSha256,
+      previousRelativePath: path.relative(
+        loaded.paths.projectRootPath,
+        recoveryPaths.previousPath,
+      ).replaceAll(path.sep, "/"),
+      nextRelativePath: path.relative(
+        loaded.paths.projectRootPath,
+        recoveryPaths.nextPath,
+      ).replaceAll(path.sep, "/"),
+      recoveryId,
+      addedElementCount: materialized.addedElementCount,
+      preparedAt: nowIso(this.#clock),
+    };
+    await atomicWriteProjectJson(
+      loaded.paths.projectRootPath,
+      transactionPath,
+      transaction,
+      "source element identity migration",
+    );
+    await atomicWriteProjectFile(
+      loaded.paths.projectRootPath,
+      recoveryPaths.previousPath,
+      source.buffer,
+      "source element identity previous bytes",
+    );
+    await atomicWriteProjectFile(
+      loaded.paths.projectRootPath,
+      recoveryPaths.nextPath,
+      materialized.buffer,
+      "source element identity replacement bytes",
+    );
+    await this.#hit("identity-migration-prepared", { transactionPath });
+
+    let migratedSource = source;
+    if (nextSha256 !== source.sha256) {
+      const cas = await compareAndSwapWorkingCopyFile({
+        sourcePath: workingCopySourcePath(loaded.paths, workingCopy),
+        nextBuffer: materialized.buffer,
+        expectedSha256: source.sha256,
+        nextSha256,
+        projectRootPath: loaded.paths.projectRootPath,
+      });
+      if (!cas.swapped) {
+        await this.#finishSourceElementIdentityMigration({
+          loaded,
+          transactionPath,
+          transaction,
+          recoveryPaths,
+          outcome: "source-changed-before-cas",
+        });
+        throw new ProjectFileRepositoryError(
+          "WORKING_COPY_CONFLICT",
+          "The Working Copy changed before its source element identity migration.",
+          {
+            workingCopyId: workingCopy.workingCopyId,
+            expectedSourceSha256: source.sha256,
+            actualSourceSha256: cas.actualSha256,
+          },
+        );
+      }
+      migratedSource = cas.written;
+      await this.#hit("identity-migration-source-written", { transactionPath });
+    }
+    const nextState = await this.#commitSourceElementIdentityMetadata({
+      loaded,
+      workingCopy,
+      state,
+      source: migratedSource,
+    });
+    await this.#hit("identity-migration-metadata-written", { transactionPath });
+    await this.#finishSourceElementIdentityMigration({
+      loaded,
+      transactionPath,
+      transaction,
+      recoveryPaths,
+      outcome: materialized.changed ? "migrated" : "adopted-existing",
+    });
+    return {
+      source: migratedSource,
+      state: nextState,
+      migrated: materialized.changed,
+      adopted: !materialized.changed,
+    };
+  }
+
+  async #recoverSourceElementIdentityMigration(
+    loaded,
+    transactionPath,
+    transaction,
+  ) {
+    const { workingCopy, recoveryPaths } =
+      this.#assertSourceElementIdentityMigrationTransaction(loaded, transaction);
+    if (transaction.state === "committed") {
+      await rm(recoveryPaths.operationRoot, { recursive: true, force: true }).catch(() => {});
+      return {
+        kind: "source-element-identity-migration",
+        workingCopyId: workingCopy.workingCopyId,
+        state: "committed-cleanup",
+      };
+    }
+
+    const state = await readJsonFile(
+      workingCopyStatePath(loaded.paths, workingCopy),
+      "Working Copy state",
+      { projectRootPath: loaded.paths.projectRootPath },
+    );
+    assertWorkingCopyState(state, loaded, workingCopy);
+    const sourcePath = workingCopySourcePath(loaded.paths, workingCopy);
+    const source = await readHtmlFile(sourcePath, "Working Copy", {
+      projectRootPath: loaded.paths.projectRootPath,
+    });
+    const readRecoveryHtml = async (filePath, label) => {
+      const information = await regularInformation(filePath, label, {
+        projectRootPath: loaded.paths.projectRootPath,
+      });
+      if (!information) return null;
+      return readHtmlFile(filePath, label, {
+        projectRootPath: loaded.paths.projectRootPath,
+      });
+    };
+    const [previous, next] = await Promise.all([
+      readRecoveryHtml(
+        recoveryPaths.previousPath,
+        "source element identity previous bytes",
+      ),
+      readRecoveryHtml(
+        recoveryPaths.nextPath,
+        "source element identity replacement bytes",
+      ),
+    ]);
+    if (previous && previous.sha256 !== transaction.expectedSourceSha256) {
+      throw new ProjectFileRepositoryError(
+        "IDENTITY_MIGRATION_INVALID",
+        "The source element identity recovery bytes do not match the expected source Hash.",
+      );
+    }
+    if (next && next.sha256 !== transaction.targetSourceSha256) {
+      throw new ProjectFileRepositoryError(
+        "IDENTITY_MIGRATION_INVALID",
+        "The source element identity replacement bytes do not match the target Hash.",
+      );
+    }
+
+    let migratedSource = source;
+    if (source.sha256 === transaction.expectedSourceSha256) {
+      if (!next) {
+        await this.#finishSourceElementIdentityMigration({
+          loaded,
+          transactionPath,
+          transaction,
+          recoveryPaths,
+          outcome: "rolled-back-incomplete-staging",
+        });
+        return {
+          kind: "source-element-identity-migration",
+          workingCopyId: workingCopy.workingCopyId,
+          state: "rolled-back",
+        };
+      }
+      if (transaction.targetSourceSha256 !== transaction.expectedSourceSha256) {
+        const cas = await compareAndSwapWorkingCopyFile({
+          sourcePath,
+          nextBuffer: next.buffer,
+          expectedSha256: transaction.expectedSourceSha256,
+          nextSha256: transaction.targetSourceSha256,
+          projectRootPath: loaded.paths.projectRootPath,
+        });
+        if (!cas.swapped) {
+          throw new ProjectFileRepositoryError(
+            "IDENTITY_MIGRATION_RECOVERY_CONFLICT",
+            "The Working Copy changed while its identity migration was recovering.",
+            {
+              workingCopyId: workingCopy.workingCopyId,
+              actualSourceSha256: cas.actualSha256,
+            },
+          );
+        }
+        migratedSource = cas.written;
+      }
+    } else if (source.sha256 !== transaction.targetSourceSha256) {
+      throw new ProjectFileRepositoryError(
+        "IDENTITY_MIGRATION_RECOVERY_CONFLICT",
+        "The Working Copy no longer matches either complete side of its identity migration.",
+        {
+          workingCopyId: workingCopy.workingCopyId,
+          expectedSourceSha256: transaction.expectedSourceSha256,
+          targetSourceSha256: transaction.targetSourceSha256,
+          actualSourceSha256: source.sha256,
+        },
+      );
+    }
+    const nextState = await this.#commitSourceElementIdentityMetadata({
+      loaded,
+      workingCopy,
+      state,
+      source: migratedSource,
+    });
+    await this.#finishSourceElementIdentityMigration({
+      loaded,
+      transactionPath,
+      transaction,
+      recoveryPaths,
+      outcome: "recovered",
+    });
+    return {
+      kind: "source-element-identity-migration",
+      workingCopyId: workingCopy.workingCopyId,
+      state: "recovered",
+      sourceSha256: migratedSource.sha256,
+      sourceElementIdentitySchemaVersion:
+        nextState.sourceElementIdentitySchemaVersion,
+    };
   }
 
   async #forceUnlockWorkingCopy({ sourcePath }) {
@@ -2957,6 +3388,8 @@ export class ProjectFileRepository {
   async #publishNewExternalImport(descriptor) {
     const stem = safeProjectName(descriptor.canonicalSourcePath);
     const extension = htmlExtension(descriptor.canonicalSourcePath);
+    const identifiedWorkingCopy = materializeSourceElementIdentity(descriptor.html);
+    const identifiedWorkingCopySha256 = sha256(identifiedWorkingCopy.buffer);
     const projectId = randomId("project");
     const documentId = randomId("doc");
     const createdAt = nowIso(this.#clock);
@@ -3011,7 +3444,12 @@ export class ProjectFileRepository {
       );
       await atomicWriteProjectFile(stagingRoot, snapshotPath, descriptor.buffer, "initial Version snapshot");
       await this.#hit("import-snapshot-written", { stagingRoot });
-      await atomicWriteProjectFile(stagingRoot, visiblePath, descriptor.buffer, "initial Working Copy");
+      await atomicWriteProjectFile(
+        stagingRoot,
+        visiblePath,
+        identifiedWorkingCopy.buffer,
+        "initial Working Copy",
+      );
       const visibleInformation = await regularInformation(visiblePath, "initial Working Copy", {
         projectRootPath: stagingRoot,
       });
@@ -3059,8 +3497,8 @@ export class ProjectFileRepository {
         workingCopyId: firstWorkingCopyId,
         basedOnVersionId: firstVersionId,
         baseSha256: descriptor.sourceSha256,
-        currentSha256: descriptor.sourceSha256,
-        differsFromBase: false,
+        currentSha256: identifiedWorkingCopySha256,
+        differsFromBase: identifiedWorkingCopySha256 !== descriptor.sourceSha256,
         draftId: `draft_${firstWorkingCopyId}`,
         draftRelativePath: draftRelativePathFor(firstWorkingCopy),
         draftSha256: null,
@@ -3069,6 +3507,7 @@ export class ProjectFileRepository {
         lastPersistedRevision: 0,
         lastSavedAt: createdAt,
         lastOpenedAt: createdAt,
+        sourceElementIdentitySchemaVersion: PAGEROOT_ELEMENT_ID_SCHEMA_VERSION,
       };
       const runtime = {
         schemaVersion: PROJECT_FILE_SCHEMA_VERSION,
@@ -3133,6 +3572,7 @@ export class ProjectFileRepository {
       });
       return {
         imported: true,
+        importSourceSha256: descriptor.sourceSha256,
         target: publicOpenTarget({
           project,
           projectRootPath: allocated.projectRootPath,
@@ -3140,7 +3580,7 @@ export class ProjectFileRepository {
           workingCopy: firstWorkingCopy,
           version: firstVersion,
           exactSourcePath: path.join(allocated.projectRootPath, visibleName),
-          sourceSha256: descriptor.sourceSha256,
+          sourceSha256: identifiedWorkingCopySha256,
         }),
       };
     } catch (cause) {
@@ -4025,10 +4465,8 @@ export class ProjectFileRepository {
   async #saveWorkingCopy({ target, html, expectedSourceSha256, editRevision }) {
     const loaded = await this.#resolveMutationTarget(target);
     const expected = assertSha256(expectedSourceSha256, "expectedSourceSha256");
-    const nextHtml = String(html || "");
+    let nextHtml = String(html || "");
     requireCompleteHtml(nextHtml, "Working Copy HTML");
-    const nextBuffer = Buffer.from(nextHtml, "utf8");
-    const nextSha256 = sha256(nextBuffer);
     const revision = Number.isSafeInteger(Number(editRevision)) && Number(editRevision) >= 0
       ? Number(editRevision)
       : 0;
@@ -4043,6 +4481,17 @@ export class ProjectFileRepository {
       );
     }
     assertWorkingCopyState(currentState, loaded, loaded.workingCopy);
+    if (
+      currentState.sourceElementIdentitySchemaVersion
+        === PAGEROOT_ELEMENT_ID_SCHEMA_VERSION
+    ) {
+      nextHtml = materializeIdentityPreservingSave(
+        loaded.source.html,
+        nextHtml,
+      ).html;
+    }
+    const nextBuffer = Buffer.from(nextHtml, "utf8");
+    const nextSha256 = sha256(nextBuffer);
     const recoveryId = `save_${loaded.workingCopy.workingCopyId}_${revision || "current"}_${randomUUID().replaceAll("-", "")}`;
     const recoveryPaths = saveRecoveryPaths(
       loaded.paths,
@@ -5721,6 +6170,36 @@ export class ProjectFileRepository {
     );
     for (const entry of entries) {
       if (entry.isSymbolicLink()) continue;
+      if (
+        entry.isFile()
+        && entry.name.startsWith("identity_")
+        && entry.name.endsWith(".json")
+      ) {
+        const transactionPath = path.join(loaded.paths.transactionsRoot, entry.name);
+        const transaction = await readJsonFile(
+          transactionPath,
+          "source element identity migration",
+          { projectRootPath: loaded.paths.projectRootPath },
+        );
+        let committedRecoveryDirectory = false;
+        if (transaction?.state === "committed") {
+          const { recoveryPaths } =
+            this.#assertSourceElementIdentityMigrationTransaction(loaded, transaction);
+          committedRecoveryDirectory = Boolean(await directoryInformation(
+            recoveryPaths.operationRoot,
+            "source element identity recovery directory",
+            { projectRootPath: loaded.paths.projectRootPath },
+          ));
+        }
+        if (transaction?.state !== "committed" || committedRecoveryDirectory) {
+          recovered.push(await this.#recoverSourceElementIdentityMigration(
+            loaded,
+            transactionPath,
+            transaction,
+          ));
+        }
+        continue;
+      }
       if (entry.isFile() && entry.name.startsWith("save_") && entry.name.endsWith(".json")) {
         const transactionPath = path.join(loaded.paths.transactionsRoot, entry.name);
         const transaction = await readJsonFile(transactionPath, "save transaction", {

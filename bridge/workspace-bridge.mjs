@@ -941,6 +941,12 @@ async function ensureProjectFile(body) {
   return {
     ...(await projectFileBaseWorkspaceState(workspace)),
     imported: imported.imported,
+    ...(imported.imported ? {
+      importSourceSha256: requireSha256(
+        imported.importSourceSha256,
+        "importSourceSha256",
+      ),
+    } : {}),
   };
 }
 
