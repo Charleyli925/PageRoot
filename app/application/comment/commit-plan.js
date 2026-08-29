@@ -1,3 +1,12 @@
+import { isValidPagerootElementId } from "../../../shared/pageroot-element-identity.mjs";
+
+export function isSavableCommentTarget(target) {
+  const globalPageTarget = String(target?.selector || "").trim().toLowerCase() === "body"
+    && target?.level === "module";
+  return target?.resolution === "exact"
+    && (globalPageTarget || isValidPagerootElementId(target?.elementId));
+}
+
 export function planCommentCommit({
   disposed = false,
   target = null,
@@ -19,7 +28,10 @@ export function planCommentCommit({
       reason: "请先选择要评论的内容。",
     });
   }
-  if (!String(target.resolution || "") || target.resolution !== "exact") {
+  if (
+    !String(target.resolution || "")
+    || !isSavableCommentTarget(target)
+  ) {
     return Object.freeze({
       kind: "reject",
       code: "COMMENT_TARGET_UNSAFE",

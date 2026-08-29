@@ -21,8 +21,20 @@ export type HtmlCanvasFingerprint = {
   textSuffix?: string;
 };
 
+export type HtmlCanvasTextLocator = {
+  quote: string;
+  /** UTF-16 offsets in the owning source element's decoded descendant text. */
+  startOffset: number;
+  endOffset: number;
+  affinity: "forward" | "backward";
+};
+
 export type HtmlCanvasSelection = {
   id: string;
+  /** Persistent source identity. Unlike `id`, this is shared by comments on the same element. */
+  elementId?: string;
+  /** Canonical source Hash expected at the target's last deterministic refresh. */
+  expectedSourceSha256?: string;
   /** Ephemeral preview identity. It is never written to the user's source HTML. */
   nodeId?: string;
   label: string;
@@ -32,6 +44,7 @@ export type HtmlCanvasSelection = {
   text: string;
   resolution: HtmlCanvasTargetResolution;
   textQuote?: string;
+  textLocator?: HtmlCanvasTextLocator;
   sourceAnchor?: {
     startOffset: number;
     endOffset: number;

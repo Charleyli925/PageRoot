@@ -2,7 +2,9 @@ import { SOURCE_NODE_ATTRIBUTE } from "../lib/source-patch-core.js";
 import { EDIT_RUNTIME_HOST_ATTRIBUTE } from "../domain/edit-runtime-contract.js";
 import { inferSelectionLevel, selectionForElement } from "./html-canvas-selection";
 import { sourceTextNodeForDomText } from "./html-canvas-preview-sync";
+import { createElementTextLocator } from "../lib/comment-text-locator.js";
 import type { ActiveTextRange, SourceIndexValue, TextRangeSegment } from "./html-canvas-internal-types";
+import type { HtmlCanvasTextLocator } from "./HtmlCanvasEditor.types";
 import type { NativeEditSelection } from "./native-edit-types";
 
 export function activeTextRangeFromDocument(
@@ -82,6 +84,13 @@ export function activeTextRangeFromDocument(
     styleElements,
     direction,
   };
+}
+
+export function textLocatorForActiveRange(
+  range: ActiveTextRange | null,
+  sourceIndex: SourceIndexValue | null,
+): HtmlCanvasTextLocator | null {
+  return createElementTextLocator(sourceIndex, range);
 }
 
 export type TextCaretPoint = {

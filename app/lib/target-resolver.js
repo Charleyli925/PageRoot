@@ -4,6 +4,7 @@ import {
   sourceSha256,
 } from "./source-index.js";
 import { isPositionalSelector } from "../../bridge/target-identity.mjs";
+import { isValidPagerootElementId } from "../../shared/pageroot-element-identity.mjs";
 
 const TARGET_LEVELS = new Set([
   "module",
@@ -103,8 +104,13 @@ export function createTargetRef(indexOrHtml, nodeOrId, options = {}) {
     endOffset: node.range.endOffset,
     fingerprint,
   };
+  const elementId = subject.pagerootId ?? undefined;
   return {
-    targetId: options.targetId ?? targetIdFor(identity),
+    targetId: options.targetId ?? targetIdFor(
+      elementId ? { level, elementId } : identity,
+    ),
+    ...(elementId ? { elementId } : {}),
+    expectedSourceSha256: index.sourceSha256,
     label: options.label ?? (node.type === "text" ? subject.label : node.label),
     level,
     selector: options.selector ?? subject.selector,
@@ -128,8 +134,20 @@ export function cleanTargetRef(targetRef, resolution = targetRef?.resolution ?? 
     level: targetRef?.level,
     resolution,
   };
+  if (targetRef?.elementId) cleaned.elementId = String(targetRef.elementId);
+  if (targetRef?.expectedSourceSha256) {
+    cleaned.expectedSourceSha256 = String(targetRef.expectedSourceSha256);
+  }
   if (targetRef?.selector) cleaned.selector = String(targetRef.selector);
   if (targetRef?.textQuote !== undefined) cleaned.textQuote = String(targetRef.textQuote);
+  if (targetRef?.textLocator) {
+    cleaned.textLocator = {
+      quote: String(targetRef.textLocator.quote ?? ""),
+      startOffset: targetRef.textLocator.startOffset,
+      endOffset: targetRef.textLocator.endOffset,
+      affinity: targetRef.textLocator.affinity,
+    };
+  }
   if (targetRef?.sourceAnchor) {
     cleaned.sourceAnchor = {
       startOffset: targetRef.sourceAnchor.startOffset,
@@ -169,12 +187,16 @@ export function createInsertionPointTargetRef(indexOrHtml, options) {
   fingerprint.textPrefix = textPrefix || undefined;
   fingerprint.textSuffix = textSuffix || undefined;
   return {
-    targetId: options.targetId ?? targetIdFor({
-      level: "insertion-point",
-      sourceSha256: index.sourceSha256,
-      offset,
-      fingerprint,
-    }),
+    targetId: options.targetId ?? targetIdFor(parent.pagerootId
+      ? { level: "insertion-point", elementId: parent.pagerootId, offset }
+      : {
+          level: "insertion-point",
+          sourceSha256: index.sourceSha256,
+          offset,
+          fingerprint,
+        }),
+    ...(parent.pagerootId ? { elementId: parent.pagerootId } : {}),
+    expectedSourceSha256: index.sourceSha256,
     label: options.label ?? `Insert in ${parent.label}`,
     level: "insertion-point",
     selector: parent.selector,
@@ -433,7 +455,25 @@ function resolveInsertionPoint(index, targetRef) {
     );
   }
 
-  const parentCandidates = insertionParentCandidates(index, targetRef);
+  if (targetRef.elementId && !isValidPagerootElementId(targetRef.elementId)) {
+    return resolved(targetRef, "orphaned", null, [], "stable-parent-id-invalid");
+  }
+  const stableParent = targetRef.elementId
+    ? index.byPagerootId.get(targetRef.elementId) ?? null
+    : null;
+  if (targetRef.elementId && !stableParent) {
+    return resolved(targetRef, "orphaned", null, [], "stable-parent-not-found");
+  }
+  if (
+    stableParent
+    && targetRef.fingerprint?.tagName
+    && stableParent.tagName !== String(targetRef.fingerprint.tagName).toLowerCase()
+  ) {
+    return resolved(targetRef, "orphaned", null, [], "stable-parent-tag-mismatch");
+  }
+  const parentCandidates = stableParent
+    ? [stableParent]
+    : insertionParentCandidates(index, targetRef);
   const isExactSource = anchor.sourceSha256 === index.sourceSha256;
   if (isExactSource) {
     const exactParents = parentCandidates.filter((parent) => (
@@ -540,6 +580,57 @@ export function resolveTargetRef(indexOrHtml, targetRef) {
   }
   if (targetRef.level === "insertion-point") {
     return resolveInsertionPoint(index, targetRef);
+  }
+
+  if (targetRef.elementId !== undefined) {
+    if (!isValidPagerootElementId(targetRef.elementId)) {
+      return resolved(targetRef, "orphaned", null, [], "stable-element-id-invalid");
+    }
+    const element = index.byPagerootId.get(targetRef.elementId) ?? null;
+    if (!element) {
+      return resolved(targetRef, "orphaned", null, [], "stable-element-not-found");
+    }
+    const expectedTag = String(targetRef.fingerprint?.tagName ?? "")
+      .trim()
+      .toLowerCase();
+    if (!expectedTag) {
+      return resolved(
+        targetRef,
+        "orphaned",
+        null,
+        [],
+        "stable-element-tag-evidence-missing",
+      );
+    }
+    if (element.tagName !== expectedTag) {
+      return resolved(targetRef, "orphaned", null, [], "stable-element-tag-mismatch");
+    }
+    if (targetRef.level === "text") {
+      const directTextNodes = element.textNodeIds
+        .map((nodeId) => index.byNodeId.get(nodeId))
+        .filter((node) => node?.type === "text");
+      if (directTextNodes.length !== 1) {
+        return resolved(targetRef, "orphaned", null, [], "stable-text-node-not-unique");
+      }
+      return resolved(
+        targetRef,
+        "exact",
+        directTextNodes[0],
+        [],
+        targetRef.expectedSourceSha256 === index.sourceSha256
+          ? "stable-element-and-source-hash-match"
+          : "stable-element-match",
+      );
+    }
+    return resolved(
+      targetRef,
+      "exact",
+      element,
+      [],
+      targetRef.expectedSourceSha256 === index.sourceSha256
+        ? "stable-element-and-source-hash-match"
+        : "stable-element-match",
+    );
   }
 
   const exact = exactNode(index, targetRef);

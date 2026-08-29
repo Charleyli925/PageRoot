@@ -2,6 +2,7 @@ import { buildSourceIndex } from "../lib/source-patch-core.js";
 import type {
   HtmlCanvasFingerprint,
   HtmlCanvasSelection,
+  HtmlCanvasTextLocator,
   HtmlCanvasTargetResolution,
 } from "./HtmlCanvasEditor.types";
 
@@ -32,10 +33,13 @@ export type SourceElementValue = {
 
 export type SourceTargetRef = {
   targetId: string;
+  elementId?: string;
+  expectedSourceSha256?: string;
   label: string;
   level: "module" | "subregion" | "text" | "insertion-point";
   selector?: string;
   textQuote?: string;
+  textLocator?: HtmlCanvasTextLocator;
   sourceAnchor?: HtmlCanvasSelection["sourceAnchor"];
   fingerprint?: HtmlCanvasFingerprint;
   resolution: HtmlCanvasTargetResolution;

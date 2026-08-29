@@ -17,6 +17,8 @@
       "text": "核心数值需要更突出，但不要改变卡片顺序。",
       "target": {
         "targetId": "target_metrics_grid",
+        "elementId": "pr1_11111111111141118111111111111111",
+        "expectedSourceSha256": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
         "label": "核心指标卡片区",
         "level": "module",
         "selector": "#metrics-grid",
@@ -53,6 +55,8 @@
       "summary": "将指标标题字重调整为 600",
       "target": {
         "targetId": "target_metrics_grid",
+        "elementId": "pr1_11111111111141118111111111111111",
+        "expectedSourceSha256": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
         "label": "核心指标卡片区",
         "level": "module",
         "selector": "#metrics-grid",

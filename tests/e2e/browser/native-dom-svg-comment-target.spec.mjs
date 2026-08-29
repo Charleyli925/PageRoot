@@ -3,8 +3,13 @@ import { expect, test } from "@playwright/test";
 import {
   caseSelector,
   fixtureBuffer,
-  loadFixture,
+  loadFixture as loadRawFixture,
 } from "./pageroot-driver.mjs";
+
+const loadFixture = (page, name, options = {}) => loadRawFixture(page, name, {
+  ...options,
+  identifiedWorkingCopy: true,
+});
 
 async function dispatchSvgClick(locator) {
   await locator.evaluate((element) => {

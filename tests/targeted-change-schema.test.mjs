@@ -115,6 +115,8 @@ test("v3 TargetRef requires explicit resolution and accepts source anchors plus 
   const [target] = request.requirements.targets;
   assert.equal(validate(request), true, ajv.errorsText(validate.errors));
   assert.equal(target.resolution, "exact");
+  assert.equal(target.elementId, "pr1_11111111111141118111111111111111");
+  assert.equal(target.expectedSourceSha256, request.baseSnapshot.sha256);
   assert.equal(target.sourceAnchor.sourceSha256, request.baseSnapshot.sha256);
   assert.equal(target.fingerprint.stableAttributes.id, "metrics-grid");
 
@@ -134,6 +136,52 @@ test("v3 TargetRef requires explicit resolution and accepts source anchors plus 
       "v3 TargetRef accepted a removed compatibility field",
     );
   }
+});
+
+test("v3 TargetRef accepts stable element identity and a bounded selected-text locator", async () => {
+  const ajv = validator();
+  const schema = await json(
+    new URL("../schemas/change-request.v3.schema.json", import.meta.url),
+  );
+  const validate = ajv.compile(schema);
+  const request = await json(
+    new URL("../fixtures/v3/change-request.frozen.json", import.meta.url),
+  );
+  const target = request.requirements.targets[0];
+  target.elementId = "pr1_11111111111141118111111111111111";
+  target.expectedSourceSha256 = request.baseSnapshot.sha256;
+  target.textLocator = {
+    quote: "指标",
+    startOffset: 2,
+    endOffset: 4,
+    affinity: "forward",
+  };
+  assert.equal(validate(request), true, ajv.errorsText(validate.errors));
+
+  const missingHash = structuredClone(request);
+  delete missingHash.requirements.targets[0].expectedSourceSha256;
+  assert.equal(validate(missingHash), false);
+
+  const missingTagEvidence = structuredClone(request);
+  delete missingTagEvidence.requirements.targets[0].fingerprint;
+  assert.equal(validate(missingTagEvidence), false);
+
+  const invalidAffinity = structuredClone(request);
+  invalidAffinity.requirements.targets[0].textLocator.affinity = "nearest";
+  assert.equal(validate(invalidAffinity), false);
+});
+
+test("v3 annotation stable targets require tag evidence", async () => {
+  const ajv = validator();
+  const schema = await json(
+    new URL("../schemas/annotation-records.v3.schema.json", import.meta.url),
+  );
+  const validate = ajv.compile(schema);
+  const annotations = await json(
+    new URL("../fixtures/v3/annotation-records.frozen.json", import.meta.url),
+  );
+  delete annotations.comments[0].target.fingerprint;
+  assert.equal(validate(annotations), false);
 });
 
 test("v3 comments can bind project attachments to the same target and AI instruction", async () => {

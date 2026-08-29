@@ -11,6 +11,7 @@ import type {
 } from "./types";
 import { isRecord } from "./record-model";
 import { canLocateTarget } from "./comment-relink-model.js";
+import { isValidPagerootElementId } from "../../shared/pageroot-element-identity.mjs";
 
 // The relink predicates live in comment-relink-model (plain JS so Node tests
 // can pin them); re-exported here for existing consumers.
@@ -36,7 +37,8 @@ export function exactGlobalPageTarget(
 }
 
 export function canSaveCommentTarget(target: HtmlCanvasSelection): boolean {
-  return target.resolution === "exact";
+  return target.resolution === "exact"
+    && (isGlobalPageTarget(target) || isValidPagerootElementId(target.elementId));
 }
 
 export function rebindTargetsPreservingGlobal(
@@ -217,6 +219,10 @@ export function selectionFromRecord(raw: unknown): HtmlCanvasSelection {
   ) as HtmlCanvasSelection["resolution"];
   const selection: HtmlCanvasSelection = {
     id: String(item.targetId || ""),
+    ...(item.elementId ? { elementId: String(item.elementId) } : {}),
+    ...(item.expectedSourceSha256
+      ? { expectedSourceSha256: String(item.expectedSourceSha256) }
+      : {}),
     label: String(item.label || selector || "页面内容"),
     selector,
     level: levelValue === "module"
@@ -232,6 +238,21 @@ export function selectionFromRecord(raw: unknown): HtmlCanvasSelection {
     text: String(item.textQuote || ""),
     resolution,
     ...(item.textQuote ? { textQuote: String(item.textQuote) } : {}),
+    ...(isRecord(item.textLocator)
+      && Number.isInteger(item.textLocator.startOffset)
+      && Number.isInteger(item.textLocator.endOffset)
+      && Number(item.textLocator.startOffset) >= 0
+      && Number(item.textLocator.endOffset) > Number(item.textLocator.startOffset)
+      && (item.textLocator.affinity === "forward" || item.textLocator.affinity === "backward")
+      ? {
+          textLocator: {
+            quote: String(item.textLocator.quote || ""),
+            startOffset: Number(item.textLocator.startOffset),
+            endOffset: Number(item.textLocator.endOffset),
+            affinity: item.textLocator.affinity,
+          },
+        }
+      : {}),
     ...(isRecord(item.sourceAnchor)
       ? {
           sourceAnchor: {
@@ -274,10 +295,13 @@ export function selectionFromRecord(raw: unknown): HtmlCanvasSelection {
 
 export type PersistedTargetRef = {
   targetId: string;
+  elementId?: string;
+  expectedSourceSha256?: string;
   label: string;
   level: "module" | "subregion" | "insertion-point";
   selector: string;
   textQuote?: string;
+  textLocator?: HtmlCanvasSelection["textLocator"];
   sourceAnchor?: HtmlCanvasSelection["sourceAnchor"];
   fingerprint?: HtmlCanvasSelection["fingerprint"];
   resolution: HtmlCanvasSelection["resolution"];
@@ -288,6 +312,10 @@ export function persistedTargetRef(
 ): PersistedTargetRef {
   return {
     targetId: target.id,
+    ...(target.elementId ? { elementId: target.elementId } : {}),
+    ...(target.expectedSourceSha256
+      ? { expectedSourceSha256: target.expectedSourceSha256 }
+      : {}),
     label: target.level === "insertion"
       ? (
           target.label.includes("添加内容")
@@ -302,6 +330,7 @@ export function persistedTargetRef(
         : "module",
     selector: target.selector,
     ...(target.textQuote !== undefined ? { textQuote: target.textQuote } : {}),
+    ...(target.textLocator ? { textLocator: { ...target.textLocator } } : {}),
     ...(target.sourceAnchor ? { sourceAnchor: { ...target.sourceAnchor } } : {}),
     ...(target.fingerprint
       ? {

@@ -32,6 +32,8 @@ function activeDraft(revision = 0, extra = {}) {
 function target(id = "target_1") {
   return {
     id,
+    elementId: "pr1_11111111111141118111111111111111",
+    expectedSourceSha256: SOURCE_SHA256,
     label: "正文",
     selector: "main p",
     level: "part",

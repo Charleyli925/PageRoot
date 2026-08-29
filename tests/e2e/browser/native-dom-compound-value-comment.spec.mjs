@@ -3,8 +3,13 @@ import { expect, test } from "@playwright/test";
 import {
   caseSelector,
   fixtureBuffer,
-  loadFixture,
+  loadFixture as loadRawFixture,
 } from "./pageroot-driver.mjs";
+
+const loadFixture = (page, name, options = {}) => loadRawFixture(page, name, {
+  ...options,
+  identifiedWorkingCopy: true,
+});
 
 test("clicking a metric unit comments the complete compound value", async ({ page }) => {
   await page.goto("/");

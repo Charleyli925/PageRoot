@@ -327,7 +327,11 @@ one-time migration authority: new imports create an identified managed Working
 Copy while preserving the external file and immutable V1 bytes; legacy managed
 Working Copies materialize missing IDs only through a Hash-checked recoverable
 transaction on editable workspace entry. Invalid identities fail closed.
-Stable TargetRef adoption and semantic saving remain outside this foundation.
+ADR 0061 makes that index the exclusive resolver for TargetRefs that carry an
+`elementId`: a surviving ID resolves exactly across text and position changes,
+while deletion or tag migration becomes orphaned without heuristic fallback.
+ID-less historical TargetRefs retain the legacy resolver. Semantic saving
+remains outside this foundation.
 
 `HtmlCanvasEditor.tsx` remains the Canvas coordinator. Parsing, DOM
 instrumentation, interaction policy, preview synchronization, selection,

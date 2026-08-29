@@ -14,10 +14,13 @@ export function targetLevelForSelection(level) {
 export function sourceTargetRefForSelection(selection) {
   return {
     targetId: selection.id,
+    elementId: selection.elementId,
+    expectedSourceSha256: selection.expectedSourceSha256,
     label: selection.label,
     level: targetLevelForSelection(selection.level),
     selector: selection.selector || undefined,
     textQuote: selection.textQuote,
+    textLocator: selection.textLocator,
     sourceAnchor: selection.sourceAnchor,
     fingerprint: selection.fingerprint,
     resolution: selection.resolution,
@@ -69,6 +72,8 @@ export function rebindCanvasSelectionTargets(sourceHtml, targets) {
         });
         return {
           ...target,
+          elementId: refreshed.elementId,
+          expectedSourceSha256: refreshed.expectedSourceSha256,
           selector: refreshed.selector,
           sourceAnchor: refreshed.sourceAnchor,
           fingerprint: refreshed.fingerprint,
@@ -86,6 +91,8 @@ export function rebindCanvasSelectionTargets(sourceHtml, targets) {
       return {
         ...target,
         nodeId: resolved.target.nodeId,
+        elementId: refreshed.elementId,
+        expectedSourceSha256: refreshed.expectedSourceSha256,
         selector: refreshed.selector,
         textQuote: refreshed.textQuote,
         sourceAnchor: refreshed.sourceAnchor,
@@ -118,6 +125,8 @@ function transitionTargetIdentity(target, nextTarget) {
   const transitioned = {
     ...target,
     nodeId: nextTarget.nodeId,
+    elementId: nextTarget.elementId,
+    expectedSourceSha256: nextTarget.expectedSourceSha256,
     selector: nextTarget.selector,
     tagName: nextTarget.tagName,
     text: nextTarget.text,
@@ -127,6 +136,8 @@ function transitionTargetIdentity(target, nextTarget) {
     fingerprint: nextTarget.fingerprint,
   };
   if (!transitioned.nodeId) delete transitioned.nodeId;
+  if (!transitioned.elementId) delete transitioned.elementId;
+  if (!transitioned.expectedSourceSha256) delete transitioned.expectedSourceSha256;
   if (transitioned.textQuote === undefined) delete transitioned.textQuote;
   if (!transitioned.sourceAnchor) delete transitioned.sourceAnchor;
   if (!transitioned.fingerprint) delete transitioned.fingerprint;

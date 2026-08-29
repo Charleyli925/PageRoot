@@ -192,6 +192,7 @@ test("TargetResolver returns exact, rebound after reorder/class change, ambiguou
   assert.deepEqual(
     Object.keys(alphaRef).sort(),
     [
+      "expectedSourceSha256",
       "fingerprint",
       "label",
       "level",
@@ -296,6 +297,7 @@ test("insertion-point refs rebind through stable parent and sibling fingerprints
   assert.deepEqual(
     Object.keys(targetRef).sort(),
     [
+      "expectedSourceSha256",
       "fingerprint",
       "label",
       "level",

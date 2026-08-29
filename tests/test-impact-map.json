@@ -941,7 +941,7 @@
     {
       "id": "source-editing-core",
       "patterns": [
-        "^app/lib/(?:align-preview-source-surface|canvas-target-rebind|editable-island|native-dom-logical-index|page-(?:presentation-dom|view-context)|pageroot-element-identity|source-(?:index|patch-core|patch-engine|text-map)|target-resolver|native-(?:edit-capability|edit-policy))\\.(?:js|ts|d\\.ts)$",
+        "^app/lib/(?:align-preview-source-surface|canvas-target-rebind|comment-text-locator|editable-island|native-dom-logical-index|page-(?:presentation-dom|view-context)|pageroot-element-identity|source-(?:index|patch-core|patch-engine|text-map)|target-resolver|native-(?:edit-capability|edit-policy))\\.(?:js|ts|d\\.ts)$",
         "^shared/pageroot-element-identity\\.mjs$",
         "^schemas/pageroot-element-identity\\.v1\\.schema\\.json$",
         "^scripts/(?:source-index|target-resolver)\\.mjs$"
@@ -954,6 +954,7 @@
       "nodeTests": [
         "tests/align-preview-source-surface.test.mjs",
         "tests/canvas-target-rebind.test.mjs",
+        "tests/comment-text-locator.test.mjs",
         "tests/pageroot-element-identity.test.mjs",
         "tests/source-element-identity-migration.test.mjs",
         "tests/source-index-target-resolver.test.mjs",
