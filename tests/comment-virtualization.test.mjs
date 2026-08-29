@@ -74,3 +74,37 @@ test("independent comments on one exact source range share one Canvas marker", (
     }),
   );
 });
+
+test("stable element identity groups moved comments without selector or Hash equality", () => {
+  const target = {
+    id: "target_comment_001",
+    elementId: "pr1_11111111111141118111111111111111",
+    selector: "main > section:nth-of-type(1)",
+    level: "part",
+    sourceAnchor: {
+      sourceSha256: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      startOffset: 10,
+      endOffset: 20,
+    },
+  };
+  assert.equal(
+    commentMarkerGroupKey(target),
+    commentMarkerGroupKey({
+      ...target,
+      id: "target_comment_002",
+      selector: "main > article > section:nth-of-type(3)",
+      sourceAnchor: {
+        sourceSha256: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        startOffset: 800,
+        endOffset: 900,
+      },
+    }),
+  );
+  assert.notEqual(
+    commentMarkerGroupKey(target),
+    commentMarkerGroupKey({
+      ...target,
+      elementId: "pr1_22222222222242229222222222222222",
+    }),
+  );
+});

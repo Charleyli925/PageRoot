@@ -11,10 +11,13 @@ export function sourceTargetRefForSelection(
   selection: HtmlCanvasSelection,
 ): {
   targetId: string;
+  elementId?: string;
+  expectedSourceSha256?: string;
   label: string;
   level: "module" | "subregion" | "insertion-point";
   selector?: string;
   textQuote?: string;
+  textLocator?: HtmlCanvasSelection["textLocator"];
   sourceAnchor?: HtmlCanvasSelection["sourceAnchor"];
   fingerprint?: HtmlCanvasSelection["fingerprint"];
   resolution: HtmlCanvasSelection["resolution"];

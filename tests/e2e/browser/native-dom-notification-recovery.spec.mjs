@@ -10,6 +10,7 @@ async function openFixture(page, name = "notification-recovery.html") {
   await page.goto("/");
   return loadFixture(page, name, {
     buffer: fixtureBuffer("complex-layout.html"),
+    identifiedWorkingCopy: true,
   });
 }
 

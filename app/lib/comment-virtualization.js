@@ -7,6 +7,7 @@ export const COMMENT_VIRTUAL_OVERSCAN = 1_000;
  *
  * @param {{
  *   id?: string;
+ *   elementId?: string;
  *   selector?: string;
  *   level?: string;
  *   text?: string;
@@ -20,6 +21,9 @@ export const COMMENT_VIRTUAL_OVERSCAN = 1_000;
  * @returns {string}
  */
 export function commentMarkerGroupKey(target) {
+  if (target?.elementId) {
+    return [target.elementId, target.level || ""].join("\u0000");
+  }
   const anchor = target?.sourceAnchor;
   if (anchor) {
     return [

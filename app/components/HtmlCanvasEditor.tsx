@@ -28,6 +28,7 @@ import {
   type PagePresentationAction,
   type PageViewContext,
 } from "../lib/page-view-context.js";
+import { isValidPagerootElementId } from "../../shared/pageroot-element-identity.mjs";
 import {
   SOURCE_NODE_ATTRIBUTE,
   applyPatchPlan,
@@ -143,6 +144,7 @@ import {
   identifyingTextRangeAtPoint,
   directTextNodeAtPoint,
   sourceHistoryDirectionForShortcut,
+  textLocatorForActiveRange,
   type TextCaretPoint,
 } from "./html-canvas-interaction";
 import {
@@ -201,6 +203,7 @@ export type {
   HtmlCanvasSelection,
   HtmlCanvasSourceTransaction,
   HtmlCanvasTargetResolution,
+  HtmlCanvasTextLocator,
   NativeDeferredCommandAuthority,
   NativeDeferredCommandDiscardReason,
   NativeDeferredCommandOptions,
@@ -2620,7 +2623,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   );
 
   const requestCommentForTarget = useCallback((target: HtmlCanvasSelection): boolean => {
-    if (target.resolution !== "exact") {
+    if (target.resolution !== "exact" || !isValidPagerootElementId(target.elementId)) {
       setEditFeedback({
         code: "canvas_c13_comment_target_not_exact",
         title: "请选择可定位的源码元素",
@@ -2631,7 +2634,27 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       });
       return false;
     }
-    onRequestCommentRef.current?.(target);
+    const activeRange = activeTextRangeRef.current;
+    const sameElement = Boolean(
+      activeRange
+      && (
+        (
+          activeRange.target.elementId
+          && activeRange.target.elementId === target.elementId
+        )
+        || (
+          activeRange.target.nodeId
+          && activeRange.target.nodeId === target.nodeId
+        )
+      )
+    );
+    const textLocator = sameElement
+      ? textLocatorForActiveRange(activeRange, sourceIndexRef.current)
+      : null;
+    onRequestCommentRef.current?.({
+      ...target,
+      ...(textLocator ? { textLocator } : {}),
+    });
     return true;
   }, []);
 
@@ -5374,11 +5397,25 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   const commentOnSelection = useCallback(() => {
     if (lockedRef.current || !selection) return;
     const openComment = () => {
+      const activeRange = activeTextRangeRef.current;
+      const sameElement = Boolean(
+        activeRange
+        && (
+          (activeRange.target.elementId && activeRange.target.elementId === selection.elementId)
+          || (activeRange.target.nodeId && activeRange.target.nodeId === selection.nodeId)
+        )
+      );
+      const capturedTextLocator = sameElement
+        ? textLocatorForActiveRange(activeRange, sourceIndexRef.current)
+        : null;
+      const commentTarget = capturedTextLocator
+        ? { ...selection, textLocator: capturedTextLocator }
+        : selection;
       if (activeNativeEditRef.current) {
         const committed = finishNativeEditing(true, "manual");
         if (!committed.ok) return;
       }
-      requestCommentForTarget(selection);
+      requestCommentForTarget(commentTarget);
     };
     if (deferNativeCommandRef.current("comment", openComment)) return;
     openComment();

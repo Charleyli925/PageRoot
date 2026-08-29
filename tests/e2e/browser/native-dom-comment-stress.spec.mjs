@@ -3,9 +3,14 @@ import { expect, test } from "@playwright/test";
 import {
   caseSelector,
   fixtureBuffer,
-  loadFixture,
+  loadFixture as loadRawFixture,
 } from "./pageroot-driver.mjs";
 import { COMMENT_VIRTUALIZATION_THRESHOLD } from "../../../app/lib/comment-virtualization.js";
+
+const loadFixture = (page, name, options = {}) => loadRawFixture(page, name, {
+  ...options,
+  identifiedWorkingCopy: true,
+});
 
 test("comments virtualize immediately above the threshold and remain navigable", async ({ page }) => {
   test.setTimeout(90_000);

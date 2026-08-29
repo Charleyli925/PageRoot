@@ -152,6 +152,36 @@ test("legacy TargetRefs retain ephemeral PageRoot attributes as compatibility ev
   assert.equal(shifted.target?.tagName, "section");
 });
 
+test("stable TargetRefs follow one element across text and position changes without guessing", () => {
+  const base = `<main data-pageroot-id="${ID_A}"><section data-pageroot-id="${ID_B}">原始文字</section><section data-pageroot-id="${ID_C}">同类兄弟</section></main>`;
+  const baseIndex = buildSourceIndex(base);
+  const target = createTargetRef(baseIndex, baseIndex.byPagerootId.get(ID_B));
+
+  assert.equal(target.elementId, ID_B);
+  assert.equal(target.expectedSourceSha256, baseIndex.sourceSha256);
+  assert.deepEqual(
+    Object.keys(target).filter((key) => key === "elementId" || key === "expectedSourceSha256"),
+    ["elementId", "expectedSourceSha256"],
+  );
+
+  const moved = `<main data-pageroot-id="${ID_A}"><section data-pageroot-id="${ID_D}">同类兄弟</section><section data-pageroot-id="${ID_C}">同类兄弟</section><section data-pageroot-id="${ID_B}">已经改字</section></main>`;
+  const resolved = resolveTargetRef(buildSourceIndex(moved), target);
+  assert.equal(resolved.resolution, "exact");
+  assert.equal(resolved.reason, "stable-element-match");
+  assert.equal(resolved.target?.pagerootId, ID_B);
+  assert.equal(resolved.target?.textContent, "已经改字");
+
+  const replacement = `<main data-pageroot-id="${ID_A}"><section data-pageroot-id="${ID_D}">原始文字</section><section data-pageroot-id="${ID_C}">同类兄弟</section></main>`;
+  const deleted = resolveTargetRef(buildSourceIndex(replacement), target);
+  assert.equal(deleted.resolution, "orphaned");
+  assert.equal(deleted.reason, "stable-element-not-found");
+
+  const wrongMigration = `<main data-pageroot-id="${ID_A}"><article data-pageroot-id="${ID_B}">原始文字</article><section data-pageroot-id="${ID_C}">同类兄弟</section></main>`;
+  const mismatched = resolveTargetRef(buildSourceIndex(wrongMigration), target);
+  assert.equal(mismatched.resolution, "orphaned");
+  assert.equal(mismatched.reason, "stable-element-tag-mismatch");
+});
+
 test("legacy HTML remains byte-for-byte untouched and is reported as identity-absent", () => {
   const html = "<!doctype html>\r\n<main><h1>旧项目 😀</h1><input disabled></main>";
   const index = buildSourceIndex(html);

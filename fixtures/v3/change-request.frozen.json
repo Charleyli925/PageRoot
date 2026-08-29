@@ -42,6 +42,8 @@
     "targets": [
       {
         "targetId": "target_metrics_grid",
+        "elementId": "pr1_11111111111141118111111111111111",
+        "expectedSourceSha256": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
         "label": "核心指标卡片区",
         "level": "module",
         "selector": "#metrics-grid",

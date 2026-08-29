@@ -176,6 +176,24 @@ level, not per file: `runtime-state.json` is preserved at its root and in
 - Disk persistence read/write: no current sidecar repair.
 - Support window and deletion evidence: live consumer removed in P0-B.
 
+## TargetRef source-element identity
+
+- Historical producer and version: comments, frozen Requests and immutable
+  Versions written before ADR 0061 have no `elementId` or
+  `expectedSourceSha256`; they carry selector, sourceAnchor and fingerprint
+  evidence only.
+- Current consumer: current Comment/Draft records, Canvas target resolution,
+  Request freeze and read-only historical Version projection.
+- Decoder and canonical output: `selectionFromRecord` preserves the old shape,
+  and `TargetResolver` uses the legacy exact/heuristic resolver only when
+  `elementId` is absent. New local-comment producers emit a valid stable ID and
+  capture Hash; whole-page comments retain the deterministic body semantic
+  target.
+- Support window and deletion evidence: keep until immutable ID-less Versions
+  and Draft recovery are outside the supported project window. Removal requires
+  a product migration policy for history; runtime heuristics must not be copied
+  into another adapter.
+
 ## Direct-edit identity names
 
 - Historical producer and version: an early Workbench/Draft producer with no

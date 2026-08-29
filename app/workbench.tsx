@@ -5062,6 +5062,11 @@ export default function Workbench() {
     if (currentComposerOpen || viewMode === "history") return;
     const matchesTarget = (comment: CommentItem) => (
       comment.target.id === target.id
+      || Boolean(
+        comment.target.elementId
+        && comment.target.elementId === target.elementId
+        && comment.target.level === target.level
+      )
       || (
         comment.target.selector === target.selector
         && comment.target.level === target.level

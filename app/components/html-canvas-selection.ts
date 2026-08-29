@@ -217,6 +217,12 @@ export function selectionFromRefreshedTarget(
 ): HtmlCanvasSelection {
   return {
     id: targetRef.targetId,
+    ...(targetRef.elementId ? { elementId: targetRef.elementId } : {}),
+    ...(original.expectedSourceSha256
+      ? { expectedSourceSha256: original.expectedSourceSha256 }
+      : targetRef.expectedSourceSha256
+        ? { expectedSourceSha256: targetRef.expectedSourceSha256 }
+        : {}),
     ...(nodeId ? { nodeId } : {}),
     label: targetRef.label,
     selector: targetRef.selector || "",
@@ -227,6 +233,7 @@ export function selectionFromRefreshedTarget(
     text: targetRef.textQuote || "",
     resolution: targetRef.resolution,
     ...(targetRef.textQuote !== undefined ? { textQuote: targetRef.textQuote } : {}),
+    ...(original.textLocator ? { textLocator: original.textLocator } : {}),
     ...(targetRef.sourceAnchor ? { sourceAnchor: targetRef.sourceAnchor } : {}),
     ...(targetRef.fingerprint ? { fingerprint: targetRef.fingerprint } : {}),
   };
@@ -311,6 +318,10 @@ export function selectionForElement(
   const view = element.ownerDocument.defaultView;
   return {
     id: targetRef?.targetId || nodeId || element.getAttribute("data-ai-id") || element.id || selector,
+    ...(targetRef?.elementId ? { elementId: targetRef.elementId } : {}),
+    ...(targetRef?.expectedSourceSha256
+      ? { expectedSourceSha256: targetRef.expectedSourceSha256 }
+      : {}),
     ...(nodeId ? { nodeId } : {}),
     label: level === "module" && isPageRootElement(element)
       ? "整个页面"
@@ -321,6 +332,7 @@ export function selectionForElement(
     text: selectionText(element),
     resolution: resolutionOverride || (targetRef ? "exact" : "orphaned"),
     ...(targetRef?.textQuote ? { textQuote: targetRef.textQuote } : {}),
+    ...(identityTarget?.textLocator ? { textLocator: identityTarget.textLocator } : {}),
     ...(targetRef?.sourceAnchor ? { sourceAnchor: targetRef.sourceAnchor } : {}),
     ...(targetRef?.fingerprint ? { fingerprint: targetRef.fingerprint } : {}),
     boundingBox: {

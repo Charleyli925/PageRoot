@@ -1,7 +1,7 @@
 import { createDraftOperationId, isDraftOperationId, rebaseDraftMutation } from "../domain/draft-aggregate.js";
 import { isBridgeRequestError } from "./bridge-client.js";
 import { createCommentWorkflowCodecs } from "./comment-workflow-codecs.js";
-import { planCommentCommit } from "./comment/commit-plan.js";
+import { isSavableCommentTarget, planCommentCommit } from "./comment/commit-plan.js";
 
 function frozenItems(value) {
   return Object.freeze(Array.isArray(value) ? [...value] : []);
@@ -552,6 +552,9 @@ export class CommentWorkflow {
     }
     if (!commentId || !target) {
       return blocked("COMMENT_TARGET_MISSING", "请先选择要评论的内容。");
+    }
+    if (!isSavableCommentTarget(target)) {
+      return blocked("COMMENT_TARGET_UNSAFE", "当前评论位置需要重新选择后才能保存。");
     }
     const current = this.#commentSession.comments.find(
       (comment) => comment.commentId === commentId,

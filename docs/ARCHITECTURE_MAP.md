@@ -30,7 +30,7 @@ the Bridge client, construct Sessions, or own debounce, polling, or drain.
 | Navigation and tabs | `WorkbenchTabsSession`, `WorkbenchNavigationSession`, `BrowserDocumentSession` | `WorkbenchNavigationWorkflow` | `workspace-controller-capabilities.d.ts` (`controller.navigation`), `workbench-navigation-container.tsx` |
 | Document save | `DocumentSession` | `DocumentWorkflow` | `document-workflow.js`, `document/save-plan.js`, `verified-project-context.js` |
 | Source element identity migration | `ProjectFileRepository` Working Copy state | `ProjectFileRepository` serialized migration transaction | `bridge/project-file-repository.mjs`, `bridge/project-file-repository/working-copy.mjs` |
-| Comments | `CommentSession` | `CommentWorkflow` | `workspace-controller-capabilities.d.ts` (`controller.comments`), `comment-workflow.js`, `comment/commit-plan.js`, `comment-rail-container.tsx`, `comment-canvas-port.js`, `comment-rail-view.tsx` |
+| Comments | `CommentSession`; persistent element identity resolves through `TargetResolver` | `CommentWorkflow` | `workspace-controller-capabilities.d.ts` (`controller.comments`), `comment-workflow.js`, `comment/commit-plan.js`, `target-resolver.js`, `comment-text-locator.js`, `comment-rail-container.tsx`, `comment-canvas-port.js`, `comment-rail-view.tsx` |
 | Attachments | Draft attachment repository | `CommentWorkflow` | `comment-workflow.js` upload/read/delete |
 | Run and AI request | `RunSession` | `RunWorkflow` | `workspace-controller-capabilities.d.ts` (`controller.runs`), `run-workflow.js`, `run/submit-plan.js`, `run-conversation-outlet.tsx` |
 | Review and Candidate | `VersionSession` (projection) | `VersionWorkflow` prepare/accept | `app/workbench/AiReviewWorkspace.tsx` |
@@ -83,7 +83,7 @@ CommentSession + CommentWorkflow
     -> CommentRailContainer
       -> stable CommentRailView model/actions
 
-HtmlCanvasEditor selection + source-tagged target geometry
+HtmlCanvasEditor selection + stable element TargetRef + source-tagged geometry
   -> commentCanvasPort
     -> CommentRailContainer
 ```
@@ -98,6 +98,10 @@ intents; it never owns comment facts. Workbench's aggregate
 subscription may suppress composer-text and edit-text-only revisions; saved
 comments, attachment structure, persistence errors and every non-comment
 capability still invalidate the composition root.
+Persistent `elementId` and optional text locator are Comment/Draft facts;
+`TargetResolver` maps the ID to current source and never consults disposable
+geometry or Runtime DOM. `commentCanvasPort` carries only the resulting
+selection and measurements.
 
 ## Project render boundary
 

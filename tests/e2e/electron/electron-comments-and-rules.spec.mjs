@@ -8,6 +8,7 @@ import {
   closePageRootGracefully,
   createSourceFixture,
   expectCheckpointPersisted,
+  existsSync,
   fixtureBuffer,
   launchPageRoot,
   loadedDiskFrame,
@@ -17,6 +18,7 @@ import {
   openRailGlobalCommentComposer,
   path,
   readFileSync,
+  readdirSync,
   removeIsolatedUserData,
   removeSourceFixture,
   requestDirectoryCount,
@@ -28,6 +30,74 @@ import {
   workspaceContainsDraftComment,
   writeFileSync,
 } from "./electron-native-harness.mjs";
+
+function managedDraftComment(managedSourcePath, text) {
+  const draftsRoot = path.join(
+    path.dirname(managedSourcePath),
+    ".pageroot",
+    "drafts",
+  );
+  if (!existsSync(draftsRoot)) return null;
+  for (const name of readdirSync(draftsRoot)) {
+    if (!name.endsWith(".json")) continue;
+    const draft = JSON.parse(readFileSync(path.join(draftsRoot, name), "utf8"));
+    const comment = Array.isArray(draft.comments)
+      ? draft.comments.find((candidate) => candidate.text === text)
+      : null;
+    if (comment) return comment;
+  }
+  return null;
+}
+
+test("selected-text comments persist stable identity and stay exact after text replacement", async () => {
+  test.setTimeout(90_000);
+  const fixture = createSourceFixture("stable-selected-text-comment.html");
+  const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
+  const commentText = "这三个字需要更直接。";
+  try {
+    const { frame } = await loadedDiskFrame(
+      launched.page,
+      fixture.sourcePath,
+      "list-item",
+    );
+    const managedSourcePath = await managedWorkingCopyPath(
+      launched.page,
+      fixture.sourcePath,
+    );
+    await activateNativeEdit(frame, "list-item");
+    await setTextSelection(frame, "list-item", 0, 3);
+    await launched.page.getByRole("toolbar", { name: /编辑/u })
+      .getByRole("button", { name: /留评论/u })
+      .click();
+    const composer = launched.page.getByRole("region", { name: "添加评论" });
+    await composer.getByRole("textbox", { name: "评论内容" }).fill(commentText);
+    await composer.getByRole("button", { name: "评论", exact: true }).click();
+
+    await expect.poll(
+      () => managedDraftComment(managedSourcePath, commentText),
+      { timeout: 20_000 },
+    ).not.toBeNull();
+    const comment = managedDraftComment(managedSourcePath, commentText);
+    expect(comment.target.elementId).toMatch(/^pr1_[0-9a-f]{32}$/u);
+    expect(comment.target.expectedSourceSha256).toMatch(/^sha256:[0-9a-f]{64}$/u);
+    expect(comment.target.textLocator).toEqual({
+      quote: ORIGINAL_LIST_TEXT.slice(0, 3),
+      startOffset: 0,
+      endOffset: 3,
+      affinity: "forward",
+    });
+
+    await activateNativeEdit(frame, "list-item");
+    await setTextSelection(frame, "list-item", 0, ORIGINAL_LIST_TEXT.length);
+    await launched.page.keyboard.insertText("替换后的评论目标文字。");
+    const card = launched.page.locator(".comment-card").filter({ hasText: commentText });
+    await expect(card).toHaveAttribute("data-resolution", "exact", { timeout: 20_000 });
+    await expect(card.getByText("原位置已变化")).toHaveCount(0);
+  } finally {
+    await stopPageRoot(launched.electronApp, launched.isolatedUserData);
+    removeSourceFixture(fixture.sourceDirectory);
+  }
+});
 
 test("Electron preview shows the read-only comment marker and opens it on hover and keyboard focus", async () => {
   test.setTimeout(90_000);

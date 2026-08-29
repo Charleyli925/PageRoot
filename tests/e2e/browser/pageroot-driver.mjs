@@ -9,6 +9,9 @@ import {
 import {
   normalizeEditableIslandHtml,
 } from "../../../app/lib/editable-island.js";
+import {
+  materializeSourceElementIdentity,
+} from "../../../bridge/project-file-repository/working-copy.mjs";
 
 const currentDirectory = path.dirname(fileURLToPath(import.meta.url));
 export const productRoot = path.resolve(currentDirectory, "../../..");
@@ -196,7 +199,11 @@ async function openFixtureThroughHiddenInput({
   );
 }
 
-export async function loadFixture(page, name, { buffer = fixtureBuffer(name) } = {}) {
+export async function loadFixture(
+  page,
+  name,
+  { buffer = fixtureBuffer(name), identifiedWorkingCopy = false } = {},
+) {
   // Pure browser use is a formal read-only preview. These source-editing tests
   // exercise the desktop renderer, so expose only the narrow capability marker
   // needed to mount its editor before loading an in-memory fixture.
@@ -215,12 +222,15 @@ export async function loadFixture(page, name, { buffer = fixtureBuffer(name) } =
 
   const fileInput = page.locator('input[type="file"][accept*=".html"]').first();
   await fileInput.waitFor({ state: "attached" });
+  const sourceBuffer = identifiedWorkingCopy
+    ? Buffer.from(materializeSourceElementIdentity(buffer.toString("utf8")).html, "utf8")
+    : buffer;
   await openFixtureThroughHiddenInput({
     page,
     editor,
     fileInput,
     name,
-    buffer,
+    buffer: sourceBuffer,
   });
 
   await expect(editor).toHaveAttribute("data-render-verified", "true");
@@ -230,7 +240,7 @@ export async function loadFixture(page, name, { buffer = fixtureBuffer(name) } =
   const initialFrame = await currentEditorFrame(page);
   await initialFrame.waitForFunction(() => document.readyState === "complete");
   await initialFrame.waitForFunction(() => Boolean(document.querySelector("[data-native-case]")));
-  return { editor, iframe, frame: resilientEditorFrame(page), source: buffer };
+  return { editor, iframe, frame: resilientEditorFrame(page), source: sourceBuffer };
 }
 
 export function caseSelector(id) {

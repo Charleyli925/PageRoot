@@ -395,6 +395,14 @@ This capability cannot discover or authorize additional Review facts. The user
 still invokes the existing fail-closed ready-version activation path through
 “直接打开” or the review confirmation “打开 AI 修改后”.
 
+Current Edit comments use a separate ADR 0061 identity boundary. A TargetRef
+with `elementId` resolves only through SourceIndex's valid unique
+`data-pageroot-id` map; missing, invalid or tag-migrated identity becomes
+orphaned and cannot fall back to selector, fingerprint, source offset or
+Runtime DOM similarity. ID-less historical records retain the bounded legacy
+resolver. Selected-text locators contain source-backed decoded text offsets and
+never authorize persistence from preview DOM.
+
 Edit-mode reveal actions use the same trust boundary. They accept only strict
 Tabs whose selected panel is proved by `aria-selected` plus `hidden`, native
 details with one direct summary, and local button/region disclosures whose

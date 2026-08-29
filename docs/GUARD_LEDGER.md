@@ -37,7 +37,7 @@ corruption or lost user work.
 | External HTML import confirmation | Do not import or retarget active/recent before consent | authority | modal | no | no | keep |
 | Source conflict banner | External write must not overwrite editor bytes | authority | banner | no | preview / force-unlock / retry | keep |
 | Request freeze before AI submit | Freeze persisted HTML/revision before creating a Request | authority | send waits on save | Drain + autosave | flush then continue | keep |
-| `RUN_SUBMISSION_TARGET_UNSAFE` | Comment target must be exact/rebound with matching anchor Hash | authority | cannot send; relink card | rail `canLocateTarget` | relink then continue send | keep; extra Toast → degrade |
+| `RUN_SUBMISSION_TARGET_UNSAFE` | Current comment must resolve exact by stable element ID; legacy comment must remain exact/rebound; missing stable ID cannot fall back to a similar node | authority | cannot send; relink card | rail `canLocateTarget` | explicit relink then continue send | keep; extra Toast → degrade |
 | Unsaved composer/edit before send | No dirty composer when submitting | authority | sticky “continue filling” | RunWorkflow plan; Workbench presents the authority result | save or cancel | merged; legacy predicate equivalence matrix retained in `run-submit-plan.test.mjs` |
 | Native edit fence (`showCommitBlocked`) | IME / uncheckpointed native input cannot preview, send or undo | authority | inline block | several fence call sites | finish input | keep port; copy → degrade |
 | `PROJECT.md` unsaved close/switch | Rules must land before fold/switch | authority | blocks close/switch | no | autosave/drain | keep |

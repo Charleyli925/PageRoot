@@ -26,6 +26,8 @@
         "app/application/comment-workflow.js",
         "app/application/comment-session.js",
         "app/application/comment/commit-plan.js",
+        "app/lib/target-resolver.js",
+        "app/lib/comment-text-locator.js",
         "app/workbench/comment-canvas-port.js",
         "app/workbench/comment-rail-container.tsx",
         "app/workbench/comment-rail-contract.ts",
@@ -37,6 +39,8 @@
         "tests/comment-commit-plan.test.mjs",
         "tests/comment-session.test.mjs",
         "tests/comment-canvas-port.test.mjs",
+        "tests/comment-text-locator.test.mjs",
+        "tests/canvas-target-rebind.test.mjs",
         "tests/workbench-render-snapshot.test.mjs"
       ],
       "requiredDocs": [

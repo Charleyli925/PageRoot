@@ -245,6 +245,13 @@
           "type": "string",
           "pattern": "^target_[A-Za-z0-9_-]+$"
         },
+        "elementId": {
+          "type": "string",
+          "pattern": "^pr1_[0-9a-f]{12}4[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+        },
+        "expectedSourceSha256": {
+          "$ref": "#/$defs/sha256"
+        },
         "label": {
           "type": "string",
           "minLength": 1,
@@ -267,6 +274,9 @@
           "type": "string",
           "maxLength": 5000
         },
+        "textLocator": {
+          "$ref": "#/$defs/textLocator"
+        },
         "sourceAnchor": {
           "$ref": "#/$defs/sourceAnchor"
         },
@@ -285,6 +295,11 @@
       "anyOf": [
         {
           "required": [
+            "elementId"
+          ]
+        },
+        {
+          "required": [
             "selector"
           ]
         },
@@ -298,7 +313,52 @@
             "fingerprint"
           ]
         }
+      ],
+      "allOf": [
+        {
+          "if": {
+            "required": [
+              "elementId"
+            ]
+          },
+          "then": {
+            "required": [
+              "expectedSourceSha256"
+            ]
+          }
+        }
       ]
+    },
+    "textLocator": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "quote",
+        "startOffset",
+        "endOffset",
+        "affinity"
+      ],
+      "properties": {
+        "quote": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 5000
+        },
+        "startOffset": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "endOffset": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "affinity": {
+          "enum": [
+            "forward",
+            "backward"
+          ]
+        }
+      }
     },
     "sourceAnchor": {
       "type": "object",
