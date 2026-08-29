@@ -11,6 +11,10 @@ Only the files listed below are product contracts and package inputs.
   transaction that authorizes a registered managed Working Copy to materialize
   that identity once. It seals before/after Hashes and recovery paths; it never
   covers historical Versions, external originals or Runtime DOM.
+- `promotion-transaction.v4.schema.json` seals the immutable Candidate output
+  Hash separately from `workingCopySourceSha256`. Promotion preserves the
+  Candidate bytes in the Version snapshot and publishes only the independently
+  identity-materialized Working Copy bytes under the latter Hash.
 
 ## Unknown members in mutable records
 

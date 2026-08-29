@@ -9,6 +9,7 @@ import { loadExecutionPolicy } from "../bridge/agent/policies/execution-policy.m
 import { createDefaultProviderRegistry } from "../bridge/agent/providers/provider-registry.mjs";
 import { sha256 } from "../bridge/lifecycle-core.mjs";
 import { ProjectFileRepository } from "../bridge/project-file-repository.mjs";
+import { inspectSourceElementIdentity } from "../bridge/project-file-repository/working-copy.mjs";
 import { normalizeAgentDelivery } from "../shared/agent-delivery.mjs";
 
 const acpFixture = fileURLToPath(new URL(
@@ -79,6 +80,8 @@ test("Codex completion reaches only a sealed Candidate and never adopts the Work
     sourcePath,
     expectedSourceSha256: sha256(Buffer.from(source)),
   });
+  const managedSourceBefore = await readFile(imported.target.exactSourcePath, "utf8");
+  assert.equal(inspectSourceElementIdentity(managedSourceBefore).complete, true);
   const selection = {
     providerId: "codex",
     runtimeId: "acp",
@@ -158,7 +161,10 @@ test("Codex completion reaches only a sealed Candidate and never adopts the Work
   assert.equal(status.status, "candidate-ready");
   assert.equal(status.candidate.candidateId, request.candidateId);
   assert.equal(await readFile(sourcePath, "utf8"), source);
-  assert.equal(await readFile(imported.target.exactSourcePath, "utf8"), source);
+  assert.equal(
+    await readFile(imported.target.exactSourcePath, "utf8"),
+    managedSourceBefore,
+  );
   const workspace = await repository.workspace({ sourcePath: imported.target.exactSourcePath });
   assert.equal(workspace.manifest.latestOfficialVersionId, "ver_0001");
   assert.equal(workspace.manifest.versions.length, 1);

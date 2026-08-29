@@ -11,6 +11,8 @@ import path from "node:path";
 
 import { expect, test } from "@playwright/test";
 import { _electron as electron } from "playwright";
+import { sha256 } from "../../../bridge/lifecycle-core.mjs";
+import { inspectSourceElementIdentity } from "../../../bridge/project-file-repository/working-copy.mjs";
 import {
   assertPackagedAppIdentity,
   expectedPackagedAppIdentity,
@@ -84,6 +86,29 @@ async function closePackagedGracefully(electronApp, page) {
     throw new Error("PageRoot main BrowserWindow was unavailable for graceful close.");
   }
   await closed;
+}
+
+function expectManagedV1Identity(managedSourcePath, original) {
+  const managed = readFileSync(managedSourcePath);
+  expect(managed).not.toEqual(original);
+  expect(inspectSourceElementIdentity(managed.toString("utf8")).complete).toBe(true);
+  const controlRoot = path.join(path.dirname(managedSourcePath), ".pageroot");
+  const manifest = JSON.parse(readFileSync(path.join(controlRoot, "manifest.json"), "utf8"));
+  const firstVersion = manifest.versions.find((version) => version.versionId === "ver_0001");
+  const firstWorkingCopy = manifest.workingCopies.find(
+    (workingCopy) => workingCopy.workingCopyId === "work_ver_0001",
+  );
+  expect(readFileSync(path.join(controlRoot, firstVersion.snapshotRelativePath))).toEqual(original);
+  const state = JSON.parse(readFileSync(
+    path.join(controlRoot, firstWorkingCopy.stateRelativePath),
+    "utf8",
+  ));
+  expect(state).toMatchObject({
+    baseSha256: sha256(original),
+    currentSha256: sha256(managed),
+    differsFromBase: true,
+    sourceElementIdentitySchemaVersion: 1,
+  });
 }
 
 test("packaged app preserves identity and imports external HTML as V1 across startup states", async () => {
@@ -174,7 +199,7 @@ test("packaged app preserves identity and imports external HTML as V1 across sta
     )?.sourcePath || "");
     expect(startupManagedSourcePath).not.toBe(startupSourcePath);
     expect(readFileSync(startupSourcePath)).toEqual(startupOriginal);
-    expect(readFileSync(startupManagedSourcePath)).toEqual(startupOriginal);
+    expectManagedV1Identity(startupManagedSourcePath, startupOriginal);
 
     await electronApp.evaluate(({ app }, sourcePath) => {
       app.emit("open-file", { preventDefault() {} }, sourcePath);
@@ -191,7 +216,7 @@ test("packaged app preserves identity and imports external HTML as V1 across sta
     )?.sourcePath || "");
     expect(liveManagedSourcePath).not.toBe(liveSourcePath);
     expect(readFileSync(liveSourcePath)).toEqual(liveOriginal);
-    expect(readFileSync(liveManagedSourcePath)).toEqual(liveOriginal);
+    expectManagedV1Identity(liveManagedSourcePath, liveOriginal);
     await expect.poll(
       () => page.locator("main.workbench").getAttribute("data-project-state"),
       { timeout: 30_000 },

@@ -5146,6 +5146,7 @@ export class ProjectFileRepository {
         versionId: candidateState.candidate.proposedVersionId,
         versionOrdinal: candidateState.candidate.proposedVersionOrdinal,
         candidateOutputSha256: candidateState.candidate.outputSha256,
+        workingCopySourceSha256: null,
         basedOnVersionId: candidateState.candidate.basedOnVersionId,
         previousVersionId: candidateState.candidate.previousVersionId,
         finalWorkingCopyRelativePath: allocation.sourceRelativePath,
@@ -5278,6 +5279,10 @@ export class ProjectFileRepository {
     let preparedWorkingCopyFileIdentity = null;
     if (hasPreparedWorkingCopy) {
       try {
+        assertSha256(
+          transaction.workingCopySourceSha256,
+          "Promotion Working Copy sourceSha256",
+        );
         preparedWorkingCopyFileIdentity = assertFileIdentity(
           transaction.preparedWorkingCopyFileIdentity,
           "Promotion prepared Working Copy fileIdentity",
@@ -5285,7 +5290,10 @@ export class ProjectFileRepository {
       } catch {
         mismatch();
       }
-    } else if (transaction.preparedWorkingCopyFileIdentity !== null) {
+    } else if (
+      transaction.preparedWorkingCopyFileIdentity !== null
+      || transaction.workingCopySourceSha256 !== null
+    ) {
       mismatch();
     }
 
@@ -5501,10 +5509,14 @@ export class ProjectFileRepository {
           );
         }
       } else {
+        const identifiedWorkingCopy = materializeSourceElementIdentity(
+          candidateState.output.html,
+        );
+        const workingCopySourceSha256 = sha256(identifiedWorkingCopy.buffer);
         const prepared = await writeFileNoReplace(
           preparedPath,
-          candidateState.output.buffer,
-          transaction.candidateOutputSha256,
+          identifiedWorkingCopy.buffer,
+          workingCopySourceSha256,
           "prepared Version Working Copy",
           { projectRootPath: loaded.paths.projectRootPath },
         );
@@ -5515,6 +5527,7 @@ export class ProjectFileRepository {
           );
         }
         preparedInformation = prepared.information;
+        transaction.workingCopySourceSha256 = workingCopySourceSha256;
       }
       transaction.preparedWorkingCopyFileIdentity = copyFileIdentity(preparedInformation);
       transaction.state = "working-copy-prepared";
@@ -5544,10 +5557,10 @@ export class ProjectFileRepository {
       const prepared = await readHtmlFile(preparedPath, "prepared Version Working Copy", {
         projectRootPath: loaded.paths.projectRootPath,
       });
-      if (prepared.sha256 !== transaction.candidateOutputSha256) {
+      if (prepared.sha256 !== transaction.workingCopySourceSha256) {
         throw new ProjectFileRepositoryError(
           "PROMOTION_PREPARED_FILE_CHANGED",
-          "The Promotion preparation file no longer matches the sealed Candidate bytes.",
+          "The Promotion preparation file no longer matches its sealed Working Copy bytes.",
         );
       }
       let visibleInformation;
@@ -5573,7 +5586,7 @@ export class ProjectFileRepository {
           const visible = await readHtmlFile(visiblePath, "Version Working Copy", {
             projectRootPath: loaded.paths.projectRootPath,
           });
-          if (visible.sha256 !== transaction.candidateOutputSha256) {
+          if (visible.sha256 !== transaction.workingCopySourceSha256) {
             throw new ProjectFileRepositoryError(
               "PROMOTION_PATH_REPLACED",
               "The allocated Version Working Copy changed after publication.",
@@ -5625,7 +5638,7 @@ export class ProjectFileRepository {
         const visible = await readHtmlFile(visiblePath, "Version Working Copy", {
           projectRootPath: loaded.paths.projectRootPath,
         });
-        if (visible.sha256 !== transaction.candidateOutputSha256) {
+        if (visible.sha256 !== transaction.workingCopySourceSha256) {
           throw new ProjectFileRepositoryError(
             "PROMOTION_PATH_REPLACED",
             "The allocated Version Working Copy changed after publication.",
@@ -5652,8 +5665,9 @@ export class ProjectFileRepository {
         workingCopyId: nextWorkingCopy.workingCopyId,
         basedOnVersionId: version.versionId,
         baseSha256: transaction.candidateOutputSha256,
-        currentSha256: transaction.candidateOutputSha256,
-        differsFromBase: false,
+        currentSha256: transaction.workingCopySourceSha256,
+        differsFromBase:
+          transaction.workingCopySourceSha256 !== transaction.candidateOutputSha256,
         draftId: "draft_" + nextWorkingCopy.workingCopyId,
         draftRelativePath: draftRelativePathFor(nextWorkingCopy),
         draftSha256: null,
@@ -5662,6 +5676,7 @@ export class ProjectFileRepository {
         lastPersistedRevision: 0,
         lastSavedAt: nowIso(this.#clock),
         lastOpenedAt: nowIso(this.#clock),
+        sourceElementIdentitySchemaVersion: PAGEROOT_ELEMENT_ID_SCHEMA_VERSION,
       }, "Version Working Copy state");
       transaction.state = "working-copy-created";
       transaction.workingCopyCreatedAt = nowIso(this.#clock);
@@ -5696,7 +5711,7 @@ export class ProjectFileRepository {
       const visible = await readHtmlFile(visiblePath, "Version Working Copy", {
         projectRootPath: loaded.paths.projectRootPath,
       });
-      if (visible.sha256 !== transaction.candidateOutputSha256) {
+      if (visible.sha256 !== transaction.workingCopySourceSha256) {
         throw new ProjectFileRepositoryError(
           "PROMOTION_PATH_REPLACED",
           "The allocated Version Working Copy bytes changed before manifest publication.",

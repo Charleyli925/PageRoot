@@ -35,6 +35,7 @@ import {
 } from "../bridge/qoder-acp-client.mjs";
 import { sha256 } from "../bridge/lifecycle-core.mjs";
 import { ProjectFileRepository } from "../bridge/project-file-repository.mjs";
+import { inspectSourceElementIdentity } from "../bridge/project-file-repository/working-copy.mjs";
 
 const IDENTITIES = Object.freeze({
   requestId: "req_aaaaaaaaaaaaaaaa",
@@ -70,6 +71,8 @@ async function createFixture(t) {
     expectedSourceSha256: sha256(Buffer.from(sourceHtml, "utf8")),
   });
   const { target } = imported;
+  const managedSourceHtml = await readFile(target.exactSourcePath, "utf8");
+  assert.equal(inspectSourceElementIdentity(managedSourceHtml).complete, true);
   const promptText = "Follow the PageRoot task contract.\n";
   const request = await repository.prepareRequest({
     target,
@@ -116,7 +119,9 @@ async function createFixture(t) {
     root,
     repository,
     target,
+    sourcePath,
     sourceHtml,
+    managedSourceHtml,
     requestPath,
     manifestPath,
     outputPath,
@@ -808,7 +813,11 @@ test("ACP ClientApp completes a synthetic PageRoot Candidate turn", async (t) =>
   });
   assert.equal(status.status, "candidate-ready");
   assert.equal(status.candidate.outputSha256, result.completion.outputSha256);
-  assert.equal(await readFile(fixture.target.exactSourcePath, "utf8"), fixture.sourceHtml);
+  assert.equal(await readFile(fixture.sourcePath, "utf8"), fixture.sourceHtml);
+  assert.equal(
+    await readFile(fixture.target.exactSourcePath, "utf8"),
+    fixture.managedSourceHtml,
+  );
   const reviewBoundaryAfter = await captureQoderAcpReviewBoundary({
     repository: fixture.repository,
     target: fixture.target,
@@ -899,7 +908,11 @@ test("ACP stdio transport completes the same synthetic Candidate contract", asyn
     ...IDENTITIES,
   });
   assert.equal(status.status, "candidate-ready");
-  assert.equal(await readFile(fixture.target.exactSourcePath, "utf8"), fixture.sourceHtml);
+  assert.equal(await readFile(fixture.sourcePath, "utf8"), fixture.sourceHtml);
+  assert.equal(
+    await readFile(fixture.target.exactSourcePath, "utf8"),
+    fixture.managedSourceHtml,
+  );
   await assert.rejects(
     runQoderAcpTask({
       command: process.execPath,

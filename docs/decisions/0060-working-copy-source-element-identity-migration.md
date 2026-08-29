@@ -61,6 +61,14 @@ leave mixed or externally overwritten HTML.
    pairing; those remain dependent PRs. Until ID-based Review lands, its legacy
    exact-subtree signature treats every PageRoot attribute, including the
    persistent ID, as disposable comparison metadata.
+7. Candidate Promotion keeps the immutable Version snapshot byte-exact to the
+   sealed Candidate. Its private prepared Working Copy is materialized
+   separately, and the Promotion transaction seals that file's distinct
+   `workingCopySourceSha256` before no-replace publication. The new Working Copy
+   state records identity schema v1, the Candidate Hash as `baseSha256`, and the
+   identified file Hash as `currentSha256`. Recovery validates each artifact
+   against its own sealed Hash; it never runs a later workspace migration that
+   would invalidate an already returned activation target.
 
 ## Consequences
 
@@ -70,6 +78,9 @@ leave mixed or externally overwritten HTML.
 - The first managed Working Copy may differ from its exact imported V1 only by
   the persistent identity attributes; this is represented by the existing
   `baseSha256`, `currentSha256` and `differsFromBase` fields.
+- A promoted Working Copy can likewise differ from its immutable Candidate
+  Version only by identity materialization performed inside the Promotion
+  transaction.
 - Partial valid identity sets converge once. Invalid or later-damaged sets are
   explicit errors rather than a heuristic rebinding opportunity.
 - Runtime DOM serialization remains prohibited.

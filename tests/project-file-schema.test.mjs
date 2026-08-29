@@ -176,6 +176,8 @@ test("v4 schemas accept repository-produced identity, Working Copy, Candidate an
     `promote_${candidate.candidate.candidateId}`,
     "transaction.json",
   ));
+  const missingWorkingCopySourceHash = structuredClone(transaction);
+  delete missingWorkingCopySourceHash.workingCopySourceSha256;
   await Promise.all([
     validate("candidate.v4.schema.json", await json(candidatePath)),
     validate("promotion-transaction.v4.schema.json", transaction),
@@ -184,6 +186,10 @@ test("v4 schemas accept repository-produced identity, Working Copy, Candidate an
     validate(
       "working-copy-state.v4.schema.json",
       await json(path.join(controlRoot, "working-copies", "work_ver_0002.json")),
+    ),
+    validateRejects(
+      "promotion-transaction.v4.schema.json",
+      missingWorkingCopySourceHash,
     ),
   ]);
   assert.equal(promoted.version.versionId, "ver_0002");
