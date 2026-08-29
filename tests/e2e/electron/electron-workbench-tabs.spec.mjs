@@ -436,3 +436,124 @@ test("Electron sidebar opens an imported historical version in the existing proj
     removeSourceFixture(projectB.sourceDirectory);
   }
 });
+
+test("Electron sidebar keeps multiple project trees expanded without switching identity", {
+  tag: ["@gate-smoke", "@smoke-project-lifecycle"],
+}, async () => {
+  test.setTimeout(180_000);
+  const projectA = createSourceFixture("sidebar-expansion-a.html");
+  const projectB = createSourceFixture("sidebar-expansion-b.html");
+  const projectC = createSourceFixture(
+    "sidebar-expansion-c-with-a-very-long-file-name-for-tooltip.html",
+  );
+  const launched = await launchPageRoot({ activeSourcePath: projectA.sourcePath });
+  try {
+    await loadedDiskFrame(launched.page, projectA.sourcePath, "list-item");
+    await waitForProjectReady(launched.page);
+    const managedAPath = await managedWorkingCopyPath(launched.page, projectA.sourcePath);
+    const repository = new ProjectFileRepository({
+      projectsRoot: path.dirname(path.dirname(managedAPath)),
+    });
+    for (const project of [projectB, projectC]) {
+      const imported = await repository.importExternal({
+        sourcePath: project.sourcePath,
+        expectedSourceSha256: sha256(readFileSync(project.sourcePath)),
+      });
+      expect(imported.target.projectId).toMatch(/^project_[a-f0-9]{16,64}$/u);
+      if (project === projectC) {
+        let target = imported.target;
+        for (const [ordinal, title] of [[2, "sidebar expansion V2"], [3, "sidebar expansion V3"]]) {
+          const candidate = await repository.createCandidate({
+            target,
+            requestId: `req_sidebar_expansion_${ordinal}`,
+            candidateId: `candidate_sidebar_expansion_${ordinal}_0001`,
+            html: `<!doctype html><html><head><title>${title}</title></head><body><h1>${title}</h1></body></html>`,
+            expectedSourceSha256: target.sourceSha256,
+          });
+          const promoted = await repository.promoteCandidate({
+            target,
+            candidateId: candidate.candidate.candidateId,
+          });
+          expect(promoted.promoted).toBe(true);
+          target = promoted.target;
+        }
+      }
+    }
+
+    await launched.page.getByRole("button", { name: "展开左侧边栏" }).click();
+    const sidebar = launched.page.locator(".workbench-global-sidebar");
+    await expect(sidebar).toHaveAttribute("data-open", "true");
+    await expect(sidebar.locator(".sidebar-imported-project")).toHaveCount(2, {
+      timeout: 30_000,
+    });
+    const currentProjectId = await launched.page.evaluate(() => (
+      window.htmlAIProjects?.getActiveProject()?.projectId || null
+    ));
+    const currentRow = sidebar.locator(".sidebar-project-row-current");
+    await expect(currentRow).toHaveAttribute("aria-expanded", "true");
+
+    const importedProject = (fileName) => sidebar.locator(".sidebar-imported-project")
+      .filter({ hasText: path.basename(fileName, path.extname(fileName)) })
+      .first();
+    const projectBRow = importedProject(projectB.sourcePath).locator(".sidebar-project-row");
+    const projectCContainer = importedProject(projectC.sourcePath);
+    const projectCRow = projectCContainer.locator(".sidebar-project-row");
+    await expect(projectBRow).toBeVisible();
+    await expect(projectCRow).toBeVisible();
+
+    await projectBRow.click();
+    await expect(projectBRow).toHaveAttribute("aria-expanded", "true");
+    await expect(importedProject(projectB.sourcePath).locator(".sidebar-version-file"))
+      .toHaveCount(1, { timeout: 30_000 });
+    expect(await launched.page.evaluate(() => (
+      window.htmlAIProjects?.getActiveProject()?.projectId || null
+    ))).toBe(currentProjectId);
+
+    await projectCRow.click();
+    await expect(projectCRow).toHaveAttribute("aria-expanded", "true");
+    await expect(importedProject(projectB.sourcePath).locator(".sidebar-project-row"))
+      .toHaveAttribute("aria-expanded", "true");
+    await expect(projectCContainer.locator(".sidebar-version-file"))
+      .toHaveCount(3, { timeout: 30_000 });
+    const longVersionLabel = await projectCContainer.locator(".sidebar-version-file").first()
+      .getAttribute("aria-label");
+    expect(longVersionLabel).toMatch(
+      /^sidebar-expansion-c-with-a-very-long-file-name-for-tooltip(?:-V1)?\.html/u,
+    );
+
+    await projectBRow.click();
+    await expect(projectBRow).toHaveAttribute("aria-expanded", "false");
+    await expect(projectCRow).toHaveAttribute("aria-expanded", "true");
+    expect(await launched.page.evaluate(() => (
+      window.htmlAIProjects?.getActiveProject()?.projectId || null
+    ))).toBe(currentProjectId);
+
+    const versionVisualFacts = await projectCContainer.locator(".sidebar-version-tree")
+      .evaluate((tree) => ({
+        fileIcons: tree.querySelectorAll(".sidebar-version-file > svg").length,
+        currentLabels: tree.querySelectorAll(".sidebar-version-current-label").length,
+        paths: [...tree.querySelectorAll(".sidebar-version-rail-path")]
+          .map((element) => getComputedStyle(element).strokeWidth),
+        nodes: [...tree.querySelectorAll(
+          ".sidebar-version-node:not(.sidebar-version-node-center)",
+        )].map((element) => element.getAttribute("r")),
+      }));
+    expect(versionVisualFacts.fileIcons).toBe(0);
+    expect(versionVisualFacts.currentLabels).toBe(0);
+    expect(new Set(versionVisualFacts.paths), JSON.stringify(versionVisualFacts))
+      .toEqual(new Set(["1.25px"]));
+    expect(new Set(versionVisualFacts.nodes)).toEqual(new Set(["3.5"]));
+
+    const tabs = launched.page.getByRole("tablist", { name: "已打开的页面" }).getByRole("tab");
+    await projectCContainer.locator(".sidebar-version-file").first().click();
+    await expect(tabs.filter({ hasText: "sidebar-expansion-c-with-a-very-long-file-name-for-tooltip" }))
+      .toHaveAttribute("aria-selected", "true", { timeout: 60_000 });
+    await expect(sidebar.locator(".sidebar-project-row-current"))
+      .toHaveAttribute("aria-expanded", "true");
+  } finally {
+    await stopPageRoot(launched.electronApp, launched.isolatedUserData);
+    removeSourceFixture(projectA.sourceDirectory);
+    removeSourceFixture(projectB.sourceDirectory);
+    removeSourceFixture(projectC.sourceDirectory);
+  }
+});

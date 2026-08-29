@@ -33,13 +33,14 @@
   height: 34px;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 7px;
   padding: 0 9px;
   border: 0;
   border-radius: 8px;
   background: transparent;
   color: #514f59;
-  font-size: 12px;
+  font-size: 11px;
+  font-weight: 400;
   text-align: left;
 }
 
@@ -59,6 +60,22 @@
   color: #777388;
 }
 
+.sidebar-project-row-current {
+  background: rgb(238 236 255 / 78%);
+  color: #4f47b8;
+}
+
+.sidebar-project-row-current:hover:not(:disabled),
+.sidebar-project-row-current:focus-visible {
+  background: rgb(231 228 255 / 92%);
+  color: #3e379d;
+}
+
+.sidebar-project-row > .sidebar-project-icon {
+  width: 14px;
+  height: 14px;
+}
+
 .sidebar-project-row-current > svg {
   color: var(--indigo-deep);
 }
@@ -68,18 +85,6 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.sidebar-project-current-label {
-  flex: none;
-  margin-left: auto;
-  padding: 2px 6px;
-  border-radius: 999px;
-  background: var(--indigo-soft);
-  color: var(--indigo-deep);
-  font-size: 9px;
-  font-weight: 760;
-  line-height: 13px;
 }
 
 .sidebar-project-pending {
@@ -152,7 +157,7 @@
 
 .sidebar-version-rail-path {
   fill: none;
-  stroke-width: 1.8;
+  stroke-width: 1.25;
   stroke-linecap: round;
   stroke-linejoin: miter;
   opacity: .92;
@@ -160,13 +165,12 @@
 
 .sidebar-version-rail-path[data-current="true"] {
   stroke: var(--sidebar-version-current-rail);
-  stroke-width: 2;
   opacity: 1;
 }
 
 .sidebar-version-node {
   fill: #f8f7f8;
-  stroke-width: 1.8;
+  stroke-width: 1.25;
 }
 
 .sidebar-version-node[data-current-path="true"] {
@@ -176,7 +180,6 @@
 .sidebar-version-node[data-current="true"] {
   fill: #f8f7f8;
   stroke: var(--sidebar-version-current-rail);
-  stroke-width: 1.8;
 }
 
 .sidebar-version-node-center {
@@ -193,7 +196,7 @@
   height: var(--sidebar-version-row-height, 34px);
   min-width: 0;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 40px;
+  grid-template-columns: minmax(0, 1fr) 68px;
   align-items: center;
   padding: 0 2px 0 calc(var(--sidebar-version-rail-width, 10px) + var(--sidebar-version-track-to-icon, 6px));
   border-radius: 8px;
@@ -212,13 +215,15 @@
   border: 0;
   background: transparent;
   text-align: left;
+  font-size: 11px;
+  font-weight: 400;
 }
 
 .sidebar-version-file {
   width: 100%;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 0;
   overflow: hidden;
   color: #4b475d;
 }
@@ -232,17 +237,6 @@
 .sidebar-version-time:hover,
 .sidebar-version-time:focus-visible {
   color: #332c78;
-}
-
-.sidebar-version-file > svg {
-  width: 16px;
-  height: 16px;
-  flex: none;
-  color: #625bd2;
-}
-
-.sidebar-version-row:not([data-current-path="true"]) .sidebar-version-file > svg {
-  color: #817ca3;
 }
 
 .sidebar-version-file-viewport {
@@ -259,8 +253,8 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 11.5px;
-  font-weight: 560;
+  font-size: 11px;
+  font-weight: 400;
   line-height: 16px;
 }
 
@@ -279,29 +273,19 @@
   visibility: hidden;
   width: max-content;
   pointer-events: none;
-  font-size: 11.5px;
-  font-weight: 560;
+  font-size: 11px;
+  font-weight: 400;
   line-height: 16px;
   white-space: nowrap;
 }
 
-.sidebar-version-current-label {
-  flex: none;
-  padding: 1px 5px;
-  border-radius: 999px;
-  background: #e3e0ff;
-  color: var(--indigo-deep);
-  font-size: 8.5px;
-  font-weight: 760;
-  line-height: 13px;
-}
-
 .sidebar-version-time {
-  width: 40px;
+  width: 68px;
   flex: none;
   overflow: hidden;
   color: #9995a3;
-  font-size: 10px;
+  font-size: 11px;
+  font-weight: 400;
   font-variant-numeric: tabular-nums;
   line-height: 30px;
   text-align: right;
@@ -334,7 +318,7 @@
   font-weight: 520;
   line-height: 1.5;
   pointer-events: none;
-  white-space: normal;
+  white-space: pre-line;
   overflow-wrap: anywhere;
 }
 
@@ -348,21 +332,20 @@
   top: 17px;
   bottom: 17px;
   left: 7px;
-  width: 2px;
-  border-radius: 2px;
+  width: 1.25px;
+  border-radius: 1.25px;
   background: #d9d6fb;
 }
 
 .sidebar-version-skeleton-row {
   height: 34px;
   display: grid;
-  grid-template-columns: 8px 16px minmax(0, 1fr) 32px;
+  grid-template-columns: 8px minmax(0, 1fr) 50px;
   align-items: center;
   gap: 6px;
 }
 
 .sidebar-skeleton-dot,
-.sidebar-skeleton-icon,
 .sidebar-skeleton-name,
 .sidebar-skeleton-time {
   display: block;
@@ -374,11 +357,6 @@
   width: 8px;
   height: 8px;
   margin-left: 0;
-}
-
-.sidebar-skeleton-icon {
-  width: 16px;
-  height: 12px;
 }
 
 .sidebar-skeleton-name {
