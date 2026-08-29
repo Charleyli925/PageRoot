@@ -19,6 +19,19 @@ function shellQuote(value) {
   return `'${String(value).replaceAll("'", `'\\''`)}'`;
 }
 
+async function assertManagedSourceIdentity(value) {
+  assert.equal(await readFile(value.externalSourcePath, "utf8"), value.sourceHtml);
+  const managedSourceHtml = await readFile(value.ensured.sourcePath, "utf8");
+  assert.notEqual(managedSourceHtml, value.sourceHtml);
+  const managedSourceIds = [...managedSourceHtml.matchAll(
+    /data-pageroot-id="(pr1_[0-9a-f]{32})"/gu,
+  )].map((match) => match[1]);
+  assert.equal(managedSourceIds.length, 6);
+  assert.equal(new Set(managedSourceIds).size, managedSourceIds.length);
+  assert.equal(value.ensured.importSourceSha256, sha256(Buffer.from(value.sourceHtml)));
+  assert.equal(value.ensured.sourceSha256, sha256(Buffer.from(managedSourceHtml)));
+}
+
 async function createCommand(environment, { hang = false, pidFile = null } = {}) {
   const command = path.join(environment.root, hang ? "qoder-hang" : "qoder-complete");
   const argumentsText = [
@@ -194,8 +207,7 @@ test("workspace Agent Bridge completes Qoder ACP into pending review without ado
   assert.equal(ready.body.activeRun.agentDelivery.mode, "managed-agent");
   assert.equal(ready.body.activeRun.agentDelivery.selection.providerId, "qoder");
   assert.equal(ready.body.activeRun.agentDelivery.selection.runtimeId, "acp");
-  assert.equal(await readFile(value.externalSourcePath, "utf8"), value.sourceHtml);
-  assert.equal(await readFile(value.ensured.sourcePath, "utf8"), value.sourceHtml);
+  await assertManagedSourceIdentity(value);
 
   const candidate = await value.bridge.requestJson(
     `/version-file?sourcePath=${encodeURIComponent(value.ensured.sourcePath)}`
@@ -248,8 +260,7 @@ test("workspace cancellation stops Qoder before cancelling the durable Request",
     },
     (result) => result.body.running === false,
   );
-  assert.equal(await readFile(value.externalSourcePath, "utf8"), value.sourceHtml);
-  assert.equal(await readFile(value.ensured.sourcePath, "utf8"), value.sourceHtml);
+  await assertManagedSourceIdentity(value);
   const workspace = await value.bridge.requestJson(
     `/workspace?sourcePath=${encodeURIComponent(value.ensured.sourcePath)}`,
   );
@@ -337,8 +348,7 @@ test("Bridge crash fences an interrupted Qoder Request from restart and clipboar
   );
   const requestDirectories = await readdir(requestsRoot);
   assert.equal(requestDirectories.filter((name) => name.startsWith("req_")).length, 1);
-  assert.equal(await readFile(value.externalSourcePath, "utf8"), value.sourceHtml);
-  assert.equal(await readFile(value.ensured.sourcePath, "utf8"), value.sourceHtml);
+  await assertManagedSourceIdentity(value);
 });
 
 test("public Agent catalog exposes installable Qoder and Codex without paths", async (t) => {

@@ -86,7 +86,6 @@ test("Electron first launch imports the welcome HTML as V1 and sends its comment
       && existsSync(welcomeLogoPath)
       && existsSync(path.join(managedWelcomePath, "..", ".pageroot", "manifest.json"))
     )).toBe(true);
-    expect(readFileSync(managedWelcomePath)).toEqual(readFileSync(welcomePath));
     const projectRoot = path.dirname(managedWelcomePath);
     const manifest = JSON.parse(readFileSync(
       path.join(projectRoot, ".pageroot", "manifest.json"),
@@ -99,6 +98,29 @@ test("Electron first launch imports the welcome HTML as V1 and sends its comment
         sourceRelativePath: "欢迎来到源页-V1.html",
       }),
     ]));
+    const originalWelcome = readFileSync(welcomePath);
+    const managedWelcome = readFileSync(managedWelcomePath);
+    expect(managedWelcome).not.toEqual(originalWelcome);
+    const managedSourceIds = [...managedWelcome.toString("utf8").matchAll(
+      /data-pageroot-id="(pr1_[0-9a-f]{32})"/gu,
+    )].map((match) => match[1]);
+    expect(managedSourceIds.length).toBeGreaterThan(0);
+    expect(new Set(managedSourceIds).size).toBe(managedSourceIds.length);
+    const firstVersion = manifest.versions[0];
+    expect(readFileSync(path.join(
+      projectRoot,
+      ".pageroot",
+      firstVersion.snapshotRelativePath,
+    ))).toEqual(originalWelcome);
+    const firstWorkingCopy = manifest.workingCopies[0];
+    const workingCopyState = JSON.parse(readFileSync(path.join(
+      projectRoot,
+      ".pageroot",
+      firstWorkingCopy.stateRelativePath,
+    ), "utf8"));
+    expect(workingCopyState.sourceElementIdentitySchemaVersion).toBe(1);
+    expect(workingCopyState.baseSha256).toBe(firstVersion.contentSha256);
+    expect(workingCopyState.currentSha256).not.toBe(workingCopyState.baseSha256);
 
     const editor = launched.page.getByTestId("html-canvas-editor")
       .filter({ visible: true })

@@ -262,7 +262,15 @@ async function run() {
     assert.equal(completionRecord.kind, "candidate-finalization");
     assert.equal(completionRecord.status, "completed");
     assert.equal(await readFile(externalSourcePath, "utf8"), sourceHtml);
-    assert.equal(await readFile(ensured.body.sourcePath, "utf8"), sourceHtml);
+    const managedSourceHtml = await readFile(ensured.body.sourcePath, "utf8");
+    assert.notEqual(managedSourceHtml, sourceHtml);
+    const managedSourceIds = [...managedSourceHtml.matchAll(
+      /data-pageroot-id="(pr1_[0-9a-f]{32})"/gu,
+    )].map((match) => match[1]);
+    assert.equal(managedSourceIds.length, 6);
+    assert.equal(new Set(managedSourceIds).size, managedSourceIds.length);
+    assert.equal(ensured.body.importSourceSha256, sha256(Buffer.from(sourceHtml, "utf8")));
+    assert.equal(ensured.body.sourceSha256, sha256(Buffer.from(managedSourceHtml, "utf8")));
     assert.equal(candidate.body.sha256, sha256(Buffer.from(candidate.body.content, "utf8")));
     process.stdout.write(`${JSON.stringify({
       ok: true,
