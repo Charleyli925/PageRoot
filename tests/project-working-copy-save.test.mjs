@@ -492,6 +492,7 @@ test("forceUnlockWorkingCopy rematerializes identities after explicitly adopting
   assert.equal(nextState.sourceElementIdentitySchemaVersion, 1);
   assert.equal(nextState.currentSha256, sha256(Buffer.from(unlocked.content, "utf8")));
   assert.equal(nextState.differsFromBase, true);
+  assert.equal(nextState.lastPersistedRevision, state.lastPersistedRevision);
 });
 
 test("forceUnlockWorkingCopy clears a stuck activeRequest without rewriting HTML", async (t) => {
