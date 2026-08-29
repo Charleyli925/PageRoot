@@ -304,6 +304,7 @@ services.
 | AI run conversation and live narration presentation | `app/workbench/run-conversation-outlet.tsx`, `app/workbench/AiConversationSidebar.tsx` |
 | Formal AI review state transitions | `app/workbench/review-state.ts` |
 | Bounded pure sibling alignment for semantic review units | `app/lib/review-semantic-alignment.js` |
+| Persistent source element ID format, generation and attribute classification | `app/lib/pageroot-element-identity.js`; ADR 0059 |
 | Typed, per-element review projection fact normalization and filtering | `app/lib/review-projection-facts.js` |
 | Formal AI review text and element-presence analysis, first-bootstrap exact comment binding, global mask and overlay projection | `app/workbench/review-document.ts` orchestrates `app/workbench/review/` pipeline modules (parse, semantic pairing, element-presence diff, text diff, comment binding, projection and serialize) |
 | Formal AI review composition, private comment/projection port lifecycle and isolated-frame coordination | `app/workbench/AiReviewWorkspace.tsx` |
@@ -317,6 +318,12 @@ FormatSkeleton and structural planner have been removed. The architecture gate
 rejects reintroducing those files or imports; production text editing has one
 V2 controller route with element-island and exact direct-text-node transaction
 scopes.
+
+`SourceIndex` also recognizes the ADR 0059 `data-pageroot-id` contract and maps
+only valid, document-unique values back to exact source element records. Missing,
+malformed and duplicated identities are diagnostics, not an instruction to
+rewrite HTML. Identity migration, stable TargetRef adoption and semantic saving
+are deliberately outside this foundation.
 
 `HtmlCanvasEditor.tsx` remains the Canvas coordinator. Parsing, DOM
 instrumentation, interaction policy, preview synchronization, selection,

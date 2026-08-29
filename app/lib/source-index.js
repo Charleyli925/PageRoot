@@ -2,6 +2,11 @@ import { sha256 } from "@noble/hashes/sha2.js";
 import { bytesToHex } from "@noble/hashes/utils.js";
 
 import { parseHtmlSource } from "../../bridge/html-source-parser.mjs";
+import {
+  PAGEROOT_ELEMENT_ID_ATTRIBUTE,
+  PAGEROOT_ELEMENT_ID_SCHEMA_VERSION,
+  isValidPagerootElementId,
+} from "./pageroot-element-identity.js";
 
 export const SOURCE_NODE_ATTRIBUTE = "data-html-ai-source-node-id";
 
@@ -354,7 +359,9 @@ export function buildSourceIndex(html) {
     comments: [],
     rootNodeIds: [],
     byNodeId: new Map(),
+    byPagerootId: new Map(),
     elementsByTagName: new Map(),
+    pagerootIdentity: null,
   };
 
   const attach = (record, parentId) => {
@@ -429,6 +436,10 @@ export function buildSourceIndex(html) {
         label: "",
         selector: "",
         fingerprint: null,
+        declaredPagerootId: null,
+        pagerootId: null,
+        pagerootIdAttribute: null,
+        pagerootIdentityStatus: "missing",
         explicitEndTag: Boolean(endTagRange),
         isVoid: VOID_ELEMENTS.has(tagName),
         boundarySafe: true,
@@ -560,6 +571,103 @@ export function buildSourceIndex(html) {
     element.label = labelFor(element);
     element.selector = selectorFor(element, index);
   }
+
+  const pagerootIdentityIssues = [];
+  const claimsByPagerootId = new Map();
+  const claimPagerootId = (pagerootId, element, attribute) => {
+    const claims = claimsByPagerootId.get(pagerootId) ?? [];
+    claims.push({ element, attribute });
+    claimsByPagerootId.set(pagerootId, claims);
+  };
+  for (const element of index.elements) {
+    const attributes = element.attributesByName.get(PAGEROOT_ELEMENT_ID_ATTRIBUTE) ?? [];
+    if (attributes.length === 0) continue;
+    element.pagerootIdAttribute = attributes[0];
+    if (attributes.length !== 1) {
+      for (const attribute of attributes) {
+        if (isValidPagerootElementId(attribute.rawValue)) {
+          claimPagerootId(attribute.rawValue, element, attribute);
+        }
+      }
+      element.pagerootIdentityStatus = "invalid";
+      pagerootIdentityIssues.push({
+        code: "PAGEROOT_ID_ATTRIBUTE_REPEATED",
+        nodeId: element.nodeId,
+        attributeRanges: attributes.map((attribute) => ({ ...attribute.range })),
+      });
+      continue;
+    }
+    const [attribute] = attributes;
+    const value = attribute.rawValue;
+    element.declaredPagerootId = value;
+    if (!isValidPagerootElementId(value)) {
+      element.pagerootIdentityStatus = "invalid";
+      pagerootIdentityIssues.push({
+        code: "PAGEROOT_ID_INVALID_FORMAT",
+        nodeId: element.nodeId,
+        value,
+        attributeRange: { ...attribute.range },
+        valueRange: attribute.valueRange ? { ...attribute.valueRange } : null,
+      });
+      continue;
+    }
+    element.pagerootIdentityStatus = "candidate";
+    claimPagerootId(value, element, attribute);
+  }
+
+  for (const [pagerootId, claims] of claimsByPagerootId) {
+    const claimedElements = [...new Set(claims.map((claim) => claim.element))];
+    if (
+      claims.length === 1
+      && claimedElements[0]?.pagerootIdentityStatus === "candidate"
+    ) {
+      const [element] = claimedElements;
+      element.pagerootId = pagerootId;
+      element.pagerootIdentityStatus = "valid";
+      index.byPagerootId.set(pagerootId, element);
+      continue;
+    }
+    if (claimedElements.length < 2) continue;
+    for (const element of claimedElements) {
+      if (element.pagerootIdentityStatus === "candidate") {
+        element.pagerootIdentityStatus = "duplicate";
+      }
+    }
+    pagerootIdentityIssues.push({
+      code: "PAGEROOT_ID_DUPLICATE_VALUE",
+      pagerootId,
+      nodeIds: claimedElements.map((element) => element.nodeId),
+      elementRanges: claimedElements.map((element) => ({ ...element.range })),
+      attributeRanges: claims.map((claim) => ({ ...claim.attribute.range })),
+    });
+  }
+
+  const identifiedElementCount = index.byPagerootId.size;
+  const invalidElementCount = index.elements.filter(
+    (element) => element.pagerootIdentityStatus === "invalid"
+      || element.pagerootIdentityStatus === "duplicate",
+  ).length;
+  const missingElementCount = index.elements.filter(
+    (element) => element.pagerootIdentityStatus === "missing",
+  ).length;
+  index.pagerootIdentity = {
+    schemaVersion: PAGEROOT_ELEMENT_ID_SCHEMA_VERSION,
+    attributeName: PAGEROOT_ELEMENT_ID_ATTRIBUTE,
+    status: invalidElementCount > 0
+      ? "invalid"
+      : missingElementCount === 0
+        ? "complete"
+        : identifiedElementCount === 0
+          ? "absent"
+          : "partial",
+    valid: pagerootIdentityIssues.length === 0,
+    complete: invalidElementCount === 0 && missingElementCount === 0,
+    totalElementCount: index.elements.length,
+    identifiedElementCount,
+    missingElementCount,
+    invalidElementCount,
+    issues: pagerootIdentityIssues,
+  };
 
   for (const element of index.elements) {
     let previousEnd = element.contentRange.startOffset;
