@@ -548,20 +548,18 @@ function expectedInlineComputedValue(
   value: string,
   activeNativeEdit: Pick<ActiveNativeEdit, "session"> | null,
 ): string | null {
-  const parent = element.parentElement || element.ownerDocument.body;
-  if (!parent) return null;
-  const probe = element.ownerDocument.createElement(element.localName || "span");
   return runInlineStyleMutation(activeNativeEdit, () => {
-    probe.style.setProperty("position", "absolute");
-    probe.style.setProperty("visibility", "hidden");
-    probe.style.setProperty("pointer-events", "none");
-    probe.style.setProperty(cssProperty, value, "important");
-    if (value.trim() && !probe.style.getPropertyValue(cssProperty).trim()) return null;
-    parent.append(probe);
+    const previousStyle = element.getAttribute("style");
     try {
-      return computedCssValue(probe, cssProperty);
+      // Resolve the requested value on the real target so structural selectors
+      // such as :last-child remain unchanged during the browser comparison.
+      // Inline !important is only a temporary canonicalization step; the exact
+      // original style attribute is restored before normal/important trials.
+      element.style.setProperty(cssProperty, value, "important");
+      if (value.trim() && !element.style.getPropertyValue(cssProperty).trim()) return null;
+      return computedCssValue(element, cssProperty) || null;
     } finally {
-      probe.remove();
+      restoreStyleAttribute(element, previousStyle);
     }
   }) ?? null;
 }

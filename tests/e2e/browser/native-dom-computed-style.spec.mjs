@@ -31,6 +31,9 @@ function computedStyleFixture() {
     }
     .ordinary-target { color: rgb(30, 40, 50); }
     .important-target { color: rgb(160, 20, 30) !important; }
+    [data-native-case="structural-target"]:last-child {
+      color: rgb(200, 0, 0) !important;
+    }
   </style>
 </head>
 <body>
@@ -41,6 +44,7 @@ function computedStyleFixture() {
     <p class="ordinary-target" data-native-case="ordinary-target" data-native-mode="native-editable">Ordinary inline target</p>
     <p class="important-target" data-native-case="important-target" data-native-mode="native-editable">Important inline target</p>
     <p data-native-case="blocked-target" data-native-mode="native-editable">Blocked inline target</p>
+    <p data-native-case="structural-target" data-native-mode="native-editable">Structural selector target</p>
   </main>
 </body>
 </html>`, "utf8");
@@ -114,6 +118,21 @@ test("inline style verification stays local and escalates priority only when nee
   )).toContain("color: #123456 !important");
 });
 
+test("inline verification preserves structural selector state", {
+  tag: ["@gate-smoke", "@smoke-editing"],
+}, async ({ page }) => {
+  await page.goto("/");
+  const { editor, frame } = await loadFixture(page, "computed-style.html", {
+    buffer: computedStyleFixture(),
+  });
+  const structural = await selectTarget(page, frame, editor, "structural-target");
+  await setColor(structural.toolbar.getByLabel("文字颜色"), "#123456");
+
+  await expect.poll(async () => (
+    (await exportCurrentHtml(page)).toString("utf8")
+  )).toContain("color: #123456 !important");
+});
+
 test("a failed local override restores the target and leaves source unchanged", {
   tag: ["@gate-smoke", "@smoke-editing"],
 }, async ({ page }) => {
@@ -128,6 +147,7 @@ test("a failed local override restores the target and leaves source unchanged", 
 
   await frame.evaluate(() => {
     const original = window.getComputedStyle;
+    let targetColorReads = 0;
     window.getComputedStyle = (element, pseudo) => {
       const computed = original.call(window, element, pseudo);
       if (
@@ -138,9 +158,22 @@ test("a failed local override restores the target and leaves source unchanged", 
         return new Proxy(computed, {
           get(targetStyle, property, receiver) {
             if (property === "getPropertyValue") {
-              return (name) => name === "color"
-                ? "rgb(1, 2, 3)"
-                : targetStyle.getPropertyValue(name);
+              return (name) => {
+                if (
+                  name !== "color"
+                  || !element.style.getPropertyValue("color").trim()
+                ) {
+                  return targetStyle.getPropertyValue(name);
+                }
+                targetColorReads += 1;
+                // The production path now establishes its expected value on
+                // the real target, then verifies each trial independently.
+                // Make that sequence inconsistent to exercise fail-closed
+                // rollback without reintroducing a structural DOM probe.
+                return targetColorReads === 1
+                  ? targetStyle.getPropertyValue(name)
+                  : "rgb(1, 2, 3)";
+              };
             }
             return Reflect.get(targetStyle, property, receiver);
           },
