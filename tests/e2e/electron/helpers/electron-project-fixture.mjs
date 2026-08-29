@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -15,21 +15,19 @@ const DEFAULT_SOURCE_PREFIX = "pageroot-native-e2e-source-";
 
 export function seedDismissedFirstEditGuide(isolatedUserData) {
   mkdirSync(isolatedUserData, { recursive: true });
-  writeFileSync(
-    path.join(isolatedUserData, UI_PREFERENCES_FILE_NAME),
-    `${JSON.stringify({
-      schemaVersion: UI_PREFERENCES_SCHEMA_VERSION,
-      firstRealHtmlEditGuide: {
-        key: FIRST_REAL_HTML_EDIT_GUIDE_KEY,
-        generation: FIRST_REAL_HTML_EDIT_GUIDE_GENERATION,
-        status: "dismissed",
-        presentedAt: null,
-        dismissedAt: "2020-01-01T00:00:00.000Z",
-      },
-      builtInWelcomeProjectId: null,
-    }, null, 2)}\n`,
-    "utf8",
-  );
+  const preferencesPath = path.join(isolatedUserData, UI_PREFERENCES_FILE_NAME);
+  if (existsSync(preferencesPath)) return;
+  writeFileSync(preferencesPath, `${JSON.stringify({
+    schemaVersion: UI_PREFERENCES_SCHEMA_VERSION,
+    firstRealHtmlEditGuide: {
+      key: FIRST_REAL_HTML_EDIT_GUIDE_KEY,
+      generation: FIRST_REAL_HTML_EDIT_GUIDE_GENERATION,
+      status: "dismissed",
+      presentedAt: null,
+      dismissedAt: "2020-01-01T00:00:00.000Z",
+    },
+    builtInWelcomeProjectId: null,
+  }, null, 2)}\n`, "utf8");
 }
 
 export function seedActiveDiskProject(

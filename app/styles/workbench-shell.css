@@ -10,6 +10,7 @@
   --workbench-header-height: 48px;
   --notice-header-height: var(--workbench-header-height);
   --workbench-sidebar-width: 0px;
+  --workbench-sidebar-width-saved: 264px;
   --workbench-inspector-width: 376px;
 
   position: fixed;
@@ -30,12 +31,12 @@
 }
 
 .workbench[data-left-sidebar="open"] {
-  --workbench-sidebar-width: 264px;
+  --workbench-sidebar-width: clamp(200px, var(--workbench-sidebar-width-saved), 420px);
 }
 
 @media (max-width: 1120px) {
   .workbench[data-left-sidebar="open"] {
-    --workbench-sidebar-width: 240px;
+    --workbench-sidebar-width: min(var(--workbench-sidebar-width-saved), 240px);
   }
 }
 
@@ -79,6 +80,11 @@
 }
 
 .workbench > .workbench-global-sidebar {
+  grid-column: 1;
+  grid-row: 1 / 4;
+}
+
+.workbench > .workbench-settings-sidebar {
   grid-column: 1;
   grid-row: 1 / 4;
 }

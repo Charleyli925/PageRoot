@@ -312,6 +312,22 @@ body {
   transition: none;
 }
 
+/* Keep pointer tracking inside the host document while the cursor crosses an
+   iframe or an overlaid inspector. Without this transparent capture surface,
+   Chromium can stop forwarding pointer events to the workbench at the first
+   cross-document boundary and leave a drag half-finished. */
+.workbench[data-resizing]::after {
+  content: "";
+  position: fixed;
+  z-index: 200;
+  inset: 0;
+  display: block;
+  background: transparent;
+  cursor: col-resize;
+  pointer-events: auto;
+  touch-action: none;
+}
+
 .workbench-refresh-button,
 .workbench-more-menu-trigger {
   width: 30px;

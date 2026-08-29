@@ -1,0 +1,293 @@
+export const DEFAULT_WORKSPACE_PREFERENCES = Object.freeze({
+  rememberPanelWidths: true,
+  sidebarWidth: 264,
+  inspectorWidth: 376,
+  motion: "system",
+  restoreTabsOnLaunch: true,
+  defaultAgentProviderId: "qoder",
+});
+
+export const WORKSPACE_PREFERENCE_LIMITS = Object.freeze({
+  sidebarWidth: Object.freeze({ min: 200, max: 420 }),
+  inspectorWidth: Object.freeze({ min: 280, max: 520 }),
+});
+
+const WORKSPACE_KEYS = new Set(Object.keys(DEFAULT_WORKSPACE_PREFERENCES));
+
+function isRecord(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function normalizedWidth(value, fallback, { min, max }) {
+  if (typeof value !== "number" || !Number.isFinite(value)) return fallback;
+  return Math.round(Math.min(max, Math.max(min, value)) * 10) / 10;
+}
+
+export function normalizeWorkspacePreferences(value) {
+  const source = isRecord(value) ? value : {};
+  return Object.freeze({
+    rememberPanelWidths: typeof source.rememberPanelWidths === "boolean"
+      ? source.rememberPanelWidths
+      : DEFAULT_WORKSPACE_PREFERENCES.rememberPanelWidths,
+    sidebarWidth: normalizedWidth(
+      source.sidebarWidth,
+      DEFAULT_WORKSPACE_PREFERENCES.sidebarWidth,
+      WORKSPACE_PREFERENCE_LIMITS.sidebarWidth,
+    ),
+    inspectorWidth: normalizedWidth(
+      source.inspectorWidth,
+      DEFAULT_WORKSPACE_PREFERENCES.inspectorWidth,
+      WORKSPACE_PREFERENCE_LIMITS.inspectorWidth,
+    ),
+    motion: source.motion === "reduced" ? "reduced" : "system",
+    restoreTabsOnLaunch: typeof source.restoreTabsOnLaunch === "boolean"
+      ? source.restoreTabsOnLaunch
+      : DEFAULT_WORKSPACE_PREFERENCES.restoreTabsOnLaunch,
+    defaultAgentProviderId: source.defaultAgentProviderId === "codex"
+      ? "codex"
+      : DEFAULT_WORKSPACE_PREFERENCES.defaultAgentProviderId,
+  });
+}
+
+export function normalizeWorkspacePatch(value) {
+  if (!isRecord(value) || !Object.keys(value).length) {
+    throw new TypeError("工作台偏好不能为空。");
+  }
+  const keys = Object.keys(value);
+  if (keys.some((key) => !WORKSPACE_KEYS.has(key))) {
+    throw new TypeError("工作台偏好包含未知字段。");
+  }
+  const normalized = {};
+  for (const key of keys) {
+    const next = value[key];
+    if (key === "rememberPanelWidths" || key === "restoreTabsOnLaunch") {
+      if (typeof next !== "boolean") throw new TypeError(`${key} 必须是布尔值。`);
+      normalized[key] = next;
+      continue;
+    }
+    if (key === "motion") {
+      if (next !== "system" && next !== "reduced") {
+        throw new TypeError("动态效果选项无效。");
+      }
+      normalized[key] = next;
+      continue;
+    }
+    if (key === "defaultAgentProviderId") {
+      if (next !== "qoder" && next !== "codex") {
+        throw new TypeError("默认 Agent 无效。");
+      }
+      normalized[key] = next;
+      continue;
+    }
+    const limits = WORKSPACE_PREFERENCE_LIMITS[key];
+    if (
+      typeof next !== "number"
+      || !Number.isFinite(next)
+      || next < limits.min
+      || next > limits.max
+    ) throw new TypeError(`${key} 超出允许范围。`);
+    normalized[key] = Math.round(next * 10) / 10;
+  }
+  return Object.freeze(normalized);
+}
+
+function freezeSnapshot({
+  loaded = false,
+  saving = false,
+  error = null,
+  workspace = DEFAULT_WORKSPACE_PREFERENCES,
+} = {}) {
+  return Object.freeze({
+    loaded: Boolean(loaded),
+    saving: Boolean(saving),
+    error: error ? String(error) : null,
+    workspace: normalizeWorkspacePreferences(workspace),
+  });
+}
+
+function deadlinePromise(deadlineAt, clock) {
+  const remaining = Math.max(0, Number(deadlineAt) - Number(clock()));
+  if (!remaining) return Promise.resolve(false);
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(false), remaining);
+    timer.unref?.();
+  });
+}
+
+export class WorkspacePreferencesSession {
+  #port;
+  #clock;
+  #listeners = new Set();
+  #snapshot = freezeSnapshot();
+  #loadPromise = null;
+  #writePromise = null;
+  #pendingPatch = null;
+  #disposed = false;
+
+  constructor({ port = null, clock = Date } = {}) {
+    if (
+      port !== null
+      && (
+        !isRecord(port)
+        || typeof port.get !== "function"
+        || typeof port.record !== "function"
+      )
+    ) throw new TypeError("WorkspacePreferencesSession requires a get/record port.");
+    if (!clock || typeof clock.now !== "function") {
+      throw new TypeError("WorkspacePreferencesSession requires a ClockPort.");
+    }
+    this.#port = port;
+    this.#clock = clock;
+  }
+
+  get snapshot() {
+    return this.#snapshot;
+  }
+
+  subscribe(listener) {
+    if (typeof listener !== "function") {
+      throw new TypeError("Workspace preferences listener is required.");
+    }
+    this.#listeners.add(listener);
+    listener(this.#snapshot);
+    return () => this.#listeners.delete(listener);
+  }
+
+  async load() {
+    if (this.#disposed) return this.#snapshot;
+    if (!this.#port) {
+      this.#publish({ ...this.#snapshot, loaded: true });
+      return this.#snapshot;
+    }
+    if (this.#loadPromise) return this.#loadPromise;
+    this.#loadPromise = Promise.resolve()
+      .then(() => this.#port.get())
+      .then((preferences) => {
+        if (this.#disposed) return this.#snapshot;
+        const loaded = normalizeWorkspacePreferences(preferences?.workspace);
+        const workspace = this.#pendingPatch
+          ? { ...loaded, ...this.#pendingPatch }
+          : loaded;
+        this.#publish({
+          ...this.#snapshot,
+          loaded: true,
+          workspace,
+        });
+        return this.#snapshot;
+      })
+      .catch(() => {
+        if (this.#disposed) return this.#snapshot;
+        this.#publish({ ...this.#snapshot, loaded: true });
+        return this.#snapshot;
+      })
+      .finally(() => {
+        this.#loadPromise = null;
+      });
+    return this.#loadPromise;
+  }
+
+  update(patch) {
+    if (this.#disposed) return Promise.resolve(false);
+    const normalized = normalizeWorkspacePatch(patch);
+    this.#pendingPatch = {
+      ...(this.#pendingPatch || {}),
+      ...normalized,
+    };
+    this.#publish({
+      ...this.#snapshot,
+      workspace: { ...this.#snapshot.workspace, ...normalized },
+      saving: Boolean(this.#port),
+      error: null,
+    });
+    if (!this.#port) {
+      this.#pendingPatch = null;
+      return Promise.resolve(true);
+    }
+    // Hydration and the first user change can happen in the same turn. Let the
+    // read establish the persisted baseline before the first read-modify-write
+    // so a stale get result cannot overwrite an optimistic Settings change.
+    if (!this.#snapshot.loaded) {
+      if (!this.#writePromise) {
+        this.#writePromise = this.load().then(() => this.#pump());
+      }
+      return this.#writePromise;
+    }
+    if (!this.#writePromise) this.#writePromise = this.#pump();
+    return this.#writePromise;
+  }
+
+  retry() {
+    if (this.#disposed || !this.#pendingPatch || !this.#port) return false;
+    this.#publish({ ...this.#snapshot, saving: true, error: null });
+    if (!this.#writePromise) this.#writePromise = this.#pump();
+    return true;
+  }
+
+  async flush({ deadlineAt } = {}) {
+    const pending = this.#writePromise;
+    if (!pending) return !this.#pendingPatch;
+    if (!Number.isFinite(Number(deadlineAt))) return pending;
+    const result = await Promise.race([
+      pending,
+      deadlinePromise(deadlineAt, () => this.#clock.now()),
+    ]);
+    return result === true;
+  }
+
+  dispose() {
+    this.#disposed = true;
+    this.#listeners.clear();
+    this.#pendingPatch = null;
+  }
+
+  async #pump() {
+    let successful = true;
+    try {
+      while (!this.#disposed && this.#pendingPatch) {
+        const patch = this.#pendingPatch;
+        this.#pendingPatch = null;
+        try {
+          const preferences = await this.#port.record({ workspace: patch });
+          if (this.#disposed) break;
+          const workspace = normalizeWorkspacePreferences(preferences?.workspace);
+          this.#publish({
+            ...this.#snapshot,
+            workspace: this.#pendingPatch
+              ? { ...workspace, ...this.#pendingPatch }
+              : workspace,
+            saving: Boolean(this.#pendingPatch),
+            error: null,
+          });
+        } catch (cause) {
+          this.#pendingPatch = { ...patch, ...(this.#pendingPatch || {}) };
+          successful = false;
+          this.#publish({
+            ...this.#snapshot,
+            saving: false,
+            error: String(cause?.message || cause || "工作台偏好暂时无法保存。"),
+          });
+          break;
+        }
+      }
+    } finally {
+      this.#writePromise = null;
+      if (this.#pendingPatch && successful) {
+        this.#publish({ ...this.#snapshot, saving: false });
+      } else if (!this.#pendingPatch && this.#snapshot.saving) {
+        this.#publish({ ...this.#snapshot, saving: false });
+      }
+    }
+    return successful && !this.#pendingPatch;
+  }
+
+  #publish(next) {
+    this.#snapshot = freezeSnapshot(next);
+    for (const listener of this.#listeners) {
+      try {
+        listener(this.#snapshot);
+      } catch {
+        // Preference presentation cannot interrupt an edit or close flow.
+      }
+    }
+  }
+}

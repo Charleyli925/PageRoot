@@ -46,6 +46,17 @@ test("cold-start priority is external FIFO, persisted active tab, activePath com
     persistedStatePresent: true,
     persistedActiveTabId: "document:B",
   }), "persisted-active-tab");
+  assert.equal(workbenchStartupPriority({
+    persistedStatePresent: true,
+    persistedActiveTabId: "document:B",
+    restoreTabsOnLaunch: false,
+  }), "start");
+  assert.equal(workbenchStartupPriority({
+    externalRequestCount: 1,
+    persistedStatePresent: true,
+    persistedActiveTabId: "document:B",
+    restoreTabsOnLaunch: false,
+  }), "external");
   assert.equal(workbenchStartupPriority({ persistedStatePresent: false }), "active-path-compatibility");
   assert.equal(workbenchStartupPriority({ persistedStatePresent: true }), "start");
 });

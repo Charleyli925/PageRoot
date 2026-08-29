@@ -279,6 +279,7 @@ export class WorkspaceController {
   #workbenchNavigationWorkflow = null;
   #workbenchNavigationUnsubscribe = null;
   #workbenchNavigationSnapshot = null;
+  #uiPreferencesPort = null;
   #workbenchTabsUnsubscribe = null;
   #workbenchTabsSnapshot = null;
   #workbenchTabsReady = false;
@@ -444,6 +445,7 @@ export class WorkspaceController {
     this.#workbenchTabsPersistenceCoordinator = workbenchTabsPersistenceCoordinator;
     this.#workbenchTabsPersistenceSnapshot = workbenchTabsPersistenceCoordinator?.snapshot || null;
     this.#navigationHostPort = ports.navigation || null;
+    this.#uiPreferencesPort = ports.uiPreferences || null;
     this.#documentProjectionPort = projectWorkflow?.ports?.projectOpen
       ?.readRegisteredProjection || null;
     this.#runtimeProjectionPrewarmPort = ports.editRuntime?.prewarmRegistered || null;
@@ -1198,28 +1200,45 @@ export class WorkspaceController {
 
   async #initializeWorkbenchTabs() {
     if (!this.#workbenchTabsSession || !this.#projectWorkflow) return;
-    let stored = null;
-    let storedStatePresent = false;
-    let initialExternal = null;
-    if (typeof this.#navigationHostPort?.readInitialExternalOpen === "function") {
-      try {
-        initialExternal = await this.#navigationHostPort.readInitialExternalOpen();
-      } catch {
-        // Live subscription still owns delivery; startup fallback remains safe.
+    const initialExternalPromise = typeof this.#navigationHostPort?.readInitialExternalOpen === "function"
+      ? Promise.resolve()
+        .then(() => this.#navigationHostPort.readInitialExternalOpen())
+        .catch(() => null)
+      : Promise.resolve(null);
+    const storedPromise = this.#workbenchTabsPersistenceCoordinator
+      ? this.#workbenchTabsPersistenceCoordinator.load().catch(() => null)
+      : Promise.resolve(null);
+    const preferencesPromise = typeof this.#uiPreferencesPort?.get === "function"
+      ? Promise.resolve(this.#uiPreferencesPort.get()).catch(() => null)
+      : Promise.resolve(null);
+    const initialExternal = await initialExternalPromise;
+    const hasBufferedExternal = this.#bufferedExternalOpens.length > 0;
+    if (initialExternal || hasBufferedExternal) {
+      if (this.#disposed) return;
+      // External files have absolute startup priority. Do not wait for
+      // optional preferences or restore a stale tab snapshot before admitting
+      // the file the user explicitly opened.
+      this.#workbenchTabsReady = true;
+      this.#publishAggregateSnapshot();
+      const externalRequests = [];
+      const seenExternalRequests = new Set();
+      for (const request of [initialExternal, ...this.#bufferedExternalOpens]) {
+        const requestId = String(request?.requestId || "");
+        if (!requestId || seenExternalRequests.has(requestId)) continue;
+        seenExternalRequests.add(requestId);
+        externalRequests.push(request);
       }
+      this.#bufferedExternalOpens = [];
+      for (const request of externalRequests) void this.acceptExternalProject(request);
+      // Both promises have rejection handlers and are intentionally allowed to
+      // settle in the background so this path never delays the first HTML.
+      void Promise.all([storedPromise, preferencesPromise]);
+      return;
     }
-    if (this.#workbenchTabsPersistenceCoordinator) {
-      try {
-        stored = await this.#workbenchTabsPersistenceCoordinator.load();
-        if (stored) {
-          storedStatePresent = true;
-          this.#workbenchTabsSession.hydrate(stored);
-        }
-      } catch {
-        // The coordinator publishes a visible failure and keeps restart safety
-        // closed until a terminal navigation state is acknowledged.
-      }
-    }
+    const [stored, preferences] = await Promise.all([storedPromise, preferencesPromise]);
+    const restoreTabsOnLaunch = preferences?.workspace?.restoreTabsOnLaunch !== false;
+    const storedStatePresent = Boolean(stored && restoreTabsOnLaunch);
+    if (storedStatePresent) this.#workbenchTabsSession.hydrate(stored);
     if (this.#disposed) return;
     this.#workbenchTabsReady = true;
     this.#publishAggregateSnapshot();
@@ -1236,6 +1255,7 @@ export class WorkspaceController {
       externalRequestCount: externalRequests.length,
       persistedStatePresent: storedStatePresent,
       persistedActiveTabId: this.#workbenchTabsSession.snapshot.pendingTabId,
+      restoreTabsOnLaunch,
     });
     if (startupPriority === "external") {
       const pending = this.#workbenchTabsSession.snapshot.pendingTabId;

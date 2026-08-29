@@ -550,20 +550,56 @@ const usageApi = Object.freeze({
     });
   },
 });
+
+const workspacePreferenceKeys = new Set([
+  "rememberPanelWidths",
+  "sidebarWidth",
+  "inspectorWidth",
+  "motion",
+  "restoreTabsOnLaunch",
+  "defaultAgentProviderId",
+]);
+
+function validWorkspacePreferencePatch(value) {
+  if (
+    !value
+    || typeof value !== "object"
+    || Array.isArray(value)
+    || !Object.keys(value).length
+    || Object.keys(value).some((key) => !workspacePreferenceKeys.has(key))
+  ) return false;
+  return Object.entries(value).every(([key, next]) => {
+    if (key === "rememberPanelWidths" || key === "restoreTabsOnLaunch") {
+      return typeof next === "boolean";
+    }
+    if (key === "motion") return next === "system" || next === "reduced";
+    if (key === "defaultAgentProviderId") return next === "qoder" || next === "codex";
+    if (key === "sidebarWidth") {
+      return typeof next === "number" && Number.isFinite(next) && next >= 200 && next <= 420;
+    }
+    if (key === "inspectorWidth") {
+      return typeof next === "number" && Number.isFinite(next) && next >= 280 && next <= 520;
+    }
+    return false;
+  });
+}
+
 const uiPreferencesApi = Object.freeze({
   get: () => invokeProject(uiPreferenceChannels.get),
   record: (payload) => {
-    if (
-      !payload
-      || typeof payload !== "object"
-      || Array.isArray(payload)
-      || (payload.action !== "presented" && payload.action !== "dismissed")
-    ) {
-      return Promise.reject(new TypeError("引导记录无效。"));
+    if (payload?.action === "presented" || payload?.action === "dismissed") {
+      return invokeProject(uiPreferenceChannels.record, { action: payload.action });
     }
-    return invokeProject(uiPreferenceChannels.record, {
-      action: payload.action,
-    });
+    if (validWorkspacePreferencePatch(payload?.workspace)) {
+      return invokeProject(uiPreferenceChannels.record, {
+        workspace: { ...payload.workspace },
+      });
+    }
+    return Promise.reject(new TypeError(
+      payload && typeof payload === "object" && "action" in payload
+        ? "引导记录无效。"
+        : "工作台偏好记录无效。",
+    ));
   },
 });
 const workbenchTabsApi = Object.freeze({

@@ -9,6 +9,7 @@ import {
   useState,
   type ChangeEvent,
   type ClipboardEvent,
+  type CSSProperties,
 } from "react";
 import { ClockCounterClockwiseIcon } from "@phosphor-icons/react/dist/csr/ClockCounterClockwise";
 import { EyeIcon } from "@phosphor-icons/react/dist/csr/Eye";
@@ -178,9 +179,15 @@ import {
 } from "./workbench/file-header-view";
 import {
   WorkbenchGlobalSidebarContainer,
+  WorkbenchSettingsSidebar,
   WorkbenchStartPageContainer,
   type ProjectCatalogCapability,
 } from "./workbench/workbench-sidebar-container";
+import type { SettingsCategory } from "./workbench/settings-types";
+import {
+  type WorkspacePreferences,
+} from "./application/workspace-preferences-session.js";
+import { useWorkspacePreferences } from "./workbench/use-workspace-preferences";
 import {
   PreviewNavigationBanner,
 } from "./workbench/presentation";
@@ -404,6 +411,9 @@ function documentEditFailureReason(outcome: DocumentEditOutcome): string {
 
 export default function Workbench() {
   const [globalSidebarOpen, setGlobalSidebarOpen] = useState(false);
+  const desktopUiPreferencesApi: DesktopUiPreferencesApi | undefined = (
+    typeof window !== "undefined" ? window.htmlAIUiPreferences : undefined
+  );
   const editorRef = useRef<HtmlCanvasEditorHandle>(null);
   const interactionPreviewRef = useRef<HtmlInteractionPreviewHandle>(null);
   const previewToEditPendingRef = useRef(false);
@@ -652,6 +662,12 @@ export default function Workbench() {
   const qoderAvailability = workspaceControllerSnapshot?.run?.qoderAvailability
     ?? INITIAL_QODER_AVAILABILITY;
   const agentCards = agentProviderCardsFromCatalog(agentCatalogSnapshot);
+  const workspacePreferencesController = useWorkspacePreferences(
+    desktopUiPreferencesApi,
+    { workspaceController, agentCatalogSnapshot },
+  );
+  const workspacePreferencesSnapshot = workspacePreferencesController.snapshot;
+  const workspacePreferences = workspacePreferencesSnapshot.workspace;
   const [previewAttachment, setPreviewAttachment] = useState<CommentAttachment | null>(null);
   const [handoffPreviewOpen, setHandoffPreviewOpen] = useState(false);
   const [projectRegistrationError, setProjectRegistrationError] = useState("");
@@ -1290,8 +1306,7 @@ export default function Workbench() {
   const [updateResult, setUpdateResult] =
     useState<ApplicationUpdateResult | null>(null);
   const [aboutOpen, setAboutOpen] = useState(false);
-  const [settingsInitialFocus, setSettingsInitialFocus] =
-    useState<"close" | "agent">("close");
+  const [settingsCategory, setSettingsCategory] = useState<SettingsCategory>("general");
   const [restartUpdateOpen, setRestartUpdateOpen] = useState(false);
   const [applicationVersion, setApplicationVersion] = useState("");
   const [desktopUpdatesAvailable, setDesktopUpdatesAvailable] = useState(false);
@@ -2280,10 +2295,11 @@ export default function Workbench() {
     setAboutOpen(true);
   }, []);
 
-  const openSettingsPage = useCallback((initialFocus: "close" | "agent" = "close") => {
+  const openSettingsPage = useCallback((category: SettingsCategory = "general") => {
     const active = document.activeElement;
     if (active instanceof HTMLElement) overlayReturnFocusRef.current = active;
-    setSettingsInitialFocus(initialFocus);
+    setGlobalSidebarOpen(true);
+    setSettingsCategory(category);
     void navigationCapability?.commands.createSettingsTab();
   }, [navigationCapability]);
 
@@ -3352,6 +3368,7 @@ export default function Workbench() {
       const detail = (event as CustomEvent<PrepareCloseDetail>).detail;
       if (!detail || typeof detail.waitUntil !== "function") return;
       // The desktop shell only accepts checks registered synchronously.
+      void workspacePreferencesController.flush(detail.deadlineAt).catch(() => false);
       detail.waitUntil(workspaceController.prepareClose({
         requestId: detail.requestId,
         deadlineAt: detail.deadlineAt,
@@ -3362,7 +3379,7 @@ export default function Workbench() {
       "html-ai:prepare-close",
       handlePrepareClose,
     );
-  }, [workspaceController]);
+  }, [workspaceController, workspacePreferencesController]);
 
   useEffect(() => {
     if (!workspaceController) return undefined;
@@ -3385,6 +3402,7 @@ export default function Workbench() {
         runtimeCapabilitiesRef.current.closeCoordination
         === "electron-handshake"
       ) return;
+      void workspacePreferencesController.flush(Date.now() + 3_000).catch(() => false);
       if (!workspaceController.hasPendingDrain("close")) return;
       event.preventDefault();
       event.returnValue = "";
@@ -3394,7 +3412,7 @@ export default function Workbench() {
     };
     window.addEventListener("beforeunload", beforeUnload);
     return () => window.removeEventListener("beforeunload", beforeUnload);
-  }, [workspaceController]);
+  }, [workspaceController, workspacePreferencesController]);
   const openProject = useCallback(async (recentPath?: string) => {
     if (!workspaceController) return;
     await workspaceController.openProject({
@@ -6182,6 +6200,7 @@ export default function Workbench() {
     void navigationCapability.commands.closeTab(activeWorkbenchTab.tabId).then((outcome) => {
       presentWorkbenchTabOutcome(outcome);
       if (outcome.status !== "succeeded") return;
+      setSettingsCategory("general");
       window.requestAnimationFrame(() => {
         const returnFocus = overlayReturnFocusRef.current;
         if (returnFocus && document.contains(returnFocus)) returnFocus.focus();
@@ -6307,6 +6326,10 @@ export default function Workbench() {
     sourcePath,
     versions,
   ]);
+  const workbenchStyle = useMemo(() => ({
+    "--workbench-sidebar-width-saved": `${workspacePreferencesController.panelWidths.sidebarWidth}px`,
+    "--workbench-inspector-width": `${workspacePreferencesController.panelWidths.inspectorWidth}px`,
+  } as CSSProperties), [workspacePreferencesController.panelWidths.inspectorWidth, workspacePreferencesController.panelWidths.sidebarWidth]);
   return (
     <>
       <RendererStartupPerformance />
@@ -6321,8 +6344,10 @@ export default function Workbench() {
       />
       <main
         className="workbench"
+        style={workbenchStyle}
         data-start-page={startPageActive ? "true" : undefined}
         data-settings-page={settingsPageActive ? "true" : undefined}
+        data-motion={workspacePreferences.motion}
         data-left-sidebar={globalSidebarOpen ? "open" : "collapsed"}
         data-round-state={runInProgress ? "processing" : viewMode}
         data-canvas-mode={canvasMode}
@@ -6548,7 +6573,16 @@ export default function Workbench() {
         />
       ) : null}
 
-      {projectCatalogCapability ? <WorkbenchGlobalSidebarContainer
+      {settingsPageActive ? (
+        <WorkbenchSettingsSidebar
+          open={globalSidebarOpen}
+          category={settingsCategory}
+          onSelectCategory={(nextCategory) => {
+            setSettingsCategory(nextCategory);
+          }}
+          onReturnToWorkbench={closeSettingsPage}
+        />
+      ) : projectCatalogCapability ? <WorkbenchGlobalSidebarContainer
         capability={projectCatalogCapability}
         open={globalSidebarOpen}
         currentProjectId={projectId}
@@ -6566,7 +6600,8 @@ export default function Workbench() {
         updateResult={updateResult}
         updateBadgeLabel={updateBadgeLabel}
         onOpenAbout={openAboutPageRoot}
-        onOpenSettings={() => openSettingsPage("close")}
+        onOpenSettings={() => openSettingsPage("general")}
+        onResizeCommit={(width) => workspacePreferencesController.commitPanelWidth("sidebar", width)}
         onDownloadOrRestartUpdate={() => {
           if (updateDownloaded) {
             setRestartUpdateOpen(true);
@@ -6585,7 +6620,8 @@ export default function Workbench() {
       {settingsPageActive ? (
         <SettingsPage
           activeTabId={activeWorkbenchTab.tabId}
-          initialFocus={settingsInitialFocus}
+          category={settingsCategory}
+          initialFocus={settingsCategory}
           appVersion={applicationVersion}
           currentAgentName={agentPresentation.agentName || agentPresentation.displayName}
           updateResult={updateResult}
@@ -6593,7 +6629,34 @@ export default function Workbench() {
           manualCheckPending={manualUpdateCheckPending}
           manualCheckFailed={manualUpdateCheckFailed}
           releaseNotesOpenFailed={releaseNotesOpenFailed}
+          workspacePreferences={workspacePreferences}
+          workspacePreferencesSaving={workspacePreferencesSnapshot.saving}
+          workspacePreferencesError={workspacePreferencesSnapshot.error}
+          agentChoices={agentProviderChoices}
+          selectedAgentChoiceId={selectedAgentChoiceId}
           agentCards={agentCards}
+          onUpdateWorkspacePreference={workspacePreferencesController.update}
+          onRetryWorkspacePreferences={() => {
+            workspacePreferencesController.retry();
+          }}
+          onSelectAgent={(selection) => {
+            try {
+              const selected = workspaceController?.selectAgent(selection);
+              if (selected) {
+                void workspacePreferencesController.update({
+                  defaultAgentProviderId: selected.providerId as WorkspacePreferences["defaultAgentProviderId"],
+                });
+              }
+            } catch (cause) {
+              setToast({
+                title: "默认 Agent 未更改",
+                message: productErrorMessage(cause, "当前 Agent 不可用，请重试。"),
+                tone: "warning",
+                disposition: "inform-in-place",
+                dedupeKey: "default-agent-selection-failed",
+              });
+            }
+          }}
           onClose={closeSettingsPage}
           onCheckForUpdates={() => void checkForApplicationUpdates()}
           onDownloadUpdate={() => void downloadAvailableUpdate()}
@@ -6755,9 +6818,12 @@ export default function Workbench() {
           ) : null}
         </section>
 
-        {workbenchInspector === "ai" && runCapability ? (
+          {workbenchInspector === "ai" && runCapability ? (
           <aside className="ai-conversation-aside" aria-label="AI 助手侧栏">
-            <WorkbenchResizer kind="inspector" />
+            <WorkbenchResizer
+              kind="inspector"
+              onCommit={(width) => workspacePreferencesController.commitPanelWidth("inspector", width)}
+            />
             <RunConversationOutlet
               capability={runCapability}
               sidebarProps={{

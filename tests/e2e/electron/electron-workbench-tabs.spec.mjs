@@ -8,6 +8,7 @@ import {
   currentEditorFrame,
   launchPageRoot,
   loadedDiskFrame,
+  mkdirSync,
   managedWorkingCopyPath,
   openRecentProject,
   path,
@@ -121,6 +122,185 @@ test("Electron tab keyboard navigation manages focus and a persisted Start suppr
       await stopPageRoot(firstLaunch.electronApp, firstLaunch.isolatedUserData);
     } else {
       removeIsolatedUserData(firstLaunch.isolatedUserData);
+    }
+    removeSourceFixture(fixture.sourceDirectory);
+  }
+});
+
+test("Electron settings routes categories and persists restore preference without hiding external opens", {
+  tag: ["@gate-smoke", "@smoke-project-lifecycle"],
+}, async () => {
+  test.setTimeout(240_000);
+  const fixture = createSourceFixture("settings-workspace-preferences.html");
+  const first = await launchPageRoot({
+    activeSourcePath: fixture.sourcePath,
+    firstEditGuide: true,
+  });
+  let firstClosed = false;
+  let reopened = null;
+  let reopenedClosed = false;
+  let external = null;
+  try {
+    await loadedDiskFrame(first.page, fixture.sourcePath, "list-item");
+    await waitForProjectReady(first.page);
+    const guideClose = first.page.getByRole("button", { name: "跳过这次说明" });
+    if (await guideClose.count()) await guideClose.click();
+
+    await first.page.getByRole("button", { name: "展开左侧边栏" }).click();
+    const sidebar = first.page.locator(".workbench-global-sidebar");
+    const preferencesPath = path.join(first.isolatedUserData, "ui-preferences.json");
+    const sidebarResizer = sidebar.locator('[data-resizer="sidebar"]');
+    await sidebarResizer.focus();
+    await sidebarResizer.press("ArrowRight");
+    await expect.poll(() => {
+      try {
+        return JSON.parse(readFileSync(preferencesPath, "utf8"));
+      } catch {
+        return null;
+      }
+    }).toMatchObject({
+      schemaVersion: 2,
+      workspace: { sidebarWidth: 280 },
+    });
+    await sidebar.getByRole("button", { name: "设置", exact: true }).click();
+    const settings = first.page.locator(".workbench-settings-page");
+    await expect(settings.getByRole("heading", { name: "常规" })).toBeFocused();
+    await expect(settings).not.toContainText("智能滚动");
+    await expect(settings).not.toContainText("快捷键提示");
+    await expect(settings).not.toContainText("最近打开记录");
+    const visibleToast = first.page.locator(".toast.show");
+    await visibleToast.waitFor({ state: "visible", timeout: 2_000 }).catch(() => {});
+    if (await visibleToast.isVisible().catch(() => false)) {
+      await visibleToast.getByRole("button", { name: "关闭提醒" }).click();
+      await expect(visibleToast).toBeHidden();
+    }
+    const captureDirectory = process.env.PAGEROOT_CAPTURE_SETTINGS_DIR
+      ? path.resolve(process.env.PAGEROOT_CAPTURE_SETTINGS_DIR)
+      : null;
+    const captureSettings = async (name, width, height) => {
+      if (!captureDirectory) return;
+      mkdirSync(captureDirectory, { recursive: true });
+      const bounds = await first.electronApp.evaluate(({ BrowserWindow }) => {
+        const window = BrowserWindow.getAllWindows().find((candidate) => (
+          candidate.webContents.getURL().includes("/dist-desktop/renderer/")
+          || candidate.getTitle() === "源页"
+        ));
+        return window?.getBounds() || null;
+      });
+      await first.electronApp.evaluate(({ BrowserWindow }, nextBounds) => {
+        const window = BrowserWindow.getAllWindows().find((candidate) => (
+          candidate.webContents.getURL().includes("/dist-desktop/renderer/")
+          || candidate.getTitle() === "源页"
+        ));
+        window?.setBounds(nextBounds, false);
+      }, { ...(bounds || {}), width, height });
+      await expect.poll(() => first.page.evaluate(() => window.innerWidth)).toBe(width);
+      await first.page.waitForTimeout(220);
+      await first.page.screenshot({
+        path: path.join(captureDirectory, `${name}.png`),
+        animations: "disabled",
+      });
+    };
+    await captureSettings("settings-general-1440x1024", 1440, 1024);
+    await captureSettings("settings-general-1024x768", 1024, 768);
+    await captureSettings("settings-general-960x720", 960, 720);
+
+    await settings.getByRole("checkbox", { name: "启动时恢复上次标签页" }).uncheck();
+    await expect.poll(() => {
+      try {
+        return JSON.parse(readFileSync(preferencesPath, "utf8"));
+      } catch {
+        return null;
+      }
+    }).toMatchObject({
+      schemaVersion: 2,
+      workspace: { restoreTabsOnLaunch: false },
+    });
+
+    await first.page.getByRole("button", { name: "AI Agent", exact: true }).click();
+    await expect(settings.getByRole("heading", { name: "AI Agent" })).toBeFocused();
+    await captureSettings("settings-agent-1440x1024", 1440, 1024);
+    await settings.getByRole("combobox", { name: "默认 Agent" }).selectOption({ label: "Codex" });
+    await expect.poll(() => {
+      try {
+        return JSON.parse(readFileSync(preferencesPath, "utf8"));
+      } catch {
+        return null;
+      }
+    }).toMatchObject({ workspace: { defaultAgentProviderId: "codex" } });
+    await first.page.getByRole("button", { name: "软件更新", exact: true }).click();
+    await expect(settings.getByRole("heading", { name: "软件更新" })).toBeFocused();
+    await captureSettings("settings-updates-1440x1024", 1440, 1024);
+
+    const tabs = first.page.getByRole("tablist", { name: "已打开的页面" }).getByRole("tab");
+    await tabs.filter({ hasText: "settings-workspace-preferences" }).click();
+    await expect(settings).toHaveCount(0);
+    await first.page.getByRole("tab", { name: "设置", exact: true }).click();
+    await expect(settings.getByRole("heading", { name: "软件更新" })).toBeFocused();
+
+    await first.page.getByRole("button", { name: "返回工作台" }).click();
+    await expect(settings).toHaveCount(0);
+    await sidebar.getByRole("button", { name: "设置", exact: true }).click();
+    await expect(settings.getByRole("heading", { name: "常规" })).toBeFocused();
+    await expect(settings.getByRole("checkbox", { name: "启动时恢复上次标签页" }))
+      .not.toBeChecked();
+    await settings.getByRole("checkbox", { name: "记住面板宽度" }).uncheck();
+    await expect.poll(() => {
+      try {
+        return JSON.parse(readFileSync(preferencesPath, "utf8"));
+      } catch {
+        return null;
+      }
+    }).toMatchObject({ workspace: { rememberPanelWidths: false } });
+    await first.page.getByRole("button", { name: "返回工作台" }).click();
+    await sidebarResizer.focus();
+    await sidebarResizer.press("ArrowRight");
+    await expect.poll(() => {
+      try {
+        return JSON.parse(readFileSync(preferencesPath, "utf8"))?.workspace?.sidebarWidth;
+      } catch {
+        return null;
+      }
+    }).toBe(280);
+
+    await closePageRootGracefully(first.electronApp, first.page);
+    firstClosed = true;
+    reopened = await launchPageRoot({
+      isolatedUserData: first.isolatedUserData,
+      firstEditGuide: true,
+    });
+    const reopenedTabs = reopened.page.getByRole("tablist", { name: "已打开的页面" })
+      .getByRole("tab");
+    await expect(reopened.page.locator("main.workbench")).toHaveAttribute(
+      "data-start-page",
+      "true",
+    );
+    await expect.poll(() => reopened.page.locator("main.workbench").evaluate((element) => (
+      getComputedStyle(element).getPropertyValue("--workbench-sidebar-width-saved").trim()
+    ))).toBe("280px");
+    await expect(reopenedTabs).toHaveCount(1);
+    await closePageRootGracefully(reopened.electronApp, reopened.page);
+    reopenedClosed = true;
+
+    external = await launchPageRoot({
+      isolatedUserData: first.isolatedUserData,
+      externalSourcePaths: [fixture.sourcePath],
+      firstEditGuide: true,
+    });
+    await loadedDiskFrame(external.page, fixture.sourcePath, "list-item");
+    await expect(external.page.locator("main.workbench")).not.toHaveAttribute(
+      "data-start-page",
+      "true",
+    );
+  } finally {
+    if (external) {
+      await stopPageRoot(external.electronApp, external.isolatedUserData);
+    } else if (reopened && !reopenedClosed) {
+      await stopPageRoot(reopened.electronApp, reopened.isolatedUserData);
+    } else if (!firstClosed) {
+      await stopPageRoot(first.electronApp, first.isolatedUserData);
+    } else {
+      removeIsolatedUserData(first.isolatedUserData);
     }
     removeSourceFixture(fixture.sourceDirectory);
   }

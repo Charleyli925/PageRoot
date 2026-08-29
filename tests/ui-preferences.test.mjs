@@ -12,9 +12,12 @@ import test from "node:test";
 
 import {
   FIRST_REAL_HTML_EDIT_GUIDE_GENERATION,
+  UI_PREFERENCES_SCHEMA_VERSION,
   decodeUiPreferences,
+  normalizeWorkspacePatch,
   readUiPreferences,
   recordFirstEditGuide,
+  recordUiWorkspacePreferences,
   rememberBuiltInWelcomeProjectId,
 } from "../desktop/ui-preferences.mjs";
 
@@ -69,6 +72,86 @@ test("an older guide generation returns to pending", () => {
   assert.equal(decodedPrevious.firstRealHtmlEditGuide.generation, FIRST_REAL_HTML_EDIT_GUIDE_GENERATION);
 });
 
+test("v1 preferences migrate without losing guide or welcome identity", async (t) => {
+  const userDataPath = await temporaryUserData(t);
+  await writeFile(path.join(userDataPath, "ui-preferences.json"), JSON.stringify({
+    schemaVersion: 1,
+    firstRealHtmlEditGuide: {
+      key: "first-real-html-edit-guide",
+      generation: FIRST_REAL_HTML_EDIT_GUIDE_GENERATION,
+      status: "dismissed",
+      presentedAt: null,
+      dismissedAt: "2026-08-29T00:00:00.000Z",
+    },
+    builtInWelcomeProjectId: "project_legacy_welcome",
+  }), "utf8");
+
+  const migrated = await readUiPreferences({ userDataPath });
+  assert.equal(migrated.schemaVersion, UI_PREFERENCES_SCHEMA_VERSION);
+  assert.equal(migrated.firstRealHtmlEditGuide.status, "dismissed");
+  assert.equal(migrated.builtInWelcomeProjectId, "project_legacy_welcome");
+  assert.deepEqual(migrated.workspace, {
+    rememberPanelWidths: true,
+    sidebarWidth: 264,
+    inspectorWidth: 376,
+    motion: "system",
+    restoreTabsOnLaunch: true,
+    defaultAgentProviderId: "qoder",
+  });
+  assert.equal(JSON.parse(await readFile(
+    path.join(userDataPath, "ui-preferences.json"),
+    "utf8",
+  )).schemaVersion, UI_PREFERENCES_SCHEMA_VERSION);
+});
+
+test("v1 migration does not overwrite a concurrent workspace update", async (t) => {
+  const userDataPath = await temporaryUserData(t);
+  await writeFile(path.join(userDataPath, "ui-preferences.json"), JSON.stringify({
+    schemaVersion: 1,
+    firstRealHtmlEditGuide: {
+      key: "first-real-html-edit-guide",
+      generation: FIRST_REAL_HTML_EDIT_GUIDE_GENERATION,
+      status: "presented",
+      presentedAt: "2026-08-29T00:00:00.000Z",
+      dismissedAt: null,
+    },
+    builtInWelcomeProjectId: "project_legacy_welcome",
+  }), "utf8");
+
+  await Promise.all([
+    readUiPreferences({ userDataPath }),
+    recordUiWorkspacePreferences({
+      userDataPath,
+      workspace: { sidebarWidth: 328 },
+    }),
+  ]);
+  const final = await readUiPreferences({ userDataPath });
+  assert.equal(final.schemaVersion, UI_PREFERENCES_SCHEMA_VERSION);
+  assert.equal(final.builtInWelcomeProjectId, "project_legacy_welcome");
+  assert.equal(final.workspace.sidebarWidth, 328);
+});
+
+test("workspace preference decoding clamps damaged values and strict writes reject unsafe patches", () => {
+  const decoded = decodeUiPreferences({
+    schemaVersion: UI_PREFERENCES_SCHEMA_VERSION,
+    workspace: {
+      sidebarWidth: 999,
+      inspectorWidth: 1,
+      motion: "unknown",
+      restoreTabsOnLaunch: "yes",
+      defaultAgentProviderId: "unknown",
+    },
+  });
+  assert.equal(decoded.workspace.sidebarWidth, 420);
+  assert.equal(decoded.workspace.inspectorWidth, 280);
+  assert.equal(decoded.workspace.motion, "system");
+  assert.equal(decoded.workspace.restoreTabsOnLaunch, true);
+  assert.equal(decoded.workspace.defaultAgentProviderId, "qoder");
+  assert.throws(() => normalizeWorkspacePatch({ sidebarWidth: 999 }), /范围/u);
+  assert.throws(() => normalizeWorkspacePatch({ unknown: true }), /未知字段/u);
+  assert.throws(() => normalizeWorkspacePatch({ defaultAgentProviderId: "gemini" }), /默认 Agent/u);
+});
+
 test("present and dismiss are install-level and dismissed is terminal", async (t) => {
   const userDataPath = await temporaryUserData(t);
   const presented = await recordFirstEditGuide({
@@ -114,4 +197,21 @@ test("welcome project identity is remembered atomically", async (t) => {
     }),
     /invalid/u,
   );
+});
+
+test("guide and workspace writes serialize against the same v2 document", async (t) => {
+  const userDataPath = await temporaryUserData(t);
+  const [guide, workspace] = await Promise.all([
+    recordFirstEditGuide({ userDataPath, action: "dismissed" }),
+    recordUiWorkspacePreferences({
+      userDataPath,
+      workspace: { sidebarWidth: 320, motion: "reduced" },
+    }),
+  ]);
+  const final = await readUiPreferences({ userDataPath });
+  assert.equal(guide.firstRealHtmlEditGuide.status, "dismissed");
+  assert.equal(workspace.workspace.sidebarWidth, 320);
+  assert.equal(final.firstRealHtmlEditGuide.status, "dismissed");
+  assert.equal(final.workspace.sidebarWidth, 320);
+  assert.equal(final.workspace.motion, "reduced");
 });

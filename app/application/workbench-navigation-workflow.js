@@ -23,8 +23,10 @@ export function workbenchStartupPriority({
   externalRequestCount = 0,
   persistedStatePresent = false,
   persistedActiveTabId = null,
+  restoreTabsOnLaunch = true,
 } = {}) {
   if (Number(externalRequestCount) > 0) return "external";
+  if (restoreTabsOnLaunch === false) return "start";
   if (persistedStatePresent && persistedActiveTabId) return "persisted-active-tab";
   if (!persistedStatePresent) return "active-path-compatibility";
   return "start";

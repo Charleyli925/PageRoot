@@ -5,6 +5,10 @@ import {
   useCallback,
   useSyncExternalStore,
 } from "react";
+import { ArrowLeftIcon } from "@phosphor-icons/react/dist/csr/ArrowLeft";
+import { CloudArrowUpIcon } from "@phosphor-icons/react/dist/csr/CloudArrowUp";
+import { GearSixIcon } from "@phosphor-icons/react/dist/csr/GearSix";
+import { UserCircleIcon } from "@phosphor-icons/react/dist/csr/UserCircle";
 import type { ProjectCatalogControllerCapability } from "../application/workspace-controller-capabilities.js";
 import type {
   ApplicationUpdateResult,
@@ -17,11 +21,71 @@ import {
   WorkbenchStartPage,
   type ProjectVersionLoadResult,
 } from "./WorkbenchChrome";
+import type { SettingsCategory } from "./settings-types";
+
+export type { SettingsCategory } from "./settings-types";
 
 export type ProjectCatalogCapability = ProjectCatalogControllerCapability<
   RecentProject,
   RegisteredProject
 >;
+
+const SETTINGS_NAV_ITEMS: ReadonlyArray<Readonly<{
+  category: SettingsCategory;
+  label: string;
+  Icon: typeof GearSixIcon;
+}>> = [
+  { category: "general", label: "常规", Icon: GearSixIcon },
+  { category: "agent", label: "AI Agent", Icon: UserCircleIcon },
+  { category: "updates", label: "软件更新", Icon: CloudArrowUpIcon },
+];
+
+export const WorkbenchSettingsSidebar = memo(function WorkbenchSettingsSidebar({
+  open,
+  category,
+  onSelectCategory,
+  onReturnToWorkbench,
+}: {
+  open: boolean;
+  category: SettingsCategory;
+  onSelectCategory(category: SettingsCategory): void;
+  onReturnToWorkbench(): void;
+}) {
+  return (
+    <aside
+      className="workbench-settings-sidebar"
+      data-open={open ? "true" : undefined}
+      aria-label="设置导航"
+      inert={!open}
+    >
+      <div className="workbench-settings-sidebar-inner">
+        <button
+          className="workbench-settings-back"
+          type="button"
+          onClick={onReturnToWorkbench}
+        >
+          <ArrowLeftIcon aria-hidden="true" size={18} weight="regular" />
+          <span>返回工作台</span>
+        </button>
+        <nav aria-label="设置类别">
+          {SETTINGS_NAV_ITEMS.map(({ category: itemCategory, label, Icon }) => (
+            <button
+              className="workbench-settings-nav-item"
+              data-selected={category === itemCategory ? "true" : undefined}
+              type="button"
+              aria-current={category === itemCategory ? "page" : undefined}
+              key={itemCategory}
+              onClick={() => onSelectCategory(itemCategory)}
+            >
+              <Icon aria-hidden="true" size={19} weight="regular" />
+              <span>{label}</span>
+            </button>
+          ))}
+        </nav>
+      </div>
+    </aside>
+  );
+});
 
 export const WorkbenchGlobalSidebarContainer = memo(function WorkbenchGlobalSidebarContainer({
   capability,
@@ -47,6 +111,7 @@ export const WorkbenchGlobalSidebarContainer = memo(function WorkbenchGlobalSide
   onOpenAbout(): void;
   onOpenSettings(): void;
   onDownloadOrRestartUpdate(): void;
+  onResizeCommit?(width: number): void;
 }) {
   const catalog = useSyncExternalStore(
     capability.subscribe,
@@ -85,6 +150,7 @@ export const WorkbenchGlobalSidebarContainer = memo(function WorkbenchGlobalSide
           void capability.commands.refreshRegistered();
         }
       }}
+      onResizeCommit={props.onResizeCommit}
     />
   );
 });
