@@ -469,6 +469,31 @@ test("forceUnlockWorkingCopy adopts disk hash without rewriting HTML", async (t)
   assert.equal(workspace.content, conflictingDiskHtml);
 });
 
+test("forceUnlockWorkingCopy rematerializes identities after explicitly adopting unmarked disk HTML", async (t) => {
+  const value = await fixture(t);
+  const imported = await importSource(value, "force-unlock-unmarked.html");
+  const statePath = path.join(
+    imported.target.projectRootPath,
+    ".pageroot",
+    "working-copies",
+    `${imported.target.workingCopyId}.json`,
+  );
+  const state = await json(statePath);
+  const conflictingDiskHtml = "<!doctype html><html><head><title>external</title></head><body><h1>external</h1></body></html>\n";
+  await writeFile(imported.target.exactSourcePath, conflictingDiskHtml, "utf8");
+
+  const unlocked = await value.repository.forceUnlockWorkingCopy({
+    sourcePath: imported.target.exactSourcePath,
+  });
+  assert.equal(unlocked.status, "force-unlocked");
+  assert.match(unlocked.content, /<h1 data-pageroot-id="pr1_[0-9a-f]{32}">external<\/h1>/u);
+  assert.equal(unlocked.content, await readFile(imported.target.exactSourcePath, "utf8"));
+  const nextState = await json(statePath);
+  assert.equal(nextState.sourceElementIdentitySchemaVersion, 1);
+  assert.equal(nextState.currentSha256, sha256(Buffer.from(unlocked.content, "utf8")));
+  assert.equal(nextState.differsFromBase, true);
+});
+
 test("forceUnlockWorkingCopy clears a stuck activeRequest without rewriting HTML", async (t) => {
   const value = await fixture(t);
   const imported = await importSource(value, "force-unlock-active-run.html");

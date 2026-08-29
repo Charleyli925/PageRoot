@@ -731,23 +731,35 @@ export class ProjectFileRepository {
     let workingCopyRecovered = false;
     if (workingCopy && state && target.targetKind === "working-copy") {
       let reconciliation;
-      try {
-        reconciliation = await this.#reconcileExternalWorkingCopyState({
-          loaded,
-          workingCopy,
-          state,
-          source,
-        });
-      } catch (cause) {
-        if (!adoptExternalConflict || cause?.code !== "WORKING_COPY_CONFLICT") {
-          throw cause;
-        }
+      if (
+        adoptExternalConflict
+        && String(state.currentSha256 || "") !== source.sha256
+      ) {
         reconciliation = await this.#adoptExternalWorkingCopyState({
           loaded,
           workingCopy,
           state,
           source,
         });
+      } else {
+        try {
+          reconciliation = await this.#reconcileExternalWorkingCopyState({
+            loaded,
+            workingCopy,
+            state,
+            source,
+          });
+        } catch (cause) {
+          if (!adoptExternalConflict || cause?.code !== "WORKING_COPY_CONFLICT") {
+            throw cause;
+          }
+          reconciliation = await this.#adoptExternalWorkingCopyState({
+            loaded,
+            workingCopy,
+            state,
+            source,
+          });
+        }
       }
       state = reconciliation.state;
       workingCopyRecovered = reconciliation.recovered;
@@ -874,8 +886,16 @@ export class ProjectFileRepository {
     ) {
       return { state, recovered: false };
     }
+    // Explicit force-unlock is the one user-authorized boundary that can
+    // replace an identity-v1 Working Copy with arbitrary complete disk HTML.
+    // Clear the marker before committing the adopted Hash so the shared
+    // recoverable migration below can validate, adopt or materialize that
+    // exact disk document instead of treating the intentional replacement as
+    // silent identity loss.
+    const adoptedState = { ...state };
+    delete adoptedState.sourceElementIdentitySchemaVersion;
     const nextState = {
-      ...state,
+      ...adoptedState,
       schemaVersion: PROJECT_FILE_SCHEMA_VERSION,
       projectId: loaded.project.projectId,
       documentId: loaded.project.documentId,

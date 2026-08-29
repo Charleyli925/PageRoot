@@ -592,7 +592,21 @@ test("Electron keeps managed V1 identity in the selected tab and retires title-b
     await expect(launched.page.getByRole("textbox", { name: "文件名（不含后缀）" }))
       .toHaveCount(0);
     expect(readFileSync(externalOriginalPath)).toEqual(originalBytes);
-    expect(readFileSync(managedOriginalPath)).toEqual(originalBytes);
+    const managedBytes = readFileSync(managedOriginalPath);
+    expect(managedBytes).not.toEqual(originalBytes);
+    const managedSourceIds = [...managedBytes.toString("utf8").matchAll(
+      /data-pageroot-id="(pr1_[0-9a-f]{32})"/gu,
+    )].map((match) => match[1]);
+    expect(managedSourceIds.length).toBeGreaterThan(0);
+    expect(new Set(managedSourceIds).size).toBe(managedSourceIds.length);
+    const firstVersion = originalManifest.versions.find(
+      (version) => version.versionId === "ver_0001",
+    );
+    expect(readFileSync(path.join(
+      projectRoot,
+      ".pageroot",
+      firstVersion.snapshotRelativePath,
+    ))).toEqual(originalBytes);
 
     const state = JSON.parse(
       readFileSync(path.join(launched.isolatedUserData, "html-projects.json"), "utf8"),

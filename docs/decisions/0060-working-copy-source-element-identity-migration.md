@@ -69,6 +69,11 @@ leave mixed or externally overwritten HTML.
    identified file Hash as `currentSha256`. Recovery validates each artifact
    against its own sealed Hash; it never runs a later workspace migration that
    would invalidate an already returned activation target.
+8. An explicit user choice to adopt conflicting disk bytes through force-unlock
+   clears the old identity marker only after recording that complete disk Hash,
+   then immediately re-enters the same recoverable migration. Ordinary external
+   edits that lose identities still fail closed; this exception exists only for
+   the product's explicit conflict-resolution action.
 
 ## Consequences
 
