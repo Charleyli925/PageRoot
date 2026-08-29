@@ -1,6 +1,6 @@
 # ADR 0030: Review runtime projection tolerates authored host mutation
 
-- Status: Superseded by ADR 0046
+- Status: Superseded by [ADR 0046](../0046-review-core-text-and-element-diff.md)
 - Date: 2026-08-20
 - Extends: ADR 0029
 

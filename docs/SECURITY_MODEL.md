@@ -288,7 +288,7 @@ least-privilege boundary and must never be described as an OS sandbox.
 Candidate completion still requires the official finalizer and Repository
 validation; ACP stop/progress cannot create, adopt or activate a Version. See
 ADR 0032. The synthetic live probe remains diagnostic evidence only and is not
-a release gate (ADR 0031).
+a release gate (ADR 0056).
 
 Installation and login guidance is copied only after the user's explicit
 button action and must pass the same clipboard write/readback check as the

@@ -1,6 +1,6 @@
 # ADR 0029: Review runtime visual comparison uses a tri-state verdict
 
-- Status: Superseded by ADR 0046
+- Status: Superseded by [ADR 0046](../0046-review-core-text-and-element-diff.md)
 - Date: 2026-08-20
 - Extends: ADR 0021
 

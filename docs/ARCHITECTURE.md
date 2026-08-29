@@ -37,7 +37,7 @@ only a Request whose durable `agentDelivery` record authorizes the trusted-local
 policy. ACP progress is presentation evidence only: only the official finalizer
 plus Repository validation can create a pending-review Candidate, and only an
 explicit user action can promote it. The ACP allowlist is not an OS sandbox;
-see ADR 0032. ADR 0039 defines the provider/runtime boundary; ADR 0031 remains
+see ADR 0032. ADR 0039 defines the provider/runtime boundary; ADR 0056 remains
 the historical synthetic-spike decision.
 
 ## Boundaries

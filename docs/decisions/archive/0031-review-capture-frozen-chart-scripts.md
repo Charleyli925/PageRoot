@@ -1,6 +1,6 @@
 # ADR 0031: Review capture serves allowlisted chart scripts from frozen bytes
 
-- Status: Superseded by ADR 0046
+- Status: Superseded by [ADR 0046](../0046-review-core-text-and-element-diff.md)
 - Date: 2026-08-20
 - Extends: ADR 0029
 

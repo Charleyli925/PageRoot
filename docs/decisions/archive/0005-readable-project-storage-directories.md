@@ -1,6 +1,6 @@
 # ADR 0005: Project identity is separate from its readable storage directory
 
-- Status: Superseded by ADR 0022
+- Status: Superseded by [ADR 0022](../0022-user-owned-project-root-identity.md)
 - Date: 2026-07-28
 
 > Historical decision. ADR 0022 replaces this registry-owned directory model

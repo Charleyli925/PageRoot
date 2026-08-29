@@ -1,6 +1,6 @@
 # ADR 0050: Review paints authored content before optional runtime evidence
 
-- Status: Superseded by ADR 0046
+- Status: Superseded by [ADR 0046](../0046-review-core-text-and-element-diff.md)
 - Date: 2026-08-28
 - Scope: formal Review rendering, runtime-visual capture and real-HTML performance evidence
 

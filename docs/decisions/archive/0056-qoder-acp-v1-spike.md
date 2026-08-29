@@ -1,6 +1,8 @@
-# ADR 0031: Qoder ACP v1 synthetic spike
+# ADR 0056: Qoder ACP v1 synthetic spike
 
-> Status: Superseded by [ADR-0032](0032-qoder-acp-agent-bridge.md)
+> Renumbered from ADR 0031 on 2026-08-29 to repair a numbering collision.
+
+> Status: Superseded by [ADR-0032](../0032-qoder-acp-agent-bridge.md)
 
 - Status: Experimental
 - Date: 2026-08-21

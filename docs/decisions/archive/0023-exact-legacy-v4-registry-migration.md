@@ -1,6 +1,6 @@
 # ADR 0023: Exact legacy V4 Registry metadata completion
 
-- Status: Superseded by ADR 0028; the migration and its dedicated lock were
+- Status: Superseded by [ADR 0028](../0028-unrecognized-registry-fails-closed.md); the migration and its dedicated lock were
   removed before the V4 project files ever shipped
 - Date: 2026-08-14
 - Extends: ADR 0022

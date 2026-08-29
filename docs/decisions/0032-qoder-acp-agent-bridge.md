@@ -8,7 +8,7 @@
 PageRoot already owns the durable safety contract for AI work: it freezes one
 Request/Attempt, accepts one complete output through the official finalizer,
 creates a separate Candidate, validates it, and waits for explicit review and
-adoption. ADR 0031 proved that Qoder CLI can execute a synthetic task over ACP,
+adoption. [ADR 0056](archive/0056-qoder-acp-v1-spike.md) proved that Qoder CLI can execute a synthetic task over ACP,
 but intentionally left the product clipboard-only.
 
 The product now needs to remove copy/paste for Qoder without giving a driver

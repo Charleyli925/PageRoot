@@ -211,7 +211,7 @@ test("v4 schemas accept repository-produced identity, Working Copy, Candidate an
   futureRuntime.historyActivation.provenance = { seq: 1 };
   await validate("project-runtime-state.v4.schema.json", futureRuntime);
 
-  // ADR 0022 forbids one specific member, a project-wide `fileNaming`; ADR 0032
+  // ADR 0022 forbids one specific member, a project-wide `fileNaming`; ADR 0057
   // requires every other added member to survive. The schema states the first
   // prohibition directly instead of rejecting anything it has not seen before,
   // so both assertions below must hold at once.

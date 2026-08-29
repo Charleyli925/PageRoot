@@ -61,7 +61,7 @@ new member forces an explicit decision. See
 
 Immutable records — anything written once and never rewritten — and the
 compatibility decoders keep their strict `additionalProperties: false` form. See
-[`docs/decisions/0032-forward-compatible-record-members.md`](../docs/decisions/0032-forward-compatible-record-members.md).
+[`docs/decisions/0057-forward-compatible-record-members.md`](../docs/decisions/0057-forward-compatible-record-members.md).
 
 ## Strict v3 main records
 

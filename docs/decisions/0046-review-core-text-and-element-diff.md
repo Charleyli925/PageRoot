@@ -2,7 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-08-27
-- Supersedes: ADR 0017, ADR 0021, ADR 0029, ADR 0030 and the Review portion of ADR 0031
+- Supersedes: ADR 0017, ADR 0021, ADR 0029, ADR 0030 and the Review portion of [ADR 0031](archive/0031-review-capture-frozen-chart-scripts.md)
 
 ## Context
 
@@ -41,7 +41,7 @@ candidate or granting the review page additional capabilities.
 Do not keep dormant flags or copied source in production. The last complete
 pre-downgrade implementation is the parent baseline
 `9dbb1322393aeffdab86dd4f01d13791a17c0756`; ADR 0017, 0021, 0029, 0030 and
-0031 describe its security and comparison decisions. A future proposal can
+the Review portion of ADR 0031 describe its security and comparison decisions. A future proposal can
 recover selected code from Git and must re-establish an independently reliable
 product contract before restoring any runtime or visual category.
 

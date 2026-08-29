@@ -1,13 +1,13 @@
 # ADR 0013: Edit runtime visuals are disposable source-host bitmap projections
 
-- Status: Superseded by `0017-shared-runtime-snapshot-owner.md`
+- Status: Superseded by [ADR 0017](0017-shared-runtime-snapshot-owner.md)
 - Date: 2026-08-04
 
 ## Context
 
 > Historical decision. Stage 08 removed the remaining Edit runtime capture,
 > cache and bitmap projection described below. The current contract is the
-> Review-only owner in ADR 0017.
+> Review-only owner in [ADR 0017](0017-shared-runtime-snapshot-owner.md).
 
 The edit iframe deliberately disables authored scripts so source mapping,
 Selection, IME and SourcePatch remain authoritative. Many existing reports,
