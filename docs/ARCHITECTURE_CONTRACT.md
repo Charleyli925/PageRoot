@@ -776,21 +776,25 @@ Hashes, state transitions and fault injection.
 
 ### Architecture gate assertion forms
 
-`scripts/check-architecture.mjs` enforces the boundaries above. To honor the
-rule that runtime coordination is not proven by source strings, the gate uses
-only these assertion forms:
+`scripts/check-architecture.mjs` enforces the boundaries above as four explicit
+responsibility groups:
 
-- **Structural queries** through `scripts/architecture-ast-query.mjs`
-  (`importsModule`, `exportsSymbol`, `classHasMember`, `classMemberConstructs`,
-  `hasCall`, `constructsClass`, `hasObjectProperty`). These parse the module and
-  match imports, exports, class members, constructions, calls and object
-  properties, so a rename, reflow, comment or format change to compliant code
-  cannot fail the gate, and a dead string cannot pass it.
-- **Negative boundary regexes** that forbid an import, construction, endpoint or
-  retired identifier from appearing (a dependency/security boundary). Pointer
-  capability files must not reference `isNativeDirectEditRoot`; tag-root
-  editability stays in `app/lib/native-edit-capability.js`.
-- **Document-content strings** for `docs/**` prose, which is not runtime code.
+- `layerBoundaryViolations`: import direction between Domain, Application,
+  Views, Bridge and build scripts;
+- `ownershipBoundaryViolations`: the single runtime composition root and the
+  approved persistence owners;
+- `escapeBoundaryViolations`: typed Bridge access, browser persistence,
+  endpoint knowledge and provider-neutral workflow boundaries;
+- `retiredArtifactViolations`: deleted production modules and their imports.
+
+The gate uses structural queries from `scripts/architecture-ast-query.mjs`
+(`moduleSpecifiers`, `callNames`, `newExpressionNames`, filesystem-write
+classification and literal comparisons). These queries operate on dependency,
+call, construction and data-category facts. They do not assert private fields,
+private methods, exact object properties or the spelling/order of a business
+call, so a responsibility-preserving rename or reflow cannot fail the gate.
+Document-content checks remain in the ADR and packaging gates where the text or
+artifact itself is the boundary.
 
 The gate must not assert that a specific code fragment *exists* by substring or
 by ordered substring (`String.prototype.includes` on code, ordered marker

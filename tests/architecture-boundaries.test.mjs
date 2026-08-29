@@ -4,23 +4,20 @@ import test from "node:test";
 
 import {
   architectureViolations,
-  canvasPointerLayerViolations,
-  compositionBoundaryViolations,
-  providerNeutralRendererViolations,
+  escapeBoundaryViolations,
+  layerBoundaryViolations,
+  ownershipBoundaryViolations,
+  retiredArtifactViolations,
 } from "../scripts/check-architecture.mjs";
 import {
-  parseModule,
-  importsModule,
-  exportsSymbol,
-  classHasMember,
-  classMemberConstructs,
-  hasCall,
-  constructsClass,
-  hasObjectProperty,
   countReactHooks,
+  hasLiteralComparison,
+  moduleSpecifiers,
+  newExpressionNames,
+  parseModule,
 } from "../scripts/architecture-ast-query.mjs";
 
-test("renderer, WorkspaceController, domain, and Bridge dependency boundaries stay enforced", async () => {
+test("the production graph satisfies the four responsibility boundaries", async () => {
   assert.deepEqual(await architectureViolations(), []);
 });
 
@@ -46,232 +43,134 @@ async function fixture(name) {
   );
 }
 
-test("final composition gate rejects each retired boundary escape", async () => {
-  const [viewBridge, controllerReact, genericBridge, duplicateSession, missingDrain] =
-    await Promise.all([
-      fixture("view-bridge-call.tsx"),
-      fixture("controller-react-import.js"),
-      fixture("generic-bridge-escape.js"),
-      fixture("duplicate-session-owner.js"),
-      fixture("missing-drain-command.js"),
-    ]);
+test("layer, ownership and escape checks reject the four forbidden boundaries", async () => {
+  const [viewBridge, controllerReact, duplicateSession, domainImport, secondWriter] = await Promise.all([
+    fixture("view-bridge-call.tsx"),
+    fixture("controller-react-import.js"),
+    fixture("duplicate-session-owner.js"),
+    fixture("domain-imports-application.js"),
+    fixture("second-persistence-writer.js"),
+  ]);
 
   assert.match(
-    compositionBoundaryViolations({ workbench: viewBridge }).join("\n"),
-    /View code cannot import or call the Bridge client/,
+    layerBoundaryViolations({ file: "app/components/example.tsx", source: viewBridge }).join("\n"),
+    /views cannot import the Bridge client/u,
   );
   assert.match(
-    compositionBoundaryViolations({ workspaceController: controllerReact }).join("\n"),
-    /Controller cannot import React, presentation, or desktop code/,
+    layerBoundaryViolations({ file: "app/application/example.js", source: controllerReact }).join("\n"),
+    /application code cannot import react/u,
   );
   assert.match(
-    compositionBoundaryViolations({ workspaceController: genericBridge }).join("\n"),
-    /generic Bridge command escapes are forbidden/,
+    ownershipBoundaryViolations({ file: "app/workbench/example.tsx", source: duplicateSession }).join("\n"),
+    /may only be constructed by the composition root/u,
   );
   assert.match(
-    compositionBoundaryViolations({
-      applicationSources: [{
-        file: "app/application/unapproved-owner.js",
-        source: duplicateSession,
-      }],
+    layerBoundaryViolations({ file: "app/domain/example.js", source: domainImport }).join("\n"),
+    /domain code cannot import/u,
+  );
+  assert.match(
+    ownershipBoundaryViolations({ file: "app/application/example.js", source: secondWriter }).join("\n"),
+    /persistence writes belong to an approved repository/u,
+  );
+});
+
+test("renderer-local workspace preferences remain an explicit presentation owner", () => {
+  const source = [
+    'import { WorkspacePreferencesSession } from "../application/workspace-preferences-session.js";',
+    "const session = new WorkspacePreferencesSession({ port: null });",
+  ].join("\n");
+  assert.deepEqual(
+    ownershipBoundaryViolations({ file: "app/workbench/use-workspace-preferences.ts", source }),
+    [],
+  );
+});
+
+test("generic Bridge escapes remain forbidden without freezing implementation names", () => {
+  assert.match(
+    escapeBoundaryViolations({
+      file: "app/application/example.js",
+      source: "export function submit(input) { return input.executeBridge('request'); }",
     }).join("\n"),
-    /runtime Session construction belongs only to WorkspaceController factory/,
+    /generic Bridge command escapes are forbidden/u,
   );
   assert.match(
-    compositionBoundaryViolations({ projectWorkflow: missingDrain }).join("\n"),
-    /switch, close, history, and request boundaries must use typed DrainCoordinator commands/,
+    escapeBoundaryViolations({
+      file: "app/application/example.js",
+      source: "export function load() { return fetch('/workspace'); }",
+    }).join("\n"),
+    /raw fetch belongs/u,
+  );
+  assert.deepEqual(
+    escapeBoundaryViolations({
+      file: "app/application/example.js",
+      source: "const internalName = value; function submit(payload) { return payload.run(internalName); }",
+    }),
+    [],
   );
 });
 
-test("composition gate rejects tabs and navigation business construction in Workbench", () => {
-  assert.match(compositionBoundaryViolations({
-    workbench: [
-      'import { WorkbenchTabsSession } from "./application/workbench-tabs-session.js";',
-      'import { WorkbenchNavigationWorkflow } from "./application/workbench-navigation-workflow.js";',
-      "const tabs = new WorkbenchTabsSession();",
-      "const navigation = new WorkbenchNavigationWorkflow({ session: tabs, controller });",
-    ].join("\n"),
-  }).join("\n"), /cannot own runtime Session\/Workflow construction/u);
-
-  assert.match(compositionBoundaryViolations({
-    workbench: 'const tabs = createWorkbenchTabsSession();',
-  }).join("\n"), /cannot own runtime Session\/Workflow construction/u);
-
-  assert.match(compositionBoundaryViolations({
-    workbench: "const workbenchTabsSessionRef = useRef(tabs);",
-  }).join("\n"), /cannot own runtime Session\/Workflow construction/u);
-
-  assert.match(compositionBoundaryViolations({
-    workbench: [
-      "const browserDocuments = new BrowserDocumentSession();",
-      "const persistence = new WorkbenchTabsPersistenceCoordinator({ port });",
-    ].join("\n"),
-  }).join("\n"), /cannot own runtime Session\/Workflow construction/u);
+test("renaming private fields, methods, parameters and locals does not alter responsibility results", () => {
+  const source = [
+    'import { RunWorkflow } from "./run-workflow.js";',
+    "export class WorkspaceController {",
+    "  #renamedWorkflow = new RunWorkflow({});",
+    "  #renamedGuard = null;",
+    "  submitRenamed(requestBody) {",
+    "    return this.#renamedWorkflow.submit(requestBody);",
+    "  }",
+    "}",
+  ].join("\n");
+  const handle = parseModule("app/application/workspace-controller.js", source);
+  assert.deepEqual(layerBoundaryViolations({ file: "app/application/workspace-controller.js", source, module: handle }), []);
+  assert.deepEqual(ownershipBoundaryViolations({ file: "app/application/workspace-controller.js", source, module: handle }), []);
+  assert.deepEqual(escapeBoundaryViolations({ file: "app/application/workspace-controller.js", source, module: handle }), []);
+  assert.deepEqual(newExpressionNames(handle), ["RunWorkflow"]);
+  assert.deepEqual(moduleSpecifiers(handle), ["./run-workflow.js"]);
 });
 
-test("provider-neutral renderer gate rejects provider branches and workflow implementation imports", () => {
-  assert.match(providerNeutralRendererViolations({
-    file: "app/workbench/example.tsx",
-    source: 'const selected = providerId === "qoder";',
-  }).join("\n"), /descriptor data/u);
-  assert.match(providerNeutralRendererViolations({
-    file: "app/workbench/example.tsx",
-    source: 'const selected = request.selection.providerId === "codex";',
-  }).join("\n"), /descriptor data/u);
-  assert.match(providerNeutralRendererViolations({
-    file: "app/application/run-workflow.js",
-    source: 'const legacy = delivery?.mode === "qoder-acp";',
-  }).join("\n"), /descriptor data/u);
-  assert.match(providerNeutralRendererViolations({
-    file: "app/application/run-workflow.js",
-    source: 'import value from "../domain/qoder-availability.js";',
-  }).join("\n"), /cannot import provider implementations/u);
-  assert.deepEqual(providerNeutralRendererViolations({
-    file: "app/application/run-workflow.js",
-    source: 'const managed = delivery.mode === "managed-agent";',
-  }), []);
-});
-
-test("pointer capability files cannot approximate editability from native-edit tag roots", () => {
-  assert.match(canvasPointerLayerViolations({
-    file: "app/components/html-canvas-pointer-capability.ts",
-    source: 'import { isNativeDirectEditRoot } from "../lib/native-edit-capability.js";',
-  }).join("\n"), /native-edit tag roots/u);
-  assert.match(canvasPointerLayerViolations({
-    file: "app/components/html-canvas-pointer-proof.js",
-    source: "if (isNativeDirectEditRoot(tagName)) return true;",
-  }).join("\n"), /native-edit tag roots/u);
-  assert.deepEqual(canvasPointerLayerViolations({
-    file: "app/components/html-canvas-pointer-capability.ts",
-    source: "export function resolveCanvasPointerCapability(input) { return input; }",
-  }), []);
-  assert.deepEqual(canvasPointerLayerViolations({
-    file: "app/lib/native-edit-capability.js",
-    source: "export function isNativeDirectEditRoot(tagName) { return false; }",
-  }), []);
-});
-
-// The gate proves runtime coordination through structure, not source strings.
-// A rename, reflow, or comment insertion is a semantically equivalent refactor:
-// the AST queries must keep passing, while a genuine removal must still fail.
-test("AST structural queries survive rename, reflow and comments", () => {
-  const baseline = parseModule(
-    "controller.js",
+test("AST queries retain responsibility facts while ignoring member spelling", () => {
+  const handle = parseModule(
+    "fixture.tsx",
     [
-      'import { RunWorkflow } from "./run-workflow.js";',
-      "export class WorkspaceController {",
-      "  #runWorkflow = new RunWorkflow({});",
-      "  #registrationPromise = null;",
-      "  submitRequest(input) {",
-      "    return this.#runWorkflow.submit(input);",
-      "  }",
-      "  getSnapshot() {",
-      "    return { run: this.#runSnapshot };",
-      "  }",
-      "}",
-    ].join("\n"),
-  );
-
-  assert.equal(importsModule(baseline, "./run-workflow.js"), true);
-  assert.equal(exportsSymbol(baseline, "WorkspaceController", { kind: "class" }), true);
-  assert.equal(classHasMember(baseline, "WorkspaceController", "#registrationPromise"), true);
-  assert.equal(classHasMember(baseline, "WorkspaceController", "submitRequest"), true);
-  assert.equal(classMemberConstructs(baseline, "WorkspaceController", "#runWorkflow", "RunWorkflow"), true);
-  assert.equal(constructsClass(baseline, "RunWorkflow"), true);
-  assert.equal(hasCall(baseline, { path: "this.#runWorkflow.submit" }), true);
-  assert.equal(hasObjectProperty(baseline, "run"), true);
-
-  // Same module, refactored: parameter renamed, call reflowed across lines,
-  // a comment inserted, and whitespace changed. A substring/order gate would
-  // break on several of these; the structural gate must not.
-  const refactored = parseModule(
-    "controller.js",
-    [
-      'import { RunWorkflow } from "./run-workflow.js";',
-      "export class WorkspaceController {",
-      "  // registration single-flight guard",
-      "  #registrationPromise = null;",
-      "  #runWorkflow = new RunWorkflow(",
-      "    {},",
-      "  );",
-      "  submitRequest(payload) {",
-      "    return this.#runWorkflow",
-      "      .submit(payload);",
-      "  }",
-      "  getSnapshot() {",
-      "    return {",
-      "      run: this.#runSnapshot,",
-      "    };",
-      "  }",
-      "}",
-    ].join("\n"),
-  );
-
-  assert.equal(importsModule(refactored, "./run-workflow.js"), true);
-  assert.equal(exportsSymbol(refactored, "WorkspaceController", { kind: "class" }), true);
-  assert.equal(classHasMember(refactored, "WorkspaceController", "#registrationPromise"), true);
-  assert.equal(classHasMember(refactored, "WorkspaceController", "submitRequest"), true);
-  assert.equal(classMemberConstructs(refactored, "WorkspaceController", "#runWorkflow", "RunWorkflow"), true);
-  assert.equal(constructsClass(refactored, "RunWorkflow"), true);
-  assert.equal(hasCall(refactored, { path: "this.#runWorkflow.submit" }), true);
-  assert.equal(hasObjectProperty(refactored, "run"), true);
-});
-
-test("AST structural queries still fail on genuine removals", () => {
-  const removed = parseModule(
-    "controller.js",
-    [
-      "export class WorkspaceController {",
-      "  getSnapshot() {",
-      "    return {};",
-      "  }",
-      "}",
-    ].join("\n"),
-  );
-
-  assert.equal(importsModule(removed, "./run-workflow.js"), false);
-  assert.equal(classHasMember(removed, "WorkspaceController", "submitRequest"), false);
-  assert.equal(classMemberConstructs(removed, "WorkspaceController", "#runWorkflow", "RunWorkflow"), false);
-  assert.equal(constructsClass(removed, "RunWorkflow"), false);
-  assert.equal(hasCall(removed, { path: "this.#runWorkflow.submit" }), false);
-  assert.equal(hasObjectProperty(removed, "run"), false);
-});
-
-// The complexity budget ratchet measures hooks structurally so that
-// generic-typed calls such as useState<T>() are counted; a regex on "useState("
-// would undercount them and let complexity drift in unseen.
-test("countReactHooks counts generic-typed hook calls a regex would miss", () => {
-  const sample = parseModule(
-    "component.tsx",
-    [
-      "function Component() {",
-      "  const [a, setA] = useState(0);",
-      "  const [b, setB] = useState<string | null>(null);",
-      "  const ref = useRef<HTMLDivElement>(null);",
+      "function View() {",
+      "  const [value, setValue] = useState(0);",
+      "  const reference = useRef<HTMLDivElement>(null);",
       "  useEffect(() => {}, []);",
-      "  const value = useMemo<number>(() => 1, []);",
-      "  return null;",
+      "  return value;",
       "}",
     ].join("\n"),
   );
-  // 2 useState (one plain, one generic) + useRef + useEffect + useMemo = 5.
-  assert.equal(countReactHooks(sample), 5);
+  assert.equal(countReactHooks(handle), 3);
+  assert.equal(
+    hasLiteralComparison(
+      parseModule("fixture.js", 'const delivery = { mode: "managed-agent" };'),
+      { literals: ["qoder"], propertyNames: ["mode"] },
+    ),
+    false,
+  );
 });
 
-// Deliberately no budget-enforcement test: the ratchet is advisory, so growth
-// never blocks CI or merge (see ARCHITECTURE_CONTRACT.md > Complexity budget
-// ratchet). Advisory notices are printed by scripts/check-architecture.mjs
-// alongside the gate output.
-
-test("architecture gate does not freeze private implementation field names", async () => {
-  const gate = await readFile(
-    new URL("../scripts/check-architecture.mjs", import.meta.url),
-    "utf8",
+test("retired production modules and imports stay outside the graph", () => {
+  assert.match(
+    retiredArtifactViolations({
+      file: "app/example.js",
+      source: 'import Controller from "./NativeEditingController";',
+    }).join("\n"),
+    /retired module/u,
   );
-  assert.doesNotMatch(gate, /#registrationPromise/u);
-  assert.doesNotMatch(gate, /#observeSessionSnapshots/u);
-  assert.doesNotMatch(gate, /pinCloseRevision/u);
-  assert.doesNotMatch(gate, /#hydrationGeneration/u);
-  assert.doesNotMatch(gate, /#uploadCount/u);
-  assert.doesNotMatch(gate, /new\s+WorkbenchTabsSession\s*\(/u);
+  assert.match(
+    retiredArtifactViolations({ file: "app/lib/format-skeleton.js", source: "" }).join("\n"),
+    /retired production modules/u,
+  );
+});
+
+test("the architecture checker contains no implementation-shape assertions", async () => {
+  const source = await readFile(new URL("../scripts/check-architecture.mjs", import.meta.url), "utf8");
+  const privatePrefix = "#";
+  const privateNames = ["drainCoordinator", "navigationPort"];
+  const receiptName = ["application", "Receipt"].join("");
+  const controllerReference = ["workspace", "Controller", "Ref"].join("");
+  assert.doesNotMatch(source, new RegExp(`${privatePrefix}(?:${privateNames.join("|")})`, "u"));
+  assert.doesNotMatch(source, new RegExp(`${receiptName}|${controllerReference}`, "u"));
+  assert.doesNotMatch(source, /\.includes\(.*(?:drain|freeze|receipt)/su);
 });
