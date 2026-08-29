@@ -380,6 +380,7 @@ function projectFileHttpError(cause) {
       "REGISTRY_BUSY",
       "REGISTERED_PROJECT_RACE",
       "WORKING_COPY_VERSION_MISMATCH",
+      "SOURCE_ELEMENT_IDENTITY_LOST",
       "HISTORY_ACTIVATION_PREDECESSOR_CONFLICT",
       "HISTORY_ACTIVATION_RECEIPT_MISMATCH",
       "REQUEST_RUNTIME_ANCHOR_MISMATCH",
@@ -1031,6 +1032,9 @@ async function saveProjectFileAutosave(body) {
         "expectedSourceSha256",
       ),
       editRevision,
+      sourceHistoryOperations: Array.isArray(body.sourceHistoryOperations)
+        ? body.sourceHistoryOperations
+        : [],
     });
   } catch (cause) {
     throw projectFileHttpError(cause);

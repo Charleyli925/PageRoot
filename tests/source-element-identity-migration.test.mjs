@@ -33,6 +33,36 @@ function deterministicUuidFactory() {
   };
 }
 
+function exactSourceHistoryOperation(beforeHtml, afterHtml, {
+  startOffset = 0,
+  endOffset = beforeHtml.length,
+  kind = "reorder",
+} = {}) {
+  const before = beforeHtml.slice(startOffset, endOffset);
+  const after = afterHtml.slice(
+    startOffset,
+    afterHtml.length - (beforeHtml.length - endOffset),
+  );
+  return {
+    operationId: "sourceop_identity_reorder_001",
+    kind,
+    editRevision: 1,
+    createdAt: "2026-08-29T00:00:00.000Z",
+    beforeSourceSha256: sha256(Buffer.from(beforeHtml)),
+    afterSourceSha256: sha256(Buffer.from(afterHtml)),
+    forwardPatches: [{ startOffset, endOffset, before, after, kind: "replace" }],
+    reversePatches: [{
+      startOffset,
+      endOffset: startOffset + after.length,
+      before: after,
+      after: before,
+      kind: "replace",
+    }],
+    beforeTarget: null,
+    afterTarget: null,
+  };
+}
+
 function fileIdentity(information) {
   return {
     device: String(information.dev),
@@ -141,19 +171,25 @@ test("identity materialization refuses malformed and duplicate authored identiti
   );
 });
 
-test("an identity-preserving save assigns IDs only to newly authored elements", () => {
+test("an identity-preserving save accepts only pre-identified additions", () => {
   const current = materializeSourceElementIdentity(RAW_HTML, {
     randomUUIDFactory: deterministicUuidFactory(),
   }).html;
-  const next = current.replace("</body>", "<br></body>");
-  const saved = materializeIdentityPreservingSave(current, next, {
-    randomUUIDFactory: () => "00000000-0000-4000-8000-999999999999",
-  });
+  const newId = "pr1_99999999999949998999999999999999";
+  const next = current.replace(
+    "</body>",
+    `<br data-pageroot-id="${newId}"></body>`,
+  );
+  const saved = materializeIdentityPreservingSave(current, next);
 
-  assert.equal(saved.addedElementCount, 1);
-  assert.match(
-    saved.html,
-    /<br data-pageroot-id="pr1_00000000000040008000999999999999">/u,
+  assert.equal(saved.changed, false);
+  assert.equal(saved.addedElementCount, 0);
+  assert.equal(saved.html, next);
+  const unidentifiedAddition = current.replace("</body>", "<br></body>");
+  assert.throws(
+    () => materializeIdentityPreservingSave(current, unidentifiedAddition),
+    (error) => error?.code === "SOURCE_ELEMENT_IDENTITY_LOST"
+      && error.details.missingElementCount === 1,
   );
   for (const pagerootId of inspectSourceElementIdentity(current).claimedIds) {
     assert.equal(saved.identity.claimedIds.has(pagerootId), true);
@@ -164,6 +200,77 @@ test("an identity-preserving save assigns IDs only to newly authored elements", 
     (error) => error?.code === "SOURCE_ELEMENT_IDENTITY_LOST"
       && error.details.lostIds.length === 1,
   );
+});
+
+test("an identity-preserving save rejects swapped and transplanted IDs", () => {
+  const current = materializeSourceElementIdentity(
+    "<!doctype html><html><head><title>IDs</title></head><body><p>first</p><p>second</p></body></html>",
+    { randomUUIDFactory: deterministicUuidFactory() },
+  ).html;
+  const paragraphIds = inspectSourceElementIdentity(current).elements
+    .filter((element) => element.tagName === "p")
+    .map((element) => element.pagerootId);
+  assert.equal(paragraphIds.length, 2);
+  const [firstId, secondId] = paragraphIds;
+  const swapped = current
+    .replace(firstId, "__pageroot_first_id__")
+    .replace(secondId, firstId)
+    .replace("__pageroot_first_id__", secondId);
+  assert.throws(
+    () => materializeIdentityPreservingSave(current, swapped),
+    (error) => error?.code === "SOURCE_ELEMENT_IDENTITY_LOST"
+      && error.details.bindingIssues.some(
+        (issue) => issue.code === "PAGEROOT_ID_SOURCE_ORDER_CHANGED",
+      ),
+  );
+  assert.throws(
+    () => materializeIdentityPreservingSave(current, swapped, {
+      sourceHistoryOperations: [exactSourceHistoryOperation(current, swapped)],
+    }),
+    (error) => error?.code === "SOURCE_ELEMENT_IDENTITY_LOST"
+      && error.details.changedElementBytes.length === 2,
+  );
+
+  const transplanted = current
+    .replace(` data-pageroot-id="${firstId}"`, "")
+    .replace(
+      `<p data-pageroot-id="${secondId}">second</p>`,
+      `<p data-pageroot-id="${firstId}">new</p>`
+        + `<p data-pageroot-id="${secondId}">second</p>`,
+    );
+  assert.throws(
+    () => materializeIdentityPreservingSave(current, transplanted),
+    (error) => error?.code === "SOURCE_ELEMENT_IDENTITY_LOST"
+      && error.details.lostIds.length === 0
+      && error.details.missingElementCount === 1,
+  );
+});
+
+test("an exact source-history reorder preserves each moved element's identity", () => {
+  const current = materializeSourceElementIdentity(
+    "<!doctype html><html><head><title>Move</title></head><body><p>first</p><p>second</p></body></html>",
+    { randomUUIDFactory: deterministicUuidFactory() },
+  ).html;
+  const paragraphs = [...current.matchAll(
+    /<p data-pageroot-id="pr1_[0-9a-f]{32}">[^<]+<\/p>/gu,
+  )].map((match) => match[0]);
+  assert.equal(paragraphs.length, 2);
+  const beforeBlock = paragraphs.join("");
+  const afterBlock = [...paragraphs].reverse().join("");
+  const startOffset = current.indexOf(beforeBlock);
+  const moved = current.slice(0, startOffset)
+    + afterBlock
+    + current.slice(startOffset + beforeBlock.length);
+  const operation = exactSourceHistoryOperation(current, moved, {
+    startOffset,
+    endOffset: startOffset + beforeBlock.length,
+  });
+
+  const saved = materializeIdentityPreservingSave(current, moved, {
+    sourceHistoryOperations: [operation],
+  });
+  assert.equal(saved.html, moved);
+  assert.equal(saved.identity.complete, true);
 });
 
 test("a new import writes identified Working Copy bytes without changing the external file or V1", async (t) => {
@@ -365,6 +472,29 @@ test("a normal save cannot publish HTML that drops the adopted identity contract
       editRevision: 1,
     }),
     (error) => error?.code === "SOURCE_ELEMENT_IDENTITY_LOST",
+  );
+  assert.equal(await readFile(imported.target.exactSourcePath, "utf8"), before);
+});
+
+test("a normal save cannot swap identities between source elements", async (t) => {
+  const value = await fixture(t);
+  const imported = await importSource(value, "save-identity-swap.html", RAW_HTML);
+  const before = await readFile(imported.target.exactSourcePath, "utf8");
+  const [firstId, secondId] = [...inspectSourceElementIdentity(before).claimedIds];
+  const swapped = before
+    .replace(firstId, "__pageroot_first_id__")
+    .replace(secondId, firstId)
+    .replace("__pageroot_first_id__", secondId);
+
+  await assert.rejects(
+    value.repository.saveWorkingCopy({
+      target: imported.target,
+      html: swapped,
+      expectedSourceSha256: imported.target.sourceSha256,
+      editRevision: 1,
+    }),
+    (error) => error?.code === "SOURCE_ELEMENT_IDENTITY_LOST"
+      && error.details.bindingIssues.length > 0,
   );
   assert.equal(await readFile(imported.target.exactSourcePath, "utf8"), before);
 });

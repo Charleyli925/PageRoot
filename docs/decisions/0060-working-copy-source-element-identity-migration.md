@@ -47,14 +47,20 @@ leave mixed or externally overwritten HTML.
    matching neither side fail closed and are never overwritten. A committed
    transaction is audit evidence; its temporary recovery directory is removed.
 6. A normal save from an identity-v1 Working Copy must preserve every identity
-   claimed by its current source. Existing edit operations may author a new
-   wrapper or line-break element before the semantic-operation PRs land, so the
-   Repository assigns identities only to otherwise valid missing-ID additions
-   before publication. A malformed, duplicate or missing prior claim fails
-   closed. This PR does not convert TargetRef, comments, undo/redo, AI identity
-   continuity or Review pairing; those remain dependent PRs. Until ID-based
-   Review lands, its legacy exact-subtree signature treats every PageRoot
-   attribute, including the persistent ID, as disposable comparison metadata.
+   claimed by its current source. Existing edit planners allocate identities for
+   new wrappers and line-break elements before autosave; the Repository accepts
+   only a complete next document and never guesses whether a missing element is
+   new or an existing element whose ID was transplanted. It also verifies that
+   retained IDs keep their tag, retained source order and nearest retained
+   ancestor. The existing sibling-reorder capability is allowed only when the
+   autosave's bounded SourcePatch history exactly replays from current bytes to
+   next bytes and every relocated ID keeps its complete source-element bytes;
+   editing or swapping ID values cannot masquerade as a move. Later semantic
+   operation PRs can replace this compatibility authorization. This PR does not
+   convert TargetRef, comments, undo/redo, AI identity continuity or Review
+   pairing; those remain dependent PRs. Until ID-based Review lands, its legacy
+   exact-subtree signature treats every PageRoot attribute, including the
+   persistent ID, as disposable comparison metadata.
 
 ## Consequences
 

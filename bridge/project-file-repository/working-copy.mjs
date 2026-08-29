@@ -23,6 +23,9 @@ import {
   generatePagerootElementId,
   isValidPagerootElementId,
 } from "../../shared/pageroot-element-identity.mjs";
+import {
+  validateSourceHistoryOperationBytes,
+} from "../../shared/source-history.mjs";
 
 import {
   PROJECT_FILE_SCHEMA_VERSION,
@@ -69,7 +72,7 @@ function startTagClosingDelimiterOffset(source, startTag) {
 export function inspectSourceElementIdentity(html) {
   const source = String(html);
   const parsed = parseHtmlSource(source);
-  const elements = parsed.elements.flatMap((token) => {
+  const inspectedElements = parsed.elements.flatMap((token) => {
     const startTag = token.node?.sourceCodeLocation?.startTag;
     if (
       !Number.isInteger(startTag?.startOffset)
@@ -92,9 +95,13 @@ export function inspectSourceElementIdentity(html) {
       (attribute) => attribute.name === PAGEROOT_ELEMENT_ID_ATTRIBUTE,
     );
     return [{
+      node: token.node,
       tagName: token.name,
       startOffset: startTag.startOffset,
       endOffset: startTag.endOffset,
+      sourceEndOffset: Number.isInteger(token.node?.sourceCodeLocation?.endOffset)
+        ? token.node.sourceCodeLocation.endOffset
+        : startTag.endOffset,
       closingDelimiterOffset,
       identityAttributes,
       pagerootId: identityAttributes.length === 1
@@ -102,6 +109,29 @@ export function inspectSourceElementIdentity(html) {
         : null,
     }];
   });
+  const elementIndexByNode = new Map(
+    inspectedElements.map((element, index) => [element.node, index]),
+  );
+  const parentElementByNode = new Map();
+  const visitAuthoredChildren = (node, authoredParent = null) => {
+    for (const child of node?.childNodes ?? []) {
+      const explicitElement = elementIndexByNode.has(child);
+      if (explicitElement) parentElementByNode.set(child, authoredParent);
+      visitAuthoredChildren(child, explicitElement ? child : authoredParent);
+    }
+    if (node?.content) {
+      visitAuthoredChildren(
+        node.content,
+        elementIndexByNode.has(node) ? node : authoredParent,
+      );
+    }
+  };
+  visitAuthoredChildren(parsed.document);
+  const elements = inspectedElements.map(({ node, ...element }, sourceOrder) => ({
+    ...element,
+    sourceOrder,
+    parentElementIndex: elementIndexByNode.get(parentElementByNode.get(node)) ?? null,
+  }));
 
   const issues = [];
   const claims = new Map();
@@ -162,6 +192,140 @@ export function inspectSourceElementIdentity(html) {
     issues,
     parseErrors: parsed.parseErrors,
   };
+}
+
+function identityElementMap(inspection) {
+  return new Map(
+    inspection.elements
+      .filter((element) => isValidPagerootElementId(element.pagerootId))
+      .map((element) => [element.pagerootId, element]),
+  );
+}
+
+function nearestRetainedAncestorId(inspection, element, retainedIds) {
+  let parentIndex = element.parentElementIndex;
+  while (Number.isInteger(parentIndex)) {
+    const parent = inspection.elements[parentIndex];
+    if (!parent) return null;
+    if (retainedIds.has(parent.pagerootId)) return parent.pagerootId;
+    parentIndex = parent.parentElementIndex;
+  }
+  return null;
+}
+
+function identityBindingIssues(currentIdentity, nextIdentity) {
+  const retainedIds = currentIdentity.claimedIds;
+  const currentById = identityElementMap(currentIdentity);
+  const nextById = identityElementMap(nextIdentity);
+  const issues = [];
+  for (const pagerootId of retainedIds) {
+    const current = currentById.get(pagerootId);
+    const next = nextById.get(pagerootId);
+    if (!current || !next) continue;
+    if (current.tagName !== next.tagName) {
+      issues.push({
+        code: "PAGEROOT_ID_TAG_CHANGED",
+        pagerootId,
+        currentTagName: current.tagName,
+        nextTagName: next.tagName,
+      });
+    }
+    const currentParentId = nearestRetainedAncestorId(
+      currentIdentity,
+      current,
+      retainedIds,
+    );
+    const nextParentId = nearestRetainedAncestorId(nextIdentity, next, retainedIds);
+    if (currentParentId !== nextParentId) {
+      issues.push({
+        code: "PAGEROOT_ID_PARENT_CHANGED",
+        pagerootId,
+        currentParentId,
+        nextParentId,
+      });
+    }
+  }
+  const currentOrder = currentIdentity.elements.map((element) => element.pagerootId);
+  const nextOrder = nextIdentity.elements
+    .map((element) => element.pagerootId)
+    .filter((pagerootId) => retainedIds.has(pagerootId));
+  for (let index = 0; index < currentOrder.length; index += 1) {
+    if (currentOrder[index] === nextOrder[index]) continue;
+    issues.push({
+      code: "PAGEROOT_ID_SOURCE_ORDER_CHANGED",
+      sourceOrder: index,
+      currentPagerootId: currentOrder[index] ?? null,
+      nextPagerootId: nextOrder[index] ?? null,
+    });
+  }
+  return issues;
+}
+
+function assertBindingChangesAreAuthorized(currentHtml, nextHtml, sourceHistoryOperations) {
+  let steps;
+  try {
+    steps = validateSourceHistoryOperationBytes(
+      sourceHistoryOperations,
+      currentHtml,
+      nextHtml,
+      (value) => sha256(Buffer.from(value, "utf8")),
+    );
+  } catch (cause) {
+    throw new ProjectFileRepositoryError(
+      "SOURCE_ELEMENT_IDENTITY_LOST",
+      "The save's source operation evidence does not reproduce its HTML.",
+      { sourceHistoryError: cause?.code || "SOURCE_HISTORY_INVALID" },
+    );
+  }
+  for (const step of steps) {
+    const beforeIdentity = inspectSourceElementIdentity(step.beforeHtml);
+    const afterIdentity = inspectSourceElementIdentity(step.afterHtml);
+    if (!beforeIdentity.complete || !afterIdentity.complete) {
+      throw new ProjectFileRepositoryError(
+        "SOURCE_ELEMENT_IDENTITY_LOST",
+        "A source operation would create an incomplete identity set.",
+        {
+          operationId: step.operation.operationId,
+          beforeStatus: beforeIdentity.status,
+          afterStatus: afterIdentity.status,
+        },
+      );
+    }
+    const bindingIssues = identityBindingIssues(beforeIdentity, afterIdentity);
+    if (bindingIssues.length === 0) continue;
+    if (step.operation.kind !== "reorder") {
+      throw new ProjectFileRepositoryError(
+        "SOURCE_ELEMENT_IDENTITY_LOST",
+        "Only an exact reorder operation may relocate persistent identities.",
+        { operationId: step.operation.operationId, bindingIssues },
+      );
+    }
+    const beforeById = identityElementMap(beforeIdentity);
+    const afterById = identityElementMap(afterIdentity);
+    const changedIds = new Set(bindingIssues.flatMap((issue) => [
+      issue.pagerootId,
+      issue.currentPagerootId,
+      issue.nextPagerootId,
+    ]).filter((pagerootId) => beforeIdentity.claimedIds.has(pagerootId)));
+    const changedElementBytes = [...changedIds].filter((pagerootId) => {
+      const before = beforeById.get(pagerootId);
+      const after = afterById.get(pagerootId);
+      if (!before || !after) return true;
+      return step.beforeHtml.slice(before.startOffset, before.sourceEndOffset)
+        !== step.afterHtml.slice(after.startOffset, after.sourceEndOffset);
+    });
+    if (changedElementBytes.length > 0) {
+      throw new ProjectFileRepositoryError(
+        "SOURCE_ELEMENT_IDENTITY_LOST",
+        "A reorder operation changed the source element bytes owned by a persistent identity.",
+        {
+          operationId: step.operation.operationId,
+          changedElementBytes,
+          bindingIssues,
+        },
+      );
+    }
+  }
 }
 
 export function materializeSourceElementIdentity(html, {
@@ -252,12 +416,33 @@ export function materializeIdentityPreservingSave(currentHtml, nextHtml, options
   const lostIds = [...currentIdentity.claimedIds].filter(
     (pagerootId) => !nextIdentity.claimedIds.has(pagerootId),
   );
-  if (lostIds.length > 0) {
+  if (lostIds.length > 0 || nextIdentity.missingElementCount > 0) {
     throw new ProjectFileRepositoryError(
       "SOURCE_ELEMENT_IDENTITY_LOST",
       "The save would remove persistent identities from existing source elements.",
-      { lostIds },
+      {
+        lostIds,
+        missingElementCount: nextIdentity.missingElementCount,
+        missingElements: nextIdentity.missing.map((element) => ({
+          tagName: element.tagName,
+          startOffset: element.startOffset,
+        })),
+      },
     );
+  }
+  const bindingIssues = identityBindingIssues(currentIdentity, nextIdentity);
+  if (bindingIssues.length > 0) {
+    const sourceHistoryOperations = Array.isArray(options.sourceHistoryOperations)
+      ? options.sourceHistoryOperations
+      : [];
+    if (sourceHistoryOperations.length === 0) {
+      throw new ProjectFileRepositoryError(
+        "SOURCE_ELEMENT_IDENTITY_LOST",
+        "The save would move persistent identities without source operation evidence.",
+        { lostIds: [], bindingIssues },
+      );
+    }
+    assertBindingChangesAreAuthorized(currentHtml, nextHtml, sourceHistoryOperations);
   }
   return materializeSourceElementIdentity(nextHtml, options);
 }

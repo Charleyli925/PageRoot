@@ -298,12 +298,14 @@ export class ProjectFileRepository {
     html,
     expectedSourceSha256,
     editRevision = 0,
+    sourceHistoryOperations = [],
   } = {}) {
     return this.#serial(() => this.#saveWorkingCopy({
       target,
       html,
       expectedSourceSha256,
       editRevision,
+      sourceHistoryOperations,
     }));
   }
 
@@ -4462,7 +4464,13 @@ export class ProjectFileRepository {
     return matches[0] || null;
   }
 
-  async #saveWorkingCopy({ target, html, expectedSourceSha256, editRevision }) {
+  async #saveWorkingCopy({
+    target,
+    html,
+    expectedSourceSha256,
+    editRevision,
+    sourceHistoryOperations,
+  }) {
     const loaded = await this.#resolveMutationTarget(target);
     const expected = assertSha256(expectedSourceSha256, "expectedSourceSha256");
     let nextHtml = String(html || "");
@@ -4488,6 +4496,7 @@ export class ProjectFileRepository {
       nextHtml = materializeIdentityPreservingSave(
         loaded.source.html,
         nextHtml,
+        { sourceHistoryOperations },
       ).html;
     }
     const nextBuffer = Buffer.from(nextHtml, "utf8");
