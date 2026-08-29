@@ -450,8 +450,9 @@ export default function AiReviewWorkspace({
     useState<ReviewDesktopSessionResult | null>(null);
   const [commentLayoutState, setCommentLayoutState] = useState<{
     documents: ReviewDocuments;
+    reloadRevision: number;
     layouts: ReviewCommentLayout[];
-  }>({ documents, layouts: [] });
+  }>({ documents, reloadRevision, layouts: [] });
   const continueReviewButtonRef = useRef<HTMLButtonElement>(null);
   const confirmationTriggerRef = useRef<HTMLButtonElement | null>(null);
   const confirmDialogRef = useRef<HTMLElement>(null);
@@ -514,6 +515,7 @@ export default function AiReviewWorkspace({
     ? desktopSessionResult.failed
     : false;
   const reviewCommentLayouts = commentLayoutState.documents === documents
+    && commentLayoutState.reloadRevision === reloadRevision
     ? commentLayoutState.layouts
     : [];
   const reviewChanges = documents.changes;
@@ -724,9 +726,9 @@ export default function AiReviewWorkspace({
     closeReviewCommentChannel();
     // A manual reload replaces both iframes without replacing the Review
     // documents. The private comment MessagePort belongs to the old before
-    // frame, so reset both the channel and its measured layouts on every frame
-    // generation before allowing the replacement frame to negotiate a new one.
-    setCommentLayoutState({ documents, layouts: [] });
+    // frame, so reset it on every frame generation before allowing the
+    // replacement frame to negotiate a new one. Layouts are generation-keyed
+    // above, so stale measurements stay hidden without an effect-time update.
     const drainRegisteredFrames = () => {
       (["before", "after"] as ReviewSide[]).forEach((side) => {
         const frame = framesRef.current[side];
@@ -1041,6 +1043,7 @@ export default function AiReviewWorkspace({
         const allowedKeys = new Set(documents.commentGroups.map((group) => group.key));
         setCommentLayoutState({
           documents,
+          reloadRevision,
           layouts: safeReviewCommentLayouts(message.commentLayouts, allowedKeys),
         });
         return;
@@ -1107,6 +1110,7 @@ export default function AiReviewWorkspace({
     relayHorizontalWheel,
     reviewChanges,
     reviewOutline,
+    reloadRevision,
     selectChange,
     sendState,
     sessionId,
