@@ -9,10 +9,12 @@ import {
   PAGEROOT_ELEMENT_ID_SCHEMA_VERSION,
   PagerootElementIdentityError,
   buildSourceIndex,
+  createTargetRef,
   generatePagerootElementId,
   isEphemeralPagerootAttribute,
   isPersistentPagerootAttribute,
   isValidPagerootElementId,
+  resolveTargetRef,
 } from "../app/lib/source-patch-core.js";
 
 const ID_A = "pr1_11111111111141118111111111111111";
@@ -110,11 +112,6 @@ test("SourceIndex reports repeated, malformed, and conflicting identities withou
   );
   assert.equal(duplicate?.pagerootId, null);
   assert.equal(duplicate?.stableAttributes[PAGEROOT_ELEMENT_ID_ATTRIBUTE], ID_A);
-  assert.equal(
-    index.elements.find((element) => element.tagName === "span")
-      ?.stableAttributes["data-pageroot-review-id"],
-    undefined,
-  );
   assert.deepEqual(
     index.pagerootIdentity.issues.find(
       (issue) => issue.code === "PAGEROOT_ID_DUPLICATE_VALUE",
@@ -137,6 +134,22 @@ test("a valid value inside a repeated attribute group still blocks a conflicting
   assert.equal(conflict?.pagerootId, ID_A);
   assert.equal(conflict?.nodeIds.length, 2);
   assert.equal(conflict?.attributeRanges.length, 2);
+});
+
+test("legacy TargetRefs retain ephemeral PageRoot attributes as compatibility evidence", () => {
+  const html = `<main><section data-pageroot-review-id="legacy-review"><h2>旧评论目标</h2></section></main>`;
+  const baseIndex = buildSourceIndex(html);
+  const section = baseIndex.elements.find((element) => element.tagName === "section");
+  const legacyTargetRef = createTargetRef(baseIndex, section.nodeId);
+
+  assert.equal(
+    legacyTargetRef.fingerprint.stableAttributes["data-pageroot-review-id"],
+    "legacy-review",
+  );
+  assert.match(legacyTargetRef.selector, /data-pageroot-review-id/u);
+  const shifted = resolveTargetRef(buildSourceIndex(`<!-- shift -->${html}`), legacyTargetRef);
+  assert.equal(shifted.resolution, "rebound");
+  assert.equal(shifted.target?.tagName, "section");
 });
 
 test("legacy HTML remains byte-for-byte untouched and is reported as identity-absent", () => {

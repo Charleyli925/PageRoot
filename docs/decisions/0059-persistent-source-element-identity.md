@@ -21,7 +21,9 @@ opened.
 
 1. The only persistent PageRoot-owned HTML attribute is
    `data-pageroot-id`. Every other `data-pageroot-*` attribute is ephemeral
-   instrumentation and must not be treated as a saved source fact.
+   instrumentation and must not be emitted as a saved source fact. The legacy
+   TargetRef resolver may still read an existing literal occurrence as
+   compatibility evidence; doing so does not make that attribute persistent.
 2. Identity schema v1 values use `pr1_` followed by the 32 lowercase
    hexadecimal digits of a cryptographically generated UUID v4. The version is
    explicit, the value carries no tag, path, source offset, project or user

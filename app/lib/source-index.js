@@ -5,7 +5,6 @@ import { parseHtmlSource } from "../../bridge/html-source-parser.mjs";
 import {
   PAGEROOT_ELEMENT_ID_ATTRIBUTE,
   PAGEROOT_ELEMENT_ID_SCHEMA_VERSION,
-  isEphemeralPagerootAttribute,
   isValidPagerootElementId,
 } from "./pageroot-element-identity.js";
 
@@ -256,7 +255,6 @@ function stableAttributesFor(attributes) {
   for (const [name, group] of grouped) {
     if (group.length !== 1 || group[0].rawValue === null) continue;
     if (name === SOURCE_NODE_ATTRIBUTE) continue;
-    if (isEphemeralPagerootAttribute(name)) continue;
     if (
       STABLE_ATTRIBUTE_NAMES.has(name)
       || name.startsWith("data-")
