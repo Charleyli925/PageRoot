@@ -11,7 +11,7 @@ import type { MoveAvailability } from "./html-canvas-selection";
 import type {
   EditableStyleProperty,
   SelectedStyle,
-} from "./html-canvas-style-inspector";
+} from "./html-canvas-computed-style";
 import type {
   CanvasCapabilityHoverSnapshot,
   CanvasHoverHintPlacement,

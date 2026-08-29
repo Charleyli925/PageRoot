@@ -67,13 +67,12 @@ import {
   sameNativeTextStyle,
 } from "./native-layout-fingerprint";
 import {
+  readComputedEditableStyle,
   STYLE_PROPERTY_CONFIGS,
   TEXT_RANGE_EDITABLE_PROPERTIES,
-  styleSourcesForElement,
-  toHexColor,
   type EditableStyleProperty,
   type SelectedStyle,
-} from "./html-canvas-style-inspector";
+} from "./html-canvas-computed-style";
 import {
   deterministicOperationTargetUpdate,
   deterministicTargetUpdates,
@@ -492,6 +491,16 @@ type FinishNativeEditingOptions = {
 
 type SourcePatchCommand = Parameters<typeof planSourcePatch>[0];
 type SourcePatchPlan = NonNullable<ReturnType<typeof planSourcePatch>>;
+type InlineStylePriority = "" | "important";
+type InlineStyleFacts = {
+  inlineValue: string | null;
+  inlinePriority: InlineStylePriority;
+  computedValue: string;
+};
+type InlineStyleOverride = {
+  priority: InlineStylePriority;
+  computedValue: string;
+};
 type PagePresentationActionCache = {
   target: HtmlCanvasSelection;
   sourceIndex: ReturnType<typeof buildSourceIndex>;
@@ -501,6 +510,122 @@ type PagePresentationActionCache = {
   currentContext: PageViewContext | null;
   action: PagePresentationAction | null;
 };
+
+function computedCssValue(element: HTMLElement, cssProperty: string): string {
+  return element.ownerDocument.defaultView
+    ?.getComputedStyle(element)
+    .getPropertyValue(cssProperty)
+    .trim() || "";
+}
+
+function inlineStyleFacts(element: HTMLElement, cssProperty: string): InlineStyleFacts {
+  const inlineValue = element.style.getPropertyValue(cssProperty).trim();
+  const priority = element.style.getPropertyPriority(cssProperty);
+  return {
+    inlineValue: inlineValue || null,
+    inlinePriority: priority === "important" ? "important" : "",
+    computedValue: computedCssValue(element, cssProperty),
+  };
+}
+
+function restoreStyleAttribute(element: HTMLElement, styleAttribute: string | null): void {
+  if (styleAttribute === null) element.removeAttribute("style");
+  else element.setAttribute("style", styleAttribute);
+}
+
+function runInlineStyleMutation<T>(
+  activeNativeEdit: Pick<ActiveNativeEdit, "session"> | null,
+  operation: () => T,
+): T | undefined {
+  return activeNativeEdit
+    ? activeNativeEdit.session.runExpectedMutation(operation)
+    : operation();
+}
+
+function expectedInlineComputedValue(
+  element: HTMLElement,
+  cssProperty: string,
+  value: string,
+  activeNativeEdit: Pick<ActiveNativeEdit, "session"> | null,
+): string | null {
+  return runInlineStyleMutation(activeNativeEdit, () => {
+    const previousStyle = element.getAttribute("style");
+    try {
+      // Resolve the requested value on the real target so structural selectors
+      // such as :last-child remain unchanged during the browser comparison.
+      // Inline !important is only a temporary canonicalization step; the exact
+      // original style attribute is restored before normal/important trials.
+      element.style.setProperty(cssProperty, value, "important");
+      if (value.trim() && !element.style.getPropertyValue(cssProperty).trim()) return null;
+      return computedCssValue(element, cssProperty) || null;
+    } finally {
+      restoreStyleAttribute(element, previousStyle);
+    }
+  }) ?? null;
+}
+
+function verifyInlineStyleOverride(
+  element: HTMLElement,
+  cssProperty: string,
+  value: string,
+  activeNativeEdit: Pick<ActiveNativeEdit, "session"> | null,
+): InlineStyleOverride | null {
+  const expectedValue = expectedInlineComputedValue(
+    element,
+    cssProperty,
+    value,
+    activeNativeEdit,
+  );
+  if (expectedValue === null) return null;
+
+  const tryPriority = (priority: InlineStylePriority): string | null => (
+    runInlineStyleMutation(activeNativeEdit, () => {
+      const previousStyle = element.getAttribute("style");
+      try {
+        element.style.setProperty(cssProperty, value, priority);
+        if (value.trim() && !element.style.getPropertyValue(cssProperty).trim()) {
+          return null;
+        }
+        const actualValue = computedCssValue(element, cssProperty);
+        return actualValue === expectedValue ? actualValue : null;
+      } finally {
+        restoreStyleAttribute(element, previousStyle);
+      }
+    }) ?? null
+  );
+
+  const ordinaryValue = tryPriority("");
+  if (ordinaryValue !== null) return { priority: "", computedValue: ordinaryValue };
+  const importantValue = tryPriority("important");
+  if (importantValue !== null) {
+    return { priority: "important", computedValue: importantValue };
+  }
+  return null;
+}
+
+function verifyInlineStyleOverrideForTargets(
+  elements: readonly HTMLElement[],
+  cssProperty: string,
+  value: string,
+  activeNativeEdit: Pick<ActiveNativeEdit, "session"> | null,
+): InlineStyleOverride | null {
+  let resolved: InlineStyleOverride | null = null;
+  for (const element of elements) {
+    const candidate = verifyInlineStyleOverride(
+      element,
+      cssProperty,
+      value,
+      activeNativeEdit,
+    );
+    if (!candidate) return null;
+    resolved = resolved && resolved.priority === "important"
+      ? resolved
+      : candidate.priority === "important"
+        ? candidate
+        : resolved || candidate;
+  }
+  return resolved;
+}
 
 const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProps>(function HtmlCanvasEditor(
   {
@@ -733,7 +858,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     isBold: false,
     isItalic: false,
     isUnderline: false,
-    sources: [],
   });
   const [moveAvailability, setMoveAvailability] = useState<MoveAvailability>({ up: false, down: false });
   const [isEditing, setIsEditing] = useState(false);
@@ -1056,34 +1180,10 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     const styleElement = activeStyleElements[0] ?? element;
     const view = styleElement?.ownerDocument.defaultView;
     if (!element || !styleElement || !view) return;
-    const computedStyle = view.getComputedStyle(styleElement);
-    const rangeComputedStyles = activeStyleElements.length > 0
-      ? activeStyleElements.map((candidate) => view.getComputedStyle(candidate))
-      : [computedStyle];
-    const styleIsBold = (candidate: CSSStyleDeclaration) => (
-      candidate.fontWeight === "bold" || Number.parseInt(candidate.fontWeight, 10) >= 600
-    );
-    const styleIsItalic = (candidate: CSSStyleDeclaration) => (
-      candidate.fontStyle === "italic" || candidate.fontStyle === "oblique"
-    );
-    const styleIsUnderline = (candidate: CSSStyleDeclaration) => (
-      candidate.textDecorationLine.split(/\s+/u).includes("underline")
-    );
-    setSelectedStyle({
-      fontSize: Math.max(1, Math.round(Number.parseFloat(computedStyle.fontSize) || 16)),
-      color: toHexColor(computedStyle.color, "#202124"),
-      backgroundColor: toHexColor(computedStyle.backgroundColor, "#ffffff"),
-      padding: Math.round(Number.parseFloat(computedStyle.paddingTop) || 0),
-      margin: Math.round(Number.parseFloat(computedStyle.marginTop) || 0),
-      lineHeight: Math.max(
-        1,
-        Math.round(Number.parseFloat(computedStyle.lineHeight) || Number.parseFloat(computedStyle.fontSize) * 1.5),
-      ),
-      isBold: rangeComputedStyles.every(styleIsBold),
-      isItalic: rangeComputedStyles.every(styleIsItalic),
-      isUnderline: rangeComputedStyles.every(styleIsUnderline),
-      sources: styleSourcesForElement(styleElement),
-    });
+    setSelectedStyle(readComputedEditableStyle(
+      styleElement,
+      activeStyleElements.length > 0 ? activeStyleElements : undefined,
+    ));
   }, []);
 
   const updateMoveAvailability = useCallback(() => {
@@ -1538,6 +1638,19 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       "data-edit-block-detail",
       rawDetail.slice(0, 240),
     );
+  }, []);
+
+  const reportInlineStyleOverrideFailure = useCallback(() => {
+    const message = "这个样式无法通过当前元素的局部修改可靠生效。可以把修改要求交给 Agent，由 Agent 调整页面样式结构。";
+    setEditFeedback({
+      code: "canvas_c02_style_override",
+      title: "暂时不能直接修改这个样式",
+      message,
+      tone: "warning",
+      sticky: false,
+      recovery: "none",
+    });
+    onEditBlockedRef.current?.(message);
   }, []);
 
   const applySourceCommand = useCallback((
@@ -4749,10 +4862,8 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     ) => {
       let element = selectedElementRef.current;
       if (readOnlyRef.current || !element) return;
-      let view = element.ownerDocument.defaultView;
       const config = STYLE_PROPERTY_CONFIGS.find((entry) => entry.property === property);
       if (!config) return;
-      const sourceInfo = selectedStyle.sources.find((entry) => entry.property === property);
       let activeNativeEdit = activeNativeEditRef.current;
       if (
         activeNativeEdit
@@ -4779,7 +4890,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           ));
           return;
         }
-        view = element.ownerDocument.defaultView;
         refreshNativeEditRangeState(
           activeNativeEdit,
           activeNativeEdit.session.getSelection(),
@@ -4815,17 +4925,30 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           ));
           return;
         }
-        view = element.ownerDocument.defaultView;
       }
       if (
         activeNativeEdit
         && activeRange
         && TEXT_RANGE_EDITABLE_PROPERTIES.has(property)
       ) {
+        const styleTargets = activeRange.styleElements.filter(
+          (candidate) => candidate.isConnected,
+        );
+        const styleTarget = styleTargets[0] || element;
+        const verifiedOverride = verifyInlineStyleOverrideForTargets(
+          styleTargets.length > 0 ? styleTargets : [styleTarget],
+          config.cssProperty,
+          value,
+          activeNativeEdit,
+        );
+        if (!verifiedOverride) {
+          reportInlineStyleOverrideFailure();
+          return;
+        }
         if (!activeNativeEdit.session.applyInlineStyle(
           config.cssProperty,
           value,
-          Boolean(sourceInfo?.important),
+          verifiedOverride.priority === "important",
         )) {
           reportBlockedEdit(new Error("当前选区无法安全应用这个文字格式。"));
           return;
@@ -4839,17 +4962,33 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       ) {
         const committed = finishNativeEditing(true, "style");
         if (!committed.ok) return;
+        activeNativeEdit = null;
       }
       if (activeRange && TEXT_RANGE_EDITABLE_PROPERTIES.has(property)) {
         const sourceIndex = sourceIndexRef.current;
         if (!sourceIndex) return;
+        const styleTargets = activeRange.styleElements.filter(
+          (candidate) => candidate.isConnected,
+        );
+        const styleTarget = styleTargets[0] || element;
+        const verifiedOverride = verifyInlineStyleOverrideForTargets(
+          styleTargets.length > 0 ? styleTargets : [styleTarget],
+          config.cssProperty,
+          value,
+          activeNativeEdit,
+        );
+        if (!verifiedOverride) {
+          reportInlineStyleOverrideFailure();
+          return;
+        }
+        const beforeFacts = inlineStyleFacts(styleTarget, config.cssProperty);
         const command = {
           type: "set-text-range-style" as const,
           targetRef: sourceTargetRefForSelection(activeRange.target),
           segments: activeRange.segments,
           property: config.cssProperty,
           value,
-          ...(sourceInfo?.important ? { important: true } : {}),
+          ...(verifiedOverride.priority === "important" ? { important: true } : {}),
           expectedSourceSha256: sourceIndex.sourceSha256,
         };
         try {
@@ -4895,15 +5034,11 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           kind: "style",
           target: activeRange.target,
           property,
-          before: {
-            text: activeRange.text,
-            segments: activeRange.segments,
-          },
+          before: beforeFacts,
           after: {
-            text: activeRange.text,
-            property: config.cssProperty,
-            value,
-            priority: sourceInfo?.important ? "important" : null,
+            inlineValue: value,
+            inlinePriority: verifiedOverride.priority,
+            computedValue: verifiedOverride.computedValue,
           },
         };
         applySourceCommand(command, mutation, {
@@ -4926,39 +5061,26 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         return;
       }
       const target = selectionForElement(element, sourceIndexRef.current);
-      const sourceValue = element.style.getPropertyValue(config.cssProperty);
-      const computedValue =
-        view?.getComputedStyle(element).getPropertyValue(config.cssProperty).trim()
-        || "";
+      const beforeFacts = inlineStyleFacts(element, config.cssProperty);
+      const verifiedOverride = verifyInlineStyleOverride(
+        element,
+        config.cssProperty,
+        value,
+        activeNativeEdit,
+      );
+      if (!verifiedOverride) {
+        reportInlineStyleOverrideFailure();
+        return;
+      }
       const mutation: HtmlCanvasMutation = {
         kind: "style",
         target,
         property,
-        before: {
-          sourceValue: sourceValue || null,
-          computedValue,
-          priority: element.style.getPropertyPriority(config.cssProperty) || null,
-          provenance: sourceInfo
-            ? {
-                kind: sourceInfo.kind,
-                selector: sourceInfo.selector,
-                source: sourceInfo.source,
-                mediaCondition: sourceInfo.mediaCondition,
-                sharedImpactCount: sourceInfo.sharedImpactCount,
-              }
-            : null,
-        },
+        before: beforeFacts,
         after: {
-          sourceValue: value,
-          computedValue: value,
-          priority: sourceInfo?.important ? "important" : null,
-          provenance: {
-            kind: "inline",
-            selector: "style attribute",
-            source: "direct canvas edit",
-            mediaCondition: "",
-            sharedImpactCount: 1,
-          },
+          inlineValue: value,
+          inlinePriority: verifiedOverride.priority,
+          computedValue: verifiedOverride.computedValue,
         },
       };
       applySourceCommand({
@@ -4966,7 +5088,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         targetRef: sourceTargetRefForSelection(target),
         property: config.cssProperty,
         value,
-        ...(sourceInfo?.important ? { important: true } : {}),
+        ...(verifiedOverride.priority === "important" ? { important: true } : {}),
         expectedSourceSha256: sourceIndexRef.current?.sourceSha256 || "",
       }, mutation);
     },
@@ -4975,8 +5097,8 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       checkpointNativeEdit,
       finishNativeEditing,
       refreshNativeEditRangeState,
+      reportInlineStyleOverrideFailure,
       reportBlockedEdit,
-      selectedStyle.sources,
     ],
   );
 
