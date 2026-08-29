@@ -607,9 +607,12 @@ identified managed Working Copy. A legacy registered Working Copy migrates only
 on editable workspace hydration, after normal save recovery and external-change
 reconciliation. The transaction seals exact before/after Hashes and complete
 recovery bytes, uses the Working Copy CAS writer, then publishes the state schema
-marker and fresh manifest file identity. Restart accepts only the sealed old or
-new side. Invalid identities, an unresolved save state or third-party bytes fail
-closed; no historical Version, Request, Candidate or Runtime DOM is serialized.
+marker, canonical ID/tag/parent/order binding Hash and fresh manifest file
+identity. Restart accepts only the sealed old or new side. A clean external edit
+may reconcile only when that binding Hash survives; a changed or missing binding
+requires explicit force-unlock before a new controlled migration. Invalid
+identities, an unresolved save state or third-party bytes fail closed; no
+historical Version, Request, Candidate or Runtime DOM is serialized.
 Until structural editing moves to semantic operations, a normal save may add an
 ID to a newly authored wrapper or line-break only after proving that every ID
 claimed by the current Working Copy remains valid and present in the candidate.

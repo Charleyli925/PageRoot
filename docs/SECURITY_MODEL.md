@@ -203,11 +203,14 @@ and immutable V1 remain exact evidence. A legacy Working Copy may migrate only
 under its valid Registry/project/manifest/state tuple. The transaction records
 its exact old and new Hashes and stages complete byte sequences before the
 same-directory CAS. Restart accepts only those two sides. Malformed or duplicated
-IDs, a missing identity previously claimed by the current source, and any third
-Hash fail closed without reminting or overwriting. Existing direct editing may
+IDs, a missing identity previously claimed by the current source, a mismatch
+against the state-sealed ID/tag/parent/order binding Hash, and any third Hash
+fail closed without first recording the external bytes. Existing direct editing may
 allocate an ID for a newly authored inline source element, and the Repository may
 fill only otherwise-valid new-element omissions after proving every prior claim
-survives. The state schema marker is durable; Runtime DOM never participates.
+survives. Explicit force-unlock clears both the marker and binding seal before
+adopting disk bytes and re-entering migration, including recovery from a prior
+build that already recorded the disk Hash. Runtime DOM never participates.
 
 The external AI Agent can write within the Request / Attempt workspace, so
 those files are evidence to validate rather than runtime authority. Reopen and

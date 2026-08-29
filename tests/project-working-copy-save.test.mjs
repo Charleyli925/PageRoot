@@ -17,6 +17,10 @@ import {
   ProjectFileRepositoryError,
 } from "../bridge/project-file-repository.mjs";
 import {
+  inspectSourceElementIdentity,
+  sourceElementIdentityBindingSha256,
+} from "../bridge/project-file-repository/working-copy.mjs";
+import {
   fixture,
   html,
   importSource,
@@ -493,6 +497,87 @@ test("forceUnlockWorkingCopy rematerializes identities after explicitly adopting
   assert.equal(nextState.currentSha256, sha256(Buffer.from(unlocked.content, "utf8")));
   assert.equal(nextState.differsFromBase, true);
   assert.equal(nextState.lastPersistedRevision, state.lastPersistedRevision);
+});
+
+test("external ID swaps require explicit adoption before their bindings change", async (t) => {
+  const value = await fixture(t);
+  const sourceHtml = html("V1").replace(
+    /<h1 data-pageroot-id="([^"]+)">V1<\/h1>/u,
+    '<p data-pageroot-id="$1">first</p>'
+      + '<p data-pageroot-id="pr1_6666666666664666a666666666666666">second</p>',
+  );
+  const imported = await importSource(value, "external-id-swap.html", sourceHtml);
+  const managed = await readFile(imported.target.exactSourcePath, "utf8");
+  const paragraphIds = inspectSourceElementIdentity(managed).elements
+    .filter((element) => element.tagName === "p")
+    .map((element) => element.pagerootId);
+  assert.equal(paragraphIds.length, 2);
+  const swapped = managed
+    .replace(paragraphIds[0], "__pageroot_first_id__")
+    .replace(paragraphIds[1], paragraphIds[0])
+    .replace("__pageroot_first_id__", paragraphIds[1]);
+  await writeFile(imported.target.exactSourcePath, swapped, "utf8");
+  const statePath = path.join(
+    imported.target.projectRootPath,
+    ".pageroot",
+    "working-copies",
+    `${imported.target.workingCopyId}.json`,
+  );
+  const beforeState = await json(statePath);
+
+  await assert.rejects(
+    value.repository.workspace({ sourcePath: imported.target.exactSourcePath }),
+    (error) => error instanceof ProjectFileRepositoryError
+      && error.code === "WORKING_COPY_CONFLICT"
+      && error.details.diskBindingSha256 !== error.details.recordedBindingSha256,
+  );
+  assert.equal((await json(statePath)).currentSha256, beforeState.currentSha256);
+
+  const unlocked = await value.repository.forceUnlockWorkingCopy({
+    sourcePath: imported.target.exactSourcePath,
+  });
+  assert.equal(unlocked.content, swapped);
+  const adoptedState = await json(statePath);
+  assert.equal(
+    adoptedState.sourceElementIdentityBindingSha256,
+    sourceElementIdentityBindingSha256(swapped),
+  );
+});
+
+test("force-unlock repairs identity loss even after its disk Hash was recorded", async (t) => {
+  const value = await fixture(t);
+  const imported = await importSource(value, "recorded-identity-loss.html");
+  const managed = await readFile(imported.target.exactSourcePath, "utf8");
+  const unmarked = managed.replace(/ data-pageroot-id="pr1_[a-f0-9]{32}"/gu, "");
+  await writeFile(imported.target.exactSourcePath, unmarked, "utf8");
+  const statePath = path.join(
+    imported.target.projectRootPath,
+    ".pageroot",
+    "working-copies",
+    `${imported.target.workingCopyId}.json`,
+  );
+  const recordedState = await json(statePath);
+  recordedState.currentSha256 = sha256(Buffer.from(unmarked, "utf8"));
+  recordedState.differsFromBase = recordedState.currentSha256 !== recordedState.baseSha256;
+  delete recordedState.sourceElementIdentityBindingSha256;
+  await writeFile(statePath, `${JSON.stringify(recordedState, null, 2)}\n`, "utf8");
+
+  await assert.rejects(
+    value.repository.workspace({ sourcePath: imported.target.exactSourcePath }),
+    (error) => error instanceof ProjectFileRepositoryError
+      && error.code === "WORKING_COPY_CONFLICT",
+  );
+  const unlocked = await value.repository.forceUnlockWorkingCopy({
+    sourcePath: imported.target.exactSourcePath,
+  });
+  assert.equal(inspectSourceElementIdentity(unlocked.content).complete, true);
+  assert.notEqual(unlocked.content, unmarked);
+  const repairedState = await json(statePath);
+  assert.equal(repairedState.sourceElementIdentitySchemaVersion, 1);
+  assert.equal(
+    repairedState.sourceElementIdentityBindingSha256,
+    sourceElementIdentityBindingSha256(unlocked.content),
+  );
 });
 
 test("forceUnlockWorkingCopy clears a stuck activeRequest without rewriting HTML", async (t) => {

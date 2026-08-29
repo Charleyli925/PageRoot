@@ -83,6 +83,11 @@ test("v4 schemas accept repository-produced identity, Working Copy, Candidate an
     projectsRoot,
     ".pageroot-registry.json",
   ));
+  const initialWorkingCopyState = await json(path.join(
+    controlRoot,
+    "working-copies",
+    "work_ver_0001.json",
+  ));
   await Promise.all([
     validate("project-registry.v4.schema.json", registry),
     validate("project-identity.v4.schema.json", await json(path.join(controlRoot, "project.json"))),
@@ -90,8 +95,16 @@ test("v4 schemas accept repository-produced identity, Working Copy, Candidate an
     validate("project-runtime-state.v4.schema.json", await json(path.join(controlRoot, "runtime-state.json"))),
     validate(
       "working-copy-state.v4.schema.json",
-      await json(path.join(controlRoot, "working-copies", "work_ver_0001.json")),
+      initialWorkingCopyState,
     ),
+  ]);
+  const missingIdentityBinding = structuredClone(initialWorkingCopyState);
+  delete missingIdentityBinding.sourceElementIdentityBindingSha256;
+  const bindingWithoutIdentitySchema = structuredClone(initialWorkingCopyState);
+  delete bindingWithoutIdentitySchema.sourceElementIdentitySchemaVersion;
+  await Promise.all([
+    validateRejects("working-copy-state.v4.schema.json", missingIdentityBinding),
+    validateRejects("working-copy-state.v4.schema.json", bindingWithoutIdentitySchema),
   ]);
   const legacyRuntimeWithoutDisplayAnchors = await json(path.join(
     controlRoot,

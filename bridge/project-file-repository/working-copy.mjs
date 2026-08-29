@@ -203,6 +203,29 @@ function identityElementMap(inspection) {
   );
 }
 
+export function sourceElementIdentityBindingSha256(htmlOrInspection) {
+  const inspection = typeof htmlOrInspection === "string"
+    ? inspectSourceElementIdentity(htmlOrInspection)
+    : htmlOrInspection;
+  if (!inspection?.complete) {
+    throw new ProjectFileRepositoryError(
+      "SOURCE_ELEMENT_IDENTITY_INVALID",
+      "A complete source identity set is required to seal its bindings.",
+      { issues: inspection?.issues ?? [] },
+    );
+  }
+  const elements = inspection.elements.map((element) => {
+    const parent = Number.isInteger(element.parentElementIndex)
+      ? inspection.elements[element.parentElementIndex]
+      : null;
+    return [element.pagerootId, element.tagName, parent?.pagerootId ?? null];
+  });
+  return sha256(Buffer.from(JSON.stringify({
+    schemaVersion: PAGEROOT_ELEMENT_ID_SCHEMA_VERSION,
+    elements,
+  }), "utf8"));
+}
+
 function nearestRetainedAncestorId(inspection, element, retainedIds) {
   let parentIndex = element.parentElementIndex;
   while (Number.isInteger(parentIndex)) {
@@ -624,7 +647,12 @@ export function draftRelativePathFor(workingCopy) {
   return `drafts/${workingCopy.workingCopyId}.json`;
 }
 
-export function assertWorkingCopyState(state, loaded, workingCopy) {
+export function assertWorkingCopyState(
+  state,
+  loaded,
+  workingCopy,
+  { allowMissingIdentityBinding = false } = {},
+) {
   const expectedDraftRelativePath = draftRelativePathFor(workingCopy);
   const validRevision = (value) => Number.isSafeInteger(value) && value >= 0;
   const basedOnVersion = loaded.manifest.versions.find(
@@ -654,6 +682,18 @@ export function assertWorkingCopyState(state, loaded, workingCopy) {
     || (
       state.sourceElementIdentitySchemaVersion !== undefined
       && state.sourceElementIdentitySchemaVersion !== PAGEROOT_ELEMENT_ID_SCHEMA_VERSION
+    )
+    || (
+      state.sourceElementIdentitySchemaVersion === PAGEROOT_ELEMENT_ID_SCHEMA_VERSION
+      && (
+        !allowMissingIdentityBinding
+        || state.sourceElementIdentityBindingSha256 !== undefined
+      )
+      && !SHA256.test(String(state.sourceElementIdentityBindingSha256 || ""))
+    )
+    || (
+      state.sourceElementIdentitySchemaVersion === undefined
+      && state.sourceElementIdentityBindingSha256 !== undefined
     )
   ) {
     throw new ProjectFileRepositoryError(

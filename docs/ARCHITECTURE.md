@@ -360,12 +360,16 @@ the pending identity through its owned workflow.
 Direct edits form ordered revisions and are written through a single queue. Every write checks the expected source Hash, uses a same-directory temporary file and atomic replacement, then rereads the result. External modification causes a fail-closed conflict.
 
 The same Repository serialization owns Working Copy source-element identity.
-`working-copy-state.v4` records the adopted identity schema. A legacy migration
+`working-copy-state.v4` records the adopted identity schema and a canonical
+binding Hash over ID, tag, identified parent and source order. A legacy migration
 stages complete before/after HTML, publishes only through the existing
 same-directory CAS, then atomically updates Working Copy state and manifest
 file identity. Restart recovery follows only the registered transaction and
-accepts only its exact before or after Hash. Immutable Versions, frozen Requests
-and Runtime DOM are never migration inputs or destinations.
+accepts only its exact before or after Hash. Clean external text/style changes
+must preserve the binding Hash; structural identity drift is an explicit
+conflict and only force-unlock may adopt it before controlled migration.
+Immutable Versions, frozen Requests and Runtime DOM are never migration inputs
+or destinations.
 On the existing direct-edit path, `IslandEditingController` retains IDs on
 authored descendants and allocates an ID when the browser creates a new inline
 wrapper or line break; the text-range style planner likewise identifies each

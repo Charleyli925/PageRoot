@@ -11,6 +11,12 @@ Only the files listed below are product contracts and package inputs.
   transaction that authorizes a registered managed Working Copy to materialize
   that identity once. It seals before/after Hashes and recovery paths; it never
   covers historical Versions, external originals or Runtime DOM.
+- `working-copy-state.v4.schema.json` requires
+  `sourceElementIdentityBindingSha256` whenever identity schema v1 is present.
+  The Hash seals ID/tag/identified-parent/source-order bindings without freezing
+  editable text, attributes or styles. Runtime compatibility can read the brief
+  pre-binding PR2 state only to route it to an explicit force-unlock conflict;
+  newly authored schema-v4 records cannot omit the seal.
 - `promotion-transaction.v4.schema.json` seals the immutable Candidate output
   Hash separately from `workingCopySourceSha256`. Promotion preserves the
   Candidate bytes in the Version snapshot and publishes only the independently

@@ -17,6 +17,7 @@ import {
   inspectSourceElementIdentity,
   materializeIdentityPreservingSave,
   materializeSourceElementIdentity,
+  sourceElementIdentityBindingSha256,
 } from "../bridge/project-file-repository/working-copy.mjs";
 import {
   fixture,
@@ -91,6 +92,7 @@ async function rewriteAsLegacyWorkingCopy(imported, html) {
   state.differsFromBase = sourceSha256 !== state.baseSha256;
   state.saveState = "saved";
   delete state.sourceElementIdentitySchemaVersion;
+  delete state.sourceElementIdentityBindingSha256;
   await writeFile(statePath, `${JSON.stringify(state, null, 2)}\n`, "utf8");
   return { controlRoot, manifestPath, statePath, workingCopy, sourceSha256 };
 }
@@ -239,6 +241,28 @@ test("fresh sibling identities cannot disguise a retained ID transplant", () => 
     (error) => error?.code === "SOURCE_ELEMENT_IDENTITY_LOST"
       && error.details.addedIds.includes(freshId),
   );
+});
+
+test("the binding seal ignores content but detects identity structure drift", () => {
+  const current = materializeSourceElementIdentity(
+    "<!doctype html><html><head><title>Seal</title></head><body><p>first</p><p>second</p></body></html>",
+    { randomUUIDFactory: deterministicUuidFactory() },
+  ).html;
+  const currentSeal = sourceElementIdentityBindingSha256(current);
+  assert.equal(
+    sourceElementIdentityBindingSha256(
+      current.replace(">first</p>", ' style="color:red">changed</p>'),
+    ),
+    currentSeal,
+  );
+  const paragraphIds = inspectSourceElementIdentity(current).elements
+    .filter((element) => element.tagName === "p")
+    .map((element) => element.pagerootId);
+  const swapped = current
+    .replace(paragraphIds[0], "__pageroot_first_id__")
+    .replace(paragraphIds[1], paragraphIds[0])
+    .replace("__pageroot_first_id__", paragraphIds[1]);
+  assert.notEqual(sourceElementIdentityBindingSha256(swapped), currentSeal);
 });
 
 test("identity materialization rejects output above the managed HTML limit", () => {
@@ -413,6 +437,7 @@ test("a complete legacy identity set is adopted without rewriting Working Copy H
   const statePath = path.join(controlRoot, workingCopy.stateRelativePath);
   const state = await json(statePath);
   delete state.sourceElementIdentitySchemaVersion;
+  delete state.sourceElementIdentityBindingSha256;
   await writeFile(statePath, `${JSON.stringify(state, null, 2)}\n`, "utf8");
 
   const workspace = await value.repository.workspace({
@@ -507,7 +532,8 @@ test("an already migrated Working Copy fails closed after identity loss", async 
 
   await assert.rejects(
     value.repository.workspace({ sourcePath: imported.target.exactSourcePath }),
-    (error) => error?.code === "SOURCE_ELEMENT_IDENTITY_LOST",
+    (error) => error?.code === "WORKING_COPY_CONFLICT"
+      && error.details.diskBindingSha256 === null,
   );
   assert.equal(await readFile(imported.target.exactSourcePath, "utf8"), damaged);
 });

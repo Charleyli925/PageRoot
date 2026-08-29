@@ -29,10 +29,13 @@ leave mixed or externally overwritten HTML.
    schema v1, any later missing or invalid identity is corruption and is not
    silently reminted.
 3. The Working Copy state records
-   `sourceElementIdentitySchemaVersion: 1`. Legacy records may omit it. The
-   migration is idempotent: a complete legacy identity set is adopted without
-   rewriting HTML, while a current v1 state plus a complete document performs
-   no transaction.
+   `sourceElementIdentitySchemaVersion: 1` together with
+   `sourceElementIdentityBindingSha256`, a canonical Hash of each ID's authored
+   tag, identified parent and source order. Text, attributes and styles do not
+   affect this Hash. Legacy records omit both members. The migration is
+   idempotent: a complete legacy identity set is adopted without rewriting
+   HTML, while a current v1 state plus a matching complete binding performs no
+   transaction.
 4. A legacy rewrite uses one Repository-serialized transaction. It records the
    project/document/Working Copy identity, source-relative path, before and
    after Hashes, identity schema, recovery ID and recovery paths. Complete old
@@ -83,6 +86,16 @@ leave mixed or externally overwritten HTML.
    enters the same controlled Working Copy migration. Present invalid values
    still fail closed. Identity materialization also enforces the 20 MiB managed
    HTML cap before import publication, migration CAS, save, or Promotion staging.
+10. A clean external edit is reconciled only when its identity binding Hash
+    still matches the last PageRoot-authorized state. Text/style edits may keep
+    their IDs and continue; external ID additions, removals, swaps, tag changes,
+    moves or reparents become an explicit Working Copy conflict before the disk
+    Hash is recorded. Force-unlock is the sole user-authorized exception: it
+   clears both identity members even when a prior build already recorded the
+   disk Hash, adopts those bytes, and re-enters controlled migration.
+   Runtime decoding also admits the brief pre-binding identity-v1 state written
+   by an older PR2 build, but ordinary reconciliation treats its missing binding
+   as a conflict; only explicit force-unlock can establish the first seal.
 
 ## Consequences
 

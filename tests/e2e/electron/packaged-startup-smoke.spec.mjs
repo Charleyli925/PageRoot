@@ -12,7 +12,10 @@ import path from "node:path";
 import { expect, test } from "@playwright/test";
 import { _electron as electron } from "playwright";
 import { sha256 } from "../../../bridge/lifecycle-core.mjs";
-import { inspectSourceElementIdentity } from "../../../bridge/project-file-repository/working-copy.mjs";
+import {
+  inspectSourceElementIdentity,
+  sourceElementIdentityBindingSha256,
+} from "../../../bridge/project-file-repository/working-copy.mjs";
 import {
   assertPackagedAppIdentity,
   expectedPackagedAppIdentity,
@@ -108,6 +111,8 @@ function expectManagedV1Identity(managedSourcePath, original) {
     currentSha256: sha256(managed),
     differsFromBase: true,
     sourceElementIdentitySchemaVersion: 1,
+    sourceElementIdentityBindingSha256:
+      sourceElementIdentityBindingSha256(managed.toString("utf8")),
   });
 }
 

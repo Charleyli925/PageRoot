@@ -146,6 +146,7 @@ import {
   publicOpenTarget,
   saveRecoveryPaths,
   SOURCE_ELEMENT_IDENTITY_MIGRATION_TRANSACTION_SCHEMA_VERSION,
+  sourceElementIdentityBindingSha256,
   sourceElementIdentityMigrationRecoveryPaths,
   workingCopySourcePath,
   workingCopyStatePath,
@@ -670,7 +671,21 @@ export class ProjectFileRepository {
       })
       : null;
     if (workingCopy) {
-      assertWorkingCopyState(state, loaded, workingCopy);
+      const missingLegacyIdentityBinding = (
+        state?.sourceElementIdentitySchemaVersion
+          === PAGEROOT_ELEMENT_ID_SCHEMA_VERSION
+        && state.sourceElementIdentityBindingSha256 === undefined
+      );
+      if (missingLegacyIdentityBinding && !adoptExternalConflict) {
+        throw new ProjectFileRepositoryError(
+          "WORKING_COPY_CONFLICT",
+          "The Working Copy identity binding must be explicitly adopted before use.",
+          { workingCopyId: workingCopy.workingCopyId },
+        );
+      }
+      assertWorkingCopyState(state, loaded, workingCopy, {
+        allowMissingIdentityBinding: adoptExternalConflict,
+      });
     }
     let draft = null;
     if (workingCopy && state) {
@@ -734,37 +749,19 @@ export class ProjectFileRepository {
     performanceTiming.checkpoint("sourceReadMs");
     let workingCopyRecovered = false;
     if (workingCopy && state && target.targetKind === "working-copy") {
-      let reconciliation;
-      if (
-        adoptExternalConflict
-        && String(state.currentSha256 || "") !== source.sha256
-      ) {
-        reconciliation = await this.#adoptExternalWorkingCopyState({
+      const reconciliation = adoptExternalConflict
+        ? await this.#adoptExternalWorkingCopyState({
+          loaded,
+          workingCopy,
+          state,
+          source,
+        })
+        : await this.#reconcileExternalWorkingCopyState({
           loaded,
           workingCopy,
           state,
           source,
         });
-      } else {
-        try {
-          reconciliation = await this.#reconcileExternalWorkingCopyState({
-            loaded,
-            workingCopy,
-            state,
-            source,
-          });
-        } catch (cause) {
-          if (!adoptExternalConflict || cause?.code !== "WORKING_COPY_CONFLICT") {
-            throw cause;
-          }
-          reconciliation = await this.#adoptExternalWorkingCopyState({
-            loaded,
-            workingCopy,
-            state,
-            source,
-          });
-        }
-      }
       state = reconciliation.state;
       workingCopyRecovered = reconciliation.recovered;
       if (workingCopyRecovered) {
@@ -848,6 +845,28 @@ export class ProjectFileRepository {
 
   async #reconcileExternalWorkingCopyState({ loaded, workingCopy, state, source }) {
     assertWorkingCopyState(state, loaded, workingCopy);
+    if (
+      state.sourceElementIdentitySchemaVersion
+        === PAGEROOT_ELEMENT_ID_SCHEMA_VERSION
+    ) {
+      const identity = inspectSourceElementIdentity(source.html);
+      const diskBindingSha256 = identity.complete
+        ? sourceElementIdentityBindingSha256(identity)
+        : null;
+      if (diskBindingSha256 !== state.sourceElementIdentityBindingSha256) {
+        throw new ProjectFileRepositoryError(
+          "WORKING_COPY_CONFLICT",
+          "The Working Copy source element identity bindings changed outside PageRoot.",
+          {
+            workingCopyId: workingCopy.workingCopyId,
+            recordedSha256: state.currentSha256,
+            diskSha256: source.sha256,
+            recordedBindingSha256: state.sourceElementIdentityBindingSha256,
+            diskBindingSha256,
+          },
+        );
+      }
+    }
     const recordedSha256 = String(state.currentSha256 || "");
     if (recordedSha256 === source.sha256) return { state, recovered: false };
     if (state.saveState !== "saved") {
@@ -883,13 +902,9 @@ export class ProjectFileRepository {
   }
 
   async #adoptExternalWorkingCopyState({ loaded, workingCopy, state, source }) {
-    assertWorkingCopyState(state, loaded, workingCopy);
-    if (
-      String(state.currentSha256 || "") === source.sha256
-      && state.saveState === "saved"
-    ) {
-      return { state, recovered: false };
-    }
+    assertWorkingCopyState(state, loaded, workingCopy, {
+      allowMissingIdentityBinding: true,
+    });
     // Explicit force-unlock is the one user-authorized boundary that can
     // replace an identity-v1 Working Copy with arbitrary complete disk HTML.
     // Clear the marker before committing the adopted Hash so the shared
@@ -898,6 +913,7 @@ export class ProjectFileRepository {
     // silent identity loss.
     const adoptedState = { ...state };
     delete adoptedState.sourceElementIdentitySchemaVersion;
+    delete adoptedState.sourceElementIdentityBindingSha256;
     const nextState = {
       ...adoptedState,
       schemaVersion: PROJECT_FILE_SCHEMA_VERSION,
@@ -1026,6 +1042,8 @@ export class ProjectFileRepository {
       saveState: "saved",
       lastSavedAt: nowIso(this.#clock),
       sourceElementIdentitySchemaVersion: PAGEROOT_ELEMENT_ID_SCHEMA_VERSION,
+      sourceElementIdentityBindingSha256:
+        sourceElementIdentityBindingSha256(identity),
     };
     await atomicWriteProjectJson(
       loaded.paths.projectRootPath,
@@ -3534,6 +3552,8 @@ export class ProjectFileRepository {
         lastSavedAt: createdAt,
         lastOpenedAt: createdAt,
         sourceElementIdentitySchemaVersion: PAGEROOT_ELEMENT_ID_SCHEMA_VERSION,
+        sourceElementIdentityBindingSha256:
+          sourceElementIdentityBindingSha256(identifiedWorkingCopy.identity),
       };
       const runtime = {
         schemaVersion: PROJECT_FILE_SCHEMA_VERSION,
@@ -4644,6 +4664,13 @@ export class ProjectFileRepository {
         revision,
       ),
       lastSavedAt: nowIso(this.#clock),
+      ...(currentState.sourceElementIdentitySchemaVersion
+        === PAGEROOT_ELEMENT_ID_SCHEMA_VERSION
+        ? {
+            sourceElementIdentityBindingSha256:
+              sourceElementIdentityBindingSha256(nextHtml),
+          }
+        : {}),
     };
     await atomicWriteProjectJson(
       loaded.paths.projectRootPath,
@@ -5732,6 +5759,8 @@ export class ProjectFileRepository {
           : {
               sourceElementIdentitySchemaVersion:
                 PAGEROOT_ELEMENT_ID_SCHEMA_VERSION,
+              sourceElementIdentityBindingSha256:
+                sourceElementIdentityBindingSha256(prepared.html),
             }),
       }, "Version Working Copy state");
       transaction.state = "working-copy-created";
@@ -5945,6 +5974,13 @@ export class ProjectFileRepository {
           revision,
         ),
         lastSavedAt: savedAt,
+        ...(currentState.sourceElementIdentitySchemaVersion
+          === PAGEROOT_ELEMENT_ID_SCHEMA_VERSION
+          ? {
+              sourceElementIdentityBindingSha256:
+                sourceElementIdentityBindingSha256(source.html),
+            }
+          : {}),
       }, "Working Copy state");
       await atomicWriteProjectJson(
         loaded.paths.projectRootPath,
