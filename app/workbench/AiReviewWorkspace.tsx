@@ -722,6 +722,11 @@ export default function AiReviewWorkspace({
       after: null,
     };
     closeReviewCommentChannel();
+    // A manual reload replaces both iframes without replacing the Review
+    // documents. The private comment MessagePort belongs to the old before
+    // frame, so reset both the channel and its measured layouts on every frame
+    // generation before allowing the replacement frame to negotiate a new one.
+    setCommentLayoutState({ documents, layouts: [] });
     const drainRegisteredFrames = () => {
       (["before", "after"] as ReviewSide[]).forEach((side) => {
         const frame = framesRef.current[side];
@@ -738,6 +743,7 @@ export default function AiReviewWorkspace({
     closeReviewCommentChannel,
     documents,
     prepareReviewCommentFrame,
+    reloadRevision,
   ]);
 
   const finishPagePresentation = useCallback((epoch: number) => {
