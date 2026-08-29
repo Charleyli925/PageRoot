@@ -344,18 +344,6 @@ export function createCodexAcpE2ECommand(directory, {
   return command;
 }
 
-export function createCodexAppServerE2ECommand(directory) {
-  const command = path.join(directory, "pageroot-codex-app-server-e2e");
-  const server = path.join(productRoot, "tests", "fixtures", "codex-app-server-execution.mjs");
-  writeFileSync(
-    command,
-    `#!/bin/sh\nexec ${shellQuote(process.execPath)} ${shellQuote(server)} "$@"\n`,
-    { encoding: "utf8", mode: 0o755 },
-  );
-  chmodSync(command, 0o755);
-  return command;
-}
-
 // The destination is chosen in the AI conversation now; the dialog over the page is gone.
 // A specific change is reached by clicking its page marker. This keeps the E2E helper
 // aligned with the review contract: markers locate changes, while the toolbar only

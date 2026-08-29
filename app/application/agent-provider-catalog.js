@@ -12,7 +12,6 @@ import {
   defaultManagedAgentDelivery,
   TRUSTED_LOCAL_AGENT_POLICY_VERSION,
 } from "../../shared/agent-delivery.mjs";
-import { AGENT_FEATURE_GATES } from "../../shared/agent-feature-gates.mjs";
 
 const QODER_FAILURE_REASONS = Object.freeze({
   QODER_COMMAND_NOT_FOUND: "not-installed",
@@ -180,12 +179,8 @@ export const CODEX_AGENT_PROVIDER = Object.freeze({
   guidanceInstruction: codexGuidanceInstruction,
 });
 
-export function defaultAgentProviders({
-  codexExecution = AGENT_FEATURE_GATES.codexExecution,
-} = {}) {
-  return Object.freeze(codexExecution
-    ? [QODER_AGENT_PROVIDER, CODEX_AGENT_PROVIDER]
-    : [QODER_AGENT_PROVIDER]);
+export function defaultAgentProviders() {
+  return Object.freeze([QODER_AGENT_PROVIDER, CODEX_AGENT_PROVIDER]);
 }
 
 export function agentAvailabilityCardPresentation(presentation, availability) {

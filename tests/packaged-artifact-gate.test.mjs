@@ -23,11 +23,11 @@ import {
 import {
   appBundleSignaturePolicyForProfile,
   assertNoRetiredEditorArtifacts,
+  assertNoBundledCodexArtifacts,
   assertPackagedAgentFeatureGates,
   assertSignedMachOContentEqual,
   expectedArtifactLayout,
   verifyAppBundle,
-  verifyPackagedCodexRuntime,
 } from "../scripts/verify-packaged-artifact.mjs";
 import { createSyntheticAppBundle } from "./helpers/release-evidence-fixtures.mjs";
 
@@ -181,40 +181,39 @@ test("release commands use one automated artifact lane with full tests and packa
   assert.equal(path.basename(layout.updateInfoPath), "latest-mac.yml");
 });
 
-test("the pinned Codex package passes the native packaged-runtime verifier", async (t) => {
-  if (process.platform !== "darwin") {
-    t.skip("the packaged artifact verifier targets the macOS application");
-    return;
-  }
-  const result = await verifyPackagedCodexRuntime({
-    resourcesPath: productRoot,
-    arch: process.arch,
-  });
-  assert.equal(result.version, "0.149.1");
-  assert.match(result.installationDigest, /^sha256:[a-f0-9]{64}$/u);
+test("the packaged verifier rejects retired Codex App Server resources", async (t) => {
+  const resourcesPath = await mkdtemp(path.join(os.tmpdir(), "pageroot-codex-package-"));
+  t.after(() => rm(resourcesPath, { recursive: true, force: true }));
+  await mkdir(path.join(resourcesPath, "bridge/agent/providers"), { recursive: true });
+  await mkdir(path.join(resourcesPath, "bridge/agent/runtimes"), { recursive: true });
+  await mkdir(path.join(resourcesPath, "node_modules/@openai/codex"), { recursive: true });
+  await writeFile(
+    path.join(resourcesPath, "bridge/agent/providers/codex-provider.mjs"),
+    "retired\n",
+  );
+  await writeFile(
+    path.join(resourcesPath, "bridge/agent/runtimes/codex-app-server-runtime.mjs"),
+    "retired\n",
+  );
+  await assert.rejects(
+    assertNoBundledCodexArtifacts(resourcesPath),
+    /retired bundled Codex artifact must be absent/u,
+  );
+  await rm(path.join(resourcesPath, "bridge/agent/providers/codex-provider.mjs"));
+  await rm(path.join(resourcesPath, "bridge/agent/runtimes/codex-app-server-runtime.mjs"));
+  await rm(path.join(resourcesPath, "node_modules/@openai/codex"), { recursive: true, force: true });
+  await assert.doesNotReject(assertNoBundledCodexArtifacts(resourcesPath));
 });
 
-test("the packaged verifier permits the exact one-flag Codex rollback", () => {
-  for (const codexExecution of [true, false]) {
-    const source = Object.freeze({ codexDiscussion: false, codexExecution });
-    assert.doesNotThrow(() => assertPackagedAgentFeatureGates(
-      { ...source },
-      source,
-    ));
-    assert.throws(
-      () => assertPackagedAgentFeatureGates(
-        { codexDiscussion: false, codexExecution: !codexExecution },
-        source,
-      ),
-      /do not match the source-owned rollback state/u,
-    );
-  }
+test("the packaged verifier accepts only the source-owned pure-discussion gate", () => {
+  const source = Object.freeze({ codexDiscussion: false });
+  assert.doesNotThrow(() => assertPackagedAgentFeatureGates({ ...source }, source));
   assert.throws(
     () => assertPackagedAgentFeatureGates(
-      { codexDiscussion: true, codexExecution: false },
-      { codexDiscussion: true, codexExecution: false },
+      { codexDiscussion: true },
+      source,
     ),
-    /must keep pure Codex Discussion disabled/u,
+    /do not match the source-owned rollback state/u,
   );
 });
 
@@ -396,7 +395,6 @@ test("real app verification requires the Electron Helper ACP smoke even when uns
       appPath: fixture.appPath,
       packageJson: fixture.packageJson,
       verifySignature: false,
-      requirePackagedCodexRuntime: false,
     }),
     /packaged Electron Helper is missing/u,
   );

@@ -5,8 +5,6 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const PRODUCT_ROOT = fileURLToPath(new URL("../", import.meta.url));
-const DECISIONS_ROOT = path.join(PRODUCT_ROOT, "docs", "decisions");
-const ARCHIVE_ROOT = path.join(DECISIONS_ROOT, "archive");
 const ACTIVE_INDEX = "docs/decisions/README.md";
 const ARCHIVE_INDEX = "docs/decisions/archive/README.md";
 const HISTORY_MAX_MARKER = /<!--\s*adr-history-max:\s*(\d{4})\s*-->/u;
@@ -15,17 +13,6 @@ const DECISION_FILE = /^(\d{4})-[^/]+\.md$/u;
 
 function repositoryPath(value) {
   return value.split(path.sep).join("/");
-}
-
-async function markdownFiles(directory, prefix) {
-  const entries = await readdir(directory, { withFileTypes: true }).catch(() => []);
-  const nested = await Promise.all(entries.map(async (entry) => {
-    const absolute = path.join(directory, entry.name);
-    const relative = `${prefix}/${entry.name}`;
-    if (entry.isDirectory()) return markdownFiles(absolute, relative);
-    return entry.isFile() && entry.name.endsWith(".md") ? [relative] : [];
-  }));
-  return nested.flat();
 }
 
 function parseStatus(source) {

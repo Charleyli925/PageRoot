@@ -113,8 +113,8 @@ The renderer's main workspace facts are partitioned as follows:
   `AgentInstaller` owns in-flight install jobs, atomic verified layout under
   `userData/agents` and shutdown drain. Coordinator does not own install. This
   is a product allowlist, not a live public registry; Qoder and Codex ACP are
-  the installable shipped ACP entries. Codex App Server modules remain in the
-  package but are not registered;
+  the installable shipped ACP entries. The packaged application contains no
+  private Codex runtime or native Codex package;
 - Bridge Agent Host/Policy Ports: `bridge/agent/policies/` owns the execution
   policy and freezes all readable files, output/completion paths,
   runtime authority and finalizer authority. `bridge/agent/hosts/` owns the
@@ -124,13 +124,13 @@ The renderer's main workspace facts are partitioned as follows:
   these Ports constrain only requests mediated through the ACP Client Host.
   They are not a sandbox for native filesystem or command operations performed
   by an Agent process. After the Codex ACP cut-over there is no registered `agent-native` provider.
-  The packaged-unregistered Codex App Server modules still describe one fresh ephemeral thread, approval `never`, disabled
-  MCP/skills/plugins/apps/Web/subagents, tool network disabled, a
-  Request-output-only workspace-write root, fixed finalizer, unique Candidate
-  acceptance and confirmed process-group cleanup; they remain a trusted local
-  process with the signed-in user's native read authority until a later
-  iteration deletes them. Any future registered `agent-native` provider
-  requires a separate sandbox conformance and security gate before registration;
+  Both installed ACP providers use one fresh ephemeral session, approval
+  `never`, disabled MCP/skills/plugins/apps/Web/subagents, tool network
+  disabled, a Request-output-only workspace-write root, fixed finalizer,
+  unique Candidate acceptance and confirmed process-group cleanup; they remain
+  trusted local processes with the signed-in user's native read authority. Any
+  future registered `agent-native` provider requires a separate sandbox
+  conformance and security gate before registration;
 - `VersionSession`: immutable Version records plus the current/history
   projection facts;
 - `VersionWorkflow`: Version operation identity/generation, Bridge version

@@ -79,7 +79,7 @@ async function writeManagedCodex(agentsRoot, version = "1.7.0") {
   return command;
 }
 
-test("the default registry registers Codex ACP and not App Server", () => {
+test("the default registry registers Codex through the shared ACP runtime", () => {
   const registry = createDefaultProviderRegistry();
   const catalog = registry.catalog();
   const codex = catalog.find((entry) => entry.providerId === "codex");
@@ -99,7 +99,6 @@ test("the default registry registers Codex ACP and not App Server", () => {
   assert.equal(provider.securityProfile, "client-mediated");
   assert.deepEqual(provider.legacyDrivers, []);
   assert.equal(catalog.filter((entry) => entry.runtimeId === "acp").length, 2);
-  assert.equal(createDefaultProviderRegistry({ codexExecution: false }).catalog().length, 1);
 });
 
 test("public catalog projection never includes command, path or stderr", async (t) => {

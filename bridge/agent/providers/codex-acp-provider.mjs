@@ -192,7 +192,7 @@ async function assertProtectedNativeBinary(nativeRoot) {
     || files.find((filePath) => path.basename(filePath).startsWith("codex"));
   if (!binary) fail("CODEX_COMMAND_UNTRUSTED", "Codex native executable was not found.");
   if (looksLikeBundledPageRootCodex(binary)) {
-    fail("CODEX_COMMAND_UNTRUSTED", "PageRoot will not use the packaged Codex App Server binary for ACP.");
+    fail("CODEX_COMMAND_UNTRUSTED", "PageRoot will not use an executable bundled inside the application for ACP.");
   }
   return fileIdentity(binary);
 }

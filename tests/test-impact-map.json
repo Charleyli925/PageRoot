@@ -1628,24 +1628,11 @@
       ]
     },
     {
-      "id": "agent-provider-codex",
-      "patterns": [
-        "^bridge/agent/providers/codex-provider\\.mjs$"
-      ],
-      "suites": [
-        "typecheck",
-        "ai-provider-smoke"
-      ],
-      "nodeTests": [
-        "tests/codex-provider-contract.test.mjs",
-        "tests/agent-provider-contract.test.mjs"
-      ]
-    },
-    {
       "id": "agent-provider-codex-acp",
       "patterns": [
         "^bridge/agent/providers/codex-acp-provider\\.mjs$",
-        "^tests/fixtures/codex-acp-agent\\.mjs$"
+        "^tests/fixtures/codex-acp-agent\\.mjs$",
+        "^tests/codex-candidate-authority\\.test\\.mjs$"
       ],
       "suites": [
         "typecheck",
@@ -1653,7 +1640,8 @@
       ],
       "nodeTests": [
         "tests/codex-acp-provider.test.mjs",
-        "tests/agent-provider-contract.test.mjs"
+        "tests/agent-provider-contract.test.mjs",
+        "tests/codex-candidate-authority.test.mjs"
       ]
     },
     {
@@ -1668,22 +1656,6 @@
       "nodeTests": [
         "tests/qoder-acp-spike-client.test.mjs",
         "tests/acp-runtime.test.mjs"
-      ]
-    },
-    {
-      "id": "agent-runtime-codex-app-server",
-      "patterns": [
-        "^bridge/agent/runtimes/codex-app-server-(?:client|runtime)\\.mjs$",
-        "^scripts/codex-app-server-preflight\\.mjs$",
-        "^tests/fixtures/codex-app-server"
-      ],
-      "suites": [
-        "typecheck",
-        "ai-provider-smoke"
-      ],
-      "nodeTests": [
-        "tests/codex-app-server-runtime.test.mjs",
-        "tests/codex-candidate-authority.test.mjs"
       ]
     },
     {
@@ -1713,20 +1685,6 @@
       ],
       "nodeTests": [
         "tests/agent-bridge-workspace.test.mjs"
-      ]
-    },
-    {
-      "id": "agent-package-closure",
-      "patterns": [
-        "^scripts/verify-codex-runtime-lock\\.mjs$",
-        "^schemas/codex-app-server\\.runtime-lock\\.json$"
-      ],
-      "suites": [
-        "dependency-audit"
-      ],
-      "nodeTests": [
-        "tests/desktop-package.test.mjs",
-        "tests/codex-app-server-runtime.test.mjs"
       ]
     },
     {

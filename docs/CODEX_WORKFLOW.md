@@ -16,6 +16,14 @@ Use the user's requested authorization level:
 
 An implementation PR is not a release. Merging to `main` updates the canonical source; only an immutable version tag may create an official installer.
 
+## PageRoot Agent runtime boundary
+
+Qoder and Codex both use the shared ACP runtime. Codex is discovered as an
+independent user or PageRoot-managed `codex-acp` installation; the packaged
+application contains neither a private Codex App Server path nor a native Codex
+binary. Package verification checks that absence while the ACP catalog retains
+the managed adapter/native closure and its integrity checks.
+
 ## Standard commands
 
 ### Inspect

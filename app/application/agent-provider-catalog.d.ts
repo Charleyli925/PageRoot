@@ -52,9 +52,7 @@ export type AgentCatalogSnapshot = Readonly<{
 
 export const QODER_AGENT_PROVIDER: AgentProviderDescriptor;
 export const CODEX_AGENT_PROVIDER: AgentProviderDescriptor;
-export function defaultAgentProviders(options?: {
-  codexExecution?: boolean;
-}): readonly AgentProviderDescriptor[];
+export function defaultAgentProviders(): readonly AgentProviderDescriptor[];
 export function agentProviderCardPresentation(provider: AgentProviderDescriptor | AgentProviderEntry): Readonly<{
   displayName: string;
   logoSrc: string | null;

@@ -4,6 +4,11 @@
 - Date: 2026-08-28
 - Scope: Codex provider registration, managed npm closure and chooser security profile
 
+> Implementation note (2026-08-29): The private Codex App Server provider,
+> runtime, root dependency and packaged native copies described by the former
+> implementation have been removed. Codex remains available through the
+> shared ACP runtime and the catalog-managed installation closure.
+
 ## Context
 
 ADR 0052 added a product ACP catalog, a managed installer and a shared ACP

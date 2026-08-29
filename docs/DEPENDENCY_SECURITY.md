@@ -66,9 +66,13 @@ removed after `npm audit` no longer reports them.
 The macOS package includes the compiled desktop renderer, selected desktop and
 Bridge modules, `parse5`, `entities`, `@agentclientprotocol/sdk`, `zod`, the
 reviewed `electron-updater` closure, schemas and build provenance; it explicitly
-excludes the general `node_modules` tree. `semver` is pinned at the package root
-so the updater closure has no hidden nested runtime copy. The dependency audit
-rejects missing, nested or undeclared modules in this exact packaged allowlist.
+excludes the general `node_modules` tree, the private Codex provider/runtime and
+all native Codex packages. Codex's adapter/native closure remains available only
+through the catalog-managed ACP installer under `userData/agents`, where its
+separate package identities and integrity pins are checked. `semver` is pinned
+at the package root so the updater closure has no hidden nested runtime copy.
+The dependency audit rejects missing, nested or undeclared modules in this exact
+packaged allowlist.
 The artifact verifier also walks every PageRoot-owned Resources subtree with
 `lstat`, rejects symlinks and all non-regular entries (including FIFOs and Unix
 sockets), rejects ASAR link entries, and byte-compares each allowlisted package

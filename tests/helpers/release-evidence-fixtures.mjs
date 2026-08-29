@@ -79,7 +79,6 @@ const BRIDGE_FILES = [
   "agent/providers/agent-provider-contract.mjs",
   "agent/providers/provider-registry.mjs",
   "agent/providers/qoder-provider.mjs",
-  "agent/providers/codex-provider.mjs",
   "agent/providers/codex-acp-provider.mjs",
   "agent/catalog/agent-catalog.mjs",
   "agent/catalog/agent-installer.mjs",
@@ -90,8 +89,6 @@ const BRIDGE_FILES = [
   "agent/runtimes/acp-protocol.mjs",
   "agent/runtimes/acp-process.mjs",
   "agent/runtimes/acp-verified-javascript.mjs",
-  "agent/runtimes/codex-app-server-client.mjs",
-  "agent/runtimes/codex-app-server-runtime.mjs",
   "agent/policies/execution-policy.mjs",
   "agent/hosts/execution-host.mjs",
   "qoder-acp-client.mjs",
@@ -444,7 +441,7 @@ export async function createSyntheticAppBundle(t, {
     writeFixtureFile(
       productRoot,
       "shared/agent-feature-gates.mjs",
-      "export const AGENT_FEATURE_GATES = Object.freeze({ codexDiscussion: false, codexExecution: false });\n",
+      "export const AGENT_FEATURE_GATES = Object.freeze({ codexDiscussion: false });\n",
     ),
     writeFixtureFile(
       productRoot,

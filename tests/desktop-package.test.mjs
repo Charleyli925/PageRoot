@@ -67,7 +67,6 @@ const BRIDGE_FILES = [
   "agent/providers/agent-provider-contract.mjs",
   "agent/providers/provider-registry.mjs",
   "agent/providers/qoder-provider.mjs",
-  "agent/providers/codex-provider.mjs",
   "agent/providers/codex-acp-provider.mjs",
   "agent/catalog/agent-catalog.mjs",
   "agent/catalog/agent-installer.mjs",
@@ -78,8 +77,6 @@ const BRIDGE_FILES = [
   "agent/runtimes/acp-protocol.mjs",
   "agent/runtimes/acp-process.mjs",
   "agent/runtimes/acp-verified-javascript.mjs",
-  "agent/runtimes/codex-app-server-client.mjs",
-  "agent/runtimes/codex-app-server-runtime.mjs",
   "agent/policies/execution-policy.mjs",
   "agent/hosts/execution-host.mjs",
   "qoder-acp-client.mjs",
@@ -116,8 +113,6 @@ const BRIDGE_FILES = [
 
 const PACKAGED_MODULES = [
   "@agentclientprotocol/sdk",
-  "@openai/codex",
-  "@openai/codex-darwin-${arch}",
   "parse5",
   "entities",
   "electron-updater",
@@ -296,6 +291,7 @@ test("desktop package identity and artifact profile stay fixed", async () => {
     repo: "PageRoot",
     releaseType: "release",
   }]);
+  assert.equal(packageJson.dependencies["@openai/codex"], undefined);
   assert.equal(packageJson.dependencies["electron-updater"], "6.8.9");
 });
 

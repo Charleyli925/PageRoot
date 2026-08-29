@@ -12,13 +12,12 @@ import {
   normalizeAgentDelivery,
   TRUSTED_LOCAL_AGENT_POLICY_VERSION,
 } from "../../../shared/agent-delivery.mjs";
-import { AGENT_FEATURE_GATES } from "../../../shared/agent-feature-gates.mjs";
 import { createAgentCatalog, defaultAgentsRoot } from "../catalog/agent-catalog.mjs";
 
 function unsupportedDriver() {
   throw agentProviderError(
     "AGENT_DRIVER_UNSUPPORTED",
-    "当前只支持 Qoder CLI 的 ACP 驱动。",
+    "当前只支持已登记的 ACP 驱动。",
     { status: 400 },
   );
 }
@@ -324,7 +323,6 @@ export function createDefaultProviderRegistry({
   preflightRunner,
   policyLoader,
   runTask,
-  codexExecution = AGENT_FEATURE_GATES.codexExecution,
   codexCommandResolver,
   codexPreflightRunner,
   agentCatalog,
@@ -342,13 +340,11 @@ export function createDefaultProviderRegistry({
     ...(policyLoader ? { policyLoader } : {}),
     managedCandidates: () => catalog.managedCommandCandidates("qoder"),
   })];
-  if (codexExecution === true) {
-    providers.push(createCodexAcpProvider({
-      ...(codexCommandResolver ? { commandResolver: codexCommandResolver } : {}),
-      ...(codexPreflightRunner ? { preflightRunner: codexPreflightRunner } : {}),
-      managedCandidates: () => catalog.managedCommandCandidates("codex"),
-    }));
-  }
+  providers.push(createCodexAcpProvider({
+    ...(codexCommandResolver ? { commandResolver: codexCommandResolver } : {}),
+    ...(codexPreflightRunner ? { preflightRunner: codexPreflightRunner } : {}),
+    managedCandidates: () => catalog.managedCommandCandidates("codex"),
+  }));
   const runtimeRegistry = createRuntimeRegistry(runtimes);
   const registry = createProviderRegistry({
     providers,

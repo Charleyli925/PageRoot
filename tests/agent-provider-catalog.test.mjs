@@ -15,14 +15,10 @@ import {
 
 const TRUST = "trusted-local-agent-v1";
 
-test("the source-owned hard gate exposes Codex through the shared Agent chooser", () => {
+test("the shared Agent chooser exposes both ACP providers", () => {
   assert.deepEqual(
     defaultAgentProviders().map(({ providerId }) => providerId),
     ["qoder", "codex"],
-  );
-  assert.deepEqual(
-    defaultAgentProviders({ codexExecution: false }).map(({ providerId }) => providerId),
-    ["qoder"],
   );
   assert.equal(
     CODEX_AGENT_PROVIDER.presentation.localReadDisclosure,
