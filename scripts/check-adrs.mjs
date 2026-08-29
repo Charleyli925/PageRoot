@@ -127,8 +127,8 @@ export function validateAdrIndex({
   const byNumber = new Map();
 
   for (const record of records) {
-    if (!Number.isInteger(record.number)) {
-      violations.push(`${record.relativePath}: filename must start with a four-digit ADR number`);
+    if (!Number.isInteger(record.number) || record.number < 1) {
+      violations.push(`${record.relativePath}: filename must start with a positive four-digit ADR number`);
     } else {
       const sameNumber = byNumber.get(record.number) || [];
       sameNumber.push(record.relativePath);
@@ -185,12 +185,26 @@ export function validateAdrIndex({
     ? gapsMarker[1].split(",").map((value) => Number(value.trim())).filter(Number.isInteger)
     : [];
   if (!gapsMarker) violations.push(`${ACTIVE_INDEX}: missing adr-history-gaps marker`);
+  const gapSet = new Set(gaps);
+  if (gapSet.size !== gaps.length) {
+    violations.push(`${ACTIVE_INDEX}: adr-history-gaps contains duplicates`);
+  }
   for (const gap of gaps) {
     if (byNumber.has(gap)) violations.push(`historical ADR gap ${String(gap).padStart(4, "0")} was reused`);
+    if (gap < 1 || gap > maxNumber) {
+      violations.push(`historical ADR gap ${String(gap).padStart(4, "0")} is outside the assigned history`);
+    }
   }
   for (const number of byNumber.keys()) {
     if (number > 0 && number <= maxNumber && gaps.includes(number)) {
       violations.push(`ADR ${String(number).padStart(4, "0")} is both assigned and marked as a historical gap`);
+    }
+  }
+  for (let number = 1; number <= maxNumber; number += 1) {
+    if (!byNumber.has(number) && !gapSet.has(number)) {
+      violations.push(
+        `ADR ${String(number).padStart(4, "0")} is an unrecorded historical gap; new ADR numbers must use max + 1`,
+      );
     }
   }
 
