@@ -161,7 +161,7 @@ PR 1 内部按“文档与 Schema → Repository → Workflow → 最低限度 U
 - 候选尚未被采纳时只显示“候选版本 N”，不能显示成已经存在的“版本 N”。
 - 被拒绝的候选不占用正式版本序号；下一次发送仍可生成“候选版本 N”。每个候选另有稳定 `candidateId`，避免内部身份复用。
 - 如果首选 Promotion 路径已经存在，不覆盖、不复用、不提示用户，继续追加同一版本后缀直到得到空闲名称。例如 `A-V2.html` 已存在时创建 `A-V2-V2.html`；仍冲突则创建 `A-V2-V2-V2.html`。
-- 目录、软链接或任何文件都算路径已占用。Promotion 先持久记录候选可见相对路径、私有准备路径、首选命名、分配 ordinal、准备文件身份和严格 Working Copy 对象；私有准备文件属于该事务，但候选可见相对路径在成功发布前尚未冻结。必须以操作系统级 no-replace 发布私有准备文件：仅当最终 `link()` 返回 `EEXIST` 时，才持久记录下一个同 ordinal 后缀路径并重试；其他错误立即失败关闭并保留 Candidate。成功发布后，该可见路径才成为唯一冻结路径，崩溃恢复必须复用它。实现可设置有限但足够高的冲突尝试上限；到达上限同样失败关闭。准备文件或已发布文件被替换、manifest 出现不可解释的正式 ordinal 冲突时，均不得覆盖或删除用户文件。
+- 目录、软链接或任何文件都算路径已占用。Promotion 先持久记录候选可见相对路径、私有准备路径、首选命名、分配 ordinal、Candidate Hash、身份物化后 Working Copy Hash、准备文件身份和严格 Working Copy 对象；不可变 Version 保留 Candidate 精确字节，私有准备 Working Copy 在事务内补齐稳定元素 ID。私有准备文件属于该事务，但候选可见相对路径在成功发布前尚未冻结。必须以操作系统级 no-replace 发布私有准备文件：仅当最终 `link()` 返回 `EEXIST` 时，才持久记录下一个同 ordinal 后缀路径并重试；其他错误立即失败关闭并保留 Candidate。成功发布后，该可见路径才成为唯一冻结路径，崩溃恢复必须复用它。实现可设置有限但足够高的冲突尝试上限；到达上限同样失败关闭。准备文件或已发布文件被替换、manifest 出现不可解释的正式 ordinal 冲突时，均不得覆盖或删除用户文件。
 
 ## 6. 默认项目目录
 
@@ -452,10 +452,10 @@ AI 只能写入固定 Attempt 输出 `.pageroot/requests/<requestId>/attempts/<a
 用户点击“采纳并成为版本 7”后，系统必须原子完成：
 
 1. 验证候选 Hash 仍与审阅内容一致。
-2. 验证运行时封存 Candidate 的 `requestId`、`proposedVersionId` / ordinal、`basedOnVersionId`、`previousVersionId`、输出 Hash 和当前项目身份。崩溃恢复时，事务只记录进度：必须由该 Candidate 与其 `sourceWorkingCopyId` 当前受管命名重新推导版本、谱系、准备路径、可见路径和已创建 Working Copy；任一不一致都失败关闭，不得发布或补全 Version。
+2. 验证运行时封存 Candidate 的 `requestId`、`proposedVersionId` / ordinal、`basedOnVersionId`、`previousVersionId`、输出 Hash 和当前项目身份。崩溃恢复时，必须由该 Candidate 与其 `sourceWorkingCopyId` 当前受管命名重新推导版本、谱系、准备路径和可见路径；事务另行封存身份物化后的 Working Copy Hash 与文件身份。任一不一致都失败关闭，不得发布或补全 Version。
 3. 根据当前 Working Copy 最新确认的首选主干与扩展名分配 V7 候选可见路径；若占用则连续追加 `-V7`。先在事务中准备私有字节，再以操作系统级 no-replace `link()` 发布。只有 `EEXIST` 可以持久分配下一个同 ordinal 路径并重试；其他发布错误失败关闭。成功 `link()` 后才冻结最终相对路径。
 4. 把候选精确字节写入 `.pageroot/versions/ver_0007/index.html`。
-5. 在根目录按事务冻结路径建立工作文件，初始字节与正式快照一致；不得覆盖任何用户已有文件。
+5. 在事务私有准备文件中为源码元素补齐稳定 ID，再按冻结路径 no-replace 建立工作文件；正式快照仍保持 Candidate 精确字节，工作文件只允许因身份物化而不同，且不得覆盖任何用户已有文件。
 6. 提交正式版本元数据与项目 `latestOfficialVersionId=ver_0007`。
 7. 将当前编辑目标切换到 V7 工作文件。
 8. 归档本轮 Request、评论和附件，并建立 V7 的空草稿。

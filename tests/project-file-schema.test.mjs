@@ -83,6 +83,11 @@ test("v4 schemas accept repository-produced identity, Working Copy, Candidate an
     projectsRoot,
     ".pageroot-registry.json",
   ));
+  const initialWorkingCopyState = await json(path.join(
+    controlRoot,
+    "working-copies",
+    "work_ver_0001.json",
+  ));
   await Promise.all([
     validate("project-registry.v4.schema.json", registry),
     validate("project-identity.v4.schema.json", await json(path.join(controlRoot, "project.json"))),
@@ -90,8 +95,16 @@ test("v4 schemas accept repository-produced identity, Working Copy, Candidate an
     validate("project-runtime-state.v4.schema.json", await json(path.join(controlRoot, "runtime-state.json"))),
     validate(
       "working-copy-state.v4.schema.json",
-      await json(path.join(controlRoot, "working-copies", "work_ver_0001.json")),
+      initialWorkingCopyState,
     ),
+  ]);
+  const missingIdentityBinding = structuredClone(initialWorkingCopyState);
+  delete missingIdentityBinding.sourceElementIdentityBindingSha256;
+  const bindingWithoutIdentitySchema = structuredClone(initialWorkingCopyState);
+  delete bindingWithoutIdentitySchema.sourceElementIdentitySchemaVersion;
+  await Promise.all([
+    validateRejects("working-copy-state.v4.schema.json", missingIdentityBinding),
+    validateRejects("working-copy-state.v4.schema.json", bindingWithoutIdentitySchema),
   ]);
   const legacyRuntimeWithoutDisplayAnchors = await json(path.join(
     controlRoot,
@@ -176,6 +189,8 @@ test("v4 schemas accept repository-produced identity, Working Copy, Candidate an
     `promote_${candidate.candidate.candidateId}`,
     "transaction.json",
   ));
+  const missingWorkingCopySourceHash = structuredClone(transaction);
+  delete missingWorkingCopySourceHash.workingCopySourceSha256;
   await Promise.all([
     validate("candidate.v4.schema.json", await json(candidatePath)),
     validate("promotion-transaction.v4.schema.json", transaction),
@@ -184,6 +199,10 @@ test("v4 schemas accept repository-produced identity, Working Copy, Candidate an
     validate(
       "working-copy-state.v4.schema.json",
       await json(path.join(controlRoot, "working-copies", "work_ver_0002.json")),
+    ),
+    validateRejects(
+      "promotion-transaction.v4.schema.json",
+      missingWorkingCopySourceHash,
     ),
   ]);
   assert.equal(promoted.version.versionId, "ver_0002");

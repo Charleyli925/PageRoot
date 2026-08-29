@@ -11,6 +11,7 @@ import {
 import path from "node:path";
 import test from "node:test";
 import { sha256 } from "../bridge/lifecycle-core.mjs";
+import { inspectSourceElementIdentity } from "../bridge/project-file-repository/working-copy.mjs";
 import {
   ProjectFileRepository,
   ProjectFileRepositoryError,
@@ -72,6 +73,116 @@ test("a Candidate is not a Version until adoption, rejection consumes no ordinal
   manifest = await json(path.join(imported.target.projectRootPath, ".pageroot", "manifest.json"));
   assert.deepEqual(manifest.versions.map((version) => version.versionId), ["ver_0001", "ver_0002"]);
   assert.equal(manifest.latestOfficialVersionId, "ver_0002");
+});
+
+test("promotion preserves Candidate bytes in the Version and materializes identities only in its Working Copy", async (t) => {
+  const value = await fixture(t);
+  const imported = await importSource(value, "promotion-identity.html");
+  const candidateHtml = "<!doctype html><html><head><title>Candidate</title></head><body><main>Candidate</main></body></html>";
+  const candidate = await value.repository.createCandidate({
+    target: imported.target,
+    requestId: "req_promotion_identity",
+    candidateId: "candidate_promotion_identity_0001",
+    html: candidateHtml,
+    expectedSourceSha256: imported.target.sourceSha256,
+  });
+  const promoted = await value.repository.promoteCandidate({
+    target: imported.target,
+    candidateId: candidate.candidate.candidateId,
+  });
+  const controlRoot = path.join(imported.target.projectRootPath, ".pageroot");
+  assert.equal(
+    await readFile(path.join(controlRoot, "versions", "ver_0002", "index.html"), "utf8"),
+    candidateHtml,
+  );
+  const managedHtml = await readFile(promoted.target.exactSourcePath, "utf8");
+  assert.notEqual(managedHtml, candidateHtml);
+  assert.equal(inspectSourceElementIdentity(managedHtml).complete, true);
+  assert.equal(promoted.target.sourceSha256, sha256(Buffer.from(managedHtml, "utf8")));
+  const state = await json(path.join(controlRoot, "working-copies", "work_ver_0002.json"));
+  assert.equal(state.baseSha256, candidate.candidate.outputSha256);
+  assert.equal(state.currentSha256, promoted.target.sourceSha256);
+  assert.equal(state.differsFromBase, true);
+  assert.equal(state.sourceElementIdentitySchemaVersion, 1);
+  const transaction = await json(path.join(
+    controlRoot,
+    "transactions",
+    `promote_${candidate.candidate.candidateId}`,
+    "transaction.json",
+  ));
+  assert.equal(transaction.candidateOutputSha256, candidate.candidate.outputSha256);
+  assert.equal(transaction.workingCopySourceSha256, promoted.target.sourceSha256);
+});
+
+test("legacy Promotion journals without a Working Copy hash remain recoverable", async (t) => {
+  for (const failpoint of [
+    "promotion-snapshot-created",
+    "promotion-working-copy-prepared",
+  ]) {
+    const value = await fixture(t);
+    const imported = await importSource(value, `legacy-${failpoint}.html`);
+    const candidateHtml = html(`legacy ${failpoint}`);
+    const suffix = failpoint.replaceAll("-", "_");
+    const candidate = await value.repository.createCandidate({
+      target: imported.target,
+      requestId: `req_legacy_${suffix}`,
+      candidateId: `candidate_legacy_${suffix}_0001`,
+      html: candidateHtml,
+      expectedSourceSha256: imported.target.sourceSha256,
+    });
+    const failing = new ProjectFileRepository({
+      projectsRoot: value.projects,
+      failpoint: async (name) => name === failpoint,
+    });
+    await assert.rejects(
+      failing.promoteCandidate({
+        target: imported.target,
+        candidateId: candidate.candidate.candidateId,
+      }),
+      (error) => error instanceof ProjectFileRepositoryError
+        && error.code === "INJECTED_FAILPOINT",
+    );
+
+    const controlRoot = path.join(imported.target.projectRootPath, ".pageroot");
+    const transactionPath = path.join(
+      controlRoot,
+      "transactions",
+      `promote_${candidate.candidate.candidateId}`,
+      "transaction.json",
+    );
+    const transaction = await json(transactionPath);
+    delete transaction.workingCopySourceSha256;
+    if (failpoint === "promotion-working-copy-prepared") {
+      await writeFile(
+        path.join(controlRoot, transaction.preparedWorkingCopyRelativePath),
+        candidateHtml,
+        "utf8",
+      );
+    }
+    await writeFile(transactionPath, `${JSON.stringify(transaction, null, 2)}\n`, "utf8");
+
+    const recovery = new ProjectFileRepository({
+      projectsRoot: value.projects,
+    });
+    const reopened = await recovery.workspace({
+      sourcePath: imported.target.exactSourcePath,
+    });
+    assert.equal(reopened.manifest.latestOfficialVersionId, "ver_0002");
+    const recoveredWorkingCopy = reopened.manifest.workingCopies.find(
+      (workingCopy) => workingCopy.workingCopyId === "work_ver_0002",
+    );
+    assert.ok(recoveredWorkingCopy);
+    const recoveredV2 = await recovery.workspace({
+      sourcePath: path.join(
+        imported.target.projectRootPath,
+        recoveredWorkingCopy.sourceRelativePath,
+      ),
+    });
+    assert.equal(recoveredV2.target.workingCopyId, "work_ver_0002");
+    assert.equal(inspectSourceElementIdentity(recoveredV2.content).complete, true);
+    const recoveredTransaction = await json(transactionPath);
+    assert.match(recoveredTransaction.workingCopySourceSha256, /^sha256:[a-f0-9]{64}$/u);
+  }
 });
 
 test("a historical Version reactivates its original Working Copy without changing its immutable snapshot", async (t) => {

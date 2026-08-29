@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pageroot.local/schemas/source-element-identity-migration.v1.schema.json",
+  "title": "PageRoot source element identity migration transaction v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "kind",
+    "state",
+    "projectId",
+    "documentId",
+    "workingCopyId",
+    "sourceRelativePath",
+    "identitySchemaVersion",
+    "expectedSourceSha256",
+    "targetSourceSha256",
+    "previousRelativePath",
+    "nextRelativePath",
+    "recoveryId",
+    "addedElementCount",
+    "preparedAt"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "1.0.0" },
+    "kind": { "const": "source-element-identity-migration" },
+    "state": { "enum": ["prepared", "committed"] },
+    "projectId": { "type": "string", "pattern": "^project_[a-f0-9]{16,64}$" },
+    "documentId": { "type": "string", "pattern": "^doc_[a-f0-9]{16,64}$" },
+    "workingCopyId": { "type": "string", "pattern": "^work_ver_\\d{4,}$" },
+    "sourceRelativePath": {
+      "type": "string",
+      "pattern": "^(?!.*[/\\\\\\u0000-\\u001F]).+\\.(?:html|htm)$"
+    },
+    "identitySchemaVersion": { "const": 1 },
+    "expectedSourceSha256": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "targetSourceSha256": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "previousRelativePath": {
+      "type": "string",
+      "pattern": "^\\.pageroot/recovery/identity_work_ver_\\d{4,}_v1_[a-f0-9]{32}/previous\\.html$"
+    },
+    "nextRelativePath": {
+      "type": "string",
+      "pattern": "^\\.pageroot/recovery/identity_work_ver_\\d{4,}_v1_[a-f0-9]{32}/next\\.html$"
+    },
+    "recoveryId": {
+      "type": "string",
+      "pattern": "^identity_work_ver_\\d{4,}_v1_[a-f0-9]{32}$"
+    },
+    "addedElementCount": { "type": "integer", "minimum": 0 },
+    "preparedAt": { "type": "string", "format": "date-time" },
+    "outcome": {
+      "enum": [
+        "migrated",
+        "adopted-existing",
+        "recovered",
+        "rolled-back-incomplete-staging",
+        "source-changed-before-cas"
+      ]
+    },
+    "committedAt": { "type": "string", "format": "date-time" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "state": { "const": "committed" } } },
+      "then": { "required": ["outcome", "committedAt"] }
+    }
+  ]
+}

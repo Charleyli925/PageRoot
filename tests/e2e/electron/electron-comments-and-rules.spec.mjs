@@ -7,6 +7,7 @@ import {
   chooseClipboardDelivery,
   closePageRootGracefully,
   createSourceFixture,
+  expectCheckpointPersisted,
   fixtureBuffer,
   launchPageRoot,
   loadedDiskFrame,
@@ -261,6 +262,10 @@ test("multiple orphaned comments relink in sequence and resume the original send
       managedSourcePath,
       "list-item",
     );
+    const persistedRevision = Number(await firstLaunch.page
+      .locator("[data-persist-state]")
+      .first()
+      .getAttribute("data-persisted-revision"));
 
     await activateNativeEdit(editingFrame, "list-item");
     await setTextSelection(editingFrame, "list-item", 0, ORIGINAL_LIST_TEXT.length);
@@ -269,8 +274,7 @@ test("multiple orphaned comments relink in sequence and resume the original send
       () => workspaceContainsDraftComment(firstLaunch.workspace, secondComment),
       { timeout: 20_000 },
     ).toBe(true);
-    await closePageRootGracefully(firstLaunch.electronApp, firstLaunch.page);
-    firstAppClosed = true;
+    await expectCheckpointPersisted(firstLaunch.page, persistedRevision);
 
     const externallyChanged = readFileSync(managedSourcePath, "utf8")
       .replace(
@@ -282,6 +286,21 @@ test("multiple orphaned comments relink in sequence and resume the original send
         "",
       );
     writeFileSync(managedSourcePath, externallyChanged, "utf8");
+
+    // Removing source elements also removes their stable identities. The PR2
+    // identity contract must fail closed until the user explicitly adopts the
+    // external bytes; a restart may not silently bless the identity loss.
+    const conflictBanner = firstLaunch.page.locator(".source-conflict-banner");
+    await expect(conflictBanner).toBeVisible({ timeout: 5_000 });
+    await expect(conflictBanner.locator("strong"))
+      .toContainText("源文件在磁盘上被其他程序修改了");
+    firstLaunch.page.once("dialog", (dialog) => dialog.accept());
+    await conflictBanner.getByRole("button", { name: "采用磁盘版本" }).click();
+    await expect(conflictBanner).toHaveCount(0, { timeout: 20_000 });
+    await loadedDiskFrame(firstLaunch.page, managedSourcePath, "flex-copy");
+
+    await closePageRootGracefully(firstLaunch.electronApp, firstLaunch.page);
+    firstAppClosed = true;
 
     activeLaunch = await launchPageRoot({
       isolatedUserData: firstLaunch.isolatedUserData,

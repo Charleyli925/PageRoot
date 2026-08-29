@@ -33,6 +33,7 @@ test("workspace timing accumulates queue and repeated phase durations", async ()
     projectReloadMs: 0,
     workingCopyScanMs: 0,
     workingCopyReconcileMs: 0,
+    workingCopyIdentityMs: 0,
     stateFilesReadMs: 0,
     sourceReadMs: 0,
     workspaceSerializeMs: 2,

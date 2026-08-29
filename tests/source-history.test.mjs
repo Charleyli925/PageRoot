@@ -388,12 +388,16 @@ test("history refuses stale or tampered exact patches", () => {
   );
 
   const operation = replacementOperation(before, after);
-  assert.doesNotThrow(() => validateSourceHistoryOperationBytes(
+  const replaySteps = validateSourceHistoryOperationBytes(
     [operation],
     before,
     after,
     sha256,
-  ));
+  );
+  assert.equal(replaySteps.length, 1);
+  assert.equal(replaySteps[0].beforeHtml, before);
+  assert.equal(replaySteps[0].afterHtml, after);
+  assert.equal(replaySteps[0].operation.operationId, operation.operationId);
   const invalidForward = structuredClone(operation);
   invalidForward.forwardPatches[0].after = "bad";
   assert.throws(

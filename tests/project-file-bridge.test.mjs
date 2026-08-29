@@ -13,7 +13,7 @@ import { ProjectFileRepository } from "../bridge/project-file-repository.mjs";
 import { sha256 } from "../bridge/lifecycle-core.mjs";
 
 function html(label) {
-  return `<!doctype html><html><head><title>${label}</title></head><body><h1>${label}</h1></body></html>`;
+  return `<!doctype html><html data-pageroot-id="pr1_11111111111141118111111111111111"><head data-pageroot-id="pr1_22222222222242229222222222222222"><title data-pageroot-id="pr1_3333333333334333a333333333333333">${label}</title></head><body data-pageroot-id="pr1_4444444444444444b444444444444444"><h1 data-pageroot-id="pr1_55555555555545558555555555555555">${label}</h1></body></html>`;
 }
 
 async function postJson(bridge, pathname, body) {
@@ -45,6 +45,7 @@ test("project-file PR1 import switches to V1 before the queued save and leaves e
   assert.equal(ensured.response.status, 200, JSON.stringify(ensured.body));
   assert.equal(ensured.body.projectFileSchemaVersion, "4.0.0");
   assert.equal(ensured.body.imported, true);
+  assert.equal(ensured.body.importSourceSha256, preview.body.currentHtmlSha256);
   assert.match(ensured.body.sourcePath, /external-V1\.htm$/u);
   assert.equal(ensured.body.openTarget.workingCopyId, "work_ver_0001");
   assert.equal(Number.isFinite(ensured.body.performanceTiming.workspaceTotalMs), true);

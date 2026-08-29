@@ -6,8 +6,26 @@ Only the files listed below are product contracts and package inputs.
 
 - `pageroot-element-identity.v1.schema.json` defines the value written to the
   sole persistent PageRoot-owned HTML attribute, `data-pageroot-id`. The schema
-  does not authorize writing that attribute; migration and save transactions
-  remain separate contracts.
+  does not itself authorize writing that attribute.
+- `source-element-identity-migration.v1.schema.json` is the strict recoverable
+  transaction that authorizes a registered managed Working Copy to materialize
+  that identity once. It seals before/after Hashes and recovery paths; it never
+  covers historical Versions, external originals or Runtime DOM.
+- `working-copy-state.v4.schema.json` requires
+  `sourceElementIdentityBindingSha256` whenever identity schema v1 is present.
+  The Hash seals ID/tag/identified-parent/source-order bindings without freezing
+  editable text, attributes or styles. Runtime compatibility can read the brief
+  pre-binding PR2 state only to route it to an explicit force-unlock conflict;
+  newly authored schema-v4 records cannot omit the seal.
+- `promotion-transaction.v4.schema.json` seals the immutable Candidate output
+  Hash separately from `workingCopySourceSha256`. Promotion preserves the
+  Candidate bytes in the Version snapshot and publishes only the independently
+  identity-materialized Working Copy bytes under the latter Hash. Newly written
+  records require that member. Recovery alone accepts an older schema-v4
+  Promotion journal that omitted it: before preparation it normalizes to
+  `null`; after legacy preparation it derives the hash from the exact Candidate
+  bytes and leaves the resulting Working Copy eligible for the normal controlled
+  identity migration.
 
 ## Unknown members in mutable records
 
@@ -107,6 +125,7 @@ records.
 - `working-copy-state.v4.schema.json`
 - `candidate.v4.schema.json`
 - `promotion-transaction.v4.schema.json`
+- `source-element-identity-migration.v1.schema.json`
 
 The Registry is the canonical write whitelist for v4. It records only direct
 children of the configured project root, the registered root path, a root

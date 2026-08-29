@@ -15,6 +15,7 @@
     "versionId",
     "versionOrdinal",
     "candidateOutputSha256",
+    "workingCopySourceSha256",
     "basedOnVersionId",
     "previousVersionId",
     "finalWorkingCopyRelativePath",
@@ -38,6 +39,10 @@
     "versionId": { "type": "string", "pattern": "^ver_\\d{4,}$" },
     "versionOrdinal": { "type": "integer", "minimum": 2 },
     "candidateOutputSha256": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "workingCopySourceSha256": {
+      "type": ["string", "null"],
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
     "basedOnVersionId": { "type": "string", "pattern": "^ver_\\d{4,}$" },
     "previousVersionId": { "type": "string", "pattern": "^ver_\\d{4,}$" },
     "finalWorkingCopyRelativePath": {

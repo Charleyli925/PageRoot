@@ -25,6 +25,9 @@ import {
   WORKSPACE_PERFORMANCE_TIMING_FIELDS,
 } from "../bridge/project-file-repository/workspace-performance-timing.mjs";
 import {
+  inspectSourceElementIdentity,
+} from "../bridge/project-file-repository/working-copy.mjs";
+import {
   fixture,
   html,
   importSource,
@@ -439,7 +442,7 @@ test("a damaged v4 record is ignored and its HTML imports as a fresh V1", async 
   assert.deepEqual(manifest.versions.map((version) => version.versionId), ["ver_0001"]);
 });
 
-test("external import creates a byte-preserving V1 for every relative resource form", async (t) => {
+test("external import preserves original and V1 bytes while identifying every managed resource form", async (t) => {
   const value = await fixture(t);
   const cases = [
     ["unquoted-src", "<img src=assets/chart.svg>"],
@@ -461,10 +464,26 @@ test("external import creates a byte-preserving V1 for every relative resource f
     });
     assert.equal(imported.imported, true, name);
     assert.deepEqual(await readFile(sourcePath), buffer, `${name} source`);
+    const manifest = await json(path.join(
+      imported.target.projectRootPath,
+      ".pageroot",
+      "manifest.json",
+    ));
     assert.deepEqual(
-      await readFile(imported.target.exactSourcePath),
+      await readFile(path.join(
+        imported.target.projectRootPath,
+        ".pageroot",
+        manifest.versions[0].snapshotRelativePath,
+      )),
       buffer,
-      `${name} V1`,
+      `${name} immutable V1`,
+    );
+    const managed = await readFile(imported.target.exactSourcePath, "utf8");
+    assert.equal(inspectSourceElementIdentity(managed).complete, true, `${name} identity`);
+    assert.equal(
+      managed.replace(/ data-pageroot-id="pr1_[a-f0-9]{32}"/gu, ""),
+      source,
+      `${name} managed source outside identity attributes`,
     );
   }
 
@@ -477,7 +496,12 @@ test("external import creates a byte-preserving V1 for every relative resource f
     expectedSourceSha256: sha256(safeBuffer),
   });
   assert.equal(imported.imported, true);
-  assert.deepEqual(await readFile(imported.target.exactSourcePath), safeBuffer);
+  const safeManaged = await readFile(imported.target.exactSourcePath, "utf8");
+  assert.equal(inspectSourceElementIdentity(safeManaged).complete, true);
+  assert.equal(
+    safeManaged.replace(/ data-pageroot-id="pr1_[a-f0-9]{32}"/gu, ""),
+    safeSource,
+  );
 });
 
 test("import fails before publication without registration debris, and rejects symbolic links", async (t) => {

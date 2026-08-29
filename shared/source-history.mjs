@@ -737,8 +737,9 @@ export function validateSourceHistoryOperationBytes(
   const requested = Array.isArray(operations)
     ? operations.map(cleanEntry)
     : [];
-  if (requested.length === 0) return;
+  if (requested.length === 0) return [];
   let current = String(source);
+  const steps = [];
   for (const entry of requested) {
     const currentSha256 = requiredSha256(sha256(current), "sourceSha256");
     if (currentSha256 !== entry.beforeSourceSha256) {
@@ -769,6 +770,11 @@ export function validateSourceHistoryOperationBytes(
         { operationId: entry.operationId },
       );
     }
+    steps.push({
+      operation: entry,
+      beforeHtml: current,
+      afterHtml: next,
+    });
     current = next;
   }
   if (current !== String(target)) {
@@ -777,6 +783,7 @@ export function validateSourceHistoryOperationBytes(
       "Pending source patches do not reproduce the autosave target bytes.",
     );
   }
+  return steps;
 }
 
 export function applySourceHistoryAction(

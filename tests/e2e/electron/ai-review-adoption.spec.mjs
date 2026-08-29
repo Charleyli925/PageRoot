@@ -1,5 +1,8 @@
 import { expect, test } from "@playwright/test";
 import {
+  materializeSourceElementIdentity,
+} from "../../../bridge/project-file-repository/working-copy.mjs";
+import {
   LINE_SCOPE_AFTER,
   LINE_SCOPE_BEFORE,
   ORIGINAL_TEXT,
@@ -220,8 +223,20 @@ ${REVIEW_MASK_UNION_BEFORE}
     await expect(runProgress).toContainText("等待你的 AI 完成修改");
     await expect(runProgress.locator("li")).toHaveCount(0);
     writeAiOutput(request.requestRoot, (base) => {
-      expect(base.match(new RegExp(ORIGINAL_TEXT, "gu"))).toHaveLength(1);
-      return base
+      const candidateBase = base.replace(
+        / data-pageroot-id="pr1_[a-f0-9]{32}"/gu,
+        "",
+      );
+      expect(candidateBase.match(new RegExp(ORIGINAL_TEXT, "gu"))).toHaveLength(1);
+      const anonymousPanelOne = candidateBase.match(
+        /      <div class="panel" role="tabpanel"[^>]*><article[^>]*><p data-review-anonymous-panel-copy="one"[^>]*>[\s\S]*?<\/div>/u,
+      )?.[0];
+      const anonymousPanelTwo = candidateBase.match(
+        /      <div class="panel" role="tabpanel"[^>]*><article[^>]*><p data-review-anonymous-panel-copy="two"[^>]*>[\s\S]*?<\/div>/u,
+      )?.[0];
+      expect(anonymousPanelOne).toBeTruthy();
+      expect(anonymousPanelTwo).toBeTruthy();
+      const candidate = candidateBase
         .replace(ORIGINAL_TEXT, UPDATED_TEXT)
         .replace(REVIEW_METRIC_BEFORE_CSS, REVIEW_METRIC_AFTER_CSS)
         .replace(REVIEW_MASK_UNION_BEFORE, REVIEW_MASK_UNION_AFTER)
@@ -337,15 +352,10 @@ ${REVIEW_MASK_UNION_BEFORE}
           "<article style=\"padding: 24px; border-radius: 16px\"><h2>标签二详情</h2><p>第四块完整内容</p></article>",
         )
         .replace(
-          `    <div class="panels" data-review-anonymous-panels>
-      <div class="panel" role="tabpanel"><article><p data-review-anonymous-panel-copy="one">匿名面板甲内容</p></article><article><p>匿名面板稳定说明</p></article></div>
-      <div class="panel" role="tabpanel"><article><p data-review-anonymous-panel-copy="two">匿名面板乙内容</p></article><article><p>匿名面板稳定说明</p></article></div>
-    </div>`,
-          `    <div class="panels" data-review-anonymous-panels>
-      <div class="panel" role="tabpanel"><article><p data-review-anonymous-panel-copy="two">匿名面板乙内容</p></article><article><p>匿名面板稳定说明</p></article></div>
-      <div class="panel" role="tabpanel"><article><p data-review-anonymous-panel-copy="one">匿名面板甲内容</p></article><article><p>匿名面板稳定说明</p></article></div>
-    </div>`,
+          `${anonymousPanelOne}\n${anonymousPanelTwo}`,
+          `${anonymousPanelTwo}\n${anonymousPanelOne}`,
         );
+      return materializeSourceElementIdentity(candidate).html;
     });
     runOfficialFinalizer(request.requestRoot, request.changeRequest);
 

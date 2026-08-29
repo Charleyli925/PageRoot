@@ -14,6 +14,10 @@ PageRoot edits local files and renders user-controlled HTML, so its default poli
   and fail-closed external-modification checks; `/source-history/action` on a
   v4 project returns the current bytes and empty history rather than a v3
   journal
+- Repository-owned source-element identity migration with sealed before/after
+  Hashes, complete recovery bytes and the same Working Copy CAS writer; only a
+  registered current Working Copy may migrate, while external originals and
+  immutable Versions remain unchanged
 - Same-directory filename changes with a fixed HTML extension, source Hash
   precondition, no-overwrite destination check and a crash-recoverable
   operation journal
@@ -192,6 +196,21 @@ Candidate and its managed source Working Copy; a transaction is never an
 independent authority for version ordinal, lineage or path identity. A replaced
 preparation file or an untrusted collision fails closed rather than deleting
 user data.
+
+Source-element identity migration is narrower than path identity recovery. A
+new import materializes IDs only in its managed Working Copy; the external file
+and immutable V1 remain exact evidence. A legacy Working Copy may migrate only
+under its valid Registry/project/manifest/state tuple. The transaction records
+its exact old and new Hashes and stages complete byte sequences before the
+same-directory CAS. Restart accepts only those two sides. Malformed or duplicated
+IDs, a missing identity previously claimed by the current source, a mismatch
+against the state-sealed ID/tag/parent/order binding Hash, and any third Hash
+fail closed without first recording the external bytes. Existing direct editing may
+allocate an ID for a newly authored inline source element, and the Repository may
+fill only otherwise-valid new-element omissions after proving every prior claim
+survives. Explicit force-unlock clears both the marker and binding seal before
+adopting disk bytes and re-entering migration, including recovery from a prior
+build that already recorded the disk Hash. Runtime DOM never participates.
 
 The external AI Agent can write within the Request / Attempt workspace, so
 those files are evidence to validate rather than runtime authority. Reopen and

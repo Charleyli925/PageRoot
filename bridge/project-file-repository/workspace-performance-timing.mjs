@@ -7,6 +7,7 @@ const TIMING_FIELDS = Object.freeze([
   "projectReloadMs",
   "workingCopyScanMs",
   "workingCopyReconcileMs",
+  "workingCopyIdentityMs",
   "stateFilesReadMs",
   "sourceReadMs",
   "workspaceSerializeMs",

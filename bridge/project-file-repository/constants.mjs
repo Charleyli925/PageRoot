@@ -26,6 +26,9 @@ export const RECONCILE_LOCATOR_REASONS = new Set([
 
 export const SAVE_RECOVERY_ID = /^save_work_ver_\d{4,}_(?:current|\d+)_[a-f0-9]{32}$/u;
 
+export const SOURCE_ELEMENT_IDENTITY_MIGRATION_RECOVERY_ID =
+  /^identity_work_ver_\d{4,}_v1_[a-f0-9]{32}$/u;
+
 export const MAX_HTML_BYTES = 20 * 1024 * 1024;
 
 export const MAX_PATH_COMPONENT_BYTES = 255;

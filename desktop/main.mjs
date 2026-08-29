@@ -1376,6 +1376,10 @@ async function ensureBridgeProjectRegistered(project) {
     && Boolean(workspaceSourceIdentity)
     && workspaceSourceIdentity !== projectSourceIdentity
   );
+  const workspaceCurrentSha256 = String(workspace?.currentHtmlSha256 || "");
+  const sourceHashMatches = importedWorkingCopy
+    ? workspace?.importSourceSha256 === project.sha256
+    : workspaceCurrentSha256 === project.sha256;
   if (
     !response.ok
     || !workspace
@@ -1385,7 +1389,8 @@ async function ensureBridgeProjectRegistered(project) {
     || !/^project_[A-Za-z0-9_-]+$/.test(workspace.projectId)
     || typeof workspace.documentId !== "string"
     || !/^doc_[A-Za-z0-9_-]+$/.test(workspace.documentId)
-    || workspace.currentHtmlSha256 !== project.sha256
+    || !/^sha256:[a-f0-9]{64}$/u.test(workspaceCurrentSha256)
+    || !sourceHashMatches
     || !workspaceSourceIdentity
     || (!importedWorkingCopy && workspaceSourceIdentity !== projectSourceIdentity)
   ) {
@@ -1405,7 +1410,7 @@ async function ensureBridgeProjectRegistered(project) {
   }
   if (importedWorkingCopy) {
     const importedProject = await readHtmlProject(registeredSourcePath);
-    if (importedProject.sha256 !== project.sha256) {
+    if (importedProject.sha256 !== workspaceCurrentSha256) {
       throw new ProjectFileError(
         "WELCOME_WORKSPACE_REGISTRATION_FAILED",
         "欢迎页已经建立，但对应的项目工作区没有通过完整性校验。",
@@ -1578,7 +1583,10 @@ async function importExternalViaBridge(sourcePath, expectedSourceSha256) {
   const importedProject = await readHtmlProject(registeredSourcePath);
   if (
     workspace.imported === true
-    && importedProject.sha256 !== expectedSourceSha256
+    && (
+      workspace.importSourceSha256 !== expectedSourceSha256
+      || importedProject.sha256 !== workspace.sourceSha256
+    )
   ) {
     throw new ProjectFileError(
       "EXTERNAL_IMPORT_FAILED",

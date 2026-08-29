@@ -25,8 +25,8 @@ import {
   rememberCurrentNativeHost,
   removeIsolatedUserData,
   removeValidatedTemporaryDirectory,
-  replaceEditableIslandBytes,
   replaceUniqueBytes,
+  replaceEditableIslandBytes,
   replayApplePinyinStyledWrapperCommit,
   retiredNativeHostState,
   setTextSelection,
@@ -36,6 +36,21 @@ import {
   withBomAndCrLf,
   writeFileSync,
 } from "./electron-native-harness.mjs";
+
+function sourceFidelityExpected(managedSource, replacement) {
+  const managedText = managedSource.toString("utf8");
+  const spanId = managedText.match(
+    /<span title='single-quoted' data-order-b="2" data-order-a='1' data-pageroot-id="(pr1_[a-f0-9]{32})">SOURCE_FIDELITY_TOKEN_001<\/span>/u,
+  )?.[1];
+  if (!spanId) {
+    throw new Error("The identified source-fidelity span is missing from the managed Working Copy.");
+  }
+  return replaceEditableIslandBytes(
+    managedSource,
+    "source-fidelity",
+    `<span title='single-quoted' data-order-b="2" data-order-a='1' data-pageroot-id="${spanId}">${replacement}</span>`,
+  );
+}
 
 test("Electron uses the authored DOM caret, Selection and controlled beforeinput", {
   tag: ["@gate-smoke","@smoke-editing"],
@@ -148,11 +163,6 @@ test("Electron autosaves one authorized disk patch and reopens the same forward 
   const originalToken = "SOURCE_FIDELITY_TOKEN_001";
   const replacement = "Electron磁盘原位_OK";
   const original = withBomAndCrLf(fixtureBuffer("source-fidelity.html"));
-  const expected = replaceEditableIslandBytes(
-    original,
-    "source-fidelity",
-    `<span title='single-quoted' data-order-b="2" data-order-a='1'>${replacement}</span>`,
-  );
   writeFileSync(sourcePath, original);
 
   const isolatedUserData = mkdtempSync(path.join(tmpdir(), "pageroot-native-e2e-"));
@@ -168,6 +178,7 @@ test("Electron autosaves one authorized disk patch and reopens the same forward 
       firstLaunch.page,
       sourcePath,
     );
+    const expected = sourceFidelityExpected(readFileSync(managedSourcePath), replacement);
     let { frame } = await loadedDiskFrame(
       firstLaunch.page,
       managedSourcePath,
@@ -263,11 +274,6 @@ test("Electron keeps V1 autosave separate from focused-field undo", {
   const originalToken = "SOURCE_FIDELITY_TOKEN_001";
   const replacement = "撤销历史已持久化";
   const original = withBomAndCrLf(fixtureBuffer("source-fidelity.html"));
-  const expected = replaceEditableIslandBytes(
-    original,
-    "source-fidelity",
-    `<span title='single-quoted' data-order-b="2" data-order-a='1'>${replacement}</span>`,
-  );
   writeFileSync(sourcePath, original);
 
   const isolatedUserData = mkdtempSync(path.join(tmpdir(), "pageroot-native-e2e-"));
@@ -282,6 +288,7 @@ test("Electron keeps V1 autosave separate from focused-field undo", {
       firstLaunch.page,
       sourcePath,
     );
+    const expected = sourceFidelityExpected(readFileSync(managedSourcePath), replacement);
     const { frame } = await loadedDiskFrame(
       firstLaunch.page,
       managedSourcePath,
@@ -486,11 +493,6 @@ test("Electron persists an Apple Pinyin boundary composition with left affinity"
   const sourceDirectory = mkdtempSync(path.join(tmpdir(), "pageroot-native-source-e2e-"));
   const sourcePath = path.join(sourceDirectory, "apple-pinyin-styled-wrapper.html");
   const original = fixtureBuffer("complex-layout.html");
-  const expected = replaceUniqueBytes(
-    original,
-    "<em>Word</em>",
-    "你好<em></em>",
-  );
   writeFileSync(sourcePath, original);
 
   const isolatedUserData = mkdtempSync(path.join(tmpdir(), "pageroot-native-e2e-"));
@@ -502,6 +504,22 @@ test("Electron persists an Apple Pinyin boundary composition with left affinity"
       activeSourcePath: sourcePath,
     });
     firstApp = firstLaunch.electronApp;
+    const managedSourcePath = await managedWorkingCopyPath(
+      firstLaunch.page,
+      sourcePath,
+    );
+    const managedOriginal = readFileSync(managedSourcePath);
+    const styledWrapper = managedOriginal.toString("utf8").match(
+      /<em data-pageroot-id="pr1_[a-f0-9]{32}">Word<\/em>/u,
+    )?.[0];
+    if (!styledWrapper) {
+      throw new Error("The identified styled wrapper is missing from the managed Working Copy.");
+    }
+    const expected = replaceUniqueBytes(
+      managedOriginal,
+      styledWrapper,
+      `你好${styledWrapper.replace("Word", "")}`,
+    );
     const loaded = await loadedDiskFrame(
       firstLaunch.page,
       sourcePath,
@@ -517,7 +535,9 @@ test("Electron persists an Apple Pinyin boundary composition with left affinity"
     await expect.poll(() => frame.locator(caseSelector("heading-inline")).innerHTML())
       .toContain("<em");
     const committedHtml = await frame.locator(caseSelector("heading-inline")).innerHTML();
-    expect(committedHtml).toContain("你好<em></em>");
+    expect(committedHtml).toMatch(
+      /你好<em data-pageroot-id="pr1_[a-f0-9]{32}"><\/em>/u,
+    );
     expect(committedHtml).not.toContain("<i>");
     expect(await editor.getAttribute("data-edit-block-detail")).toBeNull();
 
@@ -531,10 +551,6 @@ test("Electron persists an Apple Pinyin boundary composition with left affinity"
       firstLaunch.page,
       previousDocumentToken,
       "heading-inline",
-    );
-    const managedSourcePath = await managedWorkingCopyPath(
-      firstLaunch.page,
-      sourcePath,
     );
     expect(
       readFileSync(sourcePath).equals(original),

@@ -189,6 +189,27 @@ test("text range style wraps only selected characters across mixed inline conten
   assert.equal(applyPatchPlan(result.inversePlan, result.html).html, html);
 });
 
+test("text range style assigns persistent IDs to wrappers in an identified source", () => {
+  const html = `<p data-pageroot-id="pr1_11111111111141118111111111111111">Alpha Beta</p>`;
+  const index = buildSourceIndex(html);
+  const paragraph = index.elements[0];
+  const textNode = index.byNodeId.get(paragraph.textNodeIds[0]);
+  const result = applyPatchPlan(planSourcePatch({
+    type: "set-text-range-style",
+    targetRef: createTargetRef(index, paragraph.nodeId),
+    segments: [{ textNodeId: textNode.nodeId, startOffset: 0, endOffset: 5 }],
+    property: "font-weight",
+    value: "700",
+  }, index), html);
+
+  assert.match(
+    result.html,
+    /^<p data-pageroot-id="pr1_11111111111141118111111111111111"><span style="all: unset; display: inline !important; font-weight: 700" data-pageroot-id="pr1_[a-f0-9]{32}">Alpha<\/span> Beta<\/p>$/u,
+  );
+  assert.equal(buildSourceIndex(result.html).pagerootIdentity.complete, true);
+  assert.equal(applyPatchPlan(result.inversePlan, result.html).html, html);
+});
+
 test("text range style stays layout-transparent and reuses a whole selected wrapper", () => {
   const html = `<p class="button">打开原生对话框</p>`;
   const index = buildSourceIndex(html);

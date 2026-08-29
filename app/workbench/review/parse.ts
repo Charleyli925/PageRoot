@@ -234,7 +234,7 @@ export function exactSubtreeSignature(element: Element, signatures: ReviewSignat
   if (cached !== undefined) return cached;
   const value = element.outerHTML
     .replace(REVIEW_COMMENT_MARKUP_ATTRIBUTE_PATTERN, "")
-    .replace(/\sdata-pageroot-(?:review|ai-review|outline-id)[^=\s]*="[^"]*"/gu, "")
+    .replace(/\sdata-pageroot-[^=\s]*="[^"]*"/gu, "")
     .replace(/\s+/gu, " ")
     .replace(/>\s+</gu, "><")
     .trim();

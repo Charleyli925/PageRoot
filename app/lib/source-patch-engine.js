@@ -12,11 +12,18 @@ import {
 } from "./editable-island.js";
 import { isNativeDirectEditRoot } from "./native-edit-capability.js";
 import {
+  PAGEROOT_ELEMENT_ID_ATTRIBUTE,
+  generatePagerootElementId,
+  isValidPagerootElementId,
+} from "./pageroot-element-identity.js";
+import {
   cleanTargetRef,
   createInsertionPointTargetRef,
   createTargetRef,
   resolveTargetRef,
 } from "./target-resolver.js";
+
+const TEXT_RANGE_ID_REPLAY_TOKEN = Symbol("text-range-id-replay");
 
 const RAW_TEXT_ELEMENTS = new Set([
   "script",
@@ -1056,7 +1063,7 @@ export function planInlineStylePatch(indexOrHtml, command) {
   );
 }
 
-export function planTextRangeStylePatch(indexOrHtml, command) {
+export function planTextRangeStylePatch(indexOrHtml, command, replay = null) {
   const index = typeof indexOrHtml === "string"
     ? buildSourceIndex(indexOrHtml)
     : indexOrHtml;
@@ -1154,31 +1161,63 @@ export function planTextRangeStylePatch(indexOrHtml, command) {
   // Flex/grid direct-text and visible-background cases are rejected by the
   // canvas before this plan is applied. In supported inline flow, this wrapper
   // preserves Chromium's real caret/beforeinput/input behavior.
-  const openingTag = `<span style="${TEXT_RANGE_LAYOUT_GUARD}; ${declaration}">`;
-  const patches = segments.flatMap((segment) => ([
-    sourcePatch(
-      segment.rawStartOffset,
-      segment.rawStartOffset,
-      "",
-      openingTag,
-      {
-        kind: "text-range-style-open",
-        property,
-        nodeId: segment.textNodeId,
-      },
-    ),
-    sourcePatch(
-      segment.rawEndOffset,
-      segment.rawEndOffset,
-      "",
-      "</span>",
-      {
-        kind: "text-range-style-close",
-        property,
-        nodeId: segment.textNodeId,
-      },
-    ),
-  ]));
+  const replayIds = replay?.token === TEXT_RANGE_ID_REPLAY_TOKEN
+    ? replay.pagerootIds
+    : null;
+  const createdPagerootIds = index.pagerootIdentity.complete
+    ? segments.map((_, segmentIndex) => {
+      const pagerootId = replayIds?.[segmentIndex] ?? generatePagerootElementId();
+      if (!isValidPagerootElementId(pagerootId) || index.byPagerootId.has(pagerootId)) {
+        fail(
+          "TEXT_RANGE_IDENTITY_INVALID",
+          "A new text-range wrapper requires a fresh valid persistent identity.",
+        );
+      }
+      return pagerootId;
+    })
+    : [];
+  if (replayIds && replayIds.length !== createdPagerootIds.length) {
+    fail(
+      "TEXT_RANGE_IDENTITY_INVALID",
+      "Text-range wrapper identity evidence does not match the selected segments.",
+    );
+  }
+  if (new Set(createdPagerootIds).size !== createdPagerootIds.length) {
+    fail(
+      "TEXT_RANGE_IDENTITY_INVALID",
+      "Text-range wrapper identities must be unique within the operation.",
+    );
+  }
+  const patches = segments.flatMap((segment, segmentIndex) => {
+    const persistentIdentity = index.pagerootIdentity.complete
+      ? ` ${PAGEROOT_ELEMENT_ID_ATTRIBUTE}="${createdPagerootIds[segmentIndex]}"`
+      : "";
+    const openingTag = `<span style="${TEXT_RANGE_LAYOUT_GUARD}; ${declaration}"${persistentIdentity}>`;
+    return [
+      sourcePatch(
+        segment.rawStartOffset,
+        segment.rawStartOffset,
+        "",
+        openingTag,
+        {
+          kind: "text-range-style-open",
+          property,
+          nodeId: segment.textNodeId,
+        },
+      ),
+      sourcePatch(
+        segment.rawEndOffset,
+        segment.rawEndOffset,
+        "",
+        "</span>",
+        {
+          kind: "text-range-style-close",
+          property,
+          nodeId: segment.textNodeId,
+        },
+      ),
+    ];
+  });
   return makePlan(
     index,
     { ...command, type: "set-text-range-style" },
@@ -1196,6 +1235,7 @@ export function planTextRangeStylePatch(indexOrHtml, command) {
         endOffset: segment.endOffset,
       })),
       writeScope: "selected-text-ranges",
+      createdPagerootIds,
     },
   );
 }
@@ -1909,6 +1949,9 @@ function authorizePatchPlan(plan, index, patches) {
         value: plan.metadata?.value,
         important: plan.metadata?.important,
         expectedSourceSha256: index.sourceSha256,
+      }, {
+        token: TEXT_RANGE_ID_REPLAY_TOKEN,
+        pagerootIds: plan.metadata?.createdPagerootIds,
       });
       if (!patchesEqual(patches, expected.patches)) {
         fail(

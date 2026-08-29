@@ -321,9 +321,13 @@ scopes.
 
 `SourceIndex` also recognizes the ADR 0059 `data-pageroot-id` contract and maps
 only valid, document-unique values back to exact source element records. Missing,
-malformed and duplicated identities are diagnostics, not an instruction to
-rewrite HTML. Identity migration, stable TargetRef adoption and semantic saving
-are deliberately outside this foundation.
+malformed and duplicated identities are diagnostics, not an instruction from
+the parser to rewrite HTML. ADR 0060 gives `ProjectFileRepository` the separate
+one-time migration authority: new imports create an identified managed Working
+Copy while preserving the external file and immutable V1 bytes; legacy managed
+Working Copies materialize missing IDs only through a Hash-checked recoverable
+transaction on editable workspace entry. Invalid identities fail closed.
+Stable TargetRef adoption and semantic saving remain outside this foundation.
 
 `HtmlCanvasEditor.tsx` remains the Canvas coordinator. Parsing, DOM
 instrumentation, interaction policy, preview synchronization, selection,
@@ -354,6 +358,24 @@ removes missing items with an actionable Finder recovery event, and activates
 the pending identity through its owned workflow.
 
 Direct edits form ordered revisions and are written through a single queue. Every write checks the expected source Hash, uses a same-directory temporary file and atomic replacement, then rereads the result. External modification causes a fail-closed conflict.
+
+The same Repository serialization owns Working Copy source-element identity.
+`working-copy-state.v4` records the adopted identity schema and a canonical
+binding Hash over ID, tag, identified parent and source order. A legacy migration
+stages complete before/after HTML, publishes only through the existing
+same-directory CAS, then atomically updates Working Copy state and manifest
+file identity. Restart recovery follows only the registered transaction and
+accepts only its exact before or after Hash. Clean external text/style changes
+must preserve the binding Hash; structural identity drift is an explicit
+conflict and only force-unlock may adopt it before controlled migration.
+Immutable Versions, frozen Requests and Runtime DOM are never migration inputs
+or destinations.
+On the existing direct-edit path, `IslandEditingController` retains IDs on
+authored descendants and allocates an ID when the browser creates a new inline
+wrapper or line break; the text-range style planner likewise identifies each
+new source wrapper. The Repository verifies that every current claim survives
+and may fill only otherwise-valid missing IDs on genuinely new source elements
+before the CAS; it never repairs a lost prior claim.
 
 `/autosave` retains its own transport decoding and revision checks, then
 delegates the current-source write to `ProjectFileRepository`. Path safety,

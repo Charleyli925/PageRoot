@@ -601,6 +601,22 @@ v3 `SourceTransaction` kernel is not on this path. An AI Version publication
 remains a separate immutable transaction. `/source-history/action` does not
 apply a persisted journal; it returns current source bytes and empty history.
 
+That same Repository is the sole source-element identity migration owner. New
+imports preserve the external file and immutable V1 snapshot while writing an
+identified managed Working Copy. A legacy registered Working Copy migrates only
+on editable workspace hydration, after normal save recovery and external-change
+reconciliation. The transaction seals exact before/after Hashes and complete
+recovery bytes, uses the Working Copy CAS writer, then publishes the state schema
+marker, canonical ID/tag/parent/order binding Hash and fresh manifest file
+identity. Restart accepts only the sealed old or new side. A clean external edit
+may reconcile only when that binding Hash survives; a changed or missing binding
+requires explicit force-unlock before a new controlled migration. Invalid
+identities, an unresolved save state or third-party bytes fail closed; no
+historical Version, Request, Candidate or Runtime DOM is serialized.
+Until structural editing moves to semantic operations, a normal save may add an
+ID to a newly authored wrapper or line-break only after proving that every ID
+claimed by the current Working Copy remains valid and present in the candidate.
+
 A Bridge-acknowledged history result may advance the mounted editable-island
 projection without replacing its iframe only after exact old/new target
 resolution through the recorded TargetRef transition, byte-equal source
