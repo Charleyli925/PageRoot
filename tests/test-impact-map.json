@@ -993,8 +993,8 @@
     {
       "id": "canvas-overlay-owner",
       "patterns": [
-        "^app/components/(?:HtmlInteractionPreview(?:\\.module)?|html-canvas-(?:comment-layout|page-view|style-inspector|selection-chrome(?:-contract)?))\\.(?:tsx|ts|css)$",
-        "^tests/html-canvas-selection-chrome-contract\\.test\\.mjs$"
+        "^app/components/(?:HtmlInteractionPreview(?:\\.module)?|html-canvas-(?:comment-layout|page-view|computed-style|selection-chrome(?:-contract)?))\\.(?:tsx|ts|css)$",
+        "^tests/(?:html-canvas-computed-style|html-canvas-selection-chrome-contract)\\.test\\.mjs$"
       ],
       "suites": [
         "typecheck",
@@ -1002,6 +1002,7 @@
       ],
       "nodeTests": [
         "tests/page-view-context.test.mjs",
+        "tests/html-canvas-computed-style.test.mjs",
         "tests/html-canvas-selection-chrome-contract.test.mjs"
       ]
     },

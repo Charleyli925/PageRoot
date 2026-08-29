@@ -258,11 +258,11 @@ function compactHistoryText(value: unknown): string {
 function recordValueScalar(value: unknown): unknown {
   if (!isRecord(value)) return value;
   if (
-    value.sourceValue !== null
-    && value.sourceValue !== undefined
-    && value.sourceValue !== ""
+    value.inlineValue !== null
+    && value.inlineValue !== undefined
+    && value.inlineValue !== ""
   ) {
-    return value.sourceValue;
+    return value.inlineValue;
   }
   if (
     value.computedValue !== null
