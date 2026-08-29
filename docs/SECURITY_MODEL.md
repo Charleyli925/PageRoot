@@ -398,8 +398,10 @@ still invokes the existing fail-closed ready-version activation path through
 Current Edit comments use a separate ADR 0061 identity boundary. A TargetRef
 with `elementId` resolves only through SourceIndex's valid unique
 `data-pageroot-id` map; missing, invalid or tag-migrated identity becomes
-orphaned and cannot fall back to selector, fingerprint, source offset or
-Runtime DOM similarity. ID-less historical records retain the bounded legacy
+orphaned. Stable refs without `fingerprint.tagName` also fail closed, so a
+copied ID cannot bypass tag-migration detection; resolution cannot fall back to
+selector, other fingerprint fields, source offset or Runtime DOM similarity.
+ID-less historical records retain the bounded legacy
 resolver. Selected-text locators contain source-backed decoded text offsets and
 never authorize persistence from preview DOM.
 

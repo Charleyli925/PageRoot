@@ -590,8 +590,19 @@ export function resolveTargetRef(indexOrHtml, targetRef) {
     if (!element) {
       return resolved(targetRef, "orphaned", null, [], "stable-element-not-found");
     }
-    const expectedTag = targetRef.fingerprint?.tagName;
-    if (expectedTag && element.tagName !== String(expectedTag).toLowerCase()) {
+    const expectedTag = String(targetRef.fingerprint?.tagName ?? "")
+      .trim()
+      .toLowerCase();
+    if (!expectedTag) {
+      return resolved(
+        targetRef,
+        "orphaned",
+        null,
+        [],
+        "stable-element-tag-evidence-missing",
+      );
+    }
+    if (element.tagName !== expectedTag) {
       return resolved(targetRef, "orphaned", null, [], "stable-element-tag-mismatch");
     }
     if (targetRef.level === "text") {

@@ -162,9 +162,26 @@ test("v3 TargetRef accepts stable element identity and a bounded selected-text l
   delete missingHash.requirements.targets[0].expectedSourceSha256;
   assert.equal(validate(missingHash), false);
 
+  const missingTagEvidence = structuredClone(request);
+  delete missingTagEvidence.requirements.targets[0].fingerprint;
+  assert.equal(validate(missingTagEvidence), false);
+
   const invalidAffinity = structuredClone(request);
   invalidAffinity.requirements.targets[0].textLocator.affinity = "nearest";
   assert.equal(validate(invalidAffinity), false);
+});
+
+test("v3 annotation stable targets require tag evidence", async () => {
+  const ajv = validator();
+  const schema = await json(
+    new URL("../schemas/annotation-records.v3.schema.json", import.meta.url),
+  );
+  const validate = ajv.compile(schema);
+  const annotations = await json(
+    new URL("../fixtures/v3/annotation-records.frozen.json", import.meta.url),
+  );
+  delete annotations.comments[0].target.fingerprint;
+  assert.equal(validate(annotations), false);
 });
 
 test("v3 comments can bind project attachments to the same target and AI instruction", async () => {

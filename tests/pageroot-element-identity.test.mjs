@@ -180,6 +180,13 @@ test("stable TargetRefs follow one element across text and position changes with
   const mismatched = resolveTargetRef(buildSourceIndex(wrongMigration), target);
   assert.equal(mismatched.resolution, "orphaned");
   assert.equal(mismatched.reason, "stable-element-tag-mismatch");
+
+  const missingTagEvidence = structuredClone(target);
+  delete missingTagEvidence.fingerprint;
+  const unproven = resolveTargetRef(baseIndex, missingTagEvidence);
+  assert.equal(unproven.resolution, "orphaned");
+  assert.equal(unproven.target, null);
+  assert.equal(unproven.reason, "stable-element-tag-evidence-missing");
 });
 
 test("legacy HTML remains byte-for-byte untouched and is reported as identity-absent", () => {

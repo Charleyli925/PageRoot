@@ -491,7 +491,7 @@ SVG 使用实际点击的源码节点作为评论目标：`path`、`line`、`tex
 
 评论及其附件持久化不依赖 HTML 写入，也不改变 Version。单条评论最多 10 个附件，单文件最大 25 MB；附件上传未完成时不能发送评论或提交本轮。选择批次中为空或超过 25 MB 的文件不占用剩余名额，同批有效文件仍正常加入；超限、空文件和数量溢出都在 Canvas 顶部持续提示。仍有容量时可“重新选择”，容量已满时可“查看附件”并先移除一个。
 
-每条新局部评论必须持久化 `TargetRef.elementId`、最后一次确定性刷新的当前源码 Hash 与当前解析状态；选中文字时再保存元素内 UTF-16 `textLocator`（quote、起止 offset、affinity）。稳定 ID 存在时只按该 ID 解析：文字修改、同类兄弟插入和移动后仍为 `exact`；ID 删除、非法或迁移到不同标签后直接 `orphaned`，不得回退 selector/fingerprint 猜测替代节点。旧评论和无 ID 历史 Version 继续使用单一 legacy resolver，状态仍为 `exact`、`rebound`、`ambiguous` 或 `orphaned`。新评论保存和“重新选择目标”只接受可靠的 `exact`；`ambiguous` / `orphaned` 必须在画布和评论面板同时显式提示。整页评论继续使用 `selector=body + level=module` 的确定语义目标，以支持没有显式 body 源码节点的 HTML 片段。
+每条新局部评论必须持久化 `TargetRef.elementId`、最后一次确定性刷新的当前源码 Hash、`fingerprint.tagName` 与当前解析状态；选中文字时再保存元素内 UTF-16 `textLocator`（quote、起止 offset、affinity）。稳定 ID 存在时只按该 ID 解析：文字修改、同类兄弟插入和移动后仍为 `exact`；ID 删除、非法、缺少标签证据或迁移到不同标签后直接 `orphaned`，不得回退 selector/fingerprint 猜测替代节点。旧评论和无 ID 历史 Version 继续使用单一 legacy resolver，状态仍为 `exact`、`rebound`、`ambiguous` 或 `orphaned`。新评论保存和“重新选择目标”只接受可靠的 `exact`；`ambiguous` / `orphaned` 必须在画布和评论面板同时显式提示。整页评论继续使用 `selector=body + level=module` 的确定语义目标，以支持没有显式 body 源码节点的 HTML 片段。
 
 全局评论使用稳定的 `body` 语义目标；首次登记、自动保存和恢复后仍保持 `exact`，不依赖正文 SourceAnchor。兼容旧草稿或历史记录时，以 `selector=body + level=module` 识别整个页面并补齐运行时字段；即使旧记录没有 `tagName` 或曾被标成 `orphaned`，也由系统确定性标准化，不向用户显示“重新定位”。
 

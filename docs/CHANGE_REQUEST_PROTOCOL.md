@@ -301,7 +301,7 @@ fallback；用户先持久取消旧 Request 形成 fence，再重新发送并建
 每个 TargetRef 必须使用 v3 的干净结构：
 
 - `targetId`、`label`、`level`。
-- 当前受管 Working Copy 目标包含 `elementId + expectedSourceSha256`；`selector`、`sourceAnchor`、`fingerprint` 作为显示、审计与旧记录兼容证据继续保留。
+- 当前受管 Working Copy 目标包含 `elementId + expectedSourceSha256 + fingerprint.tagName`；标签指纹是拒绝 ID 错误迁移所需的完整性证据，`selector`、`sourceAnchor` 和其余 fingerprint 字段作为显示、审计与旧记录兼容证据继续保留。
 - 无 `elementId` 的历史 TargetRef 仍要求 `selector`、`sourceAnchor`、`fingerprint` 至少存在一种。
 - 选中文字时可包含 `textLocator.quote/startOffset/endOffset/affinity`；offset 是所属元素解码后代文字中的 UTF-16 位置，不扩大 AI 修改权限。
 - 若包含源码锚点，只使用冻结基线中的 `sourceAnchor.startOffset/endOffset/sourceSha256`。

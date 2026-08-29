@@ -323,7 +323,8 @@
           },
           "then": {
             "required": [
-              "expectedSourceSha256"
+              "expectedSourceSha256",
+              "fingerprint"
             ]
           }
         }

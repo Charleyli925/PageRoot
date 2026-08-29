@@ -15,15 +15,17 @@ make a current comment drift, become ambiguous or require a guessed rebind.
 ## Decision
 
 1. A new TargetRef captured from an identified source element carries
-   `elementId` and `expectedSourceSha256`; deterministic current-source rebind
-   refreshes the expected Hash. `targetId` remains the independent
+   `elementId`, `expectedSourceSha256` and `fingerprint.tagName`; deterministic
+   current-source rebind refreshes the expected Hash. Stable refs without tag
+   evidence fail closed. `targetId` remains the independent
    record identity: several comments may have different target IDs while
    sharing one element ID.
 2. When `elementId` is present, `TargetResolver` uses only SourceIndex's valid,
    unique `byPagerootId` entry. A source-Hash change, text change or move does
    not weaken the result: the surviving element resolves `exact`. A missing ID,
-   invalid ID or tag migration resolves `orphaned`; selector, fingerprint and
-   offset evidence must not select a replacement.
+   invalid ID, missing tag evidence or tag migration resolves `orphaned`;
+   selector, other fingerprint fields and offset evidence must not select a
+   replacement.
 3. A selected text range may add `textLocator = { quote, startOffset,
    endOffset, affinity }`. Offsets are UTF-16 positions in the owning element's
    decoded descendant text and are accepted only when the source-backed range
