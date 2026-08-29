@@ -8,7 +8,7 @@ User HTML bytes
   -> isolated authored-DOM preview
   -> native Selection + IslandEditingController
   -> canonical editable island or exact direct-text-node fragment
-  -> exact content-range or text-node-range SourcePatch
+  -> semantic operation foundation or current exact content/text SourcePatch
   -> renderer SourceHistorySession + durable exact Patch journal
   -> serialized atomic file writer
 
@@ -311,7 +311,10 @@ services.
 
 The V2 source-fidelity path remains a protected core: `SourceIndex`,
 `TargetResolver`, `editable-island`, direct-text-node normalization, `IslandEditingController`,
-`SourcePatchEngine` and the atomic source writer may be split only around a
+`SemanticOperationKernel` owns the pure stable-ID operation contract and lowers
+to `SourcePatchEngine`; PR4 does not yet switch Canvas, history or persistence.
+The complete next HTML remains source-derived and Runtime DOM is never
+serialized. `SourcePatchEngine` and the atomic source writer may be split only around a
 proven invariant, not to satisfy a line-count target. The retired V1
 `NativeEditingController`, its per-keystroke tracker, shadow block draft,
 FormatSkeleton and structural planner have been removed. The architecture gate

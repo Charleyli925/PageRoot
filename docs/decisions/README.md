@@ -1,6 +1,6 @@
 # Architecture Decision Records
 
-<!-- adr-history-max: 0061 -->
+<!-- adr-history-max: 0062 -->
 <!-- adr-history-gaps: 0020 -->
 
 This is the default reading path for decisions that still constrain PageRoot.
@@ -10,7 +10,7 @@ Historical and superseded decisions remain available from the archive index.
 
 The repository has one historical gap, `0020`, which is intentionally never
 reused. The four collisions found in the first curation pass were assigned
-`0055` through `0058`; future ADRs must use the next number above `0061`.
+`0055` through `0058`; future ADRs must use the next number above `0062`.
 
 ## Active decisions
 
@@ -59,6 +59,7 @@ reused. The four collisions found in the first curation pass were assigned
 | 0059 | [Source elements use a persistent PageRoot identity](0059-persistent-source-element-identity.md) | Living |
 | 0060 | [Managed Working Copies materialize source element identity once](0060-working-copy-source-element-identity-migration.md) | Living |
 | 0061 | [Current comments resolve persistent source element identity](0061-stable-current-comment-targets.md) | Living |
+| 0062 | [Semantic source operations lower to complete identified HTML](0062-semantic-source-operation-kernel.md) | Living |
 
 ## Reading guide
 

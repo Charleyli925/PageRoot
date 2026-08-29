@@ -53,6 +53,7 @@ const TEXT_RANGE_UNSAFE_CONTEXT_ELEMENTS = new Set([
 
 const TRUSTED_INVERSE_PLANS = new WeakMap();
 const CSS_PROPERTY_NAME_PATTERN = /^(?:--[A-Za-z0-9_-]+|-?[A-Za-z][A-Za-z0-9-]*)$/;
+const HTML_ATTRIBUTE_NAME_PATTERN = /^[^\u0000-\u0020"'/>=]+$/u;
 // `display: contents` looks geometry-neutral but Chromium can mutate a
 // cross-wrapper Selection without dispatching beforeinput/input to the owning
 // contenteditable host. A normal inline box keeps the native editing event
@@ -234,6 +235,273 @@ function isDescendantNode(index, node, ancestor) {
     current = index.byNodeId.get(current.parentId);
   }
   return false;
+}
+
+function semanticElement(index, elementId, expectedTagName, fieldName) {
+  if (!isValidPagerootElementId(elementId)) {
+    fail("SEMANTIC_ELEMENT_ID_INVALID", `${fieldName} must carry a valid stable element ID.`, {
+      fieldName,
+      elementId,
+    });
+  }
+  const element = index.byPagerootId.get(elementId) ?? null;
+  if (!element) {
+    fail("SEMANTIC_ELEMENT_NOT_FOUND", `${fieldName} is not present in the exact source.`, {
+      fieldName,
+      elementId,
+    });
+  }
+  const tagName = String(expectedTagName ?? "").toLowerCase();
+  if (!tagName || element.tagName !== tagName) {
+    fail("SEMANTIC_ELEMENT_TAG_MISMATCH", `${fieldName} stable ID moved to a different authored tag.`, {
+      fieldName,
+      elementId,
+      expectedTagName: tagName || null,
+      actualTagName: element.tagName,
+    });
+  }
+  return element;
+}
+
+function assertCompleteSemanticIdentity(index) {
+  if (!index.pagerootIdentity?.complete || !index.pagerootIdentity.valid) {
+    fail(
+      "SEMANTIC_IDENTITY_INCOMPLETE",
+      "Semantic operations require a managed source with complete valid element identity.",
+      { pagerootIdentity: index.pagerootIdentity },
+    );
+  }
+}
+
+function escapeHtmlText(value) {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;");
+}
+
+function escapeHtmlAttribute(value) {
+  return escapeHtmlText(value).replaceAll('"', "&quot;");
+}
+
+function directChildElement(index, parent, elementId, expectedTagName, fieldName) {
+  const element = semanticElement(index, elementId, expectedTagName, fieldName);
+  if (element.parentId !== parent.nodeId) {
+    fail("SEMANTIC_INSERTION_PARENT_MISMATCH", `${fieldName} is not a direct child of the declared parent.`, {
+      fieldName,
+      elementId,
+      parentElementId: parent.pagerootId,
+    });
+  }
+  return element;
+}
+
+function semanticInsertion(index, command) {
+  const parent = semanticElement(
+    index,
+    command.parentElementId,
+    command.parentTagName,
+    "parent",
+  );
+  if (parent.isVoid) {
+    fail("SEMANTIC_VOID_PARENT", "A void element cannot own an insertion point.", {
+      parentElementId: parent.pagerootId,
+      tagName: parent.tagName,
+    });
+  }
+  const before = command.beforeElementId
+    ? directChildElement(
+      index,
+      parent,
+      command.beforeElementId,
+      command.beforeTagName,
+      "before",
+    )
+    : null;
+  const targetRef = createInsertionPointTargetRef(index, {
+    parentId: parent.nodeId,
+    ...(before ? { beforeSiblingId: before.nodeId } : {}),
+    label: `semantic insertion in <${parent.tagName}>`,
+  });
+  return {
+    parent,
+    before,
+    offset: before?.range.startOffset ?? parent.contentRange.endOffset,
+    targetRef,
+  };
+}
+
+function semanticFragmentIndex(fragmentHtml, existingIndex, allowedExistingIds = new Set()) {
+  const fragment = String(fragmentHtml ?? "");
+  const fragmentIndex = buildSourceIndex(fragment);
+  if (!fragmentIndex.integrity.ok || !fragmentIndex.pagerootIdentity.complete) {
+    fail(
+      "SEMANTIC_FRAGMENT_IDENTITY_INVALID",
+      "Inserted or replacement HTML must contain complete valid stable identity.",
+      { pagerootIdentity: fragmentIndex.pagerootIdentity, rangeErrors: fragmentIndex.rangeErrors },
+    );
+  }
+  const rootElements = fragmentIndex.elements.filter((element) => element.parentId === null);
+  if (rootElements.length !== 1) {
+    fail("SEMANTIC_FRAGMENT_ROOT_INVALID", "A structural operation requires exactly one source root element.", {
+      rootCount: rootElements.length,
+    });
+  }
+  const [root] = rootElements;
+  if (
+    fragment.slice(0, root.range.startOffset).trim() !== ""
+    || fragment.slice(root.range.endOffset).trim() !== ""
+  ) {
+    fail("SEMANTIC_FRAGMENT_ROOT_INVALID", "Structural HTML cannot contain authored content outside its root element.");
+  }
+  for (const element of fragmentIndex.elements) {
+    if (existingIndex.byPagerootId.has(element.pagerootId) && !allowedExistingIds.has(element.pagerootId)) {
+      fail("SEMANTIC_FRAGMENT_ID_COLLISION", "Structural HTML reuses an identity owned outside its target.", {
+        elementId: element.pagerootId,
+      });
+    }
+  }
+  return { fragment, fragmentIndex, root };
+}
+
+/**
+ * Internal lowering for the semantic-operation kernel. The command is fully
+ * replayable so applyPatchPlan can independently re-plan and reject tampering.
+ */
+export function planSemanticOperationPatch(indexOrHtml, command) {
+  const index = typeof indexOrHtml === "string" ? buildSourceIndex(indexOrHtml) : indexOrHtml;
+  assertCompleteSemanticIdentity(index);
+  expectedHash(command, index);
+  const semanticType = String(command.semanticType ?? "");
+  const target = command.targetElementId
+    ? semanticElement(index, command.targetElementId, command.targetTagName, "target")
+    : null;
+  const targetRef = target
+    ? createTargetRef(index, target, { level: "subregion" })
+    : null;
+  let patches = [];
+  let targetRefs = targetRef ? [targetRef] : [];
+
+  if (semanticType === "setText") {
+    if (!target || target.isVoid || RAW_TEXT_ELEMENTS.has(target.tagName)) {
+      fail("SEMANTIC_TEXT_TARGET_UNSUPPORTED", "setText requires a non-void authored text container.");
+    }
+    patches = [sourcePatch(
+      target.contentRange.startOffset,
+      target.contentRange.endOffset,
+      index.source.slice(target.contentRange.startOffset, target.contentRange.endOffset),
+      escapeHtmlText(command.text ?? ""),
+      { kind: "semantic:set-text" },
+    )];
+  } else if (semanticType === "replaceTextRange") {
+    if (!target) fail("TARGET_REQUIRED", "replaceTextRange requires an authored target.");
+    const segments = normalizedTextRangeSegments(index, target, command.segments);
+    const replacement = escapeHtmlText(command.text ?? "");
+    patches = segments.map((segment, segmentIndex) => sourcePatch(
+      segment.rawStartOffset,
+      segment.rawEndOffset,
+      index.source.slice(segment.rawStartOffset, segment.rawEndOffset),
+      segmentIndex === 0 ? replacement : "",
+      { kind: "semantic:replace-text-range", segmentIndex },
+    ));
+  } else if (semanticType === "setAttribute") {
+    if (!target) fail("TARGET_REQUIRED", "setAttribute requires an authored target.");
+    const attributeName = String(command.attributeName ?? "").toLowerCase();
+    if (!HTML_ATTRIBUTE_NAME_PATTERN.test(attributeName)) {
+      fail("SEMANTIC_ATTRIBUTE_NAME_INVALID", "The attribute name is not valid HTML source.", { attributeName });
+    }
+    if (attributeName === PAGEROOT_ELEMENT_ID_ATTRIBUTE) {
+      fail("SEMANTIC_IDENTITY_ATTRIBUTE_PROTECTED", "Stable identity cannot be edited as an ordinary attribute.");
+    }
+    const attributes = target.attributesByName.get(attributeName) ?? [];
+    if (attributes.length > 1) {
+      fail("SEMANTIC_ATTRIBUTE_DUPLICATE", "A repeated authored attribute cannot be edited safely.", { attributeName });
+    }
+    const existing = attributes[0] ?? null;
+    if (command.value === null) {
+      patches = existing
+        ? [sourcePatch(existing.range.startOffset, existing.range.endOffset, existing.raw, "", {
+          kind: "semantic:set-attribute",
+        })]
+        : [];
+    } else {
+      const nextAttribute = `${existing?.rawName ?? attributeName}="${escapeHtmlAttribute(command.value)}"`;
+      patches = existing
+        ? [sourcePatch(existing.range.startOffset, existing.range.endOffset, existing.raw, nextAttribute, {
+          kind: "semantic:set-attribute",
+        })]
+        : [sourcePatch(target.closingDelimiterOffset, target.closingDelimiterOffset, "", ` ${nextAttribute}`, {
+          kind: "semantic:set-attribute",
+        })];
+    }
+  } else if (semanticType === "insertElement") {
+    const insertion = semanticInsertion(index, command);
+    semanticFragmentIndex(command.elementHtml, index);
+    patches = [sourcePatch(insertion.offset, insertion.offset, "", String(command.elementHtml), {
+      kind: "semantic:insert-element",
+    })];
+    targetRefs = [insertion.targetRef];
+  } else if (semanticType === "deleteElement") {
+    if (!target || !target.parentId) {
+      fail("SEMANTIC_DELETE_ROOT_UNSUPPORTED", "Only an authored element with a source parent can be deleted.");
+    }
+    patches = [sourcePatch(target.range.startOffset, target.range.endOffset, target.raw, "", {
+      kind: "semantic:delete-element",
+    })];
+  } else if (semanticType === "moveElement") {
+    if (!target || !target.parentId) {
+      fail("SEMANTIC_MOVE_ROOT_UNSUPPORTED", "Only an authored element with a source parent can be moved.");
+    }
+    const insertion = semanticInsertion(index, command);
+    if (insertion.parent.nodeId === target.nodeId || isDescendantNode(index, insertion.parent, target)) {
+      fail("SEMANTIC_MOVE_CYCLE", "An element cannot move into itself or its descendants.");
+    }
+    if (insertion.before?.nodeId === target.nodeId) {
+      fail("SEMANTIC_MOVE_NOOP", "The requested move already occupies that insertion point.");
+    }
+    patches = [
+      sourcePatch(target.range.startOffset, target.range.endOffset, target.raw, "", {
+        kind: "semantic:move-element:remove",
+      }),
+      sourcePatch(insertion.offset, insertion.offset, "", target.raw, {
+        kind: "semantic:move-element:insert",
+      }),
+    ];
+    targetRefs = [targetRef, insertion.targetRef];
+  } else if (semanticType === "replaceSubtree") {
+    if (!target) fail("TARGET_REQUIRED", "replaceSubtree requires an authored target.");
+    const subtreeIds = new Set(
+      index.elements
+        .filter((element) => element.nodeId === target.nodeId || isDescendantNode(index, element, target))
+        .map((element) => element.pagerootId),
+    );
+    const fragment = semanticFragmentIndex(command.elementHtml, index, subtreeIds);
+    if (fragment.root.pagerootId !== target.pagerootId || fragment.root.tagName !== target.tagName) {
+      fail(
+        "SEMANTIC_REPLACEMENT_ROOT_MISMATCH",
+        "A replacement subtree must retain the target root ID and authored tag.",
+        {
+          expectedElementId: target.pagerootId,
+          actualElementId: fragment.root.pagerootId,
+          expectedTagName: target.tagName,
+          actualTagName: fragment.root.tagName,
+        },
+      );
+    }
+    patches = [sourcePatch(target.range.startOffset, target.range.endOffset, target.raw, fragment.fragment, {
+      kind: "semantic:replace-subtree",
+    })];
+  } else {
+    fail("SEMANTIC_OPERATION_TYPE_UNSUPPORTED", `Unsupported semantic operation type: ${semanticType || "missing"}.`);
+  }
+
+  return makePlan(
+    index,
+    { ...command, type: "semantic-operation" },
+    patches,
+    targetRefs,
+    { semanticCommand: { ...command, type: "semantic-operation" }, semanticType },
+  );
 }
 
 function htmlEntityToken(raw, startOffset) {
@@ -1736,6 +2004,7 @@ function authorizePatchPlan(plan, index, patches) {
     "set-inline-style",
     "set-text-range-style",
     "reorder-sibling",
+    "semantic-operation",
   ].includes(operationType)) {
     fail(
       "UNSUPPORTED_PATCH_PLAN_TYPE",
@@ -2016,6 +2285,35 @@ function authorizePatchPlan(plan, index, patches) {
         fail(
           "PATCH_PLAN_TAMPERED",
           "Sibling reorder patches do not match the declared operation metadata.",
+        );
+      }
+    }
+  }
+
+  if (operationType === "semantic-operation") {
+    const semanticCommand = plan.metadata?.semanticCommand;
+    if (!semanticCommand || typeof semanticCommand !== "object") {
+      fail(
+        "SEMANTIC_OPERATION_METADATA_REQUIRED",
+        "A semantic source plan must carry its replayable command metadata.",
+      );
+    }
+    if (!isInverse) {
+      const expected = planSemanticOperationPatch(index, {
+        ...semanticCommand,
+        expectedSourceSha256: index.sourceSha256,
+      });
+      if (!patchesEqual(patches, expected.patches)) {
+        fail(
+          "PATCH_PLAN_TAMPERED",
+          "Semantic source patches do not match the declared operation.",
+        );
+      }
+      const expectedTargetRefs = expected.targetRefs.map((targetRef) => cleanTargetRef(targetRef));
+      if (canonicalValue(targetRefs) !== canonicalValue(expectedTargetRefs)) {
+        fail(
+          "PATCH_PLAN_TAMPERED",
+          "Semantic source TargetRefs do not match the declared operation.",
         );
       }
     }

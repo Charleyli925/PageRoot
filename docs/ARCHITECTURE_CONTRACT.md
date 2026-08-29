@@ -566,6 +566,17 @@ state may display capabilities, but it cannot maintain a parallel undo stack.
 The preview DOM, browser editing history and edit-audit list are not history
 authorities.
 
+The semantic source-operation foundation is a pure pre-persistence boundary.
+It accepts only complete identity-v1 HTML plus an operation carrying stable
+operation identity, exact base revision, complete-source Hash and stable
+ID/tag/outer-Hash target evidence. It returns complete next HTML, Hash, lineage
+and a generated in-process inverse. Intent is lowered to SourcePatch, whose
+apply path independently re-plans the operation before enforcing exact ranges,
+outside-scope equality and parse integrity. Runtime DOM is never an input.
+Until PR5 explicitly adopts this boundary, Canvas, `SourceHistorySession`,
+autosave and Repository remain on their existing route and do not maintain a
+parallel semantic revision.
+
 ## Mutation protocol
 
 Every durable command defines:
