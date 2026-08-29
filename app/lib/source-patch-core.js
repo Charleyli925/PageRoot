@@ -37,6 +37,7 @@ export {
   planDirectTextNodePatch,
   planEditableIslandPatch,
   planInlineStylePatch,
+  planSemanticOperationPatch,
   planSiblingReorderPatch,
   planSourcePatch,
   planTextRangeStylePatch,

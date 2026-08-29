@@ -137,6 +137,38 @@
       ]
     },
     {
+      "id": "semantic-source-editing",
+      "patterns": [
+        "^app/lib/semantic-operation-kernel",
+        "^app/lib/source-(?:patch-engine|index|text-map)",
+        "^schemas/semantic-operation",
+        "^tests/semantic-operation-kernel"
+      ],
+      "entryInterfaces": [
+        "schemas/semantic-operation.v1.schema.json"
+      ],
+      "owners": [
+        "SemanticOperationKernel"
+      ],
+      "implementationFiles": [
+        "app/lib/semantic-operation-kernel.js",
+        "app/lib/source-patch-engine.js"
+      ],
+      "focusedTests": [
+        "tests/semantic-operation-kernel.test.mjs",
+        "tests/source-patch-engine.test.mjs",
+        "tests/source-text-map.test.mjs",
+        "tests/pageroot-element-identity.test.mjs"
+      ],
+      "requiredDocs": [
+        "docs/ARCHITECTURE_MAP.md",
+        "docs/ARCHITECTURE_CONTRACT.md",
+        "docs/STATE_OWNERSHIP.md",
+        "docs/SECURITY_MODEL.md",
+        "docs/decisions/0062-semantic-source-operation-kernel.md"
+      ]
+    },
+    {
       "id": "canvas-selection",
       "patterns": [
         "^app/components/html-canvas-selection-chrome",

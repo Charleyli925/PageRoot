@@ -1,0 +1,114 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pageroot.local/schemas/semantic-operation.v1.schema.json",
+  "title": "PageRoot semantic source operation v1",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "operationId",
+    "baseRevision",
+    "expectedSourceSha256",
+    "type"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "operationId": {
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9_-]{7,95}$"
+    },
+    "baseRevision": { "type": "integer", "minimum": 0 },
+    "expectedSourceSha256": { "$ref": "#/$defs/sha256" },
+    "type": {
+      "enum": [
+        "setText",
+        "replaceTextRange",
+        "setAttribute",
+        "setStyle",
+        "insertElement",
+        "deleteElement",
+        "moveElement",
+        "replaceSubtree"
+      ]
+    },
+    "target": { "$ref": "#/$defs/target" },
+    "parent": { "$ref": "#/$defs/target" },
+    "before": {
+      "oneOf": [
+        { "$ref": "#/$defs/target" },
+        { "type": "null" }
+      ]
+    },
+    "text": { "type": "string" },
+    "range": { "$ref": "#/$defs/textRange" },
+    "name": { "type": "string", "minLength": 1 },
+    "value": { "type": ["string", "null"] },
+    "property": { "type": "string", "minLength": 1 },
+    "important": { "type": "boolean" },
+    "html": { "type": "string", "minLength": 1 }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "type": { "const": "setText" } }, "required": ["type"] },
+      "then": { "required": ["target", "text"] }
+    },
+    {
+      "if": { "properties": { "type": { "const": "replaceTextRange" } }, "required": ["type"] },
+      "then": { "required": ["target", "range", "text"] }
+    },
+    {
+      "if": { "properties": { "type": { "const": "setAttribute" } }, "required": ["type"] },
+      "then": { "required": ["target", "name", "value"] }
+    },
+    {
+      "if": { "properties": { "type": { "const": "setStyle" } }, "required": ["type"] },
+      "then": { "required": ["target", "property", "value", "important"] }
+    },
+    {
+      "if": { "properties": { "type": { "const": "insertElement" } }, "required": ["type"] },
+      "then": { "required": ["parent", "before", "html"] }
+    },
+    {
+      "if": { "properties": { "type": { "const": "deleteElement" } }, "required": ["type"] },
+      "then": { "required": ["target"] }
+    },
+    {
+      "if": { "properties": { "type": { "const": "moveElement" } }, "required": ["type"] },
+      "then": { "required": ["target", "parent", "before"] }
+    },
+    {
+      "if": { "properties": { "type": { "const": "replaceSubtree" } }, "required": ["type"] },
+      "then": { "required": ["target", "html"] }
+    }
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "elementId": {
+      "type": "string",
+      "pattern": "^pr1_[0-9a-f]{12}4[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+    },
+    "target": {
+      "type": "object",
+      "required": ["elementId", "tagName", "expectedOuterHtmlSha256"],
+      "properties": {
+        "elementId": { "$ref": "#/$defs/elementId" },
+        "tagName": { "type": "string", "pattern": "^[a-z][a-z0-9:-]*$" },
+        "expectedOuterHtmlSha256": { "$ref": "#/$defs/sha256" }
+      },
+      "additionalProperties": false
+    },
+    "textRange": {
+      "type": "object",
+      "required": ["startOffset", "endOffset", "quote"],
+      "properties": {
+        "startOffset": { "type": "integer", "minimum": 0 },
+        "endOffset": { "type": "integer", "minimum": 0 },
+        "quote": { "type": "string" }
+      },
+      "additionalProperties": false
+    }
+  }
+}

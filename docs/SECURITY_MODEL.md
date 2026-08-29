@@ -322,6 +322,14 @@ The rendered preview DOM is disposable and never becomes a whole-document
 persistence source. PageRoot 0.9.0 has one controlled `contenteditable="true"`
 route:
 
+The pure semantic-operation kernel is also source-only. It requires complete
+persistent identity plus exact source, revision, tag and subtree-Hash evidence;
+SourcePatch re-plans its lowered ranges before apply. New structural fragments
+cannot provide PageRoot IDs, moves preserve exact identified bytes, replacement
+retains the target root ID/tag, and generated exact-source inverse objects lose
+authority when cloned. The kernel has no save, IPC, filesystem or Runtime DOM
+capability in PR4.
+
 - SourceIndex and TargetResolver must prove one exact, explicit-end-tag HTML
   element before activation.
 - Runtime layout, text style, Selection, focus and restoration must pass the

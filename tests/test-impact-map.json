@@ -941,9 +941,9 @@
     {
       "id": "source-editing-core",
       "patterns": [
-        "^app/lib/(?:align-preview-source-surface|canvas-target-rebind|comment-text-locator|editable-island|native-dom-logical-index|page-(?:presentation-dom|view-context)|pageroot-element-identity|source-(?:index|patch-core|patch-engine|text-map)|target-resolver|native-(?:edit-capability|edit-policy))\\.(?:js|ts|d\\.ts)$",
+        "^app/lib/(?:align-preview-source-surface|canvas-target-rebind|comment-text-locator|editable-island|native-dom-logical-index|page-(?:presentation-dom|view-context)|pageroot-element-identity|semantic-operation-kernel|source-(?:index|patch-core|patch-engine|text-map)|target-resolver|native-(?:edit-capability|edit-policy))\\.(?:js|ts|d\\.ts)$",
         "^shared/pageroot-element-identity\\.mjs$",
-        "^schemas/pageroot-element-identity\\.v1\\.schema\\.json$",
+        "^schemas/(?:pageroot-element-identity|semantic-operation)\\.v1\\.schema\\.json$",
         "^scripts/(?:source-index|target-resolver)\\.mjs$"
       ],
       "suites": [
@@ -960,6 +960,7 @@
         "tests/source-index-target-resolver.test.mjs",
         "tests/page-view-context.test.mjs",
         "tests/source-patch-engine.test.mjs",
+        "tests/semantic-operation-kernel.test.mjs",
         "tests/editable-island.test.mjs",
         "tests/source-text-map.test.mjs",
         "tests/native-edit-capability.test.mjs",
