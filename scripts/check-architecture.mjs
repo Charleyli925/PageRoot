@@ -296,11 +296,11 @@ export async function architectureViolations() {
   for (const filePath of files) {
     const file = relative(filePath);
     const source = await readFile(filePath, "utf8");
-    const module = parseModule(filePath, source);
-    violations.push(...layerBoundaryViolations({ file, source, module }));
-    violations.push(...ownershipBoundaryViolations({ file, source, module }));
-    violations.push(...escapeBoundaryViolations({ file, source, module }));
-    violations.push(...retiredArtifactViolations({ file, source, module }));
+    const ast = parseModule(filePath, source);
+    violations.push(...layerBoundaryViolations({ file, source, module: ast }));
+    violations.push(...ownershipBoundaryViolations({ file, source, module: ast }));
+    violations.push(...escapeBoundaryViolations({ file, source, module: ast }));
+    violations.push(...retiredArtifactViolations({ file, source, module: ast }));
   }
   return [...new Set(violations)].sort();
 }
