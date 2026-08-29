@@ -1,20 +1,65 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { lstat, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { loadExecutionPolicy } from "../bridge/agent/policies/execution-policy.mjs";
-import { runCodexAppServerTask } from "../bridge/agent/runtimes/codex-app-server-runtime.mjs";
+import { createDefaultProviderRegistry } from "../bridge/agent/providers/provider-registry.mjs";
 import { sha256 } from "../bridge/lifecycle-core.mjs";
 import { ProjectFileRepository } from "../bridge/project-file-repository.mjs";
 import { normalizeAgentDelivery } from "../shared/agent-delivery.mjs";
 
-const appServerFixture = fileURLToPath(new URL(
-  "./fixtures/codex-app-server-execution.mjs",
+const acpFixture = fileURLToPath(new URL(
+  "./fixtures/codex-acp-agent.mjs",
   import.meta.url,
 ));
+
+async function createSyntheticCodexInstallation(root) {
+  const command = path.join(root, "codex-acp-synthetic");
+  await writeFile(
+    command,
+    `#!/bin/sh\nexec ${JSON.stringify(process.execPath)} ${JSON.stringify(acpFixture)} "$@"\n`,
+    { mode: 0o755 },
+  );
+  const executable = await realpath(command);
+  const information = await lstat(executable);
+  return Object.freeze({
+    command: executable,
+    version: "1.7.0",
+    identity: Object.freeze({
+      dev: information.dev,
+      ino: information.ino,
+      nlink: information.nlink,
+      size: information.size,
+      mtimeMs: information.mtimeMs,
+      sha256: sha256(await readFile(command)),
+    }),
+    source: "e2e-override",
+    nodeModulesRoot: null,
+    nativeIdentity: null,
+  });
+}
+
+function finalizerPrompt(policy) {
+  const terminalRequest = {
+    command: policy.finalizer.command,
+    args: [...policy.finalizer.args],
+    cwd: policy.finalizer.cwd,
+    env: Object.entries(policy.finalizer.env).map(([name, value]) => ({ name, value })),
+  };
+  return [
+    "Complete this single frozen PageRoot task.",
+    `Read ${policy.manifestPath} and then every file in its exact readOrder.`,
+    `Follow ${policy.promptPath}.`,
+    `Write one complete HTML document only to ${policy.outputPath}.`,
+    "Then invoke ACP terminal/create exactly once with this JSON request:",
+    JSON.stringify(terminalRequest),
+    "Do not use a shell wrapper or write any other path.",
+    "The result remains a Candidate pending PageRoot review and must not replace the Working Copy.",
+  ].join("\n");
+}
 
 test("Codex completion reaches only a sealed Candidate and never adopts the Working Copy", async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), "codex-candidate-authority-"));
@@ -36,7 +81,7 @@ test("Codex completion reaches only a sealed Candidate and never adopts the Work
   });
   const selection = {
     providerId: "codex",
-    runtimeId: "app-server",
+    runtimeId: "acp",
     requestedModelId: null,
     resolvedModelId: "codex:gpt-synthetic",
     reasoning: { requested: null, applied: null, resolution: "provider-default" },
@@ -77,26 +122,34 @@ test("Codex completion reaches only a sealed Candidate and never adopts the Work
     outputPath,
     completionPath: path.join(requestRoot, "attempts", request.attemptId, "completion.json"),
   });
-  const tracePath = path.join(root, "app-server-trace.jsonl");
-  await writeFile(tracePath, "", "utf8");
-  const result = await runCodexAppServerTask({
-    command: process.execPath,
-    argsPrefix: [appServerFixture],
-    cwd: path.dirname(outputPath),
-    environment: {
-      PATH: process.env.PATH,
-      FAKE_CODEX_EXECUTION_MODE: "completed",
-      FAKE_CODEX_OUTPUT_PATH: outputPath,
-      FAKE_CODEX_TRACE_PATH: tracePath,
-    },
-    policy,
-    prompt: "Write the exact Candidate output and stop.",
-    model: "gpt-synthetic",
-    onEvent() {},
-    requestTimeoutMs: 1_000,
-    turnTimeoutMs: 1_000,
+  const installation = await createSyntheticCodexInstallation(root);
+  const registry = createDefaultProviderRegistry({
+    codexCommandResolver: async () => installation,
+    codexPreflightRunner: async () => Object.freeze({
+      version: "1.7.0",
+      protocol: "acp",
+      authMode: "ready",
+      modelCount: 1,
+      models: Object.freeze([Object.freeze({
+        id: "codex:gpt-synthetic",
+        providerModelId: "gpt-synthetic",
+        displayName: "GPT Synthetic",
+        reasoningEfforts: Object.freeze([]),
+        defaultReasoningEffort: null,
+        isDefault: true,
+      })]),
+    }),
   });
-  assert.equal(result.status, "completed");
+  const ticket = await registry.preflightForSelection(selection, "execution", {
+    environment: {},
+  });
+  const result = await registry.run(ticket, {
+    policy,
+    prompt: finalizerPrompt(policy),
+    baseEnvironment: process.env,
+    onEvent() {},
+  });
+  assert.equal(result.stopReason, "end_turn");
   const status = await repository.requestStatus({
     target: imported.target,
     requestId: request.requestId,

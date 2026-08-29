@@ -86,7 +86,7 @@ npm run package:developer
 1. 拒绝未提交的源代码，并把 commit SHA 与 Tree SHA 写入证明。
 2. 构建最新 Electron renderer。
 3. 只生成一个对应架构的 DMG，不生成 updater ZIP、blockmap 或发布元数据。
-4. 校验 `app.asar` 文件闭包、源文件、Bridge、Schema、法律资源、测试应用名、测试版本、独立 Bundle ID、架构、DMG 完整性和只读挂载内容。
+4. 校验 `app.asar` 文件闭包、源文件、Bridge、Schema、法律资源、测试应用名、测试版本、独立 Bundle ID、架构、DMG 完整性和只读挂载内容，并确认没有私有 Codex/App Server 资源或预埋 native Codex。
 5. 要求 ad-hoc 签名，不读取 Developer ID、Apple 公证或发布凭据。
 6. 使用隔离 userData 启动真实 `.app`，确认首个窗口、版本、Bridge、Workbench 就绪状态和正常退出。
 7. 写入 `developer-preview.json`，包括 DMG SHA-256，并固定：

@@ -46,6 +46,11 @@ packaged verifier for app.asar, Bridge, Schema, resource, metadata, version and
 Bundle ID checks. It freezes that App as a dedicated dry-run checkpoint whose
 attestation always contains `releaseEligible: false`.
 
+The same resource check confirms that the packaged application contains no
+private Codex provider, App Server runtime or native Codex package. Codex's
+external ACP managed-install closure is verified by the Agent catalog and is
+not copied from the application root.
+
 The second clean macOS job downloads and hash-verifies that checkpoint, restores
 the embedded build and telemetry metadata, rebuilds the renderer comparison
 oracle, revalidates the unchanged payload, then launches the App and compares

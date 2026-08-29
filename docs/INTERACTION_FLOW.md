@@ -687,7 +687,7 @@ Agent 都只能按协议处理同一个指定 Request/Attempt。
 本轮的受管执行只在现有“修改任务”闭环中显示；不恢复自由聊天讨论、讨论输入或新的
 Conversation 写入。Bridge 的公开会话投影固定包含 `providerId`、`runtimeId`、会话状态与
 阶段、Agent 身份与时间、`visibleText`、截断标记、事件数和可恢复错误。Qoder ACP 与 Codex
-App Server 都只把 Agent 明确发送给用户的文本归一为 `visible-text`；推理、工具参数、文件内容、
+ACP 都只把 Agent 明确发送给用户的文本归一为 `visible-text`；推理、工具参数、文件内容、
 系统提示、异常堆栈和 finalizer 输出一律不进入侧栏。公开文本最多保留 64 KiB，截断必须明确标记。
 
 Renderer 通过一个可取消、单飞的递归轮询读取 Bridge 状态：初始核对与提交不确定态约 500ms，

@@ -4,6 +4,10 @@
 - Date: 2026-08-28
 - Scope: Bridge Agent discovery, on-demand ACP installation and shared ACP runtime
 
+> Implementation note (2026-08-29): The later Codex ACP cut-over completed the
+> planned removal of the bundled Codex App Server. The catalog and installer
+> remain the authority for Codex's external managed closure.
+
 ## Context
 
 PageRoot already had a provider-neutral coordinator, a Qoder ACP path and a

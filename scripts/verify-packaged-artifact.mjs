@@ -9,7 +9,6 @@ import {
   copyFile,
   lstat,
   mkdtemp,
-  open,
   readFile,
   readdir,
   rm,
@@ -40,11 +39,6 @@ import {
   readPackagedPlistIdentity,
 } from "./packaged-app-identity.mjs";
 import { assertBuildInfo, expectedBuildInfo } from "./release-provenance.mjs";
-import {
-  PINNED_CODEX_VERSION,
-  codexInstallationDigest,
-  resolveBundledCodexInstallation,
-} from "../bridge/agent/providers/codex-provider.mjs";
 import { AGENT_FEATURE_GATES } from "../shared/agent-feature-gates.mjs";
 
 const SCRIPT_PATH = fileURLToPath(import.meta.url);
@@ -61,7 +55,6 @@ const REQUIRED_BRIDGE_FILES = [
   "agent/providers/agent-provider-contract.mjs",
   "agent/providers/provider-registry.mjs",
   "agent/providers/qoder-provider.mjs",
-  "agent/providers/codex-provider.mjs",
   "agent/providers/codex-acp-provider.mjs",
   "agent/catalog/agent-catalog.mjs",
   "agent/catalog/agent-installer.mjs",
@@ -72,8 +65,6 @@ const REQUIRED_BRIDGE_FILES = [
   "agent/runtimes/acp-protocol.mjs",
   "agent/runtimes/acp-process.mjs",
   "agent/runtimes/acp-verified-javascript.mjs",
-  "agent/runtimes/codex-app-server-client.mjs",
-  "agent/runtimes/codex-app-server-runtime.mjs",
   "agent/policies/execution-policy.mjs",
   "agent/hosts/execution-host.mjs",
   "qoder-acp-client.mjs",
@@ -130,14 +121,8 @@ const REQUIRED_BASE_PACKAGED_MODULES = [
   "zod",
 ];
 
-function requiredPackagedModules({ arch, includeCodex }) {
-  assert.match(arch, /^(?:arm64|x64)$/u, "packaged Codex architecture is invalid");
-  return [
-    ...REQUIRED_BASE_PACKAGED_MODULES,
-    ...(includeCodex
-      ? ["@openai/codex", `@openai/codex-darwin-${arch}`]
-      : []),
-  ].sort();
+function requiredPackagedModules() {
+  return [...REQUIRED_BASE_PACKAGED_MODULES].sort();
 }
 export const REQUIRED_SHARED_FILES = [
   "direct-edit-compatibility.mjs",
@@ -411,28 +396,6 @@ async function assertFilesEqual(sourcePath, packagedPath, label) {
   );
 }
 
-const MACH_O_MAGICS = new Set([
-  "cafebabe",
-  "cafebabf",
-  "bebafeca",
-  "bfbafeca",
-  "cefaedfe",
-  "cffaedfe",
-  "feedface",
-  "feedfacf",
-]);
-
-async function isMachOFile(filePath) {
-  const handle = await open(filePath, "r");
-  try {
-    const magic = Buffer.alloc(4);
-    const { bytesRead } = await handle.read(magic, 0, magic.length, 0);
-    return bytesRead === magic.length && MACH_O_MAGICS.has(magic.toString("hex"));
-  } finally {
-    await handle.close();
-  }
-}
-
 export async function assertSignedMachOContentEqual({
   sourcePath,
   packagedPath,
@@ -635,18 +598,13 @@ export function assertPackagedAgentFeatureGates(
 ) {
   assert.deepEqual(
     Object.keys(sourceFeatureGates).sort(),
-    ["codexDiscussion", "codexExecution"],
+    ["codexDiscussion"],
     "source Agent feature gates changed shape",
   );
   assert.equal(
     sourceFeatureGates.codexDiscussion,
     false,
     "source Agent feature gates must keep pure Codex Discussion disabled",
-  );
-  assert.equal(
-    typeof sourceFeatureGates.codexExecution,
-    "boolean",
-    "source Codex execution gate must be boolean",
   );
   assert.deepEqual(
     packagedFeatureGates,
@@ -655,43 +613,36 @@ export function assertPackagedAgentFeatureGates(
   );
 }
 
-export async function verifyPackagedCodexRuntime({ resourcesPath, arch }) {
+export async function assertNoBundledCodexArtifacts(resourcesPath) {
   assert.equal(path.isAbsolute(resourcesPath), true, "Codex resourcesPath must be absolute");
-  const installation = await resolveBundledCodexInstallation({
-    resourcesRoot: resourcesPath,
-    platform: "darwin",
-    arch,
-  });
-  assert.equal(installation.version, PINNED_CODEX_VERSION, "packaged Codex version drifted");
-  const versionResult = spawnSync(installation.command, ["--version"], {
-    encoding: "utf8",
-    maxBuffer: 64 * 1024,
-    timeout: 10_000,
-  });
-  if (versionResult.error) throw versionResult.error;
-  assert.equal(
-    versionResult.status,
-    0,
-    `packaged Codex native runtime smoke failed\n${versionResult.stderr ?? ""}`,
-  );
-  assert.match(
-    String(versionResult.stdout || "").trim(),
-    new RegExp(`^codex-cli ${PINNED_CODEX_VERSION.replaceAll(".", "\\.")}$`, "u"),
-    "packaged Codex executable did not report the pinned version",
-  );
-  const gatePath = path.join(resourcesPath, "shared", "agent-feature-gates.mjs");
-  const gateBytes = await readFile(gatePath);
-  const gateModule = await import(
-    `${pathToFileURL(gatePath).href}?verify=${sha256(gateBytes)}`
-  );
-  assertPackagedAgentFeatureGates(
-    gateModule.AGENT_FEATURE_GATES,
-  );
-  return Object.freeze({
-    version: installation.version,
-    target: installation.target,
-    installationDigest: codexInstallationDigest(installation),
-  });
+  for (const relativePath of [
+    "bridge/agent/providers/codex-provider.mjs",
+    "node_modules/@openai/codex",
+  ]) {
+    assert.equal(
+      existsSync(path.join(resourcesPath, relativePath)),
+      false,
+      `retired bundled Codex artifact must be absent: ${relativePath}`,
+    );
+  }
+  const runtimeRoot = path.join(resourcesPath, "bridge", "agent", "runtimes");
+  const runtimeEntries = await readdir(runtimeRoot, { withFileTypes: true }).catch(() => []);
+  for (const entry of runtimeEntries) {
+    assert.equal(
+      entry.name.startsWith("codex-app-server-"),
+      false,
+      `retired bundled Codex runtime must be absent: ${entry.name}`,
+    );
+  }
+  const openaiRoot = path.join(resourcesPath, "node_modules", "@openai");
+  const openaiEntries = await readdir(openaiRoot, { withFileTypes: true }).catch(() => []);
+  for (const entry of openaiEntries) {
+    assert.equal(
+      entry.name === "codex" || entry.name.startsWith("codex-darwin-"),
+      false,
+      `retired bundled Codex package must be absent: @openai/${entry.name}`,
+    );
+  }
 }
 
 export async function verifyAppBundle({
@@ -703,8 +654,6 @@ export async function verifyAppBundle({
   signaturePolicy,
   expectedProvenance,
   requirePackagedAgentBridgeSmoke = true,
-  requirePackagedCodexRuntime = requirePackagedAgentBridgeSmoke,
-  arch = process.arch,
 }) {
   const effectiveSignaturePolicy = signaturePolicy
     ?? (verifySignature ? "developer-id" : "none");
@@ -806,6 +755,7 @@ export async function verifyAppBundle({
       `bridge/${fileName}`,
     );
   }
+  await assertNoBundledCodexArtifacts(resourcesPath);
   const sharedPackagedRoot = path.join(resourcesPath, "shared");
   const packagedSharedFiles = await listFiles(sharedPackagedRoot);
   assert.deepEqual(
@@ -820,43 +770,29 @@ export async function verifyAppBundle({
       `shared/${fileName}`,
     );
   }
+  const gatePath = path.join(sharedPackagedRoot, "agent-feature-gates.mjs");
+  const gateBytes = await readFile(gatePath);
+  const gateModule = await import(
+    `${pathToFileURL(gatePath).href}?verify=${sha256(gateBytes)}`
+  );
+  assertPackagedAgentFeatureGates(gateModule.AGENT_FEATURE_GATES);
   const packagedModuleDirectories = await listPackagedModuleNames(
     path.join(resourcesPath, "node_modules"),
   );
-  const requiredModules = requiredPackagedModules({
-    arch,
-    includeCodex: requirePackagedCodexRuntime,
-  });
+  const requiredModules = requiredPackagedModules();
   assert.deepEqual(
     packagedModuleDirectories,
     requiredModules,
     "packaged runtime modules must exactly match the reviewed allowlist",
   );
   for (const moduleName of requiredModules) {
-    const codexPlatformModule = `@openai/codex-darwin-${arch}`;
     await assertDirectoryMatches({
       sourceRoot: path.join(productRoot, "node_modules", moduleName),
       packagedRoot: path.join(resourcesPath, "node_modules", moduleName),
       label: `node_modules/${moduleName}`,
-      compareFile: moduleName === codexPlatformModule
-        ? async (sourcePath, packagedPath, label) => {
-          if (!await isMachOFile(sourcePath)) {
-            await assertFilesEqual(sourcePath, packagedPath, label);
-            return;
-          }
-          await assertSignedMachOContentEqual({
-            sourcePath,
-            packagedPath,
-            entitlementsPath: path.join(productRoot, "desktop/resources/entitlements.mac.plist"),
-            label,
-          });
-        }
-        : assertFilesEqual,
+      compareFile: assertFilesEqual,
     });
   }
-  const codex = requirePackagedCodexRuntime
-    ? await verifyPackagedCodexRuntime({ resourcesPath, arch })
-    : null;
 
   const helperExecutable = path.join(
     appPath,
@@ -1035,7 +971,6 @@ export async function verifyAppBundle({
     schemaFileCount: schemas.length,
     legalResourceCount: REQUIRED_LEGAL_RESOURCES.length,
     applicationUpdate,
-    codex,
     provenance,
     telemetry,
   };

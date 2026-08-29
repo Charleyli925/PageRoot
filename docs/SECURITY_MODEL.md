@@ -247,14 +247,14 @@ Every provider, ticket and launch descriptor freezes one `securityProfile`.
 The installed Qoder and Codex ACP mappings are `client-mediated`: the Host
 modules can allow or deny only file and terminal requests sent through the ACP
 Client Host. They do not constrain native file or command operations performed
-inside the Agent process. There is no registered `agent-native` mapping after
-the Codex ACP cut-over. The packaged-unregistered App Server modules still describe
-one fresh ephemeral thread with approval `never`; strict configuration disables
-MCP, skills, plugins, apps, Web/browser/computer use, memories and subagents.
-The turn uses a workspace-write sandbox rooted only at the Request output
-directory, with tool network access disabled and the system temporary roots
-excluded. Any permission request, unsupported App Server request, unconfirmed
-process-group cleanup, write residue beside the unique Candidate or
+inside the Agent process. There is no registered `agent-native` mapping and no
+Codex executable or private runtime in the packaged application. Both installed
+ACP providers use one fresh ephemeral session with approval `never`; strict
+configuration disables MCP, skills, plugins, apps, Web/browser/computer use,
+memories and subagents. The turn uses a workspace-write sandbox rooted only at
+the Request output directory, with tool network access disabled and the system
+temporary roots excluded. Any permission request, unsupported ACP request,
+unconfirmed process-group cleanup, write residue beside the unique Candidate or
 fixed-finalizer failure fails closed before Candidate publication. Unknown or
 mixed ticket/launch profiles fail closed, and any future registered
 `agent-native` provider requires its own sandbox conformance and security gate

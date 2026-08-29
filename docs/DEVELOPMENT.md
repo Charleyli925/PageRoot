@@ -46,15 +46,16 @@ and `task:sync-main` to fast-forward the clean primary checkout. See `AGENTS.md`
 and `docs/CODEX_WORKFLOW.md` for the complete automation and authorization
 boundary.
 
-## Product Qoder ACP Agent Bridge
+## Product ACP Agent Bridge
 
 The packaged Bridge owns the product session through
 `bridge/agent/agent-runtime-coordinator.mjs`; the old Service exports only
-delegate existing routes. Its sole provider registry maps legacy
-`qoder-acp` to `bridge/agent/providers/qoder-provider.mjs` and the `acp`
-runtime in `bridge/agent/runtimes/acp-runtime.mjs`; unknown provider/runtime
-IDs fail closed. The restricted Host Ports now live in `bridge/agent/hosts/`,
-while frozen execution policy lives in `bridge/agent/policies/`.
+delegate existing routes. Its provider registry maps legacy `qoder-acp` to
+`qoder-provider.mjs` and registers both Qoder and Codex through the single
+`acp` runtime in `bridge/agent/runtimes/acp-runtime.mjs`; unknown
+provider/runtime IDs fail closed. The restricted Host Ports now live in
+`bridge/agent/hosts/`, while frozen execution policy lives in
+`bridge/agent/policies/`.
 `bridge/qoder-acp-client.mjs` retains the legacy transport façade and exact
 compatibility exports without a second policy brand. The
 renderer can request `POST /agent/preflight` and `POST /agent/start` with
@@ -99,6 +100,8 @@ Run the deterministic owners directly while developing this boundary:
 
 ```bash
 node --test tests/qoder-acp-spike-client.test.mjs
+node --test tests/codex-acp-provider.test.mjs
+node --test tests/codex-candidate-authority.test.mjs
 node --test tests/agent-provider-contract.test.mjs
 node --test tests/agent-bridge-service.test.mjs
 node --test tests/agent-bridge-workspace.test.mjs

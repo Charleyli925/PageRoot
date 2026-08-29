@@ -705,7 +705,6 @@ test("Qoder ACP transport changes select Qoder and ACP owners without the packag
     "tests/qoder-acp-spike-client.test.mjs",
   ]);
   assert.equal(plan.selectedNodeTests.includes("tests/desktop-package.test.mjs"), false);
-  assert.equal(plan.selectedNodeTests.includes("tests/codex-app-server-runtime.test.mjs"), false);
 });
 
 test("notification, comment, and presentation Browser owners select their own smoke lane", () => {
