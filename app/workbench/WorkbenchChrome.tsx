@@ -251,6 +251,7 @@ export function WorkbenchGlobalSidebar({
   onOpenAbout,
   onOpenSettings,
   onDownloadOrRestartUpdate,
+  onResizeCommit,
 }: {
   open: boolean;
   registeredProjects: RegisteredProject[];
@@ -274,6 +275,7 @@ export function WorkbenchGlobalSidebar({
   onOpenAbout: () => void;
   onOpenSettings: () => void;
   onDownloadOrRestartUpdate: () => void;
+  onResizeCommit?: (width: number) => void;
 }) {
   const [projectExpansionState, setProjectExpansionState] = useState<ProjectExpansionState>(
     () => createProjectExpansionState(currentProjectId),
@@ -485,7 +487,7 @@ export function WorkbenchGlobalSidebar({
               <GearSixIcon aria-hidden="true" size={20} weight="bold" />
             </button>
           </footer>
-          <WorkbenchResizer kind="sidebar" />
+          <WorkbenchResizer kind="sidebar" onCommit={onResizeCommit} />
         </>
       ) : null}
     </aside>

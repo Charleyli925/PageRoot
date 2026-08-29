@@ -368,13 +368,14 @@ export async function openQoderAvailability(page) {
   }
   await expect(sidebar).toHaveAttribute("data-open", "true");
   await sidebar.getByRole("button", { name: "设置", exact: true }).click();
+  await page.getByRole("button", { name: "AI Agent", exact: true }).click();
   const card = page.locator(".workbench-settings-page").locator(".qoder-availability-card").first();
   await expect(card).toBeVisible();
   return card;
 }
 
 export async function closeQoderAvailability(page) {
-  await page.getByRole("button", { name: "关闭设置" }).click();
+  await page.getByRole("button", { name: "返回工作台" }).click();
 }
 
 export async function focusChangeById(page, frame, changeId) {

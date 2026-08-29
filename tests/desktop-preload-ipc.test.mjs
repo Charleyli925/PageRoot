@@ -229,34 +229,70 @@ test("preload exposes one narrow UI-preferences get/record port", async () => {
     calls.push(args);
     if (args[0] === "html-ui-preferences:get") {
       return success({
-        schemaVersion: 1,
+        schemaVersion: 2,
         firstRealHtmlEditGuide: { status: "pending", generation: 1 },
         builtInWelcomeProjectId: null,
+        workspace: {
+          rememberPanelWidths: true,
+          sidebarWidth: 264,
+          inspectorWidth: 376,
+          motion: "system",
+          restoreTabsOnLaunch: true,
+          defaultAgentProviderId: "qoder",
+        },
       });
     }
     return success({
-      schemaVersion: 1,
+      schemaVersion: 2,
       firstRealHtmlEditGuide: { status: "dismissed", generation: 1 },
       builtInWelcomeProjectId: null,
+      workspace: {
+        rememberPanelWidths: true,
+        sidebarWidth: 320,
+        inspectorWidth: 376,
+        motion: "system",
+        restoreTabsOnLaunch: true,
+        defaultAgentProviderId: "qoder",
+      },
     });
   });
 
   assert.deepEqual(await uiPreferences.get(), {
-    schemaVersion: 1,
+    schemaVersion: 2,
     firstRealHtmlEditGuide: { status: "pending", generation: 1 },
     builtInWelcomeProjectId: null,
+    workspace: {
+      rememberPanelWidths: true,
+      sidebarWidth: 264,
+      inspectorWidth: 376,
+      motion: "system",
+      restoreTabsOnLaunch: true,
+      defaultAgentProviderId: "qoder",
+    },
   });
   assert.deepEqual(calls[0], ["html-ui-preferences:get"]);
   assert.deepEqual(await uiPreferences.record({ action: "dismissed" }), {
-    schemaVersion: 1,
+    schemaVersion: 2,
     firstRealHtmlEditGuide: { status: "dismissed", generation: 1 },
     builtInWelcomeProjectId: null,
+    workspace: {
+      rememberPanelWidths: true,
+      sidebarWidth: 320,
+      inspectorWidth: 376,
+      motion: "system",
+      restoreTabsOnLaunch: true,
+      defaultAgentProviderId: "qoder",
+    },
   });
   assert.equal(calls[1][0], "html-ui-preferences:record");
   assert.equal(calls[1][1].action, "dismissed");
   await assert.rejects(
     () => uiPreferences.record({ action: "pending" }),
     /引导记录无效/u,
+  );
+  await assert.rejects(
+    () => uiPreferences.record({ workspace: { sidebarWidth: 999 } }),
+    /工作台偏好记录无效/u,
   );
   assert.equal(calls.length, 2);
   assert.deepEqual(Object.keys(uiPreferences).sort(), ["get", "record"]);

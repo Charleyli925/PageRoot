@@ -1338,6 +1338,29 @@
       ]
     },
     {
+      "id": "workspace-preferences",
+      "patterns": [
+        "^app/application/workspace-preferences-session\\.(?:js|d\\.ts)$",
+        "^app/components/SettingsPage\\.tsx$",
+        "^app/workbench/(?:settings-types|use-workspace-preferences)\\.(?:ts|tsx)$",
+        "^app/workbench/workbench-resizer\\.tsx$",
+        "^tests/workspace-preferences-session\\.test\\.mjs$"
+      ],
+      "suites": [
+        "typecheck",
+        "electron-smoke",
+        "electron-editing-smoke"
+      ],
+      "nodeTests": [
+        "tests/workspace-preferences-session.test.mjs",
+        "tests/ui-preferences.test.mjs",
+        "tests/desktop-preload-ipc.test.mjs",
+        "tests/workbench-navigation-workflow.test.mjs",
+        "tests/workbench-css.test.mjs",
+        "tests/agent-provider-card.test.mjs"
+      ]
+    },
+    {
       "id": "desktop-update",
       "patterns": [
         "^desktop/application-update\\.mjs$",

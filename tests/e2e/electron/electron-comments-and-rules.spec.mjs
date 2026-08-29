@@ -360,10 +360,13 @@ test("automatic update actions keep the sidebar product geometry and split About
       const actualWidth = element.getBoundingClientRect().width;
       const workbench = element.closest(".workbench");
       const targetWidth = workbench
-        ? Number.parseFloat(getComputedStyle(workbench).getPropertyValue("--workbench-sidebar-width"))
+        ? Number.parseFloat(getComputedStyle(workbench).gridTemplateColumns.split(" ")[0])
         : 0;
       return Math.abs(actualWidth - targetWidth);
     })).toBeLessThanOrEqual(0.5);
+    await launched.page.evaluate(() => new Promise((resolve) => {
+      window.setTimeout(resolve, 220);
+    }));
     const captureSidebarProduct = async ({ badgeExpected = true } = {}) => {
       const geometry = await launched.page.evaluate(() => {
         const rect = (selector) => {
@@ -460,17 +463,20 @@ test("automatic update actions keep the sidebar product geometry and split About
     await sidebar.getByRole("button", { name: "设置", exact: true }).click();
     const settings = launched.page.locator(".workbench-settings-page");
     await expect(settings).toBeVisible();
-    await expect(settings.getByRole("heading", { name: "AI Agent" })).toBeVisible();
-    await expect(settings.getByRole("heading", { name: "软件更新" })).toBeVisible();
+    await expect(settings.getByRole("heading", { name: "常规" })).toBeVisible();
+    await expect(launched.page.getByRole("button", { name: "AI Agent", exact: true }))
+      .toBeVisible();
+    await expect(settings.getByRole("heading", { name: "常规" })).toBeFocused();
+    await launched.page.getByRole("button", { name: "软件更新", exact: true }).click();
+    await expect(settings.getByRole("heading", { name: "软件更新" })).toBeFocused();
     await expect(settings.getByRole("button", { name: "下载更新" })).toBeVisible();
-    await expect(settings.getByRole("button", { name: "关闭设置" })).toBeFocused();
     if (toolbarCleanupOutput) {
       await launched.page.screenshot({
         path: path.join(toolbarCleanupOutput, "03-settings.png"),
         animations: "disabled",
       });
     }
-    await settings.getByRole("button", { name: "关闭设置" }).press("Escape");
+    await settings.getByRole("heading", { name: "软件更新" }).press("Escape");
     await expect(settings).toHaveCount(0);
     await expect(sidebar.getByRole("button", { name: "设置", exact: true })).toBeFocused();
 
@@ -517,10 +523,11 @@ test("Electron shell keeps the global rail fixed while the context inspector swa
     await expect.poll(() => sidebar.evaluate((element) => {
       const workbench = element.closest(".workbench");
       const targetWidth = workbench
-        ? Number.parseFloat(getComputedStyle(workbench).getPropertyValue("--workbench-sidebar-width"))
+        ? Number.parseFloat(getComputedStyle(workbench).gridTemplateColumns.split(" ")[0])
         : 0;
       return Math.abs(element.getBoundingClientRect().width - targetWidth);
     })).toBeLessThanOrEqual(0.5);
+    await launched.page.waitForTimeout(220);
 
     const expandedToggle = launched.page.getByRole("button", { name: "收起左侧边栏" });
     const expandedToggleBox = await expandedToggle.boundingBox();
@@ -575,10 +582,11 @@ test("Electron shell keeps the global rail fixed while the context inspector swa
     await expect.poll(() => sidebar.evaluate((element) => {
       const workbench = element.closest(".workbench");
       const targetWidth = workbench
-        ? Number.parseFloat(getComputedStyle(workbench).getPropertyValue("--workbench-sidebar-width"))
+        ? Number.parseFloat(getComputedStyle(workbench).gridTemplateColumns.split(" ")[0])
         : 0;
       return Math.abs(element.getBoundingClientRect().width - targetWidth);
     })).toBeLessThanOrEqual(0.5);
+    await launched.page.waitForTimeout(220);
 
     const readGeometry = () => launched.page.evaluate(() => {
       const readRect = (selector) => {
@@ -613,8 +621,11 @@ test("Electron shell keeps the global rail fixed while the context inspector swa
         aiPosition: ai ? getComputedStyle(ai).position : null,
         viewportWidth: window.innerWidth,
         documentWidth: Math.max(document.documentElement.scrollWidth, document.body?.scrollWidth || 0),
-        sidebarWidth: Number.parseFloat(
-          styles?.getPropertyValue("--workbench-sidebar-width") || "0",
+        sidebarWidth: styles
+          ? Number.parseFloat(styles.gridTemplateColumns.split(" ")[0])
+          : 0,
+        sidebarSavedWidth: Number.parseFloat(
+          styles?.getPropertyValue("--workbench-sidebar-width-saved") || "0",
         ),
         inspectorWidth: Number.parseFloat(
           styles?.getPropertyValue("--workbench-inspector-width") || "0",
@@ -726,10 +737,11 @@ test("Electron shell keeps the global rail fixed while the context inspector swa
     await expect.poll(() => sidebar.evaluate((element) => {
       const workbench = element.closest(".workbench");
       const targetWidth = workbench
-        ? Number.parseFloat(getComputedStyle(workbench).getPropertyValue("--workbench-sidebar-width"))
+        ? Number.parseFloat(getComputedStyle(workbench).gridTemplateColumns.split(" ")[0])
         : 0;
       return Math.abs(element.getBoundingClientRect().width - targetWidth);
     })).toBeLessThanOrEqual(0.5);
+    await launched.page.waitForTimeout(220);
     const narrowAiGeometry = await readGeometry();
     assertShellGeometry(narrowAiGeometry);
     expect(narrowAiGeometry.sidebarWidth).toBe(240);
@@ -802,7 +814,7 @@ test("Electron shell keeps the global rail fixed while the context inspector swa
       (sidebarResizerBox?.x || 0) + (sidebarResizerBox?.width || 0) / 2,
       (sidebarResizerBox?.y || 0) + 400,
     );
-    const sidebarWidthBeforeResize = narrowAiGeometry.sidebarWidth;
+    const sidebarWidthBeforeResize = narrowAiGeometry.sidebarSavedWidth;
     await launched.page.mouse.down();
     await launched.page.mouse.move(
       (sidebarResizerBox?.x || 0) + (sidebarResizerBox?.width || 0) / 2 + 32,
@@ -812,7 +824,7 @@ test("Electron shell keeps the global rail fixed while the context inspector swa
     await launched.page.mouse.up();
     await expect.poll(() => launched.page.evaluate(() => Number.parseFloat(
       getComputedStyle(document.querySelector("main.workbench")).getPropertyValue(
-        "--workbench-sidebar-width",
+        "--workbench-sidebar-width-saved",
       ),
     ))).toBeGreaterThan(sidebarWidthBeforeResize + 24);
     const shellWidthAfterResize = await launched.page.evaluate(() => ({
@@ -824,9 +836,9 @@ test("Electron shell keeps the global rail fixed while the context inspector swa
     await sidebarResizer.dblclick();
     await expect.poll(() => launched.page.evaluate(() => Number.parseFloat(
       getComputedStyle(document.querySelector("main.workbench")).getPropertyValue(
-        "--workbench-sidebar-width",
+        "--workbench-sidebar-width-saved",
       ),
-    ))).toBe(240);
+    ))).toBe(264);
 
     const inspectorResizer = launched.page.getByTestId("workbench-resizer-inspector");
     await expect(inspectorResizer).toBeVisible();

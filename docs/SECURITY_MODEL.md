@@ -439,15 +439,23 @@ so already-published clients can find that migration release without restoring
 the retired client code to the current application.
 
 Install-level UI preferences (`ui-preferences.json`) are Main-owned, bounded
-and atomically replaced. The renderer receives only `get`/`record` for the
-first-real-HTML guide through trusted IPC; the payload is `presented` or
-`dismissed`. Ordinary `PAGEROOT_E2E=1` launches do not expose that renderer
-port, so automated profiles skip first-install IPC during hydration; tests
-that need the real card set `PAGEROOT_E2E_FIRST_EDIT_GUIDE=1`. The file must
-not contain HTML, paths, comments or credentials. A damaged or oversized file
-is treated as empty pending state. The built-in welcome `projectId` is
-recorded after welcome registration so that page never shows the
-first-real-HTML card.
+and atomically replaced. Schema v1 is migrated without dropping the guide or
+built-in welcome identity; schema v2 adds only the allowlisted `workspace`
+fields `rememberPanelWidths`, `sidebarWidth`, `inspectorWidth`, `motion`,
+`restoreTabsOnLaunch` and `defaultAgentProviderId`. Main strictly validates
+field types, provider identifiers and the 200–420px / 280–520px width ranges;
+damaged values are safely normalized on read and unsafe patches are rejected.
+The renderer receives only trusted `get`/`record` for guide actions or a
+narrow workspace patch. A queued read-modify-write and atomic replacement
+prevents guide and Settings updates from clobbering one another. The file
+must not contain HTML, paths, comments, credentials or localStorage state.
+Preference errors remain a Settings-page retry state; bounded close flushing
+is best effort and cannot block a source HTML close that already completed its
+own safety boundary. Ordinary `PAGEROOT_E2E=1` launches do not expose the
+renderer preference port, so automated profiles skip preference IPC during
+hydration; tests needing it opt into `PAGEROOT_E2E_FIRST_EDIT_GUIDE=1`. The
+built-in welcome `projectId` is recorded after welcome registration so that
+page never shows the first-real-HTML card.
 
 The renderer may name only a provider selection. It cannot provide executable
 commands, paths, permissions or a security profile. Preflight resolves the

@@ -124,6 +124,7 @@ import {
 import {
   readUiPreferences,
   recordFirstEditGuide,
+  recordUiWorkspacePreferences,
   rememberBuiltInWelcomeProjectId,
 } from "./ui-preferences.mjs";
 import { readOrCreateDeviceIdentity } from "./device-identity.mjs";
@@ -3546,10 +3547,19 @@ function registerProjectIpc() {
     getUiPreferences: async () => readUiPreferences({
       userDataPath: app.getPath("userData"),
     }),
-    recordUiPreference: async (payload) => recordFirstEditGuide({
-      userDataPath: app.getPath("userData"),
-      action: payload?.action,
-    }),
+    recordUiPreference: async (payload) => {
+      const userDataPath = app.getPath("userData");
+      if (payload?.action === "presented" || payload?.action === "dismissed") {
+        return recordFirstEditGuide({
+          userDataPath,
+          action: payload.action,
+        });
+      }
+      return recordUiWorkspacePreferences({
+        userDataPath,
+        workspace: payload?.workspace,
+      });
+    },
     getWorkbenchTabs: () => readWorkbenchTabsState({
       userDataPath: app.getPath("userData"),
     }),

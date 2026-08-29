@@ -14,6 +14,7 @@ export function workbenchStartupPriority(input?: {
   externalRequestCount?: number;
   persistedStatePresent?: boolean;
   persistedActiveTabId?: string | null;
+  restoreTabsOnLaunch?: boolean;
 }): "external" | "persisted-active-tab" | "active-path-compatibility" | "start";
 export class WorkbenchNavigationWorkflow {
   constructor(input: {

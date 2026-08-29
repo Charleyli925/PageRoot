@@ -112,6 +112,7 @@ export default function AgentProviderCard({
         </span>
         <span className="qoder-card-copy">
           <strong>{provider.displayName}</strong>
+          <small>{presentation.detail}</small>
         </span>
         <span className="qoder-card-control">
           <span

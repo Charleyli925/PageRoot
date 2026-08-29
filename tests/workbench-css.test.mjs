@@ -27,6 +27,7 @@ async function readWorkbenchCascadeCss() {
     "./styles/review-v52-canvas.css",
     "./styles/comment-hierarchy.css",
     "./styles/about-and-chrome.css",
+    "./styles/settings-workspace.css",
     "./styles/top-toolbar.css",
     "./styles/workbench-chrome.css",
     "./styles/project-sidebar.css",
@@ -73,7 +74,7 @@ test("global sidebar owns the full shell column and start page has no card surfa
 
   assert.match(
     css,
-    /\.workbench\[data-left-sidebar="open"\] \{\s*--workbench-sidebar-width:\s*264px/u,
+    /\.workbench\[data-left-sidebar="open"\] \{\s*--workbench-sidebar-width:\s*clamp\(200px, var\(--workbench-sidebar-width-saved\), 420px\)/u,
   );
   assert.match(css, /--chrome-sidebar-surface:\s*rgb\(239 239 243 \/ 72%\)/u);
   assert.match(css, /\.workbench-toolbar-primary,\n\.workbench-toolbar-center,\n\.workbench-toolbar-actions \{/u);
@@ -118,6 +119,22 @@ test("project trees use compact unweighted rows and a uniform quiet lineage", as
   assert.doesNotMatch(css, /sidebar-version-file > svg/u);
   assert.doesNotMatch(css, /sidebar-version-current-label/u);
   assert.doesNotMatch(css, /sidebar-skeleton-icon/u);
+});
+
+test("settings stays a flat 780px canvas with one bordered row container", async () => {
+  const css = await readWorkbenchCascadeCss();
+  assert.match(css, /\.workbench-settings-page\s*\{[\s\S]*?background:\s*#fff/u);
+  assert.match(css, /\.settings-page-inner\s*\{[\s\S]*?width:\s*min\(780px, 100%\)/u);
+  assert.match(css, /\.settings-page-header h1\s*\{[\s\S]*?font-size:\s*26px/u);
+  const rows = lastCssRule(css, ".settings-section-rows");
+  assert.match(rows, /border:\s*1px solid/u);
+  assert.match(rows, /border-radius:\s*12px/u);
+  assert.doesNotMatch(rows, /box-shadow/u);
+  assert.match(css, /\.settings-row\s*\{[\s\S]*?min-height:\s*62px/u);
+  assert.match(css, /\.settings-row\s*\{[\s\S]*?grid-template-columns:\s*28px minmax\(0, 1fr\) auto/u);
+  assert.doesNotMatch(css, /\.settings-close-button/u);
+  assert.doesNotMatch(css, /\.settings-update-card/u);
+  assert.match(css, /\.workbench-settings-sidebar\[data-open="true"\]\s*\{[\s\S]*?display:\s*block/u);
 });
 
 test("removed project/status/review navigation surfaces have no CSS or import owner", async () => {

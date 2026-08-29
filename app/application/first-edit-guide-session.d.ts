@@ -25,16 +25,29 @@ export type FirstEditGuideEligibilityInput = Readonly<{
 }>;
 
 export type FirstEditGuidePreferences = Readonly<{
+  schemaVersion?: number;
   firstRealHtmlEditGuide?: Readonly<{
     status?: FirstEditGuideStatus;
     generation?: number;
   }>;
   builtInWelcomeProjectId?: string | null;
+  workspace?: Readonly<{
+    rememberPanelWidths?: boolean;
+    sidebarWidth?: number;
+    inspectorWidth?: number;
+    motion?: "system" | "reduced";
+    restoreTabsOnLaunch?: boolean;
+    defaultAgentProviderId?: "qoder" | "codex";
+  }>;
 }>;
 
 export type FirstEditGuidePort = Readonly<{
   get(): Promise<FirstEditGuidePreferences | null | undefined>;
-  record(input: { action: "presented" | "dismissed" }): Promise<
+  record(input: {
+    action: "presented" | "dismissed";
+  } | {
+    workspace: Readonly<Record<string, unknown>>;
+  }): Promise<
     FirstEditGuidePreferences | null | undefined
   >;
 }>;
