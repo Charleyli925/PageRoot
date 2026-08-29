@@ -2,6 +2,13 @@
 
 Only the files listed below are product contracts and package inputs.
 
+## HTML source identity
+
+- `pageroot-element-identity.v1.schema.json` defines the value written to the
+  sole persistent PageRoot-owned HTML attribute, `data-pageroot-id`. The schema
+  does not authorize writing that attribute; migration and save transactions
+  remain separate contracts.
+
 ## Unknown members in mutable records
 
 A mutable record is one this product reads, edits and writes again. For those

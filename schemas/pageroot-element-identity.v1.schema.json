@@ -1,0 +1,8 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pageroot.local/schemas/pageroot-element-identity.v1.schema.json",
+  "title": "PageRoot persistent source element identity v1",
+  "description": "The value contract for the sole persistent PageRoot-authored HTML attribute, data-pageroot-id.",
+  "type": "string",
+  "pattern": "^pr1_[0-9a-f]{12}4[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+}
