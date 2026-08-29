@@ -123,6 +123,22 @@ test("SourceIndex reports repeated, malformed, and conflicting identities withou
   );
 });
 
+test("a valid value inside a repeated attribute group still blocks a conflicting lookup", () => {
+  const html = `<main data-pageroot-id="${ID_A}" data-pageroot-id="${ID_B}"><section data-pageroot-id="${ID_A}"></section></main>`;
+  const index = buildSourceIndex(html);
+
+  assert.equal(index.byPagerootId.has(ID_A), false);
+  assert.equal(index.byPagerootId.has(ID_B), false);
+  assert.equal(index.elements[0].pagerootIdentityStatus, "invalid");
+  assert.equal(index.elements[1].pagerootIdentityStatus, "duplicate");
+  const conflict = index.pagerootIdentity.issues.find(
+    (issue) => issue.code === "PAGEROOT_ID_DUPLICATE_VALUE",
+  );
+  assert.equal(conflict?.pagerootId, ID_A);
+  assert.equal(conflict?.nodeIds.length, 2);
+  assert.equal(conflict?.attributeRanges.length, 2);
+});
+
 test("legacy HTML remains byte-for-byte untouched and is reported as identity-absent", () => {
   const html = "<!doctype html>\r\n<main><h1>旧项目 😀</h1><input disabled></main>";
   const index = buildSourceIndex(html);

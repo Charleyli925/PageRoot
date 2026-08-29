@@ -575,12 +575,22 @@ export function buildSourceIndex(html) {
   }
 
   const pagerootIdentityIssues = [];
-  const candidatesByPagerootId = new Map();
+  const claimsByPagerootId = new Map();
+  const claimPagerootId = (pagerootId, element, attribute) => {
+    const claims = claimsByPagerootId.get(pagerootId) ?? [];
+    claims.push({ element, attribute });
+    claimsByPagerootId.set(pagerootId, claims);
+  };
   for (const element of index.elements) {
     const attributes = element.attributesByName.get(PAGEROOT_ELEMENT_ID_ATTRIBUTE) ?? [];
     if (attributes.length === 0) continue;
     element.pagerootIdAttribute = attributes[0];
     if (attributes.length !== 1) {
+      for (const attribute of attributes) {
+        if (isValidPagerootElementId(attribute.rawValue)) {
+          claimPagerootId(attribute.rawValue, element, attribute);
+        }
+      }
       element.pagerootIdentityStatus = "invalid";
       pagerootIdentityIssues.push({
         code: "PAGEROOT_ID_ATTRIBUTE_REPEATED",
@@ -604,25 +614,33 @@ export function buildSourceIndex(html) {
       continue;
     }
     element.pagerootIdentityStatus = "candidate";
-    const candidates = candidatesByPagerootId.get(value) ?? [];
-    candidates.push(element);
-    candidatesByPagerootId.set(value, candidates);
+    claimPagerootId(value, element, attribute);
   }
 
-  for (const [pagerootId, candidates] of candidatesByPagerootId) {
-    if (candidates.length === 1) {
-      const [element] = candidates;
+  for (const [pagerootId, claims] of claimsByPagerootId) {
+    const claimedElements = [...new Set(claims.map((claim) => claim.element))];
+    if (
+      claims.length === 1
+      && claimedElements[0]?.pagerootIdentityStatus === "candidate"
+    ) {
+      const [element] = claimedElements;
       element.pagerootId = pagerootId;
       element.pagerootIdentityStatus = "valid";
       index.byPagerootId.set(pagerootId, element);
       continue;
     }
-    for (const element of candidates) element.pagerootIdentityStatus = "duplicate";
+    if (claimedElements.length < 2) continue;
+    for (const element of claimedElements) {
+      if (element.pagerootIdentityStatus === "candidate") {
+        element.pagerootIdentityStatus = "duplicate";
+      }
+    }
     pagerootIdentityIssues.push({
       code: "PAGEROOT_ID_DUPLICATE_VALUE",
       pagerootId,
-      nodeIds: candidates.map((element) => element.nodeId),
-      elementRanges: candidates.map((element) => ({ ...element.range })),
+      nodeIds: claimedElements.map((element) => element.nodeId),
+      elementRanges: claimedElements.map((element) => ({ ...element.range })),
+      attributeRanges: claims.map((claim) => ({ ...claim.attribute.range })),
     });
   }
 
