@@ -154,6 +154,10 @@ import {
 export { PROJECT_FILE_SCHEMA_VERSION } from "./project-file-repository/constants.mjs";
 export { ProjectFileRepositoryError } from "./project-file-repository/errors.mjs";
 
+const LEGACY_PROMOTION_WORKING_COPY_HASH = Symbol(
+  "legacy-promotion-working-copy-hash",
+);
+
 // This is a persistence repository, not a runtime Store. Sessions keep the
 // mutable UI facts; the repository only resolves and atomically records the
 // on-disk facts specified by VERSION_AND_PROJECT_FILES_PRD.md.
@@ -5353,6 +5357,27 @@ export class ProjectFileRepository {
     }
   }
 
+  #normalizeLegacyPromotionWorkingCopyHash(transaction) {
+    if (Object.hasOwn(transaction, "workingCopySourceSha256")) return;
+    const hasPreparedWorkingCopy = [
+      "working-copy-prepared",
+      "working-copy-created",
+      "manifest-committed",
+      "completed",
+    ].includes(transaction.state);
+    transaction.workingCopySourceSha256 = hasPreparedWorkingCopy
+      ? transaction.candidateOutputSha256
+      : null;
+    if (hasPreparedWorkingCopy) {
+      Object.defineProperty(transaction, LEGACY_PROMOTION_WORKING_COPY_HASH, {
+        configurable: false,
+        enumerable: false,
+        value: true,
+        writable: false,
+      });
+    }
+  }
+
   async #readCommittedPromotion(loaded, transaction) {
     const committedVersion = loaded.manifest.versions.find(
       (version) => version.versionId === transaction.versionId,
@@ -5422,6 +5447,12 @@ export class ProjectFileRepository {
         "The Promotion transaction belongs to another Candidate.",
       );
     }
+    // Schema v4 Promotion journals created before Working Copy identity
+    // materialization did not record a separate Working Copy hash. Their
+    // prepared/published bytes were exactly the Candidate bytes. Normalize
+    // only the absent legacy member; present null/invalid values still fail
+    // closed in the authority check below.
+    this.#normalizeLegacyPromotionWorkingCopyHash(transaction);
     // Promotion and crash recovery both start from the runtime-sealed
     // Candidate.  A raw candidate.json/candidate.html pair is never enough to
     // resume an adoption after review has begun.
@@ -5696,7 +5727,12 @@ export class ProjectFileRepository {
         lastPersistedRevision: 0,
         lastSavedAt: nowIso(this.#clock),
         lastOpenedAt: nowIso(this.#clock),
-        sourceElementIdentitySchemaVersion: PAGEROOT_ELEMENT_ID_SCHEMA_VERSION,
+        ...(transaction[LEGACY_PROMOTION_WORKING_COPY_HASH]
+          ? {}
+          : {
+              sourceElementIdentitySchemaVersion:
+                PAGEROOT_ELEMENT_ID_SCHEMA_VERSION,
+            }),
       }, "Version Working Copy state");
       transaction.state = "working-copy-created";
       transaction.workingCopyCreatedAt = nowIso(this.#clock);

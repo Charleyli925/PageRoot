@@ -11,6 +11,7 @@ import test from "node:test";
 import Ajv2020 from "ajv/dist/2020.js";
 
 import { sha256 } from "../bridge/lifecycle-core.mjs";
+import { MAX_HTML_BYTES } from "../bridge/project-file-repository/constants.mjs";
 import { ProjectFileRepository } from "../bridge/project-file-repository.mjs";
 import {
   inspectSourceElementIdentity,
@@ -180,7 +181,16 @@ test("an identity-preserving save accepts only pre-identified additions", () => 
     "</body>",
     `<br data-pageroot-id="${newId}"></body>`,
   );
-  const saved = materializeIdentityPreservingSave(current, next);
+  assert.throws(
+    () => materializeIdentityPreservingSave(current, next),
+    (error) => error?.code === "SOURCE_ELEMENT_IDENTITY_LOST"
+      && error.details.addedIds.includes(newId),
+  );
+  const saved = materializeIdentityPreservingSave(current, next, {
+    sourceHistoryOperations: [exactSourceHistoryOperation(current, next, {
+      kind: "structure",
+    })],
+  });
 
   assert.equal(saved.changed, false);
   assert.equal(saved.addedElementCount, 0);
@@ -199,6 +209,49 @@ test("an identity-preserving save accepts only pre-identified additions", () => 
     () => materializeIdentityPreservingSave(current, removedIdentity),
     (error) => error?.code === "SOURCE_ELEMENT_IDENTITY_LOST"
       && error.details.lostIds.length === 1,
+  );
+});
+
+test("fresh sibling identities cannot disguise a retained ID transplant", () => {
+  const current = materializeSourceElementIdentity(
+    "<!doctype html><html><head><title>IDs</title></head><body><p>first</p><p>second</p></body></html>",
+    { randomUUIDFactory: deterministicUuidFactory() },
+  ).html;
+  const [firstId, secondId] = inspectSourceElementIdentity(current).elements
+    .filter((element) => element.tagName === "p")
+    .map((element) => element.pagerootId);
+  const freshId = "pr1_99999999999949998999999999999999";
+  const next = current.replace(
+    `<p data-pageroot-id="${firstId}">first</p><p data-pageroot-id="${secondId}">second</p>`,
+    `<p data-pageroot-id="${freshId}">first</p>`
+      + `<p data-pageroot-id="${firstId}">new</p>`
+      + `<p data-pageroot-id="${secondId}">second</p>`,
+  );
+  assert.throws(
+    () => materializeIdentityPreservingSave(current, next),
+    (error) => error?.code === "SOURCE_ELEMENT_IDENTITY_LOST"
+      && error.details.addedIds.includes(freshId),
+  );
+  assert.throws(
+    () => materializeIdentityPreservingSave(current, next, {
+      sourceHistoryOperations: [exactSourceHistoryOperation(current, next)],
+    }),
+    (error) => error?.code === "SOURCE_ELEMENT_IDENTITY_LOST"
+      && error.details.addedIds.includes(freshId),
+  );
+});
+
+test("identity materialization rejects output above the managed HTML limit", () => {
+  const shell = "<!doctype html><html><head><title>Large</title></head><body><i></i></body></html>";
+  const padding = "x".repeat(MAX_HTML_BYTES - Buffer.byteLength(shell, "utf8"));
+  const source = shell.replace("<i></i>", `<i></i><!--${padding.slice(7)}-->`);
+  assert.ok(Buffer.byteLength(source, "utf8") <= MAX_HTML_BYTES);
+  assert.throws(
+    () => materializeSourceElementIdentity(source, {
+      randomUUIDFactory: deterministicUuidFactory(),
+    }),
+    (error) => error?.code === "SOURCE_TOO_LARGE"
+      && error.details.maxByteLength === MAX_HTML_BYTES,
   );
 });
 

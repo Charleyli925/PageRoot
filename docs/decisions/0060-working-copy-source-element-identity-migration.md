@@ -56,11 +56,13 @@ leave mixed or externally overwritten HTML.
    autosave's bounded SourcePatch history exactly replays from current bytes to
    next bytes and every relocated ID keeps its complete source-element bytes;
    editing or swapping ID values cannot masquerade as a move. Later semantic
-   operation PRs can replace this compatibility authorization. This PR does not
-   convert TargetRef, comments, undo/redo, AI identity continuity or Review
-   pairing; those remain dependent PRs. Until ID-based Review lands, its legacy
-   exact-subtree signature treats every PageRoot attribute, including the
-   persistent ID, as disposable comparison metadata.
+   operation PRs can replace this compatibility authorization. A save that
+   introduces a fresh persistent ID also requires the exact bounded SourcePatch
+   chain, and a reorder operation cannot claim a newly created identity. This
+   PR does not convert TargetRef, comments, undo/redo, AI identity continuity or
+   Review pairing; those remain dependent PRs. Until ID-based Review lands, its
+   legacy exact-subtree signature treats every PageRoot attribute, including
+   the persistent ID, as disposable comparison metadata.
 7. Candidate Promotion keeps the immutable Version snapshot byte-exact to the
    sealed Candidate. Its private prepared Working Copy is materialized
    separately, and the Promotion transaction seals that file's distinct
@@ -74,6 +76,13 @@ leave mixed or externally overwritten HTML.
    then immediately re-enters the same recoverable migration. Ordinary external
    edits that lose identities still fail closed; this exception exists only for
    the product's explicit conflict-resolution action.
+9. Recovery remains compatible with an interrupted schema-v4 Promotion written
+   before `workingCopySourceSha256` existed. A legacy prepared Working Copy was
+   byte-identical to its Candidate, so recovery derives that hash only when the
+   member is absent, publishes without claiming the identity marker, and then
+   enters the same controlled Working Copy migration. Present invalid values
+   still fail closed. Identity materialization also enforces the 20 MiB managed
+   HTML cap before import publication, migration CAS, save, or Promotion staging.
 
 ## Consequences
 

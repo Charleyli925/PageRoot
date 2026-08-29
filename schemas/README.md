@@ -14,7 +14,12 @@ Only the files listed below are product contracts and package inputs.
 - `promotion-transaction.v4.schema.json` seals the immutable Candidate output
   Hash separately from `workingCopySourceSha256`. Promotion preserves the
   Candidate bytes in the Version snapshot and publishes only the independently
-  identity-materialized Working Copy bytes under the latter Hash.
+  identity-materialized Working Copy bytes under the latter Hash. Newly written
+  records require that member. Recovery alone accepts an older schema-v4
+  Promotion journal that omitted it: before preparation it normalizes to
+  `null`; after legacy preparation it derives the hash from the exact Candidate
+  bytes and leaves the resulting Working Copy eligible for the normal controlled
+  identity migration.
 
 ## Unknown members in mutable records
 

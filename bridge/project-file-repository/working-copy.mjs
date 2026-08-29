@@ -29,6 +29,7 @@ import {
 
 import {
   PROJECT_FILE_SCHEMA_VERSION,
+  MAX_HTML_BYTES,
   SAVE_RECOVERY_ID,
   SHA256,
   SOURCE_ELEMENT_IDENTITY_MIGRATION_RECOVERY_ID,
@@ -291,6 +292,16 @@ function assertBindingChangesAreAuthorized(currentHtml, nextHtml, sourceHistoryO
         },
       );
     }
+    const addedIds = [...afterIdentity.claimedIds].filter(
+      (pagerootId) => !beforeIdentity.claimedIds.has(pagerootId),
+    );
+    if (addedIds.length > 0 && step.operation.kind === "reorder") {
+      throw new ProjectFileRepositoryError(
+        "SOURCE_ELEMENT_IDENTITY_LOST",
+        "A reorder operation cannot create persistent source element identities.",
+        { operationId: step.operation.operationId, addedIds },
+      );
+    }
     const bindingIssues = identityBindingIssues(beforeIdentity, afterIdentity);
     if (bindingIssues.length === 0) continue;
     if (step.operation.kind !== "reorder") {
@@ -328,6 +339,20 @@ function assertBindingChangesAreAuthorized(currentHtml, nextHtml, sourceHistoryO
   }
 }
 
+function assertMaterializedHtmlWithinLimit(buffer) {
+  if (buffer.byteLength > MAX_HTML_BYTES) {
+    throw new ProjectFileRepositoryError(
+      "SOURCE_TOO_LARGE",
+      "The identity-materialized Working Copy is too large.",
+      {
+        byteLength: buffer.byteLength,
+        maxByteLength: MAX_HTML_BYTES,
+      },
+    );
+  }
+  return buffer;
+}
+
 export function materializeSourceElementIdentity(html, {
   randomUUIDFactory = randomUUID,
 } = {}) {
@@ -341,9 +366,10 @@ export function materializeSourceElementIdentity(html, {
     );
   }
   if (inspection.complete) {
+    const buffer = assertMaterializedHtmlWithinLimit(Buffer.from(source, "utf8"));
     return {
       html: source,
-      buffer: Buffer.from(source, "utf8"),
+      buffer,
       changed: false,
       addedElementCount: 0,
       identity: inspection,
@@ -387,9 +413,10 @@ export function materializeSourceElementIdentity(html, {
       { issues: nextIdentity.issues },
     );
   }
+  const buffer = assertMaterializedHtmlWithinLimit(Buffer.from(nextHtml, "utf8"));
   return {
     html: nextHtml,
-    buffer: Buffer.from(nextHtml, "utf8"),
+    buffer,
     changed: true,
     addedElementCount: insertions.length,
     identity: nextIdentity,
@@ -416,6 +443,9 @@ export function materializeIdentityPreservingSave(currentHtml, nextHtml, options
   const lostIds = [...currentIdentity.claimedIds].filter(
     (pagerootId) => !nextIdentity.claimedIds.has(pagerootId),
   );
+  const addedIds = [...nextIdentity.claimedIds].filter(
+    (pagerootId) => !currentIdentity.claimedIds.has(pagerootId),
+  );
   if (lostIds.length > 0 || nextIdentity.missingElementCount > 0) {
     throw new ProjectFileRepositoryError(
       "SOURCE_ELEMENT_IDENTITY_LOST",
@@ -431,15 +461,15 @@ export function materializeIdentityPreservingSave(currentHtml, nextHtml, options
     );
   }
   const bindingIssues = identityBindingIssues(currentIdentity, nextIdentity);
-  if (bindingIssues.length > 0) {
+  if (bindingIssues.length > 0 || addedIds.length > 0) {
     const sourceHistoryOperations = Array.isArray(options.sourceHistoryOperations)
       ? options.sourceHistoryOperations
       : [];
     if (sourceHistoryOperations.length === 0) {
       throw new ProjectFileRepositoryError(
         "SOURCE_ELEMENT_IDENTITY_LOST",
-        "The save would move persistent identities without source operation evidence.",
-        { lostIds: [], bindingIssues },
+        "The save would change persistent identity bindings without source operation evidence.",
+        { lostIds: [], addedIds, bindingIssues },
       );
     }
     assertBindingChangesAreAuthorized(currentHtml, nextHtml, sourceHistoryOperations);

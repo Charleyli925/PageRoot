@@ -114,6 +114,77 @@ test("promotion preserves Candidate bytes in the Version and materializes identi
   assert.equal(transaction.workingCopySourceSha256, promoted.target.sourceSha256);
 });
 
+test("legacy Promotion journals without a Working Copy hash remain recoverable", async (t) => {
+  for (const failpoint of [
+    "promotion-snapshot-created",
+    "promotion-working-copy-prepared",
+  ]) {
+    const value = await fixture(t);
+    const imported = await importSource(value, `legacy-${failpoint}.html`);
+    const candidateHtml = html(`legacy ${failpoint}`);
+    const suffix = failpoint.replaceAll("-", "_");
+    const candidate = await value.repository.createCandidate({
+      target: imported.target,
+      requestId: `req_legacy_${suffix}`,
+      candidateId: `candidate_legacy_${suffix}_0001`,
+      html: candidateHtml,
+      expectedSourceSha256: imported.target.sourceSha256,
+    });
+    const failing = new ProjectFileRepository({
+      projectsRoot: value.projects,
+      failpoint: async (name) => name === failpoint,
+    });
+    await assert.rejects(
+      failing.promoteCandidate({
+        target: imported.target,
+        candidateId: candidate.candidate.candidateId,
+      }),
+      (error) => error instanceof ProjectFileRepositoryError
+        && error.code === "INJECTED_FAILPOINT",
+    );
+
+    const controlRoot = path.join(imported.target.projectRootPath, ".pageroot");
+    const transactionPath = path.join(
+      controlRoot,
+      "transactions",
+      `promote_${candidate.candidate.candidateId}`,
+      "transaction.json",
+    );
+    const transaction = await json(transactionPath);
+    delete transaction.workingCopySourceSha256;
+    if (failpoint === "promotion-working-copy-prepared") {
+      await writeFile(
+        path.join(controlRoot, transaction.preparedWorkingCopyRelativePath),
+        candidateHtml,
+        "utf8",
+      );
+    }
+    await writeFile(transactionPath, `${JSON.stringify(transaction, null, 2)}\n`, "utf8");
+
+    const recovery = new ProjectFileRepository({
+      projectsRoot: value.projects,
+    });
+    const reopened = await recovery.workspace({
+      sourcePath: imported.target.exactSourcePath,
+    });
+    assert.equal(reopened.manifest.latestOfficialVersionId, "ver_0002");
+    const recoveredWorkingCopy = reopened.manifest.workingCopies.find(
+      (workingCopy) => workingCopy.workingCopyId === "work_ver_0002",
+    );
+    assert.ok(recoveredWorkingCopy);
+    const recoveredV2 = await recovery.workspace({
+      sourcePath: path.join(
+        imported.target.projectRootPath,
+        recoveredWorkingCopy.sourceRelativePath,
+      ),
+    });
+    assert.equal(recoveredV2.target.workingCopyId, "work_ver_0002");
+    assert.equal(inspectSourceElementIdentity(recoveredV2.content).complete, true);
+    const recoveredTransaction = await json(transactionPath);
+    assert.match(recoveredTransaction.workingCopySourceSha256, /^sha256:[a-f0-9]{64}$/u);
+  }
+});
+
 test("a historical Version reactivates its original Working Copy without changing its immutable snapshot", async (t) => {
   const value = await fixture(t);
   const imported = await importSource(value, "history-lineage.html");
