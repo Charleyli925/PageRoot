@@ -1,6 +1,6 @@
 # ADR Curation Workflow
 
-Curates `docs/decisions/` so the directory stays a navigable knowledge base instead of an append-only pile. This workflow is agent-agnostic: any coding agent (or a human) can execute it by following this document. Curation means **status marking and indexing — never deleting or rewriting ADR bodies**. An ADR's text is a historical record; only its metadata (status header, index entry, filename in narrow cases) may change.
+Curates `docs/decisions/` so the directory stays a navigable knowledge base instead of an append-only pile. This workflow is agent-agnostic: any coding agent (or a human) can execute it by following this document. Curation means **status marking, indexing and moving clearly superseded ADRs into `docs/decisions/archive/` — never deleting or rewriting their rationale**. An ADR's text is a historical record; only its metadata (status header, index entry, filename in a numbering collision, and archive location) may change.
 
 ## Workflow
 
@@ -9,7 +9,7 @@ Curation Progress:
 - [ ] Step 1: Inventory and numbering health
 - [ ] Step 2: Classify every ADR by future value
 - [ ] Step 3: Write curation report to output/
-- [ ] Step 4 (on approval): apply index + status changes via task branch
+- [ ] Step 4 (on approval): apply index + status changes and archive moves via task branch
 ```
 
 ### Step 1: Inventory and numbering health
@@ -26,8 +26,8 @@ For each **collision**, decide the fix by checking references first:
 rg -n "00XX" --glob '!node_modules' --glob '!docs/decisions/00XX-*'
 ```
 
-- Colliding file is **unreferenced elsewhere** → propose renaming the *newer* file (by git history: `git log --follow --format=%ad --date=short -- <file> | tail -1`) to the next free number. Renames preserve git history; use `git mv`.
-- Colliding file **is referenced** (docs, code comments, PR descriptions that cannot be edited) → do **not** rename; disambiguate in the index with full filenames and add a one-line collision note at the top of each colliding file.
+- Colliding files are resolved by renaming the later decision to the next number above the recorded historical maximum. References are updated in the same change and the renamed ADR gets a one-line collision note. Renames preserve git history; use `git mv`.
+- The historical maximum is monotonic. Never fill a gap such as `0020`, even when it is currently unused.
 
 **Gaps** are recorded in the index as "number never used" — never backfill a gap with a new ADR; new ADRs always take `max + 1`.
 
@@ -43,7 +43,7 @@ Read each ADR and assign exactly one status. For LIVING candidates, spot-verify 
 
 Signals for SUPERSEDED: a later ADR covers the same subsystem with a different conclusion; the mechanism it mandates was replaced (verify with `rg` for the named modules); a contract document (`docs/ARCHITECTURE_CONTRACT.md`, `docs/STATE_OWNERSHIP.md`) now owns the rule.
 
-When unsure between LIVING and HISTORICAL, mark LIVING and flag it in the report for the requester — false-historical is the expensive mistake.
+When unsure between LIVING and HISTORICAL, mark LIVING and flag it in the report for the requester — false-historical is the expensive mistake. An ADR explicitly marked **Superseded** is archived after its successor is verified; a partially amended section does not justify moving the whole ADR.
 
 ### Step 3: Curation report
 
@@ -56,18 +56,19 @@ Write `output/adr-curation-YYYY-MM-DD.md` containing:
 
 ### Step 4: Apply (only after explicit approval)
 
-Per AGENTS.md: `npm run task:start -- docs/adr-curation`, apply exactly the operations from the report, run `npm run gate:edit`, open a Draft PR. Changes allowed:
+Per AGENTS.md: `npm run task:start -- docs/adr-curation`, apply exactly the operations from the report, run `npm run adr:check`, `npm run gate:edit`, and open a Draft PR. Changes allowed:
 
-- Create/refresh the `docs/decisions/README.md` index
+- Create/refresh the active `docs/decisions/README.md` and historical `docs/decisions/archive/README.md` indexes
 - Add one status line under a superseded ADR's title: `> Status: Superseded by [ADR-00YY](00YY-....md)`
-- `git mv` for approved collision renames, plus updating any in-repo references in the same commit
-- Nothing else. No body edits, no deletions, no reformatting.
+- `git mv` for approved collision renames and explicit archive moves, plus updating any in-repo references in the same commit
+- Add only the collision note and required successor metadata; do not delete, rewrite or reformat an ADR body.
 
 ## Guardrails
 
-- **Never delete an ADR.** HISTORICAL status lives in the index, not in file removal.
+- **Never delete an ADR.** Archived files remain in `docs/decisions/archive/` with their rationale intact.
 - **Never rewrite ADR content** — rationale and rejected alternatives are the point of an ADR; trimming them destroys its value.
-- **Numbers are immutable once referenced.** Rename only the unreferenced side of a collision, and only with approval.
+- **Numbers are monotonic once assigned.** Rename only the later side of a collision, and use a number above the historical maximum.
+- **The active index is the default reading path.** Historical investigation follows the archive index explicitly.
 - Steps 1–3 are read-only; Step 4 requires the requester's explicit go-ahead and follows the standard branch/PR lifecycle.
 
 ## Appendix: index template

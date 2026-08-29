@@ -1,4 +1,6 @@
-# ADR 0032: Mutable records preserve unknown members instead of dropping or refusing them
+# ADR 0057: Mutable records preserve unknown members instead of dropping or refusing them
+
+> Renumbered from ADR 0032 on 2026-08-29 to repair a numbering collision.
 
 - Status: Accepted
 - Date: 2026-08-21

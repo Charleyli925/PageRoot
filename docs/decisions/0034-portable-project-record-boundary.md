@@ -2,7 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-08-21
-- Extends: ADR 0022, ADR 0032
+- Extends: ADR 0022, ADR 0057
 
 ## Context
 
@@ -80,7 +80,7 @@ is in place.
   the benefit is portability that no shipped feature consumes.
 - **Make `fileIdentity` optional in the manifest.** Rejected for the same reason
   in a weaker form: an optional witness is a witness the promotion protocol
-  cannot rely on. It also removes a required member, which `ADR 0032` does not
+  cannot rely on. It also removes a required member, which `ADR 0057` does not
   make safe for an older reader.
 - **Leave the boundary undocumented.** Rejected: the original concern was real
   even though its premise was wrong. Without a classification the next

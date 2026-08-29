@@ -808,7 +808,7 @@ test("Node groups partition every top-level test exactly once outside full", asy
   ].map(relative);
   assert.equal(new Set(categorized).size, categorized.length);
   assert.deepEqual([...new Set(categorized)].sort(), groups.full.map(relative).sort());
-  assert.deepEqual(groups.contract.map(relative), ["architecture-boundaries.test.mjs"]);
+  assert.deepEqual(groups.contract.map(relative), ["adr-index.test.mjs", "architecture-boundaries.test.mjs"]);
   assert.ok(groups.core.some((file) => file.endsWith("notification-policy.test.mjs")));
   assert.equal(
     groups.contract.some((file) => /(?:notification-ui|workbench-shell-ux)\.test\.mjs$/u.test(file)),

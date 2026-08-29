@@ -1,6 +1,6 @@
 # ADR 0021: Review runtime visual comparison separates visible text from raster noise
 
-- Status: Superseded by ADR 0046
+- Status: Superseded by [ADR 0046](../0046-review-core-text-and-element-diff.md)
 - Date: 2026-08-12
 - Extends: ADR 0017
 

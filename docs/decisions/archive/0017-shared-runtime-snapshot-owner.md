@@ -1,6 +1,6 @@
 # ADR 0017: Review-only runtime snapshot owner
 
-- Status: Superseded by ADR 0046; the historical Edit restriction remains amended by ADR 0022
+- Status: Superseded by [ADR 0046](../0046-review-core-text-and-element-diff.md); the historical Edit restriction remains amended by [ADR 0055](0055-edit-one-shot-author-runtime.md)
 - Date: 2026-08-10
 
 ## Context

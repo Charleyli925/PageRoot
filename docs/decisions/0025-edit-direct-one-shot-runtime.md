@@ -2,7 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-08-15
-- Supersedes: [ADR 0022](0022-edit-one-shot-author-runtime.md) for Edit presentation
+- Supersedes: [ADR 0055](archive/0055-edit-one-shot-author-runtime.md) for Edit presentation
 - Does not change: Review's static-only fact contract ([ADR 0046](0046-review-core-text-and-element-diff.md)); Preview author-script execution ([ADR 0007](0007-independent-interactive-preview.md))
 
 This ADR is a product constraint above implementation and security-review

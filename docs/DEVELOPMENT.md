@@ -123,7 +123,7 @@ credentials and temporary paths are not retained. A Qoder login, model-capacity
 or network failure is a blocked live probe, not release evidence and not a test
 pass. The current harness constrains ACP calls but does not OS-sandbox the local
 Qoder process, so it must not be repurposed for real user Requests. See
-`docs/decisions/0031-qoder-acp-v1-spike.md`.
+`docs/decisions/archive/0056-qoder-acp-v1-spike.md`.
 
 ## Test lanes
 

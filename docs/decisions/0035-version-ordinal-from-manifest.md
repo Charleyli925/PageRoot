@@ -2,7 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-08-21
-- Extends: ADR 0022
+- Extends: ADR 0022, ADR 0057
 
 ## Context
 
@@ -29,7 +29,7 @@ can mint them — is a much larger change than it appears:
   rather than JSON members.
 - `assertManifest` enforces `version.versionId === versionId(version.ordinal)`.
   Globalising removes that consistency check rather than strengthening it.
-- Fifteen schemas encode the `ver_` shape in 43 places, and `ADR 0032` does not
+- Fifteen schemas encode the `ver_` shape in 43 places, and `ADR 0057` does not
   help: it makes an *added* member safe for an older reader, while *relaxing an
   existing pattern* still leaves that reader rejecting the new form.
 - The ordinal is user-visible as `-V2` in managed filenames.

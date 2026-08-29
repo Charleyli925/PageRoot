@@ -13,6 +13,7 @@ const SMOKE_TESTS = new Set([
 ]);
 
 const CONTRACT_TESTS = new Set([
+  "adr-index.test.mjs",
   "architecture-boundaries.test.mjs",
 ]);
 

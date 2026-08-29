@@ -2,7 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-08-21
-- Extends: ADR 0032
+- Extends: ADR 0057
 - Relates to: ADR 0006
 
 ## Context
@@ -19,7 +19,7 @@ changed what. All three read history that is being written today.
 
 Attribution is the irrecoverable kind of information. A field that was never
 captured cannot be backfilled: no later release can decide who wrote a comment
-in 2026. `ADR 0032` made a member addition safe for an existing installation, so
+in 2026. `ADR 0057` made a member addition safe for an existing installation, so
 the remaining cost of capturing attribution now is only the cost of writing it.
 
 ## Decision

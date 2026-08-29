@@ -57,7 +57,7 @@ level, not per file: `runtime-state.json` is preserved at its root and in
 - Direction: this protects builds from this change onward only. A build released
   before it still refuses or discards a newer member. Any release that adds a
   member to a mutable record must come strictly after the release carrying
-  `docs/decisions/0032-forward-compatible-record-members.md`.
+  `docs/decisions/0057-forward-compatible-record-members.md`.
 - Not yet covered: nothing. `project.json` is written once at import and never
   rewritten, so it is an immutable record and stays strict by design.
 

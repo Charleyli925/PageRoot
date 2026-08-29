@@ -1,6 +1,6 @@
 # ADR-0041: Stage Codex through direct App Server preflight
 
-> Status: Accepted
+> Status: Superseded by [ADR 0053](../0053-codex-acp-adapter.md)
 > Date: 2026-08-26
 
 ## Context

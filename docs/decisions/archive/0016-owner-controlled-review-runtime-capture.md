@@ -1,6 +1,6 @@
 # ADR 0016: Review Runtime Snapshot owner
 
-- Status: Superseded by `0017-shared-runtime-snapshot-owner.md`
+- Status: Superseded by [ADR 0017](0017-shared-runtime-snapshot-owner.md)
 - Date: 2026-08-09
 
 ## Context
@@ -54,7 +54,7 @@ state machine without changing its source authority.
 Review becomes usable as soon as static frames are ready. Runtime data can
 decorate the existing review presentation but cannot change source HTML,
 TargetRefs, comment targets, acceptance, persistence or AI input. Stage 08
-later removed Edit capture instead of converging it; ADR 0017 is the current
+later removed Edit capture instead of converging it; [ADR 0017](0017-shared-runtime-snapshot-owner.md) is the current
 Review-only contract.
 
 Tests cover source-host resolution, owner request rejection and containment,

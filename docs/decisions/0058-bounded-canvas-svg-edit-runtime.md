@@ -1,4 +1,6 @@
-# ADR 0046: Bounded Canvas and SVG programs may complete the visible Edit document
+# ADR 0058: Bounded Canvas and SVG programs may complete the visible Edit document
+
+> Renumbered from ADR 0046 on 2026-08-29 to repair a numbering collision.
 
 - Status: Accepted
 - Date: 2026-08-27

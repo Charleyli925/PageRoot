@@ -1,6 +1,6 @@
 # ADR 0002: Native edit hosts are measured capabilities
 
-- Status: Superseded by ADR 0004 for PageRoot 0.9.0
+- Status: Superseded by [ADR 0004](../0004-v2-editable-islands.md) for PageRoot 0.9.0
 - Date: 2026-07-23
 
 ## Context
