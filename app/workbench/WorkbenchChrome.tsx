@@ -12,6 +12,7 @@ import {
   CaretRightIcon,
   FileHtmlIcon,
   FolderOpenIcon,
+  FolderSimpleIcon,
   GearSixIcon,
   PlusIcon,
   SidebarSimpleIcon,
@@ -30,8 +31,12 @@ import {
   type ProjectVersionLoadResult,
 } from "./project-version-tree";
 import { WorkbenchResizer } from "./workbench-resizer";
-
-const CURRENT_PROJECT_TREE_KEY = "__current_project__";
+import {
+  createProjectExpansionState,
+  reconcileProjectExpansionState,
+  toggleProjectExpansion,
+  type ProjectExpansionState,
+} from "./project-sidebar-state";
 
 type ProjectVersionLoadState = ProjectVersionLoadResult & Readonly<{
   status: "loading" | "ready" | "error";
@@ -270,23 +275,39 @@ export function WorkbenchGlobalSidebar({
   onOpenSettings: () => void;
   onDownloadOrRestartUpdate: () => void;
 }) {
-  const [expandedProjectKey, setExpandedProjectKey] = useState<string | null>(
-    () => currentProjectId ? CURRENT_PROJECT_TREE_KEY : null,
+  const [projectExpansionState, setProjectExpansionState] = useState<ProjectExpansionState>(
+    () => createProjectExpansionState(currentProjectId),
   );
   const [versionStates, setVersionStates] = useState<Record<string, ProjectVersionLoadState>>({});
   const requestTokensRef = useRef(new Map<string, number>());
-  const previousCurrentProjectIdRef = useRef(currentProjectId);
+  const requestSequenceRef = useRef(0);
+
+  const knownProjectIdsKey = useMemo(() => {
+    const ids = new Set<string>();
+    if (currentProjectId) ids.add(currentProjectId);
+    for (const project of registeredProjects) {
+      if (project.projectId) ids.add(project.projectId);
+    }
+    return [...ids].join("\u0000");
+  }, [currentProjectId, registeredProjects]);
 
   useEffect(() => {
-    const previousProjectId = previousCurrentProjectIdRef.current;
-    previousCurrentProjectIdRef.current = currentProjectId;
-    if (
-      currentProjectId
-      && currentProjectId !== previousProjectId
-    ) {
-      setExpandedProjectKey(CURRENT_PROJECT_TREE_KEY);
+    const knownProjectIds = knownProjectIdsKey ? knownProjectIdsKey.split("\u0000") : [];
+    setProjectExpansionState((state) => reconcileProjectExpansionState(
+      state,
+      knownProjectIds,
+      currentProjectId,
+    ));
+    setVersionStates((states) => {
+      const next = Object.fromEntries(
+        Object.entries(states).filter(([projectId]) => knownProjectIds.includes(projectId)),
+      ) as Record<string, ProjectVersionLoadState>;
+      return Object.keys(next).length === Object.keys(states).length ? states : next;
+    });
+    for (const projectId of requestTokensRef.current.keys()) {
+      if (!knownProjectIds.includes(projectId)) requestTokensRef.current.delete(projectId);
     }
-  }, [currentProjectId]);
+  }, [currentProjectId, knownProjectIdsKey]);
 
   const importedProjects = useMemo(
     () => registeredProjects
@@ -301,7 +322,8 @@ export function WorkbenchGlobalSidebar({
   ) => {
     const existing = versionStates[project.projectId];
     if (!retry && (existing?.status === "loading" || existing?.status === "ready")) return;
-    const token = (requestTokensRef.current.get(project.projectId) || 0) + 1;
+    const token = requestSequenceRef.current + 1;
+    requestSequenceRef.current = token;
     requestTokensRef.current.set(project.projectId, token);
     if (project.availability !== "ready" || !project.documentId) {
       setVersionStates((current) => ({
@@ -341,13 +363,14 @@ export function WorkbenchGlobalSidebar({
   }, [loadProjectVersions, versionStates]);
 
   const toggleImportedProject = useCallback((project: RegisteredProject) => {
-    if (expandedProjectKey === project.projectId) {
-      setExpandedProjectKey(null);
-      return;
-    }
-    setExpandedProjectKey(project.projectId);
-    void loadImportedProject(project);
-  }, [expandedProjectKey, loadImportedProject]);
+    const expanded = projectExpansionState.expandedProjectIds[project.projectId] === true;
+    setProjectExpansionState((state) => toggleProjectExpansion(state, project.projectId));
+    if (!expanded) void loadImportedProject(project);
+  }, [loadImportedProject, projectExpansionState]);
+
+  const toggleProject = useCallback((projectId: string) => {
+    setProjectExpansionState((state) => toggleProjectExpansion(state, projectId));
+  }, []);
 
   return (
     <aside className="workbench-global-sidebar" data-open={open ? "true" : undefined} aria-label="全局项目" inert={!open}>
@@ -385,19 +408,18 @@ export function WorkbenchGlobalSidebar({
               <button
                 className="sidebar-project-row sidebar-project-row-current"
                 type="button"
-                aria-expanded={Boolean(currentProjectId) && expandedProjectKey === CURRENT_PROJECT_TREE_KEY}
+                aria-current={currentProjectId ? "true" : undefined}
+                aria-expanded={Boolean(currentProjectId && projectExpansionState.expandedProjectIds[currentProjectId])}
                 disabled={!currentProjectId}
-                onClick={() => setExpandedProjectKey(
-                  expandedProjectKey === CURRENT_PROJECT_TREE_KEY ? null : CURRENT_PROJECT_TREE_KEY,
-                )}
+                onClick={() => currentProjectId && toggleProject(currentProjectId)}
               >
-                {expandedProjectKey === CURRENT_PROJECT_TREE_KEY
+                {currentProjectId && projectExpansionState.expandedProjectIds[currentProjectId]
                   ? <CaretDownIcon aria-hidden="true" size={13} weight="bold" />
                   : <CaretRightIcon aria-hidden="true" size={13} weight="bold" />}
+                <FolderSimpleIcon className="sidebar-project-icon" aria-hidden="true" size={14} weight="regular" />
                 <span className="sidebar-project-name">{currentProjectName || "尚未打开项目"}</span>
-                <span className="sidebar-project-current-label">当前</span>
               </button>
-              {currentProjectId && expandedProjectKey === CURRENT_PROJECT_TREE_KEY ? (
+              {currentProjectId && projectExpansionState.expandedProjectIds[currentProjectId] ? (
                 <ProjectVersionTree
                   key={currentProjectId}
                   versions={currentProjectVersions}
@@ -409,13 +431,14 @@ export function WorkbenchGlobalSidebar({
               <h2 id="sidebar-imported-project-heading">已导入项目</h2>
               {projectsError ? <span className="workbench-sidebar-error" role="status">{projectsError}</span> : null}
               {importedProjects.length ? importedProjects.map((project) => {
-                const expanded = expandedProjectKey === project.projectId;
+                const expanded = projectExpansionState.expandedProjectIds[project.projectId] === true;
                 const state = versionStates[project.projectId];
                 return (
                   <div className="sidebar-imported-project" key={project.projectId}>
                     <button
                       className="sidebar-project-row"
                       type="button"
+                      aria-current={project.projectId === currentProjectId ? "true" : undefined}
                       aria-expanded={expanded}
                       data-availability={project.availability}
                       onClick={() => toggleImportedProject(project)}
@@ -423,6 +446,7 @@ export function WorkbenchGlobalSidebar({
                       {expanded
                         ? <CaretDownIcon aria-hidden="true" size={13} weight="bold" />
                         : <CaretRightIcon aria-hidden="true" size={13} weight="bold" />}
+                      <FolderSimpleIcon className="sidebar-project-icon" aria-hidden="true" size={14} weight="regular" />
                       <span className="sidebar-project-name">{project.projectName}</span>
                       {project.hasPendingCandidate ? (
                         <span className="sidebar-project-pending" aria-label="有候选待审阅" title="有候选待审阅" />

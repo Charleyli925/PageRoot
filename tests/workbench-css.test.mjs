@@ -100,6 +100,26 @@ test("global sidebar owns the full shell column and start page has no card surfa
   assert.match(settings, /margin-left:\s*auto/u);
 });
 
+test("project trees use compact unweighted rows and a uniform quiet lineage", async () => {
+  const css = await readWorkbenchCascadeCss();
+
+  const projectRow = lastCssRule(css, ".sidebar-project-row");
+  assert.match(projectRow, /font-size:\s*11px/u);
+  assert.match(projectRow, /font-weight:\s*400/u);
+  assert.match(css, /\.sidebar-project-row-current\s*\{[\s\S]*?background:\s*rgb\(238 236 255 \/ 78%\)/u);
+  assert.match(css, /\.sidebar-project-row > \.sidebar-project-icon\s*\{[\s\S]*?width:\s*14px[\s\S]*?height:\s*14px/u);
+
+  const lineage = lastCssRule(css, ".sidebar-version-rail-path");
+  assert.match(lineage, /stroke-width:\s*1\.25/u);
+  const currentLineage = lastCssRule(css, '.sidebar-version-rail-path[data-current="true"]');
+  assert.doesNotMatch(currentLineage, /stroke-width/u);
+  const node = lastCssRule(css, ".sidebar-version-node");
+  assert.match(node, /stroke-width:\s*1\.25/u);
+  assert.doesNotMatch(css, /sidebar-version-file > svg/u);
+  assert.doesNotMatch(css, /sidebar-version-current-label/u);
+  assert.doesNotMatch(css, /sidebar-skeleton-icon/u);
+});
+
 test("removed project/status/review navigation surfaces have no CSS or import owner", async () => {
   const css = await readWorkbenchCascadeCss();
   for (const retired of [

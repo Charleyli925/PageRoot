@@ -594,7 +594,7 @@
     {
       "id": "project-surface-boundary",
       "patterns": [
-        "^app/workbench/(?:workbench-sidebar-container|project-version-tree|workspace-render-snapshot)\\.(?:d\\.ts|js|tsx)$",
+        "^app/workbench/(?:workbench-sidebar-container|project-version-tree|project-sidebar-state|workspace-render-snapshot)\\.(?:d\\.ts|js|tsx|ts)$",
         "^tests/workbench-render-snapshot\\.test\\.mjs$"
       ],
       "suites": [
@@ -605,7 +605,8 @@
         "tests/project-rules-session.test.mjs",
         "tests/project-rules-workflow.test.mjs",
         "tests/workbench-render-snapshot.test.mjs",
-        "tests/workspace-controller.test.mjs"
+        "tests/workspace-controller.test.mjs",
+        "tests/project-sidebar-state.test.mjs"
       ]
     },
     {

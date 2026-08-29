@@ -12,7 +12,6 @@ import {
   useState,
   type CSSProperties,
 } from "react";
-import { FileHtmlIcon } from "@phosphor-icons/react/dist/csr/FileHtml";
 import {
   versionGraphLayout,
   type VersionLineageInput,
@@ -29,6 +28,7 @@ const SIDEBAR_VERSION_LANE_WIDTH = 13;
 const SIDEBAR_VERSION_TRACK_MARGIN = 8;
 const SIDEBAR_VERSION_TRACK_TO_ICON = 6;
 const SIDEBAR_VERSION_LANE_COUNT = 4;
+const SIDEBAR_VERSION_NODE_RADIUS = 3.5;
 
 type SidebarStyle = CSSProperties & Record<`--${string}`, string>;
 
@@ -217,6 +217,7 @@ function SidebarVersionFileName({
   });
   const tooltipId = `sidebar-version-name-${useId().replace(/:/gu, "")}`;
   const description = versionInheritanceDescription(version, parent);
+  const tooltipText = `${version.displayFileName}\n${description}`;
 
   useLayoutEffect(() => {
     const measure = () => {
@@ -253,13 +254,14 @@ function SidebarVersionFileName({
         ref={buttonRef}
         className="sidebar-version-file"
         type="button"
-        aria-label={version.displayFileName}
+        aria-label={version.isActiveWorkingCopy
+          ? `${version.displayFileName}，当前版本`
+          : version.displayFileName}
         aria-current={version.isActiveWorkingCopy ? "true" : undefined}
         aria-describedby={interaction.tooltipVisible ? tooltipId : undefined}
         onClick={onOpen}
         {...interaction.handlers}
       >
-        <FileHtmlIcon aria-hidden="true" size={16} weight="duotone" />
         <span className="sidebar-version-file-viewport" ref={viewportRef}>
           <span
             className="sidebar-version-file-text"
@@ -272,13 +274,11 @@ function SidebarVersionFileName({
             {version.displayFileName}
           </span>
         </span>
-        {version.isActiveWorkingCopy ? (
-          <span className="sidebar-version-current-label">当前</span>
-        ) : null}
+        {version.isActiveWorkingCopy ? <span className="sr-only">当前版本</span> : null}
       </button>
       <SidebarTooltip
         id={tooltipId}
-        text={description}
+        text={tooltipText}
         visible={interaction.tooltipVisible}
         anchorRef={buttonRef}
       />
@@ -448,14 +448,14 @@ export function ProjectVersionTree({
                 data-current={current ? "true" : undefined}
                 data-current-path={onCurrentPath ? "true" : undefined}
                 {...center}
-                r={current ? 5 : 4}
+                r={SIDEBAR_VERSION_NODE_RADIUS}
                 stroke={laneStroke(row.lane)}
               />
               {current ? (
                 <circle
                   className="sidebar-version-node-center"
                   {...center}
-                  r={2}
+                  r={1.35}
                   fill="var(--sidebar-version-current-rail)"
                 />
               ) : null}
@@ -508,7 +508,6 @@ export function ProjectVersionTreeSkeleton() {
       {[0, 1, 2].map((row) => (
         <div className="sidebar-version-skeleton-row" key={row}>
           <span className="sidebar-skeleton-dot" aria-hidden="true" />
-          <span className="sidebar-skeleton-icon" aria-hidden="true" />
           <span className="sidebar-skeleton-name" aria-hidden="true" />
           <span className="sidebar-skeleton-time" aria-hidden="true" />
         </div>
