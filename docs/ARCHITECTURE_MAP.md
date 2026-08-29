@@ -98,7 +98,7 @@ intents; it never owns comment facts. Workbench's aggregate
 subscription may suppress composer-text and edit-text-only revisions; saved
 comments, attachment structure, persistence errors and every non-comment
 capability still invalidate the composition root.
-Persistent `elementId` and optional text locator are Comment/Draft facts;
+Persistent `elementId`, refreshed expected source Hash and optional text locator are Comment/Draft facts;
 `TargetResolver` maps the ID to current source and never consults disposable
 geometry or Runtime DOM. `commentCanvasPort` carries only the resulting
 selection and measurements.

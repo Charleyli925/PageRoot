@@ -15,7 +15,8 @@ make a current comment drift, become ambiguous or require a guessed rebind.
 ## Decision
 
 1. A new TargetRef captured from an identified source element carries
-   `elementId` and `expectedSourceSha256`. `targetId` remains the independent
+   `elementId` and `expectedSourceSha256`; deterministic current-source rebind
+   refreshes the expected Hash. `targetId` remains the independent
    record identity: several comments may have different target IDs while
    sharing one element ID.
 2. When `elementId` is present, `TargetResolver` uses only SourceIndex's valid,

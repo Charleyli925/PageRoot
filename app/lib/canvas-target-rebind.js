@@ -73,6 +73,7 @@ export function rebindCanvasSelectionTargets(sourceHtml, targets) {
         return {
           ...target,
           elementId: refreshed.elementId,
+          expectedSourceSha256: refreshed.expectedSourceSha256,
           selector: refreshed.selector,
           sourceAnchor: refreshed.sourceAnchor,
           fingerprint: refreshed.fingerprint,
@@ -91,6 +92,7 @@ export function rebindCanvasSelectionTargets(sourceHtml, targets) {
         ...target,
         nodeId: resolved.target.nodeId,
         elementId: refreshed.elementId,
+        expectedSourceSha256: refreshed.expectedSourceSha256,
         selector: refreshed.selector,
         textQuote: refreshed.textQuote,
         sourceAnchor: refreshed.sourceAnchor,
@@ -124,6 +126,7 @@ function transitionTargetIdentity(target, nextTarget) {
     ...target,
     nodeId: nextTarget.nodeId,
     elementId: nextTarget.elementId,
+    expectedSourceSha256: nextTarget.expectedSourceSha256,
     selector: nextTarget.selector,
     tagName: nextTarget.tagName,
     text: nextTarget.text,
@@ -134,6 +137,7 @@ function transitionTargetIdentity(target, nextTarget) {
   };
   if (!transitioned.nodeId) delete transitioned.nodeId;
   if (!transitioned.elementId) delete transitioned.elementId;
+  if (!transitioned.expectedSourceSha256) delete transitioned.expectedSourceSha256;
   if (transitioned.textQuote === undefined) delete transitioned.textQuote;
   if (!transitioned.sourceAnchor) delete transitioned.sourceAnchor;
   if (!transitioned.fingerprint) delete transitioned.fingerprint;

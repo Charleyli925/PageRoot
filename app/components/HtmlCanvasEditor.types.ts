@@ -33,7 +33,7 @@ export type HtmlCanvasSelection = {
   id: string;
   /** Persistent source identity. Unlike `id`, this is shared by comments on the same element. */
   elementId?: string;
-  /** Source Hash captured with this target; stable-ID resolution does not require it to stay current. */
+  /** Canonical source Hash expected at the target's last deterministic refresh. */
   expectedSourceSha256?: string;
   /** Ephemeral preview identity. It is never written to the user's source HTML. */
   nodeId?: string;

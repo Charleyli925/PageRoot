@@ -617,7 +617,8 @@ Until structural editing moves to semantic operations, a normal save may add an
 ID to a newly authored wrapper or line-break only after proving that every ID
 claimed by the current Working Copy remains valid and present in the candidate.
 
-Current managed TargetRefs add `elementId` and a capture Hash. Presence of the
+Current managed TargetRefs add `elementId` and the expected canonical source
+Hash, refreshed by deterministic current-source rebind. Presence of the
 stable ID selects one resolver contract: only the valid unique SourceIndex ID
 entry may resolve, and deletion or tag migration is orphaned without heuristic
 fallback. `targetId` remains per-record identity; optional selected-text

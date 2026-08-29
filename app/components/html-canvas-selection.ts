@@ -218,10 +218,10 @@ export function selectionFromRefreshedTarget(
   return {
     id: targetRef.targetId,
     ...(targetRef.elementId ? { elementId: targetRef.elementId } : {}),
-    ...(original.expectedSourceSha256
-      ? { expectedSourceSha256: original.expectedSourceSha256 }
-      : targetRef.expectedSourceSha256
-        ? { expectedSourceSha256: targetRef.expectedSourceSha256 }
+    ...(targetRef.expectedSourceSha256
+      ? { expectedSourceSha256: targetRef.expectedSourceSha256 }
+      : original.expectedSourceSha256
+        ? { expectedSourceSha256: original.expectedSourceSha256 }
         : {}),
     ...(nodeId ? { nodeId } : {}),
     label: targetRef.label,

@@ -79,7 +79,8 @@ test("current comments stay exact by stable element ID and never bind a replacem
   assert.equal(rebound.elementId, elementId);
   assert.equal(rebound.resolution, "exact");
   assert.equal(rebound.textQuote, "改字后");
-  assert.equal(rebound.expectedSourceSha256, comment.expectedSourceSha256);
+  assert.equal(rebound.expectedSourceSha256, buildSourceIndex(after).sourceSha256);
+  assert.equal(rebound.sourceAnchor.sourceSha256, rebound.expectedSourceSha256);
   assert.deepEqual(rebound.textLocator, comment.textLocator);
 
   const replaced = `<main data-pageroot-id="${rootId}"><div data-pageroot-id="${replacementId}">原文</div><aside data-pageroot-id="${siblingId}">相邻</aside></main>`;
