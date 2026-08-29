@@ -242,7 +242,7 @@ test("Codex ACP shares the public execution stream and retains its frozen identi
     await expect(settingsPage.locator(".codex-availability-card")
       .getByText("已连接", { exact: true }))
       .toBeVisible({ timeout: 60_000 });
-    await settingsPage.getByRole("button", { name: "返回工作台" }).click();
+    await launched.page.getByRole("button", { name: "返回工作台" }).click();
     await expect(sidebar.getByRole("button", { name: /交给 Codex 修改/u }))
       .toBeEnabled({ timeout: 60_000 });
     await sidebar.getByRole("button", { name: /交给 Codex 修改/u }).click();
