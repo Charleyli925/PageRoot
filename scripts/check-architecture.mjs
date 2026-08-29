@@ -24,6 +24,7 @@ const LOCAL_PRESENTATION_RUNTIME_OWNERS = new Set([
   "ReviewAnalysisSession",
   "CanvasSnapshotSession",
   "RuntimeCanvasResidencySession",
+  "WorkspacePreferencesSession",
 ]);
 const RUNTIME_OWNERS = new Set([
   "ProjectSession",

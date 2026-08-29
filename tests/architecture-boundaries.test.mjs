@@ -74,6 +74,17 @@ test("layer, ownership and escape checks reject the four forbidden boundaries", 
   );
 });
 
+test("renderer-local workspace preferences remain an explicit presentation owner", () => {
+  const source = [
+    'import { WorkspacePreferencesSession } from "../application/workspace-preferences-session.js";',
+    "const session = new WorkspacePreferencesSession({ port: null });",
+  ].join("\n");
+  assert.deepEqual(
+    ownershipBoundaryViolations({ file: "app/workbench/use-workspace-preferences.ts", source }),
+    [],
+  );
+});
+
 test("generic Bridge escapes remain forbidden without freezing implementation names", () => {
   assert.match(
     escapeBoundaryViolations({
