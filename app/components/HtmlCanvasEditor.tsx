@@ -23,6 +23,7 @@ import {
   EDIT_RUNTIME_RESULT_ATTRIBUTE,
   isEditRuntimeFrameToken,
 } from "../domain/edit-runtime-contract.js";
+import { createSourceOperationId } from "../domain/source-history.js";
 import {
   createPagePresentationAction,
   type PagePresentationAction,
@@ -46,6 +47,12 @@ import {
 import {
   sourceTargetRefForSelection,
 } from "../lib/canvas-target-rebind.js";
+import {
+  applySemanticOperation,
+  createSemanticDocumentState,
+  createSemanticElementPrecondition,
+  type SemanticOperation,
+} from "../lib/semantic-operation-kernel.js";
 import {
   buildSourceTextFragmentMap,
   buildSourceTextMap,
@@ -514,6 +521,124 @@ type PagePresentationActionCache = {
   action: PagePresentationAction | null;
 };
 
+function semanticOperationForSourceCommand(
+  command: SourcePatchCommand,
+  forwardPlan: SourcePatchPlan,
+  sourceIndex: SourceIndexValue,
+  mutation: HtmlCanvasMutation,
+  baseRevision: number,
+): SemanticOperation | null {
+  const targetRef = "targetRef" in command ? command.targetRef : null;
+  const resolution = targetRef ? resolveTargetRef(sourceIndex, targetRef) : null;
+  const sourceTarget = resolution?.target;
+  if (sourceTarget?.type !== "element" || !sourceTarget.pagerootId) {
+    return null;
+  }
+  const target = createSemanticElementPrecondition(sourceIndex, sourceTarget.pagerootId);
+  const envelope = {
+    schemaVersion: 1 as const,
+    operationId: createSourceOperationId(),
+    baseRevision,
+    expectedSourceSha256: sourceIndex.sourceSha256,
+  };
+  if (command.type === "replace-editable-island") {
+    const after = mutation.after as { text?: unknown } | null;
+    const metadata = forwardPlan.metadata as { nextInnerHtml?: unknown };
+    return {
+      ...envelope,
+      type: "setText",
+      target,
+      text: String(after?.text ?? ""),
+      contentHtml: String(metadata.nextInnerHtml ?? ""),
+    };
+  }
+  if (command.type === "update-direct-text-node") {
+    const textResolution = resolveTargetRef(sourceIndex, command.textTargetRef);
+    if (textResolution.target?.type !== "text") {
+      throw new Error("语义文字范围无法定位到精确源码文本节点。");
+    }
+    const map = buildSourceTextMap(sourceIndex, sourceTarget.nodeId, { allowEmpty: true });
+    const run = map.runs.find((candidate) => (
+      candidate.kind === "text"
+      && candidate.textNodeId === textResolution.target?.nodeId
+    ));
+    if (!run || run.kind !== "text") {
+      throw new Error("语义文字范围不属于当前稳定源码元素。");
+    }
+    const after = mutation.after as { text?: unknown } | null;
+    return {
+      ...envelope,
+      type: "replaceTextRange",
+      target,
+      range: {
+        startOffset: run.textStart,
+        endOffset: run.textEnd,
+        quote: run.text,
+      },
+      text: String(after?.text ?? ""),
+    };
+  }
+  if (command.type === "set-inline-style") {
+    return {
+      ...envelope,
+      type: "setStyle",
+      target,
+      property: command.property,
+      value: command.value,
+      important: command.important === true,
+    };
+  }
+  if (command.type === "set-text-range-style") {
+    const map = buildSourceTextMap(sourceIndex, sourceTarget.nodeId, { allowEmpty: true });
+    const range = sourceSegmentsToTextRange(map, command.segments);
+    const metadata = forwardPlan.metadata as { createdPagerootIds?: unknown };
+    const createdPagerootIds = Array.isArray(metadata.createdPagerootIds)
+      ? metadata.createdPagerootIds.map(String)
+      : [];
+    return {
+      ...envelope,
+      type: "setStyle",
+      target,
+      property: command.property,
+      value: command.value,
+      important: command.important === true,
+      range: {
+        ...range,
+        quote: map.text.slice(range.startOffset, range.endOffset),
+      },
+      ...(createdPagerootIds.length > 0 ? { createdPagerootIds } : {}),
+    };
+  }
+  if (command.type === "reorder-sibling") {
+    const parent = sourceTarget.parentId
+      ? sourceIndex.byNodeId.get(sourceTarget.parentId)
+      : null;
+    if (parent?.type !== "element" || !parent.pagerootId) {
+      throw new Error("语义排序需要稳定源码父元素。");
+    }
+    const withoutTarget = parent.childElementIds.filter(
+      (nodeId: string) => nodeId !== sourceTarget.nodeId,
+    );
+    const toIndex = Number(command.toIndex);
+    if (!Number.isSafeInteger(toIndex) || toIndex < 0 || toIndex > withoutTarget.length) {
+      throw new Error("语义排序目标位置无效。");
+    }
+    const beforeNode = withoutTarget[toIndex]
+      ? sourceIndex.byNodeId.get(withoutTarget[toIndex])
+      : null;
+    return {
+      ...envelope,
+      type: "moveElement",
+      target,
+      parent: createSemanticElementPrecondition(sourceIndex, parent.pagerootId),
+      before: beforeNode?.type === "element" && beforeNode.pagerootId
+        ? createSemanticElementPrecondition(sourceIndex, beforeNode.pagerootId)
+        : null,
+    };
+  }
+  throw new Error(`当前 SourcePatch 类型尚未接入语义操作：${command.type}`);
+}
+
 function computedCssValue(element: HTMLElement, cssProperty: string): string {
   return element.ownerDocument.defaultView
     ?.getComputedStyle(element)
@@ -633,6 +758,7 @@ function verifyInlineStyleOverrideForTargets(
 const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProps>(function HtmlCanvasEditor(
   {
     html,
+    semanticRevision = 0,
     onChange,
     onSelect,
     onInteraction,
@@ -769,6 +895,8 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   const runtimeAttemptedRef = useRef(false);
   const imperativeLockRef = useRef(false);
   const lastPropRef = useRef({ html, baseHref: documentBaseHref });
+  const semanticRevisionRef = useRef(semanticRevision);
+  const lastSemanticRevisionPropRef = useRef(semanticRevision);
   const onChangeRef = useRef(onChange);
   const onSelectRef = useRef(onSelect);
   const onInteractionRef = useRef(onInteraction);
@@ -802,6 +930,10 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         : "editing";
 
   onChangeRef.current = onChange;
+  if (lastSemanticRevisionPropRef.current !== semanticRevision) {
+    lastSemanticRevisionPropRef.current = semanticRevision;
+    semanticRevisionRef.current = semanticRevision;
+  }
   onSelectRef.current = onSelect;
   onInteractionRef.current = onInteraction;
   onEditRuntimeLoadStartRef.current = onEditRuntimeLoadStart;
@@ -1702,19 +1834,44 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         ambientTargets,
         forwardPlan.targetRefs,
       );
-      const result = applyPatchPlan(
+      const mappedResult = applyPatchPlan(
         forwardPlan,
         currentSource,
         { trackedTargetRefs },
       );
-      if (result.html === currentSource) return null;
+      if (mappedResult.html === currentSource) return null;
+      const semanticOperation = semanticOperationForSourceCommand(
+        command,
+        forwardPlan,
+        sourceIndex,
+        mutation,
+        semanticRevisionRef.current,
+      );
+      const semanticResult = semanticOperation
+        ? applySemanticOperation(
+          createSemanticDocumentState(currentSource, {
+            revision: semanticRevisionRef.current,
+          }),
+          semanticOperation,
+        )
+        : null;
+      const semanticMaterialization = semanticResult?.materialization
+        .sourcePatchResult as ReturnType<typeof applyPatchPlan> | undefined;
+      const result = semanticMaterialization ?? mappedResult;
+      if (semanticOperation && (
+        !semanticMaterialization
+        || mappedResult.html !== semanticMaterialization.html
+        || mappedResult.sourceSha256 !== semanticMaterialization.sourceSha256
+      )) {
+        throw new Error("语义操作不能独立重放已接受的 SourcePatch 结果。");
+      }
       options.validateResult?.(result);
-      const targetUpdates = deterministicTargetUpdates(result, originalTargets);
+      const targetUpdates = deterministicTargetUpdates(mappedResult, originalTargets);
       const targetUpdatesById = new Map(
         targetUpdates.map((target) => [target.id, target]),
       );
       const operationTargetUpdate = deterministicOperationTargetUpdate(
-        result,
+        mappedResult,
         mutation.target,
       );
       const appliedMutation: HtmlCanvasMutation = {
@@ -1771,6 +1928,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         ...(afterHistorySelection
           ? { afterSelection: afterHistorySelection }
           : {}),
+        ...(semanticOperation ? { semanticOperation } : {}),
       };
       if (!onChangeRef.current(
         result.html,
@@ -1782,6 +1940,8 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         reportBlockedEdit(new Error("宿主状态已锁定，本次画布修改未被接受。"));
         return null;
       }
+      semanticRevisionRef.current = semanticResult?.nextRevision
+        ?? semanticRevisionRef.current + 1;
       if (!blockedDetailAtCommandStart) setEditFeedback(null);
       const activeNativeEdit = activeNativeEditRef.current;
       if (

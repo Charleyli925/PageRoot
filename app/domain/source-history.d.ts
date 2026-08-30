@@ -1,3 +1,5 @@
+import type { SemanticOperation } from "../lib/semantic-operation-kernel.js";
+
 export type SourceHistoryDirection = "undo" | "redo";
 export type SourceHistoryKind = "text" | "style" | "structure" | "reorder";
 
@@ -21,6 +23,7 @@ export type SourceHistoryEntry = {
   reversePatches: SourceHistoryPatch[];
   beforeTarget: Record<string, unknown> | null;
   afterTarget: Record<string, unknown> | null;
+  semanticOperation?: SemanticOperation;
   beforeSelection?: {
     anchor: number;
     focus: number;

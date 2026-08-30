@@ -1,95 +1,175 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { SourceHistorySession } from "../app/application/source-history-session.js";
+import {
+  SOURCE_HISTORY_MEMORY_LIMIT,
+  SourceHistorySession,
+} from "../app/application/source-history-session.js";
+import { sourceSha256 } from "../app/lib/source-index.js";
 
-const beforeSha = `sha256:${"1".repeat(64)}`;
-const afterSha = `sha256:${"2".repeat(64)}`;
 const context = {
   epoch: 1,
   projectId: "project_history",
   documentId: "doc_history",
   sourcePath: "/tmp/history.html",
 };
-const empty = {
-  schemaVersion: "1.0.0",
-  projectId: context.projectId,
-  documentId: context.documentId,
-  baseSourceSha256: beforeSha,
-  cursor: 0,
-  revision: 0,
-  entries: [],
-  appliedActions: [],
-  updatedAt: "2026-07-31T00:00:00.000Z",
-};
-const transaction = {
-  kind: "text",
-  beforeSourceSha256: beforeSha,
-  afterSourceSha256: afterSha,
-  forwardPatches: [{
-    startOffset: 0,
-    endOffset: 1,
-    before: "a",
-    after: "b",
+
+function transaction(before, after, index = 1) {
+  return {
     kind: "text",
-  }],
-  reversePatches: [{
-    startOffset: 0,
-    endOffset: 1,
-    before: "b",
-    after: "a",
-    kind: "inverse:text",
-  }],
-  beforeTarget: { id: "target" },
-  afterTarget: { id: "target" },
-  beforeSelection: { anchor: 0, focus: 1, affinity: "right" },
-  afterSelection: { anchor: 1, focus: 1, affinity: "right" },
-};
-
-test("SourceHistorySession preserves a pre-registration edit through authority binding", () => {
-  const session = new SourceHistorySession();
-  session.record(
-    { ...context, projectId: "", documentId: "" },
-    transaction,
-    1,
-    "2026-07-31T00:00:00.000Z",
-  );
-  assert.equal(session.pendingOperations.length, 1);
-  assert.equal(session.capabilities.canUndo, true);
-
-  session.activate(context, beforeSha, empty, { preservePending: true });
-  assert.equal(session.pendingOperations.length, 1);
-  assert.equal(session.isActive(context), true);
-  assert.equal(session.createAction(context, "undo"), null);
-});
-
-test("SourceHistorySession acknowledges only sent operations and then enables action routing", () => {
-  const session = new SourceHistorySession();
-  session.activate(context, beforeSha, empty);
-  const operation = session.record(
-    context,
-    transaction,
-    1,
-    "2026-07-31T00:00:00.000Z",
-  );
-  assert.deepEqual(operation.beforeSelection, transaction.beforeSelection);
-  assert.deepEqual(operation.afterSelection, transaction.afterSelection);
-  const persisted = {
-    ...empty,
-    cursor: 1,
-    revision: 1,
-    entries: [operation],
-    updatedAt: "2026-07-31T00:00:01.000Z",
+    beforeSourceSha256: sourceSha256(before),
+    afterSourceSha256: sourceSha256(after),
+    forwardPatches: [{
+      startOffset: 0,
+      endOffset: before.length,
+      before,
+      after,
+      kind: "text",
+    }],
+    reversePatches: [{
+      startOffset: 0,
+      endOffset: after.length,
+      before: after,
+      after: before,
+      kind: "inverse:text",
+    }],
+    beforeTarget: { id: `target-${index}` },
+    afterTarget: { id: `target-${index}` },
+    beforeSelection: { anchor: 0, focus: before.length, affinity: "right" },
+    afterSelection: { anchor: after.length, focus: after.length, affinity: "right" },
   };
+}
+
+function acknowledgePending(session, activeContext, html) {
+  const pending = session.pendingOperations;
   assert.equal(
-    session.acknowledge(context, [operation], persisted, afterSha),
+    session.acknowledge(activeContext, pending, null, sourceSha256(html)),
     true,
   );
-  assert.equal(session.pendingOperations.length, 0);
-  assert.equal(session.isActive({ ...context, epoch: context.epoch + 1 }), false);
-  const action = session.createAction(context, "undo");
-  assert.equal(action.direction, "undo");
-  assert.equal(action.expectedHistoryCursor, 1);
-  assert.equal(action.expectedHistoryRevision, 1);
-  assert.equal(action.expectedSourceSha256, afterSha);
+  assert.deepEqual(session.pendingOperations, []);
+}
+
+test("SourceHistorySession retains acknowledged edits only in the active memory stack", () => {
+  const session = new SourceHistorySession();
+  session.activate(context, sourceSha256("a"), null);
+  const recorded = session.record(context, transaction("a", "b"), 1);
+
+  assert.equal(session.capabilities.canUndo, false, "save evidence blocks history action");
+  acknowledgePending(session, context, "b");
+  assert.equal(session.capabilities.canUndo, true);
+  assert.equal(session.capabilities.canRedo, false);
+  assert.equal(session.capabilities.depth, 1);
+  assert.equal(session.snapshot.entries[0].operationId, recorded.operationId);
+});
+
+test("SourceHistorySession applies undo and redo locally with exact HTML evidence", () => {
+  const session = new SourceHistorySession();
+  session.activate(context, sourceSha256("a"), null);
+  session.record(context, transaction("a", "b"), 1);
+  acknowledgePending(session, context, "b");
+
+  const undone = session.apply(context, "undo", "b", 2);
+  assert.equal(undone.html, "a");
+  assert.equal(undone.sourceSha256, sourceSha256("a"));
+  assert.equal(session.capabilities.canUndo, false);
+  acknowledgePending(session, context, "a");
+  assert.equal(session.capabilities.canRedo, true);
+
+  const redone = session.apply(context, "redo", "a", 3);
+  assert.equal(redone.html, "b");
+  acknowledgePending(session, context, "b");
+  assert.equal(session.capabilities.canUndo, true);
+  assert.equal(session.capabilities.canRedo, false);
+});
+
+test("SourceHistorySession truncates redo when a new edit follows undo", () => {
+  const session = new SourceHistorySession();
+  session.activate(context, sourceSha256("a"), null);
+  session.record(context, transaction("a", "b", 1), 1);
+  session.record(context, transaction("b", "c", 2), 2);
+  acknowledgePending(session, context, "c");
+
+  assert.equal(session.apply(context, "undo", "c", 3).html, "b");
+  acknowledgePending(session, context, "b");
+  assert.equal(session.capabilities.canRedo, true);
+  session.record(context, transaction("b", "x", 3), 4);
+  acknowledgePending(session, context, "x");
+
+  assert.equal(session.capabilities.depth, 2);
+  assert.equal(session.capabilities.canRedo, false);
+  assert.equal(session.apply(context, "redo", "x", 5), null);
+});
+
+test("SourceHistorySession keeps only the latest 20 edit behaviors", () => {
+  const session = new SourceHistorySession();
+  session.activate(context, sourceSha256("0"), null);
+  let html = "0";
+  for (let index = 1; index <= 25; index += 1) {
+    const next = String(index);
+    session.record(context, transaction(html, next, index), index);
+    html = next;
+  }
+  acknowledgePending(session, context, html);
+
+  assert.equal(session.capabilities.depth, SOURCE_HISTORY_MEMORY_LIMIT);
+  for (let index = 0; index < SOURCE_HISTORY_MEMORY_LIMIT; index += 1) {
+    const undone = session.apply(context, "undo", html, 26 + index);
+    html = undone.html;
+    acknowledgePending(session, context, html);
+  }
+  assert.equal(html, "5");
+  assert.equal(session.apply(context, "undo", html, 50), null);
+});
+
+test("SourceHistorySession clears history on another HTML or a new open lifetime", () => {
+  const session = new SourceHistorySession();
+  session.activate(context, sourceSha256("a"), null);
+  session.record(context, transaction("a", "b"), 1);
+  acknowledgePending(session, context, "b");
+
+  session.activate(
+    { ...context, sourcePath: "/tmp/other.html" },
+    sourceSha256("other"),
+    null,
+  );
+  assert.equal(session.capabilities.depth, 0);
+
+  session.deactivate();
+  session.activate(context, sourceSha256("b"), null);
+  assert.equal(session.capabilities.depth, 0);
+  assert.equal(session.capabilities.canUndo, false);
+});
+
+test("SourceHistorySession rejects a forged in-process handoff snapshot", () => {
+  const source = new SourceHistorySession();
+  source.activate(context, sourceSha256("a"), null);
+  source.record(context, transaction("a", "b"), 1);
+  acknowledgePending(source, context, "b");
+  const forged = {
+    ...source.snapshot,
+    entries: [{
+      ...source.snapshot.entries[0],
+      beforeSourceSha256: sourceSha256("forged"),
+    }],
+  };
+
+  const target = new SourceHistorySession();
+  target.activate(context, sourceSha256("b"), forged);
+  assert.equal(target.capabilities.depth, 0);
+  assert.equal(target.capabilities.canUndo, false);
+});
+
+test("crash recovery may restore save evidence but never an undo stack", () => {
+  const original = new SourceHistorySession();
+  original.activate(context, sourceSha256("a"), null);
+  original.record(context, transaction("a", "b"), 1);
+  const saveEvidence = original.pendingOperations;
+
+  const restarted = new SourceHistorySession();
+  restarted.activate(context, sourceSha256("b"), null);
+  assert.equal(restarted.restorePendingEvidence(context, saveEvidence), true);
+  assert.equal(restarted.capabilities.depth, 0);
+  assert.equal(restarted.capabilities.canUndo, false);
+  acknowledgePending(restarted, context, "b");
+  assert.equal(restarted.capabilities.canUndo, false);
 });

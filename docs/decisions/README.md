@@ -1,6 +1,6 @@
 # Architecture Decision Records
 
-<!-- adr-history-max: 0062 -->
+<!-- adr-history-max: 0063 -->
 <!-- adr-history-gaps: 0020 -->
 
 This is the default reading path for decisions that still constrain PageRoot.
@@ -10,7 +10,7 @@ Historical and superseded decisions remain available from the archive index.
 
 The repository has one historical gap, `0020`, which is intentionally never
 reused. The four collisions found in the first curation pass were assigned
-`0055` through `0058`; future ADRs must use the next number above `0062`.
+`0055` through `0058`; future ADRs must use the next number above `0063`.
 
 ## Active decisions
 
@@ -22,13 +22,11 @@ reused. The four collisions found in the first curation pass were assigned
 | 0006 | [Usage telemetry uses random installation identity and a strict event allowlist](0006-pseudonymous-usage-telemetry.md) | Living |
 | 0007 | [Interactive preview uses an independent document and source-backed edit context](0007-independent-interactive-preview.md) | Living; one presentation handoff is historical |
 | 0008 | [Edit mode exposes only source-backed presentation actions](0008-safe-presentation-actions-in-edit-mode.md) | Living |
-| 0009 | [Canvas undo uses one persistent exact-Patch journal](0009-persistent-source-patch-history.md) | Living |
 | 0010 | [Short-lived branches use managed isolated worktrees](0010-worktree-branch-lifecycle.md) | Living |
 | 0011 | [Workbench is a composition root over explicit sessions and views](0011-workbench-session-decomposition.md) | Living |
 | 0012 | [Registered project mutations resolve identity before path](0012-id-first-project-context.md) | Living |
 | 0014 | [AI candidate acceptance does not classify authored script content](0014-user-authority-over-ai-script-content.md) | Living |
 | 0015 | [Safe host fallback and exact direct-text-node editing](0015-safe-host-fallback-and-direct-text-nodes.md) | Living |
-| 0018 | [Autosave and source history share one SourceTransaction kernel](0018-source-transaction-kernel.md) | Living |
 | 0019 | [WorkspaceController orchestrates application workflows without owning facts](0019-workspace-controller-orchestration.md) | Living |
 | 0022 | [v4 Registry-authorized project roots and promotion paths](0022-user-owned-project-root-identity.md) | Living |
 | 0024 | [Registry catalog and AI-task projection authority](0024-registry-catalog-and-ai-task-projections.md) | Living |
@@ -60,6 +58,7 @@ reused. The four collisions found in the first curation pass were assigned
 | 0060 | [Managed Working Copies materialize source element identity once](0060-working-copy-source-element-identity-migration.md) | Living |
 | 0061 | [Current comments resolve persistent source element identity](0061-stable-current-comment-targets.md) | Living |
 | 0062 | [Semantic source operations lower to complete identified HTML](0062-semantic-source-operation-kernel.md) | Living |
+| 0063 | [Canvas undo is a 20-step open-document memory history](0063-open-document-memory-history.md) | Living |
 
 ## Reading guide
 

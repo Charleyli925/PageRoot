@@ -25,7 +25,7 @@ The active source-shape allowlist is intentionally narrow:
 | system work cannot replace a queued or scheduled user command | `check-architecture.mjs` keeps the explicit user-over-system arbitration boundary before the controller queue. |
 | empty text-fragment deletion replays its queued explicit command after retirement | `native-dom-structural-text.spec.mjs` observes deletion ending the fragment session without a blocked resume. |
 | Workbench header drawers defer until the active composition is settled | `native-dom-v2-editable-island.spec.mjs` observes the repeated Project command remaining closed until `compositionend`, then opening once. |
-| format replay rebinds the live element after its checkpoint | Browser toolbar formatting plus the Native Electron persistent undo/selection case observe the post-checkpoint live target and exact source bytes. |
+| format replay rebinds the live element after its checkpoint | Browser toolbar formatting plus the Native Electron current-open undo/selection case observe the post-checkpoint live target and exact source bytes. |
 | canonical island replacement retires the old lease before DOM removal | `check-architecture.mjs` owns the replacement ordering boundary; Native Electron also retains the retired host and observes its editing attributes removed. |
 | source-authority fences defer preview reconcile and retire the editable DOM | Browser source-byte tests and Native Electron save/switch/close tests observe a retired edit host and a fresh authoritative frame. |
 | V2 composition and source revision advance both use hard generation boundaries | Browser IME replay and Native Electron Apple Pinyin/relaunch cases observe final text, selection, bytes, and late-event rejection. |

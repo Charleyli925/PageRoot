@@ -147,9 +147,10 @@ writers do not emit them; archived outcomes remain terminal and history is
 never rewritten. See [`docs/COMPATIBILITY.md`](../docs/COMPATIBILITY.md) for
 its removal evidence and fixture contract.
 
-`source-history.v1.schema.json` is the bounded, document-owned journal of
-byte-exact canvas source operations. Its cursor is independent from immutable
-Versions; comments, attachments, and project-rule edits are not entries.
+`source-history.v1.schema.json` is retained to decode historical bounded source
+operation journals. Current v4 Canvas undo is a renderer-only 20-step stack for
+the currently open HTML and does not write this schema. Crash recovery may keep
+exact operations only as pending-save evidence, never as a restored undo cursor.
 
 `conversation.v2.schema.json` is the current writer contract for one AI
 conversation thread; v1 remains read-only compatibility. A Conversation

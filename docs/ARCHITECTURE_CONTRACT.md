@@ -142,7 +142,7 @@ The renderer's main workspace facts are partitioned as follows:
   durable V2 state. It publishes through `ProjectSession`,
   `DocumentSession`, `VersionSession`, `DraftSession` and `CommentSession`; it
   never owns a second mutable Version store;
-- `SourceHistorySession`: pending exact Patch operations and history action.
+- `SourceHistorySession`: current-open 20-step exact Patch cursor and pending-save evidence.
 - `ExternalFileOpenSession`: opaque external-open delivery IDs, one active
   switch, newest queued request, deferred safe-switch retry and stale-result
   fencing for work that has not yet been accepted.
@@ -558,13 +558,14 @@ asynchronous lifetime. `CommentWorkflow` is the only renderer application
 owner that may stage an attachment, call its Bridge repository, or compensate a
 late write; browser-memory attachments never acquire that Bridge capability.
 
-Canvas operation history has split but non-overlapping ownership:
-`SourceHistorySession` owns the renderer context, unsaved operation outbox and
-one in-flight action intent; `history/source-operations.json` owned by the
-Bridge is the durable cursor, operation and applied-action authority. React
-state may display capabilities, but it cannot maintain a parallel undo stack.
-The preview DOM, browser editing history and edit-audit list are not history
-authorities.
+`SourceHistorySession` is the sole Canvas undo owner. It owns one memory-only
+cursor and at most 20 exact operation pairs for the currently open HTML, plus
+pending-save evidence until autosave acknowledges it. React state may display
+capabilities but cannot maintain a parallel stack. Switching HTML, closing the
+document or restarting clears the cursor; recovery evidence may finish an
+interrupted complete-HTML save but never rebuild undo capability. The preview
+DOM, browser editing history, legacy Bridge journal and edit-audit list are not
+current history authorities.
 
 The semantic source-operation foundation is a pure pre-persistence boundary.
 It accepts only complete identity-v1 HTML plus an operation carrying stable
@@ -573,9 +574,10 @@ ID/tag/outer-Hash target evidence. It returns complete next HTML, Hash, lineage
 and a generated in-process inverse. Intent is lowered to SourcePatch, whose
 apply path independently re-plans the operation before enforcing exact ranges,
 outside-scope equality and parse integrity. Runtime DOM is never an input.
-Until PR5 explicitly adopts this boundary, Canvas, `SourceHistorySession`,
-autosave and Repository remain on their existing route and do not maintain a
-parallel semantic revision.
+PR5 adopts this boundary for existing text, style and sibling-order edits.
+Canvas verifies that semantic materialization matches the accepted SourcePatch
+result before publishing complete HTML. Repository and Desktop Main do not own
+or persist the semantic revision or the current-open history stack.
 
 ## Mutation protocol
 
@@ -593,18 +595,12 @@ The client queries authority before retrying. A retry action must change its
 precondition through reconciliation, refreshed identity, backoff or new user
 information; resending the same known-stale command is forbidden.
 
-A persisted source-history operation is created only from an accepted
-SourcePatch result. It carries stable operation identity, exact forward and
-reverse patch lists, before/after source Hashes and bounded logical target
-snapshots, plus optional bounded before/after logical Selection for text-focus
-restoration. Selection is presentation metadata, not a patch precondition or
-source authority. Autosave validates the full operation chain before placing
-the HTML candidate and history candidate in the same recoverable `pendingWrite`.
-Undo/redo is another durable command with stable action ID, expected source
-Hash, expected history revision and expected cursor. An unknown response is
-reconciled by querying workspace authority; the same action ID may be replayed
-once only when authority proves it was already applied or its original
-preconditions still hold.
+An accepted Canvas semantic operation retains exact forward and reverse patches,
+before/after source Hashes, bounded logical target snapshots and optional
+Selection only in the current-open renderer session. Autosave receives the
+resulting complete HTML and exact operations as identity/save evidence. Undo or
+redo creates another normal complete-HTML save; there is no durable history
+action ID, cursor CAS, history candidate or restart migration.
 
 Autosave then enters `ProjectFileRepository`. It is the only live Bridge-side
 owner of the current-source write for a registered v4 Project File. The retired

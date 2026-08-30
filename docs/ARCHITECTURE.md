@@ -418,23 +418,21 @@ state. This decision is recorded in
 identity rule and superseded at the desktop open boundary by v4-only Project
 Files.
 
-Every accepted Canvas SourcePatch also emits one operation containing the
-actual forward patches, the exact inverse patches returned by the engine, the
-before/after source Hashes and the logical before/after target. The renderer
-`SourceHistorySession` owns unsaved operations and the current action intent.
-A v4 Project File does not persist a Bridge source-history journal;
-`/source-history/action` returns the current source bytes and empty history so
-the renderer empty-history path still works. There is no v3
-`history/source-operations.json` store.
+Every accepted Canvas edit is independently expressed as a semantic operation.
+The semantic kernel materializes complete next HTML plus the exact forward and
+inverse patches used by the current-open editing session. The renderer
+`SourceHistorySession` owns a memory-only cursor capped at the latest 20 edits
+for one open HTML. A new forward edit truncates redo; switching HTML, closing
+the document or restarting clears the stack.
 
 Undo and redo first checkpoint any active editable island and drain the source
-queue. The Bridge then validates project/document identity, source Hash,
-journal revision/cursor and every exact patch before atomically applying the
-inverse or forward bytes. Stable action IDs make lost responses idempotent;
-the renderer queries workspace authority before its single replay. A new
-forward operation truncates redo. If current source bytes cannot be chained to
-the journal—external modification or a new working file—the Bridge establishes
-a fresh boundary at those bytes rather than crossing unknown content.
+queue. The renderer applies the exact inverse or forward patches locally, then
+saves the resulting complete HTML through the normal Hash/CAS and atomic
+autosave path. Crash recovery can finish that save from exact operation
+evidence but never restores the user-visible history stack. A v4 Project File
+does not persist a Bridge source-history journal. The legacy schema and
+`/source-history/action` remain compatibility surfaces until PR10 and are not a
+current editing authority.
 
 After that acknowledgement, the Canvas may keep the current iframe only when
 both history targets resolve exactly to the same editable-island identity, the
@@ -447,8 +445,8 @@ mounted DOM remains a disposable projection and is never serialized into source.
 
 The desktop `Edit` menu is a router, not another history owner. Focused native
 text inputs use Electron/Chromium's local text undo. Canvas focus routes
-Undo/Redo intent to the renderer source-history session. Comment/card,
-attachment and project actions never enter the source journal.
+Undo/Redo intent to the renderer memory session. Comment/card, attachment and
+project actions never enter the Canvas stack.
 
 An explicit filename change is a separate desktop source-path transaction, not
 an HTML write. `desktop/source-rename.mjs` validates one stable operation ID,

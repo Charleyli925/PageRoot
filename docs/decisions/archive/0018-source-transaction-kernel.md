@@ -1,6 +1,6 @@
 # ADR 0018: Autosave and source history share one SourceTransaction kernel
 
-- Status: Accepted
+- Status: Superseded by [ADR 0063](../0063-open-document-memory-history.md)
 - Date: 2026-08-10
 
 ## Context

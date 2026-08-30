@@ -1,14 +1,30 @@
 import type {
   SourceHistoryDirection,
   SourceHistoryEntry,
-  SourceHistoryState,
 } from "../domain/source-history.js";
+import type { SemanticOperation } from "../lib/semantic-operation-kernel.js";
+
+export const SOURCE_HISTORY_MEMORY_LIMIT: 20;
 
 export type SourceHistoryContext = {
   epoch: number;
   projectId: string;
   documentId: string;
   sourcePath: string;
+};
+
+export type OpenDocumentMemoryHistory = {
+  scope: "open-document-memory";
+  schemaVersion: 1;
+  projectId: string;
+  documentId: string;
+  sourcePath: string;
+  baseSourceSha256: string;
+  cursor: number;
+  revision: number;
+  entries: SourceHistoryEntry[];
+  appliedActions: [];
+  updatedAt: string;
 };
 
 export type CanvasSourceTransaction = {
@@ -22,6 +38,7 @@ export type CanvasSourceTransaction = {
   afterTarget: SourceHistoryEntry["afterTarget"];
   beforeSelection?: SourceHistoryEntry["beforeSelection"];
   afterSelection?: SourceHistoryEntry["afterSelection"];
+  semanticOperation?: SemanticOperation;
 };
 
 export class SourceHistorySession {
@@ -31,7 +48,7 @@ export class SourceHistorySession {
     sourceSha256: string,
     historyValue: unknown,
     options?: { preservePending?: boolean },
-  ): SourceHistoryState;
+  ): OpenDocumentMemoryHistory;
   deactivate(): void;
   isActive(context: SourceHistoryContext): boolean;
   record(
@@ -40,7 +57,7 @@ export class SourceHistorySession {
     editRevision: number,
     createdAt?: string,
   ): SourceHistoryEntry;
-  restorePending(
+  restorePendingEvidence(
     context: SourceHistoryContext,
     operations: SourceHistoryEntry[],
   ): boolean;
@@ -50,23 +67,24 @@ export class SourceHistorySession {
     historyValue: unknown,
     sourceSha256: string,
   ): boolean;
-  replaceAuthority(
-    context: SourceHistoryContext,
-    historyValue: unknown,
-    sourceSha256: string,
-  ): boolean;
-  createAction(
+  apply(
     context: SourceHistoryContext,
     direction: SourceHistoryDirection,
+    sourceHtml: string,
+    editRevision: number,
+    createdAt?: string,
   ): {
-    actionId: string;
-    direction: SourceHistoryDirection;
-    expectedHistoryRevision: number;
-    expectedHistoryCursor: number;
-    expectedSourceSha256: string;
+    html: string;
+    sourceSha256: string;
+    target: SourceHistoryEntry["beforeTarget"];
+    targetTransition: {
+      fromTarget: SourceHistoryEntry["beforeTarget"];
+      toTarget: SourceHistoryEntry["afterTarget"];
+    };
+    selection?: SourceHistoryEntry["beforeSelection"];
   } | null;
   readonly pendingOperations: SourceHistoryEntry[];
-  readonly snapshot: SourceHistoryState | null;
+  readonly snapshot: OpenDocumentMemoryHistory | null;
   readonly capabilities: {
     canUndo: boolean;
     canRedo: boolean;

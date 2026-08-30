@@ -84,6 +84,11 @@ test("semantic operation schema accepts the public command envelope and rejects 
   assert.equal(validate(operation(baseline, "op_schema_00001", "deleteElement", {
     target: target(baseline, IDS.first),
   })), true, ajv.errorsText(validate.errors));
+  assert.equal(validate(operation(baseline, "op_schema_text_01", "setText", {
+    target: target(baseline, IDS.paragraph),
+    text: "",
+    contentHtml: "",
+  })), true, ajv.errorsText(validate.errors));
   assert.equal(validate({
     schemaVersion: 1,
     operationId: "op_schema_00002",
@@ -141,6 +146,41 @@ test("applies text, range, attribute and style operations through exact SourcePa
   assert.match(styleResult.html, /style="color: red !important"/u);
 });
 
+test("materializes rich text and range style semantically with a generated inverse", () => {
+  const baseline = state();
+  const textEdit = operation(baseline, "sourceop_legacy_text_01", "setText", {
+    target: target(baseline, IDS.paragraph),
+    text: "Hello semantic",
+  });
+  const textResult = applySemanticOperation(baseline, textEdit);
+  assert.match(textResult.html, />Hello semantic<\/p>/u);
+  assert.equal(textResult.materialization.sourcePatchResult.html, textResult.html);
+
+  const richText = operation(baseline, "sourceop_rich_text_0001", "setText", {
+    target: target(baseline, IDS.paragraph),
+    text: "Hello semantic",
+    contentHtml: `Hello <strong data-pageroot-id="${IDS.strong}">semantic</strong>`,
+  });
+  const richResult = applySemanticOperation(baseline, richText);
+  assert.match(
+    richResult.html,
+    new RegExp(`Hello <strong data-pageroot-id="${IDS.strong}">semantic</strong>`),
+  );
+  assert.equal(buildSourceIndex(richResult.html).byPagerootId.has(IDS.strong), true);
+
+  const rangeStyle = operation(baseline, "sourceop_legacy_style1", "setStyle", {
+    target: target(baseline, IDS.paragraph),
+    property: "font-weight",
+    value: "700",
+    important: false,
+    range: { startOffset: 0, endOffset: 5, quote: "Hello" },
+    createdPagerootIds: [elementId(30)],
+  });
+  const styled = applySemanticOperation(baseline, rangeStyle);
+  assert.match(styled.html, /font-weight: 700/u);
+  assert.match(styled.html, new RegExp(elementId(30), "u"));
+});
+
 test("allocates new identities for insert and replacement while preserving the replacement root", () => {
   const baseline = state();
   const insertResult = applySemanticOperation(baseline, operation(
@@ -194,6 +234,7 @@ test("deletes and moves only source elements addressed by stable identity", () =
       before: target(baseline, IDS.first),
     },
   ));
+  assert.equal(moveResult.materialization.planType, "reorder-sibling");
   assert.ok(moveResult.html.indexOf(`>${"B"}</span>`) < moveResult.html.indexOf(`>${"A"}</span>`));
   assert.equal(buildSourceIndex(moveResult.html).byPagerootId.get(IDS.second)?.parentId !== null, true);
 });
@@ -246,7 +287,10 @@ test("fails closed for stale, duplicate and changed target preconditions", () =>
     () => applySemanticOperation(baseline, {
       ...edit,
       operationId: "op_target_hash1",
-      target: { ...edit.target, expectedOuterHtmlSha256: "sha256:deadbeef" },
+      target: {
+        ...edit.target,
+        expectedOuterHtmlSha256: `sha256:${"0".repeat(64)}`,
+      },
     }),
     (error) => error instanceof SemanticOperationError && error.code === "SEMANTIC_TARGET_HASH_MISMATCH",
   );

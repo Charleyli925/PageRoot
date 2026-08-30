@@ -211,7 +211,6 @@ export type WorkspaceControllerConstruction = Readonly<{
     | "workspace"
     | "autosave"
     | "source"
-    | "sourceHistoryAction"
     | "resolveConflict"
     | "conflictCandidate"
     | "sourcePreview"

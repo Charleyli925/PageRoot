@@ -13,7 +13,6 @@ import { auditEventKey, removeAcknowledgedAuditEvents } from "../app/lib/audit-e
 import { appendDirectEditEvent } from "../app/lib/direct-edit-events.js";
 import {
   appendSourceHistoryOperations,
-  applySourceHistoryAction,
   createEmptySourceHistory,
 } from "../shared/source-history.mjs";
 
@@ -252,7 +251,7 @@ test("DocumentWorkflow restores source-history and recovery authority after a pr
   };
   const pending = operation(before, after);
   harness.workflow.replaceRecoveryIdentity(recoveryIdentity);
-  harness.sourceHistorySession.restorePending(harness.context, [pending]);
+  harness.sourceHistorySession.restorePendingEvidence(harness.context, [pending]);
   const authority = harness.workflow.captureProjectTransitionAuthority();
 
   harness.workflow.resetForProjectTransition();
@@ -266,7 +265,7 @@ test("DocumentWorkflow restores source-history and recovery authority after a pr
     sourceSha256: sha256(before),
   }), true);
   assert.deepEqual(harness.workflow.recoveryIdentity, recoveryIdentity);
-  assert.deepEqual(harness.sourceHistorySession.snapshot, authority.sourceHistory);
+  assert.equal(harness.sourceHistorySession.capabilities.depth, 0);
   assert.deepEqual(harness.sourceHistorySession.pendingOperations, [pending]);
 });
 
@@ -952,64 +951,32 @@ test("DocumentWorkflow restores a matching crash record into the same durable qu
   assert.equal(harness.documentSession.persistState, "idle");
 });
 
-test("DocumentWorkflow reconciles an unknown history action before replaying its stable actionId", async () => {
+test("DocumentWorkflow applies current-open undo locally and saves the resulting full HTML", async () => {
   const before = "<!doctype html><html><body><p>one</p></body></html>";
   const after = before.replace("one", "two");
   const entry = operation(before, after);
-  const history = sourceHistory({
-    sourceSha256: sha256(before),
-    entries: [entry],
-  });
   const calls = [];
-  const harness = createHarness({ html: after });
-  harness.documentSession.update({
-    sourceSha256: sha256(after),
-    editRevision: 1,
-    lastPersistedRevision: 1,
-  });
-  harness.sourceHistorySession.activate(
-    harness.context,
-    sha256(after),
-    history,
-  );
-  let first = true;
-  harness.client.workspace = async () => ({
-    projectId: PROJECT_ID,
-    documentId: DOCUMENT_ID,
-    sourcePath: SOURCE_PATH,
-    currentHtmlSha256: sha256(after),
-    sourceHistory: {
-      ...history,
-      capabilities: { revision: 1, cursor: 1 },
+  const harness = createHarness({
+    html: before,
+    bridge: {
+      async autosave(body) {
+        calls.push(body);
+        return {
+          content: body.html,
+          sha256: sha256(body.html),
+          persistedRevision: body.editRevision,
+          lastModifiedAt: "2026-08-11T00:00:02.000Z",
+        };
+      },
     },
   });
-  harness.client.sourceHistoryAction = async (body) => {
-    calls.push(body);
-    if (first) {
-      first = false;
-      throw new BridgeRequestError("timeout", { status: 503, outcome: "unknown" });
-    }
-    const undone = applySourceHistoryAction(history, after, {
-      projectId: PROJECT_ID,
-      documentId: DOCUMENT_ID,
-      direction: "undo",
-      actionId: body.actionId,
-      expectedRevision: body.expectedHistoryRevision,
-      expectedCursor: body.expectedHistoryCursor,
-      sha256,
-      now: () => "2026-08-11T00:00:02.000Z",
-    });
-    return {
-      content: undone.html,
-      sha256: sha256(undone.html),
-      persistedRevision: 2,
-      lastModifiedAt: "2026-08-11T00:00:02.000Z",
-      sourceHistory: undone.history,
-      target: undone.target,
-      targetTransition: undone.targetTransition,
-      selection: undone.selection,
-    };
-  };
+  assert.equal(harness.workflow.enqueueEdit({
+    html: after,
+    sourceTransaction: entry,
+    context: harness.context,
+  }).status, "succeeded");
+  assert.equal((await harness.workflow.flush()).status, "succeeded");
+  assert.equal(harness.sourceHistorySession.capabilities.canUndo, true);
 
   const outcome = await harness.workflow.performHistoryAction({
     direction: "undo",
@@ -1018,10 +985,12 @@ test("DocumentWorkflow reconciles an unknown history action before replaying its
 
   assert.equal(outcome.status, "succeeded");
   assert.equal(calls.length, 2);
-  assert.equal(calls[0].actionId, calls[1].actionId);
+  assert.equal(calls[0].html, after);
+  assert.equal(calls[1].html, before);
   assert.equal(harness.documentSession.html, before);
   assert.equal(harness.documentSession.sourceSha256, sha256(before));
   assert.equal(harness.canvas.history.length, 1);
+  assert.equal(harness.sourceHistorySession.capabilities.canRedo, true);
 });
 
 test("DocumentWorkflow force-unlock adopts disk HTML and clears persistence conflict", async () => {

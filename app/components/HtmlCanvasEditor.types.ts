@@ -5,6 +5,7 @@ import type {
 } from "./native-edit-types";
 import type { NoticeUsageCapture } from "./NoticeBar";
 import type { EditRuntimeGrant } from "../domain/edit-runtime-contract.js";
+import type { SemanticOperation } from "../lib/semantic-operation-kernel.js";
 
 export type HtmlCanvasSelectionLevel = "module" | "part" | "insertion";
 export type HtmlCanvasTargetResolution =
@@ -94,6 +95,7 @@ export type HtmlCanvasSourceTransaction = {
   afterTarget: HtmlCanvasSelection;
   beforeSelection?: NativeEditSelection;
   afterSelection?: NativeEditSelection;
+  semanticOperation?: SemanticOperation;
 };
 
 export type HtmlCanvasInteractionMode = "editing" | "processing" | "history";
@@ -225,6 +227,8 @@ export type HtmlCanvasEditorHandle = {
 export type HtmlCanvasEditorProps = {
   /** A complete document or an HTML fragment. Fragments are normalized to a complete document. */
   html: string;
+  /** Host-owned edit revision used as the semantic operation base revision. */
+  semanticRevision?: number;
   /** Called with the exact next source produced by SourcePatchEngine. */
   onChange: (
     nextSourceHtml: string,
