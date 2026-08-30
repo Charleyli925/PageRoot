@@ -234,7 +234,16 @@ export const HtmlCanvasSelectionChrome = memo(function HtmlCanvasSelectionChrome
           style={toolbarStyle}
           role="toolbar"
           aria-label={`编辑${selection.label}`}
-          onKeyDown={onToolbarKeyDown}
+          onKeyDown={(event) => {
+            const target = event.target instanceof Element ? event.target : null;
+            const confirmsArmedDelete = Boolean(
+              deleteArmed
+              && target?.closest("[data-delete-action]")
+              && (event.key === "Enter" || event.key === " "),
+            );
+            if (!confirmsArmedDelete) setArmedDeleteTargetId(null);
+            onToolbarKeyDown(event);
+          }}
           onPointerDownCapture={onToolbarPointerDownCapture}
           onMouseDownCapture={onToolbarMouseDownCapture}
           onClickCapture={(event) => {

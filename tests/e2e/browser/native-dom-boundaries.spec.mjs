@@ -284,6 +284,9 @@ test("source structure toolbar duplicates with fresh IDs and deletes only the se
   await copies.nth(1).click();
   await editor.getByRole("button", { name: "删除元素", exact: true }).click();
   await expect(copies).toHaveCount(2);
+  await page.keyboard.press(keyShortcut("Z"));
+  await expect(editor.getByRole("button", { name: "删除元素", exact: true })).toBeVisible();
+  await editor.getByRole("button", { name: "删除元素", exact: true }).click();
   await editor.getByRole("button", { name: "复制元素", exact: true }).click();
   await expect(copies).toHaveCount(3);
   await editor.getByRole("button", { name: "删除元素", exact: true }).click();

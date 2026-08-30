@@ -22,7 +22,8 @@ state. Cloning authored markup also cannot retain the original persistent IDs.
   IDs; later operations never deliberately reuse them.
 - The Canvas toolbar exposes duplicate, two-step confirmed delete and the
   existing same-parent up/down actions. Changing selection cancels a pending
-  delete confirmation. The editor port also supports identity-addressed insertion
+  delete confirmation; any intervening pointer or keyboard action cancels it as
+  well. The editor port also supports identity-addressed insertion
   and cross-parent move without introducing an element palette, component
   system or layout engine.
 - Only elements proven in the current `SourceIndex` are eligible. Runtime DOM
