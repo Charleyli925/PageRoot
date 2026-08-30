@@ -453,6 +453,9 @@ source change materializes complete HTML, rebuilds the disposable frame and
 reruns the author program. Native input may postpone that rebuild until editing
 finishes. The resource session may be reused only while exact authored script
 markup/body identity is unchanged; a Script change requires a new generation.
+Main enforces two concurrent preparations and a non-evicting 128-preparation
+application-lifetime cap; renderer-selected request IDs cannot roll that cap
+forward. Reaching the cap fails closed until PageRoot restarts.
 Any preparation, load, provenance or deadline failure selects ordinary static
 Edit. Runtime DOM never becomes SourcePatch, Source HTML, save, Version, export,
 Request, Candidate or Review input.

@@ -28,7 +28,10 @@ source or be reconciled node by node.
   resource budgets before preparing a scoped `pageroot-edit-runtime:` resource
   closure. Inline and contained local scripts are supported. Exact reviewed
   ECharts 5.5.0 CDN URLs may resolve to pinned packaged bytes. Module import
-  graphs remain unsupported and fail closed to static Edit.
+  graphs remain unsupported and fail closed to static Edit. Main admits at
+  most two concurrent preparations and keeps a non-evicting 128-preparation
+  application-lifetime cap; reaching it requires an app restart rather than
+  accepting renderer-chosen request IDs without a hard bound.
 - Before author scripts execute, the fixed bootstrap opens one parent-owned
   registration capability. The parent editor deletes that entry after the
   bootstrap captures its private batch port and keeps registered DOM references

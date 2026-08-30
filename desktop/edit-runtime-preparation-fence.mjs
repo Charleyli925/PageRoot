@@ -71,8 +71,7 @@ export function createEditRuntimePreparationFence({
         throw new Error("Edit runtime preparation is already in progress.");
       }
       if (consumedRequestIds.size >= maximumConsumed) {
-        const [oldestRequestId] = consumedRequestIds;
-        consumedRequestIds.delete(oldestRequestId);
+        throw new Error("Edit runtime preparation lifetime limit was reached.");
       }
       consumedRequestIds.add(identity.requestId);
       inFlight += 1;

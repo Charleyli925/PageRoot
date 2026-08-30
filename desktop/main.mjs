@@ -1971,10 +1971,12 @@ async function prepareEditAuthorRuntime(payload) {
         "当前画布的运行时准备已经完成。",
       );
     }
-    if (cause instanceof Error && /in progress/u.test(cause.message)) {
+    if (cause instanceof Error && /in progress|lifetime limit/u.test(cause.message)) {
       throw new ProjectFileError(
         "EDIT_RUNTIME_PREPARATION_LIMITED",
-        "当前画布正在安全准备，请稍后重试。",
+        /lifetime limit/u.test(cause.message)
+          ? "本次应用会话的运行页面准备已达到安全上限，请重启 PageRoot 后继续。"
+          : "当前画布正在安全准备，请稍后重试。",
       );
     }
     throw cause;

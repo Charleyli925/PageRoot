@@ -97,6 +97,9 @@ PageRoot edits local files and renders user-controlled HTML, so its default poli
   has no Node integration and no preload or IPC sender of its own. Capture
   preparation, provenance or load failure revokes the session and renders static
   Edit. Edit must not answer a security concern by converting to PNG.
+  Main also keeps a non-evicting 128-preparation application-lifetime cap;
+  renderer-selected request IDs cannot renew it, and reaching it fails closed
+  until the app restarts.
   Remaining low-cost boundaries: no directory listing or project path on the
   edit-runtime protocol, no popup, no worker, no top-level navigation.
 - Strict schemas, frozen inputs and identity/Hash/path checks before accepting

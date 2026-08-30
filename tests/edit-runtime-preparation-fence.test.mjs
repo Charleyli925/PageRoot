@@ -57,7 +57,7 @@ test("Main-owned Edit runtime fence permits only the bounded activation overlap"
   nextRelease();
 });
 
-test("Main-owned Edit runtime fence bounds replay history without exhausting future pages", () => {
+test("Main-owned Edit runtime fence keeps a non-evicting application lifetime cap", () => {
   const fence = createEditRuntimePreparationFence({ maximumConsumedPreparations: 1 });
   const release = fence.claim(preparation());
   release();
@@ -66,12 +66,12 @@ test("Main-owned Edit runtime fence bounds replay history without exhausting fut
     requestId: "edit-runtime-request-0002",
     sourcePath: "/projects/second-report.html",
   });
-  const releaseNext = fence.claim(nextPreparation);
-  releaseNext();
   assert.throws(
     () => fence.claim(nextPreparation),
+    /lifetime limit/u,
+  );
+  assert.throws(
+    () => fence.claim(preparation()),
     /already consumed/u,
   );
-  const releaseReopened = fence.claim(preparation());
-  releaseReopened();
 });

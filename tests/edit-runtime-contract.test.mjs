@@ -115,11 +115,13 @@ test("formal architecture keeps the source-edit experience contract and runtime 
   assert.match(adr, /parent-realm `WeakSet`/u);
   assert.match(adr, /public source identity revokes/u);
   assert.match(adr, /Every source mutation[\s\S]*registered stable ID/u);
+  assert.match(adr, /non-evicting 128-preparation[\s\S]*application-lifetime cap/u);
   assert.match(architecture, /close\/reopen must reproduce source edits/u);
   assert.match(architecture, /no Runtime DOM persistence/u);
   assert.match(architecture, /private parent-realm `WeakSet`/u);
   assert.match(architecture, /public source identity revokes/u);
   assert.match(architecture, /cached selection state is never mutation authority/u);
+  assert.match(architecture, /non-evicting 128-preparation[\s\S]*application-lifetime cap/u);
   assert.match(interaction, /用户对源码内容完成的编辑必须写入完整 HTML/u);
   assert.match(interaction, /不得每输入一个字符就重建 iframe/u);
   assert.match(interaction, /父编辑器私有 `WeakSet`/u);
