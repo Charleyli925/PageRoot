@@ -78,6 +78,8 @@ test("program identity follows only the effective live document base", () => {
   const assetsB = '<base target="_blank"><base href="assets-b/">' + scripts;
   const inertA = '<template><base href="assets-a/"></template>' + scripts;
   const inertB = '<template><base href="assets-b/"></template>' + scripts;
+  const foreignA = '<svg><base href="assets-a/"></base></svg>' + scripts;
+  const foreignB = '<svg><base href="assets-b/"></base></svg>' + scripts;
 
   assert.deepEqual(authoredDocumentBase(assetsA), {
     href: "assets-a/",
@@ -85,6 +87,7 @@ test("program identity follows only the effective live document base", () => {
   });
   assert.notEqual(editRuntimeProgramIdentity(assetsA), editRuntimeProgramIdentity(assetsB));
   assert.equal(editRuntimeProgramIdentity(inertA), editRuntimeProgramIdentity(inertB));
+  assert.equal(editRuntimeProgramIdentity(foreignA), editRuntimeProgramIdentity(foreignB));
 });
 
 test("direct Edit runtime grants use one session and one execution identity", () => {

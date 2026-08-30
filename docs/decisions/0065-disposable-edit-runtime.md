@@ -142,8 +142,8 @@ runtime-only state after reopen.
   `DOMContentLoaded` listeners, and a first contained relative `<base href>`.
   Program identity and Main resource preparation must derive that base from the
   same first live-document `base[href]`: an earlier base without `href` does not
-  win, inert `<template>` contents do not participate, and absolute or escaping
-  bases fail closed.
+  win, inert `<template>` contents and foreign-namespace lookalikes do not
+  participate, and absolute or escaping bases fail closed.
   PageRoot may defer the native `DOMContentLoaded` delivery until the supported
   non-async activation sequence has completed. An external or source-root-
   escaping base and module import graphs enter the explicit static-degraded

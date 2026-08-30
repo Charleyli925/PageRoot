@@ -35,6 +35,12 @@ test("contained document base ignores inert and href-less base elements", () => 
     ),
     { documentPath: "/", basePath: "" },
   );
+  assert.deepEqual(
+    resolveContainedDocumentBase(
+      '<svg><base href="./assets/"></base></svg><script src="chart.js"></script>',
+    ),
+    { documentPath: "/", basePath: "" },
+  );
 });
 
 test("contained document base rejects absolute and scheme-relative sentinel URLs", () => {

@@ -50,6 +50,7 @@ const CLASSIC_SCRIPT_TYPES = new Set([
   "application/ecmascript",
   "text/ecmascript",
 ]);
+const HTML_NAMESPACE = "http://www.w3.org/1999/xhtml";
 
 function frozenArray(value) {
   return Object.freeze([...value]);
@@ -164,7 +165,10 @@ export function authoredDocumentBase(html) {
   let result = null;
   const visit = (node) => {
     if (result) return;
-    if (String(node?.tagName || "").toLowerCase() === "base") {
+    if (
+      node?.namespaceURI === HTML_NAMESPACE
+      && String(node?.tagName || "").toLowerCase() === "base"
+    ) {
       const hrefAttribute = (node.attrs || []).find((attribute) => (
         String(attribute.name || "").toLowerCase() === "href"
       ));
