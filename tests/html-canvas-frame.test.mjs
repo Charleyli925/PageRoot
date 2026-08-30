@@ -14,6 +14,7 @@ function grant(overrides = {}) {
     executionId: "bbbbbbbbbbbbbbbbbbbbbbbb",
     sourceSha256: "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
     resourceSha256: "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    documentBasePath: "/",
     scriptCount: 1,
     byteLength: 32,
     canvasGeneration: 1,
@@ -26,6 +27,7 @@ test("sameRuntimeGrant compares resource and program identity", () => {
   const left = grant();
   assert.equal(sameRuntimeGrant(left, grant()), true);
   assert.equal(sameRuntimeGrant(left, grant({ executionId: "ffffffffffffffffffffffff" })), false);
+  assert.equal(sameRuntimeGrant(left, grant({ documentBasePath: "/assets/" })), false);
   assert.equal(sameRuntimeGrant(left, grant({ programIdentity: "program-b" })), false);
   assert.equal(sameRuntimeGrant(null, left), false);
 });

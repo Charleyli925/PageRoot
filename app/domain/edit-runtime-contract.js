@@ -146,6 +146,29 @@ function scriptPolicy(attributes) {
   return Object.freeze({ executable: true, reason: null });
 }
 
+function firstBaseOpeningTag(html) {
+  const source = String(html || "");
+  const lower = source.toLowerCase();
+  let cursor = 0;
+  while (cursor < source.length) {
+    const comment = source.indexOf("<!--", cursor);
+    const opening = lower.indexOf("<base", cursor);
+    if (comment >= 0 && (opening < 0 || comment < opening)) {
+      const end = source.indexOf("-->", comment + 4);
+      cursor = end < 0 ? source.length : end + 3;
+      continue;
+    }
+    if (opening < 0) return null;
+    if (!isNameBoundary(source[opening + 5] || "")) {
+      cursor = opening + 5;
+      continue;
+    }
+    const openingEnd = htmlTagEnd(source, opening + 5);
+    return openingEnd < 0 ? null : source.slice(opening, openingEnd + 1);
+  }
+  return null;
+}
+
 /**
  * Scans HTML executable script elements. The parser also treats a closing
  * script tag inside a JavaScript string as a terminator, so this deliberately
@@ -224,10 +247,13 @@ export function collectEditRuntimeScripts(html) {
 export function editRuntimeProgramIdentity(html) {
   const contract = collectEditRuntimeScripts(html);
   if (contract.unsupportedReason || contract.executableScripts.length < 1) return null;
-  return JSON.stringify(contract.executableScripts.map((script) => ({
-    openingTag: script.openingTag,
-    inline: script.inline,
-  })));
+  return JSON.stringify({
+    documentBase: firstBaseOpeningTag(html),
+    scripts: contract.executableScripts.map((script) => ({
+      openingTag: script.openingTag,
+      inline: script.inline,
+    })),
+  });
 }
 
 /**
@@ -268,6 +294,24 @@ export function isEditRuntimeSourceSha256(value) {
 
 export function isEditRuntimeFrameToken(value) {
   return FRAME_TOKEN_PATTERN.test(String(value || "").toLowerCase());
+}
+
+export function isEditRuntimeDocumentBasePath(value) {
+  const pathname = String(value || "");
+  if (
+    !pathname.startsWith("/")
+    || pathname.length > 4_096
+    || /[?#\\\0]/u.test(pathname)
+  ) return false;
+  let decoded;
+  try {
+    decoded = decodeURIComponent(pathname);
+  } catch {
+    return false;
+  }
+  return !decoded.split("/").some((segment) => (
+    segment === ".." || segment.startsWith(".")
+  ));
 }
 
 export function editRuntimeRegistrationProperty(executionId) {

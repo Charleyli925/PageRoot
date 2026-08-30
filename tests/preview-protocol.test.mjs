@@ -43,6 +43,35 @@ test("declared asset discovery caps missing-reference probes before they can del
   assert.equal(assets.has("later.png"), false);
 });
 
+test("declared asset discovery applies an authored base only for the Edit runtime caller", async (t) => {
+  const temporaryRoot = await mkdtemp(
+    path.join(tmpdir(), "pageroot-preview-document-base-"),
+  );
+  t.after(() => rm(temporaryRoot, { recursive: true, force: true }));
+  await mkdir(path.join(temporaryRoot, "assets"));
+  await Promise.all([
+    writeFile(path.join(temporaryRoot, "chart.js"), "window.previewRoot=true;"),
+    writeFile(path.join(temporaryRoot, "assets", "chart.js"), "window.editBase=true;"),
+  ]);
+  const sourceRoot = await realpath(temporaryRoot);
+  const html = '<base href="./assets/"><script src="chart.js"></script>';
+
+  const previewAssets = await collectDeclaredPreviewAssets({
+    html,
+    sourceRoot,
+  });
+  const editRuntimeAssets = await collectDeclaredPreviewAssets({
+    html,
+    sourceRoot,
+    documentBasePath: "assets",
+  });
+
+  assert.equal(previewAssets.has("chart.js"), true);
+  assert.equal(previewAssets.has("assets/chart.js"), false);
+  assert.equal(editRuntimeAssets.has("chart.js"), false);
+  assert.equal(editRuntimeAssets.has("assets/chart.js"), true);
+});
+
 test("preview protocol installs one handler for each isolated Electron session", () => {
   let defaultHandlers = 0;
   let isolatedHandlers = 0;

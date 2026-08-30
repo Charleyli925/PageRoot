@@ -7,7 +7,7 @@ import {
 // source generation may finish while its replacement begins. Two preserves
 // that bounded hand-off without permitting unbounded renderer-triggered work.
 const DEFAULT_MAXIMUM_CONCURRENT_PREPARATIONS = 2;
-const DEFAULT_MAXIMUM_CONSUMED_PREPARATIONS = 128;
+const DEFAULT_MAXIMUM_REMEMBERED_PREPARATIONS = 128;
 const MAXIMUM_SOURCE_PATH_LENGTH = 4_096;
 
 function boundedPositiveInteger(value, label) {
@@ -43,43 +43,51 @@ function normalizedPreparation({
 
 /**
  * Main-owned admission for disposable Edit author-runtime resource closures.
- * A renderer request cannot replay a consumed request identity, and the app
- * permits only the bounded external-to-Managed-V1 preparation overlap.
+ * A renderer request cannot replay an in-flight or recently completed request
+ * identity, and the app permits only the bounded external-to-Managed-V1
+ * preparation overlap. Completed identities age out of a bounded FIFO rather
+ * than exhausting the application lifetime.
  */
 export function createEditRuntimePreparationFence({
   maximumConcurrentPreparations = DEFAULT_MAXIMUM_CONCURRENT_PREPARATIONS,
-  maximumConsumedPreparations = DEFAULT_MAXIMUM_CONSUMED_PREPARATIONS,
+  maximumRememberedPreparations = DEFAULT_MAXIMUM_REMEMBERED_PREPARATIONS,
 } = {}) {
   const maximumConcurrent = boundedPositiveInteger(
     maximumConcurrentPreparations,
     "maximumConcurrentPreparations",
   );
-  const maximumConsumed = boundedPositiveInteger(
-    maximumConsumedPreparations,
-    "maximumConsumedPreparations",
+  const maximumRemembered = boundedPositiveInteger(
+    maximumRememberedPreparations,
+    "maximumRememberedPreparations",
   );
-  const consumedRequestIds = new Set();
-  let inFlight = 0;
+  const inFlightRequestIds = new Set();
+  const rememberedRequestIds = new Set();
+  const rememberedRequestOrder = [];
 
   return Object.freeze({
     claim(preparation) {
       const identity = normalizedPreparation(preparation);
-      if (consumedRequestIds.has(identity.requestId)) {
+      if (
+        inFlightRequestIds.has(identity.requestId)
+        || rememberedRequestIds.has(identity.requestId)
+      ) {
         throw new Error("Edit runtime preparation was already consumed.");
       }
-      if (inFlight >= maximumConcurrent) {
+      if (inFlightRequestIds.size >= maximumConcurrent) {
         throw new Error("Edit runtime preparation is already in progress.");
       }
-      if (consumedRequestIds.size >= maximumConsumed) {
-        throw new Error("Edit runtime preparation lifetime limit was reached.");
-      }
-      consumedRequestIds.add(identity.requestId);
-      inFlight += 1;
+      inFlightRequestIds.add(identity.requestId);
       let released = false;
       return () => {
         if (released) return;
         released = true;
-        inFlight -= 1;
+        inFlightRequestIds.delete(identity.requestId);
+        rememberedRequestIds.add(identity.requestId);
+        rememberedRequestOrder.push(identity.requestId);
+        while (rememberedRequestOrder.length > maximumRemembered) {
+          const retiredRequestId = rememberedRequestOrder.shift();
+          rememberedRequestIds.delete(retiredRequestId);
+        }
       };
     },
   });

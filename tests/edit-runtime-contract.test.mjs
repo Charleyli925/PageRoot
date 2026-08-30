@@ -11,6 +11,7 @@ import {
   editRuntimeProtocolUrl,
   editRuntimeRegistrationProperty,
   isEditRuntimeExecutionId,
+  isEditRuntimeDocumentBasePath,
   isEditRuntimeFrameToken,
   isEditRuntimeProtocolUrl,
   isEditRuntimeRequestId,
@@ -64,8 +65,10 @@ test("program identity changes only when authored script markup changes", () => 
   const first = '<main>A</main><script defer>window.ready = true</script>';
   const semanticEdit = '<main>B</main><script defer>window.ready = true</script>';
   const scriptEdit = '<main>B</main><script defer>window.ready = false</script>';
+  const baseEdit = '<base href="assets/"><main>B</main><script defer>window.ready = true</script>';
   assert.equal(editRuntimeProgramIdentity(first), editRuntimeProgramIdentity(semanticEdit));
   assert.notEqual(editRuntimeProgramIdentity(first), editRuntimeProgramIdentity(scriptEdit));
+  assert.notEqual(editRuntimeProgramIdentity(first), editRuntimeProgramIdentity(baseEdit));
 });
 
 test("direct Edit runtime grants use one session and one execution identity", () => {
@@ -83,6 +86,8 @@ test("direct Edit runtime grants use one session and one execution identity", ()
   assert.equal(isEditRuntimeRequestId("edit-runtime-12345678"), true);
   assert.equal(isEditRuntimeSourceSha256(sourceSha), true);
   assert.equal(isEditRuntimeFrameToken("edit-runtime-frame-" + executionId), true);
+  assert.equal(isEditRuntimeDocumentBasePath("/assets/"), true);
+  assert.equal(isEditRuntimeDocumentBasePath("/../outside/"), false);
   assert.equal(isEditRuntimeProtocolUrl(url, sessionId), true);
   assert.equal(
     editRuntimeRegistrationProperty(executionId),
@@ -115,7 +120,8 @@ test("formal architecture keeps the source-edit experience contract and runtime 
   assert.match(adr, /parent-realm `WeakSet`/u);
   assert.match(adr, /public source identity revokes/u);
   assert.match(adr, /Every source mutation[\s\S]*registered stable ID/u);
-  assert.match(adr, /non-evicting 128-preparation[\s\S]*application-lifetime cap/u);
+  assert.match(adr, /bounded[\s\S]*request-ID replay window/u);
+  assert.match(adr, /cannot exhaust[\s\S]*application-lifetime/u);
   assert.match(adr, /Workers stay[\s\S]*CSP-disabled/u);
   assert.match(adr, /Stable ID and Runtime edit authority are separate contracts/u);
   assert.match(adr, /authority set is sealed[\s\S]*cannot add a trusted source object/u);
@@ -125,15 +131,20 @@ test("formal architecture keeps the source-edit experience contract and runtime 
   assert.match(architecture, /private parent-realm `WeakSet`/u);
   assert.match(architecture, /public source identity revokes/u);
   assert.match(architecture, /cached selection state is never mutation authority/u);
-  assert.match(architecture, /non-evicting 128-preparation[\s\S]*application-lifetime cap/u);
+  assert.match(architecture, /bounded recent request-ID replay[\s\S]*never exhausts/u);
   assert.match(architecture, /persistent source identity, not Runtime edit authority/u);
   assert.match(architecture, /established exactly once[\s\S]*is then sealed/u);
   assert.match(architecture, /Exact parser-time execution order is not an Edit Runtime[\s\S]*contract/u);
+  assert.match(architecture, /parser-blocking[\s\S]*DOMContentLoaded[\s\S]*contained relative `<base href>`/u);
+  assert.match(architecture, /static-degraded state[\s\S]*rather than partially or silently execute/u);
+  assert.match(architecture, /location\.assign\(\)[\s\S]*location\.replace\(\)[\s\S]*frame navigation boundary/u);
   assert.match(interaction, /用户对源码内容完成的编辑必须写入完整 HTML/u);
   assert.match(interaction, /不得每输入一个字符就重建 iframe/u);
   assert.match(interaction, /父编辑器私有 `WeakSet`/u);
   assert.match(interaction, /公开源码 ID 被改写时立即/u);
   assert.match(interaction, /不把缓存 selection 当作修改权限/u);
+  assert.match(interaction, /静态降级提示/u);
+  assert.match(interaction, /连续使用不会累计到必须重启应用/u);
   for (const document of [adr, architecture, interaction]) {
     assert.match(document, /Runtime DOM/u);
     assert.match(document, /timer\/rAF\/Observer\/listener/u);

@@ -193,6 +193,90 @@ function attributesFor(node) {
   ]));
 }
 
+function firstDocumentBaseHref(document) {
+  let href = null;
+  const visit = (node) => {
+    if (href !== null) return;
+    if (String(node?.tagName || "").toLowerCase() === "base") {
+      const attributes = attributesFor(node);
+      if (attributes.has("href")) {
+        href = attributes.get("href") || "";
+        return;
+      }
+    }
+    for (const child of node?.childNodes || []) visit(child);
+    if (node?.content) visit(node.content);
+  };
+  visit(document);
+  return href;
+}
+
+/**
+ * Resolves the first authored <base href> inside the authorized source root.
+ * Runtime and declared-asset preparation share this result so a relative base
+ * can never make Main freeze one file while the visible frame requests another.
+ */
+export function resolveContainedDocumentBase(html) {
+  let document;
+  try {
+    document = parse(String(html || ""));
+  } catch {
+    return null;
+  }
+  const href = firstDocumentBaseHref(document);
+  if (href === null) {
+    return Object.freeze({ documentPath: "/", basePath: "" });
+  }
+  const pathReference = String(href).split(/[?#]/u, 1)[0];
+  let decodedReference;
+  try {
+    decodedReference = decodeURIComponent(pathReference);
+  } catch {
+    return null;
+  }
+  if (
+    decodedReference.includes("\0")
+    || decodedReference.includes("\\")
+    || decodedReference.split("/").some((segment) => (
+      segment === ".." || (segment.startsWith(".") && segment !== ".")
+    ))
+  ) return null;
+  let parsed;
+  try {
+    parsed = new URL(href, `${ASSET_REFERENCE_ORIGIN}/`);
+  } catch {
+    return null;
+  }
+  if (parsed.origin !== ASSET_REFERENCE_ORIGIN) return null;
+  let decodedPath;
+  try {
+    decodedPath = decodeURIComponent(parsed.pathname);
+  } catch {
+    return null;
+  }
+  if (decodedPath.includes("\0") || decodedPath.includes("\\")) return null;
+  const normalized = path.posix.normalize(decodedPath);
+  const segments = normalized.split("/").filter(Boolean);
+  if (segments.some((segment) => segment === ".." || segment.startsWith("."))) {
+    return null;
+  }
+  const rootedPath = normalized === "."
+    ? "/"
+    : `${normalized.startsWith("/") ? "" : "/"}${normalized}`;
+  const documentPath = parsed.pathname.endsWith("/")
+    && rootedPath !== "/"
+    && !rootedPath.endsWith("/")
+    ? `${rootedPath}/`
+    : rootedPath;
+  const relativeDocumentPath = documentPath.replace(/^\/+|\/+$/gu, "");
+  const basePath = documentPath.endsWith("/")
+    ? relativeDocumentPath
+    : path.posix.dirname(relativeDocumentPath) === "."
+      ? ""
+      : path.posix.dirname(relativeDocumentPath);
+  return Object.freeze({ documentPath, basePath });
+}
+
 function isOwnedPreviewBootstrap(node) {
   if (String(node?.tagName || "").toLowerCase() !== "script") return false;
   const attributes = attributesFor(node);
@@ -249,10 +333,10 @@ function textContentFor(node) {
   return (node?.childNodes || []).map((child) => textContentFor(child)).join("");
 }
 
-function collectHtmlAssetReferences(html) {
+function collectHtmlAssetReferences(html, documentBasePath = "") {
   const references = [];
   const append = (value, extensions) => {
-    references.push({ value, extensions, basePath: "" });
+    references.push({ value, extensions, basePath: documentBasePath });
   };
   const visit = (node) => {
     const tagName = String(node.tagName || "").toLowerCase();
@@ -378,6 +462,7 @@ async function resolveDeclaredAsset(sourceRoot, relativePath, signal) {
 export async function collectDeclaredPreviewAssets({
   html,
   sourceRoot,
+  documentBasePath = "",
   maxAssets = DEFAULT_MAX_DECLARED_ASSETS,
   maxReferences = DEFAULT_MAX_DECLARED_ASSETS,
   maxDependencyScanBytes = DEFAULT_MAX_DEPENDENCY_SCAN_BYTES,
@@ -386,7 +471,7 @@ export async function collectDeclaredPreviewAssets({
   const assets = new Map();
   const cssQueue = [];
   const scriptQueue = [];
-  const pendingReferences = collectHtmlAssetReferences(html);
+  const pendingReferences = collectHtmlAssetReferences(html, documentBasePath);
   const referenceLimit = Math.max(0, Math.floor(Number(maxReferences)) || 0);
   let referenceCount = 0;
 

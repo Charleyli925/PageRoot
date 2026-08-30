@@ -33,7 +33,6 @@ export const EDIT_RUNTIME_CSP = [
   "frame-src 'none'",
   "object-src 'none'",
   "form-action 'none'",
-  "navigate-to 'none'",
   "base-uri pageroot-edit-runtime:",
 ].join("; ");
 
@@ -212,8 +211,8 @@ function addRuntimeContentSecurityPolicy(parsed) {
  * editor DOM access, so the protocol base—not the iframe URL—closes this
  * capability boundary.
  */
-function addRuntimeResourceBase(parsed, sessionId) {
-  const resourceBase = editRuntimeProtocolUrl(sessionId, "/");
+function addRuntimeResourceBase(parsed, sessionId, documentBasePath = "/") {
+  const resourceBase = editRuntimeProtocolUrl(sessionId, documentBasePath);
   if (!resourceBase || !parsed.head) return false;
   parsed.head.querySelectorAll("base").forEach((node) => node.remove());
   const base = parsed.createElement("base");
@@ -236,6 +235,7 @@ export function prepareDisposableRuntimeFrameDocument(
   {
     sessionId,
     executionId,
+    documentBasePath,
     baseUrl,
     editorStyles,
   } = {},
@@ -255,7 +255,7 @@ export function prepareDisposableRuntimeFrameDocument(
   if (typeof DOMParser === "undefined") return null;
   const parsed = new DOMParser().parseFromString(sanitized, "text/html");
   if (!parsed.documentElement || !parsed.head) return null;
-  if (!addRuntimeResourceBase(parsed, sessionId)) return null;
+  if (!addRuntimeResourceBase(parsed, sessionId, documentBasePath)) return null;
   const root = parsed.documentElement;
   const sourceElements = [root, ...root.querySelectorAll("*")];
   const seenMarkers = new Set();

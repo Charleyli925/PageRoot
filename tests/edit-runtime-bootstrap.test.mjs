@@ -18,6 +18,9 @@ test("disposable runtime bootstrap proves the parsed source set before author wo
   assert.match(source, /proveParsedSource/u);
   assert.match(source, /activateAuthorScripts/u);
   assert.match(source, /DOMContentLoaded/u);
+  assert.match(source, /readystatechange/u);
+  assert.match(source, /holdDomContentLoaded/u);
+  assert.match(source, /dispatchEvent\(new Event\("DOMContentLoaded"/u);
   assert.match(source, /placeholder\.replaceWith\(script\)/u);
   assert.doesNotMatch(source, /MutationObserver/u);
   assert.match(source, /markerAttribute \+ "\],\[" \+ config\.sourceNodeAttribute/u);

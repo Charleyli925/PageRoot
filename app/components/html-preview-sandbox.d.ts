@@ -25,6 +25,7 @@ export function prepareDisposableRuntimeFrameDocument(
   options: {
     sessionId: string;
     executionId: string;
+    documentBasePath?: string;
     baseUrl?: string;
     editorStyles?: string;
   },
@@ -40,6 +41,7 @@ export function prepareCanvasFrameDocument(
     mode: "disposable-runtime";
     sessionId: string;
     executionId: string;
+    documentBasePath?: string;
     baseUrl?: string;
     editorStyles?: string;
   },

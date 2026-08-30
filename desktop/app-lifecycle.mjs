@@ -6,6 +6,7 @@ import {
 import path from "node:path";
 
 import { PREVIEW_PROTOCOL_SCHEME } from "./preview-protocol.mjs";
+import { EDIT_RUNTIME_PROTOCOL_SCHEME } from "../app/domain/edit-runtime-contract.js";
 
 export function createWindowLifecycle(ctx) {
   function presentMainWindow({ userInitiated = false } = {}) {
@@ -65,22 +66,73 @@ export function createWindowLifecycle(ctx) {
     ctx.mainWindow = mainWindow;
     ctx.markStartupStage?.("browser-window-created");
 
+    const guardedWebContentsId = mainWindow.webContents.id;
+    const webRequest = mainWindow.webContents.session.webRequest;
+    webRequest.onBeforeRequest((details, callback) => {
+      const parentFrame = details.frame?.parent;
+      let requestProtocol = "";
+      try {
+        requestProtocol = new URL(details.url).protocol;
+      } catch {
+        // An invalid direct-child navigation is never an allowed Preview load.
+      }
+      // Direct Canvas srcdoc has no network navigation of its own. The only
+      // permitted direct-child document request is Main's scoped Preview URL;
+      // nested author frames, ordinary assets and XHR are not widened here.
+      const blockCanvasNavigation = (
+        details.webContentsId === guardedWebContentsId
+        && details.resourceType === "subFrame"
+        && parentFrame?.frameTreeNodeId
+          === mainWindow.webContents.mainFrame.frameTreeNodeId
+        && requestProtocol !== `${PREVIEW_PROTOCOL_SCHEME}:`
+      );
+      callback({ cancel: blockCanvasNavigation });
+    });
+    mainWindow.once("closed", () => {
+      webRequest.onBeforeRequest(null);
+    });
+
     registerProjectIpc();
     mainWindow.removeMenu();
     const loadedManagedPreviewFrameIds = new Set();
+    const loadedDirectChildFrames = new Map();
+    const directChildFrameWasLoaded = (frame) => (
+      Boolean(frame)
+      && loadedDirectChildFrames.get(frame.frameTreeNodeId)?.deref() === frame
+    );
     mainWindow.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
     mainWindow.webContents.on("will-navigate", (event, url) => {
       if (!ctx.isTrustedRendererUrl(url)) event.preventDefault();
     });
     mainWindow.webContents.on("will-frame-navigate", (details) => {
       if (details.isMainFrame) return;
+      // Editable/static Canvas documents are mounted through srcdoc. Allow the
+      // initial about:blank -> about:srcdoc commit, then reject every authored
+      // location navigation from that live frame at the WebContents boundary.
+      if (details.frame?.url === "about:srcdoc") {
+        details.preventDefault();
+        return;
+      }
       const parentFrame = details.frame?.parent;
-      if (parentFrame !== ctx.mainWindow?.webContents.mainFrame) return;
+      if (
+        !parentFrame
+        || parentFrame.frameTreeNodeId
+          !== ctx.mainWindow?.webContents.mainFrame.frameTreeNodeId
+      ) return;
       try {
         const previewProtocol = `${PREVIEW_PROTOCOL_SCHEME}:`;
         const protectedPreviewUrl = [details.frame?.url, details.initiator?.url]
           .find((url) => new URL(url || "about:blank").protocol === previewProtocol);
-        if (!protectedPreviewUrl) return;
+        if (!protectedPreviewUrl) {
+          const editRuntimeProtocol = `${EDIT_RUNTIME_PROTOCOL_SCHEME}:`;
+          const initiatedByEditRuntime = [details.frame?.url, details.initiator?.url]
+            .some((url) => new URL(url || "about:blank").protocol === editRuntimeProtocol);
+          if (
+            initiatedByEditRuntime
+            || directChildFrameWasLoaded(details.frame)
+          ) details.preventDefault();
+          return;
+        }
         details.preventDefault();
         const frame = details.frame;
         if (!frame || loadedManagedPreviewFrameIds.has(frame.frameTreeNodeId)) return;
@@ -111,7 +163,18 @@ export function createWindowLifecycle(ctx) {
       (_event, isMainFrame, frameProcessId, frameRoutingId) => {
         if (isMainFrame) return;
         const frame = webFrameMain.fromId(frameProcessId, frameRoutingId);
-        if (!frame || frame.parent !== ctx.mainWindow?.webContents.mainFrame) return;
+        if (
+          !frame?.parent
+          || frame.parent.frameTreeNodeId
+            !== ctx.mainWindow?.webContents.mainFrame.frameTreeNodeId
+        ) return;
+        for (const [frameTreeNodeId, frameReference] of loadedDirectChildFrames) {
+          const retainedFrame = frameReference.deref();
+          if (!retainedFrame || retainedFrame.isDestroyed()) {
+            loadedDirectChildFrames.delete(frameTreeNodeId);
+          }
+        }
+        loadedDirectChildFrames.set(frame.frameTreeNodeId, new WeakRef(frame));
         try {
           if (new URL(frame.url).protocol === `${PREVIEW_PROTOCOL_SCHEME}:`) {
             loadedManagedPreviewFrameIds.add(frame.frameTreeNodeId);
@@ -123,9 +186,11 @@ export function createWindowLifecycle(ctx) {
     );
     mainWindow.webContents.on(
       "did-start-navigation",
-      (_event, _url, isInPlace, isMainFrame) => {
-        if (isInPlace || !isMainFrame) return;
+      (details) => {
+        if (details.isSameDocument) return;
+        if (!details.isMainFrame) return;
         loadedManagedPreviewFrameIds.clear();
+        loadedDirectChildFrames.clear();
         ctx.rendererHasLoaded = false;
         ctx.workspaceRecoveryMailbox.beginRendererLoad();
       },

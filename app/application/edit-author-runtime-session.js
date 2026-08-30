@@ -3,6 +3,7 @@ import {
   EDIT_AUTHOR_RUNTIME_CONTRACT_VERSION,
   collectEditRuntimeScripts,
   editRuntimeProgramIdentity,
+  isEditRuntimeDocumentBasePath,
   isEditRuntimeSourceSha256,
 } from "../domain/edit-runtime-contract.js";
 
@@ -60,6 +61,7 @@ function normalizedGrant(value, request) {
     || !/^[a-f0-9]{24}$/u.test(String(value.executionId || ""))
     || String(value.sourceSha256 || "").toLowerCase() !== request.sourceSha256
     || !isEditRuntimeSourceSha256(value.resourceSha256)
+    || !isEditRuntimeDocumentBasePath(value.documentBasePath)
     || !Number.isSafeInteger(value.scriptCount)
     || value.scriptCount < 1
     || value.scriptCount > EDIT_AUTHOR_RUNTIME_BUDGET.scriptCount
@@ -82,6 +84,7 @@ function normalizedGrant(value, request) {
     executionId: String(value.executionId).toLowerCase(),
     sourceSha256: request.sourceSha256,
     resourceSha256: String(value.resourceSha256).toLowerCase(),
+    documentBasePath: String(value.documentBasePath),
     scriptCount: value.scriptCount,
     byteLength: value.byteLength,
     libraryOrigins: Object.freeze([...(value.libraryOrigins || [])]),
@@ -218,10 +221,8 @@ export class EditAuthorRuntimeSession {
     const scriptContract = collectEditRuntimeScripts(identity.html);
     const programIdentity = editRuntimeProgramIdentity(identity.html);
     if (
-      scriptContract.unsupportedReason
-      || scriptContract.executableScripts.length < 1
-      || scriptContract.executableScripts.length > EDIT_AUTHOR_RUNTIME_BUDGET.scriptCount
-      || !programIdentity
+      scriptContract.executableScripts.length < 1
+      && !scriptContract.unsupportedReason
     ) {
       this.#emit({
         phase: "static",
@@ -232,9 +233,23 @@ export class EditAuthorRuntimeSession {
       });
       return this.#snapshot;
     }
+    if (
+      scriptContract.unsupportedReason
+      || scriptContract.executableScripts.length > EDIT_AUTHOR_RUNTIME_BUDGET.scriptCount
+      || !programIdentity
+    ) {
+      this.#emit({
+        phase: "static-fallback",
+        sourceSha256: identity.sourceSha256,
+        sourcePath: identity.sourcePath,
+        canvasGeneration: identity.canvasGeneration,
+        lastOutcome: "unsupported-program",
+      });
+      return this.#snapshot;
+    }
     if (!this.#port) {
       this.#emit({
-        phase: "static",
+        phase: "static-fallback",
         sourceSha256: identity.sourceSha256,
         sourcePath: identity.sourcePath,
         canvasGeneration: identity.canvasGeneration,

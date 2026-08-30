@@ -118,6 +118,17 @@ test("window loads the real renderer shell before Bridge readiness", async () =>
   assert.match(createWindow, /bridge-connection-published/u);
 });
 
+test("direct Edit frames block author location navigation at the frame boundary", async () => {
+  const appLifecycle = await readFile(sourceUrl("../desktop/app-lifecycle.mjs"), "utf8");
+  assert.match(appLifecycle, /will-frame-navigate/u);
+  assert.match(appLifecycle, /EDIT_RUNTIME_PROTOCOL_SCHEME/u);
+  assert.match(appLifecycle, /details\.frame\?\.url === "about:srcdoc"[\s\S]*?details\.preventDefault\(\)/u);
+  assert.match(appLifecycle, /resourceType === "subFrame"[\s\S]*?parentFrame\?\.frameTreeNodeId[\s\S]*?requestProtocol !== `\$\{PREVIEW_PROTOCOL_SCHEME\}:`[\s\S]*?cancel: blockCanvasNavigation/u);
+  assert.match(appLifecycle, /initiatedByEditRuntime[\s\S]*?details\.preventDefault\(\)/u);
+  assert.match(appLifecycle, /loadedDirectChildFrames[\s\S]*?new WeakRef\(frame\)/u);
+  assert.match(appLifecycle, /directChildFrameWasLoaded[\s\S]*?details\.preventDefault\(\)/u);
+});
+
 test("usage telemetry starts only after the renderer is ready to show", async () => {
   const [mainProcess, appLifecycle] = await Promise.all([
     readFile(sourceUrl("../desktop/main.mjs"), "utf8"),

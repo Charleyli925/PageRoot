@@ -26,6 +26,7 @@ export type EditRuntimeGrant = Readonly<{
   executionId: string;
   sourceSha256: string;
   resourceSha256: string;
+  documentBasePath: string;
   libraryOrigins?: readonly ("bundled" | "network" | "local" | "inline")[];
   scriptCount: number;
   byteLength: number;
@@ -73,6 +74,7 @@ export function isEditRuntimeExecutionId(value: unknown): boolean;
 export function isEditRuntimeRequestId(value: unknown): boolean;
 export function isEditRuntimeSourceSha256(value: unknown): boolean;
 export function isEditRuntimeFrameToken(value: unknown): boolean;
+export function isEditRuntimeDocumentBasePath(value: unknown): boolean;
 export function editRuntimeRegistrationProperty(executionId: unknown): string | null;
 export function editRuntimeProtocolUrl(sessionId: string, path: string): string | null;
 export function isEditRuntimeProtocolUrl(value: unknown, sessionId?: string | null): boolean;
