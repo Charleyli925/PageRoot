@@ -723,9 +723,19 @@ page reload; this identity update does not grant Runtime source authority. Plain
 `setText` uses one shared Canvas/Repository planner that rejects void/raw-text
 targets and binds the exact target range, original bytes, canonical escaped
 text bytes and patch kind; decoded-equivalent entities and extra patches fail
-closed. Range-style wrappers are independently reconstructed from the
+closed. Repository also independently reconstructs the complete original-
+forward patch plan for `replaceTextRange`, `setAttribute` and non-range
+`setStyle`, including authored attribute spelling/quote form and canonical
+inline-style placement; missing, substituted or additional patches fail
+closed even when Hash, inverse, topology and `identityDelta` are self-
+consistent. Range-style wrappers are independently reconstructed from the
 operation's logical range/quote, canonical guard and declaration, exact source
-offsets and fresh ID list. Canvas and Repository share the pure editable-island normalizer and
+offsets and fresh ID list. When the same range canonically coalesces onto the
+whole target or its existing immediate wrapper, Repository instead requires
+that exact inline-style plan; a partial range without wrapper identity evidence
+fails closed. Canvas and Repository share one text-host capability, so
+dedicated-editor roots and foreign-content ranges fail at both boundaries.
+Canvas and Repository share the pure editable-island normalizer and
 single-CSS-value declaration validator, so exact self-consistent evidence still
 cannot change protected island attributes or inject another CSS declaration.
 The same proof selects the original forward patches when validating undo;

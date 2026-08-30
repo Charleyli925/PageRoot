@@ -83,6 +83,16 @@ state. Cloning authored markup also cannot retain the original persistent IDs.
   authorized. Canvas and Repository consume the same pure editable-island and
   single-CSS-value validators; exact caller-authored bytes cannot bypass the
   inline schema, protected-attribute, atom/comment or style-injection rules.
+- Identity-preserving operations have the same exact save-boundary rule.
+  Repository reconstructs every `replaceTextRange`, `setAttribute` and
+  non-range `setStyle` patch from the original forward source and public
+  operation, then compares the entire retained patch array. A range style that
+  canonically coalesces onto its target or an existing immediate wrapper is
+  replayed as that exact inline-style plan; a partial range cannot omit its
+  wrapper identities. Canvas and Repository use one text-host capability, so
+  dedicated-editor roots and foreign-content ranges cannot gain save authority.
+  A self-consistent Hash, inverse and `identityDelta` never
+  authorize an unrelated identity-preserving byte change.
 - The operation rules are closed: insert/duplicate add only fresh subtree IDs;
   delete removes only the addressed subtree; move retains every subtree ID;
   `replaceSubtree` retains its root ID while replacing descendants; `setText`

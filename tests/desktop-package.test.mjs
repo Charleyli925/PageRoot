@@ -139,6 +139,7 @@ const SHARED_FILES = [
   "draft-aggregate.mjs",
   "direct-edit-compatibility.mjs",
   "editable-island.mjs",
+  "native-edit-capability.mjs",
   "pageroot-element-identity.mjs",
   "provenance.mjs",
   "semantic-identity-delta.mjs",

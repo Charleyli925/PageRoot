@@ -1244,6 +1244,356 @@ test("plain setText target capability is identical in the kernel and Repository"
   }
 });
 
+test("Repository replays every identity-preserving semantic patch plan exactly", () => {
+  const cases = [
+    operation("replaceTextRange", {
+      target: target(ids.plain),
+      range: { startOffset: 0, endOffset: 3, quote: "pla" },
+      text: "X&",
+    }, "sourceop_exact_range_replay_029"),
+    operation("setAttribute", {
+      target: target(ids.left),
+      name: "aria-label",
+      value: "A & B",
+    }, "sourceop_exact_attribute_replay_030"),
+    operation("setStyle", {
+      target: target(ids.left),
+      property: "color",
+      value: "red",
+      important: true,
+    }, "sourceop_exact_style_replay_031"),
+    operation("setStyle", {
+      target: target(ids.plain),
+      property: "font-weight",
+      value: "700",
+      important: false,
+      range: { startOffset: 0, endOffset: 5, quote: "plain" },
+    }, "sourceop_exact_coalesced_target_style_032"),
+    operation("setStyle", {
+      target: target(ids.first),
+      property: "font-style",
+      value: "italic",
+      important: false,
+      range: { startOffset: 2, endOffset: 5, quote: "one" },
+    }, "sourceop_exact_coalesced_wrapper_style_033"),
+  ];
+
+  for (const semanticOperation of cases) {
+    const result = applySemanticOperation(
+      createSemanticDocumentState(html),
+      semanticOperation,
+    );
+    const valid = saveEvidence(html, result, semanticOperation, "text");
+    assert.equal(materializeIdentityPreservingSave(html, result.html, {
+      sourceHistoryOperations: [valid],
+    }).html, result.html);
+    assert.equal(materializeIdentityPreservingSave(result.html, html, {
+      sourceHistoryOperations: [{
+        ...valid,
+        operationId: `${semanticOperation.operationId}_undo`,
+        beforeSourceSha256: result.sourceSha256,
+        afterSourceSha256: result.previousSourceSha256,
+        forwardPatches: valid.reversePatches,
+        reversePatches: valid.forwardPatches,
+        semanticDirection: "undo",
+        identityDelta: deriveSemanticOperationIdentityDelta(
+          result.html,
+          html,
+          semanticOperation,
+          { direction: "undo" },
+        ),
+      }],
+    }).html, html);
+    assert.equal(materializeIdentityPreservingSave(html, result.html, {
+      sourceHistoryOperations: [{
+        ...valid,
+        operationId: `${semanticOperation.operationId}_redo`,
+        semanticDirection: "redo",
+        identityDelta: deriveSemanticOperationIdentityDelta(
+          html,
+          result.html,
+          semanticOperation,
+          { direction: "redo" },
+        ),
+      }],
+    }).html, result.html);
+
+    const forwardPatches = [...valid.forwardPatches, unrelatedTitlePatch(html)]
+      .sort((left, right) => left.startOffset - right.startOffset);
+    const forgedHtml = renderExactPatches(html, forwardPatches);
+    assert.throws(
+      () => materializeIdentityPreservingSave(html, forgedHtml, {
+        sourceHistoryOperations: [{
+          ...valid,
+          afterSourceSha256: createSemanticDocumentState(forgedHtml).sourceSha256,
+          forwardPatches,
+          reversePatches: exactInversePatches(forwardPatches),
+          identityDelta: deriveSemanticOperationIdentityDelta(
+            html,
+            forgedHtml,
+            semanticOperation,
+          ),
+        }],
+      }),
+      (error) => (
+        error?.code === "SOURCE_ELEMENT_IDENTITY_LOST"
+        && error?.details?.semanticIdentityError
+          === "SEMANTIC_IDENTITY_OPERATION_MATERIALIZATION_MISMATCH"
+      ),
+      semanticOperation.type,
+    );
+
+    const unrelatedOnlyPatch = unrelatedTitlePatch(html);
+    const unrelatedOnlyHtml = renderExactPatches(html, [unrelatedOnlyPatch]);
+    assert.throws(
+      () => materializeIdentityPreservingSave(html, unrelatedOnlyHtml, {
+        sourceHistoryOperations: [{
+          ...valid,
+          afterSourceSha256: createSemanticDocumentState(unrelatedOnlyHtml).sourceSha256,
+          forwardPatches: [unrelatedOnlyPatch],
+          reversePatches: exactInversePatches([unrelatedOnlyPatch]),
+          identityDelta: deriveSemanticOperationIdentityDelta(
+            html,
+            unrelatedOnlyHtml,
+            semanticOperation,
+          ),
+        }],
+      }),
+      (error) => (
+        error?.code === "SOURCE_ELEMENT_IDENTITY_LOST"
+        && error?.details?.semanticIdentityError
+          === "SEMANTIC_IDENTITY_OPERATION_MATERIALIZATION_MISMATCH"
+      ),
+      `${semanticOperation.type} unrelated-only`,
+    );
+  }
+
+  const partialRangeWithoutWrapperIds = operation("setStyle", {
+    target: target(ids.plain),
+    property: "text-decoration",
+    value: "underline",
+    important: false,
+    range: { startOffset: 0, endOffset: 3, quote: "pla" },
+  }, "sourceop_missing_range_wrapper_ids_034");
+  const unrelatedPatch = unrelatedTitlePatch(html);
+  const unrelatedHtml = renderExactPatches(html, [unrelatedPatch]);
+  assert.throws(
+    () => materializeIdentityPreservingSave(html, unrelatedHtml, {
+      sourceHistoryOperations: [{
+        operationId: partialRangeWithoutWrapperIds.operationId,
+        kind: "text",
+        editRevision: 1,
+        createdAt: "2026-08-30T00:00:00.000Z",
+        beforeSourceSha256: createSemanticDocumentState(html).sourceSha256,
+        afterSourceSha256: createSemanticDocumentState(unrelatedHtml).sourceSha256,
+        forwardPatches: [unrelatedPatch],
+        reversePatches: exactInversePatches([unrelatedPatch]),
+        beforeTarget: null,
+        afterTarget: null,
+        semanticDirection: "forward",
+        semanticOperation: partialRangeWithoutWrapperIds,
+        identityDelta: deriveSemanticOperationIdentityDelta(
+          html,
+          unrelatedHtml,
+          partialRangeWithoutWrapperIds,
+        ),
+      }],
+    }),
+    (error) => (
+      error?.code === "SOURCE_ELEMENT_IDENTITY_LOST"
+      && error?.details?.semanticIdentityError
+        === "SEMANTIC_IDENTITY_RANGE_STYLE_MATERIALIZATION_MISMATCH"
+    ),
+  );
+});
+
+test("Repository exact replay preserves authored attribute and inline-style forms", () => {
+  const variants = [
+    {
+      source: html.replace(
+        `<section data-pageroot-id="${ids.left}">`,
+        `<section data-pageroot-id="${ids.left}" aria-label='old'>`,
+      ),
+      type: "setAttribute",
+      fields: { name: "aria-label", value: "new & exact" },
+    },
+    {
+      source: html.replace(
+        `<section data-pageroot-id="${ids.left}">`,
+        `<section data-pageroot-id="${ids.left}" aria-label='old'>`,
+      ),
+      type: "setAttribute",
+      fields: { name: "aria-label", value: null },
+    },
+    {
+      source: html.replace(
+        `<section data-pageroot-id="${ids.left}">`,
+        `<section data-pageroot-id="${ids.left}" style='color: blue !important; padding: 1px'>`,
+      ),
+      type: "setStyle",
+      fields: { property: "color", value: "red", important: false },
+    },
+    {
+      source: html.replace(
+        `<section data-pageroot-id="${ids.left}">`,
+        `<section data-pageroot-id="${ids.left}" style='padding: 1px'>`,
+      ),
+      type: "setStyle",
+      fields: { property: "color", value: "rgb(1, 2, 3)", important: true },
+    },
+    {
+      source: html.replace(
+        `<section data-pageroot-id="${ids.left}">`,
+        `<section style=color:blue data-pageroot-id="${ids.left}">`,
+      ),
+      type: "setStyle",
+      fields: { property: "color", value: "red", important: true },
+    },
+  ];
+
+  for (const [index, variant] of variants.entries()) {
+    const state = createSemanticDocumentState(variant.source);
+    const semanticOperation = {
+      schemaVersion: 1,
+      operationId: `sourceop_authored_form_${String(index).padStart(3, "0")}`,
+      baseRevision: state.revision,
+      expectedSourceSha256: state.sourceSha256,
+      type: variant.type,
+      target: createSemanticElementPrecondition(variant.source, ids.left),
+      ...variant.fields,
+    };
+    const result = applySemanticOperation(state, semanticOperation);
+    const valid = saveEvidence(variant.source, result, semanticOperation, "text");
+    const saved = materializeIdentityPreservingSave(variant.source, result.html, {
+      sourceHistoryOperations: [valid],
+    });
+    assert.equal(saved.html, result.html);
+
+    const extraPatch = unrelatedTitlePatch(variant.source);
+    const forwardPatches = [...valid.forwardPatches, extraPatch]
+      .sort((left, right) => left.startOffset - right.startOffset);
+    const forgedHtml = renderExactPatches(variant.source, forwardPatches);
+    assert.throws(
+      () => materializeIdentityPreservingSave(variant.source, forgedHtml, {
+        sourceHistoryOperations: [{
+          ...valid,
+          afterSourceSha256: createSemanticDocumentState(forgedHtml).sourceSha256,
+          forwardPatches,
+          reversePatches: exactInversePatches(forwardPatches),
+          identityDelta: deriveSemanticOperationIdentityDelta(
+            variant.source,
+            forgedHtml,
+            semanticOperation,
+          ),
+        }],
+      }),
+      (error) => (
+        error?.code === "SOURCE_ELEMENT_IDENTITY_LOST"
+        && error?.details?.semanticIdentityError
+          === "SEMANTIC_IDENTITY_OPERATION_MATERIALIZATION_MISMATCH"
+      ),
+    );
+  }
+});
+
+test("Repository range replay shares Canvas text-host capability", () => {
+  const unsupported = [
+    operation("replaceTextRange", {
+      target: target(ids.title),
+      range: { startOffset: 0, endOffset: 8, quote: "Identity" },
+      text: "Blocked",
+    }, "sourceop_unsupported_title_range_035"),
+    operation("setStyle", {
+      target: target(ids.title),
+      property: "color",
+      value: "red",
+      important: false,
+      range: { startOffset: 0, endOffset: 8, quote: "Identity" },
+    }, "sourceop_unsupported_title_style_036"),
+  ];
+
+  for (const semanticOperation of unsupported) {
+    assert.throws(
+      () => applySemanticOperation(createSemanticDocumentState(html), semanticOperation),
+      (error) => error?.code === "TEXT_RANGE_STYLE_UNSUPPORTED",
+    );
+    const title = buildSourceIndex(html).byPagerootId.get(ids.title);
+    const patch = semanticOperation.type === "replaceTextRange"
+      ? {
+          startOffset: html.indexOf("Identity"),
+          endOffset: html.indexOf("Identity") + "Identity".length,
+          before: "Identity",
+          after: "Blocked",
+          kind: "semantic:replace-text-range",
+        }
+      : {
+          startOffset: title.closingDelimiterOffset,
+          endOffset: title.closingDelimiterOffset,
+          before: "",
+          after: ' style="color: red"',
+          kind: "style-attribute-add",
+        };
+    const forgedHtml = renderExactPatches(html, [patch]);
+    assert.throws(
+      () => materializeIdentityPreservingSave(html, forgedHtml, {
+        sourceHistoryOperations: [{
+          operationId: semanticOperation.operationId,
+          kind: "text",
+          editRevision: 1,
+          createdAt: "2026-08-30T00:00:00.000Z",
+          beforeSourceSha256: createSemanticDocumentState(html).sourceSha256,
+          afterSourceSha256: createSemanticDocumentState(forgedHtml).sourceSha256,
+          forwardPatches: [patch],
+          reversePatches: exactInversePatches([patch]),
+          beforeTarget: null,
+          afterTarget: null,
+          semanticDirection: "forward",
+          semanticOperation,
+          identityDelta: deriveSemanticOperationIdentityDelta(
+            html,
+            forgedHtml,
+            semanticOperation,
+          ),
+        }],
+      }),
+      (error) => (
+        error?.code === "SOURCE_ELEMENT_IDENTITY_LOST"
+        && error?.details?.semanticIdentityError
+          === "SEMANTIC_IDENTITY_OPERATION_MATERIALIZATION_MISMATCH"
+      ),
+    );
+  }
+});
+
+test("Repository exact replay matches self-closing SVG attribute boundaries", () => {
+  const svgId = "pr1_b0000000000040008000000000000001";
+  const circleId = "pr1_b0000000000040008000000000000002";
+  const svgHtml = html.replace(
+    `<aside data-pageroot-id="${ids.right}"></aside>`,
+    `<aside data-pageroot-id="${ids.right}"><svg data-pageroot-id="${svgId}"><circle data-pageroot-id="${circleId}" style=color:blue data-kind=dot/></svg></aside>`,
+  );
+  for (const [index, fields] of [
+    ["setStyle", { property: "color", value: "red", important: true }],
+    ["setAttribute", { name: "data-kind", value: "point" }],
+  ].entries()) {
+    const [type, operationFields] = fields;
+    const state = createSemanticDocumentState(svgHtml);
+    const semanticOperation = {
+      schemaVersion: 1,
+      operationId: `sourceop_svg_self_closing_${index}`,
+      baseRevision: state.revision,
+      expectedSourceSha256: state.sourceSha256,
+      type,
+      target: createSemanticElementPrecondition(svgHtml, circleId),
+      ...operationFields,
+    };
+    const result = applySemanticOperation(state, semanticOperation);
+    assert.equal(materializeIdentityPreservingSave(svgHtml, result.html, {
+      sourceHistoryOperations: [saveEvidence(svgHtml, result, semanticOperation, "text")],
+    }).html, result.html);
+  }
+});
+
 test("range-style materialization selects the original forward proof for undo and redo", () => {
   const wrapperId = "pr1_a0000000000040008000000000000001";
   const styling = operation("setStyle", {

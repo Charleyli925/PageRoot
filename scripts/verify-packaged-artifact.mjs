@@ -130,6 +130,7 @@ export const REQUIRED_SHARED_FILES = [
   "direct-edit-compatibility.mjs",
   "draft-aggregate.mjs",
   "editable-island.mjs",
+  "native-edit-capability.mjs",
   "pageroot-element-identity.mjs",
   "provenance.mjs",
   "semantic-identity-delta.mjs",

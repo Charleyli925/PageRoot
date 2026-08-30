@@ -431,6 +431,11 @@ export async function createSyntheticAppBundle(t, {
     ),
     writeFixtureFile(
       productRoot,
+      "shared/native-edit-capability.mjs",
+      "export const fixtureNativeEditCapability = true;\n",
+    ),
+    writeFixtureFile(
+      productRoot,
       "shared/source-history.mjs",
       "export const fixtureSourceHistory = true;\n",
     ),
@@ -541,6 +546,7 @@ export async function createSyntheticAppBundle(t, {
       "draft-aggregate.mjs",
       "direct-edit-compatibility.mjs",
       "editable-island.mjs",
+      "native-edit-capability.mjs",
       "pageroot-element-identity.mjs",
       "provenance.mjs",
       "semantic-identity-delta.mjs",

@@ -447,6 +447,10 @@
         "to": "shared/editable-island.mjs"
       },
       {
+        "from": "shared/native-edit-capability.mjs",
+        "to": "shared/native-edit-capability.mjs"
+      },
+      {
         "from": "shared/source-history.mjs",
         "to": "shared/source-history.mjs"
       },

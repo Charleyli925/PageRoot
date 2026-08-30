@@ -59,8 +59,13 @@ Runtime DOM or prematurely switch the existing Canvas and history paths.
 9. `HtmlCanvasEditor` now uses the kernel for source edits and forwards complete
    HTML, exact patches, the semantic operation and derived delta through
    `DocumentWorkflow` autosave. Repository independently validates the saved
-   transition. AI Candidate and Review remain separate authorities and cannot
-   submit semantic inverse or identity-delta claims through this boundary.
+   transition. That save boundary independently reconstructs the complete
+   type-specific patch plan for all eight operation kinds: identity-preserving
+   `replaceTextRange`, `setAttribute` and inline/coalesced `setStyle` evidence
+   is no more trusted than a structural identity transition. Missing, replaced
+   or additional patches fail closed. AI Candidate and Review remain separate
+   authorities and cannot submit semantic inverse or identity-delta claims
+   through this boundary.
 10. Public operation structure is documented by
     `schemas/semantic-operation.v1.schema.json`. Source lowering, all eight
     operations, exact inverse/redo, deterministic allocation replay and stale,
