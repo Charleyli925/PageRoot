@@ -27,8 +27,8 @@ Runtime DOM or prematurely switch the existing Canvas and history paths.
    source Hash or repeated operation ID fails closed before materialization.
 3. The kernel accepts only complete identity-v1 source. It returns complete next
    HTML, before/after Hashes, monotonic revision, lineage entry, allocation
-   report and a generated inverse operation. Runtime DOM, preview snapshots and
-   browser editing history are never inputs.
+   report, system-derived `identityDelta` and a generated inverse operation.
+   Runtime DOM, preview snapshots and browser editing history are never inputs.
 4. Semantic intent lowers to an independently replayable SourcePatch plan.
    `applyPatchPlan` re-plans semantic patches from sealed metadata before
    applying them, then retains the existing exact before-bytes, scope and parse
@@ -41,8 +41,8 @@ Runtime DOM or prematurely switch the existing Canvas and history paths.
    descendant source elements.
 6. New structural fragments may not supply or clone persistent PageRoot IDs.
    The kernel allocates a new cryptographic ID for every inserted source
-   element. `replaceSubtree` retains the target root ID and tag, allocates new
-   descendant IDs and refuses identity authored by its caller. Move preserves
+   element. `replaceSubtree` retains the target root ID, may change its tag,
+   allocates new descendant IDs and refuses identity authored by its caller. Move preserves
    the exact source fragment and every contained ID; cycles and root moves fail
    closed. Delete removes only the exact identified source range.
 7. `data-pageroot-id` is protected from ordinary attribute editing. Other HTML,
@@ -51,13 +51,16 @@ Runtime DOM or prematurely switch the existing Canvas and history paths.
 8. Accepted operations always advance semantic revision and lineage, including
    byte no-ops, so replay remains unambiguous. Generated exact-source inverse
    operations restore authoritative pre-operation bytes and generate a redo.
-   They are trusted in-process values in this foundation PR; cloning or
-   authoring one fails closed. Durable undo/redo adoption belongs to the next
-   history integration PR.
-9. This PR does not call the kernel from `HtmlCanvasEditor`, Workbench,
-   `DocumentWorkflow`, Repository, Desktop Main, AI or Review. It does not
-   alter autosave or persistent source history. Those integrations remain
-   ordered follow-up PRs.
+   These inverses are session-local exact restore values created and consumed
+   only by the current open-document history. They are not persistent or
+   collaborative semantic commands and cannot be authored by an external
+   caller. Closing/switching HTML or restarting discards the at-most-20-entry
+   cursor; crash recovery may retain save evidence but never restores history.
+9. `HtmlCanvasEditor` now uses the kernel for source edits and forwards complete
+   HTML, exact patches, the semantic operation and derived delta through
+   `DocumentWorkflow` autosave. Repository independently validates the saved
+   transition. AI Candidate and Review remain separate authorities and cannot
+   submit semantic inverse or identity-delta claims through this boundary.
 10. Public operation structure is documented by
     `schemas/semantic-operation.v1.schema.json`. Source lowering, all eight
     operations, exact inverse/redo, deterministic allocation replay and stale,
@@ -67,11 +70,11 @@ Runtime DOM or prematurely switch the existing Canvas and history paths.
 ## Consequences
 
 - PageRoot has one stable-ID semantic editing contract before any UI migration.
-- Existing source-byte behavior remains unchanged until a caller explicitly
-  adopts the kernel.
+- Source-byte materialization remains exact while product authorization comes
+  from the semantic operation and verified identity delta.
 - Structural commands are source operations, not Runtime DOM serialization.
-- Durable inverse persistence and UI history switching remain deliberate PR5
-  work rather than an accidental second history authority in PR4.
+- Undo/Redo remains deliberately session-local and bounded rather than a
+  durable second history authority.
 
 ## Rejected alternatives
 

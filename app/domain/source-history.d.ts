@@ -1,4 +1,7 @@
-import type { SemanticOperation } from "../lib/semantic-operation-kernel.js";
+import type {
+  SemanticIdentityDelta,
+  SemanticOperation,
+} from "../lib/semantic-operation-kernel.js";
 
 export type SourceHistoryDirection = "undo" | "redo";
 export type SourceHistoryKind = "text" | "style" | "structure" | "reorder";
@@ -24,6 +27,8 @@ export type SourceHistoryEntry = {
   beforeTarget: Record<string, unknown> | null;
   afterTarget: Record<string, unknown> | null;
   semanticOperation?: SemanticOperation;
+  semanticDirection?: "forward" | "undo" | "redo";
+  identityDelta?: SemanticIdentityDelta;
   beforeSelection?: {
     anchor: number;
     focus: number;

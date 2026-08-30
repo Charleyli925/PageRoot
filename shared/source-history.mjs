@@ -108,6 +108,9 @@ const KNOWN_ENTRY_KEYS = new Set([
   "afterTarget",
   "beforeSelection",
   "afterSelection",
+  "semanticDirection",
+  "semanticOperation",
+  "identityDelta",
 ]);
 const KNOWN_ACTION_KEYS = new Set([
   "actionId",
@@ -274,6 +277,18 @@ function cleanEntry(raw) {
   const property = raw.property === undefined
     ? undefined
     : String(raw.property || "").slice(0, 200);
+  const semanticDirection = raw.semanticDirection === undefined
+    ? undefined
+    : String(raw.semanticDirection || "");
+  if (
+    semanticDirection !== undefined
+    && !["forward", "undo", "redo"].includes(semanticDirection)
+  ) {
+    throw historyError(
+      "INVALID_SOURCE_HISTORY_SEMANTIC_DIRECTION",
+      "Semantic history direction is invalid.",
+    );
+  }
   return preserveUnknown({
     operationId,
     kind,
@@ -292,6 +307,23 @@ function cleanEntry(raw) {
     reversePatches: cleanPatches(raw.reversePatches, "entry.reversePatches"),
     beforeTarget: boundedJsonRecord(raw.beforeTarget, "entry.beforeTarget"),
     afterTarget: boundedJsonRecord(raw.afterTarget, "entry.afterTarget"),
+    ...(semanticDirection ? { semanticDirection } : {}),
+    ...(raw.semanticOperation !== undefined
+      ? {
+          semanticOperation: boundedJsonRecord(
+            raw.semanticOperation,
+            "entry.semanticOperation",
+          ),
+        }
+      : {}),
+    ...(raw.identityDelta !== undefined
+      ? {
+          identityDelta: boundedJsonRecord(
+            raw.identityDelta,
+            "entry.identityDelta",
+          ),
+        }
+      : {}),
     ...(raw.beforeSelection !== undefined
       ? {
           beforeSelection: cleanSelection(

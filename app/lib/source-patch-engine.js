@@ -476,15 +476,13 @@ export function planSemanticOperationPatch(indexOrHtml, command) {
         .map((element) => element.pagerootId),
     );
     const fragment = semanticFragmentIndex(command.elementHtml, index, subtreeIds);
-    if (fragment.root.pagerootId !== target.pagerootId || fragment.root.tagName !== target.tagName) {
+    if (fragment.root.pagerootId !== target.pagerootId) {
       fail(
         "SEMANTIC_REPLACEMENT_ROOT_MISMATCH",
-        "A replacement subtree must retain the target root ID and authored tag.",
+        "A replacement subtree must retain the target root ID.",
         {
           expectedElementId: target.pagerootId,
           actualElementId: fragment.root.pagerootId,
-          expectedTagName: target.tagName,
-          actualTagName: fragment.root.tagName,
         },
       );
     }

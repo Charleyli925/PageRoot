@@ -1,5 +1,8 @@
 import { createSourceOperationId } from "../domain/source-history.js";
 import { sourceSha256 } from "../lib/source-index.js";
+import {
+  deriveSemanticOperationIdentityDelta,
+} from "../lib/semantic-operation-kernel.js";
 
 export const SOURCE_HISTORY_MEMORY_LIMIT = 20;
 const SHA256 = /^sha256:[a-f0-9]{64}$/u;
@@ -140,6 +143,9 @@ export class SourceHistorySession {
     if (transaction.beforeSourceSha256 !== this.#currentSourceSha256) {
       throw new Error("源码历史与当前画布补丁链不一致。");
     }
+    if (transaction.semanticOperation && !transaction.identityDelta) {
+      throw new Error("语义编辑缺少系统生成的元素身份变化证据。");
+    }
     const operation = {
       operationId: transaction.semanticOperation?.operationId
         || createSourceOperationId(),
@@ -154,7 +160,11 @@ export class SourceHistorySession {
       beforeTarget: structuredClone(transaction.beforeTarget),
       afterTarget: structuredClone(transaction.afterTarget),
       ...(transaction.semanticOperation
-        ? { semanticOperation: structuredClone(transaction.semanticOperation) }
+        ? {
+            semanticDirection: "forward",
+            semanticOperation: structuredClone(transaction.semanticOperation),
+            identityDelta: structuredClone(transaction.identityDelta),
+          }
         : {}),
       ...(transaction.beforeSelection
         ? { beforeSelection: structuredClone(transaction.beforeSelection) }
@@ -223,6 +233,15 @@ export class SourceHistorySession {
     this.#currentSourceSha256 = expectedAfterSha256;
     const beforeSelection = undo ? entry.afterSelection : entry.beforeSelection;
     const afterSelection = undo ? entry.beforeSelection : entry.afterSelection;
+    const semanticDirection = undo ? "undo" : "redo";
+    const identityDelta = entry.semanticOperation
+      ? deriveSemanticOperationIdentityDelta(
+          sourceHtml,
+          html,
+          entry.semanticOperation,
+          { direction: semanticDirection },
+        )
+      : null;
     const evidence = {
       operationId: createSourceOperationId(),
       kind: entry.kind,
@@ -237,6 +256,13 @@ export class SourceHistorySession {
       ),
       beforeTarget: structuredClone(undo ? entry.afterTarget : entry.beforeTarget),
       afterTarget: structuredClone(undo ? entry.beforeTarget : entry.afterTarget),
+      ...(entry.semanticOperation
+        ? {
+            semanticDirection,
+            semanticOperation: structuredClone(entry.semanticOperation),
+            identityDelta: structuredClone(identityDelta),
+          }
+        : {}),
       ...(beforeSelection ? { beforeSelection: structuredClone(beforeSelection) } : {}),
       ...(afterSelection ? { afterSelection: structuredClone(afterSelection) } : {}),
     };

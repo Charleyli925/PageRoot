@@ -23,7 +23,7 @@
 | Toast dismissal/repeat window (1s merge, 5s TTL) | Renderer `createNoticeDismissalMemory()` owned by Workbench | none; bounded in-memory map only | `NoticeBar` repeat badge |
 | Current-source commit, same-directory two-state CAS replacement (`prepared` → atomic rename → `committed`) and Project File settlement | `ProjectFileRepository` | source HTML working copy and `.pageroot` runtime/autosave records; the save journal is two-state CAS owned by `ProjectFileRepository`; each `#serial()` turn caches one verified project root (realpath, not a symlink) | `/autosave` route adapter and restart recovery |
 | Managed Working Copy source-element identity schema, sealed binding Hash, one-time materialization and crash recovery | `ProjectFileRepository` (`working-copy.mjs` supplies pure inspection/materialization/binding and CAS paths; the façade owns transaction sequencing) | current Working Copy HTML, `working-copy-state.v4.sourceElementIdentitySchemaVersion + sourceElementIdentityBindingSha256`, manifest file identity, committed `source-element-identity-migration.v1` transaction and temporary complete before/after recovery bytes | editable workspace hydration; external clean edits must preserve the sealed ID/tag/parent/order binding or require explicit force-unlock; `IslandEditingController` and the text-range style planner preserve existing IDs and allocate them for new inline source descendants, while normal save verifies every prior claim and fills only valid new-element omissions; historical Versions, external originals, Runtime DOM, comments and Review are not consumers with write authority |
-| Pure semantic document revision, accepted operation lineage and generated in-process inverse | `SemanticOperationKernel` | Canvas supplies current source/revision and receives complete HTML; SourcePatch is an internal exact-range materializer | text/style/reorder and stable-ID insert/duplicate/delete/move paths; Repository, Desktop, Runtime DOM, AI and Review do not own this state |
+| Pure semantic document revision, accepted operation lineage, system-derived identity delta and generated in-process inverse | `SemanticOperationKernel` | Canvas supplies current source/revision and receives complete HTML; SourcePatch is an internal exact-range materializer | text/style/reorder and stable-ID insert/duplicate/delete/move/replace paths; Repository independently verifies the delta but does not create semantic authority; Desktop, Runtime DOM, AI and Review do not own this state |
 | Current-open Canvas undo/redo context, at most 20 exact Patch pairs, cursor and pending-save evidence | Renderer `SourceHistorySession` | bounded process memory only; recovery may retain exact save evidence but never a restorable cursor; legacy `source-history.v1` and `/source-history/action` are compatibility surfaces | Canvas, Document session, desktop Edit intent router |
 | Durable AI Conversation, its Contexts, Turns and terminal messages, the per-Document current-conversation pointer and the Composer draft | Bridge-owned `ConversationRepository` in `bridge/conversation-repository.mjs` is the only writer | `.pageroot/conversations/`: one record per Conversation plus a per-project index and a separate small draft record, all atomically replaced. A Conversation belongs to exactly one Document, so a cross-Document read fails closed on identity rather than being filtered at read time. `sequence` is assigned from the record's own `lastSequence`; the single writer makes strict increase need no coordination. A streaming fragment is never written: `draft`, `queued` and `streaming` are refused, so every stored message is terminal and crash recovery repairs nothing. A stored message carries no interface member | typed Bridge routes `/conversation`, `/conversation/list` and `/conversation/draft`; renderer receives a read projection only |
 | Renderer conversation projection, load status and unsent Composer text/intent | Renderer `ConversationSession` | none; it holds a disposable projection of the Bridge record. Switching Document clears it before the next load so one Document's messages can never appear under another | AI sidebar through the aggregate `WorkspaceController` snapshot |
@@ -63,7 +63,7 @@
 | AI review semantic pair graph, stable-ID topology, text/element-presence/movement/attribute/inline-style/CSS/Script source facts, disposable fact/semantic/geometry owner IDs, prepared immutable review documents and canonical frame/mask geometry | Cancellable `ReviewAnalysisSession` plus `review-document` analyzer (`app/workbench/review/` pipeline), ready-review session and isolated-frame projection runtime | none; byte-bounded multi-entry cache keyed only by exact operation/source/comment identity; fact identities are analysis-only and never persisted | review outline, semantic frames and context mask; Runtime DOM, computed style and pixels are never inputs |
 | AI review Tab/disclosure/control presentation state and transition epoch | Parent `AiReviewWorkspace` presentation coordinator; either frame may propose an intent | none; disposable parent state plus frame projection only | both review frames, content map and overlay/mask projection |
 | Frozen review comment set and read-only before-page marker projection | Ready-review session owns comment text; `review-document` resolves opaque targets during analysis, strips temporary review attributes, and carries source-node bindings only in the parser-blocking first private bootstrap response; trusted `AiReviewWorkspace` delivers targets only through a challenged private port, then joins anonymous viewport geometry and renders it | none beyond the immutable Request/Draft evidence already frozen for the run | trusted review host above the before frame only; authored frames never receive comment text, comment keys, a comment marker, or a source-node/locator map in HTML or later bootstrap source |
-| Current source-backed comment identity, resolution, visibility, coordinates, marker eligibility and natural document height | persistent `elementId` is captured in the Comment/Draft aggregate; `TargetResolver` owns ID-first source resolution; `html-canvas-comment-layout` measurement is owned by `HtmlCanvasEditor` and stabilized by `commentCanvasPort` | TargetRef persists `elementId`, current expected canonical source Hash and optional text locator; geometry remains a disposable snapshot tagged by rendered source Hash, applied page-view generation and exact target-ID set | `CommentRailContainer` and the inherited Canvas-height CSS variable; Workbench root does not subscribe |
+| Current source-backed comment identity, resolution, visibility, coordinates, marker eligibility and natural document height | persistent `elementId` is captured in the Comment/Draft aggregate and is the sole source-element identity; `TargetResolver` owns ID-first source resolution; `html-canvas-comment-layout` measurement is owned by `HtmlCanvasEditor` and stabilized by `commentCanvasPort` | TargetRef persists `elementId`, current expected canonical source Hash and optional text locator; tag/fingerprint is compatibility evidence only; geometry remains a disposable snapshot tagged by rendered source Hash, applied page-view generation and exact target-ID set | `CommentRailContainer` and the inherited Canvas-height CSS variable; Workbench root does not subscribe |
 | Stable application update schedule, coalesced manual check, download progress and restart-install readiness | Main-process application-update controller | signed GitHub Release metadata plus updater cache; no editor authority | preload status snapshot, Settings PageRoot, sidebar update entry, drain coordinator |
 | Random installation identity, project pseudonym secret, aggregate counters and unsent usage events | Main-process usage-telemetry controller | bounded `usage-telemetry.json` under PageRoot Application Support | PostHog batch ingestion only |
 | Install-level first-real-HTML guide status, generation and built-in welcome `projectId` | Main `desktop/ui-preferences.mjs`; renderer `FirstEditGuideSession` owns visibility and the 800ms present-dwell timer and is composed only by `WorkspaceController` | bounded `ui-preferences.json` under PageRoot Application Support; atomic replace; schemaVersion 2 with v1 migration | `document.body` portal overlay (`FirstEditGuideCard`); Canvas does not mount or dismiss the card |
@@ -311,11 +311,13 @@ Rules:
   unpair a stable ancestor, and an ambiguous empty sibling never gains a
   positional identity. Trusted fact generation reports an overflow instead of
   silently publishing a partial fact set.
-- Review facts are static and analysis-local. Only precise text evidence and
-  outermost element presence may enter the fact set; movement, attributes,
-  style, layout, wrapping and runtime drawing have no owner and create no fact.
-  Main, preload and authored frames expose no Review capture or screenshot
-  capability.
+- Review facts are static and analysis-local. Stable-ID pairing may produce
+  text, outermost presence, movement, authored attribute/inline-style and
+  CSS/Script source facts under ADR 0066. A valid ID is sole identity; tag,
+  parent and order are reported changes rather than replacement identities.
+  Layout, wrapping, computed cascade impact and runtime drawing have no formal
+  fact owner. Main, preload and authored frames expose no Review capture or
+  screenshot capability.
 - `CommentSession` is a renderer working copy, not durable Draft authority.
   Runtime state is likewise not a second copy of draft contents: it carries
   lifecycle state and a revisioned pointer to the draft repository.
@@ -325,8 +327,10 @@ Rules:
   on the workspace banner; otherwise Draft persistence uses that same surface.
   The comment rail and Toast layer do not repeat either issue.
 - Canvas never owns a parallel snapshot or DOM undo stack. A pending history
-  operation is built only from the accepted SourcePatch result; after
-  acknowledgement, the Bridge journal cursor is authoritative. Optional
+  operation is built from the accepted semantic result, its system-derived
+  identity delta and exact SourcePatch byte proof. `SourceHistorySession` alone
+  owns the acknowledged at-most-20-entry cursor for the current open HTML.
+  Optional
   logical Selection and the operation's TargetRef transition may restore
   presentation identity after canonical adoption but cannot change bytes. A
   proven island-only result may update the disposable mounted projection in the
@@ -335,6 +339,11 @@ Rules:
 - The desktop Edit menu owns no history. It routes focused native text controls
   to platform undo and all eligible Canvas intent to `SourceHistorySession`.
   Comment cards, attachments and project actions are outside both histories.
+- Repository owns Hash/CAS, atomic complete-HTML publication, recovery and
+  external-conflict detection. It recomputes semantic identity transitions and
+  verifies kernel evidence; it does not infer product authorization from an
+  exact patch kind. The tag/parent/order binding is a resealed integrity fact,
+  not an identity owner.
 - Telemetry is observational and best effort. It never owns product state,
   never receives content or paths, and never registers a drain obligation for
   edit, save, switch, submit, close or update installation.

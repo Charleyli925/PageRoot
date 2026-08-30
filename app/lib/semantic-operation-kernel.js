@@ -14,6 +14,11 @@ import {
 import { buildSourceIndex, sourceSha256 } from "./source-index.js";
 import { buildSourceTextMap, textRangeToSourceSegments } from "./source-text-map.js";
 import { createTargetRef } from "./target-resolver.js";
+import {
+  createSemanticIdentitySnapshot,
+  deriveSemanticIdentityDelta,
+  verifySemanticIdentityTransition,
+} from "../../shared/semantic-identity-delta.mjs";
 
 export const SEMANTIC_OPERATION_SCHEMA_VERSION = 1;
 
@@ -323,12 +328,6 @@ function materializeReplacementFragment(rawHtml, documentIndex, target, options 
   const html = String(rawHtml ?? "");
   const index = buildSourceIndex(html);
   const root = fragmentRoot(index, html);
-  if (root.tagName !== target.tagName) {
-    fail("SEMANTIC_REPLACEMENT_ROOT_MISMATCH", "Replacement HTML must retain the target root tag.", {
-      expectedTagName: target.tagName,
-      actualTagName: root.tagName,
-    });
-  }
   if (index.elements.some((element) => element.pagerootIdAttribute)) {
     fail(
       "SEMANTIC_REPLACEMENT_ID_FORBIDDEN",
@@ -501,7 +500,14 @@ function inverseOperationId(operationId, nextRevision, sourceHash) {
   return `inverse_${sourceHash.slice(-12)}_${sourceSha256(operationId).slice(-12)}_${nextRevision}`;
 }
 
-function appliedResult(state, operation, html, materialization, allocation = {}) {
+function appliedResult(
+  state,
+  operation,
+  html,
+  materialization,
+  allocation = {},
+  identityDelta = null,
+) {
   const nextRevision = state.revision + 1;
   const afterSourceSha256 = sourceSha256(html);
   const lineageEntry = {
@@ -533,8 +539,57 @@ function appliedResult(state, operation, html, materialization, allocation = {})
     inverseOperation,
     nextState,
     materialization,
+    ...(identityDelta ? { identityDelta } : {}),
     ...allocation,
   };
+}
+
+function nearestIdentifiedParentId(index, element) {
+  let parentId = element.parentId;
+  while (parentId) {
+    const parent = index.byNodeId.get(parentId);
+    if (!parent || parent.type !== "element") return null;
+    if (parent.pagerootId) return parent.pagerootId;
+    parentId = parent.parentId;
+  }
+  return null;
+}
+
+function semanticIdentitySnapshot(index) {
+  assertManagedIdentity(index, "Semantic identity delta");
+  return createSemanticIdentitySnapshot({
+    sourceSha256: index.sourceSha256,
+    elements: index.elements.map((element) => ({
+      elementId: element.pagerootId,
+      tagName: element.tagName,
+      parentElementId: nearestIdentifiedParentId(index, element),
+      outerHtmlSha256: sourceSha256(element.raw),
+    })),
+  });
+}
+
+export function deriveSemanticOperationIdentityDelta(
+  beforeHtml,
+  afterHtml,
+  operation,
+  { direction = "forward" } = {},
+) {
+  const beforeSnapshot = semanticIdentitySnapshot(buildSourceIndex(String(beforeHtml)));
+  const afterSnapshot = semanticIdentitySnapshot(buildSourceIndex(String(afterHtml)));
+  const identityDelta = deriveSemanticIdentityDelta(
+    beforeSnapshot,
+    afterSnapshot,
+    operation,
+    { direction },
+  );
+  verifySemanticIdentityTransition({
+    beforeSnapshot,
+    afterSnapshot,
+    operation,
+    direction,
+    identityDelta,
+  });
+  return identityDelta;
 }
 
 function applyTrustedRestore(state, operation) {
@@ -673,6 +728,11 @@ export function applySemanticOperation(inputState, operation, options = {}) {
       );
     }
   }
+  const identityDelta = deriveSemanticOperationIdentityDelta(
+    state.html,
+    materialization.html,
+    operation,
+  );
   return appliedResult(state, operation, materialization.html, {
     kind: "source-patch",
     planType: plan.type,
@@ -680,7 +740,7 @@ export function applySemanticOperation(inputState, operation, options = {}) {
     scopeReport: materialization.scopeReport,
     parseIntegrity: materialization.parseIntegrity,
     sourcePatchResult: materialization,
-  }, allocation);
+  }, allocation, identityDelta);
 }
 
 export class SemanticOperationKernel {

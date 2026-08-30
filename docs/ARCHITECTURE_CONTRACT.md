@@ -666,7 +666,9 @@ The semantic source-operation foundation is a pure pre-persistence boundary.
 It accepts only complete identity-v1 HTML plus an operation carrying stable
 operation identity, exact base revision, complete-source Hash and stable
 ID/tag/outer-Hash target evidence. It returns complete next HTML, Hash, lineage
-and a generated in-process inverse. Intent is lowered to SourcePatch, whose
+and a system-derived `identityDelta` plus a generated in-process inverse. The
+stable ID is the sole element identity; tag, parent, order and outer Hash are
+operation preconditions or change evidence, not alternate identities. Intent is lowered to SourcePatch, whose
 apply path independently re-plans the operation before enforcing exact ranges,
 outside-scope equality and parse integrity. Runtime DOM is never an input.
 PR5 adopts this boundary for existing text, style and sibling-order edits; PR6
@@ -692,11 +694,16 @@ precondition through reconciliation, refreshed identity, backoff or new user
 information; resending the same known-stale command is forbidden.
 
 An accepted Canvas semantic operation retains exact forward and reverse patches,
-before/after source Hashes, bounded logical target snapshots and optional
+before/after source Hashes, a system-derived identity delta, bounded logical target snapshots and optional
 Selection only in the current-open renderer session. Autosave receives the
-resulting complete HTML and exact operations as identity/save evidence. Undo or
-redo creates another normal complete-HTML save; there is no durable history
-action ID, cursor CAS, history candidate or restart migration.
+resulting complete HTML and operations as identity/save evidence. Repository
+independently parses each before/after HTML pair, recomputes its ID-set and
+topology delta, and cross-validates that fact against the operation and delta.
+Exact SourcePatch replay proves only the byte/Hash/CAS/recovery chain; patch
+`kind` cannot authorize identity changes. Undo or redo creates another normal
+complete-HTML save; its inverse is session-local exact restore evidence, not an
+externally authorable or persistent semantic command. There is no durable
+history action ID, cursor CAS, history candidate or restart migration.
 
 Autosave then enters `ProjectFileRepository`. It is the only live Bridge-side
 owner of the current-source write for a registered v4 Project File. The retired
@@ -718,16 +725,22 @@ identities, an unresolved save state or third-party bytes fail closed; no
 historical Version, Request, Candidate or Runtime DOM is serialized.
 Every structural Canvas edit now enters the semantic boundary. New fragments
 must be identity-free and receive kernel-owned IDs; duplicate cannot inherit an
-existing ID, move preserves IDs, and delete makes the old target orphaned. A
-normal text save may still add an ID to a newly authored inline wrapper or
-line-break only after proving that every ID already claimed by the current
-Working Copy remains valid and present in the candidate.
+existing ID, move preserves IDs, delete retires the exact target subtree, and
+replacement retains its root while replacing descendant identities. `setText`
+retains the target but may retire authored descendants. New inline wrappers and
+line breaks receive kernel-owned IDs recorded in the same identity delta. A
+successful semantic save reseals the exact tag/parent/order binding; this seal
+detects later external topology drift but is not a second element identity.
+Without semantic proof, additions, removals, swaps, transplants, forgeries,
+duplicates, tag changes and moves all fail closed.
 
 Current managed TargetRefs add `elementId` and the expected canonical source
 Hash, refreshed by deterministic current-source rebind. Presence of the
 stable ID selects one resolver contract: only the valid unique SourceIndex ID
-entry may resolve, and deletion or tag migration is orphaned without heuristic
-fallback. `targetId` remains per-record identity; optional selected-text
+entry may resolve. Tag changes retain that identity; deletion or invalid ID is
+orphaned without heuristic fallback. A source target that survives while its
+current Canvas projection cannot display it remains the same target with a
+missing/hidden presentation state, never a guessed replacement. `targetId` remains per-record identity; optional selected-text
 locators are UTF-16 ranges inside the owning element's decoded descendant text.
 ID-less historical TargetRefs keep the legacy resolver and immutable Version
 records are never rewritten. See ADR 0061.

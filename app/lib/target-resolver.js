@@ -464,13 +464,6 @@ function resolveInsertionPoint(index, targetRef) {
   if (targetRef.elementId && !stableParent) {
     return resolved(targetRef, "orphaned", null, [], "stable-parent-not-found");
   }
-  if (
-    stableParent
-    && targetRef.fingerprint?.tagName
-    && stableParent.tagName !== String(targetRef.fingerprint.tagName).toLowerCase()
-  ) {
-    return resolved(targetRef, "orphaned", null, [], "stable-parent-tag-mismatch");
-  }
   const parentCandidates = stableParent
     ? [stableParent]
     : insertionParentCandidates(index, targetRef);
@@ -589,21 +582,6 @@ export function resolveTargetRef(indexOrHtml, targetRef) {
     const element = index.byPagerootId.get(targetRef.elementId) ?? null;
     if (!element) {
       return resolved(targetRef, "orphaned", null, [], "stable-element-not-found");
-    }
-    const expectedTag = String(targetRef.fingerprint?.tagName ?? "")
-      .trim()
-      .toLowerCase();
-    if (!expectedTag) {
-      return resolved(
-        targetRef,
-        "orphaned",
-        null,
-        [],
-        "stable-element-tag-evidence-missing",
-      );
-    }
-    if (element.tagName !== expectedTag) {
-      return resolved(targetRef, "orphaned", null, [], "stable-element-tag-mismatch");
     }
     if (targetRef.level === "text") {
       const directTextNodes = element.textNodeIds

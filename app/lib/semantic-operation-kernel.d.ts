@@ -90,10 +90,34 @@ export interface SemanticOperationResult {
   nextState: SemanticDocumentState;
   allocatedElementIds?: string[];
   insertedRootElementId?: string;
+  identityDelta?: SemanticIdentityDelta;
   materialization: {
     kind: "source-patch" | "trusted-exact-source-restore";
     [key: string]: unknown;
   };
+}
+
+export interface SemanticIdentityDelta {
+  schemaVersion: 1;
+  operationId: string;
+  operationType: SemanticOperation["type"];
+  direction: "forward" | "undo" | "redo";
+  targetElementId: string | null;
+  parentElementId: string | null;
+  beforeElementId: string | null;
+  retainedTargetRootElementId: string | null;
+  addedElementIds: readonly string[];
+  removedElementIds: readonly string[];
+  movedElementIds: readonly string[];
+  tagChangedElementIds: readonly string[];
+  targetPlacementBefore: Readonly<{
+    parentElementId: string | null;
+    beforeElementId: string | null;
+  }> | null;
+  targetPlacementAfter: Readonly<{
+    parentElementId: string | null;
+    beforeElementId: string | null;
+  }> | null;
 }
 
 export declare class SemanticOperationError extends Error {
@@ -116,6 +140,13 @@ export declare function applySemanticOperation(
   operation: SemanticOperation | GeneratedSemanticInverseOperation,
   options?: { randomUUID?: () => string },
 ): SemanticOperationResult;
+
+export declare function deriveSemanticOperationIdentityDelta(
+  beforeHtml: string,
+  afterHtml: string,
+  operation: SemanticOperation,
+  options?: { direction?: "forward" | "undo" | "redo" },
+): SemanticIdentityDelta;
 
 export declare class SemanticOperationKernel {
   createState(

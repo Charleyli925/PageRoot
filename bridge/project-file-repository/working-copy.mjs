@@ -26,6 +26,10 @@ import {
 import {
   validateSourceHistoryOperationBytes,
 } from "../../shared/source-history.mjs";
+import {
+  createSemanticIdentitySnapshot,
+  verifySemanticIdentityTransition,
+} from "../../shared/semantic-identity-delta.mjs";
 
 import {
   PROJECT_FILE_SCHEMA_VERSION,
@@ -285,6 +289,42 @@ function identityBindingIssues(currentIdentity, nextIdentity) {
   return issues;
 }
 
+function semanticIdentitySnapshot(html, inspection) {
+  return createSemanticIdentitySnapshot({
+    sourceSha256: sha256(Buffer.from(html, "utf8")),
+    elements: inspection.elements.map((element) => {
+      const parent = Number.isInteger(element.parentElementIndex)
+        ? inspection.elements[element.parentElementIndex]
+        : null;
+      return {
+        elementId: element.pagerootId,
+        tagName: element.tagName,
+        parentElementId: parent?.pagerootId ?? null,
+        outerHtmlSha256: sha256(Buffer.from(
+          html.slice(element.startOffset, element.sourceEndOffset),
+          "utf8",
+        )),
+      };
+    }),
+  });
+}
+
+function identityTransitionFacts(beforeIdentity, afterIdentity) {
+  const lostIds = [...beforeIdentity.claimedIds].filter(
+    (pagerootId) => !afterIdentity.claimedIds.has(pagerootId),
+  );
+  const addedIds = [...afterIdentity.claimedIds].filter(
+    (pagerootId) => !beforeIdentity.claimedIds.has(pagerootId),
+  );
+  const bindingIssues = identityBindingIssues(beforeIdentity, afterIdentity);
+  return {
+    lostIds,
+    addedIds,
+    bindingIssues,
+    changed: lostIds.length > 0 || addedIds.length > 0 || bindingIssues.length > 0,
+  };
+}
+
 function assertBindingChangesAreAuthorized(currentHtml, nextHtml, sourceHistoryOperations) {
   let steps;
   try {
@@ -315,47 +355,35 @@ function assertBindingChangesAreAuthorized(currentHtml, nextHtml, sourceHistoryO
         },
       );
     }
-    const addedIds = [...afterIdentity.claimedIds].filter(
-      (pagerootId) => !beforeIdentity.claimedIds.has(pagerootId),
-    );
-    if (addedIds.length > 0 && step.operation.kind === "reorder") {
+    const transition = identityTransitionFacts(beforeIdentity, afterIdentity);
+    const semanticOperation = step.operation.semanticOperation;
+    const identityDelta = step.operation.identityDelta;
+    const semanticDirection = String(step.operation.semanticDirection || "");
+    if (!semanticOperation || !identityDelta || !["forward", "undo", "redo"].includes(semanticDirection)) {
+      if (!transition.changed) continue;
       throw new ProjectFileRepositoryError(
         "SOURCE_ELEMENT_IDENTITY_LOST",
-        "A reorder operation cannot create persistent source element identities.",
-        { operationId: step.operation.operationId, addedIds },
+        "The save changes persistent identity without semantic operation evidence.",
+        { operationId: step.operation.operationId, ...transition },
       );
     }
-    const bindingIssues = identityBindingIssues(beforeIdentity, afterIdentity);
-    if (bindingIssues.length === 0) continue;
-    if (step.operation.kind !== "reorder") {
+    try {
+      verifySemanticIdentityTransition({
+        beforeSnapshot: semanticIdentitySnapshot(step.beforeHtml, beforeIdentity),
+        afterSnapshot: semanticIdentitySnapshot(step.afterHtml, afterIdentity),
+        operation: semanticOperation,
+        direction: semanticDirection,
+        identityDelta,
+      });
+    } catch (cause) {
       throw new ProjectFileRepositoryError(
         "SOURCE_ELEMENT_IDENTITY_LOST",
-        "Only an exact reorder operation may relocate persistent identities.",
-        { operationId: step.operation.operationId, bindingIssues },
-      );
-    }
-    const beforeById = identityElementMap(beforeIdentity);
-    const afterById = identityElementMap(afterIdentity);
-    const changedIds = new Set(bindingIssues.flatMap((issue) => [
-      issue.pagerootId,
-      issue.currentPagerootId,
-      issue.nextPagerootId,
-    ]).filter((pagerootId) => beforeIdentity.claimedIds.has(pagerootId)));
-    const changedElementBytes = [...changedIds].filter((pagerootId) => {
-      const before = beforeById.get(pagerootId);
-      const after = afterById.get(pagerootId);
-      if (!before || !after) return true;
-      return step.beforeHtml.slice(before.startOffset, before.sourceEndOffset)
-        !== step.afterHtml.slice(after.startOffset, after.sourceEndOffset);
-    });
-    if (changedElementBytes.length > 0) {
-      throw new ProjectFileRepositoryError(
-        "SOURCE_ELEMENT_IDENTITY_LOST",
-        "A reorder operation changed the source element bytes owned by a persistent identity.",
+        "Semantic operation evidence does not authorize the exact identity transition.",
         {
           operationId: step.operation.operationId,
-          changedElementBytes,
-          bindingIssues,
+          semanticIdentityError: cause?.code || "SEMANTIC_IDENTITY_INVALID",
+          semanticIdentityDetails: cause?.details || {},
+          ...transition,
         },
       );
     }
@@ -469,10 +497,10 @@ export function materializeIdentityPreservingSave(currentHtml, nextHtml, options
   const addedIds = [...nextIdentity.claimedIds].filter(
     (pagerootId) => !currentIdentity.claimedIds.has(pagerootId),
   );
-  if (lostIds.length > 0 || nextIdentity.missingElementCount > 0) {
+  if (nextIdentity.missingElementCount > 0) {
     throw new ProjectFileRepositoryError(
       "SOURCE_ELEMENT_IDENTITY_LOST",
-      "The save would remove persistent identities from existing source elements.",
+      "The save would publish source elements without persistent identity.",
       {
         lostIds,
         missingElementCount: nextIdentity.missingElementCount,
@@ -484,15 +512,20 @@ export function materializeIdentityPreservingSave(currentHtml, nextHtml, options
     );
   }
   const bindingIssues = identityBindingIssues(currentIdentity, nextIdentity);
-  if (bindingIssues.length > 0 || addedIds.length > 0) {
-    const sourceHistoryOperations = Array.isArray(options.sourceHistoryOperations)
-      ? options.sourceHistoryOperations
-      : [];
+  const sourceHistoryOperations = Array.isArray(options.sourceHistoryOperations)
+    ? options.sourceHistoryOperations
+    : [];
+  if (
+    lostIds.length > 0
+    || bindingIssues.length > 0
+    || addedIds.length > 0
+    || sourceHistoryOperations.length > 0
+  ) {
     if (sourceHistoryOperations.length === 0) {
       throw new ProjectFileRepositoryError(
         "SOURCE_ELEMENT_IDENTITY_LOST",
         "The save would change persistent identity bindings without source operation evidence.",
-        { lostIds: [], addedIds, bindingIssues },
+        { lostIds, addedIds, bindingIssues },
       );
     }
     assertBindingChangesAreAuthorized(currentHtml, nextHtml, sourceHistoryOperations);

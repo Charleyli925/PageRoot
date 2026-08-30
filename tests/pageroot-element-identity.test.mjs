@@ -178,15 +178,17 @@ test("stable TargetRefs follow one element across text and position changes with
 
   const wrongMigration = `<main data-pageroot-id="${ID_A}"><article data-pageroot-id="${ID_B}">原始文字</article><section data-pageroot-id="${ID_C}">同类兄弟</section></main>`;
   const mismatched = resolveTargetRef(buildSourceIndex(wrongMigration), target);
-  assert.equal(mismatched.resolution, "orphaned");
-  assert.equal(mismatched.reason, "stable-element-tag-mismatch");
+  assert.equal(mismatched.resolution, "exact");
+  assert.equal(mismatched.reason, "stable-element-match");
+  assert.equal(mismatched.target?.pagerootId, ID_B);
+  assert.equal(mismatched.target?.tagName, "article");
 
   const missingTagEvidence = structuredClone(target);
   delete missingTagEvidence.fingerprint;
   const unproven = resolveTargetRef(baseIndex, missingTagEvidence);
-  assert.equal(unproven.resolution, "orphaned");
-  assert.equal(unproven.target, null);
-  assert.equal(unproven.reason, "stable-element-tag-evidence-missing");
+  assert.equal(unproven.resolution, "exact");
+  assert.equal(unproven.target?.pagerootId, ID_B);
+  assert.equal(unproven.reason, "stable-element-and-source-hash-match");
 });
 
 test("legacy HTML remains byte-for-byte untouched and is reported as identity-absent", () => {

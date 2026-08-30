@@ -33,8 +33,23 @@ state. Cloning authored markup also cannot retain the original persistent IDs.
   stable root ID as a direct child of the requested parent; raw-text and other
   parser-reparenting destinations are rejected.
 - Every accepted operation publishes complete next HTML and exact inverse
-  patches. It joins ADR 0063's current-open, 20-step memory history and the
-  existing Hash/CAS atomic autosave path.
+  patches plus a system-derived `identityDelta`. The delta records the actual
+  added/removed/moved IDs, retained target root and requested target/parent/
+  insertion-position evidence. It is derived from the semantic operation and
+  independently parsed before/after complete HTML, never supplied as caller
+  authority.
+- Repository replays SourcePatch only to prove the exact before/after byte,
+  Hash, CAS and crash-recovery chain. It independently recomputes the identity
+  delta and cross-validates it with the semantic operation; a legacy patch
+  `kind` cannot authorize ID-set or topology changes. Successful save reseals
+  the new tag/parent/order binding for later external-conflict detection.
+- The operation rules are closed: insert/duplicate add only fresh subtree IDs;
+  delete removes only the addressed subtree; move retains every subtree ID;
+  `replaceSubtree` retains its root ID while replacing descendants; `setText`
+  may remove target descendants; range/style-created wrappers and line breaks
+  must list kernel-allocated IDs. Other identity effects fail closed.
+- This joins ADR 0063's current-open, 20-step memory history and the existing
+  Hash/CAS atomic autosave path.
 
 ## Consequences
 

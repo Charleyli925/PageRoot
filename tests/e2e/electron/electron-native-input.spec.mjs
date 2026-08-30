@@ -353,6 +353,123 @@ test("Electron separates focused-field undo from current-open Canvas undo and re
   }
 });
 
+test("Electron persists semantic identity edits, orphans deleted comments, and clears history on relaunch", {
+  tag: ["@gate-smoke", "@smoke-editing"],
+}, async () => {
+  test.setTimeout(240_000);
+  const sourceDirectory = mkdtempSync(path.join(tmpdir(), "pageroot-native-source-e2e-"));
+  const sourcePath = path.join(sourceDirectory, "semantic-identity-closure.html");
+  writeFileSync(sourcePath, Buffer.from(
+    "<!doctype html><html><head><title>Identity closure</title></head><body>"
+      + "<main><p data-native-case='identity-target'>Alpha <strong>child</strong></p>"
+      + "<p data-native-case='identity-sibling'>Sibling</p></main>"
+      + "<script>document.body.dataset.runtimeOnly = 'display';</script>"
+      + "</body></html>",
+    "utf8",
+  ));
+  const isolatedUserData = mkdtempSync(path.join(tmpdir(), "pageroot-native-e2e-"));
+  const commentText = "删除后必须保持孤立。";
+  let activeApp = null;
+  try {
+    let launched = await launchPageRoot({ isolatedUserData, activeSourcePath: sourcePath });
+    activeApp = launched.electronApp;
+    let { editor, frame } = await loadedDiskFrame(
+      launched.page,
+      sourcePath,
+      "identity-target",
+    );
+    const managedSourcePath = await managedWorkingCopyPath(launched.page, sourcePath);
+    const identified = readFileSync(managedSourcePath, "utf8");
+    const targetId = identified.match(
+      /<p data-native-case='identity-target' data-pageroot-id="(pr1_[a-f0-9]{32})">/u,
+    )?.[1];
+    const descendantId = identified.match(
+      /<strong data-pageroot-id="(pr1_[a-f0-9]{32})">child<\/strong>/u,
+    )?.[1];
+    expect(targetId).toBeTruthy();
+    expect(descendantId).toBeTruthy();
+
+    const comment = await addCanvasComment(
+      launched.page,
+      frame,
+      "identity-target",
+      commentText,
+    );
+    await activateNativeEdit(frame, "identity-target");
+    await setTextSelection(frame, "identity-target", 0, "Alpha child".length);
+    await launched.page.keyboard.insertText("Flattened source text");
+    await launched.page.keyboard.press(keyShortcut("S"));
+    let persistedRevision = await expectCheckpointPersisted(launched.page, 0);
+    let savedHtml = readFileSync(managedSourcePath, "utf8");
+    expect(savedHtml).toContain(`data-pageroot-id="${targetId}"`);
+    // Native rich-text replacement preserves the authored empty wrapper; the
+    // direct semantic setText descendant-retirement rule is covered by the
+    // managed Repository contract test instead of being conflated with this UI path.
+    expect(savedHtml).toContain(`<strong data-pageroot-id="${descendantId}"></strong>`);
+    expect(savedHtml).not.toContain(">child</strong>");
+    await expect(comment).toHaveAttribute("data-resolution", "exact");
+
+    frame = await currentEditorFrame(launched.page);
+    let targets = frame.locator(caseSelector("identity-target"));
+    await targets.first().click();
+    await editor.getByRole("button", { name: "复制元素", exact: true }).click();
+    persistedRevision = await expectCheckpointPersisted(launched.page, persistedRevision);
+    frame = await currentEditorFrame(launched.page);
+    targets = frame.locator(caseSelector("identity-target"));
+    await expect(targets).toHaveCount(2);
+    const duplicateIds = await targets.evaluateAll((elements) => elements.map(
+      (element) => element.getAttribute("data-pageroot-id"),
+    ));
+    expect(duplicateIds[0]).toBe(targetId);
+    expect(duplicateIds[1]).toMatch(/^pr1_[a-f0-9]{32}$/u);
+    expect(duplicateIds[1]).not.toBe(targetId);
+
+    await targets.nth(1).click();
+    await editor.getByRole("button", { name: "上移", exact: true }).click();
+    persistedRevision = await expectCheckpointPersisted(launched.page, persistedRevision);
+    frame = await currentEditorFrame(launched.page);
+    targets = frame.locator(caseSelector("identity-target"));
+    expect(await targets.evaluateAll((elements) => elements.map(
+      (element) => element.getAttribute("data-pageroot-id"),
+    ))).toEqual([duplicateIds[1], duplicateIds[0]]);
+
+    await targets.nth(1).click();
+    launched.page.once("dialog", (dialog) => dialog.accept());
+    await editor.getByRole("button", { name: "删除元素", exact: true }).click();
+    await expectCheckpointPersisted(launched.page, persistedRevision);
+    frame = await currentEditorFrame(launched.page);
+    targets = frame.locator(caseSelector("identity-target"));
+    await expect(targets).toHaveCount(1);
+    await expect(comment).toHaveAttribute("data-resolution", "orphaned");
+    savedHtml = readFileSync(managedSourcePath, "utf8");
+    expect(savedHtml).not.toContain(`data-pageroot-id="${targetId}"`);
+    expect(savedHtml).toContain(`data-pageroot-id="${duplicateIds[1]}"`);
+    expect(savedHtml).not.toContain("data-runtime-only");
+
+    await closePageRootGracefully(activeApp, launched.page);
+    activeApp = null;
+    launched = await launchPageRoot({ isolatedUserData });
+    activeApp = launched.electronApp;
+    ({ editor, frame } = await loadedDiskFrame(
+      launched.page,
+      managedSourcePath,
+      "identity-target",
+    ));
+    await expect(frame.locator(caseSelector("identity-target"))).toHaveCount(1);
+    const reopenedComment = launched.page.locator(".comment-card").filter({ hasText: commentText });
+    await expect(reopenedComment).toHaveAttribute("data-resolution", "orphaned");
+    const reopenedBytes = readFileSync(managedSourcePath);
+    await frame.locator(caseSelector("identity-target")).click();
+    await clickEditHistoryMenu(activeApp, launched.page, "undo");
+    await launched.page.waitForTimeout(300);
+    expect(readFileSync(managedSourcePath)).toEqual(reopenedBytes);
+  } finally {
+    if (activeApp) await stopPageRoot(activeApp, isolatedUserData, { cleanup: false });
+    removeIsolatedUserData(isolatedUserData);
+    removeValidatedTemporaryDirectory(sourceDirectory, "pageroot-native-source-e2e-");
+  }
+});
+
 test("Electron keeps the active text selection and comment anchors stable after V1 autosave", {
   tag: ["@gate-smoke","@smoke-editing"],
 }, async () => {

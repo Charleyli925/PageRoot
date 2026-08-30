@@ -183,15 +183,22 @@ test("accepted structure patches undo and redo inside the bounded open-document 
     beforeTarget: { id: "target_structure", elementId: ids.first },
     afterTarget: { id: "target_structure", elementId: ids.first },
     semanticOperation: operation,
+    identityDelta: applied.identityDelta,
   }, 1);
   const pending = session.pendingOperations;
   assert.equal(session.acknowledge(context, pending, null, applied.sourceSha256), true);
 
   const undone = session.apply(context, "undo", applied.html, 2);
   assert.equal(undone.html, html);
+  assert.equal(session.pendingOperations[0].semanticDirection, "undo");
+  assert.deepEqual(
+    session.pendingOperations[0].identityDelta.addedElementIds,
+    applied.identityDelta.removedElementIds,
+  );
   assert.equal(session.acknowledge(context, session.pendingOperations, null, sourceSha256(html)), true);
   const redone = session.apply(context, "redo", html, 3);
   assert.equal(redone.html, applied.html);
+  assert.equal(session.pendingOperations[0].semanticDirection, "redo");
 });
 
 test("structure edits keep surviving comment IDs exact and orphan deleted targets", () => {

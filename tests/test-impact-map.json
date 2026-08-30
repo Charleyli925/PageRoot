@@ -800,7 +800,8 @@
       ],
       "nodeTests": [
         "tests/source-history.test.mjs",
-        "tests/source-history-session.test.mjs"
+        "tests/source-history-session.test.mjs",
+        "tests/project-semantic-identity-save.test.mjs"
       ]
     },
     {
@@ -924,7 +925,7 @@
         "^scripts/check-architecture\\.mjs$",
         "^scripts/architecture-ast-query\\.mjs$",
         "^scripts/architecture-budget\\.json$",
-        "^tests/architecture-boundaries\\.test\\.mjs$",
+        "^tests/(?:architecture-boundaries|semantic-identity-architecture-contract)\\.test\\.mjs$",
         "^tests/fixtures/architecture-boundaries/",
         "^(?:CONTRIBUTING|docs/(?:ARCHITECTURE|ARCHITECTURE_CONTRACT|COMPATIBILITY|INTERACTION_FLOW|STATE_OWNERSHIP|ARCHITECTURE_MAP|GUARD_LEDGER|ENGINEERING_STANDARDS|SECURITY_MODEL|WORKBENCH_ORCHESTRATION_REFACTOR_PLAN))\\.md$",
         "^docs/decisions/(?:archive/)?[0-9]{4}-[^/]+\\.md$"
@@ -934,6 +935,7 @@
       ],
       "nodeTests": [
         "tests/architecture-boundaries.test.mjs",
+        "tests/semantic-identity-architecture-contract.test.mjs",
         "tests/project-rules-workflow.test.mjs",
         "tests/project-workflow.test.mjs"
       ]
@@ -943,6 +945,7 @@
       "patterns": [
         "^app/lib/(?:align-preview-source-surface|canvas-target-rebind|comment-text-locator|editable-island|native-dom-logical-index|page-(?:presentation-dom|view-context)|pageroot-element-identity|semantic-operation-kernel|source-(?:index|patch-core|patch-engine|text-map)|target-resolver|native-(?:edit-capability|edit-policy))\\.(?:js|ts|d\\.ts)$",
         "^shared/pageroot-element-identity\\.mjs$",
+        "^shared/semantic-identity-delta\\.mjs$",
         "^schemas/(?:pageroot-element-identity|semantic-operation)\\.v1\\.schema\\.json$",
         "^scripts/(?:source-index|target-resolver)\\.mjs$"
       ],
@@ -961,6 +964,8 @@
         "tests/page-view-context.test.mjs",
         "tests/source-patch-engine.test.mjs",
         "tests/semantic-operation-kernel.test.mjs",
+        "tests/semantic-identity-save-contract.test.mjs",
+        "tests/project-semantic-identity-save.test.mjs",
         "tests/editable-island.test.mjs",
         "tests/source-text-map.test.mjs",
         "tests/native-edit-capability.test.mjs",
@@ -1756,14 +1761,16 @@
       "patterns": [
         "^bridge/project-file-repository/working-copy\\.mjs$",
         "^schemas/(?:pageroot-element-identity|source-element-identity-migration|working-copy-state\\.v4)\\.schema\\.json$",
-        "^tests/source-element-identity-migration\\.test\\.mjs$"
+        "^tests/(?:source-element-identity-migration|semantic-identity-save-contract|project-semantic-identity-save)\\.test\\.mjs$"
       ],
       "suites": [
         "typecheck"
       ],
       "nodeTests": [
         "tests/project-working-copy-save.test.mjs",
-        "tests/source-element-identity-migration.test.mjs"
+        "tests/source-element-identity-migration.test.mjs",
+        "tests/semantic-identity-save-contract.test.mjs",
+        "tests/project-semantic-identity-save.test.mjs"
       ]
     },
     {

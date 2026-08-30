@@ -15,17 +15,20 @@ make a current comment drift, become ambiguous or require a guessed rebind.
 ## Decision
 
 1. A new TargetRef captured from an identified source element carries
-   `elementId`, `expectedSourceSha256` and `fingerprint.tagName`; deterministic
-   current-source rebind refreshes the expected Hash. Stable refs without tag
-   evidence fail closed. `targetId` remains the independent
+   `elementId`, `expectedSourceSha256` and compatibility fingerprint evidence;
+   deterministic current-source rebind refreshes the expected Hash.
+   `elementId` is the sole persistent element identity. `tagName` remains useful
+   display/stale evidence but is not a second identity. `targetId` remains the independent
    record identity: several comments may have different target IDs while
    sharing one element ID.
 2. When `elementId` is present, `TargetResolver` uses only SourceIndex's valid,
    unique `byPagerootId` entry. A source-Hash change, text change or move does
-   not weaken the result: the surviving element resolves `exact`. A missing ID,
-   invalid ID, missing tag evidence or tag migration resolves `orphaned`;
-   selector, other fingerprint fields and offset evidence must not select a
-   replacement.
+   not weaken the result: the surviving element resolves `exact`, including
+   when its authored tag changes. A missing or invalid ID resolves `orphaned`;
+   selector, tag, other fingerprint fields and offset evidence must not select
+   a replacement. If the source element still exists but the current Canvas
+   projection cannot locate or display it, presentation reports it as currently
+   missing/hidden without changing or transferring its source identity.
 3. A selected text range may add `textLocator = { quote, startOffset,
    endOffset, affinity }`. Offsets are UTF-16 positions in the owning element's
    decoded descendant text and are accepted only when the source-backed range
@@ -48,8 +51,8 @@ make a current comment drift, become ambiguous or require a guessed rebind.
 
 ## Consequences
 
-- Current comments survive text edits, same-tag sibling insertion and element
-  moves without heuristic rebinding.
+- Current comments survive text edits, tag changes, sibling insertion and
+  element moves without heuristic rebinding.
 - Deletion is explicit. A visually identical new element has a new ID and
   cannot inherit the old comment.
 - Historical records remain readable without rewriting immutable Versions.

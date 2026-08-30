@@ -2123,7 +2123,12 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         ...(afterHistorySelection
           ? { afterSelection: afterHistorySelection }
           : {}),
-        ...(semanticOperation ? { semanticOperation } : {}),
+        ...(semanticOperation
+          ? {
+              semanticOperation,
+              identityDelta: semanticResult?.identityDelta,
+            }
+          : {}),
       };
       if (!onChangeRef.current(
         result.html,
