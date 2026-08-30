@@ -13,6 +13,7 @@ import {
   reviewCommentBootstrapBindings,
 } from "./review/comment-binding";
 import {
+  REVIEW_MOVED_TEXT_ACCOUNTED_ATTRIBUTE,
   REVIEW_PROJECTION_FACTS_ATTRIBUTE,
 } from "./review/constants";
 import {
@@ -93,6 +94,33 @@ function* annotateChangePairSteps(
     ambiguousPersistentIds,
   });
   return yield* changeTypesForSemanticGraphSteps(graph);
+}
+
+function* annotateMovedStableSubtreeSteps(
+  movedPairs: Array<{
+    id: string;
+    before: Element;
+    after: Element;
+    outermost: boolean;
+  }>,
+  ambiguousPersistentIds: ReadonlySet<string>,
+): Generator<"semantic-row", void, void> {
+  for (const movedPair of movedPairs) {
+    const graph = yield* buildReviewSemanticPairGraphSteps({
+      before: movedPair.before,
+      after: movedPair.after,
+      beforeIndex: -1,
+      afterIndex: -1,
+    }, {
+      usePersistentIdentity: true,
+      ambiguousPersistentIds,
+      ownerNamespace: `moved-${movedPair.id}`,
+    });
+    if (movedPair.outermost) yield* markStructureDifferenceSteps(graph);
+    markSemanticTextDifferences(graph);
+    movedPair.before.setAttribute(REVIEW_MOVED_TEXT_ACCOUNTED_ATTRIBUTE, "true");
+    movedPair.after.setAttribute(REVIEW_MOVED_TEXT_ACCOUNTED_ATTRIBUTE, "true");
+  }
 }
 
 function attachChangeMarkerMetadata(
@@ -286,6 +314,9 @@ function* buildReviewDocumentSteps(
   const stableSourceAnalysis = annotateStableSourceDifferences(beforeDocument, afterDocument);
   const ambiguousPersistentIds = new Set(stableSourceAnalysis.ambiguousPersistentIds);
   yield "stable-source";
+  // Freeze authored candidate regions and their pairing before moved-text
+  // annotation inserts disposable review spans. The pre-pass may mutate text
+  // nodes, but it must never redefine which authored element owns a movement.
   const beforeSections = candidateSections(beforeDocument);
   yield "candidate-sections-before";
   const afterSections = candidateSections(afterDocument);
@@ -294,6 +325,10 @@ function* buildReviewDocumentSteps(
     usePersistentIdentity: stableSourceAnalysis.hasPersistentContinuity,
     ambiguousPersistentIds,
   });
+  yield* annotateMovedStableSubtreeSteps(
+    stableSourceAnalysis.movedPairs,
+    ambiguousPersistentIds,
+  );
   const changes: ReviewChange[] = [];
   const outline: ReviewOutlineItem[] = [];
   yield "section-pairing";

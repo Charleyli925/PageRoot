@@ -126,6 +126,57 @@ test("exact markup cannot bridge conflicting or missing persistent identities", 
   }
 });
 
+test("a claimed persistent identity cannot re-enter any fallback pairing path", async (context) => {
+  const claimed = (stableId) => unit("完全相同的源码内容", {
+    stableId,
+    persistentIdentityClaimed: true,
+    exactSignature: "same-subtree",
+    compatibilitySignature: "same-element",
+    relocationKey: "same-relocation",
+    affinities: ["same-affinity"],
+    parentKey: "same-parent",
+  });
+  for (const [name, beforeStableId, afterStableId] of [
+    ["deleted ID", "pageroot:pr1_before", null],
+    ["replaced ID", "pageroot:pr1_before", "pageroot:pr1_after"],
+    ["invalid ID claim", null, null],
+    ["legacy identity under a persistent claim", "id:legacy", "id:legacy"],
+  ]) {
+    await context.test(name, () => {
+      const pairs = alignReviewSemanticUnits(
+        [claimed(beforeStableId)],
+        [claimed(afterStableId)],
+      );
+      assert.equal(matchedPairs(pairs).length, 0);
+      assert.deepEqual(new Set(
+        pairs.map(({ beforeIndex, afterIndex }) => `${beforeIndex}:${afterIndex}`),
+      ), new Set(["0:null", "null:0"]));
+    });
+  }
+});
+
+test("an ID-bearing element cannot pair with identical markup after its ID is removed", () => {
+  const sharedEvidence = {
+    exactSignature: "same-subtree",
+    compatibilitySignature: "same-element",
+    relocationKey: "same-relocation",
+    parentKey: "same-parent",
+  };
+  const pairs = alignReviewSemanticUnits(
+    [unit("相同内容", {
+      ...sharedEvidence,
+      stableId: "pageroot:pr1_before",
+      persistentIdentityClaimed: true,
+    })],
+    [unit("相同内容", sharedEvidence)],
+  );
+
+  assert.equal(matchedPairs(pairs).length, 0);
+  assert.deepEqual(new Set(
+    pairs.map(({ beforeIndex, afterIndex }) => `${beforeIndex}:${afterIndex}`),
+  ), new Set(["0:null", "null:0"]));
+});
+
 test("a legacy explicit identity remains scoped to its paired parent", () => {
   const pairs = alignReviewSemanticUnits(
     [unit("旧元素", { stableId: "id:legacy", parentKey: "list-a" })],

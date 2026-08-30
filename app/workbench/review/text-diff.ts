@@ -137,7 +137,15 @@ export function markSemanticTextFootprintOwner(
 export function markSemanticTextDifferences(graph: ReviewSemanticPairGraph): {
   changed: boolean;
 } {
-  let changed = false;
+  const alreadyMarked = (element: Element | null | undefined) => Boolean(
+    element
+    && (
+      element.matches("[data-pageroot-review-text]")
+      || element.querySelector("[data-pageroot-review-text]")
+    )
+  );
+  let changed = alreadyMarked(graph.root.before?.element)
+    || alreadyMarked(graph.root.after?.element);
   let groupSequence = 0;
   flattenReviewSemanticPairs(graph.root).forEach((pair) => {
     const beforeInventory = pair.before?.inventory || null;

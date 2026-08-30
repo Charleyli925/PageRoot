@@ -8,10 +8,6 @@ import {
 import {
   appendProjectionFactToElement,
 } from "./parse";
-import {
-  REVIEW_MOVED_TEXT_ACCOUNTED_ATTRIBUTE,
-} from "./constants";
-
 export type StableSourceChangeKind =
   | "moved"
   | "attribute"
@@ -23,6 +19,12 @@ export type StableSourceDifferenceAnalysis = {
   hasPersistentContinuity: boolean;
   sourceKinds: Array<"css-source" | "script-source">;
   ambiguousPersistentIds: string[];
+  movedPairs: Array<{
+    id: string;
+    before: Element;
+    after: Element;
+    outermost: boolean;
+  }>;
 };
 
 const COMMON_STABLE_SOURCE_ATTRIBUTE = "data-pageroot-review-stable-common";
@@ -90,22 +92,6 @@ function comparableAttributes(element: Element, excluded: Set<string>) {
     .join("\u001f");
 }
 
-function visibleSourceText(element: Element): string {
-  let text = "";
-  const visit = (node: Node) => {
-    if (node.nodeType === Node.TEXT_NODE) {
-      text += node.textContent || "";
-      return;
-    }
-    if (!(node instanceof Element)) return;
-    if (node.matches("script, style, noscript, template")) return;
-    if (node.namespaceURI !== "http://www.w3.org/1999/xhtml") return;
-    node.childNodes.forEach(visit);
-  };
-  element.childNodes.forEach(visit);
-  return text.replace(/\s+/gu, " ").trim();
-}
-
 function authorSourceInventory(
   document: Document,
   kind: "css-source" | "script-source",
@@ -144,33 +130,6 @@ function annotateStructureFact(
   });
 }
 
-function annotateMovedTextPair(before: Element, after: Element, id: string) {
-  before.setAttribute(REVIEW_MOVED_TEXT_ACCOUNTED_ATTRIBUTE, "true");
-  after.setAttribute(REVIEW_MOVED_TEXT_ACCOUNTED_ATTRIBUTE, "true");
-  if (visibleSourceText(before) === visibleSourceText(after)) return;
-  const semanticOwnerId = `stable-${id}`;
-  const geometryOwnerId = `stable-geometry-${id}`;
-  [
-    { element: before, tone: "removed" as const },
-    { element: after, tone: "added" as const },
-  ].forEach(({ element, tone }) => {
-    element.setAttribute("data-pageroot-review-text", tone);
-    element.setAttribute("data-pageroot-review-text-operation", "replace");
-    element.setAttribute("data-pageroot-review-text-group", `moved-text-${id}`);
-    appendProjectionFactToElement(element, {
-      id: `moved-text-${id}`,
-      type: "text",
-      semanticOwnerId,
-      geometryOwnerId,
-      scope: "text-block",
-      operation: "replace",
-      tone,
-      textGroup: `moved-text-${id}`,
-      summary: "文本调整",
-    });
-  });
-}
-
 export function annotateStablePageSourceAggregate(
   document: Document,
   kinds: ReadonlySet<"css-source" | "script-source">,
@@ -195,10 +154,10 @@ export function annotateStableSourceDifferences(
   const movedIds = new Set(topology.movedIds);
   const sourceKinds = new Set<"css-source" | "script-source">();
 
-  // A Candidate that churned every ID has no persistent-identity continuity;
-  // keep that historical input on the legacy matcher instead of describing
-  // every <style>/<script> as a source addition/removal. One surviving stable
-  // source identity is the minimum evidence that this topology is meaningful.
+  // Page-level source inventories only coexist with proven persistent
+  // continuity. Elements that claim a persistent identity but do not share it
+  // are still emitted as additions/removals by semantic pairing; they never
+  // regain identity through the legacy matcher.
   if (topology.commonIds.length) {
     (["css-source", "script-source"] as const).forEach((kind) => {
       if (authorSourceInventory(beforeDocument, kind)
@@ -215,7 +174,6 @@ export function annotateStableSourceDifferences(
     if (movedIds.has(id)) {
       annotateStructureFact(before, id, "moved");
       annotateStructureFact(after, id, "moved");
-      annotateMovedTextPair(before, after, id);
     }
 
     const isScript = before.tagName === "SCRIPT" || after.tagName === "SCRIPT";
@@ -240,9 +198,35 @@ export function annotateStableSourceDifferences(
     }
   });
 
+  const elementDepth = (element: Element) => {
+    let value = 0;
+    for (let parent = element.parentElement; parent; parent = parent.parentElement) value += 1;
+    return value;
+  };
+  const movedPairs = topology.movedIds.map((id) => {
+    const before = beforeElements.get(id)!;
+    const after = afterElements.get(id)!;
+    const hasMovedAncestor = (element: Element) => {
+      let ancestor = element.parentElement;
+      while (ancestor) {
+        const ancestorId = sourceId(ancestor);
+        if (ancestorId && movedIds.has(ancestorId)) return true;
+        ancestor = ancestor.parentElement;
+      }
+      return false;
+    };
+    return {
+      id,
+      before,
+      after,
+      outermost: !hasMovedAncestor(before) && !hasMovedAncestor(after),
+    };
+  }).sort((left, right) => elementDepth(right.before) - elementDepth(left.before));
+
   return {
     hasPersistentContinuity: topology.commonIds.length > 0,
     sourceKinds: [...sourceKinds],
     ambiguousPersistentIds: topology.duplicateIds,
+    movedPairs,
   };
 }

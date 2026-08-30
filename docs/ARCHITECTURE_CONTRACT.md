@@ -514,9 +514,12 @@ existing evidence thresholds. A unique valid `data-pageroot-id` is the strongest
 pairing key and may cross source parents; duplicate/invalid IDs fail closed and
 legacy no-ID Versions retain the old matcher. A duplicated persistent value is
 globally ambiguous for the complete document pair and cannot re-enter pairing
-through exact-subtree, relocation or fuzzy evidence. A frozen pair with no
-shared valid persistent ID uses the legacy matcher throughout, so full ID churn
-cannot become false source additions/removals. Stable identity, exact subtree equality and own
+through exact-subtree, relocation, singleton, weighted or fuzzy evidence. Any
+element carrying `data-pageroot-id` claims persistent identity: unless the same
+valid unique ID pairs it, every fallback is forbidden and ID deletion,
+replacement or wrong migration is reported as removal plus addition even when
+markup is unchanged. Only elements genuinely lacking the persistent attribute
+may use the legacy matcher. Stable identity, exact subtree equality and own
 non-presentation compatibility have different roles: exact equality skips only
 an unchanged branch and never bridges an identified element to a different or
 missing persistent ID. The same persistent ID pairs independently of an authored
@@ -526,9 +529,19 @@ remain unmatched. Stable topology distinguishes insertion from same-parent
 reorder and cross-parent movement; a common stable ID cannot degrade into
 delete plus add, and byte-identical markup cannot hide a precomputed movement.
 `added`/`removed` whole-element facts own descendant text evidence. A moved
-stable subtree is compared against its exact before/after ID counterpart before
-its one-sided candidate-region graphs suppress duplicate text; unchanged moved
-text produces no text fact, while changed moved text coexists with movement.
+stable subtree compares each stable descendant against its exact before/after
+ID counterpart through the existing semantic text diff, never through flattened
+whole-subtree text. Text transferred between different stable descendants
+therefore reports movement plus the corresponding removed/added text facts;
+unchanged moved text produces no text fact. A cross-region stable-common root
+suppresses only its own false addition/removal and traversal continues through
+descendants, so images, modules and other non-text elements added or removed
+during the move remain visible. Authored candidate regions and their pairing
+are frozen before disposable Review text wrappers are inserted, and each
+moved-subtree graph has a distinct semantic/geometry owner namespace. Review
+markup therefore cannot steal root movement ownership or merge facts across
+independent moved roots. The later one-sided candidate-region graphs suppress
+only duplicate text evidence.
 Attribute, inline-style and page-source facts likewise coexist with simultaneous
 text facts.
 With persistent continuity, Review compares ordered authored CSS and Script
