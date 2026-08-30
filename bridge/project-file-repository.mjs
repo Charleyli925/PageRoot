@@ -99,11 +99,16 @@ import {
 } from "./project-file-repository/identity.mjs";
 import {
   assertCandidateAssessment,
+  assertCandidateIdentityReport,
   assertCandidateId,
   assessedCandidate,
   mapCandidateValidationError,
   versionSnapshotPath,
 } from "./project-file-repository/version-candidate.mjs";
+import {
+  assertCandidateSourceIdentityOutput,
+  prepareCandidateSourceIdentity,
+} from "./project-file-repository/candidate-identity.mjs";
 import {
   assertFileIdentity,
   assertId,
@@ -2850,7 +2855,10 @@ export class ProjectFileRepository {
     const outputSha256 = sha256(Buffer.from(outputHtml, "utf8"));
     if (record.status === "candidate-ready" || record.status === "promoted") {
       const candidate = await this.#readCandidateForLoaded(loaded, record.candidateId);
-      if (candidate.output.sha256 !== outputSha256) {
+      if (
+        (candidate.candidate.submittedOutputSha256 ?? candidate.output.sha256)
+        !== outputSha256
+      ) {
         throw new ProjectFileRepositoryError(
           "REQUEST_OUTPUT_CHANGED",
           "The finalized Candidate output changed after review began.",
@@ -4763,10 +4771,9 @@ export class ProjectFileRepository {
         "The Working Copy changed before Candidate preparation.",
       );
     }
-    const candidateHtml = String(html || "");
-    requireCompleteHtml(candidateHtml, "Candidate HTML");
-    const outputBuffer = Buffer.from(candidateHtml, "utf8");
-    const outputSha256 = sha256(outputBuffer);
+    const submittedCandidateHtml = String(html || "");
+    requireCompleteHtml(submittedCandidateHtml, "Candidate HTML");
+    const submittedOutputSha256 = sha256(Buffer.from(submittedCandidateHtml, "utf8"));
     const latest = loaded.manifest.versions.find(
       (version) => version.versionId === loaded.manifest.latestOfficialVersionId,
     );
@@ -4817,10 +4824,14 @@ export class ProjectFileRepository {
     });
     const existingCandidate = existingCandidateRecord?.value || null;
     let candidateRecordSha256;
+    let outputSha256;
     if (existingCandidate) {
       if (
         existingCandidate.candidateId !== id
-        || existingCandidate.outputSha256 !== outputSha256
+        || (
+          existingCandidate.submittedOutputSha256
+          ?? existingCandidate.outputSha256
+        ) !== submittedOutputSha256
       ) {
         throw new ProjectFileRepositoryError(
           "CANDIDATE_COLLISION",
@@ -4845,8 +4856,18 @@ export class ProjectFileRepository {
           "An existing Candidate is not sealed by the active runtime authority.",
         );
       }
+      outputSha256 = existingOutput.sha256;
       candidateRecordSha256 = existingCandidateRecord.sha256;
     } else {
+      const identityPrepared = prepareCandidateSourceIdentity(
+        typeof assessmentBaseHtml === "string"
+          ? assessmentBaseHtml
+          : loaded.source.html,
+        submittedCandidateHtml,
+      );
+      const candidateHtml = identityPrepared.html;
+      const outputBuffer = identityPrepared.buffer;
+      outputSha256 = identityPrepared.outputSha256;
       const assessment = assessedCandidate(
         typeof assessmentBaseHtml === "string"
           ? assessmentBaseHtml
@@ -4871,7 +4892,9 @@ export class ProjectFileRepository {
         sourceWorkingCopyId: loaded.workingCopy.workingCopyId,
         expectedSourceSha256: expected,
         outputRelativePath: `requests/${request}/candidate.html`,
+        submittedOutputSha256,
         outputSha256,
+        identityReport: identityPrepared.identityReport,
         assessment,
         status: "pending-review",
         createdAt: nowIso(this.#clock),
@@ -4960,6 +4983,20 @@ export class ProjectFileRepository {
           "The Candidate no longer matches the runtime authority sealed for review.",
         );
       }
+    }
+    if (candidate.identityReport !== undefined) {
+      assertCandidateIdentityReport(candidate.identityReport);
+      if (
+        candidate.identityReport.outputSha256 !== candidate.outputSha256
+        || candidate.identityReport.submittedOutputSha256
+          !== (candidate.submittedOutputSha256 ?? candidate.outputSha256)
+      ) {
+        throw new ProjectFileRepositoryError(
+          "CANDIDATE_IDENTITY_REPORT_INVALID",
+          "Candidate source identity evidence does not match its sealed output.",
+        );
+      }
+      assertCandidateSourceIdentityOutput(candidate.identityReport, output.html);
     }
     return {
       candidate,

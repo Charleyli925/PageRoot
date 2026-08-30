@@ -763,9 +763,12 @@ durable cancel 只作为旧 Request 的 authority fence，不声称已经停止�
 内部 AI：
 
 1. 读取 Prompt、v3 Request、input manifest、项目规则和冻结输入。
-2. 只修改明确目标及聊天补充指向的位置。
+2. 把评论 TargetRef 和文字范围作为理解上下文，不把它们当作可写子树边界；一条评论可以要求同时修改多个远距离区域。
 3. 将完整 HTML 写入 Prompt 冻结的唯一 `requests/<requestId>/attempts/<attemptId>/output/candidate.html`。PageRoot 已给出精确绝对路径；AI 不得从 `input/base/index.html` 推导名称、递增版本号、创建 `AI任务/` 或写入其他 output 路径。
-4. 完成全部写入后执行 Prompt 给出的完整 finalizer 命令。
+4. 保留所有仍存在源码元素的 `data-pageroot-id`，移动或改 tag 时 ID 仍跟随该元素；不复制或伪造 ID。真正新增的元素不填 ID，由 PageRoot 校验后分配。Stable ID 是唯一身份，parent、order 和 tag 只作为 Review 变化事实。
+5. 完成全部写入后执行 Prompt 给出的完整 finalizer 命令。
+
+finalizer 通过后，Repository 封存 AI 原始输出 Hash，再以冻结 HTML 为基线校验重复、伪造和具有确定性证据的可疑丢失；同一有效 ID 即使 tag、parent 或 order 变化仍按同一元素处理。只有校验通过后，才为新元素分配 ID，生成完整规范化 Candidate、独立 Hash 和 identity report；不启发式重绑。
 
 产品可以用文件可读性检查辅助显示进度，但不得把“暂时没有变化”解释为完成。
 用户在 Finder 查看本轮目录时，普通、非软链接 `.DS_Store` 属于无语义的系统显示元数据：工作台和 finalizer 忽略它，但继续拒绝其他未声明文件、目录或软链接。

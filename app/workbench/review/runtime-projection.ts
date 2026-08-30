@@ -43,14 +43,18 @@ export function reviewBootstrapElementBinding(
   }
   if (current !== root) return null;
   const nonReviewAttributes = [...element.attributes].filter((attribute) => (
-    !attribute.name.startsWith("data-pageroot-")
+    (
+      attribute.name === "data-pageroot-id"
+      || !attribute.name.startsWith("data-pageroot-")
+    )
     && !REVIEW_COMMENT_BINDING_SOURCE_BOX_ATTRIBUTES.includes(attribute.name)
   ));
   const identityAttributePriority = (name: string) => {
-    if (name === "id") return 0;
-    if (name === "name" || name === "aria-label") return 1;
-    if (name.startsWith("data-")) return 2;
-    return 3;
+    if (name === "data-pageroot-id") return 0;
+    if (name === "id") return 1;
+    if (name === "name" || name === "aria-label") return 2;
+    if (name.startsWith("data-")) return 3;
+    return 4;
   };
   const identityAttributes = (nonReviewAttributes.some(
     (attribute) => attribute.name !== "class",
@@ -434,9 +438,16 @@ function reviewBootstrap(
       if (!runtimeVisualArrayIsArray(rawAttribute) || rawAttribute.length !== 2) return null;
       const name = RuntimeVisualString(rawAttribute[0] || "");
       const value = RuntimeVisualString(rawAttribute[1] || "");
+      const ownedAttribute = runtimeVisualRegExpExec(
+        runtimeVisualOwnedAttributeNamePattern,
+        name,
+      ) !== null;
       if (
         runtimeVisualRegExpExec(runtimeVisualBindingAttributeNamePattern, name) === null
-        || runtimeVisualRegExpExec(runtimeVisualOwnedAttributeNamePattern, name) !== null
+        || (
+          ownedAttribute
+          && runtimeVisualStringToLowerCase(name) !== "data-pageroot-id"
+        )
         || value.length > 1024
       ) return null;
       runtimeVisualArrayPush(attributes, [name, value]);

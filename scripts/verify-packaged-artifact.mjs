@@ -78,6 +78,7 @@ const REQUIRED_BRIDGE_FILES = [
   "project-file-repository/registry.mjs",
   "project-file-repository/request-draft.mjs",
   "project-file-repository/version-candidate.mjs",
+  "project-file-repository/candidate-identity.mjs",
   "project-file-repository/working-copy.mjs",
   "project-file-repository/semantic-text-materialization.mjs",
   "project-file-repository/semantic-structure-materialization.mjs",

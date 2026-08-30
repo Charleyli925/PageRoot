@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { readFile, stat } from "node:fs/promises";
+import path from "node:path";
 import test from "node:test";
 import semver from "semver";
 
@@ -89,6 +90,7 @@ const BRIDGE_FILES = [
   "project-file-repository/registry.mjs",
   "project-file-repository/request-draft.mjs",
   "project-file-repository/version-candidate.mjs",
+  "project-file-repository/candidate-identity.mjs",
   "project-file-repository/working-copy.mjs",
   "project-file-repository/semantic-text-materialization.mjs",
   "project-file-repository/semantic-structure-materialization.mjs",
@@ -236,6 +238,36 @@ test("desktop package manifest owns the exact application and Bridge resource cl
       ...LEGAL_RESOURCE_FILES,
     ]),
   );
+  const exactPackagedAppTargets = packageJson.build.files.filter((entry) => (
+    typeof entry === "string"
+    && !entry.startsWith("!")
+    && !/[?*{}[\]]/u.test(entry)
+  ));
+  const packagedRuntimeTargets = new Set([
+    ...resourceTargets,
+    ...exactPackagedAppTargets,
+  ]);
+  for (const entry of packageJson.build.extraResources.filter((candidate) => (
+    typeof candidate.from === "string"
+    && typeof candidate.to === "string"
+    && candidate.from.endsWith(".mjs")
+    && (candidate.to.startsWith("bridge/") || candidate.to.startsWith("shared/"))
+  ))) {
+    const source = await readFile(new URL(`../${entry.from}`, import.meta.url), "utf8");
+    const relativeImports = [...source.matchAll(
+      /\bfrom\s+["'](\.{1,2}\/[^"']+)["']/gu,
+    )].map((match) => match[1]);
+    for (const specifier of relativeImports) {
+      const dependency = path.posix.normalize(path.posix.join(
+        path.posix.dirname(entry.to),
+        specifier,
+      ));
+      assert.ok(
+        packagedRuntimeTargets.has(dependency),
+        `${entry.to} imports an unpackaged runtime resource: ${dependency}`,
+      );
+    }
+  }
   const schemaResource = packageJson.build.extraResources.find(
     (entry) => entry.to === "schemas",
   );

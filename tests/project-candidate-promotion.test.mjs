@@ -75,15 +75,18 @@ test("a Candidate is not a Version until adoption, rejection consumes no ordinal
   assert.equal(manifest.latestOfficialVersionId, "ver_0002");
 });
 
-test("promotion preserves Candidate bytes in the Version and materializes identities only in its Working Copy", async (t) => {
+test("promotion preserves the identity-normalized Candidate in its Version and Working Copy", async (t) => {
   const value = await fixture(t);
   const imported = await importSource(value, "promotion-identity.html");
-  const candidateHtml = "<!doctype html><html><head><title>Candidate</title></head><body><main>Candidate</main></body></html>";
+  const candidateSubmission = html("Candidate").replace(
+    /<h1 data-pageroot-id="[^"]+">Candidate<\/h1>/u,
+    "<main>Candidate</main>",
+  );
   const candidate = await value.repository.createCandidate({
     target: imported.target,
     requestId: "req_promotion_identity",
     candidateId: "candidate_promotion_identity_0001",
-    html: candidateHtml,
+    html: candidateSubmission,
     expectedSourceSha256: imported.target.sourceSha256,
   });
   const promoted = await value.repository.promoteCandidate({
@@ -91,18 +94,26 @@ test("promotion preserves Candidate bytes in the Version and materializes identi
     candidateId: candidate.candidate.candidateId,
   });
   const controlRoot = path.join(imported.target.projectRootPath, ".pageroot");
+  const candidateHtml = await readFile(path.join(
+    controlRoot,
+    "requests",
+    "req_promotion_identity",
+    "candidate.html",
+  ), "utf8");
+  assert.notEqual(candidateHtml, candidateSubmission);
+  assert.equal(inspectSourceElementIdentity(candidateHtml).complete, true);
   assert.equal(
     await readFile(path.join(controlRoot, "versions", "ver_0002", "index.html"), "utf8"),
     candidateHtml,
   );
   const managedHtml = await readFile(promoted.target.exactSourcePath, "utf8");
-  assert.notEqual(managedHtml, candidateHtml);
+  assert.equal(managedHtml, candidateHtml);
   assert.equal(inspectSourceElementIdentity(managedHtml).complete, true);
   assert.equal(promoted.target.sourceSha256, sha256(Buffer.from(managedHtml, "utf8")));
   const state = await json(path.join(controlRoot, "working-copies", "work_ver_0002.json"));
   assert.equal(state.baseSha256, candidate.candidate.outputSha256);
   assert.equal(state.currentSha256, promoted.target.sourceSha256);
-  assert.equal(state.differsFromBase, true);
+  assert.equal(state.differsFromBase, false);
   assert.equal(state.sourceElementIdentitySchemaVersion, 1);
   const transaction = await json(path.join(
     controlRoot,
@@ -369,7 +380,7 @@ test("blocked Candidate validation never reserves a Version", async (t) => {
       target: imported.target,
       requestId: "req_empty_candidate",
       candidateId: "candidate_empty_0001",
-      html: "<!doctype html><html><head><title>empty</title></head><body></body></html>",
+      html: html("empty").replace(/<h1[^>]*>empty<\/h1>/u, ""),
       expectedSourceSha256: imported.target.sourceSha256,
     }),
     (error) => error instanceof ProjectFileRepositoryError
@@ -398,12 +409,13 @@ test("createCandidate ignores authored script changes and keeps weak continuity 
 </body>
 </html>`;
   const imported = await importSource(value, "scope.html", base);
+  const identityBase = await readFile(imported.target.exactSourcePath, "utf8");
 
   const scriptOnly = await value.repository.createCandidate({
     target: imported.target,
     requestId: "req_script_only",
     candidateId: "candidate_script_only_0001",
-    html: base.replace("window.scopeFixture = 1", "window.scopeFixture = 2"),
+    html: identityBase.replace("window.scopeFixture = 1", "window.scopeFixture = 2"),
     expectedSourceSha256: imported.target.sourceSha256,
   });
   assert.equal(scriptOnly.candidate.status, "pending-review");
@@ -425,7 +437,12 @@ test("createCandidate ignores authored script changes and keeps weak continuity 
     target: imported.target,
     requestId: "req_unrelated_page",
     candidateId: "candidate_unrelated_0001",
-    html: `<!doctype html><html><head><title>另一页</title><script id="shared-script">window.scopeFixture = 1;</script></head><body><article>全新的内容与结构</article></body></html>`,
+    html: identityBase
+      .replace(">Scope fixture</title>", ">另一页</title>")
+      .replace(
+        /<body([^>]*)>[\s\S]*<\/body>/u,
+        '<body$1><article>全新的内容与结构</article></body>',
+      ),
     expectedSourceSha256: imported.target.sourceSha256,
   });
   assert.equal(unrelated.candidate.status, "pending-review");

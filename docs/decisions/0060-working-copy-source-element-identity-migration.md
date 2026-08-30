@@ -70,13 +70,12 @@ leave mixed or externally overwritten HTML.
    addition, deletion, swap, transplant, forgery, duplication, tag change or
    topology change fails closed even if an exact byte patch replays.
 7. Candidate Promotion keeps the immutable Version snapshot byte-exact to the
-   sealed Candidate. Its private prepared Working Copy is materialized
-   separately, and the Promotion transaction seals that file's distinct
-   `workingCopySourceSha256` before no-replace publication. The new Working Copy
-   state records identity schema v1, the Candidate Hash as `baseSha256`, and the
-   identified file Hash as `currentSha256`. Recovery validates each artifact
-   against its own sealed Hash; it never runs a later workspace migration that
-   would invalidate an already returned activation target.
+   sealed Candidate. ADR 0067 now requires new Candidates to be identity-complete
+   before Review, so their prepared Working Copy is normally byte-identical;
+   the separate `workingCopySourceSha256` remains for old schema-v4 Candidates
+   and crash recovery. The new Working Copy state records identity schema v1,
+   Candidate Hash as `baseSha256`, and identified file Hash as `currentSha256`.
+   Recovery validates every artifact against its own sealed Hash.
 8. An explicit user choice to adopt conflicting disk bytes through force-unlock
    clears the old identity marker only after recording that complete disk Hash,
    then immediately re-enters the same recoverable migration. Ordinary external

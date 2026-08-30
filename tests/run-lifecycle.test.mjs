@@ -468,4 +468,21 @@ test("active run errors are localized without exposing internal messages or code
     "返回的 HTML 无法安全采用，当前页面没有被覆盖。",
   );
   assert.doesNotMatch(legacyScopeFailure.error, /TARGET_|HARD_/u);
+
+  const identityFailure = activeRunFromRecord({
+    requestId: "req_identity",
+    status: "error",
+    completionObserved: true,
+    error: {
+      code: "CANDIDATE_SOURCE_IDENTITY_LOST",
+      errorCode: "CANDIDATE_IDENTITY_INVALID",
+      message: "The Candidate omitted an existing identity.",
+    },
+  });
+  assert.equal(
+    identityFailure.error,
+    "返回的 HTML 没有保留可信的源码元素身份，当前页面没有被覆盖。",
+  );
+  assert.equal(identityFailure.errorCode, "CANDIDATE_IDENTITY_INVALID");
+  assert.doesNotMatch(identityFailure.error, /CANDIDATE_|Stable ID/iu);
 });

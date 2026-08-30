@@ -137,6 +137,11 @@ The v1 suffix here is local to each auxiliary artifact and remains its current
 strict contract. These files are not compatibility readers for old main
 records.
 
+New `candidate.v4` writers persist `submittedOutputSha256` and an identity-v1
+report inside the Candidate record. Those members are optional in the schema
+only so already sealed schema-v4 Candidates remain readable; Repository-created
+Candidates always write and validate them before Review.
+
 `candidate-assessment.v1.schema.json` requires document-health and continuity
 evidence. The retired `health.executableSurfaceUnchanged` and `executable`
 members remain optional only so immutable Developer Preview history can be

@@ -20,6 +20,17 @@ import {
   waitForProjectReady,
 } from "./electron-native-harness.mjs";
 
+function identityPreservingCandidateHtml(target, title) {
+  const current = readFileSync(target.exactSourcePath, "utf8");
+  const candidate = current.replace(
+    /(<title\b[^>]*>)[\s\S]*?(<\/title>)/iu,
+    (_match, opening, closing) => `${opening}${title}${closing}`,
+  );
+  return candidate === current
+    ? current.replace(/<\/html\s*>/iu, `<!-- ${title} --></html>`)
+    : candidate;
+}
+
 test("Electron tab keyboard navigation manages focus and a persisted Start suppresses activePath restart", {
   tag: ["@gate-smoke","@smoke-project-lifecycle"],
 }, async () => {
@@ -562,7 +573,7 @@ test("Electron sidebar opens an imported historical version in the existing proj
         target,
         requestId: `req_sidebar_history_${ordinal}`,
         candidateId: `candidate_sidebar_history_${ordinal}_0001`,
-        html: `<!doctype html><html><head><title>${title}</title></head><body><h1>${title}</h1></body></html>`,
+        html: identityPreservingCandidateHtml(target, title),
         expectedSourceSha256: target.sourceSha256,
       });
       const promoted = await repository.promoteCandidate({
@@ -647,7 +658,7 @@ test("Electron sidebar keeps multiple project trees expanded without switching i
             target,
             requestId: `req_sidebar_expansion_${ordinal}`,
             candidateId: `candidate_sidebar_expansion_${ordinal}_0001`,
-            html: `<!doctype html><html><head><title>${title}</title></head><body><h1>${title}</h1></body></html>`,
+            html: identityPreservingCandidateHtml(target, title),
             expectedSourceSha256: target.sourceSha256,
           });
           const promoted = await repository.promoteCandidate({

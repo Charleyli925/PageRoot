@@ -15,7 +15,7 @@ import { sha256 } from "../bridge/lifecycle-core.mjs";
 import { ProjectFileRepository } from "../bridge/project-file-repository.mjs";
 
 function html(label) {
-  return `<!doctype html><html><head><title>${label}</title></head><body><h1>${label}</h1></body></html>`;
+  return `<!doctype html><html data-pageroot-id="pr1_11111111111141118111111111111111"><head data-pageroot-id="pr1_22222222222242229222222222222222"><title data-pageroot-id="pr1_3333333333334333a333333333333333">${label}</title></head><body data-pageroot-id="pr1_4444444444444444b444444444444444"><h1 data-pageroot-id="pr1_55555555555545558555555555555555">${label}</h1></body></html>`;
 }
 
 async function json(filePath) {
@@ -149,10 +149,21 @@ test("v4 schemas accept repository-produced identity, Working Copy, Candidate an
   });
   const candidatePath = path.join(controlRoot, "requests", "req_schema", "candidate.json");
   const candidateRuntime = await json(path.join(controlRoot, "runtime-state.json"));
+  const candidateRecord = await json(candidatePath);
   await Promise.all([
-    validate("candidate.v4.schema.json", await json(candidatePath)),
+    validate("candidate.v4.schema.json", candidateRecord),
     validate("project-runtime-state.v4.schema.json", candidateRuntime),
   ]);
+  assert.equal(candidateRecord.identityReport.status, "verified");
+  assert.equal(
+    candidateRecord.identityReport.submittedOutputSha256,
+    candidateRecord.submittedOutputSha256,
+  );
+  assert.equal(candidateRecord.identityReport.outputSha256, candidateRecord.outputSha256);
+  const legacyCandidateWithoutIdentityEvidence = structuredClone(candidateRecord);
+  delete legacyCandidateWithoutIdentityEvidence.submittedOutputSha256;
+  delete legacyCandidateWithoutIdentityEvidence.identityReport;
+  await validate("candidate.v4.schema.json", legacyCandidateWithoutIdentityEvidence);
   assert.match(candidateRuntime.activeRequest.candidateOutputSha256, /^sha256:[a-f0-9]{64}$/u);
   assert.match(candidateRuntime.activeRequest.candidateRecordSha256, /^sha256:[a-f0-9]{64}$/u);
   const missingCandidateSeal = structuredClone(candidateRuntime);

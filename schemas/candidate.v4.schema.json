@@ -77,6 +77,43 @@
         },
         "assessedAt": { "type": "string", "format": "date-time" }
       }
+    },
+    "identityReport": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "status",
+        "baseElementCount",
+        "outputElementCount",
+        "retainedElementCount",
+        "deletedElementCount",
+        "addedElementCount",
+        "assignedElementCount",
+        "baseIdentityBindingSha256",
+        "outputIdentityBindingSha256",
+        "submittedOutputSha256",
+        "outputSha256",
+        "issueCodes"
+      ],
+      "properties": {
+        "schemaVersion": { "const": "1.0.0" },
+        "status": { "const": "verified" },
+        "baseElementCount": { "type": "integer", "minimum": 0 },
+        "outputElementCount": { "type": "integer", "minimum": 0 },
+        "retainedElementCount": { "type": "integer", "minimum": 0 },
+        "deletedElementCount": { "type": "integer", "minimum": 0 },
+        "addedElementCount": { "type": "integer", "minimum": 0 },
+        "assignedElementCount": { "type": "integer", "minimum": 0 },
+        "baseIdentityBindingSha256": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+        "outputIdentityBindingSha256": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+        "submittedOutputSha256": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+        "outputSha256": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+        "issueCodes": {
+          "type": "array",
+          "maxItems": 0
+        }
+      }
     }
   },
   "type": "object",
@@ -114,7 +151,9 @@
     "sourceWorkingCopyId": { "type": "string", "pattern": "^work_ver_\\d{4,}$" },
     "expectedSourceSha256": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
     "outputRelativePath": { "type": "string", "pattern": "^requests/[A-Za-z0-9_-]{1,160}/candidate\\.html$" },
+    "submittedOutputSha256": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
     "outputSha256": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "identityReport": { "$ref": "#/$defs/identityReport" },
     "assessment": { "$ref": "#/$defs/assessment" },
     "status": { "enum": ["pending-review", "rejected", "promoted"] },
     "createdAt": { "type": "string", "format": "date-time" },

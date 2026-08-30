@@ -134,6 +134,10 @@ async function createFixture(t) {
   };
 }
 
+function identityPreservingCandidate(fixture, label) {
+  return fixture.managedSourceHtml.replaceAll("Before", label);
+}
+
 test("Qoder ACP policy freezes identities, hashes, and real files", async (t) => {
   const fixture = await createFixture(t);
   assert.equal(fixture.policy.requestRoot, fixture.requestPath);
@@ -661,7 +665,7 @@ function createSyntheticAgent(fixture, observed) {
         sessionId,
         path: fixture.options.promptPath,
       });
-      const candidate = "<!doctype html><html><head><title>Candidate</title></head><body><h1>ACP Candidate</h1></body></html>\n";
+      const candidate = identityPreservingCandidate(fixture, "ACP Candidate");
       await client.request(acp.methods.client.fs.writeTextFile, {
         sessionId,
         path: fixture.outputPath,
@@ -883,7 +887,7 @@ test("ACP execution projects public Agent messages and marks a bounded text tail
 
 test("ACP stdio transport completes the same synthetic Candidate contract", async (t) => {
   const fixture = await createFixture(t);
-  const candidate = "<!doctype html><html><head><title>Stdio Candidate</title></head><body><h1>ACP stdio Candidate</h1></body></html>\n";
+  const candidate = identityPreservingCandidate(fixture, "ACP stdio Candidate");
   const scriptPath = await createStdioAgentScript(fixture);
   const result = await runQoderAcpTask({
     command: process.execPath,
@@ -927,7 +931,7 @@ test("ACP stdio transport completes the same synthetic Candidate contract", asyn
 
 test("ACP stdio transport runs a verified npm-style bundle with Finder's sparse PATH", async (t) => {
   const fixture = await createFixture(t);
-  const candidate = "<!doctype html><html><head><title>Runtime Candidate</title></head><body><h1>Trusted runtime Candidate</h1></body></html>\n";
+  const candidate = identityPreservingCandidate(fixture, "Trusted runtime Candidate");
   const scriptPath = await createStdioAgentScript(fixture);
   const information = await stat(scriptPath);
   const expectedExecutable = {
@@ -1180,7 +1184,7 @@ process.stdout.write(JSON.stringify({
 
 test("ACP stdio transport accepts a valid completed turn before immediate Agent exit", async (t) => {
   const fixture = await createFixture(t);
-  const candidate = "<!doctype html><html><head><title>Immediate exit</title></head><body><h1>Immediate exit Candidate</h1></body></html>\n";
+  const candidate = identityPreservingCandidate(fixture, "Immediate exit Candidate");
   const scriptPath = await createStdioAgentScript(fixture);
   const result = await runQoderAcpTask({
     command: process.execPath,

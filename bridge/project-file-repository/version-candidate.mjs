@@ -7,6 +7,9 @@ import {
   ProjectFileRepositoryError,
 } from "./errors.mjs";
 import {
+  assertCandidateSourceIdentityReport,
+} from "./candidate-identity.mjs";
+import {
   ensureRelativePath,
   isObject,
   nowIso,
@@ -44,6 +47,14 @@ export function mapCandidateValidationError(cause) {
       message: message || "The Candidate HTML is unusable.",
       errorDetail: "输出缺少必要的协议字段或无法作为完整页面使用",
       recoveryHint: "请检查 AI Agent 的输出是否完整，然后重新提交。",
+    };
+  }
+  if (code.startsWith("CANDIDATE_SOURCE_IDENTITY_")) {
+    return {
+      errorCode: "CANDIDATE_IDENTITY_INVALID",
+      message: message || "The Candidate source identities are invalid.",
+      errorDetail: "输出未保留现有源码元素身份，或包含重复、伪造的 Stable ID",
+      recoveryHint: "请让 AI 保留所有仍存在元素的 data-pageroot-id，并删除对新增元素自行填写的 ID 后重新提交。",
     };
   }
   return null;
@@ -105,4 +116,8 @@ export function assertCandidateAssessment(assessment) {
     );
   }
   return assessment;
+}
+
+export function assertCandidateIdentityReport(report) {
+  return assertCandidateSourceIdentityReport(report);
 }

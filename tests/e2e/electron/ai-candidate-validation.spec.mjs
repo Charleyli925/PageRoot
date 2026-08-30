@@ -200,3 +200,77 @@ test("a malformed AI HTML return is rejected before completion or opening", asyn
     removeSourceFixture(fixture.sourceDirectory);
   }
 });
+
+test("an AI return cannot drop a retained source identity", async () => {
+  test.setTimeout(120_000);
+  const fixture = createSourceFixture("candidate-identity-loss.html");
+  const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
+  try {
+    const request = await addCommentAndSubmit(
+      launched.page,
+      launched.electronApp,
+      fixture.sourcePath,
+    );
+    writeAiOutput(request.requestRoot, (base) => base.replace(
+      /\sdata-pageroot-id="pr1_[a-f0-9]{32}"/u,
+      "",
+    ));
+    runOfficialFinalizer(request.requestRoot, request.changeRequest);
+
+    const actionBar = launched.page.getByTestId("ai-conversation-action-bar");
+    await expect(actionBar).toContainText(
+      "输出未保留现有源码元素身份，或包含重复、伪造的 Stable ID",
+      { timeout: 30_000 },
+    );
+    const requestRecord = JSON.parse(readFileSync(
+      path.join(request.requestRoot, "request.json"),
+      "utf8",
+    ));
+    expect(requestRecord.status).toBe("error");
+    expect(requestRecord.error.errorCode).toBe("CANDIDATE_IDENTITY_INVALID");
+    expect(requestRecord.error.code).toBe("CANDIDATE_SOURCE_IDENTITY_LOST");
+    expect(existsSync(path.join(request.requestRoot, "candidate.json"))).toBe(false);
+    expect(workingHtmlFiles(launched.workspace, request.changeRequest.projectId)).toHaveLength(1);
+    expect(readFileSync(fixture.sourcePath).equals(fixture.original)).toBe(true);
+  } finally {
+    await stopPageRoot(launched.electronApp, launched.isolatedUserData);
+    removeSourceFixture(fixture.sourceDirectory);
+  }
+});
+
+test("an AI return cannot replace a retained source identity with a forged ID", async () => {
+  test.setTimeout(120_000);
+  const fixture = createSourceFixture("candidate-identity-forgery.html");
+  const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
+  try {
+    const request = await addCommentAndSubmit(
+      launched.page,
+      launched.electronApp,
+      fixture.sourcePath,
+    );
+    writeAiOutput(request.requestRoot, (base) => base.replace(
+      /data-pageroot-id="pr1_[a-f0-9]{32}"/u,
+      'data-pageroot-id="pr1_ffffffffffff4fff8fffffffffffffff"',
+    ));
+    runOfficialFinalizer(request.requestRoot, request.changeRequest);
+
+    const actionBar = launched.page.getByTestId("ai-conversation-action-bar");
+    await expect(actionBar).toContainText(
+      "输出未保留现有源码元素身份，或包含重复、伪造的 Stable ID",
+      { timeout: 30_000 },
+    );
+    const requestRecord = JSON.parse(readFileSync(
+      path.join(request.requestRoot, "request.json"),
+      "utf8",
+    ));
+    expect(requestRecord.status).toBe("error");
+    expect(requestRecord.error.errorCode).toBe("CANDIDATE_IDENTITY_INVALID");
+    expect(requestRecord.error.code).toBe("CANDIDATE_SOURCE_IDENTITY_FORGED");
+    expect(existsSync(path.join(request.requestRoot, "candidate.json"))).toBe(false);
+    expect(workingHtmlFiles(launched.workspace, request.changeRequest.projectId)).toHaveLength(1);
+    expect(readFileSync(fixture.sourcePath).equals(fixture.original)).toBe(true);
+  } finally {
+    await stopPageRoot(launched.electronApp, launched.isolatedUserData);
+    removeSourceFixture(fixture.sourceDirectory);
+  }
+});
