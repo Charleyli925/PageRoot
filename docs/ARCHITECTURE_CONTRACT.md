@@ -698,7 +698,9 @@ before/after source Hashes, a system-derived identity delta, bounded logical tar
 Selection only in the current-open renderer session. Autosave receives the
 resulting complete HTML and operations as identity/save evidence. Repository
 independently parses each before/after HTML pair, recomputes its ID-set and
-topology delta, and cross-validates that fact against the operation and delta.
+topology delta, validates the complete public operation schema/envelope plus
+type-specific fields, and cross-validates that fact against the operation and
+delta.
 Exact SourcePatch replay proves only the byte/Hash/CAS/recovery chain; patch
 `kind` cannot authorize identity changes. Undo or redo creates another normal
 complete-HTML save; its inverse is session-local exact restore evidence, not an

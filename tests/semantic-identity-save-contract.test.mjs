@@ -246,3 +246,39 @@ test("Repository rejects forged deltas and unproved identity topology changes", 
   const contentOnly = html.replace(">plain</p>", ' class="changed">changed</p>');
   assert.equal(materializeIdentityPreservingSave(html, contentOnly).html, contentOnly);
 });
+
+test("Repository validates the complete semantic operation contract before authorizing identity changes", () => {
+  const inserting = createInsertElementOperation(html, {
+    baseRevision: 0,
+    operationId: "sourceop_save_contract_shape_010",
+    parentElementId: ids.left,
+    beforeElementId: null,
+    html: "<article>new</article>",
+  });
+  const result = applySemanticOperation(
+    createSemanticDocumentState(html),
+    inserting,
+    { randomUUID: uuidFactory("60000000-0000-4000-8000-000000000001") },
+  );
+  const without = (value, key) => Object.fromEntries(
+    Object.entries(value).filter(([member]) => member !== key),
+  );
+  const malformed = [
+    [without(inserting, "schemaVersion"), "SEMANTIC_OPERATION_SCHEMA_UNSUPPORTED"],
+    [without(inserting, "baseRevision"), "SEMANTIC_REVISION_INVALID"],
+    [without(inserting, "html"), "SEMANTIC_OPERATION_MEMBER_REQUIRED"],
+    [{ ...inserting, rendererAuthority: true }, "SEMANTIC_OPERATION_MEMBER_UNKNOWN"],
+  ];
+  for (const [semanticOperation, expectedCode] of malformed) {
+    const evidence = saveEvidence(html, result, semanticOperation);
+    assert.throws(
+      () => materializeIdentityPreservingSave(html, result.html, {
+        sourceHistoryOperations: [evidence],
+      }),
+      (error) => (
+        error?.code === "SOURCE_ELEMENT_IDENTITY_LOST"
+        && error?.details?.semanticIdentityError === expectedCode
+      ),
+    );
+  }
+});

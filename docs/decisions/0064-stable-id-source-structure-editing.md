@@ -40,7 +40,8 @@ state. Cloning authored markup also cannot retain the original persistent IDs.
   authority.
 - Repository replays SourcePatch only to prove the exact before/after byte,
   Hash, CAS and crash-recovery chain. It independently recomputes the identity
-  delta and cross-validates it with the semantic operation; a legacy patch
+  delta and cross-validates it with the complete public semantic-operation
+  schema/envelope and type-specific fields; a legacy patch
   `kind` cannot authorize ID-set or topology changes. Successful save reseals
   the new tag/parent/order binding for later external-conflict detection.
 - The operation rules are closed: insert/duplicate add only fresh subtree IDs;

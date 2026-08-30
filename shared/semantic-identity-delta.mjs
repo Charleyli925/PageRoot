@@ -9,6 +9,31 @@ const SEMANTIC_TYPES = new Set([
   "replaceSubtree",
 ]);
 const DIRECTIONS = new Set(["forward", "undo", "redo"]);
+export const SEMANTIC_OPERATION_SCHEMA_VERSION = 1;
+
+const OPERATION_ID_PATTERN = /^[A-Za-z][A-Za-z0-9_-]{7,95}$/u;
+const SHA256_PATTERN = /^sha256:[a-f0-9]{64}$/u;
+const ELEMENT_ID_PATTERN = /^pr1_[a-f0-9]{12}4[a-f0-9]{3}[89ab][a-f0-9]{15}$/u;
+const COMMON_OPERATION_KEYS = new Set([
+  "schemaVersion",
+  "operationId",
+  "baseRevision",
+  "expectedSourceSha256",
+  "type",
+]);
+const OPERATION_FIELDS = new Map([
+  ["setText", { required: ["target", "text"], optional: ["contentHtml"] }],
+  ["replaceTextRange", { required: ["target", "range", "text"], optional: [] }],
+  ["setAttribute", { required: ["target", "name", "value"], optional: [] }],
+  ["setStyle", {
+    required: ["target", "property", "value", "important"],
+    optional: ["range", "createdPagerootIds"],
+  }],
+  ["insertElement", { required: ["parent", "before", "html"], optional: [] }],
+  ["deleteElement", { required: ["target"], optional: [] }],
+  ["moveElement", { required: ["target", "parent", "before"], optional: [] }],
+  ["replaceSubtree", { required: ["target", "html"], optional: [] }],
+]);
 
 export class SemanticIdentityDeltaError extends Error {
   constructor(code, message, details = {}) {
@@ -23,6 +48,148 @@ function fail(code, message, details = {}) {
   throw new SemanticIdentityDeltaError(code, message, details);
 }
 
+function record(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function assertOnlyMembers(value, allowed, label) {
+  const unknown = Object.keys(value).filter((key) => !allowed.has(key));
+  if (unknown.length > 0) {
+    fail("SEMANTIC_OPERATION_MEMBER_UNKNOWN", `${label} contains unsupported members.`, {
+      label,
+      members: unknown,
+    });
+  }
+}
+
+function assertOperationPrecondition(value, label) {
+  if (!record(value)) {
+    fail("SEMANTIC_TARGET_PRECONDITION_REQUIRED", `${label} precondition is required.`);
+  }
+  assertOnlyMembers(
+    value,
+    new Set(["elementId", "tagName", "expectedOuterHtmlSha256"]),
+    label,
+  );
+  if (!ELEMENT_ID_PATTERN.test(value.elementId ?? "")) {
+    fail("SEMANTIC_IDENTITY_ELEMENT_INVALID", `${label}.elementId is not a stable element ID.`);
+  }
+  if (!/^[a-z][a-z0-9:-]*$/u.test(value.tagName ?? "")) {
+    fail("SEMANTIC_TARGET_TAG_INVALID", `${label}.tagName is invalid.`);
+  }
+  if (!SHA256_PATTERN.test(value.expectedOuterHtmlSha256 ?? "")) {
+    fail("SEMANTIC_IDENTITY_HASH_INVALID", `${label}.expectedOuterHtmlSha256 is not a sha256 Hash.`);
+  }
+}
+
+function assertTextRange(value) {
+  if (!record(value)) {
+    fail("SEMANTIC_TEXT_RANGE_INVALID", "A semantic text range object is required.");
+  }
+  assertOnlyMembers(value, new Set(["startOffset", "endOffset", "quote"]), "range");
+  if (
+    !Number.isSafeInteger(value.startOffset)
+    || !Number.isSafeInteger(value.endOffset)
+    || value.startOffset < 0
+    || value.endOffset < value.startOffset
+    || typeof value.quote !== "string"
+  ) {
+    fail("SEMANTIC_TEXT_RANGE_INVALID", "A semantic text range requires safe ordered offsets and a quote.");
+  }
+}
+
+/**
+ * Validates the public semantic-operation envelope independently of renderer
+ * state. Repository calls this before treating an operation as save authority;
+ * DOM-specific stale preconditions are verified separately against before HTML.
+ */
+export function assertSemanticOperationContract(operation) {
+  if (!record(operation)) {
+    fail("SEMANTIC_OPERATION_INVALID", "A semantic operation object is required.");
+  }
+  if (operation.schemaVersion !== SEMANTIC_OPERATION_SCHEMA_VERSION) {
+    fail("SEMANTIC_OPERATION_SCHEMA_UNSUPPORTED", "Semantic operation schema version is unsupported.", {
+      schemaVersion: operation.schemaVersion,
+    });
+  }
+  if (!OPERATION_ID_PATTERN.test(operation.operationId ?? "")) {
+    fail("SEMANTIC_OPERATION_ID_INVALID", "Semantic operationId has an invalid format.");
+  }
+  if (!Number.isSafeInteger(operation.baseRevision) || operation.baseRevision < 0) {
+    fail("SEMANTIC_REVISION_INVALID", "baseRevision must be a non-negative safe integer.");
+  }
+  if (!SHA256_PATTERN.test(operation.expectedSourceSha256 ?? "")) {
+    fail("SEMANTIC_OPERATION_HASH_INVALID", "expectedSourceSha256 must be a sha256 Hash.");
+  }
+  const fields = OPERATION_FIELDS.get(operation.type);
+  if (!fields) {
+    fail("SEMANTIC_OPERATION_TYPE_UNSUPPORTED", `Unsupported semantic operation type: ${operation.type ?? "missing"}.`);
+  }
+  assertOnlyMembers(operation, new Set([
+    ...COMMON_OPERATION_KEYS,
+    ...fields.required,
+    ...fields.optional,
+  ]), "operation");
+  const missing = fields.required.filter((field) => !Object.hasOwn(operation, field));
+  if (missing.length > 0) {
+    fail("SEMANTIC_OPERATION_MEMBER_REQUIRED", "Semantic operation is missing required members.", {
+      members: missing,
+    });
+  }
+
+  if (fields.required.includes("target")) assertOperationPrecondition(operation.target, "target");
+  if (fields.required.includes("parent")) assertOperationPrecondition(operation.parent, "parent");
+  if (fields.required.includes("before") && operation.before !== null) {
+    assertOperationPrecondition(operation.before, "before");
+  }
+  if (operation.type === "setText") {
+    if (
+      typeof operation.text !== "string"
+      || (operation.contentHtml !== undefined && typeof operation.contentHtml !== "string")
+    ) {
+      fail("SEMANTIC_TEXT_INVALID", "setText requires string text and optional string contentHtml.");
+    }
+  } else if (operation.type === "replaceTextRange") {
+    assertTextRange(operation.range);
+    if (typeof operation.text !== "string") {
+      fail("SEMANTIC_TEXT_INVALID", "replaceTextRange replacement must be a string.");
+    }
+  } else if (operation.type === "setAttribute") {
+    if (
+      typeof operation.name !== "string"
+      || operation.name.length === 0
+      || (operation.value !== null && typeof operation.value !== "string")
+    ) {
+      fail("SEMANTIC_ATTRIBUTE_INVALID", "setAttribute requires a non-empty name and string-or-null value.");
+    }
+  } else if (operation.type === "setStyle") {
+    if (
+      typeof operation.property !== "string"
+      || operation.property.length === 0
+      || typeof operation.value !== "string"
+      || typeof operation.important !== "boolean"
+    ) {
+      fail("SEMANTIC_STYLE_INVALID", "setStyle requires property/value strings and an explicit important boolean.");
+    }
+    if (operation.range !== undefined) assertTextRange(operation.range);
+    if (operation.createdPagerootIds !== undefined) {
+      if (
+        !Array.isArray(operation.createdPagerootIds)
+        || operation.createdPagerootIds.length === 0
+        || new Set(operation.createdPagerootIds).size !== operation.createdPagerootIds.length
+        || operation.createdPagerootIds.some((elementId) => !ELEMENT_ID_PATTERN.test(elementId))
+      ) {
+        fail("SEMANTIC_STYLE_IDENTITY_INVALID", "createdPagerootIds must contain unique stable element IDs.");
+      }
+    }
+  } else if (["insertElement", "replaceSubtree"].includes(operation.type)) {
+    if (typeof operation.html !== "string" || operation.html.length === 0) {
+      fail("SEMANTIC_FRAGMENT_INVALID", `${operation.type} requires non-empty structural HTML.`);
+    }
+  }
+  return operation;
+}
+
 function canonicalJson(value) {
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
   if (value && typeof value === "object") {
@@ -35,7 +202,7 @@ function canonicalJson(value) {
 
 function requiredElementId(value, label) {
   const elementId = String(value || "");
-  if (!/^pr1_[a-f0-9]{12}4[a-f0-9]{3}[89ab][a-f0-9]{15}$/u.test(elementId)) {
+  if (!ELEMENT_ID_PATTERN.test(elementId)) {
     fail("SEMANTIC_IDENTITY_ELEMENT_INVALID", `${label} is not a stable element ID.`, {
       label,
       elementId,
@@ -458,6 +625,7 @@ export function verifySemanticIdentityTransition({
   direction = "forward",
   identityDelta,
 } = {}) {
+  assertSemanticOperationContract(operation);
   if (!DIRECTIONS.has(direction)) {
     fail("SEMANTIC_IDENTITY_DIRECTION_INVALID", "Semantic identity direction is invalid.");
   }

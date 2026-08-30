@@ -15,12 +15,14 @@ import { buildSourceIndex, sourceSha256 } from "./source-index.js";
 import { buildSourceTextMap, textRangeToSourceSegments } from "./source-text-map.js";
 import { createTargetRef } from "./target-resolver.js";
 import {
+  assertSemanticOperationContract,
   createSemanticIdentitySnapshot,
   deriveSemanticIdentityDelta,
+  SEMANTIC_OPERATION_SCHEMA_VERSION as SHARED_SEMANTIC_OPERATION_SCHEMA_VERSION,
   verifySemanticIdentityTransition,
 } from "../../shared/semantic-identity-delta.mjs";
 
-export const SEMANTIC_OPERATION_SCHEMA_VERSION = 1;
+export const SEMANTIC_OPERATION_SCHEMA_VERSION = SHARED_SEMANTIC_OPERATION_SCHEMA_VERSION;
 
 const OPERATION_TYPES = new Set([
   "setText",
@@ -34,27 +36,6 @@ const OPERATION_TYPES = new Set([
 ]);
 const OPERATION_ID_PATTERN = /^[A-Za-z][A-Za-z0-9_-]{7,95}$/u;
 const TRUSTED_RESTORE_OPERATIONS = new WeakMap();
-const COMMON_OPERATION_KEYS = new Set([
-  "schemaVersion",
-  "operationId",
-  "baseRevision",
-  "expectedSourceSha256",
-  "type",
-]);
-const OPERATION_FIELDS = new Map([
-  ["setText", { required: ["target", "text"], optional: ["contentHtml"] }],
-  ["replaceTextRange", { required: ["target", "range", "text"], optional: [] }],
-  ["setAttribute", { required: ["target", "name", "value"], optional: [] }],
-  ["setStyle", {
-    required: ["target", "property", "value", "important"],
-    optional: ["range", "createdPagerootIds"],
-  }],
-  ["insertElement", { required: ["parent", "before", "html"], optional: [] }],
-  ["deleteElement", { required: ["target"], optional: [] }],
-  ["moveElement", { required: ["target", "parent", "before"], optional: [] }],
-  ["replaceSubtree", { required: ["target", "html"], optional: [] }],
-  ["restoreExactSource", { required: [], optional: [] }],
-]);
 
 export class SemanticOperationError extends Error {
   constructor(code, message, details = {}) {
@@ -170,31 +151,16 @@ function assertOperationEnvelope(state, operation) {
       actualSourceSha256: operation.expectedSourceSha256,
     });
   }
-}
-
-function assertOperationShape(operation) {
-  const fields = OPERATION_FIELDS.get(operation.type);
-  if (!fields) {
-    fail("SEMANTIC_OPERATION_TYPE_UNSUPPORTED", `Unsupported semantic operation type: ${operation.type ?? "missing"}.`);
-  }
-  const allowed = new Set([
-    ...COMMON_OPERATION_KEYS,
-    ...fields.required,
-    ...fields.optional,
-  ]);
-  const unknown = Object.keys(operation).filter((key) => !allowed.has(key));
-  if (unknown.length > 0) {
-    fail("SEMANTIC_OPERATION_MEMBER_UNKNOWN", "Semantic operation contains unsupported members.", {
-      members: unknown,
-    });
-  }
-  const missing = fields.required.filter(
-    (field) => !Object.hasOwn(operation, field),
-  );
-  if (missing.length > 0) {
-    fail("SEMANTIC_OPERATION_MEMBER_REQUIRED", "Semantic operation is missing required members.", {
-      members: missing,
-    });
+  if (operation.type !== "restoreExactSource") {
+    try {
+      assertSemanticOperationContract(operation);
+    } catch (cause) {
+      fail(
+        cause?.code || "SEMANTIC_OPERATION_INVALID",
+        cause?.message || "Semantic operation is invalid.",
+        cause?.details || {},
+      );
+    }
   }
 }
 
@@ -611,7 +577,6 @@ function applyTrustedRestore(state, operation) {
 export function applySemanticOperation(inputState, operation, options = {}) {
   const state = assertState(inputState);
   assertOperationEnvelope(state, operation);
-  assertOperationShape(operation);
   if (operation.type === "restoreExactSource") {
     return applyTrustedRestore(state, operation);
   }
