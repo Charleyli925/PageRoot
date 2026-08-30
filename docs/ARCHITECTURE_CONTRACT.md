@@ -481,7 +481,10 @@ reconciliation or Script execution-state migration.
 The supported compatibility surface is deliberately finite: parser-blocking
 classic scripts, inline classic scripts, `defer`, import-free modules, author
 `DOMContentLoaded` listeners and a first contained relative `<base href>` must
-run in real Electron. The bootstrap may hold and redeliver `DOMContentLoaded`
+run in real Electron. Program identity and Main resource preparation use the
+same first live-document `base[href]`; href-less base elements and inert
+`<template>` contents cannot win, while absolute or escaping bases fail closed.
+The bootstrap may hold and redeliver `DOMContentLoaded`
 after the supported non-async activation sequence. Module import graphs,
 external/source-root-escaping bases and other non-equivalent programs must enter
 the explicit static-degraded state rather than partially or silently execute.

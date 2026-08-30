@@ -66,6 +66,10 @@ export function collectEditRuntimeScripts(html: string): Readonly<{
   executableScripts: readonly EditRuntimeScript[];
   unsupportedReason: string | null;
 }>;
+export function authoredDocumentBase(html: string): Readonly<{
+  href: string;
+  openingTag: string;
+}> | null;
 export function editRuntimeProgramIdentity(html: string): string | null;
 export function unsupportedEditRuntimeProgramReason(source: string): string | null;
 export function editRuntimeSourceMarker(path: readonly number[]): string | null;

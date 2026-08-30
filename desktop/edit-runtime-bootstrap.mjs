@@ -126,7 +126,7 @@ export function createEditRuntimeBootstrap({ executionId, sessionId } = {}) {
     deferredDomContentLoaded = true;
     event.stopImmediatePropagation();
   };
-  document.addEventListener("DOMContentLoaded", holdDomContentLoaded, true);
+  window.addEventListener("DOMContentLoaded", holdDomContentLoaded, true);
 
   const start = async () => {
     if (activationStarted) return;
@@ -136,7 +136,7 @@ export function createEditRuntimeBootstrap({ executionId, sessionId } = {}) {
       await activateAuthorScripts();
     } finally {
       activationComplete = true;
-      document.removeEventListener("DOMContentLoaded", holdDomContentLoaded, true);
+      window.removeEventListener("DOMContentLoaded", holdDomContentLoaded, true);
       if (deferredDomContentLoaded) {
         document.dispatchEvent(new Event("DOMContentLoaded", { bubbles: true }));
       }

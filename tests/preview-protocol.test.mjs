@@ -18,8 +18,35 @@ import {
   createPreviewProtocolController,
   createPreviewSessionOperation,
   registerPreviewProtocolScheme,
+  resolveContainedDocumentBase,
   resolvePreviewSourceRoot,
 } from "../desktop/preview-protocol.mjs";
+
+test("contained document base ignores inert and href-less base elements", () => {
+  assert.deepEqual(
+    resolveContainedDocumentBase(
+      '<base target="_blank"><base href="./assets/"><script src="chart.js"></script>',
+    ),
+    { documentPath: "/assets/", basePath: "assets" },
+  );
+  assert.deepEqual(
+    resolveContainedDocumentBase(
+      '<template><base href="./assets/"></template><script src="chart.js"></script>',
+    ),
+    { documentPath: "/", basePath: "" },
+  );
+});
+
+test("contained document base rejects absolute and scheme-relative sentinel URLs", () => {
+  assert.equal(
+    resolveContainedDocumentBase('<base href="https://pageroot-preview.invalid/assets/">'),
+    null,
+  );
+  assert.equal(
+    resolveContainedDocumentBase('<base href="//pageroot-preview.invalid/assets/">'),
+    null,
+  );
+});
 
 test("declared asset discovery caps missing-reference probes before they can delay a preview session", async (t) => {
   const temporaryRoot = await mkdtemp(

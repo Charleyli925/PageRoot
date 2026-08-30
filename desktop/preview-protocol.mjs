@@ -8,6 +8,8 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { parse, serialize } from "parse5";
 
+import { authoredDocumentBase } from "../app/domain/edit-runtime-contract.js";
+
 export const PREVIEW_PROTOCOL_SCHEME = "pageroot-preview";
 export const PREVIEW_BOOTSTRAP_PATH = "/.pageroot/preview-bootstrap.js";
 
@@ -193,41 +195,19 @@ function attributesFor(node) {
   ]));
 }
 
-function firstDocumentBaseHref(document) {
-  let href = null;
-  const visit = (node) => {
-    if (href !== null) return;
-    if (String(node?.tagName || "").toLowerCase() === "base") {
-      const attributes = attributesFor(node);
-      if (attributes.has("href")) {
-        href = attributes.get("href") || "";
-        return;
-      }
-    }
-    for (const child of node?.childNodes || []) visit(child);
-    if (node?.content) visit(node.content);
-  };
-  visit(document);
-  return href;
-}
-
 /**
  * Resolves the first authored <base href> inside the authorized source root.
  * Runtime and declared-asset preparation share this result so a relative base
  * can never make Main freeze one file while the visible frame requests another.
  */
 export function resolveContainedDocumentBase(html) {
-  let document;
-  try {
-    document = parse(String(html || ""));
-  } catch {
-    return null;
-  }
-  const href = firstDocumentBaseHref(document);
-  if (href === null) {
+  const base = authoredDocumentBase(html);
+  if (!base) {
     return Object.freeze({ documentPath: "/", basePath: "" });
   }
-  const pathReference = String(href).split(/[?#]/u, 1)[0];
+  const href = String(base.href || "").trim();
+  if (/^(?:[a-z][a-z0-9+.-]*:|\/\/)/iu.test(href)) return null;
+  const pathReference = href.split(/[?#]/u, 1)[0];
   let decodedReference;
   try {
     decodedReference = decodeURIComponent(pathReference);

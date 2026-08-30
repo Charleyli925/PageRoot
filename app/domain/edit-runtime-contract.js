@@ -1,3 +1,5 @@
+import { parse as parseHtmlDocument } from "parse5";
+
 /**
  * Pure syntax and identity rules for the bounded Edit author-runtime path.
  * This contract describes a disposable direct-frame grant only: source HTML
@@ -146,27 +148,41 @@ function scriptPolicy(attributes) {
   return Object.freeze({ executable: true, reason: null });
 }
 
-function firstBaseOpeningTag(html) {
+/**
+ * Returns the first authored, live-document <base href> using HTML parser tree
+ * order. A base without href does not win, and inert template contents never
+ * participate in the document base URL.
+ */
+export function authoredDocumentBase(html) {
   const source = String(html || "");
-  const lower = source.toLowerCase();
-  let cursor = 0;
-  while (cursor < source.length) {
-    const comment = source.indexOf("<!--", cursor);
-    const opening = lower.indexOf("<base", cursor);
-    if (comment >= 0 && (opening < 0 || comment < opening)) {
-      const end = source.indexOf("-->", comment + 4);
-      cursor = end < 0 ? source.length : end + 3;
-      continue;
-    }
-    if (opening < 0) return null;
-    if (!isNameBoundary(source[opening + 5] || "")) {
-      cursor = opening + 5;
-      continue;
-    }
-    const openingEnd = htmlTagEnd(source, opening + 5);
-    return openingEnd < 0 ? null : source.slice(opening, openingEnd + 1);
+  let document;
+  try {
+    document = parseHtmlDocument(source, { sourceCodeLocationInfo: true });
+  } catch {
+    return null;
   }
-  return null;
+  let result = null;
+  const visit = (node) => {
+    if (result) return;
+    if (String(node?.tagName || "").toLowerCase() === "base") {
+      const hrefAttribute = (node.attrs || []).find((attribute) => (
+        String(attribute.name || "").toLowerCase() === "href"
+      ));
+      const startTag = node.sourceCodeLocation?.startTag;
+      if (hrefAttribute && startTag) {
+        result = Object.freeze({
+          href: String(hrefAttribute.value || ""),
+          openingTag: source.slice(startTag.startOffset, startTag.endOffset),
+        });
+        return;
+      }
+    }
+    // parse5 stores template descendants in node.content. Deliberately visit
+    // only live childNodes: inert template contents cannot set document.baseURI.
+    for (const child of node?.childNodes || []) visit(child);
+  };
+  visit(document);
+  return result;
 }
 
 /**
@@ -248,7 +264,7 @@ export function editRuntimeProgramIdentity(html) {
   const contract = collectEditRuntimeScripts(html);
   if (contract.unsupportedReason || contract.executableScripts.length < 1) return null;
   return JSON.stringify({
-    documentBase: firstBaseOpeningTag(html),
+    documentBase: authoredDocumentBase(html)?.openingTag || null,
     scripts: contract.executableScripts.map((script) => ({
       openingTag: script.openingTag,
       inline: script.inline,

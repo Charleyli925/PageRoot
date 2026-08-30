@@ -314,11 +314,13 @@ test("semantic structure edit rebuilds the disposable page and reruns its script
 test("Electron Edit executes parser-blocking, inline, defer and module programs with DOMContentLoaded and base", async () => {
   const html = `<!doctype html>
 <html><head><title>Runtime compatibility</title>
+  <template><base href="../inert-assets/"></template>
+  <base target="_blank">
   <base href="./assets/">
   <script src="blocking.js"></script>
   <script>
     window.__runtimeOrder.push('inline');
-    document.addEventListener('DOMContentLoaded', () => {
+    window.addEventListener('DOMContentLoaded', () => {
       window.__runtimeOrder.push('dom-content-loaded');
       document.body.dataset.domContentLoadedReady = 'true';
     }, { once: true });

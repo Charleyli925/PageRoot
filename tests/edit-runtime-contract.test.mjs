@@ -6,6 +6,7 @@ import {
   EDIT_AUTHOR_RUNTIME_BUDGET,
   EDIT_AUTHOR_RUNTIME_VERIFICATION_DEADLINE_MS,
   EDIT_RUNTIME_PROTOCOL_SCHEME,
+  authoredDocumentBase,
   collectEditRuntimeScripts,
   editRuntimeProgramIdentity,
   editRuntimeProtocolUrl,
@@ -71,6 +72,21 @@ test("program identity changes only when authored script markup changes", () => 
   assert.notEqual(editRuntimeProgramIdentity(first), editRuntimeProgramIdentity(baseEdit));
 });
 
+test("program identity follows only the effective live document base", () => {
+  const scripts = '<script defer src="chart.js"></script>';
+  const assetsA = '<base target="_blank"><base href="assets-a/">' + scripts;
+  const assetsB = '<base target="_blank"><base href="assets-b/">' + scripts;
+  const inertA = '<template><base href="assets-a/"></template>' + scripts;
+  const inertB = '<template><base href="assets-b/"></template>' + scripts;
+
+  assert.deepEqual(authoredDocumentBase(assetsA), {
+    href: "assets-a/",
+    openingTag: '<base href="assets-a/">',
+  });
+  assert.notEqual(editRuntimeProgramIdentity(assetsA), editRuntimeProgramIdentity(assetsB));
+  assert.equal(editRuntimeProgramIdentity(inertA), editRuntimeProgramIdentity(inertB));
+});
+
 test("direct Edit runtime grants use one session and one execution identity", () => {
   const sessionId = "0123456789abcdef0123456789abcdef";
   const executionId = "abcdefabcdefabcdefabcdef";
@@ -122,6 +138,7 @@ test("formal architecture keeps the source-edit experience contract and runtime 
   assert.match(adr, /Every source mutation[\s\S]*registered stable ID/u);
   assert.match(adr, /bounded[\s\S]*request-ID replay window/u);
   assert.match(adr, /cannot exhaust[\s\S]*application-lifetime/u);
+  assert.match(adr, /first live-document `base\[href\]`[\s\S]*inert `<template>`/u);
   assert.match(adr, /Workers stay[\s\S]*CSP-disabled/u);
   assert.match(adr, /Stable ID and Runtime edit authority are separate contracts/u);
   assert.match(adr, /authority set is sealed[\s\S]*cannot add a trusted source object/u);
@@ -136,6 +153,7 @@ test("formal architecture keeps the source-edit experience contract and runtime 
   assert.match(architecture, /established exactly once[\s\S]*is then sealed/u);
   assert.match(architecture, /Exact parser-time execution order is not an Edit Runtime[\s\S]*contract/u);
   assert.match(architecture, /parser-blocking[\s\S]*DOMContentLoaded[\s\S]*contained relative `<base href>`/u);
+  assert.match(architecture, /same first live-document `base\[href\]`[\s\S]*inert[\s\S]*`<template>`/u);
   assert.match(architecture, /static-degraded state[\s\S]*rather than partially or silently execute/u);
   assert.match(architecture, /location\.assign\(\)[\s\S]*location\.replace\(\)[\s\S]*frame navigation boundary/u);
   assert.match(interaction, /用户对源码内容完成的编辑必须写入完整 HTML/u);
