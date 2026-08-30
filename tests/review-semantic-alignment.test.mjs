@@ -94,6 +94,23 @@ test("a persistent stable identity pairs across source parents", () => {
   })), [{ beforeIndex: 0, afterIndex: 0, match: "stable-id" }]);
 });
 
+test("persistent identity pairs independently of an authored tag change", () => {
+  const pairs = alignReviewSemanticUnits(
+    [unit("同一元素", {
+      kind: "section:SECTION",
+      stableId: "pageroot:pr1_source",
+      parentKey: "before-parent",
+    })],
+    [unit("同一元素", {
+      kind: "section:ARTICLE",
+      stableId: "pageroot:pr1_source",
+      parentKey: "after-parent",
+    })],
+  );
+
+  assert.deepEqual(matchedPairs(pairs).map(({ match }) => match), ["stable-id"]);
+});
+
 test("exact markup cannot bridge conflicting or missing persistent identities", () => {
   const exact = (stableId) => unit("相同源码", {
     stableId,

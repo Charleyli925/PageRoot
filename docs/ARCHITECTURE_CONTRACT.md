@@ -519,7 +519,8 @@ shared valid persistent ID uses the legacy matcher throughout, so full ID churn
 cannot become false source additions/removals. Stable identity, exact subtree equality and own
 non-presentation compatibility have different roles: exact equality skips only
 an unchanged branch and never bridges an identified element to a different or
-missing persistent ID, while an empty Canvas/SVG/control/container needs the same
+missing persistent ID. The same persistent ID pairs independently of an authored
+tag-kind change, while an empty Canvas/SVG/control/container needs the same
 parent, kind and compatibility to become a candidate. Ambiguous alternatives
 remain unmatched. Stable topology distinguishes insertion from same-parent
 reorder and cross-parent movement; a common stable ID cannot degrade into
@@ -530,8 +531,12 @@ its one-sided candidate-region graphs suppress duplicate text; unchanged moved
 text produces no text fact, while changed moved text coexists with movement.
 Attribute, inline-style and page-source facts likewise coexist with simultaneous
 text facts.
+With persistent continuity, Review compares ordered authored CSS and Script
+inventories independently of stable IDs; adding a no-ID `<style>`, stylesheet
+`<link>` or `<script>` cannot disappear from Review.
 Topology groups common IDs by source parent in one pass before sibling-order
-analysis; per-parent rescans of the complete identified inventory are forbidden.
+analysis, and each parent's identified-child indexes are built once. Per-parent
+rescans of the complete inventory and per-child rescans of siblings are forbidden.
 Analysis-local signature caches and projection facts are
 disposable; a trusted 25th distinct fact is an explicit analysis failure, while
 an oversized serialized payload fails closed rather than being treated as a

@@ -2624,12 +2624,12 @@ test("stable-ID review reports movement, source attributes, styles, and author s
       return base
         .replace(ORIGINAL_TEXT, UPDATED_TEXT)
         .replace(
-          ".stable-review-card { color: rgb(30 40 50); }",
-          ".stable-review-card { color: rgb(80 60 180); font-weight: 600; }",
+          "</head>",
+          '<style data-stable-review-added-css>.added-source { font-weight: 600; }</style></head>',
         )
         .replace(
-          '{"state":"before"}',
-          '{"state":"after"}',
+          "</body>",
+          '<script type="application/json" data-stable-review-added-script>{"added":true}</script></body>',
         )
         .replace(card, "")
         .replace(staticCard, changedStaticCard)
@@ -2679,6 +2679,10 @@ test("stable-ID review reports movement, source attributes, styles, and author s
       ));
       expect(falsePresenceFacts).toEqual([]);
     }
+    await expect(afterFrame.locator("[data-stable-review-added-css]"))
+      .not.toHaveAttribute("data-pageroot-id", /.+/u);
+    await expect(afterFrame.locator("[data-stable-review-added-script]"))
+      .not.toHaveAttribute("data-pageroot-id", /.+/u);
     await expect(beforeFrame.locator(
       '[data-stable-review-card] [data-pageroot-review-text="removed"], [data-stable-review-card][data-pageroot-review-text="removed"]',
     ).first()).toBeAttached();

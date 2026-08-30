@@ -51,17 +51,31 @@ function uniqueSourceElements(document: Document): Map<string, Element> {
 }
 
 function topologyDescriptors(document: Document) {
-  return [...document.querySelectorAll(`[${PAGEROOT_ELEMENT_ID_ATTRIBUTE}]`)]
+  const elements = [...document.querySelectorAll(`[${PAGEROOT_ELEMENT_ID_ATTRIBUTE}]`)]
     .flatMap((element) => {
       const id = sourceId(element);
-      return id ? [{
-        id,
-        parentId: sourceId(element.parentElement),
-        index: [...(element.parentElement?.children || [])]
-          .filter((candidate) => Boolean(sourceId(candidate)))
-          .indexOf(element),
-      }] : [];
+      return id ? [{ id, element }] : [];
     });
+  const siblingIndexes = new WeakMap<Element, Map<Element, number>>();
+  return elements.map(({ id, element }) => {
+    const parent = element.parentElement;
+    let indexes = parent ? siblingIndexes.get(parent) : undefined;
+    if (parent && !indexes) {
+      indexes = new Map<Element, number>();
+      let index = 0;
+      [...parent.children].forEach((candidate) => {
+        if (!sourceId(candidate)) return;
+        indexes!.set(candidate, index);
+        index += 1;
+      });
+      siblingIndexes.set(parent, indexes);
+    }
+    return {
+      id,
+      parentId: sourceId(parent),
+      index: indexes?.get(element) ?? 0,
+    };
+  });
 }
 
 function comparableAttributes(element: Element, excluded: Set<string>) {
@@ -92,13 +106,21 @@ function visibleSourceText(element: Element): string {
   return text.replace(/\s+/gu, " ").trim();
 }
 
-function authorSourceKind(
-  element: Element,
-): "css-source" | "script-source" | null {
-  if (element.tagName === "SCRIPT") return "script-source";
-  return element.tagName === "STYLE" || element.matches("link[rel~='stylesheet' i]")
-    ? "css-source"
-    : null;
+function authorSourceInventory(
+  document: Document,
+  kind: "css-source" | "script-source",
+): string {
+  const selector = kind === "css-source"
+    ? "style, link[rel~='stylesheet' i]"
+    : "script";
+  return [...document.querySelectorAll(selector)]
+    .map((element) => [
+      element.namespaceURI || "",
+      element.localName,
+      comparableAttributes(element, new Set()),
+      element.textContent || "",
+    ].join("\u0000"))
+    .join("\u0001");
 }
 
 function annotateStructureFact(
@@ -178,17 +200,10 @@ export function annotateStableSourceDifferences(
   // every <style>/<script> as a source addition/removal. One surviving stable
   // source identity is the minimum evidence that this topology is meaningful.
   if (topology.commonIds.length) {
-    for (const [ids, elements] of [
-      [topology.addedIds, afterElements],
-      [topology.removedIds, beforeElements],
-    ] as const) {
-      ids.forEach((id) => {
-        const element = elements.get(id);
-        const kind = element ? authorSourceKind(element) : null;
-        if (!element || !kind) return;
-        sourceKinds.add(kind);
-      });
-    }
+    (["css-source", "script-source"] as const).forEach((kind) => {
+      if (authorSourceInventory(beforeDocument, kind)
+        !== authorSourceInventory(afterDocument, kind)) sourceKinds.add(kind);
+    });
   }
 
   topology.commonIds.forEach((id) => {
@@ -208,22 +223,7 @@ export function annotateStableSourceDifferences(
       || after.tagName === "STYLE"
       || before.matches("link[rel~='stylesheet' i]")
       || after.matches("link[rel~='stylesheet' i]");
-    if (isScript && (
-      before.textContent !== after.textContent
-      || comparableAttributes(before, new Set(["style"]))
-        !== comparableAttributes(after, new Set(["style"]))
-    )) {
-      sourceKinds.add("script-source");
-      return;
-    }
-    if (isCssSource && (
-      before.textContent !== after.textContent
-      || comparableAttributes(before, new Set(["style"]))
-        !== comparableAttributes(after, new Set(["style"]))
-    )) {
-      sourceKinds.add("css-source");
-      return;
-    }
+    if (isScript || isCssSource) return;
 
     if ((before.getAttribute("style") || "") !== (after.getAttribute("style") || "")) {
       annotateStructureFact(before, id, "style");

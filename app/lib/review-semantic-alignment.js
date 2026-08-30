@@ -18,7 +18,7 @@ function identityKey(unit) {
   const stableId = String(unit.stableId || "").trim();
   if (!stableId) return null;
   return stableId.startsWith("pageroot:")
-    ? `${unit.kind}\u0000${stableId}`
+    ? stableId
     : `${normalizedParent(unit)}\u0000${unit.kind}\u0000${stableId}`;
 }
 
