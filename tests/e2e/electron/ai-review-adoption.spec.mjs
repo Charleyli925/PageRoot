@@ -203,7 +203,7 @@ ${REVIEW_MASK_UNION_BEFORE}
       UPDATED_TEXT,
       [{
         text: ordinaryReviewCommentText,
-        targetSelector: ".review-comment-ordinary-target",
+        targetSelector: ".review-comment-ordinary-target[data-pageroot-id]",
       }],
     );
     const attemptRoot = path.join(

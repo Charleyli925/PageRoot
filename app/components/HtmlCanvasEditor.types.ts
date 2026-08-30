@@ -254,11 +254,11 @@ export type HtmlCanvasEditorProps = {
   onSelect?: (selection: HtmlCanvasSelection | null) => void;
   /** Notifies the host about any pointer interaction inside the isolated iframe. */
   onInteraction?: () => void;
-  /** A main-process-authorized, source-bound one-shot runtime grant. */
+  /** A main-process-authorized, source-bound disposable runtime grant. */
   editRuntimeGrant?: EditRuntimeGrant | null;
-  /** State-owner transition when the one visible one-shot document begins loading. */
+  /** State-owner transition when a visible disposable document begins loading. */
   onEditRuntimeLoadStart?: (grant: EditRuntimeGrant) => void;
-  /** State-owner transition after the direct one-shot document settles. */
+  /** State-owner transition after the disposable document loads or fails. */
   onEditRuntimeLoadOutcome?: (
     grant: EditRuntimeGrant,
     outcome: HtmlCanvasEditRuntimeLoadOutcome,

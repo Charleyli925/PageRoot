@@ -17,17 +17,10 @@ import {
 import {
   createEditRuntimeProtocolController,
   registerEditRuntimeProtocolScheme,
-  validateEditRuntimeHostBindings,
 } from "../desktop/edit-runtime-protocol.mjs";
 
 const SESSION_ID = "0123456789abcdef0123456789abcdef";
 const EXECUTION_ID = "abcdefabcdefabcdefabcdef";
-const BINDINGS = [{
-  key: "edit-runtime-1",
-  path: [1, 0],
-  tagName: "main",
-  identityAttributes: [["id", "chart-host"]],
-}];
 const HTML = [
   '<!doctype html><html><head><title>Report</title><link rel="stylesheet" href="report.css"></head><body>',
   '<main id="chart-host" style="width:640px;height:360px"></main>',
@@ -40,7 +33,7 @@ const REMOTE_ECHARTS_HTML = HTML.replace(
   'src="https://cdnjs.cloudflare.com/ajax/libs/echarts/5.5.0/echarts.min.js"',
 );
 
-test("direct protocol serves one immutable resource session and consumes execution bytes once", async (t) => {
+test("direct protocol serves one reusable disposable-frame resource session", async (t) => {
   const temporaryRoot = await mkdtemp(path.join(tmpdir(), "pageroot-edit-runtime-"));
   t.after(() => rm(temporaryRoot, { recursive: true, force: true }));
   const sourcePath = path.join(temporaryRoot, "report.html");
@@ -82,7 +75,6 @@ test("direct protocol serves one immutable resource session and consumes executi
   const session = await controller.createSession({
     html: HTML,
     sourcePath,
-    bindings: BINDINGS,
   });
   assert.deepEqual(
     {
@@ -93,7 +85,7 @@ test("direct protocol serves one immutable resource session and consumes executi
       byteLength: session.byteLength,
     },
     {
-      contractVersion: 1,
+      contractVersion: 2,
       sessionId: SESSION_ID,
       executionId: EXECUTION_ID,
       scriptCount: 2,
@@ -113,8 +105,8 @@ test("direct protocol serves one immutable resource session and consumes executi
     + "/.pageroot/bootstrap/" + EXECUTION_ID + ".js";
   const bootstrap = await handler(new Request(bootstrapUrl));
   assert.equal(bootstrap.status, 200);
-  assert.match(await bootstrap.text(), /runtimeQuietFrames/u);
-  assert.equal((await handler(new Request(bootstrapUrl))).status, 404);
+  assert.match(await bootstrap.text(), /claimedIds/u);
+  assert.equal((await handler(new Request(bootstrapUrl))).status, 200);
 
   const firstAuthor = await handler(new Request(
     "pageroot-edit-runtime://" + SESSION_ID + "/.pageroot/author/0.js",
@@ -124,7 +116,7 @@ test("direct protocol serves one immutable resource session and consumes executi
     (await handler(new Request(
       "pageroot-edit-runtime://" + SESSION_ID + "/.pageroot/author/0.js",
     ))).status,
-    404,
+    200,
   );
   const secondAuthor = await handler(new Request(
     "pageroot-edit-runtime://" + SESSION_ID + "/.pageroot/author/1.js",
@@ -155,7 +147,7 @@ test("direct protocol keeps CSP instead of keyword-rejecting fetch and workers",
     randomExecutionId: () => "222222222222222222222222",
   });
 
-  const session = await controller.createSession({ html, sourcePath, bindings: BINDINGS });
+  const session = await controller.createSession({ html, sourcePath });
   assert.equal(session.scriptCount, 2);
   await assert.rejects(
     controller.createSession({
@@ -164,17 +156,12 @@ test("direct protocol keeps CSP instead of keyword-rejecting fetch and workers",
         'import("./chart.js")',
       ),
       sourcePath,
-      bindings: BINDINGS,
     }),
     /dynamic-or-module-import/u,
   );
-  assert.throws(
-    () => validateEditRuntimeHostBindings([{ ...BINDINGS[0], path: [-1] }]),
-    /invalid/u,
-  );
 });
 
-test("direct protocol admits contained custom visual bytes but rejects non-visual programs", async (t) => {
+test("direct protocol admits ordinary and visual programs", async (t) => {
   const temporaryRoot = await mkdtemp(path.join(tmpdir(), "pageroot-edit-runtime-custom-"));
   t.after(() => rm(temporaryRoot, { recursive: true, force: true }));
   const sourcePath = path.join(temporaryRoot, "custom.html");
@@ -190,32 +177,27 @@ test("direct protocol admits contained custom visual bytes but rejects non-visua
     randomSessionId: () => "c".repeat(32),
     randomExecutionId: () => "d".repeat(24),
   });
-  const bindings = [{
-    key: "edit-runtime-1",
-    path: [1, 0],
-    tagName: "canvas",
-    identityAttributes: [["id", "chart-host"]],
-  }];
   const session = await controller.createSession({
     html: canvasHtml,
     sourcePath,
-    bindings,
   });
   assert.equal(session.scriptCount, 1);
   assert.equal(session.byteLength > 0, true);
+  controller.revokeSession(session.sessionId);
 
   const nonVisualHtml = canvasHtml.replace(
     'document.querySelector("#chart-host").getContext("2d").fillRect(0,0,10,10)',
     'document.querySelector("#chart-host").addEventListener("click", () => {})',
   );
   await writeFile(sourcePath, nonVisualHtml);
-  await assert.rejects(
-    controller.createSession({ html: nonVisualHtml, sourcePath, bindings }),
-    /explicit visual paint candidate/u,
-  );
+  const ordinarySession = await controller.createSession({
+    html: nonVisualHtml,
+    sourcePath,
+  });
+  assert.equal(ordinarySession.scriptCount, 1);
 });
 
-test("direct protocol never serves a capture HTML document and consumes bootstrap once", async (t) => {
+test("direct protocol never serves a capture HTML document", async (t) => {
   const temporaryRoot = await mkdtemp(path.join(tmpdir(), "pageroot-edit-runtime-document-"));
   t.after(() => rm(temporaryRoot, { recursive: true, force: true }));
   const sourcePath = path.join(temporaryRoot, "report.html");
@@ -237,7 +219,7 @@ test("direct protocol never serves a capture HTML document and consumes bootstra
     randomExecutionId: () => "4".repeat(24),
   });
   controller.install();
-  const session = await controller.createSession({ html: HTML, sourcePath, bindings: BINDINGS });
+  const session = await controller.createSession({ html: HTML, sourcePath });
   assert.equal(typeof controller.runtimeDocumentUrl, "undefined");
   assert.equal(
     (await handler(new Request(`pageroot-edit-runtime://${session.sessionId}/index.html`))).status,
@@ -252,8 +234,8 @@ test("direct protocol never serves a capture HTML document and consumes bootstra
   const bootstrapUrl = `pageroot-edit-runtime://${session.sessionId}/.pageroot/bootstrap/${session.executionId}.js`;
   const bootstrap = await handler(new Request(bootstrapUrl));
   assert.equal(bootstrap.status, 200);
-  assert.match(await bootstrap.text(), /runtimeQuietFrames/u);
-  assert.equal((await handler(new Request(bootstrapUrl))).status, 404);
+  assert.match(await bootstrap.text(), /claimedIds/u);
+  assert.equal((await handler(new Request(bootstrapUrl))).status, 200);
 });
 
 test("direct protocol streams a headerless allowlisted ECharts response within the fixed byte cap", async (t) => {
@@ -281,44 +263,72 @@ test("direct protocol streams a headerless allowlisted ECharts response within t
   const session = await controller.createSession({
     html: REMOTE_ECHARTS_HTML,
     sourcePath,
-    bindings: BINDINGS,
   });
   assert.equal(session.scriptCount, 2);
   assert.ok(observedSignal instanceof AbortSignal);
   assert.equal(observedSignal.aborted, false);
 });
 
-test("registered projection prewarm retains five or more source-bound remote script preparations", async (t) => {
-  const temporaryRoot = await mkdtemp(path.join(tmpdir(), "pageroot-edit-runtime-prewarm-"));
+test("separate runtime sessions do not retain a hidden script-preparation cache", async (t) => {
+  const temporaryRoot = await mkdtemp(path.join(tmpdir(), "pageroot-edit-runtime-no-cache-"));
   t.after(() => rm(temporaryRoot, { recursive: true, force: true }));
   const sourcePath = path.join(temporaryRoot, "report.html");
   await writeFile(sourcePath, REMOTE_ECHARTS_HTML);
   let fetches = 0;
+  let sessionSequence = 7;
   const controller = createEditRuntimeProtocolController({
     protocolApi: { handle() {} },
     netFetch: async () => {
       fetches += 1;
       return new Response("window.echarts={init(){return {}}};", { status: 200 });
     },
-    randomSessionId: () => "8".repeat(32),
+    randomSessionId: () => String(++sessionSequence).repeat(32),
     randomExecutionId: () => "9".repeat(24),
-    preparedScriptEntries: 5,
   });
+  const first = await controller.createSession({
+    html: REMOTE_ECHARTS_HTML,
+    sourcePath,
+  });
+  const second = await controller.createSession({
+    html: REMOTE_ECHARTS_HTML,
+    sourcePath,
+  });
+  assert.equal(first.resourceSha256, second.resourceSha256);
+  assert.equal(fetches, 2);
+  assert.equal("preparedScriptCount" in controller, false);
+});
 
-  const prewarmed = await controller.prewarmScripts({
-    html: REMOTE_ECHARTS_HTML,
-    sourcePath,
+test("an active reusable resource session survives the orphan cleanup window", async (t) => {
+  const temporaryRoot = await mkdtemp(path.join(tmpdir(), "pageroot-edit-runtime-reuse-"));
+  t.after(() => rm(temporaryRoot, { recursive: true, force: true }));
+  const sourcePath = path.join(temporaryRoot, "report.html");
+  const inlineHtml = [
+    "<!doctype html><html><head><title>Reuse</title></head><body>",
+    "<script>window.ready=true</script></body></html>",
+  ].join("");
+  await writeFile(sourcePath, inlineHtml);
+  let currentTime = 1_000;
+  let handler = null;
+  const controller = createEditRuntimeProtocolController({
+    protocolApi: {
+      handle(_scheme, nextHandler) {
+        handler = nextHandler;
+      },
+    },
+    netFetch: async () => new Response("unexpected"),
+    now: () => currentTime,
+    orphanSessionTtlMs: 10,
+    randomSessionId: () => "8".repeat(32),
+    randomExecutionId: () => "7".repeat(24),
   });
-  assert.equal(prewarmed.scriptCount, 2);
-  assert.deepEqual(prewarmed.libraryOrigins, ["network", "inline"]);
-  assert.equal(controller.preparedScriptCount(), 1);
-  const session = await controller.createSession({
-    html: REMOTE_ECHARTS_HTML,
-    sourcePath,
-    bindings: BINDINGS,
-  });
-  assert.equal(session.resourceSha256, prewarmed.resourceSha256);
-  assert.equal(fetches, 1, "active preparation reuses exact source-bound prewarm bytes");
+  controller.install();
+  const session = await controller.createSession({ html: inlineHtml, sourcePath });
+  currentTime += 20;
+  const bootstrap = await handler(new Request(
+    `pageroot-edit-runtime://${session.sessionId}/.pageroot/bootstrap/${session.executionId}.js`,
+  ));
+  assert.equal(bootstrap.status, 200);
+  assert.equal(controller.sessionCount(), 1);
 });
 
 test("direct protocol cancels a headerless ECharts stream as soon as it exceeds the fixed byte cap", async (t) => {
@@ -347,7 +357,7 @@ test("direct protocol cancels a headerless ECharts stream as soon as it exceeds 
   });
 
   await assert.rejects(
-    controller.createSession({ html: REMOTE_ECHARTS_HTML, sourcePath, bindings: BINDINGS }),
+    controller.createSession({ html: REMOTE_ECHARTS_HTML, sourcePath }),
     /CDN script is too large/u,
   );
   await new Promise((resolve) => setImmediate(resolve));
@@ -377,7 +387,7 @@ test("direct protocol aborts a stalled headerless ECharts stream by the existing
   });
 
   await assert.rejects(
-    controller.createSession({ html: REMOTE_ECHARTS_HTML, sourcePath, bindings: BINDINGS }),
+    controller.createSession({ html: REMOTE_ECHARTS_HTML, sourcePath }),
     /timed out/u,
   );
   assert.ok(observedSignal instanceof AbortSignal);
@@ -425,7 +435,7 @@ test("direct protocol streams bounded declared assets and never buffers an overs
     randomExecutionId: () => "b".repeat(24),
   });
   controller.install();
-  const session = await controller.createSession({ html, sourcePath, bindings: BINDINGS });
+  const session = await controller.createSession({ html, sourcePath });
 
   const small = await handler(new Request(
     `pageroot-edit-runtime://${session.sessionId}/small.png`,
@@ -469,7 +479,7 @@ test("direct protocol bounds declared-asset discovery by the shared preparation 
   });
 
   await assert.rejects(
-    controller.createSession({ html: HTML, sourcePath, bindings: BINDINGS }),
+    controller.createSession({ html: HTML, sourcePath }),
     /preparation timed out/u,
   );
   assert.ok(observedSignal instanceof AbortSignal);
@@ -499,7 +509,7 @@ test("direct protocol keeps an incomplete injected source-root resolver inside t
   });
 
   await assert.rejects(
-    controller.createSession({ html: REMOTE_ECHARTS_HTML, sourcePath, bindings: BINDINGS }),
+    controller.createSession({ html: REMOTE_ECHARTS_HTML, sourcePath }),
     /preparation timed out/u,
   );
   assert.equal(resolverCalls, 1);

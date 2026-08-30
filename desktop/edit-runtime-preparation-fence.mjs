@@ -38,18 +38,13 @@ function normalizedPreparation({
   }
   return Object.freeze({
     requestId: String(requestId),
-    key: JSON.stringify([
-      normalizedSourcePath,
-      normalizedSourceSha256,
-      canvasGeneration,
-    ]),
   });
 }
 
 /**
- * Main-owned one-shot admission for disposable Edit author-runtime captures.
- * A renderer request cannot reopen a consumed source/canvas identity, and the
- * app permits only the bounded external-to-Managed-V1 capture overlap.
+ * Main-owned admission for disposable Edit author-runtime resource closures.
+ * A renderer request cannot replay a consumed request identity, and the app
+ * permits only the bounded external-to-Managed-V1 preparation overlap.
  */
 export function createEditRuntimePreparationFence({
   maximumConcurrentPreparations = DEFAULT_MAXIMUM_CONCURRENT_PREPARATIONS,
@@ -63,31 +58,28 @@ export function createEditRuntimePreparationFence({
     maximumConsumedPreparations,
     "maximumConsumedPreparations",
   );
-  const consumedByKey = new Map();
-  const consumedRequestIds = new Map();
+  const consumedRequestIds = new Set();
   let inFlight = 0;
 
   return Object.freeze({
     claim(preparation) {
       const identity = normalizedPreparation(preparation);
-      if (consumedByKey.has(identity.key) || consumedRequestIds.has(identity.requestId)) {
+      if (consumedRequestIds.has(identity.requestId)) {
         throw new Error("Edit runtime preparation was already consumed.");
       }
       if (inFlight >= maximumConcurrent) {
         throw new Error("Edit runtime preparation is already in progress.");
       }
-      if (consumedByKey.size >= maximumConsumed) {
-        throw new Error("Edit runtime preparation history is at capacity.");
+      if (consumedRequestIds.size >= maximumConsumed) {
+        const [oldestRequestId] = consumedRequestIds;
+        consumedRequestIds.delete(oldestRequestId);
       }
-      const record = { requestId: identity.requestId, inFlight: true };
-      consumedByKey.set(identity.key, record);
-      consumedRequestIds.set(identity.requestId, identity.key);
+      consumedRequestIds.add(identity.requestId);
       inFlight += 1;
       let released = false;
       return () => {
         if (released) return;
         released = true;
-        record.inFlight = false;
         inFlight -= 1;
       };
     },

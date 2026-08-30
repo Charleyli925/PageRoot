@@ -428,31 +428,29 @@ workbench or canvas; `HtmlCanvasEditor` must not mount or dismiss the card.
 Send that enters waiting writes `dismissed`; Escape does not. Hover captions
 are disposable Canvas presentation and must not change the click selection path.
 
-The direct path permits only a bounded classic-script ECharts candidate, frozen
-local/allowlisted-CDN bytes and at most 32 uniquely bound, source-empty hosts.
-For an HTML-only imported V1, Main records the original selected HTML directory
-in desktop `html-projects.json` and uses it as the local asset root for Preview,
-static Edit and the one-shot ECharts path. The renderer neither supplies nor
-learns that original path; the Working Copy remains source authority. The
-binding survives continue-current, restart, working-copy switches and optional
-original-HTML trash while sibling files remain in that directory.
-The final frame executes once, disables its disposable initial ECharts
-animation, then freezes after real paint and two quiet frames; the deadline is
-only a broken-script fallback. It stops tracked runtime activity and audits
-source-node identity/text/attributes plus
-host containment before installing Canvas interaction. An approved empty host
-may add only absent ECharts layout declarations (`position: relative`,
-`user-select: none`, transparent `-webkit-tap-highlight-color`, or a positive
-`scale()` no greater than `1`);
-its authored declarations and every other
-attribute remain exact. Runtime descendants are
-display-only and map to their approved source host. They never become a
-`SourcePatch`, Source HTML, save, Version, export, Request or AI input. Any
-prepare, load, audit or deadline failure selects the ordinary static frame.
-Workbench may retain five already verified iframe documents and prewarm exact
-immutable script bytes for registered tabs. Those caches are inert presentation
-or resource facts only: there is no bitmap/Blob projection, hidden execution
-probe, source promotion or post-interaction iframe replacement.
+The direct path accepts a bounded supported executable `script` program. Main
+re-reads the active persisted HTML, verifies exact Hash and Canvas generation,
+then prepares only contained local/inline resources plus the reviewed ECharts
+CDN mapping. For an HTML-only imported V1, Main records the original selected
+HTML directory in desktop `html-projects.json` and uses it as the contained
+local asset root for Preview, static Edit and the disposable Edit runtime. The
+renderer neither supplies nor learns that original path; the Working Copy
+remains source authority.
+
+The visible frame runs author scripts with ordinary browser scheduling. There
+is no visual-signal classifier, hidden probe, real-paint/quiet-frame gate,
+runtime activity freeze, host mutation audit, script prewarm or disk cache.
+Before author code runs, the fixed bootstrap privately proves instrumented
+source nodes and strips copied public markers from generated clones. A runtime
+descendant is display-only and resolves to the nearest still-proven source host
+for comments; it cannot become a semantic source edit. A supported semantic
+source change materializes complete HTML, rebuilds the disposable frame and
+reruns the author program. Native input may postpone that rebuild until editing
+finishes. The resource session may be reused only while exact authored script
+markup/body identity is unchanged; a Script change requires a new generation.
+Any preparation, load, provenance or deadline failure selects ordinary static
+Edit. Runtime DOM never becomes SourcePatch, Source HTML, save, Version, export,
+Request, Candidate or Review input.
 
 Review has no runtime-snapshot owner or PNG evidence path. It compares only the
 frozen before/after HTML and emits bounded text facts plus outermost
@@ -500,8 +498,8 @@ bootstrap binding may identify a frozen before target for comment geometry, but
 it neither reaches authored markup nor authorizes runtime host discovery. No
 TargetRef, source binding or runtime output enters either review frame's
 authored HTML or the Review fact list. Edit does not invoke any Review resolver
-or owner and has no Review snapshot state; its separate one-shot author-runtime
-session is governed by ADR 0025. Edit screenshot/capture/projection count must
+or owner and has no Review snapshot state; its disposable author-runtime
+session is governed by ADR 0065. Edit screenshot/capture/projection count must
 be 0.
 
 For each Review side and active filter, overlay frames and context masking

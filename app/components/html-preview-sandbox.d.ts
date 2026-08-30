@@ -18,18 +18,12 @@ export function prepareVerifiedFrameDocument(
     editorStyles?: string;
   },
 ): string;
-export function prepareOneShotRuntimeFrameDocument(
+export function prepareDisposableRuntimeFrameDocument(
   source: string,
   verificationToken: string,
   options: {
     sessionId: string;
     executionId: string;
-    hosts: readonly {
-      key: string;
-      path: readonly number[];
-      tagName: string;
-      identityAttributes: readonly (readonly [string, string])[];
-    }[];
     baseUrl?: string;
     editorStyles?: string;
   },
@@ -42,15 +36,9 @@ export function prepareCanvasFrameDocument(
     baseUrl?: string;
     editorStyles?: string;
   } | {
-    mode: "one-shot-runtime";
+    mode: "disposable-runtime";
     sessionId: string;
     executionId: string;
-    hosts: readonly {
-      key: string;
-      path: readonly number[];
-      tagName: string;
-      identityAttributes: readonly (readonly [string, string])[];
-    }[];
     baseUrl?: string;
     editorStyles?: string;
   },

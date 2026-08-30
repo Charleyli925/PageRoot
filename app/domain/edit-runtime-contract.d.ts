@@ -1,4 +1,4 @@
-export const EDIT_AUTHOR_RUNTIME_CONTRACT_VERSION: 1;
+export const EDIT_AUTHOR_RUNTIME_CONTRACT_VERSION: 2;
 
 export const EDIT_AUTHOR_RUNTIME_BUDGET: Readonly<{
   htmlBytes: number;
@@ -8,9 +8,6 @@ export const EDIT_AUTHOR_RUNTIME_BUDGET: Readonly<{
   declaredAssetCount: number;
   declaredAssetReferenceCount: number;
   declaredAssetBytes: number;
-  hostCount: number;
-  sourceNodeCount: number;
-  runtimeQuietFrames: number;
   runtimeDeadlineMs: number;
   orphanSessionTtlMs: number;
 }>;
@@ -19,19 +16,9 @@ export const EDIT_AUTHOR_RUNTIME_VERIFICATION_DEADLINE_MS: number;
 
 export const EDIT_RUNTIME_PROTOCOL_SCHEME: "pageroot-edit-runtime";
 export const EDIT_RUNTIME_SOURCE_MARKER_ATTRIBUTE: string;
-export const EDIT_RUNTIME_HOST_ATTRIBUTE: string;
 export const EDIT_RUNTIME_OWNED_ATTRIBUTE: string;
 export const EDIT_RUNTIME_SCRIPT_STUB_ATTRIBUTE: string;
 export const EDIT_RUNTIME_BOOTSTRAP_ATTRIBUTE: string;
-export const EDIT_RUNTIME_FROZEN_ATTRIBUTE: string;
-export const EDIT_RUNTIME_RESULT_ATTRIBUTE: string;
-
-export type EditRuntimeHostBinding = Readonly<{
-  key: string;
-  path: readonly number[];
-  tagName: string;
-  identityAttributes: readonly (readonly [string, string])[];
-}>;
 
 export type EditRuntimeGrant = Readonly<{
   contractVersion: number;
@@ -39,11 +26,11 @@ export type EditRuntimeGrant = Readonly<{
   executionId: string;
   sourceSha256: string;
   resourceSha256: string;
-  libraryOrigins?: readonly ("bundled" | "disk-cache" | "network" | "local" | "inline")[];
+  libraryOrigins?: readonly ("bundled" | "network" | "local" | "inline")[];
   scriptCount: number;
   byteLength: number;
   canvasGeneration: number;
-  hosts: readonly EditRuntimeHostBinding[];
+  programIdentity: string;
 }>;
 
 export type EditRuntimePrepareRequest = Readonly<{
@@ -51,7 +38,7 @@ export type EditRuntimePrepareRequest = Readonly<{
   requestId: string;
   sourceSha256: string;
   html: string;
-  hosts: readonly EditRuntimeHostBinding[];
+  programIdentity: string;
   canvasGeneration: number;
 }>;
 
@@ -78,10 +65,7 @@ export function collectEditRuntimeScripts(html: string): Readonly<{
   executableScripts: readonly EditRuntimeScript[];
   unsupportedReason: string | null;
 }>;
-export function hasEditRuntimeEchartsSignal(source: string): boolean;
-export function hasEditRuntimeVisualSignal(source: string): boolean;
-export function isEditRuntimeEchartsCandidate(html: string): boolean;
-export function isEditRuntimeVisualCandidate(html: string): boolean;
+export function editRuntimeProgramIdentity(html: string): string | null;
 export function unsupportedEditRuntimeProgramReason(source: string): string | null;
 export function editRuntimeSourceMarker(path: readonly number[]): string | null;
 export function isEditRuntimeSessionId(value: unknown): boolean;
@@ -89,5 +73,6 @@ export function isEditRuntimeExecutionId(value: unknown): boolean;
 export function isEditRuntimeRequestId(value: unknown): boolean;
 export function isEditRuntimeSourceSha256(value: unknown): boolean;
 export function isEditRuntimeFrameToken(value: unknown): boolean;
+export function editRuntimeProofProperty(executionId: unknown): string | null;
 export function editRuntimeProtocolUrl(sessionId: string, path: string): string | null;
 export function isEditRuntimeProtocolUrl(value: unknown, sessionId?: string | null): boolean;

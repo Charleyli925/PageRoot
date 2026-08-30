@@ -41,8 +41,8 @@ The outgoing clean Canvas may reuse an already verified authority only when its
 generation and rendered SHA-256 exactly match `DocumentSession`. Dirty,
 unverified, failed or mismatched Canvas state still performs the full fence.
 
-One-shot Edit runtime preparation must not produce a blank workspace. While the
-final runtime iframe is being prepared, Workbench shows a separate
+Edit runtime resource preparation must not produce a blank workspace. While the
+disposable runtime iframe is being prepared, Workbench shows a separate
 script-disabled display surface. That surface has no SourceIndex, edit, comment,
 save or serialization authority and is destroyed when the final Edit iframe
 mounts.
@@ -65,5 +65,5 @@ mounts.
 - Background hydration or Canvas failure preserves the displayed tab, marks it
   as an error and keeps editing closed.
 - A clean, exact verified Canvas does not execute a second render fence.
-- During one-shot runtime preparation the HTML remains visible and the
+- During Edit runtime preparation the HTML remains visible and the
   temporary surface cannot execute authored scripts.

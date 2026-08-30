@@ -2,13 +2,9 @@ import {
   EDIT_AUTHOR_RUNTIME_BUDGET,
   EDIT_AUTHOR_RUNTIME_CONTRACT_VERSION,
   collectEditRuntimeScripts,
-  isEditRuntimeVisualCandidate,
+  editRuntimeProgramIdentity,
   isEditRuntimeSourceSha256,
 } from "../domain/edit-runtime-contract.js";
-import {
-  resolveEditRuntimeHosts,
-  editRuntimeCaptureCandidate,
-} from "../domain/runtime-snapshot-hosts.js";
 
 function isRecord(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -55,7 +51,7 @@ function sameKey(left, right) {
 
 function normalizedGrant(value, request) {
   const allowedLibraryOrigins = new Set([
-    "bundled", "disk-cache", "network", "local", "inline",
+    "bundled", "network", "local", "inline",
   ]);
   if (
     !isRecord(value)
@@ -71,7 +67,7 @@ function normalizedGrant(value, request) {
     || value.byteLength < 1
     || value.byteLength > EDIT_AUTHOR_RUNTIME_BUDGET.aggregateScriptBytes
     || value.canvasGeneration !== request.canvasGeneration
-    || !Array.isArray(value.hosts)
+    || typeof request.programIdentity !== "string"
     || (
       value.libraryOrigins !== undefined
       && (
@@ -80,21 +76,6 @@ function normalizedGrant(value, request) {
       )
     )
   ) return null;
-  const expected = new Map(request.hosts.map((host) => [host.key, host]));
-  const hosts = [];
-  for (const host of value.hosts) {
-    if (!isRecord(host) || typeof host.key !== "string") return null;
-    const expectedHost = expected.get(host.key);
-    if (
-      !expectedHost
-      || hosts.some((candidate) => candidate.key === host.key)
-      || JSON.stringify(host.path) !== JSON.stringify(expectedHost.path)
-      || host.tagName !== expectedHost.tagName
-      || JSON.stringify(host.identityAttributes) !== JSON.stringify(expectedHost.identityAttributes)
-    ) return null;
-    hosts.push(expectedHost);
-  }
-  if (hosts.length !== request.hosts.length) return null;
   return Object.freeze({
     contractVersion: EDIT_AUTHOR_RUNTIME_CONTRACT_VERSION,
     sessionId: String(value.sessionId).toLowerCase(),
@@ -105,7 +86,7 @@ function normalizedGrant(value, request) {
     byteLength: value.byteLength,
     libraryOrigins: Object.freeze([...(value.libraryOrigins || [])]),
     canvasGeneration: request.canvasGeneration,
-    hosts: Object.freeze(hosts),
+    programIdentity: request.programIdentity,
   });
 }
 
@@ -175,30 +156,6 @@ export class EditAuthorRuntimeSession {
     });
   }
 
-  #hostCandidates(html) {
-    const resolved = resolveEditRuntimeHosts({
-      html,
-      maximum: EDIT_AUTHOR_RUNTIME_BUDGET.hostCount,
-    });
-    if (!resolved?.hosts.length) return Object.freeze([]);
-    const candidates = [];
-    for (const host of resolved.hosts) {
-      const candidate = editRuntimeCaptureCandidate(
-        "edit-runtime-" + String(candidates.length + 1),
-        host,
-      );
-      if (!candidate) continue;
-      candidates.push(Object.freeze({
-        key: candidate.key,
-        path: candidate.path,
-        tagName: candidate.tagName,
-        identityAttributes: candidate.identityAttributes,
-      }));
-      if (candidates.length >= EDIT_AUTHOR_RUNTIME_BUDGET.hostCount) break;
-    }
-    return Object.freeze(candidates);
-  }
-
   refresh({
     html,
     sourceSha256,
@@ -259,11 +216,12 @@ export class EditAuthorRuntimeSession {
       return this.#snapshot;
     }
     const scriptContract = collectEditRuntimeScripts(identity.html);
+    const programIdentity = editRuntimeProgramIdentity(identity.html);
     if (
       scriptContract.unsupportedReason
       || scriptContract.executableScripts.length < 1
       || scriptContract.executableScripts.length > EDIT_AUTHOR_RUNTIME_BUDGET.scriptCount
-      || !isEditRuntimeVisualCandidate(identity.html)
+      || !programIdentity
     ) {
       this.#emit({
         phase: "static",
@@ -274,14 +232,13 @@ export class EditAuthorRuntimeSession {
       });
       return this.#snapshot;
     }
-    const hosts = this.#hostCandidates(identity.html);
-    if (!hosts.length || !this.#port) {
+    if (!this.#port) {
       this.#emit({
         phase: "static",
         sourceSha256: identity.sourceSha256,
         sourcePath: identity.sourcePath,
         canvasGeneration: identity.canvasGeneration,
-        lastOutcome: hosts.length ? "desktop-unavailable" : "no-approved-hosts",
+        lastOutcome: "desktop-unavailable",
       });
       return this.#snapshot;
     }
@@ -292,7 +249,7 @@ export class EditAuthorRuntimeSession {
         + "-" + String(++this.#requestSequence).toString(36),
       sourceSha256: identity.sourceSha256,
       html: identity.html,
-      hosts,
+      programIdentity,
       canvasGeneration: identity.canvasGeneration,
     });
     this.#pendingPreparation = Object.freeze({
@@ -361,32 +318,10 @@ export class EditAuthorRuntimeSession {
     return true;
   }
 
-  reusePrepared({ sourceSha256, canvasGeneration } = {}) {
-    const normalizedSha = String(sourceSha256 || "").toLowerCase();
-    if (
-      this.#disposed
-      || !this.#identity
-      || !["preparing", "ready"].includes(this.#snapshot.phase)
-      || this.#identity.sourceSha256 !== normalizedSha
-      || this.#identity.canvasGeneration !== canvasGeneration
-    ) return false;
-    this.#attemptGeneration += 1;
-    this.#pendingPreparation = null;
-    this.#revoke(this.#snapshot.grant);
-    this.#emit({
-      phase: "settled",
-      sourceSha256: this.#identity.sourceSha256,
-      sourcePath: this.#identity.sourcePath,
-      canvasGeneration: this.#identity.canvasGeneration,
-      lastOutcome: "retained-runtime",
-    });
-    return true;
-  }
-
   beginRuntime({ sessionId, sourceSha256, canvasGeneration } = {}) {
     const grant = this.#snapshot.grant;
     if (
-      this.#snapshot.phase !== "ready"
+      !["ready", "settled"].includes(this.#snapshot.phase)
       || !grant
       || grant.sessionId !== String(sessionId || "").toLowerCase()
       || grant.sourceSha256 !== String(sourceSha256 || "").toLowerCase()
@@ -412,7 +347,6 @@ export class EditAuthorRuntimeSession {
       || grant.canvasGeneration !== canvasGeneration
     ) return false;
     if (outcome === "ready") {
-      this.#revoke(grant);
       this.#emit({
         phase: "settled",
         sourceSha256: grant.sourceSha256,

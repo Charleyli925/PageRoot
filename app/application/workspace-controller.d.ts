@@ -244,9 +244,7 @@ export type WorkspaceControllerConstruction = Readonly<{
     recovery?: RecoveryPort;
     canvas?: CanvasAuthorityPort;
     projectSource?: ProjectSourceActivationPort;
-    editRuntime?: EditAuthorRuntimePort & Readonly<{
-      prewarmRegistered?: (projectId: string) => Promise<unknown>;
-    }>;
+    editRuntime?: EditAuthorRuntimePort;
     uiPreferences?: FirstEditGuidePort;
     workbenchTabs?: Readonly<{
       get(): Promise<unknown>;
@@ -434,10 +432,6 @@ export class WorkspaceController {
   readonly projectHydrating: boolean;
   readonly projectLoadError: string | null;
   startEditAuthorRuntimePreparation(input: {
-    sourceSha256: string;
-    canvasGeneration: number;
-  }): boolean;
-  reusePreparedEditAuthorRuntime(input: {
     sourceSha256: string;
     canvasGeneration: number;
   }): boolean;

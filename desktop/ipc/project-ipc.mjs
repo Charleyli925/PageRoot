@@ -97,13 +97,6 @@ export function registerProjectIpc({
     trustedProject(handlers.prepareEditAuthorRuntime, "edit_runtime_prepare"),
   );
   ipcMain.handle(
-    EDIT_RUNTIME_CHANNELS.prewarmRegistered,
-    trustedProject(
-      handlers.prewarmRegisteredEditRuntime,
-      "edit_runtime_prewarm_registered",
-    ),
-  );
-  ipcMain.handle(
     EDIT_RUNTIME_CHANNELS.revoke,
     trustedProject(handlers.revokeEditAuthorRuntime, "edit_runtime_revoke"),
   );

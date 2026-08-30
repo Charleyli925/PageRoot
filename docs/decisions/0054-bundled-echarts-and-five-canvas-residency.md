@@ -2,7 +2,10 @@
 
 ## Status
 
-Accepted.
+Partially superseded by [ADR 0065](0065-disposable-edit-runtime.md). Decision 1
+and script-disabled Canvas residency remain active; Script-enabled runtime
+pages, the private library store, script prewarm and paint/freeze rules are
+retired.
 
 ## Context
 

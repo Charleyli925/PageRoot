@@ -37,10 +37,6 @@ export class EditAuthorRuntimeSession {
     sourceSha256?: string;
     canvasGeneration?: number;
   }): boolean;
-  reusePrepared(input?: {
-    sourceSha256?: string;
-    canvasGeneration?: number;
-  }): boolean;
   beginRuntime(input?: {
     sessionId?: string;
     sourceSha256?: string;

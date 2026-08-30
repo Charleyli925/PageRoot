@@ -553,18 +553,32 @@ test("Electron persists an Apple Pinyin boundary composition with left affinity"
     );
     expect(committedHtml).not.toContain("<i>");
     expect(await editor.getAttribute("data-edit-block-detail")).toBeNull();
-
     const previousDocumentToken = await documentToken(firstLaunch.page);
     await firstLaunch.page.keyboard.press(keyShortcut("S"));
     await expectCheckpointPersisted(
       firstLaunch.page,
       0,
     );
-    frame = await waitForFreshDiskFrame(
-      firstLaunch.page,
-      previousDocumentToken,
-      "heading-inline",
-    );
+    const persistedDocumentToken = await documentToken(firstLaunch.page);
+    if (persistedDocumentToken !== previousDocumentToken) {
+      frame = await waitForFreshDiskFrame(
+        firstLaunch.page,
+        previousDocumentToken,
+        "heading-inline",
+      );
+    } else {
+      frame = await currentEditorFrame(firstLaunch.page);
+      await expect(editor).toHaveAttribute("data-render-verified", "true");
+      await expect(editor).toHaveAttribute("data-runtime-bootstrap-count", "1");
+      await expect.poll(() => nativeEditingState(firstLaunch.page, "heading-inline"))
+        .toMatchObject({
+          targetIsActive: true,
+          contenteditable: "true",
+          isContentEditable: true,
+          activeCase: "heading-inline",
+          selectionInside: true,
+        });
+    }
     expect(
       readFileSync(sourcePath).equals(original),
       "the caller-owned HTML must remain byte-for-byte unchanged after V1 import",

@@ -5,34 +5,24 @@ import {
   createEditRuntimeBootstrap,
 } from "../desktop/edit-runtime-bootstrap.mjs";
 
-test("one-shot bootstrap freezes author async work and performs one final source audit", () => {
+test("disposable runtime bootstrap proves source nodes without freezing author work", () => {
   const source = createEditRuntimeBootstrap({
     executionId: "a".repeat(24),
     sessionId: "b".repeat(32),
   });
 
   assert.doesNotThrow(() => new Function(source));
-  assert.match(source, /captureBaseline\(\)/u);
-  assert.match(source, /installTracking\(\)/u);
-  assert.match(source, /prepareHiddenHostGeometry\(\)/u);
-  assert.match(source, /restoreHiddenHostGeometry\(\)/u);
-  assert.match(source, /clearTrackedAsync\(\)/u);
-  assert.match(source, /removeTrackedListeners\(\)/u);
-  assert.match(source, /disconnectTrackedObservers\(\)/u);
-  assert.match(source, /document\.getAnimations/u);
-  assert.match(source, /closeTrackedPorts\(\)/u);
-  assert.match(source, /MessageChannel/u);
-  assert.match(source, /messagePortClose/u);
-  assert.match(source, /document-replacement/u);
-  assert.match(source, /runtime-node-outside-host/u);
-  assert.match(source, /pointer-events/u);
-  assert.match(source, /runtimeQuietFrames/u);
-  assert.match(source, /installEchartsReadiness/u);
-  assert.match(source, /animationDurationUpdate/u);
-  assert.match(source, /waitForUsefulPaint/u);
-  assert.doesNotMatch(source, /runtimeSettleMs/u);
-  assert.match(source, /data-pageroot-edit-runtime-frozen/u);
-  assert.match(source, /data-pageroot-edit-runtime-result/u);
+  assert.match(source, /claimedIds/u);
+  assert.match(source, /Object\.defineProperty\(element/u);
+  assert.match(source, /MutationObserver/u);
+  assert.match(source, /markerAttribute \+ "\],\[" \+ config\.sourceNodeAttribute/u);
+  assert.match(source, /data-pageroot-edit-runtime-source/u);
+  assert.match(source, /data-html-ai-source-node-id/u);
+  assert.match(source, /DOMContentLoaded/u);
+  assert.match(source, /event\.preventDefault/u);
+  assert.doesNotMatch(source, /setInterval|clearInterval|requestAnimationFrame/u);
+  assert.doesNotMatch(source, /getAnimations|MessageChannel|runtimeQuietFrames/u);
+  assert.doesNotMatch(source, /edit-runtime-frozen|edit-runtime-result/u);
   assert.doesNotMatch(source, /window\.fetch\s*=/u);
   assert.doesNotMatch(source, /window\.Worker\s*=/u);
   assert.doesNotMatch(source, /mutationRecordLimit/u);

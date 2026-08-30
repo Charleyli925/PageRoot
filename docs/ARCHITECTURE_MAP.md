@@ -37,7 +37,7 @@ the Bridge client, construct Sessions, or own debounce, polling, or drain.
 | Review and Candidate | `VersionSession` (projection) | `VersionWorkflow` prepare/accept | `app/workbench/AiReviewWorkspace.tsx` |
 | Version and history | `VersionSession` | `VersionWorkflow` | `version-workflow.js`, `version/review-plan.js` |
 | Project context and version navigation | `ProjectSession`, `ProjectRulesSession`, `VersionSession` | `ProjectWorkflow`, `ProjectRulesWorkflow` | `workspace-controller-capabilities.d.ts` (`controller.projectCatalog`), `workbench-sidebar-container.tsx`, `WorkbenchChrome.tsx` |
-| Canvas edit runtime | `EditAuthorRuntimeSession` | Canvas / `DocumentWorkflow` | `HtmlCanvasEditor.tsx`, `html-canvas-selection-chrome-contract.ts` |
+| Canvas edit runtime | `EditAuthorRuntimeSession` owns the scoped resource grant; source HTML remains authoritative | Canvas rebuild/rerun in `HtmlCanvasEditor`; `DocumentWorkflow` persists complete HTML | `edit-runtime-contract.js`, `HtmlCanvasEditor.tsx`, `desktop/edit-runtime-protocol.mjs`, `desktop/edit-runtime-bootstrap.mjs` |
 | Preview | disposable preview session | Desktop preview protocol | `desktop/` preview owner, `HtmlInteractionPreview` |
 | Project open / switch / close | `ProjectSession` | `ProjectWorkflow` | `project-workflow.js`, `project/open-intent.js`, `project/switch-plan.js`, `project/close-plan.js`, `project/source-locator-plan.js` |
 | External open | Main mailbox + `ExternalFileOpenSession` + `ProjectApplicationSession` | `ProjectWorkflow` | `desktop/prepared-html-open.mjs`, `app/workbench/ExternalHtmlOpenDialog.tsx` |

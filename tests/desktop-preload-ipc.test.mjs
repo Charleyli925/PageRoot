@@ -170,55 +170,44 @@ test("preload exposes no Agent executable, spawn, command, or path capability", 
   for (const [name, value] of Object.entries(worlds)) visit(value, name);
 });
 
-test("preload exposes one narrow one-shot Edit runtime preparation port", async () => {
+test("preload exposes one narrow disposable Edit runtime resource port", async () => {
   const calls = [];
   const { editRuntime } = await loadPreloadApis(async (...args) => {
     calls.push(args);
     if (args[0] === "html-edit-runtime:prepare") {
       return success({
-        contractVersion: 1,
+        contractVersion: 2,
         sessionId: "0123456789abcdef0123456789abcdef",
         executionId: "abcdefabcdefabcdefabcdef",
       });
     }
-    if (args[0] === "html-edit-runtime:prewarm-registered") {
-      return success({ projectId: args[1], libraryOrigins: ["bundled"] });
-    }
     return success({ revoked: true });
   });
   const payload = {
-    contractVersion: 1,
+    contractVersion: 2,
+    requestId: "edit-runtime-request-0001",
     sourceSha256: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     html: "<!doctype html><main id=chart></main>",
+    programIdentity: "[]",
     canvasGeneration: 4,
-    bindings: [],
   };
 
   assert.deepEqual(await editRuntime.prepare(payload), {
-    contractVersion: 1,
+    contractVersion: 2,
     sessionId: "0123456789abcdef0123456789abcdef",
     executionId: "abcdefabcdefabcdefabcdef",
   });
   assert.deepEqual(calls[0], ["html-edit-runtime:prepare", payload]);
-  assert.deepEqual(await editRuntime.prewarmRegistered("project_demo"), {
-    projectId: "project_demo",
-    libraryOrigins: ["bundled"],
-  });
-  assert.deepEqual(calls[1], [
-    "html-edit-runtime:prewarm-registered",
-    "project_demo",
-  ]);
   assert.deepEqual(
     await editRuntime.revoke("0123456789abcdef0123456789abcdef"),
     { revoked: true },
   );
-  assert.deepEqual(calls[2], [
+  assert.deepEqual(calls[1], [
     "html-edit-runtime:revoke",
     "0123456789abcdef0123456789abcdef",
   ]);
   assert.deepEqual(Object.keys(editRuntime).sort(), [
     "prepare",
-    "prewarmRegistered",
     "revoke",
   ]);
 });

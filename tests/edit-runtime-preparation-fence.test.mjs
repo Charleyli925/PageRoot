@@ -16,24 +16,18 @@ function preparation({
   return { requestId, sourcePath, sourceSha256, canvasGeneration };
 }
 
-test("Main-owned Edit runtime fence consumes each request and source generation once", () => {
+test("Main-owned Edit runtime fence consumes request identities but permits a later disposable page", () => {
   const fence = createEditRuntimePreparationFence();
   const release = fence.claim(preparation());
   release();
   release();
 
   assert.throws(
-    () => fence.claim(preparation({ requestId: "edit-runtime-request-0002" })),
+    () => fence.claim(preparation()),
     /already consumed/u,
   );
-  assert.throws(
-    () => fence.claim(preparation({ canvasGeneration: 2 })),
-    /already consumed/u,
-  );
-
   const nextRelease = fence.claim(preparation({
-    requestId: "edit-runtime-request-0003",
-    canvasGeneration: 2,
+    requestId: "edit-runtime-request-0002",
   }));
   nextRelease();
 });
@@ -63,20 +57,21 @@ test("Main-owned Edit runtime fence permits only the bounded activation overlap"
   nextRelease();
 });
 
-test("Main-owned Edit runtime fence never reopens a consumed identity at history capacity", () => {
+test("Main-owned Edit runtime fence bounds replay history without exhausting future pages", () => {
   const fence = createEditRuntimePreparationFence({ maximumConsumedPreparations: 1 });
   const release = fence.claim(preparation());
   release();
 
+  const nextPreparation = preparation({
+    requestId: "edit-runtime-request-0002",
+    sourcePath: "/projects/second-report.html",
+  });
+  const releaseNext = fence.claim(nextPreparation);
+  releaseNext();
   assert.throws(
-    () => fence.claim(preparation({
-      requestId: "edit-runtime-request-0002",
-      sourcePath: "/projects/second-report.html",
-    })),
-    /history is at capacity/u,
-  );
-  assert.throws(
-    () => fence.claim(preparation()),
+    () => fence.claim(nextPreparation),
     /already consumed/u,
   );
+  const releaseReopened = fence.claim(preparation());
+  releaseReopened();
 });
