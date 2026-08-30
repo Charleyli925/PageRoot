@@ -337,27 +337,6 @@ export const ECHARTS_STUB = `window.echarts = {
   }
 };`;
 
-export async function assertFrozenRuntimeRetained(page, frame, baseline) {
-  expect(frame.isDetached()).toBe(false);
-  expect(await documentToken(page)).toBe(baseline.document);
-  await expect(page.locator("[data-runtime-bootstrap-count=\"1\"]")).toHaveCount(1);
-  expect(await frame.evaluate(() => ({
-    rendererAuthorExecutions: window.__PAGEROOT_ECHARTS_AUTHOR_EXECUTIONS__,
-    chartCount: document.querySelectorAll("#chart-host canvas[data-echarts-runtime=true]").length,
-    frozenSnapshotCount: document.querySelectorAll(
-      "#chart-host img[data-pageroot-edit-runtime-snapshot]",
-    ).length,
-    dataImagePngCount: document.querySelectorAll('img[src^="data:image/png"]').length,
-    frozen: document.documentElement.getAttribute("data-pageroot-edit-runtime-frozen"),
-  }))).toEqual({
-    rendererAuthorExecutions: 1,
-    chartCount: 1,
-    frozenSnapshotCount: 0,
-    dataImagePngCount: 0,
-    frozen: "true",
-  });
-}
-
 export function requestDirectoryCount(workspace) {
   const projectsRoot = path.join(workspace, "projects");
   const legacyCount = !existsSync(projectsRoot) ? 0 : readdirSync(projectsRoot).reduce((total, projectDirectoryName) => {

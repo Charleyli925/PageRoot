@@ -14,7 +14,7 @@ optional deletion of the original lived nowhere that could wait for a verified
 Canvas.
 
 Renderer-supplied paths cannot be trusted. The Edit iframe is same-origin with
-the application renderer (ADR 0025), so confirmation controls must also reject
+the application renderer (ADR 0065), so confirmation controls must also reject
 untrusted programmatic events. The Repository must not gain delete authority
 outside the configured projects root.
 

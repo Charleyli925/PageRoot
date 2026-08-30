@@ -120,7 +120,7 @@
       ]
     },
     "electron-editing-smoke": {
-      "description": "Capability canary for authored DOM input, Edit runtime freeze and persisted composition.",
+      "description": "Capability canary for authored DOM input, disposable Edit runtime rerender and persisted composition.",
       "prerequisites": [
         "build-desktop"
       ]
@@ -1074,16 +1074,15 @@
       ]
     },
     {
-      "id": "edit-one-shot-author-runtime",
+      "id": "edit-disposable-author-runtime",
       "patterns": [
         "^app/application/edit-author-runtime-session\\.(?:js|d\\.ts)$",
         "^app/domain/edit-runtime-contract\\.(?:js|d\\.ts)$",
-        "^app/domain/runtime-snapshot-hosts\\.(?:js|d\\.ts)$",
         "^app/components/(?:HtmlCanvasEditor(?:\\.types)?|HtmlDisplaySurface(?:\\.module)?|html-canvas-selection-chrome(?:-contract)?|html-preview-sandbox)\\.(?:tsx|ts|js|css|d\\.ts)$",
         "^app/workbench\\.tsx$",
         "^desktop/(?:edit-runtime-bootstrap|edit-runtime-protocol|edit-runtime-preparation-fence)\\.mjs$",
         "^desktop/main\\.mjs$",
-        "^docs/decisions/0025-edit-direct-one-shot-runtime\\.md$",
+        "^docs/decisions/(?:0065-disposable-edit-runtime|archive/(?:0025-edit-direct-one-shot-runtime|0058-bounded-canvas-svg-edit-runtime))\\.md$",
         "^tests/(?:edit-author-runtime-session|edit-runtime-bootstrap|edit-runtime-preparation-fence|edit-runtime-contract|edit-runtime-protocol|html-canvas-frame)\\.test\\.mjs$"
       ],
       "suites": [
@@ -1096,7 +1095,6 @@
         "tests/edit-runtime-preparation-fence.test.mjs",
         "tests/edit-runtime-contract.test.mjs",
         "tests/edit-runtime-protocol.test.mjs",
-        "tests/runtime-snapshot-hosts.test.mjs",
         "tests/html-preview-sandbox.test.mjs",
         "tests/html-canvas-frame.test.mjs",
         "tests/workspace-controller.test.mjs",

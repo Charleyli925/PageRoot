@@ -99,7 +99,6 @@ const APPROVED_PERSISTENCE_OWNERS = new Set([
   "bridge/workspace-bridge.mjs",
   "desktop/after-pack.mjs",
   "desktop/device-identity.mjs",
-  "desktop/edit-runtime-library-store.mjs",
   "desktop/external-file-open.mjs",
   "desktop/main.mjs",
   "desktop/project-files.mjs",

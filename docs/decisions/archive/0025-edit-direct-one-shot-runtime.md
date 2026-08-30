@@ -1,6 +1,6 @@
 # ADR 0025: Edit runs the author program once in the final visible iframe
 
-- Status: Accepted
+- Status: Superseded by [ADR 0065](../0065-disposable-edit-runtime.md)
 - Date: 2026-08-15
 - Supersedes: [ADR 0055](archive/0055-edit-one-shot-author-runtime.md) for Edit presentation
 - Does not change: Review's static-only fact contract ([ADR 0046](0046-review-core-text-and-element-diff.md)); Preview author-script execution ([ADR 0007](0007-independent-interactive-preview.md))

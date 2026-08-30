@@ -2,7 +2,7 @@
 
 > Renumbered from ADR 0022 on 2026-08-29 to repair a numbering collision.
 
-- Status: Superseded by [ADR 0025](../0025-edit-direct-one-shot-runtime.md)
+- Status: Superseded by [ADR 0025](0025-edit-direct-one-shot-runtime.md)
 - Date: 2026-08-14
 - Amends: the Edit-only restriction in ADR 0017; Review is now static-only per ADR 0046
 

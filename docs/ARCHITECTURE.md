@@ -80,25 +80,19 @@ the historical synthetic-spike decision.
 - Preview-to-edit carries only a bounded `PageViewContext`: source-backed
   active/inactive class transitions and `hidden`, `open`, `aria-selected` or
   `aria-expanded` state. It never carries runtime DOM, pixels or table markup.
-- Edit is source-static by default. On desktop only, a clean persisted document
-  with an explicit ECharts signal may receive one immutable author-runtime
-  resource session before the first editable frame is mounted. The
-  `WorkspaceController` keys that disposable attempt by `(sourcePath,
-  canvasGeneration)`; Main prepares the resource closure only. The first
-  visible Edit iframe is the final iframe: it executes ordered classic scripts
-  once at the real Edit size, waits 1.2 seconds, performs one layout/`resize`
-  settle, freezes timers/listeners/observers/animations/MessageChannel ports
-  and audits. Success keeps the real Canvas/SVG in that same
-  iframe. Same-origin `window.parent` access, including renderer-exposed
-  preload APIs, is an accepted in-place-editing cost. A missing grant or failed
-  audit before interaction uses ordinary
-  static Edit for that generation. After interaction starts, comments, IME,
-  save, native-edit fences, hard breaks and sibling reorder must not replace
-  that iframe. A same-generation static remount after interaction is not an
-  accepted fallback. Runtime descendants have no persistence authority;
-  authored inline SVG remains source-backed while
-  unapproved runtime-only Canvas/SVG stays in Preview. Edit screenshot,
-  capture and projection count must be 0.
+- On desktop, a clean persisted document with a supported executable `script`
+  program may receive one Main-authorized resource closure. The visible Edit
+  iframe parses source with author scripts inert, proves the complete parser-
+  authored object set, then activates those scripts in source order; PageRoot does not
+  wait for visual paint, freeze activity or audit Runtime DOM against source.
+  Same-origin `window.parent` access, including renderer-exposed preload APIs,
+  remains the accepted in-place-editing cost. Unsupported programs fail closed
+  to static Edit. Semantic source changes rebuild the disposable iframe and
+  rerun the unchanged author program; native input may defer that one rebuild
+  until composition/editing finishes. Generated descendants are display-only
+  and map to the nearest still-proven authored source host for comments. Runtime
+  DOM has no persistence authority and Edit screenshot/capture/projection count
+  remains 0.
 - Review is static source-diff only. It reads the frozen before/after HTML and
   emits bounded text facts plus outermost element-presence facts; scripts,
   pixels, computed style, Canvas/SVG runtime output, PNGs and a Review runtime
@@ -284,14 +278,14 @@ services.
 | Pseudonymous identity, strict event schemas, local queue and PostHog delivery | `desktop/usage-telemetry.mjs` |
 | Install-level first-real-HTML guide status and built-in welcome identity | `desktop/ui-preferences.mjs`, `app/application/first-edit-guide-session.js` |
 | Preview sanitization and verified frame injection | `app/components/html-preview-sandbox.js` |
-| Canvas one-shot runtime frame identity, frozen-result verification and author-paint retention | `app/components/html-canvas-frame.js`; `HtmlCanvasEditor` still owns iframe mount/reload |
+| Canvas disposable runtime frame identity and exact-program reuse | `app/components/html-canvas-frame.js`; `HtmlCanvasEditor` owns iframe mount/reload |
 | Native deferred-command arbitration (user-explicit vs system, lease matching, stale drain) | `app/components/html-canvas-native-commands.js`; the editor supplies the live session/lease and still retires the queue before host replacement |
 | Canvas comment-target measurement, insertion-point and marker layout | `app/components/html-canvas-comment-layout.ts`; disposable geometry only |
 | Canvas selection chrome, comment markers, hover hints and edit toolbar presentation | `app/components/html-canvas-selection-chrome.tsx`; snapshots and callbacks only, no source or editing authority |
 | Volatile desktop preview sessions and contained local-asset serving | `desktop/preview-protocol.mjs` |
 | Imported project's original sibling-asset directory | `desktop/imported-asset-root.mjs` plus Main `html-projects.json` |
-| Edit one-shot candidate limits, source-host discovery and direct-frame grant | `app/domain/edit-runtime-contract.js`, `app/domain/runtime-snapshot-hosts.js`, `app/application/edit-author-runtime-session.js` |
-| Isolated Edit author-resource closure, contained static-asset/script serving and one-use bootstrap | `desktop/edit-runtime-protocol.mjs`, `desktop/edit-runtime-bootstrap.mjs` |
+| Edit script/resource limits, exact program identity and direct-frame grant | `app/domain/edit-runtime-contract.js`, `app/application/edit-author-runtime-session.js` |
+| Scoped Edit author-resource closure, contained asset/script serving and source-provenance bootstrap | `desktop/edit-runtime-protocol.mjs`, `desktop/edit-runtime-bootstrap.mjs` |
 | Source-backed preview/edit display-state filtering, rebinding and safe action resolution | `app/lib/page-view-context.js` |
 | Run lifecycle decoding and transition policy | `app/domain/run-lifecycle.js` |
 | Request freeze/persisted-boundary validation, authority reconciliation, run polling, cancellation, conflict commands and confirmed handoff | `app/application/run-workflow.js` |

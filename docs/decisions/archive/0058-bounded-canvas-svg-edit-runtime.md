@@ -2,7 +2,7 @@
 
 > Renumbered from ADR 0046 on 2026-08-29 to repair a numbering collision.
 
-- Status: Accepted
+- Status: Superseded by [ADR 0065](../0065-disposable-edit-runtime.md)
 - Date: 2026-08-27
 - Scope: visible-first Edit rendering and real-content readiness
 

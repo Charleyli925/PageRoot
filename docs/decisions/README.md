@@ -1,6 +1,6 @@
 # Architecture Decision Records
 
-<!-- adr-history-max: 0064 -->
+<!-- adr-history-max: 0065 -->
 <!-- adr-history-gaps: 0020 -->
 
 This is the default reading path for decisions that still constrain PageRoot.
@@ -10,7 +10,7 @@ Historical and superseded decisions remain available from the archive index.
 
 The repository has one historical gap, `0020`, which is intentionally never
 reused. The four collisions found in the first curation pass were assigned
-`0055` through `0058`; future ADRs must use the next number above `0064`.
+`0055` through `0058`; future ADRs must use the next number above `0065`.
 
 ## Active decisions
 
@@ -30,7 +30,6 @@ reused. The four collisions found in the first curation pass were assigned
 | 0019 | [WorkspaceController orchestrates application workflows without owning facts](0019-workspace-controller-orchestration.md) | Living |
 | 0022 | [v4 Registry-authorized project roots and promotion paths](0022-user-owned-project-root-identity.md) | Living |
 | 0024 | [Registry catalog and AI-task projection authority](0024-registry-catalog-and-ai-task-projections.md) | Living |
-| 0025 | [Edit runs the author program once in the final visible iframe](0025-edit-direct-one-shot-runtime.md) | Living |
 | 0026 | [External source to project binding is a long-lived lookup](0026-external-source-project-binding.md) | Living |
 | 0027 | [Prepared open intent, Canvas-verified finalize, and out-of-root trash](0027-prepared-open-intent.md) | Living |
 | 0028 | [Unrecognized project Registry shapes fail closed, with no migration](0028-unrecognized-registry-fails-closed.md) | Living |
@@ -51,15 +50,15 @@ reused. The four collisions found in the first curation pass were assigned
 | 0051 | [HTML readiness is progressive and scroll never waits for Canvas verification](0051-progressive-scrollable-html-readiness.md) | Living |
 | 0052 | [Product ACP catalog and managed installer](0052-acp-catalog-installer.md) | Living |
 | 0053 | [Codex chooser uses ACP; App Server stays packaged-unregistered](0053-codex-acp-adapter.md) | Living; implementation metadata records the completed removal |
-| 0054 | [bundle common ECharts bytes and retain five exact frozen Canvases](0054-bundled-echarts-and-five-canvas-residency.md) | Living |
+| 0054 | [bundle common ECharts bytes and retain five exact frozen Canvases](0054-bundled-echarts-and-five-canvas-residency.md) | Living in part; only bundled ECharts and script-disabled Canvas residency remain |
 | 0057 | [Mutable records preserve unknown members instead of dropping or refusing them](0057-forward-compatible-record-members.md) | Living |
-| 0058 | [Bounded Canvas and SVG programs may complete the visible Edit document](0058-bounded-canvas-svg-edit-runtime.md) | Living |
 | 0059 | [Source elements use a persistent PageRoot identity](0059-persistent-source-element-identity.md) | Living |
 | 0060 | [Managed Working Copies materialize source element identity once](0060-working-copy-source-element-identity-migration.md) | Living |
 | 0061 | [Current comments resolve persistent source element identity](0061-stable-current-comment-targets.md) | Living |
 | 0062 | [Semantic source operations lower to complete identified HTML](0062-semantic-source-operation-kernel.md) | Living |
 | 0063 | [Canvas undo is a 20-step open-document memory history](0063-open-document-memory-history.md) | Living |
 | 0064 | [Source structure edits use stable IDs and semantic operations](0064-stable-id-source-structure-editing.md) | Living |
+| 0065 | [Edit runs supported author scripts in a disposable source-bound page](0065-disposable-edit-runtime.md) | Living |
 
 ## Reading guide
 

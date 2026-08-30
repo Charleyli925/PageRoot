@@ -15,6 +15,7 @@ directory is the default reading path.
 | 0018 | [Autosave and source history share one SourceTransaction kernel](0018-source-transaction-kernel.md) | Superseded | ADR 0063 |
 | 0021 | [Review runtime visual comparison separates visible text from raster noise](0021-review-runtime-visual-comparison-noise-tolerance.md) | Superseded | ADR 0046 |
 | 0023 | [Exact legacy V4 Registry metadata completion](0023-exact-legacy-v4-registry-migration.md) | Superseded | ADR 0028 |
+| 0025 | [Edit runs the author program once in the final visible iframe](0025-edit-direct-one-shot-runtime.md) | Superseded | ADR 0065 |
 | 0029 | [Review runtime visual comparison uses a tri-state verdict](0029-review-runtime-visual-tri-state-verdict.md) | Superseded | ADR 0046 |
 | 0030 | [Review runtime projection tolerates authored host mutation](0030-review-runtime-projection-tolerates-host-mutation.md) | Superseded | ADR 0046 |
 | 0031 | [Review capture serves allowlisted chart scripts from frozen bytes](0031-review-capture-frozen-chart-scripts.md) | Superseded | ADR 0046, Review portion |
@@ -25,6 +26,7 @@ directory is the default reading path.
 | 0050 | [Review paints authored content before optional runtime evidence](0050-review-first-paint-before-runtime-evidence.md) | Superseded | ADR 0046 |
 | 0055 | [Edit uses one bounded ECharts isolated-capture handoff](0055-edit-one-shot-author-runtime.md) | Superseded | ADR 0025 |
 | 0056 | [Qoder ACP v1 synthetic spike](0056-qoder-acp-v1-spike.md) | Superseded | ADR 0032 |
+| 0058 | [Bounded Canvas and SVG programs may complete the visible Edit document](0058-bounded-canvas-svg-edit-runtime.md) | Superseded | ADR 0065 |
 
 The archive preserves the original rationale. Collision-renamed files carry a
 single renumbering note beneath their H1; no other historical body text was

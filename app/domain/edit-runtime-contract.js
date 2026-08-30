@@ -5,7 +5,7 @@
  * screenshots, PNG bytes or a second visual representation.
  */
 
-export const EDIT_AUTHOR_RUNTIME_CONTRACT_VERSION = 1;
+export const EDIT_AUTHOR_RUNTIME_CONTRACT_VERSION = 2;
 
 export const EDIT_AUTHOR_RUNTIME_BUDGET = Object.freeze({
   htmlBytes: 20 * 1024 * 1024,
@@ -15,17 +15,13 @@ export const EDIT_AUTHOR_RUNTIME_BUDGET = Object.freeze({
   declaredAssetCount: 64,
   declaredAssetReferenceCount: 128,
   declaredAssetBytes: 2 * 1024 * 1024,
-  hostCount: 32,
-  sourceNodeCount: 4_096,
-  runtimeQuietFrames: 2,
   runtimeDeadlineMs: 4_000,
   orphanSessionTtlMs: 60_000,
 });
 
 // Main first bounds immutable resource preparation. The visible Edit iframe
-// freezes as soon as its approved visual hosts report a real paint followed by
-// quiet animation frames. runtimeDeadlineMs is only a fail-safe for hostile or
-// broken author code; it is never a minimum wait and never hides static HTML.
+// acknowledges its ordinary load directly; runtimeDeadlineMs is only a
+// fail-safe for hostile or broken author code and never a minimum wait.
 export const EDIT_AUTHOR_RUNTIME_VERIFICATION_DEADLINE_MS = (
   EDIT_AUTHOR_RUNTIME_BUDGET.runtimeDeadlineMs * 2
 ) + 1_000;
@@ -33,18 +29,12 @@ export const EDIT_AUTHOR_RUNTIME_VERIFICATION_DEADLINE_MS = (
 export const EDIT_RUNTIME_PROTOCOL_SCHEME = "pageroot-edit-runtime";
 export const EDIT_RUNTIME_SOURCE_MARKER_ATTRIBUTE =
   "data-pageroot-edit-runtime-source";
-export const EDIT_RUNTIME_HOST_ATTRIBUTE =
-  "data-pageroot-edit-runtime-host";
 export const EDIT_RUNTIME_OWNED_ATTRIBUTE =
   "data-pageroot-edit-runtime-owned";
 export const EDIT_RUNTIME_SCRIPT_STUB_ATTRIBUTE =
   "data-pageroot-edit-runtime-script";
 export const EDIT_RUNTIME_BOOTSTRAP_ATTRIBUTE =
   "data-pageroot-edit-runtime-bootstrap";
-export const EDIT_RUNTIME_FROZEN_ATTRIBUTE =
-  "data-pageroot-edit-runtime-frozen";
-export const EDIT_RUNTIME_RESULT_ATTRIBUTE =
-  "data-pageroot-edit-runtime-result";
 
 const SESSION_ID_PATTERN = /^[a-f0-9]{32}$/u;
 const EXECUTION_ID_PATTERN = /^[a-f0-9]{24}$/u;
@@ -146,28 +136,18 @@ function attributeValue(attributes, name) {
   return matches.length === 1 ? matches[0].value ?? "" : null;
 }
 
-function hasAttribute(attributes, name) {
-  return attributes.some((attribute) => attribute.name === asciiLower(name));
-}
-
 function scriptPolicy(attributes) {
   const rawType = attributeValue(attributes, "type");
   const type = asciiLower(rawType || "").trim();
-  if (type === "module") return Object.freeze({ executable: false, reason: "module-script" });
+  if (type === "module") return Object.freeze({ executable: true, reason: null });
   if (!CLASSIC_SCRIPT_TYPES.has(type)) {
     return Object.freeze({ executable: false, reason: null });
-  }
-  if (hasAttribute(attributes, "async") || hasAttribute(attributes, "defer")) {
-    return Object.freeze({ executable: false, reason: "non-deterministic-script" });
-  }
-  if (hasAttribute(attributes, "nomodule")) {
-    return Object.freeze({ executable: false, reason: "nomodule-script" });
   }
   return Object.freeze({ executable: true, reason: null });
 }
 
 /**
- * Scans only HTML classic-script elements. The parser also treats a closing
+ * Scans HTML executable script elements. The parser also treats a closing
  * script tag inside a JavaScript string as a terminator, so this deliberately
  * conservative scanner follows browser parsing instead of inventing JS rules.
  */
@@ -235,71 +215,25 @@ export function collectEditRuntimeScripts(html) {
   });
 }
 
-export function hasEditRuntimeEchartsSignal(source) {
-  const value = String(source || "");
-  return /(?:^|[/?#._-])echarts(?:[/?#._-]|$)/iu.test(value)
-    || /\b(?:window\s*\.\s*)?echarts\s*\.\s*init\s*\(/u.test(value);
-}
-
 /**
- * Recognizes only author programs that explicitly paint a visual surface.
- * This is intentionally narrower than "has a script": ordinary interaction,
- * analytics and application scripts never qualify for the direct Edit path.
+ * Exact authored-script identity used to decide whether one disposable Edit
+ * resource session can render a later semantic HTML revision. Ordinary text,
+ * style and structure edits leave this value unchanged; script edits require a
+ * new Canvas generation and a new Main-authorized resource closure.
  */
-export function hasEditRuntimeVisualSignal(source) {
-  const value = String(source || "");
-  if (hasEditRuntimeEchartsSignal(value)) return true;
-  const canvasSignal = (
-    /\bgetContext\s*\(\s*["'](?:2d|webgl2?|bitmaprenderer)["']/iu.test(value)
-    || /\bcreateElement\s*\(\s*["']canvas["']\s*\)/iu.test(value)
-  );
-  const svgSignal = (
-    /\bcreateElementNS\s*\(/u.test(value)
-    && (
-      /http:\/\/www\.w3\.org\/2000\/svg/iu.test(value)
-      || /\bcreateElementNS\s*\([^,]+,\s*["'](?:svg|g|path|rect|circle|ellipse|line|polyline|polygon|text|tspan|defs|linearGradient|radialGradient|stop|clipPath|mask|use)["']/iu.test(value)
-    )
-  );
-  return canvasSignal || svgSignal;
-}
-
-function hasEditRuntimeSvgHostMutationSignal(source) {
-  return /\bsetAttribute\s*\(\s*["']viewBox["']/u.test(String(source || ""));
-}
-
-/**
- * Edit does not grant arbitrary script execution. A classic-script document
- * needs an explicit ECharts library or initializer signal before preparation.
- */
-export function isEditRuntimeEchartsCandidate(html) {
+export function editRuntimeProgramIdentity(html) {
   const contract = collectEditRuntimeScripts(html);
-  return !contract.unsupportedReason
-    && contract.executableScripts.some((script) => (
-      hasEditRuntimeEchartsSignal(script.src || "")
-      || hasEditRuntimeEchartsSignal(script.inline)
-    ));
+  if (contract.unsupportedReason || contract.executableScripts.length < 1) return null;
+  return JSON.stringify(contract.executableScripts.map((script) => ({
+    openingTag: script.openingTag,
+    inline: script.inline,
+  })));
 }
 
 /**
- * A bounded visual candidate is an ordered classic-script document with an
- * explicit ECharts, Canvas or SVG paint signal. Script presence alone is not
- * sufficient to cross the direct Edit runtime boundary.
- */
-export function isEditRuntimeVisualCandidate(html) {
-  const contract = collectEditRuntimeScripts(html);
-  const hasAuthoredSvgRoot = /<svg(?:[\t\n\f\r />])/iu.test(String(html || ""));
-  return !contract.unsupportedReason
-    && contract.executableScripts.some((script) => (
-      hasEditRuntimeVisualSignal(script.src || "")
-      || hasEditRuntimeVisualSignal(script.inline)
-      || (hasAuthoredSvgRoot && hasEditRuntimeSvgHostMutationSignal(script.inline))
-    ));
-}
-
-/**
- * Modules and dynamic imports remain outside the one-shot ordered-classic
- * contract. Network and worker APIs are intentionally not predicted here:
- * CSP is the runtime boundary, avoiding false static fallbacks from strings.
+ * Relative module imports still need a native module graph rooted in the
+ * authored file. Until that graph is served by the scoped protocol, reject
+ * only import syntax and let CSP remain the boundary for ordinary APIs.
  */
 export function unsupportedEditRuntimeProgramReason(source) {
   const program = String(source || "");
@@ -334,6 +268,13 @@ export function isEditRuntimeSourceSha256(value) {
 
 export function isEditRuntimeFrameToken(value) {
   return FRAME_TOKEN_PATTERN.test(String(value || "").toLowerCase());
+}
+
+export function editRuntimeRegistrationProperty(executionId) {
+  const normalized = String(executionId || "").toLowerCase();
+  return isEditRuntimeExecutionId(normalized)
+    ? `__pageroot_edit_register_${normalized}`
+    : null;
 }
 
 export function editRuntimeProtocolUrl(sessionId, path) {

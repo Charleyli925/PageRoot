@@ -41,7 +41,6 @@ function success(request, overrides = {}) {
     scriptCount: 1,
     byteLength: 96,
     canvasGeneration: request.canvasGeneration,
-    hosts: request.hosts,
     ...overrides,
   };
 }
@@ -121,31 +120,6 @@ test("authority confirmation prepares once within the same source and canvas ide
   }));
   await flushAsync();
   assert.equal(requests.length, 1);
-});
-
-test("an exact retained runtime cancels preparation without creating a second execution", async () => {
-  const requests = [];
-  const revoked = [];
-  const session = new EditAuthorRuntimeSession({
-    port: {
-      prepare: async (request) => {
-        requests.push(request);
-        return success(request);
-      },
-      revoke: async (sessionId) => revoked.push(sessionId),
-    },
-  });
-
-  session.refresh(input());
-  assert.equal(session.snapshot.phase, "preparing");
-  assert.equal(session.reusePrepared(input()), true);
-  assert.equal(session.snapshot.phase, "settled");
-  assert.equal(session.snapshot.lastOutcome, "retained-runtime");
-  assert.equal(session.snapshot.grant, null);
-  assert.equal(session.startPreparation(input()), false);
-  await flushAsync();
-  assert.equal(requests.length, 0);
-  assert.deepEqual(revoked, []);
 });
 
 test("macOS /var aliases preserve a started preparation identity", async () => {
@@ -238,7 +212,7 @@ test("late preparation from an old generation is revoked and cannot publish", as
   assert.deepEqual(revoked, ["0123456789abcdef0123456789abcdef"]);
 });
 
-test("runtime settles once and later grants cannot re-enter preparation", async () => {
+test("settled runtime grant can render another disposable frame", async () => {
   const requests = [];
   const revoked = [];
   const session = new EditAuthorRuntimeSession({
@@ -265,8 +239,9 @@ test("runtime settles once and later grants cannot re-enter preparation", async 
   }));
 
   assert.equal(requests.length, 1);
-  assert.equal(session.beginRuntime(grant), false);
-  assert.deepEqual(revoked, [grant.sessionId]);
+  assert.equal(session.beginRuntime(grant), true);
+  assert.equal(session.settleRuntime({ ...grant, outcome: "ready" }), true);
+  assert.deepEqual(revoked, []);
 });
 
 test("failed preparation silently reaches static fallback", async () => {
@@ -286,8 +261,9 @@ test("failed preparation silently reaches static fallback", async () => {
   assert.equal(session.snapshot.lastOutcome, "prepare-failed");
 });
 
-test("explicit Canvas and SVG paint candidates use the same single preparation owner", async () => {
+test("ordinary, Canvas and SVG scripts use the same preparation owner", async () => {
   for (const visualProgram of [
+    'document.querySelector("#chart-host").addEventListener("click", () => {})',
     'document.querySelector("#chart-host").append(document.createElement("canvas"))',
     'document.querySelector("#chart-host").setAttribute("viewBox", "0 0 10 10")',
   ]) {

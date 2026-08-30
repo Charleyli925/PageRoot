@@ -2,7 +2,6 @@ import { createHash, randomBytes } from "node:crypto";
 import { readFile, realpath, stat } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { parse } from "parse5";
 
 import {
   EDIT_AUTHOR_RUNTIME_BUDGET,
@@ -10,8 +9,6 @@ import {
   EDIT_RUNTIME_PROTOCOL_SCHEME,
   collectEditRuntimeScripts,
   editRuntimeProtocolUrl,
-  hasEditRuntimeVisualSignal,
-  isEditRuntimeVisualCandidate,
   isEditRuntimeExecutionId,
   isEditRuntimeSessionId,
   unsupportedEditRuntimeProgramReason,
@@ -25,13 +22,15 @@ import {
 
 const AUTHOR_SCRIPT_PATH = /^\/.pageroot\/author\/(\d+)\.js$/u;
 const BOOTSTRAP_PATH = /^\/.pageroot\/bootstrap\/([a-f0-9]{24})\.js$/u;
-const RESERVED_ATTRIBUTE_PREFIX = "data-pageroot-edit-runtime-";
 const SCRIPT_EXTENSIONS = new Set([".js", ".mjs"]);
 const ALLOWED_CDN_HOSTS = new Set([
   "cdn.jsdelivr.net",
   "unpkg.com",
   "cdnjs.cloudflare.com",
 ]);
+const BUNDLED_ECHARTS_VERSION = "5.5.0";
+const BUNDLED_ECHARTS_SHA256 =
+  "42f8329d989b6f6539dd2b15bbdf0d82025762ac112fbb60dc57b27d7bcf3946";
 
 let schemePrivilegesRegistered = false;
 
@@ -62,6 +61,8 @@ function invalidRequest() {
 function assetContentType(relativePath) {
   switch (path.posix.extname(relativePath).toLowerCase()) {
     case ".css": return "text/css; charset=utf-8";
+    case ".js":
+    case ".mjs": return "text/javascript; charset=utf-8";
     case ".svg": return "image/svg+xml";
     case ".avif": return "image/avif";
     case ".gif": return "image/gif";
@@ -86,140 +87,13 @@ function assetContentType(relativePath) {
   }
 }
 
-function isRecord(value) {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
-
-function elementChildren(node) {
-  return (node?.childNodes || []).filter((child) => typeof child?.tagName === "string");
-}
-
-function documentElement(documentNode) {
-  return elementChildren(documentNode).find((node) => (
-    String(node.tagName || "").toLowerCase() === "html"
-  )) || null;
-}
-
-function childAtPath(root, pathValue) {
-  let current = root;
-  for (const index of pathValue) {
-    current = elementChildren(current)[index] || null;
-    if (!current) return null;
-  }
-  return current;
-}
-
-function sourceContentIsEmpty(node) {
-  return (node?.childNodes || []).every((child) => (
-    child?.nodeName === "#comment"
-    || (child?.nodeName === "#text" && !String(child.value || "").trim())
-  ));
-}
-
-function attributesFor(node) {
-  return new Map((node?.attrs || []).map((attribute) => [
-    String(attribute.name || "").toLowerCase(),
-    String(attribute.value || ""),
-  ]));
-}
-
-function containsReservedRuntimeAttribute(node) {
-  const visit = (current) => {
-    if (!current || typeof current !== "object") return false;
-    if ((current.attrs || []).some((attribute) => (
-      String(attribute.name || "").toLowerCase().startsWith(RESERVED_ATTRIBUTE_PREFIX)
-    ))) return true;
-    return (current.childNodes || []).some(visit)
-      || Boolean(current.content && visit(current.content));
-  };
-  return visit(node);
-}
-
-function validHostKey(value) {
-  return typeof value === "string" && /^[a-z0-9][a-z0-9-]{0,127}$/u.test(value);
-}
-
-function validHostBinding(value, keys) {
-  if (!isRecord(value) || keys.has(value.key) || !validHostKey(value.key)) return null;
-  if (
-    !Array.isArray(value.path)
-    || value.path.length > 256
-    || value.path.some((index) => (
-      !Number.isSafeInteger(index) || index < 0 || index > 65_535
-    ))
-  ) return null;
-  if (
-    typeof value.tagName !== "string"
-    || !/^[A-Za-z][A-Za-z0-9:-]{0,63}$/u.test(value.tagName)
-  ) return null;
-  if (!Array.isArray(value.identityAttributes) || !value.identityAttributes.length) return null;
-  if (value.identityAttributes.length > 8) return null;
-  const names = new Set();
-  const attributes = [];
-  for (const pair of value.identityAttributes) {
-    if (
-      !Array.isArray(pair)
-      || pair.length !== 2
-      || typeof pair[0] !== "string"
-      || !/^[A-Za-z_:][A-Za-z0-9:_.-]{0,127}$/u.test(pair[0])
-      || typeof pair[1] !== "string"
-      || pair[1].length > 2_048
-      || names.has(pair[0].toLowerCase())
-    ) return null;
-    names.add(pair[0].toLowerCase());
-    attributes.push(Object.freeze([pair[0].toLowerCase(), pair[1]]));
-  }
-  keys.add(value.key);
-  return Object.freeze({
-    key: value.key,
-    path: Object.freeze([...value.path]),
-    tagName: value.tagName.toLowerCase(),
-    identityAttributes: Object.freeze(attributes),
-  });
-}
-
-export function validateEditRuntimeHostBindings(value) {
-  if (
-    !Array.isArray(value)
-    || value.length < 1
-    || value.length > EDIT_AUTHOR_RUNTIME_BUDGET.hostCount
-  ) throw new TypeError("Edit runtime host bindings are invalid.");
-  const keys = new Set();
-  const bindings = value.map((item) => validHostBinding(item, keys));
-  if (bindings.some((binding) => binding === null)) {
-    throw new TypeError("Edit runtime host bindings are invalid.");
-  }
-  return Object.freeze(bindings);
-}
-
-function validateBoundHosts(documentNode, bindings) {
-  if (containsReservedRuntimeAttribute(documentNode)) {
-    throw new TypeError("Edit runtime source reserves a PageRoot runtime attribute.");
-  }
-  const root = documentElement(documentNode);
-  if (!root) throw new TypeError("Edit runtime source has no document root.");
-  for (const binding of bindings) {
-    const element = childAtPath(root, binding.path);
-    const sourceEmpty = sourceContentIsEmpty(element);
-    const canvasTextFallback = binding.tagName === "canvas"
-      && (element?.childNodes || []).every((node) => (
-        node.nodeName === "#text" || node.nodeName === "#comment"
-      ));
-    if (
-      !element
-      || String(element.tagName || "").toLowerCase() !== binding.tagName
-      || (!sourceEmpty && !canvasTextFallback)
-    ) throw new TypeError("Edit runtime host binding is not an approved visual surface.");
-    const attributes = attributesFor(element);
-    if (!binding.identityAttributes.every(([name, expected]) => (
-      attributes.get(name) === expected
-    ))) throw new TypeError("Edit runtime host binding is not exact.");
-  }
-}
-
 function containedPath(rootPath, candidate) {
   const relative = path.relative(rootPath, candidate);
   return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+}
+
+function isExecutableAssetPath(relativePath) {
+  return SCRIPT_EXTENSIONS.has(path.posix.extname(relativePath).toLowerCase());
 }
 
 async function resolveLocalScript(sourceRoot, reference, {
@@ -264,8 +138,25 @@ function permittedEchartsUrl(value) {
   }
 }
 
-// Edit's one-shot author runtime uses the allowlisted chart-library scripts.
-// Review is static-only and has no runtime capture path.
+function isBundledEchartsUrl(value) {
+  try {
+    const url = new URL(String(value || ""));
+    const pathName = url.pathname.toLowerCase();
+    return (
+      (url.hostname === "cdnjs.cloudflare.com"
+        && pathName === `/ajax/libs/echarts/${BUNDLED_ECHARTS_VERSION}/echarts.min.js`)
+      || (url.hostname === "cdn.jsdelivr.net"
+        && pathName === `/npm/echarts@${BUNDLED_ECHARTS_VERSION}/dist/echarts.min.js`)
+      || (url.hostname === "unpkg.com"
+        && pathName === `/echarts@${BUNDLED_ECHARTS_VERSION}/dist/echarts.min.js`)
+    );
+  } catch {
+    return false;
+  }
+}
+
+// Edit may resolve the reviewed ECharts CDN URLs to pinned packaged bytes.
+// Review is static-only and has no author-runtime path.
 export { permittedEchartsUrl };
 
 function remoteScriptTimeoutError() {
@@ -391,12 +282,12 @@ async function fixedAuthorScripts({
   html,
   sourceRoot,
   netFetch,
-  runtimeLibraryStore,
   readFileImpl,
   realpathImpl,
   statImpl,
   preparationDeadlineAt,
   preparationSignal,
+  bundledEchartsPath,
 }) {
   const contract = collectEditRuntimeScripts(html);
   if (contract.unsupportedReason) {
@@ -408,7 +299,6 @@ async function fixedAuthorScripts({
   ) throw new TypeError("Edit runtime script count is invalid.");
   const scripts = [];
   let totalBytes = 0;
-  let containsVisualSignal = isEditRuntimeVisualCandidate(html);
   for (const descriptor of contract.executableScripts) {
     let libraryOrigin = descriptor.src ? "local" : "inline";
     let bytes;
@@ -419,10 +309,13 @@ async function fixedAuthorScripts({
         preparationDeadlineAt,
         preparationSignal,
       );
-      if (runtimeLibraryStore?.load) {
-        const loaded = await runtimeLibraryStore.load(descriptor.src, fetchRemote);
-        bytes = loaded.bytes;
-        libraryOrigin = loaded.origin;
+      if (bundledEchartsPath && isBundledEchartsUrl(descriptor.src)) {
+        bytes = Buffer.from(await readFileImpl(bundledEchartsPath));
+        const digest = createHash("sha256").update(bytes).digest("hex");
+        if (digest !== BUNDLED_ECHARTS_SHA256) {
+          throw new TypeError("Bundled ECharts bytes failed integrity verification.");
+        }
+        libraryOrigin = "bundled";
       } else {
         bytes = await fetchRemote();
         libraryOrigin = "network";
@@ -444,7 +337,6 @@ async function fixedAuthorScripts({
     if (programReason) {
       throw new TypeError("Edit runtime script is unsupported: " + programReason + ".");
     }
-    containsVisualSignal ||= hasEditRuntimeVisualSignal(program);
     totalBytes += bytes.byteLength;
     if (totalBytes > EDIT_AUTHOR_RUNTIME_BUDGET.aggregateScriptBytes) {
       throw new TypeError("Edit runtime script aggregate exceeds the byte budget.");
@@ -454,11 +346,7 @@ async function fixedAuthorScripts({
       bytes,
       sha256: "sha256:" + createHash("sha256").update(bytes).digest("hex"),
       libraryOrigin,
-      available: true,
     }));
-  }
-  if (!containsVisualSignal) {
-    throw new TypeError("Edit runtime requires an explicit visual paint candidate.");
   }
   const digest = createHash("sha256");
   for (const script of scripts) {
@@ -503,14 +391,14 @@ export function registerEditRuntimeProtocolScheme(protocolApi) {
 }
 
 /**
- * One immutable resource session per execution. It has no compatibility
- * result, promotion document, LRU, TTL cache, or second execution identity.
- * A short orphan cleanup only bounds abandoned sessions after navigation.
+ * One immutable resource session per authorized Script program. The same
+ * session may serve repeated disposable iframe loads while the program
+ * identity stays exact. It has no compatibility result, promotion document,
+ * prewarm store or disk cache; a short idle cleanup bounds abandoned sessions.
  */
 export function createEditRuntimeProtocolController({
   protocolApi,
   netFetch,
-  runtimeLibraryStore = null,
   now = () => Date.now(),
   randomSessionId = () => randomBytes(16).toString("hex"),
   randomExecutionId = () => randomBytes(12).toString("hex"),
@@ -519,9 +407,9 @@ export function createEditRuntimeProtocolController({
   statImpl = stat,
   resolveSourceRoot = resolvePreviewSourceRoot,
   collectDeclaredAssets = collectDeclaredPreviewAssets,
+  bundledEchartsPath = null,
   orphanSessionTtlMs = EDIT_AUTHOR_RUNTIME_BUDGET.orphanSessionTtlMs,
   runtimePreparationDeadlineMs = EDIT_AUTHOR_RUNTIME_BUDGET.runtimeDeadlineMs,
-  preparedScriptEntries = 8,
 } = {}) {
   if (!protocolApi || typeof protocolApi.handle !== "function") {
     throw new TypeError("Edit runtime protocol requires protocol.handle.");
@@ -534,7 +422,6 @@ export function createEditRuntimeProtocolController({
     Math.round(Number(runtimePreparationDeadlineMs)) || EDIT_AUTHOR_RUNTIME_BUDGET.runtimeDeadlineMs,
   ));
   const sessions = new Map();
-  const preparedScripts = new Map();
   const installedProtocols = new WeakSet();
   const allocate = (create, predicate) => {
     for (let attempt = 0; attempt < 32; attempt += 1) {
@@ -543,24 +430,11 @@ export function createEditRuntimeProtocolController({
     }
     throw new Error("Unable to allocate an Edit runtime identity.");
   };
-  const pruneOrphans = () => {
+  const pruneOrphans = (activeSessionId = null) => {
     const cutoff = now() - Math.max(1, Number(orphanSessionTtlMs) || 1);
     for (const [id, session] of sessions) {
-      if (session.createdAt < cutoff) sessions.delete(id);
+      if (id !== activeSessionId && session.lastAccessAt < cutoff) sessions.delete(id);
     }
-  };
-  const preparedScriptKey = (source, sourceRoot) => createHash("sha256")
-    .update(sourceRoot)
-    .update("\0")
-    .update(source)
-    .digest("hex");
-  const rememberPreparedScripts = (key, value) => {
-    preparedScripts.delete(key);
-    preparedScripts.set(key, value);
-    while (preparedScripts.size > Math.max(5, Number(preparedScriptEntries) || 8)) {
-      preparedScripts.delete(preparedScripts.keys().next().value);
-    }
-    return value;
   };
   const prepareScripts = async ({
     source,
@@ -568,70 +442,28 @@ export function createEditRuntimeProtocolController({
     preparationController,
     preparationDeadlineAt,
   }) => {
-    const key = preparedScriptKey(source, sourceRoot);
-    const scriptContract = collectEditRuntimeScripts(source);
-    const cacheable = !scriptContract.unsupportedReason
-      && scriptContract.executableScripts.every((descriptor) => (
-        !descriptor.src || permittedEchartsUrl(descriptor.src)
-      ));
-    const retained = cacheable ? preparedScripts.get(key) : null;
-    if (retained) return rememberPreparedScripts(key, retained);
-    const frozen = await settleWithinRuntimeDeadline(
+    return settleWithinRuntimeDeadline(
       () => fixedAuthorScripts({
         html: source,
         sourceRoot,
         netFetch,
-        runtimeLibraryStore,
         readFileImpl,
         realpathImpl,
         statImpl,
         preparationDeadlineAt,
         preparationSignal: preparationController.signal,
+        bundledEchartsPath,
       }),
       preparationController,
       preparationDeadlineAt,
       runtimePreparationTimeoutError,
     );
-    return cacheable ? rememberPreparedScripts(key, frozen) : frozen;
   };
-  const prewarmScripts = async ({ html, sourcePath } = {}) => {
-    const source = typeof html === "string" ? html : null;
-    if (!source || utf8Bytes(source) > EDIT_AUTHOR_RUNTIME_BUDGET.htmlBytes) {
-      throw new TypeError("Edit runtime prewarm source is invalid or too large.");
-    }
-    const preparationController = new AbortController();
-    const preparationDeadlineAt = Date.now() + boundedRuntimePreparationDeadlineMs;
-    const sourceRoot = await settleWithinRuntimeDeadline(
-      () => resolveSourceRoot(sourcePath),
-      preparationController,
-      preparationDeadlineAt,
-      runtimePreparationTimeoutError,
-    );
-    if (!sourceRoot) throw new TypeError("Edit runtime prewarm requires a known source path.");
-    const frozen = await prepareScripts({
-      source,
-      sourceRoot,
-      preparationController,
-      preparationDeadlineAt,
-    });
-    return Object.freeze({
-      sourceSha256: "sha256:" + createHash("sha256").update(source).digest("hex"),
-      resourceSha256: frozen.resourceSha256,
-      scriptCount: frozen.scripts.length,
-      byteLength: frozen.byteLength,
-      libraryOrigins: Object.freeze([
-        ...new Set(frozen.scripts.map((script) => script.libraryOrigin)),
-      ]),
-    });
-  };
-  const createSession = async ({ html, sourcePath, bindings } = {}) => {
+  const createSession = async ({ html, sourcePath } = {}) => {
     const source = typeof html === "string" ? html : null;
     if (!source || utf8Bytes(source) > EDIT_AUTHOR_RUNTIME_BUDGET.htmlBytes) {
       throw new TypeError("Edit runtime source is invalid or too large.");
     }
-    const normalizedBindings = validateEditRuntimeHostBindings(bindings);
-    const documentNode = parse(source);
-    validateBoundHosts(documentNode, normalizedBindings);
     const preparationController = new AbortController();
     const preparationDeadlineAt = Date.now() + boundedRuntimePreparationDeadlineMs;
     const sourceRoot = await settleWithinRuntimeDeadline(
@@ -647,7 +479,7 @@ export function createEditRuntimeProtocolController({
       preparationController,
       preparationDeadlineAt,
     });
-    const declaredAssets = await settleWithinRuntimeDeadline(
+    const discoveredAssets = await settleWithinRuntimeDeadline(
       () => collectDeclaredAssets({
         html: source,
         sourceRoot,
@@ -660,12 +492,15 @@ export function createEditRuntimeProtocolController({
       preparationDeadlineAt,
       runtimePreparationTimeoutError,
     );
+    const declaredAssets = new Map(
+      [...discoveredAssets].filter(([relativePath]) => !isExecutableAssetPath(relativePath)),
+    );
     pruneOrphans();
     const sessionId = allocate(randomSessionId, (candidate) => (
       isEditRuntimeSessionId(candidate) && !sessions.has(candidate)
     ));
     const executionId = allocate(randomExecutionId, isEditRuntimeExecutionId);
-    const createdAt = now();
+    const lastAccessAt = now();
     sessions.set(sessionId, {
       sessionId,
       executionId,
@@ -674,9 +509,7 @@ export function createEditRuntimeProtocolController({
       scripts: frozenScripts.scripts.map((script) => ({ ...script })),
       byteLength: frozenScripts.byteLength,
       resourceSha256: frozenScripts.resourceSha256,
-      bindings: normalizedBindings,
-      bootstrapAvailable: true,
-      createdAt,
+      lastAccessAt,
     });
     return Object.freeze({
       contractVersion: EDIT_AUTHOR_RUNTIME_CONTRACT_VERSION,
@@ -688,7 +521,6 @@ export function createEditRuntimeProtocolController({
       libraryOrigins: Object.freeze([
         ...new Set(frozenScripts.scripts.map((script) => script.libraryOrigin)),
       ]),
-      bindings: normalizedBindings,
     });
   };
   const revokeSession = (value) => {
@@ -703,17 +535,14 @@ export function createEditRuntimeProtocolController({
     } catch {
       return invalidRequest();
     }
-    pruneOrphans();
     const sessionId = sessionIdFrom(requestUrl.hostname);
     const session = sessionId ? sessions.get(sessionId) : null;
+    if (session) session.lastAccessAt = now();
+    pruneOrphans(sessionId);
     if (!session) return notFound();
     const bootstrap = requestUrl.pathname.match(BOOTSTRAP_PATH);
     if (bootstrap) {
-      if (
-        executionIdFrom(bootstrap[1]) !== session.executionId
-        || (request.method === "GET" && !session.bootstrapAvailable)
-      ) return notFound();
-      if (request.method === "GET") session.bootstrapAvailable = false;
+      if (executionIdFrom(bootstrap[1]) !== session.executionId) return notFound();
       return response(
         request.method === "HEAD" ? null : createEditRuntimeBootstrap({
           executionId: session.executionId,
@@ -731,9 +560,7 @@ export function createEditRuntimeProtocolController({
         !Number.isSafeInteger(index)
         || !script
         || script.index !== index
-        || (request.method === "GET" && !script.available)
       ) return notFound();
-      if (request.method === "GET") script.available = false;
       return response(
         request.method === "HEAD" ? null : script.bytes,
         200,
@@ -741,9 +568,7 @@ export function createEditRuntimeProtocolController({
       );
     }
     const relative = normalizeRelativeAssetPath(requestUrl.pathname);
-    if (!relative || SCRIPT_EXTENSIONS.has(path.posix.extname(relative).toLowerCase())) {
-      return notFound();
-    }
+    if (!relative || isExecutableAssetPath(relative)) return notFound();
     const asset = session.declaredAssets.get(relative);
     if (!asset) return notFound();
     try {
@@ -785,14 +610,11 @@ export function createEditRuntimeProtocolController({
     install: () => installFor(protocolApi),
     installFor,
     createSession,
-    prewarmScripts,
     revokeSession,
     dispose: () => {
       sessions.clear();
-      preparedScripts.clear();
     },
     sessionCount: () => sessions.size,
-    preparedScriptCount: () => preparedScripts.size,
     handleRequest,
   });
 }

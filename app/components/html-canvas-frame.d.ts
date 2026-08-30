@@ -17,15 +17,3 @@ export function frameDocumentMatchesExpected(
   expectedFrameHtml: string,
   writtenHtml: string | null,
 ): boolean;
-
-export function isRuntimeFrameFrozenResult(
-  value: unknown,
-  frame: RuntimeFrameContext,
-): boolean;
-
-export function hostHasAuthorPaint(element: Element | null): boolean;
-
-export function runtimeFrameKeepsAuthorPaint(
-  documentNode: Document,
-  frame: RuntimeFrameContext,
-): boolean;

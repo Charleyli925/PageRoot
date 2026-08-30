@@ -23,8 +23,17 @@ class RuntimeCanvasResidencySession {
 
   getSnapshot = () => this.#keys;
 
-  retain(tabId: string, sourceSha256: string, canvasGeneration: number) {
+  retain(
+    tabId: string,
+    sourceSha256: string,
+    canvasGeneration: number,
+    cacheable = true,
+  ) {
     if (!tabId || !sourceSha256 || !Number.isSafeInteger(canvasGeneration)) return;
+    if (!cacheable) {
+      this.evict(tabId);
+      return;
+    }
     this.#publish([
       Object.freeze({ tabId, sourceSha256, canvasGeneration }),
       ...this.#keys.filter((entry) => entry.tabId !== tabId),
@@ -63,7 +72,6 @@ export function useRuntimeCanvasResidency({
   canvasMode,
   editRuntimeSnapshot,
   startPreparation,
-  reusePreparation,
 }: {
   tabIds: readonly string[];
   activeTabId: string | null;
@@ -72,12 +80,16 @@ export function useRuntimeCanvasResidency({
   canvasMode: "edit" | "preview";
   editRuntimeSnapshot: EditAuthorRuntimeSnapshot | null;
   startPreparation: (input: { sourceSha256: string; canvasGeneration: number }) => void;
-  reusePreparation: (input: { sourceSha256: string; canvasGeneration: number }) => void;
 }) {
   const [session] = useState(() => new RuntimeCanvasResidencySession());
   const keys = useSyncExternalStore(session.subscribe, session.getSnapshot, session.getSnapshot);
-  const retain = useCallback((tabId: string, sourceSha256: string, canvasGeneration: number) => {
-    session.retain(tabId, sourceSha256, canvasGeneration);
+  const retain = useCallback((
+    tabId: string,
+    sourceSha256: string,
+    canvasGeneration: number,
+    cacheable = true,
+  ) => {
+    session.retain(tabId, sourceSha256, canvasGeneration, cacheable);
   }, [session]);
   const evict = useCallback((tabId: string) => {
     session.evict(tabId);
@@ -109,14 +121,11 @@ export function useRuntimeCanvasResidency({
       || !Number.isSafeInteger(canvasGeneration)
     ) return;
     const input = { sourceSha256, canvasGeneration };
-    if (activeRetained) reusePreparation(input);
-    else startPreparation(input);
+    startPreparation(input);
   }, [
-    activeRetained,
     editRuntimeSnapshot?.canvasGeneration,
     editRuntimeSnapshot?.sourcePath,
     editRuntimeSnapshot?.sourceSha256,
-    reusePreparation,
     runtimePreparing,
     startPreparation,
   ]);

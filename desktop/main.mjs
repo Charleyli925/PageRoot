@@ -137,9 +137,9 @@ import {
   createEditRuntimeProtocolController,
   registerEditRuntimeProtocolScheme,
 } from "./edit-runtime-protocol.mjs";
-import { createEditRuntimeLibraryStore } from "./edit-runtime-library-store.mjs";
 import {
   EDIT_AUTHOR_RUNTIME_CONTRACT_VERSION,
+  editRuntimeProgramIdentity,
   isEditRuntimeRequestId,
 } from "../app/domain/edit-runtime-contract.js";
 import {
@@ -289,7 +289,6 @@ const PREVIEW_CHANNELS = Object.freeze({
 });
 const EDIT_RUNTIME_CHANNELS = Object.freeze({
   prepare: "html-edit-runtime:prepare",
-  prewarmRegistered: "html-edit-runtime:prewarm-registered",
   revoke: "html-edit-runtime:revoke",
 });
 const EDIT_CHANNELS = Object.freeze({
@@ -459,10 +458,7 @@ function ensureEditRuntimeProtocolController() {
     editRuntimeProtocolController = createEditRuntimeProtocolController({
       protocolApi: protocol,
       netFetch: (url, options) => net.fetch(url, options),
-      runtimeLibraryStore: createEditRuntimeLibraryStore({
-        userDataPath: app.getPath("userData"),
-        bundledEchartsPath,
-      }),
+      bundledEchartsPath,
     });
     editRuntimeProtocolController.install();
   }
@@ -1953,10 +1949,10 @@ async function prepareEditAuthorRuntime(payload) {
     || !isEditRuntimeRequestId(payload.requestId)
     || typeof payload.html !== "string"
     || payload.html !== activeSource.html
+    || payload.programIdentity !== editRuntimeProgramIdentity(activeSource.html)
     || String(payload.sourceSha256 || "").toLowerCase() !== activeSource.sha256
     || !Number.isSafeInteger(payload.canvasGeneration)
     || payload.canvasGeneration < 0
-    || !Array.isArray(payload.hosts)
   ) {
     throw new Error("Edit runtime source is no longer the active persisted document.");
   }
@@ -1975,10 +1971,12 @@ async function prepareEditAuthorRuntime(payload) {
         "当前画布的运行时准备已经完成。",
       );
     }
-    if (cause instanceof Error && /in progress|at capacity/u.test(cause.message)) {
+    if (cause instanceof Error && /in progress|lifetime limit/u.test(cause.message)) {
       throw new ProjectFileError(
         "EDIT_RUNTIME_PREPARATION_LIMITED",
-        "当前画布正在安全准备，请稍后重试。",
+        /lifetime limit/u.test(cause.message)
+          ? "本次应用会话的运行页面准备已达到安全上限，请重启 PageRoot 后继续。"
+          : "当前画布正在安全准备，请稍后重试。",
       );
     }
     throw cause;
@@ -1989,7 +1987,6 @@ async function prepareEditAuthorRuntime(payload) {
     session = await ensureEditRuntimeProtocolController().createSession({
       html: activeSource.html,
       sourcePath: assetSourcePath,
-      bindings: payload.hosts,
     });
     return Object.freeze({
       contractVersion: session.contractVersion,
@@ -2001,7 +1998,6 @@ async function prepareEditAuthorRuntime(payload) {
       scriptCount: session.scriptCount,
       byteLength: session.byteLength,
       canvasGeneration: payload.canvasGeneration,
-      hosts: session.bindings,
     });
   } catch (cause) {
     if (session) {
@@ -3306,29 +3302,6 @@ async function readRegisteredProjectProjection(projectIdInput) {
   });
 }
 
-async function prewarmRegisteredEditRuntime(projectIdInput) {
-  const project = await readRegisteredProjectProjection(projectIdInput);
-  const prepared = await ensureEditRuntimeProtocolController().prewarmScripts({
-    html: project.html,
-    sourcePath: project.sourcePath,
-  });
-  if (prepared.sourceSha256 !== project.sha256) {
-    throw new ProjectFileError(
-      "EDIT_RUNTIME_PREWARM_HASH_MISMATCH",
-      "后台准备的图表资源与已验证工作文件不一致。",
-    );
-  }
-  return Object.freeze({
-    projectId: project.projectId,
-    documentId: project.documentId,
-    sourceSha256: project.sha256,
-    resourceSha256: prepared.resourceSha256,
-    scriptCount: prepared.scriptCount,
-    byteLength: prepared.byteLength,
-    libraryOrigins: prepared.libraryOrigins,
-  });
-}
-
 async function openRegisteredProject(projectIdInput) {
   return projectOpenQueue.run(async () => {
     const project = await readRegisteredProjectProjection(projectIdInput);
@@ -3501,7 +3474,6 @@ function registerProjectIpc() {
         ensurePreviewProtocolController().revokeSession(sessionId)
       ),
       prepareEditAuthorRuntime,
-      prewarmRegisteredEditRuntime,
       revokeEditAuthorRuntime,
     },
   });

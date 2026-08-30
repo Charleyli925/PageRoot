@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import {
@@ -6,9 +7,9 @@ import {
   EDIT_AUTHOR_RUNTIME_VERIFICATION_DEADLINE_MS,
   EDIT_RUNTIME_PROTOCOL_SCHEME,
   collectEditRuntimeScripts,
+  editRuntimeProgramIdentity,
   editRuntimeProtocolUrl,
-  isEditRuntimeEchartsCandidate,
-  isEditRuntimeVisualCandidate,
+  editRuntimeRegistrationProperty,
   isEditRuntimeExecutionId,
   isEditRuntimeFrameToken,
   isEditRuntimeProtocolUrl,
@@ -41,15 +42,13 @@ test("direct Edit runtime extracts ordered deterministic classic scripts", () =>
   assert.equal(contract.scripts.at(-1)?.executable, false);
 });
 
-test("direct Edit runtime keeps module and dynamic imports outside its boundary", () => {
-  for (const [html, expected] of [
-    ['<script type="module">import "./chart.js"</script>', "module-script"],
-    ['<script async src="chart.js"></script>', "non-deterministic-script"],
-    ['<script defer src="chart.js"></script>', "non-deterministic-script"],
-    ['<script nomodule src="chart.js"></script>', "nomodule-script"],
-  ]) {
-    assert.equal(collectEditRuntimeScripts(html).unsupportedReason, expected);
-  }
+test("disposable Edit runtime preserves native script scheduling attributes", () => {
+  for (const html of [
+    '<script type="module">window.ready = true</script>',
+    '<script async src="chart.js"></script>',
+    '<script defer src="chart.js"></script>',
+    '<script nomodule src="chart.js"></script>',
+  ]) assert.equal(collectEditRuntimeScripts(html).unsupportedReason, null);
   assert.equal(
     unsupportedEditRuntimeProgramReason('import("./chart.js")'),
     "dynamic-or-module-import",
@@ -61,22 +60,12 @@ test("direct Edit runtime keeps module and dynamic imports outside its boundary"
   );
 });
 
-test("direct Edit runtime keeps ECharts compatibility and admits explicit Canvas/SVG paint", () => {
-  assert.equal(isEditRuntimeEchartsCandidate(
-    '<main id="chart"></main><script src="./vendor/echarts.min.js"></script><script>echarts.init(document.querySelector("#chart"))</script>',
-  ), true);
-  assert.equal(isEditRuntimeEchartsCandidate(
-    '<main id="chart"></main><script>document.querySelector("#chart").append(document.createElement("canvas"))</script>',
-  ), false);
-  assert.equal(isEditRuntimeVisualCandidate(
-    '<canvas id="chart">fallback</canvas><script>document.querySelector("#chart").getContext("2d").fillRect(0,0,10,10)</script>',
-  ), true);
-  assert.equal(isEditRuntimeVisualCandidate(
-    '<svg id="chart"></svg><script>document.querySelector("#chart").setAttribute("viewBox", "0 0 10 10")</script>',
-  ), true);
-  assert.equal(isEditRuntimeVisualCandidate(
-    '<main id="app"></main><script>document.querySelector("#app").addEventListener("click", () => {})</script>',
-  ), false, "ordinary application scripts stay outside the visual runtime boundary");
+test("program identity changes only when authored script markup changes", () => {
+  const first = '<main>A</main><script defer>window.ready = true</script>';
+  const semanticEdit = '<main>B</main><script defer>window.ready = true</script>';
+  const scriptEdit = '<main>B</main><script defer>window.ready = false</script>';
+  assert.equal(editRuntimeProgramIdentity(first), editRuntimeProgramIdentity(semanticEdit));
+  assert.notEqual(editRuntimeProgramIdentity(first), editRuntimeProgramIdentity(scriptEdit));
 });
 
 test("direct Edit runtime grants use one session and one execution identity", () => {
@@ -95,12 +84,14 @@ test("direct Edit runtime grants use one session and one execution identity", ()
   assert.equal(isEditRuntimeSourceSha256(sourceSha), true);
   assert.equal(isEditRuntimeFrameToken("edit-runtime-frame-" + executionId), true);
   assert.equal(isEditRuntimeProtocolUrl(url, sessionId), true);
+  assert.equal(
+    editRuntimeRegistrationProperty(executionId),
+    "__pageroot_edit_register_" + executionId,
+  );
   assert.equal(editRuntimeProtocolUrl(sessionId, "relative.js"), null);
-  assert.equal(EDIT_AUTHOR_RUNTIME_BUDGET.hostCount, 32);
   assert.equal(EDIT_AUTHOR_RUNTIME_BUDGET.declaredAssetCount, 64);
   assert.equal(EDIT_AUTHOR_RUNTIME_BUDGET.declaredAssetReferenceCount, 128);
   assert.equal(EDIT_AUTHOR_RUNTIME_BUDGET.declaredAssetBytes, 2 * 1024 * 1024);
-  assert.equal(EDIT_AUTHOR_RUNTIME_BUDGET.runtimeQuietFrames, 2);
   assert.equal(
     EDIT_AUTHOR_RUNTIME_VERIFICATION_DEADLINE_MS,
     (EDIT_AUTHOR_RUNTIME_BUDGET.runtimeDeadlineMs * 2) + 1_000,
@@ -109,4 +100,44 @@ test("direct Edit runtime grants use one session and one execution identity", ()
   assert.equal(EDIT_AUTHOR_RUNTIME_BUDGET.orphanSessionTtlMs, 60_000);
   assert.equal("cacheEntries" in EDIT_AUTHOR_RUNTIME_BUDGET, false);
   assert.equal("cacheTtlMs" in EDIT_AUTHOR_RUNTIME_BUDGET, false);
+  assert.equal("runtimeQuietFrames" in EDIT_AUTHOR_RUNTIME_BUDGET, false);
+  assert.equal("hostCount" in EDIT_AUTHOR_RUNTIME_BUDGET, false);
+});
+
+test("formal architecture keeps the source-edit experience contract and runtime non-goals", async () => {
+  const [adr, architecture, interaction] = await Promise.all([
+    readFile(new URL("../docs/decisions/0065-disposable-edit-runtime.md", import.meta.url), "utf8"),
+    readFile(new URL("../docs/ARCHITECTURE_CONTRACT.md", import.meta.url), "utf8"),
+    readFile(new URL("../docs/INTERACTION_FLOW.md", import.meta.url), "utf8"),
+  ]);
+  assert.match(adr, /completed operation materializes complete next HTML/u);
+  assert.match(adr, /must not replace the iframe for every keystroke/u);
+  assert.match(adr, /parent-realm `WeakSet`/u);
+  assert.match(adr, /public source identity revokes/u);
+  assert.match(adr, /Every source mutation[\s\S]*registered stable ID/u);
+  assert.match(adr, /non-evicting 128-preparation[\s\S]*application-lifetime cap/u);
+  assert.match(adr, /Workers stay[\s\S]*CSP-disabled/u);
+  assert.match(adr, /Stable ID and Runtime edit authority are separate contracts/u);
+  assert.match(adr, /authority set is sealed[\s\S]*cannot add a trusted source object/u);
+  assert.match(adr, /does not promise exact parser-time Script scheduling/u);
+  assert.match(architecture, /close\/reopen must reproduce source edits/u);
+  assert.match(architecture, /no Runtime DOM persistence/u);
+  assert.match(architecture, /private parent-realm `WeakSet`/u);
+  assert.match(architecture, /public source identity revokes/u);
+  assert.match(architecture, /cached selection state is never mutation authority/u);
+  assert.match(architecture, /non-evicting 128-preparation[\s\S]*application-lifetime cap/u);
+  assert.match(architecture, /persistent source identity, not Runtime edit authority/u);
+  assert.match(architecture, /established exactly once[\s\S]*is then sealed/u);
+  assert.match(architecture, /Exact parser-time execution order is not an Edit Runtime[\s\S]*contract/u);
+  assert.match(interaction, /用户对源码内容完成的编辑必须写入完整 HTML/u);
+  assert.match(interaction, /不得每输入一个字符就重建 iframe/u);
+  assert.match(interaction, /父编辑器私有 `WeakSet`/u);
+  assert.match(interaction, /公开源码 ID 被改写时立即/u);
+  assert.match(interaction, /不把缓存 selection 当作修改权限/u);
+  for (const document of [adr, architecture, interaction]) {
+    assert.match(document, /Runtime DOM/u);
+    assert.match(document, /timer\/rAF\/Observer\/listener/u);
+    assert.match(document, /Canvas\/SVG/u);
+    assert.match(document, /dual-iframe|双 iframe/u);
+  }
 });

@@ -428,31 +428,71 @@ workbench or canvas; `HtmlCanvasEditor` must not mount or dismiss the card.
 Send that enters waiting writes `dismissed`; Escape does not. Hover captions
 are disposable Canvas presentation and must not change the click selection path.
 
-The direct path permits only a bounded classic-script ECharts candidate, frozen
-local/allowlisted-CDN bytes and at most 32 uniquely bound, source-empty hosts.
-For an HTML-only imported V1, Main records the original selected HTML directory
-in desktop `html-projects.json` and uses it as the local asset root for Preview,
-static Edit and the one-shot ECharts path. The renderer neither supplies nor
-learns that original path; the Working Copy remains source authority. The
-binding survives continue-current, restart, working-copy switches and optional
-original-HTML trash while sibling files remain in that directory.
-The final frame executes once, disables its disposable initial ECharts
-animation, then freezes after real paint and two quiet frames; the deadline is
-only a broken-script fallback. It stops tracked runtime activity and audits
-source-node identity/text/attributes plus
-host containment before installing Canvas interaction. An approved empty host
-may add only absent ECharts layout declarations (`position: relative`,
-`user-select: none`, transparent `-webkit-tap-highlight-color`, or a positive
-`scale()` no greater than `1`);
-its authored declarations and every other
-attribute remain exact. Runtime descendants are
-display-only and map to their approved source host. They never become a
-`SourcePatch`, Source HTML, save, Version, export, Request or AI input. Any
-prepare, load, audit or deadline failure selects the ordinary static frame.
-Workbench may retain five already verified iframe documents and prewarm exact
-immutable script bytes for registered tabs. Those caches are inert presentation
-or resource facts only: there is no bitmap/Blob projection, hidden execution
-probe, source promotion or post-interaction iframe replacement.
+The direct path accepts a bounded supported executable `script` program. Main
+re-reads the active persisted HTML, verifies exact Hash and Canvas generation,
+then prepares only contained local/inline resources plus the reviewed ECharts
+CDN mapping. For an HTML-only imported V1, Main records the original selected
+HTML directory in desktop `html-projects.json` and uses it as the contained
+local asset root for Preview, static Edit and the disposable Edit runtime. The
+renderer neither supplies nor learns that original path; the Working Copy
+remains source authority.
+
+The visible frame parses complete source while author-script placeholders stay
+inert, registers the parser-authored source object set once, then activates the
+author program in source order. There
+is no visual-signal classifier, hidden probe, real-paint/quiet-frame gate,
+runtime activity freeze, host mutation audit, script prewarm or disk cache.
+Before author code runs, the fixed bootstrap captures a one-time parent-owned
+registration port. Registration completes at `DOMContentLoaded` before any
+author placeholder activates, so a script cannot preclaim a future parser
+object. The parent deletes the public entry and keeps proved source
+DOM references in a private parent-realm `WeakSet`; copied attributes or
+author-realm properties cannot grant edit authority, and changing a proved
+element's public source identity revokes that authority. Every source mutation
+must revalidate the live DOM object, its registered stable ID and its current
+SourceIndex mapping; cached selection state is never mutation authority. A runtime descendant is
+display-only and resolves to the nearest still-proven source host for comments;
+it cannot become a semantic source edit. A supported semantic
+source change materializes complete HTML, rebuilds the disposable frame and
+reruns the author program. Native input may postpone that rebuild until editing
+finishes. The resource session may be reused only while exact authored script
+markup/body identity is unchanged; a Script change requires a new generation.
+Main enforces two concurrent preparations and a non-evicting 128-preparation
+application-lifetime cap; renderer-selected request IDs cannot roll that cap
+forward. Reaching the cap fails closed until PageRoot restarts.
+Any preparation, load, provenance or deadline failure selects ordinary static
+Edit. Runtime DOM never becomes SourcePatch, Source HTML, save, Version, export,
+Request, Candidate or Review input.
+
+`data-pageroot-id` is persistent source identity, not Runtime edit authority.
+An equal ID on another DOM object grants nothing by itself. For each Runtime
+generation, the private source-object authority set is established exactly once
+before author Script activation and is then sealed. A registered object may be
+revoked when its live identity fails, but author code can never add another
+trusted object after activation; generated, copied and forged nodes remain
+display/comment-only. Exact parser-time execution order is not an Edit Runtime
+contract: PageRoot may finish source parsing and authority registration before
+activating parser-blocking, `async`, `defer` or module scripts. Reproducing every
+edge timing must not reintroduce Runtime snapshots, freeze, per-node provenance
+reconciliation or Script execution-state migration.
+
+The Edit Canvas has one normative experience/persistence contract. Direct
+source text and common-style edits are reflected in the current projection
+without a user refresh, and high-frequency input must not replace the iframe on
+each event. A structure or Script-dependent semantic operation may rebuild one
+disposable frame at its checkpoint; unnecessary rebuilds are forbidden. A
+rebuild restores the shared scroll position, exposed zoom context and
+stable-element-ID selection when each target remains valid. Every completed
+operation first materializes complete HTML and enters the ordinary Hash/CAS,
+atomic-save and recovery boundary; close/reopen must reproduce source edits
+from that HTML. Author Script then regenerates runtime presentation.
+
+This contract grants no Runtime DOM persistence, timer/rAF/Observer/listener
+freeze, runtime snapshot recovery, Canvas/SVG pixel save, runtime/source
+per-node reconciliation, Script execution-state migration, dual-iframe state
+synchronization, or equality for random/time/animation state after reopen.
+Presentation restoration is best effort and cannot widen source authority. The
+lowest-complexity safe local update or rebuild remains the required design.
 
 Review has no runtime-snapshot owner or PNG evidence path. It compares only the
 frozen before/after HTML and emits bounded text facts plus outermost
@@ -500,8 +540,8 @@ bootstrap binding may identify a frozen before target for comment geometry, but
 it neither reaches authored markup nor authorizes runtime host discovery. No
 TargetRef, source binding or runtime output enters either review frame's
 authored HTML or the Review fact list. Edit does not invoke any Review resolver
-or owner and has no Review snapshot state; its separate one-shot author-runtime
-session is governed by ADR 0025. Edit screenshot/capture/projection count must
+or owner and has no Review snapshot state; its disposable author-runtime
+session is governed by ADR 0065. Edit screenshot/capture/projection count must
 be 0.
 
 For each Review side and active filter, overlay frames and context masking

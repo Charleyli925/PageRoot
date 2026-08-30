@@ -513,7 +513,6 @@ test("Workbench and review surfaces route to architecture or observable runtime 
     "tests/html-preview-sandbox.test.mjs",
     "tests/project-rules-workflow.test.mjs",
     "tests/project-workflow.test.mjs",
-    "tests/runtime-snapshot-hosts.test.mjs",
     "tests/source-rename.test.mjs",
     "tests/ui-preferences.test.mjs",
     "tests/workspace-controller.test.mjs",

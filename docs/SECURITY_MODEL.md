@@ -76,32 +76,33 @@ PageRoot edits local files and renders user-controlled HTML, so its default poli
   `pageroot-preview:` is absent from `script-src` and every source transition
   revokes the previous session. After an external HTML import, Main substitutes
   the original sibling directory as that preview/edit resource root without
-  exposing the original path to the renderer. The separate one-shot ECharts
+  exposing the original path to the renderer. The separate disposable Script
   path never reuses that preview session.
-- Desktop one-shot Edit author runtime is a deliberately narrow ECharts
-  capability for trusted, user-opened local generative HTML, not a hostile-page
-  sandbox. Main first re-reads the active source and requires exact HTML/SHA,
-  bounded classic scripts, an ECharts signal and uniquely bound empty hosts; it
-  freezes local or allowlisted-CDN script bytes into a one-use
-  `pageroot-edit-runtime:` session. The final visible Edit iframe runs that
-  closure once at real Edit size with the sandbox tokens required for in-place
-  editing. Relative visual assets resolve only through the declared, contained
-  asset map; direct `file:` assets and authored base URLs are blocked. The
-  protocol has no `bypassCSP`, exposes no directory listing or project path,
-  and the runtime document keeps `connect-src`, workers, popups and top-level
-  navigation closed. A fixed bootstrap freezes timers, listeners, observers,
-  animations and MessageChannel ports, then audits source fidelity; the real
-  Canvas/SVG stays in that
-  iframe. Same-origin `window.parent` access is a known, explicitly accepted
-  product risk. Exact ECharts 5.5.0 minified CDN references use the packaged,
-  SHA-verified library; other allowlisted versions use verified private
-  content-addressed blobs. These resource caches never carry source or Session
-  authority. Under the accepted product risk in ADR 0025, author scripts in
-  that iframe can reach
+- Desktop Edit author runtime is a trusted-local authoring capability, not a
+  hostile-page sandbox. Main re-reads the active source and requires exact
+  HTML/SHA, Canvas generation, bounded supported scripts and contained resource
+  paths before creating a scoped `pageroot-edit-runtime:` session. The visible
+  iframe parses the complete source with author-script placeholders inert,
+  registers parser-authored source objects once, and then activates that closure
+  in source order with the sandbox tokens required for in-place editing. Relative assets resolve only through
+  the declared contained map; direct `file:` assets and authored base URLs are
+  blocked. The protocol has no `bypassCSP`, directory listing or project-path
+  response. Popup, form submission and top-level navigation remain blocked.
+  A fixed bootstrap privately proves the complete source-node set at
+  `DOMContentLoaded` before author code runs. An authored head script therefore
+  cannot register a generated object against a future parser-node identity;
+  copied public markers remain non-authoritative. The bootstrap does not
+  freeze author activity or audit Runtime DOM. Exact ECharts 5.5.0 minified CDN
+  references use the packaged SHA-verified library; other reviewed URLs are
+  fetched per resource session and are not retained in a private disk cache.
+  Under the accepted product risk in ADR 0065, author scripts in that iframe can reach
   renderer-exposed contextBridge APIs on the parent. The iframe itself still
   has no Node integration and no preload or IPC sender of its own. Capture
-  failure or audit rejection revokes the session and renders static Edit before
-  interaction. Edit must not answer a security concern by converting to PNG.
+  preparation, provenance or load failure revokes the session and renders static
+  Edit. Edit must not answer a security concern by converting to PNG.
+  Main also keeps a non-evicting 128-preparation application-lifetime cap;
+  renderer-selected request IDs cannot renew it, and reaching it fails closed
+  until the app restarts.
   Remaining low-cost boundaries: no directory listing or project path on the
   edit-runtime protocol, no popup, no worker, no top-level navigation.
 - Strict schemas, frozen inputs and identity/Hash/path checks before accepting
@@ -371,10 +372,9 @@ owned external bootstrap, while later attempts leave the loaded page intact.
 When the user returns to ordinary editing, PageRoot accepts only an allowlisted
 source-backed presentation diff. It rejects unknown or duplicated source nodes,
 stale Hashes, arbitrary one-sided runtime classes, text/HTML, inline style,
-form state and runtime children. The desktop one-shot ECharts exception may
-keep real author Canvas/SVG inside an approved empty source host after one
-visible-iframe execution and freeze. It has no source or persistence authority
-and is never serialized. Save, review comparison and Request creation continue
+form state and runtime children. The desktop disposable Script page may keep
+real author Canvas/SVG and generated DOM for display; those nodes have no source
+or persistence authority and are never serialized. Save, review comparison and Request creation continue
 from authoritative source bytes (the Bridge copies those exact bytes to
 `input/base/index.html`), and the SourcePatch checks remain unchanged.
 

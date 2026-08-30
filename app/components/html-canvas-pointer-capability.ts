@@ -1,4 +1,3 @@
-import { EDIT_RUNTIME_HOST_ATTRIBUTE } from "../domain/edit-runtime-contract.js";
 import { SOURCE_NODE_ATTRIBUTE } from "../lib/source-patch-core.js";
 import type { HtmlCanvasTargetResolution } from "./HtmlCanvasEditor.types";
 import type { SourceIndexValue } from "./html-canvas-internal-types";
@@ -7,6 +6,7 @@ import {
   findCanvasHitSourceElement,
   findCanvasSelectionElement,
   findDedicatedSourceSurfaceAtPoint,
+  eventTargetsRuntimeGeneratedNode,
   isCanvasRootElement,
   type TextCaretPoint,
 } from "./html-canvas-interaction";
@@ -44,7 +44,6 @@ export function canStartNativeTextEditAtTarget({
   sourceIndex: SourceIndexValue | null;
 }): boolean {
   if (!element || !sourceIndex || !documentNode) return false;
-  if (element.closest(`[${EDIT_RUNTIME_HOST_ATTRIBUTE}]`)) return false;
   const islandHost = nativeEditHostForElement(element, sourceIndex);
   if (islandHost) return true;
   const hintedTextNode = point
@@ -61,6 +60,7 @@ export type ResolvedCanvasPointerCapability = ReturnType<
   element: HTMLElement;
   selectionElement: HTMLElement;
   targetKey: string;
+  runtimeGenerated: boolean;
 }>;
 
 export type CanvasPointerHit =
@@ -73,6 +73,7 @@ export type CanvasPointerHitInput = {
   point?: TextCaretPoint | null;
   sourceIndex: SourceIndexValue | null;
   enabled?: boolean;
+  isProvenRuntimeSourceElement?: ((element: HTMLElement) => boolean) | null;
 };
 
 export function canvasVisualTargetElement(
@@ -91,6 +92,7 @@ export function resolveCanvasPointerHit({
   point,
   sourceIndex,
   enabled = true,
+  isProvenRuntimeSourceElement = null,
 }: CanvasPointerHitInput): CanvasPointerHit {
   if (!enabled || !documentNode) return { action: "clear" };
   if (isCanvasRootElement(eventTarget)) return { action: "clear" };
@@ -112,10 +114,24 @@ export function resolveCanvasPointerHit({
     ?? dedicatedSurface
     ?? findCanvasHitSourceElement(eventTarget)
     ?? directSelection;
+  // In a Runtime frame, public source/stable-ID attributes are locators only.
+  // The exact selected object must belong to the generation's sealed private
+  // authority set; otherwise even a perfectly copied identity remains
+  // display/comment-only.
+  const runtimeGenerated = Boolean(
+    isProvenRuntimeSourceElement
+    && directSelection
+    && !isProvenRuntimeSourceElement(directSelection)
+  ) || eventTargetsRuntimeGeneratedNode(
+    eventTarget,
+    isProvenRuntimeSourceElement,
+  );
   if (
     !hit
-    || hit === documentNode.body
-    || hit === documentNode.documentElement
+    || (
+      !runtimeGenerated
+      && (hit === documentNode.body || hit === documentNode.documentElement)
+    )
   ) {
     return { action: "clear" };
   }
@@ -123,6 +139,7 @@ export function resolveCanvasPointerHit({
     return { action: "clear" };
   }
   const canStartTextEdit = !dedicatedSurface
+    && !runtimeGenerated
     && canStartNativeTextEditAtTarget({
       documentNode,
       element: hit,
@@ -143,6 +160,7 @@ export function resolveCanvasPointerHit({
       targetKey: hit.getAttribute(SOURCE_NODE_ATTRIBUTE)
         || selection.id
         || hit.tagName,
+      runtimeGenerated,
     },
   };
 }

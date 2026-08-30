@@ -581,7 +581,7 @@ test("workspace controller owns one Edit runtime attempt per source path and can
         prepares.push(request);
         const ordinal = prepares.length.toString(16);
         return {
-          contractVersion: 1,
+          contractVersion: 2,
           sessionId: ordinal.padStart(32, "0"),
           executionId: ordinal.padStart(24, "0"),
           sourceSha256: request.sourceSha256,
@@ -651,7 +651,7 @@ test("workspace controller owns one Edit runtime attempt per source path and can
   harness.controller.dispose();
 });
 
-test("workspace controller starts the one-shot runtime when its initial source becomes authoritative", async () => {
+test("workspace controller starts the disposable runtime when its initial source becomes authoritative", async () => {
   const html = [
     "<!doctype html><html><body>",
     '<main id="chart-host"></main>',
@@ -670,7 +670,7 @@ test("workspace controller starts the one-shot runtime when its initial source b
       async prepare(request) {
         prepares.push(request);
         return {
-          contractVersion: 1,
+          contractVersion: 2,
           sessionId: "1".padStart(32, "0"),
           executionId: "1".padStart(24, "0"),
           sourceSha256: request.sourceSha256,

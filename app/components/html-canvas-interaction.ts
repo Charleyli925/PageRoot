@@ -1,5 +1,4 @@
 import { SOURCE_NODE_ATTRIBUTE } from "../lib/source-patch-core.js";
-import { EDIT_RUNTIME_HOST_ATTRIBUTE } from "../domain/edit-runtime-contract.js";
 import { inferSelectionLevel, selectionForElement } from "./html-canvas-selection";
 import { sourceTextNodeForDomText } from "./html-canvas-preview-sync";
 import { createElementTextLocator } from "../lib/comment-text-locator.js";
@@ -20,11 +19,10 @@ export function activeTextRangeFromDocument(
   const commonElement = commonNode.nodeType === 1
     ? commonNode as HTMLElement
     : commonNode.parentElement;
-  // Generated runtime descendants are display-only. The empty source host can
-  // still be selected as a comment target, but generated text is never a
-  // source-backed text range or native editable island.
-  if (commonElement?.closest(`[${EDIT_RUNTIME_HOST_ATTRIBUTE}]`)) return null;
   const targetElement = commonElement?.closest<HTMLElement>(`[${SOURCE_NODE_ATTRIBUTE}]`) ?? null;
+  // A generated descendant maps to its nearest authored host for comments,
+  // but its text is never a source-backed range or native editable island.
+  if (commonElement && targetElement !== commonElement) return null;
   if (
     !targetElement
     || ["BODY", "HTML", "HEAD", "SCRIPT", "STYLE", "NOSCRIPT"].includes(targetElement.tagName)
@@ -337,8 +335,6 @@ function elementFromEventTarget(target: EventTarget | null): HTMLElement | null 
 export function findCanvasHitSourceElement(target: EventTarget | null): HTMLElement | null {
   const selected = elementFromEventTarget(target);
   if (!selected) return null;
-  const runtimeHost = selected.closest<HTMLElement>(`[${EDIT_RUNTIME_HOST_ATTRIBUTE}]`);
-  if (runtimeHost) return runtimeHost;
   const element = compoundValueSelectionRoot(selected);
   return element.closest<HTMLElement>(`[${SOURCE_NODE_ATTRIBUTE}]`) ?? element;
 }
@@ -346,8 +342,6 @@ export function findCanvasHitSourceElement(target: EventTarget | null): HTMLElem
 export function findCanvasSelectionElement(target: EventTarget | null): HTMLElement | null {
   const selected = findSelectableElement(target);
   if (!selected) return null;
-  const runtimeHost = selected.closest<HTMLElement>(`[${EDIT_RUNTIME_HOST_ATTRIBUTE}]`);
-  if (runtimeHost) return runtimeHost;
   const element = compoundValueSelectionRoot(selected);
   const ownsMediaSurface = element.matches(MEDIA_SURFACE_SELECTOR)
     || Boolean(element.querySelector(MEDIA_SURFACE_SELECTOR));
@@ -361,6 +355,18 @@ export function findCanvasSelectionElement(target: EventTarget | null): HTMLElem
     candidate = candidate.parentElement;
   }
   return element;
+}
+
+export function eventTargetsRuntimeGeneratedNode(
+  target: EventTarget | null,
+  isProvenSourceElement: ((element: HTMLElement) => boolean) | null = null,
+): boolean {
+  if (!isProvenSourceElement) return false;
+  const selected = elementFromEventTarget(target);
+  if (!selected) return false;
+  const sourceHost = selected.closest<HTMLElement>(`[${SOURCE_NODE_ATTRIBUTE}]`);
+  if (!sourceHost || sourceHost !== selected) return true;
+  return !isProvenSourceElement(sourceHost);
 }
 
 export function findNativeActionTarget(target: EventTarget | null): HTMLElement | null {

@@ -2,9 +2,15 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  EDIT_RUNTIME_CSP,
   baseHrefFromSourcePath,
   disableExecutableMarkup,
 } from "../app/components/html-preview-sandbox.js";
+
+test("Edit runtime CSP keeps workers outside the admitted program closure", () => {
+  assert.match(EDIT_RUNTIME_CSP, /worker-src 'none'/u);
+  assert.doesNotMatch(EDIT_RUNTIME_CSP, /worker-src[^;]*blob:/u);
+});
 
 test("preview sandbox disables scripts without losing authored type metadata", () => {
   const disabled = disableExecutableMarkup(

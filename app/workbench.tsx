@@ -740,7 +740,6 @@ export default function Workbench() {
     activeTabId: workbenchTabsSnapshot.activeTabId, activeSourceSha256: sourceSha256,
     activeCanvasGeneration: canvasGeneration, canvasMode, editRuntimeSnapshot,
     startPreparation: (input) => workspaceControllerRef.current?.startEditAuthorRuntimePreparation(input),
-    reusePreparation: (input) => workspaceControllerRef.current?.reusePreparedEditAuthorRuntime(input),
   });
   const {
     keys: retainedCanvasKeys, retain: retainRuntimeCanvas, evict: evictRuntimeCanvas,
@@ -848,10 +847,6 @@ export default function Workbench() {
         ...(editRuntimeApi ? {
           editRuntime: {
             prepare: (request) => editRuntimeApi.prepare(request),
-            prewarmRegistered: (registeredProjectId) => (
-              editRuntimeApi.prewarmRegistered?.(registeredProjectId)
-              ?? Promise.resolve(null)
-            ),
             revoke: (sessionId) => editRuntimeApi.revoke(sessionId),
           },
         } : {}),
@@ -1248,7 +1243,13 @@ export default function Workbench() {
         const activeTab = snapshot?.workbenchTabs?.tabs.find((tab) => (
           tab.kind === "document" && tab.tabId === snapshot.workbenchTabs?.activeTabId
         ));
-        if (activeTab) retainRuntimeCanvas(activeTab.tabId, sha256, generation);
+        const disposableRuntime = Boolean(
+          snapshot?.editRuntime?.grant
+          && ["running", "settled"].includes(snapshot.editRuntime.phase),
+        );
+        if (activeTab) {
+          retainRuntimeCanvas(activeTab.tabId, sha256, generation, !disposableRuntime);
+        }
       }
       return acknowledged;
     }
@@ -2849,10 +2850,10 @@ export default function Workbench() {
         if (EDIT_RUNTIME_PENDING_PHASES.has(
           currentControllerSnapshot()?.editRuntime?.phase || "static",
         )) {
-          // Main bounds preparation and the visible iframe settle independently.
-          // A final one-shot author frame cannot acknowledge its source until
-          // both serial phases settle; treating that permitted interval as a
-          // failed static render would replace the iframe and execute again.
+          // Main bounds preparation and visible iframe load independently.
+          // The disposable author frame cannot acknowledge its source until
+          // both phases settle; treating that permitted interval as a failed
+          // static render would replace the iframe unnecessarily.
           attemptLimit = Math.max(attemptLimit, runtimeAttemptLimit);
         }
         if (context && !isCurrentProjectContext(context)) {
@@ -6753,7 +6754,14 @@ export default function Workbench() {
                       canvasGeneration: grant.canvasGeneration,
                       outcome,
                     });
-                    if (outcome === "ready" && activeWorkbenchTab.kind === "document") retainRuntimeCanvas(activeWorkbenchTab.tabId, grant.sourceSha256, grant.canvasGeneration);
+                    if (outcome === "ready" && activeWorkbenchTab.kind === "document") {
+                      retainRuntimeCanvas(
+                        activeWorkbenchTab.tabId,
+                        grant.sourceSha256,
+                        grant.canvasGeneration,
+                        false,
+                      );
+                    }
                   }}
                   onCommentLayout={commentCanvasPort.publishLayout}
                   onSelect={handleCanvasSelection}

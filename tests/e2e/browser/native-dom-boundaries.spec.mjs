@@ -409,7 +409,7 @@ test("clicking blank header and comment-rail surfaces commits editing and clears
   await expect(target).not.toHaveAttribute("contenteditable", "true");
 });
 
-test("typing never replaces the iframe Document or jumps a scroll container", async ({ page }) => {
+test("continuous source typing is immediately visible without iframe replacement or scroll jumps", async ({ page }) => {
   const { frame } = await loadFixture(page, "complex-layout.html");
   const beforeDocument = await documentToken(frame);
   await activateNativeEdit(frame, "scroll-copy");
@@ -421,8 +421,14 @@ test("typing never replaces the iframe Document or jumps a scroll container", as
   const beforeScrollTop = await frame.locator(caseSelector("scroll-copy")).evaluate(
     (target) => target.parentElement.scrollTop,
   );
-  const inserted = "原生光标连续输入不应丢字或乱序。".repeat(4);
-  await page.keyboard.insertText(inserted);
+  const chunks = ["原生光标", "连续输入", "不应丢字或乱序。"];
+  let inserted = "";
+  for (const chunk of chunks) {
+    await page.keyboard.insertText(chunk);
+    inserted += chunk;
+    expect(await documentToken(frame)).toBe(beforeDocument);
+    expect(await frame.locator(caseSelector("scroll-copy")).textContent()).toContain(inserted);
+  }
 
   expect(await documentToken(frame)).toBe(beforeDocument);
   expect(await frame.locator(caseSelector("scroll-copy")).textContent()).toContain(inserted);
