@@ -61,8 +61,7 @@ function comparableAttributes(element: Element, excluded: Set<string>) {
     .filter((attribute) => {
       const name = attribute.name.toLowerCase();
       return !excluded.has(name)
-        && name !== PAGEROOT_ELEMENT_ID_ATTRIBUTE
-        && !name.startsWith("data-pageroot-review-");
+        && !name.startsWith("data-pageroot-");
     })
     .map((attribute) => `${attribute.name.toLowerCase()}=${attribute.value}`)
     .sort()
@@ -178,7 +177,6 @@ export function annotateStableSourceDifferences(
         const kind = element ? authorSourceKind(element) : null;
         if (!element || !kind) return;
         sourceKinds.add(kind);
-        annotateStructureFact(element, id, kind);
       });
     }
   }
@@ -206,8 +204,6 @@ export function annotateStableSourceDifferences(
         !== comparableAttributes(after, new Set(["style"]))
     )) {
       sourceKinds.add("script-source");
-      annotateStructureFact(before, id, "script-source");
-      annotateStructureFact(after, id, "script-source");
       return;
     }
     if (isCssSource && (
@@ -216,8 +212,6 @@ export function annotateStableSourceDifferences(
         !== comparableAttributes(after, new Set(["style"]))
     )) {
       sourceKinds.add("css-source");
-      annotateStructureFact(before, id, "css-source");
-      annotateStructureFact(after, id, "css-source");
       return;
     }
 

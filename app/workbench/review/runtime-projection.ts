@@ -1266,7 +1266,17 @@ function reviewBootstrap(
     const fact = { id, type, semanticOwnerId };
     const geometryOwnerId = safeProjectionFactKey(value.geometryOwnerId);
     const textGroup = safeProjectionFactKey(value.textGroup);
-    const structureChange = safeProjectionFactKey(value.structureChange);
+    const structureChange = [
+      "added",
+      "removed",
+      "moved",
+      "attribute",
+      "style",
+      "css-source",
+      "script-source",
+    ].includes(value.structureChange)
+      ? value.structureChange
+      : "";
     const scope = ["text", "text-phrase", "text-line", "text-block", "element"]
       .includes(value.scope)
       ? value.scope
