@@ -28,9 +28,11 @@ test("a pre-load review navigation falls back without trusting the replacement p
         document.querySelector("#review-navigation-chart").textContent = reviewNavigationVariant;
         const reviewReplacementHtml = '<!doctype html>'
           + '<html data-review-navigation-replacement="true"><body></body></html>';
-        location.replace(
-          "data:text/html;charset=utf-8," + encodeURIComponent(reviewReplacementHtml),
-        );
+        if (document.documentElement.dataset.pagerootReviewSide) {
+          location.replace(
+            "data:text/html;charset=utf-8," + encodeURIComponent(reviewReplacementHtml),
+          );
+        }
       </script>
     </section>
   </main>`,
@@ -71,6 +73,9 @@ test("a pre-load review navigation falls back without trusting the replacement p
     await expect(afterReviewFrame.locator(
       '[data-pageroot-review-marker-types~="text"]',
     ).filter({ hasText: UPDATED_TEXT }).first()).toBeVisible();
+    await expect(afterReviewFrame.locator(
+      'html[data-pageroot-review-marker-types~="structure"]',
+    )).toHaveAttribute("data-pageroot-review-summary", "Script 源码调整");
     await expect(launched.page.getByText(
       "审阅画布未能安全载入，可返回 AI 修改前后重试。",
       { exact: true },

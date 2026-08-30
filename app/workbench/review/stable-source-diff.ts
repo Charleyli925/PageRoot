@@ -139,7 +139,7 @@ function annotateMovedTextFallback(before: Element, after: Element, id: string) 
   });
 }
 
-function annotatePageSourceAggregate(
+export function annotateStablePageSourceAggregate(
   document: Document,
   kinds: ReadonlySet<"css-source" | "script-source">,
 ) {
@@ -230,8 +230,6 @@ export function annotateStableSourceDifferences(
     }
   });
 
-  annotatePageSourceAggregate(beforeDocument, sourceKinds);
-  annotatePageSourceAggregate(afterDocument, sourceKinds);
   return {
     hasPersistentContinuity: topology.commonIds.length > 0,
     sourceKinds: [...sourceKinds],

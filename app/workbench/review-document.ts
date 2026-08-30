@@ -44,6 +44,7 @@ import {
   markSemanticTextDifferences,
 } from "./review/text-diff";
 import {
+  annotateStablePageSourceAggregate,
   annotateStableSourceDifferences,
 } from "./review/stable-source-diff";
 import type {
@@ -359,6 +360,13 @@ function* buildReviewDocumentSteps(
     ));
     const helper = `${labels.join("、")} 源码调整`;
     const label = labels.length === 1 ? `${labels[0]} 源码` : "页面源码";
+    // Page-level source facts are deliberately attached only after semantic
+    // text/structure analysis. Marking <html> earlier would make every authored
+    // descendant look covered by one structural ancestor and suppress precise
+    // text facts.
+    const sourceKinds = new Set(stableSourceAnalysis.sourceKinds);
+    annotateStablePageSourceAggregate(beforeDocument, sourceKinds);
+    annotateStablePageSourceAggregate(afterDocument, sourceKinds);
     attachSourceChangeMarkerMetadata(
       beforeDocument.documentElement,
       afterDocument.documentElement,
