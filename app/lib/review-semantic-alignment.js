@@ -17,13 +17,14 @@ function identityKey(unit) {
   if (unit.identityAmbiguous) return null;
   const stableId = String(unit.stableId || "").trim();
   if (!stableId) return null;
+  if (unit.persistentIdentityClaimed && !stableId.startsWith("pageroot:")) return null;
   return stableId.startsWith("pageroot:")
     ? stableId
     : `${normalizedParent(unit)}\u0000${unit.kind}\u0000${stableId}`;
 }
 
 function exactKey(unit) {
-  if (unit.identityAmbiguous) return null;
+  if (unit.identityAmbiguous || unit.persistentIdentityClaimed) return null;
   // Explicit identity is authoritative: equal markup cannot bridge a changed
   // or missing ID. Equal IDs were already consumed by the stable-id pass.
   if (String(unit.stableId || "").trim()) return null;
@@ -34,7 +35,7 @@ function exactKey(unit) {
 }
 
 function compatibilityKey(unit) {
-  if (unit.identityAmbiguous) return null;
+  if (unit.identityAmbiguous || unit.persistentIdentityClaimed) return null;
   const signature = String(unit.compatibilitySignature || "").trim();
   return signature
     ? `${normalizedParent(unit)}\u0000${unit.kind}\u0000${signature}`
@@ -42,7 +43,7 @@ function compatibilityKey(unit) {
 }
 
 function relocationKey(unit) {
-  if (unit.identityAmbiguous) return null;
+  if (unit.identityAmbiguous || unit.persistentIdentityClaimed) return null;
   const key = String(unit.relocationKey || "").trim();
   return key || null;
 }
@@ -169,6 +170,9 @@ function weightedPairScore(before, after) {
   if (before.identityAmbiguous || after.identityAmbiguous) {
     return Number.NEGATIVE_INFINITY;
   }
+  if (before.persistentIdentityClaimed || after.persistentIdentityClaimed) {
+    return Number.NEGATIVE_INFINITY;
+  }
   if (before.kind !== after.kind) return Number.NEGATIVE_INFINITY;
   if (normalizedParent(before) !== normalizedParent(after)) return Number.NEGATIVE_INFINITY;
   if (identityKey(before) || identityKey(after)) return Number.NEGATIVE_INFINITY;
@@ -209,6 +213,7 @@ function weightedPairScore(before, after) {
 function singletonReplacementIsCompatible(before, after) {
   if (!before || !after) return false;
   if (before.identityAmbiguous || after.identityAmbiguous) return false;
+  if (before.persistentIdentityClaimed || after.persistentIdentityClaimed) return false;
   if (before.kind !== after.kind) return false;
   if (normalizedParent(before) !== normalizedParent(after)) return false;
   if (identityKey(before) || identityKey(after)) return false;

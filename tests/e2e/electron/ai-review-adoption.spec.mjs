@@ -11,12 +11,10 @@ import {
   PICKER_TEXT,
   READABLE_REWRITE_AFTER,
   READABLE_REWRITE_BEFORE,
-  REVIEW_MASK_UNION_AFTER,
   REVIEW_MASK_UNION_BEFORE,
   REVIEW_METRIC_AFTER_CSS,
   REVIEW_METRIC_BEFORE_CSS,
   REVIEW_PROJECTION_CASES,
-  SCOPE_PROMOTION_AFTER,
   SCOPE_PROMOTION_BEFORE,
   SECOND_UPDATED_TEXT,
   UPDATED_TEXT,
@@ -223,138 +221,132 @@ ${REVIEW_MASK_UNION_BEFORE}
     await expect(runProgress).toContainText("等待你的 AI 完成修改");
     await expect(runProgress.locator("li")).toHaveCount(0);
     writeAiOutput(request.requestRoot, (base) => {
-      const candidateBase = base.replace(
-        / data-pageroot-id="pr1_[a-f0-9]{32}"/gu,
-        "",
-      );
-      expect(candidateBase.match(new RegExp(ORIGINAL_TEXT, "gu"))).toHaveLength(1);
-      const anonymousPanelOne = candidateBase.match(
+      expect(base.match(new RegExp(ORIGINAL_TEXT, "gu"))).toHaveLength(1);
+      const anonymousPanelOne = base.match(
         /      <div class="panel" role="tabpanel"[^>]*><article[^>]*><p data-review-anonymous-panel-copy="one"[^>]*>[\s\S]*?<\/div>/u,
       )?.[0];
-      const anonymousPanelTwo = candidateBase.match(
+      const anonymousPanelTwo = base.match(
         /      <div class="panel" role="tabpanel"[^>]*><article[^>]*><p data-review-anonymous-panel-copy="two"[^>]*>[\s\S]*?<\/div>/u,
       )?.[0];
+      const layoutOnly = base.match(/<p data-review-layout-only[\s\S]*?<\/p>/u)?.[0];
+      const atomicMedia = base.match(/      <div data-review-atomic-media[\s\S]*?\n      <\/div>/u)?.[0];
+      const warning = base.match(/<p data-review-warning[\s\S]*?<\/p>/u)?.[0];
+      const breakLayout = base.match(/<div data-review-break-layout[\s\S]*?<\/div>/u)?.[0];
+      const deletedCopy = base.match(/<div data-review-deleted-copy[\s\S]*?<\/div>/u)?.[0];
+      const ebitaCopy = base.match(/<div data-review-ebita-copy[\s\S]*?<\/div>/u)?.[0];
+      const anchorOnly = base.match(/<p data-review-anchor-only[\s\S]*?<\/p>/u)?.[0];
+      const tabOneOverview = base.match(/<article id="review-tab-one-overview"[\s\S]*?<\/article>/u)?.[0];
+      const tabOneDetail = base.match(/<article id="review-tab-one-detail"[\s\S]*?<\/article>/u)?.[0];
+      const tabTwoDetail = base.match(/<article[^>]*><h2[^>]*>标签二详情<\/h2>[\s\S]*?<\/article>/u)?.[0];
       expect(anonymousPanelOne).toBeTruthy();
       expect(anonymousPanelTwo).toBeTruthy();
-      const candidate = candidateBase
+      expect(layoutOnly).toBeTruthy();
+      expect(atomicMedia).toBeTruthy();
+      expect(warning).toBeTruthy();
+      expect(breakLayout).toBeTruthy();
+      expect(deletedCopy).toBeTruthy();
+      expect(ebitaCopy).toBeTruthy();
+      expect(anchorOnly).toBeTruthy();
+      expect(tabOneOverview).toBeTruthy();
+      expect(tabOneDetail).toBeTruthy();
+      expect(tabTwoDetail).toBeTruthy();
+      const changedLayoutOnly = layoutOnly
+        .replace(
+          'style="width: 240px; padding: 4px; border: 1px solid #c9ceda"',
+          'style="width: 240px; padding: 14px; border: 3px solid #6d5ce7"',
+        )
+        .replace(/<br data-pageroot-id="pr1_[a-f0-9]{32}">/u, "")
+        .replace("只是换行位置调整。", "只是<br>换行位置调整。");
+      const changedAtomicMedia = atomicMedia
+        .replace(/\s*<img data-review-atomic-removed[^>]*>/u, "")
+        .replace(
+          /(<span data-review-atomic-stable-before[^>]*>稳定媒体前文。<\/span>)/u,
+          '$1\n        <canvas data-review-atomic-added aria-label="新增画布图" width="28" height="20"></canvas>',
+        )
+        .replace('fill="#8aa4c8"', 'fill="#d26a81"')
+        .replace(
+          'style="width:60px;border:1px solid #9aa4b2"',
+          'style="width:60px;border:3px solid #6d5ce7"',
+        );
+      const changedWarning = warning.replace(
+        />[\s\S]*<\/p>/u,
+        '>⚠️ 近6天（7/23—<strong>7/28）增幅收窄至负值区间，需</strong>持续关注定价调整和转化波动。</p>',
+      );
+      const changedBreakLayout = breakLayout.replace(
+        />[\s\S]*<\/div>/u,
+        ">日均63.4万 vs 60.7万</div>",
+      );
+      const changedDeletedCopy = deletedCopy.replace(
+        />[\s\S]*<\/div>/u,
+        "><strong>品均拆解：</strong>总确收增长来自覆盖扩大。<br>AI托管的核心价值保持不变，并应继续关注留存质量。</div>",
+      );
+      const changedEbitaCopy = ebitaCopy.replace(
+        />[\s\S]*<\/div>/u,
+        "><strong>结论：</strong>EBITA差异均在波动范围内（0.06~0.13pt），AI托管未恶化盈利能力，建议继续保留实验策略。</div>",
+      );
+      const changedAnchorOnly = anchorOnly.replace(
+        /(<br data-pageroot-id="pr1_[a-f0-9]{32}">)只删除这句定位文字。/u,
+        "$1",
+      );
+      const changedTabTwoDetail = tabTwoDetail.replace(
+        "<article ",
+        '<article style="padding: 24px; border-radius: 16px" ',
+      );
+      let candidate = base
         .replace(ORIGINAL_TEXT, UPDATED_TEXT)
         .replace(REVIEW_METRIC_BEFORE_CSS, REVIEW_METRIC_AFTER_CSS)
-        .replace(REVIEW_MASK_UNION_BEFORE, REVIEW_MASK_UNION_AFTER)
+        .replace("border:2px solid #4a1111", "border:6px solid #6d5ce7")
+        .replace("border:2px solid #114a11", "border:6px solid #d26a81")
         .replace(
-          "      <div data-review-regression-summary>",
+          "      <div data-review-regression-summary",
           `      <div data-review-added-chart>
         <strong>实验效果概览</strong>
         <div><span>锁单确收</span><progress max="100" value="82"></progress></div>
         <div><span>CVR</span><progress max="100" value="69"></progress></div>
         <p>读图：规模增长由转化效率提升与动销覆盖扩大共同驱动。</p>
       </div>
-      <div data-review-regression-summary>`,
+      <div data-review-regression-summary`,
         )
         .replace(
-          '    <div data-review-priority><strong>优先顺序：</strong>先处理稳定性，再补齐体验细节。</div>\n',
+          /    <div data-review-priority[^>]*>[\s\S]*?<\/div>\n/u,
           "",
         )
+        .replace("增量4.12万/天约占2.0%", "本实验增量4.12万/天约占2.0%")
+        .replace("实验结果稳定。换言之，策略有效。", "实验结果稳定。策略有效。")
+        .replace("③ 经营解读：效率保持稳定。", "③ 经营解读：效率保持稳定。<br>④ 后续重点：继续观察新增商品。")
+        .replace("经营效率稳定</li>", "经营效率稳定</li><li data-review-added-list-item>后续观察新增商品</li>")
         .replace(
-          '<p data-review-reference>参考：示例日均确收约207万，增量4.12万/天约占2.0%。</p>',
-          '<p data-review-reference>参考：示例日均确收约207万，本实验增量4.12万/天约占2.0%。</p>',
-        )
-        .replace(
-          '<p data-review-delete-only>实验结果稳定。换言之，策略有效。</p>',
-          '<p data-review-delete-only>实验结果稳定。策略有效。</p>',
-        )
-        .replace(
-          '<div data-review-numbered-lines>① 业务盘子：整体规模稳定。<br>② 实验贡献：日均增量明确。<br>③ 经营解读：效率保持稳定。</div>',
-          '<div data-review-numbered-lines>① 业务盘子：整体规模稳定。<br>② 实验贡献：日均增量明确。<br>③ 经营解读：效率保持稳定。<br>④ 后续重点：继续观察新增商品。</div>',
-        )
-        .replace(
-          '        <li>业务盘子稳定</li><li>实验贡献明确<ul data-review-nested-list><li>嵌套稳定项</li></ul></li><li>经营效率稳定</li>',
-          '        <li>业务盘子稳定</li><li>实验贡献明确<ul data-review-nested-list><li>嵌套稳定项</li></ul></li><li>经营效率稳定</li><li data-review-added-list-item>后续观察新增商品</li>',
-        )
-        .replace(
-          '          <tr data-review-brand-row="gamma"><td>品牌丙</td><td>类目三</td><td>2.3万</td></tr>',
+          '          <tr data-review-brand-row="gamma"',
           `          <tr data-review-brand-row="added"><td>品牌新增</td><td>类目二</td><td>1.4万</td></tr>
-          <tr data-review-brand-row="gamma"><td>品牌丙</td><td>类目三</td><td>2.3万</td></tr>`,
+          <tr data-review-brand-row="gamma"`,
         )
+        .replace("品均基本持平", "单品效率整体稳定，增幅仅+0.10%")
+        .replace(READABLE_REWRITE_BEFORE, READABLE_REWRITE_AFTER)
+        .replace(LINE_SCOPE_BEFORE, LINE_SCOPE_AFTER)
+        .replace(layoutOnly, changedLayoutOnly)
+        .replace("稳定前缀，稳定后缀。", "稳定前缀，新增说明需要跨越多个实际文字行并合并为一个框，稳定后缀。")
+        .replace("旧方案覆盖多个指标、多个渠道、多个阶段，并给出较长说明。", "新方案改写全部口径、执行路径、验证方式，并补充另一组较长说明。")
+        .replace("旧词", "新词")
+        .replace(atomicMedia, changedAtomicMedia)
+        .replace(warning, changedWarning)
+        .replace(breakLayout, changedBreakLayout)
+        .replace(deletedCopy, changedDeletedCopy)
+        .replace(ebitaCopy, changedEbitaCopy)
+        .replace(anchorOnly, changedAnchorOnly)
         .replace(
-          '<div data-review-semantic-copy>而非「让每个商品卖得更好」（品均基本持平）。这说明增长主要来自有效成交覆盖扩大。</div>',
-          '<div data-review-semantic-copy>而非「让每个商品卖得更好」（单品效率整体稳定，增幅仅+0.10%）。这说明增长主要来自有效成交覆盖扩大。</div>',
+          `${tabOneOverview}\n      ${tabOneDetail}`,
+          `${tabOneDetail}\n      ${tabOneOverview}`,
         )
-        .replace(
-          `<div data-review-readable-rewrite style="width: 360px; line-height: 1.7">${READABLE_REWRITE_BEFORE}</div>`,
-          `<div data-review-readable-rewrite style="width: 360px; line-height: 1.7">${READABLE_REWRITE_AFTER}</div>`,
-        )
-        .replace(
-          `<p data-review-line-scope style="width: 360px; white-space: nowrap; line-height: 1.7">${LINE_SCOPE_BEFORE}</p>`,
-          `<p data-review-line-scope style="width: 360px; white-space: nowrap; line-height: 1.7">${LINE_SCOPE_AFTER}</p>`,
-        )
-        .replace(
-          `<p data-review-scope-promotion style="width: 360px; line-height: 1.7">${SCOPE_PROMOTION_BEFORE}</p>`,
-          `<p data-review-scope-promotion style="width: 360px; line-height: 1.7">${SCOPE_PROMOTION_AFTER}</p>`,
-        )
-        .replace(
-          '<p data-review-layout-only style="width: 240px; padding: 4px; border: 1px solid #c9ceda">同一段文字保持不变<br>只是换行位置调整。</p>',
-          '<p data-review-layout-only style="width: 240px; padding: 14px; border: 3px solid #6d5ce7">同一段文字保持不变只是<br>换行位置调整。</p>',
-        )
-        .replace(
-          '<p data-review-cross-line style="width: 150px; line-height: 1.6">稳定前缀，稳定后缀。</p>',
-          '<p data-review-cross-line style="width: 150px; line-height: 1.6">稳定前缀，新增说明需要跨越多个实际文字行并合并为一个框，稳定后缀。</p>',
-        )
-        .replace(
-          '<p data-review-stable-sentence-rewrite style="width: 150px; line-height: 1.6">稳定前句。旧方案覆盖多个指标、多个渠道、多个阶段，并给出较长说明。稳定后句。</p>',
-          '<p data-review-stable-sentence-rewrite style="width: 150px; line-height: 1.6">稳定前句。新方案改写全部口径、执行路径、验证方式，并补充另一组较长说明。稳定后句。</p>',
-        )
-        .replace(
-          '<p data-review-injection-stability><span data-review-stable-left>稳定左侧</span><strong>旧词</strong><em data-review-stable-right>稳定右侧</em></p>',
-          '<p data-review-injection-stability><span data-review-stable-left>稳定左侧</span><strong>新词</strong><em data-review-stable-right>稳定右侧</em></p>',
-        )
-        .replace(
-          `      <div data-review-atomic-media style="display:flex;align-items:center;gap:6px">
-        <span data-review-atomic-stable-before>稳定媒体前文。</span>
-        <img data-review-atomic-removed alt="旧品牌图示" src="data:image/svg+xml,%3Csvg/%3E" width="28" height="20">
-        <svg data-review-atomic-paired role="img" aria-label="趋势图" width="30" height="20" viewBox="0 0 30 20" fill="#8aa4c8"></svg>
-        <input data-review-atomic-input name="品牌标识" type="text" value="品牌甲" style="width:60px;border:1px solid #9aa4b2">
-        <span data-review-atomic-stable-after>稳定媒体后文。</span>
-      </div>`,
-          `      <div data-review-atomic-media style="display:flex;align-items:center;gap:6px">
-        <span data-review-atomic-stable-before>稳定媒体前文。</span>
-        <canvas data-review-atomic-added aria-label="新增画布图" width="28" height="20"></canvas>
-        <svg data-review-atomic-paired role="img" aria-label="趋势图" width="30" height="20" viewBox="0 0 30 20" fill="#d26a81"></svg>
-        <input data-review-atomic-input name="品牌标识" type="text" value="品牌甲" style="width:60px;border:3px solid #6d5ce7">
-        <span data-review-atomic-stable-after>稳定媒体后文。</span>
-      </div>`,
-        )
-        .replace(
-          '<p data-review-warning>⚠️ 近6天(7/23-<span><strong>7/28)增幅收窄至负值区间，需</strong></span>持续关注。</p>',
-          '<p data-review-warning>⚠️ 近6天（7/23—<strong>7/28）增幅收窄至负值区间，需</strong>持续关注定价调整和转化波动。</p>',
-        )
-        .replace(
-          '<div data-review-break-layout><span>日均63<br><br>.4万<br>60.7万</span></div>',
-          '<div data-review-break-layout>日均63.4万 vs 60.7万</div>',
-        )
-        .replace(
-          '<div data-review-deleted-copy><strong>品均拆解：</strong>总确收增长来自覆盖扩大。<br>待删除第一行<br>待删除第二行<br>待删除第三行<br>AI托管的核心价值保持不变。</div>',
-          '<div data-review-deleted-copy><strong>品均拆解：</strong>总确收增长来自覆盖扩大。<br>AI托管的核心价值保持不变，并应继续关注留存质量。</div>',
-        )
-        .replace(
-          '<div data-review-ebita-copy><strong>结论：</strong>EBITA差异均在波动范围<br>内（0.06~0.13pt），AI托管未恶化盈利能力。</div>',
-          '<div data-review-ebita-copy><strong>结论：</strong>EBITA差异均在波动范围内（0.06~0.13pt），AI托管未恶化盈利能力，建议继续保留实验策略。</div>',
-        )
-        .replace(
-          '<p data-review-anchor-only style="line-height:48px">稳定开头。<br>稳定中段。<br>只删除这句定位文字。稳定结尾。</p>',
-          '<p data-review-anchor-only style="line-height:48px">稳定开头。<br>稳定中段。<br>稳定结尾。</p>',
-        )
-        .replace(
-          "<article id=\"review-tab-one-overview\"><h2>标签一概览</h2><p>第一块完整内容</p></article>\n      <article id=\"review-tab-one-detail\"><h2>标签一详情</h2><p>第二块完整内容</p></article>",
-          "<article id=\"review-tab-one-detail\"><h2>标签一详情</h2><p>第二块完整内容</p></article>\n      <article id=\"review-tab-one-overview\"><h2>标签一概览</h2><p>第一块完整内容</p></article>",
-        )
-        .replace(
-          "<article><h2>标签二详情</h2><p>第四块完整内容</p></article>",
-          "<article style=\"padding: 24px; border-radius: 16px\"><h2>标签二详情</h2><p>第四块完整内容</p></article>",
-        )
+        .replace(tabTwoDetail, changedTabTwoDetail)
         .replace(
           `${anonymousPanelOne}\n${anonymousPanelTwo}`,
           `${anonymousPanelTwo}\n${anonymousPanelOne}`,
         );
+      for (const [beforeText, afterText] of [
+        ["甲旧", "甲新"], ["乙旧", "乙新"], ["丙旧", "丙新"],
+        ["丁旧", "丁新"], ["戊旧", "戊新"], ["己旧", "己新"],
+        ["庚旧", "庚新"], ["辛旧", "辛新"], ["壬旧", "壬新"],
+      ]) candidate = candidate.replace(beforeText, afterText);
       return materializeSourceElementIdentity(candidate).html;
     });
     runOfficialFinalizer(request.requestRoot, request.changeRequest);
@@ -1693,12 +1685,16 @@ ${REVIEW_MASK_UNION_BEFORE}
     )).toHaveCount(0);
     for (const frame of [beforeReviewFrame, afterReviewFrame]) {
       await expect(frame.locator("[data-pageroot-review-style]")).toHaveCount(0);
+      await expect(frame.locator("[data-review-layout-only]"))
+        .toHaveAttribute("data-pageroot-review-structure", "style");
+      await expect(frame.locator("[data-review-layout-only]"))
+        .toHaveAttribute("data-pageroot-review-projection-facts", /"structureChange":"style"/u);
       await expect(frame.locator(
-        '[data-review-layout-only][data-pageroot-review-marker], [data-review-layout-only][data-pageroot-review-structure], [data-review-layout-only][data-pageroot-review-projection-facts]',
+        '[data-review-metrics] [data-pageroot-review-marker]',
       )).toHaveCount(0);
       await expect(frame.locator(
-        '[data-review-metrics] [data-pageroot-review-marker], [data-review-mask-stage] [data-pageroot-review-marker]',
-      )).toHaveCount(0);
+        '[data-review-mask-stage] [data-pageroot-review-structure="style"]',
+      )).toHaveCount(2);
     }
     await launched.page.getByRole("button", {
       name: "只看修改前",
@@ -2003,13 +1999,17 @@ ${REVIEW_MASK_UNION_BEFORE}
     await launched.page.mouse.wheel(0, 150);
     await launched.page.waitForTimeout(240);
     expect((await frameScrollState(afterReviewFrame)).remaining).toBeLessThanOrEqual(1);
-    expect((await frameScrollState(beforeReviewFrame)).top).toBe(leaderAtPageEnd.top);
+    // Scaled iframes may expose the same page-end lock on adjacent rounded
+    // CSS pixels; this remains the existing one-pixel synchronization budget.
+    expect(Math.abs(
+      (await frameScrollState(beforeReviewFrame)).top - leaderAtPageEnd.top,
+    )).toBeLessThanOrEqual(1);
     await beforeReviewFrame.locator("html").evaluate(() => {
       dispatchEvent(new WheelEvent("wheel", { deltaY: -120 }));
       window.scrollTo(0, 0);
     });
-    await expect.poll(() => afterReviewFrame.locator("html").evaluate(() => window.scrollY))
-      .toBe(0);
+    await expect.poll(() => afterReviewFrame.locator("html").evaluate(() => Math.abs(scrollY)))
+      .toBeLessThanOrEqual(1);
 
     const originalAfterMaximum = await afterReviewFrame.locator("html").evaluate(() => (
       Math.max(0, document.documentElement.scrollHeight - innerHeight)
@@ -2580,6 +2580,13 @@ test("stable-ID review reports movement, source attributes, styles, and author s
           <h2>原位卡片</h2><p>原位修改前文字</p>
         </article>
         <article data-stable-review-unchanged-move><p>跨区移动但文字不变</p></article>
+        <article data-stable-review-id-deleted><h2>相同身份标题</h2><p>删除 ID 但内容不变</p></article>
+        <article data-stable-review-id-replaced><h2>相同身份标题</h2><p>替换 ID 但标记不变</p></article>
+        <article data-stable-review-composite-move>
+          <p data-stable-review-transfer-from>待转移文字</p>
+          <p data-stable-review-transfer-to>稳定乙</p>
+          <aside data-stable-review-removed-module>移动时删除的模块</aside>
+        </article>
         <p data-stable-review-order="a">稳定顺序甲</p>
         <p data-stable-review-order="b">稳定顺序乙</p>
       </div>
@@ -2602,6 +2609,9 @@ test("stable-ID review reports movement, source attributes, styles, and author s
       const card = base.match(/<article data-stable-review-card[\s\S]*?<\/article>/u)?.[0];
       const staticCard = base.match(/<article data-stable-review-static[\s\S]*?<\/article>/u)?.[0];
       const unchangedMove = base.match(/<article data-stable-review-unchanged-move[\s\S]*?<\/article>/u)?.[0];
+      const idDeleted = base.match(/<article data-stable-review-id-deleted[\s\S]*?<\/article>/u)?.[0];
+      const idReplaced = base.match(/<article data-stable-review-id-replaced[\s\S]*?<\/article>/u)?.[0];
+      const compositeMove = base.match(/<article data-stable-review-composite-move[\s\S]*?<\/article>/u)?.[0];
       const orderA = base.match(/<p data-stable-review-order="a"[^>]*>稳定顺序甲<\/p>/u)?.[0];
       const orderB = base.match(/<p data-stable-review-order="b"[^>]*>稳定顺序乙<\/p>/u)?.[0];
       const exactA = base.match(/<article data-stable-review-exact="a"[^>]*>精确重排甲<\/article>/u)?.[0];
@@ -2609,6 +2619,9 @@ test("stable-ID review reports movement, source attributes, styles, and author s
       expect(card).toBeTruthy();
       expect(staticCard).toBeTruthy();
       expect(unchangedMove).toBeTruthy();
+      expect(idDeleted).toBeTruthy();
+      expect(idReplaced).toBeTruthy();
+      expect(compositeMove).toBeTruthy();
       expect(orderA).toBeTruthy();
       expect(orderB).toBeTruthy();
       expect(exactA).toBeTruthy();
@@ -2621,6 +2634,22 @@ test("stable-ID review reports movement, source attributes, styles, and author s
         .replace('data-review-static="before"', 'data-review-static="after"')
         .replace('style="margin: 4px"', 'style="margin: 14px; color: rgb(90 40 150)"')
         .replace("原位修改前文字", "原位修改后文字");
+      const deletedIdentityCard = idDeleted.replace(
+        / data-pageroot-id="pr1_[a-f0-9]{32}"/u,
+        "",
+      );
+      const replacedIdentityCard = idReplaced.replace(
+        /data-pageroot-id="pr1_[a-f0-9]{32}"/u,
+        'data-pageroot-id="pr1_99999999999949998999999999999999"',
+      );
+      const changedCompositeMove = compositeMove
+        .replace("待转移文字", "稳定甲")
+        .replace("稳定乙", "待转移文字")
+        .replace(/\s*<aside data-stable-review-removed-module[\s\S]*?<\/aside>/u, "")
+        .replace(
+          "</article>",
+          '<img data-stable-review-added-image alt="移动时新增的图片" src="data:image/svg+xml,%3Csvg/%3E"></article>',
+        );
       return base
         .replace(ORIGINAL_TEXT, UPDATED_TEXT)
         .replace(
@@ -2632,13 +2661,16 @@ test("stable-ID review reports movement, source attributes, styles, and author s
           '<script type="application/json" data-stable-review-added-script>{"added":true}</script></body>',
         )
         .replace(card, "")
+        .replace(idDeleted, deletedIdentityCard)
+        .replace(idReplaced, replacedIdentityCard)
+        .replace(compositeMove, "")
         .replace(staticCard, changedStaticCard)
         .replace(unchangedMove, "")
         .replace(`${orderA}\n        ${orderB}`, `${orderB}\n        ${orderA}`)
         .replace(`${exactA}\n      ${exactB}`, `${exactB}\n      ${exactA}`)
         .replace(
           /(<div data-stable-review-column="b"[^>]*>)/u,
-          `$1\n        ${movedCard}\n        ${unchangedMove}`,
+          `$1\n        ${movedCard}\n        ${unchangedMove}\n        ${changedCompositeMove}`,
         );
     });
     runOfficialFinalizer(request.requestRoot, request.changeRequest);
@@ -2679,6 +2711,58 @@ test("stable-ID review reports movement, source attributes, styles, and author s
       ));
       expect(falsePresenceFacts).toEqual([]);
     }
+    for (const [selector, expectedBeforeId, expectedAfterId] of [
+      ["[data-stable-review-id-deleted]", /pr1_[a-f0-9]{32}/u, null],
+      [
+        "[data-stable-review-id-replaced]",
+        /pr1_[a-f0-9]{32}/u,
+        "pr1_99999999999949998999999999999999",
+      ],
+    ]) {
+      const beforeElement = beforeFrame.locator(selector);
+      const afterElement = afterFrame.locator(selector);
+      await expect.poll(() => structureKinds(beforeElement)).toEqual(
+        expect.arrayContaining(["removed"]),
+      );
+      await expect.poll(() => structureKinds(afterElement)).toEqual(
+        expect.arrayContaining(["added"]),
+      );
+      await expect(beforeElement).toHaveAttribute("data-pageroot-id", expectedBeforeId);
+      if (expectedAfterId === null) {
+        await expect(afterElement).not.toHaveAttribute("data-pageroot-id", /.+/u);
+      } else {
+        await expect(afterElement).toHaveAttribute("data-pageroot-id", expectedAfterId);
+      }
+    }
+    for (const frame of [beforeFrame, afterFrame]) {
+      const compositeMove = frame.locator("[data-stable-review-composite-move]");
+      await expect.poll(() => structureKinds(compositeMove)).toEqual(
+        expect.arrayContaining(["moved"]),
+      );
+      await expect(compositeMove).toHaveAttribute(
+        "data-pageroot-review-marker",
+        /change-/u,
+      );
+    }
+    await expect(beforeFrame.locator(
+      '[data-stable-review-transfer-from] [data-pageroot-review-text="removed"], [data-stable-review-transfer-from][data-pageroot-review-text="removed"]',
+    ).first()).toContainText("待转移文字");
+    await expect(afterFrame.locator(
+      '[data-stable-review-transfer-to] [data-pageroot-review-text="added"], [data-stable-review-transfer-to][data-pageroot-review-text="added"]',
+    ).first()).toContainText("待转移文字");
+    const movedTextOwners = await beforeFrame.locator(
+      '[data-stable-review-card] [data-pageroot-review-text="removed"], [data-stable-review-transfer-from] [data-pageroot-review-text="removed"]',
+    ).evaluateAll((elements) => elements.map((element) => (
+      element.getAttribute("data-pageroot-review-semantic-owner") || ""
+    )).filter(Boolean));
+    expect(movedTextOwners).toHaveLength(2);
+    expect(new Set(movedTextOwners).size).toBe(2);
+    await expect.poll(() => structureKinds(afterFrame.locator(
+      "[data-stable-review-added-image]",
+    ))).toEqual(expect.arrayContaining(["added"]));
+    await expect.poll(() => structureKinds(beforeFrame.locator(
+      "[data-stable-review-removed-module]",
+    ))).toEqual(expect.arrayContaining(["removed"]));
     await expect(afterFrame.locator("[data-stable-review-added-css]"))
       .not.toHaveAttribute("data-pageroot-id", /.+/u);
     await expect(afterFrame.locator("[data-stable-review-added-script]"))

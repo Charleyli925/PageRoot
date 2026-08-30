@@ -41,7 +41,7 @@ export function* markStructureDifferenceSteps(
     } else if (beforeElement && !afterElement && ownsElement && !stableCommon) {
       markStructureElement(beforeElement, "removed", pair.semanticOwnerId);
       stats.removed.push(semanticElementName(beforeElement));
-    } else if (beforeElement && afterElement) {
+    } else if ((beforeElement && afterElement) || stableCommon) {
       for (let index = pair.children.length - 1; index >= 0; index -= 1) {
         pending.push(pair.children[index]);
       }

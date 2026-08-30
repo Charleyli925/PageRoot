@@ -3,6 +3,9 @@ export type ReviewSemanticAlignmentUnit = {
   text?: string;
   /** Only a unique, explicit identity may establish an identity pair. */
   stableId?: string | null;
+  /** A persistent source-ID claim forbids every non-ID fallback pairing. */
+  persistentIdentityClaimed?: boolean;
+  identityAmbiguous?: boolean;
   /** Exact subtree/unit equality, not a durable identity. */
   exactSignature?: string | null;
   /** Own non-presentation structure used only for compatible empty units. */

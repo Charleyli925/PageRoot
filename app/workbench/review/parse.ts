@@ -198,12 +198,15 @@ export function explicitStableElementIdentity(
   usePersistentIdentity = true,
   ambiguousPersistentIds: ReadonlySet<string> = new Set(),
 ): string | null {
-  if (usePersistentIdentity) {
+  const claimsPersistentIdentity = element.hasAttribute(PAGEROOT_ELEMENT_ID_ATTRIBUTE);
+  if (claimsPersistentIdentity) {
     const pagerootId = element.getAttribute(PAGEROOT_ELEMENT_ID_ATTRIBUTE)?.trim() || "";
     if (
-      isValidPagerootElementId(pagerootId)
+      usePersistentIdentity
+      && isValidPagerootElementId(pagerootId)
       && !ambiguousPersistentIds.has(pagerootId)
     ) return `pageroot:${pagerootId}`;
+    return null;
   }
   for (const name of [
     "id",

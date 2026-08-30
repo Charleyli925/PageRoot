@@ -331,6 +331,8 @@ export function semanticUnitDescriptor(
         ambiguousPersistentIds,
       )
       : null,
+    persistentIdentityClaimed: ownsElementIdentity
+      && unit.element.hasAttribute("data-pageroot-id"),
     identityAmbiguous: ownsElementIdentity
       && hasAmbiguousPersistentIdentity(unit.element, ambiguousPersistentIds),
     exactSignature,
@@ -365,6 +367,7 @@ export function* buildReviewSemanticPairGraphSteps(
   options: {
     usePersistentIdentity?: boolean;
     ambiguousPersistentIds?: ReadonlySet<string>;
+    ownerNamespace?: string;
   } = {},
 ): Generator<"semantic-row", ReviewSemanticPairGraph, void> {
   const signatures = createReviewSignatureCache();
@@ -373,11 +376,15 @@ export function* buildReviewSemanticPairGraphSteps(
   let parentSequence = 0;
   let semanticRowsSinceYield = 0;
   const geometryOwners = new WeakMap<Element, string>();
-  const semanticOwner = () => `semantic-owner-${++semanticOwnerSequence}`;
+  const ownerNamespace = options.ownerNamespace
+    ? `-${options.ownerNamespace}`
+    : "";
+  const semanticOwner = () => `semantic-owner${ownerNamespace}-${++semanticOwnerSequence}`;
   const geometryOwner = (before: Element | null, after: Element | null) => {
     const existing = (before && geometryOwners.get(before))
       || (after && geometryOwners.get(after));
-    const ownerId = existing || `geometry-owner-${++geometryOwnerSequence}`;
+    const ownerId = existing
+      || `geometry-owner${ownerNamespace}-${++geometryOwnerSequence}`;
     [before, after].forEach((element) => {
       if (!element) return;
       geometryOwners.set(element, ownerId);
@@ -508,6 +515,7 @@ export function sectionElementDescriptor(
       usePersistentIdentity,
       ambiguousPersistentIds,
     ),
+    persistentIdentityClaimed: element.hasAttribute("data-pageroot-id"),
     identityAmbiguous: hasAmbiguousPersistentIdentity(element, ambiguousPersistentIds),
     exactSignature: exactSubtreeSignature(element, signatures),
     compatibilitySignature: selfCompatibilitySignature(element, signatures),
