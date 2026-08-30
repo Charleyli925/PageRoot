@@ -27,6 +27,8 @@ visual inference.
   IDs by Review. A pair with no shared valid persistent ID, including a legacy
   Candidate that churned every ID, uses that legacy matcher for the whole pair;
   isolated unmatched IDs cannot partially enable exact topology.
+  While persistent identity is active, exact-subtree equality cannot pair an
+  identified element with a different or missing persistent ID.
 - Stable sibling topology reports same-parent and cross-parent movement. An
   insertion alone does not report every following sibling as moved. A stable
   element that moves and changes text retains both movement and text facts;
@@ -50,6 +52,8 @@ visual inference.
 
 - Stable-ID Working Copies get deterministic element continuity; old Versions
   continue to open and use their earlier bounded matcher.
+- Stable sibling topology groups common IDs by parent in one pass; it must not
+  rescan the complete element inventory once per distinct parent.
 - Projection facts remain only `text | structure`. Structure changes admit
   `added`, `removed`, `moved`, `attribute`, `style`, `css-source` and
   `script-source` with the existing purple element presentation.

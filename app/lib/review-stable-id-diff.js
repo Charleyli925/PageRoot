@@ -62,15 +62,17 @@ export function analyzeReviewStableIdTopology(beforeDescriptors, afterDescriptor
     }
   }
 
-  const parentIds = new Set(commonIds.map((id) => before.get(id).parentId || ""));
-  for (const parentId of parentIds) {
-    const beforeSiblings = commonIds
-      .filter((id) => (
-        !movedIds.has(id)
-        && (before.get(id).parentId || "") === parentId
-        && (after.get(id).parentId || "") === parentId
-      ))
-      .sort((left, right) => before.get(left).index - before.get(right).index);
+  const siblingIdsByParent = new Map();
+  for (const id of commonIds) {
+    if (movedIds.has(id)) continue;
+    const parentId = before.get(id).parentId || "";
+    if ((after.get(id).parentId || "") !== parentId) continue;
+    const siblings = siblingIdsByParent.get(parentId) || [];
+    siblings.push(id);
+    siblingIdsByParent.set(parentId, siblings);
+  }
+  for (const beforeSiblings of siblingIdsByParent.values()) {
+    beforeSiblings.sort((left, right) => before.get(left).index - before.get(right).index);
     const afterPositions = new Map(beforeSiblings
       .slice()
       .sort((left, right) => after.get(left).index - after.get(right).index)

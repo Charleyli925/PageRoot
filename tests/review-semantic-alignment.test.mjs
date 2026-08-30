@@ -94,6 +94,21 @@ test("a persistent stable identity pairs across source parents", () => {
   })), [{ beforeIndex: 0, afterIndex: 0, match: "stable-id" }]);
 });
 
+test("exact markup cannot bridge conflicting or missing persistent identities", () => {
+  const exact = (stableId) => unit("相同源码", {
+    stableId,
+    exactSignature: "same-subtree-without-pageroot-id",
+    parentKey: "same-parent",
+  });
+  for (const afterStableId of ["pageroot:pr1_other", null]) {
+    const pairs = alignReviewSemanticUnits(
+      [exact("pageroot:pr1_before")],
+      [exact(afterStableId)],
+    );
+    assert.equal(matchedPairs(pairs).length, 0);
+  }
+});
+
 test("a legacy explicit identity remains scoped to its paired parent", () => {
   const pairs = alignReviewSemanticUnits(
     [unit("旧元素", { stableId: "id:legacy", parentKey: "list-a" })],

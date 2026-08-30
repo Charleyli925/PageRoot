@@ -60,3 +60,16 @@ test("duplicate IDs remain globally ambiguous beside valid continuity", () => {
   assert.deepEqual(result.commonIds, ["stable"]);
   assert.deepEqual(result.duplicateIds, ["duplicate"]);
 });
+
+test("many distinct parents retain independent linear sibling topology", () => {
+  const before = [];
+  const after = [];
+  for (let parent = 0; parent < 2_000; parent += 1) {
+    before.push(item(`item-${parent}`, `parent-${parent}`, 0));
+    after.push(item(`item-${parent}`, `parent-${parent}`, 0));
+  }
+
+  const result = analyzeReviewStableIdTopology(before, after);
+  assert.equal(result.commonIds.length, 2_000);
+  assert.deepEqual(result.movedIds, []);
+});

@@ -518,7 +518,8 @@ through exact-subtree, relocation or fuzzy evidence. A frozen pair with no
 shared valid persistent ID uses the legacy matcher throughout, so full ID churn
 cannot become false source additions/removals. Stable identity, exact subtree equality and own
 non-presentation compatibility have different roles: exact equality skips only
-an unchanged branch, while an empty Canvas/SVG/control/container needs the same
+an unchanged branch and never bridges an identified element to a different or
+missing persistent ID, while an empty Canvas/SVG/control/container needs the same
 parent, kind and compatibility to become a candidate. Ambiguous alternatives
 remain unmatched. Stable topology distinguishes insertion from same-parent
 reorder and cross-parent movement; a common stable ID cannot degrade into
@@ -529,6 +530,8 @@ its one-sided candidate-region graphs suppress duplicate text; unchanged moved
 text produces no text fact, while changed moved text coexists with movement.
 Attribute, inline-style and page-source facts likewise coexist with simultaneous
 text facts.
+Topology groups common IDs by source parent in one pass before sibling-order
+analysis; per-parent rescans of the complete identified inventory are forbidden.
 Analysis-local signature caches and projection facts are
 disposable; a trusted 25th distinct fact is an explicit analysis failure, while
 an oversized serialized payload fails closed rather than being treated as a

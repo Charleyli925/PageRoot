@@ -24,6 +24,9 @@ function identityKey(unit) {
 
 function exactKey(unit) {
   if (unit.identityAmbiguous) return null;
+  // Explicit identity is authoritative: equal markup cannot bridge a changed
+  // or missing ID. Equal IDs were already consumed by the stable-id pass.
+  if (String(unit.stableId || "").trim()) return null;
   const signature = String(unit.exactSignature || normalizedText(unit)).trim();
   return signature
     ? `${normalizedParent(unit)}\u0000${unit.kind}\u0000${signature}`
