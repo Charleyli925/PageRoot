@@ -1,5 +1,13 @@
 import assert from "node:assert/strict";
-import { access, mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import {
+  access,
+  mkdir,
+  readFile,
+  readdir,
+  realpath,
+  rename,
+  writeFile,
+} from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 
@@ -201,7 +209,7 @@ test("the Bridge exposes content-free version summaries without rewriting a rena
   assert.deepEqual(await readFile(manifestPath), manifestBeforeRename);
 });
 
-test("a v4 client treats a pre-v4 project as a fresh V1 import", async (t) => {
+test("a new v4 import never enters or mutates the legacy v3 project main path", async (t) => {
   const environment = await createBridgeTestEnvironment(t, {
     prefix: "pageroot-project-file-pre-v4-",
   });
@@ -211,8 +219,10 @@ test("a v4 client treats a pre-v4 project as a fresh V1 import", async (t) => {
   const legacyStorageDirectoryName = "pre-v4-legacy__20260101T000000__aaaaaaaa";
   const legacyProjectRoot = join(environment.workspace, "projects", legacyStorageDirectoryName);
   await mkdir(join(legacyProjectRoot, "versions"), { recursive: true });
+  const legacyRegistryPath = join(environment.workspace, "project-registry.json");
+  const legacyProjectPath = join(legacyProjectRoot, "project.json");
   await writeFile(
-    join(environment.workspace, "project-registry.json"),
+    legacyRegistryPath,
     `${JSON.stringify({
       schemaVersion: "3.0.0",
       projects: {
@@ -226,7 +236,7 @@ test("a v4 client treats a pre-v4 project as a fresh V1 import", async (t) => {
     }, null, 2)}\n`,
   );
   await writeFile(
-    join(legacyProjectRoot, "project.json"),
+    legacyProjectPath,
     `${JSON.stringify({
       schemaVersion: "3.0.0",
       projectId: legacyProjectId,
@@ -236,6 +246,9 @@ test("a v4 client treats a pre-v4 project as a fresh V1 import", async (t) => {
       storageDirectoryName: legacyStorageDirectoryName,
     }, null, 2)}\n`,
   );
+  const legacyRegistryBefore = await readFile(legacyRegistryPath);
+  const legacyProjectBefore = await readFile(legacyProjectPath);
+  const legacyTreeBefore = await readdir(legacyProjectRoot, { recursive: true });
   const bridge = await environment.start({
     HTML_AI_PROJECT_FILES_ROOT: join(environment.root, "project-files"),
   });
@@ -262,17 +275,24 @@ test("a v4 client treats a pre-v4 project as a fresh V1 import", async (t) => {
   assert.equal(imported.body.imported, true);
   assert.notEqual(imported.body.projectId, legacyProjectId);
   assert.match(imported.body.sourcePath, /pre-v4-V1\.html$/u);
-  assert.equal(await readFile(sourcePath, "utf8"), original);
+  const managedProjectsRoot = await realpath(join(environment.root, "project-files"));
   assert.equal(
-    JSON.parse(await readFile(join(environment.workspace, "project-registry.json"), "utf8"))
-      .projects[legacyProjectId].storageDirectoryName,
-    legacyStorageDirectoryName,
+    (await realpath(imported.body.projectRoot)).startsWith(`${managedProjectsRoot}/`),
+    true,
   );
+  assert.equal(await readFile(sourcePath, "utf8"), original);
+  assert.deepEqual(await readFile(legacyRegistryPath), legacyRegistryBefore);
+  assert.deepEqual(await readFile(legacyProjectPath), legacyProjectBefore);
+  assert.deepEqual(await readdir(legacyProjectRoot, { recursive: true }), legacyTreeBefore);
   const manifest = JSON.parse(await readFile(
     join(imported.body.projectRoot, ".pageroot", "manifest.json"),
     "utf8",
   ));
   assert.deepEqual(manifest.versions.map((version) => version.versionId), ["ver_0001"]);
+  const newControlEntries = await readdir(join(imported.body.projectRoot, ".pageroot"));
+  assert.equal(newControlEntries.includes("project-state.v3.json"), false);
+  assert.equal(newControlEntries.includes("source-history.json"), false);
+  assert.equal(newControlEntries.includes("history"), false);
 
   const reopened = await bridge.requestJson(
     `/workspace?sourcePath=${encodeURIComponent(imported.body.sourcePath)}`,
