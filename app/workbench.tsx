@@ -6701,6 +6701,7 @@ export default function Workbench() {
         >
           <div
             className="canvas-edit-surface"
+            data-edit-runtime-phase={editRuntimePhase}
             hidden={canvasMode !== "edit"}
             aria-hidden={canvasMode !== "edit" || Boolean(effectiveVisibleCachedSurface)}
             inert={effectiveVisibleCachedSurface ? true : undefined}
@@ -6709,6 +6710,17 @@ export default function Workbench() {
               <div className="canvas-loading" role="status">正在识别运行环境…</div>
             ) : !browserPreviewOnly ? (
               <>
+              {editRuntimePhase === "static-fallback" ? (
+                <section
+                  className="edit-runtime-static-fallback"
+                  data-testid="edit-runtime-static-fallback"
+                  role="status"
+                  aria-live="polite"
+                >
+                  <strong>脚本未在编辑画布中运行</strong>
+                  <span>此页面已静态显示；源码编辑和保存仍然有效。</span>
+                </section>
+              ) : null}
               {editRuntimePreparing && !activeRuntimeCanvasUsable ? (
                 <HtmlDisplaySurface
                   html={html}

@@ -443,7 +443,7 @@ author program in source order. There
 is no visual-signal classifier, hidden probe, real-paint/quiet-frame gate,
 runtime activity freeze, host mutation audit, script prewarm or disk cache.
 Before author code runs, the fixed bootstrap captures a one-time parent-owned
-registration port. Registration completes at `DOMContentLoaded` before any
+registration port. Registration completes after full parsing and before any
 author placeholder activates, so a script cannot preclaim a future parser
 object. The parent deletes the public entry and keeps proved source
 DOM references in a private parent-realm `WeakSet`; copied attributes or
@@ -457,11 +457,13 @@ source change materializes complete HTML, rebuilds the disposable frame and
 reruns the author program. Native input may postpone that rebuild until editing
 finishes. The resource session may be reused only while exact authored script
 markup/body identity is unchanged; a Script change requires a new generation.
-Main enforces two concurrent preparations and a non-evicting 128-preparation
-application-lifetime cap; renderer-selected request IDs cannot roll that cap
-forward. Reaching the cap fails closed until PageRoot restarts.
-Any preparation, load, provenance or deadline failure selects ordinary static
-Edit. Runtime DOM never becomes SourcePatch, Source HTML, save, Version, export,
+Main enforces two concurrent preparations and a bounded recent request-ID replay
+window. Completed identities age out, so repeated ordinary use never exhausts a
+permanent application-lifetime allowance or requires PageRoot to restart. Any
+preparation, load, provenance or deadline failure selects an explicit
+script-disabled static Edit state; the Workbench must disclose that author
+Script did not run and must not interpret iframe `load` alone as Runtime success.
+Runtime DOM never becomes SourcePatch, Source HTML, save, Version, export,
 Request, Candidate or Review input.
 
 `data-pageroot-id` is persistent source identity, not Runtime edit authority.
@@ -475,6 +477,22 @@ contract: PageRoot may finish source parsing and authority registration before
 activating parser-blocking, `async`, `defer` or module scripts. Reproducing every
 edge timing must not reintroduce Runtime snapshots, freeze, per-node provenance
 reconciliation or Script execution-state migration.
+
+The supported compatibility surface is deliberately finite: parser-blocking
+classic scripts, inline classic scripts, `defer`, import-free modules, author
+`DOMContentLoaded` listeners and a first contained relative `<base href>` must
+run in real Electron. Program identity and Main resource preparation use the
+same first live-document `base[href]`; href-less base elements, inert
+`<template>` contents and foreign-namespace lookalikes cannot win, while
+absolute or escaping bases fail closed.
+The bootstrap may hold and redeliver `DOMContentLoaded`
+after the supported non-async activation sequence. Module import graphs,
+external/source-root-escaping bases and other non-equivalent programs must enter
+the explicit static-degraded state rather than partially or silently execute.
+Author `location.assign()` and `location.replace()` are blocked at the
+direct-child frame navigation boundary; this is navigation policy, not author
+API freezing. Popup/form guards and the existing resource/CSP boundaries remain
+defence in depth.
 
 The Edit Canvas has one normative experience/persistence contract. Direct
 source text and common-style edits are reflected in the current projection

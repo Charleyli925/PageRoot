@@ -85,11 +85,12 @@ PageRoot edits local files and renders user-controlled HTML, so its default poli
   iframe parses the complete source with author-script placeholders inert,
   registers parser-authored source objects once, and then activates that closure
   in source order with the sandbox tokens required for in-place editing. Relative assets resolve only through
-  the declared contained map; direct `file:` assets and authored base URLs are
-  blocked. The protocol has no `bypassCSP`, directory listing or project-path
+  the declared contained map; direct `file:` assets and external or source-root-
+  escaping authored base URLs are blocked. A first contained relative base is
+  resolved inside the same resource closure. The protocol has no `bypassCSP`, directory listing or project-path
   response. Popup, form submission and top-level navigation remain blocked.
-  A fixed bootstrap privately proves the complete source-node set at
-  `DOMContentLoaded` before author code runs. An authored head script therefore
+  A fixed bootstrap privately proves the complete source-node set after parsing
+  and before author code runs. An authored head script therefore
   cannot register a generated object against a future parser-node identity;
   copied public markers remain non-authoritative. The bootstrap does not
   freeze author activity or audit Runtime DOM. Exact ECharts 5.5.0 minified CDN
@@ -100,9 +101,9 @@ PageRoot edits local files and renders user-controlled HTML, so its default poli
   has no Node integration and no preload or IPC sender of its own. Capture
   preparation, provenance or load failure revokes the session and renders static
   Edit. Edit must not answer a security concern by converting to PNG.
-  Main also keeps a non-evicting 128-preparation application-lifetime cap;
-  renderer-selected request IDs cannot renew it, and reaching it fails closed
-  until the app restarts.
+  Main admits two concurrent preparations and retains a bounded recent request-
+  ID replay window. Completed IDs age out, so renderer IDs cannot grow memory
+  without bound and ordinary use cannot exhaust the app lifetime.
   Remaining low-cost boundaries: no directory listing or project path on the
   edit-runtime protocol, no popup, no worker, no top-level navigation.
 - Strict schemas, frozen inputs and identity/Hash/path checks before accepting

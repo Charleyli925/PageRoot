@@ -213,6 +213,28 @@
   min-height: calc(100vh - 56px);
 }
 
+.edit-runtime-static-fallback {
+  position: absolute;
+  z-index: 18;
+  top: 12px;
+  left: 50%;
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  max-width: calc(100% - 32px);
+  padding: 8px 12px;
+  border: 1px solid #d8c58f;
+  border-radius: 10px;
+  color: #5d491b;
+  background: rgb(255 249 226 / 96%);
+  box-shadow: 0 4px 14px rgb(45 35 14 / 10%);
+  transform: translateX(-50%);
+}
+
+.edit-runtime-static-fallback span {
+  color: #74633a;
+}
+
 .source-conflict-banner,
 .history-view-banner {
   top: 66px;

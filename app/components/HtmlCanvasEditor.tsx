@@ -1260,6 +1260,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
               mode: "disposable-runtime",
               sessionId: runtimeGrant.sessionId,
               executionId: runtimeGrant.executionId,
+              documentBasePath: runtimeGrant.documentBasePath,
               baseUrl: documentBaseHref,
               editorStyles: EDITOR_DOCUMENT_STYLES,
             },

@@ -1,3 +1,5 @@
+import { parse as parseHtmlDocument } from "parse5";
+
 /**
  * Pure syntax and identity rules for the bounded Edit author-runtime path.
  * This contract describes a disposable direct-frame grant only: source HTML
@@ -48,6 +50,7 @@ const CLASSIC_SCRIPT_TYPES = new Set([
   "application/ecmascript",
   "text/ecmascript",
 ]);
+const HTML_NAMESPACE = "http://www.w3.org/1999/xhtml";
 
 function frozenArray(value) {
   return Object.freeze([...value]);
@@ -147,6 +150,46 @@ function scriptPolicy(attributes) {
 }
 
 /**
+ * Returns the first authored, live-document <base href> using HTML parser tree
+ * order. A base without href does not win, and inert template contents never
+ * participate in the document base URL.
+ */
+export function authoredDocumentBase(html) {
+  const source = String(html || "");
+  let document;
+  try {
+    document = parseHtmlDocument(source, { sourceCodeLocationInfo: true });
+  } catch {
+    return null;
+  }
+  let result = null;
+  const visit = (node) => {
+    if (result) return;
+    if (
+      node?.namespaceURI === HTML_NAMESPACE
+      && String(node?.tagName || "").toLowerCase() === "base"
+    ) {
+      const hrefAttribute = (node.attrs || []).find((attribute) => (
+        String(attribute.name || "").toLowerCase() === "href"
+      ));
+      const startTag = node.sourceCodeLocation?.startTag;
+      if (hrefAttribute && startTag) {
+        result = Object.freeze({
+          href: String(hrefAttribute.value || ""),
+          openingTag: source.slice(startTag.startOffset, startTag.endOffset),
+        });
+        return;
+      }
+    }
+    // parse5 stores template descendants in node.content. Deliberately visit
+    // only live childNodes: inert template contents cannot set document.baseURI.
+    for (const child of node?.childNodes || []) visit(child);
+  };
+  visit(document);
+  return result;
+}
+
+/**
  * Scans HTML executable script elements. The parser also treats a closing
  * script tag inside a JavaScript string as a terminator, so this deliberately
  * conservative scanner follows browser parsing instead of inventing JS rules.
@@ -224,10 +267,13 @@ export function collectEditRuntimeScripts(html) {
 export function editRuntimeProgramIdentity(html) {
   const contract = collectEditRuntimeScripts(html);
   if (contract.unsupportedReason || contract.executableScripts.length < 1) return null;
-  return JSON.stringify(contract.executableScripts.map((script) => ({
-    openingTag: script.openingTag,
-    inline: script.inline,
-  })));
+  return JSON.stringify({
+    documentBase: authoredDocumentBase(html)?.openingTag || null,
+    scripts: contract.executableScripts.map((script) => ({
+      openingTag: script.openingTag,
+      inline: script.inline,
+    })),
+  });
 }
 
 /**
@@ -268,6 +314,24 @@ export function isEditRuntimeSourceSha256(value) {
 
 export function isEditRuntimeFrameToken(value) {
   return FRAME_TOKEN_PATTERN.test(String(value || "").toLowerCase());
+}
+
+export function isEditRuntimeDocumentBasePath(value) {
+  const pathname = String(value || "");
+  if (
+    !pathname.startsWith("/")
+    || pathname.length > 4_096
+    || /[?#\\\0]/u.test(pathname)
+  ) return false;
+  let decoded;
+  try {
+    decoded = decodeURIComponent(pathname);
+  } catch {
+    return false;
+  }
+  return !decoded.split("/").some((segment) => (
+    segment === ".." || segment.startsWith(".")
+  ));
 }
 
 export function editRuntimeRegistrationProperty(executionId) {

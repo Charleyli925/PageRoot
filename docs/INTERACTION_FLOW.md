@@ -176,10 +176,12 @@ Tab 已经能操作，不为此增加眼睛徽章或工具栏「去预览」按�
 
 1. “编辑”从当前权威源码构建画布。桌面端遇到已持久化且具有受支持
    `script` 程序的页面时，主进程先核对路径、Hash、generation 和资源预算，
-   再准备作用域受限的资源闭包。可见 Edit iframe 按浏览器正常调度执行作者
-   脚本，包括 `async` / `defer`；PageRoot 不等待“静默帧”，不冻结 timer/listener/
+   再准备作用域受限的资源闭包。可见 Edit iframe 执行受支持的 parser-blocking、
+   inline、`defer`、无 import module、`DOMContentLoaded` listener 与受控相对
+   `<base>` 页面；PageRoot 不等待“静默帧”，不冻结 timer/listener/
    Observer/动画，也不把 Runtime DOM 与源码逐节点对账。不支持的 module import
-   graph 等程序失败关闭到禁用脚本的静态画布。Edit 始终不使用截图、位图投影
+   graph 等不能等价执行的程序会明确提示并关闭到禁用脚本的静态画布，不能把
+   iframe load 当成脚本已运行。Edit 始终不使用截图、位图投影
    或隐藏执行探针冒充作者页面。
 2. 点击“预览”后，当前 HTML 在独立隔离文档中像普通页面一样运行。
    页面脚本、相对资源、Tab、表单、SVG、Canvas 和动态表格可以工作；
@@ -1178,11 +1180,10 @@ A 项目 processing 时切换 B 项目：
 22. Registry 有 A/B 且 Recent 只有 A 时，项目列表同时显示 A/B，A 仅因 Recent 排序优先；Recent 外的项目可安全打开，未登记 Recent 文件不能成为项目。
 23. V6 的历史 V2 继续编辑后，左侧版本树与历史仍保留“基于 V2”“项目最新 V6”“当前编辑基础/有本地修改”事实；顶栏不显示保存状态，历史只读不改变当前编辑目标。
 24. Version Finder 定位可见 Working Copy，Candidate Finder 只打开 `AI任务/`；删除或篡改 AI任务 后，隐藏 Candidate 仍可审阅和 Promotion，P2 不创建 `附件与图片/`。
-25. 符合条件的 ECharts 页在一个 `canvasGeneration` 最多在最终可见 Edit iframe
-    执行一次作者脚本；1.2 秒冻结审计（含 MessageChannel/MessagePort）完成后编辑、
-    评论、IME、自动保存、结束编辑后的 ⌘S、插入换行、同级上移/下移和目标切换都不
-    替换该 iframe。作者源码里的内联 PNG 按原样显示，不得被当成 PageRoot 截图替身。
-    显示图的评论仍落到唯一源码宿主；所有保存/Version/AI 输入字节不含运行时节点或
-    显示图。无法原位同步的结构变化必须保留当前 iframe 或显式进入新 generation，
-    不得把本代静默静态重建写成已接受限制。
+25. 受支持的 parser-blocking、inline、defer、无 import module、DOMContentLoaded
+    listener 与受控相对 `<base>` 页面在真实 Electron Edit iframe 中运行；不能等价
+    执行时必须显示静态降级提示。`location.assign/replace` 在 frame navigation 层被
+    拒绝。准备请求只保留有限近期重放记录，连续使用不会累计到必须重启应用。全过程
+    不增加 freeze、probe、snapshot、双 iframe 或逐节点 Runtime 对账；所有保存、
+    Version 与 AI 输入仍只含完整源码 HTML。
 26. 打开未绑定 HTML 先出现导入确认；取消后当前项目不变。勾选删除也必须等新画布确认后才把原稿移入废纸篓。再次打开同一原稿只出现“已经导入”确认，主操作打开之前的项目，不出现“查看初始版本 V1”。

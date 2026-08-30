@@ -93,6 +93,7 @@ test("direct protocol serves one reusable disposable-frame resource session", as
     },
   );
   assert.match(session.resourceSha256, /^sha256:[a-f0-9]{64}$/u);
+  assert.equal(session.documentBasePath, "/");
 
   const stylesheet = await handler(new Request(
     "pageroot-edit-runtime://" + SESSION_ID + "/report.css",
@@ -125,6 +126,47 @@ test("direct protocol serves one reusable disposable-frame resource session", as
 
   assert.deepEqual(controller.revokeSession(SESSION_ID), { revoked: true });
   assert.equal(controller.sessionCount(), 0);
+});
+
+test("direct protocol freezes scripts relative to a contained authored base", async (t) => {
+  const temporaryRoot = await mkdtemp(path.join(tmpdir(), "pageroot-edit-runtime-base-"));
+  t.after(() => rm(temporaryRoot, { recursive: true, force: true }));
+  const sourcePath = path.join(temporaryRoot, "report.html");
+  const html = [
+    '<!doctype html><html><head><base href="./assets/">',
+    '<script src="blocking.js"></script></head><body></body></html>',
+  ].join("");
+  await mkdir(path.join(temporaryRoot, "assets"));
+  await Promise.all([
+    writeFile(sourcePath, html),
+    writeFile(path.join(temporaryRoot, "assets", "blocking.js"), "window.baseReady=true;"),
+  ]);
+  let handler = null;
+  const controller = createEditRuntimeProtocolController({
+    protocolApi: {
+      handle(_scheme, nextHandler) {
+        handler = nextHandler;
+      },
+    },
+    netFetch: async () => new Response("unexpected", { status: 500 }),
+    randomSessionId: () => "6".repeat(32),
+    randomExecutionId: () => "7".repeat(24),
+  });
+  controller.install();
+  const session = await controller.createSession({ html, sourcePath });
+  assert.equal(session.documentBasePath, "/assets/");
+  const authorScript = await handler(new Request(
+    `pageroot-edit-runtime://${session.sessionId}/.pageroot/author/0.js`,
+  ));
+  assert.equal(await authorScript.text(), "window.baseReady=true;");
+
+  await assert.rejects(
+    controller.createSession({
+      html: html.replace("./assets/", "../outside/"),
+      sourcePath,
+    }),
+    /document base/u,
+  );
 });
 
 test("direct protocol keeps CSP instead of keyword-rejecting fetch and workers", async (t) => {

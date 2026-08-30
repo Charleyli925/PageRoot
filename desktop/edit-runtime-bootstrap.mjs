@@ -118,14 +118,39 @@ export function createEditRuntimeBootstrap({ executionId, sessionId } = {}) {
     }
   };
 
-  const start = () => {
-    proveParsedSource();
-    void activateAuthorScripts();
+  let activationStarted = false;
+  let activationComplete = false;
+  let deferredDomContentLoaded = false;
+  const holdDomContentLoaded = (event) => {
+    if (activationComplete || !event.isTrusted) return;
+    deferredDomContentLoaded = true;
+    event.stopImmediatePropagation();
+  };
+  window.addEventListener("DOMContentLoaded", holdDomContentLoaded, true);
+
+  const start = async () => {
+    if (activationStarted) return;
+    activationStarted = true;
+    try {
+      proveParsedSource();
+      await activateAuthorScripts();
+    } finally {
+      activationComplete = true;
+      window.removeEventListener("DOMContentLoaded", holdDomContentLoaded, true);
+      if (deferredDomContentLoaded) {
+        document.dispatchEvent(new Event("DOMContentLoaded", { bubbles: true }));
+      }
+    }
+  };
+  const startWhenParsed = () => {
+    if (document.readyState === "loading") return;
+    document.removeEventListener("readystatechange", startWhenParsed);
+    void start();
   };
   if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", start, { once: true });
+    document.addEventListener("readystatechange", startWhenParsed);
   } else {
-    start();
+    void start();
   }
 
   document.addEventListener("click", (event) => {

@@ -18,8 +18,41 @@ import {
   createPreviewProtocolController,
   createPreviewSessionOperation,
   registerPreviewProtocolScheme,
+  resolveContainedDocumentBase,
   resolvePreviewSourceRoot,
 } from "../desktop/preview-protocol.mjs";
+
+test("contained document base ignores inert and href-less base elements", () => {
+  assert.deepEqual(
+    resolveContainedDocumentBase(
+      '<base target="_blank"><base href="./assets/"><script src="chart.js"></script>',
+    ),
+    { documentPath: "/assets/", basePath: "assets" },
+  );
+  assert.deepEqual(
+    resolveContainedDocumentBase(
+      '<template><base href="./assets/"></template><script src="chart.js"></script>',
+    ),
+    { documentPath: "/", basePath: "" },
+  );
+  assert.deepEqual(
+    resolveContainedDocumentBase(
+      '<svg><base href="./assets/"></base></svg><script src="chart.js"></script>',
+    ),
+    { documentPath: "/", basePath: "" },
+  );
+});
+
+test("contained document base rejects absolute and scheme-relative sentinel URLs", () => {
+  assert.equal(
+    resolveContainedDocumentBase('<base href="https://pageroot-preview.invalid/assets/">'),
+    null,
+  );
+  assert.equal(
+    resolveContainedDocumentBase('<base href="//pageroot-preview.invalid/assets/">'),
+    null,
+  );
+});
 
 test("declared asset discovery caps missing-reference probes before they can delay a preview session", async (t) => {
   const temporaryRoot = await mkdtemp(
@@ -41,6 +74,35 @@ test("declared asset discovery caps missing-reference probes before they can del
 
   assert.equal(assets.size, 0);
   assert.equal(assets.has("later.png"), false);
+});
+
+test("declared asset discovery applies an authored base only for the Edit runtime caller", async (t) => {
+  const temporaryRoot = await mkdtemp(
+    path.join(tmpdir(), "pageroot-preview-document-base-"),
+  );
+  t.after(() => rm(temporaryRoot, { recursive: true, force: true }));
+  await mkdir(path.join(temporaryRoot, "assets"));
+  await Promise.all([
+    writeFile(path.join(temporaryRoot, "chart.js"), "window.previewRoot=true;"),
+    writeFile(path.join(temporaryRoot, "assets", "chart.js"), "window.editBase=true;"),
+  ]);
+  const sourceRoot = await realpath(temporaryRoot);
+  const html = '<base href="./assets/"><script src="chart.js"></script>';
+
+  const previewAssets = await collectDeclaredPreviewAssets({
+    html,
+    sourceRoot,
+  });
+  const editRuntimeAssets = await collectDeclaredPreviewAssets({
+    html,
+    sourceRoot,
+    documentBasePath: "assets",
+  });
+
+  assert.equal(previewAssets.has("chart.js"), true);
+  assert.equal(previewAssets.has("assets/chart.js"), false);
+  assert.equal(editRuntimeAssets.has("chart.js"), false);
+  assert.equal(editRuntimeAssets.has("assets/chart.js"), true);
 });
 
 test("preview protocol installs one handler for each isolated Electron session", () => {

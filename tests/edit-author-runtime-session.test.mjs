@@ -38,6 +38,7 @@ function success(request, overrides = {}) {
     executionId: "abcdefabcdefabcdefabcdef",
     sourceSha256: request.sourceSha256,
     resourceSha256: "sha256:" + "b".repeat(64),
+    documentBasePath: "/",
     scriptCount: 1,
     byteLength: 96,
     canvasGeneration: request.canvasGeneration,
@@ -244,7 +245,7 @@ test("settled runtime grant can render another disposable frame", async () => {
   assert.deepEqual(revoked, []);
 });
 
-test("failed preparation silently reaches static fallback", async () => {
+test("failed preparation reaches an explicit static fallback", async () => {
   const session = new EditAuthorRuntimeSession({
     port: {
       prepare: async () => null,
@@ -259,6 +260,25 @@ test("failed preparation silently reaches static fallback", async () => {
   assert.equal(session.snapshot.phase, "static-fallback");
   assert.equal(session.snapshot.grant, null);
   assert.equal(session.snapshot.lastOutcome, "prepare-failed");
+});
+
+test("an unsupported authored program publishes static fallback before preparation", () => {
+  const requests = [];
+  const session = new EditAuthorRuntimeSession({
+    port: {
+      prepare: async (request) => {
+        requests.push(request);
+        return success(request);
+      },
+      revoke: async () => {},
+    },
+  });
+
+  session.refresh(input({ html: "<!doctype html><html><body><script>unfinished" }));
+
+  assert.equal(session.snapshot.phase, "static-fallback");
+  assert.equal(session.snapshot.lastOutcome, "unsupported-program");
+  assert.equal(requests.length, 0);
 });
 
 test("ordinary, Canvas and SVG scripts use the same preparation owner", async () => {

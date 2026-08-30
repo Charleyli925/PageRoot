@@ -9,6 +9,7 @@ import {
   launchPageRoot,
   loadedDiskFrame,
   managedWorkingCopyPath,
+  mkdirSync,
   mkdtempSync,
   path,
   readFileSync,
@@ -22,7 +23,9 @@ async function withRuntimeProject(prefix, files, run) {
   const sourceDirectory = mkdtempSync(path.join(tmpdir(), prefix));
   const sourcePath = path.join(sourceDirectory, "runtime-report.html");
   for (const [relativePath, content] of Object.entries(files)) {
-    writeFileSync(path.join(sourceDirectory, relativePath), content, "utf8");
+    const targetPath = path.join(sourceDirectory, relativePath);
+    mkdirSync(path.dirname(targetPath), { recursive: true });
+    writeFileSync(targetPath, content, "utf8");
   }
   let electronApp = null;
   let isolatedUserData = null;
@@ -159,7 +162,7 @@ test("author Script cannot add source authority after Runtime starts or save Run
         document.body.dataset.workerBlocked = 'true';
         worker.terminate();
         URL.revokeObjectURL(workerUrl);
-      }, 100);
+      }, 5_000);
     } catch {
       document.body.dataset.workerBlocked = 'true';
     }
@@ -308,21 +311,114 @@ test("semantic structure edit rebuilds the disposable page and reruns its script
   });
 });
 
-test("Electron Edit executes local defer and async scripts with native scheduling attributes", async () => {
+test("Electron Edit executes parser-blocking, inline, defer and module programs with DOMContentLoaded and base", async () => {
   const html = `<!doctype html>
-<html><head><title>Runtime</title></head><body>
-  <main data-native-case="scheduled-runtime"></main>
+<html><head><title>Runtime compatibility</title>
+  <template><base href="../inert-assets/"></template>
+  <base target="_blank">
+  <base href="./assets/">
+  <script src="blocking.js"></script>
+  <script>
+    window.__runtimeOrder.push('inline');
+    window.addEventListener('DOMContentLoaded', () => {
+      window.__runtimeOrder.push('dom-content-loaded');
+      document.body.dataset.domContentLoadedReady = 'true';
+    }, { once: true });
+  </script>
   <script defer src="defer.js"></script>
-  <script async src="async.js"></script>
+  <script type="module">
+    window.__runtimeOrder.push('module');
+    document.body.dataset.moduleReady = 'true';
+  </script>
+</head><body>
+  <main data-native-case="scheduled-runtime"></main>
 </body></html>`;
   await withRuntimeProject("pageroot-scheduled-runtime-e2e-", {
     "runtime-report.html": html,
-    "defer.js": "document.body.dataset.deferReady = 'true';",
-    "async.js": "document.body.dataset.asyncReady = 'true';",
+    "assets/blocking.js": [
+      "window.__runtimeOrder = ['parser-blocking'];",
+      "document.documentElement.dataset.parserBlockingReady = 'true';",
+    ].join("\n"),
+    "assets/defer.js": [
+      "window.__runtimeOrder.push('defer');",
+      "document.body.dataset.deferReady = 'true';",
+    ].join("\n"),
   }, async ({ page, sourcePath }) => {
     const { frame } = await loadedDiskFrame(page, sourcePath, "scheduled-runtime");
+    await expect(frame.locator("html")).toHaveAttribute("data-parser-blocking-ready", "true");
     await expect(frame.locator("body")).toHaveAttribute("data-defer-ready", "true");
-    await expect(frame.locator("body")).toHaveAttribute("data-async-ready", "true");
+    await expect(frame.locator("body")).toHaveAttribute("data-module-ready", "true");
+    await expect(frame.locator("body")).toHaveAttribute("data-dom-content-loaded-ready", "true");
+    await expect.poll(() => frame.evaluate(() => window.__runtimeOrder)).toEqual([
+      "parser-blocking",
+      "inline",
+      "defer",
+      "module",
+      "dom-content-loaded",
+    ]);
+    await expect(frame.locator("base")).toHaveAttribute(
+      "href",
+      /^pageroot-edit-runtime:\/\/[a-f0-9]{32}\/assets\/$/u,
+    );
+    expect(readFileSync(sourcePath, "utf8")).toBe(html);
+  });
+});
+
+test("unsupported Script programs enter an explicit static Edit state", async () => {
+  const html = `<!doctype html>
+<html><head><title>Static fallback</title></head><body>
+  <main data-native-case="static-runtime-fallback">源码仍可编辑</main>
+  <script type="module">
+    import { runtimeMarker } from './runtime-module.js';
+    document.body.dataset.runtimeMarker = runtimeMarker;
+  </script>
+</body></html>`;
+  await withRuntimeProject("pageroot-static-runtime-fallback-e2e-", {
+    "runtime-report.html": html,
+    "runtime-module.js": "export const runtimeMarker = 'executed';",
+  }, async ({ page, sourcePath }) => {
+    const { frame } = await loadedDiskFrame(page, sourcePath, "static-runtime-fallback");
+    await expect(page.getByTestId("edit-runtime-static-fallback")).toContainText(
+      "脚本未在编辑画布中运行",
+    );
+    await expect(page.locator(".canvas-edit-surface")).toHaveAttribute(
+      "data-edit-runtime-phase",
+      "static-fallback",
+    );
+    await expect(frame.locator("body")).not.toHaveAttribute("data-runtime-marker", "executed");
+    expect(readFileSync(sourcePath, "utf8")).toBe(html);
+  });
+});
+
+test("Edit frame navigation blocks location.assign and location.replace", async () => {
+  const html = `<!doctype html>
+<html><head><title>Navigation</title></head><body>
+  <main data-native-case="runtime-navigation">页面保持在原文档</main>
+  <script>
+    window.__attemptAssignNavigation = () => {
+      document.body.dataset.assignAttempted = 'true';
+      location.assign(new URL('/navigation-assign', document.baseURI).href);
+    };
+    window.__attemptReplaceNavigation = () => {
+      document.body.dataset.replaceAttempted = 'true';
+      location.replace(new URL('/navigation-replace', document.baseURI).href);
+    };
+  </script>
+</body></html>`;
+  await withRuntimeProject("pageroot-runtime-navigation-e2e-", {
+    "runtime-report.html": html,
+  }, async ({ page, sourcePath }) => {
+    const { frame } = await loadedDiskFrame(page, sourcePath, "runtime-navigation");
+    await frame.evaluate(() => window.__attemptAssignNavigation());
+    await expect(frame.locator("body")).toHaveAttribute("data-assign-attempted", "true");
+    await expect(frame.locator('[data-native-case="runtime-navigation"]')).toHaveText(
+      "页面保持在原文档",
+    );
+    await frame.evaluate(() => window.__attemptReplaceNavigation());
+    await expect(frame.locator("body")).toHaveAttribute("data-replace-attempted", "true");
+    await expect(frame.locator('[data-native-case="runtime-navigation"]')).toHaveText(
+      "页面保持在原文档",
+    );
     expect(readFileSync(sourcePath, "utf8")).toBe(html);
   });
 });

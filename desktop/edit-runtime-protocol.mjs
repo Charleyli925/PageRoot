@@ -17,6 +17,7 @@ import { createEditRuntimeBootstrap } from "./edit-runtime-bootstrap.mjs";
 import {
   collectDeclaredPreviewAssets,
   normalizeRelativeAssetPath,
+  resolveContainedDocumentBase,
   resolvePreviewSourceRoot,
 } from "./preview-protocol.mjs";
 
@@ -97,11 +98,12 @@ function isExecutableAssetPath(relativePath) {
 }
 
 async function resolveLocalScript(sourceRoot, reference, {
+  basePath = "",
   readFileImpl,
   realpathImpl,
   statImpl,
 }) {
-  const relative = normalizeRelativeAssetPath(reference);
+  const relative = normalizeRelativeAssetPath(reference, basePath);
   if (!relative || !SCRIPT_EXTENSIONS.has(path.posix.extname(relative).toLowerCase())) {
     throw new TypeError("Edit runtime local script is not allowed.");
   }
@@ -280,6 +282,7 @@ export { fetchFixedEchartsBytes };
 
 async function fixedAuthorScripts({
   html,
+  documentBase,
   sourceRoot,
   netFetch,
   readFileImpl,
@@ -322,6 +325,7 @@ async function fixedAuthorScripts({
       }
     } else if (descriptor.src) {
       bytes = await resolveLocalScript(sourceRoot, descriptor.src, {
+        basePath: documentBase.basePath,
         readFileImpl,
         realpathImpl,
         statImpl,
@@ -359,6 +363,7 @@ async function fixedAuthorScripts({
     scripts: Object.freeze(scripts),
     byteLength: totalBytes,
     resourceSha256: "sha256:" + digest.digest("hex"),
+    documentBasePath: documentBase.documentPath,
   });
 }
 
@@ -439,12 +444,14 @@ export function createEditRuntimeProtocolController({
   const prepareScripts = async ({
     source,
     sourceRoot,
+    documentBase,
     preparationController,
     preparationDeadlineAt,
   }) => {
     return settleWithinRuntimeDeadline(
       () => fixedAuthorScripts({
         html: source,
+        documentBase,
         sourceRoot,
         netFetch,
         readFileImpl,
@@ -473,9 +480,14 @@ export function createEditRuntimeProtocolController({
       runtimePreparationTimeoutError,
     );
     if (!sourceRoot) throw new TypeError("Edit runtime requires a known local source path.");
+    const documentBase = resolveContainedDocumentBase(source);
+    if (!documentBase) {
+      throw new TypeError("Edit runtime document base is outside the authorized source root.");
+    }
     const frozenScripts = await prepareScripts({
       source,
       sourceRoot,
+      documentBase,
       preparationController,
       preparationDeadlineAt,
     });
@@ -483,6 +495,7 @@ export function createEditRuntimeProtocolController({
       () => collectDeclaredAssets({
         html: source,
         sourceRoot,
+        documentBasePath: documentBase.basePath,
         maxAssets: EDIT_AUTHOR_RUNTIME_BUDGET.declaredAssetCount,
         maxReferences: EDIT_AUTHOR_RUNTIME_BUDGET.declaredAssetReferenceCount,
         maxDependencyScanBytes: EDIT_AUTHOR_RUNTIME_BUDGET.declaredAssetBytes,
@@ -509,6 +522,7 @@ export function createEditRuntimeProtocolController({
       scripts: frozenScripts.scripts.map((script) => ({ ...script })),
       byteLength: frozenScripts.byteLength,
       resourceSha256: frozenScripts.resourceSha256,
+      documentBasePath: frozenScripts.documentBasePath,
       lastAccessAt,
     });
     return Object.freeze({
@@ -517,6 +531,7 @@ export function createEditRuntimeProtocolController({
       executionId,
       scriptCount: frozenScripts.scripts.length,
       resourceSha256: frozenScripts.resourceSha256,
+      documentBasePath: frozenScripts.documentBasePath,
       byteLength: frozenScripts.byteLength,
       libraryOrigins: Object.freeze([
         ...new Set(frozenScripts.scripts.map((script) => script.libraryOrigin)),

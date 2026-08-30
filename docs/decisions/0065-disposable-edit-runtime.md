@@ -29,17 +29,19 @@ source or be reconciled node by node.
   resource budgets before preparing a scoped `pageroot-edit-runtime:` resource
   closure. Inline and contained local scripts are supported. Exact reviewed
   ECharts 5.5.0 CDN URLs may resolve to pinned packaged bytes. Module import
-  graphs remain unsupported and fail closed to static Edit. Main admits at
-  most two concurrent preparations and keeps a non-evicting 128-preparation
-  application-lifetime cap; reaching it requires an app restart rather than
-  accepting renderer-chosen request IDs without a hard bound. Workers stay
+  graphs remain unsupported and fail closed to an explicit static Edit state.
+  Main admits at most two concurrent preparations and retains only a bounded
+  recent request-ID replay window. Completed identities age out; ordinary use
+  cannot exhaust a permanent application-lifetime budget or require a restart.
+  Workers stay
   CSP-disabled because worker bytes are outside the frozen author-script
   closure and its Hash/budget checks.
 - Before author scripts execute, the fixed bootstrap opens one parent-owned
   registration capability. The parent editor deletes that entry after the
-  bootstrap captures its private batch port. At `DOMContentLoaded`, while every
-  author-script placeholder is still inert, the bootstrap registers the
-  complete parsed set once and only then activates author programs. An early
+  bootstrap captures its private batch port. Once parsing reaches the complete
+  document, while every author-script placeholder is still inert, the bootstrap
+  registers the complete parsed set once and only then activates author
+  programs. An early
   authored script therefore cannot preclaim the identity of a later parser
   element. The parent keeps registered DOM references in a parent-realm `WeakSet`;
   public attributes and author-realm expandos are never edit authority. Changing
@@ -121,16 +123,31 @@ runtime-only state after reopen.
 - The runtime remains a trusted-local authoring capability, not hostile-content
   isolation. The iframe has no Node integration or preload of its own, while
   same-origin parent reachability remains the accepted cost of DOM editing.
-- Navigation, popup and form submission remain blocked. Resource byte/count,
+- Navigation, popup and form submission remain blocked. Author calls such as
+  `location.assign()` and `location.replace()` are rejected at the direct-child
+  frame navigation boundary, not by patching or freezing author APIs. Resource byte/count,
   source-root containment, CSP, stale generation/Hash and orphan-session limits
   remain fail-closed.
-- Unsupported programs fall back to the script-disabled source document. Edit
-  does not use screenshots, bitmap projection or hidden execution probes.
+- Unsupported or failed programs fall back to the script-disabled source
+  document and publish a visible static-degraded state; an ordinary iframe
+  `load` may not be reported as successful Script execution. Edit does not use
+  screenshots, bitmap projection or hidden execution probes.
 - Edit Runtime does not promise exact parser-time Script scheduling. Establishing
   source authority may complete parsing and registration before activating
   parser-blocking, `async`, `defer` or module programs. Restoring every edge-case
   interleaving cannot justify Runtime snapshots, activity freeze, per-node
   provenance reconciliation or Script execution-state migration.
+- The supported compatibility surface includes parser-blocking classic scripts,
+  inline classic scripts, `defer`, import-free modules, author
+  `DOMContentLoaded` listeners, and a first contained relative `<base href>`.
+  Program identity and Main resource preparation must derive that base from the
+  same first live-document `base[href]`: an earlier base without `href` does not
+  win, inert `<template>` contents and foreign-namespace lookalikes do not
+  participate, and absolute or escaping bases fail closed.
+  PageRoot may defer the native `DOMContentLoaded` delivery until the supported
+  non-async activation sequence has completed. An external or source-root-
+  escaping base and module import graphs enter the explicit static-degraded
+  state instead of running partially.
 - Review continues to compare frozen source HTML only; runtime output is not a
   formal change fact.
 
@@ -139,8 +156,14 @@ runtime-only state after reopen.
 - Ordinary DOM scripts continue running in Edit without leaking generated DOM
   into the Working Copy.
 - ECharts and Canvas pages render in the real editable iframe.
-- `async` and `defer` attributes are preserved; exact pre-`DOMContentLoaded`
-  interleaving is not a source-persistence contract.
+- Parser-blocking classic, inline, `defer`, import-free module,
+  `DOMContentLoaded` listener and contained relative `<base>` fixtures execute
+  in real Electron; exact parser-time interleaving remains a non-goal.
+- An unsupported module graph visibly reports static degradation and never
+  presents a static iframe load as successful Script execution.
+- Repeated preparations beyond the replay-window size remain available without
+  restarting PageRoot, while current/recent request identities still reject replay.
+- `location.assign()` and `location.replace()` cannot navigate the Edit frame.
 - A semantic structure edit rebuilds the iframe, reruns the program and saves
   only the complete semantic HTML result.
 - Continuous direct text input is visible immediately without repeated iframe
