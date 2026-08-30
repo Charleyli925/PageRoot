@@ -322,7 +322,7 @@ test("insert and replace identity allocations are bound to exact operation HTML"
     operationId: "sourceop_insert_payload_binding_012",
     parentElementId: ids.left,
     beforeElementId: ids.second,
-    html: "<article><em>inserted</em></article>",
+    html: "\n<article><em>inserted</em></article>\n",
   });
   const inserted = applySemanticOperation(
     createSemanticDocumentState(html),
@@ -336,7 +336,7 @@ test("insert and replace identity allocations are bound to exact operation HTML"
   );
   const replacing = operation("replaceSubtree", {
     target: target(ids.first),
-    html: "<article><em>replacement</em></article>",
+    html: "\n<article><em>replacement</em></article>\n",
   }, "sourceop_replace_payload_binding_013");
   const replaced = applySemanticOperation(
     createSemanticDocumentState(html),
@@ -347,6 +347,10 @@ test("insert and replace identity allocations are bound to exact operation HTML"
     [inserted, inserting, "<aside>unrelated insert</aside>"],
     [replaced, replacing, "<section>unrelated replacement</section>"],
   ]) {
+    const saved = materializeIdentityPreservingSave(html, result.html, {
+      sourceHistoryOperations: [saveEvidence(html, result, validOperation)],
+    });
+    assert.equal(saved.html, result.html);
     const evidence = saveEvidence(html, result, {
       ...validOperation,
       html: forgedHtml,

@@ -317,7 +317,13 @@ function semanticAuthorizationError(code, message, details = {}) {
   return error;
 }
 
-function kernelIdentityFreeSubtreeHtml(html, inspection, rootElementId, expectedElementIds) {
+function kernelIdentityFreeSubtreeHtml(
+  html,
+  inspection,
+  rootElementId,
+  expectedElementIds,
+  operationHtml,
+) {
   const byId = identityElementMap(inspection);
   const root = byId.get(rootElementId);
   if (!root) {
@@ -346,6 +352,22 @@ function kernelIdentityFreeSubtreeHtml(html, inspection, rootElementId, expected
       },
     );
   }
+  const leadingWhitespace = operationHtml.match(/^\s*/u)?.[0] ?? "";
+  const trailingWhitespace = operationHtml.match(/\s*$/u)?.[0] ?? "";
+  const fragmentStartOffset = root.startOffset - leadingWhitespace.length;
+  const fragmentEndOffset = root.sourceEndOffset + trailingWhitespace.length;
+  if (
+    fragmentStartOffset < 0
+    || fragmentEndOffset > html.length
+    || html.slice(fragmentStartOffset, root.startOffset) !== leadingWhitespace
+    || html.slice(root.sourceEndOffset, fragmentEndOffset) !== trailingWhitespace
+  ) {
+    throw semanticAuthorizationError(
+      "SEMANTIC_IDENTITY_MATERIALIZATION_WHITESPACE_MISMATCH",
+      "The materialized structural subtree does not preserve allowed operation.html outer whitespace.",
+      { rootElementId },
+    );
+  }
   const removals = subtree.map((element) => {
     const injected = ` ${PAGEROOT_ELEMENT_ID_ATTRIBUTE}="${element.pagerootId}"`;
     const endOffset = element.closingDelimiterOffset;
@@ -362,10 +384,10 @@ function kernelIdentityFreeSubtreeHtml(html, inspection, rootElementId, expected
     }
     return { startOffset, endOffset };
   }).sort((left, right) => right.startOffset - left.startOffset);
-  let identityFreeHtml = html.slice(root.startOffset, root.sourceEndOffset);
+  let identityFreeHtml = html.slice(fragmentStartOffset, fragmentEndOffset);
   for (const removal of removals) {
-    const startOffset = removal.startOffset - root.startOffset;
-    const endOffset = removal.endOffset - root.startOffset;
+    const startOffset = removal.startOffset - fragmentStartOffset;
+    const endOffset = removal.endOffset - fragmentStartOffset;
     identityFreeHtml = `${identityFreeHtml.slice(0, startOffset)}${identityFreeHtml.slice(endOffset)}`;
   }
   return identityFreeHtml;
@@ -417,6 +439,7 @@ function assertKernelStructuralMaterialization({
     forwardAfterIdentity,
     rootElementId,
     expectedElementIds,
+    operation.html,
   );
   if (identityFreeHtml !== operation.html) {
     throw semanticAuthorizationError(
