@@ -249,6 +249,8 @@ test("the contextual edit toolbar stays on one quiet-glass row and defers second
 
   await expect(toolbar.getByRole("button", { name: "上移", exact: true })).toBeVisible();
   await expect(toolbar.getByRole("button", { name: "下移", exact: true })).toBeVisible();
+  await expect(toolbar.getByRole("button", { name: "复制元素", exact: true })).toBeVisible();
+  await expect(toolbar.getByRole("button", { name: "删除元素", exact: true })).toBeVisible();
   await expect(toolbar.getByLabel("字号")).toBeHidden();
   await expect(toolbar.getByLabel("文字颜色")).toBeHidden();
   await expect(toolbar.getByLabel("元素填充色")).toBeHidden();
@@ -260,6 +262,39 @@ test("the contextual edit toolbar stays on one quiet-glass row and defers second
   await expect(toolbar.getByLabel("内边距")).toBeVisible();
   await expect(toolbar.getByLabel("外间距")).toBeVisible();
   await expect(toolbar.getByLabel("行距")).toBeVisible();
+});
+
+test("source structure toolbar duplicates with fresh IDs and deletes only the selected source element", async ({
+  page,
+}) => {
+  const { editor, frame } = await loadFixture(page, "module-padding-hit.html", {
+    identifiedWorkingCopy: true,
+  });
+  const copies = frame.locator(caseSelector("module-padding-copy"));
+  await copies.first().click();
+  await editor.getByRole("button", { name: "复制元素", exact: true }).click();
+
+  await expect(copies).toHaveCount(2);
+  const duplicatedIds = await copies.evaluateAll((elements) => (
+    elements.map((element) => element.getAttribute("data-pageroot-id"))
+  ));
+  expect(duplicatedIds.every(Boolean)).toBe(true);
+  expect(new Set(duplicatedIds).size).toBe(2);
+
+  await copies.nth(1).click();
+  page.once("dialog", (dialog) => dialog.dismiss());
+  await editor.getByRole("button", { name: "删除元素", exact: true }).click();
+  await expect(copies).toHaveCount(2);
+  await editor.getByRole("button", { name: "复制元素", exact: true }).click();
+  await expect(copies).toHaveCount(3);
+  await copies.nth(1).click();
+  page.once("dialog", (dialog) => dialog.accept());
+  await editor.getByRole("button", { name: "删除元素", exact: true }).click();
+  await expect(copies).toHaveCount(2);
+
+  const exported = (await exportCurrentHtml(page)).toString("utf8");
+  expect(exported).toContain(duplicatedIds[0]);
+  expect(exported).not.toContain(duplicatedIds[1]);
 });
 
 test("hovering a filled module's padding advertises the same module click selects", async ({

@@ -205,6 +205,21 @@ export type HtmlCanvasEditorHandle = {
   ) => HtmlCanvasSelection | null;
   startEditing: () => boolean;
   moveSelected: (direction: "up" | "down") => boolean;
+  /** Duplicates the selected authored source subtree with fresh stable IDs. */
+  duplicateSelected: () => boolean;
+  /** Deletes the selected authored source element; document roots are protected. */
+  deleteSelected: () => boolean;
+  /** Inserts one identity-free HTML element into an authored source parent. */
+  insertElement: (options: {
+    parentElementId: string;
+    beforeElementId?: string | null;
+    html: string;
+  }) => boolean;
+  /** Moves the selected authored element, preserving its stable ID. */
+  moveSelectedTo: (options: {
+    parentElementId: string;
+    beforeElementId?: string | null;
+  }) => boolean;
   /** Adopts one Bridge-validated history result in place when proven safe, otherwise with a fresh frame. */
   adoptHistorySource: (
     source: string,

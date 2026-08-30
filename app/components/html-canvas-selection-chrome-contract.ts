@@ -109,6 +109,8 @@ export type SelectionChromeActions = {
   onStartEditing: () => void;
   onApplyInlineStyle: (property: EditableStyleProperty, value: string) => void;
   onMoveSelected: (direction: "up" | "down") => void;
+  onDuplicateSelected: () => void;
+  onDeleteSelected: () => void;
   onToggleSpacingMenu: () => void;
 };
 
