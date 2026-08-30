@@ -82,6 +82,32 @@ export const HtmlCanvasSelectionChrome = memo(function HtmlCanvasSelectionChrome
   useEffect(() => {
     setArmedDeleteTargetId(null);
   }, [selection?.id]);
+  useEffect(() => {
+    if (!armedDeleteTargetId) return undefined;
+    const disarmOnPointer = (event: PointerEvent) => {
+      const target = event.target instanceof Element ? event.target : null;
+      if (!target?.closest("[data-delete-action]")) {
+        setArmedDeleteTargetId(null);
+      }
+    };
+    const disarmOnKey = (event: KeyboardEvent) => {
+      const target = event.target instanceof Element ? event.target : null;
+      const confirmsDelete = Boolean(
+        target?.closest("[data-delete-action]")
+        && (event.key === "Enter" || event.key === " "),
+      );
+      if (!confirmsDelete) setArmedDeleteTargetId(null);
+    };
+    const disarm = () => setArmedDeleteTargetId(null);
+    document.addEventListener("pointerdown", disarmOnPointer, true);
+    document.addEventListener("keydown", disarmOnKey, true);
+    window.addEventListener("blur", disarm);
+    return () => {
+      document.removeEventListener("pointerdown", disarmOnPointer, true);
+      document.removeEventListener("keydown", disarmOnKey, true);
+      window.removeEventListener("blur", disarm);
+    };
+  }, [armedDeleteTargetId]);
   const {
     onHoverHintPointerDown,
     onHoverHintPointerEnter,
@@ -244,7 +270,13 @@ export const HtmlCanvasSelectionChrome = memo(function HtmlCanvasSelectionChrome
             if (!confirmsArmedDelete) setArmedDeleteTargetId(null);
             onToolbarKeyDown(event);
           }}
-          onPointerDownCapture={onToolbarPointerDownCapture}
+          onPointerDownCapture={(event) => {
+            const target = event.target instanceof Element ? event.target : null;
+            if (!target?.closest("[data-delete-action]")) {
+              setArmedDeleteTargetId(null);
+            }
+            onToolbarPointerDownCapture(event);
+          }}
           onMouseDownCapture={onToolbarMouseDownCapture}
           onClickCapture={(event) => {
             const target = event.target instanceof Element ? event.target : null;
