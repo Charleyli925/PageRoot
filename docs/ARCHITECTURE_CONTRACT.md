@@ -700,7 +700,10 @@ resulting complete HTML and operations as identity/save evidence. Repository
 independently parses each before/after HTML pair, recomputes its ID-set and
 topology delta, validates the complete public operation schema/envelope plus
 type-specific fields, and cross-validates that fact against the operation and
-delta.
+delta. Insert and subtree replacement additionally reconstruct the exact
+identity-free result by removing only kernel-form identity attributes, then
+require those bytes to equal `operation.html`; fresh-looking IDs alone are not
+allocation authority.
 Exact SourcePatch replay proves only the byte/Hash/CAS/recovery chain; patch
 `kind` cannot authorize identity changes. Undo or redo creates another normal
 complete-HTML save; its inverse is session-local exact restore evidence, not an

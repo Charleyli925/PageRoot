@@ -315,3 +315,50 @@ test("setText additions require exact kernel-created identity evidence", () => {
     );
   }
 });
+
+test("insert and replace identity allocations are bound to exact operation HTML", () => {
+  const inserting = createInsertElementOperation(html, {
+    baseRevision: 0,
+    operationId: "sourceop_insert_payload_binding_012",
+    parentElementId: ids.left,
+    beforeElementId: ids.second,
+    html: "<article><em>inserted</em></article>",
+  });
+  const inserted = applySemanticOperation(
+    createSemanticDocumentState(html),
+    inserting,
+    {
+      randomUUID: uuidFactory(
+        "70000000-0000-4000-8000-000000000001",
+        "70000000-0000-4000-8000-000000000002",
+      ),
+    },
+  );
+  const replacing = operation("replaceSubtree", {
+    target: target(ids.first),
+    html: "<article><em>replacement</em></article>",
+  }, "sourceop_replace_payload_binding_013");
+  const replaced = applySemanticOperation(
+    createSemanticDocumentState(html),
+    replacing,
+    { randomUUID: uuidFactory("80000000-0000-4000-8000-000000000001") },
+  );
+  for (const [result, validOperation, forgedHtml] of [
+    [inserted, inserting, "<aside>unrelated insert</aside>"],
+    [replaced, replacing, "<section>unrelated replacement</section>"],
+  ]) {
+    const evidence = saveEvidence(html, result, {
+      ...validOperation,
+      html: forgedHtml,
+    });
+    assert.throws(
+      () => materializeIdentityPreservingSave(html, result.html, {
+        sourceHistoryOperations: [evidence],
+      }),
+      (error) => (
+        error?.code === "SOURCE_ELEMENT_IDENTITY_LOST"
+        && error?.details?.semanticIdentityError === "SEMANTIC_IDENTITY_MATERIALIZATION_MISMATCH"
+      ),
+    );
+  }
+});

@@ -44,6 +44,11 @@ state. Cloning authored markup also cannot retain the original persistent IDs.
   schema/envelope and type-specific fields; a legacy patch
   `kind` cannot authorize ID-set or topology changes. Successful save reseals
   the new tag/parent/order binding for later external-conflict detection.
+- For insert and `replaceSubtree`, Repository also removes only the exact
+  kernel-form identity attributes from the saved result and requires the
+  resulting identity-free subtree bytes to equal `operation.html`. A caller
+  cannot pair unrelated payload HTML with fresh-looking IDs and a recomputed
+  delta.
 - The operation rules are closed: insert/duplicate add only fresh subtree IDs;
   delete removes only the addressed subtree; move retains every subtree ID;
   `replaceSubtree` retains its root ID while replacing descendants; `setText`
