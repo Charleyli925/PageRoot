@@ -351,6 +351,10 @@
         "to": "bridge/project-file-repository/version-candidate.mjs"
       },
       {
+        "from": "bridge/project-file-repository/candidate-identity.mjs",
+        "to": "bridge/project-file-repository/candidate-identity.mjs"
+      },
+      {
         "from": "bridge/project-file-repository/working-copy.mjs",
         "to": "bridge/project-file-repository/working-copy.mjs"
       },

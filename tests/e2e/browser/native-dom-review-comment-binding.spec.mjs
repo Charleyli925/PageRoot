@@ -237,6 +237,37 @@ test("path-only review comments fail closed when a same-tag parser decoy shifts 
   ))).toBe(false);
 });
 
+test("a pre-author Stable ID binding survives a same-tag parser decoy", {
+  tag: ["@gate-smoke","@smoke-review"],
+}, async ({ page }) => {
+  const stableId = "pr1_11111111111141118111111111111111";
+  const binding = {
+    sourceNodeId: "element:1:1:div",
+    path: [1, 0, 0],
+    tagName: "DIV",
+    sourceBoxSignature: COMMENT_SOURCE_BOX_SIGNATURE,
+    identityAttributes: [["data-pageroot-id", stableId]],
+    identityText: "",
+  };
+  const result = await parsedReviewCommentLayouts(page, {
+    binding,
+    authoredScript: `
+      const main = document.querySelector("main");
+      const decoy = document.createElement("div");
+      decoy.className = "comment-host";
+      main.append(decoy);
+      const actualTarget = document.createElement("div");
+      actualTarget.className = "comment-host";
+      actualTarget.setAttribute("data-pageroot-id", ${JSON.stringify(stableId)});
+      main.append(actualTarget);
+    `,
+  });
+  expect(result.channel).toBe(true);
+  expect(result.layouts.some((message) => (
+    message.commentLayouts?.some((layout) => layout.key === "parsed-comment")
+  ))).toBe(true);
+});
+
 test("path-only review comments keep a bound target when a later same-tag node is unrelated", {
   tag: ["@gate-smoke","@smoke-review"],
 }, async ({ page }) => {

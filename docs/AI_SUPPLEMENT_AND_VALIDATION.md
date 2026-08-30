@@ -30,6 +30,7 @@ stop 事件同样不是 Candidate 完成证据；仍以官方 completion 与 Rep
 - 项目、文档、Request、Attempt、Version 身份；
 - 冻结输入、输出、completion、manifest、commit marker 的 Hash；
 - 完整 HTML、受管路径、普通文件与无路径逃逸；
+- 冻结源码元素 ID 的唯一性与连续性：拒绝重复、伪造和可疑丢失；同一有效 ID 跨 tag、parent 和 order 变化仍是同一元素；
 - supplement 封存、引用、附件与 Hash；
 - 管理元信息；
 - 事务、工作副本与版本完整性。
@@ -39,6 +40,12 @@ stop 事件同样不是 Candidate 完成证据；仍以官方 completion 与 Rep
 handler、可执行 URL 和 refresh 指令都属于候选内容，不参与检测、分级或用户提示。
 连续性证据来自可见文字、稳定 id/data 属性、class、资源引用和 title，属于
 粗粒度启发式，不宣称逐节点证明。
+
+Stable ID 硬校验先于这个连续性分级。AI 必须保留仍存在元素的
+`data-pageroot-id`；移动保留 ID，真正新增的元素不填 ID，由
+PageRoot 验证后分配。不能确定是删除还是丢失时拒绝 Candidate，不做
+启发式重绑。通过后同时封存 AI 原始输出 Hash、系统补 ID 后的完整
+Candidate Hash 和 identity report；Review、Promotion 和新 Version 只读后者。
 
 评论 TargetRef 和有效 supplement 继续指导 AI、审阅与历史解释，但不再授权或禁止某个
 DOM 子树之外的普通正文、属性、结构或样式变化。这样可以避免 AI 把 `<p>` 改为 `<div>`、

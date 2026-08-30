@@ -1,6 +1,9 @@
 import { expect, test } from "@playwright/test";
 import {
-  materializeSourceElementIdentity,
+  preserveCandidateSourceIdsForFixture,
+} from "../../helpers/preserve-candidate-source-ids.mjs";
+import {
+  inspectSourceElementIdentity,
 } from "../../../bridge/project-file-repository/working-copy.mjs";
 import {
   LINE_SCOPE_AFTER,
@@ -347,7 +350,7 @@ ${REVIEW_MASK_UNION_BEFORE}
         ["丁旧", "丁新"], ["戊旧", "戊新"], ["己旧", "己新"],
         ["庚旧", "庚新"], ["辛旧", "辛新"], ["壬旧", "壬新"],
       ]) candidate = candidate.replace(beforeText, afterText);
-      return materializeSourceElementIdentity(candidate).html;
+      return preserveCandidateSourceIdsForFixture(base, candidate);
     });
     runOfficialFinalizer(request.requestRoot, request.changeRequest);
 
@@ -356,6 +359,23 @@ ${REVIEW_MASK_UNION_BEFORE}
     await expect(readyDecision).toBeVisible({ timeout: 30_000 });
     await expect(readyDecision).toContainText("等待你的决定");
     await expect(runProgress).toHaveCount(0);
+    const candidateRecord = JSON.parse(readFileSync(
+      path.join(request.requestRoot, "candidate.json"),
+      "utf8",
+    ));
+    const normalizedCandidateHtml = readFileSync(
+      path.join(request.requestRoot, "candidate.html"),
+      "utf8",
+    );
+    expect(candidateRecord.identityReport.status).toBe("verified");
+    expect(candidateRecord.identityReport.retainedElementCount).toBeGreaterThan(0);
+    expect(candidateRecord.identityReport.deletedElementCount).toBeGreaterThan(0);
+    expect(candidateRecord.identityReport.assignedElementCount).toBeGreaterThan(0);
+    expect(candidateRecord.submittedOutputSha256)
+      .toBe(candidateRecord.identityReport.submittedOutputSha256);
+    expect(candidateRecord.outputSha256).toBe(candidateRecord.identityReport.outputSha256);
+    expect(candidateRecord.outputSha256).not.toBe(candidateRecord.submittedOutputSha256);
+    expect(inspectSourceElementIdentity(normalizedCandidateHtml).complete).toBe(true);
     const pending = await launched.page.evaluate(
       () => window.htmlAIProjects?.getActiveProject(),
     );
@@ -709,24 +729,26 @@ ${REVIEW_MASK_UNION_BEFORE}
           // bare summary.
           return text.length >= 2 && text.length <= 40;
         };
-        // One change region carries at most one caption: the region caption
-        // sits on the change's topmost box and an aggregated neighbour carries
-        // none. The invariant that guards real bugs is "never more than one
-        // label per box, and never more than one per text group".
+        // One spatial change region carries at most one caption: the caption
+        // sits on that region's topmost box and an aggregated neighbour carries
+        // none. One semantic text group may legitimately span distant spatial
+        // regions, so each distant carrier may keep its own caption.
         const hasAnyLabel = boxes.some((box) => (
           box.querySelector("[data-pageroot-review-overlay-label]")
         ));
-        return hasAnyLabel && standaloneBoxes.every((box) => {
+        const valid = standaloneBoxes.every((box) => {
           const labels = box.querySelectorAll("[data-pageroot-review-overlay-label]");
           return labels.length <= 1 && (labels.length === 0 || validLabel(labels[0]));
-        }) && [...textGroups.values()].every((group) => {
-          const labels = group.flatMap((box) => (
-            [...box.querySelectorAll("[data-pageroot-review-overlay-label]")]
-          ));
+        }) && [...textGroups.values()].every((group) => group.every((box) => {
+          const labels = box.querySelectorAll("[data-pageroot-review-overlay-label]");
           return labels.length <= 1 && (labels.length === 0 || validLabel(labels[0]));
-        });
+        }));
+        return { hasAnyLabel, valid };
       })),
-    ).then((states) => states.every(Boolean))).toBe(true);
+    ).then((states) => (
+      states.every((state) => state.valid)
+      && states.some((state) => state.hasAnyLabel)
+    ))).toBe(true);
     const nestedOverlayPairs = await afterReviewFrame.locator(
       "[data-pageroot-review-overlay-box]",
     ).evaluateAll((boxes) => boxes.flatMap((outer, outerIndex) => {
@@ -1677,12 +1699,26 @@ ${REVIEW_MASK_UNION_BEFORE}
     await expect(afterReviewFrame.locator(
       '[data-review-metrics] [data-pageroot-review-structure]',
     )).toHaveCount(0);
-    await expect(beforeReviewFrame.locator(
-      '[data-review-mixed-copy] [data-pageroot-review-structure], [data-review-break-layout] [data-pageroot-review-structure], [data-review-ebita-copy] [data-pageroot-review-structure]',
-    )).toHaveCount(0);
-    await expect(afterReviewFrame.locator(
-      '[data-review-mixed-copy] [data-pageroot-review-structure], [data-review-break-layout] [data-pageroot-review-structure], [data-review-ebita-copy] [data-pageroot-review-structure]',
-    )).toHaveCount(0);
+    const sourceRewriteSelector = [
+      "[data-review-mixed-copy] [data-pageroot-review-structure]",
+      "[data-review-break-layout] [data-pageroot-review-structure]",
+      "[data-review-ebita-copy] [data-pageroot-review-structure]",
+    ].join(", ");
+    const structureChanges = async (frame) => frame.locator(sourceRewriteSelector)
+      .evaluateAll((elements) => elements.flatMap((element) => {
+        const facts = JSON.parse(
+          element.getAttribute("data-pageroot-review-projection-facts") || "[]",
+        );
+        return facts.filter((fact) => fact.type === "structure")
+          .map((fact) => fact.structureChange);
+      }));
+    const beforeSourceRewriteChanges = await structureChanges(beforeReviewFrame);
+    expect(beforeSourceRewriteChanges.length).toBeGreaterThan(0);
+    expect(beforeSourceRewriteChanges.every((change) => (
+      change === "removed" || change === "moved"
+    ))).toBe(true);
+    const afterSourceRewriteChanges = await structureChanges(afterReviewFrame);
+    expect(afterSourceRewriteChanges.every((change) => change === "moved")).toBe(true);
     for (const frame of [beforeReviewFrame, afterReviewFrame]) {
       await expect(frame.locator("[data-pageroot-review-style]")).toHaveCount(0);
       await expect(frame.locator("[data-review-layout-only]"))
@@ -2609,8 +2645,6 @@ test("stable-ID review reports movement, source attributes, styles, and author s
       const card = base.match(/<article data-stable-review-card[\s\S]*?<\/article>/u)?.[0];
       const staticCard = base.match(/<article data-stable-review-static[\s\S]*?<\/article>/u)?.[0];
       const unchangedMove = base.match(/<article data-stable-review-unchanged-move[\s\S]*?<\/article>/u)?.[0];
-      const idDeleted = base.match(/<article data-stable-review-id-deleted[\s\S]*?<\/article>/u)?.[0];
-      const idReplaced = base.match(/<article data-stable-review-id-replaced[\s\S]*?<\/article>/u)?.[0];
       const compositeMove = base.match(/<article data-stable-review-composite-move[\s\S]*?<\/article>/u)?.[0];
       const orderA = base.match(/<p data-stable-review-order="a"[^>]*>稳定顺序甲<\/p>/u)?.[0];
       const orderB = base.match(/<p data-stable-review-order="b"[^>]*>稳定顺序乙<\/p>/u)?.[0];
@@ -2619,8 +2653,6 @@ test("stable-ID review reports movement, source attributes, styles, and author s
       expect(card).toBeTruthy();
       expect(staticCard).toBeTruthy();
       expect(unchangedMove).toBeTruthy();
-      expect(idDeleted).toBeTruthy();
-      expect(idReplaced).toBeTruthy();
       expect(compositeMove).toBeTruthy();
       expect(orderA).toBeTruthy();
       expect(orderB).toBeTruthy();
@@ -2634,14 +2666,6 @@ test("stable-ID review reports movement, source attributes, styles, and author s
         .replace('data-review-static="before"', 'data-review-static="after"')
         .replace('style="margin: 4px"', 'style="margin: 14px; color: rgb(90 40 150)"')
         .replace("原位修改前文字", "原位修改后文字");
-      const deletedIdentityCard = idDeleted.replace(
-        / data-pageroot-id="pr1_[a-f0-9]{32}"/u,
-        "",
-      );
-      const replacedIdentityCard = idReplaced.replace(
-        /data-pageroot-id="pr1_[a-f0-9]{32}"/u,
-        'data-pageroot-id="pr1_99999999999949998999999999999999"',
-      );
       const changedCompositeMove = compositeMove
         .replace("待转移文字", "稳定甲")
         .replace("稳定乙", "待转移文字")
@@ -2661,8 +2685,6 @@ test("stable-ID review reports movement, source attributes, styles, and author s
           '<script type="application/json" data-stable-review-added-script>{"added":true}</script></body>',
         )
         .replace(card, "")
-        .replace(idDeleted, deletedIdentityCard)
-        .replace(idReplaced, replacedIdentityCard)
         .replace(compositeMove, "")
         .replace(staticCard, changedStaticCard)
         .replace(unchangedMove, "")
@@ -2711,29 +2733,6 @@ test("stable-ID review reports movement, source attributes, styles, and author s
       ));
       expect(falsePresenceFacts).toEqual([]);
     }
-    for (const [selector, expectedBeforeId, expectedAfterId] of [
-      ["[data-stable-review-id-deleted]", /pr1_[a-f0-9]{32}/u, null],
-      [
-        "[data-stable-review-id-replaced]",
-        /pr1_[a-f0-9]{32}/u,
-        "pr1_99999999999949998999999999999999",
-      ],
-    ]) {
-      const beforeElement = beforeFrame.locator(selector);
-      const afterElement = afterFrame.locator(selector);
-      await expect.poll(() => structureKinds(beforeElement)).toEqual(
-        expect.arrayContaining(["removed"]),
-      );
-      await expect.poll(() => structureKinds(afterElement)).toEqual(
-        expect.arrayContaining(["added"]),
-      );
-      await expect(beforeElement).toHaveAttribute("data-pageroot-id", expectedBeforeId);
-      if (expectedAfterId === null) {
-        await expect(afterElement).not.toHaveAttribute("data-pageroot-id", /.+/u);
-      } else {
-        await expect(afterElement).toHaveAttribute("data-pageroot-id", expectedAfterId);
-      }
-    }
     for (const frame of [beforeFrame, afterFrame]) {
       const compositeMove = frame.locator("[data-stable-review-composite-move]");
       await expect.poll(() => structureKinds(compositeMove)).toEqual(
@@ -2763,10 +2762,12 @@ test("stable-ID review reports movement, source attributes, styles, and author s
     await expect.poll(() => structureKinds(beforeFrame.locator(
       "[data-stable-review-removed-module]",
     ))).toEqual(expect.arrayContaining(["removed"]));
-    await expect(afterFrame.locator("[data-stable-review-added-css]"))
-      .not.toHaveAttribute("data-pageroot-id", /.+/u);
-    await expect(afterFrame.locator("[data-stable-review-added-script]"))
-      .not.toHaveAttribute("data-pageroot-id", /.+/u);
+    const addedCss = afterFrame.locator("[data-stable-review-added-css]");
+    const addedScript = afterFrame.locator("[data-stable-review-added-script]");
+    await expect(addedCss).toHaveAttribute("data-pageroot-id", /^pr1_[a-f0-9]{32}$/u);
+    await expect(addedScript).toHaveAttribute("data-pageroot-id", /^pr1_[a-f0-9]{32}$/u);
+    expect(await addedCss.getAttribute("data-pageroot-id"))
+      .not.toBe(await addedScript.getAttribute("data-pageroot-id"));
     await expect(beforeFrame.locator(
       '[data-stable-review-card] [data-pageroot-review-text="removed"], [data-stable-review-card][data-pageroot-review-text="removed"]',
     ).first()).toBeAttached();

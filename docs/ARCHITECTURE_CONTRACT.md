@@ -764,6 +764,28 @@ may reconcile only when that binding Hash survives; a changed or missing binding
 requires explicit force-unlock before a new controlled migration. Invalid
 identities, an unresolved save state or third-party bytes fail closed; no
 historical Version, Request, Candidate or Runtime DOM is serialized.
+
+The Repository is also the sole AI Candidate source-identity validator. The AI
+continues to submit one complete HTML document; comments and text ranges provide
+context but never restrict that document to one target subtree. The frozen
+identity-complete HTML is the only comparison base. Retained elements must keep
+their unique IDs even when tag, parent, order or content changes; those facts
+are Review evidence, not a second element identity. Duplicate, malformed or
+invented IDs fail closed. When exact source or stable retained
+neighbours show that an existing element merely lost its ID, validation also
+fails closed instead of guessing. An equal-cardinality repeated exact-source or
+stable retained-neighbour group fails closed when it proves identity stripping
+even if individual members remain ambiguous. Only after those checks may
+identity-free elements be classified as new and receive Repository-allocated IDs.
+
+The Repository seals the submitted-output Hash separately from the normalized
+complete Candidate Hash and persists one identity report containing retained,
+deleted, added and assigned counts plus both binding hashes. Review and explicit
+Promotion consume that normalized Candidate; it cannot overwrite the current
+Working Copy before adoption. Existing schema-v4 Candidate records without the
+optional report remain read-only compatible and are never rewritten. Runtime
+DOM, generated nodes, computed style and pixels are not Candidate identity or
+persistence evidence. See ADR 0067.
 Every structural Canvas edit now enters the semantic boundary. New fragments
 must be identity-free and receive kernel-owned IDs; duplicate cannot inherit an
 existing ID, move preserves IDs, delete retires the exact target subtree, and

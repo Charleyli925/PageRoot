@@ -1139,7 +1139,7 @@ function projectFilePromptForRequest(target, request, body) {
     ...String(request.outputRelativePath || "").split("/"),
   );
   const summary = String(body.summary || "根据本轮评论和要求生成新的完整 HTML。").trim();
-  return `# PageRoot AI Candidate\n\n## 任务\n\n${summary}\n\n## 冻结输入\n\n严格按 \`${inputManifestPath}\` 的 \`readOrder\` 读取。该清单包含：\n\n- 本轮要求：\`${changeRequestPath}\`\n- 项目长期规则：\`${projectRulesPath}\`\n- 冻结 HTML：\`${inputPath}\`\n- 冻结评论、目标与编辑记录：\`${annotationsPath}\`\n\n这些文件及可见 Working Copy、任何 Version、PROJECT.md 都是只读的。只将一个完整 HTML 写入：\`${outputPath}\`。\n\nPageRoot 会校验输出的完整文档和页面连续性；校验通过后它仍只是待审阅 Candidate。只有用户明确采纳后才会成为正式 Version。\n\n## 完成\n\n输出写完后，执行唯一最终化命令：\n\n\`\`\`sh\n${projectFileFinalizerCommand(target, request)}\n\`\`\`\n`;
+  return `# PageRoot AI Candidate\n\n## 任务\n\n${summary}\n\n## 冻结输入\n\n严格按 \`${inputManifestPath}\` 的 \`readOrder\` 读取。该清单包含：\n\n- 本轮要求：\`${changeRequestPath}\`\n- 项目长期规则：\`${projectRulesPath}\`\n- 冻结 HTML：\`${inputPath}\`\n- 冻结评论、目标与编辑记录：\`${annotationsPath}\`\n\n这些文件及可见 Working Copy、任何 Version、PROJECT.md 都是只读的。只将一个完整 HTML 写入：\`${outputPath}\`。\n\nPageRoot 会校验输出的完整文档、页面连续性和源码元素身份。输出时：\n\n- 仍然存在的源码元素必须保留原有 \`data-pageroot-id\`；元素移动或改 tag 时 ID 仍随同一元素。\n- 不得伪造或复制 ID；删除元素后，不要把其旧 ID 填给真正新增的元素。\n- 真正新增的元素不要自行填写 \`data-pageroot-id\`，PageRoot 会在校验后统一分配。\n\nStable ID 是唯一元素身份；tag、parent 和 order 的变化会进入 Review，不作为第二身份。重复、伪造或具有确定性证据的可疑 ID 丢失会被拒绝，不会启发式修复。校验通过后它仍只是待审阅 Candidate。只有用户明确采纳后才会成为正式 Version。\n\n## 完成\n\n输出写完后，执行唯一最终化命令：\n\n\`\`\`sh\n${projectFileFinalizerCommand(target, request)}\n\`\`\`\n`;
 }
 
 function projectFileReadyPayload({ request, candidate, target }) {

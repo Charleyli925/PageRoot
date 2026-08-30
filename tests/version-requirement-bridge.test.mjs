@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { writeFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 
@@ -50,13 +50,14 @@ async function adoptSecondVersion(bridge, ensured, summary) {
     changeEvents: [],
   });
   assert.equal(request.response.status, 201, JSON.stringify(request.body));
+  const currentHtml = await readFile(ensured.body.sourcePath, "utf8");
   await writeFile(
     join(
       ensured.body.projectRoot,
       ".pageroot",
       ...request.body.outputRelativePath.split("/"),
     ),
-    html("Candidate V2"),
+    currentHtml.replaceAll("V1", "Candidate V2"),
     "utf8",
   );
   const finalized = await finalizeProjectFileAttempt({

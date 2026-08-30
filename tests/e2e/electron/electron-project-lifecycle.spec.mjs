@@ -44,6 +44,17 @@ import {
   writeFileSync,
 } from "./electron-native-harness.mjs";
 
+function identityPreservingCandidateHtml(target, title) {
+  const current = readFileSync(target.exactSourcePath, "utf8");
+  const candidate = current.replace(
+    /(<title\b[^>]*>)[\s\S]*?(<\/title>)/iu,
+    (_match, opening, closing) => `${opening}${title}${closing}`,
+  );
+  return candidate === current
+    ? current.replace(/<\/html\s*>/iu, `<!-- ${title} --></html>`)
+    : candidate;
+}
+
 test("Electron first launch imports the welcome HTML as V1 and sends its comment to Qoder", {
   tag: ["@gate-smoke","@smoke-project-lifecycle","@smoke-agent"],
 }, async () => {
@@ -185,7 +196,7 @@ test("Electron retries a managed Working Copy activation after the first respons
       target: workspace.target,
       requestId: "req_e2e_managed_activation_retry",
       candidateId: "candidate_e2e_managed_activation_retry_0001",
-      html: "<!doctype html><html><head><title>V2 retry</title></head><body><p>V2 retry</p></body></html>",
+      html: identityPreservingCandidateHtml(workspace.target, "V2 retry"),
       expectedSourceSha256: workspace.sourceSha256,
     });
     const promoted = await repository.promoteCandidate({
@@ -271,7 +282,7 @@ test("Electron Finder reveals verified project, visible Version Working Copy and
         target: active,
         requestId: `req_e2e_finder_${ordinal}`,
         candidateId: `candidate_e2e_finder_${ordinal}_0001`,
-        html: `<!doctype html><html><head><title>Finder V${ordinal}</title></head><body><p>Finder V${ordinal}</p></body></html>`,
+        html: identityPreservingCandidateHtml(active, `Finder V${ordinal}`),
         expectedSourceSha256: active.sourceSha256,
       });
       active = (await repository.promoteCandidate({
@@ -345,7 +356,10 @@ test("Electron Finder reveals verified project, visible Version Working Copy and
     expect(readFileSync(path.join(processingTask.aiTaskPath, "PROMPT.md"), "utf8"))
       .toBe("# E2E AI task\n\n只生成候选 HTML。\n");
 
-    const candidateHtml = "<!doctype html><html><head><title>Finder V7</title></head><body><p>Finder V7 Candidate</p></body></html>";
+    const candidateHtml = identityPreservingCandidateHtml(
+      continued.target,
+      "Finder V7 Candidate",
+    );
     const completed = await repository.completeRequest({
       target: continued.target,
       requestId,
@@ -524,7 +538,7 @@ test("Electron v4 registry only recovers Finder rename and protects moved copies
       target: workspace.target,
       requestId: "req_e2e_registered_root",
       candidateId: "candidate_e2e_registered_root_0001",
-      html: "<!doctype html><html><head><title>Finder candidate</title></head><body><p>Candidate retained for explicit adoption.</p></body></html>",
+      html: identityPreservingCandidateHtml(workspace.target, "Finder candidate"),
       expectedSourceSha256: workspace.sourceSha256,
     });
     const userFile = path.join(finderRenamedRoot, "Finder-B-V2.html");

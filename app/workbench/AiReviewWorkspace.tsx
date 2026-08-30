@@ -66,6 +66,7 @@ type ReviewDesktopSession = { sessionId: string; url: string };
 type ReviewDesktopSessions = Record<ReviewSide, ReviewDesktopSession>;
 type ReviewDesktopSessionResult = {
   documents: ReviewDocuments;
+  reloadRevision: number;
   sessions: ReviewDesktopSessions | null;
   failed: boolean;
 };
@@ -342,6 +343,7 @@ function ReviewDocumentPane({
           <iframe
             ref={assignFrame}
             key={`${side}-${reloadRevision}-${independentTransport ? frameUrl || "pending" : "srcdoc"}`}
+            data-reload-revision={reloadRevision}
             {...(independentTransport
               ? { src: frameUrl || "about:blank" }
               : { srcDoc: html })}
@@ -502,16 +504,21 @@ export default function AiReviewWorkspace({
     after: null,
   });
   const reviewCommentPortRef = useRef<MessagePort | null>(null);
-  const reviewCommentChannelChallengeRef = useRef<string | null>(null);
+  const reviewCommentChannelChallengeRef = useRef<{
+    challenge: string;
+    frame: HTMLIFrameElement;
+  } | null>(null);
   const reviewStateRef = useRef({ filter, focus, transparency, pagePresentationPath });
   const scrollModeRef = useRef(scrollMode);
   useLayoutEffect(() => {
     reviewStateRef.current = { filter, focus, transparency, pagePresentationPath };
   }, [filter, focus, pagePresentationPath, transparency]);
   const desktopSessions = desktopSessionResult?.documents === documents
+    && desktopSessionResult.reloadRevision === reloadRevision
     ? desktopSessionResult.sessions
     : null;
   const reviewLoadFailed = desktopSessionResult?.documents === documents
+    && desktopSessionResult.reloadRevision === reloadRevision
     ? desktopSessionResult.failed
     : false;
   const reviewCommentLayouts = commentLayoutState.documents === documents
@@ -703,20 +710,26 @@ export default function AiReviewWorkspace({
     side: ReviewSide,
     frame: HTMLIFrameElement,
   ) => {
+    const pendingChallenge = reviewCommentChannelChallengeRef.current;
     if (
       side !== "before"
       || !documents.commentTargets.length
       || reviewCommentPortRef.current
-      || reviewCommentChannelChallengeRef.current
+      || pendingChallenge?.frame === frame
+      || frame.dataset.reloadRevision !== String(reloadRevision)
     ) return;
+    // A keyed Review reload may let the retiring iframe report ready just
+    // before React registers its replacement. Do not let that old frame's
+    // unanswered capability challenge exhaust the new generation.
+    reviewCommentChannelChallengeRef.current = null;
     const challenge = createReviewCapabilityChallenge();
     if (!challenge) return;
-    reviewCommentChannelChallengeRef.current = challenge;
+    reviewCommentChannelChallengeRef.current = { challenge, frame };
     postToFrame(frame, sessionId, {
       type: "request-review-comment-channel",
       challenge,
     });
-  }, [documents.commentTargets, sessionId]);
+  }, [documents.commentTargets, reloadRevision, sessionId]);
 
   useLayoutEffect(() => {
     reviewFrameReadyRef.current = {
@@ -855,6 +868,7 @@ export default function AiReviewWorkspace({
       if (cancelled) return;
       setDesktopSessionResult({
         documents,
+        reloadRevision,
         sessions: { before: beforeSession, after: afterSession },
         failed: false,
       });
@@ -863,14 +877,19 @@ export default function AiReviewWorkspace({
       // release it now instead of holding it until the next teardown.
       releaseLiveSessions();
       if (!cancelled) {
-        setDesktopSessionResult({ documents, sessions: null, failed: true });
+        setDesktopSessionResult({
+          documents,
+          reloadRevision,
+          sessions: null,
+          failed: true,
+        });
       }
     });
     return () => {
       cancelled = true;
       releaseLiveSessions();
     };
-  }, [documents, independentTransport, sourcePath]);
+  }, [documents, independentTransport, reloadRevision, sourcePath]);
 
   useEffect(() => {
     sendState();
@@ -944,6 +963,8 @@ export default function AiReviewWorkspace({
         || message.sessionId !== sessionId
         || (message.side !== "before" && message.side !== "after")
         || event.source !== framesRef.current[message.side]?.contentWindow
+        || framesRef.current[message.side]?.dataset.reloadRevision
+          !== String(reloadRevision)
       ) return;
       if (message.type === "review-comment-channel") {
         const port = event.ports.length === 1 ? event.ports[0] : null;
@@ -952,7 +973,8 @@ export default function AiReviewWorkspace({
           message.side !== "before"
           || !port
           || typeof message.challenge !== "string"
-          || message.challenge !== expectedChallenge
+          || message.challenge !== expectedChallenge?.challenge
+          || framesRef.current.before !== expectedChallenge.frame
           || reviewCommentPortRef.current
         ) {
           port?.close();
@@ -1041,10 +1063,11 @@ export default function AiReviewWorkspace({
       if (message.type === "comment-layout") {
         if (message.side !== "before") return;
         const allowedKeys = new Set(documents.commentGroups.map((group) => group.key));
+        const layouts = safeReviewCommentLayouts(message.commentLayouts, allowedKeys);
         setCommentLayoutState({
           documents,
           reloadRevision,
-          layouts: safeReviewCommentLayouts(message.commentLayouts, allowedKeys),
+          layouts,
         });
         return;
       }
@@ -1119,11 +1142,12 @@ export default function AiReviewWorkspace({
 
   const registerFrame = useCallback((side: ReviewSide, frame: HTMLIFrameElement | null) => {
     if (framesRef.current[side] !== frame) {
+      if (side === "before") closeReviewCommentChannel();
       reviewFrameReadyRef.current[side] = null;
       setFramesReadyFor(null);
     }
     framesRef.current[side] = frame;
-  }, []);
+  }, [closeReviewCommentChannel]);
 
   const registerViewport = useCallback((side: ReviewSide, viewport: HTMLDivElement | null) => {
     viewportsRef.current[side] = viewport;

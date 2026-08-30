@@ -523,6 +523,7 @@ const ERROR_COPY_BY_CODE = new Map([
   ["PROTOCOL_FIELD_MISSING", "返回结果缺少必要字段，当前页面没有被覆盖。"],
   ["CANDIDATE_UNUSABLE", "返回的 HTML 无法作为完整页面使用，当前页面没有被覆盖。"],
   ["CANDIDATE_HASH_MISMATCH", "返回内容与校验记录不一致，当前页面没有被覆盖。"],
+  ["CANDIDATE_IDENTITY_INVALID", "返回的 HTML 没有保留可信的源码元素身份，当前页面没有被覆盖。"],
 ]);
 
 const ERROR_CODE_ALIAS = new Map([
@@ -535,7 +536,9 @@ const ERROR_CODE_ALIAS = new Map([
 function localizedRunError(rawError, completionObserved) {
   const error = isRecord(rawError) ? rawError : {};
   const rawCode = isRecord(rawError) ? String(error.code || error.errorCode || "") : "";
-  const code = ERROR_CODE_ALIAS.get(rawCode) || rawCode;
+  const code = rawCode.startsWith("CANDIDATE_SOURCE_IDENTITY_")
+    ? "CANDIDATE_IDENTITY_INVALID"
+    : ERROR_CODE_ALIAS.get(rawCode) || rawCode;
   const rawMessage = isRecord(rawError)
     ? String(error.message || "")
     : String(rawError || "");

@@ -1,6 +1,6 @@
 # Architecture Decision Records
 
-<!-- adr-history-max: 0066 -->
+<!-- adr-history-max: 0067 -->
 <!-- adr-history-gaps: 0020 -->
 
 This is the default reading path for decisions that still constrain PageRoot.
@@ -60,6 +60,7 @@ reused. The four collisions found in the first curation pass were assigned
 | 0064 | [Source structure edits use stable IDs and semantic operations](0064-stable-id-source-structure-editing.md) | Living |
 | 0065 | [Edit runs supported author scripts in a disposable source-bound page](0065-disposable-edit-runtime.md) | Living |
 | 0066 | [Review pairs persistent IDs and reports source changes](0066-stable-id-source-review.md) | Living |
+| 0067 | [AI Candidate identity is validated before PageRoot assigns new IDs](0067-ai-candidate-source-identity.md) | Living |
 
 ## Reading guide
 
