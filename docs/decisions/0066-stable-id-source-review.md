@@ -19,6 +19,9 @@ visual inference.
   uses Runtime DOM, screenshots, computed style, layout or rendered pixels as
   formal evidence.
 - A valid, unique `data-pageroot-id` is the strongest element pairing key.
+  It is the sole persistent element identity; authored tag, parent and source
+  order are Review change facts and semantic stale evidence, never alternate
+  identity keys.
   The same ID remains paired after same-parent reorder or cross-parent move.
   Duplicate or invalid IDs cannot establish exact identity. Any element that
   carries `data-pageroot-id` claims persistent identity. If it does not pair by

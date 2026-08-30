@@ -5,8 +5,18 @@ import {
 } from "./source-index.js";
 import { decodeHTML } from "entities";
 import {
+  canonicalSourceStyleDeclaration,
+} from "../../shared/source-style-value.mjs";
+import {
+  planSemanticPlainTextPatch,
+} from "../../shared/editable-island.mjs";
+import {
+  planSemanticStructurePatches,
+} from "../../shared/semantic-structure-plan.mjs";
+import {
   editableIslandForTarget,
   isEditableIslandTarget,
+  materializeEditableIslandHtml,
   normalizeEditableIslandHtml,
   normalizeEditableTextFragmentHtml,
 } from "./editable-island.js";
@@ -24,6 +34,7 @@ import {
 } from "./target-resolver.js";
 
 const TEXT_RANGE_ID_REPLAY_TOKEN = Symbol("text-range-id-replay");
+const EDITABLE_ISLAND_ID_REPLAY_TOKEN = Symbol("editable-island-id-replay");
 
 const RAW_TEXT_ELEMENTS = new Set([
   "script",
@@ -331,6 +342,42 @@ function semanticInsertion(index, command) {
   };
 }
 
+function semanticStructurePlanElements(index) {
+  return index.elements.map((element) => ({
+    elementId: element.pagerootId,
+    tagName: element.tagName,
+    parentElementId: element.parentId
+      ? index.byNodeId.get(element.parentId)?.pagerootId ?? null
+      : null,
+    startOffset: element.range.startOffset,
+    endOffset: element.range.endOffset,
+    contentStartOffset: element.contentRange.startOffset,
+    contentEndOffset: element.contentRange.endOffset,
+    explicitEndTag: element.explicitEndTag,
+    isVoid: element.isVoid,
+    selfClosing: element.startTagRange.endOffset === element.range.endOffset
+      && /\/\s*>$/u.test(element.startTagRaw),
+    boundarySafe: element.boundarySafe,
+  }));
+}
+
+function sharedSemanticStructurePatches(index, operation, fragmentHtml = null) {
+  try {
+    return planSemanticStructurePatches({
+      source: index.source,
+      elements: semanticStructurePlanElements(index),
+      operation,
+      fragmentHtml,
+    }).patches;
+  } catch (cause) {
+    fail(
+      cause?.code || "SEMANTIC_STRUCTURE_PLAN_INVALID",
+      cause instanceof Error ? cause.message : "Semantic structure planning failed.",
+      cause?.details || {},
+    );
+  }
+}
+
 function semanticFragmentIndex(fragmentHtml, existingIndex, allowedExistingIds = new Set()) {
   const fragment = String(fragmentHtml ?? "");
   const fragmentIndex = buildSourceIndex(fragment);
@@ -383,16 +430,14 @@ export function planSemanticOperationPatch(indexOrHtml, command) {
   let targetRefs = targetRef ? [targetRef] : [];
 
   if (semanticType === "setText") {
-    if (!target || target.isVoid || RAW_TEXT_ELEMENTS.has(target.tagName)) {
-      fail("SEMANTIC_TEXT_TARGET_UNSUPPORTED", "setText requires a non-void authored text container.");
-    }
-    patches = [sourcePatch(
-      target.contentRange.startOffset,
-      target.contentRange.endOffset,
-      index.source.slice(target.contentRange.startOffset, target.contentRange.endOffset),
-      escapeHtmlText(command.text ?? ""),
-      { kind: "semantic:set-text" },
-    )];
+    if (!target) fail("TARGET_REQUIRED", "setText requires an authored target.");
+    patches = [planSemanticPlainTextPatch(index.source, {
+      tagName: target.tagName,
+      isVoid: target.isVoid,
+      contentStartOffset: target.contentRange.startOffset,
+      contentEndOffset: target.contentRange.endOffset,
+      text: command.text ?? "",
+    })];
   } else if (semanticType === "replaceTextRange") {
     if (!target) fail("TARGET_REQUIRED", "replaceTextRange requires an authored target.");
     const segments = normalizedTextRangeSegments(index, target, command.segments);
@@ -437,17 +482,13 @@ export function planSemanticOperationPatch(indexOrHtml, command) {
   } else if (semanticType === "insertElement") {
     const insertion = semanticInsertion(index, command);
     semanticFragmentIndex(command.elementHtml, index);
-    patches = [sourcePatch(insertion.offset, insertion.offset, "", String(command.elementHtml), {
-      kind: "semantic:insert-element",
-    })];
+    patches = sharedSemanticStructurePatches(index, command, command.elementHtml);
     targetRefs = [insertion.targetRef];
   } else if (semanticType === "deleteElement") {
     if (!target || !target.parentId) {
       fail("SEMANTIC_DELETE_ROOT_UNSUPPORTED", "Only an authored element with a source parent can be deleted.");
     }
-    patches = [sourcePatch(target.range.startOffset, target.range.endOffset, target.raw, "", {
-      kind: "semantic:delete-element",
-    })];
+    patches = sharedSemanticStructurePatches(index, command);
   } else if (semanticType === "moveElement") {
     if (!target || !target.parentId) {
       fail("SEMANTIC_MOVE_ROOT_UNSUPPORTED", "Only an authored element with a source parent can be moved.");
@@ -459,14 +500,7 @@ export function planSemanticOperationPatch(indexOrHtml, command) {
     if (insertion.before?.nodeId === target.nodeId) {
       fail("SEMANTIC_MOVE_NOOP", "The requested move already occupies that insertion point.");
     }
-    patches = [
-      sourcePatch(target.range.startOffset, target.range.endOffset, target.raw, "", {
-        kind: "semantic:move-element:remove",
-      }),
-      sourcePatch(insertion.offset, insertion.offset, "", target.raw, {
-        kind: "semantic:move-element:insert",
-      }),
-    ];
+    patches = sharedSemanticStructurePatches(index, command);
     targetRefs = [targetRef, insertion.targetRef];
   } else if (semanticType === "replaceSubtree") {
     if (!target) fail("TARGET_REQUIRED", "replaceSubtree requires an authored target.");
@@ -476,21 +510,17 @@ export function planSemanticOperationPatch(indexOrHtml, command) {
         .map((element) => element.pagerootId),
     );
     const fragment = semanticFragmentIndex(command.elementHtml, index, subtreeIds);
-    if (fragment.root.pagerootId !== target.pagerootId || fragment.root.tagName !== target.tagName) {
+    if (fragment.root.pagerootId !== target.pagerootId) {
       fail(
         "SEMANTIC_REPLACEMENT_ROOT_MISMATCH",
-        "A replacement subtree must retain the target root ID and authored tag.",
+        "A replacement subtree must retain the target root ID.",
         {
           expectedElementId: target.pagerootId,
           actualElementId: fragment.root.pagerootId,
-          expectedTagName: target.tagName,
-          actualTagName: fragment.root.tagName,
         },
       );
     }
-    patches = [sourcePatch(target.range.startOffset, target.range.endOffset, target.raw, fragment.fragment, {
-      kind: "semantic:replace-subtree",
-    })];
+    patches = sharedSemanticStructurePatches(index, command, fragment.fragment);
   } else {
     fail("SEMANTIC_OPERATION_TYPE_UNSUPPORTED", `Unsupported semantic operation type: ${semanticType || "missing"}.`);
   }
@@ -697,7 +727,7 @@ function normalizedTextRangeSegments(index, target, segments) {
   return normalized;
 }
 
-export function planEditableIslandPatch(indexOrHtml, command) {
+export function planEditableIslandPatch(indexOrHtml, command, replay = null) {
   const index = typeof indexOrHtml === "string"
     ? buildSourceIndex(indexOrHtml)
     : indexOrHtml;
@@ -725,10 +755,22 @@ export function planEditableIslandPatch(indexOrHtml, command) {
     );
   }
 
-  const nextInnerHtml = normalizeEditableIslandHtml(
-    String(command.nextInnerHtml),
-    { baselineInnerHtml: island.innerHtml },
-  );
+  const replayPagerootIds = replay?.token === EDITABLE_ISLAND_ID_REPLAY_TOKEN
+    ? replay.pagerootIds
+    : null;
+  const materialized = index.pagerootIdentity.complete
+    ? materializeEditableIslandHtml(String(command.nextInnerHtml), {
+        baselineInnerHtml: island.innerHtml,
+        replayPagerootIds,
+      })
+    : {
+        html: normalizeEditableIslandHtml(
+          String(command.nextInnerHtml),
+          { baselineInnerHtml: island.innerHtml },
+        ),
+        createdPagerootIds: [],
+      };
+  const nextInnerHtml = materialized.html;
   const patch = sourcePatch(
     island.contentRange.startOffset,
     island.contentRange.endOffset,
@@ -749,9 +791,21 @@ export function planEditableIslandPatch(indexOrHtml, command) {
       rootTagName: island.element.tagName,
       beforeInnerHtml: island.innerHtml,
       nextInnerHtml,
+      createdPagerootIds: materialized.createdPagerootIds,
       writeScope: "editable-island-inner-html",
     },
   );
+}
+
+export function planSemanticEditableIslandPatch(
+  indexOrHtml,
+  command,
+  createdPagerootIds,
+) {
+  return planEditableIslandPatch(indexOrHtml, command, {
+    token: EDITABLE_ISLAND_ID_REPLAY_TOKEN,
+    pagerootIds: createdPagerootIds,
+  });
 }
 
 export function planDirectTextNodePatch(indexOrHtml, command) {
@@ -1351,14 +1405,21 @@ export function planTextRangeStylePatch(indexOrHtml, command, replay = null) {
       { property },
     );
   }
-  assertCommentFreeStyleSyntax(command.value, {
-    nodeId: target.nodeId,
-    property,
-  });
-  assertSingleCssValue(command.value, {
-    nodeId: target.nodeId,
-    property,
-  });
+  let declaration;
+  try {
+    ({ declaration } = canonicalSourceStyleDeclaration({
+      property,
+      value: command.value,
+      important: Boolean(command.important),
+      quote: '"',
+    }));
+  } catch (cause) {
+    fail(
+      cause?.code || "INVALID_STYLE_VALUE",
+      cause?.message || "Inline style value is invalid.",
+      { nodeId: target.nodeId, property, ...(cause?.details ?? {}) },
+    );
+  }
   const segments = normalizedTextRangeSegments(index, target, command.segments);
   const onlySegment = segments.length === 1 ? segments[0] : null;
   if (
@@ -1420,12 +1481,6 @@ export function planTextRangeStylePatch(indexOrHtml, command, replay = null) {
       },
     );
   }
-  const declaration = declarationFor(
-    property,
-    command.value,
-    Boolean(command.important),
-    "\"",
-  );
   // Flex/grid direct-text and visible-background cases are rejected by the
   // canvas before this plan is applied. In supported inline flow, this wrapper
   // preserves Chromium's real caret/beforeinput/input behavior.
@@ -1699,35 +1754,50 @@ export function planSiblingReorderPatch(indexOrHtml, command) {
     );
   }
 
-  let firstChanged = -1;
-  let lastChanged = -1;
-  for (let position = 0; position < oldOrder.length; position += 1) {
-    if (oldOrder[position] !== nextOrder[position]) {
-      if (firstChanged < 0) firstChanged = position;
-      lastChanged = position;
+  let patches;
+  if (index.pagerootIdentity?.complete) {
+    const movedPosition = nextOrder.indexOf(moving.nodeId);
+    const nextSiblingNodeId = nextOrder[movedPosition + 1] ?? null;
+    const nextSibling = nextSiblingNodeId
+      ? index.byNodeId.get(nextSiblingNodeId)
+      : null;
+    patches = sharedSemanticStructurePatches(index, {
+      type: "moveElement",
+      targetElementId: moving.pagerootId,
+      parentElementId: parent.pagerootId,
+      beforeElementId: nextSibling?.pagerootId ?? null,
+    });
+  } else {
+    let firstChanged = -1;
+    let lastChanged = -1;
+    for (let position = 0; position < oldOrder.length; position += 1) {
+      if (oldOrder[position] !== nextOrder[position]) {
+        if (firstChanged < 0) firstChanged = position;
+        lastChanged = position;
+      }
     }
-  }
-  const patches = [];
-  if (firstChanged >= 0) {
-    const byNodeId = new Map(units.map((unit) => [unit.nodeId, unit]));
-    const startOffset = units[firstChanged].startOffset;
-    const endOffset = units[lastChanged].endOffset;
-    const before = index.source.slice(startOffset, endOffset);
-    const after = nextOrder
-      .slice(firstChanged, lastChanged + 1)
-      .map((nodeId) => byNodeId.get(nodeId).raw)
-      .join("");
-    patches.push(sourcePatch(
-      startOffset,
-      endOffset,
-      before,
-      after,
-      {
-        kind: "sibling-reorder",
-        parentId: parent.nodeId,
-        movedNodeId: moving.nodeId,
-      },
-    ));
+    patches = [];
+    if (firstChanged >= 0) {
+      const byNodeId = new Map(units.map((unit) => [unit.nodeId, unit]));
+      const startOffset = units[firstChanged].startOffset;
+      const endOffset = units[lastChanged].endOffset;
+      const before = index.source.slice(startOffset, endOffset);
+      const after = nextOrder
+        .slice(firstChanged, lastChanged + 1)
+        .map((nodeId) => byNodeId.get(nodeId).raw)
+        .join("");
+      patches.push(sourcePatch(
+        startOffset,
+        endOffset,
+        before,
+        after,
+        {
+          kind: "sibling-reorder",
+          parentId: parent.nodeId,
+          movedNodeId: moving.nodeId,
+        },
+      ));
+    }
   }
 
   return makePlan(
@@ -2083,13 +2153,13 @@ function authorizePatchPlan(plan, index, patches) {
       }
     }
     if (!isInverse) {
-      const expected = planEditableIslandPatch(index, {
+      const expected = planSemanticEditableIslandPatch(index, {
         type: "replace-editable-island",
         targetRef: targetRefs[0],
         beforeInnerHtml: plan.metadata?.beforeInnerHtml,
         nextInnerHtml: plan.metadata?.nextInnerHtml,
         expectedSourceSha256: index.sourceSha256,
-      });
+      }, plan.metadata?.createdPagerootIds ?? []);
       if (!patchesEqual(patches, expected.patches)) {
         fail(
           "PATCH_PLAN_TAMPERED",

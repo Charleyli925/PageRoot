@@ -26,6 +26,10 @@ import {
 import {
   validateSourceHistoryOperationBytes,
 } from "../../shared/source-history.mjs";
+import {
+  createSemanticIdentitySnapshot,
+  verifySemanticIdentityTransition,
+} from "../../shared/semantic-identity-delta.mjs";
 
 import {
   PROJECT_FILE_SCHEMA_VERSION,
@@ -52,8 +56,18 @@ import {
   resolveRelative,
   validStateTimestamp,
 } from "./path-safety.mjs";
+import {
+  assertKernelTextMaterialization,
+} from "./semantic-text-materialization.mjs";
+import {
+  assertKernelStructurePatchMaterialization,
+} from "./semantic-structure-materialization.mjs";
 
 const HTML_WHITESPACE = /[\t\n\f\r ]/u;
+const HTML_VOID_ELEMENTS = new Set([
+  "area", "base", "br", "col", "embed", "hr", "img", "input", "link",
+  "meta", "param", "source", "track", "wbr",
+]);
 
 export const SOURCE_ELEMENT_IDENTITY_MIGRATION_TRANSACTION_SCHEMA_VERSION = "1.0.0";
 
@@ -95,14 +109,52 @@ export function inspectSourceElementIdentity(html) {
     const identityAttributes = rawStartTagAttributes(source, startTag).filter(
       (attribute) => attribute.name === PAGEROOT_ELEMENT_ID_ATTRIBUTE,
     );
+    const endTag = token.node?.sourceCodeLocation?.endTag;
+    const explicitEndTag = Number.isInteger(endTag?.startOffset)
+      && Number.isInteger(endTag?.endOffset);
+    const isVoid = HTML_VOID_ELEMENTS.has(token.name);
+    const startTagRaw = source.slice(startTag.startOffset, startTag.endOffset);
+    const sourceEndOffset = Number.isInteger(token.node?.sourceCodeLocation?.endOffset)
+      ? token.node.sourceCodeLocation.endOffset
+      : startTag.endOffset;
+    const contentEndOffset = explicitEndTag
+      ? endTag.startOffset
+      : isVoid
+        ? startTag.endOffset
+        : sourceEndOffset;
+    let boundarySafe = true;
+    let previousChildEndOffset = startTag.endOffset;
+    const authoredChildren = token.node?.nodeName === "template" && token.node.content
+      ? token.node.content.childNodes ?? []
+      : token.node?.childNodes ?? [];
+    for (const child of authoredChildren) {
+      const location = child?.sourceCodeLocation;
+      if (!Number.isInteger(location?.startOffset) || !Number.isInteger(location?.endOffset)) {
+        continue;
+      }
+      if (
+        location.startOffset < startTag.endOffset
+        || location.endOffset > contentEndOffset
+        || location.startOffset < previousChildEndOffset
+      ) {
+        boundarySafe = false;
+        break;
+      }
+      previousChildEndOffset = Math.max(previousChildEndOffset, location.endOffset);
+    }
     return [{
       node: token.node,
       tagName: token.name,
       startOffset: startTag.startOffset,
       endOffset: startTag.endOffset,
-      sourceEndOffset: Number.isInteger(token.node?.sourceCodeLocation?.endOffset)
-        ? token.node.sourceCodeLocation.endOffset
-        : startTag.endOffset,
+      sourceEndOffset,
+      contentStartOffset: startTag.endOffset,
+      contentEndOffset,
+      explicitEndTag,
+      isVoid,
+      selfClosing: startTag.endOffset === sourceEndOffset
+        && /\/\s*>$/u.test(startTagRaw),
+      boundarySafe,
       closingDelimiterOffset,
       identityAttributes,
       pagerootId: identityAttributes.length === 1
@@ -285,6 +337,193 @@ function identityBindingIssues(currentIdentity, nextIdentity) {
   return issues;
 }
 
+function semanticIdentitySnapshot(html, inspection) {
+  return createSemanticIdentitySnapshot({
+    sourceSha256: sha256(Buffer.from(html, "utf8")),
+    elements: inspection.elements.map((element) => {
+      const parent = Number.isInteger(element.parentElementIndex)
+        ? inspection.elements[element.parentElementIndex]
+        : null;
+      return {
+        elementId: element.pagerootId,
+        tagName: element.tagName,
+        parentElementId: parent?.pagerootId ?? null,
+        outerHtmlSha256: sha256(Buffer.from(
+          html.slice(element.startOffset, element.sourceEndOffset),
+          "utf8",
+        )),
+      };
+    }),
+  });
+}
+
+function semanticAuthorizationError(code, message, details = {}) {
+  const error = new Error(message);
+  error.name = "SemanticIdentityAuthorizationError";
+  error.code = code;
+  error.details = details;
+  return error;
+}
+
+function kernelIdentityFreeSubtreeHtml(
+  html,
+  inspection,
+  rootElementId,
+  expectedElementIds,
+  operationHtml,
+) {
+  const byId = identityElementMap(inspection);
+  const root = byId.get(rootElementId);
+  if (!root) {
+    throw semanticAuthorizationError(
+      "SEMANTIC_IDENTITY_MATERIALIZATION_ROOT_MISSING",
+      "The kernel-materialized structural root is absent from semantic result HTML.",
+      { rootElementId },
+    );
+  }
+  const subtree = inspection.elements.filter((element) => (
+    element.startOffset >= root.startOffset
+    && element.sourceEndOffset <= root.sourceEndOffset
+  ));
+  const actualElementIds = new Set(subtree.map((element) => element.pagerootId));
+  if (
+    actualElementIds.size !== expectedElementIds.size
+    || [...actualElementIds].some((elementId) => !expectedElementIds.has(elementId))
+  ) {
+    throw semanticAuthorizationError(
+      "SEMANTIC_IDENTITY_MATERIALIZATION_SET_MISMATCH",
+      "The materialized structural subtree does not contain the kernel allocation set.",
+      {
+        rootElementId,
+        actualElementIds: [...actualElementIds],
+        expectedElementIds: [...expectedElementIds],
+      },
+    );
+  }
+  const leadingWhitespace = operationHtml.match(/^\s*/u)?.[0] ?? "";
+  const trailingWhitespace = operationHtml.match(/\s*$/u)?.[0] ?? "";
+  const fragmentStartOffset = root.startOffset - leadingWhitespace.length;
+  const fragmentEndOffset = root.sourceEndOffset + trailingWhitespace.length;
+  if (
+    fragmentStartOffset < 0
+    || fragmentEndOffset > html.length
+    || html.slice(fragmentStartOffset, root.startOffset) !== leadingWhitespace
+    || html.slice(root.sourceEndOffset, fragmentEndOffset) !== trailingWhitespace
+  ) {
+    throw semanticAuthorizationError(
+      "SEMANTIC_IDENTITY_MATERIALIZATION_WHITESPACE_MISMATCH",
+      "The materialized structural subtree does not preserve allowed operation.html outer whitespace.",
+      { rootElementId },
+    );
+  }
+  const removals = subtree.map((element) => {
+    const injected = ` ${PAGEROOT_ELEMENT_ID_ATTRIBUTE}="${element.pagerootId}"`;
+    const endOffset = element.closingDelimiterOffset;
+    const startOffset = endOffset - injected.length;
+    if (
+      startOffset < element.startOffset
+      || html.slice(startOffset, endOffset) !== injected
+    ) {
+      throw semanticAuthorizationError(
+        "SEMANTIC_IDENTITY_MATERIALIZATION_ATTRIBUTE_MISMATCH",
+        "A structural identity was not materialized in the kernel-owned form.",
+        { elementId: element.pagerootId },
+      );
+    }
+    return { startOffset, endOffset };
+  }).sort((left, right) => right.startOffset - left.startOffset);
+  const materializedHtml = html.slice(fragmentStartOffset, fragmentEndOffset);
+  let identityFreeHtml = materializedHtml;
+  for (const removal of removals) {
+    const startOffset = removal.startOffset - fragmentStartOffset;
+    const endOffset = removal.endOffset - fragmentStartOffset;
+    identityFreeHtml = `${identityFreeHtml.slice(0, startOffset)}${identityFreeHtml.slice(endOffset)}`;
+  }
+  return { identityFreeHtml, materializedHtml };
+}
+
+function assertKernelStructuralMaterialization({
+  beforeIdentity,
+  afterIdentity,
+  beforeHtml,
+  afterHtml,
+  operation,
+  direction,
+}) {
+  if (!["insertElement", "replaceSubtree"].includes(operation.type)) return null;
+  const forwardBeforeIdentity = direction === "undo" ? afterIdentity : beforeIdentity;
+  const forwardAfterIdentity = direction === "undo" ? beforeIdentity : afterIdentity;
+  const forwardAfterHtml = direction === "undo" ? beforeHtml : afterHtml;
+  const forwardAddedIds = new Set(
+    [...forwardAfterIdentity.claimedIds].filter(
+      (elementId) => !forwardBeforeIdentity.claimedIds.has(elementId),
+    ),
+  );
+  const forwardAfterById = identityElementMap(forwardAfterIdentity);
+  let rootElementId;
+  let expectedElementIds;
+  if (operation.type === "insertElement") {
+    const roots = [...forwardAddedIds].filter((elementId) => {
+      const element = forwardAfterById.get(elementId);
+      const parent = Number.isInteger(element?.parentElementIndex)
+        ? forwardAfterIdentity.elements[element.parentElementIndex]
+        : null;
+      return !forwardAddedIds.has(parent?.pagerootId);
+    });
+    if (roots.length !== 1) {
+      throw semanticAuthorizationError(
+        "SEMANTIC_IDENTITY_MATERIALIZATION_ROOT_MISMATCH",
+        "insertElement does not have one kernel-materialized added root.",
+        { roots },
+      );
+    }
+    [rootElementId] = roots;
+    expectedElementIds = forwardAddedIds;
+  } else {
+    rootElementId = operation.target.elementId;
+    expectedElementIds = new Set([rootElementId, ...forwardAddedIds]);
+  }
+  const materialization = kernelIdentityFreeSubtreeHtml(
+    forwardAfterHtml,
+    forwardAfterIdentity,
+    rootElementId,
+    expectedElementIds,
+    operation.html,
+  );
+  if (materialization.identityFreeHtml !== operation.html) {
+    throw semanticAuthorizationError(
+      "SEMANTIC_IDENTITY_MATERIALIZATION_MISMATCH",
+      "The saved structural subtree is not the kernel materialization of operation.html.",
+      {
+        operationType: operation.type,
+        rootElementId,
+        operationHtmlSha256: sha256(Buffer.from(operation.html, "utf8")),
+        materializedIdentityFreeSha256: sha256(Buffer.from(
+          materialization.identityFreeHtml,
+          "utf8",
+        )),
+      },
+    );
+  }
+  return materialization.materializedHtml;
+}
+
+function identityTransitionFacts(beforeIdentity, afterIdentity) {
+  const lostIds = [...beforeIdentity.claimedIds].filter(
+    (pagerootId) => !afterIdentity.claimedIds.has(pagerootId),
+  );
+  const addedIds = [...afterIdentity.claimedIds].filter(
+    (pagerootId) => !beforeIdentity.claimedIds.has(pagerootId),
+  );
+  const bindingIssues = identityBindingIssues(beforeIdentity, afterIdentity);
+  return {
+    lostIds,
+    addedIds,
+    bindingIssues,
+    changed: lostIds.length > 0 || addedIds.length > 0 || bindingIssues.length > 0,
+  };
+}
+
 function assertBindingChangesAreAuthorized(currentHtml, nextHtml, sourceHistoryOperations) {
   let steps;
   try {
@@ -315,47 +554,58 @@ function assertBindingChangesAreAuthorized(currentHtml, nextHtml, sourceHistoryO
         },
       );
     }
-    const addedIds = [...afterIdentity.claimedIds].filter(
-      (pagerootId) => !beforeIdentity.claimedIds.has(pagerootId),
-    );
-    if (addedIds.length > 0 && step.operation.kind === "reorder") {
+    const transition = identityTransitionFacts(beforeIdentity, afterIdentity);
+    const semanticOperation = step.operation.semanticOperation;
+    const identityDelta = step.operation.identityDelta;
+    const semanticDirection = String(step.operation.semanticDirection || "");
+    if (!semanticOperation || !identityDelta || !["forward", "undo", "redo"].includes(semanticDirection)) {
+      if (!transition.changed) continue;
       throw new ProjectFileRepositoryError(
         "SOURCE_ELEMENT_IDENTITY_LOST",
-        "A reorder operation cannot create persistent source element identities.",
-        { operationId: step.operation.operationId, addedIds },
+        "The save changes persistent identity without semantic operation evidence.",
+        { operationId: step.operation.operationId, ...transition },
       );
     }
-    const bindingIssues = identityBindingIssues(beforeIdentity, afterIdentity);
-    if (bindingIssues.length === 0) continue;
-    if (step.operation.kind !== "reorder") {
+    try {
+      verifySemanticIdentityTransition({
+        beforeSnapshot: semanticIdentitySnapshot(step.beforeHtml, beforeIdentity),
+        afterSnapshot: semanticIdentitySnapshot(step.afterHtml, afterIdentity),
+        operation: semanticOperation,
+        direction: semanticDirection,
+        identityDelta,
+      });
+      const materializedFragmentHtml = assertKernelStructuralMaterialization({
+        beforeIdentity,
+        afterIdentity,
+        beforeHtml: step.beforeHtml,
+        afterHtml: step.afterHtml,
+        operation: semanticOperation,
+        direction: semanticDirection,
+      });
+      assertKernelStructurePatchMaterialization({
+        step,
+        beforeIdentity,
+        afterIdentity,
+        operation: semanticOperation,
+        direction: semanticDirection,
+        materializedFragmentHtml,
+      });
+      assertKernelTextMaterialization({
+        step,
+        beforeIdentity,
+        afterIdentity,
+        operation: semanticOperation,
+        direction: semanticDirection,
+      });
+    } catch (cause) {
       throw new ProjectFileRepositoryError(
         "SOURCE_ELEMENT_IDENTITY_LOST",
-        "Only an exact reorder operation may relocate persistent identities.",
-        { operationId: step.operation.operationId, bindingIssues },
-      );
-    }
-    const beforeById = identityElementMap(beforeIdentity);
-    const afterById = identityElementMap(afterIdentity);
-    const changedIds = new Set(bindingIssues.flatMap((issue) => [
-      issue.pagerootId,
-      issue.currentPagerootId,
-      issue.nextPagerootId,
-    ]).filter((pagerootId) => beforeIdentity.claimedIds.has(pagerootId)));
-    const changedElementBytes = [...changedIds].filter((pagerootId) => {
-      const before = beforeById.get(pagerootId);
-      const after = afterById.get(pagerootId);
-      if (!before || !after) return true;
-      return step.beforeHtml.slice(before.startOffset, before.sourceEndOffset)
-        !== step.afterHtml.slice(after.startOffset, after.sourceEndOffset);
-    });
-    if (changedElementBytes.length > 0) {
-      throw new ProjectFileRepositoryError(
-        "SOURCE_ELEMENT_IDENTITY_LOST",
-        "A reorder operation changed the source element bytes owned by a persistent identity.",
+        "Semantic operation evidence does not authorize the exact identity transition.",
         {
           operationId: step.operation.operationId,
-          changedElementBytes,
-          bindingIssues,
+          semanticIdentityError: cause?.code || "SEMANTIC_IDENTITY_INVALID",
+          semanticIdentityDetails: cause?.details || {},
+          ...transition,
         },
       );
     }
@@ -469,10 +719,10 @@ export function materializeIdentityPreservingSave(currentHtml, nextHtml, options
   const addedIds = [...nextIdentity.claimedIds].filter(
     (pagerootId) => !currentIdentity.claimedIds.has(pagerootId),
   );
-  if (lostIds.length > 0 || nextIdentity.missingElementCount > 0) {
+  if (nextIdentity.missingElementCount > 0) {
     throw new ProjectFileRepositoryError(
       "SOURCE_ELEMENT_IDENTITY_LOST",
-      "The save would remove persistent identities from existing source elements.",
+      "The save would publish source elements without persistent identity.",
       {
         lostIds,
         missingElementCount: nextIdentity.missingElementCount,
@@ -484,15 +734,20 @@ export function materializeIdentityPreservingSave(currentHtml, nextHtml, options
     );
   }
   const bindingIssues = identityBindingIssues(currentIdentity, nextIdentity);
-  if (bindingIssues.length > 0 || addedIds.length > 0) {
-    const sourceHistoryOperations = Array.isArray(options.sourceHistoryOperations)
-      ? options.sourceHistoryOperations
-      : [];
+  const sourceHistoryOperations = Array.isArray(options.sourceHistoryOperations)
+    ? options.sourceHistoryOperations
+    : [];
+  if (
+    lostIds.length > 0
+    || bindingIssues.length > 0
+    || addedIds.length > 0
+    || sourceHistoryOperations.length > 0
+  ) {
     if (sourceHistoryOperations.length === 0) {
       throw new ProjectFileRepositoryError(
         "SOURCE_ELEMENT_IDENTITY_LOST",
         "The save would change persistent identity bindings without source operation evidence.",
-        { lostIds: [], addedIds, bindingIssues },
+        { lostIds, addedIds, bindingIssues },
       );
     }
     assertBindingChangesAreAuthorized(currentHtml, nextHtml, sourceHistoryOperations);

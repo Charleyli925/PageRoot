@@ -5,7 +5,10 @@ import type {
 } from "./native-edit-types";
 import type { NoticeUsageCapture } from "./NoticeBar";
 import type { EditRuntimeGrant } from "../domain/edit-runtime-contract.js";
-import type { SemanticOperation } from "../lib/semantic-operation-kernel.js";
+import type {
+  SemanticIdentityDelta,
+  SemanticOperation,
+} from "../lib/semantic-operation-kernel.js";
 
 export type HtmlCanvasSelectionLevel = "module" | "part" | "insertion";
 export type HtmlCanvasTargetResolution =
@@ -96,6 +99,7 @@ export type HtmlCanvasSourceTransaction = {
   beforeSelection?: NativeEditSelection;
   afterSelection?: NativeEditSelection;
   semanticOperation?: SemanticOperation;
+  identityDelta?: SemanticIdentityDelta;
 };
 
 export type HtmlCanvasInteractionMode = "editing" | "processing" | "history";

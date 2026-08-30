@@ -32,7 +32,10 @@ leave mixed or externally overwritten HTML.
    `sourceElementIdentitySchemaVersion: 1` together with
    `sourceElementIdentityBindingSha256`, a canonical Hash of each ID's authored
    tag, identified parent and source order. Text, attributes and styles do not
-   affect this Hash. Legacy records omit both members. The migration is
+   affect this Hash. This binding is an integrity seal for the exact saved
+   topology, not a second element identity: `data-pageroot-id` alone defines
+   element continuity, while tag, parent and order are preconditions or change
+   facts. Legacy records omit both members. The migration is
    idempotent: a complete legacy identity set is adopted without rewriting
    HTML, while a current v1 state plus a matching complete binding performs no
    transaction.
@@ -49,23 +52,23 @@ leave mixed or externally overwritten HTML.
    transaction. It may finish from the exact old side or exact new side. Bytes
    matching neither side fail closed and are never overwritten. A committed
    transaction is audit evidence; its temporary recovery directory is removed.
-6. A normal save from an identity-v1 Working Copy must preserve every identity
-   claimed by its current source. Existing edit planners allocate identities for
-   new wrappers and line-break elements before autosave; the Repository accepts
-   only a complete next document and never guesses whether a missing element is
-   new or an existing element whose ID was transplanted. It also verifies that
-   retained IDs keep their tag, retained source order and nearest retained
-   ancestor. The existing sibling-reorder capability is allowed only when the
-   autosave's bounded SourcePatch history exactly replays from current bytes to
-   next bytes and every relocated ID keeps its complete source-element bytes;
-   editing or swapping ID values cannot masquerade as a move. Later semantic
-   operation PRs can replace this compatibility authorization. A save that
-   introduces a fresh persistent ID also requires the exact bounded SourcePatch
-   chain, and a reorder operation cannot claim a newly created identity. This
-   PR does not convert TargetRef, comments, undo/redo, AI identity continuity or
-   Review pairing; those remain dependent PRs. Until ID-based Review lands, its
-   legacy exact-subtree signature treats every PageRoot attribute, including
-   the persistent ID, as disposable comparison metadata.
+6. A normal save from an identity-v1 Working Copy accepts identity-set or
+   topology changes only when a system-executed semantic operation proves them.
+   The semantic kernel derives `identityDelta` from the operation plus the
+   independently parsed before/after complete HTML; callers cannot freely
+   declare it. Repository replays the exact SourcePatch chain to prove the byte,
+   Hash, CAS and recovery lineage, then independently recomputes the actual ID
+   delta and cross-validates the operation and `identityDelta`. SourcePatch
+   `kind` is never product authorization. Insert and duplicate add only fresh
+   subtree IDs; delete removes only the target subtree; move retains the whole
+   subtree while allowing parent/order changes; `replaceSubtree` retains the
+   target root ID while replacing descendant identities; `setText` retains the
+   target and may retire its descendants. Text-range, attribute and style
+   operations admit only their explicitly defined identity effects, including
+   kernel-allocated rich-text wrappers and line-break nodes. Retained IDs may
+   change tag when the operation permits it. Without this semantic proof, ID
+   addition, deletion, swap, transplant, forgery, duplication, tag change or
+   topology change fails closed even if an exact byte patch replays.
 7. Candidate Promotion keeps the immutable Version snapshot byte-exact to the
    sealed Candidate. Its private prepared Working Copy is materialized
    separately, and the Promotion transaction seals that file's distinct
@@ -87,10 +90,12 @@ leave mixed or externally overwritten HTML.
    still fail closed. Identity materialization also enforces the 20 MiB managed
    HTML cap before import publication, migration CAS, save, or Promotion staging.
 10. A clean external edit is reconciled only when its identity binding Hash
-    still matches the last PageRoot-authorized state. Text/style edits may keep
-    their IDs and continue; external ID additions, removals, swaps, tag changes,
-    moves or reparents become an explicit Working Copy conflict before the disk
-    Hash is recorded. Force-unlock is the sole user-authorized exception: it
+    still matches the last PageRoot-authorized state. Text/attribute/style edits
+    may keep their IDs and continue; external ID additions, removals, swaps,
+    transplants, forgeries, duplications, tag changes, moves or reparents become
+    an explicit Working Copy conflict before the disk Hash is recorded.
+    PageRoot semantic saves reseal the newly authorized binding after successful
+    CAS; external writes cannot borrow that authority. Force-unlock is the sole user-authorized exception: it
    clears both identity members even when a prior build already recorded the
    disk Hash, adopts those bytes, and re-enters controlled migration.
    Runtime decoding also admits the brief pre-binding identity-v1 state written
@@ -110,6 +115,8 @@ leave mixed or externally overwritten HTML.
   transaction.
 - Partial valid identity sets converge once. Invalid or later-damaged sets are
   explicit errors rather than a heuristic rebinding opportunity.
+- A stable ID can legally survive tag, parent and order changes. The sealed
+  binding records those facts for conflict detection but never overrides the ID.
 - Runtime DOM serialization remains prohibited.
 
 ## Rejected alternatives

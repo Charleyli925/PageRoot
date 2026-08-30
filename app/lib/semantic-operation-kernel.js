@@ -4,8 +4,8 @@ import {
 } from "./pageroot-element-identity.js";
 import {
   applyPatchPlan,
-  planEditableIslandPatch,
   planInlineStylePatch,
+  planSemanticEditableIslandPatch,
   planSemanticOperationPatch,
   planSemanticTextRangeStylePatch,
   planSiblingReorderPatch,
@@ -14,8 +14,15 @@ import {
 import { buildSourceIndex, sourceSha256 } from "./source-index.js";
 import { buildSourceTextMap, textRangeToSourceSegments } from "./source-text-map.js";
 import { createTargetRef } from "./target-resolver.js";
+import {
+  assertSemanticOperationContract,
+  createSemanticIdentitySnapshot,
+  deriveSemanticIdentityDelta,
+  SEMANTIC_OPERATION_SCHEMA_VERSION as SHARED_SEMANTIC_OPERATION_SCHEMA_VERSION,
+  verifySemanticIdentityTransition,
+} from "../../shared/semantic-identity-delta.mjs";
 
-export const SEMANTIC_OPERATION_SCHEMA_VERSION = 1;
+export const SEMANTIC_OPERATION_SCHEMA_VERSION = SHARED_SEMANTIC_OPERATION_SCHEMA_VERSION;
 
 const OPERATION_TYPES = new Set([
   "setText",
@@ -29,27 +36,6 @@ const OPERATION_TYPES = new Set([
 ]);
 const OPERATION_ID_PATTERN = /^[A-Za-z][A-Za-z0-9_-]{7,95}$/u;
 const TRUSTED_RESTORE_OPERATIONS = new WeakMap();
-const COMMON_OPERATION_KEYS = new Set([
-  "schemaVersion",
-  "operationId",
-  "baseRevision",
-  "expectedSourceSha256",
-  "type",
-]);
-const OPERATION_FIELDS = new Map([
-  ["setText", { required: ["target", "text"], optional: ["contentHtml"] }],
-  ["replaceTextRange", { required: ["target", "range", "text"], optional: [] }],
-  ["setAttribute", { required: ["target", "name", "value"], optional: [] }],
-  ["setStyle", {
-    required: ["target", "property", "value", "important"],
-    optional: ["range", "createdPagerootIds"],
-  }],
-  ["insertElement", { required: ["parent", "before", "html"], optional: [] }],
-  ["deleteElement", { required: ["target"], optional: [] }],
-  ["moveElement", { required: ["target", "parent", "before"], optional: [] }],
-  ["replaceSubtree", { required: ["target", "html"], optional: [] }],
-  ["restoreExactSource", { required: [], optional: [] }],
-]);
 
 export class SemanticOperationError extends Error {
   constructor(code, message, details = {}) {
@@ -165,31 +151,16 @@ function assertOperationEnvelope(state, operation) {
       actualSourceSha256: operation.expectedSourceSha256,
     });
   }
-}
-
-function assertOperationShape(operation) {
-  const fields = OPERATION_FIELDS.get(operation.type);
-  if (!fields) {
-    fail("SEMANTIC_OPERATION_TYPE_UNSUPPORTED", `Unsupported semantic operation type: ${operation.type ?? "missing"}.`);
-  }
-  const allowed = new Set([
-    ...COMMON_OPERATION_KEYS,
-    ...fields.required,
-    ...fields.optional,
-  ]);
-  const unknown = Object.keys(operation).filter((key) => !allowed.has(key));
-  if (unknown.length > 0) {
-    fail("SEMANTIC_OPERATION_MEMBER_UNKNOWN", "Semantic operation contains unsupported members.", {
-      members: unknown,
-    });
-  }
-  const missing = fields.required.filter(
-    (field) => !Object.hasOwn(operation, field),
-  );
-  if (missing.length > 0) {
-    fail("SEMANTIC_OPERATION_MEMBER_REQUIRED", "Semantic operation is missing required members.", {
-      members: missing,
-    });
+  if (operation.type !== "restoreExactSource") {
+    try {
+      assertSemanticOperationContract(operation);
+    } catch (cause) {
+      fail(
+        cause?.code || "SEMANTIC_OPERATION_INVALID",
+        cause?.message || "Semantic operation is invalid.",
+        cause?.details || {},
+      );
+    }
   }
 }
 
@@ -323,12 +294,6 @@ function materializeReplacementFragment(rawHtml, documentIndex, target, options 
   const html = String(rawHtml ?? "");
   const index = buildSourceIndex(html);
   const root = fragmentRoot(index, html);
-  if (root.tagName !== target.tagName) {
-    fail("SEMANTIC_REPLACEMENT_ROOT_MISMATCH", "Replacement HTML must retain the target root tag.", {
-      expectedTagName: target.tagName,
-      actualTagName: root.tagName,
-    });
-  }
   if (index.elements.some((element) => element.pagerootIdAttribute)) {
     fail(
       "SEMANTIC_REPLACEMENT_ID_FORBIDDEN",
@@ -501,7 +466,14 @@ function inverseOperationId(operationId, nextRevision, sourceHash) {
   return `inverse_${sourceHash.slice(-12)}_${sourceSha256(operationId).slice(-12)}_${nextRevision}`;
 }
 
-function appliedResult(state, operation, html, materialization, allocation = {}) {
+function appliedResult(
+  state,
+  operation,
+  html,
+  materialization,
+  allocation = {},
+  identityDelta = null,
+) {
   const nextRevision = state.revision + 1;
   const afterSourceSha256 = sourceSha256(html);
   const lineageEntry = {
@@ -533,8 +505,57 @@ function appliedResult(state, operation, html, materialization, allocation = {})
     inverseOperation,
     nextState,
     materialization,
+    ...(identityDelta ? { identityDelta } : {}),
     ...allocation,
   };
+}
+
+function nearestIdentifiedParentId(index, element) {
+  let parentId = element.parentId;
+  while (parentId) {
+    const parent = index.byNodeId.get(parentId);
+    if (!parent || parent.type !== "element") return null;
+    if (parent.pagerootId) return parent.pagerootId;
+    parentId = parent.parentId;
+  }
+  return null;
+}
+
+function semanticIdentitySnapshot(index) {
+  assertManagedIdentity(index, "Semantic identity delta");
+  return createSemanticIdentitySnapshot({
+    sourceSha256: index.sourceSha256,
+    elements: index.elements.map((element) => ({
+      elementId: element.pagerootId,
+      tagName: element.tagName,
+      parentElementId: nearestIdentifiedParentId(index, element),
+      outerHtmlSha256: sourceSha256(element.raw),
+    })),
+  });
+}
+
+export function deriveSemanticOperationIdentityDelta(
+  beforeHtml,
+  afterHtml,
+  operation,
+  { direction = "forward" } = {},
+) {
+  const beforeSnapshot = semanticIdentitySnapshot(buildSourceIndex(String(beforeHtml)));
+  const afterSnapshot = semanticIdentitySnapshot(buildSourceIndex(String(afterHtml)));
+  const identityDelta = deriveSemanticIdentityDelta(
+    beforeSnapshot,
+    afterSnapshot,
+    operation,
+    { direction },
+  );
+  verifySemanticIdentityTransition({
+    beforeSnapshot,
+    afterSnapshot,
+    operation,
+    direction,
+    identityDelta,
+  });
+  return identityDelta;
 }
 
 function applyTrustedRestore(state, operation) {
@@ -556,7 +577,6 @@ function applyTrustedRestore(state, operation) {
 export function applySemanticOperation(inputState, operation, options = {}) {
   const state = assertState(inputState);
   assertOperationEnvelope(state, operation);
-  assertOperationShape(operation);
   if (operation.type === "restoreExactSource") {
     return applyTrustedRestore(state, operation);
   }
@@ -585,7 +605,7 @@ export function applySemanticOperation(inputState, operation, options = {}) {
       expectedSourceSha256: state.sourceSha256,
     })
     : operation.type === "setText" && operation.contentHtml !== undefined
-    ? planEditableIslandPatch(index, {
+    ? planSemanticEditableIslandPatch(index, {
       type: "replace-editable-island",
       targetRef: createTargetRef(index, targetElement, { level: "subregion" }),
       beforeInnerHtml: index.source.slice(
@@ -594,7 +614,7 @@ export function applySemanticOperation(inputState, operation, options = {}) {
       ),
       nextInnerHtml: command.contentHtml,
       expectedSourceSha256: state.sourceSha256,
-    })
+    }, operation.createdPagerootIds ?? [])
     : operation.type === "setStyle" && operation.range
     ? (operation.createdPagerootIds
       ? planSemanticTextRangeStylePatch(index, {
@@ -673,6 +693,11 @@ export function applySemanticOperation(inputState, operation, options = {}) {
       );
     }
   }
+  const identityDelta = deriveSemanticOperationIdentityDelta(
+    state.html,
+    materialization.html,
+    operation,
+  );
   return appliedResult(state, operation, materialization.html, {
     kind: "source-patch",
     planType: plan.type,
@@ -680,7 +705,7 @@ export function applySemanticOperation(inputState, operation, options = {}) {
     scopeReport: materialization.scopeReport,
     parseIntegrity: materialization.parseIntegrity,
     sourcePatchResult: materialization,
-  }, allocation);
+  }, allocation, identityDelta);
 }
 
 export class SemanticOperationKernel {

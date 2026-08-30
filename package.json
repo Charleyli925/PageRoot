@@ -355,6 +355,14 @@
         "to": "bridge/project-file-repository/working-copy.mjs"
       },
       {
+        "from": "bridge/project-file-repository/semantic-text-materialization.mjs",
+        "to": "bridge/project-file-repository/semantic-text-materialization.mjs"
+      },
+      {
+        "from": "bridge/project-file-repository/semantic-structure-materialization.mjs",
+        "to": "bridge/project-file-repository/semantic-structure-materialization.mjs"
+      },
+      {
         "from": "bridge/project-file-repository/workspace-performance-timing.mjs",
         "to": "bridge/project-file-repository/workspace-performance-timing.mjs"
       },
@@ -435,8 +443,28 @@
         "to": "shared/direct-edit-compatibility.mjs"
       },
       {
+        "from": "shared/editable-island.mjs",
+        "to": "shared/editable-island.mjs"
+      },
+      {
+        "from": "shared/native-edit-capability.mjs",
+        "to": "shared/native-edit-capability.mjs"
+      },
+      {
         "from": "shared/source-history.mjs",
         "to": "shared/source-history.mjs"
+      },
+      {
+        "from": "shared/source-style-value.mjs",
+        "to": "shared/source-style-value.mjs"
+      },
+      {
+        "from": "shared/semantic-identity-delta.mjs",
+        "to": "shared/semantic-identity-delta.mjs"
+      },
+      {
+        "from": "shared/semantic-structure-plan.mjs",
+        "to": "shared/semantic-structure-plan.mjs"
       },
       {
         "from": "shared/conversation.mjs",

@@ -15,6 +15,7 @@ const SMOKE_TESTS = new Set([
 const CONTRACT_TESTS = new Set([
   "adr-index.test.mjs",
   "architecture-boundaries.test.mjs",
+  "semantic-identity-architecture-contract.test.mjs",
   "stable-id-review-contract.test.mjs",
 ]);
 

@@ -102,6 +102,8 @@ const BRIDGE_FILES = [
   "project-file-repository/request-draft.mjs",
   "project-file-repository/version-candidate.mjs",
   "project-file-repository/working-copy.mjs",
+  "project-file-repository/semantic-text-materialization.mjs",
+  "project-file-repository/semantic-structure-materialization.mjs",
   "project-file-repository/workspace-performance-timing.mjs",
   "ai-task-projection.mjs",
   "project-file-finalizer.mjs",
@@ -424,8 +426,33 @@ export async function createSyntheticAppBundle(t, {
     ),
     writeFixtureFile(
       productRoot,
+      "shared/editable-island.mjs",
+      "export const fixtureEditableIsland = true;\n",
+    ),
+    writeFixtureFile(
+      productRoot,
+      "shared/native-edit-capability.mjs",
+      "export const fixtureNativeEditCapability = true;\n",
+    ),
+    writeFixtureFile(
+      productRoot,
       "shared/source-history.mjs",
       "export const fixtureSourceHistory = true;\n",
+    ),
+    writeFixtureFile(
+      productRoot,
+      "shared/source-style-value.mjs",
+      "export const fixtureSourceStyleValue = true;\n",
+    ),
+    writeFixtureFile(
+      productRoot,
+      "shared/semantic-identity-delta.mjs",
+      "export const fixtureSemanticIdentityDelta = true;\n",
+    ),
+    writeFixtureFile(
+      productRoot,
+      "shared/semantic-structure-plan.mjs",
+      "export const fixtureSemanticStructurePlan = true;\n",
     ),
     writeFixtureFile(
       productRoot,
@@ -518,9 +545,14 @@ export async function createSyntheticAppBundle(t, {
     ...[
       "draft-aggregate.mjs",
       "direct-edit-compatibility.mjs",
+      "editable-island.mjs",
+      "native-edit-capability.mjs",
       "pageroot-element-identity.mjs",
       "provenance.mjs",
+      "semantic-identity-delta.mjs",
+      "semantic-structure-plan.mjs",
       "source-history.mjs",
+      "source-style-value.mjs",
       "conversation.mjs",
       "agent-delivery.mjs",
       "agent-feature-gates.mjs",

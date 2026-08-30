@@ -810,6 +810,7 @@ test("Node groups partition every top-level test exactly once outside full", asy
   assert.deepEqual(groups.contract.map(relative), [
     "adr-index.test.mjs",
     "architecture-boundaries.test.mjs",
+    "semantic-identity-architecture-contract.test.mjs",
     "stable-id-review-contract.test.mjs",
   ]);
   assert.ok(groups.core.some((file) => file.endsWith("notification-policy.test.mjs")));

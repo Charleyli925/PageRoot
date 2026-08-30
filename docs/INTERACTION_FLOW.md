@@ -363,15 +363,22 @@ Source 逐节点对账；Script 执行状态迁移；为绝对无刷新建立双
 → 生成 replace-editable-island 或 update-direct-text-node EditCommand
 → SourceIndex + TargetResolver 锁定源码范围
 → 岛内或纯文本片段做最小安全规范化，SourcePatchEngine 生成精确 range patch 与 inverse patch
+→ 原生换行以裸 `<br>` 进入受管计划，由系统分配 fresh stable ID 后再形成 `setText`；调用方预置新 ID 失败关闭
+→ 保存计划接受后，仅在 expected-mutation 边界把这些 ID 补到对应实时 `<br>`，保留 Selection 并继续当前编辑会话；ID 不新增 Runtime authority
 → 校验岛外字节完全不变，并重解析受影响区域
+→ 语义内核从 before/after 完整 HTML 导出 identityDelta（新增/删除/移动 ID、保留根与放置证据）
 → 用新源码原子重建 projection 并恢复逻辑选区
 → 内存 source HTML 立即更新
 → editRevision + 1
 → 记录 edit event
 → debounce 后进入同一串行队列
 → 核对源 Hash
+→ Repository 重新解析身份差异，与 semantic operation + identityDelta 交叉验证；SourcePatch kind 不授权身份变化
+→ 结构操作使用 Canvas/Repository 共享的纯 plan replayer 重建整组 exact patches；删除、插入、替换、跨父移动及 comment-aware 同父 reorder 均禁止附带无关 patch
+→ 对 plain `setText`，Canvas/Repository 共用纯 planner，拒绝 void/raw-text target，并核对唯一 target-content patch 的范围、原字节、规范转义后字节和 kind；Repository 也从 original-forward 源码独立重建 `replaceTextRange`、`setAttribute`、普通/整段合并 `setStyle` 的完整 patch 数组；对 identified `setText` 岛内容及需要 wrapper 的 range-style，继续按目标内容范围或逻辑文字范围核对位置、数量、样式字节和新 ID，部分 range 不得省略 wrapper identity
 → 临时文件写入、刷盘、原子替换
 → 重读校验
+→ 封存新的 ID/tag/parent/order binding，仅用于之后的外部冲突检测
 → lastPersistedRevision 前移；失败则由全局错误提示承载
 ```
 
@@ -518,7 +525,7 @@ SVG 使用实际点击的源码节点作为评论目标：`path`、`line`、`tex
 
 评论及其附件持久化不依赖 HTML 写入，也不改变 Version。单条评论最多 10 个附件，单文件最大 25 MB；附件上传未完成时不能发送评论或提交本轮。选择批次中为空或超过 25 MB 的文件不占用剩余名额，同批有效文件仍正常加入；超限、空文件和数量溢出都在 Canvas 顶部持续提示。仍有容量时可“重新选择”，容量已满时可“查看附件”并先移除一个。
 
-每条新局部评论必须持久化 `TargetRef.elementId`、最后一次确定性刷新的当前源码 Hash、`fingerprint.tagName` 与当前解析状态；选中文字时再保存元素内 UTF-16 `textLocator`（quote、起止 offset、affinity）。稳定 ID 存在时只按该 ID 解析：文字修改、同类兄弟插入和移动后仍为 `exact`；ID 删除、非法、缺少标签证据或迁移到不同标签后直接 `orphaned`，不得回退 selector/fingerprint 猜测替代节点。旧评论和无 ID 历史 Version 继续使用单一 legacy resolver，状态仍为 `exact`、`rebound`、`ambiguous` 或 `orphaned`。新评论保存和“重新选择目标”只接受可靠的 `exact`；`ambiguous` / `orphaned` 必须在画布和评论面板同时显式提示。整页评论继续使用 `selector=body + level=module` 的确定语义目标，以支持没有显式 body 源码节点的 HTML 片段。
+每条新局部评论必须持久化 `TargetRef.elementId`、最后一次确定性刷新的当前源码 Hash、兼容指纹与当前解析状态；选中文字时再保存元素内 UTF-16 `textLocator`（quote、起止 offset、affinity）。`elementId` 是唯一持久元素身份，`tagName` 只是显示/兼容证据。稳定 ID 存在时只按该 ID 解析：文字修改、兄弟插入、移动或 tag 变化后仍为 `exact`；ID 删除或非法才为 `orphaned`，不得回退 selector/fingerprint 猜测替代节点。源元素仍在但当前 Canvas 无法呈现/定位时，仅标记呈现为 `hidden` / `missing`，不改写身份。旧评论和无 ID 历史 Version 继续使用单一 legacy resolver，状态仍为 `exact`、`rebound`、`ambiguous` 或 `orphaned`。新评论保存和“重新选择目标”只接受可靠的 `exact`；`ambiguous` / `orphaned` 必须在画布和评论面板同时显式提示。整页评论继续使用 `selector=body + level=module` 的确定语义目标，以支持没有显式 body 源码节点的 HTML 片段。
 
 全局评论使用稳定的 `body` 语义目标；首次登记、自动保存和恢复后仍保持 `exact`，不依赖正文 SourceAnchor。兼容旧草稿或历史记录时，以 `selector=body + level=module` 识别整个页面并补齐运行时字段；即使旧记录没有 `tagName` 或曾被标成 `orphaned`，也由系统确定性标准化，不向用户显示“重新定位”。
 

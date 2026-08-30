@@ -3,6 +3,8 @@ const SOURCE_HISTORY_ENTRY_LIMIT = 100;
 const SOURCE_HISTORY_ACTION_LIMIT = 256;
 const SOURCE_HISTORY_PATCH_LIMIT = 2_048;
 const SOURCE_HISTORY_TEXT_LIMIT = 4 * 1024 * 1024;
+const SOURCE_HISTORY_TARGET_BYTE_LIMIT = 64 * 1024;
+const SOURCE_HISTORY_SEMANTIC_EVIDENCE_BYTE_LIMIT = 8 * 1024 * 1024;
 const SOURCE_HISTORY_JOURNAL_BYTE_LIMIT = 32 * 1024 * 1024;
 const SHA256_PATTERN = /^sha256:[a-f0-9]{64}$/;
 const OPERATION_ID_PATTERN = /^sourceop_[A-Za-z0-9_-]{12,180}$/;
@@ -58,7 +60,10 @@ function requiredTimestamp(value, label) {
   return timestamp;
 }
 
-function boundedJsonRecord(value, label) {
+function boundedJsonRecord(value, label, {
+  maxBytes = SOURCE_HISTORY_TARGET_BYTE_LIMIT,
+  errorCode = "INVALID_SOURCE_HISTORY_TARGET",
+} = {}) {
   if (value === null || value === undefined) return null;
   if (!isRecord(value)) {
     throw historyError(
@@ -72,13 +77,20 @@ function boundedJsonRecord(value, label) {
   } catch {
     serialized = "";
   }
-  if (!serialized || serialized.length > 64 * 1024) {
+  if (!serialized || new TextEncoder().encode(serialized).byteLength > maxBytes) {
     throw historyError(
-      "INVALID_SOURCE_HISTORY_TARGET",
+      errorCode,
       `${label} is too large or cannot be serialized.`,
     );
   }
   return JSON.parse(serialized);
+}
+
+function boundedSemanticEvidence(value, label) {
+  return boundedJsonRecord(value, label, {
+    maxBytes: SOURCE_HISTORY_SEMANTIC_EVIDENCE_BYTE_LIMIT,
+    errorCode: "SOURCE_HISTORY_SEMANTIC_EVIDENCE_TOO_LARGE",
+  });
 }
 
 // Forward compatibility. A newer PageRoot may add members to any of these
@@ -108,6 +120,9 @@ const KNOWN_ENTRY_KEYS = new Set([
   "afterTarget",
   "beforeSelection",
   "afterSelection",
+  "semanticDirection",
+  "semanticOperation",
+  "identityDelta",
 ]);
 const KNOWN_ACTION_KEYS = new Set([
   "actionId",
@@ -274,6 +289,18 @@ function cleanEntry(raw) {
   const property = raw.property === undefined
     ? undefined
     : String(raw.property || "").slice(0, 200);
+  const semanticDirection = raw.semanticDirection === undefined
+    ? undefined
+    : String(raw.semanticDirection || "");
+  if (
+    semanticDirection !== undefined
+    && !["forward", "undo", "redo"].includes(semanticDirection)
+  ) {
+    throw historyError(
+      "INVALID_SOURCE_HISTORY_SEMANTIC_DIRECTION",
+      "Semantic history direction is invalid.",
+    );
+  }
   return preserveUnknown({
     operationId,
     kind,
@@ -292,6 +319,23 @@ function cleanEntry(raw) {
     reversePatches: cleanPatches(raw.reversePatches, "entry.reversePatches"),
     beforeTarget: boundedJsonRecord(raw.beforeTarget, "entry.beforeTarget"),
     afterTarget: boundedJsonRecord(raw.afterTarget, "entry.afterTarget"),
+    ...(semanticDirection ? { semanticDirection } : {}),
+    ...(raw.semanticOperation !== undefined
+      ? {
+          semanticOperation: boundedSemanticEvidence(
+            raw.semanticOperation,
+            "entry.semanticOperation",
+          ),
+        }
+      : {}),
+    ...(raw.identityDelta !== undefined
+      ? {
+          identityDelta: boundedSemanticEvidence(
+            raw.identityDelta,
+            "entry.identityDelta",
+          ),
+        }
+      : {}),
     ...(raw.beforeSelection !== undefined
       ? {
           beforeSelection: cleanSelection(
@@ -971,4 +1015,5 @@ export {
   SOURCE_HISTORY_ENTRY_LIMIT,
   SOURCE_HISTORY_JOURNAL_BYTE_LIMIT,
   SOURCE_HISTORY_SCHEMA_VERSION,
+  SOURCE_HISTORY_SEMANTIC_EVIDENCE_BYTE_LIMIT,
 };

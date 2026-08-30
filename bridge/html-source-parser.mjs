@@ -19,6 +19,7 @@ function sourceSlice(source, location) {
 export function rawStartTagAttributes(source, location) {
   const raw = sourceSlice(source, location);
   if (!raw.startsWith("<")) return [];
+  const sourceOffset = location.startOffset;
   const attributes = [];
   let cursor = 1;
   while (cursor < raw.length && /\s/u.test(raw[cursor])) cursor += 1;
@@ -48,36 +49,67 @@ export function rawStartTagAttributes(source, location) {
       cursor += 1;
       continue;
     }
-    const name = raw.slice(nameStart, cursor).toLowerCase();
+    const nameEnd = cursor;
+    const rawName = raw.slice(nameStart, nameEnd);
+    const name = rawName.toLowerCase();
     while (cursor < raw.length && /\s/u.test(raw[cursor])) cursor += 1;
     let rawValue = "";
+    let equalsOffset = null;
+    let quote = null;
+    let valueStart = null;
+    let valueEnd = null;
     if (raw[cursor] === "=") {
+      equalsOffset = cursor;
       cursor += 1;
       while (cursor < raw.length && /\s/u.test(raw[cursor])) cursor += 1;
-      const quote = raw[cursor] === '"' || raw[cursor] === "'"
+      quote = raw[cursor] === '"' || raw[cursor] === "'"
         ? raw[cursor]
         : null;
       if (quote) {
         cursor += 1;
-        const valueStart = cursor;
+        valueStart = cursor;
         while (cursor < raw.length && raw[cursor] !== quote) cursor += 1;
+        valueEnd = cursor;
         rawValue = raw.slice(valueStart, cursor);
         if (raw[cursor] === quote) cursor += 1;
       } else {
-        const valueStart = cursor;
+        valueStart = cursor;
         while (
           cursor < raw.length
           && !/[\s>]/u.test(raw[cursor])
+          && !(raw[cursor] === "/" && raw[cursor + 1] === ">")
         ) {
           cursor += 1;
         }
+        valueEnd = cursor;
         rawValue = raw.slice(valueStart, cursor);
       }
     }
+    const attributeEnd = cursor;
     attributes.push({
       name,
+      rawName,
+      raw: raw.slice(nameStart, attributeEnd),
       rawValue,
       value: decodeHTMLAttribute(rawValue),
+      quote,
+      equalsOffset: equalsOffset === null ? null : sourceOffset + equalsOffset,
+      range: {
+        startOffset: sourceOffset + nameStart,
+        endOffset: sourceOffset + attributeEnd,
+      },
+      nameRange: {
+        startOffset: sourceOffset + nameStart,
+        endOffset: sourceOffset + nameEnd,
+      },
+      valueRange: valueStart === null ? null : {
+        startOffset: sourceOffset + valueStart,
+        endOffset: sourceOffset + valueEnd,
+      },
+      removalRange: {
+        startOffset: sourceOffset + nameStart,
+        endOffset: sourceOffset + attributeEnd,
+      },
     });
   }
   return attributes;

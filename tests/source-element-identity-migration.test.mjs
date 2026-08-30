@@ -174,7 +174,7 @@ test("identity materialization refuses malformed and duplicate authored identiti
   );
 });
 
-test("an identity-preserving save accepts only pre-identified additions", () => {
+test("an identity-preserving save requires semantic evidence even for pre-identified additions", () => {
   const current = materializeSourceElementIdentity(RAW_HTML, {
     randomUUIDFactory: deterministicUuidFactory(),
   }).html;
@@ -188,24 +188,21 @@ test("an identity-preserving save accepts only pre-identified additions", () => 
     (error) => error?.code === "SOURCE_ELEMENT_IDENTITY_LOST"
       && error.details.addedIds.includes(newId),
   );
-  const saved = materializeIdentityPreservingSave(current, next, {
-    sourceHistoryOperations: [exactSourceHistoryOperation(current, next, {
-      kind: "structure",
-    })],
-  });
-
-  assert.equal(saved.changed, false);
-  assert.equal(saved.addedElementCount, 0);
-  assert.equal(saved.html, next);
+  assert.throws(
+    () => materializeIdentityPreservingSave(current, next, {
+      sourceHistoryOperations: [exactSourceHistoryOperation(current, next, {
+        kind: "structure",
+      })],
+    }),
+    (error) => error?.code === "SOURCE_ELEMENT_IDENTITY_LOST"
+      && error.details.addedIds.includes(newId),
+  );
   const unidentifiedAddition = current.replace("</body>", "<br></body>");
   assert.throws(
     () => materializeIdentityPreservingSave(current, unidentifiedAddition),
     (error) => error?.code === "SOURCE_ELEMENT_IDENTITY_LOST"
       && error.details.missingElementCount === 1,
   );
-  for (const pagerootId of inspectSourceElementIdentity(current).claimedIds) {
-    assert.equal(saved.identity.claimedIds.has(pagerootId), true);
-  }
   const removedIdentity = next.replace(/ data-pageroot-id="pr1_[a-f0-9]{32}"/u, "");
   assert.throws(
     () => materializeIdentityPreservingSave(current, removedIdentity),
@@ -305,7 +302,7 @@ test("an identity-preserving save rejects swapped and transplanted IDs", () => {
       sourceHistoryOperations: [exactSourceHistoryOperation(current, swapped)],
     }),
     (error) => error?.code === "SOURCE_ELEMENT_IDENTITY_LOST"
-      && error.details.changedElementBytes.length === 2,
+      && error.details.operationId === "sourceop_identity_reorder_001",
   );
 
   const transplanted = current
@@ -323,7 +320,7 @@ test("an identity-preserving save rejects swapped and transplanted IDs", () => {
   );
 });
 
-test("an exact source-history reorder preserves each moved element's identity", () => {
+test("an exact source-history reorder cannot authorize topology changes without semantic evidence", () => {
   const current = materializeSourceElementIdentity(
     "<!doctype html><html><head><title>Move</title></head><body><p>first</p><p>second</p></body></html>",
     { randomUUIDFactory: deterministicUuidFactory() },
@@ -343,11 +340,13 @@ test("an exact source-history reorder preserves each moved element's identity", 
     endOffset: startOffset + beforeBlock.length,
   });
 
-  const saved = materializeIdentityPreservingSave(current, moved, {
-    sourceHistoryOperations: [operation],
-  });
-  assert.equal(saved.html, moved);
-  assert.equal(saved.identity.complete, true);
+  assert.throws(
+    () => materializeIdentityPreservingSave(current, moved, {
+      sourceHistoryOperations: [operation],
+    }),
+    (error) => error?.code === "SOURCE_ELEMENT_IDENTITY_LOST"
+      && error.details.operationId === operation.operationId,
+  );
 });
 
 test("a new import writes identified Working Copy bytes without changing the external file or V1", async (t) => {

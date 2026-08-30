@@ -2,7 +2,10 @@ import type {
   SourceHistoryDirection,
   SourceHistoryEntry,
 } from "../domain/source-history.js";
-import type { SemanticOperation } from "../lib/semantic-operation-kernel.js";
+import type {
+  SemanticIdentityDelta,
+  SemanticOperation,
+} from "../lib/semantic-operation-kernel.js";
 
 export const SOURCE_HISTORY_MEMORY_LIMIT: 20;
 
@@ -39,6 +42,7 @@ export type CanvasSourceTransaction = {
   beforeSelection?: SourceHistoryEntry["beforeSelection"];
   afterSelection?: SourceHistoryEntry["afterSelection"];
   semanticOperation?: SemanticOperation;
+  identityDelta?: SemanticIdentityDelta;
 };
 
 export class SourceHistorySession {

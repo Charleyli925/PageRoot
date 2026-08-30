@@ -76,4 +76,42 @@ test("raw start-tag attributes keep authored duplicates instead of parse5 last-w
       ["class", "b"],
     ],
   );
+  assert.deepEqual(
+    raw.map((attribute) => ({
+      rawName: attribute.rawName,
+      raw: attribute.raw,
+      quote: attribute.quote,
+      range: html.slice(attribute.range.startOffset, attribute.range.endOffset),
+      valueRange: html.slice(
+        attribute.valueRange.startOffset,
+        attribute.valueRange.endOffset,
+      ),
+    })),
+    [
+      { rawName: "class", raw: 'class="a"', quote: '"', range: 'class="a"', valueRange: "a" },
+      { rawName: "id", raw: 'id="x"', quote: '"', range: 'id="x"', valueRange: "x" },
+      { rawName: "class", raw: 'class="b"', quote: '"', range: 'class="b"', valueRange: "b" },
+    ],
+  );
+});
+
+test("raw unquoted attributes stop before a source self-closing delimiter", () => {
+  const html = `<svg><circle style=color:blue data-kind=dot/></svg>`;
+  const parsed = parseHtmlSource(html);
+  const circle = parsed.elements.find((token) => token.name === "circle");
+  const attributes = rawStartTagAttributes(
+    parsed.source,
+    circle.node.sourceCodeLocation.startTag,
+  );
+  assert.deepEqual(
+    attributes.map((attribute) => [
+      attribute.name,
+      attribute.rawValue,
+      html.slice(attribute.range.startOffset, attribute.range.endOffset),
+    ]),
+    [
+      ["style", "color:blue", "style=color:blue"],
+      ["data-kind", "dot", "data-kind=dot"],
+    ],
+  );
 });

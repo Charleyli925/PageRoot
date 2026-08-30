@@ -195,6 +195,47 @@ test("persistent source history rejects malformed logical selection metadata", (
   );
 });
 
+test("semantic save evidence uses the patch-scale budget instead of the TargetRef budget", () => {
+  const before = "<p>one</p>";
+  const after = "<p>two</p>";
+  const accepted = replacementOperation(before, after, "sourceop_large_semantic_001");
+  accepted.semanticDirection = "forward";
+  accepted.semanticOperation = {
+    schemaVersion: 1,
+    operationId: accepted.operationId,
+    type: "insertElement",
+    html: "x".repeat(96 * 1024),
+  };
+  accepted.identityDelta = {
+    schemaVersion: 1,
+    removedElementIds: Array.from(
+      { length: 2_000 },
+      (_, index) => `identity-${index}`,
+    ),
+  };
+  const empty = createEmptySourceHistory({
+    projectId,
+    documentId,
+    sourceSha256: sha256(before),
+    now,
+  });
+  const context = {
+    projectId,
+    documentId,
+    sourceSha256: sha256(before),
+    targetSourceSha256: sha256(after),
+    now,
+  };
+  assert.doesNotThrow(() => appendSourceHistoryOperations(empty, [accepted], context));
+
+  const oversized = structuredClone(accepted);
+  oversized.semanticOperation.html = "x".repeat(8 * 1024 * 1024 + 1);
+  assert.throws(
+    () => appendSourceHistoryOperations(empty, [oversized], context),
+    (error) => error?.code === "SOURCE_HISTORY_SEMANTIC_EVIDENCE_TOO_LARGE",
+  );
+});
+
 test("text, style, structure, and sibling reorder share one exact durable cursor", () => {
   const sources = [
     "<main><p class=\"plain\">one<br></p><aside>A</aside><section>B</section></main>",
