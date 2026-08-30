@@ -359,6 +359,10 @@
         "to": "bridge/project-file-repository/semantic-text-materialization.mjs"
       },
       {
+        "from": "bridge/project-file-repository/semantic-structure-materialization.mjs",
+        "to": "bridge/project-file-repository/semantic-structure-materialization.mjs"
+      },
+      {
         "from": "bridge/project-file-repository/workspace-performance-timing.mjs",
         "to": "bridge/project-file-repository/workspace-performance-timing.mjs"
       },
@@ -453,6 +457,10 @@
       {
         "from": "shared/semantic-identity-delta.mjs",
         "to": "shared/semantic-identity-delta.mjs"
+      },
+      {
+        "from": "shared/semantic-structure-plan.mjs",
+        "to": "shared/semantic-structure-plan.mjs"
       },
       {
         "from": "shared/conversation.mjs",

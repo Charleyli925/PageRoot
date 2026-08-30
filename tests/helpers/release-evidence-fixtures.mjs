@@ -103,6 +103,7 @@ const BRIDGE_FILES = [
   "project-file-repository/version-candidate.mjs",
   "project-file-repository/working-copy.mjs",
   "project-file-repository/semantic-text-materialization.mjs",
+  "project-file-repository/semantic-structure-materialization.mjs",
   "project-file-repository/workspace-performance-timing.mjs",
   "ai-task-projection.mjs",
   "project-file-finalizer.mjs",
@@ -445,6 +446,11 @@ export async function createSyntheticAppBundle(t, {
     ),
     writeFixtureFile(
       productRoot,
+      "shared/semantic-structure-plan.mjs",
+      "export const fixtureSemanticStructurePlan = true;\n",
+    ),
+    writeFixtureFile(
+      productRoot,
       "shared/conversation.mjs",
       "export const fixtureConversation = true;\n",
     ),
@@ -538,6 +544,7 @@ export async function createSyntheticAppBundle(t, {
       "pageroot-element-identity.mjs",
       "provenance.mjs",
       "semantic-identity-delta.mjs",
+      "semantic-structure-plan.mjs",
       "source-history.mjs",
       "source-style-value.mjs",
       "conversation.mjs",

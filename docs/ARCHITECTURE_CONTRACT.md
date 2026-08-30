@@ -704,9 +704,18 @@ delta. Insert and subtree replacement additionally reconstruct the exact
 identity-free result by removing only kernel-form identity attributes, then
 require those bytes to equal `operation.html`; fresh-looking IDs alone are not
 allocation authority.
+All four structural operations then pass through the same pure structural plan
+replayer used by Canvas. Repository compares the whole retained patch array,
+including comment-aware same-parent reorder, so no valid move/delete/insert/
+replacement can authorize an additional source change. The shared planner also
+owns the safe parent boundary and explicit-end/void/source-self-closing sibling
+preconditions, preventing Repository from accepting a reorder Canvas rejects.
 Native editable-island `<br>` nodes receive fresh IDs in the accepted Canvas
 plan before `setText` is formed, and Repository binds that operation to one
-exact target-content patch and its normalized `contentHtml`. Range-style
+exact target-content patch and its normalized `contentHtml`. Canvas copies only
+those accepted IDs onto the matching live line-break objects under its expected
+mutation guard, then rebases the current selection/session without a page
+reload; this identity update does not grant Runtime source authority. Range-style
 wrappers are independently reconstructed from the operation's logical
 range/quote, canonical guard and declaration, exact source offsets and fresh ID
 list. Canvas and Repository share the pure editable-island normalizer and

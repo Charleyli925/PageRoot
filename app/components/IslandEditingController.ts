@@ -1388,6 +1388,9 @@ export class IslandEditingController {
     ) return false;
     let canonical: string;
     try {
+      if (options.reconcileDomBeforeRebase) {
+        this.runExpectedMutation(() => options.reconcileDomBeforeRebase?.());
+      }
       canonical = this.normalizeInnerHtml(baseline.innerHtml, {
         baselineInnerHtml: baseline.innerHtml,
       });

@@ -289,21 +289,44 @@ test("Electron assigns Stable ID to a native line break and reopens it from mana
       sourcePath,
       "managed-line-break",
     );
+    const initialDocument = await documentToken(frame);
     const target = await activateNativeEdit(frame, "managed-line-break");
     await setTextSelection(frame, "managed-line-break", "Alpha".length);
     await target.press("Enter");
     await expect.poll(() => frame.locator(
       `${caseSelector("managed-line-break")} > br`,
     ).count()).toBeGreaterThan(0);
-    await launched.page.keyboard.press(keyShortcut("S"));
-    await expect(editor).not.toHaveAttribute("data-edit-block-detail", /.+/u);
-    await expectCheckpointPersisted(launched.page, 0);
+    await expect.poll(() => readFileSync(managedSourcePath, "utf8"))
+      .toMatch(/<br data-pageroot-id="pr1_/u);
+    expect(await documentToken(frame)).toBe(initialDocument);
+    await expect(target).toHaveAttribute("contenteditable", "true");
     const savedHtml = readFileSync(managedSourcePath, "utf8");
     const identifiedBreaks = savedHtml.match(
       /<br data-pageroot-id="pr1_[0-9a-f]{12}4[0-9a-f]{3}[89ab][0-9a-f]{15}">/gu,
     ) ?? [];
     expect(identifiedBreaks.length).toBeGreaterThan(0);
     expect(savedHtml).not.toMatch(/<br(?! data-pageroot-id=)/u);
+    await expect(frame.locator(
+      `${caseSelector("managed-line-break")} > br`,
+    )).toHaveAttribute("data-pageroot-id", /^pr1_/u);
+    await target.evaluate((element) => {
+      const range = element.ownerDocument.createRange();
+      range.selectNodeContents(element);
+      range.collapse(false);
+      const selection = element.ownerDocument.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+    });
+    await launched.page.keyboard.insertText("Omega");
+    expect(await documentToken(frame)).toBe(initialDocument);
+    await expect(target).toContainText("Omega");
+    await launched.page.keyboard.press(keyShortcut("S"));
+    await expect(editor).not.toHaveAttribute("data-edit-block-detail", /.+/u);
+    await expect.poll(() => readFileSync(managedSourcePath, "utf8"))
+      .toContain("Omega");
+    const finalSavedHtml = readFileSync(managedSourcePath, "utf8");
+    expect(finalSavedHtml.match(/data-pageroot-id=/gu)?.length)
+      .toBe(savedHtml.match(/data-pageroot-id=/gu)?.length);
     expect(readFileSync(sourcePath)).toEqual(original);
 
     await closePageRootGracefully(activeApp, launched.page);
@@ -317,7 +340,9 @@ test("Electron assigns Stable ID to a native line break and reopens it from mana
     ));
     await expect(frame.locator(`${caseSelector("managed-line-break")} > br`))
       .toHaveCount(identifiedBreaks.length);
-    expect(readFileSync(managedSourcePath, "utf8")).toBe(savedHtml);
+    await expect(frame.locator(caseSelector("managed-line-break")))
+      .toContainText("Omega");
+    expect(readFileSync(managedSourcePath, "utf8")).toBe(finalSavedHtml);
   } finally {
     if (activeApp) await stopPageRoot(activeApp, isolatedUserData, { cleanup: false });
     removeIsolatedUserData(isolatedUserData);

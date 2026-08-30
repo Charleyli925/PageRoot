@@ -49,12 +49,23 @@ state. Cloning authored markup also cannot retain the original persistent IDs.
   resulting identity-free subtree bytes to equal `operation.html`. A caller
   cannot pair unrelated payload HTML with fresh-looking IDs and a recomputed
   delta.
+- Every structural operation is additionally bound to one complete patch
+  plan reconstructed by a pure planner shared with Canvas. Delete, insert,
+  replacement, cross-parent move and the comment-aware minimal same-parent
+  reorder must match that plan in patch count, range, before/after bytes and
+  kind. Same-parent reorder retains the existing explicit-end/void/source-
+  self-closing sibling and safe-parent-boundary prerequisites; optional implicit
+  end tags cannot gain authority only at the Repository boundary. A valid
+  identity transition cannot carry an extra unrelated patch.
 - Native editable-island line breaks enter the semantic contract as bare
   `<br>` nodes. The accepted Canvas plan allocates their fresh IDs before it
   creates `setText`; semantic replay must reproduce that exact identified
   `contentHtml`. Repository binds the operation to the target's one exact
   editable-island patch, so a matching ID inventory cannot authorize unrelated
-  island bytes.
+  island bytes. After acceptance, the controller applies only those
+  source-allocated IDs to the corresponding live `<br>` nodes as an expected
+  mutation, preserving the active selection and allowing the same edit session
+  to continue. The attribute remains identity, not new Runtime authority.
 - A range-style operation that adds wrappers is independently replayed at the
   Repository boundary. Its logical range and quote must map to the exact
   authored text segments; wrapper count, offsets, canonical guard/style bytes

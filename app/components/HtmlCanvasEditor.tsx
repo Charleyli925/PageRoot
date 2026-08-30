@@ -234,6 +234,65 @@ import {
 } from "./html-preview-sandbox.js";
 import styles from "./HtmlCanvasEditor.module.css";
 
+function reconcileAllocatedLineBreakIds(
+  hostElement: HTMLElement,
+  previousSourceInnerHtml: string,
+  nextSourceInnerHtml: string,
+) {
+  const liveDraft = editableIslandDraftHtml(hostElement.innerHTML, {
+    baselineInnerHtml: previousSourceInnerHtml,
+  });
+  const sourceDraft = editableIslandDraftHtml(nextSourceInnerHtml, {
+    baselineInnerHtml: previousSourceInnerHtml,
+  });
+  if (liveDraft !== sourceDraft) {
+    throw new Error("实时编辑 DOM 与已保存的源码换行结构不一致。");
+  }
+  const document = hostElement.ownerDocument;
+  const previousTemplate = document.createElement("template");
+  const nextTemplate = document.createElement("template");
+  previousTemplate.innerHTML = previousSourceInnerHtml;
+  nextTemplate.innerHTML = nextSourceInnerHtml;
+  const previousIds = new Set(Array.from(
+    previousTemplate.content.querySelectorAll(`[${PAGEROOT_ELEMENT_ID_ATTRIBUTE}]`),
+  ).map((element) => element.getAttribute(PAGEROOT_ELEMENT_ID_ATTRIBUTE)));
+  const liveElements = Array.from(hostElement.querySelectorAll("*"));
+  const sourceElements = Array.from(nextTemplate.content.querySelectorAll("*"));
+  if (liveElements.length !== sourceElements.length) {
+    throw new Error("实时编辑 DOM 与已保存的源码元素数量不一致。");
+  }
+  const assignments: Array<{ element: Element; elementId: string }> = [];
+  const assignedIds = new Set<string>();
+  for (let index = 0; index < sourceElements.length; index += 1) {
+    const liveElement = liveElements[index];
+    const sourceElement = sourceElements[index];
+    if (liveElement.localName !== sourceElement.localName) {
+      throw new Error("实时编辑 DOM 与已保存的源码元素顺序不一致。");
+    }
+    const liveId = liveElement.getAttribute(PAGEROOT_ELEMENT_ID_ATTRIBUTE);
+    const sourceId = sourceElement.getAttribute(PAGEROOT_ELEMENT_ID_ATTRIBUTE);
+    if (liveId === sourceId) continue;
+    if (
+      liveId !== null
+      || sourceElement.localName !== "br"
+      || typeof sourceId !== "string"
+      || !isValidPagerootElementId(sourceId)
+      || previousIds.has(sourceId)
+      || assignedIds.has(sourceId)
+    ) {
+      throw new Error("已保存的源码身份无法安全同步到实时换行节点。");
+    }
+    assignedIds.add(sourceId);
+    assignments.push({ element: liveElement, elementId: sourceId });
+  }
+  for (const assignment of assignments) {
+    assignment.element.setAttribute(
+      PAGEROOT_ELEMENT_ID_ATTRIBUTE,
+      assignment.elementId,
+    );
+  }
+}
+
 const GLOBAL_SELECTION_ATTRIBUTE = "data-html-canvas-global-selected";
 
 const TEXT_FRAGMENT_STYLE_PROPERTIES = [
@@ -2276,6 +2335,15 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         }, {
           preserveLiveSelection: true,
           lease: nextLease,
+          ...(refreshedIsland
+            ? {
+                reconcileDomBeforeRebase: () => reconcileAllocatedLineBreakIds(
+                  activeNativeEdit.session.hostElement,
+                  activeNativeEdit.sourceInnerHtml,
+                  nextSourceInnerHtml,
+                ),
+              }
+            : {}),
         });
         if (!rebased) {
           throw new Error("V2 可编辑岛已写入源码，但实时编辑会话无法推进到新版本。");

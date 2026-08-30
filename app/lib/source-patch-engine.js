@@ -8,6 +8,9 @@ import {
   canonicalSourceStyleDeclaration,
 } from "../../shared/source-style-value.mjs";
 import {
+  planSemanticStructurePatches,
+} from "../../shared/semantic-structure-plan.mjs";
+import {
   editableIslandForTarget,
   isEditableIslandTarget,
   materializeEditableIslandHtml,
@@ -336,6 +339,42 @@ function semanticInsertion(index, command) {
   };
 }
 
+function semanticStructurePlanElements(index) {
+  return index.elements.map((element) => ({
+    elementId: element.pagerootId,
+    tagName: element.tagName,
+    parentElementId: element.parentId
+      ? index.byNodeId.get(element.parentId)?.pagerootId ?? null
+      : null,
+    startOffset: element.range.startOffset,
+    endOffset: element.range.endOffset,
+    contentStartOffset: element.contentRange.startOffset,
+    contentEndOffset: element.contentRange.endOffset,
+    explicitEndTag: element.explicitEndTag,
+    isVoid: element.isVoid,
+    selfClosing: element.startTagRange.endOffset === element.range.endOffset
+      && /\/\s*>$/u.test(element.startTagRaw),
+    boundarySafe: element.boundarySafe,
+  }));
+}
+
+function sharedSemanticStructurePatches(index, operation, fragmentHtml = null) {
+  try {
+    return planSemanticStructurePatches({
+      source: index.source,
+      elements: semanticStructurePlanElements(index),
+      operation,
+      fragmentHtml,
+    }).patches;
+  } catch (cause) {
+    fail(
+      cause?.code || "SEMANTIC_STRUCTURE_PLAN_INVALID",
+      cause instanceof Error ? cause.message : "Semantic structure planning failed.",
+      cause?.details || {},
+    );
+  }
+}
+
 function semanticFragmentIndex(fragmentHtml, existingIndex, allowedExistingIds = new Set()) {
   const fragment = String(fragmentHtml ?? "");
   const fragmentIndex = buildSourceIndex(fragment);
@@ -442,17 +481,13 @@ export function planSemanticOperationPatch(indexOrHtml, command) {
   } else if (semanticType === "insertElement") {
     const insertion = semanticInsertion(index, command);
     semanticFragmentIndex(command.elementHtml, index);
-    patches = [sourcePatch(insertion.offset, insertion.offset, "", String(command.elementHtml), {
-      kind: "semantic:insert-element",
-    })];
+    patches = sharedSemanticStructurePatches(index, command, command.elementHtml);
     targetRefs = [insertion.targetRef];
   } else if (semanticType === "deleteElement") {
     if (!target || !target.parentId) {
       fail("SEMANTIC_DELETE_ROOT_UNSUPPORTED", "Only an authored element with a source parent can be deleted.");
     }
-    patches = [sourcePatch(target.range.startOffset, target.range.endOffset, target.raw, "", {
-      kind: "semantic:delete-element",
-    })];
+    patches = sharedSemanticStructurePatches(index, command);
   } else if (semanticType === "moveElement") {
     if (!target || !target.parentId) {
       fail("SEMANTIC_MOVE_ROOT_UNSUPPORTED", "Only an authored element with a source parent can be moved.");
@@ -464,14 +499,7 @@ export function planSemanticOperationPatch(indexOrHtml, command) {
     if (insertion.before?.nodeId === target.nodeId) {
       fail("SEMANTIC_MOVE_NOOP", "The requested move already occupies that insertion point.");
     }
-    patches = [
-      sourcePatch(target.range.startOffset, target.range.endOffset, target.raw, "", {
-        kind: "semantic:move-element:remove",
-      }),
-      sourcePatch(insertion.offset, insertion.offset, "", target.raw, {
-        kind: "semantic:move-element:insert",
-      }),
-    ];
+    patches = sharedSemanticStructurePatches(index, command);
     targetRefs = [targetRef, insertion.targetRef];
   } else if (semanticType === "replaceSubtree") {
     if (!target) fail("TARGET_REQUIRED", "replaceSubtree requires an authored target.");
@@ -491,9 +519,7 @@ export function planSemanticOperationPatch(indexOrHtml, command) {
         },
       );
     }
-    patches = [sourcePatch(target.range.startOffset, target.range.endOffset, target.raw, fragment.fragment, {
-      kind: "semantic:replace-subtree",
-    })];
+    patches = sharedSemanticStructurePatches(index, command, fragment.fragment);
   } else {
     fail("SEMANTIC_OPERATION_TYPE_UNSUPPORTED", `Unsupported semantic operation type: ${semanticType || "missing"}.`);
   }
@@ -1727,35 +1753,50 @@ export function planSiblingReorderPatch(indexOrHtml, command) {
     );
   }
 
-  let firstChanged = -1;
-  let lastChanged = -1;
-  for (let position = 0; position < oldOrder.length; position += 1) {
-    if (oldOrder[position] !== nextOrder[position]) {
-      if (firstChanged < 0) firstChanged = position;
-      lastChanged = position;
+  let patches;
+  if (index.pagerootIdentity?.complete) {
+    const movedPosition = nextOrder.indexOf(moving.nodeId);
+    const nextSiblingNodeId = nextOrder[movedPosition + 1] ?? null;
+    const nextSibling = nextSiblingNodeId
+      ? index.byNodeId.get(nextSiblingNodeId)
+      : null;
+    patches = sharedSemanticStructurePatches(index, {
+      type: "moveElement",
+      targetElementId: moving.pagerootId,
+      parentElementId: parent.pagerootId,
+      beforeElementId: nextSibling?.pagerootId ?? null,
+    });
+  } else {
+    let firstChanged = -1;
+    let lastChanged = -1;
+    for (let position = 0; position < oldOrder.length; position += 1) {
+      if (oldOrder[position] !== nextOrder[position]) {
+        if (firstChanged < 0) firstChanged = position;
+        lastChanged = position;
+      }
     }
-  }
-  const patches = [];
-  if (firstChanged >= 0) {
-    const byNodeId = new Map(units.map((unit) => [unit.nodeId, unit]));
-    const startOffset = units[firstChanged].startOffset;
-    const endOffset = units[lastChanged].endOffset;
-    const before = index.source.slice(startOffset, endOffset);
-    const after = nextOrder
-      .slice(firstChanged, lastChanged + 1)
-      .map((nodeId) => byNodeId.get(nodeId).raw)
-      .join("");
-    patches.push(sourcePatch(
-      startOffset,
-      endOffset,
-      before,
-      after,
-      {
-        kind: "sibling-reorder",
-        parentId: parent.nodeId,
-        movedNodeId: moving.nodeId,
-      },
-    ));
+    patches = [];
+    if (firstChanged >= 0) {
+      const byNodeId = new Map(units.map((unit) => [unit.nodeId, unit]));
+      const startOffset = units[firstChanged].startOffset;
+      const endOffset = units[lastChanged].endOffset;
+      const before = index.source.slice(startOffset, endOffset);
+      const after = nextOrder
+        .slice(firstChanged, lastChanged + 1)
+        .map((nodeId) => byNodeId.get(nodeId).raw)
+        .join("");
+      patches.push(sourcePatch(
+        startOffset,
+        endOffset,
+        before,
+        after,
+        {
+          kind: "sibling-reorder",
+          parentId: parent.nodeId,
+          movedNodeId: moving.nodeId,
+        },
+      ));
+    }
   }
 
   return makePlan(

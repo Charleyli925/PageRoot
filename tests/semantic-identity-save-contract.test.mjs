@@ -58,6 +58,93 @@ function sequentialUuidFactory() {
   return () => `70000000-0000-4000-8000-${String(++index).padStart(12, "0")}`;
 }
 
+function renderExactPatches(source, patches) {
+  let output = source;
+  for (const patch of [...patches].sort(
+    (left, right) => right.startOffset - left.startOffset,
+  )) {
+    assert.equal(output.slice(patch.startOffset, patch.endOffset), patch.before);
+    output = `${output.slice(0, patch.startOffset)}${patch.after}${
+      output.slice(patch.endOffset)
+    }`;
+  }
+  return output;
+}
+
+function exactInversePatches(patches) {
+  let delta = 0;
+  const inverse = [...patches]
+    .sort((left, right) => left.startOffset - right.startOffset)
+    .map((patch) => {
+      const startOffset = patch.startOffset + delta;
+      const result = {
+        startOffset,
+        endOffset: startOffset + patch.after.length,
+        before: patch.after,
+        after: patch.before,
+        kind: `inverse:${patch.kind ?? "source"}`,
+      };
+      delta += patch.after.length - patch.before.length;
+      return result;
+    });
+  const coalesced = [];
+  for (const patch of inverse) {
+    const previous = coalesced.at(-1);
+    if (previous && previous.startOffset === patch.startOffset) {
+      previous.endOffset = Math.max(previous.endOffset, patch.endOffset);
+      previous.before += patch.before;
+      previous.after += patch.after;
+      if (previous.kind !== patch.kind) previous.kind = "inverse:source";
+      continue;
+    }
+    coalesced.push({ ...patch });
+  }
+  return coalesced;
+}
+
+function unrelatedTitlePatch(source) {
+  const before = "Identity";
+  const startOffset = source.indexOf(before);
+  assert.notEqual(startOffset, -1);
+  return {
+    startOffset,
+    endOffset: startOffset + before.length,
+    before,
+    after: "Intruder",
+    kind: "forged:unrelated-title",
+  };
+}
+
+function evidenceWithExtraStructuralPatch(source, result, semanticOperation, {
+  direction = "forward",
+} = {}) {
+  const valid = saveEvidence(source, result, semanticOperation);
+  const beforeHtml = direction === "undo" ? result.html : source;
+  const canonicalPatches = direction === "undo"
+    ? valid.reversePatches
+    : valid.forwardPatches;
+  const forwardPatches = [...canonicalPatches, unrelatedTitlePatch(beforeHtml)]
+    .sort((left, right) => left.startOffset - right.startOffset);
+  const afterHtml = renderExactPatches(beforeHtml, forwardPatches);
+  return {
+    afterHtml,
+    evidence: {
+      ...valid,
+      beforeSourceSha256: createSemanticDocumentState(beforeHtml).sourceSha256,
+      afterSourceSha256: createSemanticDocumentState(afterHtml).sourceSha256,
+      forwardPatches,
+      reversePatches: exactInversePatches(forwardPatches),
+      semanticDirection: direction,
+      identityDelta: deriveSemanticOperationIdentityDelta(
+        beforeHtml,
+        afterHtml,
+        semanticOperation,
+        { direction },
+      ),
+    },
+  };
+}
+
 function saveEvidence(source, result, semanticOperation, kind = "structure") {
   const materialization = result.materialization.sourcePatchResult;
   return {
@@ -157,6 +244,7 @@ test("insert, duplicate, same-parent move and cross-parent move save from semant
   for (const [operationId, parentElementId, beforeElementId] of [
     ["sourceop_same_parent_move_005", ids.left, ids.first],
     ["sourceop_cross_parent_move_006", ids.right, null],
+    ["sourceop_backward_cross_parent_move_006b", ids.body, ids.left],
   ]) {
     const moving = createMoveElementOperation(html, {
       baseRevision: 0,
@@ -365,6 +453,200 @@ test("insert and replace identity allocations are bound to exact operation HTML"
         && error?.details?.semanticIdentityError === "SEMANTIC_IDENTITY_MATERIALIZATION_MISMATCH"
       ),
     );
+  }
+});
+
+test("structural semantic evidence rejects any unrelated extra patch", () => {
+  const cases = [];
+  const deleting = operation("deleteElement", {
+    target: target(ids.first),
+  }, "sourceop_structure_extra_delete_016");
+  cases.push([deleting, applySemanticOperation(createSemanticDocumentState(html), deleting)]);
+
+  const inserting = createInsertElementOperation(html, {
+    baseRevision: 0,
+    operationId: "sourceop_structure_extra_insert_017",
+    parentElementId: ids.left,
+    beforeElementId: ids.second,
+    html: "<article><em>new</em></article>",
+  });
+  cases.push([inserting, applySemanticOperation(
+    createSemanticDocumentState(html),
+    inserting,
+    {
+      randomUUID: uuidFactory(
+        "a0000000-0000-4000-8000-000000000001",
+        "a0000000-0000-4000-8000-000000000002",
+      ),
+    },
+  )]);
+
+  const replacing = operation("replaceSubtree", {
+    target: target(ids.first),
+    html: "<article><em>replacement</em></article>",
+  }, "sourceop_structure_extra_replace_018");
+  cases.push([replacing, applySemanticOperation(
+    createSemanticDocumentState(html),
+    replacing,
+    { randomUUID: uuidFactory("a0000000-0000-4000-8000-000000000003") },
+  )]);
+
+  for (const [operationId, parentElementId, beforeElementId] of [
+    ["sourceop_structure_extra_same_move_019", ids.left, ids.first],
+    ["sourceop_structure_extra_cross_move_020", ids.right, null],
+  ]) {
+    const moving = createMoveElementOperation(html, {
+      baseRevision: 0,
+      operationId,
+      elementId: ids.second,
+      parentElementId,
+      beforeElementId,
+    });
+    cases.push([moving, applySemanticOperation(createSemanticDocumentState(html), moving)]);
+  }
+
+  for (const [semanticOperation, result] of cases) {
+    const forged = evidenceWithExtraStructuralPatch(html, result, semanticOperation);
+    assert.throws(
+      () => materializeIdentityPreservingSave(html, forged.afterHtml, {
+        sourceHistoryOperations: [forged.evidence],
+      }),
+      (error) => (
+        error?.code === "SOURCE_ELEMENT_IDENTITY_LOST"
+        && error?.details?.semanticIdentityError
+          === "SEMANTIC_IDENTITY_STRUCTURE_PATCH_MISMATCH"
+      ),
+      semanticOperation.type,
+    );
+  }
+});
+
+test("structural semantic patch binding selects exact undo and redo evidence", () => {
+  const moving = createMoveElementOperation(html, {
+    baseRevision: 0,
+    operationId: "sourceop_structure_direction_021",
+    elementId: ids.second,
+    parentElementId: ids.body,
+    beforeElementId: ids.left,
+  });
+  const result = applySemanticOperation(createSemanticDocumentState(html), moving);
+  const forward = saveEvidence(html, result, moving);
+  const undo = {
+    ...forward,
+    beforeSourceSha256: result.sourceSha256,
+    afterSourceSha256: result.previousSourceSha256,
+    forwardPatches: forward.reversePatches,
+    reversePatches: forward.forwardPatches,
+    semanticDirection: "undo",
+    identityDelta: deriveSemanticOperationIdentityDelta(
+      result.html,
+      html,
+      moving,
+      { direction: "undo" },
+    ),
+  };
+  assert.equal(materializeIdentityPreservingSave(result.html, html, {
+    sourceHistoryOperations: [undo],
+  }).html, html);
+  assert.equal(materializeIdentityPreservingSave(html, result.html, {
+    sourceHistoryOperations: [{
+      ...forward,
+      semanticDirection: "redo",
+      identityDelta: deriveSemanticOperationIdentityDelta(
+        html,
+        result.html,
+        moving,
+        { direction: "redo" },
+      ),
+    }],
+  }).html, result.html);
+});
+
+test("same-parent semantic replay preserves exact sibling source boundaries", () => {
+  const implicit = `<!doctype html><html data-pageroot-id="${ids.html}"><head data-pageroot-id="${ids.head}"><title data-pageroot-id="${ids.title}">Implicit</title></head><body data-pageroot-id="${ids.body}"><ul data-pageroot-id="${ids.left}"><li data-pageroot-id="${ids.first}">A<li data-pageroot-id="${ids.second}">B</ul></body></html>`;
+  const moving = createMoveElementOperation(implicit, {
+    baseRevision: 0,
+    operationId: "sourceop_implicit_sibling_move_022",
+    elementId: ids.second,
+    parentElementId: ids.left,
+    beforeElementId: ids.first,
+  });
+  assert.throws(
+    () => applySemanticOperation(createSemanticDocumentState(implicit), moving),
+    (error) => [
+      "UNSAFE_REORDER_BOUNDARY",
+      "SEMANTIC_STRUCTURE_REORDER_SIBLING_BOUNDARY_INVALID",
+    ].includes(error?.code),
+  );
+  const implicitIndex = buildSourceIndex(implicit);
+  const parent = implicitIndex.byPagerootId.get(ids.left);
+  const after = `${implicit.slice(0, parent.contentRange.startOffset)}${
+    `<li data-pageroot-id="${ids.second}">B<li data-pageroot-id="${ids.first}">A`
+  }${implicit.slice(parent.contentRange.endOffset)}`;
+  const patch = {
+    startOffset: parent.contentRange.startOffset,
+    endOffset: parent.contentRange.endOffset,
+    before: implicit.slice(parent.contentRange.startOffset, parent.contentRange.endOffset),
+    after: `<li data-pageroot-id="${ids.second}">B<li data-pageroot-id="${ids.first}">A`,
+    kind: "sibling-reorder",
+  };
+  assert.throws(
+    () => materializeIdentityPreservingSave(implicit, after, {
+      sourceHistoryOperations: [{
+        operationId: moving.operationId,
+        kind: "structure",
+        editRevision: 1,
+        createdAt: "2026-08-30T00:00:00.000Z",
+        beforeSourceSha256: createSemanticDocumentState(implicit).sourceSha256,
+        afterSourceSha256: createSemanticDocumentState(after).sourceSha256,
+        forwardPatches: [patch],
+        reversePatches: exactInversePatches([patch]),
+        beforeTarget: null,
+        afterTarget: null,
+        semanticDirection: "forward",
+        semanticOperation: moving,
+        identityDelta: deriveSemanticOperationIdentityDelta(
+          implicit,
+          after,
+          moving,
+        ),
+      }],
+    }),
+    (error) => (
+      error?.code === "SOURCE_ELEMENT_IDENTITY_LOST"
+      && error?.details?.semanticIdentityError
+        === "SEMANTIC_IDENTITY_STRUCTURE_PATCH_MISMATCH"
+      && error?.details?.semanticIdentityDetails?.structurePlanError
+        === "SEMANTIC_STRUCTURE_REORDER_SIBLING_BOUNDARY_INVALID"
+    ),
+  );
+
+  for (const [operationId, structuralSource] of [
+    [
+      "sourceop_void_sibling_move_023",
+      `<!doctype html><html data-pageroot-id="${ids.html}"><head data-pageroot-id="${ids.head}"><title data-pageroot-id="${ids.title}">Void</title></head><body data-pageroot-id="${ids.body}"><div data-pageroot-id="${ids.left}"><br data-pageroot-id="${ids.first}"><hr data-pageroot-id="${ids.second}"></div></body></html>`,
+    ],
+    [
+      "sourceop_self_closing_sibling_move_024",
+      `<!doctype html><html data-pageroot-id="${ids.html}"><head data-pageroot-id="${ids.head}"><title data-pageroot-id="${ids.title}">SVG</title></head><body data-pageroot-id="${ids.body}"><svg data-pageroot-id="${ids.left}"><circle data-pageroot-id="${ids.first}"/><path data-pageroot-id="${ids.second}"/></svg></body></html>`,
+    ],
+  ]) {
+    const operationValue = createMoveElementOperation(structuralSource, {
+      baseRevision: 0,
+      operationId,
+      elementId: ids.second,
+      parentElementId: ids.left,
+      beforeElementId: ids.first,
+    });
+    const result = applySemanticOperation(
+      createSemanticDocumentState(structuralSource),
+      operationValue,
+    );
+    assert.equal(materializeIdentityPreservingSave(
+      structuralSource,
+      result.html,
+      { sourceHistoryOperations: [saveEvidence(structuralSource, result, operationValue)] },
+    ).html, result.html);
   }
 });
 

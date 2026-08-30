@@ -59,8 +59,15 @@ import {
 import {
   assertKernelTextMaterialization,
 } from "./semantic-text-materialization.mjs";
+import {
+  assertKernelStructurePatchMaterialization,
+} from "./semantic-structure-materialization.mjs";
 
 const HTML_WHITESPACE = /[\t\n\f\r ]/u;
+const HTML_VOID_ELEMENTS = new Set([
+  "area", "base", "br", "col", "embed", "hr", "img", "input", "link",
+  "meta", "param", "source", "track", "wbr",
+]);
 
 export const SOURCE_ELEMENT_IDENTITY_MIGRATION_TRANSACTION_SCHEMA_VERSION = "1.0.0";
 
@@ -102,14 +109,52 @@ export function inspectSourceElementIdentity(html) {
     const identityAttributes = rawStartTagAttributes(source, startTag).filter(
       (attribute) => attribute.name === PAGEROOT_ELEMENT_ID_ATTRIBUTE,
     );
+    const endTag = token.node?.sourceCodeLocation?.endTag;
+    const explicitEndTag = Number.isInteger(endTag?.startOffset)
+      && Number.isInteger(endTag?.endOffset);
+    const isVoid = HTML_VOID_ELEMENTS.has(token.name);
+    const startTagRaw = source.slice(startTag.startOffset, startTag.endOffset);
+    const sourceEndOffset = Number.isInteger(token.node?.sourceCodeLocation?.endOffset)
+      ? token.node.sourceCodeLocation.endOffset
+      : startTag.endOffset;
+    const contentEndOffset = explicitEndTag
+      ? endTag.startOffset
+      : isVoid
+        ? startTag.endOffset
+        : sourceEndOffset;
+    let boundarySafe = true;
+    let previousChildEndOffset = startTag.endOffset;
+    const authoredChildren = token.node?.nodeName === "template" && token.node.content
+      ? token.node.content.childNodes ?? []
+      : token.node?.childNodes ?? [];
+    for (const child of authoredChildren) {
+      const location = child?.sourceCodeLocation;
+      if (!Number.isInteger(location?.startOffset) || !Number.isInteger(location?.endOffset)) {
+        continue;
+      }
+      if (
+        location.startOffset < startTag.endOffset
+        || location.endOffset > contentEndOffset
+        || location.startOffset < previousChildEndOffset
+      ) {
+        boundarySafe = false;
+        break;
+      }
+      previousChildEndOffset = Math.max(previousChildEndOffset, location.endOffset);
+    }
     return [{
       node: token.node,
       tagName: token.name,
       startOffset: startTag.startOffset,
       endOffset: startTag.endOffset,
-      sourceEndOffset: Number.isInteger(token.node?.sourceCodeLocation?.endOffset)
-        ? token.node.sourceCodeLocation.endOffset
-        : startTag.endOffset,
+      sourceEndOffset,
+      contentStartOffset: startTag.endOffset,
+      contentEndOffset,
+      explicitEndTag,
+      isVoid,
+      selfClosing: startTag.endOffset === sourceEndOffset
+        && /\/\s*>$/u.test(startTagRaw),
+      boundarySafe,
       closingDelimiterOffset,
       identityAttributes,
       pagerootId: identityAttributes.length === 1
@@ -387,13 +432,14 @@ function kernelIdentityFreeSubtreeHtml(
     }
     return { startOffset, endOffset };
   }).sort((left, right) => right.startOffset - left.startOffset);
-  let identityFreeHtml = html.slice(fragmentStartOffset, fragmentEndOffset);
+  const materializedHtml = html.slice(fragmentStartOffset, fragmentEndOffset);
+  let identityFreeHtml = materializedHtml;
   for (const removal of removals) {
     const startOffset = removal.startOffset - fragmentStartOffset;
     const endOffset = removal.endOffset - fragmentStartOffset;
     identityFreeHtml = `${identityFreeHtml.slice(0, startOffset)}${identityFreeHtml.slice(endOffset)}`;
   }
-  return identityFreeHtml;
+  return { identityFreeHtml, materializedHtml };
 }
 
 function assertKernelStructuralMaterialization({
@@ -404,7 +450,7 @@ function assertKernelStructuralMaterialization({
   operation,
   direction,
 }) {
-  if (!["insertElement", "replaceSubtree"].includes(operation.type)) return;
+  if (!["insertElement", "replaceSubtree"].includes(operation.type)) return null;
   const forwardBeforeIdentity = direction === "undo" ? afterIdentity : beforeIdentity;
   const forwardAfterIdentity = direction === "undo" ? beforeIdentity : afterIdentity;
   const forwardAfterHtml = direction === "undo" ? beforeHtml : afterHtml;
@@ -437,14 +483,14 @@ function assertKernelStructuralMaterialization({
     rootElementId = operation.target.elementId;
     expectedElementIds = new Set([rootElementId, ...forwardAddedIds]);
   }
-  const identityFreeHtml = kernelIdentityFreeSubtreeHtml(
+  const materialization = kernelIdentityFreeSubtreeHtml(
     forwardAfterHtml,
     forwardAfterIdentity,
     rootElementId,
     expectedElementIds,
     operation.html,
   );
-  if (identityFreeHtml !== operation.html) {
+  if (materialization.identityFreeHtml !== operation.html) {
     throw semanticAuthorizationError(
       "SEMANTIC_IDENTITY_MATERIALIZATION_MISMATCH",
       "The saved structural subtree is not the kernel materialization of operation.html.",
@@ -452,10 +498,14 @@ function assertKernelStructuralMaterialization({
         operationType: operation.type,
         rootElementId,
         operationHtmlSha256: sha256(Buffer.from(operation.html, "utf8")),
-        materializedIdentityFreeSha256: sha256(Buffer.from(identityFreeHtml, "utf8")),
+        materializedIdentityFreeSha256: sha256(Buffer.from(
+          materialization.identityFreeHtml,
+          "utf8",
+        )),
       },
     );
   }
+  return materialization.materializedHtml;
 }
 
 function identityTransitionFacts(beforeIdentity, afterIdentity) {
@@ -524,13 +574,21 @@ function assertBindingChangesAreAuthorized(currentHtml, nextHtml, sourceHistoryO
         direction: semanticDirection,
         identityDelta,
       });
-      assertKernelStructuralMaterialization({
+      const materializedFragmentHtml = assertKernelStructuralMaterialization({
         beforeIdentity,
         afterIdentity,
         beforeHtml: step.beforeHtml,
         afterHtml: step.afterHtml,
         operation: semanticOperation,
         direction: semanticDirection,
+      });
+      assertKernelStructurePatchMaterialization({
+        step,
+        beforeIdentity,
+        afterIdentity,
+        operation: semanticOperation,
+        direction: semanticDirection,
+        materializedFragmentHtml,
       });
       assertKernelTextMaterialization({
         step,

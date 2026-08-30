@@ -364,6 +364,7 @@ Source 逐节点对账；Script 执行状态迁移；为绝对无刷新建立双
 → SourceIndex + TargetResolver 锁定源码范围
 → 岛内或纯文本片段做最小安全规范化，SourcePatchEngine 生成精确 range patch 与 inverse patch
 → 原生换行以裸 `<br>` 进入受管计划，由系统分配 fresh stable ID 后再形成 `setText`；调用方预置新 ID 失败关闭
+→ 保存计划接受后，仅在 expected-mutation 边界把这些 ID 补到对应实时 `<br>`，保留 Selection 并继续当前编辑会话；ID 不新增 Runtime authority
 → 校验岛外字节完全不变，并重解析受影响区域
 → 语义内核从 before/after 完整 HTML 导出 identityDelta（新增/删除/移动 ID、保留根与放置证据）
 → 用新源码原子重建 projection 并恢复逻辑选区
@@ -373,6 +374,7 @@ Source 逐节点对账；Script 执行状态迁移；为绝对无刷新建立双
 → debounce 后进入同一串行队列
 → 核对源 Hash
 → Repository 重新解析身份差异，与 semantic operation + identityDelta 交叉验证；SourcePatch kind 不授权身份变化
+→ 结构操作使用 Canvas/Repository 共享的纯 plan replayer 重建整组 exact patches；删除、插入、替换、跨父移动及 comment-aware 同父 reorder 均禁止附带无关 patch
 → 对 identified `setText` 岛内容及 range-style wrapper，Repository 还按目标内容范围或逻辑文字范围独立重建 exact patch，核对位置、数量、样式字节和新 ID
 → 临时文件写入、刷盘、原子替换
 → 重读校验
