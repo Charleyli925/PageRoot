@@ -439,6 +439,10 @@
         "to": "shared/source-history.mjs"
       },
       {
+        "from": "shared/semantic-identity-delta.mjs",
+        "to": "shared/semantic-identity-delta.mjs"
+      },
+      {
         "from": "shared/conversation.mjs",
         "to": "shared/conversation.mjs"
       },

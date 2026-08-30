@@ -129,6 +129,7 @@ export const REQUIRED_SHARED_FILES = [
   "draft-aggregate.mjs",
   "pageroot-element-identity.mjs",
   "provenance.mjs",
+  "semantic-identity-delta.mjs",
   "source-history.mjs",
   "conversation.mjs",
   "agent-delivery.mjs",

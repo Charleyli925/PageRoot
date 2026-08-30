@@ -138,6 +138,7 @@ const SHARED_FILES = [
   "direct-edit-compatibility.mjs",
   "pageroot-element-identity.mjs",
   "provenance.mjs",
+  "semantic-identity-delta.mjs",
   "source-history.mjs",
   "conversation.mjs",
   "agent-delivery.mjs",

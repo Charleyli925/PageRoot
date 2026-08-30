@@ -429,6 +429,11 @@ export async function createSyntheticAppBundle(t, {
     ),
     writeFixtureFile(
       productRoot,
+      "shared/semantic-identity-delta.mjs",
+      "export const fixtureSemanticIdentityDelta = true;\n",
+    ),
+    writeFixtureFile(
+      productRoot,
       "shared/conversation.mjs",
       "export const fixtureConversation = true;\n",
     ),
@@ -520,6 +525,7 @@ export async function createSyntheticAppBundle(t, {
       "direct-edit-compatibility.mjs",
       "pageroot-element-identity.mjs",
       "provenance.mjs",
+      "semantic-identity-delta.mjs",
       "source-history.mjs",
       "conversation.mjs",
       "agent-delivery.mjs",
