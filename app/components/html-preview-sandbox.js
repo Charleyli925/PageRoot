@@ -225,9 +225,10 @@ function addRuntimeResourceBase(parsed, sessionId) {
 
 /**
  * Builds one disposable Edit runtime document. Native script elements load
- * through a source-scoped protocol session, so browser ordering semantics run
- * normally without widening the renderer's own CSP. No Runtime DOM is ever
- * serialized back into the source HTML.
+ * through a source-scoped protocol session. They remain inert until the fixed
+ * bootstrap has proved the complete parser-authored source object set, then
+ * activate in source order without widening the renderer's own CSP. No Runtime
+ * DOM is ever serialized back into the source HTML.
  */
 export function prepareDisposableRuntimeFrameDocument(
   source,
@@ -276,8 +277,6 @@ export function prepareDisposableRuntimeFrameDocument(
     );
     if (!scriptUrl) return null;
     script.src = scriptUrl;
-    if (descriptor.type) script.type = descriptor.type;
-    else script.removeAttribute("type");
     script.setAttribute(EDIT_RUNTIME_SCRIPT_STUB_ATTRIBUTE, String(descriptor.index));
     script.textContent = "";
   }

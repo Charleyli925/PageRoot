@@ -82,7 +82,8 @@ the historical synthetic-spike decision.
   `aria-expanded` state. It never carries runtime DOM, pixels or table markup.
 - On desktop, a clean persisted document with a supported executable `script`
   program may receive one Main-authorized resource closure. The visible Edit
-  iframe runs those scripts with ordinary browser scheduling; PageRoot does not
+  iframe parses source with author scripts inert, proves the complete parser-
+  authored object set, then activates those scripts in source order; PageRoot does not
   wait for visual paint, freeze activity or audit Runtime DOM against source.
   Same-origin `window.parent` access, including renderer-exposed preload APIs,
   remains the accepted in-place-editing cost. Unsupported programs fail closed

@@ -1,5 +1,7 @@
 import { expect, test } from "@playwright/test";
 
+import { buildSourceIndex } from "../../../app/lib/source-index.js";
+
 import {
   ECHARTS_STUB,
   currentEditorFrame,
@@ -37,7 +39,58 @@ async function withRuntimeProject(prefix, files, run) {
   }
 }
 
-test("Electron Edit runs ordinary scripts continuously without saving Runtime DOM", {
+function parserPreclaimFixture() {
+  const futurePagerootId = "pr1_123456789abc4def8abc000000000006";
+  const nodeIdPlaceholder = "__FUTURE_SOURCE_NODE_ID__";
+  const template = `<!doctype html>
+<html data-pageroot-id="pr1_123456789abc4def8abc000000000001"><head data-pageroot-id="pr1_123456789abc4def8abc000000000002"><title data-pageroot-id="pr1_123456789abc4def8abc000000000003">Preclaim</title><script data-pageroot-id="pr1_123456789abc4def8abc000000000004">
+    const decoy = document.createElement('button');
+    decoy.id = 'runtime-preclaim-decoy';
+    decoy.textContent = '伪造源码按钮';
+    decoy.setAttribute('data-pageroot-id', '${futurePagerootId}');
+    decoy.setAttribute('data-html-ai-source-node-id', '${nodeIdPlaceholder}');
+    decoy.setAttribute('data-pageroot-edit-runtime-source', '${nodeIdPlaceholder}');
+    document.documentElement.append(decoy);
+  </script></head><body data-pageroot-id="pr1_123456789abc4def8abc000000000005"><button id="future-source" data-native-case="runtime-preclaim" data-pageroot-id="${futurePagerootId}">真实源码按钮</button></body></html>`;
+  let sourceNodeId = nodeIdPlaceholder;
+  let html = template;
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    html = template.replaceAll(nodeIdPlaceholder, sourceNodeId);
+    const next = buildSourceIndex(html).byPagerootId.get(futurePagerootId)?.nodeId;
+    if (!next) throw new Error("Unable to resolve future source-node identity.");
+    if (next === sourceNodeId) return html;
+    sourceNodeId = next;
+  }
+  throw new Error("Future source-node identity did not stabilize.");
+}
+
+test("author script cannot preclaim a future parser-authored source object", {
+  tag: ["@gate-smoke", "@smoke-editing"],
+}, async () => {
+  const html = parserPreclaimFixture();
+  await withRuntimeProject("pageroot-runtime-preclaim-e2e-", {
+    "runtime-report.html": html,
+  }, async ({ page, sourcePath }) => {
+    const { frame } = await loadedDiskFrame(page, sourcePath, "runtime-preclaim");
+    await expect(frame.locator("#runtime-preclaim-decoy")).toHaveText("伪造源码按钮");
+    const toolbar = page.getByRole("toolbar", { name: /编辑/u });
+
+    await frame.locator("#runtime-preclaim-decoy").click();
+    await expect(toolbar.getByRole("button", { name: /留评论/u })).toBeVisible();
+    await expect(toolbar.getByRole("button", { name: "编辑", exact: true })).toHaveCount(0);
+    await expect(toolbar.getByRole("button", { name: "删除元素", exact: true })).toHaveCount(0);
+
+    await page.keyboard.press("Escape");
+    await frame.locator("#future-source").click();
+    await expect(toolbar.getByRole("button", { name: "删除元素", exact: true })).toBeVisible();
+    expect(readFileSync(sourcePath, "utf8")).toBe(html);
+    expect(readFileSync(sourcePath, "utf8")).not.toContain(
+      '<button id="runtime-preclaim-decoy"',
+    );
+  });
+});
+
+test("author Script cannot add source authority after Runtime starts or save Runtime DOM", {
   tag: ["@gate-smoke", "@smoke-editing"],
 }, async () => {
   const html = `<!doctype html>
@@ -70,6 +123,7 @@ test("Electron Edit runs ordinary scripts continuously without saving Runtime DO
     const copiedRuntimeMarker = host.getAttribute('data-pageroot-edit-runtime-source');
     generated.setAttribute('data-pageroot-edit-runtime-source', copiedRuntimeMarker);
     generated.setAttribute('data-html-ai-source-node-id', copiedSourceId);
+    generated.setAttribute('data-pageroot-id', host.getAttribute('data-pageroot-id'));
     const copiedProofProperty = Object.getOwnPropertyNames(host).find(
       (name) => name.startsWith('__pageroot_edit_source_'),
     );
@@ -164,9 +218,8 @@ test("Electron Edit runs ordinary scripts continuously without saving Runtime DO
       hostSourceId: node.closest("[data-html-ai-source-node-id]")
         ?.getAttribute("data-html-ai-source-node-id") || null,
     }));
-    expect(provenance.generatedSourceId).toBeNull();
-    expect(provenance.runtimeMarker).toBeNull();
-    expect(provenance.hostSourceId).not.toBeNull();
+    expect(provenance.generatedSourceId).toBe(provenance.hostSourceId);
+    expect(provenance.runtimeMarker).toBe(provenance.generatedSourceId);
     expect(readFileSync(sourcePath, "utf8")).toBe(html);
     expect(readFileSync(sourcePath, "utf8")).not.toContain('<button id="runtime-generated"');
 

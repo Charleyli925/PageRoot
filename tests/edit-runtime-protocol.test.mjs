@@ -105,7 +105,7 @@ test("direct protocol serves one reusable disposable-frame resource session", as
     + "/.pageroot/bootstrap/" + EXECUTION_ID + ".js";
   const bootstrap = await handler(new Request(bootstrapUrl));
   assert.equal(bootstrap.status, 200);
-  assert.match(await bootstrap.text(), /claimedIds/u);
+  assert.match(await bootstrap.text(), /proveParsedSource/u);
   assert.equal((await handler(new Request(bootstrapUrl))).status, 200);
 
   const firstAuthor = await handler(new Request(
@@ -234,7 +234,7 @@ test("direct protocol never serves a capture HTML document", async (t) => {
   const bootstrapUrl = `pageroot-edit-runtime://${session.sessionId}/.pageroot/bootstrap/${session.executionId}.js`;
   const bootstrap = await handler(new Request(bootstrapUrl));
   assert.equal(bootstrap.status, 200);
-  assert.match(await bootstrap.text(), /claimedIds/u);
+  assert.match(await bootstrap.text(), /proveParsedSource/u);
   assert.equal((await handler(new Request(bootstrapUrl))).status, 200);
 });
 

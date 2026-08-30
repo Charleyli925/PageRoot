@@ -5,7 +5,7 @@ import {
   createEditRuntimeBootstrap,
 } from "../desktop/edit-runtime-bootstrap.mjs";
 
-test("disposable runtime bootstrap proves source nodes without freezing author work", () => {
+test("disposable runtime bootstrap proves the parsed source set before author work", () => {
   const source = createEditRuntimeBootstrap({
     executionId: "a".repeat(24),
     sessionId: "b".repeat(32),
@@ -15,8 +15,11 @@ test("disposable runtime bootstrap proves source nodes without freezing author w
   assert.match(source, /claimedIds/u);
   assert.match(source, /openRegistration/u);
   assert.match(source, /registerProved/u);
-  assert.match(source, /new WeakMap/u);
-  assert.match(source, /MutationObserver/u);
+  assert.match(source, /proveParsedSource/u);
+  assert.match(source, /activateAuthorScripts/u);
+  assert.match(source, /DOMContentLoaded/u);
+  assert.match(source, /placeholder\.replaceWith\(script\)/u);
+  assert.doesNotMatch(source, /MutationObserver/u);
   assert.match(source, /markerAttribute \+ "\],\[" \+ config\.sourceNodeAttribute/u);
   assert.match(source, /data-pageroot-edit-runtime-source/u);
   assert.match(source, /data-html-ai-source-node-id/u);

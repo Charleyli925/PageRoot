@@ -82,13 +82,16 @@ PageRoot edits local files and renders user-controlled HTML, so its default poli
   hostile-page sandbox. Main re-reads the active source and requires exact
   HTML/SHA, Canvas generation, bounded supported scripts and contained resource
   paths before creating a scoped `pageroot-edit-runtime:` session. The visible
-  iframe runs that closure with ordinary browser scheduling and the sandbox
-  tokens required for in-place editing. Relative assets resolve only through
+  iframe parses the complete source with author-script placeholders inert,
+  registers parser-authored source objects once, and then activates that closure
+  in source order with the sandbox tokens required for in-place editing. Relative assets resolve only through
   the declared contained map; direct `file:` assets and authored base URLs are
   blocked. The protocol has no `bypassCSP`, directory listing or project-path
   response. Popup, form submission and top-level navigation remain blocked.
-  A fixed bootstrap privately proves source-node provenance before author code
-  runs and strips copied public markers from generated clones; it does not
+  A fixed bootstrap privately proves the complete source-node set at
+  `DOMContentLoaded` before author code runs. An authored head script therefore
+  cannot register a generated object against a future parser-node identity;
+  copied public markers remain non-authoritative. The bootstrap does not
   freeze author activity or audit Runtime DOM. Exact ECharts 5.5.0 minified CDN
   references use the packaged SHA-verified library; other reviewed URLs are
   fetched per resource session and are not retained in a private disk cache.

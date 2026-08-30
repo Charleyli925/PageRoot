@@ -29,14 +29,16 @@ export function createEditRuntimeBootstrap({ executionId, sessionId } = {}) {
   const configuration = JSON.stringify({
     markerAttribute: EDIT_RUNTIME_SOURCE_MARKER_ATTRIBUTE,
     sourceNodeAttribute: "data-html-ai-source-node-id",
+    scriptStubAttribute: "data-pageroot-edit-runtime-script",
+    disabledScriptAttribute: "data-html-canvas-disabled-script",
+    originalScriptTypeAttribute: "data-html-canvas-original-script-type",
+    missingAttributeValue: "__html_canvas_missing__",
     registrationProperty,
   }).replace(/</gu, "\\u003c");
   return String.raw`
 (() => {
   "use strict";
   const config = ${configuration};
-  const claimedIds = new Set();
-  const provedIds = new WeakMap();
   const openRegistration = window.parent?.[config.registrationProperty];
   const registerProved = typeof openRegistration === "function"
     ? openRegistration(window)
@@ -58,20 +60,16 @@ export function createEditRuntimeBootstrap({ executionId, sessionId } = {}) {
     element.removeAttribute(config.sourceNodeAttribute);
   };
 
-  const claim = (root) => {
+  const proveParsedSource = () => {
+    const claimedIds = new Set();
     const sourceElements = [];
-    for (const element of candidates(root)) {
+    for (const element of candidates(document.documentElement)) {
       const sourceNodeId = element.getAttribute(config.markerAttribute) || "";
       if (!sourceNodeId) {
         reject(element);
         continue;
       }
       const publicSourceNodeId = element.getAttribute(config.sourceNodeAttribute) || "";
-      const provedId = provedIds.get(element);
-      if (provedId) {
-        if (sourceNodeId !== provedId) reject(element);
-        continue;
-      }
       if (
         claimedIds.has(sourceNodeId)
         || (publicSourceNodeId && publicSourceNodeId !== sourceNodeId)
@@ -80,7 +78,6 @@ export function createEditRuntimeBootstrap({ executionId, sessionId } = {}) {
         continue;
       }
       claimedIds.add(sourceNodeId);
-      provedIds.set(element, sourceNodeId);
       if (publicSourceNodeId === sourceNodeId) sourceElements.push(element);
     }
     if (sourceElements.length > 0 && typeof registerProved === "function") {
@@ -88,29 +85,48 @@ export function createEditRuntimeBootstrap({ executionId, sessionId } = {}) {
     }
   };
 
-  claim(document.documentElement);
-  const observer = new MutationObserver((records) => {
-    for (const record of records) {
-      if (record.type === "attributes") {
+  const activateAuthorScripts = async () => {
+    const placeholders = Array.from(document.querySelectorAll(
+      "script[" + config.scriptStubAttribute + "]",
+    ));
+    for (const placeholder of placeholders) {
+      if (!placeholder.isConnected) continue;
+      const script = document.createElement("script");
+      for (const attribute of Array.from(placeholder.attributes)) {
         if (
-          record.attributeName === config.sourceNodeAttribute
-          && !record.target.hasAttribute(config.markerAttribute)
-        ) {
-          record.target.removeAttribute(config.sourceNodeAttribute);
-          continue;
-        }
-        claim(record.target);
-        continue;
+          attribute.name === config.markerAttribute
+          || attribute.name === config.sourceNodeAttribute
+          || attribute.name === config.scriptStubAttribute
+          || attribute.name === config.disabledScriptAttribute
+          || attribute.name === config.originalScriptTypeAttribute
+        ) continue;
+        script.setAttribute(attribute.name, attribute.value);
       }
-      for (const node of record.addedNodes) claim(node);
+      const originalType = placeholder.getAttribute(config.originalScriptTypeAttribute);
+      if (originalType && originalType !== config.missingAttributeValue) {
+        script.setAttribute("type", originalType);
+      } else {
+        script.removeAttribute("type");
+      }
+      if (!placeholder.hasAttribute("async")) script.async = false;
+      const settled = new Promise((resolve) => {
+        script.addEventListener("load", resolve, { once: true });
+        script.addEventListener("error", resolve, { once: true });
+      });
+      placeholder.replaceWith(script);
+      if (!script.async) await settled;
     }
-  });
-  observer.observe(document, {
-    attributes: true,
-    attributeFilter: [config.markerAttribute, config.sourceNodeAttribute],
-    childList: true,
-    subtree: true,
-  });
+  };
+
+  const start = () => {
+    proveParsedSource();
+    void activateAuthorScripts();
+  };
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", start, { once: true });
+  } else {
+    start();
+  }
 
   document.addEventListener("click", (event) => {
     if (event.target?.closest?.("a[href], area[href]")) event.preventDefault();

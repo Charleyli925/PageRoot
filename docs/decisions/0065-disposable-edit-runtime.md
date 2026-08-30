@@ -21,9 +21,10 @@ source or be reconciled node by node.
 ## Decision
 
 - A persisted desktop document with a supported executable `script` program may
-  use the direct Edit runtime. The visible iframe runs the authored scripts with
-  normal browser scheduling; PageRoot does not stop timers, listeners,
-  observers, animations or message ports.
+  use the direct Edit runtime. The visible iframe first parses the complete
+  source with authored scripts inert, proves the parser-authored source object
+  set, and then activates those scripts in source order. PageRoot does not stop
+  timers, listeners, observers, animations or message ports after activation.
 - Main verifies the active source path, exact HTML Hash, Canvas generation and
   resource budgets before preparing a scoped `pageroot-edit-runtime:` resource
   closure. Inline and contained local scripts are supported. Exact reviewed
@@ -36,13 +37,28 @@ source or be reconciled node by node.
   closure and its Hash/budget checks.
 - Before author scripts execute, the fixed bootstrap opens one parent-owned
   registration capability. The parent editor deletes that entry after the
-  bootstrap captures its private batch port and keeps registered DOM references
-  in a parent-realm `WeakSet`; public attributes and author-realm expandos are
-  never edit authority. Changing either public source identity revokes the
+  bootstrap captures its private batch port. At `DOMContentLoaded`, while every
+  author-script placeholder is still inert, the bootstrap registers the
+  complete parsed set once and only then activates author programs. An early
+  authored script therefore cannot preclaim the identity of a later parser
+  element. The parent keeps registered DOM references in a parent-realm `WeakSet`;
+  public attributes and author-realm expandos are never edit authority. Changing
+  either public source identity revokes the
   registered object's authority and fails closed. Every source mutation
   revalidates the live object, its registered stable ID and its current
   SourceIndex mapping instead of trusting cached selection state. Runtime-generated descendants resolve only to their
   nearest still-proven authored source host.
+- Stable ID and Runtime edit authority are separate contracts.
+  `data-pageroot-id` is the durable identity of a source element, but an equal
+  ID on a Runtime object never grants text, style or structure edit permission.
+  Runtime authority additionally requires membership in the current
+  generation's private registered object set and live SourceIndex validation.
+- Each Runtime generation establishes its complete source DOM authority exactly
+  once, before the first author Script activates. That authority set is sealed
+  for the generation: author code cannot add a trusted source object after it
+  starts. A registered object may lose authority when it disconnects or its
+  identity no longer validates, but no generated, copied or forged object may
+  gain authority later; such objects remain display/comment-only.
 - PageRoot directly edits only nodes still proven to be authored source
   elements. A runtime-generated node is display-only: it may be commented on
   through its nearest source host but cannot be text-edited, styled, reordered,
@@ -110,6 +126,11 @@ runtime-only state after reopen.
   remain fail-closed.
 - Unsupported programs fall back to the script-disabled source document. Edit
   does not use screenshots, bitmap projection or hidden execution probes.
+- Edit Runtime does not promise exact parser-time Script scheduling. Establishing
+  source authority may complete parsing and registration before activating
+  parser-blocking, `async`, `defer` or module programs. Restoring every edge-case
+  interleaving cannot justify Runtime snapshots, activity freeze, per-node
+  provenance reconciliation or Script execution-state migration.
 - Review continues to compare frozen source HTML only; runtime output is not a
   formal change fact.
 
@@ -118,7 +139,8 @@ runtime-only state after reopen.
 - Ordinary DOM scripts continue running in Edit without leaking generated DOM
   into the Working Copy.
 - ECharts and Canvas pages render in the real editable iframe.
-- `async` and `defer` scheduling attributes are preserved.
+- `async` and `defer` attributes are preserved; exact pre-`DOMContentLoaded`
+  interleaving is not a source-persistence contract.
 - A semantic structure edit rebuilds the iframe, reruns the program and saves
   only the complete semantic HTML result.
 - Continuous direct text input is visible immediately without repeated iframe

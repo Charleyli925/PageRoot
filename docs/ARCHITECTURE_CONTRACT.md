@@ -437,11 +437,15 @@ local asset root for Preview, static Edit and the disposable Edit runtime. The
 renderer neither supplies nor learns that original path; the Working Copy
 remains source authority.
 
-The visible frame runs author scripts with ordinary browser scheduling. There
+The visible frame parses complete source while author-script placeholders stay
+inert, registers the parser-authored source object set once, then activates the
+author program in source order. There
 is no visual-signal classifier, hidden probe, real-paint/quiet-frame gate,
 runtime activity freeze, host mutation audit, script prewarm or disk cache.
 Before author code runs, the fixed bootstrap captures a one-time parent-owned
-registration port. The parent deletes the public entry and keeps proved source
+registration port. Registration completes at `DOMContentLoaded` before any
+author placeholder activates, so a script cannot preclaim a future parser
+object. The parent deletes the public entry and keeps proved source
 DOM references in a private parent-realm `WeakSet`; copied attributes or
 author-realm properties cannot grant edit authority, and changing a proved
 element's public source identity revokes that authority. Every source mutation
@@ -459,6 +463,18 @@ forward. Reaching the cap fails closed until PageRoot restarts.
 Any preparation, load, provenance or deadline failure selects ordinary static
 Edit. Runtime DOM never becomes SourcePatch, Source HTML, save, Version, export,
 Request, Candidate or Review input.
+
+`data-pageroot-id` is persistent source identity, not Runtime edit authority.
+An equal ID on another DOM object grants nothing by itself. For each Runtime
+generation, the private source-object authority set is established exactly once
+before author Script activation and is then sealed. A registered object may be
+revoked when its live identity fails, but author code can never add another
+trusted object after activation; generated, copied and forged nodes remain
+display/comment-only. Exact parser-time execution order is not an Edit Runtime
+contract: PageRoot may finish source parsing and authority registration before
+activating parser-blocking, `async`, `defer` or module scripts. Reproducing every
+edge timing must not reintroduce Runtime snapshots, freeze, per-node provenance
+reconciliation or Script execution-state migration.
 
 The Edit Canvas has one normative experience/persistence contract. Direct
 source text and common-style edits are reflected in the current projection

@@ -114,7 +114,15 @@ export function resolveCanvasPointerHit({
     ?? dedicatedSurface
     ?? findCanvasHitSourceElement(eventTarget)
     ?? directSelection;
-  const runtimeGenerated = eventTargetsRuntimeGeneratedNode(
+  // In a Runtime frame, public source/stable-ID attributes are locators only.
+  // The exact selected object must belong to the generation's sealed private
+  // authority set; otherwise even a perfectly copied identity remains
+  // display/comment-only.
+  const runtimeGenerated = Boolean(
+    isProvenRuntimeSourceElement
+    && directSelection
+    && !isProvenRuntimeSourceElement(directSelection)
+  ) || eventTargetsRuntimeGeneratedNode(
     eventTarget,
     isProvenRuntimeSourceElement,
   );
