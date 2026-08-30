@@ -270,10 +270,10 @@ export function isEditRuntimeFrameToken(value) {
   return FRAME_TOKEN_PATTERN.test(String(value || "").toLowerCase());
 }
 
-export function editRuntimeProofProperty(executionId) {
+export function editRuntimeRegistrationProperty(executionId) {
   const normalized = String(executionId || "").toLowerCase();
   return isEditRuntimeExecutionId(normalized)
-    ? `__pageroot_edit_source_${normalized}`
+    ? `__pageroot_edit_register_${normalized}`
     : null;
 }
 

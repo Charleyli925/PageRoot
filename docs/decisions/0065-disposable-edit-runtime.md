@@ -29,10 +29,12 @@ source or be reconciled node by node.
   closure. Inline and contained local scripts are supported. Exact reviewed
   ECharts 5.5.0 CDN URLs may resolve to pinned packaged bytes. Module import
   graphs remain unsupported and fail closed to static Edit.
-- Before author scripts execute, the fixed bootstrap privately binds each
-  instrumented source node to its source identity and removes copied public
-  markers from runtime-generated clones. Runtime-generated descendants resolve
-  only to their nearest still-proven authored source host.
+- Before author scripts execute, the fixed bootstrap opens one parent-owned
+  registration capability. The parent editor deletes that entry after the
+  bootstrap captures its private batch port and keeps registered DOM references
+  in a parent-realm `WeakSet`; public attributes and author-realm expandos are
+  never edit authority. Runtime-generated descendants resolve only to their
+  nearest still-proven authored source host.
 - PageRoot directly edits only nodes still proven to be authored source
   elements. A runtime-generated node is display-only: it may be commented on
   through its nearest source host but cannot be text-edited, styled, reordered,

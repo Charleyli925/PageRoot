@@ -1,14 +1,15 @@
 import {
   EDIT_RUNTIME_SOURCE_MARKER_ATTRIBUTE,
-  editRuntimeProofProperty,
+  editRuntimeRegistrationProperty,
   isEditRuntimeExecutionId,
   isEditRuntimeSessionId,
 } from "../app/domain/edit-runtime-contract.js";
 
 /**
- * Installs source provenance before authored programs run. The proof is a
- * non-copying DOM expando: cloneNode, innerHTML and script-created descendants
- * cannot inherit source authority merely by copying an attribute.
+ * Installs source provenance before authored programs run. The bootstrap opens
+ * one parent-owned registration capability, captures the returned batch port
+ * in this private closure, and never publishes it to author code. DOM
+ * attributes remain routing hints rather than edit authority.
  *
  * The bootstrap never freezes timers, listeners, observers, animations or
  * author DOM. Runtime state remains a disposable display projection until the
@@ -17,24 +18,29 @@ import {
 export function createEditRuntimeBootstrap({ executionId, sessionId } = {}) {
   const normalizedExecutionId = String(executionId || "").toLowerCase();
   const normalizedSessionId = String(sessionId || "").toLowerCase();
-  const proofProperty = editRuntimeProofProperty(normalizedExecutionId);
+  const registrationProperty = editRuntimeRegistrationProperty(normalizedExecutionId);
   if (
     !isEditRuntimeExecutionId(normalizedExecutionId)
     || !isEditRuntimeSessionId(normalizedSessionId)
-    || !proofProperty
+    || !registrationProperty
   ) {
     throw new TypeError("Edit runtime bootstrap identity is invalid.");
   }
   const configuration = JSON.stringify({
     markerAttribute: EDIT_RUNTIME_SOURCE_MARKER_ATTRIBUTE,
     sourceNodeAttribute: "data-html-ai-source-node-id",
-    proofProperty,
+    registrationProperty,
   }).replace(/</gu, "\\u003c");
   return String.raw`
 (() => {
   "use strict";
   const config = ${configuration};
   const claimedIds = new Set();
+  const provedIds = new WeakMap();
+  const openRegistration = window.parent?.[config.registrationProperty];
+  const registerProved = typeof openRegistration === "function"
+    ? openRegistration(window)
+    : null;
 
   const candidates = (root) => {
     if (!root || root.nodeType !== Node.ELEMENT_NODE) return [];
@@ -47,28 +53,38 @@ export function createEditRuntimeBootstrap({ executionId, sessionId } = {}) {
     )));
   };
 
+  const reject = (element) => {
+    element.removeAttribute(config.markerAttribute);
+    element.removeAttribute(config.sourceNodeAttribute);
+  };
+
   const claim = (root) => {
+    const sourceElements = [];
     for (const element of candidates(root)) {
       const sourceNodeId = element.getAttribute(config.markerAttribute) || "";
       if (!sourceNodeId) {
-        element.removeAttribute(config.markerAttribute);
-        element.removeAttribute(config.sourceNodeAttribute);
+        reject(element);
         continue;
       }
-      if (!claimedIds.has(sourceNodeId)) {
-        claimedIds.add(sourceNodeId);
-        Object.defineProperty(element, config.proofProperty, {
-          configurable: false,
-          enumerable: false,
-          writable: false,
-          value: sourceNodeId,
-        });
+      const publicSourceNodeId = element.getAttribute(config.sourceNodeAttribute) || "";
+      const provedId = provedIds.get(element);
+      if (provedId) {
+        if (sourceNodeId !== provedId) reject(element);
         continue;
       }
-      if (element[config.proofProperty] !== sourceNodeId) {
-        element.removeAttribute(config.markerAttribute);
-        element.removeAttribute(config.sourceNodeAttribute);
+      if (
+        claimedIds.has(sourceNodeId)
+        || (publicSourceNodeId && publicSourceNodeId !== sourceNodeId)
+      ) {
+        reject(element);
+        continue;
       }
+      claimedIds.add(sourceNodeId);
+      provedIds.set(element, sourceNodeId);
+      if (publicSourceNodeId === sourceNodeId) sourceElements.push(element);
+    }
+    if (sourceElements.length > 0 && typeof registerProved === "function") {
+      registerProved(sourceElements);
     }
   };
 
@@ -94,9 +110,6 @@ export function createEditRuntimeBootstrap({ executionId, sessionId } = {}) {
     attributeFilter: [config.markerAttribute, config.sourceNodeAttribute],
     childList: true,
     subtree: true,
-  });
-  document.addEventListener("DOMContentLoaded", () => claim(document.documentElement), {
-    once: true,
   });
 
   document.addEventListener("click", (event) => {

@@ -73,7 +73,7 @@ export type CanvasPointerHitInput = {
   point?: TextCaretPoint | null;
   sourceIndex: SourceIndexValue | null;
   enabled?: boolean;
-  runtimeProofProperty?: string | null;
+  isProvenRuntimeSourceElement?: ((element: HTMLElement) => boolean) | null;
 };
 
 export function canvasVisualTargetElement(
@@ -92,7 +92,7 @@ export function resolveCanvasPointerHit({
   point,
   sourceIndex,
   enabled = true,
-  runtimeProofProperty = null,
+  isProvenRuntimeSourceElement = null,
 }: CanvasPointerHitInput): CanvasPointerHit {
   if (!enabled || !documentNode) return { action: "clear" };
   if (isCanvasRootElement(eventTarget)) return { action: "clear" };
@@ -116,7 +116,7 @@ export function resolveCanvasPointerHit({
     ?? directSelection;
   const runtimeGenerated = eventTargetsRuntimeGeneratedNode(
     eventTarget,
-    runtimeProofProperty,
+    isProvenRuntimeSourceElement,
   );
   if (
     !hit

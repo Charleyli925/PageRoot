@@ -9,6 +9,7 @@ import {
   collectEditRuntimeScripts,
   editRuntimeProgramIdentity,
   editRuntimeProtocolUrl,
+  editRuntimeRegistrationProperty,
   isEditRuntimeExecutionId,
   isEditRuntimeFrameToken,
   isEditRuntimeProtocolUrl,
@@ -83,6 +84,10 @@ test("direct Edit runtime grants use one session and one execution identity", ()
   assert.equal(isEditRuntimeSourceSha256(sourceSha), true);
   assert.equal(isEditRuntimeFrameToken("edit-runtime-frame-" + executionId), true);
   assert.equal(isEditRuntimeProtocolUrl(url, sessionId), true);
+  assert.equal(
+    editRuntimeRegistrationProperty(executionId),
+    "__pageroot_edit_register_" + executionId,
+  );
   assert.equal(editRuntimeProtocolUrl(sessionId, "relative.js"), null);
   assert.equal(EDIT_AUTHOR_RUNTIME_BUDGET.declaredAssetCount, 64);
   assert.equal(EDIT_AUTHOR_RUNTIME_BUDGET.declaredAssetReferenceCount, 128);
@@ -107,10 +112,13 @@ test("formal architecture keeps the source-edit experience contract and runtime 
   ]);
   assert.match(adr, /completed operation materializes complete next HTML/u);
   assert.match(adr, /must not replace the iframe for every keystroke/u);
+  assert.match(adr, /parent-realm `WeakSet`/u);
   assert.match(architecture, /close\/reopen must reproduce source edits/u);
   assert.match(architecture, /no Runtime DOM persistence/u);
+  assert.match(architecture, /private parent-realm `WeakSet`/u);
   assert.match(interaction, /用户对源码内容完成的编辑必须写入完整 HTML/u);
   assert.match(interaction, /不得每输入一个字符就重建 iframe/u);
+  assert.match(interaction, /父编辑器私有 `WeakSet`/u);
   for (const document of [adr, architecture, interaction]) {
     assert.match(document, /Runtime DOM/u);
     assert.match(document, /timer\/rAF\/Observer\/listener/u);

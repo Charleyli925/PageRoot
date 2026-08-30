@@ -18,8 +18,9 @@ import { flushSync } from "react-dom";
 
 import {
   EDIT_AUTHOR_RUNTIME_BUDGET,
-  editRuntimeProofProperty,
+  EDIT_RUNTIME_SOURCE_MARKER_ATTRIBUTE,
   editRuntimeProgramIdentity,
+  editRuntimeRegistrationProperty,
   isEditRuntimeFrameToken,
 } from "../domain/edit-runtime-contract.js";
 import { createSourceOperationId } from "../domain/source-history.js";
@@ -907,6 +908,12 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   const expectedFrameTokenRef = useRef<string | null>(null);
   const frameLoadGenerationRef = useRef(0);
   const runtimeFrameRef = useRef<RuntimeFrameContext | null>(null);
+  const runtimeSourceElementsRef = useRef<{
+    elementGeneration: number;
+    executionId: string;
+    elements: WeakSet<HTMLElement>;
+  } | null>(null);
+  const runtimeSourceRegistrationCleanupRef = useRef<() => void>(() => undefined);
   const runtimeNeedsRerenderRef = useRef(false);
   const imperativeLockRef = useRef(false);
   const lastPropRef = useRef({ html, baseHref: documentBaseHref });
@@ -971,6 +978,21 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   pageViewDocumentKeyRef.current = pageViewDocumentKey;
   onPageViewContextChangeRef.current = onPageViewContextChange;
   pointerCapabilityHoverEnabledRef.current = pointerCapabilityHoverEnabled;
+
+  const currentRuntimeSourceProof = () => {
+    const runtimeFrame = runtimeFrameRef.current;
+    if (
+      !runtimeFrame?.settled
+      || runtimeFrame.elementGeneration !== frameLoadGenerationRef.current
+    ) return null;
+    const registered = runtimeSourceElementsRef.current;
+    return (element: HTMLElement) => Boolean(
+      registered
+      && registered.elementGeneration === runtimeFrame.elementGeneration
+      && registered.executionId === runtimeFrame.grant.executionId
+      && registered.elements.has(element)
+    );
+  };
 
   // Keep the server and hydration value deterministic, then normalize through DOMParser after mount.
   const [frameRender, setFrameRender] = useState(() => ({
@@ -1134,6 +1156,9 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           top: sharedScrollElement.scrollTop,
         }
       : null;
+    runtimeSourceRegistrationCleanupRef.current();
+    runtimeSourceRegistrationCleanupRef.current = () => undefined;
+    runtimeSourceElementsRef.current = null;
     const reuseCandidate = Boolean(options.reuseDocument)
       && !options.immediate
       && !options.forceStatic
@@ -1242,6 +1267,86 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     containerRef.current?.removeAttribute("data-runtime-bootstrap-count");
     runtimeFrameRef.current = runtimeFrame;
     if (runtimeFrame) {
+      const registrationProperty = editRuntimeRegistrationProperty(
+        runtimeFrame.grant.executionId,
+      );
+      if (registrationProperty) {
+        const parentGlobals = window as unknown as Record<string, unknown>;
+        const openRegistration = (sourceWindow: unknown) => {
+          const current = runtimeFrameRef.current;
+          const iframe = iframeRef.current;
+          if (
+            !current
+            || current.elementGeneration !== runtimeFrame.elementGeneration
+            || current.grant.executionId !== runtimeFrame.grant.executionId
+            || sourceWindow !== iframe?.contentWindow
+          ) return null;
+          if (parentGlobals[registrationProperty] === openRegistration) {
+            delete parentGlobals[registrationProperty];
+          }
+          runtimeSourceRegistrationCleanupRef.current = () => undefined;
+          const elements = new WeakSet<HTMLElement>();
+          const elementsBySourceNodeId = new Map<string, HTMLElement>();
+          const conflictedSourceNodeIds = new Set<string>();
+          runtimeSourceElementsRef.current = {
+            elementGeneration: runtimeFrame.elementGeneration,
+            executionId: runtimeFrame.grant.executionId,
+            elements,
+          };
+          return (candidates: unknown) => {
+            const active = runtimeFrameRef.current;
+            const activeIframe = iframeRef.current;
+            if (
+              !Array.isArray(candidates)
+              || !activeIframe
+              || active?.elementGeneration !== runtimeFrame.elementGeneration
+              || active.grant.executionId !== runtimeFrame.grant.executionId
+              || sourceWindow !== activeIframe?.contentWindow
+            ) return false;
+            const sourceIndex = sourceIndexRef.current;
+            for (const value of candidates) {
+              const element = value as HTMLElement;
+              if (
+                element?.nodeType !== 1
+                || typeof element.getAttribute !== "function"
+                || element.ownerDocument !== activeIframe.contentDocument
+              ) continue;
+              const sourceNodeId = element.getAttribute(SOURCE_NODE_ATTRIBUTE);
+              const sourceEntry = sourceNodeId
+                ? sourceIndex?.byNodeId.get(sourceNodeId)
+                : null;
+              if (
+                sourceNodeId
+                && sourceEntry?.type === "element"
+                && element.getAttribute(EDIT_RUNTIME_SOURCE_MARKER_ATTRIBUTE) === sourceNodeId
+              ) {
+                if (conflictedSourceNodeIds.has(sourceNodeId)) continue;
+                const existing = elementsBySourceNodeId.get(sourceNodeId);
+                if (existing && existing !== element) {
+                  elements.delete(existing);
+                  elementsBySourceNodeId.delete(sourceNodeId);
+                  conflictedSourceNodeIds.add(sourceNodeId);
+                  continue;
+                }
+                elementsBySourceNodeId.set(sourceNodeId, element);
+                elements.add(element);
+              }
+            }
+            return true;
+          };
+        };
+        Object.defineProperty(parentGlobals, registrationProperty, {
+          configurable: true,
+          enumerable: false,
+          writable: false,
+          value: openRegistration,
+        });
+        runtimeSourceRegistrationCleanupRef.current = () => {
+          if (parentGlobals[registrationProperty] === openRegistration) {
+            delete parentGlobals[registrationProperty];
+          }
+        };
+      }
       onEditRuntimeLoadStartRef.current?.(runtimeFrame.grant);
     }
     const iframe = iframeRef.current;
@@ -4514,6 +4619,8 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       pendingHistoryCanonicalFenceRef.current = false;
       const runtimeFrame = runtimeFrameRef.current;
       runtimeFrameRef.current = null;
+      runtimeSourceRegistrationCleanupRef.current();
+      runtimeSourceElementsRef.current = null;
       if (runtimeFrame && !runtimeFrame.settled) {
         onEditRuntimeLoadOutcomeRef.current?.(runtimeFrame.grant, "failed");
       }
@@ -4606,10 +4713,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         point: caretPointFromMouseEvent(event),
         sourceIndex: sourceIndexRef.current,
         enabled: true,
-        runtimeProofProperty: (
-          runtimeFrameRef.current?.settled
-          && runtimeFrameRef.current.elementGeneration === frameLoadGenerationRef.current
-        ) ? editRuntimeProofProperty(runtimeFrameRef.current.grant.executionId) : null,
+        isProvenRuntimeSourceElement: currentRuntimeSourceProof(),
       });
       if (hit.action === "clear") {
         if (!lockedRef.current) {
@@ -4673,10 +4777,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         point: caretPoint,
         sourceIndex: sourceIndexRef.current,
         enabled: true,
-        runtimeProofProperty: (
-          runtimeFrameRef.current?.settled
-          && runtimeFrameRef.current.elementGeneration === frameLoadGenerationRef.current
-        ) ? editRuntimeProofProperty(runtimeFrameRef.current.grant.executionId) : null,
+        isProvenRuntimeSourceElement: currentRuntimeSourceProof(),
       });
       if (hit.action === "clear") return;
       const target = hit.capability.element;
@@ -4950,10 +5051,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         point: caretPointFromMouseEvent(event),
         sourceIndex: sourceIndexRef.current,
         enabled: true,
-        runtimeProofProperty: (
-          runtimeFrameRef.current?.settled
-          && runtimeFrameRef.current.elementGeneration === frameLoadGenerationRef.current
-        ) ? editRuntimeProofProperty(runtimeFrameRef.current.grant.executionId) : null,
+        isProvenRuntimeSourceElement: currentRuntimeSourceProof(),
       }));
     };
     const handlePointerLeave = () => {

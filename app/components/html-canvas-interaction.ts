@@ -1,5 +1,4 @@
 import { SOURCE_NODE_ATTRIBUTE } from "../lib/source-patch-core.js";
-import { EDIT_RUNTIME_SOURCE_MARKER_ATTRIBUTE } from "../domain/edit-runtime-contract.js";
 import { inferSelectionLevel, selectionForElement } from "./html-canvas-selection";
 import { sourceTextNodeForDomText } from "./html-canvas-preview-sync";
 import { createElementTextLocator } from "../lib/comment-text-locator.js";
@@ -360,19 +359,14 @@ export function findCanvasSelectionElement(target: EventTarget | null): HTMLElem
 
 export function eventTargetsRuntimeGeneratedNode(
   target: EventTarget | null,
-  runtimeProofProperty: string | null = null,
+  isProvenSourceElement: ((element: HTMLElement) => boolean) | null = null,
 ): boolean {
-  if (!runtimeProofProperty) return false;
+  if (!isProvenSourceElement) return false;
   const selected = elementFromEventTarget(target);
   if (!selected) return false;
   const sourceHost = selected.closest<HTMLElement>(`[${SOURCE_NODE_ATTRIBUTE}]`);
   if (!sourceHost || sourceHost !== selected) return true;
-  const sourceNodeId = sourceHost.getAttribute(SOURCE_NODE_ATTRIBUTE);
-  const runtimeMarker = sourceHost.getAttribute(EDIT_RUNTIME_SOURCE_MARKER_ATTRIBUTE);
-  const runtimeProof = (sourceHost as unknown as Record<string, unknown>)[runtimeProofProperty];
-  return !sourceNodeId
-    || runtimeMarker !== sourceNodeId
-    || runtimeProof !== sourceNodeId;
+  return !isProvenSourceElement(sourceHost);
 }
 
 export function findNativeActionTarget(target: EventTarget | null): HTMLElement | null {
