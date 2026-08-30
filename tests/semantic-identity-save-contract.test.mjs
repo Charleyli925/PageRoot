@@ -52,6 +52,11 @@ function uuidFactory(...values) {
   return () => values[index++];
 }
 
+function sequentialUuidFactory() {
+  let index = 0;
+  return () => `70000000-0000-4000-8000-${String(++index).padStart(12, "0")}`;
+}
+
 function saveEvidence(source, result, semanticOperation, kind = "structure") {
   const materialization = result.materialization.sourcePatchResult;
   return {
@@ -186,6 +191,29 @@ test("system-created line breaks and range-style wrappers have explicit added-ID
   }, "sourceop_range_style_identity_008");
   const styled = applyAndSave(rangeStyle);
   assert.deepEqual(styled.result.identityDelta.addedElementIds, [wrapperId]);
+});
+
+test("large structural operations and identity deltas survive the autosave evidence codec", () => {
+  const largeFragment = `<article>${"<i>x</i>".repeat(2_000)}${"x".repeat(96 * 1024)}</article>`;
+  const inserting = createInsertElementOperation(html, {
+    baseRevision: 0,
+    operationId: "sourceop_large_identity_evidence_009",
+    parentElementId: ids.left,
+    beforeElementId: null,
+    html: largeFragment,
+  });
+  const result = applySemanticOperation(
+    createSemanticDocumentState(html),
+    inserting,
+    { randomUUID: sequentialUuidFactory() },
+  );
+  assert.ok(JSON.stringify(inserting).length > 64 * 1024);
+  assert.ok(JSON.stringify(result.identityDelta).length > 64 * 1024);
+  const saved = materializeIdentityPreservingSave(html, result.html, {
+    sourceHistoryOperations: [saveEvidence(html, result, inserting)],
+  });
+  assert.equal(saved.html, result.html);
+  assert.equal(saved.identity.complete, true);
 });
 
 test("Repository rejects forged deltas and unproved identity topology changes", () => {
