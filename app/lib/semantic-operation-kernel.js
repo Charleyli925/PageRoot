@@ -4,8 +4,12 @@ import {
 } from "./pageroot-element-identity.js";
 import {
   applyPatchPlan,
+  planEditableIslandPatch,
   planInlineStylePatch,
   planSemanticOperationPatch,
+  planSemanticTextRangeStylePatch,
+  planSiblingReorderPatch,
+  planTextRangeStylePatch,
 } from "./source-patch-engine.js";
 import { buildSourceIndex, sourceSha256 } from "./source-index.js";
 import { buildSourceTextMap, textRangeToSourceSegments } from "./source-text-map.js";
@@ -33,15 +37,18 @@ const COMMON_OPERATION_KEYS = new Set([
   "type",
 ]);
 const OPERATION_FIELDS = new Map([
-  ["setText", ["target", "text"]],
-  ["replaceTextRange", ["target", "range", "text"]],
-  ["setAttribute", ["target", "name", "value"]],
-  ["setStyle", ["target", "property", "value", "important"]],
-  ["insertElement", ["parent", "before", "html"]],
-  ["deleteElement", ["target"]],
-  ["moveElement", ["target", "parent", "before"]],
-  ["replaceSubtree", ["target", "html"]],
-  ["restoreExactSource", []],
+  ["setText", { required: ["target", "text"], optional: ["contentHtml"] }],
+  ["replaceTextRange", { required: ["target", "range", "text"], optional: [] }],
+  ["setAttribute", { required: ["target", "name", "value"], optional: [] }],
+  ["setStyle", {
+    required: ["target", "property", "value", "important"],
+    optional: ["range", "createdPagerootIds"],
+  }],
+  ["insertElement", { required: ["parent", "before", "html"], optional: [] }],
+  ["deleteElement", { required: ["target"], optional: [] }],
+  ["moveElement", { required: ["target", "parent", "before"], optional: [] }],
+  ["replaceSubtree", { required: ["target", "html"], optional: [] }],
+  ["restoreExactSource", { required: [], optional: [] }],
 ]);
 
 export class SemanticOperationError extends Error {
@@ -165,14 +172,20 @@ function assertOperationShape(operation) {
   if (!fields) {
     fail("SEMANTIC_OPERATION_TYPE_UNSUPPORTED", `Unsupported semantic operation type: ${operation.type ?? "missing"}.`);
   }
-  const allowed = new Set([...COMMON_OPERATION_KEYS, ...fields]);
+  const allowed = new Set([
+    ...COMMON_OPERATION_KEYS,
+    ...fields.required,
+    ...fields.optional,
+  ]);
   const unknown = Object.keys(operation).filter((key) => !allowed.has(key));
   if (unknown.length > 0) {
     fail("SEMANTIC_OPERATION_MEMBER_UNKNOWN", "Semantic operation contains unsupported members.", {
       members: unknown,
     });
   }
-  const missing = fields.filter((field) => !Object.hasOwn(operation, field));
+  const missing = fields.required.filter(
+    (field) => !Object.hasOwn(operation, field),
+  );
   if (missing.length > 0) {
     fail("SEMANTIC_OPERATION_MEMBER_REQUIRED", "Semantic operation is missing required members.", {
       members: missing,
@@ -369,10 +382,19 @@ function semanticSourceCommand(state, index, operation, options) {
   }
 
   if (operation.type === "setText") {
-    if (typeof operation.text !== "string") {
+    if (
+      typeof operation.text !== "string"
+      || (
+        operation.contentHtml !== undefined
+        && typeof operation.contentHtml !== "string"
+      )
+    ) {
       fail("SEMANTIC_TEXT_INVALID", "setText text must be a string.");
     }
     command.text = operation.text;
+    if (operation.contentHtml !== undefined) {
+      command.contentHtml = operation.contentHtml;
+    }
   } else if (operation.type === "replaceTextRange") {
     const target = index.byPagerootId.get(command.targetElementId);
     const textMap = buildSourceTextMap(index, target.nodeId);
@@ -414,6 +436,31 @@ function semanticSourceCommand(state, index, operation, options) {
       || typeof operation.important !== "boolean"
     ) {
       fail("SEMANTIC_STYLE_INVALID", "setStyle requires string property/value and an explicit important boolean.");
+    }
+    if (operation.range !== undefined) {
+      if (
+        !operation.range
+        || typeof operation.range !== "object"
+        || Object.keys(operation.range).some(
+          (member) => !["startOffset", "endOffset", "quote"].includes(member),
+        )
+        || typeof operation.range.quote !== "string"
+      ) {
+        fail("SEMANTIC_TEXT_RANGE_INVALID", "Range style requires an exact text range and quote.");
+      }
+      const target = index.byPagerootId.get(command.targetElementId);
+      const textMap = buildSourceTextMap(index, target.nodeId);
+      if (
+        textMap.text.slice(operation.range.startOffset, operation.range.endOffset)
+          !== operation.range.quote
+      ) {
+        fail("SEMANTIC_TEXT_QUOTE_MISMATCH", "The styled text no longer matches its exact source quote.");
+      }
+      command.segments = textRangeToSourceSegments(
+        textMap,
+        operation.range.startOffset,
+        operation.range.endOffset,
+      );
     }
   } else if (operation.type === "insertElement") {
     if (typeof operation.html !== "string" || operation.html.length === 0) {
@@ -515,10 +562,63 @@ export function applySemanticOperation(inputState, operation, options = {}) {
   }
   const index = buildSourceIndex(state.html);
   const { command, allocation } = semanticSourceCommand(state, index, operation, options);
-  const plan = operation.type === "setStyle"
+  const targetElement = command.targetElementId
+    ? index.byPagerootId.get(command.targetElementId)
+    : null;
+  const semanticParent = operation.type === "moveElement"
+    ? index.byPagerootId.get(operation.parent.elementId)
+    : null;
+  const plan = operation.type === "moveElement"
+    && targetElement?.parentId === semanticParent?.nodeId
+    ? planSiblingReorderPatch(index, {
+      type: "reorder-sibling",
+      targetRef: createTargetRef(index, targetElement, { level: "subregion" }),
+      ...(operation.before
+        ? {
+            beforeTargetRef: createTargetRef(
+              index,
+              index.byPagerootId.get(operation.before.elementId),
+              { level: "subregion" },
+            ),
+          }
+        : {}),
+      expectedSourceSha256: state.sourceSha256,
+    })
+    : operation.type === "setText" && operation.contentHtml !== undefined
+    ? planEditableIslandPatch(index, {
+      type: "replace-editable-island",
+      targetRef: createTargetRef(index, targetElement, { level: "subregion" }),
+      beforeInnerHtml: index.source.slice(
+        targetElement.contentRange.startOffset,
+        targetElement.contentRange.endOffset,
+      ),
+      nextInnerHtml: command.contentHtml,
+      expectedSourceSha256: state.sourceSha256,
+    })
+    : operation.type === "setStyle" && operation.range
+    ? (operation.createdPagerootIds
+      ? planSemanticTextRangeStylePatch(index, {
+        type: "set-text-range-style",
+        targetRef: createTargetRef(index, targetElement, { level: "subregion" }),
+        segments: command.segments,
+        property: operation.property,
+        value: operation.value,
+        important: operation.important,
+        expectedSourceSha256: state.sourceSha256,
+      }, operation.createdPagerootIds)
+      : planTextRangeStylePatch(index, {
+        type: "set-text-range-style",
+        targetRef: createTargetRef(index, targetElement, { level: "subregion" }),
+        segments: command.segments,
+        property: operation.property,
+        value: operation.value,
+        important: operation.important,
+        expectedSourceSha256: state.sourceSha256,
+      }))
+    : operation.type === "setStyle"
     ? planInlineStylePatch(index, {
       type: "set-inline-style",
-      targetRef: createTargetRef(index, index.byPagerootId.get(command.targetElementId), {
+      targetRef: createTargetRef(index, targetElement, {
         level: "subregion",
       }),
       property: operation.property,
@@ -529,12 +629,31 @@ export function applySemanticOperation(inputState, operation, options = {}) {
     : planSemanticOperationPatch(index, command);
   const materialization = applyPatchPlan(plan, state.html);
   assertManagedIdentity(materialization.sourceIndex, "Semantic operation output");
+  if (operation.type === "setText" && operation.contentHtml !== undefined) {
+    const target = materialization.sourceIndex.byPagerootId.get(
+      operation.target.elementId,
+    );
+    const text = target?.type === "element"
+      ? buildSourceTextMap(
+        materialization.sourceIndex,
+        target.nodeId,
+        { allowEmpty: true, ignoreComments: true },
+      ).text
+      : null;
+    if (text !== operation.text) {
+      fail(
+        "SEMANTIC_MATERIALIZATION_TEXT_MISMATCH",
+        "The identified content projection does not match setText logical text.",
+      );
+    }
+  }
   return appliedResult(state, operation, materialization.html, {
     kind: "source-patch",
     planType: plan.type,
     patches: materialization.patches,
     scopeReport: materialization.scopeReport,
     parseIntegrity: materialization.parseIntegrity,
+    sourcePatchResult: materialization,
   }, allocation);
 }
 

@@ -1,6 +1,6 @@
 # ADR 0009: Canvas undo uses one persistent exact-Patch journal
 
-- Status: Accepted
+- Status: Superseded by [ADR 0063](../0063-open-document-memory-history.md)
 - Date: 2026-07-31
 
 ## Context

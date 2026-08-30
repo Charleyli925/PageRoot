@@ -6728,6 +6728,7 @@ export default function Workbench() {
                   key={`editor-authority-${activeWorkbenchTab.tabId}-${canvasGeneration}`}
                   ref={editorRef}
                   html={html}
+                  semanticRevision={editRevision}
                   sourcePath={canvasSourcePath}
                   height="var(--comment-canvas-height, 760px)"
                   onChange={handleCanvasChange}

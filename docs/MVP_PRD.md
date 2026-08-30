@@ -150,7 +150,7 @@ PageRoot 让用户在真实本地 HTML 上完成两类工作：
 - 字体、字号、字重、斜体和颜色。
 - 背景、填充、边框和常用间距。
 - 同级模块顺序。
-- 画布文字、样式、安全结构变化和同级模块顺序共享一条可持久化的撤销/重做历史；关闭并重开项目后仍可继续。
+- 画布文字、样式、安全结构变化和同级模块顺序共享当前打开 HTML 的内存撤销/重做历史；只保留最近 20 次，切换 HTML、关闭文档或重启应用即清空。
 - 不在画布工具栏增加撤销入口。沿用系统 `Edit > 撤销/重做`，并支持 `Cmd/Ctrl+Z` 撤销、`Cmd/Ctrl+Shift+Z` 与 `Ctrl+Y` 重做。
 - 焦点位于评论正文、项目长期规则或其他真实文字输入框时，撤销/重做只使用该输入框的原生局部输入历史，不触碰画布源码历史。评论卡片、评论/附件的新增删除和其他项目操作不纳入本轮撤销范围。
 
@@ -535,7 +535,7 @@ editing
 | 整个项目长期使用的 AI 规则 | `PROJECT.md` |
 | active run、项目锁、冲突与恢复事务 | `runtime-state.json` |
 | 当前评论、edit event、删除 tombstone、草稿 revision 与已处理 operation ID | `draft/annotations.json`；`runtime-state.json` 只保存其指针与 revision |
-| 画布撤销/重做 cursor、精确 Patch 与已处理 action ID | `history/source-operations.json`；最多保留最近 100 个、合计不超过 32 MiB 的连续源码操作 |
+| 当前画布撤销/重做 cursor 与精确 Patch | Renderer `SourceHistorySession` 的当前打开 HTML 内存；最多 20 次，不跨 HTML、不跨关闭或重启；恢复记录只保留完成中断保存所需的证据 |
 | 本地直接编辑审计 | `edit-audit.jsonl` |
 | 冻结输入 | Request 的 `input/` |
 | AI 完成 | Attempt 的 `completion.json` |

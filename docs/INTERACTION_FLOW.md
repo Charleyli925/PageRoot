@@ -384,11 +384,10 @@ PageRoot 0.9.0 只使用一种文字编辑路线：
 → Cmd/Ctrl+Z，或 Edit > 撤销
 → 完成当前 IME / 文字 checkpoint
 → 刷新同一条自动写回队列，确认没有待落盘 Patch
-→ 用历史 cursor 选择上一条 exact inverse Patch
-→ Bridge 核对 projectId + documentId + source Hash + history revision
-→ HTML 与 source-operations.json 进入同一个 pendingWrite 恢复边界
-→ 原子替换并重读源 HTML
-→ 画布采用 Bridge 返回的 canonical bytes
+→ 当前打开 HTML 的内存 cursor 选择上一条 exact inverse Patch
+→ Renderer 核对当前 source Hash 并生成完整 next HTML
+→ 完整 HTML 进入普通 autosave pendingWrite 恢复边界
+→ Repository 按既有 Hash/CAS 原子替换并确认源 HTML
 → 沿同一历史操作迁移 TargetRef
 → 若变化严格局限于同一个可编辑文字岛，则在当前 iframe 原位采用并恢复宿主、逻辑选区与视口
 → 其余情况只重建一次 verified iframe，再恢复宿主、逻辑选区与视口
@@ -396,15 +395,14 @@ PageRoot 0.9.0 只使用一种文字编辑路线：
 
 重做使用 `Cmd/Ctrl+Shift+Z`、Windows/Linux 的 `Ctrl+Y` 或
 `Edit > 重做`，沿相同链路应用原 forward Patch。文字、样式、安全的
-岛内结构变化和同级模块上移/下移均进入这条历史；关闭并重开项目后，
-最多最近 100 个且合计不超过 32 MiB 的连续操作仍可使用。撤销/重做
-本身增加 edit revision 和审计记录，但不创建 Version。
+岛内结构变化和同级模块上移/下移均进入这条历史；当前打开的同一 HTML
+最多保留最近 20 次。切换 HTML、关闭文档或重启应用即清空。撤销/重做
+本身增加 edit revision 并保存完整 HTML，但不创建 Version。
 
 新的画布修改会丢弃 cursor 之后的 redo。源文件被外部程序改写、切换到
-新的 AI 工作文件，或任一 Hash 链无法连续证明时，系统从当前字节建立
-新的历史边界，不尝试跨边界套用旧 Patch。请求结果未知时先读取 Bridge
-权威历史；只有 action 已登记或原前提仍成立，才用同一 action ID 重放
-一次。
+新的 AI 工作文件，或任一 Hash 链无法连续证明时，系统清空当前栈，不
+尝试跨边界套用旧 Patch。保存结果未知仍按普通 autosave authority 查询
+和恢复；不会恢复或重放一个独立的历史 action。
 
 文字操作的历史记录可以携带前后逻辑 Selection；它只用于 canonical
 采用后恢复焦点、方向和光标，不参与生成源码。Bridge 确认结果后，只有
@@ -1148,7 +1146,7 @@ A 项目 processing 时切换 B 项目：
 18. 剪贴板已交接，或重启后恢复且无法重新证明交接状态时，点击“结束本轮并继续编辑”先显示精简的 AI Agent 风险确认；“继续等待”不改变 Request。
 19. 确认结束后立即恢复编辑并显示手动停止 AI Agent 的提醒；迟到 finalizer 可重复返回同一不可重试取消终态，且不写 completion、不建版、不改变源 HTML。
     - 自动模式的受管 Qoder 必须先停止 ACP mutation 与进程组、再持久取消同一 Request；Bridge 崩溃后只投影不可重试的 interrupted，durable cancel fence 旧 Request 后只能重新发送为新 Request，绝不并发写同一输出或自动采用 Candidate。
-20. 文字、样式、插入换行和同级下移落盘后，系统 Edit 菜单可逐项按原始字节撤销，并在重启后继续；重做恢复完全相同的 forward 字节。
+20. 文字、样式、插入换行和同级下移落盘后，系统 Edit 菜单可在当前打开 HTML 内逐项按原始字节撤销/重做，最多 20 次；切换 HTML、关闭或重启后不继续旧栈。
 21. 评论正文和 `PROJECT.md` 获得焦点时，Edit > Undo 只恢复该输入框文字；评论/附件卡片状态与源 HTML 均不变化。
 22. Registry 有 A/B 且 Recent 只有 A 时，项目列表同时显示 A/B，A 仅因 Recent 排序优先；Recent 外的项目可安全打开，未登记 Recent 文件不能成为项目。
 23. V6 的历史 V2 继续编辑后，左侧版本树与历史仍保留“基于 V2”“项目最新 V6”“当前编辑基础/有本地修改”事实；顶栏不显示保存状态，历史只读不改变当前编辑目标。

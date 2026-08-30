@@ -265,7 +265,7 @@ test("Electron autosaves one authorized disk patch and reopens the same forward 
   }
 });
 
-test("Electron keeps V1 autosave separate from focused-field undo", {
+test("Electron separates focused-field undo from current-open Canvas undo and redo", {
   tag: ["@gate-smoke","@smoke-editing"],
 }, async () => {
   test.setTimeout(120_000);
@@ -288,7 +288,8 @@ test("Electron keeps V1 autosave separate from focused-field undo", {
       firstLaunch.page,
       sourcePath,
     );
-    const expected = sourceFidelityExpected(readFileSync(managedSourcePath), replacement);
+    const identifiedBeforeEdit = readFileSync(managedSourcePath);
+    const expected = sourceFidelityExpected(identifiedBeforeEdit, replacement);
     const { frame } = await loadedDiskFrame(
       firstLaunch.page,
       managedSourcePath,
@@ -320,6 +321,18 @@ test("Electron keeps V1 autosave separate from focused-field undo", {
       readFileSync(managedSourcePath).equals(expected),
       "native comment undo must not touch the managed V1",
     ).toBe(true);
+    await commentInput.press("Enter");
+    await expect(commentInput).toHaveCount(0);
+
+    const currentFrame = await currentEditorFrame(firstLaunch.page);
+    await currentFrame.locator(caseSelector("source-fidelity")).click();
+    await clickEditHistoryMenu(firstApp, firstLaunch.page, "undo");
+    const undoRevision = await expectCheckpointPersisted(firstLaunch.page, 1);
+    expect(readFileSync(managedSourcePath).equals(identifiedBeforeEdit)).toBe(true);
+
+    await clickEditHistoryMenu(firstApp, firstLaunch.page, "redo");
+    await expectCheckpointPersisted(firstLaunch.page, undoRevision);
+    expect(readFileSync(managedSourcePath).equals(expected)).toBe(true);
 
     const manifest = JSON.parse(readFileSync(
       path.join(path.dirname(managedSourcePath), ".pageroot", "manifest.json"),

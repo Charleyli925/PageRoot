@@ -2,10 +2,13 @@ import type { BridgeClient } from "./bridge-client.js";
 import type { CommentSession } from "./comment-session.js";
 import type { DocumentSession, PersistedBoundaryResult } from "./document-session.js";
 import type { ProjectContext, ProjectSession } from "./project-session.js";
-import type { SourceHistorySession } from "./source-history-session.js";
+import type {
+  OpenDocumentMemoryHistory,
+  SourceHistorySession,
+} from "./source-history-session.js";
 import type { VersionSession } from "./version-session.js";
 import type { DocumentWorkflowCodecs } from "./document-workflow-codecs.js";
-import type { SourceHistoryEntry, SourceHistoryState } from "../domain/source-history.js";
+import type { SourceHistoryEntry } from "../domain/source-history.js";
 
 export type DocumentWorkflowOutcome<T> =
   | Readonly<{ status: "succeeded"; value: T }>
@@ -22,7 +25,7 @@ export type DocumentWorkflowRecoveryStore = Readonly<{
 
 export type DocumentWorkflowTransitionAuthority = Readonly<{
   recoveryIdentity: unknown;
-  sourceHistory: SourceHistoryState | null;
+  sourceHistory: OpenDocumentMemoryHistory | null;
   sourceHistoryOperations: SourceHistoryEntry[];
 }>;
 
@@ -40,7 +43,7 @@ export type DocumentWorkflowCanvasPort = Readonly<{
 export type DocumentWorkflowConstruction = Readonly<{
   bridgeClient: Pick<
     BridgeClient,
-    "autosave" | "source" | "workspace" | "sourceHistoryAction" | "resolveConflict"
+    "autosave" | "source" | "workspace" | "resolveConflict"
   > & Partial<Pick<BridgeClient, "sourcePreview" | "sourceStat">>;
   ensureRegistered(input: {
     sourcePath?: string;

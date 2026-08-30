@@ -1508,6 +1508,17 @@ export function planTextRangeStylePatch(indexOrHtml, command, replay = null) {
   );
 }
 
+export function planSemanticTextRangeStylePatch(
+  indexOrHtml,
+  command,
+  createdPagerootIds,
+) {
+  return planTextRangeStylePatch(indexOrHtml, command, {
+    token: TEXT_RANGE_ID_REPLAY_TOKEN,
+    pagerootIds: createdPagerootIds,
+  });
+}
+
 function gapBoundary(source, previousElement, nextElement) {
   const startOffset = previousElement.range.endOffset;
   const endOffset = nextElement.range.startOffset;

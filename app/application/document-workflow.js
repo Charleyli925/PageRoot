@@ -161,7 +161,6 @@ export class DocumentWorkflow {
       || typeof bridgeClient.autosave !== "function"
       || typeof bridgeClient.source !== "function"
       || typeof bridgeClient.workspace !== "function"
-      || typeof bridgeClient.sourceHistoryAction !== "function"
       || typeof bridgeClient.resolveConflict !== "function"
     ) {
       throw new TypeError("DocumentWorkflow requires its durable Bridge methods.");
@@ -280,7 +279,7 @@ export class DocumentWorkflow {
       String(sourceSha256),
       history,
     );
-    this.#sourceHistorySession.restorePending(
+    this.#sourceHistorySession.restorePendingEvidence(
       activeContext,
       authority.sourceHistoryOperations,
     );
@@ -1082,7 +1081,12 @@ export class DocumentWorkflow {
         ),
         recoveryIdentity: this.#recoveryIdentity,
       };
-      this.#sourceHistorySession.restorePending(activeContext, write.historyOperations);
+      // Crash recovery keeps exact save evidence only. Undo/Redo history is
+      // intentionally empty after a process restart.
+      this.#sourceHistorySession.restorePendingEvidence(
+        activeContext,
+        write.historyOperations,
+      );
       this.#auditPending = recoveredEvents;
       this.#commentSession.setChangeEvents(mergedEvents);
       this.#documentSession.publishAuthority({
@@ -1409,7 +1413,6 @@ export class DocumentWorkflow {
       || persistedRevision < write.revision
       || !persistedAt
       || (payload.skipped === true && declaredHash !== actualHash)
-      || !this.#codecs.isRecord(payload.sourceHistory)
     ) {
       throw invalidAcknowledgement(
         "自动写回的确认内容与本次提交的原始字节不一致。",
@@ -1476,13 +1479,14 @@ export class DocumentWorkflow {
     });
     const acknowledgedContext = rebound.context;
     if (rebound.routingChanged) {
+      const memoryHistory = this.#sourceHistorySession.snapshot;
       const pendingHistory = this.#sourceHistorySession.pendingOperations;
       this.#sourceHistorySession.activate(
         acknowledgedContext,
         sourceSha256,
-        payload.sourceHistory,
+        memoryHistory,
       );
-      this.#sourceHistorySession.restorePending(
+      this.#sourceHistorySession.restorePendingEvidence(
         acknowledgedContext,
         pendingHistory,
       );
@@ -1757,7 +1761,6 @@ export class DocumentWorkflow {
         || !this.#codecs.sameSourcePath(authority.sourcePath, writeContext.sourcePath)
         || !SHA256.test(sourceSha256)
         || persistedRevision < write.revision
-        || !this.#codecs.isRecord(authority.sourceHistory)
       ) return null;
       const source = await this.#bridgeClient.source(write.sourcePath);
       if (!this.#isCurrent(writeContext)) return stale(writeContext);
@@ -1852,93 +1855,41 @@ export class DocumentWorkflow {
     const flush = await this.flush({ throughRevision: this.#documentSession.editRevision });
     if (!flush || flush.status !== "succeeded") return flush;
     if (!this.#isCurrent(context)) return stale(context);
-    const action = this.#sourceHistorySession.createAction(context, direction);
-    if (!action) {
-      return blocked(
-        "SOURCE_HISTORY_ACTION_UNAVAILABLE",
-        "当前源码历史尚未完成写入，暂时不能撤销或重做。",
-      );
-    }
-    this.#documentSession.setPersistence({ state: "writing", error: "" });
     try {
-      const request = { ...context, ...action };
-      let payload;
-      try {
-        payload = await this.#bridgeClient.sourceHistoryAction(request);
-      } catch (cause) {
-        if (
-          !isBridgeRequestError(cause)
-          || (cause.outcome !== "unknown" && cause.status < 500)
-        ) throw cause;
-        const authority = await this.#bridgeClient.workspace(context.sourcePath);
-        const history = this.#codecs.isRecord(authority.sourceHistory)
-          ? authority.sourceHistory
-          : null;
-        const capabilities = this.#codecs.isRecord(history?.capabilities)
-          ? history.capabilities
-          : null;
-        const actionApplied = Array.isArray(history?.appliedActions)
-          && history.appliedActions.some((entry) => (
-            this.#codecs.isRecord(entry) && entry.actionId === action.actionId
-          ));
-        const actionStillEligible = (
-          String(authority.projectId || "") === context.projectId
-          && String(authority.documentId || "") === context.documentId
-          && this.#codecs.sameSourcePath(authority.sourcePath, context.sourcePath)
-          && String(authority.currentHtmlSha256 || "") === action.expectedSourceSha256
-          && Number(capabilities?.revision) === action.expectedHistoryRevision
-          && Number(capabilities?.cursor) === action.expectedHistoryCursor
-        );
-        if (!this.#isCurrent(context) || (!actionApplied && !actionStillEligible)) {
-          throw invalidAcknowledgement(
-            "无法确认上一次撤销或重做的结果，已停止重复操作。",
-            "SOURCE_HISTORY_RECONCILIATION_CONFLICT",
-          );
-        }
-        // The Bridge binds replay to actionId.  Authority either proves the
-        // original action or proves its preconditions still hold.
-        payload = await this.#bridgeClient.sourceHistoryAction(request);
-      }
-      const canonicalHtml = typeof payload.content === "string" ? payload.content : "";
-      const sourceSha256 = String(
-        payload.sha256 || payload.sourceSha256 || payload.currentHtmlSha256 || "",
-      );
-      const persistedRevision = Number(payload.persistedRevision || payload.lastPersistedRevision);
-      if (
-        !canonicalHtml
-        || !SHA256.test(sourceSha256)
-        || await this.#hashPort.sha256(canonicalHtml) !== sourceSha256
-        || !Number.isSafeInteger(persistedRevision)
-        || persistedRevision < this.#documentSession.lastPersistedRevision
-        || !this.#codecs.isRecord(payload.sourceHistory)
-      ) {
-        throw invalidAcknowledgement(
-          "撤销结果与持久化源码历史不一致。",
-          "INVALID_SOURCE_HISTORY_ACK",
-        );
-      }
-      if (!this.#isCurrent(context)) return stale(context);
-      if (!this.#sourceHistorySession.replaceAuthority(
+      const nextRevision = this.#documentSession.editRevision + 1;
+      const applied = this.#sourceHistorySession.apply(
         context,
-        payload.sourceHistory,
-        sourceSha256,
-      )) {
-        this.#sourceHistorySession.activate(context, sourceSha256, payload.sourceHistory);
+        direction,
+        this.#documentSession.html,
+        nextRevision,
+        new Date(this.#clock.now()).toISOString(),
+      );
+      if (!applied) {
+        return blocked(
+          "SOURCE_HISTORY_ACTION_UNAVAILABLE",
+          "当前页面没有可撤销或重做的本次打开记录。",
+        );
       }
-      this.#adoptHistoryAuthority({ context, payload, canonicalHtml, sourceSha256, persistedRevision });
+      this.#queueLocalHistoryEdit({
+        context,
+        direction,
+        applied,
+        nextRevision,
+      });
+      const persisted = await this.flush({ throughRevision: nextRevision });
+      if (!persisted || persisted.status !== "succeeded") return persisted;
       return succeeded({
         direction,
-        sourceSha256,
-        persistedRevision,
-        lastModifiedAt: String(payload.lastModifiedAt || ""),
+        sourceSha256: applied.sourceSha256,
+        persistedRevision: this.#documentSession.lastPersistedRevision,
       });
     } catch (cause) {
       if (!this.#isCurrent(context)) return stale(context);
       const message = this.#codecs.errorMessage(
         cause,
         direction === "undo"
-          ? "这次撤销没有完成，源 HTML 保持不变。"
-          : "这次重做没有完成，源 HTML 保持不变。",
+          ? "撤销结果仍保留在当前页面，可重试保存。"
+          : "重做结果仍保留在当前页面，可重试保存。",
       );
       this.#documentSession.setPersistence({ state: "failed", error: message });
       this.#emit({
@@ -1956,12 +1907,13 @@ export class DocumentWorkflow {
     }
   }
 
-  #adoptHistoryAuthority({ context, payload, canonicalHtml, sourceSha256, persistedRevision }) {
-    const rawTarget = this.#codecs.isRecord(payload.target)
-      ? this.#codecs.selectionFromRecord(payload.target)
+  #queueLocalHistoryEdit({ context, direction, applied, nextRevision }) {
+    const canonicalHtml = applied.html;
+    const rawTarget = this.#codecs.isRecord(applied.target)
+      ? this.#codecs.selectionFromRecord(applied.target)
       : null;
-    const rawTransition = this.#codecs.isRecord(payload.targetTransition)
-      ? payload.targetTransition
+    const rawTransition = this.#codecs.isRecord(applied.targetTransition)
+      ? applied.targetTransition
       : null;
     const transition = {
       fromTarget: this.#codecs.isRecord(rawTransition?.fromTarget)
@@ -2014,31 +1966,24 @@ export class DocumentWorkflow {
     this.#canvasPort.adoptHistorySource?.(
       canonicalHtml,
       historyTarget,
-      this.#codecs.historyTextSelectionFromRecord(payload.selection),
+      this.#codecs.historyTextSelectionFromRecord(applied.selection),
     );
-    this.#recoveryIdentity = this.#codecs.recoveryIdentityFromRecord(payload.recoveryIdentity)
-      || this.#recoveryIdentity;
-    this.#documentSession.update({
-      html: canonicalHtml,
-      sourceSha256,
-      editRevision: Math.max(this.#documentSession.editRevision, persistedRevision),
-      lastPersistedRevision: Math.max(
-        this.#documentSession.lastPersistedRevision,
-        persistedRevision,
-      ),
-      pendingWrite: null,
-      persistState: "idle",
-      persistError: "",
-    });
-    this.#versionSession.updateAuthority({
-      currentExactVersionId: payload.currentExactVersionId,
-    });
+    if (this.#documentSession.beginEdit(canonicalHtml) !== nextRevision) {
+      throw invalidAcknowledgement(
+        "当前文档没有接受撤销结果。",
+        "SOURCE_HISTORY_EDIT_REJECTED",
+      );
+    }
+    this.#versionSession.markSourceEdited();
     this.#canvasPort.invalidateRenderAcks();
-    this.#persistRecovery(null, context);
+    const write = this.#createWrite(context, canonicalHtml, nextRevision);
+    this.#documentSession.setPendingWrite(write);
+    this.#persistRecovery(write, context);
+    this.#documentSession.setPersistence({ state: "queued", error: "" });
     this.#emit({
       type: "document-history-applied",
       context,
-      lastModifiedAt: String(payload.lastModifiedAt || ""),
+      direction,
     });
   }
 

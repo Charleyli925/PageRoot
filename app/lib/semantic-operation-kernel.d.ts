@@ -14,7 +14,12 @@ interface SemanticOperationEnvelope {
 }
 
 export type SemanticOperation = SemanticOperationEnvelope & (
-  | { type: "setText"; target: SemanticElementPrecondition; text: string }
+  | {
+    type: "setText";
+    target: SemanticElementPrecondition;
+    text: string;
+    contentHtml?: string;
+  }
   | {
     type: "replaceTextRange";
     target: SemanticElementPrecondition;
@@ -33,6 +38,8 @@ export type SemanticOperation = SemanticOperationEnvelope & (
     property: string;
     value: string;
     important: boolean;
+    range?: { startOffset: number; endOffset: number; quote: string };
+    createdPagerootIds?: string[];
   }
   | {
     type: "insertElement";
