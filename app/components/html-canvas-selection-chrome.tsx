@@ -2,6 +2,8 @@
 
 import {
   memo,
+  useEffect,
+  useState,
   type CSSProperties,
 } from "react";
 import { ArrowDownIcon } from "@phosphor-icons/react/dist/csr/ArrowDown";
@@ -34,6 +36,7 @@ export const HtmlCanvasSelectionChrome = memo(function HtmlCanvasSelectionChrome
   model,
   actions,
 }: HtmlCanvasSelectionChromeProps) {
+  const [armedDeleteTargetId, setArmedDeleteTargetId] = useState<string | null>(null);
   const {
     canvasTransitionActive,
     selectionCapabilitySpoken,
@@ -72,6 +75,13 @@ export const HtmlCanvasSelectionChrome = memo(function HtmlCanvasSelectionChrome
     selection,
     selectedOutlineStyle,
   } = selectionChromeViewFields(model);
+  const deleteArmed = Boolean(
+    selection?.id
+    && armedDeleteTargetId === selection.id,
+  );
+  useEffect(() => {
+    setArmedDeleteTargetId(null);
+  }, [selection?.id]);
   const {
     onHoverHintPointerDown,
     onHoverHintPointerEnter,
@@ -486,10 +496,19 @@ export const HtmlCanvasSelectionChrome = memo(function HtmlCanvasSelectionChrome
               <button
                 type="button"
                 className={styles.iconButton}
-                aria-label="删除元素"
-                data-tooltip="删除元素"
+                aria-label={deleteArmed ? "确认删除元素" : "删除元素"}
+                data-confirm-delete={deleteArmed ? "true" : undefined}
+                data-tooltip={deleteArmed ? "再次点击确认删除" : "删除元素"}
                 data-tooltip-side="below"
-                onClick={onDeleteSelected}
+                onClick={() => {
+                  if (!selection?.id) return;
+                  if (deleteArmed) {
+                    setArmedDeleteTargetId(null);
+                    onDeleteSelected();
+                    return;
+                  }
+                  setArmedDeleteTargetId(selection.id);
+                }}
               >
                 <TrashIcon size={15} weight="bold" aria-hidden="true" />
               </button>

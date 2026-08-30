@@ -509,6 +509,16 @@
   background: transparent;
 }
 
+.iconButton[data-confirm-delete="true"] {
+  color: #a83d38;
+  background: #f8e8e6;
+}
+
+.iconButton[data-confirm-delete="true"]:hover:not(:disabled) {
+  color: #8f2f2b;
+  background: #f3d8d5;
+}
+
 @keyframes canvas-popover-in {
   from {
     opacity: 0;
