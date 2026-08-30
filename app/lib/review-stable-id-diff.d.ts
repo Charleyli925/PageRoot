@@ -9,6 +9,7 @@ export type ReviewStableIdTopology = {
   addedIds: string[];
   removedIds: string[];
   movedIds: string[];
+  duplicateIds: string[];
 };
 
 export function analyzeReviewStableIdTopology(

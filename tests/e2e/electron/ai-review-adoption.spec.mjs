@@ -2576,10 +2576,15 @@ test("stable-ID review reports movement, source attributes, styles, and author s
         <article data-stable-review-card data-review-status="before" style="padding: 8px">
           <h2>稳定卡片</h2><p>移动前文字</p>
         </article>
+        <article data-stable-review-static data-review-static="before" style="margin: 4px">
+          <h2>原位卡片</h2><p>原位修改前文字</p>
+        </article>
         <p data-stable-review-order="a">稳定顺序甲</p>
         <p data-stable-review-order="b">稳定顺序乙</p>
       </div>
       <div data-stable-review-column="b"></div>
+      <article data-stable-review-exact="a">精确重排甲</article>
+      <article data-stable-review-exact="b">精确重排乙</article>
     </section>
     <script type="application/json" data-stable-review-script>{"state":"before"}</script>
   </main>`,
@@ -2594,15 +2599,25 @@ test("stable-ID review reports movement, source attributes, styles, and author s
     );
     writeAiOutput(request.requestRoot, (base) => {
       const card = base.match(/<article data-stable-review-card[\s\S]*?<\/article>/u)?.[0];
+      const staticCard = base.match(/<article data-stable-review-static[\s\S]*?<\/article>/u)?.[0];
       const orderA = base.match(/<p data-stable-review-order="a"[^>]*>稳定顺序甲<\/p>/u)?.[0];
       const orderB = base.match(/<p data-stable-review-order="b"[^>]*>稳定顺序乙<\/p>/u)?.[0];
+      const exactA = base.match(/<article data-stable-review-exact="a"[^>]*>精确重排甲<\/article>/u)?.[0];
+      const exactB = base.match(/<article data-stable-review-exact="b"[^>]*>精确重排乙<\/article>/u)?.[0];
       expect(card).toBeTruthy();
+      expect(staticCard).toBeTruthy();
       expect(orderA).toBeTruthy();
       expect(orderB).toBeTruthy();
+      expect(exactA).toBeTruthy();
+      expect(exactB).toBeTruthy();
       const movedCard = card
         .replace('data-review-status="before"', 'data-review-status="after"')
         .replace('style="padding: 8px"', 'style="padding: 18px; border: 2px solid #6d5ce7"')
         .replace("移动前文字", "移动后文字");
+      const changedStaticCard = staticCard
+        .replace('data-review-static="before"', 'data-review-static="after"')
+        .replace('style="margin: 4px"', 'style="margin: 14px; color: rgb(90 40 150)"')
+        .replace("原位修改前文字", "原位修改后文字");
       return base
         .replace(ORIGINAL_TEXT, UPDATED_TEXT)
         .replace(
@@ -2614,7 +2629,9 @@ test("stable-ID review reports movement, source attributes, styles, and author s
           '{"state":"after"}',
         )
         .replace(card, "")
+        .replace(staticCard, changedStaticCard)
         .replace(`${orderA}\n        ${orderB}`, `${orderB}\n        ${orderA}`)
+        .replace(`${exactA}\n      ${exactB}`, `${exactB}\n      ${exactA}`)
         .replace(
           /(<div data-stable-review-column="b"[^>]*>)/u,
           `$1\n        ${movedCard}`,
@@ -2664,8 +2681,25 @@ test("stable-ID review reports movement, source attributes, styles, and author s
     await expect(afterFrame.locator(
       '[data-stable-review-card] [data-pageroot-review-text="added"], [data-stable-review-card][data-pageroot-review-text="added"]',
     ).first()).toBeAttached();
+    for (const [frame, tone] of [[beforeFrame, "removed"], [afterFrame, "added"]]) {
+      const staticCard = frame.locator("[data-stable-review-static]");
+      await expect.poll(() => structureKinds(staticCard)).toEqual(expect.arrayContaining([
+        "attribute",
+        "style",
+      ]));
+      await expect(frame.locator(
+        `[data-stable-review-static] [data-pageroot-review-text="${tone}"], [data-stable-review-static][data-pageroot-review-text="${tone}"]`,
+      ).first()).toBeAttached();
+    }
     await expect.poll(async () => {
       const facts = await afterFrame.locator('[data-stable-review-order="a"], [data-stable-review-order="b"]')
+        .evaluateAll((elements) => elements.flatMap((element) => (
+          JSON.parse(element.getAttribute("data-pageroot-review-projection-facts") || "[]")
+        )));
+      return facts.filter((fact) => fact.structureChange === "moved").length;
+    }).toBe(1);
+    await expect.poll(async () => {
+      const facts = await afterFrame.locator('[data-stable-review-exact="a"], [data-stable-review-exact="b"]')
         .evaluateAll((elements) => elements.flatMap((element) => (
           JSON.parse(element.getAttribute("data-pageroot-review-projection-facts") || "[]")
         )));

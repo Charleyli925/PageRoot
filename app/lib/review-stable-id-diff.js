@@ -1,13 +1,15 @@
 function uniqueDescriptorMap(descriptors) {
   const map = new Map();
+  const duplicateIds = new Set();
   for (const descriptor of descriptors) {
     if (!descriptor?.id) continue;
+    if (map.has(descriptor.id)) duplicateIds.add(descriptor.id);
     map.set(descriptor.id, map.has(descriptor.id) ? null : descriptor);
   }
   for (const [id, descriptor] of map) {
     if (!descriptor) map.delete(id);
   }
-  return map;
+  return { map, duplicateIds };
 }
 
 function longestIncreasingIds(entries) {
@@ -41,8 +43,14 @@ function longestIncreasingIds(entries) {
  * ambiguous elements deliberately stay outside this exact movement contract.
  */
 export function analyzeReviewStableIdTopology(beforeDescriptors, afterDescriptors) {
-  const before = uniqueDescriptorMap(beforeDescriptors);
-  const after = uniqueDescriptorMap(afterDescriptors);
+  const beforeAnalysis = uniqueDescriptorMap(beforeDescriptors);
+  const afterAnalysis = uniqueDescriptorMap(afterDescriptors);
+  const before = beforeAnalysis.map;
+  const after = afterAnalysis.map;
+  const duplicateIds = [...new Set([
+    ...beforeAnalysis.duplicateIds,
+    ...afterAnalysis.duplicateIds,
+  ])];
   const commonIds = [...before.keys()].filter((id) => after.has(id));
   const addedIds = [...after.keys()].filter((id) => !before.has(id));
   const removedIds = [...before.keys()].filter((id) => !after.has(id));
@@ -79,5 +87,6 @@ export function analyzeReviewStableIdTopology(beforeDescriptors, afterDescriptor
     addedIds,
     removedIds,
     movedIds: [...movedIds],
+    duplicateIds,
   };
 }

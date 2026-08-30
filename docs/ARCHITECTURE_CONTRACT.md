@@ -512,15 +512,21 @@ compatible tag/context buckets after exact and unique explicit identity
 matches; it cannot restore a page-wide Cartesian candidate set or change the
 existing evidence thresholds. A unique valid `data-pageroot-id` is the strongest
 pairing key and may cross source parents; duplicate/invalid IDs fail closed and
-legacy no-ID Versions retain the old matcher. A frozen pair with no shared valid
-persistent ID uses the legacy matcher throughout, so full ID churn cannot become
-false source additions/removals. Stable identity, exact subtree equality and own
+legacy no-ID Versions retain the old matcher. A duplicated persistent value is
+globally ambiguous for the complete document pair and cannot re-enter pairing
+through exact-subtree, relocation or fuzzy evidence. A frozen pair with no
+shared valid persistent ID uses the legacy matcher throughout, so full ID churn
+cannot become false source additions/removals. Stable identity, exact subtree equality and own
 non-presentation compatibility have different roles: exact equality skips only
 an unchanged branch, while an empty Canvas/SVG/control/container needs the same
 parent, kind and compatibility to become a candidate. Ambiguous alternatives
 remain unmatched. Stable topology distinguishes insertion from same-parent
 reorder and cross-parent movement; a common stable ID cannot degrade into
-delete/add. Analysis-local signature caches and projection facts are
+delete plus add, and byte-identical markup cannot hide a precomputed movement.
+Only `added`/`removed` whole-element facts suppress descendant text evidence;
+movement, attribute, inline-style and page-source facts must coexist with any
+simultaneous text fact.
+Analysis-local signature caches and projection facts are
 disposable; a trusted 25th distinct fact is an explicit analysis failure, while
 an oversized serialized payload fails closed rather than being treated as a
 complete review.

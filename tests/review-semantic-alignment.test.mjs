@@ -103,6 +103,23 @@ test("a legacy explicit identity remains scoped to its paired parent", () => {
   assert.equal(matchedPairs(pairs).length, 0);
 });
 
+test("globally ambiguous persistent identities cannot pair through fallback evidence", () => {
+  const ambiguous = (text) => unit(text, {
+    stableId: null,
+    identityAmbiguous: true,
+    exactSignature: "same-subtree",
+    compatibilitySignature: "same-element",
+    relocationKey: "same-relocation",
+  });
+  const pairs = alignReviewSemanticUnits(
+    [ambiguous("重复源码元素")],
+    [ambiguous("重复源码元素")],
+  );
+
+  assert.equal(matchedPairs(pairs).length, 0);
+  assert.deepEqual(unmatchedAfter(pairs), [0]);
+});
+
 test("a unique empty atomic unit pairs only through its self compatibility signature", () => {
   const pairs = alignReviewSemanticUnits(
     [unit("", {

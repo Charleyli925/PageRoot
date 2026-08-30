@@ -19,6 +19,7 @@ export type StableSourceChangeKind =
 export type StableSourceDifferenceAnalysis = {
   hasPersistentContinuity: boolean;
   sourceKinds: Array<"css-source" | "script-source">;
+  ambiguousPersistentIds: string[];
 };
 
 const COMMON_STABLE_SOURCE_ATTRIBUTE = "data-pageroot-review-stable-common";
@@ -46,14 +47,18 @@ function uniqueSourceElements(document: Document): Map<string, Element> {
   return new Map([...elements].filter((entry): entry is [string, Element] => Boolean(entry[1])));
 }
 
-function topologyDescriptors(elements: Map<string, Element>) {
-  return [...elements].map(([id, element]) => ({
-    id,
-    parentId: sourceId(element.parentElement),
-    index: [...(element.parentElement?.children || [])]
-      .filter((candidate) => Boolean(sourceId(candidate)))
-      .indexOf(element),
-  }));
+function topologyDescriptors(document: Document) {
+  return [...document.querySelectorAll(`[${PAGEROOT_ELEMENT_ID_ATTRIBUTE}]`)]
+    .flatMap((element) => {
+      const id = sourceId(element);
+      return id ? [{
+        id,
+        parentId: sourceId(element.parentElement),
+        index: [...(element.parentElement?.children || [])]
+          .filter((candidate) => Boolean(sourceId(candidate)))
+          .indexOf(element),
+      }] : [];
+    });
 }
 
 function comparableAttributes(element: Element, excluded: Set<string>) {
@@ -66,22 +71,6 @@ function comparableAttributes(element: Element, excluded: Set<string>) {
     .map((attribute) => `${attribute.name.toLowerCase()}=${attribute.value}`)
     .sort()
     .join("\u001f");
-}
-
-function visibleSourceText(element: Element): string {
-  let text = "";
-  const visit = (node: Node) => {
-    if (node.nodeType === Node.TEXT_NODE) {
-      text += node.textContent || "";
-      return;
-    }
-    if (!(node instanceof Element)) return;
-    if (node.matches("script, style, noscript, template")) return;
-    if (node.namespaceURI !== "http://www.w3.org/1999/xhtml") return;
-    node.childNodes.forEach(visit);
-  };
-  element.childNodes.forEach(visit);
-  return text.replace(/\s+/gu, " ").trim();
 }
 
 function authorSourceKind(
@@ -114,31 +103,6 @@ function annotateStructureFact(
   });
 }
 
-function annotateMovedTextFallback(before: Element, after: Element, id: string) {
-  if (visibleSourceText(before) === visibleSourceText(after)) return;
-  const semanticOwnerId = `stable-${id}`;
-  const geometryOwnerId = `stable-geometry-${id}`;
-  [
-    { element: before, tone: "removed" as const },
-    { element: after, tone: "added" as const },
-  ].forEach(({ element, tone }) => {
-    element.setAttribute("data-pageroot-review-text", tone);
-    element.setAttribute("data-pageroot-review-text-operation", "replace");
-    element.setAttribute("data-pageroot-review-text-group", `moved-text-${id}`);
-    appendProjectionFactToElement(element, {
-      id: `moved-text-${id}`,
-      type: "text",
-      semanticOwnerId,
-      geometryOwnerId,
-      scope: "text-block",
-      operation: "replace",
-      tone,
-      textGroup: `moved-text-${id}`,
-      summary: "文本调整",
-    });
-  });
-}
-
 export function annotateStablePageSourceAggregate(
   document: Document,
   kinds: ReadonlySet<"css-source" | "script-source">,
@@ -157,8 +121,8 @@ export function annotateStableSourceDifferences(
   const beforeElements = uniqueSourceElements(beforeDocument);
   const afterElements = uniqueSourceElements(afterDocument);
   const topology = analyzeReviewStableIdTopology(
-    topologyDescriptors(beforeElements),
-    topologyDescriptors(afterElements),
+    topologyDescriptors(beforeDocument),
+    topologyDescriptors(afterDocument),
   );
   const movedIds = new Set(topology.movedIds);
   const sourceKinds = new Set<"css-source" | "script-source">();
@@ -190,7 +154,6 @@ export function annotateStableSourceDifferences(
     if (movedIds.has(id)) {
       annotateStructureFact(before, id, "moved");
       annotateStructureFact(after, id, "moved");
-      annotateMovedTextFallback(before, after, id);
     }
 
     const isScript = before.tagName === "SCRIPT" || after.tagName === "SCRIPT";
@@ -233,5 +196,6 @@ export function annotateStableSourceDifferences(
   return {
     hasPersistentContinuity: topology.commonIds.length > 0,
     sourceKinds: [...sourceKinds],
+    ambiguousPersistentIds: topology.duplicateIds,
   };
 }

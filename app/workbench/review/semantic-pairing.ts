@@ -11,6 +11,7 @@ import {
   directHeading,
   exactSubtreeSignature,
   GENERIC_REVIEW_TEXT_CLASSES,
+  hasAmbiguousPersistentIdentity,
   hasClassRole,
   isReviewTextBlockElement,
   normalizedText,
@@ -303,6 +304,7 @@ export function semanticUnitDescriptor(
   parentKey: string,
   signatures: ReviewSignatureCache,
   usePersistentIdentity = true,
+  ambiguousPersistentIds: ReadonlySet<string> = new Set(),
 ) {
   const logicalCell = unit.kind === "table-cell"
     ? `:${unit.element.tagName}:${unit.columnStart ?? -1}:${unit.columnSpan ?? 1}`
@@ -322,8 +324,15 @@ export function semanticUnitDescriptor(
     kind: `${unit.kind}${logicalCell}`,
     text,
     stableId: ownsElementIdentity
-      ? stableElementIdentity(unit.element, signatures, usePersistentIdentity)
+      ? stableElementIdentity(
+        unit.element,
+        signatures,
+        usePersistentIdentity,
+        ambiguousPersistentIds,
+      )
       : null,
+    identityAmbiguous: ownsElementIdentity
+      && hasAmbiguousPersistentIdentity(unit.element, ambiguousPersistentIds),
     exactSignature,
     compatibilitySignature: `${unit.kind}\u0000${logicalCell}\u0000${selfCompatibilitySignature(
       unit.element,
@@ -353,7 +362,10 @@ export function sameLogicalCellPattern(
 
 export function* buildReviewSemanticPairGraphSteps(
   pair: SectionPair,
-  options: { usePersistentIdentity?: boolean } = {},
+  options: {
+    usePersistentIdentity?: boolean;
+    ambiguousPersistentIds?: ReadonlySet<string>;
+  } = {},
 ): Generator<"semantic-row", ReviewSemanticPairGraph, void> {
   const signatures = createReviewSignatureCache();
   let semanticOwnerSequence = 0;
@@ -436,12 +448,14 @@ export function* buildReviewSemanticPairGraphSteps(
         parentKey,
         signatures,
         options.usePersistentIdentity !== false,
+        options.ambiguousPersistentIds,
       )),
       after.children.map((unit) => semanticUnitDescriptor(
         unit,
         parentKey,
         signatures,
         options.usePersistentIdentity !== false,
+        options.ambiguousPersistentIds,
       )),
     );
     for (const childPair of aligned) {
@@ -483,11 +497,18 @@ export function sectionElementDescriptor(
   parentKey: string,
   signatures: ReviewSignatureCache,
   usePersistentIdentity = true,
+  ambiguousPersistentIds: ReadonlySet<string> = new Set(),
 ) {
   return {
     kind: `${element.namespaceURI || ""}:${element.localName.toLowerCase()}`,
     text: normalizedText(element),
-    stableId: stableElementIdentity(element, signatures, usePersistentIdentity),
+    stableId: stableElementIdentity(
+      element,
+      signatures,
+      usePersistentIdentity,
+      ambiguousPersistentIds,
+    ),
+    identityAmbiguous: hasAmbiguousPersistentIdentity(element, ambiguousPersistentIds),
     exactSignature: exactSubtreeSignature(element, signatures),
     compatibilitySignature: selfCompatibilitySignature(element, signatures),
     relocationKey: semanticRelocationKey(element, "section", signatures),
@@ -509,7 +530,10 @@ export function semanticElementName(element: Element): string {
 export function pairSections(
   before: Element[],
   after: Element[],
-  options: { usePersistentIdentity?: boolean } = {},
+  options: {
+    usePersistentIdentity?: boolean;
+    ambiguousPersistentIds?: ReadonlySet<string>;
+  } = {},
 ): SectionPair[] {
   const signatures = createReviewSignatureCache();
   const parentKey = (element: Element) => {
@@ -532,12 +556,14 @@ export function pairSections(
       parentKey(element),
       signatures,
       options.usePersistentIdentity !== false,
+      options.ambiguousPersistentIds,
     )),
     after.map((element) => sectionElementDescriptor(
       element,
       parentKey(element),
       signatures,
       options.usePersistentIdentity !== false,
+      options.ambiguousPersistentIds,
     )),
   ).map((pair) => ({
     before: pair.beforeIndex === null ? null : before[pair.beforeIndex],

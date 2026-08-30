@@ -48,4 +48,15 @@ test("duplicate IDs are excluded from exact identity analysis", () => {
   assert.deepEqual(result.commonIds, []);
   assert.deepEqual(result.addedIds, ["duplicate"]);
   assert.deepEqual(result.movedIds, []);
+  assert.deepEqual(result.duplicateIds, ["duplicate"]);
+});
+
+test("duplicate IDs remain globally ambiguous beside valid continuity", () => {
+  const result = analyzeReviewStableIdTopology(
+    [item("stable", "root", 0), item("duplicate", "a", 0), item("duplicate", "b", 0)],
+    [item("stable", "root", 0), item("duplicate", "c", 0), item("duplicate", "d", 0)],
+  );
+
+  assert.deepEqual(result.commonIds, ["stable"]);
+  assert.deepEqual(result.duplicateIds, ["duplicate"]);
 });

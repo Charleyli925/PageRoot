@@ -86,8 +86,12 @@ function* changeTypesForSemanticGraphSteps(
 function* annotateChangePairSteps(
   pair: SectionPair,
   usePersistentIdentity: boolean,
+  ambiguousPersistentIds: ReadonlySet<string>,
 ): Generator<"semantic-row", ReviewChangeType[], void> {
-  const graph = yield* buildReviewSemanticPairGraphSteps(pair, { usePersistentIdentity });
+  const graph = yield* buildReviewSemanticPairGraphSteps(pair, {
+    usePersistentIdentity,
+    ambiguousPersistentIds,
+  });
   return yield* changeTypesForSemanticGraphSteps(graph);
 }
 
@@ -210,6 +214,13 @@ function attachSourceChangeMarkerMetadata(
   );
 }
 
+function hasPreannotatedStableDifference(pair: SectionPair): boolean {
+  const selector = "[data-pageroot-review-text],[data-pageroot-review-structure]";
+  return [pair.before, pair.after].some((root) => Boolean(
+    root && (root.matches(selector) || root.querySelector(selector)),
+  ));
+}
+
 function* buildReviewDocumentSteps(
   beforeHtml: string,
   afterHtml: string,
@@ -273,6 +284,7 @@ function* buildReviewDocumentSteps(
   annotateActionPairs(beforeDocument, afterDocument);
   yield "actions";
   const stableSourceAnalysis = annotateStableSourceDifferences(beforeDocument, afterDocument);
+  const ambiguousPersistentIds = new Set(stableSourceAnalysis.ambiguousPersistentIds);
   yield "stable-source";
   const beforeSections = candidateSections(beforeDocument);
   yield "candidate-sections-before";
@@ -280,6 +292,7 @@ function* buildReviewDocumentSteps(
   yield "candidate-sections-after";
   const pairs = pairSections(beforeSections, afterSections, {
     usePersistentIdentity: stableSourceAnalysis.hasPersistentContinuity,
+    ambiguousPersistentIds,
   });
   const changes: ReviewChange[] = [];
   const outline: ReviewOutlineItem[] = [];
@@ -292,12 +305,14 @@ function* buildReviewDocumentSteps(
       pair.before
       && pair.after
       && normalizedMarkup(pair.before) === normalizedMarkup(pair.after)
+      && !hasPreannotatedStableDifference(pair)
     );
     let types: ReviewChangeType[] = [];
     if (!exactStablePair) {
       const annotationSteps = annotateChangePairSteps(
         pair,
         stableSourceAnalysis.hasPersistentContinuity,
+        ambiguousPersistentIds,
       );
       let annotationStep = annotationSteps.next();
       while (!annotationStep.done) {

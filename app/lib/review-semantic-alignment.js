@@ -14,6 +14,7 @@ function normalizedParent(unit) {
 }
 
 function identityKey(unit) {
+  if (unit.identityAmbiguous) return null;
   const stableId = String(unit.stableId || "").trim();
   if (!stableId) return null;
   return stableId.startsWith("pageroot:")
@@ -22,6 +23,7 @@ function identityKey(unit) {
 }
 
 function exactKey(unit) {
+  if (unit.identityAmbiguous) return null;
   const signature = String(unit.exactSignature || normalizedText(unit)).trim();
   return signature
     ? `${normalizedParent(unit)}\u0000${unit.kind}\u0000${signature}`
@@ -29,6 +31,7 @@ function exactKey(unit) {
 }
 
 function compatibilityKey(unit) {
+  if (unit.identityAmbiguous) return null;
   const signature = String(unit.compatibilitySignature || "").trim();
   return signature
     ? `${normalizedParent(unit)}\u0000${unit.kind}\u0000${signature}`
@@ -36,6 +39,7 @@ function compatibilityKey(unit) {
 }
 
 function relocationKey(unit) {
+  if (unit.identityAmbiguous) return null;
   const key = String(unit.relocationKey || "").trim();
   return key || null;
 }
@@ -159,6 +163,9 @@ function stableBoundaryAffinity(beforeText, afterText) {
 }
 
 function weightedPairScore(before, after) {
+  if (before.identityAmbiguous || after.identityAmbiguous) {
+    return Number.NEGATIVE_INFINITY;
+  }
   if (before.kind !== after.kind) return Number.NEGATIVE_INFINITY;
   if (normalizedParent(before) !== normalizedParent(after)) return Number.NEGATIVE_INFINITY;
   if (identityKey(before) || identityKey(after)) return Number.NEGATIVE_INFINITY;
@@ -198,6 +205,7 @@ function weightedPairScore(before, after) {
 
 function singletonReplacementIsCompatible(before, after) {
   if (!before || !after) return false;
+  if (before.identityAmbiguous || after.identityAmbiguous) return false;
   if (before.kind !== after.kind) return false;
   if (normalizedParent(before) !== normalizedParent(after)) return false;
   if (identityKey(before) || identityKey(after)) return false;

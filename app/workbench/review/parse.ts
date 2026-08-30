@@ -196,10 +196,14 @@ export function reviewAttributeRole(attribute: Attr): ReviewAttributeRole {
 export function explicitStableElementIdentity(
   element: Element,
   usePersistentIdentity = true,
+  ambiguousPersistentIds: ReadonlySet<string> = new Set(),
 ): string | null {
   if (usePersistentIdentity) {
-    const pagerootId = element.getAttribute(PAGEROOT_ELEMENT_ID_ATTRIBUTE)?.trim();
-    if (isValidPagerootElementId(pagerootId)) return `pageroot:${pagerootId}`;
+    const pagerootId = element.getAttribute(PAGEROOT_ELEMENT_ID_ATTRIBUTE)?.trim() || "";
+    if (
+      isValidPagerootElementId(pagerootId)
+      && !ambiguousPersistentIds.has(pagerootId)
+    ) return `pageroot:${pagerootId}`;
   }
   for (const name of [
     "id",
@@ -216,14 +220,27 @@ export function explicitStableElementIdentity(
   return null;
 }
 
+export function hasAmbiguousPersistentIdentity(
+  element: Element,
+  ambiguousPersistentIds: ReadonlySet<string>,
+): boolean {
+  const pagerootId = element.getAttribute(PAGEROOT_ELEMENT_ID_ATTRIBUTE)?.trim() || "";
+  return isValidPagerootElementId(pagerootId) && ambiguousPersistentIds.has(pagerootId);
+}
+
 export function stableElementIdentity(
   element: Element,
   signatures: ReviewSignatureCache,
   usePersistentIdentity = true,
+  ambiguousPersistentIds: ReadonlySet<string> = new Set(),
 ): string | null {
   const cached = signatures.stableIdentity.get(element);
   if (cached !== undefined) return cached;
-  const value = explicitStableElementIdentity(element, usePersistentIdentity);
+  const value = explicitStableElementIdentity(
+    element,
+    usePersistentIdentity,
+    ambiguousPersistentIds,
+  );
   signatures.stableIdentity.set(element, value);
   return value;
 }
