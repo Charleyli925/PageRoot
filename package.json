@@ -423,20 +423,8 @@
         "to": "bridge/draft-command-decoder.mjs"
       },
       {
-        "from": "bridge/source-history-service.mjs",
-        "to": "bridge/source-history-service.mjs"
-      },
-      {
         "from": "bridge/conversation-repository.mjs",
         "to": "bridge/conversation-repository.mjs"
-      },
-      {
-        "from": "bridge/source-transaction-service.mjs",
-        "to": "bridge/source-transaction-service.mjs"
-      },
-      {
-        "from": "bridge/project-context-service.mjs",
-        "to": "bridge/project-context-service.mjs"
       },
       {
         "from": "shared/draft-aggregate.mjs",

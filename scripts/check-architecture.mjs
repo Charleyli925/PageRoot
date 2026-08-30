@@ -95,7 +95,6 @@ const APPROVED_PERSISTENCE_OWNERS = new Set([
   "bridge/project-file-repository/path-safety.mjs",
   "bridge/project-file-repository/registry.mjs",
   "bridge/project-file-repository/working-copy.mjs",
-  "bridge/source-transaction-service.mjs",
   "bridge/workspace-bridge.mjs",
   "desktop/after-pack.mjs",
   "desktop/device-identity.mjs",

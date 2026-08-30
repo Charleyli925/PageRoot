@@ -265,9 +265,6 @@ services.
 | Pure comment/edit-event/tombstone transition rules | `shared/draft-aggregate.mjs` |
 | Pure source-history validation, cursor transitions and exact Patch replay | `shared/source-history.mjs`, re-exported through `app/domain/source-history.js` |
 | Bridge-side draft command validation and CAS | `bridge/draft-service.mjs` |
-| Bridge-side source-history repository, autosave preparation and action application | `bridge/source-history-service.mjs` |
-| Bridge-side current-source commit/recovery WAL, same-directory replacement, history application, metadata settlement and exactly-once audit outbox | `bridge/source-transaction-service.mjs` |
-| Bridge-side registered command identity and source-observation classification | `bridge/project-context-service.mjs` |
 | Durable Project File Registry, Working Copy CAS, Version/Candidate and Request/Draft records | `bridge/project-file-repository.mjs` façade over `bridge/project-file-repository/` internals (path safety, Registry, Working Copy CAS, Version/Candidate, Request/Draft). Callers keep importing the façade; there is no second persistence owner |
 | Close, switch, submit and history obligations | `app/application/drain-coordinator.js` |
 | Late query rejection and monotonic draft reads | `app/application/project-query-fence.js` |

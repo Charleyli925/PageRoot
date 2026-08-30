@@ -558,7 +558,6 @@
       "id": "project-session",
       "patterns": [
         "^app/application/(?:external-file-open-session|local-action-outcomes|project-application-session|project-query-fence|project-session)\\.(?:js|d\\.ts)$",
-        "^bridge/project-context-service\\.mjs$",
         "^app/application/project/source-locator-plan\\.(?:js|d\\.ts)$"
       ],
       "suites": [
@@ -568,7 +567,6 @@
         "tests/external-file-open-session.test.mjs",
         "tests/local-action-outcomes.test.mjs",
         "tests/project-application-session.test.mjs",
-        "tests/project-context-service.test.mjs",
         "tests/project-query-fence.test.mjs",
         "tests/project-session.test.mjs",
         "tests/project-plan.test.mjs"
@@ -1873,7 +1871,6 @@
         "tests/candidate-assessment.test.mjs",
         "tests/compatibility-decoders.test.mjs",
         "tests/product-contract.test.mjs",
-        "tests/project-context-service.test.mjs",
         "tests/targeted-change-schema.test.mjs",
         "tests/user-supplement.test.mjs",
         "tests/project-file-bridge.test.mjs",
