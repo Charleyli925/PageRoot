@@ -556,13 +556,20 @@ function semanticOperationForSourceCommand(
   };
   if (command.type === "replace-editable-island") {
     const after = mutation.after as { text?: unknown } | null;
-    const metadata = forwardPlan.metadata as { nextInnerHtml?: unknown };
+    const metadata = forwardPlan.metadata as {
+      nextInnerHtml?: unknown;
+      createdPagerootIds?: unknown;
+    };
+    const createdPagerootIds = Array.isArray(metadata.createdPagerootIds)
+      ? metadata.createdPagerootIds.map(String)
+      : [];
     return {
       ...envelope,
       type: "setText",
       target,
       text: String(after?.text ?? ""),
       contentHtml: String(metadata.nextInnerHtml ?? ""),
+      ...(createdPagerootIds.length > 0 ? { createdPagerootIds } : {}),
     };
   }
   if (command.type === "update-direct-text-node") {

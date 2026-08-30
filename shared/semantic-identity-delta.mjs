@@ -22,7 +22,10 @@ const COMMON_OPERATION_KEYS = new Set([
   "type",
 ]);
 const OPERATION_FIELDS = new Map([
-  ["setText", { required: ["target", "text"], optional: ["contentHtml"] }],
+  ["setText", {
+    required: ["target", "text"],
+    optional: ["contentHtml", "createdPagerootIds"],
+  }],
   ["replaceTextRange", { required: ["target", "range", "text"], optional: [] }],
   ["setAttribute", { required: ["target", "name", "value"], optional: [] }],
   ["setStyle", {
@@ -98,6 +101,17 @@ function assertTextRange(value) {
   }
 }
 
+function assertCreatedPagerootIds(value) {
+  if (
+    !Array.isArray(value)
+    || value.length === 0
+    || new Set(value).size !== value.length
+    || value.some((elementId) => !ELEMENT_ID_PATTERN.test(elementId))
+  ) {
+    fail("SEMANTIC_CREATED_IDENTITY_INVALID", "createdPagerootIds must contain unique stable element IDs.");
+  }
+}
+
 /**
  * Validates the public semantic-operation envelope independently of renderer
  * state. Repository calls this before treating an operation as save authority;
@@ -149,6 +163,12 @@ export function assertSemanticOperationContract(operation) {
     ) {
       fail("SEMANTIC_TEXT_INVALID", "setText requires string text and optional string contentHtml.");
     }
+    if (operation.createdPagerootIds !== undefined) {
+      if (operation.contentHtml === undefined) {
+        fail("SEMANTIC_CREATED_IDENTITY_INVALID", "setText created IDs require explicit contentHtml.");
+      }
+      assertCreatedPagerootIds(operation.createdPagerootIds);
+    }
   } else if (operation.type === "replaceTextRange") {
     assertTextRange(operation.range);
     if (typeof operation.text !== "string") {
@@ -173,14 +193,7 @@ export function assertSemanticOperationContract(operation) {
     }
     if (operation.range !== undefined) assertTextRange(operation.range);
     if (operation.createdPagerootIds !== undefined) {
-      if (
-        !Array.isArray(operation.createdPagerootIds)
-        || operation.createdPagerootIds.length === 0
-        || new Set(operation.createdPagerootIds).size !== operation.createdPagerootIds.length
-        || operation.createdPagerootIds.some((elementId) => !ELEMENT_ID_PATTERN.test(elementId))
-      ) {
-        fail("SEMANTIC_STYLE_IDENTITY_INVALID", "createdPagerootIds must contain unique stable element IDs.");
-      }
+      assertCreatedPagerootIds(operation.createdPagerootIds);
     }
   } else if (["insertElement", "replaceSubtree"].includes(operation.type)) {
     if (typeof operation.html !== "string" || operation.html.length === 0) {
@@ -547,11 +560,14 @@ function assertAllowedForwardTransition(beforeSnapshot, afterSnapshot, operation
     }
     const beforeDescendants = descendants(before, target.elementId);
     const afterDescendants = descendants(after, target.elementId);
+    const expectedAdded = new Set(
+      Array.isArray(operation.createdPagerootIds) ? operation.createdPagerootIds : [],
+    );
     assertSubset(removed, beforeDescendants, "SEMANTIC_IDENTITY_TEXT_REMOVAL", "setText removed identity outside its target.");
     assertSubset(added, afterDescendants, "SEMANTIC_IDENTITY_TEXT_ADDITION", "setText added identity outside its target.");
+    assertSet(added, expectedAdded, "SEMANTIC_IDENTITY_TEXT_ADDITION", "setText added IDs do not match kernel allocation evidence.");
     if (operation.contentHtml === undefined) {
       assertSet(removed, beforeDescendants, "SEMANTIC_IDENTITY_TEXT_REMOVAL", "Plain setText must retire all old descendant IDs.");
-      assertSet(added, new Set(), "SEMANTIC_IDENTITY_TEXT_ADDITION", "Plain setText cannot add source elements.");
     }
     assertNoTagChanges(before, after);
     assertCommonTopologyEqual(before, after);

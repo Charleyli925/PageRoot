@@ -19,6 +19,7 @@ export type SemanticOperation = SemanticOperationEnvelope & (
     target: SemanticElementPrecondition;
     text: string;
     contentHtml?: string;
+    createdPagerootIds?: string[];
   }
   | {
     type: "replaceTextRange";

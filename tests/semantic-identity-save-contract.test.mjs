@@ -176,6 +176,7 @@ test("system-created line breaks and range-style wrappers have explicit added-ID
     target: target(ids.plain),
     text: "first\nsecond",
     contentHtml: `first<br data-pageroot-id="${lineBreakId}">second`,
+    createdPagerootIds: [lineBreakId],
   }, "sourceop_line_break_identity_007");
   const lineBreakSaved = applyAndSave(lineBreak);
   assert.deepEqual(lineBreakSaved.result.identityDelta.addedElementIds, [lineBreakId]);
@@ -278,6 +279,38 @@ test("Repository validates the complete semantic operation contract before autho
       (error) => (
         error?.code === "SOURCE_ELEMENT_IDENTITY_LOST"
         && error?.details?.semanticIdentityError === expectedCode
+      ),
+    );
+  }
+});
+
+test("setText additions require exact kernel-created identity evidence", () => {
+  const lineBreakId = "pr1_60000000000040008000000000000002";
+  const settingText = operation("setText", {
+    target: target(ids.plain),
+    text: "first\nsecond",
+    contentHtml: `first<br data-pageroot-id="${lineBreakId}">second`,
+    createdPagerootIds: [lineBreakId],
+  }, "sourceop_text_identity_evidence_011");
+  const result = applySemanticOperation(createSemanticDocumentState(html), settingText);
+  const missingAllocation = {
+    ...settingText,
+  };
+  delete missingAllocation.createdPagerootIds;
+  for (const forgedOperation of [
+    missingAllocation,
+    {
+      ...settingText,
+      createdPagerootIds: ["pr1_60000000000040008000000000000003"],
+    },
+  ]) {
+    assert.throws(
+      () => materializeIdentityPreservingSave(html, result.html, {
+        sourceHistoryOperations: [saveEvidence(html, result, forgedOperation)],
+      }),
+      (error) => (
+        error?.code === "SOURCE_ELEMENT_IDENTITY_LOST"
+        && error?.details?.semanticIdentityError === "SEMANTIC_IDENTITY_TEXT_ADDITION"
       ),
     );
   }
