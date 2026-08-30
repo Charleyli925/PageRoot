@@ -704,6 +704,16 @@ delta. Insert and subtree replacement additionally reconstruct the exact
 identity-free result by removing only kernel-form identity attributes, then
 require those bytes to equal `operation.html`; fresh-looking IDs alone are not
 allocation authority.
+Native editable-island `<br>` nodes receive fresh IDs in the accepted Canvas
+plan before `setText` is formed, and Repository binds that operation to one
+exact target-content patch and its normalized `contentHtml`. Range-style
+wrappers are independently reconstructed from the operation's logical
+range/quote, canonical guard and declaration, exact source offsets and fresh ID
+list. Canvas and Repository share the pure editable-island normalizer and
+single-CSS-value declaration validator, so exact self-consistent evidence still
+cannot change protected island attributes or inject another CSS declaration.
+The same proof selects the original forward patches when validating undo;
+self-consistent wrapper inventories or legacy patch kinds are insufficient.
 Exact SourcePatch replay proves only the byte/Hash/CAS/recovery chain; patch
 `kind` cannot authorize identity changes. Undo or redo creates another normal
 complete-HTML save; its inverse is session-local exact restore evidence, not an

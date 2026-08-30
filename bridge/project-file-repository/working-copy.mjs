@@ -56,6 +56,9 @@ import {
   resolveRelative,
   validStateTimestamp,
 } from "./path-safety.mjs";
+import {
+  assertKernelTextMaterialization,
+} from "./semantic-text-materialization.mjs";
 
 const HTML_WHITESPACE = /[\t\n\f\r ]/u;
 
@@ -526,6 +529,13 @@ function assertBindingChangesAreAuthorized(currentHtml, nextHtml, sourceHistoryO
         afterIdentity,
         beforeHtml: step.beforeHtml,
         afterHtml: step.afterHtml,
+        operation: semanticOperation,
+        direction: semanticDirection,
+      });
+      assertKernelTextMaterialization({
+        step,
+        beforeIdentity,
+        afterIdentity,
         operation: semanticOperation,
         direction: semanticDirection,
       });

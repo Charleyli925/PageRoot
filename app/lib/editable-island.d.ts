@@ -33,6 +33,20 @@ export function normalizeEditableIslandHtml(
   options?: { baselineInnerHtml?: string },
 ): string;
 
+export function materializeEditableIslandHtml(
+  value: string,
+  options?: {
+    baselineInnerHtml?: string;
+    replayPagerootIds?: string[] | null;
+    randomUUID?: () => string;
+  },
+): { html: string; createdPagerootIds: string[] };
+
+export function editableIslandDraftHtml(
+  value: string,
+  options?: { baselineInnerHtml?: string },
+): string;
+
 export function normalizeEditableTextFragmentHtml(
   value: string,
   options?: { baselineInnerHtml?: string },

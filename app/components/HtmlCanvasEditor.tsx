@@ -44,6 +44,7 @@ import {
   resolveTargetRef,
 } from "../lib/source-patch-core.js";
 import {
+  editableIslandDraftHtml,
   editableIslandForTarget,
   isEditableIslandTarget,
   normalizeEditableTextFragmentHtml,
@@ -2598,7 +2599,9 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
               operationTargetRef,
             );
             if (
-              island.innerHtml !== nextInnerHtml
+              editableIslandDraftHtml(island.innerHtml, {
+                baselineInnerHtml: previousInnerHtml,
+              }) !== nextInnerHtml
               || projection.text !== nextText
             ) {
               throw new Error("V2 可编辑岛源码结果与当前草稿不一致。");

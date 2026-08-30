@@ -127,10 +127,12 @@ function requiredPackagedModules() {
 export const REQUIRED_SHARED_FILES = [
   "direct-edit-compatibility.mjs",
   "draft-aggregate.mjs",
+  "editable-island.mjs",
   "pageroot-element-identity.mjs",
   "provenance.mjs",
   "semantic-identity-delta.mjs",
   "source-history.mjs",
+  "source-style-value.mjs",
   "conversation.mjs",
   "agent-delivery.mjs",
   "agent-feature-gates.mjs",

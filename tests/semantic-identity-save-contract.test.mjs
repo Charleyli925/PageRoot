@@ -5,6 +5,7 @@ import {
   applySemanticOperation,
   createSemanticDocumentState,
   createSemanticElementPrecondition,
+  deriveSemanticOperationIdentityDelta,
 } from "../app/lib/semantic-operation-kernel.js";
 import {
   createDuplicateElementOperation,
@@ -365,4 +366,332 @@ test("insert and replace identity allocations are bound to exact operation HTML"
       ),
     );
   }
+});
+
+test("setText and range-style identity additions are bound to exact semantic materialization", () => {
+  const lineBreakId = "pr1_90000000000040008000000000000001";
+  const settingText = operation("setText", {
+    target: target(ids.plain),
+    text: "first\nsecond",
+    contentHtml: `first<br data-pageroot-id="${lineBreakId}">second`,
+    createdPagerootIds: [lineBreakId],
+  }, "sourceop_text_materialization_014");
+  const textResult = applySemanticOperation(createSemanticDocumentState(html), settingText);
+  const forgedTextEvidence = saveEvidence(html, textResult, {
+    ...settingText,
+    contentHtml: `forged<br data-pageroot-id="${lineBreakId}">content`,
+  });
+  assert.throws(
+    () => materializeIdentityPreservingSave(html, textResult.html, {
+      sourceHistoryOperations: [forgedTextEvidence],
+    }),
+    (error) => (
+      error?.code === "SOURCE_ELEMENT_IDENTITY_LOST"
+      && error?.details?.semanticIdentityError
+        === "SEMANTIC_IDENTITY_TEXT_MATERIALIZATION_MISMATCH"
+    ),
+  );
+
+  const wrapperId = "pr1_90000000000040008000000000000002";
+  const styling = operation("setStyle", {
+    target: target(ids.plain),
+    property: "font-weight",
+    value: "700",
+    important: false,
+    range: { startOffset: 0, endOffset: 3, quote: "pla" },
+    createdPagerootIds: [wrapperId],
+  }, "sourceop_range_materialization_015");
+  const styleResult = applySemanticOperation(createSemanticDocumentState(html), styling);
+  for (const forgedStyleOperation of [
+    { ...styling, property: "color", value: "red" },
+    {
+      ...styling,
+      range: { startOffset: 1, endOffset: 4, quote: "lai" },
+    },
+  ]) {
+    assert.throws(
+      () => materializeIdentityPreservingSave(html, styleResult.html, {
+        sourceHistoryOperations: [saveEvidence(html, styleResult, forgedStyleOperation)],
+      }),
+      (error) => (
+        error?.code === "SOURCE_ELEMENT_IDENTITY_LOST"
+        && error?.details?.semanticIdentityError
+          === "SEMANTIC_IDENTITY_RANGE_STYLE_MATERIALIZATION_MISMATCH"
+      ),
+    );
+  }
+
+  const targetElement = buildSourceIndex(html).byPagerootId.get(ids.plain);
+  const linkId = "pr1_b0000000000040008000000000000001";
+  const safeLink = `<a href="/safe" data-pageroot-id="${linkId}">plain</a>`;
+  const linkSource = `${html.slice(0, targetElement.contentRange.startOffset)}${safeLink}${
+    html.slice(targetElement.contentRange.endOffset)
+  }`;
+  const linkTarget = buildSourceIndex(linkSource).byPagerootId.get(ids.plain);
+  const unsafeLink = `<a href="javascript:alert(1)" onclick="alert(2)" data-pageroot-id="${linkId}">plain</a>`;
+  const unsafeLinkHtml = `${linkSource.slice(0, linkTarget.contentRange.startOffset)}${
+    unsafeLink
+  }${linkSource.slice(linkTarget.contentRange.endOffset)}`;
+  const linkState = createSemanticDocumentState(linkSource);
+  const unsafeTextOperation = {
+    schemaVersion: 1,
+    operationId: "sourceop_text_protected_attr_014",
+    baseRevision: linkState.revision,
+    expectedSourceSha256: linkState.sourceSha256,
+    type: "setText",
+    target: createSemanticElementPrecondition(linkSource, ids.plain),
+    text: "plain",
+    contentHtml: unsafeLink,
+  };
+  assert.throws(
+    () => materializeIdentityPreservingSave(linkSource, unsafeLinkHtml, {
+      sourceHistoryOperations: [{
+        operationId: unsafeTextOperation.operationId,
+        kind: "text",
+        editRevision: 1,
+        createdAt: "2026-08-30T00:00:00.000Z",
+        beforeSourceSha256: linkState.sourceSha256,
+        afterSourceSha256: createSemanticDocumentState(unsafeLinkHtml).sourceSha256,
+        forwardPatches: [{
+          startOffset: linkTarget.contentRange.startOffset,
+          endOffset: linkTarget.contentRange.endOffset,
+          before: safeLink,
+          after: unsafeLink,
+          kind: "editable-island",
+        }],
+        reversePatches: [{
+          startOffset: linkTarget.contentRange.startOffset,
+          endOffset: linkTarget.contentRange.startOffset + unsafeLink.length,
+          before: unsafeLink,
+          after: safeLink,
+          kind: "inverse:editable-island",
+        }],
+        beforeTarget: null,
+        afterTarget: null,
+        semanticDirection: "forward",
+        semanticOperation: unsafeTextOperation,
+        identityDelta: deriveSemanticOperationIdentityDelta(
+          linkSource,
+          unsafeLinkHtml,
+          unsafeTextOperation,
+        ),
+      }],
+    }),
+    (error) => (
+      error?.code === "SOURCE_ELEMENT_IDENTITY_LOST"
+      && error?.details?.semanticIdentityError
+        === "SEMANTIC_IDENTITY_TEXT_MATERIALIZATION_MISMATCH"
+    ),
+  );
+
+  const forgedTextWrapper = `<span data-pageroot-id="${lineBreakId}">forged</span>`;
+  const forgedTextHtml = `${html.slice(0, targetElement.contentRange.startOffset)}${
+    forgedTextWrapper
+  }${html.slice(targetElement.contentRange.endOffset)}`;
+  const forgedTextOperation = {
+    ...settingText,
+    text: "forged",
+    contentHtml: forgedTextWrapper,
+  };
+  assert.throws(
+    () => materializeIdentityPreservingSave(html, forgedTextHtml, {
+      sourceHistoryOperations: [{
+        ...saveEvidence(html, textResult, forgedTextOperation),
+        operationId: "sourceop_text_forged_tree_014",
+        afterSourceSha256: createSemanticDocumentState(forgedTextHtml).sourceSha256,
+        forwardPatches: [{
+          startOffset: targetElement.contentRange.startOffset,
+          endOffset: targetElement.contentRange.endOffset,
+          before: "plain",
+          after: forgedTextWrapper,
+          kind: "editable-island",
+        }],
+        reversePatches: [{
+          startOffset: targetElement.contentRange.startOffset,
+          endOffset: targetElement.contentRange.startOffset + forgedTextWrapper.length,
+          before: forgedTextWrapper,
+          after: "plain",
+          kind: "inverse:editable-island",
+        }],
+        identityDelta: deriveSemanticOperationIdentityDelta(
+          html,
+          forgedTextHtml,
+          forgedTextOperation,
+        ),
+      }],
+    }),
+    (error) => (
+      error?.code === "SOURCE_ELEMENT_IDENTITY_LOST"
+      && error?.details?.semanticIdentityError
+        === "SEMANTIC_IDENTITY_TEXT_MATERIALIZATION_MISMATCH"
+    ),
+  );
+
+  const forgedWrapper = `<mark data-pageroot-id="${wrapperId}">plain</mark>`;
+  const forgedHtml = `${html.slice(0, targetElement.contentRange.startOffset)}${forgedWrapper}${
+    html.slice(targetElement.contentRange.endOffset)
+  }`;
+  const forgedState = createSemanticDocumentState(forgedHtml);
+  const forgedEvidence = {
+    operationId: "sourceop_range_forged_tree_015",
+    kind: "style",
+    editRevision: 1,
+    createdAt: "2026-08-30T00:00:00.000Z",
+    beforeSourceSha256: createSemanticDocumentState(html).sourceSha256,
+    afterSourceSha256: forgedState.sourceSha256,
+    forwardPatches: [{
+      startOffset: targetElement.contentRange.startOffset,
+      endOffset: targetElement.contentRange.endOffset,
+      before: "plain",
+      after: forgedWrapper,
+      kind: "text-range-style-open",
+    }],
+    reversePatches: [{
+      startOffset: targetElement.contentRange.startOffset,
+      endOffset: targetElement.contentRange.startOffset + forgedWrapper.length,
+      before: forgedWrapper,
+      after: "plain",
+      kind: "inverse:text-range-style-open",
+    }],
+    beforeTarget: null,
+    afterTarget: null,
+    semanticDirection: "forward",
+    semanticOperation: styling,
+    identityDelta: deriveSemanticOperationIdentityDelta(html, forgedHtml, styling),
+  };
+  assert.equal(
+    `${html.slice(0, targetElement.contentRange.startOffset)}${forgedWrapper}${
+      html.slice(targetElement.contentRange.endOffset)
+    }`,
+    forgedHtml,
+  );
+  assert.equal(
+    `${forgedHtml.slice(0, targetElement.contentRange.startOffset)}plain${
+      forgedHtml.slice(targetElement.contentRange.startOffset + forgedWrapper.length)
+    }`,
+    html,
+  );
+  assert.throws(
+    () => materializeIdentityPreservingSave(html, forgedHtml, {
+      sourceHistoryOperations: [forgedEvidence],
+    }),
+    (error) => (
+      error?.code === "SOURCE_ELEMENT_IDENTITY_LOST"
+      && error?.details?.semanticIdentityError
+        === "SEMANTIC_IDENTITY_RANGE_STYLE_MATERIALIZATION_MISMATCH"
+    ),
+  );
+
+  const unsafeStyleOperation = {
+    ...styling,
+    operationId: "sourceop_range_css_injection_015",
+    property: "color",
+    value: "red; position: fixed",
+  };
+  const unsafeOpening = `<span style="all: unset; display: inline !important; color: red; position: fixed" data-pageroot-id="${wrapperId}">`;
+  const unsafeClosing = "</span>";
+  const unsafeStyledContent = `${unsafeOpening}pla${unsafeClosing}in`;
+  const unsafeStyledHtml = `${html.slice(0, targetElement.contentRange.startOffset)}${
+    unsafeStyledContent
+  }${html.slice(targetElement.contentRange.endOffset)}`;
+  assert.throws(
+    () => materializeIdentityPreservingSave(html, unsafeStyledHtml, {
+      sourceHistoryOperations: [{
+        operationId: unsafeStyleOperation.operationId,
+        kind: "style",
+        editRevision: 1,
+        createdAt: "2026-08-30T00:00:00.000Z",
+        beforeSourceSha256: createSemanticDocumentState(html).sourceSha256,
+        afterSourceSha256: createSemanticDocumentState(unsafeStyledHtml).sourceSha256,
+        forwardPatches: [{
+          startOffset: targetElement.contentRange.startOffset,
+          endOffset: targetElement.contentRange.startOffset,
+          before: "",
+          after: unsafeOpening,
+          kind: "text-range-style-open",
+        }, {
+          startOffset: targetElement.contentRange.startOffset + 3,
+          endOffset: targetElement.contentRange.startOffset + 3,
+          before: "",
+          after: unsafeClosing,
+          kind: "text-range-style-close",
+        }],
+        reversePatches: [{
+          startOffset: targetElement.contentRange.startOffset,
+          endOffset: targetElement.contentRange.startOffset + unsafeOpening.length,
+          before: unsafeOpening,
+          after: "",
+          kind: "inverse:text-range-style-open",
+        }, {
+          startOffset: targetElement.contentRange.startOffset + unsafeOpening.length + 3,
+          endOffset: targetElement.contentRange.startOffset
+            + unsafeOpening.length + 3 + unsafeClosing.length,
+          before: unsafeClosing,
+          after: "",
+          kind: "inverse:text-range-style-close",
+        }],
+        beforeTarget: null,
+        afterTarget: null,
+        semanticDirection: "forward",
+        semanticOperation: unsafeStyleOperation,
+        identityDelta: deriveSemanticOperationIdentityDelta(
+          html,
+          unsafeStyledHtml,
+          unsafeStyleOperation,
+        ),
+      }],
+    }),
+    (error) => (
+      error?.code === "SOURCE_ELEMENT_IDENTITY_LOST"
+      && error?.details?.semanticIdentityError
+        === "SEMANTIC_IDENTITY_RANGE_STYLE_MATERIALIZATION_MISMATCH"
+    ),
+  );
+});
+
+test("range-style materialization selects the original forward proof for undo and redo", () => {
+  const wrapperId = "pr1_a0000000000040008000000000000001";
+  const styling = operation("setStyle", {
+    target: target(ids.plain),
+    property: "font-style",
+    value: "italic",
+    important: false,
+    range: { startOffset: 0, endOffset: 3, quote: "pla" },
+    createdPagerootIds: [wrapperId],
+  }, "sourceop_range_direction_016");
+  const result = applySemanticOperation(createSemanticDocumentState(html), styling);
+  const materialization = result.materialization.sourcePatchResult;
+  const undoEvidence = {
+    ...saveEvidence(html, result, styling),
+    operationId: "sourceop_range_undo_016",
+    beforeSourceSha256: result.sourceSha256,
+    afterSourceSha256: result.previousSourceSha256,
+    forwardPatches: materialization.inversePlan.patches,
+    reversePatches: materialization.patches,
+    semanticDirection: "undo",
+    identityDelta: deriveSemanticOperationIdentityDelta(
+      result.html,
+      html,
+      styling,
+      { direction: "undo" },
+    ),
+  };
+  assert.equal(materializeIdentityPreservingSave(result.html, html, {
+    sourceHistoryOperations: [undoEvidence],
+  }).html, html);
+
+  const redoEvidence = {
+    ...saveEvidence(html, result, styling),
+    operationId: "sourceop_range_redo_016",
+    semanticDirection: "redo",
+    identityDelta: deriveSemanticOperationIdentityDelta(
+      html,
+      result.html,
+      styling,
+      { direction: "redo" },
+    ),
+  };
+  assert.equal(materializeIdentityPreservingSave(html, result.html, {
+    sourceHistoryOperations: [redoEvidence],
+  }).html, result.html);
 });

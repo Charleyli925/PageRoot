@@ -49,6 +49,20 @@ state. Cloning authored markup also cannot retain the original persistent IDs.
   resulting identity-free subtree bytes to equal `operation.html`. A caller
   cannot pair unrelated payload HTML with fresh-looking IDs and a recomputed
   delta.
+- Native editable-island line breaks enter the semantic contract as bare
+  `<br>` nodes. The accepted Canvas plan allocates their fresh IDs before it
+  creates `setText`; semantic replay must reproduce that exact identified
+  `contentHtml`. Repository binds the operation to the target's one exact
+  editable-island patch, so a matching ID inventory cannot authorize unrelated
+  island bytes.
+- A range-style operation that adds wrappers is independently replayed at the
+  Repository boundary. Its logical range and quote must map to the exact
+  authored text segments; wrapper count, offsets, canonical guard/style bytes
+  and allocated IDs must equal the retained forward evidence for forward,
+  undo and redo. An identified but differently placed or styled subtree is not
+  authorized. Canvas and Repository consume the same pure editable-island and
+  single-CSS-value validators; exact caller-authored bytes cannot bypass the
+  inline schema, protected-attribute, atom/comment or style-injection rules.
 - The operation rules are closed: insert/duplicate add only fresh subtree IDs;
   delete removes only the addressed subtree; move retains every subtree ID;
   `replaceSubtree` retains its root ID while replacing descendants; `setText`

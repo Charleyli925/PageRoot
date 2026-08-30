@@ -10,6 +10,7 @@ import {
 } from "../app/lib/source-patch-core.js";
 import {
   EditableIslandError,
+  editableIslandDraftHtml,
   editableIslandForTarget,
   normalizeEditableIslandHtml,
   normalizeEditableTextFragmentHtml,
@@ -105,6 +106,44 @@ test("editable island admits mixed inline markup, empty text and hard breaks", (
     nextInnerHtml: "",
   }, emptyIndex), result.html);
   assert.equal(emptied.html, "<button></button>");
+});
+
+test("managed native line breaks receive one fresh persistent identity", () => {
+  const htmlId = "pr1_10000000000040008000000000000001";
+  const headId = "pr1_10000000000040008000000000000002";
+  const bodyId = "pr1_10000000000040008000000000000003";
+  const paragraphId = "pr1_10000000000040008000000000000004";
+  const html = `<html data-pageroot-id="${htmlId}"><head data-pageroot-id="${headId}"></head><body data-pageroot-id="${bodyId}"><p data-pageroot-id="${paragraphId}">first</p></body></html>`;
+  const { index, targetRef } = targetFor(html);
+  const plan = planEditableIslandPatch(index, {
+    targetRef,
+    beforeInnerHtml: "first",
+    nextInnerHtml: "first<br>second",
+    expectedSourceSha256: index.sourceSha256,
+  });
+  const createdPagerootIds = plan.metadata.createdPagerootIds;
+  assert.equal(createdPagerootIds.length, 1);
+  assert.match(createdPagerootIds[0], /^pr1_[0-9a-f]{12}4[0-9a-f]{3}[89ab][0-9a-f]{15}$/u);
+  assert.match(
+    plan.metadata.nextInnerHtml,
+    new RegExp(`<br data-pageroot-id="${createdPagerootIds[0]}">`, "u"),
+  );
+  const result = applyPatchPlan(plan, html);
+  assert.equal(result.sourceIndex.pagerootIdentity.complete, true);
+  assert.equal(result.sourceIndex.byPagerootId.has(createdPagerootIds[0]), true);
+  assert.equal(editableIslandDraftHtml(plan.metadata.nextInnerHtml, {
+    baselineInnerHtml: "first",
+  }), "first<br>second");
+
+  assertIslandError(
+    "EDITABLE_ISLAND_IDENTITY_ADDED",
+    () => planEditableIslandPatch(index, {
+      targetRef,
+      beforeInnerHtml: "first",
+      nextInnerHtml: `first<br data-pageroot-id="pr1_20000000000040008000000000000001">second`,
+      expectedSourceSha256: index.sourceSha256,
+    }),
+  );
 });
 
 test("editable island preserves persistent IDs while allowing identified new inline structure", () => {

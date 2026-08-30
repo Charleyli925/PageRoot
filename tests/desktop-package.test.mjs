@@ -136,10 +136,12 @@ const PACKAGED_MODULES = [
 const SHARED_FILES = [
   "draft-aggregate.mjs",
   "direct-edit-compatibility.mjs",
+  "editable-island.mjs",
   "pageroot-element-identity.mjs",
   "provenance.mjs",
   "semantic-identity-delta.mjs",
   "source-history.mjs",
+  "source-style-value.mjs",
   "conversation.mjs",
   "agent-delivery.mjs",
   "agent-feature-gates.mjs",

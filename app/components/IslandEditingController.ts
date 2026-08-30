@@ -9,7 +9,6 @@ import {
 } from "../lib/editable-island.js";
 import {
   PAGEROOT_ELEMENT_ID_ATTRIBUTE,
-  generatePagerootElementId,
   isValidPagerootElementId,
 } from "../lib/pageroot-element-identity.js";
 import {
@@ -729,13 +728,13 @@ export class IslandEditingController {
   }
 
   private serializeLiveCanonical(): string {
-    this.ensurePersistentDescendantIdentities();
+    this.validatePersistentDescendantIdentities();
     return this.normalizeInnerHtml(this.hostElement.innerHTML, {
       baselineInnerHtml: this.baselineInnerHtml,
     });
   }
 
-  private ensurePersistentDescendantIdentities(): void {
+  private validatePersistentDescendantIdentities(): void {
     const hostId = this.hostElement.getAttribute(PAGEROOT_ELEMENT_ID_ATTRIBUTE);
     if (hostId === null) return;
     if (!isValidPagerootElementId(hostId)) {
@@ -750,21 +749,6 @@ export class IslandEditingController {
         throw new Error("The editable source island has invalid persistent element identities.");
       }
       allocated.add(pagerootId);
-    }
-    for (const element of descendants) {
-      if (element.hasAttribute(PAGEROOT_ELEMENT_ID_ATTRIBUTE)) continue;
-      let pagerootId = "";
-      for (let attempt = 0; attempt < 64; attempt += 1) {
-        const candidate = generatePagerootElementId();
-        if (allocated.has(candidate)) continue;
-        pagerootId = candidate;
-        allocated.add(candidate);
-        break;
-      }
-      if (!pagerootId) {
-        throw new Error("A unique persistent identity could not be allocated for a new source element.");
-      }
-      element.setAttribute(PAGEROOT_ELEMENT_ID_ATTRIBUTE, pagerootId);
     }
   }
 

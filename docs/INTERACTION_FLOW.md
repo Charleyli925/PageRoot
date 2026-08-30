@@ -363,6 +363,7 @@ Source 逐节点对账；Script 执行状态迁移；为绝对无刷新建立双
 → 生成 replace-editable-island 或 update-direct-text-node EditCommand
 → SourceIndex + TargetResolver 锁定源码范围
 → 岛内或纯文本片段做最小安全规范化，SourcePatchEngine 生成精确 range patch 与 inverse patch
+→ 原生换行以裸 `<br>` 进入受管计划，由系统分配 fresh stable ID 后再形成 `setText`；调用方预置新 ID 失败关闭
 → 校验岛外字节完全不变，并重解析受影响区域
 → 语义内核从 before/after 完整 HTML 导出 identityDelta（新增/删除/移动 ID、保留根与放置证据）
 → 用新源码原子重建 projection 并恢复逻辑选区
@@ -372,6 +373,7 @@ Source 逐节点对账；Script 执行状态迁移；为绝对无刷新建立双
 → debounce 后进入同一串行队列
 → 核对源 Hash
 → Repository 重新解析身份差异，与 semantic operation + identityDelta 交叉验证；SourcePatch kind 不授权身份变化
+→ 对 identified `setText` 岛内容及 range-style wrapper，Repository 还按目标内容范围或逻辑文字范围独立重建 exact patch，核对位置、数量、样式字节和新 ID
 → 临时文件写入、刷盘、原子替换
 → 重读校验
 → 封存新的 ID/tag/parent/order binding，仅用于之后的外部冲突检测

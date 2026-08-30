@@ -5,8 +5,12 @@ import {
 } from "./source-index.js";
 import { decodeHTML } from "entities";
 import {
+  canonicalSourceStyleDeclaration,
+} from "../../shared/source-style-value.mjs";
+import {
   editableIslandForTarget,
   isEditableIslandTarget,
+  materializeEditableIslandHtml,
   normalizeEditableIslandHtml,
   normalizeEditableTextFragmentHtml,
 } from "./editable-island.js";
@@ -24,6 +28,7 @@ import {
 } from "./target-resolver.js";
 
 const TEXT_RANGE_ID_REPLAY_TOKEN = Symbol("text-range-id-replay");
+const EDITABLE_ISLAND_ID_REPLAY_TOKEN = Symbol("editable-island-id-replay");
 
 const RAW_TEXT_ELEMENTS = new Set([
   "script",
@@ -695,7 +700,7 @@ function normalizedTextRangeSegments(index, target, segments) {
   return normalized;
 }
 
-export function planEditableIslandPatch(indexOrHtml, command) {
+export function planEditableIslandPatch(indexOrHtml, command, replay = null) {
   const index = typeof indexOrHtml === "string"
     ? buildSourceIndex(indexOrHtml)
     : indexOrHtml;
@@ -723,10 +728,22 @@ export function planEditableIslandPatch(indexOrHtml, command) {
     );
   }
 
-  const nextInnerHtml = normalizeEditableIslandHtml(
-    String(command.nextInnerHtml),
-    { baselineInnerHtml: island.innerHtml },
-  );
+  const replayPagerootIds = replay?.token === EDITABLE_ISLAND_ID_REPLAY_TOKEN
+    ? replay.pagerootIds
+    : null;
+  const materialized = index.pagerootIdentity.complete
+    ? materializeEditableIslandHtml(String(command.nextInnerHtml), {
+        baselineInnerHtml: island.innerHtml,
+        replayPagerootIds,
+      })
+    : {
+        html: normalizeEditableIslandHtml(
+          String(command.nextInnerHtml),
+          { baselineInnerHtml: island.innerHtml },
+        ),
+        createdPagerootIds: [],
+      };
+  const nextInnerHtml = materialized.html;
   const patch = sourcePatch(
     island.contentRange.startOffset,
     island.contentRange.endOffset,
@@ -747,9 +764,21 @@ export function planEditableIslandPatch(indexOrHtml, command) {
       rootTagName: island.element.tagName,
       beforeInnerHtml: island.innerHtml,
       nextInnerHtml,
+      createdPagerootIds: materialized.createdPagerootIds,
       writeScope: "editable-island-inner-html",
     },
   );
+}
+
+export function planSemanticEditableIslandPatch(
+  indexOrHtml,
+  command,
+  createdPagerootIds,
+) {
+  return planEditableIslandPatch(indexOrHtml, command, {
+    token: EDITABLE_ISLAND_ID_REPLAY_TOKEN,
+    pagerootIds: createdPagerootIds,
+  });
 }
 
 export function planDirectTextNodePatch(indexOrHtml, command) {
@@ -1349,14 +1378,21 @@ export function planTextRangeStylePatch(indexOrHtml, command, replay = null) {
       { property },
     );
   }
-  assertCommentFreeStyleSyntax(command.value, {
-    nodeId: target.nodeId,
-    property,
-  });
-  assertSingleCssValue(command.value, {
-    nodeId: target.nodeId,
-    property,
-  });
+  let declaration;
+  try {
+    ({ declaration } = canonicalSourceStyleDeclaration({
+      property,
+      value: command.value,
+      important: Boolean(command.important),
+      quote: '"',
+    }));
+  } catch (cause) {
+    fail(
+      cause?.code || "INVALID_STYLE_VALUE",
+      cause?.message || "Inline style value is invalid.",
+      { nodeId: target.nodeId, property, ...(cause?.details ?? {}) },
+    );
+  }
   const segments = normalizedTextRangeSegments(index, target, command.segments);
   const onlySegment = segments.length === 1 ? segments[0] : null;
   if (
@@ -1418,12 +1454,6 @@ export function planTextRangeStylePatch(indexOrHtml, command, replay = null) {
       },
     );
   }
-  const declaration = declarationFor(
-    property,
-    command.value,
-    Boolean(command.important),
-    "\"",
-  );
   // Flex/grid direct-text and visible-background cases are rejected by the
   // canvas before this plan is applied. In supported inline flow, this wrapper
   // preserves Chromium's real caret/beforeinput/input behavior.
@@ -2081,13 +2111,13 @@ function authorizePatchPlan(plan, index, patches) {
       }
     }
     if (!isInverse) {
-      const expected = planEditableIslandPatch(index, {
+      const expected = planSemanticEditableIslandPatch(index, {
         type: "replace-editable-island",
         targetRef: targetRefs[0],
         beforeInnerHtml: plan.metadata?.beforeInnerHtml,
         nextInnerHtml: plan.metadata?.nextInnerHtml,
         expectedSourceSha256: index.sourceSha256,
-      });
+      }, plan.metadata?.createdPagerootIds ?? []);
       if (!patchesEqual(patches, expected.patches)) {
         fail(
           "PATCH_PLAN_TAMPERED",

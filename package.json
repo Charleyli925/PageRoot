@@ -435,8 +435,16 @@
         "to": "shared/direct-edit-compatibility.mjs"
       },
       {
+        "from": "shared/editable-island.mjs",
+        "to": "shared/editable-island.mjs"
+      },
+      {
         "from": "shared/source-history.mjs",
         "to": "shared/source-history.mjs"
+      },
+      {
+        "from": "shared/source-style-value.mjs",
+        "to": "shared/source-style-value.mjs"
       },
       {
         "from": "shared/semantic-identity-delta.mjs",

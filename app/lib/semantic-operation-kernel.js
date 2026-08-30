@@ -4,8 +4,8 @@ import {
 } from "./pageroot-element-identity.js";
 import {
   applyPatchPlan,
-  planEditableIslandPatch,
   planInlineStylePatch,
+  planSemanticEditableIslandPatch,
   planSemanticOperationPatch,
   planSemanticTextRangeStylePatch,
   planSiblingReorderPatch,
@@ -605,7 +605,7 @@ export function applySemanticOperation(inputState, operation, options = {}) {
       expectedSourceSha256: state.sourceSha256,
     })
     : operation.type === "setText" && operation.contentHtml !== undefined
-    ? planEditableIslandPatch(index, {
+    ? planSemanticEditableIslandPatch(index, {
       type: "replace-editable-island",
       targetRef: createTargetRef(index, targetElement, { level: "subregion" }),
       beforeInnerHtml: index.source.slice(
@@ -614,7 +614,7 @@ export function applySemanticOperation(inputState, operation, options = {}) {
       ),
       nextInnerHtml: command.contentHtml,
       expectedSourceSha256: state.sourceSha256,
-    })
+    }, operation.createdPagerootIds ?? [])
     : operation.type === "setStyle" && operation.range
     ? (operation.createdPagerootIds
       ? planSemanticTextRangeStylePatch(index, {

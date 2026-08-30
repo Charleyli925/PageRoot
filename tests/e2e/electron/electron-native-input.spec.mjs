@@ -265,6 +265,66 @@ test("Electron autosaves one authorized disk patch and reopens the same forward 
   }
 });
 
+test("Electron assigns Stable ID to a native line break and reopens it from managed HTML", {
+  tag: ["@gate-smoke", "@smoke-editing"],
+}, async () => {
+  test.setTimeout(120_000);
+  const sourceDirectory = mkdtempSync(path.join(tmpdir(), "pageroot-native-source-e2e-"));
+  const sourcePath = path.join(sourceDirectory, "managed-line-break.html");
+  const original = Buffer.from(
+    "<!doctype html><html><head><title>Line break</title></head><body>"
+      + "<main><p data-native-case='managed-line-break'>Alpha</p></main>"
+      + "</body></html>",
+    "utf8",
+  );
+  writeFileSync(sourcePath, original);
+  const isolatedUserData = mkdtempSync(path.join(tmpdir(), "pageroot-native-e2e-"));
+  let activeApp = null;
+  try {
+    let launched = await launchPageRoot({ isolatedUserData, activeSourcePath: sourcePath });
+    activeApp = launched.electronApp;
+    const managedSourcePath = await managedWorkingCopyPath(launched.page, sourcePath);
+    let { editor, frame } = await loadedDiskFrame(
+      launched.page,
+      sourcePath,
+      "managed-line-break",
+    );
+    const target = await activateNativeEdit(frame, "managed-line-break");
+    await setTextSelection(frame, "managed-line-break", "Alpha".length);
+    await target.press("Enter");
+    await expect.poll(() => frame.locator(
+      `${caseSelector("managed-line-break")} > br`,
+    ).count()).toBeGreaterThan(0);
+    await launched.page.keyboard.press(keyShortcut("S"));
+    await expect(editor).not.toHaveAttribute("data-edit-block-detail", /.+/u);
+    await expectCheckpointPersisted(launched.page, 0);
+    const savedHtml = readFileSync(managedSourcePath, "utf8");
+    const identifiedBreaks = savedHtml.match(
+      /<br data-pageroot-id="pr1_[0-9a-f]{12}4[0-9a-f]{3}[89ab][0-9a-f]{15}">/gu,
+    ) ?? [];
+    expect(identifiedBreaks.length).toBeGreaterThan(0);
+    expect(savedHtml).not.toMatch(/<br(?! data-pageroot-id=)/u);
+    expect(readFileSync(sourcePath)).toEqual(original);
+
+    await closePageRootGracefully(activeApp, launched.page);
+    activeApp = null;
+    launched = await launchPageRoot({ isolatedUserData });
+    activeApp = launched.electronApp;
+    ({ frame } = await loadedDiskFrame(
+      launched.page,
+      managedSourcePath,
+      "managed-line-break",
+    ));
+    await expect(frame.locator(`${caseSelector("managed-line-break")} > br`))
+      .toHaveCount(identifiedBreaks.length);
+    expect(readFileSync(managedSourcePath, "utf8")).toBe(savedHtml);
+  } finally {
+    if (activeApp) await stopPageRoot(activeApp, isolatedUserData, { cleanup: false });
+    removeIsolatedUserData(isolatedUserData);
+    removeValidatedTemporaryDirectory(sourceDirectory, "pageroot-native-source-e2e-");
+  }
+});
+
 test("Electron separates focused-field undo from current-open Canvas undo and redo", {
   tag: ["@gate-smoke","@smoke-editing"],
 }, async () => {

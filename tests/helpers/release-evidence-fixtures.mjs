@@ -424,8 +424,18 @@ export async function createSyntheticAppBundle(t, {
     ),
     writeFixtureFile(
       productRoot,
+      "shared/editable-island.mjs",
+      "export const fixtureEditableIsland = true;\n",
+    ),
+    writeFixtureFile(
+      productRoot,
       "shared/source-history.mjs",
       "export const fixtureSourceHistory = true;\n",
+    ),
+    writeFixtureFile(
+      productRoot,
+      "shared/source-style-value.mjs",
+      "export const fixtureSourceStyleValue = true;\n",
     ),
     writeFixtureFile(
       productRoot,
@@ -523,10 +533,12 @@ export async function createSyntheticAppBundle(t, {
     ...[
       "draft-aggregate.mjs",
       "direct-edit-compatibility.mjs",
+      "editable-island.mjs",
       "pageroot-element-identity.mjs",
       "provenance.mjs",
       "semantic-identity-delta.mjs",
       "source-history.mjs",
+      "source-style-value.mjs",
       "conversation.mjs",
       "agent-delivery.mjs",
       "agent-feature-gates.mjs",

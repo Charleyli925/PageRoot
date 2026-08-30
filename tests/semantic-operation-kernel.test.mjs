@@ -18,6 +18,7 @@ import {
 } from "../app/lib/source-patch-engine.js";
 import {
   createTargetRef,
+  planEditableIslandPatch,
   planTextRangeStylePatch,
 } from "../app/lib/source-patch-core.js";
 import { buildSourceIndex } from "../app/lib/source-index.js";
@@ -220,6 +221,41 @@ test("replays the exact wrapper IDs allocated by an accepted Canvas range style 
       value: "700",
       important: false,
       range,
+      createdPagerootIds,
+    },
+  ));
+
+  assert.equal(createdPagerootIds.length, 1);
+  assert.match(semantic.html, new RegExp(createdPagerootIds[0], "u"));
+  assert.equal(semantic.html, mapped.html);
+  assert.equal(semantic.sourceSha256, mapped.sourceSha256);
+});
+
+test("replays the exact line-break ID allocated by an accepted Canvas text plan", () => {
+  const baseline = state();
+  const index = buildSourceIndex(baseline.html);
+  const paragraph = index.byPagerootId.get(IDS.second);
+  const beforeInnerHtml = baseline.html.slice(
+    paragraph.contentRange.startOffset,
+    paragraph.contentRange.endOffset,
+  );
+  const forwardPlan = planEditableIslandPatch(index, {
+    type: "replace-editable-island",
+    targetRef: createTargetRef(index, paragraph, { level: "subregion" }),
+    beforeInnerHtml,
+    nextInnerHtml: "B<br>semantic",
+    expectedSourceSha256: baseline.sourceSha256,
+  });
+  const mapped = applyPatchPlan(forwardPlan, baseline.html);
+  const createdPagerootIds = forwardPlan.metadata.createdPagerootIds;
+  const semantic = applySemanticOperation(baseline, operation(
+    baseline,
+    "sourceop_canvas_break1",
+    "setText",
+    {
+      target: target(baseline, IDS.second),
+      text: "B\nsemantic",
+      contentHtml: forwardPlan.metadata.nextInnerHtml,
       createdPagerootIds,
     },
   ));
