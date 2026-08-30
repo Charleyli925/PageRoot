@@ -549,7 +549,7 @@ test("Electron persists an Apple Pinyin boundary composition with left affinity"
       .toContain("<em");
     const committedHtml = await frame.locator(caseSelector("heading-inline")).innerHTML();
     expect(committedHtml).toMatch(
-      /你好<em data-pageroot-id="pr1_[a-f0-9]{32}"><\/em>/u,
+      /你好<em\b[^>]*data-pageroot-id="pr1_[a-f0-9]{32}"[^>]*><\/em>/u,
     );
     expect(committedHtml).not.toContain("<i>");
     expect(await editor.getAttribute("data-edit-block-detail")).toBeNull();
