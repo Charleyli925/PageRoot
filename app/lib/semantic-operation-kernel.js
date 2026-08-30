@@ -629,6 +629,32 @@ export function applySemanticOperation(inputState, operation, options = {}) {
     : planSemanticOperationPatch(index, command);
   const materialization = applyPatchPlan(plan, state.html);
   assertManagedIdentity(materialization.sourceIndex, "Semantic operation output");
+  if (operation.type === "insertElement" || operation.type === "moveElement") {
+    const expectedParent = materialization.sourceIndex.byPagerootId.get(
+      operation.parent.elementId,
+    );
+    const placedElementId = operation.type === "moveElement"
+      ? operation.target.elementId
+      : allocation.insertedRootElementId;
+    const placedElement = placedElementId
+      ? materialization.sourceIndex.byPagerootId.get(placedElementId)
+      : null;
+    if (
+      expectedParent?.type !== "element"
+      || placedElement?.type !== "element"
+      || placedElement.parentId !== expectedParent.nodeId
+    ) {
+      fail(
+        "SEMANTIC_STRUCTURE_DESTINATION_MISMATCH",
+        "The HTML parser did not retain the structural element under the requested source parent.",
+        {
+          operationType: operation.type,
+          parentElementId: operation.parent.elementId,
+          placedElementId: placedElementId ?? null,
+        },
+      );
+    }
+  }
   if (operation.type === "setText" && operation.contentHtml !== undefined) {
     const target = materialization.sourceIndex.byPagerootId.get(
       operation.target.elementId,

@@ -27,7 +27,9 @@ state. Cloning authored markup also cannot retain the original persistent IDs.
   system or layout engine.
 - Only elements proven in the current `SourceIndex` are eligible. Runtime DOM
   descendants, document roots, stale targets, cycles and ambiguous insertion
-  points fail closed.
+  points fail closed. After parsing, insert and move must still place the same
+  stable root ID as a direct child of the requested parent; raw-text and other
+  parser-reparenting destinations are rejected.
 - Every accepted operation publishes complete next HTML and exact inverse
   patches. It joins ADR 0063's current-open, 20-step memory history and the
   existing Hash/CAS atomic autosave path.

@@ -124,6 +124,33 @@ test("structure operation builders reject root deletion and invalid insertion ow
   }), /direct child/u);
 });
 
+test("insert and move fail closed when HTML parsing rejects the requested parent relationship", () => {
+  const scriptId = "pr1_00000000000040008000000000000010";
+  const unsafeHtml = html.replace(
+    `</body>`,
+    `<script data-pageroot-id="${scriptId}">void 0</script></body>`,
+  );
+  const baseline = createSemanticDocumentState(unsafeHtml);
+  assert.throws(() => applySemanticOperation(
+    baseline,
+    createMoveElementOperation(unsafeHtml, {
+      baseRevision: 0,
+      operationId: "op_move_raw_text",
+      elementId: ids.second,
+      parentElementId: scriptId,
+    }),
+  ), (error) => error.code === "SEMANTIC_STRUCTURE_DESTINATION_MISMATCH");
+  assert.throws(() => applySemanticOperation(
+    baseline,
+    createInsertElementOperation(unsafeHtml, {
+      baseRevision: 0,
+      operationId: "op_insert_raw_text",
+      parentElementId: scriptId,
+      html: "<p>Unsafe</p>",
+    }),
+  ), (error) => error.code === "SEMANTIC_STRUCTURE_DESTINATION_MISMATCH");
+});
+
 test("accepted structure patches undo and redo inside the bounded open-document history", () => {
   const context = {
     epoch: 1,

@@ -237,6 +237,12 @@ export const HtmlCanvasSelectionChrome = memo(function HtmlCanvasSelectionChrome
           onKeyDown={onToolbarKeyDown}
           onPointerDownCapture={onToolbarPointerDownCapture}
           onMouseDownCapture={onToolbarMouseDownCapture}
+          onClickCapture={(event) => {
+            const target = event.target instanceof Element ? event.target : null;
+            if (!target?.closest("[data-delete-action]")) {
+              setArmedDeleteTargetId(null);
+            }
+          }}
         >
           <div className={styles.toolbarRow}>
           {selectedPagePresentationAction ? (
@@ -497,6 +503,7 @@ export const HtmlCanvasSelectionChrome = memo(function HtmlCanvasSelectionChrome
                 type="button"
                 className={styles.iconButton}
                 aria-label={deleteArmed ? "确认删除元素" : "删除元素"}
+                data-delete-action="true"
                 data-confirm-delete={deleteArmed ? "true" : undefined}
                 data-tooltip={deleteArmed ? "再次点击确认删除" : "删除元素"}
                 data-tooltip-side="below"
@@ -509,6 +516,7 @@ export const HtmlCanvasSelectionChrome = memo(function HtmlCanvasSelectionChrome
                   }
                   setArmedDeleteTargetId(selection.id);
                 }}
+                onBlur={() => setArmedDeleteTargetId(null)}
               >
                 <TrashIcon size={15} weight="bold" aria-hidden="true" />
               </button>
