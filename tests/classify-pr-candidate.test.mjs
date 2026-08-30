@@ -43,7 +43,6 @@ test("candidate classification preserves every former release-dry-run packaging 
     "scripts/package-delivery-report.mjs",
     "scripts/packaged-app-identity.mjs",
     "bridge/product-contract.mjs",
-    "bridge/project-context-service.mjs",
     "bridge/record-user-supplement.mjs",
     "scripts/release-app-checkpoint.mjs",
     "scripts/release-app-stage.mjs",

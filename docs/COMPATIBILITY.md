@@ -157,11 +157,13 @@ level, not per file: `runtime-state.json` is preserved at its root and in
   with the v3 stack. v4 mutations resolve a Project File from the request
   OpenTarget or source path and fail closed with `PROJECT_NOT_FOUND` when no
   v4 project is registered.
-- Decoder and canonical output: historical. `project-context-service.mjs`
-  remains as an archived helper, not a Bridge open or mutation path.
-- Historical proof: `tests/project-context-service.test.mjs`.
+- Decoder and canonical output: removed in PR10 after the live Bridge consumer
+  and package entry were both proven absent. The v4 import guard now preserves
+  the old v3 tree byte-for-byte while creating a separate v4 V1.
+- Historical proof: `tests/project-file-bridge.test.mjs`.
 - Disk persistence read: no current Bridge read of `project-registry.json`.
-- Support window and deletion evidence: live consumer removed in P0-B.
+- Support window and deletion evidence: live consumer removed in P0-B; the
+  unused policy helper and its standalone test were removed in PR10.
 
 ## Legacy stamped-document repair
 

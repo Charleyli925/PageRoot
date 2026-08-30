@@ -96,7 +96,6 @@ const REQUIRED_BRIDGE_FILES = [
   "draft-aggregate.mjs",
   "draft-service.mjs",
   "draft-command-decoder.mjs",
-  "project-context-service.mjs",
   "source-history-service.mjs",
   "conversation-repository.mjs",
   "source-transaction-service.mjs",

@@ -179,7 +179,6 @@ const TASK_OWNER_CASES = [
       "tests/html-source-parser.test.mjs",
       "tests/lifecycle-core.test.mjs",
       "tests/product-contract.test.mjs",
-      "tests/project-context-service.test.mjs",
       "tests/project-file-bridge.test.mjs",
       "tests/targeted-change-schema.test.mjs",
       "tests/user-supplement.test.mjs",
