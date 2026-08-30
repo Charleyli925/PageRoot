@@ -912,6 +912,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     elementGeneration: number;
     executionId: string;
     elements: WeakSet<HTMLElement>;
+    sourceNodeIds: WeakMap<HTMLElement, string>;
   } | null>(null);
   const runtimeSourceRegistrationCleanupRef = useRef<() => void>(() => undefined);
   const runtimeNeedsRerenderRef = useRef(false);
@@ -991,6 +992,10 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       && registered.elementGeneration === runtimeFrame.elementGeneration
       && registered.executionId === runtimeFrame.grant.executionId
       && registered.elements.has(element)
+      && registered.sourceNodeIds.get(element) === element.getAttribute(SOURCE_NODE_ATTRIBUTE)
+      && registered.sourceNodeIds.get(element) === element.getAttribute(
+        EDIT_RUNTIME_SOURCE_MARKER_ATTRIBUTE,
+      )
     );
   };
 
@@ -1293,35 +1298,20 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
             elementGeneration: runtimeFrame.elementGeneration,
             executionId: runtimeFrame.grant.executionId,
             elements,
+            sourceNodeIds: sourceNodeIdByElement,
           };
-          return (update: unknown) => {
+          return (candidates: unknown) => {
             const active = runtimeFrameRef.current;
             const activeIframe = iframeRef.current;
-            const payload = update as {
-              add?: unknown;
-              revoke?: unknown;
-            } | null;
             if (
-              !payload
+              !Array.isArray(candidates)
               || !activeIframe
               || active?.elementGeneration !== runtimeFrame.elementGeneration
               || active.grant.executionId !== runtimeFrame.grant.executionId
               || sourceWindow !== activeIframe?.contentWindow
             ) return false;
-            if (Array.isArray(payload.revoke)) {
-              for (const value of payload.revoke) {
-                const element = value as HTMLElement;
-                const sourceNodeId = sourceNodeIdByElement.get(element);
-                elements.delete(element);
-                sourceNodeIdByElement.delete(element);
-                if (sourceNodeId && elementsBySourceNodeId.get(sourceNodeId) === element) {
-                  elementsBySourceNodeId.delete(sourceNodeId);
-                }
-              }
-            }
-            if (!Array.isArray(payload.add)) return true;
             const sourceIndex = sourceIndexRef.current;
-            for (const value of payload.add) {
+            for (const value of candidates) {
               const element = value as HTMLElement;
               if (
                 element?.nodeType !== 1
