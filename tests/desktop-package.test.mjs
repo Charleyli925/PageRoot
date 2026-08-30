@@ -108,9 +108,7 @@ const BRIDGE_FILES = [
   "draft-aggregate.mjs",
   "draft-service.mjs",
   "draft-command-decoder.mjs",
-  "source-history-service.mjs",
   "conversation-repository.mjs",
-  "source-transaction-service.mjs",
 ];
 
 const PACKAGED_MODULES = [

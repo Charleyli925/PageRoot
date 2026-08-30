@@ -49,7 +49,6 @@ test("candidate classification preserves every former release-dry-run packaging 
     "scripts/release-candidate-provenance.mjs",
     "scripts/release-provenance.mjs",
     "scripts/source-gate-provenance.mjs",
-    "bridge/source-history-service.mjs",
     "bridge/target-identity.mjs",
     "bridge/user-supplement-core.mjs",
     "scripts/verify-packaged-artifact.mjs",
