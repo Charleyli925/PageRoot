@@ -342,9 +342,7 @@ export function findCanvasHitSourceElement(target: EventTarget | null): HTMLElem
 export function findCanvasSelectionElement(target: EventTarget | null): HTMLElement | null {
   const selected = findSelectableElement(target);
   if (!selected) return null;
-  const element = compoundValueSelectionRoot(selected)
-    .closest<HTMLElement>(`[${SOURCE_NODE_ATTRIBUTE}]`)
-    ?? compoundValueSelectionRoot(selected);
+  const element = compoundValueSelectionRoot(selected);
   const ownsMediaSurface = element.matches(MEDIA_SURFACE_SELECTOR)
     || Boolean(element.querySelector(MEDIA_SURFACE_SELECTOR));
   if (!ownsMediaSurface) return element;
@@ -359,7 +357,11 @@ export function findCanvasSelectionElement(target: EventTarget | null): HTMLElem
   return element;
 }
 
-export function eventTargetsRuntimeGeneratedNode(target: EventTarget | null): boolean {
+export function eventTargetsRuntimeGeneratedNode(
+  target: EventTarget | null,
+  runtimeActive = false,
+): boolean {
+  if (!runtimeActive) return false;
   const selected = elementFromEventTarget(target);
   if (!selected) return false;
   const sourceHost = selected.closest<HTMLElement>(`[${SOURCE_NODE_ATTRIBUTE}]`);

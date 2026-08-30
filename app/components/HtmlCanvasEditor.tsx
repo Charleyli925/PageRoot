@@ -4590,6 +4590,10 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         point: caretPointFromMouseEvent(event),
         sourceIndex: sourceIndexRef.current,
         enabled: true,
+        runtimeActive: Boolean(
+          runtimeFrameRef.current?.settled
+          && runtimeFrameRef.current.elementGeneration === frameLoadGenerationRef.current
+        ),
       });
       if (hit.action === "clear") {
         if (!lockedRef.current) {
@@ -4653,6 +4657,10 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         point: caretPoint,
         sourceIndex: sourceIndexRef.current,
         enabled: true,
+        runtimeActive: Boolean(
+          runtimeFrameRef.current?.settled
+          && runtimeFrameRef.current.elementGeneration === frameLoadGenerationRef.current
+        ),
       });
       if (hit.action === "clear") return;
       const target = hit.capability.element;
@@ -4926,6 +4934,10 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         point: caretPointFromMouseEvent(event),
         sourceIndex: sourceIndexRef.current,
         enabled: true,
+        runtimeActive: Boolean(
+          runtimeFrameRef.current?.settled
+          && runtimeFrameRef.current.elementGeneration === frameLoadGenerationRef.current
+        ),
       }));
     };
     const handlePointerLeave = () => {
