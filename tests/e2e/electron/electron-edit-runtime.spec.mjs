@@ -45,16 +45,24 @@ test("Electron Edit runs ordinary scripts continuously without saving Runtime DO
   <main data-native-case="runtime-host">
     <p>源码正文</p>
     <button id="source-id-forged">被脚本改写 ID 的源码按钮</button>
+    <button id="source-id-late">选中后被脚本改写 ID 的源码按钮</button>
     <button id="source-id-decoy">另一个源码按钮</button>
   </main>
   <script>
     const host = document.querySelector('[data-native-case="runtime-host"]');
     const sourceIdForged = document.querySelector('#source-id-forged');
+    const sourceIdLate = document.querySelector('#source-id-late');
     const sourceIdDecoy = document.querySelector('#source-id-decoy');
     sourceIdForged.setAttribute(
       'data-html-ai-source-node-id',
       sourceIdDecoy.getAttribute('data-html-ai-source-node-id'),
     );
+    window.__mutateSelectedSourceIdentity = () => {
+      sourceIdLate.setAttribute(
+        'data-html-ai-source-node-id',
+        sourceIdDecoy.getAttribute('data-html-ai-source-node-id'),
+      );
+    };
     const generated = document.createElement('button');
     generated.id = 'runtime-generated';
     generated.textContent = '运行时按钮';
@@ -106,6 +114,19 @@ test("Electron Edit runs ordinary scripts continuously without saving Runtime DO
     await expect(toolbar.getByRole("button", { name: /留评论/u })).toBeVisible();
     await expect(toolbar.getByRole("button", { name: "编辑", exact: true })).toHaveCount(0);
     await expect(toolbar.getByRole("button", { name: "删除元素", exact: true })).toHaveCount(0);
+
+    await page.keyboard.press("Escape");
+    await frame.locator("#source-id-late").click();
+    await expect(toolbar.getByRole("button", { name: "删除元素", exact: true })).toBeVisible();
+    await frame.evaluate(() => window.__mutateSelectedSourceIdentity());
+    await expect.poll(async () => frame.locator("#source-id-late").getAttribute(
+      "data-html-ai-source-node-id",
+    )).toBe(await frame.locator("#source-id-decoy").getAttribute(
+      "data-html-ai-source-node-id",
+    ));
+    await toolbar.getByRole("button", { name: "删除元素", exact: true }).click();
+    await expect(frame.locator("#source-id-late")).toHaveCount(1);
+    await expect(frame.locator("#source-id-decoy")).toHaveCount(1);
 
     await page.keyboard.press("Escape");
     await expect(toolbar).toBeHidden();

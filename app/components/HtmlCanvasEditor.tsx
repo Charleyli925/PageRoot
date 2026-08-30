@@ -29,7 +29,10 @@ import {
   type PagePresentationAction,
   type PageViewContext,
 } from "../lib/page-view-context.js";
-import { isValidPagerootElementId } from "../../shared/pageroot-element-identity.mjs";
+import {
+  PAGEROOT_ELEMENT_ID_ATTRIBUTE,
+  isValidPagerootElementId,
+} from "../../shared/pageroot-element-identity.mjs";
 import {
   SOURCE_NODE_ATTRIBUTE,
   applyPatchPlan,
@@ -912,7 +915,8 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     elementGeneration: number;
     executionId: string;
     elements: WeakSet<HTMLElement>;
-    sourceNodeIds: WeakMap<HTMLElement, string>;
+    markerSourceNodeIds: WeakMap<HTMLElement, string>;
+    pagerootIds: WeakMap<HTMLElement, string>;
   } | null>(null);
   const runtimeSourceRegistrationCleanupRef = useRef<() => void>(() => undefined);
   const runtimeNeedsRerenderRef = useRef(false);
@@ -980,24 +984,46 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   onPageViewContextChangeRef.current = onPageViewContextChange;
   pointerCapabilityHoverEnabledRef.current = pointerCapabilityHoverEnabled;
 
-  const currentRuntimeSourceProof = () => {
+  const currentRuntimeSourceProof = useCallback(() => {
     const runtimeFrame = runtimeFrameRef.current;
     if (
       !runtimeFrame?.settled
       || runtimeFrame.elementGeneration !== frameLoadGenerationRef.current
     ) return null;
     const registered = runtimeSourceElementsRef.current;
-    return (element: HTMLElement) => Boolean(
-      registered
-      && registered.elementGeneration === runtimeFrame.elementGeneration
-      && registered.executionId === runtimeFrame.grant.executionId
-      && registered.elements.has(element)
-      && registered.sourceNodeIds.get(element) === element.getAttribute(SOURCE_NODE_ATTRIBUTE)
-      && registered.sourceNodeIds.get(element) === element.getAttribute(
-        EDIT_RUNTIME_SOURCE_MARKER_ATTRIBUTE,
-      )
-    );
-  };
+    return (element: HTMLElement) => {
+      const registeredMarkerId = registered?.markerSourceNodeIds.get(element);
+      const registeredPagerootId = registered?.pagerootIds.get(element);
+      const liveSourceNodeId = element.getAttribute(SOURCE_NODE_ATTRIBUTE);
+      const liveSourceEntry = liveSourceNodeId
+        ? sourceIndexRef.current?.byNodeId.get(liveSourceNodeId)
+        : null;
+      return Boolean(
+        registered
+        && registered.elementGeneration === runtimeFrame.elementGeneration
+        && registered.executionId === runtimeFrame.grant.executionId
+        && registered.elements.has(element)
+        && registeredMarkerId
+        && registeredMarkerId === element.getAttribute(
+          EDIT_RUNTIME_SOURCE_MARKER_ATTRIBUTE,
+        )
+        && registeredPagerootId
+        && registeredPagerootId === element.getAttribute(PAGEROOT_ELEMENT_ID_ATTRIBUTE)
+        && liveSourceEntry?.type === "element"
+        && liveSourceEntry.pagerootId === registeredPagerootId
+      );
+    };
+  }, []);
+
+  const selectedElementHasSourceMutationAuthority = useCallback(() => {
+    const element = selectedElementRef.current;
+    if (
+      !element?.isConnected
+      || runtimeGeneratedSelectionRef.current
+    ) return false;
+    if (!runtimeFrameRef.current) return true;
+    return Boolean(currentRuntimeSourceProof()?.(element));
+  }, [currentRuntimeSourceProof]);
 
   // Keep the server and hydration value deterministic, then normalize through DOMParser after mount.
   const [frameRender, setFrameRender] = useState(() => ({
@@ -1293,12 +1319,14 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           const elements = new WeakSet<HTMLElement>();
           const elementsBySourceNodeId = new Map<string, HTMLElement>();
           const sourceNodeIdByElement = new WeakMap<HTMLElement, string>();
+          const pagerootIdByElement = new WeakMap<HTMLElement, string>();
           const conflictedSourceNodeIds = new Set<string>();
           runtimeSourceElementsRef.current = {
             elementGeneration: runtimeFrame.elementGeneration,
             executionId: runtimeFrame.grant.executionId,
             elements,
-            sourceNodeIds: sourceNodeIdByElement,
+            markerSourceNodeIds: sourceNodeIdByElement,
+            pagerootIds: pagerootIdByElement,
           };
           return (candidates: unknown) => {
             const active = runtimeFrameRef.current;
@@ -1322,9 +1350,13 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
               const sourceEntry = sourceNodeId
                 ? sourceIndex?.byNodeId.get(sourceNodeId)
                 : null;
+              const pagerootId = sourceEntry?.type === "element"
+                ? sourceEntry.pagerootId
+                : null;
               if (
                 sourceNodeId
-                && sourceEntry?.type === "element"
+                && pagerootId
+                && element.getAttribute(PAGEROOT_ELEMENT_ID_ATTRIBUTE) === pagerootId
                 && element.getAttribute(EDIT_RUNTIME_SOURCE_MARKER_ATTRIBUTE) === sourceNodeId
               ) {
                 if (conflictedSourceNodeIds.has(sourceNodeId)) continue;
@@ -1337,6 +1369,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
                 }
                 elementsBySourceNodeId.set(sourceNodeId, element);
                 sourceNodeIdByElement.set(element, sourceNodeId);
+                pagerootIdByElement.set(element, pagerootId);
                 elements.add(element);
               }
             }
@@ -1933,6 +1966,20 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     const blockedDetailAtCommandStart = containerRef.current?.getAttribute(
       "data-edit-block-detail",
     );
+    if (runtimeFrameRef.current) {
+      const liveSourceElement = activeNativeEditRef.current?.selectionElement
+        ?? selectedElementRef.current;
+      const sourceProof = currentRuntimeSourceProof();
+      if (
+        !liveSourceElement?.isConnected
+        || !sourceProof?.(liveSourceElement)
+      ) {
+        reportBlockedEdit(new Error(
+          "运行页面中的源码目标身份已变化，本次修改已停止。",
+        ));
+        return null;
+      }
+    }
     if (!sourceIndex || sourceIndex.source !== currentSource) {
       reportBlockedEdit(new Error("源码地图已过期，请等待画布重新载入后重试。"));
       return null;
@@ -2277,6 +2324,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       return null;
     }
   }, [
+    currentRuntimeSourceProof,
     loadFrameSource,
     reportBlockedEdit,
     synchronizeStablePreview,
@@ -3011,7 +3059,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       );
       return false;
     }
-    if (runtimeGeneratedSelectionRef.current) {
+    if (!selectedElementHasSourceMutationAuthority()) {
       containerRef.current?.setAttribute("data-native-start-status", "runtime-display-only");
       return false;
     }
@@ -3370,6 +3418,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     refreshNativeEditRangeState,
     reportBlockedEdit,
     selectElement,
+    selectedElementHasSourceMutationAuthority,
     updateOverlayPosition,
   ]);
 
@@ -3456,7 +3505,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       const element = selectedElementRef.current;
       if (
         readOnlyRef.current
-        || runtimeGeneratedSelectionRef.current
+        || !selectedElementHasSourceMutationAuthority()
         || !enableReorderRef.current
       ) {
         return false;
@@ -3557,7 +3606,12 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         expectedSourceSha256: sourceIndex?.sourceSha256 || "",
       }, mutation));
     },
-    [applySourceCommand, finishNativeEditing, reportBlockedEdit],
+    [
+      applySourceCommand,
+      finishNativeEditing,
+      reportBlockedEdit,
+      selectedElementHasSourceMutationAuthority,
+    ],
   );
 
   const applySelectedStructureOperation = useCallback((
@@ -3580,7 +3634,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     }
     if (
       readOnlyRef.current
-      || runtimeGeneratedSelectionRef.current
+      || !selectedElementHasSourceMutationAuthority()
       || !enableReorderRef.current
     ) return false;
     const sourceIndex = sourceIndexRef.current;
@@ -3613,7 +3667,13 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       reportBlockedEdit(cause);
       return false;
     }
-  }, [applySourceCommand, clearSelection, finishNativeEditing, reportBlockedEdit]);
+  }, [
+    applySourceCommand,
+    clearSelection,
+    finishNativeEditing,
+    reportBlockedEdit,
+    selectedElementHasSourceMutationAuthority,
+  ]);
 
   const duplicateSelected = useCallback(
     () => applySelectedStructureOperation("duplicate"),
@@ -4977,7 +5037,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       if (
         event.key === "Enter"
         && selectedElementRef.current
-        && !runtimeGeneratedSelectionRef.current
+        && selectedElementHasSourceMutationAuthority()
       ) {
         event.preventDefault();
         startEditing();
@@ -5239,6 +5299,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   }, [
     captureTextRange,
     clearSelection,
+    currentRuntimeSourceProof,
     executePagePresentationAction,
     fencePendingEdit,
     finishNativeEditing,
@@ -5246,6 +5307,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     resolvePagePresentationAction,
     selectElement,
     selectTarget,
+    selectedElementHasSourceMutationAuthority,
     startEditing,
     updateOverlayPosition,
     fallBackToStaticRuntimeFrame,
@@ -5323,7 +5385,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       fromQueuedCommand = false,
     ) => {
       let element = selectedElementRef.current;
-      if (readOnlyRef.current || runtimeGeneratedSelectionRef.current || !element) return;
+      if (readOnlyRef.current || !selectedElementHasSourceMutationAuthority() || !element) return;
       const config = STYLE_PROPERTY_CONFIGS.find((entry) => entry.property === property);
       if (!config) return;
       let activeNativeEdit = activeNativeEditRef.current;
@@ -5561,6 +5623,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       refreshNativeEditRangeState,
       reportInlineStyleOverrideFailure,
       reportBlockedEdit,
+      selectedElementHasSourceMutationAuthority,
     ],
   );
 

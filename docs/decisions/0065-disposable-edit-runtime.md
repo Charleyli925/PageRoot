@@ -34,7 +34,9 @@ source or be reconciled node by node.
   bootstrap captures its private batch port and keeps registered DOM references
   in a parent-realm `WeakSet`; public attributes and author-realm expandos are
   never edit authority. Changing either public source identity revokes the
-  registered object and fails closed. Runtime-generated descendants resolve only to their
+  registered object's authority and fails closed. Every source mutation
+  revalidates the live object, its registered stable ID and its current
+  SourceIndex mapping instead of trusting cached selection state. Runtime-generated descendants resolve only to their
   nearest still-proven authored source host.
 - PageRoot directly edits only nodes still proven to be authored source
   elements. A runtime-generated node is display-only: it may be commented on
