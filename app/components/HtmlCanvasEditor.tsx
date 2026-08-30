@@ -18,6 +18,7 @@ import { flushSync } from "react-dom";
 
 import {
   EDIT_AUTHOR_RUNTIME_BUDGET,
+  editRuntimeProofProperty,
   editRuntimeProgramIdentity,
   isEditRuntimeFrameToken,
 } from "../domain/edit-runtime-contract.js";
@@ -4590,10 +4591,10 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         point: caretPointFromMouseEvent(event),
         sourceIndex: sourceIndexRef.current,
         enabled: true,
-        runtimeActive: Boolean(
+        runtimeProofProperty: (
           runtimeFrameRef.current?.settled
           && runtimeFrameRef.current.elementGeneration === frameLoadGenerationRef.current
-        ),
+        ) ? editRuntimeProofProperty(runtimeFrameRef.current.grant.executionId) : null,
       });
       if (hit.action === "clear") {
         if (!lockedRef.current) {
@@ -4657,10 +4658,10 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         point: caretPoint,
         sourceIndex: sourceIndexRef.current,
         enabled: true,
-        runtimeActive: Boolean(
+        runtimeProofProperty: (
           runtimeFrameRef.current?.settled
           && runtimeFrameRef.current.elementGeneration === frameLoadGenerationRef.current
-        ),
+        ) ? editRuntimeProofProperty(runtimeFrameRef.current.grant.executionId) : null,
       });
       if (hit.action === "clear") return;
       const target = hit.capability.element;
@@ -4934,10 +4935,10 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         point: caretPointFromMouseEvent(event),
         sourceIndex: sourceIndexRef.current,
         enabled: true,
-        runtimeActive: Boolean(
+        runtimeProofProperty: (
           runtimeFrameRef.current?.settled
           && runtimeFrameRef.current.elementGeneration === frameLoadGenerationRef.current
-        ),
+        ) ? editRuntimeProofProperty(runtimeFrameRef.current.grant.executionId) : null,
       }));
     };
     const handlePointerLeave = () => {

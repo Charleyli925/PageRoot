@@ -50,6 +50,7 @@ test("Electron Edit runs ordinary scripts continuously without saving Runtime DO
     const generated = document.createElement('button');
     generated.id = 'runtime-generated';
     generated.textContent = '运行时按钮';
+    generated.setAttribute('data-pageroot-edit-runtime-source', 'forged-runtime-node');
     generated.setAttribute(
       'data-html-ai-source-node-id',
       host.getAttribute('data-html-ai-source-node-id'),
@@ -93,10 +94,12 @@ test("Electron Edit runs ordinary scripts continuously without saving Runtime DO
 
     const provenance = await frame.locator("#runtime-generated").evaluate((node) => ({
       generatedSourceId: node.getAttribute("data-html-ai-source-node-id"),
+      runtimeMarker: node.getAttribute("data-pageroot-edit-runtime-source"),
       hostSourceId: node.closest("[data-html-ai-source-node-id]")
         ?.getAttribute("data-html-ai-source-node-id") || null,
     }));
-    expect(provenance.generatedSourceId).toBeNull();
+    expect(provenance.generatedSourceId).toBe(provenance.hostSourceId);
+    expect(provenance.runtimeMarker).toBe("forged-runtime-node");
     expect(provenance.hostSourceId).not.toBeNull();
     expect(readFileSync(sourcePath, "utf8")).toBe(html);
     expect(readFileSync(sourcePath, "utf8")).not.toContain('<button id="runtime-generated"');

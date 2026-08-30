@@ -92,6 +92,10 @@ function containedPath(rootPath, candidate) {
   return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
 }
 
+function isExecutableAssetPath(relativePath) {
+  return SCRIPT_EXTENSIONS.has(path.posix.extname(relativePath).toLowerCase());
+}
+
 async function resolveLocalScript(sourceRoot, reference, {
   readFileImpl,
   realpathImpl,
@@ -475,7 +479,7 @@ export function createEditRuntimeProtocolController({
       preparationController,
       preparationDeadlineAt,
     });
-    const declaredAssets = await settleWithinRuntimeDeadline(
+    const discoveredAssets = await settleWithinRuntimeDeadline(
       () => collectDeclaredAssets({
         html: source,
         sourceRoot,
@@ -487,6 +491,9 @@ export function createEditRuntimeProtocolController({
       preparationController,
       preparationDeadlineAt,
       runtimePreparationTimeoutError,
+    );
+    const declaredAssets = new Map(
+      [...discoveredAssets].filter(([relativePath]) => !isExecutableAssetPath(relativePath)),
     );
     pruneOrphans();
     const sessionId = allocate(randomSessionId, (candidate) => (
@@ -561,7 +568,7 @@ export function createEditRuntimeProtocolController({
       );
     }
     const relative = normalizeRelativeAssetPath(requestUrl.pathname);
-    if (!relative) return notFound();
+    if (!relative || isExecutableAssetPath(relative)) return notFound();
     const asset = session.declaredAssets.get(relative);
     if (!asset) return notFound();
     try {

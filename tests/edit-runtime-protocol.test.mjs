@@ -452,6 +452,48 @@ test("direct protocol streams bounded declared assets and never buffers an overs
   assert.equal(fetchedFileUrls.length, 1);
 });
 
+test("direct protocol never serves executable bytes from the generic declared-asset route", async (t) => {
+  const temporaryRoot = await mkdtemp(path.join(tmpdir(), "pageroot-edit-runtime-script-asset-"));
+  t.after(() => rm(temporaryRoot, { recursive: true, force: true }));
+  const sourcePath = path.join(temporaryRoot, "report.html");
+  const scriptPath = path.join(temporaryRoot, "extra.js");
+  const inlineHtml = [
+    "<!doctype html><html><head>",
+    '<link rel="preload" as="script" href="extra.js">',
+    "</head><body><script>window.ready=true</script></body></html>",
+  ].join("");
+  await Promise.all([
+    writeFile(sourcePath, inlineHtml),
+    writeFile(scriptPath, "window.bypassed=true"),
+  ]);
+  let handler = null;
+  let assetFetches = 0;
+  const controller = createEditRuntimeProtocolController({
+    protocolApi: {
+      handle(_scheme, nextHandler) {
+        handler = nextHandler;
+      },
+    },
+    netFetch: async () => {
+      assetFetches += 1;
+      return new Response("window.bypassed=true", { status: 200 });
+    },
+    collectDeclaredAssets: async () => new Map([
+      ["extra.js", Object.freeze({ relativePath: "extra.js", resolvedPath: scriptPath })],
+    ]),
+    randomSessionId: () => "1".repeat(32),
+    randomExecutionId: () => "2".repeat(24),
+  });
+  controller.install();
+  const session = await controller.createSession({ html: inlineHtml, sourcePath });
+
+  const response = await handler(new Request(
+    `pageroot-edit-runtime://${session.sessionId}/extra.js`,
+  ));
+  assert.equal(response.status, 404);
+  assert.equal(assetFetches, 0);
+});
+
 test("direct protocol bounds declared-asset discovery by the shared preparation deadline", async (t) => {
   const temporaryRoot = await mkdtemp(path.join(tmpdir(), "pageroot-edit-runtime-assets-timeout-"));
   t.after(() => rm(temporaryRoot, { recursive: true, force: true }));
