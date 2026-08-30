@@ -714,8 +714,10 @@ Native editable-island `<br>` nodes receive fresh IDs in the accepted Canvas
 plan before `setText` is formed, and Repository binds that operation to one
 exact target-content patch and its normalized `contentHtml`. Canvas copies only
 those accepted IDs onto the matching live line-break objects under its expected
-mutation guard, then rebases the current selection/session without a page
-reload; this identity update does not grant Runtime source authority. Plain
+mutation guard. The controller first proves the prior live DOM still equals its
+owned canonical draft, then proves the reconciled live DOM equals the newly
+saved canonical island before advancing both owned and baseline state without a
+page reload; this identity update does not grant Runtime source authority. Plain
 `setText` uses one shared Canvas/Repository planner that rejects void/raw-text
 targets and binds the exact target range, original bytes, canonical escaped
 text bytes and patch kind; decoded-equivalent entities and extra patches fail

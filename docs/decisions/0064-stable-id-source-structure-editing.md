@@ -64,8 +64,10 @@ state. Cloning authored markup also cannot retain the original persistent IDs.
   editable-island patch, so a matching ID inventory cannot authorize unrelated
   island bytes. After acceptance, the controller applies only those
   source-allocated IDs to the corresponding live `<br>` nodes as an expected
-  mutation, preserving the active selection and allowing the same edit session
-  to continue. The attribute remains identity, not new Runtime authority.
+  mutation. The controller accepts that reconciliation only when the live
+  canonical island exactly equals the newly saved source, then advances both
+  its owned and baseline canonical values while preserving the active selection
+  and edit session. The attribute remains identity, not new Runtime authority.
 - Plain `setText` without `contentHtml` is also one closed kernel plan, not a
   caller-authored patch allowance. Canvas and Repository share the same pure
   planner: it rejects void and raw-text targets, escapes `&`, `<` and `>` once,

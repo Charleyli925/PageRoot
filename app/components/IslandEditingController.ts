@@ -1388,13 +1388,16 @@ export class IslandEditingController {
     ) return false;
     let canonical: string;
     try {
-      if (options.reconcileDomBeforeRebase) {
-        this.runExpectedMutation(() => options.reconcileDomBeforeRebase?.());
-      }
       canonical = this.normalizeInnerHtml(baseline.innerHtml, {
         baselineInnerHtml: baseline.innerHtml,
       });
-      if (
+      if (options.reconcileDomBeforeRebase) {
+        if (this.serializeLiveCanonical() !== this.ownedCanonicalInnerHtml) {
+          return false;
+        }
+        this.runExpectedMutation(() => options.reconcileDomBeforeRebase?.());
+        if (this.serializeLiveCanonical() !== canonical) return false;
+      } else if (
         this.ownedCanonicalInnerHtml !== canonical
         || this.serializeLiveCanonical() !== canonical
       ) return false;
