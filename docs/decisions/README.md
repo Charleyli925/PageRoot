@@ -1,6 +1,6 @@
 # Architecture Decision Records
 
-<!-- adr-history-max: 0065 -->
+<!-- adr-history-max: 0066 -->
 <!-- adr-history-gaps: 0020 -->
 
 This is the default reading path for decisions that still constrain PageRoot.
@@ -10,7 +10,7 @@ Historical and superseded decisions remain available from the archive index.
 
 The repository has one historical gap, `0020`, which is intentionally never
 reused. The four collisions found in the first curation pass were assigned
-`0055` through `0058`; future ADRs must use the next number above `0065`.
+`0055` through `0058`; future ADRs must use the next number above `0066`.
 
 ## Active decisions
 
@@ -43,7 +43,7 @@ reused. The four collisions found in the first curation pass were assigned
 | 0040 | [Provider-neutral persistence and Conversation v2](0040-provider-neutral-persistence-and-conversation-v2.md) | Living |
 | 0044 | [HTML opening commits at display readiness](0044-visible-first-html-open.md) | Living |
 | 0045 | [Byte-bounded display caches accelerate tabs and review](0045-byte-bounded-tab-and-review-display-caches.md) | Living |
-| 0046 | [Review keeps text and element presence only](0046-review-core-text-and-element-diff.md) | Living |
+| 0046 | [Review keeps text and element presence only](0046-review-core-text-and-element-diff.md) | Living only for static/no-runtime analysis; fact scope superseded by ADR 0066 |
 | 0047 | [Project open publishes Core before fenced Supplemental projections](0047-core-supplemental-project-open.md) | Living |
 | 0048 | [Tab display cache uses a measured Hot/Warm/Cold resource budget](0048-hot-warm-cold-tab-resource-budget.md) | Living |
 | 0049 | [Desktop loads the real renderer shell before Bridge readiness](0049-desktop-shell-first-startup.md) | Living |
@@ -59,6 +59,7 @@ reused. The four collisions found in the first curation pass were assigned
 | 0063 | [Canvas undo is a 20-step open-document memory history](0063-open-document-memory-history.md) | Living |
 | 0064 | [Source structure edits use stable IDs and semantic operations](0064-stable-id-source-structure-editing.md) | Living |
 | 0065 | [Edit runs supported author scripts in a disposable source-bound page](0065-disposable-edit-runtime.md) | Living |
+| 0066 | [Review pairs persistent IDs and reports source changes](0066-stable-id-source-review.md) | Living |
 
 ## Reading guide
 

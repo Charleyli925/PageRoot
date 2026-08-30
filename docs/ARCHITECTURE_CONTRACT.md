@@ -495,13 +495,14 @@ Presentation restoration is best effort and cannot widen source authority. The
 lowest-complexity safe local update or rebuild remains the required design.
 
 Review has no runtime-snapshot owner or PNG evidence path. It compares only the
-frozen before/after HTML and emits bounded text facts plus outermost
-element-presence facts. Its script-enabled frames may keep an opaque origin and
+frozen before/after HTML and emits bounded text facts, outermost element-presence
+facts and, for unique valid stable-ID pairs, movement, authored attribute,
+inline-style and CSS/Script source facts. Its script-enabled frames may keep an opaque origin and
 use a frame-local memory Storage compatibility bootstrap so ordinary authored
 scripts do not abort, but that compatibility surface grants no durable or
-shared storage and produces no Review facts. Position, order, attributes, CSS,
-layout, computed style, Canvas/SVG pixels and runtime-discovered nodes remain
-outside the Review contract.
+shared storage and produces no Review facts. CSS effects, layout, wrapping,
+computed style, animation, Canvas/SVG pixels and runtime-discovered nodes remain
+outside the Review contract. Review never serializes, compares or trusts Runtime DOM.
 
 Prepared formal-review documents are owned by a cancellable
 `ReviewAnalysisSession` keyed to exact operation/source/comment identity. Its
@@ -509,11 +510,17 @@ multi-entry cache is byte bounded. Parsing and annotation yield between phases,
 and stale work stops before publication. Fuzzy node pairing may compare only
 compatible tag/context buckets after exact and unique explicit identity
 matches; it cannot restore a page-wide Cartesian candidate set or change the
-existing evidence thresholds. Stable identity, exact subtree equality and own
+existing evidence thresholds. A unique valid `data-pageroot-id` is the strongest
+pairing key and may cross source parents; duplicate/invalid IDs fail closed and
+legacy no-ID Versions retain the old matcher. A frozen pair with no shared valid
+persistent ID uses the legacy matcher throughout, so full ID churn cannot become
+false source additions/removals. Stable identity, exact subtree equality and own
 non-presentation compatibility have different roles: exact equality skips only
 an unchanged branch, while an empty Canvas/SVG/control/container needs the same
 parent, kind and compatibility to become a candidate. Ambiguous alternatives
-remain unmatched. Analysis-local signature caches and projection facts are
+remain unmatched. Stable topology distinguishes insertion from same-parent
+reorder and cross-parent movement; a common stable ID cannot degrade into
+delete/add. Analysis-local signature caches and projection facts are
 disposable; a trusted 25th distinct fact is an explicit analysis failure, while
 an oversized serialized payload fails closed rather than being treated as a
 complete review.

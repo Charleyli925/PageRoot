@@ -215,11 +215,14 @@ Workbench 只确认已提交 loading surface、传入窄 port 并消费快照。
   Node oracle 必须分别覆盖唯一空 Canvas/SVG/表单/容器的兼容配对、重复
   class-only 空节点保持 unmatched、深层子变化不拆稳定祖先，以及第 25 个
   trusted projection fact 明确失败；解析端超限仍必须 fail-closed。
-  Review 的负向边界由 Node 与 Electron 共同锁定：`style`、`layout`、movement 和
-  runtime facts 在 projection 边界 fail-closed；preload、IPC、package allowlist 与
-  artifact verifier 均不存在 Review capture owner。真实 Electron 证明纯样式、
-  换行、Canvas/SVG 绘制和兄弟重排生成零变化，同时精确文字、元素新增/删除、
-  评论、Tab 与采纳仍可用。
+  Stable-ID Review 的 Node oracle 必须区分普通插入与同父重排、识别跨父移动，
+  并守护 `moved/attribute/style/css-source/script-source` 始终归入 `structure`；
+  重复/非法 ID 不建立精确身份，无 ID 历史输入继续走旧 matcher。Review 的负向
+  边界由 Node 与 Electron 共同锁定：`layout`、computed style、runtime 与 pixel
+  facts 在 projection 边界 fail-closed；preload、IPC、package allowlist 与 artifact
+  verifier 均不存在 Review capture owner。真实 Electron 证明稳定 ID 的文字、
+  元素增删移动、属性/内联样式和 CSS/Script 源码变化可审阅，同时纯换行、
+  Canvas/SVG Runtime 绘制、评论、Tab 与采纳合同不回归。
 - Electron E2E 夹具与场景归属：`tests/e2e/electron/helpers/pageroot-app-fixture.mjs` 是兼容 re-export。能力实现分别在 `electron-app-launch.mjs`、`electron-project-fixture.mjs`、`electron-project-ready.mjs`、`electron-comment-driver.mjs`、`electron-legacy-project-fixture.mjs` 与 `electron-safe-cleanup.mjs`。它们只拥有独立 userData/workspace/source、隐藏窗口启动、Bridge 路径、close-first
   cleanup、诊断输出和已加载 frame；不包含产品断言、整条用户流程或自动重试。
   启动或 hydration 未就绪时，fixture 必须记录主 frame、Workbench/
@@ -298,11 +301,12 @@ Workbench 只确认已提交 loading surface、传入窄 port 并消费快照。
   `全部 / 文字 / 元素` 工具栏、页面/筛选/可见度/导航彼此独立、左右单页和
   双页均铺满 Canvas，以及采纳和返回修改前的持久化边界。
   Node 直接覆盖精确字符范围、纯插入/删除镜像、完全重写 singleton 的兼容配对、
-  重复多解不猜、超预算有界退化，以及 projection 只接受 `text/structure` 与
-  `added/removed`。真实 Electron 证明文字替换保留红色删除虚线与绿色逐字实点；
+  重复多解不猜、超预算有界退化，以及 projection 只接受 `text/structure`，其
+  结构子类为 `added/removed/moved/attribute/style/css-source/script-source`。真实 Electron 证明文字替换保留红色删除虚线与绿色逐字实点；
   真正新增/删除的 `li/tr/卡片/区块` 只显示一个最外层“新增元素 / 删除元素”框，
-  内部元素和文字零重复；新增编号 `<br>` 行仍是文字事实；纯样式、换行、
-  Canvas/SVG 绘制和兄弟重排生成零变化。框与遮罩孔保持同一 canonical geometry，
+  内部元素和文字零重复；新增编号 `<br>` 行仍是文字事实；稳定 ID 的兄弟/跨父
+  移动、普通属性、内联样式和 CSS/Script 源码变化进入元素事实，纯换行及
+  Canvas/SVG Runtime 绘制仍为零变化。框与遮罩孔保持同一 canonical geometry，
   评论、Tab、同步/独立滚动、缩放和采纳闭环继续运行。
 - 审阅滚动回归必须直接证明页面概览会递增手势代次、取消待执行跟随帧并保留语义映射；评论布局契约还必须接受超出 100,000px 的有限长文档坐标，同时继续拒绝非有限值和超过安全上限的坐标。
 - 评论标记必须覆盖无 `id`、`data-*`、`name`、`aria-label` 的 class-only 普通目标；私有绑定、评论正文和 locator map 不进入 authored HTML 或后续 bootstrap，恶意作者 listener 不能抢先伪造评论端口。

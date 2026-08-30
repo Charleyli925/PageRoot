@@ -16,7 +16,14 @@ export type ReviewProjectionFact = {
   operation?: "none" | "insert" | "delete" | "replace";
   tone?: "added" | "removed";
   textGroup?: string;
-  structureChange?: "added" | "removed";
+  structureChange?:
+    | "added"
+    | "removed"
+    | "moved"
+    | "attribute"
+    | "style"
+    | "css-source"
+    | "script-source";
   summary?: string;
 };
 

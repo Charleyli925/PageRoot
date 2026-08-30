@@ -302,6 +302,7 @@ export function semanticUnitDescriptor(
   unit: ReviewSemanticUnit,
   parentKey: string,
   signatures: ReviewSignatureCache,
+  usePersistentIdentity = true,
 ) {
   const logicalCell = unit.kind === "table-cell"
     ? `:${unit.element.tagName}:${unit.columnStart ?? -1}:${unit.columnSpan ?? 1}`
@@ -320,7 +321,9 @@ export function semanticUnitDescriptor(
   return {
     kind: `${unit.kind}${logicalCell}`,
     text,
-    stableId: ownsElementIdentity ? stableElementIdentity(unit.element, signatures) : null,
+    stableId: ownsElementIdentity
+      ? stableElementIdentity(unit.element, signatures, usePersistentIdentity)
+      : null,
     exactSignature,
     compatibilitySignature: `${unit.kind}\u0000${logicalCell}\u0000${selfCompatibilitySignature(
       unit.element,
@@ -350,6 +353,7 @@ export function sameLogicalCellPattern(
 
 export function* buildReviewSemanticPairGraphSteps(
   pair: SectionPair,
+  options: { usePersistentIdentity?: boolean } = {},
 ): Generator<"semantic-row", ReviewSemanticPairGraph, void> {
   const signatures = createReviewSignatureCache();
   let semanticOwnerSequence = 0;
@@ -427,8 +431,18 @@ export function* buildReviewSemanticPairGraphSteps(
     }
     const parentKey = `semantic-parent-${++parentSequence}`;
     const aligned = alignReviewSemanticUnits(
-      before.children.map((unit) => semanticUnitDescriptor(unit, parentKey, signatures)),
-      after.children.map((unit) => semanticUnitDescriptor(unit, parentKey, signatures)),
+      before.children.map((unit) => semanticUnitDescriptor(
+        unit,
+        parentKey,
+        signatures,
+        options.usePersistentIdentity !== false,
+      )),
+      after.children.map((unit) => semanticUnitDescriptor(
+        unit,
+        parentKey,
+        signatures,
+        options.usePersistentIdentity !== false,
+      )),
     );
     for (const childPair of aligned) {
       node.children.push(yield* createPair(
@@ -468,11 +482,12 @@ export function sectionElementDescriptor(
   element: Element,
   parentKey: string,
   signatures: ReviewSignatureCache,
+  usePersistentIdentity = true,
 ) {
   return {
     kind: `${element.namespaceURI || ""}:${element.localName.toLowerCase()}`,
     text: normalizedText(element),
-    stableId: stableElementIdentity(element, signatures),
+    stableId: stableElementIdentity(element, signatures, usePersistentIdentity),
     exactSignature: exactSubtreeSignature(element, signatures),
     compatibilitySignature: selfCompatibilitySignature(element, signatures),
     relocationKey: semanticRelocationKey(element, "section", signatures),
@@ -491,7 +506,11 @@ export function semanticElementName(element: Element): string {
   return "元素";
 }
 
-export function pairSections(before: Element[], after: Element[]): SectionPair[] {
+export function pairSections(
+  before: Element[],
+  after: Element[],
+  options: { usePersistentIdentity?: boolean } = {},
+): SectionPair[] {
   const signatures = createReviewSignatureCache();
   const parentKey = (element: Element) => {
     const parent = element.parentElement;
@@ -508,8 +527,18 @@ export function pairSections(before: Element[], after: Element[]): SectionPair[]
       : `section-document${panelContext}`;
   };
   return alignReviewSemanticUnits(
-    before.map((element) => sectionElementDescriptor(element, parentKey(element), signatures)),
-    after.map((element) => sectionElementDescriptor(element, parentKey(element), signatures)),
+    before.map((element) => sectionElementDescriptor(
+      element,
+      parentKey(element),
+      signatures,
+      options.usePersistentIdentity !== false,
+    )),
+    after.map((element) => sectionElementDescriptor(
+      element,
+      parentKey(element),
+      signatures,
+      options.usePersistentIdentity !== false,
+    )),
   ).map((pair) => ({
     before: pair.beforeIndex === null ? null : before[pair.beforeIndex],
     after: pair.afterIndex === null ? null : after[pair.afterIndex],

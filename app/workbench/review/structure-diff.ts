@@ -8,6 +8,7 @@ import type {
 export type StructureDifferenceStats = {
   added: string[];
   removed: string[];
+  changed: boolean;
 };
 
 export function markStructureElement(element: Element, tone: string, semanticOwnerId: string) {
@@ -18,7 +19,7 @@ export function markStructureElement(element: Element, tone: string, semanticOwn
 export function* markStructureDifferenceSteps(
   graph: ReviewSemanticPairGraph,
 ): Generator<"semantic-row", boolean, void> {
-  const stats: StructureDifferenceStats = { added: [], removed: [] };
+  const stats: StructureDifferenceStats = { added: [], removed: [], changed: false };
   const pending = [graph.root];
   let inspected = 0;
   while (pending.length) {
@@ -28,10 +29,16 @@ export function* markStructureDifferenceSteps(
     const afterElement = pair.after?.element || null;
     const unitKind = pair.before?.kind || pair.after?.kind || "";
     const ownsElement = unitKind !== "direct-flow" && unitKind !== "br-line";
-    if (!beforeElement && afterElement && ownsElement) {
+    if (beforeElement?.hasAttribute("data-pageroot-review-structure")
+      || afterElement?.hasAttribute("data-pageroot-review-structure")) {
+      stats.changed = true;
+    }
+    const stableCommon = beforeElement?.getAttribute("data-pageroot-review-stable-common") === "true"
+      || afterElement?.getAttribute("data-pageroot-review-stable-common") === "true";
+    if (!beforeElement && afterElement && ownsElement && !stableCommon) {
       markStructureElement(afterElement, "added", pair.semanticOwnerId);
       stats.added.push(semanticElementName(afterElement));
-    } else if (beforeElement && !afterElement && ownsElement) {
+    } else if (beforeElement && !afterElement && ownsElement && !stableCommon) {
       markStructureElement(beforeElement, "removed", pair.semanticOwnerId);
       stats.removed.push(semanticElementName(beforeElement));
     } else if (beforeElement && afterElement) {
@@ -41,5 +48,5 @@ export function* markStructureDifferenceSteps(
     }
     if (inspected % 24 === 0) yield "semantic-row";
   }
-  return Object.values(stats).some((entries) => entries.length > 0);
+  return stats.changed || stats.added.length > 0 || stats.removed.length > 0;
 }

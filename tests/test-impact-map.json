@@ -1132,14 +1132,15 @@
     {
       "id": "review-semantic-owner",
       "patterns": [
-        "^app/lib/review-semantic-alignment\\.(?:d\\.ts|js)$",
-        "^app/workbench/review/semantic-pairing\\.ts$"
+        "^app/lib/review-(?:semantic-alignment|stable-id-diff)\\.(?:d\\.ts|js)$",
+        "^app/workbench/review/(?:semantic-pairing|stable-source-diff)\\.ts$"
       ],
       "suites": [
         "typecheck"
       ],
       "nodeTests": [
-        "tests/review-semantic-alignment.test.mjs"
+        "tests/review-semantic-alignment.test.mjs",
+        "tests/review-stable-id-diff.test.mjs"
       ]
     },
     {

@@ -94,9 +94,10 @@ the historical synthetic-spike decision.
   DOM has no persistence authority and Edit screenshot/capture/projection count
   remains 0.
 - Review is static source-diff only. It reads the frozen before/after HTML and
-  emits bounded text facts plus outermost element-presence facts; scripts,
-  pixels, computed style, Canvas/SVG runtime output, PNGs and a Review runtime
-  owner do not participate. Runtime descendants remain display-only preview
+  emits bounded text facts plus stable-ID movement/attribute/inline-style/
+  CSS/Script source facts and outermost element-presence facts. Scripts are not
+  executed to derive facts; pixels, computed style, Canvas/SVG runtime output,
+  PNGs and a Review runtime owner do not participate. Runtime descendants remain display-only preview
   state and never enter SourcePatch, save, Version, Review analysis or AI
   Request input.
 - Comment selection remains source-node exact inside foreign content. Authored
@@ -165,10 +166,12 @@ the historical synthetic-spike decision.
   ready-review session prepares that immutable document pair for the exact
   operation/source/comment identity before the React review surface mounts;
   rerenders and bounded cache hits reuse it. The analyzer compares only frozen
-  HTML: text uses bounded evidence ranges and semantic pairing, while element
-  presence emits only the outermost unmatched subtree. Position, order,
-  attributes, CSS, layout, computed style and runtime-discovered nodes do not
-  become Review facts. The projection layer keeps its geometry and mask records
+  HTML: text uses bounded evidence ranges and semantic pairing; unique valid
+  stable IDs strongly pair elements and provide movement, authored attribute,
+  inline-style and CSS/Script source facts; element presence emits only the
+  outermost unmatched subtree. Legacy no-ID inputs retain bounded semantic
+  pairing. CSS impact, layout, computed style and runtime-discovered nodes do
+  not become Review facts. The projection layer keeps its geometry and mask records
   disposable, and the initial private bootstrap is used only for exact
   before-side comment targeting; neither capability changes the diff authority.
 

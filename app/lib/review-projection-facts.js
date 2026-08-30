@@ -8,7 +8,15 @@ const FACT_SCOPES = new Set([
 ]);
 const FACT_OPERATIONS = new Set(["none", "insert", "delete", "replace"]);
 const FACT_TONES = new Set(["added", "removed"]);
-const FACT_STRUCTURE_CHANGES = new Set(["added", "removed"]);
+const FACT_STRUCTURE_CHANGES = new Set([
+  "added",
+  "removed",
+  "moved",
+  "attribute",
+  "style",
+  "css-source",
+  "script-source",
+]);
 const FACT_KEY_PATTERN = /^[a-z0-9:_-]{1,160}$/iu;
 export const REVIEW_PROJECTION_FACTS_PER_ELEMENT_LIMIT = 24;
 const MAX_SUMMARY_LENGTH = 80;

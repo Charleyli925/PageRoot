@@ -15,9 +15,10 @@ function normalizedParent(unit) {
 
 function identityKey(unit) {
   const stableId = String(unit.stableId || "").trim();
-  return stableId
-    ? `${normalizedParent(unit)}\u0000${unit.kind}\u0000${stableId}`
-    : null;
+  if (!stableId) return null;
+  return stableId.startsWith("pageroot:")
+    ? `${unit.kind}\u0000${stableId}`
+    : `${normalizedParent(unit)}\u0000${unit.kind}\u0000${stableId}`;
 }
 
 function exactKey(unit) {

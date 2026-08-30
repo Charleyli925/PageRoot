@@ -15,6 +15,10 @@ import {
   REVIEW_SOURCE_NODE_ATTRIBUTE,
 } from "../../lib/review-comment-source-map.js";
 import {
+  isValidPagerootElementId,
+  PAGEROOT_ELEMENT_ID_ATTRIBUTE,
+} from "../../lib/pageroot-element-identity.js";
+import {
   REVIEW_BASE_ATTRIBUTE,
   REVIEW_BOOTSTRAP_ATTRIBUTE,
   REVIEW_COMMENT_GLOBAL_ATTRIBUTE,
@@ -189,7 +193,14 @@ export function reviewAttributeRole(attribute: Attr): ReviewAttributeRole {
   return "structural";
 }
 
-export function explicitStableElementIdentity(element: Element): string | null {
+export function explicitStableElementIdentity(
+  element: Element,
+  usePersistentIdentity = true,
+): string | null {
+  if (usePersistentIdentity) {
+    const pagerootId = element.getAttribute(PAGEROOT_ELEMENT_ID_ATTRIBUTE)?.trim();
+    if (isValidPagerootElementId(pagerootId)) return `pageroot:${pagerootId}`;
+  }
   for (const name of [
     "id",
     "data-test-module",
@@ -205,10 +216,14 @@ export function explicitStableElementIdentity(element: Element): string | null {
   return null;
 }
 
-export function stableElementIdentity(element: Element, signatures: ReviewSignatureCache): string | null {
+export function stableElementIdentity(
+  element: Element,
+  signatures: ReviewSignatureCache,
+  usePersistentIdentity = true,
+): string | null {
   const cached = signatures.stableIdentity.get(element);
   if (cached !== undefined) return cached;
-  const value = explicitStableElementIdentity(element);
+  const value = explicitStableElementIdentity(element, usePersistentIdentity);
   signatures.stableIdentity.set(element, value);
   return value;
 }

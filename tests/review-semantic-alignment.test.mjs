@@ -81,6 +81,28 @@ test("units from different parent keys never pair", () => {
   assert.equal(matchedPairs(pairs).length, 0);
 });
 
+test("a persistent stable identity pairs across source parents", () => {
+  const pairs = alignReviewSemanticUnits(
+    [unit("同一源码元素", { stableId: "pageroot:pr1_source", parentKey: "list-a" })],
+    [unit("同一源码元素已移动", { stableId: "pageroot:pr1_source", parentKey: "list-b" })],
+  );
+
+  assert.deepEqual(matchedPairs(pairs).map(({ beforeIndex, afterIndex, match }) => ({
+    beforeIndex,
+    afterIndex,
+    match,
+  })), [{ beforeIndex: 0, afterIndex: 0, match: "stable-id" }]);
+});
+
+test("a legacy explicit identity remains scoped to its paired parent", () => {
+  const pairs = alignReviewSemanticUnits(
+    [unit("旧元素", { stableId: "id:legacy", parentKey: "list-a" })],
+    [unit("旧元素", { stableId: "id:legacy", parentKey: "list-b" })],
+  );
+
+  assert.equal(matchedPairs(pairs).length, 0);
+});
+
 test("a unique empty atomic unit pairs only through its self compatibility signature", () => {
   const pairs = alignReviewSemanticUnits(
     [unit("", {
