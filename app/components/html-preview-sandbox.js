@@ -21,7 +21,7 @@ const DISABLED_REFRESH_ATTRIBUTE = "data-html-canvas-disabled-refresh";
 const DISPLAY_POLICY_ATTRIBUTE = "data-pageroot-display-policy";
 const MISSING_ATTRIBUTE_VALUE = "__html_canvas_missing__";
 const SOURCE_NODE_ATTRIBUTE = "data-html-ai-source-node-id";
-const EDIT_RUNTIME_CSP = [
+export const EDIT_RUNTIME_CSP = [
   "default-src 'none'",
   "script-src pageroot-edit-runtime:",
   "style-src 'unsafe-inline' data: http: https: pageroot-edit-runtime:",
@@ -29,7 +29,7 @@ const EDIT_RUNTIME_CSP = [
   "font-src data: http: https: pageroot-edit-runtime:",
   "media-src data: blob: http: https: pageroot-edit-runtime:",
   "connect-src http: https:",
-  "worker-src blob:",
+  "worker-src 'none'",
   "frame-src 'none'",
   "object-src 'none'",
   "form-action 'none'",

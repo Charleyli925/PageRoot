@@ -31,7 +31,9 @@ source or be reconciled node by node.
   graphs remain unsupported and fail closed to static Edit. Main admits at
   most two concurrent preparations and keeps a non-evicting 128-preparation
   application-lifetime cap; reaching it requires an app restart rather than
-  accepting renderer-chosen request IDs without a hard bound.
+  accepting renderer-chosen request IDs without a hard bound. Workers stay
+  CSP-disabled because worker bytes are outside the frozen author-script
+  closure and its Hash/budget checks.
 - Before author scripts execute, the fixed bootstrap opens one parent-owned
   registration capability. The parent editor deletes that entry after the
   bootstrap captures its private batch port and keeps registered DOM references

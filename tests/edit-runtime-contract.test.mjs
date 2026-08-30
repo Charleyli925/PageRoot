@@ -116,6 +116,7 @@ test("formal architecture keeps the source-edit experience contract and runtime 
   assert.match(adr, /public source identity revokes/u);
   assert.match(adr, /Every source mutation[\s\S]*registered stable ID/u);
   assert.match(adr, /non-evicting 128-preparation[\s\S]*application-lifetime cap/u);
+  assert.match(adr, /Workers stay[\s\S]*CSP-disabled/u);
   assert.match(architecture, /close\/reopen must reproduce source edits/u);
   assert.match(architecture, /no Runtime DOM persistence/u);
   assert.match(architecture, /private parent-realm `WeakSet`/u);

@@ -88,6 +88,27 @@ test("Electron Edit runs ordinary scripts continuously without saving Runtime DO
       ticks += 1;
       document.body.dataset.runtimeTicks = String(ticks);
     }, 25);
+    try {
+      const workerUrl = URL.createObjectURL(new Blob([
+        'postMessage("worker-executed")',
+      ], { type: 'text/javascript' }));
+      const worker = new Worker(workerUrl);
+      worker.addEventListener('message', () => {
+        document.body.dataset.workerExecuted = 'true';
+      });
+      worker.addEventListener('error', () => {
+        document.body.dataset.workerBlocked = 'true';
+        worker.terminate();
+        URL.revokeObjectURL(workerUrl);
+      });
+      window.setTimeout(() => {
+        document.body.dataset.workerBlocked = 'true';
+        worker.terminate();
+        URL.revokeObjectURL(workerUrl);
+      }, 100);
+    } catch {
+      document.body.dataset.workerBlocked = 'true';
+    }
   </script>
 </body></html>`;
 
@@ -102,6 +123,9 @@ test("Electron Edit runs ordinary scripts continuously without saving Runtime DO
     await expect.poll(async () => Number(
       await frame.locator("body").getAttribute("data-runtime-ticks"),
     )).toBeGreaterThan(firstTicks);
+    await expect.poll(() => frame.locator("body").getAttribute("data-worker-blocked"))
+      .toBe("true");
+    await expect(frame.locator("body")).not.toHaveAttribute("data-worker-executed", "true");
 
     await frame.locator("#runtime-generated").click();
     const toolbar = page.getByRole("toolbar", { name: /编辑/u });

@@ -1,5 +1,6 @@
 export const EDITOR_STYLE_ATTRIBUTE: string;
 export const FRAME_VERIFICATION_ATTRIBUTE: string;
+export const EDIT_RUNTIME_CSP: string;
 
 export function disableExecutableMarkup(source: string): string;
 export function sanitizePreviewDocument(
