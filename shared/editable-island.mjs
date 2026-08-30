@@ -7,6 +7,21 @@ import {
 } from "./pageroot-element-identity.mjs";
 export const HTML_NAMESPACE = "http://www.w3.org/1999/xhtml";
 
+export const HTML_VOID_TAGS = new Set([
+  "area", "base", "br", "col", "embed", "hr", "img", "input", "link",
+  "meta", "param", "source", "track", "wbr",
+]);
+
+export const PLAIN_TEXT_RAW_TAGS = new Set([
+  "script",
+  "style",
+  "xmp",
+  "iframe",
+  "noembed",
+  "noframes",
+  "plaintext",
+]);
+
 export const ROOT_BLOCKED_TAGS = new Set([
   "html",
   "head",
@@ -124,6 +139,56 @@ export class EditableIslandError extends Error {
 
 function fail(code, message, details = {}) {
   throw new EditableIslandError(code, message, details);
+}
+
+function escapePlainText(value) {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;");
+}
+
+export function planSemanticPlainTextPatch(source, {
+  tagName,
+  isVoid = false,
+  contentStartOffset,
+  contentEndOffset,
+  text,
+}) {
+  const normalizedTagName = String(tagName ?? "").toLowerCase();
+  if (
+    !normalizedTagName
+    || isVoid
+    || HTML_VOID_TAGS.has(normalizedTagName)
+    || PLAIN_TEXT_RAW_TAGS.has(normalizedTagName)
+  ) {
+    fail(
+      "SEMANTIC_TEXT_TARGET_UNSUPPORTED",
+      "setText requires a non-void authored text container.",
+      { tagName: normalizedTagName || null },
+    );
+  }
+  const value = String(source);
+  if (
+    !Number.isInteger(contentStartOffset)
+    || !Number.isInteger(contentEndOffset)
+    || contentStartOffset < 0
+    || contentEndOffset < contentStartOffset
+    || contentEndOffset > value.length
+  ) {
+    fail(
+      "SEMANTIC_TEXT_TARGET_UNSUPPORTED",
+      "setText requires exact authored content boundaries.",
+      { tagName: normalizedTagName },
+    );
+  }
+  return {
+    startOffset: contentStartOffset,
+    endOffset: contentEndOffset,
+    before: value.slice(contentStartOffset, contentEndOffset),
+    after: escapePlainText(text),
+    kind: "semantic:set-text",
+  };
 }
 
 function childNodesFor(node) {

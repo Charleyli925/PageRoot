@@ -375,7 +375,7 @@ Source 逐节点对账；Script 执行状态迁移；为绝对无刷新建立双
 → 核对源 Hash
 → Repository 重新解析身份差异，与 semantic operation + identityDelta 交叉验证；SourcePatch kind 不授权身份变化
 → 结构操作使用 Canvas/Repository 共享的纯 plan replayer 重建整组 exact patches；删除、插入、替换、跨父移动及 comment-aware 同父 reorder 均禁止附带无关 patch
-→ 对 identified `setText` 岛内容及 range-style wrapper，Repository 还按目标内容范围或逻辑文字范围独立重建 exact patch，核对位置、数量、样式字节和新 ID
+→ 对 plain `setText`，Canvas/Repository 共用纯 planner，拒绝 void/raw-text target，并核对唯一 target-content patch 的范围、原字节、规范转义后字节和 kind；对 identified `setText` 岛内容及 range-style wrapper，Repository 还按目标内容范围或逻辑文字范围独立重建 exact patch，核对位置、数量、样式字节和新 ID
 → 临时文件写入、刷盘、原子替换
 → 重读校验
 → 封存新的 ID/tag/parent/order binding，仅用于之后的外部冲突检测

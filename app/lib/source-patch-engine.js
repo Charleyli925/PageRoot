@@ -8,6 +8,9 @@ import {
   canonicalSourceStyleDeclaration,
 } from "../../shared/source-style-value.mjs";
 import {
+  planSemanticPlainTextPatch,
+} from "../../shared/editable-island.mjs";
+import {
   planSemanticStructurePatches,
 } from "../../shared/semantic-structure-plan.mjs";
 import {
@@ -427,16 +430,14 @@ export function planSemanticOperationPatch(indexOrHtml, command) {
   let targetRefs = targetRef ? [targetRef] : [];
 
   if (semanticType === "setText") {
-    if (!target || target.isVoid || RAW_TEXT_ELEMENTS.has(target.tagName)) {
-      fail("SEMANTIC_TEXT_TARGET_UNSUPPORTED", "setText requires a non-void authored text container.");
-    }
-    patches = [sourcePatch(
-      target.contentRange.startOffset,
-      target.contentRange.endOffset,
-      index.source.slice(target.contentRange.startOffset, target.contentRange.endOffset),
-      escapeHtmlText(command.text ?? ""),
-      { kind: "semantic:set-text" },
-    )];
+    if (!target) fail("TARGET_REQUIRED", "setText requires an authored target.");
+    patches = [planSemanticPlainTextPatch(index.source, {
+      tagName: target.tagName,
+      isVoid: target.isVoid,
+      contentStartOffset: target.contentRange.startOffset,
+      contentEndOffset: target.contentRange.endOffset,
+      text: command.text ?? "",
+    })];
   } else if (semanticType === "replaceTextRange") {
     if (!target) fail("TARGET_REQUIRED", "replaceTextRange requires an authored target.");
     const segments = normalizedTextRangeSegments(index, target, command.segments);

@@ -715,10 +715,13 @@ plan before `setText` is formed, and Repository binds that operation to one
 exact target-content patch and its normalized `contentHtml`. Canvas copies only
 those accepted IDs onto the matching live line-break objects under its expected
 mutation guard, then rebases the current selection/session without a page
-reload; this identity update does not grant Runtime source authority. Range-style
-wrappers are independently reconstructed from the operation's logical
-range/quote, canonical guard and declaration, exact source offsets and fresh ID
-list. Canvas and Repository share the pure editable-island normalizer and
+reload; this identity update does not grant Runtime source authority. Plain
+`setText` uses one shared Canvas/Repository planner that rejects void/raw-text
+targets and binds the exact target range, original bytes, canonical escaped
+text bytes and patch kind; decoded-equivalent entities and extra patches fail
+closed. Range-style wrappers are independently reconstructed from the
+operation's logical range/quote, canonical guard and declaration, exact source
+offsets and fresh ID list. Canvas and Repository share the pure editable-island normalizer and
 single-CSS-value declaration validator, so exact self-consistent evidence still
 cannot change protected island attributes or inject another CSS declaration.
 The same proof selects the original forward patches when validating undo;

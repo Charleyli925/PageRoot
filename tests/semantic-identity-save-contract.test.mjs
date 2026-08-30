@@ -931,6 +931,194 @@ test("setText and range-style identity additions are bound to exact semantic mat
   );
 });
 
+test("plain setText is bound to the exact escaped kernel patch plan", () => {
+  const settingText = operation("setText", {
+    target: target(ids.first),
+    text: "replacement <safe> & exact",
+  }, "sourceop_plain_text_materialization_025");
+  const result = applySemanticOperation(createSemanticDocumentState(html), settingText);
+  const valid = saveEvidence(html, result, settingText, "text");
+  assert.equal(
+    valid.forwardPatches[0].after,
+    "replacement &lt;safe&gt; &amp; exact",
+  );
+  assert.equal(materializeIdentityPreservingSave(html, result.html, {
+    sourceHistoryOperations: [valid],
+  }).html, result.html);
+  assert.equal(materializeIdentityPreservingSave(result.html, html, {
+    sourceHistoryOperations: [{
+      ...valid,
+      beforeSourceSha256: result.sourceSha256,
+      afterSourceSha256: result.previousSourceSha256,
+      forwardPatches: valid.reversePatches,
+      reversePatches: valid.forwardPatches,
+      semanticDirection: "undo",
+      identityDelta: deriveSemanticOperationIdentityDelta(
+        result.html,
+        html,
+        settingText,
+        { direction: "undo" },
+      ),
+    }],
+  }).html, html);
+  assert.equal(materializeIdentityPreservingSave(html, result.html, {
+    sourceHistoryOperations: [{
+      ...valid,
+      semanticDirection: "redo",
+      identityDelta: deriveSemanticOperationIdentityDelta(
+        html,
+        result.html,
+        settingText,
+        { direction: "redo" },
+      ),
+    }],
+  }).html, result.html);
+
+  const extraPatches = [...valid.forwardPatches, unrelatedTitlePatch(html)]
+    .sort((left, right) => left.startOffset - right.startOffset);
+  const extraHtml = renderExactPatches(html, extraPatches);
+  assert.throws(
+    () => materializeIdentityPreservingSave(html, extraHtml, {
+      sourceHistoryOperations: [{
+        ...valid,
+        afterSourceSha256: createSemanticDocumentState(extraHtml).sourceSha256,
+        forwardPatches: extraPatches,
+        reversePatches: exactInversePatches(extraPatches),
+        identityDelta: deriveSemanticOperationIdentityDelta(html, extraHtml, settingText),
+      }],
+    }),
+    (error) => (
+      error?.code === "SOURCE_ELEMENT_IDENTITY_LOST"
+      && error?.details?.semanticIdentityError
+        === "SEMANTIC_IDENTITY_TEXT_MATERIALIZATION_MISMATCH"
+    ),
+  );
+
+  const targetElement = buildSourceIndex(html).byPagerootId.get(ids.first);
+  const unrelatedTextPatch = {
+    startOffset: targetElement.contentRange.startOffset,
+    endOffset: targetElement.contentRange.endOffset,
+    before: html.slice(
+      targetElement.contentRange.startOffset,
+      targetElement.contentRange.endOffset,
+    ),
+    after: "unrelated",
+    kind: "semantic:set-text",
+  };
+  const unrelatedHtml = renderExactPatches(html, [unrelatedTextPatch]);
+  assert.throws(
+    () => materializeIdentityPreservingSave(html, unrelatedHtml, {
+      sourceHistoryOperations: [{
+        ...valid,
+        afterSourceSha256: createSemanticDocumentState(unrelatedHtml).sourceSha256,
+        forwardPatches: [unrelatedTextPatch],
+        reversePatches: exactInversePatches([unrelatedTextPatch]),
+        identityDelta: deriveSemanticOperationIdentityDelta(html, unrelatedHtml, settingText),
+      }],
+    }),
+    (error) => (
+      error?.code === "SOURCE_ELEMENT_IDENTITY_LOST"
+      && error?.details?.semanticIdentityError
+        === "SEMANTIC_IDENTITY_TEXT_MATERIALIZATION_MISMATCH"
+    ),
+  );
+
+  const entityPatch = {
+    ...valid.forwardPatches[0],
+    after: "replacement &#60;safe&#62; &amp; exact",
+  };
+  const entityHtml = renderExactPatches(html, [entityPatch]);
+  assert.throws(
+    () => materializeIdentityPreservingSave(html, entityHtml, {
+      sourceHistoryOperations: [{
+        ...valid,
+        afterSourceSha256: createSemanticDocumentState(entityHtml).sourceSha256,
+        forwardPatches: [entityPatch],
+        reversePatches: exactInversePatches([entityPatch]),
+        identityDelta: deriveSemanticOperationIdentityDelta(html, entityHtml, settingText),
+      }],
+    }),
+    (error) => (
+      error?.code === "SOURCE_ELEMENT_IDENTITY_LOST"
+      && error?.details?.semanticIdentityError
+        === "SEMANTIC_IDENTITY_TEXT_MATERIALIZATION_MISMATCH"
+    ),
+  );
+
+  const clearing = operation("setText", {
+    target: target(ids.first),
+    text: "",
+  }, "sourceop_plain_text_empty_026");
+  const cleared = applySemanticOperation(createSemanticDocumentState(html), clearing);
+  assert.equal(materializeIdentityPreservingSave(html, cleared.html, {
+    sourceHistoryOperations: [saveEvidence(html, cleared, clearing, "text")],
+  }).html, cleared.html);
+});
+
+test("plain setText target capability is identical in the kernel and Repository", () => {
+  const capabilityHtml = `<!doctype html><html data-pageroot-id="${ids.html}"><head data-pageroot-id="${ids.head}"><title data-pageroot-id="${ids.title}">Capability</title></head><body data-pageroot-id="${ids.body}"><script data-pageroot-id="${ids.strong}">window.value = 1;</script><br data-pageroot-id="${ids.second}"></body></html>`;
+  const state = createSemanticDocumentState(capabilityHtml);
+  for (const [elementId, operationId] of [
+    [ids.strong, "sourceop_plain_text_script_027"],
+    [ids.second, "sourceop_plain_text_void_028"],
+  ]) {
+    const semanticOperation = {
+      schemaVersion: 1,
+      operationId,
+      baseRevision: state.revision,
+      expectedSourceSha256: state.sourceSha256,
+      type: "setText",
+      target: createSemanticElementPrecondition(capabilityHtml, elementId),
+      text: "forged",
+    };
+    assert.throws(
+      () => applySemanticOperation(state, semanticOperation),
+      (error) => error?.code === "SEMANTIC_TEXT_TARGET_UNSUPPORTED",
+    );
+
+    const element = buildSourceIndex(capabilityHtml).byPagerootId.get(elementId);
+    const forgedPatch = {
+      startOffset: element.contentRange.startOffset,
+      endOffset: element.contentRange.endOffset,
+      before: capabilityHtml.slice(
+        element.contentRange.startOffset,
+        element.contentRange.endOffset,
+      ),
+      after: "forged",
+      kind: "semantic:set-text",
+    };
+    const forgedHtml = renderExactPatches(capabilityHtml, [forgedPatch]);
+    assert.throws(
+      () => materializeIdentityPreservingSave(capabilityHtml, forgedHtml, {
+        sourceHistoryOperations: [{
+          operationId,
+          kind: "text",
+          editRevision: 1,
+          createdAt: "2026-08-30T00:00:00.000Z",
+          beforeSourceSha256: state.sourceSha256,
+          afterSourceSha256: createSemanticDocumentState(forgedHtml).sourceSha256,
+          forwardPatches: [forgedPatch],
+          reversePatches: exactInversePatches([forgedPatch]),
+          beforeTarget: null,
+          afterTarget: null,
+          semanticDirection: "forward",
+          semanticOperation,
+          identityDelta: deriveSemanticOperationIdentityDelta(
+            capabilityHtml,
+            forgedHtml,
+            semanticOperation,
+          ),
+        }],
+      }),
+      (error) => (
+        error?.code === "SOURCE_ELEMENT_IDENTITY_LOST"
+        && error?.details?.semanticIdentityError
+          === "SEMANTIC_TEXT_TARGET_UNSUPPORTED"
+      ),
+    );
+  }
+});
+
 test("range-style materialization selects the original forward proof for undo and redo", () => {
   const wrapperId = "pr1_a0000000000040008000000000000001";
   const styling = operation("setStyle", {

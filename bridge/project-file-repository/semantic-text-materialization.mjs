@@ -5,7 +5,9 @@ import {
   PAGEROOT_ELEMENT_ID_ATTRIBUTE,
 } from "../../shared/pageroot-element-identity.mjs";
 import {
+  HTML_VOID_TAGS,
   normalizeEditableIslandHtml,
+  planSemanticPlainTextPatch,
 } from "../../shared/editable-island.mjs";
 import {
   canonicalSourceStyleDeclaration,
@@ -279,7 +281,7 @@ function assertExactPatches(actual, expected, code, message) {
 }
 
 function assertSetTextMaterialization(step, operation, direction, beforeIdentity, afterIdentity) {
-  if (operation.type !== "setText" || operation.contentHtml === undefined) return;
+  if (operation.type !== "setText") return;
   const forward = forwardEvidence(step, direction);
   const forwardBeforeIdentity = direction === "undo" ? afterIdentity : beforeIdentity;
   const forwardAfterIdentity = direction === "undo" ? beforeIdentity : afterIdentity;
@@ -293,6 +295,18 @@ function assertSetTextMaterialization(step, operation, direction, beforeIdentity
       "SEMANTIC_IDENTITY_TEXT_MATERIALIZATION_MISMATCH",
       "The setText target does not have exact source content boundaries.",
     );
+  }
+  if (operation.contentHtml === undefined) {
+    assertExactPatches(forward.patches, [planSemanticPlainTextPatch(forward.beforeHtml, {
+      tagName: rootNode.tagName,
+      isVoid: HTML_VOID_TAGS.has(String(rootNode.tagName ?? "").toLowerCase()),
+      contentStartOffset: contentStart,
+      contentEndOffset: contentEnd,
+      text: operation.text,
+    })],
+    "SEMANTIC_IDENTITY_TEXT_MATERIALIZATION_MISMATCH",
+    "The saved source is not the exact semantic plain-text materialization.");
+    return;
   }
   let normalizedContentHtml;
   try {

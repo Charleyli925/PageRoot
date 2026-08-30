@@ -66,6 +66,11 @@ state. Cloning authored markup also cannot retain the original persistent IDs.
   source-allocated IDs to the corresponding live `<br>` nodes as an expected
   mutation, preserving the active selection and allowing the same edit session
   to continue. The attribute remains identity, not new Runtime authority.
+- Plain `setText` without `contentHtml` is also one closed kernel plan, not a
+  caller-authored patch allowance. Canvas and Repository share the same pure
+  planner: it rejects void and raw-text targets, escapes `&`, `<` and `>` once,
+  and requires one exact target-content patch. Equivalent decoded text, an
+  unrelated extra patch or a target Canvas cannot edit is not authorized.
 - A range-style operation that adds wrappers is independently replayed at the
   Repository boundary. Its logical range and quote must map to the exact
   authored text segments; wrapper count, offsets, canonical guard/style bytes
