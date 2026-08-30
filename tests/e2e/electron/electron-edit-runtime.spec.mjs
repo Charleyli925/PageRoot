@@ -272,8 +272,25 @@ test("semantic structure edit rebuilds the disposable page and reruns its script
       element.scrollTop = 480;
     });
     await expect.poll(() => reviewStage.evaluate((element) => element.scrollTop)).toBe(480);
-    await expect(page.getByRole("button", { name: "下移", exact: true })).toBeVisible();
-    await page.getByRole("button", { name: "下移", exact: true }).click();
+    const moveDownButton = page.getByRole("button", { name: "下移", exact: true });
+    await expect(moveDownButton).toBeVisible();
+    const moveDownBox = await moveDownButton.boundingBox();
+    expect(moveDownBox).not.toBeNull();
+    const viewport = await page.evaluate(() => ({
+      width: window.innerWidth,
+      height: window.innerHeight,
+    }));
+    expect(moveDownBox.x).toBeGreaterThanOrEqual(0);
+    expect(moveDownBox.y).toBeGreaterThanOrEqual(0);
+    expect(moveDownBox.x + moveDownBox.width).toBeLessThanOrEqual(viewport.width);
+    expect(moveDownBox.y + moveDownBox.height).toBeLessThanOrEqual(viewport.height);
+    // Use the already-visible toolbar coordinate. locator.click() is allowed to
+    // scroll an ancestor first; that Playwright convenience would replace the
+    // user viewport before the product can capture it for the rebuild.
+    await page.mouse.click(
+      moveDownBox.x + moveDownBox.width / 2,
+      moveDownBox.y + moveDownBox.height / 2,
+    );
 
     const nextFrame = await currentEditorFrame(page);
     await expect.poll(() => documentToken(page)).not.toBe(beforeDocument);
