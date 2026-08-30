@@ -36,7 +36,9 @@ visual inference.
   under the existing `structure` category and `全部 / 文字 / 元素` toolbar;
   Review does not add a visual/style filter or a second fact system.
   Movement, attribute, style and page-source facts do not suppress simultaneous
-  text facts; only whole-element `added`/`removed` facts own descendant text.
+  text facts. Whole-element `added`/`removed` facts own descendant text; a moved
+  stable subtree must first compare its before/after text by ID, then suppress
+  duplicate evidence from its separately paired one-sided regions.
 - Added and removed elements retain the outermost-unmatched-subtree rule.
   A stable element common to both inputs cannot be emitted as delete plus add
   merely because its source parent changed.
@@ -55,5 +57,5 @@ visual inference.
   even when their source elements are non-rendering `<head>` content.
 - Tests must cover insertion versus reorder, cross-parent movement, moved text,
   attributes plus text, inline style plus text, CSS/Script source, pure reorder,
-  global duplicate-ID ambiguity, legacy no-ID behavior and the continuing
-  absence of runtime/pixel facts.
+  unchanged and changed text inside cross-region moves, global duplicate-ID
+  ambiguity, legacy no-ID behavior and the continuing absence of runtime/pixel facts.

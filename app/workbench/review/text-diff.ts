@@ -6,6 +6,9 @@ import {
 import {
   flattenReviewSemanticPairs,
 } from "./semantic-pairing";
+import {
+  REVIEW_MOVED_TEXT_ACCOUNTED_ATTRIBUTE,
+} from "./constants";
 import type {
   ReviewSemanticPairGraph,
   ReviewSemanticUnit,
@@ -17,6 +20,7 @@ import type {
 const WHOLE_ELEMENT_CHANGE_SELECTOR = [
   '[data-pageroot-review-structure="added"]',
   '[data-pageroot-review-structure="removed"]',
+  `[${REVIEW_MOVED_TEXT_ACCOUNTED_ATTRIBUTE}="true"]`,
 ].join(",");
 
 export function markTextAnchor(anchor: Element, groupId: string, offset: number) {

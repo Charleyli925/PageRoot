@@ -523,9 +523,12 @@ parent, kind and compatibility to become a candidate. Ambiguous alternatives
 remain unmatched. Stable topology distinguishes insertion from same-parent
 reorder and cross-parent movement; a common stable ID cannot degrade into
 delete plus add, and byte-identical markup cannot hide a precomputed movement.
-Only `added`/`removed` whole-element facts suppress descendant text evidence;
-movement, attribute, inline-style and page-source facts must coexist with any
-simultaneous text fact.
+`added`/`removed` whole-element facts own descendant text evidence. A moved
+stable subtree is compared against its exact before/after ID counterpart before
+its one-sided candidate-region graphs suppress duplicate text; unchanged moved
+text produces no text fact, while changed moved text coexists with movement.
+Attribute, inline-style and page-source facts likewise coexist with simultaneous
+text facts.
 Analysis-local signature caches and projection facts are
 disposable; a trusted 25th distinct fact is an explicit analysis failure, while
 an oversized serialized payload fails closed rather than being treated as a

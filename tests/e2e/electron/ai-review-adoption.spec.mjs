@@ -2579,6 +2579,7 @@ test("stable-ID review reports movement, source attributes, styles, and author s
         <article data-stable-review-static data-review-static="before" style="margin: 4px">
           <h2>原位卡片</h2><p>原位修改前文字</p>
         </article>
+        <article data-stable-review-unchanged-move><p>跨区移动但文字不变</p></article>
         <p data-stable-review-order="a">稳定顺序甲</p>
         <p data-stable-review-order="b">稳定顺序乙</p>
       </div>
@@ -2600,12 +2601,14 @@ test("stable-ID review reports movement, source attributes, styles, and author s
     writeAiOutput(request.requestRoot, (base) => {
       const card = base.match(/<article data-stable-review-card[\s\S]*?<\/article>/u)?.[0];
       const staticCard = base.match(/<article data-stable-review-static[\s\S]*?<\/article>/u)?.[0];
+      const unchangedMove = base.match(/<article data-stable-review-unchanged-move[\s\S]*?<\/article>/u)?.[0];
       const orderA = base.match(/<p data-stable-review-order="a"[^>]*>稳定顺序甲<\/p>/u)?.[0];
       const orderB = base.match(/<p data-stable-review-order="b"[^>]*>稳定顺序乙<\/p>/u)?.[0];
       const exactA = base.match(/<article data-stable-review-exact="a"[^>]*>精确重排甲<\/article>/u)?.[0];
       const exactB = base.match(/<article data-stable-review-exact="b"[^>]*>精确重排乙<\/article>/u)?.[0];
       expect(card).toBeTruthy();
       expect(staticCard).toBeTruthy();
+      expect(unchangedMove).toBeTruthy();
       expect(orderA).toBeTruthy();
       expect(orderB).toBeTruthy();
       expect(exactA).toBeTruthy();
@@ -2630,11 +2633,12 @@ test("stable-ID review reports movement, source attributes, styles, and author s
         )
         .replace(card, "")
         .replace(staticCard, changedStaticCard)
+        .replace(unchangedMove, "")
         .replace(`${orderA}\n        ${orderB}`, `${orderB}\n        ${orderA}`)
         .replace(`${exactA}\n      ${exactB}`, `${exactB}\n      ${exactA}`)
         .replace(
           /(<div data-stable-review-column="b"[^>]*>)/u,
-          `$1\n        ${movedCard}`,
+          `$1\n        ${movedCard}\n        ${unchangedMove}`,
         );
     });
     runOfficialFinalizer(request.requestRoot, request.changeRequest);
@@ -2681,6 +2685,17 @@ test("stable-ID review reports movement, source attributes, styles, and author s
     await expect(afterFrame.locator(
       '[data-stable-review-card] [data-pageroot-review-text="added"], [data-stable-review-card][data-pageroot-review-text="added"]',
     ).first()).toBeAttached();
+    for (const frame of [beforeFrame, afterFrame]) {
+      const unchangedMove = frame.locator("[data-stable-review-unchanged-move]");
+      await expect.poll(() => structureKinds(unchangedMove)).toEqual(
+        expect.arrayContaining(["moved"]),
+      );
+      await expect(unchangedMove.locator("[data-pageroot-review-text]")).toHaveCount(0);
+      await expect.poll(async () => (
+        JSON.parse(await unchangedMove.getAttribute("data-pageroot-review-projection-facts") || "[]")
+          .filter((fact) => fact.type === "text")
+      )).toEqual([]);
+    }
     for (const [frame, tone] of [[beforeFrame, "removed"], [afterFrame, "added"]]) {
       const staticCard = frame.locator("[data-stable-review-static]");
       await expect.poll(() => structureKinds(staticCard)).toEqual(expect.arrayContaining([

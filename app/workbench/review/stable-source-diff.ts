@@ -8,6 +8,9 @@ import {
 import {
   appendProjectionFactToElement,
 } from "./parse";
+import {
+  REVIEW_MOVED_TEXT_ACCOUNTED_ATTRIBUTE,
+} from "./constants";
 
 export type StableSourceChangeKind =
   | "moved"
@@ -73,6 +76,22 @@ function comparableAttributes(element: Element, excluded: Set<string>) {
     .join("\u001f");
 }
 
+function visibleSourceText(element: Element): string {
+  let text = "";
+  const visit = (node: Node) => {
+    if (node.nodeType === Node.TEXT_NODE) {
+      text += node.textContent || "";
+      return;
+    }
+    if (!(node instanceof Element)) return;
+    if (node.matches("script, style, noscript, template")) return;
+    if (node.namespaceURI !== "http://www.w3.org/1999/xhtml") return;
+    node.childNodes.forEach(visit);
+  };
+  element.childNodes.forEach(visit);
+  return text.replace(/\s+/gu, " ").trim();
+}
+
 function authorSourceKind(
   element: Element,
 ): "css-source" | "script-source" | null {
@@ -100,6 +119,33 @@ function annotateStructureFact(
     scope: "element",
     structureChange: kind,
     summary: CHANGE_SUMMARIES[kind],
+  });
+}
+
+function annotateMovedTextPair(before: Element, after: Element, id: string) {
+  before.setAttribute(REVIEW_MOVED_TEXT_ACCOUNTED_ATTRIBUTE, "true");
+  after.setAttribute(REVIEW_MOVED_TEXT_ACCOUNTED_ATTRIBUTE, "true");
+  if (visibleSourceText(before) === visibleSourceText(after)) return;
+  const semanticOwnerId = `stable-${id}`;
+  const geometryOwnerId = `stable-geometry-${id}`;
+  [
+    { element: before, tone: "removed" as const },
+    { element: after, tone: "added" as const },
+  ].forEach(({ element, tone }) => {
+    element.setAttribute("data-pageroot-review-text", tone);
+    element.setAttribute("data-pageroot-review-text-operation", "replace");
+    element.setAttribute("data-pageroot-review-text-group", `moved-text-${id}`);
+    appendProjectionFactToElement(element, {
+      id: `moved-text-${id}`,
+      type: "text",
+      semanticOwnerId,
+      geometryOwnerId,
+      scope: "text-block",
+      operation: "replace",
+      tone,
+      textGroup: `moved-text-${id}`,
+      summary: "文本调整",
+    });
   });
 }
 
@@ -154,6 +200,7 @@ export function annotateStableSourceDifferences(
     if (movedIds.has(id)) {
       annotateStructureFact(before, id, "moved");
       annotateStructureFact(after, id, "moved");
+      annotateMovedTextPair(before, after, id);
     }
 
     const isScript = before.tagName === "SCRIPT" || after.tagName === "SCRIPT";
