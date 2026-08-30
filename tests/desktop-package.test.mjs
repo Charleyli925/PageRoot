@@ -90,6 +90,7 @@ const BRIDGE_FILES = [
   "project-file-repository/request-draft.mjs",
   "project-file-repository/version-candidate.mjs",
   "project-file-repository/working-copy.mjs",
+  "project-file-repository/semantic-text-materialization.mjs",
   "project-file-repository/workspace-performance-timing.mjs",
   "ai-task-projection.mjs",
   "project-file-finalizer.mjs",
