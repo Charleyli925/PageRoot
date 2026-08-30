@@ -16,7 +16,15 @@ import {
   applyPatchPlan,
   planSemanticOperationPatch,
 } from "../app/lib/source-patch-engine.js";
+import {
+  createTargetRef,
+  planTextRangeStylePatch,
+} from "../app/lib/source-patch-core.js";
 import { buildSourceIndex } from "../app/lib/source-index.js";
+import {
+  buildSourceTextMap,
+  textRangeToSourceSegments,
+} from "../app/lib/source-text-map.js";
 
 function elementId(sequence) {
   return `pr1_000000000000400080000000${sequence.toString(16).padStart(8, "0")}`;
@@ -179,6 +187,47 @@ test("materializes rich text and range style semantically with a generated inver
   const styled = applySemanticOperation(baseline, rangeStyle);
   assert.match(styled.html, /font-weight: 700/u);
   assert.match(styled.html, new RegExp(elementId(30), "u"));
+});
+
+test("replays the exact wrapper IDs allocated by an accepted Canvas range style plan", () => {
+  const baseline = state();
+  const index = buildSourceIndex(baseline.html);
+  const paragraph = index.byPagerootId.get(IDS.paragraph);
+  const textMap = buildSourceTextMap(index, paragraph.nodeId);
+  const range = { startOffset: 0, endOffset: 5, quote: "Hello" };
+  const forwardPlan = planTextRangeStylePatch(index, {
+    type: "set-text-range-style",
+    targetRef: createTargetRef(index, paragraph, { level: "subregion" }),
+    segments: textRangeToSourceSegments(
+      textMap,
+      range.startOffset,
+      range.endOffset,
+    ),
+    property: "font-weight",
+    value: "700",
+    important: false,
+    expectedSourceSha256: baseline.sourceSha256,
+  });
+  const mapped = applyPatchPlan(forwardPlan, baseline.html);
+  const createdPagerootIds = forwardPlan.metadata.createdPagerootIds;
+  const semantic = applySemanticOperation(baseline, operation(
+    baseline,
+    "sourceop_canvas_style1",
+    "setStyle",
+    {
+      target: target(baseline, IDS.paragraph),
+      property: "font-weight",
+      value: "700",
+      important: false,
+      range,
+      createdPagerootIds,
+    },
+  ));
+
+  assert.equal(createdPagerootIds.length, 1);
+  assert.match(semantic.html, new RegExp(createdPagerootIds[0], "u"));
+  assert.equal(semantic.html, mapped.html);
+  assert.equal(semantic.sourceSha256, mapped.sourceSha256);
 });
 
 test("allocates new identities for insert and replacement while preserving the replacement root", () => {
