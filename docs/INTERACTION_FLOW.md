@@ -319,6 +319,30 @@ Script 标记与内容精确不变时，同一作用域资源会话才可复用�
 新 generation 并重新授权。保存、Version、导出和 AI 输入始终读取完整源码
 HTML，永不序列化 Runtime DOM。
 
+#### 5.1.1 编辑画布体验与持久化合同
+
+正式一致性合同只有一条：**用户对源码内容完成的编辑必须写入完整 HTML，
+关闭并重新打开后仍能从该 HTML 得到；Runtime 临时状态不是保存事实。**
+
+- 源码元素的文字和常用样式在当前画布及时可见，不要求用户手动刷新。
+  连续输入优先原位更新安全的源码投影，不得每输入一个字符就重建 iframe。
+- 页面应尽量保持当前 Document、共享滚动位置和 Selection。结构修改或必须由
+  Script 重新计算的修改可以在语义操作/checkpoint 边界自动重建，但同一批
+  高频输入只允许合并为必要的一次重建。
+- 必须重建时，尽量恢复共享 scroll、当前界面实际提供的 zoom，以及仍能按
+  `data-pageroot-id` 精确解析的 selection；目标已删除或证明失败时允许安全
+  清除选择，不能猜测重绑或转存 Runtime DOM。
+- 用户完成的每个操作先产生完整 next HTML，再进入既有 Hash/CAS、原子保存
+  和恢复链路。重开时以保存 HTML 重新执行 Script，生成 ECharts、Canvas 等
+  展示；不要求随机数、当前时间、动画中间帧或运行时交互状态与上次相同。
+- 工程实现选择满足上述合同的最低复杂度方案。安全局部更新优先；简单重建
+  已足够快且没有明显跳动时，不继续增加状态同步架构。
+
+以下均为明确 non-goals：Runtime DOM 持久化；timer/rAF/Observer/listener
+freeze；Runtime snapshot 恢复；Canvas/SVG 像素状态保存；Runtime DOM 与
+Source 逐节点对账；Script 执行状态迁移；为绝对无刷新建立双 iframe 同步；
+保证 Runtime 临时状态在重开后完全一致。不得以画布 UX 优化为理由重新引入。
+
 保存事实不再由画布上方或顶栏的状态条展示。源文件仍是项目当前指向的 HTML；第一次打开时是用户选择的原始文件，AI 产生新 Candidate 后继续由 Project/Version 工作流保存独立 Working Copy。用户只在发生冲突或失败时从全局提示执行恢复动作。
 
 每次编辑的交互顺序：

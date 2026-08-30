@@ -57,6 +57,39 @@ source or be reconciled node by node.
   runtime mutation audit, activity freeze, script prewarm, disk cache and
   per-node runtime snapshot reconciliation are retired.
 
+## Editing-canvas experience and persistence contract
+
+The product consistency promise is deliberately source-scoped: **an edit the
+user completes against authored source content is saved in complete HTML and
+is obtained again after close and reopen; transient runtime state is not a
+saved fact.**
+
+- Direct text and common-style edits must be visible in the current Canvas
+  without a manual refresh. Safe high-frequency input updates the current
+  authored DOM projection and must not replace the iframe for every keystroke.
+- The implementation preserves the current page whenever it can still prove a
+  local source-backed update. A structure change or a change whose result
+  requires author Script may rebuild the disposable iframe, but rebuilds are
+  coalesced at semantic/checkpoint boundaries rather than driven by individual
+  input events.
+- A necessary rebuild should restore the shared scroll position, any exposed
+  zoom context, and the selection resolved by stable element ID when those
+  facts still have a valid target. Restoration is best-effort presentation;
+  failure never permits runtime DOM to become source authority.
+- Every completed operation materializes complete next HTML before ordinary
+  autosave/Hash/CAS persistence. Reopen reads that HTML and reruns Script to
+  produce ECharts, Canvas and other runtime output afresh.
+- The minimum-complexity implementation that satisfies these guarantees wins.
+  A sufficiently fast rebuild is acceptable; absence of every perceptible
+  refresh is not itself a reason to add another runtime state system.
+
+The following are explicit non-goals and must not be reintroduced as Canvas UX
+optimizations: Runtime DOM persistence; timer/rAF/Observer/listener freeze;
+runtime snapshot restore; Canvas/SVG pixel-state save; runtime/source per-node
+reconciliation; Script execution-state migration; a dual-iframe synchronization
+system; or equality of random values, current time, animation frames and other
+runtime-only state after reopen.
+
 ## Boundaries
 
 - The runtime remains a trusted-local authoring capability, not hostile-content
@@ -78,6 +111,10 @@ source or be reconciled node by node.
 - `async` and `defer` scheduling attributes are preserved.
 - A semantic structure edit rebuilds the iframe, reruns the program and saves
   only the complete semantic HTML result.
+- Continuous direct text input is visible immediately without repeated iframe
+  replacement; a completed common edit survives close and reopen from HTML.
+- A required rebuild preserves shared scroll and stable-ID selection when the
+  target remains valid, without serializing runtime output.
 - Switching away and back creates a fresh runtime page without replaying an old
   request identity or reusing an inactive live Script DOM.
 - Generated descendants map to a source host for comments and expose no source

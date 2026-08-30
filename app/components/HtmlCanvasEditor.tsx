@@ -898,6 +898,11 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   const hoverControllerRef = useRef<ReturnType<typeof createCanvasCapabilityHoverController> | null>(null);
   const hoverHintPointerInsideRef = useRef(false);
   const pendingFrameViewportRef = useRef<{ left: number; top: number } | null>(null);
+  const pendingSharedViewportRef = useRef<{
+    element: HTMLElement;
+    left: number;
+    top: number;
+  } | null>(null);
   const expectedFrameHtmlRef = useRef<string | null>(null);
   const expectedFrameTokenRef = useRef<string | null>(null);
   const frameLoadGenerationRef = useRef(0);
@@ -1118,6 +1123,16 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     const frameView = iframeRef.current?.contentWindow;
     pendingFrameViewportRef.current = options.preserveViewport && frameView
       ? { left: frameView.scrollX, top: frameView.scrollY }
+      : null;
+    const sharedScrollElement = containerRef.current?.closest<HTMLElement>(
+      ".review-scroll-stage",
+    ) ?? null;
+    pendingSharedViewportRef.current = options.preserveViewport && sharedScrollElement
+      ? {
+          element: sharedScrollElement,
+          left: sharedScrollElement.scrollLeft,
+          top: sharedScrollElement.scrollTop,
+        }
       : null;
     const reuseCandidate = Boolean(options.reuseDocument)
       && !options.immediate
@@ -4997,6 +5012,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     const pendingSelection = pendingSelectionRef.current;
     const pendingToolbarVisible = pendingToolbarVisibleRef.current;
     const pendingViewport = pendingFrameViewportRef.current;
+    const pendingSharedViewport = pendingSharedViewportRef.current;
     const pendingNativeResume = pendingNativeEditResumeRef.current;
     const pendingRestoreEpoch = pendingFrameRestoreEpochRef.current;
     containerRef.current?.setAttribute(
@@ -5006,6 +5022,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     pendingSelectionRef.current = null;
     pendingToolbarVisibleRef.current = false;
     pendingFrameViewportRef.current = null;
+    pendingSharedViewportRef.current = null;
     requestAnimationFrame(() => {
       if (
         iframe.contentDocument !== documentNode
@@ -5035,6 +5052,15 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           behavior: "auto",
         });
       }
+      const restoreSharedViewport = () => {
+        if (!pendingSharedViewport?.element.isConnected) return;
+        pendingSharedViewport.element.scrollTo({
+          left: pendingSharedViewport.left,
+          top: pendingSharedViewport.top,
+          behavior: "auto",
+        });
+      };
+      restoreSharedViewport();
       if (pendingSelection && !lockedRef.current) {
         const restoredTarget = selectTarget(pendingSelection, {
           reveal: false,
@@ -5094,6 +5120,14 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         ) pendingNativeEditResumeRef.current = null;
         updateOverlayPosition();
       }
+      requestAnimationFrame(() => {
+        if (
+          iframe.contentDocument === documentNode
+          && frameLoadGenerationRef.current === connectedFrameGeneration
+          && expectedFrameTokenRef.current === expectedToken
+          && pendingFrameRestoreEpochRef.current === pendingRestoreEpoch
+        ) restoreSharedViewport();
+      });
     });
     return true;
   }, [

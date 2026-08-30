@@ -52,7 +52,7 @@ function sourceFidelityExpected(managedSource, replacement) {
   );
 }
 
-test("Electron uses the authored DOM caret, Selection and controlled beforeinput", {
+test("Electron shows continuous source text immediately without rebuilding the iframe", {
   tag: ["@gate-smoke","@smoke-editing"],
 }, async () => {
   const { electronApp, page, isolatedUserData } = await launchPageRoot();

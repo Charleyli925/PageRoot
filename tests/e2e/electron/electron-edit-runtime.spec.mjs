@@ -120,10 +120,12 @@ test("semantic structure edit rebuilds the disposable page and reruns its script
 }, async () => {
   const html = `<!doctype html>
 <html><head><title>Runtime</title></head><body>
+  <div aria-hidden="true" style="height:600px"></div>
   <section>
     <p id="first" data-native-case="runtime-first">甲</p>
     <p id="second">乙</p>
     <output id="runtime-order"></output>
+    <div aria-hidden="true" style="height:1600px"></div>
   </section>
   <script>
     document.querySelector('#runtime-order').textContent = Array.from(
@@ -138,12 +140,30 @@ test("semantic structure edit rebuilds the disposable page and reruns its script
   }, async ({ page, sourcePath }) => {
     const { frame } = await loadedDiskFrame(page, sourcePath, "runtime-first");
     await expect(frame.locator("#runtime-order")).toHaveText("甲乙");
+    const beforeDocument = await documentToken(page);
+    const stableId = await frame.locator('[data-native-case="runtime-first"]')
+      .getAttribute("data-pageroot-id");
+    expect(stableId).toMatch(/^pr1_[a-f0-9]{32}$/u);
+    const reviewStage = page.locator(".review-scroll-stage");
+    await expect.poll(() => reviewStage.evaluate((element) => (
+      element.scrollHeight - element.clientHeight
+    ))).toBeGreaterThan(480);
     await frame.locator('[data-native-case="runtime-first"]').click();
+    await reviewStage.evaluate((element) => {
+      element.scrollTop = 480;
+    });
+    await expect.poll(() => reviewStage.evaluate((element) => element.scrollTop)).toBe(480);
+    await expect(page.getByRole("button", { name: "下移", exact: true })).toBeVisible();
     await page.getByRole("button", { name: "下移", exact: true }).click();
 
     const nextFrame = await currentEditorFrame(page);
+    await expect.poll(() => documentToken(page)).not.toBe(beforeDocument);
     await expect(nextFrame.locator("#runtime-order")).toHaveText("乙甲");
     await expect(nextFrame.locator("section > p").first()).toHaveAttribute("id", "second");
+    await expect(nextFrame.locator(
+      `[data-pageroot-id="${stableId}"][data-html-canvas-selected]`,
+    )).toHaveCount(1);
+    await expect.poll(() => reviewStage.evaluate((element) => element.scrollTop)).toBe(480);
     const workingCopyPath = await managedWorkingCopyPath(page, sourcePath);
     await expect.poll(() => readFileSync(workingCopyPath, "utf8"))
       .toMatch(/id="second"[\s\S]*id="first"/u);
@@ -188,6 +208,15 @@ test("Electron Edit renders a source-relative ECharts page in the editable ifram
     await expect(frame.locator("#chart canvas")).toHaveCount(1);
     await expect(frame.locator("[data-pageroot-edit-runtime-bootstrap]")).toHaveCount(1);
     await expect(frame.locator("[data-pageroot-edit-runtime-frozen]")).toHaveCount(0);
+    expect(readFileSync(sourcePath, "utf8")).toBe(html);
+    const firstDocumentToken = await documentToken(page);
+    const tabs = page.getByRole("tablist", { name: "已打开的页面" });
+    const documentTab = tabs.getByRole("tab").first();
+    await page.getByRole("button", { name: "新标签页" }).click();
+    await documentTab.click();
+    const reopened = await loadedDiskFrame(page, sourcePath, "echarts-runtime");
+    await expect(reopened.frame.locator("#chart canvas")).toHaveCount(1);
+    await expect.poll(() => documentToken(page)).not.toBe(firstDocumentToken);
     expect(readFileSync(sourcePath, "utf8")).toBe(html);
   });
 });

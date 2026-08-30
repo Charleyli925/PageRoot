@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import {
@@ -96,4 +97,24 @@ test("direct Edit runtime grants use one session and one execution identity", ()
   assert.equal("cacheTtlMs" in EDIT_AUTHOR_RUNTIME_BUDGET, false);
   assert.equal("runtimeQuietFrames" in EDIT_AUTHOR_RUNTIME_BUDGET, false);
   assert.equal("hostCount" in EDIT_AUTHOR_RUNTIME_BUDGET, false);
+});
+
+test("formal architecture keeps the source-edit experience contract and runtime non-goals", async () => {
+  const [adr, architecture, interaction] = await Promise.all([
+    readFile(new URL("../docs/decisions/0065-disposable-edit-runtime.md", import.meta.url), "utf8"),
+    readFile(new URL("../docs/ARCHITECTURE_CONTRACT.md", import.meta.url), "utf8"),
+    readFile(new URL("../docs/INTERACTION_FLOW.md", import.meta.url), "utf8"),
+  ]);
+  assert.match(adr, /completed operation materializes complete next HTML/u);
+  assert.match(adr, /must not replace the iframe for every keystroke/u);
+  assert.match(architecture, /close\/reopen must reproduce source edits/u);
+  assert.match(architecture, /no Runtime DOM persistence/u);
+  assert.match(interaction, /用户对源码内容完成的编辑必须写入完整 HTML/u);
+  assert.match(interaction, /不得每输入一个字符就重建 iframe/u);
+  for (const document of [adr, architecture, interaction]) {
+    assert.match(document, /Runtime DOM/u);
+    assert.match(document, /timer\/rAF\/Observer\/listener/u);
+    assert.match(document, /Canvas\/SVG/u);
+    assert.match(document, /dual-iframe|双 iframe/u);
+  }
 });

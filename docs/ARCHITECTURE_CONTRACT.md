@@ -452,6 +452,24 @@ Any preparation, load, provenance or deadline failure selects ordinary static
 Edit. Runtime DOM never becomes SourcePatch, Source HTML, save, Version, export,
 Request, Candidate or Review input.
 
+The Edit Canvas has one normative experience/persistence contract. Direct
+source text and common-style edits are reflected in the current projection
+without a user refresh, and high-frequency input must not replace the iframe on
+each event. A structure or Script-dependent semantic operation may rebuild one
+disposable frame at its checkpoint; unnecessary rebuilds are forbidden. A
+rebuild restores the shared scroll position, exposed zoom context and
+stable-element-ID selection when each target remains valid. Every completed
+operation first materializes complete HTML and enters the ordinary Hash/CAS,
+atomic-save and recovery boundary; close/reopen must reproduce source edits
+from that HTML. Author Script then regenerates runtime presentation.
+
+This contract grants no Runtime DOM persistence, timer/rAF/Observer/listener
+freeze, runtime snapshot recovery, Canvas/SVG pixel save, runtime/source
+per-node reconciliation, Script execution-state migration, dual-iframe state
+synchronization, or equality for random/time/animation state after reopen.
+Presentation restoration is best effort and cannot widen source authority. The
+lowest-complexity safe local update or rebuild remains the required design.
+
 Review has no runtime-snapshot owner or PNG evidence path. It compares only the
 frozen before/after HTML and emits bounded text facts plus outermost
 element-presence facts. Its script-enabled frames may keep an opaque origin and
