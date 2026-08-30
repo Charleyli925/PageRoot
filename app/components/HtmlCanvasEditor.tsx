@@ -36,6 +36,7 @@ import {
   buildSourceIndex,
   createTargetRef,
   instrumentPreviewHtml,
+  planSemanticOperationPatch,
   planSourcePatch,
   resolveTargetRef,
 } from "../lib/source-patch-core.js";
@@ -93,6 +94,12 @@ import {
   uniqueSelections,
   type MoveAvailability,
 } from "./html-canvas-selection";
+import {
+  insertStructureCommand,
+  selectedStructureCommand,
+  type SelectedStructureAction,
+  type StructureDestination,
+} from "./html-canvas-structure-commands";
 import type {
   ActiveTextRange,
   SourceElementValue,
@@ -500,6 +507,11 @@ type FinishNativeEditingOptions = {
 
 
 type SourcePatchCommand = Parameters<typeof planSourcePatch>[0];
+type DirectSemanticCommand = {
+  type: "direct-semantic-operation";
+  operation: SemanticOperation;
+};
+type CanvasSourceCommand = SourcePatchCommand | DirectSemanticCommand;
 type SourcePatchPlan = NonNullable<ReturnType<typeof planSourcePatch>>;
 type InlineStylePriority = "" | "important";
 type InlineStyleFacts = {
@@ -1789,7 +1801,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   }, []);
 
   const applySourceCommand = useCallback((
-    command: SourcePatchCommand,
+    command: CanvasSourceCommand,
     mutation: HtmlCanvasMutation,
     options: {
       validateResult?: (result: ReturnType<typeof applyPatchPlan>) => void;
@@ -1821,7 +1833,24 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     }
 
     try {
-      const forwardPlan = planSourcePatch(command, sourceIndex) as SourcePatchPlan;
+      const directSemanticOperation = command.type === "direct-semantic-operation"
+        ? command.operation
+        : null;
+      let semanticResult = directSemanticOperation
+        ? applySemanticOperation(
+          createSemanticDocumentState(currentSource, {
+            revision: semanticRevisionRef.current,
+          }),
+          directSemanticOperation,
+        )
+        : null;
+      const directSemanticMaterialization = semanticResult?.materialization
+        .sourcePatchResult as ReturnType<typeof applyPatchPlan> | undefined;
+      const semanticCommand = directSemanticMaterialization?.inversePlan?.metadata
+        ?.semanticCommand;
+      const forwardPlan = directSemanticOperation
+        ? planSemanticOperationPatch(sourceIndex, semanticCommand) as SourcePatchPlan
+        : planSourcePatch(command, sourceIndex) as SourcePatchPlan;
       const ambientTargets = uniqueSelections([
         ...commentedTargetsRef.current.map((entry) => entry.target),
         ...trackedTargetsRef.current,
@@ -1831,7 +1860,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         ...ambientTargets,
       ]);
       const trackedTargetRefs = trackedSourceTargetRefs(
-        ambientTargets,
+        originalTargets,
         forwardPlan.targetRefs,
       );
       const mappedResult = applyPatchPlan(
@@ -1840,21 +1869,22 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         { trackedTargetRefs },
       );
       if (mappedResult.html === currentSource) return null;
-      const semanticOperation = semanticOperationForSourceCommand(
-        command,
-        forwardPlan,
-        sourceIndex,
-        mutation,
-        semanticRevisionRef.current,
-      );
-      const semanticResult = semanticOperation
+      const semanticOperation = directSemanticOperation
+        || semanticOperationForSourceCommand(
+          command as SourcePatchCommand,
+          forwardPlan,
+          sourceIndex,
+          mutation,
+          semanticRevisionRef.current,
+        );
+      semanticResult = semanticResult || (semanticOperation
         ? applySemanticOperation(
           createSemanticDocumentState(currentSource, {
             revision: semanticRevisionRef.current,
           }),
           semanticOperation,
         )
-        : null;
+        : null);
       const semanticMaterialization = semanticResult?.materialization
         .sourcePatchResult as ReturnType<typeof applyPatchPlan> | undefined;
       const result = semanticMaterialization ?? mappedResult;
@@ -3393,6 +3423,113 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     [applySourceCommand, finishNativeEditing, reportBlockedEdit],
   );
 
+  const applySelectedStructureOperation = useCallback((
+    action: SelectedStructureAction,
+    destination?: StructureDestination,
+  ): boolean => {
+    if (activeNativeEditRef.current) {
+      if (deferNativeCommandRef.current(
+        "target-switch",
+        () => {
+          const committed = finishNativeEditing(true, "manual");
+          if (committed.ok) {
+            window.queueMicrotask(() => applySelectedStructureOperation(action, destination));
+          }
+        },
+        { action, destination },
+      )) return true;
+      const committed = finishNativeEditing(true, "manual");
+      if (!committed.ok || committed.frameReloading) return false;
+    }
+    if (readOnlyRef.current || !enableReorderRef.current) return false;
+    const sourceIndex = sourceIndexRef.current;
+    if (!sourceIndex) return false;
+    const liveElement = selectedElementRef.current;
+    const logicalSelection = liveElement?.isConnected
+      ? selectionForElement(
+        liveElement,
+        sourceIndex,
+        selectedSourceSelectionRef.current ?? undefined,
+      )
+      : selectedSourceSelectionRef.current;
+    if (!logicalSelection) return false;
+    try {
+      const { operation, mutation } = selectedStructureCommand({
+        sourceIndex,
+        selection: logicalSelection,
+        action,
+        destination,
+        baseRevision: semanticRevisionRef.current,
+      });
+      const result = applySourceCommand({
+        type: "direct-semantic-operation",
+        operation,
+      }, mutation);
+      if (!result) return false;
+      if (action === "delete") clearSelection();
+      return true;
+    } catch (cause) {
+      reportBlockedEdit(cause);
+      return false;
+    }
+  }, [applySourceCommand, clearSelection, finishNativeEditing, reportBlockedEdit]);
+
+  const duplicateSelected = useCallback(
+    () => applySelectedStructureOperation("duplicate"),
+    [applySelectedStructureOperation],
+  );
+
+  const deleteSelected = useCallback(
+    () => applySelectedStructureOperation("delete"),
+    [applySelectedStructureOperation],
+  );
+
+  const moveSelectedTo = useCallback((options: {
+    parentElementId: string;
+    beforeElementId?: string | null;
+  }): boolean => applySelectedStructureOperation("move", options), [
+    applySelectedStructureOperation,
+  ]);
+
+  const insertElement = useCallback((options: {
+    parentElementId: string;
+    beforeElementId?: string | null;
+    html: string;
+  }): boolean => {
+    if (activeNativeEditRef.current) {
+      if (deferNativeCommandRef.current(
+        "target-switch",
+        () => {
+          const committed = finishNativeEditing(true, "manual");
+          if (committed.ok) window.queueMicrotask(() => insertElement(options));
+        },
+        options,
+      )) return true;
+      const committed = finishNativeEditing(true, "manual");
+      if (!committed.ok || committed.frameReloading) return false;
+    }
+    if (readOnlyRef.current || !enableReorderRef.current) return false;
+    const sourceIndex = sourceIndexRef.current;
+    if (!sourceIndex) return false;
+    try {
+      const { operation, mutation } = insertStructureCommand({
+        sourceIndex,
+        baseRevision: semanticRevisionRef.current,
+        parentElementId: options.parentElementId,
+        beforeElementId: options.beforeElementId ?? null,
+        html: options.html,
+        originalSelection: selectedSourceSelectionRef.current,
+      });
+      return Boolean(applySourceCommand({
+        type: "direct-semantic-operation",
+        operation,
+      }, mutation));
+    } catch (cause) {
+      reportBlockedEdit(cause);
+      return false;
+    }
+  }, [applySourceCommand, finishNativeEditing, reportBlockedEdit]);
+
   const selectInsertionPoint = useCallback(
     (
       point: InsertionPoint,
@@ -4211,6 +4348,10 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       select: selectTarget,
       startEditing,
       moveSelected,
+      duplicateSelected,
+      deleteSelected,
+      insertElement,
+      moveSelectedTo,
       adoptHistorySource,
       cancelHistoryAction,
       deferNativeCommand,
@@ -4225,7 +4366,11 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       deferNativeCommand,
       freezeNow,
       getScrollTop,
+      deleteSelected,
+      duplicateSelected,
+      insertElement,
       moveSelected,
+      moveSelectedTo,
       adoptHistorySource,
       cancelHistoryAction,
       selectTarget,
@@ -5672,11 +5817,15 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     onStartEditing: startEditingSelection,
     onApplyInlineStyle: applyInlineStyle,
     onMoveSelected: moveSelected,
+    onDuplicateSelected: duplicateSelected,
+    onDeleteSelected: deleteSelected,
     onToggleSpacingMenu: toggleSpacingMenu,
   }), [
     applyInlineStyle,
     commentOnSelection,
     dismissEditFeedback,
+    deleteSelected,
+    duplicateSelected,
     executeSelectedPresentationAction,
     handleEditFeedbackAction,
     handleHoverHintClick,

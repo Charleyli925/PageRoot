@@ -6,6 +6,8 @@ import {
 } from "react";
 import { ArrowDownIcon } from "@phosphor-icons/react/dist/csr/ArrowDown";
 import { ArrowUpIcon } from "@phosphor-icons/react/dist/csr/ArrowUp";
+import { CopySimpleIcon } from "@phosphor-icons/react/dist/csr/CopySimple";
+import { TrashIcon } from "@phosphor-icons/react/dist/csr/Trash";
 
 import {
   isPageRootSelection,
@@ -87,6 +89,8 @@ export const HtmlCanvasSelectionChrome = memo(function HtmlCanvasSelectionChrome
     onStartEditing,
     onApplyInlineStyle,
     onMoveSelected,
+    onDuplicateSelected,
+    onDeleteSelected,
     onToggleSpacingMenu,
   } = actions;
   return (
@@ -314,33 +318,6 @@ export const HtmlCanvasSelectionChrome = memo(function HtmlCanvasSelectionChrome
                 </button>
               </div>
 
-              {enableReorder ? (
-                <div className={styles.moveGroup} aria-label="移动选中内容">
-                  <button
-                    type="button"
-                    className={styles.iconButton}
-                    aria-label="上移"
-                    data-tooltip="上移（Option + ↑）"
-                    data-tooltip-side="below"
-                    disabled={!moveAvailability.up}
-                    onClick={() => onMoveSelected("up")}
-                  >
-                    <ArrowUpIcon size={15} weight="bold" aria-hidden="true" />
-                  </button>
-                  <button
-                    type="button"
-                    className={styles.iconButton}
-                    aria-label="下移"
-                    data-tooltip="下移（Option + ↓）"
-                    data-tooltip-side="below"
-                    disabled={!moveAvailability.down}
-                    onClick={() => onMoveSelected("down")}
-                  >
-                    <ArrowDownIcon size={15} weight="bold" aria-hidden="true" />
-                  </button>
-                </div>
-              ) : null}
-
               <details
                 ref={spacingMenuRef}
                 className={styles.spacingMenu}
@@ -471,6 +448,52 @@ export const HtmlCanvasSelectionChrome = memo(function HtmlCanvasSelectionChrome
                 </div>
               </details>
             </>
+          ) : null}
+          {!readOnly && enableReorder ? (
+            <div className={styles.moveGroup} aria-label="结构操作">
+              <button
+                type="button"
+                className={styles.iconButton}
+                aria-label="上移"
+                data-tooltip="上移（Option + ↑）"
+                data-tooltip-side="below"
+                disabled={!moveAvailability.up}
+                onClick={() => onMoveSelected("up")}
+              >
+                <ArrowUpIcon size={15} weight="bold" aria-hidden="true" />
+              </button>
+              <button
+                type="button"
+                className={styles.iconButton}
+                aria-label="下移"
+                data-tooltip="下移（Option + ↓）"
+                data-tooltip-side="below"
+                disabled={!moveAvailability.down}
+                onClick={() => onMoveSelected("down")}
+              >
+                <ArrowDownIcon size={15} weight="bold" aria-hidden="true" />
+              </button>
+              <button
+                type="button"
+                className={styles.iconButton}
+                aria-label="复制元素"
+                data-tooltip="复制元素"
+                data-tooltip-side="below"
+                onClick={onDuplicateSelected}
+              >
+                <CopySimpleIcon size={15} weight="bold" aria-hidden="true" />
+              </button>
+              <button
+                type="button"
+                className={styles.iconButton}
+                aria-label="删除元素"
+                data-tooltip="删除元素"
+                data-tooltip-side="below"
+                onClick={onDeleteSelected}
+              >
+                <TrashIcon size={15} weight="bold" aria-hidden="true" />
+              </button>
+            </div>
           ) : null}
           </div>
         </div>

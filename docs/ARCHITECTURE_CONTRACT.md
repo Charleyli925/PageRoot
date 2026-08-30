@@ -574,7 +574,8 @@ ID/tag/outer-Hash target evidence. It returns complete next HTML, Hash, lineage
 and a generated in-process inverse. Intent is lowered to SourcePatch, whose
 apply path independently re-plans the operation before enforcing exact ranges,
 outside-scope equality and parse integrity. Runtime DOM is never an input.
-PR5 adopts this boundary for existing text, style and sibling-order edits.
+PR5 adopts this boundary for existing text, style and sibling-order edits; PR6
+adds stable-ID source insert, duplicate, delete and cross-parent move.
 Canvas verifies that semantic materialization matches the accepted SourcePatch
 result before publishing complete HTML. Repository and Desktop Main do not own
 or persist the semantic revision or the current-open history stack.
@@ -620,9 +621,12 @@ may reconcile only when that binding Hash survives; a changed or missing binding
 requires explicit force-unlock before a new controlled migration. Invalid
 identities, an unresolved save state or third-party bytes fail closed; no
 historical Version, Request, Candidate or Runtime DOM is serialized.
-Until structural editing moves to semantic operations, a normal save may add an
-ID to a newly authored wrapper or line-break only after proving that every ID
-claimed by the current Working Copy remains valid and present in the candidate.
+Every structural Canvas edit now enters the semantic boundary. New fragments
+must be identity-free and receive kernel-owned IDs; duplicate cannot inherit an
+existing ID, move preserves IDs, and delete makes the old target orphaned. A
+normal text save may still add an ID to a newly authored inline wrapper or
+line-break only after proving that every ID already claimed by the current
+Working Copy remains valid and present in the candidate.
 
 Current managed TargetRefs add `elementId` and the expected canonical source
 Hash, refreshed by deterministic current-source rebind. Presence of the

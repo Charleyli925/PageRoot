@@ -2389,6 +2389,10 @@ function directChildUnder(index, node, parentId) {
 }
 
 function deterministicMappedNode(plan, baseIndex, nextIndex, patches, baseNode) {
+  if (baseNode.type === "element" && baseNode.pagerootId) {
+    const stableElement = nextIndex.byPagerootId.get(baseNode.pagerootId) ?? null;
+    return stableElement?.tagName === baseNode.tagName ? stableElement : null;
+  }
   const reorderMap = reorderIdentityMap(plan, baseIndex, nextIndex);
   if (reorderMap) {
     if (baseNode.nodeId === reorderMap.oldParent.nodeId) return reorderMap.nextParent;

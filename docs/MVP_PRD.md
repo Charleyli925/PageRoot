@@ -150,6 +150,7 @@ PageRoot 让用户在真实本地 HTML 上完成两类工作：
 - 字体、字号、字重、斜体和颜色。
 - 背景、填充、边框和常用间距。
 - 同级模块顺序。
+- 源码元素复制、删除，以及按稳定 ID 执行的插入和跨父移动。复制与新增分配全新 ID，移动保留 ID；脚本生成节点不可进入这条编辑链路。
 - 画布文字、样式、安全结构变化和同级模块顺序共享当前打开 HTML 的内存撤销/重做历史；只保留最近 20 次，切换 HTML、关闭文档或重启应用即清空。
 - 不在画布工具栏增加撤销入口。沿用系统 `Edit > 撤销/重做`，并支持 `Cmd/Ctrl+Z` 撤销、`Cmd/Ctrl+Shift+Z` 与 `Ctrl+Y` 重做。
 - 焦点位于评论正文、项目长期规则或其他真实文字输入框时，撤销/重做只使用该输入框的原生局部输入历史，不触碰画布源码历史。评论卡片、评论/附件的新增删除和其他项目操作不纳入本轮撤销范围。
@@ -159,7 +160,7 @@ PageRoot 让用户在真实本地 HTML 上完成两类工作：
 1. 文字双击时由 `IslandEditingController` 为当前源码宿主建立唯一可编辑岛；向上提升遇到不安全父容器时回退到最近安全节点，或为唯一直属裸文字建立一个不写入源码的临时纯文本宿主。浏览器只负责光标、Selection 和 IME，Controller 接管实际变更。
 2. 约 700ms、格式、Cmd+S、目标切换、关闭或发送边界生成带目标身份、源 Hash 和精确 before/after 的 `replace-editable-island` 或 `update-direct-text-node` 命令；编辑工具栏及与当前选区绑定的评论操作不结束会话，点击除此之外的页面或 App 区域则提交 checkpoint，并同时清除编辑态、选区与工具栏。
 3. SourceIndex/TargetResolver 唯一定位真实源码范围；无法唯一定位时保留草稿并阻止操作。
-4. SourcePatchEngine 只替换目标元素的精确 `contentRange`，或裸文字的精确 text-node range，并验证其他源码逐字节不变。文本节点删除时仍由存活父 TargetRef 授权，保证 exact inverse 可恢复；不保存整页 DOM 快照。
+4. SemanticOperationKernel 把文字、样式或结构意图降低为 SourcePatchEngine 的精确 range patch，并验证未授权范围逐字节不变。文本节点删除时仍由存活父 TargetRef 授权；结构新增、删除和移动只使用 SourceIndex 中的稳定元素 ID，保证 exact inverse 可恢复；不保存整页 DOM 快照。
 5. 用 Patch 结果更新内存 HTML 并原子重建 projection；失败时保留原会话和草稿。
 6. 增加 `editRevision` 并追加稳定 ID 的 edit event。
 7. 触发有上限 debounce 的同一条串行写入队列。

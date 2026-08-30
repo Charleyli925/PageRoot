@@ -425,6 +425,15 @@ inverse patches used by the current-open editing session. The renderer
 for one open HTML. A new forward edit truncates redo; switching HTML, closing
 the document or restarting clears the stack.
 
+Authored structure edits use the same boundary. Insert accepts one identity-free
+source element and allocates IDs for its whole subtree; duplicate first removes
+the selected subtree's IDs; delete retires them; same-parent and cross-parent
+move preserve them. Only current `SourceIndex` elements are eligible. Script-
+generated nodes and preview DOM are never structural inputs. The visible toolbar
+keeps this deliberately small: duplicate, delete and sibling up/down; the Canvas
+port exposes raw insertion and cross-parent move for product workflows without
+adding a component or layout system. See ADR 0064.
+
 Undo and redo first checkpoint any active editable island and drain the source
 queue. The renderer applies the exact inverse or forward patches locally, then
 saves the resulting complete HTML through the normal Hash/CAS and atomic

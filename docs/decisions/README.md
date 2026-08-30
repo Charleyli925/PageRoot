@@ -1,6 +1,6 @@
 # Architecture Decision Records
 
-<!-- adr-history-max: 0063 -->
+<!-- adr-history-max: 0064 -->
 <!-- adr-history-gaps: 0020 -->
 
 This is the default reading path for decisions that still constrain PageRoot.
@@ -10,7 +10,7 @@ Historical and superseded decisions remain available from the archive index.
 
 The repository has one historical gap, `0020`, which is intentionally never
 reused. The four collisions found in the first curation pass were assigned
-`0055` through `0058`; future ADRs must use the next number above `0063`.
+`0055` through `0058`; future ADRs must use the next number above `0064`.
 
 ## Active decisions
 
@@ -59,6 +59,7 @@ reused. The four collisions found in the first curation pass were assigned
 | 0061 | [Current comments resolve persistent source element identity](0061-stable-current-comment-targets.md) | Living |
 | 0062 | [Semantic source operations lower to complete identified HTML](0062-semantic-source-operation-kernel.md) | Living |
 | 0063 | [Canvas undo is a 20-step open-document memory history](0063-open-document-memory-history.md) | Living |
+| 0064 | [Source structure edits use stable IDs and semantic operations](0064-stable-id-source-structure-editing.md) | Living |
 
 ## Reading guide
 
