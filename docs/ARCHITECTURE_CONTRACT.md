@@ -443,7 +443,8 @@ runtime activity freeze, host mutation audit, script prewarm or disk cache.
 Before author code runs, the fixed bootstrap captures a one-time parent-owned
 registration port. The parent deletes the public entry and keeps proved source
 DOM references in a private parent-realm `WeakSet`; copied attributes or
-author-realm properties cannot grant edit authority. A runtime descendant is
+author-realm properties cannot grant edit authority, and changing a proved
+element's public source identity revokes that authority. A runtime descendant is
 display-only and resolves to the nearest still-proven source host for comments;
 it cannot become a semantic source edit. A supported semantic
 source change materializes complete HTML, rebuilds the disposable frame and

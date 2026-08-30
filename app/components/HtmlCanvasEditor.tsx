@@ -1287,24 +1287,41 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           runtimeSourceRegistrationCleanupRef.current = () => undefined;
           const elements = new WeakSet<HTMLElement>();
           const elementsBySourceNodeId = new Map<string, HTMLElement>();
+          const sourceNodeIdByElement = new WeakMap<HTMLElement, string>();
           const conflictedSourceNodeIds = new Set<string>();
           runtimeSourceElementsRef.current = {
             elementGeneration: runtimeFrame.elementGeneration,
             executionId: runtimeFrame.grant.executionId,
             elements,
           };
-          return (candidates: unknown) => {
+          return (update: unknown) => {
             const active = runtimeFrameRef.current;
             const activeIframe = iframeRef.current;
+            const payload = update as {
+              add?: unknown;
+              revoke?: unknown;
+            } | null;
             if (
-              !Array.isArray(candidates)
+              !payload
               || !activeIframe
               || active?.elementGeneration !== runtimeFrame.elementGeneration
               || active.grant.executionId !== runtimeFrame.grant.executionId
               || sourceWindow !== activeIframe?.contentWindow
             ) return false;
+            if (Array.isArray(payload.revoke)) {
+              for (const value of payload.revoke) {
+                const element = value as HTMLElement;
+                const sourceNodeId = sourceNodeIdByElement.get(element);
+                elements.delete(element);
+                sourceNodeIdByElement.delete(element);
+                if (sourceNodeId && elementsBySourceNodeId.get(sourceNodeId) === element) {
+                  elementsBySourceNodeId.delete(sourceNodeId);
+                }
+              }
+            }
+            if (!Array.isArray(payload.add)) return true;
             const sourceIndex = sourceIndexRef.current;
-            for (const value of candidates) {
+            for (const value of payload.add) {
               const element = value as HTMLElement;
               if (
                 element?.nodeType !== 1
@@ -1329,6 +1346,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
                   continue;
                 }
                 elementsBySourceNodeId.set(sourceNodeId, element);
+                sourceNodeIdByElement.set(element, sourceNodeId);
                 elements.add(element);
               }
             }

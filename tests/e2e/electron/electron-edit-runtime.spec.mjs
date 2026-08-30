@@ -44,9 +44,17 @@ test("Electron Edit runs ordinary scripts continuously without saving Runtime DO
 <html><head><title>Runtime</title></head><body>
   <main data-native-case="runtime-host">
     <p>源码正文</p>
+    <button id="source-id-forged">被脚本改写 ID 的源码按钮</button>
+    <button id="source-id-decoy">另一个源码按钮</button>
   </main>
   <script>
     const host = document.querySelector('[data-native-case="runtime-host"]');
+    const sourceIdForged = document.querySelector('#source-id-forged');
+    const sourceIdDecoy = document.querySelector('#source-id-decoy');
+    sourceIdForged.setAttribute(
+      'data-html-ai-source-node-id',
+      sourceIdDecoy.getAttribute('data-html-ai-source-node-id'),
+    );
     const generated = document.createElement('button');
     generated.id = 'runtime-generated';
     generated.textContent = '运行时按钮';
@@ -89,6 +97,12 @@ test("Electron Edit runs ordinary scripts continuously without saving Runtime DO
 
     await frame.locator("#runtime-generated").click();
     const toolbar = page.getByRole("toolbar", { name: /编辑/u });
+    await expect(toolbar.getByRole("button", { name: /留评论/u })).toBeVisible();
+    await expect(toolbar.getByRole("button", { name: "编辑", exact: true })).toHaveCount(0);
+    await expect(toolbar.getByRole("button", { name: "删除元素", exact: true })).toHaveCount(0);
+
+    await page.keyboard.press("Escape");
+    await frame.locator("#source-id-forged").click();
     await expect(toolbar.getByRole("button", { name: /留评论/u })).toBeVisible();
     await expect(toolbar.getByRole("button", { name: "编辑", exact: true })).toHaveCount(0);
     await expect(toolbar.getByRole("button", { name: "删除元素", exact: true })).toHaveCount(0);

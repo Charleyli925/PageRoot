@@ -54,6 +54,12 @@ export function createEditRuntimeBootstrap({ executionId, sessionId } = {}) {
   };
 
   const reject = (element) => {
+    if (provedIds.has(element)) {
+      provedIds.delete(element);
+      if (typeof registerProved === "function") {
+        registerProved({ revoke: [element] });
+      }
+    }
     element.removeAttribute(config.markerAttribute);
     element.removeAttribute(config.sourceNodeAttribute);
   };
@@ -69,7 +75,10 @@ export function createEditRuntimeBootstrap({ executionId, sessionId } = {}) {
       const publicSourceNodeId = element.getAttribute(config.sourceNodeAttribute) || "";
       const provedId = provedIds.get(element);
       if (provedId) {
-        if (sourceNodeId !== provedId) reject(element);
+        if (
+          sourceNodeId !== provedId
+          || (publicSourceNodeId && publicSourceNodeId !== provedId)
+        ) reject(element);
         continue;
       }
       if (
@@ -84,7 +93,7 @@ export function createEditRuntimeBootstrap({ executionId, sessionId } = {}) {
       if (publicSourceNodeId === sourceNodeId) sourceElements.push(element);
     }
     if (sourceElements.length > 0 && typeof registerProved === "function") {
-      registerProved(sourceElements);
+      registerProved({ add: sourceElements });
     }
   };
 

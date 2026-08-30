@@ -113,12 +113,15 @@ test("formal architecture keeps the source-edit experience contract and runtime 
   assert.match(adr, /completed operation materializes complete next HTML/u);
   assert.match(adr, /must not replace the iframe for every keystroke/u);
   assert.match(adr, /parent-realm `WeakSet`/u);
+  assert.match(adr, /public source identity revokes/u);
   assert.match(architecture, /close\/reopen must reproduce source edits/u);
   assert.match(architecture, /no Runtime DOM persistence/u);
   assert.match(architecture, /private parent-realm `WeakSet`/u);
+  assert.match(architecture, /public source identity revokes/u);
   assert.match(interaction, /用户对源码内容完成的编辑必须写入完整 HTML/u);
   assert.match(interaction, /不得每输入一个字符就重建 iframe/u);
   assert.match(interaction, /父编辑器私有 `WeakSet`/u);
+  assert.match(interaction, /公开源码 ID 被改写时立即/u);
   for (const document of [adr, architecture, interaction]) {
     assert.match(document, /Runtime DOM/u);
     assert.match(document, /timer\/rAF\/Observer\/listener/u);

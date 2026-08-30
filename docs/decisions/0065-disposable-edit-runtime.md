@@ -33,7 +33,8 @@ source or be reconciled node by node.
   registration capability. The parent editor deletes that entry after the
   bootstrap captures its private batch port and keeps registered DOM references
   in a parent-realm `WeakSet`; public attributes and author-realm expandos are
-  never edit authority. Runtime-generated descendants resolve only to their
+  never edit authority. Changing either public source identity revokes the
+  registered object and fails closed. Runtime-generated descendants resolve only to their
   nearest still-proven authored source host.
 - PageRoot directly edits only nodes still proven to be authored source
   elements. A runtime-generated node is display-only: it may be commented on
