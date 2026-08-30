@@ -6,6 +6,9 @@ import {
 import {
   flattenReviewSemanticPairs,
 } from "./semantic-pairing";
+import {
+  REVIEW_MOVED_TEXT_ACCOUNTED_ATTRIBUTE,
+} from "./constants";
 import type {
   ReviewSemanticPairGraph,
   ReviewSemanticUnit,
@@ -13,6 +16,12 @@ import type {
   ReviewTextInventory,
   TextRange,
 } from "./types";
+
+const WHOLE_ELEMENT_CHANGE_SELECTOR = [
+  '[data-pageroot-review-structure="added"]',
+  '[data-pageroot-review-structure="removed"]',
+  `[${REVIEW_MOVED_TEXT_ACCOUNTED_ATTRIBUTE}="true"]`,
+].join(",");
 
 export function markTextAnchor(anchor: Element, groupId: string, offset: number) {
   const attribute = "data-pageroot-review-text-anchors";
@@ -139,8 +148,8 @@ export function markSemanticTextDifferences(graph: ReviewSemanticPairGraph): {
     // element marker. One-sided logical text units such as an added <br> line
     // remain text evidence because no element was added or removed.
     const insideWholeElementChange = Boolean(
-      pair.before?.element.closest("[data-pageroot-review-structure]")
-      || pair.after?.element.closest("[data-pageroot-review-structure]"),
+      pair.before?.element.closest(WHOLE_ELEMENT_CHANGE_SELECTOR)
+      || pair.after?.element.closest(WHOLE_ELEMENT_CHANGE_SELECTOR),
     );
     if (insideWholeElementChange) return;
     const beforeText = beforeInventory?.text || "";

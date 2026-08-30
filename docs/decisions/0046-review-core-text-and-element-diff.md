@@ -3,6 +3,7 @@
 - Status: Accepted
 - Date: 2026-08-27
 - Supersedes: ADR 0017, ADR 0021, ADR 0029, ADR 0030 and the Review portion of [ADR 0031](archive/0031-review-capture-frozen-chart-scripts.md)
+- Partially superseded: [ADR 0066](0066-stable-id-source-review.md) expands the static source-fact scope; this ADR still owns the no-runtime-capture boundary
 
 ## Context
 

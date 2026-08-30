@@ -43,6 +43,10 @@ import {
 import {
   markSemanticTextDifferences,
 } from "./review/text-diff";
+import {
+  annotateStablePageSourceAggregate,
+  annotateStableSourceDifferences,
+} from "./review/stable-source-diff";
 import type {
   ReviewChange,
   ReviewChangeType,
@@ -81,8 +85,13 @@ function* changeTypesForSemanticGraphSteps(
 
 function* annotateChangePairSteps(
   pair: SectionPair,
+  usePersistentIdentity: boolean,
+  ambiguousPersistentIds: ReadonlySet<string>,
 ): Generator<"semantic-row", ReviewChangeType[], void> {
-  const graph = yield* buildReviewSemanticPairGraphSteps(pair);
+  const graph = yield* buildReviewSemanticPairGraphSteps(pair, {
+    usePersistentIdentity,
+    ambiguousPersistentIds,
+  });
   return yield* changeTypesForSemanticGraphSteps(graph);
 }
 
@@ -90,15 +99,28 @@ function attachChangeMarkerMetadata(
   pair: SectionPair,
   changeId: string,
   helper: string,
+  includeDescendants = true,
 ) {
-  [pair.before, pair.after].forEach((root) => {
+  const structureSummary = (change: string) => ({
+    added: "新增元素",
+    removed: "删除元素",
+    moved: "移动元素",
+    attribute: "属性调整",
+    style: "样式调整",
+    "css-source": "CSS 源码调整",
+    "script-source": "Script 源码调整",
+  }[change] || "元素调整");
+  const attachRoots = (roots: Array<Element | null>) => roots.forEach((root) => {
     if (!root) return;
-    [root, ...root.querySelectorAll("[data-pageroot-review-text-anchors]")]
+    [root, ...(includeDescendants
+      ? root.querySelectorAll("[data-pageroot-review-text-anchors]")
+      : [])]
       .filter((element) => element.hasAttribute("data-pageroot-review-text-anchors"))
       .forEach((element) => {
         element.setAttribute("data-pageroot-review-anchor-change", changeId);
       });
-    const markerElements = [root, ...root.querySelectorAll("*")].filter((element) => (
+    const markerElements = [root, ...(includeDescendants ? root.querySelectorAll("*") : [])]
+      .filter((element) => (
       element.hasAttribute("data-pageroot-review-text")
       || element.hasAttribute("data-pageroot-review-structure")
       || element.hasAttribute(REVIEW_PROJECTION_FACTS_ATTRIBUTE)
@@ -144,16 +166,22 @@ function attachChangeMarkerMetadata(
         const semanticOwnerId = element.getAttribute("data-pageroot-review-semantic-owner")
           || `fallback-owner-${changeId}-structure-${index + 1}`;
         const geometryOwnerId = element.getAttribute("data-pageroot-review-geometry-owner") || "";
-      const structureChange = element.getAttribute("data-pageroot-review-structure") || "changed";
-        facts = appendTrustedReviewProjectionFact(facts, {
-          id: `structure-${semanticOwnerId}-${structureChange}`,
-          type: "structure",
-          semanticOwnerId,
-          ...(geometryOwnerId ? { geometryOwnerId } : {}),
-          scope: "element",
-          structureChange,
-          summary: structureChange === "added" ? "新增元素" : "删除元素",
-        });
+        const structureChange = element.getAttribute("data-pageroot-review-structure") || "changed";
+        if (!facts.some((fact) => (
+          fact.type === "structure"
+          && fact.semanticOwnerId === semanticOwnerId
+          && fact.structureChange === structureChange
+        ))) {
+          facts = appendTrustedReviewProjectionFact(facts, {
+            id: `structure-${semanticOwnerId}-${structureChange}`,
+            type: "structure",
+            semanticOwnerId,
+            ...(geometryOwnerId ? { geometryOwnerId } : {}),
+            scope: "element",
+            structureChange,
+            summary: structureSummary(structureChange),
+          });
+        }
       }
       const markerTypes = [...new Set(facts.map((fact) => fact.type))] as ReviewChangeType[];
       const textFact = facts.find((fact) => fact.type === "text");
@@ -169,6 +197,28 @@ function attachChangeMarkerMetadata(
       if (index === 0) element.setAttribute("data-pageroot-review-primary", "true");
     });
   });
+  attachRoots([pair.before, pair.after]);
+}
+
+function attachSourceChangeMarkerMetadata(
+  before: Element,
+  after: Element,
+  changeId: string,
+  helper: string,
+) {
+  attachChangeMarkerMetadata(
+    { before, after, beforeIndex: -1, afterIndex: -1 },
+    changeId,
+    helper,
+    false,
+  );
+}
+
+function hasPreannotatedStableDifference(pair: SectionPair): boolean {
+  const selector = "[data-pageroot-review-text],[data-pageroot-review-structure]";
+  return [pair.before, pair.after].some((root) => Boolean(
+    root && (root.matches(selector) || root.querySelector(selector)),
+  ));
 }
 
 function* buildReviewDocumentSteps(
@@ -233,11 +283,17 @@ function* buildReviewDocumentSteps(
   yield "panels";
   annotateActionPairs(beforeDocument, afterDocument);
   yield "actions";
+  const stableSourceAnalysis = annotateStableSourceDifferences(beforeDocument, afterDocument);
+  const ambiguousPersistentIds = new Set(stableSourceAnalysis.ambiguousPersistentIds);
+  yield "stable-source";
   const beforeSections = candidateSections(beforeDocument);
   yield "candidate-sections-before";
   const afterSections = candidateSections(afterDocument);
   yield "candidate-sections-after";
-  const pairs = pairSections(beforeSections, afterSections);
+  const pairs = pairSections(beforeSections, afterSections, {
+    usePersistentIdentity: stableSourceAnalysis.hasPersistentContinuity,
+    ambiguousPersistentIds,
+  });
   const changes: ReviewChange[] = [];
   const outline: ReviewOutlineItem[] = [];
   yield "section-pairing";
@@ -249,10 +305,15 @@ function* buildReviewDocumentSteps(
       pair.before
       && pair.after
       && normalizedMarkup(pair.before) === normalizedMarkup(pair.after)
+      && !hasPreannotatedStableDifference(pair)
     );
     let types: ReviewChangeType[] = [];
     if (!exactStablePair) {
-      const annotationSteps = annotateChangePairSteps(pair);
+      const annotationSteps = annotateChangePairSteps(
+        pair,
+        stableSourceAnalysis.hasPersistentContinuity,
+        ambiguousPersistentIds,
+      );
       let annotationStep = annotationSteps.next();
       while (!annotationStep.done) {
         yield annotationStep.value;
@@ -304,6 +365,51 @@ function* buildReviewDocumentSteps(
       ...(panelPath.length ? { panelPath } : {}),
     });
     if ((pairIndex + 1) % 24 === 0) yield "change-annotation";
+  }
+
+  if (stableSourceAnalysis.sourceKinds.length) {
+    const changeId = `change-${changes.length + 1}`;
+    const outlineId = `outline-${outline.length + 1}`;
+    const labels = stableSourceAnalysis.sourceKinds.map((kind) => (
+      kind === "css-source" ? "CSS" : "Script"
+    ));
+    const helper = `${labels.join("、")} 源码调整`;
+    const label = labels.length === 1 ? `${labels[0]} 源码` : "页面源码";
+    // Page-level source facts are deliberately attached only after semantic
+    // text/structure analysis. Marking <html> earlier would make every authored
+    // descendant look covered by one structural ancestor and suppress precise
+    // text facts.
+    const sourceKinds = new Set(stableSourceAnalysis.sourceKinds);
+    annotateStablePageSourceAggregate(beforeDocument, sourceKinds);
+    annotateStablePageSourceAggregate(afterDocument, sourceKinds);
+    attachSourceChangeMarkerMetadata(
+      beforeDocument.documentElement,
+      afterDocument.documentElement,
+      changeId,
+      helper,
+    );
+    [beforeDocument.documentElement, afterDocument.documentElement].forEach((element) => {
+      element.setAttribute("data-pageroot-outline-id", outlineId);
+      element.setAttribute("data-pageroot-review-id", changeId);
+      element.setAttribute("data-pageroot-review-types", "structure");
+      element.setAttribute("data-pageroot-review-summary", helper);
+    });
+    changes.push({
+      id: changeId,
+      label,
+      helper,
+      types: ["structure"],
+      beforePresent: true,
+      afterPresent: true,
+    });
+    outline.push({
+      id: outlineId,
+      group: "页面源码",
+      label,
+      helper,
+      types: ["structure"],
+      changeId,
+    });
   }
 
   // Comment attributes are analyzer-only scope hints. Bind every resolved
@@ -456,6 +562,7 @@ export async function buildReviewDocumentsAsync(
     "comments",
     "panels",
     "actions",
+    "stable-source",
     "candidate-sections-before",
     "candidate-sections-after",
     "section-pairing",

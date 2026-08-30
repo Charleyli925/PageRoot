@@ -81,6 +81,77 @@ test("units from different parent keys never pair", () => {
   assert.equal(matchedPairs(pairs).length, 0);
 });
 
+test("a persistent stable identity pairs across source parents", () => {
+  const pairs = alignReviewSemanticUnits(
+    [unit("同一源码元素", { stableId: "pageroot:pr1_source", parentKey: "list-a" })],
+    [unit("同一源码元素已移动", { stableId: "pageroot:pr1_source", parentKey: "list-b" })],
+  );
+
+  assert.deepEqual(matchedPairs(pairs).map(({ beforeIndex, afterIndex, match }) => ({
+    beforeIndex,
+    afterIndex,
+    match,
+  })), [{ beforeIndex: 0, afterIndex: 0, match: "stable-id" }]);
+});
+
+test("persistent identity pairs independently of an authored tag change", () => {
+  const pairs = alignReviewSemanticUnits(
+    [unit("同一元素", {
+      kind: "section:SECTION",
+      stableId: "pageroot:pr1_source",
+      parentKey: "before-parent",
+    })],
+    [unit("同一元素", {
+      kind: "section:ARTICLE",
+      stableId: "pageroot:pr1_source",
+      parentKey: "after-parent",
+    })],
+  );
+
+  assert.deepEqual(matchedPairs(pairs).map(({ match }) => match), ["stable-id"]);
+});
+
+test("exact markup cannot bridge conflicting or missing persistent identities", () => {
+  const exact = (stableId) => unit("相同源码", {
+    stableId,
+    exactSignature: "same-subtree-without-pageroot-id",
+    parentKey: "same-parent",
+  });
+  for (const afterStableId of ["pageroot:pr1_other", null]) {
+    const pairs = alignReviewSemanticUnits(
+      [exact("pageroot:pr1_before")],
+      [exact(afterStableId)],
+    );
+    assert.equal(matchedPairs(pairs).length, 0);
+  }
+});
+
+test("a legacy explicit identity remains scoped to its paired parent", () => {
+  const pairs = alignReviewSemanticUnits(
+    [unit("旧元素", { stableId: "id:legacy", parentKey: "list-a" })],
+    [unit("旧元素", { stableId: "id:legacy", parentKey: "list-b" })],
+  );
+
+  assert.equal(matchedPairs(pairs).length, 0);
+});
+
+test("globally ambiguous persistent identities cannot pair through fallback evidence", () => {
+  const ambiguous = (text) => unit(text, {
+    stableId: null,
+    identityAmbiguous: true,
+    exactSignature: "same-subtree",
+    compatibilitySignature: "same-element",
+    relocationKey: "same-relocation",
+  });
+  const pairs = alignReviewSemanticUnits(
+    [ambiguous("重复源码元素")],
+    [ambiguous("重复源码元素")],
+  );
+
+  assert.equal(matchedPairs(pairs).length, 0);
+  assert.deepEqual(unmatchedAfter(pairs), [0]);
+});
+
 test("a unique empty atomic unit pairs only through its self compatibility signature", () => {
   const pairs = alignReviewSemanticUnits(
     [unit("", {

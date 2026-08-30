@@ -1246,6 +1246,15 @@ function reviewBootstrap(
     const summary = String(value || "").trim();
     return summary && summary.length <= 80 ? summary : "";
   };
+  const structureSummary = (change) => ({
+    added: "新增元素",
+    removed: "删除元素",
+    moved: "移动元素",
+    attribute: "属性调整",
+    style: "样式调整",
+    "css-source": "CSS 源码调整",
+    "script-source": "Script 源码调整",
+  })[change] || "元素调整";
   const normalizeProjectionFact = (value) => {
     if (!value || typeof value !== "object" || Array.isArray(value)) return null;
     const id = safeProjectionFactKey(value.id);
@@ -1257,7 +1266,17 @@ function reviewBootstrap(
     const fact = { id, type, semanticOwnerId };
     const geometryOwnerId = safeProjectionFactKey(value.geometryOwnerId);
     const textGroup = safeProjectionFactKey(value.textGroup);
-    const structureChange = safeProjectionFactKey(value.structureChange);
+    const structureChange = [
+      "added",
+      "removed",
+      "moved",
+      "attribute",
+      "style",
+      "css-source",
+      "script-source",
+    ].includes(value.structureChange)
+      ? value.structureChange
+      : "";
     const scope = ["text", "text-phrase", "text-line", "text-block", "element"]
       .includes(value.scope)
       ? value.scope
@@ -1333,7 +1352,7 @@ function reviewBootstrap(
         scope: "element",
         structureChange,
         summary: element.getAttribute("data-pageroot-review-summary")
-          || (structureChange === "added" ? "新增元素" : "删除元素"),
+          || structureSummary(structureChange),
       });
     }
     return facts.map(normalizeProjectionFact).filter(Boolean);
@@ -2030,9 +2049,7 @@ function reviewBootstrap(
           }
           const scope = "element";
           const structureChange = fact.structureChange || "";
-          const summary = fact.summary || (structureChange === "added"
-            ? "新增元素"
-            : "删除元素");
+          const summary = fact.summary || structureSummary(structureChange);
           [element.getBoundingClientRect()].forEach((rect) => records.push({
             element,
             changeId,

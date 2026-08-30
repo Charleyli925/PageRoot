@@ -1,0 +1,51 @@
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import test from "node:test";
+import { fileURLToPath } from "node:url";
+
+const productRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const read = (relativePath) => readFileSync(path.join(productRoot, relativePath), "utf8");
+
+test("ADR 0066 and the architecture contract freeze stable-ID source Review", () => {
+  const adr = read("docs/decisions/0066-stable-id-source-review.md");
+  const architecture = read("docs/ARCHITECTURE_CONTRACT.md");
+  const normalizedAdr = adr.replace(/\s+/gu, " ");
+  const normalizedArchitecture = architecture.replace(/\s+/gu, " ");
+
+  for (const required of [
+    "valid, unique `data-pageroot-id`",
+    "same-parent reorder or cross-parent move",
+    "Historical inputs without IDs retain",
+    "Candidate that churned every ID, uses that legacy matcher for the whole pair",
+    "globally ambiguous across the whole document pair",
+    "different or missing persistent ID",
+    "same persistent ID remains paired when the authored element tag changes",
+    "newly added no-ID `<style>`",
+    "groups common IDs by parent in one pass",
+    "sibling indexes are likewise built once per parent",
+    "must first compare its before/after text by ID",
+    "`added`, `removed`, `moved`, `attribute`, `style`, `css-source` and",
+    "CSS cascade effects, layout, wrapping, animation state, Canvas/SVG",
+  ]) {
+    assert.ok(normalizedAdr.includes(required), `ADR 0066 lost required contract: ${required}`);
+  }
+  for (const required of [
+    "unique valid stable-ID pairs",
+    "Review never serializes, compares or trusts Runtime DOM",
+    "legacy no-ID Versions retain the old matcher",
+    "full ID churn cannot become false source additions/removals",
+    "cannot re-enter pairing through exact-subtree, relocation or fuzzy evidence",
+    "never bridges an identified element to a different or missing persistent ID",
+    "same persistent ID pairs independently of an authored tag-kind change",
+    "adding a no-ID `<style>`",
+    "Per-parent rescans of the complete inventory",
+    "per-child rescans of siblings are forbidden",
+    "byte-identical markup cannot hide a precomputed movement",
+    "compared against its exact before/after ID counterpart",
+    "unchanged moved text produces no text fact",
+    "a common stable ID cannot degrade into",
+  ]) {
+    assert.ok(normalizedArchitecture.includes(required), `Architecture Contract lost boundary: ${required}`);
+  }
+});

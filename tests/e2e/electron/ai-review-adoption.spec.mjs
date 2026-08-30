@@ -2565,6 +2565,175 @@ test("a committed version that the desktop cannot activate stays visibly blocked
   }
 });
 
+test("stable-ID review reports movement, source attributes, styles, and author source", {
+  tag: ["@gate-smoke", "@smoke-review"],
+}, async () => {
+  const fixture = createSourceFixture("stable-id-review.html", (source) => source.replace(
+    "  </main>",
+    `    <style data-stable-review-css>.stable-review-card { color: rgb(30 40 50); }</style>
+    <section data-stable-review-root>
+      <div data-stable-review-column="a">
+        <article data-stable-review-card data-review-status="before" style="padding: 8px">
+          <h2>稳定卡片</h2><p>移动前文字</p>
+        </article>
+        <article data-stable-review-static data-review-static="before" style="margin: 4px">
+          <h2>原位卡片</h2><p>原位修改前文字</p>
+        </article>
+        <article data-stable-review-unchanged-move><p>跨区移动但文字不变</p></article>
+        <p data-stable-review-order="a">稳定顺序甲</p>
+        <p data-stable-review-order="b">稳定顺序乙</p>
+      </div>
+      <div data-stable-review-column="b"></div>
+      <article data-stable-review-exact="a">精确重排甲</article>
+      <article data-stable-review-exact="b">精确重排乙</article>
+    </section>
+    <script type="application/json" data-stable-review-script>{"state":"before"}</script>
+  </main>`,
+  ));
+  const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
+  try {
+    await loadedDiskFrame(launched.page, fixture.sourcePath);
+    const request = await addCommentAndSubmit(
+      launched.page,
+      launched.electronApp,
+      fixture.sourcePath,
+    );
+    writeAiOutput(request.requestRoot, (base) => {
+      const card = base.match(/<article data-stable-review-card[\s\S]*?<\/article>/u)?.[0];
+      const staticCard = base.match(/<article data-stable-review-static[\s\S]*?<\/article>/u)?.[0];
+      const unchangedMove = base.match(/<article data-stable-review-unchanged-move[\s\S]*?<\/article>/u)?.[0];
+      const orderA = base.match(/<p data-stable-review-order="a"[^>]*>稳定顺序甲<\/p>/u)?.[0];
+      const orderB = base.match(/<p data-stable-review-order="b"[^>]*>稳定顺序乙<\/p>/u)?.[0];
+      const exactA = base.match(/<article data-stable-review-exact="a"[^>]*>精确重排甲<\/article>/u)?.[0];
+      const exactB = base.match(/<article data-stable-review-exact="b"[^>]*>精确重排乙<\/article>/u)?.[0];
+      expect(card).toBeTruthy();
+      expect(staticCard).toBeTruthy();
+      expect(unchangedMove).toBeTruthy();
+      expect(orderA).toBeTruthy();
+      expect(orderB).toBeTruthy();
+      expect(exactA).toBeTruthy();
+      expect(exactB).toBeTruthy();
+      const movedCard = card
+        .replace('data-review-status="before"', 'data-review-status="after"')
+        .replace('style="padding: 8px"', 'style="padding: 18px; border: 2px solid #6d5ce7"')
+        .replace("移动前文字", "移动后文字");
+      const changedStaticCard = staticCard
+        .replace('data-review-static="before"', 'data-review-static="after"')
+        .replace('style="margin: 4px"', 'style="margin: 14px; color: rgb(90 40 150)"')
+        .replace("原位修改前文字", "原位修改后文字");
+      return base
+        .replace(ORIGINAL_TEXT, UPDATED_TEXT)
+        .replace(
+          "</head>",
+          '<style data-stable-review-added-css>.added-source { font-weight: 600; }</style></head>',
+        )
+        .replace(
+          "</body>",
+          '<script type="application/json" data-stable-review-added-script>{"added":true}</script></body>',
+        )
+        .replace(card, "")
+        .replace(staticCard, changedStaticCard)
+        .replace(unchangedMove, "")
+        .replace(`${orderA}\n        ${orderB}`, `${orderB}\n        ${orderA}`)
+        .replace(`${exactA}\n      ${exactB}`, `${exactB}\n      ${exactA}`)
+        .replace(
+          /(<div data-stable-review-column="b"[^>]*>)/u,
+          `$1\n        ${movedCard}\n        ${unchangedMove}`,
+        );
+    });
+    runOfficialFinalizer(request.requestRoot, request.changeRequest);
+    await expect(launched.page.getByTestId("ai-conversation-action-bar"))
+      .toContainText("等待你的决定", { timeout: 30_000 });
+
+    await launched.page.getByRole("button", { name: "审阅对比" }).click();
+    await expect(launched.page.getByTestId("ai-review-workspace"))
+      .toBeVisible({ timeout: 30_000 });
+    const beforeFrame = launched.page.frameLocator('iframe[title^="修改前"]');
+    const afterFrame = launched.page.frameLocator('iframe[title^="修改后"]');
+    for (const frame of [beforeFrame, afterFrame]) {
+      await expect(frame.locator("html")).toHaveAttribute(
+        "data-pageroot-review-filter",
+        "all",
+        { timeout: 30_000 },
+      );
+    }
+
+    const structureKinds = async (locator) => JSON.parse(
+      await locator.getAttribute("data-pageroot-review-projection-facts") || "[]",
+    ).filter((fact) => fact.type === "structure")
+      .map((fact) => fact.structureChange);
+    for (const frame of [beforeFrame, afterFrame]) {
+      const card = frame.locator("[data-stable-review-card]");
+      await expect(card).toHaveAttribute("data-pageroot-review-marker", /change-/u);
+      await expect.poll(() => structureKinds(card)).toEqual(expect.arrayContaining([
+        "moved",
+        "attribute",
+        "style",
+      ]));
+      await expect.poll(() => structureKinds(frame.locator("html"))).toEqual(
+        expect.arrayContaining(["css-source", "script-source"]),
+      );
+      const falsePresenceFacts = await card.evaluate((element) => (
+        JSON.parse(element.getAttribute("data-pageroot-review-projection-facts") || "[]")
+          .filter((fact) => fact.structureChange === "added" || fact.structureChange === "removed")
+      ));
+      expect(falsePresenceFacts).toEqual([]);
+    }
+    await expect(afterFrame.locator("[data-stable-review-added-css]"))
+      .not.toHaveAttribute("data-pageroot-id", /.+/u);
+    await expect(afterFrame.locator("[data-stable-review-added-script]"))
+      .not.toHaveAttribute("data-pageroot-id", /.+/u);
+    await expect(beforeFrame.locator(
+      '[data-stable-review-card] [data-pageroot-review-text="removed"], [data-stable-review-card][data-pageroot-review-text="removed"]',
+    ).first()).toBeAttached();
+    await expect(afterFrame.locator(
+      '[data-stable-review-card] [data-pageroot-review-text="added"], [data-stable-review-card][data-pageroot-review-text="added"]',
+    ).first()).toBeAttached();
+    for (const frame of [beforeFrame, afterFrame]) {
+      const unchangedMove = frame.locator("[data-stable-review-unchanged-move]");
+      await expect.poll(() => structureKinds(unchangedMove)).toEqual(
+        expect.arrayContaining(["moved"]),
+      );
+      await expect(unchangedMove.locator("[data-pageroot-review-text]")).toHaveCount(0);
+      await expect.poll(async () => (
+        JSON.parse(await unchangedMove.getAttribute("data-pageroot-review-projection-facts") || "[]")
+          .filter((fact) => fact.type === "text")
+      )).toEqual([]);
+    }
+    for (const [frame, tone] of [[beforeFrame, "removed"], [afterFrame, "added"]]) {
+      const staticCard = frame.locator("[data-stable-review-static]");
+      await expect.poll(() => structureKinds(staticCard)).toEqual(expect.arrayContaining([
+        "attribute",
+        "style",
+      ]));
+      await expect(frame.locator(
+        `[data-stable-review-static] [data-pageroot-review-text="${tone}"], [data-stable-review-static][data-pageroot-review-text="${tone}"]`,
+      ).first()).toBeAttached();
+    }
+    await expect.poll(async () => {
+      const facts = await afterFrame.locator('[data-stable-review-order="a"], [data-stable-review-order="b"]')
+        .evaluateAll((elements) => elements.flatMap((element) => (
+          JSON.parse(element.getAttribute("data-pageroot-review-projection-facts") || "[]")
+        )));
+      return facts.filter((fact) => fact.structureChange === "moved").length;
+    }).toBe(1);
+    await expect.poll(async () => {
+      const facts = await afterFrame.locator('[data-stable-review-exact="a"], [data-stable-review-exact="b"]')
+        .evaluateAll((elements) => elements.flatMap((element) => (
+          JSON.parse(element.getAttribute("data-pageroot-review-projection-facts") || "[]")
+        )));
+      return facts.filter((fact) => fact.structureChange === "moved").length;
+    }).toBe(1);
+    await launched.page.getByRole("button", { name: "元素变化" }).click();
+    await expect.poll(() => afterFrame.locator(
+      '[data-pageroot-review-overlay-box][data-tone="structure"]',
+    ).count()).toBeGreaterThan(0);
+  } finally {
+    await stopPageRoot(launched.electronApp, launched.isolatedUserData);
+    removeSourceFixture(fixture.sourceDirectory);
+  }
+});
+
 test("a rewrite outside <main> is still reviewed", {
   tag: ["@gate-smoke","@smoke-review"],
 }, async () => {

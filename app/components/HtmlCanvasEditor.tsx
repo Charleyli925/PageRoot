@@ -5218,13 +5218,39 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           behavior: "auto",
         });
       }
-      const restoreSharedViewport = () => {
-        if (!pendingSharedViewport?.element.isConnected) return;
-        pendingSharedViewport.element.scrollTo({
-          left: pendingSharedViewport.left,
-          top: pendingSharedViewport.top,
-          behavior: "auto",
-        });
+      const sharedViewportStillCurrent = () => (
+        iframe.contentDocument === documentNode
+        && frameLoadGenerationRef.current === connectedFrameGeneration
+        && expectedFrameTokenRef.current === expectedToken
+        && pendingFrameRestoreEpochRef.current === pendingRestoreEpoch
+      );
+      const restoreSharedViewport = (remainingFrames = 30) => {
+        const sharedViewport = pendingSharedViewport;
+        if (
+          !sharedViewport
+          || !sharedViewport.element.isConnected
+          || !sharedViewportStillCurrent()
+        ) return;
+        const maxTop = Math.max(
+          0,
+          sharedViewport.element.scrollHeight - sharedViewport.element.clientHeight,
+        );
+        const targetTop = Math.min(sharedViewport.top, maxTop);
+        const currentTop = sharedViewport.element.scrollTop;
+        // A zero position during the bounded rebuild window can be a transient
+        // React/layout clamp. A different non-zero position is treated as a
+        // fresh user scroll and ends restoration instead of fighting input.
+        if (Math.abs(currentTop - targetTop) > 1) {
+          if (currentTop > 1) return;
+          sharedViewport.element.scrollTo({
+            left: sharedViewport.left,
+            top: targetTop,
+            behavior: "auto",
+          });
+        }
+        if (remainingFrames > 0) {
+          requestAnimationFrame(() => restoreSharedViewport(remainingFrames - 1));
+        }
       };
       restoreSharedViewport();
       if (pendingSelection && !lockedRef.current) {
@@ -5286,14 +5312,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         ) pendingNativeEditResumeRef.current = null;
         updateOverlayPosition();
       }
-      requestAnimationFrame(() => {
-        if (
-          iframe.contentDocument === documentNode
-          && frameLoadGenerationRef.current === connectedFrameGeneration
-          && expectedFrameTokenRef.current === expectedToken
-          && pendingFrameRestoreEpochRef.current === pendingRestoreEpoch
-        ) restoreSharedViewport();
-      });
     });
     return true;
   }, [

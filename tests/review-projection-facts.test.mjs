@@ -38,7 +38,7 @@ const removedText = {
   summary: "删除内容",
 };
 
-test("projection keeps only text and added or removed element facts", () => {
+test("projection keeps text and source-structure facts in the existing filters", () => {
   const facts = appendReviewProjectionFact(
     appendReviewProjectionFact([], addedElement),
     removedText,
@@ -50,17 +50,35 @@ test("projection keeps only text and added or removed element facts", () => {
   assert.deepEqual(reviewProjectionFactsForFilter(facts, "text"), [removedText]);
 });
 
-test("retired style, movement, and layout facts fail closed", () => {
+test("movement, attributes, styles, and source changes remain structure facts", () => {
+  for (const structureChange of [
+    "moved",
+    "attribute",
+    "style",
+    "css-source",
+    "script-source",
+  ]) {
+    const normalized = normalizeReviewProjectionFact({
+      ...addedElement,
+      structureChange,
+      summary: "元素调整",
+    });
+    assert.equal(normalized?.type, "structure");
+    assert.equal(normalized?.structureChange, structureChange);
+  }
+});
+
+test("retired visual fact types and layout operations still fail closed", () => {
   for (const fact of [
     { ...addedElement, type: "style", summary: "视觉调整" },
-    { ...addedElement, structureChange: "moved", summary: "位置调整" },
+    { ...addedElement, structureChange: "layout", summary: "位置调整" },
     { ...removedText, operation: "layout", summary: "换行调整" },
   ]) {
     const normalized = normalizeReviewProjectionFact(fact);
     if (fact.type === "style") assert.equal(normalized, null);
     else {
       assert.ok(normalized);
-      assert.equal(normalized.structureChange === "moved", false);
+      assert.equal(normalized.structureChange === "layout", false);
       assert.equal(normalized.operation === "layout", false);
     }
   }

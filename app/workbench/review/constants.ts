@@ -3,6 +3,8 @@ export const REVIEW_BOOTSTRAP_ATTRIBUTE = "data-pageroot-ai-review-bootstrap";
 export const REVIEW_BASE_ATTRIBUTE = "data-pageroot-ai-review-base";
 export const REVIEW_BOOTSTRAP_PATH = "/.pageroot/preview-bootstrap.js";
 export const REVIEW_PROJECTION_FACTS_ATTRIBUTE = "data-pageroot-review-projection-facts";
+export const REVIEW_MOVED_TEXT_ACCOUNTED_ATTRIBUTE =
+  "data-pageroot-review-moved-text-accounted";
 export const REVIEW_BOOTSTRAP_IDENTITY_ATTRIBUTE_LIMIT = 24;
 
 export const NON_CONTENT_TAGS = new Set([
