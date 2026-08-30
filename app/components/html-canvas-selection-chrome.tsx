@@ -2,8 +2,6 @@
 
 import {
   memo,
-  useEffect,
-  useState,
   type CSSProperties,
 } from "react";
 import { ArrowDownIcon } from "@phosphor-icons/react/dist/csr/ArrowDown";
@@ -36,7 +34,6 @@ export const HtmlCanvasSelectionChrome = memo(function HtmlCanvasSelectionChrome
   model,
   actions,
 }: HtmlCanvasSelectionChromeProps) {
-  const [armedDeleteTargetId, setArmedDeleteTargetId] = useState<string | null>(null);
   const {
     canvasTransitionActive,
     selectionCapabilitySpoken,
@@ -75,39 +72,6 @@ export const HtmlCanvasSelectionChrome = memo(function HtmlCanvasSelectionChrome
     selection,
     selectedOutlineStyle,
   } = selectionChromeViewFields(model);
-  const deleteArmed = Boolean(
-    selection?.id
-    && armedDeleteTargetId === selection.id,
-  );
-  useEffect(() => {
-    setArmedDeleteTargetId(null);
-  }, [selection?.id]);
-  useEffect(() => {
-    if (!armedDeleteTargetId) return undefined;
-    const disarmOnPointer = (event: PointerEvent) => {
-      const target = event.target instanceof Element ? event.target : null;
-      if (!target?.closest("[data-delete-action]")) {
-        setArmedDeleteTargetId(null);
-      }
-    };
-    const disarmOnKey = (event: KeyboardEvent) => {
-      const target = event.target instanceof Element ? event.target : null;
-      const confirmsDelete = Boolean(
-        target?.closest("[data-delete-action]")
-        && (event.key === "Enter" || event.key === " "),
-      );
-      if (!confirmsDelete) setArmedDeleteTargetId(null);
-    };
-    const disarm = () => setArmedDeleteTargetId(null);
-    document.addEventListener("pointerdown", disarmOnPointer, true);
-    document.addEventListener("keydown", disarmOnKey, true);
-    window.addEventListener("blur", disarm);
-    return () => {
-      document.removeEventListener("pointerdown", disarmOnPointer, true);
-      document.removeEventListener("keydown", disarmOnKey, true);
-      window.removeEventListener("blur", disarm);
-    };
-  }, [armedDeleteTargetId]);
   const {
     onHoverHintPointerDown,
     onHoverHintPointerEnter,
@@ -260,30 +224,9 @@ export const HtmlCanvasSelectionChrome = memo(function HtmlCanvasSelectionChrome
           style={toolbarStyle}
           role="toolbar"
           aria-label={`编辑${selection.label}`}
-          onKeyDown={(event) => {
-            const target = event.target instanceof Element ? event.target : null;
-            const confirmsArmedDelete = Boolean(
-              deleteArmed
-              && target?.closest("[data-delete-action]")
-              && (event.key === "Enter" || event.key === " "),
-            );
-            if (!confirmsArmedDelete) setArmedDeleteTargetId(null);
-            onToolbarKeyDown(event);
-          }}
-          onPointerDownCapture={(event) => {
-            const target = event.target instanceof Element ? event.target : null;
-            if (!target?.closest("[data-delete-action]")) {
-              setArmedDeleteTargetId(null);
-            }
-            onToolbarPointerDownCapture(event);
-          }}
+          onKeyDown={onToolbarKeyDown}
+          onPointerDownCapture={onToolbarPointerDownCapture}
           onMouseDownCapture={onToolbarMouseDownCapture}
-          onClickCapture={(event) => {
-            const target = event.target instanceof Element ? event.target : null;
-            if (!target?.closest("[data-delete-action]")) {
-              setArmedDeleteTargetId(null);
-            }
-          }}
         >
           <div className={styles.toolbarRow}>
           {selectedPagePresentationAction ? (
@@ -543,21 +486,14 @@ export const HtmlCanvasSelectionChrome = memo(function HtmlCanvasSelectionChrome
               <button
                 type="button"
                 className={styles.iconButton}
-                aria-label={deleteArmed ? "确认删除元素" : "删除元素"}
-                data-delete-action="true"
-                data-confirm-delete={deleteArmed ? "true" : undefined}
-                data-tooltip={deleteArmed ? "再次点击确认删除" : "删除元素"}
+                aria-label="删除元素"
+                data-tooltip="删除元素"
                 data-tooltip-side="below"
                 onClick={() => {
-                  if (!selection?.id) return;
-                  if (deleteArmed) {
-                    setArmedDeleteTargetId(null);
+                  if (window.confirm(`确定删除“${selection.label}”及其全部内容吗？`)) {
                     onDeleteSelected();
-                    return;
                   }
-                  setArmedDeleteTargetId(selection.id);
                 }}
-                onBlur={() => setArmedDeleteTargetId(null)}
               >
                 <TrashIcon size={15} weight="bold" aria-hidden="true" />
               </button>

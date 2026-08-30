@@ -282,23 +282,14 @@ test("source structure toolbar duplicates with fresh IDs and deletes only the se
   expect(new Set(duplicatedIds).size).toBe(2);
 
   await copies.nth(1).click();
+  page.once("dialog", (dialog) => dialog.dismiss());
   await editor.getByRole("button", { name: "删除元素", exact: true }).click();
   await expect(copies).toHaveCount(2);
-  await page.keyboard.press(keyShortcut("Z"));
-  await expect(editor.getByRole("button", { name: "删除元素", exact: true })).toBeVisible();
-  await editor.getByRole("button", { name: "删除元素", exact: true }).click();
-  await editor.getByRole("button", { name: "下移", exact: true }).dispatchEvent("pointerdown");
-  await expect(editor.getByRole("button", { name: "删除元素", exact: true })).toBeVisible();
-  await editor.getByRole("button", { name: "删除元素", exact: true }).click();
   await editor.getByRole("button", { name: "复制元素", exact: true }).click();
   await expect(copies).toHaveCount(3);
-  await editor.getByRole("button", { name: "删除元素", exact: true }).click();
-  await expect(copies).toHaveCount(3);
-  await copies.first().click();
-  await expect(editor.getByRole("button", { name: "删除元素", exact: true })).toBeVisible();
   await copies.nth(1).click();
+  page.once("dialog", (dialog) => dialog.accept());
   await editor.getByRole("button", { name: "删除元素", exact: true }).click();
-  await editor.getByRole("button", { name: "确认删除元素", exact: true }).click();
   await expect(copies).toHaveCount(2);
 
   const exported = (await exportCurrentHtml(page)).toString("utf8");

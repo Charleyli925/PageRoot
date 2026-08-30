@@ -20,11 +20,11 @@ state. Cloning authored markup also cannot retain the original persistent IDs.
   using the insert contract. The original and copy never share an ID.
 - Move preserves the selected subtree and all of its IDs. Delete retires those
   IDs; later operations never deliberately reuse them.
-- The Canvas toolbar exposes duplicate, two-step confirmed delete and the
-  existing same-parent up/down actions. Changing selection cancels a pending
-  delete confirmation; any intervening pointer or keyboard action cancels it as
-  well, including disabled controls and focus leaving the toolbar document. The
-  editor port also supports identity-addressed insertion
+- The Canvas toolbar exposes duplicate, explicitly confirmed delete and the
+  existing same-parent up/down actions. Delete has no armed state: every attempt
+  opens a blocking confirmation, cancellation has no source effect, and only an
+  accepted confirmation dispatches the semantic operation. The editor port also
+  supports identity-addressed insertion
   and cross-parent move without introducing an element palette, component
   system or layout engine.
 - Only elements proven in the current `SourceIndex` are eligible. Runtime DOM
