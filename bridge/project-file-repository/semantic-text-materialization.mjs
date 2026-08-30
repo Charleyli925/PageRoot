@@ -6,7 +6,7 @@ import {
 } from "../../shared/pageroot-element-identity.mjs";
 import {
   HTML_VOID_TAGS,
-  normalizeEditableIslandHtml,
+  materializeEditableIslandHtml,
   planSemanticPlainTextPatch,
 } from "../../shared/editable-island.mjs";
 import {
@@ -284,7 +284,6 @@ function assertSetTextMaterialization(step, operation, direction, beforeIdentity
   if (operation.type !== "setText") return;
   const forward = forwardEvidence(step, direction);
   const forwardBeforeIdentity = direction === "undo" ? afterIdentity : beforeIdentity;
-  const forwardAfterIdentity = direction === "undo" ? beforeIdentity : afterIdentity;
   const target = identityElementMap(forwardBeforeIdentity).get(operation.target.elementId);
   const rootNode = target ? parsedElementAt(forward.beforeHtml, target.startOffset) : null;
   const location = rootNode?.sourceCodeLocation;
@@ -308,10 +307,11 @@ function assertSetTextMaterialization(step, operation, direction, beforeIdentity
     "The saved source is not the exact semantic plain-text materialization.");
     return;
   }
-  let normalizedContentHtml;
+  let materializedContent;
   try {
-    normalizedContentHtml = normalizeEditableIslandHtml(operation.contentHtml, {
+    materializedContent = materializeEditableIslandHtml(operation.contentHtml, {
       baselineInnerHtml: forward.beforeHtml.slice(contentStart, contentEnd),
+      replayPagerootIds: operation.createdPagerootIds ?? [],
     });
   } catch (cause) {
     fail(
@@ -320,7 +320,14 @@ function assertSetTextMaterialization(step, operation, direction, beforeIdentity
       { editableIslandError: cause?.code || "EDITABLE_ISLAND_INVALID" },
     );
   }
-  if (normalizedContentHtml !== operation.contentHtml) {
+  if (
+    materializedContent.html !== operation.contentHtml
+    || materializedContent.createdPagerootIds.length
+      !== (operation.createdPagerootIds ?? []).length
+    || materializedContent.createdPagerootIds.some(
+      (elementId, index) => elementId !== operation.createdPagerootIds[index],
+    )
+  ) {
     fail(
       "SEMANTIC_IDENTITY_TEXT_MATERIALIZATION_MISMATCH",
       "The setText content is not the canonical shared editable-island materialization.",
@@ -335,28 +342,6 @@ function assertSetTextMaterialization(step, operation, direction, beforeIdentity
   }],
   "SEMANTIC_IDENTITY_TEXT_MATERIALIZATION_MISMATCH",
   "The saved editable island is not the exact semantic setText materialization.");
-  const createdIds = operation.createdPagerootIds ?? [];
-  const forwardAfterById = identityElementMap(forwardAfterIdentity);
-  const afterTarget = forwardAfterById.get(operation.target.elementId);
-  for (const elementId of createdIds) {
-    const element = forwardAfterById.get(elementId);
-    const injected = ` ${PAGEROOT_ELEMENT_ID_ATTRIBUTE}="${elementId}"`;
-    const attributeStart = element?.closingDelimiterOffset - injected.length;
-    if (
-      element?.tagName !== "br"
-      || !afterTarget
-      || element.startOffset < afterTarget.startOffset
-      || element.sourceEndOffset > afterTarget.sourceEndOffset
-      || attributeStart < element.startOffset
-      || forward.afterHtml.slice(attributeStart, element.closingDelimiterOffset) !== injected
-    ) {
-      fail(
-        "SEMANTIC_IDENTITY_TEXT_MATERIALIZATION_MISMATCH",
-        "setText can allocate persistent identity only for a kernel-form line break inside its target.",
-        { elementId },
-      );
-    }
-  }
 }
 
 function assertRangeStyleMaterialization(step, operation, direction, beforeIdentity, afterIdentity) {

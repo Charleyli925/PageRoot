@@ -60,7 +60,9 @@ state. Cloning authored markup also cannot retain the original persistent IDs.
 - Native editable-island line breaks enter the semantic contract as bare
   `<br>` nodes. The accepted Canvas plan allocates their fresh IDs before it
   creates `setText`; semantic replay must reproduce that exact identified
-  `contentHtml`. Repository binds the operation to the target's one exact
+  `contentHtml`, including the ordered association between each new `<br>` and
+  its system allocation. Repository replays the shared materializer with the
+  declared ID sequence and binds the operation to the target's one exact
   editable-island patch, so a matching ID inventory cannot authorize unrelated
   island bytes. After acceptance, the controller applies only those
   source-allocated IDs to the corresponding live `<br>` nodes as an expected

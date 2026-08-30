@@ -712,7 +712,9 @@ owns the safe parent boundary and explicit-end/void/source-self-closing sibling
 preconditions, preventing Repository from accepting a reorder Canvas rejects.
 Native editable-island `<br>` nodes receive fresh IDs in the accepted Canvas
 plan before `setText` is formed, and Repository binds that operation to one
-exact target-content patch and its normalized `contentHtml`. Canvas copies only
+exact target-content patch and the shared materializer's normalized
+`contentHtml`; multiple new line breaks must retain their declared allocation
+order, not merely the same ID set. Canvas copies only
 those accepted IDs onto the matching live line-break objects under its expected
 mutation guard. The controller first proves the prior live DOM still equals its
 owned canonical draft, then proves the reconciled live DOM equals the newly

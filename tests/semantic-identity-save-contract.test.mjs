@@ -405,6 +405,131 @@ test("setText additions require exact kernel-created identity evidence", () => {
   }
 });
 
+test("setText binds multiple line-break identities to kernel allocation order", () => {
+  const firstBreakId = "pr1_91000000000040008000000000000001";
+  const secondBreakId = "pr1_91000000000040008000000000000002";
+  const ordered = operation("setText", {
+    target: target(ids.plain),
+    text: "first\nsecond\nthird",
+    contentHtml: `first<br data-pageroot-id="${firstBreakId}">second<br data-pageroot-id="${secondBreakId}">third`,
+    createdPagerootIds: [firstBreakId, secondBreakId],
+  }, "sourceop_text_ordered_ids_029");
+  const orderedResult = applySemanticOperation(createSemanticDocumentState(html), ordered);
+  const orderedForward = saveEvidence(html, orderedResult, ordered, "text");
+  assert.equal(materializeIdentityPreservingSave(html, orderedResult.html, {
+    sourceHistoryOperations: [orderedForward],
+  }).html, orderedResult.html);
+  assert.equal(materializeIdentityPreservingSave(orderedResult.html, html, {
+    sourceHistoryOperations: [{
+      ...orderedForward,
+      beforeSourceSha256: orderedResult.sourceSha256,
+      afterSourceSha256: orderedResult.previousSourceSha256,
+      forwardPatches: orderedForward.reversePatches,
+      reversePatches: orderedForward.forwardPatches,
+      semanticDirection: "undo",
+      identityDelta: deriveSemanticOperationIdentityDelta(
+        orderedResult.html,
+        html,
+        ordered,
+        { direction: "undo" },
+      ),
+    }],
+  }).html, html);
+  assert.equal(materializeIdentityPreservingSave(html, orderedResult.html, {
+    sourceHistoryOperations: [{
+      ...orderedForward,
+      semanticDirection: "redo",
+      identityDelta: deriveSemanticOperationIdentityDelta(
+        html,
+        orderedResult.html,
+        ordered,
+        { direction: "redo" },
+      ),
+    }],
+  }).html, orderedResult.html);
+
+  const swapped = {
+    ...ordered,
+    operationId: "sourceop_text_swapped_ids_030",
+    contentHtml: `first<br data-pageroot-id="${secondBreakId}">second<br data-pageroot-id="${firstBreakId}">third`,
+  };
+  const targetElement = buildSourceIndex(html).byPagerootId.get(ids.plain);
+  const swappedPatch = {
+    startOffset: targetElement.contentRange.startOffset,
+    endOffset: targetElement.contentRange.endOffset,
+    before: html.slice(
+      targetElement.contentRange.startOffset,
+      targetElement.contentRange.endOffset,
+    ),
+    after: swapped.contentHtml,
+    kind: "editable-island",
+  };
+  const swappedHtml = renderExactPatches(html, [swappedPatch]);
+  const swappedForward = {
+    operationId: swapped.operationId,
+    kind: "text",
+    editRevision: 1,
+    createdAt: "2026-08-30T00:00:00.000Z",
+    beforeSourceSha256: createSemanticDocumentState(html).sourceSha256,
+    afterSourceSha256: createSemanticDocumentState(swappedHtml).sourceSha256,
+    forwardPatches: [swappedPatch],
+    reversePatches: exactInversePatches([swappedPatch]),
+    beforeTarget: null,
+    afterTarget: null,
+    semanticDirection: "forward",
+    semanticOperation: swapped,
+    identityDelta: deriveSemanticOperationIdentityDelta(html, swappedHtml, swapped),
+  };
+  const swappedDirections = [{
+    currentHtml: html,
+    nextHtml: swappedHtml,
+    evidence: swappedForward,
+  }, {
+    currentHtml: html,
+    nextHtml: swappedHtml,
+    evidence: {
+      ...swappedForward,
+      semanticDirection: "redo",
+      identityDelta: deriveSemanticOperationIdentityDelta(
+        html,
+        swappedHtml,
+        swapped,
+        { direction: "redo" },
+      ),
+    },
+  }, {
+    currentHtml: swappedHtml,
+    nextHtml: html,
+    evidence: {
+      ...swappedForward,
+      beforeSourceSha256: createSemanticDocumentState(swappedHtml).sourceSha256,
+      afterSourceSha256: createSemanticDocumentState(html).sourceSha256,
+      forwardPatches: swappedForward.reversePatches,
+      reversePatches: swappedForward.forwardPatches,
+      semanticDirection: "undo",
+      identityDelta: deriveSemanticOperationIdentityDelta(
+        swappedHtml,
+        html,
+        swapped,
+        { direction: "undo" },
+      ),
+    },
+  }];
+  for (const { currentHtml, nextHtml, evidence } of swappedDirections) {
+    assert.throws(
+      () => materializeIdentityPreservingSave(currentHtml, nextHtml, {
+        sourceHistoryOperations: [evidence],
+      }),
+      (error) => (
+        error?.code === "SOURCE_ELEMENT_IDENTITY_LOST"
+        && error?.details?.semanticIdentityError
+          === "SEMANTIC_IDENTITY_TEXT_MATERIALIZATION_MISMATCH"
+      ),
+      evidence.semanticDirection,
+    );
+  }
+});
+
 test("insert and replace identity allocations are bound to exact operation HTML", () => {
   const inserting = createInsertElementOperation(html, {
     baseRevision: 0,

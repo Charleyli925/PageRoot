@@ -12,6 +12,7 @@ import {
   EditableIslandError,
   editableIslandDraftHtml,
   editableIslandForTarget,
+  materializeEditableIslandHtml,
   normalizeEditableIslandHtml,
   normalizeEditableTextFragmentHtml,
 } from "../app/lib/editable-island.js";
@@ -142,6 +143,37 @@ test("managed native line breaks receive one fresh persistent identity", () => {
       beforeInnerHtml: "first",
       nextInnerHtml: `first<br data-pageroot-id="pr1_20000000000040008000000000000001">second`,
       expectedSourceSha256: index.sourceSha256,
+    }),
+  );
+});
+
+test("editable island replays multiple line-break identities in DOM order", () => {
+  const firstBreakId = "pr1_92000000000040008000000000000001";
+  const secondBreakId = "pr1_92000000000040008000000000000002";
+  const allocated = materializeEditableIslandHtml("first<br>second<br>third", {
+    baselineInnerHtml: "first",
+    randomUUID: (() => {
+      const values = [
+        "92000000-0000-4000-8000-000000000001",
+        "92000000-0000-4000-8000-000000000002",
+      ];
+      return () => values.shift();
+    })(),
+  });
+  assert.deepEqual(allocated.createdPagerootIds, [firstBreakId, secondBreakId]);
+  assert.equal(
+    allocated.html,
+    `first<br data-pageroot-id="${firstBreakId}">second<br data-pageroot-id="${secondBreakId}">third`,
+  );
+  assert.deepEqual(materializeEditableIslandHtml(allocated.html, {
+    baselineInnerHtml: "first",
+    replayPagerootIds: [firstBreakId, secondBreakId],
+  }), allocated);
+  assertIslandError(
+    "EDITABLE_ISLAND_IDENTITY_EVIDENCE_MISMATCH",
+    () => materializeEditableIslandHtml(allocated.html, {
+      baselineInnerHtml: "first",
+      replayPagerootIds: [secondBreakId, firstBreakId],
     }),
   );
 });

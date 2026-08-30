@@ -231,7 +231,7 @@ test("replays the exact wrapper IDs allocated by an accepted Canvas range style 
   assert.equal(semantic.sourceSha256, mapped.sourceSha256);
 });
 
-test("replays the exact line-break ID allocated by an accepted Canvas text plan", () => {
+test("replays ordered line-break IDs allocated by an accepted Canvas text plan", () => {
   const baseline = state();
   const index = buildSourceIndex(baseline.html);
   const paragraph = index.byPagerootId.get(IDS.second);
@@ -243,7 +243,7 @@ test("replays the exact line-break ID allocated by an accepted Canvas text plan"
     type: "replace-editable-island",
     targetRef: createTargetRef(index, paragraph, { level: "subregion" }),
     beforeInnerHtml,
-    nextInnerHtml: "B<br>semantic",
+    nextInnerHtml: "B<br>semantic<br>ordered",
     expectedSourceSha256: baseline.sourceSha256,
   });
   const mapped = applyPatchPlan(forwardPlan, baseline.html);
@@ -254,14 +254,19 @@ test("replays the exact line-break ID allocated by an accepted Canvas text plan"
     "setText",
     {
       target: target(baseline, IDS.second),
-      text: "B\nsemantic",
+      text: "B\nsemantic\nordered",
       contentHtml: forwardPlan.metadata.nextInnerHtml,
       createdPagerootIds,
     },
   ));
 
-  assert.equal(createdPagerootIds.length, 1);
+  assert.equal(createdPagerootIds.length, 2);
+  const orderedIds = [...forwardPlan.metadata.nextInnerHtml.matchAll(
+    /<br data-pageroot-id="([^"]+)">/gu,
+  )].map((match) => match[1]);
+  assert.deepEqual(orderedIds, createdPagerootIds);
   assert.match(semantic.html, new RegExp(createdPagerootIds[0], "u"));
+  assert.match(semantic.html, new RegExp(createdPagerootIds[1], "u"));
   assert.equal(semantic.html, mapped.html);
   assert.equal(semantic.sourceSha256, mapped.sourceSha256);
 });
