@@ -302,7 +302,27 @@ test("toolbar formatting restores one logical range across button and input focu
   const toolbar = editor.getByRole("toolbar");
   const bold = toolbar.getByRole("button", { name: "加粗", exact: true });
   await expect(bold).toBeEnabled();
-  await bold.click();
+  const boldBox = await bold.boundingBox();
+  if (!boldBox) throw new Error("Bold toolbar button is not measurable.");
+  await page.mouse.move(
+    boldBox.x + boldBox.width / 2,
+    boldBox.y + boldBox.height / 2,
+  );
+  await page.mouse.down();
+  await frame.evaluate(() => {
+    const target = document.querySelector('[data-native-case="plain"][contenteditable]');
+    const text = target
+      ? document.createTreeWalker(target, NodeFilter.SHOW_TEXT).nextNode()
+      : null;
+    if (!(text instanceof Text)) throw new Error("Plain text fixture is incomplete.");
+    const selection = document.getSelection();
+    const range = document.createRange();
+    range.setStart(text, 1);
+    range.collapse(true);
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+  });
+  await page.mouse.up();
   await expect.poll(() => authoredInnerHtml(target)).toContain("font-weight: 700");
   expect((await selectionSnapshot(frame, "plain")).text).toBe("普通");
 
@@ -313,23 +333,26 @@ test("toolbar formatting restores one logical range across button and input focu
   expect((await selectionSnapshot(frame, "plain")).text).toBe("普通");
 });
 
-test("a cleared iframe Selection still lets consecutive color commands use the saved lease", async ({ page }) => {
+test("a collapsed iframe Selection still lets consecutive color commands use the saved lease", async ({ page }) => {
   const { editor, frame } = await openFixture(page);
   const target = await activateNativeEdit(frame, "plain");
   await setTextSelection(frame, "plain", 0, 2);
   const toolbar = editor.getByRole("toolbar");
   await toolbar.getByText("样式与间距", { exact: true }).click();
   const color = toolbar.getByLabel("文字颜色");
-  await color.evaluate((element) => {
-    element.dispatchEvent(new PointerEvent("pointerdown", {
-      bubbles: true,
-      cancelable: true,
-      pointerId: 1,
-      pointerType: "mouse",
-    }));
+  await frame.evaluate(() => {
+    const target = document.querySelector('[data-native-case="plain"][contenteditable]');
+    const text = target
+      ? document.createTreeWalker(target, NodeFilter.SHOW_TEXT).nextNode()
+      : null;
+    if (!(text instanceof Text)) throw new Error("Plain text fixture is incomplete.");
+    const selection = document.getSelection();
+    const range = document.createRange();
+    range.setStart(text, 1);
+    range.collapse(true);
+    selection?.removeAllRanges();
+    selection?.addRange(range);
   });
-  await frame.evaluate(() => document.getSelection()?.removeAllRanges());
-
   const setColor = async (value) => color.evaluate((element, nextValue) => {
     const setter = Object.getOwnPropertyDescriptor(
       HTMLInputElement.prototype,
@@ -342,18 +365,54 @@ test("a cleared iframe Selection still lets consecutive color commands use the s
 
   await setColor("#123456");
   await expect.poll(() => authoredInnerHtml(target)).toContain("color: rgb(18, 52, 86)");
-  await frame.evaluate(() => document.getSelection()?.removeAllRanges());
-  await color.evaluate((element) => {
-    element.dispatchEvent(new PointerEvent("pointerdown", {
-      bubbles: true,
-      cancelable: true,
-      pointerId: 2,
-      pointerType: "mouse",
-    }));
+  await frame.evaluate(() => {
+    const target = document.querySelector('[data-native-case="plain"][contenteditable]');
+    const text = target
+      ? document.createTreeWalker(target, NodeFilter.SHOW_TEXT).nextNode()
+      : null;
+    if (!(text instanceof Text)) throw new Error("Plain text fixture is incomplete.");
+    const selection = document.getSelection();
+    const range = document.createRange();
+    range.setStart(text, 1);
+    range.collapse(true);
+    selection?.removeAllRanges();
+    selection?.addRange(range);
   });
   await setColor("#654321");
   await expect.poll(() => authoredInnerHtml(target)).toContain("color: rgb(101, 67, 33)");
   expect((await selectionSnapshot(frame, "plain")).text).toBe("普通");
+});
+
+test("a new host selection supersedes the retained toolbar range", async ({ page }) => {
+  const { frame } = await openFixture(page);
+  const target = await activateNativeEdit(frame, "plain");
+  await setTextSelection(frame, "plain", 0, 2);
+
+  const toolbar = page.getByTestId("html-canvas-editor")
+    .filter({ visible: true })
+    .first()
+    .getByRole("toolbar");
+  await toolbar.getByText("样式与间距", { exact: true }).click();
+  await target.click({ position: { x: 8, y: 8 } });
+  await setTextSelection(frame, "plain", 2, 4);
+  await toolbar.getByText("样式与间距", { exact: true }).click();
+
+  const color = toolbar.getByLabel("文字颜色");
+  const setter = async (value) => color.evaluate((element, nextValue) => {
+    const nativeSetter = Object.getOwnPropertyDescriptor(
+      HTMLInputElement.prototype,
+      "value",
+    )?.set;
+    nativeSetter?.call(element, nextValue);
+    element.dispatchEvent(new Event("input", { bubbles: true }));
+    element.dispatchEvent(new Event("change", { bubbles: true }));
+  }, value);
+  await setter("#123456");
+
+  await expect.poll(() => authoredInnerHtml(target)).toContain(
+    '<span style="color: rgb(18, 52, 86);">段落</span>',
+  );
+  expect((await selectionSnapshot(frame, "plain")).text).toBe("段落");
 });
 
 test("IME confirmation replays at the frozen left-style caret", {
