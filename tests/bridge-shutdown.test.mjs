@@ -28,7 +28,7 @@ test("workspace recovery is replayed only after the renderer listener acknowledg
   const mailbox = createWorkspaceRecoveryMailbox();
   const firstIssue = {
     title: "本地项目资料暂时不可用",
-    message: "请先导出 PageRoot 工作副本。",
+    message: "请先导出当前 HTML。",
   };
 
   const beforeReady = mailbox.publish(firstIssue);

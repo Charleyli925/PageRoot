@@ -7,11 +7,7 @@ import {
   metaContentByName,
   parseHtmlSource,
   rawStartTagAttributes,
-  removePagerootElementIdentityAttributes,
 } from "../bridge/html-source-parser.mjs";
-import {
-  userDiffersFromBaseHtml,
-} from "../bridge/project-file-repository/working-copy.mjs";
 
 test("document identity comes only from a real explicit head meta", () => {
   const html = `<!doctype html>
@@ -117,40 +113,5 @@ test("raw unquoted attributes stop before a source self-closing delimiter", () =
       ["style", "color:blue", "style=color:blue"],
       ["data-kind", "dot", "data-kind=dot"],
     ],
-  );
-});
-
-test("clean source export removes only real Stable ID attributes", () => {
-  const html = `<!doctype html><html data-pageroot-id="pr1_11111111111141118111111111111111"><head><style>.x::after{content:"data-pageroot-id=\\\"style\\\""}</style><script>const text = "data-pageroot-id=\\\"script\\\"";</script></head><body><main data-pageroot-id="pr1_22222222222242229222222222222222" class="changed">data-pageroot-id="text"</main></body></html>`;
-  const clean = removePagerootElementIdentityAttributes(html);
-  assert.equal(
-    clean,
-    `<!doctype html><html><head><style>.x::after{content:"data-pageroot-id=\\\"style\\\""}</style><script>const text = "data-pageroot-id=\\\"script\\\"";</script></head><body><main class="changed">data-pageroot-id="text"</main></body></html>`,
-  );
-  assert.equal(
-    userDiffersFromBaseHtml(html, clean),
-    false,
-  );
-  assert.equal(
-    userDiffersFromBaseHtml(
-      html,
-      clean.replace("class=\"changed\"", "class=\"user-changed\""),
-    ),
-    true,
-  );
-  assert.equal(
-    userDiffersFromBaseHtml(
-      "<main>one</main>",
-      "<main><p>one</p></main>",
-    ),
-    true,
-  );
-});
-
-test("clean source export preserves authored whitespace around void tags", () => {
-  const html = `<!doctype html><html><head><meta charset="utf-8" data-pageroot-id="pr1_11111111111141118111111111111111" /></head><body><br data-pageroot-id="pr1_22222222222242229222222222222222"\t/></body></html>`;
-  assert.equal(
-    removePagerootElementIdentityAttributes(html),
-    `<!doctype html><html><head><meta charset="utf-8" /></head><body><br\t/></body></html>`,
   );
 });

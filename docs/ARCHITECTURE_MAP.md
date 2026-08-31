@@ -116,9 +116,7 @@ ProjectSession + ProjectWorkflow + ProjectRulesWorkflow + VersionSession
 The global sidebar owns the visible project context, safe project switching and
 the fixed settings entry. It is not a project management drawer: PROJECT.md
 editing, version-detail presentation, export/Finder actions and history-preview
-entry points are not rendered there. The project row may render the derived
-`userDiffersFromBase` status, while the header's More menu exposes the distinct
-Working Copy and clean-HTML exports. `ProjectRulesSession` and
+entry points are not rendered there. `ProjectRulesSession` and
 `ProjectRulesWorkflow` remain fact and lifecycle owners for persistence and
 close/switch safety; no disposable project-panel port or presentation facet
 crosses into Workbench.

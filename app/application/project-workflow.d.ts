@@ -71,7 +71,6 @@ export type ProjectWorkflowSnapshot = Readonly<{
     currentBasedOnOrdinal?: number;
     latestOfficialOrdinal?: number;
     currentDiffersFromBase?: boolean;
-    currentUserDiffersFromBase?: boolean;
     sourceRelation?: "unchanged" | "changed";
     deleteOriginal?: boolean;
     busy?: boolean;

@@ -40,10 +40,8 @@ import {
 import { WELCOME_LOGO_RELATIVE_PATH } from "./welcome-project-content.mjs";
 import {
   createSafeExportDefaultPath,
-  HTML_EXPORT_KINDS,
   isProtectedExportDestination,
   normalizeHtmlExportPath,
-  prepareHtmlForExport,
   selectExportDestination,
 } from "./export-copy.mjs";
 import {
@@ -726,7 +724,7 @@ function assertExportPayload(payload) {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
     throw new TypeError("导出参数无效。");
   }
-  const allowedKeys = new Set(["html", "suggestedName", "sourcePath", "exportKind"]);
+  const allowedKeys = new Set(["html", "suggestedName", "sourcePath"]);
   if (Object.keys(payload).some((key) => !allowedKeys.has(key))) {
     throw new TypeError("导出参数包含未支持的字段。");
   }
@@ -738,13 +736,7 @@ function assertExportPayload(payload) {
     },
     { allowSuggestedName: true },
   );
-  const exportKind = payload.exportKind === undefined
-    ? HTML_EXPORT_KINDS.WORKING_COPY
-    : String(payload.exportKind);
-  if (!Object.values(HTML_EXPORT_KINDS).includes(exportKind)) {
-    throw new TypeError("exportKind 必须是 working-copy 或 clean-html。");
-  }
-  return { html, sourcePath, suggestedName, exportKind };
+  return { html, sourcePath, suggestedName };
 }
 
 function isValidRecentEntry(entry) {
@@ -2956,12 +2948,7 @@ async function revealAiTask(payload) {
 }
 
 async function exportHtmlCopy(payload) {
-  const {
-    html,
-    sourcePath,
-    suggestedName,
-    exportKind,
-  } = assertExportPayload(payload);
+  const { html, sourcePath, suggestedName } = assertExportPayload(payload);
   const activePath = await currentActivePath();
   const defaultDirectory = sourcePath
     ? path.dirname(sourcePath)
@@ -2984,12 +2971,8 @@ async function exportHtmlCopy(payload) {
     protectedPaths,
     normalizeDestination: (value) => assertHtmlPath(normalizeHtmlExportPath(value)),
     showSaveDialog: (safeDefaultPath) => dialog.showSaveDialog(mainWindow, {
-      title: exportKind === HTML_EXPORT_KINDS.CLEAN_HTML
-        ? "导出干净 HTML"
-        : "导出 PageRoot 工作副本",
-      buttonLabel: exportKind === HTML_EXPORT_KINDS.CLEAN_HTML
-        ? "导出干净 HTML"
-        : "导出工作副本",
+      title: "导出 HTML 副本",
+      buttonLabel: "导出 HTML 副本",
       defaultPath: safeDefaultPath,
       properties: ["createDirectory", "showOverwriteConfirmation"],
       filters: [
@@ -3000,9 +2983,7 @@ async function exportHtmlCopy(payload) {
       const warning = await dialog.showMessageBox(mainWindow, {
         type: "warning",
         title: "请选择其他导出位置",
-        message: exportKind === HTML_EXPORT_KINDS.CLEAN_HTML
-          ? "干净 HTML 不能覆盖当前源文件"
-          : "PageRoot 工作副本不能覆盖当前源文件",
+        message: "HTML 副本不能覆盖当前源文件",
         detail: "源文件保持不变。请更换文件名或文件夹后再导出。",
         buttons: ["重新选择位置", "取消"],
         defaultId: 0,
@@ -3025,14 +3006,13 @@ async function exportHtmlCopy(payload) {
   }
   const exported = await writeHtmlCopy({
     destinationPath,
-    html: prepareHtmlForExport(html, exportKind),
+    html,
     maxHtmlBytes: MAX_HTML_BYTES,
   });
   // Export is deliberately not activated and does not mutate recent files.
   return {
     ...exported,
     exported: true,
-    exportKind,
   };
 }
 
@@ -3987,7 +3967,7 @@ async function showWorkspaceUnavailableRecovery() {
   });
   const delivery = workspaceRecoveryMailbox.publish({
     title: "本地项目资料暂时不可用",
-    message: "当前页面内容仍保留。可先导出 PageRoot 工作副本，再重新打开源页恢复本地服务。",
+    message: "当前页面内容仍保留。可先导出当前 HTML，再重新打开源页恢复本地服务。",
   });
   if (
     delivery.deliverToRenderer
@@ -4018,7 +3998,7 @@ async function showWorkspaceUnavailableRecovery() {
     type: "warning",
     title: delivery.issue.title,
     message: "源页的本地项目服务已停止。",
-    detail: "当前窗口中的内容仍保留。返回源页可先导出 PageRoot 工作副本；若没有待保存内容，也可以直接重新打开。",
+    detail: "当前窗口中的内容仍保留。返回源页可先导出当前 HTML；若没有待保存内容，也可以直接重新打开。",
     buttons: ["返回源页处理", "重新打开源页"],
     defaultId: 0,
     cancelId: 0,

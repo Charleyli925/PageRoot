@@ -840,7 +840,7 @@ test("preload exposes workspace failure recovery and a narrow relaunch action", 
 
   preload.emit("html-app:workspace-unavailable", {
     title: "本地项目资料暂时不可用",
-    message: "请先导出 PageRoot 工作副本。",
+    message: "请先导出当前 HTML。",
   });
   preload.emit("html-app:about-requested");
   assert.equal(aboutRequests, 1);
@@ -853,7 +853,7 @@ test("preload exposes workspace failure recovery and a narrow relaunch action", 
       },
       {
         title: "本地项目资料暂时不可用",
-        message: "请先导出 PageRoot 工作副本。",
+        message: "请先导出当前 HTML。",
       },
     ],
   );

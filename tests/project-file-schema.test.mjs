@@ -98,13 +98,6 @@ test("v4 schemas accept repository-produced identity, Working Copy, Candidate an
       initialWorkingCopyState,
     ),
   ]);
-  assert.equal(initialWorkingCopyState.userDiffersFromBase, false);
-  const legacyWorkingCopyWithoutSemanticProjection = structuredClone(initialWorkingCopyState);
-  delete legacyWorkingCopyWithoutSemanticProjection.userDiffersFromBase;
-  await validate(
-    "working-copy-state.v4.schema.json",
-    legacyWorkingCopyWithoutSemanticProjection,
-  );
   const missingIdentityBinding = structuredClone(initialWorkingCopyState);
   delete missingIdentityBinding.sourceElementIdentityBindingSha256;
   const bindingWithoutIdentitySchema = structuredClone(initialWorkingCopyState);

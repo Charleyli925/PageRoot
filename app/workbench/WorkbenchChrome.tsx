@@ -373,12 +373,6 @@ export function WorkbenchGlobalSidebar({
   const toggleProject = useCallback((projectId: string) => {
     setProjectExpansionState((state) => toggleProjectExpansion(state, projectId));
   }, []);
-  const currentProjectUserDiffersFromBase = currentProjectVersions.find(
-    (version) => version.isActiveWorkingCopy,
-  )?.userDiffersFromBase;
-  const currentProjectStatus = typeof currentProjectUserDiffersFromBase === "boolean"
-    ? currentProjectUserDiffersFromBase ? "已修改" : "未修改"
-    : null;
 
   return (
     <aside className="workbench-global-sidebar" data-open={open ? "true" : undefined} aria-label="全局项目" inert={!open}>
@@ -426,14 +420,6 @@ export function WorkbenchGlobalSidebar({
                   : <CaretRightIcon aria-hidden="true" size={13} weight="bold" />}
                 <FolderSimpleIcon className="sidebar-project-icon" aria-hidden="true" size={14} weight="regular" />
                 <span className="sidebar-project-name">{currentProjectName || "尚未打开项目"}</span>
-                {currentProjectStatus ? (
-                  <span
-                    className="sidebar-project-change-status"
-                    data-modified={currentProjectUserDiffersFromBase ? "true" : "false"}
-                  >
-                    {currentProjectStatus}
-                  </span>
-                ) : null}
               </button>
               {currentProjectId && projectExpansionState.expandedProjectIds[currentProjectId] ? (
                 <ProjectVersionTree
@@ -464,14 +450,6 @@ export function WorkbenchGlobalSidebar({
                         : <CaretRightIcon aria-hidden="true" size={13} weight="bold" />}
                       <FolderSimpleIcon className="sidebar-project-icon" aria-hidden="true" size={14} weight="regular" />
                       <span className="sidebar-project-name">{project.projectName}</span>
-                      {typeof project.userDiffersFromBase === "boolean" ? (
-                        <span
-                          className="sidebar-project-change-status"
-                          data-modified={project.userDiffersFromBase ? "true" : "false"}
-                        >
-                          {project.userDiffersFromBase ? "已修改" : "未修改"}
-                        </span>
-                      ) : null}
                       {project.hasPendingCandidate ? (
                         <span className="sidebar-project-pending" aria-label="有候选待审阅" title="有候选待审阅" />
                       ) : null}

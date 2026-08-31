@@ -134,6 +134,30 @@ test("export creates an independent copy and readback reports exact hash", async
   assert.equal(inspected.html, html);
 });
 
+test("export preserves the complete Working Copy bytes with embedded HTML payloads", async (t) => {
+  resetProjectFileQueuesForTests();
+  const directory = await mkdtemp(join(tmpdir(), "html-ai-export-rich-"));
+  const destinationPath = join(directory, "rich-copy.html");
+  const html = [
+    '<!doctype html><html data-pageroot-id="pr1_root"><head>',
+    '<style>.marker::before{content:"data-pageroot-id"}</style>',
+    '</head><body data-pageroot-id="pr1_body">',
+    '<script>window.echarts = { init() { return "data-pageroot-id"; } };</script>',
+    '<svg viewBox="0 0 10 10"><text>data-pageroot-id</text></svg>',
+    '<canvas width="10" height="10"></canvas>',
+    '<p>data-pageroot-id</p></body></html>',
+  ].join("");
+  t.after(() => rm(directory, { recursive: true, force: true }));
+
+  const exported = await writeHtmlCopy({ destinationPath, html });
+  const inspected = await readHtmlFile({ sourcePath: destinationPath });
+
+  assert.equal(exported.sha256, htmlSha256(html));
+  assert.equal(inspected.sha256, exported.sha256);
+  assert.equal(inspected.html, html);
+  assert.equal((inspected.html.match(/data-pageroot-id/gu) ?? []).length, 6);
+});
+
 test("desktop reader fails closed on non-UTF-8 HTML without rewriting bytes", async (t) => {
   resetProjectFileQueuesForTests();
   const directory = await mkdtemp(join(tmpdir(), "pageroot-encoding-"));

@@ -1,6 +1,5 @@
 import { decodeHTMLAttribute } from "entities";
 import { parse, serialize } from "parse5";
-import { PAGEROOT_ELEMENT_ID_ATTRIBUTE } from "../shared/pageroot-element-identity.mjs";
 
 function sourceSlice(source, location) {
   if (
@@ -171,73 +170,6 @@ export function parseHtmlSource(html) {
     { includeTemplateContent: true },
   );
   return { source, document, elements, parseErrors };
-}
-
-/**
- * Remove authored attributes from real HTML start tags while preserving every
- * other source byte. Parsing the element locations first is important here:
- * the same text inside a script, style block, comment or ordinary text is not
- * an HTML attribute and must remain untouched.
- */
-export function removeSourceAttributes(html, predicate) {
-  if (typeof predicate !== "function") {
-    throw new TypeError("An attribute predicate is required.");
-  }
-  const parsed = parseHtmlSource(html);
-  const removals = [];
-  for (const token of parsed.elements) {
-    const startTag = token.node?.sourceCodeLocation?.startTag;
-    if (
-      !Number.isInteger(startTag?.startOffset)
-      || !Number.isInteger(startTag?.endOffset)
-      || startTag.startOffset < 0
-      || startTag.endOffset > parsed.source.length
-    ) continue;
-    for (const attribute of rawStartTagAttributes(parsed.source, startTag)) {
-      if (!predicate(attribute, token)) continue;
-      let startOffset = attribute.removalRange.startOffset;
-      // Identity materialization prefixes every generated attribute with one
-      // ASCII space. Remove that separator, but preserve authored whitespace
-      // before a void-tag slash or closing delimiter (for example `<meta />`).
-      if (
-        startOffset > startTag.startOffset + 1
-        && parsed.source[startOffset - 1] === " "
-      ) {
-        startOffset -= 1;
-      }
-      removals.push({
-        startOffset,
-        endOffset: attribute.removalRange.endOffset,
-      });
-    }
-  }
-  removals.sort((left, right) => (
-    right.startOffset - left.startOffset
-    || right.endOffset - left.endOffset
-  ));
-  let result = parsed.source;
-  for (const removal of removals) {
-    if (
-      removal.startOffset < 0
-      || removal.endOffset > parsed.source.length
-      || removal.startOffset >= removal.endOffset
-    ) continue;
-    result = result.slice(0, removal.startOffset)
-      + result.slice(removal.endOffset);
-  }
-  return result;
-}
-
-/**
- * Return the source used for a clean, user-facing HTML export. Stable IDs are
- * PageRoot working-file metadata, so only actual attributes with this name are
- * removed; literal strings in authored content are not interpreted as markup.
- */
-export function removePagerootElementIdentityAttributes(html) {
-  return removeSourceAttributes(
-    html,
-    (attribute) => attribute.name === PAGEROOT_ELEMENT_ID_ATTRIBUTE,
-  );
 }
 
 export function removeElementTokens(html, predicate) {

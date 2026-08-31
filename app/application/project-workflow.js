@@ -70,10 +70,6 @@ function copyOpenConfirmation(value) {
     classification !== "new-external"
     && classification !== "known-external"
   ) return null;
-  const currentUserDiffersFromBase = value.currentUserDiffersFromBase === undefined
-    ? value.currentDiffersFromBase === true
-    : value.currentUserDiffersFromBase === true;
-  const hasUserDiffersFromBase = typeof value.currentUserDiffersFromBase === "boolean";
   return Object.freeze({
     requestId: value.requestId,
     classification,
@@ -89,8 +85,7 @@ function copyOpenConfirmation(value) {
     currentBasedOnOrdinal: Number(value.currentBasedOnOrdinal) || 0,
     latestOfficialVersionId: value.latestOfficialVersionId || null,
     latestOfficialOrdinal: Number(value.latestOfficialOrdinal) || 0,
-    currentDiffersFromBase: currentUserDiffersFromBase,
-    ...(hasUserDiffersFromBase ? { currentUserDiffersFromBase } : {}),
+    currentDiffersFromBase: value.currentDiffersFromBase === true,
     sourceRelation: value.sourceRelation === "changed" ? "changed" : "unchanged",
     deleteOriginal: value.deleteOriginal === true,
     busy: value.busy === true,
@@ -3528,7 +3523,7 @@ export class ProjectWorkflow {
         if (!frozen?.ok) throw new Error(frozen?.reason || "无法冻结已恢复的冲突候选。");
         this.#documentSession.setPersistence({
           state: "conflict",
-          error: "源 HTML 在自动写回前被外部修改。工作台候选和外部文件均已保留，请比较后重新载入或导出 PageRoot 工作副本。",
+          error: "源 HTML 在自动写回前被外部修改。工作台候选和外部文件均已保留，请比较后重新载入或导出当前 HTML。",
         });
       }
       this.#setHydration({

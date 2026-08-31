@@ -148,9 +148,6 @@ export function publicFactsFromClassification(classified, {
     return Object.freeze({});
   }
   if (classified.kind === "known-external" || classified.classification === "known-external") {
-    const currentUserDiffersFromBase = typeof classified.currentUserDiffersFromBase === "boolean"
-      ? classified.currentUserDiffersFromBase
-      : null;
     return Object.freeze({
       sourceFileName: String(sourceFileName || classified.sourceFileName || ""),
       projectName: String(classified.projectName || ""),
@@ -159,7 +156,6 @@ export function publicFactsFromClassification(classified, {
       latestOfficialVersionId: classified.latestOfficialVersionId || null,
       latestOfficialOrdinal: Number(classified.latestOfficialOrdinal) || 0,
       currentDiffersFromBase: classified.currentDiffersFromBase === true,
-      ...(currentUserDiffersFromBase === null ? {} : { currentUserDiffersFromBase }),
       sourceRelation: classified.sourceRelation === "changed" ? "changed" : "unchanged",
     });
   }
@@ -187,9 +183,6 @@ export function publicPreparedDescriptor(intent) {
     });
   }
   if (classification === "known-external") {
-    const currentUserDiffersFromBase = typeof facts.currentUserDiffersFromBase === "boolean"
-      ? facts.currentUserDiffersFromBase
-      : null;
     return Object.freeze({
       requestId: intent.requestId,
       classification: "known-external",
@@ -200,7 +193,6 @@ export function publicPreparedDescriptor(intent) {
       latestOfficialVersionId: facts.latestOfficialVersionId || null,
       latestOfficialOrdinal: Number(facts.latestOfficialOrdinal) || 0,
       currentDiffersFromBase: facts.currentDiffersFromBase === true,
-      ...(currentUserDiffersFromBase === null ? {} : { currentUserDiffersFromBase }),
       sourceRelation: facts.sourceRelation === "changed" ? "changed" : "unchanged",
     });
   }

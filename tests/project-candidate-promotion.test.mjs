@@ -232,7 +232,6 @@ test("a historical Version reactivates its original Working Copy without changin
       versionId: "ver_0002",
       basedOnVersionId: "ver_0002",
       differsFromBase: false,
-      userDiffersFromBase: false,
       saveState: "saved",
     },
   );

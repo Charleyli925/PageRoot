@@ -26,7 +26,6 @@ export type ExternalHtmlOpenConfirmation = {
   currentBasedOnOrdinal?: number;
   latestOfficialOrdinal?: number;
   currentDiffersFromBase?: boolean;
-  currentUserDiffersFromBase?: boolean;
   sourceRelation?: "unchanged" | "changed";
 };
 
@@ -79,9 +78,6 @@ export default function ExternalHtmlOpenDialog({
     confirmation.currentBasedOnOrdinal,
     confirmation.latestOfficialOrdinal,
   );
-  const currentUserDiffersFromBase = confirmation.currentUserDiffersFromBase
-    ?? confirmation.currentDiffersFromBase
-    ?? false;
   const primaryLabel = isNewExternal ? "导入并打开" : "打开之前的项目";
   const busyLabel = isNewExternal ? "正在导入…" : "正在打开…";
 
@@ -241,9 +237,6 @@ export default function ExternalHtmlOpenDialog({
             {staleVersionNote ? (
               <p className={styles.note}>{staleVersionNote}</p>
             ) : null}
-            <p className={styles.note}>
-              当前项目{currentUserDiffersFromBase ? "已有保存修改" : "未修改"}；打开之前的项目会保留当前工作内容。
-            </p>
           </div>
         )}
         {busy ? (

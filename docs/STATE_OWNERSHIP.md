@@ -76,26 +76,6 @@
 | Last proven comment-target geometry during Canvas replacement | `commentCanvasPort` | in-memory and cleared on project transition | `CommentRailContainer` only |
 | Current source/Draft persistence recovery banner | Workbench status-banner projection, with source failure priority | owner snapshots only; no independent durable state | workspace view and recovery actions |
 
-## Project-file status and export projection
-
-`ProjectFileRepository` owns both the technical Working Copy byte facts and the
-derived user-status projection. `baseSha256`, `currentSha256` and
-`differsFromBase` remain exact byte relationships. `userDiffersFromBase` is
-derived against the base Version snapshot by ignoring only parser-identified
-real `data-pageroot-id` attributes, and is the only one of these facts that
-project status, import confirmation and version-tree UI may present as “未修改”
-or “已修改”. Stable ID materialization can therefore leave the technical flag
-true while the user flag is false.
-
-The external original and hidden V1 snapshot are immutable byte references for
-this contract; the visible Working Copy is allowed to contain Stable IDs. Both
-export actions read the complete current Working Copy without changing any
-durable owner: Working Copy export retains IDs, while clean HTML export removes
-only real HTML attributes and leaves Script, Style, comments and text literals
-untouched. Undo/Redo remains the bounded in-memory history of the current open
-document; its autosave is ordinary Working Copy persistence and never a project
-Version history.
-
 Rules:
 
 - A consumer never writes another owner's fields directly.
@@ -259,9 +239,8 @@ Rules:
 - `/autosave` may decide its own command preconditions, but it may not own a
   partial write path. `ProjectFileRepository` alone advances the current-source
   write for a registered v4 Project File. Canvas undo/redo submits complete HTML
-  through that same path; its cursor is current-open-document session state only,
-  not a Bridge history journal or project Version authority. AI Version
-  publication remains a separate immutable transaction.
+  through that same path; no Bridge history journal or action cursor is current
+  authority. AI Version publication remains a separate immutable transaction.
 - Cross-owner operations are coordinated explicitly; they do not synchronize
   through incidental React effects.
 - A current-source transition first stages one complete candidate containing
@@ -373,3 +352,11 @@ Rules:
   Codec owns canonical Request selection and legacy projection. Coordinator owns
   preflight tickets and sessions. Conversation Repository is the only v2 writer;
   v1 conversation records are never migrated in place.
+
+## 文件与历史合同
+
+外部原 HTML 与隐藏 V1 快照保留首次导入的原始字节。可见 Working Copy
+可以因物化 Stable ID 而与它们逐字节不同，但 Stable ID 不回写外部原文件或
+不可变 Version。唯一导出动作原样复制当前完整 Working Copy，包括 Stable ID，
+不改变项目、Version、Registry、Recent 或当前打开文件。Undo/Redo 只属于
+当前打开文档会话，不属于正式 Version 历史，也不跨切换、关闭或重启恢复。

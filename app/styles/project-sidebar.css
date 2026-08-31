@@ -87,24 +87,6 @@
   white-space: nowrap;
 }
 
-.sidebar-project-change-status {
-  flex: none;
-  margin-left: auto;
-  padding: 2px 5px;
-  border-radius: 5px;
-  background: rgb(93 87 126 / 8%);
-  color: #777381;
-  font-size: 9.5px;
-  font-weight: 650;
-  line-height: 14px;
-  white-space: nowrap;
-}
-
-.sidebar-project-change-status[data-modified="true"] {
-  background: rgb(112 91 183 / 12%);
-  color: #6b58a8;
-}
-
 .sidebar-project-pending {
   width: 6px;
   height: 6px;

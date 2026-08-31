@@ -2,7 +2,6 @@ import { sha256 } from "@noble/hashes/sha2.js";
 import { bytesToHex } from "@noble/hashes/utils.js";
 
 import { parseHtmlSource } from "../../bridge/html-source-parser.mjs";
-export { removePagerootElementIdentityAttributes } from "../../bridge/html-source-parser.mjs";
 import {
   PAGEROOT_ELEMENT_ID_ATTRIBUTE,
   PAGEROOT_ELEMENT_ID_SCHEMA_VERSION,

@@ -33,7 +33,6 @@ export type HtmlOpenConfirmation = {
   latestOfficialVersionId?: string | null;
   latestOfficialOrdinal?: number;
   currentDiffersFromBase?: boolean;
-  currentUserDiffersFromBase?: boolean;
   sourceRelation?: "unchanged" | "changed";
 };
 
@@ -59,7 +58,6 @@ export type RegisteredProject = {
   availability: "ready" | "unavailable" | "invalid";
   availabilityReason?: string | null;
   lastOpenedAt: number | null;
-  userDiffersFromBase?: boolean;
 };
 
 export type ProjectVersionSummary = {
@@ -73,7 +71,6 @@ export type ProjectVersionSummary = {
   modifiedAt: string;
   isActiveWorkingCopy: boolean;
   isLatestOfficial: boolean;
-  userDiffersFromBase?: boolean;
 };
 
 export type DesktopProjectsApi = {
@@ -164,7 +161,6 @@ export type DesktopProjectsApi = {
     html: string;
     sourcePath?: string | null;
     suggestedName?: string;
-    exportKind?: "working-copy" | "clean-html";
   }) => Promise<{ path: string; name: string } | null>;
   readHtml?: (sourcePath: string) => Promise<HtmlProject>;
   listRecentProjects: () => Promise<RecentProject[]>;
@@ -435,7 +431,6 @@ export type Version = {
   isActiveWorkingCopy?: boolean;
   isLatestOfficial?: boolean;
   differsFromBase?: boolean;
-  userDiffersFromBase?: boolean;
   saveState?: "saved" | "saving" | "failed" | null;
 };
 
@@ -470,11 +465,7 @@ export type ToastDisposition =
   | "background-result"
   | "inform-in-place";
 export type ToastAction =
-  | {
-      id: "retry-export";
-      label: string;
-      exportKind?: "working-copy" | "clean-html";
-    }
+  | { id: "retry-export"; label: string }
   | { id: "open-handoff"; label: string }
   | { id: "retry-history"; label: string; direction?: "undo" | "redo" }
   | { id: "open-project"; label: string; sourcePath: string }

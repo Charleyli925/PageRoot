@@ -1120,7 +1120,7 @@ export class DocumentWorkflow {
       }
       this.#documentSession.setPersistence({
         state: "conflict",
-        error: "恢复记录与当前项目、版本或源文件身份不一致，请比较后选择重新载入或导出 PageRoot 工作副本。",
+        error: "恢复记录与当前项目、版本或源文件身份不一致，请比较后选择重新载入或导出当前 HTML。",
       });
       return succeeded({ recovered: true, queued: false, conflict: true });
     } catch (cause) {
@@ -1697,7 +1697,7 @@ export class DocumentWorkflow {
     }
     const message = this.#codecs.errorMessage(
       cause,
-      "当前修改还没有写入源 HTML，请重试或导出 PageRoot 工作副本。",
+      "当前修改还没有写入源 HTML，请重试或导出当前 HTML。",
     );
     const code = sourceErrorCode(cause, "DOCUMENT_AUTOSAVE_REJECTED");
     const conflict = (

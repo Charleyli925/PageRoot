@@ -12,14 +12,12 @@ import test from "node:test";
 
 import {
   createSafeExportDefaultPath,
-  HTML_EXPORT_KINDS,
   isProtectedExportDestination,
   normalizeHtmlExportPath,
   normalizedPathKey,
   pathsReferToSameFile,
   PROJECT_IPC_PROTOCOL,
   PROJECT_IPC_VERSION,
-  prepareHtmlForExport,
   runProjectIpcOperation,
   selectExportDestination,
 } from "../desktop/export-copy.mjs";
@@ -51,20 +49,6 @@ test("the default export name is a free numbered copy and never the source", asy
       activePath: sourcePath,
     }),
     path.join(directory, "页面-副本-2.html"),
-  );
-});
-
-test("export preparation distinguishes the working copy from clean HTML", () => {
-  const html = `<!doctype html><html data-pageroot-id="pr1_11111111111141118111111111111111"><head><style>.x{content:"data-pageroot-id"}</style><script>const literal = "data-pageroot-id";</script></head><body><p data-pageroot-id="pr1_22222222222242229222222222222222">data-pageroot-id</p></body></html>`;
-  assert.equal(prepareHtmlForExport(html), html);
-  const clean = prepareHtmlForExport(html, HTML_EXPORT_KINDS.CLEAN_HTML);
-  assert.equal(clean.includes('data-pageroot-id="'), false);
-  assert.match(clean, /content:"data-pageroot-id"/u);
-  assert.match(clean, /const literal = "data-pageroot-id"/u);
-  assert.match(clean, />data-pageroot-id<\/p>/u);
-  assert.throws(
-    () => prepareHtmlForExport(html, "unknown"),
-    (error) => error instanceof ProjectFileError && error.code === "INVALID_EXPORT_KIND",
   );
 });
 

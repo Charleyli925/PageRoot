@@ -207,16 +207,6 @@ points are not exposed through a drawer or a React editor container.
 and its timestamps therefore commit only the conversation region. Workbench's
 aggregate comparator still publishes run identity, lifecycle, phase and error
 changes needed by cross-capability locks and navigation.
-
-Project-file status is a derived contract, not a second renderer authority:
-`baseSha256`, `currentSha256` and `differsFromBase` describe the actual stored
-bytes, while `userDiffersFromBase` ignores only parser-identified
-`data-pageroot-id` attributes and drives user-facing modified state. The first
-import may therefore have `differsFromBase=true` and
-`userDiffersFromBase=false` after Stable ID materialization. Export commands are
-read-only projections of the complete current HTML: the Working Copy form keeps
-Stable IDs and the clean form removes only actual HTML attributes, without
-mutating Project File, Version, Draft/comment, Registry, current or Recent state.
 `WorkbenchTabBarContainer` subscribes `controller.navigation` and owns tab
 commands, keyboard shortcuts and post-close focus restoration. Startup restore,
 Registry reconciliation and tab persistence enter through Controller-owned
@@ -756,6 +746,16 @@ complete-HTML save; its inverse is session-local exact restore evidence, not an
 externally authorable or persistent semantic command. There is no durable
 history action ID, cursor CAS, history candidate or restart migration.
 
+The file contract is intentionally single-path: the external original and
+hidden V1 preserve the first-import bytes, while the visible Working Copy may
+contain PageRoot Stable ID metadata and therefore need not be byte-identical.
+Stable IDs never write back to the external original or immutable Version.
+The only export copies the complete current Working Copy HTML, including those
+IDs, through the existing protected atomic file-copy path; it does not update
+Project, Version, Registry, Recent or the current open file. Undo/Redo remains
+session-local to the current open document and never becomes formal Version
+history.
+
 Autosave then enters `ProjectFileRepository`. It is the only live Bridge-side
 owner of the current-source write for a registered v4 Project File. The retired
 v3 `SourceTransaction` kernel is not on this path. An AI Version publication
@@ -827,12 +827,10 @@ path: canonical bytes still come only from the Bridge. Failure at any proof
 point retires the frame and loads the canonical source through the normal
 verified fallback.
 
-The current-open history journal is bounded in renderer memory and may be reset
-only at a proven current source Hash. A forward edit after undo truncates redo.
-Source mismatch never attempts best-effort patching and never serializes preview
-DOM; it creates a new history boundary or reports the existing source conflict.
-It is not project Version history and is cleared when the document is switched,
-closed or the application restarts.
+The history journal is bounded and may be reset only at a proven current source
+Hash. A forward edit after undo truncates redo. Source mismatch never attempts
+best-effort patching and never serializes preview DOM; it creates a new history
+boundary or reports the existing source conflict.
 
 An inode change is not by itself proof of a new document because PageRoot's
 same-directory atomic replacement intentionally changes it. The Bridge may

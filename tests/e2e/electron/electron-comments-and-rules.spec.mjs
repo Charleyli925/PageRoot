@@ -627,8 +627,7 @@ test("Electron shell keeps the global rail fixed while the context inspector swa
     expect(await moreMenu.evaluate((element) => element.parentElement === document.body)).toBe(true);
     await expect(moreMenu.getByRole("menuitem", { name: "在 Finder 中显示" })).toBeVisible();
     await expect(moreMenu.getByRole("menuitem", { name: "在默认浏览器中打开" })).toBeVisible();
-    await expect(moreMenu.getByRole("menuitem", { name: "导出 PageRoot 工作副本…" })).toBeVisible();
-    await expect(moreMenu.getByRole("menuitem", { name: "导出干净 HTML…" })).toBeVisible();
+    await expect(moreMenu.getByRole("menuitem", { name: "导出当前 HTML…" })).toBeVisible();
     await expect(moreMenu.getByRole("menuitem", { name: "在 Finder 中显示" })).toBeFocused();
     await launched.page.keyboard.press("Tab");
     await expect(moreMenu).toHaveCount(0);
@@ -1006,7 +1005,7 @@ test("workspace failure keeps the current page visible with export and relaunch 
         "html-app:workspace-unavailable",
         {
           title: "本地项目资料暂时不可用",
-          message: "当前页面内容仍保留。可先导出 PageRoot 工作副本，再重新打开源页。",
+          message: "当前页面内容仍保留。可先导出当前 HTML，再重新打开源页。",
         },
       );
     }, mainRendererUrl);
@@ -1014,7 +1013,7 @@ test("workspace failure keeps the current page visible with export and relaunch 
     const recovery = launched.page.getByRole("alert")
       .filter({ hasText: "本地项目资料暂时不可用" });
     await expect(recovery).toBeVisible();
-    await expect(recovery.getByRole("button", { name: "导出 PageRoot 工作副本" }))
+    await expect(recovery.getByRole("button", { name: "导出当前 HTML" }))
       .toBeVisible();
     await expect(recovery.getByRole("button", { name: "重新打开源页" }))
       .toBeVisible();

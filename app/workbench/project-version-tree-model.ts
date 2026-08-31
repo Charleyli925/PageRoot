@@ -63,9 +63,6 @@ export function projectVersionSummariesFromVersions(
       modifiedAt,
       isActiveWorkingCopy,
       isLatestOfficial: version.isLatestOfficial === true || version.id === latestVersionId,
-      userDiffersFromBase: isActiveWorkingCopy
-        ? version.userDiffersFromBase === true
-        : false,
     };
   });
 }
