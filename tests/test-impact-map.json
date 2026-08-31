@@ -975,7 +975,7 @@
     {
       "id": "canvas-pointer-owner",
       "patterns": [
-        "^app/components/html-canvas-pointer-(?:hit|capability|proof)\\.(?:ts|js|d\\.ts)$",
+        "^app/components/html-canvas-(?:pointer-(?:hit|capability|proof)|interaction)\\.(?:ts|js|d\\.ts)$",
         "^app/components/html-canvas-capability-hover\\.(?:js|d\\.ts)$"
       ],
       "suites": [
@@ -1048,7 +1048,7 @@
     {
       "id": "canvas-runtime-owner",
       "patterns": [
-        "^app/components/(?:html-canvas-(?:dom|frame|interaction|internal-types)|desktop-edit-runtime-api)\\.(?:ts|js|d\\.ts)$"
+        "^app/components/(?:html-canvas-(?:dom|frame|internal-types)|desktop-edit-runtime-api)\\.(?:ts|js|d\\.ts)$"
       ],
       "suites": [
         "typecheck",
