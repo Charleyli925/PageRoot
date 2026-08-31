@@ -301,7 +301,9 @@ export function selectionForElement(
 ): HtmlCanvasSelection {
   const selector = selectorForElement(element);
   const level = levelOverride ?? identityTarget?.level ?? inferSelectionLevel(element);
-  const nodeId = element.getAttribute(SOURCE_NODE_ATTRIBUTE) || undefined;
+  const nodeId = sourceIndex
+    ? element.getAttribute(SOURCE_NODE_ATTRIBUTE) || undefined
+    : undefined;
   let targetRef: SourceTargetRef | null = null;
   if (sourceIndex && nodeId) {
     try {

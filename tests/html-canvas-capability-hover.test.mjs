@@ -13,16 +13,23 @@ import {
   placeCanvasHoverHint,
 } from "../app/components/html-canvas-capability-hover.js";
 
-function capability(kind, targetKey) {
-  const element = {};
+function capability(kind, targetKey, generation = 1, visualKey = targetKey) {
+  const hitElement = {};
+  const targetElement = {};
+  const visualElement = {};
   return {
     kind,
     hint: kind === "edit-text" ? "双击文字直接编辑" : "单击选择并评论",
     spoken: "可编辑",
     cursor: kind === "edit-text" ? "text" : "pointer",
-    element,
-    selectionElement: element,
+    hitElement,
+    targetElement,
+    visualElement,
+    selection: { id: targetKey, resolution: "exact" },
+    sourceRef: { targetId: targetKey, expectedSourceSha256: "sha256:test" },
     targetKey,
+    visualKey,
+    generation,
   };
 }
 
@@ -96,29 +103,39 @@ test("the same target does not restart hover timers", () => {
   assert.equal(controller.snapshot.hint, true);
 });
 
-test("the same visual target refreshes its precise caption selection without restarting", () => {
+test("the same visual target does not restart while replacing the full canonical capability", () => {
   const scheduler = createScheduler();
   const controller = createCanvasCapabilityHoverController({ scheduler });
-  const visualElement = {};
-  const firstSelection = {};
-  const secondSelection = {};
-  controller.update({
-    ...capability("edit-text", "host-1"),
-    element: visualElement,
-    selectionElement: firstSelection,
-  });
+  const first = capability("select-comment", "svg-child-a", 1, "svg-root");
+  const second = capability("select-comment", "svg-child-b", 1, "svg-root");
+  controller.update(first);
   scheduler.flush(CANVAS_HOVER_DELAY_MS - 1);
-  controller.update({
-    ...capability("edit-text", "host-1"),
-    element: visualElement,
-    selectionElement: secondSelection,
-  });
-  assert.equal(controller.snapshot.capability.selectionElement, secondSelection);
+  controller.update(second);
+  assert.equal(controller.snapshot.capability, second);
+  assert.equal(controller.snapshot.capability.targetKey, "svg-child-b");
   assert.equal(controller.snapshot.outline, false);
   scheduler.flush(1);
-  assert.equal(controller.snapshot.capability.selectionElement, secondSelection);
+  assert.equal(controller.snapshot.capability, second);
   assert.equal(controller.snapshot.outline, true);
   assert.equal(controller.snapshot.hint, true);
+});
+
+test("a new generation re-arms hover even when stable target identity is unchanged", () => {
+  const scheduler = createScheduler();
+  const controller = createCanvasCapabilityHoverController({ scheduler });
+  controller.update(capability("edit-text", "host-1", 7));
+  scheduler.flush(CANVAS_HOVER_DELAY_MS);
+  assert.equal(controller.snapshot.outline, true);
+
+  const replacement = capability("edit-text", "host-1", 8);
+  controller.update(replacement);
+  assert.equal(controller.snapshot.outline, false);
+  assert.equal(controller.snapshot.hint, false);
+  scheduler.flush(CANVAS_HOVER_DELAY_MS - 1);
+  assert.equal(controller.snapshot.outline, false);
+  scheduler.flush(1);
+  assert.equal(controller.snapshot.outline, true);
+  assert.equal(controller.snapshot.capability, replacement);
 });
 
 test("hiding for a replaced document re-arms an otherwise identical target", () => {

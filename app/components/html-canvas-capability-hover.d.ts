@@ -1,4 +1,4 @@
-import type { ResolvedCanvasPointerCapability } from "./html-canvas-pointer-capability";
+import type { ResolvedCanvasTarget } from "./html-canvas-pointer-capability";
 
 export const CANVAS_HOVER_DELAY_MS: 80;
 export const CANVAS_HOVER_OUTLINE_DELAY_MS: 80;
@@ -51,7 +51,7 @@ export type CanvasCapabilityHoverSnapshot = Readonly<{
   cursor: "default" | "text" | "pointer" | "help";
   outline: boolean;
   hint: boolean;
-  capability: ResolvedCanvasPointerCapability | null;
+  capability: ResolvedCanvasTarget | null;
 }>;
 
 export function createCanvasCapabilityHoverController(options?: {
@@ -62,7 +62,7 @@ export function createCanvasCapabilityHoverController(options?: {
   };
   onChange?: (snapshot: CanvasCapabilityHoverSnapshot) => void;
 }): {
-  update(capability: ResolvedCanvasPointerCapability | null): void;
+  update(capability: ResolvedCanvasTarget | null): void;
   hide(): void;
   readonly snapshot: CanvasCapabilityHoverSnapshot;
   dispose(): void;

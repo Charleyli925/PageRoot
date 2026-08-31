@@ -143,17 +143,13 @@ export function createCanvasCapabilityHoverController({
       hide();
       return;
     }
-    const key = `${capability.kind}:${capability.targetKey}`;
+    const key = `${capability.kind}:${capability.generation}:${capability.visualKey}`;
     if (key === currentKey) {
       const current = snapshot.capability;
-      if (
-        !current
-        || current.element !== capability.element
-        || current.selectionElement !== capability.selectionElement
-        || current.cursor !== capability.cursor
-        || current.hint !== capability.hint
-        || current.spoken !== capability.spoken
-      ) {
+      if (current !== capability) {
+        // A shared visual surface can contain several canonical source targets
+        // (for example two authored SVG children). Keep the visual lifecycle
+        // alive while replacing the complete resolved target contract.
         emit({
           ...snapshot,
           cursor: capability.cursor,

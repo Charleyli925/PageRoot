@@ -349,6 +349,36 @@ it must not roll durable V2 back to V6. A background Candidate carries its own
 complete OpenTarget and may never use whichever target happens to be mounted in
 the foreground.
 
+## Canvas target contract
+
+The Edit Canvas resolves one pointer event into three deliberately different
+objects. `hitElement` is the precise DOM hit and is retained for caret placement,
+Double Click and Option-click page actions. `targetElement` is the canonical
+long-lived source target used by selection, comments, AI targets and structural
+operations. `visualElement` owns Hover, selected chrome and toolbar geometry.
+The resolver also returns one `HtmlCanvasSelection`, its `SourceTargetRef` when
+the source mapping is exact, a non-persistent `targetKey`, the current DOM
+generation and the Runtime fail-closed proof. `targetKey` is only an interaction
+identity; it is never persisted or used as source authority. Its priority is a
+valid `elementId`, the current `TargetRef.targetId`, the current generation's
+`nodeId`, and finally a generation-scoped WeakMap key.
+
+The following invariants are normative:
+
+1. Pointer Hit remains the precise pointer hit.
+2. Canonical Target is the user's long-lived selection object.
+3. Visual Target owns only chrome and toolbar geometry.
+4. Hover promotes to Selected through the same canonical target.
+5. Comments, AI and structural operations use canonical Stable Source Identity.
+6. Caret placement and Option-click use the precise Pointer Hit.
+7. Runtime DOM may be rebuilt; Selection rebinds only through Stable ID.
+
+Ordinary inline source text uses the existing native edit host as its canonical
+target. Independent block-level inline elements, SVG/MathML dedicated surfaces,
+Canvas, iframe and controls retain their existing special semantics. Runtime
+generated or ambiguous nodes never gain edit or persistent precise-comment
+authority merely by carrying a copied source or stable ID.
+
 ## Registry catalog and AI-task display projections
 
 The Registry is the sole project-catalog membership and write-authority source.

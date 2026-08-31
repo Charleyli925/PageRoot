@@ -1,6 +1,9 @@
 import { SOURCE_NODE_ATTRIBUTE } from "../lib/source-patch-core.js";
 import { inferSelectionLevel, selectionForElement } from "./html-canvas-selection";
-import { sourceTextNodeForDomText } from "./html-canvas-preview-sync";
+import {
+  nativeEditHostForElement,
+  sourceTextNodeForDomText,
+} from "./html-canvas-preview-sync";
 import { createElementTextLocator } from "../lib/comment-text-locator.js";
 import type { ActiveTextRange, SourceIndexValue, TextRangeSegment } from "./html-canvas-internal-types";
 import type { HtmlCanvasTextLocator } from "./HtmlCanvasEditor.types";
@@ -19,14 +22,17 @@ export function activeTextRangeFromDocument(
   const commonElement = commonNode.nodeType === 1
     ? commonNode as HTMLElement
     : commonNode.parentElement;
-  const targetElement = commonElement?.closest<HTMLElement>(`[${SOURCE_NODE_ATTRIBUTE}]`) ?? null;
+  const hitElement = commonElement?.closest<HTMLElement>(`[${SOURCE_NODE_ATTRIBUTE}]`) ?? null;
   // A generated descendant maps to its nearest authored host for comments,
   // but its text is never a source-backed range or native editable island.
-  if (commonElement && targetElement !== commonElement) return null;
+  if (commonElement && hitElement !== commonElement) return null;
   if (
-    !targetElement
-    || ["BODY", "HTML", "HEAD", "SCRIPT", "STYLE", "NOSCRIPT"].includes(targetElement.tagName)
+    !hitElement
+    || ["BODY", "HTML", "HEAD", "SCRIPT", "STYLE", "NOSCRIPT"].includes(hitElement.tagName)
   ) return null;
+  // The DOM range keeps exact text-node/style evidence, while its logical
+  // target follows the same native text host used by pointer selection.
+  const targetElement = nativeEditHostForElement(hitElement, sourceIndex) ?? hitElement;
 
   const showText = documentNode.defaultView?.NodeFilter.SHOW_TEXT ?? 4;
   const walker = documentNode.createTreeWalker(targetElement, showText);

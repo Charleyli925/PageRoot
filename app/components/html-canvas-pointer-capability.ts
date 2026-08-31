@@ -1,6 +1,17 @@
 import { SOURCE_NODE_ATTRIBUTE } from "../lib/source-patch-core.js";
-import type { HtmlCanvasTargetResolution } from "./HtmlCanvasEditor.types";
-import type { SourceIndexValue } from "./html-canvas-internal-types";
+import { sourceTargetRefForSelection } from "../lib/canvas-target-rebind.js";
+import {
+  PAGEROOT_ELEMENT_ID_ATTRIBUTE,
+  isValidPagerootElementId,
+} from "../../shared/pageroot-element-identity.mjs";
+import type {
+  HtmlCanvasSelection,
+  HtmlCanvasTargetResolution,
+} from "./HtmlCanvasEditor.types";
+import type {
+  SourceIndexValue,
+  SourceTargetRef,
+} from "./html-canvas-internal-types";
 import {
   directTextNodeAtPoint,
   findCanvasHitSourceElement,
@@ -54,18 +65,39 @@ export function canStartNativeTextEditAtTarget({
   );
 }
 
-export type ResolvedCanvasPointerCapability = ReturnType<
-  typeof canvasPointerCapabilityFromProof
-> & Readonly<{
-  element: HTMLElement;
-  selectionElement: HTMLElement;
+export type ResolvedCanvasTarget = Readonly<{
+  /** The precise DOM object under the pointer. */
+  hitElement: HTMLElement;
+  /** The long-lived source object consumed by selection and operations. */
+  targetElement: HTMLElement;
+  /** The object whose geometry owns hover, selected chrome and the toolbar. */
+  visualElement: HTMLElement;
+  selection: HtmlCanvasSelection;
+  sourceRef: SourceTargetRef | null;
   targetKey: string;
+  /** The visual continuity identity. It is intentionally not a persistence key. */
+  visualKey: string;
+  generation: number;
   runtimeGenerated: boolean;
-}>;
+}> & ReturnType<typeof canvasPointerCapabilityFromProof>;
+
+export type CanvasTargetIdentityScope = {
+  readonly generation: number;
+  readonly targetObjectKeys: WeakMap<HTMLElement, string>;
+  readonly visualObjectKeys: WeakMap<HTMLElement, string>;
+};
+
+/** @deprecated Use ResolvedCanvasTarget. Kept as a narrow compatibility name. */
+export type ResolvedCanvasPointerCapability = ResolvedCanvasTarget;
 
 export type CanvasPointerHit =
   | Readonly<{ action: "clear" }>
-  | Readonly<{ action: "select"; capability: ResolvedCanvasPointerCapability }>;
+  | Readonly<{
+    action: "select";
+    target: ResolvedCanvasTarget;
+    /** @deprecated Use target. This alias keeps the pointer-hit envelope stable. */
+    capability: ResolvedCanvasTarget;
+  }>;
 
 export type CanvasPointerHitInput = {
   documentNode: Document | null;
@@ -74,28 +106,157 @@ export type CanvasPointerHitInput = {
   sourceIndex: SourceIndexValue | null;
   enabled?: boolean;
   isProvenRuntimeSourceElement?: ((element: HTMLElement) => boolean) | null;
+  /** Ephemeral DOM generation. It is never persisted with a selection. */
+  generation?: number;
+  /** Per-Canvas identity scope. A missing scope is compatibility-only. */
+  identityScope?: CanvasTargetIdentityScope | null;
 };
+
+function normalizedGeneration(value: number | undefined): number {
+  const numeric = Number(value);
+  return Number.isSafeInteger(numeric) && numeric >= 0 ? numeric : 0;
+}
+
+export function createCanvasTargetIdentityScope(
+  generation = 0,
+): CanvasTargetIdentityScope {
+  return {
+    generation: normalizedGeneration(generation),
+    targetObjectKeys: new WeakMap<HTMLElement, string>(),
+    visualObjectKeys: new WeakMap<HTMLElement, string>(),
+  };
+}
+
+function transientTargetKeyForElement(
+  element: HTMLElement,
+  generation: number,
+  objectKeys: WeakMap<HTMLElement, string>,
+): string {
+  const existing = objectKeys.get(element);
+  if (existing) return existing;
+  const suffix = globalThis.crypto?.randomUUID?.()
+    ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+  const key = `object:${generation}:${suffix}`;
+  objectKeys.set(element, key);
+  return key;
+}
+
+export function canvasTargetKeyFor({
+  element,
+  selection,
+  sourceRef,
+  generation = 0,
+  identityScope,
+  runtimeGenerated = false,
+}: {
+  element: HTMLElement;
+  selection: HtmlCanvasSelection;
+  sourceRef: SourceTargetRef | null;
+  generation?: number;
+  identityScope?: CanvasTargetIdentityScope | null;
+  runtimeGenerated?: boolean;
+}): string {
+  const normalized = normalizedGeneration(generation);
+  const scope = identityScope?.generation === normalized
+    ? identityScope
+    : createCanvasTargetIdentityScope(normalized);
+  if (!runtimeGenerated) {
+    const elementId = [sourceRef?.elementId, selection.elementId]
+      .find((candidate) => isValidPagerootElementId(candidate));
+    if (elementId) return `element:${elementId}`;
+    if (sourceRef?.targetId) return `target:${sourceRef.targetId}`;
+    const nodeId = element.getAttribute(SOURCE_NODE_ATTRIBUTE) || selection.nodeId;
+    if (nodeId) return `node:${normalized}:${nodeId}`;
+  }
+  return transientTargetKeyForElement(
+    element,
+    normalized,
+    scope.targetObjectKeys,
+  );
+}
+
+function canvasVisualKeyFor({
+  element,
+  generation,
+  identityScope,
+  runtimeGenerated,
+}: {
+  element: HTMLElement;
+  generation: number;
+  identityScope?: CanvasTargetIdentityScope | null;
+  runtimeGenerated: boolean;
+}): string {
+  const normalized = normalizedGeneration(generation);
+  const scope = identityScope?.generation === normalized
+    ? identityScope
+    : createCanvasTargetIdentityScope(normalized);
+  if (!runtimeGenerated) {
+    const elementId = element.getAttribute(PAGEROOT_ELEMENT_ID_ATTRIBUTE);
+    if (isValidPagerootElementId(elementId)) return `element:${elementId}`;
+    const nodeId = element.getAttribute(SOURCE_NODE_ATTRIBUTE);
+    if (nodeId) return `node:${normalized}:${nodeId}`;
+  }
+  return transientTargetKeyForElement(
+    element,
+    normalized,
+    scope.visualObjectKeys,
+  );
+}
 
 export function canvasVisualTargetElement(
   element: HTMLElement | null,
   sourceIndex: SourceIndexValue | null,
+  options: { runtimeGenerated?: boolean } = {},
 ): HTMLElement | null {
   if (!element || !sourceIndex) return element;
+  if (options.runtimeGenerated) {
+    return element.closest("svg, math") as HTMLElement | null ?? element;
+  }
   const dedicatedSurface = element.closest("svg, math") as HTMLElement | null;
   if (dedicatedSurface?.hasAttribute(SOURCE_NODE_ATTRIBUTE)) return dedicatedSurface;
   return nativeEditHostForElement(element, sourceIndex) ?? element;
 }
 
-export function resolveCanvasPointerHit({
+function sourceRefForSelection(
+  selection: HtmlCanvasSelection,
+  runtimeGenerated: boolean,
+): SourceTargetRef | null {
+  if (
+    runtimeGenerated
+    || (selection.resolution !== "exact" && selection.resolution !== "rebound")
+  ) return null;
+  try {
+    return sourceTargetRefForSelection(selection) as SourceTargetRef;
+  } catch {
+    return null;
+  }
+}
+
+function canonicalTargetElement(
+  hitElement: HTMLElement,
+  dedicatedSurface: HTMLElement | null,
+  sourceIndex: SourceIndexValue,
+  runtimeGenerated: boolean,
+): HTMLElement {
+  // Dedicated surfaces own their own target semantics. SVG/MathML children
+  // remain exact source targets while canvas/form/media roots stay atomic.
+  if (dedicatedSurface || runtimeGenerated) return hitElement;
+  return nativeEditHostForElement(hitElement, sourceIndex) ?? hitElement;
+}
+
+export function resolveCanvasTarget({
   documentNode,
   eventTarget,
   point,
   sourceIndex,
   enabled = true,
   isProvenRuntimeSourceElement = null,
-}: CanvasPointerHitInput): CanvasPointerHit {
-  if (!enabled || !documentNode) return { action: "clear" };
-  if (isCanvasRootElement(eventTarget)) return { action: "clear" };
+  generation: rawGeneration = 0,
+  identityScope: rawIdentityScope = null,
+}: CanvasPointerHitInput): ResolvedCanvasTarget | null {
+  if (!enabled || !documentNode || !sourceIndex) return null;
+  if (isCanvasRootElement(eventTarget)) return null;
+  const generation = normalizedGeneration(rawGeneration);
   const dedicatedSurface = point
     ? findDedicatedSourceSurfaceAtPoint(documentNode, point)
     : null;
@@ -133,11 +294,9 @@ export function resolveCanvasPointerHit({
       && (hit === documentNode.body || hit === documentNode.documentElement)
     )
   ) {
-    return { action: "clear" };
+    return null;
   }
-  if (inferSelectionLevel(hit) === "module" && !moduleHasSubstance(hit)) {
-    return { action: "clear" };
-  }
+  if (inferSelectionLevel(hit) === "module" && !moduleHasSubstance(hit)) return null;
   const canStartTextEdit = !dedicatedSurface
     && !runtimeGenerated
     && canStartNativeTextEditAtTarget({
@@ -146,43 +305,69 @@ export function resolveCanvasPointerHit({
       point,
       sourceIndex,
     });
-  const selection = selectionForElement(hit, sourceIndex);
+  const targetElement = canonicalTargetElement(
+    hit,
+    dedicatedSurface,
+    sourceIndex,
+    runtimeGenerated,
+  );
+  const selection = runtimeGenerated
+    ? selectionForElement(targetElement, null, undefined, "ambiguous")
+    : selectionForElement(targetElement, sourceIndex);
+  const sourceRef = sourceRefForSelection(selection, runtimeGenerated);
   const capability = canvasPointerCapabilityFromProof({
     canStartTextEdit,
     sourceResolution: selection.resolution as HtmlCanvasTargetResolution,
   });
+  const visualElement = canvasVisualTargetElement(
+    targetElement,
+    sourceIndex,
+    { runtimeGenerated },
+  )
+    ?? targetElement;
+  const identityScope = rawIdentityScope?.generation === generation
+    ? rawIdentityScope
+    : createCanvasTargetIdentityScope(generation);
+  return Object.freeze({
+    ...capability,
+    hitElement: hit,
+    targetElement,
+    visualElement,
+    selection,
+    sourceRef,
+    targetKey: canvasTargetKeyFor({
+      element: targetElement,
+      selection,
+      sourceRef,
+      generation,
+      identityScope,
+      runtimeGenerated,
+    }),
+    visualKey: canvasVisualKeyFor({
+      element: visualElement,
+      generation,
+      identityScope,
+      runtimeGenerated,
+    }),
+    generation,
+    runtimeGenerated,
+  });
+}
+
+export function resolveCanvasPointerHit(input: CanvasPointerHitInput): CanvasPointerHit {
+  const target = resolveCanvasTarget(input);
+  if (!target) return { action: "clear" };
   return {
     action: "select",
-    capability: {
-      ...capability,
-      element: hit,
-      selectionElement: hit,
-      targetKey: hit.getAttribute(SOURCE_NODE_ATTRIBUTE)
-        || selection.id
-        || hit.tagName,
-      runtimeGenerated,
-    },
+    target,
+    capability: target,
   };
 }
 
 export function resolveCanvasPointerCapability(
   input: CanvasPointerHitInput,
 ): ResolvedCanvasPointerCapability | null {
-  if (!input.sourceIndex) return null;
-  const hit = resolveCanvasPointerHit(input);
-  if (hit.action !== "select") return null;
-  const capability = hit.capability;
-  // Rich inline markup can expose several instrumented elements while the
-  // pointer remains inside one native-edit host. SVG and MathML likewise keep
-  // exact child selection while presenting one dedicated visual surface. Use
-  // the normalized element only for hover identity and geometry; click
-  // selection must retain the exact hit element.
-  const hoverElement = canvasVisualTargetElement(capability.element, input.sourceIndex)
-    ?? capability.element;
-  return {
-    ...capability,
-    element: hoverElement,
-    targetKey: hoverElement.getAttribute(SOURCE_NODE_ATTRIBUTE)
-      || capability.targetKey,
-  };
+  // Compatibility callers receive the canonical result directly. There is
+  // deliberately no second visual/selection resolution in this exit.
+  return resolveCanvasTarget(input);
 }
