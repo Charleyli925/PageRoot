@@ -1,14 +1,23 @@
 # 外部 HTML 打开、导入确认与项目归属 · 详细实施计划
 
-- 计划版本：v2.1
+- 计划版本：v2.2
 - 状态：施工合同；本文不授权合并、打 tag、发布或制作安装包
-- 产品规范：[IMPORT_CONFIRMATION_PRD.md](IMPORT_CONFIRMATION_PRD.md) v1.2
-- 审计基线：`origin/main@e7fcc65529dd46bff45db4ef3237d58ce9a713fc`
+- 产品规范：[IMPORT_CONFIRMATION_PRD.md](IMPORT_CONFIRMATION_PRD.md) v1.3
+- 审计基线：`origin/main@aec93a2fd1f0ff7ab386979707f243c8be769713`
 - 实施基线：每个实施 PR 开始时重新同步最新 `origin/main`，旧 SHA 只用于解释本文审计结论
 - 推荐拆分：2 个完整 PR；只有发现本文列出的硬阻塞才停下重新评审，不能自行扩成平行版本系统
 - 目标：新外部 HTML 先确认再导入；同一外部原文件永久回到唯一项目；V1/当前本地编辑语义准确；可选删除严格后置；任何 Canvas 确认都有终态
 
-> 本分支已实施 PR-1 与 PR-2：长期外部源绑定、只读 A/B/C 分类、确认 UI、Prepared Intent、Canvas 终态与可选废纸篓删除。保持 Draft，直到全部条款验收完成后再标 Ready。
+> 本分支已实施 PR-1 与 PR-2：长期外部源绑定、只读 A/B/C 分类、确认 UI、Prepared Intent、Canvas 终态与可选废纸篓删除。当前补丁继续收敛 PR1–PR10 后的文件状态和导出合同。保持 Draft，直到全部条款验收完成后再标 Ready。
+
+## 0.1 PR1–PR10 后的文件与导出合同
+
+以下条款覆盖本文早期对“V1 工作文件 Hash 等于原稿”的简写，不改变项目目录、Registry、导入确认、自动保存、Hash/CAS、原子写入、崩溃恢复或打开/切换流程：
+
+1. 外部原 HTML 与隐藏 V1 快照保留首次导入时的原始字节。可见 `…-V1.html` 是会物化真实 `data-pageroot-id` Stable ID 的 PageRoot Working Copy，因此可以与原稿和 V1 快照逐字节不同。
+2. `baseSha256`、`currentSha256`、`differsFromBase` 继续表示真实字节关系；`userDiffersFromBase` 是用户可见的语义投影，比较时只忽略真实 HTML 属性 `data-pageroot-id`。项目状态、导入确认和版本树的“未修改/已修改”均使用后者；仅物化 Stable ID 时必须为 `false`。
+3. “导出 PageRoot 工作副本”完整复制当前 HTML 并保留 Stable ID；“导出干净 HTML”只移除真实 HTML start tag 属性，不得触碰 Script、Style、注释或普通文本中的同名字符串。两种导出都只读，不改变 Working Copy、Version、评论、Registry、当前项目或 Recent。
+4. Undo/Redo 只属于当前打开文档的会话历史；它可以沿普通自动保存链路保存完整 HTML，但不属于项目版本历史，不创建正式 Version，也不跨切换、关闭或重启恢复。
 
 ## 0. 执行摘要
 
@@ -71,7 +80,9 @@ pending import:
 
 - `latestOfficialVersionId === V1`；
 - `activeWorkingCopyId === V1 Working Copy`；
-- 当前 V1 工作文件 Hash 仍等于首次导入 Hash。
+- 当前 V1 工作文件的真实字节 Hash 仍等于首次导入 Hash。
+
+这一组条件只描述旧的“一次导入崩溃重试”证据，不再作为长期外部源关联条件。关联成功后，若只因 Stable ID 物化导致当前工作文件 Hash 不同，`userDiffersFromBase` 仍为 `false`；若用户修改文字、样式或结构，则该字段为 `true`。
 
 只要用户正常编辑 V1、采纳 V2，或改为基于历史版本继续编辑，这些条件就不成立。随后 `#importExternal()` 会把同一路径当成全新项目。这是“再次打开原稿重复建项目”的直接技术根因。
 
@@ -301,7 +312,8 @@ Canvas failed、应用退出、Renderer 销毁、request 被替换、Hash 漂移
 - 当前活动 `openTarget`；
 - `currentBasedOnVersionId` 及 ordinal；
 - `latestOfficialVersionId` 及 ordinal；
-- 当前 Working Copy `differsFromBase`；
+- 当前 Working Copy 的技术字节关系 `differsFromBase`；
+- 当前 Working Copy 的用户语义状态 `userDiffersFromBase`；
 - 初始 Version ID/ordinal（必须实际从 manifest 找 ordinal 1）；
 - `sourceRelation: unchanged | changed`；
 - 首次导入 Hash只用于 relation，不返回 raw source key。
@@ -889,7 +901,7 @@ Node测试通过依赖注入的 fake `trashItem` 验证真实调用次数和路�
 正式 Electron cases：
 
 1. 运行中选择新 HTML：确认框前 active source/Registry/画布不变；取消零副作用；
-2. 新 HTML确认导入：V1 bytes=原稿 bytes，原稿保留，Canvas verified；
+2. 新 HTML确认导入：隐藏 V1 snapshot bytes=原稿 bytes，原稿保留；可见 Working Copy 含 Stable ID 且仅身份物化时 `userDiffersFromBase=false`，Canvas verified；
 3. 冷启动 argv/open-file：先显示确认，不静默导入；取消回欢迎项目；
 4. 保留原稿再次 `open-file`：显示 B dialog，项目目录数/版本数不变；
 5. B“打开之前的项目”：打开已保存本地编辑，不跳只读 latest；
@@ -899,6 +911,8 @@ Node测试通过依赖注入的 fake `trashItem` 验证真实调用次数和路�
 9. Canvas验证注入失败：原稿不删，旧项目成功 rollback或进入明确 attention；
 10. close在 dialog可见时等价取消，不把同意/checkbox写入 handoff。
 11. B dialog 没有“查看初始版本 V1”按钮。
+12. 首次导入后的文字、样式和结构修改均显示 `userDiffersFromBase=true`，重启后仍保持；仅 Stable ID 变化不显示为用户修改。
+13. 工作副本导出保留 Stable ID；干净 HTML 导出移除真实属性且保留 Script、Style、注释和普通文本中的 `data-pageroot-id` 字符串，项目事实不变化。
 
 `packaged-startup-smoke.spec.mjs` 现有“启动即导入”用例必须改为驱动确认框，再验证 managed V1。真实 `shell.trashItem` 的调用正确性由注入 Node controller拥有；Electron不得污染用户废纸篓。
 

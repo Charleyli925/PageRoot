@@ -52,7 +52,7 @@ export function planProjectCloseHydration({
       return Object.freeze({
         kind: "reject",
         code: "PROJECT_CLOSE_LOAD_ERROR_DIRTY",
-        reason: "项目读取失败且仍有待恢复的 HTML 修改，请先重试读取或导出副本。",
+        reason: "项目读取失败且仍有待恢复的 HTML 修改，请先重试读取或导出 PageRoot 工作副本。",
         presentation: "in-app",
       });
     }

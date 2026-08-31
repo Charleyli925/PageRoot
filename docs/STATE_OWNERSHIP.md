@@ -76,6 +76,26 @@
 | Last proven comment-target geometry during Canvas replacement | `commentCanvasPort` | in-memory and cleared on project transition | `CommentRailContainer` only |
 | Current source/Draft persistence recovery banner | Workbench status-banner projection, with source failure priority | owner snapshots only; no independent durable state | workspace view and recovery actions |
 
+## Project-file status and export projection
+
+`ProjectFileRepository` owns both the technical Working Copy byte facts and the
+derived user-status projection. `baseSha256`, `currentSha256` and
+`differsFromBase` remain exact byte relationships. `userDiffersFromBase` is
+derived against the base Version snapshot by ignoring only parser-identified
+real `data-pageroot-id` attributes, and is the only one of these facts that
+project status, import confirmation and version-tree UI may present as “未修改”
+or “已修改”. Stable ID materialization can therefore leave the technical flag
+true while the user flag is false.
+
+The external original and hidden V1 snapshot are immutable byte references for
+this contract; the visible Working Copy is allowed to contain Stable IDs. Both
+export actions read the complete current Working Copy without changing any
+durable owner: Working Copy export retains IDs, while clean HTML export removes
+only real HTML attributes and leaves Script, Style, comments and text literals
+untouched. Undo/Redo remains the bounded in-memory history of the current open
+document; its autosave is ordinary Working Copy persistence and never a project
+Version history.
+
 Rules:
 
 - A consumer never writes another owner's fields directly.
@@ -239,8 +259,9 @@ Rules:
 - `/autosave` may decide its own command preconditions, but it may not own a
   partial write path. `ProjectFileRepository` alone advances the current-source
   write for a registered v4 Project File. Canvas undo/redo submits complete HTML
-  through that same path; no Bridge history journal or action cursor is current
-  authority. AI Version publication remains a separate immutable transaction.
+  through that same path; its cursor is current-open-document session state only,
+  not a Bridge history journal or project Version authority. AI Version
+  publication remains a separate immutable transaction.
 - Cross-owner operations are coordinated explicitly; they do not synchronize
   through incidental React effects.
 - A current-source transition first stages one complete candidate containing

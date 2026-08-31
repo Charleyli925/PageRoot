@@ -167,6 +167,7 @@ export function versionsFromWorkspace(
         isActiveWorkingCopy: raw.isActiveWorkingCopy === true,
         isLatestOfficial: raw.isLatestOfficial === true,
         differsFromBase: raw.differsFromBase === true,
+        userDiffersFromBase: raw.userDiffersFromBase === true,
         saveState: ["saved", "saving", "failed"].includes(String(raw.saveState || ""))
           ? String(raw.saveState) as Version["saveState"]
           : null,
@@ -225,6 +226,7 @@ export function versionsFromWorkspace(
       isActiveWorkingCopy: raw.isActiveWorkingCopy === true,
       isLatestOfficial: raw.isLatestOfficial === true,
       differsFromBase: raw.differsFromBase === true,
+      userDiffersFromBase: raw.userDiffersFromBase === true,
       saveState: ["saved", "saving", "failed"].includes(String(raw.saveState || ""))
         ? String(raw.saveState) as Version["saveState"]
         : null,

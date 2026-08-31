@@ -2,9 +2,30 @@ import { lstat, stat } from "node:fs/promises";
 import path from "node:path";
 
 import { ProjectFileError } from "./project-files.mjs";
+import { removePagerootElementIdentityAttributes } from "../bridge/html-source-parser.mjs";
 
 export const PROJECT_IPC_PROTOCOL = "html-ai-project-result";
 export const PROJECT_IPC_VERSION = 1;
+
+export const HTML_EXPORT_KINDS = Object.freeze({
+  WORKING_COPY: "working-copy",
+  CLEAN_HTML: "clean-html",
+});
+
+export function prepareHtmlForExport(
+  html,
+  exportKind = HTML_EXPORT_KINDS.WORKING_COPY,
+) {
+  const source = String(html);
+  if (exportKind === HTML_EXPORT_KINDS.WORKING_COPY) return source;
+  if (exportKind === HTML_EXPORT_KINDS.CLEAN_HTML) {
+    return removePagerootElementIdentityAttributes(source);
+  }
+  throw new ProjectFileError(
+    "INVALID_EXPORT_KIND",
+    "不支持的 HTML 导出类型。",
+  );
+}
 
 const GENERIC_PROJECT_ERROR = Object.freeze({
   code: "FILE_OPERATION_FAILED",

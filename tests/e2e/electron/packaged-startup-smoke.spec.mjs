@@ -110,6 +110,7 @@ function expectManagedV1Identity(managedSourcePath, original) {
     baseSha256: sha256(original),
     currentSha256: sha256(managed),
     differsFromBase: true,
+    userDiffersFromBase: false,
     sourceElementIdentitySchemaVersion: 1,
     sourceElementIdentityBindingSha256:
       sourceElementIdentityBindingSha256(managed.toString("utf8")),

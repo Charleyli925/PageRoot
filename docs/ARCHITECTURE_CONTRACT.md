@@ -207,6 +207,16 @@ points are not exposed through a drawer or a React editor container.
 and its timestamps therefore commit only the conversation region. Workbench's
 aggregate comparator still publishes run identity, lifecycle, phase and error
 changes needed by cross-capability locks and navigation.
+
+Project-file status is a derived contract, not a second renderer authority:
+`baseSha256`, `currentSha256` and `differsFromBase` describe the actual stored
+bytes, while `userDiffersFromBase` ignores only parser-identified
+`data-pageroot-id` attributes and drives user-facing modified state. The first
+import may therefore have `differsFromBase=true` and
+`userDiffersFromBase=false` after Stable ID materialization. Export commands are
+read-only projections of the complete current HTML: the Working Copy form keeps
+Stable IDs and the clean form removes only actual HTML attributes, without
+mutating Project File, Version, Draft/comment, Registry, current or Recent state.
 `WorkbenchTabBarContainer` subscribes `controller.navigation` and owns tab
 commands, keyboard shortcuts and post-close focus restoration. Startup restore,
 Registry reconciliation and tab persistence enter through Controller-owned
@@ -817,10 +827,12 @@ path: canonical bytes still come only from the Bridge. Failure at any proof
 point retires the frame and loads the canonical source through the normal
 verified fallback.
 
-The history journal is bounded and may be reset only at a proven current source
-Hash. A forward edit after undo truncates redo. Source mismatch never attempts
-best-effort patching and never serializes preview DOM; it creates a new history
-boundary or reports the existing source conflict.
+The current-open history journal is bounded in renderer memory and may be reset
+only at a proven current source Hash. A forward edit after undo truncates redo.
+Source mismatch never attempts best-effort patching and never serializes preview
+DOM; it creates a new history boundary or reports the existing source conflict.
+It is not project Version history and is cleared when the document is switched,
+closed or the application restarts.
 
 An inode change is not by itself proof of a new document because PageRoot's
 same-directory atomic replacement intentionally changes it. The Bridge may

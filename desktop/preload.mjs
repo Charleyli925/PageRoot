@@ -372,7 +372,7 @@ function normalizedWorkspaceIssue(payload) {
       : "本地项目资料暂时不可用",
     message: typeof payload?.message === "string"
       ? payload.message
-      : "当前页面内容仍保留，可以导出后重新打开源页。",
+      : "当前页面内容仍保留，可以先导出 PageRoot 工作副本，再重新打开源页。",
   });
 }
 function normalizedExternalOpenRequest(payload) {

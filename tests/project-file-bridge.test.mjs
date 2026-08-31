@@ -201,6 +201,7 @@ test("the Bridge exposes content-free version summaries without rewriting a rena
     modifiedAt: summaries.body.versions[0].modifiedAt,
     isActiveWorkingCopy: true,
     isLatestOfficial: true,
+    userDiffersFromBase: false,
   });
   assert.equal(typeof summaries.body.versions[0].modifiedAt, "string");
   assert.equal(Object.hasOwn(summaries.body.versions[0], "content"), false);
@@ -1030,6 +1031,7 @@ test("open-classification is read-only and returns A/B/C without source keys or 
   assert.equal(known.body.currentBasedOnVersionId, "ver_0001");
   assert.equal(known.body.latestOfficialVersionId, "ver_0001");
   assert.equal(known.body.currentDiffersFromBase, false);
+  assert.equal(known.body.currentUserDiffersFromBase, false);
   assert.equal(known.body.openTarget.workingCopyId, "work_ver_0001");
   assert.equal(known.body.openTarget.exactSourcePath, ensured.body.sourcePath);
   assert.equal("importSourceKey" in known.body, false);
@@ -1052,6 +1054,7 @@ test("open-classification is read-only and returns A/B/C without source keys or 
   assert.equal(knownAfterEdit.body.kind, "known-external");
   assert.equal(knownAfterEdit.body.projectId, ensured.body.projectId);
   assert.equal(knownAfterEdit.body.currentDiffersFromBase, true);
+  assert.equal(knownAfterEdit.body.currentUserDiffersFromBase, true);
   assert.equal(knownAfterEdit.body.openTarget.workingCopyId, "work_ver_0001");
   assert.deepEqual(await readFile(registryFile), registryBefore);
 });

@@ -10,6 +10,7 @@ export type ExternalHtmlOpenConfirmation = Readonly<{
   latestOfficialVersionId?: string | null;
   latestOfficialOrdinal?: number;
   currentDiffersFromBase?: boolean;
+  currentUserDiffersFromBase?: boolean;
   sourceRelation?: "unchanged" | "changed";
   [key: string]: unknown;
 }>;

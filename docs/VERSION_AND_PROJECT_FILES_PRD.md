@@ -1,12 +1,21 @@
 # PageRoot 版本与项目文件产品需求
 
-- 文档版本：PRD v1.4
-- 最近更新：2026-08-15（Asia/Shanghai，UTC+8）
+- 文档版本：PRD v1.5
+- 最近更新：2026-08-31（Asia/Shanghai，UTC+8）
 - 状态：产品规则已确认，按两期串行实施
 - 适用范围：桌面版本地 HTML 导入、持续编辑、评论与附件、AI 候选审阅、正式版本历史、Registry 项目目录与 Finder 体验
 - 关联文档：[MVP 产品需求](MVP_PRD.md)、[交互流程](INTERACTION_FLOW.md)、[Change Request 协议](CHANGE_REQUEST_PROTOCOL.md)、[ADR 0022](decisions/0022-user-owned-project-root-identity.md)、[ADR 0024](decisions/0024-registry-catalog-and-ai-task-projections.md)、[首次打开导入确认](IMPORT_CONFIRMATION_PRD.md)
 
 本文定义下一阶段目标规则。桌面打开路径只承认有效 v4 Project；所有 v4 以前的项目状态均不兼容，不迁移、不恢复、也不作为读取回退。任何不属于有效 v4 Project 的 HTML 都从新 v4 Project 的 V1 开始；实施本 PRD 时必须同步更新关联协议、Schema、测试和 ADR，不能只修改界面文案。
+
+## 0. PR1–PR10 后的文件与项目管理合同
+
+本节是对前序版本中“导入后所有文件逐字节一致”及“修改状态直接由 Hash 差异得出”的收敛。它不改变项目目录、Registry、导入确认、自动保存、Hash/CAS、原子写入、崩溃恢复或打开/切换流程。
+
+1. 外部原 HTML 与隐藏 V1 快照始终保留首次导入时的原始字节。项目内可见 Working Copy 会物化真实 `data-pageroot-id` Stable ID，因此它可以与原文件和 V1 快照存在字节差异；Stable ID 是 PageRoot 工作文件元数据，干净导出会移除它。
+2. `baseSha256`、`currentSha256`、`differsFromBase` 继续是技术层的真实字节关系，不能改名或改变含义。新增/派生 `userDiffersFromBase`，比较时忽略真实 HTML 属性 `data-pageroot-id`，只表达用户内容、样式和结构是否不同。所有面向用户的“未修改/已修改/与初始版本不同”均使用该语义字段；首次只发生 Stable ID 物化时为 `false`。
+3. “导出 PageRoot 工作副本”完整复制当前 HTML 并保留 Stable ID；“导出干净 HTML”只删除真实 start tag 属性 `data-pageroot-id`，不得触碰 Script、Style、注释或普通文本中的同名字符串。导出是只读副作用，不改变 Working Copy、Version、评论、Registry、当前项目或 Recent。
+4. Undo/Redo 只属于当前打开文档的会话历史。它可以沿普通自动保存链路写入完整 HTML，但不属于项目版本历史、不生成正式 Version，也不跨切换、关闭或重启恢复。
 
 ## 1. 产品结论
 
@@ -258,7 +267,7 @@ PR 1 内部按“文档与 Schema → Repository → Workflow → 最低限度 U
 
 1. 再次读取外部 HTML，并验证它没有在预览后被外部修改。
 2. 分配唯一项目目录和内部 `projectId`，先在 Registry 写入带登记根目录的 `pendingImports` 意图；此时尚未让任意目录取得写入授权。
-3. 仅在私有 staging 目录原样复制 HTML 字节到隐藏的版本 1 快照、可见 `<名称>-V1.html` 工作文件和全部 v4 元数据。
+3. 仅在私有 staging 目录原样复制 HTML 字节到隐藏的版本 1 快照；可见 `<名称>-V1.html` 工作文件在同一事务中物化 PageRoot Stable ID，全部 v4 元数据仍在该目录内生成。
 4. 原外部 HTML 再次校验后，将完整 staging 目录原子发布到该登记根目录。
 5. 由该 Registry pending intent 验证已发布目录的项目/文档 ID，写入正式 Registry 白名单并清除 pending intent；恢复器只处理这种意图，绝不扫描任意副本的 `import.json`。
 6. 将当前打开目标切换到 PageRoot 内的 V1 工作文件，并发布该新 v4 Project 的身份。
@@ -303,7 +312,7 @@ PR 1 内部按“文档与 Schema → Repository → Workflow → 最低限度 U
 | `.pageroot/versions/ver_0002/index.html` | 否 | 版本 2 的不可变历史事实 |
 | `复杂HTML综合测试页-V2.html` | 是 | 基于版本 2 的当前本地工作文件 |
 
-V2 工作文件第一次建立时与 V2 正式快照字节一致。此后用户可以反复修改 V2 工作文件，系统持续保存，但隐藏快照保持不变。
+V2 工作文件第一次建立时以 V2 正式快照为内容基线，并可能物化 PageRoot Stable ID，因此不要求与 V2 快照逐字节一致。比较用户是否修改时忽略这些真实 `data-pageroot-id` 属性，所以首次建立状态仍为“未修改”；此后用户可以反复修改 V2 工作文件，系统持续保存，但隐藏快照保持不变。
 
 界面状态示例：
 
@@ -475,7 +484,7 @@ AI 只能写入固定 Attempt 输出 `.pageroot/requests/<requestId>/attempts/<a
 顶部必须由纯投影同时表达下列现有权威事实；不得以多层互斥三元表达式隐藏其中任一项：
 
 - 当前打开的是哪个版本工作文件或历史快照。
-- 是否存在本地修改，是否已经保存。
+- 是否存在用户内容、样式或结构修改（`userDiffersFromBase`），以及该修改是否已经保存。
 - 当前内容基于哪个正式版本。
 - 项目最新正式版本是哪个。
 - 当前是否存在待审阅候选。
@@ -485,9 +494,9 @@ AI 只能写入固定 Attempt 输出 `.pageroot/requests/<requestId>/attempts/<a
 | 场景 | 主状态 | 辅助状态/操作 |
 |---|---|---|
 | 首次导入 | `V1 · 已导入 PageRoot` | `在文件夹中打开` |
-| V1 本地修改 | `基于 V1 · 本地修改已保存` | `项目最新 V1` |
+| V1 用户修改 | `基于 V1 · 用户修改已保存` | `项目最新 V1` |
 | 打开历史快照 | `正在查看 V2 · 只读浏览` | `基于此版本继续编辑` |
-| 编辑历史 V2 | `基于 V2 · 项目最新 V6 · 本地修改已保存` | `当前编辑基础 V2` |
+| 编辑历史 V2 | `基于 V2 · 项目最新 V6 · 用户修改已保存` | `当前编辑基础 V2` |
 | AI 已返回 | `基于 V2 · 项目最新 V6 · 候选 V7 待审阅` | `审阅候选` |
 | 候选已采纳 | `基于 V2 · 项目最新 V7` | `在文件夹中打开` |
 | 保存失败 | `基于 V2 · 保存失败` | `重试`、`查看详情` |
@@ -496,8 +505,8 @@ AI 只能写入固定 Attempt 输出 `.pageroot/requests/<requestId>/attempts/<a
 
 - Registry 决定项目列表成员资格；项目列表以 Registry 登记项目文件夹名为用户项目名，不显示内部 `projectId`。用户在配置项目目录内改名后，重新识别时同步更新列表名称，不联动 HTML 名称。
 - Desktop Recent 只提供 `lastOpenedAt`、启动优先和排序；已登记但未进入 Recent 的项目仍显示，Recent 中未登记的外部 HTML 不显示成项目，清除 Recent 不移除项目。
-- 版本列表按正式 ordinal 排列，每行展示 `基于 Vn`、`前一正式版本 Vn`、`最新正式版本`、`当前编辑基础`、`有本地修改` 或 `当前只读浏览` 等适用的谱系/投影事实。
-- 当前存在本地编辑的历史版本显示圆点或“有本地修改”，不能伪装成新正式版本。
+- 版本列表按正式 ordinal 排列，每行展示 `基于 Vn`、`前一正式版本 Vn`、`最新正式版本`、`当前编辑基础`、由 `userDiffersFromBase` 派生的“未修改/已修改”或 `当前只读浏览` 等适用的谱系/投影事实。
+- 当前存在用户本地内容、样式或结构编辑的历史版本显示圆点或“已修改”，不能把仅由 Stable ID 物化造成的技术字节差异显示为用户修改，也不能伪装成新正式版本。
 - AI 候选与正式版本视觉上明确区分。
 - 不提供“恢复并覆盖最新版本”的动作。
 - 不提供“删除后续版本”的动作。
@@ -563,13 +572,14 @@ PR 1 不引入并行的全局 Store。下表是每类状态的唯一权威位置
   "baseSha256": "...",
   "currentSha256": "...",
   "differsFromBase": true,
+  "userDiffersFromBase": true,
   "draftId": "draft_...",
   "lastSavedAt": "2026-08-12T15:30:12+08:00",
   "lastOpenedAt": "2026-08-12T15:31:00+08:00"
 }
 ```
 
-一个正式版本在 MVP 中最多有一份受管理的版本工作文件。重复“基于 V2 继续编辑”时打开同一份 V2 工作文件，避免产生多个无法区分的 V2 草稿。这份状态文件是 Hash、draft 和保存状态的唯一权威；`manifest.json` 只保留稳定 ID、Version、相对路径和可见命名事实的结构映射。
+一个正式版本在 MVP 中最多有一份受管理的版本工作文件。重复“基于 V2 继续编辑”时打开同一份 V2 工作文件，避免产生多个无法区分的 V2 草稿。这份状态文件是 Hash、draft 和保存状态的唯一权威；`differsFromBase` 用于真实字节关系，`userDiffersFromBase` 用于用户可见修改状态；`manifest.json` 只保留稳定 ID、Version、相对路径和可见命名事实的结构映射。`userDiffersFromBase` 为可选的向后兼容字段，旧状态在打开时按基线快照与当前工作文件重新派生。
 
 `.pageroot/manifest.json` 以 `versionId` / `workingCopyId` 映射当前相对路径、首选文件名主干、扩展名和受控文件身份。上例中的三个命名字段是该 manifest 映射的逻辑投影；Hash、draft 和保存状态仍以 Working Copy 状态文件为权威。`sourceRelativePath`、`preferredFileStem` 和 `preferredExtension` 可以随可信用户改名而更新，但稳定 ID 不变；系统不得反向解析文件名来生成或猜测这些 ID。
 
@@ -707,6 +717,7 @@ manifest 可记录平台文件标识（例如 device、inode、birthtime）作�
 ### 16.1 版本与保存
 
 - [ ] 导入外部 `A.html` 后创建隐藏不可变版本 1 和可见 `A-V1.html`，原文件字节不变。`[第一期]`
+- [ ] 首次导入若只为可见 Working Copy 物化 Stable ID，`differsFromBase` 可以为真但 `userDiffersFromBase=false`，界面显示“未修改”；用户修改文字、样式或结构后该字段为真，重启后保持正确。`[PR1–PR10 合同]`
 - [ ] 用户连续修改 `A-V1.html` 100 次并重启应用，内容全部保存，正式版本仍只有版本 1。`[第一期]`
 - [ ] 添加、删除、修改评论和附件后重启应用，草稿完整恢复，不创建正式版本 2。`[第二期]`
 - [ ] 发送 AI 后，界面显示候选版本 2；AI 返回但未采纳时，正式历史仍只有版本 1。`[第一期]`
@@ -761,7 +772,9 @@ manifest 可记录平台文件标识（例如 device、inode、birthtime）作�
 
 ### 16.5 源码与安全
 
-- [ ] 仅打开和导入时，供应的单文件 HTML 字节逐字节不变。`[第一期]`
+- [ ] 仅打开和导入时，供应的外部单文件 HTML 字节逐字节不变；可见项目 Working Copy 的 Stable ID 物化不计入外部原稿保护承诺。`[第一期]`
+- [ ] 外部原文件与隐藏 V1 快照逐字节保持原稿；可见 Working Copy 的 Stable ID 物化不回写原文件或快照。`[PR1–PR10 合同]`
+- [ ] 工作副本导出保留 Stable ID；干净 HTML 导出只移除真实 `data-pageroot-id` 属性并完整保留用户修改与 Script、Style、文本字面量。`[PR1–PR10 合同]`
 - [ ] 本地局部编辑仍通过受支持 SourcePatch 路径，只改变授权范围。`[第一期]`
 - [ ] 预览 DOM 从不成为保存或版本快照事实源。`[第一期]`
 - [ ] 相对资源依赖不阻止完整 HTML 建立原字节 V1；资源包复制、重写和长期管理不在第一期隐式交付。`[第一期]`
@@ -810,13 +823,18 @@ manifest 可记录平台文件标识（例如 device、inode、birthtime）作�
 
 用户只需要理解五句话：
 
-1. **打开不会改动原文件；若它不属于有效 v4 Project，PageRoot 会立即把它导入自己的项目文件夹并从 V1 开始。**
+1. **打开不会改动原文件；若它不属于有效 v4 Project，PageRoot 会在确认后把它导入自己的项目文件夹并从 V1 开始。**
 2. **你的文字、样式、评论、附件和图片都会自动保存，但不会因此不停增加版本号。**
 3. **从历史版本继续修改没有问题；界面会一直告诉你当前基于版本几。**
 4. **AI 返回的是待审阅候选，只有你采纳以后，它才成为下一个正式版本。**
 5. **PageRoot 只管理“PageRoot/项目”里已登记的文件；整个项目文件夹搬走或复制出去后不会被两边同时写。**
+6. **项目只因真实内容、样式或结构变化显示“已修改”；PageRoot 为工作文件补上的 Stable ID 不算用户修改。需要交付时可选择保留工作副本元数据，或导出移除 Stable ID 的干净 HTML。**
 
 ## 19. 更新记录
+
+### 2026-08-31（Asia/Shanghai，UTC+8）— PR1–PR10 文件合同收敛
+
+明确原稿/V1/Working Copy 的字节边界，新增 `userDiffersFromBase` 语义投影，区分保留 Stable ID 的工作副本导出与移除真实 Stable ID 属性的干净 HTML 导出，并声明 Undo/Redo 只属于当前打开文档会话。
 
 ### 2026-08-15（Asia/Shanghai，UTC+8）— PRD v1.4 / PR 2B
 

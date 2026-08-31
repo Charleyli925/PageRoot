@@ -153,6 +153,7 @@ import {
   SOURCE_ELEMENT_IDENTITY_MIGRATION_TRANSACTION_SCHEMA_VERSION,
   sourceElementIdentityBindingSha256,
   sourceElementIdentityMigrationRecoveryPaths,
+  userDiffersFromBaseHtml,
   workingCopySourcePath,
   workingCopyStatePath,
 } from "./project-file-repository/working-copy.mjs";
@@ -796,6 +797,14 @@ export class ProjectFileRepository {
         sourceSha256: source.sha256,
       });
     }
+    if (workingCopy && state && target.targetKind === "working-copy") {
+      state = await this.#ensureUserDifferenceProjection({
+        loaded,
+        workingCopy,
+        state,
+        html: source.html,
+      });
+    }
     performanceTiming.checkpoint("workingCopyIdentityMs");
     // The active Working Copy can be reconciled from a clean external edit
     // immediately above. Build this public list only after that mutation so
@@ -815,6 +824,7 @@ export class ProjectFileRepository {
         versionId: entry.versionId,
         basedOnVersionId: entry.basedOnVersionId,
         differsFromBase: workingCopyState.differsFromBase === true,
+        userDiffersFromBase: workingCopyState.userDiffersFromBase === true,
         saveState: workingCopyState.saveState,
       });
     }
@@ -846,6 +856,56 @@ export class ProjectFileRepository {
     };
     performanceTiming.checkpoint("workspaceSerializeMs");
     return result;
+  }
+
+  async #userDiffersFromBase({ loaded, workingCopy, html }) {
+    const baseVersion = loaded.manifest.versions.find(
+      (version) => version.versionId === workingCopy.basedOnVersionId,
+    );
+    if (!baseVersion) {
+      throw new ProjectFileRepositoryError(
+        "WORKING_COPY_BASE_VERSION_MISSING",
+        "The Working Copy base Version is missing.",
+        { workingCopyId: workingCopy.workingCopyId },
+      );
+    }
+    const snapshot = await readHtmlFile(
+      versionSnapshotPath(loaded.paths, baseVersion),
+      "Working Copy base Version",
+      { projectRootPath: loaded.paths.projectRootPath },
+    );
+    if (snapshot.sha256 !== baseVersion.contentSha256) {
+      throw new ProjectFileRepositoryError(
+        "VERSION_SNAPSHOT_HASH_MISMATCH",
+        "The Working Copy base Version snapshot changed and cannot be compared.",
+        { versionId: baseVersion.versionId },
+      );
+    }
+    return userDiffersFromBaseHtml(snapshot.html, html);
+  }
+
+  async #ensureUserDifferenceProjection({ loaded, workingCopy, state, html }) {
+    const userDiffersFromBase = await this.#userDiffersFromBase({
+      loaded,
+      workingCopy,
+      html,
+    });
+    if (state.userDiffersFromBase === userDiffersFromBase) return state;
+    const nextState = {
+      ...state,
+      schemaVersion: PROJECT_FILE_SCHEMA_VERSION,
+      projectId: loaded.project.projectId,
+      documentId: loaded.project.documentId,
+      workingCopyId: workingCopy.workingCopyId,
+      userDiffersFromBase,
+    };
+    await atomicWriteProjectJson(
+      loaded.paths.projectRootPath,
+      workingCopyStatePath(loaded.paths, workingCopy),
+      nextState,
+      "Working Copy state",
+    );
+    return nextState;
   }
 
   async #reconcileExternalWorkingCopyState({ loaded, workingCopy, state, source }) {
@@ -886,6 +946,11 @@ export class ProjectFileRepository {
         },
       );
     }
+    const userDiffersFromBase = await this.#userDiffersFromBase({
+      loaded,
+      workingCopy,
+      html: source.html,
+    });
     const nextState = {
       ...state,
       schemaVersion: PROJECT_FILE_SCHEMA_VERSION,
@@ -894,6 +959,7 @@ export class ProjectFileRepository {
       workingCopyId: workingCopy.workingCopyId,
       currentSha256: source.sha256,
       differsFromBase: source.sha256 !== state.baseSha256,
+      userDiffersFromBase,
       saveState: "saved",
       lastOpenedAt: nowIso(this.#clock),
     };
@@ -919,6 +985,11 @@ export class ProjectFileRepository {
     const adoptedState = { ...state };
     delete adoptedState.sourceElementIdentitySchemaVersion;
     delete adoptedState.sourceElementIdentityBindingSha256;
+    const userDiffersFromBase = await this.#userDiffersFromBase({
+      loaded,
+      workingCopy,
+      html: source.html,
+    });
     const nextState = {
       ...adoptedState,
       schemaVersion: PROJECT_FILE_SCHEMA_VERSION,
@@ -927,6 +998,7 @@ export class ProjectFileRepository {
       workingCopyId: workingCopy.workingCopyId,
       currentSha256: source.sha256,
       differsFromBase: source.sha256 !== state.baseSha256,
+      userDiffersFromBase,
       saveState: "saved",
       lastOpenedAt: nowIso(this.#clock),
       // lastPersistedRevision stays at the last successful PageRoot write.
@@ -1036,6 +1108,11 @@ export class ProjectFileRepository {
       );
     }
     workingCopy.fileIdentity = copyFileIdentity(source.information);
+    const userDiffersFromBase = await this.#userDiffersFromBase({
+      loaded,
+      workingCopy,
+      html: source.html,
+    });
     const nextState = {
       ...state,
       schemaVersion: PROJECT_FILE_SCHEMA_VERSION,
@@ -1044,6 +1121,7 @@ export class ProjectFileRepository {
       workingCopyId: workingCopy.workingCopyId,
       currentSha256: source.sha256,
       differsFromBase: source.sha256 !== state.baseSha256,
+      userDiffersFromBase,
       saveState: "saved",
       lastSavedAt: nowIso(this.#clock),
       sourceElementIdentitySchemaVersion: PAGEROOT_ELEMENT_ID_SCHEMA_VERSION,
@@ -3271,6 +3349,15 @@ export class ProjectFileRepository {
         { projectId },
       );
     }
+    // Classification reads the current managed Working Copy, so do not trust
+    // a stale derived bit if another process changed the file since its last
+    // hydration. The technical state remains untouched here; workspace
+    // hydration performs the normal reconciliation/write-back when appropriate.
+    const currentUserDiffersFromBase = await this.#userDiffersFromBase({
+      loaded,
+      workingCopy,
+      html: opened.html,
+    });
     return {
       projectId: loaded.project.projectId,
       documentId: loaded.project.documentId,
@@ -3280,7 +3367,12 @@ export class ProjectFileRepository {
       currentBasedOnOrdinal: basedOnVersion.ordinal,
       latestOfficialVersionId: latestVersion.versionId,
       latestOfficialOrdinal: latestVersion.ordinal,
-      currentDiffersFromBase: state.differsFromBase === true,
+      // Preserve the technical byte projection while reflecting the bytes
+      // read for this classification. User-facing consumers use the semantic
+      // projection below; classification remains read-only and does not write
+      // the stale state back.
+      currentDiffersFromBase: opened.sourceSha256 !== state.baseSha256,
+      currentUserDiffersFromBase,
       initialVersionId: initialVersion.versionId,
       initialVersionOrdinal: initialVersion.ordinal,
       sourceRelation: currentSourceSha256 === record.importSourceSha256
@@ -3551,6 +3643,10 @@ export class ProjectFileRepository {
         baseSha256: descriptor.sourceSha256,
         currentSha256: identifiedWorkingCopySha256,
         differsFromBase: identifiedWorkingCopySha256 !== descriptor.sourceSha256,
+        userDiffersFromBase: userDiffersFromBaseHtml(
+          descriptor.html,
+          identifiedWorkingCopy.html,
+        ),
         draftId: `draft_${firstWorkingCopyId}`,
         draftRelativePath: draftRelativePathFor(firstWorkingCopy),
         draftSha256: null,
@@ -4000,6 +4096,9 @@ export class ProjectFileRepository {
           activeSourcePath: resolved.exactSourcePath,
           currentBasedOnVersionId: workingCopy.basedOnVersionId,
           latestOfficialVersionId: loaded.manifest.latestOfficialVersionId,
+          userDiffersFromBase: typeof state.userDiffersFromBase === "boolean"
+            ? state.userDiffersFromBase
+            : undefined,
           hasPendingCandidate: loaded.runtime.activeCandidateId !== null,
           availability: "ready",
           availabilityReason: null,
@@ -4031,6 +4130,20 @@ export class ProjectFileRepository {
       { projectRootPath: loaded.paths.projectRootPath },
     );
     assertWorkingCopyState(activeState, loaded, activeWorkingCopy);
+    const activeSource = typeof activeState.userDiffersFromBase === "boolean"
+      ? null
+      : await readHtmlFile(
+        resolvedActive.exactSourcePath,
+        "active Working Copy",
+        { projectRootPath: loaded.paths.projectRootPath },
+      );
+    const activeUserDiffersFromBase = typeof activeState.userDiffersFromBase === "boolean"
+      ? activeState.userDiffersFromBase
+      : await this.#userDiffersFromBase({
+        loaded,
+        workingCopy: activeWorkingCopy,
+        html: activeSource.html,
+      });
     const versions = loaded.manifest.versions.map((version) => {
       const workingCopy = loaded.manifest.workingCopies.find(
         (entry) => entry.versionId === version.versionId,
@@ -4054,6 +4167,9 @@ export class ProjectFileRepository {
           : String(version.createdAt),
         isActiveWorkingCopy,
         isLatestOfficial: version.versionId === loaded.manifest.latestOfficialVersionId,
+        userDiffersFromBase: isActiveWorkingCopy
+          ? activeUserDiffersFromBase
+          : false,
       };
     });
     return {
@@ -4658,6 +4774,11 @@ export class ProjectFileRepository {
 
     await this.#hit("save-source-written", { transactionPath });
     loaded.workingCopy.fileIdentity = copyFileIdentity(cas.written.information);
+    const userDiffersFromBase = await this.#userDiffersFromBase({
+      loaded,
+      workingCopy: loaded.workingCopy,
+      html: nextHtml,
+    });
     const nextState = {
       ...currentState,
       schemaVersion: PROJECT_FILE_SCHEMA_VERSION,
@@ -4666,6 +4787,7 @@ export class ProjectFileRepository {
       workingCopyId: loaded.workingCopy.workingCopyId,
       currentSha256: nextSha256,
       differsFromBase: nextSha256 !== currentState.baseSha256,
+      userDiffersFromBase,
       saveState: "saved",
       lastPersistedRevision: Math.max(
         Number(currentState.lastPersistedRevision || 0),
@@ -5772,6 +5894,21 @@ export class ProjectFileRepository {
         stateRelativePath: "working-copies/" + workingCopyId(version.ordinal) + ".json",
         fileIdentity: copyFileIdentity(visibleInformation),
       };
+      const visibleSource = await readHtmlFile(
+        path.join(
+          loaded.paths.projectRootPath,
+          topLevelHtmlRelativePath(transaction.finalWorkingCopyRelativePath),
+        ),
+        "Version Working Copy",
+        { projectRootPath: loaded.paths.projectRootPath },
+      );
+      if (visibleSource.sha256 !== transaction.workingCopySourceSha256) {
+        throw new ProjectFileRepositoryError(
+          "PROMOTION_PATH_REPLACED",
+          "The allocated Version Working Copy bytes changed before state publication.",
+          { sourceRelativePath: transaction.finalWorkingCopyRelativePath },
+        );
+      }
       const statePath = workingCopyStatePath(loaded.paths, nextWorkingCopy);
       await atomicWriteProjectJson(loaded.paths.projectRootPath, statePath, {
         schemaVersion: PROJECT_FILE_SCHEMA_VERSION,
@@ -5783,6 +5920,10 @@ export class ProjectFileRepository {
         currentSha256: transaction.workingCopySourceSha256,
         differsFromBase:
           transaction.workingCopySourceSha256 !== transaction.candidateOutputSha256,
+        userDiffersFromBase: userDiffersFromBaseHtml(
+          candidateState.output.html,
+          visibleSource.html,
+        ),
         draftId: "draft_" + nextWorkingCopy.workingCopyId,
         draftRelativePath: draftRelativePathFor(nextWorkingCopy),
         draftSha256: null,
@@ -5797,7 +5938,7 @@ export class ProjectFileRepository {
               sourceElementIdentitySchemaVersion:
                 PAGEROOT_ELEMENT_ID_SCHEMA_VERSION,
               sourceElementIdentityBindingSha256:
-                sourceElementIdentityBindingSha256(prepared.html),
+                sourceElementIdentityBindingSha256(visibleSource.html),
             }),
       }, "Version Working Copy state");
       transaction.state = "working-copy-created";
@@ -5997,6 +6138,11 @@ export class ProjectFileRepository {
     const commitSavedSource = async (source) => {
       workingCopy.fileIdentity = copyFileIdentity(source.information);
       const savedAt = String(transaction.committedAt || transaction.preparedAt || nowIso(this.#clock));
+      const userDiffersFromBase = await this.#userDiffersFromBase({
+        loaded,
+        workingCopy,
+        html: source.html,
+      });
       await atomicWriteProjectJson(loaded.paths.projectRootPath, statePath, {
         ...currentState,
         schemaVersion: PROJECT_FILE_SCHEMA_VERSION,
@@ -6005,6 +6151,7 @@ export class ProjectFileRepository {
         workingCopyId: workingCopy.workingCopyId,
         currentSha256: target,
         differsFromBase: target !== currentState.baseSha256,
+        userDiffersFromBase,
         saveState: "saved",
         lastPersistedRevision: Math.max(
           Number(currentState.lastPersistedRevision || 0),

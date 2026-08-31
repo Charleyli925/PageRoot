@@ -430,7 +430,7 @@ export class DocumentSession {
     ) {
       return boundaryBlock(
         "source-integrity-failed",
-        "源文件的内容校验没有通过。当前页面没有覆盖文件；请先导出当前编辑，再重新读取源文件。",
+        "源文件的内容校验没有通过。当前页面没有覆盖文件；请先导出 PageRoot 工作副本，再重新读取源文件。",
         true,
       );
     }
@@ -441,7 +441,7 @@ export class DocumentSession {
       );
     }
     if (content !== html || declaredSha256 !== frozenSha256) {
-      const reason = "磁盘中的 HTML 已被其他操作修改。当前页面没有覆盖任何一份；请先导出当前编辑，或重新载入磁盘文件。";
+      const reason = "磁盘中的 HTML 已被其他操作修改。当前页面没有覆盖任何一份；请先导出 PageRoot 工作副本，或重新载入磁盘文件。";
       this.setPersistence({ state: "conflict", error: reason });
       return boundaryBlock("source-diverged", reason, true);
     }

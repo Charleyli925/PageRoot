@@ -4439,7 +4439,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     lockedRef.current = true;
     readOnlyRef.current = true;
     enableReorderRef.current = false;
-    iframeRef.current?.contentDocument?.documentElement.setAttribute(
+    iframeRef.current?.contentDocument?.documentElement?.setAttribute(
       "data-html-canvas-locked",
       "",
     );

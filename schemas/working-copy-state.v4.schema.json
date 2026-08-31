@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://pageroot.local/schemas/working-copy-state.v4.schema.json",
-  "$comment": "Forward compatible. Every write spreads the record it read before overriding its authoritative members, so a member added by a newer PageRoot is preserved. Legacy records omit both sourceElementIdentitySchemaVersion and sourceElementIdentityBindingSha256; once value 1 is recorded the current Working Copy must retain the sealed complete identity binding.",
+  "$comment": "Forward compatible. Every write spreads the record it read before overriding its authoritative members, so a member added by a newer PageRoot is preserved. Legacy records may omit userDiffersFromBase; when present it is the user-facing semantic projection that ignores PageRoot's data-pageroot-id metadata, while differsFromBase remains the raw byte relation. Legacy records omit both sourceElementIdentitySchemaVersion and sourceElementIdentityBindingSha256; once value 1 is recorded the current Working Copy must retain the sealed complete identity binding.",
   "type": "object",
   "required": [
     "schemaVersion",
@@ -30,6 +30,7 @@
     "baseSha256": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
     "currentSha256": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
     "differsFromBase": { "type": "boolean" },
+    "userDiffersFromBase": { "type": "boolean" },
     "draftId": { "type": "string", "minLength": 1 },
     "draftRelativePath": { "type": "string", "pattern": "^drafts/work_ver_\\d{4,}\\.json$" },
     "draftSha256": { "type": ["string", "null"], "pattern": "^sha256:[a-f0-9]{64}$" },

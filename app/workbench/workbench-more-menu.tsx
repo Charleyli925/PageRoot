@@ -7,6 +7,7 @@ import { ArrowClockwiseIcon } from "@phosphor-icons/react/dist/csr/ArrowClockwis
 import { ArrowSquareOutIcon } from "@phosphor-icons/react/dist/csr/ArrowSquareOut";
 import { DotsThreeIcon } from "@phosphor-icons/react/dist/csr/DotsThree";
 import { DownloadSimpleIcon } from "@phosphor-icons/react/dist/csr/DownloadSimple";
+import { FileHtmlIcon } from "@phosphor-icons/react/dist/csr/FileHtml";
 import { FolderOpenIcon } from "@phosphor-icons/react/dist/csr/FolderOpen";
 
 type MoreMenuItem = Readonly<{
@@ -23,7 +24,8 @@ export type WorkbenchMoreMenuProps = Readonly<{
   canOpenInBrowser: boolean;
   onOpenInBrowser: () => void;
   canExportCurrentHtml: boolean;
-  onExportCurrentHtml: () => void;
+  onExportWorkingCopy: () => void;
+  onExportCleanHtml: () => void;
   canReloadCurrentSource: boolean;
   onReloadCurrentSource: () => void;
 }>;
@@ -46,7 +48,8 @@ export function WorkbenchMoreMenu({
   canOpenInBrowser,
   onOpenInBrowser,
   canExportCurrentHtml,
-  onExportCurrentHtml,
+  onExportWorkingCopy,
+  onExportCleanHtml,
   canReloadCurrentSource,
   onReloadCurrentSource,
 }: WorkbenchMoreMenuProps) {
@@ -70,11 +73,17 @@ export function WorkbenchMoreMenu({
       onSelect: onOpenInBrowser,
     },
     {
-      id: "export-html",
-      label: "导出当前 HTML…",
+      id: "export-working-copy",
+      label: "导出 PageRoot 工作副本…",
       icon: <DownloadSimpleIcon aria-hidden="true" size={16} weight="duotone" />,
-      onSelect: onExportCurrentHtml,
+      onSelect: onExportWorkingCopy,
       dividerBefore: true,
+    },
+    {
+      id: "export-clean-html",
+      label: "导出干净 HTML…",
+      icon: <FileHtmlIcon aria-hidden="true" size={16} weight="duotone" />,
+      onSelect: onExportCleanHtml,
     },
     {
       id: "reload-source",
@@ -84,7 +93,8 @@ export function WorkbenchMoreMenu({
       dividerBefore: true,
     },
   ], [
-    onExportCurrentHtml,
+    onExportCleanHtml,
+    onExportWorkingCopy,
     onOpenInBrowser,
     onReloadCurrentSource,
     onShowInFolder,
@@ -92,7 +102,8 @@ export function WorkbenchMoreMenu({
   const visibleItems = useMemo(() => items.filter((item) => (
     item.id === "show-in-folder" ? canShowInFolder
       : item.id === "open-in-browser" ? canOpenInBrowser
-        : item.id === "export-html" ? canExportCurrentHtml
+        : item.id === "export-working-copy" || item.id === "export-clean-html"
+          ? canExportCurrentHtml
           : canReloadCurrentSource
   )), [
     canExportCurrentHtml,

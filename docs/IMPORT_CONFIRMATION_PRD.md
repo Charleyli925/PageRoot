@@ -1,8 +1,8 @@
 # 外部 HTML 打开、导入确认与项目归属
 
-- 文档版本：PRD v1.2
-- 最近更新：2026-08-16（Asia/Shanghai，UTC+8）
-- 状态：已实施（v1.2 产品规则；确认 UI、Prepared Intent、Canvas 终态与可选废纸篓删除已在本分支落地）
+- 文档版本：PRD v1.3
+- 最近更新：2026-08-31（Asia/Shanghai，UTC+8）
+- 状态：已实施（v1.3 产品规则；确认 UI、Prepared Intent、Canvas 终态与可选废纸篓删除已在本分支落地）
 - 适用范围：桌面版打开本地 `.html` / `.htm`，包括首次打开外部文件、再次打开已导入原文件、直接打开已登记 PageRoot 项目文件
 - 关联文档：[版本与项目文件产品需求](VERSION_AND_PROJECT_FILES_PRD.md)、[MVP 产品需求](MVP_PRD.md)、[交互流程](INTERACTION_FLOW.md)、[状态所有权](STATE_OWNERSHIP.md)、[安全模型](SECURITY_MODEL.md)、[ADR 0022](decisions/0022-user-owned-project-root-identity.md)
 
@@ -16,6 +16,15 @@
 这不是只有高频测试才会遇到的特殊情况。任何保留下载目录、桌面或业务文件夹中原稿，并习惯从 Finder 再次双击它的普通用户都可能遇到。产品必须把“外部源与 PageRoot 项目的长期归属”建模为正式事实，而不是把每次外部打开都当成一次全新导入。
 
 版本、Working Copy、Candidate 和 Promotion 的基础语义仍以 [VERSION_AND_PROJECT_FILES_PRD](VERSION_AND_PROJECT_FILES_PRD.md) 为准。本文只补齐外部源关联和打开分流，不改变正式版本的生成规则。
+
+### PR1–PR10 后的文件状态与导出合同
+
+以下规则覆盖本文此前对“可见 V1 工作文件逐字节一致”的简写：
+
+1. 外部原 HTML 与隐藏 V1 快照保留首次导入时的原始字节。项目内可见的 `A-V1.html` 是 PageRoot Working Copy，会在需要时物化真实的 `data-pageroot-id` Stable ID，因此可能与两者逐字节不同。
+2. Working Copy state 中的 `baseSha256`、`currentSha256`、`differsFromBase` 继续表示真实字节关系；用户界面和“是否与初始版本不同”使用 `userDiffersFromBase`，比较时只忽略实际 HTML 属性 `data-pageroot-id`。首次导入只物化 Stable ID 时，`userDiffersFromBase=false`，界面显示“未修改”。
+3. “导出 PageRoot 工作副本”完整复制当前 HTML 并保留 Stable ID；“导出干净 HTML”只从真实 HTML start tag 移除 `data-pageroot-id` 属性，Script、Style、注释和普通文本中的同名字符串保持不变。两种导出都不写回项目、版本、评论、Registry 或 Recent。
+4. Undo/Redo 只属于当前打开文档的会话历史；它可以触发普通自动保存，但不属于项目版本历史，也不创建正式 Version。
 
 ## 1. 产品结论
 
@@ -41,12 +50,12 @@
 |---|---|---|---|---|
 | 外部原文件 `/桌面/A.html` | 是 | 用户选择时的原始字节 | PageRoot 不自动回写；除非用户主动在别处修改它，否则保持原样 | 否 |
 | 隐藏的 V1 版本快照 | 默认不可见 | 与首次导入时所选文件逐字节一致 | 永远不变 | 是，正式版本 1 |
-| 项目内可见工作文件 `A-V1.html` | 是 | 刚导入时与 V1 快照逐字节一致 | 用户编辑后自动保存到这里 | 否；它是基于 V1 的可编辑工作文件，不是不可变版本快照 |
+| 项目内可见工作文件 `A-V1.html` | 是 | 从 V1 原始字节物化 PageRoot Stable ID 后的工作文件，用户语义上与 V1 一致但不保证逐字节一致 | 用户编辑后自动保存到这里 | 否；它是基于 V1 的可编辑工作文件，不是不可变版本快照 |
 | Working Copy | 不作为用户术语展示 | 从导入完成时就存在，记录 `A-V1.html` 当前编辑状态及其基于哪个正式版本 | 随本地保存更新 | 否，它是内部编辑状态，不是额外生成的一份 `A-working-copy.html` |
 
-因此，不是“用户一修改 A，才出现一个 `A-working copy` 文件”。首次导入成功时，项目内可见 `A-V1.html` 及其内部 Working Copy 状态就已经存在。用户看到并编辑的是 `A-V1.html`；“Working Copy”只是系统内部用来表达“当前本地编辑基于哪个正式版本、是否与基线不同”的模型。
+因此，不是“用户一修改 A，才出现一个 `A-working copy` 文件”。首次导入成功时，项目内可见 `A-V1.html` 及其内部 Working Copy 状态就已经存在。用户看到并编辑的是 `A-V1.html`；“Working Copy”只是系统内部用来表达“当前本地编辑基于哪个正式版本、是否与基线不同”的模型。Stable ID 是 PageRoot 工作文件元数据，不是外部原稿或 V1 快照的一部分。
 
-UI 不向普通用户展示“Working Copy”一词。对用户统一说“当前项目”“当前本地编辑”“已保存修改”或“基于版本 N”。
+除导出菜单中为避免歧义而明确写出“PageRoot 工作副本”外，UI 不要求普通用户理解内部 Working Copy 模型；状态文案继续使用“当前项目”“当前本地编辑”“已保存修改”“未修改”或“基于版本 N”。
 
 ### 2.2 什么会自动保存，什么不会
 
@@ -202,7 +211,7 @@ UI 不向普通用户展示“Working Copy”一词。对用户统一说“当�
 ［取消］［导入并打开］
 ```
 
-确认框只陈述“将要发生什么”：新建项目、复制本文件、V1 文件名。V1 与所选文件一致、正式版本只在采纳 AI 修改后递增、不导入同目录资源这三条仍然成立（分别见 §2.3、§2.4 与 §14），但不在确认框里逐条展开：加粗的“复制”已经表明原文件只被复制、不被改写。
+确认框只陈述“将要发生什么”：新建项目、复制本文件、V1 文件名。隐藏 V1 快照与所选文件一致、正式版本只在采纳 AI 修改后递增、不导入同目录资源这三条仍然成立（分别见 §2.3、§2.4 与 §14），但不在确认框里逐条展开：加粗的“复制”已经表明原文件只被复制、不被改写。
 
 替换规则：
 
@@ -455,8 +464,10 @@ Workbench 只能投影这些状态并发送用户意图，不能再维护一套�
 
 ### 16.1 文件与版本语义
 
-- [ ] 首次导入后，隐藏 V1 快照、可见 `…-V1.html` 和导入时外部原文件三者字节完全一致。
+- [ ] 首次导入后，导入时外部原文件与隐藏 V1 快照字节完全一致；可见 `…-V1.html` 含 Stable ID，移除这些真实属性后与 V1 语义一致，且 `userDiffersFromBase=false`。
 - [ ] 本地编辑自动保存到项目内可见工作文件，不改外部原稿和隐藏 V1。
+- [ ] 用户修改文字、样式或结构后，`userDiffersFromBase=true`，重启后仍正确；仅物化或移除 Stable ID 不算用户修改。
+- [ ] 工作副本导出保留 Stable ID；干净 HTML 导出移除真实 `data-pageroot-id` 属性但保留 Script、Style 和普通文本中的同名字符串，且不改变项目事实。
 - [ ] 连续本地保存不创建新正式版本；第一次明确采纳 AI Candidate 才创建 V2。
 - [ ] UI 不生成或展示 `A-working-copy.html`，也不要求用户理解 Working Copy 术语。
 - [ ] 所有 V1 文案均区分“与首次导入时一致”和“当前外部文件仍与 V1 一致”。

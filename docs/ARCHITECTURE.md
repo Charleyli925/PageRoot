@@ -9,7 +9,7 @@ User HTML bytes
   -> native Selection + IslandEditingController
   -> canonical editable island or exact direct-text-node fragment
   -> semantic operation foundation or current exact content/text SourcePatch
-  -> renderer SourceHistorySession + durable exact Patch journal
+  -> renderer SourceHistorySession (current-open session only)
   -> serialized atomic file writer
 
 Comments + frozen input
@@ -330,6 +330,13 @@ while deletion or tag migration becomes orphaned without heuristic fallback.
 ID-less historical TargetRefs retain the legacy resolver. Semantic saving
 remains outside this foundation.
 
+The external original and the hidden V1 snapshot remain byte-exact. The visible
+Working Copy may therefore differ in raw bytes immediately after import because
+it materializes Stable IDs; that identity-only difference is not a user edit.
+`baseSha256`, `currentSha256` and `differsFromBase` remain the technical byte
+projection, while `userDiffersFromBase` is the user-facing projection derived by
+the same source parser after removing only actual `data-pageroot-id` attributes.
+
 `HtmlCanvasEditor.tsx` remains the Canvas coordinator. Parsing, DOM
 instrumentation, interaction policy, preview synchronization, selection,
 source-backed page view and style inspection live in the adjacent
@@ -359,6 +366,13 @@ removes missing items with an actionable Finder recovery event, and activates
 the pending identity through its owned workflow.
 
 Direct edits form ordered revisions and are written through a single queue. Every write checks the expected source Hash, uses a same-directory temporary file and atomic replacement, then rereads the result. External modification causes a fail-closed conflict.
+
+Export is a read-only projection of the current complete Working Copy source.
+The PageRoot Working Copy export copies the HTML, including Stable IDs. The clean
+HTML export uses parser-proven start-tag attribute ranges to remove only real
+`data-pageroot-id` attributes; literals in Script, Style, comments and text are
+not source attributes and remain untouched. Neither export writes Working Copy,
+Version, comment, Registry, current-project or Recent state.
 
 The same Repository serialization owns Working Copy source-element identity.
 `working-copy-state.v4` records the adopted identity schema and a canonical
@@ -436,6 +450,11 @@ evidence but never restores the user-visible history stack. A v4 Project File
 does not persist a Bridge source-history journal. The legacy schema and
 `/source-history/action` remain compatibility surfaces until PR10 and are not a
 current editing authority.
+
+The cursor and its inverse/forward Patch pairs belong only to the currently open
+document session: switching documents, closing the document or restarting the
+application clears them. A successful autosave is ordinary Working Copy state,
+not project Version history.
 
 After that acknowledgement, the Canvas may keep the current iframe only when
 both history targets resolve exactly to the same editable-island identity, the

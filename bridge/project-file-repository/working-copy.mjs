@@ -16,6 +16,7 @@ import {
 import {
   parseHtmlSource,
   rawStartTagAttributes,
+  removePagerootElementIdentityAttributes,
 } from "../html-source-parser.mjs";
 import {
   PAGEROOT_ELEMENT_ID_ATTRIBUTE,
@@ -70,6 +71,17 @@ const HTML_VOID_ELEMENTS = new Set([
 ]);
 
 export const SOURCE_ELEMENT_IDENTITY_MIGRATION_TRANSACTION_SCHEMA_VERSION = "1.0.0";
+
+export function userContentSha256(html) {
+  return sha256(Buffer.from(
+    removePagerootElementIdentityAttributes(html),
+    "utf8",
+  ));
+}
+
+export function userDiffersFromBaseHtml(baseHtml, currentHtml) {
+  return userContentSha256(baseHtml) !== userContentSha256(currentHtml);
+}
 
 function startTagClosingDelimiterOffset(source, startTag) {
   let cursor = startTag.endOffset - 1;
@@ -926,6 +938,10 @@ export function assertWorkingCopyState(
     || !SHA256.test(String(state.currentSha256 || ""))
     || typeof state.differsFromBase !== "boolean"
     || state.differsFromBase !== (state.currentSha256 !== state.baseSha256)
+    || (
+      state.userDiffersFromBase !== undefined
+      && typeof state.userDiffersFromBase !== "boolean"
+    )
     || state.draftId !== `draft_${workingCopy.workingCopyId}`
     || state.draftRelativePath !== expectedDraftRelativePath
     || (state.draftSha256 !== null && !SHA256.test(String(state.draftSha256 || "")))

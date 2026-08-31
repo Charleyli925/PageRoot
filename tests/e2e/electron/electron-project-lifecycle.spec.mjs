@@ -70,6 +70,11 @@ test("Electron first launch imports the welcome HTML as V1 and sends its comment
       "欢迎来到源页.html",
     );
     await waitForProjectReady(launched.page);
+    await launched.page.getByRole("button", { name: "展开左侧边栏" }).click();
+    const sidebar = launched.page.locator(".workbench-global-sidebar");
+    await expect(sidebar.locator(
+      ".sidebar-project-row-current .sidebar-project-change-status",
+    )).toHaveText("未修改");
     let managedWelcomePath = "";
     await expect.poll(
       async () => {
@@ -132,6 +137,8 @@ test("Electron first launch imports the welcome HTML as V1 and sends its comment
     expect(workingCopyState.sourceElementIdentitySchemaVersion).toBe(1);
     expect(workingCopyState.baseSha256).toBe(firstVersion.contentSha256);
     expect(workingCopyState.currentSha256).not.toBe(workingCopyState.baseSha256);
+    expect(workingCopyState.differsFromBase).toBe(true);
+    expect(workingCopyState.userDiffersFromBase).toBe(false);
 
     const editor = launched.page.getByTestId("html-canvas-editor")
       .filter({ visible: true })

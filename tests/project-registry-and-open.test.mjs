@@ -83,6 +83,89 @@ test("atomic import creates V1 facts once and ordinary saves never create a Vers
   );
 });
 
+test("first import keeps original bytes and treats Stable ID materialization as unmodified", async (t) => {
+  const value = await fixture(t);
+  const original = "<!doctype html><html><head><title>原稿</title></head><body><main><p>原始文字</p></main></body></html>";
+  const imported = await importSource(value, "首次导入-无身份.html", original);
+  const controlRoot = path.join(imported.target.projectRootPath, ".pageroot");
+  const manifest = await json(path.join(controlRoot, "manifest.json"));
+  const state = await json(path.join(
+    controlRoot,
+    "working-copies",
+    imported.target.workingCopyId + ".json",
+  ));
+  const workingCopyHtml = await readFile(imported.target.exactSourcePath, "utf8");
+  assert.equal(await readFile(imported.sourcePath, "utf8"), original);
+  assert.equal(
+    await readFile(path.join(controlRoot, manifest.versions[0].snapshotRelativePath), "utf8"),
+    original,
+  );
+  assert.match(workingCopyHtml, /data-pageroot-id="pr1_[0-9a-f]{32}"/u);
+  assert.notEqual(state.currentSha256, state.baseSha256);
+  assert.equal(state.userDiffersFromBase, false);
+
+  const workspace = await value.repository.workspace({ sourcePath: imported.target.exactSourcePath });
+  assert.equal(workspace.workingCopyState.userDiffersFromBase, false);
+  assert.equal(
+    workspace.workingCopies.find((entry) => entry.workingCopyId === imported.target.workingCopyId)
+      ?.userDiffersFromBase,
+    false,
+  );
+  const reopened = await new ProjectFileRepository({ projectsRoot: value.projects })
+    .workspace({ sourcePath: imported.target.exactSourcePath });
+  assert.equal(reopened.workingCopyState.userDiffersFromBase, false);
+  const externalClassification = await value.repository.classifyOpenPath({
+    sourcePath: imported.sourcePath,
+  });
+  assert.equal(externalClassification.projectFacts.currentDiffersFromBase, true);
+  assert.equal(externalClassification.projectFacts.currentUserDiffersFromBase, false);
+});
+
+test("text and style edits use semantic difference and survive restart", async (t) => {
+  const value = await fixture(t);
+  const original = "<!doctype html><html><head></head><body><main class=\"hero\" style=\"color: red;\"><p>原始文字</p></main></body></html>";
+  const imported = await importSource(value, "用户修改后重开.html", original);
+  const controlRoot = path.join(imported.target.projectRootPath, ".pageroot");
+  const statePath = () => path.join(
+    controlRoot,
+    "working-copies",
+    `${imported.target.workingCopyId}.json`,
+  );
+  const assertUserModified = async (target) => {
+    const state = await json(statePath());
+    assert.equal(state.userDiffersFromBase, true);
+    assert.notEqual(state.currentSha256, state.baseSha256);
+    const workspace = await new ProjectFileRepository({ projectsRoot: value.projects }).workspace({
+      sourcePath: target.exactSourcePath,
+    });
+    assert.equal(workspace.workingCopyState.userDiffersFromBase, true);
+    assert.equal(workspace.workingCopies[0].userDiffersFromBase, true);
+    return workspace.target;
+  };
+
+  let target = imported.target;
+  for (const [editRevision, edit] of [
+    [1, (htmlSource) => htmlSource.replace("原始文字", "修改文字")],
+    [2, (htmlSource) => htmlSource.replace("color: red", "color: blue")],
+  ]) {
+    const currentHtml = await readFile(target.exactSourcePath, "utf8");
+    const nextHtml = edit(currentHtml);
+    const saved = await value.repository.saveWorkingCopy({
+      target,
+      html: nextHtml,
+      expectedSourceSha256: target.sourceSha256,
+      editRevision,
+    });
+    target = await assertUserModified(saved.target);
+  }
+
+  const classified = await value.repository.classifyOpenPath({
+    sourcePath: imported.sourcePath,
+  });
+  assert.equal(classified.projectFacts.currentDiffersFromBase, true);
+  assert.equal(classified.projectFacts.currentUserDiffersFromBase, true);
+});
+
 test("PROJECT.md starts with only the project title and can be cleared", async (t) => {
   const value = await fixture(t);
   const imported = await importSource(value, "项目规则.html");
@@ -246,6 +329,7 @@ test("registered version summaries stay content-free and expose the safe active 
     modifiedAt: summary.versions[0].modifiedAt,
     isActiveWorkingCopy: true,
     isLatestOfficial: true,
+    userDiffersFromBase: false,
   });
   assert.equal(Object.hasOwn(summary.versions[0], "content"), false);
   assert.equal(Object.hasOwn(summary.versions[0], "comments"), false);

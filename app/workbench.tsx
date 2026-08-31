@@ -137,6 +137,7 @@ import {
   fileAsBase64,
   isImageFile,
 } from "./workbench/browser-io";
+import { removePagerootElementIdentityAttributes } from "./lib/source-index.js";
 import {
   attachmentFromRecord,
   canLocateTarget,
@@ -265,6 +266,12 @@ const BROWSER_PREVIEW_LOGO_PLACEHOLDER =
 const PROJECT_REPOSITORY_URL = "https://github.com/Charleyli925/PageRoot";
 const LATEST_RELEASE_PAGE_URL =
   "https://github.com/Charleyli925/PageRoot/releases/latest";
+
+type HtmlExportKind = "working-copy" | "clean-html";
+
+function htmlExportLabel(exportKind: HtmlExportKind): string {
+  return exportKind === "clean-html" ? "干净 HTML" : "PageRoot 工作副本";
+}
 
 class DeferredEditorCommandDiscardedError extends Error {
   readonly reason: NativeDeferredCommandDiscardReason;
@@ -419,7 +426,7 @@ export default function Workbench() {
   const previewToEditPendingRef = useRef(false);
   const pageViewDocumentKeyRef = useRef("");
   const deferredEditorReplayRef = useRef<{
-    exportCurrentHtml?: () => void;
+    exportCurrentHtml?: (exportKind?: HtmlExportKind) => void;
     reloadCurrentSource?: () => void;
     reloadReview?: () => void;
     requestUserFlush?: () => void;
@@ -2280,7 +2287,7 @@ export default function Workbench() {
         title: "本地项目资料暂时不可用",
         message: productErrorMessage(
           cause,
-          "当前页面内容仍保留。可先导出当前编辑，再重新打开源页。",
+          "当前页面内容仍保留。可先导出 PageRoot 工作副本，再重新打开源页。",
         ),
       });
     }
@@ -2318,7 +2325,7 @@ export default function Workbench() {
       setWorkspaceIssue({
         title: issue.title || "本地项目资料暂时不可用",
         message: issue.message
-          || "当前页面内容仍保留。可先导出当前编辑，再重新打开源页。",
+          || "当前页面内容仍保留。可先导出 PageRoot 工作副本，再重新打开源页。",
       });
     });
   }, []);
@@ -3770,13 +3777,16 @@ export default function Workbench() {
     workspaceController,
   ]);
 
-  const exportCurrentHtml = useCallback(async (fromDeferred = false) => {
+  const exportCurrentHtml = useCallback(async (
+    exportKind: HtmlExportKind = "working-copy",
+    fromDeferred = false,
+  ) => {
     if (isViewTransitioning()) return;
     if (
       !fromDeferred
       && deferEditorCommand(
         "export",
-        () => deferredEditorReplayRef.current.exportCurrentHtml?.(),
+        () => deferredEditorReplayRef.current.exportCurrentHtml?.(exportKind),
       )
     ) return;
     // Export is a source-authority boundary, just like save/navigation. Do not
@@ -3789,21 +3799,25 @@ export default function Workbench() {
     if (committed && !committed.ok) {
       editorRef.current?.showCommitBlocked(
         committed.reason
-          || "请点回文字完成输入，再导出 HTML 副本。",
+          || "请点回文字完成输入，再导出 PageRoot 工作副本。",
       );
       return;
     }
     const nextHtml = committed?.html
       || editorRef.current?.getSourceHtml()
       || currentDocumentSessionSnapshot().html;
+    const exportHtml = exportKind === "clean-html"
+      ? removePagerootElementIdentityAttributes(nextHtml)
+      : nextHtml;
+    const exportLabel = htmlExportLabel(exportKind);
     const api = window.htmlAIProjects;
     if (!api?.exportHtmlCopy) {
-      downloadHtml(nextHtml, projectName);
+      downloadHtml(exportHtml, projectName);
       setToast({
-        title: "已导出 HTML 副本",
-        message: "导出不会改变当前项目或版本历史。",
+        title: `已导出${exportLabel}`,
+        message: "导出不会改变当前项目、版本、评论或最近打开记录。",
         tone: "success",
-        dedupeKey: "export",
+        dedupeKey: `export-${exportKind}`,
       });
       return;
     }
@@ -3812,13 +3826,14 @@ export default function Workbench() {
         html: nextHtml,
         sourcePath: currentProjectSessionSnapshot().sourcePath,
         suggestedName: projectName,
+        exportKind,
       });
       if (result) {
         setToast({
-          title: "已导出 HTML 副本",
-          message: `已保存为 ${result.name}；当前项目和版本号没有变化。`,
+          title: `已导出${exportLabel}`,
+          message: `已保存为 ${result.name}；当前项目、版本、评论和最近打开记录没有变化。`,
           tone: "success",
-          dedupeKey: "export",
+          dedupeKey: `export-${exportKind}`,
         });
       }
     } catch (cause) {
@@ -3827,15 +3842,19 @@ export default function Workbench() {
         "请选择另一个文件名或位置后重试。",
       );
       setToast({
-        title: "副本没有导出",
+        title: `${exportLabel}没有导出`,
         message: /没有被改动|保持不变|没有覆盖/.test(reason)
           ? reason
           : `${reason} 当前源 HTML 没有被改动。`,
         tone: "error",
         sticky: true,
         disposition: "direct-action",
-        dedupeKey: "export",
-        action: { id: "retry-export", label: "重新选择位置" },
+        dedupeKey: `export-${exportKind}`,
+        action: {
+          id: "retry-export",
+          label: "重新选择位置",
+          exportKind,
+        },
       });
     }
   }, [
@@ -3846,8 +3865,8 @@ export default function Workbench() {
     projectName,
   ]);
   useEffect(() => {
-    deferredEditorReplayRef.current.exportCurrentHtml = () => {
-      void exportCurrentHtml(true);
+    deferredEditorReplayRef.current.exportCurrentHtml = (exportKind = "working-copy") => {
+      void exportCurrentHtml(exportKind, true);
     };
   }, [exportCurrentHtml]);
 
@@ -3924,7 +3943,7 @@ export default function Workbench() {
       !skipConfirmation
       && persistState !== "conflict"
       && hasUnwrittenLocalChanges
-      && !window.confirm("重新载入会舍弃尚未写回的当前编辑内容。建议先导出副本，仍要继续吗？")
+        && !window.confirm("重新载入会舍弃尚未写回的当前编辑内容。建议先导出 PageRoot 工作副本，仍要继续吗？")
     ) return;
     const operationId = beginSourceTransition();
     if (operationId === null) return;
@@ -4071,7 +4090,7 @@ export default function Workbench() {
       if (!isCurrentProjectContext(context)) return;
       setToast({
         title: "强制解锁失败",
-        message: productErrorMessage(cause, "项目仍保持冲突状态，请先导出当前编辑后再试。"),
+        message: productErrorMessage(cause, "项目仍保持冲突状态，请先导出 PageRoot 工作副本后再试。"),
         tone: "error",
         sticky: true,
         disposition: "user-choice",
@@ -5749,6 +5768,7 @@ export default function Workbench() {
       isActiveWorkingCopy: summary.isActiveWorkingCopy,
       isLatestOfficial: summary.isLatestOfficial,
       differsFromBase: false,
+      userDiffersFromBase: summary.userDiffersFromBase === true,
       saveState: null,
     };
   }, [versions]);
@@ -5977,7 +5997,7 @@ export default function Workbench() {
         void showProjectInFolder(action.sourcePath);
         return;
       case "retry-export":
-        void exportCurrentHtml();
+        void exportCurrentHtml(action.exportKind || "working-copy");
         return;
       case "open-handoff":
         setCanvasMode("preview");
@@ -6412,7 +6432,8 @@ export default function Workbench() {
             canOpenInBrowser: canOpenCurrentHtml,
             onOpenInBrowser: () => void openCurrentHtmlInDefaultBrowser(),
             canExportCurrentHtml,
-            onExportCurrentHtml: () => void exportCurrentHtml(),
+            onExportWorkingCopy: () => void exportCurrentHtml("working-copy"),
+            onExportCleanHtml: () => void exportCurrentHtml("clean-html"),
             canReloadCurrentSource,
             onReloadCurrentSource: () => void reloadCurrentSource(),
           }}
@@ -6461,7 +6482,7 @@ export default function Workbench() {
             <span>{workspaceIssue.message}</span>
           </div>
           <button type="button" onClick={() => void exportCurrentHtml()}>
-            导出当前编辑
+            导出 PageRoot 工作副本
           </button>
           <button type="button" onClick={() => void relaunchApp()}>
             重新打开源页
@@ -6480,7 +6501,7 @@ export default function Workbench() {
               ? (persistError || "您的编辑内容仍在，可先预览外部版本再决定。")
               : (persistError || "工作台保留了当前编辑内容，不会假装已经更新。")}</span>
           </div>
-          <button type="button" onClick={() => void exportCurrentHtml()}>导出当前编辑</button>
+          <button type="button" onClick={() => void exportCurrentHtml("working-copy")}>导出 PageRoot 工作副本</button>
           {persistState === "conflict" ? (
             <button type="button" onClick={() => void previewExternalSource()}>
               预览外部版本
