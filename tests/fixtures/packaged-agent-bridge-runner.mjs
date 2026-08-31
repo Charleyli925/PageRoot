@@ -200,7 +200,13 @@ async function run() {
       expectedSourceSha256: ensured.body.sourceSha256,
       freezeCutoffRevision: 0,
       summary: "Packaged Agent Bridge closed loop",
-      comments: [],
+      comments: [{
+        commentId: "comment_packaged_closed_loop",
+        text: "Packaged Agent Bridge closed loop",
+        target: { targetId: "target_packaged_closed_loop" },
+        attachments: [],
+      }],
+      targets: [{ targetId: "target_packaged_closed_loop" }],
       changeEvents: [],
       agentDelivery: {
         mode: "managed-agent",

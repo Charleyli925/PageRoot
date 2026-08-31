@@ -630,10 +630,13 @@ async function versionRequirement(cacheScope, projectRootPath, requestId) {
       "utf8",
     );
     const record = JSON.parse(raw);
-    // v3 change requests keep the requirement under `requirements.summary`;
-    // older records nested the same string under `request.summary`.
+    // v4 Task Specs keep the user-authored objective under
+    // `requirements.objective`; v3 and older records used summary fields.
     requirement = condenseVersionRequirement(
-      record?.requirements?.summary ?? record?.request?.summary,
+      record?.requirements?.objective
+        ?? record?.requirements?.summary
+        ?? record?.request?.taskSpec?.objective
+        ?? record?.request?.summary,
     );
   } catch {
     // A retired or unreadable round simply has no requirement to show. The
