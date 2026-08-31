@@ -2891,3 +2891,46 @@ test("a rewrite outside <main> is still reviewed", {
     removeSourceFixture(fixture.sourceDirectory);
   }
 });
+
+test("Review exposes Candidate changes outside the comment target without blocking adoption", {
+  tag: ["@gate-smoke", "@smoke-review"],
+}, async () => {
+  test.setTimeout(120_000);
+  const fixture = createSourceFixture("candidate-impact-review.html");
+  const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
+  try {
+    const request = await addCommentAndSubmit(
+      launched.page,
+      launched.electronApp,
+      fixture.sourcePath,
+      UPDATED_TEXT,
+    );
+    writeAiOutput(request.requestRoot, (base) => {
+      const changedTitle = base.replace(
+        /(<title[^>]*>)[\s\S]*?(<\/title>)/u,
+        "$1AI 任务标题$2",
+      );
+      return changedTitle.replace(ORIGINAL_TEXT, UPDATED_TEXT);
+    });
+    runOfficialFinalizer(request.requestRoot, request.changeRequest);
+    await expect(launched.page.getByTestId("ai-conversation-action-bar"))
+      .toContainText("等待你的决定", { timeout: 30_000 });
+
+    await launched.page.getByRole("button", { name: "审阅对比" }).click();
+    await expect(launched.page.getByTestId("ai-review-workspace"))
+      .toBeVisible({ timeout: 30_000 });
+    const impact = launched.page.getByTestId("review-impact-summary");
+    await expect(impact).toBeVisible({ timeout: 30_000 });
+    await expect(impact).toContainText("1 本轮评论目标");
+    await expect(impact).toContainText("实际修改元素");
+    await expect(impact).toContainText("目标之外修改");
+    await expect(impact).toContainText("评论目标之外的修改仍保留为上下文");
+    await expect(impact.getByRole("button", { name: "查看超范围修改" }))
+      .toBeVisible();
+    await expect(launched.page.getByRole("button", { name: "采纳修改" }))
+      .toBeVisible();
+  } finally {
+    await stopPageRoot(launched.electronApp, launched.isolatedUserData);
+    removeSourceFixture(fixture.sourceDirectory);
+  }
+});

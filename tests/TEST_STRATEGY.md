@@ -106,8 +106,11 @@ step summary 里。
   run mutation I/O。
 - `VersionWorkflow`：fake Bridge、Project/Document/Version/Run Session 与 Canvas/Hash
   Port 证明 Review candidate 只读且不可变、明确 activation 的完整 identity/hash/time
-  校验、Project/Document/Version 同步 publication、background result 不抢占当前 Canvas，
-  以及 history/current navigation 的完整 Document + Version rollback 与 byte oracle。
+  校验、Project/Document/Version 同步 publication、Candidate 的 Stable-ID 目标范围评估
+  与旧 assessment 兼容、background result 不抢占当前 Canvas，以及 history/current
+  navigation 的完整 Document + Version rollback 与 byte oracle。Electron AI Review
+  场景还必须看到评论目标数、实际修改元素数、目标外修改数和进入全部变化的入口；
+  该警告不得阻止 Candidate 继续审阅或采纳。
   Workbench 只保留 review filters/layout/lease、动画和 Outcome/Toast 映射；architecture
   gate 将其直接 Bridge 调用锁定为 0。
 - `WorkspaceController`：runtime factory 是生产组合的唯一入口；它构造唯一的 Bridge

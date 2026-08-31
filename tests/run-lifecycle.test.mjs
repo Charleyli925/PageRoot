@@ -390,6 +390,30 @@ test("candidate assessment exposes only the renderer fields needed for review", 
   assert.equal(candidateAssessmentFromRecord({ status: "unknown" }), null);
 });
 
+test("candidate assessment carries valid Stable-ID impact facts to Review", () => {
+  const changedId = "pr1_00000000000040008000000000000000";
+  const outsideId = "pr1_11111111111141118000000000000000";
+  assert.deepEqual(candidateAssessmentFromRecord({
+    status: "ready",
+    issueCodes: [],
+    health: { completeDocument: true, bodyHasContent: true },
+    continuity: { status: "related" },
+    changedStableElementIds: [changedId, outsideId],
+    requestedTargetElementIds: [changedId],
+    outsideRequestedTargetElementIds: [outsideId],
+    requestedTargetCount: 1,
+  }), {
+    status: "ready",
+    issueCodes: [],
+    health: { completeDocument: true, bodyHasContent: true },
+    continuity: { status: "related" },
+    changedStableElementIds: [changedId, outsideId],
+    requestedTargetElementIds: [changedId],
+    outsideRequestedTargetElementIds: [outsideId],
+    requestedTargetCount: 1,
+  });
+});
+
 test("active run records decode transport aliases into one canonical model", () => {
   assert.deepEqual(activeRunFromRecord({
     projectId: "project_1",

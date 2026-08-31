@@ -173,7 +173,6 @@ const TASK_OWNER_CASES = [
     file: "bridge/workspace-bridge.mjs",
     nodeTests: [
       "tests/attachment-storage.test.mjs",
-      "tests/candidate-assessment.test.mjs",
       "tests/compatibility-decoders.test.mjs",
       "tests/conversation-bridge.test.mjs",
       "tests/html-source-parser.test.mjs",
@@ -187,6 +186,18 @@ const TASK_OWNER_CASES = [
     suites: ["typecheck", "lint", "node-targeted", "build-desktop", "ai-run-lifecycle-smoke"],
     directOwners: ["tests/workspace-bridge.test.mjs"],
     unrelatedOwners: ["tests/desktop-package.test.mjs", "tests/application-update.test.mjs"],
+  },
+  {
+    file: "bridge/candidate-assessment.mjs",
+    nodeTests: [
+      "tests/ai-candidate-identity-contract.test.mjs",
+      "tests/candidate-assessment.test.mjs",
+      "tests/candidate-source-identity.test.mjs",
+      "tests/project-candidate-promotion.test.mjs",
+    ],
+    suites: ["typecheck", "lint", "node-targeted", "build-desktop", "ai-review-smoke"],
+    directOwners: ["tests/candidate-assessment.test.mjs"],
+    unrelatedOwners: ["tests/project-request-authority.test.mjs", "tests/application-update.test.mjs"],
   },
   {
     file: "bridge/project-file-repository.mjs",

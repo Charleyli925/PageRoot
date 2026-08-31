@@ -14,6 +14,7 @@ import {
   buildReviewDocumentsAsync,
   buildReviewShellDocuments,
   type ReviewDocuments,
+  type ReviewImpact,
 } from "./review-document";
 import type { CommentItem, PersistState } from "./types";
 
@@ -39,7 +40,34 @@ export function preparedReviewByteSize(prepared: PreparedReviewDocuments): numbe
     + prepared.documents.bootstrapFallbackJavaScript.before.length
     + prepared.documents.bootstrapFallbackJavaScript.after.length
     + JSON.stringify(prepared.documents.commentTargets).length
+    + JSON.stringify(prepared.documents.reviewImpact || null).length
   );
+}
+
+function reviewImpactFromCandidate(
+  candidate: VersionReviewCandidate,
+): ReviewImpact | undefined {
+  const assessment = candidate.candidateAssessment;
+  if (
+    !assessment
+    || !Array.isArray(assessment.changedStableElementIds)
+    || !Array.isArray(assessment.requestedTargetElementIds)
+    || !Array.isArray(assessment.outsideRequestedTargetElementIds)
+  ) return undefined;
+  const recordedTargetCount = assessment.requestedTargetCount;
+  const requestedTargetCount = typeof recordedTargetCount === "number"
+    && Number.isSafeInteger(recordedTargetCount)
+    && recordedTargetCount >= 0
+    ? recordedTargetCount
+    : assessment.requestedTargetElementIds.length;
+  return {
+    requestedTargetCount,
+    actualChangedElementCount: assessment.changedStableElementIds.length,
+    outsideRequestedTargetCount: assessment.outsideRequestedTargetElementIds.length,
+    changedStableElementIds: [...assessment.changedStableElementIds],
+    requestedTargetElementIds: [...assessment.requestedTargetElementIds],
+    outsideRequestedTargetElementIds: [...assessment.outsideRequestedTargetElementIds],
+  };
 }
 
 export function reviewCommentsForAnalysis(comments: readonly CommentItem[]): CommentItem[] {
@@ -87,11 +115,13 @@ export async function prepareReviewAnalysis({
   onShell?: (documents: ReviewDocuments) => void;
 }): Promise<PreparedReviewDocuments> {
   const reviewComments = reviewCommentsForAnalysis(comments);
+  const reviewImpact = reviewImpactFromCandidate(candidate);
   const commentsKey = JSON.stringify(reviewComments);
   const cacheKey = [
     candidate.operationKey,
     candidate.baseSnapshotSha256,
     candidate.sha256,
+    JSON.stringify(candidate.candidateAssessment || null),
     candidate.sourcePath,
     externalBootstrap ? "external" : "inline",
     await browserSha256(commentsKey),
@@ -102,6 +132,7 @@ export async function prepareReviewAnalysis({
     sessionId,
     sourcePath: candidate.sourcePath,
     externalBootstrap,
+    ...(reviewImpact ? { reviewImpact } : {}),
   }));
   return session.analyze({
     key: cacheKey,
@@ -117,6 +148,7 @@ export async function prepareReviewAnalysis({
         sourcePath: candidate.sourcePath,
         externalBootstrap,
         comments: reviewComments,
+        ...(reviewImpact ? { reviewImpact } : {}),
       }, { isCancelled }),
     }),
   });
@@ -192,12 +224,14 @@ export default function ReviewAnalysisPrewarm({
         candidate.operationKey,
         candidate.baseSnapshotSha256,
         candidate.sha256,
+        JSON.stringify(candidate.candidateAssessment || null),
         candidate.sourcePath,
         externalBootstrap ? "external" : "inline",
         await browserSha256(commentsKey),
       ].join("\u0000");
       if (cancelled || session.peek(cacheKey)) return;
       const sessionId = `review-prewarm-${Date.now().toString(36)}-${++sequenceRef.current}`;
+      const reviewImpact = reviewImpactFromCandidate(candidate);
       await session.analyze({
         key: cacheKey,
         compute: async ({ isCancelled }) => ({
@@ -212,6 +246,7 @@ export default function ReviewAnalysisPrewarm({
             sourcePath: candidate.sourcePath,
             externalBootstrap,
             comments: reviewComments,
+            ...(reviewImpact ? { reviewImpact } : {}),
           }, { isCancelled }),
         }),
       });

@@ -66,6 +66,30 @@ test("candidate assessment ignores script changes while checking document health
   assert.equal("executableSurfaceUnchanged" in scriptChange.health, false);
 });
 
+test("candidate assessment reports stable-element changes inside and outside comment targets", () => {
+  const targetId = "pr1_00000000000040008000000000000000";
+  const outsideId = "pr1_11111111111141118000000000000000";
+  const baseHtml = `<!doctype html><html><head><title>Impact</title></head><body>
+<main><p data-pageroot-id="${targetId}">评论目标</p></main>
+<aside data-pageroot-id="${outsideId}">评论目标之外</aside>
+</body></html>`;
+  const outputHtml = baseHtml
+    .replace("评论目标</p>", "评论目标已修改</p>")
+    .replace("评论目标之外</aside>", "评论目标之外也被修改</aside>");
+
+  const assessment = assessHtmlCandidate({
+    baseHtml,
+    outputHtml,
+    requestedTargetElementIds: [targetId],
+    requestedTargetCount: 1,
+  });
+
+  assert.deepEqual(assessment.changedStableElementIds, [targetId, outsideId].sort());
+  assert.deepEqual(assessment.requestedTargetElementIds, [targetId]);
+  assert.deepEqual(assessment.outsideRequestedTargetElementIds, [outsideId]);
+  assert.equal(assessment.requestedTargetCount, 1);
+});
+
 test("historical script-change conclusions are normalized out of current policy", () => {
   const current = assessHtmlCandidate({
     baseHtml: documentHtml(),

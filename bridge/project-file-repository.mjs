@@ -41,6 +41,7 @@ import {
   normalizeNewAgentDelivery,
 } from "../shared/agent-delivery.mjs";
 import {
+  isValidPagerootElementId,
   PAGEROOT_ELEMENT_ID_SCHEMA_VERSION,
 } from "../shared/pageroot-element-identity.mjs";
 
@@ -329,6 +330,8 @@ export class ProjectFileRepository {
     candidateId = null,
     html,
     expectedSourceSha256,
+    requestedTargetElementIds = [],
+    requestedTargetCount = null,
   } = {}) {
     return this.#serial(() => this.#createCandidate({
       target,
@@ -337,6 +340,8 @@ export class ProjectFileRepository {
       candidateId,
       html,
       expectedSourceSha256,
+      requestedTargetElementIds,
+      requestedTargetCount,
       inputManifestSha256: null,
     }));
   }
@@ -2938,6 +2943,14 @@ export class ProjectFileRepository {
         "The frozen Request input changed after submission.",
       );
     }
+    const requestTargets = Array.isArray(record.request?.targets)
+      ? record.request.targets
+      : [];
+    const requestedTargetElementIds = [...new Set(
+      requestTargets
+        .map((targetRef) => targetRef?.elementId)
+        .filter((elementId) => isValidPagerootElementId(elementId)),
+    )].sort();
     let prepared;
     try {
       prepared = await this.#createCandidate({
@@ -2955,6 +2968,8 @@ export class ProjectFileRepository {
         },
         assessmentBaseHtml: frozenInput.html,
         allowSourceDivergence: true,
+        requestedTargetElementIds,
+        requestedTargetCount: requestTargets.length,
         inputManifestSha256: record.inputManifestSha256,
       });
     } catch (cause) {
@@ -4777,6 +4792,8 @@ export class ProjectFileRepository {
     candidateIdentity = null,
     assessmentBaseHtml = null,
     allowSourceDivergence = false,
+    requestedTargetElementIds = [],
+    requestedTargetCount = null,
     inputManifestSha256 = null,
   }) {
     const loaded = await this.#resolveMutationTarget(target);
@@ -4897,6 +4914,10 @@ export class ProjectFileRepository {
           : loaded.source.html,
         candidateHtml,
         this.#clock,
+        {
+          requestedTargetElementIds,
+          requestedTargetCount,
+        },
       );
       await writeFileNoReplace(outputPath, outputBuffer, outputSha256, "Candidate HTML", {
         projectRootPath: loaded.paths.projectRootPath,

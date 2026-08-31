@@ -932,6 +932,67 @@ test("request finalization creates a reviewable Candidate only, and manifest pat
   );
 });
 
+test("request finalization seals Candidate impact against its requested Stable ID targets", async (t) => {
+  const value = await fixture(t);
+  const imported = await importSource(value, "candidate-impact.html", html("V1"));
+  const baseHtml = await readFile(imported.target.exactSourcePath, "utf8");
+  const identity = inspectSourceElementIdentity(baseHtml);
+  const targetId = identity.elements.find((element) => element.tagName === "h1")?.pagerootId;
+  const outsideId = identity.elements.find((element) => element.tagName === "title")?.pagerootId;
+  assert.ok(targetId);
+  assert.ok(outsideId);
+  const prepared = await value.repository.prepareRequest({
+    target: imported.target,
+    requestId: "req_candidate_impact",
+    attemptId: "attempt_001",
+    expectedSourceSha256: imported.target.sourceSha256,
+    request: {
+      summary: "验证评论目标之外的修改提示",
+      comments: [],
+      changeEvents: [],
+      instructions: [{
+        instructionId: "instruction_h1",
+        text: "只修改标题。",
+        targetRefs: ["target_h1"],
+      }],
+      targets: [{
+        targetId: "target_h1",
+        elementId: targetId,
+        label: "页面标题",
+        level: "module",
+        selector: "h1",
+        resolution: "exact",
+      }],
+    },
+    prompt: "# Candidate impact\n",
+  });
+  const candidateHtml = baseHtml
+    .replace(">V1</title>", ">V1 页面标题</title>")
+    .replace(">V1</h1>", ">V1 页面标题</h1>");
+  const completed = await value.repository.completeRequest({
+    target: imported.target,
+    requestId: prepared.requestId,
+    attemptId: prepared.attemptId,
+    html: candidateHtml,
+  });
+  assert.equal(completed.status, "candidate-ready");
+  assert.deepEqual(completed.candidate.assessment.requestedTargetElementIds, [targetId]);
+  assert.equal(completed.candidate.assessment.requestedTargetCount, 1);
+  assert.deepEqual(
+    completed.candidate.assessment.changedStableElementIds,
+    [targetId, outsideId].sort(),
+  );
+  assert.deepEqual(completed.candidate.assessment.outsideRequestedTargetElementIds, [outsideId]);
+  const reread = await value.repository.readCandidate({
+    target: imported.target,
+    candidateId: completed.candidate.candidateId,
+  });
+  assert.deepEqual(
+    reread.candidate.assessment.outsideRequestedTargetElementIds,
+    [outsideId],
+  );
+});
+
 test("a replaced private promotion file fails recovery without deleting user bytes", async (t) => {
   const value = await fixture(t);
   const imported = await importSource(value, "promotion-tamper.html");

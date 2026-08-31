@@ -4,6 +4,12 @@ import {
   parseHtmlSource,
   visitElements,
 } from "./html-source-parser.mjs";
+import {
+  inspectSourceElementIdentity,
+} from "./project-file-repository/working-copy.mjs";
+import {
+  isValidPagerootElementId,
+} from "../shared/pageroot-element-identity.mjs";
 
 export const CANDIDATE_ASSESSMENT_SCHEMA_VERSION = "1.0.0";
 
@@ -29,6 +35,11 @@ const ASSET_ATTRIBUTES = new Set([
 ]);
 const MAX_CONTINUITY_TEXT_CODEPOINTS = 100_000;
 const TEXT_SHINGLE_SIZE = 4;
+const IMPACT_ARRAY_FIELDS = Object.freeze([
+  "changedStableElementIds",
+  "requestedTargetElementIds",
+  "outsideRequestedTargetElementIds",
+]);
 
 function normalizedVisibleText(value) {
   return String(value || "")
@@ -225,6 +236,128 @@ function continuityAssessment(baseHtml, outputHtml) {
   };
 }
 
+function authoredChildren(element) {
+  return element?.nodeName === "template" && element.content
+    ? element.content.childNodes ?? []
+    : element?.childNodes ?? [];
+}
+
+function normalizedOwnSource(value) {
+  return String(value || "").replace(/\s+/gu, " ").trim();
+}
+
+function startTagWithoutStableId(source, element) {
+  const ranges = (element.identityAttributes || [])
+    .map((attribute) => attribute.range)
+    .filter((range) => (
+      Number.isInteger(range?.startOffset)
+      && Number.isInteger(range?.endOffset)
+      && range.startOffset >= element.startOffset
+      && range.endOffset <= element.endOffset
+      && range.endOffset > range.startOffset
+    ))
+    .sort((left, right) => left.startOffset - right.startOffset);
+  if (ranges.length === 0) {
+    return source.slice(element.startOffset, element.endOffset);
+  }
+  const parts = [];
+  let cursor = element.startOffset;
+  for (const range of ranges) {
+    if (range.startOffset < cursor) continue;
+    parts.push(source.slice(cursor, range.startOffset));
+    cursor = range.endOffset;
+  }
+  parts.push(source.slice(cursor, element.endOffset));
+  return parts.join("");
+}
+
+function siblingIndexFor(inspection, elementIndex, element) {
+  const parentIndex = element.parentElementIndex;
+  if (!Number.isInteger(parentIndex)) return 0;
+  return inspection.elements
+    .slice(0, elementIndex)
+    .filter((candidate) => candidate.parentElementIndex === parentIndex)
+    .length;
+}
+
+function stableElementSignatures(source) {
+  let inspection;
+  try {
+    inspection = inspectSourceElementIdentity(source);
+  } catch {
+    return null;
+  }
+  // Candidate identity validation owns malformed/duplicate identity errors.
+  // Assessment remains conservative if it is called directly with such input.
+  if (!inspection.valid) return null;
+  const parsed = parseHtmlSource(source);
+  const nodeByStartOffset = new Map(
+    parsed.elements
+      .filter((token) => Number.isInteger(token.start))
+      .map((token) => [token.start, token.node]),
+  );
+  const signatures = new Map();
+  for (const [elementIndex, element] of inspection.elements.entries()) {
+    const id = element.pagerootId;
+    if (!isValidPagerootElementId(id)) continue;
+    if (signatures.has(id)) return null;
+    const directText = authoredChildren(nodeByStartOffset.get(element.startOffset))
+      .filter((child) => child?.nodeName === "#text")
+      .map((child) => child.value ?? "")
+      .join("");
+    const parent = Number.isInteger(element.parentElementIndex)
+      ? inspection.elements[element.parentElementIndex]
+      : null;
+    signatures.set(id, JSON.stringify({
+      namespaceURI: String(element.node?.namespaceURI || ""),
+      tagName: String(element.tagName || "").toLowerCase(),
+      startTag: normalizedOwnSource(startTagWithoutStableId(source, element)),
+      endTag: element.explicitEndTag
+        ? normalizedOwnSource(source.slice(element.contentEndOffset, element.sourceEndOffset))
+        : "",
+      parentId: isValidPagerootElementId(parent?.pagerootId)
+        ? parent.pagerootId
+        : null,
+      siblingIndex: siblingIndexFor(inspection, elementIndex, element),
+      directText: normalizedOwnSource(directText),
+    }));
+  }
+  return signatures;
+}
+
+function normalizedRequestedTargetIds(values) {
+  return [...new Set(
+    (Array.isArray(values) ? values : [])
+      .filter((value) => isValidPagerootElementId(value)),
+  )].sort();
+}
+
+function candidateImpact(
+  baseHtml,
+  outputHtml,
+  requestedTargetElementIds,
+  requestedTargetCount,
+) {
+  const requested = normalizedRequestedTargetIds(requestedTargetElementIds);
+  const base = stableElementSignatures(baseHtml);
+  const output = stableElementSignatures(outputHtml);
+  const changed = base && output
+    ? [...new Set([...base.keys(), ...output.keys()])]
+      .filter((id) => base.get(id) !== output.get(id))
+      .sort()
+    : [];
+  const requestedSet = new Set(requested);
+  return {
+    changedStableElementIds: changed,
+    requestedTargetElementIds: requested,
+    outsideRequestedTargetElementIds: changed.filter((id) => !requestedSet.has(id)),
+    requestedTargetCount: Number.isSafeInteger(requestedTargetCount)
+      && requestedTargetCount >= 0
+      ? requestedTargetCount
+      : requested.length,
+  };
+}
+
 export function candidateAssessmentDecision({
   completeDocument,
   bodyHasContent,
@@ -251,7 +384,13 @@ export function candidateAssessmentDecision({
   return { status: "ready", issueCodes: [] };
 }
 
-export function assessHtmlCandidate({ baseHtml, outputHtml }) {
+export function assessHtmlCandidate({
+  baseHtml,
+  outputHtml,
+  requestedTargetElementIds = [],
+  requestedTargetCount = null,
+  includeImpact = true,
+}) {
   const completeDocument = hasCompleteDocumentStructure(outputHtml);
   const continuity = continuityAssessment(baseHtml, outputHtml);
   const bodyHasContent = Boolean(
@@ -264,7 +403,7 @@ export function assessHtmlCandidate({ baseHtml, outputHtml }) {
     continuityStatus: continuity.status,
   });
 
-  return {
+  const assessment = {
     schemaVersion: CANDIDATE_ASSESSMENT_SCHEMA_VERSION,
     ...decision,
     health: {
@@ -273,4 +412,18 @@ export function assessHtmlCandidate({ baseHtml, outputHtml }) {
     },
     continuity,
   };
+  if (includeImpact) {
+    Object.assign(
+      assessment,
+      candidateImpact(
+        baseHtml,
+        outputHtml,
+        requestedTargetElementIds,
+        requestedTargetCount,
+      ),
+    );
+  }
+  return assessment;
 }
+
+export { IMPACT_ARRAY_FIELDS };

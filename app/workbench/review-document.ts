@@ -68,6 +68,7 @@ export type {
   ReviewCommentTarget,
   ReviewDocumentBuildOptions,
   ReviewDocuments,
+  ReviewImpact,
   ReviewFilter,
   ReviewOutlineItem,
   ReviewSide,
@@ -282,6 +283,7 @@ function* buildReviewDocumentSteps(
       outline: [],
       commentGroups: [],
       commentTargets: [],
+      ...(options.reviewImpact ? { reviewImpact: options.reviewImpact } : {}),
     };
   }
   const parser = new DOMParser();
@@ -488,6 +490,7 @@ function* buildReviewDocumentSteps(
     outline,
     commentGroups,
     commentTargets: reviewCommentTargets,
+    ...(options.reviewImpact ? { reviewImpact: options.reviewImpact } : {}),
   };
 }
 
@@ -528,6 +531,7 @@ export function buildReviewShellDocuments(
       outline: [],
       commentGroups: [],
       commentTargets: [],
+      ...(options.reviewImpact ? { reviewImpact: options.reviewImpact } : {}),
     };
   }
   const parser = new DOMParser();
@@ -564,6 +568,7 @@ export function buildReviewShellDocuments(
     outline: [],
     commentGroups: [],
     commentTargets: [],
+    ...(options.reviewImpact ? { reviewImpact: options.reviewImpact } : {}),
   };
 }
 

@@ -24,6 +24,26 @@
         "continuity",
         "assessedAt"
       ],
+      "allOf": [
+        {
+          "if": {
+            "anyOf": [
+              { "required": ["changedStableElementIds"] },
+              { "required": ["requestedTargetElementIds"] },
+              { "required": ["outsideRequestedTargetElementIds"] },
+              { "required": ["requestedTargetCount"] }
+            ]
+          },
+          "then": {
+            "required": [
+              "changedStableElementIds",
+              "requestedTargetElementIds",
+              "outsideRequestedTargetElementIds",
+              "requestedTargetCount"
+            ]
+          }
+        }
+      ],
       "properties": {
         "schemaVersion": { "const": "1.0.0" },
         "status": { "enum": ["ready", "attention"] },
@@ -74,6 +94,25 @@
             "baseParseErrorCount": { "type": "integer", "minimum": 0 },
             "outputParseErrorCount": { "type": "integer", "minimum": 0 }
           }
+        },
+        "changedStableElementIds": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^pr1_[0-9a-f]{12}4[0-9a-f]{3}[89ab][0-9a-f]{15}$" }
+        },
+        "requestedTargetElementIds": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^pr1_[0-9a-f]{12}4[0-9a-f]{3}[89ab][0-9a-f]{15}$" }
+        },
+        "outsideRequestedTargetElementIds": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^pr1_[0-9a-f]{12}4[0-9a-f]{3}[89ab][0-9a-f]{15}$" }
+        },
+        "requestedTargetCount": {
+          "type": "integer",
+          "minimum": 0
         },
         "assessedAt": { "type": "string", "format": "date-time" }
       }

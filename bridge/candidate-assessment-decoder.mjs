@@ -11,6 +11,9 @@ import {
   LifecycleError,
   sha256,
 } from "./lifecycle-core.mjs";
+import {
+  isValidPagerootElementId,
+} from "../shared/pageroot-element-identity.mjs";
 
 const ROOT_FIELDS = new Set([
   "schemaVersion",
@@ -27,6 +30,10 @@ const ROOT_FIELDS = new Set([
   "issueCodes",
   "health",
   "continuity",
+  "changedStableElementIds",
+  "requestedTargetElementIds",
+  "outsideRequestedTargetElementIds",
+  "requestedTargetCount",
   "assessedAt",
   "executable",
 ]);
@@ -74,6 +81,11 @@ const EXECUTABLE_FIELDS = new Set([
   "outputCount",
   "changedCount",
 ]);
+const IMPACT_ARRAY_FIELDS = [
+  "changedStableElementIds",
+  "requestedTargetElementIds",
+  "outsideRequestedTargetElementIds",
+];
 const SHA256_PATTERN = /^sha256:[a-f0-9]{64}$/;
 const ID_PATTERNS = {
   projectId: /^project_[A-Za-z0-9_-]+$/,
@@ -142,6 +154,19 @@ function assertOverlap(value, label) {
   }
   for (const field of ["shared", "base", "output"]) {
     assertNonNegativeInteger(overlap[field], `${label}.${field}`);
+  }
+}
+
+function assertStableIdArray(value, label) {
+  if (
+    !Array.isArray(value)
+    || value.some((id) => !isValidPagerootElementId(id))
+    || new Set(value).size !== value.length
+  ) {
+    throw decodeError(
+      "CANDIDATE_ASSESSMENT_INVALID",
+      `${label} must contain unique valid Stable IDs.`,
+    );
   }
 }
 
@@ -227,6 +252,32 @@ function assertCandidateAssessmentShape(assessment, label) {
   }
   for (const field of ["text", "anchors", "classes", "assets"]) {
     assertOverlap(continuity[field], `${label}.continuity.${field}`);
+  }
+
+  const hasImpact = [
+    ...IMPACT_ARRAY_FIELDS,
+    "requestedTargetCount",
+  ].some((field) => Object.hasOwn(value, field));
+  if (hasImpact) {
+    assertRequiredFields(
+      value,
+      [...IMPACT_ARRAY_FIELDS, "requestedTargetCount"],
+      label,
+    );
+    IMPACT_ARRAY_FIELDS.forEach((field) => {
+      assertStableIdArray(value[field], `${label}.${field}`);
+    });
+    assertNonNegativeInteger(
+      value.requestedTargetCount,
+      `${label}.requestedTargetCount`,
+    );
+    const changed = new Set(value.changedStableElementIds);
+    if (value.outsideRequestedTargetElementIds.some((id) => !changed.has(id))) {
+      throw decodeError(
+        "CANDIDATE_ASSESSMENT_INVALID",
+        `${label}.outsideRequestedTargetElementIds must be a subset of changedStableElementIds.`,
+      );
+    }
   }
 
   const hasRetiredExecutable = Object.hasOwn(value, "executable");
@@ -353,6 +404,9 @@ export function decodeHistoricalCandidateAssessment(
       `${label} no longer matches its sealed HTML evidence.`,
     );
   }
+  const hasImpact = IMPACT_ARRAY_FIELDS.every(
+    (field) => Object.hasOwn(normalized, field),
+  ) && Object.hasOwn(normalized, "requestedTargetCount");
   const current = {
     schemaVersion: normalized.schemaVersion,
     projectId: normalized.projectId,
@@ -364,7 +418,17 @@ export function decodeHistoricalCandidateAssessment(
     outputSha256: normalized.outputSha256,
     baseComparisonSha256: normalized.baseComparisonSha256,
     outputComparisonSha256: normalized.outputComparisonSha256,
-    ...assessHtmlCandidate({ baseHtml, outputHtml }),
+    ...assessHtmlCandidate({
+      baseHtml,
+      outputHtml,
+      includeImpact: hasImpact,
+      ...(hasImpact
+        ? {
+            requestedTargetElementIds: normalized.requestedTargetElementIds,
+            requestedTargetCount: normalized.requestedTargetCount,
+          }
+        : {}),
+    }),
     assessedAt: normalized.assessedAt,
   };
   if (!isDeepStrictEqual(normalized, current)) {

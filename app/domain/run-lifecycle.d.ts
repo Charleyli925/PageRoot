@@ -130,6 +130,10 @@ export type CandidateAssessment = {
   continuity: {
     status: "related" | "uncertain";
   };
+  changedStableElementIds?: string[];
+  requestedTargetElementIds?: string[];
+  outsideRequestedTargetElementIds?: string[];
+  requestedTargetCount?: number;
 };
 
 export function candidateAssessmentFromRecord(

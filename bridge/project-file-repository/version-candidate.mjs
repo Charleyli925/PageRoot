@@ -2,6 +2,9 @@
 import {
   assessHtmlCandidate,
 } from "../candidate-assessment.mjs";
+import {
+  isValidPagerootElementId,
+} from "../../shared/pageroot-element-identity.mjs";
 
 import {
   ProjectFileRepositoryError,
@@ -80,9 +83,22 @@ export function assertCandidateId(value) {
   return id;
 }
 
-export function assessedCandidate(baseHtml, outputHtml, clock) {
+export function assessedCandidate(
+  baseHtml,
+  outputHtml,
+  clock,
+  {
+    requestedTargetElementIds = [],
+    requestedTargetCount = requestedTargetElementIds.length,
+  } = {},
+) {
   const assessment = {
-    ...assessHtmlCandidate({ baseHtml, outputHtml }),
+    ...assessHtmlCandidate({
+      baseHtml,
+      outputHtml,
+      requestedTargetElementIds,
+      requestedTargetCount,
+    }),
     assessedAt: nowIso(clock),
   };
   if (assessment.status === "blocked") {
@@ -114,6 +130,36 @@ export function assertCandidateAssessment(assessment) {
       "CANDIDATE_VALIDATION_INVALID",
       "Candidate validation evidence is invalid.",
     );
+  }
+  const impactFields = [
+    "changedStableElementIds",
+    "requestedTargetElementIds",
+    "outsideRequestedTargetElementIds",
+    "requestedTargetCount",
+  ];
+  const hasImpact = impactFields.some((field) => Object.hasOwn(assessment, field));
+  if (hasImpact) {
+    const validIdList = (value) => (
+      Array.isArray(value)
+      && value.every((id) => isValidPagerootElementId(id))
+      && new Set(value).size === value.length
+    );
+    if (
+      !impactFields.every((field) => Object.hasOwn(assessment, field))
+      || !validIdList(assessment.changedStableElementIds)
+      || !validIdList(assessment.requestedTargetElementIds)
+      || !validIdList(assessment.outsideRequestedTargetElementIds)
+      || !Number.isSafeInteger(assessment.requestedTargetCount)
+      || assessment.requestedTargetCount < 0
+      || assessment.outsideRequestedTargetElementIds.some(
+        (id) => !assessment.changedStableElementIds.includes(id),
+      )
+    ) {
+      throw new ProjectFileRepositoryError(
+        "CANDIDATE_VALIDATION_INVALID",
+        "Candidate impact evidence is invalid.",
+      );
+    }
   }
   return assessment;
 }

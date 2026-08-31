@@ -1,3 +1,7 @@
+import {
+  isValidPagerootElementId,
+} from "../../shared/pageroot-element-identity.mjs";
+
 export const CANONICAL_LIFECYCLE_STATES = Object.freeze([
   "editing",
   "submitting",
@@ -477,7 +481,7 @@ export function candidateAssessmentFromRecord(value) {
   if (!["ready", "attention", "blocked"].includes(status)) return null;
   const health = isRecord(value.health) ? value.health : {};
   const continuity = isRecord(value.continuity) ? value.continuity : {};
-  return {
+  const assessment = {
     status,
     issueCodes: Array.isArray(value.issueCodes)
       ? value.issueCodes.map(String).filter(Boolean)
@@ -490,6 +494,36 @@ export function candidateAssessmentFromRecord(value) {
       status: continuity.status === "related" ? "related" : "uncertain",
     },
   };
+  const impactArrayFields = [
+    "changedStableElementIds",
+    "requestedTargetElementIds",
+    "outsideRequestedTargetElementIds",
+  ];
+  const hasImpact = impactArrayFields.every(
+    (field) => Array.isArray(value[field]),
+  ) && Number.isSafeInteger(value.requestedTargetCount)
+    && value.requestedTargetCount >= 0;
+  if (hasImpact) {
+    const validUniqueIds = (ids) => (
+      ids.every((id) => isValidPagerootElementId(id))
+      && new Set(ids).size === ids.length
+    );
+    const changed = value.changedStableElementIds.map(String);
+    const requested = value.requestedTargetElementIds.map(String);
+    const outside = value.outsideRequestedTargetElementIds.map(String);
+    if (
+      validUniqueIds(changed)
+      && validUniqueIds(requested)
+      && validUniqueIds(outside)
+      && outside.every((id) => changed.includes(id))
+    ) {
+      assessment.changedStableElementIds = changed;
+      assessment.requestedTargetElementIds = requested;
+      assessment.outsideRequestedTargetElementIds = outside;
+      assessment.requestedTargetCount = value.requestedTargetCount;
+    }
+  }
+  return assessment;
 }
 
 function isRecord(value) {

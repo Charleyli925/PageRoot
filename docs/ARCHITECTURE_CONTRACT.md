@@ -534,6 +534,21 @@ shared storage and produces no Review facts. CSS effects, layout, wrapping,
 computed style, animation, Canvas/SVG pixels and runtime-discovered nodes remain
 outside the Review contract. Review never serializes, compares or trusts Runtime DOM.
 
+Candidate assessment also compares the frozen base HTML with the identity-
+normalized Candidate HTML at the source-byte boundary. It records the sorted
+union of Stable IDs whose authored identity signature changed or exists on only
+one side as `changedStableElementIds`, the unique valid element IDs carried by
+the frozen Request targets as `requestedTargetElementIds`, and the changed IDs
+outside that requested set as `outsideRequestedTargetElementIds`. The separate
+`requestedTargetCount` retains the number of frozen target references, including
+global or legacy references that do not expose a Stable ID. These facts are a
+Review warning and navigation entry only: comment targets remain context, never
+a subtree-exact source-write or Candidate-acceptance boundary. Runtime DOM,
+Script-generated nodes and screenshots cannot contribute to the assessment.
+Historical Candidate assessments without these optional fields remain readable
+through the compatibility decoder; malformed partial impact evidence is rejected
+at the durable Candidate boundary.
+
 Prepared formal-review documents are owned by a cancellable
 `ReviewAnalysisSession` keyed to exact operation/source/comment identity. Its
 multi-entry cache is byte bounded. Parsing and annotation yield between phases,
