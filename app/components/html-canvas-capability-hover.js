@@ -143,21 +143,32 @@ export function createCanvasCapabilityHoverController({
       hide();
       return;
     }
-    const key = `${capability.kind}:${capability.targetKey}`;
+    const key = `${capability.kind}:${capability.generation}:${capability.targetKey}`;
     if (key === currentKey) {
       const current = snapshot.capability;
       if (
         !current
-        || current.element !== capability.element
-        || current.selectionElement !== capability.selectionElement
+        || current.hitElement !== capability.hitElement
         || current.cursor !== capability.cursor
         || current.hint !== capability.hint
         || current.spoken !== capability.spoken
       ) {
+        // Moving between rich inline descendants keeps one canonical target
+        // and one visual surface. Only the precise pointer hit is refreshed;
+        // outline visibility, target identity and the active timer stay put.
+        const nextCapability = current
+          ? {
+              ...current,
+              hitElement: capability.hitElement,
+              cursor: capability.cursor,
+              hint: capability.hint,
+              spoken: capability.spoken,
+            }
+          : capability;
         emit({
           ...snapshot,
           cursor: capability.cursor,
-          capability,
+          capability: nextCapability,
         });
       }
       return;
