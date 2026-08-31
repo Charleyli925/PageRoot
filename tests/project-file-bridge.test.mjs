@@ -496,16 +496,17 @@ test("project-file Request becomes a Candidate on finalization and a Version onl
   });
   assert.equal(ensured.response.status, 200, JSON.stringify(ensured.body));
 
+  const taskText = "将标题改为 Candidate。确保标题保持可读；本轮不需要修改导航栏。";
   const request = await postJson(bridge, "/request", {
     projectId: ensured.body.projectId,
     documentId: ensured.body.documentId,
     sourcePath: ensured.body.sourcePath,
     expectedSourceSha256: ensured.body.sourceSha256,
     freezeCutoffRevision: 0,
-    summary: "将标题改为 Candidate",
+    summary: taskText,
     comments: [{
       commentId: "comment_candidate",
-      text: "将标题改为 Candidate",
+      text: taskText,
       target: { targetId: "target_candidate" },
       attachments: [],
     }],
@@ -521,12 +522,12 @@ test("project-file Request becomes a Candidate on finalization and a Version onl
     request.body.requestId,
     "change-request.json",
   ), "utf8"));
-  assert.equal(frozenTask.requirements.objective, "将标题改为 Candidate");
+  assert.equal(frozenTask.requirements.objective, taskText);
   assert.equal(
     frozenTask.requirements.scopePolicy,
     "targets-plus-required-dependencies",
   );
-  assert.equal(frozenTask.requirements.instructions[0].text, "将标题改为 Candidate");
+  assert.equal(frozenTask.requirements.instructions[0].text, taskText);
   assert.equal("comments" in frozenTask.requirements, false);
   assert.equal("changeEvents" in frozenTask.requirements, false);
   assert.equal("preserveOutsideTargets" in frozenTask.requirements, false);
@@ -543,7 +544,17 @@ test("project-file Request becomes a Candidate on finalization and a Version onl
     join(ensured.body.projectRoot, ".pageroot", "requests", request.body.requestId, "PROMPT.md"),
     "utf8",
   );
-  assert.match(prompt, /待审阅 Candidate/u);
+  assert.match(prompt, /## 本轮目标/u);
+  assert.match(prompt, /将标题改为 Candidate/u);
+  assert.match(prompt, /## 修改范围/u);
+  assert.match(prompt, /评论目标及实现要求所需的直接依赖/u);
+  assert.match(prompt, /## 验收标准/u);
+  assert.match(prompt, /确保标题保持可读/u);
+  assert.match(prompt, /## 明确不做/u);
+  assert.match(prompt, /本轮不需要修改导航栏/u);
+  assert.match(prompt, /## 冻结输入与输出/u);
+  assert.match(prompt, /## 完成/u);
+  assert.doesNotMatch(prompt, /data-pageroot-id|Runtime DOM|Stable ID/u);
 
   const outputPath = join(
     ensured.body.projectRoot,

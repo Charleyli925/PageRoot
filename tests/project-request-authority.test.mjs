@@ -17,6 +17,13 @@ import {
   ProjectFileRepositoryError,
 } from "../bridge/project-file-repository.mjs";
 import {
+  FROZEN_REQUEST_POLICY_VERSION,
+  FROZEN_REQUEST_PROMPT_TEMPLATE_VERSION,
+  FROZEN_REQUEST_RULES,
+  SUPPORTED_FROZEN_REQUEST_POLICY_VERSIONS,
+  SUPPORTED_FROZEN_REQUEST_PROMPT_TEMPLATE_VERSIONS,
+} from "../bridge/project-file-repository/request-draft.mjs";
+import {
   fixture,
   html,
   importSource,
@@ -39,6 +46,25 @@ function requestFor(summary, overrides = {}) {
     ...overrides,
   };
 }
+
+test("frozen policy v2 owns stable HTML editing rules and keeps v1 readable", () => {
+  assert.equal(FROZEN_REQUEST_POLICY_VERSION, "2.0.0");
+  assert.equal(FROZEN_REQUEST_PROMPT_TEMPLATE_VERSION, "2.0.0");
+  assert.deepEqual([...SUPPORTED_FROZEN_REQUEST_POLICY_VERSIONS], ["1.0.0", "2.0.0"]);
+  assert.deepEqual(
+    [...SUPPORTED_FROZEN_REQUEST_PROMPT_TEMPLATE_VERSIONS],
+    ["1.0.0", "2.0.0"],
+  );
+  assert.match(FROZEN_REQUEST_RULES, /AI_RULES\.md, explicit requirements in change-request\.json, PROJECT\.md/iu);
+  assert.match(FROZEN_REQUEST_RULES, /changeEvents are audit context, not actions to replay, undo or apply again/iu);
+  assert.match(FROZEN_REQUEST_RULES, /complete, parseable HTML document/iu);
+  assert.match(FROZEN_REQUEST_RULES, /preserve the HTML unchanged instead of inventing work/iu);
+  assert.match(FROZEN_REQUEST_RULES, /Never create, copy, normalize, transfer, duplicate or reuse an ID/iu);
+  assert.match(FROZEN_REQUEST_RULES, /Modify authored source HTML, not the current Runtime DOM/iu);
+  assert.match(FROZEN_REQUEST_RULES, /change its authored host, configuration or script/iu);
+  assert.match(FROZEN_REQUEST_RULES, /targets-plus-required-dependencies allows only their minimal direct dependencies/iu);
+  assert.match(FROZEN_REQUEST_RULES, /Do not add external dependencies, tracking, network calls/iu);
+});
 
 test("Request publication rechecks source bytes after freezing its input bundle", async (t) => {
   const value = await fixture(t);
@@ -579,8 +605,8 @@ test("a Request freezes comments, targets and project rules alongside its exact 
     targets: request.targets,
     attachments: [frozenAttachment],
   });
-  assert.equal(changeRequest.policyVersion, "1.0.0");
-  assert.equal(changeRequest.promptTemplateVersion, "1.0.0");
+  assert.equal(changeRequest.policyVersion, "2.0.0");
+  assert.equal(changeRequest.promptTemplateVersion, "2.0.0");
   assert.deepEqual(inputManifest.readOrder, [
     "PROMPT.md",
     "input/AI_RULES.md",

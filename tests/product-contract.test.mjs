@@ -121,19 +121,22 @@ test("Prompt, protocol, helper, and finalizer agree on frozen input plus control
     readFile(new URL("../docs/INTERACTION_FLOW.md", import.meta.url), "utf8"),
     readFile(new URL("../docs/MVP_PRD.md", import.meta.url), "utf8"),
   ]);
-  assert.match(repository, /# PageRoot AI Request Rules/);
+  assert.match(repository, /# PageRoot HTML Candidate Rules/);
   assert.match(
     repository,
-    /Read the frozen files in input-manifest.json readOrder before editing/,
+    /Read every frozen input in input-manifest.json readOrder before editing/,
   );
   assert.match(
     repository,
-    /Treat the frozen HTML, project rules, annotations, comment attachments and change request as read-only/,
+    /changeEvents are audit context, not actions to replay, undo or apply again/,
   );
   assert.match(
     repository,
-    /Write exactly one complete HTML document to the output path stated in PROMPT.md/,
+    /Write exactly one complete, parseable HTML document to the output path stated in PROMPT.md/,
   );
+  assert.match(repository, /Treat every existing data-pageroot-id as an opaque authored-source identity/);
+  assert.match(repository, /Modify authored source HTML, not the current Runtime DOM/);
+  assert.match(repository, /targets-plus-required-dependencies allows only their minimal direct dependencies/);
   assert.doesNotMatch(bridge, /# PageRoot 通用执行规则/);
   assert.equal(
     (repository.match(/只修改用户明确要求的区域/g) ?? []).length,
@@ -152,7 +155,7 @@ test("Prompt, protocol, helper, and finalizer agree on frozen input plus control
   assert.match(protocol, /output 只有一个完整 HTML，不得创建 `PROJECT\.md`/);
   assert.match(protocol, /AI 输出文件命名/);
   assert.match(protocol, /`USER_SUPPLEMENT\.json` 只能由受控 helper 追加/);
-  assert.match(protocol, /Prompt 引用这份通用规则，不再逐条复制/);
+  assert.match(protocol, /Prompt 只引用\s*这份通用合同，不重复 Stable ID 或 Runtime 规则/);
   assert.match(protocol, /新项目默认创建空文件/);
   assert.match(protocol, /^# PageRoot Change Request 协议$/m);
   assert.match(protocol, /v3 Attempt \/ finalizer CLI `--workspace` \/ `--project-id` 是历史归档/);

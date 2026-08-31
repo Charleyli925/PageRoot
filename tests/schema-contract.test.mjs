@@ -1134,8 +1134,8 @@ test(
     const generatedChangeRequest = await json(new URL(
       `file://${join(controlRoot, "requests", run.requestId, "change-request.json")}`,
     ));
-    assert.equal(generatedChangeRequest.policyVersion, "1.0.0");
-    assert.equal(generatedChangeRequest.promptTemplateVersion, "1.0.0");
+    assert.equal(generatedChangeRequest.policyVersion, "2.0.0");
+    assert.equal(generatedChangeRequest.promptTemplateVersion, "2.0.0");
     assert.equal("comments" in generatedChangeRequest.requirements, false);
     assert.equal("changeEvents" in generatedChangeRequest.requirements, false);
     assert.equal("preserveOutsideTargets" in generatedChangeRequest.requirements, false);

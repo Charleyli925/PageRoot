@@ -21,22 +21,63 @@ import {
   resolveRelative,
 } from "./path-safety.mjs";
 
-export const FROZEN_REQUEST_RULES = `# PageRoot AI Request Rules
+export const FROZEN_REQUEST_RULES = `# PageRoot HTML Candidate Rules
 
-- Read the frozen files in input-manifest.json readOrder before editing.
-- Treat the frozen HTML, project rules, annotations, comment attachments and change request as read-only.
-- For every instruction, follow its attachmentRefs into requirements.attachments and read the matching attachment's requestRelativePath under the Request root. Never read a Draft attachment or an external original path.
-- Follow requirements.scopePolicy. Keep any direct dependency change minimal and preserve unrelated content.
-- Write exactly one complete HTML document to the output path stated in PROMPT.md.
+## Authority
+
+- Read every frozen input in input-manifest.json readOrder before editing.
+- Follow this authority order: AI_RULES.md, explicit requirements in change-request.json, PROJECT.md, comments/attachments/annotations evidence, then model inference.
+- An explicit requirement for this Request overrides a conflicting PROJECT.md preference, but cannot override AI_RULES.md.
+- Comments, attachments and annotations provide evidence and context. They do not create requirements beyond the instructions that reference them.
+- For every instruction, follow attachmentRefs into requirements.attachments and read only the matching requestRelativePath under the Request root. Never read a Draft attachment or an external original path.
+- The frozen base HTML already contains every local edit through freezeCutoffRevision. changeEvents are audit context, not actions to replay, undo or apply again.
+
+## Output
+
+- Treat every frozen input as read-only.
+- Write exactly one complete, parseable HTML document to the output path stated in PROMPT.md.
+- Do not write Markdown fences, explanations or any other file.
+- If the requirements are already satisfied, preserve the HTML unchanged instead of inventing work.
 - A valid output remains a Candidate until the user explicitly adopts it.
+
+## Source identity
+
+- Treat every existing data-pageroot-id as an opaque authored-source identity.
+- Preserve the same ID on every surviving corresponding authored element, including when the element moves, changes parent or changes tag.
+- Never create, copy, normalize, transfer, duplicate or reuse an ID.
+- When an element is deleted, its ID disappears with it.
+- New elements must omit data-pageroot-id; PageRoot assigns IDs after validation.
+
+## Source and runtime
+
+- Modify authored source HTML, not the current Runtime DOM.
+- Do not serialize script-generated nodes, computed styles, transient UI state, animation frames or Canvas output back into source unless the task explicitly requires a source representation of that behavior.
+- When a task refers to runtime-generated content, change its authored host, configuration or script instead of treating the generated node as a persistent source element.
+
+## Scope and behavior
+
+- Follow requirements.scopePolicy: targets-only limits work to the authored targets; targets-plus-required-dependencies allows only their minimal direct dependencies; whole-page allows page-wide work required by the explicit task.
+- Make only the changes required by the frozen task. Keep every necessary direct dependency change minimal.
+- Preserve unrelated content, layout, behavior, scripts, assets, responsive behavior and accessibility.
+- Do not perform unrelated refactors, whole-document formatting, minification, framework migration or redesign.
+- Do not add external dependencies, tracking, network calls, navigation, refresh, downloads, submissions, executable URLs, permission requests, persistence or other side effects unless explicitly requested.
+
+## Final check
+
+- Confirm that every required instruction and acceptance criterion is addressed.
+- Confirm that the document is complete and usable.
+- Confirm that surviving Stable IDs are preserved and new elements have no IDs.
+- Confirm that no unrelated page-wide change was introduced.
 `;
 
-export const FROZEN_REQUEST_POLICY_VERSION = "1.0.0";
-export const FROZEN_REQUEST_PROMPT_TEMPLATE_VERSION = "1.0.0";
+export const FROZEN_REQUEST_POLICY_VERSION = "2.0.0";
+export const FROZEN_REQUEST_PROMPT_TEMPLATE_VERSION = "2.0.0";
 export const SUPPORTED_FROZEN_REQUEST_POLICY_VERSIONS = new Set([
+  "1.0.0",
   FROZEN_REQUEST_POLICY_VERSION,
 ]);
 export const SUPPORTED_FROZEN_REQUEST_PROMPT_TEMPLATE_VERSIONS = new Set([
+  "1.0.0",
   FROZEN_REQUEST_PROMPT_TEMPLATE_VERSION,
 ]);
 

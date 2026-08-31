@@ -364,8 +364,9 @@ Project File Request 不再复用这一二元范围字段。系统在冻结时�
 在冻结 HTML 中的 `changeEvents` 只保存在 `input/annotations/records.json` 和
 内部不可变 Request 记录中：前者是用户表达证据，后者是审计事实，均不是需要
 再次执行的动作。新 Request 同时冻结 `taskSchemaVersion`、`policyVersion` 和
-`promptTemplateVersion`；旧 Request 缺少这些字段时按既有只读合同继续完成或
-取消，不做原地改写。
+`promptTemplateVersion`。当前规则与 Prompt 模板版本均为 `2.0.0`；`1.0.0`
+冻结 Request 仍可读、可完成，不做原地改写。更早的 Request 缺少这些字段时，
+按既有只读合同继续完成或取消。
 
 ## 6. Annotation records v3
 
@@ -431,30 +432,31 @@ Input manifest 同时包含完整冻结 Hash 清单 `files` 和 AI 执行读取�
 
 ## 8. Prompt
 
-Prompt 必须是当前 Attempt 的精简入口，只承载本轮动态信息，至少包含：
+Prompt 必须是当前 Attempt 的精简入口，只承载本轮动态信息：
 
-- PageRoot 品牌标题，并按“本轮身份、执行、文件位置、对话补充、附件、完成”分组。
-- 本机 Request 与 Attempt 绝对路径。
-- Request、Attempt、项目、文档与候选 Version 身份。
-- 从 `input-manifest.json` 开始并按 `readOrder` 读取的短执行清单。
-- `change-request.json` 与当前 Attempt `USER_SUPPLEMENT.json` 共同组成有效要求，并同时遵守 `AI_RULES.md` 与 `PROJECT.md`。
-- 评论、TargetRef 与附件清单的读取要求；不得只读正文而忽略图片或文件。
-- 每个附件的 Request 管理本机绝对路径和相对回退路径。
-- 唯一 output 路径，以及由 PageRoot 已计算的输入文件名和固定输出文件名。
-- 完整 finalizer 命令。
-- “完成全部写入后最后执行 finalizer”的明确要求。
-- 对话补充 helper 的完整命令、追加式 `add / amend / retract` 规则，以及“记录成功后才可执行”的停止条件。
+- Task Spec 的 `objective`、`scopePolicy`、`instructions`、明确验收标准与
+  `nonGoals`；
+- `input-manifest.json`、`change-request.json`、冻结 `PROJECT.md`、冻结 HTML、
+  annotations 与唯一 output 的当前本机路径；
+- 有附件时，追加本轮 attachmentId、`requestRelativePath`、媒体类型、字节数和 Hash；
+- 完整 finalizer 命令，并明确其在输出写入后最后执行。
 
-跨任务不变的范围、只读输入、受管附件、禁止扫描、唯一写入、
-`preserveOutsideTargets=true`、`completion.json` 与 `status=cancelled` 规则只写在
-`AI_RULES.md`。Prompt 引用这份通用规则，不再逐条复制。Prompt 也不让 AI
-猜候选版本号。
+跨任务不变的权威顺序、只读输入、唯一输出、Stable ID、Runtime/source
+边界、范围模式、无关行为保留和副作用禁止只写在 `AI_RULES.md`。Prompt 只引用
+这份通用合同，不重复 Stable ID 或 Runtime 规则，也不让 AI 猜输出文件名或版本号。
+
+`AI_RULES.md` 的解释顺序为：`AI_RULES.md` ＞ `change-request.json` 中的显式 Task
+Spec ＞ `PROJECT.md` ＞ comments/attachments/annotations 证据 ＞ 模型推断。本轮显式要求
+可覆盖冲突的项目长期偏好，但不能覆盖 `AI_RULES.md`。附件只是引用它的 instruction
+的证据；`annotations/records.json` 是审计与定位上下文，不是第二套指令。冻结
+HTML 已包含截至 `freezeCutoffRevision` 的本地编辑，`changeEvents` 只可审计，不得重放、
+撤销或重复执行。
 
 ## 9. AI 写入规则
 
 内部 AI 可直接写 Prompt 列出的唯一文件：
 
-- `attempts/<attemptId>/output/<原用户文件名>-V1.x.html`
+- `attempts/<attemptId>/output/candidate.html`
 
 AI 不得从 `input/base/index.html` 推导文件名，也不得用 `index.html`、自行递增的版本号或其他名称替换该路径。
 
