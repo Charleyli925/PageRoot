@@ -331,13 +331,18 @@ ID-less historical TargetRefs retain the legacy resolver. Semantic saving
 remains outside this foundation.
 
 The external original and the hidden V1 snapshot remain byte-exact copies of
-the first imported HTML. The visible Working Copy is the editable project
-file and may differ immediately because PageRoot materializes Stable IDs; those
-IDs never write back to the external original or to an immutable Version.
-There is one export action: it copies the complete current Working Copy HTML
-as-is, including Stable IDs, and does not mutate Project, Version, Registry,
-Recent or the current open file. Undo/Redo remains the bounded session history
-of the current open document and is not formal Version history.
+the first imported HTML, without PageRoot Stable ID metadata. The visible V1
+Working Copy is the editable project file and may differ immediately because
+PageRoot materializes Stable IDs. Before an AI Candidate is promoted, its HTML
+is normalized with Stable IDs; V2 and later immutable Versions store the full
+accepted Candidate HTML and may therefore contain those IDs. A new V2+ Working
+Copy starts byte-identical to its corresponding Version snapshot; later local
+editing changes only that Working Copy and never rewrites the established
+snapshot. Stable IDs never write back to the external original. There is one
+export action: it copies the complete current Working Copy HTML as-is,
+including Stable IDs, and does not mutate Project, Version, Registry, Recent or
+the current open file. Undo/Redo remains the bounded session history of the
+current open document and is not formal Version history.
 
 `HtmlCanvasEditor.tsx` remains the Canvas coordinator. Parsing, DOM
 instrumentation, interaction policy, preview synchronization, selection,

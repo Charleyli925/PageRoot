@@ -355,8 +355,11 @@ Rules:
 
 ## 文件与历史合同
 
-外部原 HTML 与隐藏 V1 快照保留首次导入的原始字节。可见 Working Copy
-可以因物化 Stable ID 而与它们逐字节不同，但 Stable ID 不回写外部原文件或
-不可变 Version。唯一导出动作原样复制当前完整 Working Copy，包括 Stable ID，
-不改变项目、Version、Registry、Recent 或当前打开文件。Undo/Redo 只属于
-当前打开文档会话，不属于正式 Version 历史，也不跨切换、关闭或重启恢复。
+外部原 HTML 与首次导入的隐藏 V1 快照保留原始字节且不含 Stable ID。可见 V1
+Working Copy 可以因物化 Stable ID 而与它们逐字节不同。AI Candidate 在晋升前
+完成 Stable ID 归一化；V2 及后续不可变 Version 保存完整的已采纳 Candidate
+HTML，因此可以包含 Stable ID。V2+ 新 Working Copy 初始与对应 Version 快照逐字节
+一致，之后本地编辑只更新 Working Copy，不改写已建立的 Version 快照。Stable ID
+不回写外部原文件。唯一导出动作原样复制当前完整 Working Copy，包括 Stable ID，
+不改变项目、Version、Registry、Recent 或当前打开文件。Undo/Redo 只属于当前打开
+文档会话，不属于正式 Version 历史，也不跨切换、关闭或重启恢复。

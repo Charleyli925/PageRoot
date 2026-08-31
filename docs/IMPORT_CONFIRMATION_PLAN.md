@@ -8,10 +8,12 @@
 - 推荐拆分：2 个完整 PR；只有发现本文列出的硬阻塞才停下重新评审，不能自行扩成平行版本系统
 - 目标：新外部 HTML 先确认再导入；同一外部原文件永久回到唯一项目；V1/当前本地编辑语义准确；可选删除严格后置；任何 Canvas 确认都有终态
 
-本次收敛只修正文档合同和必要回归测试：外部原 HTML 与隐藏 V1 保留首次导入
-字节；可见 Working Copy 可物化 Stable ID，因而不保证逐字节一致；Stable ID
-不回写外部原文件或不可变 Version；唯一导出原样复制完整当前 HTML（含 Stable
-ID）；Undo/Redo 仅属于当前打开文档会话。不得新增第二套导出或项目修改状态。
+本次收敛只修正文档合同：外部原 HTML 与隐藏 V1 保留首次导入字节且不含
+PageRoot Stable ID；V1 可见 Working Copy 可物化 Stable ID，因而不保证逐字节
+一致。AI Candidate 在晋升前归一化 Stable ID，V2 及后续不可变 Version 保存完整
+的已采纳 Candidate HTML；对应 V2+ Working Copy 建立时与 Version 快照逐字节一致，
+之后本地编辑只更新 Working Copy。唯一导出原样复制完整当前 HTML（含 Stable ID）；
+Undo/Redo 仅属于当前打开文档会话。不得新增第二套导出或项目修改状态。
 
 > 本分支已实施 PR-1 与 PR-2：长期外部源绑定、只读 A/B/C 分类、确认 UI、Prepared Intent、Canvas 终态与可选废纸篓删除。保持 Draft，直到全部条款验收完成后再标 Ready。
 

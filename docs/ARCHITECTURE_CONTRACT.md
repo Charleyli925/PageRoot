@@ -747,14 +747,18 @@ externally authorable or persistent semantic command. There is no durable
 history action ID, cursor CAS, history candidate or restart migration.
 
 The file contract is intentionally single-path: the external original and
-hidden V1 preserve the first-import bytes, while the visible Working Copy may
-contain PageRoot Stable ID metadata and therefore need not be byte-identical.
-Stable IDs never write back to the external original or immutable Version.
-The only export copies the complete current Working Copy HTML, including those
-IDs, through the existing protected atomic file-copy path; it does not update
-Project, Version, Registry, Recent or the current open file. Undo/Redo remains
-session-local to the current open document and never becomes formal Version
-history.
+hidden V1 preserve the first-import bytes without PageRoot Stable ID metadata,
+while the visible V1 Working Copy may contain materialized IDs and therefore
+need not be byte-identical. AI Candidate HTML is normalized with Stable IDs
+before promotion; V2 and later immutable Versions preserve the complete
+accepted Candidate HTML and may contain those IDs. A new V2+ Working Copy is
+initially byte-identical to its corresponding Version snapshot, and later local
+editing changes only the Working Copy. Stable IDs never write back to the
+external original. The only export copies the complete current Working Copy,
+including its IDs, through the existing protected atomic file-copy path; it does
+not update Project, Version, Registry, Recent or the current open file.
+Undo/Redo remains session-local to the current open document and never becomes
+formal Version history.
 
 Autosave then enters `ProjectFileRepository`. It is the only live Bridge-side
 owner of the current-source write for a registered v4 Project File. The retired

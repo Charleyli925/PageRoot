@@ -12,11 +12,12 @@
 
 以下合同补充文件边界，不改变现有项目目录、Registry、导入确认、自动保存、Hash/CAS、原子写入、崩溃恢复或打开/切换流程：
 
-1. 外部原 HTML 与隐藏 V1 快照都保留首次导入时的原始字节。
-2. 项目内可见的 `A-V1.html` 是可编辑 Working Copy；建立时会物化 PageRoot Stable ID，因此不保证与原稿逐字节相同。
-3. Stable ID 只属于项目内工作文件，不回写外部原文件，也不写入或改写不可变 Version 快照。
-4. 唯一的“导出当前 HTML…”动作原样复制当前完整 Working Copy HTML，包括 Stable ID；导出不改变项目、Version、评论、Registry、Recent 或当前打开文件。
-5. Undo/Redo 只属于当前打开文档的会话历史；它可以沿既有自动保存链路保存 HTML，但不属于正式 Version 历史，也不跨切换、关闭或重启恢复。
+1. 外部原 HTML 与隐藏 V1 快照都保留首次导入时的原始字节，且这两份首次导入事实不写入 PageRoot Stable ID。
+2. 项目内可见的 `A-V1.html` 是可编辑的 V1 Working Copy；建立时会物化 PageRoot Stable ID，因此不保证与原稿或 V1 快照逐字节相同。
+3. AI Candidate 在晋升前完成 Stable ID 归一化；V2 及后续不可变 Version 保存完整的已采纳 Candidate HTML，因此可以包含 Stable ID。Stable ID 不回写外部原文件。
+4. V2+ Working Copy 建立时与对应 Version 快照逐字节一致；之后本地编辑只更新 Working Copy，不改写已建立的 Version 快照。
+5. 唯一的“导出当前 HTML…”动作原样复制当前完整 Working Copy HTML，包括 Stable ID；导出不改变项目、Version、评论、Registry、Recent 或当前打开文件。
+6. Undo/Redo 只属于当前打开文档的会话历史；它可以沿既有自动保存链路保存 HTML，但不属于正式 Version 历史，也不跨切换、关闭或重启恢复。
 
 它修正两类不能分开处理的问题：
 
@@ -50,11 +51,11 @@
 | 对象 | 用户是否看得见 | 初始内容 | 后续本地修改 | 是否正式版本 |
 |---|---|---|---|---|
 | 外部原文件 `/桌面/A.html` | 是 | 用户选择时的原始字节 | PageRoot 不自动回写；除非用户主动在别处修改它，否则保持原样 | 否 |
-| 隐藏的 V1 版本快照 | 默认不可见 | 与首次导入时所选文件逐字节一致 | 永远不变 | 是，正式版本 1 |
+| 隐藏的 V1 版本快照 | 默认不可见 | 与首次导入时所选文件逐字节一致，且不含 Stable ID | 永远不变 | 是，正式版本 1 |
 | 项目内可见工作文件 `A-V1.html` | 是 | 从 V1 原始字节物化 Stable ID 后形成，不保证逐字节一致 | 用户编辑后自动保存到这里 | 否；它是基于 V1 的可编辑工作文件，不是不可变版本快照 |
 | Working Copy | 不作为用户术语展示 | 从导入完成时就存在，记录 `A-V1.html` 当前编辑状态及其基于哪个正式版本 | 随本地保存更新 | 否，它是内部编辑状态，不是额外生成的一份 `A-working-copy.html` |
 
-因此，不是“用户一修改 A，才出现一个 `A-working copy` 文件”。首次导入成功时，项目内可见 `A-V1.html` 及其内部 Working Copy 状态就已经存在。用户看到并编辑的是 `A-V1.html`；“Working Copy”只是系统内部用来表达“当前本地编辑基于哪个正式版本”的模型。Stable ID 是工作文件元数据，不是外部原稿或不可变 V1 快照的一部分。
+因此，不是“用户一修改 A，才出现一个 `A-working copy` 文件”。首次导入成功时，项目内可见 `A-V1.html` 及其内部 Working Copy 状态就已经存在。用户看到并编辑的是 `A-V1.html`；“Working Copy”只是系统内部用来表达“当前本地编辑基于哪个正式版本”的模型。Stable ID 是工作文件及已采纳 Candidate HTML 的持久元数据；首次外部原稿与 V1 快照不含它。
 
 UI 不向普通用户展示“Working Copy”一词。导出入口统一称为“导出当前 HTML…”或“HTML 副本”；其他界面对用户统一说“当前项目”“当前本地编辑”或“基于版本 N”。
 
@@ -465,9 +466,9 @@ Workbench 只能投影这些状态并发送用户意图，不能再维护一套�
 
 ### 16.1 文件与版本语义
 
-- [ ] 首次导入后，外部原文件与隐藏 V1 快照字节完全一致；可见 `…-V1.html` 含 Stable ID，不保证与前两者逐字节一致。
+- [ ] 首次导入后，外部原文件与隐藏 V1 快照字节完全一致且不含 Stable ID；可见 V1 `…-V1.html` 含 Stable ID，不保证与前两者逐字节一致。
 - [ ] 本地编辑自动保存到项目内可见工作文件，不改外部原稿和隐藏 V1。
-- [ ] Stable ID 物化不回写外部原文件或不可变 Version；唯一“导出当前 HTML…”入口原样复制当前完整 Working Copy。
+- [ ] Candidate 晋升前完成 Stable ID 归一化；V2 及后续不可变 Version 保存完整的已采纳 Candidate HTML，因此可以包含 Stable ID。V2+ 新 Working Copy 初始与对应 Version 快照逐字节一致，之后本地编辑只更新 Working Copy；唯一“导出当前 HTML…”入口原样复制当前完整 Working Copy。
 - [ ] Undo/Redo 只属于当前打开文档会话，不跨切换、关闭或重启恢复，也不创建正式 Version。
 - [ ] 连续本地保存不创建新正式版本；第一次明确采纳 AI Candidate 才创建 V2。
 - [ ] UI 不生成或展示 `A-working-copy.html`，也不要求用户理解 Working Copy 术语。
