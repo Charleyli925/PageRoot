@@ -4,8 +4,10 @@ import { buildSourceIndex } from "../../../app/lib/source-index.js";
 
 import {
   ECHARTS_STUB,
+  clickEditHistoryMenu,
   currentEditorFrame,
   documentToken,
+  expectCheckpointPersisted,
   launchPageRoot,
   loadedDiskFrame,
   managedWorkingCopyPath,
@@ -40,6 +42,93 @@ async function withRuntimeProject(prefix, files, run) {
     }
     removeValidatedTemporaryDirectory(sourceDirectory, prefix);
   }
+}
+
+async function armRuntimeHandoffSamples(page) {
+  await page.evaluate(() => {
+    const editor = document.querySelector('[data-testid="html-canvas-editor"]');
+    const oldFrame = editor?.querySelector('iframe[title*="HTML"]');
+    if (!editor || !(oldFrame instanceof HTMLIFrameElement)) {
+      throw new Error("The active Edit iframe was not available before the runtime handoff.");
+    }
+    const samples = [];
+    window.__PAGEROOT_RUNTIME_HANDOFF_SAMPLES__ = samples;
+    window.__PAGEROOT_RUNTIME_CANDIDATE_FRAME__ = null;
+    window.__PAGEROOT_RUNTIME_OLD_FRAME__ = oldFrame;
+    window.__PAGEROOT_RUNTIME_HANDOFF_ACTIVE__ = true;
+    const sample = () => {
+      if (!window.__PAGEROOT_RUNTIME_HANDOFF_ACTIVE__) return;
+      const candidate = editor.querySelector('iframe[data-frame-role="runtime-candidate"]');
+      if (candidate && !window.__PAGEROOT_RUNTIME_CANDIDATE_FRAME__) {
+        window.__PAGEROOT_RUNTIME_CANDIDATE_FRAME__ = candidate;
+      }
+      samples.push({
+        candidateGeneration: candidate?.getAttribute("data-frame-generation") || null,
+        candidateVisibility: candidate ? getComputedStyle(candidate).visibility : null,
+        oldConnected: oldFrame.isConnected,
+        oldGeneration: oldFrame.getAttribute("data-frame-generation"),
+        oldRenderVerified: editor.getAttribute("data-render-verified"),
+        oldVisibility: oldFrame.isConnected ? getComputedStyle(oldFrame).visibility : null,
+        handoffState: editor.getAttribute("data-runtime-handoff"),
+        oldSelectedCount: oldFrame.contentDocument
+          ?.querySelectorAll("[data-html-canvas-selected]").length || 0,
+        toolbarVisible: Boolean(
+          editor.querySelector('[role="toolbar"]')?.getClientRects().length,
+        ),
+      });
+    };
+    const observer = new MutationObserver(sample);
+    observer.observe(editor, { attributes: true, childList: true, subtree: true });
+    window.__PAGEROOT_RUNTIME_HANDOFF_OBSERVER__ = observer;
+    sample();
+  });
+}
+
+async function assertRuntimeHandoff(page, { requireActiveChrome = false } = {}) {
+  await expect.poll(() => page.evaluate(() => (
+    window.__PAGEROOT_RUNTIME_HANDOFF_SAMPLES__ || []
+  ).some((sample) => sample.candidateGeneration))).toBe(true);
+  const handoffSamples = await page.evaluate(() => {
+    window.__PAGEROOT_RUNTIME_HANDOFF_ACTIVE__ = false;
+    window.__PAGEROOT_RUNTIME_HANDOFF_OBSERVER__?.disconnect();
+    return window.__PAGEROOT_RUNTIME_HANDOFF_SAMPLES__ || [];
+  });
+  const candidateSamples = handoffSamples.filter((sample) => sample.candidateGeneration);
+  expect(candidateSamples.length).toBeGreaterThan(0);
+  const preparingSamples = candidateSamples.filter((sample) => sample.handoffState === "preparing");
+  expect(preparingSamples.length).toBeGreaterThan(0);
+  const activeFrameStayedManaged = preparingSamples.some((sample) => (
+    sample.oldConnected
+    && sample.oldVisibility === "visible"
+    && sample.oldRenderVerified === "true"
+    && sample.candidateVisibility === "hidden"
+    && sample.oldGeneration !== sample.candidateGeneration
+  ));
+  if (!activeFrameStayedManaged) {
+    throw new Error(`Runtime preparing samples: ${JSON.stringify(preparingSamples)}`);
+  }
+  if (requireActiveChrome) {
+    const activeChromeStayedIntact = preparingSamples.some((sample) => (
+      sample.oldSelectedCount === 1 && sample.toolbarVisible
+    ));
+    if (!activeChromeStayedIntact) {
+      throw new Error(`Runtime preparing chrome samples: ${JSON.stringify(preparingSamples)}`);
+    }
+  }
+}
+
+async function assertRuntimeCandidateReused(page) {
+  await expect.poll(() => page.evaluate(() => {
+    const active = document.querySelector(
+      '[data-testid="html-canvas-editor"] iframe[title*="HTML"]',
+    );
+    return Boolean(
+      active
+      && active.isConnected
+      && active === window.__PAGEROOT_RUNTIME_CANDIDATE_FRAME__
+      && active.contentDocument?.documentElement,
+    );
+  })).toBe(true);
 }
 
 function parserPreclaimFixture() {
@@ -259,7 +348,7 @@ test("semantic structure edit rebuilds the disposable page and reruns its script
 
   await withRuntimeProject("pageroot-runtime-rerender-e2e-", {
     "runtime-report.html": html,
-  }, async ({ page, sourcePath }) => {
+  }, async ({ electronApp, page, sourcePath }) => {
     const { frame } = await loadedDiskFrame(page, sourcePath, "runtime-first");
     await expect(frame.locator("#runtime-order")).toHaveText("甲乙");
     const beforeDocument = await documentToken(page);
@@ -290,13 +379,22 @@ test("semantic structure edit rebuilds the disposable page and reruns its script
     // Use the already-visible toolbar coordinate. locator.click() is allowed to
     // scroll an ancestor first; that Playwright convenience would replace the
     // user viewport before the product can capture it for the rebuild.
+    await armRuntimeHandoffSamples(page);
     await page.mouse.click(
       moveDownBox.x + moveDownBox.width / 2,
       moveDownBox.y + moveDownBox.height / 2,
     );
+    await assertRuntimeHandoff(page, { requireActiveChrome: true });
 
+    await expect.poll(async () => {
+      try {
+        return await documentToken(page);
+      } catch {
+        return beforeDocument;
+      }
+    }).not.toBe(beforeDocument);
+    await assertRuntimeCandidateReused(page);
     const nextFrame = await currentEditorFrame(page);
-    await expect.poll(() => documentToken(page)).not.toBe(beforeDocument);
     await expect(nextFrame.locator("#runtime-order")).toHaveText("乙甲");
     await expect(nextFrame.locator("section > p").first()).toHaveAttribute("id", "second");
     await expect(nextFrame.locator(
@@ -306,8 +404,119 @@ test("semantic structure edit rebuilds the disposable page and reruns its script
     const workingCopyPath = await managedWorkingCopyPath(page, sourcePath);
     await expect.poll(() => readFileSync(workingCopyPath, "utf8"))
       .toMatch(/id="second"[\s\S]*id="first"/u);
+    const moveRevision = await expectCheckpointPersisted(page, 0);
+
+    const beforeUndoDocument = await documentToken(page);
+    await armRuntimeHandoffSamples(page);
+    await clickEditHistoryMenu(electronApp, page, "undo");
+    await assertRuntimeHandoff(page);
+    await expect.poll(async () => {
+      try {
+        return await documentToken(page);
+      } catch {
+        return beforeUndoDocument;
+      }
+    }).not.toBe(beforeUndoDocument);
+    await assertRuntimeCandidateReused(page);
+    const undoFrame = await currentEditorFrame(page);
+    await expect(undoFrame.locator("#runtime-order")).toHaveText("甲乙");
+    const undoRevision = await expectCheckpointPersisted(page, moveRevision);
+    expect(readFileSync(workingCopyPath, "utf8"))
+      .toMatch(/id="first"[\s\S]*id="second"/u);
+
+    const beforeRedoDocument = await documentToken(page);
+    await armRuntimeHandoffSamples(page);
+    await clickEditHistoryMenu(electronApp, page, "redo");
+    await assertRuntimeHandoff(page);
+    await expect.poll(async () => {
+      try {
+        return await documentToken(page);
+      } catch {
+        return beforeRedoDocument;
+      }
+    }).not.toBe(beforeRedoDocument);
+    await assertRuntimeCandidateReused(page);
+    const redoFrame = await currentEditorFrame(page);
+    await expect(redoFrame.locator("#runtime-order")).toHaveText("乙甲");
+    await expectCheckpointPersisted(page, undoRevision);
+    expect(readFileSync(workingCopyPath, "utf8"))
+      .toMatch(/id="second"[\s\S]*id="first"/u);
     expect(readFileSync(sourcePath, "utf8")).toBe(html);
     expect(readFileSync(workingCopyPath, "utf8")).not.toContain("乙甲</output>");
+  });
+});
+
+test("a failed runtime candidate leaves the old active frame managed and never ready", {
+  tag: ["@gate-smoke", "@smoke-editing"],
+}, async () => {
+  const html = `<!doctype html>
+<html><head><title>Runtime candidate failure</title></head><body>
+  <section>
+    <p id="first" data-native-case="runtime-candidate-failure">甲</p>
+    <p id="second">乙</p>
+    <button id="runtime-proof-target" type="button">运行时证明仍在</button>
+    <a id="runtime-link" href="#runtime-target">运行时链接</a>
+    <output id="runtime-order"></output>
+  </section>
+  <script>
+    document.querySelector('#runtime-order').textContent = Array.from(
+      document.querySelectorAll('section > p'),
+      (node) => node.textContent,
+    ).join('');
+    if (document.querySelector('section > p')?.id === 'second') {
+      const marker = document.querySelector('meta[data-html-canvas-render-verification]');
+      marker?.setAttribute('data-html-canvas-render-verification', 'invalid-candidate');
+      marker?.setAttribute('content', 'invalid-candidate');
+    }
+  </script>
+</body></html>`;
+
+  await withRuntimeProject("pageroot-runtime-candidate-failure-e2e-", {
+    "runtime-report.html": html,
+  }, async ({ page, sourcePath }) => {
+    const { frame } = await loadedDiskFrame(
+      page,
+      sourcePath,
+      "runtime-candidate-failure",
+    );
+    await frame.locator('[data-native-case="runtime-candidate-failure"]').click();
+    const toolbar = page.getByRole("toolbar", { name: /编辑/u });
+    await expect(toolbar).toBeVisible();
+    await expect(toolbar.getByRole("button", { name: "下移", exact: true })).toBeVisible();
+
+    await armRuntimeHandoffSamples(page);
+    await toolbar.getByRole("button", { name: "下移", exact: true }).click();
+    await assertRuntimeHandoff(page, { requireActiveChrome: true });
+
+    await expect.poll(() => page.locator(".canvas-edit-surface").getAttribute(
+      "data-edit-runtime-phase",
+    )).toBe("running");
+    const oldFrameState = await page.evaluate(() => {
+      const editor = document.querySelector('[data-testid="html-canvas-editor"]');
+      const oldFrame = window.__PAGEROOT_RUNTIME_OLD_FRAME__;
+      return {
+        connected: oldFrame?.isConnected || false,
+        visibility: oldFrame?.isConnected ? getComputedStyle(oldFrame).visibility : null,
+        selectedCount: oldFrame?.contentDocument
+          ?.querySelectorAll("[data-html-canvas-selected]").length || 0,
+        toolbarVisible: Boolean(editor?.querySelector('[role="toolbar"]')?.getClientRects().length),
+      };
+    });
+    expect(oldFrameState).toEqual({
+      connected: true,
+      visibility: "visible",
+      selectedCount: 1,
+      toolbarVisible: true,
+    });
+
+    await frame.locator("#runtime-proof-target").hover();
+    await expect(page.getByTestId("canvas-capability-outline")).toBeVisible();
+    const beforeUrl = page.url();
+    await frame.locator("#runtime-link").click({ modifiers: ["Alt"] });
+    expect(page.url()).toBe(beforeUrl);
+    await expect.poll(() => page.locator(".canvas-edit-surface").getAttribute(
+      "data-edit-runtime-phase",
+    )).toBe("running");
   });
 });
 

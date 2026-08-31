@@ -421,6 +421,21 @@ test("hovering a filled module's padding advertises the same module click select
   await expect(editor.getByRole("toolbar")).toBeVisible();
 });
 
+test("static reorder keeps the existing preview document", async ({ page }) => {
+  const { editor, frame } = await loadFixture(page, "module-padding-hit.html");
+  const filledModule = frame.locator(caseSelector("filled-module"));
+  await filledModule.click({ position: { x: 24, y: 72 } });
+  const beforeDocument = await documentToken(page);
+
+  await editor.getByRole("button", { name: "上移", exact: true }).click();
+
+  await expect.poll(() => documentToken(page)).toBe(beforeDocument);
+  await expect.poll(() => frame.locator("body > section").evaluateAll((elements) => (
+    elements.map((element) => element.getAttribute("data-native-case"))
+  ))).toEqual(["filled-module", "empty-module"]);
+  await expect(filledModule).toHaveAttribute("data-html-canvas-selected", "module");
+});
+
 test("text-edit hover caption hugs its copy instead of a fixed ribbon", async ({ page }) => {
   const { editor, frame } = await loadFixture(page, "complex-layout.html");
   const target = frame.locator(caseSelector("paragraph-entities"));
