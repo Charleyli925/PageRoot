@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 const productRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const read = (relativePath) => readFileSync(path.join(productRoot, relativePath), "utf8");
 
-test("ADR 0066/0068 and the architecture contract freeze modern visual Review", () => {
+test("ADR 0066/0068 and the architecture contract keep source Review authoritative", () => {
   const adr = read("docs/decisions/0066-stable-id-source-review.md");
   const visualAdr = read("docs/decisions/0068-review-visual-verdict-gate.md");
   const architecture = read("docs/ARCHITECTURE_CONTRACT.md");
@@ -22,7 +22,7 @@ test("ADR 0066/0068 and the architecture contract freeze modern visual Review", 
     "exact-subtree, relocation, singleton, weighted or fuzzy pairing",
     "appears as element removal plus addition even when its content or markup is unchanged",
     "globally ambiguous across the whole document pair",
-    "does not enter a legacy matcher",
+    "semantic source matcher remains",
     "same persistent ID remains paired when the authored element tag changes",
     "groups common IDs by parent in one pass",
     "sibling indexes are likewise built once per parent",
@@ -33,35 +33,38 @@ test("ADR 0066/0068 and the architecture contract freeze modern visual Review", 
     "suppresses only that root's false presence fact",
     "images, modules and other non-text elements",
     "`added`, `removed`, `moved`, `attribute`, `style`, `css-source` and",
-    "bounded observation decides whether CSS cascade, layout, Canvas/SVG",
+    "bounded observation reports whether sampled CSS cascade, layout, Canvas/SVG",
   ]) {
     assert.ok(normalizedAdr.includes(required), `ADR 0066 lost required contract: ${required}`);
   }
   for (const required of [
-    "complete, valid and document-unique",
-    "There is no semantic matcher",
-    "challenge-bound `MessagePort` per frame side",
-    "Common Stable IDs require a matching trusted observation from both sides",
-    "source-proven absence",
-    "Two samples across animation frames must agree",
-    "WebGL, tainted Canvas",
-    "Pending and unverified candidates never enter changes",
+    "Review source facts remain authoritative",
+    "makes only visual enhancement `unsupported`",
+    "existing semantic source matcher remains available",
+    "plan contains only hosts implicated by a source difference",
+    "`evidenceStableIds[]`",
+    "best-effort `changed / unchanged / unverified`",
+    "not an isolated security oracle",
+    "one Review-wide time, node and pixel budget",
+    "there is no `.slice(0, 1000)`",
+    "both-side-hidden source facts are also `unverified`",
+    "remain in filters, navigation and markers",
     "fixed to the right edge of the Before pane",
     "aggregate to `评2`/`评3`",
   ]) {
     assert.ok(normalizedVisualAdr.includes(required), `ADR 0068 lost required contract: ${required}`);
   }
   for (const required of [
-    "SourceEvidence",
-    "Those facts are never user-visible changes by themselves",
-    "one-shot `MessagePort`",
-    "WebGL, tainted Canvas, live media",
-    "absent, partial, malformed or duplicate identity is explicitly unsupported",
-    "Exact-subtree, title/class/id, sibling index, relocation, singleton, weighted and fuzzy matchers are never entered",
-    "Character alignment is allowed only inside a pair already proven by the same Stable ID",
-    "Every candidate settles to `changed`, `unchanged` or `unverified`",
-    "Only `changed` enters the existing `全部 / 文字 / 元素` filters",
-    "`unverified` creates no change or count and remains normally visible",
+    "remains Review fact authority",
+    "identical common Stable IDs are not observed",
+    "`evidenceStableIds[]`",
+    "not an isolated security oracle",
+    "makes visual enhancement `unsupported`, but does not cancel source Review",
+    "existing semantic matcher remains the historical-source fallback",
+    "Every planned observation settles to `changed`, `unchanged` or `unverified`",
+    "those verdicts never replace deterministic source facts",
+    "hidden, stale, unsupported and budget-limited source changes stay",
+    "Equal bounded summaries for pure CSS/Script or style evidence remain `unverified`",
   ]) {
     assert.ok(normalizedArchitecture.includes(required), `Architecture Contract lost boundary: ${required}`);
   }

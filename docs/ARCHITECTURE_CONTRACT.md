@@ -563,24 +563,26 @@ Presentation restoration is best effort and cannot widen source authority. The
 lowest-complexity safe local update or rebuild remains the required design.
 
 Review has no runtime-snapshot owner, BrowserWindow or PNG evidence path. Its
-source layer compares the frozen before/after HTML only to discover private
-`SourceEvidence`: bounded text candidates, outermost element presence,
-movement, authored attributes/inline styles and CSS/Script source changes.
-Those facts are never user-visible changes by themselves. The two Review frames
-remain the pages the user is already viewing. Their first owned bootstrap
-captures bounded native observation capabilities before author Script and
-returns Stable-ID-bound visible text, computed presentation, image, SVG,
-Canvas 2D and runtime-generated descendant summaries through a random-
-challenge one-shot `MessagePort`. Author code cannot enumerate candidates or
-forge this private result. Parser-time source-host references are private and
-never reacquired by querying the current DOM: disconnect, ID drift, duplicate
-claim or same-ID replacement is unverified. A later iframe load clears the
-entire prior verdict generation before renegotiation. WebGL, tainted Canvas,
-live media, running animation,
-time/random/network-dependent output, hidden unsynchronized surfaces, budget
-overflow, unstable samples and stale frame generations fail closed as
-`unverified`. Runtime DOM is observation evidence only; it never enters source,
-save, Version, Candidate, Promotion, comment identity or persistence authority.
+source layer compares the frozen before/after HTML and remains Review fact
+authority: precise text, outermost element presence, movement and explicit
+authored attribute changes enter filters, count, navigation and projection
+without waiting for runtime observation. `SourceEvidence` is only a bounded
+visual-enhancement plan for hosts implicated by source differences; identical
+common Stable IDs are not observed. One `ReviewChange` keeps
+`evidenceStableIds[]`, so multi-host source facts retain their original change
+ID and exact character ranges.
+
+The two Review frames may return best-effort Stable-ID-bound visible text,
+computed presentation, image, SVG, Canvas 2D and runtime-descendant summaries
+through a random-challenge `MessagePort`. Parser-time source-host references
+reject disconnect, ID drift, duplicate claims and same-ID replacement, and a
+later iframe load clears the old generation. This code shares the authored
+frame realm and echoes a parent-provided source label; it is not an isolated
+security oracle. WebGL, tainted Canvas, live media, running animation, hidden
+surfaces, global budget overflow, unstable samples and stale generations are
+explicitly `unverified`. Runtime DOM remains observation evidence only; it
+never enters source, save, Version, Candidate, Promotion, comment identity or
+persistence authority.
 
 Candidate assessment also compares the frozen base HTML with the identity-
 normalized Candidate HTML at the source-byte boundary. It computes Stable-ID
@@ -607,25 +609,23 @@ durable Candidate boundary.
 Prepared formal-review documents are owned by a cancellable
 `ReviewAnalysisSession` keyed to exact operation/source/comment identity. Its
 multi-entry cache is byte bounded. Parsing and annotation yield between phases,
-and stale work stops before publication. The formal path requires both source
-indexes to report complete, valid and unique `data-pageroot-id`; absent,
-partial, malformed or duplicate identity is explicitly unsupported. The same
-Stable ID is the only cross-document element identity and may survive tag,
-parent or source-order changes. Exact-subtree, title/class/id, sibling index,
-relocation, singleton, weighted and fuzzy matchers are never entered. Character
-alignment is allowed only inside a pair already proven by the same Stable ID.
-Stable topology distinguishes insertion from reorder and cross-parent movement,
-while added/removed subtrees retain the outermost-only rule.
+and stale work stops before publication. Complete, valid and unique
+`data-pageroot-id` enables exact persistent continuity and current-frame visual
+enhancement. Absent, partial, malformed or duplicate identity makes visual
+enhancement `unsupported`, but does not cancel source Review: the existing
+semantic matcher remains the historical-source fallback. When Stable-ID
+continuity exists, it distinguishes insertion from reorder and cross-parent
+movement while added/removed subtrees retain the outermost-only rule.
 
-Every candidate settles to `changed`, `unchanged` or `unverified`. Only
-`changed` enters the existing `全部 / 文字 / 元素` filters, count, first-change
-navigation, character marks, element boxes and dim-mask holes. `unchanged`
-creates no change but is verified context. `unverified` creates no change or
-count and remains normally visible; inability to observe can never become
-unchanged or dimmed context. CSS/Script source changes use each Stable-ID host's
-final observation, so equal computed output stays unchanged and changed
-Canvas/SVG/runtime output uses the ordinary element presentation without a new
-top-level category or detailed auto-generated explanation.
+Every planned observation settles to `changed`, `unchanged` or `unverified`,
+but those verdicts never replace deterministic source facts. The UI exposes
+`正在分析 / 已完成 / 有 N 项无法视觉验证 / 不支持`; hidden, stale, unsupported
+and budget-limited source changes stay in the existing `全部 / 文字 / 元素`
+filters and adoption confirmation explains the uncertainty. Observation is
+batched across frames with one sample-wide node/pixel/time budget and never
+silently truncates candidates. Equal bounded summaries for pure CSS/Script or
+style evidence remain `unverified`, because a finite whitelist cannot prove the
+absence of downstream visual effects.
 `added`/`removed` whole-element facts own descendant text evidence. A moved
 stable subtree compares each stable descendant against its exact before/after
 ID counterpart through the existing semantic text diff, never through flattened

@@ -863,17 +863,17 @@ AI 候选通过检查并进入待打开状态后，正常连续性候选显示�
 
 权威实现是 `app/lib/review-text-evidence-marks.js`。审阅页对 `[data-pageroot-review-text]` 只能 `inherit` 作者文字样式，真正的红虚线与绿点由投影叠层绘制。
 
-审阅分析只读取冻结的修改前/修改后 HTML，不执行候选来生成差异，也没有 Review 专用截图、像素比较、主进程 owner 或 IPC。现代正式审阅要求两侧都有完整、有效且全文唯一的 `data-pageroot-id`；缺失、partial、invalid 或 duplicate 直接是 `unsupported`，不进入旧语义、位置或相似度配对。源码文字、新增/删除、移动、属性/内联样式及 CSS/Script 变化只产生与 Session、两侧 source Hash 和 Stable ID 绑定的待验证候选，不是用户可见变化。
+审阅分析只读取冻结的修改前/修改后 HTML，不执行候选来生成源码差异，也没有 Review 专用截图、像素比较、主进程 owner 或 IPC。源码文字、新增/删除、移动和明确属性变化仍是用户可见的正式事实；完整、有效且全文唯一的 `data-pageroot-id` 只决定能否使用精确连续性与当前帧视觉增强。旧版本缺失、partial、invalid 或 duplicate Stable ID 时，视觉增强显示 `不支持`，既有源码语义配对仍保留，不把差异隐藏成空审阅。
 
-1. 候选内部仍复用 `text` 与 `structure` 两类投影事实。文字使用 `insert/delete/replace` 和两侧独立的 `evidenceRanges`、`phraseGroups`、`anchorOffset`；`evidenceRanges` 是唯一字符级候选证据。这些 wrapper 与 projection facts 序列化后仍是 pending，只有最终 verdict 为 `changed` 的 ID 才能激活。
-2. 同一 Stable ID 是两文档间唯一配对键，可以跨父级、顺序和标签变化保持连续性。只有这个已证明的 pair 内部才能进行字符对齐；不运行 exact-subtree、title/class/id/text、sibling index、relocation、singleton、weighted 或 fuzzy matcher。
+1. 源码事实仍复用 `text` 与 `structure` 两类投影。文字使用 `insert/delete/replace` 和两侧独立的 `evidenceRanges`、`phraseGroups`、`anchorOffset`；`evidenceRanges` 是唯一字符级证据。视觉观察不得生成替代性的通用 change，也不得覆盖这些 wrapper、changeId 或精确范围。
+2. 有完整 Stable ID 时，同一 ID 是两文档间最强的持久配对键，可以跨父级、顺序和标签变化保持连续性；一个 change 用 `evidenceStableIds[]` 保留多宿主关系。没有完整 Stable ID 时继续使用已有源码语义 matcher，但不提供 Stable-ID 视觉增强。
 3. 真正只在一侧存在的元素写成 `新增元素` 或 `删除元素`。只标最外层 unmatched 子树；后代元素和后代文字不重复打标。两侧共有的稳定 ID 不得因移动退化成删除加新增。稳定同级顺序用共同 ID 序列比较，单纯插入不把后续兄弟误报为移动。
-4. 当前两个审阅 iframe 就是观测表面。第一段 owned bootstrap 在作者 Script 前捕获原生能力，经随机 challenge 的一次性 `MessagePort` 返回同 Stable ID 的可见文字、computed presentation、图像、SVG、Canvas 2D 及其最近 Stable host 所拥有的运行时后代摘要。绝对页面坐标和滚动位置不进入摘要。
+4. 当前两个审阅 iframe 是 best-effort 观测表面。第一段 owned bootstrap 经随机 challenge 的 `MessagePort` 返回计划内 Stable ID 的可见文字、computed presentation、图像、SVG、Canvas 2D 及其最近 Stable host 所拥有的运行时后代摘要。它与作者 Script 同 realm，不是隔离安全证明；source Hash 是父级标签，不是 iframe 自算的内容凭证。
    Bootstrap 在 parser 构建文档时私有捕获源码 Stable host 引用；断连、ID 漂移、重复声明或同 ID 替身一律 unverified，不得从当前 DOM 重新查找获得身份。iframe 首次之后的任意 load 先清空旧 generation，再允许新端口验证。
-5. 候选只有 `changed / unchanged / unverified` 三种结论。只有 `changed` 进入既有 `全部 / 文字 / 元素`、计数、首处导航、字符点/删除线、元素框和遮罩孔。用户标签继续复用既有文字/元素词汇；CSS/Script 源码本身不再显示为变化，只在它最终导致可见差异时使用普通元素呈现。
-6. 双侧可信摘要相同是 `unchanged`；缺失、过期、不稳定、不可读、WebGL、tainted Canvas、运行动画、活跃媒体、time/random/network 依赖、隐藏未同步内容或超预算都是 `unverified`。二者均不显示框、计数或虚化；无法观测绝不能被当作未变化。`navigationTarget` 只可指向已确认变化，筛选、单双页、页面交互、滚动和缩放保持正交。
+5. 视觉结果只有 `changed / unchanged / unverified` 三种结论，但源码事实无需等待它们。只有纯视觉候选在所有关联宿主都被明确证明为 no-op 时才可过滤；`unverified` 继续显示源码变化。UI 内联显示 `正在分析 / 已完成 / 有 N 项无法视觉验证 / 不支持`。
+6. 缺失、过期、不稳定、不可读、WebGL、tainted Canvas、运行动画、活跃媒体、隐藏内容或整轮节点/像素/时间预算超限都是 `unverified`。有限摘要相同不能证明任意 CSS/Script 没有后代影响，因此纯视觉 equality 也保持 `unverified`。采纳仍以 Candidate 完整性为边界，但确认框必须提示正在分析、未验证数量或不支持状态。
 
-修改前 pane 的右边缘是 React 拥有的固定评论轨道。标记横坐标不随 HTML 横向滚动，纵坐标跟随目标；整页评论停在轨道顶部，过近标记聚合为 `评2` / `评3`。Hover 与键盘 Focus 展开原评论 Bubble，并通过私有 frame 端口同时高亮修改前目标和修改后同 Stable ID 元素；删除目标只高亮左页。评论正文和附件始终不进入 authored HTML。
+修改前 pane 的右边缘是 React 拥有的固定评论轨道。标记横坐标不随 HTML 横向滚动，纵坐标跟随目标；整页评论停在轨道顶部，过近标记聚合为 `评2` / `评3`。Hover 与键盘 Focus 展开原评论 Bubble，并通过私有 frame 端口同时高亮修改前目标和修改后同 Stable ID 元素；删除目标只高亮左页。父级维护 active key Set；marker 卸载、文档替换、frame reload 与 port 关闭都发送 inactive，评论正文和附件始终不进入 authored HTML。
 
 页面变化标记使用克制的紫色边线与淡底色，未变化内容按上下文可见度降低对比度。点击标记只更新 `navigationTarget`，并在两侧安全揭示目标所在 Tab、滚动到目标和显示活动提示，保持当时的 `pageView + changeFilter + contextVisibility + zoomMode`。
 

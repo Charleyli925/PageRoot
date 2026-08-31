@@ -3,7 +3,7 @@
 - Status: Accepted
 - Date: 2026-08-30
 - Supersedes: the fact-scope and negative movement/attribute clauses of [ADR 0046](0046-review-core-text-and-element-diff.md)
-- Superseded in part by: [ADR 0068](0068-review-visual-verdict-gate.md), which makes these source facts candidates and adds current-frame visual verification
+- Extended by: [ADR 0068](0068-review-visual-verdict-gate.md), which adds non-authoritative current-frame visual enhancement
 
 ## Context
 
@@ -16,8 +16,9 @@ visual inference.
 ## Decision
 
 - Review's source-evidence layer still analyzes only the frozen before/after
-  complete HTML. ADR 0068 owns the later visual verdict gate; screenshots and
-  a second capture owner remain forbidden.
+  complete HTML and remains user-visible Review authority. ADR 0068 adds
+  best-effort visual enhancement; screenshots and a second capture owner remain
+  forbidden.
 - A valid, unique `data-pageroot-id` is the strongest element pairing key.
   It is the sole persistent element identity; authored tag, parent and source
   order are Review change facts and semantic stale evidence, never alternate
@@ -30,8 +31,9 @@ visual inference.
   migrating its ID therefore appears as element removal plus addition even when
   its content or markup is unchanged. Duplicate values are globally ambiguous
   across the whole document pair and fail under the same rule. A formal Review
-  with any absent, partial, invalid or duplicate Stable ID is unsupported and
-  does not enter a legacy matcher. Conversely,
+  with any absent, partial, invalid or duplicate Stable ID cannot use exact
+  identity or visual enhancement; the already-existing semantic source matcher
+  remains the historical-document fallback. Conversely,
   the same persistent ID remains paired when the authored element tag changes;
   the tag change is a source-structure fact, not identity loss.
 - Stable sibling topology reports same-parent and cross-parent movement. An
@@ -39,8 +41,8 @@ visual inference.
   element that moves and changes text retains both movement and text facts;
   byte-identical element markup cannot suppress a topology movement fact.
 - For a stable pair, authored attribute changes, inline `style` changes and
-  `<style>`/stylesheet or `<script>` source changes are candidate facts. A
-  current-frame visual verdict is required before they reach Review. They stay
+  `<style>`/stylesheet or `<script>` source changes are source facts. Current-
+  frame visual observation may annotate them but cannot delete them. They stay
   under the existing `structure` category and `全部 / 文字 / 元素` toolbar;
   Review does not add a visual/style filter or a second fact system.
   Movement, attribute, style and page-source facts do not suppress simultaneous
@@ -64,25 +66,26 @@ visual inference.
   suppresses only that root's false presence fact; traversal continues through
   its descendants so images, modules and other non-text elements added or
   removed during the move remain Review facts.
-- Attribute/style/source facts discover what must be checked; ADR 0068's
-  bounded observation decides whether CSS cascade, layout, Canvas/SVG and
-  runtime-generated presentation are visible, equal or unverified.
+- Attribute/style/source facts discover what may be observed; ADR 0068's
+  bounded observation reports whether sampled CSS cascade, layout, Canvas/SVG
+  and runtime presentation differ or remain explicitly unverified.
 
 ## Consequences
 
 - Stable-ID Working Copies get deterministic element continuity; old Versions
-  can still open read-only, but formal Review does not infer their identity.
+  continue through the existing source matcher without visual enhancement.
 - Stable sibling topology groups common IDs by parent in one pass; it must not
   rescan the complete element inventory once per distinct parent. Identified
   sibling indexes are likewise built once per parent, not once per child.
 - Projection facts remain only `text | structure`. Structure changes admit
   `added`, `removed`, `moved`, `attribute`, `style`, `css-source` and
   `script-source` with the existing purple element presentation.
-- CSS/Script source-only changes fan out to bounded Stable-ID host observations;
-  they do not create a page-source user change or explanation by themselves.
+- CSS/Script source-only changes remain a page-source user fact and may fan out
+  to planned Stable-ID host observations without creating replacement changes.
 - Tests must cover insertion versus reorder, cross-parent movement, moved text,
   attributes plus text, inline style plus text, CSS/Script source, pure reorder,
   unchanged and changed text inside cross-region moves, text transfer between
   stable descendants, ID deletion and replacement with unchanged markup,
   additions/removals inside a moved subtree, global duplicate-ID ambiguity,
-  unsupported incomplete identity and the ADR 0068 visual verdict matrix.
+  visual-unsupported incomplete identity, source fallback and the ADR 0068
+  enhancement matrix.

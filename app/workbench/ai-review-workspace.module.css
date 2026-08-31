@@ -466,6 +466,33 @@
   overflow: hidden;
 }
 
+.visualReviewStatus {
+  position: absolute;
+  z-index: 61;
+  top: 14px;
+  right: 18px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: min(360px, calc(100% - 36px));
+  padding: 6px 9px;
+  border: 1px solid #dddaf2;
+  border-radius: 9px;
+  background: rgb(255 255 255 / 94%);
+  color: #5f599a;
+  box-shadow: 0 5px 16px rgb(31 28 51 / 10%);
+  font-size: 10px;
+  font-weight: 650;
+  pointer-events: none;
+}
+
+.visualReviewStatus[data-phase="unverified"],
+.visualReviewStatus[data-phase="unsupported"] {
+  border-color: #e4d9a8;
+  background: rgb(255 254 244 / 96%);
+  color: #74621f;
+}
+
 .reviewImpactSummary {
   position: absolute;
   z-index: 60;

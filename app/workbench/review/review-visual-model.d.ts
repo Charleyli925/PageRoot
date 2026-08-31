@@ -1,7 +1,6 @@
 import type { ReviewChangeType, ReviewSide } from "./types";
 
 export type SourceEvidenceKind =
-  | "observation"
   | "text"
   | "added"
   | "removed"
@@ -9,8 +8,7 @@ export type SourceEvidenceKind =
   | "attribute"
   | "style"
   | "css-source"
-  | "script-source"
-  | "dynamic-runtime";
+  | "script-source";
 export type SourceEvidence = {
   id: string;
   stableId: string;
@@ -45,6 +43,8 @@ export function buildReviewVisualEvidence(
   sessionId: string,
 ): { binding: ReviewVisualSourceBinding; evidence: SourceEvidence[] };
 export function hasReviewSourceCandidate(evidence: SourceEvidence): boolean;
+export function hasDeterministicReviewSourceEvidence(evidence: SourceEvidence): boolean;
+export function isVisualOnlyReviewSourceEvidence(evidence: SourceEvidence): boolean;
 export function reviewVisualVerdict(
   evidence: SourceEvidence,
   before: ReviewVisualObservation | undefined,

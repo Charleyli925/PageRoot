@@ -494,9 +494,10 @@ ${REVIEW_MASK_UNION_BEFORE}
       hasText: frozenReviewComment,
     });
     await expect(reviewCommentMarker).toHaveCount(1);
-    await expect(reviewCommentMarkers.filter({
+    const ordinaryReviewCommentMarker = reviewCommentMarkers.filter({
       hasText: ordinaryReviewCommentText,
-    })).toHaveCount(1);
+    });
+    await expect(ordinaryReviewCommentMarker).toHaveCount(1);
     // 只读评论标记与 AI 预览共用同一个组件。它是可聚焦控件而不是静态说明，
     // 因为气泡是读到评论正文的唯一入口，键盘用户必须够得到。
     await expect(reviewCommentMarker).toHaveJSProperty("tagName", "BUTTON");
@@ -625,11 +626,24 @@ ${REVIEW_MASK_UNION_BEFORE}
     await launched.page.keyboard.press("Enter");
     await launched.page.keyboard.press("Space");
     await expect(reviewCommentBubble).toBeVisible();
+    await ordinaryReviewCommentMarker.hover();
+    await expect.poll(() => beforeReviewFrame.locator(
+      "[data-pageroot-review-comment-highlight]",
+    ).count()).toBeGreaterThan(0);
+    await launched.page.locator('section[data-side="before"] > header').hover();
+    // Leaving the second marker must not clear the first marker that still owns
+    // keyboard focus. The parent active-key set owns the combined highlight.
+    await expect(beforeReviewFrame.locator("[data-pageroot-review-comment-highlight]"))
+      .toHaveCount(1);
     await expect(launched.page.locator(
       'section[data-side="before"] [data-testid="review-comment-marker"]',
     )).toHaveCount(2);
     await reviewCommentMarker.blur();
     await expect(reviewCommentBubble).toBeHidden();
+    await expect(beforeReviewFrame.locator("[data-pageroot-review-comment-highlight]"))
+      .toHaveCount(0);
+    await expect(afterReviewFrame.locator("[data-pageroot-review-comment-highlight]"))
+      .toHaveCount(0);
     // 接下来继续操作始终固定在工作台顶栏中的审阅控件。
     await expect(liveReviewTools).toBeVisible();
     await expect(beforeReviewFrame.locator('[data-review-tab-panel="two"]'))
@@ -1783,9 +1797,10 @@ ${REVIEW_MASK_UNION_BEFORE}
         .toHaveAttribute("data-pageroot-review-structure", "style");
       await expect(frame.locator("[data-review-layout-only]"))
         .toHaveAttribute("data-pageroot-review-projection-facts", /"structureChange":"style"/u);
-      await expect.poll(() => frame.locator(
-        '[data-review-metrics] [data-pageroot-review-marker][data-pageroot-review-confirmed="true"]',
-      ).count()).toBeGreaterThan(0);
+      await expect(frame.locator("html"))
+        .toHaveAttribute("data-pageroot-review-confirmed", "true");
+      await expect(frame.locator("html"))
+        .toHaveAttribute("data-pageroot-review-projection-facts", /"structureChange":"css-source"/u);
       await expect(frame.locator(
         '[data-review-mask-stage] [data-pageroot-review-structure="style"]',
       )).toHaveCount(2);
@@ -2782,7 +2797,9 @@ test("stable-ID review gates movement, attributes and styles through visible out
         "attribute",
         "style",
       ]));
-      await expect.poll(() => structureKinds(frame.locator("html"))).toEqual([]);
+      await expect.poll(() => structureKinds(frame.locator("html"))).toEqual(
+        expect.arrayContaining(["css-source", "script-source"]),
+      );
       const falsePresenceFacts = await card.evaluate((element) => (
         JSON.parse(element.getAttribute("data-pageroot-review-projection-facts") || "[]")
           .filter((fact) => fact.structureChange === "added" || fact.structureChange === "removed")
@@ -2993,6 +3010,69 @@ test("Review exposes Candidate changes outside the comment target without blocki
       .toBeVisible();
     await expect(launched.page.getByRole("button", { name: "采纳修改" }))
       .toBeVisible();
+  } finally {
+    await stopPageRoot(launched.electronApp, launched.isolatedUserData);
+    removeSourceFixture(fixture.sourceDirectory);
+  }
+});
+
+test("source Review preserves multi-host text evidence and hidden changes without visual confirmation", {
+  tag: ["@gate-smoke", "@smoke-review"],
+}, async () => {
+  test.setTimeout(120_000);
+  const SECTION_ID = "pr1_aaaaaaaaaaaa4aaa8aaaaaaaaaaaaaaa";
+  const FIRST_ID = "pr1_bbbbbbbbbbbb4bbb8bbbbbbbbbbbbbbb";
+  const SECOND_ID = "pr1_cccccccccccc4ccc8ccccccccccccccc";
+  const HIDDEN_ID = "pr1_dddddddddddd4ddd8ddddddddddddddd";
+  const fixture = createSourceFixture("multi-host-hidden-review.html", (source) => source.replace(
+    "  </main>",
+    `    <p data-review-multi-host data-pageroot-id="${SECTION_ID}">
+      <span data-pageroot-id="${FIRST_ID}">第一段旧文字</span>
+      <span data-pageroot-id="${SECOND_ID}">第二段旧文字</span>
+    </p>
+    <div style="display:none!important;visibility:hidden;opacity:0" data-review-hidden-source data-pageroot-id="${HIDDEN_ID}">隐藏旧文字</div>
+  </main>`,
+  ));
+  const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
+  try {
+    const request = await addCommentAndSubmit(
+      launched.page,
+      launched.electronApp,
+      fixture.sourcePath,
+    );
+    writeAiOutput(request.requestRoot, (base) => base
+      .replace("第一段旧文字", "第一段新文字")
+      .replace("第二段旧文字", "第二段新文字")
+      .replace("隐藏旧文字", "隐藏新文字"));
+    runOfficialFinalizer(request.requestRoot, request.changeRequest);
+    await expect(launched.page.getByTestId("ai-conversation-action-bar"))
+      .toContainText("等待你的决定", { timeout: 30_000 });
+    await launched.page.getByRole("button", { name: "审阅对比" }).click();
+    await expect(launched.page.getByTestId("ai-review-workspace"))
+      .toBeVisible({ timeout: 30_000 });
+
+    const beforeFrame = launched.page.frameLocator('iframe[title^="修改前"]');
+    const afterFrame = launched.page.frameLocator('iframe[title^="修改后"]');
+    const addedMarkers = afterFrame.locator(
+      '[data-review-multi-host] [data-pageroot-review-text="added"]',
+    );
+    await expect(addedMarkers.filter({ hasText: "新" })).toHaveCount(2);
+    const changeIds = await addedMarkers.filter({ hasText: "新" }).evaluateAll((elements) => (
+      elements.map((element) => element.getAttribute("data-pageroot-review-marker"))
+    ));
+    expect(new Set(changeIds).size).toBe(1);
+    await expect(beforeFrame.locator(
+      '[data-review-multi-host] [data-pageroot-review-text="removed"]',
+    ).filter({ hasText: "旧" })).toHaveCount(2);
+
+    const hiddenAfter = afterFrame.locator("[data-review-hidden-source]");
+    await expect(hiddenAfter).toBeAttached();
+    await expect(hiddenAfter.locator('[data-pageroot-review-text="added"]'))
+      .toBeAttached();
+    await expect(hiddenAfter.locator('[data-pageroot-review-text="added"]'))
+      .toHaveAttribute("data-pageroot-review-confirmed", "true");
+    await expect(launched.page.getByTestId("review-visual-status"))
+      .toContainText("无法视觉验证", { timeout: 30_000 });
   } finally {
     await stopPageRoot(launched.electronApp, launched.isolatedUserData);
     removeSourceFixture(fixture.sourceDirectory);

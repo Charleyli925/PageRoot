@@ -15,7 +15,10 @@ export type ReviewSide = "before" | "after";
 
 export type ReviewChange = {
   id: string;
-  stableId?: string;
+  /** Stable-ID hosts that carry this source fact. One fact may span many hosts. */
+  evidenceStableIds?: string[];
+  /** Only a proven visual no-op may suppress this source candidate. */
+  visualGate?: "enhancement";
   label: string;
   helper: string;
   types: ReviewChangeType[];

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, type KeyboardEvent, type PointerEvent } from "react";
+import { useCallback, useEffect, useRef, type KeyboardEvent, type PointerEvent } from "react";
 
 import styles from "./read-only-comment-marker.module.css";
 
@@ -85,9 +85,19 @@ export default function ReadOnlyCommentMarker({
 }: ReadOnlyCommentMarkerProps) {
   const count = group.items.length;
   const activeRef = useRef({ pointer: false, focus: false });
-  const publishActive = useCallback(() => {
-    onActiveChange?.(activeRef.current.pointer || activeRef.current.focus);
+  const onActiveChangeRef = useRef(onActiveChange);
+  useEffect(() => {
+    onActiveChangeRef.current = onActiveChange;
   }, [onActiveChange]);
+  const publishActive = useCallback(() => {
+    onActiveChangeRef.current?.(activeRef.current.pointer || activeRef.current.focus);
+  }, []);
+
+  useEffect(() => () => {
+    if (!activeRef.current.pointer && !activeRef.current.focus) return;
+    activeRef.current = { pointer: false, focus: false };
+    onActiveChangeRef.current?.(false);
+  }, []);
 
   // Hover and keyboard focus open the same bubble through the same measurement,
   // so a keyboard user is never left without the comment body.

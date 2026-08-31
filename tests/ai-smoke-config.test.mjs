@@ -24,6 +24,7 @@ test("AI smoke configuration selects review activation and broad-edit regression
     "stable-ID review gates movement, attributes and styles through visible output",
     "a rewrite outside <main> is still reviewed",
     "Review exposes Candidate changes outside the comment target without blocking adoption",
+    "source Review preserves multi-host text evidence and hidden changes without visual confirmation",
   ]);
   for (const source of sources) {
     assert.doesNotMatch(

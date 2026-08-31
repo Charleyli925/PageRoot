@@ -1,68 +1,83 @@
-# ADR 0068: Review visual verdict gate
+# ADR 0068: Review source facts with visual enhancement
 
 - Status: Accepted
 - Date: 2026-08-31
-- Supersedes: ADR 0066's static source-fact visibility rule
+- Amended: 2026-09-01
+- Extends: ADR 0046 and ADR 0066
 
 ## Decision
 
-Formal modern Review accepts only two complete, valid and document-unique
-`data-pageroot-id` source indexes. The same valid ID is the only pairing key:
-tag and parent changes retain continuity, while missing, partial, invalid and
-duplicate identity is explicitly `unsupported`. There is no semantic matcher,
-title/class/id/text similarity, sibling, relocation, singleton, weighted or
-fuzzy recovery in this path.
+Review source facts remain authoritative. Precise text differences, outermost
+element addition/removal, Stable-ID movement and explicit authored attribute
+changes enter the existing `全部 / 文字 / 元素` list, count, navigation and
+projection as soon as source analysis completes. A runtime visual observation
+may annotate those facts, but missing, stale, hidden, unsupported or
+unreadable observation never deletes them.
 
-Source text, add/remove, move, attribute/style, CSS and script differences are
-`SourceEvidence`: private pending candidates bound to the exact before/after
-source SHA and Review session. They are not Review changes. The pre-authored
-bootstrap captures native DOM capability and establishes a one-shot,
-challenge-bound `MessagePort` per frame side. The port observes the matching
-stable-ID host after load and is invalidated by document/session/frame reload
-generation replacement. No Main/Preload/IPC/screenshot/PNG owner is added.
-The bootstrap also captures each source-declared Stable-ID host reference while
-the parser constructs the document. A disconnected host, changed/removed ID,
-duplicate claimant or later same-ID replacement is unverified; current-DOM
-lookup can never reacquire identity. Any iframe `load` after its initial load
-immediately clears the old verdict generation before a new port may settle.
+Complete, valid and document-unique `data-pageroot-id` remains the required
+binding for current-frame visual enhancement. Missing, partial, invalid or
+duplicate identity makes only visual enhancement `unsupported`. It does not
+cancel source Review: the existing semantic source matcher remains available
+for historical documents, while Stable-ID continuity is used whenever the
+document pair proves it. This PR does not add a migration, compatibility flag
+or second source classifier.
 
-Common Stable IDs require a matching trusted observation from both sides;
-added/removed roots require the trusted present side plus the source-proven
-absence. Equal stable visible summaries are `unchanged`; a visible difference
-with SourceEvidence is `changed`; stale, missing, unstable or unreadable
-observation is `unverified`. Added/removed roots are changed only if their
-present side is visible, own their descendants, and inherit dynamic-source
-pollution. Pending and unverified
-candidates never enter changes, markers, counts, navigation or context dimming.
+`SourceEvidence` is an observation plan, not a replacement Review model. The
+plan contains only hosts implicated by a source difference; identical common
+Stable IDs are not observation candidates. One semantic `ReviewChange` carries
+`evidenceStableIds[]`, so one change can span several hosts and several changes
+can depend on one host without replacing precise character facts with generic
+element changes. CSS and Script source aggregates remain visible source facts.
 
-The bounded summary excludes absolute page coordinates and scroll position. It
-includes visible direct text, a computed-presentation whitelist, pseudo-element
-content, visible image dimensions, normalized SVG drawing attributes and
-resolved paint, Canvas 2D backing-store hashes and runtime-generated descendants
-owned by the nearest Stable-ID host. Stable descendants remain independent
-targets. Two samples across animation frames must agree. WebGL, tainted Canvas,
-running animation, video/audio, time/random/network-dependent output, hidden
-unsynchronized content, node/pixel/time budget overflow and generation changes
-are `unverified`; no threshold or source fallback upgrades them.
+The current-frame bootstrap may provide best-effort `changed / unchanged /
+unverified` observations for DOM presentation, pseudo content, images, SVG,
+Canvas 2D and runtime descendants owned by a planned Stable-ID host. It uses a
+challenge-bound `MessagePort`, source/session/generation labels and parser-time
+host references to reject stale ports, duplicate claims and same-ID
+replacement. It runs in the authored frame realm, however, and echoes the
+parent-provided source label; it is not an isolated security oracle and must
+not be described as a trusted proof against hostile authored code.
 
-Existing text wrappers and element projection facts are serialized as pending.
-The frame projection owns an empty confirmed-ID set until the parent combines
-both observations. Only confirmed IDs can draw character dots/strikes, element
-boxes, mask holes or revision bars. This preserves `全部 / 文字 / 元素`, split
-and single-page modes, linked scrolling, zoom, first-change navigation and
-whole-Candidate adoption without a new category or explanation panel.
+Observation is batched across animation frames and uses one Review-wide time,
+node and pixel budget per sample. Every planned candidate receives an explicit
+result; there is no `.slice(0, 1000)` or other silent truncation. Budget
+exhaustion, WebGL, tainted pixels, live media, running animation, instability,
+missing hosts and late/stale generations are `unverified`. Added, removed or
+both-side-hidden source facts are also `unverified` visually while remaining
+visible as source changes. Presence of an external Script, ECharts, timers or
+network API never blanket-taints unrelated source facts.
 
-Review comments remain trusted React UI. Their marker is fixed to the right
-edge of the Before pane rather than authored document coordinates; vertical
-position follows the target and nearby markers aggregate to `评2`/`评3` without
-large displacement. Hover and keyboard focus use the same private frame ports
-to highlight the Before target and the After element with the same Stable ID.
-A deleted target highlights Before only. Comment text and attachments never
-enter authored HTML.
+A bounded DOM/style summary can establish a visible difference, but equality
+cannot prove that arbitrary CSS or Script had no downstream effect. Equal
+visual-only summaries therefore remain `unverified`; they do not suppress a
+source fact. A pure visual candidate may be suppressed only if a future
+observer can explicitly prove every linked host is unchanged without relying
+on this bounded whitelist.
 
-Tests must assert non-zero candidates, the pure three-state reducer and final
-projection activation. The browser matrix covers position/class no-ops, text,
-computed style, runtime DOM, SVG, Canvas, WebGL, real taint, animation, media,
-budgets and generation invalidation. Electron Review verifies the fixed comment
-track, horizontal-scroll independence, paired hover/focus highlighting and the
-unchanged adoption contract.
+The Review UI exposes one inline state: `正在分析`, `已完成`, `有 N 项无法视觉验证`
+or `不支持`. `unverified` source changes remain in filters, navigation and
+markers. Adoption stays available because source validation and Candidate
+integrity are separate authorities, but the confirmation dialog explicitly
+states when visual enhancement is pending, unsupported or unverified.
+
+Review comments remain trusted React UI outside authored HTML. The marker rail
+is fixed to the right edge of the Before pane, nearby comments aggregate to
+`评2`/`评3`, and active comment keys are owned by the parent. Marker unmount,
+document replacement, frame reload and port closure broadcast inactive state
+so one marker cannot clear another active highlight or leave a stale layer.
+
+No Main/Preload/IPC/screenshot/PNG capture owner is restored. Existing Review
+text geometry, structure facts, split/single-page views, panel reveal, linked
+scrolling, zoom, comments and Candidate adoption remain the reused product
+surface.
+
+## Required tests
+
+- a deterministic change after more than 1,000 unchanged Stable IDs;
+- hidden Tab, `display:none`, `visibility:hidden` and `opacity:0` source facts;
+- parent class/CSS-variable, positioning and cross-parent movement changes;
+- delayed runtime mutation settling after the first sample;
+- one semantic change spanning multiple Stable-ID hosts;
+- external ECharts/Script pages with an ordinary text change;
+- pending, unsupported and unverified inline state plus adoption confirmation;
+- comment marker unmount, document replacement and port-rebind cleanup.

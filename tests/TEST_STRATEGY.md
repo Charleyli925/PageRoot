@@ -4,22 +4,23 @@
 
 ## Review visual verdict matrix
 
-`tests/review-visual-model.test.mjs` covers the source identity gate and pure
-verdict reducer: incomplete/duplicate identity is unsupported; same-ID source
-candidates are non-zero; stale, one-sided or unstable observations are
-unverified; equal summaries are unchanged; only a matching changed pair
-activates a change. `native-dom-review-visual-observation.spec.mjs` exercises
+`tests/review-visual-model.test.mjs` covers the visual identity boundary and
+pure verdict reducer: incomplete/duplicate identity disables only visual
+enhancement; identical Stable IDs create no observation-only candidates;
+stale, one-sided, hidden or unstable observations are unverified; deterministic
+source facts remain visible independently. `native-dom-review-visual-observation.spec.mjs` exercises
 the real pre-author bootstrap and private port with position/class no-ops,
 computed presentation, text, runtime DOM, SVG, Canvas 2D, WebGL, running
-animation, live media, pixel budget and a genuinely tainted Canvas. Its pending
-projection case proves that zero verdicts create no dim layer and a trusted
-verdict activates the existing character marks and element projection. A
+animation, live media, global pixel budget, delayed mutation and a genuinely
+tainted Canvas. Its projection case proves that the parent can activate the
+existing source character marks without generating replacement facts. A
 same-ID runtime replacement remains unverified rather than reacquiring the
-forged node; dynamic pollution covers common, added and removed candidates.
+forged node. External runtime libraries never blanket-taint ordinary text,
+added or removed source facts.
 
-The AI Review Electron flow owns the host integration oracle: confirmed changes
-alone enter filters/navigation, frame reload and authored post-verdict
-navigation invalidate the old generation,
+The AI Review Electron flow owns the host integration oracle: source changes
+enter filters/navigation before visual observation; frame reload and authored
+navigation invalidate the old generation and surface explicit unverified state;
 the Before comment marker remains on the pane-right track during horizontal
 HTML scrolling, and hover/focus highlights the same Stable ID in both frames.
 Real-page fixtures retain identical, scroll/position-only,
@@ -251,15 +252,14 @@ Workbench 只确认已提交 loading surface、传入窄 port 并消费快照。
   Electron AI 闭环还必须从真实评论附件上传开始，验证 Request 内冻结文件的
   实际字节、manifest Hash 与删除 Draft 原件后的可读性，不得只断言 JSON 元数据。
   `ReviewAnalysisSession` 的 Node oracle 另证明确切 key 合并、异步让步、运行中
-  取消和按字节 LRU。正式现代 Review 不再有 fuzzy/legacy pairing 性能路径；
-  Node oracle 必须证明两侧完整、有效、唯一 Stable ID 的硬门禁，区分普通插入、
-  同父重排与跨父移动，并守护源码只产生候选。重复/非法/缺失 ID
-  明确 unsupported，不运行旧 matcher。纯函数 oracle 覆盖 `changed / unchanged /
-  unverified`、source Hash、Session、generation 与单侧 added/removed 证据；真实
-  Chromium 覆盖本文开头的 Review visual verdict matrix，并证明 pending 不激活
-  字符/元素投影。Electron 闭环验证只有可见变化进入计数和导航，
-  CSS/Script 源码不作为用户变化显示，同时评论固定轨道、Tab、采纳与导航
-  降级合同不回归。preload、IPC、package allowlist 与 artifact verifier 仍不存在
+  取消和按字节 LRU。Node oracle 必须区分普通插入、同父重排与跨父移动，证明
+  Stable ID 支持多宿主 evidence 映射，并证明重复/非法/缺失 ID 只禁用视觉增强，
+  不取消既有源码 matcher。纯函数 oracle 覆盖 `changed / unchanged / unverified`、
+  source Hash、Session、generation、隐藏内容、外链运行库、1001 个 Stable ID 后的
+  源码变化与单侧 added/removed 证据；真实 Chromium 覆盖本文开头的 Review visual
+  matrix、整轮预算和延迟变化。Electron 闭环验证源码变化始终进入计数和导航，
+  unverified 有内联状态与采纳提示，同时评论固定轨道、cleanup、Tab 与导航合同
+  不回归。preload、IPC、package allowlist 与 artifact verifier 仍不存在
   Review capture owner。
 - Electron E2E 夹具与场景归属：`tests/e2e/electron/helpers/pageroot-app-fixture.mjs` 是兼容 re-export。能力实现分别在 `electron-app-launch.mjs`、`electron-project-fixture.mjs`、`electron-project-ready.mjs`、`electron-comment-driver.mjs`、`electron-legacy-project-fixture.mjs` 与 `electron-safe-cleanup.mjs`。它们只拥有独立 userData/workspace/source、隐藏窗口启动、Bridge 路径、close-first
   cleanup、诊断输出和已加载 frame；不包含产品断言、整条用户流程或自动重试。

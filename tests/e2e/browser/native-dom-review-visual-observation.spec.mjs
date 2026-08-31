@@ -156,7 +156,54 @@ test("unsupported animated, media, WebGL and over-budget surfaces fail closed", 
   expect(animated).toMatchObject({ unverified: true, failureReason: "animation" });
   expect(media).toMatchObject({ unverified: true, failureReason: "live-media" });
   expect(webgl).toMatchObject({ unverified: true, failureReason: "webgl-or-unreadable-canvas" });
-  expect(overBudget).toMatchObject({ unverified: true, failureReason: "pixel-budget" });
+  expect(overBudget).toMatchObject({ unverified: true, failureReason: "global-pixel-budget" });
+});
+
+test("a delayed runtime mutation is never frozen into an unchanged verdict", async ({ page }) => {
+  const delayed = await observe(page, {
+    body: `<main data-pageroot-id="${HOST_ID}">initial</main>`,
+    authoredScript: `setTimeout(() => {
+      document.querySelector('main').textContent = 'final content';
+    }, 500)`,
+  });
+  expect(delayed).toMatchObject({ unverified: true, failureReason: "unstable" });
+});
+
+test("the observation plan reports every candidate beyond 1000 without silent truncation", async ({ page }) => {
+  test.setTimeout(30_000);
+  const stableId = (index) => `pr1_${index.toString(16).padStart(12, "0")}40008${"0".repeat(15)}`;
+  const stableIds = Array.from({ length: 1_001 }, (_, index) => stableId(index + 1));
+  const bootstrap = generatedReviewBootstrap([], "after", stableIds);
+  await page.setContent(`<!doctype html><script>${bootstrap}</script>${stableIds.map((id, index) => (
+    `<span data-pageroot-id="${id}">${index}</span>`
+  )).join("")}`);
+  const observations = await page.evaluate(async ({ ids }) => {
+    let port = null;
+    addEventListener("message", (event) => {
+      if (event.data?.type === "review-visual-channel") port = event.ports?.[0] || null;
+    }, { once: true });
+    postMessage({
+      source: "pageroot-ai-review-parent",
+      sessionId: "review-session",
+      type: "request-review-visual-channel",
+      challenge: "e".repeat(32),
+    }, "*");
+    const deadline = Date.now() + 5_000;
+    while (!port && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 10));
+    return await new Promise((resolve) => {
+      port.onmessage = (event) => resolve(event.data.observations);
+      port.postMessage({
+        type: "observe",
+        sessionId: "review-session",
+        side: "after",
+        sourceHash: "sha256:after",
+        generation: 9,
+        candidates: ids.map((id) => ({ stableId: id, present: true })),
+      });
+    });
+  }, { ids: stableIds });
+  expect(observations).toHaveLength(1_001);
+  expect(observations.at(-1)?.stableId).toBe(stableIds.at(-1));
 });
 
 test("a genuinely tainted Canvas proves the unreadable branch", async ({ page }) => {
@@ -187,12 +234,13 @@ test("a genuinely tainted Canvas proves the unreadable branch", async ({ page })
   }
 });
 
-test("pending projection stays clear and a trusted verdict activates existing text UI", {
+test("source projection activates existing text UI without creating replacement changes", {
   tag: ["@gate-smoke", "@smoke-review"],
 }, async ({ page }) => {
   const bootstrap = generatedReviewBootstrap([], "after", [HOST_ID]);
   await page.setContent(`<!doctype html><script>${bootstrap}</script><p data-pageroot-id="${HOST_ID}"><span data-pageroot-review-text="added" data-pageroot-review-marker="change-1" data-pageroot-review-marker-types="text" data-pageroot-review-summary="新增内容">new</span></p>`);
-  await expect(page.locator("[data-pageroot-review-projection-layer]")).toHaveCount(0);
+  await expect(page.locator('[data-pageroot-review-overlay-box="change-1"]')).toHaveCount(1);
+  await expect(page.locator('[data-pageroot-review-text-mark="added"]')).not.toHaveCount(0);
   const activated = await page.evaluate(async ({ stableId }) => {
     let port = null;
     addEventListener("message", (event) => {

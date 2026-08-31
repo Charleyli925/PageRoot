@@ -95,12 +95,14 @@ test("a pre-load review navigation falls back without trusting the replacement p
     await afterReviewFrame.locator("html").evaluate(() => {
       location.replace("about:blank");
     });
-    await expect(launched.page.getByText(
-      "本轮没有已确认变化，仍可查看双页",
-      { exact: true },
-    )).toBeVisible({ timeout: 30_000 });
+    await expect(launched.page.getByTestId("review-visual-status"))
+      .toContainText("无法视觉验证", { timeout: 30_000 });
+    await launched.page.getByRole("button", { name: "采纳修改" }).click();
+    await expect(launched.page.getByRole("dialog"))
+      .toContainText("无法视觉验证");
+    await launched.page.getByRole("button", { name: "继续审阅" }).click();
     await expect(beforeReviewFrame.locator("[data-pageroot-review-confirmed=\"true\"]"))
-      .toHaveCount(0);
+      .not.toHaveCount(0);
   } finally {
     await stopPageRoot(launched.electronApp, launched.isolatedUserData);
     removeSourceFixture(fixture.sourceDirectory);

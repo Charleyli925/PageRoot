@@ -1,8 +1,8 @@
 import { buildSourceIndex } from "../../lib/source-index.js";
 import { analyzeReviewStableIdTopology } from "../../lib/review-stable-id-diff.js";
 
-const OBSERVATION_ONLY = "observation";
-const DYNAMIC_RUNTIME = "dynamic-runtime";
+const VISUAL_ONLY_KINDS = new Set(["style", "css-source", "script-source"]);
+const DETERMINISTIC_KINDS = new Set(["text", "added", "removed", "moved", "attribute"]);
 
 function sourceElementMap(html) {
   const index = buildSourceIndex(html);
@@ -43,20 +43,6 @@ function authorSourceInventory(index, kind) {
   return index.elements.filter(accepted).map((element) => element.raw).join("\u0001");
 }
 
-function dynamicRuntimeSource(index) {
-  const scriptSource = index.elements
-    .filter((element) => element.tagName === "script")
-    .map((element) => element.raw)
-    .join("\n");
-  const externalRuntime = index.elements.some((element) => (
-    (element.tagName === "script" || element.tagName === "video")
-    && Boolean(element.attributesByName.get("src")?.[0]?.value)
-  ));
-  return externalRuntime || /\b(?:Math\.random|Date\.now|new\s+Date|performance\.now|fetch|XMLHttpRequest|WebSocket|EventSource|setInterval)\b/u.test(
-    scriptSource,
-  );
-}
-
 function outermost(element, changedIds, index) {
   for (let parentId = element.parentId; parentId;) {
     const parent = index.byNodeId.get(parentId);
@@ -69,12 +55,21 @@ function outermost(element, changedIds, index) {
 
 function evidenceTypes(kinds) {
   const text = kinds.includes("text");
-  const structure = kinds.some((kind) => ![OBSERVATION_ONLY, "text"].includes(kind));
+  const structure = kinds.some((kind) => kind !== "text");
   return [...(text ? ["text"] : []), ...(structure || !text ? ["structure"] : [])];
 }
 
 export function hasReviewSourceCandidate(evidence) {
-  return evidence.kinds.some((kind) => kind !== OBSERVATION_ONLY);
+  return evidence.kinds.length > 0;
+}
+
+export function hasDeterministicReviewSourceEvidence(evidence) {
+  return evidence.kinds.some((kind) => DETERMINISTIC_KINDS.has(kind));
+}
+
+export function isVisualOnlyReviewSourceEvidence(evidence) {
+  return evidence.kinds.length > 0
+    && evidence.kinds.every((kind) => VISUAL_ONLY_KINDS.has(kind));
 }
 
 /** Candidate discovery only; this function never declares a visual change. */
@@ -112,13 +107,12 @@ export function buildReviewVisualEvidence(beforeHtml, afterHtml, sessionId) {
   const afterScriptSource = authorSourceInventory(after.index, "script-source");
   const cssChanged = beforeCssSource !== afterCssSource;
   const scriptChanged = beforeScriptSource !== afterScriptSource;
-  const dynamicRuntime = dynamicRuntimeSource(before.index) || dynamicRuntimeSource(after.index);
   const evidence = [];
 
   for (const id of topology.commonIds) {
     const beforeElement = before.elements.get(id);
     const afterElement = after.elements.get(id);
-    const kinds = [OBSERVATION_ONLY];
+    const kinds = [];
     if (beforeElement.directText !== afterElement.directText) kinds.push("text");
     if (moved.has(id)) kinds.push("moved");
     if ((beforeElement.attributesByName.get("style")?.[0]?.value || "")
@@ -131,7 +125,7 @@ export function buildReviewVisualEvidence(beforeHtml, afterHtml, sessionId) {
     ) kinds.push("attribute");
     if (cssChanged) kinds.push("css-source");
     if (scriptChanged) kinds.push("script-source");
-    if (dynamicRuntime && kinds.length > 1) kinds.push(DYNAMIC_RUNTIME);
+    if (!kinds.length) continue;
     evidence.push({
       id: `candidate-${id}`,
       stableId: id,
@@ -150,7 +144,7 @@ export function buildReviewVisualEvidence(beforeHtml, afterHtml, sessionId) {
       id: `candidate-${id}`,
       stableId: id,
       parentStableId: parentPagerootId(before.index, element),
-      kinds: dynamicRuntime ? ["removed", DYNAMIC_RUNTIME] : ["removed"],
+      kinds: ["removed"],
       types: ["structure"],
       beforePresent: true,
       afterPresent: false,
@@ -163,7 +157,7 @@ export function buildReviewVisualEvidence(beforeHtml, afterHtml, sessionId) {
       id: `candidate-${id}`,
       stableId: id,
       parentStableId: parentPagerootId(after.index, element),
-      kinds: dynamicRuntime ? ["added", DYNAMIC_RUNTIME] : ["added"],
+      kinds: ["added"],
       types: ["structure"],
       beforePresent: false,
       afterPresent: true,
@@ -186,30 +180,36 @@ function observationMatches(observation, side, stableId, binding, generation) {
 
 /** Missing, stale, unstable or one-sided evidence is never unchanged. */
 export function reviewVisualVerdict(evidence, before, after, binding, generation) {
-  if (binding.identity !== "supported" || evidence.kinds.includes(DYNAMIC_RUNTIME)) {
+  if (binding.identity !== "supported") {
     return "unverified";
   }
   if (evidence.kinds.includes("added")) {
     if (!observationMatches(after, "after", evidence.stableId, binding, generation)) {
       return "unverified";
     }
-    return after.visible ? "changed" : "unchanged";
+    return after.visible ? "changed" : "unverified";
   }
   if (evidence.kinds.includes("removed")) {
     if (!observationMatches(before, "before", evidence.stableId, binding, generation)) {
       return "unverified";
     }
-    return before.visible ? "changed" : "unchanged";
+    return before.visible ? "changed" : "unverified";
   }
   if (
     !observationMatches(before, "before", evidence.stableId, binding, generation)
     || !observationMatches(after, "after", evidence.stableId, binding, generation)
   ) return "unverified";
-  if (!before.visible && !after.visible) return "unchanged";
+  if (!before.visible && !after.visible) return "unverified";
   if (before.visible !== after.visible) {
     return hasReviewSourceCandidate(evidence) ? "changed" : "unverified";
   }
   if (!before.fingerprint || !after.fingerprint) return "unverified";
-  if (before.fingerprint === after.fingerprint) return "unchanged";
+  if (before.fingerprint === after.fingerprint) {
+    // A bounded DOM/style fingerprint can prove a difference, but it cannot
+    // prove that arbitrary CSS or Script had no visual effect outside the
+    // sampled surface. Equal visual-only summaries therefore remain explicit
+    // uncertainty rather than deleting a source fact.
+    return isVisualOnlyReviewSourceEvidence(evidence) ? "unverified" : "unchanged";
+  }
   return hasReviewSourceCandidate(evidence) ? "changed" : "unverified";
 }

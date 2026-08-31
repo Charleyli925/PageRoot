@@ -11,7 +11,7 @@ const B = "pr1_22222222222242229222222222222222";
 const C = "pr1_3333333333334333a333333333333333";
 const html = (body) => `<!doctype html><html data-pageroot-id="${A}"><body data-pageroot-id="${B}">${body}</body></html>`;
 
-test("formal visual review rejects incomplete or duplicate identity without legacy pairing", () => {
+test("visual enhancement rejects incomplete or duplicate identity without cancelling source Review", () => {
   const incomplete = buildReviewVisualEvidence("<p>same</p>", "<p>changed</p>", "s");
   assert.equal(incomplete.binding.identity, "unsupported");
   assert.deepEqual(incomplete.evidence, []);
@@ -36,12 +36,11 @@ test("only same stable ID produces source evidence; a move remains a candidate",
   assert.ok(changed?.kinds.includes("moved"));
 });
 
-test("identical modern pages still produce real unchanged observation candidates", () => {
+test("identical modern pages do not schedule observation-only candidates", () => {
   const source = `<main data-pageroot-id="${A}"><p data-pageroot-id="${B}">same</p></main>`;
   const result = buildReviewVisualEvidence(source, source, "same-session");
   assert.equal(result.binding.identity, "supported");
-  assert.equal(result.evidence.length, 2);
-  assert.ok(result.evidence.every((entry) => entry.kinds.join() === "observation"));
+  assert.deepEqual(result.evidence, []);
 });
 
 test("verdict is fail-closed and source candidates cannot promote themselves", () => {
@@ -77,7 +76,7 @@ test("added and removed elements require only the trusted present-side observati
     fingerprint: "visible",
   };
   assert.equal(reviewVisualVerdict(added, undefined, present, addedResult.binding, 4), "changed");
-  assert.equal(reviewVisualVerdict(added, undefined, { ...present, visible: false }, addedResult.binding, 4), "unchanged");
+  assert.equal(reviewVisualVerdict(added, undefined, { ...present, visible: false }, addedResult.binding, 4), "unverified");
 
   const removedResult = buildReviewVisualEvidence(after, before, "removed-session");
   const removed = removedResult.evidence.find((entry) => entry.kinds.includes("removed"));
@@ -90,66 +89,73 @@ test("added and removed elements require only the trusted present-side observati
   assert.equal(reviewVisualVerdict(removed, beforePresent, undefined, removedResult.binding, 4), "changed");
 });
 
-test("runtime differences without source evidence and dynamic output stay unverified", () => {
-  const identical = `<main data-pageroot-id="${A}">same</main>`;
-  const observationOnly = buildReviewVisualEvidence(identical, identical, "runtime-session");
-  const evidence = observationOnly.evidence[0];
-  const observation = (side, fingerprint) => ({
-    sessionId: "runtime-session",
+test("external runtime does not erase deterministic source facts", () => {
+  const before = `<main data-pageroot-id="${A}"><p data-pageroot-id="${B}">old</p></main><script data-pageroot-id="${C}" src="echarts.min.js"></script>`;
+  const after = `<main data-pageroot-id="${A}"><p data-pageroot-id="${B}">new</p></main><script data-pageroot-id="${C}" src="echarts.min.js"></script>`;
+  const result = buildReviewVisualEvidence(before, after, "external-runtime");
+  assert.deepEqual(result.evidence.map((entry) => entry.stableId), [B]);
+  assert.deepEqual(result.evidence[0].kinds, ["text"]);
+});
+
+test("equal bounded summaries never prove a pure style source candidate unchanged", () => {
+  const before = `<main data-pageroot-id="${A}" style="left:0"></main>`;
+  const after = `<main data-pageroot-id="${A}" style="left:120px"></main>`;
+  const result = buildReviewVisualEvidence(before, after, "style-session");
+  const evidence = result.evidence[0];
+  const observation = (side) => ({
+    sessionId: "style-session",
     side,
-    sourceHash: observationOnly.binding.sourceHash[side],
+    sourceHash: result.binding.sourceHash[side],
     generation: 2,
     stableId: A,
     visible: true,
-    fingerprint,
+    fingerprint: "same-bounded-summary",
   });
   assert.equal(reviewVisualVerdict(
     evidence,
-    observation("before", "a"),
-    observation("after", "b"),
-    observationOnly.binding,
+    observation("before"),
+    observation("after"),
+    result.binding,
     2,
   ), "unverified");
+});
 
-  const dynamicBefore = `<main data-pageroot-id="${A}" class="old"></main><script data-pageroot-id="${C}">Math.random()</script>`;
-  const dynamicAfter = `<main data-pageroot-id="${A}" class="new"></main><script data-pageroot-id="${C}">Math.random()</script>`;
-  const dynamic = buildReviewVisualEvidence(dynamicBefore, dynamicAfter, "dynamic-session");
-  assert.ok(dynamic.evidence.find((entry) => entry.stableId === A)?.kinds.includes("dynamic-runtime"));
-
-  const dynamicAddedBefore = `<main data-pageroot-id="${A}"></main><script data-pageroot-id="${C}">Math.random()</script>`;
-  const dynamicAddedAfter = `<main data-pageroot-id="${A}"><p data-pageroot-id="${B}">added</p></main><script data-pageroot-id="${C}">Math.random()</script>`;
-  const dynamicAdded = buildReviewVisualEvidence(
-    dynamicAddedBefore,
-    dynamicAddedAfter,
-    "dynamic-added-session",
-  );
-  const added = dynamicAdded.evidence.find((entry) => entry.stableId === B);
-  assert.ok(added?.kinds.includes("dynamic-runtime"));
-  const present = {
-    sessionId: "dynamic-added-session",
-    side: "after",
-    sourceHash: dynamicAdded.binding.sourceHash.after,
-    generation: 8,
+test("hidden text, parent-class effects and cross-parent moves remain source evidence", () => {
+  const before = `<main data-pageroot-id="${A}" class="theme-old"><section data-pageroot-id="${C}"><p data-pageroot-id="${B}">old</p></section></main>`;
+  const after = `<main data-pageroot-id="${A}" class="theme-new"><section data-pageroot-id="${C}"></section><p data-pageroot-id="${B}">new</p></main>`;
+  const result = buildReviewVisualEvidence(before, after, "hidden-source");
+  assert.ok(result.evidence.find((entry) => entry.stableId === A)?.kinds.includes("attribute"));
+  const movedText = result.evidence.find((entry) => entry.stableId === B);
+  assert.ok(movedText?.kinds.includes("moved"));
+  assert.ok(movedText?.kinds.includes("text"));
+  const hidden = (side) => ({
+    sessionId: "hidden-source",
+    side,
+    sourceHash: result.binding.sourceHash[side],
+    generation: 5,
     stableId: B,
-    visible: true,
-    fingerprint: "stable-sample",
-  };
-  assert.equal(
-    reviewVisualVerdict(added, undefined, present, dynamicAdded.binding, 8),
-    "unverified",
-  );
+    visible: false,
+    fingerprint: "hidden",
+  });
+  assert.equal(reviewVisualVerdict(
+    movedText,
+    hidden("before"),
+    hidden("after"),
+    result.binding,
+    5,
+  ), "unverified");
+});
 
-  const dynamicRemoved = buildReviewVisualEvidence(
-    dynamicAddedAfter,
-    dynamicAddedBefore,
-    "dynamic-removed-session",
-  );
-  const removed = dynamicRemoved.evidence.find((entry) => entry.stableId === B);
-  assert.ok(removed?.kinds.includes("dynamic-runtime"));
-  assert.equal(reviewVisualVerdict(removed, {
-    ...present,
-    sessionId: "dynamic-removed-session",
-    side: "before",
-    sourceHash: dynamicRemoved.binding.sourceHash.before,
-  }, undefined, dynamicRemoved.binding, 8), "unverified");
+test("long pages schedule only actual source evidence beyond the first 1000 stable IDs", () => {
+  const stableId = (index) => `pr1_${index.toString(16).padStart(12, "0")}40008${"0".repeat(15)}`;
+  const elements = Array.from({ length: 1_101 }, (_, index) => (
+    `<p data-pageroot-id="${stableId(index + 2)}">item-${index}</p>`
+  ));
+  const before = `<main data-pageroot-id="${stableId(1)}">${elements.join("")}</main>`;
+  elements[1_050] = `<p data-pageroot-id="${stableId(1_052)}">changed</p>`;
+  const after = `<main data-pageroot-id="${stableId(1)}">${elements.join("")}</main>`;
+  const result = buildReviewVisualEvidence(before, after, "long-page");
+  assert.equal(result.binding.identity, "supported");
+  assert.deepEqual(result.evidence.map((entry) => entry.stableId), [stableId(1_052)]);
+  assert.ok(result.evidence[0].kinds.includes("text"));
 });

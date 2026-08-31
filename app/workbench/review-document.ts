@@ -33,6 +33,7 @@ import {
 } from "./review/runtime-projection";
 import {
   buildReviewVisualEvidence,
+  isVisualOnlyReviewSourceEvidence,
 } from "./review/review-visual-model.js";
 import {
   buildReviewSemanticPairGraphSteps,
@@ -48,6 +49,7 @@ import {
   markSemanticTextDifferences,
 } from "./review/text-diff";
 import {
+  annotateStablePageSourceAggregate,
   annotateStableSourceDifferences,
 } from "./review/stable-source-diff";
 import type {
@@ -231,7 +233,7 @@ function attachChangeMarkerMetadata(
   attachRoots([pair.before, pair.after]);
 }
 
-function visualStableIdForChange(pair: SectionPair, changeId: string) {
+function visualStableIdsForChange(pair: SectionPair, changeId: string) {
   const stableIds = new Set<string>();
   [pair.before, pair.after].forEach((root) => {
     if (!root) return;
@@ -243,8 +245,25 @@ function visualStableIdForChange(pair: SectionPair, changeId: string) {
         if (stableId) stableIds.add(stableId);
       });
   });
-  if (stableIds.size === 1) return [...stableIds][0];
-  return (pair.after || pair.before)?.getAttribute("data-pageroot-id") || undefined;
+  if (!stableIds.size) {
+    const rootStableId = (pair.after || pair.before)?.getAttribute("data-pageroot-id") || "";
+    if (rootStableId) stableIds.add(rootStableId);
+  }
+  return [...stableIds];
+}
+
+function attachSourceChangeMarkerMetadata(
+  before: Element,
+  after: Element,
+  changeId: string,
+  helper: string,
+) {
+  attachChangeMarkerMetadata(
+    { before, after, beforeIndex: -1, afterIndex: -1 },
+    changeId,
+    helper,
+    false,
+  );
 }
 
 function hasPreannotatedStableDifference(pair: SectionPair): boolean {
@@ -262,7 +281,6 @@ function* buildReviewDocumentSteps(
   const visual = buildReviewVisualEvidence(beforeHtml, afterHtml, options.sessionId);
   const visualStableIds = (side: "before" | "after") => visual.evidence
     .filter((evidence) => side === "before" ? evidence.beforePresent : evidence.afterPresent)
-    .slice(0, 1000)
     .map((evidence) => evidence.stableId);
   if (typeof DOMParser === "undefined") {
     return {
@@ -332,48 +350,6 @@ function* buildReviewDocumentSteps(
     });
   });
   yield "comments";
-  // The formal path is modern-only. Incomplete, absent, invalid or duplicate
-  // identity never reaches semantic pairing and therefore cannot regain
-  // identity through the historical matcher.
-  if (visual.binding.identity !== "supported") {
-    const preparedBefore = prepareDocument(
-      beforeDocument,
-      "before",
-      options.sessionId,
-      options.sourcePath,
-      options.externalBootstrap,
-      reviewCommentBootstrapBindings(beforeDocument, reviewCommentTargets),
-      preparedVisualStableIds("before"),
-    );
-    const preparedAfter = prepareDocument(
-      afterDocument,
-      "after",
-      options.sessionId,
-      options.sourcePath,
-      options.externalBootstrap,
-      [],
-      preparedVisualStableIds("after"),
-    );
-    return {
-      before: preparedBefore.html,
-      after: preparedAfter.html,
-      bootstrapJavaScript: {
-        before: preparedBefore.bootstrapJavaScript,
-        after: preparedAfter.bootstrapJavaScript,
-      },
-      bootstrapFallbackJavaScript: {
-        before: preparedBefore.bootstrapFallbackJavaScript,
-        after: preparedAfter.bootstrapFallbackJavaScript,
-      },
-      changes: [],
-      outline: [],
-      commentGroups,
-      commentTargets: reviewCommentTargets,
-      visualBinding: visual.binding,
-      visualEvidence: [],
-      ...(options.reviewImpact ? { reviewImpact: options.reviewImpact } : {}),
-    };
-  }
   annotatePanelPairs(beforeDocument, afterDocument);
   yield "panels";
   annotateActionPairs(beforeDocument, afterDocument);
@@ -389,7 +365,7 @@ function* buildReviewDocumentSteps(
   const afterSections = candidateSections(afterDocument);
   yield "candidate-sections-after";
   const pairs = pairSections(beforeSections, afterSections, {
-    usePersistentIdentity: true,
+    usePersistentIdentity: stableSourceAnalysis.hasPersistentContinuity,
     ambiguousPersistentIds,
   });
   yield* annotateMovedStableSubtreeSteps(
@@ -413,7 +389,7 @@ function* buildReviewDocumentSteps(
     if (!exactStablePair) {
       const annotationSteps = annotateChangePairSteps(
         pair,
-        true,
+        stableSourceAnalysis.hasPersistentContinuity,
         ambiguousPersistentIds,
       );
       let annotationStep = annotationSteps.next();
@@ -432,9 +408,12 @@ function* buildReviewDocumentSteps(
       ? panelPathForElement(pair.after)
       : panelPathForElement(pair.before);
     const panelKey = panelPath.at(-1);
-    const stableId = changeId
-      ? visualStableIdForChange(pair, changeId)
-      : (pair.after || pair.before)?.getAttribute("data-pageroot-id") || undefined;
+    const evidenceStableIds = changeId ? visualStableIdsForChange(pair, changeId) : [];
+    const linkedEvidence = evidenceStableIds.flatMap((stableId) => (
+      visual.evidence.filter((evidence) => evidence.stableId === stableId)
+    ));
+    const visualGate = linkedEvidence.length > 0
+      && linkedEvidence.every(isVisualOnlyReviewSourceEvidence);
     [pair.before, pair.after].forEach((element) => {
       if (!element) return;
       element.setAttribute("data-pageroot-outline-id", outlineId);
@@ -448,7 +427,8 @@ function* buildReviewDocumentSteps(
     if (changeId) {
       changes.push({
         id: changeId,
-        ...(stableId ? { stableId } : {}),
+        ...(evidenceStableIds.length ? { evidenceStableIds } : {}),
+        ...(visualGate ? { visualGate: "enhancement" as const } : {}),
         label,
         helper,
         types,
@@ -471,6 +451,54 @@ function* buildReviewDocumentSteps(
       ...(panelPath.length ? { panelPath } : {}),
     });
     if ((pairIndex + 1) % 24 === 0) yield "change-annotation";
+  }
+
+  if (stableSourceAnalysis.sourceKinds.length) {
+    const changeId = `change-${changes.length + 1}`;
+    const outlineId = `outline-${outline.length + 1}`;
+    const labels = stableSourceAnalysis.sourceKinds.map((kind) => (
+      kind === "css-source" ? "CSS" : "Script"
+    ));
+    const helper = `${labels.join("、")} 源码调整`;
+    const label = labels.length === 1 ? `${labels[0]} 源码` : "页面源码";
+    const sourceKinds = new Set(stableSourceAnalysis.sourceKinds);
+    annotateStablePageSourceAggregate(beforeDocument, sourceKinds);
+    annotateStablePageSourceAggregate(afterDocument, sourceKinds);
+    attachSourceChangeMarkerMetadata(
+      beforeDocument.documentElement,
+      afterDocument.documentElement,
+      changeId,
+      helper,
+    );
+    [beforeDocument.documentElement, afterDocument.documentElement].forEach((element) => {
+      element.setAttribute("data-pageroot-outline-id", outlineId);
+      element.setAttribute("data-pageroot-review-id", changeId);
+      element.setAttribute("data-pageroot-review-types", "structure");
+      element.setAttribute("data-pageroot-review-summary", helper);
+    });
+    const evidenceStableIds = visual.evidence
+      .filter((evidence) => evidence.kinds.some((kind) => (
+        (kind === "css-source" || kind === "script-source") && sourceKinds.has(kind)
+      )))
+      .map((evidence) => evidence.stableId);
+    changes.push({
+      id: changeId,
+      label,
+      helper,
+      types: ["structure"],
+      beforePresent: true,
+      afterPresent: true,
+      visualGate: "enhancement",
+      ...(evidenceStableIds.length ? { evidenceStableIds } : {}),
+    });
+    outline.push({
+      id: outlineId,
+      group: "页面源码",
+      label,
+      helper,
+      types: ["structure"],
+      changeId,
+    });
   }
 
   // Comment attributes are analyzer-only scope hints. Bind every resolved
@@ -546,7 +574,6 @@ export function buildReviewShellDocuments(
   const visual = buildReviewVisualEvidence(beforeHtml, afterHtml, options.sessionId);
   const visualStableIds = (side: "before" | "after") => visual.evidence
     .filter((evidence) => side === "before" ? evidence.beforePresent : evidence.afterPresent)
-    .slice(0, 1000)
     .map((evidence) => evidence.stableId);
   if (typeof DOMParser === "undefined") {
     return {

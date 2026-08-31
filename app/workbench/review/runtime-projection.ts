@@ -421,9 +421,14 @@ function reviewBootstrap(
     }
     return RuntimeVisualString(left >>> 0) + ":" + RuntimeVisualString(right >>> 0);
   };
-  const reviewVisualOwnedElements = (host) => {
+  const reviewVisualOwnedElements = (host, budget) => {
     const descendants = runtimeVisualElementQuerySelectorAll(host, "*");
     if (runtimeVisualNodeListLength(descendants) > 2048) return null;
+    budget.nodes += runtimeVisualNodeListLength(descendants) + 1;
+    if (budget.nodes > 20_000) {
+      budget.failureReason = "global-node-budget";
+      return null;
+    }
     const result = [host];
     for (let index = 0; index < runtimeVisualNodeListLength(descendants); index += 1) {
       const node = runtimeVisualNodeListItem(descendants, index);
@@ -437,10 +442,19 @@ function reviewBootstrap(
     }
     return result;
   };
-  const reviewVisualFingerprint = (element, positionSensitive = false) => {
-    const startedAt = runtimeVisualPerformanceNow();
-    const owned = reviewVisualOwnedElements(element);
-    if (!owned) return { visible: false, unverified: true, failureReason: "node-budget" };
+  const reviewVisualFingerprint = (element, positionSensitive = false, budget) => {
+    if (budget.failureReason) {
+      return { visible: false, unverified: true, failureReason: budget.failureReason };
+    }
+    if (runtimeVisualPerformanceNow() - budget.startedAt > 1_500) {
+      return { visible: false, unverified: true, failureReason: "global-time-budget" };
+    }
+    const owned = reviewVisualOwnedElements(element, budget);
+    if (!owned) return {
+      visible: false,
+      unverified: true,
+      failureReason: budget.failureReason || "node-budget",
+    };
     const rootStyle = runtimeVisualGetComputedStyle(element);
     const rootRect = runtimeVisualElementGetBoundingClientRect(element);
     let stableParent = element.parentElement;
@@ -451,8 +465,7 @@ function reviewBootstrap(
       ? runtimeVisualElementGetBoundingClientRect(stableParent)
       : null;
     const ownedSet = new RuntimeVisualSet(owned);
-    const animations = runtimeVisualDocumentGetAnimations(document);
-    if (runtimeVisualArraySome(animations, (animation) => (
+    if (runtimeVisualArraySome(budget.animations, (animation) => (
       animation.playState === "running"
       && runtimeVisualSetHas(ownedSet, animation.effect?.target)
     ))) {
@@ -462,7 +475,6 @@ function reviewBootstrap(
       return { visible: false, unverified: true, failureReason: "live-media" };
     }
     let visible = false;
-    let pixelBudget = 0;
     const pieces = [];
     const presentation = (style) => [
       style.display, style.visibility, style.opacity, style.color,
@@ -531,9 +543,10 @@ function reviewBootstrap(
       if (runtimeVisualElementMatches(node, "canvas")) {
         const width = runtimeVisualCanvasWidth(node);
         const height = runtimeVisualCanvasHeight(node);
-        pixelBudget += width * height;
-        if (pixelBudget > 4_000_000) {
-          return { visible, unverified: true, failureReason: "pixel-budget" };
+        budget.pixels += width * height;
+        if (budget.pixels > 4_000_000) {
+          budget.failureReason = "global-pixel-budget";
+          return { visible, unverified: true, failureReason: budget.failureReason };
         }
         try {
           const context = runtimeVisualCanvasGetContext(node, "2d", { willReadFrequently: true });
@@ -548,9 +561,10 @@ function reviewBootstrap(
         if (!node.complete || !node.naturalWidth || !node.naturalHeight) {
           return { visible, unverified: true, failureReason: "image-not-ready" };
         }
-        pixelBudget += node.naturalWidth * node.naturalHeight;
-        if (pixelBudget > 4_000_000) {
-          return { visible, unverified: true, failureReason: "pixel-budget" };
+        budget.pixels += node.naturalWidth * node.naturalHeight;
+        if (budget.pixels > 4_000_000) {
+          budget.failureReason = "global-pixel-budget";
+          return { visible, unverified: true, failureReason: budget.failureReason };
         }
         try {
           const imageCanvas = runtimeVisualDocumentCreateElement(document, "canvas");
@@ -609,8 +623,9 @@ function reviewBootstrap(
           style.clipPath,
         );
       }
-      if (runtimeVisualPerformanceNow() - startedAt > 120) {
-        return { visible, unverified: true, failureReason: "time-budget" };
+      if (runtimeVisualPerformanceNow() - budget.startedAt > 1_500) {
+        budget.failureReason = "global-time-budget";
+        return { visible, unverified: true, failureReason: budget.failureReason };
       }
     }
     if (
@@ -702,49 +717,74 @@ function reviewBootstrap(
     if (!request || request.type !== "observe" || request.sessionId !== sessionId || request.side !== side
       || !Array.isArray(request.candidates) || typeof request.sourceHash !== "string") return;
     const observationSequence = ++reviewVisualObservationSequence;
-    const candidates = request.candidates.slice(0, 1000);
-    const sample = () => runtimeVisualArrayMap(candidates, (candidate) => {
-      const stableId = RuntimeVisualString(candidate?.stableId || "");
-      const element = reviewVisualStableElement(stableId);
-      const expectedPresent = candidate?.present === true;
-      const result = element
-        ? reviewVisualFingerprint(element, candidate?.positionSensitive === true)
-        : expectedPresent
-          ? { visible: false, unverified: true, failureReason: "missing-runtime-host" }
-          : { visible: false, fingerprint: "absent" };
-      return {
-        sessionId,
-        side,
-        sourceHash: request.sourceHash,
-        generation: request.generation,
-        stableId,
-        ...result,
+    const candidates = request.candidates;
+    const sample = (complete) => {
+      const observations = [];
+      const budget = {
+        startedAt: runtimeVisualPerformanceNow(),
+        nodes: 0,
+        pixels: 0,
+        failureReason: "",
+        animations: runtimeVisualDocumentGetAnimations(document),
       };
+      let candidateIndex = 0;
+      const sampleBatch = () => {
+        const batchEnd = candidateIndex + 24;
+        while (candidateIndex < candidates.length && candidateIndex < batchEnd) {
+          const candidate = candidates[candidateIndex];
+          const stableId = RuntimeVisualString(candidate?.stableId || "");
+          const element = reviewVisualStableElement(stableId);
+          const expectedPresent = candidate?.present === true;
+          const result = element
+            ? reviewVisualFingerprint(element, candidate?.positionSensitive === true, budget)
+            : expectedPresent
+              ? { visible: false, unverified: true, failureReason: "missing-runtime-host" }
+              : { visible: false, fingerprint: "absent" };
+          runtimeVisualArrayPush(observations, {
+            sessionId,
+            side,
+            sourceHash: request.sourceHash,
+            generation: request.generation,
+            stableId,
+            ...result,
+          });
+          candidateIndex += 1;
+        }
+        if (candidateIndex < candidates.length) {
+          runtimeVisualRequestAnimationFrame(sampleBatch);
+          return;
+        }
+        complete(observations);
+      };
+      sampleBatch();
+    };
+    sample((first) => {
+      runtimeVisualSetTimeout(() => runtimeVisualRequestAnimationFrame(() => (
+        runtimeVisualRequestAnimationFrame(() => {
+          if (observationSequence !== reviewVisualObservationSequence) return;
+          sample((second) => {
+            if (observationSequence !== reviewVisualObservationSequence) return;
+            const observations = runtimeVisualArrayMap(second, (current, index) => {
+              const previous = first[index];
+              if (
+                !previous
+                || previous.unverified
+                || current.unverified
+                || previous.visible !== current.visible
+                || previous.fingerprint !== current.fingerprint
+              ) return {
+                ...current,
+                fingerprint: undefined,
+                unverified: true,
+                failureReason: current.failureReason || previous?.failureReason || "unstable",
+              };
+              return current;
+            });
+            reviewVisualChannel.port1.postMessage({ type: "observations", observations });
+          });
+        })
+      )), 650);
     });
-    const first = sample();
-    runtimeVisualSetTimeout(() => runtimeVisualRequestAnimationFrame(() => (
-      runtimeVisualRequestAnimationFrame(() => {
-        if (observationSequence !== reviewVisualObservationSequence) return;
-        const second = sample();
-        const observations = runtimeVisualArrayMap(second, (current, index) => {
-          const previous = first[index];
-          if (
-            !previous
-            || previous.unverified
-            || current.unverified
-            || previous.visible !== current.visible
-            || previous.fingerprint !== current.fingerprint
-          ) return {
-            ...current,
-            fingerprint: undefined,
-            unverified: true,
-            failureReason: current.failureReason || previous?.failureReason || "unstable",
-          };
-          return current;
-        });
-        reviewVisualChannel.port1.postMessage({ type: "observations", observations });
-      })
-    )), 80);
   };
   const clamp = (value, minimum, maximum) => Math.max(minimum, Math.min(maximum, value));
   const documentHeight = () => Math.max(
@@ -3269,6 +3309,15 @@ function reviewBootstrap(
     closeInitialBindings();
     // Static facts are independently complete. Runtime projection may arrive
     // later, fail, or be unavailable without delaying or clearing them.
+    const sourceChangeIds = new RuntimeVisualSet();
+    runtimeVisualQueryElements("[data-pageroot-review-marker]").forEach((element) => {
+      const changeId = safeKey(runtimeVisualElementGetAttribute(
+        element,
+        "data-pageroot-review-marker",
+      ));
+      if (changeId) runtimeVisualSetAdd(sourceChangeIds, changeId);
+    });
+    confirmedVisualChangeIds = sourceChangeIds;
     initialProjectionCommitted = true;
     scheduleOverlayRender();
     announceReady();
