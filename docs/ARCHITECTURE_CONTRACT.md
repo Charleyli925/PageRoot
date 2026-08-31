@@ -90,8 +90,9 @@ The renderer's main workspace facts are partitioned as follows:
   lock, and operation locks. ACP events remain bounded presentation facts and
   never become completion authority;
 - `RunWorkflow`: pre-Request Agent use-time check, Request freeze/persisted-boundary
-  verification, safely fenced same-Request Agent start/retry, unknown-POST authority
-  reconciliation, tracked-run polling, stop-before-durable-cancel ordering,
+  verification, final-saved-HTML text-locator preflight, safely fenced same-Request
+  Agent start/retry, unknown-POST authority reconciliation, tracked-run polling,
+  stop-before-durable-cancel ordering,
   conflict commands and confirmed clipboard fallback. It publishes through
   `RunSession` and never creates a second run store;
 - Bridge `AgentRuntimeCoordinator`: ephemeral provider/runtime/security-profile/

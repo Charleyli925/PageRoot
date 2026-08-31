@@ -719,8 +719,8 @@
       "id": "run-workflow",
       "patterns": [
         "^app/application/run-workflow(?:-codecs)?\\.(?:js|d\\.ts)$",
-        "^app/application/run/submit-plan\\.(?:js|d\\.ts)$",
-        "^tests/run-workflow\\.test\\.mjs$",
+        "^app/application/run/(?:submit-plan|text-locator-validation)\\.(?:js|d\\.ts)$",
+        "^tests/(?:run-workflow|text-locator-validation)\\.test\\.mjs$",
         "^tests/run-submit-plan\\.test\\.mjs$"
       ],
       "suites": [
@@ -729,6 +729,7 @@
       ],
       "nodeTests": [
         "tests/run-workflow.test.mjs",
+        "tests/text-locator-validation.test.mjs",
         "tests/run-submit-plan.test.mjs",
         "tests/run-session.test.mjs",
         "tests/run-lifecycle.test.mjs",

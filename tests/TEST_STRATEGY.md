@@ -98,8 +98,9 @@ step summary 里。
   `request.json`/Runtime authority 发布前失败。Agent Policy 必须按 manifest 读取真实附件
   字节，而不是只接受附件元数据。
 - `RunWorkflow`：fake Bridge、Scheduler、Canvas/Handoff/Hash Port 和既有 Run/Project/
-  Document/Comment Session 证明 source freeze 与 persisted SHA/revision 边界、一次
-  Request、unknown POST 只读 authority reconciliation、A/B 并行 polling、dispose
+  Document/Comment Session 证明 source freeze 与 persisted SHA/revision 边界、最终
+  保存 HTML 上 Stable-ID/UTF-16 textLocator 的唯一重定位与 stale/ambiguous 阻断、
+  一次 Request、unknown POST 只读 authority reconciliation、A/B 并行 polling、dispose
   late-callback fence、取消/冲突 scoped identity，以及 clipboard failure 后只重试复制。
   Workbench 只保留 intent 和 Outcome/Event 的 Toast 映射，不持有 poll timer 或
   run mutation I/O。

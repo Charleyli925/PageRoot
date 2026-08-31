@@ -1,5 +1,6 @@
 import { isBridgeRequestError } from "./bridge-client.js";
 import { planRunSubmit, planRunSubmitEntry } from "./run/submit-plan.js";
+import { revalidateCommentTextLocators } from "./run/text-locator-validation.js";
 import { createRunWorkflowCodecs } from "./run-workflow-codecs.js";
 import { verifyProjectContext } from "./verified-project-context.js";
 import { AgentCatalogState } from "./agent-provider-catalog.js";
@@ -824,7 +825,7 @@ export class RunWorkflow {
           "冻结 HTML 的 Hash 与已写回源文件不一致。",
         );
       }
-      const persistedComments = this.#commentsForSubmission();
+      let persistedComments = this.#commentsForSubmission();
       const persistedCommentOutcome = this.#validateComments(
         persistedComments,
         persistedSourceSha256,
@@ -836,6 +837,17 @@ export class RunWorkflow {
           persistedCommentOutcome.reason,
         );
       }
+      const textLocatorValidation = revalidateCommentTextLocators(
+        persistedComments,
+        this.#documentSession.html,
+      );
+      if (!textLocatorValidation.ok) {
+        throw responseError(
+          textLocatorValidation.code,
+          textLocatorValidation.reason,
+        );
+      }
+      persistedComments = textLocatorValidation.comments;
       const persistedEvents = this.#commentSession.changeEvents.map(
         (event) => ({ ...event }),
       );
@@ -1745,7 +1757,8 @@ export class RunWorkflow {
       || (
         sourceSha256
         && comment.target?.sourceAnchor?.sourceSha256
-          && comment.target.sourceAnchor.sourceSha256 !== sourceSha256
+        && !comment.target?.textLocator
+        && comment.target.sourceAnchor.sourceSha256 !== sourceSha256
       )
     ));
     if (unsafe) {
