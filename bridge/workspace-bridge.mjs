@@ -1127,7 +1127,17 @@ function agentDeliveryForRequest(body = {}) {
   }
 }
 
-function projectFilePromptForRequest(target, request, body) {
+const TASK_SCOPE_LABELS = Object.freeze({
+  "targets-only": "仅评论目标",
+  "targets-plus-required-dependencies": "评论目标及实现要求所需的直接依赖",
+  "whole-page": "整页",
+});
+
+function promptListItem(value) {
+  return String(value || "").trim().replace(/\r?\n/gu, "\n  ");
+}
+
+function projectFilePromptForRequest(target, request, taskSpec) {
   const requestRoot = path.join(
     target.projectRootPath,
     ".pageroot",
@@ -1144,8 +1154,25 @@ function projectFilePromptForRequest(target, request, body) {
     ".pageroot",
     ...String(request.outputRelativePath || "").split("/"),
   );
-  const summary = String(body.summary || "根据本轮评论和要求生成新的完整 HTML。").trim();
-  return `# PageRoot AI Candidate\n\n## 任务\n\n${summary}\n\n## 冻结输入\n\n严格按 \`${inputManifestPath}\` 的 \`readOrder\` 读取。该清单包含：\n\n- 本轮要求：\`${changeRequestPath}\`\n- 项目长期规则：\`${projectRulesPath}\`\n- 冻结 HTML：\`${inputPath}\`\n- 冻结评论、目标与编辑记录：\`${annotationsPath}\`\n\n这些文件及可见 Working Copy、任何 Version、PROJECT.md 都是只读的。只将一个完整 HTML 写入：\`${outputPath}\`。\n\nPageRoot 会校验输出的完整文档、页面连续性和源码元素身份。输出时：\n\n- 仍然存在的源码元素必须保留原有 \`data-pageroot-id\`；元素移动或改 tag 时 ID 仍随同一元素。\n- 不得伪造或复制 ID；删除元素后，不要把其旧 ID 填给真正新增的元素。\n- 真正新增的元素不要自行填写 \`data-pageroot-id\`，PageRoot 会在校验后统一分配。\n\nStable ID 是唯一元素身份；tag、parent 和 order 的变化会进入 Review，不作为第二身份。重复、伪造或具有确定性证据的可疑 ID 丢失会被拒绝，不会启发式修复。校验通过后它仍只是待审阅 Candidate。只有用户明确采纳后才会成为正式 Version。\n\n## 完成\n\n输出写完后，执行唯一最终化命令：\n\n\`\`\`sh\n${projectFileFinalizerCommand(target, request)}\n\`\`\`\n`;
+  const objective = promptListItem(taskSpec.objective);
+  const scopePolicy = String(taskSpec.scopePolicy || "");
+  const scopeLabel = TASK_SCOPE_LABELS[scopePolicy] || scopePolicy;
+  const instructionLines = taskSpec.instructions.map((instruction) => {
+    const targets = instruction.targetRefs.join("、");
+    return `- ${promptListItem(instruction.text)}\n  - 目标：${targets}`;
+  });
+  const acceptanceLines = [
+    ...taskSpec.globalAcceptanceCriteria.map((criterion) => (
+      `- ${promptListItem(criterion)}（全局）`
+    )),
+    ...taskSpec.instructions.flatMap((instruction) => (
+      instruction.acceptanceCriteria.map((criterion) => (
+        `- ${promptListItem(criterion)}（${instruction.instructionId}）`
+      ))
+    )),
+  ];
+  const nonGoalLines = taskSpec.nonGoals.map((nonGoal) => `- ${promptListItem(nonGoal)}`);
+  return `# PageRoot AI Candidate\n\n## 本轮目标\n\n${objective}\n\n## 修改范围\n\n${scopeLabel}（\`${scopePolicy}\`）\n\n## 本轮要求\n\n${instructionLines.join("\n")}\n\n## 验收标准\n\n${acceptanceLines.length > 0 ? acceptanceLines.join("\n") : "评论中没有额外明确验收条目。"}\n\n## 明确不做\n\n${nonGoalLines.length > 0 ? nonGoalLines.join("\n") : "评论中没有额外明确的不做项。"}\n\n## 冻结输入与输出\n\n从 \`${inputManifestPath}\` 开始，严格按 \`readOrder\` 读取。跨任务不变的合同在 \`input/AI_RULES.md\`；本轮 Task Spec 以 \`${changeRequestPath}\` 为准。\n\n- 项目长期规则：\`${projectRulesPath}\`\n- 冻结 HTML：\`${inputPath}\`\n- 评论、目标与审计上下文：\`${annotationsPath}\`\n- 唯一输出：\`${outputPath}\`\n\n## 完成\n\n完成输出写入后，最后执行唯一最终化命令：\n\n\`\`\`sh\n${projectFileFinalizerCommand(target, request)}\n\`\`\`\n`;
 }
 
 function projectFileReadyPayload({ request, candidate, target }) {
@@ -1291,10 +1318,7 @@ async function createProjectFileRequest(body) {
     requestId,
     "PROMPT.md",
   )} 中的单轮任务，完成后运行其中的最终化（finalizer）命令。`;
-  const prompt = projectFilePromptForRequest(target, promptDescriptor, {
-    ...body,
-    summary: taskSpec.objective,
-  });
+  const prompt = projectFilePromptForRequest(target, promptDescriptor, taskSpec);
   try {
     const durable = await projectFileRepository.prepareRequest({
       target,
