@@ -28,6 +28,7 @@ const capability = Object.freeze({
   selection,
   sourceRef: { targetId: "target_1", elementId: "pr1_11111111111141118111111111111111" },
   targetKey: "element:pr1_11111111111141118111111111111111",
+  visualKey: "element:pr1_11111111111141118111111111111111",
   generation: 4,
   runtimeGenerated: false,
 });

@@ -13,7 +13,7 @@ import {
   placeCanvasHoverHint,
 } from "../app/components/html-canvas-capability-hover.js";
 
-function capability(kind, targetKey, generation = 1) {
+function capability(kind, targetKey, generation = 1, visualKey = targetKey) {
   const hitElement = {};
   const targetElement = {};
   const visualElement = {};
@@ -28,6 +28,7 @@ function capability(kind, targetKey, generation = 1) {
     selection: { id: targetKey, resolution: "exact" },
     sourceRef: { targetId: targetKey, expectedSourceSha256: "sha256:test" },
     targetKey,
+    visualKey,
     generation,
   };
 }
@@ -102,32 +103,19 @@ test("the same target does not restart hover timers", () => {
   assert.equal(controller.snapshot.hint, true);
 });
 
-test("the same canonical target refreshes only its precise hit without restarting", () => {
+test("the same visual target does not restart while replacing the full canonical capability", () => {
   const scheduler = createScheduler();
   const controller = createCanvasCapabilityHoverController({ scheduler });
-  const visualElement = {};
-  const targetElement = {};
-  const firstHit = {};
-  const secondHit = {};
-  controller.update({
-    ...capability("edit-text", "host-1"),
-    hitElement: firstHit,
-    targetElement,
-    visualElement,
-  });
+  const first = capability("select-comment", "svg-child-a", 1, "svg-root");
+  const second = capability("select-comment", "svg-child-b", 1, "svg-root");
+  controller.update(first);
   scheduler.flush(CANVAS_HOVER_DELAY_MS - 1);
-  controller.update({
-    ...capability("edit-text", "host-1"),
-    hitElement: secondHit,
-    targetElement,
-    visualElement,
-  });
-  assert.equal(controller.snapshot.capability.hitElement, secondHit);
-  assert.equal(controller.snapshot.capability.targetElement, targetElement);
-  assert.equal(controller.snapshot.capability.visualElement, visualElement);
+  controller.update(second);
+  assert.equal(controller.snapshot.capability, second);
+  assert.equal(controller.snapshot.capability.targetKey, "svg-child-b");
   assert.equal(controller.snapshot.outline, false);
   scheduler.flush(1);
-  assert.equal(controller.snapshot.capability.hitElement, secondHit);
+  assert.equal(controller.snapshot.capability, second);
   assert.equal(controller.snapshot.outline, true);
   assert.equal(controller.snapshot.hint, true);
 });

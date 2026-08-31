@@ -143,32 +143,17 @@ export function createCanvasCapabilityHoverController({
       hide();
       return;
     }
-    const key = `${capability.kind}:${capability.generation}:${capability.targetKey}`;
+    const key = `${capability.kind}:${capability.generation}:${capability.visualKey}`;
     if (key === currentKey) {
       const current = snapshot.capability;
-      if (
-        !current
-        || current.hitElement !== capability.hitElement
-        || current.cursor !== capability.cursor
-        || current.hint !== capability.hint
-        || current.spoken !== capability.spoken
-      ) {
-        // Moving between rich inline descendants keeps one canonical target
-        // and one visual surface. Only the precise pointer hit is refreshed;
-        // outline visibility, target identity and the active timer stay put.
-        const nextCapability = current
-          ? {
-              ...current,
-              hitElement: capability.hitElement,
-              cursor: capability.cursor,
-              hint: capability.hint,
-              spoken: capability.spoken,
-            }
-          : capability;
+      if (current !== capability) {
+        // A shared visual surface can contain several canonical source targets
+        // (for example two authored SVG children). Keep the visual lifecycle
+        // alive while replacing the complete resolved target contract.
         emit({
           ...snapshot,
           cursor: capability.cursor,
-          capability: nextCapability,
+          capability,
         });
       }
       return;

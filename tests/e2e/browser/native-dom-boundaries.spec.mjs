@@ -622,16 +622,18 @@ test("clicking a canvas selects the dedicated surface instead of the wrapping mo
     .not.toHaveAttribute("data-html-canvas-selected", /.+/u);
 });
 
-test("double-clicking a canvas reports the dedicated root and stays comment-only", {
+test("double-clicking a canvas selects the dedicated root without entering text editing", {
   tag: ["@gate-smoke","@smoke-editing"],
 }, async ({ page }) => {
   const { editor, frame } = await loadFixture(page, "complex-layout.html");
   const canvas = frame.locator(caseSelector("canvas-surface"));
   await canvas.scrollIntoViewIfNeeded();
   await canvas.dblclick({ force: true, position: { x: 4, y: 4 } });
+  await expect(canvas).toHaveAttribute("data-html-canvas-selected", "part");
+  await expect(canvas.locator("xpath=ancestor::section[1]"))
+    .not.toHaveAttribute("data-html-canvas-selected", /.+/u);
   expect(await frame.locator('[contenteditable="true"]').count()).toBe(0);
-  await expect.poll(() => editor.getAttribute("data-native-capability-detail") || "")
-    .toContain("EDITABLE_ISLAND_ROOT_UNSUPPORTED");
+  await expect(editor).not.toHaveAttribute("data-native-start-status", "started");
 });
 
 test("first double-click places a caret; a second double-click selects the word", {

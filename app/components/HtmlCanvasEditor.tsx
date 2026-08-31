@@ -166,7 +166,9 @@ import {
 import {
   canvasVisualTargetElement,
   canvasPointerCapabilityFromProof,
+  createCanvasTargetIdentityScope,
   resolveCanvasTarget,
+  type CanvasTargetIdentityScope,
   type ResolvedCanvasTarget,
 } from "./html-canvas-pointer-capability";
 import {
@@ -922,6 +924,19 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   }));
   const nativeEditSessionSequenceRef = useRef(0);
   const nativeDomGenerationRef = useRef(0);
+  const canvasTargetIdentityScopeRef = useRef<CanvasTargetIdentityScope>(
+    createCanvasTargetIdentityScope(0),
+  );
+  const canvasTargetIdentityScopeForGeneration = useCallback((generation: number) => {
+    const normalizedGeneration = Number.isSafeInteger(Number(generation))
+      ? Math.max(0, Number(generation))
+      : 0;
+    const current = canvasTargetIdentityScopeRef.current;
+    if (current.generation === normalizedGeneration) return current;
+    const next = createCanvasTargetIdentityScope(normalizedGeneration);
+    canvasTargetIdentityScopeRef.current = next;
+    return next;
+  }, []);
   const nativeSessionNeedsCanonicalFenceRef = useRef(false);
   const nativeEditFenceSequenceRef = useRef(0);
   const currentNativeEditLeaseRef = useRef<ActiveNativeEdit["lease"] | null>(null);
@@ -1734,11 +1749,12 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   }, []);
 
   const observeSelectedElement = useCallback(
-    (element: HTMLElement) => {
+    (element: HTMLElement, runtimeGenerated = false) => {
       resizeObserverRef.current?.disconnect();
       const visualElement = canvasVisualTargetElement(
         element,
         sourceIndexRef.current,
+        { runtimeGenerated },
       ) ?? element;
       const ResizeObserverConstructor = visualElement.ownerDocument.defaultView?.ResizeObserver;
       if (!ResizeObserverConstructor) return;
@@ -3035,13 +3051,21 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           )
         ) return activeNativeEdit.target;
         const requestedTarget = options.selectionOverride
-          ?? selectionForElement(
-            element,
-            sourceIndexRef.current,
-            undefined,
-            undefined,
-            levelOverride,
-          );
+          ?? (options.runtimeGenerated
+            ? selectionForElement(
+              element,
+              null,
+              undefined,
+              "ambiguous",
+              levelOverride,
+            )
+            : selectionForElement(
+              element,
+              sourceIndexRef.current,
+              undefined,
+              undefined,
+              levelOverride,
+            ));
         const committed = finishNativeEditing(true, "manual");
         if (!committed.ok) return activeNativeEdit.target;
         if (committed.frameReloading) {
@@ -3053,13 +3077,21 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       selectedElementRef.current?.removeAttribute("data-html-canvas-selected");
       selectedElementRef.current?.removeAttribute(GLOBAL_SELECTION_ATTRIBUTE);
       const nextSelection = options.selectionOverride
-        ?? selectionForElement(
-          element,
-          sourceIndexRef.current,
-          undefined,
-          undefined,
-          levelOverride,
-        );
+        ?? (options.runtimeGenerated
+          ? selectionForElement(
+            element,
+            null,
+            undefined,
+            "ambiguous",
+            levelOverride,
+          )
+          : selectionForElement(
+            element,
+            sourceIndexRef.current,
+            undefined,
+            undefined,
+            levelOverride,
+          ));
       selectedElementRef.current = element;
       setSpacingMenuOpen(false);
       setSelectedInsertionId(null);
@@ -3079,7 +3111,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       onSelectRef.current?.(nextSelection);
       updateSelectedStyle();
       updateMoveAvailability();
-      observeSelectedElement(element);
+      observeSelectedElement(element, options.runtimeGenerated === true);
       if (isGlobalPage) {
         const scrollingElement = element.ownerDocument.scrollingElement;
         if (scrollingElement) scrollingElement.scrollTop = 0;
@@ -3974,7 +4006,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         onSelectRef.current?.(selectedValue);
         updateSelectedStyle();
         updateMoveAvailability();
-        observeSelectedElement(element);
+        observeSelectedElement(element, false);
         if (options.reveal !== false) {
           if (isGlobalPage) {
             const scrollingElement = documentNode.scrollingElement;
@@ -4892,32 +4924,11 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       enabled: true,
       isProvenRuntimeSourceElement: currentRuntimeSourceProof(),
       generation: nativeDomGenerationRef.current,
+      identityScope: canvasTargetIdentityScopeForGeneration(
+        nativeDomGenerationRef.current,
+      ),
     });
-    const isUsableHoveredTarget = (
-      candidate: ResolvedCanvasTarget | null,
-      event: MouseEvent,
-    ): candidate is ResolvedCanvasTarget => {
-      const eventTarget = event.target;
-      const eventNode = eventTarget
-        && typeof eventTarget === "object"
-        && "nodeType" in eventTarget
-        ? eventTarget as Node
-        : null;
-      const currentSourceHash = sourceIndexRef.current?.sourceSha256;
-      return Boolean(
-        candidate
-        && candidate.sourceRef
-        && candidate.sourceRef.expectedSourceSha256 === currentSourceHash
-        && candidate.generation === nativeDomGenerationRef.current
-        && candidate.targetElement.ownerDocument === documentNode
-        && candidate.targetElement.isConnected
-        && candidate.visualElement.isConnected
-        && eventNode
-        && candidate.targetElement.contains(eventNode)
-      );
-    };
     const handleClick = (event: MouseEvent) => {
-      const hoveredTarget = hoverControllerRef.current?.snapshot.capability ?? null;
       hoverControllerRef.current?.hide();
       // Authored controls remain selectable/editable content in the Canvas,
       // never live navigation or form controls. Suppress their browser action
@@ -4925,9 +4936,9 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       // iframe away from the verified source document.
       const nativeActionTarget = findNativeActionTarget(event.target);
       if (nativeActionTarget) event.preventDefault();
-      const resolvedTarget = isUsableHoveredTarget(hoveredTarget, event)
-        ? hoveredTarget
-        : resolveTargetAtEvent(event);
+      // Clicks always resolve the current DOM and permission proof. Hover is a
+      // visual preview only and is never a selection or Option-click authority.
+      const resolvedTarget = resolveTargetAtEvent(event);
       if (!resolvedTarget) {
         if (!lockedRef.current) {
           event.preventDefault();
@@ -5051,6 +5062,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       selectResolvedTarget(resolvedTarget, {
         preserveTextSelection: Boolean(activeTextRangeRef.current),
       });
+      if (dedicatedSurface) return;
       const editingStarted = startEditing(caretPoint);
       if (!editingStarted) selectResolvedTarget(resolvedTarget);
     };
@@ -5260,6 +5272,9 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         enabled: true,
         isProvenRuntimeSourceElement: currentRuntimeSourceProof(),
         generation: nativeDomGenerationRef.current,
+        identityScope: canvasTargetIdentityScopeForGeneration(
+          nativeDomGenerationRef.current,
+        ),
       }));
     };
     const handlePointerLeave = () => {
@@ -5455,6 +5470,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     });
     return true;
   }, [
+    canvasTargetIdentityScopeForGeneration,
     captureTextRange,
     clearSelection,
     currentRuntimeSourceProof,
@@ -5891,6 +5907,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   const selectedVisualTargetElement = canvasVisualTargetElement(
     selectedElementRef.current,
     sourceIndexRef.current,
+    { runtimeGenerated: runtimeGeneratedSelection },
   );
   const hoverTargetIsSelected = Boolean(
     hoverChrome.capability
@@ -6021,18 +6038,22 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     hoverControllerRef.current?.hide();
     const currentDocument = iframeRef.current?.contentDocument;
     const currentSourceHash = sourceIndexRef.current?.sourceSha256;
+    const expectedSourceHash = resolvedTarget.sourceRef?.expectedSourceSha256
+      || resolvedTarget.selection.expectedSourceSha256;
     if (
       resolvedTarget.generation !== nativeDomGenerationRef.current
       || resolvedTarget.targetElement.ownerDocument !== currentDocument
       || !resolvedTarget.targetElement.isConnected
       || !resolvedTarget.visualElement.isConnected
-      || (
-        resolvedTarget.sourceRef
-        && resolvedTarget.sourceRef.expectedSourceSha256 !== currentSourceHash
-      )
+      || (expectedSourceHash && expectedSourceHash !== currentSourceHash)
     ) return;
-    selectResolvedTarget(resolvedTarget);
-  }, [hoverChrome.capability, interactionLocked, selectResolvedTarget]);
+    // The caption has no current pointer hit. Rebuild selection from the live
+    // canonical target instead of reusing a possibly stale selection override.
+    selectElement(resolvedTarget.targetElement, undefined, {
+      showToolbar: true,
+      runtimeGenerated: resolvedTarget.runtimeGenerated,
+    });
+  }, [hoverChrome.capability, interactionLocked, selectElement]);
   const dismissEditFeedback = useCallback(() => {
     setEditFeedback(null);
   }, []);
