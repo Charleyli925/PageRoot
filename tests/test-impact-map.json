@@ -1793,10 +1793,12 @@
     {
       "id": "project-request-owner",
       "patterns": [
+        "^bridge/project-file-repository\\.mjs$",
         "^bridge/project-file-repository/(?:request-draft|request-attachments)\\.mjs$"
       ],
       "suites": [
-        "typecheck"
+        "typecheck",
+        "ai-review-smoke"
       ],
       "nodeTests": [
         "tests/project-request-authority.test.mjs",

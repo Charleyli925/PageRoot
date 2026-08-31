@@ -1561,8 +1561,11 @@ export default function AiReviewWorkspace({
                       查看超范围修改
                     </button>
                     <div className={styles.reviewImpactIds}>
-                      <span>目标之外元素：</span>
-                      {documents.reviewImpact.outsideRequestedTargetElementIds.map((id) => (
+                      <span>
+                        目标之外元素
+                        {documents.reviewImpact.truncated ? "（仅展示样例）" : ""}：
+                      </span>
+                      {documents.reviewImpact.outsideTargetElementIdSample.map((id) => (
                         <code key={id}>{id}</code>
                       ))}
                     </div>

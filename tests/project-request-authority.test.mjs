@@ -69,6 +69,7 @@ test("Request publication rechecks source bytes after freezing its input bundle"
 
 test("request preparation fault injection restores one immutable active Request", async (t) => {
   for (const failpoint of [
+    "request-attachments-written",
     "request-input-written",
     "request-project-rules-written",
     "request-annotations-written",
@@ -76,12 +77,46 @@ test("request preparation fault injection restores one immutable active Request"
     "request-prompt-written",
     "request-input-manifest-written",
     "request-record-written",
+    "request-freeze-ready",
+    "request-published",
     "request-runtime-written",
     "request-prepared",
   ]) {
     const value = await fixture(t);
     const imported = await importSource(value, "request-fault.html");
-    const request = { summary: `fault recovery ${failpoint}` };
+    const attachmentBytes = Buffer.from(`fault attachment ${failpoint}`, "utf8");
+    const attachmentRelativePath = "draft/attachments/comment_fault/attachment_fault-attachment_fault.txt";
+    const attachmentPath = path.join(
+      imported.target.projectRootPath,
+      ...attachmentRelativePath.split("/"),
+    );
+    await mkdir(path.dirname(attachmentPath), { recursive: true });
+    await writeFile(attachmentPath, attachmentBytes);
+    const request = {
+      freezeCutoffRevision: 0,
+      summary: `fault recovery ${failpoint}`,
+      comments: [{
+        commentId: "comment_fault",
+        text: "附件故障恢复",
+        target: { targetId: "target_fault" },
+        attachments: [{
+          attachmentId: "attachment_fault",
+          kind: "file",
+          fileName: "attachment_fault.txt",
+          mediaType: "text/plain",
+          byteLength: attachmentBytes.byteLength,
+          sha256: sha256(attachmentBytes),
+          relativePath: attachmentRelativePath,
+        }],
+      }],
+      targets: [{ targetId: "target_fault" }],
+      instructions: [{
+        instructionId: "instruction_fault",
+        text: "读取附件",
+        targetRefs: ["target_fault"],
+        attachmentRefs: ["attachment_fault"],
+      }],
+    };
     const prompt = `# ${failpoint}\n`;
     const failing = new ProjectFileRepository({
       projectsRoot: value.projects,
@@ -99,6 +134,23 @@ test("request preparation fault injection restores one immutable active Request"
       (error) => error instanceof ProjectFileRepositoryError
         && error.code === "INJECTED_FAILPOINT",
       failpoint,
+    );
+    const publicRequestPath = path.join(
+      imported.target.projectRootPath,
+      ".pageroot",
+      "requests",
+      "req_fault_recovery",
+      "request.json",
+    );
+    const publishedBeforeRetry = new Set([
+      "request-published",
+      "request-runtime-written",
+      "request-prepared",
+    ]).has(failpoint);
+    assert.equal(
+      await lstat(publicRequestPath).then(() => true, () => false),
+      publishedBeforeRetry,
+      `${failpoint}: public request publication boundary`,
     );
 
     const restarted = new ProjectFileRepository({ projectsRoot: value.projects });
@@ -120,7 +172,145 @@ test("request preparation fault injection restores one immutable active Request"
       "requests",
     ), { withFileTypes: true })).filter((entry) => entry.isDirectory());
     assert.deepEqual(requestRoots.map((entry) => entry.name), ["req_fault_recovery"], failpoint);
+    const frozenAttachmentPath = path.join(
+      imported.target.projectRootPath,
+      ".pageroot",
+      "requests",
+      "req_fault_recovery",
+      "input",
+      "attachments",
+      "comment_fault",
+      "attachment_fault-attachment_fault.txt",
+    );
+    assert.deepEqual(await readFile(frozenAttachmentPath), attachmentBytes, failpoint);
+    await rm(attachmentPath);
+    assert.deepEqual(await readFile(frozenAttachmentPath), attachmentBytes, failpoint);
+    assert.equal(
+      await lstat(path.join(
+        imported.target.projectRootPath,
+        ".pageroot",
+        "recovery",
+        "request-freeze",
+        "req_fault_recovery",
+      )).then(() => true, () => false),
+      false,
+      failpoint,
+    );
+    assert.equal(
+      await lstat(path.join(
+        imported.target.projectRootPath,
+        ".pageroot",
+        "recovery",
+        "request-freeze",
+        "req_fault_recovery.json",
+      )).then(() => true, () => false),
+      false,
+      failpoint,
+    );
   }
+});
+
+test("project recovery publishes a verified staged Request after a process-like interruption", async (t) => {
+  const value = await fixture(t);
+  const imported = await importSource(value, "request-published-recovery.html");
+  const attachmentBytes = Buffer.from("recover this frozen attachment", "utf8");
+  const attachmentRelativePath = "draft/attachments/comment_recovery/attachment_recovery-attachment_recovery.txt";
+  const attachmentPath = path.join(
+    imported.target.projectRootPath,
+    ...attachmentRelativePath.split("/"),
+  );
+  await mkdir(path.dirname(attachmentPath), { recursive: true });
+  await writeFile(attachmentPath, attachmentBytes);
+  const requestId = "req_published_recovery";
+  const request = {
+    freezeCutoffRevision: 0,
+    summary: "恢复已发布前的冻结 Request",
+    comments: [{
+      commentId: "comment_recovery",
+      text: "",
+      target: { targetId: "target_recovery" },
+      attachments: [{
+        attachmentId: "attachment_recovery",
+        kind: "file",
+        fileName: "attachment_recovery.txt",
+        mediaType: "text/plain",
+        byteLength: attachmentBytes.byteLength,
+        sha256: sha256(attachmentBytes),
+        relativePath: attachmentRelativePath,
+      }],
+    }],
+    targets: [{ targetId: "target_recovery" }],
+    instructions: [{
+      instructionId: "instruction_recovery",
+      text: "读取附件",
+      targetRefs: ["target_recovery"],
+      attachmentRefs: ["attachment_recovery"],
+    }],
+  };
+  const interrupted = new ProjectFileRepository({
+    projectsRoot: value.projects,
+    failpoint: async (name) => name === "request-published",
+  });
+  await assert.rejects(
+    interrupted.prepareRequest({
+      target: imported.target,
+      requestId,
+      attemptId: "attempt_001",
+      expectedSourceSha256: imported.target.sourceSha256,
+      request,
+      prompt: "# interrupted freeze\n",
+    }),
+    (error) => error instanceof ProjectFileRepositoryError
+      && error.code === "INJECTED_FAILPOINT",
+  );
+  const controlRoot = path.join(imported.target.projectRootPath, ".pageroot");
+  const stagingRoot = path.join(controlRoot, "recovery", "request-freeze", requestId);
+  const markerPath = `${stagingRoot}.json`;
+  const publishedRequestRoot = path.join(controlRoot, "requests", requestId);
+  assert.equal(await lstat(stagingRoot).then(() => true, () => false), false);
+  assert.equal(await lstat(publishedRequestRoot).then(() => true, () => false), true);
+  assert.equal(await lstat(markerPath).then(() => true, () => false), true);
+  assert.equal((await json(path.join(controlRoot, "runtime-state.json"))).activeRequest, null);
+
+  const restarted = new ProjectFileRepository({ projectsRoot: value.projects });
+  const recovered = await restarted.recoverProject({
+    projectRootPath: imported.target.projectRootPath,
+  });
+  assert.equal(
+    recovered.some((item) => item.kind === "request-freeze" && item.state === "recovered"),
+    true,
+  );
+  const runtime = await json(path.join(controlRoot, "runtime-state.json"));
+  assert.equal(runtime.activeRequest?.requestId, requestId);
+  const frozenPath = path.join(
+    publishedRequestRoot,
+    "input",
+    "attachments",
+    "comment_recovery",
+    "attachment_recovery-attachment_recovery.txt",
+  );
+  assert.deepEqual(await readFile(frozenPath), attachmentBytes);
+  assert.equal(await lstat(markerPath).then(() => true, () => false), false);
+  await rm(attachmentPath);
+  assert.deepEqual(await readFile(frozenPath), attachmentBytes);
+
+  const markerlessRoot = path.join(
+    controlRoot,
+    "recovery",
+    "request-freeze",
+    "req_markerless_orphan",
+  );
+  await mkdir(path.join(markerlessRoot, "input"), { recursive: true });
+  await writeFile(path.join(markerlessRoot, "input", "orphan.bin"), "orphan", "utf8");
+  const orphanRecovery = await restarted.recoverProject({
+    projectRootPath: imported.target.projectRootPath,
+  });
+  assert.equal(
+    orphanRecovery.some((item) => item.requestId === "req_markerless_orphan"
+      && item.state === "discarded-unpublished-staging"),
+    true,
+  );
+  assert.equal(await lstat(markerlessRoot).then(() => true, () => false), false);
 });
 
 test("request recovery keeps the original runtime input-manifest anchor", async (t) => {

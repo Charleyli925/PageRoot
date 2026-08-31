@@ -96,7 +96,10 @@ step summary 里。
   独立字节副本、annotations/requirements/instruction/manifest 的 attachmentId 对齐、
   Draft 原件删除后的继续读取，以及缺失、篡改、长度超限、目录、软链接和路径逃逸在
   `request.json`/Runtime authority 发布前失败。Agent Policy 必须按 manifest 读取真实附件
-  字节，而不是只接受附件元数据。
+  字节，而不是只接受附件元数据。Request 级 failpoint 矩阵还要覆盖附件写完、完整
+  bundle/marker 就绪、staging 目录发布、Runtime 写入和最终准备；前置失败不得留下
+  public Request，模拟进程中断后 `recoverProject` 必须校验 marker、逐文件 Hash 并恢复
+  Runtime，而不是重复复制附件或产生孤儿目录。
 - `RunWorkflow`：fake Bridge、Scheduler、Canvas/Handoff/Hash Port 和既有 Run/Project/
   Document/Comment Session 证明 source freeze 与 persisted SHA/revision 边界、最终
   保存 HTML 上 Stable-ID/UTF-16 textLocator 的唯一重定位与 stale/ambiguous 阻断、
@@ -108,7 +111,9 @@ step summary 里。
   Port 证明 Review candidate 只读且不可变、明确 activation 的完整 identity/hash/time
   校验、Project/Document/Version 同步 publication、Candidate 的 Stable-ID 目标范围评估
   与旧 assessment 兼容、background result 不抢占当前 Canvas，以及 history/current
-  navigation 的完整 Document + Version rollback 与 byte oracle。Electron AI Review
+  navigation 的完整 Document + Version rollback 与 byte oracle。Candidate impact Node
+  oracle 必须覆盖目标后代、目标内增删、兄弟前插、整页评论、重叠根和接近 HTML 上限的
+  O(N) 计算；持久化样例最多 100 个且 `truncated` 与计数一致。Electron AI Review
   场景还必须看到评论目标数、实际修改元素数、目标外修改数和进入全部变化的入口；
   该警告不得阻止 Candidate 继续审阅或采纳。
   Workbench 只保留 review filters/layout/lease、动画和 Outcome/Toast 映射；architecture

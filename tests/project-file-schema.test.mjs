@@ -154,6 +154,17 @@ test("v4 schemas accept repository-produced identity, Working Copy, Candidate an
     validate("candidate.v4.schema.json", candidateRecord),
     validate("project-runtime-state.v4.schema.json", candidateRuntime),
   ]);
+  const oversizedImpactSample = structuredClone(candidateRecord);
+  oversizedImpactSample.assessment.changedElementIdSample = Array.from(
+    { length: 101 },
+    () => "pr1_55555555555545558555555555555555",
+  );
+  const mixedImpactEvidence = structuredClone(candidateRecord);
+  mixedImpactEvidence.assessment.changedStableElementIds = [];
+  await Promise.all([
+    validateRejects("candidate.v4.schema.json", oversizedImpactSample),
+    validateRejects("candidate.v4.schema.json", mixedImpactEvidence),
+  ]);
   assert.equal(candidateRecord.identityReport.status, "verified");
   assert.equal(
     candidateRecord.identityReport.submittedOutputSha256,

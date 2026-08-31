@@ -18,6 +18,8 @@ import {
 } from "./review-document";
 import type { CommentItem, PersistState } from "./types";
 
+const REVIEW_IMPACT_SAMPLE_LIMIT = 100;
+
 export type PreparedReviewDocuments = {
   operationKey: string;
   beforeHtml: string;
@@ -48,25 +50,52 @@ function reviewImpactFromCandidate(
   candidate: VersionReviewCandidate,
 ): ReviewImpact | undefined {
   const assessment = candidate.candidateAssessment;
-  if (
-    !assessment
-    || !Array.isArray(assessment.changedStableElementIds)
-    || !Array.isArray(assessment.requestedTargetElementIds)
-    || !Array.isArray(assessment.outsideRequestedTargetElementIds)
-  ) return undefined;
+  if (!assessment) return undefined;
   const recordedTargetCount = assessment.requestedTargetCount;
   const requestedTargetCount = typeof recordedTargetCount === "number"
     && Number.isSafeInteger(recordedTargetCount)
     && recordedTargetCount >= 0
     ? recordedTargetCount
-    : assessment.requestedTargetElementIds.length;
+    : 0;
+  const changedElementCount = assessment.changedElementCount;
+  const outsideTargetCount = assessment.outsideTargetCount;
+  if (
+    typeof changedElementCount === "number"
+    && Number.isSafeInteger(changedElementCount)
+    && changedElementCount >= 0
+    && typeof outsideTargetCount === "number"
+    && Number.isSafeInteger(outsideTargetCount)
+    && outsideTargetCount >= 0
+    && Array.isArray(assessment.changedElementIdSample)
+    && Array.isArray(assessment.outsideTargetElementIdSample)
+    && typeof assessment.truncated === "boolean"
+  ) {
+    return {
+      requestedTargetCount,
+      actualChangedElementCount: changedElementCount,
+      outsideRequestedTargetCount: outsideTargetCount,
+      changedElementIdSample: assessment.changedElementIdSample
+        .slice(0, REVIEW_IMPACT_SAMPLE_LIMIT),
+      outsideTargetElementIdSample: assessment.outsideTargetElementIdSample
+        .slice(0, REVIEW_IMPACT_SAMPLE_LIMIT),
+      truncated: assessment.truncated,
+    };
+  }
+  if (
+    !Array.isArray(assessment.changedStableElementIds)
+    || !Array.isArray(assessment.requestedTargetElementIds)
+    || !Array.isArray(assessment.outsideRequestedTargetElementIds)
+  ) return undefined;
+  const changed = assessment.changedStableElementIds;
+  const outside = assessment.outsideRequestedTargetElementIds;
   return {
-    requestedTargetCount,
-    actualChangedElementCount: assessment.changedStableElementIds.length,
-    outsideRequestedTargetCount: assessment.outsideRequestedTargetElementIds.length,
-    changedStableElementIds: [...assessment.changedStableElementIds],
-    requestedTargetElementIds: [...assessment.requestedTargetElementIds],
-    outsideRequestedTargetElementIds: [...assessment.outsideRequestedTargetElementIds],
+    requestedTargetCount: requestedTargetCount || assessment.requestedTargetElementIds.length,
+    actualChangedElementCount: changed.length,
+    outsideRequestedTargetCount: outside.length,
+    changedElementIdSample: changed.slice(0, REVIEW_IMPACT_SAMPLE_LIMIT),
+    outsideTargetElementIdSample: outside.slice(0, REVIEW_IMPACT_SAMPLE_LIMIT),
+    truncated: changed.length > REVIEW_IMPACT_SAMPLE_LIMIT
+      || outside.length > REVIEW_IMPACT_SAMPLE_LIMIT,
   };
 }
 

@@ -128,7 +128,7 @@ test("Prompt, protocol, helper, and finalizer agree on frozen input plus control
   );
   assert.match(
     repository,
-    /Treat the frozen HTML, project rules, annotations and change request as read-only/,
+    /Treat the frozen HTML, project rules, annotations, comment attachments and change request as read-only/,
   );
   assert.match(
     repository,

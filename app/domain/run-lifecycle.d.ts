@@ -133,6 +133,11 @@ export type CandidateAssessment = {
   changedStableElementIds?: string[];
   requestedTargetElementIds?: string[];
   outsideRequestedTargetElementIds?: string[];
+  changedElementCount?: number;
+  outsideTargetCount?: number;
+  changedElementIdSample?: string[];
+  outsideTargetElementIdSample?: string[];
+  truncated?: boolean;
   requestedTargetCount?: number;
 };
 

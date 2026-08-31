@@ -414,6 +414,34 @@ test("candidate assessment carries valid Stable-ID impact facts to Review", () =
   });
 });
 
+test("bounded Candidate impact facts reach Review without expanding the renderer payload", () => {
+  const changedId = "pr1_00000000000040008000000000000000";
+  const outsideId = "pr1_11111111111141118000000000000000";
+  assert.deepEqual(candidateAssessmentFromRecord({
+    status: "attention",
+    issueCodes: [],
+    health: { completeDocument: true, bodyHasContent: true },
+    continuity: { status: "related" },
+    changedElementCount: 1200,
+    requestedTargetCount: 2,
+    outsideTargetCount: 400,
+    changedElementIdSample: [changedId],
+    outsideTargetElementIdSample: [outsideId],
+    truncated: true,
+  }), {
+    status: "attention",
+    issueCodes: [],
+    health: { completeDocument: true, bodyHasContent: true },
+    continuity: { status: "related" },
+    changedElementCount: 1200,
+    requestedTargetCount: 2,
+    outsideTargetCount: 400,
+    changedElementIdSample: [changedId],
+    outsideTargetElementIdSample: [outsideId],
+    truncated: true,
+  });
+});
+
 test("active run records decode transport aliases into one canonical model", () => {
   assert.deepEqual(activeRunFromRecord({
     projectId: "project_1",

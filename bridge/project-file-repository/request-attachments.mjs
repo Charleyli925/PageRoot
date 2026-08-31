@@ -262,6 +262,7 @@ async function removeCreatedAttachments(created) {
 export async function freezeRequestCommentAttachments({
   projectRootPath,
   requestRoot,
+  publicRequestRoot = requestRoot,
   requestId,
   comments = [],
 } = {}) {
@@ -425,7 +426,7 @@ export async function freezeRequestCommentAttachments({
     sha256: item.sha256,
     relativePath: `requests/${id}/${item.requestRelativePath}`,
     requestRelativePath: item.requestRelativePath,
-    localPath: path.join(requestRoot, ...item.requestRelativePath.split("/")),
+    localPath: path.join(publicRequestRoot, ...item.requestRelativePath.split("/")),
     ...(item.sourceKind ? { source: item.sourceKind } : {}),
   }));
   const manifestFiles = sources.map((item) => ({

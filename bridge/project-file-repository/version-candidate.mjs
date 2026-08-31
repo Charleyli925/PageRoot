@@ -1,5 +1,6 @@
 // Version snapshot paths and Candidate identity/assessment evidence.
 import {
+  IMPACT_SAMPLE_LIMIT,
   assessHtmlCandidate,
 } from "../candidate-assessment.mjs";
 import {
@@ -90,6 +91,7 @@ export function assessedCandidate(
   {
     requestedTargetElementIds = [],
     requestedTargetCount = requestedTargetElementIds.length,
+    requestedTargetIsPage = false,
   } = {},
 ) {
   const assessment = {
@@ -98,6 +100,7 @@ export function assessedCandidate(
       outputHtml,
       requestedTargetElementIds,
       requestedTargetCount,
+      requestedTargetIsPage,
     }),
     assessedAt: nowIso(clock),
   };
@@ -131,21 +134,35 @@ export function assertCandidateAssessment(assessment) {
       "Candidate validation evidence is invalid.",
     );
   }
-  const impactFields = [
+  const legacyImpactFields = [
     "changedStableElementIds",
     "requestedTargetElementIds",
     "outsideRequestedTargetElementIds",
-    "requestedTargetCount",
   ];
-  const hasImpact = impactFields.some((field) => Object.hasOwn(assessment, field));
-  if (hasImpact) {
+  const boundedImpactFields = [
+    "changedElementCount",
+    "requestedTargetCount",
+    "outsideTargetCount",
+    "changedElementIdSample",
+    "outsideTargetElementIdSample",
+    "truncated",
+  ];
+  const hasLegacyImpact = legacyImpactFields.some((field) => Object.hasOwn(assessment, field));
+  const hasBoundedImpact = boundedImpactFields.some((field) => Object.hasOwn(assessment, field));
+  if (hasLegacyImpact && hasBoundedImpact) {
+    throw new ProjectFileRepositoryError(
+      "CANDIDATE_VALIDATION_INVALID",
+      "Candidate impact evidence mixes legacy and bounded forms.",
+    );
+  }
+  if (hasLegacyImpact) {
     const validIdList = (value) => (
       Array.isArray(value)
       && value.every((id) => isValidPagerootElementId(id))
       && new Set(value).size === value.length
     );
     if (
-      !impactFields.every((field) => Object.hasOwn(assessment, field))
+      !legacyImpactFields.every((field) => Object.hasOwn(assessment, field))
       || !validIdList(assessment.changedStableElementIds)
       || !validIdList(assessment.requestedTargetElementIds)
       || !validIdList(assessment.outsideRequestedTargetElementIds)
@@ -158,6 +175,36 @@ export function assertCandidateAssessment(assessment) {
       throw new ProjectFileRepositoryError(
         "CANDIDATE_VALIDATION_INVALID",
         "Candidate impact evidence is invalid.",
+      );
+    }
+  }
+  if (hasBoundedImpact) {
+    const validSample = (value) => (
+      Array.isArray(value)
+      && value.length <= IMPACT_SAMPLE_LIMIT
+      && value.every((id) => isValidPagerootElementId(id))
+      && new Set(value).size === value.length
+    );
+    if (
+      !boundedImpactFields.every((field) => Object.hasOwn(assessment, field))
+      || !Number.isSafeInteger(assessment.changedElementCount)
+      || assessment.changedElementCount < 0
+      || !Number.isSafeInteger(assessment.requestedTargetCount)
+      || assessment.requestedTargetCount < 0
+      || !Number.isSafeInteger(assessment.outsideTargetCount)
+      || assessment.outsideTargetCount < 0
+      || assessment.outsideTargetCount > assessment.changedElementCount
+      || !validSample(assessment.changedElementIdSample)
+      || !validSample(assessment.outsideTargetElementIdSample)
+      || typeof assessment.truncated !== "boolean"
+      || assessment.truncated !== (
+        assessment.changedElementCount > assessment.changedElementIdSample.length
+        || assessment.outsideTargetCount > assessment.outsideTargetElementIdSample.length
+      )
+    ) {
+      throw new ProjectFileRepositoryError(
+        "CANDIDATE_VALIDATION_INVALID",
+        "Bounded Candidate impact evidence is invalid.",
       );
     }
   }

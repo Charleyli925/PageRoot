@@ -539,6 +539,29 @@ test("the candidate assessment Schema accepts only current and paired retired ex
     ),
   );
   assertValid(ajv, validate, current, "current candidate assessment");
+  const bounded = {
+    ...current,
+    changedElementCount: 120,
+    requestedTargetCount: 1,
+    outsideTargetCount: 120,
+    changedElementIdSample: [
+      "pr1_11111111111141118111111111111111",
+    ],
+    outsideTargetElementIdSample: [
+      "pr1_11111111111141118111111111111111",
+    ],
+    truncated: true,
+  };
+  assertValid(ajv, validate, bounded, "bounded candidate assessment");
+  const oversizedSample = structuredClone(bounded);
+  oversizedSample.changedElementIdSample = Array.from(
+    { length: 101 },
+    () => "pr1_11111111111141118111111111111111",
+  );
+  assert.equal(validate(oversizedSample), false);
+  const mixedImpact = structuredClone(bounded);
+  mixedImpact.changedStableElementIds = [];
+  assert.equal(validate(mixedImpact), false);
 
   const legacy = await json(
     new URL(

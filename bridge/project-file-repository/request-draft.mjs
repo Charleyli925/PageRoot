@@ -31,6 +31,8 @@ export const FROZEN_REQUEST_RULES = `# PageRoot AI Request Rules
 - A valid output remains a Candidate until the user explicitly adopts it.
 `;
 
+export const REQUEST_FREEZE_RECOVERY_SCHEMA_VERSION = "1.0.0";
+
 export function requestInputFileRecord(relativePath, role, mediaType, buffer) {
   return {
     path: String(relativePath).split(path.sep).join("/"),
@@ -93,6 +95,41 @@ export function requestRootPath(paths, requestId) {
     throw new ProjectFileRepositoryError("INVALID_REQUEST_ID", "requestId is invalid.");
   }
   return path.join(paths.requestsRoot, id);
+}
+
+export function requestFreezeStagingRootPath(paths, requestId) {
+  const id = String(requestId || "");
+  if (!SAFE_REQUEST_ID.test(id)) {
+    throw new ProjectFileRepositoryError("INVALID_REQUEST_ID", "requestId is invalid.");
+  }
+  const root = path.join(paths.recoveryRoot, "request-freeze");
+  const staging = path.join(root, id);
+  if (!pathInside(paths.recoveryRoot, staging)) {
+    throw new ProjectFileRepositoryError(
+      "PATH_ESCAPES_PROJECT",
+      "Request freeze staging must stay inside recovery/.",
+    );
+  }
+  return staging;
+}
+
+export function requestFreezeMarkerPath(paths, requestId) {
+  const id = String(requestId || "");
+  if (!SAFE_REQUEST_ID.test(id)) {
+    throw new ProjectFileRepositoryError("INVALID_REQUEST_ID", "requestId is invalid.");
+  }
+  const marker = path.join(
+    paths.recoveryRoot,
+    "request-freeze",
+    `${id}.json`,
+  );
+  if (!pathInside(paths.recoveryRoot, marker)) {
+    throw new ProjectFileRepositoryError(
+      "PATH_ESCAPES_PROJECT",
+      "Request freeze recovery marker must stay inside recovery/.",
+    );
+  }
+  return marker;
 }
 
 export function cancellationAuthorityPath(paths, requestId, attemptId) {

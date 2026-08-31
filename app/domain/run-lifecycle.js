@@ -494,16 +494,62 @@ export function candidateAssessmentFromRecord(value) {
       status: continuity.status === "related" ? "related" : "uncertain",
     },
   };
-  const impactArrayFields = [
+  const legacyImpactArrayFields = [
     "changedStableElementIds",
     "requestedTargetElementIds",
     "outsideRequestedTargetElementIds",
   ];
-  const hasImpact = impactArrayFields.every(
+  const boundedImpactFields = [
+    "changedElementCount",
+    "requestedTargetCount",
+    "outsideTargetCount",
+    "changedElementIdSample",
+    "outsideTargetElementIdSample",
+    "truncated",
+  ];
+  const hasLegacyImpact = legacyImpactArrayFields.every(
     (field) => Array.isArray(value[field]),
   ) && Number.isSafeInteger(value.requestedTargetCount)
     && value.requestedTargetCount >= 0;
-  if (hasImpact) {
+  const hasBoundedImpact = boundedImpactFields.every(
+    (field) => Object.hasOwn(value, field),
+  );
+  if (hasBoundedImpact) {
+    const changed = Array.isArray(value.changedElementIdSample)
+      ? value.changedElementIdSample.map(String)
+      : [];
+    const outside = Array.isArray(value.outsideTargetElementIdSample)
+      ? value.outsideTargetElementIdSample.map(String)
+      : [];
+    const validSample = (ids) => (
+      ids.length <= 100
+      && ids.every((id) => isValidPagerootElementId(id))
+      && new Set(ids).size === ids.length
+    );
+    if (
+      Number.isSafeInteger(value.changedElementCount)
+      && value.changedElementCount >= 0
+      && Number.isSafeInteger(value.requestedTargetCount)
+      && value.requestedTargetCount >= 0
+      && Number.isSafeInteger(value.outsideTargetCount)
+      && value.outsideTargetCount >= 0
+      && value.outsideTargetCount <= value.changedElementCount
+      && typeof value.truncated === "boolean"
+      && value.truncated === (
+        value.changedElementCount > changed.length
+        || value.outsideTargetCount > outside.length
+      )
+      && validSample(changed)
+      && validSample(outside)
+    ) {
+      assessment.changedElementCount = value.changedElementCount;
+      assessment.requestedTargetCount = value.requestedTargetCount;
+      assessment.outsideTargetCount = value.outsideTargetCount;
+      assessment.changedElementIdSample = changed;
+      assessment.outsideTargetElementIdSample = outside;
+      assessment.truncated = value.truncated;
+    }
+  } else if (hasLegacyImpact) {
     const validUniqueIds = (ids) => (
       ids.every((id) => isValidPagerootElementId(id))
       && new Set(ids).size === ids.length

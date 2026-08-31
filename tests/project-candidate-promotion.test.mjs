@@ -976,21 +976,78 @@ test("request finalization seals Candidate impact against its requested Stable I
     html: candidateHtml,
   });
   assert.equal(completed.status, "candidate-ready");
-  assert.deepEqual(completed.candidate.assessment.requestedTargetElementIds, [targetId]);
   assert.equal(completed.candidate.assessment.requestedTargetCount, 1);
-  assert.deepEqual(
-    completed.candidate.assessment.changedStableElementIds,
-    [targetId, outsideId].sort(),
-  );
-  assert.deepEqual(completed.candidate.assessment.outsideRequestedTargetElementIds, [outsideId]);
+  assert.deepEqual(completed.candidate.assessment.changedElementIdSample, [targetId, outsideId].sort());
+  assert.equal(completed.candidate.assessment.outsideTargetCount, 1);
+  assert.deepEqual(completed.candidate.assessment.outsideTargetElementIdSample, [outsideId]);
+  assert.equal(completed.candidate.assessment.truncated, false);
   const reread = await value.repository.readCandidate({
     target: imported.target,
     candidateId: completed.candidate.candidateId,
   });
   assert.deepEqual(
-    reread.candidate.assessment.outsideRequestedTargetElementIds,
+    reread.candidate.assessment.outsideTargetElementIdSample,
     [outsideId],
   );
+});
+
+test("request finalization treats a comment root and its descendants as one allowed impact scope", async (t) => {
+  const value = await fixture(t);
+  const ids = {
+    html: "pr1_11111111111141118111111111111111",
+    head: "pr1_22222222222242229222222222222222",
+    title: "pr1_3333333333334333a333333333333333",
+    body: "pr1_4444444444444444b444444444444444",
+    section: "pr1_77777777777747778077777777777777",
+    heading: "pr1_88888888888848888088888888888888",
+    paragraph: "pr1_99999999999949999099999999999999",
+    outside: "pr1_aaaaaaaabbbb4ccc8ddddeeeeeeeeeee",
+  };
+  const baseHtml = `<!doctype html><html data-pageroot-id="${ids.html}"><head data-pageroot-id="${ids.head}"><title data-pageroot-id="${ids.title}">Scope</title></head><body data-pageroot-id="${ids.body}"><section data-pageroot-id="${ids.section}"><h2 data-pageroot-id="${ids.heading}">标题</h2><p data-pageroot-id="${ids.paragraph}">正文</p></section><aside data-pageroot-id="${ids.outside}">旁支</aside></body></html>`;
+  const imported = await importSource(value, "comment-root-scope.html", baseHtml);
+  const prepared = await value.repository.prepareRequest({
+    target: imported.target,
+    requestId: "req_comment_root_scope",
+    attemptId: "attempt_001",
+    expectedSourceSha256: imported.target.sourceSha256,
+    request: {
+      freezeCutoffRevision: 0,
+      summary: "评论整个 Section",
+      comments: [{
+        commentId: "comment_section",
+        text: "调整 Section 内的标题和正文",
+        target: {
+          targetId: "target_section",
+          elementId: ids.section,
+          level: "module",
+          selector: "section",
+          resolution: "exact",
+        },
+      }],
+      targets: [],
+      instructions: [{
+        instructionId: "instruction_section",
+        text: "更新 Section 内容",
+        targetRefs: ["target_section"],
+      }],
+    },
+    prompt: "# Section scope\n",
+  });
+  const candidate = await value.repository.completeRequest({
+    target: imported.target,
+    requestId: prepared.requestId,
+    attemptId: prepared.attemptId,
+    html: baseHtml
+      .replace(">标题</h2>", ">更新标题</h2>")
+      .replace(">正文</p>", ">更新正文</p>"),
+  });
+  assert.equal(candidate.status, "candidate-ready");
+  assert.equal(candidate.candidate.assessment.requestedTargetCount, 1);
+  assert.deepEqual(
+    candidate.candidate.assessment.changedElementIdSample,
+    [ids.heading, ids.paragraph].sort(),
+  );
+  assert.equal(candidate.candidate.assessment.outsideTargetCount, 0);
 });
 
 test("a replaced private promotion file fails recovery without deleting user bytes", async (t) => {

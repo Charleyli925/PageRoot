@@ -47,9 +47,9 @@ export type ReviewImpact = {
   requestedTargetCount: number;
   actualChangedElementCount: number;
   outsideRequestedTargetCount: number;
-  changedStableElementIds: string[];
-  requestedTargetElementIds: string[];
-  outsideRequestedTargetElementIds: string[];
+  changedElementIdSample: string[];
+  outsideTargetElementIdSample: string[];
+  truncated: boolean;
 };
 
 export type ReviewCommentGroup = {

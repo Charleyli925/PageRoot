@@ -58,7 +58,10 @@ v3 在其历史切换边界内不兼容 v1/v2；新写入不得沿用以下旧�
         │   ├── annotations.json
         │   └── attachments/<commentId>/<attachmentId>-<fileName>
         ├── recovery/
-        │   └── autosave.jsonl
+        │   ├── autosave.jsonl
+        │   └── request-freeze/
+        │       ├── <requestId>/
+        │       └── <requestId>.json
         ├── transactions/
         │   └── <transactionId>/
         │       ├── transaction.json
@@ -201,11 +204,14 @@ freezeCutoffRevision=<current editRevision>
 3. 重读源 HTML并计算精确 Hash。
 4. 把这份完整源 HTML 冻结到 `input/base/index.html`，再冻结截止 revision 内的 comments 和 edit events。
 5. 分配 Request、Attempt 和候选 Version 身份。
-6. 在临时目录完成全部文件。
-7. Schema/Hash 校验通过后原子发布 Request。
+6. 在 `recovery/request-freeze/<requestId>/` staging 目录完成全部文件和附件。
+7. 逐文件 Schema/Hash 校验通过后，用 recovery marker 和目录 rename 原子发布 Request。
 8. 将状态改为 `processing`。
 
-若任一步失败，删除未发布临时目录并回到 `editing`；不得丢失评论、编辑事实或源 HTML。
+若任一步失败，删除未发布 staging 和 marker 并回到 `editing`；若进程在 marker
+或目录发布边界退出，重启时只恢复经过逐文件校验的 staging，或幂等完成已发布目录的
+Runtime authority。staging 与 public Request 同时存在、Hash 不一致或结构不完整时失败
+关闭；不得丢失评论、编辑事实或源 HTML。
 
 成功发布 Request 后，`input/base/index.html` 是本轮修改前的完整、不可变基线。无论 AI 最终成功、失败、取消或 no-change，它都不得被工作文件或后续 Request 替换。
 
@@ -225,6 +231,7 @@ fallback；用户先持久取消旧 Request 形成 fence，再重新发送并建
 
 - `input/base/index.html`
 - `input/annotations/records.json`
+- `input/attachments/<commentId>/<attachmentId>-<fileName>`（存在时）
 - `input/AI_RULES.md`
 - `input/PROJECT.md`
 - `input-manifest.json`
@@ -359,7 +366,7 @@ Comment 包含：
 - `attachments[]`：稳定 `attachmentId`、图片/文件类型、文件名、媒体类型、字节数、Hash、项目相对路径、Request 相对路径和添加来源。
 - `request-only` 或 `project-rule`。
 
-附件实体保存在项目目录，草稿阶段位于 `draft/attachments/`；系统不保存用户桌面、下载目录、移动硬盘等外部原始路径。冻结 Request 时先收集并校验本轮全部评论附件，再逐个重新读取并核对字节数与 Hash，最后把实际字节复制到 `input/attachments/<commentId>/<attachmentId>-<fileName>`。冻结副本必须是独立普通文件，不能是指向 Draft 的硬链接；复制后还要重新读取并核对字节数与 Hash。任何附件缺失、篡改、超限、目录、软链接或路径逃逸都必须在发布 `request.json` 和 Runtime authority 前终止，不能留下可被当作完整 Request 的半成品。冻结 Comment、`requirements.attachments[]`、对应 instruction 的 `attachmentRefs[]` 和 input manifest 必须引用同一组附件 ID；其中 `targetRef` 明确附件随哪条评论作用于哪个模块或子区域。
+附件实体保存在项目目录，草稿阶段位于 `draft/attachments/`；系统不保存用户桌面、下载目录、移动硬盘等外部原始路径。冻结 Request 时先收集并校验本轮全部评论附件，再逐个重新读取并核对字节数与 Hash，最后把实际字节复制到 staging 内的 `input/attachments/<commentId>/<attachmentId>-<fileName>`，完成整包校验后随 staging 目录一起发布。冻结副本必须是独立普通文件，不能是指向 Draft 的硬链接；复制后还要重新读取并核对字节数与 Hash。任何附件缺失、篡改、超限、目录、软链接或路径逃逸都必须在发布 `request.json` 和 Runtime authority 前终止，不能留下可被当作完整 Request 的半成品。冻结 Comment、`requirements.attachments[]`、对应 instruction 的 `attachmentRefs[]` 和 input manifest 必须引用同一组附件 ID；其中 `targetRef` 明确附件随哪条评论作用于哪个模块或子区域。
 
 `requirements.attachments[]` 同时提供 Request 相对路径和 Request 管理文件的本机绝对 `localPath`。绝对路径只指向当前 Request 冻结快照，不得指向选择附件时的外部原文件。若项目目录整体移动，AI 应以 Request 根目录加相对路径重新定位。交接记录不得包含附件 Base64 或二进制内嵌内容。
 
@@ -601,6 +608,13 @@ Completion 必须在 output 完全关闭后最后写入。完成后 output 封�
 refresh 指令属于普通候选内容，不检测、不分级、不产生用户提示。`attention` 表示 HTML
 可以打开，但系统无法充分证明它继承了上一版；Bridge 仍创建不可变候选 Version，界面必须
 移除“直接打开”并要求先进入隔离对比审阅。`ready` 允许审阅或直接打开。
+
+当前 assessment 还记录 Stable-ID impact 的 bounded Review 投影：线性计算的
+`changedElementCount`、`requestedTargetCount`、`outsideTargetCount`，以及每类最多 100
+个 ID 样例和 `truncated`。允许范围是每个评论目标根及其源码后代；整页 `body` 目标覆盖
+页面，重叠目标取并集，目标内新增元素随 Candidate 目标根计入范围。兄弟顺序证据使用
+parent ID 和前/后一个保留兄弟 ID，不使用绝对 sibling index。旧的三个无界 ID 数组只作
+只读兼容；该 impact 仅产生 Review 警告和导航入口，不是 Candidate 拒绝或源码写入边界。
 
 当前 writer 只写完整文档、非空 body 与连续性字段，不写 `executable` 或
 `health.executableSurfaceUnchanged`。这两个退役字段在 v1 Schema 中保持可选，只为读取

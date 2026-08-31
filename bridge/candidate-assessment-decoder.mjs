@@ -1,6 +1,7 @@
 import { isDeepStrictEqual } from "node:util";
 
 import {
+  IMPACT_SAMPLE_LIMIT,
   assessHtmlCandidate,
   candidateAssessmentDecision,
 } from "./candidate-assessment.mjs";
@@ -33,6 +34,11 @@ const ROOT_FIELDS = new Set([
   "changedStableElementIds",
   "requestedTargetElementIds",
   "outsideRequestedTargetElementIds",
+  "changedElementCount",
+  "outsideTargetCount",
+  "changedElementIdSample",
+  "outsideTargetElementIdSample",
+  "truncated",
   "requestedTargetCount",
   "assessedAt",
   "executable",
@@ -81,11 +87,22 @@ const EXECUTABLE_FIELDS = new Set([
   "outputCount",
   "changedCount",
 ]);
-const IMPACT_ARRAY_FIELDS = [
+const LEGACY_IMPACT_ARRAY_FIELDS = [
   "changedStableElementIds",
   "requestedTargetElementIds",
   "outsideRequestedTargetElementIds",
 ];
+const BOUNDED_IMPACT_FIELDS = [
+  "changedElementCount",
+  "requestedTargetCount",
+  "outsideTargetCount",
+  "changedElementIdSample",
+  "outsideTargetElementIdSample",
+  "truncated",
+];
+const BOUNDED_IMPACT_MARKER_FIELDS = BOUNDED_IMPACT_FIELDS.filter(
+  (field) => field !== "requestedTargetCount",
+);
 const SHA256_PATTERN = /^sha256:[a-f0-9]{64}$/;
 const ID_PATTERNS = {
   projectId: /^project_[A-Za-z0-9_-]+$/,
@@ -166,6 +183,22 @@ function assertStableIdArray(value, label) {
     throw decodeError(
       "CANDIDATE_ASSESSMENT_INVALID",
       `${label} must contain unique valid Stable IDs.`,
+    );
+  }
+}
+
+function assertBoundedStableIdSample(value, label) {
+  if (
+    !Array.isArray(value)
+    || value.length > IMPACT_SAMPLE_LIMIT
+    || value.some((id) => !isValidPagerootElementId(id))
+    || new Set(value).size !== value.length
+  ) {
+    throw decodeError(
+      "CANDIDATE_ASSESSMENT_INVALID",
+      label + " must contain at most "
+        + IMPACT_SAMPLE_LIMIT
+        + " unique valid Stable IDs.",
     );
   }
 }
@@ -254,17 +287,35 @@ function assertCandidateAssessmentShape(assessment, label) {
     assertOverlap(continuity[field], `${label}.continuity.${field}`);
   }
 
-  const hasImpact = [
-    ...IMPACT_ARRAY_FIELDS,
-    "requestedTargetCount",
-  ].some((field) => Object.hasOwn(value, field));
-  if (hasImpact) {
+  const hasLegacyImpact = LEGACY_IMPACT_ARRAY_FIELDS.some(
+    (field) => Object.hasOwn(value, field),
+  );
+  const hasBoundedImpact = BOUNDED_IMPACT_MARKER_FIELDS.some(
+    (field) => Object.hasOwn(value, field),
+  );
+  if (
+    Object.hasOwn(value, "requestedTargetCount")
+    && !hasLegacyImpact
+    && !hasBoundedImpact
+  ) {
+    throw decodeError(
+      "CANDIDATE_ASSESSMENT_INVALID",
+      label + " has incomplete impact evidence.",
+    );
+  }
+  if (hasLegacyImpact && hasBoundedImpact) {
+    throw decodeError(
+      "CANDIDATE_ASSESSMENT_INVALID",
+      label + " mixes legacy and bounded impact evidence.",
+    );
+  }
+  if (hasLegacyImpact) {
     assertRequiredFields(
       value,
-      [...IMPACT_ARRAY_FIELDS, "requestedTargetCount"],
+      [...LEGACY_IMPACT_ARRAY_FIELDS, "requestedTargetCount"],
       label,
     );
-    IMPACT_ARRAY_FIELDS.forEach((field) => {
+    LEGACY_IMPACT_ARRAY_FIELDS.forEach((field) => {
       assertStableIdArray(value[field], `${label}.${field}`);
     });
     assertNonNegativeInteger(
@@ -276,6 +327,38 @@ function assertCandidateAssessmentShape(assessment, label) {
       throw decodeError(
         "CANDIDATE_ASSESSMENT_INVALID",
         `${label}.outsideRequestedTargetElementIds must be a subset of changedStableElementIds.`,
+      );
+    }
+  }
+  if (hasBoundedImpact) {
+    assertRequiredFields(value, BOUNDED_IMPACT_FIELDS, label);
+    assertNonNegativeInteger(value.changedElementCount, `${label}.changedElementCount`);
+    assertNonNegativeInteger(value.requestedTargetCount, `${label}.requestedTargetCount`);
+    assertNonNegativeInteger(value.outsideTargetCount, `${label}.outsideTargetCount`);
+    if (value.outsideTargetCount > value.changedElementCount) {
+      throw decodeError(
+        "CANDIDATE_ASSESSMENT_INVALID",
+        `${label}.outsideTargetCount cannot exceed changedElementCount.`,
+      );
+    }
+    assertBoundedStableIdSample(
+      value.changedElementIdSample,
+      `${label}.changedElementIdSample`,
+    );
+    assertBoundedStableIdSample(
+      value.outsideTargetElementIdSample,
+      `${label}.outsideTargetElementIdSample`,
+    );
+    if (
+      typeof value.truncated !== "boolean"
+      || value.truncated !== (
+        value.changedElementCount > value.changedElementIdSample.length
+        || value.outsideTargetCount > value.outsideTargetElementIdSample.length
+      )
+    ) {
+      throw decodeError(
+        "CANDIDATE_ASSESSMENT_INVALID",
+        `${label}.truncated does not match its bounded samples.`,
       );
     }
   }
@@ -404,9 +487,12 @@ export function decodeHistoricalCandidateAssessment(
       `${label} no longer matches its sealed HTML evidence.`,
     );
   }
-  const hasImpact = IMPACT_ARRAY_FIELDS.every(
+  const hasLegacyImpact = LEGACY_IMPACT_ARRAY_FIELDS.every(
     (field) => Object.hasOwn(normalized, field),
   ) && Object.hasOwn(normalized, "requestedTargetCount");
+  const hasBoundedImpact = BOUNDED_IMPACT_FIELDS.every(
+    (field) => Object.hasOwn(normalized, field),
+  );
   const current = {
     schemaVersion: normalized.schemaVersion,
     projectId: normalized.projectId,
@@ -421,16 +507,27 @@ export function decodeHistoricalCandidateAssessment(
     ...assessHtmlCandidate({
       baseHtml,
       outputHtml,
-      includeImpact: hasImpact,
-      ...(hasImpact
-        ? {
-            requestedTargetElementIds: normalized.requestedTargetElementIds,
-            requestedTargetCount: normalized.requestedTargetCount,
-          }
-        : {}),
+      includeImpact: false,
     }),
     assessedAt: normalized.assessedAt,
   };
+  if (hasLegacyImpact) {
+    Object.assign(current, {
+      changedStableElementIds: normalized.changedStableElementIds,
+      requestedTargetElementIds: normalized.requestedTargetElementIds,
+      outsideRequestedTargetElementIds: normalized.outsideRequestedTargetElementIds,
+      requestedTargetCount: normalized.requestedTargetCount,
+    });
+  } else if (hasBoundedImpact) {
+    Object.assign(current, {
+      changedElementCount: normalized.changedElementCount,
+      requestedTargetCount: normalized.requestedTargetCount,
+      outsideTargetCount: normalized.outsideTargetCount,
+      changedElementIdSample: normalized.changedElementIdSample,
+      outsideTargetElementIdSample: normalized.outsideTargetElementIdSample,
+      truncated: normalized.truncated,
+    });
+  }
   if (!isDeepStrictEqual(normalized, current)) {
     throw decodeError(
       "CANDIDATE_ASSESSMENT_INVALID",
