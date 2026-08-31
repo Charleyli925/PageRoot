@@ -2972,7 +2972,7 @@ async function exportHtmlCopy(payload) {
     normalizeDestination: (value) => assertHtmlPath(normalizeHtmlExportPath(value)),
     showSaveDialog: (safeDefaultPath) => dialog.showSaveDialog(mainWindow, {
       title: "导出 HTML 副本",
-      buttonLabel: "导出副本",
+      buttonLabel: "导出 HTML 副本",
       defaultPath: safeDefaultPath,
       properties: ["createDirectory", "showOverwriteConfirmation"],
       filters: [
@@ -3967,7 +3967,7 @@ async function showWorkspaceUnavailableRecovery() {
   });
   const delivery = workspaceRecoveryMailbox.publish({
     title: "本地项目资料暂时不可用",
-    message: "当前页面内容仍保留。可先导出当前编辑，再重新打开源页恢复本地服务。",
+    message: "当前页面内容仍保留。可先导出当前 HTML，再重新打开源页恢复本地服务。",
   });
   if (
     delivery.deliverToRenderer
@@ -3998,7 +3998,7 @@ async function showWorkspaceUnavailableRecovery() {
     type: "warning",
     title: delivery.issue.title,
     message: "源页的本地项目服务已停止。",
-    detail: "当前窗口中的内容仍保留。返回源页可先导出当前编辑；若没有待保存内容，也可以直接重新打开。",
+    detail: "当前窗口中的内容仍保留。返回源页可先导出当前 HTML；若没有待保存内容，也可以直接重新打开。",
     buttons: ["返回源页处理", "重新打开源页"],
     defaultId: 0,
     cancelId: 0,

@@ -3523,7 +3523,7 @@ export class ProjectWorkflow {
         if (!frozen?.ok) throw new Error(frozen?.reason || "无法冻结已恢复的冲突候选。");
         this.#documentSession.setPersistence({
           state: "conflict",
-          error: "源 HTML 在自动写回前被外部修改。工作台候选和外部文件均已保留，请比较后重新载入或导出当前编辑。",
+          error: "源 HTML 在自动写回前被外部修改。工作台候选和外部文件均已保留，请比较后重新载入或导出当前 HTML。",
         });
       }
       this.#setHydration({

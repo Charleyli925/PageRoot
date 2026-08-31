@@ -49,7 +49,7 @@ test("conflict banner adopts the disk version and restores an editable project",
     const banner = launched.page.locator(".source-conflict-banner");
     await expect(banner).toBeVisible({ timeout: 5_000 });
     await expect(banner.locator("strong")).toContainText("源文件在磁盘上被其他程序修改了");
-    await expect(banner.getByRole("button", { name: "导出当前编辑" })).toBeVisible();
+    await expect(banner.getByRole("button", { name: "导出当前 HTML" })).toBeVisible();
     await expect(banner.getByRole("button", { name: "预览外部版本" })).toBeVisible();
     await banner.getByRole("button", { name: "采用磁盘版本" }).click();
 

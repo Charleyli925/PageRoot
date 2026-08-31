@@ -15,13 +15,13 @@ test("technical Electron IPC prefixes never reach the visible error copy", () =>
   const message = productErrorMessage(
     new Error(
       "Error invoking remote method 'html-projects:export-copy': "
-      + "ProjectFileError: 导出副本不能覆盖当前源 HTML，请选择另一个位置。",
+      + "ProjectFileError: 导出 HTML 副本不能覆盖当前源 HTML，请选择另一个位置。",
     ),
     "导出没有完成。",
   );
   assert.equal(
     message,
-    "导出副本不能覆盖当前源 HTML，请选择另一个位置。",
+    "导出 HTML 副本不能覆盖当前源 HTML，请选择另一个位置。",
   );
   assert.doesNotMatch(message, /Error invoking|html-projects|ProjectFileError/);
 });

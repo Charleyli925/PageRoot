@@ -1,12 +1,23 @@
 # PageRoot 版本与项目文件产品需求
 
 - 文档版本：PRD v1.4
-- 最近更新：2026-08-15（Asia/Shanghai，UTC+8）
+- 最近更新：2026-08-31（Asia/Shanghai，UTC+8）
 - 状态：产品规则已确认，按两期串行实施
 - 适用范围：桌面版本地 HTML 导入、持续编辑、评论与附件、AI 候选审阅、正式版本历史、Registry 项目目录与 Finder 体验
 - 关联文档：[MVP 产品需求](MVP_PRD.md)、[交互流程](INTERACTION_FLOW.md)、[Change Request 协议](CHANGE_REQUEST_PROTOCOL.md)、[ADR 0022](decisions/0022-user-owned-project-root-identity.md)、[ADR 0024](decisions/0024-registry-catalog-and-ai-task-projections.md)、[首次打开导入确认](IMPORT_CONFIRMATION_PRD.md)
 
 本文定义下一阶段目标规则。桌面打开路径只承认有效 v4 Project；所有 v4 以前的项目状态均不兼容，不迁移、不恢复、也不作为读取回退。任何不属于有效 v4 Project 的 HTML 都从新 v4 Project 的 V1 开始；实施本 PRD 时必须同步更新关联协议、Schema、测试和 ADR，不能只修改界面文案。
+
+## 0. PR1–PR10 后的文件与历史合同
+
+1. 外部原 HTML 与隐藏 V1 快照保留首次导入时的原始字节，且不写入 PageRoot Stable ID。
+2. 项目内可见的 V1 Working Copy 会物化 Stable ID，因此不保证与外部原稿或隐藏 V1 逐字节相同。
+3. AI Candidate 在晋升前完成 Stable ID 归一化；V2 及后续不可变 Version 保存完整的已采纳 Candidate HTML，因此可以包含 Stable ID。Stable ID 不回写外部原文件。
+4. V2+ 新 Working Copy 建立时与对应 Version 快照逐字节一致；之后本地编辑只修改 Working Copy，不改写已建立的 Version 快照。
+5. 只保留一个“导出当前 HTML…”入口；它原样复制当前完整 Working Copy HTML，包括 Stable ID。导出不改变项目、Version、评论、Registry、Recent 或当前打开文件。
+6. Undo/Redo 仅属于当前打开文档的会话历史；普通自动保存可以保存结果 HTML，但不创建正式 Version，且历史不跨切换、关闭或重启恢复。
+
+`baseSha256`、`currentSha256` 和 `differsFromBase` 继续只表达实际存储字节关系；它们不是单独的用户可见修改徽标或第二套项目状态系统。
 
 ## 1. 产品结论
 
@@ -161,7 +172,7 @@ PR 1 内部按“文档与 Schema → Repository → Workflow → 最低限度 U
 - 候选尚未被采纳时只显示“候选版本 N”，不能显示成已经存在的“版本 N”。
 - 被拒绝的候选不占用正式版本序号；下一次发送仍可生成“候选版本 N”。每个候选另有稳定 `candidateId`，避免内部身份复用。
 - 如果首选 Promotion 路径已经存在，不覆盖、不复用、不提示用户，继续追加同一版本后缀直到得到空闲名称。例如 `A-V2.html` 已存在时创建 `A-V2-V2.html`；仍冲突则创建 `A-V2-V2-V2.html`。
-- 目录、软链接或任何文件都算路径已占用。Promotion 先持久记录候选可见相对路径、私有准备路径、首选命名、分配 ordinal、Candidate Hash、身份物化后 Working Copy Hash、准备文件身份和严格 Working Copy 对象；不可变 Version 保留 Candidate 精确字节，私有准备 Working Copy 在事务内补齐稳定元素 ID。私有准备文件属于该事务，但候选可见相对路径在成功发布前尚未冻结。必须以操作系统级 no-replace 发布私有准备文件：仅当最终 `link()` 返回 `EEXIST` 时，才持久记录下一个同 ordinal 后缀路径并重试；其他错误立即失败关闭并保留 Candidate。成功发布后，该可见路径才成为唯一冻结路径，崩溃恢复必须复用它。实现可设置有限但足够高的冲突尝试上限；到达上限同样失败关闭。准备文件或已发布文件被替换、manifest 出现不可解释的正式 ordinal 冲突时，均不得覆盖或删除用户文件。
+- 目录、软链接或任何文件都算路径已占用。Promotion 先持久记录候选可见相对路径、私有准备路径、首选命名、分配 ordinal、Candidate Hash、身份物化后 Working Copy Hash、准备文件身份和严格 Working Copy 对象；AI Candidate 在晋升前完成 Stable ID 归一化，不可变 Version 保存完整的已采纳 Candidate HTML，私有准备 Working Copy 以同一已归一化字节建立。私有准备文件属于该事务，但候选可见相对路径在成功发布前尚未冻结。必须以操作系统级 no-replace 发布私有准备文件：仅当最终 `link()` 返回 `EEXIST` 时，才持久记录下一个同 ordinal 后缀路径并重试；其他错误立即失败关闭并保留 Candidate。成功发布后，该可见路径才成为唯一冻结路径，崩溃恢复必须复用它。实现可设置有限但足够高的冲突尝试上限；到达上限同样失败关闭。准备文件或已发布文件被替换、manifest 出现不可解释的正式 ordinal 冲突时，均不得覆盖或删除用户文件。
 
 ## 6. 默认项目目录
 
@@ -258,7 +269,7 @@ PR 1 内部按“文档与 Schema → Repository → Workflow → 最低限度 U
 
 1. 再次读取外部 HTML，并验证它没有在预览后被外部修改。
 2. 分配唯一项目目录和内部 `projectId`，先在 Registry 写入带登记根目录的 `pendingImports` 意图；此时尚未让任意目录取得写入授权。
-3. 仅在私有 staging 目录原样复制 HTML 字节到隐藏的版本 1 快照、可见 `<名称>-V1.html` 工作文件和全部 v4 元数据。
+3. 仅在私有 staging 目录原样复制 HTML 字节到隐藏的版本 1 快照；该 V1 快照不含 PageRoot Stable ID。可见 `<名称>-V1.html` 工作文件在同一事务中物化 Stable ID，全部 v4 元数据仍在该目录内生成。
 4. 原外部 HTML 再次校验后，将完整 staging 目录原子发布到该登记根目录。
 5. 由该 Registry pending intent 验证已发布目录的项目/文档 ID，写入正式 Registry 白名单并清除 pending intent；恢复器只处理这种意图，绝不扫描任意副本的 `import.json`。
 6. 将当前打开目标切换到 PageRoot 内的 V1 工作文件，并发布该新 v4 Project 的身份。
@@ -303,11 +314,11 @@ PR 1 内部按“文档与 Schema → Repository → Workflow → 最低限度 U
 | `.pageroot/versions/ver_0002/index.html` | 否 | 版本 2 的不可变历史事实 |
 | `复杂HTML综合测试页-V2.html` | 是 | 基于版本 2 的当前本地工作文件 |
 
-V2 工作文件第一次建立时与 V2 正式快照字节一致。此后用户可以反复修改 V2 工作文件，系统持续保存，但隐藏快照保持不变。
+V2 工作文件第一次建立时与 V2 正式快照逐字节一致。V2 正式快照来自晋升前已完成 Stable ID 归一化的完整 Candidate HTML，因此两者都可以包含 Stable ID。此后用户只修改 V2 工作文件，系统持续保存，但隐藏快照保持不变。
 
-界面状态示例：
+界面状态示例（仅表示当前打开动作与保存过程，不表示基线字节差异）：
 
-- `版本 2 · 未修改`
+- `版本 2 · 只读快照`
 - `基于版本 2 的本地编辑 · 已保存`
 - `基于版本 2 的本地编辑 · 正在保存…`
 - `基于版本 2 的本地编辑 · 保存失败`
@@ -330,7 +341,7 @@ V2 工作文件第一次建立时与 V2 正式快照字节一致。此后用户�
 1. 在版本历史中打开版本 2，先精确显示版本 2 的不可变快照，状态为只读。
 2. 用户点击“基于版本 2 继续编辑”后：
    - 系统只接受 manifest 中 `versionId=V2` 且 `basedOnVersionId=V2` 的唯一原有 Working Copy；缺失、重复、状态/快照 Hash 不完整时失败关闭，不从快照临时重建或猜测另一份文件。
-   - 在切换前完整校验该 Working Copy state、可见工作文件、不可变 V2 快照、Registry 根目录和完整 OpenTarget 身份；成功后打开原有工作文件，并显示其本地修改状态。
+   - 在切换前完整校验该 Working Copy state、可见工作文件、不可变 V2 快照、Registry 根目录和完整 OpenTarget 身份；成功后打开原有工作文件，不根据快照字节差异生成额外的用户状态徽标。
    - Finder 定位该历史 Version 的可见工作文件时也执行同一受控重命名恢复：只在旧映射缺失、`workingCopyId` 不变且同根文件标识唯一时更新 manifest，不能因非活动文件路径陈旧而改为定位隐藏快照或猜测另一份 HTML。
 3. 后续编辑全部保存到 V2 工作文件，不覆盖正式 V2，也不创建新项目。
 
@@ -454,8 +465,8 @@ AI 只能写入固定 Attempt 输出 `.pageroot/requests/<requestId>/attempts/<a
 1. 验证候选 Hash 仍与审阅内容一致。
 2. 验证运行时封存 Candidate 的 `requestId`、`proposedVersionId` / ordinal、`basedOnVersionId`、`previousVersionId`、输出 Hash 和当前项目身份。崩溃恢复时，必须由该 Candidate 与其 `sourceWorkingCopyId` 当前受管命名重新推导版本、谱系、准备路径和可见路径；事务另行封存身份物化后的 Working Copy Hash 与文件身份。任一不一致都失败关闭，不得发布或补全 Version。
 3. 根据当前 Working Copy 最新确认的首选主干与扩展名分配 V7 候选可见路径；若占用则连续追加 `-V7`。先在事务中准备私有字节，再以操作系统级 no-replace `link()` 发布。只有 `EEXIST` 可以持久分配下一个同 ordinal 路径并重试；其他发布错误失败关闭。成功 `link()` 后才冻结最终相对路径。
-4. 把候选精确字节写入 `.pageroot/versions/ver_0007/index.html`。
-5. 在事务私有准备文件中为源码元素补齐稳定 ID，再按冻结路径 no-replace 建立工作文件；正式快照仍保持 Candidate 精确字节，工作文件只允许因身份物化而不同，且不得覆盖任何用户已有文件。
+4. 在晋升前完成 Candidate 的 Stable ID 归一化，并把完整的已采纳 Candidate HTML 写入 `.pageroot/versions/ver_0007/index.html`。
+5. 在事务私有准备文件中以同一份已归一化字节按冻结路径 no-replace 建立工作文件；正式快照与新 Working Copy 初始逐字节一致，且不得覆盖任何用户已有文件。
 6. 提交正式版本元数据与项目 `latestOfficialVersionId=ver_0007`。
 7. 将当前编辑目标切换到 V7 工作文件。
 8. 归档本轮 Request、评论和附件，并建立 V7 的空草稿。
@@ -706,7 +717,10 @@ manifest 可记录平台文件标识（例如 device、inode、birthtime）作�
 
 ### 16.1 版本与保存
 
-- [ ] 导入外部 `A.html` 后创建隐藏不可变版本 1 和可见 `A-V1.html`，原文件字节不变。`[第一期]`
+- [ ] 导入外部 `A.html` 后创建隐藏不可变版本 1 和可见 `A-V1.html`，外部原文件与隐藏快照字节不变且不含 Stable ID；可见 V1 工作文件可以因 Stable ID 物化而不同。`[第一期]`
+- [ ] 唯一“导出当前 HTML…”入口原样复制完整 Working Copy，包括 Stable ID，且不改变项目、Version、Registry、Recent 或当前打开文件。`[PR1–PR10 合同]`
+- [ ] Undo/Redo 仅属于当前打开文档会话，不属于正式 Version 历史，也不跨切换、关闭或重启恢复。`[PR1–PR10 合同]`
+- [ ] AI Candidate 在晋升前完成 Stable ID 归一化；V2 及后续不可变 Version 保存完整的已采纳 Candidate HTML，因此可以包含 Stable ID；对应 V2+ 新 Working Copy 初始与 Version 快照逐字节一致，之后本地编辑只修改 Working Copy。`[PR1–PR10 合同]`
 - [ ] 用户连续修改 `A-V1.html` 100 次并重启应用，内容全部保存，正式版本仍只有版本 1。`[第一期]`
 - [ ] 添加、删除、修改评论和附件后重启应用，草稿完整恢复，不创建正式版本 2。`[第二期]`
 - [ ] 发送 AI 后，界面显示候选版本 2；AI 返回但未采纳时，正式历史仍只有版本 1。`[第一期]`
@@ -761,7 +775,7 @@ manifest 可记录平台文件标识（例如 device、inode、birthtime）作�
 
 ### 16.5 源码与安全
 
-- [ ] 仅打开和导入时，供应的单文件 HTML 字节逐字节不变。`[第一期]`
+- [ ] 仅打开和导入时，供应的外部单文件 HTML 字节逐字节不变；V1 隐藏快照保留同一原始字节且不含 Stable ID，可见 V1 Working Copy 的 Stable ID 物化不回写原稿或隐藏快照。`[第一期]`
 - [ ] 本地局部编辑仍通过受支持 SourcePatch 路径，只改变授权范围。`[第一期]`
 - [ ] 预览 DOM 从不成为保存或版本快照事实源。`[第一期]`
 - [ ] 相对资源依赖不阻止完整 HTML 建立原字节 V1；资源包复制、重写和长期管理不在第一期隐式交付。`[第一期]`

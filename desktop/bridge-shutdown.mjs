@@ -17,7 +17,7 @@ function normalizedWorkspaceIssue(issue) {
       : "本地项目资料暂时不可用",
     message: typeof issue?.message === "string" && issue.message.trim()
       ? issue.message.trim()
-      : "当前页面内容仍保留，可以导出后重新打开源页。",
+      : "当前页面内容仍保留，可以先导出当前 HTML，再重新打开源页。",
   });
 }
 

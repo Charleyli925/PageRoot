@@ -2280,7 +2280,7 @@ export default function Workbench() {
         title: "本地项目资料暂时不可用",
         message: productErrorMessage(
           cause,
-          "当前页面内容仍保留。可先导出当前编辑，再重新打开源页。",
+          "当前页面内容仍保留。可先导出当前 HTML，再重新打开源页。",
         ),
       });
     }
@@ -2318,7 +2318,7 @@ export default function Workbench() {
       setWorkspaceIssue({
         title: issue.title || "本地项目资料暂时不可用",
         message: issue.message
-          || "当前页面内容仍保留。可先导出当前编辑，再重新打开源页。",
+          || "当前页面内容仍保留。可先导出当前 HTML，再重新打开源页。",
       });
     });
   }, []);
@@ -3924,7 +3924,7 @@ export default function Workbench() {
       !skipConfirmation
       && persistState !== "conflict"
       && hasUnwrittenLocalChanges
-      && !window.confirm("重新载入会舍弃尚未写回的当前编辑内容。建议先导出副本，仍要继续吗？")
+      && !window.confirm("重新载入会舍弃尚未写回的当前编辑内容。建议先导出 HTML 副本，仍要继续吗？")
     ) return;
     const operationId = beginSourceTransition();
     if (operationId === null) return;
@@ -4071,7 +4071,7 @@ export default function Workbench() {
       if (!isCurrentProjectContext(context)) return;
       setToast({
         title: "强制解锁失败",
-        message: productErrorMessage(cause, "项目仍保持冲突状态，请先导出当前编辑后再试。"),
+        message: productErrorMessage(cause, "项目仍保持冲突状态，请先导出当前 HTML 后再试。"),
         tone: "error",
         sticky: true,
         disposition: "user-choice",
@@ -6461,7 +6461,7 @@ export default function Workbench() {
             <span>{workspaceIssue.message}</span>
           </div>
           <button type="button" onClick={() => void exportCurrentHtml()}>
-            导出当前编辑
+            导出当前 HTML
           </button>
           <button type="button" onClick={() => void relaunchApp()}>
             重新打开源页
@@ -6480,7 +6480,7 @@ export default function Workbench() {
               ? (persistError || "您的编辑内容仍在，可先预览外部版本再决定。")
               : (persistError || "工作台保留了当前编辑内容，不会假装已经更新。")}</span>
           </div>
-          <button type="button" onClick={() => void exportCurrentHtml()}>导出当前编辑</button>
+          <button type="button" onClick={() => void exportCurrentHtml()}>导出当前 HTML</button>
           {persistState === "conflict" ? (
             <button type="button" onClick={() => void previewExternalSource()}>
               预览外部版本

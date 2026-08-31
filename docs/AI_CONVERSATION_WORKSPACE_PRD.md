@@ -533,7 +533,7 @@ PageRoot · 已将“index.html”交给 Qoder
 - 冻结评论显示“评”标记与只读气泡。
 - 不显示低透明遮罩，不跳到全屏等待工作台。
 - 编辑入口、评论编辑、项目规则修改和再次提交真实 disabled。
-- 用户可滚动、使用允许的预览交互、切换 Document、切换项目、查看历史和导出副本。
+- 用户可滚动、使用允许的预览交互、切换 Document、切换项目、查看历史和导出 HTML 副本。
 
 ### 12.2 消息流
 
@@ -1070,7 +1070,7 @@ Version manifest 保持不可变；历史通过稳定身份读取 Conversation �
 
 Conversation 可能包含 HTML、评论、用户要求、Qoder 回复和模型信息，属于项目内容。默认只保存在项目的受管本地目录，不进入系统剪贴板、Crash 日志或遥测。
 
-Discussion Snapshot 是短命只读文件，Turn 结束即删除，不进入版本历史、导出副本或备份。
+Discussion Snapshot 是短命只读文件，Turn 结束即删除，不进入版本历史、导出 HTML 副本或备份。
 
 ### 21.2 禁止进入遥测
 

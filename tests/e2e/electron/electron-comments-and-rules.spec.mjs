@@ -1005,7 +1005,7 @@ test("workspace failure keeps the current page visible with export and relaunch 
         "html-app:workspace-unavailable",
         {
           title: "本地项目资料暂时不可用",
-          message: "当前页面内容仍保留。可先导出当前编辑，再重新打开源页。",
+          message: "当前页面内容仍保留。可先导出当前 HTML，再重新打开源页。",
         },
       );
     }, mainRendererUrl);
@@ -1013,7 +1013,7 @@ test("workspace failure keeps the current page visible with export and relaunch 
     const recovery = launched.page.getByRole("alert")
       .filter({ hasText: "本地项目资料暂时不可用" });
     await expect(recovery).toBeVisible();
-    await expect(recovery.getByRole("button", { name: "导出当前编辑" }))
+    await expect(recovery.getByRole("button", { name: "导出当前 HTML" }))
       .toBeVisible();
     await expect(recovery.getByRole("button", { name: "重新打开源页" }))
       .toBeVisible();
