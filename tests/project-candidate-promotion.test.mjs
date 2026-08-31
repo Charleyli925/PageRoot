@@ -520,7 +520,15 @@ test("request recovery promotes a prepared Candidate only when its runtime seal 
     requestId: "req_candidate_recovery",
     attemptId: "attempt_001",
     expectedSourceSha256: imported.target.sourceSha256,
-    request: { summary: "recover sealed candidate" },
+    request: {
+      summary: "recover sealed candidate",
+      comments: [{
+        commentId: "comment_candidate_recovery",
+        text: "recover sealed candidate",
+        target: { targetId: "target_candidate_recovery" },
+      }],
+      targets: [{ targetId: "target_candidate_recovery" }],
+    },
     prompt: "# recover sealed candidate\n",
   });
   const interrupted = new ProjectFileRepository({
@@ -904,7 +912,15 @@ test("request finalization creates a reviewable Candidate only, and manifest pat
     requestId: "req_workflow",
     attemptId: "attempt_001",
     expectedSourceSha256: imported.target.sourceSha256,
-    request: { summary: "candidate lifecycle" },
+    request: {
+      summary: "candidate lifecycle",
+      comments: [{
+        commentId: "comment_candidate_lifecycle",
+        text: "candidate lifecycle",
+        target: { targetId: "target_candidate_lifecycle" },
+      }],
+      targets: [{ targetId: "target_candidate_lifecycle" }],
+    },
     prompt: "# Frozen candidate request\n",
   });
   assert.equal(prepared.status, "processing");
@@ -1024,7 +1040,13 @@ test("request finalization treats a comment root and its descendants as one allo
           resolution: "exact",
         },
       }],
-      targets: [],
+      targets: [{
+        targetId: "target_section",
+        elementId: ids.section,
+        level: "module",
+        selector: "section",
+        resolution: "exact",
+      }],
       instructions: [{
         instructionId: "instruction_section",
         text: "更新 Section 内容",

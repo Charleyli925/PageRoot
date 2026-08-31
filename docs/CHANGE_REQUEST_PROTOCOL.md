@@ -342,6 +342,31 @@ offset 统一按 JavaScript UTF-16 code unit 计算。Request 只能把 `exact` 
 
 Request 不定义任何基于时间窗口的成功条件。
 
+### 5.5 当前 v4 Request 的 Task Spec v1
+
+历史 v3 `requirements.preserveOutsideTargets=true` 保持只读兼容；当前 v4
+Project File Request 不再复用这一二元范围字段。系统在冻结时从已重新校验的
+评论自动编译严格的 [Task Spec v1](../schemas/task-spec.v1.schema.json)：
+
+- `objective` 忠实合并评论原文，不新增用户没有表达的目标；
+- `instructions` 按评论顺序生成，每条均为 `priority=required`，并保留原始
+  Target 与 attachment 引用；
+- `scopePolicy` 为 `targets-only`、默认的
+  `targets-plus-required-dependencies` 或 `whole-page`；页面级 `body` 评论使用
+  `whole-page`，只有明确禁止修改目标外源码时才使用 `targets-only`；
+- `acceptanceCriteria` 和 `nonGoals` 只复制评论中明确出现的约束，不由系统
+  发明；
+- `targets` 继续使用既有 Stable ID、源码 Hash 与定位证据，不生成第二套目标
+  身份；
+- `attachments` 只包含 Request 冻结副本，并必须由 instruction 显式引用。
+
+`change-request.json.requirements` 只保存 Task Spec。原始 `comments` 与已经体现
+在冻结 HTML 中的 `changeEvents` 只保存在 `input/annotations/records.json` 和
+内部不可变 Request 记录中：前者是用户表达证据，后者是审计事实，均不是需要
+再次执行的动作。新 Request 同时冻结 `taskSchemaVersion`、`policyVersion` 和
+`promptTemplateVersion`；旧 Request 缺少这些字段时按既有只读合同继续完成或
+取消，不做原地改写。
+
 ## 6. Annotation records v3
 
 权威 Schema：

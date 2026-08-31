@@ -77,7 +77,13 @@ async function createManagedRequest(t, { hang = false } = {}) {
     expectedSourceSha256: ensured.body.sourceSha256,
     freezeCutoffRevision: 0,
     summary: "must not publish",
-    comments: [],
+    comments: [{
+      commentId: "comment_unknown_provider",
+      text: "must not publish",
+      target: { targetId: "target_unknown_provider" },
+      attachments: [],
+    }],
+    targets: [{ targetId: "target_unknown_provider" }],
     changeEvents: [],
     agentDelivery: {
       mode: "managed-agent",
@@ -138,7 +144,13 @@ async function createManagedRequest(t, { hang = false } = {}) {
     expectedSourceSha256: ensured.body.sourceSha256,
     freezeCutoffRevision: 0,
     summary: "完成受管 Qoder ACP 测试任务",
-    comments: [],
+    comments: [{
+      commentId: "comment_managed_qoder",
+      text: "完成受管 Qoder ACP 测试任务",
+      target: { targetId: "target_managed_qoder" },
+      attachments: [],
+    }],
+    targets: [{ targetId: "target_managed_qoder" }],
     changeEvents: [],
     agentDelivery: {
       mode: "managed-agent",

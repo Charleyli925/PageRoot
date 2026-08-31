@@ -455,7 +455,9 @@ export async function addCommentAndSubmit(
   expect(changeRequest.requirements.instructions.some(
     (instruction) => instruction.text.includes(updatedText),
   )).toBe(true);
-  expect(changeRequest.requirements.preserveOutsideTargets).toBe(true);
+  expect(changeRequest.requirements.scopePolicy)
+    .toBe("targets-plus-required-dependencies");
+  expect(changeRequest.requirements).not.toHaveProperty("preserveOutsideTargets");
   return { promptPath, requestRoot, changeRequest, sourcePath: activeSourcePath };
 }
 

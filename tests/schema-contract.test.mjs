@@ -112,6 +112,9 @@ function schemaValidator() {
 
 async function validator(schemaName) {
   const ajv = schemaValidator();
+  if (schemaName === "task-spec.v1.schema.json") {
+    ajv.addSchema(await schema("change-request.v3.schema.json"));
+  }
   const contract = await schema(schemaName);
   assert.equal(
     ajv.validateSchema(contract),
@@ -1091,11 +1094,56 @@ test(
       expectedSourceSha256: opened.body.currentHtmlSha256,
       freezeCutoffRevision: 0,
       summary: "增加合同验证结果",
-      comments: [],
+      comments: [{
+        commentId: "comment_contract",
+        text: "增加合同验证结果",
+        target: {
+          targetId: "target_contract",
+          elementId: "pr1_7777777777774777a777777777777777",
+          expectedSourceSha256: opened.body.currentHtmlSha256,
+          label: "合同标题",
+          level: "module",
+          selector: "h1",
+          fingerprint: {
+            tagName: "h1",
+            stableAttributes: {},
+            ancestorFingerprint: [],
+          },
+          resolution: "exact",
+        },
+        attachments: [],
+      }],
+      targets: [{
+        targetId: "target_contract",
+        elementId: "pr1_7777777777774777a777777777777777",
+        expectedSourceSha256: opened.body.currentHtmlSha256,
+        label: "合同标题",
+        level: "module",
+        selector: "h1",
+        fingerprint: {
+          tagName: "h1",
+          stableAttributes: {},
+          ancestorFingerprint: [],
+        },
+        resolution: "exact",
+      }],
       changeEvents: [],
     });
     assert.equal(submitted.response.status, 201, JSON.stringify(submitted.body));
     const run = submitted.body;
+    const generatedChangeRequest = await json(new URL(
+      `file://${join(controlRoot, "requests", run.requestId, "change-request.json")}`,
+    ));
+    assert.equal(generatedChangeRequest.policyVersion, "1.0.0");
+    assert.equal(generatedChangeRequest.promptTemplateVersion, "1.0.0");
+    assert.equal("comments" in generatedChangeRequest.requirements, false);
+    assert.equal("changeEvents" in generatedChangeRequest.requirements, false);
+    assert.equal("preserveOutsideTargets" in generatedChangeRequest.requirements, false);
+    await validateArtifact(
+      "task-spec.v1.schema.json",
+      generatedChangeRequest.requirements,
+      "generated Task Spec v1",
+    );
     const generatedHtml =
       "<!doctype html><html data-pageroot-id=\"pr1_11111111111141118111111111111111\"><head data-pageroot-id=\"pr1_22222222222242229222222222222222\"><meta charset=\"utf-8\" data-pageroot-id=\"pr1_3333333333334333a333333333333333\"><title data-pageroot-id=\"pr1_4444444444444444b444444444444444\">合同</title></head><body data-pageroot-id=\"pr1_55555555555545558555555555555555\"><main id=\"main\" data-pageroot-id=\"pr1_66666666666646669666666666666666\"><h1 data-pageroot-id=\"pr1_7777777777774777a777777777777777\">合同</h1><p id=\"verified\">验证通过</p></main></body></html>";
     await writeAttemptOutput(run, generatedHtml);

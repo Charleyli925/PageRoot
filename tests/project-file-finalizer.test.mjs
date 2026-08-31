@@ -21,6 +21,22 @@ function html(label) {
   return `<!doctype html><html data-pageroot-id="pr1_11111111111141118111111111111111"><head data-pageroot-id="pr1_22222222222242229222222222222222"><title data-pageroot-id="pr1_3333333333334333a333333333333333">${label}</title></head><body data-pageroot-id="pr1_4444444444444444b444444444444444"><h1 data-pageroot-id="pr1_55555555555545558555555555555555">${label}</h1></body></html>`;
 }
 
+function requestFor(summary) {
+  const target = { targetId: "target_test" };
+  return {
+    freezeCutoffRevision: 0,
+    summary,
+    comments: [{
+      commentId: "comment_test",
+      text: summary,
+      target,
+      attachments: [],
+    }],
+    changeEvents: [],
+    targets: [target],
+  };
+}
+
 async function preparedRequest(t, requestId) {
   const root = await mkdtemp(path.join(os.tmpdir(), "pageroot-project-finalizer-"));
   t.after(() => rm(root, { recursive: true, force: true }));
@@ -36,6 +52,7 @@ async function preparedRequest(t, requestId) {
     target: imported.target,
     requestId,
     expectedSourceSha256: imported.target.sourceSha256,
+    request: requestFor("Generate the Candidate."),
     prompt: "# Candidate\n",
   });
   const requestRoot = path.join(
@@ -68,6 +85,7 @@ test("project-file finalizer freezes a Candidate output without publishing a Ver
     target: imported.target,
     requestId: "req_finalizer",
     expectedSourceSha256: imported.target.sourceSha256,
+    request: requestFor("Generate the Candidate."),
     prompt: "# Candidate\n",
   });
   const outputPath = path.join(

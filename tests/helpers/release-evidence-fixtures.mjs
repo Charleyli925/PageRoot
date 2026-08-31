@@ -151,6 +151,7 @@ const SCHEMA_FILES = [
   "runtime-state.v3.schema.json",
   "scope-report.v1.schema.json",
   "source-history.v1.schema.json",
+  "task-spec.v1.schema.json",
   "user-supplement.v1.schema.json",
 ];
 
@@ -470,6 +471,11 @@ export async function createSyntheticAppBundle(t, {
     ),
     writeFixtureFile(
       productRoot,
+      "shared/task-spec.mjs",
+      "export const TASK_SPEC_SCHEMA_VERSION = '1.0.0';\n",
+    ),
+    writeFixtureFile(
+      productRoot,
       "shared/provenance.mjs",
       "export const fixtureProvenance = true;\n",
     ),
@@ -555,6 +561,7 @@ export async function createSyntheticAppBundle(t, {
       "conversation.mjs",
       "agent-delivery.mjs",
       "agent-feature-gates.mjs",
+      "task-spec.mjs",
     ].map((fileName) => copyFixtureFile(
       productRoot,
       resourcesPath,

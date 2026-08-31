@@ -46,7 +46,13 @@ async function adoptSecondVersion(bridge, ensured, summary) {
     expectedSourceSha256: ensured.body.sourceSha256,
     freezeCutoffRevision: 0,
     summary,
-    comments: [],
+    comments: [{
+      commentId: "comment_version_requirement",
+      text: summary,
+      target: { targetId: "target_version_requirement" },
+      attachments: [],
+    }],
+    targets: [{ targetId: "target_version_requirement" }],
     changeEvents: [],
   });
   assert.equal(request.response.status, 201, JSON.stringify(request.body));

@@ -44,6 +44,10 @@ import {
   isValidPagerootElementId,
   PAGEROOT_ELEMENT_ID_SCHEMA_VERSION,
 } from "../shared/pageroot-element-identity.mjs";
+import {
+  assertTaskSpec,
+  compileTaskSpec,
+} from "../shared/task-spec.mjs";
 
 import {
   CURRENT_REGISTRY_WRITE_LOCK_GRACE_MS,
@@ -73,7 +77,11 @@ import {
 } from "./project-file-repository/constants.mjs";
 import {
   FROZEN_REQUEST_RULES,
+  FROZEN_REQUEST_POLICY_VERSION,
+  FROZEN_REQUEST_PROMPT_TEMPLATE_VERSION,
   REQUEST_FREEZE_RECOVERY_SCHEMA_VERSION,
+  SUPPORTED_FROZEN_REQUEST_POLICY_VERSIONS,
+  SUPPORTED_FROZEN_REQUEST_PROMPT_TEMPLATE_VERSIONS,
   assertWorkingCopyDraft,
   cancellationAuthorityPath,
   draftPathForState,
@@ -1481,11 +1489,37 @@ export class ProjectFileRepository {
       { projectRootPath: loaded.paths.projectRootPath },
     );
     assertWorkingCopyState(workingState, loaded, loaded.workingCopy);
+    const requestInput = isObject(request) ? structuredClone(request) : {};
+    let taskSpec;
+    try {
+      taskSpec = requestInput.taskSpec
+        ? assertTaskSpec(requestInput.taskSpec, { requireAttachmentResolution: false })
+        : compileTaskSpec({
+            comments: Array.isArray(requestInput.comments) ? requestInput.comments : [],
+            instructions: Array.isArray(requestInput.instructions)
+              ? requestInput.instructions
+              : [],
+            targets: Array.isArray(requestInput.targets) ? requestInput.targets : [],
+            legacySummary: requestInput.summary,
+            legacyPreserveOutsideTargets: requestInput.preserveOutsideTargets === true,
+          });
+    } catch (cause) {
+      throw new ProjectFileRepositoryError(
+        "TASK_SPEC_INVALID",
+        "The Request Task Spec is invalid.",
+        { reasonCode: cause?.code || "TASK_SPEC_INVALID" },
+      );
+    }
     const frozenRequest = {
-      ...(isObject(request) ? structuredClone(request) : {}),
-      // The V4 protocol keeps the same source-preservation contract as V3.
-      // A caller cannot weaken it while a Request is being frozen.
-      preserveOutsideTargets: true,
+      freezeCutoffRevision: Number(requestInput.freezeCutoffRevision || 0),
+      summary: taskSpec.objective,
+      taskSpec,
+      comments: Array.isArray(requestInput.comments) ? requestInput.comments : [],
+      changeEvents: Array.isArray(requestInput.changeEvents) ? requestInput.changeEvents : [],
+      agentDelivery: requestInput.agentDelivery || { mode: "clipboard" },
+      ...(requestInput.handoffMessage
+        ? { handoffMessage: String(requestInput.handoffMessage) }
+        : {}),
     };
     try {
       frozenRequest.agentDelivery = this.#normalizeNewAgentDelivery(
@@ -1523,12 +1557,23 @@ export class ProjectFileRepository {
     });
     if (frozenCommentAttachments.attachments.length > 0) {
       frozenRequest.comments = frozenCommentAttachments.comments;
-      frozenRequest.attachments = frozenCommentAttachments.attachments;
       await this.#hit("request-attachments-written", {
         requestId: id,
         requestRoot,
         attachmentCount: frozenCommentAttachments.attachments.length,
       });
+    }
+    try {
+      frozenRequest.taskSpec = assertTaskSpec({
+        ...frozenRequest.taskSpec,
+        attachments: frozenCommentAttachments.attachments,
+      });
+    } catch (cause) {
+      throw new ProjectFileRepositoryError(
+        "TASK_SPEC_INVALID",
+        "The frozen Request attachments do not match the Task Spec.",
+        { reasonCode: cause?.code || "TASK_SPEC_INVALID" },
+      );
     }
     const ordinal = latest.ordinal + 1;
     const proposedVersionId = versionId(ordinal);
@@ -1575,12 +1620,14 @@ export class ProjectFileRepository {
       changeEvents: Array.isArray(frozenRequest.changeEvents)
         ? frozenRequest.changeEvents
         : [],
-      targets: Array.isArray(frozenRequest.targets)
-        ? frozenRequest.targets
+      targets: Array.isArray(frozenRequest.taskSpec.targets)
+        ? frozenRequest.taskSpec.targets
         : [],
     }), "utf8");
     const changeRequestBuffer = Buffer.from(jsonText({
       schemaVersion: PROJECT_FILE_SCHEMA_VERSION,
+      policyVersion: FROZEN_REQUEST_POLICY_VERSION,
+      promptTemplateVersion: FROZEN_REQUEST_PROMPT_TEMPLATE_VERSION,
       projectId: loaded.project.projectId,
       documentId: loaded.project.documentId,
       requestId: id,
@@ -1592,7 +1639,7 @@ export class ProjectFileRepository {
       basedOnVersionId: loaded.workingCopy.basedOnVersionId,
       previousVersionId: latest.versionId,
       freezeCutoffRevision,
-      requirements: frozenRequest,
+      requirements: frozenRequest.taskSpec,
     }), "utf8");
     const inputManifestRelativePath = `requests/${id}/input-manifest.json`;
     const inputManifest = {
@@ -1645,6 +1692,8 @@ export class ProjectFileRepository {
       outputRelativePath,
       status: "processing",
       createdAt: nowIso(this.#clock),
+      policyVersion: FROZEN_REQUEST_POLICY_VERSION,
+      promptTemplateVersion: FROZEN_REQUEST_PROMPT_TEMPLATE_VERSION,
       request: frozenRequest,
     };
     await ensureProjectDirectory(
@@ -2145,9 +2194,11 @@ export class ProjectFileRepository {
     const requestComments = Array.isArray(record.request?.comments)
       ? record.request.comments
       : [];
-    const requestAttachments = Array.isArray(record.request?.attachments)
-      ? record.request.attachments
-      : [];
+    const requestAttachments = Array.isArray(record.request?.taskSpec?.attachments)
+      ? record.request.taskSpec.attachments
+      : Array.isArray(record.request?.attachments)
+        ? record.request.attachments
+        : [];
     const attachmentEntries = new Map(
       [...manifestEntries.entries()]
         .filter(([, entry]) => entry.role === "comment-attachment")
@@ -2225,6 +2276,15 @@ export class ProjectFileRepository {
       || JSON.stringify(annotations.comments || []) !== JSON.stringify(requestComments)
     ) {
       fail("The Request freeze annotations do not match frozen comment requirements.");
+    }
+    if (record.request?.taskSpec !== undefined) {
+      try {
+        assertTaskSpec(record.request.taskSpec);
+      } catch (cause) {
+        fail("The Request freeze Task Spec is invalid.", {
+          cause: cause?.code || null,
+        });
+      }
     }
     return { record, workingCopy, inputManifest };
   }
@@ -2371,6 +2431,28 @@ export class ProjectFileRepository {
         "The frozen Request Agent delivery policy is invalid.",
         { reasonCode: cause?.code || "AGENT_DELIVERY_INVALID" },
       );
+    }
+    if (record.request?.taskSpec !== undefined) {
+      if (
+        !SUPPORTED_FROZEN_REQUEST_POLICY_VERSIONS.has(record.policyVersion)
+        || !SUPPORTED_FROZEN_REQUEST_PROMPT_TEMPLATE_VERSIONS.has(
+          record.promptTemplateVersion,
+        )
+      ) {
+        throw new ProjectFileRepositoryError(
+          "REQUEST_TEMPLATE_VERSION_INVALID",
+          "The frozen Request policy or Prompt template version is unsupported.",
+        );
+      }
+      try {
+        assertTaskSpec(record.request.taskSpec);
+      } catch (cause) {
+        throw new ProjectFileRepositoryError(
+          "TASK_SPEC_INVALID",
+          "The frozen Request Task Spec is invalid.",
+          { reasonCode: cause?.code || "TASK_SPEC_INVALID" },
+        );
+      }
     }
     assertSha256(record.expectedSourceSha256, "request expectedSourceSha256");
     assertId(record.proposedVersionId, VERSION_ID, "proposedVersionId");
@@ -3577,9 +3659,11 @@ export class ProjectFileRepository {
         "The frozen Request input changed after submission.",
       );
     }
-    const requestTargets = Array.isArray(record.request?.targets)
-      ? record.request.targets
-      : [];
+    const requestTargets = Array.isArray(record.request?.taskSpec?.targets)
+      ? record.request.taskSpec.targets
+      : Array.isArray(record.request?.targets)
+        ? record.request.targets
+        : [];
     const commentTargets = Array.isArray(record.request?.comments)
       ? record.request.comments.map((comment) => comment?.target).filter(Boolean)
       : [];

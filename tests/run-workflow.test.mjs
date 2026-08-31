@@ -343,6 +343,7 @@ test("submit freezes the exact source, creates one Request, and confirms handoff
   assert.equal("html" in request, false);
   assert.equal("baseHtml" in request, false);
   assert.equal("projection" in request, false);
+  assert.equal("instructions" in request, false);
 
   const duplicate = await harness.workflow.submit({ projectName: "landing.html" });
   assert.equal(duplicate.status, "blocked");

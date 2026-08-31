@@ -610,10 +610,19 @@ async function verifyFrozenRequestBundle({
     "basedOnVersionId",
     "previousVersionId",
   ];
+  const taskSpec = record.request?.taskSpec;
+  const frozenRequirements = taskSpec || record.request || {};
   if (
     !isObject(changeRequest)
     || immutableKeys.some((key) => changeRequest[key] !== record[key])
-    || canonicalJson(changeRequest.requirements) !== canonicalJson(record.request || {})
+    || (
+      taskSpec
+      && (
+        changeRequest.policyVersion !== record.policyVersion
+        || changeRequest.promptTemplateVersion !== record.promptTemplateVersion
+      )
+    )
+    || canonicalJson(changeRequest.requirements) !== canonicalJson(frozenRequirements)
   ) {
     throw new ProjectFileFinalizerError(
       "FROZEN_REQUEST_BUNDLE_MISMATCH",

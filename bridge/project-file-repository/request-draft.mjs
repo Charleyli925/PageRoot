@@ -26,10 +26,19 @@ export const FROZEN_REQUEST_RULES = `# PageRoot AI Request Rules
 - Read the frozen files in input-manifest.json readOrder before editing.
 - Treat the frozen HTML, project rules, annotations, comment attachments and change request as read-only.
 - For every instruction, follow its attachmentRefs into requirements.attachments and read the matching attachment's requestRelativePath under the Request root. Never read a Draft attachment or an external original path.
-- Preserve content outside the explicitly frozen targets.
+- Follow requirements.scopePolicy. Keep any direct dependency change minimal and preserve unrelated content.
 - Write exactly one complete HTML document to the output path stated in PROMPT.md.
 - A valid output remains a Candidate until the user explicitly adopts it.
 `;
+
+export const FROZEN_REQUEST_POLICY_VERSION = "1.0.0";
+export const FROZEN_REQUEST_PROMPT_TEMPLATE_VERSION = "1.0.0";
+export const SUPPORTED_FROZEN_REQUEST_POLICY_VERSIONS = new Set([
+  FROZEN_REQUEST_POLICY_VERSION,
+]);
+export const SUPPORTED_FROZEN_REQUEST_PROMPT_TEMPLATE_VERSIONS = new Set([
+  FROZEN_REQUEST_PROMPT_TEMPLATE_VERSION,
+]);
 
 export const REQUEST_FREEZE_RECOVERY_SCHEMA_VERSION = "1.0.0";
 

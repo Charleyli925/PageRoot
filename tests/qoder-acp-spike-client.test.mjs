@@ -81,10 +81,14 @@ async function createFixture(t) {
     request: {
       freezeCutoffRevision: 0,
       summary: "Synthetic ACP test",
-      comments: [],
+      comments: [{
+        commentId: "comment_synthetic_acp",
+        text: "Synthetic ACP test",
+        target: { targetId: "target_synthetic_acp" },
+        attachments: [],
+      }],
       changeEvents: [],
-      instructions: [],
-      targets: [],
+      targets: [{ targetId: "target_synthetic_acp" }],
     },
     prompt: promptText,
   });
