@@ -116,7 +116,8 @@ The renderer's main workspace facts are partitioned as follows:
   the installable shipped ACP entries. The packaged application contains no
   private Codex runtime or native Codex package;
 - Bridge Agent Host/Policy Ports: `bridge/agent/policies/` owns the execution
-  policy and freezes all readable files, output/completion paths,
+  policy and freezes all readable files, including comment-attachment bytes,
+  output/completion paths,
   runtime authority and finalizer authority. `bridge/agent/hosts/` owns the
   single-output Execution surface, including cancellation fencing, completion proof and managed terminal
   cleanup. Provider/runtime code may invoke these ports but cannot choose their
@@ -387,6 +388,16 @@ may only be rebuilt from hidden authority or replaced with a new safe display
 directory. The project Finder entry opens the validated project root; the
 Version Finder entry opens the validated visible Working Copy rather than the
 hidden immutable snapshot.
+
+Comment attachment bytes cross the Draft-to-AI boundary only during
+`ProjectFileRepository.#prepareRequest()`. The repository validates every
+comment/attachment identity, project-relative path, regular-file status, size
+and SHA-256 before creating any Request-owned attachment; it then copies and
+re-reads each byte into `input/attachments/<commentId>/`. The annotations,
+`change-request.json`, `PROMPT.md` and `input-manifest.json` projections must
+refer to the same attachment IDs and Request-relative paths. A failed
+attachment validation stops before `request.json` and Runtime authority are
+published, and the copy is never a hard link to the mutable Draft.
 
 Edit and preview surfaces acknowledge the exact Canvas authority generation and
 rendered source Hash. Acknowledgements are disposable and generation-fenced;

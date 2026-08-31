@@ -89,6 +89,7 @@ const BRIDGE_FILES = [
   "project-file-repository/path-safety.mjs",
   "project-file-repository/registry.mjs",
   "project-file-repository/request-draft.mjs",
+  "project-file-repository/request-attachments.mjs",
   "project-file-repository/version-candidate.mjs",
   "project-file-repository/candidate-identity.mjs",
   "project-file-repository/working-copy.mjs",

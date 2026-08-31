@@ -1,8 +1,11 @@
 import assert from "node:assert/strict";
 import {
   lstat,
+  mkdir,
   readFile,
   readdir,
+  rm,
+  symlink,
   writeFile,
 } from "node:fs/promises";
 import path from "node:path";
@@ -239,14 +242,29 @@ test("a Request freezes comments, targets and project rules alongside its exact 
     target: saved.target,
     content: "# 项目规则\n\n只修改首页标题。\n",
   });
+  const attachmentBuffer = Buffer.from("frozen comment attachment", "utf8");
+  const attachmentPath = path.join(
+    saved.target.projectRootPath,
+    "draft",
+    "attachments",
+    "comment_001",
+    "attachment_001-参考.png",
+  );
+  await mkdir(path.dirname(attachmentPath), { recursive: true });
+  await writeFile(attachmentPath, attachmentBuffer);
   const comments = [{
     commentId: "comment_001",
     text: "把标题改成欢迎页",
     target: { targetId: "target_title" },
     attachments: [{
       attachmentId: "attachment_001",
+      kind: "image",
       fileName: "参考.png",
+      mediaType: "image/png",
+      byteLength: attachmentBuffer.byteLength,
+      sha256: sha256(attachmentBuffer),
       relativePath: "draft/attachments/comment_001/attachment_001-参考.png",
+      source: "file-picker",
     }],
   }];
   const request = {
@@ -316,11 +334,32 @@ test("a Request freezes comments, targets and project rules alongside its exact 
   const annotations = JSON.parse(frozenAnnotations.toString("utf8"));
   const changeRequest = JSON.parse(frozenChangeRequest.toString("utf8"));
   const inputManifest = await json(inputManifestPath);
-  assert.deepEqual(annotations.comments, comments);
+  const requestAttachmentPath = "input/attachments/comment_001/attachment_001-参考.png";
+  const frozenComments = [{
+    ...comments[0],
+    attachments: [{
+      ...comments[0].attachments[0],
+      requestRelativePath: requestAttachmentPath,
+    }],
+  }];
+  const frozenAttachment = {
+    ...comments[0].attachments[0],
+    commentId: "comment_001",
+    targetRef: "target_title",
+    relativePath: "requests/req_frozen_inputs/" + requestAttachmentPath,
+    requestRelativePath: requestAttachmentPath,
+    localPath: path.join(
+      requestRoot,
+      ...requestAttachmentPath.split("/"),
+    ),
+  };
+  assert.deepEqual(annotations.comments, frozenComments);
   assert.deepEqual(changeRequest.requirements, {
     ...request,
     preserveOutsideTargets: true,
     agentDelivery: { mode: "clipboard" },
+    comments: frozenComments,
+    attachments: [frozenAttachment],
   });
   assert.deepEqual(inputManifest.readOrder, [
     "PROMPT.md",
@@ -329,7 +368,23 @@ test("a Request freezes comments, targets and project rules alongside its exact 
     "input/PROJECT.md",
     "input/base/index.html",
     "input/annotations/records.json",
+    requestAttachmentPath,
   ]);
+  assert.deepEqual(
+    inputManifest.files.find((entry) => entry.path === requestAttachmentPath),
+    {
+      path: requestAttachmentPath,
+      role: "comment-attachment",
+      mediaType: "image/png",
+      byteLength: attachmentBuffer.byteLength,
+      sha256: sha256(attachmentBuffer),
+    },
+  );
+  assert.deepEqual(await readFile(path.join(requestRoot, requestAttachmentPath)), attachmentBuffer);
+  assert.match(
+    await readFile(path.join(requestRoot, "PROMPT.md"), "utf8"),
+    new RegExp(`${requestAttachmentPath.replaceAll("/", "\\/")}`),
+  );
   assert.equal(
     inputManifest.files.find((entry) => entry.path === "input/base/index.html").sha256,
     saved.target.sourceSha256,
@@ -340,9 +395,226 @@ test("a Request freezes comments, targets and project rules alongside its exact 
     target: saved.target,
     content: "# 已修改的项目规则\n",
   });
+  await writeFile(attachmentPath, "draft attachment changed", "utf8");
   assert.deepEqual(await readFile(annotationsPath), frozenAnnotations);
   assert.deepEqual(await readFile(projectRulesPath), frozenProjectRules);
   assert.deepEqual(await readFile(changeRequestPath), frozenChangeRequest);
+  assert.deepEqual(await readFile(path.join(requestRoot, requestAttachmentPath)), attachmentBuffer);
+});
+
+test("attachments-only comments freeze every byte before Request authority is published", async (t) => {
+  const value = await fixture(t);
+  const imported = await importSource(value, "attachments-only.html");
+  const attachmentCases = [
+    {
+      commentId: "comment_alpha",
+      attachmentId: "attachment_alpha",
+      fileName: "alpha.txt",
+      bytes: Buffer.from("alpha bytes", "utf8"),
+      targetId: "target_alpha",
+    },
+    {
+      commentId: "comment_beta",
+      attachmentId: "attachment_beta",
+      fileName: "beta.png",
+      bytes: Buffer.from([0, 1, 2, 3, 254, 255]),
+      targetId: "target_beta",
+    },
+  ];
+  const comments = [];
+  for (const item of attachmentCases) {
+    const relativePath = `draft/attachments/${item.commentId}/${item.attachmentId}-${item.fileName}`;
+    const sourcePath = path.join(imported.target.projectRootPath, ...relativePath.split("/"));
+    await mkdir(path.dirname(sourcePath), { recursive: true });
+    await writeFile(sourcePath, item.bytes);
+    comments.push({
+      commentId: item.commentId,
+      text: "",
+      target: { targetId: item.targetId },
+      attachments: [{
+        attachmentId: item.attachmentId,
+        kind: item.fileName.endsWith(".png") ? "image" : "file",
+        fileName: item.fileName,
+        mediaType: item.fileName.endsWith(".png") ? "image/png" : "text/plain",
+        byteLength: item.bytes.byteLength,
+        sha256: sha256(item.bytes),
+        relativePath,
+      }],
+    });
+  }
+  const prepared = await value.repository.prepareRequest({
+    target: imported.target,
+    requestId: "req_attachments_only",
+    attemptId: "attempt_001",
+    expectedSourceSha256: imported.target.sourceSha256,
+    request: {
+      freezeCutoffRevision: 0,
+      summary: "只根据附件完成修改",
+      comments,
+      targets: comments.map((comment) => comment.target),
+      instructions: comments.map((comment) => ({
+        instructionId: comment.commentId.replace("comment_", "instruction_"),
+        text: "",
+        targetRefs: [comment.target.targetId],
+        attachmentRefs: comment.attachments.map((attachment) => attachment.attachmentId),
+      })),
+    },
+    prompt: "# 附件任务\n",
+  });
+  const requestRoot = path.join(
+    imported.target.projectRootPath,
+    ".pageroot",
+    "requests",
+    prepared.requestId,
+  );
+  const requestRecord = await json(path.join(requestRoot, "request.json"));
+  const manifest = await json(path.join(requestRoot, "input-manifest.json"));
+  const frozenAnnotations = await json(
+    path.join(requestRoot, "input", "annotations", "records.json"),
+  );
+  assert.equal(requestRecord.request.comments.every((comment) => !comment.text), true);
+  assert.equal(requestRecord.request.attachments.length, attachmentCases.length);
+  assert.deepEqual(
+    manifest.files.filter((entry) => entry.role === "comment-attachment").map((entry) => entry.path),
+    [
+      "input/attachments/comment_alpha/attachment_alpha-alpha.txt",
+      "input/attachments/comment_beta/attachment_beta-beta.png",
+    ],
+  );
+  for (const item of attachmentCases) {
+    const requestRelativePath = `input/attachments/${item.commentId}/${item.attachmentId}-${item.fileName}`;
+    const frozenPath = path.join(requestRoot, ...requestRelativePath.split("/"));
+    assert.deepEqual(await readFile(frozenPath), item.bytes);
+    const manifestEntry = manifest.files.find((entry) => entry.path === requestRelativePath);
+    assert.deepEqual(manifestEntry, {
+      path: requestRelativePath,
+      role: "comment-attachment",
+      mediaType: item.fileName.endsWith(".png") ? "image/png" : "text/plain",
+      byteLength: item.bytes.byteLength,
+      sha256: sha256(item.bytes),
+    });
+    const sourceInformation = await lstat(
+      path.join(
+        imported.target.projectRootPath,
+        "draft",
+        "attachments",
+        item.commentId,
+        `${item.attachmentId}-${item.fileName}`,
+      ),
+    );
+    const frozenInformation = await lstat(frozenPath);
+    assert.equal(sourceInformation.nlink, 1);
+    assert.equal(frozenInformation.nlink, 1);
+    assert.notEqual(frozenInformation.ino, sourceInformation.ino);
+    const annotation = frozenAnnotations.comments.find(
+      (comment) => comment.commentId === item.commentId,
+    );
+    assert.equal(annotation.attachments[0].requestRelativePath, requestRelativePath);
+    await rm(
+      path.join(
+        imported.target.projectRootPath,
+        "draft",
+        "attachments",
+        item.commentId,
+        `${item.attachmentId}-${item.fileName}`,
+      ),
+    );
+    assert.deepEqual(await readFile(frozenPath), item.bytes);
+  }
+  const prompt = await readFile(path.join(requestRoot, "PROMPT.md"), "utf8");
+  assert.match(prompt, /attachmentRefs/iu);
+  assert.match(prompt, /requestRelativePath/iu);
+});
+
+test("invalid comment attachments stop before request.json and Runtime authority", async (t) => {
+  const cases = [
+    { name: "missing", kind: "missing", expectedCode: "REQUEST_ATTACHMENT_NOT_FOUND" },
+    { name: "hash mismatch", kind: "hash", expectedCode: "REQUEST_ATTACHMENT_HASH_MISMATCH" },
+    { name: "byte length mismatch", kind: "length", expectedCode: "REQUEST_ATTACHMENT_LENGTH_MISMATCH" },
+    { name: "metadata over limit", kind: "too-large", expectedCode: "REQUEST_ATTACHMENT_TOO_LARGE" },
+    { name: "directory", kind: "directory", expectedCode: "UNSAFE_FILE" },
+    { name: "symbolic link", kind: "symlink", expectedCode: "PATH_ESCAPES_PROJECT" },
+    { name: "path traversal", kind: "traversal", expectedCode: "INVALID_RELATIVE_PATH" },
+  ];
+  for (const item of cases) {
+    const value = await fixture(t);
+    const imported = await importSource(value, `invalid-attachment-${item.kind}.html`);
+    const commentId = "comment_invalid";
+    const attachmentId = "attachment_invalid";
+    const fileName = "payload.bin";
+    const relativePath = `draft/attachments/${commentId}/${attachmentId}-${fileName}`;
+    const sourcePath = path.join(imported.target.projectRootPath, ...relativePath.split("/"));
+    const bytes = Buffer.from("actual attachment", "utf8");
+    if (item.kind === "hash" || item.kind === "length") {
+      await mkdir(path.dirname(sourcePath), { recursive: true });
+      await writeFile(sourcePath, bytes);
+    } else if (item.kind === "directory") {
+      await mkdir(sourcePath, { recursive: true });
+    } else if (item.kind === "symlink") {
+      const external = path.join(value.root, "outside-attachment.bin");
+      await writeFile(external, bytes);
+      await mkdir(path.dirname(sourcePath), { recursive: true });
+      await symlink(external, sourcePath);
+    }
+    const attachment = {
+      attachmentId,
+      kind: "file",
+      fileName,
+      mediaType: "application/octet-stream",
+      byteLength: item.kind === "too-large" ? 25 * 1024 * 1024 + 1 : bytes.byteLength,
+      sha256: item.kind === "hash" ? sha256(Buffer.from("other", "utf8")) : sha256(bytes),
+      relativePath: item.kind === "traversal"
+        ? `draft/attachments/${commentId}/../${attachmentId}-${fileName}`
+        : relativePath,
+    };
+    if (item.kind === "length") attachment.byteLength += 1;
+    const requestRoot = path.join(
+      imported.target.projectRootPath,
+      ".pageroot",
+      "requests",
+      `req_invalid_${item.kind}`,
+    );
+    await assert.rejects(
+      value.repository.prepareRequest({
+        target: imported.target,
+        requestId: `req_invalid_${item.kind}`,
+        attemptId: "attempt_001",
+        expectedSourceSha256: imported.target.sourceSha256,
+        request: {
+          freezeCutoffRevision: 0,
+          comments: [{
+            commentId,
+            text: "",
+            target: { targetId: "target_invalid" },
+            attachments: [attachment],
+          }],
+          targets: [{ targetId: "target_invalid" }],
+          instructions: [{
+            instructionId: "instruction_invalid",
+            text: "",
+            targetRefs: ["target_invalid"],
+            attachmentRefs: [attachmentId],
+          }],
+        },
+        prompt: "# invalid attachment\n",
+      }),
+      (error) => error instanceof ProjectFileRepositoryError
+        && error.code === item.expectedCode,
+      item.name,
+    );
+    await assert.rejects(
+      readFile(path.join(requestRoot, "request.json")),
+      (error) => error?.code === "ENOENT",
+      item.name,
+    );
+    const runtime = await json(path.join(
+      imported.target.projectRootPath,
+      ".pageroot",
+      "runtime-state.json",
+    ));
+    assert.equal(runtime.activeRequest, null, item.name);
+    assert.equal(runtime.activeCandidateId, null, item.name);
+  }
 });
 
 test("an existing unknown-provider Request remains readable and durably cancellable without read-time rewrite", async (t) => {

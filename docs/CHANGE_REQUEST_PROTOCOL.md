@@ -359,7 +359,7 @@ Comment 包含：
 - `attachments[]`：稳定 `attachmentId`、图片/文件类型、文件名、媒体类型、字节数、Hash、项目相对路径、Request 相对路径和添加来源。
 - `request-only` 或 `project-rule`。
 
-附件实体保存在项目目录，草稿阶段位于 `draft/attachments/`；系统不保存用户桌面、下载目录、移动硬盘等外部原始路径。冻结 Request 时逐个重新读取并核对字节数与 Hash，再优先以 copy-on-write 独立快照写入 `input/attachments/<commentId>/`，文件系统不支持时回退为完整复制；文件和父目录同步成功后才能发布 Request。冻结 Comment、`requirements.attachments[]`、对应 instruction 的 `attachmentRefs[]` 和 input manifest 必须引用同一组附件 ID；其中 `targetRef` 明确附件随哪条评论作用于哪个模块或子区域。
+附件实体保存在项目目录，草稿阶段位于 `draft/attachments/`；系统不保存用户桌面、下载目录、移动硬盘等外部原始路径。冻结 Request 时先收集并校验本轮全部评论附件，再逐个重新读取并核对字节数与 Hash，最后把实际字节复制到 `input/attachments/<commentId>/<attachmentId>-<fileName>`。冻结副本必须是独立普通文件，不能是指向 Draft 的硬链接；复制后还要重新读取并核对字节数与 Hash。任何附件缺失、篡改、超限、目录、软链接或路径逃逸都必须在发布 `request.json` 和 Runtime authority 前终止，不能留下可被当作完整 Request 的半成品。冻结 Comment、`requirements.attachments[]`、对应 instruction 的 `attachmentRefs[]` 和 input manifest 必须引用同一组附件 ID；其中 `targetRef` 明确附件随哪条评论作用于哪个模块或子区域。
 
 `requirements.attachments[]` 同时提供 Request 相对路径和 Request 管理文件的本机绝对 `localPath`。绝对路径只指向当前 Request 冻结快照，不得指向选择附件时的外部原文件。若项目目录整体移动，AI 应以 Request 根目录加相对路径重新定位。交接记录不得包含附件 Base64 或二进制内嵌内容。
 
@@ -391,9 +391,9 @@ Input manifest 同时包含完整冻结 Hash 清单 `files` 和 AI 执行读取�
 4. `input/PROJECT.md`
 5. `input/base/index.html`
 6. `input/annotations/records.json`（完整审计归档）
-7. 评论附件 `input/attachments/...`（存在时逐个列出，角色为 `reference`）
+7. 评论附件 `input/attachments/...`（存在时逐个列出，角色为 `comment-attachment`）
 8. 其他明确列出的 references
-每项包含相对路径、角色、媒体类型、字节数和 SHA-256。`readOrder` 默认依次只读 PROMPT、AI_RULES、change-request、PROJECT、base HTML 和评论附件；不包含 `input/annotations/records.json`。AI 只能读取 `readOrder` 声明的执行输入，不扫描 files 中仅用于审计的条目、其他 Request、Version 或项目目录。
+每项包含相对路径、角色、媒体类型、字节数和 SHA-256。`readOrder` 默认依次只读 PROMPT、AI_RULES、change-request、PROJECT、base HTML、annotations 和评论附件；评论附件只有冻结 Request 内的 `requestRelativePath` 可读。AI 只能读取 `readOrder` 声明的执行输入，不扫描 files 中仅用于审计的条目、其他 Request、Version 或项目目录。
 
 `input-manifest.json` 只描述冻结的原始输入。当前 Attempt 的 `USER_SUPPLEMENT.json` 是唯一允许在冻结后额外读取的动态执行记录；它不回写 manifest，也不能由内部 AI 直接编辑。
 

@@ -172,6 +172,7 @@
             "change-request",
             "base-html",
             "annotations",
+            "comment-attachment",
             "reference",
             "user-supplement"
           ]

@@ -92,6 +92,11 @@ step summary 里。
   仅删除 staged 附件，以及 unknown Draft POST 只通过 authority query 收敛而不重复
   mutation。Workbench 只保留 File、Object URL、焦点和 Toast 映射；Browser memory
   附件不得调用 Bridge。
+- `ProjectFileRepository` Request freeze：Node 集成覆盖附件-only 评论、多评论多附件的
+  独立字节副本、annotations/requirements/instruction/manifest 的 attachmentId 对齐、
+  Draft 原件删除后的继续读取，以及缺失、篡改、长度超限、目录、软链接和路径逃逸在
+  `request.json`/Runtime authority 发布前失败。Agent Policy 必须按 manifest 读取真实附件
+  字节，而不是只接受附件元数据。
 - `RunWorkflow`：fake Bridge、Scheduler、Canvas/Handoff/Hash Port 和既有 Run/Project/
   Document/Comment Session 证明 source freeze 与 persisted SHA/revision 边界、一次
   Request、unknown POST 只读 authority reconciliation、A/B 并行 polling、dispose
@@ -208,6 +213,8 @@ Workbench 只确认已提交 loading surface、传入窄 port 并消费快照。
   HTML 进入 `attention` 并强制审阅、脚本/inline handler 等作者内容变化
   照常建版且不生成检测字段或提示，以及身份/Hash/路径/协议失败与
   no-change 可从 workspace 恢复。
+  Electron AI 闭环还必须从真实评论附件上传开始，验证 Request 内冻结文件的
+  实际字节、manifest Hash 与删除 Draft 原件后的可读性，不得只断言 JSON 元数据。
   `ReviewAnalysisSession` 的 Node oracle 另证明确切 key 合并、异步让步、运行中
   取消和按字节 LRU。修改审阅配对/分段实现时，还要在真实 Chromium DOM 中用
   大型多 section/深层卡片 HTML 记录总耗时及各 `pageroot:review-analysis:*`

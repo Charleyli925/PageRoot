@@ -31,6 +31,10 @@ export const SOURCE_ELEMENT_IDENTITY_MIGRATION_RECOVERY_ID =
 
 export const MAX_HTML_BYTES = 20 * 1024 * 1024;
 
+// Keep the Request freeze cap aligned with the renderer's Draft attachment
+// limit. The repository rechecks actual bytes instead of trusting UI metadata.
+export const MAX_REQUEST_ATTACHMENT_BYTES = 25 * 1024 * 1024;
+
 export const MAX_PATH_COMPONENT_BYTES = 255;
 
 export const WORKING_COPY_SAVE_STATES = new Set(["saved", "saving", "failed"]);

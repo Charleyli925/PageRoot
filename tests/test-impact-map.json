@@ -1791,7 +1791,7 @@
     {
       "id": "project-request-owner",
       "patterns": [
-        "^bridge/project-file-repository/request-draft\\.mjs$"
+        "^bridge/project-file-repository/(?:request-draft|request-attachments)\\.mjs$"
       ],
       "suites": [
         "typecheck"
@@ -1805,7 +1805,7 @@
       "id": "project-file-lifecycle",
       "patterns": [
         "^bridge/project-file-(?:repository|finalizer)\\.mjs$",
-        "^bridge/project-file-repository/(?:constants|errors|workspace-performance-timing)\\.mjs$",
+        "^bridge/project-file-repository/(?:constants|errors|request-attachments|workspace-performance-timing)\\.mjs$",
         "^tests/project-file-(?:finalizer|bridge|schema)\\.test\\.mjs$",
         "^tests/project-file-repository(?:-harness|\\.integration\\.test)\\.mjs$",
         "^tests/project-(?:registry-and-open|working-copy-save|candidate-promotion|request-authority|ai-task-projection|path-security-and-locks)\\.test\\.mjs$",

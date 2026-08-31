@@ -78,6 +78,9 @@ import {
   requestRootPath,
 } from "./project-file-repository/request-draft.mjs";
 import {
+  freezeRequestCommentAttachments,
+} from "./project-file-repository/request-attachments.mjs";
+import {
   ProjectFileRepositoryError,
   invalidRegisteredProjectError,
   registeredProjectCatalogAvailability,
@@ -1473,6 +1476,21 @@ export class ProjectFileRepository {
         },
       );
     }
+    const frozenCommentAttachments = await freezeRequestCommentAttachments({
+      projectRootPath: loaded.paths.projectRootPath,
+      requestRoot,
+      requestId: id,
+      comments: frozenRequest.comments,
+    });
+    if (frozenCommentAttachments.attachments.length > 0) {
+      frozenRequest.comments = frozenCommentAttachments.comments;
+      frozenRequest.attachments = frozenCommentAttachments.attachments;
+      await this.#hit("request-attachments-written", {
+        requestId: id,
+        requestRoot,
+        attachmentCount: frozenCommentAttachments.attachments.length,
+      });
+    }
     const ordinal = latest.ordinal + 1;
     const proposedVersionId = versionId(ordinal);
     const idForCandidate = candidateIdForRequest(loaded.project.projectId, id);
@@ -1501,7 +1519,10 @@ export class ProjectFileRepository {
       );
     }
     const projectNotesBuffer = await readFile(projectNotesPath);
-    const promptBuffer = Buffer.from(String(prompt || ""), "utf8");
+    const promptBuffer = Buffer.from(
+      `${String(prompt || "")}${frozenCommentAttachments.promptAppendix}`,
+      "utf8",
+    );
     const aiRulesBuffer = Buffer.from(FROZEN_REQUEST_RULES, "utf8");
     const annotationsBuffer = Buffer.from(jsonText({
       schemaVersion: PROJECT_FILE_SCHEMA_VERSION,
@@ -1552,6 +1573,7 @@ export class ProjectFileRepository {
         "input/PROJECT.md",
         "input/base/index.html",
         "input/annotations/records.json",
+        ...frozenCommentAttachments.manifestFiles.map((entry) => entry.path),
       ],
       files: [
         requestInputFileRecord("PROMPT.md", "prompt", "text/markdown", promptBuffer),
@@ -1560,6 +1582,7 @@ export class ProjectFileRepository {
         requestInputFileRecord("input/PROJECT.md", "project-rules", "text/markdown", projectNotesBuffer),
         requestInputFileRecord("input/base/index.html", "base-html", "text/html", loaded.source.buffer),
         requestInputFileRecord("input/annotations/records.json", "annotations", "application/json", annotationsBuffer),
+        ...frozenCommentAttachments.manifestFiles,
       ],
     };
     const inputManifestBuffer = Buffer.from(jsonText(inputManifest), "utf8");
