@@ -94,6 +94,7 @@ function reviewBootstrap(
   sessionId: string,
   side: ReviewSide,
   reviewCommentBindings: readonly ReviewCommentBootstrapBinding[] = [],
+  reviewVisualStableIds: readonly string[] = [],
 ): string {
   const serializedBootstrapPayload = (value: unknown) => (
     JSON.stringify(value).replace(/</gu, "\\u003c")
@@ -108,6 +109,9 @@ function reviewBootstrap(
   // never receive source identities, candidate keys, or screenshots.
   const reviewCommentInitialBindings = Object.freeze(
     ${serializedBootstrapPayload(reviewCommentBindings)},
+  );
+  const reviewVisualInitialStableIds = Object.freeze(
+    ${serializedBootstrapPayload(reviewVisualStableIds)},
   );
   // A script-enabled opaque sandbox intentionally has no durable origin. The
   // shared bootstrap supplies one frame-local compatibility surface so an
@@ -131,21 +135,29 @@ function reviewBootstrap(
   const RuntimeVisualString = String;
   const runtimeVisualBoolean = Boolean;
   const runtimeVisualMathFloor = Math.floor.bind(Math);
+  const runtimeVisualMathImul = Math.imul.bind(Math);
   const runtimeVisualNumberIsFinite = Number.isFinite.bind(Number);
   const runtimeVisualSetTimeout = window.setTimeout.bind(window);
+  const runtimeVisualRequestAnimationFrame = window.requestAnimationFrame.bind(window);
+  const runtimeVisualPerformanceNow = performance.now.bind(performance);
   const runtimeVisualArrayPush = runtimeVisualBindCall(Array.prototype.push);
   const runtimeVisualArrayForEach = runtimeVisualBindCall(Array.prototype.forEach);
   const runtimeVisualArrayJoin = runtimeVisualBindCall(Array.prototype.join);
   const runtimeVisualArrayMap = runtimeVisualBindCall(Array.prototype.map);
+  const runtimeVisualArraySome = runtimeVisualBindCall(Array.prototype.some);
   const runtimeVisualArrayIsArray = Array.isArray.bind(Array);
   const runtimeVisualStringCharCodeAt = runtimeVisualBindCall(
     String.prototype.charCodeAt,
   );
   const runtimeVisualStringToLowerCase = runtimeVisualBindCall(String.prototype.toLowerCase);
+  const runtimeVisualStringToUpperCase = runtimeVisualBindCall(String.prototype.toUpperCase);
   const runtimeVisualStringFromCharCode = String.fromCharCode.bind(String);
   const runtimeVisualRegExpExec = runtimeVisualBindCall(RegExp.prototype.exec);
   const runtimeVisualDocumentQuerySelectorAll = runtimeVisualBindCall(
     Document.prototype.querySelectorAll,
+  );
+  const runtimeVisualDocumentCreateElement = runtimeVisualBindCall(
+    Document.prototype.createElement,
   );
   const runtimeVisualElementGetAttribute = runtimeVisualBindCall(
     Element.prototype.getAttribute,
@@ -159,8 +171,31 @@ function reviewBootstrap(
   const runtimeVisualElementQuerySelectorAll = runtimeVisualBindCall(
     Element.prototype.querySelectorAll,
   );
+  const runtimeVisualElementMatches = runtimeVisualBindCall(Element.prototype.matches);
   const runtimeVisualElementGetClientRects = runtimeVisualBindCall(
     Element.prototype.getClientRects,
+  );
+  const runtimeVisualElementGetBoundingClientRect = runtimeVisualBindCall(
+    Element.prototype.getBoundingClientRect,
+  );
+  const runtimeVisualGetComputedStyle = window.getComputedStyle.bind(window);
+  const runtimeVisualCanvasGetContext = runtimeVisualBindCall(
+    HTMLCanvasElement.prototype.getContext,
+  );
+  const runtimeVisualCanvasWidth = runtimeVisualBindCall(
+    Object.getOwnPropertyDescriptor(HTMLCanvasElement.prototype, "width").get,
+  );
+  const runtimeVisualCanvasHeight = runtimeVisualBindCall(
+    Object.getOwnPropertyDescriptor(HTMLCanvasElement.prototype, "height").get,
+  );
+  const runtimeVisualCanvasGetImageData = runtimeVisualBindCall(
+    CanvasRenderingContext2D.prototype.getImageData,
+  );
+  const runtimeVisualCanvasDrawImage = runtimeVisualBindCall(
+    CanvasRenderingContext2D.prototype.drawImage,
+  );
+  const runtimeVisualDocumentGetAnimations = runtimeVisualBindCall(
+    Document.prototype.getAnimations,
   );
   const runtimeVisualDocumentReadyState = runtimeVisualBindCall(
     Object.getOwnPropertyDescriptor(Document.prototype, "readyState").get,
@@ -202,6 +237,15 @@ function reviewBootstrap(
   );
   const runtimeVisualMutationRecordAddedNodes = runtimeVisualBindCall(
     Object.getOwnPropertyDescriptor(MutationRecord.prototype, "addedNodes").get,
+  );
+  const runtimeVisualMutationRecordRemovedNodes = runtimeVisualBindCall(
+    Object.getOwnPropertyDescriptor(MutationRecord.prototype, "removedNodes").get,
+  );
+  const runtimeVisualMutationRecordTarget = runtimeVisualBindCall(
+    Object.getOwnPropertyDescriptor(MutationRecord.prototype, "target").get,
+  );
+  const runtimeVisualMutationRecordOldValue = runtimeVisualBindCall(
+    Object.getOwnPropertyDescriptor(MutationRecord.prototype, "oldValue").get,
   );
   const runtimeVisualDomRectListLength = runtimeVisualBindCall(
     Object.getOwnPropertyDescriptor(DOMRectList.prototype, "length").get,
@@ -274,6 +318,7 @@ function reviewBootstrap(
   let overlayMaskSequence = 0;
   let projectionTransitioning = false;
   let initialProjectionCommitted = false;
+  let confirmedVisualChangeIds = new RuntimeVisualSet();
   let mirroringPanel = false;
   let mirroringAction = false;
   let currentState = { filter: "all", focus: "all", transparency: 18, scale: 1 };
@@ -291,23 +336,31 @@ function reviewBootstrap(
   let reviewCommentChannelTransferred = false;
   let reviewCommentTargets = [];
   let pendingReviewCommentChannelChallenge = null;
+  // This second capability is deliberately separate from comments. Its port
+  // carries only bound visual observations; authored scripts cannot enumerate
+  // candidates or forge a verdict through window messages.
+  const reviewVisualChannel = typeof MessageChannel === "function" ? new MessageChannel() : null;
+  let reviewVisualChannelTransferred = false;
+  let pendingReviewVisualChannelChallenge = null;
   let privateChannelRequestsReady = false;
   const capturePrivateChannelRequest = (event) => {
     const message = event.data;
     const requestsCommentChannel = message?.type === "request-review-comment-channel";
+    const requestsVisualChannel = message?.type === "request-review-visual-channel";
     if (
       !event.isTrusted
       || event.source !== reviewParent
       || !message
       || message.source !== "pageroot-ai-review-parent"
       || message.sessionId !== sessionId
-      || !requestsCommentChannel
+      || (!requestsCommentChannel && !requestsVisualChannel)
     ) return;
     // This listener is installed by the first owned script with capture=true.
     // It consumes the capability challenge before authored capture listeners can
     // observe it or race a forged port back to the parent.
     stopImmediateMessagePropagation(event);
-    pendingReviewCommentChannelChallenge = message.challenge;
+    if (requestsCommentChannel) pendingReviewCommentChannelChallenge = message.challenge;
+    if (requestsVisualChannel) pendingReviewVisualChannelChallenge = message.challenge;
     if (privateChannelRequestsReady) drainPrivateChannelRequests();
   };
   runtimeVisualAddEventListener("message", capturePrivateChannelRequest, { capture: true });
@@ -331,13 +384,368 @@ function reviewBootstrap(
       challenge,
     }, "*", [reviewCommentChannel.port2]);
   };
+  const transferReviewVisualChannel = (rawChallenge) => {
+    const challenge = String(rawChallenge || "");
+    if (runtimeVisualRegExpExec(/^[a-f0-9]{32}$/u, challenge) === null) return;
+    if (!reviewVisualChannel || reviewVisualChannelTransferred) return;
+    reviewVisualChannelTransferred = true;
+    postToParent({ source: "pageroot-ai-review", sessionId, side, type: "review-visual-channel", challenge }, "*", [reviewVisualChannel.port2]);
+  };
   const drainPrivateChannelRequests = () => {
     const commentChallenge = pendingReviewCommentChannelChallenge;
     pendingReviewCommentChannelChallenge = null;
     if (commentChallenge !== null) transferReviewCommentChannel(commentChallenge);
+    const visualChallenge = pendingReviewVisualChannelChallenge;
+    pendingReviewVisualChannelChallenge = null;
+    if (visualChallenge !== null) transferReviewVisualChannel(visualChallenge);
   };
   privateChannelRequestsReady = true;
   drainPrivateChannelRequests();
+  const reviewVisualHash = (values) => {
+    let left = 2166136261;
+    let right = 2246822507;
+    const source = runtimeVisualArrayJoin(values, "\u001f");
+    for (let index = 0; index < source.length; index += 1) {
+      const code = runtimeVisualStringCharCodeAt(source, index);
+      left = runtimeVisualMathImul(left ^ code, 16777619);
+      right = runtimeVisualMathImul(right ^ code, 3266489909);
+    }
+    return RuntimeVisualString(left >>> 0) + ":" + RuntimeVisualString(right >>> 0);
+  };
+  const reviewVisualPixelHash = (pixels) => {
+    let left = 2166136261;
+    let right = 2246822507;
+    for (let index = 0; index < pixels.length; index += 1) {
+      left = runtimeVisualMathImul(left ^ pixels[index], 16777619);
+      right = runtimeVisualMathImul(right ^ pixels[index], 3266489909);
+    }
+    return RuntimeVisualString(left >>> 0) + ":" + RuntimeVisualString(right >>> 0);
+  };
+  const reviewVisualOwnedElements = (host) => {
+    const descendants = runtimeVisualElementQuerySelectorAll(host, "*");
+    if (runtimeVisualNodeListLength(descendants) > 2048) return null;
+    const result = [host];
+    for (let index = 0; index < runtimeVisualNodeListLength(descendants); index += 1) {
+      const node = runtimeVisualNodeListItem(descendants, index);
+      if (!node) continue;
+      let owner = node;
+      while (owner && owner !== host) {
+        if (runtimeVisualElementGetAttribute(owner, "data-pageroot-id")) break;
+        owner = owner.parentElement;
+      }
+      if (owner === host) runtimeVisualArrayPush(result, node);
+    }
+    return result;
+  };
+  const reviewVisualFingerprint = (element, positionSensitive = false) => {
+    const startedAt = runtimeVisualPerformanceNow();
+    const owned = reviewVisualOwnedElements(element);
+    if (!owned) return { visible: false, unverified: true, failureReason: "node-budget" };
+    const rootStyle = runtimeVisualGetComputedStyle(element);
+    const rootRect = runtimeVisualElementGetBoundingClientRect(element);
+    let stableParent = element.parentElement;
+    while (stableParent && !runtimeVisualElementGetAttribute(stableParent, "data-pageroot-id")) {
+      stableParent = stableParent.parentElement;
+    }
+    const stableParentRect = stableParent
+      ? runtimeVisualElementGetBoundingClientRect(stableParent)
+      : null;
+    const ownedSet = new RuntimeVisualSet(owned);
+    const animations = runtimeVisualDocumentGetAnimations(document);
+    if (runtimeVisualArraySome(animations, (animation) => (
+      animation.playState === "running"
+      && runtimeVisualSetHas(ownedSet, animation.effect?.target)
+    ))) {
+      return { visible: false, unverified: true, failureReason: "animation" };
+    }
+    if (runtimeVisualArraySome(owned, (node) => runtimeVisualElementMatches(node, "video,audio"))) {
+      return { visible: false, unverified: true, failureReason: "live-media" };
+    }
+    let visible = false;
+    let pixelBudget = 0;
+    const pieces = [];
+    const presentation = (style) => [
+      style.display, style.visibility, style.opacity, style.color,
+      style.backgroundColor, style.borderTopColor, style.borderRightColor,
+      style.borderBottomColor, style.borderLeftColor, style.borderTopWidth,
+      style.borderRightWidth, style.borderBottomWidth, style.borderLeftWidth,
+      style.borderTopStyle, style.borderRightStyle, style.borderBottomStyle,
+      style.borderLeftStyle, style.fontFamily, style.fontSize, style.fontWeight,
+      style.lineHeight, style.width, style.height, style.paddingTop,
+      style.paddingRight, style.paddingBottom, style.paddingLeft, style.marginTop,
+      style.marginRight, style.marginBottom, style.marginLeft, style.gap,
+      style.rowGap, style.columnGap, style.borderRadius, style.boxShadow,
+      style.transform, style.filter, style.mask, style.clipPath,
+    ];
+    for (let index = 0; index < owned.length; index += 1) {
+      const node = owned[index];
+      const style = runtimeVisualGetComputedStyle(node);
+      const rect = runtimeVisualElementGetBoundingClientRect(node);
+      const directText = [];
+      for (let child = node.firstChild; child; child = child.nextSibling) {
+        if (child.nodeType === 3) runtimeVisualArrayPush(directText, runtimeVisualNodeTextContent(child));
+      }
+      let visibleText = runtimeVisualNormalizeText(runtimeVisualArrayJoin(directText, " "));
+      let effectiveOpacity = 1;
+      for (let ancestor = node; ancestor; ancestor = ancestor.parentElement) {
+        effectiveOpacity *= Number(runtimeVisualGetComputedStyle(ancestor).opacity || 1);
+        if (ancestor === element) break;
+      }
+      const nodeVisible = style.display !== "none" && style.visibility !== "hidden"
+        && effectiveOpacity > 0 && (
+          (rect.width > 0 && rect.height > 0)
+          || (style.display === "contents" && Boolean(visibleText))
+        );
+      visible ||= nodeVisible;
+      if (!nodeVisible) continue;
+      if (style.textTransform === "uppercase") {
+        visibleText = runtimeVisualStringToUpperCase(visibleText);
+      } else if (style.textTransform === "lowercase") {
+        visibleText = runtimeVisualStringToLowerCase(visibleText);
+      }
+      runtimeVisualArrayPush(
+        pieces,
+        visibleText,
+        String(Math.round(rect.width * 2) / 2),
+        String(Math.round(rect.height * 2) / 2),
+      );
+      runtimeVisualArrayForEach(presentation(style), (value) => runtimeVisualArrayPush(pieces, value));
+      const pseudoNames = ["::before", "::after"];
+      for (let pseudoIndex = 0; pseudoIndex < pseudoNames.length; pseudoIndex += 1) {
+        const pseudoName = pseudoNames[pseudoIndex];
+        const pseudo = runtimeVisualGetComputedStyle(node, pseudoName);
+        runtimeVisualArrayPush(
+          pieces,
+          pseudo.content,
+          pseudo.display,
+          pseudo.visibility,
+          pseudo.opacity,
+          pseudo.color,
+          pseudo.backgroundColor,
+          pseudo.fontSize,
+          pseudo.fontWeight,
+          pseudo.width,
+          pseudo.height,
+        );
+      }
+      if (runtimeVisualElementMatches(node, "canvas")) {
+        const width = runtimeVisualCanvasWidth(node);
+        const height = runtimeVisualCanvasHeight(node);
+        pixelBudget += width * height;
+        if (pixelBudget > 4_000_000) {
+          return { visible, unverified: true, failureReason: "pixel-budget" };
+        }
+        try {
+          const context = runtimeVisualCanvasGetContext(node, "2d", { willReadFrequently: true });
+          if (!context) return { visible, unverified: true, failureReason: "webgl-or-unreadable-canvas" };
+          const pixels = runtimeVisualCanvasGetImageData(context, 0, 0, width, height).data;
+          runtimeVisualArrayPush(pieces, "canvas", String(width), String(height), reviewVisualPixelHash(pixels));
+        } catch {
+          return { visible, unverified: true, failureReason: "tainted-canvas" };
+        }
+      }
+      if (runtimeVisualElementMatches(node, "img")) {
+        if (!node.complete || !node.naturalWidth || !node.naturalHeight) {
+          return { visible, unverified: true, failureReason: "image-not-ready" };
+        }
+        pixelBudget += node.naturalWidth * node.naturalHeight;
+        if (pixelBudget > 4_000_000) {
+          return { visible, unverified: true, failureReason: "pixel-budget" };
+        }
+        try {
+          const imageCanvas = runtimeVisualDocumentCreateElement(document, "canvas");
+          imageCanvas.width = node.naturalWidth;
+          imageCanvas.height = node.naturalHeight;
+          const imageContext = runtimeVisualCanvasGetContext(
+            imageCanvas,
+            "2d",
+            { willReadFrequently: true },
+          );
+          if (!imageContext) {
+            return { visible, unverified: true, failureReason: "image-unreadable" };
+          }
+          runtimeVisualCanvasDrawImage(
+            imageContext,
+            node,
+            0,
+            0,
+            node.naturalWidth,
+            node.naturalHeight,
+          );
+          const imagePixels = runtimeVisualCanvasGetImageData(
+            imageContext,
+            0,
+            0,
+            node.naturalWidth,
+            node.naturalHeight,
+          ).data;
+          runtimeVisualArrayPush(
+            pieces,
+            "image",
+            String(node.naturalWidth),
+            String(node.naturalHeight),
+            reviewVisualPixelHash(imagePixels),
+          );
+        } catch {
+          return { visible, unverified: true, failureReason: "tainted-image" };
+        }
+      }
+      if (node.namespaceURI === "http://www.w3.org/2000/svg") {
+        runtimeVisualArrayPush(
+          pieces,
+          "svg",
+          runtimeVisualElementGetAttribute(node, "d") || "",
+          runtimeVisualElementGetAttribute(node, "points") || "",
+          runtimeVisualElementGetAttribute(node, "x") || "",
+          runtimeVisualElementGetAttribute(node, "y") || "",
+          runtimeVisualElementGetAttribute(node, "width") || "",
+          runtimeVisualElementGetAttribute(node, "height") || "",
+          style.fill,
+          style.stroke,
+          style.strokeWidth,
+          style.opacity,
+          style.filter,
+          style.mask,
+          style.clipPath,
+        );
+      }
+      if (runtimeVisualPerformanceNow() - startedAt > 120) {
+        return { visible, unverified: true, failureReason: "time-budget" };
+      }
+    }
+    if (
+      !visible
+      && rootStyle.display !== "none"
+      && rootStyle.visibility !== "hidden"
+      && Number(rootStyle.opacity || 1) > 0
+      && (rootRect.width <= 0 || rootRect.height <= 0)
+    ) return { visible: false, unverified: true, failureReason: "hidden-context" };
+    if (positionSensitive && stableParentRect) runtimeVisualArrayPush(
+      pieces,
+      "local-position",
+      String(Math.round((rootRect.left - stableParentRect.left) * 2) / 2),
+      String(Math.round((rootRect.top - stableParentRect.top) * 2) / 2),
+    );
+    return { visible, fingerprint: reviewVisualHash(pieces) };
+  };
+  let reviewVisualObservationSequence = 0;
+  const renderReviewCommentHighlight = (stableIds) => {
+    document.querySelector('[data-pageroot-review-comment-highlight-layer]')?.remove();
+    if (!stableIds.length) return;
+    const layer = document.createElement("div");
+    layer.setAttribute("data-pageroot-review-comment-highlight-layer", "true");
+    layer.style.cssText = "position:absolute;inset:0;z-index:2147483000;pointer-events:none";
+    runtimeVisualArrayForEach(stableIds, (stableId) => {
+      const element = reviewVisualStableElement(stableId);
+      if (!element) return;
+      const rect = runtimeVisualElementGetBoundingClientRect(element);
+      if (rect.width <= 0 || rect.height <= 0) return;
+      const box = document.createElement("div");
+      box.setAttribute("data-pageroot-review-comment-highlight", "true");
+      box.style.cssText = "position:absolute;border:2px solid #6258d6;border-radius:6px;background:rgb(98 88 214 / 10%);box-shadow:0 0 0 2px rgb(255 255 255 / 78%);pointer-events:none";
+      box.style.left = Math.max(0, rect.left + scrollX - 3) + "px";
+      box.style.top = Math.max(0, rect.top + scrollY - 3) + "px";
+      box.style.width = Math.max(0, rect.width + 6) + "px";
+      box.style.height = Math.max(0, rect.height + 6) + "px";
+      layer.append(box);
+    });
+    if (layer.childElementCount) document.documentElement.append(layer);
+  };
+  if (reviewVisualChannel) reviewVisualChannel.port1.onmessage = (event) => {
+    const request = event.data;
+    if (request?.type === "comment-highlight" && request.sessionId === sessionId
+      && request.side === side && Array.isArray(request.stableIds)) {
+      renderReviewCommentHighlight(request.active === true
+        ? request.stableIds.slice(0, 32)
+        : []);
+      return;
+    }
+    if (request?.type === "verdicts" && request.sessionId === sessionId && request.side === side
+      && Array.isArray(request.changed)) {
+      runtimeVisualQueryElements('[data-pageroot-review-confirmed="true"]').forEach((element) => {
+        runtimeVisualElementRemoveAttribute(element, "data-pageroot-review-confirmed");
+      });
+      runtimeVisualQueryElements('[data-pageroot-review-runtime-visual-marker="true"]').forEach((element) => {
+        runtimeVisualElementRemoveAttribute(element, "data-pageroot-review-marker");
+        runtimeVisualElementRemoveAttribute(element, "data-pageroot-review-marker-types");
+        runtimeVisualElementRemoveAttribute(element, "data-pageroot-review-summary");
+        runtimeVisualElementRemoveAttribute(element, "data-pageroot-review-runtime-visual-marker");
+      });
+      const nextConfirmed = new RuntimeVisualSet();
+      request.changed.forEach((candidate) => {
+        const changeId = safeKey(candidate?.id);
+        if (!changeId) return;
+        runtimeVisualSetAdd(nextConfirmed, changeId);
+        const stableId = RuntimeVisualString(candidate?.stableId || "");
+        const element = reviewVisualStableElement(stableId);
+        if (!element) return;
+        if (runtimeVisualElementGetAttribute(element, "data-pageroot-review-marker")) return;
+        runtimeVisualElementSetAttribute(element, "data-pageroot-review-marker", changeId);
+        runtimeVisualElementSetAttribute(element, "data-pageroot-review-marker-types", candidate.types?.join(" ") || "structure");
+        runtimeVisualElementSetAttribute(element, "data-pageroot-review-summary", "元素变化");
+        runtimeVisualElementSetAttribute(element, "data-pageroot-review-active", "true");
+        runtimeVisualElementSetAttribute(element, "data-pageroot-review-runtime-visual-marker", "true");
+      });
+      runtimeVisualQueryElements("[data-pageroot-review-marker]").forEach((element) => {
+        const changeId = safeKey(runtimeVisualElementGetAttribute(
+          element,
+          "data-pageroot-review-marker",
+        ));
+        if (runtimeVisualSetHas(nextConfirmed, changeId)) {
+          runtimeVisualElementSetAttribute(element, "data-pageroot-review-confirmed", "true");
+        }
+      });
+      confirmedVisualChangeIds = nextConfirmed;
+      scheduleOverlayRender();
+      return;
+    }
+    if (!request || request.type !== "observe" || request.sessionId !== sessionId || request.side !== side
+      || !Array.isArray(request.candidates) || typeof request.sourceHash !== "string") return;
+    const observationSequence = ++reviewVisualObservationSequence;
+    const candidates = request.candidates.slice(0, 1000);
+    const sample = () => runtimeVisualArrayMap(candidates, (candidate) => {
+      const stableId = RuntimeVisualString(candidate?.stableId || "");
+      const element = reviewVisualStableElement(stableId);
+      const expectedPresent = candidate?.present === true;
+      const result = element
+        ? reviewVisualFingerprint(element, candidate?.positionSensitive === true)
+        : expectedPresent
+          ? { visible: false, unverified: true, failureReason: "missing-runtime-host" }
+          : { visible: false, fingerprint: "absent" };
+      return {
+        sessionId,
+        side,
+        sourceHash: request.sourceHash,
+        generation: request.generation,
+        stableId,
+        ...result,
+      };
+    });
+    const first = sample();
+    runtimeVisualSetTimeout(() => runtimeVisualRequestAnimationFrame(() => (
+      runtimeVisualRequestAnimationFrame(() => {
+        if (observationSequence !== reviewVisualObservationSequence) return;
+        const second = sample();
+        const observations = runtimeVisualArrayMap(second, (current, index) => {
+          const previous = first[index];
+          if (
+            !previous
+            || previous.unverified
+            || current.unverified
+            || previous.visible !== current.visible
+            || previous.fingerprint !== current.fingerprint
+          ) return {
+            ...current,
+            fingerprint: undefined,
+            unverified: true,
+            failureReason: current.failureReason || previous?.failureReason || "unstable",
+          };
+          return current;
+        });
+        reviewVisualChannel.port1.postMessage({ type: "observations", observations });
+      })
+    )), 80);
+  };
   const clamp = (value, minimum, maximum) => Math.max(minimum, Math.min(maximum, value));
   const documentHeight = () => Math.max(
     document.documentElement.scrollHeight,
@@ -647,6 +1055,34 @@ function reviewBootstrap(
   const reviewCommentIdentityElements = reviewCommentBindingRegistry.identityElements;
   const reviewCommentDeferredBindings = reviewCommentBindingRegistry.deferredBindings;
   const reviewCommentInvalidSourceNodeIds = reviewCommentBindingRegistry.invalidBindingIds;
+  const reviewVisualAllowedStableIds = new RuntimeVisualSet(reviewVisualInitialStableIds);
+  const reviewVisualIdentityElements = new RuntimeVisualMap();
+  const reviewVisualInvalidStableIds = new RuntimeVisualSet();
+  const captureReviewVisualElement = (element, rawStableId = "") => {
+    if (!runtimeVisualIsInstance(RuntimeVisualElement, element)) return;
+    const stableId = RuntimeVisualString(
+      rawStableId || runtimeVisualElementGetAttribute(element, "data-pageroot-id") || "",
+    );
+    if (!runtimeVisualSetHas(reviewVisualAllowedStableIds, stableId)) return;
+    const existing = runtimeVisualMapGet(reviewVisualIdentityElements, stableId);
+    if (existing && existing !== element) {
+      runtimeVisualSetAdd(reviewVisualInvalidStableIds, stableId);
+      return;
+    }
+    if (!existing) runtimeVisualMapSet(reviewVisualIdentityElements, stableId, element);
+  };
+  const captureReviewVisualTree = (node) => {
+    if (!runtimeVisualIsInstance(RuntimeVisualElement, node)) return;
+    captureReviewVisualElement(node);
+    runtimeVisualArrayForEach(
+      runtimeVisualElementQuerySelectorAll(node, "[data-pageroot-id]"),
+      (element) => captureReviewVisualElement(element),
+    );
+  };
+  runtimeVisualArrayForEach(
+    runtimeVisualQueryElements("[data-pageroot-id]"),
+    (element) => captureReviewVisualElement(element),
+  );
   let privateInitialBindingsBootstrapped = false;
   let privateInitialBindingsClosed = false;
   const captureInitialBindings = (records = []) => {
@@ -656,24 +1092,40 @@ function reviewBootstrap(
       reviewCommentBindingRegistry.captureAll();
     }
     runtimeVisualArrayForEach(records, (record) => {
-      if (runtimeVisualMutationRecordType(record) !== "childList") return;
-      const addedNodes = runtimeVisualMutationRecordAddedNodes(record);
-      const addedNodeCount = runtimeVisualNodeListLength(addedNodes);
-      for (let nodeIndex = 0; nodeIndex < addedNodeCount; nodeIndex += 1) {
-        const addedNode = runtimeVisualNodeListItem(addedNodes, nodeIndex);
-        if (!runtimeVisualIsInstance(RuntimeVisualElement, addedNode)) continue;
-        const addedElements = [addedNode];
-        runtimeVisualArrayForEach(
-          runtimeVisualElementQuerySelectorAll(addedNode, "*"),
-          (element) => runtimeVisualArrayPush(addedElements, element),
+      const recordType = runtimeVisualMutationRecordType(record);
+      if (recordType === "attributes") {
+        captureReviewVisualElement(
+          runtimeVisualMutationRecordTarget(record),
+          runtimeVisualMutationRecordOldValue(record),
         );
-        runtimeVisualArrayForEach(addedElements, (element) => {
-          reviewCommentBindingRegistry.captureAll(element);
-        });
+        captureReviewVisualElement(runtimeVisualMutationRecordTarget(record));
+        return;
+      }
+      if (recordType !== "childList") return;
+      const nodeLists = [
+        runtimeVisualMutationRecordAddedNodes(record),
+        runtimeVisualMutationRecordRemovedNodes(record),
+      ];
+      for (let listIndex = 0; listIndex < nodeLists.length; listIndex += 1) {
+        const nodes = nodeLists[listIndex];
+        const nodeCount = runtimeVisualNodeListLength(nodes);
+        for (let nodeIndex = 0; nodeIndex < nodeCount; nodeIndex += 1) {
+          const node = runtimeVisualNodeListItem(nodes, nodeIndex);
+          if (!runtimeVisualIsInstance(RuntimeVisualElement, node)) continue;
+          captureReviewVisualTree(node);
+          const addedElements = [node];
+          runtimeVisualArrayForEach(
+            runtimeVisualElementQuerySelectorAll(node, "*"),
+            (element) => runtimeVisualArrayPush(addedElements, element),
+          );
+          runtimeVisualArrayForEach(addedElements, (element) => {
+            reviewCommentBindingRegistry.captureAll(element);
+          });
+        }
       }
     });
   };
-  const initialBindingObserver = reviewCommentInitialBindings.length
+  const initialBindingObserver = reviewCommentInitialBindings.length || reviewVisualInitialStableIds.length
     ? new RuntimeVisualMutationObserver(captureInitialBindings)
     : null;
   if (initialBindingObserver && runtimeVisualDocumentRoot) {
@@ -681,7 +1133,13 @@ function reviewBootstrap(
     runtimeVisualMutationObserverObserve(
       initialBindingObserver,
       runtimeVisualDocumentRoot,
-      { subtree: true, childList: true },
+      {
+        subtree: true,
+        childList: true,
+        attributes: true,
+        attributeOldValue: true,
+        attributeFilter: ["data-pageroot-id"],
+      },
     );
   }
   const drainInitialBindings = () => {
@@ -694,6 +1152,23 @@ function reviewBootstrap(
     reviewCommentBindingRegistry.captureDeferred();
     runtimeVisualMutationObserverDisconnect(initialBindingObserver);
     privateInitialBindingsClosed = true;
+  };
+  const reviewVisualStableElement = (rawStableId) => {
+    const stableId = RuntimeVisualString(rawStableId || "");
+    if (
+      !runtimeVisualSetHas(reviewVisualAllowedStableIds, stableId)
+      || runtimeVisualSetHas(reviewVisualInvalidStableIds, stableId)
+    ) return null;
+    const element = runtimeVisualMapGet(reviewVisualIdentityElements, stableId);
+    if (
+      !element
+      || !runtimeVisualNodeIsConnected(element)
+      || runtimeVisualElementGetAttribute(element, "data-pageroot-id") !== stableId
+    ) return null;
+    const matches = runtimeVisualQueryElements(
+      "[data-pageroot-id=\"" + stableId + "\"]",
+    );
+    return matches.length === 1 && matches[0] === element ? element : null;
   };
   const isSafePanelControl = (element) => element instanceof Element && element.matches(
     '[data-pageroot-review-panel-control="true"]',
@@ -2022,6 +2497,7 @@ function reviewBootstrap(
     document.querySelectorAll('[data-pageroot-review-marker]').forEach((element) => {
       markerSequence += 1;
       const changeId = element.getAttribute("data-pageroot-review-marker") || "";
+      if (!runtimeVisualSetHas(confirmedVisualChangeIds, changeId)) return;
       projectionFactsForElement(element, markerSequence).forEach((fact) => {
         appendProjectionEntry(element, changeId, fact);
       });
@@ -2206,6 +2682,12 @@ function reviewBootstrap(
         pathData: unionPath(renderFragments),
       }];
     });
+    if (!merged.length) {
+      overlayHoverRegions = [];
+      overlayElementsByChange = new RuntimeVisualMap();
+      setHoverChange("");
+      return;
+    }
     // One contiguous stretch of a change carries one caption and one
     // page-edge revision bar. A change may touch places far apart on the
     // page, so captions and bars follow its spatial clusters instead of one
@@ -2355,6 +2837,8 @@ function reviewBootstrap(
       const strikeRuns = [];
       const addedDots = [];
       document.querySelectorAll("[data-pageroot-review-text]").forEach((marker) => {
+        const markerChangeId = marker.getAttribute("data-pageroot-review-marker") || "";
+        if (!runtimeVisualSetHas(confirmedVisualChangeIds, markerChangeId)) return;
         const tone = marker.getAttribute("data-pageroot-review-text") || "";
         if (tone !== "added" && tone !== "removed") return;
         const fontSize = Number.parseFloat(getComputedStyle(marker).fontSize || "0");

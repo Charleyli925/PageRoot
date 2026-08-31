@@ -5,12 +5,17 @@ import type {
   ReviewTextChangeOperation,
 } from "../../lib/review-text-diff.js";
 import type { CommentItem } from "../types";
+import type {
+  ReviewVisualSourceBinding,
+  SourceEvidence,
+} from "./review-visual-model.js";
 export type ReviewFilter = "all" | "text" | "structure";
 export type ReviewChangeType = Exclude<ReviewFilter, "all">;
 export type ReviewSide = "before" | "after";
 
 export type ReviewChange = {
   id: string;
+  stableId?: string;
   label: string;
   helper: string;
   types: ReviewChangeType[];
@@ -40,6 +45,9 @@ export type ReviewDocuments = {
   outline: ReviewOutlineItem[];
   commentGroups: ReviewCommentGroup[];
   commentTargets: ReviewCommentTarget[];
+  /** Pending source candidates are private input to the frame observer. */
+  visualBinding: ReviewVisualSourceBinding;
+  visualEvidence: SourceEvidence[];
   reviewImpact?: ReviewImpact;
 };
 
@@ -63,6 +71,7 @@ export type ReviewCommentGroup = {
 export type ReviewCommentTarget = {
   key: string;
   global: boolean;
+  stableId?: string;
   selector?: string;
   sourceNodeId?: string;
 };

@@ -73,9 +73,17 @@ test("a pre-load review navigation falls back without trusting the replacement p
     await expect(afterReviewFrame.locator(
       '[data-pageroot-review-marker-types~="text"]',
     ).filter({ hasText: UPDATED_TEXT }).first()).toBeVisible();
+    await expect(beforeReviewFrame.locator(
+      "#review-navigation-chart",
+    )).toBeEmpty();
     await expect(afterReviewFrame.locator(
-      'html[data-pageroot-review-marker-types~="structure"]',
-    )).toHaveAttribute("data-pageroot-review-summary", "Script 源码调整");
+      "#review-navigation-chart",
+    )).toBeEmpty();
+    await expect(afterReviewFrame.locator(
+      '#review-navigation-chart[data-pageroot-review-confirmed="true"]',
+    )).toHaveCount(0);
+    await expect(launched.page.getByText("Script 源码调整", { exact: true }))
+      .toHaveCount(0);
     await expect(launched.page.getByText(
       "审阅画布未能安全载入，可返回 AI 修改前后重试。",
       { exact: true },
@@ -83,6 +91,15 @@ test("a pre-load review navigation falls back without trusting the replacement p
     await expect(launched.page.locator("header.workbench-header")
       .getByLabel("审阅工具", { exact: true })).toBeVisible();
     await expect(launched.page.getByRole("button", { name: "收起审阅工具" }))
+      .toHaveCount(0);
+    await afterReviewFrame.locator("html").evaluate(() => {
+      location.replace("about:blank");
+    });
+    await expect(launched.page.getByText(
+      "本轮没有已确认变化，仍可查看双页",
+      { exact: true },
+    )).toBeVisible({ timeout: 30_000 });
+    await expect(beforeReviewFrame.locator("[data-pageroot-review-confirmed=\"true\"]"))
       .toHaveCount(0);
   } finally {
     await stopPageRoot(launched.electronApp, launched.isolatedUserData);

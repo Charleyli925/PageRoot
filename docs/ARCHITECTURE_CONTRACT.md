@@ -562,15 +562,25 @@ synchronization, or equality for random/time/animation state after reopen.
 Presentation restoration is best effort and cannot widen source authority. The
 lowest-complexity safe local update or rebuild remains the required design.
 
-Review has no runtime-snapshot owner or PNG evidence path. It compares only the
-frozen before/after HTML and emits bounded text facts, outermost element-presence
-facts and, for unique valid stable-ID pairs, movement, authored attribute,
-inline-style and CSS/Script source facts. Its script-enabled frames may keep an opaque origin and
-use a frame-local memory Storage compatibility bootstrap so ordinary authored
-scripts do not abort, but that compatibility surface grants no durable or
-shared storage and produces no Review facts. CSS effects, layout, wrapping,
-computed style, animation, Canvas/SVG pixels and runtime-discovered nodes remain
-outside the Review contract. Review never serializes, compares or trusts Runtime DOM.
+Review has no runtime-snapshot owner, BrowserWindow or PNG evidence path. Its
+source layer compares the frozen before/after HTML only to discover private
+`SourceEvidence`: bounded text candidates, outermost element presence,
+movement, authored attributes/inline styles and CSS/Script source changes.
+Those facts are never user-visible changes by themselves. The two Review frames
+remain the pages the user is already viewing. Their first owned bootstrap
+captures bounded native observation capabilities before author Script and
+returns Stable-ID-bound visible text, computed presentation, image, SVG,
+Canvas 2D and runtime-generated descendant summaries through a random-
+challenge one-shot `MessagePort`. Author code cannot enumerate candidates or
+forge this private result. Parser-time source-host references are private and
+never reacquired by querying the current DOM: disconnect, ID drift, duplicate
+claim or same-ID replacement is unverified. A later iframe load clears the
+entire prior verdict generation before renegotiation. WebGL, tainted Canvas,
+live media, running animation,
+time/random/network-dependent output, hidden unsynchronized surfaces, budget
+overflow, unstable samples and stale frame generations fail closed as
+`unverified`. Runtime DOM is observation evidence only; it never enters source,
+save, Version, Candidate, Promotion, comment identity or persistence authority.
 
 Candidate assessment also compares the frozen base HTML with the identity-
 normalized Candidate HTML at the source-byte boundary. It computes Stable-ID
@@ -597,27 +607,25 @@ durable Candidate boundary.
 Prepared formal-review documents are owned by a cancellable
 `ReviewAnalysisSession` keyed to exact operation/source/comment identity. Its
 multi-entry cache is byte bounded. Parsing and annotation yield between phases,
-and stale work stops before publication. Fuzzy node pairing may compare only
-compatible tag/context buckets after exact and unique explicit identity
-matches; it cannot restore a page-wide Cartesian candidate set or change the
-existing evidence thresholds. A unique valid `data-pageroot-id` is the strongest
-pairing key and may cross source parents; duplicate/invalid IDs fail closed and
-legacy no-ID Versions retain the old matcher. A duplicated persistent value is
-globally ambiguous for the complete document pair and cannot re-enter pairing
-through exact-subtree, relocation, singleton, weighted or fuzzy evidence. Any
-element carrying `data-pageroot-id` claims persistent identity: unless the same
-valid unique ID pairs it, every fallback is forbidden and ID deletion,
-replacement or wrong migration is reported as removal plus addition even when
-markup is unchanged. Only elements genuinely lacking the persistent attribute
-may use the legacy matcher. Stable identity, exact subtree equality and own
-non-presentation compatibility have different roles: exact equality skips only
-an unchanged branch and never bridges an identified element to a different or
-missing persistent ID. The same persistent ID pairs independently of an authored
-tag-kind change, while an empty Canvas/SVG/control/container needs the same
-parent, kind and compatibility to become a candidate. Ambiguous alternatives
-remain unmatched. Stable topology distinguishes insertion from same-parent
-reorder and cross-parent movement; a common stable ID cannot degrade into
-delete plus add, and byte-identical markup cannot hide a precomputed movement.
+and stale work stops before publication. The formal path requires both source
+indexes to report complete, valid and unique `data-pageroot-id`; absent,
+partial, malformed or duplicate identity is explicitly unsupported. The same
+Stable ID is the only cross-document element identity and may survive tag,
+parent or source-order changes. Exact-subtree, title/class/id, sibling index,
+relocation, singleton, weighted and fuzzy matchers are never entered. Character
+alignment is allowed only inside a pair already proven by the same Stable ID.
+Stable topology distinguishes insertion from reorder and cross-parent movement,
+while added/removed subtrees retain the outermost-only rule.
+
+Every candidate settles to `changed`, `unchanged` or `unverified`. Only
+`changed` enters the existing `全部 / 文字 / 元素` filters, count, first-change
+navigation, character marks, element boxes and dim-mask holes. `unchanged`
+creates no change but is verified context. `unverified` creates no change or
+count and remains normally visible; inability to observe can never become
+unchanged or dimmed context. CSS/Script source changes use each Stable-ID host's
+final observation, so equal computed output stays unchanged and changed
+Canvas/SVG/runtime output uses the ordinary element presentation without a new
+top-level category or detailed auto-generated explanation.
 `added`/`removed` whole-element facts own descendant text evidence. A moved
 stable subtree compares each stable descendant against its exact before/after
 ID counterpart through the existing semantic text diff, never through flattened

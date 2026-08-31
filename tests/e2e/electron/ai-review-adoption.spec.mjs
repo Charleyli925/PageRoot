@@ -520,13 +520,62 @@ ${REVIEW_MASK_UNION_BEFORE}
       (element, text) => element.innerHTML.includes(text),
       frozenReviewComment,
     )).toBe(false);
+    const beforeReviewViewport = launched.page.locator(
+      'section[data-side="before"] [aria-label="修改前画布滚动区"]',
+    );
+    const reviewMarkerRailGeometry = async () => {
+      const [markerBox, viewportBox] = await Promise.all([
+        reviewCommentMarker.boundingBox(),
+        beforeReviewViewport.boundingBox(),
+      ]);
+      if (!markerBox || !viewportBox) return null;
+      return {
+        markerRight: markerBox.x + markerBox.width,
+        viewportRight: viewportBox.x + viewportBox.width,
+      };
+    };
+    const railBeforeHorizontalScroll = await reviewMarkerRailGeometry();
+    expect(railBeforeHorizontalScroll).not.toBeNull();
+    expect(Math.abs(
+      railBeforeHorizontalScroll.viewportRight - railBeforeHorizontalScroll.markerRight,
+    )).toBeLessThanOrEqual(4);
+    await beforeReviewViewport.evaluate((element) => {
+      element.scrollLeft = element.scrollWidth - element.clientWidth;
+    });
+    await expect.poll(async () => {
+      const current = await reviewMarkerRailGeometry();
+      return current && railBeforeHorizontalScroll
+        ? Math.abs(current.markerRight - railBeforeHorizontalScroll.markerRight)
+        : Infinity;
+    }).toBeLessThanOrEqual(1);
+    await beforeReviewFrame.locator(caseSelector("list-item"))
+      .evaluate((element) => element.scrollIntoView({ block: "center" }));
+    await expect.poll(async () => {
+      const [markerBox, viewportBox] = await Promise.all([
+        reviewCommentMarker.boundingBox(),
+        beforeReviewViewport.boundingBox(),
+      ]);
+      const scrollY = await launched.page.locator('section[data-side="before"]')
+        .evaluate((element) => getComputedStyle(element).getPropertyValue(
+          "--review-comment-scroll-y",
+        ));
+      return {
+        inside: Boolean(markerBox && viewportBox
+          && markerBox.y >= viewportBox.y
+          && markerBox.y + markerBox.height <= viewportBox.y + viewportBox.height),
+        markerBox,
+        viewportBox,
+        scrollY,
+      };
+    }).toMatchObject({ inside: true });
     await reviewCommentMarker.hover();
     const reviewCommentBubble = reviewCommentMarker.getByTestId("review-comment-bubble");
     await expect(reviewCommentBubble).toContainText(frozenReviewComment);
     await expect(reviewCommentBubble).toBeVisible();
-    const beforeReviewViewport = launched.page.locator(
-      'section[data-side="before"] [aria-label="修改前画布滚动区"]',
-    );
+    await expect(beforeReviewFrame.locator("[data-pageroot-review-comment-highlight]"))
+      .toHaveCount(1);
+    await expect(afterReviewFrame.locator("[data-pageroot-review-comment-highlight]"))
+      .toHaveCount(1);
     await expect.poll(async () => {
       const [bubbleBox, viewportBox] = await Promise.all([
         reviewCommentBubble.boundingBox(),
@@ -848,7 +897,7 @@ ${REVIEW_MASK_UNION_BEFORE}
     )).not.toHaveCount(0);
     await expect(beforeReviewFrame.locator(
       `[data-pageroot-review-region-bar="${filteredFocusChangeId}"]`,
-    )).toBeVisible();
+    ).first()).toBeVisible();
     // Re-selecting the same filter keeps the user's position; page markers
     // remain the explicit way to move to another change.
     await launched.page.getByRole("button", { name: "文字变化" }).click();
@@ -953,7 +1002,9 @@ ${REVIEW_MASK_UNION_BEFORE}
           && outer.right >= inner.right - tolerance
           && outer.bottom >= inner.bottom - tolerance
         );
-        return [...document.querySelectorAll("[data-pageroot-review-text]")].every((marker) => {
+        return [...document.querySelectorAll(
+          '[data-pageroot-review-text][data-pageroot-review-confirmed="true"]',
+        )].every((marker) => {
           const groupId = marker.getAttribute("data-pageroot-review-text-group") || "";
           const tone = marker.getAttribute("data-pageroot-review-text") === "removed"
             ? "text-removed"
@@ -1259,13 +1310,20 @@ ${REVIEW_MASK_UNION_BEFORE}
     await expect(afterReviewFrame.locator(
       '[data-review-anchor-only] [data-pageroot-review-text]',
     )).toHaveCount(0);
-    const anchorOnlyChangeId = await afterReviewFrame.locator(
+    const anchorOnlySectionChangeId = await afterReviewFrame.locator(
       "[data-review-anchor-only-section]",
     ).getAttribute("data-pageroot-review-id");
-    expect(anchorOnlyChangeId).toBeTruthy();
+    expect(anchorOnlySectionChangeId).toBeTruthy();
     await expect(afterReviewFrame.locator(
       "[data-review-anchor-only]",
-    )).toHaveAttribute("data-pageroot-review-anchor-change", anchorOnlyChangeId);
+    )).toHaveAttribute("data-pageroot-review-anchor-change", anchorOnlySectionChangeId);
+    const anchorOnlyChangeId = await beforeReviewFrame.locator(
+      '[data-review-anchor-only] [data-pageroot-review-text="removed"]',
+    ).getAttribute("data-pageroot-review-marker");
+    expect(anchorOnlyChangeId).toBeTruthy();
+    await expect(beforeReviewFrame.locator(
+      '[data-review-anchor-only] [data-pageroot-review-text="removed"]',
+    )).toHaveAttribute("data-pageroot-review-confirmed", "true");
     const anchorOffsets = await afterReviewFrame.locator(
       "[data-review-anchor-only]",
     ).evaluate((anchor) => String(
@@ -1725,9 +1783,9 @@ ${REVIEW_MASK_UNION_BEFORE}
         .toHaveAttribute("data-pageroot-review-structure", "style");
       await expect(frame.locator("[data-review-layout-only]"))
         .toHaveAttribute("data-pageroot-review-projection-facts", /"structureChange":"style"/u);
-      await expect(frame.locator(
-        '[data-review-metrics] [data-pageroot-review-marker]',
-      )).toHaveCount(0);
+      await expect.poll(() => frame.locator(
+        '[data-review-metrics] [data-pageroot-review-marker][data-pageroot-review-confirmed="true"]',
+      ).count()).toBeGreaterThan(0);
       await expect(frame.locator(
         '[data-review-mask-stage] [data-pageroot-review-structure="style"]',
       )).toHaveCount(2);
@@ -2601,7 +2659,7 @@ test("a committed version that the desktop cannot activate stays visibly blocked
   }
 });
 
-test("stable-ID review reports movement, source attributes, styles, and author source", {
+test("stable-ID review gates movement, attributes and styles through visible output", {
   tag: ["@gate-smoke", "@smoke-review"],
 }, async () => {
   const fixture = createSourceFixture("stable-id-review.html", (source) => source.replace(
@@ -2724,9 +2782,7 @@ test("stable-ID review reports movement, source attributes, styles, and author s
         "attribute",
         "style",
       ]));
-      await expect.poll(() => structureKinds(frame.locator("html"))).toEqual(
-        expect.arrayContaining(["css-source", "script-source"]),
-      );
+      await expect.poll(() => structureKinds(frame.locator("html"))).toEqual([]);
       const falsePresenceFacts = await card.evaluate((element) => (
         JSON.parse(element.getAttribute("data-pageroot-review-projection-facts") || "[]")
           .filter((fact) => fact.structureChange === "added" || fact.structureChange === "removed")
@@ -2768,6 +2824,14 @@ test("stable-ID review reports movement, source attributes, styles, and author s
     await expect(addedScript).toHaveAttribute("data-pageroot-id", /^pr1_[a-f0-9]{32}$/u);
     expect(await addedCss.getAttribute("data-pageroot-id"))
       .not.toBe(await addedScript.getAttribute("data-pageroot-id"));
+    for (const sourceElement of [addedCss, addedScript]) {
+      const sourceChangeId = await sourceElement.getAttribute("data-pageroot-review-marker");
+      if (sourceChangeId) {
+        await expect(afterFrame.locator(
+          `[data-pageroot-review-overlay-box="${sourceChangeId}"]`,
+        )).toHaveCount(0);
+      }
+    }
     await expect(beforeFrame.locator(
       '[data-stable-review-card] [data-pageroot-review-text="removed"], [data-stable-review-card][data-pageroot-review-text="removed"]',
     ).first()).toBeAttached();

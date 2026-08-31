@@ -2,6 +2,32 @@
 
 目标不是增加测试数量，而是在尽量短的反馈时间内发现真实缺陷。所有活动门禁都必须无人值守：不等待真人点击、输入、观察、判断或把任务转交给外部模型。测试物料可以由确定性生成器产生，但判断标准必须由源码字节、Hash、状态机、DOM/几何或明确协议字段自动给出。
 
+## Review visual verdict matrix
+
+`tests/review-visual-model.test.mjs` covers the source identity gate and pure
+verdict reducer: incomplete/duplicate identity is unsupported; same-ID source
+candidates are non-zero; stale, one-sided or unstable observations are
+unverified; equal summaries are unchanged; only a matching changed pair
+activates a change. `native-dom-review-visual-observation.spec.mjs` exercises
+the real pre-author bootstrap and private port with position/class no-ops,
+computed presentation, text, runtime DOM, SVG, Canvas 2D, WebGL, running
+animation, live media, pixel budget and a genuinely tainted Canvas. Its pending
+projection case proves that zero verdicts create no dim layer and a trusted
+verdict activates the existing character marks and element projection. A
+same-ID runtime replacement remains unverified rather than reacquiring the
+forged node; dynamic pollution covers common, added and removed candidates.
+
+The AI Review Electron flow owns the host integration oracle: confirmed changes
+alone enter filters/navigation, frame reload and authored post-verdict
+navigation invalidate the old generation,
+the Before comment marker remains on the pane-right track during horizontal
+HTML scrolling, and hover/focus highlights the same Stable ID in both frames.
+Real-page fixtures retain identical, scroll/position-only,
+equal-computed-style, text/add/remove/image/style/SVG/Canvas/runtime-DOM/
+visibility cases, plus random/time, side failure and hidden-tab replacement.
+Every matrix row asserts a non-zero candidate so unsupported discovery cannot
+turn into a zero-work green result.
+
 ## 本地反馈与三道交付边界
 
 | 门禁 | 使用时机 | 覆盖 | 目标 |
@@ -225,22 +251,16 @@ Workbench 只确认已提交 loading surface、传入窄 port 并消费快照。
   Electron AI 闭环还必须从真实评论附件上传开始，验证 Request 内冻结文件的
   实际字节、manifest Hash 与删除 Draft 原件后的可读性，不得只断言 JSON 元数据。
   `ReviewAnalysisSession` 的 Node oracle 另证明确切 key 合并、异步让步、运行中
-  取消和按字节 LRU。修改审阅配对/分段实现时，还要在真实 Chromium DOM 中用
-  大型多 section/深层卡片 HTML 记录总耗时及各 `pageroot:review-analysis:*`
-  phase，确认 fuzzy pairing 只在兼容 bucket 内运行，并以正式 Electron 闭环
-  证明变化数量和类型没有因性能优化改变；可复现实测入口是
-  `npm run benchmark:review-analysis`，该诊断不增加产品内提示。语义配对
-  Node oracle 必须分别覆盖唯一空 Canvas/SVG/表单/容器的兼容配对、重复
-  class-only 空节点保持 unmatched、深层子变化不拆稳定祖先，以及第 25 个
-  trusted projection fact 明确失败；解析端超限仍必须 fail-closed。
-  Stable-ID Review 的 Node oracle 必须区分普通插入与同父重排、识别跨父移动，
-  并守护 `moved/attribute/style/css-source/script-source` 始终归入 `structure`；
-  重复/非法 ID 不建立精确身份，无 ID 历史输入继续走旧 matcher。Review 的负向
-  边界由 Node 与 Electron 共同锁定：`layout`、computed style、runtime 与 pixel
-  facts 在 projection 边界 fail-closed；preload、IPC、package allowlist 与 artifact
-  verifier 均不存在 Review capture owner。真实 Electron 证明稳定 ID 的文字、
-  元素增删移动、属性/内联样式和 CSS/Script 源码变化可审阅，同时纯换行、
-  Canvas/SVG Runtime 绘制、评论、Tab 与采纳合同不回归。
+  取消和按字节 LRU。正式现代 Review 不再有 fuzzy/legacy pairing 性能路径；
+  Node oracle 必须证明两侧完整、有效、唯一 Stable ID 的硬门禁，区分普通插入、
+  同父重排与跨父移动，并守护源码只产生候选。重复/非法/缺失 ID
+  明确 unsupported，不运行旧 matcher。纯函数 oracle 覆盖 `changed / unchanged /
+  unverified`、source Hash、Session、generation 与单侧 added/removed 证据；真实
+  Chromium 覆盖本文开头的 Review visual verdict matrix，并证明 pending 不激活
+  字符/元素投影。Electron 闭环验证只有可见变化进入计数和导航，
+  CSS/Script 源码不作为用户变化显示，同时评论固定轨道、Tab、采纳与导航
+  降级合同不回归。preload、IPC、package allowlist 与 artifact verifier 仍不存在
+  Review capture owner。
 - Electron E2E 夹具与场景归属：`tests/e2e/electron/helpers/pageroot-app-fixture.mjs` 是兼容 re-export。能力实现分别在 `electron-app-launch.mjs`、`electron-project-fixture.mjs`、`electron-project-ready.mjs`、`electron-comment-driver.mjs`、`electron-legacy-project-fixture.mjs` 与 `electron-safe-cleanup.mjs`。它们只拥有独立 userData/workspace/source、隐藏窗口启动、Bridge 路径、close-first
   cleanup、诊断输出和已加载 frame；不包含产品断言、整条用户流程或自动重试。
   启动或 hydration 未就绪时，fixture 必须记录主 frame、Workbench/
