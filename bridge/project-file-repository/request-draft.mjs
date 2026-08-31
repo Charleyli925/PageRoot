@@ -24,11 +24,14 @@ import {
 export const FROZEN_REQUEST_RULES = `# PageRoot AI Request Rules
 
 - Read the frozen files in input-manifest.json readOrder before editing.
-- Treat the frozen HTML, project rules, annotations and change request as read-only.
+- Treat the frozen HTML, project rules, annotations, comment attachments and change request as read-only.
+- For every instruction, follow its attachmentRefs into requirements.attachments and read the matching attachment's requestRelativePath under the Request root. Never read a Draft attachment or an external original path.
 - Preserve content outside the explicitly frozen targets.
 - Write exactly one complete HTML document to the output path stated in PROMPT.md.
 - A valid output remains a Candidate until the user explicitly adopts it.
 `;
+
+export const REQUEST_FREEZE_RECOVERY_SCHEMA_VERSION = "1.0.0";
 
 export function requestInputFileRecord(relativePath, role, mediaType, buffer) {
   return {
@@ -92,6 +95,41 @@ export function requestRootPath(paths, requestId) {
     throw new ProjectFileRepositoryError("INVALID_REQUEST_ID", "requestId is invalid.");
   }
   return path.join(paths.requestsRoot, id);
+}
+
+export function requestFreezeStagingRootPath(paths, requestId) {
+  const id = String(requestId || "");
+  if (!SAFE_REQUEST_ID.test(id)) {
+    throw new ProjectFileRepositoryError("INVALID_REQUEST_ID", "requestId is invalid.");
+  }
+  const root = path.join(paths.recoveryRoot, "request-freeze");
+  const staging = path.join(root, id);
+  if (!pathInside(paths.recoveryRoot, staging)) {
+    throw new ProjectFileRepositoryError(
+      "PATH_ESCAPES_PROJECT",
+      "Request freeze staging must stay inside recovery/.",
+    );
+  }
+  return staging;
+}
+
+export function requestFreezeMarkerPath(paths, requestId) {
+  const id = String(requestId || "");
+  if (!SAFE_REQUEST_ID.test(id)) {
+    throw new ProjectFileRepositoryError("INVALID_REQUEST_ID", "requestId is invalid.");
+  }
+  const marker = path.join(
+    paths.recoveryRoot,
+    "request-freeze",
+    `${id}.json`,
+  );
+  if (!pathInside(paths.recoveryRoot, marker)) {
+    throw new ProjectFileRepositoryError(
+      "PATH_ESCAPES_PROJECT",
+      "Request freeze recovery marker must stay inside recovery/.",
+    );
+  }
+  return marker;
 }
 
 export function cancellationAuthorityPath(paths, requestId, attemptId) {

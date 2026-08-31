@@ -8,6 +8,7 @@ import type { ProjectContext, ProjectSession } from "./project-session.js";
 import type { ProjectWorkflow } from "./project-workflow.js";
 import type { RunSession } from "./run-session.js";
 import type { VersionSession } from "./version-session.js";
+import type { CandidateAssessment } from "../domain/run-lifecycle.js";
 
 export type VersionWorkflowOutcome<T = Record<string, unknown>> =
   | Readonly<{ status: "succeeded"; value: T }>
@@ -47,6 +48,7 @@ export type VersionReviewCandidate = Readonly<{
   baseSnapshotSha256: string;
   content: string;
   sha256: string;
+  candidateAssessment?: CandidateAssessment;
 }>;
 
 export type VersionReviewLease = Readonly<{

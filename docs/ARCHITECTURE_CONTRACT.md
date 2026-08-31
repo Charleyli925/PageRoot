@@ -90,8 +90,9 @@ The renderer's main workspace facts are partitioned as follows:
   lock, and operation locks. ACP events remain bounded presentation facts and
   never become completion authority;
 - `RunWorkflow`: pre-Request Agent use-time check, Request freeze/persisted-boundary
-  verification, safely fenced same-Request Agent start/retry, unknown-POST authority
-  reconciliation, tracked-run polling, stop-before-durable-cancel ordering,
+  verification, final-saved-HTML text-locator preflight, safely fenced same-Request
+  Agent start/retry, unknown-POST authority reconciliation, tracked-run polling,
+  stop-before-durable-cancel ordering,
   conflict commands and confirmed clipboard fallback. It publishes through
   `RunSession` and never creates a second run store;
 - Bridge `AgentRuntimeCoordinator`: ephemeral provider/runtime/security-profile/
@@ -116,7 +117,8 @@ The renderer's main workspace facts are partitioned as follows:
   the installable shipped ACP entries. The packaged application contains no
   private Codex runtime or native Codex package;
 - Bridge Agent Host/Policy Ports: `bridge/agent/policies/` owns the execution
-  policy and freezes all readable files, output/completion paths,
+  policy and freezes all readable files, including comment-attachment bytes,
+  output/completion paths,
   runtime authority and finalizer authority. `bridge/agent/hosts/` owns the
   single-output Execution surface, including cancellation fencing, completion proof and managed terminal
   cleanup. Provider/runtime code may invoke these ports but cannot choose their
@@ -388,6 +390,24 @@ directory. The project Finder entry opens the validated project root; the
 Version Finder entry opens the validated visible Working Copy rather than the
 hidden immutable snapshot.
 
+Comment attachment bytes cross the Draft-to-AI boundary only during
+`ProjectFileRepository.#prepareRequest()`. The repository validates every
+comment/attachment identity, project-relative path, regular-file status, size
+and SHA-256 before creating any Request-owned attachment; it then copies and
+re-reads each byte into `input/attachments/<commentId>/`. The complete frozen
+Request bundle, including those copies, is first assembled under
+`.pageroot/recovery/request-freeze/<requestId>/`. A verified recovery marker is
+written only after every bundle file and manifest digest has been checked; the
+staging directory is then atomically renamed to
+`.pageroot/requests/<requestId>/` before Runtime authority is published. A
+restart verifies and resumes a ready marker, discards only markerless
+unpublished staging, and fails closed if staging and a published directory both
+exist. The annotations, `change-request.json`, `PROMPT.md` and
+`input-manifest.json` projections must refer to the same attachment IDs and
+Request-relative paths. A failed attachment or bundle validation stops before
+public `request.json` and Runtime authority are published, and the copy is
+never a hard link to the mutable Draft.
+
 Edit and preview surfaces acknowledge the exact Canvas authority generation and
 rendered source Hash. Acknowledgements are disposable and generation-fenced;
 they never become source authority. The safe-save projection requires both the
@@ -521,6 +541,28 @@ scripts do not abort, but that compatibility surface grants no durable or
 shared storage and produces no Review facts. CSS effects, layout, wrapping,
 computed style, animation, Canvas/SVG pixels and runtime-discovered nodes remain
 outside the Review contract. Review never serializes, compares or trusts Runtime DOM.
+
+Candidate assessment also compares the frozen base HTML with the identity-
+normalized Candidate HTML at the source-byte boundary. It computes Stable-ID
+signatures in linear passes using parent ID and previous/next retained sibling
+IDs; absolute sibling indexes are not evidence, so inserting a sibling does not
+relabel every following element. Its `allowedScopeIds` closure contains each
+frozen target root and all of its source descendants, plus descendants and
+newly materialized elements that remain under a retained target in the
+Candidate. A page-level `body`/`module` target covers the whole page and
+overlapping roots are unioned. Deletions inside the frozen closure remain in
+scope; an element moved out of a retained target is evaluated at its Candidate
+location. The durable impact projection stores only
+`changedElementCount`, `requestedTargetCount`, `outsideTargetCount`, at most 100
+IDs in each changed/outside sample, and `truncated`; the complete HTML remains
+the source of truth for on-demand Review analysis. These facts are a Review
+warning and navigation entry only: comment targets remain context, never a
+subtree-exact source-write or Candidate-acceptance boundary. Runtime DOM,
+Script-generated nodes and screenshots cannot contribute to the assessment.
+Historical Candidate assessments with the old unbounded arrays remain readable
+through the compatibility decoder; new records cannot mix the legacy and
+bounded forms, and malformed partial impact evidence is rejected at the
+durable Candidate boundary.
 
 Prepared formal-review documents are owned by a cancellable
 `ReviewAnalysisSession` keyed to exact operation/source/comment identity. Its

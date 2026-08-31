@@ -25,6 +25,85 @@
   "allOf": [
     {
       "if": {
+        "anyOf": [
+          { "required": ["changedStableElementIds"] },
+          { "required": ["requestedTargetElementIds"] },
+          { "required": ["outsideRequestedTargetElementIds"] }
+        ]
+      },
+      "then": {
+        "required": [
+          "changedStableElementIds",
+          "requestedTargetElementIds",
+          "outsideRequestedTargetElementIds",
+          "requestedTargetCount"
+        ],
+        "not": {
+          "anyOf": [
+            { "required": ["changedElementCount"] },
+            { "required": ["outsideTargetCount"] },
+            { "required": ["changedElementIdSample"] },
+            { "required": ["outsideTargetElementIdSample"] },
+            { "required": ["truncated"] }
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "required": ["requestedTargetCount"]
+      },
+      "then": {
+        "anyOf": [
+          {
+            "required": [
+              "changedStableElementIds",
+              "requestedTargetElementIds",
+              "outsideRequestedTargetElementIds"
+            ]
+          },
+          {
+            "required": [
+              "changedElementCount",
+              "outsideTargetCount",
+              "changedElementIdSample",
+              "outsideTargetElementIdSample",
+              "truncated"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "if": {
+        "anyOf": [
+          { "required": ["changedElementCount"] },
+          { "required": ["outsideTargetCount"] },
+          { "required": ["changedElementIdSample"] },
+          { "required": ["outsideTargetElementIdSample"] },
+          { "required": ["truncated"] }
+        ]
+      },
+      "then": {
+        "required": [
+          "changedElementCount",
+          "requestedTargetCount",
+          "outsideTargetCount",
+          "changedElementIdSample",
+          "outsideTargetElementIdSample",
+          "truncated"
+        ],
+        "not": {
+          "anyOf": [
+            { "required": ["changedStableElementIds"] },
+            { "required": ["requestedTargetElementIds"] },
+            { "required": ["outsideRequestedTargetElementIds"] }
+          ]
+        }
+      }
+    },
+    {
+      "if": {
         "type": "object",
         "required": ["executable"]
       },
@@ -147,6 +226,48 @@
         "baseParseErrorCount": { "type": "integer", "minimum": 0 },
         "outputParseErrorCount": { "type": "integer", "minimum": 0 }
       }
+    },
+    "changedStableElementIds": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "type": "string", "pattern": "^pr1_[0-9a-f]{12}4[0-9a-f]{3}[89ab][0-9a-f]{15}$" }
+    },
+    "requestedTargetElementIds": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "type": "string", "pattern": "^pr1_[0-9a-f]{12}4[0-9a-f]{3}[89ab][0-9a-f]{15}$" }
+    },
+    "outsideRequestedTargetElementIds": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "type": "string", "pattern": "^pr1_[0-9a-f]{12}4[0-9a-f]{3}[89ab][0-9a-f]{15}$" }
+    },
+    "changedElementCount": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "outsideTargetCount": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "changedElementIdSample": {
+      "type": "array",
+      "uniqueItems": true,
+      "maxItems": 100,
+      "items": { "type": "string", "pattern": "^pr1_[0-9a-f]{12}4[0-9a-f]{3}[89ab][0-9a-f]{15}$" }
+    },
+    "outsideTargetElementIdSample": {
+      "type": "array",
+      "uniqueItems": true,
+      "maxItems": 100,
+      "items": { "type": "string", "pattern": "^pr1_[0-9a-f]{12}4[0-9a-f]{3}[89ab][0-9a-f]{15}$" }
+    },
+    "truncated": {
+      "type": "boolean"
+    },
+    "requestedTargetCount": {
+      "type": "integer",
+      "minimum": 0
     },
     "executable": {
       "deprecated": true,

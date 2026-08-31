@@ -92,16 +92,30 @@ step summary 里。
   仅删除 staged 附件，以及 unknown Draft POST 只通过 authority query 收敛而不重复
   mutation。Workbench 只保留 File、Object URL、焦点和 Toast 映射；Browser memory
   附件不得调用 Bridge。
+- `ProjectFileRepository` Request freeze：Node 集成覆盖附件-only 评论、多评论多附件的
+  独立字节副本、annotations/requirements/instruction/manifest 的 attachmentId 对齐、
+  Draft 原件删除后的继续读取，以及缺失、篡改、长度超限、目录、软链接和路径逃逸在
+  `request.json`/Runtime authority 发布前失败。Agent Policy 必须按 manifest 读取真实附件
+  字节，而不是只接受附件元数据。Request 级 failpoint 矩阵还要覆盖附件写完、完整
+  bundle/marker 就绪、staging 目录发布、Runtime 写入和最终准备；前置失败不得留下
+  public Request，模拟进程中断后 `recoverProject` 必须校验 marker、逐文件 Hash 并恢复
+  Runtime，而不是重复复制附件或产生孤儿目录。
 - `RunWorkflow`：fake Bridge、Scheduler、Canvas/Handoff/Hash Port 和既有 Run/Project/
-  Document/Comment Session 证明 source freeze 与 persisted SHA/revision 边界、一次
-  Request、unknown POST 只读 authority reconciliation、A/B 并行 polling、dispose
+  Document/Comment Session 证明 source freeze 与 persisted SHA/revision 边界、最终
+  保存 HTML 上 Stable-ID/UTF-16 textLocator 的唯一重定位与 stale/ambiguous 阻断、
+  一次 Request、unknown POST 只读 authority reconciliation、A/B 并行 polling、dispose
   late-callback fence、取消/冲突 scoped identity，以及 clipboard failure 后只重试复制。
   Workbench 只保留 intent 和 Outcome/Event 的 Toast 映射，不持有 poll timer 或
   run mutation I/O。
 - `VersionWorkflow`：fake Bridge、Project/Document/Version/Run Session 与 Canvas/Hash
   Port 证明 Review candidate 只读且不可变、明确 activation 的完整 identity/hash/time
-  校验、Project/Document/Version 同步 publication、background result 不抢占当前 Canvas，
-  以及 history/current navigation 的完整 Document + Version rollback 与 byte oracle。
+  校验、Project/Document/Version 同步 publication、Candidate 的 Stable-ID 目标范围评估
+  与旧 assessment 兼容、background result 不抢占当前 Canvas，以及 history/current
+  navigation 的完整 Document + Version rollback 与 byte oracle。Candidate impact Node
+  oracle 必须覆盖目标后代、目标内增删、兄弟前插、整页评论、重叠根和接近 HTML 上限的
+  O(N) 计算；持久化样例最多 100 个且 `truncated` 与计数一致。Electron AI Review
+  场景还必须看到评论目标数、实际修改元素数、目标外修改数和进入全部变化的入口；
+  该警告不得阻止 Candidate 继续审阅或采纳。
   Workbench 只保留 review filters/layout/lease、动画和 Outcome/Toast 映射；architecture
   gate 将其直接 Bridge 调用锁定为 0。
 - `WorkspaceController`：runtime factory 是生产组合的唯一入口；它构造唯一的 Bridge
@@ -208,6 +222,8 @@ Workbench 只确认已提交 loading surface、传入窄 port 并消费快照。
   HTML 进入 `attention` 并强制审阅、脚本/inline handler 等作者内容变化
   照常建版且不生成检测字段或提示，以及身份/Hash/路径/协议失败与
   no-change 可从 workspace 恢复。
+  Electron AI 闭环还必须从真实评论附件上传开始，验证 Request 内冻结文件的
+  实际字节、manifest Hash 与删除 Draft 原件后的可读性，不得只断言 JSON 元数据。
   `ReviewAnalysisSession` 的 Node oracle 另证明确切 key 合并、异步让步、运行中
   取消和按字节 LRU。修改审阅配对/分段实现时，还要在真实 Chromium DOM 中用
   大型多 section/深层卡片 HTML 记录总耗时及各 `pageroot:review-analysis:*`

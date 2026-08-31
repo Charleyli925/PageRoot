@@ -4,6 +4,12 @@ import {
   parseHtmlSource,
   visitElements,
 } from "./html-source-parser.mjs";
+import {
+  inspectSourceElementIdentity,
+} from "./project-file-repository/working-copy.mjs";
+import {
+  isValidPagerootElementId,
+} from "../shared/pageroot-element-identity.mjs";
 
 export const CANDIDATE_ASSESSMENT_SCHEMA_VERSION = "1.0.0";
 
@@ -29,6 +35,20 @@ const ASSET_ATTRIBUTES = new Set([
 ]);
 const MAX_CONTINUITY_TEXT_CODEPOINTS = 100_000;
 const TEXT_SHINGLE_SIZE = 4;
+export const IMPACT_SAMPLE_LIMIT = 100;
+const LEGACY_IMPACT_ARRAY_FIELDS = Object.freeze([
+  "changedStableElementIds",
+  "requestedTargetElementIds",
+  "outsideRequestedTargetElementIds",
+]);
+const BOUNDED_IMPACT_FIELDS = Object.freeze([
+  "changedElementCount",
+  "requestedTargetCount",
+  "outsideTargetCount",
+  "changedElementIdSample",
+  "outsideTargetElementIdSample",
+  "truncated",
+]);
 
 function normalizedVisibleText(value) {
   return String(value || "")
@@ -225,6 +245,245 @@ function continuityAssessment(baseHtml, outputHtml) {
   };
 }
 
+function authoredChildren(element) {
+  return element?.nodeName === "template" && element.content
+    ? element.content.childNodes ?? []
+    : element?.childNodes ?? [];
+}
+
+function normalizedOwnSource(value) {
+  return String(value || "").replace(/\s+/gu, " ").trim();
+}
+
+function startTagWithoutStableId(source, element) {
+  const ranges = (element.identityAttributes || [])
+    .map((attribute) => attribute.range)
+    .filter((range) => (
+      Number.isInteger(range?.startOffset)
+      && Number.isInteger(range?.endOffset)
+      && range.startOffset >= element.startOffset
+      && range.endOffset <= element.endOffset
+      && range.endOffset > range.startOffset
+    ))
+    .sort((left, right) => left.startOffset - right.startOffset);
+  if (ranges.length === 0) {
+    return source.slice(element.startOffset, element.endOffset);
+  }
+  const parts = [];
+  let cursor = element.startOffset;
+  for (const range of ranges) {
+    if (range.startOffset < cursor) continue;
+    parts.push(source.slice(cursor, range.startOffset));
+    cursor = range.endOffset;
+  }
+  parts.push(source.slice(cursor, element.endOffset));
+  return parts.join("");
+}
+
+export function isPageTargetReference(value) {
+  return String(value?.selector || "").trim().toLocaleLowerCase("und") === "body"
+    && String(value?.level || "").trim().toLocaleLowerCase("und") === "module";
+}
+
+function stableElementSnapshot(source) {
+  let inspection;
+  try {
+    inspection = inspectSourceElementIdentity(source);
+  } catch {
+    return null;
+  }
+  // Candidate identity validation owns malformed/duplicate identity errors.
+  // Assessment remains conservative if it is called directly with such input.
+  if (!inspection.valid) return null;
+  const parsed = parseHtmlSource(source);
+  const nodeByStartOffset = new Map(
+    parsed.elements
+      .filter((token) => Number.isInteger(token.start))
+      .map((token) => [token.start, token.node]),
+  );
+  const elements = [];
+  const byId = new Map();
+  const siblingGroups = new Map();
+  const sourceElementIds = inspection.elements.map((element) => (
+    isValidPagerootElementId(element.pagerootId) ? element.pagerootId : null
+  ));
+  const sourceParentElementIndices = inspection.elements.map(
+    (element) => element.parentElementIndex,
+  );
+  for (const [elementIndex, element] of inspection.elements.entries()) {
+    const id = element.pagerootId;
+    if (!isValidPagerootElementId(id)) continue;
+    if (byId.has(id)) return null;
+    const directText = authoredChildren(nodeByStartOffset.get(element.startOffset))
+      .filter((child) => child?.nodeName === "#text")
+      .map((child) => child.value ?? "")
+      .join("");
+    const parent = Number.isInteger(element.parentElementIndex)
+      ? inspection.elements[element.parentElementIndex]
+      : null;
+    const item = {
+      id,
+      sourceElementIndex: elementIndex,
+      parentElementIndex: element.parentElementIndex,
+      parentId: isValidPagerootElementId(parent?.pagerootId)
+        ? parent.pagerootId
+        : null,
+      namespaceURI: String(element.node?.namespaceURI || ""),
+      tagName: String(element.tagName || "").toLowerCase(),
+      startTag: normalizedOwnSource(startTagWithoutStableId(source, element)),
+      endTag: element.explicitEndTag
+        ? normalizedOwnSource(source.slice(element.contentEndOffset, element.sourceEndOffset))
+        : "",
+      directText: normalizedOwnSource(directText),
+    };
+    elements.push(item);
+    byId.set(id, item);
+    const groupKey = Number.isInteger(element.parentElementIndex)
+      ? element.parentElementIndex
+      : "root";
+    const group = siblingGroups.get(groupKey) ?? [];
+    group.push(item);
+    siblingGroups.set(groupKey, group);
+  }
+  return {
+    elements,
+    byId,
+    siblingGroups,
+    sourceElementIds,
+    sourceParentElementIndices,
+  };
+}
+
+function normalizedRequestedTargetIds(values) {
+  return [...new Set(
+    (Array.isArray(values) ? values : [])
+      .filter((value) => isValidPagerootElementId(value)),
+  )];
+}
+
+function topologySignatures(snapshot, retainedIds) {
+  const previousRetainedSiblingId = new Map();
+  const nextRetainedSiblingId = new Map();
+  for (const siblings of snapshot.siblingGroups.values()) {
+    let previous = null;
+    for (const sibling of siblings) {
+      previousRetainedSiblingId.set(sibling.id, previous);
+      if (retainedIds.has(sibling.id)) previous = sibling.id;
+    }
+    let next = null;
+    for (let index = siblings.length - 1; index >= 0; index -= 1) {
+      const sibling = siblings[index];
+      nextRetainedSiblingId.set(sibling.id, next);
+      if (retainedIds.has(sibling.id)) next = sibling.id;
+    }
+  }
+  return new Map(snapshot.elements.map((element) => [
+    element.id,
+    JSON.stringify({
+      namespaceURI: element.namespaceURI,
+      tagName: element.tagName,
+      startTag: element.startTag,
+      endTag: element.endTag,
+      parentId: element.parentId,
+      previousRetainedSiblingId: previousRetainedSiblingId.get(element.id) || null,
+      nextRetainedSiblingId: nextRetainedSiblingId.get(element.id) || null,
+      directText: element.directText,
+    }),
+  ]));
+}
+
+function scopeIds(snapshot, roots) {
+  const scopedBySourceIndex = new Map();
+  const result = new Set();
+  for (let sourceIndex = 0; sourceIndex < snapshot.sourceElementIds.length; sourceIndex += 1) {
+    const id = snapshot.sourceElementIds[sourceIndex];
+    const parentIndex = snapshot.sourceParentElementIndices[sourceIndex];
+    const parentScoped = Number.isInteger(parentIndex)
+      && scopedBySourceIndex.get(parentIndex) === true;
+    const scoped = (id !== null && roots.has(id)) || parentScoped;
+    scopedBySourceIndex.set(sourceIndex, scoped);
+    if (scoped && id !== null) result.add(id);
+  }
+  return result;
+}
+
+function allowedScopeIds(base, output, requested, pageTarget) {
+  if (pageTarget) {
+    return {
+      base: new Set(base.byId.keys()),
+      output: new Set(output.byId.keys()),
+    };
+  }
+  const retainedRoots = new Set(
+    [...requested].filter((id) => base.byId.has(id) && output.byId.has(id)),
+  );
+  return {
+    base: scopeIds(base, requested),
+    output: scopeIds(output, retainedRoots),
+  };
+}
+
+function boundedImpact(changed, outside, requestedTargetCount) {
+  return {
+    changedElementCount: changed.length,
+    requestedTargetCount,
+    outsideTargetCount: outside.length,
+    changedElementIdSample: changed.slice(0, IMPACT_SAMPLE_LIMIT),
+    outsideTargetElementIdSample: outside.slice(0, IMPACT_SAMPLE_LIMIT),
+    truncated: changed.length > IMPACT_SAMPLE_LIMIT
+      || outside.length > IMPACT_SAMPLE_LIMIT,
+  };
+}
+
+function candidateImpact(
+  baseHtml,
+  outputHtml,
+  requestedTargetElementIds,
+  requestedTargetCount,
+  requestedTargetIsPage,
+) {
+  const requested = normalizedRequestedTargetIds(requestedTargetElementIds);
+  const base = stableElementSnapshot(baseHtml);
+  const output = stableElementSnapshot(outputHtml);
+  const changed = base && output
+    ? (() => {
+      const retained = new Set(
+        [...base.byId.keys()].filter((id) => output.byId.has(id)),
+      );
+      const baseSignatures = topologySignatures(base, retained);
+      const outputSignatures = topologySignatures(output, retained);
+      const changed = [];
+      const seen = new Set();
+      for (const element of base.elements) {
+        if (baseSignatures.get(element.id) === outputSignatures.get(element.id)) continue;
+        changed.push(element.id);
+        seen.add(element.id);
+      }
+      for (const element of output.elements) {
+        if (seen.has(element.id)) continue;
+        if (baseSignatures.get(element.id) === outputSignatures.get(element.id)) continue;
+        changed.push(element.id);
+      }
+      return changed;
+    })()
+    : [];
+  const count = Number.isSafeInteger(requestedTargetCount)
+    && requestedTargetCount >= 0
+    ? requestedTargetCount
+    : requested.length;
+  if (!base || !output) return boundedImpact([], [], count);
+  const scopes = allowedScopeIds(
+    base,
+    output,
+    new Set(requested),
+    requestedTargetIsPage === true,
+  );
+  const outside = changed.filter((id) => output.byId.has(id)
+    ? !scopes.output.has(id)
+    : !scopes.base.has(id));
+  return boundedImpact(changed, outside, count);
+}
+
 export function candidateAssessmentDecision({
   completeDocument,
   bodyHasContent,
@@ -251,7 +510,14 @@ export function candidateAssessmentDecision({
   return { status: "ready", issueCodes: [] };
 }
 
-export function assessHtmlCandidate({ baseHtml, outputHtml }) {
+export function assessHtmlCandidate({
+  baseHtml,
+  outputHtml,
+  requestedTargetElementIds = [],
+  requestedTargetCount = null,
+  requestedTargetIsPage = false,
+  includeImpact = true,
+}) {
   const completeDocument = hasCompleteDocumentStructure(outputHtml);
   const continuity = continuityAssessment(baseHtml, outputHtml);
   const bodyHasContent = Boolean(
@@ -264,7 +530,7 @@ export function assessHtmlCandidate({ baseHtml, outputHtml }) {
     continuityStatus: continuity.status,
   });
 
-  return {
+  const assessment = {
     schemaVersion: CANDIDATE_ASSESSMENT_SCHEMA_VERSION,
     ...decision,
     health: {
@@ -273,4 +539,22 @@ export function assessHtmlCandidate({ baseHtml, outputHtml }) {
     },
     continuity,
   };
+  if (includeImpact) {
+    Object.assign(
+      assessment,
+      candidateImpact(
+        baseHtml,
+        outputHtml,
+        requestedTargetElementIds,
+        requestedTargetCount,
+        requestedTargetIsPage,
+      ),
+    );
+  }
+  return assessment;
 }
+
+export {
+  BOUNDED_IMPACT_FIELDS,
+  LEGACY_IMPACT_ARRAY_FIELDS as IMPACT_ARRAY_FIELDS,
+};

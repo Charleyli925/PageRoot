@@ -11,6 +11,7 @@ import { sha256 } from "../../lifecycle-core.mjs";
 
 export const MAX_HTML_BYTES = 20 * 1024 * 1024;
 export const MAX_PROMPT_BYTES = 256 * 1024;
+export const MAX_COMMENT_ATTACHMENT_BYTES = 25 * 1024 * 1024;
 
 const POLICY_ERROR_NAME = "AgentPolicyError";
 export const AGENT_POLICY_BRAND = Symbol("pageroot-agent-policy");
@@ -42,6 +43,9 @@ const EXPECTED_MEDIA_TYPES = Object.freeze(new Map([
   ["input/base/index.html", "text/html"],
   ["input/annotations/records.json", "application/json"],
 ]));
+const COMMENT_ATTACHMENT_READ_PATH =
+  /^input\/attachments\/comment_[A-Za-z0-9_-]+\/attachment_[A-Za-z0-9_-]+-[^/]+$/u;
+const MEDIA_TYPE = /^[A-Za-z0-9!#$&^_.+-]+\/[A-Za-z0-9!#$&^_.+-]+$/u;
 const SAFE_TASK_ID = /^[A-Za-z0-9_-]{1,160}$/u;
 const PROJECT_ID = /^project_[a-f0-9]{16,64}$/u;
 const DOCUMENT_ID = /^doc_[a-f0-9]{16,64}$/u;
@@ -435,9 +439,13 @@ export async function loadExecutionPolicy(options) {
   assertIdentity(manifest.requestId, requestId, "requestId");
   assertIdentity(manifest.attemptId, attemptId, "attemptId");
   if (
-    manifest.readOrder.length !== EXPECTED_READ_ORDER.length
-    || manifest.readOrder.some((entry, index) => entry !== EXPECTED_READ_ORDER[index])
-    || manifest.files.length !== EXPECTED_READ_ORDER.length
+    manifest.readOrder.length < EXPECTED_READ_ORDER.length
+    || manifest.readOrder.some((entry, index) => (
+      index < EXPECTED_READ_ORDER.length
+        ? entry !== EXPECTED_READ_ORDER[index]
+        : false
+    ))
+    || manifest.files.length !== manifest.readOrder.length
   ) {
     throw policyError(
       "INPUT_MANIFEST_SHAPE_MISMATCH",
@@ -455,9 +463,23 @@ export async function loadExecutionPolicy(options) {
   }));
   for (const relativePath of manifest.readOrder) {
     const entry = await verifyFrozenEntry(requestRoot, manifest, relativePath);
+    const manifestEntry = expectedManifestFile(manifest, relativePath);
+    const isBaseInput = EXPECTED_READ_ROLES.has(relativePath);
+    const validCommentAttachment = (
+      COMMENT_ATTACHMENT_READ_PATH.test(relativePath)
+      && manifestEntry.role === "comment-attachment"
+      && MEDIA_TYPE.test(String(manifestEntry.mediaType || ""))
+      && Number.isSafeInteger(manifestEntry.byteLength)
+      && manifestEntry.byteLength > 0
+      && manifestEntry.byteLength <= MAX_COMMENT_ATTACHMENT_BYTES
+    );
     if (
-      entry.role !== EXPECTED_READ_ROLES.get(relativePath)
-      || expectedManifestFile(manifest, relativePath).mediaType !== EXPECTED_MEDIA_TYPES.get(relativePath)
+      isBaseInput
+        ? (
+          entry.role !== EXPECTED_READ_ROLES.get(relativePath)
+          || manifestEntry.mediaType !== EXPECTED_MEDIA_TYPES.get(relativePath)
+        )
+        : !validCommentAttachment
     ) {
       throw policyError(
         "MANIFEST_ENTRY_INVALID",

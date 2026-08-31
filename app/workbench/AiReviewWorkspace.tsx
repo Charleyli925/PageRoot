@@ -1533,6 +1533,50 @@ export default function AiReviewWorkspace({
           </div> : null}
 
           <div className={styles.canvasReviewBody}>
+            {documents.reviewImpact ? (
+              <section
+                className={styles.reviewImpactSummary}
+                data-testid="review-impact-summary"
+                aria-label="本轮 AI 修改范围"
+              >
+                <div className={styles.reviewImpactHeading}>
+                  <span className={styles.reviewImpactEyebrow}>修改范围提示</span>
+                  {documents.reviewImpact.outsideRequestedTargetCount > 0 ? (
+                    <WarningCircleIcon aria-hidden="true" size={15} weight="fill" />
+                  ) : null}
+                </div>
+                <div className={styles.reviewImpactStats}>
+                  <span><strong>{documents.reviewImpact.requestedTargetCount}</strong> 本轮评论目标</span>
+                  <span><strong>{documents.reviewImpact.actualChangedElementCount}</strong> 实际修改元素</span>
+                  <span><strong>{documents.reviewImpact.outsideRequestedTargetCount}</strong> 目标之外修改</span>
+                </div>
+                {documents.reviewImpact.outsideRequestedTargetCount > 0 ? (
+                  <div className={styles.reviewImpactWarning} role="status">
+                    <span>评论目标之外的修改仍保留为上下文，请从变化审阅入口核对。</span>
+                    <button
+                      className={styles.reviewImpactLink}
+                      type="button"
+                      onClick={() => selectReviewMode("all")}
+                    >
+                      查看超范围修改
+                    </button>
+                    <div className={styles.reviewImpactIds}>
+                      <span>
+                        目标之外元素
+                        {documents.reviewImpact.truncated ? "（仅展示样例）" : ""}：
+                      </span>
+                      {documents.reviewImpact.outsideTargetElementIdSample.map((id) => (
+                        <code key={id}>{id}</code>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  <div className={styles.reviewImpactQuiet}>
+                    本轮未发现评论目标之外的源码元素修改。
+                  </div>
+                )}
+              </section>
+            ) : null}
             {!navigableChanges.length ? (
               <div className={styles.emptyFilterNotice} role="status">
                 {filter === "all"

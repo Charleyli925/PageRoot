@@ -66,6 +66,171 @@ test("candidate assessment ignores script changes while checking document health
   assert.equal("executableSurfaceUnchanged" in scriptChange.health, false);
 });
 
+test("candidate assessment reports bounded stable-element impact", () => {
+  const targetId = "pr1_00000000000040008000000000000000";
+  const outsideId = "pr1_11111111111141118000000000000000";
+  const baseHtml = `<!doctype html><html><head><title>Impact</title></head><body>
+<main><p data-pageroot-id="${targetId}">评论目标</p></main>
+<aside data-pageroot-id="${outsideId}">评论目标之外</aside>
+</body></html>`;
+  const outputHtml = baseHtml
+    .replace("评论目标</p>", "评论目标已修改</p>")
+    .replace("评论目标之外</aside>", "评论目标之外也被修改</aside>");
+
+  const assessment = assessHtmlCandidate({
+    baseHtml,
+    outputHtml,
+    requestedTargetElementIds: [targetId],
+    requestedTargetCount: 1,
+  });
+
+  assert.equal(assessment.changedElementCount, 2);
+  assert.deepEqual(assessment.changedElementIdSample, [targetId, outsideId].sort());
+  assert.equal(assessment.outsideTargetCount, 1);
+  assert.deepEqual(assessment.outsideTargetElementIdSample, [outsideId]);
+  assert.equal(assessment.truncated, false);
+  assert.equal(assessment.requestedTargetCount, 1);
+});
+
+test("candidate impact scope includes descendants, additions, deletions, page comments and overlaps", () => {
+  const ids = {
+    section: "pr1_00000000000040008000000000000000",
+    heading: "pr1_11111111111141118000000000000000",
+    paragraph: "pr1_22222222222242228000000000000000",
+    outside: "pr1_33333333333343338000000000000000",
+    first: "pr1_44444444444444448000000000000000",
+    second: "pr1_55555555555545558000000000000000",
+    added: "pr1_66666666666646668000000000000000",
+  };
+  const baseHtml = `<!doctype html><html><head><title>Scope</title></head><body>
+<section data-pageroot-id="${ids.section}"><h2 data-pageroot-id="${ids.heading}">标题</h2><p data-pageroot-id="${ids.paragraph}">正文</p></section>
+<aside data-pageroot-id="${ids.outside}">旁支</aside>
+<ul><li data-pageroot-id="${ids.first}">第一项</li><li data-pageroot-id="${ids.second}">第二项</li></ul>
+</body></html>`;
+  const assess = (outputHtml, targets, options = {}) => assessHtmlCandidate({
+    baseHtml: options.baseHtml ?? baseHtml,
+    outputHtml,
+    requestedTargetElementIds: targets,
+    requestedTargetCount: options.requestedTargetCount ?? targets.length,
+    requestedTargetIsPage: options.requestedTargetIsPage ?? false,
+  });
+
+  const descendantEdit = assess(
+    baseHtml.replace(">标题</h2>", ">新标题</h2>").replace(">正文</p>", ">新正文</p>"),
+    [ids.section],
+  );
+  assert.equal(descendantEdit.changedElementCount, 2);
+  assert.equal(descendantEdit.outsideTargetCount, 0);
+
+  const addedInside = assess(
+    baseHtml.replace(
+      "</section>",
+      `<em data-pageroot-id="${ids.added}">新增</em></section>`,
+    ),
+    [ids.section],
+  );
+  assert.deepEqual(addedInside.changedElementIdSample, [ids.added]);
+  assert.equal(addedInside.outsideTargetCount, 0);
+
+  const deletedInside = assess(
+    baseHtml.replace(
+      `<p data-pageroot-id="${ids.paragraph}">正文</p>`,
+      "",
+    ),
+    [ids.section],
+  );
+  assert.deepEqual(deletedInside.changedElementIdSample, [ids.paragraph]);
+  assert.equal(deletedInside.outsideTargetCount, 0);
+
+  const insertedBeforeSiblings = assess(
+    baseHtml.replace(
+      `<li data-pageroot-id="${ids.first}">第一项</li>`,
+      `<li data-pageroot-id="${ids.added}">插入项</li><li data-pageroot-id="${ids.first}">第一项</li>`,
+    ),
+    [ids.first],
+  );
+  assert.deepEqual(insertedBeforeSiblings.changedElementIdSample, [ids.added]);
+  assert.deepEqual(insertedBeforeSiblings.outsideTargetElementIdSample, [ids.added]);
+
+  const pageComment = assess(
+    baseHtml.replace(">旁支</aside>", ">旁支已改</aside>"),
+    [],
+    { requestedTargetCount: 1, requestedTargetIsPage: true },
+  );
+  assert.equal(pageComment.outsideTargetCount, 0);
+  assert.equal(pageComment.requestedTargetCount, 1);
+
+  const overlappingTargets = assess(
+    baseHtml.replace(">标题</h2>", ">重叠目标标题</h2>").replace(">正文</p>", ">重叠目标正文</p>"),
+    [ids.section, ids.heading],
+  );
+  assert.equal(overlappingTargets.outsideTargetCount, 0);
+
+  const manyIds = Array.from({ length: 101 }, (_, index) => (
+    `pr1_${String(index + 1).padStart(12, "0")}40008${String(index + 1).padStart(15, "0")}`
+  ));
+  const manyChangesBase = `<!doctype html><html><head><title>Many</title></head><body>${manyIds
+    .map((id, index) => `<p data-pageroot-id="${id}">item-${index}</p>`)
+    .join("")}</body></html>`;
+  const manyChanges = assess(
+    manyChangesBase.replace(/>(item-\d+)</gu, ">changed-$1<"),
+    [],
+    { baseHtml: manyChangesBase },
+  );
+  assert.equal(manyChanges.changedElementCount, 101);
+  assert.equal(manyChanges.outsideTargetCount, 101);
+  assert.equal(manyChanges.changedElementIdSample.length, 100);
+  assert.equal(manyChanges.outsideTargetElementIdSample.length, 100);
+  assert.equal(manyChanges.truncated, true);
+});
+
+test("candidate impact stays linear and bounded near the HTML size limit", () => {
+  const bodyId = "pr1_4444444444444444b444444444444444";
+  const elementId = (index) => (
+    `pr1_${String(index).padStart(12, "0")}40008${String(index).padStart(15, "0")}`
+  );
+  const filler = "x".repeat(640);
+  const rows = Array.from({ length: 12_000 }, (_, index) => (
+    `<p data-pageroot-id="${elementId(index + 1)}" data-fixture="${filler}">row-${index}</p>`
+  )).join("");
+  const baseHtml = `<!doctype html><html><head><title>Large</title></head><body data-pageroot-id="${bodyId}">${rows}</body></html>`;
+  const outputHtml = baseHtml.replace("row-11999", "row-11999 changed");
+  assert.ok(Buffer.byteLength(baseHtml, "utf8") > 8 * 1024 * 1024);
+  const startedAt = performance.now();
+  const assessment = assessHtmlCandidate({
+    baseHtml,
+    outputHtml,
+    requestedTargetElementIds: [bodyId],
+    requestedTargetCount: 1,
+  });
+  const elapsedMs = performance.now() - startedAt;
+  assert.equal(assessment.changedElementCount, 1);
+  assert.equal(assessment.outsideTargetCount, 0);
+  assert.equal(assessment.truncated, false);
+  assert.ok(assessment.changedElementIdSample.length <= 100);
+  assert.ok(elapsedMs < 10_000, `candidate impact took ${elapsedMs.toFixed(0)}ms`);
+});
+
+test("candidate impact scope crosses unlabelled source wrappers", () => {
+  const sectionId = "pr1_00000000000040008000000000000000";
+  const childId = "pr1_11111111111141118000000000000000";
+  const outsideId = "pr1_22222222222242228000000000000000";
+  const baseHtml = `<!doctype html><html><head><title>Wrapper</title></head><body>
+<section data-pageroot-id="${sectionId}"><div><p data-pageroot-id="${childId}">正文</p></div></section>
+<aside data-pageroot-id="${outsideId}">旁支</aside>
+</body></html>`;
+  const outputHtml = baseHtml.replace("正文", "更新后的正文");
+  const assessment = assessHtmlCandidate({
+    baseHtml,
+    outputHtml,
+    requestedTargetElementIds: [sectionId],
+    requestedTargetCount: 1,
+  });
+
+  assert.deepEqual(assessment.changedElementIdSample, [childId]);
+  assert.equal(assessment.outsideTargetCount, 0);
+});
+
 test("historical script-change conclusions are normalized out of current policy", () => {
   const current = assessHtmlCandidate({
     baseHtml: documentHtml(),

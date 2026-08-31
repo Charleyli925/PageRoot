@@ -23,6 +23,7 @@ test("AI smoke configuration selects review activation and broad-edit regression
     "a broad but related AI return is accepted without a target-scope error",
     "stable-ID review reports movement, source attributes, styles, and author source",
     "a rewrite outside <main> is still reviewed",
+    "Review exposes Candidate changes outside the comment target without blocking adoption",
   ]);
   for (const source of sources) {
     assert.doesNotMatch(

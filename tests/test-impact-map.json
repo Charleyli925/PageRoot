@@ -719,8 +719,8 @@
       "id": "run-workflow",
       "patterns": [
         "^app/application/run-workflow(?:-codecs)?\\.(?:js|d\\.ts)$",
-        "^app/application/run/submit-plan\\.(?:js|d\\.ts)$",
-        "^tests/run-workflow\\.test\\.mjs$",
+        "^app/application/run/(?:submit-plan|text-locator-validation)\\.(?:js|d\\.ts)$",
+        "^tests/(?:run-workflow|text-locator-validation)\\.test\\.mjs$",
         "^tests/run-submit-plan\\.test\\.mjs$"
       ],
       "suites": [
@@ -729,6 +729,7 @@
       ],
       "nodeTests": [
         "tests/run-workflow.test.mjs",
+        "tests/text-locator-validation.test.mjs",
         "tests/run-submit-plan.test.mjs",
         "tests/run-session.test.mjs",
         "tests/run-lifecycle.test.mjs",
@@ -1774,9 +1775,9 @@
     {
       "id": "project-candidate-owner",
       "patterns": [
-        "^bridge/project-file-repository/(?:candidate-identity|version-candidate)\\.mjs$",
-        "^schemas/candidate\\.v4\\.schema\\.json$",
-        "^tests/(?:ai-candidate-identity-contract|candidate-source-identity)\\.test\\.mjs$"
+        "^bridge/(?:candidate-assessment(?:-decoder)?|project-file-repository/(?:candidate-identity|version-candidate))\\.mjs$",
+        "^schemas/candidate(?:-assessment\\.v1|\\.v4)\\.schema\\.json$",
+        "^tests/(?:ai-candidate-identity-contract|candidate-assessment|candidate-source-identity|project-candidate-promotion)\\.test\\.mjs$"
       ],
       "suites": [
         "typecheck",
@@ -1784,6 +1785,7 @@
       ],
       "nodeTests": [
         "tests/ai-candidate-identity-contract.test.mjs",
+        "tests/candidate-assessment.test.mjs",
         "tests/candidate-source-identity.test.mjs",
         "tests/project-candidate-promotion.test.mjs"
       ]
@@ -1791,10 +1793,12 @@
     {
       "id": "project-request-owner",
       "patterns": [
-        "^bridge/project-file-repository/request-draft\\.mjs$"
+        "^bridge/project-file-repository\\.mjs$",
+        "^bridge/project-file-repository/(?:request-draft|request-attachments)\\.mjs$"
       ],
       "suites": [
-        "typecheck"
+        "typecheck",
+        "ai-review-smoke"
       ],
       "nodeTests": [
         "tests/project-request-authority.test.mjs",
@@ -1805,7 +1809,7 @@
       "id": "project-file-lifecycle",
       "patterns": [
         "^bridge/project-file-(?:repository|finalizer)\\.mjs$",
-        "^bridge/project-file-repository/(?:constants|errors|workspace-performance-timing)\\.mjs$",
+        "^bridge/project-file-repository/(?:constants|errors|request-attachments|workspace-performance-timing)\\.mjs$",
         "^tests/project-file-(?:finalizer|bridge|schema)\\.test\\.mjs$",
         "^tests/project-file-repository(?:-harness|\\.integration\\.test)\\.mjs$",
         "^tests/project-(?:registry-and-open|working-copy-save|candidate-promotion|request-authority|ai-task-projection|path-security-and-locks)\\.test\\.mjs$",
@@ -1858,7 +1862,7 @@
     {
       "id": "bridge-lifecycle",
       "patterns": [
-        "^bridge/(?:workspace-bridge(?:-shutdown)?|lifecycle-core|finalize-attempt|record-user-supplement|user-supplement-core|candidate-assessment(?:-decoder)?|html-source-parser|attachment-storage|product-contract|target-identity)\\.mjs$"
+        "^bridge/(?:workspace-bridge(?:-shutdown)?|lifecycle-core|finalize-attempt|record-user-supplement|user-supplement-core|html-source-parser|attachment-storage|product-contract|target-identity)\\.mjs$"
       ],
       "suites": [
         "ai-run-lifecycle-smoke"
@@ -1868,7 +1872,6 @@
         "tests/lifecycle-core.test.mjs",
         "tests/html-source-parser.test.mjs",
         "tests/attachment-storage.test.mjs",
-        "tests/candidate-assessment.test.mjs",
         "tests/compatibility-decoders.test.mjs",
         "tests/product-contract.test.mjs",
         "tests/targeted-change-schema.test.mjs",

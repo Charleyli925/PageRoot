@@ -41,6 +41,7 @@ import {
   normalizeNewAgentDelivery,
 } from "../shared/agent-delivery.mjs";
 import {
+  isValidPagerootElementId,
   PAGEROOT_ELEMENT_ID_SCHEMA_VERSION,
 } from "../shared/pageroot-element-identity.mjs";
 
@@ -60,6 +61,7 @@ import {
 import {
   DOCUMENT_ID,
   HTML_EXTENSIONS,
+  MAX_REQUEST_ATTACHMENT_BYTES,
   PROJECT_FILE_SCHEMA_VERSION,
   PROJECT_ID,
   RECONCILE_LOCATOR_REASONS,
@@ -71,12 +73,21 @@ import {
 } from "./project-file-repository/constants.mjs";
 import {
   FROZEN_REQUEST_RULES,
+  REQUEST_FREEZE_RECOVERY_SCHEMA_VERSION,
   assertWorkingCopyDraft,
   cancellationAuthorityPath,
   draftPathForState,
   requestInputFileRecord,
+  requestFreezeMarkerPath,
+  requestFreezeStagingRootPath,
   requestRootPath,
 } from "./project-file-repository/request-draft.mjs";
+import {
+  isPageTargetReference,
+} from "./candidate-assessment.mjs";
+import {
+  freezeRequestCommentAttachments,
+} from "./project-file-repository/request-attachments.mjs";
 import {
   ProjectFileRepositoryError,
   invalidRegisteredProjectError,
@@ -163,6 +174,14 @@ export { ProjectFileRepositoryError } from "./project-file-repository/errors.mjs
 const LEGACY_PROMOTION_WORKING_COPY_HASH = Symbol(
   "legacy-promotion-working-copy-hash",
 );
+
+function requestFreezeRecoveryError(message, details = {}) {
+  return new ProjectFileRepositoryError(
+    "REQUEST_FREEZE_RECOVERY_INVALID",
+    message,
+    details,
+  );
+}
 
 // This is a persistence repository, not a runtime Store. Sessions keep the
 // mutable UI facts; the repository only resolves and atomically records the
@@ -326,6 +345,9 @@ export class ProjectFileRepository {
     candidateId = null,
     html,
     expectedSourceSha256,
+    requestedTargetElementIds = [],
+    requestedTargetCount = null,
+    requestedTargetIsPage = false,
   } = {}) {
     return this.#serial(() => this.#createCandidate({
       target,
@@ -334,6 +356,9 @@ export class ProjectFileRepository {
       candidateId,
       html,
       expectedSourceSha256,
+      requestedTargetElementIds,
+      requestedTargetCount,
+      requestedTargetIsPage,
       inputManifestSha256: null,
     }));
   }
@@ -1411,6 +1436,7 @@ export class ProjectFileRepository {
       );
     }
     const requestRoot = requestRootPath(loaded.paths, id);
+    await this.#recoverRequestFreezeForId(loaded, id);
     const requestPath = path.join(requestRoot, "request.json");
     const existing = await readJsonFile(requestPath, "request.json", {
       projectRootPath: loaded.paths.projectRootPath,
@@ -1432,6 +1458,20 @@ export class ProjectFileRepository {
       });
       return this.#publicRequest(existing, loaded.paths.projectRootPath);
     }
+    if (await directoryInformation(
+      requestRoot,
+      "Request directory",
+      { projectRootPath: loaded.paths.projectRootPath },
+    )) {
+      throw new ProjectFileRepositoryError(
+        "REQUEST_COLLISION",
+        "This Request id is occupied by an incomplete or incompatible Request directory.",
+        { requestId: id },
+      );
+    }
+    const stagingRoot = requestFreezeStagingRootPath(loaded.paths, id);
+    const markerPath = requestFreezeMarkerPath(loaded.paths, id);
+    let requestPublished = false;
     const latest = loaded.manifest.versions.find(
       (version) => version.versionId === loaded.manifest.latestOfficialVersionId,
     );
@@ -1473,23 +1513,37 @@ export class ProjectFileRepository {
         },
       );
     }
+    try {
+    const frozenCommentAttachments = await freezeRequestCommentAttachments({
+      projectRootPath: loaded.paths.projectRootPath,
+      requestRoot: stagingRoot,
+      publicRequestRoot: requestRoot,
+      requestId: id,
+      comments: frozenRequest.comments,
+    });
+    if (frozenCommentAttachments.attachments.length > 0) {
+      frozenRequest.comments = frozenCommentAttachments.comments;
+      frozenRequest.attachments = frozenCommentAttachments.attachments;
+      await this.#hit("request-attachments-written", {
+        requestId: id,
+        requestRoot,
+        attachmentCount: frozenCommentAttachments.attachments.length,
+      });
+    }
     const ordinal = latest.ordinal + 1;
     const proposedVersionId = versionId(ordinal);
     const idForCandidate = candidateIdForRequest(loaded.project.projectId, id);
-    const inputRoot = path.join(requestRoot, "input", "base");
+    const inputRoot = path.join(stagingRoot, "input", "base");
     const inputPath = path.join(inputRoot, "index.html");
-    const annotationsPath = path.join(requestRoot, "input", "annotations", "records.json");
-    const projectRulesPath = path.join(requestRoot, "input", "PROJECT.md");
-    const aiRulesPath = path.join(requestRoot, "input", "AI_RULES.md");
-    const changeRequestPath = path.join(requestRoot, "change-request.json");
-    const inputManifestPath = path.join(requestRoot, "input-manifest.json");
-    const promptPath = path.join(requestRoot, "PROMPT.md");
+    const annotationsPath = path.join(stagingRoot, "input", "annotations", "records.json");
+    const projectRulesPath = path.join(stagingRoot, "input", "PROJECT.md");
+    const aiRulesPath = path.join(stagingRoot, "input", "AI_RULES.md");
+    const changeRequestPath = path.join(stagingRoot, "change-request.json");
+    const inputManifestPath = path.join(stagingRoot, "input-manifest.json");
+    const promptPath = path.join(stagingRoot, "PROMPT.md");
+    const stagingRequestPath = path.join(stagingRoot, "request.json");
     const outputRelativePath = `requests/${id}/attempts/${attempt}/output/candidate.html`;
-    const outputPath = resolveRelative(
-      loaded.paths.controlRoot,
-      outputRelativePath,
-      "request output path",
-    );
+    const outputPath = path.join(stagingRoot, "attempts", attempt, "output", "candidate.html");
     const projectNotesPath = path.join(loaded.paths.projectRootPath, "PROJECT.md");
     const projectNotes = await regularInformation(projectNotesPath, "PROJECT.md", {
       projectRootPath: loaded.paths.projectRootPath,
@@ -1501,7 +1555,10 @@ export class ProjectFileRepository {
       );
     }
     const projectNotesBuffer = await readFile(projectNotesPath);
-    const promptBuffer = Buffer.from(String(prompt || ""), "utf8");
+    const promptBuffer = Buffer.from(
+      `${String(prompt || "")}${frozenCommentAttachments.promptAppendix}`,
+      "utf8",
+    );
     const aiRulesBuffer = Buffer.from(FROZEN_REQUEST_RULES, "utf8");
     const annotationsBuffer = Buffer.from(jsonText({
       schemaVersion: PROJECT_FILE_SCHEMA_VERSION,
@@ -1552,6 +1609,7 @@ export class ProjectFileRepository {
         "input/PROJECT.md",
         "input/base/index.html",
         "input/annotations/records.json",
+        ...frozenCommentAttachments.manifestFiles.map((entry) => entry.path),
       ],
       files: [
         requestInputFileRecord("PROMPT.md", "prompt", "text/markdown", promptBuffer),
@@ -1560,6 +1618,7 @@ export class ProjectFileRepository {
         requestInputFileRecord("input/PROJECT.md", "project-rules", "text/markdown", projectNotesBuffer),
         requestInputFileRecord("input/base/index.html", "base-html", "text/html", loaded.source.buffer),
         requestInputFileRecord("input/annotations/records.json", "annotations", "application/json", annotationsBuffer),
+        ...frozenCommentAttachments.manifestFiles,
       ],
     };
     const inputManifestBuffer = Buffer.from(jsonText(inputManifest), "utf8");
@@ -1654,11 +1713,41 @@ export class ProjectFileRepository {
     }
     await atomicWriteProjectJson(
       loaded.paths.projectRootPath,
-      requestPath,
+      stagingRequestPath,
       record,
       "request.json",
     );
     await this.#hit("request-record-written", { requestId: id, requestRoot });
+    const freezeMarker = {
+      schemaVersion: REQUEST_FREEZE_RECOVERY_SCHEMA_VERSION,
+      kind: "request-freeze",
+      state: "ready",
+      projectId: loaded.project.projectId,
+      documentId: loaded.project.documentId,
+      sourceWorkingCopyId: loaded.workingCopy.workingCopyId,
+      requestId: id,
+      attemptId: attempt,
+      expectedSourceSha256: expected,
+      requestRecordSha256: sha256(Buffer.from(jsonText(record), "utf8")),
+      inputManifestSha256: record.inputManifestSha256,
+      preparedAt: nowIso(this.#clock),
+    };
+    await this.#verifyRequestFreezeBundle({
+      loaded,
+      root: stagingRoot,
+      marker: freezeMarker,
+    });
+    await atomicWriteProjectJson(
+      loaded.paths.projectRootPath,
+      markerPath,
+      freezeMarker,
+      "Request freeze recovery marker",
+    );
+    await this.#hit("request-freeze-ready", { requestId: id, requestRoot });
+    await rename(stagingRoot, requestRoot);
+    requestPublished = true;
+    await this.#hit("request-published", { requestId: id, requestRoot });
+    await syncDirectory(loaded.paths.requestsRoot);
     loaded.runtime.activeRequest = {
       requestId: id,
       candidateId: null,
@@ -1675,6 +1764,8 @@ export class ProjectFileRepository {
     loaded.runtime.lastAiTask = null;
     await this.#writeRuntime(loaded);
     await this.#hit("request-runtime-written", { requestId: id, requestRoot });
+    await unlink(markerPath).catch(() => {});
+    await syncDirectory(path.dirname(markerPath)).catch(() => {});
     await this.#publishAiTaskProjectionIfPossible({
       target,
       requestId: id,
@@ -1683,6 +1774,577 @@ export class ProjectFileRepository {
     });
     await this.#hit("request-prepared", { requestId: id, requestRoot });
     return this.#publicRequest(record, loaded.paths.projectRootPath);
+    } catch (cause) {
+      if (!requestPublished) {
+        await this.#cleanupRequestFreezeForId(loaded, id);
+      }
+      throw cause;
+    }
+  }
+
+  async #cleanupRequestFreezeForId(loaded, requestId) {
+    const stagingRoot = requestFreezeStagingRootPath(loaded.paths, requestId);
+    const markerPath = requestFreezeMarkerPath(loaded.paths, requestId);
+    const staging = await directoryInformation(
+      stagingRoot,
+      "Request freeze staging directory",
+      { projectRootPath: loaded.paths.projectRootPath },
+    );
+    if (staging) {
+      await rm(stagingRoot, { recursive: true, force: true });
+    }
+    const marker = await regularInformation(
+      markerPath,
+      "Request freeze recovery marker",
+      { projectRootPath: loaded.paths.projectRootPath },
+    );
+    if (marker) await unlink(markerPath);
+    await syncDirectory(path.dirname(stagingRoot)).catch(() => {});
+  }
+
+  async #verifyRequestFreezeTree({ root, projectRootPath, relativePath = "", files = new Set() }) {
+    const currentPath = relativePath
+      ? path.join(root, ...relativePath.split("/"))
+      : root;
+    const current = await directoryInformation(
+      currentPath,
+      "Request freeze directory",
+      { projectRootPath },
+    );
+    if (!current) {
+      throw requestFreezeRecoveryError(
+        "The Request freeze directory disappeared during recovery.",
+        { root, relativePath },
+      );
+    }
+    const entries = await readdir(currentPath, { withFileTypes: true });
+    for (const entry of entries) {
+      const entryRelativePath = relativePath
+        ? `${relativePath}/${entry.name}`
+        : entry.name;
+      const entryPath = path.join(currentPath, entry.name);
+      if (entry.isSymbolicLink()) {
+        throw requestFreezeRecoveryError(
+          "The Request freeze contains a symbolic link.",
+          { path: entryRelativePath },
+        );
+      }
+      if (entry.isDirectory()) {
+        await this.#verifyRequestFreezeTree({
+          root,
+          projectRootPath,
+          relativePath: entryRelativePath,
+          files,
+        });
+        continue;
+      }
+      if (!entry.isFile()) {
+        throw requestFreezeRecoveryError(
+          "The Request freeze contains an unsupported filesystem entry.",
+          { path: entryRelativePath },
+        );
+      }
+      await regularInformation(
+        entryPath,
+        "Request freeze file",
+        { projectRootPath },
+      );
+      files.add(entryRelativePath);
+    }
+    return files;
+  }
+
+  #assertRequestFreezeMarker(marker, loaded, requestId) {
+    const markerId = String(requestId || "");
+    if (
+      !isObject(marker)
+      || marker.schemaVersion !== REQUEST_FREEZE_RECOVERY_SCHEMA_VERSION
+      || marker.kind !== "request-freeze"
+      || marker.state !== "ready"
+      || marker.projectId !== loaded.project.projectId
+      || marker.documentId !== loaded.project.documentId
+      || marker.requestId !== markerId
+      || !SAFE_REQUEST_ID.test(String(marker.attemptId || ""))
+      || !validStateTimestamp(marker.preparedAt)
+    ) {
+      throw requestFreezeRecoveryError(
+        "The Request freeze recovery marker has invalid identity or state.",
+        { requestId: markerId },
+      );
+    }
+    for (const [value, label] of [
+      [marker.expectedSourceSha256, "expectedSourceSha256"],
+      [marker.requestRecordSha256, "requestRecordSha256"],
+      [marker.inputManifestSha256, "inputManifestSha256"],
+    ]) {
+      try {
+        assertSha256(value, `Request freeze marker ${label}`);
+      } catch (cause) {
+        throw requestFreezeRecoveryError(
+          "The Request freeze recovery marker contains an invalid hash.",
+          { requestId: markerId, label, cause: cause?.code || null },
+        );
+      }
+    }
+    if (
+      !SAFE_REQUEST_ID.test(markerId)
+      || !WORKING_COPY_ID.test(String(marker.sourceWorkingCopyId || ""))
+    ) {
+      throw requestFreezeRecoveryError(
+        "The Request freeze recovery marker is missing a safe Working Copy identity.",
+        { requestId: markerId },
+      );
+    }
+    return marker;
+  }
+
+  async #verifyRequestFreezeBundle({ loaded, root, marker }) {
+    const requestId = String(marker?.requestId || "");
+    const attemptId = String(marker?.attemptId || "");
+    this.#assertRequestFreezeMarker(marker, loaded, requestId);
+    const workingCopy = loaded.manifest.workingCopies.find(
+      (entry) => entry.workingCopyId === marker.sourceWorkingCopyId,
+    );
+    if (!workingCopy) {
+      throw requestFreezeRecoveryError(
+        "The Request freeze marker names an unknown Working Copy.",
+        { requestId, sourceWorkingCopyId: marker.sourceWorkingCopyId },
+      );
+    }
+    const currentSource = await readHtmlFile(
+      workingCopySourcePath(loaded.paths, workingCopy),
+      "Working Copy during Request freeze recovery",
+      { projectRootPath: loaded.paths.projectRootPath },
+    );
+    if (currentSource.sha256 !== assertSha256(marker.expectedSourceSha256, "marker source hash")) {
+      throw new ProjectFileRepositoryError(
+        "SOURCE_HASH_CONFLICT",
+        "The Working Copy changed before the staged Request could be recovered.",
+        {
+          requestId,
+          expectedSourceSha256: marker.expectedSourceSha256,
+          actualSourceSha256: currentSource.sha256,
+        },
+      );
+    }
+    const loadedWithWorkingCopy = { ...loaded, workingCopy };
+    const fail = (message, details = {}) => {
+      throw requestFreezeRecoveryError(message, { requestId, ...details });
+    };
+    const readJsonWithHash = async (filePath, label) => {
+      try {
+        return await readJsonFileWithSha256(filePath, label, {
+          projectRootPath: loaded.paths.projectRootPath,
+        });
+      } catch (cause) {
+        fail(
+          `The Request freeze ${label} could not be read safely.`,
+          { cause: cause?.code || null },
+        );
+      }
+      return null;
+    };
+    const readManifestFile = async (relativePath, entry) => {
+      const filePath = path.join(root, ...relativePath.split("/"));
+      try {
+        const result = await readRegularFileWithSha256(
+          filePath,
+          `Request freeze ${relativePath}`,
+          { projectRootPath: loaded.paths.projectRootPath },
+        );
+        if (
+          !result
+          || result.buffer.byteLength !== entry.byteLength
+          || result.sha256 !== entry.sha256
+        ) {
+          fail(
+            "A Request freeze file does not match its input manifest.",
+            { path: relativePath },
+          );
+        }
+        return result;
+      } catch (cause) {
+        if (cause?.code === "REQUEST_FREEZE_RECOVERY_INVALID") throw cause;
+        fail(
+          `The Request freeze file ${relativePath} could not be verified.`,
+          { path: relativePath, cause: cause?.code || null },
+        );
+      }
+      return null;
+    };
+    const expectedRequestPaths = {
+      inputRelativePath: `requests/${requestId}/input/base/index.html`,
+      promptRelativePath: `requests/${requestId}/PROMPT.md`,
+      projectRulesRelativePath: `requests/${requestId}/input/PROJECT.md`,
+      annotationsRelativePath: `requests/${requestId}/input/annotations/records.json`,
+      changeRequestRelativePath: `requests/${requestId}/change-request.json`,
+      inputManifestRelativePath: `requests/${requestId}/input-manifest.json`,
+      outputRelativePath: `requests/${requestId}/attempts/${attemptId}/output/candidate.html`,
+    };
+    const requestFile = await readJsonWithHash(
+      path.join(root, "request.json"),
+      "request.json",
+    );
+    if (!requestFile) fail("The Request freeze has no request.json.");
+    if (requestFile.sha256 !== assertSha256(marker.requestRecordSha256, "marker request hash")) {
+      fail("The Request freeze request.json hash does not match its recovery marker.");
+    }
+    const record = requestFile.value;
+    try {
+      this.#assertRequestRecord(record, loadedWithWorkingCopy, {
+        requestId,
+        attemptId,
+      });
+    } catch (cause) {
+      fail(
+        "The Request freeze request.json failed its identity validation.",
+        { cause: cause?.code || null },
+      );
+    }
+    if (
+      record.status !== "processing"
+      || record.expectedSourceSha256 !== assertSha256(marker.expectedSourceSha256, "marker source hash")
+      || record.sourceWorkingCopyId !== marker.sourceWorkingCopyId
+      || record.inputManifestSha256 !== assertSha256(marker.inputManifestSha256, "marker manifest hash")
+    ) {
+      fail("The Request freeze request.json does not match its recovery marker.");
+    }
+    for (const [field, expected] of Object.entries(expectedRequestPaths)) {
+      if (record[field] !== expected) {
+        fail("The Request freeze request path is not canonical.", {
+          field,
+          actual: record[field] || null,
+          expected,
+        });
+      }
+    }
+
+    const manifestFile = await readJsonWithHash(
+      path.join(root, "input-manifest.json"),
+      "input-manifest.json",
+    );
+    if (!manifestFile) fail("The Request freeze has no input-manifest.json.");
+    if (
+      manifestFile.sha256 !== record.inputManifestSha256
+      || manifestFile.sha256 !== marker.inputManifestSha256
+    ) {
+      fail("The Request freeze input manifest hash does not match its authority.");
+    }
+    const inputManifest = manifestFile.value;
+    if (
+      inputManifest.schemaVersion !== PROJECT_FILE_SCHEMA_VERSION
+      || inputManifest.projectId !== loaded.project.projectId
+      || inputManifest.documentId !== loaded.project.documentId
+      || inputManifest.requestId !== requestId
+      || inputManifest.attemptId !== attemptId
+      || inputManifest.frozen !== true
+      || !Array.isArray(inputManifest.readOrder)
+      || !Array.isArray(inputManifest.files)
+    ) {
+      fail("The Request freeze input manifest has invalid identity or shape.");
+    }
+    const manifestEntries = new Map();
+    for (const [index, entry] of inputManifest.files.entries()) {
+      if (!isObject(entry)) fail("The Request freeze input manifest has an invalid file entry.", { index });
+      let relativePath;
+      try {
+        relativePath = ensureRelativePath(entry.path, `input-manifest.files[${index}].path`);
+        assertSha256(entry.sha256, `input-manifest.files[${index}].sha256`);
+      } catch (cause) {
+        fail("The Request freeze input manifest has an unsafe file entry.", {
+          index,
+          cause: cause?.code || null,
+        });
+      }
+      if (
+        entry.path !== relativePath
+        || manifestEntries.has(relativePath)
+        || typeof entry.role !== "string"
+        || !/^[A-Za-z0-9!#$&^_.+-]+\/[A-Za-z0-9!#$&^_.+-]+$/u.test(String(entry.mediaType || ""))
+        || !Number.isSafeInteger(entry.byteLength)
+        || entry.byteLength < 0
+      ) {
+        fail("The Request freeze input manifest has a duplicate or invalid file entry.", {
+          path: relativePath || entry.path || null,
+        });
+      }
+      if (
+        entry.role === "comment-attachment"
+        && (
+          !relativePath.startsWith("input/attachments/")
+          || entry.byteLength < 1
+          || entry.byteLength > MAX_REQUEST_ATTACHMENT_BYTES
+        )
+      ) {
+        fail("The Request freeze contains an invalid comment attachment manifest entry.", {
+          path: relativePath,
+        });
+      }
+      manifestEntries.set(relativePath, entry);
+    }
+    const readOrder = [];
+    for (const [index, value] of inputManifest.readOrder.entries()) {
+      let relativePath;
+      try {
+        relativePath = ensureRelativePath(value, `input-manifest.readOrder[${index}]`);
+      } catch (cause) {
+        fail("The Request freeze input manifest has an unsafe readOrder entry.", {
+          index,
+          cause: cause?.code || null,
+        });
+      }
+      if (readOrder.includes(relativePath) || !manifestEntries.has(relativePath)) {
+        fail("The Request freeze input manifest readOrder is not a manifest subset.", {
+          path: relativePath,
+        });
+      }
+      readOrder.push(relativePath);
+    }
+    const requiredEntries = [
+      ["PROMPT.md", "prompt", "text/markdown"],
+      ["input/AI_RULES.md", "policy", "text/markdown"],
+      ["change-request.json", "change-request", "application/json"],
+      ["input/PROJECT.md", "project-rules", "text/markdown"],
+      ["input/base/index.html", "base-html", "text/html"],
+      ["input/annotations/records.json", "annotations", "application/json"],
+    ];
+    for (const [relativePath, role, mediaType] of requiredEntries) {
+      const entry = manifestEntries.get(relativePath);
+      if (!entry || entry.role !== role || entry.mediaType !== mediaType || !readOrder.includes(relativePath)) {
+        fail("The Request freeze input manifest is missing a required file.", {
+          path: relativePath,
+        });
+      }
+    }
+    if (manifestEntries.get("input/base/index.html").sha256 !== record.expectedSourceSha256) {
+      fail("The Request freeze base HTML does not match the frozen source authority.");
+    }
+    const files = new Map();
+    for (const [relativePath, entry] of manifestEntries) {
+      files.set(relativePath, await readManifestFile(relativePath, entry));
+    }
+    const actualFiles = await this.#verifyRequestFreezeTree({
+      root,
+      projectRootPath: loaded.paths.projectRootPath,
+    });
+    const expectedFiles = new Set([
+      "request.json",
+      "input-manifest.json",
+      ...manifestEntries.keys(),
+    ]);
+    if (
+      actualFiles.size !== expectedFiles.size
+      || [...expectedFiles].some((relativePath) => !actualFiles.has(relativePath))
+    ) {
+      fail("The Request freeze contains files outside its verified bundle.", {
+        unexpected: [...actualFiles].filter((relativePath) => !expectedFiles.has(relativePath)),
+        missing: [...expectedFiles].filter((relativePath) => !actualFiles.has(relativePath)),
+      });
+    }
+
+    const requestComments = Array.isArray(record.request?.comments)
+      ? record.request.comments
+      : [];
+    const requestAttachments = Array.isArray(record.request?.attachments)
+      ? record.request.attachments
+      : [];
+    const attachmentEntries = new Map(
+      [...manifestEntries.entries()]
+        .filter(([, entry]) => entry.role === "comment-attachment")
+        .map(([relativePath, entry]) => [relativePath, entry]),
+    );
+    const requestAttachmentsById = new Map();
+    for (const attachment of requestAttachments) {
+      if (!isObject(attachment)) fail("The Request freeze has an invalid attachment reference.");
+      const attachmentId = String(attachment.attachmentId || "");
+      let requestRelativePath;
+      let relativePath;
+      try {
+        requestRelativePath = ensureRelativePath(
+          attachment.requestRelativePath,
+          `attachment ${attachmentId} requestRelativePath`,
+        );
+        relativePath = ensureRelativePath(
+          attachment.relativePath,
+          `attachment ${attachmentId} relativePath`,
+        );
+        assertSha256(attachment.sha256, `attachment ${attachmentId} sha256`);
+      } catch (cause) {
+        fail("The Request freeze has an unsafe attachment reference.", {
+          attachmentId,
+          cause: cause?.code || null,
+        });
+      }
+      if (
+        !attachmentId
+        || requestAttachmentsById.has(attachmentId)
+        || relativePath !== `requests/${requestId}/${requestRelativePath}`
+        || !attachmentEntries.has(requestRelativePath)
+      ) {
+        fail("The Request freeze attachment reference is not canonical.", { attachmentId });
+      }
+      const entry = attachmentEntries.get(requestRelativePath);
+      if (
+        entry.mediaType !== attachment.mediaType
+        || entry.byteLength !== attachment.byteLength
+        || entry.sha256 !== attachment.sha256
+        || attachment.commentId === undefined
+      ) {
+        fail("The Request freeze attachment metadata does not match its manifest.", {
+          attachmentId,
+        });
+      }
+      requestAttachmentsById.set(attachmentId, attachment);
+    }
+    if (requestAttachmentsById.size !== attachmentEntries.size) {
+      fail("The Request freeze manifest contains an unreferenced comment attachment.");
+    }
+    for (const comment of requestComments) {
+      for (const attachment of Array.isArray(comment?.attachments) ? comment.attachments : []) {
+        const frozen = requestAttachmentsById.get(String(attachment?.attachmentId || ""));
+        if (
+          !frozen
+          || attachment.requestRelativePath !== frozen.requestRelativePath
+        ) {
+          fail("The Request freeze comment attachment reference is inconsistent.");
+        }
+      }
+    }
+    let annotations;
+    try {
+      annotations = JSON.parse(files.get("input/annotations/records.json").buffer.toString("utf8"));
+    } catch {
+      fail("The Request freeze annotations file is not valid JSON.");
+    }
+    if (
+      !isObject(annotations)
+      || annotations.projectId !== loaded.project.projectId
+      || annotations.documentId !== loaded.project.documentId
+      || annotations.requestId !== requestId
+      || annotations.attemptId !== attemptId
+      || JSON.stringify(annotations.comments || []) !== JSON.stringify(requestComments)
+    ) {
+      fail("The Request freeze annotations do not match frozen comment requirements.");
+    }
+    return { record, workingCopy, inputManifest };
+  }
+
+  async #recoverRequestFreezeForId(loaded, requestId) {
+    const id = String(requestId || "");
+    const stagingRoot = requestFreezeStagingRootPath(loaded.paths, id);
+    const markerPath = requestFreezeMarkerPath(loaded.paths, id);
+    const requestRoot = requestRootPath(loaded.paths, id);
+    const staging = await directoryInformation(
+      stagingRoot,
+      "Request freeze staging directory",
+      { projectRootPath: loaded.paths.projectRootPath },
+    );
+    const markerInformation = await regularInformation(
+      markerPath,
+      "Request freeze recovery marker",
+      { projectRootPath: loaded.paths.projectRootPath },
+    );
+    const published = await directoryInformation(
+      requestRoot,
+      "Request directory",
+      { projectRootPath: loaded.paths.projectRootPath },
+    );
+    if (!staging && !markerInformation) return null;
+    if (!markerInformation) {
+      await this.#cleanupRequestFreezeForId(loaded, id);
+      return {
+        kind: "request-freeze",
+        requestId: id,
+        state: "discarded-unpublished-staging",
+      };
+    }
+    if (!staging && !published) {
+      throw requestFreezeRecoveryError(
+        "The Request freeze recovery marker has no staging or published bundle.",
+        { requestId: id },
+      );
+    }
+    if (staging && published) {
+      throw new ProjectFileRepositoryError(
+        "REQUEST_FREEZE_COLLISION",
+        "The Request freeze has both staging and published directories; recovery will not choose between them.",
+        { requestId: id },
+      );
+    }
+    const marker = await readJsonFile(
+      markerPath,
+      "Request freeze recovery marker",
+      { projectRootPath: loaded.paths.projectRootPath },
+    );
+    this.#assertRequestFreezeMarker(marker, loaded, id);
+    const verified = await this.#verifyRequestFreezeBundle({
+      loaded,
+      root: staging ? stagingRoot : requestRoot,
+      marker,
+    });
+    if (staging) {
+      await rename(stagingRoot, requestRoot);
+      await syncDirectory(loaded.paths.requestsRoot);
+    }
+    await this.#restoreRequestRuntime(
+      { ...loaded, workingCopy: verified.workingCopy },
+      verified.record,
+    );
+    await unlink(markerPath);
+    await syncDirectory(path.dirname(markerPath)).catch(() => {});
+    return {
+      kind: "request-freeze",
+      requestId: id,
+      attemptId: verified.record.attemptId,
+      state: "recovered",
+    };
+  }
+
+  async #recoverRequestFreezes(loaded) {
+    const root = path.join(loaded.paths.recoveryRoot, "request-freeze");
+    const information = await directoryInformation(
+      root,
+      "Request freeze recovery directory",
+      { projectRootPath: loaded.paths.projectRootPath },
+    );
+    if (!information) return [];
+    const entries = await readdir(root, { withFileTypes: true });
+    const requestIds = new Set();
+    for (const entry of entries) {
+      if (entry.isSymbolicLink()) {
+        throw requestFreezeRecoveryError(
+          "The Request freeze recovery directory contains a symbolic link.",
+          { path: entry.name },
+        );
+      }
+      if (entry.isDirectory()) {
+        if (!SAFE_REQUEST_ID.test(entry.name)) {
+          throw requestFreezeRecoveryError(
+            "The Request freeze staging directory has an invalid Request id.",
+            { path: entry.name },
+          );
+        }
+        requestIds.add(entry.name);
+        continue;
+      }
+      if (
+        !entry.isFile()
+        || !entry.name.endsWith(".json")
+        || !SAFE_REQUEST_ID.test(entry.name.slice(0, -5))
+      ) {
+        throw requestFreezeRecoveryError(
+          "The Request freeze recovery directory contains an unexpected entry.",
+          { path: entry.name },
+        );
+      }
+      requestIds.add(entry.name.slice(0, -5));
+    }
+    const recovered = [];
+    for (const requestId of [...requestIds].sort()) {
+      const result = await this.#recoverRequestFreezeForId(loaded, requestId);
+      if (result) recovered.push(result);
+    }
+    return recovered;
   }
 
   #assertRequestRecord(record, loaded, { requestId, attemptId }) {
@@ -2915,6 +3577,30 @@ export class ProjectFileRepository {
         "The frozen Request input changed after submission.",
       );
     }
+    const requestTargets = Array.isArray(record.request?.targets)
+      ? record.request.targets
+      : [];
+    const commentTargets = Array.isArray(record.request?.comments)
+      ? record.request.comments.map((comment) => comment?.target).filter(Boolean)
+      : [];
+    const allRequestedTargetRefs = [...requestTargets, ...commentTargets];
+    const requestedTargetElementIds = [...new Set(
+      allRequestedTargetRefs
+        .map((targetRef) => targetRef?.elementId)
+        .filter((elementId) => isValidPagerootElementId(elementId)),
+    )].sort();
+    const requestedTargetCount = new Set(
+      allRequestedTargetRefs.map((targetRef, index) => {
+        if (!isObject(targetRef)) return `target-index:${index}`;
+        return String(
+          targetRef.targetId
+          || targetRef.id
+          || targetRef.elementId
+          || `${targetRef.level || ""}:${targetRef.selector || ""}:${index}`,
+        );
+      }),
+    ).size;
+    const requestedTargetIsPage = allRequestedTargetRefs.some(isPageTargetReference);
     let prepared;
     try {
       prepared = await this.#createCandidate({
@@ -2932,6 +3618,9 @@ export class ProjectFileRepository {
         },
         assessmentBaseHtml: frozenInput.html,
         allowSourceDivergence: true,
+        requestedTargetElementIds,
+        requestedTargetCount,
+        requestedTargetIsPage,
         inputManifestSha256: record.inputManifestSha256,
       });
     } catch (cause) {
@@ -4754,6 +5443,9 @@ export class ProjectFileRepository {
     candidateIdentity = null,
     assessmentBaseHtml = null,
     allowSourceDivergence = false,
+    requestedTargetElementIds = [],
+    requestedTargetCount = null,
+    requestedTargetIsPage = false,
     inputManifestSha256 = null,
   }) {
     const loaded = await this.#resolveMutationTarget(target);
@@ -4874,6 +5566,11 @@ export class ProjectFileRepository {
           : loaded.source.html,
         candidateHtml,
         this.#clock,
+        {
+          requestedTargetElementIds,
+          requestedTargetCount,
+          requestedTargetIsPage,
+        },
       );
       await writeFileNoReplace(outputPath, outputBuffer, outputSha256, "Candidate HTML", {
         projectRootPath: loaded.paths.projectRootPath,
@@ -6404,6 +7101,8 @@ export class ProjectFileRepository {
         transaction,
       ));
     }
+    const requestFreezes = await this.#recoverRequestFreezes(loaded);
+    recovered.push(...requestFreezes);
     // A crash after candidate.json becomes promoted but before request.json
     // follows leaves an intentional intermediate state. Finish every pending
     // Promotion first, then use Request facts to restore runtime state.

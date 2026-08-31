@@ -347,6 +347,10 @@
         "to": "bridge/project-file-repository/request-draft.mjs"
       },
       {
+        "from": "bridge/project-file-repository/request-attachments.mjs",
+        "to": "bridge/project-file-repository/request-attachments.mjs"
+      },
+      {
         "from": "bridge/project-file-repository/version-candidate.mjs",
         "to": "bridge/project-file-repository/version-candidate.mjs"
       },

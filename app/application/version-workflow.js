@@ -377,6 +377,9 @@ export class VersionWorkflow {
         baseSnapshotSha256: ready.baseSnapshotSha256,
         content,
         sha256,
+        ...(ready.candidateAssessment
+          ? { candidateAssessment: ready.candidateAssessment }
+          : {}),
       });
       this.#emitEvent({ type: "version-review-candidate-prepared", candidate });
       return succeeded(candidate);

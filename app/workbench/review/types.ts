@@ -40,6 +40,16 @@ export type ReviewDocuments = {
   outline: ReviewOutlineItem[];
   commentGroups: ReviewCommentGroup[];
   commentTargets: ReviewCommentTarget[];
+  reviewImpact?: ReviewImpact;
+};
+
+export type ReviewImpact = {
+  requestedTargetCount: number;
+  actualChangedElementCount: number;
+  outsideRequestedTargetCount: number;
+  changedElementIdSample: string[];
+  outsideTargetElementIdSample: string[];
+  truncated: boolean;
 };
 
 export type ReviewCommentGroup = {
@@ -62,6 +72,7 @@ export type ReviewDocumentBuildOptions = {
   sourcePath?: string;
   externalBootstrap?: boolean;
   comments?: readonly CommentItem[];
+  reviewImpact?: ReviewImpact;
 };
 
 export type ReviewCommentAnnotations = {

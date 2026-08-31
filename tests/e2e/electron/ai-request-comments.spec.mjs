@@ -6,6 +6,8 @@ import {
   chooseClipboardDelivery,
   closePageRootGracefully,
   createSourceFixture,
+  sha256,
+  existsSync,
   loadedDiskFrame,
   launchPageRoot,
   managedProjectRoots,
@@ -14,6 +16,7 @@ import {
   path,
   readFileSync,
   realpathSync,
+  rmSync,
   removeSourceFixture,
   rewriteWorkspaceDraftComment,
   seedLegacyV3Project,
@@ -21,6 +24,7 @@ import {
   stopPageRoot,
   tmpdir,
   waitForProjectReady,
+  writeFileSync,
   workspaceContainsDraftComment,
 } from "./ai-closed-loop-helpers.mjs";
 
@@ -153,6 +157,92 @@ test("a persisted global comment stays exact after restart and sends directly", 
     await expect(activeLaunch.page.getByText(/评论需要重新定位/u)).toHaveCount(0);
   } finally {
     await stopPageRoot(activeLaunch.electronApp, firstLaunch.isolatedUserData);
+    removeSourceFixture(fixture.sourceDirectory);
+  }
+});
+
+test("a file attachment is frozen as Request bytes before the AI handoff", async () => {
+  test.setTimeout(120_000);
+  const fixture = createSourceFixture("attachment-ai-loop.html");
+  const attachmentBytes = Buffer.from([0, 1, 2, 3, 13, 10, 254, 255]);
+  const attachmentSourcePath = path.join(fixture.sourceDirectory, "reference.bin");
+  writeFileSync(attachmentSourcePath, attachmentBytes);
+  const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
+  try {
+    const active = await launched.page.evaluate(
+      () => window.htmlAIProjects?.getActiveProject(),
+    );
+    const frame = await loadedDiskFrame(
+      launched.page,
+      active?.sourcePath || fixture.sourcePath,
+    );
+    const target = frame.locator(caseSelector("list-item"));
+    await launched.page.keyboard.press("Escape");
+    await frame.locator("body").click({ position: { x: 2, y: 2 } });
+    await target.scrollIntoViewIfNeeded();
+    await target.click();
+    const commentButton = launched.page.getByRole("button", { name: /给.+留评论/u })
+      .filter({ visible: true })
+      .first();
+    await expect(commentButton).toBeVisible();
+    await commentButton.click();
+    await expect(launched.page.getByRole("textbox", { name: "评论内容" }))
+      .toBeVisible();
+    await launched.page.getByRole("button", { name: "添加附件", exact: true }).click();
+    await launched.page.locator('input[type="file"]').last().setInputFiles(attachmentSourcePath);
+    await expect(launched.page.locator(".comment-composer").getByText("reference.bin"))
+      .toBeVisible({ timeout: 30_000 });
+    await launched.page.getByRole("button", { name: "评论", exact: true }).click();
+    await expect(launched.page.getByRole("textbox", { name: "评论内容" }))
+      .toBeHidden({ timeout: 45_000 });
+
+    await launched.page.getByRole("button", { name: /AI 助手/u }).click();
+    await chooseClipboardDelivery(launched.page);
+    let promptPath = "";
+    await expect.poll(async () => {
+      const copied = await launched.electronApp.evaluate(
+        ({ clipboard }) => clipboard.readText(),
+      );
+      promptPath = copied.match(/请执行\s+(.+?\/PROMPT\.md)\s+中的单轮任务/u)?.[1] || "";
+      return Boolean(promptPath && existsSync(promptPath));
+    }, { timeout: 20_000 }).toBe(true);
+    const requestRoot = path.dirname(promptPath);
+    const requestRecord = JSON.parse(
+      readFileSync(path.join(requestRoot, "request.json"), "utf8"),
+    );
+    const frozenComment = requestRecord.request.comments[0];
+    const frozenAttachment = frozenComment.attachments[0];
+    const requestRelativePath = frozenAttachment.requestRelativePath;
+    const frozenPath = path.join(requestRoot, ...requestRelativePath.split("/"));
+    const projectRoot = path.resolve(requestRoot, "../../..");
+    const draftPath = path.join(
+      projectRoot,
+      ...frozenAttachment.relativePath.split("/"),
+    );
+    expect(readFileSync(draftPath).equals(attachmentBytes)).toBe(true);
+    expect(readFileSync(frozenPath).equals(attachmentBytes)).toBe(true);
+    expect(frozenAttachment.byteLength).toBe(attachmentBytes.byteLength);
+    expect(frozenAttachment.sha256).toBe(sha256(attachmentBytes));
+    const manifest = JSON.parse(
+      readFileSync(path.join(requestRoot, "input-manifest.json"), "utf8"),
+    );
+    expect(manifest.files).toContainEqual({
+      path: requestRelativePath,
+      role: "comment-attachment",
+      mediaType: frozenAttachment.mediaType,
+      byteLength: attachmentBytes.byteLength,
+      sha256: sha256(attachmentBytes),
+    });
+    expect(JSON.parse(
+      readFileSync(path.join(requestRoot, "input", "annotations", "records.json"), "utf8"),
+    ).comments[0].attachments[0].requestRelativePath).toBe(requestRelativePath);
+    expect(readFileSync(path.join(requestRoot, "PROMPT.md"), "utf8"))
+      .toContain(requestRelativePath);
+
+    rmSync(draftPath);
+    expect(readFileSync(frozenPath).equals(attachmentBytes)).toBe(true);
+  } finally {
+    await stopPageRoot(launched.electronApp, launched.isolatedUserData);
     removeSourceFixture(fixture.sourceDirectory);
   }
 });

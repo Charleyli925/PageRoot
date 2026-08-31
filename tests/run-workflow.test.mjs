@@ -159,6 +159,7 @@ function codecs() {
 function createHarness({
   sourcePath = SOURCE_A,
   html = HTML_A,
+  comments = null,
   bridge = {},
   copy = async () => ({ status: "copied", copied: true }),
   freeze = null,
@@ -180,16 +181,16 @@ function createHarness({
     sourceSha256: sha256(html),
   });
   const commentSession = new CommentSession();
-  commentSession.setComments([{
-    commentId: "comment_001",
-    text: "把标题改得更清晰",
-    target: {
-      id: "target_001",
-      selector: "main",
-      sourceAnchor: { sourceSha256: sha256(html) },
-    },
-    attachments: [],
-  }]);
+  commentSession.setComments(comments || [{
+      commentId: "comment_001",
+      text: "把标题改得更清晰",
+      target: {
+        id: "target_001",
+        selector: "main",
+        sourceAnchor: { sourceSha256: sha256(html) },
+      },
+      attachments: [],
+    }]);
   const versionSession = new VersionSession();
   versionSession.hydrate({
     versions: [],
@@ -346,6 +347,84 @@ test("submit freezes the exact source, creates one Request, and confirms handoff
   const duplicate = await harness.workflow.submit({ projectName: "landing.html" });
   assert.equal(duplicate.status, "blocked");
   assert.equal(harness.calls.createRequest.length, 1);
+});
+
+test("submit refreshes a unique text quote against the final saved HTML before creating the Request", async () => {
+  const elementId = "pr1_11111111111141118111111111111111";
+  const originalHtml = `<!doctype html><html><body><p data-pageroot-id="${elementId}">目标内容</p></body></html>`;
+  const finalHtml = `<!doctype html><html><body><p data-pageroot-id="${elementId}">新目标内容</p></body></html>`;
+  const harness = createHarness({
+    html: finalHtml,
+    comments: [{
+      commentId: "comment_001",
+      text: "请检查选中文字",
+      target: {
+        id: "target_001",
+        elementId,
+        selector: "p",
+        resolution: "exact",
+        sourceAnchor: { sourceSha256: sha256(originalHtml) },
+        textLocator: {
+          quote: "目标",
+          startOffset: 0,
+          endOffset: 2,
+          affinity: "forward",
+        },
+      },
+      attachments: [],
+    }],
+  });
+
+  const outcome = await harness.workflow.submit();
+
+  assert.equal(outcome.status, "succeeded");
+  assert.equal(harness.calls.createRequest.length, 1);
+  assert.deepEqual(
+    harness.calls.createRequest[0].comments[0].target.textLocator,
+    {
+      quote: "目标",
+      startOffset: 1,
+      endOffset: 3,
+      affinity: "forward",
+    },
+  );
+});
+
+test("submit blocks a stale or ambiguous text quote without creating a Request", async () => {
+  const elementId = "pr1_11111111111141118111111111111111";
+  const originalHtml = `<!doctype html><html><body><p data-pageroot-id="${elementId}">目标内容</p></body></html>`;
+  for (const finalText of ["已改写", "新目标和目标", "目标在别的元素"]) {
+    const finalHtml = finalText === "目标在别的元素"
+      ? `<!doctype html><html><body><p data-pageroot-id="${elementId}">已删除</p><aside>目标</aside></body></html>`
+      : `<!doctype html><html><body><p data-pageroot-id="${elementId}">${finalText}</p></body></html>`;
+    const harness = createHarness({
+      html: finalHtml,
+      comments: [{
+        commentId: "comment_001",
+        text: "请检查选中文字",
+        target: {
+          id: "target_001",
+          elementId,
+          selector: "p",
+          resolution: "exact",
+          sourceAnchor: { sourceSha256: sha256(originalHtml) },
+          textLocator: {
+            quote: "目标",
+            startOffset: 0,
+            endOffset: 2,
+            affinity: "forward",
+          },
+        },
+      }],
+    });
+
+    const outcome = await harness.workflow.submit();
+
+    assert.equal(outcome.status, "rejected", finalText);
+    assert.equal(outcome.code, "RUN_SUBMISSION_TEXT_LOCATOR_STALE", finalText);
+    assert.match(outcome.reason, /重新选择文字/u, finalText);
+    assert.equal(harness.calls.createRequest.length, 0, finalText);
+  }
 });
 
 test("submission planning is side-effect free and derives current comment authority", () => {

@@ -1,3 +1,7 @@
+import {
+  isValidPagerootElementId,
+} from "../../shared/pageroot-element-identity.mjs";
+
 export const CANONICAL_LIFECYCLE_STATES = Object.freeze([
   "editing",
   "submitting",
@@ -477,7 +481,7 @@ export function candidateAssessmentFromRecord(value) {
   if (!["ready", "attention", "blocked"].includes(status)) return null;
   const health = isRecord(value.health) ? value.health : {};
   const continuity = isRecord(value.continuity) ? value.continuity : {};
-  return {
+  const assessment = {
     status,
     issueCodes: Array.isArray(value.issueCodes)
       ? value.issueCodes.map(String).filter(Boolean)
@@ -490,6 +494,82 @@ export function candidateAssessmentFromRecord(value) {
       status: continuity.status === "related" ? "related" : "uncertain",
     },
   };
+  const legacyImpactArrayFields = [
+    "changedStableElementIds",
+    "requestedTargetElementIds",
+    "outsideRequestedTargetElementIds",
+  ];
+  const boundedImpactFields = [
+    "changedElementCount",
+    "requestedTargetCount",
+    "outsideTargetCount",
+    "changedElementIdSample",
+    "outsideTargetElementIdSample",
+    "truncated",
+  ];
+  const hasLegacyImpact = legacyImpactArrayFields.every(
+    (field) => Array.isArray(value[field]),
+  ) && Number.isSafeInteger(value.requestedTargetCount)
+    && value.requestedTargetCount >= 0;
+  const hasBoundedImpact = boundedImpactFields.every(
+    (field) => Object.hasOwn(value, field),
+  );
+  if (hasBoundedImpact) {
+    const changed = Array.isArray(value.changedElementIdSample)
+      ? value.changedElementIdSample.map(String)
+      : [];
+    const outside = Array.isArray(value.outsideTargetElementIdSample)
+      ? value.outsideTargetElementIdSample.map(String)
+      : [];
+    const validSample = (ids) => (
+      ids.length <= 100
+      && ids.every((id) => isValidPagerootElementId(id))
+      && new Set(ids).size === ids.length
+    );
+    if (
+      Number.isSafeInteger(value.changedElementCount)
+      && value.changedElementCount >= 0
+      && Number.isSafeInteger(value.requestedTargetCount)
+      && value.requestedTargetCount >= 0
+      && Number.isSafeInteger(value.outsideTargetCount)
+      && value.outsideTargetCount >= 0
+      && value.outsideTargetCount <= value.changedElementCount
+      && typeof value.truncated === "boolean"
+      && value.truncated === (
+        value.changedElementCount > changed.length
+        || value.outsideTargetCount > outside.length
+      )
+      && validSample(changed)
+      && validSample(outside)
+    ) {
+      assessment.changedElementCount = value.changedElementCount;
+      assessment.requestedTargetCount = value.requestedTargetCount;
+      assessment.outsideTargetCount = value.outsideTargetCount;
+      assessment.changedElementIdSample = changed;
+      assessment.outsideTargetElementIdSample = outside;
+      assessment.truncated = value.truncated;
+    }
+  } else if (hasLegacyImpact) {
+    const validUniqueIds = (ids) => (
+      ids.every((id) => isValidPagerootElementId(id))
+      && new Set(ids).size === ids.length
+    );
+    const changed = value.changedStableElementIds.map(String);
+    const requested = value.requestedTargetElementIds.map(String);
+    const outside = value.outsideRequestedTargetElementIds.map(String);
+    if (
+      validUniqueIds(changed)
+      && validUniqueIds(requested)
+      && validUniqueIds(outside)
+      && outside.every((id) => changed.includes(id))
+    ) {
+      assessment.changedStableElementIds = changed;
+      assessment.requestedTargetElementIds = requested;
+      assessment.outsideRequestedTargetElementIds = outside;
+      assessment.requestedTargetCount = value.requestedTargetCount;
+    }
+  }
+  return assessment;
 }
 
 function isRecord(value) {
