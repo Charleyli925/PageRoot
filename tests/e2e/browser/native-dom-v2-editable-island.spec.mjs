@@ -5,6 +5,7 @@ import {
   exportCurrentHtml,
   loadFixture,
   replaceEditableIslandBytes,
+  selectionSnapshot,
   setTextSelection,
 } from "./pageroot-driver.mjs";
 
@@ -289,6 +290,70 @@ test("toolbar formatting, protected atoms, comments and link identity stay safe"
   await setTextSelection(frame, "link", "开始试览".length);
   await page.keyboard.insertText("V2");
   await expect(link).toHaveAttribute("href", "#safe");
+});
+
+test("toolbar formatting restores one logical range across button and input focus", async ({ page }) => {
+  const { editor, frame } = await openFixture(page);
+  const target = await activateNativeEdit(frame, "plain");
+  await setTextSelection(frame, "plain", 0, 2);
+  const before = await selectionSnapshot(frame, "plain");
+  expect(before.text).toBe("普通");
+
+  const toolbar = editor.getByRole("toolbar");
+  const bold = toolbar.getByRole("button", { name: "加粗", exact: true });
+  await expect(bold).toBeEnabled();
+  await bold.click();
+  await expect.poll(() => authoredInnerHtml(target)).toContain("font-weight: 700");
+  expect((await selectionSnapshot(frame, "plain")).text).toBe("普通");
+
+  await toolbar.getByText("样式与间距", { exact: true }).click();
+  const fontSize = toolbar.getByLabel("字号（像素）");
+  await fontSize.fill("28");
+  await expect.poll(() => authoredInnerHtml(target)).toContain("font-size: 28px");
+  expect((await selectionSnapshot(frame, "plain")).text).toBe("普通");
+});
+
+test("a cleared iframe Selection still lets consecutive color commands use the saved lease", async ({ page }) => {
+  const { editor, frame } = await openFixture(page);
+  const target = await activateNativeEdit(frame, "plain");
+  await setTextSelection(frame, "plain", 0, 2);
+  const toolbar = editor.getByRole("toolbar");
+  await toolbar.getByText("样式与间距", { exact: true }).click();
+  const color = toolbar.getByLabel("文字颜色");
+  await color.evaluate((element) => {
+    element.dispatchEvent(new PointerEvent("pointerdown", {
+      bubbles: true,
+      cancelable: true,
+      pointerId: 1,
+      pointerType: "mouse",
+    }));
+  });
+  await frame.evaluate(() => document.getSelection()?.removeAllRanges());
+
+  const setColor = async (value) => color.evaluate((element, nextValue) => {
+    const setter = Object.getOwnPropertyDescriptor(
+      HTMLInputElement.prototype,
+      "value",
+    )?.set;
+    setter?.call(element, nextValue);
+    element.dispatchEvent(new Event("input", { bubbles: true }));
+    element.dispatchEvent(new Event("change", { bubbles: true }));
+  }, value);
+
+  await setColor("#123456");
+  await expect.poll(() => authoredInnerHtml(target)).toContain("color: rgb(18, 52, 86)");
+  await frame.evaluate(() => document.getSelection()?.removeAllRanges());
+  await color.evaluate((element) => {
+    element.dispatchEvent(new PointerEvent("pointerdown", {
+      bubbles: true,
+      cancelable: true,
+      pointerId: 2,
+      pointerType: "mouse",
+    }));
+  });
+  await setColor("#654321");
+  await expect.poll(() => authoredInnerHtml(target)).toContain("color: rgb(101, 67, 33)");
+  expect((await selectionSnapshot(frame, "plain")).text).toBe("普通");
 });
 
 test("IME confirmation replays at the frozen left-style caret", {

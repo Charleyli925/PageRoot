@@ -539,6 +539,7 @@ type ActiveNativeEdit = {
 type RetainedNativeEditFocus = {
   session: IslandEditingController;
   lease: ActiveNativeEdit["lease"];
+  selection: NativeEditSelection;
 };
 
 type NativeEditFenceBookmark = {
@@ -1304,6 +1305,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     nativeSessionNeedsCanonicalFenceRef.current = false;
     nativeEditNeedsReloadRef.current = false;
     currentNativeEditLeaseRef.current = null;
+    retainNativeEditFocusRef.current = null;
     const randomPart = globalThis.crypto?.randomUUID?.()
       ?? `${Date.now()}_${Math.random().toString(36).slice(2)}`;
     const token = `frame_${frameLoadGenerationRef.current}_${randomPart}`;
@@ -2517,6 +2519,70 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     }
     updateSelectedStyle();
   }, [updateSelectedStyle]);
+
+  const nativeEditAuthorityIsCurrent = useCallback((active: ActiveNativeEdit) => {
+    const currentDocument = iframeRef.current?.contentDocument;
+    const selectedTarget = selectedSourceSelectionRef.current;
+    return Boolean(
+      activeNativeEditRef.current === active
+      && active.rootElement.isConnected
+      && active.selectionElement.isConnected
+      && active.rootElement.ownerDocument === currentDocument
+      && selectedElementRef.current === active.selectionElement
+      && selectedTarget
+      && selectedTarget.id === active.target.id
+      && active.lease.domGeneration === nativeDomGenerationRef.current
+      && nativeEditLeasesMatch(currentNativeEditLeaseRef.current, active.lease)
+    );
+  }, []);
+
+  const restoreNativeEditSelectionForCommand = useCallback((
+    active: ActiveNativeEdit,
+  ): NativeEditSelection | null => {
+    if (!nativeEditAuthorityIsCurrent(active)) {
+      retainNativeEditFocusRef.current = null;
+      return null;
+    }
+    const retained = retainNativeEditFocusRef.current;
+    if (retained && (
+      retained.session !== active.session
+      || !nativeEditLeasesMatch(retained.lease, active.lease)
+    )) {
+      retainNativeEditFocusRef.current = null;
+      return null;
+    }
+    const documentSelection = active.rootElement.ownerDocument.getSelection();
+    const liveSelectionIsInside = Boolean(
+      documentSelection?.anchorNode
+      && documentSelection.focusNode
+      && (
+        documentSelection.anchorNode === active.rootElement
+        || active.rootElement.contains(documentSelection.anchorNode)
+      )
+      && (
+        documentSelection.focusNode === active.rootElement
+        || active.rootElement.contains(documentSelection.focusNode)
+      )
+    );
+    const selection = liveSelectionIsInside
+      ? active.session.getSelection()
+      : retained?.selection ?? active.selection;
+    active.session.restoreSelection(selection);
+    refreshNativeEditRangeState(active, selection);
+    return selection;
+  }, [nativeEditAuthorityIsCurrent, refreshNativeEditRangeState]);
+
+  const rememberNativeEditSelection = useCallback((active: ActiveNativeEdit) => {
+    if (!nativeEditAuthorityIsCurrent(active)) {
+      retainNativeEditFocusRef.current = null;
+      return;
+    }
+    retainNativeEditFocusRef.current = {
+      session: active.session,
+      lease: { ...active.lease },
+      selection: { ...active.selection },
+    };
+  }, [nativeEditAuthorityIsCurrent]);
 
   const reloadCommittedNativeEditFromSource = useCallback((
     active: ActiveNativeEdit,
@@ -5128,6 +5194,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       }
       const activeNativeEdit = activeNativeEditRef.current;
       if (activeNativeEdit?.rootElement.contains(event.target as Node)) {
+        retainNativeEditFocusRef.current = null;
         const formatShortcut = (
           (event.metaKey || event.ctrlKey)
           && !event.altKey
@@ -5225,6 +5292,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       onInteractionRef.current?.();
       setSpacingMenuOpen(false);
       if (activeNativeEditRef.current?.rootElement.contains(event.target as Node)) {
+        retainNativeEditFocusRef.current = null;
         return;
       }
       activeTextRangeRef.current = null;
@@ -5573,6 +5641,12 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         )
       ) return;
       if (activeNativeEdit) {
+        if (!restoreNativeEditSelectionForCommand(activeNativeEdit)) {
+          reportBlockedEdit(new Error(
+            "当前文字选择已失效，请重新选择文字后再修改格式。",
+          ));
+          return;
+        }
         const checkpoint = checkpointNativeEdit("style");
         if (!checkpoint.ok) return;
         activeNativeEdit = activeNativeEditRef.current;
@@ -5649,9 +5723,15 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           verifiedOverride.priority === "important",
         )) {
           reportBlockedEdit(new Error("当前选区无法安全应用这个文字格式。"));
+          retainNativeEditFocusRef.current = null;
           return;
         }
-        checkpointNativeEdit("style");
+        const checkpoint = checkpointNativeEdit("style");
+        if (!checkpoint.ok) {
+          retainNativeEditFocusRef.current = null;
+          return;
+        }
+        rememberNativeEditSelection(activeNativeEdit);
         return;
       }
       if (
@@ -5794,9 +5874,11 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       applySourceCommand,
       checkpointNativeEdit,
       finishNativeEditing,
+      rememberNativeEditSelection,
       refreshNativeEditRangeState,
       reportInlineStyleOverrideFailure,
       reportBlockedEdit,
+      restoreNativeEditSelectionForCommand,
       selectedElementHasSourceMutationAuthority,
     ],
   );
@@ -5806,8 +5888,13 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   ): boolean => {
     const active = activeNativeEditRef.current;
     if (!active) return false;
-    const nativeSelection = active.session.getSelection();
-    refreshNativeEditRangeState(active, nativeSelection);
+    const nativeSelection = restoreNativeEditSelectionForCommand(active);
+    if (!nativeSelection) {
+      reportBlockedEdit(new Error(
+        "当前文字选择已失效，请重新选择文字后再修改格式。",
+      ));
+      return true;
+    }
     const activeRange = activeTextRangeRef.current;
     if (!activeRange) {
       reportBlockedEdit(new Error("请先选中要修改的文字，再使用格式快捷键。"));
@@ -5842,8 +5929,8 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     return true;
   }, [
     applyInlineStyle,
-    refreshNativeEditRangeState,
     reportBlockedEdit,
+    restoreNativeEditSelectionForCommand,
   ]);
   applyNativeFormatShortcutRef.current = applyNativeFormatShortcut;
 
@@ -6074,10 +6161,37 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       event.preventDefault();
       return;
     }
+    const documentSelection = activeNativeEdit.rootElement.ownerDocument.getSelection();
+    const liveSelectionIsInside = Boolean(
+      documentSelection?.anchorNode
+      && documentSelection.focusNode
+      && (
+        documentSelection.anchorNode === activeNativeEdit.rootElement
+        || activeNativeEdit.rootElement.contains(documentSelection.anchorNode)
+      )
+      && (
+        documentSelection.focusNode === activeNativeEdit.rootElement
+        || activeNativeEdit.rootElement.contains(documentSelection.focusNode)
+      )
+    );
+    const retained = retainNativeEditFocusRef.current;
+    const selection = liveSelectionIsInside
+      ? activeNativeEdit.session.getSelection()
+      : retained
+        && retained.session === activeNativeEdit.session
+        && nativeEditLeasesMatch(retained.lease, activeNativeEdit.lease)
+        ? retained.selection
+        : activeNativeEdit.selection;
     retainNativeEditFocusRef.current = {
       session: activeNativeEdit.session,
       lease: { ...activeNativeEdit.lease },
+      selection: { ...selection },
     };
+    const target = event.target;
+    if (
+      target instanceof Element
+      && target.closest("button[data-native-format-focus='preserve']")
+    ) event.preventDefault();
   }, []);
   const handleToolbarMouseDownCapture = useCallback((
     event: ReactMouseEvent<HTMLDivElement>,
