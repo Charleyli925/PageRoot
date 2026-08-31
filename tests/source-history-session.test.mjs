@@ -155,6 +155,26 @@ test("SourceHistorySession keeps pending evidence intact for invalid ACK order, 
   assert.deepEqual(session.pendingOperations, originalPending);
 });
 
+test("SourceHistorySession does not mutate on an inactive-context ACK", () => {
+  const session = new SourceHistorySession();
+  session.activate(context, sourceSha256("a"), null);
+  session.record(context, transaction("a", "b"), 1);
+  const expectedSnapshot = structuredClone(session.snapshot);
+  const expectedPending = session.pendingOperations;
+
+  assert.deepEqual(
+    session.acknowledge(
+      { ...context, epoch: context.epoch + 1 },
+      expectedPending,
+      null,
+      sourceSha256("b"),
+    ),
+    { status: "invalid", reason: "inactive-context" },
+  );
+  assert.deepEqual(session.snapshot, expectedSnapshot);
+  assert.deepEqual(session.pendingOperations, expectedPending);
+});
+
 test("SourceHistorySession applies undo and redo locally with exact HTML evidence", () => {
   const session = new SourceHistorySession();
   session.activate(context, sourceSha256("a"), null);
