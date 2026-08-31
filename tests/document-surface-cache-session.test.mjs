@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  documentSurfaceCacheEntryMatchesToken,
+  documentSurfaceCacheToken,
   DocumentSurfaceCacheSession,
+  sameDocumentSurfaceCacheToken,
 } from "../app/application/document-surface-cache-session.js";
 
 const hash = (digit) => `sha256:${String(digit).slice(-1).repeat(64)}`;
@@ -32,6 +35,23 @@ function capture(session, id, html = `<p>${id}</p>`) {
     },
   });
 }
+
+test("cache readiness is fenced by the exact hot tab and source token", () => {
+  const token = documentSurfaceCacheToken({ tabId: "tab_a", sourceSha256: hash("a") });
+  const same = documentSurfaceCacheToken({ tabId: "tab_a", sourceSha256: hash("a") });
+  const changed = documentSurfaceCacheToken({ tabId: "tab_a", sourceSha256: hash("b") });
+  const entry = {
+    tabId: "tab_a",
+    sourceSha256: hash("a"),
+    tier: "hot",
+  };
+  assert.equal(Object.isFrozen(token), true);
+  assert.equal(sameDocumentSurfaceCacheToken(token, same), true);
+  assert.equal(sameDocumentSurfaceCacheToken(token, changed), false);
+  assert.equal(documentSurfaceCacheEntryMatchesToken(entry, token), true);
+  assert.equal(documentSurfaceCacheEntryMatchesToken({ ...entry, tier: "warm" }, token), false);
+  assert.equal(documentSurfaceCacheEntryMatchesToken({ ...entry, sourceSha256: hash("b") }, token), false);
+});
 
 test("surface cache admits only exact persisted and Canvas-verified projections", () => {
   const session = new DocumentSurfaceCacheSession();

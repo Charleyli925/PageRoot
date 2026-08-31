@@ -8,6 +8,7 @@ export type AgentProviderPresentation = Readonly<{
   displayName: string;
   agentName: string;
   logoSrc: string | null;
+  brandIcon?: "openai" | null;
   cardClassName: string;
   primaryActionDataAttribute: string | null;
   restartLabel?: string;
@@ -56,6 +57,7 @@ export function defaultAgentProviders(): readonly AgentProviderDescriptor[];
 export function agentProviderCardPresentation(provider: AgentProviderDescriptor | AgentProviderEntry): Readonly<{
   displayName: string;
   logoSrc: string | null;
+  brandIcon?: "openai" | null;
   cardClassName: string;
   primaryActionDataAttribute: string | null;
   availability: (value: AgentProviderAvailabilitySnapshot) => Readonly<{

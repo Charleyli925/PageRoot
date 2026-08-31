@@ -64,7 +64,9 @@ export const WorkbenchSettingsSidebar = memo(function WorkbenchSettingsSidebar({
           type="button"
           onClick={onReturnToWorkbench}
         >
-          <ArrowLeftIcon aria-hidden="true" size={18} weight="regular" />
+          <span className="workbench-settings-back-icon" aria-hidden="true">
+            <ArrowLeftIcon size={18} weight="regular" />
+          </span>
           <span>返回工作台</span>
         </button>
         <nav aria-label="设置类别">

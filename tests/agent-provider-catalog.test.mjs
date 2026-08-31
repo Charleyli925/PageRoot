@@ -65,6 +65,32 @@ test("Settings cards include every installable provider without provider-id bran
   assert.equal(cards[1].presentation.actions.install.label, "安装 Codex");
 });
 
+test("provider cards use the resolved current selection only for the selected provider", () => {
+  const qoderRequested = selection("qoder", { modelId: "requested" });
+  const qoderResolved = freezeAgentSelection({
+    ...qoderRequested,
+    resolvedModelId: "qoder:resolved",
+  });
+  const qoder = {
+    ...provider("qoder", qoderRequested),
+    installable: true,
+    availability: { status: "ready" },
+  };
+  const codex = {
+    ...provider("codex"),
+    presentation: CODEX_AGENT_PROVIDER.presentation,
+    installable: true,
+    availability: { status: "not-installed" },
+  };
+  const cards = agentProviderCardsFromCatalog({
+    selected: qoderResolved,
+    providers: { qoder, codex },
+  });
+
+  assert.deepEqual(cards.map((card) => card.selection), [qoderResolved, codex.selection]);
+  assert.equal(cards[1].presentation.brandIcon, "openai");
+});
+
 function selection(providerId, {
   modelId = null,
   reasoning = null,
@@ -491,4 +517,43 @@ test("one-click install is gated to installable providers and then refreshes ava
   assert.equal(refreshed.availability.status, "checking");
   assert.equal(catalog.provider(qoder).installSource, "managed");
   assert.equal(catalog.provider(qoder).installState, "idle");
+});
+
+test("post-install availability rechecks the provider's resolved selected authority", async () => {
+  const requested = freezeAgentSelection({
+    ...QODER_AGENT_PROVIDER.selection,
+    resolvedModelId: null,
+  });
+  const resolved = freezeAgentSelection({
+    ...requested,
+    resolvedModelId: "qoder:qoder-default",
+  });
+  const availabilitySelections = [];
+  const catalog = new AgentCatalogState({
+    bridgeClient: {
+      async preflightAgent() {
+        return {
+          status: "ready",
+          preflightId: "ticket_resolved_before_install",
+          selection: resolved,
+          expiresAt: new Date(20_000).toISOString(),
+        };
+      },
+      async installAgent() {
+        return { ok: true, providerId: "qoder", installSource: "managed" };
+      },
+      async agentAvailability({ selection: current }) {
+        availabilitySelections.push(current);
+        return { status: "ready" };
+      },
+    },
+    providers: [QODER_AGENT_PROVIDER],
+    selected: requested,
+    clock: { now: () => 10 },
+  });
+
+  await catalog.preflight(requested);
+  await catalog.install(requested);
+  assert.equal(availabilitySelections.at(-1).resolvedModelId, "qoder:qoder-default");
+  assert.equal(catalog.freezeSelected().resolvedModelId, "qoder:qoder-default");
 });

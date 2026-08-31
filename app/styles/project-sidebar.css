@@ -2,6 +2,8 @@
  * deliberately keep their existing selectors above; these rules only own the
  * project catalog and its read-only version projection. */
 :root {
+  --sidebar-content-inset: 14px;
+  --sidebar-content-right-inset: 12px;
   --sidebar-version-lane-0: #7169e7;
   --sidebar-version-lane-1: #918bef;
   --sidebar-version-lane-2: #aaa5f3;
@@ -19,7 +21,7 @@
 }
 
 .sidebar-project-section > h2 {
-  margin: 0 9px 4px;
+  margin: 0 0 4px;
   color: #9b98a2;
   font-size: 10px;
   font-weight: 680;
@@ -34,7 +36,7 @@
   display: flex;
   align-items: center;
   gap: 7px;
-  padding: 0 9px;
+  padding: 0;
   border: 0;
   border-radius: 8px;
   background: transparent;
@@ -61,14 +63,14 @@
 }
 
 .sidebar-project-row-current {
-  background: rgb(238 236 255 / 78%);
-  color: #4f47b8;
+  background: transparent;
+  color: #514f59;
 }
 
 .sidebar-project-row-current:hover:not(:disabled),
 .sidebar-project-row-current:focus-visible {
-  background: rgb(231 228 255 / 92%);
-  color: #3e379d;
+  background: rgb(83 76 112 / 7%);
+  color: #34323a;
 }
 
 .sidebar-project-row > .sidebar-project-icon {
@@ -99,7 +101,7 @@
 
 .sidebar-project-empty {
   display: block;
-  margin: 3px 9px 2px;
+  margin: 3px 0 2px;
   color: #aaa7af;
   font-size: 10.5px;
   line-height: 18px;
@@ -107,7 +109,7 @@
 
 .workbench-sidebar-error {
   display: block;
-  margin: 2px 9px 5px;
+  margin: 2px 0 5px;
 }
 
 .sidebar-imported-project {
@@ -198,7 +200,7 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr) 68px;
   align-items: center;
-  padding: 0 2px 0 calc(var(--sidebar-version-rail-width, 10px) + var(--sidebar-version-track-to-icon, 6px));
+  padding: 0 0 0 calc(var(--sidebar-version-rail-width, 10px) + var(--sidebar-version-track-to-icon, 6px));
   border-radius: 8px;
   background: transparent;
 }
@@ -297,7 +299,7 @@
 }
 
 .sidebar-version-empty {
-  margin: 2px 9px 4px;
+  margin: 2px 0 4px;
   color: #aaa7af;
   font-size: 10.5px;
   line-height: 18px;

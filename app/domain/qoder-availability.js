@@ -44,7 +44,7 @@ export function qoderAvailabilityFromFailureCode(
 export function qoderAvailabilityPresentation(availability) {
   const status = availability?.status || "checking";
   if (status === "ready") {
-    return Object.freeze({ statusLabel: "已连接", detail: "真实预检已完成，可直接交给 Qoder CLI", tone: "ready" });
+    return Object.freeze({ statusLabel: "已连接", detail: "真实预检已完成，可直接交给 Qoder 修改", tone: "ready" });
   }
   if (status === "not-installed") {
     return Object.freeze({ statusLabel: "未安装", detail: "如需从 PageRoot 直接发送，还需要 Qoder CLI。", tone: "attention" });
