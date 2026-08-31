@@ -118,8 +118,10 @@ test("selected chrome reuses hover geometry outside authored clipping", async ({
   await inlineChild.click();
   await expect(selectedOutline).toBeVisible();
   await expect(hoverOutline).toHaveCount(0);
-  await expect(inlineChild).toHaveAttribute("data-html-canvas-selected", "part");
-  expect(await inlineChild.evaluate((element) => {
+  await expect(target).toHaveAttribute("data-html-canvas-selected", "module");
+  await expect(target.locator("strong[data-html-canvas-selected], em[data-html-canvas-selected]"))
+    .toHaveCount(0);
+  expect(await target.locator("strong").evaluate((element) => {
     const style = getComputedStyle(element);
     return {
       color: style.outlineColor,
@@ -159,8 +161,10 @@ test("selected chrome reuses hover geometry outside authored clipping", async ({
   expect(await hoverOutline.boundingBox()).not.toEqual(coexistSelectedRect);
 });
 
-test("caption selection follows the current rich child on one visual host", async ({ page }) => {
-  const { editor, frame } = await loadFixture(page, "selected-overlay-clipping.html");
+test("caption selection promotes rich children to one canonical visual host", async ({ page }) => {
+  const { editor, frame } = await loadFixture(page, "selected-overlay-clipping.html", {
+    identifiedWorkingCopy: true,
+  });
   const first = frame.locator(caseSelector("rich-child-a"));
   const second = frame.locator(caseSelector("rich-child-b"));
   const hint = editor.getByTestId("canvas-capability-hint");
@@ -180,9 +184,111 @@ test("caption selection follows the current rich child on one visual host", asyn
   await expect(hint).toBeVisible();
   await hint.click();
 
-  await expect(second).toHaveAttribute("data-html-canvas-selected", "part");
+  await expect(frame.locator(caseSelector("selected-overlay-target")))
+    .toHaveAttribute("data-html-canvas-selected", "module");
   await expect(first).not.toHaveAttribute("data-html-canvas-selected", /.+/u);
-  await expect(editor.getByRole("toolbar")).toHaveAttribute("aria-label", /富文本 B/u);
+  await expect(second).not.toHaveAttribute("data-html-canvas-selected", /.+/u);
+  await expect(editor.getByRole("toolbar")).toHaveAttribute(
+    "aria-label",
+    /文章模块/u,
+  );
+  await expect(editor.getByRole("toolbar")).not.toHaveAttribute(
+    "aria-label",
+    /富文本/u,
+  );
+
+  await editor.getByRole("toolbar").getByRole("button", { name: /留评论/u }).click();
+  const composer = page.getByRole("region", { name: "添加评论" });
+  await expect(composer).toContainText("文章模块");
+  await expect(composer).not.toContainText("富文本 B");
+  await composer.getByRole("textbox", { name: "评论内容" })
+    .fill("完整文字宿主应作为同一个评论目标。");
+  await composer.getByRole("button", { name: "评论", exact: true }).click();
+  const savedCard = page.locator(".comment-card").filter({
+    hasText: "完整文字宿主应作为同一个评论目标。",
+  });
+  await expect(savedCard).toHaveAttribute("data-resolution", "exact");
+  await expect(savedCard).toContainText("文章模块");
+  await expect(savedCard).not.toContainText("富文本 B");
+});
+
+test("double click keeps the canonical rich-text host while caret stays in the exact child", async ({
+  page,
+}) => {
+  const { editor, frame } = await loadFixture(page, "selected-overlay-clipping.html", {
+    identifiedWorkingCopy: true,
+  });
+  const target = frame.locator(caseSelector("selected-overlay-target"));
+  const richChild = frame.locator(caseSelector("rich-child-a"));
+  const selectedOutline = editor.locator(
+    '[data-testid="canvas-target-outline"][data-tone="selected"]',
+  );
+
+  await richChild.dblclick();
+  await expect(target).toHaveAttribute("contenteditable", /^(?:plaintext-only|true)$/u);
+  await expect(richChild).not.toHaveAttribute("contenteditable", "true");
+  await expect(target).toHaveAttribute("data-html-canvas-selected", "part");
+  await expect(selectedOutline).toBeVisible();
+  const selectedRect = await selectedOutline.boundingBox();
+  expect(selectedRect?.height).toBeGreaterThan(92);
+
+  const caret = await frame.evaluate(() => {
+    const current = document.getSelection();
+    return {
+      collapsed: Boolean(current?.isCollapsed),
+      insideRichChild: Boolean(
+        current?.anchorNode
+        && document.querySelector('[data-native-case="rich-child-a"]')?.contains(current.anchorNode),
+      ),
+    };
+  });
+  expect(caret).toEqual({ collapsed: true, insideRichChild: true });
+});
+
+test("a block-level strong remains its own canonical target", async ({ page }) => {
+  const { editor, frame } = await loadFixture(page, "selected-overlay-clipping.html");
+  const blockStrong = frame.locator(caseSelector("block-strong"));
+  const selectedOutline = editor.locator(
+    '[data-testid="canvas-target-outline"][data-tone="selected"]',
+  );
+
+  await blockStrong.click();
+  await expect(blockStrong).toHaveAttribute("data-html-canvas-selected", "module");
+  await expect(frame.locator(caseSelector("selected-overlay-target")))
+    .not.toHaveAttribute("data-html-canvas-selected", /.+/u);
+  await expect(editor.getByRole("toolbar")).toHaveAttribute(
+    "aria-label",
+    /独立强调文字/u,
+  );
+  await expect(selectedOutline).toBeVisible();
+  const selectedRect = await selectedOutline.boundingBox();
+  const elementRect = await blockStrong.boundingBox();
+  expect(selectedRect).toEqual(elementRect);
+});
+
+test("a range inside a rich child keeps the complete host selected", async ({ page }) => {
+  const { editor, frame } = await loadFixture(page, "selected-overlay-clipping.html");
+  const target = frame.locator(caseSelector("selected-overlay-target"));
+  const richChild = frame.locator(caseSelector("rich-child-a"));
+  const selectedOutline = editor.locator(
+    '[data-testid="canvas-target-outline"][data-tone="selected"]',
+  );
+
+  await richChild.click();
+  await richChild.evaluate((element) => {
+    const range = document.createRange();
+    range.selectNodeContents(element);
+    const selection = document.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+  });
+  await target.dispatchEvent("mouseup");
+
+  await expect(target).toHaveAttribute("data-html-canvas-selected", "part");
+  await expect(richChild).not.toHaveAttribute("data-html-canvas-selected", /.+/u);
+  await expect(selectedOutline).toBeVisible();
+  const selectedRect = await selectedOutline.boundingBox();
+  expect(selectedRect?.height).toBeGreaterThan(92);
 });
 
 test("selected chrome clips to the iframe viewport while retaining selection", async ({ page }) => {

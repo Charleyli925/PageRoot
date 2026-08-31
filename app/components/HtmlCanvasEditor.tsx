@@ -166,8 +166,8 @@ import {
 import {
   canvasVisualTargetElement,
   canvasPointerCapabilityFromProof,
-  resolveCanvasPointerCapability,
-  resolveCanvasPointerHit,
+  resolveCanvasTarget,
+  type ResolvedCanvasTarget,
 } from "./html-canvas-pointer-capability";
 import {
   clipCanvasTargetRectToViewport,
@@ -1257,6 +1257,13 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     runtimeSourceRegistrationCleanupRef.current();
     runtimeSourceRegistrationCleanupRef.current = () => undefined;
     runtimeSourceElementsRef.current = null;
+    // A frame load invalidates every DOM reference. Keep only the logical
+    // selection snapshot for the existing selectTarget() rebind path.
+    selectedElementRef.current?.removeAttribute("data-html-canvas-selected");
+    selectedElementRef.current?.removeAttribute(GLOBAL_SELECTION_ATTRIBUTE);
+    selectedElementRef.current = null;
+    resizeObserverRef.current?.disconnect();
+    resizeObserverRef.current = null;
     const reuseCandidate = Boolean(options.reuseDocument)
       && !options.immediate
       && !options.forceStatic
@@ -1576,7 +1583,10 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     const container = containerRef.current;
     const iframe = iframeRef.current;
     const documentNode = iframe?.contentDocument;
-    const element = selectedElementRef.current;
+    const element = canvasVisualTargetElement(
+      selectedElementRef.current,
+      sourceIndexRef.current,
+    );
     const sourceSha256 = sourceIndexRef.current?.sourceSha256 ?? "";
     const viewContextGeneration =
       appliedPageViewContextRef.current?.generation ?? 0;
@@ -1726,10 +1736,14 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   const observeSelectedElement = useCallback(
     (element: HTMLElement) => {
       resizeObserverRef.current?.disconnect();
-      const ResizeObserverConstructor = element.ownerDocument.defaultView?.ResizeObserver;
+      const visualElement = canvasVisualTargetElement(
+        element,
+        sourceIndexRef.current,
+      ) ?? element;
+      const ResizeObserverConstructor = visualElement.ownerDocument.defaultView?.ResizeObserver;
       if (!ResizeObserverConstructor) return;
       const observer = new ResizeObserverConstructor(() => updateOverlayPosition());
-      observer.observe(element);
+      observer.observe(visualElement);
       resizeObserverRef.current = observer;
     },
     [updateOverlayPosition],
@@ -3003,6 +3017,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         showToolbar?: boolean;
         fromQueuedCommand?: boolean;
         runtimeGenerated?: boolean;
+        selectionOverride?: HtmlCanvasSelection;
       } = {},
     ): HtmlCanvasSelection => {
       pendingFrameRestoreEpochRef.current += 1;
@@ -3019,13 +3034,14 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
             { targetId: element.getAttribute(SOURCE_NODE_ATTRIBUTE) },
           )
         ) return activeNativeEdit.target;
-        const requestedTarget = selectionForElement(
-          element,
-          sourceIndexRef.current,
-          undefined,
-          undefined,
-          levelOverride,
-        );
+        const requestedTarget = options.selectionOverride
+          ?? selectionForElement(
+            element,
+            sourceIndexRef.current,
+            undefined,
+            undefined,
+            levelOverride,
+          );
         const committed = finishNativeEditing(true, "manual");
         if (!committed.ok) return activeNativeEdit.target;
         if (committed.frameReloading) {
@@ -3036,13 +3052,14 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       }
       selectedElementRef.current?.removeAttribute("data-html-canvas-selected");
       selectedElementRef.current?.removeAttribute(GLOBAL_SELECTION_ATTRIBUTE);
-      const nextSelection = selectionForElement(
-        element,
-        sourceIndexRef.current,
-        undefined,
-        undefined,
-        levelOverride,
-      );
+      const nextSelection = options.selectionOverride
+        ?? selectionForElement(
+          element,
+          sourceIndexRef.current,
+          undefined,
+          undefined,
+          levelOverride,
+        );
       selectedElementRef.current = element;
       setSpacingMenuOpen(false);
       setSelectedInsertionId(null);
@@ -3079,6 +3096,21 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     },
     [finishNativeEditing, observeSelectedElement, updateMoveAvailability, updateOverlayPosition, updateSelectedStyle],
   );
+
+  const selectResolvedTarget = useCallback((
+    resolvedTarget: ResolvedCanvasTarget,
+    options: {
+      preserveTextSelection?: boolean;
+      showToolbar?: boolean;
+      fromQueuedCommand?: boolean;
+    } = {},
+  ): HtmlCanvasSelection => (
+    selectElement(resolvedTarget.targetElement, undefined, {
+      ...options,
+      selectionOverride: resolvedTarget.selection,
+      runtimeGenerated: resolvedTarget.runtimeGenerated,
+    })
+  ), [selectElement]);
 
   const requestCommentForTarget = useCallback((target: HtmlCanvasSelection): boolean => {
     if (target.resolution !== "exact" || !isValidPagerootElementId(target.elementId)) {
@@ -3997,6 +4029,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     const selectedValue = selectElement(targetElement, "part", {
       preserveTextSelection: true,
       showToolbar: true,
+      selectionOverride: activeRange.target,
     });
     activeTextRangeRef.current = {
       ...activeRange,
@@ -4851,7 +4884,40 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       null,
     );
     appliedPageViewContextRef.current = pageViewContextRef.current;
+    const resolveTargetAtEvent = (event: MouseEvent) => resolveCanvasTarget({
+      documentNode,
+      eventTarget: event.target,
+      point: caretPointFromMouseEvent(event),
+      sourceIndex: sourceIndexRef.current,
+      enabled: true,
+      isProvenRuntimeSourceElement: currentRuntimeSourceProof(),
+      generation: nativeDomGenerationRef.current,
+    });
+    const isUsableHoveredTarget = (
+      candidate: ResolvedCanvasTarget | null,
+      event: MouseEvent,
+    ): candidate is ResolvedCanvasTarget => {
+      const eventTarget = event.target;
+      const eventNode = eventTarget
+        && typeof eventTarget === "object"
+        && "nodeType" in eventTarget
+        ? eventTarget as Node
+        : null;
+      const currentSourceHash = sourceIndexRef.current?.sourceSha256;
+      return Boolean(
+        candidate
+        && candidate.sourceRef
+        && candidate.sourceRef.expectedSourceSha256 === currentSourceHash
+        && candidate.generation === nativeDomGenerationRef.current
+        && candidate.targetElement.ownerDocument === documentNode
+        && candidate.targetElement.isConnected
+        && candidate.visualElement.isConnected
+        && eventNode
+        && candidate.targetElement.contains(eventNode)
+      );
+    };
     const handleClick = (event: MouseEvent) => {
+      const hoveredTarget = hoverControllerRef.current?.snapshot.capability ?? null;
       hoverControllerRef.current?.hide();
       // Authored controls remain selectable/editable content in the Canvas,
       // never live navigation or form controls. Suppress their browser action
@@ -4859,15 +4925,10 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       // iframe away from the verified source document.
       const nativeActionTarget = findNativeActionTarget(event.target);
       if (nativeActionTarget) event.preventDefault();
-      const hit = resolveCanvasPointerHit({
-        documentNode,
-        eventTarget: event.target,
-        point: caretPointFromMouseEvent(event),
-        sourceIndex: sourceIndexRef.current,
-        enabled: true,
-        isProvenRuntimeSourceElement: currentRuntimeSourceProof(),
-      });
-      if (hit.action === "clear") {
+      const resolvedTarget = isUsableHoveredTarget(hoveredTarget, event)
+        ? hoveredTarget
+        : resolveTargetAtEvent(event);
+      if (!resolvedTarget) {
         if (!lockedRef.current) {
           event.preventDefault();
           event.stopPropagation();
@@ -4875,7 +4936,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         }
         return;
       }
-      const target = hit.capability.element;
+      const target = resolvedTarget.targetElement;
       if (lockedRef.current) {
         if (target.closest(
           "a, button, form, input, select, summary, textarea, [contenteditable], [role=\"tab\"], [aria-expanded][aria-controls]",
@@ -4884,18 +4945,19 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         }
         return;
       }
-      const targetSelection = selectionForElement(
-        target,
-        sourceIndexRef.current,
-      );
+      const actionSelection = resolvedTarget.runtimeGenerated
+        || !sourceIndexRef.current
+        ? null
+        : selectionForElement(resolvedTarget.hitElement, sourceIndexRef.current);
       if (
         event.altKey
-        && resolvePagePresentationAction(targetSelection)
+        && actionSelection
+        && resolvePagePresentationAction(actionSelection)
       ) {
         event.preventDefault();
         event.stopPropagation();
         if (event.detail === 1) {
-          executePagePresentationAction(targetSelection, {
+          executePagePresentationAction(actionSelection, {
             selectTargetAfter: true,
           });
         }
@@ -4914,41 +4976,34 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       }
       event.preventDefault();
       event.stopPropagation();
-      selectElement(target, undefined, {
-        runtimeGenerated: hit.capability.runtimeGenerated,
-      });
+      selectResolvedTarget(resolvedTarget);
     };
 
     const handleDoubleClick = (event: MouseEvent) => {
       hoverControllerRef.current?.hide();
       if (findNativeActionTarget(event.target)) event.preventDefault();
       const caretPoint = caretPointFromMouseEvent(event);
-      const hit = resolveCanvasPointerHit({
-        documentNode,
-        eventTarget: event.target,
-        point: caretPoint,
-        sourceIndex: sourceIndexRef.current,
-        enabled: true,
-        isProvenRuntimeSourceElement: currentRuntimeSourceProof(),
-      });
-      if (hit.action === "clear") return;
-      const target = hit.capability.element;
+      const resolvedTarget = resolveTargetAtEvent(event);
+      if (!resolvedTarget) return;
+      const target = resolvedTarget.targetElement;
       const dedicatedSurface = findDedicatedSourceSurfaceAtPoint(
         documentNode,
         caretPoint,
       );
-      if (hit.capability.runtimeGenerated) {
+      if (resolvedTarget.runtimeGenerated) {
         event.preventDefault();
         event.stopPropagation();
         if (!lockedRef.current) {
-          selectElement(target, undefined, { runtimeGenerated: true });
+          selectResolvedTarget(resolvedTarget);
         }
         return;
       }
       if (
         event.altKey
+        && !resolvedTarget.runtimeGenerated
+        && sourceIndexRef.current
         && resolvePagePresentationAction(selectionForElement(
-          target,
+          resolvedTarget.hitElement,
           sourceIndexRef.current,
         ))
       ) {
@@ -4993,11 +5048,11 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           );
         }
       }
-      selectElement(editTarget, undefined, {
+      selectResolvedTarget(resolvedTarget, {
         preserveTextSelection: Boolean(activeTextRangeRef.current),
       });
       const editingStarted = startEditing(caretPoint);
-      if (!editingStarted) selectElement(editTarget);
+      if (!editingStarted) selectResolvedTarget(resolvedTarget);
     };
 
     let disabledButtonPointer:
@@ -5197,13 +5252,14 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         hoverControllerRef.current?.hide();
         return;
       }
-      hoverControllerRef.current?.update(resolveCanvasPointerCapability({
+      hoverControllerRef.current?.update(resolveCanvasTarget({
         documentNode,
         eventTarget: event.target,
         point: caretPointFromMouseEvent(event),
         sourceIndex: sourceIndexRef.current,
         enabled: true,
         isProvenRuntimeSourceElement: currentRuntimeSourceProof(),
+        generation: nativeDomGenerationRef.current,
       }));
     };
     const handlePointerLeave = () => {
@@ -5407,7 +5463,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     finishNativeEditing,
     moveSelected,
     resolvePagePresentationAction,
-    selectElement,
+    selectResolvedTarget,
     selectTarget,
     selectedElementHasSourceMutationAuthority,
     startEditing,
@@ -5839,7 +5895,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   const hoverTargetIsSelected = Boolean(
     hoverChrome.capability
     && selection
-    && hoverChrome.capability.element === selectedVisualTargetElement,
+    && hoverChrome.capability.visualElement === selectedVisualTargetElement,
   );
   const selectedOutlineStyle = canvasTargetOutlineStyle(
     containerRef.current,
@@ -5874,7 +5930,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     : undefined;
   if (
     (showHoverOutline || showHoverHint)
-    && hoverChrome.capability?.element?.isConnected
+    && hoverChrome.capability?.visualElement?.isConnected
     && containerRef.current
     && iframeRef.current
   ) {
@@ -5882,7 +5938,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     const outline = canvasTargetOutlineStyle(
       containerRef.current,
       iframeRef.current,
-      hoverChrome.capability.element,
+      hoverChrome.capability.visualElement,
     );
     if (outline) {
       hoverOutlineStyle = outline;
@@ -5960,14 +6016,23 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   const handleHoverHintClick = useCallback((event: ReactMouseEvent<HTMLDivElement>) => {
     event.preventDefault();
     event.stopPropagation();
-    const capability = hoverChrome.capability;
-    if (!interactionLocked && capability) {
-      hoverControllerRef.current?.hide();
-      selectElement(capability.selectionElement, undefined, {
-        runtimeGenerated: capability.runtimeGenerated,
-      });
-    }
-  }, [hoverChrome.capability, interactionLocked, selectElement]);
+    const resolvedTarget = hoverChrome.capability;
+    if (interactionLocked || !resolvedTarget) return;
+    hoverControllerRef.current?.hide();
+    const currentDocument = iframeRef.current?.contentDocument;
+    const currentSourceHash = sourceIndexRef.current?.sourceSha256;
+    if (
+      resolvedTarget.generation !== nativeDomGenerationRef.current
+      || resolvedTarget.targetElement.ownerDocument !== currentDocument
+      || !resolvedTarget.targetElement.isConnected
+      || !resolvedTarget.visualElement.isConnected
+      || (
+        resolvedTarget.sourceRef
+        && resolvedTarget.sourceRef.expectedSourceSha256 !== currentSourceHash
+      )
+    ) return;
+    selectResolvedTarget(resolvedTarget);
+  }, [hoverChrome.capability, interactionLocked, selectResolvedTarget]);
   const dismissEditFeedback = useCallback(() => {
     setEditFeedback(null);
   }, []);
