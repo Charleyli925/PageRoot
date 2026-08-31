@@ -283,6 +283,7 @@ export const HtmlCanvasSelectionChrome = memo(function HtmlCanvasSelectionChrome
                 <button
                   type="button"
                   className={styles.formatButton}
+                  data-native-format-focus="preserve"
                   aria-pressed={selectedStyle.isBold}
                   disabled={textFormatRequiresSelection}
                   title={textFormatRequiresSelection ? "请先选中要修改的文字" : "加粗"}
@@ -294,6 +295,7 @@ export const HtmlCanvasSelectionChrome = memo(function HtmlCanvasSelectionChrome
                 <button
                   type="button"
                   className={styles.formatButton}
+                  data-native-format-focus="preserve"
                   aria-pressed={selectedStyle.isItalic}
                   disabled={textFormatRequiresSelection}
                   title={textFormatRequiresSelection ? "请先选中要修改的文字" : "斜体"}
@@ -305,6 +307,7 @@ export const HtmlCanvasSelectionChrome = memo(function HtmlCanvasSelectionChrome
                 <button
                   type="button"
                   className={styles.formatButton}
+                  data-native-format-focus="preserve"
                   aria-pressed={selectedStyle.isUnderline}
                   disabled={textFormatRequiresSelection}
                   title={textFormatRequiresSelection ? "请先选中要修改的文字" : "下划线"}

@@ -539,7 +539,23 @@ type ActiveNativeEdit = {
 type RetainedNativeEditFocus = {
   session: IslandEditingController;
   lease: ActiveNativeEdit["lease"];
+  targetId: string;
+  selection: NativeEditSelection;
+  textRange: ActiveTextRange | null;
 };
+
+function cloneActiveTextRange(
+  range: ActiveTextRange | null,
+  target?: HtmlCanvasSelection,
+): ActiveTextRange | null {
+  if (!range) return null;
+  return {
+    ...range,
+    target: target ?? range.target,
+    segments: range.segments.map((segment) => ({ ...segment })),
+    styleElements: [...range.styleElements],
+  };
+}
 
 type NativeEditFenceBookmark = {
   fenceId: number;
@@ -1304,6 +1320,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     nativeSessionNeedsCanonicalFenceRef.current = false;
     nativeEditNeedsReloadRef.current = false;
     currentNativeEditLeaseRef.current = null;
+    retainNativeEditFocusRef.current = null;
     const randomPart = globalThis.crypto?.randomUUID?.()
       ?? `${Date.now()}_${Math.random().toString(36).slice(2)}`;
     const token = `frame_${frameLoadGenerationRef.current}_${randomPart}`;
@@ -2486,10 +2503,33 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     active: ActiveNativeEdit,
     nextSelection: NativeEditSelection,
   ) => {
+    const retained = retainNativeEditFocusRef.current;
+    const retainedIsCurrent = Boolean(
+      retained
+      && retained.session === active.session
+      && retained.targetId === active.target.id
+      && nativeEditLeasesMatch(retained.lease, active.lease)
+    );
     active.selection = nextSelection;
     const startOffset = Math.min(nextSelection.anchor, nextSelection.focus);
     const endOffset = Math.max(nextSelection.anchor, nextSelection.focus);
     if (startOffset === endOffset) {
+      const retainedTextRange = retainedIsCurrent
+        ? retained?.textRange ?? activeTextRangeRef.current
+        : null;
+      if (
+        retained
+        && retainedTextRange
+        && retained.selection.anchor !== retained.selection.focus
+      ) {
+        activeTextRangeRef.current = cloneActiveTextRange(
+          retainedTextRange,
+          active.target,
+        );
+        setHasTextRange(true);
+        updateSelectedStyle();
+        return;
+      }
       activeTextRangeRef.current = null;
       setHasTextRange(false);
       updateSelectedStyle();
@@ -2517,6 +2557,74 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     }
     updateSelectedStyle();
   }, [updateSelectedStyle]);
+
+  const nativeEditAuthorityIsCurrent = useCallback((active: ActiveNativeEdit) => {
+    const currentDocument = iframeRef.current?.contentDocument;
+    const selectedTarget = selectedSourceSelectionRef.current;
+    return Boolean(
+      activeNativeEditRef.current === active
+      && active.rootElement.isConnected
+      && active.selectionElement.isConnected
+      && active.rootElement.ownerDocument === currentDocument
+      && selectedElementRef.current === active.selectionElement
+      && selectedTarget
+      && selectedTarget.id === active.target.id
+      && active.lease.domGeneration === nativeDomGenerationRef.current
+      && nativeEditLeasesMatch(currentNativeEditLeaseRef.current, active.lease)
+    );
+  }, []);
+
+  const restoreNativeEditSelectionForCommand = useCallback((
+    active: ActiveNativeEdit,
+  ): NativeEditSelection | null => {
+    if (!nativeEditAuthorityIsCurrent(active)) {
+      retainNativeEditFocusRef.current = null;
+      return null;
+    }
+    const retained = retainNativeEditFocusRef.current;
+    if (retained && (
+      retained.session !== active.session
+      || retained.targetId !== active.target.id
+      || !nativeEditLeasesMatch(retained.lease, active.lease)
+    )) {
+      retainNativeEditFocusRef.current = null;
+      return null;
+    }
+    const documentSelection = active.rootElement.ownerDocument.getSelection();
+    const liveSelectionIsInside = Boolean(
+      documentSelection?.anchorNode
+      && documentSelection.focusNode
+      && (
+        documentSelection.anchorNode === active.rootElement
+        || active.rootElement.contains(documentSelection.anchorNode)
+      )
+      && (
+        documentSelection.focusNode === active.rootElement
+        || active.rootElement.contains(documentSelection.focusNode)
+      )
+    );
+    const selection = retained?.selection
+      ?? (liveSelectionIsInside
+        ? active.session.getSelection()
+        : active.selection);
+    active.session.restoreSelection(selection);
+    refreshNativeEditRangeState(active, selection);
+    return selection;
+  }, [nativeEditAuthorityIsCurrent, refreshNativeEditRangeState]);
+
+  const rememberNativeEditSelection = useCallback((active: ActiveNativeEdit) => {
+    if (!nativeEditAuthorityIsCurrent(active)) {
+      retainNativeEditFocusRef.current = null;
+      return;
+    }
+    retainNativeEditFocusRef.current = {
+      session: active.session,
+      lease: { ...active.lease },
+      targetId: active.target.id,
+      selection: { ...active.selection },
+      textRange: cloneActiveTextRange(activeTextRangeRef.current, active.target),
+    };
+  }, [nativeEditAuthorityIsCurrent]);
 
   const reloadCommittedNativeEditFromSource = useCallback((
     active: ActiveNativeEdit,
@@ -5128,6 +5236,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       }
       const activeNativeEdit = activeNativeEditRef.current;
       if (activeNativeEdit?.rootElement.contains(event.target as Node)) {
+        retainNativeEditFocusRef.current = null;
         const formatShortcut = (
           (event.metaKey || event.ctrlKey)
           && !event.altKey
@@ -5224,7 +5333,67 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       hoverControllerRef.current?.hide();
       onInteractionRef.current?.();
       setSpacingMenuOpen(false);
+      const toolbarTarget = event.target instanceof Node
+        && toolbarRef.current?.contains(event.target);
+      if (toolbarTarget) {
+        const activeNativeEdit = activeNativeEditRef.current;
+        if (activeNativeEdit) {
+          const documentSelection = activeNativeEdit.rootElement.ownerDocument.getSelection();
+          const liveSelectionIsInside = Boolean(
+            documentSelection?.anchorNode
+            && documentSelection.focusNode
+            && (
+              documentSelection.anchorNode === activeNativeEdit.rootElement
+              || activeNativeEdit.rootElement.contains(documentSelection.anchorNode)
+            )
+            && (
+              documentSelection.focusNode === activeNativeEdit.rootElement
+              || activeNativeEdit.rootElement.contains(documentSelection.focusNode)
+            )
+          );
+          const retained = retainNativeEditFocusRef.current;
+          const retainedIsCurrent = Boolean(
+            retained
+            && retained.session === activeNativeEdit.session
+            && retained.targetId === activeNativeEdit.target.id
+            && nativeEditLeasesMatch(retained.lease, activeNativeEdit.lease),
+          );
+          if (retained && !retainedIsCurrent) return;
+          const selection = retained && retainedIsCurrent
+            ? retained.selection
+            : liveSelectionIsInside
+              ? activeNativeEdit.session.getSelection()
+              : activeNativeEdit.selection;
+          retainNativeEditFocusRef.current = {
+            session: activeNativeEdit.session,
+            lease: { ...activeNativeEdit.lease },
+            targetId: activeNativeEdit.target.id,
+            selection: { ...selection },
+            textRange: cloneActiveTextRange(
+              activeTextRangeRef.current,
+              activeNativeEdit.target,
+            ),
+          };
+          const targetElement = event.target instanceof Element
+            ? event.target
+            : event.target instanceof Node
+              ? event.target.parentElement
+              : null;
+          if (
+            targetElement?.closest(
+              "button[data-native-format-focus='preserve']",
+            )
+          ) event.preventDefault();
+          const nativeActionTarget = findNativeActionTarget(event.target);
+          if (
+            nativeActionTarget
+            && ["INPUT", "SELECT", "TEXTAREA"].includes(nativeActionTarget.tagName)
+          ) event.preventDefault();
+        }
+        return;
+      }
       if (activeNativeEditRef.current?.rootElement.contains(event.target as Node)) {
+        retainNativeEditFocusRef.current = null;
         return;
       }
       activeTextRangeRef.current = null;
@@ -5573,6 +5742,12 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         )
       ) return;
       if (activeNativeEdit) {
+        if (!restoreNativeEditSelectionForCommand(activeNativeEdit)) {
+          reportBlockedEdit(new Error(
+            "当前文字选择已失效，请重新选择文字后再修改格式。",
+          ));
+          return;
+        }
         const checkpoint = checkpointNativeEdit("style");
         if (!checkpoint.ok) return;
         activeNativeEdit = activeNativeEditRef.current;
@@ -5649,9 +5824,15 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           verifiedOverride.priority === "important",
         )) {
           reportBlockedEdit(new Error("当前选区无法安全应用这个文字格式。"));
+          retainNativeEditFocusRef.current = null;
           return;
         }
-        checkpointNativeEdit("style");
+        const checkpoint = checkpointNativeEdit("style");
+        if (!checkpoint.ok) {
+          retainNativeEditFocusRef.current = null;
+          return;
+        }
+        rememberNativeEditSelection(activeNativeEdit);
         return;
       }
       if (
@@ -5794,9 +5975,11 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       applySourceCommand,
       checkpointNativeEdit,
       finishNativeEditing,
+      rememberNativeEditSelection,
       refreshNativeEditRangeState,
       reportInlineStyleOverrideFailure,
       reportBlockedEdit,
+      restoreNativeEditSelectionForCommand,
       selectedElementHasSourceMutationAuthority,
     ],
   );
@@ -5806,8 +5989,13 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   ): boolean => {
     const active = activeNativeEditRef.current;
     if (!active) return false;
-    const nativeSelection = active.session.getSelection();
-    refreshNativeEditRangeState(active, nativeSelection);
+    const nativeSelection = restoreNativeEditSelectionForCommand(active);
+    if (!nativeSelection) {
+      reportBlockedEdit(new Error(
+        "当前文字选择已失效，请重新选择文字后再修改格式。",
+      ));
+      return true;
+    }
     const activeRange = activeTextRangeRef.current;
     if (!activeRange) {
       reportBlockedEdit(new Error("请先选中要修改的文字，再使用格式快捷键。"));
@@ -5842,8 +6030,8 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     return true;
   }, [
     applyInlineStyle,
-    refreshNativeEditRangeState,
     reportBlockedEdit,
+    restoreNativeEditSelectionForCommand,
   ]);
   applyNativeFormatShortcutRef.current = applyNativeFormatShortcut;
 
@@ -6074,10 +6262,44 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       event.preventDefault();
       return;
     }
+    const documentSelection = activeNativeEdit.rootElement.ownerDocument.getSelection();
+    const liveSelectionIsInside = Boolean(
+      documentSelection?.anchorNode
+      && documentSelection.focusNode
+      && (
+        documentSelection.anchorNode === activeNativeEdit.rootElement
+        || activeNativeEdit.rootElement.contains(documentSelection.anchorNode)
+      )
+      && (
+        documentSelection.focusNode === activeNativeEdit.rootElement
+        || activeNativeEdit.rootElement.contains(documentSelection.focusNode)
+      )
+    );
+    const retained = retainNativeEditFocusRef.current;
+    const retainedIsCurrent = Boolean(
+      retained
+      && retained.session === activeNativeEdit.session
+      && retained.targetId === activeNativeEdit.target.id
+      && nativeEditLeasesMatch(retained.lease, activeNativeEdit.lease),
+    );
+    if (retained && !retainedIsCurrent) return;
+    const selection = retained && retainedIsCurrent
+      ? retained.selection
+      : liveSelectionIsInside
+        ? activeNativeEdit.session.getSelection()
+        : activeNativeEdit.selection;
     retainNativeEditFocusRef.current = {
       session: activeNativeEdit.session,
       lease: { ...activeNativeEdit.lease },
+      targetId: activeNativeEdit.target.id,
+      selection: { ...selection },
+      textRange: cloneActiveTextRange(activeTextRangeRef.current, activeNativeEdit.target),
     };
+    const target = event.target;
+    if (
+      target instanceof Element
+      && target.closest("button[data-native-format-focus='preserve']")
+    ) event.preventDefault();
   }, []);
   const handleToolbarMouseDownCapture = useCallback((
     event: ReactMouseEvent<HTMLDivElement>,
