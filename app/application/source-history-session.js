@@ -7,6 +7,109 @@ import {
 export const SOURCE_HISTORY_MEMORY_LIMIT = 20;
 const SHA256 = /^sha256:[a-f0-9]{64}$/u;
 
+function isRecord(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function acknowledgementAccepted(status, pendingCount) {
+  return Object.freeze(status === "accepted-prefix"
+    ? { status, pendingCount }
+    : { status });
+}
+
+function acknowledgementInvalid(reason) {
+  return Object.freeze({ status: "invalid", reason: String(reason) });
+}
+
+function validSha256(value) {
+  return SHA256.test(String(value || ""));
+}
+
+function sameOperation(left, right) {
+  if (!isRecord(left) || !isRecord(right)) return false;
+  try {
+    return JSON.stringify(left) === JSON.stringify(right);
+  } catch {
+    return false;
+  }
+}
+
+function validateOperationShape(operation, label) {
+  if (!isRecord(operation) || !String(operation.operationId || "")) {
+    return `${label}-operation`;
+  }
+  if (
+    !validSha256(operation.beforeSourceSha256)
+    || !validSha256(operation.afterSourceSha256)
+  ) {
+    return `${label}-sha`;
+  }
+  return null;
+}
+
+function persistedHistorySourceSha256(history) {
+  if (!isRecord(history) || !Array.isArray(history.entries)) return null;
+  const entries = history.entries;
+  const cursor = Number(history.cursor);
+  if (
+    !Number.isSafeInteger(cursor)
+    || cursor < 0
+    || cursor > entries.length
+    || !validSha256(history.baseSourceSha256)
+  ) return { error: "persisted-history-state" };
+  let expected = String(history.baseSourceSha256);
+  const operationIds = new Set();
+  for (const entry of entries) {
+    const shapeError = validateOperationShape(entry, "persisted-history");
+    if (
+      shapeError
+      || operationIds.has(entry.operationId)
+      || entry.beforeSourceSha256 !== expected
+    ) return { error: shapeError || "persisted-history-chain" };
+    operationIds.add(entry.operationId);
+    expected = entry.afterSourceSha256;
+  }
+  return {
+    sourceSha256: cursor === 0
+      ? String(history.baseSourceSha256)
+      : String(entries[cursor - 1].afterSourceSha256),
+    entries,
+    cursor,
+  };
+}
+
+function persistedHistoryConfirms({ history, context, operations, sourceSha256Value }) {
+  // PR10 deliberately exposes a history-no-op response. The exact autosave
+  // HTML/hash acknowledgement remains the durable proof in that mode. When a
+  // history journal is present, however, it must independently agree with the
+  // acknowledged operation prefix.
+  if (history === null || history === undefined) return null;
+  if (!isRecord(history)) return "persisted-history-record";
+  for (const key of ["projectId", "documentId"]) {
+    if (
+      history[key] !== undefined
+      && String(history[key] || "") !== String(context?.[key] || "")
+    ) return "persisted-history-context";
+  }
+  const persisted = persistedHistorySourceSha256(history);
+  if (!persisted || persisted.error) return persisted?.error || "persisted-history-record";
+  if (persisted.entries.length === 0) {
+    return persisted.sourceSha256 === sourceSha256Value
+      ? null
+      : "persisted-history-sha";
+  }
+  if (persisted.sourceSha256 !== sourceSha256Value) return "persisted-history-sha";
+  const limit = persisted.cursor - operations.length;
+  for (let start = 0; start <= limit; start += 1) {
+    const candidate = persisted.entries.slice(start, start + operations.length);
+    if (candidate.length === operations.length
+      && candidate.every((entry, index) => sameOperation(entry, operations[index]))) {
+      return null;
+    }
+  }
+  return "persisted-history-operations";
+}
+
 function sameContext(left, right) {
   return Boolean(
     left
@@ -190,17 +293,81 @@ export class SourceHistorySession {
     return true;
   }
 
-  acknowledge(context, sentOperations, _historyValue, sourceSha256Value) {
-    if (!this.isActive(context)) return false;
-    const sentIds = new Set(
-      Array.isArray(sentOperations)
-        ? sentOperations.map((operation) => operation.operationId)
-        : [],
-    );
-    this.#pending = this.#pending.filter(
-      (operation) => !sentIds.has(operation.operationId),
-    );
-    return String(sourceSha256Value || "") === this.#currentSourceSha256;
+  acknowledge(context, sentOperations, historyValue, sourceSha256Value) {
+    if (!this.isActive(context)) {
+      return acknowledgementInvalid("inactive-context");
+    }
+    if (!Array.isArray(sentOperations)) {
+      return acknowledgementInvalid("sent-operations-record");
+    }
+    const acknowledgedSourceSha256 = String(sourceSha256Value || "");
+    if (!validSha256(acknowledgedSourceSha256)) {
+      return acknowledgementInvalid("acknowledged-sha");
+    }
+
+    const pendingIds = new Set();
+    let previousPendingSha256 = null;
+    for (const operation of this.#pending) {
+      const shapeError = validateOperationShape(operation, "pending");
+      if (shapeError || pendingIds.has(operation.operationId)) {
+        return acknowledgementInvalid(shapeError || "pending-operation-duplicate");
+      }
+      if (previousPendingSha256 && operation.beforeSourceSha256 !== previousPendingSha256) {
+        return acknowledgementInvalid("pending-operation-chain");
+      }
+      pendingIds.add(operation.operationId);
+      previousPendingSha256 = operation.afterSourceSha256;
+    }
+    if (sentOperations.length > this.#pending.length) {
+      return acknowledgementInvalid("sent-operations-not-prefix");
+    }
+    const sentIds = new Set();
+    let previousSentSha256 = null;
+    for (let index = 0; index < sentOperations.length; index += 1) {
+      const sent = sentOperations[index];
+      const expected = this.#pending[index];
+      const shapeError = validateOperationShape(sent, "sent");
+      if (shapeError || sentIds.has(sent.operationId)) {
+        return acknowledgementInvalid(shapeError || "sent-operation-duplicate");
+      }
+      if (!sameOperation(sent, expected)) {
+        return acknowledgementInvalid("sent-operations-not-prefix");
+      }
+      if (previousSentSha256 && sent.beforeSourceSha256 !== previousSentSha256) {
+        return acknowledgementInvalid("sent-operation-chain");
+      }
+      sentIds.add(sent.operationId);
+      previousSentSha256 = sent.afterSourceSha256;
+    }
+    if (
+      sentOperations.length > 0
+      && previousSentSha256 !== acknowledgedSourceSha256
+    ) {
+      return acknowledgementInvalid("acknowledged-sha-not-last-operation");
+    }
+    const remaining = this.#pending.slice(sentOperations.length);
+    if (
+      remaining.length > 0
+      && remaining[0].beforeSourceSha256 !== acknowledgedSourceSha256
+    ) {
+      return acknowledgementInvalid("remaining-operation-chain");
+    }
+    if (remaining.length === 0 && this.#currentSourceSha256 !== acknowledgedSourceSha256) {
+      return acknowledgementInvalid("acknowledged-sha-not-local-head");
+    }
+    if (sentOperations.length > 0) {
+      const historyError = persistedHistoryConfirms({
+        history: historyValue,
+        context,
+        operations: sentOperations,
+        sourceSha256Value: acknowledgedSourceSha256,
+      });
+      if (historyError) return acknowledgementInvalid(historyError);
+    }
+    this.#pending = remaining;
+    return remaining.length === 0
+      ? acknowledgementAccepted("accepted-head")
+      : acknowledgementAccepted("accepted-prefix", remaining.length);
   }
 
   apply(context, direction, sourceHtml, editRevision, createdAt = new Date().toISOString()) {

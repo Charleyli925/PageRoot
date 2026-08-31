@@ -1351,12 +1351,13 @@ export class DocumentWorkflow {
         await this.#validateAutosaveAck(payload, write);
         const sourceSha256 = String(payload.sha256 || payload.currentHtmlSha256 || "");
         const persistedRevision = revision(payload.persistedRevision);
-        if (!this.#sourceHistorySession.acknowledge(
+        const acknowledgement = this.#sourceHistorySession.acknowledge(
           writeContext,
           write.historyOperations,
           payload.sourceHistory,
           sourceSha256,
-        )) {
+        );
+        if (acknowledgement.status === "invalid") {
           this.#sourceHistorySession.activate(
             writeContext,
             sourceSha256,
@@ -1789,12 +1790,13 @@ export class DocumentWorkflow {
           || authority.currentExactVersionId,
       };
       if (!payload.lastModifiedAt) return null;
-      if (!this.#sourceHistorySession.acknowledge(
+      const acknowledgement = this.#sourceHistorySession.acknowledge(
         writeContext,
         write.historyOperations,
         authority.sourceHistory,
         sourceSha256,
-      )) {
+      );
+      if (acknowledgement.status === "invalid") {
         this.#sourceHistorySession.activate(
           writeContext,
           sourceSha256,

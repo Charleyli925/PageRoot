@@ -186,7 +186,10 @@ test("accepted structure patches undo and redo inside the bounded open-document 
     identityDelta: applied.identityDelta,
   }, 1);
   const pending = session.pendingOperations;
-  assert.equal(session.acknowledge(context, pending, null, applied.sourceSha256), true);
+  assert.deepEqual(
+    session.acknowledge(context, pending, null, applied.sourceSha256),
+    { status: "accepted-head" },
+  );
 
   const undone = session.apply(context, "undo", applied.html, 2);
   assert.equal(undone.html, html);
@@ -195,7 +198,10 @@ test("accepted structure patches undo and redo inside the bounded open-document 
     session.pendingOperations[0].identityDelta.addedElementIds,
     applied.identityDelta.removedElementIds,
   );
-  assert.equal(session.acknowledge(context, session.pendingOperations, null, sourceSha256(html)), true);
+  assert.deepEqual(
+    session.acknowledge(context, session.pendingOperations, null, sourceSha256(html)),
+    { status: "accepted-head" },
+  );
   const redone = session.apply(context, "redo", html, 3);
   assert.equal(redone.html, applied.html);
   assert.equal(session.pendingOperations[0].semanticDirection, "redo");

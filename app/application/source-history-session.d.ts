@@ -45,6 +45,11 @@ export type CanvasSourceTransaction = {
   identityDelta?: SemanticIdentityDelta;
 };
 
+export type SourceHistoryAcknowledgeResult =
+  | Readonly<{ status: "accepted-head" }>
+  | Readonly<{ status: "accepted-prefix"; pendingCount: number }>
+  | Readonly<{ status: "invalid"; reason: string }>;
+
 export class SourceHistorySession {
   constructor();
   activate(
@@ -70,7 +75,7 @@ export class SourceHistorySession {
     sentOperations: SourceHistoryEntry[],
     historyValue: unknown,
     sourceSha256: string,
-  ): boolean;
+  ): SourceHistoryAcknowledgeResult;
   apply(
     context: SourceHistoryContext,
     direction: SourceHistoryDirection,

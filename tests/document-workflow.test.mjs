@@ -94,7 +94,22 @@ function sourceHistory({ sourceSha256, entries = [] } = {}) {
 }
 
 function operation(before, after) {
-  const startOffset = before.indexOf("one");
+  let startOffset = 0;
+  while (
+    startOffset < before.length
+    && startOffset < after.length
+    && before[startOffset] === after[startOffset]
+  ) startOffset += 1;
+  let beforeEnd = before.length;
+  let afterEnd = after.length;
+  while (
+    beforeEnd > startOffset
+    && afterEnd > startOffset
+    && before[beforeEnd - 1] === after[afterEnd - 1]
+  ) {
+    beforeEnd -= 1;
+    afterEnd -= 1;
+  }
   return {
     operationId: "sourceop_document_workflow_001",
     kind: "text",
@@ -104,16 +119,16 @@ function operation(before, after) {
     afterSourceSha256: sha256(after),
     forwardPatches: [{
       startOffset,
-      endOffset: startOffset + 3,
-      before: "one",
-      after: "two",
+      endOffset: beforeEnd,
+      before: before.slice(startOffset, beforeEnd),
+      after: after.slice(startOffset, afterEnd),
       kind: "text",
     }],
     reversePatches: [{
       startOffset,
-      endOffset: startOffset + 3,
-      before: "two",
-      after: "one",
+      endOffset: afterEnd,
+      before: after.slice(startOffset, afterEnd),
+      after: before.slice(startOffset, beforeEnd),
       kind: "inverse:text",
     }],
     beforeTarget: { id: "target-history", text: "one", resolution: "exact" },
@@ -493,6 +508,85 @@ test("DocumentWorkflow drains a newer queued write after an earlier acknowledgem
   assert.equal(calls[1].expectedSourceSha256, sha256(middle));
   assert.equal(harness.documentSession.html, after);
   assert.equal(harness.documentSession.persistState, "idle");
+});
+
+test("DocumentWorkflow accepts an older ACK and drains the newer source-history prefix", async () => {
+  const before = "<!doctype html><html><body><p>one</p></body></html>";
+  const middle = before.replace("one", "two");
+  const after = middle.replace("two", "three");
+  const calls = [];
+  let resolveFirst;
+  const harness = createHarness({
+    html: before,
+    bridge: {
+      autosave(body) {
+        calls.push(body);
+        if (calls.length === 1) {
+          return new Promise((resolve) => { resolveFirst = resolve; });
+        }
+        return Promise.resolve({
+          ok: true,
+          content: body.html,
+          sha256: sha256(body.html),
+          persistedRevision: body.editRevision,
+          lastModifiedAt: `2026-08-11T00:00:0${calls.length}.000Z`,
+          sourceHistory: sourceHistory({ sourceSha256: sha256(body.html) }),
+        });
+      },
+    },
+  });
+
+  assert.equal(harness.workflow.enqueueEdit({
+    html: middle,
+    sourceTransaction: operation(before, middle),
+  }).status, "succeeded");
+  const flushing = harness.workflow.flush();
+  await Promise.resolve();
+  assert.equal(calls.length, 1);
+
+  assert.equal(harness.workflow.enqueueEdit({
+    html: after,
+    sourceTransaction: operation(middle, after),
+  }).status, "succeeded");
+  resolveFirst({
+    ok: true,
+    content: middle,
+    sha256: sha256(middle),
+    persistedRevision: 1,
+    lastModifiedAt: "2026-08-11T00:00:01.000Z",
+    sourceHistory: sourceHistory({ sourceSha256: sha256(middle) }),
+  });
+
+  assert.equal((await flushing).status, "succeeded");
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0].html, middle);
+  assert.equal(calls[1].html, after);
+  assert.equal(calls[1].expectedSourceSha256, sha256(middle));
+  assert.equal(calls[1].sourceHistoryOperations.length, 1);
+  assert.equal(
+    calls[1].sourceHistoryOperations[0].beforeSourceSha256,
+    sha256(middle),
+  );
+  assert.equal(harness.documentSession.html, after);
+  assert.equal(harness.sourceHistorySession.capabilities.canUndo, true);
+
+  assert.equal(
+    (await harness.workflow.performHistoryAction({
+      direction: "undo",
+      context: harness.context,
+    })).status,
+    "succeeded",
+  );
+  assert.equal(harness.documentSession.html, middle);
+  assert.equal(
+    (await harness.workflow.performHistoryAction({
+      direction: "undo",
+      context: harness.context,
+    })).status,
+    "succeeded",
+  );
+  assert.equal(harness.documentSession.html, before);
+  assert.equal(harness.sourceHistorySession.capabilities.canRedo, true);
 });
 
 test("DocumentWorkflow reconstructs a missing pending write and rebinds comment targets after acknowledgement", async () => {
