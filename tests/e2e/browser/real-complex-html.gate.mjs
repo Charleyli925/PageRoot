@@ -559,10 +559,7 @@ async function discoverCommentCandidate(frame) {
       + `Sample: ${JSON.stringify(candidates.slice(0, 12))}`,
     );
   }
-  return {
-    ...candidate,
-    expectedCapabilities: ["EDITABLE_ISLAND_ROOT_UNSUPPORTED"],
-  };
+  return candidate;
 }
 
 async function visualGeometrySnapshot(handle) {
@@ -817,12 +814,8 @@ test("a real complex HTML file keeps layout and editable-island source authority
     position: { x: 4, y: 4 },
   });
   expect(await currentFrame.locator('[contenteditable="true"]').count()).toBe(0);
-  await expect.poll(async () => {
-    const detail = await editor.getAttribute("data-native-capability-detail") || "";
-    return commentCandidate.expectedCapabilities.some((code) => detail.includes(code));
-  }, {
-    message: `Expected one of ${commentCandidate.expectedCapabilities.join(", ")}: ${JSON.stringify(commentCandidate)}`,
-  }).toBe(true);
+  // Dedicated surfaces use the Canvas Target contract directly: double-click
+  // selects and comments, but never enters the generic native text editor.
   await expect(page.getByRole("button", { name: /留评论|评论/ }).filter({ visible: true }).first())
     .toBeVisible();
   const notice = page.locator('[role="status"], [role="alert"]').filter({ hasText: /评论/ });
