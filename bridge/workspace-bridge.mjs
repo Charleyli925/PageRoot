@@ -50,6 +50,9 @@ import {
   legacyDriverForAgentDelivery,
   normalizeAgentDelivery,
 } from "../shared/agent-delivery.mjs";
+import {
+  compileTaskSpec,
+} from "../shared/task-spec.mjs";
 
 const HOST = "127.0.0.1";
 const DEFAULT_PORT = 4317;
@@ -1252,14 +1255,25 @@ async function createProjectFileRequest(body) {
   }
   const requestId = `req_${randomUUID().replaceAll("-", "")}`;
   const attemptId = "attempt_001";
+  let taskSpec;
+  try {
+    taskSpec = compileTaskSpec({
+      comments: Array.isArray(body.comments) ? body.comments : [],
+      targets: Array.isArray(body.targets) ? body.targets : [],
+    });
+  } catch (cause) {
+    throw new HttpError(
+      422,
+      cause?.code || "TASK_SPEC_INVALID",
+      "The current comments could not be compiled into a valid Task Spec.",
+    );
+  }
   const request = {
     freezeCutoffRevision: Number(body.freezeCutoffRevision || 0),
-    summary: String(body.summary || ""),
+    summary: taskSpec.objective,
+    taskSpec,
     comments: Array.isArray(body.comments) ? body.comments : [],
     changeEvents: Array.isArray(body.changeEvents) ? body.changeEvents : [],
-    instructions: Array.isArray(body.instructions) ? body.instructions : [],
-    targets: Array.isArray(body.targets) ? body.targets : [],
-    preserveOutsideTargets: true,
     agentDelivery: agentDeliveryForRequest(body),
   };
   const promptDescriptor = {
@@ -1274,7 +1288,10 @@ async function createProjectFileRequest(body) {
     requestId,
     "PROMPT.md",
   )} 中的单轮任务，完成后运行其中的最终化（finalizer）命令。`;
-  const prompt = projectFilePromptForRequest(target, promptDescriptor, body);
+  const prompt = projectFilePromptForRequest(target, promptDescriptor, {
+    ...body,
+    summary: taskSpec.objective,
+  });
   try {
     const durable = await projectFileRepository.prepareRequest({
       target,

@@ -868,15 +868,6 @@ export class RunWorkflow {
         summary: this.#summary(persistedComments),
         targets: this.#codecs.uniqueTargets(persistedComments)
           .map(this.#codecs.persistedTargetRef),
-        instructions: persistedComments.map((comment) => ({
-          instructionId: `instruction_${String(comment.commentId || "").replace(/^comment_/, "")}`,
-          text: String(comment.text || "").trim()
-            || "请结合本条评论所附附件完成修改。",
-          targetRefs: [comment.target.id],
-          attachmentRefs: (comment.attachments || []).map(
-            (attachment) => attachment.attachmentId,
-          ),
-        })),
         comments: persistedComments.map(this.#codecs.persistedComment),
         changeEvents: persistedEvents.map(this.#codecs.persistedChangeEvent),
         agentDelivery: frozenAgentDelivery,

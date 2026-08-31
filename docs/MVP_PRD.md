@@ -563,6 +563,7 @@ Prompt、AI 返回、附件、剪贴板、文件名/路径、账号、电脑序�
 
 - `version-manifest.v3.schema.json`
 - `change-request.v3.schema.json`
+- `task-spec.v1.schema.json`（当前 v4 Request 自动编译的本轮执行要求）
 - `annotation-records.v3.schema.json`
 - `project-state.v3.schema.json`
 - `runtime-state.v3.schema.json`

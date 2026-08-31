@@ -111,10 +111,14 @@ export async function prepareAiTaskRequest(repository, target, requestId) {
     request: {
       freezeCutoffRevision: 0,
       summary: "生成一份可审阅的候选页面",
-      comments: [],
+      comments: [{
+        commentId: "comment_candidate_page",
+        text: "生成一份可审阅的候选页面",
+        target: { targetId: "target_candidate_page" },
+        attachments: [],
+      }],
       changeEvents: [],
-      instructions: [],
-      targets: [],
+      targets: [{ targetId: "target_candidate_page" }],
     },
     prompt: `# ${requestId}\n\n只生成本轮候选页面。\n`,
   });

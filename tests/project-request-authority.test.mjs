@@ -23,6 +23,23 @@ import {
   json,
 } from "./project-file-repository-harness.mjs";
 
+function requestFor(summary, overrides = {}) {
+  const target = { targetId: "target_test" };
+  return {
+    freezeCutoffRevision: 0,
+    summary,
+    comments: [{
+      commentId: "comment_test",
+      text: summary,
+      target,
+      attachments: [],
+    }],
+    changeEvents: [],
+    targets: [target],
+    ...overrides,
+  };
+}
+
 test("Request publication rechecks source bytes after freezing its input bundle", async (t) => {
   const value = await fixture(t);
   const imported = await importSource(value, "request-boundary.html");
@@ -42,6 +59,7 @@ test("Request publication rechecks source bytes after freezing its input bundle"
       target: imported.target,
       requestId: "req_source_boundary",
       expectedSourceSha256: imported.target.sourceSha256,
+      request: requestFor("Source boundary request."),
       prompt: "# Request\n",
     }),
     (error) => error instanceof ProjectFileRepositoryError
@@ -321,7 +339,7 @@ test("request recovery keeps the original runtime input-manifest anchor", async 
     requestId: "req_runtime_anchor",
     attemptId: "attempt_001",
     expectedSourceSha256: imported.target.sourceSha256,
-    request: { summary: "runtime anchor" },
+    request: requestFor("runtime anchor"),
     prompt: "# Runtime anchor\n",
   });
   const controlRoot = path.join(imported.target.projectRootPath, ".pageroot");
@@ -357,7 +375,7 @@ test("request recovery binds Request identity to its sealed runtime anchor", asy
     requestId: "req_runtime_identity_anchor",
     attemptId: "attempt_001",
     expectedSourceSha256: imported.target.sourceSha256,
-    request: { summary: "runtime identity anchor" },
+    request: requestFor("runtime identity anchor"),
     prompt: "# Runtime identity anchor\n",
   });
   const controlRoot = path.join(imported.target.projectRootPath, ".pageroot");
@@ -388,7 +406,7 @@ test("request recovery never recreates runtime authority from Agent-owned Reques
     requestId: "req_agent_owned_recovery",
     attemptId: "attempt_001",
     expectedSourceSha256: imported.target.sourceSha256,
-    request: { summary: "must retain the runtime seal" },
+    request: requestFor("must retain the runtime seal"),
     prompt: "# Runtime seal\n",
   });
   const controlRoot = path.join(imported.target.projectRootPath, ".pageroot");
@@ -545,12 +563,24 @@ test("a Request freezes comments, targets and project rules alongside its exact 
   };
   assert.deepEqual(annotations.comments, frozenComments);
   assert.deepEqual(changeRequest.requirements, {
-    ...request,
-    preserveOutsideTargets: true,
-    agentDelivery: { mode: "clipboard" },
-    comments: frozenComments,
+    taskSchemaVersion: "1.0.0",
+    objective: "把标题改成欢迎页",
+    scopePolicy: "targets-plus-required-dependencies",
+    instructions: [{
+      instructionId: "instruction_001",
+      priority: "required",
+      text: "把标题改成欢迎页",
+      targetRefs: ["target_title"],
+      acceptanceCriteria: [],
+      attachmentRefs: ["attachment_001"],
+    }],
+    globalAcceptanceCriteria: [],
+    nonGoals: [],
+    targets: request.targets,
     attachments: [frozenAttachment],
   });
+  assert.equal(changeRequest.policyVersion, "1.0.0");
+  assert.equal(changeRequest.promptTemplateVersion, "1.0.0");
   assert.deepEqual(inputManifest.readOrder, [
     "PROMPT.md",
     "input/AI_RULES.md",
@@ -663,7 +693,7 @@ test("attachments-only comments freeze every byte before Request authority is pu
     path.join(requestRoot, "input", "annotations", "records.json"),
   );
   assert.equal(requestRecord.request.comments.every((comment) => !comment.text), true);
-  assert.equal(requestRecord.request.attachments.length, attachmentCases.length);
+  assert.equal(requestRecord.request.taskSpec.attachments.length, attachmentCases.length);
   assert.deepEqual(
     manifest.files.filter((entry) => entry.role === "comment-attachment").map((entry) => entry.path),
     [
@@ -815,16 +845,9 @@ test("an existing unknown-provider Request remains readable and durably cancella
     requestId: "req_unknown_history",
     attemptId: "attempt_001",
     expectedSourceSha256: imported.target.sourceSha256,
-    request: {
-      freezeCutoffRevision: 0,
-      summary: "historical request",
-      comments: [],
-      changeEvents: [],
-      instructions: [],
-      targets: [],
-      preserveOutsideTargets: true,
+    request: requestFor("historical request", {
       agentDelivery: { mode: "clipboard" },
-    },
+    }),
     prompt: "# historical request\n",
   });
   const requestPath = path.join(
@@ -899,15 +922,7 @@ test("injected provider authority can normalize a new selection without a legacy
     requestId: "req_selection_first_provider",
     attemptId: "attempt_001",
     expectedSourceSha256: imported.target.sourceSha256,
-    request: {
-      freezeCutoffRevision: 0,
-      summary: "selection-first request",
-      comments: [],
-      changeEvents: [],
-      instructions: [],
-      targets: [],
-      agentDelivery,
-    },
+    request: requestFor("selection-first request", { agentDelivery }),
     prompt: "# selection-first request\n",
   });
   assert.deepEqual(prepared.request.agentDelivery, normalizeAgentDelivery(agentDelivery));

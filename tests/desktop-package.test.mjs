@@ -149,6 +149,7 @@ const SHARED_FILES = [
   "conversation.mjs",
   "agent-delivery.mjs",
   "agent-feature-gates.mjs",
+  "task-spec.mjs",
 ];
 
 const SCHEMA_FILES = [
@@ -176,6 +177,7 @@ const SCHEMA_FILES = [
   "scope-report.v1.schema.json",
   "source-history.v1.schema.json",
   "source-element-identity-migration.v1.schema.json",
+  "task-spec.v1.schema.json",
   "user-supplement.v1.schema.json",
   "version-manifest.v3.schema.json",
   "version-transaction.v1.schema.json",

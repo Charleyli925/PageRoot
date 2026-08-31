@@ -97,9 +97,14 @@ test("Codex completion reaches only a sealed Candidate and never adopts the Work
     request: {
       freezeCutoffRevision: 0,
       summary: "Modify the page through Codex",
-      comments: [],
+      comments: [{
+        commentId: "comment_codex_candidate",
+        text: "Modify the page through Codex",
+        target: { targetId: "target_codex_candidate" },
+        attachments: [],
+      }],
       changeEvents: [],
-      targets: [],
+      targets: [{ targetId: "target_codex_candidate" }],
       agentDelivery: {
         mode: "managed-agent",
         selection,

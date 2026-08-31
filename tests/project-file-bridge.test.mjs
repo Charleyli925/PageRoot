@@ -503,11 +503,33 @@ test("project-file Request becomes a Candidate on finalization and a Version onl
     expectedSourceSha256: ensured.body.sourceSha256,
     freezeCutoffRevision: 0,
     summary: "将标题改为 Candidate",
-    comments: [],
+    comments: [{
+      commentId: "comment_candidate",
+      text: "将标题改为 Candidate",
+      target: { targetId: "target_candidate" },
+      attachments: [],
+    }],
+    targets: [{ targetId: "target_candidate" }],
     changeEvents: [],
   });
   assert.equal(request.response.status, 201, JSON.stringify(request.body));
   assert.equal(request.body.activeRun.status, "processing");
+  const frozenTask = JSON.parse(await readFile(join(
+    ensured.body.projectRoot,
+    ".pageroot",
+    "requests",
+    request.body.requestId,
+    "change-request.json",
+  ), "utf8"));
+  assert.equal(frozenTask.requirements.objective, "将标题改为 Candidate");
+  assert.equal(
+    frozenTask.requirements.scopePolicy,
+    "targets-plus-required-dependencies",
+  );
+  assert.equal(frozenTask.requirements.instructions[0].text, "将标题改为 Candidate");
+  assert.equal("comments" in frozenTask.requirements, false);
+  assert.equal("changeEvents" in frozenTask.requirements, false);
+  assert.equal("preserveOutsideTargets" in frozenTask.requirements, false);
   const processingAiTask = await bridge.requestJson(
     `/ai-task?sourcePath=${encodeURIComponent(ensured.body.sourcePath)}`,
   );
@@ -631,7 +653,13 @@ test("Bridge reveals a sealed terminal AI task after no-change", async (t) => {
     expectedSourceSha256: ensured.body.sourceSha256,
     freezeCutoffRevision: 0,
     summary: "不修改当前 HTML",
-    comments: [],
+    comments: [{
+      commentId: "comment_no_change",
+      text: "不修改当前 HTML",
+      target: { targetId: "target_no_change" },
+      attachments: [],
+    }],
+    targets: [{ targetId: "target_no_change" }],
     changeEvents: [],
   });
   assert.equal(request.response.status, 201, JSON.stringify(request.body));
@@ -723,7 +751,13 @@ test("a finalized but unusable Candidate remains an error and never creates a Ve
     expectedSourceSha256: ensured.body.sourceSha256,
     freezeCutoffRevision: 0,
     summary: "生成一个空页面",
-    comments: [],
+    comments: [{
+      commentId: "comment_empty_page",
+      text: "生成一个空页面",
+      target: { targetId: "target_empty_page" },
+      attachments: [],
+    }],
+    targets: [{ targetId: "target_empty_page" }],
     changeEvents: [],
   });
   assert.equal(request.response.status, 201, JSON.stringify(request.body));

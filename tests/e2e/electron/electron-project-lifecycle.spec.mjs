@@ -341,10 +341,14 @@ test("Electron Finder reveals verified project, visible Version Working Copy and
       request: {
         freezeCutoffRevision: 0,
         summary: "从历史 Version 2 生成待审阅的 Version 7",
-        comments: [],
+        comments: [{
+          commentId: "comment_e2e_history_candidate",
+          text: "从历史 Version 2 生成待审阅的 Version 7",
+          target: { targetId: "target_e2e_history_candidate" },
+          attachments: [],
+        }],
         changeEvents: [],
-        instructions: [],
-        targets: [],
+        targets: [{ targetId: "target_e2e_history_candidate" }],
       },
       prompt: "# E2E AI task\n\n只生成候选 HTML。\n",
     });

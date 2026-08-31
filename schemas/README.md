@@ -102,6 +102,11 @@ records.
 
 ## Current auxiliary records
 
+- `task-spec.v1.schema.json` is the strict, system-compiled task contract for
+  current v4 AI Requests. It references the existing v3 Target and attachment
+  definitions so source identity evidence stays unchanged. Raw comments and
+  already-applied change events remain in frozen annotations rather than being
+  copied into the executable requirements object.
 - `candidate-assessment.v1.schema.json`
 - `scope-report.v1.schema.json` (direct-patch and legacy Attempt evidence; new AI Attempts use candidate assessment)
 - `completion.v1.schema.json`

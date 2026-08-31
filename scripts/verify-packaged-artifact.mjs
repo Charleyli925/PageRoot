@@ -139,6 +139,7 @@ export const REQUIRED_SHARED_FILES = [
   "conversation.mjs",
   "agent-delivery.mjs",
   "agent-feature-gates.mjs",
+  "task-spec.mjs",
 ];
 const REQUIRED_LEGAL_RESOURCES = [
   "PageRoot 用户声明与免责声明.txt",
