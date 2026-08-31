@@ -76,17 +76,22 @@ function createRecoveryStore() {
   };
 }
 
-function sourceHistory({ sourceSha256, entries = [] } = {}) {
+function sourceHistory({
+  sourceSha256,
+  entries = [],
+  projectId = PROJECT_ID,
+  documentId = DOCUMENT_ID,
+} = {}) {
   const history = createEmptySourceHistory({
-    projectId: PROJECT_ID,
-    documentId: DOCUMENT_ID,
+    projectId,
+    documentId,
     sourceSha256,
     now: () => "2026-08-11T00:00:00.000Z",
   });
   if (entries.length === 0) return history;
   return appendSourceHistoryOperations(history, entries, {
-    projectId: PROJECT_ID,
-    documentId: DOCUMENT_ID,
+    projectId,
+    documentId,
     sourceSha256,
     targetSourceSha256: entries.at(-1).afterSourceSha256,
     now: () => "2026-08-11T00:00:01.000Z",
@@ -94,7 +99,22 @@ function sourceHistory({ sourceSha256, entries = [] } = {}) {
 }
 
 function operation(before, after) {
-  const startOffset = before.indexOf("one");
+  let startOffset = 0;
+  while (
+    startOffset < before.length
+    && startOffset < after.length
+    && before[startOffset] === after[startOffset]
+  ) startOffset += 1;
+  let beforeEnd = before.length;
+  let afterEnd = after.length;
+  while (
+    beforeEnd > startOffset
+    && afterEnd > startOffset
+    && before[beforeEnd - 1] === after[afterEnd - 1]
+  ) {
+    beforeEnd -= 1;
+    afterEnd -= 1;
+  }
   return {
     operationId: "sourceop_document_workflow_001",
     kind: "text",
@@ -104,16 +124,16 @@ function operation(before, after) {
     afterSourceSha256: sha256(after),
     forwardPatches: [{
       startOffset,
-      endOffset: startOffset + 3,
-      before: "one",
-      after: "two",
+      endOffset: beforeEnd,
+      before: before.slice(startOffset, beforeEnd),
+      after: after.slice(startOffset, afterEnd),
       kind: "text",
     }],
     reversePatches: [{
       startOffset,
-      endOffset: startOffset + 3,
-      before: "two",
-      after: "one",
+      endOffset: afterEnd,
+      before: after.slice(startOffset, afterEnd),
+      after: before.slice(startOffset, beforeEnd),
       kind: "inverse:text",
     }],
     beforeTarget: { id: "target-history", text: "one", resolution: "exact" },
@@ -495,6 +515,85 @@ test("DocumentWorkflow drains a newer queued write after an earlier acknowledgem
   assert.equal(harness.documentSession.persistState, "idle");
 });
 
+test("DocumentWorkflow accepts an older ACK and drains the newer source-history prefix", async () => {
+  const before = "<!doctype html><html><body><p>one</p></body></html>";
+  const middle = before.replace("one", "two");
+  const after = middle.replace("two", "three");
+  const calls = [];
+  let resolveFirst;
+  const harness = createHarness({
+    html: before,
+    bridge: {
+      autosave(body) {
+        calls.push(body);
+        if (calls.length === 1) {
+          return new Promise((resolve) => { resolveFirst = resolve; });
+        }
+        return Promise.resolve({
+          ok: true,
+          content: body.html,
+          sha256: sha256(body.html),
+          persistedRevision: body.editRevision,
+          lastModifiedAt: `2026-08-11T00:00:0${calls.length}.000Z`,
+          sourceHistory: sourceHistory({ sourceSha256: sha256(body.html) }),
+        });
+      },
+    },
+  });
+
+  assert.equal(harness.workflow.enqueueEdit({
+    html: middle,
+    sourceTransaction: operation(before, middle),
+  }).status, "succeeded");
+  const flushing = harness.workflow.flush();
+  await Promise.resolve();
+  assert.equal(calls.length, 1);
+
+  assert.equal(harness.workflow.enqueueEdit({
+    html: after,
+    sourceTransaction: operation(middle, after),
+  }).status, "succeeded");
+  resolveFirst({
+    ok: true,
+    content: middle,
+    sha256: sha256(middle),
+    persistedRevision: 1,
+    lastModifiedAt: "2026-08-11T00:00:01.000Z",
+    sourceHistory: sourceHistory({ sourceSha256: sha256(middle) }),
+  });
+
+  assert.equal((await flushing).status, "succeeded");
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0].html, middle);
+  assert.equal(calls[1].html, after);
+  assert.equal(calls[1].expectedSourceSha256, sha256(middle));
+  assert.equal(calls[1].sourceHistoryOperations.length, 1);
+  assert.equal(
+    calls[1].sourceHistoryOperations[0].beforeSourceSha256,
+    sha256(middle),
+  );
+  assert.equal(harness.documentSession.html, after);
+  assert.equal(harness.sourceHistorySession.capabilities.canUndo, true);
+
+  assert.equal(
+    (await harness.workflow.performHistoryAction({
+      direction: "undo",
+      context: harness.context,
+    })).status,
+    "succeeded",
+  );
+  assert.equal(harness.documentSession.html, middle);
+  assert.equal(
+    (await harness.workflow.performHistoryAction({
+      direction: "undo",
+      context: harness.context,
+    })).status,
+    "succeeded",
+  );
+  assert.equal(harness.documentSession.html, before);
+  assert.equal(harness.sourceHistorySession.capabilities.canRedo, true);
+});
+
 test("DocumentWorkflow reconstructs a missing pending write and rebinds comment targets after acknowledgement", async () => {
   const before = "<!doctype html><html><body><p>one</p></body></html>";
   const after = before.replace("one", "two");
@@ -717,6 +816,117 @@ test("DocumentWorkflow returns stale after a durable acknowledgement races a new
   });
 
   assert.equal((await flushing).status, "stale");
+});
+
+test("DocumentWorkflow leaves the next document Source History untouched by a stale ACK", async () => {
+  const before = "<!doctype html><html><body><p>one</p></body></html>";
+  const after = before.replace("one", "two");
+  const nextBefore = "<!doctype html><html><body><p>next</p></body></html>";
+  const nextAfter = nextBefore.replace("next", "later");
+  const nextSourcePath = "/tmp/next-document.html";
+  const nextProjectId = "project_document_workflow_next";
+  const nextDocumentId = "document_document_workflow_next";
+  let resolveWrite;
+  const harness = createHarness({
+    bridge: {
+      autosave() {
+        return new Promise((resolve) => { resolveWrite = resolve; });
+      },
+    },
+  });
+
+  harness.workflow.enqueueEdit({ html: after });
+  const flushing = harness.workflow.flush();
+  await Promise.resolve();
+
+  harness.projectSession.transitionSource({
+    previousSourcePath: SOURCE_PATH,
+    sourcePath: nextSourcePath,
+    projectId: nextProjectId,
+    documentId: nextDocumentId,
+  });
+  const nextContext = {
+    epoch: harness.projectSession.epoch,
+    projectId: nextProjectId,
+    documentId: nextDocumentId,
+    sourcePath: nextSourcePath,
+  };
+  harness.sourceHistorySession.activate(
+    nextContext,
+    sha256(nextBefore),
+    sourceHistory({
+      sourceSha256: sha256(nextBefore),
+      projectId: nextProjectId,
+      documentId: nextDocumentId,
+    }),
+  );
+  harness.sourceHistorySession.record(
+    nextContext,
+    operation(nextBefore, nextAfter),
+    1,
+  );
+  const expectedSnapshot = structuredClone(harness.sourceHistorySession.snapshot);
+  const expectedPending = harness.sourceHistorySession.pendingOperations;
+  const nextRecoveryKey = `html-ai-recovery:${nextDocumentId}`;
+  harness.recoveryStore.write(nextRecoveryKey, { documentId: nextDocumentId, keep: true });
+
+  let activateCalls = 0;
+  const activate = harness.sourceHistorySession.activate.bind(harness.sourceHistorySession);
+  harness.sourceHistorySession.activate = (...args) => {
+    activateCalls += 1;
+    return activate(...args);
+  };
+
+  resolveWrite({
+    ok: true,
+    content: after,
+    sha256: sha256(after),
+    persistedRevision: 1,
+    lastModifiedAt: "2026-08-11T00:00:01.000Z",
+    sourceHistory: sourceHistory({ sourceSha256: sha256(before) }),
+  });
+
+  assert.equal((await flushing).status, "stale");
+  assert.equal(activateCalls, 0, "inactive-context ACK must not reactivate the old document");
+  assert.deepEqual(harness.sourceHistorySession.snapshot, expectedSnapshot);
+  assert.deepEqual(harness.sourceHistorySession.pendingOperations, expectedPending);
+  assert.equal(harness.sourceHistorySession.capabilities.sourceSha256, sha256(nextAfter));
+  assert.deepEqual(harness.recoveryStore.values.get(nextRecoveryKey), {
+    documentId: nextDocumentId,
+    keep: true,
+  });
+});
+
+test("DocumentWorkflow rebuilds Source History for an invalid ACK in the current context", async () => {
+  const before = "<!doctype html><html><body><p>one</p></body></html>";
+  const after = before.replace("one", "two");
+  const harness = createHarness({
+    bridge: {
+      async autosave(body) {
+        return {
+          ok: true,
+          content: body.html,
+          sha256: sha256(body.html),
+          persistedRevision: body.editRevision,
+          lastModifiedAt: "2026-08-11T00:00:01.000Z",
+          sourceHistory: sourceHistory({ sourceSha256: sha256(after) }),
+        };
+      },
+    },
+  });
+  let activateCalls = 0;
+  const activate = harness.sourceHistorySession.activate.bind(harness.sourceHistorySession);
+  harness.sourceHistorySession.activate = (...args) => {
+    activateCalls += 1;
+    return activate(...args);
+  };
+
+  harness.workflow.enqueueEdit({ html: after });
+  assert.equal((await harness.workflow.flush()).status, "succeeded");
+  assert.equal(activateCalls, 1);
+  assert.equal(harness.sourceHistorySession.snapshot.projectId, PROJECT_ID);
+  assert.equal(harness.sourceHistorySession.capabilities.sourceSha256, sha256(after));
+  assert.deepEqual(harness.sourceHistorySession.pendingOperations, []);
 });
 
 test("DocumentWorkflow preserves recovery and fails closed when autosave acknowledgement bytes differ", async () => {

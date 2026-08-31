@@ -6,6 +6,10 @@ import {
   SourceHistorySession,
 } from "../app/application/source-history-session.js";
 import { sourceSha256 } from "../app/lib/source-index.js";
+import {
+  appendSourceHistoryOperations,
+  createEmptySourceHistory,
+} from "../shared/source-history.mjs";
 
 const context = {
   epoch: 1,
@@ -42,11 +46,27 @@ function transaction(before, after, index = 1) {
 
 function acknowledgePending(session, activeContext, html) {
   const pending = session.pendingOperations;
-  assert.equal(
+  assert.deepEqual(
     session.acknowledge(activeContext, pending, null, sourceSha256(html)),
-    true,
+    { status: "accepted-head" },
   );
   assert.deepEqual(session.pendingOperations, []);
+}
+
+function persistedHistory(source, entries) {
+  const initial = createEmptySourceHistory({
+    projectId: context.projectId,
+    documentId: context.documentId,
+    sourceSha256: sourceSha256(source),
+    now: () => "2026-08-31T00:00:00.000Z",
+  });
+  return appendSourceHistoryOperations(initial, entries, {
+    projectId: context.projectId,
+    documentId: context.documentId,
+    sourceSha256: sourceSha256(source),
+    targetSourceSha256: entries.at(-1)?.afterSourceSha256 || sourceSha256(source),
+    now: () => "2026-08-31T00:00:01.000Z",
+  });
 }
 
 test("SourceHistorySession retains acknowledged edits only in the active memory stack", () => {
@@ -60,6 +80,99 @@ test("SourceHistorySession retains acknowledged edits only in the active memory 
   assert.equal(session.capabilities.canRedo, false);
   assert.equal(session.capabilities.depth, 1);
   assert.equal(session.snapshot.entries[0].operationId, recorded.operationId);
+});
+
+test("SourceHistorySession accepts a durable prefix without dropping newer local edits", () => {
+  const session = new SourceHistorySession();
+  session.activate(context, sourceSha256("a"), null);
+  const first = session.record(context, transaction("a", "b", 1), 1);
+  const second = session.record(context, transaction("b", "c", 2), 2);
+
+  const result = session.acknowledge(
+    context,
+    [first],
+    persistedHistory("a", [first]),
+    sourceSha256("b"),
+  );
+
+  assert.deepEqual(result, { status: "accepted-prefix", pendingCount: 1 });
+  assert.deepEqual(session.pendingOperations, [second]);
+  assert.equal(session.capabilities.sourceSha256, sourceSha256("c"));
+  assert.equal(session.capabilities.depth, 2);
+
+  assert.deepEqual(
+    session.acknowledge(
+      context,
+      [second],
+      persistedHistory("a", [first, second]),
+      sourceSha256("c"),
+    ),
+    { status: "accepted-head" },
+  );
+  assert.deepEqual(session.pendingOperations, []);
+  assert.equal(session.capabilities.canUndo, true);
+});
+
+test("SourceHistorySession keeps pending evidence intact for invalid ACK order, hashes, or proof", () => {
+  const session = new SourceHistorySession();
+  session.activate(context, sourceSha256("a"), null);
+  const first = session.record(context, transaction("a", "b", 1), 1);
+  const second = session.record(context, transaction("b", "c", 2), 2);
+  const originalPending = session.pendingOperations;
+
+  assert.deepEqual(
+    session.acknowledge(context, [second], null, sourceSha256("c")),
+    { status: "invalid", reason: "sent-operations-not-prefix" },
+  );
+  assert.deepEqual(session.pendingOperations, originalPending);
+
+  assert.deepEqual(
+    session.acknowledge(context, [first], null, sourceSha256("c")),
+    { status: "invalid", reason: "acknowledged-sha-not-last-operation" },
+  );
+  assert.deepEqual(session.pendingOperations, originalPending);
+
+  assert.deepEqual(
+    session.acknowledge(
+      context,
+      [first, { ...first }],
+      null,
+      sourceSha256("b"),
+    ),
+    { status: "invalid", reason: "sent-operation-duplicate" },
+  );
+  assert.deepEqual(session.pendingOperations, originalPending);
+
+  const missingProof = createEmptySourceHistory({
+    projectId: context.projectId,
+    documentId: context.documentId,
+    sourceSha256: sourceSha256("a"),
+  });
+  assert.deepEqual(
+    session.acknowledge(context, [first], missingProof, sourceSha256("b")),
+    { status: "invalid", reason: "persisted-history-sha" },
+  );
+  assert.deepEqual(session.pendingOperations, originalPending);
+});
+
+test("SourceHistorySession does not mutate on an inactive-context ACK", () => {
+  const session = new SourceHistorySession();
+  session.activate(context, sourceSha256("a"), null);
+  session.record(context, transaction("a", "b"), 1);
+  const expectedSnapshot = structuredClone(session.snapshot);
+  const expectedPending = session.pendingOperations;
+
+  assert.deepEqual(
+    session.acknowledge(
+      { ...context, epoch: context.epoch + 1 },
+      expectedPending,
+      null,
+      sourceSha256("b"),
+    ),
+    { status: "invalid", reason: "inactive-context" },
+  );
+  assert.deepEqual(session.snapshot, expectedSnapshot);
+  assert.deepEqual(session.pendingOperations, expectedPending);
 });
 
 test("SourceHistorySession applies undo and redo locally with exact HTML evidence", () => {

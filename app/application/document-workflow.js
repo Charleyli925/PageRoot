@@ -1351,17 +1351,23 @@ export class DocumentWorkflow {
         await this.#validateAutosaveAck(payload, write);
         const sourceSha256 = String(payload.sha256 || payload.currentHtmlSha256 || "");
         const persistedRevision = revision(payload.persistedRevision);
-        if (!this.#sourceHistorySession.acknowledge(
+        if (!this.#acknowledgeSourceHistory({
+          write,
           writeContext,
-          write.historyOperations,
-          payload.sourceHistory,
+          history: payload.sourceHistory,
           sourceSha256,
-        )) {
-          this.#sourceHistorySession.activate(
+        })) {
+          // A durable ACK may arrive after the renderer has moved to another
+          // document. Complete only the stale write's recovery cleanup; the
+          // current SourceHistorySession is owned by the new document.
+          this.#acknowledgeWrite({
+            write,
             writeContext,
+            payload,
             sourceSha256,
-            payload.sourceHistory,
-          );
+            persistedRevision,
+          });
+          return stale(writeContext);
         }
         const acknowledgedContext = this.#acknowledgeWrite({
           write,
@@ -1392,6 +1398,28 @@ export class DocumentWorkflow {
       );
     }
     return succeeded({ revision: this.#documentSession.lastPersistedRevision });
+  }
+
+  #acknowledgeSourceHistory({ write, writeContext, history, sourceSha256 }) {
+    if (!this.#isCurrent(writeContext)) return false;
+    const acknowledgement = this.#sourceHistorySession.acknowledge(
+      writeContext,
+      write.historyOperations,
+      history,
+      sourceSha256,
+    );
+    if (
+      acknowledgement.status === "invalid"
+      && acknowledgement.reason !== "inactive-context"
+      && this.#isCurrent(writeContext)
+    ) {
+      this.#sourceHistorySession.activate(
+        writeContext,
+        sourceSha256,
+        history,
+      );
+    }
+    return true;
   }
 
   async #validateAutosaveAck(payload, write) {
@@ -1789,17 +1817,22 @@ export class DocumentWorkflow {
           || authority.currentExactVersionId,
       };
       if (!payload.lastModifiedAt) return null;
-      if (!this.#sourceHistorySession.acknowledge(
+      if (!this.#acknowledgeSourceHistory({
+        write,
         writeContext,
-        write.historyOperations,
-        authority.sourceHistory,
+        history: authority.sourceHistory,
         sourceSha256,
-      )) {
-        this.#sourceHistorySession.activate(
+      })) {
+        // The authority read proved the old write, but the document changed
+        // while it was being reconciled. Clean up only that stale write.
+        this.#acknowledgeWrite({
+          write,
           writeContext,
+          payload,
           sourceSha256,
-          authority.sourceHistory,
-        );
+          persistedRevision,
+        });
+        return stale(writeContext);
       }
       this.#acknowledgeWrite({
         write,
