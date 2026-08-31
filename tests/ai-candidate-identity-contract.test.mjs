@@ -8,14 +8,15 @@ const read = (relativePath) => readFile(
 );
 
 test("ADR 0067 and Architecture Contract freeze full-HTML Candidate identity", async () => {
-  const [adr, architecture, interaction, validation, promptOwner] = await Promise.all([
+  const [adr, architecture, interaction, validation, policyOwner, promptOwner] = await Promise.all([
     read("docs/decisions/0067-ai-candidate-source-identity.md"),
     read("docs/ARCHITECTURE_CONTRACT.md"),
     read("docs/INTERACTION_FLOW.md"),
     read("docs/AI_SUPPLEMENT_AND_VALIDATION.md"),
+    read("bridge/project-file-repository/request-draft.mjs"),
     read("bridge/workspace-bridge.mjs"),
   ]);
-  const normalized = [adr, architecture, interaction, validation, promptOwner]
+  const normalized = [adr, architecture, interaction, validation, policyOwner]
     .map((value) => value.replace(/\s+/gu, " "));
 
   for (const required of [
@@ -48,8 +49,9 @@ test("ADR 0067 and Architecture Contract freeze full-HTML Candidate identity", a
   assert.match(interaction, /一条评论可以要求同时修改多个远距离区域/u);
   assert.match(interaction, /真正新增的元素不填 ID/u);
   assert.match(validation, /不做\s*启发式重绑/u);
-  assert.match(promptOwner, /不得伪造或复制/u);
-  assert.match(promptOwner, /Stable ID 是唯一元素身份/u);
+  assert.match(policyOwner, /Never create, copy, normalize, transfer, duplicate or reuse an ID/u);
+  assert.match(policyOwner, /surviving Stable IDs are preserved and new elements have no IDs/u);
+  assert.doesNotMatch(promptOwner, /data-pageroot-id|Stable ID 是唯一元素身份/u);
 });
 
 test("Candidate v4 schema admits sealed submitted and normalized identity evidence", async () => {
