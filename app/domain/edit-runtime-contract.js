@@ -17,6 +17,7 @@ export const EDIT_AUTHOR_RUNTIME_BUDGET = Object.freeze({
   declaredAssetCount: 64,
   declaredAssetReferenceCount: 128,
   declaredAssetBytes: 2 * 1024 * 1024,
+  remoteLibraryDeadlineMs: 60_000,
   runtimeDeadlineMs: 4_000,
   orphanSessionTtlMs: 60_000,
 });
@@ -25,7 +26,8 @@ export const EDIT_AUTHOR_RUNTIME_BUDGET = Object.freeze({
 // acknowledges its ordinary load directly; runtimeDeadlineMs is only a
 // fail-safe for hostile or broken author code and never a minimum wait.
 export const EDIT_AUTHOR_RUNTIME_VERIFICATION_DEADLINE_MS = (
-  EDIT_AUTHOR_RUNTIME_BUDGET.runtimeDeadlineMs * 2
+  EDIT_AUTHOR_RUNTIME_BUDGET.remoteLibraryDeadlineMs
+  + (EDIT_AUTHOR_RUNTIME_BUDGET.runtimeDeadlineMs * 2)
 ) + 1_000;
 
 export const EDIT_RUNTIME_PROTOCOL_SCHEME = "pageroot-edit-runtime";

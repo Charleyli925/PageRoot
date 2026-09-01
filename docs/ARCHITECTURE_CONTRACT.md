@@ -479,8 +479,12 @@ are disposable Canvas presentation and must not change the click selection path.
 
 The direct path accepts a bounded supported executable `script` program. Main
 re-reads the active persisted HTML, verifies exact Hash and Canvas generation,
-then prepares only contained local/inline resources plus the reviewed ECharts
-CDN mapping. For an HTML-only imported V1, Main records the original selected
+then prepares only contained local/inline resources plus reviewed ECharts CDN
+mappings. Exact immutable ECharts URLs first consult a Main-owned,
+content-addressed byte store under Application Support. Cache entries are keyed
+by canonical exact-version URL and verified by length and SHA-256 on every
+read; they own no runtime session, source identity or DOM. For an HTML-only
+imported V1, Main records the original selected
 HTML directory in desktop `html-projects.json` and uses it as the contained
 local asset root for Preview, static Edit and the disposable Edit runtime. The
 renderer neither supplies nor learns that original path; the Working Copy
@@ -488,9 +492,10 @@ remains source authority.
 
 The visible frame parses complete source while author-script placeholders stay
 inert, registers the parser-authored source object set once, then activates the
-author program in source order. There
-is no visual-signal classifier, hidden probe, real-paint/quiet-frame gate,
-runtime activity freeze, host mutation audit, script prewarm or disk cache.
+author program in source order. There is no visual-signal classifier, hidden
+probe, real-paint/quiet-frame gate, runtime activity freeze, host mutation
+audit, script prewarm or Runtime/DOM cache. The only disk cache contains
+verified immutable external script bytes.
 Before author code runs, the fixed bootstrap captures a one-time parent-owned
 registration port. Registration completes after full parsing and before any
 author placeholder activates, so a script cannot preclaim a future parser
@@ -506,10 +511,32 @@ source change materializes complete HTML, rebuilds the disposable frame and
 reruns the author program. Native input may postpone that rebuild until editing
 finishes. The resource session may be reused only while exact authored script
 markup/body identity is unchanged; a Script change requires a new generation.
+The same one-time private capability returns an activation-result callback bound
+to the source window, session, execution and frame token. Resource errors,
+synchronous author errors and immediate unhandled rejections through the
+deferred `DOMContentLoaded` task report `activation-failed`; only a complete
+error-free activation reports `activation-ready`. Frame load, source proof and
+the verification token remain necessary but are not sufficient for Runtime
+success. This is an execution-failure signal, not a visual or Canvas probe.
+When the exact query-free 5.4.3 ECharts core URL is not cached, has no authored
+integrity constraint, and the executable program contains no other `src`
+attribute, Main may freeze packaged 5.5.0 bytes as a
+separate compatible resource variant while downloading exact bytes in the
+background. The current resource set never mutates. The first successful
+runtime wins the Canvas generation; exact bytes arriving after compatible
+success only update the byte store. A compatible load failure may consume the
+same initial preparation's exact promise once and receive a new immutable
+session/execution identity. Main binds that recovery to the original canonical
+source path, source Hash, authored-program identity and Canvas generation. No
+other retry or resource promotion is permitted. Every redirect used to obtain
+an exact immutable library must preserve its version, core filename and query
+identity before those bytes can enter the exact cache.
 Main enforces two concurrent preparations and a bounded recent request-ID replay
 window. Completed identities age out, so repeated ordinary use never exhausts a
-permanent application-lifetime allowance or requires PageRoot to restart. Any
-preparation, load, provenance or deadline failure selects an explicit
+permanent application-lifetime allowance or requires PageRoot to restart. An
+unavailable resource remains a recoverable preparation state while its
+independent bounded download is active. A terminal preparation, exact recovery,
+load, provenance or execution-deadline failure selects an explicit
 script-disabled static Edit state; the Workbench must disclose that author
 Script did not run and must not interpret iframe `load` alone as Runtime success.
 Runtime DOM never becomes SourcePatch, Source HTML, save, Version, export,
@@ -534,6 +561,11 @@ run in real Electron. Program identity and Main resource preparation use the
 same first live-document `base[href]`; href-less base elements, inert
 `<template>` contents and foreign-namespace lookalikes cannot win, while
 absolute or escaping bases fail closed.
+The dependency compatibility surface is separately finite: only the three
+standard, query-free ECharts 5.4.3 minified core CDN URLs may use packaged
+5.5.0, only when all other executable scripts are inline. Near matches,
+version ranges, unknown paths and additional plugin/library scripts never use
+that substitution.
 The bootstrap may hold and redeliver `DOMContentLoaded`
 after the supported non-async activation sequence. Module import graphs,
 external/source-root-escaping bases and other non-equivalent programs must enter

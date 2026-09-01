@@ -516,6 +516,7 @@ test("Workbench and review surfaces route to architecture or observable runtime 
     "tests/edit-author-runtime-session.test.mjs",
     "tests/edit-runtime-bootstrap.test.mjs",
     "tests/edit-runtime-contract.test.mjs",
+    "tests/edit-runtime-library-store.test.mjs",
     "tests/edit-runtime-preparation-fence.test.mjs",
     "tests/edit-runtime-protocol.test.mjs",
     "tests/first-edit-guide-session.test.mjs",

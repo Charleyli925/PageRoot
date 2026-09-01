@@ -11,9 +11,11 @@ import {
   editRuntimeProtocolUrl,
   isEditRuntimeExecutionId,
   isEditRuntimeSessionId,
+  isEditRuntimeSourceSha256,
   unsupportedEditRuntimeProgramReason,
 } from "../app/domain/edit-runtime-contract.js";
 import { createEditRuntimeBootstrap } from "./edit-runtime-bootstrap.mjs";
+import { classifyExactImmutableEchartsUrl } from "./edit-runtime-library-store.mjs";
 import {
   collectDeclaredPreviewAssets,
   normalizeRelativeAssetPath,
@@ -30,6 +32,7 @@ const ALLOWED_CDN_HOSTS = new Set([
   "cdnjs.cloudflare.com",
 ]);
 const BUNDLED_ECHARTS_VERSION = "5.5.0";
+const COMPATIBLE_ECHARTS_SOURCE_VERSION = "5.4.3";
 const BUNDLED_ECHARTS_SHA256 =
   "42f8329d989b6f6539dd2b15bbdf0d82025762ac112fbb60dc57b27d7bcf3946";
 
@@ -141,20 +144,24 @@ function permittedEchartsUrl(value) {
 }
 
 function isBundledEchartsUrl(value) {
-  try {
-    const url = new URL(String(value || ""));
-    const pathName = url.pathname.toLowerCase();
-    return (
-      (url.hostname === "cdnjs.cloudflare.com"
-        && pathName === `/ajax/libs/echarts/${BUNDLED_ECHARTS_VERSION}/echarts.min.js`)
-      || (url.hostname === "cdn.jsdelivr.net"
-        && pathName === `/npm/echarts@${BUNDLED_ECHARTS_VERSION}/dist/echarts.min.js`)
-      || (url.hostname === "unpkg.com"
-        && pathName === `/echarts@${BUNDLED_ECHARTS_VERSION}/dist/echarts.min.js`)
-    );
-  } catch {
-    return false;
-  }
+  const classification = classifyExactImmutableEchartsUrl(value);
+  return classification?.version === BUNDLED_ECHARTS_VERSION
+    && classification.fileName === "echarts.min.js";
+}
+
+function isCompatibleEchartsSourceUrl(value) {
+  const classification = classifyExactImmutableEchartsUrl(value);
+  return classification?.version === COMPATIBLE_ECHARTS_SOURCE_VERSION
+    && classification.fileName === "echarts.min.js"
+    && new URL(classification.url).search === "";
+}
+
+function sameImmutableEchartsIdentity(left, right) {
+  return Boolean(left)
+    && Boolean(right)
+    && left.version === right.version
+    && left.fileName === right.fileName
+    && new URL(left.url).search === new URL(right.url).search;
 }
 
 // Edit may resolve the reviewed ECharts CDN URLs to pinned packaged bytes.
@@ -231,127 +238,86 @@ async function readFixedEchartsBytes(responseValue, controller, deadlineAt) {
   return Buffer.concat(chunks, byteLength);
 }
 
-async function fetchFixedEchartsBytes(initialUrl, netFetch, deadlineAt, preparationSignal) {
+async function fetchFixedEchartsBytes(initialUrl, netFetch, deadlineAt) {
   let url = String(initialUrl);
-  for (let attempt = 0; attempt < 4; attempt += 1) {
+  const initialImmutable = classifyExactImmutableEchartsUrl(url);
+  for (let redirectCount = 0; redirectCount <= 4; redirectCount += 1) {
     if (!permittedEchartsUrl(url)) {
       throw new TypeError("Edit runtime remote script is not an allowed ECharts CDN URL.");
     }
+    if (
+      initialImmutable
+      && !sameImmutableEchartsIdentity(
+        initialImmutable,
+        classifyExactImmutableEchartsUrl(url),
+      )
+    ) {
+      throw new TypeError("Edit runtime CDN redirect changed the immutable script identity.");
+    }
     const controller = new AbortController();
-    const abortForPreparation = () => controller.abort();
-    if (preparationSignal?.aborted) {
+    const responseValue = await settleWithinRuntimeDeadline(
+      () => netFetch(url, {
+        method: "GET",
+        redirect: "manual",
+        cache: "no-store",
+        signal: controller.signal,
+      }),
+      controller,
+      deadlineAt,
+      remoteScriptTimeoutError,
+    );
+    const status = Number(responseValue?.status || 0);
+    if (status >= 300 && status < 400) {
+      if (redirectCount === 4) {
+        controller.abort();
+        throw new TypeError("Edit runtime CDN redirect limit exceeded.");
+      }
+      const next = responseValue.headers?.get?.("location");
+      if (!next) throw new TypeError("Edit runtime CDN redirect is invalid.");
       controller.abort();
-    } else {
-      preparationSignal?.addEventListener("abort", abortForPreparation, { once: true });
+      url = new URL(next, url).href;
+      continue;
     }
-    try {
-      const responseValue = await settleWithinRuntimeDeadline(
-        () => netFetch(url, {
-          method: "GET",
-          redirect: "manual",
-          cache: "no-store",
-          signal: controller.signal,
-        }),
-        controller,
-        deadlineAt,
-        remoteScriptTimeoutError,
-      );
-      const status = Number(responseValue?.status || 0);
-      if (status >= 300 && status < 400) {
-        const next = responseValue.headers?.get?.("location");
-        if (!next) throw new TypeError("Edit runtime CDN redirect is invalid.");
-        controller.abort();
-        url = new URL(next, url).href;
-        continue;
-      }
-      if (!responseValue?.ok) throw new TypeError("Edit runtime CDN script could not be loaded.");
-      const declaredLength = Number(responseValue.headers?.get?.("content-length") || 0);
-      if (declaredLength > EDIT_AUTHOR_RUNTIME_BUDGET.scriptBytes) {
-        controller.abort();
-        throw new TypeError("Edit runtime CDN script is too large.");
-      }
-      return await readFixedEchartsBytes(responseValue, controller, deadlineAt);
-    } finally {
-      preparationSignal?.removeEventListener("abort", abortForPreparation);
+    if (!responseValue?.ok) throw new TypeError("Edit runtime CDN script could not be loaded.");
+    const declaredLength = Number(responseValue.headers?.get?.("content-length") || 0);
+    if (declaredLength > EDIT_AUTHOR_RUNTIME_BUDGET.scriptBytes) {
+      controller.abort();
+      throw new TypeError("Edit runtime CDN script is too large.");
     }
+    return readFixedEchartsBytes(responseValue, controller, deadlineAt);
   }
   throw new TypeError("Edit runtime CDN redirect limit exceeded.");
 }
 
 export { fetchFixedEchartsBytes };
 
-async function fixedAuthorScripts({
-  html,
-  documentBase,
-  sourceRoot,
-  netFetch,
-  readFileImpl,
-  realpathImpl,
-  statImpl,
-  preparationDeadlineAt,
-  preparationSignal,
-  bundledEchartsPath,
-}) {
-  const contract = collectEditRuntimeScripts(html);
-  if (contract.unsupportedReason) {
-    throw new TypeError("Edit runtime script is unsupported: " + contract.unsupportedReason + ".");
+function validatedScriptBytes(value) {
+  const bytes = Buffer.from(value || []);
+  if (bytes.byteLength < 1 || bytes.byteLength > EDIT_AUTHOR_RUNTIME_BUDGET.scriptBytes) {
+    throw new TypeError("Edit runtime script exceeds the byte budget.");
   }
-  if (
-    contract.executableScripts.length < 1
-    || contract.executableScripts.length > EDIT_AUTHOR_RUNTIME_BUDGET.scriptCount
-  ) throw new TypeError("Edit runtime script count is invalid.");
-  const scripts = [];
+  const programReason = unsupportedEditRuntimeProgramReason(bytes.toString("utf8"));
+  if (programReason) {
+    throw new TypeError("Edit runtime script is unsupported: " + programReason + ".");
+  }
+  return bytes;
+}
+
+function freezeAuthorScripts(scriptValues, documentBasePath) {
   let totalBytes = 0;
-  for (const descriptor of contract.executableScripts) {
-    let libraryOrigin = descriptor.src ? "local" : "inline";
-    let bytes;
-    if (descriptor.src && permittedEchartsUrl(descriptor.src)) {
-      const fetchRemote = () => fetchFixedEchartsBytes(
-        descriptor.src,
-        netFetch,
-        preparationDeadlineAt,
-        preparationSignal,
-      );
-      if (bundledEchartsPath && isBundledEchartsUrl(descriptor.src)) {
-        bytes = Buffer.from(await readFileImpl(bundledEchartsPath));
-        const digest = createHash("sha256").update(bytes).digest("hex");
-        if (digest !== BUNDLED_ECHARTS_SHA256) {
-          throw new TypeError("Bundled ECharts bytes failed integrity verification.");
-        }
-        libraryOrigin = "bundled";
-      } else {
-        bytes = await fetchRemote();
-        libraryOrigin = "network";
-      }
-    } else if (descriptor.src) {
-      bytes = await resolveLocalScript(sourceRoot, descriptor.src, {
-        basePath: documentBase.basePath,
-        readFileImpl,
-        realpathImpl,
-        statImpl,
-      });
-    } else {
-      bytes = Buffer.from(descriptor.inline, "utf8");
-    }
-    if (bytes.byteLength < 1 || bytes.byteLength > EDIT_AUTHOR_RUNTIME_BUDGET.scriptBytes) {
-      throw new TypeError("Edit runtime script exceeds the byte budget.");
-    }
-    const program = bytes.toString("utf8");
-    const programReason = unsupportedEditRuntimeProgramReason(program);
-    if (programReason) {
-      throw new TypeError("Edit runtime script is unsupported: " + programReason + ".");
-    }
+  const scripts = scriptValues.map((script) => {
+    const bytes = validatedScriptBytes(script.bytes);
     totalBytes += bytes.byteLength;
     if (totalBytes > EDIT_AUTHOR_RUNTIME_BUDGET.aggregateScriptBytes) {
       throw new TypeError("Edit runtime script aggregate exceeds the byte budget.");
     }
-    scripts.push(Object.freeze({
-      index: descriptor.index,
+    return Object.freeze({
+      index: script.index,
       bytes,
       sha256: "sha256:" + createHash("sha256").update(bytes).digest("hex"),
-      libraryOrigin,
-    }));
-  }
+      libraryOrigin: script.libraryOrigin,
+    });
+  });
   const digest = createHash("sha256");
   for (const script of scripts) {
     digest.update(String(script.index));
@@ -363,7 +329,151 @@ async function fixedAuthorScripts({
     scripts: Object.freeze(scripts),
     byteLength: totalBytes,
     resourceSha256: "sha256:" + digest.digest("hex"),
-    documentBasePath: documentBase.documentPath,
+    documentBasePath,
+  });
+}
+
+function compatibleContractExternalUrl(contract) {
+  const externalScripts = contract.executableScripts.filter((descriptor) => descriptor.src !== null);
+  if (externalScripts.length !== 1) return null;
+  const candidate = externalScripts[0].src;
+  const hasIntegrity = externalScripts[0].attributes.some((attribute) => (
+    attribute.name === "integrity"
+  ));
+  return !hasIntegrity && isCompatibleEchartsSourceUrl(candidate) ? candidate : null;
+}
+
+async function prepareAuthorScripts({
+  html,
+  documentBase,
+  sourceRoot,
+  netFetch,
+  runtimeLibraryStore,
+  readFileImpl,
+  realpathImpl,
+  statImpl,
+  bundledEchartsPath,
+  remoteLibraryDeadlineMs,
+}) {
+  const contract = collectEditRuntimeScripts(html);
+  if (contract.unsupportedReason) {
+    throw new TypeError("Edit runtime script is unsupported: " + contract.unsupportedReason + ".");
+  }
+  if (
+    contract.executableScripts.length < 1
+    || contract.executableScripts.length > EDIT_AUTHOR_RUNTIME_BUDGET.scriptCount
+  ) throw new TypeError("Edit runtime script count is invalid.");
+  const compatibleExternalUrl = compatibleContractExternalUrl(contract);
+  const scripts = new Array(contract.executableScripts.length);
+  const pendingRemoteScripts = [];
+  let compatiblePendingIndex = null;
+  let bundledBytesPromise = null;
+  const readBundledBytes = async () => {
+    if (!bundledEchartsPath) {
+      throw new TypeError("Bundled ECharts bytes are unavailable.");
+    }
+    if (!bundledBytesPromise) {
+      bundledBytesPromise = Promise.resolve(readFileImpl(bundledEchartsPath)).then((value) => {
+        const bytes = validatedScriptBytes(value);
+        const digest = createHash("sha256").update(bytes).digest("hex");
+        if (digest !== BUNDLED_ECHARTS_SHA256) {
+          throw new TypeError("Bundled ECharts bytes failed integrity verification.");
+        }
+        return bytes;
+      });
+    }
+    return bundledBytesPromise;
+  };
+  for (let position = 0; position < contract.executableScripts.length; position += 1) {
+    const descriptor = contract.executableScripts[position];
+    let libraryOrigin = descriptor.src ? "local" : "inline";
+    let bytes;
+    if (descriptor.src && permittedEchartsUrl(descriptor.src)) {
+      const fetchRemote = async () => validatedScriptBytes(await fetchFixedEchartsBytes(
+        descriptor.src,
+        netFetch,
+        Date.now() + remoteLibraryDeadlineMs,
+      ));
+      if (bundledEchartsPath && isBundledEchartsUrl(descriptor.src)) {
+        bytes = await readBundledBytes();
+        libraryOrigin = "bundled";
+      } else {
+        const immutable = classifyExactImmutableEchartsUrl(descriptor.src);
+        const cached = immutable && runtimeLibraryStore?.get
+          ? await runtimeLibraryStore.get(immutable.url)
+          : null;
+        if (cached) {
+          bytes = validatedScriptBytes(cached.bytes);
+          libraryOrigin = "disk-cache";
+        } else {
+          const exactLoad = immutable && runtimeLibraryStore?.load
+            ? runtimeLibraryStore.load(immutable.url, fetchRemote)
+            : fetchRemote().then((remoteBytes) => Object.freeze({
+                bytes: remoteBytes,
+                origin: "network",
+              }));
+          const exactScript = Promise.resolve(exactLoad).then((loaded) => ({
+            index: descriptor.index,
+            bytes: validatedScriptBytes(loaded.bytes),
+            libraryOrigin: loaded.origin === "disk-cache" ? "disk-cache" : "network",
+          }));
+          pendingRemoteScripts.push({ position, exactScript });
+          if (
+            descriptor.src === compatibleExternalUrl
+            && bundledEchartsPath
+            && runtimeLibraryStore?.load
+          ) {
+            bytes = await readBundledBytes();
+            libraryOrigin = "bundled-compatible";
+            compatiblePendingIndex = position;
+          } else {
+            continue;
+          }
+        }
+      }
+    } else if (descriptor.src) {
+      bytes = await resolveLocalScript(sourceRoot, descriptor.src, {
+        basePath: documentBase.basePath,
+        readFileImpl,
+        realpathImpl,
+        statImpl,
+      });
+    } else {
+      bytes = Buffer.from(descriptor.inline, "utf8");
+    }
+    scripts[position] = {
+      index: descriptor.index,
+      bytes: validatedScriptBytes(bytes),
+      libraryOrigin,
+    };
+  }
+  if (!pendingRemoteScripts.length) {
+    return Object.freeze({
+      resourceMode: "exact",
+      current: freezeAuthorScripts(scripts, documentBase.documentPath),
+      exactPromise: null,
+    });
+  }
+  const exactPromise = Promise.all(pendingRemoteScripts.map(async ({ position, exactScript }) => {
+    const script = await exactScript;
+    return { position, script };
+  })).then((loadedScripts) => {
+    const exactScripts = [...scripts];
+    for (const { position, script } of loadedScripts) exactScripts[position] = script;
+    return freezeAuthorScripts(exactScripts, documentBase.documentPath);
+  });
+  void exactPromise.catch(() => undefined);
+  if (compatiblePendingIndex !== null && pendingRemoteScripts.length === 1) {
+    return Object.freeze({
+      resourceMode: "compatible",
+      current: freezeAuthorScripts(scripts, documentBase.documentPath),
+      exactPromise,
+    });
+  }
+  return Object.freeze({
+    resourceMode: "exact",
+    current: null,
+    exactPromise,
   });
 }
 
@@ -375,6 +485,27 @@ function sessionIdFrom(value) {
 function executionIdFrom(value) {
   const normalized = String(value || "").toLowerCase();
   return isEditRuntimeExecutionId(normalized) ? normalized : null;
+}
+
+function normalizedRecoveryIdentity(value) {
+  const sourceSha256 = String(value?.sourceSha256 || "").toLowerCase();
+  const authoritySourcePath = typeof value?.authoritySourcePath === "string"
+    ? value.authoritySourcePath
+    : "";
+  if (
+    !isEditRuntimeSourceSha256(sourceSha256)
+    || !authoritySourcePath
+    || typeof value?.programIdentity !== "string"
+    || !value.programIdentity
+    || !Number.isSafeInteger(value.canvasGeneration)
+    || value.canvasGeneration < 0
+  ) return null;
+  return Object.freeze({
+    sourceSha256,
+    authoritySourcePath,
+    programIdentity: value.programIdentity,
+    canvasGeneration: value.canvasGeneration,
+  });
 }
 
 export function registerEditRuntimeProtocolScheme(protocolApi) {
@@ -396,14 +527,15 @@ export function registerEditRuntimeProtocolScheme(protocolApi) {
 }
 
 /**
- * One immutable resource session per authorized Script program. The same
- * session may serve repeated disposable iframe loads while the program
- * identity stays exact. It has no compatibility result, promotion document,
- * prewarm store or disk cache; a short idle cleanup bounds abandoned sessions.
+ * One immutable resource session per authorized Script program. A narrowly
+ * compatible ECharts resource is a separate immutable program and may derive
+ * one later exact session from the same initial preparation. Neither result
+ * changes source HTML or promotes Runtime DOM into source authority.
  */
 export function createEditRuntimeProtocolController({
   protocolApi,
   netFetch,
+  runtimeLibraryStore = null,
   now = () => Date.now(),
   randomSessionId = () => randomBytes(16).toString("hex"),
   randomExecutionId = () => randomBytes(12).toString("hex"),
@@ -415,6 +547,7 @@ export function createEditRuntimeProtocolController({
   bundledEchartsPath = null,
   orphanSessionTtlMs = EDIT_AUTHOR_RUNTIME_BUDGET.orphanSessionTtlMs,
   runtimePreparationDeadlineMs = EDIT_AUTHOR_RUNTIME_BUDGET.runtimeDeadlineMs,
+  remoteLibraryDeadlineMs = EDIT_AUTHOR_RUNTIME_BUDGET.remoteLibraryDeadlineMs,
 } = {}) {
   if (!protocolApi || typeof protocolApi.handle !== "function") {
     throw new TypeError("Edit runtime protocol requires protocol.handle.");
@@ -425,6 +558,11 @@ export function createEditRuntimeProtocolController({
   const boundedRuntimePreparationDeadlineMs = Math.max(1, Math.min(
     EDIT_AUTHOR_RUNTIME_BUDGET.runtimeDeadlineMs,
     Math.round(Number(runtimePreparationDeadlineMs)) || EDIT_AUTHOR_RUNTIME_BUDGET.runtimeDeadlineMs,
+  ));
+  const boundedRemoteLibraryDeadlineMs = Math.max(1, Math.min(
+    EDIT_AUTHOR_RUNTIME_BUDGET.remoteLibraryDeadlineMs,
+    Math.round(Number(remoteLibraryDeadlineMs))
+      || EDIT_AUTHOR_RUNTIME_BUDGET.remoteLibraryDeadlineMs,
   ));
   const sessions = new Map();
   const installedProtocols = new WeakSet();
@@ -449,24 +587,77 @@ export function createEditRuntimeProtocolController({
     preparationDeadlineAt,
   }) => {
     return settleWithinRuntimeDeadline(
-      () => fixedAuthorScripts({
+      () => prepareAuthorScripts({
         html: source,
         documentBase,
         sourceRoot,
         netFetch,
+        runtimeLibraryStore,
         readFileImpl,
         realpathImpl,
         statImpl,
-        preparationDeadlineAt,
-        preparationSignal: preparationController.signal,
         bundledEchartsPath,
+        remoteLibraryDeadlineMs: boundedRemoteLibraryDeadlineMs,
       }),
       preparationController,
       preparationDeadlineAt,
       runtimePreparationTimeoutError,
     );
   };
-  const createSession = async ({ html, sourcePath } = {}) => {
+  const allocateSessionId = () => allocate(randomSessionId, (candidate) => (
+    isEditRuntimeSessionId(candidate) && !sessions.has(candidate)
+  ));
+  const allocateExecutionId = (excludedExecutionId = null) => allocate(
+    randomExecutionId,
+    (candidate) => isEditRuntimeExecutionId(candidate) && candidate !== excludedExecutionId,
+  );
+  const installFrozenSession = ({
+    frozenScripts,
+    sourceRoot,
+    declaredAssets,
+    resourceMode,
+    exactPromise = null,
+    recoveryIdentity = null,
+    excludedExecutionId = null,
+  }) => {
+    const sessionId = allocateSessionId();
+    const executionId = allocateExecutionId(excludedExecutionId);
+    const record = {
+      sessionId,
+      executionId,
+      sourceRoot,
+      declaredAssets: new Map(declaredAssets),
+      scripts: frozenScripts.scripts.map((script) => ({
+        ...script,
+        bytes: Buffer.from(script.bytes),
+      })),
+      byteLength: frozenScripts.byteLength,
+      resourceSha256: frozenScripts.resourceSha256,
+      documentBasePath: frozenScripts.documentBasePath,
+      resourceMode,
+      recovery: resourceMode === "compatible"
+        ? { consumed: false, exactPromise, identity: recoveryIdentity }
+        : null,
+      lastAccessAt: now(),
+    };
+    sessions.set(sessionId, record);
+    const descriptor = {
+      contractVersion: EDIT_AUTHOR_RUNTIME_CONTRACT_VERSION,
+      sessionId,
+      executionId,
+      scriptCount: record.scripts.length,
+      resourceSha256: record.resourceSha256,
+      documentBasePath: record.documentBasePath,
+      byteLength: record.byteLength,
+      resourceMode,
+      libraryOrigins: Object.freeze([
+        ...new Set(record.scripts.map((script) => script.libraryOrigin)),
+      ]),
+    };
+    if (resourceMode === "compatible") descriptor.recoveryAvailable = true;
+    return Object.freeze(descriptor);
+  };
+  const createSession = async ({ html, sourcePath, recoveryIdentity = null } = {}) => {
     const source = typeof html === "string" ? html : null;
     if (!source || utf8Bytes(source) > EDIT_AUTHOR_RUNTIME_BUDGET.htmlBytes) {
       throw new TypeError("Edit runtime source is invalid or too large.");
@@ -484,7 +675,7 @@ export function createEditRuntimeProtocolController({
     if (!documentBase) {
       throw new TypeError("Edit runtime document base is outside the authorized source root.");
     }
-    const frozenScripts = await prepareScripts({
+    const scriptPreparation = await prepareScripts({
       source,
       sourceRoot,
       documentBase,
@@ -508,34 +699,59 @@ export function createEditRuntimeProtocolController({
     const declaredAssets = new Map(
       [...discoveredAssets].filter(([relativePath]) => !isExecutableAssetPath(relativePath)),
     );
+    const frozenScripts = scriptPreparation.current
+      || await scriptPreparation.exactPromise;
+    const boundRecoveryIdentity = scriptPreparation.resourceMode === "compatible"
+      ? normalizedRecoveryIdentity(recoveryIdentity)
+      : null;
+    if (scriptPreparation.resourceMode === "compatible" && !boundRecoveryIdentity) {
+      throw new TypeError("Edit runtime compatible recovery requires source identity.");
+    }
     pruneOrphans();
-    const sessionId = allocate(randomSessionId, (candidate) => (
-      isEditRuntimeSessionId(candidate) && !sessions.has(candidate)
-    ));
-    const executionId = allocate(randomExecutionId, isEditRuntimeExecutionId);
-    const lastAccessAt = now();
-    sessions.set(sessionId, {
-      sessionId,
-      executionId,
+    return installFrozenSession({
+      frozenScripts,
       sourceRoot,
       declaredAssets,
-      scripts: frozenScripts.scripts.map((script) => ({ ...script })),
-      byteLength: frozenScripts.byteLength,
-      resourceSha256: frozenScripts.resourceSha256,
-      documentBasePath: frozenScripts.documentBasePath,
-      lastAccessAt,
+      resourceMode: scriptPreparation.resourceMode,
+      exactPromise: scriptPreparation.exactPromise,
+      recoveryIdentity: boundRecoveryIdentity,
     });
-    return Object.freeze({
-      contractVersion: EDIT_AUTHOR_RUNTIME_CONTRACT_VERSION,
-      sessionId,
-      executionId,
-      scriptCount: frozenScripts.scripts.length,
-      resourceSha256: frozenScripts.resourceSha256,
-      documentBasePath: frozenScripts.documentBasePath,
-      byteLength: frozenScripts.byteLength,
-      libraryOrigins: Object.freeze([
-        ...new Set(frozenScripts.scripts.map((script) => script.libraryOrigin)),
-      ]),
+  };
+  const recoverSession = async (value) => {
+    const sessionId = sessionIdFrom(value?.sessionId);
+    const compatibleSession = sessionId ? sessions.get(sessionId) : null;
+    if (
+      !compatibleSession
+      || compatibleSession.resourceMode !== "compatible"
+      || !compatibleSession.recovery?.exactPromise
+    ) {
+      throw new TypeError("Edit runtime session has no compatible recovery.");
+    }
+    const expectedIdentity = compatibleSession.recovery.identity;
+    if (
+      !expectedIdentity
+      || !isEditRuntimeSourceSha256(value?.sourceSha256)
+      || value.sourceSha256.toLowerCase() !== expectedIdentity.sourceSha256
+      || typeof value.authoritySourcePath !== "string"
+      || value.authoritySourcePath !== expectedIdentity.authoritySourcePath
+      || typeof value.programIdentity !== "string"
+      || value.programIdentity !== expectedIdentity.programIdentity
+      || value.canvasGeneration !== expectedIdentity.canvasGeneration
+    ) {
+      throw new TypeError("Edit runtime compatible recovery identity is invalid.");
+    }
+    if (compatibleSession.recovery.consumed) {
+      throw new TypeError("Edit runtime compatible recovery was already consumed.");
+    }
+    compatibleSession.recovery.consumed = true;
+    const frozenScripts = await compatibleSession.recovery.exactPromise;
+    pruneOrphans(compatibleSession.sessionId);
+    return installFrozenSession({
+      frozenScripts,
+      sourceRoot: compatibleSession.sourceRoot,
+      declaredAssets: compatibleSession.declaredAssets,
+      resourceMode: "exact",
+      excludedExecutionId: compatibleSession.executionId,
     });
   };
   const revokeSession = (value) => {
@@ -625,6 +841,7 @@ export function createEditRuntimeProtocolController({
     install: () => installFor(protocolApi),
     installFor,
     createSession,
+    recoverSession,
     revokeSession,
     dispose: () => {
       sessions.clear();

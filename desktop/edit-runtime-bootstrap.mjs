@@ -34,15 +34,24 @@ export function createEditRuntimeBootstrap({ executionId, sessionId } = {}) {
     originalScriptTypeAttribute: "data-html-canvas-original-script-type",
     missingAttributeValue: "__html_canvas_missing__",
     registrationProperty,
+    sessionId: normalizedSessionId,
+    executionId: normalizedExecutionId,
+    frameToken: `edit-runtime-frame-${normalizedExecutionId}`,
   }).replace(/</gu, "\\u003c");
   return String.raw`
 (() => {
   "use strict";
   const config = ${configuration};
   const openRegistration = window.parent?.[config.registrationProperty];
-  const registerProved = typeof openRegistration === "function"
-    ? openRegistration(window)
+  const registration = typeof openRegistration === "function"
+    ? openRegistration(window, {
+        sessionId: config.sessionId,
+        executionId: config.executionId,
+        frameToken: config.frameToken,
+      })
     : null;
+  const registerProved = registration?.registerProved;
+  const reportActivationOutcome = registration?.reportActivationOutcome;
 
   const candidates = (root) => {
     if (!root || root.nodeType !== Node.ELEMENT_NODE) return [];
@@ -85,10 +94,11 @@ export function createEditRuntimeBootstrap({ executionId, sessionId } = {}) {
     }
   };
 
-  const activateAuthorScripts = async () => {
+  const activateAuthorScripts = async (asyncSettlements) => {
     const placeholders = Array.from(document.querySelectorAll(
       "script[" + config.scriptStubAttribute + "]",
     ));
+    let scriptLoadFailed = false;
     for (const placeholder of placeholders) {
       if (!placeholder.isConnected) continue;
       const script = document.createElement("script");
@@ -109,13 +119,24 @@ export function createEditRuntimeBootstrap({ executionId, sessionId } = {}) {
         script.removeAttribute("type");
       }
       if (!placeholder.hasAttribute("async")) script.async = false;
-      const settled = new Promise((resolve) => {
-        script.addEventListener("load", resolve, { once: true });
-        script.addEventListener("error", resolve, { once: true });
-      });
+      const waitsForResource = Boolean(
+        script.getAttribute("src")
+        || (script.getAttribute("type") || "").trim().toLowerCase() === "module"
+      );
+      const settled = waitsForResource
+        ? new Promise((resolve) => {
+            script.addEventListener("load", () => resolve(true), { once: true });
+            script.addEventListener("error", () => resolve(false), { once: true });
+          })
+        : Promise.resolve(true);
       placeholder.replaceWith(script);
-      if (!script.async) await settled;
+      if (!script.async) {
+        if (!await settled) scriptLoadFailed = true;
+      } else {
+        asyncSettlements.push(settled);
+      }
     }
+    return !scriptLoadFailed;
   };
 
   let activationStarted = false;
@@ -131,14 +152,46 @@ export function createEditRuntimeBootstrap({ executionId, sessionId } = {}) {
   const start = async () => {
     if (activationStarted) return;
     activationStarted = true;
+    let activationFailed = false;
+    let activationReported = false;
+    const asyncSettlements = [];
+    const reportOnce = (outcome) => {
+      if (activationReported || typeof reportActivationOutcome !== "function") return;
+      activationReported = true;
+      reportActivationOutcome(outcome);
+    };
+    const captureActivationError = (event) => {
+      if (event instanceof ErrorEvent) activationFailed = true;
+    };
+    const captureActivationRejection = () => {
+      activationFailed = true;
+    };
+    window.addEventListener("error", captureActivationError, true);
+    window.addEventListener("unhandledrejection", captureActivationRejection, true);
     try {
       proveParsedSource();
-      await activateAuthorScripts();
+      if (!await activateAuthorScripts(asyncSettlements)) activationFailed = true;
+    } catch {
+      activationFailed = true;
     } finally {
       activationComplete = true;
       window.removeEventListener("DOMContentLoaded", holdDomContentLoaded, true);
-      if (deferredDomContentLoaded) {
-        document.dispatchEvent(new Event("DOMContentLoaded", { bubbles: true }));
+      try {
+        if (deferredDomContentLoaded) {
+          document.dispatchEvent(new Event("DOMContentLoaded", { bubbles: true }));
+        }
+        const asyncResults = await Promise.all(asyncSettlements);
+        if (asyncResults.some((loaded) => !loaded)) activationFailed = true;
+        // Keep the activation window open through the next task so an
+        // immediately rejected author promise, including one created by a
+        // deferred DOMContentLoaded handler, reaches unhandledrejection.
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      } catch {
+        activationFailed = true;
+      } finally {
+        window.removeEventListener("error", captureActivationError, true);
+        window.removeEventListener("unhandledrejection", captureActivationRejection, true);
+        reportOnce(activationFailed ? "activation-failed" : "activation-ready");
       }
     }
   };

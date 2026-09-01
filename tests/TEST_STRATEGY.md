@@ -170,7 +170,10 @@ Workbench 只确认已提交 loading surface、传入窄 port 并消费快照。
   结构操作会用完整 next HTML 重建 iframe 并重跑作者程序。运行时后代必须
   映射到最近源码宿主，只保留评论能力，不暴露文字/样式/结构编辑。原始
   HTML 与 Working Copy 均不得出现生成节点标记。协议/bootstrap 单测拥有资源闭包
-  复用、revoke、CSP、导航拦截、源码证明和无预热/磁盘 cache 边界。
+  复用、revoke、CSP、导航拦截、源码证明、无预热/Runtime cache 边界，以及
+  精确 URL 内容寻址字节缓存的损坏回退、并发去重、严格容量 LRU 和原子发布。
+  5.4.3 定向兼容矩阵必须证明准确缓存优先、兼容成功不消费恢复、准确字节迟到
+  只写缓存，以及兼容失败后至多一次准确 Session 恢复。
   Session 单测还覆盖外部来源切换至托管 V1 时，即使 SHA/Canvas generation
   未变也会发布新的准备路径；而 macOS `/var` 与 `/private/var` 同一文件别名
   不会消耗额外尝试。

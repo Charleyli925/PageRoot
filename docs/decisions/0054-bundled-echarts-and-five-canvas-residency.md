@@ -2,10 +2,10 @@
 
 ## Status
 
-Partially superseded by [ADR 0065](0065-disposable-edit-runtime.md). Decision 1
-and script-disabled Canvas residency remain active; Script-enabled runtime
-pages, the private library store, script prewarm and paint/freeze rules are
-retired.
+Partially superseded by [ADR 0065](0065-disposable-edit-runtime.md). Decision 1,
+the immutable verified byte-store responsibility in Decision 2, and
+script-disabled Canvas residency remain active. Script-enabled iframe
+residency, script prewarm and paint/freeze rules are retired.
 
 ## Context
 
@@ -22,9 +22,10 @@ working reports executed the same chart again.
 1. ECharts 5.5.0 minified bytes, SHA-256, Apache-2.0 license and NOTICE ship in
    App Resources. Exact 5.5.0 cdnjs/jsDelivr/unpkg minified URLs resolve to that
    integrity-checked file without network access or source rewriting.
-2. Other allowlisted ECharts URLs use a private content-addressed library store.
-   It retains at least ten libraries within 128 MiB and verifies every blob on
-   read. URL metadata never replaces the content hash.
+2. Exact-version allowlisted ECharts core URLs use a private content-addressed
+   library store. It strictly enforces both entry and byte ceilings and verifies
+   every blob on read. URL metadata never replaces the content hash. The store
+   owns bytes only, never a runtime session, compatibility result or DOM.
 3. Registered inactive tabs sequentially prewarm only immutable script bytes.
    The cache is keyed by source HTML plus resolved source root, holds at least
    five and never caches mutable local-script dependencies.
