@@ -1352,6 +1352,7 @@ export default function Workbench() {
     useState<readonly string[]>([]);
   const [runtimeCapabilitiesReady, setRuntimeCapabilitiesReady] = useState(false);
   const [browserPreviewOnly, setBrowserPreviewOnly] = useState(false);
+  const [browserEditingRuntimeActive, setBrowserEditingRuntimeActive] = useState(false);
   const agentHandoffState = runSnapshot.activeHandoff;
   const [updateResult, setUpdateResult] =
     useState<ApplicationUpdateResult | null>(null);
@@ -2699,8 +2700,11 @@ export default function Workbench() {
     });
     runtimeCapabilitiesRef.current = capabilities;
     const previewOnly = capabilities.sourceEditing !== "enabled";
+    const browserEditing = capabilities.sourceEditing === "enabled"
+      && capabilities.projectOpening === "browser-file";
     const frame = window.requestAnimationFrame(() => {
       setBrowserPreviewOnly(previewOnly);
+      setBrowserEditingRuntimeActive(browserEditing);
       setInteractivePreviewTransport(capabilities.interactivePreview);
       if (previewOnly) setCanvasMode("preview");
       setRuntimeCapabilitiesReady(true);
@@ -6394,7 +6398,7 @@ export default function Workbench() {
     ? workspaceController.projectCatalog as ProjectCatalogCapability
     : null;
   const canMountUnboundCanvas = Boolean(documentRuntimeTabId)
-    || (!startPageActive && !settingsPageActive && !projectRulesPageActive && !browserPreviewOnly);
+    || browserEditingRuntimeActive;
   const currentProjectDisplayName = currentProjectNameFromFile(sourcePath, projectName);
   const currentProjectSidebarVersions = useMemo(() => (
     projectId && documentId
