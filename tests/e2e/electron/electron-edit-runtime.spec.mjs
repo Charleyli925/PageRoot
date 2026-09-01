@@ -833,6 +833,16 @@ test("a real user scroll during runtime handoff becomes the latest handoff targe
     const moveDownBox = await moveDownButton.boundingBox();
     expect(moveDownBox).not.toBeNull();
     await armRuntimeHandoffSamples(page);
+    // Use the already-visible toolbar coordinate so Playwright does not first
+    // scroll the shared stage while locating the operation.
+    await page.mouse.click(
+      moveDownBox.x + moveDownBox.width / 2,
+      moveDownBox.y + moveDownBox.height / 2,
+    );
+    await expect.poll(() => page.locator(
+      '[data-testid="html-canvas-editor"]',
+    ).getAttribute("data-runtime-handoff"))
+      .toMatch(/preparing|positioning/u);
     const scrollbarDrag = await reviewStage.evaluate((element) => {
       const rect = element.getBoundingClientRect();
       const maximum = Math.max(1, element.scrollHeight - element.clientHeight);
@@ -849,18 +859,11 @@ test("a real user scroll during runtime handoff becomes the latest handoff targe
         endY: rect.top + thumbHeight / 2 + targetRatio * travel,
       };
     });
-    // Use the already-visible toolbar coordinate so Playwright does not first
-    // scroll the shared stage while locating the operation.
-    await page.mouse.click(
-      moveDownBox.x + moveDownBox.width / 2,
-      moveDownBox.y + moveDownBox.height / 2,
-    );
     // Drag the native scrollbar thumb. This is a real pointer gesture and
     // directly exercises the handoff's scrollbar-drag intent channel, including
     // hosts where a wheel over the scrollbar does not bubble a wheel event.
-    // The coordinates are captured before the operation so the gesture starts
-    // in the same event turn as preparing/positioning, before a fast candidate
-    // can settle without observing the user's intent.
+    // Capture the coordinates after the operation has laid out its positioning
+    // state, so a toolbar transition cannot leave the native track stale.
     await page.mouse.move(scrollbarDrag.x, scrollbarDrag.startY);
     await page.mouse.down();
     await page.mouse.move(scrollbarDrag.x, scrollbarDrag.endY, { steps: 12 });
