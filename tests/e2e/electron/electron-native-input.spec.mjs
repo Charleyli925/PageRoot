@@ -66,6 +66,13 @@ test("Electron shows continuous source text immediately without rebuilding the i
       activeIsLegacySurface: false,
       legacySurfaceCount: 0,
     });
+    await expect(page.getByTestId("canvas-target-outline")).toHaveCount(1);
+    await expect(page.getByTestId("canvas-capability-outline")).toHaveCount(0);
+    await expect(page.getByTestId("canvas-target-outline")).toBeVisible();
+    expect(await frame.locator(caseSelector("heading-inline")).evaluate((element) => {
+      const style = getComputedStyle(element);
+      return { boxShadow: style.boxShadow, outlineStyle: style.outlineStyle };
+    })).toEqual({ boxShadow: "none", outlineStyle: "none" });
     await installInputRecorder(frame);
     await setTextSelection(frame, "heading-inline", 3, 9);
     await page.keyboard.insertText("Electron原位");

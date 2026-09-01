@@ -639,7 +639,14 @@ test("Electron Edit renders a source-relative ECharts page in the editable ifram
 <html><head><title>Runtime</title></head><body>
   <main id="chart" data-native-case="echarts-runtime" style="width:320px;height:180px"></main>
   <script src="echarts.js"></script>
-  <script>echarts.init(document.querySelector('#chart')).setOption({series:[{type:'bar',data:[1,2,3]}]});</script>
+  <script>
+    const chart = document.querySelector('#chart');
+    echarts.init(chart).setOption({series:[{type:'bar',data:[1,2,3]}]});
+    const runtimeOverlay = document.createElement('div');
+    runtimeOverlay.id = 'runtime-chart-overlay';
+    runtimeOverlay.style.cssText = 'position:absolute;inset:0;z-index:2;cursor:crosshair';
+    chart.append(runtimeOverlay);
+  </script>
 </body></html>`;
   await withRuntimeProject("pageroot-echarts-runtime-e2e-", {
     "runtime-report.html": html,
@@ -647,6 +654,13 @@ test("Electron Edit renders a source-relative ECharts page in the editable ifram
   }, async ({ page, sourcePath }) => {
     const { frame } = await loadedDiskFrame(page, sourcePath, "echarts-runtime");
     await expect(frame.locator("#chart canvas")).toHaveCount(1);
+    await expect(frame.locator("#runtime-chart-overlay")).toBeVisible();
+    await frame.locator("#runtime-chart-overlay").hover();
+    await expect.poll(() => frame.locator("html").getAttribute("data-html-canvas-pointer"))
+      .toBeNull();
+    await expect.poll(() => frame.locator("#runtime-chart-overlay").evaluate(
+      (element) => getComputedStyle(element).cursor,
+    )).toBe("crosshair");
     await expect(frame.locator("[data-pageroot-edit-runtime-bootstrap]")).toHaveCount(1);
     await expect(frame.locator("[data-pageroot-edit-runtime-frozen]")).toHaveCount(0);
     expect(readFileSync(sourcePath, "utf8")).toBe(html);
