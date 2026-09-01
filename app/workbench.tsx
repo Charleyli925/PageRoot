@@ -6393,10 +6393,8 @@ export default function Workbench() {
   const projectCatalogCapability = workspaceController
     ? workspaceController.projectCatalog as ProjectCatalogCapability
     : null;
-  const browserEditingRuntimeActive = runtimeCapabilitiesReady
-    && runtimeCapabilitiesRef.current.sourceEditing === "enabled"
-    && runtimeCapabilitiesRef.current.projectOpening === "browser-file";
-  const canMountUnboundCanvas = Boolean(documentRuntimeTabId) || browserEditingRuntimeActive;
+  const canMountUnboundCanvas = Boolean(documentRuntimeTabId)
+    || (!startPageActive && !settingsPageActive && !projectRulesPageActive && !browserPreviewOnly);
   const currentProjectDisplayName = currentProjectNameFromFile(sourcePath, projectName);
   const currentProjectSidebarVersions = useMemo(() => (
     projectId && documentId
