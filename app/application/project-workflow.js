@@ -2492,9 +2492,19 @@ export class ProjectWorkflow {
         return "deferred";
       }
       canvasFrozen = true;
+      const pendingWrite = this.#documentSession.pendingWrite;
+      const pendingWriteIsProtected = Boolean(
+        pendingWrite
+        && Number(pendingWrite.revision) === cutoff
+        && String(pendingWrite.html) === this.#documentSession.html
+        && documentHasProtectionEvidence(this.#documentWorkflow, {
+          context: this.#projectSession.context,
+          revision: cutoff,
+        })
+      );
       if (
         this.#documentSession.editRevision !== cutoff
-        || this.#documentSession.pendingWrite
+        || (pendingWrite && !pendingWriteIsProtected)
         || this.#documentSession.flushPromise
       ) {
         this.#canvasPort.unlock?.();

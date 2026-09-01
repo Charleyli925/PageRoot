@@ -825,6 +825,23 @@ test("real Document and Project workflows protect H1 for navigation, close, and 
   assert.equal(restarted.documentSession.html, h1);
   assert.equal(restarted.documentSession.persistedSourceSha256, sha256(OLD_HTML));
   assert.equal(restarted.documentSession.workingHtmlSha256, sha256(h1));
+  assert.notEqual((await restarted.documentWorkflow.flush({ throughRevision: 1 })).status, "succeeded");
+  assert.ok(restarted.documentSession.pendingWrite);
+  assert.equal(restarted.workflow.acceptProject({
+    name: "Protected successor",
+    projectId: "project_protected_successor",
+    documentId: "document_protected_successor",
+    sourcePath: B_PATH,
+    html: B_HTML,
+    sha256: sha256(B_HTML),
+  }).status, "succeeded");
+  await waitFor(
+    () => restarted.projectSession.sourcePath === B_PATH
+      && restarted.workflow.getSnapshot().projectApplication.status === "idle",
+    "verified protection did not release the successor project application",
+  );
+  assert.equal(restarted.documentSession.html, B_HTML);
+  assert.equal(journalRecord.html, h1);
 });
 
 test("a startup catalog read cannot delay or supersede a newer local open", async (t) => {
