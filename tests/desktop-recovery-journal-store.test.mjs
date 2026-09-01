@@ -1,10 +1,21 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, readFile, symlink, writeFile } from "node:fs/promises";
+import {
+  mkdtemp,
+  mkdir,
+  open,
+  readFile,
+  readdir,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-import { createRecoveryJournalStore } from "../desktop/recovery-journal-store.mjs";
+import {
+  atomicWriteRecoveryJournalFile,
+  createRecoveryJournalStore,
+} from "../desktop/recovery-journal-store.mjs";
 
 const HASH_A = `sha256:${"a".repeat(64)}`;
 
@@ -69,6 +80,56 @@ test("recovery journal atomically commits and reads back exact verified HTML", a
   assert.equal(names.length, 1);
   assert.match(names[0], /^[a-f0-9]{64}\.json$/u);
   assert.equal(names.some((name) => name.endsWith(".tmp")), false);
+});
+
+test("default journal limits read back JSON-escaped product-valid HTML", async (t) => {
+  const { store } = await fixture(t);
+  const html = `<!doctype html><html><body>${"\0".repeat(5 * 1024 * 1024)}</body></html>`;
+  const committed = await store.commit(checkpoint({ html }));
+  const recovered = await store.readVerified(committed);
+  assert.equal(recovered.html, html);
+  assert.ok(committed.byteLength < Buffer.byteLength(JSON.stringify({ html }), "utf8"));
+});
+
+test("journal rejects an oversized serialized envelope before publishing it", async (t) => {
+  const { rootPath } = await fixture(t);
+  await mkdir(rootPath, { recursive: true });
+  const store = createRecoveryJournalStore({ rootPath, maxEntryBytes: 1_024 });
+  await assert.rejects(
+    store.commit(checkpoint({
+      html: `<!doctype html><html><body>${"\0".repeat(512)}</body></html>`,
+    })),
+    (error) => error.code === "RECOVERY_JOURNAL_ENTRY_TOO_LARGE",
+  );
+  assert.deepEqual(await readdir(rootPath), []);
+});
+
+test("journal atomic writes remove temporary files after write or sync failure", async (t) => {
+  const { rootPath } = await fixture(t);
+  await mkdir(rootPath, { recursive: true });
+  for (const failurePhase of ["write", "sync"]) {
+    const destination = path.join(rootPath, `${failurePhase}.json`);
+    await assert.rejects(
+      atomicWriteRecoveryJournalFile(destination, "journal payload", {
+        async openFile(filePath, flags, mode) {
+          const handle = await open(filePath, flags, mode);
+          return {
+            async writeFile(content) {
+              await handle.writeFile(content);
+              if (failurePhase === "write") throw new Error("injected write failure");
+            },
+            async sync() {
+              if (failurePhase === "sync") throw new Error("injected sync failure");
+              await handle.sync();
+            },
+            close: () => handle.close(),
+          };
+        },
+      }),
+      new RegExp(`injected ${failurePhase} failure`, "u"),
+    );
+    assert.deepEqual(await readdir(rootPath), []);
+  }
 });
 
 test("recovery journal refuses stale CAS commit and stale removal", async (t) => {

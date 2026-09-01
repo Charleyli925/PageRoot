@@ -18,7 +18,10 @@ const SHA256 = /^sha256:[a-f0-9]{64}$/u;
 const MAX_ID_LENGTH = 160;
 const MAX_PATH_LENGTH = 4096;
 const DEFAULT_MAX_ENTRY_COUNT = 512;
-const DEFAULT_MAX_ENTRY_BYTES = PRODUCT_MAX_HTML_BYTES + 1_048_576;
+// JSON may encode one accepted HTML byte as a six-byte `\u00xx` escape.
+// Keep enough fixed overhead for the remaining bounded envelope fields so a
+// product-valid HTML document can always be written and read back.
+const DEFAULT_MAX_ENTRY_BYTES = (PRODUCT_MAX_HTML_BYTES * 6) + 65_536;
 const DEFAULT_MAX_TOTAL_BYTES = PRODUCT_MAX_HTML_BYTES * 8;
 const DEFAULT_SCAN_TIME_MS = 2_000;
 
@@ -124,26 +127,34 @@ async function ensureOwnedDirectory(directory) {
   }
 }
 
-async function atomicWrite(filePath, content) {
+export async function atomicWriteRecoveryJournalFile(filePath, content, {
+  openFile = open,
+  renameFile = rename,
+  removeFile = rm,
+  syncParent = syncDirectory,
+} = {}) {
   const parent = path.dirname(filePath);
   await ensureOwnedDirectory(parent);
   const temporary = path.join(
     parent,
     `.pageroot-recovery-${process.pid}-${randomUUID()}.tmp`,
   );
-  const handle = await open(temporary, "wx", 0o600);
+  let published = false;
   try {
-    await handle.writeFile(content);
-    await handle.sync();
+    const handle = await openFile(temporary, "wx", 0o600);
+    try {
+      await handle.writeFile(content);
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+    await renameFile(temporary, filePath);
+    published = true;
+    await syncParent(parent);
   } finally {
-    await handle.close();
-  }
-  try {
-    await rename(temporary, filePath);
-    await syncDirectory(parent);
-  } catch (error) {
-    await rm(temporary, { force: true });
-    throw error;
+    if (!published) {
+      await removeFile(temporary, { force: true }).catch(() => {});
+    }
   }
 }
 
@@ -228,6 +239,17 @@ export function createRecoveryJournalStore({
     maxTotalBytes: Math.max(1, Number(maxTotalBytes) || DEFAULT_MAX_TOTAL_BYTES),
     scanTimeMs: Math.max(1, Number(scanTimeMs) || DEFAULT_SCAN_TIME_MS),
   });
+
+  const serializeForWrite = (envelope) => {
+    const content = serialize(envelope);
+    if (Buffer.byteLength(content, "utf8") > normalizedLimits.maxEntryBytes) {
+      throw recoveryError(
+        "RECOVERY_JOURNAL_ENTRY_TOO_LARGE",
+        "恢复日志文件超出写入上限。",
+      );
+    }
+    return content;
+  };
 
   const readEnvelope = async (locator) => {
     const filePath = entryPath(locator);
@@ -358,7 +380,10 @@ export function createRecoveryJournalStore({
               workingCopyId: incomingWorkingCopyId,
               updatedAt: now().toISOString(),
             });
-            await atomicWrite(entryPath(locator), serialize(upgraded));
+            await atomicWriteRecoveryJournalFile(
+              entryPath(locator),
+              serializeForWrite(upgraded),
+            );
             const verifiedUpgrade = await readEnvelope(locator);
             if (!verifiedUpgrade) {
               throw recoveryError(
@@ -384,7 +409,10 @@ export function createRecoveryJournalStore({
           updatedAt: now().toISOString(),
           html,
         });
-        await atomicWrite(entryPath(locator), serialize(envelope));
+        await atomicWriteRecoveryJournalFile(
+          entryPath(locator),
+          serializeForWrite(envelope),
+        );
         const verified = await readEnvelope(locator);
         if (!verified) {
           throw recoveryError(
@@ -468,7 +496,10 @@ export function createRecoveryJournalStore({
           sourcePath: nextSourcePath,
           updatedAt: now().toISOString(),
         });
-        await atomicWrite(entryPath(locator), serialize(envelope));
+        await atomicWriteRecoveryJournalFile(
+          entryPath(locator),
+          serializeForWrite(envelope),
+        );
         const rebound = await readEnvelope(locator);
         if (!rebound) {
           throw recoveryError(
