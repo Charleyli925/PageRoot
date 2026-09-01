@@ -36,7 +36,7 @@ the Bridge client, construct Sessions, or own debounce, polling, or drain.
 | Run and AI request | `RunSession` | `RunWorkflow` | `workspace-controller-capabilities.d.ts` (`controller.runs`), `run-workflow.js`, `run/text-locator-validation.js`, `run/submit-plan.js`, `run-conversation-outlet.tsx` |
 | Review and Candidate | Repository owns immutable Candidate HTML, runtime seal, source-identity report and bounded Stable-ID impact assessment with descendant scope closure; `VersionSession` owns only the renderer projection | Repository validates/normalizes full-HTML Candidate; `VersionWorkflow` prepares Review and accepts; Review analysis presents bounded warning-only impact context | `bridge/candidate-assessment.mjs`, `bridge/candidate-assessment-decoder.mjs`, `bridge/project-file-repository/candidate-identity.mjs`, `bridge/project-file-repository/version-candidate.mjs`, `app/domain/run-lifecycle.js`, `app/application/version-workflow.js`, `app/workbench/ReviewAnalysisPrewarm.tsx`, `app/workbench/review-document.ts`, `app/workbench/AiReviewWorkspace.tsx` |
 | Version and history | `VersionSession` | `VersionWorkflow` | `version-workflow.js`, `version/review-plan.js` |
-| Project context and version navigation | `ProjectSession`, `ProjectRulesSession`, `VersionSession` | `ProjectWorkflow`, `ProjectRulesWorkflow` | `workspace-controller-capabilities.d.ts` (`controller.projectCatalog`), `workbench-sidebar-container.tsx`, `WorkbenchChrome.tsx` |
+| Project context and version navigation | `ProjectSession`, `ProjectRulesSession`, `VersionSession` | `ProjectWorkflow`, `ProjectRulesWorkflow` | `workspace-controller-capabilities.d.ts` (`controller.projectCatalog`), `workbench-sidebar-container.tsx`, `WorkbenchChrome.tsx`, `project-rules-editor.tsx` |
 | Canvas edit runtime | `EditAuthorRuntimeSession` owns the scoped resource grant and one compatible-to-exact recovery; Main's library store owns only verified immutable CDN bytes; source HTML remains authoritative | Canvas rebuild/rerun in `HtmlCanvasEditor`; `DocumentWorkflow` persists complete HTML | `edit-runtime-contract.js`, `HtmlCanvasEditor.tsx`, `desktop/edit-runtime-protocol.mjs`, `desktop/edit-runtime-library-store.mjs`, `desktop/edit-runtime-bootstrap.mjs` |
 | Preview | disposable preview session | Desktop preview protocol | `desktop/` preview owner, `HtmlInteractionPreview` |
 | Project open / switch / close | `ProjectSession` | `ProjectWorkflow` | `project-workflow.js`, `project/open-intent.js`, `project/switch-plan.js`, `project/close-plan.js`, `project/source-locator-plan.js` |
@@ -113,13 +113,14 @@ ProjectSession + ProjectWorkflow + ProjectRulesWorkflow + VersionSession
       -> current-project context and version-tree navigation
 ```
 
-The global sidebar owns the visible project context, safe project switching and
-the fixed settings entry. It is not a project management drawer: PROJECT.md
-editing, version-detail presentation, export/Finder actions and history-preview
-entry points are not rendered there. `ProjectRulesSession` and
-`ProjectRulesWorkflow` remain fact and lifecycle owners for persistence and
-close/switch safety; no disposable project-panel port or presentation facet
-crosses into Workbench.
+The global sidebar owns the visible project context, safe project switching, the
+fixed `PROJECT.md` entry and the fixed settings entry. The “长期规则” row is
+not part of the version timeline: it opens the singleton `project-rules` tab in
+the workbench and never receives a version date. `ProjectRulesSession` and
+`ProjectRulesWorkflow` remain fact and lifecycle owners for persistence,
+autosave and close/switch safety; the editor is only a projection over that
+workflow. The document canvas remains mounted while the rules tab is visible,
+so switching presentation does not rebuild the HTML iframe.
 
 ## Run and navigation render boundaries
 

@@ -862,7 +862,6 @@ export class RunWorkflow {
       const request = {
         ...context,
         projectName: this.#codecs.fileStem(submissionContext.projectName),
-        projectMd: this.#codecs.projectMarkdown(submissionContext.projectName),
         sourcePath: context.sourcePath,
         expectedSourceSha256: persistedSourceSha256,
         freezeCutoffRevision,

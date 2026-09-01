@@ -86,7 +86,7 @@ step summary 里。
   close/open/hydration 路径。
 - `ProjectRulesWorkflow`：fake Bridge、Scheduler 与 Project/Run Session 验证 `PROJECT.md` 的
   700ms debounce、保存中继续输入时的完整 drain、unknown-write 单次 authority
-  reconciliation、late read/write stale fence、run lock、dispose timer fence 与显式还原先退役原生输入节点。`ProjectRulesSession` 只验证 working copy/composition/save projection；Workbench 只转发规则工作流 intent，不再消费独立的规则展示 Facet。
+  reconciliation、late read/write stale fence、run lock、dispose timer fence 与显式还原先退役原生输入节点。`ProjectRulesSession` 只验证 working copy/composition/save projection；Workbench 只转发规则工作流 intent，长期规则页的正文草稿留在编辑器本地，保存状态仍来自工作流快照。
 - `CommentWorkflow`：fake Bridge、RecoveryStore 和现有 Comment/Draft Session 证明
   lazy registration、单次 Draft 持久化、附件部分成功、跨项目迟到上传补偿、编辑取消
   仅删除 staged 附件，以及 unknown Draft POST 只通过 authority query 收敛而不重复

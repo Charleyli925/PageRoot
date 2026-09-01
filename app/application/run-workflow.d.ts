@@ -37,7 +37,6 @@ export type RunWorkflowCodecs = Readonly<{
   persistedTargetRef(value: unknown): unknown;
   uniqueTargets(value: unknown[]): unknown[];
   fileStem(value: string): string;
-  projectMarkdown(value: string): string;
   operationKey(run: Pick<ActiveRun, "sourcePath" | "requestId" | "attemptId">): string;
   errorMessage(cause: unknown, fallback: string): string;
 }>;

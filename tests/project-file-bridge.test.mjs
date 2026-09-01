@@ -17,7 +17,10 @@ import {
 import {
   finalizeProjectFileAttempt,
 } from "../bridge/project-file-finalizer.mjs";
-import { ProjectFileRepository } from "../bridge/project-file-repository.mjs";
+import {
+  DEFAULT_PROJECT_RULES_TEMPLATE,
+  ProjectFileRepository,
+} from "../bridge/project-file-repository.mjs";
 import { sha256 } from "../bridge/lifecycle-core.mjs";
 
 function html(label) {
@@ -453,7 +456,7 @@ test("project-file PROJECT.md remains available through the shared project-file 
   assert.equal(initial.response.status, 200, JSON.stringify(initial.body));
   assert.equal(initial.body.relativePath, "PROJECT.md");
   assert.equal(initial.body.readOnly, false);
-  assert.equal(initial.body.content, "# rules\n");
+  assert.equal(initial.body.content, DEFAULT_PROJECT_RULES_TEMPLATE);
 
   const content = "# 项目规则\n\n- 只修改首页标题。\n";
   const saved = await postJson(bridge, "/project-file", {
@@ -497,6 +500,14 @@ test("project-file Request becomes a Candidate on finalization and a Version onl
   assert.equal(ensured.response.status, 200, JSON.stringify(ensured.body));
 
   const taskText = "将标题改为 Candidate。确保标题保持可读；本轮不需要修改导航栏。";
+  const projectRules = "# 本轮前的长期规则\n\n- 只修改标题。\n";
+  const savedRules = await postJson(bridge, "/project-file", {
+    sourcePath: ensured.body.sourcePath,
+    projectId: ensured.body.projectId,
+    documentId: ensured.body.documentId,
+    content: projectRules,
+  });
+  assert.equal(savedRules.response.status, 200, JSON.stringify(savedRules.body));
   const request = await postJson(bridge, "/request", {
     projectId: ensured.body.projectId,
     documentId: ensured.body.documentId,
@@ -515,6 +526,24 @@ test("project-file Request becomes a Candidate on finalization and a Version onl
   });
   assert.equal(request.response.status, 201, JSON.stringify(request.body));
   assert.equal(request.body.activeRun.status, "processing");
+  const changedAfterFreeze = "# 下一次任务的长期规则\n";
+  const changedRules = await postJson(bridge, "/project-file", {
+    sourcePath: ensured.body.sourcePath,
+    projectId: ensured.body.projectId,
+    documentId: ensured.body.documentId,
+    content: changedAfterFreeze,
+  });
+  assert.equal(changedRules.response.status, 200, JSON.stringify(changedRules.body));
+  assert.equal(
+    await readFile(join(
+      ensured.body.projectRoot,
+      ".pageroot",
+      "requests",
+      request.body.requestId,
+      "input",
+      "PROJECT.md",
+    ), "utf8"),
+  projectRules);
   const frozenTask = JSON.parse(await readFile(join(
     ensured.body.projectRoot,
     ".pageroot",

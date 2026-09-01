@@ -1,7 +1,7 @@
 export type WorkbenchTabStatus = "normal" | "processing" | "review-ready" | "error" | "opening";
 export type WorkbenchTab = Readonly<{
   tabId: string;
-  kind: "start" | "settings" | "document";
+  kind: "start" | "settings" | "project-rules" | "document";
   title: string;
   status: WorkbenchTabStatus;
   projectId?: string;
@@ -24,6 +24,7 @@ export class WorkbenchTabsSession {
   hydrate(value: unknown): WorkbenchTabsSnapshot;
   createStart(input?: { focus?: boolean }): WorkbenchTabsSnapshot | null;
   createSettings(input?: { focus?: boolean }): WorkbenchTabsSnapshot | null;
+  createProjectRules(input?: { focus?: boolean }): WorkbenchTabsSnapshot | null;
   bindDocument(input: {
     projectId: string;
     documentId: string;
@@ -42,6 +43,7 @@ export class WorkbenchTabsSession {
   beginSwitch(tabId: string): WorkbenchTabsSnapshot | null;
   commitStart(tabId: string): WorkbenchTabsSnapshot | null;
   commitSettings(tabId: string): WorkbenchTabsSnapshot | null;
+  commitProjectRules(tabId: string): WorkbenchTabsSnapshot | null;
   commitDocument(input: { tabId: string; projectId: string; documentId: string; title: string }): WorkbenchTabsSnapshot | null;
   cancelSwitch(tabId: string): WorkbenchTabsSnapshot;
   updateStatus(projectId: string, documentId: string, status: WorkbenchTabStatus): WorkbenchTabsSnapshot;
