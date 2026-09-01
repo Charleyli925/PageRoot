@@ -69,14 +69,14 @@ export function updatePresentation({
     return {
       tone: "available",
       title: `正在下载 PageRoot ${result.latestVersion || "新版本"}`,
-      detail: "你可以继续编辑；下载完成后源页会询问是否现在重启。",
+      detail: "你可以继续编辑；下载完成后可在侧栏或设置中重启安装。",
     };
   }
   if (result.status === "downloaded") {
     return {
       tone: "ready",
       title: `PageRoot ${result.latestVersion || "新版本"} 已准备好`,
-      detail: "重启前会先确认当前编辑、评论和项目资料已经安全写入。",
+      detail: "点击重启后会先写入当前编辑，然后安装新版本。",
     };
   }
   if (result.status === "installing") {

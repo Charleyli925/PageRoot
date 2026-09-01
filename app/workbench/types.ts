@@ -586,6 +586,7 @@ export type CloseReadiness =
       ready: false;
       reason: string;
       presentation: "in-app" | "native";
+      retry?: boolean;
     };
 export type PrepareCloseDetail = {
   requestId: string;

@@ -214,23 +214,29 @@ export async function selectExportDestination({
   defaultPath,
   protectedPaths,
   showSaveDialog,
-  showProtectedWarning,
   normalizeDestination = (value) => path.resolve(value),
   platform = process.platform,
   statFile = stat,
+  lstatFile = lstat,
 }) {
-  while (true) {
-    const result = await showSaveDialog(defaultPath);
-    if (!result || result.canceled || !result.filePath) return null;
+  const result = await showSaveDialog(defaultPath);
+  if (!result || result.canceled || !result.filePath) return null;
 
-    const destinationPath = normalizeDestination(result.filePath);
-    if (!await isProtectedExportDestination(destinationPath, protectedPaths, {
-      platform,
-      statFile,
-    })) {
-      return destinationPath;
-    }
-
-    if (!await showProtectedWarning(destinationPath)) return null;
+  const destinationPath = normalizeDestination(result.filePath);
+  if (!await isProtectedExportDestination(destinationPath, protectedPaths, {
+    platform,
+    statFile,
+  })) {
+    return destinationPath;
   }
+
+  return createSafeExportDefaultPath({
+    directoryPath: path.dirname(destinationPath),
+    suggestedName: path.basename(destinationPath),
+    sourcePath: protectedPaths[0],
+    activePath: protectedPaths[1],
+    platform,
+    lstatFile,
+    statFile,
+  });
 }

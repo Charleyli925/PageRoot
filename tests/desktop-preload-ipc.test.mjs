@@ -869,6 +869,66 @@ test("preload exposes workspace failure recovery and a narrow relaunch action", 
   unsubscribe();
 });
 
+test("preload reports close blockers in-app and can request retry", async () => {
+  const calls = [];
+  const preload = await loadPreloadApis(async (...args) => {
+    calls.push(args);
+    return { accepted: true };
+  });
+  await preload.lifecycle.reportBlocked("close-request-0001", "正在保存。");
+  await preload.lifecycle.reportBlocked("close-request-0002", "正在保存。", "in-app", true);
+  assert.deepEqual(JSON.parse(JSON.stringify(calls)), [
+    ["html-app:close-result", {
+      requestId: "close-request-0001",
+      ready: false,
+      reason: "正在保存。",
+      presentation: "in-app",
+    }],
+    ["html-app:close-result", {
+      requestId: "close-request-0002",
+      ready: false,
+      reason: "正在保存。",
+      presentation: "in-app",
+      retry: true,
+    }],
+  ]);
+});
+
+test("preload replays a pending external-open failure and receives later failures", async () => {
+  const calls = [];
+  const preload = await loadPreloadApis(async (...args) => {
+    calls.push(args);
+    if (args[0] === "html-app:external-open-failed-ready") {
+      return {
+        title: "无法打开这个 HTML",
+        message: "启动期间未能读取这个 HTML 文件。",
+      };
+    }
+    return null;
+  });
+  const issues = [];
+  const unsubscribe = preload.lifecycle.onExternalOpenFailed((issue) => {
+    issues.push(issue);
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  preload.emit("html-app:external-open-failed", {
+    title: "无法打开这个 HTML",
+    message: "无法读取这个 HTML 文件。请确认文件仍存在且具有访问权限。",
+  });
+  assert.deepEqual(JSON.parse(JSON.stringify(issues)), [
+    {
+      title: "无法打开这个 HTML",
+      message: "启动期间未能读取这个 HTML 文件。",
+    },
+    {
+      title: "无法打开这个 HTML",
+      message: "无法读取这个 HTML 文件。请确认文件仍存在且具有访问权限。",
+    },
+  ]);
+  assert.deepEqual(calls, [["html-app:external-open-failed-ready"]]);
+  unsubscribe();
+});
+
 test("preload opens only the fixed packaged user notice", async () => {
   const calls = [];
   const { lifecycle } = await loadPreloadApis(async (...args) => {

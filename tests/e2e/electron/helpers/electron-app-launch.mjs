@@ -792,14 +792,7 @@ export async function waitForProjectReady(page, {
   timeout = 60_000,
   includeFailureDetail = true,
 } = {}) {
-  const importButton = page.getByRole("button", { name: "导入并打开" });
-  const continueButton = page.getByRole("button", { name: "打开之前的项目" });
   const readinessSamples = [];
-  const confirmationKind = async () => {
-    if (await importButton.isVisible().catch(() => false)) return "import";
-    if (await continueButton.isVisible().catch(() => false)) return "continue";
-    return "";
-  };
   const visibleFailure = async (snapshot) => (
     includeFailureDetail && snapshot?.projectState === "failed"
       ? await page.locator('[aria-label="项目读取失败"]').textContent().catch(() => "")
@@ -807,46 +800,36 @@ export async function waitForProjectReady(page, {
   );
 
   let currentDocumentId = "";
-
-  // Settle on a ready project, or on the confirmation the startup path is
-  // waiting for. A workbench that disappears inside one live document fails
-  // immediately instead of being hidden behind the full hydration timeout.
-  const settleReady = async ({ acceptConfirmation }) => {
-    const deadline = Date.now() + timeout;
-    let snapshot = null;
+  const deadline = Date.now() + timeout;
+  let snapshot = null;
+  try {
     for (;;) {
-      const confirmation = await confirmationKind();
-      if (confirmation) {
-        readinessSample(readinessSamples, `confirm:${confirmation}`);
-        if (acceptConfirmation) return confirmation;
-      } else {
-        snapshot = await rendererProbe(page, {
-          timeout: Math.min(DEFAULT_DIAGNOSTIC_OPERATION_TIMEOUT, Math.max(1, deadline - Date.now())),
+      snapshot = await rendererProbe(page, {
+        timeout: Math.min(DEFAULT_DIAGNOSTIC_OPERATION_TIMEOUT, Math.max(1, deadline - Date.now())),
+      });
+      if (snapshot) {
+        const documentReplaced = Boolean(currentDocumentId)
+          && currentDocumentId !== snapshot.documentId;
+        currentDocumentId = snapshot.documentId;
+        const state = `${snapshot.projectState || "missing"}:${snapshot.hydrationStage || "unmarked"}`;
+        readinessSample(readinessSamples, state);
+        if (snapshot.projectState === "ready") return;
+        const classification = classifyRendererMount({
+          mounted: snapshot.mounted,
+          mountObservedForDocument: observedRendererMount(page, snapshot.documentId),
+          documentReplaced,
         });
-        if (snapshot) {
-          const documentReplaced = Boolean(currentDocumentId)
-            && currentDocumentId !== snapshot.documentId;
-          currentDocumentId = snapshot.documentId;
-          const state = `${snapshot.projectState || "missing"}:${snapshot.hydrationStage || "unmarked"}`;
-          readinessSample(readinessSamples, state);
-          if (snapshot.projectState === "ready") return "";
-          const classification = classifyRendererMount({
-            mounted: snapshot.mounted,
-            mountObservedForDocument: observedRendererMount(page, snapshot.documentId),
-            documentReplaced,
-          });
-          if (classification === "torn-down") {
-            throw new Error(describeRendererReadiness(
-              "PageRoot renderer unmounted the workbench it had already mounted. "
-              + "A live document must never drop main.workbench.",
-              snapshot,
-              rendererFaultLog(page),
-              { documentNote: `unchanged (${snapshot.documentId})` },
-            ));
-          }
-        } else {
-          readinessSample(readinessSamples, "transient:renderer-probe:no-detail");
+        if (classification === "torn-down") {
+          throw new Error(describeRendererReadiness(
+            "PageRoot renderer unmounted the workbench it had already mounted. "
+            + "A live document must never drop main.workbench.",
+            snapshot,
+            rendererFaultLog(page),
+            { documentNote: `unchanged (${snapshot.documentId})` },
+          ));
         }
+      } else {
+        readinessSample(readinessSamples, "transient:renderer-probe:no-detail");
       }
       if (Date.now() >= deadline) {
         throw new Error(describeRendererReadiness(
@@ -858,48 +841,8 @@ export async function waitForProjectReady(page, {
       }
       await sleep(READINESS_POLL_MS);
     }
-  };
-
-  let pendingConfirmation = "";
-  try {
-    pendingConfirmation = await settleReady({ acceptConfirmation: true });
   } catch (cause) {
     throw await projectReadinessTimeout(page, cause, readinessSamples);
-  }
-
-  // Last-active external HTML can overlay confirmation after welcome is already ready.
-  if (!pendingConfirmation) {
-    try {
-      await importButton.or(continueButton).waitFor({ state: "visible", timeout: 1_500 });
-      pendingConfirmation = await confirmationKind();
-    } catch {
-      pendingConfirmation = "";
-    }
-  }
-
-  if (pendingConfirmation === "import" || pendingConfirmation === "continue") {
-    const button = pendingConfirmation === "import" ? importButton : continueButton;
-    if (pendingConfirmation === "import") {
-      const importDialog = page.locator(
-        'section[role="dialog"][data-classification="new-external"]',
-      );
-      await expect(importDialog).toBeVisible();
-      await expect(importDialog).toContainText("复制本文件并保存为");
-      await expect(importDialog).toContainText(
-        "成功导入后，同意将原文件移至废纸篓。",
-      );
-      await expect(importDialog.getByRole("checkbox"))
-        .not.toBeChecked();
-      await expect(importDialog.getByRole("button", { name: /^点击打开 /u }))
-        .toBeVisible();
-    }
-    await button.focus();
-    await button.click();
-    try {
-      await settleReady({ acceptConfirmation: false });
-    } catch (cause) {
-      throw await projectReadinessTimeout(page, cause, readinessSamples);
-    }
   }
 }
 

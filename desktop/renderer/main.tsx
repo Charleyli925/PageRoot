@@ -24,6 +24,7 @@ type CloseReadiness =
       ready: false;
       reason: string;
       presentation: "in-app" | "native";
+      retry?: boolean;
     };
 
 type PrepareCloseDetail = PrepareCloseRequest & {
@@ -50,11 +51,15 @@ declare global {
         requestId: string,
         reason: string,
         presentation?: "in-app" | "native",
+        retry?: boolean,
       ) => Promise<{ accepted: boolean }>;
       onCloseAborted: (
         listener: (request: CloseAbortedRequest) => void,
       ) => () => void;
       onWorkspaceUnavailable: (
+        listener: (issue: WorkspaceUnavailable) => void,
+      ) => () => void;
+      onExternalOpenFailed: (
         listener: (issue: WorkspaceUnavailable) => void,
       ) => () => void;
       onExternalOpenRequested: (
@@ -126,6 +131,7 @@ window.htmlAIAppLifecycle?.onPrepareClose(async (request) => {
         request.requestId,
         blocked.reason || "仍有更改尚未安全写入。",
         blocked.presentation,
+        blocked.retry === true,
       );
       return;
     }

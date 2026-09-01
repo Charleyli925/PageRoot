@@ -206,6 +206,7 @@ export function createWindowLifecycle(ctx) {
           ctx.publicMailboxRequest(pendingExternalOpen),
         );
       }
+      ctx.deliverPendingExternalOpenFailure?.();
     });
     mainWindow.webContents.on("render-process-gone", (_event, details) => {
       ctx.captureUsage("runtime_fault", {

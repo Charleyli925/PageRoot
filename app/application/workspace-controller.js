@@ -1529,6 +1529,7 @@ export class WorkspaceController {
         ready: false,
         reason: "另一个关闭核对正在进行。",
         presentation: "in-app",
+        retry: true,
       });
     }
     try {
@@ -1539,6 +1540,7 @@ export class WorkspaceController {
           ready: false,
           reason: "HTML 导航尚未在关闭时限内完成。",
           presentation: "in-app",
+          retry: true,
         });
       }
       const persistenceRevision = Number(
@@ -1556,6 +1558,7 @@ export class WorkspaceController {
           ready: false,
           reason: tabsPersisted.reason || "标签页状态尚未安全写入。",
           presentation: "in-app",
+          retry: true,
         });
       }
       const projectReady = await project.prepareClose(input);
@@ -1572,6 +1575,7 @@ export class WorkspaceController {
             ready: false,
             reason: "标签页状态在关闭核对期间发生变化，请重试关闭。",
             presentation: "in-app",
+          retry: true,
           });
         }
         return projectReady;
@@ -1583,6 +1587,7 @@ export class WorkspaceController {
           ready: false,
           reason: "桌面外壳已取消本次关闭。",
           presentation: "in-app",
+          retry: true,
         });
       }
       return projectReady;
