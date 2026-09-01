@@ -40,7 +40,7 @@ export class WorkbenchTabsSession {
   }): WorkbenchTab | null;
   resolveTab(tabId: string): WorkbenchTab | null;
   discardUnstartedDocument(tabId: string): boolean;
-  beginSwitch(tabId: string): WorkbenchTabsSnapshot | null;
+  beginSwitch(tabId: string, input?: { force?: boolean }): WorkbenchTabsSnapshot | null;
   commitStart(tabId: string): WorkbenchTabsSnapshot | null;
   commitSettings(tabId: string): WorkbenchTabsSnapshot | null;
   commitProjectRules(tabId: string): WorkbenchTabsSnapshot | null;

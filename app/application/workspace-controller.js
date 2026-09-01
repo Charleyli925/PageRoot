@@ -600,6 +600,7 @@ export class WorkspaceController {
         ports: {
           hash: this.#hashPort,
           recoveryStore: documentWorkflow.recoveryStore,
+          recoveryJournal: documentWorkflow.recoveryJournal || null,
           canvas: {
             invalidateRenderAcks: this.#canvasPort.invalidateRenderAcks,
             verifyRendered: documentWorkflow.canvas?.verifyRendered,
@@ -1580,41 +1581,11 @@ export class WorkspaceController {
           retry: true,
         });
       }
-      const persistenceRevision = Number(
-        this.#workbenchTabsPersistenceCoordinator?.pinCloseRevision()
-        ?? this.#workbenchTabsPersistenceCoordinator?.snapshot.requestedRevision
-        ?? 0,
-      );
-      const tabsPersisted = await this.#workbenchTabsPersistenceCoordinator?.drain({
-        ...input,
-        throughRevision: persistenceRevision,
-      });
-      if (tabsPersisted && !tabsPersisted.ok) {
-        abortPreparation();
-        return Object.freeze({
-          ready: false,
-          reason: tabsPersisted.reason || "标签页状态尚未安全写入。",
-          presentation: "in-app",
-          retry: true,
-        });
-      }
+      // Open-tab layout is restart convenience metadata. Its coordinator keeps
+      // writing best-effort, but failure must not veto a content-safe exit.
       const projectReady = await project.prepareClose(input);
-      const persistence = this.#workbenchTabsPersistenceCoordinator?.snapshot;
-      if (
-        !projectReady?.ready
-        || Number(persistence?.requestedRevision || 0) !== persistenceRevision
-        || Number(persistence?.acknowledgedRevision || 0) < persistenceRevision
-      ) {
-        if (projectReady?.ready) project.abortClose(input);
+      if (!projectReady?.ready) {
         abortPreparation();
-        if (projectReady?.ready) {
-          return Object.freeze({
-            ready: false,
-            reason: "标签页状态在关闭核对期间发生变化，请重试关闭。",
-            presentation: "in-app",
-          retry: true,
-          });
-        }
         return projectReady;
       }
       if (!navigation.commitClose({ requestId })) {
@@ -1835,6 +1806,10 @@ export class WorkspaceController {
 
   recoverDocumentAutosave(input) {
     return this.#requireDocumentWorkflow().recoverAutosave(input);
+  }
+
+  recordDocumentExportEvidence(input) {
+    return this.#requireDocumentWorkflow().recordVerifiedExport(input);
   }
 
   adoptDocumentConflictCandidate(input) {

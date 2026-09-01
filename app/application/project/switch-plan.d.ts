@@ -28,8 +28,11 @@ export function planProjectSwitchValidationLease(input?: {
   lastPersistedRevision?: number;
   sourcePath?: string;
   sourceSha256?: string;
+  persistedSourceSha256?: string;
+  workingHtmlSha256?: string;
   canvasStatus?: string;
   renderedSha256?: string;
+  canvasRenderedSha256?: string;
 }): Readonly<{ kind: "ready"; action: "reuse-verified" | "full-check" }>;
 
 export function planProjectSwitchAfterDrain(input?: {
@@ -38,6 +41,7 @@ export function planProjectSwitchAfterDrain(input?: {
   pendingWrite?: boolean;
   flushInFlight?: boolean;
   hasHistoryAction?: boolean;
+  recoveryProtected?: boolean;
 }): ProjectSwitchPlan;
 
 export function planProjectSwitchAfterCanvas(input?: {
@@ -51,4 +55,9 @@ export function planProjectSwitchAfterCanvas(input?: {
   cutoffRevision?: number;
   committedSourceSha256?: string;
   documentSourceSha256?: string;
+  persistedSourceSha256?: string;
+  workingHtmlSha256?: string;
+  canvasRenderedSha256?: string;
+  protectionHtmlSha256?: string;
+  recoveryProtected?: boolean;
 }): ProjectSwitchPlan;

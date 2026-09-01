@@ -157,6 +157,7 @@ export const REQUIRED_APP_SOURCE_FILES = [
   "desktop/prepared-html-open.mjs",
   "desktop/project-open-queue.mjs",
   "desktop/project-files.mjs",
+  "desktop/recovery-journal-store.mjs",
   "desktop/source-file-watch.mjs",
   "desktop/source-rename.mjs",
   "desktop/active-managed-locator.mjs",

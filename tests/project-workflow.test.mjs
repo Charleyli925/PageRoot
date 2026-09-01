@@ -4,18 +4,22 @@ import test from "node:test";
 
 import { CommentSession } from "../app/application/comment-session.js";
 import { DocumentSession } from "../app/application/document-session.js";
+import { DocumentWorkflow } from "../app/application/document-workflow.js";
 import { DrainCoordinator } from "../app/application/drain-coordinator.js";
 import { ExternalFileOpenSession } from "../app/application/external-file-open-session.js";
 import { ProjectApplicationSession } from "../app/application/project-application-session.js";
 import { ProjectSession } from "../app/application/project-session.js";
 import { ProjectWorkflow } from "../app/application/project-workflow.js";
 import { RunSession } from "../app/application/run-session.js";
+import { SourceHistorySession } from "../app/application/source-history-session.js";
 import { VersionSession } from "../app/application/version-session.js";
 import {
   WorkbenchTabsSession,
   projectAppliedEventToWorkbenchTabs,
 } from "../app/application/workbench-tabs-session.js";
 import { createBrowserFileTabIdentity } from "../app/application/browser-file-tab-identity.js";
+import { createEmptySourceHistory } from "../shared/source-history.mjs";
+import { stopBridgeOrNotifyCloseAborted } from "../desktop/close-recovery.mjs";
 
 const OLD_PATH = "/tmp/project-workflow-old.html";
 const RENAMED_PATH = "/tmp/project-workflow-renamed.html";
@@ -159,6 +163,8 @@ function createHarness({
   policies = {},
   projectRulesWorkflow: rulesWorkflow = {},
   navigation = null,
+  documentWorkflow: documentWorkflowOverrides = {},
+  documentWorkflowFactory = null,
   initialProject = true,
   openTarget = null,
 } = {}) {
@@ -212,7 +218,7 @@ function createHarness({
     },
     ...bridge,
   };
-  const documentWorkflow = {
+  const defaultDocumentWorkflow = {
     hasHistoryAction: false,
     resetCount: 0,
     projectTransitionAuthority: Object.freeze({
@@ -250,7 +256,12 @@ function createHarness({
       return true;
     },
     async flush({ throughRevision } = {}) {
-      documentSession.update({ lastPersistedRevision: throughRevision });
+      const persistedHash = sha256(documentSession.html);
+      documentSession.update({
+        persistedSourceSha256: persistedHash,
+        workingHtmlSha256: persistedHash,
+        lastPersistedRevision: throughRevision,
+      });
       return succeeded({ revision: throughRevision });
     },
     async waitForHistoryAction() {
@@ -272,6 +283,15 @@ function createHarness({
     async recoverAutosave() {
       return succeeded({ recovered: false });
     },
+    canProtectForDetach() {
+      return false;
+    },
+    hasVerifiedRecoveryCheckpoint() {
+      return false;
+    },
+    async protectForDetach() {
+      return { status: "blocked", code: "NO_RECOVERY", reason: "no recovery" };
+    },
     adoptConflictCandidate() {
       return succeeded({ adopted: true });
     },
@@ -281,6 +301,7 @@ function createHarness({
       this.observeCount += 1;
       return succeeded(this.observeResult);
     },
+    ...documentWorkflowOverrides,
   };
   let unlockCount = 0;
   let fenceCount = 0;
@@ -288,18 +309,24 @@ function createHarness({
     deferCommand: () => false,
     fencePendingEdit: () => {
       fenceCount += 1;
+      const canvasRenderedSha256 = sha256(documentSession.html);
       return {
         ok: true,
         html: documentSession.html,
-        sourceSha256: documentSession.sourceSha256,
+        canvasRenderedSha256,
+        sourceSha256: canvasRenderedSha256,
       };
     },
-    freeze: () => ({
-      ok: true,
-      html: documentSession.html,
-      sourceSha256: documentSession.sourceSha256,
-      pendingMutation: null,
-    }),
+    freeze: () => {
+      const canvasRenderedSha256 = sha256(documentSession.html);
+      return {
+        ok: true,
+        html: documentSession.html,
+        canvasRenderedSha256,
+        sourceSha256: canvasRenderedSha256,
+        pendingMutation: null,
+      };
+    },
     async verifyRendered() {},
     invalidateRenderAcks() {},
     showCommitBlocked() {},
@@ -312,6 +339,17 @@ function createHarness({
     requestFrame: (callback) => callback(),
     ...canvas,
   };
+  const documentWorkflow = typeof documentWorkflowFactory === "function"
+    ? documentWorkflowFactory({
+        client,
+        projectSession,
+        documentSession,
+        commentSession,
+        versionSession,
+        canvasPort,
+        context: oldContext,
+      })
+    : defaultDocumentWorkflow;
   const openPort = {
     mode: () => "desktop-dialog",
     async openLocal() {
@@ -429,17 +467,24 @@ function createHarness({
       shouldRecoverAfterCloseAbort: (state) => Boolean(
         state.approvedRequestId === state.abortedRequestId
         && state.imposedEditorFreeze
+        && state.projectIdentityMatches
         && !state.projectLocked
         && !state.projectHydrating
         && !state.projectLoadError
         && !state.viewTransitioning
         && !state.submissionPending
-        && !state.pendingWrite
-        && !state.flushInProgress
         && !state.draftPending
         && !state.draftFlushInProgress
         && !state.draftPersistError
-        && state.editRevision === state.lastPersistedRevision
+        && (
+          state.protectionVerified
+          || (
+            state.persistState === "idle"
+            && !state.pendingWrite
+            && !state.flushInProgress
+            && state.editRevision === state.lastPersistedRevision
+          )
+        )
       ),
       ...policies,
     },
@@ -531,6 +576,272 @@ test("a dirty document cannot reuse the Canvas validation lease", async (t) => {
   assert.equal(outcome.status, "succeeded");
   assert.equal(outcome.value.validationLease, undefined);
   assert.ok(harness.fenceCount > 0);
+});
+
+test("a failed source write can switch only after an exact recovery checkpoint", async (t) => {
+  let checkpointVerified = false;
+  const harness = createHarness({
+    documentWorkflow: {
+      async flush() {
+        return { status: "rejected", code: "SOURCE_WRITE_FAILED", reason: "disk denied" };
+      },
+      canProtectForDetach() {
+        return true;
+      },
+      hasVerifiedRecoveryCheckpoint({ revision } = {}) {
+        return checkpointVerified && revision === 1;
+      },
+      verifiedProtectionEvidence({ revision } = {}) {
+        return checkpointVerified && revision === 1
+          ? {
+              kind: "recoveryVerified",
+              revision,
+              htmlSha256: harness.documentSession.workingHtmlSha256,
+            }
+          : null;
+      },
+      async protectForDetach() {
+        harness.documentSession.confirmWorkingHtml({
+          revision: 1,
+          htmlSha256: sha256(harness.documentSession.html),
+        });
+        checkpointVerified = true;
+        return succeeded({ protected: true, evidence: "recoveryVerified" });
+      },
+    },
+  });
+  t.after(() => harness.workflow.dispose());
+  harness.documentSession.beginEdit(OLD_HTML.replace("old", "protected"));
+  harness.documentSession.setPersistence({ state: "failed", error: "disk denied" });
+
+  const outcome = await harness.workflow.prepareSwitch();
+  assert.equal(outcome.status, "succeeded", JSON.stringify(outcome));
+  assert.equal(checkpointVerified, true);
+  assert.equal(harness.documentSession.persistState, "failed");
+  assert.equal(harness.documentSession.lastPersistedRevision, 0);
+});
+
+test("a failed source write can close after recovery evidence without claiming source persistence", async (t) => {
+  let checkpointVerified = false;
+  const harness = createHarness({
+    documentWorkflow: {
+      async flush() {
+        return { status: "rejected", code: "SOURCE_WRITE_FAILED", reason: "disk denied" };
+      },
+      canProtectForDetach() { return true; },
+      hasVerifiedProtectionEvidence({ revision } = {}) {
+        return checkpointVerified && revision === 1;
+      },
+      async protectForDetach() {
+        checkpointVerified = true;
+        return succeeded({ protected: true, evidence: "recoveryVerified" });
+      },
+    },
+  });
+  t.after(() => harness.workflow.dispose());
+  harness.documentSession.beginEdit(OLD_HTML.replace("old", "protected"));
+  harness.documentSession.setPersistence({ state: "failed", error: "disk denied" });
+
+  const result = await harness.workflow.prepareClose({
+    requestId: "close_recovery_001",
+    deadlineAt: Date.now() + 5_000,
+  });
+  assert.deepEqual(result, { ready: true });
+  assert.equal(checkpointVerified, true);
+  assert.equal(harness.documentSession.persistState, "failed");
+  assert.equal(harness.documentSession.lastPersistedRevision, 0);
+  harness.workflow.abortClose({ requestId: "close_recovery_other" });
+  assert.equal(harness.unlockCount, 0);
+  harness.workflow.abortClose({ requestId: "close_recovery_001" });
+  assert.equal(harness.unlockCount, 1);
+  assert.equal(harness.workflow.getSnapshot().close.phase, "idle");
+  assert.equal(harness.documentSession.persistState, "failed");
+  assert.equal(harness.documentSession.editRevision, 1);
+});
+
+test("real Document and Project workflows protect H1 for navigation, close, and restart while source stays H0", async (t) => {
+  const h1 = OLD_HTML.replace("old", "protected-real-workflow");
+  let journalRecord = null;
+  const recoveryJournal = {
+    async commit(input) {
+      journalRecord = {
+        schemaVersion: "2.0.0",
+        ...structuredClone(input),
+        workingCopyId: String(input.workingCopyId || ""),
+        recoveryHtmlSha256: sha256(input.html),
+        journalSha256: sha256(`real-journal:${input.revision}:${input.html}`),
+        updatedAt: "2026-09-02T00:00:00.000Z",
+        byteLength: Buffer.byteLength(input.html),
+      };
+      return structuredClone(journalRecord);
+    },
+    async readVerified() {
+      return journalRecord ? structuredClone(journalRecord) : null;
+    },
+    async remove(input) {
+      if (journalRecord?.journalSha256 === input.expectedJournalSha256) {
+        journalRecord = null;
+        return { removed: true };
+      }
+      return { removed: false };
+    },
+  };
+  const sourceBytes = OLD_HTML;
+  const makeRealDocumentWorkflow = ({
+    client,
+    projectSession,
+    documentSession,
+    commentSession,
+    versionSession,
+    canvasPort,
+    context,
+  }) => {
+    const sourceHistorySession = new SourceHistorySession();
+    sourceHistorySession.activate(
+      context,
+      sha256(OLD_HTML),
+      createEmptySourceHistory({
+        projectId: context.projectId,
+        documentId: context.documentId,
+        sourceSha256: sha256(OLD_HTML),
+        now: () => "2026-09-02T00:00:00.000Z",
+      }),
+    );
+    const recoveryValues = new Map();
+    return new DocumentWorkflow({
+      bridgeClient: client,
+      ensureRegistered: async () => succeeded(projectSession.context),
+      projectSession,
+      documentSession,
+      commentSession,
+      versionSession,
+      sourceHistorySession,
+      codecs: {
+        isRecord,
+        sameSourcePath: (left, right) => left === right,
+        persistedChangeEvent: (value) => value,
+        recoveryIdentityFromRecord: (value) => value || null,
+        sourceHistoryOperationsFromRecord: (value) => Array.isArray(value) ? value : [],
+        changesFromRecords: (value) => Array.isArray(value) ? value : [],
+        historyTextSelectionFromRecord: (value) => value || null,
+        selectionFromRecord: (value) => value || null,
+        rebindTargetsPreservingGlobal: (_html, targets) => targets,
+        rebindTargetsAcrossHistoryPreservingGlobal: (_before, _after, targets) => targets,
+        canLocateTarget: () => true,
+        appendDirectEditEvent: ({ events, pendingEvents }) => ({ events, pendingEvents }),
+        auditEventKey: (value) => String(value?.eventId || ""),
+        removeAcknowledgedAuditEvents: (events) => events,
+        errorMessage: (cause, fallback) => String(cause?.message || fallback),
+      },
+      ports: {
+        hash: { sha256: async (value) => sha256(value) },
+        recoveryStore: {
+          readRecords: (keys) => (Array.isArray(keys) ? keys : [keys])
+            .filter((key) => recoveryValues.has(key))
+            .map((key) => ({ key, value: recoveryValues.get(key) })),
+          write(keys, value) {
+            for (const key of Array.isArray(keys) ? keys : [keys]) {
+              recoveryValues.set(key, structuredClone(value));
+            }
+            return true;
+          },
+          remove(keys) {
+            for (const key of Array.isArray(keys) ? keys : [keys]) recoveryValues.delete(key);
+            return true;
+          },
+        },
+        recoveryJournal,
+        canvas: canvasPort,
+      },
+      scheduler: globalThis,
+      clock: { now: Date.now },
+    });
+  };
+  const bridge = {
+    async autosave() {
+      throw new Error("permanent source write failure");
+    },
+    async resolveConflict() { return { ok: true }; },
+  };
+  const first = createHarness({
+    bridge,
+    documentWorkflowFactory: makeRealDocumentWorkflow,
+  });
+  t.after(() => {
+    first.documentWorkflow.dispose();
+    first.workflow.dispose();
+  });
+  assert.equal(first.documentWorkflow.enqueueEdit({
+    html: h1,
+    context: first.projectSession.context,
+  }).status, "succeeded");
+  assert.notEqual((await first.documentWorkflow.flush({ throughRevision: 1 })).status, "succeeded");
+  assert.equal(sourceBytes, OLD_HTML);
+  assert.equal(first.documentSession.persistedSourceSha256, sha256(OLD_HTML));
+  assert.equal(first.documentSession.persistState, "failed");
+
+  for (const destination of ["start", "settings", "other-html", "close-active-tab"]) {
+    const prepared = await first.workflow.prepareSwitch();
+    assert.equal(prepared.status, "succeeded", destination);
+    assert.equal(first.documentSession.workingHtmlSha256, sha256(h1));
+    assert.equal(first.documentSession.canvasAuthority.renderedSha256, sha256(h1));
+    assert.equal(first.documentSession.persistedSourceSha256, sha256(OLD_HTML));
+    assert.equal(first.documentSession.persistState, "failed");
+  }
+  assert.equal(journalRecord.html, h1);
+  assert.equal(journalRecord.recoveryHtmlSha256, sha256(h1));
+  const close = await first.workflow.prepareClose({
+    requestId: "close_real_recovery_001",
+    deadlineAt: Date.now() + 5_000,
+  });
+  assert.deepEqual(close, { ready: true });
+  await assert.rejects(
+    stopBridgeOrNotifyCloseAborted({
+      requestId: "close_real_recovery_001",
+      stopBridge: async () => { throw new Error("bridge shutdown failed"); },
+      notifyCloseAborted: async (payload) => first.workflow.abortClose(payload),
+    }),
+    /bridge shutdown failed/u,
+  );
+  assert.equal(first.unlockCount, 1);
+  assert.equal(first.workflow.getSnapshot().close.phase, "idle");
+  assert.equal(first.documentSession.persistState, "failed");
+
+  const restarted = createHarness({
+    bridge,
+    documentWorkflowFactory: makeRealDocumentWorkflow,
+  });
+  t.after(() => {
+    restarted.documentWorkflow.dispose();
+    restarted.workflow.dispose();
+  });
+  const recovered = await restarted.documentWorkflow.recoverAutosave({
+    context: restarted.projectSession.context,
+    currentSourceSha256: sha256(OLD_HTML),
+    serverRevision: 0,
+  });
+  assert.equal(recovered.status, "succeeded");
+  assert.equal(recovered.value.queued, true);
+  assert.equal(restarted.documentSession.html, h1);
+  assert.equal(restarted.documentSession.persistedSourceSha256, sha256(OLD_HTML));
+  assert.equal(restarted.documentSession.workingHtmlSha256, sha256(h1));
+  assert.notEqual((await restarted.documentWorkflow.flush({ throughRevision: 1 })).status, "succeeded");
+  assert.ok(restarted.documentSession.pendingWrite);
+  assert.equal(restarted.workflow.acceptProject({
+    name: "Protected successor",
+    projectId: "project_protected_successor",
+    documentId: "document_protected_successor",
+    sourcePath: B_PATH,
+    html: B_HTML,
+    sha256: sha256(B_HTML),
+  }).status, "succeeded");
+  await waitFor(
+    () => restarted.projectSession.sourcePath === B_PATH
+      && restarted.workflow.getSnapshot().projectApplication.status === "idle",
+    "verified protection did not release the successor project application",
+  );
+  assert.equal(restarted.documentSession.html, B_HTML);
+  assert.equal(journalRecord.html, h1);
 });
 
 test("a startup catalog read cannot delay or supersede a newer local open", async (t) => {
@@ -1012,6 +1323,41 @@ test("a Registry project open routes only its projectId through the desktop auth
   assert.equal(harness.documentSession.html, B_HTML);
   assert.equal(harness.calls.filter(([kind]) => kind === "source").length, 0);
   assert.equal(fenceCount, 2, "the outgoing Canvas is fenced by one prepareSwitch only");
+});
+
+test("a pre-protected Registry successor does not repeat the outgoing switch drain", async (t) => {
+  let prepareCount = 0;
+  const harness = createHarness({
+    projectOpen: {
+      async openRegistered() {
+        return {
+          name: "B",
+          sourcePath: B_PATH,
+          html: B_HTML,
+          sha256: sha256(B_HTML),
+        };
+      },
+    },
+  });
+  t.after(() => harness.workflow.dispose());
+  harness.workflow.prepareSwitch = async () => {
+    prepareCount += 1;
+    return succeeded({ prepared: true });
+  };
+
+  const opening = await harness.workflow.openProject({
+    kind: "registered",
+    projectId: "project_catalog_b",
+    switchPrepared: true,
+  });
+
+  assert.equal(opening.status, "succeeded");
+  await waitFor(
+    () => harness.projectSession.context?.sourcePath === B_PATH
+      && !harness.workflow.projectHydrating,
+    "pre-protected registered successor did not publish",
+  );
+  assert.equal(prepareCount, 0);
 });
 
 test("a Registry project opens from Start without fencing an unmounted Canvas", async (t) => {
@@ -2549,6 +2895,38 @@ test("Finder locator rebase keeps IDs, publishes the new path, and does not load
   assert.equal(reconcileCalls[0].reason, "watch");
   assert.ok(!("nextSourcePath" in reconcileCalls[0]));
   assert.ok(harness.events.some((event) => event.type === "project-source-relocated"));
+});
+
+test("Finder relocation is not reported settled when journal rebase cannot reconcile", async (t) => {
+  const harness = createHarness({
+    openTarget: managedOpenTarget(),
+    documentWorkflow: {
+      async rebaseRecoveryJournal() {
+        return {
+          status: "rejected",
+          code: "DOCUMENT_RECOVERY_REBASE_REJECTED",
+          reason: "journal rebase unavailable",
+        };
+      },
+    },
+    projectOpen: {
+      async reconcileActiveManagedSource(payload) {
+        return locatorResult(payload);
+      },
+      async listRecent() { return []; },
+      async listRegistered() { return []; },
+    },
+  });
+  t.after(() => harness.workflow.dispose());
+
+  const outcome = await harness.workflow.reconcileExternalSourceLocator({
+    reason: "watch",
+    previousSourcePath: OLD_PATH,
+  });
+
+  assert.notEqual(outcome.status, "succeeded");
+  assert.match(outcome.reason, /journal rebase unavailable/u);
+  assert.ok(!harness.events.some((event) => event.type === "project-source-relocated"));
 });
 
 test("present-file watch hints only hash-observe and do not drain switch", async (t) => {

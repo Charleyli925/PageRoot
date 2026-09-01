@@ -1,5 +1,4 @@
 "use client";
-
 import {
   useCallback,
   useEffect,
@@ -86,6 +85,7 @@ import {
 import { agentProviderCardsFromCatalog } from "./application/agent-provider-catalog.js";
 import { createWorkspaceControllerCodecs } from "./application/workspace-controller-codecs.js";
 import { createBrowserFileTabIdentity } from "./application/browser-file-tab-identity.js";
+import { createDesktopRecoveryJournalPort } from "./workbench/desktop-recovery-journal-port";
 import type { CommentSessionSnapshot } from "./application/comment-session.js";
 import type { DocumentSessionSnapshot } from "./application/document-session.js";
 import { runLocalUserAction } from "./application/local-action-outcomes.js";
@@ -126,7 +126,6 @@ import {
   reportInternalFailure,
   setInternalFailureTelemetry,
 } from "./application/internal-failure.js";
-
 setInternalFailureTelemetry((record) => {
   captureUsageEvent("internal_failure", {
     area: record.area,
@@ -270,13 +269,11 @@ import type {
   Version,
   WorkspaceIssue,
 } from "./workbench/types";
-
 const BROWSER_PREVIEW_LOGO_PLACEHOLDER =
   "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cdefs%3E%3ClinearGradient id='g' x2='1' y2='1'%3E%3Cstop stop-color='%236550e8'/%3E%3Cstop offset='1' stop-color='%23d45df2'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='64' height='64' rx='15' fill='url(%23g)'/%3E%3Cpath d='M23 23 13 32l10 9M41 23l10 9-10 9M36 16 28 48' fill='none' stroke='white' stroke-width='5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E";
 const PROJECT_REPOSITORY_URL = "https://github.com/Charleyli925/PageRoot";
 const LATEST_RELEASE_PAGE_URL =
   "https://github.com/Charleyli925/PageRoot/releases/latest";
-
 class DeferredEditorCommandDiscardedError extends Error {
   readonly reason: NativeDeferredCommandDiscardReason;
 
@@ -355,6 +352,8 @@ const INITIAL_VERSION_SNAPSHOT: VersionSessionSnapshot<Version> = {
 const INITIAL_DOCUMENT_SNAPSHOT: DocumentSessionSnapshot = {
   html: DEFAULT_PROJECT_HTML,
   sourceSha256: null,
+  persistedSourceSha256: null,
+  workingHtmlSha256: null,
   canvasGeneration: 0,
   canvasAuthority: {
     status: "idle",
@@ -921,6 +920,7 @@ export default function Workbench() {
         } : {}),
       },
       documentWorkflow: {
+        recoveryJournal: createDesktopRecoveryJournalPort(window.htmlAIProjects),
         codecs: createDocumentWorkflowCodecs({
           isRecord,
           sameSourcePath: sameLocalSourcePath,
@@ -3516,17 +3516,19 @@ export default function Workbench() {
     const nextHtml = committed?.html
       || editorRef.current?.getSourceHtml()
       || currentDocumentSessionSnapshot().html;
+    const exportRevision = currentDocumentSessionSnapshot().editRevision;
     const api = window.htmlAIProjects;
     if (!api?.exportHtmlCopy) {
       downloadHtml(nextHtml, projectName);
       return;
     }
     try {
-      await api.exportHtmlCopy({
+      const exported = await api.exportHtmlCopy({
         html: nextHtml,
         sourcePath: currentProjectSessionSnapshot().sourcePath,
         suggestedName: projectName,
       });
+      if (exported) await workspaceController?.recordDocumentExportEvidence({ html: nextHtml, revision: exportRevision, exported });
     } catch (cause) {
       const reason = productErrorMessage(
         cause,
@@ -3544,7 +3546,7 @@ export default function Workbench() {
     currentProjectSessionSnapshot,
     deferEditorCommand,
     isViewTransitioning,
-    projectName,
+    projectName, workspaceController,
   ]);
   useEffect(() => {
     deferredEditorReplayRef.current.exportCurrentHtml = () => {
@@ -5873,6 +5875,24 @@ export default function Workbench() {
     "--workbench-sidebar-width-saved": `${workspacePreferencesController.panelWidths.sidebarWidth}px`,
     "--workbench-inspector-width": `${workspacePreferencesController.panelWidths.inspectorWidth}px`,
   } as CSSProperties), [workspacePreferencesController.panelWidths.inspectorWidth, workspacePreferencesController.panelWidths.sidebarWidth]);
+  const documentPersistenceBannerVisible = Boolean(
+    !settingsPageActive
+    && !projectRulesPageActive
+    && !workspaceIssue
+    && !externalSourcePreview
+    && (persistState === "conflict" || persistState === "failed"),
+  );
+  const persistenceDiagnostic = [
+    `persistState: ${persistState}`,
+    `reason: ${persistError || "unknown"}`,
+    `projectId: ${projectId || "unbound"}`,
+    `documentId: ${documentId || "unbound"}`,
+    `sourcePath: ${sourcePath || "unbound"}`,
+    `editRevision: ${editRevision}`,
+    `lastPersistedRevision: ${lastPersistedRevision}`,
+    `sourceSha256: ${sourceSha256 || "unknown"}`,
+    `pendingWrite: ${documentSnapshot.hasPendingWrite ? "true" : "false"}`,
+  ].join("\n");
   return (
     <>
       <RendererStartupPerformance />
@@ -5896,6 +5916,7 @@ export default function Workbench() {
         data-round-state={runInProgress ? "processing" : viewMode}
         data-canvas-mode={canvasMode}
         data-handoff-preview={runInProgress && handoffPreviewOpen ? "true" : undefined}
+        data-document-persistence-banner={documentPersistenceBannerVisible ? "true" : undefined}
         data-persist-state={persistState}
         data-edit-revision={String(editRevision)}
         data-persisted-revision={String(lastPersistedRevision)}
@@ -6020,19 +6041,28 @@ export default function Workbench() {
         </section>
       ) : null}
 
-      {!settingsPageActive
-      && !projectRulesPageActive
-      && !workspaceIssue
-      && !externalSourcePreview
-      && (persistState === "conflict" || persistState === "failed") ? (
-        <section className="source-conflict-banner" role="alert">
+      {documentPersistenceBannerVisible ? (
+        <section className="source-conflict-banner document-persistence-banner" role="alert">
           <div>
             <strong>{persistState === "conflict" ? "源文件在磁盘上被其他程序修改了" : "当前修改还没有写入文件"}</strong>
             <span>{persistState === "conflict"
               ? (persistError || "您的编辑内容仍在，可先预览外部版本再决定。")
               : (persistError || "工作台保留了当前编辑内容，不会假装已经更新。")}</span>
+            <details className="persistence-error-details">
+              <summary>错误详情</summary>
+              <pre>{persistenceDiagnostic}</pre>
+            </details>
           </div>
           <button type="button" onClick={() => void exportCurrentHtml()}>导出当前 HTML</button>
+          <button
+            type="button"
+            onClick={() => {
+              void copyText(persistenceDiagnostic).then(
+                () => setFileStatusNotice("错误详情已复制"),
+                () => setFileStatusNotice("无法复制错误详情"),
+              );
+            }}
+          >复制错误详情</button>
           {persistState === "conflict" ? (
             <button type="button" onClick={() => void previewExternalSource()}>
               预览外部版本

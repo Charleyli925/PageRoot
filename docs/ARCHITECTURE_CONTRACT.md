@@ -1029,6 +1029,30 @@ copy their own boolean lists. An obligation may request a final verification
 without reporting permanent pending state; an already acknowledged aggregate
 must drain as a no-op without advancing its revision.
 
+Source durability and detach protection are separate facts. A failed/conflict
+source write may resolve the reversible switch/close obligation only after
+`DocumentWorkflow` writes and reads back the exact current revision from the
+Main-owned recovery journal (or verifies an exact export receipt) and matches
+`workingHtmlSha256 === canvasRenderedSha256 === protectionHtmlSha256`.
+`persistedSourceSha256` remains the last disk-confirmed Hash and is not required
+to equal those three values after a failed write. That evidence never changes
+`persistState` to `idle`,
+never authorizes an irreversible overwrite, and remains document-scoped. Tab
+layout persistence is restart-convenience metadata and is excluded from the
+content-safety close aggregate.
+
+The recovery-journal identity is project + document + Working Copy + revision
+and HTML Hash; `sourcePath` is a rebased location. A path change requires the
+prior journal receipt and an exact CAS rebase. Main HTML bytes win over the
+compatibility browser record at an equal revision/Hash, while the browser
+record may contribute recovery identity, audit events and history metadata.
+Journal writes retain at most one in-flight record and one latest pending
+record. Startup scan failure degrades the journal capability without preventing
+window creation; bounded scans isolate corrupt entries and Start lists only
+verified summaries. Draft, PROJECT.md, attachment and other non-HTML drains
+retain their existing owner-specific policies and are not reclassified as HTML
+protection evidence by this contract.
+
 After the aggregate drains, `ProjectWorkflow` asks `DocumentWorkflow` to
 reconcile source close readiness against the independently hashed frozen HTML
 and `DocumentSession` authority. An acknowledged
@@ -1037,6 +1061,11 @@ is not itself a blocker; only an unresolved exact-byte check may trigger the
 bounded authoritative source read. Matching bytes repair the projection, while
 confirmed divergence or invalid source integrity remains fail-closed in its
 owning renderer recovery surface.
+
+Electron may automatically repeat a transient close request once. It must
+first send `close-aborted` for the exact request and release renderer/navigation
+freeze ownership. A second blocked result returns to an operable window; a
+fixed-interval unbounded retry is not a recovery state.
 
 A lazily opened page with no durable material closes as a no-op and remains
 unregistered. If it contains a comment, composer recovery, tombstone or edit

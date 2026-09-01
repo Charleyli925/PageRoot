@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import { WorkbenchNavigationSession } from "../app/application/workbench-navigation-session.js";
@@ -15,6 +16,17 @@ const C = { projectId: "project_gamma", documentId: "doc_gamma", name: "Gamma" }
 const D = { projectId: "project_delta", documentId: "doc_delta", name: "Delta" };
 
 const nextTurn = () => new Promise((resolve) => setImmediate(resolve));
+
+test("Start recovery export protects the journal source path", async () => {
+  const source = await readFile(new URL(
+    "../app/workbench/workbench-sidebar-container.tsx",
+    import.meta.url,
+  ), "utf8");
+  assert.match(
+    source,
+    /exportHtmlCopy\?\.\(\{\s*html:\s*recovered\.html,\s*sourcePath:\s*journal\.sourcePath,/u,
+  );
+});
 
 function assertAlignedNavigation(harness, expectedProject) {
   const snapshot = harness.tabs.snapshot;
@@ -552,6 +564,64 @@ test("closing a browser tab removes its in-memory backing and runtime owner", as
   assert.equal(closed.status, "succeeded");
   assert.equal(browserDocuments.resolve(A.projectId, A.documentId), null);
   assert.equal(harness.tabs.snapshot.runtimeOwnerTabId, null);
+});
+
+test("active document close protects and removes the current tab before opening its successor", async () => {
+  const order = [];
+  const harness = fixture({
+    open: ({ input, apply }) => {
+      order.push("open-successor");
+      assert.equal(input.switchPrepared, true);
+      const applied = apply(B);
+      return {
+        status: "succeeded",
+        value: { opened: true, applicationId: applied.applicationId },
+      };
+    },
+  });
+  harness.tabs.bindDocument({ ...B, title: B.name, focus: false });
+  harness.projectWorkflow.prepareSwitch = async () => {
+    order.push("protect-current");
+    return { status: "succeeded", value: {} };
+  };
+  const close = harness.tabs.close.bind(harness.tabs);
+  harness.tabs.close = (tabId) => {
+    order.push("close-current");
+    return close(tabId);
+  };
+
+  const outcome = await harness.workflow.closeTab(`document:${A.projectId}:${A.documentId}`);
+
+  assert.equal(outcome.status, "succeeded");
+  assert.deepEqual(order, ["protect-current", "close-current", "open-successor"]);
+  assert.equal(
+    harness.tabs.snapshot.tabs.some((tab) => tab.projectId === A.projectId),
+    false,
+  );
+  assert.equal(harness.tabs.snapshot.activeTabId, `document:${B.projectId}:${B.documentId}`);
+});
+
+test("active document close falls back to Start without resurrecting a failed successor", async () => {
+  const harness = fixture({
+    open: () => ({
+      status: "rejected",
+      code: "SUCCESSOR_UNAVAILABLE",
+      reason: "successor unavailable",
+    }),
+  });
+  harness.tabs.bindDocument({ ...B, title: B.name, focus: false });
+
+  const outcome = await harness.workflow.closeTab(`document:${A.projectId}:${A.documentId}`);
+
+  assert.equal(outcome.status, "rejected");
+  assert.equal(
+    harness.tabs.snapshot.tabs.some((tab) => tab.projectId === A.projectId),
+    false,
+  );
+  assert.equal(
+    harness.tabs.snapshot.tabs.find((tab) => tab.tabId === harness.tabs.snapshot.activeTabId)?.kind,
+    "start",
+  );
 });
 
 test("browser pre-apply rejection restores the prior in-memory authority", async () => {

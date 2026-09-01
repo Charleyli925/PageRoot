@@ -328,7 +328,7 @@ export class WorkbenchTabsSession {
     return false;
   }
 
-  beginSwitch(tabId) {
+  beginSwitch(tabId, { force = false } = {}) {
     const target = this.resolveTab(tabId);
     if (!target) return null;
     if (
@@ -339,7 +339,7 @@ export class WorkbenchTabsSession {
       ...this.#snapshot,
       pendingTabId: target.tabId,
     });
-    if (target.tabId === this.#snapshot.activeTabId) return this.#snapshot;
+    if (target.tabId === this.#snapshot.activeTabId && !force) return this.#snapshot;
     this.#pendingPriorStatus = target.status;
     return this.#publish({
       ...this.#snapshot,

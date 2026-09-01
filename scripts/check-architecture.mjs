@@ -120,6 +120,7 @@ const APPROVED_PERSISTENCE_OWNERS = new Set([
   "desktop/external-file-open.mjs",
   "desktop/main.mjs",
   "desktop/project-files.mjs",
+  "desktop/recovery-journal-store.mjs",
   "desktop/ui-preferences.mjs",
   "desktop/usage-telemetry.mjs",
   "desktop/workbench-tabs-state.mjs",

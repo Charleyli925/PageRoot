@@ -19,6 +19,7 @@ import {
 import { PencilSimpleIcon } from "@phosphor-icons/react/dist/csr/PencilSimple";
 import type { WorkbenchTab, WorkbenchTabsSnapshot } from "../application/workbench-tabs-session.js";
 import type {
+  DocumentRecoveryJournalSummary,
   ApplicationUpdateResult,
   ProjectVersionSummary,
   RegisteredProject,
@@ -193,15 +194,25 @@ export function WorkbenchStartPage({
   registeredProjects,
   catalogReady,
   catalogError,
+  recoveryJournals,
+  hasMoreRecoveryJournals,
+  recoveryJournalsLoading,
   onCreateProject,
   onOpenProject,
+  onOpenRecovery,
+  onLoadMoreRecovery,
 }: {
   activeTabId: string;
   registeredProjects: RegisteredProject[];
   catalogReady: boolean;
   catalogError: string;
+  recoveryJournals: DocumentRecoveryJournalSummary[];
+  hasMoreRecoveryJournals: boolean;
+  recoveryJournalsLoading: boolean;
   onCreateProject: () => void;
   onOpenProject: (project: RegisteredProject) => void;
+  onOpenRecovery: (journal: DocumentRecoveryJournalSummary) => void;
+  onLoadMoreRecovery: () => void;
 }) {
   const [showAllTasks, setShowAllTasks] = useState(false);
   const [renderedAt] = useState(Date.now);
@@ -224,7 +235,15 @@ export function WorkbenchStartPage({
     : pendingProjects.slice(0, 3);
   const firstProject = catalogReady
     && !catalogError
-    && registeredProjects.length === 0;
+    && registeredProjects.length === 0
+    && recoveryJournals.length === 0
+    && !hasMoreRecoveryJournals;
+  const recoveryCanOpen = (journal: DocumentRecoveryJournalSummary) => (
+    readyProjects.some((project) => (
+      project.projectId === journal.projectId
+      && project.documentId === journal.documentId
+    ))
+  );
 
   const formatRecency = (lastOpenedAt: number | null): string => {
     if (!lastOpenedAt) return "";
@@ -265,6 +284,42 @@ export function WorkbenchStartPage({
           </section>
         ) : (
           <>
+            {recoveryJournals.length || hasMoreRecoveryJournals ? (
+              <section className="workbench-start-section workbench-start-recovery" aria-labelledby="workbench-start-recovery-title">
+                <h2 id="workbench-start-recovery-title">可恢复修改</h2>
+                <div className="workbench-start-recovery-list">
+                  {recoveryJournals.map((journal) => (
+                    <button
+                      type="button"
+                      key={`${journal.projectId}:${journal.documentId}`}
+                      onClick={() => onOpenRecovery(journal)}
+                    >
+                      <span className="workbench-start-file-icon">
+                        <FileHtmlIcon aria-hidden="true" size={18} weight="duotone" />
+                      </span>
+                      <span>
+                        <strong>{localFileNameFromSourcePath(journal.sourcePath)}</strong>
+                        <small>原文件未更新 · 已校验恢复副本</small>
+                      </span>
+                      <span className="workbench-start-resume-action">
+                        {recoveryCanOpen(journal) ? "恢复编辑" : "导出恢复副本"}
+                      </span>
+                      <CaretRightIcon aria-hidden="true" size={15} weight="bold" />
+                    </button>
+                  ))}
+                </div>
+                {hasMoreRecoveryJournals ? (
+                  <button
+                    className="workbench-start-recovery-more"
+                    type="button"
+                    disabled={recoveryJournalsLoading}
+                    onClick={onLoadMoreRecovery}
+                  >
+                    {recoveryJournalsLoading ? "正在校验…" : "加载更多恢复记录"}
+                  </button>
+                ) : null}
+              </section>
+            ) : null}
             {continuingProject ? (
               <section className="workbench-start-section" aria-labelledby="workbench-start-continue-title">
                 <h2 id="workbench-start-continue-title">继续编辑</h2>

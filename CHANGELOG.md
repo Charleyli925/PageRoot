@@ -4,6 +4,7 @@ Notable user-visible changes are documented here. This project follows Semantic 
 
 ## [Unreleased]
 
+- 源 HTML 写入失败不再锁死整个工作台。源页独立跟踪磁盘已确认 Hash、当前工作 HTML Hash、Canvas Hash 和保护 Hash；只有后三者精确一致才放行可逆导航，`failed/conflict` 和原文件 Hash 保持真实。Main 恢复日志支持同文档路径 CAS rebase、Main/local 合并恢复、单 in-flight + latest pending 写入合并、成功保存后 CAS 退役，并在目录不可用或单记录损坏时降级而不阻止启动。得到精确恢复或导出凭证后可切换标签、关闭文档和退出；活动标签先保护再关闭，标签布局 best-effort，桌面关闭最多自动重试一次并释放精确冻结。失败横幅占用工作区自身布局，可展开和复制诊断。本项不把 Draft、`PROJECT.md`、附件或 AI 不可逆提交重分类为 HTML 保护凭证。
 - 多个 HTML 标签现在会保留受内存预算约束的只读页面缓存：最近页面可先显示、再在后台核对最新源文件，切换时不再反复空白重载。AI 候选就绪后会预热审阅；未命中缓存时也先显示修改前后页面，再补变化标注。采纳后在新版本安全提交时立即回到新 HTML，最终编辑画布与项目资料继续后台准备。
 - 工作台改为统一的浏览器式外壳：全局项目侧栏占据产品完整左侧并可从系统红黄绿按钮旁
   收起或展开；标签页、模式切换、审阅工具、项目、文件夹/默认浏览器动作与 AI 入口对齐在

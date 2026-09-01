@@ -78,6 +78,16 @@ function sameContext(left, right, sameSourcePath) {
   );
 }
 
+function sameRecoveryDocument(left, right) {
+  return Boolean(
+    left
+    && right
+    && String(left.projectId || "") === String(right.projectId || "")
+    && String(left.documentId || "") === String(right.documentId || "")
+    && String(left.workingCopyId || "") === String(right.workingCopyId || "")
+  );
+}
+
 function sameOpenTarget(left, right, sameSourcePath) {
   return Boolean(
     sameOpenRoute(left, right, sameSourcePath)
@@ -131,6 +141,7 @@ export class DocumentWorkflow {
   #codecs;
   #hashPort;
   #recoveryStore;
+  #recoveryJournal;
   #canvasPort;
   #scheduler;
   #clock;
@@ -140,6 +151,12 @@ export class DocumentWorkflow {
   #auditPending = [];
   #auditInFlight = new Set();
   #recoveryIdentity = null;
+  #recoveryCheckpoint = null;
+  #recoveryJournalReceipt = null;
+  #exportCheckpoint = null;
+  #recoveryJournalInFlight = null;
+  #recoveryJournalPending = null;
+  #recoveryJournalGeneration = 0;
   #operationSequence = 0;
   #disposed = false;
 
@@ -194,6 +211,16 @@ export class DocumentWorkflow {
     ) {
       throw new TypeError("DocumentWorkflow requires a RecoveryStore port.");
     }
+    if (
+      ports.recoveryJournal
+      && (
+        typeof ports.recoveryJournal.commit !== "function"
+        || typeof ports.recoveryJournal.readVerified !== "function"
+        || typeof ports.recoveryJournal.remove !== "function"
+      )
+    ) {
+      throw new TypeError("DocumentWorkflow RecoveryJournal port is invalid.");
+    }
     if (!ports.canvas || typeof ports.canvas.invalidateRenderAcks !== "function") {
       throw new TypeError("DocumentWorkflow requires a CanvasAuthorityPort.");
     }
@@ -218,6 +245,7 @@ export class DocumentWorkflow {
     this.#codecs = createDocumentWorkflowCodecs(codecs);
     this.#hashPort = ports.hash;
     this.#recoveryStore = ports.recoveryStore;
+    this.#recoveryJournal = ports.recoveryJournal || null;
     this.#canvasPort = ports.canvas;
     this.#scheduler = scheduler;
     this.#clock = clock;
@@ -243,6 +271,212 @@ export class DocumentWorkflow {
 
   get recoveryIdentity() {
     return this.#recoveryIdentity;
+  }
+
+  get recoveryCheckpoint() {
+    return this.#recoveryCheckpoint;
+  }
+
+  canProtectForDetach(context = this.#projectSession.context) {
+    return Boolean(
+      this.#recoveryJournal
+      && context?.projectId
+      && context?.documentId
+      && context?.sourcePath
+    );
+  }
+
+  hasVerifiedRecoveryCheckpoint({ context, revision: expectedRevision } = {}) {
+    const activeContext = copyContext(context) || copyContext(this.#projectSession.context);
+    const checkpoint = this.#recoveryCheckpoint;
+    return Boolean(
+      activeContext
+      && checkpoint
+      && sameContext(checkpoint, activeContext, this.#codecs.sameSourcePath)
+      && Number(checkpoint.revision) === revision(
+        expectedRevision ?? this.#documentSession.editRevision,
+      )
+      && SHA256.test(String(checkpoint.recoveryHtmlSha256 || ""))
+      && SHA256.test(String(checkpoint.journalSha256 || ""))
+      && checkpoint.recoveryHtmlSha256 === this.#documentSession.workingHtmlSha256
+    );
+  }
+
+  verifiedProtectionEvidence(input = {}) {
+    if (this.hasVerifiedRecoveryCheckpoint(input)) {
+      return Object.freeze({
+        kind: "recoveryVerified",
+        revision: revision(input.revision ?? this.#documentSession.editRevision),
+        htmlSha256: this.#recoveryCheckpoint.recoveryHtmlSha256,
+        journalSha256: this.#recoveryCheckpoint.journalSha256,
+      });
+    }
+    const activeContext = copyContext(input.context) || copyContext(this.#projectSession.context);
+    const checkpoint = this.#exportCheckpoint;
+    if (
+      activeContext
+      && checkpoint
+      && sameContext(checkpoint, activeContext, this.#codecs.sameSourcePath)
+      && Number(checkpoint.revision) === revision(
+        input.revision ?? this.#documentSession.editRevision,
+      )
+      && SHA256.test(String(checkpoint.exportHtmlSha256 || ""))
+      && checkpoint.exportHtmlSha256 === this.#documentSession.workingHtmlSha256
+      && String(checkpoint.path || "")
+    ) {
+      return Object.freeze({
+        kind: "exportVerified",
+        revision: revision(input.revision ?? this.#documentSession.editRevision),
+        htmlSha256: checkpoint.exportHtmlSha256,
+        path: checkpoint.path,
+      });
+    }
+    return null;
+  }
+
+  hasVerifiedProtectionEvidence(input = {}) {
+    return Boolean(this.verifiedProtectionEvidence(input));
+  }
+
+  async recordVerifiedExport({ context, html, revision: exportedRevision, exported } = {}) {
+    const activeContext = copyContext(context) || copyContext(this.#projectSession.context);
+    if (!activeContext || !this.#isCurrent(activeContext)) {
+      return activeContext ? stale(activeContext) : blocked(
+        "DOCUMENT_CONTEXT_REQUIRED",
+        "当前页面尚未完成项目身份初始化。",
+      );
+    }
+    const expectedRevision = revision(exportedRevision);
+    const expectedHtml = String(html || "");
+    if (
+      expectedRevision !== this.#documentSession.editRevision
+      || expectedHtml !== this.#documentSession.html
+    ) {
+      return blocked("DOCUMENT_EXPORT_STALE", "导出副本没有覆盖当前编辑版本。");
+    }
+    const exportedSha256 = String(exported?.sha256 || "");
+    const exportedPath = String(exported?.path || "");
+    const actualSha256 = await this.#hashPort.sha256(expectedHtml);
+    if (
+      !this.#isCurrent(activeContext)
+      || !SHA256.test(exportedSha256)
+      || exportedSha256 !== actualSha256
+      || !exportedPath
+    ) {
+      return rejected(
+        "DOCUMENT_EXPORT_EVIDENCE_INVALID",
+        "导出文件与当前 HTML 无法完成 Hash 校验。",
+      );
+    }
+    if (!this.#documentSession.confirmWorkingHtml({
+      revision: expectedRevision,
+      htmlSha256: actualSha256,
+    })) {
+      return blocked("DOCUMENT_EXPORT_STALE", "导出副本没有覆盖当前编辑版本。");
+    }
+    this.#exportCheckpoint = Object.freeze({
+      ...activeContext,
+      revision: expectedRevision,
+      exportHtmlSha256: exportedSha256,
+      path: exportedPath,
+    });
+    this.#emit({
+      type: "document-export-checkpoint-verified",
+      context: activeContext,
+      revision: expectedRevision,
+      exportHtmlSha256: exportedSha256,
+    });
+    return succeeded({ protected: true, evidence: "exportVerified" });
+  }
+
+  async protectForDetach({ context } = {}) {
+    const activeContext = copyContext(context) || copyContext(this.#projectSession.context);
+    if (!activeContext || !this.#isCurrent(activeContext)) {
+      return activeContext ? stale(activeContext) : blocked(
+        "DOCUMENT_CONTEXT_REQUIRED",
+        "当前页面尚未完成项目身份初始化。",
+      );
+    }
+    if (
+      this.#documentSession.persistState === "idle"
+      && this.#documentSession.editRevision === this.#documentSession.lastPersistedRevision
+    ) {
+      return succeeded({ protected: true, evidence: "sourcePersisted" });
+    }
+    if (this.hasVerifiedRecoveryCheckpoint({
+      context: activeContext,
+      revision: this.#documentSession.editRevision,
+    })) {
+      return succeeded({ protected: true, evidence: "recoveryVerified" });
+    }
+    if (this.#exportCheckpoint && this.hasVerifiedProtectionEvidence({
+      context: activeContext,
+      revision: this.#documentSession.editRevision,
+    })) {
+      return succeeded({ protected: true, evidence: "exportVerified" });
+    }
+    const strandedReceipt = this.#recoveryJournalReceipt;
+    if (
+      strandedReceipt
+      && sameRecoveryDocument(strandedReceipt, activeContext)
+      && !this.#codecs.sameSourcePath(strandedReceipt.sourcePath, activeContext.sourcePath)
+    ) {
+      const rebased = await this.rebaseRecoveryJournal({
+        previousContext: {
+          ...activeContext,
+          sourcePath: strandedReceipt.sourcePath,
+          ...(activeContext.exactSourcePath
+            ? { exactSourcePath: strandedReceipt.sourcePath }
+            : {}),
+        },
+        context: activeContext,
+      });
+      if (rebased.status !== "succeeded") return rebased;
+      if (this.hasVerifiedRecoveryCheckpoint({
+        context: activeContext,
+        revision: this.#documentSession.editRevision,
+      })) {
+        return succeeded({ protected: true, evidence: "recoveryVerified" });
+      }
+    }
+    if (!this.canProtectForDetach(activeContext)) {
+      return blocked(
+        "DOCUMENT_RECOVERY_JOURNAL_UNAVAILABLE",
+        "当前内容还没有可校验的恢复副本。",
+      );
+    }
+    const write = this.#documentSession.pendingWrite || this.#createWrite(
+      activeContext,
+      this.#documentSession.html,
+      this.#documentSession.editRevision,
+    );
+    try {
+      const checkpoint = await this.#commitRecoveryJournal(write, activeContext);
+      if (!this.#isCurrent(activeContext)) return stale(activeContext);
+      if (!this.hasVerifiedRecoveryCheckpoint({
+        context: activeContext,
+        revision: write.revision,
+      })) {
+        return blocked(
+          "DOCUMENT_RECOVERY_CHECKPOINT_STALE",
+          "恢复副本没有覆盖当前编辑版本。",
+        );
+      }
+      return succeeded({
+        protected: true,
+        evidence: "recoveryVerified",
+        checkpoint,
+      });
+    } catch (cause) {
+      if (!this.#isCurrent(activeContext)) return stale(activeContext);
+      const reason = this.#codecs.errorMessage(cause, "恢复副本没有安全完成。");
+      this.#emit({
+        type: "document-recovery-checkpoint-failed",
+        context: activeContext,
+        reason,
+      });
+      return rejected("DOCUMENT_RECOVERY_CHECKPOINT_FAILED", reason);
+    }
   }
 
   get pendingAuditEvents() {
@@ -297,6 +531,93 @@ export class DocumentWorkflow {
 
   clearRecovery(context) {
     this.#persistRecovery(null, context);
+  }
+
+  async rebaseRecoveryJournal({ previousContext, context } = {}) {
+    const previous = copyContext(previousContext);
+    const next = copyContext(context);
+    const receipt = this.#recoveryJournalReceipt;
+    if (
+      !previous
+      || !next
+      || !receipt
+      || typeof this.#recoveryJournal?.rebase !== "function"
+      || !sameRecoveryDocument(receipt, previous)
+      || !this.#codecs.sameSourcePath(receipt.sourcePath, previous.sourcePath)
+    ) {
+      return succeeded({ rebased: false });
+    }
+    const publishRebased = (journal) => {
+      const checkpoint = this.#checkpointFromJournal(journal, next);
+      if (!checkpoint) {
+        throw invalidAcknowledgement(
+          "恢复日志路径更新后的身份无法校验。",
+          "DOCUMENT_RECOVERY_REBASE_INVALID",
+        );
+      }
+      this.#recoveryJournalReceipt = checkpoint;
+      if (
+        checkpoint.revision === this.#documentSession.editRevision
+        && checkpoint.recoveryHtmlSha256 === this.#documentSession.workingHtmlSha256
+      ) {
+        this.#recoveryCheckpoint = checkpoint;
+      }
+      return succeeded({ rebased: true, checkpoint });
+    };
+    const rebase = (authority) => this.#recoveryJournal.rebase({
+      projectId: authority.projectId,
+      documentId: authority.documentId,
+      previousSourcePath: authority.sourcePath,
+      sourcePath: next.sourcePath,
+      workingCopyId: String(authority.workingCopyId || ""),
+      revision: authority.revision,
+      recoveryHtmlSha256: authority.recoveryHtmlSha256,
+      expectedJournalSha256: authority.journalSha256,
+    });
+    try {
+      return publishRebased(await rebase(receipt));
+    } catch (cause) {
+      let finalCause = cause;
+      try {
+        const authority = await this.#recoveryJournal.readVerified({
+          projectId: receipt.projectId,
+          documentId: receipt.documentId,
+        });
+        if (
+          !authority
+          || !sameRecoveryDocument(authority, receipt)
+          || Number(authority.revision) !== Number(receipt.revision)
+          || String(authority.recoveryHtmlSha256 || "") !== receipt.recoveryHtmlSha256
+        ) {
+          throw invalidAcknowledgement(
+            "恢复日志路径更新后的 Main 权威与当前恢复凭证不一致。",
+            "DOCUMENT_RECOVERY_REBASE_AUTHORITY_MISMATCH",
+          );
+        }
+        if (this.#codecs.sameSourcePath(authority.sourcePath, next.sourcePath)) {
+          return publishRebased(authority);
+        }
+        if (!this.#codecs.sameSourcePath(authority.sourcePath, receipt.sourcePath)) {
+          throw invalidAcknowledgement(
+            "恢复日志已经指向另一个文件位置。",
+            "DOCUMENT_RECOVERY_REBASE_PATH_MISMATCH",
+          );
+        }
+        return publishRebased(await rebase(authority));
+      } catch (reconcileCause) {
+        finalCause = reconcileCause;
+      }
+      this.#emit({
+        type: "document-recovery-rebase-failed",
+        context: next,
+        previousContext: previous,
+        reason: this.#codecs.errorMessage(finalCause, "恢复日志无法更新到新文件位置。"),
+      });
+      return rejected(
+        "DOCUMENT_RECOVERY_REBASE_REJECTED",
+        this.#codecs.errorMessage(finalCause, "恢复日志无法更新到新文件位置。"),
+      );
+    }
   }
 
   clearAutosaveTimer() {
@@ -549,7 +870,8 @@ export class DocumentWorkflow {
       if (this.#isCurrent(activeContext) && !externalAccepted) {
         this.#documentSession.publishAuthority({
           html: previousDocument.html,
-          sourceSha256: previousDocument.sourceSha256,
+          persistedSourceSha256: previousDocument.persistedSourceSha256,
+          workingHtmlSha256: previousDocument.workingHtmlSha256,
           pendingWrite: previousPendingWrite,
           persistState: previousDocument.persistState,
           persistError: previousDocument.persistError,
@@ -698,7 +1020,8 @@ export class DocumentWorkflow {
       if (this.#isCurrent(activeContext)) {
         this.#documentSession.publishAuthority({
           html: previousDocument.html,
-          sourceSha256: previousDocument.sourceSha256,
+          persistedSourceSha256: previousDocument.persistedSourceSha256,
+          workingHtmlSha256: previousDocument.workingHtmlSha256,
           pendingWrite: previousPendingWrite,
           persistState: previousDocument.persistState,
           persistError: previousDocument.persistError,
@@ -736,14 +1059,19 @@ export class DocumentWorkflow {
     const canvasAuthority = this.#documentSession.canvasAuthority;
     if (
       clean
-      && this.#documentSession.sourceSha256
+      && this.#documentSession.persistedSourceSha256
+      && this.#documentSession.workingHtmlSha256
       && canvasAuthority.status === "verified"
       && canvasAuthority.generation === this.#documentSession.canvasGeneration
-      && canvasAuthority.renderedSha256 === this.#documentSession.sourceSha256
+      && canvasAuthority.renderedSha256 === this.#documentSession.workingHtmlSha256
+      && this.#documentSession.workingHtmlSha256
+        === this.#documentSession.persistedSourceSha256
     ) {
       return succeeded({
         html: expectedHtml,
-        sourceSha256: this.#documentSession.sourceSha256,
+        persistedSourceSha256: this.#documentSession.persistedSourceSha256,
+        workingHtmlSha256: this.#documentSession.workingHtmlSha256,
+        canvasRenderedSha256: canvasAuthority.renderedSha256,
         reusedCanvasAuthority: true,
       });
     }
@@ -752,8 +1080,8 @@ export class DocumentWorkflow {
       if (
         activeContext
         && clean
-        && this.#documentSession.sourceSha256
-        && this.#documentSession.sourceSha256 !== expectedSha256
+        && this.#documentSession.persistedSourceSha256
+        && this.#documentSession.persistedSourceSha256 !== expectedSha256
       ) {
         const payload = await this.#bridgeClient.source(activeContext.sourcePath);
         if (!this.#isCurrent(activeContext)) return stale(activeContext);
@@ -792,16 +1120,30 @@ export class DocumentWorkflow {
         });
       }
       await this.#verifyRendered(expectedHtml, expectedSha256, activeContext || undefined);
+      if (!this.#documentSession.confirmWorkingHtml({
+        revision: this.#documentSession.editRevision,
+        htmlSha256: expectedSha256,
+      })) {
+        throw Object.assign(new Error("当前工作 HTML 已变化，未接受过期画布回执。"), {
+          code: "DOCUMENT_WORKING_HTML_STALE",
+        });
+      }
       const confirmed = this.#documentSession.confirmCanvas({
         generation: this.#documentSession.canvasGeneration,
         renderedSha256: expectedSha256,
+        workingHtmlSha256: expectedSha256,
       });
       if (!confirmed) {
         throw Object.assign(new Error("当前画布尚未完成自动恢复。"), {
           code: "DOCUMENT_CANVAS_AUTHORITY_REJECTED",
         });
       }
-      return succeeded({ html: expectedHtml, sourceSha256: expectedSha256 });
+      return succeeded({
+        html: expectedHtml,
+        persistedSourceSha256: this.#documentSession.persistedSourceSha256,
+        workingHtmlSha256: expectedSha256,
+        canvasRenderedSha256: expectedSha256,
+      });
     } catch (cause) {
       if (activeContext && !this.#isCurrent(activeContext)) return stale(activeContext);
       this.#documentSession.failCanvas({
@@ -1021,20 +1363,94 @@ export class DocumentWorkflow {
     const keys = this.#recoveryKeys(activeContext);
     let raw = null;
     let recoveredKey = "";
-    for (const record of this.#recoveryStore.readRecords(keys)) {
-      if (this.#codecs.isRecord(record?.value)) {
-        raw = record.value;
-        recoveredKey = String(record.key || "");
-        break;
+    let journalRaw = null;
+    if (this.#recoveryJournal && activeContext.projectId && activeContext.documentId) {
+      try {
+        let journal = await this.#recoveryJournal.readVerified({
+          projectId: activeContext.projectId,
+          documentId: activeContext.documentId,
+        });
+        if (journal) {
+          if (
+            sameRecoveryDocument(journal, activeContext)
+            && !this.#codecs.sameSourcePath(journal.sourcePath, activeContext.sourcePath)
+            && typeof this.#recoveryJournal.rebase === "function"
+          ) {
+            journal = await this.#recoveryJournal.rebase({
+              projectId: journal.projectId,
+              documentId: journal.documentId,
+              previousSourcePath: journal.sourcePath,
+              sourcePath: activeContext.sourcePath,
+              workingCopyId: String(journal.workingCopyId || ""),
+              revision: revision(journal.revision),
+              recoveryHtmlSha256: journal.recoveryHtmlSha256,
+              expectedJournalSha256: journal.journalSha256,
+            });
+            journal = await this.#recoveryJournal.readVerified({
+              projectId: activeContext.projectId,
+              documentId: activeContext.documentId,
+              expectedJournalSha256: journal.journalSha256,
+            });
+          }
+          journalRaw = journal;
+          this.#recoveryJournalReceipt = this.#checkpointFromJournal(journal, activeContext);
+        }
+      } catch (cause) {
+        this.#emit({
+          type: "document-recovery-checkpoint-failed",
+          context: activeContext,
+          reason: this.#codecs.errorMessage(cause, "恢复日志无法读取。"),
+        });
+      }
+    }
+    const localRecord = this.#recoveryStore.readRecords(keys)
+      .filter((record) => this.#codecs.isRecord(record?.value))
+      .sort((left, right) => revision(right.value.revision) - revision(left.value.revision))[0]
+      || null;
+    const candidates = [
+      ...(journalRaw ? [{ raw: journalRaw, key: "main-recovery-journal" }] : []),
+      ...(localRecord ? [{ raw: localRecord.value, key: String(localRecord.key || "") }] : []),
+    ].filter((candidate) => (
+      String(candidate.raw.projectId || "") === activeContext.projectId
+      && String(candidate.raw.documentId || "") === activeContext.documentId
+      && (
+        !String(candidate.raw.workingCopyId || "")
+        || !String(activeContext.workingCopyId || "")
+        || String(candidate.raw.workingCopyId) === String(activeContext.workingCopyId)
+      )
+      && typeof candidate.raw.html === "string"
+      && /<html(?:\s|>)/iu.test(candidate.raw.html)
+    )).sort((left, right) => (
+      revision(right.raw.revision) - revision(left.raw.revision)
+      || Number(right.key === "main-recovery-journal")
+        - Number(left.key === "main-recovery-journal")
+    ));
+    if (candidates[0]) {
+      raw = candidates[0].raw;
+      recoveredKey = candidates[0].key;
+      if (
+        journalRaw
+        && localRecord
+        && revision(journalRaw.revision) === revision(localRecord.value.revision)
+        && await this.#hashPort.sha256(String(localRecord.value.html || ""))
+          === String(journalRaw.recoveryHtmlSha256 || "")
+      ) {
+        raw = {
+          ...localRecord.value,
+          ...journalRaw,
+          html: journalRaw.html,
+          recoveryIdentity: localRecord.value.recoveryIdentity,
+          changeEvents: localRecord.value.changeEvents,
+          sourceHistoryOperations: localRecord.value.sourceHistoryOperations,
+        };
+        recoveredKey = "main-recovery-journal";
+      }
+      if (recoveredKey === "main-recovery-journal") {
+        this.#recoveryCheckpoint = this.#recoveryJournalReceipt;
       }
     }
     if (
       !raw
-      || String(raw.sourcePath || "") !== activeContext.sourcePath
-      || String(raw.projectId || "") !== activeContext.projectId
-      || String(raw.documentId || "") !== activeContext.documentId
-      || typeof raw.html !== "string"
-      || !/<html(?:\s|>)/iu.test(raw.html)
     ) return succeeded({ recovered: false });
 
     try {
@@ -1050,7 +1466,10 @@ export class DocumentWorkflow {
           persistState: "idle",
           persistError: "",
         });
-        if (recoveredKey) this.#recoveryStore.remove(recoveredKey);
+        if (recoveredKey && recoveredKey !== "main-recovery-journal") {
+          this.#recoveryStore.remove(recoveredKey);
+        }
+        this.#scheduleRecoveryJournal(null, activeContext);
         return succeeded({ recovered: false, reconciled: true });
       }
 
@@ -1064,8 +1483,13 @@ export class DocumentWorkflow {
         ...recoveredEvents.filter((event) => !existingIds.has(event.eventId)),
       ];
       const storedIdentity = this.#codecs.recoveryIdentityFromRecord(raw.recoveryIdentity);
+      const mainJournalIdentityMatches = recoveredKey === "main-recovery-journal"
+        && sameRecoveryDocument(raw, activeContext);
       const canRebaseSafely = Boolean(
-        identityMatches(storedIdentity, this.#recoveryIdentity, this.#codecs.sameSourcePath)
+        (
+          identityMatches(storedIdentity, this.#recoveryIdentity, this.#codecs.sameSourcePath)
+          || mainJournalIdentityMatches
+        )
         && String(raw.expectedSourceSha256 || "") === String(currentSourceSha256 || ""),
       );
       const write = {
@@ -1091,7 +1515,8 @@ export class DocumentWorkflow {
       this.#commentSession.setChangeEvents(mergedEvents);
       this.#documentSession.publishAuthority({
         html: recoveredHtml,
-        sourceSha256: currentSourceSha256,
+        persistedSourceSha256: currentSourceSha256,
+        workingHtmlSha256: targetSha256,
         editRevision: nextRevision,
         pendingWrite: write,
       });
@@ -1161,7 +1586,8 @@ export class DocumentWorkflow {
     this.#auditPending = [...write.events];
     this.#documentSession.publishAuthority({
       html: write.html,
-      sourceSha256: authoritativeSourceSha256 || null,
+      persistedSourceSha256: authoritativeSourceSha256 || null,
+      workingHtmlSha256: null,
       editRevision: write.revision,
       pendingWrite: write,
     });
@@ -1270,6 +1696,7 @@ export class DocumentWorkflow {
   #persistRecovery(write, context) {
     const keys = this.#recoveryKeys(write || context);
     if (keys.length === 0) return false;
+    this.#scheduleRecoveryJournal(write, context);
     if (!write) return this.#recoveryStore.remove(keys);
     return this.#recoveryStore.write(keys, {
       schemaVersion: "2.0.0",
@@ -1285,7 +1712,177 @@ export class DocumentWorkflow {
     });
   }
 
+  #checkpointFromJournal(journal, context) {
+    if (
+      !journal
+      || String(journal.projectId || "") !== String(context?.projectId || "")
+      || String(journal.documentId || "") !== String(context?.documentId || "")
+      || (
+        String(journal.workingCopyId || "")
+        && String(context?.workingCopyId || "")
+        && String(journal.workingCopyId) !== String(context.workingCopyId)
+      )
+      || !this.#codecs.sameSourcePath(journal.sourcePath, context?.sourcePath)
+      || !SHA256.test(String(journal.recoveryHtmlSha256 || ""))
+      || !SHA256.test(String(journal.journalSha256 || ""))
+    ) return null;
+    return Object.freeze({
+      ...copyContext(context),
+      sourcePath: String(journal.sourcePath),
+      workingCopyId: String(journal.workingCopyId || context?.workingCopyId || ""),
+      revision: revision(journal.revision),
+      recoveryHtmlSha256: String(journal.recoveryHtmlSha256),
+      journalSha256: String(journal.journalSha256),
+      updatedAt: String(journal.updatedAt || ""),
+    });
+  }
+
+  #scheduleRecoveryJournal(write, context) {
+    if (!this.#recoveryJournal) return null;
+    const activeContext = copyContext(write || context);
+    if (!activeContext?.projectId || !activeContext?.documentId || !activeContext?.sourcePath) {
+      return null;
+    }
+    this.#recoveryJournalGeneration += 1;
+    const generation = this.#recoveryJournalGeneration;
+    const operation = async () => {
+      if (!write) {
+        const receipt = this.#recoveryJournalReceipt;
+        if (!receipt || !sameContext(receipt, activeContext, this.#codecs.sameSourcePath)) {
+          if (
+            generation === this.#recoveryJournalGeneration
+            && this.#recoveryCheckpoint
+            && sameRecoveryDocument(this.#recoveryCheckpoint, activeContext)
+          ) {
+            this.#recoveryCheckpoint = null;
+          }
+          return null;
+        }
+        await this.#recoveryJournal.remove({
+          projectId: activeContext.projectId,
+          documentId: activeContext.documentId,
+          sourcePath: receipt.sourcePath,
+          workingCopyId: String(receipt.workingCopyId || ""),
+          revision: receipt.revision,
+          recoveryHtmlSha256: receipt.recoveryHtmlSha256,
+          expectedJournalSha256: receipt.journalSha256,
+        });
+        if (this.#recoveryJournalReceipt?.journalSha256 === receipt.journalSha256) {
+          this.#recoveryJournalReceipt = null;
+        }
+        if (generation === this.#recoveryJournalGeneration) {
+          this.#recoveryCheckpoint = null;
+        }
+        return null;
+      }
+      const journal = await this.#recoveryJournal.commit({
+        projectId: activeContext.projectId,
+        documentId: activeContext.documentId,
+        sourcePath: activeContext.sourcePath,
+        workingCopyId: String(write.workingCopyId || activeContext.workingCopyId || ""),
+        expectedSourceSha256: String(write.expectedSourceSha256 || "") || null,
+        revision: revision(write.revision),
+        html: String(write.html || ""),
+        ...(this.#recoveryJournalReceipt
+          && sameContext(
+            this.#recoveryJournalReceipt,
+            activeContext,
+            this.#codecs.sameSourcePath,
+          ) ? {
+            expectedJournalSha256: this.#recoveryJournalReceipt.journalSha256,
+          } : {}),
+      });
+      const checkpoint = this.#checkpointFromJournal(journal, activeContext);
+      const expectedHtmlSha256 = await this.#hashPort.sha256(String(write.html || ""));
+      if (
+        !checkpoint
+        || checkpoint.recoveryHtmlSha256 !== expectedHtmlSha256
+        || checkpoint.revision !== revision(write.revision)
+      ) {
+        throw invalidAcknowledgement(
+          "恢复日志写入后的读回校验失败。",
+          "DOCUMENT_RECOVERY_CHECKPOINT_INVALID",
+        );
+      }
+      if (!this.#documentSession.confirmWorkingHtml({
+        revision: write.revision,
+        htmlSha256: expectedHtmlSha256,
+      })) {
+        throw invalidAcknowledgement(
+          "恢复日志已写入，但当前工作 HTML 已变化。",
+          "DOCUMENT_RECOVERY_CHECKPOINT_STALE",
+        );
+      }
+      this.#recoveryJournalReceipt = checkpoint;
+      if (generation === this.#recoveryJournalGeneration) {
+        this.#recoveryCheckpoint = checkpoint;
+        this.#emit({
+          type: "document-recovery-checkpoint-verified",
+          context: activeContext,
+          revision: checkpoint.revision,
+          recoveryHtmlSha256: checkpoint.recoveryHtmlSha256,
+        });
+      }
+      return checkpoint;
+    };
+    let resolveQueued;
+    let rejectQueued;
+    const queued = new Promise((resolve, reject) => {
+      resolveQueued = resolve;
+      rejectQueued = reject;
+    });
+    const priorWaiters = this.#recoveryJournalPending?.waiters || [];
+    this.#recoveryJournalPending = {
+      operation,
+      waiters: [...priorWaiters, { resolve: resolveQueued, reject: rejectQueued }],
+    };
+    this.#runNextRecoveryJournal();
+    queued.catch((cause) => {
+      if (generation !== this.#recoveryJournalGeneration) return;
+      this.#recoveryCheckpoint = null;
+      this.#emit({
+        type: "document-recovery-checkpoint-failed",
+        context: activeContext,
+        reason: this.#codecs.errorMessage(cause, "恢复副本没有安全完成。"),
+      });
+    });
+    return queued;
+  }
+
+  #runNextRecoveryJournal() {
+    if (this.#recoveryJournalInFlight || !this.#recoveryJournalPending) return;
+    const task = this.#recoveryJournalPending;
+    this.#recoveryJournalPending = null;
+    const inFlight = Promise.resolve().then(task.operation);
+    this.#recoveryJournalInFlight = inFlight;
+    inFlight.then(
+      (value) => {
+        for (const waiter of task.waiters) waiter.resolve(value);
+      },
+      (cause) => {
+        for (const waiter of task.waiters) waiter.reject(cause);
+      },
+    ).finally(() => {
+      if (this.#recoveryJournalInFlight === inFlight) {
+        this.#recoveryJournalInFlight = null;
+      }
+      this.#runNextRecoveryJournal();
+    });
+  }
+
+  async #commitRecoveryJournal(write, context) {
+    const queued = this.#scheduleRecoveryJournal(write, context);
+    if (!queued) {
+      throw invalidAcknowledgement(
+        "当前内容无法写入恢复日志。",
+        "DOCUMENT_RECOVERY_JOURNAL_UNAVAILABLE",
+      );
+    }
+    return queued;
+  }
+
   async #runFlush(cutoff) {
+    let latestAcknowledgedContext = null;
     while (this.#documentSession.pendingWrite) {
       const pendingWrite = this.#documentSession.takePendingWrite();
       if (!pendingWrite) break;
@@ -1377,6 +1974,7 @@ export class DocumentWorkflow {
           persistedRevision,
         });
         if (!this.#isCurrent(acknowledgedContext)) return stale(acknowledgedContext);
+        latestAcknowledgedContext = acknowledgedContext;
       } catch (cause) {
         return await this.#handleFlushFailure({
           cause,
@@ -1386,6 +1984,21 @@ export class DocumentWorkflow {
         });
       } finally {
         for (const key of inFlightKeys) this.#auditInFlight.delete(key);
+      }
+    }
+    if (latestAcknowledgedContext && !this.#documentSession.pendingWrite) {
+      const retirement = this.#scheduleRecoveryJournal(null, latestAcknowledgedContext);
+      if (retirement) {
+        await retirement.catch((cause) => {
+          this.#emit({
+            type: "document-recovery-retirement-failed",
+            context: latestAcknowledgedContext,
+            reason: this.#codecs.errorMessage(
+              cause,
+              "源 HTML 已写入，但恢复日志尚未退役。",
+            ),
+          });
+        });
       }
     }
     if (
@@ -1481,14 +2094,15 @@ export class DocumentWorkflow {
     this.#documentSession.update(writeCompletesCurrentDocument
       ? {
           html: acknowledgedHtml,
-          sourceSha256,
+          persistedSourceSha256: sourceSha256,
+          workingHtmlSha256: sourceSha256,
           lastPersistedRevision: Math.max(
             this.#documentSession.lastPersistedRevision,
             persistedRevision,
           ),
         }
       : {
-          sourceSha256,
+          persistedSourceSha256: sourceSha256,
           lastPersistedRevision: Math.max(
             this.#documentSession.lastPersistedRevision,
             persistedRevision,

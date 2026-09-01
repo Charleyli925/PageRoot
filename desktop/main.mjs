@@ -84,6 +84,7 @@ import { registerAgentIpc, unregisterAgentIpc } from "./ipc/agent-ipc.mjs";
 import { registerUpdateIpc, unregisterUpdateIpc } from "./ipc/update-ipc.mjs";
 import { registerWindowIpc, unregisterWindowIpc } from "./ipc/window-ipc.mjs";
 import { createWindowLifecycle } from "./app-lifecycle.mjs";
+import { createRecoveryJournalStore } from "./recovery-journal-store.mjs";
 import { createStartupPerformanceTimeline } from "./startup-performance-timeline.mjs";
 import {
   closeAbortPayload,
@@ -248,6 +249,11 @@ const PROJECT_CHANNELS = Object.freeze({
   cancelPreparedHtmlOpen: "html-projects:cancel-prepared-open",
   finalizePreparedHtmlOpen: "html-projects:finalize-prepared-open",
   rollbackPreparedHtmlOpen: "html-projects:rollback-prepared-open",
+  commitRecoveryJournal: "html-projects:commit-recovery-journal",
+  readRecoveryJournal: "html-projects:read-recovery-journal",
+  rebaseRecoveryJournal: "html-projects:rebase-recovery-journal",
+  removeRecoveryJournal: "html-projects:remove-recovery-journal",
+  listRecoveryJournals: "html-projects:list-recovery-journals",
   sourceFileMayHaveChanged: "html-projects:source-file-may-have-changed",
 });
 const APP_CHANNELS = Object.freeze({
@@ -434,6 +440,20 @@ const externalFileOpenMailbox = createExternalFileOpenMailbox();
 const externalOpenFailureMailbox = createExternalOpenFailureMailbox();
 const externalFileOpenDelivery = createExternalFileOpenDeliveryCoordinator();
 const preparedHtmlOpenStore = createPreparedHtmlOpenStore();
+const recoveryJournalStore = createRecoveryJournalStore({
+  rootPath: path.join(app.getPath("userData"), "recovery-journals-v1"),
+});
+let recoveryJournalAvailable = true;
+let recoveryJournalUnavailableReason = "";
+
+function requireRecoveryJournal() {
+  if (recoveryJournalAvailable) return recoveryJournalStore;
+  const error = new Error(
+    recoveryJournalUnavailableReason || "恢复日志当前不可用，请导出当前 HTML 作为恢复副本。",
+  );
+  error.code = "RECOVERY_JOURNAL_UNAVAILABLE";
+  throw error;
+}
 const externalFileOpenExitHandoff = createExternalFileOpenExitHandoff({
   handoffPath: path.join(app.getPath("userData"), "external-open-handoff.json"),
 });
@@ -3551,6 +3571,21 @@ function registerProjectIpc() {
       cancelPreparedHtmlOpen,
       finalizePreparedHtmlOpen,
       rollbackPreparedHtmlOpen,
+      commitRecoveryJournal: (payload) => requireRecoveryJournal().commit(payload),
+      readRecoveryJournal: (payload) => requireRecoveryJournal().readVerified(payload),
+      rebaseRecoveryJournal: (payload) => requireRecoveryJournal().rebase(payload),
+      removeRecoveryJournal: (payload) => requireRecoveryJournal().remove(payload),
+      listRecoveryJournals: (payload) => recoveryJournalAvailable
+        ? recoveryJournalStore.listRecoverable(payload)
+        : Promise.resolve({
+            entries: [],
+            invalidCount: 0,
+            scannedCount: 0,
+            totalBytes: 0,
+            truncated: false,
+            nextCursor: null,
+            unavailable: true,
+          }),
       createPreviewSession,
       revokePreviewSession: (sessionId) => (
         ensurePreviewProtocolController().revokeSession(sessionId)
@@ -3867,6 +3902,7 @@ async function coordinateApplicationExit(reason, intent = "quit") {
   let coordinatedCloseAuthority = null;
   coordinatedExit = (async () => {
     let result = null;
+    let retryCount = 0;
     while (true) {
       result = await requestRendererClose(reason);
       coordinatedCloseAuthority = closeAuthorityFromResult(result);
@@ -3890,13 +3926,16 @@ async function coordinateApplicationExit(reason, intent = "quit") {
         result: "unknown",
         surface: "global",
       });
-      const retry = !e2eNativeDialogsSuppressed && shouldRetryCloseBlock(result);
+      const retry = !e2eNativeDialogsSuppressed && shouldRetryCloseBlock(result, {
+        retryCount,
+        maxRetries: 1,
+      });
       if (retry) {
-        if (coordinatedCloseAuthority) {
-          externalFileOpenDelivery.releaseBarrier(coordinatedCloseAuthority);
-          externalFileOpenDelivery.abortClose(coordinatedCloseAuthority);
-        }
+        // Every attempt owns a distinct renderer freeze. Release it before the
+        // single bounded retry so the next request can change the condition.
+        finishCloseAbort(coordinatedCloseAuthority, result.reason);
         presentMainWindow();
+        retryCount += 1;
         await new Promise((resolve) => {
           setTimeout(resolve, 400);
         });
@@ -4233,6 +4272,20 @@ if (!hasSingleInstanceLock) {
     }
     installApplicationMenu();
     ensureApplicationUpdateController();
+    try {
+      await recoveryJournalStore.initialize();
+    } catch (error) {
+      recoveryJournalAvailable = false;
+      recoveryJournalUnavailableReason = error instanceof Error
+        ? error.message
+        : "恢复日志初始化失败。";
+      captureUsage("runtime_fault", {
+        process: "main",
+        kind: "recovery_journal_degraded",
+        reason_code: telemetryReasonCode(error?.code, "RECOVERY_JOURNAL_UNAVAILABLE"),
+        fingerprint: telemetryFingerprint(error),
+      });
+    }
     await createWindow();
   }).catch(async (error) => {
     captureUsage("runtime_fault", {

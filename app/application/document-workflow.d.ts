@@ -23,6 +23,13 @@ export type DocumentWorkflowRecoveryStore = Readonly<{
   remove(keys: string | string[]): boolean;
 }>;
 
+export type DocumentWorkflowRecoveryJournal = Readonly<{
+  commit(input: Readonly<Record<string, unknown>>): Promise<Readonly<Record<string, unknown>>>;
+  readVerified(input: Readonly<Record<string, unknown>>): Promise<Readonly<Record<string, unknown>> | null>;
+  rebase?(input: Readonly<Record<string, unknown>>): Promise<Readonly<Record<string, unknown>>>;
+  remove(input: Readonly<Record<string, unknown>>): Promise<Readonly<{ removed: boolean }>>;
+}>;
+
 export type DocumentWorkflowTransitionAuthority = Readonly<{
   recoveryIdentity: unknown;
   sourceHistory: OpenDocumentMemoryHistory | null;
@@ -59,6 +66,7 @@ export type DocumentWorkflowConstruction = Readonly<{
   ports: Readonly<{
     hash: Readonly<{ sha256(html: string): Promise<string> }>;
     recoveryStore: DocumentWorkflowRecoveryStore;
+    recoveryJournal?: DocumentWorkflowRecoveryJournal | null;
     canvas: DocumentWorkflowCanvasPort;
   }>;
   scheduler?: Readonly<{
@@ -74,8 +82,37 @@ export class DocumentWorkflow {
   dispose(): void;
   readonly hasHistoryAction: boolean;
   readonly recoveryIdentity: unknown;
+  readonly recoveryCheckpoint: Readonly<Record<string, unknown>> | null;
   readonly pendingAuditEvents: unknown[];
   replaceRecoveryIdentity(identity: unknown): unknown;
+  canProtectForDetach(context?: ProjectContext | null): boolean;
+  hasVerifiedRecoveryCheckpoint(input?: {
+    context?: ProjectContext | null;
+    revision?: number;
+  }): boolean;
+  hasVerifiedProtectionEvidence(input?: {
+    context?: ProjectContext | null;
+    revision?: number;
+  }): boolean;
+  verifiedProtectionEvidence(input?: {
+    context?: ProjectContext | null;
+    revision?: number;
+  }): Readonly<{
+    kind: "recoveryVerified" | "exportVerified";
+    revision: number;
+    htmlSha256: string;
+    journalSha256?: string;
+    path?: string;
+  }> | null;
+  recordVerifiedExport(input: {
+    context?: ProjectContext | null;
+    html: string;
+    revision: number;
+    exported: { path: string; sha256: string };
+  }): Promise<DocumentWorkflowOutcome<Record<string, unknown>>>;
+  protectForDetach(input?: {
+    context?: ProjectContext | null;
+  }): Promise<DocumentWorkflowOutcome<Record<string, unknown>>>;
   captureProjectTransitionAuthority(): DocumentWorkflowTransitionAuthority;
   restoreProjectTransitionAuthority(input?: {
     authority?: DocumentWorkflowTransitionAuthority | null;
@@ -84,6 +121,10 @@ export class DocumentWorkflow {
   }): boolean;
   resetForProjectTransition(options?: { clearRecovery?: boolean; context?: Partial<ProjectContext> }): void;
   clearRecovery(context?: Partial<ProjectContext>): void;
+  rebaseRecoveryJournal(input: {
+    previousContext: Partial<ProjectContext>;
+    context: Partial<ProjectContext>;
+  }): Promise<DocumentWorkflowOutcome<Record<string, unknown>>>;
   clearAutosaveTimer(): void;
   clearAudit(): void;
   activateSourceHistory(input: {

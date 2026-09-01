@@ -53,7 +53,10 @@ test("Electron automation stays backgrounded unless foreground debugging is expl
     mainProcess,
     /if \(e2eNativeDialogsSuppressed\) \{[\s\S]*?reportSuppressedNativeDialog\([\s\S]*?\} else \{[\s\S]*?dialog\.showErrorBox\(/u,
   );
-  assert.match(mainProcess, /shouldRetryCloseBlock\(result\)/u);
+  assert.match(
+    mainProcess,
+    /shouldRetryCloseBlock\(result, \{[\s\S]*?retryCount,[\s\S]*?maxRetries: 1/u,
+  );
   assert.doesNotMatch(mainProcess, /dialog\.showMessageBox/u);
 
   assert.match(appFixture, /window\.isVisible\(\)/u);
@@ -142,6 +145,21 @@ test("usage telemetry starts only after the renderer is ready to show", async ()
     /once\("ready-to-show"[\s\S]*?window-ready-to-show[\s\S]*?startUsageTelemetryAfterFirstPaint/u,
   );
   assert.match(mainProcess, /telemetry-failed/u);
+});
+
+test("a recovery journal initialization failure degrades before the main window is created", async () => {
+  const mainProcess = await readFile(sourceUrl("../desktop/main.mjs"), "utf8");
+  const coldStart = mainProcess.slice(mainProcess.indexOf("app.whenReady().then"));
+  const recoveryInitialization = coldStart.indexOf("await recoveryJournalStore.initialize()");
+  const degradedCapability = coldStart.indexOf("recoveryJournalAvailable = false", recoveryInitialization);
+  const createWindow = coldStart.indexOf("await createWindow()", recoveryInitialization);
+  assert.ok(recoveryInitialization >= 0);
+  assert.ok(degradedCapability > recoveryInitialization);
+  assert.ok(createWindow > degradedCapability);
+  assert.match(
+    coldStart.slice(recoveryInitialization, createWindow),
+    /catch \(error\)[\s\S]*?recovery_journal_degraded/u,
+  );
 });
 
 test("final-exit IPC unregister and close-abort registration include workbench tabs", async () => {

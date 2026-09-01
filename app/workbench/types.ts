@@ -162,7 +162,29 @@ export type DesktopProjectsApi = {
     html: string;
     sourcePath?: string | null;
     suggestedName?: string;
-  }) => Promise<{ path: string; name: string } | null>;
+  }) => Promise<{
+    path: string;
+    name: string;
+    sha256: string;
+    html: string;
+  } | null>;
+  commitRecoveryJournal?: (payload: DocumentRecoveryJournalCommit) => Promise<DocumentRecoveryJournalSummary>;
+  readRecoveryJournal?: (payload: DocumentRecoveryJournalLocator & {
+    expectedJournalSha256?: string | null;
+  }) => Promise<(DocumentRecoveryJournalSummary & { html: string }) | null>;
+  rebaseRecoveryJournal?: (payload: DocumentRecoveryJournalRebase) => Promise<DocumentRecoveryJournalSummary>;
+  removeRecoveryJournal?: (payload: DocumentRecoveryJournalLocator & {
+    expectedJournalSha256?: string | null;
+  }) => Promise<{ removed: boolean }>;
+  listRecoveryJournals?: (payload?: { cursor?: string | null }) => Promise<{
+    entries: DocumentRecoveryJournalSummary[];
+    invalidCount: number;
+    scannedCount?: number;
+    totalBytes?: number;
+    truncated?: boolean;
+    nextCursor?: string | null;
+    unavailable?: boolean;
+  }>;
   readHtml?: (sourcePath: string) => Promise<HtmlProject>;
   listRecentProjects: () => Promise<RecentProject[]>;
   listRegisteredProjects?: () => Promise<RegisteredProject[]>;
@@ -195,6 +217,41 @@ export type DesktopProjectsApi = {
     rolledBack: boolean;
     project?: HtmlProject | null;
   }>;
+};
+
+export type DocumentRecoveryJournalLocator = {
+  projectId: string;
+  documentId: string;
+};
+
+export type DocumentRecoveryJournalCommit = DocumentRecoveryJournalLocator & {
+  sourcePath: string;
+  workingCopyId?: string | null;
+  expectedSourceSha256?: string | null;
+  expectedJournalSha256?: string | null;
+  revision: number;
+  html: string;
+};
+
+export type DocumentRecoveryJournalRebase = DocumentRecoveryJournalLocator & {
+  previousSourcePath: string;
+  sourcePath: string;
+  workingCopyId: string;
+  revision: number;
+  recoveryHtmlSha256: string;
+  expectedJournalSha256: string;
+};
+
+export type DocumentRecoveryJournalSummary = DocumentRecoveryJournalLocator & {
+  schemaVersion: "1.0.0" | "2.0.0";
+  sourcePath: string;
+  workingCopyId: string;
+  expectedSourceSha256: string | null;
+  recoveryHtmlSha256: string;
+  journalSha256: string;
+  revision: number;
+  updatedAt: string;
+  byteLength: number;
 };
 
 export type DesktopWorkbenchTabsApi = {

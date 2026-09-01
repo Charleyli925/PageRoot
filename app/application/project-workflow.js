@@ -54,6 +54,21 @@ function stale(identity) {
   });
 }
 
+function matchesCloseProjectIdentity(projectSession, context) {
+  if (!context || typeof context !== "object") return false;
+  const liveContext = projectSession.context;
+  if (!liveContext) return false;
+  const baseMatches = projectSession.matches({
+    epoch: context.epoch,
+    projectId: context.projectId,
+    documentId: context.documentId,
+    sourcePath: context.sourcePath,
+  });
+  if (!baseMatches) return false;
+  return String(liveContext.workingCopyId || "")
+    === String(context.workingCopyId || "");
+}
+
 function copyOpenRequest(value) {
   if (!value || typeof value.requestId !== "string" || !value.requestId) return null;
   return Object.freeze({
@@ -219,6 +234,24 @@ function documentIsStable(session) {
   );
 }
 
+function documentProtectionEvidence(workflow, input) {
+  if (typeof workflow?.verifiedProtectionEvidence === "function") {
+    return workflow.verifiedProtectionEvidence(input) || null;
+  }
+  if (typeof workflow?.hasVerifiedProtectionEvidence === "function") {
+    return workflow.hasVerifiedProtectionEvidence(input) === true
+      ? Object.freeze({ kind: "legacyVerified", htmlSha256: null })
+      : null;
+  }
+  return workflow?.hasVerifiedRecoveryCheckpoint?.(input) === true
+    ? Object.freeze({ kind: "legacyVerified", htmlSha256: null })
+    : null;
+}
+
+function documentHasProtectionEvidence(workflow, input) {
+  return Boolean(documentProtectionEvidence(workflow, input));
+}
+
 function projectErrorCode(cause, fallback) {
   if (isBridgeRequestError(cause) && cause.code) return cause.code;
   return cause && typeof cause === "object" && cause.code
@@ -283,6 +316,7 @@ export class ProjectWorkflow {
   #closeLifecycle = {
     preparingRequestId: null,
     frozenRequestId: null,
+    frozenContext: null,
     abortedRequestIds: new Set(),
   };
 
@@ -642,9 +676,10 @@ export class ProjectWorkflow {
         editRevision: document.editRevision,
         lastPersistedRevision: document.lastPersistedRevision,
         sourcePath: this.#projectSession.sourcePath,
-        sourceSha256: document.sourceSha256,
+        persistedSourceSha256: document.persistedSourceSha256,
+        workingHtmlSha256: document.workingHtmlSha256,
         canvasStatus: document.canvasAuthority?.status,
-        renderedSha256: document.canvasAuthority?.renderedSha256,
+        canvasRenderedSha256: document.canvasAuthority?.renderedSha256,
       });
       if (entry.action === "continue" && validationLease.action === "reuse-verified") {
         this.#emit({
@@ -681,12 +716,18 @@ export class ProjectWorkflow {
       if (!drained.ok) {
         return blocked("PROJECT_SWITCH_DRAIN_BLOCKED", drained.reason);
       }
+      const protectionEvidence = documentProtectionEvidence(this.#documentWorkflow, {
+        context: this.#projectSession.context,
+        revision: cutoffRevision,
+      });
+      const recoveryProtected = Boolean(protectionEvidence);
       const afterDrain = planProjectSwitchAfterDrain({
         editRevision: this.#documentSession.editRevision,
         cutoffRevision,
         pendingWrite: Boolean(this.#documentSession.pendingWrite),
         flushInFlight: Boolean(this.#documentSession.flushPromise),
         hasHistoryAction: this.#documentWorkflow.hasHistoryAction,
+        recoveryProtected,
       });
       if (afterDrain.kind === "reject") {
         return blocked(afterDrain.code, afterDrain.reason);
@@ -715,8 +756,11 @@ export class ProjectWorkflow {
           sourcePath: this.#projectSession.sourcePath,
           lastPersistedRevision: this.#documentSession.lastPersistedRevision,
           cutoffRevision,
-          committedSourceSha256: committed?.sourceSha256,
-          documentSourceSha256: this.#documentSession.sourceSha256,
+          persistedSourceSha256: this.#documentSession.persistedSourceSha256,
+          workingHtmlSha256: this.#documentSession.workingHtmlSha256,
+          canvasRenderedSha256: committed?.canvasRenderedSha256 || committed?.sourceSha256,
+          protectionHtmlSha256: protectionEvidence?.htmlSha256 || "",
+          recoveryProtected,
         });
         if (afterCanvas.kind === "reject") {
           return blocked(afterCanvas.code, afterCanvas.reason);
@@ -749,6 +793,7 @@ export class ProjectWorkflow {
     sourcePath,
     projectId,
     fromDeferred = false,
+    switchPrepared = false,
     transactionId = null,
   } = {}) {
     const openIntent = planProjectOpen({
@@ -804,7 +849,9 @@ export class ProjectWorkflow {
             "这次打开没有返回可安全切换的 HTML。",
           );
         }
-        const switchOutcome = await this.prepareSwitch({ fromDeferred });
+        const switchOutcome = switchPrepared
+          ? succeeded({ prepared: true })
+          : await this.prepareSwitch({ fromDeferred });
         if (this.#snapshot.close.phase === "ready") {
           return blocked(
             "PROJECT_OPEN_CLOSE_COMMITTED",
@@ -838,7 +885,9 @@ export class ProjectWorkflow {
         return succeeded({ operationId, applicationId: accepted, opened: true });
       }
 
-      const switchOutcome = await this.prepareSwitch({ fromDeferred });
+      const switchOutcome = switchPrepared
+        ? succeeded({ prepared: true })
+        : await this.prepareSwitch({ fromDeferred });
       if (this.#snapshot.close.phase === "ready") {
         return blocked(
           "PROJECT_OPEN_CLOSE_COMMITTED",
@@ -941,6 +990,7 @@ export class ProjectWorkflow {
     kind = "accepted",
     operationId = this.#nextOpenOperation(),
     sourcePath = null,
+    switchPrepared = false,
     transactionId = null,
   } = {}) {
     if (this.#snapshot.close.phase === "ready") {
@@ -953,6 +1003,7 @@ export class ProjectWorkflow {
       kind,
       operationId,
       sourcePath,
+      switchPrepared,
       transactionId,
     });
     return accepted
@@ -1131,8 +1182,11 @@ export class ProjectWorkflow {
         }
         imposedEditorFreeze = true;
         frozenHtml = frozen.html;
-        frozenSourceSha256 = frozen.sourceSha256;
+        frozenSourceSha256 = frozen.canvasRenderedSha256 || frozen.sourceSha256;
         lifecycle.frozenRequestId = closeRequestId;
+        lifecycle.frozenContext = this.#projectSession.context
+          ? Object.freeze({ ...this.#projectSession.context })
+          : null;
         if (
           frozen.html !== this.#documentSession.html
           && (Boolean(this.#projectSession.sourcePath) || Boolean(frozen.pendingMutation))
@@ -1156,6 +1210,10 @@ export class ProjectWorkflow {
         imposedEditorFreeze
         && this.#projectSession.sourcePath
         && frozenHtml !== null
+        && !documentHasProtectionEvidence(this.#documentWorkflow, {
+          context: this.#projectSession.context,
+          revision: cutoffRevision,
+        })
       ) {
         const boundaryOutcome = await this.#documentWorkflow.reconcileBoundary({
           frozenHtml,
@@ -1182,6 +1240,16 @@ export class ProjectWorkflow {
       if (abortPlan.kind === "reject") {
         return inAppBlock(abortPlan.reason);
       }
+      if (
+        imposedEditorFreeze
+        && lifecycle.frozenContext
+        && !matchesCloseProjectIdentity(this.#projectSession, lifecycle.frozenContext)
+      ) {
+        return inAppBlock("关闭核对期间当前项目身份已变化。", false);
+      }
+      if (imposedEditorFreeze && this.#projectSession.context) {
+        lifecycle.frozenContext = Object.freeze({ ...this.#projectSession.context });
+      }
       ready = true;
       this.#setClose("ready", closeRequestId);
       return { ready: true };
@@ -1197,6 +1265,7 @@ export class ProjectWorkflow {
       if (!ready && imposedEditorFreeze && !this.#runSession.activeLocked) {
         if (lifecycle.frozenRequestId === closeRequestId) {
           lifecycle.frozenRequestId = null;
+          lifecycle.frozenContext = null;
         }
         this.#canvasPort.unlock?.();
       }
@@ -1221,11 +1290,23 @@ export class ProjectWorkflow {
       lifecycle.abortedRequestIds.delete(closeRequestId);
       return;
     }
+    const projectIdentityMatches = Boolean(
+      lifecycle.frozenContext
+      && matchesCloseProjectIdentity(this.#projectSession, lifecycle.frozenContext)
+    );
+    const protectionVerified = projectIdentityMatches && Boolean(
+      documentProtectionEvidence(this.#documentWorkflow, {
+        context: this.#projectSession.context,
+        revision: this.#documentSession.editRevision,
+      })
+    );
     const draftState = this.#draftSession.inspect();
     const mayRecover = this.#policies.shouldRecoverAfterCloseAbort({
       approvedRequestId: lifecycle.frozenRequestId,
       abortedRequestId: closeRequestId,
       imposedEditorFreeze: true,
+      projectIdentityMatches,
+      protectionVerified,
       projectLocked: this.#runSession.activeLocked,
       projectHydrating: this.projectHydrating,
       projectLoadError: Boolean(this.projectLoadError),
@@ -1242,6 +1323,7 @@ export class ProjectWorkflow {
     });
     if (!mayRecover) return;
     lifecycle.frozenRequestId = null;
+    lifecycle.frozenContext = null;
     lifecycle.abortedRequestIds.delete(closeRequestId);
     this.#canvasPort.unlock?.();
     this.#setClose("idle", null);
@@ -1617,6 +1699,15 @@ export class ProjectWorkflow {
       if (!transitioned || !this.#projectSession.context) {
         throw new Error("文件已重命名，但当前项目身份已经变化。");
       }
+      const journalRebase = await this.#documentWorkflow.rebaseRecoveryJournal?.({
+        previousContext: context,
+        context: transitioned,
+      });
+      if (journalRebase && journalRebase.status !== "succeeded") {
+        throw new Error(String(
+          journalRebase.reason || "文件已重命名，但恢复日志没有完成路径更新。",
+        ));
+      }
 
       const [recents, hydrated] = await Promise.all([
         this.refreshRecents(),
@@ -1732,6 +1823,8 @@ export class ProjectWorkflow {
     openTarget = null,
   }) {
     const canonicalSourcePath = String(nextSourcePath || "");
+    const documentAuthority = this.#documentWorkflow.captureProjectTransitionAuthority?.();
+    const pendingWrite = this.#documentSession.pendingWrite;
     const nextOpenTarget = rebasedManagedOpenTarget(
       openTarget,
       canonicalSourcePath,
@@ -1749,16 +1842,22 @@ export class ProjectWorkflow {
       documentId: context.documentId,
       ...(nextOpenTarget ? { openTarget: nextOpenTarget } : {}),
     });
-    this.#documentSession.publishAuthority({
-      html: this.#documentSession.html,
-      sourceSha256: expectedSha256,
-      pendingWrite: null,
-    });
-    this.#documentWorkflow.clearRecovery({
-      documentId: context.documentId,
-      sourcePath: previousSourcePath,
-    });
+    if (pendingWrite && transitioned) {
+      this.#documentSession.setPendingWrite({
+        ...pendingWrite,
+        ...transitioned,
+        sourcePath: canonicalSourcePath,
+        expectedSourceSha256: expectedSha256,
+      });
+    }
     this.#documentWorkflow.resetForProjectTransition();
+    if (documentAuthority && transitioned) {
+      this.#documentWorkflow.restoreProjectTransitionAuthority?.({
+        authority: documentAuthority,
+        context: transitioned,
+        sourceSha256: expectedSha256,
+      });
+    }
     this.#commentWorkflow.resetForProjectTransition();
     this.#projectRulesWorkflow.resetForProjectTransition();
     return transitioned;
@@ -1965,6 +2064,15 @@ export class ProjectWorkflow {
           if (!transitioned || !this.#projectSession.context) {
             throw new Error("文件位置已恢复，但当前项目身份已经变化。");
           }
+          const journalRebase = await this.#documentWorkflow.rebaseRecoveryJournal?.({
+            previousContext: liveContext,
+            context: transitioned,
+          });
+          if (journalRebase && journalRebase.status !== "succeeded") {
+            throw new Error(String(
+              journalRebase.reason || "文件位置已恢复，但恢复日志没有完成路径更新。",
+            ));
+          }
           const recents = await this.refreshRecents();
           if (recents.status !== "succeeded") {
             return unknown(operationId, "文件位置已经恢复，但项目状态还没有完成刷新。");
@@ -2146,7 +2254,7 @@ export class ProjectWorkflow {
     this.#drainCoordinator.replace("source", {
       label: "等待当前 HTML 写回",
       inspect: (boundary) => this.#inspectSourceObligation(boundary),
-      drain: async () => {
+      drain: async ({ boundary }) => {
         if (this.#documentWorkflow.hasHistoryAction) {
           const history = await this.#documentWorkflow.waitForHistoryAction();
           if (history.status !== "succeeded") return false;
@@ -2154,7 +2262,12 @@ export class ProjectWorkflow {
         const outcome = await this.#documentWorkflow.flush({
           throughRevision: this.#documentSession.editRevision,
         });
-        return outcome.status === "succeeded";
+        if (outcome.status === "succeeded") return true;
+        if (boundary !== "switch" && boundary !== "close") return false;
+        const protectedOutcome = await this.#documentWorkflow.protectForDetach?.({
+          context: this.#projectSession.context,
+        });
+        return protectedOutcome?.status === "succeeded";
       },
     });
     this.#drainCoordinator.replace("draft", {
@@ -2181,13 +2294,32 @@ export class ProjectWorkflow {
         reason: "当前编辑尚未绑定本地 HTML，请先导出或打开本地文件。",
       };
     }
+    const detachBoundary = boundary === "switch" || boundary === "close";
+    const recoveryProtected = detachBoundary
+      && documentHasProtectionEvidence(this.#documentWorkflow, {
+        context: this.#projectSession.context,
+        revision: this.#documentSession.editRevision,
+      });
+    if (recoveryProtected) return { state: "resolved" };
     if (this.#documentSession.persistState === "conflict") {
+      if (detachBoundary && this.#documentWorkflow.canProtectForDetach?.() === true) {
+        return {
+          state: "pending",
+          reason: "正在校验当前 HTML 的恢复副本。",
+        };
+      }
       return {
         state: "blocked",
         reason: "当前 HTML 与外部文件存在冲突，请先选择保留哪一份。",
       };
     }
     if (this.#documentSession.persistState === "failed") {
+      if (detachBoundary && this.#documentWorkflow.canProtectForDetach?.() === true) {
+        return {
+          state: "pending",
+          reason: "正在校验当前 HTML 的恢复副本。",
+        };
+      }
       return {
         state: "blocked",
         reason: this.#documentSession.persistError
@@ -2370,9 +2502,19 @@ export class ProjectWorkflow {
         return "deferred";
       }
       canvasFrozen = true;
+      const pendingWrite = this.#documentSession.pendingWrite;
+      const pendingWriteIsProtected = Boolean(
+        pendingWrite
+        && Number(pendingWrite.revision) === cutoff
+        && String(pendingWrite.html) === this.#documentSession.html
+        && documentHasProtectionEvidence(this.#documentWorkflow, {
+          context: this.#projectSession.context,
+          revision: cutoff,
+        })
+      );
       if (
         this.#documentSession.editRevision !== cutoff
-        || this.#documentSession.pendingWrite
+        || (pendingWrite && !pendingWriteIsProtected)
         || this.#documentSession.flushPromise
       ) {
         this.#canvasPort.unlock?.();
@@ -3765,7 +3907,8 @@ export class ProjectWorkflow {
     this.#documentWorkflow.resetForProjectTransition();
     this.#documentSession.publishAuthority({
       html: previous.document.html,
-      sourceSha256: previous.document.sourceSha256,
+      persistedSourceSha256: previous.document.persistedSourceSha256,
+      workingHtmlSha256: previous.document.workingHtmlSha256,
       editRevision: previous.document.editRevision,
       lastPersistedRevision: previous.document.lastPersistedRevision,
       persistState: previous.document.persistState,

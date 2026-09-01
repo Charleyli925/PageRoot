@@ -32,6 +32,11 @@ const channels = Object.freeze({
   cancelPreparedHtmlOpen: "html-projects:cancel-prepared-open",
   finalizePreparedHtmlOpen: "html-projects:finalize-prepared-open",
   rollbackPreparedHtmlOpen: "html-projects:rollback-prepared-open",
+  commitRecoveryJournal: "html-projects:commit-recovery-journal",
+  readRecoveryJournal: "html-projects:read-recovery-journal",
+  rebaseRecoveryJournal: "html-projects:rebase-recovery-journal",
+  removeRecoveryJournal: "html-projects:remove-recovery-journal",
+  listRecoveryJournals: "html-projects:list-recovery-journals",
 });
 const appChannels = Object.freeze({
   prepareClose: "html-app:prepare-close",
@@ -204,6 +209,25 @@ const projectsApi = Object.freeze({
     channels.rollbackPreparedHtmlOpen,
     { requestId },
   ),
+  commitRecoveryJournal: (payload) => invokeProject(
+    channels.commitRecoveryJournal,
+    payload,
+  ),
+  readRecoveryJournal: (payload) => invokeProject(
+    channels.readRecoveryJournal,
+    payload,
+  ),
+  rebaseRecoveryJournal: (payload) => invokeProject(
+    channels.rebaseRecoveryJournal,
+    payload,
+  ),
+  removeRecoveryJournal: (payload) => invokeProject(
+    channels.removeRecoveryJournal,
+    payload,
+  ),
+  listRecoveryJournals: (payload) => payload
+    ? invokeProject(channels.listRecoveryJournals, payload)
+    : invokeProject(channels.listRecoveryJournals),
   onSourceFileChanged: (listener) => {
     if (typeof listener !== "function") {
       throw new TypeError("onSourceFileChanged listener must be a function.");

@@ -39,6 +39,18 @@ export function normalizeProjectIpcError(error) {
     };
   }
 
+  if (
+    typeof error?.code === "string"
+    && error.code.startsWith("RECOVERY_JOURNAL_")
+  ) {
+    return {
+      code: error.code,
+      message: typeof error.message === "string" && error.message
+        ? error.message
+        : "恢复副本没有安全完成，请重试。",
+    };
+  }
+
   switch (error?.code) {
     case "ENOENT":
       return {
