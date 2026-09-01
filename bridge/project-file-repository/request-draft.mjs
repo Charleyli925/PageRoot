@@ -53,6 +53,9 @@ export const FROZEN_REQUEST_RULES = `# PageRoot HTML Candidate Rules
 - Modify authored source HTML, not the current Runtime DOM.
 - Do not serialize script-generated nodes, computed styles, transient UI state, animation frames or Canvas output back into source unless the task explicitly requires a source representation of that behavior.
 - When a task refers to runtime-generated content, change its authored host, configuration or script instead of treating the generated node as a persistent source element.
+- A comment on runtime-generated visible content is comment-only: the nearest privately proven authored source host in the comment's \`sourceAnchor\` is the only source identity and edit scope authority.
+- The comment's \`visualHint\` (kind, user-facing label, bounded visible-text summary, host-relative path and normalized box) explains which generated object the user saw. It is not a source identity, selector authority, or permission to edit, delete, move, style or save Runtime DOM.
+- When one source host renders multiple tables or charts, use the complete \`visualHint\` to distinguish the selected object, then modify the HTML, data or Script that generates it. Never save Runtime DOM, \`outerHTML\`, event objects or execution state.
 
 ## Scope and behavior
 

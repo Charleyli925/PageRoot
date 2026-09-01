@@ -103,6 +103,12 @@
         "target": {
           "$ref": "#/$defs/target"
         },
+        "sourceAnchor": {
+          "$ref": "#/$defs/target"
+        },
+        "visualHint": {
+          "$ref": "#/$defs/visualHint"
+        },
         "persistence": {
           "enum": [
             "request-only",
@@ -380,6 +386,75 @@
         },
         "sourceSha256": {
           "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "visualHint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "runtimeGenerated",
+        "kind",
+        "label"
+      ],
+      "properties": {
+        "runtimeGenerated": {
+          "const": true
+        },
+        "kind": {
+          "enum": [
+            "table",
+            "table-cell",
+            "chart",
+            "svg",
+            "canvas",
+            "runtime-region"
+          ]
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "renderedText": {
+          "type": "string",
+          "maxLength": 320
+        },
+        "relativePath": {
+          "type": "string",
+          "maxLength": 400
+        },
+        "relativeBox": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "x",
+            "y",
+            "width",
+            "height"
+          ],
+          "properties": {
+            "x": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "y": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "width": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "height": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            }
+          }
         }
       }
     },

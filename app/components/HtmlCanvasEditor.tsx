@@ -176,6 +176,7 @@ import {
   type CanvasTargetIdentityScope,
   type ResolvedCanvasTarget,
 } from "./html-canvas-pointer-capability";
+import { runtimeVisualTargetForHint } from "./html-canvas-runtime-target";
 import {
   clipCanvasTargetRectToViewport,
   createCanvasCapabilityHoverController,
@@ -212,9 +213,11 @@ import type {
   HtmlCanvasTargetResolution,
   NativeDeferredCommandDiscardReason,
   NativeDeferredCommandOptions,
+  HtmlCanvasRuntimeVisualHint,
 } from "./HtmlCanvasEditor.types";
 export type {
   HtmlCanvasCommentedTarget,
+  HtmlCanvasCommentLayoutTarget,
   HtmlCanvasCommentLayoutState,
   HtmlCanvasCommitResult,
   HtmlCanvasEditRuntimeLoadOutcome,
@@ -228,6 +231,8 @@ export type {
   HtmlCanvasSourceTransaction,
   HtmlCanvasTargetResolution,
   HtmlCanvasTextLocator,
+  HtmlCanvasRuntimeVisualHint,
+  HtmlCanvasRuntimeVisualHintKind,
   NativeDeferredCommandAuthority,
   NativeDeferredCommandDiscardReason,
   NativeDeferredCommandOptions,
@@ -1622,6 +1627,8 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   const selectedElementRef = useRef<HTMLElement | null>(null);
   const runtimeGeneratedSelectionRef = useRef(false);
   const selectedSourceSelectionRef = useRef<HtmlCanvasSelection | null>(null);
+  const selectedCommentAnchorRef = useRef<HtmlCanvasSelection | null>(null);
+  const selectedVisualHintRef = useRef<HtmlCanvasRuntimeVisualHint | null>(null);
   const activeTextRangeRef = useRef<ActiveTextRange | null>(null);
   const activeNativeEditRef = useRef<ActiveNativeEdit | null>(null);
   const nativeCommandQueueRef = useRef(new NativeDeferredCommandQueue());
@@ -2064,6 +2071,8 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     selectedElementRef.current?.removeAttribute("data-html-canvas-selected");
     selectedElementRef.current?.removeAttribute(GLOBAL_SELECTION_ATTRIBUTE);
     selectedElementRef.current = null;
+    selectedCommentAnchorRef.current = null;
+    selectedVisualHintRef.current = null;
     resizeObserverRef.current?.disconnect();
     resizeObserverRef.current = null;
     const reuseCandidate = Boolean(options.reuseDocument)
@@ -3090,6 +3099,10 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       ));
       return;
     }
+    if (runtimeGeneratedSelectionRef.current) {
+      setMoveAvailability({ up: false, down: false });
+      return;
+    }
     const parent = element?.parentElement;
     const isSafeParent = parent && !["HTML", "HEAD"].includes(parent.tagName);
     const isSafeElement = element && !["BODY", "HTML"].includes(element.tagName);
@@ -3131,6 +3144,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     const element = canvasVisualTargetElement(
       selectedElementRef.current,
       sourceIndexRef.current,
+      { runtimeGenerated: runtimeGeneratedSelectionRef.current },
     );
     const sourceSha256 = sourceIndexRef.current?.sourceSha256 ?? "";
     const viewContextGeneration =
@@ -3212,6 +3226,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       sourceIndex: sourceIndexRef.current,
       scrollTop,
       commentTabAssociations,
+      isProvenSourceElement: currentRuntimeSourceProof(),
     });
     const commentLayoutsByTargetId = new Map(
       commentLayouts.map((layout) => [layout.targetId, layout]),
@@ -3285,8 +3300,9 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       frameOffsetTop,
       containerWidth: containerRect.width,
       containerHeight: containerRect.height,
+      isProvenSourceElement: currentRuntimeSourceProof(),
     }));
-  }, []);
+  }, [currentRuntimeSourceProof]);
 
   const observeSelectedElement = useCallback(
     (element: HTMLElement, runtimeGenerated = false) => {
@@ -4681,6 +4697,8 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     selectedElementRef.current?.removeAttribute(GLOBAL_SELECTION_ATTRIBUTE);
     selectedElementRef.current = null;
     selectedSourceSelectionRef.current = null;
+    selectedCommentAnchorRef.current = null;
+    selectedVisualHintRef.current = null;
     activeTextRangeRef.current = null;
     resizeObserverRef.current?.disconnect();
     setSelection(null);
@@ -4736,6 +4754,8 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         fromQueuedCommand?: boolean;
         runtimeGenerated?: boolean;
         selectionOverride?: HtmlCanvasSelection;
+        commentAnchor?: HtmlCanvasSelection | null;
+        visualHint?: HtmlCanvasRuntimeVisualHint | null;
       } = {},
     ): HtmlCanvasSelection => {
       pendingFrameRestoreEpochRef.current += 1;
@@ -4796,6 +4816,11 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
             undefined,
             levelOverride,
           ));
+      const nextSelectionWithContext = {
+        ...nextSelection,
+        ...(options.commentAnchor ? { commentAnchor: options.commentAnchor } : {}),
+        ...(options.visualHint ? { visualHint: options.visualHint } : {}),
+      };
       selectedElementRef.current = element;
       setSpacingMenuOpen(false);
       setSelectedInsertionId(null);
@@ -4807,12 +4832,20 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       element.setAttribute("data-html-canvas-selected", nextSelection.level);
       const isGlobalPage = isPageRootElement(element) && nextSelection.level === "module";
       element.toggleAttribute(GLOBAL_SELECTION_ATTRIBUTE, isGlobalPage);
-      selectedSourceSelectionRef.current = nextSelection;
-      setSelection(nextSelection);
+      selectedSourceSelectionRef.current = nextSelectionWithContext;
+      selectedCommentAnchorRef.current = options.commentAnchor
+        ?? (!options.runtimeGenerated
+          && (nextSelection.resolution === "exact" || nextSelection.resolution === "rebound")
+          ? nextSelection
+          : null);
+      selectedVisualHintRef.current = options.visualHint
+        ?? nextSelection.visualHint
+        ?? null;
+      setSelection(nextSelectionWithContext);
       runtimeGeneratedSelectionRef.current = options.runtimeGenerated === true;
       setRuntimeGeneratedSelection(options.runtimeGenerated === true);
       setToolbarVisible(options.showToolbar ?? true);
-      onSelectRef.current?.(nextSelection);
+      onSelectRef.current?.(nextSelectionWithContext);
       updateSelectedStyle();
       updateMoveAvailability();
       observeSelectedElement(element, options.runtimeGenerated === true);
@@ -4827,8 +4860,8 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           behavior: "auto",
         });
       }
-      requestAnimationFrame(() => updateOverlayPosition());
-      return nextSelection;
+      requestAnimationFrame(updateOverlayPosition);
+      return nextSelectionWithContext;
     },
     [finishNativeEditing, observeSelectedElement, updateMoveAvailability, updateOverlayPosition, updateSelectedStyle],
   );
@@ -4841,19 +4874,67 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       fromQueuedCommand?: boolean;
     } = {},
   ): HtmlCanvasSelection => (
-    selectElement(resolvedTarget.targetElement, undefined, {
+    selectElement(resolvedTarget.operationTarget, undefined, {
       ...options,
       selectionOverride: resolvedTarget.selection,
       runtimeGenerated: resolvedTarget.runtimeGenerated,
+      commentAnchor: resolvedTarget.commentAnchorSelection,
+      visualHint: resolvedTarget.selection.visualHint ?? null,
     })
   ), [selectElement]);
 
   const requestCommentForTarget = useCallback((target: HtmlCanvasSelection): boolean => {
-    if (target.resolution !== "exact" || !isValidPagerootElementId(target.elementId)) {
+    const commentAnchor = target.commentAnchor
+      ?? selectedCommentAnchorRef.current
+      ?? (!runtimeGeneratedSelectionRef.current ? target : null);
+    const validPageAnchor = Boolean(
+      commentAnchor
+      && commentAnchor.level === "module"
+      && commentAnchor.selector.trim().toLowerCase() === "body",
+    );
+    const validStableAnchor = Boolean(
+      commentAnchor
+      && commentAnchor.resolution === "exact"
+      && isValidPagerootElementId(commentAnchor.elementId),
+    );
+    const sourceIndex = sourceIndexRef.current;
+    let resolvedAnchorElement: HTMLElement | null = null;
+    if (commentAnchor && sourceIndex) {
+      try {
+        const resolved = resolveTargetRef(
+          sourceIndex,
+          sourceTargetRefForSelection(commentAnchor),
+        );
+        const sourceNodeId = resolved.target?.type === "element"
+          ? resolved.target.nodeId
+          : commentAnchor.nodeId;
+        if (sourceNodeId) {
+          const escapedSourceNodeId = String(sourceNodeId)
+            .replace(/\\/g, "\\\\")
+            .replace(/"/g, '\\"');
+          resolvedAnchorElement = iframeRef.current?.contentDocument
+            ?.querySelector<HTMLElement>(
+              `[${SOURCE_NODE_ATTRIBUTE}="${escapedSourceNodeId}"]`,
+            ) ?? null;
+        }
+      } catch {
+        resolvedAnchorElement = null;
+      }
+    }
+    const runtimeProof = currentRuntimeSourceProof();
+    const authorityVerified = !runtimeFrameRef.current
+      ? Boolean(resolvedAnchorElement || validPageAnchor)
+      : Boolean(resolvedAnchorElement && runtimeProof?.(resolvedAnchorElement));
+    if (
+      !commentAnchor
+      || commentAnchor.resolution !== "exact"
+      || (!validPageAnchor && !validStableAnchor)
+      || !authorityVerified
+    ) {
       setEditFeedback({
         code: "canvas_c13_comment_target_not_exact",
-        title: "请选择可定位的源码元素",
-        message: "这部分内容由页面运行时生成，无法对应到源码。请重新选择可定位的折线、文字、数据点或其他源码元素。",
+        title: "暂时无法建立评论位置",
+        message: "当前内容暂时无法建立安全的评论位置，请稍后重试。",
         tone: "warning",
         sticky: false,
         recovery: "none",
@@ -4863,14 +4944,14 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     const activeRange = activeTextRangeRef.current;
     const sameElement = Boolean(
       activeRange
-      && (
-        (
+        && (
+          (
           activeRange.target.elementId
-          && activeRange.target.elementId === target.elementId
+          && activeRange.target.elementId === commentAnchor.elementId
         )
         || (
           activeRange.target.nodeId
-          && activeRange.target.nodeId === target.nodeId
+          && activeRange.target.nodeId === commentAnchor.nodeId
         )
       )
     );
@@ -4879,10 +4960,16 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       : null;
     onRequestCommentRef.current?.({
       ...target,
+      commentAnchor,
+      ...(target.visualHint || selectedVisualHintRef.current
+        ? {
+            visualHint: target.visualHint || selectedVisualHintRef.current || undefined,
+          }
+        : {}),
       ...(textLocator ? { textLocator } : {}),
     });
     return true;
-  }, []);
+  }, [currentRuntimeSourceProof]);
 
   const startEditing = useCallback((
     caretPoint?: TextCaretPoint,
@@ -5626,6 +5713,10 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       selectedElementRef.current?.removeAttribute("data-html-canvas-selected");
       selectedElementRef.current = null;
       selectedSourceSelectionRef.current = null;
+      selectedCommentAnchorRef.current = null;
+      selectedVisualHintRef.current = null;
+      runtimeGeneratedSelectionRef.current = false;
+      setRuntimeGeneratedSelection(false);
       activeTextRangeRef.current = null;
       resizeObserverRef.current?.disconnect();
       setOverlayPosition(null);
@@ -5645,26 +5736,31 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   const selectTarget = useCallback(
     (
       target: HtmlCanvasSelection,
-      options: { reveal?: boolean; showToolbar?: boolean } = {},
+      options: {
+        reveal?: boolean;
+        showToolbar?: boolean;
+        visualHint?: HtmlCanvasRuntimeVisualHint | null;
+      } = {},
     ): HtmlCanvasSelection | null => {
       pendingFrameRestoreEpochRef.current += 1;
       if (lockedRef.current) return null;
       const documentNode = iframeRef.current?.contentDocument;
       const sourceIndex = sourceIndexRef.current;
       if (!documentNode || !sourceIndex) return null;
+      const sourceTarget = target.commentAnchor ?? target;
       activeTextRangeRef.current = null;
       setHasTextRange(false);
       setToolbarVisible(Boolean(options.showToolbar));
       try {
         const resolution = resolveTargetRef(
           sourceIndex,
-          sourceTargetRefForSelection(target),
+          sourceTargetRefForSelection(sourceTarget),
         );
-        if (target.level === "insertion") {
+        if (sourceTarget.level === "insertion") {
           selectedSourceSelectionRef.current = null;
           if (!resolution.target || resolution.target.type !== "insertion-point") {
             const unresolved = {
-              ...target,
+              ...sourceTarget,
               resolution: resolution.resolution as HtmlCanvasTargetResolution,
             };
             setSelection(unresolved);
@@ -5677,20 +5773,20 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
             ),
           );
           if (!insertionPoint) {
-            return { ...target, resolution: "orphaned" };
+            return { ...sourceTarget, resolution: "orphaned" };
           }
           return selectInsertionPoint({
             ...insertionPoint,
             selection: {
               ...insertionPoint.selection,
-              id: target.id,
+              id: sourceTarget.id,
               resolution: resolution.resolution as HtmlCanvasTargetResolution,
             },
           });
         }
         if (!resolution.target || resolution.target.type !== "element") {
           const unresolved = {
-            ...target,
+            ...sourceTarget,
             resolution: resolution.resolution as HtmlCanvasTargetResolution,
           };
           selectedSourceSelectionRef.current = unresolved;
@@ -5704,7 +5800,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           `[${SOURCE_NODE_ATTRIBUTE}="${escapedNodeId}"]`,
         );
         if (!element) return {
-          ...target,
+          ...sourceTarget,
           resolution: "orphaned",
         };
         if (
@@ -5716,20 +5812,88 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         const selectedValue = selectionForElement(
           element,
           sourceIndex,
-          target,
+          sourceTarget,
           resolution.resolution as HtmlCanvasTargetResolution,
         );
+        const visualHint = options.visualHint ?? target.visualHint ?? null;
+        const runtimeFrame = runtimeFrameRef.current;
+        const runtimeIsCurrent = Boolean(
+          runtimeFrame?.settled
+          && runtimeFrame.elementGeneration === frameLoadGenerationRef.current,
+        );
+        const runtimeVisualTarget = runtimeIsCurrent && visualHint
+          ? runtimeVisualTargetForHint(element, visualHint, {
+              isProvenSourceElement: currentRuntimeSourceProof(),
+            })
+          : null;
+        if (runtimeVisualTarget && runtimeVisualTarget !== element && visualHint) {
+          const runtimeSelection = {
+            ...selectionForElement(
+              runtimeVisualTarget,
+              null,
+              undefined,
+              "ambiguous",
+            ),
+            label: visualHint.label,
+            commentAnchor: selectedValue,
+            visualHint,
+          };
+          if (options.reveal !== false) {
+            element.scrollIntoView({
+              behavior: "smooth",
+              block: "center",
+              inline: "nearest",
+            });
+          }
+          return selectElement(runtimeVisualTarget, undefined, {
+            showToolbar: options.showToolbar,
+            runtimeGenerated: true,
+            selectionOverride: runtimeSelection,
+            commentAnchor: selectedValue,
+            visualHint,
+          });
+        }
+        if (visualHint) {
+          // A failed runtime match may only fall back to the proven source
+          // host's geometry. Keep that selection comment-only so the visual
+          // fallback can never grant the host's direct source permissions.
+          const runtimeFallbackSelection = {
+            ...selectionForElement(
+              element,
+              null,
+              undefined,
+              "ambiguous",
+            ),
+            label: visualHint.label,
+            commentAnchor: selectedValue,
+            visualHint,
+          };
+          return selectElement(element, undefined, {
+            showToolbar: options.showToolbar,
+            runtimeGenerated: true,
+            selectionOverride: runtimeFallbackSelection,
+            commentAnchor: selectedValue,
+            visualHint,
+          });
+        }
+        const sourceSelection = visualHint
+          ? { ...selectedValue, visualHint }
+          : selectedValue;
         selectedElementRef.current?.removeAttribute("data-html-canvas-selected");
         selectedElementRef.current?.removeAttribute(GLOBAL_SELECTION_ATTRIBUTE);
         selectedElementRef.current = element;
-        selectedSourceSelectionRef.current = selectedValue;
-        element.setAttribute("data-html-canvas-selected", selectedValue.level);
-        const isGlobalPage = isPageRootElement(element) && selectedValue.level === "module";
+        selectedSourceSelectionRef.current = sourceSelection;
+        selectedCommentAnchorRef.current = selectedValue;
+        selectedVisualHintRef.current = visualHint;
+        element.setAttribute("data-html-canvas-selected", sourceSelection.level);
+        const isGlobalPage = isPageRootElement(element) && sourceSelection.level === "module";
         element.toggleAttribute(GLOBAL_SELECTION_ATTRIBUTE, isGlobalPage);
         setSpacingMenuOpen(false);
-        setSelection(selectedValue);
+        runtimeGeneratedSelectionRef.current = false;
+        setRuntimeGeneratedSelection(false);
+        setSelection(sourceSelection);
         setSelectedInsertionId(null);
-        onSelectRef.current?.(selectedValue);
+        onSelectRef.current?.(sourceSelection);
         updateSelectedStyle();
         updateMoveAvailability();
         observeSelectedElement(element, false);
@@ -5748,19 +5912,21 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
             element.scrollIntoView({ behavior: "smooth", block: "center", inline: "nearest" });
           }
         }
-        requestAnimationFrame(() => updateOverlayPosition());
-        return selectedValue;
+        requestAnimationFrame(updateOverlayPosition);
+        return sourceSelection;
       } catch (cause) {
         reportBlockedEdit(cause);
         return {
-          ...target,
+          ...sourceTarget,
           resolution: "orphaned",
         };
       }
     },
     [
       observeSelectedElement,
+      currentRuntimeSourceProof,
       reportBlockedEdit,
+      selectElement,
       selectInsertionPoint,
       updateMoveAvailability,
       updateOverlayPosition,
@@ -6251,6 +6417,8 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     selectedElementRef.current?.removeAttribute("data-html-canvas-selected");
     selectedElementRef.current = null;
     selectedSourceSelectionRef.current = null;
+    selectedCommentAnchorRef.current = null;
+    selectedVisualHintRef.current = null;
     resizeObserverRef.current?.disconnect();
     setSelection(null);
     setSelectedInsertionId(null);
@@ -8574,13 +8742,12 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       || !resolvedTarget.visualElement.isConnected
       || (expectedSourceHash && expectedSourceHash !== currentSourceHash)
     ) return;
-    // The caption has no current pointer hit. Rebuild selection from the live
-    // canonical target instead of reusing a possibly stale selection override.
-    selectElement(resolvedTarget.targetElement, undefined, {
+    // The caption has no current pointer hit. Reuse the resolved operation,
+    // source comment anchor and visual hint as one short-lived selection.
+    selectResolvedTarget(resolvedTarget, {
       showToolbar: true,
-      runtimeGenerated: resolvedTarget.runtimeGenerated,
     });
-  }, [hoverChrome.capability, interactionLocked, selectElement]);
+  }, [hoverChrome.capability, interactionLocked, selectResolvedTarget]);
   const dismissEditFeedback = useCallback(() => {
     setEditFeedback(null);
   }, []);

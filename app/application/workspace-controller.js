@@ -79,6 +79,17 @@ function unknown(operationId, reason) {
   });
 }
 
+function commentSourceTarget(comment) {
+  return comment?.sourceAnchor || comment?.target || null;
+}
+
+function commentTargetForDisplay(sourceTarget, comment) {
+  const visualHint = comment?.visualHint || comment?.target?.visualHint;
+  return visualHint
+    ? { ...sourceTarget, label: visualHint.label, visualHint }
+    : sourceTarget;
+}
+
 function stale(identity) {
   return Object.freeze({ status: "stale", identity });
 }
@@ -2539,10 +2550,11 @@ export class WorkspaceController {
         const reboundTargets = this.#codecs.rebindTargetsPreservingGlobal(
           canonicalSource,
           [
-            ...this.#commentSession.comments.map((comment) => comment.target),
+            ...this.#commentSession.comments.map(commentSourceTarget),
             ...(
               this.#commentSession.composerTarget
-                ? [this.#commentSession.composerTarget]
+                ? [this.#commentSession.composerTarget.commentAnchor
+                  || this.#commentSession.composerTarget]
                 : []
             ),
           ],
@@ -2553,13 +2565,23 @@ export class WorkspaceController {
         this.#commentSession.setComments(
           this.#commentSession.comments.map((comment) => ({
             ...comment,
-            target: reboundById.get(comment.target.id) || comment.target,
+            target: commentTargetForDisplay(
+              reboundById.get(commentSourceTarget(comment)?.id)
+                || commentSourceTarget(comment),
+              comment,
+            ),
+            sourceAnchor: reboundById.get(commentSourceTarget(comment)?.id)
+              || commentSourceTarget(comment),
           })),
         );
         if (this.#commentSession.composerTarget) {
+          const composerTarget = this.#commentSession.composerTarget;
+          const sourceTarget = composerTarget.commentAnchor || composerTarget;
           this.#commentSession.setComposerTarget(
-            reboundById.get(this.#commentSession.composerTarget.id)
-              || this.#commentSession.composerTarget,
+            commentTargetForDisplay(
+              reboundById.get(sourceTarget.id) || sourceTarget,
+              composerTarget,
+            ),
           );
         }
       }

@@ -24,7 +24,10 @@ import {
   virtualizedCommentIds,
 } from "../lib/comment-virtualization.js";
 import {
+  canSaveCommentTarget,
+  commentSourceAnchor,
   commentEditSessionHasChanges,
+  commentVisualHintForSelection,
 } from "./comment-model";
 import { relinkNoticeCopy } from "./comment-relink-model.js";
 import {
@@ -80,7 +83,32 @@ function draftScope(target: HtmlCanvasSelection | null): string {
   if (target.tagName === "body") return "全局评论";
   if (target.level === "module") return "整个模块";
   if (target.level === "insertion") return "添加位置";
+  if (target.visualHint?.runtimeGenerated) {
+    switch (target.visualHint.kind) {
+      case "table":
+      case "table-cell":
+        return "表格";
+      case "chart":
+        return "图表";
+      case "svg":
+      case "canvas":
+        return "图形";
+      default:
+        return "页面内容";
+    }
+  }
   return "页面内容";
+}
+
+function commentLayoutTarget(comment: CommentItem): HtmlCanvasSelection {
+  const sourceTarget = commentSourceAnchor(comment) || comment.target;
+  const visualHint = comment.visualHint
+    || commentVisualHintForSelection(comment.target);
+  return visualHint ? { ...sourceTarget, visualHint } : sourceTarget;
+}
+
+function sourceTargetForSelection(target: HtmlCanvasSelection): HtmlCanvasSelection {
+  return target.commentAnchor ?? target;
 }
 
 export const CommentRailContainer = memo(function CommentRailContainer({
@@ -161,10 +189,12 @@ export const CommentRailContainer = memo(function CommentRailContainer({
     && (draft.trim() || draftAttachments.length > 0),
   );
   const expectedCommentLayoutTargetIds = useMemo(() => [...new Set([
-    ...context.visibleCommentItems.map((comment) => comment.target.id),
+    ...context.visibleCommentItems.map((comment) => (
+      (commentSourceAnchor(comment) || comment.target).id
+    )),
     ...(
       (hasCommentDraft || composerOpen) && draftTarget
-        ? [draftTarget.id]
+        ? [sourceTargetForSelection(draftTarget).id]
         : []
     ),
   ])].sort(), [
@@ -187,7 +217,10 @@ export const CommentRailContainer = memo(function CommentRailContainer({
     && commentLayoutAuthority.targetIdsKey === expectedCommentLayoutTargetIdsKey
     && expectedCommentLayoutTargetIds.every((targetId) => Boolean(targetLayouts[targetId]))
   );
-  const draftTargetLayout = draftTarget ? targetLayouts[draftTarget.id] : undefined;
+  const draftSourceTarget = draftTarget ? sourceTargetForSelection(draftTarget) : null;
+  const draftTargetLayout = draftSourceTarget
+    ? targetLayouts[draftSourceTarget.id]
+    : undefined;
   const draftTargetInOtherTab = Boolean(
     draftTarget?.tagName !== "body"
     && draftTargetLayout?.status === "hidden"
@@ -207,9 +240,10 @@ export const CommentRailContainer = memo(function CommentRailContainer({
   ), [targetLayouts]);
   const otherTabCommentItems = useMemo(() => context.visibleCommentItems.filter(
     (comment) => {
-      const layout = targetLayouts[comment.target.id];
+      const sourceTarget = commentSourceAnchor(comment) || comment.target;
+      const layout = targetLayouts[sourceTarget.id];
       return Boolean(
-        comment.target.tagName !== "body"
+        sourceTarget.tagName !== "body"
         && layout?.status === "hidden"
         && layout.tabGroupKey
       );
@@ -233,14 +267,15 @@ export const CommentRailContainer = memo(function CommentRailContainer({
       else grouped.set(key, { key, label, entries: [entry] });
     };
     for (const comment of otherTabCommentItems) {
-      const layout = targetLayouts[comment.target.id];
+      const target = commentLayoutTarget(comment);
+      const layout = targetLayouts[target.id];
       appendEntry(
-        layout?.tabGroupKey || comment.target.id,
+        layout?.tabGroupKey || target.id,
         layout?.tabGroupLabel || "其他标签页",
         {
           kind: "saved",
           key: comment.commentId,
-          target: comment.target,
+          target,
           comment,
           previewText: comment.text.trim()
             || `已添加 ${(comment.attachments ?? []).length} 个附件`,
@@ -311,23 +346,29 @@ export const CommentRailContainer = memo(function CommentRailContainer({
   const commentRailMinimumTop = commentRailStatusTop
     + (relinkRailCardVisible ? 96 : 0);
   const isLocatable = useCallback((target: HtmlCanvasSelection): boolean => {
-    const layout = targetLayouts[target.id];
-    const resolution = layout?.resolution ?? target.resolution;
+    const sourceTarget = sourceTargetForSelection(target);
+    const layout = targetLayouts[sourceTarget.id];
+    const resolution = layout?.resolution ?? sourceTarget.resolution;
     return layout?.status !== "missing"
       && (resolution === "exact" || resolution === "rebound");
   }, [targetLayouts]);
   const draftTargetCanSave = Boolean(
     draftTarget
-    && targetLayouts[draftTarget.id]?.status !== "missing"
-    && (targetLayouts[draftTarget.id]?.resolution ?? draftTarget.resolution) === "exact"
+    && canSaveCommentTarget(draftTarget)
+    && draftTargetLayout?.status !== "missing"
+    && (draftTargetLayout?.resolution ?? draftTarget.commentAnchor?.resolution ?? draftTarget.resolution) === "exact"
   );
   const commentRailTargetTops = useMemo(() => {
     if (!commentLayoutReady) return {};
     const targets = [
-      ...railCommentItems.map((comment) => comment.target),
+      ...railCommentItems.map(commentLayoutTarget),
       ...(
         (composerInCurrentTab || hasCollapsedCommentDraft) && draftTarget
-          ? [draftTarget]
+          ? [
+              draftTarget.visualHint
+                ? { ...sourceTargetForSelection(draftTarget), visualHint: draftTarget.visualHint }
+                : sourceTargetForSelection(draftTarget),
+            ]
           : []
       ),
     ];
@@ -365,14 +406,15 @@ export const CommentRailContainer = memo(function CommentRailContainer({
     if (!commentLayoutReady) return [];
     return railCommentItems
       .flatMap((comment, index) => {
-        const targetTop = comment.target.tagName === "body"
+        const target = commentLayoutTarget(comment);
+        const targetTop = target.tagName === "body"
           ? commentRailMinimumTop
-          : commentRailTargetTops[comment.target.id];
+          : commentRailTargetTops[target.id];
         if (!Number.isFinite(targetTop)) return [];
         return [{
           comment,
           index,
-          scopeRank: comment.target.tagName === "body" ? 0 : 1,
+          scopeRank: target.tagName === "body" ? 0 : 1,
           targetTop: targetTop as number,
         }];
       })
@@ -386,8 +428,9 @@ export const CommentRailContainer = memo(function CommentRailContainer({
   }, [commentLayoutReady, commentRailMinimumTop, commentRailTargetTops, railCommentItems]);
   const commentMeasurementKeys = useMemo(() => Object.fromEntries(
     sortedVisibleCommentItems.map((comment) => {
-      const layout = targetLayouts[comment.target.id];
-      const resolution = layout?.resolution ?? comment.target.resolution;
+      const target = commentLayoutTarget(comment);
+      const layout = targetLayouts[target.id];
+      const resolution = layout?.resolution ?? target.resolution;
       return [comment.commentId, commentMeasurementKey(comment.commentId, {
         resolution,
         locatable: layout?.status !== "missing"
@@ -450,9 +493,9 @@ export const CommentRailContainer = memo(function CommentRailContainer({
       const measurementKey = commentMeasurementKeys[comment.commentId];
       return {
         key: comment.commentId,
-        targetTop: comment.target.tagName === "body"
+        targetTop: commentLayoutTarget(comment).tagName === "body"
           ? commentRailMinimumTop
-          : commentRailTargetTops[comment.target.id],
+          : commentRailTargetTops[commentLayoutTarget(comment).id],
         height: commentCardHeights[measurementKey]
           || 104
             + textLines * 19
@@ -462,13 +505,13 @@ export const CommentRailContainer = memo(function CommentRailContainer({
             + (editingCommentId === comment.commentId ? 92 : 0)
             + (pendingDeleteCommentId === comment.commentId ? 46 : 0),
         order: index + 1,
-        scopeRank: comment.target.tagName === "body" ? 0 : 1,
+        scopeRank: commentLayoutTarget(comment).tagName === "body" ? 0 : 1,
       };
     });
-    const draftTargetTop = draftTarget?.tagName === "body"
+    const draftTargetTop = draftSourceTarget?.tagName === "body"
       ? commentRailMinimumTop
-      : draftTarget
-        ? commentRailTargetTops[draftTarget.id]
+      : draftSourceTarget
+        ? commentRailTargetTops[draftSourceTarget.id]
         : undefined;
     if (composerInCurrentTab && draftTarget && Number.isFinite(draftTargetTop)) {
       items.push({
@@ -479,7 +522,7 @@ export const CommentRailContainer = memo(function CommentRailContainer({
             + (!draftTargetCanSave ? 70 : 0)
             + (pendingDeleteCommentId === "__composer" ? 46 : 0),
         order: Number.MAX_SAFE_INTEGER,
-        scopeRank: draftTarget.tagName === "body" ? 0 : 1,
+        scopeRank: draftSourceTarget?.tagName === "body" ? 0 : 1,
       });
     }
     if (hasCollapsedCommentDraft && draftTarget && Number.isFinite(draftTargetTop)) {
@@ -488,7 +531,7 @@ export const CommentRailContainer = memo(function CommentRailContainer({
         targetTop: draftTargetTop as number,
         height: commentCardHeights[draftRecoveryMeasurementKey] || 142,
         order: Number.MAX_SAFE_INTEGER,
-        scopeRank: draftTarget.tagName === "body" ? 0 : 1,
+        scopeRank: draftSourceTarget?.tagName === "body" ? 0 : 1,
       });
     }
     const layout = layoutCommentRailItems({ minimumTop: commentRailMinimumTop, gap: 20, items });
@@ -504,6 +547,7 @@ export const CommentRailContainer = memo(function CommentRailContainer({
     commentRailTargetTops,
     composerInCurrentTab,
     composerMeasurementKey,
+    draftSourceTarget,
     pendingDeleteCommentId,
     context.viewMode,
     draftRecoveryMeasurementKey,
@@ -677,27 +721,46 @@ export const CommentRailContainer = memo(function CommentRailContainer({
       || !draftTarget
       || !Number.isFinite(commentRailLayout.composerTop)
     ) return;
-    const targetTop = draftTarget.tagName === "body"
+    const targetTop = draftSourceTarget?.tagName === "body"
       ? commentRailMinimumTop
-      : commentRailTargetTops[draftTarget.id];
+      : draftSourceTarget
+        ? commentRailTargetTops[draftSourceTarget.id]
+          ?? (draftTargetLayout?.status === "visible"
+            && Number.isFinite(draftTargetLayout.top)
+            ? draftTargetLayout.top
+            : undefined)
+        : undefined;
     if (!Number.isFinite(targetTop)) return;
     const nextRailOffset = computeAlignedRailOffset({
       targetTop: Math.max(commentRailMinimumTop, targetTop as number),
       cardTop: commentRailLayout.composerTop as number,
       minimumTop: commentRailMinimumTop,
     });
-    if (Math.abs(commentRailOffsetRef.current - nextRailOffset) > 0.01) {
-      commentRailOffsetRef.current = nextRailOffset;
-      setCommentRailOffset(nextRailOffset);
+    const composerHeight = commentRailLayout.heights.__composer || 276;
+    const composerBottomOffset = canvasDocumentHeight - 14
+      - (commentRailLayout.composerTop as number)
+      - composerHeight;
+    const boundedRailOffset = Math.max(
+      Math.min(nextRailOffset, composerBottomOffset),
+      commentRailMinimumOffset,
+    );
+    if (Math.abs(commentRailOffsetRef.current - boundedRailOffset) > 0.01) {
+      commentRailOffsetRef.current = boundedRailOffset;
+      setCommentRailOffset(boundedRailOffset);
     }
     if (!commentRailFollowsFocus) setCommentRailFollowsFocus(true);
   }, [
+    canvasDocumentHeight,
     commentLayoutReady,
     commentRailFollowsFocus,
     commentRailLayout.composerTop,
+    commentRailLayout.heights,
     commentRailMinimumTop,
+    commentRailMinimumOffset,
     commentRailTargetTops,
     composerInCurrentTab,
+    draftSourceTarget,
+    draftTargetLayout,
     draftTarget,
   ]);
 
@@ -744,10 +807,20 @@ export const CommentRailContainer = memo(function CommentRailContainer({
   }, [canvasSnapshot.focusedCommentId, context.canvasMode, composerOpen, editingCommentId]);
 
   useEffect(() => {
+    if (
+      context.canvasMode === "edit"
+      && (canvasSnapshot.focusedCommentId || composerOpen || editingCommentId)
+    ) return;
     commentRailOffsetRef.current = 0;
     setCommentRailFollowsFocus(false);
     setCommentRailOffset(0);
-  }, [canvasSnapshot.railResetRevision]);
+  }, [
+    canvasSnapshot.focusedCommentId,
+    canvasSnapshot.railResetRevision,
+    composerOpen,
+    context.canvasMode,
+    editingCommentId,
+  ]);
 
   useEffect(() => {
     const request = canvasSnapshot.revealRequest;
@@ -768,9 +841,14 @@ export const CommentRailContainer = memo(function CommentRailContainer({
         }
         const item = [...rail.querySelectorAll<HTMLElement>("[data-comment-measure]")]
           .find((node) => node.dataset.commentMeasure === request.itemKey);
-        const targetTop = request.target.tagName === "body"
+        const sourceTarget = request.target.commentAnchor ?? request.target;
+        const targetTop = sourceTarget.tagName === "body"
           ? commentRailMinimumTop
-          : commentTargetTops[request.target.id];
+          : commentTargetTops[sourceTarget.id]
+            ?? (targetLayouts[sourceTarget.id]?.status === "visible"
+              && Number.isFinite(targetLayouts[sourceTarget.id]?.top)
+              ? targetLayouts[sourceTarget.id]?.top
+              : undefined);
         const cardTop = request.itemKey === "__composer"
           ? commentRailLayout.composerTop
           : item?.offsetTop;
@@ -781,9 +859,22 @@ export const CommentRailContainer = memo(function CommentRailContainer({
           cardTop: cardTop as number,
           minimumTop: commentRailMinimumTop,
         });
-        commentRailOffsetRef.current = nextRailOffset;
+        const composerHeight = commentRailLayout.heights.__composer || 276;
+        const composerBottomOffset = request.itemKey === "__composer"
+          && Number.isFinite(commentRailLayout.composerTop)
+          ? canvasDocumentHeight - 14
+            - (commentRailLayout.composerTop as number)
+            - composerHeight
+          : 0;
+        const boundedRailOffset = Math.max(
+          request.itemKey === "__composer"
+            ? Math.min(nextRailOffset, composerBottomOffset)
+            : nextRailOffset,
+          commentRailMinimumOffset,
+        );
+        commentRailOffsetRef.current = boundedRailOffset;
         setCommentRailFollowsFocus(true);
-        setCommentRailOffset(nextRailOffset);
+        setCommentRailOffset(boundedRailOffset);
         const desiredTop = Math.max(0, safeTargetTop - commentRailMinimumTop - 10);
         const maxTop = Math.max(0, stage.scrollHeight - stage.clientHeight);
         const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -803,9 +894,13 @@ export const CommentRailContainer = memo(function CommentRailContainer({
     canvasSnapshot.revealRequest,
     commentLayoutReady,
     commentRailLayout.composerTop,
+    commentRailLayout.heights,
+    canvasDocumentHeight,
+    commentRailMinimumOffset,
     commentRailMinimumTop,
     commentTargetTops,
     context.reviewStageRef,
+    targetLayouts,
     renderedVisibleCommentItems,
   ]);
 

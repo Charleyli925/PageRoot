@@ -15,7 +15,11 @@ import { TrashIcon } from "@phosphor-icons/react/dist/csr/Trash";
 import { XIcon } from "@phosphor-icons/react/dist/csr/X";
 
 import { shouldSubmitCommentOnEnter } from "../lib/comment-rail-layout.js";
-import { insertionLabel } from "./comment-model";
+import {
+  commentSourceAnchor,
+  commentVisualHintForSelection,
+  insertionLabel,
+} from "./comment-model";
 import {
   composerViewFields,
   type CommentRailActions,
@@ -596,6 +600,12 @@ export const CommentRailView = memo(function CommentRailView({
               const index = sortedVisibleCommentItems.findIndex(
                 (item) => item.commentId === comment.commentId,
               );
+              const sourceTarget = commentSourceAnchor(comment) || comment.target;
+              const visualHint = comment.visualHint
+                || commentVisualHintForSelection(comment.target);
+              const displayTarget = visualHint
+                ? { ...sourceTarget, label: visualHint.label, visualHint }
+                : sourceTarget;
               const editable = viewMode === "current" && !interactionLocked;
               const editing = (
                 editingCommentId === comment.commentId
@@ -611,9 +621,9 @@ export const CommentRailView = memo(function CommentRailView({
                 ? activeEditSession.draftAttachments
                 : comment.attachments;
               const deleting = pendingDeleteCommentId === comment.commentId;
-              const targetLayout = commentTargetLayouts[comment.target.id];
+              const targetLayout = commentTargetLayouts[sourceTarget.id];
               const targetResolution =
-                targetLayout?.resolution ?? comment.target.resolution;
+                targetLayout?.resolution ?? sourceTarget.resolution;
               const targetLocatable = commentTargetIsLocatable(comment.target);
               return (
                 <article
@@ -621,20 +631,20 @@ export const CommentRailView = memo(function CommentRailView({
                   data-html-canvas-preserve-selection="true"
                   data-comment-measure={comment.commentId}
                   data-comment-measure-key={commentMeasurementKeys[comment.commentId]}
-                  data-selected={selection?.selector === comment.target.selector ? "true" : "false"}
+                  data-selected={selection?.selector === sourceTarget.selector ? "true" : "false"}
                   data-focused={focusedCommentId === comment.commentId ? "true" : undefined}
                   data-resolution={targetResolution}
                   data-editing={editing ? "true" : undefined}
                   role="group"
                   aria-current={focusedCommentId === comment.commentId ? "location" : undefined}
                   tabIndex={editable && targetLocatable ? 0 : -1}
-                  aria-label={`${insertionLabel(comment.target)}：${comment.text}`}
+                  aria-label={`${insertionLabel(displayTarget)}：${comment.text}`}
                   style={{
                     top: `${visibleCommentPositions[comment.commentId]}px`,
                   }}
                   onClick={() => {
                     if (!editing && !deleting && editable && targetLocatable) {
-                      focusCommentTarget(comment.target, comment.commentId);
+                      focusCommentTarget(displayTarget, comment.commentId);
                     }
                   }}
                   onKeyDown={(event) => {
@@ -647,13 +657,13 @@ export const CommentRailView = memo(function CommentRailView({
                       && (event.key === "Enter" || event.key === " ")
                     ) {
                       event.preventDefault();
-                      focusCommentTarget(comment.target, comment.commentId);
+                      focusCommentTarget(displayTarget, comment.commentId);
                     }
                   }}
                   key={comment.commentId}
                 >
                   <header className="comment-card-header">
-                    <span className="comment-target">{insertionLabel(comment.target)}</span>
+                    <span className="comment-target">{insertionLabel(displayTarget)}</span>
                     <time dateTime={comment.updatedAt || comment.createdAt}>
                       {formatTime(comment.updatedAt || comment.createdAt, true)}
                     </time>
@@ -735,7 +745,7 @@ export const CommentRailView = memo(function CommentRailView({
                             onClick={(event) => {
                               event.currentTarget.blur();
                               clearDeleteRequest();
-                              queueReviewCommentFocus(comment.target, comment.commentId);
+                              queueReviewCommentFocus(displayTarget, comment.commentId);
                               window.requestAnimationFrame(() => {
                                 document.getElementById(`comment-delete-${comment.commentId}`)?.focus();
                               });
@@ -863,7 +873,7 @@ export const CommentRailView = memo(function CommentRailView({
                               event.stopPropagation();
                               event.currentTarget.blur();
                               requestDeleteComment(comment.commentId);
-                              queueReviewCommentFocus(comment.target, comment.commentId);
+                              queueReviewCommentFocus(displayTarget, comment.commentId);
                             }}
                           >
                             <TrashIcon aria-hidden="true" size={17} weight="bold" />

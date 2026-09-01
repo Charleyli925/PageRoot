@@ -25,6 +25,30 @@ export type HtmlCanvasFingerprint = {
   textSuffix?: string;
 };
 
+export type HtmlCanvasRuntimeVisualHintKind =
+  | "table"
+  | "table-cell"
+  | "chart"
+  | "svg"
+  | "canvas"
+  | "runtime-region";
+
+export type HtmlCanvasRuntimeVisualHint = {
+  /** Runtime DOM is explanatory context only and never a source authority. */
+  runtimeGenerated: true;
+  kind: HtmlCanvasRuntimeVisualHintKind;
+  label: string;
+  renderedText?: string;
+  relativePath?: string;
+  /** All four coordinates are normalized to the source host's box. */
+  relativeBox?: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  };
+};
+
 export type HtmlCanvasTextLocator = {
   quote: string;
   /** UTF-16 offsets in the owning source element's decoded descendant text. */
@@ -61,6 +85,10 @@ export type HtmlCanvasSelection = {
     width: number;
     height: number;
   };
+  /** Ephemeral bridge from a runtime visual target to its proven source host. */
+  commentAnchor?: HtmlCanvasSelection;
+  /** Ephemeral runtime context; never included in a persisted TargetRef. */
+  visualHint?: HtmlCanvasRuntimeVisualHint;
 };
 
 export type HtmlCanvasMutation = {
@@ -147,6 +175,11 @@ export type NativeDeferredCommandOptions = {
   onDiscard?: (reason: NativeDeferredCommandDiscardReason) => void;
 };
 
+export type HtmlCanvasCommentLayoutTarget = {
+  target: HtmlCanvasSelection;
+  visualHint?: HtmlCanvasRuntimeVisualHint;
+};
+
 export type HtmlCanvasCommentedTarget = {
   target: HtmlCanvasSelection;
   /**
@@ -154,7 +187,11 @@ export type HtmlCanvasCommentedTarget = {
    * comments share one canvas marker. Layout reporting must retain those ids so
    * the rail can position and group each card independently.
    */
-  layoutTargets?: readonly HtmlCanvasSelection[];
+  layoutTargets?: readonly (
+    | HtmlCanvasSelection
+    | HtmlCanvasCommentLayoutTarget
+  )[];
+  visualHint?: HtmlCanvasRuntimeVisualHint;
   count?: number;
   label?: string;
   /** Report target layout without rendering a saved-comment marker. */
@@ -211,7 +248,11 @@ export type HtmlCanvasEditorHandle = {
   clearSelection: () => void;
   select: (
     target: HtmlCanvasSelection,
-    options?: { reveal?: boolean; showToolbar?: boolean },
+    options?: {
+      reveal?: boolean;
+      showToolbar?: boolean;
+      visualHint?: HtmlCanvasRuntimeVisualHint | null;
+    },
   ) => HtmlCanvasSelection | null;
   startEditing: () => boolean;
   moveSelected: (direction: "up" | "down") => boolean;

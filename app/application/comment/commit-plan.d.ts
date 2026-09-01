@@ -7,6 +7,12 @@ export function isSavableCommentTarget(target?: {
   elementId?: string;
   selector?: string;
   level?: string;
+  commentAnchor?: {
+    resolution?: string;
+    elementId?: string;
+    selector?: string;
+    level?: string;
+  } | null;
 } | null): boolean;
 
 export function planCommentCommit(input?: {

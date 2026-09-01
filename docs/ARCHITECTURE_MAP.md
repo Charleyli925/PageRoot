@@ -31,7 +31,7 @@ the Bridge client, construct Sessions, or own debounce, polling, or drain.
 | Document save and detach protection | `DocumentSession` owns current bytes/durability; Main recovery journal owns crash bytes | `DocumentWorkflow` owns source write plus verified recovery/export evidence | `document-workflow.js`, `document/save-plan.js`, `verified-project-context.js`, `desktop/recovery-journal-store.mjs` |
 | Source element identity migration | `ProjectFileRepository` Working Copy state | `ProjectFileRepository` serialized migration transaction | `bridge/project-file-repository.mjs`, `bridge/project-file-repository/working-copy.mjs` |
 | Semantic source editing | immutable semantic document state, stable-ID operation intent and lineage | pure `SemanticOperationKernel`; SourcePatch is its internal materializer; Canvas owns only current-open invocation | `app/lib/semantic-operation-kernel.js`, `app/lib/source-structure-edit.js`, `app/lib/source-patch-engine.js`, `app/components/html-canvas-structure-commands.ts`, `schemas/semantic-operation.v1.schema.json` |
-| Comments | `CommentSession`; persistent element identity resolves through `TargetResolver` | `CommentWorkflow` | `workspace-controller-capabilities.d.ts` (`controller.comments`), `comment-workflow.js`, `comment/commit-plan.js`, `target-resolver.js`, `comment-text-locator.js`, `comment-rail-container.tsx`, `comment-canvas-port.js`, `comment-rail-view.tsx` |
+| Comments | `CommentSession`; `sourceAnchor` is the only persistent source authority and resolves through `TargetResolver`; bounded `visualHint` is explanatory runtime context | `CommentWorkflow` | `workspace-controller-capabilities.d.ts` (`controller.comments`), `comment-workflow.js`, `comment/commit-plan.js`, `target-resolver.js`, `runtime-comment-hint.js`, `comment-text-locator.js`, `comment-rail-container.tsx`, `comment-canvas-port.js`, `comment-rail-view.tsx` |
 | Attachments | Draft attachment repository; Request freeze owns independent byte copies and recovery staging | `CommentWorkflow` before send, `ProjectFileRepository` during Request preparation/publication | `comment-workflow.js` upload/read/delete, `bridge/project-file-repository/request-attachments.mjs`, `request-draft.mjs` |
 | Run and AI request | `RunSession` | `RunWorkflow` | `workspace-controller-capabilities.d.ts` (`controller.runs`), `run-workflow.js`, `run/text-locator-validation.js`, `run/submit-plan.js`, `run-conversation-outlet.tsx` |
 | Review and Candidate | Repository owns immutable Candidate HTML, runtime seal, source-identity report and bounded Stable-ID impact assessment with descendant scope closure; `VersionSession` owns only the renderer projection | Repository validates/normalizes full-HTML Candidate; `VersionWorkflow` prepares Review and accepts; Review analysis presents bounded warning-only impact context | `bridge/candidate-assessment.mjs`, `bridge/candidate-assessment-decoder.mjs`, `bridge/project-file-repository/candidate-identity.mjs`, `bridge/project-file-repository/version-candidate.mjs`, `app/domain/run-lifecycle.js`, `app/application/version-workflow.js`, `app/workbench/ReviewAnalysisPrewarm.tsx`, `app/workbench/review-document.ts`, `app/workbench/AiReviewWorkspace.tsx` |
@@ -89,7 +89,8 @@ CommentSession + CommentWorkflow
     -> CommentRailContainer
       -> stable CommentRailView model/actions
 
-HtmlCanvasEditor selection + stable element TargetRef + source-tagged geometry
+HtmlCanvasEditor selection + dual runtime target (operation/visual/comment anchor)
+  -> source-backed TargetRef + bounded visualHint
   -> commentCanvasPort
     -> CommentRailContainer
 ```
@@ -104,10 +105,11 @@ intents; it never owns comment facts. Workbench's aggregate
 subscription may suppress composer-text and edit-text-only revisions; saved
 comments, attachment structure, persistence errors and every non-comment
 capability still invalidate the composition root.
-Persistent `elementId`, refreshed expected source Hash and optional text locator are Comment/Draft facts;
-`TargetResolver` maps the ID to current source and never consults disposable
-geometry or Runtime DOM. `commentCanvasPort` carries only the resulting
-selection and measurements.
+Persistent `sourceAnchor.elementId`, refreshed expected source Hash and optional text locator are
+Comment/Draft facts; `TargetResolver` maps that ID to current source and never consults disposable
+geometry or Runtime DOM. A runtime `visualHint` is bounded display context only: Canvas may best-effort
+match it inside the proven source host after a rerun, then fall back to that host without changing
+permissions. `commentCanvasPort` carries only the resulting selection and measurements.
 
 ## Project render boundary
 

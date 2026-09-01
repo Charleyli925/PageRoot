@@ -3,7 +3,12 @@ import {
   validationReviewFromRecord,
 } from "../domain/run-lifecycle.js";
 import { versionAuditCollections } from "../lib/version-audit-records";
-import { commentsFromRecords, insertionLabel, selectionFromRecord } from "./comment-model";
+import {
+  commentSourceAnchor,
+  commentsFromRecords,
+  insertionLabel,
+  selectionFromRecord,
+} from "./comment-model";
 import { displayVersionLabel } from "./project-model";
 import { isRecord } from "./record-model";
 import {
@@ -33,7 +38,7 @@ export function versionTitle(
   return versionEntryTitle({
     isInitial: version.source === "初始页面",
     comments: version.comments.map((comment) => ({
-      label: insertionLabel(comment.target),
+      label: insertionLabel(commentSourceAnchor(comment) || comment.target),
       text: comment.text,
     })),
     requirement: version.requirement,

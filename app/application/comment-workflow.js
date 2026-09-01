@@ -2,6 +2,15 @@ import { createDraftOperationId, isDraftOperationId, rebaseDraftMutation } from 
 import { isBridgeRequestError } from "./bridge-client.js";
 import { createCommentWorkflowCodecs } from "./comment-workflow-codecs.js";
 import { isSavableCommentTarget, planCommentCommit } from "./comment/commit-plan.js";
+import { normalizeRuntimeVisualHint } from "../lib/runtime-comment-hint.js";
+
+function commentSourceTarget(target) {
+  return target?.commentAnchor || target || null;
+}
+
+function commentVisualHint(target) {
+  return normalizeRuntimeVisualHint(target?.visualHint);
+}
 
 function frozenItems(value) {
   return Object.freeze(Array.isArray(value) ? [...value] : []);
@@ -554,7 +563,7 @@ export class CommentWorkflow {
       return blocked("COMMENT_TARGET_MISSING", "请先选择要评论的内容。");
     }
     if (!isSavableCommentTarget(target)) {
-      return blocked("COMMENT_TARGET_UNSAFE", "当前评论位置需要重新选择后才能保存。");
+      return blocked("COMMENT_TARGET_UNSAFE", "当前内容暂时无法建立安全的评论位置。");
     }
     const current = this.#commentSession.comments.find(
       (comment) => comment.commentId === commentId,
@@ -562,12 +571,21 @@ export class CommentWorkflow {
     if (!current) {
       return blocked("COMMENT_MISSING", "这条评论已经不存在。");
     }
-    const nextTarget = { ...target, id: current.target.id };
+    const nextTarget = {
+      ...commentSourceTarget(target),
+      id: current.target.id,
+    };
+    const visualHint = commentVisualHint(target) || current.visualHint;
+    const visualTarget = visualHint
+      ? { ...nextTarget, label: visualHint.label, visualHint }
+      : nextTarget;
     const nextComments = this.#commentSession.comments.map((comment) => (
       comment.commentId === commentId
         ? {
             ...comment,
-            target: nextTarget,
+            target: visualTarget,
+            sourceAnchor: nextTarget,
+            ...(visualHint ? { visualHint } : {}),
             updatedAt: safeDate(this.#clock.now()),
           }
         : comment
@@ -633,21 +651,27 @@ export class CommentWorkflow {
     if (
       !currentTarget
       || currentTarget.id !== target.id
-      || currentTarget.resolution !== "exact"
+      || !isSavableCommentTarget(currentTarget)
       || this.#uploadCount > 0
     ) return stale(context || { sourcePath, epoch: this.#projectSession.epoch });
 
     const nextCommentId = String(commentId || this.#nextCommentId());
     const now = safeDate(this.#clock.now());
     const commentTarget = this.#codecs.independentCommentTarget(
-      currentTarget,
+      commentSourceTarget(currentTarget),
       nextCommentId,
     );
+    const visualHint = commentVisualHint(currentTarget);
+    const visualTarget = visualHint
+      ? { ...commentTarget, label: visualHint.label, visualHint }
+      : commentTarget;
     const comment = {
       commentId: nextCommentId,
       createdAt: now,
       updatedAt: now,
-      target: commentTarget,
+      target: visualTarget,
+      sourceAnchor: commentTarget,
+      ...(visualHint ? { visualHint } : {}),
       text,
       ...(attachments.length > 0
         ? { attachments: attachments.map(this.#codecs.persistedAttachment) }
@@ -1243,7 +1267,12 @@ export class CommentWorkflow {
       composerCommentId: this.#commentSession.composerCommentId,
       composerAttachments: composerAttachments.map(this.#codecs.persistedAttachment),
       composerTarget: composerTarget
-        ? this.#codecs.persistedTargetRef(composerTarget)
+        ? {
+            ...this.#codecs.persistedTargetRef(commentSourceTarget(composerTarget)),
+            ...(commentVisualHint(composerTarget)
+              ? { visualHint: commentVisualHint(composerTarget) }
+              : {}),
+          }
         : null,
       commentEdit: commentEdit
         ? {

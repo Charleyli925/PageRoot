@@ -17,9 +17,11 @@ import HtmlCanvasEditor from "./components/HtmlCanvasEditor";
 import HtmlDisplaySurface from "./components/HtmlDisplaySurface";
 import type {
   HtmlCanvasEditRuntimeLoadOutcome,
+  HtmlCanvasCommentLayoutTarget,
   HtmlCanvasEditorHandle,
   HtmlCanvasMutation,
   HtmlCanvasSelection,
+  HtmlCanvasRuntimeVisualHint,
   HtmlCanvasSourceTransaction,
   NativeDeferredCommandAuthority,
   NativeDeferredCommandDiscardReason,
@@ -152,6 +154,8 @@ import {
   attachmentFromRecord,
   canLocateTarget,
   canSaveCommentTarget,
+  commentSourceAnchor,
+  commentVisualHintForSelection,
   commentEditSessionHasChanges,
   commentHasContent,
   commentsFromRecords,
@@ -2432,40 +2436,66 @@ export default function Workbench() {
   const commentedTargets = useMemo(() => {
     const grouped = new Map<string, {
       target: HtmlCanvasSelection;
-      layoutTargets: HtmlCanvasSelection[];
+      layoutTargets: HtmlCanvasCommentLayoutTarget[];
+      visualHint?: HtmlCanvasRuntimeVisualHint;
       count: number;
       label: string;
       showMarker?: boolean;
     }>();
     for (const comment of visibleCommentItems) {
-      const markerKey = commentMarkerGroupKey(comment.target);
+      const sourceTarget = commentSourceAnchor(comment) || comment.target;
+      const visualHint = comment.visualHint
+        || commentVisualHintForSelection(comment.target);
+      const markerTarget = visualHint
+        ? { ...sourceTarget, visualHint }
+        : sourceTarget;
+      const markerKey = commentMarkerGroupKey(markerTarget);
       const current = grouped.get(markerKey);
       if (current) {
         current.count += 1;
-        current.layoutTargets.push(comment.target);
+        current.layoutTargets.push({
+          target: sourceTarget,
+          ...(visualHint ? { visualHint } : {}),
+        });
       }
       else {
         grouped.set(markerKey, {
-          target: comment.target,
-          layoutTargets: [comment.target],
+          target: sourceTarget,
+          layoutTargets: [{
+            target: sourceTarget,
+            ...(visualHint ? { visualHint } : {}),
+          }],
+          ...(visualHint ? { visualHint } : {}),
           count: 1,
-          label: insertionLabel(comment.target),
+          label: visualHint?.label || insertionLabel(sourceTarget),
         });
       }
     }
     if ((hasCommentDraft || composerOpen) && draftTarget) {
-      const markerKey = commentMarkerGroupKey(draftTarget);
+      const sourceTarget = draftTarget.commentAnchor ?? draftTarget;
+      const visualHint = commentVisualHintForSelection(draftTarget);
+      const markerTarget = visualHint
+        ? { ...sourceTarget, visualHint }
+        : sourceTarget;
+      const markerKey = commentMarkerGroupKey(markerTarget);
       const current = grouped.get(markerKey);
       if (current) {
-        if (!current.layoutTargets.some((target) => target.id === draftTarget.id)) {
-          current.layoutTargets.push(draftTarget);
+        if (!current.layoutTargets.some((entry) => entry.target.id === sourceTarget.id)) {
+          current.layoutTargets.push({
+            target: sourceTarget,
+            ...(visualHint ? { visualHint } : {}),
+          });
         }
       } else {
         grouped.set(markerKey, {
-          target: draftTarget,
-          layoutTargets: [draftTarget],
+          target: sourceTarget,
+          layoutTargets: [{
+            target: sourceTarget,
+            ...(visualHint ? { visualHint } : {}),
+          }],
+          ...(visualHint ? { visualHint } : {}),
           count: 0,
-          label: insertionLabel(draftTarget),
+          label: visualHint?.label || insertionLabel(sourceTarget),
           showMarker: false,
         });
       }
@@ -3418,9 +3448,13 @@ export default function Workbench() {
     // mutation cannot overwrite that new event with the pre-command snapshot.
     const settledComments = currentCommentSessionSnapshot();
     const activeTargets = [
-      ...settledComments.comments.map((comment) => comment.target),
+      ...settledComments.comments.map((comment) => (
+        commentSourceAnchor(comment) || comment.target
+      )),
       ...settledComments.changeEvents.map((event) => event.target),
-      ...(settledComments.composerTarget ? [settledComments.composerTarget] : []),
+      ...(settledComments.composerTarget
+        ? [settledComments.composerTarget.commentAnchor || settledComments.composerTarget]
+        : []),
     ];
     if (activeTargets.length > 0) {
       const deterministicById = new Map(
@@ -3449,7 +3483,17 @@ export default function Workbench() {
       };
       const nextComments = settledComments.comments.map((comment) => ({
         ...comment,
-        target: refreshedTarget(comment.target),
+        target: (() => {
+          const sourceTarget = refreshedTarget(
+            commentSourceAnchor(comment) || comment.target,
+          );
+          const visualHint = comment.visualHint
+            || commentVisualHintForSelection(comment.target);
+          return visualHint ? { ...sourceTarget, visualHint } : sourceTarget;
+        })(),
+        sourceAnchor: refreshedTarget(
+          commentSourceAnchor(comment) || comment.target,
+        ),
       }));
       const nextEvents = settledComments.changeEvents.map((event) => ({
         ...event,
@@ -3460,7 +3504,14 @@ export default function Workbench() {
         comments: nextComments,
         changeEvents: nextEvents,
         ...(currentDraftTarget
-          ? { composerTarget: refreshedTarget(currentDraftTarget) }
+          ? {
+              composerTarget: currentDraftTarget.commentAnchor
+                ? {
+                    ...currentDraftTarget,
+                    commentAnchor: refreshedTarget(currentDraftTarget.commentAnchor),
+                  }
+                : refreshedTarget(currentDraftTarget),
+            }
           : {}),
       });
     }
@@ -3951,7 +4002,12 @@ export default function Workbench() {
     target: HtmlCanvasSelection,
     itemKey: string,
   ) => {
-    commentCanvasPort.requestReveal(target, itemKey);
+    const sourceTarget = target.commentAnchor ?? target;
+    const visualHint = commentVisualHintForSelection(target);
+    commentCanvasPort.requestReveal(
+      visualHint ? { ...sourceTarget, visualHint } : sourceTarget,
+      itemKey,
+    );
   }, [commentCanvasPort]);
 
   const requestComposerFocus = useCallback(() => {
@@ -4086,7 +4142,12 @@ export default function Workbench() {
       beginTargetRelink("__composer");
       return;
     }
-    const located = editorRef.current?.select(target, { showToolbar: false });
+    const sourceTarget = target.commentAnchor ?? target;
+    const visualHint = commentVisualHintForSelection(target);
+    const located = editorRef.current?.select(sourceTarget, {
+      showToolbar: false,
+      ...(visualHint ? { visualHint } : {}),
+    });
     const nextTarget = located || target;
     workspaceControllerRef.current?.rebindCommentComposer(nextTarget);
     commentCanvasPort.setSelection(nextTarget);
@@ -4673,14 +4734,19 @@ export default function Workbench() {
     target: HtmlCanvasSelection,
     commentId: string,
   ) => {
-    if (!canLocateTarget(target)) {
+    const sourceTarget = target.commentAnchor ?? target;
+    const visualHint = commentVisualHintForSelection(target);
+    if (!canLocateTarget(sourceTarget)) {
       commentCanvasPort.setSelection(target);
       updateFocusedComment(commentId);
       queueReviewPairReveal(target, commentId);
       return;
     }
     updateFocusedComment(commentId);
-    const located = editorRef.current?.select(target, { showToolbar: false });
+    const located = editorRef.current?.select(sourceTarget, {
+      showToolbar: false,
+      ...(visualHint ? { visualHint } : {}),
+    });
     const nextTarget = located || target;
     commentCanvasPort.setSelection(nextTarget);
     queueReviewPairReveal(nextTarget, commentId);
@@ -4696,24 +4762,33 @@ export default function Workbench() {
     }
     if (finishTargetRelink(target)) return;
     if (currentComposerOpen || viewMode === "history") return;
-    const matchesTarget = (comment: CommentItem) => (
-      comment.target.id === target.id
-      || Boolean(
-        comment.target.elementId
-        && comment.target.elementId === target.elementId
-        && comment.target.level === target.level
-      )
-      || (
-        comment.target.selector === target.selector
-        && comment.target.level === target.level
-      )
-    );
+    const sourceTarget = target.commentAnchor ?? target;
+    const visualHint = commentVisualHintForSelection(target);
+    const matchesTarget = (comment: CommentItem) => {
+      const commentAnchor = commentSourceAnchor(comment) || comment.target;
+      const sourceMatches = commentAnchor.id === sourceTarget.id
+        || Boolean(
+          commentAnchor.elementId
+          && commentAnchor.elementId === sourceTarget.elementId
+          && commentAnchor.level === sourceTarget.level,
+        )
+        || (
+          commentAnchor.selector === sourceTarget.selector
+          && commentAnchor.level === sourceTarget.level
+        );
+      if (!sourceMatches) return false;
+      const commentHint = comment.visualHint
+        || commentVisualHintForSelection(comment.target);
+      if (!visualHint || !commentHint) return !visualHint && !commentHint;
+      return visualHint.kind === commentHint.kind
+        && visualHint.relativePath === commentHint.relativePath;
+    };
     const currentFocusedId = commentCanvasPort.getSnapshot().focusedCommentId;
     const focusedMatch = visibleCommentItems.find(
       (comment) => comment.commentId === currentFocusedId && matchesTarget(comment),
     );
     const nextComment = focusedMatch || visibleCommentItems.find(matchesTarget);
-    if (!nextComment || !canLocateTarget(nextComment.target)) {
+    if (!nextComment || !canLocateTarget(commentSourceAnchor(nextComment) || nextComment.target)) {
       updateFocusedComment(null);
       return;
     }
@@ -5540,8 +5615,9 @@ export default function Workbench() {
     activeRun && ["error", "no-change"].includes(activeRun.status) && !pendingRunOutcome,
   );
   const commentTargetIsLocatable = useCallback((target: HtmlCanvasSelection): boolean => {
-    const layout = commentCanvasPort.getSnapshot().targetLayouts[target.id];
-    const resolution = layout?.resolution ?? target.resolution;
+    const sourceTarget = target.commentAnchor ?? target;
+    const layout = commentCanvasPort.getSnapshot().targetLayouts[sourceTarget.id];
+    const resolution = layout?.resolution ?? sourceTarget.resolution;
     return layout?.status !== "missing"
       && (resolution === "exact" || resolution === "rebound");
   }, [commentCanvasPort]);

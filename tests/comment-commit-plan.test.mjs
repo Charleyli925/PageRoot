@@ -51,3 +51,32 @@ test("comment commit plan fail-closes disposed, missing, unsafe, uploading and e
     elementId: "pr1_invalid",
   }), false);
 });
+
+test("runtime visual selections save only through a separately proven source anchor", () => {
+  const runtimeSelection = {
+    resolution: "ambiguous",
+    elementId: ELEMENT_ID,
+    visualHint: {
+      runtimeGenerated: true,
+      kind: "table",
+      label: "财务数据表",
+    },
+    commentAnchor: {
+      resolution: "exact",
+      elementId: ELEMENT_ID,
+      selector: "main",
+      level: "part",
+    },
+  };
+  assert.equal(isSavableCommentTarget(runtimeSelection), true);
+  assert.equal(planCommentCommit({
+    target: runtimeSelection,
+    text: "请核对 2026Q2。",
+  }).kind, "ready");
+
+  assert.equal(isSavableCommentTarget({
+    resolution: "ambiguous",
+    elementId: ELEMENT_ID,
+    visualHint: runtimeSelection.visualHint,
+  }), false, "a copied runtime ID cannot become a source anchor");
+});

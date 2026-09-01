@@ -182,8 +182,8 @@
 
 .workbench > .review-scroll-stage[data-inspector="comments"] > .comments-panel.comment-rail {
   align-self: start;
-  height: var(--comment-rail-height);
-  max-height: var(--comment-rail-height);
+  height: max(var(--comment-rail-height), 100%);
+  max-height: max(var(--comment-rail-height), 100%);
   overflow-x: visible;
   overflow-y: clip;
 }

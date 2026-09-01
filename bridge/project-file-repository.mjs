@@ -3694,7 +3694,9 @@ export class ProjectFileRepository {
         ? record.request.targets
         : [];
     const commentTargets = Array.isArray(record.request?.comments)
-      ? record.request.comments.map((comment) => comment?.target).filter(Boolean)
+      ? record.request.comments
+        .map((comment) => comment?.sourceAnchor || comment?.target)
+        .filter(Boolean)
       : [];
     const allRequestedTargetRefs = [...requestTargets, ...commentTargets];
     const requestedTargetElementIds = [...new Set(

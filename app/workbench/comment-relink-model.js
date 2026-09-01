@@ -14,9 +14,10 @@
 // `canLocateTarget` and `commentHasContent` also live here so the predicate
 // has one home; comment-model.ts re-exports them for existing consumers.
 
-/** @param {{ resolution?: string }} target */
+/** @param {{ resolution?: string, commentAnchor?: { resolution?: string } }} target */
 export function canLocateTarget(target) {
-  return target.resolution === "exact" || target.resolution === "rebound";
+  const anchor = target?.commentAnchor || target;
+  return anchor?.resolution === "exact" || anchor?.resolution === "rebound";
 }
 
 /**
@@ -35,7 +36,8 @@ export function commentHasContent(comment) {
  */
 export function unsafeRelinkComments(comments) {
   return comments.filter(
-    (comment) => commentHasContent(comment) && !canLocateTarget(comment.target),
+    (comment) => commentHasContent(comment)
+      && !canLocateTarget(comment.sourceAnchor || comment.target),
   );
 }
 

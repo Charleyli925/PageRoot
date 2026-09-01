@@ -9,6 +9,7 @@ import type { VersionReviewCandidate } from "../application/version-workflow.js"
 import type { ActiveRun } from "../domain/run-lifecycle.js";
 import { browserSha256 } from "./browser-io";
 import { commentHasContent } from "./comment-relink-model.js";
+import { commentSourceAnchor } from "./comment-model";
 import { activeRunOperationKey } from "./project-model";
 import {
   buildReviewDocumentsAsync,
@@ -103,30 +104,43 @@ function reviewImpactFromCandidate(
 }
 
 export function reviewCommentsForAnalysis(comments: readonly CommentItem[]): CommentItem[] {
-  return comments.filter(commentHasContent).map((comment) => ({
-    ...comment,
-    target: {
-      ...comment.target,
-      ...(comment.target.sourceAnchor
-        ? { sourceAnchor: { ...comment.target.sourceAnchor } }
-        : {}),
-      ...(comment.target.fingerprint
+  return comments.filter(commentHasContent).map((comment) => {
+    const sourceTarget = commentSourceAnchor(comment) || comment.target;
+    return {
+      ...comment,
+      target: {
+        ...sourceTarget,
+        ...(sourceTarget.sourceAnchor
+          ? { sourceAnchor: { ...sourceTarget.sourceAnchor } }
+          : {}),
+        ...(sourceTarget.fingerprint
+          ? {
+              fingerprint: {
+                ...sourceTarget.fingerprint,
+                stableAttributes: { ...sourceTarget.fingerprint.stableAttributes },
+                ancestorFingerprint: [...sourceTarget.fingerprint.ancestorFingerprint],
+              },
+            }
+          : {}),
+        ...(sourceTarget.boundingBox
+          ? { boundingBox: { ...sourceTarget.boundingBox } }
+          : {}),
+      },
+      ...(comment.sourceAnchor
         ? {
-            fingerprint: {
-              ...comment.target.fingerprint,
-              stableAttributes: { ...comment.target.fingerprint.stableAttributes },
-              ancestorFingerprint: [...comment.target.fingerprint.ancestorFingerprint],
+            sourceAnchor: {
+              ...sourceTarget,
+              ...(sourceTarget.sourceAnchor
+                ? { sourceAnchor: { ...sourceTarget.sourceAnchor } }
+                : {}),
             },
           }
         : {}),
-      ...(comment.target.boundingBox
-        ? { boundingBox: { ...comment.target.boundingBox } }
+      ...(comment.attachments?.length
+        ? { attachments: comment.attachments.map((item) => ({ ...item })) }
         : {}),
-    },
-    ...(comment.attachments?.length
-      ? { attachments: comment.attachments.map((item) => ({ ...item })) }
-      : {}),
-  }));
+    };
+  });
 }
 
 export async function prepareReviewAnalysis({

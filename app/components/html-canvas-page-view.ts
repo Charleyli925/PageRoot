@@ -7,7 +7,10 @@ import {
   pageTabAssociations,
   type PageTabAssociation,
 } from "../lib/page-presentation-dom";
-import type { HtmlCanvasCommentedTarget, HtmlCanvasSelection } from "./HtmlCanvasEditor.types";
+import type {
+  HtmlCanvasCommentedTarget,
+  HtmlCanvasCommentLayoutTarget,
+} from "./HtmlCanvasEditor.types";
 
 const PAGE_VIEW_CONTEXT_ATTRIBUTE = "data-pageroot-view-context";
 
@@ -31,16 +34,27 @@ export function isRenderedCommentTarget(element: HTMLElement): boolean {
 
 export function commentLayoutTargets(
   commentedTargets: readonly HtmlCanvasCommentedTarget[],
-): HtmlCanvasSelection[] {
-  return commentedTargets.flatMap((rawTarget) => (
-    rawTarget.layoutTargets ?? [rawTarget.target]
-  ));
+): HtmlCanvasCommentLayoutTarget[] {
+  return commentedTargets.flatMap((rawTarget) => {
+    const entries = rawTarget.layoutTargets ?? [{
+      target: rawTarget.target,
+      ...(rawTarget.visualHint ? { visualHint: rawTarget.visualHint } : {}),
+    }];
+    return entries.map((entry) => (
+      "target" in entry
+        ? entry
+        : {
+            target: entry,
+            ...(entry.visualHint ? { visualHint: entry.visualHint } : {}),
+          }
+    ));
+  });
 }
 
 export function sortedCommentLayoutTargetIds(
-  targets: readonly HtmlCanvasSelection[],
+  targets: readonly HtmlCanvasCommentLayoutTarget[],
 ): string[] {
-  return [...new Set(targets.map((target) => target.id))].sort();
+  return [...new Set(targets.map((entry) => entry.target.id))].sort();
 }
 
 export function naturalDocumentContentHeight(

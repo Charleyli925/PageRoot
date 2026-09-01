@@ -109,7 +109,8 @@ function scopePolicyFor(comments, targets) {
 
 function instructionFromComment(comment, index) {
   const commentId = String(comment?.commentId || comment?.id || "");
-  const targetId = String(comment?.target?.targetId || comment?.target?.id || "");
+  const sourceTarget = comment?.sourceAnchor || comment?.target;
+  const targetId = String(sourceTarget?.targetId || sourceTarget?.id || "");
   if (!TARGET_ID.test(targetId)) {
     throw taskSpecError(`comments[${index}] has no valid target.`);
   }
