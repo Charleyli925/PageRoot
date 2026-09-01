@@ -926,7 +926,8 @@
         "^scripts/architecture-budget\\.json$",
         "^scripts/notice-policy\\.mjs$",
         "^scripts/notice-disposition-ledger\\.json$",
-        "^tests/(?:architecture-boundaries|semantic-identity-architecture-contract|notice-disposition-ledger)\\.test\\.mjs$",
+        "^app/application/internal-failure\\.(?:js|d\\.ts)$",
+        "^tests/(?:architecture-boundaries|semantic-identity-architecture-contract|notice-disposition-ledger|internal-failure)\\.test\\.mjs$",
         "^tests/fixtures/architecture-boundaries/",
         "^(?:CONTRIBUTING|docs/(?:ARCHITECTURE|ARCHITECTURE_CONTRACT|COMPATIBILITY|INTERACTION_FLOW|STATE_OWNERSHIP|ARCHITECTURE_MAP|GUARD_LEDGER|ENGINEERING_STANDARDS|SECURITY_MODEL|WORKBENCH_ORCHESTRATION_REFACTOR_PLAN))\\.md$",
         "^docs/decisions/(?:archive/)?[0-9]{4}-[^/]+\\.md$"
@@ -938,6 +939,7 @@
         "tests/architecture-boundaries.test.mjs",
         "tests/semantic-identity-architecture-contract.test.mjs",
         "tests/notice-disposition-ledger.test.mjs",
+        "tests/internal-failure.test.mjs",
         "tests/project-rules-workflow.test.mjs",
         "tests/project-workflow.test.mjs"
       ]

@@ -122,6 +122,19 @@ import {
   usageFingerprint,
 } from "./application/usage-telemetry";
 import {
+  reportInternalFailure,
+  setInternalFailureTelemetry,
+} from "./application/internal-failure.js";
+
+setInternalFailureTelemetry((record) => {
+  captureUsageEvent("internal_failure", {
+    area: record.area,
+    operation: record.operation,
+    code: record.code,
+    recovered: record.recovered,
+  });
+});
+import {
   activeRunFromRecord,
   canonicalLifecycleState,
   isLockedLifecycleState,
@@ -216,7 +229,6 @@ import { deriveWorkbenchHeaderCapabilities } from "./workbench/workbench-header-
 import {
   activeRunOperationKey,
   fileStem,
-  formatTime,
   localFileNameFromSourcePath,
   projectMarkdown,
   safeVersionLabel,
@@ -1416,44 +1428,23 @@ export default function Workbench() {
         return;
       }
       if (event.type === "workbench-tabs-persistence-failed") {
-        setToast({
-          title: "标签页状态未安全保存",
-          message: String(event.reason || "当前窗口会保持开启，请重试后再关闭。"),
-          tone: "error",
-          sticky: true,
-          disposition: "background-result",
-          dedupeKey: "workbench-tabs-persistence-failed",
-        });
         return;
       }
       if (event.type === "workbench-tabs-restore-failed") {
         const failure = event as { tabId?: unknown; committed?: unknown; reason?: unknown };
-        if (failure.committed === true) {
-          setToast({
-            title: "HTML 已打开，但恢复未完成",
-            message: String(
-              failure.reason || "当前标签和 Controller 身份已对齐，请重试权威读取。",
-            ),
-            tone: "error",
-            sticky: true,
-            disposition: "direct-action",
-            dedupeKey: `workbench-restore-settle-failed:${String(failure.tabId || "")}`,
-            action: { id: "retry-project-hydration", label: "重试恢复" },
-          });
-        } else {
-          setGlobalSidebarOpen(true);
-          setToast({
-            title: "无法恢复这个 HTML",
-            message: String(
-              failure.reason || "项目可能已移动或删除，请从 Finder 重新打开。",
-            ),
-            tone: "warning",
-            sticky: true,
-            disposition: "background-result",
-            dedupeKey: `workbench-restore-failed:${String(failure.tabId || "")}`,
-            action: { id: "retry-project-open", label: "从 Finder 重新打开" },
-          });
-        }
+        if (failure.committed === true) return;
+        setGlobalSidebarOpen(true);
+        setToast({
+          title: "无法恢复这个 HTML",
+          message: String(
+            failure.reason || "项目可能已移动或删除，请从 Finder 重新打开。",
+          ),
+          tone: "warning",
+          sticky: true,
+          disposition: "background-result",
+          dedupeKey: `workbench-restore-failed:${String(failure.tabId || "")}`,
+          action: { id: "retry-project-open", label: "从 Finder 重新打开" },
+        });
         return;
       }
       if (event.type === "external-open-completed") {
@@ -1483,41 +1474,9 @@ export default function Workbench() {
         return;
       }
       if (event.type === "external-open-ack-failed") {
-        const ackEvent = event as Readonly<{
-          requestId?: string;
-          confirmation?: boolean;
-          reason?: string;
-        }>;
-        if (!ackEvent.confirmation || !ackEvent.requestId) return;
-        setToast({
-          title: "HTML 已处理，等待 Finder 回执",
-          message: ackEvent.reason || "回执暂时发送失败；重试只会发送回执，不会重复打开 HTML。",
-          tone: "warning",
-          sticky: true,
-          disposition: "direct-action",
-          dedupeKey: `external-open-ack:${ackEvent.requestId}`,
-          action: {
-            id: "retry-external-project-open",
-            label: "重试回执",
-            requestId: ackEvent.requestId,
-          },
-        });
         return;
       }
       if (event.type === "external-open-canvas-failed") {
-        const canvasEvent = event as Readonly<{ reason?: string }>;
-        setToast({
-          title: "画布确认失败",
-          message: canvasEvent.reason || "当前画布尚未完成自动恢复。",
-          tone: "error",
-          sticky: true,
-          disposition: "direct-action",
-          dedupeKey: "canvas-verification-failed",
-          action: {
-            id: "retry-canvas-verification",
-            label: "重试",
-          },
-        });
         return;
       }
       if (event.type === "version-refresh-warning") {
@@ -1530,13 +1489,12 @@ export default function Workbench() {
           refreshEvent.context
           && !workspaceController.matchesCurrentProjectContext(refreshEvent.context)
         ) return;
-        setToast({
-          title: `${refreshEvent.candidateLabel || "新版本"} 已打开，但需要复核`,
-          message: refreshEvent.reason || "项目资料尚未完成复核。",
-          tone: "warning",
-          sticky: true,
-          disposition: "background-result",
-          dedupeKey: "current-version-result",
+        reportInternalFailure({
+          area: "version",
+          operation: "refresh-warning",
+          code: "version-refresh-warning",
+          recovered: false,
+          cause: refreshEvent.reason,
         });
         return;
       }
@@ -1574,15 +1532,12 @@ export default function Workbench() {
           attachmentEvent.context
           && !workspaceController.matchesCurrentProjectContext(attachmentEvent.context)
         ) return;
-        const fileName = attachmentEvent.attachment?.fileName || "附件";
-        setToast({
-          title: "附件已从评论中移除",
-          message: `${fileName} 的项目副本暂时无法清理：${String(
-            attachmentEvent.outcome?.reason || "请稍后重新打开项目核对。",
-          )}`,
-          tone: "warning",
-          disposition: "background-result",
-          dedupeKey: `attachment-cleanup-${attachmentEvent.attachment?.attachmentId || "unknown"}`,
+        reportInternalFailure({
+          area: "attachments",
+          operation: "copy-cleanup",
+          code: "attachment-cleanup-failed",
+          recovered: false,
+          cause: attachmentEvent.outcome?.reason,
         });
         return;
       }
@@ -1846,35 +1801,9 @@ export default function Workbench() {
         return;
       }
       if (projectEvent.type === "project-application-deferred") {
-        setToast({
-          title: "当前 HTML 尚未完成安全切换",
-          message: "已保留已接受的 HTML；当前画布恢复后可手动继续切换。",
-          tone: "warning",
-          sticky: true,
-          disposition: "direct-action",
-          dedupeKey: "project-application-deferred",
-          action: { id: "retry-project-application", label: "继续切换" },
-        });
         return;
       }
       if (projectEvent.type === "external-project-open-deferred") {
-        const ackPending = projectEvent.ackPending === true;
-        setToast({
-          title: ackPending
-            ? "HTML 已处理，等待 Finder 回执"
-            : "暂不能切换到 QoderWork 中的 HTML",
-          message: ackPending
-            ? "回执暂时发送失败；重试只会发送回执，不会重复打开 HTML。"
-            : "当前画布仍在安全恢复；已保留当前 HTML。恢复后可手动重试打开。",
-          tone: "warning",
-          sticky: true,
-          disposition: "direct-action",
-          dedupeKey: "external-project-open-deferred",
-          action: {
-            id: "retry-external-project-open",
-            label: ackPending ? "重试回执" : "重试打开",
-          },
-        });
         return;
       }
       if (projectEvent.type === "external-project-open-unavailable") {
@@ -1915,12 +1844,12 @@ export default function Workbench() {
         if (projectEvent.code === "source-integrity-failed") {
           setWorkspaceIssue({ title: "源文件需要重新核对", message: reason });
         } else {
-          setToast({
-            title: "当前页面仍保持开启",
-            message: reason,
-            tone: "info",
-            disposition: "background-result",
-            dedupeKey: "close-source-reconciliation",
+          reportInternalFailure({
+            area: "project",
+            operation: "close-reconciliation",
+            code: String(projectEvent.code || "close-source-reconciliation"),
+            recovered: false,
+            cause: reason,
           });
         }
         return;
@@ -3440,22 +3369,6 @@ export default function Workbench() {
     workbenchTabsSnapshot.revision,
     workspaceController,
   ]);
-  useEffect(() => {
-    if (
-      externalFileOpenSnapshot.status !== "deferred"
-      && toastRef.current?.dedupeKey === "external-project-open-deferred"
-    ) {
-      setToast(null);
-    }
-  }, [externalFileOpenSnapshot.status]);
-  useEffect(() => {
-    if (
-      projectApplicationSnapshot.status !== "deferred"
-      && toastRef.current?.dedupeKey === "project-application-deferred"
-    ) {
-      setToast(null);
-    }
-  }, [projectApplicationSnapshot.status]);
 
   const showProjectInFolder = useCallback(async (requestedSourcePath?: string) => {
     const activeSourcePath = requestedSourcePath
@@ -3621,25 +3534,22 @@ export default function Workbench() {
     try {
       const enqueued = enqueueAutosave(nextHtml, mutation, sourceTransaction);
       if (enqueued.status !== "succeeded") {
-        setToast({
-          title: "这次编辑没有进入撤销历史",
-          message: documentEditFailureReason(enqueued),
-          tone: "warning",
-          disposition: "background-result",
-          dedupeKey: "source-history-record-failed",
+        reportInternalFailure({
+          area: "history",
+          operation: "record-edit",
+          code: "source-history-record-failed",
+          recovered: false,
+          cause: documentEditFailureReason(enqueued),
         });
         return false;
       }
     } catch (cause) {
-      setToast({
-        title: "这次编辑没有进入撤销历史",
-        message: productErrorMessage(
-          cause,
-          "源码历史与当前页面不一致，已停止接受这次修改。",
-        ),
-        tone: "warning",
-        disposition: "background-result",
-        dedupeKey: "source-history-record-failed",
+      reportInternalFailure({
+        area: "history",
+        operation: "record-edit",
+        code: "source-history-record-failed",
+        recovered: false,
+        cause,
       });
       return false;
     }
@@ -5091,14 +5001,12 @@ export default function Workbench() {
         return;
       }
       if (outcome.code === "RUN_SUBMISSION_DOCUMENT_EDIT") {
-        setToast({
-          title: "当前编辑没有进入撤销历史",
-          message: outcome.reason,
-          tone: "warning",
-          sticky: true,
-          disposition: "direct-action",
-          dedupeKey: "source-history-record-failed",
-          action: { id: "retry-submit", label: "重新发送" },
+        reportInternalFailure({
+          area: "history",
+          operation: "record-submit",
+          code: "source-history-record-failed",
+          recovered: false,
+          cause: outcome.reason,
         });
         return;
       }
@@ -5260,14 +5168,12 @@ export default function Workbench() {
             setCanvasMode("preview");
             revealAiConversation();
           }
-          setToast({
-            title: published ? "新版本已提交，编辑画布仍在准备" : "最新版暂时无法打开",
-            message: published ? `${outcome.reason} 已提交的 HTML 保持可见，完成恢复前不会开放编辑。`
-              : outcome.reason,
-            tone: outcome.status === "blocked" ? "warning" : "error",
-            sticky: outcome.status !== "blocked",
-            disposition: "background-result",
-            dedupeKey: "activate-ready-version",
+          reportInternalFailure({
+            area: "version",
+            operation: "activate-ready-version",
+            code: published ? "canvas-preparing" : "activate-unrecovered",
+            recovered: false,
+            cause: outcome.reason,
           });
         }
         return;
@@ -5290,22 +5196,14 @@ export default function Workbench() {
         performance.mark("pageroot:accept:overlay-closed");
       }
       if (!result.current) {
-        setToast({
-          title: result.protocolViolation
-            ? `${result.candidateLabel} 已生成，但需要检查`
-            : `${result.candidateLabel} 已生成`,
-          message: result.protocolViolation
-            ? "新版本本身已经安全提交，但检测到内部 AI 在完成后又改动了临时输出；打开项目查看详情。"
-            : `${result.aiCompletedAt ? `内部 AI 于 ${formatTime(result.aiCompletedAt, true)} 完成；` : ""}打开该项目后会核对并显示新版本。`,
-          tone: result.protocolViolation ? "warning" : "success",
-          sticky: result.protocolViolation,
-          disposition: "background-result",
-          dedupeKey: `background-version:${run.sourcePath}`,
-          action: {
-            id: "open-project",
-            label: "打开项目",
-            sourcePath: result.committedSourcePath,
-          },
+        reportInternalFailure({
+          area: "version",
+          operation: "background-version",
+          code: result.protocolViolation ? "protocol-violation" : "generated-other-project",
+          recovered: true,
+          cause: result.protocolViolation
+            ? "protocol-violation"
+            : result.committedSourcePath,
         });
         return;
       }
@@ -5318,23 +5216,20 @@ export default function Workbench() {
       setCanvasMode("edit");
       performance.mark("pageroot:accept:ui-committed");
       if (result.protocolViolation) {
-        const warning = "内部 AI 的临时输出在最终化后又被修改；已提交版本本身未受影响。";
-        setToast({
-          title: `${result.candidateLabel} 已打开，但需要检查`,
-          message: `${warning} 新版本内容已经核对一致；详情已保留在本轮处理记录中。`,
-          tone: "warning",
-          sticky: true,
-          dedupeKey: "current-version-result",
-          action: { id: "open-handoff", label: "回到 AI 助手" },
+        reportInternalFailure({
+          area: "version",
+          operation: "activate-ready-version",
+          code: "protocol-violation",
+          recovered: true,
+          cause: "protocol-violation",
         });
       } else if (result.verificationWarning) {
-        setToast({
-          title: `${result.candidateLabel} 已打开，但需要复核`,
-          message: result.verificationWarning,
-          tone: "warning",
-          sticky: true,
-          disposition: "background-result",
-          dedupeKey: "current-version-result",
+        reportInternalFailure({
+          area: "version",
+          operation: "activate-ready-version",
+          code: "verification-warning",
+          recovered: true,
+          cause: result.verificationWarning,
         });
       } else if (
         toastRef.current?.dedupeKey === "activate-ready-version"

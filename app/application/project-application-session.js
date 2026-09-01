@@ -55,6 +55,8 @@ export class ProjectApplicationSession {
 
   #cancelled = new Set();
 
+  #immediateResumeIds = new Set();
+
   setObserver(observer) {
     this.#observer = typeof observer === "function" ? observer : null;
   }
@@ -184,23 +186,32 @@ export class ProjectApplicationSession {
     return this.#active?.applicationId === id;
   }
 
-  // This session owns the FIFO predecessor's blocker transition, so Workbench
-  // keeps no second retry history for an accepted project result.
+  // One silent continue when the switch drain is already clear; a second
+  // defer of the same application waits for a blocker to appear and clear.
+  // That bound keeps observer → resume → defer from looping.
   reconcileDeferredSwitch({ switchBlocked, execute }) {
     if (!this.#deferred || typeof execute !== "function") return "idle";
     this.#execute = execute;
+    const applicationId = this.#deferred.applicationId;
 
     if (this.#observedDeferredSequence !== this.#deferredSequence) {
       this.#observedDeferredSequence = this.#deferredSequence;
       this.#sawSwitchBlocker = Boolean(switchBlocked);
-      return switchBlocked ? "blocked" : "action-required";
+      if (switchBlocked) return "blocked";
+      return this.#resumeOnce(applicationId, execute);
     }
     if (switchBlocked) {
       this.#sawSwitchBlocker = true;
       return "blocked";
     }
-    if (!this.#sawSwitchBlocker) return "blocked";
+    if (!this.#sawSwitchBlocker) return "idle";
     this.#sawSwitchBlocker = false;
+    return this.resume(execute) ? "resumed" : "idle";
+  }
+
+  #resumeOnce(applicationId, execute) {
+    if (!applicationId || this.#immediateResumeIds.has(applicationId)) return "idle";
+    this.#immediateResumeIds.add(applicationId);
     return this.resume(execute) ? "resumed" : "idle";
   }
 
@@ -242,6 +253,7 @@ export class ProjectApplicationSession {
     this.#sawSwitchBlocker = false;
     this.#execute = null;
     this.#cancelled.clear();
+    this.#immediateResumeIds.clear();
     for (const [applicationId, waiters] of this.#waiters) {
       const receipt = Object.freeze({
         applicationId,

@@ -72,6 +72,7 @@ The gate must enforce responsibility, not private field names:
 - Repository internals are not a second writer.
 - Retired modules stay deleted.
 - Global Notice growth is frozen to `scripts/notice-disposition-ledger.json`.
+- Internal reliability failures log through `reportInternalFailure()`; they must not create Notice.
 
 Do not add checks for `#privateField`, private method names, or “this call
 text must appear in this file”. Public outcome tests own those invariants.

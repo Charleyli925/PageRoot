@@ -77,13 +77,16 @@ test("close can pin one persistence revision without mistaking a later revision 
 });
 
 test("tabs persistence rejection failure-closes close and close-abort retry re-acknowledges", async () => {
-  let fail = true;
+  let remainingFailures = 2;
   const snapshots = [];
   const coordinator = new WorkbenchTabsPersistenceCoordinator({
     port: {
       async get() { return null; },
       async set() {
-        if (fail) throw new Error("disk unavailable");
+        if (remainingFailures > 0) {
+          remainingFailures -= 1;
+          throw new Error("disk unavailable");
+        }
       },
     },
   });
@@ -94,13 +97,36 @@ test("tabs persistence rejection failure-closes close and close-abort retry re-a
   assert.equal(coordinator.snapshot.restartSafe, false);
   assert.equal((await coordinator.drain({ deadlineAt: Date.now() + 1_000 })).ok, false);
   assert.match(coordinator.snapshot.error, /disk unavailable/u);
-  fail = false;
+  remainingFailures = 0;
   assert.equal(coordinator.retry(), true);
   assert.deepEqual(await coordinator.drain({ deadlineAt: Date.now() + 1_000 }), {
     ok: true,
     revision: 1,
   });
   assert.equal(snapshots.some((snapshot) => snapshot.phase === "failed"), true);
+});
+
+test("tabs persistence recovers a single write rejection without failing close", async () => {
+  let remainingFailures = 1;
+  const coordinator = new WorkbenchTabsPersistenceCoordinator({
+    port: {
+      async get() { return null; },
+      async set() {
+        if (remainingFailures > 0) {
+          remainingFailures -= 1;
+          throw new Error("disk unavailable");
+        }
+      },
+    },
+  });
+  coordinator.commit(B);
+  assert.deepEqual(await coordinator.drain({ deadlineAt: Date.now() + 1_000 }), {
+    ok: true,
+    revision: 1,
+  });
+  assert.equal(coordinator.snapshot.phase, "idle");
+  assert.equal(coordinator.snapshot.restartSafe, true);
+  assert.equal(remainingFailures, 0);
 });
 
 test("tabs persistence load failure closes restart safety until a terminal write", async () => {

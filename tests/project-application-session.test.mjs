@@ -73,6 +73,26 @@ test("project application session sequences each repeated deferred transition", 
   assert.equal(session.snapshot.deferredSequence, 2);
 });
 
+test("project application session resumes immediately when the switch drain is already clear", async () => {
+  const session = new ProjectApplicationSession();
+  const order = [];
+  const execute = async (entry) => {
+    order.push(entry.applicationId);
+    return order.length === 1 ? "deferred" : "complete";
+  };
+
+  assert.equal(session.enqueue(application("clear"), execute), true);
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(
+    session.reconcileDeferredSwitch({ switchBlocked: false, execute }),
+    "resumed",
+  );
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(order, ["application_clear", "application_clear"]);
+  assert.equal(session.snapshot.status, "idle");
+});
+
 test("project application session resumes its FIFO predecessor only after a switch blocker clears", async () => {
   const session = new ProjectApplicationSession();
   const order = [];
@@ -85,11 +105,7 @@ test("project application session resumes its FIFO predecessor only after a swit
   await new Promise((resolve) => setImmediate(resolve));
 
   assert.equal(
-    session.reconcileDeferredSwitch({ switchBlocked: false, execute }),
-    "action-required",
-  );
-  assert.equal(
-    session.reconcileDeferredSwitch({ switchBlocked: false, execute }),
+    session.reconcileDeferredSwitch({ switchBlocked: true, execute }),
     "blocked",
   );
   assert.deepEqual(order, ["application_blocker"]);
@@ -106,6 +122,36 @@ test("project application session resumes its FIFO predecessor only after a swit
 
   assert.deepEqual(order, ["application_blocker", "application_blocker"]);
   assert.equal(session.snapshot.status, "idle");
+});
+
+test("project application session does not loop a second unblocked defer of the same application", async () => {
+  const session = new ProjectApplicationSession();
+  const execute = async () => "deferred";
+
+  assert.equal(session.enqueue(application("loop"), execute), true);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(
+    session.reconcileDeferredSwitch({ switchBlocked: false, execute }),
+    "resumed",
+  );
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(session.snapshot.status, "deferred");
+  assert.equal(
+    session.reconcileDeferredSwitch({ switchBlocked: false, execute }),
+    "idle",
+  );
+  assert.equal(
+    session.reconcileDeferredSwitch({ switchBlocked: false, execute }),
+    "idle",
+  );
+  assert.equal(
+    session.reconcileDeferredSwitch({ switchBlocked: true, execute }),
+    "blocked",
+  );
+  assert.equal(
+    session.reconcileDeferredSwitch({ switchBlocked: false, execute }),
+    "resumed",
+  );
 });
 
 test("project application session settles waiters and stale-closes them on dispose", async () => {
