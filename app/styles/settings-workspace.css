@@ -30,7 +30,7 @@
   display: grid;
   align-content: start;
   gap: 28px;
-  padding: calc(var(--workbench-tabbar-height) + 32px) 14px 24px;
+  padding: calc(var(--workbench-tabbar-height) + 9px) var(--sidebar-content-right-inset, 12px) 24px var(--sidebar-content-inset, 14px);
 }
 
 .workbench-settings-back,
@@ -45,13 +45,22 @@
 
 .workbench-settings-back {
   gap: 9px;
-  min-height: 36px;
-  padding: 0 14px;
+  min-height: 30px;
+  padding: 0;
   border-radius: 9px;
   background: transparent;
   color: #4c4a56;
-  font-size: 13px;
-  font-weight: 550;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 20px;
+}
+
+.workbench-settings-back-icon {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  flex: none;
 }
 
 .workbench-settings-back:hover,
@@ -401,12 +410,14 @@
   background: #fff;
 }
 
-.settings-agent-rows .qoder-availability-card {
+.settings-agent-rows .qoder-availability-card,
+.settings-agent-rows .codex-availability-card {
   border-top: 0;
   border-bottom: 1px solid #ecebf0;
 }
 
-.settings-agent-rows .qoder-availability-card:last-child {
+.settings-agent-rows .qoder-availability-card:last-child,
+.settings-agent-rows .codex-availability-card:last-child {
   border-bottom: 0;
 }
 
@@ -445,11 +456,13 @@
 }
 
 .settings-agent-rows .qoder-card-control {
-  width: auto;
+  width: 140px;
+  min-width: 140px;
   min-height: 34px;
   display: flex;
   flex-direction: row;
   align-items: center;
+  justify-content: flex-end;
   gap: 10px;
 }
 
@@ -582,6 +595,11 @@
 .qoder-card-brand[data-fallback="true"] {
   color: #5a55c9;
   background: #f0efff;
+}
+
+.codex-availability-card .qoder-card-brand[data-fallback="true"] {
+  color: #2b2936;
+  background: #f4f4f5;
 }
 
 .qoder-card-copy {

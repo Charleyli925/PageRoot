@@ -6215,9 +6215,10 @@ export default function Workbench() {
       });
     });
   }, [activeWorkbenchTab, navigationCapability, presentWorkbenchTabOutcome, settingsPageActive]);
-  const { visibleCachedSurface, retainPresentedTab, completeHandoff, updateVisibleScroll, markFirstScroll } = useDocumentSurfaceHandoff({ cache: documentSurfaceCacheSnapshot, tabs: workbenchTabsSnapshot, sourceSha256, renderedSourceSha256: canvasMode === "preview" && canvasRenderAcks.preview?.generation === canvasGeneration ? canvasRenderAcks.preview.sha256 : renderedContentSha256, canvasAuthority, canvasGeneration, controller: workspaceController });
+  const { visibleCachedSurface, candidateCachedSurface, retainPresentedTab, completeHandoff, updateVisibleScroll, markFirstScroll } = useDocumentSurfaceHandoff({ cache: documentSurfaceCacheSnapshot, tabs: workbenchTabsSnapshot, sourceSha256, renderedSourceSha256: canvasMode === "preview" && canvasRenderAcks.preview?.generation === canvasGeneration ? canvasRenderAcks.preview.sha256 : renderedContentSha256, canvasAuthority, canvasGeneration, controller: workspaceController });
   const activeRuntimeCanvasUsable = retainedRuntimeForActiveDocument;
-  const effectiveVisibleCachedSurface = canvasMode === "edit" && activeRuntimeCanvasUsable ? null : visibleCachedSurface;
+  const cachePresentationAllowed = !(canvasMode === "edit" && activeRuntimeCanvasUsable);
+  const effectiveVisibleCachedSurface = cachePresentationAllowed ? visibleCachedSurface : null;
   const retryProjectHydrationFromCommentRail = useCallback(() => {
     void workspaceController?.retryProjectHydration();
   }, [workspaceController]);
@@ -6617,7 +6618,11 @@ export default function Workbench() {
         }}
       /> : null}
       <WorkbenchDocumentSurfaceCache
-        snapshot={documentSurfaceCacheSnapshot} visibleTabId={effectiveVisibleCachedSurface?.tabId || null}
+        snapshot={documentSurfaceCacheSnapshot}
+        visibleTabId={effectiveVisibleCachedSurface?.tabId || null}
+        visibleSourceSha256={effectiveVisibleCachedSurface?.sourceSha256 || null}
+        candidateTabId={cachePresentationAllowed ? candidateCachedSurface?.tabId || null : null}
+        candidateSourceSha256={cachePresentationAllowed ? candidateCachedSurface?.sourceSha256 || null : null}
         onVisibleReady={retainPresentedTab} onHandoffComplete={completeHandoff}
         onVisibleScroll={updateVisibleScroll}
         onFirstScroll={markFirstScroll}
@@ -6833,8 +6838,8 @@ export default function Workbench() {
               transport={interactivePreviewTransport}
               onInteraction={() => workspaceControllerRef.current?.deferDocumentSurfacePrewarm()}
               onReady={handlePreviewReady}
-              presentationCovered={Boolean(visibleCachedSurface)}
-              initialScrollTop={visibleCachedSurface?.scrollTop}
+              presentationCovered={Boolean(effectiveVisibleCachedSurface)}
+              initialScrollTop={effectiveVisibleCachedSurface?.scrollTop}
               onScrollTopChange={(scrollTop) => {
                 if (activeWorkbenchTab.kind === "document") {
                   updateVisibleScroll(activeWorkbenchTab.tabId, scrollTop);

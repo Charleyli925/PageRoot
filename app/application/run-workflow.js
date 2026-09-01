@@ -618,7 +618,9 @@ export class RunWorkflow {
       const refreshed = await this.#agentCatalog.install(frozen);
       if (this.#disposed) return stale({ kind: "agent-install" });
       if (String(refreshed?.result?.status || "") === "ready") {
-        return this.checkAgentUsability(frozen);
+        return this.checkAgentUsability(
+          this.#agentCatalog.freezeProviderSelection(frozen.providerId) || frozen,
+        );
       }
       return succeeded({ availability: this.#agentCatalog.availability(frozen) });
     } catch (cause) {

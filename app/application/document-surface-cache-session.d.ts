@@ -28,6 +28,23 @@ export type DocumentSurfaceCacheSnapshot = Readonly<{
 
 export const INITIAL_DOCUMENT_SURFACE_CACHE_SNAPSHOT: DocumentSurfaceCacheSnapshot;
 
+export type DocumentSurfaceCacheToken = Readonly<{
+  tabId: string;
+  sourceSha256: string;
+}>;
+
+export function documentSurfaceCacheToken(
+  value: Readonly<{ tabId?: unknown; sourceSha256?: unknown }> | null | undefined,
+): DocumentSurfaceCacheToken | null;
+export function sameDocumentSurfaceCacheToken(
+  left: DocumentSurfaceCacheToken | null | undefined,
+  right: DocumentSurfaceCacheToken | null | undefined,
+): boolean;
+export function documentSurfaceCacheEntryMatchesToken(
+  entry: DocumentSurfaceCacheEntry | null | undefined,
+  token: DocumentSurfaceCacheToken | null | undefined,
+): boolean;
+
 export class DocumentSurfaceCacheSession {
   constructor(input?: { maxHotEntries?: number; maxWarmEntries?: number; maxBytes?: number });
   readonly snapshot: DocumentSurfaceCacheSnapshot;

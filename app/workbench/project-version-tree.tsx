@@ -200,11 +200,13 @@ function SidebarVersionFileName({
   version,
   parent,
   reducedMotion,
+  isCurrentWorkingCopy = version.isActiveWorkingCopy,
   onOpen,
 }: {
   version: ProjectVersionSummary;
   parent: ProjectVersionSummary | null;
   reducedMotion: boolean;
+  isCurrentWorkingCopy?: boolean;
   onOpen: () => void;
 }) {
   const buttonRef = useRef<HTMLButtonElement>(null);
@@ -254,10 +256,10 @@ function SidebarVersionFileName({
         ref={buttonRef}
         className="sidebar-version-file"
         type="button"
-        aria-label={version.isActiveWorkingCopy
+        aria-label={isCurrentWorkingCopy
           ? `${version.displayFileName}，当前版本`
           : version.displayFileName}
-        aria-current={version.isActiveWorkingCopy ? "true" : undefined}
+        aria-current={isCurrentWorkingCopy ? "true" : undefined}
         aria-describedby={interaction.tooltipVisible ? tooltipId : undefined}
         onClick={onOpen}
         {...interaction.handlers}
@@ -274,7 +276,7 @@ function SidebarVersionFileName({
             {version.displayFileName}
           </span>
         </span>
-        {version.isActiveWorkingCopy ? <span className="sr-only">当前版本</span> : null}
+        {isCurrentWorkingCopy ? <span className="sr-only">当前版本</span> : null}
       </button>
       <SidebarTooltip
         id={tooltipId}
@@ -345,9 +347,11 @@ function useSidebarClock(): Date {
 export function ProjectVersionTree({
   versions,
   onOpenVersion,
+  isCurrentProject = true,
 }: {
   versions: readonly ProjectVersionSummary[];
   onOpenVersion: (version: ProjectVersionSummary) => void;
+  isCurrentProject?: boolean;
 }) {
   const reducedMotion = usePrefersReducedMotion();
   const now = useSidebarClock();
@@ -438,7 +442,8 @@ export function ProjectVersionTree({
           );
         })}
         {layout.rows.map((row) => {
-          const current = byId.get(row.versionId)?.isActiveWorkingCopy === true;
+          const current = isCurrentProject
+            && byId.get(row.versionId)?.isActiveWorkingCopy === true;
           const onCurrentPath = currentPath.has(row.versionId);
           const center = { cx: laneCenter(row.lane), cy: rowCenter(row.row) };
           return (
@@ -469,7 +474,7 @@ export function ProjectVersionTree({
           if (!version) return null;
           const parentId = version.basedOnVersionId || version.previousVersionId || null;
           const parent = parentId ? byId.get(parentId) || null : null;
-          const current = version.isActiveWorkingCopy;
+          const current = isCurrentProject && version.isActiveWorkingCopy;
           const onCurrentPath = currentPath.has(version.versionId);
           return (
             <div
@@ -486,6 +491,9 @@ export function ProjectVersionTree({
                 version={version}
                 parent={parent}
                 reducedMotion={reducedMotion}
+                // Imported summaries retain their local lineage data, but
+                // never advertise a globally current file to assistive tech.
+                isCurrentWorkingCopy={current}
                 onOpen={() => onOpenVersion(version)}
               />
               <SidebarVersionTime

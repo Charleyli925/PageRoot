@@ -1,14 +1,34 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useState } from "react";
 
 import type { DocumentSurfaceControllerCapability } from "../application/workspace-controller-capabilities.js";
 import type {
   DocumentSurfaceCacheEntry,
   DocumentSurfaceCacheSnapshot,
+  DocumentSurfaceCacheToken,
+} from "../application/document-surface-cache-session.js";
+import {
+  documentSurfaceCacheEntryMatchesToken,
+  documentSurfaceCacheToken,
+  sameDocumentSurfaceCacheToken,
 } from "../application/document-surface-cache-session.js";
 import type { WorkbenchTabsSnapshot } from "../application/workbench-tabs-session.js";
 import type { PageViewContext } from "../lib/page-view-context.js";
 import type { CanvasMode, HtmlProject } from "./types";
 import type { ActiveRun } from "../domain/run-lifecycle.js";
+
+function tokenForEntry(entry: DocumentSurfaceCacheEntry | null): DocumentSurfaceCacheToken | null {
+  return documentSurfaceCacheToken(entry);
+}
+
+function entryForToken(
+  cache: DocumentSurfaceCacheSnapshot,
+  token: DocumentSurfaceCacheToken | null,
+): DocumentSurfaceCacheEntry | null {
+  if (!token) return null;
+  return cache.entries.find((entry) => (
+    documentSurfaceCacheEntryMatchesToken(entry, token)
+  )) || null;
+}
 
 export function useDocumentSurfaceHandoff({
   cache,
@@ -32,15 +52,43 @@ export function useDocumentSurfaceHandoff({
   controller: DocumentSurfaceControllerCapability | null;
 }): {
   visibleCachedSurface: DocumentSurfaceCacheEntry | null;
-  retainPresentedTab: (tabId: string) => void;
-  completeHandoff: (tabId: string) => void;
+  candidateCachedSurface: DocumentSurfaceCacheEntry | null;
+  visibleCachedSurfaceReady: boolean;
+  retainPresentedTab: (token: DocumentSurfaceCacheToken) => boolean;
+  completeHandoff: (token: DocumentSurfaceCacheToken) => void;
   updateVisibleScroll: (tabId: string, scrollTop: number) => void;
   markFirstScroll: (tabId: string, scrollTop: number) => void;
 } {
   const pending = cache.entries.find((entry) => (
     entry.tier === "hot" && entry.tabId === tabs.pendingTabId
   )) || null;
-  const [retainedTabId, setRetainedTabId] = useState<string | null>(null);
+  const pendingToken = tokenForEntry(pending);
+  const [presentedToken, setPresentedToken] = useState<DocumentSurfaceCacheToken | null>(null);
+  const [retainedCandidateToken, setCandidateToken] = useState<DocumentSurfaceCacheToken | null>(null);
+  const pendingTabId = pendingToken?.tabId || null;
+  const pendingSourceSha256 = pendingToken?.sourceSha256 || null;
+  const presentedEntryIsHot = Boolean(
+    presentedToken && entryForToken(cache, presentedToken),
+  );
+  useLayoutEffect(() => {
+    if (!presentedToken || presentedEntryIsHot) return;
+    // A demoted projection must not become visible again merely because the
+    // cache promotes the same tab later; it must rehydrate as a candidate.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setPresentedToken(null);
+  }, [presentedEntryIsHot, presentedToken]);
+  useEffect(() => {
+    if (!pendingTabId || !pendingSourceSha256) return;
+    // The pending tab can commit before the static candidate reports ready;
+    // retain its exact token across that commit without creating another
+    // navigation/state owner.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setCandidateToken((current) => (
+      current?.tabId === pendingTabId && current.sourceSha256 === pendingSourceSha256
+        ? current
+        : documentSurfaceCacheToken({ tabId: pendingTabId, sourceSha256: pendingSourceSha256 })
+    ));
+  }, [pendingSourceSha256, pendingTabId]);
   const active = tabs.tabs.find((tab) => tab.tabId === tabs.activeTabId);
   const terminal = Boolean(
     sourceSha256 && renderedSourceSha256 === sourceSha256
@@ -49,14 +97,18 @@ export function useDocumentSurfaceHandoff({
     && canvasAuthority.generation === canvasGeneration
     && canvasAuthority.renderedSha256 === sourceSha256
   ) || canvasAuthority?.status === "failed";
-  const retainPresentedTab = useCallback((tabId: string) => {
-    setRetainedTabId(tabId);
+  const retainPresentedTab = useCallback((token: DocumentSurfaceCacheToken) => {
     const entry = controller?.getSnapshot().documentSurfaceCache?.entries
-      .find((candidate) => candidate.tabId === tabId);
-    if (entry) controller?.confirmDocumentSurfaceReady(tabId, entry.sourceSha256);
+      .find((candidate) => documentSurfaceCacheEntryMatchesToken(candidate, token));
+    if (!entry) return false;
+    const exactToken = tokenForEntry(entry);
+    if (!exactToken) return false;
+    setPresentedToken((current) => sameDocumentSurfaceCacheToken(current, exactToken) ? current : exactToken);
+    controller?.confirmDocumentSurfaceReady(exactToken.tabId, exactToken.sourceSha256);
+    return true;
   }, [controller]);
-  const completeHandoff = useCallback((tabId: string) => {
-    setRetainedTabId((current) => current === tabId ? null : current);
+  const completeHandoff = useCallback((token: DocumentSurfaceCacheToken) => {
+    setPresentedToken((current) => sameDocumentSurfaceCacheToken(current, token) ? null : current);
   }, []);
   const updateVisibleScroll = useCallback((tabId: string, scrollTop: number) => {
     controller?.updateDocumentSurfacePresentation(tabId, { scrollTop });
@@ -67,21 +119,48 @@ export function useDocumentSurfaceHandoff({
       detail: Object.freeze({ tabId, scrollTop }),
     });
   }, [controller]);
-  let visibleCachedSurface: DocumentSurfaceCacheEntry | null = pending;
-  if (!visibleCachedSurface && active?.kind === "document" && retainedTabId && !terminal) {
-    // Keep the scroll-only cached page above the newly committed Canvas until
-    // that exact Canvas generation verifies. Authority still mounts underneath.
-    visibleCachedSurface = cache.entries.find((entry) => (
+  const activeCandidate = !presentedToken
+    && !terminal
+    && active?.kind === "document"
+    && sourceSha256
+    ? cache.entries.find((entry) => (
       entry.tier === "hot"
-      && entry.tabId === retainedTabId
       && entry.tabId === active.tabId
       && entry.projectId === active.projectId
       && entry.documentId === active.documentId
       && entry.sourceSha256 === sourceSha256
-    )) || null;
-  }
+    )) || null
+    : null;
+  const retainedCandidateIsActive = Boolean(
+    retainedCandidateToken
+    && active?.kind === "document"
+    && active.tabId === retainedCandidateToken.tabId
+    && sourceSha256 === retainedCandidateToken.sourceSha256,
+  );
+  const candidateToken = pendingToken
+    || (retainedCandidateIsActive && !terminal ? retainedCandidateToken : null)
+    || tokenForEntry(activeCandidate);
+  const candidateCachedSurface = entryForToken(cache, candidateToken);
+  const presentedCachedSurface = entryForToken(cache, presentedToken);
+  const presentedMatchesActive = Boolean(
+    presentedCachedSurface
+    && active?.kind === "document"
+    && presentedCachedSurface.tabId === active.tabId
+    && presentedCachedSurface.projectId === active.projectId
+    && presentedCachedSurface.documentId === active.documentId
+    && presentedCachedSurface.sourceSha256 === sourceSha256,
+  );
+  // During a handoff, keep the old ready projection over the new live Canvas
+  // until the target reports its own display-ready token. Once the target is
+  // active and its Canvas is verified, normal authority takes over.
+  const visibleCachedSurface = presentedCachedSurface && (
+    Boolean(candidateCachedSurface)
+    || (presentedMatchesActive && !terminal)
+  ) ? presentedCachedSurface : null;
   return {
     visibleCachedSurface,
+    candidateCachedSurface,
+    visibleCachedSurfaceReady: Boolean(visibleCachedSurface),
     retainPresentedTab,
     completeHandoff,
     updateVisibleScroll,

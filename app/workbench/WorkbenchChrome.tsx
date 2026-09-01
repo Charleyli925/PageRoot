@@ -425,6 +425,7 @@ export function WorkbenchGlobalSidebar({
                 <ProjectVersionTree
                   key={currentProjectId}
                   versions={currentProjectVersions}
+                  isCurrentProject
                   onOpenVersion={onOpenCurrentVersion}
                 />
               ) : null}
@@ -465,6 +466,7 @@ export function WorkbenchGlobalSidebar({
                       ) : (
                         <ProjectVersionTree
                           versions={state.versions}
+                          isCurrentProject={false}
                           onOpenVersion={(version) => onOpenRegisteredVersion(project, version)}
                         />
                       )
@@ -484,7 +486,7 @@ export function WorkbenchGlobalSidebar({
               data-tooltip="设置"
               onClick={onOpenSettings}
             >
-              <GearSixIcon aria-hidden="true" size={20} weight="bold" />
+              <GearSixIcon aria-hidden="true" size={17} weight="bold" />
             </button>
           </footer>
           <WorkbenchResizer kind="sidebar" onCommit={onResizeCommit} />
