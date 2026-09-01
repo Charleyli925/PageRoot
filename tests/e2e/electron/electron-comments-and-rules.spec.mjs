@@ -62,7 +62,7 @@ async function retainedEditorDocumentToken(page) {
   });
 }
 
-test("长期规则入口打开唯一 PROJECT.md 标签并保留 HTML 画布", async () => {
+test("长期规则入口打开唯一规则标签并保留 HTML 画布", async () => {
   test.setTimeout(90_000);
   const fixture = createSourceFixture("project-rules-first-stage.html");
   const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
@@ -78,12 +78,12 @@ test("长期规则入口打开唯一 PROJECT.md 标签并保留 HTML 画布", as
     const rulesEntry = launched.page.locator(".sidebar-project-rules-row");
     await expect(rulesEntry).toBeVisible();
     await expect(rulesEntry).toContainText("长期规则");
-    await expect(rulesEntry).toContainText("PROJECT.md");
+    await expect(rulesEntry).not.toContainText("PROJECT.md");
 
     await rulesEntry.click();
     const rulesTab = launched.page.getByRole("tab", { name: "长期规则", exact: true });
     await expect(rulesTab).toHaveAttribute("aria-selected", "true");
-    const editor = launched.page.getByRole("textbox", { name: "PROJECT.md 内容" });
+    const editor = launched.page.getByRole("textbox", { name: "长期规则内容" });
     await expect(editor).toBeVisible();
     await expect(editor).toHaveValue(/## 项目目标/u);
     await editor.fill("只修改首页标题");

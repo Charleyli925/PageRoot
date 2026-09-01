@@ -4747,7 +4747,23 @@ export class ProjectFileRepository {
       availabilityReason: availability === "ready"
         ? null
         : "项目记录或当前工作文件暂时无法核对。",
+      lastUpdatedAt: null,
     };
+  }
+
+  #registeredProjectLastUpdatedAt({ loaded, workingCopyState, rulesInformation }) {
+    const candidates = [
+      workingCopyState?.lastSavedAt,
+      rulesInformation?.mtime instanceof Date
+        ? rulesInformation.mtime.toISOString()
+        : null,
+      ...loaded.manifest.versions.map((version) => version.createdAt),
+    ];
+    const timestamps = candidates
+      .map((value) => Date.parse(String(value || "")))
+      .filter((value) => Number.isFinite(value));
+    if (timestamps.length === 0) return null;
+    return new Date(Math.max(...timestamps)).toISOString();
   }
 
   async #activeRegisteredWorkingCopy(loaded) {
@@ -4793,6 +4809,11 @@ export class ProjectFileRepository {
           { projectRootPath: loaded.paths.projectRootPath },
         );
         assertWorkingCopyState(state, loaded, workingCopy);
+        const rulesInformation = await regularInformation(
+          path.join(loaded.paths.projectRootPath, "PROJECT.md"),
+          "PROJECT.md",
+          { projectRootPath: loaded.paths.projectRootPath },
+        );
         rows.push({
           projectId: loaded.project.projectId,
           documentId: loaded.project.documentId,
@@ -4805,6 +4826,11 @@ export class ProjectFileRepository {
           hasPendingCandidate: loaded.runtime.activeCandidateId !== null,
           availability: "ready",
           availabilityReason: null,
+          lastUpdatedAt: this.#registeredProjectLastUpdatedAt({
+            loaded,
+            workingCopyState: state,
+            rulesInformation,
+          }),
         });
       } catch (cause) {
         const fallback = this.#registeredProjectCatalogFallback(

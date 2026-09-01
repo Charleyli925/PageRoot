@@ -182,6 +182,24 @@ test("the Registry alone determines catalog membership and secure project opens"
   assert.equal(bBeforeRename?.activeWorkingCopyId, "work_ver_0001");
   assert.equal(bBeforeRename?.currentBasedOnVersionId, "ver_0001");
   assert.equal(bBeforeRename?.latestOfficialVersionId, "ver_0001");
+  for (const project of [a, b]) {
+    const row = initial.find((entry) => entry.projectId === project.target.projectId);
+    const manifest = await json(path.join(project.target.projectRootPath, ".pageroot", "manifest.json"));
+    const workingState = await json(path.join(
+      project.target.projectRootPath,
+      ".pageroot",
+      "working-copies",
+      `${project.target.workingCopyId}.json`,
+    ));
+    const rules = await lstat(path.join(project.target.projectRootPath, "PROJECT.md"));
+    const expectedLastUpdatedAt = new Date(Math.max(
+      Date.parse(workingState.lastSavedAt),
+      Date.parse(rules.mtime.toISOString()),
+      ...manifest.versions.map((version) => Date.parse(version.createdAt)),
+    )).toISOString();
+    assert.equal(row?.lastUpdatedAt, expectedLastUpdatedAt);
+    assert.equal(Object.hasOwn(row || {}, "lastOpenedAt"), false);
+  }
 
   const renamedRoot = path.join(value.projects, "B renamed");
   await rename(b.target.projectRootPath, renamedRoot);

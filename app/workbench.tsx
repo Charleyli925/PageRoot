@@ -6146,7 +6146,12 @@ export default function Workbench() {
         open={globalSidebarOpen}
         currentProjectId={projectId}
         currentProjectName={currentProjectDisplayName}
+        currentProjectDocumentId={documentId || null}
+        currentProjectSourcePath={sourcePath || null}
         currentProjectVersions={currentProjectSidebarVersions}
+        activeVersionId={activeWorkbenchTab?.kind === "document"
+          ? viewMode === "history" ? viewingVersionId : currentBasedOnVersionId
+          : null}
         projectRulesActive={projectRulesPageActive}
         onToggle={() => {
           setGlobalSidebarOpen((open) => !open);

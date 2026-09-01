@@ -216,7 +216,7 @@ export class ProjectRulesWorkflow {
       if (!this.#isCurrent(token)) return stale(token.context);
       const reason = this.#errorMessage(
         cause,
-        "项目文件暂时无法读取；未显示任何可编辑的替代内容。",
+        "长期规则暂时无法读取；未显示任何可编辑的替代内容。",
       );
       this.#projectRulesSession.failOpen(token, reason);
       return rejected(bridgeErrorCode(cause, "PROJECT_RULES_READ_FAILED"), reason);

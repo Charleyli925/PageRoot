@@ -142,25 +142,30 @@ test("project trees use compact unweighted rows and a uniform quiet lineage", as
   const css = await readWorkbenchCascadeCss();
 
   const projectRow = lastCssRule(css, ".sidebar-project-row");
-  assert.match(projectRow, /font-size:\s*11px/u);
+  assert.match(projectRow, /font-size:\s*12px/u);
   assert.match(projectRow, /font-weight:\s*400/u);
-  const currentProject = lastCssRule(css, ".sidebar-project-row-current");
-  assert.match(currentProject, /background:\s*transparent/u);
-  assert.doesNotMatch(currentProject, /#ece9ff|rgb\(238 236 255 \/ 78%\)/u);
-  assert.match(css, /\.sidebar-project-row > \.sidebar-project-icon\s*\{[\s\S]*?width:\s*14px[\s\S]*?height:\s*14px/u);
+  assert.match(projectRow, /display:\s*grid/u);
+  assert.match(projectRow, /grid-template-columns:\s*var\(--sidebar-row-icon-column\) minmax\(0, 1fr\)/u);
+  assert.doesNotMatch(css, /sidebar-project-row-current|sidebar-project-pending/u);
+  assert.match(css, /\.sidebar-project-row > \.sidebar-project-icon\s*\{[\s\S]*?width:\s*16px[\s\S]*?height:\s*16px/u);
 
   const lineage = lastCssRule(css, ".sidebar-version-rail-path");
   assert.match(lineage, /stroke-width:\s*1\.25/u);
-  const currentLineage = lastCssRule(css, '.sidebar-version-rail-path[data-current="true"]');
-  assert.doesNotMatch(currentLineage, /stroke-width/u);
+  assert.doesNotMatch(css, /\.sidebar-version-rail-path\[data-current=/u);
   const node = lastCssRule(css, ".sidebar-version-node");
   assert.match(node, /stroke-width:\s*1\.25/u);
+  assert.match(css, /\.sidebar-version-node\[data-selected="true"\]/u);
+  const versionRow = lastCssRule(css, ".sidebar-version-row");
+  assert.match(versionRow, /grid-template-columns:\s*var\(--sidebar-row-icon-column\) minmax\(0, 1fr\) 68px/u);
+  assert.match(versionRow, /padding:\s*0/u);
+  assert.match(css, /\.sidebar-version-row\[data-selected="true"\]/u);
   assert.doesNotMatch(css, /sidebar-version-file > svg/u);
   assert.doesNotMatch(css, /sidebar-version-current-label/u);
   assert.doesNotMatch(css, /sidebar-skeleton-icon/u);
   const rulesRow = lastCssRule(css, ".sidebar-project-rules-row");
-  assert.match(rulesRow, /min-height:\s*38px/u);
-  assert.match(css, /\.sidebar-project-rules-copy > small/u);
+  assert.match(rulesRow, /min-height:\s*34px/u);
+  assert.match(rulesRow, /grid-template-columns:\s*var\(--sidebar-row-icon-column\) minmax\(0, 1fr\)/u);
+  assert.doesNotMatch(css, /sidebar-project-rules-copy|<small>PROJECT\.md/u);
 });
 
 test("cache handoff waits for static display readiness and uses live canvas geometry", async () => {

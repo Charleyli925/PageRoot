@@ -1610,7 +1610,7 @@ async function importExternalViaBridge(sourcePath, expectedSourceSha256) {
   ) {
     throw new ProjectFileError(
       "EXTERNAL_IMPORT_FAILED",
-      "导入后的项目文件与刚才选择的文件不一致，当前项目没有改变。",
+      "导入后的项目与刚才选择的文件不一致，当前项目没有改变。",
     );
   }
   const [originalIdentity, importedIdentity] = await Promise.all([
@@ -1795,7 +1795,7 @@ async function assertTrashableOriginal(intent) {
     if (originalIdentity === committedIdentity) {
       throw new ProjectFileError(
         "EXTERNAL_OPEN_DELETE_NOT_ALLOWED",
-        "不能删除当前项目文件。",
+        "不能删除当前 HTML 文件。",
       );
     }
   }
@@ -1921,14 +1921,14 @@ async function openProjectsRoot() {
   if (!information?.isDirectory() || information.isSymbolicLink()) {
     throw new ProjectFileError(
       "PROJECTS_ROOT_UNAVAILABLE",
-      "PageRoot 项目文件夹暂时无法打开，请稍后重试。",
+      "PageRoot 项目目录暂时无法打开，请稍后重试。",
     );
   }
   const openError = await shell.openPath(rootPath);
   if (openError) {
     throw new ProjectFileError(
       "PROJECTS_ROOT_OPEN_FAILED",
-      "PageRoot 项目文件夹暂时无法打开，请稍后重试。",
+      "PageRoot 项目目录暂时无法打开，请稍后重试。",
       { reason: openError },
     );
   }
@@ -3115,12 +3115,16 @@ function assertRegisteredProjectCatalogRow(value) {
   }
   const availability = String(value.availability || "");
   const projectId = assertRegisteredProjectId(value.projectId);
+  const lastUpdatedAt = value.lastUpdatedAt == null
+    ? null
+    : String(value.lastUpdatedAt);
   if (
     !["ready", "unavailable", "invalid"].includes(availability)
     || typeof value.projectName !== "string"
     || !value.projectName
     || typeof value.registeredProjectRootPath !== "string"
     || !value.registeredProjectRootPath
+    || (lastUpdatedAt !== null && Number.isNaN(Date.parse(lastUpdatedAt)))
   ) {
     throw new ProjectFileError(
       "REGISTERED_PROJECT_CATALOG_INVALID",
@@ -3157,7 +3161,14 @@ function assertRegisteredProjectCatalogRow(value) {
     availabilityReason: typeof value.availabilityReason === "string"
       ? value.availabilityReason
       : null,
+    lastUpdatedAt,
   });
+}
+
+function registeredProjectTimestamp(value) {
+  if (typeof value !== "string" || !value) return null;
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? timestamp : null;
 }
 
 function assertRegisteredProjectVersionSummary(value, projectId, documentId) {
@@ -3279,7 +3290,10 @@ async function listRegisteredProjects() {
         : null,
     }))
     .sort((left, right) => (
-      Number(right.lastOpenedAt || 0) - Number(left.lastOpenedAt || 0)
+      (registeredProjectTimestamp(right.lastUpdatedAt) === null)
+        - (registeredProjectTimestamp(left.lastUpdatedAt) === null)
+      || (registeredProjectTimestamp(right.lastUpdatedAt) || 0)
+        - (registeredProjectTimestamp(left.lastUpdatedAt) || 0)
       || left.projectName.localeCompare(right.projectName, "zh-CN")
       || left.projectId.localeCompare(right.projectId)
     ));
