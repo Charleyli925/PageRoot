@@ -1121,7 +1121,8 @@ responsibility groups:
   `scripts/notice-disposition-ledger.json`. Counts may only decrease. New
   wrapper aliases of `setToast` fail. Changing a registered Notice must
   reclassify or delete it; the N5 allowlist may only shrink. N0 success
-  notices and N1 internal reliability notices are already deleted.
+  notices, N1 internal reliability notices and N2 existing-control notices
+  are already deleted.
 
 The gate uses structural queries from `scripts/architecture-ast-query.mjs`
 (`moduleSpecifiers`, `callNames`, `callExpressions`, `jsxElementNames`, `newExpressionNames`, filesystem-write

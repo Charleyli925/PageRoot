@@ -1,5 +1,5 @@
 import type { HtmlCanvasSelection } from "../components/HtmlCanvasEditor";
-import type { CommentItem, Toast } from "./types";
+import type { CommentItem } from "./types";
 
 export function canLocateTarget(target: HtmlCanvasSelection): boolean;
 
@@ -21,7 +21,3 @@ export type RelinkNoticeCopy = {
 export function relinkNoticeCopy(
   comments: readonly CommentItem[],
 ): RelinkNoticeCopy;
-
-export function unsafeCommentTargetsNotice(
-  comments: readonly CommentItem[],
-): NonNullable<Toast>;
