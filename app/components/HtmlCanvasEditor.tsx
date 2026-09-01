@@ -176,7 +176,10 @@ import {
   type CanvasTargetIdentityScope,
   type ResolvedCanvasTarget,
 } from "./html-canvas-pointer-capability";
-import { runtimeVisualTargetForHint } from "./html-canvas-runtime-target";
+import {
+  disposeRuntimeVisualTargetIndex,
+  runtimeVisualTargetForHint,
+} from "./html-canvas-runtime-target";
 import {
   clipCanvasTargetRectToViewport,
   createCanvasCapabilityHoverController,
@@ -1663,6 +1666,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       : 0;
     const current = canvasTargetIdentityScopeRef.current;
     if (current.generation === normalizedGeneration) return current;
+    disposeRuntimeVisualTargetIndex(current.runtimeVisualTargetIndex);
     const next = createCanvasTargetIdentityScope(normalizedGeneration);
     canvasTargetIdentityScopeRef.current = next;
     return next;
@@ -4830,7 +4834,9 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         element.ownerDocument.getSelection()?.removeAllRanges();
       }
       element.setAttribute("data-html-canvas-selected", nextSelection.level);
-      const isGlobalPage = isPageRootElement(element) && nextSelection.level === "module";
+      const isGlobalPage = !options.runtimeGenerated
+        && isPageRootElement(element)
+        && nextSelection.level === "module";
       element.toggleAttribute(GLOBAL_SELECTION_ATTRIBUTE, isGlobalPage);
       selectedSourceSelectionRef.current = nextSelectionWithContext;
       selectedCommentAnchorRef.current = options.commentAnchor
@@ -4955,9 +4961,10 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         )
       )
     );
-    const textLocator = sameElement
-      ? textLocatorForActiveRange(activeRange, sourceIndexRef.current)
-      : null;
+    const textLocator = target.textLocator
+      ?? (sameElement
+        ? textLocatorForActiveRange(activeRange, sourceIndexRef.current)
+        : null);
     onRequestCommentRef.current?.({
       ...target,
       commentAnchor,
@@ -6779,6 +6786,9 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         && runtimePromotion.previousActive.cleanupFrame !== activeCleanup
       ) runtimePromotion.previousActive.cleanupFrame();
       runtimePromotion?.previousActive.runtimeSourceRegistrationCleanup();
+      disposeRuntimeVisualTargetIndex(
+        canvasTargetIdentityScopeRef.current.runtimeVisualTargetIndex,
+      );
       resizeObserverRef.current?.disconnect();
     };
   }, [clearNativeEditCheckpointTimer, discardPendingNativeCommands]);
@@ -6877,7 +6887,52 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         nativeDomGenerationRef.current,
       ),
     });
+    let pendingHoverPointer: {
+      eventTarget: EventTarget | null;
+      point: TextCaretPoint;
+    } | null = null;
+    let pendingHoverFrame: number | null = null;
+    const cancelPendingHoverResolution = () => {
+      pendingHoverPointer = null;
+      if (pendingHoverFrame === null) return;
+      documentNode.defaultView?.cancelAnimationFrame(pendingHoverFrame);
+      pendingHoverFrame = null;
+    };
+    const flushPendingHoverResolution = () => {
+      pendingHoverFrame = null;
+      const pending = pendingHoverPointer;
+      pendingHoverPointer = null;
+      if (!pending) return;
+      if (
+        connectedFrameRef.current?.iframe !== iframe
+        || connectedFrameRef.current.generation !== connectedFrameGeneration
+      ) return;
+      hoverControllerRef.current?.update(resolveCanvasTarget({
+        documentNode,
+        eventTarget: pending.eventTarget,
+        point: pending.point,
+        sourceIndex: sourceIndexRef.current,
+        enabled: true,
+        isProvenRuntimeSourceElement: currentRuntimeSourceProof(),
+        generation: nativeDomGenerationRef.current,
+        identityScope: canvasTargetIdentityScopeForGeneration(
+          nativeDomGenerationRef.current,
+        ),
+      }));
+    };
+    const scheduleHoverResolution = () => {
+      if (pendingHoverFrame !== null) return;
+      const frameView = documentNode.defaultView;
+      if (!frameView?.requestAnimationFrame) {
+        flushPendingHoverResolution();
+        return;
+      }
+      pendingHoverFrame = frameView.requestAnimationFrame(
+        flushPendingHoverResolution,
+      );
+    };
     const handleClick = (event: MouseEvent) => {
+      cancelPendingHoverResolution();
       hoverControllerRef.current?.hide();
       // Authored controls remain selectable/editable content in the Canvas,
       // never live navigation or form controls. Suppress their browser action
@@ -6942,6 +6997,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     };
 
     const handleDoubleClick = (event: MouseEvent) => {
+      cancelPendingHoverResolution();
       hoverControllerRef.current?.hide();
       if (findNativeActionTarget(event.target)) event.preventDefault();
       const caretPoint = caretPointFromMouseEvent(event);
@@ -7175,6 +7231,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     };
 
     const handleMouseDown = (event: MouseEvent) => {
+      cancelPendingHoverResolution();
       hoverControllerRef.current?.hide();
       onInteractionRef.current?.();
       setSpacingMenuOpen(false);
@@ -7263,6 +7320,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     };
 
     const handleScroll = () => {
+      cancelPendingHoverResolution();
       hoverControllerRef.current?.hide();
       updateOverlayPosition();
     };
@@ -7275,23 +7333,18 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         || !pointerCapabilityHoverEnabledRef.current
         || activeNativeEditRef.current
       ) {
+        cancelPendingHoverResolution();
         hoverControllerRef.current?.hide();
         return;
       }
-      hoverControllerRef.current?.update(resolveCanvasTarget({
-        documentNode,
+      pendingHoverPointer = {
         eventTarget: event.target,
         point: caretPointFromMouseEvent(event),
-        sourceIndex: sourceIndexRef.current,
-        enabled: true,
-        isProvenRuntimeSourceElement: currentRuntimeSourceProof(),
-        generation: nativeDomGenerationRef.current,
-        identityScope: canvasTargetIdentityScopeForGeneration(
-          nativeDomGenerationRef.current,
-        ),
-      }));
+      };
+      scheduleHoverResolution();
     };
     const handlePointerLeave = () => {
+      cancelPendingHoverResolution();
       // The caption is rendered outside the iframe. Let its pointer-enter
       // event win the transition from the iframe before hiding the hover
       // chrome, otherwise an outside caption cannot be clicked.
@@ -7351,6 +7404,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     }
 
     cleanupFrameRef.current = () => {
+      cancelPendingHoverResolution();
       documentNode.removeEventListener("click", handleClick, true);
       documentNode.removeEventListener("mousedown", handleMouseDown, true);
       documentNode.removeEventListener("mouseup", handleMouseUp, true);
@@ -8821,6 +8875,28 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   const commentOnSelection = useCallback(() => {
     if (lockedRef.current || !selection) return;
     const openComment = () => {
+      const activeNativeEdit = activeNativeEditRef.current;
+      if (!activeTextRangeRef.current && activeNativeEdit) {
+        // A programmatic Selection (and a fast mouse selection) may reach the
+        // toolbar before the controller's selectionchange frame publishes its
+        // range. Read the live island selection once at the comment boundary
+        // and prefer the toolbar's retained selection after focus leaves the
+        // iframe, so a source comment does not silently lose its text locator.
+        const retained = retainNativeEditFocusRef.current;
+        const liveSelection = activeNativeEdit.session.getSelection();
+        const selectionForRange = liveSelection.anchor !== liveSelection.focus
+          ? liveSelection
+          : retained
+            && retained.session === activeNativeEdit.session
+            && retained.targetId === activeNativeEdit.target.id
+            && nativeEditLeasesMatch(retained.lease, activeNativeEdit.lease)
+            ? retained.selection
+            : liveSelection;
+        refreshNativeEditRangeState(
+          activeNativeEdit,
+          selectionForRange,
+        );
+      }
       const activeRange = activeTextRangeRef.current;
       const sameElement = Boolean(
         activeRange
@@ -8845,7 +8921,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     };
     if (deferNativeCommandRef.current("comment", openComment)) return;
     openComment();
-  }, [finishNativeEditing, requestCommentForTarget, selection]);
+  }, [finishNativeEditing, refreshNativeEditRangeState, requestCommentForTarget, selection]);
   const startEditingSelection = useCallback(() => {
     startEditing();
   }, [startEditing]);

@@ -10,8 +10,232 @@ import type {
 } from "./HtmlCanvasEditor.types";
 import { readableLabel } from "./html-canvas-selection";
 
-const RUNTIME_TARGET_SELECTOR = "*";
+const RUNTIME_VISUAL_TARGET_SELECTOR = [
+  "table",
+  "td",
+  "th",
+  "svg",
+  "canvas",
+  "[data-chart]",
+  "[data-chart-root]",
+  "[data-echarts]",
+  "[role='img']",
+].join(", ");
+const RUNTIME_VISUAL_TARGET_BUCKET_SIZE = 192;
+const RUNTIME_HINT_CANDIDATE_LIMIT = 512;
 const RUNTIME_TEXT_LIMIT = 320;
+
+type RuntimeVisualTargetIndexEntry = {
+  target: HTMLElement;
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+  area: number;
+};
+
+export type RuntimeVisualTargetIndex = {
+  readonly documentNode: Document;
+  readonly entries: RuntimeVisualTargetIndexEntry[];
+  readonly buckets: Map<string, RuntimeVisualTargetIndexEntry[]>;
+  hintCache: WeakMap<HTMLElement, {
+    sourceHost: HTMLElement;
+    hint: HtmlCanvasRuntimeVisualHint;
+  }>;
+  mutationObserver: MutationObserver | null;
+  resizeObserver: ResizeObserver | null;
+  resizeObserverPrimed: boolean;
+  readonly resizeWindow: Window | null;
+  resizeListener: (() => void) | null;
+  scrollListener: (() => void) | null;
+  dirty: boolean;
+  disposed: boolean;
+};
+
+function isElementNode(value: unknown): value is HTMLElement {
+  return Boolean(
+    value
+    && typeof value === "object"
+    && (value as { nodeType?: unknown }).nodeType === 1,
+  );
+}
+
+function bucketCoordinate(value: number): number {
+  return Math.floor(value / RUNTIME_VISUAL_TARGET_BUCKET_SIZE);
+}
+
+function bucketKey(x: number, y: number): string {
+  return `${bucketCoordinate(x)}:${bucketCoordinate(y)}`;
+}
+
+function runtimeTargetRect(
+  element: HTMLElement,
+): RuntimeVisualTargetIndexEntry | null {
+  const rect = element.getBoundingClientRect();
+  if (
+    !Number.isFinite(rect.left)
+    || !Number.isFinite(rect.top)
+    || !Number.isFinite(rect.width)
+    || !Number.isFinite(rect.height)
+    || rect.width <= 0
+    || rect.height <= 0
+  ) return null;
+  return {
+    target: element,
+    left: rect.left,
+    top: rect.top,
+    right: rect.right,
+    bottom: rect.bottom,
+    area: rect.width * rect.height,
+  };
+}
+
+function markRuntimeVisualTargetIndexDirty(
+  index: RuntimeVisualTargetIndex,
+): void {
+  if (index.disposed) return;
+  index.dirty = true;
+  index.hintCache = new WeakMap();
+}
+
+function addRuntimeVisualTargetIndexEntry(
+  buckets: Map<string, RuntimeVisualTargetIndexEntry[]>,
+  entry: RuntimeVisualTargetIndexEntry,
+): void {
+  const firstX = bucketCoordinate(entry.left);
+  const lastX = bucketCoordinate(Math.max(entry.left, entry.right - 0.01));
+  const firstY = bucketCoordinate(entry.top);
+  const lastY = bucketCoordinate(Math.max(entry.top, entry.bottom - 0.01));
+  for (let x = firstX; x <= lastX; x += 1) {
+    for (let y = firstY; y <= lastY; y += 1) {
+      const key = `${x}:${y}`;
+      const entries = buckets.get(key) || [];
+      entries.push(entry);
+      buckets.set(key, entries);
+    }
+  }
+}
+
+function rebuildRuntimeVisualTargetIndex(
+  index: RuntimeVisualTargetIndex,
+  isProvenSourceElement: ((element: HTMLElement) => boolean) | null,
+): void {
+  if (index.disposed) return;
+  index.entries.length = 0;
+  index.buckets.clear();
+  index.hintCache = new WeakMap();
+  if (!isProvenSourceElement) {
+    index.dirty = false;
+    return;
+  }
+  try {
+    const visualTargets = new Set<HTMLElement>();
+    index.documentNode
+      .querySelectorAll<HTMLElement>(RUNTIME_VISUAL_TARGET_SELECTOR)
+      .forEach((candidate) => {
+        if (!isElementNode(candidate) || isProvenSourceElement(candidate)) return;
+        const visualTarget = runtimeVisualTargetElement(candidate);
+        if (
+          visualTarget
+          && visualTarget !== index.documentNode.body
+          && visualTarget !== index.documentNode.documentElement
+          && !isProvenSourceElement(visualTarget)
+        ) visualTargets.add(visualTarget);
+      });
+    for (const visualTarget of visualTargets) {
+      const entry = runtimeTargetRect(visualTarget);
+      if (!entry) continue;
+      index.entries.push(entry);
+      addRuntimeVisualTargetIndexEntry(index.buckets, entry);
+    }
+  } catch {
+    index.entries.length = 0;
+    index.buckets.clear();
+  }
+  index.dirty = false;
+}
+
+export function createRuntimeVisualTargetIndex(
+  documentNode: Document,
+): RuntimeVisualTargetIndex {
+  const index = {
+    documentNode,
+    entries: [],
+    buckets: new Map<string, RuntimeVisualTargetIndexEntry[]>(),
+    hintCache: new WeakMap(),
+    mutationObserver: null,
+    resizeObserver: null,
+    resizeObserverPrimed: false,
+    resizeWindow: documentNode.defaultView || null,
+    resizeListener: null,
+    scrollListener: null,
+    dirty: true,
+    disposed: false,
+  } as RuntimeVisualTargetIndex;
+  const MutationObserverConstructor = documentNode.defaultView?.MutationObserver;
+  if (MutationObserverConstructor) {
+    const observer = new MutationObserverConstructor(() => {
+      markRuntimeVisualTargetIndexDirty(index);
+    });
+    observer.observe(documentNode.documentElement || documentNode, {
+      attributes: true,
+      attributeFilter: [
+        "aria-label",
+        "class",
+        "data-chart",
+        "data-chart-root",
+        "data-echarts",
+        "data-label",
+        "hidden",
+        "role",
+        "style",
+      ],
+      childList: true,
+      characterData: true,
+      subtree: true,
+    });
+    index.mutationObserver = observer;
+  }
+  const ResizeObserverConstructor = documentNode.defaultView?.ResizeObserver;
+  if (ResizeObserverConstructor) {
+    const observer = new ResizeObserverConstructor(() => {
+      if (!index.resizeObserverPrimed) {
+        index.resizeObserverPrimed = true;
+        return;
+      }
+      markRuntimeVisualTargetIndexDirty(index);
+    });
+    if (documentNode.documentElement) observer.observe(documentNode.documentElement);
+    if (documentNode.body) observer.observe(documentNode.body);
+    index.resizeObserver = observer;
+  }
+  const resizeListener = () => {
+    markRuntimeVisualTargetIndexDirty(index);
+  };
+  index.resizeWindow?.addEventListener("resize", resizeListener);
+  index.resizeListener = resizeListener;
+  documentNode.addEventListener("scroll", resizeListener, true);
+  index.scrollListener = resizeListener;
+  return index;
+}
+
+export function disposeRuntimeVisualTargetIndex(
+  index: RuntimeVisualTargetIndex | null | undefined,
+): void {
+  if (!index || index.disposed) return;
+  index.disposed = true;
+  index.mutationObserver?.disconnect();
+  index.resizeObserver?.disconnect();
+  if (index.resizeWindow && index.resizeListener) {
+    index.resizeWindow.removeEventListener("resize", index.resizeListener);
+  }
+  if (index.scrollListener) {
+    index.documentNode.removeEventListener("scroll", index.scrollListener, true);
+  }
+  index.entries.length = 0;
+  index.buckets.clear();
+  index.hintCache = new WeakMap();
+}
 
 function cleanVisibleText(element: HTMLElement): string {
   return String(element.innerText || element.textContent || "")
@@ -157,12 +381,19 @@ function explicitRuntimeLabel(
 export function runtimeVisualHintForTarget({
   sourceHost,
   visualTarget,
+  cache,
 }: {
   sourceHost: HTMLElement;
   visualTarget: HTMLElement;
+  cache?: WeakMap<HTMLElement, {
+    sourceHost: HTMLElement;
+    hint: HtmlCanvasRuntimeVisualHint;
+  }>;
 }): HtmlCanvasRuntimeVisualHint {
+  const cached = cache?.get(visualTarget);
+  if (cached?.sourceHost === sourceHost) return cached.hint;
   const kind = runtimeVisualHintKind(visualTarget);
-  return normalizeRuntimeVisualHint({
+  const hint = normalizeRuntimeVisualHint({
     runtimeGenerated: true,
     kind,
     label: explicitRuntimeLabel(sourceHost, visualTarget),
@@ -170,51 +401,64 @@ export function runtimeVisualHintForTarget({
     relativePath: runtimeVisualPathWithin(sourceHost, visualTarget),
     relativeBox: normalizedRelativeBox(sourceHost, visualTarget),
   }) as HtmlCanvasRuntimeVisualHint;
+  cache?.set(visualTarget, { sourceHost, hint });
+  return hint;
 }
 
 export function runtimeVisualTargetAtPoint({
   documentNode,
   point,
   isProvenSourceElement,
+  runtimeVisualTargetIndex = null,
 }: {
   documentNode: Document;
   point: { clientX: number; clientY: number };
   isProvenSourceElement: ((element: HTMLElement) => boolean) | null;
+  runtimeVisualTargetIndex?: RuntimeVisualTargetIndex | null;
 }): HTMLElement | null {
   if (!isProvenSourceElement || !documentNode || !point) return null;
-  const candidates = new Set<HTMLElement>();
   if (typeof documentNode.elementsFromPoint === "function") {
-    documentNode.elementsFromPoint(point.clientX, point.clientY)
-      .forEach((candidate) => {
-        if (candidate instanceof HTMLElement) candidates.add(candidate);
-      });
+    for (const candidate of documentNode.elementsFromPoint(
+      point.clientX,
+      point.clientY,
+    )) {
+      if (!isElementNode(candidate) || isProvenSourceElement(candidate)) continue;
+      const visualTarget = runtimeVisualTargetElement(candidate);
+      if (
+        visualTarget
+        && visualTarget !== documentNode.body
+        && visualTarget !== documentNode.documentElement
+        && !isProvenSourceElement(visualTarget)
+      ) return visualTarget;
+    }
   }
-  documentNode.querySelectorAll<HTMLElement>(
-    "table, td, th, svg, canvas, [data-chart], [data-chart-root], [data-echarts], [role='img']",
-  ).forEach((candidate) => candidates.add(candidate));
-  const visualTargets = new Set<HTMLElement>();
-  for (const candidate of candidates) {
-    if (isProvenSourceElement(candidate)) continue;
-    const rect = candidate.getBoundingClientRect();
+  if (
+    !runtimeVisualTargetIndex
+    || runtimeVisualTargetIndex.documentNode !== documentNode
+    || runtimeVisualTargetIndex.disposed
+  ) return null;
+  if (runtimeVisualTargetIndex.dirty) {
+    rebuildRuntimeVisualTargetIndex(
+      runtimeVisualTargetIndex,
+      isProvenSourceElement,
+    );
+  }
+  const entries = runtimeVisualTargetIndex.buckets.get(
+    bucketKey(point.clientX, point.clientY),
+  ) || [];
+  let best: RuntimeVisualTargetIndexEntry | null = null;
+  for (const entry of entries) {
     if (
-      rect.width <= 0
-      || rect.height <= 0
-      || point.clientX < rect.left
-      || point.clientX > rect.right
-      || point.clientY < rect.top
-      || point.clientY > rect.bottom
+      !entry.target.isConnected
+      || isProvenSourceElement(entry.target)
+      || point.clientX < entry.left
+      || point.clientX > entry.right
+      || point.clientY < entry.top
+      || point.clientY > entry.bottom
     ) continue;
-    const visualTarget = runtimeVisualTargetElement(candidate);
-    if (
-      visualTarget
-      && visualTarget !== candidate.ownerDocument.body
-      && !isProvenSourceElement(visualTarget)
-    ) visualTargets.add(visualTarget);
+    if (!best || entry.area < best.area) best = entry;
   }
-  return [...visualTargets].sort((left, right) => (
-    (left.getBoundingClientRect().width * left.getBoundingClientRect().height)
-      - (right.getBoundingClientRect().width * right.getBoundingClientRect().height)
-  ))[0] ?? null;
+  return best?.target ?? null;
 }
 
 function visualBoxDistance(
@@ -235,6 +479,82 @@ function textSimilarity(left: string, right: string): number {
   return 0;
 }
 
+function selectorsForRuntimeHintKind(
+  kind: HtmlCanvasRuntimeVisualHintKind,
+): string[] {
+  switch (kind) {
+    case "table":
+      return ["table"];
+    case "table-cell":
+      return ["td, th"];
+    case "chart":
+      return [
+        "svg",
+        "canvas",
+        "[data-chart]",
+        "[data-chart-root]",
+        "[data-echarts]",
+        "[role='img']",
+      ];
+    case "svg":
+      return ["svg"];
+    case "canvas":
+      return ["canvas"];
+    case "runtime-region":
+      return [
+        "[data-chart]",
+        "[data-chart-root]",
+        "[data-echarts]",
+        "[role='img']",
+      ];
+    default:
+      return [];
+  }
+}
+
+function appendRuntimeHintCandidate(
+  candidates: HTMLElement[],
+  seen: Set<HTMLElement>,
+  candidate: unknown,
+): boolean {
+  if (
+    !isElementNode(candidate)
+    || seen.has(candidate)
+    || candidates.length >= RUNTIME_HINT_CANDIDATE_LIMIT
+  ) return false;
+  seen.add(candidate);
+  candidates.push(candidate);
+  return true;
+}
+
+function pathCandidateForRuntimeHint(
+  sourceHost: HTMLElement,
+  relativePath: string | undefined,
+): HTMLElement | null {
+  if (!relativePath || relativePath === ":scope") return null;
+  try {
+    const candidate = sourceHost.querySelector(relativePath);
+    return isElementNode(candidate) ? candidate : null;
+  } catch {
+    return null;
+  }
+}
+
+function appendBoundedRuntimeRegionCandidates(
+  sourceHost: HTMLElement,
+  candidates: HTMLElement[],
+  seen: Set<HTMLElement>,
+): void {
+  if (candidates.length >= RUNTIME_HINT_CANDIDATE_LIMIT) return;
+  const showElement = sourceHost.ownerDocument.defaultView?.NodeFilter.SHOW_ELEMENT ?? 1;
+  const walker = sourceHost.ownerDocument.createTreeWalker(sourceHost, showElement);
+  let current = walker.nextNode();
+  while (current && candidates.length < RUNTIME_HINT_CANDIDATE_LIMIT) {
+    appendRuntimeHintCandidate(candidates, seen, current);
+    current = walker.nextNode();
+  }
+}
+
 /**
  * Best-effort visual restoration inside a proven source host. It never
  * returns a source-backed descendant and it never participates in authority.
@@ -249,10 +569,28 @@ export function runtimeVisualTargetForHint(
   const hint = normalizeRuntimeVisualHint(rawHint);
   if (!hint) return null;
   const visualTargets = new Set<HTMLElement>();
-  const candidates = [
-    ...Array.from(sourceHost.querySelectorAll<HTMLElement>(RUNTIME_TARGET_SELECTOR)),
-    sourceHost,
-  ];
+  const candidates: HTMLElement[] = [];
+  const seenCandidates = new Set<HTMLElement>();
+  appendRuntimeHintCandidate(
+    candidates,
+    seenCandidates,
+    pathCandidateForRuntimeHint(sourceHost, hint.relativePath),
+  );
+  for (const selector of selectorsForRuntimeHintKind(hint.kind)) {
+    if (candidates.length >= RUNTIME_HINT_CANDIDATE_LIMIT) break;
+    try {
+      for (const candidate of sourceHost.querySelectorAll(selector)) {
+        appendRuntimeHintCandidate(candidates, seenCandidates, candidate);
+        if (candidates.length >= RUNTIME_HINT_CANDIDATE_LIMIT) break;
+      }
+    } catch {
+      // A persisted selector is only a hint. A malformed hint must not block
+      // the remaining bounded visual candidates.
+    }
+  }
+  if (hint.kind === "runtime-region") {
+    appendBoundedRuntimeRegionCandidates(sourceHost, candidates, seenCandidates);
+  }
   for (const candidate of candidates) {
     if (candidate === sourceHost) continue;
     if (options.isProvenSourceElement?.(candidate)) continue;
@@ -268,7 +606,12 @@ export function runtimeVisualTargetForHint(
       )
     ) continue;
     const visualTarget = runtimeVisualTargetElement(candidate);
-    if (visualTarget && visualTarget !== sourceHost) visualTargets.add(visualTarget);
+    if (
+      visualTarget
+      && visualTarget !== sourceHost
+      && runtimeVisualHintKind(visualTarget) === hint.kind
+      && !options.isProvenSourceElement?.(visualTarget)
+    ) visualTargets.add(visualTarget);
   }
   const ranked = [...visualTargets].map((candidate) => {
     const candidateKind = runtimeVisualHintKind(candidate);

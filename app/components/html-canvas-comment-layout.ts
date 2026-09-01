@@ -385,7 +385,8 @@ export function layoutCommentMarkers(options: {
     const targetRect = measuredElement.getBoundingClientRect();
     if (targetRect.bottom < 0 || targetRect.top > frameHeight) return;
     const isGlobalPageTarget = isPageRootElement(targetElement)
-      && target.level === "module";
+      && target.level === "module"
+      && !rawTarget.visualHint;
     const tabControl = commentTabAssociations.find((association) => (
       association.control === targetElement
       || association.control.contains(targetElement)

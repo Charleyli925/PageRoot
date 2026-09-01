@@ -5,6 +5,7 @@ import {
 import { versionAuditCollections } from "../lib/version-audit-records";
 import {
   commentSourceAnchor,
+  commentVisualHintForSelection,
   commentsFromRecords,
   insertionLabel,
   selectionFromRecord,
@@ -37,10 +38,18 @@ export function versionTitle(
     : null;
   return versionEntryTitle({
     isInitial: version.source === "初始页面",
-    comments: version.comments.map((comment) => ({
-      label: insertionLabel(commentSourceAnchor(comment) || comment.target),
-      text: comment.text,
-    })),
+    comments: version.comments.map((comment) => {
+      const sourceTarget = commentSourceAnchor(comment) || comment.target;
+      const visualHint = comment.visualHint
+        || commentVisualHintForSelection(comment.target);
+      const displayTarget = visualHint
+        ? { ...sourceTarget, label: visualHint.label, visualHint }
+        : sourceTarget;
+      return {
+        label: insertionLabel(displayTarget),
+        text: comment.text,
+      };
+    }),
     requirement: version.requirement,
     directEditCount: version.directEdits.length,
     branchedFromOrdinal: branchedFrom ? branchedFrom.ordinal : null,

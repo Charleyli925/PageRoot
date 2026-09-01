@@ -6,7 +6,9 @@ import {
   ECHARTS_STUB,
   bridgeJson,
   clickEditHistoryMenu,
+  chooseClipboardDelivery,
   currentEditorFrame,
+  existsSync,
   documentToken,
   expectCheckpointPersisted,
   launchPageRoot,
@@ -737,7 +739,7 @@ test("runtime tables, SVG and Canvas keep visual comments source-anchored", {
 
   await withRuntimeProject("pageroot-runtime-comment-dual-anchor-e2e-", {
     "runtime-report.html": html,
-  }, async ({ page, sourcePath }) => {
+  }, async ({ page, sourcePath, electronApp }) => {
     const { frame } = await loadedDiskFrame(page, sourcePath, "runtime-comment-host");
     const toolbar = page.getByRole("toolbar", { name: /评论/u });
     const table = frame.locator("#runtime-table-first");
@@ -792,6 +794,11 @@ test("runtime tables, SVG and Canvas keep visual comments source-anchored", {
       await commentButton.click();
       const nextComposer = page.getByRole("region", { name: "添加评论" });
       await expect(nextComposer).toBeVisible();
+      if (selector === "#runtime-page-table") {
+        await expect(nextComposer).toContainText("页面级数据表");
+        await expect(nextComposer.getByRole("textbox", { name: "评论内容" }))
+          .toHaveAttribute("placeholder", "输入对这部分内容的修改要求…");
+      }
       await nextComposer.getByRole("textbox", { name: "评论内容" }).fill(text);
       await nextComposer.getByRole("button", { name: "评论", exact: true }).click();
       await expect(page.locator(".comment-card").filter({ hasText: text })).toHaveCount(1);
@@ -874,6 +881,13 @@ test("runtime tables, SVG and Canvas keep visual comments source-anchored", {
       level: "module",
       selector: "body",
     });
+    expect(pageTableRecord.visualHint).toMatchObject({
+      runtimeGenerated: true,
+      kind: "table",
+      label: "页面级数据表",
+      relativePath: "table",
+    });
+    expect(pageTableRecord.target.visualHint).toBeUndefined();
 
     expect(readFileSync(sourcePath, "utf8")).toBe(html);
     const tablist = page.getByRole("tablist", { name: "已打开的页面" });
@@ -894,20 +908,68 @@ test("runtime tables, SVG and Canvas keep visual comments source-anchored", {
     expect(markerBox?.x || 0).toBeLessThanOrEqual((reopenedTableBox?.x || 0) + (reopenedTableBox?.width || 0) + 24);
     expect(markerBox?.y || 0).toBeGreaterThanOrEqual((reopenedTableBox?.y || 0) - 24);
     expect(markerBox?.y || 0).toBeLessThanOrEqual((reopenedTableBox?.y || 0) + (reopenedTableBox?.height || 0) + 24);
+    const pageMarker = page.getByRole("button", { name: "页面级数据表", exact: true });
+    await expect(pageMarker).toBeVisible();
+    const reopenedPageTableBox = await reopenedFrame.locator("#runtime-page-table").boundingBox();
+    const pageMarkerBox = await pageMarker.boundingBox();
+    expect(reopenedPageTableBox).not.toBeNull();
+    expect(pageMarkerBox).not.toBeNull();
+    expect(pageMarkerBox?.x || 0).toBeGreaterThanOrEqual((reopenedPageTableBox?.x || 0) - 24);
+    expect(pageMarkerBox?.x || 0).toBeLessThanOrEqual((reopenedPageTableBox?.x || 0) + (reopenedPageTableBox?.width || 0) + 24);
+    expect(pageMarkerBox?.y || 0).toBeGreaterThanOrEqual((reopenedPageTableBox?.y || 0) - 24);
+    expect(pageMarkerBox?.y || 0).toBeLessThanOrEqual((reopenedPageTableBox?.y || 0) + (reopenedPageTableBox?.height || 0) + 24);
+    const pageCommentCard = page.locator(".comment-card").filter({
+      hasText: "请保留页面级数据表的汇总行。",
+    });
+    await expect(pageCommentCard).toContainText("页面级数据表");
 
-    await reopenedFrame.evaluate(() => {
+    await page.getByRole("button", { name: "全局评论" }).click();
+    const globalComposer = page.getByRole("region", { name: "添加评论" });
+    await expect(globalComposer).toContainText("全局评论");
+    await expect(globalComposer.getByRole("textbox", { name: "评论内容" }))
+      .toHaveAttribute("placeholder", "输入对整个页面的修改要求…");
+    await globalComposer.getByRole("button", { name: "关闭评论编辑器" }).click();
+
+    await reopenedFrame.locator("#runtime-page-table").click();
+    const reopenedToolbar = page.getByRole("toolbar", { name: /评论/u });
+    await reopenedToolbar.getByRole("button", { name: /给页面级数据表留评论/u }).click();
+    const recoveredComposer = page.getByRole("region", { name: "添加评论" });
+    await recoveredComposer.getByRole("textbox", { name: "评论内容" })
+      .fill("页面级数据表草稿");
+    await recoveredComposer.getByRole("button", { name: "关闭评论编辑器" }).click();
+    await expect(page.locator(".draft-comment-card").filter({ hasText: "页面级数据表" }))
+      .toBeVisible();
+    await page.getByRole("button", { name: "新标签页" }).click();
+    await documentTab.click();
+    const draftReopened = await loadedDiskFrame(page, sourcePath, "runtime-comment-host");
+    const draftCard = page.locator(".draft-comment-card").filter({
+      hasText: "页面级数据表",
+    });
+    await expect(draftCard).toBeVisible();
+    await draftCard.click();
+    const restoredDraftComposer = page.getByRole("region", { name: "添加评论" });
+    await expect(restoredDraftComposer).toContainText("表格");
+    await expect(restoredDraftComposer.getByRole("textbox", { name: "评论内容" }))
+      .toHaveAttribute("placeholder", "输入对这部分内容的修改要求…");
+    await restoredDraftComposer.getByRole("button", { name: "删除未保存评论" }).click();
+    await expect(page.getByRole("alert").filter({ hasText: "删除这条未保存评论" }))
+      .toBeVisible();
+    await page.getByRole("alert").getByRole("button", { name: "删除", exact: true }).click();
+    const reopenedFrameAfterDraft = draftReopened.frame;
+
+    await reopenedFrameAfterDraft.evaluate(() => {
       document.querySelector("#runtime-table-first")?.remove();
     });
     await page.setViewportSize({ width: 1279, height: 720 });
     await expect(marker).toBeVisible();
-    const fallbackHostBox = await reopenedFrame.locator("#runtime-output").boundingBox();
+    const fallbackHostBox = await reopenedFrameAfterDraft.locator("#runtime-output").boundingBox();
     const fallbackMarkerBox = await marker.boundingBox();
     expect(fallbackHostBox).not.toBeNull();
     expect(fallbackMarkerBox).not.toBeNull();
     expect(fallbackMarkerBox?.x || 0).toBeGreaterThanOrEqual((fallbackHostBox?.x || 0) - 24);
     expect(fallbackMarkerBox?.x || 0).toBeLessThanOrEqual((fallbackHostBox?.x || 0) + (fallbackHostBox?.width || 0) + 24);
     await marker.click();
-    await expect(reopenedFrame.locator("#runtime-output"))
+    await expect(reopenedFrameAfterDraft.locator("#runtime-output"))
       .toHaveAttribute("data-html-canvas-selected", "part");
     const fallbackToolbar = page.getByRole("toolbar", { name: /评论/u });
     await expect(fallbackToolbar.getByRole("button", { name: "编辑", exact: true }))
@@ -918,10 +980,146 @@ test("runtime tables, SVG and Canvas keep visual comments source-anchored", {
       .toHaveCount(0);
     await expect(fallbackToolbar.getByRole("button", { name: "下移", exact: true }))
       .toHaveCount(0);
-    await expect(reopenedFrame.locator("#runtime-table-second"))
+    await expect(reopenedFrameAfterDraft.locator("#runtime-table-second"))
       .not.toHaveAttribute("data-html-canvas-selected", /.+/u);
     await expect(page.locator(".comment-card").filter({ hasText: firstCommentText }))
       .toHaveCount(1);
+
+    await electronApp.evaluate(({ clipboard }) => clipboard.clear());
+    await page.getByRole("button", { name: /AI 助手/u }).click();
+    await chooseClipboardDelivery(page);
+    await expect(page.getByTestId("ai-conversation-action-bar"))
+      .toContainText("任务已复制，等你的 AI 改完");
+    let promptPath = "";
+    await expect.poll(async () => {
+      const copied = await electronApp.evaluate(({ clipboard }) => clipboard.readText());
+      promptPath = copied.match(/请执行\s+(.+?\/PROMPT\.md)\s+中的单轮任务/u)?.[1] || "";
+      return Boolean(promptPath && existsSync(promptPath));
+    }, { timeout: 20_000 }).toBe(true);
+    const requestRoot = path.dirname(promptPath);
+    const requestRecord = JSON.parse(
+      readFileSync(path.join(requestRoot, "request.json"), "utf8"),
+    );
+    const annotations = JSON.parse(
+      readFileSync(path.join(requestRoot, "input", "annotations", "records.json"), "utf8"),
+    );
+    const runtimeRequestComments = requestRecord.request.comments.filter(
+      (comment) => comment.visualHint?.runtimeGenerated === true,
+    );
+    expect(runtimeRequestComments).toHaveLength(5);
+    expect(runtimeRequestComments.map((comment) => comment.visualHint.relativePath))
+      .toEqual(expect.arrayContaining([
+        "table:nth-of-type(1)",
+        "table:nth-of-type(2)",
+      ]));
+    expect(runtimeRequestComments.every((comment) => (
+      comment.sourceAnchor?.elementId
+      && comment.target?.elementId === comment.sourceAnchor.elementId
+      && !comment.target?.visualHint
+    ))).toBe(true);
+    expect(requestRecord.request.taskSpec.scopePolicy)
+      .toBe("targets-plus-required-dependencies");
+    const prompt = readFileSync(promptPath, "utf8");
+    expect(prompt).toContain("财务数据表");
+    expect(prompt).toContain("利润数据表");
+    expect(prompt).toContain("table:nth-of-type(1)");
+    expect(prompt).toContain("table:nth-of-type(2)");
+    expect(prompt).toContain("请修改生成该内容的 HTML、数据或 Script");
+    const annotatedFirstTable = annotations.comments.find(
+      (comment) => comment.visualHint?.relativePath === "table:nth-of-type(1)",
+    );
+    const annotatedSecondTable = annotations.comments.find(
+      (comment) => comment.visualHint?.relativePath === "table:nth-of-type(2)",
+    );
+    expect(annotatedFirstTable?.sourceAnchor?.elementId).toBe(sourceHostId);
+    expect(annotatedSecondTable?.sourceAnchor?.elementId).toBe(sourceHostId);
+  });
+});
+
+test("dense runtime tables keep pointer hit testing bounded", {
+  tag: ["@gate-smoke", "@smoke-editing"],
+}, async () => {
+  test.setTimeout(120_000);
+  const html = `<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><title>运行时命中性能</title>
+<style>
+  html, body { margin: 0; padding: 0; }
+  body { font: 14px/1.2 system-ui, sans-serif; }
+  main { padding: 16px; }
+  table { width: 720px; table-layout: fixed; border-collapse: collapse; }
+  td { width: 36px; height: 26px; padding: 2px; border: 1px solid #d8d9e3; }
+</style></head><body>
+<main data-native-case="runtime-perf-host"><div id="runtime-perf-output"></div></main>
+<script>
+  const table = document.createElement('table');
+  table.id = 'runtime-perf-table';
+  const body = document.createElement('tbody');
+  for (let row = 0; row < 50; row += 1) {
+    const line = document.createElement('tr');
+    for (let column = 0; column < 20; column += 1) {
+      const cell = document.createElement('td');
+      cell.textContent = row + ':' + column;
+      line.append(cell);
+    }
+    body.append(line);
+  }
+  table.append(body);
+  document.querySelector('#runtime-perf-output').append(table);
+</script></body></html>`;
+
+  await withRuntimeProject("pageroot-runtime-pointer-perf-e2e-", {
+    "runtime-report.html": html,
+  }, async ({ page, sourcePath }) => {
+    const { frame } = await loadedDiskFrame(page, sourcePath, "runtime-perf-host");
+    const table = frame.locator("#runtime-perf-table");
+    await expect(table).toBeVisible();
+    await expect(table.locator("td")).toHaveCount(1_000);
+    await frame.evaluate(() => {
+      const runtimeTable = document.querySelector("#runtime-perf-table");
+      const state = { bcr: 0, runtimeBcr: 0, qsa: 0 };
+      const originalBcr = Element.prototype.getBoundingClientRect;
+      const originalQsa = Document.prototype.querySelectorAll;
+      Element.prototype.getBoundingClientRect = function countedBcr() {
+        state.bcr += 1;
+        if (this === runtimeTable || runtimeTable?.contains(this)) state.runtimeBcr += 1;
+        return originalBcr.call(this);
+      };
+      Document.prototype.querySelectorAll = function countedQsa(...args) {
+        state.qsa += 1;
+        return originalQsa.apply(this, args);
+      };
+      window.__PAGEROOT_RUNTIME_POINTER_PERF__ = state;
+    });
+    const box = await table.boundingBox();
+    expect(box).not.toBeNull();
+    await frame.evaluate(() => {
+      document.querySelector("#runtime-perf-table").style.pointerEvents = "none";
+    });
+    await page.mouse.move((box?.x || 0) + 12, (box?.y || 0) + 12);
+    await page.waitForTimeout(100);
+    await frame.evaluate(() => {
+      const state = window.__PAGEROOT_RUNTIME_POINTER_PERF__;
+      if (state) {
+        state.bcr = 0;
+        state.runtimeBcr = 0;
+        state.qsa = 0;
+      }
+    });
+    for (let index = 0; index < 30; index += 1) {
+      await page.mouse.move(
+        (box?.x || 0) + 10 + (index % 20) * ((box?.width || 720) / 20),
+        (box?.y || 0) + 10 + (index % 12) * 24,
+      );
+    }
+    await page.waitForTimeout(100);
+    const metrics = await frame.evaluate(() => window.__PAGEROOT_RUNTIME_POINTER_PERF__);
+    expect(metrics).toMatchObject({
+      bcr: expect.any(Number),
+      runtimeBcr: expect.any(Number),
+      qsa: expect.any(Number),
+    });
+    expect(metrics.runtimeBcr).toBeLessThan(180);
+    expect(metrics.qsa).toBeLessThan(100);
   });
 });
 

@@ -27,15 +27,7 @@ export function commentMarkerGroupKey(target) {
         visualHint.runtimeGenerated === true ? "runtime" : "",
         visualHint.kind || "",
         visualHint.relativePath || "",
-        visualHint.renderedText || "",
-        visualHint.relativeBox
-          ? [
-              visualHint.relativeBox.x,
-              visualHint.relativeBox.y,
-              visualHint.relativeBox.width,
-              visualHint.relativeBox.height,
-            ].join(",")
-          : "",
+        visualHint.label || "",
       ].join("\u0000")
     : "";
   if (target?.elementId) {

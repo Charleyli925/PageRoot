@@ -43,6 +43,24 @@ function target(id = "target_1") {
   };
 }
 
+function runtimeTarget(sourceTarget, label, relativePath) {
+  return {
+    ...sourceTarget,
+    id: `runtime-${sourceTarget.id}`,
+    label,
+    resolution: "ambiguous",
+    commentAnchor: sourceTarget,
+    visualHint: {
+      runtimeGenerated: true,
+      kind: "table",
+      label,
+      renderedText: `${label} 项目 2025Q1`,
+      relativePath,
+      relativeBox: { x: 0.1, y: 0.2, width: 0.7, height: 0.2 },
+    },
+  };
+}
+
 function attachment({
   attachmentId,
   commentId = "comment_1",
@@ -612,6 +630,87 @@ test("rebindCommentTarget is the unique comment-location commit path", () => {
   assert.equal(outcome.value.target.selector, "main p");
   assert.equal(harness.commentSession.comments[0].target.id, "target_old");
   assert.equal(outcome.value.comment.target.resolution, "exact");
+});
+
+test("relinking a runtime comment to a source target clears the old visual hint", () => {
+  const harness = createHarness();
+  const sourceHost = target("target_runtime_host");
+  harness.commentSession.setComments([{
+    commentId: "comment_runtime_to_source",
+    createdAt: "2026-08-11T00:00:00.000Z",
+    updatedAt: "2026-08-11T00:00:00.000Z",
+    target: {
+      ...runtimeTarget(sourceHost, "财务数据表", "table:nth-of-type(1)"),
+      id: "target_runtime_to_source",
+    },
+    sourceAnchor: sourceHost,
+    visualHint: runtimeTarget(sourceHost, "财务数据表", "table:nth-of-type(1)").visualHint,
+    text: "运行时评论",
+    baseVersionId: "V1",
+  }]);
+
+  const outcome = harness.workflow.rebindCommentTarget({
+    commentId: "comment_runtime_to_source",
+    target: target("target_new_source"),
+  });
+  assert.equal(outcome.status, "succeeded");
+  const rebound = harness.commentSession.comments[0];
+  assert.equal(rebound.target.selector, "main p");
+  assert.equal(rebound.sourceAnchor.selector, "main p");
+  assert.equal(Object.hasOwn(rebound, "visualHint"), false);
+  assert.equal(Object.hasOwn(rebound.target, "visualHint"), false);
+});
+
+test("relinking between runtime objects replaces the visual hint", () => {
+  const harness = createHarness();
+  const sourceHost = target("target_runtime_host_pair");
+  const firstRuntime = runtimeTarget(sourceHost, "财务数据表", "table:nth-of-type(1)");
+  const secondRuntime = runtimeTarget(sourceHost, "利润数据表", "table:nth-of-type(2)");
+  harness.commentSession.setComments([{
+    commentId: "comment_runtime_pair",
+    createdAt: "2026-08-11T00:00:00.000Z",
+    updatedAt: "2026-08-11T00:00:00.000Z",
+    target: { ...firstRuntime, id: "target_runtime_pair" },
+    sourceAnchor: sourceHost,
+    visualHint: firstRuntime.visualHint,
+    text: "运行时评论",
+    baseVersionId: "V1",
+  }]);
+
+  const outcome = harness.workflow.rebindCommentTarget({
+    commentId: "comment_runtime_pair",
+    target: secondRuntime,
+  });
+  assert.equal(outcome.status, "succeeded");
+  const rebound = harness.commentSession.comments[0];
+  assert.equal(rebound.visualHint.label, "利润数据表");
+  assert.equal(rebound.visualHint.relativePath, "table:nth-of-type(2)");
+  assert.equal(rebound.target.label, "利润数据表");
+});
+
+test("relinking a source comment to a runtime object adds a new visual hint", () => {
+  const harness = createHarness();
+  const sourceHost = target("target_source_to_runtime");
+  harness.commentSession.setComments([{
+    commentId: "comment_source_to_runtime",
+    createdAt: "2026-08-11T00:00:00.000Z",
+    updatedAt: "2026-08-11T00:00:00.000Z",
+    target: sourceHost,
+    sourceAnchor: sourceHost,
+    text: "源码评论",
+    baseVersionId: "V1",
+  }]);
+
+  const runtime = runtimeTarget(sourceHost, "财务数据表", "table:nth-of-type(1)");
+  const outcome = harness.workflow.rebindCommentTarget({
+    commentId: "comment_source_to_runtime",
+    target: runtime,
+  });
+  assert.equal(outcome.status, "succeeded");
+  const rebound = harness.commentSession.comments[0];
+  assert.equal(rebound.visualHint.kind, "table");
+  assert.equal(rebound.target.visualHint.relativePath, "table:nth-of-type(1)");
+  assert.equal(rebound.sourceAnchor.elementId, sourceHost.elementId);
 });
 
 test("beginEdit and confirmEdit keep an exclusive editing session", () => {

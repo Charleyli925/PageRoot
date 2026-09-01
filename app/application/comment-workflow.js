@@ -5,7 +5,11 @@ import { isSavableCommentTarget, planCommentCommit } from "./comment/commit-plan
 import { normalizeRuntimeVisualHint } from "../lib/runtime-comment-hint.js";
 
 function commentSourceTarget(target) {
-  return target?.commentAnchor || target || null;
+  const sourceTarget = target?.commentAnchor || target || null;
+  if (sourceTarget && target?.textLocator && !sourceTarget.textLocator) {
+    return { ...sourceTarget, textLocator: target.textLocator };
+  }
+  return sourceTarget;
 }
 
 function commentVisualHint(target) {
@@ -575,19 +579,23 @@ export class CommentWorkflow {
       ...commentSourceTarget(target),
       id: current.target.id,
     };
-    const visualHint = commentVisualHint(target) || current.visualHint;
+    const visualHint = commentVisualHint(target);
     const visualTarget = visualHint
       ? { ...nextTarget, label: visualHint.label, visualHint }
       : nextTarget;
     const nextComments = this.#commentSession.comments.map((comment) => (
       comment.commentId === commentId
-        ? {
-            ...comment,
-            target: visualTarget,
-            sourceAnchor: nextTarget,
-            ...(visualHint ? { visualHint } : {}),
-            updatedAt: safeDate(this.#clock.now()),
-          }
+        ? (() => {
+            const nextComment = {
+              ...comment,
+              target: visualTarget,
+              sourceAnchor: nextTarget,
+              updatedAt: safeDate(this.#clock.now()),
+            };
+            if (visualHint) nextComment.visualHint = visualHint;
+            else delete nextComment.visualHint;
+            return nextComment;
+          })()
         : comment
     ));
     this.#commentSession.setComments(nextComments);

@@ -26,6 +26,8 @@ import {
   nativeTextFragmentForElement,
 } from "./html-canvas-preview-sync";
 import {
+  createRuntimeVisualTargetIndex,
+  type RuntimeVisualTargetIndex,
   runtimeVisualTargetAtPoint,
   runtimeVisualHintForTarget,
   runtimeVisualTargetElement,
@@ -98,6 +100,7 @@ export type CanvasTargetIdentityScope = {
   readonly generation: number;
   readonly targetObjectKeys: WeakMap<HTMLElement, string>;
   readonly visualObjectKeys: WeakMap<HTMLElement, string>;
+  runtimeVisualTargetIndex: RuntimeVisualTargetIndex | null;
 };
 
 /** @deprecated Use ResolvedCanvasTarget. Kept as a narrow compatibility name. */
@@ -137,6 +140,7 @@ export function createCanvasTargetIdentityScope(
     generation: normalizedGeneration(generation),
     targetObjectKeys: new WeakMap<HTMLElement, string>(),
     visualObjectKeys: new WeakMap<HTMLElement, string>(),
+    runtimeVisualTargetIndex: null,
   };
 }
 
@@ -270,6 +274,19 @@ export function resolveCanvasTarget({
   if (!enabled || !documentNode || !sourceIndex) return null;
   if (isCanvasRootElement(eventTarget)) return null;
   const generation = normalizedGeneration(rawGeneration);
+  const identityScope = rawIdentityScope?.generation === generation
+    ? rawIdentityScope
+    : createCanvasTargetIdentityScope(generation);
+  if (
+    isProvenRuntimeSourceElement
+    && point
+    && (
+      !identityScope.runtimeVisualTargetIndex
+      || identityScope.runtimeVisualTargetIndex.disposed
+    )
+  ) {
+    identityScope.runtimeVisualTargetIndex = createRuntimeVisualTargetIndex(documentNode);
+  }
   const dedicatedSurface = point
     ? findDedicatedSourceSurfaceAtPoint(documentNode, point)
     : null;
@@ -282,6 +299,7 @@ export function resolveCanvasTarget({
         documentNode,
         point,
         isProvenSourceElement: isProvenRuntimeSourceElement,
+        runtimeVisualTargetIndex: identityScope.runtimeVisualTargetIndex,
       })
     : null;
   // A dedicated surface such as <canvas> needs point-based selection so its
@@ -371,6 +389,7 @@ export function resolveCanvasTarget({
     ? runtimeVisualHintForTarget({
         sourceHost: commentAnchorData.element,
         visualTarget: visualElement,
+        cache: identityScope.runtimeVisualTargetIndex?.hintCache,
       })
     : null;
   const selectionWithVisualHint = visualHint
@@ -384,9 +403,6 @@ export function resolveCanvasTarget({
     canStartTextEdit,
     sourceResolution: selectionWithVisualHint.resolution as HtmlCanvasTargetResolution,
   });
-  const identityScope = rawIdentityScope?.generation === generation
-    ? rawIdentityScope
-    : createCanvasTargetIdentityScope(generation);
   return Object.freeze({
     ...capability,
     hitElement: hit,

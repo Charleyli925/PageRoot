@@ -97,10 +97,32 @@ function exactMatchingClauses(text, pattern) {
   return [...new Set(clauses(text).filter((value) => pattern.test(value)))];
 }
 
+function sourceTargetForComment(comment) {
+  return comment?.sourceAnchor || comment?.target || comment || null;
+}
+
+function commentHasRuntimeVisualHint(comment) {
+  return comment?.visualHint?.runtimeGenerated === true
+    || comment?.target?.visualHint?.runtimeGenerated === true;
+}
+
+function isExplicitGlobalComment(comment) {
+  const sourceTarget = sourceTargetForComment(comment);
+  return String(sourceTarget?.selector || "").trim().toLowerCase() === "body"
+    && sourceTarget?.level === "module"
+    && !commentHasRuntimeVisualHint(comment);
+}
+
 function scopePolicyFor(comments, targets) {
-  if (targets.some((target) => (
-    String(target?.selector || "").trim().toLowerCase() === "body"
-  ))) return TASK_SCOPE_WHOLE_PAGE;
+  if (
+    comments.some(isExplicitGlobalComment)
+    || (
+      comments.length === 0
+      && targets.some((target) => (
+        String(target?.selector || "").trim().toLowerCase() === "body"
+      ))
+    )
+  ) return TASK_SCOPE_WHOLE_PAGE;
   if (comments.some((comment) => STRICT_SOURCE_SCOPE.test(String(comment?.text || "")))) {
     return TASK_SCOPE_TARGETS_ONLY;
   }

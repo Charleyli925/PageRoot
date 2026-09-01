@@ -92,6 +92,39 @@ test("Task Spec derives whole-page and strict-source scopes conservatively", () 
   assert.equal(targetsOnly.scopePolicy, TASK_SCOPE_TARGETS_ONLY);
 });
 
+test("Runtime visual comments keep a body fallback out of whole-page scope", () => {
+  const pageSourceTarget = target({
+    targetId: "target_runtime_page_host",
+    elementId: undefined,
+    expectedSourceSha256: undefined,
+    label: "整个页面",
+    selector: "body",
+    fingerprint: undefined,
+  });
+  const runtimeComment = {
+    commentId: "comment_runtime_table",
+    text: "核对页面级财务数据表。",
+    target: {
+      ...pageSourceTarget,
+      label: "财务数据表",
+      visualHint: {
+        runtimeGenerated: true,
+        kind: "table",
+        label: "财务数据表",
+        renderedText: "项目 2025Q1 2025Q2",
+        relativePath: "table:nth-of-type(1)",
+        relativeBox: { x: 0.1, y: 0.2, width: 0.7, height: 0.2 },
+      },
+    },
+    sourceAnchor: pageSourceTarget,
+  };
+  const spec = compileTaskSpec({
+    comments: [runtimeComment],
+    targets: [pageSourceTarget],
+  });
+  assert.equal(spec.scopePolicy, TASK_SCOPE_TARGETS_PLUS_DEPENDENCIES);
+});
+
 test("Task Spec keeps attachment references unresolved until Request bytes freeze", () => {
   const draftAttachment = { attachmentId: "attachment_reference" };
   const pending = compileTaskSpec({

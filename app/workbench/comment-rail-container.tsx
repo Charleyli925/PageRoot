@@ -28,6 +28,7 @@ import {
   commentSourceAnchor,
   commentEditSessionHasChanges,
   commentVisualHintForSelection,
+  isExplicitGlobalCommentTarget,
 } from "./comment-model";
 import { relinkNoticeCopy } from "./comment-relink-model.js";
 import {
@@ -80,11 +81,9 @@ function shallowEqualRecord(
 
 function draftScope(target: HtmlCanvasSelection | null): string {
   if (!target) return "尚未选择";
-  if (target.tagName === "body") return "全局评论";
-  if (target.level === "module") return "整个模块";
-  if (target.level === "insertion") return "添加位置";
-  if (target.visualHint?.runtimeGenerated) {
-    switch (target.visualHint.kind) {
+  const visualHint = commentVisualHintForSelection(target);
+  if (visualHint?.runtimeGenerated) {
+    switch (visualHint.kind) {
       case "table":
       case "table-cell":
         return "表格";
@@ -97,6 +96,9 @@ function draftScope(target: HtmlCanvasSelection | null): string {
         return "页面内容";
     }
   }
+  if (isExplicitGlobalCommentTarget(target)) return "全局评论";
+  if (target.level === "module") return "整个模块";
+  if (target.level === "insertion") return "添加位置";
   return "页面内容";
 }
 
@@ -375,7 +377,7 @@ export const CommentRailContainer = memo(function CommentRailContainer({
     const measuredGroupTops = new Map<string, number>();
     for (const target of targets) {
       const layout = targetLayouts[target.id];
-      const measuredTop = target.tagName === "body" || layout?.status === "missing"
+      const measuredTop = isExplicitGlobalCommentTarget(target) || layout?.status === "missing"
         ? commentRailMinimumTop
         : commentTargetTops[target.id];
       if (!Number.isFinite(measuredTop)) continue;
@@ -407,14 +409,14 @@ export const CommentRailContainer = memo(function CommentRailContainer({
     return railCommentItems
       .flatMap((comment, index) => {
         const target = commentLayoutTarget(comment);
-        const targetTop = target.tagName === "body"
+        const targetTop = isExplicitGlobalCommentTarget(target)
           ? commentRailMinimumTop
           : commentRailTargetTops[target.id];
         if (!Number.isFinite(targetTop)) return [];
         return [{
           comment,
           index,
-          scopeRank: target.tagName === "body" ? 0 : 1,
+          scopeRank: isExplicitGlobalCommentTarget(target) ? 0 : 1,
           targetTop: targetTop as number,
         }];
       })
@@ -493,7 +495,7 @@ export const CommentRailContainer = memo(function CommentRailContainer({
       const measurementKey = commentMeasurementKeys[comment.commentId];
       return {
         key: comment.commentId,
-        targetTop: commentLayoutTarget(comment).tagName === "body"
+        targetTop: isExplicitGlobalCommentTarget(commentLayoutTarget(comment))
           ? commentRailMinimumTop
           : commentRailTargetTops[commentLayoutTarget(comment).id],
         height: commentCardHeights[measurementKey]
@@ -505,10 +507,10 @@ export const CommentRailContainer = memo(function CommentRailContainer({
             + (editingCommentId === comment.commentId ? 92 : 0)
             + (pendingDeleteCommentId === comment.commentId ? 46 : 0),
         order: index + 1,
-        scopeRank: commentLayoutTarget(comment).tagName === "body" ? 0 : 1,
+        scopeRank: isExplicitGlobalCommentTarget(commentLayoutTarget(comment)) ? 0 : 1,
       };
     });
-    const draftTargetTop = draftSourceTarget?.tagName === "body"
+    const draftTargetTop = draftTarget && isExplicitGlobalCommentTarget(draftTarget)
       ? commentRailMinimumTop
       : draftSourceTarget
         ? commentRailTargetTops[draftSourceTarget.id]
@@ -522,7 +524,7 @@ export const CommentRailContainer = memo(function CommentRailContainer({
             + (!draftTargetCanSave ? 70 : 0)
             + (pendingDeleteCommentId === "__composer" ? 46 : 0),
         order: Number.MAX_SAFE_INTEGER,
-        scopeRank: draftSourceTarget?.tagName === "body" ? 0 : 1,
+        scopeRank: draftTarget && isExplicitGlobalCommentTarget(draftTarget) ? 0 : 1,
       });
     }
     if (hasCollapsedCommentDraft && draftTarget && Number.isFinite(draftTargetTop)) {
@@ -531,7 +533,7 @@ export const CommentRailContainer = memo(function CommentRailContainer({
         targetTop: draftTargetTop as number,
         height: commentCardHeights[draftRecoveryMeasurementKey] || 142,
         order: Number.MAX_SAFE_INTEGER,
-        scopeRank: draftSourceTarget?.tagName === "body" ? 0 : 1,
+        scopeRank: draftTarget && isExplicitGlobalCommentTarget(draftTarget) ? 0 : 1,
       });
     }
     const layout = layoutCommentRailItems({ minimumTop: commentRailMinimumTop, gap: 20, items });
@@ -721,7 +723,7 @@ export const CommentRailContainer = memo(function CommentRailContainer({
       || !draftTarget
       || !Number.isFinite(commentRailLayout.composerTop)
     ) return;
-    const targetTop = draftSourceTarget?.tagName === "body"
+    const targetTop = isExplicitGlobalCommentTarget(draftTarget)
       ? commentRailMinimumTop
       : draftSourceTarget
         ? commentRailTargetTops[draftSourceTarget.id]
@@ -842,7 +844,7 @@ export const CommentRailContainer = memo(function CommentRailContainer({
         const item = [...rail.querySelectorAll<HTMLElement>("[data-comment-measure]")]
           .find((node) => node.dataset.commentMeasure === request.itemKey);
         const sourceTarget = request.target.commentAnchor ?? request.target;
-        const targetTop = sourceTarget.tagName === "body"
+        const targetTop = isExplicitGlobalCommentTarget(request.target)
           ? commentRailMinimumTop
           : commentTargetTops[sourceTarget.id]
             ?? (targetLayouts[sourceTarget.id]?.status === "visible"

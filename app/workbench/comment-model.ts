@@ -56,6 +56,22 @@ export function commentVisualHintForSelection(
   return normalized || undefined;
 }
 
+/**
+ * A body source anchor is only a true global comment when the user selected
+ * the global entry point. Runtime comments may use body as their safe source
+ * fallback while retaining a visual hint for the generated object.
+ */
+export function isExplicitGlobalCommentTarget(
+  target: HtmlCanvasSelection | null | undefined,
+): boolean {
+  const sourceTarget = commentAnchorForSelection(target);
+  return Boolean(
+    sourceTarget
+    && isGlobalPageTarget(sourceTarget)
+    && !commentVisualHintForSelection(target),
+  );
+}
+
 export function commentSourceAnchor(
   comment: Pick<CommentItem, "target" | "sourceAnchor"> | null | undefined,
 ): HtmlCanvasSelection | null {

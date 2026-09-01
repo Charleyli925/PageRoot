@@ -19,6 +19,7 @@ import {
   commentSourceAnchor,
   commentVisualHintForSelection,
   insertionLabel,
+  isExplicitGlobalCommentTarget,
 } from "./comment-model";
 import {
   composerViewFields,
@@ -189,7 +190,7 @@ export const CommentRailView = memo(function CommentRailView({
                       type="button"
                       data-html-canvas-preserve-selection="true"
                       aria-label="全局评论"
-                      aria-expanded={composerOpen && draftTarget?.tagName === "body"}
+                      aria-expanded={composerOpen && isExplicitGlobalCommentTarget(draftTarget)}
                       disabled={interactionLocked}
                       onClick={openGlobalCommentComposer}
                     ><PlusIcon aria-hidden="true" size={12} weight="bold" />添加全局评论</button>
@@ -433,7 +434,7 @@ export const CommentRailView = memo(function CommentRailView({
                   ref={composerRef}
                   value={draft}
                   disabled={!draftTargetCanSave || interactionLocked}
-                  placeholder={draftTarget.tagName === "body"
+                  placeholder={isExplicitGlobalCommentTarget(draftTarget)
                     ? "输入对整个页面的修改要求…"
                     : "输入对这部分内容的修改要求…"}
                   onChange={(event) => {
