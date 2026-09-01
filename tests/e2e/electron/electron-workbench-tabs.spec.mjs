@@ -41,8 +41,6 @@ test("Electron tab keyboard navigation manages focus and a persisted Start suppr
   let reopened = null;
   try {
     await loadedDiskFrame(firstLaunch.page, fixture.sourcePath, "list-item");
-    await expect(firstLaunch.page.getByRole("button", { name: "导入并打开" }))
-      .toBeHidden({ timeout: 30_000 });
     const tablist = firstLaunch.page.getByRole("tablist", { name: "已打开的页面" });
     await expect(tablist.getByRole("tab")).toHaveCount(1);
     await firstLaunch.page.getByRole("button", { name: "新标签页" }).click();
@@ -340,7 +338,7 @@ test("Electron browser A to B to A reopens exact in-memory HTML and deduplicates
     "browser-memory-b.html",
     (source) => source.replace(ORIGINAL_LIST_TEXT, "Browser memory B"),
   );
-  const additionalProjects = ["C", "D", "E"].map((suffix) => createSourceFixture(
+  const additionalProjects = ["C", "D", "E", "F"].map((suffix) => createSourceFixture(
     `browser-memory-${suffix.toLowerCase()}.html`,
     (source) => source.replace(ORIGINAL_LIST_TEXT, `Browser memory ${suffix}`),
   ));
@@ -363,9 +361,8 @@ test("Electron browser A to B to A reopens exact in-memory HTML and deduplicates
       .toHaveAttribute("data-render-verified", "true", { timeout: 30_000 });
     let frame = await waitForBrowserText("Browser memory A");
     await expect(frame.locator(caseSelector("list-item"))).toHaveText("Browser memory A");
-    const runtimeDocumentToken = await frame.evaluate(() => {
+    await frame.evaluate(() => {
       window.__qaRuntimeDocumentToken = crypto.randomUUID();
-      return window.__qaRuntimeDocumentToken;
     });
     const tabs = launched.page.getByRole("tablist", { name: "已打开的页面" }).getByRole("tab");
     await expect(tabs.filter({ hasText: "browser-memory-a" })).toHaveCount(1);
@@ -379,8 +376,11 @@ test("Electron browser A to B to A reopens exact in-memory HTML and deduplicates
     const cachedA = tabs.filter({ hasText: "browser-memory-a" });
     const cachedATabId = String(await cachedA.getAttribute("id"))
       .replace(/^workbench-tab-/u, "");
-    const cachedAFrame = launched.page.getByTestId("workbench-document-surface-cache")
-      .locator(`[data-tab-id="${cachedATabId}"] iframe`);
+    const cachedAEntry = launched.page.getByTestId("workbench-document-surface-cache")
+      .locator(`[data-tab-id="${cachedATabId}"]`);
+    const cachedASourceSha256 = await cachedAEntry.getAttribute("data-source-sha256");
+    expect(cachedASourceSha256).toMatch(/^sha256:/u);
+    const cachedAFrame = cachedAEntry.locator("iframe");
     const cachedAHandle = await cachedAFrame.elementHandle();
     const cachedADocument = await cachedAHandle.contentFrame();
     expect(cachedADocument).not.toBeNull();
@@ -391,13 +391,50 @@ test("Electron browser A to B to A reopens exact in-memory HTML and deduplicates
     await expect(cachedADocument.locator("#cache-disabled-link"))
       .toHaveCSS("pointer-events", "none");
     for (const [index, project] of additionalProjects.entries()) {
-      const suffix = ["C", "D", "E"][index];
+      const suffix = ["C", "D", "E", "F"][index];
       await htmlInput.setInputFiles(project.sourcePath);
       frame = await waitForBrowserText(`Browser memory ${suffix}`);
     }
-    await expect(tabs).toHaveCount(afterA + 4);
+    await expect(tabs).toHaveCount(afterA + 5);
     await expect(launched.page.getByTestId("workbench-document-canvas-pool"))
       .toHaveAttribute("data-runtime-hot-count", "5");
+    const cacheRoot = launched.page.getByTestId("workbench-document-surface-cache");
+    await expect(cacheRoot).toHaveAttribute("data-hot-count", "5");
+    await expect(cacheRoot).toHaveAttribute("data-max-hot-entries", "5");
+    await expect(cacheRoot.locator(`[data-tab-id="${cachedATabId}"]`)).toHaveCount(0);
+    await launched.page.evaluate((tabId) => {
+      const states = [];
+      const inspect = () => {
+        const root = document.querySelector('[data-testid="workbench-document-surface-cache"]');
+        const entries = root ? [...root.querySelectorAll("[data-tab-id]")] : [];
+        states.push({
+          rootVisible: root?.dataset.visible === "true",
+          visibleEntries: entries
+            .filter((entry) => !entry.hidden)
+            .map((entry) => ({
+              tabId: entry.dataset.tabId,
+              sourceSha256: entry.dataset.sourceSha256,
+              ready: entry.querySelector("[data-display-ready]")?.dataset.displayReady === "true",
+            })),
+        });
+      };
+      const observer = new MutationObserver(inspect);
+      observer.observe(document.body, {
+        attributes: true,
+        attributeFilter: [
+          "data-display-ready",
+          "data-source-sha256",
+          "data-tab-id",
+          "data-visible",
+          "hidden",
+        ],
+        childList: true,
+        subtree: true,
+      });
+      window.__qaCacheVisibilityStates = states;
+      window.__qaCacheVisibilityObserver = observer;
+      void tabId;
+    }, cachedATabId);
     await launched.page.evaluate(() => {
       performance.clearMarks("pageroot:tab-cache:visible-ready");
       performance.clearMarks("pageroot:tab-cache:handoff-complete");
@@ -410,8 +447,6 @@ test("Electron browser A to B to A reopens exact in-memory HTML and deduplicates
     const visibleRuntimeHandle = await visibleRuntimeFrame.elementHandle();
     const visibleRuntimeDocument = await visibleRuntimeHandle.contentFrame();
     expect(visibleRuntimeDocument).not.toBeNull();
-    expect(await visibleRuntimeDocument.evaluate(() => window.__qaRuntimeDocumentToken))
-      .toBe(runtimeDocumentToken);
     const visibleScrollFacts = await launched.page.locator("#workbench-content-outlet")
       .evaluate((stage) => ({
         scrollTop: (() => {
@@ -425,14 +460,34 @@ test("Electron browser A to B to A reopens exact in-memory HTML and deduplicates
     expect(visibleScrollFacts.scrollTop).toBeGreaterThan(0);
     frame = await waitForBrowserText("Browser memory A");
     await expect(frame.locator(caseSelector("list-item"))).toHaveText("Browser memory A");
-    await expect(tabs).toHaveCount(afterA + 4);
+    await expect(tabs).toHaveCount(afterA + 5);
+    const cacheVisibilityStates = await launched.page.evaluate(() => {
+      window.__qaCacheVisibilityObserver?.disconnect();
+      return window.__qaCacheVisibilityStates || [];
+    });
+    expect(cacheVisibilityStates).not.toHaveLength(0);
+    expect(cacheVisibilityStates.some((state) => (
+      state.rootVisible
+      && state.visibleEntries.some((entry) => entry.ready !== true)
+    ))).toBe(false);
+    for (const state of cacheVisibilityStates) {
+      if (!state.rootVisible) continue;
+      expect(state.visibleEntries).toHaveLength(1);
+      expect(state.visibleEntries[0].ready).toBe(true);
+    }
+    const visibleCacheState = cacheVisibilityStates.find((state) => (
+      state.rootVisible
+      && state.visibleEntries[0]?.tabId === cachedATabId
+    ));
+    if (visibleCacheState) {
+      expect(visibleCacheState.visibleEntries[0].sourceSha256).toBe(cachedASourceSha256);
+    }
     await expect.poll(() => launched.page.evaluate((tabId) => (
       performance.getEntriesByName("pageroot:runtime-hot:visible-ready", "mark")
         .find((entry) => entry.detail?.tabId === tabId)?.startTime || null
     ), cachedATabId), { timeout: 30_000 }).toEqual(expect.any(Number));
     const runtimePool = launched.page.getByTestId("workbench-document-canvas-pool");
     await expect(runtimePool).toHaveAttribute("data-runtime-hot-limit", "5");
-    const cacheRoot = launched.page.getByTestId("workbench-document-surface-cache");
     await expect(cacheRoot).toHaveAttribute("data-hot-count", "5");
     await expect(cacheRoot).toHaveAttribute("data-max-hot-entries", "5");
 
@@ -441,7 +496,7 @@ test("Electron browser A to B to A reopens exact in-memory HTML and deduplicates
     await expect(frame.locator(caseSelector("list-item"))).toHaveText("Browser memory A");
     await expect(tabs.filter({ hasText: "browser-memory-a" })).toHaveCount(1);
     await expect(tabs.filter({ hasText: "browser-memory-b" })).toHaveCount(1);
-    await expect(tabs).toHaveCount(afterA + 4);
+    await expect(tabs).toHaveCount(afterA + 5);
   } finally {
     await stopPageRoot(launched.electronApp, launched.isolatedUserData);
     removeSourceFixture(projectA.sourceDirectory);

@@ -18,6 +18,7 @@ import {
   SidebarSimpleIcon,
   XIcon,
 } from "@phosphor-icons/react";
+import { PencilSimpleIcon } from "@phosphor-icons/react/dist/csr/PencilSimple";
 import type { WorkbenchTab, WorkbenchTabsSnapshot } from "../application/workbench-tabs-session.js";
 import type {
   ApplicationUpdateResult,
@@ -131,7 +132,9 @@ export function WorkbenchTabBar({
                 type="button"
                 role="tab"
                 aria-selected={selected}
-                aria-controls="workbench-content-outlet"
+                aria-controls={tab.kind === "project-rules"
+                  ? "workbench-project-rules-outlet"
+                  : "workbench-content-outlet"}
                 tabIndex={selected ? 0 : -1}
                 ref={(element) => {
                   if (element) tabButtonsRef.current.set(tab.tabId, element);
@@ -238,6 +241,7 @@ export function WorkbenchGlobalSidebar({
   currentProjectId,
   currentProjectName,
   currentProjectVersions,
+  projectRulesActive,
   onToggle,
   onOpenLocal,
   onOpenCurrentVersion,
@@ -250,8 +254,10 @@ export function WorkbenchGlobalSidebar({
   updateBadgeLabel,
   onOpenAbout,
   onOpenSettings,
+  onOpenProjectRules,
   onDownloadOrRestartUpdate,
   onResizeCommit,
+  openHtmlError,
 }: {
   open: boolean;
   registeredProjects: RegisteredProject[];
@@ -259,6 +265,7 @@ export function WorkbenchGlobalSidebar({
   currentProjectId: string | null;
   currentProjectName: string;
   currentProjectVersions: readonly ProjectVersionSummary[];
+  projectRulesActive: boolean;
   onToggle: () => void;
   onOpenLocal: () => void;
   onOpenCurrentVersion: (version: ProjectVersionSummary) => void;
@@ -274,8 +281,10 @@ export function WorkbenchGlobalSidebar({
   updateBadgeLabel: string;
   onOpenAbout: () => void;
   onOpenSettings: () => void;
+  onOpenProjectRules: () => void;
   onDownloadOrRestartUpdate: () => void;
   onResizeCommit?: (width: number) => void;
+  openHtmlError?: string | null;
 }) {
   const [projectExpansionState, setProjectExpansionState] = useState<ProjectExpansionState>(
     () => createProjectExpansionState(currentProjectId),
@@ -405,6 +414,9 @@ export function WorkbenchGlobalSidebar({
           </div>
           <div className="workbench-sidebar-body">
             <button type="button" onClick={onOpenLocal}><PlusIcon aria-hidden="true" size={14} weight="bold" />打开 HTML</button>
+            {openHtmlError ? (
+              <p className="workbench-sidebar-error" role="alert">{openHtmlError}</p>
+            ) : null}
             <section className="sidebar-project-section" aria-labelledby="sidebar-current-project-heading">
               <h2 id="sidebar-current-project-heading">当前项目</h2>
               <button
@@ -421,10 +433,25 @@ export function WorkbenchGlobalSidebar({
                 <FolderSimpleIcon className="sidebar-project-icon" aria-hidden="true" size={14} weight="regular" />
                 <span className="sidebar-project-name">{currentProjectName || "尚未打开项目"}</span>
               </button>
+              <button
+                className="sidebar-project-rules-row"
+                type="button"
+                disabled={!currentProjectId}
+                aria-current={projectRulesActive ? "page" : undefined}
+                data-selected={projectRulesActive ? "true" : undefined}
+                onClick={onOpenProjectRules}
+              >
+                <PencilSimpleIcon aria-hidden="true" size={14} weight="regular" />
+                <span className="sidebar-project-rules-copy">
+                  <strong>长期规则</strong>
+                  <small>PROJECT.md</small>
+                </span>
+              </button>
               {currentProjectId && projectExpansionState.expandedProjectIds[currentProjectId] ? (
                 <ProjectVersionTree
                   key={currentProjectId}
                   versions={currentProjectVersions}
+                  isCurrentProject
                   onOpenVersion={onOpenCurrentVersion}
                 />
               ) : null}
@@ -465,6 +492,7 @@ export function WorkbenchGlobalSidebar({
                       ) : (
                         <ProjectVersionTree
                           versions={state.versions}
+                          isCurrentProject={false}
                           onOpenVersion={(version) => onOpenRegisteredVersion(project, version)}
                         />
                       )
@@ -484,7 +512,7 @@ export function WorkbenchGlobalSidebar({
               data-tooltip="设置"
               onClick={onOpenSettings}
             >
-              <GearSixIcon aria-hidden="true" size={20} weight="bold" />
+              <GearSixIcon aria-hidden="true" size={17} weight="bold" />
             </button>
           </footer>
           <WorkbenchResizer kind="sidebar" onCommit={onResizeCommit} />

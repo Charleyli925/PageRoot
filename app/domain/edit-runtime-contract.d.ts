@@ -8,6 +8,7 @@ export const EDIT_AUTHOR_RUNTIME_BUDGET: Readonly<{
   declaredAssetCount: number;
   declaredAssetReferenceCount: number;
   declaredAssetBytes: number;
+  remoteLibraryDeadlineMs: number;
   runtimeDeadlineMs: number;
   orphanSessionTtlMs: number;
 }>;
@@ -27,11 +28,27 @@ export type EditRuntimeGrant = Readonly<{
   sourceSha256: string;
   resourceSha256: string;
   documentBasePath: string;
-  libraryOrigins?: readonly ("bundled" | "network" | "local" | "inline")[];
+  libraryOrigins?: readonly (
+    | "bundled"
+    | "bundled-compatible"
+    | "disk-cache"
+    | "network"
+    | "local"
+    | "inline"
+  )[];
+  resourceMode?: "exact" | "compatible";
+  recoveryAvailable?: boolean;
   scriptCount: number;
   byteLength: number;
   canvasGeneration: number;
   programIdentity: string;
+}>;
+
+export type EditRuntimeRecoveryRequest = Readonly<{
+  sessionId: string;
+  sourceSha256: string;
+  programIdentity: string;
+  canvasGeneration: number;
 }>;
 
 export type EditRuntimePrepareRequest = Readonly<{
@@ -45,6 +62,7 @@ export type EditRuntimePrepareRequest = Readonly<{
 
 export type EditRuntimePort = Readonly<{
   prepare(request: EditRuntimePrepareRequest): Promise<EditRuntimeGrant | null>;
+  recover?(request: EditRuntimeRecoveryRequest): Promise<EditRuntimeGrant | null>;
   revoke(sessionId: string): Promise<unknown>;
 }>;
 

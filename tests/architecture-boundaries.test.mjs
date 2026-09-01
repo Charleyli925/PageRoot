@@ -4,6 +4,7 @@ import test from "node:test";
 
 import {
   architectureViolations,
+  dialogPolicyViolations,
   escapeBoundaryViolations,
   layerBoundaryViolations,
   ownershipBoundaryViolations,
@@ -17,7 +18,7 @@ import {
   parseModule,
 } from "../scripts/architecture-ast-query.mjs";
 
-test("the production graph satisfies the four responsibility boundaries", async () => {
+test("the production graph satisfies the five responsibility boundaries", async () => {
   assert.deepEqual(await architectureViolations(), []);
 });
 
@@ -147,6 +148,30 @@ test("AST queries retain responsibility facts while ignoring member spelling", (
       { literals: ["qoder"], propertyNames: ["mode"] },
     ),
     false,
+  );
+});
+
+test("dialog policy forbids unregistered native alerts and window.confirm", async () => {
+  const source = await fixture("unregistered-confirm.js");
+  const violations = dialogPolicyViolations({
+    file: "app/workbench/example.js",
+    source,
+  }).join("\n");
+  assert.match(violations, /ordinary showMessageBox is forbidden/u);
+  assert.match(violations, /showErrorBox is forbidden except the registered startup failure/u);
+  assert.match(
+    violations,
+    /window.confirm is forbidden unless the copy is a registered delete\/overwrite\/abandon confirm/u,
+  );
+  assert.deepEqual(
+    dialogPolicyViolations({
+      file: "app/workbench/example.js",
+      source: [
+        'window.confirm("确定要用磁盘上的版本继续吗？未写入的编辑都会丢弃。");',
+        'window.confirm("确定要用外部版本覆盖当前编辑吗？此操作不可撤销。");',
+      ].join("\n"),
+    }),
+    [],
   );
 });
 

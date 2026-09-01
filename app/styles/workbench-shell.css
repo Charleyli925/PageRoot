@@ -235,6 +235,31 @@
   color: #74633a;
 }
 
+.workbench-chrome-status {
+  position: fixed;
+  z-index: 90;
+  top: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: min(560px, calc(100vw - 48px));
+  padding: 6px 14px;
+  border: 1px solid #c8c2f2;
+  border-radius: 999px;
+  background: rgb(247 246 255 / 96%);
+  color: var(--indigo-deep);
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.4;
+  box-shadow: 0 8px 20px rgb(40 37 56 / 12%);
+  pointer-events: none;
+}
+
+.workbench-chrome-status[data-tone="exit"] {
+  border-color: #d7b77c;
+  background: rgb(255 250 238 / 97%);
+  color: #704c1d;
+}
+
 .source-conflict-banner,
 .history-view-banner {
   top: 66px;

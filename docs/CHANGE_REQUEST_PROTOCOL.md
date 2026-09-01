@@ -105,7 +105,7 @@ v3 在其历史切换边界内不兼容 v1/v2；新写入不得沿用以下旧�
   0.9.0 v3 记录可由历史适配器在原目录补写
   `storageDirectoryName=projectId`；该适配器不是 v4 Project 打开路径的一部分，
   v1/v2、记录不完整或身份不一致的旧目录不迁移。
-- `PROJECT.md` 是整个项目长期使用的 AI 修改规则，不只属于某一次 Request；新项目默认创建空文件，由用户按需填写。项目空闲时允许用户修改并由工作台自动保存，处理期间只读。Request 会把当时已持久化规则冻结到 `input/PROJECT.md`；PageRoot 通用边界只写在 `AI_RULES.md`，不预填到项目规则中。
+- `PROJECT.md` 是整个项目长期使用的 AI 修改规则，不只属于某一次 Request；新项目首次打开时默认创建包含“项目目标、目标受众、内容与事实规则、视觉与表达、AI 修改边界”五段的简洁 Markdown 模板，用户也可以清空后按需填写。项目空闲时允许用户修改并由工作台自动保存，处理期间只读。Request 会把任务开始时已持久化的规则冻结到 `input/PROJECT.md`；PageRoot 通用边界只写在 `AI_RULES.md`，不预填到项目规则中。
 - `runtime-state.json` 与 `edit-audit.jsonl` 是系统运行和本地直接编辑的审计文件，只建议查看，不提供普通用户编辑入口。
 - `working/<原用户文件名>-V1.x.html` 是有效 AI 结果通过校验后创建的完整 HTML。它先进入“可审阅/打开”状态；审阅只读不会切换项目当前源，只有用户点击“直接打开”或在审阅页确认“打开 AI 修改后”才成为项目当前源。旧工作文件永不原地改写。
 - input manifest、冻结 annotation 等可移植索引只使用项目或 Request 内相对路径。

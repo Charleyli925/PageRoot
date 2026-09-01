@@ -6,6 +6,7 @@ import type {
 export type EditAuthorRuntimePhase =
   | "static"
   | "preparing"
+  | "recovering"
   | "ready"
   | "running"
   | "settled"

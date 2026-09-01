@@ -31,6 +31,7 @@ async function readWorkbenchCascadeCss() {
     "./styles/top-toolbar.css",
     "./styles/workbench-chrome.css",
     "./styles/project-sidebar.css",
+    "./styles/project-rules.css",
   ]);
   assert.equal(entry.trim(), imports.map((file) => `@import "${file}";`).join("\n"));
   const parts = await Promise.all(imports.map((file) => (
@@ -96,9 +97,31 @@ test("global sidebar owns the full shell column and start page has no card surfa
   assert.match(footer, /display:\s*flex/u);
   assert.match(footer, /justify-content:\s*flex-end/u);
   const settings = lastCssRule(css, ".workbench-sidebar-settings");
-  assert.match(settings, /width:\s*30px/u);
-  assert.match(settings, /height:\s*30px/u);
+  assert.match(settings, /width:\s*26px/u);
+  assert.match(settings, /height:\s*26px/u);
   assert.match(settings, /margin-left:\s*auto/u);
+});
+
+test("sidebar controls share inset and tab chrome is vertically centered without a grip line", async () => {
+  const css = await readWorkbenchCascadeCss();
+  const tabs = css.match(/\.workbench-tablist\s*\{[\s\S]*?\}/u)?.[0];
+  assert.ok(tabs, "missing base tablist rule");
+  assert.match(tabs, /align-items:\s*center/u);
+  assert.match(tabs, /padding:\s*0 8px 0 140px/u);
+
+  for (const selector of [
+    ".workbench-sidebar-product",
+    ".workbench-sidebar-body",
+    ".workbench-sidebar-footer",
+  ]) {
+    assert.match(
+      lastCssRule(css, selector),
+      /var\(--sidebar-content-inset, 14px\)/u,
+      `${selector} must use the shared left inset`,
+    );
+  }
+  assert.match(css, /\.workbench-resizer-grip\s*\{[\s\S]*?display:\s*none/u);
+  assert.match(css, /\.workbench-resizer\s*\{[\s\S]*?width:\s*18px/u);
 });
 
 test("project trees use compact unweighted rows and a uniform quiet lineage", async () => {
@@ -107,7 +130,9 @@ test("project trees use compact unweighted rows and a uniform quiet lineage", as
   const projectRow = lastCssRule(css, ".sidebar-project-row");
   assert.match(projectRow, /font-size:\s*11px/u);
   assert.match(projectRow, /font-weight:\s*400/u);
-  assert.match(css, /\.sidebar-project-row-current\s*\{[\s\S]*?background:\s*rgb\(238 236 255 \/ 78%\)/u);
+  const currentProject = lastCssRule(css, ".sidebar-project-row-current");
+  assert.match(currentProject, /background:\s*transparent/u);
+  assert.doesNotMatch(currentProject, /#ece9ff|rgb\(238 236 255 \/ 78%\)/u);
   assert.match(css, /\.sidebar-project-row > \.sidebar-project-icon\s*\{[\s\S]*?width:\s*14px[\s\S]*?height:\s*14px/u);
 
   const lineage = lastCssRule(css, ".sidebar-version-rail-path");
@@ -119,6 +144,28 @@ test("project trees use compact unweighted rows and a uniform quiet lineage", as
   assert.doesNotMatch(css, /sidebar-version-file > svg/u);
   assert.doesNotMatch(css, /sidebar-version-current-label/u);
   assert.doesNotMatch(css, /sidebar-skeleton-icon/u);
+  const rulesRow = lastCssRule(css, ".sidebar-project-rules-row");
+  assert.match(rulesRow, /min-height:\s*38px/u);
+  assert.match(css, /\.sidebar-project-rules-copy > small/u);
+});
+
+test("cache handoff waits for static display readiness and uses live canvas geometry", async () => {
+  const moduleCss = await readFile(new URL(
+    "../app/workbench/workbench-document-surface-cache.module.css",
+    import.meta.url,
+  ), "utf8");
+  const cacheComponent = await readFile(new URL(
+    "../app/workbench/WorkbenchDocumentSurfaceCache.tsx",
+    import.meta.url,
+  ), "utf8");
+
+  assert.match(moduleCss, /\.cache\s*\{[\s\S]*?grid-column:\s*2/u);
+  assert.match(moduleCss, /\.cache\[data-visible="true"\]\s*\{[\s\S]*?padding:\s*0/u);
+  assert.match(cacheComponent, /data-display-ready/u);
+  assert.match(cacheComponent, /candidateTabId/u);
+  assert.match(cacheComponent, /presentedToken/u);
+  assert.match(cacheComponent, /data-source-sha256=\{entry\.sourceSha256\}/u);
+  assert.match(cacheComponent, /hidden=\{entry\.tabId !== renderedPresentedToken\?\.tabId[\s\S]*?entry\.sourceSha256 !== renderedPresentedToken\?\.sourceSha256/u);
 });
 
 test("settings stays a flat 780px canvas with one bordered row container", async () => {

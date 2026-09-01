@@ -400,6 +400,7 @@ export class WorkspaceController {
   activateWorkbenchTab(tabId: string, input?: { deadlineMs?: number }): Promise<WorkbenchNavigationOutcome>;
   createWorkbenchStartTab(): Promise<WorkbenchNavigationOutcome>;
   createWorkbenchSettingsTab(): Promise<WorkbenchNavigationOutcome>;
+  createWorkbenchProjectRulesTab(): Promise<WorkbenchNavigationOutcome>;
   closeWorkbenchTab(tabId: string): Promise<WorkbenchNavigationOutcome>;
   openRegisteredWorkbenchProject(input: {
     projectId: string;
@@ -508,6 +509,7 @@ export class WorkspaceController {
     ready: boolean;
     reason?: string;
     presentation?: "in-app" | "native";
+    retry?: boolean;
   }>>;
   abortClose(input: { requestId: string }): void;
   hasPendingDrain(boundary: string): boolean;

@@ -101,6 +101,28 @@ test("settings is a singleton presentation tab and preserves the document runtim
   assert.equal(second.runtimeOwnerTabId, documentTabId);
 });
 
+test("长期规则是唯一的独立标签，并保留 HTML runtime owner", () => {
+  const session = new WorkbenchTabsSession();
+  session.bindDocument(a);
+  const documentTabId = session.snapshot.activeTabId;
+
+  const first = session.createProjectRules({ focus: true });
+  const rulesTab = first.tabs.find((tab) => tab.kind === "project-rules");
+  assert.ok(rulesTab);
+  assert.equal(rulesTab.title, "长期规则");
+  assert.equal(first.activeTabId, rulesTab.tabId);
+  assert.equal(first.mountedDocumentTabId, null);
+  assert.equal(first.runtimeOwnerTabId, documentTabId);
+
+  session.beginSwitch(rulesTab.tabId);
+  session.commitProjectRules(rulesTab.tabId);
+  const second = session.createProjectRules({ focus: true });
+  assert.equal(second.tabs.filter((tab) => tab.kind === "project-rules").length, 1);
+  assert.equal(second.activeTabId, rulesTab.tabId);
+  assert.equal(second.runtimeOwnerTabId, documentTabId);
+  assert.doesNotMatch(JSON.stringify(session.serialize()), /PROJECT\.md|project-rules/u);
+});
+
 test("a Finder rename updates the document tab title without changing its identity", () => {
   const session = new WorkbenchTabsSession();
   session.bindDocument(a);

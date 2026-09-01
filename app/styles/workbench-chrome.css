@@ -288,13 +288,8 @@ body {
 }
 
 .workbench-resizer-grip {
-  width: 1px;
-  height: 100%;
-  min-height: 1px;
-  display: grid;
-  border-radius: 0;
-  background: #a9a8ae;
-  transition: background-color 140ms ease;
+  /* Keep the 18px parent as the hit target, but do not expose a drag line. */
+  display: none;
 }
 
 .workbench-resizer:hover .workbench-resizer-grip,

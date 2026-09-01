@@ -64,7 +64,9 @@ export const WorkbenchSettingsSidebar = memo(function WorkbenchSettingsSidebar({
           type="button"
           onClick={onReturnToWorkbench}
         >
-          <ArrowLeftIcon aria-hidden="true" size={18} weight="regular" />
+          <span className="workbench-settings-back-icon" aria-hidden="true">
+            <ArrowLeftIcon size={18} weight="regular" />
+          </span>
           <span>返回工作台</span>
         </button>
         <nav aria-label="设置类别">
@@ -96,6 +98,7 @@ export const WorkbenchGlobalSidebarContainer = memo(function WorkbenchGlobalSide
   currentProjectId: string | null;
   currentProjectName: string;
   currentProjectVersions: readonly ProjectVersionSummary[];
+  projectRulesActive: boolean;
   onToggle(): void;
   onOpenLocal(): void;
   onOpenCurrentVersion(version: ProjectVersionSummary): void;
@@ -110,8 +113,10 @@ export const WorkbenchGlobalSidebarContainer = memo(function WorkbenchGlobalSide
   updateBadgeLabel: string;
   onOpenAbout(): void;
   onOpenSettings(): void;
+  onOpenProjectRules(): void;
   onDownloadOrRestartUpdate(): void;
   onResizeCommit?(width: number): void;
+  openHtmlError?: string | null;
 }) {
   const catalog = useSyncExternalStore(
     capability.subscribe,

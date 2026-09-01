@@ -5,6 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
+  callExpressions,
   callNames,
   countReactHooks,
   hasFilesystemWrite,
@@ -85,6 +86,17 @@ const RAW_ENDPOINTS = new Set([
   "/version-file",
   "/project-file",
 ]);
+const ALLOWED_SHOW_ERROR_BOX_TITLES = new Set([
+  "源页启动失败",
+]);
+const ALLOWED_WINDOW_CONFIRM_PREFIXES = Object.freeze([
+  "确定删除",
+  "确定要用磁盘上的版本继续吗",
+  "确定要用外部版本覆盖当前编辑吗",
+  "重新载入会舍弃尚未写回的当前编辑内容",
+  "成功导入后会将原文件移至废纸篓",
+]);
+
 const APPROVED_PERSISTENCE_OWNERS = new Set([
   "bridge/agent/agent-lease-store.mjs",
   "bridge/agent/catalog/agent-installer.mjs",
@@ -99,6 +111,7 @@ const APPROVED_PERSISTENCE_OWNERS = new Set([
   "bridge/workspace-bridge.mjs",
   "desktop/after-pack.mjs",
   "desktop/device-identity.mjs",
+  "desktop/edit-runtime-library-store.mjs",
   "desktop/external-file-open.mjs",
   "desktop/main.mjs",
   "desktop/project-files.mjs",
@@ -241,6 +254,55 @@ export function escapeBoundaryViolations({ file = "", source = "", module = null
   return violations;
 }
 
+function callPathKind(pathName) {
+  if (!pathName) return null;
+  if (pathName === "window.confirm") {
+    return "window.confirm";
+  }
+  if (pathName === "dialog.showErrorBox" || pathName.endsWith(".showErrorBox")) {
+    return "showErrorBox";
+  }
+  if (pathName === "dialog.showMessageBox" || pathName.endsWith(".showMessageBox")) {
+    return "showMessageBox";
+  }
+  return null;
+}
+
+export function dialogPolicyViolations({ file = "", source = "", module = null } = {}) {
+  const handle = module || parseModule(file || "fixture.js", source);
+  const violations = [];
+  if (
+    file.startsWith("tests/")
+    || file.startsWith("scripts/")
+    || file.startsWith(".codex-worktrees/")
+  ) {
+    return violations;
+  }
+  for (const call of callExpressions(handle)) {
+    const kind = callPathKind(call.path);
+    if (!kind) continue;
+    if (kind === "showMessageBox") {
+      violations.push(`${file}: ordinary showMessageBox is forbidden; keep only registered content-loss confirms`);
+      continue;
+    }
+    if (kind === "showErrorBox") {
+      const title = call.args[0];
+      if (!title || !ALLOWED_SHOW_ERROR_BOX_TITLES.has(title)) {
+        violations.push(`${file}: showErrorBox is forbidden except the registered startup failure`);
+      }
+      continue;
+    }
+    const prefix = call.args[0];
+    if (
+      typeof prefix !== "string"
+      || !ALLOWED_WINDOW_CONFIRM_PREFIXES.some((allowed) => prefix.startsWith(allowed))
+    ) {
+      violations.push(`${file}: window.confirm is forbidden unless the copy is a registered delete/overwrite/abandon confirm`);
+    }
+  }
+  return violations;
+}
+
 export function retiredArtifactViolations({ file = "", source = "", module = null } = {}) {
   const handle = module || parseModule(file || "fixture.js", source);
   const violations = [];
@@ -299,6 +361,7 @@ export async function architectureViolations() {
     violations.push(...ownershipBoundaryViolations({ file, source, module: ast }));
     violations.push(...escapeBoundaryViolations({ file, source, module: ast }));
     violations.push(...retiredArtifactViolations({ file, source, module: ast }));
+    violations.push(...dialogPolicyViolations({ file, source, module: ast }));
   }
   return [...new Set(violations)].sort();
 }

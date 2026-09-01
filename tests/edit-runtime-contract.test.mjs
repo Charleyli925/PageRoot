@@ -116,10 +116,13 @@ test("direct Edit runtime grants use one session and one execution identity", ()
   assert.equal(EDIT_AUTHOR_RUNTIME_BUDGET.declaredAssetCount, 64);
   assert.equal(EDIT_AUTHOR_RUNTIME_BUDGET.declaredAssetReferenceCount, 128);
   assert.equal(EDIT_AUTHOR_RUNTIME_BUDGET.declaredAssetBytes, 2 * 1024 * 1024);
+  assert.equal(EDIT_AUTHOR_RUNTIME_BUDGET.remoteLibraryDeadlineMs, 60_000);
   assert.equal(
     EDIT_AUTHOR_RUNTIME_VERIFICATION_DEADLINE_MS,
-    (EDIT_AUTHOR_RUNTIME_BUDGET.runtimeDeadlineMs * 2) + 1_000,
-    "canvas acknowledgement permits bounded preparation and one fail-safe visible-iframe deadline",
+    EDIT_AUTHOR_RUNTIME_BUDGET.remoteLibraryDeadlineMs
+      + (EDIT_AUTHOR_RUNTIME_BUDGET.runtimeDeadlineMs * 2)
+      + 1_000,
+    "canvas acknowledgement permits remote acquisition and one fail-safe visible-iframe deadline",
   );
   assert.equal(EDIT_AUTHOR_RUNTIME_BUDGET.orphanSessionTtlMs, 60_000);
   assert.equal("cacheEntries" in EDIT_AUTHOR_RUNTIME_BUDGET, false);

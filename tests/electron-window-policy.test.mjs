@@ -53,10 +53,8 @@ test("Electron automation stays backgrounded unless foreground debugging is expl
     mainProcess,
     /if \(e2eNativeDialogsSuppressed\) \{[\s\S]*?reportSuppressedNativeDialog\([\s\S]*?\} else \{[\s\S]*?dialog\.showErrorBox\(/u,
   );
-  assert.match(
-    mainProcess,
-    /const nativeBlock = \(\s*!e2eNativeDialogsSuppressed\s*&& shouldPresentNativeCloseBlock\(result\)/u,
-  );
+  assert.match(mainProcess, /shouldRetryCloseBlock\(result\)/u);
+  assert.doesNotMatch(mainProcess, /dialog\.showMessageBox/u);
 
   assert.match(appFixture, /window\.isVisible\(\)/u);
   assert.match(appFixture, /PAGEROOT_E2E_FOREGROUND/u);
@@ -157,5 +155,6 @@ test("final-exit IPC unregister and close-abort registration include workbench t
   assert.match(windowIpc, /WORKBENCH_TAB_CHANNELS\.get/u);
   assert.match(windowIpc, /WORKBENCH_TAB_CHANNELS\.set/u);
   assert.match(windowIpc, /\.\.\.Object\.values\(WORKBENCH_TAB_CHANNELS/u);
+  assert.match(windowIpc, /APP_CHANNELS\.externalOpenFailedReady/u);
   assert.match(projectIpc, /acknowledgeExternalOpen/u);
 });

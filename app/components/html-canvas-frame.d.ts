@@ -4,6 +4,7 @@ export type RuntimeFrameContext = {
   verificationToken: string;
   grant: EditRuntimeGrant;
   elementGeneration: number;
+  activation: "pending" | "ready" | "failed";
   settled: boolean;
 };
 

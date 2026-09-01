@@ -20,7 +20,7 @@ function assertAlignedNavigation(harness, expectedProject) {
   const snapshot = harness.tabs.snapshot;
   const active = snapshot.tabs.find((tab) => tab.tabId === snapshot.activeTabId);
   assert.ok(active);
-  if (active.kind === "start") {
+  if (active.kind === "start" || active.kind === "settings" || active.kind === "project-rules") {
     assert.equal(snapshot.mountedDocumentTabId, null);
     if (snapshot.runtimeOwnerTabId) {
       assert.equal(snapshot.tabs.some((tab) => (
@@ -63,7 +63,12 @@ test("cold-start priority is external FIFO, persisted active tab, activePath com
 
 function projectSnapshot(project, epoch, options = {}) {
   return {
-    projectSession: { projectId: project.projectId, documentId: project.documentId, epoch },
+    projectSession: {
+      projectId: project.projectId,
+      documentId: project.documentId,
+      epoch,
+      sourcePath: `/managed/${project.projectId}.html`,
+    },
     project: {
       hydration: {
         phase: options.hydration || "idle",
@@ -117,6 +122,10 @@ function fixture({
       listeners.add(listener);
       listener(snapshot);
       return () => listeners.delete(listener);
+    },
+    openProjectRules({ context }) {
+      calls.push(`rules:${context.projectId}`);
+      return Promise.resolve({ status: "succeeded", value: { opened: true } });
     },
   };
   const publish = (next) => {
@@ -709,6 +718,30 @@ test("settings opens once, returns to the retained document without reopening Pr
   assert.equal(harness.tabs.snapshot.tabs.some((tab) => tab.kind === "settings"), false);
   assert.equal(harness.tabs.snapshot.activeTabId, `document:${A.projectId}:${A.documentId}`);
   assert.equal(harness.calls.some((call) => call === `open:registered:${A.projectId}`), false);
+});
+
+test("长期规则只打开一个标签，并在返回 HTML 时复用 runtime owner", async () => {
+  const harness = fixture();
+  const first = await harness.workflow.createProjectRules();
+  assert.equal(first.status, "succeeded");
+  assert.equal(first.value.tabId, "project-rules:1");
+  assert.equal(harness.navigation.snapshot.lastReceipt.kind, "project-rules");
+  assert.equal(harness.tabs.snapshot.activeTabId, "project-rules:1");
+  assert.equal(harness.tabs.snapshot.mountedDocumentTabId, null);
+  assert.equal(harness.tabs.snapshot.runtimeOwnerTabId, "document:project_alpha:doc_alpha");
+  assert.deepEqual(harness.calls.filter((call) => call === `rules:${A.projectId}`), [`rules:${A.projectId}`]);
+
+  const second = await harness.workflow.createProjectRules();
+  assert.equal(second.status, "succeeded");
+  assert.equal(harness.tabs.snapshot.tabs.filter((tab) => tab.kind === "project-rules").length, 1);
+  assert.deepEqual(harness.calls.filter((call) => call === `rules:${A.projectId}`), [`rules:${A.projectId}`]);
+
+  const returned = await harness.workflow.activateTab(`document:${A.projectId}:${A.documentId}`);
+  assert.equal(returned.status, "succeeded");
+  assert.equal(harness.tabs.snapshot.activeTabId, `document:${A.projectId}:${A.documentId}`);
+  assert.equal(harness.tabs.snapshot.mountedDocumentTabId, `document:${A.projectId}:${A.documentId}`);
+  assert.equal(harness.tabs.snapshot.runtimeOwnerTabId, `document:${A.projectId}:${A.documentId}`);
+  assert.deepEqual(harness.calls.filter((call) => call === "prepare"), ["prepare"]);
 });
 
 test("external admission completes only after the correlated application and terminal settlement", async () => {

@@ -181,6 +181,14 @@ test("preload exposes one narrow disposable Edit runtime resource port", async (
         executionId: "abcdefabcdefabcdefabcdef",
       });
     }
+    if (args[0] === "html-edit-runtime:recover") {
+      return success({
+        contractVersion: 2,
+        sessionId: "11111111111111111111111111111111",
+        executionId: "222222222222222222222222",
+        resourceMode: "exact",
+      });
+    }
     return success({ revoked: true });
   });
   const payload = {
@@ -198,16 +206,30 @@ test("preload exposes one narrow disposable Edit runtime resource port", async (
     executionId: "abcdefabcdefabcdefabcdef",
   });
   assert.deepEqual(calls[0], ["html-edit-runtime:prepare", payload]);
+  const recovery = {
+    sessionId: "0123456789abcdef0123456789abcdef",
+    sourceSha256: payload.sourceSha256,
+    programIdentity: payload.programIdentity,
+    canvasGeneration: payload.canvasGeneration,
+  };
+  assert.deepEqual(await editRuntime.recover(recovery), {
+    contractVersion: 2,
+    sessionId: "11111111111111111111111111111111",
+    executionId: "222222222222222222222222",
+    resourceMode: "exact",
+  });
+  assert.deepEqual(calls[1], ["html-edit-runtime:recover", recovery]);
   assert.deepEqual(
     await editRuntime.revoke("0123456789abcdef0123456789abcdef"),
     { revoked: true },
   );
-  assert.deepEqual(calls[1], [
+  assert.deepEqual(calls[2], [
     "html-edit-runtime:revoke",
     "0123456789abcdef0123456789abcdef",
   ]);
   assert.deepEqual(Object.keys(editRuntime).sort(), [
     "prepare",
+    "recover",
     "revoke",
   ]);
 });
@@ -866,6 +888,66 @@ test("preload exposes workspace failure recovery and a narrow relaunch action", 
     ["html-app:relaunch"],
   ]);
   unsubscribeAbout();
+  unsubscribe();
+});
+
+test("preload reports close blockers in-app and can request retry", async () => {
+  const calls = [];
+  const preload = await loadPreloadApis(async (...args) => {
+    calls.push(args);
+    return { accepted: true };
+  });
+  await preload.lifecycle.reportBlocked("close-request-0001", "正在保存。");
+  await preload.lifecycle.reportBlocked("close-request-0002", "正在保存。", "in-app", true);
+  assert.deepEqual(JSON.parse(JSON.stringify(calls)), [
+    ["html-app:close-result", {
+      requestId: "close-request-0001",
+      ready: false,
+      reason: "正在保存。",
+      presentation: "in-app",
+    }],
+    ["html-app:close-result", {
+      requestId: "close-request-0002",
+      ready: false,
+      reason: "正在保存。",
+      presentation: "in-app",
+      retry: true,
+    }],
+  ]);
+});
+
+test("preload replays a pending external-open failure and receives later failures", async () => {
+  const calls = [];
+  const preload = await loadPreloadApis(async (...args) => {
+    calls.push(args);
+    if (args[0] === "html-app:external-open-failed-ready") {
+      return {
+        title: "无法打开这个 HTML",
+        message: "启动期间未能读取这个 HTML 文件。",
+      };
+    }
+    return null;
+  });
+  const issues = [];
+  const unsubscribe = preload.lifecycle.onExternalOpenFailed((issue) => {
+    issues.push(issue);
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  preload.emit("html-app:external-open-failed", {
+    title: "无法打开这个 HTML",
+    message: "无法读取这个 HTML 文件。请确认文件仍存在且具有访问权限。",
+  });
+  assert.deepEqual(JSON.parse(JSON.stringify(issues)), [
+    {
+      title: "无法打开这个 HTML",
+      message: "启动期间未能读取这个 HTML 文件。",
+    },
+    {
+      title: "无法打开这个 HTML",
+      message: "无法读取这个 HTML 文件。请确认文件仍存在且具有访问权限。",
+    },
+  ]);
+  assert.deepEqual(calls, [["html-app:external-open-failed-ready"]]);
   unsubscribe();
 });
 

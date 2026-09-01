@@ -1084,10 +1084,10 @@
         "^app/domain/edit-runtime-contract\\.(?:js|d\\.ts)$",
         "^app/components/(?:HtmlCanvasEditor(?:\\.types)?|HtmlDisplaySurface(?:\\.module)?|html-canvas-selection-chrome(?:-contract)?|html-preview-sandbox)\\.(?:tsx|ts|js|css|d\\.ts)$",
         "^app/workbench\\.tsx$",
-        "^desktop/(?:edit-runtime-bootstrap|edit-runtime-protocol|edit-runtime-preparation-fence)\\.mjs$",
+        "^desktop/(?:edit-runtime-bootstrap|edit-runtime-protocol|edit-runtime-preparation-fence|edit-runtime-library-store)\\.mjs$",
         "^desktop/main\\.mjs$",
         "^docs/decisions/(?:0065-disposable-edit-runtime|archive/(?:0025-edit-direct-one-shot-runtime|0058-bounded-canvas-svg-edit-runtime))\\.md$",
-        "^tests/(?:edit-author-runtime-session|edit-runtime-bootstrap|edit-runtime-preparation-fence|edit-runtime-contract|edit-runtime-protocol|html-canvas-frame)\\.test\\.mjs$"
+        "^tests/(?:edit-author-runtime-session|edit-runtime-bootstrap|edit-runtime-preparation-fence|edit-runtime-contract|edit-runtime-protocol|edit-runtime-library-store|html-canvas-frame)\\.test\\.mjs$"
       ],
       "suites": [
         "typecheck",
@@ -1099,6 +1099,7 @@
         "tests/edit-runtime-preparation-fence.test.mjs",
         "tests/edit-runtime-contract.test.mjs",
         "tests/edit-runtime-protocol.test.mjs",
+        "tests/edit-runtime-library-store.test.mjs",
         "tests/html-preview-sandbox.test.mjs",
         "tests/html-canvas-frame.test.mjs",
         "tests/workspace-controller.test.mjs",
@@ -1278,8 +1279,6 @@
         "^app/workbench\\.tsx$",
         "^app/workbench/(?:comment-rail-view|comment-rail-contract|file-header-view|run-conversation-outlet|workbench-navigation-container)\\.(?:ts|tsx)$",
         "^tests/comment-rail-contract\\.test\\.mjs$",
-        "^app/workbench/ExternalHtmlOpenDialog\\.tsx$",
-        "^app/workbench/external-html-open-dialog\\.module\\.css$",
         "^app/workbench/(?:browser-io|comment-model|project-model|record-model|types)\\.ts$"
       ],
       "suites": [
@@ -1338,7 +1337,7 @@
     {
       "id": "web-ui",
       "patterns": [
-        "^app/components/(?:AboutPageRootDialog|CancelAiRunDialog|RestartUpdateDialog)\\.tsx$",
+        "^app/components/(?:AboutPageRootDialog|CancelAiRunDialog)\\.tsx$",
         "^app/(?:page|layout)\\.tsx$"
       ],
       "suites": [

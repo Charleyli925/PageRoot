@@ -171,6 +171,28 @@ export class WorkbenchNavigationWorkflow {
     });
   }
 
+  createProjectRules() {
+    return this.#admit({ kind: "create-project-rules" }, async (active) => {
+      const project = this.#controller.getSnapshot()?.projectSession;
+      if (!project?.projectId || !project.documentId || !project.sourcePath) {
+        return { outcome: rejected(
+          "PROJECT_RULES_CONTEXT_REQUIRED",
+          "当前项目尚未完成初始化，暂时不能打开长期规则。",
+        ) };
+      }
+      const before = new Set(this.#tabs.snapshot.tabs.map((tab) => tab.tabId));
+      this.#tabs.createProjectRules({ focus: false });
+      const created = this.#tabs.snapshot.tabs.find((tab) => !before.has(tab.tabId))
+        || this.#tabs.snapshot.tabs.find((tab) => tab.kind === "project-rules");
+      return created
+        ? this.#activateTab(active, created.tabId, {})
+        : { outcome: rejected(
+          "PROJECT_RULES_CREATE_FAILED",
+          "无法打开长期规则。",
+        ) };
+    });
+  }
+
   closeTab(tabId) {
     return this.#admit({ kind: "close-tab", tabId: String(tabId || "") }, async (active) => {
       const snapshot = this.#tabs.snapshot;
@@ -574,9 +596,59 @@ export class WorkbenchNavigationWorkflow {
       this.#session.transition(active.transactionId, "canvas-verified", { receipt });
       return { outcome: succeeded({ tabId: target.tabId }), receipt };
     }
+    if (target.kind === "project-rules") {
+      const prepared = current?.kind === "start" || current?.kind === "settings"
+        ? succeeded()
+        : await this.#projectWorkflow.prepareSwitch();
+      if (prepared?.status !== "succeeded") {
+        return { outcome: rejected(
+          prepared?.code || "PROJECT_RULES_SWITCH_BLOCKED",
+          String(prepared?.reason || "当前页面尚未安全收口。"),
+        ) };
+      }
+      if (current?.kind === "document") this.#captureCurrentSurface(current);
+      const project = this.#controller.getSnapshot()?.projectSession;
+      const context = project && project.projectId && project.documentId && project.sourcePath
+        ? {
+          epoch: Number(project.epoch) || 0,
+          projectId: String(project.projectId),
+          documentId: String(project.documentId),
+          sourcePath: String(project.sourcePath),
+        }
+        : null;
+      if (!context) {
+        return { outcome: rejected(
+          "PROJECT_RULES_CONTEXT_REQUIRED",
+          "当前项目尚未完成初始化，暂时不能打开长期规则。",
+        ) };
+      }
+      const opened = await this.#controller.openProjectRules({ context });
+      if (opened?.status !== "succeeded") {
+        return { outcome: rejected(
+          opened?.code || "PROJECT_RULES_READ_FAILED",
+          String(opened?.reason || "项目规则暂时无法读取。"),
+        ) };
+      }
+      const committed = this.#tabs.commitProjectRules(target.tabId);
+      if (!committed) return { outcome: rejected(
+        "WORKBENCH_TAB_COMMIT_REJECTED",
+        "标签页状态已变化，没有打开长期规则。",
+      ) };
+      const receipt = Object.freeze({
+        transactionId: active.transactionId,
+        applicationId: null,
+        projectId: context.projectId,
+        documentId: context.documentId,
+        epoch: context.epoch,
+        tabId: target.tabId,
+        kind: "project-rules",
+      });
+      this.#session.transition(active.transactionId, "canvas-verified", { receipt });
+      return { outcome: succeeded({ tabId: target.tabId }), receipt };
+    }
     if (current?.kind === "document") this.#captureCurrentSurface(current);
     if (
-      current?.kind === "settings"
+      (current?.kind === "settings" || current?.kind === "project-rules")
       && this.#tabs.snapshot.runtimeOwnerTabId === target.tabId
     ) {
       const currentProject = this.#controller.getSnapshot()?.projectSession;
@@ -592,7 +664,7 @@ export class WorkbenchNavigationWorkflow {
         });
         if (!committed) return { outcome: rejected(
           "WORKBENCH_TAB_COMMIT_REJECTED",
-          "标签页状态已变化，没有离开设置。",
+          "标签页状态已变化，没有离开当前页面。",
         ) };
         const receipt = Object.freeze({
           transactionId: active.transactionId,

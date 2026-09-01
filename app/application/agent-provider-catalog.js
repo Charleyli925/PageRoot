@@ -39,7 +39,7 @@ const QODER_PRESENTATION = Object.freeze({
   cardClassName: "qoder-availability-card",
   primaryActionDataAttribute: "data-qoder-primary",
   guidancePurposePrefix: "qoder",
-  readyDetail: "真实预检已完成，可直接交给 Qoder CLI",
+  readyDetail: "真实预检已完成，可直接交给 Qoder 修改",
   notInstalledDetail: "如需从 PageRoot 直接发送，还需要 Qoder CLI。",
   authRequiredDetail: "完成 Qoder 登录后即可直接发送。",
   invalidInstallationDetail: "当前安装不是 PageRoot 支持的独立 Qoder CLI。",
@@ -116,6 +116,7 @@ const CODEX_PRESENTATION = Object.freeze({
   displayName: "Codex",
   agentName: "Codex",
   logoSrc: null,
+  brandIcon: "openai",
   cardClassName: "codex-availability-card",
   primaryActionDataAttribute: "data-codex-primary",
   guidancePurposePrefix: "codex",
@@ -256,6 +257,7 @@ export function agentProviderCardPresentation(provider) {
   return Object.freeze({
     displayName: presentation.displayName,
     logoSrc: presentation.logoSrc || null,
+    brandIcon: presentation.brandIcon || null,
     cardClassName: presentation.cardClassName,
     primaryActionDataAttribute: presentation.primaryActionDataAttribute || null,
     availability: (availability) => agentAvailabilityCardPresentation(presentation, availability),
@@ -273,6 +275,7 @@ export function agentProviderCardPresentation(provider) {
 }
 
 export function agentProviderCardsFromCatalog(snapshot) {
+  const selected = snapshot?.selected || null;
   return Object.freeze(Object.values(snapshot?.providers ?? {})
     .filter((provider) => (
       provider.installable === true
@@ -280,7 +283,14 @@ export function agentProviderCardsFromCatalog(snapshot) {
       || provider.availability?.status === "not-installed"
     ))
     .map((provider) => Object.freeze({
-      selection: provider.selection,
+      // Preflight may resolve a provider default model. Keep that resolved
+      // selection for the selected card; other cards remain descriptor-backed
+      // until the user selects them.
+      selection: selected
+        && selected.providerId === provider.providerId
+        && selected.runtimeId === provider.runtimeId
+        ? selected
+        : provider.selection,
       presentation: agentProviderCardPresentation(provider),
       availability: provider.availability,
     })));
@@ -713,10 +723,14 @@ export class AgentCatalogState {
         installState: "idle",
         installSource: "managed",
       });
-      return this.refreshAvailability(frozen);
+      return this.refreshAvailability(
+        this.freezeProviderSelection(frozen.providerId) || frozen,
+      );
     } catch (cause) {
       this.#patchProvider(frozen.providerId, { installState: "failed" });
-      await this.refreshAvailability(frozen).catch(() => null);
+      await this.refreshAvailability(
+        this.freezeProviderSelection(frozen.providerId) || frozen,
+      ).catch(() => null);
       throw cause;
     }
   }

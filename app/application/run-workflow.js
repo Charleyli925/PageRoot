@@ -618,7 +618,9 @@ export class RunWorkflow {
       const refreshed = await this.#agentCatalog.install(frozen);
       if (this.#disposed) return stale({ kind: "agent-install" });
       if (String(refreshed?.result?.status || "") === "ready") {
-        return this.checkAgentUsability(frozen);
+        return this.checkAgentUsability(
+          this.#agentCatalog.freezeProviderSelection(frozen.providerId) || frozen,
+        );
       }
       return succeeded({ availability: this.#agentCatalog.availability(frozen) });
     } catch (cause) {
@@ -860,7 +862,6 @@ export class RunWorkflow {
       const request = {
         ...context,
         projectName: this.#codecs.fileStem(submissionContext.projectName),
-        projectMd: this.#codecs.projectMarkdown(submissionContext.projectName),
         sourcePath: context.sourcePath,
         expectedSourceSha256: persistedSourceSha256,
         freezeCutoffRevision,

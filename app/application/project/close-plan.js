@@ -7,7 +7,7 @@ export function planProjectCloseIdentity({
       kind: "reject",
       code: "PROJECT_CLOSE_IDENTITY_INVALID",
       reason: "桌面关闭请求缺少完整身份。",
-      presentation: "native",
+      presentation: "in-app",
     });
   }
   return Object.freeze({ kind: "ready" });

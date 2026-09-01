@@ -26,6 +26,15 @@ function settingsTab(tabId = "settings:1") {
   });
 }
 
+function projectRulesTab(tabId = "project-rules:1") {
+  return freezeTab({
+    tabId,
+    kind: "project-rules",
+    title: "长期规则",
+    status: "normal",
+  });
+}
+
 function normalizedDocumentTab(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const projectId = String(value.projectId || "");
@@ -196,6 +205,30 @@ export class WorkbenchTabsSession {
     });
   }
 
+  createProjectRules({ focus = true } = {}) {
+    const existing = this.#snapshot.tabs.find((tab) => tab.kind === "project-rules");
+    if (existing) {
+      return this.#publish({
+        ...this.#snapshot,
+        activeTabId: focus ? existing.tabId : this.#snapshot.activeTabId,
+        pendingTabId: null,
+        mountedDocumentTabId: focus ? null : this.#snapshot.mountedDocumentTabId,
+        runtimeOwnerTabId: this.#snapshot.runtimeOwnerTabId,
+      });
+    }
+    let sequence = 1;
+    const ids = new Set(this.#snapshot.tabs.map((tab) => tab.tabId));
+    while (ids.has(`project-rules:${sequence}`)) sequence += 1;
+    const tab = projectRulesTab(`project-rules:${sequence}`);
+    return this.#publish({
+      tabs: [...this.#snapshot.tabs, tab],
+      activeTabId: focus ? tab.tabId : this.#snapshot.activeTabId,
+      pendingTabId: null,
+      mountedDocumentTabId: focus ? null : this.#snapshot.mountedDocumentTabId,
+      runtimeOwnerTabId: this.#snapshot.runtimeOwnerTabId,
+    });
+  }
+
   bindDocument({ projectId, documentId, title, status = "normal", focus = true }) {
     const tab = normalizedDocumentTab({
       tabId: `document:${projectId}:${documentId}`,
@@ -298,7 +331,11 @@ export class WorkbenchTabsSession {
   beginSwitch(tabId) {
     const target = this.resolveTab(tabId);
     if (!target) return null;
-    if (target.kind === "start" || target.kind === "settings") return this.#publish({
+    if (
+      target.kind === "start"
+      || target.kind === "settings"
+      || target.kind === "project-rules"
+    ) return this.#publish({
       ...this.#snapshot,
       pendingTabId: target.tabId,
     });
@@ -327,6 +364,21 @@ export class WorkbenchTabsSession {
 
   commitSettings(tabId) {
     const target = this.#snapshot.tabs.find((tab) => tab.tabId === tabId && tab.kind === "settings");
+    if (!target || this.#snapshot.pendingTabId !== tabId) return null;
+    this.#pendingPriorStatus = null;
+    return this.#publish({
+      ...this.#snapshot,
+      activeTabId: tabId,
+      pendingTabId: null,
+      mountedDocumentTabId: null,
+      runtimeOwnerTabId: this.#snapshot.runtimeOwnerTabId,
+    });
+  }
+
+  commitProjectRules(tabId) {
+    const target = this.#snapshot.tabs.find(
+      (tab) => tab.tabId === tabId && tab.kind === "project-rules",
+    );
     if (!target || this.#snapshot.pendingTabId !== tabId) return null;
     this.#pendingPriorStatus = null;
     return this.#publish({

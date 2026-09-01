@@ -1095,6 +1095,14 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     candidate: RuntimeCandidate,
     outcome: Exclude<HtmlCanvasEditRuntimeLoadOutcome, "ready">,
   ) => boolean>(() => false);
+  const failActiveRuntimeFrameRef = useRef<(
+    frame: RuntimeFrameContext,
+    outcome: Exclude<HtmlCanvasEditRuntimeLoadOutcome, "ready">,
+  ) => boolean>(() => false);
+  const failRuntimeCandidateActivationRef = useRef<(
+    candidate: RuntimeCandidate,
+    outcome: Exclude<HtmlCanvasEditRuntimeLoadOutcome, "ready">,
+  ) => boolean>(() => false);
   const cancelRuntimeCandidateRef = useRef<(outcome?: Exclude<HtmlCanvasEditRuntimeLoadOutcome, "ready">) => void>(
     () => undefined,
   );
@@ -1494,6 +1502,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
               grant: runtimeGrant,
               verificationToken: runtimeToken,
               elementGeneration: nextFrameGeneration,
+              activation: "pending",
               settled: false,
             };
           }
@@ -1525,13 +1534,23 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       );
       if (registrationProperty) {
         const parentGlobals = window as unknown as Record<string, unknown>;
-        const openRegistration = (sourceWindow: unknown) => {
+        const openRegistration = (
+          sourceWindow: unknown,
+          identity: {
+            sessionId?: unknown;
+            executionId?: unknown;
+            frameToken?: unknown;
+          } | null,
+        ) => {
           const current = runtimeFrameRef.current;
           const iframe = iframeRef.current;
           if (
             !current
             || current.elementGeneration !== runtimeFrame.elementGeneration
+            || identity?.sessionId !== runtimeFrame.grant.sessionId
             || current.grant.executionId !== runtimeFrame.grant.executionId
+            || identity?.executionId !== runtimeFrame.grant.executionId
+            || identity?.frameToken !== runtimeFrame.verificationToken
             || sourceWindow !== iframe?.contentWindow
           ) return null;
           if (parentGlobals[registrationProperty] === openRegistration) {
@@ -1550,7 +1569,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
             markerSourceNodeIds: sourceNodeIdByElement,
             pagerootIds: pagerootIdByElement,
           };
-          return (candidates: unknown) => {
+          const registerProved = (candidates: unknown) => {
             const active = runtimeFrameRef.current;
             const activeIframe = iframeRef.current;
             if (
@@ -1597,6 +1616,26 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
             }
             return true;
           };
+          const reportActivationOutcome = (outcome: unknown) => {
+            const active = runtimeFrameRef.current;
+            const activeIframe = iframeRef.current;
+            if (
+              active !== runtimeFrame
+              || active.activation !== "pending"
+              || sourceWindow !== activeIframe?.contentWindow
+            ) return false;
+            if (outcome === "activation-ready") {
+              active.activation = "ready";
+              return true;
+            }
+            if (outcome !== "activation-failed") return false;
+            active.activation = "failed";
+            queueMicrotask(() => {
+              failActiveRuntimeFrameRef.current(active, "failed");
+            });
+            return true;
+          };
+          return { registerProved, reportActivationOutcome };
         };
         Object.defineProperty(parentGlobals, registrationProperty, {
           configurable: true,
@@ -1780,6 +1819,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
             grant: runtimeGrant,
             verificationToken: runtimeToken,
             elementGeneration: candidateGeneration,
+            activation: "pending",
             settled: false,
           };
         }
@@ -1861,11 +1901,21 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       );
       if (registrationProperty) {
         const parentGlobals = window as unknown as Record<string, unknown>;
-        const openRegistration = (sourceWindow: unknown) => {
+        const openRegistration = (
+          sourceWindow: unknown,
+          identity: {
+            sessionId?: unknown;
+            executionId?: unknown;
+            frameToken?: unknown;
+          } | null,
+        ) => {
           const activeCandidate = runtimeCandidateRef.current;
           const iframe = runtimeCandidateIframeRef.current;
           if (
             activeCandidate !== candidate
+            || identity?.sessionId !== runtimeFrame.grant.sessionId
+            || identity?.executionId !== runtimeFrame.grant.executionId
+            || identity?.frameToken !== runtimeFrame.verificationToken
             || sourceWindow !== iframe?.contentWindow
           ) return null;
           if (parentGlobals[registrationProperty] === openRegistration) {
@@ -1883,7 +1933,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
             markerSourceNodeIds: sourceNodeIdByElement,
             pagerootIds: pagerootIdByElement,
           };
-          return (candidates: unknown) => {
+          const registerProved = (candidates: unknown) => {
             const currentCandidate = runtimeCandidateRef.current;
             const activeIframe = runtimeCandidateIframeRef.current;
             if (
@@ -1928,6 +1978,26 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
             }
             return true;
           };
+          const reportActivationOutcome = (outcome: unknown) => {
+            const currentCandidate = runtimeCandidateRef.current;
+            const activeIframe = runtimeCandidateIframeRef.current;
+            if (
+              currentCandidate !== candidate
+              || runtimeFrame.activation !== "pending"
+              || sourceWindow !== activeIframe?.contentWindow
+            ) return false;
+            if (outcome === "activation-ready") {
+              runtimeFrame.activation = "ready";
+              return true;
+            }
+            if (outcome !== "activation-failed") return false;
+            runtimeFrame.activation = "failed";
+            queueMicrotask(() => {
+              failRuntimeCandidateActivationRef.current(candidate, "failed");
+            });
+            return true;
+          };
+          return { registerProved, reportActivationOutcome };
         };
         Object.defineProperty(parentGlobals, registrationProperty, {
           configurable: true,
@@ -2025,7 +2095,13 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     const iframe = runtimeCandidateIframeRef.current;
     const documentNode = iframe?.contentDocument;
     if (!iframe || !documentNode?.documentElement) return false;
-    if (candidate.runtimeFrame && !candidate.sourceElements) return false;
+    if (
+      candidate.runtimeFrame
+      && (
+        candidate.runtimeFrame.activation !== "ready"
+        || !candidate.sourceElements
+      )
+    ) return false;
     try {
       applyPageViewContextToDocument(
         documentNode,
@@ -2098,6 +2174,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     }
     return false;
   }, []);
+  failRuntimeCandidateActivationRef.current = failRuntimeCandidate;
 
   const connectRuntimeCandidate = useCallback((
     iframe: HTMLIFrameElement,
@@ -2119,6 +2196,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       || marker?.getAttribute(FRAME_VERIFICATION_ATTRIBUTE) !== candidate.verificationToken
       || marker.getAttribute("content") !== candidate.verificationToken
       || (candidate.runtimeFrame && !candidate.loaded)
+      || (candidate.runtimeFrame && candidate.runtimeFrame.activation !== "ready")
       || (candidate.runtimeFrame && !candidate.sourceElements)
     ) return false;
     return promoteRuntimeCandidate(candidate);
@@ -2148,6 +2226,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     onEditRuntimeLoadOutcomeRef.current?.(frame.grant, outcome);
     return true;
   }, [loadFrameSource]);
+  failActiveRuntimeFrameRef.current = fallBackToStaticRuntimeFrame;
 
   const updateSelectedStyle = useCallback(() => {
     const element = selectedElementRef.current;
@@ -5625,7 +5704,8 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       }
       const runtimeSourceElements = runtimeSourceElementsRef.current;
       if (
-        !runtimeSourceElements
+        runtimeFrame.activation !== "ready"
+        || !runtimeSourceElements
         || runtimeSourceElements.elementGeneration !== runtimeFrame.elementGeneration
         || runtimeSourceElements.executionId !== runtimeFrame.grant.executionId
       ) return false;
@@ -6186,6 +6266,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         // Proof and active handlers were already validated by connectFrame. Mark
         // this frame internally settled before rebinding a pending native edit;
         // the external ready outcome is still emitted only after that rebind.
+        if (connectedRuntimeFrame.activation !== "ready") return;
         connectedRuntimeFrame.settled = true;
         containerRef.current?.setAttribute(
           "data-runtime-bootstrap-count",
@@ -6286,7 +6367,10 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         ) pendingNativeEditResumeRef.current = null;
         updateOverlayPosition();
       }
-      if (connectedRuntimeFrameIsCurrent && connectedRuntimeFrame) {
+      if (
+        connectedRuntimeFrameIsCurrent
+        && connectedRuntimeFrame?.activation === "ready"
+      ) {
         if (!runtimeReadyReportedRef.current.has(connectedRuntimeFrame)) {
           runtimeReadyReportedRef.current.add(connectedRuntimeFrame);
           const promotedCandidate = runtimePromotionRef.current;

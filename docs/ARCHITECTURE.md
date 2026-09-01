@@ -87,7 +87,12 @@ the historical synthetic-spike decision.
   wait for visual paint, freeze activity or audit Runtime DOM against source.
   Same-origin `window.parent` access, including renderer-exposed preload APIs,
   remains the accepted in-place-editing cost. Unsupported programs fail closed
-  to static Edit. Semantic source changes rebuild the disposable iframe and
+  to static Edit. An exact cached ECharts library wins; the narrowly reviewed
+  5.4.3 core CDN mapping may render immediately with packaged 5.5.0 while the
+  exact bytes download into a verified content-addressed store. The first
+  successful runtime locks the current Canvas generation. Exact bytes never
+  replace a successful compatible page; only a failed compatible run may
+  consume one exact recovery. Semantic source changes rebuild the disposable iframe and
   rerun the unchanged author program; native input may defer that one rebuild
   until composition/editing finishes. Generated descendants are display-only
   and map to the nearest still-proven authored source host for comments. Runtime
@@ -246,7 +251,7 @@ services.
 | Browser-workbench navigation and tabs | `createRuntimeWorkspaceController()` constructs one `WorkbenchNavigationSession`, one `WorkbenchTabsSession` and one byte-bounded `DocumentSurfaceCacheSession`; `WorkspaceController` owns their `WorkbenchNavigationWorkflow`, startup arbitration, Registry reconciliation, aggregate projection and commands. The cache admits only persisted, Canvas-verified exact HTML, retains at most three script-disabled hot iframes plus eight/48 MiB warm entries, and never persists or authorizes editing. Every startup/restore, local/recent, registered/sidebar/tab, browser-file, OS-external and confirmation intent enters one ordered admission stream with a transaction ID. Before mutating Controller Sessions, `ProjectWorkflow` must synchronously authorize any non-null transaction/application generation and then obtain its matching application receipt; null identifies a legal authority refresh, while mismatched or terminal identity is stale. `project-applied` is informational only. Pre-apply failure restores the captured tab authority, while a post-apply failure either restores both Controller and tabs from the same receipt or retains the aligned document as committed-error. Desktop close freezes this admission stream before its first await, pins one persistence revision through Project close, retains the freeze when ready, and releases it on abort/retry. `app/workbench/WorkbenchChrome.tsx` and cached surfaces are presentation only. |
 | Open/registered project identity, session generation and late-query fencing | `app/application/project-session.js` |
 | External OS/QoderWork HTML-open FIFO delivery with explicit renderer acknowledgement, opaque request deduplication, read-only A/B/C classification, Prepared Intent, committed-exit one-shot handoff, cold-start native failure presentation from stable product codes, whole project-open transition ordering, blocker-gated deferred head retention, request-keyed ack-only retry, accepted-result FIFO and final renderer fence | `desktop/external-file-open.mjs`, `desktop/prepared-html-open.mjs`, `desktop/project-open-queue.mjs`, `app/application/external-file-open-session.js`, `app/application/project-application-session.js` |
-| First-open and already-imported confirmation prompt | `app/workbench/ExternalHtmlOpenDialog.tsx`, projected from `ProjectWorkflow` |
+| First-open and already-imported confirmation prompt | Auto-confirmed by Workbench from `ProjectWorkflow.openConfirmation`; delete-original still uses a registered `window.confirm` |
 | Current source bytes, Hash, revisions, persistence projection, source-write single flight and Canvas authority generation | `app/application/document-session.js` |
 | Renderer draft revision, pending operations and reconciliation | `app/application/draft-session.js` |
 | Renderer comment working copy, composer and saved-comment edit projection | `app/application/comment-session.js` |
@@ -286,6 +291,7 @@ services.
 | Imported project's original sibling-asset directory | `desktop/imported-asset-root.mjs` plus Main `html-projects.json` |
 | Edit script/resource limits, exact program identity and direct-frame grant | `app/domain/edit-runtime-contract.js`, `app/application/edit-author-runtime-session.js` |
 | Scoped Edit author-resource closure, contained asset/script serving and source-provenance bootstrap | `desktop/edit-runtime-protocol.mjs`, `desktop/edit-runtime-bootstrap.mjs` |
+| Verified immutable ECharts CDN byte cache, exact-URL classification and LRU | `desktop/edit-runtime-library-store.mjs` |
 | Source-backed preview/edit display-state filtering, rebinding and safe action resolution | `app/lib/page-view-context.js` |
 | Run lifecycle decoding and transition policy | `app/domain/run-lifecycle.js` |
 | Request freeze/persisted-boundary validation, authority reconciliation, run polling, cancellation, conflict commands and confirmed handoff | `app/application/run-workflow.js` |

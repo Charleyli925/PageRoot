@@ -27,9 +27,9 @@
 .workbench-tablist {
   height: 100%;
   display: flex;
-  align-items: end;
+  align-items: center;
   gap: 2px;
-  padding: 5px 8px 0 140px;
+  padding: 0 8px 0 140px;
   overflow-x: auto;
   scrollbar-width: none;
 }
@@ -187,11 +187,12 @@
 }
 
 .workbench-sidebar-product {
+  width: 100%;
   min-width: 0;
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 9px 14px 8px;
+  padding: 9px var(--sidebar-content-right-inset, 12px) 8px var(--sidebar-content-inset, 14px);
 }
 
 .workbench-sidebar-product > button:first-child {
@@ -239,7 +240,7 @@
   display: grid;
   grid-auto-rows: min-content;
   gap: 3px;
-  padding: 4px 10px 18px;
+  padding: 4px var(--sidebar-content-right-inset, 12px) 18px var(--sidebar-content-inset, 14px);
   overflow-y: auto;
 }
 
@@ -247,14 +248,14 @@
   min-width: 0;
   display: flex;
   justify-content: flex-end;
-  padding: 8px 28px 10px 14px;
+  padding: 8px var(--sidebar-content-right-inset, 12px) 10px var(--sidebar-content-inset, 14px);
   border-top: 1px solid rgb(43 40 53 / 6%);
   background: inherit;
 }
 
 .workbench-sidebar-settings {
-  width: 30px;
-  height: 30px;
+  width: 26px;
+  height: 26px;
   flex: none;
   display: grid;
   place-items: center;
@@ -291,7 +292,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 7px 9px;
+  padding: 7px 0;
   border: 0;
   border-radius: 9px;
   background: transparent;

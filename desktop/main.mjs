@@ -57,6 +57,7 @@ import {
   createExternalFileOpenDeliveryCoordinator,
   createExternalFileOpenExitHandoff,
   createExternalFileOpenMailbox,
+  createExternalOpenFailureMailbox,
   externalOpenFailurePresentation,
   externalHtmlPathsFromArgv,
 } from "./external-file-open.mjs";
@@ -88,7 +89,7 @@ import {
   closeAbortPayload,
   normalizeCloseResult,
   runGuardedFinalExit,
-  shouldPresentNativeCloseBlock,
+  shouldRetryCloseBlock,
   stopBridgeOrNotifyCloseAborted,
 } from "./close-recovery.mjs";
 import {
@@ -137,10 +138,12 @@ import {
   createEditRuntimeProtocolController,
   registerEditRuntimeProtocolScheme,
 } from "./edit-runtime-protocol.mjs";
+import { createEditRuntimeLibraryStore } from "./edit-runtime-library-store.mjs";
 import {
   EDIT_AUTHOR_RUNTIME_CONTRACT_VERSION,
   editRuntimeProgramIdentity,
   isEditRuntimeRequestId,
+  isEditRuntimeSessionId,
 } from "../app/domain/edit-runtime-contract.js";
 import {
   createEditRuntimePreparationFence,
@@ -256,6 +259,8 @@ const APP_CHANNELS = Object.freeze({
   workspaceRecoveryReady: "html-app:workspace-recovery-ready",
   externalOpenRequested: "html-app:external-open-requested",
   externalOpenReady: "html-app:external-open-ready",
+  externalOpenFailed: "html-app:external-open-failed",
+  externalOpenFailedReady: "html-app:external-open-failed-ready",
   bridgeReady: "html-app:bridge-ready",
   relaunch: "html-app:relaunch",
   openUserNotice: "html-app:open-user-notice",
@@ -289,6 +294,7 @@ const PREVIEW_CHANNELS = Object.freeze({
 });
 const EDIT_RUNTIME_CHANNELS = Object.freeze({
   prepare: "html-edit-runtime:prepare",
+  recover: "html-edit-runtime:recover",
   revoke: "html-edit-runtime:revoke",
 });
 const EDIT_CHANNELS = Object.freeze({
@@ -315,7 +321,6 @@ let workbenchTabsWriteQueue = Promise.resolve();
 let latestUpdateResult = null;
 let applicationUpdate = null;
 let usageTelemetry = null;
-let workspaceFailurePrompt = null;
 let managedWelcomeRegistration = null;
 let previewProtocolController = null;
 let editRuntimeProtocolController = null;
@@ -347,6 +352,7 @@ const desktopRuntime = {
   markStartupStage: (stage) => startupPerformanceTimeline.mark(stage),
   startupTimingSnapshot: () => startupPerformanceTimeline.snapshot(),
   startUsageTelemetryAfterFirstPaint,
+  deliverPendingExternalOpenFailure,
 };
 const {
   presentMainWindow,
@@ -425,6 +431,7 @@ async function recoverWatchedManagedSource(info) {
 let activeImportedAssetSourcePath = null;
 const workspaceRecoveryMailbox = createWorkspaceRecoveryMailbox();
 const externalFileOpenMailbox = createExternalFileOpenMailbox();
+const externalOpenFailureMailbox = createExternalOpenFailureMailbox();
 const externalFileOpenDelivery = createExternalFileOpenDeliveryCoordinator();
 const preparedHtmlOpenStore = createPreparedHtmlOpenStore();
 const externalFileOpenExitHandoff = createExternalFileOpenExitHandoff({
@@ -459,6 +466,9 @@ function ensureEditRuntimeProtocolController() {
       protocolApi: protocol,
       netFetch: (url, options) => net.fetch(url, options),
       bundledEchartsPath,
+      runtimeLibraryStore: createEditRuntimeLibraryStore({
+        userDataPath: app.getPath("userData"),
+      }),
     });
     editRuntimeProtocolController.install();
   }
@@ -1172,15 +1182,29 @@ async function prepareOrOpenFromPath(sourcePath, { requestId } = {}) {
   return taggedConfirmation(descriptor);
 }
 
-function showExternalOpenError(error) {
+function presentExternalOpenFailure(error) {
   const presentation = externalOpenFailurePresentation(error);
-  const title = "无法打开这个 HTML";
-  const message = `${presentation.message}\n\n错误代码：${presentation.code}`;
+  console.error("[external-open]", presentation.code, error);
+  const issue = externalOpenFailureMailbox.publish({
+    title: "无法打开这个 HTML",
+    message: presentation.message,
+  });
   if (e2eNativeDialogsSuppressed) {
-    reportSuppressedNativeDialog(title, message);
-    return;
+    reportSuppressedNativeDialog(issue.title, issue.message);
   }
-  dialog.showErrorBox(title, message);
+  deliverPendingExternalOpenFailure();
+}
+
+function deliverPendingExternalOpenFailure() {
+  const issue = externalOpenFailureMailbox.peek();
+  if (!issue || !rendererCanReceive()) return false;
+  try {
+    mainWindow.webContents.send(APP_CHANNELS.externalOpenFailed, issue);
+  } catch {
+    return false;
+  }
+  externalOpenFailureMailbox.take();
+  return true;
 }
 
 function focusMainWindow() {
@@ -1262,7 +1286,7 @@ function publishExternalFileOpen(filePath) {
     deliverExternalMailboxHead();
     return request;
   } catch (error) {
-    if (app.isReady()) showExternalOpenError(error);
+    if (app.isReady()) presentExternalOpenFailure(error);
     return null;
   }
 }
@@ -1985,6 +2009,12 @@ async function prepareEditAuthorRuntime(payload) {
     session = await ensureEditRuntimeProtocolController().createSession({
       html: activeSource.html,
       sourcePath: assetSourcePath,
+      recoveryIdentity: {
+        sourceSha256: activeSource.sha256,
+        authoritySourcePath: activeSource.sourcePath,
+        programIdentity: payload.programIdentity,
+        canvasGeneration: payload.canvasGeneration,
+      },
     });
     return Object.freeze({
       contractVersion: session.contractVersion,
@@ -1994,9 +2024,12 @@ async function prepareEditAuthorRuntime(payload) {
       resourceSha256: session.resourceSha256,
       documentBasePath: session.documentBasePath,
       libraryOrigins: session.libraryOrigins,
+      resourceMode: session.resourceMode,
+      recoveryAvailable: session.recoveryAvailable,
       scriptCount: session.scriptCount,
       byteLength: session.byteLength,
       canvasGeneration: payload.canvasGeneration,
+      programIdentity: payload.programIdentity,
     });
   } catch (cause) {
     if (session) {
@@ -2010,6 +2043,55 @@ async function prepareEditAuthorRuntime(payload) {
   } finally {
     releasePreparation();
   }
+}
+
+async function recoverEditAuthorRuntime(payload) {
+  assertExactPayload(payload, [
+    "sessionId",
+    "sourceSha256",
+    "programIdentity",
+    "canvasGeneration",
+  ]);
+  if (
+    !isEditRuntimeSessionId(payload.sessionId)
+    || typeof payload.sourceSha256 !== "string"
+    || typeof payload.programIdentity !== "string"
+    || !Number.isSafeInteger(payload.canvasGeneration)
+    || payload.canvasGeneration < 0
+  ) {
+    throw new Error("Edit runtime recovery identity is invalid.");
+  }
+  const activeSourcePath = await currentActivePath();
+  if (!activeSourcePath) throw new Error("Edit runtime recovery requires an active source path.");
+  const activeSource = await readHtmlFile({
+    sourcePath: activeSourcePath,
+    maxHtmlBytes: MAX_HTML_BYTES,
+  });
+  if (
+    payload.sourceSha256.toLowerCase() !== activeSource.sha256
+    || payload.programIdentity !== editRuntimeProgramIdentity(activeSource.html)
+  ) {
+    throw new Error("Edit runtime recovery source is no longer authoritative.");
+  }
+  const session = await ensureEditRuntimeProtocolController().recoverSession({
+    ...payload,
+    authoritySourcePath: activeSource.sourcePath,
+  });
+  return Object.freeze({
+    contractVersion: session.contractVersion,
+    sessionId: session.sessionId,
+    executionId: session.executionId,
+    sourceSha256: activeSource.sha256,
+    resourceSha256: session.resourceSha256,
+    documentBasePath: session.documentBasePath,
+    libraryOrigins: session.libraryOrigins,
+    resourceMode: session.resourceMode,
+    recoveryAvailable: session.recoveryAvailable,
+    scriptCount: session.scriptCount,
+    byteLength: session.byteLength,
+    canvasGeneration: payload.canvasGeneration,
+    programIdentity: payload.programIdentity,
+  });
 }
 
 const revokeEditAuthorRuntime = (sessionId) => (
@@ -2979,19 +3061,6 @@ async function exportHtmlCopy(payload) {
         { name: "HTML 文件", extensions: ["html", "htm"] },
       ],
     }),
-    showProtectedWarning: async () => {
-      const warning = await dialog.showMessageBox(mainWindow, {
-        type: "warning",
-        title: "请选择其他导出位置",
-        message: "HTML 副本不能覆盖当前源文件",
-        detail: "源文件保持不变。请更换文件名或文件夹后再导出。",
-        buttons: ["重新选择位置", "取消"],
-        defaultId: 0,
-        cancelId: 1,
-        noLink: true,
-      });
-      return warning.response === 0;
-    },
   });
   if (!destinationPath) return null;
 
@@ -3473,6 +3542,7 @@ function registerProjectIpc() {
         ensurePreviewProtocolController().revokeSession(sessionId)
       ),
       prepareEditAuthorRuntime,
+      recoverEditAuthorRuntime,
       revokeEditAuthorRuntime,
     },
   });
@@ -3509,6 +3579,7 @@ function registerProjectIpc() {
       issue: workspaceRecoveryMailbox.acknowledgeRendererReady(),
     }),
     peekExternalOpenReady: () => publicMailboxRequest(externalFileOpenMailbox.peek()),
+    peekExternalOpenFailed: () => externalOpenFailureMailbox.peek(),
     relaunchApplication: async () => ({
       relaunched: await coordinateApplicationRelaunch("user-relaunch"),
     }),
@@ -3650,7 +3721,8 @@ function requestRendererClose(reason) {
       closeGeneration: closeAuthority.generation,
       ready: false,
       reason: "等待编辑器写入完成超时。请保持应用开启，确认自动保存状态后再关闭。",
-      presentation: "native",
+      presentation: "in-app",
+      retry: true,
     });
   }, RENDERER_CLOSE_TIMEOUT_MS);
   closeRequest = {
@@ -3764,21 +3836,12 @@ function unregisterIpc() {
 
 const EXIT_INTENTS = Object.freeze({
   quit: Object.freeze({
-    abortDetail: "源页已取消关闭并返回当前页面，请处理后再试。",
-    abortButton: "继续编辑",
-    blockedMessage: "关闭前的安全确认没有完成。",
     errorTitle: "无法安全关闭源页",
   }),
   relaunch: Object.freeze({
-    abortDetail: "源页已取消重新打开并返回当前页面，请处理后再试。",
-    abortButton: "返回源页",
-    blockedMessage: "重新打开前的安全确认没有完成。",
     errorTitle: "暂时无法重新打开源页",
   }),
   update: Object.freeze({
-    abortDetail: "源页已取消安装更新并返回当前页面，请处理后再试。",
-    abortButton: "返回源页",
-    blockedMessage: "安装更新前的安全确认没有完成。",
     errorTitle: "暂时无法安装更新",
   }),
 });
@@ -3789,63 +3852,50 @@ async function coordinateApplicationExit(reason, intent = "quit") {
   if (!exitIntent) throw new TypeError(`Unsupported exit intent: ${intent}`);
   let coordinatedCloseAuthority = null;
   coordinatedExit = (async () => {
-    const result = await requestRendererClose(reason);
-    coordinatedCloseAuthority = closeAuthorityFromResult(result);
-    if (
-      coordinatedCloseAuthority
-      && !externalFileOpenDelivery.isCurrent(coordinatedCloseAuthority)
-    ) {
-      finishCloseAbort(
-        coordinatedCloseAuthority,
-        "收到新的外部 HTML 打开请求，已取消关闭。",
-      );
-      presentMainWindow();
-      coordinatedExit = null;
-      return false;
-    }
-    if (!result.ready) {
-      const nativeBlock = (
-        !e2eNativeDialogsSuppressed
-        && shouldPresentNativeCloseBlock(result)
-      );
-      const interruptionSurface = nativeBlock ? "native" : "global";
+    let result = null;
+    while (true) {
+      result = await requestRendererClose(reason);
+      coordinatedCloseAuthority = closeAuthorityFromResult(result);
+      if (
+        coordinatedCloseAuthority
+        && !externalFileOpenDelivery.isCurrent(coordinatedCloseAuthority)
+      ) {
+        finishCloseAbort(
+          coordinatedCloseAuthority,
+          "收到新的外部 HTML 打开请求，已取消关闭。",
+        );
+        presentMainWindow();
+        coordinatedExit = null;
+        return false;
+      }
+      if (result.ready) break;
+
       captureUsage("interruption_changed", {
         interruption_code: "close_safety",
         phase: "started",
         result: "unknown",
-        surface: interruptionSurface,
+        surface: "global",
       });
-      finishCloseAbort(coordinatedCloseAuthority, result.reason);
-      if (!nativeBlock) {
+      const retry = !e2eNativeDialogsSuppressed && shouldRetryCloseBlock(result);
+      if (retry) {
+        if (coordinatedCloseAuthority) {
+          externalFileOpenDelivery.releaseBarrier(coordinatedCloseAuthority);
+          externalFileOpenDelivery.abortClose(coordinatedCloseAuthority);
+        }
         presentMainWindow();
-        captureUsage("interruption_changed", {
-          interruption_code: "close_safety",
-          phase: "resolved",
-          result: "continued",
-          surface: interruptionSurface,
+        await new Promise((resolve) => {
+          setTimeout(resolve, 400);
         });
-        coordinatedExit = null;
-        return false;
+        continue;
       }
-      const messageBoxOptions = {
-        type: "warning",
-        title: exitIntent.errorTitle,
-        message: result.reason || exitIntent.blockedMessage,
-        detail: exitIntent.abortDetail,
-        buttons: [exitIntent.abortButton],
-        defaultId: 0,
-        noLink: true,
-      };
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        await dialog.showMessageBox(mainWindow, messageBoxOptions);
-      } else {
-        await dialog.showMessageBox(messageBoxOptions);
-      }
+
+      finishCloseAbort(coordinatedCloseAuthority, result.reason);
+      presentMainWindow();
       captureUsage("interruption_changed", {
         interruption_code: "close_safety",
         phase: "resolved",
         result: "continued",
-        surface: interruptionSurface,
+        surface: "global",
       });
       coordinatedExit = null;
       return false;
@@ -3935,13 +3985,9 @@ async function coordinateApplicationExit(reason, intent = "quit") {
     finishCloseAbort(coordinatedCloseAuthority, error, {
       restoreHandoff: true,
     });
+    console.error("[close]", exitIntent.errorTitle, error);
     if (e2eNativeDialogsSuppressed) {
       reportSuppressedNativeDialog(
-        exitIntent.errorTitle,
-        error instanceof Error ? error.message : String(error),
-      );
-    } else {
-      dialog.showErrorBox(
         exitIntent.errorTitle,
         error instanceof Error ? error.message : String(error),
       );
@@ -3985,50 +4031,8 @@ async function showWorkspaceUnavailableRecovery() {
       delivery.issue.title,
       "源页的本地项目服务已停止。当前窗口中的内容仍保留。",
     );
-    return null;
   }
-  if (workspaceFailurePrompt) return workspaceFailurePrompt;
-  captureUsage("interruption_changed", {
-    interruption_code: "workspace_unavailable",
-    phase: "started",
-    result: "unknown",
-    surface: "native",
-  });
-  const options = {
-    type: "warning",
-    title: delivery.issue.title,
-    message: "源页的本地项目服务已停止。",
-    detail: "当前窗口中的内容仍保留。返回源页可先导出当前 HTML；若没有待保存内容，也可以直接重新打开。",
-    buttons: ["返回源页处理", "重新打开源页"],
-    defaultId: 0,
-    cancelId: 0,
-    noLink: true,
-  };
-  workspaceFailurePrompt = (
-    mainWindow && !mainWindow.isDestroyed()
-      ? dialog.showMessageBox(mainWindow, options)
-      : dialog.showMessageBox(options)
-  ).then(async (result) => {
-    if (result.response === 1) {
-      captureUsage("interruption_changed", {
-        interruption_code: "workspace_unavailable",
-        phase: "resolved",
-        result: "recovered",
-        surface: "native",
-      });
-      await coordinateApplicationRelaunch("workspace-unavailable");
-    } else {
-      captureUsage("interruption_changed", {
-        interruption_code: "workspace_unavailable",
-        phase: "resolved",
-        result: "continued",
-        surface: "native",
-      });
-    }
-  }).finally(() => {
-    workspaceFailurePrompt = null;
-  });
-  return workspaceFailurePrompt;
+  return null;
 }
 
 async function workspacePath() {

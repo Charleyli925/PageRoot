@@ -2,6 +2,7 @@
 
 import { useState, type Ref } from "react";
 import { CodeIcon } from "@phosphor-icons/react/dist/csr/Code";
+import { OpenAiLogoIcon } from "@phosphor-icons/react/dist/csr/OpenAiLogo";
 
 import type {
   AgentProviderAvailabilitySnapshot,
@@ -13,6 +14,7 @@ type AgentActionOutcome = Readonly<{ status: string; reason?: string }> | null |
 export type AgentProviderCardPresentation = Readonly<{
   displayName: string;
   logoSrc: string | null;
+  brandIcon?: "openai" | null;
   cardClassName: string;
   primaryActionDataAttribute: string | null;
   availability: (value: AgentProviderAvailabilitySnapshot) => Readonly<{
@@ -106,6 +108,8 @@ export default function AgentProviderCard({
           {provider.logoSrc ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img src={provider.logoSrc} alt="" />
+          ) : provider.brandIcon === "openai" ? (
+            <OpenAiLogoIcon size={22} weight="regular" />
           ) : (
             <CodeIcon size={22} weight="bold" />
           )}

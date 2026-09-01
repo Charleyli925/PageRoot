@@ -613,11 +613,9 @@ async function openThroughInput(source, ordinal) {
     dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [sourcePath] });
   }, source.copyPath);
   await requestLocalHtmlOpen(launched.page);
-  const importButton = launched.page.getByRole("button", { name: "导入并打开" });
   const openLocalButton = launched.page.locator(".open-local-button");
   let pendingImport = await waitUntil(async () => {
     if (await openLocalButton.isVisible().catch(() => false)) return "picker";
-    if (await importButton.isVisible().catch(() => false)) return "confirm";
     const project = await activeProject();
     if (project?.sourcePath && path.basename(project.sourcePath).includes(source.stem)) return "opened";
     return "";
@@ -625,14 +623,10 @@ async function openThroughInput(source, ordinal) {
   if (pendingImport === "picker") {
     await openLocalButton.click();
     pendingImport = await waitUntil(async () => {
-      if (await importButton.isVisible().catch(() => false)) return "confirm";
       const project = await activeProject();
       if (project?.sourcePath && path.basename(project.sourcePath).includes(source.stem)) return "opened";
       return "";
     }, { timeout: 15_000, label: `picker handoff ${source.stem}` });
-  }
-  if (pendingImport === "confirm") {
-    await importButton.click();
   }
   const displayReadyPromise = firstUsefulDocumentVisible({ expectedStem: source.stem })
     .then(() => performance.now() - started);
@@ -1160,11 +1154,9 @@ async function openAfterAccept(source) {
   }, source.copyPath);
   const started = performance.now();
   await requestLocalHtmlOpen(page);
-  const importButton = page.getByRole("button", { name: "导入并打开" });
   const openLocalButton = page.locator(".open-local-button");
   let pendingImport = await waitUntil(async () => {
     if (await openLocalButton.isVisible().catch(() => false)) return "picker";
-    if (await importButton.isVisible().catch(() => false)) return "confirm";
     const project = await activeProject();
     if (project?.sourcePath && project.sourcePath !== beforeOpenSourcePath) return "opened";
     return "";
@@ -1172,13 +1164,11 @@ async function openAfterAccept(source) {
   if (pendingImport === "picker") {
     await openLocalButton.click();
     pendingImport = await waitUntil(async () => {
-      if (await importButton.isVisible().catch(() => false)) return "confirm";
       const project = await activeProject();
       if (project?.sourcePath && project.sourcePath !== beforeOpenSourcePath) return "opened";
       return "";
     }, { timeout: 15_000, label: "post-accept picker handoff" });
   }
-  if (pendingImport === "confirm") await importButton.click();
   await waitUntil(async () => {
     const project = await activeProject();
     return project?.sourcePath && project.sourcePath !== beforeOpenSourcePath;
