@@ -5,10 +5,9 @@ export type SourceEvidenceKind =
   | "added"
   | "removed"
   | "moved"
+  | "reordered"
   | "attribute"
-  | "style"
-  | "css-source"
-  | "script-source";
+  | "style";
 export type SourceEvidence = {
   id: string;
   stableId: string;

@@ -98,9 +98,8 @@ export function useAiConversation({
   onOpenAgentSettings,
 }: UseAiConversationOptions) {
   const [open, setOpen] = useState(false);
-  // Review is the same workbench with a different Canvas, so the thread that led
-  // to the candidate stays on screen instead of vanishing and reappearing. It is
-  // read-only there: see sidebarSendState(reviewing).
+  // Review remains eligible for the same thread, but every new Review session
+  // explicitly hides it once so the comparison starts at full width.
   const active = (canvasMode === "preview" || reviewing) && Boolean(sourcePath);
   const visible = active && open;
 
@@ -128,6 +127,9 @@ export function useAiConversation({
   //
   const reveal = useCallback(() => {
     setOpen(true);
+  }, []);
+  const hide = useCallback(() => {
+    setOpen(false);
   }, []);
 
   const onSend = useCallback(() => {
@@ -217,5 +219,5 @@ export function useAiConversation({
     onSelectAgentChoice,
   ]);
 
-  return { open, visible, toggle, reveal, sidebarProps };
+  return { open, visible, toggle, reveal, hide, sidebarProps };
 }

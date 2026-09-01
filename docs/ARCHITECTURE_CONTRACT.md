@@ -563,14 +563,16 @@ Presentation restoration is best effort and cannot widen source authority. The
 lowest-complexity safe local update or rebuild remains the required design.
 
 Review has no runtime-snapshot owner, BrowserWindow or PNG evidence path. Its
-source layer compares the frozen before/after HTML and remains Review fact
-authority: precise text, outermost element presence, movement and explicit
-authored attribute changes enter filters, count, navigation and projection
-without waiting for runtime observation. `SourceEvidence` is only a bounded
-visual-enhancement plan for hosts implicated by source differences; identical
-common Stable IDs are not observed. One `ReviewChange` keeps
-`evidenceStableIds[]`, so multi-host source facts retain their original change
-ID and exact character ranges.
+source layer compares the frozen before/after HTML, but user-visible
+`ReviewChange` is position-bound: precise text, outermost element presence,
+exact movement, parent-level ambiguous reorder, explicit authored attributes,
+inline style and safely mapped simple-selector CSS enter filters, navigation
+and projection. Whole-page CSS/Script differences that cannot bind to a
+concrete Stable ID become private `ReviewDiagnostic` records; they cannot
+create `<html>` markers, mask holes, outline entries or user-facing uncertainty.
+`SourceEvidence` is only a bounded diagnostic plan for concrete hosts. One
+`ReviewChange` keeps `evidenceStableIds[]`, so multi-host facts retain their
+original change ID and exact character ranges.
 
 The two Review frames may return best-effort Stable-ID-bound visible text,
 computed presentation, image, SVG, Canvas 2D and runtime-descendant summaries
@@ -579,10 +581,10 @@ reject disconnect, ID drift, duplicate claims and same-ID replacement, and a
 later iframe load clears the old generation. This code shares the authored
 frame realm and echoes a parent-provided source label; it is not an isolated
 security oracle. WebGL, tainted Canvas, live media, running animation, hidden
-surfaces, global budget overflow, unstable samples and stale generations are
-explicitly `unverified`. Runtime DOM remains observation evidence only; it
-never enters source, save, Version, Candidate, Promotion, comment identity or
-persistence authority.
+surfaces, global budget overflow, unstable samples and stale generations remain
+internal diagnostics. They do not create an `unverified` Review change or
+banner. Runtime DOM remains observation evidence only; it never enters source,
+save, Version, Candidate, Promotion, comment identity or persistence authority.
 
 Candidate assessment also compares the frozen base HTML with the identity-
 normalized Candidate HTML at the source-byte boundary. It computes Stable-ID
@@ -597,9 +599,9 @@ scope; an element moved out of a retained target is evaluated at its Candidate
 location. The durable impact projection stores only
 `changedElementCount`, `requestedTargetCount`, `outsideTargetCount`, at most 100
 IDs in each changed/outside sample, and `truncated`; the complete HTML remains
-the source of truth for on-demand Review analysis. These facts are a Review
-warning and navigation entry only: comment targets remain context, never a
-subtree-exact source-write or Candidate-acceptance boundary. Runtime DOM,
+the source of truth for on-demand Review analysis. These facts remain
+task/version diagnostics rather than a floating Review warning: comment targets
+remain context, never a subtree-exact source-write or Candidate-acceptance boundary. Runtime DOM,
 Script-generated nodes and screenshots cannot contribute to the assessment.
 Historical Candidate assessments with the old unbounded arrays remain readable
 through the compatibility decoder; new records cannot mix the legacy and
@@ -617,15 +619,13 @@ semantic matcher remains the historical-source fallback. When Stable-ID
 continuity exists, it distinguishes insertion from reorder and cross-parent
 movement while added/removed subtrees retain the outermost-only rule.
 
-Every planned observation settles to `changed`, `unchanged` or `unverified`,
-but those verdicts never replace deterministic source facts. The UI exposes
-`正在分析 / 已完成 / 有 N 项无法视觉验证 / 不支持`; hidden, stale, unsupported
-and budget-limited source changes stay in the existing `全部 / 文字 / 元素`
-filters and adoption confirmation explains the uncertainty. Observation is
-batched across frames with one sample-wide node/pixel/time budget and never
-silently truncates candidates. Equal bounded summaries for pure CSS/Script or
-style evidence remain `unverified`, because a finite whitelist cannot prove the
-absence of downstream visual effects.
+Every planned observation settles internally to `changed`, `unchanged` or
+`unverified`, but those verdicts neither replace deterministic position-bound
+facts nor appear as Review status chrome. Observation is batched across frames
+with one sample-wide node/pixel/time budget and never silently truncates
+concrete candidates. Equal bounded summaries cannot prove arbitrary CSS/Script
+behavior; unmapped source-only differences stay private diagnostics instead of
+becoming a page-level claim.
 `added`/`removed` whole-element facts own descendant text evidence. A moved
 stable subtree compares each stable descendant against its exact before/after
 ID counterpart through the existing semantic text diff, never through flattened
@@ -640,11 +640,10 @@ moved-subtree graph has a distinct semantic/geometry owner namespace. Review
 markup therefore cannot steal root movement ownership or merge facts across
 independent moved roots. The later one-sided candidate-region graphs suppress
 only duplicate text evidence.
-Attribute, inline-style and page-source facts likewise coexist with simultaneous
-text facts.
-With persistent continuity, Review compares ordered authored CSS and Script
-inventories independently of stable IDs; adding a no-ID `<style>`, stylesheet
-`<link>` or `<script>` cannot disappear from Review.
+Attribute, inline-style and mapped simple-selector CSS facts likewise coexist
+with simultaneous text facts. Ordered authored CSS and Script inventories may
+be retained with task/version diagnostics, but adding a no-ID `<style>`,
+stylesheet `<link>` or `<script>` does not manufacture a page Review marker.
 Topology groups common IDs by source parent in one pass before sibling-order
 analysis, and each parent's identified-child indexes are built once. Per-parent
 rescans of the complete inventory and per-child rescans of siblings are forbidden.
@@ -655,10 +654,9 @@ complete review.
 
 Exact completed review entries survive unrelated tab applications; only stale
 in-flight analysis is cancelled. Candidate-ready state may prewarm the same
-cache key. An uncached explicit Review first publishes a minimally prepared
-sandbox/bootstrap shell with no change, comment or runtime facts, then replaces
-it with complete analyzed documents. The shell is presentation only and cannot
-approve, promote or alter either source.
+cache key. Explicit Review waits for complete analyzed documents before opening;
+a Candidate with diagnostics but no position-bound change stays outside Review
+and uses the existing no-effective-page-change result.
 
 Successful Candidate adoption and stale Review invalidation clear the prepared
 document cache immediately. Unmounting the Review workspace then releases its
@@ -670,6 +668,15 @@ Formal Review has no runtime-snapshot supplement. The trusted
 the analysis, navigation, masking and acceptance paths display-only. Inline
 and browser Review use the same static contract.
 
+Each change owns a side-specific `ReviewPresentation` derived from its actual
+marker/evidence host. Ordered reveal steps currently admit a panel key and a
+Stable-ID-bound `<details>` ancestor. Review coordinates both disposable frames,
+waits for their presentation acknowledgements, then focuses the first change;
+no reveal state is persisted to source. Review renders no non-blocking visual
+status, scope card, candidate-attention notice or global Toast. A new Review
+session hides the AI conversation once; an explicit user reopen remains visible
+for that session.
+
 Comment location remains a separate private capability. An opaque initial
 bootstrap binding may identify a frozen before target for comment geometry, but
 it neither reaches authored markup nor authorizes runtime host discovery. No
@@ -680,10 +687,12 @@ session is governed by ADR 0065. Edit screenshot/capture/projection count must
 be 0.
 
 For each Review side and active filter, overlay frames and context masking
-consume the same final canonical projection records. The mask is a session-,
-side- and projection-epoch-scoped SVG luminance mask: a white full-page
-background retains the dim rectangle and each record path is a black transparent
-hole. Therefore overlapping independent facts stay transparent as a geometric
+consume the same final canonical projection records. All text facts and only
+the active element change cut mask holes; other element changes retain quiet
+page-edge revision bars until hover/focus. The mask is a session-, side- and
+projection-epoch-scoped SVG luminance mask: a white full-page background
+retains the dim rectangle and each emphasized record path is a black transparent
+hole. Therefore overlapping emphasized facts stay transparent as a geometric
 union; a full-page `evenodd` path is not a permitted representation. Reserved
 mask background, hole and dim primitives reset authored fill, stroke, opacity,
 filter and transform while preserving the current context-opacity value.

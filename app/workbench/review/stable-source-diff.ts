@@ -8,12 +8,14 @@ import {
 import {
   appendProjectionFactToElement,
 } from "./parse";
+import {
+  REVIEW_MOVED_TEXT_ACCOUNTED_ATTRIBUTE,
+} from "./constants";
 export type StableSourceChangeKind =
   | "moved"
+  | "reordered"
   | "attribute"
-  | "style"
-  | "css-source"
-  | "script-source";
+  | "style";
 
 export type StableSourceDifferenceAnalysis = {
   hasPersistentContinuity: boolean;
@@ -25,16 +27,20 @@ export type StableSourceDifferenceAnalysis = {
     after: Element;
     outermost: boolean;
   }>;
+  reorderedPairs: Array<{
+    parentId: string;
+    before: Element;
+    after: Element;
+  }>;
 };
 
 const COMMON_STABLE_SOURCE_ATTRIBUTE = "data-pageroot-review-stable-common";
 
 const CHANGE_SUMMARIES: Record<StableSourceChangeKind, string> = {
   moved: "移动元素",
+  reordered: "元素顺序调整",
   attribute: "属性调整",
   style: "样式调整",
-  "css-source": "CSS 源码调整",
-  "script-source": "Script 源码调整",
 };
 
 function sourceId(element: Element | null): string | null {
@@ -109,6 +115,46 @@ function authorSourceInventory(
     .join("\u0001");
 }
 
+function normalizedCssDeclarations(value: string): string {
+  return value
+    .replace(/\/\*[\s\S]*?\*\//gu, "")
+    .split(";")
+    .map((declaration) => declaration.trim().replace(/\s*:\s*/u, ":"))
+    .filter(Boolean)
+    .join(";");
+}
+
+function simpleCssRuleMap(document: Document): Map<string, string> {
+  const rules = new Map<string, string>();
+  document.querySelectorAll("style").forEach((style) => {
+    const source = (style.textContent || "").replace(/\/\*[\s\S]*?\*\//gu, "");
+    const pattern = /([^{}]+)\{([^{}]*)\}/gu;
+    let match = pattern.exec(source);
+    while (match) {
+      match[1].split(",").map((selector) => selector.trim()).filter((selector) => (
+        selector
+        && !selector.startsWith("@")
+        && !/[\s>+~:]/u.test(selector)
+        && /^(?:[a-z][\w-]*)?(?:#[\w-]+)?(?:\.[\w-]+)*(?:\[[\w-]+(?:[~|^$*]?=(?:"[^"]*"|'[^']*'|[^\]\s]+))?\])*$/iu.test(selector)
+      )).forEach((selector) => {
+        const declarations = normalizedCssDeclarations(match![2]);
+        const previous = rules.get(selector);
+        rules.set(selector, previous ? `${previous}\u0001${declarations}` : declarations);
+      });
+      match = pattern.exec(source);
+    }
+  });
+  return rules;
+}
+
+function changedSimpleCssSelectors(beforeDocument: Document, afterDocument: Document): string[] {
+  const before = simpleCssRuleMap(beforeDocument);
+  const after = simpleCssRuleMap(afterDocument);
+  return [...new Set([...before.keys(), ...after.keys()])].filter((selector) => (
+    before.get(selector) !== after.get(selector)
+  ));
+}
+
 function annotateStructureFact(
   element: Element,
   id: string,
@@ -127,17 +173,6 @@ function annotateStructureFact(
     scope: "element",
     structureChange: kind,
     summary: CHANGE_SUMMARIES[kind],
-  });
-}
-
-export function annotateStablePageSourceAggregate(
-  document: Document,
-  kinds: ReadonlySet<"css-source" | "script-source">,
-) {
-  const root = document.documentElement;
-  kinds.forEach((kind) => {
-    const id = kind === "css-source" ? "page-css-source" : "page-script-source";
-    annotateStructureFact(root, id, kind);
   });
 }
 
@@ -195,7 +230,28 @@ export function annotateStableSourceDifferences(
     ) {
       annotateStructureFact(before, id, "attribute");
       annotateStructureFact(after, id, "attribute");
+      if (
+        (before.namespaceURI !== after.namespaceURI || before.localName !== after.localName)
+        && before.textContent === after.textContent
+      ) {
+        before.setAttribute(REVIEW_MOVED_TEXT_ACCOUNTED_ATTRIBUTE, "true");
+        after.setAttribute(REVIEW_MOVED_TEXT_ACCOUNTED_ATTRIBUTE, "true");
+      }
     }
+  });
+
+  changedSimpleCssSelectors(beforeDocument, afterDocument).forEach((selector) => {
+    ([beforeDocument, afterDocument] as const).forEach((document) => {
+      try {
+        document.querySelectorAll(selector).forEach((element) => {
+          const id = sourceId(element);
+          if (id && topology.commonIds.includes(id)) annotateStructureFact(element, id, "style");
+        });
+      } catch {
+        // Selector parsing is deliberately best-effort. Complex or invalid
+        // selectors stay in diagnostics and never become a page-level marker.
+      }
+    });
   });
 
   const elementDepth = (element: Element) => {
@@ -222,11 +278,21 @@ export function annotateStableSourceDifferences(
       outermost: !hasMovedAncestor(before) && !hasMovedAncestor(after),
     };
   }).sort((left, right) => elementDepth(right.before) - elementDepth(left.before));
+  const reorderedPairs = topology.reorderedRanges.flatMap((range) => {
+    if (!range.parentId) return [];
+    const before = beforeElements.get(range.parentId);
+    const after = afterElements.get(range.parentId);
+    if (!before || !after) return [];
+    annotateStructureFact(before, range.parentId, "reordered");
+    annotateStructureFact(after, range.parentId, "reordered");
+    return [{ parentId: range.parentId, before, after }];
+  });
 
   return {
     hasPersistentContinuity: topology.commonIds.length > 0,
     sourceKinds: [...sourceKinds],
     ambiguousPersistentIds: topology.duplicateIds,
     movedPairs,
+    reorderedPairs,
   };
 }

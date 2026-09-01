@@ -35,6 +35,8 @@ import {
   REVIEW_STRUCTURE_TONE_COLOR,
   type ReviewCommentGroup,
   type ReviewDocuments,
+  type ReviewPresentation,
+  type ReviewRevealStep,
   type ReviewSide,
 } from "./review-document";
 import {
@@ -148,6 +150,7 @@ type ReviewMessage = {
   scrollGeometry?: unknown;
   panelKey?: string;
   panelPath?: string[];
+  revealSteps?: ReviewRevealStep[];
   presentationEpoch?: number;
   actionKey?: string;
   actionType?: "click" | "control-state";
@@ -462,7 +465,6 @@ export default function AiReviewWorkspace({
   sourcePath,
   accepting,
   error,
-  notice,
   onAbout,
   onReturnBefore,
   onAccept,
@@ -480,7 +482,6 @@ export default function AiReviewWorkspace({
   sourcePath?: string;
   accepting: boolean;
   error?: string;
-  notice?: string;
   onAbout: () => void;
   onReturnBefore: () => void;
   onAccept: () => void;
@@ -510,7 +511,7 @@ export default function AiReviewWorkspace({
     changeFilter: filter,
     contextVisibility: transparency,
     navigationTarget: focus,
-    pagePresentationPath,
+    pagePresentation,
     scrollMode,
     zoomMode: zoom,
   } = reviewState;
@@ -582,18 +583,18 @@ export default function AiReviewWorkspace({
   const reviewFrameLoadCountsRef = useRef(new WeakMap<HTMLIFrameElement, number>());
   const reviewVisualTimeoutRef = useRef<number | null>(null);
   const activeCommentKeysRef = useRef(new Set<string>());
-  const [visualResolution, setVisualResolution] = useState<ReviewVisualResolution>(() => (
+  const [, setVisualResolution] = useState<ReviewVisualResolution>(() => (
     initialVisualResolution(documents, reloadRevision, 0)
   ));
   const reviewCommentChannelChallengeRef = useRef<{
     challenge: string;
     frame: HTMLIFrameElement;
   } | null>(null);
-  const reviewStateRef = useRef({ filter, focus, transparency, pagePresentationPath });
+  const reviewStateRef = useRef({ filter, focus, transparency, pagePresentation });
   const scrollModeRef = useRef(scrollMode);
   useLayoutEffect(() => {
-    reviewStateRef.current = { filter, focus, transparency, pagePresentationPath };
-  }, [filter, focus, pagePresentationPath, transparency]);
+    reviewStateRef.current = { filter, focus, transparency, pagePresentation };
+  }, [filter, focus, pagePresentation, transparency]);
   const desktopSessions = desktopSessionResult?.documents === documents
     && desktopSessionResult.reloadRevision === reloadRevision
     ? desktopSessionResult.sessions
@@ -606,24 +607,7 @@ export default function AiReviewWorkspace({
     && commentLayoutState.reloadRevision === reloadRevision
     ? commentLayoutState.layouts
     : [];
-  const currentVisualResolution = visualResolution.documents === documents
-    && visualResolution.reloadRevision === reloadRevision
-    ? visualResolution
-    : initialVisualResolution(
-      documents,
-      reloadRevision,
-      visualResolution.generation,
-    );
-  // Source facts remain Review authority. Visual observation may suppress only
-  // a pure visual candidate after every linked host is proven unchanged.
-  const reviewChanges = useMemo(() => documents.changes.filter((change) => {
-    if (change.visualGate !== "enhancement") return true;
-    const stableIds = change.evidenceStableIds || [];
-    if (!stableIds.length) return true;
-    return !stableIds.every((stableId) => (
-      currentVisualResolution.verdicts[stableId] === "unchanged"
-    ));
-  }), [currentVisualResolution.verdicts, documents.changes]);
+  const reviewChanges = documents.changes;
   const confirmedChangeIds = useMemo(
     () => new Set(reviewChanges.map((change) => change.id)),
     [reviewChanges],
@@ -631,21 +615,9 @@ export default function AiReviewWorkspace({
   const reviewOutline = useMemo(() => documents.outline.filter((item) => (
     !item.changeId || confirmedChangeIds.has(item.changeId)
   )), [confirmedChangeIds, documents.outline]);
-  const navigableChanges = useMemo(() => (
-    filter === "all"
-      ? reviewChanges
-      : reviewChanges.filter((change) => change.types.includes(filter))
-  ), [filter, reviewChanges]);
   const activeChange = focus === "all"
     ? null
     : reviewChanges.find((change) => change.id === focus) || null;
-  const visualStatusText = currentVisualResolution.phase === "analyzing"
-    ? "正在分析视觉呈现"
-    : currentVisualResolution.phase === "unverified"
-      ? `已完成源码审阅 · ${currentVisualResolution.unverifiedCount} 项无法视觉验证`
-      : currentVisualResolution.phase === "unsupported"
-        ? "源码差异可审阅 · 当前版本不支持 Stable ID 视觉验证"
-        : "源码审阅已完成 · 视觉增强已完成";
   const closeReviewCommentChannel = useCallback(() => {
     const port = reviewCommentPortRef.current;
     if (port) {
@@ -876,13 +848,16 @@ export default function AiReviewWorkspace({
     reviewStateRef.current = {
       ...reviewStateRef.current,
       focus: targetId,
-      pagePresentationPath: [],
+      pagePresentation: { before: [], after: [] },
     };
     dispatchReviewState({
       type: "set-navigation-target",
       value: targetId,
     });
-    dispatchReviewState({ type: "set-page-presentation", value: [] });
+    dispatchReviewState({
+      type: "set-page-presentation",
+      value: { before: [], after: [] },
+    });
   }, [documents, sessionId]);
 
   const sendState = useCallback((side?: ReviewSide) => {
@@ -1047,11 +1022,27 @@ export default function AiReviewWorkspace({
   }, [sessionId]);
 
   const coordinatePagePresentation = useCallback((
-    rawPath: readonly string[],
+    requested: ReviewPresentation,
     afterCommit?: () => void,
   ) => {
-    const panelPath = [...new Set(rawPath.filter((key) => /^panel-\d+$/u.test(key)))];
-    if (!panelPath.length) {
+    const normalize = (side: ReviewSide) => {
+      const seen = new Set<string>();
+      return requested[side].filter((step) => {
+        const valid = step.kind === "panel"
+          ? /^panel-\d+$/u.test(step.key)
+          : /^pr1_[0-9a-f]{32}$/iu.test(step.stableId);
+        if (!valid) return false;
+        const key = step.kind === "panel" ? `panel:${step.key}` : `details:${step.stableId}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+    };
+    const presentation: ReviewPresentation = {
+      before: normalize("before"),
+      after: normalize("after"),
+    };
+    if (!presentation.before.length && !presentation.after.length) {
       afterCommit?.();
       return;
     }
@@ -1072,7 +1063,7 @@ export default function AiReviewWorkspace({
       timer: null as number | null,
     };
     presentationReadyRef.current = pending;
-    dispatchReviewState({ type: "set-page-presentation", value: panelPath });
+    dispatchReviewState({ type: "set-page-presentation", value: presentation });
     expected.forEach((side) => {
       postToFrame(framesRef.current[side], sessionId, {
         type: "begin-presentation",
@@ -1081,9 +1072,8 @@ export default function AiReviewWorkspace({
     });
     expected.forEach((side) => {
       postToFrame(framesRef.current[side], sessionId, {
-        type: "activate-panel",
-        panelKey: panelPath.at(-1),
-        panelPath,
+        type: "activate-presentation",
+        revealSteps: presentation[side],
         presentationEpoch: epoch,
       });
     });
@@ -1185,14 +1175,16 @@ export default function AiReviewWorkspace({
         postToFrame(framesRef.current[side], sessionId, {
           type: "focus-change",
           changeId,
-          panelKey: selectedChange?.panelKey,
-          panelPath: selectedChange?.panelPath,
+          revealSteps: selectedChange?.presentation[side] || [],
           behavior,
         });
       });
     };
-    if (selectedChange?.panelPath?.length) {
-      coordinatePagePresentation(selectedChange.panelPath, focusChange);
+    if (selectedChange && (
+      selectedChange.presentation.before.length
+      || selectedChange.presentation.after.length
+    )) {
+      coordinatePagePresentation(selectedChange.presentation, focusChange);
     } else {
       focusChange();
     }
@@ -1448,8 +1440,11 @@ export default function AiReviewWorkspace({
           : message.panelKey
             ? [message.panelKey]
             : [];
+        const panelSteps: ReviewRevealStep[] = panelPath.map((key) => ({ kind: "panel", key }));
         const visibleItem = reviewOutline.find((item) => (
-          item.panelPath?.at(-1) === panelPath.at(-1)
+          item.presentation?.[message.side || "after"]
+            .filter((step) => step.kind === "panel")
+            .at(-1)?.key === panelPath.at(-1)
         ));
         if (visibleItem) {
           dispatchReviewState({
@@ -1457,7 +1452,7 @@ export default function AiReviewWorkspace({
             value: visibleItem.changeId || visibleItem.id,
           });
         }
-        coordinatePagePresentation(panelPath);
+        coordinatePagePresentation({ before: panelSteps, after: panelSteps });
         return;
       }
       // A click on a page-edge revision bar or a region caption asks the
@@ -1760,13 +1755,6 @@ export default function AiReviewWorkspace({
         </div>
       ) : null}
 
-      {!error && notice ? (
-        <div className={styles.reviewNotice} role="status">
-          <WarningCircleIcon aria-hidden="true" size={17} weight="fill" />
-          <span>{notice}</span>
-        </div>
-      ) : null}
-
       <main
         className={`${styles.reviewMain}${sidebar ? ` ${styles.reviewMainWithSidebar}` : ""}`}
         inert={confirmationAction ? true : undefined}
@@ -1920,69 +1908,6 @@ export default function AiReviewWorkspace({
           </div> : null}
 
           <div className={styles.canvasReviewBody}>
-            <div
-              className={styles.visualReviewStatus}
-              data-phase={currentVisualResolution.phase}
-              data-testid="review-visual-status"
-              role="status"
-            >
-              {currentVisualResolution.phase === "unverified"
-                || currentVisualResolution.phase === "unsupported" ? (
-                  <WarningCircleIcon aria-hidden="true" size={14} weight="fill" />
-                ) : <EyeIcon aria-hidden="true" size={14} weight="duotone" />}
-              <span>{visualStatusText}</span>
-            </div>
-            {documents.reviewImpact ? (
-              <section
-                className={styles.reviewImpactSummary}
-                data-testid="review-impact-summary"
-                aria-label="本轮 AI 修改范围"
-              >
-                <div className={styles.reviewImpactHeading}>
-                  <span className={styles.reviewImpactEyebrow}>修改范围提示</span>
-                  {documents.reviewImpact.outsideRequestedTargetCount > 0 ? (
-                    <WarningCircleIcon aria-hidden="true" size={15} weight="fill" />
-                  ) : null}
-                </div>
-                <div className={styles.reviewImpactStats}>
-                  <span><strong>{documents.reviewImpact.requestedTargetCount}</strong> 本轮评论目标</span>
-                  <span><strong>{documents.reviewImpact.actualChangedElementCount}</strong> 实际修改元素</span>
-                  <span><strong>{documents.reviewImpact.outsideRequestedTargetCount}</strong> 目标之外修改</span>
-                </div>
-                {documents.reviewImpact.outsideRequestedTargetCount > 0 ? (
-                  <div className={styles.reviewImpactWarning} role="status">
-                    <span>评论目标之外的修改仍保留为上下文，请从变化审阅入口核对。</span>
-                    <button
-                      className={styles.reviewImpactLink}
-                      type="button"
-                      onClick={() => selectReviewMode("all")}
-                    >
-                      查看超范围修改
-                    </button>
-                    <div className={styles.reviewImpactIds}>
-                      <span>
-                        目标之外元素
-                        {documents.reviewImpact.truncated ? "（仅展示样例）" : ""}：
-                      </span>
-                      {documents.reviewImpact.outsideTargetElementIdSample.map((id) => (
-                        <code key={id}>{id}</code>
-                      ))}
-                    </div>
-                  </div>
-                ) : (
-                  <div className={styles.reviewImpactQuiet}>
-                    本轮未发现评论目标之外的源码元素修改。
-                  </div>
-                )}
-              </section>
-            ) : null}
-            {!navigableChanges.length ? (
-              <div className={styles.emptyFilterNotice} role="status">
-                {filter === "all"
-                  ? "本轮没有源码变化，仍可查看双页"
-                  : `本轮没有${FILTER_LABELS[filter]}变化，仍可切回双页或其他类型继续审阅`}
-              </div>
-            ) : null}
             <div className={styles.canvasGrid} data-view={canvasView}>
               <ReviewDocumentPane
                 side="before"
@@ -2074,13 +1999,6 @@ export default function AiReviewWorkspace({
                   </>
                 : <>
                     <span>确认后将采纳 AI 修改后的{afterLabel}为正式版本。</span>
-                    {currentVisualResolution.phase === "analyzing" ? (
-                      <span>视觉增强仍在分析；源码差异已经完整列出，继续采纳将不等待视觉结果。</span>
-                    ) : currentVisualResolution.phase === "unverified" ? (
-                      <span>有 {currentVisualResolution.unverifiedCount} 项无法视觉验证；这些源码差异仍保留在审阅中，请确认后再采纳。</span>
-                    ) : currentVisualResolution.phase === "unsupported" ? (
-                      <span>当前版本不支持 Stable ID 视觉验证；源码差异仍可审阅，采纳前请确认双页内容。</span>
-                    ) : null}
                     <span>修改前的 {beforeLabel} 与本轮记录仍会保留，可在历史记录中查看。</span>
                   </>}
             </div>

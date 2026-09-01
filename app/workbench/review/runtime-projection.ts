@@ -821,6 +821,34 @@ function reviewBootstrap(
       .map(safeKey)
       .filter(Boolean),
   )];
+  const safeStableId = (value) => {
+    const stableId = RuntimeVisualString(value || "");
+    return runtimeVisualRegExpExec(/^pr1_[0-9a-f]{32}$/iu, stableId) !== null
+      ? stableId
+      : "";
+  };
+  const safeRevealSteps = (value) => {
+    if (!Array.isArray(value)) return [];
+    const seen = new Set();
+    return value.flatMap((candidate) => {
+      if (!candidate || typeof candidate !== "object") return [];
+      if (candidate.kind === "panel") {
+        const key = safeKey(candidate.key);
+        const identity = "panel:" + key;
+        if (!key || seen.has(identity)) return [];
+        seen.add(identity);
+        return [{ kind: "panel", key }];
+      }
+      if (candidate.kind === "details") {
+        const stableId = safeStableId(candidate.stableId);
+        const identity = "details:" + stableId;
+        if (!stableId || seen.has(identity)) return [];
+        seen.add(identity);
+        return [{ kind: "details", stableId }];
+      }
+      return [];
+    });
+  };
   const runtimeVisualSourceBoxAttributes = ${JSON.stringify(REVIEW_COMMENT_BINDING_SOURCE_BOX_ATTRIBUTES)};
   const runtimeVisualIdentityAttributeLimit = ${REVIEW_BOOTSTRAP_IDENTITY_ATTRIBUTE_LIMIT};
   const reviewCommentSourceNodeIdPattern = /^element:\d+:\d+:[a-z][a-z0-9:-]{0,127}$/iu;
@@ -1483,6 +1511,20 @@ function reviewBootstrap(
     panelPath.forEach(activatePanelKey);
     return panelPath;
   };
+  const activatePresentation = (rawSteps) => {
+    const steps = safeRevealSteps(rawSteps);
+    steps.forEach((step) => {
+      if (step.kind === "panel") {
+        activatePanelKey(step.key);
+        return;
+      }
+      const details = document.querySelector(
+        'details[data-pageroot-id="' + step.stableId + '"]',
+      );
+      if (details instanceof HTMLDetailsElement) details.open = true;
+    });
+    return steps;
+  };
   const mirrorAction = (message) => {
     const actionKey = safeKey(message.actionKey);
     if (!actionKey) return;
@@ -1536,7 +1578,9 @@ function reviewBootstrap(
       )) || null;
   };
   const revealTarget = (target, requestedPanelPath) => {
-    if (requestedPanelPath?.length) activatePanelPath(requestedPanelPath);
+    if (requestedPanelPath?.length && typeof requestedPanelPath[0] === "object") {
+      activatePresentation(requestedPanelPath);
+    } else if (requestedPanelPath?.length) activatePanelPath(requestedPanelPath);
     else if (typeof requestedPanelPath === "string") activatePanelKey(requestedPanelPath);
     if (!target) return;
     const details = target.closest("details");
@@ -1776,10 +1820,9 @@ function reviewBootstrap(
     added: "新增元素",
     removed: "删除元素",
     moved: "移动元素",
+    reordered: "元素顺序调整",
     attribute: "属性调整",
     style: "样式调整",
-    "css-source": "CSS 源码调整",
-    "script-source": "Script 源码调整",
   })[change] || "元素调整";
   const normalizeProjectionFact = (value) => {
     if (!value || typeof value !== "object" || Array.isArray(value)) return null;
@@ -1796,10 +1839,9 @@ function reviewBootstrap(
       "added",
       "removed",
       "moved",
+      "reordered",
       "attribute",
       "style",
-      "css-source",
-      "script-source",
     ].includes(value.structureChange)
       ? value.structureChange
       : "";
@@ -2823,7 +2865,11 @@ function reviewBootstrap(
     maskBackground.setAttribute("fill", "#ffffff");
     resetMaskPrimitive(maskBackground, "#ffffff");
     mask.append(maskBackground);
-    merged.forEach((record) => {
+    const emphasizedRecords = merged.filter((record) => (
+      record.types.includes("text")
+      || (currentState.focus !== "all" && currentState.focus === record.changeId)
+    ));
+    emphasizedRecords.forEach((record) => {
       const hole = document.createElementNS(namespace, "path");
       hole.setAttribute("data-pageroot-review-mask-hole", record.changeId);
       hole.setAttribute("data-pageroot-review-semantic-owner", record.semanticOwnerId || "");
@@ -3124,6 +3170,11 @@ function reviewBootstrap(
       activatePanelPath(message.panelPath?.length ? message.panelPath : [message.panelKey]);
       schedulePresentationReady(message.presentationEpoch);
     }
+    if (message.type === "activate-presentation") {
+      if (!projectionTransitioning) beginProjectionTransition(message.presentationEpoch);
+      activatePresentation(message.revealSteps);
+      schedulePresentationReady(message.presentationEpoch);
+    }
     if (message.type === "commit-presentation") commitProjectionTransition(message.presentationEpoch);
     if (message.type === "mirror-action") mirrorAction(message);
     if (message.type === "focus-change") {
@@ -3132,7 +3183,9 @@ function reviewBootstrap(
       focusChangeTarget(
         changeId,
         target,
-        message.panelPath?.length ? message.panelPath : message.panelKey,
+        message.revealSteps?.length
+          ? message.revealSteps
+          : message.panelPath?.length ? message.panelPath : message.panelKey,
         message.behavior === "smooth" ? "smooth" : "auto",
       );
     }

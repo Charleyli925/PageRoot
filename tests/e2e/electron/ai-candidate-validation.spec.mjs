@@ -95,11 +95,10 @@ test("a pre-load review navigation falls back without trusting the replacement p
     await afterReviewFrame.locator("html").evaluate(() => {
       location.replace("about:blank");
     });
-    await expect(launched.page.getByTestId("review-visual-status"))
-      .toContainText("无法视觉验证", { timeout: 30_000 });
+    await expect(launched.page.getByTestId("review-visual-status")).toHaveCount(0);
     await launched.page.getByRole("button", { name: "采纳修改" }).click();
     await expect(launched.page.getByRole("dialog"))
-      .toContainText("无法视觉验证");
+      .not.toContainText("无法视觉验证");
     await launched.page.getByRole("button", { name: "继续审阅" }).click();
     await expect(beforeReviewFrame.locator("[data-pageroot-review-confirmed=\"true\"]"))
       .not.toHaveCount(0);

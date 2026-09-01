@@ -12,20 +12,25 @@ import type {
 export type ReviewFilter = "all" | "text" | "structure";
 export type ReviewChangeType = Exclude<ReviewFilter, "all">;
 export type ReviewSide = "before" | "after";
+export type ReviewRevealStep =
+  | { kind: "panel"; key: string }
+  | { kind: "details"; stableId: string };
+export type ReviewPresentation = Record<ReviewSide, ReviewRevealStep[]>;
+export type ReviewDiagnostic = {
+  kind: "css-source" | "script-source";
+  summary: string;
+};
 
 export type ReviewChange = {
   id: string;
   /** Stable-ID hosts that carry this source fact. One fact may span many hosts. */
   evidenceStableIds?: string[];
-  /** Only a proven visual no-op may suppress this source candidate. */
-  visualGate?: "enhancement";
   label: string;
   helper: string;
   types: ReviewChangeType[];
   beforePresent: boolean;
   afterPresent: boolean;
-  panelKey?: string;
-  panelPath?: string[];
+  presentation: ReviewPresentation;
 };
 
 export type ReviewOutlineItem = {
@@ -34,8 +39,7 @@ export type ReviewOutlineItem = {
   label: string;
   helper: string;
   changeId?: string;
-  panelKey?: string;
-  panelPath?: string[];
+  presentation?: ReviewPresentation;
   types: ReviewChangeType[];
 };
 
@@ -51,6 +55,7 @@ export type ReviewDocuments = {
   /** Pending source candidates are private input to the frame observer. */
   visualBinding: ReviewVisualSourceBinding;
   visualEvidence: SourceEvidence[];
+  diagnostics: ReviewDiagnostic[];
   reviewImpact?: ReviewImpact;
 };
 

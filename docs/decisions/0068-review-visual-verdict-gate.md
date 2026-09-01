@@ -1,4 +1,4 @@
-# ADR 0068: Review source facts with visual enhancement
+# ADR 0068: Position-bound Review changes and private source diagnostics
 
 - Status: Accepted
 - Date: 2026-08-31
@@ -7,77 +7,66 @@
 
 ## Decision
 
-Review source facts remain authoritative. Precise text differences, outermost
-element addition/removal, Stable-ID movement and explicit authored attribute
-changes enter the existing `全部 / 文字 / 元素` list, count, navigation and
-projection as soon as source analysis completes. A runtime visual observation
-may annotate those facts, but missing, stale, hidden, unsupported or
-unreadable observation never deletes them.
+Review is a position-bound page comparison, not a general source-code audit.
+Only a `ReviewChange` that can be attached to a concrete page element or text
+range enters `全部 / 文字 / 元素`, navigation, masking and projection. Precise
+text differences, outermost addition/removal, cross-parent movement, uniquely
+attributable same-parent movement, parent-level ambiguous reorder, authored
+attributes, inline style and safely mapped simple-selector CSS are eligible.
 
-Complete, valid and document-unique `data-pageroot-id` remains the required
-binding for current-frame visual enhancement. Missing, partial, invalid or
-duplicate identity makes only visual enhancement `unsupported`. It does not
-cancel source Review: the existing semantic source matcher remains available
-for historical documents, while Stable-ID continuity is used whenever the
-document pair proves it. This PR does not add a migration, compatibility flag
-or second source classifier.
+CSS/Script comments, formatting, whitespace and any whole-page source
+difference that cannot be mapped to a concrete Stable ID become private
+`ReviewDiagnostic` records. Diagnostics may be retained with task/version
+evidence, but they never create a `ReviewChange`, `<html>` marker, mask hole,
+outline entry, risk banner or user-visible `unverified` claim. A Candidate with
+diagnostics but no position-bound change is treated as having no effective page
+change and does not open the comparison surface.
 
-`SourceEvidence` is an observation plan, not a replacement Review model. The
-plan contains only hosts implicated by a source difference; identical common
-Stable IDs are not observation candidates. One semantic `ReviewChange` carries
-`evidenceStableIds[]`, so one change can span several hosts and several changes
-can depend on one host without replacing precise character facts with generic
-element changes. CSS and Script source aggregates remain visible source facts.
+Current-frame observation remains bounded, non-authoritative diagnostic input
+for already position-bound Stable-ID hosts. It may help measure DOM
+presentation, images, SVG, Canvas 2D and runtime descendants, but missing,
+stale, hidden, unsupported, unstable or budget-limited observation does not add
+a user-facing change or warning. The authored frame realm is not an isolated
+security oracle. No Main/Preload/IPC/screenshot/PNG evidence owner is restored.
 
-The current-frame bootstrap may provide best-effort `changed / unchanged /
-unverified` observations for DOM presentation, pseudo content, images, SVG,
-Canvas 2D and runtime descendants owned by a planned Stable-ID host. It uses a
-challenge-bound `MessagePort`, source/session/generation labels and parser-time
-host references to reject stale ports, duplicate claims and same-ID
-replacement. It runs in the authored frame realm, however, and echoes the
-parent-provided source label; it is not an isolated security oracle and must
-not be described as a trusted proof against hostile authored code.
+Each `ReviewChange` owns a side-specific `ReviewPresentation`. Its ordered
+steps currently admit a panel key and a Stable-ID-bound `<details>` disclosure.
+The path is derived from the actual marker/evidence host, not the coarse section
+pair. Initial entry and explicit selection first coordinate both disposable
+iframes to the requested states, wait for both presentations, then focus and
+scroll. Presentation changes never persist to authored HTML.
 
-Observation is batched across animation frames and uses one Review-wide time,
-node and pixel budget per sample. Every planned candidate receives an explicit
-result; there is no `.slice(0, 1000)` or other silent truncation. Budget
-exhaustion, WebGL, tainted pixels, live media, running animation, instability,
-missing hosts and late/stale generations are `unverified`. Added, removed or
-both-side-hidden source facts are also `unverified` visually while remaining
-visible as source changes. Presence of an external Script, ECharts, timers or
-network API never blanket-taints unrelated source facts.
+One first change is active on entry. It keeps the existing full purple outline,
+caption, text marks and context focus. Other text changes retain their existing
+added/removed marks. Other element changes retain the quiet page-edge revision
+bar; their full outline/caption appears only when focused or hovered. Review
+adds no list and no previous/next controls.
 
-A bounded DOM/style summary can establish a visible difference, but equality
-cannot prove that arbitrary CSS or Script had no downstream effect. Equal
-visual-only summaries therefore remain `unverified`; they do not suppress a
-source fact. A pure visual candidate may be suppressed only if a future
-observer can explicitly prove every linked host is unchanged without relying
-on this bounded whitelist.
+Same-parent topology names a concrete moved element only when removing exactly
+one candidate restores the sibling order. If more than one element is an
+equivalent explanation, Review attaches `元素顺序调整` to the shared Stable-ID
+parent and suppresses false text delete/insert evidence for that interval.
+Cross-parent movement remains an exact element fact.
 
-The Review UI exposes one inline state: `正在分析`, `已完成`, `有 N 项无法视觉验证`
-or `不支持`. `unverified` source changes remain in filters, navigation and
-markers. Adoption stays available because source validation and Candidate
-integrity are separate authorities, but the confirmation dialog explicitly
-states when visual enhancement is pending, unsupported or unverified.
+Review is a no-floating-notice surface. Visual status, unverified state, scope
+summary, candidate attention and background success Toasts are not rendered
+over the comparison. Blocking frame load errors stay in the existing canvas
+error area. Each new Review session hides the AI conversation once; the toolbar
+entry can reopen it and the session does not auto-hide it again.
 
 Review comments remain trusted React UI outside authored HTML. The marker rail
 is fixed to the right edge of the Before pane, nearby comments aggregate to
-`评2`/`评3`, and active comment keys are owned by the parent. Marker unmount,
-document replacement, frame reload and port closure broadcast inactive state
-so one marker cannot clear another active highlight or leave a stale layer.
-
-No Main/Preload/IPC/screenshot/PNG capture owner is restored. Existing Review
-text geometry, structure facts, split/single-page views, panel reveal, linked
-scrolling, zoom, comments and Candidate adoption remain the reused product
-surface.
+`评2`/`评3`, and active comment keys are owned by the parent. Static-fallback
+element commenting is outside this ADR and remains a separate PR.
 
 ## Required tests
 
-- a deterministic change after more than 1,000 unchanged Stable IDs;
-- hidden Tab, `display:none`, `visibility:hidden` and `opacity:0` source facts;
-- parent class/CSS-variable, positioning and cross-parent movement changes;
-- delayed runtime mutation settling after the first sample;
-- one semantic change spanning multiple Stable-ID hosts;
-- external ECharts/Script pages with an ordinary text change;
-- pending, unsupported and unverified inline state plus adoption confirmation;
+- CSS/Script comment-only Candidates create diagnostics but zero Review changes;
+- a simple changed selector maps only its concrete Stable-ID targets;
+- hidden Tab and closed `<details>` targets reveal on both sides before focus;
+- no Review visual/scope/attention/Toast overlay is present;
+- the AI conversation is hidden once per new Review session and can reopen;
+- ambiguous same-parent reorder becomes one parent-level `元素顺序调整` fact;
+- uniquely attributable and cross-parent movement remain exact;
+- first-change emphasis, quiet sibling revision bars and persistent text marks;
 - comment marker unmount, document replacement and port-rebind cleanup.

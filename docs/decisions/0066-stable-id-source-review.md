@@ -36,16 +36,18 @@ visual inference.
   remains the historical-document fallback. Conversely,
   the same persistent ID remains paired when the authored element tag changes;
   the tag change is a source-structure fact, not identity loss.
-- Stable sibling topology reports same-parent and cross-parent movement. An
-  insertion alone does not report every following sibling as moved. A stable
-  element that moves and changes text retains both movement and text facts;
-  byte-identical element markup cannot suppress a topology movement fact.
-- For a stable pair, authored attribute changes, inline `style` changes and
-  `<style>`/stylesheet or `<script>` source changes are source facts. Current-
-  frame visual observation may annotate them but cannot delete them. They stay
-  under the existing `structure` category and `全部 / 文字 / 元素` toolbar;
-  Review does not add a visual/style filter or a second fact system.
-  Movement, attribute, style and page-source facts do not suppress simultaneous
+- Stable sibling topology reports cross-parent movement exactly. A same-parent
+  reorder names one moved element only when that attribution is unique; an
+  ambiguous reorder attaches `元素顺序调整` to the shared stable parent instead
+  of guessing. An insertion alone does not report every following sibling as
+  moved. A stable element that moves and changes text retains both movement and
+  text facts; byte-identical element markup cannot suppress a topology fact.
+- For a stable pair, authored attribute changes and inline `style` changes are
+  position-bound source facts. A safely parsed simple CSS selector may map a
+  stylesheet difference to its concrete Stable-ID hosts. Whole-page CSS/Script
+  changes without such a mapping are private diagnostics under ADR 0068 and do
+  not enter `structure` or `全部 / 文字 / 元素`.
+  Movement, reorder, attribute and style facts do not suppress simultaneous
   text facts. Whole-element `added`/`removed` facts own descendant text. A moved
   stable subtree compares stable descendants through their individual IDs with
   the existing semantic text diff rather than flattening the subtree into one
@@ -57,18 +59,17 @@ visual inference.
   markup cannot steal movement ownership from an authored root. Independent
   moved-subtree graphs use distinct semantic and geometry owner namespaces;
   facts from different moved roots cannot merge or suppress one another.
-  On a pair with persistent continuity, ordered authored CSS/Script inventories
-  are compared independently of element IDs, so a newly added no-ID `<style>`,
-  stylesheet `<link>` or `<script>` remains visible in Review.
+  Ordered authored CSS/Script inventories may be retained as task/version
+  diagnostics independently of element IDs; they are not page Review markers.
 - Added and removed elements retain the outermost-unmatched-subtree rule.
   A stable element common to both inputs cannot be emitted as delete plus add
   merely because its source parent changed. A cross-region stable-common root
   suppresses only that root's false presence fact; traversal continues through
   its descendants so images, modules and other non-text elements added or
   removed during the move remain Review facts.
-- Attribute/style/source facts discover what may be observed; ADR 0068's
-  bounded observation reports whether sampled CSS cascade, layout, Canvas/SVG
-  and runtime presentation differ or remain explicitly unverified.
+- Attribute/style facts discover what may be observed. ADR 0068's bounded
+  observation remains private diagnostic input and cannot manufacture a
+  user-visible page change or uncertainty banner.
 
 ## Consequences
 
@@ -78,10 +79,10 @@ visual inference.
   rescan the complete element inventory once per distinct parent. Identified
   sibling indexes are likewise built once per parent, not once per child.
 - Projection facts remain only `text | structure`. Structure changes admit
-  `added`, `removed`, `moved`, `attribute`, `style`, `css-source` and
-  `script-source` with the existing purple element presentation.
-- CSS/Script source-only changes remain a page-source user fact and may fan out
-  to planned Stable-ID host observations without creating replacement changes.
+  `added`, `removed`, `moved`, `reordered`, `attribute` and `style` with the
+  existing purple element presentation.
+- CSS/Script source-only changes cannot fan out to Stable-ID hosts or create a
+  page-level Review change.
 - Tests must cover insertion versus reorder, cross-parent movement, moved text,
   attributes plus text, inline style plus text, CSS/Script source, pure reorder,
   unchanged and changed text inside cross-region moves, text transfer between

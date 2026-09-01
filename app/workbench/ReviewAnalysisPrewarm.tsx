@@ -45,6 +45,7 @@ export function preparedReviewByteSize(prepared: PreparedReviewDocuments): numbe
     + JSON.stringify(prepared.documents.visualBinding).length
     + JSON.stringify(prepared.documents.visualEvidence).length
     + JSON.stringify(prepared.documents.reviewImpact || null).length
+    + JSON.stringify(prepared.documents.diagnostics).length
   );
 }
 

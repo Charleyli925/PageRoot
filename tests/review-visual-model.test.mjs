@@ -9,6 +9,8 @@ import {
 const A = "pr1_11111111111141118111111111111111";
 const B = "pr1_22222222222242229222222222222222";
 const C = "pr1_3333333333334333a333333333333333";
+const D = "pr1_4444444444444444b444444444444444";
+const E = "pr1_55555555555545558555555555555555";
 const html = (body) => `<!doctype html><html data-pageroot-id="${A}"><body data-pageroot-id="${B}">${body}</body></html>`;
 
 test("visual enhancement rejects incomplete or duplicate identity without cancelling source Review", () => {
@@ -39,6 +41,15 @@ test("only same stable ID produces source evidence; a move remains a candidate",
 test("identical modern pages do not schedule observation-only candidates", () => {
   const source = `<main data-pageroot-id="${A}"><p data-pageroot-id="${B}">same</p></main>`;
   const result = buildReviewVisualEvidence(source, source, "same-session");
+  assert.equal(result.binding.identity, "supported");
+  assert.deepEqual(result.evidence, []);
+});
+
+test("page-level CSS and Script source-only edits never fan out to Stable-ID hosts", () => {
+  const before = `<main data-pageroot-id="${A}"><p data-pageroot-id="${B}">same</p></main><style data-pageroot-id="${D}">/* before */ .card { color: red; }</style><script data-pageroot-id="${E}">/* before */</script>`;
+  const after = `<main data-pageroot-id="${A}"><p data-pageroot-id="${B}">same</p></main><style data-pageroot-id="${D}">/* after */ .card { color: red; }</style><script data-pageroot-id="${E}">/* after */</script>`;
+  const result = buildReviewVisualEvidence(before, after, "source-only");
+
   assert.equal(result.binding.identity, "supported");
   assert.deepEqual(result.evidence, []);
 });

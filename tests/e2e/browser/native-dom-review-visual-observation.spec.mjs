@@ -5,6 +5,7 @@ import { createServer } from "node:http";
 import { generatedReviewBootstrap } from "../../helpers/generated-review-bootstrap.mjs";
 
 const HOST_ID = "pr1_11111111111141118111111111111111";
+const DETAILS_ID = "pr1_22222222222242229222222222222222";
 
 async function observe(page, {
   body = `<main data-pageroot-id="${HOST_ID}">same</main>`,
@@ -52,6 +53,68 @@ async function observe(page, {
     }
   }, { side, stableId: HOST_ID, present });
 }
+
+test("structured Review presentation reveals a panel and details before focus", {
+  tag: ["@gate-smoke", "@smoke-review"],
+}, async ({ page }) => {
+  const bootstrap = generatedReviewBootstrap([], "after", []);
+  await page.setContent(`<!doctype html><html><head><script>${bootstrap}</script></head><body>
+    <button aria-controls="hidden-panel" aria-selected="false"
+      data-pageroot-review-panel-control="true"
+      data-pageroot-review-panel-group="panel-group-1"
+      data-pageroot-review-panel-key="panel-1">隐藏面板</button>
+    <section id="hidden-panel" hidden aria-hidden="true"
+      data-pageroot-review-panel-container="true"
+      data-pageroot-review-panel-group="panel-group-1"
+      data-pageroot-review-panel-key="panel-1">
+      <details data-pageroot-id="${DETAILS_ID}"><summary>说明</summary><p>目标内容</p></details>
+    </section>
+  </body></html>`);
+
+  const state = await page.evaluate(async ({ stableId }) => {
+    const epoch = 7;
+    const ready = new Promise((resolve) => {
+      const receive = (event) => {
+        if (event.data?.source !== "pageroot-ai-review"
+          || event.data?.type !== "presentation-ready"
+          || event.data?.presentationEpoch !== epoch) return;
+        removeEventListener("message", receive);
+        resolve(true);
+      };
+      addEventListener("message", receive);
+    });
+    postMessage({
+      source: "pageroot-ai-review-parent",
+      sessionId: "review-session",
+      type: "begin-presentation",
+      presentationEpoch: epoch,
+    }, "*");
+    postMessage({
+      source: "pageroot-ai-review-parent",
+      sessionId: "review-session",
+      type: "activate-presentation",
+      presentationEpoch: epoch,
+      revealSteps: [
+        { kind: "panel", key: "panel-1" },
+        { kind: "details", stableId },
+      ],
+    }, "*");
+    await ready;
+    const panel = document.querySelector("#hidden-panel");
+    const details = document.querySelector(`details[data-pageroot-id="${stableId}"]`);
+    return {
+      panelHidden: panel.hidden,
+      panelAriaHidden: panel.getAttribute("aria-hidden"),
+      detailsOpen: details.open,
+    };
+  }, { stableId: DETAILS_ID });
+
+  expect(state).toEqual({
+    panelHidden: false,
+    panelAriaHidden: "false",
+    detailsOpen: true,
+  });
+});
 
 test("visual summaries ignore page position and class source noise but detect presentation", {
   tag: ["@gate-smoke", "@smoke-review"],

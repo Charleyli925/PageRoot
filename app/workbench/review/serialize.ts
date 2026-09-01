@@ -281,8 +281,17 @@ ${REVIEW_TEXT_EVIDENCE_MARKER_CSS}
     line-height: 1.2 !important;
     white-space: nowrap !important;
     text-overflow: ellipsis !important;
-    pointer-events: auto !important;
+    opacity: 0 !important;
+    visibility: hidden !important;
+    pointer-events: none !important;
     cursor: pointer !important;
+  }
+
+  [data-pageroot-review-overlay-box][data-hover="true"] [data-pageroot-review-overlay-label],
+  [data-pageroot-review-overlay-box][data-active="true"] [data-pageroot-review-overlay-label] {
+    opacity: 1 !important;
+    visibility: visible !important;
+    pointer-events: auto !important;
   }
 
   /* At the document's very top there is no room above the box, so the caption

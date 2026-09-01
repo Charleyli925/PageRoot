@@ -33,40 +33,50 @@ const TREND_BEFORE = "内容平台搜索挤压传统搜索引擎与传统电商�
 const TREND_AFTER = "大盘增量增速放缓（96.2 亿次/日，YoY +18%，较 1&amp;2 月 +20% 回落 2pp），但结构变化加剧：抖系份额收缩，微信、小红书接棒增长。";
 const NOTE_BEFORE = "增速较 1–2 月 +20% 走弱；抖系份额 -0.7pp，微信 +5.4pp、红书 +1.3pp 是唯三正增长入口";
 const NOTE_AFTER = "增速较 1–2 月 +20% 走弱；微信 +5.4pp、红书 +1.3pp 正增长，抖系 -0.7pp";
-const ORDINARY_MODULE_BEFORE = "    <div class=\"ordinary-module\" data-review-ordinary-replacement><h2>普通标题</h2><p>北方仓储周转红线</p></div>";
-const ORDINARY_MODULE_AFTER = "    <div class=\"ordinary-module\" data-review-ordinary-replacement><h2>普通标题</h2><p>海外广告买量策略</p></div>";
-const JD_CARD_BEFORE = `        <div class="metric" data-report-metric="jd-retail-profit">
-          <div class="metric-label">京东零售经营利润</div>
-          <div class="metric-value">135<span class="metric-unit">亿元</span> <span class="up">-3.3%</span></div>
-          <p class="metric-note" data-review-jd-note>零售基本盘保持韧性；利润率仍需观察。</p>
-        </div>`;
-const JD_CARD_AFTER = `        <div class="metric" data-report-metric="jd-retail-profit">
-          <div class="metric-label">京东零售经营利润</div>
-          <div class="metric-value">135<span class="metric-unit">亿元</span> <span class="up">-3.3%</span></div>
-          <ul class="metric-note" data-review-jd-note><li>零售基本盘保持韧性；</li><li>利润率仍需观察。</li></ul>
-        </div>`;
-
+const ORDINARY_MODULE_AFTER = "    <section class=\"ordinary-module\" data-review-ordinary-replacement>全新普通模块：海外广告买量策略</section>";
 /** The AI candidate: text edits, one added wrapper, and ignored style edits. */
 function rewriteReport(source) {
+  const firstTab = source.match(
+    /<span\b(?=[^>]*class="tab")(?=[^>]*data-active="true")[^>]*>① 大盘 &amp; 电商搜索<\/span>/u,
+  )?.[0];
+  const secondTab = source.match(
+    /<span\b(?=[^>]*class="tab")[^>]*>② 抖音搜盘表现<\/span>/u,
+  )?.[0];
+  const tabPairBefore = firstTab && secondTab
+    ? `${firstTab}\n      ${secondTab}`
+    : "\u0000";
+  const tabPairAfter = firstTab && secondTab
+    ? `${secondTab}\n      ${firstTab}`
+    : "";
+  const jdCard = source.match(
+    /<div\b(?=[^>]*class="metric")(?=[^>]*data-report-metric="jd-retail-profit")[^>]*>[\s\S]*?<p\b(?=[^>]*data-review-jd-note)[^>]*>零售基本盘保持韧性；利润率仍需观察。<\/p>\s*<\/div>/u,
+  )?.[0];
+  const jdNote = jdCard?.match(
+    /<p\b(?=[^>]*data-review-jd-note)[^>]*>零售基本盘保持韧性；利润率仍需观察。<\/p>/u,
+  )?.[0];
+  const changedJdCard = jdCard && jdNote
+    ? jdCard.replace(
+      jdNote,
+      jdNote.replace(/^<p\b/u, "<ul").replace(
+        />零售基本盘保持韧性；利润率仍需观察。<\/p>$/u,
+        "><li>零售基本盘保持韧性；</li><li>利润率仍需观察。</li></ul>",
+      ),
+    )
+    : "";
+  const ordinaryModule = source.match(
+    /<div\b(?=[^>]*class="ordinary-module")(?=[^>]*data-review-ordinary-replacement)[^>]*><h2[^>]*>普通标题<\/h2><p[^>]*>北方仓储周转红线<\/p><\/div>/u,
+  )?.[0];
   return source
     .replace("边缘旧值", "边缘新值")
-    .replace(`${ORDINARY_MODULE_BEFORE}\n`, "")
+    .replace(ordinaryModule || "\u0000", "")
     .replace(TREND_BEFORE, TREND_AFTER)
     .replace(NOTE_BEFORE, NOTE_AFTER)
+    .replace(jdCard ? `${jdCard}\n` : "\u0000", "")
     .replace(
-      `${JD_CARD_BEFORE}\n        <div class="metric" data-report-metric="overall">`,
-      `        <div class="metric" data-report-metric="overall">`,
+      /(<div\b(?=[^>]*class="metric")(?=[^>]*data-report-metric="commerce")[^>]*>)/u,
+      changedJdCard ? `${changedJdCard}\n        $1` : "$1",
     )
-    .replace(
-      "        </div>\n        <div class=\"metric\" data-report-metric=\"commerce\">",
-      `        </div>\n${JD_CARD_AFTER}\n        <div class="metric" data-report-metric="commerce">`,
-    )
-    .replace(
-      '<span class="tab" data-active="true">① 大盘 &amp; 电商搜索</span>\n'
-      + '      <span class="tab">② 抖音搜盘表现</span>',
-      '<span class="tab">② 抖音搜盘表现</span>\n'
-      + '      <span class="tab" data-active="true">① 大盘 &amp; 电商搜索</span>',
-    )
+    .replace(tabPairBefore, tabPairAfter)
     .replace(
       '<p class="panel-title">核心结论</p>',
       '<div class="panel-head"><p class="panel-title">核心结论</p>'
@@ -175,26 +185,33 @@ function writeCandidate(requestRoot, changeRequest) {
 async function readProjection(frame) {
   return frame.locator("html").evaluate(() => {
     const boxes = [...document.querySelectorAll("[data-pageroot-review-overlay-box]")]
-      .map((box) => ({
-        changeId: box.getAttribute("data-pageroot-review-overlay-box") || "",
-        owner: box.getAttribute("data-pageroot-review-semantic-owner") || "",
-        fact: box.getAttribute("data-pageroot-review-fact") || "",
-        path: box.getAttribute("data-path") || "",
-        tone: box.dataset.tone || "",
-        types: box.dataset.types || "",
-        scope: box.dataset.scope || "",
-        summary: box.dataset.summary || "",
-        active: box.dataset.active || "",
-        label: box.querySelector("[data-pageroot-review-overlay-label]")?.textContent || "",
-        labelCount: Number(box.querySelector("[data-pageroot-review-overlay-label]")
-          ?.getAttribute("data-pageroot-review-label-count") || 1),
-        borderWidth: Number.parseFloat(getComputedStyle(box).borderTopWidth || "0"),
-        borderColor: getComputedStyle(box).borderTopColor || "",
-        left: Number(box.getAttribute("data-left")),
-        top: Number(box.getAttribute("data-top")),
-        width: Number(box.getAttribute("data-width")),
-        height: Number(box.getAttribute("data-height")),
-      }));
+      .map((box) => {
+        const labelElement = box.querySelector("[data-pageroot-review-overlay-label]");
+        return {
+          changeId: box.getAttribute("data-pageroot-review-overlay-box") || "",
+          owner: box.getAttribute("data-pageroot-review-semantic-owner") || "",
+          fact: box.getAttribute("data-pageroot-review-fact") || "",
+          path: box.getAttribute("data-path") || "",
+          tone: box.dataset.tone || "",
+          types: box.dataset.types || "",
+          scope: box.dataset.scope || "",
+          summary: box.dataset.summary || "",
+          active: box.dataset.active || "",
+          label: labelElement?.textContent || "",
+          labelVisible: labelElement
+            ? getComputedStyle(labelElement).visibility !== "hidden"
+              && Number(getComputedStyle(labelElement).opacity) > 0
+            : false,
+          labelCount: Number(labelElement
+            ?.getAttribute("data-pageroot-review-label-count") || 1),
+          borderWidth: Number.parseFloat(getComputedStyle(box).borderTopWidth || "0"),
+          borderColor: getComputedStyle(box).borderTopColor || "",
+          left: Number(box.getAttribute("data-left")),
+          top: Number(box.getAttribute("data-top")),
+          width: Number(box.getAttribute("data-width")),
+          height: Number(box.getAttribute("data-height")),
+        };
+      });
     const holes = [...document.querySelectorAll("[data-pageroot-review-mask-hole]")]
       .map((hole) => ({
         changeId: hole.getAttribute("data-pageroot-review-mask-hole") || "",
@@ -374,13 +391,29 @@ test("the review projection annotates a dense report cleanly and accurately", as
         `${side}: projection chrome must not widen the authored document`,
       ).toBeLessThanOrEqual(projection.authoredDocumentWidth + 0.01);
       expect(
-        projection.boxes.some((box) => box.types.includes("style")),
-        `${side}: style-only changes must not enter Review facts`,
-      ).toBe(false);
-      expect(projection.boxes.length, `${side}: every box needs exactly one mask hole`)
-        .toBe(projection.holes.length);
-      projection.boxes.forEach((box, index) => {
-        const hole = projection.holes[index];
+        projection.boxes.some((box) => (
+          box.fact.includes("stable-style") || box.summary.includes("样式调整")
+        )),
+        `${side}: simple-selector CSS must bind to concrete elements`,
+      ).toBe(true);
+      expect(projection.holes.length, `${side}: quiet element changes must not all cut mask holes`)
+        .toBeLessThanOrEqual(projection.boxes.length);
+      expect(
+        projection.boxes.filter((box) => box.active !== "true" && !box.types.includes("text"))
+          .every((box) => box.labelVisible === false),
+        `${side}: inactive element captions must remain quiet`,
+      ).toBe(true);
+      projection.holes.forEach((hole) => {
+        const box = projection.boxes.find((candidate) => (
+          candidate.changeId === hole.changeId
+          && candidate.owner === hole.owner
+          && candidate.fact === hole.fact
+        ));
+        expect(box, `${side}: every emphasized mask hole needs a canonical box`).toBeTruthy();
+        expect(
+          box.types.includes("text") || box.active === "true",
+          `${side}: only text or the active element change may cut a mask hole`,
+        ).toBe(true);
         for (const [kind, geometry] of [["box", box], ["hole", hole]]) {
           expect(geometry.left, `${side}: ${kind} ${box.changeId} crosses the left edge`)
             .toBeGreaterThanOrEqual(0);
@@ -406,17 +439,24 @@ test("the review projection annotates a dense report cleanly and accurately", as
     for (const [side, frame] of [["before", beforeFrame], ["after", afterFrame]]) {
       expect(
         await frame.locator(".tabs .tab[data-pageroot-review-structure]").count(),
-        `${side}: reordered tabs must not be reported as element changes`,
+        `${side}: ambiguous reorder must not guess one tab`,
       ).toBe(0);
+      await expect(frame.locator(".tabs"))
+        .toHaveAttribute("data-pageroot-review-structure", "reordered");
     }
     for (const [side, frame] of [["before", beforeFrame], ["after", afterFrame]]) {
+      await expect(frame.locator(".metrics"))
+        .toHaveAttribute("data-pageroot-review-structure", "reordered");
       const jdEvidence = await frame.locator('[data-report-metric="jd-retail-profit"]')
         .evaluate((card) => {
           const markerText = [...card.querySelectorAll("[data-pageroot-review-text]")]
             .map((marker) => marker.textContent || "").join("");
           const note = card.querySelector("[data-review-jd-note]");
           return {
-            cardStructure: card.hasAttribute("data-pageroot-review-structure"),
+            cardStructure: JSON.parse(
+              card.getAttribute("data-pageroot-review-projection-facts") || "[]",
+            ).filter((fact) => fact.type === "structure")
+              .map((fact) => fact.structureChange),
             stableCopyMarked: ["京东零售经营利润", "135", "-3.3%"]
               .some((value) => markerText.includes(value)),
             noteStructure: note?.getAttribute("data-pageroot-review-structure") || "",
@@ -424,14 +464,14 @@ test("the review projection annotates a dense report cleanly and accurately", as
             descendantText: note?.querySelectorAll("[data-pageroot-review-text]").length || 0,
           };
         });
-      expect(jdEvidence.cardStructure, `${side}: the relocated JD card must stay paired`)
-        .toBe(false);
+      expect(jdEvidence.cardStructure, `${side}: ambiguous sibling order stays on the parent`)
+        .toEqual(["style"]);
       expect(jdEvidence.stableCopyMarked, `${side}: stable JD title/value must not be text evidence`)
         .toBe(false);
       expect(jdEvidence.noteStructure, `${side}: only the changed bottom wrapper is structural`)
-        .toBe(side === "before" ? "removed" : "added");
-      expect(jdEvidence.descendantStructure, `${side}: JD bottom subtree has duplicate structure facts`)
-        .toBe(0);
+        .toBe("attribute");
+      expect(jdEvidence.descendantStructure, `${side}: list items retain their concrete presence facts`)
+        .toBe(side === "before" ? 0 : 2);
       expect(jdEvidence.descendantText, `${side}: JD bottom subtree has duplicate text facts`)
         .toBe(0);
     }
@@ -501,13 +541,16 @@ test("the review projection annotates a dense report cleanly and accurately", as
       "utf8",
     );
 
-    // 1. One change region draws one outline. A nested descendant of the same
-    //    change must never earn a second box inside its container.
+    // 1. One source fact draws one outline. Independent localized facts may
+    //    coexist inside a parent reorder region, but duplicate geometry for
+    //    the same fact/owner must still collapse.
     for (const [side, projection] of Object.entries(projections)) {
       for (const box of projection.boxes) {
         const container = projection.boxes.find((candidate) => (
           candidate !== box
           && candidate.changeId === box.changeId
+          && candidate.fact === box.fact
+          && candidate.owner === box.owner
           && !candidate.types.includes("text")
           && !box.types.includes("text")
           && box.left >= candidate.left - 1
@@ -536,6 +579,8 @@ test("the review projection annotates a dense report cleanly and accurately", as
         const crossing = projection.boxes.find((candidate) => (
           candidate !== box
           && candidate.changeId === box.changeId
+          && candidate.fact === box.fact
+          && candidate.owner === box.owner
           && !stackedRun(box, candidate)
           && Math.min(box.left + box.width, candidate.left + candidate.width)
             - Math.max(box.left, candidate.left) > 0

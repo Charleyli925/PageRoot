@@ -1,8 +1,10 @@
 import { buildSourceIndex } from "../../lib/source-index.js";
 import { analyzeReviewStableIdTopology } from "../../lib/review-stable-id-diff.js";
 
-const VISUAL_ONLY_KINDS = new Set(["style", "css-source", "script-source"]);
-const DETERMINISTIC_KINDS = new Set(["text", "added", "removed", "moved", "attribute"]);
+const VISUAL_ONLY_KINDS = new Set(["style"]);
+const DETERMINISTIC_KINDS = new Set([
+  "text", "added", "removed", "moved", "reordered", "attribute",
+]);
 
 function sourceElementMap(html) {
   const index = buildSourceIndex(html);
@@ -25,22 +27,20 @@ function parentPagerootId(index, element) {
   return parent?.type === "element" ? parent.pagerootId : null;
 }
 
+function isPageSourceElement(element) {
+  return element.tagName === "style"
+    || element.tagName === "script"
+    || (element.tagName === "link" && /(?:^|\s)stylesheet(?:\s|$)/iu.test(
+      element.attributesByName.get("rel")?.[0]?.value || "",
+    ));
+}
+
 function topologyDescriptors(index) {
   return index.elements.flatMap((element) => element.pagerootId ? [{
     id: element.pagerootId,
     parentId: parentPagerootId(index, element),
     index: element.siblingIndex,
   }] : []);
-}
-
-function authorSourceInventory(index, kind) {
-  const accepted = kind === "css-source"
-    ? (element) => element.tagName === "style"
-      || (element.tagName === "link" && /(?:^|\s)stylesheet(?:\s|$)/iu.test(
-        element.attributesByName.get("rel")?.[0]?.value || "",
-      ))
-    : (element) => element.tagName === "script";
-  return index.elements.filter(accepted).map((element) => element.raw).join("\u0001");
 }
 
 function outermost(element, changedIds, index) {
@@ -101,17 +101,12 @@ export function buildReviewVisualEvidence(beforeHtml, afterHtml, sessionId) {
   const moved = new Set(topology.movedIds);
   const removed = new Set(topology.removedIds);
   const added = new Set(topology.addedIds);
-  const beforeCssSource = authorSourceInventory(before.index, "css-source");
-  const afterCssSource = authorSourceInventory(after.index, "css-source");
-  const beforeScriptSource = authorSourceInventory(before.index, "script-source");
-  const afterScriptSource = authorSourceInventory(after.index, "script-source");
-  const cssChanged = beforeCssSource !== afterCssSource;
-  const scriptChanged = beforeScriptSource !== afterScriptSource;
   const evidence = [];
 
   for (const id of topology.commonIds) {
     const beforeElement = before.elements.get(id);
     const afterElement = after.elements.get(id);
+    if (isPageSourceElement(beforeElement) || isPageSourceElement(afterElement)) continue;
     const kinds = [];
     if (beforeElement.directText !== afterElement.directText) kinds.push("text");
     if (moved.has(id)) kinds.push("moved");
@@ -123,8 +118,6 @@ export function buildReviewVisualEvidence(beforeHtml, afterHtml, sessionId) {
       || comparableAttributes(beforeElement, new Set(["style"]))
         !== comparableAttributes(afterElement, new Set(["style"]))
     ) kinds.push("attribute");
-    if (cssChanged) kinds.push("css-source");
-    if (scriptChanged) kinds.push("script-source");
     if (!kinds.length) continue;
     evidence.push({
       id: `candidate-${id}`,
@@ -137,9 +130,30 @@ export function buildReviewVisualEvidence(beforeHtml, afterHtml, sessionId) {
     });
   }
 
+  for (const range of topology.reorderedRanges) {
+    if (!range.parentId || !topology.commonIds.includes(range.parentId)) continue;
+    const parent = after.elements.get(range.parentId);
+    if (!parent) continue;
+    const existing = evidence.find((entry) => entry.stableId === range.parentId);
+    if (existing) {
+      existing.kinds = [...new Set([...existing.kinds, "reordered"])];
+      existing.types = evidenceTypes(existing.kinds);
+      continue;
+    }
+    evidence.push({
+      id: `candidate-${range.parentId}`,
+      stableId: range.parentId,
+      parentStableId: parentPagerootId(after.index, parent),
+      kinds: ["reordered"],
+      types: ["structure"],
+      beforePresent: true,
+      afterPresent: true,
+    });
+  }
+
   for (const id of topology.removedIds) {
     const element = before.elements.get(id);
-    if (!element || !outermost(element, removed, before.index)) continue;
+    if (!element || isPageSourceElement(element) || !outermost(element, removed, before.index)) continue;
     evidence.push({
       id: `candidate-${id}`,
       stableId: id,
@@ -152,7 +166,7 @@ export function buildReviewVisualEvidence(beforeHtml, afterHtml, sessionId) {
   }
   for (const id of topology.addedIds) {
     const element = after.elements.get(id);
-    if (!element || !outermost(element, added, after.index)) continue;
+    if (!element || isPageSourceElement(element) || !outermost(element, added, after.index)) continue;
     evidence.push({
       id: `candidate-${id}`,
       stableId: id,
@@ -205,10 +219,8 @@ export function reviewVisualVerdict(evidence, before, after, binding, generation
   }
   if (!before.fingerprint || !after.fingerprint) return "unverified";
   if (before.fingerprint === after.fingerprint) {
-    // A bounded DOM/style fingerprint can prove a difference, but it cannot
-    // prove that arbitrary CSS or Script had no visual effect outside the
-    // sampled surface. Equal visual-only summaries therefore remain explicit
-    // uncertainty rather than deleting a source fact.
+    // Inline style remains a concrete element-level source fact. Observation
+    // is diagnostic only and never creates a page-level user-visible claim.
     return isVisualOnlyReviewSourceEvidence(evidence) ? "unverified" : "unchanged";
   }
   return hasReviewSourceCandidate(evidence) ? "changed" : "unverified";
