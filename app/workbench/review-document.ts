@@ -289,6 +289,10 @@ function presentationElement(
     ...(root.matches(selector) ? [root] : []),
     ...root.querySelectorAll(selector),
   ];
+  const preciseMarker = markers.find((element) => (
+    element.matches("[data-pageroot-review-text],[data-pageroot-review-structure]")
+  ));
+  if (preciseMarker) return preciseMarker;
   return markers.find((element) => {
       const stableId = element.closest("[data-pageroot-id]")?.getAttribute("data-pageroot-id") || "";
       return evidenceStableIds.includes(stableId);
