@@ -245,7 +245,7 @@ PR 1 内部按“文档与 Schema → Repository → Workflow → 最低限度 U
 
 ### 6.3 Markdown 文件
 
-- `PROJECT.md`：唯一由用户长期维护的项目规则、背景和约束；新项目只预填一行项目标题，用户可随时清空为零字节。它不预填系统规则，也不承担身份或事务职责。
+- `PROJECT.md`：唯一由用户长期维护的项目规则、背景和约束；新项目首次打开时预填“项目目标、目标受众、内容与事实规则、视觉与表达、AI 修改边界”五段简洁 Markdown 模板。用户可随时编辑或清空为零字节。它不预填系统规则，也不承担身份或事务职责；它独立于 HTML 版本时间线，单独导出 HTML 时不附带该文件。
 - `AI_RULES.md`：PageRoot 维护的稳定 AI 行为边界，例如冻结输入、唯一输出、附件、完成与取消规则。它是 Request 输入，不复制到 `PROJECT.md` 或每轮 Prompt。
 - `PROMPT.md`：当前 Request / Attempt 的精简入口，只包含本轮身份、读取顺序、当前附件/补充、唯一输出路径和 finalizer 命令；它引用 `AI_RULES.md`，不得重复稳定规则或要求 AI 推导文件名、版本号。
 - `.pageroot/requests/<requestId>/PROMPT.md`、冻结的 `input/PROJECT.md` 与 `input/AI_RULES.md` 是机器执行记录；PR 2B 的 `AI任务/<轮次>/PROMPT.md` 只复制已经冻结的精简 Prompt，不重新拼接稳定规则，且不改变任何权威路径。
@@ -852,7 +852,7 @@ manifest 可记录平台文件标识（例如 device、inode、birthtime）作�
 |---|---|---|
 | Promotion 路径冻结 | 私有准备文件可先建立；只有 no-replace `link()` 成功后最终可见路径才冻结。发布前仅 `EEXIST` 可持久分配下一个同 ordinal 路径并重试，其他错误失败关闭。 | 事务、恢复和故障注入须区分“发布前 EEXIST”与“成功发布后恢复”。 |
 | Candidate 与可见 AI 任务 | AI 唯一写入固定 Attempt `output/candidate.html`；Request / Attempt 与 Candidate 记录才是权威。`AI任务/` 仅在第二期作为只读派生展示。 | 不得由 AI 直接写 Finder 可见正式 Version，也不得以可见副本作为 Promotion 输入。 |
-| AI Markdown 职责 | `PROJECT.md` 默认只预填项目标题且可清空，是用户长期规则；`AI_RULES.md` 是稳定系统边界；`PROMPT.md` 只给出本轮精简执行入口并引用规则。 | 禁止在 Prompt 重复稳定规则或要求 AI 推导输出文件名、版本号。 |
+| AI Markdown 职责 | `PROJECT.md` 默认预填五段长期规则模板且可清空，是用户长期规则；`AI_RULES.md` 是稳定系统边界；`PROMPT.md` 只给出本轮精简执行入口并引用规则。 | 禁止在 Prompt 重复稳定规则或要求 AI 推导输出文件名、版本号。 |
 | Hash 与身份 | Hash 只验证内容，绝不单独补回 Working Copy 映射或授予管理权。 | ADR 0022 与恢复实现必须删除 Hash 身份回退。 |
 | 第二期可见体验 | 可见 AI 任务、附件与完整顶部/项目界面明确属于第二期。 | 第一期开箱与验收不以这些 Finder 目录或完整 UI 为前提。 |
 

@@ -31,6 +31,7 @@ async function readWorkbenchCascadeCss() {
     "./styles/top-toolbar.css",
     "./styles/workbench-chrome.css",
     "./styles/project-sidebar.css",
+    "./styles/project-rules.css",
   ]);
   assert.equal(entry.trim(), imports.map((file) => `@import "${file}";`).join("\n"));
   const parts = await Promise.all(imports.map((file) => (
@@ -143,6 +144,9 @@ test("project trees use compact unweighted rows and a uniform quiet lineage", as
   assert.doesNotMatch(css, /sidebar-version-file > svg/u);
   assert.doesNotMatch(css, /sidebar-version-current-label/u);
   assert.doesNotMatch(css, /sidebar-skeleton-icon/u);
+  const rulesRow = lastCssRule(css, ".sidebar-project-rules-row");
+  assert.match(rulesRow, /min-height:\s*38px/u);
+  assert.match(css, /\.sidebar-project-rules-copy > small/u);
 });
 
 test("cache handoff waits for static display readiness and uses live canvas geometry", async () => {

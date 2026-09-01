@@ -150,7 +150,6 @@ function codecs() {
       return [...targets.values()];
     },
     fileStem: (name) => String(name).replace(/\.html?$/iu, "") || "未命名页面",
-    projectMarkdown: (name) => `# ${name}`,
     operationKey,
     errorMessage: (cause, fallback) => String(cause?.message || fallback),
   };
