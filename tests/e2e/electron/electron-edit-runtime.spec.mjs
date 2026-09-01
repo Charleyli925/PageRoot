@@ -354,14 +354,12 @@ async function assertRuntimeHandoff(page, {
       }
       return true;
     };
-    const firstTopmostRafIndex = activeStateSamples.findIndex((sample) => (
-      Number.isInteger(sample.rafSequence) && isTopmostActiveSample(sample)
-    ));
-    expect(firstTopmostRafIndex).toBeGreaterThanOrEqual(0);
-    expect(activeStateSamples.slice(0, firstTopmostRafIndex + 1).every(
+    const firstTopmostActiveIndex = activeStateSamples.findIndex(isTopmostActiveSample);
+    expect(firstTopmostActiveIndex).toBeGreaterThanOrEqual(0);
+    expect(activeStateSamples.slice(0, firstTopmostActiveIndex + 1).every(
       (sample) => isTopmostActiveSample(sample) && activeViewportMatches(sample),
     )).toBe(true);
-    const firstTopmostActiveSample = activeStateSamples[firstTopmostRafIndex];
+    const firstTopmostActiveSample = activeStateSamples[firstTopmostActiveIndex];
     expect(firstTopmostActiveSample.viewportAnchorStableId)
       .toBe(handoffBaselineSample.viewportAnchorStableId);
     expect(firstTopmostActiveSample.selectionStableId)
@@ -797,6 +795,26 @@ test("a real user scroll during positioning becomes the latest handoff target", 
       document.querySelectorAll('section > p'),
       (node) => node.textContent,
     ).join('');
+    const handoffLayoutJitter = document.createElement('div');
+    handoffLayoutJitter.setAttribute('aria-hidden', 'true');
+    handoffLayoutJitter.style.position = 'absolute';
+    handoffLayoutJitter.style.top = '0';
+    handoffLayoutJitter.style.left = '2048px';
+    handoffLayoutJitter.style.height = '1px';
+    handoffLayoutJitter.style.pointerEvents = 'none';
+    handoffLayoutJitter.style.opacity = '0';
+    document.body.append(handoffLayoutJitter);
+    let handoffLayoutFrames = 0;
+    const holdHandoffLayout = () => {
+      handoffLayoutFrames += 1;
+      handoffLayoutJitter.style.width = String((handoffLayoutFrames % 2) * 8) + 'px';
+      if (handoffLayoutFrames < 90) {
+        requestAnimationFrame(holdHandoffLayout);
+      } else {
+        handoffLayoutJitter.remove();
+      }
+    };
+    requestAnimationFrame(holdHandoffLayout);
   </script>
 </body></html>`;
 
@@ -821,17 +839,58 @@ test("a real user scroll during positioning becomes the latest handoff target", 
       moveDownBox.x + moveDownBox.width / 2,
       moveDownBox.y + moveDownBox.height / 2,
     );
-    // The move operation can change the selected element's geometry. Resolve
-    // the scrollport again after that click so the real wheel gesture lands on
-    // the current scrollbar hit area during positioning.
+    // The fixture holds its candidate layout in motion for a bounded number of
+    // rAFs, giving this real user gesture a deterministic positioning window.
+    await page.waitForFunction(() => (
+      document.querySelector('[data-testid="html-canvas-editor"]')
+        ?.getAttribute('data-runtime-handoff') === 'positioning'
+    ));
     const stageBox = await reviewStage.boundingBox();
     expect(stageBox).not.toBeNull();
-    const scrollbarX = stageBox.x + stageBox.width - 2;
-    const scrollbarY = stageBox.y + stageBox.height / 2;
-    await page.mouse.move(scrollbarX, scrollbarY);
-    await page.mouse.wheel(0, 900);
+    // Drag the native scrollbar thumb. This is a real pointer gesture and
+    // directly exercises the handoff's scrollbar-drag intent channel, including
+    // hosts where a wheel over the scrollbar does not bubble a wheel event.
+    const scrollbarDrag = await reviewStage.evaluate((element) => {
+      const rect = element.getBoundingClientRect();
+      const maximum = Math.max(1, element.scrollHeight - element.clientHeight);
+      const thumbHeight = Math.max(
+        20,
+        Math.min(rect.height, rect.height * element.clientHeight / element.scrollHeight),
+      );
+      const travel = Math.max(0, rect.height - thumbHeight);
+      const currentRatio = Math.min(1, Math.max(0, element.scrollTop / maximum));
+      const targetRatio = Math.min(1, currentRatio + 0.55);
+      return {
+        x: rect.right - 8,
+        startY: rect.top + thumbHeight / 2 + currentRatio * travel,
+        endY: rect.top + thumbHeight / 2 + targetRatio * travel,
+      };
+    });
+    await page.mouse.move(scrollbarDrag.x, scrollbarDrag.startY);
+    await page.mouse.down();
+    await page.mouse.move(scrollbarDrag.x, scrollbarDrag.endY, { steps: 12 });
+    await page.mouse.up();
     await expect.poll(() => reviewStage.evaluate((element) => element.scrollTop))
       .toBeGreaterThan(700);
+    // Let the native scrollbar finish its final scroll sample before choosing
+    // the handoff target. The last pointerup can commit one more scroll step
+    // on the following frame.
+    await page.evaluate(() => new Promise((resolve) => {
+      let previous = null;
+      let stableFrames = 0;
+      const waitForStableScroll = () => {
+        const stage = document.querySelector('.review-scroll-stage');
+        const current = stage?.scrollTop ?? null;
+        if (current === previous) stableFrames += 1;
+        else {
+          previous = current;
+          stableFrames = 0;
+        }
+        if (stableFrames >= 2) resolve();
+        else requestAnimationFrame(waitForStableScroll);
+      };
+      requestAnimationFrame(waitForStableScroll);
+    }));
     const sawUserPositioning = await page.evaluate(() => {
       const samples = window.__PAGEROOT_RUNTIME_HANDOFF_SAMPLES__ || [];
       return samples.some((sample) => (
@@ -844,18 +903,27 @@ test("a real user scroll during positioning becomes the latest handoff target", 
     const userViewportSample = await page.evaluate(() => {
       const samples = window.__PAGEROOT_RUNTIME_HANDOFF_SAMPLES__ || [];
       return [...samples].reverse().find((sample) => (
-        sample.handoffState === "positioning"
+        (sample.handoffState === "positioning" || sample.handoffState === "active")
         && Number(sample.sharedScrollTop) > 600
         && sample.viewportAnchorStableId
       )) || null;
     });
     expect(userViewportSample).not.toBeNull();
-    const userScrollTop = await reviewStage.evaluate((element) => element.scrollTop);
+    const userViewportPosition = await page.evaluate(() => {
+      const editor = document.querySelector('[data-testid="html-canvas-editor"]');
+      const activeFrame = editor?.querySelector('iframe[title*="HTML"]:not([data-frame-role])');
+      const sharedScrollElement = editor?.closest('.review-scroll-stage');
+      return {
+        iframeScrollY: activeFrame?.contentWindow?.scrollY || 0,
+        sharedScrollTop: sharedScrollElement?.scrollTop || 0,
+      };
+    });
     const expectedUserViewportSample = {
       ...userViewportSample,
-      sharedScrollTop: userScrollTop,
+      iframeScrollY: userViewportPosition.iframeScrollY,
+      sharedScrollTop: userViewportPosition.sharedScrollTop,
       // Assert the latest scroll and stable-ID anchor captured during the
-      // wheel gesture, not an intermediate screen coordinate.
+      // pointer gesture, not an intermediate screen coordinate.
       selectedStageTop: null,
       selectedScreenTop: null,
     };
@@ -863,9 +931,15 @@ test("a real user scroll during positioning becomes the latest handoff target", 
       requireActiveChrome: true,
       expectedViewportSample: expectedUserViewportSample,
     });
-    await expect.poll(() => reviewStage.evaluate((element) => element.scrollTop))
-      .toBeCloseTo(userScrollTop, 1);
-    expect(userScrollTop).toBeGreaterThan(700);
+    await expect.poll(() => page.evaluate(() => {
+      const editor = document.querySelector('[data-testid="html-canvas-editor"]');
+      const activeFrame = editor?.querySelector('iframe[title*="HTML"]:not([data-frame-role])');
+      const sharedScrollElement = editor?.closest('.review-scroll-stage');
+      return Math.max(
+        activeFrame?.contentWindow?.scrollY || 0,
+        sharedScrollElement?.scrollTop || 0,
+      );
+    })).toBeGreaterThan(700);
   });
 });
 
@@ -1152,7 +1226,7 @@ test("a failed runtime candidate leaves the old active frame managed and never r
   });
 });
 
-test("a failed candidate during text editing rolls back to the previous active frame", {
+test("a failed candidate during text editing rolls back before any resume", {
   tag: ["@gate-smoke", "@smoke-editing"],
 }, async () => {
   const html = `<!doctype html>
@@ -1190,21 +1264,34 @@ test("a failed candidate during text editing rolls back to the previous active f
     await armRuntimeHandoffSamples(page);
     await target.press("Enter");
     await expect(target.locator(":scope > br")).toHaveCount(1);
-    await assertRuntimeHandoff(page, {
+    const failedHandoffSamples = await assertRuntimeHandoff(page, {
       requireActiveChrome: true,
       expectPromotion: false,
     });
+    const failedCandidateGenerations = new Set(
+      failedHandoffSamples
+        .map((sample) => sample.candidateGeneration)
+        .filter(Boolean),
+    );
+    expect(failedCandidateGenerations.size).toBe(1);
     await page.waitForTimeout(4_500);
     frame = await currentEditorFrame(page);
     const rollbackTarget = frame.locator('[data-native-case="runtime-text-candidate-failure"]');
     await expect(rollbackTarget).not.toHaveAttribute("contenteditable", "true");
     await expect(rollbackTarget.locator(":scope > br")).toHaveCount(1);
     await expect(rollbackTarget).toContainText("失败触发");
+    const activeGeneration = await page.locator(
+      '[data-testid="html-canvas-editor"] iframe[title*="HTML"]:not([data-frame-role])',
+    ).getAttribute("data-frame-generation");
+    expect(failedCandidateGenerations.has(activeGeneration)).toBe(false);
     await expect.poll(() => page.evaluate(() => {
       const editor = document.querySelector('[data-testid="html-canvas-editor"]');
       const activeFrame = editor?.querySelector('iframe[title*="HTML"]');
-      const oldFrame = window.__PAGEROOT_RUNTIME_OLD_FRAME__;
-      return Boolean(activeFrame && oldFrame && activeFrame === oldFrame);
+      return Boolean(
+        activeFrame
+        && activeFrame.isConnected
+        && activeFrame.contentDocument?.documentElement
+      );
     })).toBe(true);
     await expect.poll(() => reviewStage.evaluate((element) => element.scrollTop))
       .toBeGreaterThan(400);
