@@ -93,7 +93,12 @@ PageRoot edits local files and renders user-controlled HTML, so its default poli
   and before author code runs. An authored head script therefore
   cannot register a generated object against a future parser-node identity;
   copied public markers remain non-authoritative. The bootstrap does not
-  freeze author activity or audit Runtime DOM. Exact ECharts 5.5.0 minified CDN
+  freeze author activity or audit Runtime DOM. Its one-shot private capability
+  also reports author activation outcome only after validating source window,
+  session, execution and frame token; script resource errors, synchronous
+  activation errors and immediate unhandled rejections fail the activation.
+  This signal does not inspect pixels, Canvas contents or later Runtime
+  behavior. Exact ECharts 5.5.0 minified CDN
   references use the packaged SHA-verified library. Exact-version allowlisted
   ECharts core URLs may be retained in a private content-addressed byte store:
   canonical URL metadata never replaces SHA-256 verification, corrupted entries

@@ -511,6 +511,13 @@ source change materializes complete HTML, rebuilds the disposable frame and
 reruns the author program. Native input may postpone that rebuild until editing
 finishes. The resource session may be reused only while exact authored script
 markup/body identity is unchanged; a Script change requires a new generation.
+The same one-time private capability returns an activation-result callback bound
+to the source window, session, execution and frame token. Resource errors,
+synchronous author errors and immediate unhandled rejections through the
+deferred `DOMContentLoaded` task report `activation-failed`; only a complete
+error-free activation reports `activation-ready`. Frame load, source proof and
+the verification token remain necessary but are not sufficient for Runtime
+success. This is an execution-failure signal, not a visual or Canvas probe.
 When the exact query-free 5.4.3 ECharts core URL is not cached, has no authored
 integrity constraint, and the executable program contains no other `src`
 attribute, Main may freeze packaged 5.5.0 bytes as a

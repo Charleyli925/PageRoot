@@ -662,6 +662,30 @@ test("Electron Edit renders a source-relative ECharts page in the editable ifram
   });
 });
 
+test("author async scripts settle without blocking deferred DOMContentLoaded", {
+  tag: ["@gate-smoke", "@smoke-editing"],
+}, async () => {
+  const html = `<!doctype html>
+<html><head><title>Async Runtime</title></head><body data-native-case="runtime-async-dcl">
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      document.body.dataset.asyncLoadedAtDcl = String(Boolean(window.__asyncProbeLoaded));
+    }, { once: true });
+  </script>
+  <script async src="async-probe.js"></script>
+</body></html>`;
+  await withRuntimeProject("pageroot-runtime-async-dcl-e2e-", {
+    "runtime-report.html": html,
+    "async-probe.js": "window.__asyncProbeLoaded = true;",
+  }, async ({ page, sourcePath }) => {
+    const { frame } = await loadedDiskFrame(page, sourcePath, "runtime-async-dcl");
+    await expect(frame.locator("body")).toHaveAttribute("data-async-loaded-at-dcl", "false");
+    await expect.poll(() => frame.evaluate(() => window.__asyncProbeLoaded)).toBe(true);
+    await expect(page.getByTestId("edit-runtime-static-fallback")).toHaveCount(0);
+    expect(readFileSync(sourcePath, "utf8")).toBe(html);
+  });
+});
+
 test("Electron Edit renders the reviewed ECharts 5.4.3 URL immediately with packaged compatible bytes", {
   tag: ["@gate-smoke", "@smoke-editing"],
 }, async () => {
@@ -692,6 +716,59 @@ test("Electron Edit renders the reviewed ECharts 5.4.3 URL immediately with pack
       /bundled-compatible/u,
     );
     await expect(page.getByTestId("edit-runtime-static-fallback")).toHaveCount(0);
+    expect(readFileSync(sourcePath, "utf8")).toBe(html);
+  });
+});
+
+test("compatible ECharts activation failure recovers exactly once with exact 5.4.3 bytes", {
+  tag: ["@gate-smoke", "@smoke-editing"],
+}, async () => {
+  const html = `<!doctype html>
+<html><head><title>Exact Runtime Recovery</title></head><body>
+  <main id="chart" data-native-case="echarts-exact-recovery" style="width:320px;height:180px"></main>
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+  <script>
+    const activations = window.parent.__PAGEROOT_ECHARTS_EXACT_RECOVERY__ || [];
+    activations.push(echarts.version);
+    window.parent.__PAGEROOT_ECHARTS_EXACT_RECOVERY__ = activations;
+    document.addEventListener('DOMContentLoaded', () => {
+      if (echarts.version !== '5.4.3') {
+        throw new Error('compatible ECharts must not become activation-ready: ' + echarts.version);
+      }
+      echarts.init(document.querySelector('#chart')).setOption({
+        animation: false,
+        xAxis: { type: 'category', data: ['A', 'B', 'C'] },
+        yAxis: { type: 'value' },
+        series: [{ type: 'bar', data: [1, 2, 3] }],
+      });
+    }, { once: true });
+  </script>
+</body></html>`;
+  await withRuntimeProject("pageroot-echarts-exact-recovery-e2e-", {
+    "runtime-report.html": html,
+  }, async ({ page, sourcePath }) => {
+    const { frame } = await loadedDiskFrame(
+      page,
+      sourcePath,
+      "echarts-exact-recovery",
+    );
+    await expect(frame.locator("#chart canvas")).toHaveCount(1);
+    await expect.poll(() => page.evaluate(() => (
+      window.__PAGEROOT_ECHARTS_EXACT_RECOVERY__ || []
+    ))).toEqual(["5.5.0", "5.4.3"]);
+    await expect(page.getByTestId("html-canvas-editor")).toHaveAttribute(
+      "data-runtime-library-origins",
+      /(?:network|disk-cache)/u,
+    );
+    await expect(page.getByTestId("html-canvas-editor")).not.toHaveAttribute(
+      "data-runtime-library-origins",
+      /bundled-compatible/u,
+    );
+    await expect(page.getByTestId("edit-runtime-static-fallback")).toHaveCount(0);
+    await expect(page.locator(".canvas-edit-surface")).not.toHaveAttribute(
+      "data-edit-runtime-phase",
+      "static-fallback",
+    );
     expect(readFileSync(sourcePath, "utf8")).toBe(html);
   });
 });

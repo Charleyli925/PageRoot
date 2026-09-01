@@ -48,10 +48,13 @@ source or be reconciled node by node.
   the original source path, Hash, program identity and Canvas generation.
 - Before author scripts execute, the fixed bootstrap opens one parent-owned
   registration capability. The parent editor deletes that entry after the
-  bootstrap captures its private batch port. Once parsing reaches the complete
+  bootstrap captures its private batch and activation-result ports, each bound
+  to the source window, session, execution and frame token. Once parsing reaches the complete
   document, while every author-script placeholder is still inert, the bootstrap
   registers the complete parsed set once and only then activates author
-  programs. An early
+  programs. Script resource errors, synchronous author errors and immediate
+  unhandled rejections through deferred `DOMContentLoaded` report activation
+  failure; iframe load alone never reports success. An early
   authored script therefore cannot preclaim the identity of a later parser
   element. The parent keeps registered DOM references in a parent-realm `WeakSet`;
   public attributes and author-realm expandos are never edit authority. Changing
