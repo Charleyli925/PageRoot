@@ -841,36 +841,18 @@ test("a real user scroll during runtime handoff becomes the latest handoff targe
       '[data-testid="html-canvas-editor"]',
     ).getAttribute("data-runtime-handoff"))
       .toMatch(/preparing|positioning/u);
-    const scrollbarDrag = await reviewStage.evaluate((element) => {
-      const rect = element.getBoundingClientRect();
-      const maximum = Math.max(1, element.scrollHeight - element.clientHeight);
-      const thumbHeight = Math.max(
-        20,
-        Math.min(rect.height, rect.height * element.clientHeight / element.scrollHeight),
-      );
-      const travel = Math.max(0, rect.height - thumbHeight);
-      const currentRatio = Math.min(1, Math.max(0, element.scrollTop / maximum));
-      const targetRatio = Math.min(1, currentRatio + 0.55);
-      return {
-        x: rect.right - 8,
-        startY: rect.top + thumbHeight / 2 + currentRatio * travel,
-        endY: rect.top + thumbHeight / 2 + targetRatio * travel,
-      };
+    // PageDown is a real user gesture and directly exercises the handoff's
+    // scroll-key intent channel without depending on a native scrollbar thumb
+    // whose geometry is changing while the candidate layout is unsettled.
+    await reviewStage.evaluate((element) => {
+      element.setAttribute("tabindex", "0");
+      element.focus();
     });
-    // Drag the native scrollbar thumb. This is a real pointer gesture and
-    // directly exercises the handoff's scrollbar-drag intent channel, including
-    // hosts where a wheel over the scrollbar does not bubble a wheel event.
-    // Capture the coordinates after the operation has laid out its positioning
-    // state, so a toolbar transition cannot leave the native track stale.
-    await page.mouse.move(scrollbarDrag.x, scrollbarDrag.startY);
-    await page.mouse.down();
-    await page.mouse.move(scrollbarDrag.x, scrollbarDrag.endY, { steps: 12 });
-    await page.mouse.up();
+    await page.keyboard.press("PageDown");
     await expect.poll(() => reviewStage.evaluate((element) => element.scrollTop))
       .toBeGreaterThan(700);
-    // Let the native scrollbar finish its final scroll sample before choosing
-    // the handoff target. The last pointerup can commit one more scroll step
-    // on the following frame.
+    // Let the browser finish its final scroll sample before choosing the
+    // handoff target.
     await page.evaluate(() => new Promise((resolve) => {
       let previous = null;
       let stableFrames = 0;
@@ -896,6 +878,12 @@ test("a real user scroll during runtime handoff becomes the latest handoff targe
       ));
     });
     expect(sawUserHandoffScroll).toBe(true);
+    await expect.poll(() => page.evaluate(() => (
+      window.__PAGEROOT_RUNTIME_HANDOFF_SAMPLES__ || []
+    ).some((sample) => (
+      sample.handoffState === "active"
+      && sample.activeGeneration === sample.candidateGeneration
+    )))).toBe(true);
     const userViewportSample = await page.evaluate(() => {
       const samples = window.__PAGEROOT_RUNTIME_HANDOFF_SAMPLES__ || [];
       return [...samples].reverse().find((sample) => (
