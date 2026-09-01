@@ -797,9 +797,7 @@ test("a real user scroll during runtime handoff becomes the latest handoff targe
     ).join('');
     const handoffLayoutJitter = document.createElement('div');
     handoffLayoutJitter.setAttribute('aria-hidden', 'true');
-    handoffLayoutJitter.style.position = 'absolute';
-    handoffLayoutJitter.style.top = '0';
-    handoffLayoutJitter.style.left = '2048px';
+    handoffLayoutJitter.style.display = 'block';
     handoffLayoutJitter.style.height = '1px';
     handoffLayoutJitter.style.pointerEvents = 'none';
     handoffLayoutJitter.style.opacity = '0';
@@ -807,8 +805,8 @@ test("a real user scroll during runtime handoff becomes the latest handoff targe
     let handoffLayoutFrames = 0;
     const holdHandoffLayout = () => {
       handoffLayoutFrames += 1;
-      handoffLayoutJitter.style.width = String((handoffLayoutFrames % 2) * 8) + 'px';
-      if (handoffLayoutFrames < 90) {
+      handoffLayoutJitter.style.height = String(8 + handoffLayoutFrames * 8) + 'px';
+      if (handoffLayoutFrames < 120) {
         requestAnimationFrame(holdHandoffLayout);
       } else {
         handoffLayoutJitter.remove();
