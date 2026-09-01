@@ -138,6 +138,26 @@ test("external file session gives every deferred transition a new sequence", asy
   assert.deepEqual(calls, ["external_retry-sequence", "external_retry-sequence"]);
 });
 
+test("external file session resumes immediately when the switch drain is already clear", async () => {
+  const session = new ExternalFileOpenSession();
+  const calls = [];
+  const execute = async (value) => {
+    calls.push(value.requestId);
+    return calls.length === 1 ? "deferred" : "complete";
+  };
+
+  assert.equal(session.enqueue(request("clear"), execute), true);
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(
+    session.reconcileDeferredSwitch({ switchBlocked: false, execute }),
+    "resumed",
+  );
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(calls, ["external_clear", "external_clear"]);
+  assert.equal(session.snapshot.status, "idle");
+});
+
 test("external file session resumes only after an observed switch blocker clears", async () => {
   const session = new ExternalFileOpenSession();
   const calls = [];
@@ -150,11 +170,7 @@ test("external file session resumes only after an observed switch blocker clears
   await new Promise((resolve) => setImmediate(resolve));
 
   assert.equal(
-    session.reconcileDeferredSwitch({ switchBlocked: false, execute }),
-    "action-required",
-  );
-  assert.equal(
-    session.reconcileDeferredSwitch({ switchBlocked: false, execute }),
+    session.reconcileDeferredSwitch({ switchBlocked: true, execute }),
     "blocked",
   );
   assert.deepEqual(calls, ["external_blocker"]);
@@ -171,6 +187,32 @@ test("external file session resumes only after an observed switch blocker clears
 
   assert.deepEqual(calls, ["external_blocker", "external_blocker"]);
   assert.equal(session.snapshot.status, "idle");
+});
+
+test("external file session does not loop a second unblocked defer of the same request", async () => {
+  const session = new ExternalFileOpenSession();
+  const execute = async () => "deferred";
+
+  assert.equal(session.enqueue(request("loop"), execute), true);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(
+    session.reconcileDeferredSwitch({ switchBlocked: false, execute }),
+    "resumed",
+  );
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(session.snapshot.status, "deferred");
+  assert.equal(
+    session.reconcileDeferredSwitch({ switchBlocked: false, execute }),
+    "idle",
+  );
+  assert.equal(
+    session.reconcileDeferredSwitch({ switchBlocked: true, execute }),
+    "blocked",
+  );
+  assert.equal(
+    session.reconcileDeferredSwitch({ switchBlocked: false, execute }),
+    "resumed",
+  );
 });
 
 test("a newer external request waits behind a deferred request", async () => {

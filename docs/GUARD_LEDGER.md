@@ -44,13 +44,14 @@ corruption or lost user work.
 | Browser preview read-only | Pure browser has no edit/comment/AI write | authority | permanent read-only | runtime capabilities | no | keep |
 | Cancel AI run dialog | Do not silently drop an Agent that may still be writing | authority | modal | no | no | keep |
 | Restart-update dialog | Installing an update exits the process | authority | non-blocking badge + close drain | close drain | no | degrade |
-| Canvas ACK vs “safely saved” | Visible canvas Hash must match authoritative HTML | reversible | header pending; sticky retry on failure | Workbench effect + DocumentWorkflow | one reread + rebuild | merge to DocumentSession; Toast → degrade |
-| Deferred external/application retry | Switch only after drain/Canvas is safe | reversible | sticky “continue switch” | Session auto-resume + Toast | blocker-transition resume | cancel user block when auto-resume works |
+| Canvas ACK vs “safely saved” | Visible canvas Hash must match authoritative HTML | reversible | header pending; one-shot owner retry then fail-closed rollback | Workbench effect + DocumentWorkflow | one reread + rebuild | merge to DocumentSession; Toast deleted |
+| Deferred external/application retry | Switch only after drain/Canvas is safe | reversible | session auto-resume with one-shot bound | Session auto-resume | blocker-transition resume | cancel user block; Toast deleted |
 | Catalog/recent refresh failure | A failed listing must not freeze the current document | reversible | sidebar error | no | next refresh | degrade |
 | `interactionLocked` composite | Run/preview/hydration/conflict/history forbids comment and send | presentation | whole chrome frozen | `RunSession.activeLocked` | clears when owners settle | merge to one authority projection |
 | Canvas `readOnly` during AI | Processing run is browse-only | presentation | iframe “locked” | `interactionLocked` | unlocks when run ends | merge to run lock |
 | Patch host refuse (`data-edit-block-detail`) | Non-exact target or locked canvas does not write source | presentation / post-validate | silent refuse | Canvas + DocumentWorkflow | reload/unlock | post-validate; do not forbid entry |
 | Literal `暂时不能直接编辑` / `COMMENT_TARGET_MISSING` | n/a | n/a | n/a | n/a | n/a | delete later if docs still name them; they are not in this tree |
+| New global `setToast` / `NoticeBar` | Extra interruption besides Confirmation and workspace safety | presentation | overlay | classified ledger | silent recover / in-place / safety banner | freeze; generic `setToast` retired; remaining N5 kinds may only shrink |
 
 ## Sample now exists; deletion still needs shadow
 

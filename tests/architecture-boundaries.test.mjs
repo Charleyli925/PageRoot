@@ -9,16 +9,19 @@ import {
   layerBoundaryViolations,
   ownershipBoundaryViolations,
   retiredArtifactViolations,
+  noticePolicyViolations,
 } from "../scripts/check-architecture.mjs";
+import { loadNoticeLedger } from "../scripts/notice-policy.mjs";
 import {
   countReactHooks,
   hasLiteralComparison,
+  jsxElementNames,
   moduleSpecifiers,
   newExpressionNames,
   parseModule,
 } from "../scripts/architecture-ast-query.mjs";
 
-test("the production graph satisfies the five responsibility boundaries", async () => {
+test("the production graph satisfies the responsibility boundaries", async () => {
   assert.deepEqual(await architectureViolations(), []);
 });
 
@@ -142,6 +145,7 @@ test("AST queries retain responsibility facts while ignoring member spelling", (
     ].join("\n"),
   );
   assert.equal(countReactHooks(handle), 3);
+  assert.deepEqual(jsxElementNames(handle), []);
   assert.equal(
     hasLiteralComparison(
       parseModule("fixture.js", 'const delivery = { mode: "managed-agent" };'),
@@ -170,6 +174,36 @@ test("dialog policy forbids unregistered native alerts and window.confirm", asyn
         'window.confirm("确定要用磁盘上的版本继续吗？未写入的编辑都会丢弃。");',
         'window.confirm("确定要用外部版本覆盖当前编辑吗？此操作不可撤销。");',
       ].join("\n"),
+    }),
+    [],
+  );
+});
+
+test("notice freeze forbids unregistered setToast, NoticeBar, aliases and background-result", async () => {
+  const ledger = await loadNoticeLedger();
+  const noticeSource = await fixture("unregistered-notice.js");
+  const noticeViolations = noticePolicyViolations({
+    file: "app/workbench/example.js",
+    source: noticeSource,
+    ledger,
+  }).join("\n");
+  assert.match(noticeViolations, /setToast create calls are frozen/u);
+  assert.match(noticeViolations, /background-result is frozen/u);
+  assert.match(noticeViolations, /uncatalogued is frozen/u);
+  assert.match(noticeViolations, /setToast aliases are forbidden/u);
+  assert.match(
+    noticePolicyViolations({
+      file: "app/components/example.tsx",
+      source: "export default function Example() { return <NoticeBar title=\"unregistered\" />; }",
+      ledger,
+    }).join("\n"),
+    /NoticeBar is frozen to registered surfaces/u,
+  );
+  assert.deepEqual(
+    noticePolicyViolations({
+      file: "app/workbench.tsx",
+      source: "setToast(null);",
+      ledger,
     }),
     [],
   );

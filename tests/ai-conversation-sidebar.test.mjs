@@ -123,6 +123,16 @@ test("a blocked candidate offers recovery instead of adoption", () => {
   assert.ok(!bar.actions.some((action) => action.id === "adopt"));
 });
 
+test("an adoption failure stays on the existing decision bar", () => {
+  const bar = sidebarActionBar({
+    state: "ready-to-open",
+    failureMessage: "最新版暂时无法打开。",
+  });
+  assert.equal(bar.kind, "decision");
+  assert.match(bar.detail, /最新版暂时无法打开/u);
+  assert.ok(bar.actions.some((action) => action.id === "adopt"));
+});
+
 test("the product state owns the single available modification intent", () => {
   assert.equal(sidebarResolvedIntent("preview-ready"), "modify");
   assert.equal(sidebarResolvedIntent("processing"), "modify");

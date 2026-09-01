@@ -176,7 +176,7 @@ export class WorkbenchTabsPersistenceCoordinator {
       if (target.requestedRevision <= this.#snapshot.acknowledgedRevision) break;
       this.#publish({ ...this.#snapshot, phase: "writing", restartSafe: false, error: null });
       try {
-        await this.#port.set(target.state);
+        await this.#writeWithRetry(target.state);
       } catch (cause) {
         this.#writing = false;
         this.#publish({
@@ -199,6 +199,14 @@ export class WorkbenchTabsPersistenceCoordinator {
       if (this.#latest.requestedRevision <= target.requestedRevision) break;
     }
     this.#writing = false;
+  }
+
+  async #writeWithRetry(state) {
+    try {
+      await this.#port.set(state);
+    } catch {
+      await this.#port.set(state);
+    }
   }
 
   #settleDrains() {

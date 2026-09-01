@@ -17,8 +17,8 @@
   ],
   "files": {
     "app/workbench.tsx": {
-      "maxLines": 6972,
-      "maxHooks": 255
+      "maxLines": 6521,
+      "maxHooks": 258
     },
     "app/components/HtmlCanvasEditor.tsx": {
       "maxLines": 5416

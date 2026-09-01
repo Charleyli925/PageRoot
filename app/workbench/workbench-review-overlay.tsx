@@ -3,8 +3,6 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import AiReviewWorkspace from "./AiReviewWorkspace";
 import type { ReviewDocuments } from "./review-document";
-import type { Toast } from "./types";
-
 type WorkbenchReviewSession = Readonly<{
   sessionId: string;
   documents: ReviewDocuments;
@@ -19,7 +17,6 @@ export type WorkbenchReviewOverlayProps = Readonly<{
   activeRunError?: string;
   onAbout: () => void;
   onCancelBefore: (options: { reason: string }) => Promise<boolean>;
-  onNotify: (toast: Toast) => void;
   onAccept: () => void;
   onRevealAiTask: () => void;
   assistantEntry: ReactNode;
@@ -34,7 +31,6 @@ export function WorkbenchReviewOverlay({
   activeRunError,
   onAbout,
   onCancelBefore,
-  onNotify,
   onAccept,
   onRevealAiTask,
   assistantEntry,
@@ -57,14 +53,8 @@ export function WorkbenchReviewOverlay({
         reason: "declined-ai-candidate-after-review",
       });
       if (!restored) return;
-      onNotify({
-        title: `已返回 AI 修改前的${session.beforeLabel}`,
-        message: `${session.afterLabel} 与本轮记录仍已保留；当前页面可直接继续编辑。`,
-        tone: "success",
-        dedupeKey: "ready-version-returned-before",
-      });
     })();
-  }, [onCancelBefore, onNotify, session.afterLabel, session.beforeLabel]);
+  }, [onCancelBefore]);
 
   return (
     <AiReviewWorkspace

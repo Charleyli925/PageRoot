@@ -5,7 +5,6 @@ import {
   canLocateTarget,
   commentHasContent,
   relinkNoticeCopy,
-  unsafeCommentTargetsNotice,
   unsafeRelinkComments,
 } from "../app/workbench/comment-relink-model.js";
 
@@ -89,23 +88,4 @@ test("the rail card copy never promises submission, whatever the count", () => {
   assert.equal(many.title, "2 条评论需要重新定位");
   assert.equal(many.actionLabel, "开始重新定位");
   assert.ok(!many.detail.includes("发送"));
-});
-
-test("the blocked-send notice points at the rail card and carries no action", () => {
-  const notice = unsafeCommentTargetsNotice([comment()]);
-
-  assert.equal(notice.tone, "warning");
-  assert.equal(notice.disposition, "background-result");
-  assert.equal(notice.dedupeKey, "unsafe-comment-targets");
-  assert.ok(!("action" in notice), "the toast must not own a relink action (#281)");
-  assert.ok(notice.message.includes("本轮评论"), "the pointer must name the rail");
-  assert.ok(notice.message.includes("发送"), "the send context is why it exists");
-
-  const many = unsafeCommentTargetsNotice([
-    comment(),
-    comment({ commentId: "comment_2" }),
-  ]);
-  assert.equal(many.title, "2 条评论需要重新定位");
-  assert.ok(!("action" in many));
-  assert.ok(!("sticky" in many), "a pointer is transient, the rail card persists");
 });

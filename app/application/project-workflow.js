@@ -14,6 +14,7 @@ import {
   planProjectSwitchFence,
   planProjectSwitchValidationLease,
 } from "./project/switch-plan.js";
+import { reportInternalFailure } from "./internal-failure.js";
 
 const SHA256 = /^sha256:[a-f0-9]{64}$/u;
 const SWITCH_DEADLINE_MS = 15_000;
@@ -1016,28 +1017,17 @@ export class ProjectWorkflow {
       .inspect("switch")
       .some((status) => status.state !== "resolved");
     if (this.#projectApplicationSession.snapshot.status === "deferred") {
-      const retry = this.#projectApplicationSession.reconcileDeferredSwitch({
+      this.#projectApplicationSession.reconcileDeferredSwitch({
         switchBlocked,
         execute: (application) => this.#applyAcceptedProject(application),
       });
-      if (retry === "action-required") {
-        this.#emit({ type: "project-application-deferred" });
-      }
       return;
     }
     if (this.#externalFileOpenSession.snapshot.status === "deferred") {
-      const retry = this.#externalFileOpenSession.reconcileDeferredSwitch({
+      this.#externalFileOpenSession.reconcileDeferredSwitch({
         switchBlocked,
         execute: (request, options) => this.#openExternalProject(request, options),
       });
-      if (retry === "action-required") {
-        const requestId = this.#externalFileOpenSession.snapshot.deferredRequestId;
-        this.#emit({
-          type: "external-project-open-deferred",
-          requestId,
-          ackPending: Boolean(requestId && this.#externalAckPending.has(requestId)),
-        });
-      }
       return;
     }
     if (!this.#pendingOpen || switchBlocked) return;
@@ -2626,22 +2616,42 @@ export class ProjectWorkflow {
 
   async #ackExternalOpen(requestId) {
     if (typeof this.#projectOpenPort.ackExternal !== "function") return true;
-    try {
-      await this.#projectOpenPort.ackExternal(requestId);
-      return true;
-    } catch (cause) {
-      this.#emit({
-        type: "external-open-ack-failed",
-        requestId,
-        confirmation: this.#confirmationRequiresExternalAck(requestId),
-        reason: projectErrorMessage(
-          this.#codecs,
-          cause,
-          "外部 HTML 已处理，但下一个打开请求尚未解锁。",
-        ),
-      });
-      return false;
+    let lastCause = null;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        await this.#projectOpenPort.ackExternal(requestId);
+        if (attempt > 0) {
+          reportInternalFailure({
+            area: "import",
+            operation: "external-ack",
+            code: "ack-retried",
+            recovered: true,
+            cause: lastCause,
+          });
+        }
+        return true;
+      } catch (cause) {
+        lastCause = cause;
+      }
     }
+    reportInternalFailure({
+      area: "import",
+      operation: "external-ack",
+      code: "ack-unrecovered",
+      recovered: false,
+      cause: lastCause,
+    });
+    this.#emit({
+      type: "external-open-ack-failed",
+      requestId,
+      confirmation: this.#confirmationRequiresExternalAck(requestId),
+      reason: projectErrorMessage(
+        this.#codecs,
+        lastCause,
+        "外部 HTML 已处理，但下一个打开请求尚未解锁。",
+      ),
+    });
+    return false;
   }
 
   #confirmationRequiresExternalAck(requestId) {
@@ -2865,10 +2875,34 @@ export class ProjectWorkflow {
           ),
         });
       }
-      const canvasOutcome = await this.#documentWorkflow.ensureCurrentCanvas({
+      let canvasOutcome = await this.#documentWorkflow.ensureCurrentCanvas({
         context: this.#projectSession.context || undefined,
       });
       if (canvasOutcome.status !== "succeeded") {
+        const retryOutcome = await this.#documentWorkflow.ensureCurrentCanvas({
+          context: this.#projectSession.context || undefined,
+        });
+        if (retryOutcome.status === "succeeded") {
+          reportInternalFailure({
+            area: "canvas",
+            operation: "import-canvas-ack",
+            code: "canvas-retried",
+            recovered: true,
+            cause: canvasOutcome.reason,
+          });
+          canvasOutcome = retryOutcome;
+        } else {
+          canvasOutcome = retryOutcome;
+        }
+      }
+      if (canvasOutcome.status !== "succeeded") {
+        reportInternalFailure({
+          area: "canvas",
+          operation: "import-canvas-ack",
+          code: "canvas-unrecovered",
+          recovered: false,
+          cause: canvasOutcome.reason,
+        });
         if (typeof this.#projectOpenPort.rollbackPrepared === "function") {
           await this.#projectOpenPort.rollbackPrepared(confirmation.requestId);
         }

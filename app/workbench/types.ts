@@ -456,81 +456,6 @@ export type UserSupplementRecord = {
 export type PersistState = "idle" | "preview-dirty" | "queued" | "writing" | "failed" | "conflict";
 export type ViewMode = "current" | "history";
 export type CanvasMode = "edit" | "preview";
-export type ToastTone = "success" | "info" | "warning" | "error";
-export type ToastDisposition =
-  | "silent-recover"
-  | "defer-and-resume"
-  | "direct-action"
-  | "user-choice"
-  | "background-result"
-  | "inform-in-place";
-export type ToastAction =
-  | { id: "retry-export"; label: string }
-  | { id: "open-handoff"; label: string }
-  | { id: "retry-history"; label: string; direction?: "undo" | "redo" }
-  | { id: "open-project"; label: string; sourcePath: string }
-  | { id: "retry-project-open"; label: string; sourcePath?: string }
-  | { id: "retry-project-hydration"; label: string }
-  | { id: "retry-external-project-open"; label: string; requestId?: string }
-  | { id: "retry-project-application"; label: string }
-  | {
-      id: "open-attachment-picker";
-      label: string;
-      target: { kind: "composer" | "comment"; commentId: string };
-      accept?: "all" | "image";
-    }
-  | {
-      id: "review-comment-attachments";
-      label: string;
-      target: { kind: "composer" | "comment"; commentId: string };
-    }
-  | { id: "relaunch-app"; label: string }
-  | { id: "retry-draft-persist"; label: string }
-  | { id: "retry-submit"; label: string }
-  | { id: "resume-draft"; label: string }
-  | { id: "resume-comment-edit"; label: string; commentId: string }
-  | { id: "retry-canvas-verification"; label: string }
-  | { id: "reveal-imported-project"; label: string; sourcePath: string };
-
-type ToastBase = {
-  title: string;
-  message: string;
-  tone: ToastTone;
-  sticky?: boolean;
-  dedupeKey?: string;
-  repeatCount?: number;
-};
-
-/**
- * The disposition/action matrix is intentionally a type-level contract.
- *
- * A direct user decision must always name its recovery action; silent and
- * deferred outcomes must not accidentally grow a button that replays work.
- * The remaining visible outcomes may optionally offer a bounded action.
- */
-type ToastDispositionActionMatrix = {
-  "silent-recover": { action?: never };
-  "defer-and-resume": { action?: never };
-  "direct-action": { action: ToastAction };
-  "user-choice": { action: ToastAction };
-  "background-result": { action?: ToastAction };
-  "inform-in-place": { action?: ToastAction };
-};
-
-type ToastForDisposition<TDisposition extends ToastDisposition> = ToastBase & {
-  disposition: TDisposition;
-} & ToastDispositionActionMatrix[TDisposition];
-
-type InformInPlaceToast = ToastBase & {
-  /** Omitted disposition retains the historical in-place informational default. */
-  disposition?: "inform-in-place";
-  action?: ToastAction;
-};
-
-export type Toast = (
-  | InformInPlaceToast
-  | { [TDisposition in ToastDisposition]: ToastForDisposition<TDisposition> }[ToastDisposition]
-) | null;
 export type StartupIssue = {
   title: string;
   message: string;
@@ -538,6 +463,7 @@ export type StartupIssue = {
 export type WorkspaceIssue = {
   title: string;
   message: string;
+  source?: "lifecycle" | "locator" | "integrity";
 };
 export type WorkspaceFileView = {
   path: string;

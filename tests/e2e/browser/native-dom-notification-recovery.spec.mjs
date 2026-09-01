@@ -172,15 +172,7 @@ test.describe("notification recovery paths", () => {
     await secondTarget.click();
     await commentButton.click();
 
-    const notice = page.locator(".toast.show");
-    await expect(notice).toContainText("上一条评论还未保存");
-    await expect(notice).toContainText(
-      "请先点击“评论”保存；保存后仍可修改，再为其他内容添加评论。",
-    );
-    await expect(composer).toHaveCount(0);
-    await expect(recoveryCard).toHaveCount(1);
-
-    await notice.getByRole("button", { name: "继续填写" }).click();
+    await expect(page.locator(".toast.show")).toHaveCount(0);
     await expect(composer.getByRole("textbox", { name: "评论内容" }))
       .toHaveValue(firstComment);
     await expect(unsavedShortcut).toHaveCount(1);

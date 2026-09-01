@@ -1,0 +1,324 @@
+{
+  "version": 1,
+  "policy": "Notice growth is frozen. Generic setToast is retired. Remaining sites are the N5 GlobalInterruption catalog; later PRs may only delete them or shrink the allowlist. Do not invent replacement UI to retire a Notice. PR-B removed N0 success notices. PR-C removed N1 internal notices after owner-side one-shot recovery. PR-D removed N2 user-action notices by reusing existing controls. PR-E moved N3 onto existing workspace-safety banners and closed the remaining interruptions as GlobalInterruption kinds.",
+  "baseline": {
+    "setToastCreateCalls": 0,
+    "noticeBarJsx": 2,
+    "backgroundResultLiterals": 1,
+    "uncataloguedLiterals": 2
+  },
+  "registeredFiles": {
+    "setToast": [],
+    "noticeBar": [
+      "app/workbench.tsx",
+      "app/components/html-canvas-selection-chrome.tsx",
+      "app/components/NoticeBar.tsx"
+    ],
+    "backgroundResult": [
+      "desktop/usage-telemetry.mjs"
+    ],
+    "uncatalogued": [
+      "app/application/usage-telemetry.ts",
+      "desktop/usage-telemetry.mjs"
+    ]
+  },
+  "classes": {
+    "N0": "Delete. Result is already visible or the user does not need to know.",
+    "N1": "Silent recover. Internal reliability; log only unless content becomes unsavable.",
+    "N2": "Reuse existing control behavior. Keep current state; do not add UI.",
+    "N3": "Workspace safety banner. Off Toast as of PR-E; locator/persist facts use existing workspace banners.",
+    "N4": "Irreversible confirmation. Not a Toast; listed for completeness.",
+    "N5": "Temporary allowlist. Keep until a designed surface exists. Do not invent UI in a cleanup PR."
+  },
+  "n4": [
+    {
+      "id": "delete",
+      "owner": "confirm",
+      "reason": "删除文件或项目"
+    },
+    {
+      "id": "discard-unsaved",
+      "owner": "confirm",
+      "reason": "放弃未保存修改"
+    },
+    {
+      "id": "overwrite-external",
+      "owner": "confirm",
+      "reason": "覆盖磁盘或外部最新内容"
+    }
+  ],
+  "allowlist": [
+    {
+      "id": "import-trash-failed",
+      "owner": "import",
+      "reason": "用户明确要求删除原文件，但移入废纸篓失败；导入成功本身可静默，这一支无法从界面判断原文件是否还在",
+      "removalCondition": "完成导入后原文件处置结果的现成反馈设计",
+      "siteIds": [
+        "external-html-imported"
+      ]
+    },
+    {
+      "id": "external-agent-may-still-run",
+      "owner": "runs",
+      "reason": "用户结束已交给外部 Agent 的任务，但 PageRoot 无法保证外部进程停止",
+      "removalCondition": "完成外部 Agent 仍可能运行的封闭 GlobalInterruption 设计",
+      "siteIds": [
+        "ai-run-cancelled-agent-may-run"
+      ]
+    },
+    {
+      "id": "external-open-unavailable",
+      "owner": "import",
+      "reason": "外部投放 HTML 后没有现成错误位，用户无法判断文件是否被接收",
+      "removalCondition": "完成外部打开失败闭环设计",
+      "siteIds": [
+        "external-project-open-unavailable"
+      ]
+    },
+    {
+      "id": "project-open-failed",
+      "owner": "project",
+      "reason": "从最近项目或选择器打开失败时，非外部路径没有现成错误位",
+      "removalCondition": "复用或设计打开失败的现成位置，且不新增通用错误区",
+      "siteIds": [
+        "project-open-error"
+      ]
+    },
+    {
+      "id": "attachment-rejected",
+      "owner": "attachments",
+      "reason": "附件大小、数量超限或格式不支持时，用户必须知道文件为什么没有加入；当前没有经过设计的现成反馈位置",
+      "removalCondition": "完成附件拒绝原因的现成反馈设计，且不新增卡片红字",
+      "siteIds": [
+        "attachment-rejected",
+        "attachment-batch-partial-open",
+        "attachment-batch-partial-closed"
+      ]
+    },
+    {
+      "id": "show-in-folder-failed",
+      "owner": "finder",
+      "reason": "在文件夹中显示失败后，现有入口只是恢复可点击，用户无法判断是否执行",
+      "removalCondition": "完成 Finder 动作失败闭环设计，且不改按钮文案或布局",
+      "siteIds": [
+        "show-project-in-folder-error"
+      ]
+    },
+    {
+      "id": "open-in-browser-failed",
+      "owner": "browser",
+      "reason": "在默认浏览器打开失败后，用户无法判断点击是否生效",
+      "removalCondition": "完成浏览器打开失败闭环设计，且不改按钮文案或布局",
+      "siteIds": [
+        "open-project-in-default-browser-error"
+      ]
+    },
+    {
+      "id": "browser-file-unsupported",
+      "owner": "browser",
+      "reason": "浏览器选择不支持的编码或类型时，没有现成错误位说明文件为什么没打开",
+      "removalCondition": "复用已有文件打开错误位置，且不扩展成通用错误区",
+      "siteIds": [
+        "browser-file-error"
+      ]
+    },
+    {
+      "id": "export-failed",
+      "owner": "export",
+      "reason": "导出失败且系统保存面板已经关闭，用户无法从现有界面判断导出是否成功",
+      "removalCondition": "完成原生保存失败闭环设计",
+      "siteIds": [
+        "export-failed"
+      ]
+    },
+    {
+      "id": "handoff-recopy",
+      "owner": "runs",
+      "reason": "重新复制交接内容无论成功或失败，剪贴板都没有其他可感知结果",
+      "removalCondition": "完成剪贴板动作的无文案反馈设计",
+      "siteIds": [
+        "handoff-recopy"
+      ]
+    },
+    {
+      "id": "review-no-visible-change",
+      "owner": "review",
+      "reason": "审阅对比后没有可定位变化时，对话仍显示可审阅；若不说明，用户无法判断点击是否生效",
+      "removalCondition": "在现有审阅入口上显示无变化结果，且不新增卡片红字",
+      "siteIds": [
+        "review-no-visible-change"
+      ]
+    }
+  ],
+  "sites": [
+    {
+      "id": "external-html-imported",
+      "class": "N5",
+      "owner": "import",
+      "file": "app/workbench.tsx",
+      "title": "已导入 PageRoot（仅废纸篓失败）",
+      "dedupeKey": "external-html-imported",
+      "disposition": "background-result",
+      "wave": "PR-D",
+      "reason": "导入成功已静默；仅在用户要求删除原文件但移入废纸篓失败时保留",
+      "fingerprint": "N5|已导入 PageRoot（仅废纸篓失败）|external-html-imported|background-result",
+      "allowlistId": "import-trash-failed"
+    },
+    {
+      "id": "ai-run-cancelled-agent-may-run",
+      "class": "N5",
+      "owner": "runs",
+      "file": "app/workbench.tsx",
+      "title": "本轮已结束",
+      "dedupeKey": "ai-run-cancelled",
+      "disposition": "background-result",
+      "wave": "PR-D",
+      "reason": "外部 Agent 仍可能运行",
+      "allowlistId": "external-agent-may-still-run",
+      "fingerprint": "N5|本轮已结束|ai-run-cancelled|background-result"
+    },
+    {
+      "id": "external-project-open-unavailable",
+      "class": "N5",
+      "owner": "import",
+      "file": "app/workbench.tsx",
+      "title": "无法接收外部 HTML",
+      "dedupeKey": "external-project-open-unavailable",
+      "disposition": "background-result",
+      "wave": "PR-D",
+      "reason": "投放后无其他可见结果",
+      "allowlistId": "external-open-unavailable",
+      "fingerprint": "N5|无法接收外部 HTML|external-project-open-unavailable|background-result"
+    },
+    {
+      "id": "project-open-error",
+      "class": "N5",
+      "owner": "project",
+      "file": "app/workbench.tsx",
+      "title": "无法打开这个 HTML",
+      "dedupeKey": "project-open-error",
+      "disposition": "direct-action",
+      "wave": "PR-D",
+      "reason": "非外部打开没有现成错误位",
+      "allowlistId": "project-open-failed",
+      "fingerprint": "N5|无法打开这个 HTML|project-open-error|direct-action"
+    },
+    {
+      "id": "attachment-rejected",
+      "class": "N5",
+      "owner": "attachments",
+      "file": "app/workbench.tsx",
+      "title": "附件没有加入",
+      "dedupeKey": "attachment-batch",
+      "disposition": "direct-action",
+      "wave": "PR-D",
+      "reason": "超限或不支持，用户必须知道原因",
+      "allowlistId": "attachment-rejected",
+      "fingerprint": "N5|附件没有加入|attachment-batch|direct-action"
+    },
+    {
+      "id": "attachment-batch-partial-open",
+      "class": "N5",
+      "owner": "attachments",
+      "file": "app/workbench.tsx",
+      "title": "附件部分未加入",
+      "dedupeKey": "attachment-batch",
+      "disposition": "direct-action",
+      "wave": "PR-D",
+      "reason": "部分文件未加入且无局部错误位",
+      "allowlistId": "attachment-rejected",
+      "fingerprint": "N5|附件部分未加入|attachment-batch|direct-action"
+    },
+    {
+      "id": "attachment-batch-partial-closed",
+      "class": "N5",
+      "owner": "attachments",
+      "file": "app/workbench.tsx",
+      "title": "附件部分未加入",
+      "dedupeKey": "attachment-batch",
+      "disposition": "background-result",
+      "wave": "PR-D",
+      "reason": "评论已关闭，用户看不到局部状态",
+      "allowlistId": "attachment-rejected",
+      "fingerprint": "N5|附件部分未加入|attachment-batch|background-result"
+    },
+    {
+      "id": "show-project-in-folder-error",
+      "class": "N5",
+      "owner": "finder",
+      "file": "app/workbench.tsx",
+      "title": "无法在文件夹中打开",
+      "dedupeKey": "show-project-in-folder-error",
+      "disposition": "background-result",
+      "wave": "PR-D",
+      "reason": "Finder 动作无其他可感知结果",
+      "allowlistId": "show-in-folder-failed",
+      "fingerprint": "N5|无法在文件夹中打开|show-project-in-folder-error|background-result"
+    },
+    {
+      "id": "open-project-in-default-browser-error",
+      "class": "N5",
+      "owner": "browser",
+      "file": "app/workbench.tsx",
+      "title": "无法在默认浏览器中打开",
+      "dedupeKey": "open-project-in-default-browser-error",
+      "disposition": "background-result",
+      "wave": "PR-D",
+      "reason": "浏览器动作无其他可感知结果",
+      "allowlistId": "open-in-browser-failed",
+      "fingerprint": "N5|无法在默认浏览器中打开|open-project-in-default-browser-error|background-result"
+    },
+    {
+      "id": "browser-file-error",
+      "class": "N5",
+      "owner": "browser",
+      "file": "app/workbench.tsx",
+      "title": "文件编码不支持 / 文件无法打开",
+      "dedupeKey": "browser-file-error",
+      "disposition": "direct-action",
+      "wave": "PR-D",
+      "reason": "浏览器打开失败没有现成错误位",
+      "allowlistId": "browser-file-unsupported",
+      "fingerprint": "N5|文件编码不支持 / 文件无法打开|browser-file-error|direct-action"
+    },
+    {
+      "id": "export-failed",
+      "class": "N5",
+      "owner": "export",
+      "file": "app/workbench.tsx",
+      "title": "副本没有导出",
+      "dedupeKey": "export",
+      "disposition": "direct-action",
+      "wave": "PR-D",
+      "reason": "保存面板已关闭，失败不可见",
+      "allowlistId": "export-failed",
+      "fingerprint": "N5|副本没有导出|export|direct-action"
+    },
+    {
+      "id": "handoff-recopy",
+      "class": "N5",
+      "owner": "runs",
+      "file": "app/workbench.tsx",
+      "title": "本轮要求已复制 / 复制没有成功",
+      "dedupeKey": "handoff-recopied",
+      "disposition": "inform-in-place",
+      "wave": "PR-D",
+      "reason": "剪贴板动作无其他可感知结果",
+      "allowlistId": "handoff-recopy",
+      "fingerprint": "N5|本轮要求已复制 / 复制没有成功|handoff-recopied|inform-in-place"
+    },
+    {
+      "id": "review-no-visible-change",
+      "class": "N5",
+      "owner": "review",
+      "file": "app/workbench.tsx",
+      "title": "这次没有产生有效变化",
+      "dedupeKey": "ready-version-no-visible-review-change",
+      "disposition": "background-result",
+      "wave": "PR-E",
+      "reason": "审阅未打开，对话仍显示可审阅",
+      "allowlistId": "review-no-visible-change",
+      "fingerprint": "N5|这次没有产生有效变化|ready-version-no-visible-review-change|background-result"
+    }
+  ]
+}

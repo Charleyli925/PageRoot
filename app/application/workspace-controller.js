@@ -33,6 +33,7 @@ import {
   WorkbenchNavigationWorkflow,
   workbenchStartupPriority,
 } from "./workbench-navigation-workflow.js";
+import { reportInternalFailure } from "./internal-failure.js";
 
 function copyLocator({
   operationId,
@@ -826,6 +827,13 @@ export class WorkspaceController {
             this.#workbenchTabsPersistenceSnapshot = snapshot;
             this.#publishAggregateSnapshot();
             if (snapshot.phase === "failed" && !wasFailed) {
+              reportInternalFailure({
+                area: "navigation",
+                operation: "tabs-persist",
+                code: "write-unrecovered",
+                recovered: false,
+                cause: snapshot.error,
+              });
               this.#emitEvent({
                 type: "workbench-tabs-persistence-failed",
                 reason: snapshot.error || "标签页状态写入失败。",
@@ -1310,6 +1318,29 @@ export class WorkspaceController {
     });
     if (outcome.status === "succeeded") return;
     if (outcome.committed === true) {
+      let hydration;
+      try {
+        hydration = await this.retryProjectHydration();
+      } catch (cause) {
+        hydration = { status: "rejected", reason: String(cause?.message || cause) };
+      }
+      if (hydration.status === "succeeded") {
+        reportInternalFailure({
+          area: "navigation",
+          operation: "restore-settle",
+          code: "hydration-retried",
+          recovered: true,
+          cause: outcome.reason,
+        });
+        return;
+      }
+      reportInternalFailure({
+        area: "navigation",
+        operation: "restore-settle",
+        code: "hydration-unrecovered",
+        recovered: false,
+        cause: hydration.reason || outcome.reason,
+      });
       const target = this.#workbenchTabsSession.resolveTab(pending);
       if (target?.kind === "document") {
         this.#workbenchTabsSession.updateStatus(

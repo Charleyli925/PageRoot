@@ -76,6 +76,8 @@ export class ExternalFileOpenSession {
 
   #rememberedRequestIds = new Set();
 
+  #immediateResumeIds = new Set();
+
   setObserver(observer) {
     this.#observer = typeof observer === "function" ? observer : null;
   }
@@ -247,23 +249,31 @@ export class ExternalFileOpenSession {
     return true;
   }
 
-  // A new deferred request retries only after an observed blocker clears;
-  // otherwise it awaits the explicit retry action.
+  // One silent continue when the switch drain is already clear; a second
+  // defer of the same request waits for a blocker to appear and clear.
   reconcileDeferredSwitch({ switchBlocked, execute }) {
     if (!this.#deferred || typeof execute !== "function") return "idle";
     this.#execute = execute;
+    const requestId = this.#deferred.requestId;
 
     if (this.#observedDeferredSequence !== this.#deferredSequence) {
       this.#observedDeferredSequence = this.#deferredSequence;
       this.#sawSwitchBlocker = Boolean(switchBlocked);
-      return switchBlocked ? "blocked" : "action-required";
+      if (switchBlocked) return "blocked";
+      return this.#resumeOnce(requestId, execute);
     }
     if (switchBlocked) {
       this.#sawSwitchBlocker = true;
       return "blocked";
     }
-    if (!this.#sawSwitchBlocker) return "blocked";
+    if (!this.#sawSwitchBlocker) return "idle";
     this.#sawSwitchBlocker = false;
+    return this.resume(execute) ? "resumed" : "idle";
+  }
+
+  #resumeOnce(requestId, execute) {
+    if (!requestId || this.#immediateResumeIds.has(requestId)) return "idle";
+    this.#immediateResumeIds.add(requestId);
     return this.resume(execute) ? "resumed" : "idle";
   }
 
@@ -278,6 +288,7 @@ export class ExternalFileOpenSession {
     this.#awaitingConfirmation = false;
     this.#observedDeferredSequence = 0;
     this.#sawSwitchBlocker = false;
+    this.#immediateResumeIds.clear();
     this.#execute = null;
     this.#emit();
   }

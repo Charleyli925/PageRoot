@@ -17,6 +17,11 @@ import {
   parseModule,
   stringLiterals,
 } from "./architecture-ast-query.mjs";
+import {
+  loadNoticeLedger,
+  noticeInventoryViolations,
+  noticePolicyViolations,
+} from "./notice-policy.mjs";
 
 const PRODUCT_ROOT = fileURLToPath(new URL("../", import.meta.url));
 const SOURCE_EXTENSIONS = new Set([".js", ".mjs", ".ts", ".tsx"]);
@@ -303,6 +308,8 @@ export function dialogPolicyViolations({ file = "", source = "", module = null }
   return violations;
 }
 
+export { noticePolicyViolations, noticeInventoryViolations } from "./notice-policy.mjs";
+
 export function retiredArtifactViolations({ file = "", source = "", module = null } = {}) {
   const handle = module || parseModule(file || "fixture.js", source);
   const violations = [];
@@ -352,17 +359,22 @@ export async function architectureViolations() {
     ...(await sourceFiles(path.join(PRODUCT_ROOT, "scripts"))),
     ...(await sourceFiles(path.join(PRODUCT_ROOT, "desktop"))),
   ];
+  const ledger = await loadNoticeLedger();
+  const scanned = [];
   const violations = [];
   for (const filePath of files) {
     const file = relative(filePath);
     const source = await readFile(filePath, "utf8");
     const ast = parseModule(filePath, source);
+    scanned.push({ file, source, module: ast });
     violations.push(...layerBoundaryViolations({ file, source, module: ast }));
     violations.push(...ownershipBoundaryViolations({ file, source, module: ast }));
     violations.push(...escapeBoundaryViolations({ file, source, module: ast }));
     violations.push(...retiredArtifactViolations({ file, source, module: ast }));
     violations.push(...dialogPolicyViolations({ file, source, module: ast }));
+    violations.push(...noticePolicyViolations({ file, source, module: ast, ledger }));
   }
+  violations.push(...await noticeInventoryViolations(scanned, ledger));
   return [...new Set(violations)].sort();
 }
 

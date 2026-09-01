@@ -979,8 +979,8 @@ temporary comment without claiming that it was saved.
 One unresolved failure has one visible recovery owner. A source persistence
 failure takes precedence over a Draft persistence failure on the workspace
 status-banner surface; when it clears, an outstanding Draft failure may own the
-same surface. Views must not duplicate either issue in the comment rail or a
-Toast. User-visible error text is derived from stable product codes and must
+same surface. Views must not duplicate either issue in the comment rail.
+User-visible error text is derived from stable product codes and must
 not expose bridge fields, local paths, Hashes or raw exception messages.
 
 ## React effects
@@ -1117,7 +1117,7 @@ Hashes, state transitions and fault injection.
 
 ### Architecture gate assertion forms
 
-`scripts/check-architecture.mjs` enforces the boundaries above as five explicit
+`scripts/check-architecture.mjs` enforces the boundaries above as six explicit
 responsibility groups:
 
 - `layerBoundaryViolations`: import direction between Domain, Application,
@@ -1132,9 +1132,18 @@ responsibility groups:
   native error box is the startup failure that happens before a renderer exists.
   Content-loss confirms (delete, overwrite, abandon unsaved edits) must be
   registered in `ALLOWED_WINDOW_CONFIRM_PREFIXES`.
+- `noticePolicyViolations` plus the inventory ratchet in
+  `scripts/notice-policy.mjs`: production `setToast` creates must stay at 0.
+  `NoticeBar` JSX, `background-result` and `uncatalogued` literals are frozen to
+  `scripts/notice-disposition-ledger.json`. Counts may only decrease. New
+  wrapper aliases of `setToast` fail. Remaining ledger sites are N5
+  `GlobalInterruption` kinds; the allowlist may only shrink. N0 success
+  notices, N1 internal reliability notices, N2 existing-control notices and
+  N3 workspace-safety toasts are already deleted. Workspace safety uses the
+  existing persist/unavailable banners via `WorkspaceSafetyState`.
 
 The gate uses structural queries from `scripts/architecture-ast-query.mjs`
-(`moduleSpecifiers`, `callNames`, `callExpressions`, `newExpressionNames`, filesystem-write
+(`moduleSpecifiers`, `callNames`, `callExpressions`, `jsxElementNames`, `newExpressionNames`, filesystem-write
 classification and literal comparisons). These queries operate on dependency,
 call, construction and data-category facts. They do not assert private fields,
 private methods, exact object properties or the spelling/order of a business
