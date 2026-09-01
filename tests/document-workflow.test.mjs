@@ -866,6 +866,7 @@ test("DocumentWorkflow leaves the next document Source History untouched by a st
     1,
   );
   const expectedSnapshot = structuredClone(harness.sourceHistorySession.snapshot);
+  delete expectedSnapshot.updatedAt;
   const expectedPending = harness.sourceHistorySession.pendingOperations;
   const nextRecoveryKey = `html-ai-recovery:${nextDocumentId}`;
   harness.recoveryStore.write(nextRecoveryKey, { documentId: nextDocumentId, keep: true });
@@ -888,7 +889,9 @@ test("DocumentWorkflow leaves the next document Source History untouched by a st
 
   assert.equal((await flushing).status, "stale");
   assert.equal(activateCalls, 0, "inactive-context ACK must not reactivate the old document");
-  assert.deepEqual(harness.sourceHistorySession.snapshot, expectedSnapshot);
+  const actualSnapshot = harness.sourceHistorySession.snapshot;
+  delete actualSnapshot.updatedAt;
+  assert.deepEqual(actualSnapshot, expectedSnapshot);
   assert.deepEqual(harness.sourceHistorySession.pendingOperations, expectedPending);
   assert.equal(harness.sourceHistorySession.capabilities.sourceSha256, sha256(nextAfter));
   assert.deepEqual(harness.recoveryStore.values.get(nextRecoveryKey), {

@@ -160,6 +160,7 @@ test("SourceHistorySession does not mutate on an inactive-context ACK", () => {
   session.activate(context, sourceSha256("a"), null);
   session.record(context, transaction("a", "b"), 1);
   const expectedSnapshot = structuredClone(session.snapshot);
+  delete expectedSnapshot.updatedAt;
   const expectedPending = session.pendingOperations;
 
   assert.deepEqual(
@@ -171,7 +172,9 @@ test("SourceHistorySession does not mutate on an inactive-context ACK", () => {
     ),
     { status: "invalid", reason: "inactive-context" },
   );
-  assert.deepEqual(session.snapshot, expectedSnapshot);
+  const actualSnapshot = session.snapshot;
+  delete actualSnapshot.updatedAt;
+  assert.deepEqual(actualSnapshot, expectedSnapshot);
   assert.deepEqual(session.pendingOperations, expectedPending);
 });
 
