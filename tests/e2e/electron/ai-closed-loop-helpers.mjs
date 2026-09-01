@@ -17,6 +17,7 @@ import { inflateSync } from "node:zlib";
 import { expect } from "@playwright/test";
 
 import { sha256 } from "../../../bridge/lifecycle-core.mjs";
+import { ProjectFileRepository } from "../../../bridge/project-file-repository.mjs";
 import {
   activateNativeEdit,
   caseSelector,
@@ -513,10 +514,31 @@ export async function openRecentProject(page, sourcePath, options) {
     await page.getByRole("button", { name: "新标签页" }).click();
   }
   await startPage.waitFor({ state: "visible" });
-  await startPage.getByRole("button", {
-    name: path.basename(sourcePath),
-    exact: true,
-  }).click();
+  const sidebar = page.locator(".workbench-global-sidebar");
+  if (await sidebar.getAttribute("data-open") !== "true") {
+    await page.getByRole("button", { name: "展开左侧边栏" }).click();
+  }
+  const projectName = path.basename(sourcePath, path.extname(sourcePath));
+  let projectRow = sidebar.getByRole("button", { name: projectName, exact: true });
+  if (await projectRow.count() === 0) {
+    const activeSourcePath = await page.evaluate(
+      async () => (await window.htmlAIProjects?.getActiveProject())?.sourcePath || "",
+    );
+    const repository = new ProjectFileRepository({
+      projectsRoot: path.dirname(path.dirname(activeSourcePath)),
+    });
+    await repository.importExternal({
+      sourcePath,
+      expectedSourceSha256: sha256(readFileSync(sourcePath)),
+    });
+    await page.getByRole("button", { name: "收起左侧边栏" }).click();
+    await page.getByRole("button", { name: "展开左侧边栏" }).click();
+    projectRow = sidebar.getByRole("button", { name: projectName, exact: true });
+  }
+  if (await projectRow.getAttribute("aria-expanded") !== "true") {
+    await projectRow.click();
+  }
+  await projectRow.locator("xpath=..").locator(".sidebar-version-file").first().click();
   await waitForProjectReady(page);
   await expect.poll(async () => {
     const active = await page.evaluate(

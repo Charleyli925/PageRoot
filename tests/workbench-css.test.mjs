@@ -90,8 +90,22 @@ test("global sidebar owns the full shell column and start page has no card surfa
   assert.doesNotMatch(sidebar, /position:\s*fixed/u);
 
   const startContent = lastCssRule(css, ".workbench-start-content");
-  assert.match(startContent, /width:\s*min\(520px, 100%\)/u);
+  assert.match(startContent, /width:\s*min\(840px, 100%\)/u);
+  assert.match(startContent, /gap:\s*40px/u);
   assert.doesNotMatch(startContent, /border|box-shadow|background/u);
+
+  assert.match(
+    css,
+    /\.workbench-start-page \{\s*min-width:[\s\S]*?padding:\s*clamp\(64px, 8vh, 92px\)/u,
+  );
+  assert.match(
+    css,
+    /\.workbench-start-resume \{\s*width:[\s\S]*?border:\s*1px solid var\(--line-soft\)[\s\S]*?border-radius:\s*15px/u,
+  );
+  assert.match(
+    css,
+    /\.workbench-start-task-list > button \{\s*width:[\s\S]*?border-bottom:\s*1px solid var\(--line-soft\)[\s\S]*?background:\s*transparent/u,
+  );
 
   const footer = lastCssRule(css, ".workbench-sidebar-footer");
   assert.match(footer, /display:\s*flex/u);
