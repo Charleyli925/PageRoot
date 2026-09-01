@@ -141,7 +141,3 @@ export function formatProjectTimestamp(value: unknown): string {
   }
   return `${date.getFullYear()}/${date.getMonth() + 1}/${date.getDate()}`;
 }
-
-export function projectMarkdown(name: string): string {
-  return `# ${fileStem(name)}\n\n- 入口文件：${name}\n- 默认延续当前页面的视觉语言、组件样式和响应式行为。\n- 在这里补充页面用途、长期风格和需要跨轮次持续遵循的约束。\n`;
-}

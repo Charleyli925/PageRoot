@@ -183,6 +183,50 @@ const LEGACY_PROMOTION_WORKING_COPY_HASH = Symbol(
   "legacy-promotion-working-copy-hash",
 );
 
+export const DEFAULT_PROJECT_RULES_TEMPLATE = `# 项目长期规则
+
+## 项目目标
+<!-- 这个项目要达成什么？请写下长期目标和成功标准。 -->
+
+## 目标受众
+<!-- 谁会使用、阅读或受这个项目影响？ -->
+
+## 内容与事实规则
+<!-- 哪些事实必须准确？哪些内容需要引用、核验或避免猜测？ -->
+
+## 视觉与表达
+<!-- 记录视觉风格、语气、术语和表达偏好。 -->
+
+## AI 修改边界
+<!-- 哪些内容可以修改？哪些内容必须保留、先询问或不得触碰？ -->
+`;
+
+async function ensureProjectRulesFile(projectRootPath) {
+  const filePath = path.join(projectRootPath, "PROJECT.md");
+  const information = await regularInformation(filePath, "PROJECT.md", {
+    projectRootPath,
+  });
+  if (information) return { filePath, information };
+  const buffer = Buffer.from(DEFAULT_PROJECT_RULES_TEMPLATE, "utf8");
+  await writeFileNoReplace(
+    filePath,
+    buffer,
+    sha256(buffer),
+    "PROJECT.md",
+    { projectRootPath },
+  );
+  const createdInformation = await regularInformation(filePath, "PROJECT.md", {
+    projectRootPath,
+  });
+  if (!createdInformation) {
+    throw new ProjectFileRepositoryError(
+      "PROJECT_FILE_NOT_FOUND",
+      "PROJECT.md could not be created.",
+    );
+  }
+  return { filePath, information: createdInformation };
+}
+
 function requestFreezeRecoveryError(message, details = {}) {
   return new ProjectFileRepositoryError(
     "REQUEST_FREEZE_RECOVERY_INVALID",
@@ -531,16 +575,9 @@ export class ProjectFileRepository {
   async readProjectNotes({ target } = {}) {
     return this.#serial(async () => {
       const loaded = await this.#resolveMutationTarget(target);
-      const filePath = path.join(loaded.paths.projectRootPath, "PROJECT.md");
-      const information = await regularInformation(filePath, "PROJECT.md", {
-        projectRootPath: loaded.paths.projectRootPath,
-      });
-      if (!information) {
-        throw new ProjectFileRepositoryError(
-          "PROJECT_FILE_NOT_FOUND",
-          "PROJECT.md was not found.",
-        );
-      }
+      const { filePath, information } = await ensureProjectRulesFile(
+        loaded.paths.projectRootPath,
+      );
       const buffer = await readFile(filePath);
       return {
         projectId: loaded.project.projectId,
@@ -1589,16 +1626,8 @@ export class ProjectFileRepository {
     const stagingRequestPath = path.join(stagingRoot, "request.json");
     const outputRelativePath = `requests/${id}/attempts/${attempt}/output/candidate.html`;
     const outputPath = path.join(stagingRoot, "attempts", attempt, "output", "candidate.html");
-    const projectNotesPath = path.join(loaded.paths.projectRootPath, "PROJECT.md");
-    const projectNotes = await regularInformation(projectNotesPath, "PROJECT.md", {
-      projectRootPath: loaded.paths.projectRootPath,
-    });
-    if (!projectNotes) {
-      throw new ProjectFileRepositoryError(
-        "PROJECT_FILE_NOT_FOUND",
-        "PROJECT.md must exist before an AI Request can be frozen.",
-      );
-    }
+    const { filePath: projectNotesPath } =
+      await ensureProjectRulesFile(loaded.paths.projectRootPath);
     const projectNotesBuffer = await readFile(projectNotesPath);
     const promptBuffer = Buffer.from(
       `${String(prompt || "")}${frozenCommentAttachments.promptAppendix}`,
@@ -4367,7 +4396,7 @@ export class ProjectFileRepository {
       await atomicWriteProjectFile(
         stagingRoot,
         path.join(stagingRoot, "PROJECT.md"),
-        Buffer.from(`# ${stem}\n`, "utf8"),
+        Buffer.from(DEFAULT_PROJECT_RULES_TEMPLATE, "utf8"),
         "PROJECT.md",
       );
       await this.#hit("import-metadata-written", { stagingRoot });

@@ -15,7 +15,6 @@ export type WorkbenchReviewOverlayProps = Readonly<{
   session: WorkbenchReviewSession;
   accepting: boolean;
   activeRunError?: string;
-  candidateAssessmentAttention: boolean;
   onAbout: () => void;
   onCancelBefore: (options: { reason: string }) => Promise<boolean>;
   onAccept: () => void;
@@ -30,7 +29,6 @@ export function WorkbenchReviewOverlay({
   session,
   accepting,
   activeRunError,
-  candidateAssessmentAttention,
   onAbout,
   onCancelBefore,
   onAccept,
@@ -69,9 +67,6 @@ export function WorkbenchReviewOverlay({
       sourcePath={session.sourcePath || undefined}
       accepting={accepting}
       error={activeRunError}
-      notice={candidateAssessmentAttention
-        ? "这个候选可以打开，但与上一版的共同特征较少。请重点核对整页内容，再决定是否接受。"
-        : undefined}
       onAbout={onAbout}
       onReturnBefore={onReturnBefore}
       onAccept={onAccept}

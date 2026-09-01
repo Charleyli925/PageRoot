@@ -18,14 +18,28 @@ test("a stable insertion does not report existing siblings as moved", () => {
   assert.deepEqual(result.movedIds, []);
 });
 
-test("same-parent reorder reports a minimal stable movement set", () => {
+test("ambiguous same-parent reorder reports the affected parent instead of guessing", () => {
   const result = analyzeReviewStableIdTopology(
     [item("a", "root", 0), item("b", "root", 1), item("c", "root", 2)],
     [item("b", "root", 0), item("a", "root", 1), item("c", "root", 2)],
   );
 
-  assert.equal(result.movedIds.length, 1);
-  assert.ok(result.movedIds[0] === "a" || result.movedIds[0] === "b");
+  assert.deepEqual(result.movedIds, []);
+  assert.deepEqual(result.reorderedRanges, [{
+    parentId: "root",
+    beforeIds: ["a", "b", "c"],
+    afterIds: ["b", "a", "c"],
+  }]);
+});
+
+test("same-parent reorder names one element only when attribution is unique", () => {
+  const result = analyzeReviewStableIdTopology(
+    [item("a", "root", 0), item("b", "root", 1), item("c", "root", 2), item("d", "root", 3)],
+    [item("c", "root", 0), item("a", "root", 1), item("b", "root", 2), item("d", "root", 3)],
+  );
+
+  assert.deepEqual(result.movedIds, ["c"]);
+  assert.deepEqual(result.reorderedRanges, []);
 });
 
 test("cross-parent identity continuity is an exact movement fact", () => {

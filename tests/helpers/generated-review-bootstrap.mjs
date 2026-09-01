@@ -28,6 +28,7 @@ const reviewRuntimeProjection = await readFile(
 export function generatedReviewBootstrap(
   reviewCommentBindings = [],
   side = "before",
+  reviewVisualStableIds = [],
 ) {
   const sourceFile = ts.createSourceFile(
     "runtime-projection.ts",
@@ -87,5 +88,6 @@ export function generatedReviewBootstrap(
     "review-session",
     side,
     reviewCommentBindings,
+    reviewVisualStableIds,
   );
 }

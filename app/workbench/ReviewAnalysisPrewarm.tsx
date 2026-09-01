@@ -42,7 +42,10 @@ export function preparedReviewByteSize(prepared: PreparedReviewDocuments): numbe
     + prepared.documents.bootstrapFallbackJavaScript.before.length
     + prepared.documents.bootstrapFallbackJavaScript.after.length
     + JSON.stringify(prepared.documents.commentTargets).length
+    + JSON.stringify(prepared.documents.visualBinding).length
+    + JSON.stringify(prepared.documents.visualEvidence).length
     + JSON.stringify(prepared.documents.reviewImpact || null).length
+    + JSON.stringify(prepared.documents.diagnostics).length
   );
 }
 

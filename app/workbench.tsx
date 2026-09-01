@@ -95,6 +95,7 @@ import {
 } from "./application/review-analysis-session.js";
 import type { PageViewContext } from "./lib/page-view-context.js";
 import type { ProjectSessionSnapshot } from "./application/project-session.js";
+import type { ProjectRulesSnapshot } from "./application/project-rules-session.js";
 import type { RunSessionSnapshot } from "./application/run-session.js";
 import type { VersionSessionSnapshot } from "./application/version-session.js";
 import {
@@ -206,6 +207,7 @@ import { RunConversationOutlet } from "./workbench/run-conversation-outlet";
 import { WorkbenchReviewOverlay } from "./workbench/workbench-review-overlay";
 import WorkbenchDocumentSurfaceCache from "./workbench/WorkbenchDocumentSurfaceCache";
 import WorkbenchDocumentCanvasPool from "./workbench/WorkbenchDocumentCanvasPool";
+import ProjectRulesEditorPage from "./workbench/project-rules-editor";
 import { useRuntimeCanvasResidency } from "./workbench/use-runtime-canvas-residency";
 import ReviewAnalysisPrewarm, {
   prepareReviewAnalysis,
@@ -219,7 +221,10 @@ import {
   useDocumentSurfaceHandoff,
 } from "./workbench/document-surface-presentation";
 import { markDocumentSurfacePrewarmed, markProjectApplied, markProjectHydrationStage, RendererStartupPerformance } from "./workbench/performance-timeline";
-import type { ReviewDocuments } from "./workbench/review-document";
+import {
+  pageSourceOnlyReviewDiagnostics,
+  type ReviewDocuments,
+} from "./workbench/review-document";
 import { useRuntimeBridgeConnectionReady } from "./workbench/runtime-bridge-connection";
 import { WorkbenchTabBarContainer } from "./workbench/workbench-navigation-container";
 import { WorkbenchResizer } from "./workbench/workbench-resizer";
@@ -229,7 +234,6 @@ import {
   activeRunOperationKey,
   fileStem,
   localFileNameFromSourcePath,
-  projectMarkdown,
   safeVersionLabel,
   sameLocalSourcePath,
 } from "./workbench/project-model";
@@ -326,6 +330,18 @@ const INITIAL_PROJECT_SESSION_SNAPSHOT: ProjectSessionSnapshot = {
   projectId: "",
   documentId: "",
   registered: false,
+};
+const INITIAL_PROJECT_RULES_SNAPSHOT: ProjectRulesSnapshot = {
+  open: false,
+  path: "PROJECT.md",
+  content: "",
+  savedContent: "",
+  loading: false,
+  error: "",
+  saving: false,
+  saveError: "",
+  compositionActive: false,
+  editorGeneration: 0,
 };
 const INITIAL_VERSION_SNAPSHOT: VersionSessionSnapshot<Version> = {
   versions: [],
@@ -530,6 +546,19 @@ export default function Workbench() {
     : null;
   const workbenchTabsSnapshot = workspaceControllerSnapshot?.workbenchTabs
     ?? INITIAL_WORKBENCH_TABS_SNAPSHOT;
+  const activeWorkbenchTab = workbenchTabsSnapshot.tabs.find(
+    (tab) => tab.tabId === workbenchTabsSnapshot.activeTabId,
+  ) || workbenchTabsSnapshot.tabs[0];
+  const projectRulesSnapshot = workspaceControllerSnapshot?.projectRules
+    ?? INITIAL_PROJECT_RULES_SNAPSHOT;
+  const settingsPageActive = activeWorkbenchTab?.kind === "settings";
+  const startPageActive = activeWorkbenchTab?.kind === "start"
+    && typeof window !== "undefined"
+    && Boolean(window.htmlAIProjects);
+  const projectRulesPageActive = activeWorkbenchTab?.kind === "project-rules";
+  const documentRuntimeTabId = activeWorkbenchTab?.kind === "document"
+    ? activeWorkbenchTab.tabId
+    : workbenchTabsSnapshot.runtimeOwnerTabId;
   const documentSurfaceCacheSnapshot = workspaceControllerSnapshot?.documentSurfaceCache
     ?? INITIAL_DOCUMENT_SURFACE_CACHE_SNAPSHOT;
   const [importedCanvasBase, setImportedCanvasBase] = useState<{
@@ -766,6 +795,7 @@ export default function Workbench() {
     onOpenAgentSettings: openAgentSettings,
   });
   const revealAiConversation = aiConversation.reveal;
+  const hideAiConversation = aiConversation.hide;
   const editRuntimeSnapshot = workspaceControllerSnapshot?.editRuntime ?? null;
   const runtimeCanvasResidency = useRuntimeCanvasResidency({
     tabIds: workbenchTabsSnapshot.tabs.map((tab) => tab.tabId),
@@ -1169,7 +1199,6 @@ export default function Workbench() {
           persistedTargetRef,
           uniqueTargets,
           fileStem,
-          projectMarkdown,
           operationKey: activeRunOperationKey,
           errorMessage: productErrorMessage,
         }),
@@ -1336,6 +1365,7 @@ export default function Workbench() {
     useState<readonly string[]>([]);
   const [runtimeCapabilitiesReady, setRuntimeCapabilitiesReady] = useState(false);
   const [browserPreviewOnly, setBrowserPreviewOnly] = useState(false);
+  const [browserEditingRuntimeActive, setBrowserEditingRuntimeActive] = useState(false);
   const agentHandoffState = runSnapshot.activeHandoff;
   const [updateResult, setUpdateResult] =
     useState<ApplicationUpdateResult | null>(null);
@@ -2381,8 +2411,11 @@ export default function Workbench() {
     });
     runtimeCapabilitiesRef.current = capabilities;
     const previewOnly = capabilities.sourceEditing !== "enabled";
+    const browserEditing = capabilities.sourceEditing === "enabled"
+      && capabilities.projectOpening === "browser-file";
     const frame = window.requestAnimationFrame(() => {
       setBrowserPreviewOnly(previewOnly);
+      setBrowserEditingRuntimeActive(browserEditing);
       setInteractivePreviewTransport(capabilities.interactivePreview);
       if (previewOnly) setCanvasMode("preview");
       setRuntimeCapabilitiesReady(true);
@@ -3144,6 +3177,51 @@ export default function Workbench() {
     presentWorkbenchTabOutcome(outcome);
     return outcome;
   }, [navigationCapability, presentWorkbenchTabOutcome]);
+
+  const openProjectRulesPage = useCallback(() => {
+    if (!navigationCapability) return;
+    setGlobalSidebarOpen(true);
+    void navigationCapability.commands.createProjectRulesTab().then((outcome) => {
+      presentWorkbenchTabOutcome(outcome);
+    });
+  }, [navigationCapability, presentWorkbenchTabOutcome]);
+
+  const updateProjectRules = useCallback((content: string) => {
+    workspaceController?.updateProjectRules({ content });
+  }, [workspaceController]);
+
+  const beginProjectRulesComposition = useCallback((input: {
+    target: HTMLTextAreaElement;
+    baselineValue: string;
+  }) => {
+    workspaceController?.beginProjectRulesComposition(input);
+  }, [workspaceController]);
+
+  const finishProjectRulesComposition = useCallback((input: {
+    target: HTMLTextAreaElement;
+  }) => {
+    workspaceController?.finishProjectRulesComposition(input);
+  }, [workspaceController]);
+
+  const saveProjectRules = useCallback(() => {
+    void workspaceController?.saveProjectRules();
+  }, [workspaceController]);
+
+  const restoreProjectRules = useCallback(() => {
+    workspaceController?.restoreProjectRules();
+  }, [workspaceController]);
+
+  const retryProjectRules = useCallback(() => {
+    if (!workspaceController || !projectId || !documentId || !sourcePath) return;
+    void workspaceController.openProjectRules({
+      context: {
+        epoch: projectSnapshot.epoch,
+        projectId,
+        documentId,
+        sourcePath,
+      },
+    });
+  }, [documentId, projectId, projectSnapshot.epoch, sourcePath, workspaceController]);
 
   useEffect(() => {
     workspaceController?.reconcileProjectTransitions();
@@ -5006,6 +5084,16 @@ export default function Workbench() {
       ) {
         throw new Error("当前冻结 HTML 已发生变化，无法开始安全对比。");
       }
+      const sourceOnlyDiagnostics = pageSourceOnlyReviewDiagnostics(
+        frozenHtml,
+        candidate.content,
+      );
+      if (sourceOnlyDiagnostics) {
+        reviewAnalysisSession.clear();
+        setReadyReviewSession(null);
+        setInterruption({ kind: "review-no-visible-change" });
+        return;
+      }
       const externalBootstrap = Boolean(window.htmlAIPreview);
       const sessionId = `review-${Date.now().toString(36)}-${++reviewSessionSequenceRef.current}`;
       const beforeLabel = run.basedOnVersionId
@@ -5022,13 +5110,6 @@ export default function Workbench() {
         comments: currentCommentSessionSnapshot().comments,
         externalBootstrap,
         sessionId,
-        onShell: (documents) => {
-          if (!isCurrentProjectContext(reviewContext)) return;
-          setReadyReviewSession({ operationKey, sessionId, documents,
-            beforeHtml: frozenHtml, sourcePath: candidate.sourcePath,
-            beforeLabel, afterLabel });
-          performance.mark("pageroot:review:shell-visible");
-        },
       });
       const analyzedRun = currentRunSessionSnapshot().activeRun;
       if (
@@ -5037,6 +5118,13 @@ export default function Workbench() {
         || activeRunOperationKey(analyzedRun) !== operationKey
         || !isCurrentProjectContext(reviewContext)
       ) return;
+      if (!preparedReview.documents.changes.length) {
+        setReadyReviewSession(null);
+        setInterruption({ kind: "review-no-visible-change" });
+        return;
+      }
+      hideAiConversation();
+      setInterruption(null);
       setReadyReviewSession({
         operationKey,
         sessionId: preparedReview.sessionId,
@@ -5063,6 +5151,7 @@ export default function Workbench() {
     currentCommentSessionSnapshot,
     currentRunSessionSnapshot,
     fenceAndFreezeCurrentCanvas,
+    hideAiConversation,
     isCurrentProjectContext,
     reviewAnalysisSession,
     reviewPreparing,
@@ -5608,7 +5697,6 @@ export default function Workbench() {
       fileName={localFileNameFromSourcePath(readyReviewSession.sourcePath) || currentSourceFileName}
       accepting={openingReadyVersion}
       activeRunError={activeRun?.status === "ready-to-open" ? activeRun.error : undefined}
-      candidateAssessmentAttention={activeRun?.candidateAssessment?.status === "attention"}
       onAbout={openAboutPageRoot}
       onCancelBefore={cancelActiveRun}
       onAccept={() => void activateReadyResult({ reviewed: true })}
@@ -5636,14 +5724,15 @@ export default function Workbench() {
       }}
     />
   ) : null;
-  const workbenchInspector = deriveWorkbenchInspector({ canvasMode, aiVisible: aiConversation.visible && Boolean(runCapability) && !readyReviewSession, reviewVisible: Boolean(readyReviewSession), commentsAvailable: Boolean(workspaceController) });
-  const activeWorkbenchTab = workbenchTabsSnapshot.tabs.find(
-    (tab) => tab.tabId === workbenchTabsSnapshot.activeTabId,
-  ) || workbenchTabsSnapshot.tabs[0];
-  const settingsPageActive = activeWorkbenchTab?.kind === "settings";
-  const startPageActive = activeWorkbenchTab?.kind === "start"
-    && typeof window !== "undefined"
-    && Boolean(window.htmlAIProjects);
+  const workbenchInspector = deriveWorkbenchInspector({
+    canvasMode,
+    aiVisible: aiConversation.visible
+      && Boolean(runCapability)
+      && !readyReviewSession
+      && !projectRulesPageActive,
+    reviewVisible: Boolean(readyReviewSession) && !projectRulesPageActive,
+    commentsAvailable: Boolean(workspaceController) && !projectRulesPageActive,
+  });
   const closeSettingsPage = useCallback(() => {
     if (!settingsPageActive || !activeWorkbenchTab || !navigationCapability) return;
     void navigationCapability.commands.closeTab(activeWorkbenchTab.tabId).then((outcome) => {
@@ -5751,6 +5840,8 @@ export default function Workbench() {
   const projectCatalogCapability = workspaceController
     ? workspaceController.projectCatalog as ProjectCatalogCapability
     : null;
+  const canMountUnboundCanvas = Boolean(documentRuntimeTabId)
+    || browserEditingRuntimeActive;
   const currentProjectDisplayName = currentProjectNameFromFile(sourcePath, projectName);
   const currentProjectSidebarVersions = useMemo(() => (
     projectId && documentId
@@ -5797,6 +5888,7 @@ export default function Workbench() {
         style={workbenchStyle}
         data-start-page={startPageActive ? "true" : undefined}
         data-settings-page={settingsPageActive ? "true" : undefined}
+        data-project-rules-page={projectRulesPageActive ? "true" : undefined}
         data-motion={workspacePreferences.motion}
         data-left-sidebar={globalSidebarOpen ? "open" : "collapsed"}
         data-round-state={runInProgress ? "processing" : viewMode}
@@ -5830,7 +5922,7 @@ export default function Workbench() {
         onBeforeSelect={rememberWorkbenchTabPresentation}
         onOutcome={presentWorkbenchTabOutcome}
       /> : null}
-      {!startPageActive && !settingsPageActive ? <>
+      {!startPageActive && !settingsPageActive && !projectRulesPageActive ? <>
         <WorkbenchHeaderView
           runInProgress={runInProgress}
           canvasMode={canvasMode}
@@ -5893,7 +5985,7 @@ export default function Workbench() {
         </section>
       ) : null}
 
-      {!settingsPageActive && startupIssue ? (
+      {!settingsPageActive && !projectRulesPageActive && startupIssue ? (
         <section className="startup-issue" role="alert">
           <div>
             <strong>{startupIssue.title}</strong>
@@ -5908,7 +6000,7 @@ export default function Workbench() {
         </section>
       ) : null}
 
-      {!settingsPageActive && workspaceIssue ? (
+      {!settingsPageActive && !projectRulesPageActive && workspaceIssue ? (
         <section className="source-conflict-banner workspace-unavailable-banner" role="alert">
           <div>
             <strong>{workspaceIssue.title}</strong>
@@ -5927,6 +6019,7 @@ export default function Workbench() {
       ) : null}
 
       {!settingsPageActive
+      && !projectRulesPageActive
       && !workspaceIssue
       && !externalSourcePreview
       && (persistState === "conflict" || persistState === "failed") ? (
@@ -5965,6 +6058,7 @@ export default function Workbench() {
       ) : null}
 
       {!settingsPageActive
+      && !projectRulesPageActive
       && !workspaceIssue
       && persistState !== "conflict"
       && persistState !== "failed"
@@ -5983,7 +6077,7 @@ export default function Workbench() {
         </section>
       ) : null}
 
-      {!settingsPageActive && externalSourcePreview ? (
+      {!settingsPageActive && !projectRulesPageActive && externalSourcePreview ? (
         <PreviewNavigationBanner
           key={`external-${externalSourcePreview.sourceSha256}`}
           icon={<EyeIcon aria-hidden="true" size={18} weight="duotone" />}
@@ -6051,6 +6145,7 @@ export default function Workbench() {
         currentProjectId={projectId}
         currentProjectName={currentProjectDisplayName}
         currentProjectVersions={currentProjectSidebarVersions}
+        projectRulesActive={projectRulesPageActive}
         onToggle={() => {
           setGlobalSidebarOpen((open) => !open);
         }}
@@ -6064,6 +6159,7 @@ export default function Workbench() {
         updateBadgeLabel={updateBadgeLabel}
         onOpenAbout={openAboutPageRoot}
         onOpenSettings={() => openSettingsPage("general")}
+        onOpenProjectRules={openProjectRulesPage}
         onResizeCommit={(width) => workspacePreferencesController.commitPanelWidth("sidebar", width)}
         onDownloadOrRestartUpdate={() => {
           if (updateDownloaded) {
@@ -6136,17 +6232,28 @@ export default function Workbench() {
           onCopyGuidance={copyAgentGuidance}
           onInstall={installAgent}
         />
-      ) : startPageActive && projectCatalogCapability ? (
+      ) : null}
+      {!settingsPageActive && startPageActive && projectCatalogCapability ? (
         <WorkbenchStartPageContainer
           capability={projectCatalogCapability}
           activeTabId={activeWorkbenchTab.tabId}
           onOpenLocal={() => void openProject()}
-          onOpenRecent={(recentSourcePath) => void openProject(recentSourcePath)}
-          onOpenSidebar={() => {
-            setGlobalSidebarOpen(true);
-          }}
+          onOpenRegistered={openRegisteredWorkbenchProject}
         />
-      ) : (
+      ) : null}
+      {projectRulesPageActive ? (
+        <ProjectRulesEditorPage
+          activeTabId={activeWorkbenchTab.tabId}
+          snapshot={projectRulesSnapshot}
+          runLocked={runSnapshot.activeLocked || runInProgress}
+          onChange={updateProjectRules}
+          onBeginComposition={beginProjectRulesComposition}
+          onFinishComposition={finishProjectRulesComposition}
+          onRestore={restoreProjectRules}
+          onSave={saveProjectRules}
+          onRetry={retryProjectRules}
+        />
+      ) : null}
       <div
         id="workbench-content-outlet"
         role="tabpanel"
@@ -6155,6 +6262,9 @@ export default function Workbench() {
         className="review-scroll-stage"
         data-inspector={workbenchInspector}
         data-review-active={readyReviewOverlay ? "true" : undefined}
+        data-surface-hidden={settingsPageActive || startPageActive || projectRulesPageActive
+          ? "true"
+          : undefined}
       >
         {readyReviewOverlay}
         <section
@@ -6193,16 +6303,14 @@ export default function Workbench() {
                 />
               ) : null}
               <WorkbenchDocumentCanvasPool
-                  activeTabId={activeWorkbenchTab.kind === "document"
-                    ? activeWorkbenchTab.tabId
-                    : null}
+                  activeTabId={documentRuntimeTabId}
                   activeSourceSha256={sourceSha256} activeCanvasGeneration={canvasGeneration}
                   retainedTabIds={retainedCanvasKeys.map((entry) => entry.tabId)}
                   onEvict={evictRuntimeCanvas}
-                  activeElement={editRuntimePreparing && !activeRuntimeCanvasUsable
-                    ? null
-                    : <HtmlCanvasEditor
-                  key={`editor-authority-${activeWorkbenchTab.tabId}-${canvasGeneration}`}
+                  activeElement={canMountUnboundCanvas
+                    && !(editRuntimePreparing && !activeRuntimeCanvasUsable)
+                    ? <HtmlCanvasEditor
+                  key={`editor-authority-${documentRuntimeTabId || "none"}-${canvasGeneration}`}
                   ref={editorRef}
                   html={html}
                   semanticRevision={editRevision}
@@ -6230,9 +6338,9 @@ export default function Workbench() {
                       canvasGeneration: grant.canvasGeneration,
                       outcome,
                     });
-                    if (outcome === "ready" && activeWorkbenchTab.kind === "document") {
+                    if (outcome === "ready" && documentRuntimeTabId) {
                       retainRuntimeCanvas(
-                        activeWorkbenchTab.tabId,
+                        documentRuntimeTabId,
                         grant.sourceSha256,
                         grant.canvasGeneration,
                         false,
@@ -6280,12 +6388,13 @@ export default function Workbench() {
                       : "editing"}
                   enableReorder={!interactionLocked}
                   pointerCapabilityHoverEnabled={!isBuiltInWelcomePage}
-                />}
+                />
+                    : null}
                 />
               </>
             ) : null}
           </div>
-          {canvasMode === "preview" ? (
+          {canvasMode === "preview" && (documentRuntimeTabId || browserPreviewOnly) ? (
             <HtmlInteractionPreview
               key={`preview-authority-${canvasGeneration}`}
               ref={interactionPreviewRef}
@@ -6335,7 +6444,6 @@ export default function Workbench() {
           />
         ) : null}
       </div>
-      )}
 
       {previewAttachment && attachmentObjectUrls[previewAttachment.attachmentId] ? (
         <AttachmentLightbox
@@ -6374,7 +6482,7 @@ export default function Workbench() {
         onOpenUserNotice={() => void openUserNotice()}
       />
 
-      {presentedInterruption ? (
+      {presentedInterruption && !readyReviewSession ? (
         <NoticeBar
           className="toast"
           title={presentedInterruption.title}

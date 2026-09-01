@@ -35,8 +35,15 @@ import {
   REVIEW_STRUCTURE_TONE_COLOR,
   type ReviewCommentGroup,
   type ReviewDocuments,
+  type ReviewPresentation,
+  type ReviewRevealStep,
   type ReviewSide,
 } from "./review-document";
+import {
+  reviewVisualVerdict,
+  type ReviewVisualObservation,
+  type ReviewVisualVerdict,
+} from "./review/review-visual-model.js";
 import ReadOnlyCommentMarker from "../components/ReadOnlyCommentMarker";
 import {
   REVIEW_TEXT_EVIDENCE_ADDED_COLOR,
@@ -78,6 +85,35 @@ type ReviewCommentLayout = {
   viewportTop: number;
   global: boolean;
 };
+type ReviewVisualPhase = "analyzing" | "complete" | "unverified" | "unsupported";
+type ReviewVisualResolution = {
+  documents: ReviewDocuments;
+  reloadRevision: number;
+  generation: number;
+  phase: ReviewVisualPhase;
+  verdicts: Record<string, ReviewVisualVerdict>;
+  unverifiedCount: number;
+};
+
+function initialVisualResolution(
+  documents: ReviewDocuments,
+  reloadRevision: number,
+  generation: number,
+): ReviewVisualResolution {
+  const unsupported = documents.visualBinding.identity === "unsupported";
+  return {
+    documents,
+    reloadRevision,
+    generation,
+    phase: unsupported
+      ? "unsupported"
+      : documents.visualEvidence.length
+        ? "analyzing"
+        : "complete",
+    verdicts: {},
+    unverifiedCount: unsupported ? documents.changes.length : 0,
+  };
+}
 
 const FILTER_LABELS: Record<ReviewChangeFilter, string> = {
   all: "全部",
@@ -114,6 +150,7 @@ type ReviewMessage = {
   scrollGeometry?: unknown;
   panelKey?: string;
   panelPath?: string[];
+  revealSteps?: ReviewRevealStep[];
   presentationEpoch?: number;
   actionKey?: string;
   actionType?: "click" | "control-state";
@@ -201,9 +238,11 @@ function ReviewDocumentPane({
   label,
   zoom,
   onFrame,
+  onFrameLoad,
   onScale,
   onViewport,
   onHorizontalScroll,
+  onCommentActive,
   independentTransport,
   frameUrl,
   loadFailed,
@@ -217,9 +256,11 @@ function ReviewDocumentPane({
   label: string;
   zoom: ReviewZoomMode;
   onFrame: (side: ReviewSide, frame: HTMLIFrameElement | null) => void;
+  onFrameLoad: (side: ReviewSide, frame: HTMLIFrameElement) => void;
   onScale: (side: ReviewSide, scale: number) => void;
   onViewport: (side: ReviewSide, viewport: HTMLDivElement | null) => void;
   onHorizontalScroll: (side: ReviewSide) => void;
+  onCommentActive: (keys: readonly string[], active: boolean) => void;
   independentTransport: boolean;
   frameUrl?: string;
   loadFailed: boolean;
@@ -265,6 +306,49 @@ function ReviewDocumentPane({
   const renderedWidth = documentViewportWidth * scale;
   const iframeHeight = Math.max(620, viewportSize.height / scale);
   const commentLayoutsByKey = new Map(commentLayouts.map((layout) => [layout.key, layout]));
+  const commentEntries = commentGroups.flatMap((group) => {
+    const layout = commentLayoutsByKey.get(group.key);
+    return layout ? [{ group, layout }] : [];
+  });
+  const nearbyCommentClusters: Array<{
+    key: string;
+    keys: string[];
+    items: ReviewCommentGroup["items"];
+    top: number;
+    viewportTop: number;
+    global: boolean;
+  }> = [];
+  commentEntries
+    .filter(({ layout }) => !layout.global)
+    .sort((left, right) => left.layout.top - right.layout.top)
+    .forEach(({ group, layout }) => {
+      const previous = nearbyCommentClusters.at(-1);
+      if (previous && Math.abs(layout.top - previous.top) * scale < 34) {
+        previous.key += `-${group.key}`;
+        previous.keys.push(group.key);
+        previous.items.push(...group.items);
+        return;
+      }
+      nearbyCommentClusters.push({
+        key: group.key,
+        keys: [group.key],
+        items: [...group.items],
+        top: layout.top,
+        viewportTop: layout.viewportTop,
+        global: false,
+      });
+    });
+  const globalEntries = commentEntries.filter(({ layout }) => layout.global);
+  if (globalEntries.length) {
+    nearbyCommentClusters.unshift({
+      key: globalEntries.map(({ group }) => group.key).join("-"),
+      keys: globalEntries.map(({ group }) => group.key),
+      items: globalEntries.flatMap(({ group }) => group.items),
+      top: 20 / scale,
+      viewportTop: 20 / scale,
+      global: true,
+    });
+  }
 
   useEffect(() => {
     onScale(side, scale);
@@ -275,26 +359,18 @@ function ReviewDocumentPane({
     onViewport(side, null);
   }, [onFrame, onViewport, side]);
 
-  const renderCommentMarker = (group: ReviewCommentGroup) => {
-    const layout = commentLayoutsByKey.get(group.key);
-    if (!layout) return null;
-    const left = Math.max(12, Math.min(documentViewportWidth - 12, layout.left)) * scale;
-    const top = Math.max(12, layout.top) * scale;
-    // Horizontal scrolling must not re-render the pane, so the rendered side is
-    // the unscrolled one; pointer entry and keyboard focus measure the live
-    // position instead.
-    const visibleLeft = layout.viewportLeft * scale;
-    const visibleTop = layout.viewportTop * scale;
+  const renderCommentMarker = (cluster: (typeof nearbyCommentClusters)[number]) => {
+    const left = Math.max(18, viewportSize.width - 18);
+    const top = Math.max(18, cluster.top * scale);
+    const visibleTop = cluster.viewportTop * scale;
     return (
       <ReadOnlyCommentMarker
-        key={group.key}
-        group={group}
+        key={cluster.key}
+        group={{ key: cluster.key, items: cluster.items }}
         left={left}
         top={top}
         viewportRef={viewportRef}
-        initialPlacement={
-          visibleLeft < viewportSize.width * .55 ? "right" : "left"
-        }
+        initialPlacement="left"
         initialVertical={
           visibleTop < 96
             ? "below"
@@ -304,6 +380,7 @@ function ReviewDocumentPane({
         }
         testId="review-comment-marker"
         bubbleTestId="review-comment-bubble"
+        onActiveChange={(active) => onCommentActive(cluster.keys, active)}
       />
     );
   };
@@ -362,22 +439,19 @@ function ReviewDocumentPane({
               const frame = event.currentTarget;
               if (iframeRef.current !== frame) return;
               if (viewportRef.current) viewportRef.current.scrollLeft = 0;
+              onFrameLoad(side, frame);
             }}
           />
-          {commentGroups.length ? (
-            <div className={styles.reviewCommentLayer}>
-              <div className={styles.reviewCommentContentLayer}>
-                {commentGroups.filter((group) => (
-                  commentLayoutsByKey.get(group.key)?.global !== true
-                )).map(renderCommentMarker)}
-              </div>
-              {commentGroups.filter((group) => (
-                commentLayoutsByKey.get(group.key)?.global === true
-              )).map(renderCommentMarker)}
-            </div>
-          ) : null}
         </div>
       </div>
+      {nearbyCommentClusters.length ? (
+        <div className={styles.reviewCommentLayer}>
+          <div className={styles.reviewCommentContentLayer}>
+            {nearbyCommentClusters.filter((cluster) => !cluster.global).map(renderCommentMarker)}
+          </div>
+          {nearbyCommentClusters.filter((cluster) => cluster.global).map(renderCommentMarker)}
+        </div>
+      ) : null}
     </section>
   );
 }
@@ -391,7 +465,6 @@ export default function AiReviewWorkspace({
   sourcePath,
   accepting,
   error,
-  notice,
   onAbout,
   onReturnBefore,
   onAccept,
@@ -409,7 +482,6 @@ export default function AiReviewWorkspace({
   sourcePath?: string;
   accepting: boolean;
   error?: string;
-  notice?: string;
   onAbout: () => void;
   onReturnBefore: () => void;
   onAccept: () => void;
@@ -439,7 +511,7 @@ export default function AiReviewWorkspace({
     changeFilter: filter,
     contextVisibility: transparency,
     navigationTarget: focus,
-    pagePresentationPath,
+    pagePresentation,
     scrollMode,
     zoomMode: zoom,
   } = reviewState;
@@ -504,15 +576,25 @@ export default function AiReviewWorkspace({
     after: null,
   });
   const reviewCommentPortRef = useRef<MessagePort | null>(null);
+  const reviewVisualPortsRef = useRef<Record<ReviewSide, MessagePort | null>>({ before: null, after: null });
+  const reviewVisualChallengesRef = useRef<Partial<Record<ReviewSide, { challenge: string; frame: HTMLIFrameElement }>>>({});
+  const reviewVisualObservationsRef = useRef<Partial<Record<ReviewSide, Map<string, ReviewVisualObservation>>>>({});
+  const reviewVisualGenerationRef = useRef(0);
+  const reviewFrameLoadCountsRef = useRef(new WeakMap<HTMLIFrameElement, number>());
+  const reviewVisualTimeoutRef = useRef<number | null>(null);
+  const activeCommentKeysRef = useRef(new Set<string>());
+  const [, setVisualResolution] = useState<ReviewVisualResolution>(() => (
+    initialVisualResolution(documents, reloadRevision, 0)
+  ));
   const reviewCommentChannelChallengeRef = useRef<{
     challenge: string;
     frame: HTMLIFrameElement;
   } | null>(null);
-  const reviewStateRef = useRef({ filter, focus, transparency, pagePresentationPath });
+  const reviewStateRef = useRef({ filter, focus, transparency, pagePresentation });
   const scrollModeRef = useRef(scrollMode);
   useLayoutEffect(() => {
-    reviewStateRef.current = { filter, focus, transparency, pagePresentationPath };
-  }, [filter, focus, pagePresentationPath, transparency]);
+    reviewStateRef.current = { filter, focus, transparency, pagePresentation };
+  }, [filter, focus, pagePresentation, transparency]);
   const desktopSessions = desktopSessionResult?.documents === documents
     && desktopSessionResult.reloadRevision === reloadRevision
     ? desktopSessionResult.sessions
@@ -526,12 +608,13 @@ export default function AiReviewWorkspace({
     ? commentLayoutState.layouts
     : [];
   const reviewChanges = documents.changes;
-  const reviewOutline = documents.outline;
-  const navigableChanges = useMemo(() => (
-    filter === "all"
-      ? reviewChanges
-      : reviewChanges.filter((change) => change.types.includes(filter))
-  ), [filter, reviewChanges]);
+  const confirmedChangeIds = useMemo(
+    () => new Set(reviewChanges.map((change) => change.id)),
+    [reviewChanges],
+  );
+  const reviewOutline = useMemo(() => documents.outline.filter((item) => (
+    !item.changeId || confirmedChangeIds.has(item.changeId)
+  )), [confirmedChangeIds, documents.outline]);
   const activeChange = focus === "all"
     ? null
     : reviewChanges.find((change) => change.id === focus) || null;
@@ -544,6 +627,86 @@ export default function AiReviewWorkspace({
     reviewCommentPortRef.current = null;
     reviewCommentChannelChallengeRef.current = null;
   }, []);
+  const closeReviewVisualChannels = useCallback(() => {
+    (['before', 'after'] as ReviewSide[]).forEach((side) => {
+      const port = reviewVisualPortsRef.current[side];
+      if (port) {
+        port.postMessage({
+          type: "comment-highlight",
+          sessionId,
+          side,
+          active: false,
+          stableIds: [],
+        });
+        port.onmessage = null;
+        port.close();
+      }
+      reviewVisualPortsRef.current[side] = null;
+    });
+    reviewVisualChallengesRef.current = {};
+    reviewVisualObservationsRef.current = {};
+  }, [sessionId]);
+
+  useLayoutEffect(() => {
+    reviewVisualGenerationRef.current += 1;
+    const generation = reviewVisualGenerationRef.current;
+    closeReviewVisualChannels();
+    activeCommentKeysRef.current.clear();
+    if (reviewVisualTimeoutRef.current !== null) {
+      window.clearTimeout(reviewVisualTimeoutRef.current);
+      reviewVisualTimeoutRef.current = null;
+    }
+    setVisualResolution(initialVisualResolution(documents, reloadRevision, generation));
+    if (documents.visualBinding.identity === "supported" && documents.visualEvidence.length) {
+      reviewVisualTimeoutRef.current = window.setTimeout(() => {
+        if (reviewVisualGenerationRef.current !== generation) return;
+        const verdicts = Object.fromEntries(documents.visualEvidence.map((evidence) => (
+          [evidence.stableId, "unverified" as const]
+        )));
+        setVisualResolution({
+          documents,
+          reloadRevision,
+          generation,
+          phase: "unverified",
+          verdicts,
+          unverifiedCount: documents.visualEvidence.length,
+        });
+      }, 4_000);
+    }
+    return () => {
+      if (reviewVisualTimeoutRef.current !== null) {
+        window.clearTimeout(reviewVisualTimeoutRef.current);
+        reviewVisualTimeoutRef.current = null;
+      }
+      closeReviewVisualChannels();
+    };
+  }, [closeReviewVisualChannels, documents, reloadRevision, sessionId]);
+
+  const observeReviewVisualSide = useCallback((side: ReviewSide) => {
+    const port = reviewVisualPortsRef.current[side];
+    if (!port) return;
+    port.postMessage({
+      type: "observe",
+      sessionId,
+      side,
+      sourceHash: documents.visualBinding.sourceHash[side],
+      generation: reviewVisualGenerationRef.current,
+      candidates: documents.visualEvidence.map((evidence) => ({
+        stableId: evidence.stableId,
+        positionSensitive: evidence.kinds.includes("moved"),
+        present: side === "before" ? evidence.beforePresent : evidence.afterPresent,
+      })),
+    });
+  }, [documents, sessionId]);
+
+  const requestReviewVisualFrame = useCallback((side: ReviewSide, frame: HTMLIFrameElement) => {
+    if (reviewVisualPortsRef.current[side] || reviewVisualChallengesRef.current[side]?.frame === frame
+      || frame.dataset.reloadRevision !== String(reloadRevision)) return;
+    const challenge = createReviewCapabilityChallenge();
+    if (!challenge) return;
+    reviewVisualChallengesRef.current[side] = { challenge, frame };
+    postToFrame(frame, sessionId, { type: "request-review-visual-channel", challenge });
+  }, [reloadRevision, sessionId]);
 
   const updateCommentScrollTransform = useCallback((
     side: ReviewSide,
@@ -558,6 +721,10 @@ export default function AiReviewWorkspace({
     const scale = scalesRef.current[side];
     viewport.style.setProperty("--review-comment-scroll-x", `${safeLeft * scale}px`);
     viewport.style.setProperty("--review-comment-scroll-y", `${safeTop * scale}px`);
+    viewport.parentElement?.style.setProperty(
+      "--review-comment-scroll-y",
+      `${safeTop * scale}px`,
+    );
   }, []);
 
   // The pane viewport owns horizontal review scrolling, but the wheel lands
@@ -681,13 +848,16 @@ export default function AiReviewWorkspace({
     reviewStateRef.current = {
       ...reviewStateRef.current,
       focus: targetId,
-      pagePresentationPath: [],
+      pagePresentation: { before: [], after: [] },
     };
     dispatchReviewState({
       type: "set-navigation-target",
       value: targetId,
     });
-    dispatchReviewState({ type: "set-page-presentation", value: [] });
+    dispatchReviewState({
+      type: "set-page-presentation",
+      value: { before: [], after: [] },
+    });
   }, [documents, sessionId]);
 
   const sendState = useCallback((side?: ReviewSide) => {
@@ -730,6 +900,82 @@ export default function AiReviewWorkspace({
       challenge,
     });
   }, [documents.commentTargets, reloadRevision, sessionId]);
+
+  const handleReviewFrameLoad = useCallback((
+    side: ReviewSide,
+    frame: HTMLIFrameElement,
+  ) => {
+    if (framesRef.current[side] !== frame) return;
+    const loadCount = reviewFrameLoadCountsRef.current.get(frame) || 0;
+    reviewFrameLoadCountsRef.current.set(frame, loadCount + 1);
+    if (loadCount === 0) return;
+    const generation = reviewVisualGenerationRef.current + 1;
+    reviewVisualGenerationRef.current = generation;
+    reviewVisualObservationsRef.current = {};
+    setVisualResolution(initialVisualResolution(documents, reloadRevision, generation));
+    if (reviewVisualTimeoutRef.current !== null) window.clearTimeout(reviewVisualTimeoutRef.current);
+    if (documents.visualBinding.identity === "supported" && documents.visualEvidence.length) {
+      reviewVisualTimeoutRef.current = window.setTimeout(() => {
+        if (reviewVisualGenerationRef.current !== generation) return;
+        setVisualResolution({
+          documents,
+          reloadRevision,
+          generation,
+          phase: "unverified",
+          verdicts: Object.fromEntries(documents.visualEvidence.map((evidence) => (
+            [evidence.stableId, "unverified" as const]
+          ))),
+          unverifiedCount: documents.visualEvidence.length,
+        });
+      }, 4_000);
+    }
+    activeCommentKeysRef.current.clear();
+    (["before", "after"] as ReviewSide[]).forEach((targetSide) => {
+      reviewVisualPortsRef.current[targetSide]?.postMessage({
+        type: "comment-highlight",
+        sessionId,
+        side: targetSide,
+        active: false,
+        stableIds: [],
+      });
+      reviewVisualPortsRef.current[targetSide]?.postMessage({
+        type: "verdicts",
+        sessionId,
+        side: targetSide,
+        changed: reviewChanges.map((change) => ({
+          ...change,
+          stableId: change.evidenceStableIds?.[0],
+        })),
+      });
+    });
+    const port = reviewVisualPortsRef.current[side];
+    if (port) {
+      port.onmessage = null;
+      port.close();
+    }
+    reviewVisualPortsRef.current[side] = null;
+    delete reviewVisualChallengesRef.current[side];
+    if (side === "before") {
+      closeReviewCommentChannel();
+      setCommentLayoutState({ documents, reloadRevision, layouts: [] });
+    }
+    const otherSide: ReviewSide = side === "before" ? "after" : "before";
+    observeReviewVisualSide(otherSide);
+    window.requestAnimationFrame(() => {
+      if (framesRef.current[side] !== frame) return;
+      prepareReviewCommentFrame(side, frame);
+      requestReviewVisualFrame(side, frame);
+    });
+  }, [
+    closeReviewCommentChannel,
+    documents,
+    observeReviewVisualSide,
+    prepareReviewCommentFrame,
+    reloadRevision,
+    reviewChanges,
+    requestReviewVisualFrame,
+    sessionId,
+  ]);
 
   useLayoutEffect(() => {
     reviewFrameReadyRef.current = {
@@ -776,11 +1022,27 @@ export default function AiReviewWorkspace({
   }, [sessionId]);
 
   const coordinatePagePresentation = useCallback((
-    rawPath: readonly string[],
+    requested: ReviewPresentation,
     afterCommit?: () => void,
   ) => {
-    const panelPath = [...new Set(rawPath.filter((key) => /^panel-\d+$/u.test(key)))];
-    if (!panelPath.length) {
+    const normalize = (side: ReviewSide) => {
+      const seen = new Set<string>();
+      return requested[side].filter((step) => {
+        const valid = step.kind === "panel"
+          ? /^panel-\d+$/u.test(step.key)
+          : /^pr1_[0-9a-f]{32}$/iu.test(step.stableId);
+        if (!valid) return false;
+        const key = step.kind === "panel" ? `panel:${step.key}` : `details:${step.stableId}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+    };
+    const presentation: ReviewPresentation = {
+      before: normalize("before"),
+      after: normalize("after"),
+    };
+    if (!presentation.before.length && !presentation.after.length) {
       afterCommit?.();
       return;
     }
@@ -801,7 +1063,7 @@ export default function AiReviewWorkspace({
       timer: null as number | null,
     };
     presentationReadyRef.current = pending;
-    dispatchReviewState({ type: "set-page-presentation", value: panelPath });
+    dispatchReviewState({ type: "set-page-presentation", value: presentation });
     expected.forEach((side) => {
       postToFrame(framesRef.current[side], sessionId, {
         type: "begin-presentation",
@@ -810,9 +1072,8 @@ export default function AiReviewWorkspace({
     });
     expected.forEach((side) => {
       postToFrame(framesRef.current[side], sessionId, {
-        type: "activate-panel",
-        panelKey: panelPath.at(-1),
-        panelPath,
+        type: "activate-presentation",
+        revealSteps: presentation[side],
         presentationEpoch: epoch,
       });
     });
@@ -914,14 +1175,16 @@ export default function AiReviewWorkspace({
         postToFrame(framesRef.current[side], sessionId, {
           type: "focus-change",
           changeId,
-          panelKey: selectedChange?.panelKey,
-          panelPath: selectedChange?.panelPath,
+          revealSteps: selectedChange?.presentation[side] || [],
           behavior,
         });
       });
     };
-    if (selectedChange?.panelPath?.length) {
-      coordinatePagePresentation(selectedChange.panelPath, focusChange);
+    if (selectedChange && (
+      selectedChange.presentation.before.length
+      || selectedChange.presentation.after.length
+    )) {
+      coordinatePagePresentation(selectedChange.presentation, focusChange);
     } else {
       focusChange();
     }
@@ -991,11 +1254,88 @@ export default function AiReviewWorkspace({
         });
         return;
       }
+      if (message.type === "review-visual-channel") {
+        const port = event.ports.length === 1 ? event.ports[0] : null;
+        const visualSide = message.side as ReviewSide;
+        const expected = reviewVisualChallengesRef.current[visualSide];
+        if (!port || typeof message.challenge !== "string" || message.challenge !== expected?.challenge
+          || expected.frame !== framesRef.current[visualSide] || reviewVisualPortsRef.current[visualSide]) {
+          port?.close();
+          return;
+        }
+        delete reviewVisualChallengesRef.current[visualSide];
+        reviewVisualPortsRef.current[visualSide] = port;
+        port.onmessage = (portEvent) => {
+          const payload = portEvent.data;
+          if (!payload || payload.type !== "observations" || !Array.isArray(payload.observations)) return;
+          const observations = new Map<string, ReviewVisualObservation>();
+          payload.observations.forEach((value: unknown) => {
+            const observation = value as ReviewVisualObservation;
+            if (observation?.side === visualSide && typeof observation.stableId === "string") {
+              observations.set(observation.stableId, observation);
+            }
+          });
+          reviewVisualObservationsRef.current[visualSide] = observations;
+          const before = reviewVisualObservationsRef.current.before;
+          const after = reviewVisualObservationsRef.current.after;
+          if (!before || !after) return;
+          const generation = reviewVisualGenerationRef.current;
+          const verdicts = Object.fromEntries(documents.visualEvidence.map((evidence) => (
+            [evidence.stableId, reviewVisualVerdict(
+              evidence,
+              before.get(evidence.stableId),
+              after.get(evidence.stableId),
+              documents.visualBinding,
+              generation,
+            )]
+          )));
+          const unverifiedCount = Object.values(verdicts).filter((verdict) => (
+            verdict === "unverified"
+          )).length;
+          if (reviewVisualTimeoutRef.current !== null) {
+            window.clearTimeout(reviewVisualTimeoutRef.current);
+            reviewVisualTimeoutRef.current = null;
+          }
+          setVisualResolution({
+            documents,
+            reloadRevision,
+            generation,
+            phase: unverifiedCount ? "unverified" : "complete",
+            verdicts,
+            unverifiedCount,
+          });
+        };
+        port.postMessage({
+          type: "verdicts",
+          sessionId,
+          side: visualSide,
+          changed: reviewChanges.map((change) => ({
+            ...change,
+            stableId: change.evidenceStableIds?.[0],
+          })),
+        });
+        const activeKeys = activeCommentKeysRef.current;
+        const activeStableIds = [...new Set(documents.commentTargets.flatMap((target) => (
+          activeKeys.has(target.key) && target.stableId ? [target.stableId] : []
+        )))];
+        if (activeStableIds.length) port.postMessage({
+          type: "comment-highlight",
+          sessionId,
+          side: visualSide,
+          active: true,
+          stableIds: activeStableIds,
+        });
+        if (documents.visualBinding.identity === "supported" && documents.visualEvidence.length) {
+          observeReviewVisualSide(visualSide);
+        }
+        return;
+      }
       if (message.type === "ready") {
         const frame = framesRef.current[message.side];
         if (frame) {
           reviewFrameReadyRef.current[message.side] = { documents, frame };
           prepareReviewCommentFrame(message.side, frame);
+          requestReviewVisualFrame(message.side, frame);
           if (
             reviewFrameReadyRef.current.before?.documents === documents
             && reviewFrameReadyRef.current.after?.documents === documents
@@ -1100,8 +1440,11 @@ export default function AiReviewWorkspace({
           : message.panelKey
             ? [message.panelKey]
             : [];
+        const panelSteps: ReviewRevealStep[] = panelPath.map((key) => ({ kind: "panel", key }));
         const visibleItem = reviewOutline.find((item) => (
-          item.panelPath?.at(-1) === panelPath.at(-1)
+          item.presentation?.[message.side || "after"]
+            .filter((step) => step.kind === "panel")
+            .at(-1)?.key === panelPath.at(-1)
         ));
         if (visibleItem) {
           dispatchReviewState({
@@ -1109,7 +1452,7 @@ export default function AiReviewWorkspace({
             value: visibleItem.changeId || visibleItem.id,
           });
         }
-        coordinatePagePresentation(panelPath);
+        coordinatePagePresentation({ before: panelSteps, after: panelSteps });
         return;
       }
       // A click on a page-edge revision bar or a region caption asks the
@@ -1129,7 +1472,9 @@ export default function AiReviewWorkspace({
     documents,
     finishPagePresentation,
     focusHorizontalFootprint,
+    observeReviewVisualSide,
     prepareReviewCommentFrame,
+    requestReviewVisualFrame,
     relayHorizontalWheel,
     reviewChanges,
     reviewOutline,
@@ -1170,6 +1515,43 @@ export default function AiReviewWorkspace({
       },
     });
   }, [sessionId, updateCommentScrollTransform]);
+
+  const setReviewCommentHighlight = useCallback((
+    keys: readonly string[],
+    active: boolean,
+  ) => {
+    keys.forEach((key) => {
+      if (active) activeCommentKeysRef.current.add(key);
+      else activeCommentKeysRef.current.delete(key);
+    });
+    const allowedKeys = activeCommentKeysRef.current;
+    const stableIds = [...new Set(documents.commentTargets.flatMap((target) => (
+      allowedKeys.has(target.key) && target.stableId ? [target.stableId] : []
+    )))];
+    (["before", "after"] as ReviewSide[]).forEach((side) => {
+      reviewVisualPortsRef.current[side]?.postMessage({
+        type: "comment-highlight",
+        sessionId,
+        side,
+        active: stableIds.length > 0,
+        stableIds,
+      });
+    });
+  }, [documents.commentTargets, sessionId]);
+
+  useEffect(() => {
+    (["before", "after"] as ReviewSide[]).forEach((side) => {
+      reviewVisualPortsRef.current[side]?.postMessage({
+        type: "verdicts",
+        sessionId,
+        side,
+        changed: reviewChanges.map((change) => ({
+          ...change,
+          stableId: change.evidenceStableIds?.[0],
+        })),
+      });
+    });
+  }, [reviewChanges, sessionId]);
 
   const handleHorizontalScroll = useCallback((side: ReviewSide) => {
     if (scrollModeRef.current !== "linked" || horizontalFocusSidesRef.current.has(side)) return;
@@ -1373,13 +1755,6 @@ export default function AiReviewWorkspace({
         </div>
       ) : null}
 
-      {!error && notice ? (
-        <div className={styles.reviewNotice} role="status">
-          <WarningCircleIcon aria-hidden="true" size={17} weight="fill" />
-          <span>{notice}</span>
-        </div>
-      ) : null}
-
       <main
         className={`${styles.reviewMain}${sidebar ? ` ${styles.reviewMainWithSidebar}` : ""}`}
         inert={confirmationAction ? true : undefined}
@@ -1533,57 +1908,6 @@ export default function AiReviewWorkspace({
           </div> : null}
 
           <div className={styles.canvasReviewBody}>
-            {documents.reviewImpact ? (
-              <section
-                className={styles.reviewImpactSummary}
-                data-testid="review-impact-summary"
-                aria-label="本轮 AI 修改范围"
-              >
-                <div className={styles.reviewImpactHeading}>
-                  <span className={styles.reviewImpactEyebrow}>修改范围提示</span>
-                  {documents.reviewImpact.outsideRequestedTargetCount > 0 ? (
-                    <WarningCircleIcon aria-hidden="true" size={15} weight="fill" />
-                  ) : null}
-                </div>
-                <div className={styles.reviewImpactStats}>
-                  <span><strong>{documents.reviewImpact.requestedTargetCount}</strong> 本轮评论目标</span>
-                  <span><strong>{documents.reviewImpact.actualChangedElementCount}</strong> 实际修改元素</span>
-                  <span><strong>{documents.reviewImpact.outsideRequestedTargetCount}</strong> 目标之外修改</span>
-                </div>
-                {documents.reviewImpact.outsideRequestedTargetCount > 0 ? (
-                  <div className={styles.reviewImpactWarning} role="status">
-                    <span>评论目标之外的修改仍保留为上下文，请从变化审阅入口核对。</span>
-                    <button
-                      className={styles.reviewImpactLink}
-                      type="button"
-                      onClick={() => selectReviewMode("all")}
-                    >
-                      查看超范围修改
-                    </button>
-                    <div className={styles.reviewImpactIds}>
-                      <span>
-                        目标之外元素
-                        {documents.reviewImpact.truncated ? "（仅展示样例）" : ""}：
-                      </span>
-                      {documents.reviewImpact.outsideTargetElementIdSample.map((id) => (
-                        <code key={id}>{id}</code>
-                      ))}
-                    </div>
-                  </div>
-                ) : (
-                  <div className={styles.reviewImpactQuiet}>
-                    本轮未发现评论目标之外的源码元素修改。
-                  </div>
-                )}
-              </section>
-            ) : null}
-            {!navigableChanges.length ? (
-              <div className={styles.emptyFilterNotice} role="status">
-                {filter === "all"
-                  ? "本轮没有检测到变化，仍可查看双页"
-                  : `本轮没有检测到${FILTER_LABELS[filter]}变化，仍可切回双页或其他类型继续审阅`}
-              </div>
-            ) : null}
             <div className={styles.canvasGrid} data-view={canvasView}>
               <ReviewDocumentPane
                 side="before"
@@ -1591,9 +1915,11 @@ export default function AiReviewWorkspace({
                 label={beforeLabel}
                 zoom={zoom}
                 onFrame={registerFrame}
+                onFrameLoad={handleReviewFrameLoad}
                 onScale={updateScale}
                 onViewport={registerViewport}
                 onHorizontalScroll={handleHorizontalScroll}
+                onCommentActive={setReviewCommentHighlight}
                 independentTransport={independentTransport}
                 frameUrl={desktopSessions?.before.url}
                 loadFailed={reviewLoadFailed}
@@ -1608,9 +1934,11 @@ export default function AiReviewWorkspace({
                 label={afterLabel}
                 zoom={zoom}
                 onFrame={registerFrame}
+                onFrameLoad={handleReviewFrameLoad}
                 onScale={updateScale}
                 onViewport={registerViewport}
                 onHorizontalScroll={handleHorizontalScroll}
+                onCommentActive={setReviewCommentHighlight}
                 independentTransport={independentTransport}
                 frameUrl={desktopSessions?.after.url}
                 loadFailed={reviewLoadFailed}

@@ -169,10 +169,14 @@ export function annotateReviewComments(
         null,
       );
     const sourceNodeId = global ? undefined : sourceNodeIdsByElement.get(element);
+    const stableId = global
+      ? undefined
+      : element.getAttribute("data-pageroot-id") || undefined;
     if (selector || sourceNodeId) {
       targets.push({
         key,
         global,
+        ...(stableId ? { stableId } : {}),
         ...(selector ? { selector } : {}),
         ...(sourceNodeId ? { sourceNodeId } : {}),
       });

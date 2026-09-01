@@ -127,6 +127,35 @@ test("path-only review comments bind against a real parsed DOM", {
   ))).toBe(true);
 });
 
+test("private visual capability observes the actual stable host after authored runtime mutation", async ({ page }) => {
+  const bootstrap = generatedReviewBootstrap(
+    [],
+    "after",
+    ["pr1_11111111111141118111111111111111"],
+  );
+  await page.setContent(`<!doctype html><script>${bootstrap}</script><main data-pageroot-id="pr1_11111111111141118111111111111111">old</main><script>document.querySelector('main').textContent = 'runtime new'</script>`);
+  const result = await page.evaluate(async () => {
+    let port;
+    const listener = (event) => {
+      if (event.data?.type === "review-visual-channel") port = event.ports[0];
+    };
+    addEventListener("message", listener);
+    postMessage({ source: "pageroot-ai-review-parent", sessionId: "review-session", type: "request-review-visual-channel", challenge: "b".repeat(32) }, "*");
+    const until = Date.now() + 3000;
+    while (!port && Date.now() < until) await new Promise((resolve) => setTimeout(resolve, 10));
+    if (!port) return null;
+    const observations = await new Promise((resolve) => {
+      port.onmessage = (event) => resolve(event.data.observations);
+      port.postMessage({ type: "observe", sessionId: "review-session", side: "after", sourceHash: "sha256:test", generation: 0, candidates: [{ stableId: "pr1_11111111111141118111111111111111", present: true }] });
+    });
+    removeEventListener("message", listener);
+    return observations;
+  });
+  expect(result).toHaveLength(1);
+  expect(result[0].visible).toBe(true);
+  expect(result[0].fingerprint).toMatch(/^\d+:\d+$/u);
+});
+
 test("source-backed comment IDs survive an authored RegExp exec mutation", {
   tag: ["@gate-smoke","@smoke-comments"],
 }, async ({ page }) => {

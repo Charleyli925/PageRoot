@@ -7,23 +7,23 @@ import { fileURLToPath } from "node:url";
 const productRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const read = (relativePath) => readFileSync(path.join(productRoot, relativePath), "utf8");
 
-test("ADR 0066 and the architecture contract freeze stable-ID source Review", () => {
+test("ADR 0066/0068 and the architecture contract keep source Review authoritative", () => {
   const adr = read("docs/decisions/0066-stable-id-source-review.md");
+  const visualAdr = read("docs/decisions/0068-review-visual-verdict-gate.md");
   const architecture = read("docs/ARCHITECTURE_CONTRACT.md");
   const normalizedAdr = adr.replace(/\s+/gu, " ");
+  const normalizedVisualAdr = visualAdr.replace(/\s+/gu, " ");
   const normalizedArchitecture = architecture.replace(/\s+/gu, " ");
 
   for (const required of [
     "valid, unique `data-pageroot-id`",
     "same-parent reorder or cross-parent move",
-    "Historical elements genuinely without IDs retain",
     "Any element that carries `data-pageroot-id` claims persistent identity",
     "exact-subtree, relocation, singleton, weighted or fuzzy pairing",
     "appears as element removal plus addition even when its content or markup is unchanged",
     "globally ambiguous across the whole document pair",
-    "If it does not pair by the same valid, unique ID",
+    "semantic source matcher remains",
     "same persistent ID remains paired when the authored element tag changes",
-    "newly added no-ID `<style>`",
     "groups common IDs by parent in one pass",
     "sibling indexes are likewise built once per parent",
     "compares stable descendants through their individual IDs",
@@ -32,32 +32,42 @@ test("ADR 0066 and the architecture contract freeze stable-ID source Review", ()
     "distinct semantic and geometry owner namespaces",
     "suppresses only that root's false presence fact",
     "images, modules and other non-text elements",
-    "`added`, `removed`, `moved`, `attribute`, `style`, `css-source` and",
-    "CSS cascade effects, layout, wrapping, animation state, Canvas/SVG",
+    "ambiguous reorder attaches `元素顺序调整` to the shared stable parent",
+    "`added`, `removed`, `moved`, `reordered`, `attribute` and `style`",
+    "CSS/Script source-only changes cannot fan out",
   ]) {
     assert.ok(normalizedAdr.includes(required), `ADR 0066 lost required contract: ${required}`);
   }
   for (const required of [
-    "unique valid stable-ID pairs",
-    "Review never serializes, compares or trusts Runtime DOM",
-    "legacy no-ID Versions retain the old matcher",
-    "Any element carrying `data-pageroot-id` claims persistent identity",
-    "cannot re-enter pairing through exact-subtree, relocation, singleton, weighted or fuzzy evidence",
-    "reported as removal plus addition even when markup is unchanged",
-    "never bridges an identified element to a different or missing persistent ID",
-    "same persistent ID pairs independently of an authored tag-kind change",
-    "adding a no-ID `<style>`",
-    "Per-parent rescans of the complete inventory",
-    "per-child rescans of siblings are forbidden",
-    "byte-identical markup cannot hide a precomputed movement",
-    "compares each stable descendant against its exact before/after ID counterpart",
-    "never through flattened whole-subtree text",
-    "Text transferred between different stable descendants",
-    "Authored candidate regions and their pairing are frozen",
-    "distinct semantic/geometry owner namespace",
-    "suppresses only its own false addition/removal",
-    "unchanged moved text produces no text fact",
-    "a common stable ID cannot degrade into",
+    "Review is a position-bound page comparison",
+    "private `ReviewDiagnostic` records",
+    "never create a `ReviewChange`, `<html>` marker, mask hole",
+    "Candidate with diagnostics but no position-bound change",
+    "side-specific `ReviewPresentation`",
+    "panel key and a Stable-ID-bound `<details>` disclosure",
+    "actual marker/evidence host, not the coarse section pair",
+    "One first change is active on entry",
+    "Other element changes retain the quiet page-edge revision bar",
+    "Same-parent topology names a concrete moved element only",
+    "attaches `元素顺序调整` to the shared Stable-ID parent",
+    "Review is a no-floating-notice surface",
+    "hides the AI conversation once",
+    "fixed to the right edge of the Before pane",
+    "aggregate to `评2`/`评3`",
+  ]) {
+    assert.ok(normalizedVisualAdr.includes(required), `ADR 0068 lost required contract: ${required}`);
+  }
+  for (const required of [
+    "user-visible `ReviewChange` is position-bound",
+    "private `ReviewDiagnostic` records",
+    "cannot create `<html>` markers, mask holes, outline entries",
+    "Equal bounded summaries cannot prove arbitrary CSS/Script behavior",
+    "Candidate with diagnostics but no position-bound change stays outside Review",
+    "All text facts and only the active element change cut mask holes",
+    "side-specific `ReviewPresentation`",
+    "actual marker/evidence host",
+    "renders no non-blocking visual status, scope card, candidate-attention notice or global Toast",
+    "hides the AI conversation once",
   ]) {
     assert.ok(normalizedArchitecture.includes(required), `Architecture Contract lost boundary: ${required}`);
   }

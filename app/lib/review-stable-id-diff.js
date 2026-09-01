@@ -12,30 +12,29 @@ function uniqueDescriptorMap(descriptors) {
   return { map, duplicateIds };
 }
 
-function longestIncreasingIds(entries) {
-  if (!entries.length) return new Set();
-  const tails = [];
-  const tailIndexes = [];
-  const previous = new Int32Array(entries.length).fill(-1);
-  entries.forEach((entry, index) => {
-    let low = 0;
-    let high = tails.length;
-    while (low < high) {
-      const middle = (low + high) >> 1;
-      if (tails[middle] < entry.afterIndex) low = middle + 1;
-      else high = middle;
-    }
-    if (low > 0) previous[index] = tailIndexes[low - 1];
-    tails[low] = entry.afterIndex;
-    tailIndexes[low] = index;
-  });
-  const ids = new Set();
-  let cursor = tailIndexes[tails.length - 1];
-  while (cursor >= 0) {
-    ids.add(entries[cursor].id);
-    cursor = previous[cursor];
+function uniqueSingleMovedId(entries) {
+  if (entries.length < 2) return null;
+  const increasingPrefix = new Array(entries.length).fill(true);
+  const increasingSuffix = new Array(entries.length).fill(true);
+  for (let index = 1; index < entries.length; index += 1) {
+    increasingPrefix[index] = increasingPrefix[index - 1]
+      && entries[index - 1].afterIndex < entries[index].afterIndex;
   }
-  return ids;
+  if (increasingPrefix.at(-1)) return null;
+  for (let index = entries.length - 2; index >= 0; index -= 1) {
+    increasingSuffix[index] = increasingSuffix[index + 1]
+      && entries[index].afterIndex < entries[index + 1].afterIndex;
+  }
+  const candidates = entries.filter((entry, index) => (
+    (index === 0 || increasingPrefix[index - 1])
+    && (index === entries.length - 1 || increasingSuffix[index + 1])
+    && (
+      index === 0
+      || index === entries.length - 1
+      || entries[index - 1].afterIndex < entries[index + 1].afterIndex
+    )
+  ));
+  return candidates.length === 1 ? candidates[0].id : null;
 }
 
 /**
@@ -55,6 +54,7 @@ export function analyzeReviewStableIdTopology(beforeDescriptors, afterDescriptor
   const addedIds = [...after.keys()].filter((id) => !before.has(id));
   const removedIds = [...before.keys()].filter((id) => !after.has(id));
   const movedIds = new Set();
+  const reorderedRanges = [];
 
   for (const id of commonIds) {
     if ((before.get(id).parentId || "") !== (after.get(id).parentId || "")) {
@@ -71,16 +71,27 @@ export function analyzeReviewStableIdTopology(beforeDescriptors, afterDescriptor
     siblings.push(id);
     siblingIdsByParent.set(parentId, siblings);
   }
-  for (const beforeSiblings of siblingIdsByParent.values()) {
+  for (const [parentId, beforeSiblings] of siblingIdsByParent) {
     beforeSiblings.sort((left, right) => before.get(left).index - before.get(right).index);
     const afterPositions = new Map(beforeSiblings
       .slice()
       .sort((left, right) => after.get(left).index - after.get(right).index)
       .map((id, index) => [id, index]));
     const entries = beforeSiblings.map((id) => ({ id, afterIndex: afterPositions.get(id) }));
-    const orderedIds = longestIncreasingIds(entries);
-    entries.forEach(({ id }) => {
-      if (!orderedIds.has(id)) movedIds.add(id);
+    const uniqueMovedId = uniqueSingleMovedId(entries);
+    if (uniqueMovedId) {
+      movedIds.add(uniqueMovedId);
+      continue;
+    }
+    const reordered = entries.some((entry, index) => (
+      index > 0 && entries[index - 1].afterIndex > entry.afterIndex
+    ));
+    if (reordered) reorderedRanges.push({
+      parentId,
+      beforeIds: beforeSiblings,
+      afterIds: beforeSiblings.slice().sort((left, right) => (
+        after.get(left).index - after.get(right).index
+      )),
     });
   }
 
@@ -89,6 +100,7 @@ export function analyzeReviewStableIdTopology(beforeDescriptors, afterDescriptor
     addedIds,
     removedIds,
     movedIds: [...movedIds],
+    reorderedRanges,
     duplicateIds,
   };
 }

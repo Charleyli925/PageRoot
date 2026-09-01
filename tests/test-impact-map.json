@@ -1154,13 +1154,29 @@
       ]
     },
     {
+      "id": "review-visual-verdict-owner",
+      "patterns": [
+        "^app/workbench/review/review-visual-model\\.(?:d\\.ts|js)$"
+      ],
+      "suites": [
+        "typecheck",
+        "browser-review-smoke",
+        "ai-review-smoke"
+      ],
+      "nodeTests": [
+        "tests/review-visual-model.test.mjs"
+      ]
+    },
+    {
       "id": "review-comment-binding-owner",
       "patterns": [
         "^app/lib/(?:review-comment-source-map|review-region-annotation)\\.(?:d\\.ts|js)$",
         "^app/workbench/review/comment-binding\\.ts$"
       ],
       "suites": [
-        "typecheck"
+        "typecheck",
+        "browser-review-smoke",
+        "ai-review-smoke"
       ],
       "nodeTests": [
         "tests/review-comment-source-map.test.mjs",
@@ -1185,7 +1201,9 @@
         "^app/workbench/review/runtime-projection\\.ts$"
       ],
       "suites": [
-        "typecheck"
+        "typecheck",
+        "browser-review-smoke",
+        "ai-review-smoke"
       ],
       "nodeTests": [
         "tests/review-projection-facts.test.mjs"

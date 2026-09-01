@@ -560,6 +560,7 @@ export class WorkspaceController {
         activateTab: (tabId, input) => this.activateWorkbenchTab(tabId, input),
         createStartTab: () => this.createWorkbenchStartTab(),
         createSettingsTab: () => this.createWorkbenchSettingsTab(),
+        createProjectRulesTab: () => this.createWorkbenchProjectRulesTab(),
         closeTab: (tabId) => this.closeWorkbenchTab(tabId),
         openRegisteredProject: (input) => this.openRegisteredWorkbenchProject(input),
       }),
@@ -1150,6 +1151,11 @@ export class WorkspaceController {
 
   createWorkbenchSettingsTab() {
     return this.#workbenchNavigationWorkflow?.createSettings()
+      || Promise.resolve(rejected("WORKBENCH_TABS_UNAVAILABLE", "标签页尚未完成初始化。"));
+  }
+
+  createWorkbenchProjectRulesTab() {
+    return this.#workbenchNavigationWorkflow?.createProjectRules()
       || Promise.resolve(rejected("WORKBENCH_TABS_UNAVAILABLE", "标签页尚未完成初始化。"));
   }
 

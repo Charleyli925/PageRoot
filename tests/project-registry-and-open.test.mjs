@@ -18,6 +18,7 @@ import path from "node:path";
 import test from "node:test";
 import { sha256 } from "../bridge/lifecycle-core.mjs";
 import {
+  DEFAULT_PROJECT_RULES_TEMPLATE,
   ProjectFileRepository,
   ProjectFileRepositoryError,
 } from "../bridge/project-file-repository.mjs";
@@ -42,6 +43,11 @@ test("atomic import creates V1 facts once and ordinary saves never create a Vers
   const value = await fixture(t);
   const imported = await importSource(value, "原文件.htm");
   const original = await readFile(imported.sourcePath);
+
+  await assert.rejects(
+    () => lstat(path.join(path.dirname(imported.sourcePath), "PROJECT.md")),
+    { code: "ENOENT" },
+  );
 
   assert.equal(imported.target.targetKind, "working-copy");
   assert.equal(imported.target.workingCopyId, "work_ver_0001");
@@ -83,12 +89,12 @@ test("atomic import creates V1 facts once and ordinary saves never create a Vers
   );
 });
 
-test("PROJECT.md starts with only the project title and can be cleared", async (t) => {
+test("PROJECT.md starts with the long-term rules template and can be cleared", async (t) => {
   const value = await fixture(t);
   const imported = await importSource(value, "项目规则.html");
   const projectNotesPath = path.join(imported.target.projectRootPath, "PROJECT.md");
 
-  assert.equal(await readFile(projectNotesPath, "utf8"), "# 项目规则\n");
+  assert.equal(await readFile(projectNotesPath, "utf8"), DEFAULT_PROJECT_RULES_TEMPLATE);
   const cleared = await value.repository.updateProjectNotes({
     target: imported.target,
     content: "",
@@ -97,6 +103,17 @@ test("PROJECT.md starts with only the project title and can be cleared", async (
   assert.equal(cleared.updated, true);
   assert.equal(cleared.content, "");
   assert.equal(await readFile(projectNotesPath, "utf8"), "");
+});
+
+test("an older managed project receives the default PROJECT.md on first read", async (t) => {
+  const value = await fixture(t);
+  const imported = await importSource(value, "缺少规则文件.html");
+  const projectNotesPath = path.join(imported.target.projectRootPath, "PROJECT.md");
+  await unlink(projectNotesPath);
+
+  const notes = await value.repository.readProjectNotes({ target: imported.target });
+  assert.equal(notes.content, DEFAULT_PROJECT_RULES_TEMPLATE);
+  assert.equal(await readFile(projectNotesPath, "utf8"), DEFAULT_PROJECT_RULES_TEMPLATE);
 });
 
 test("a legacy v4 Runtime without historyActivation opens as null and normalizes on write", async (t) => {

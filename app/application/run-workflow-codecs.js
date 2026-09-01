@@ -26,7 +26,6 @@ export function createRunWorkflowCodecs(overrides = {}) {
     persistedTargetRef: requiredFunction(overrides, "persistedTargetRef"),
     uniqueTargets: requiredFunction(overrides, "uniqueTargets"),
     fileStem: requiredFunction(overrides, "fileStem"),
-    projectMarkdown: requiredFunction(overrides, "projectMarkdown"),
     operationKey: requiredFunction(overrides, "operationKey"),
     errorMessage: requiredFunction(overrides, "errorMessage"),
   });

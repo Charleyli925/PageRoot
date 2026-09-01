@@ -466,111 +466,6 @@
   overflow: hidden;
 }
 
-.reviewImpactSummary {
-  position: absolute;
-  z-index: 60;
-  pointer-events: none;
-  top: 14px;
-  left: 50%;
-  width: min(560px, calc(100% - 44px));
-  box-sizing: border-box;
-  padding: 10px 12px;
-  border: 1px solid #e2d9a8;
-  border-radius: 11px;
-  background: rgb(255 254 244 / 96%);
-  color: #5c5430;
-  box-shadow: 0 7px 20px rgb(52 45 17 / 13%);
-  transform: translateX(-50%);
-  font-size: 10px;
-}
-
-.reviewImpactHeading {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  color: #70631d;
-}
-
-.reviewImpactEyebrow {
-  font-size: 10px;
-  font-weight: 720;
-  letter-spacing: .02em;
-}
-
-.reviewImpactStats {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 5px 14px;
-  margin-top: 6px;
-  color: #756f58;
-}
-
-.reviewImpactStats strong {
-  margin-right: 3px;
-  color: #3f391c;
-  font-size: 13px;
-}
-
-.reviewImpactWarning,
-.reviewImpactQuiet {
-  display: grid;
-  gap: 5px;
-  margin-top: 7px;
-  color: #756329;
-}
-
-.reviewImpactQuiet {
-  color: #74705a;
-}
-
-.reviewImpactLink {
-  justify-self: start;
-  pointer-events: auto;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: #4c5eaa;
-  font-size: 10px;
-  font-weight: 700;
-  text-decoration: underline;
-}
-
-.reviewImpactIds {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px;
-  color: #7e7041;
-}
-
-.reviewImpactIds code {
-  padding: 2px 4px;
-  border-radius: 4px;
-  background: rgb(112 98 29 / 9%);
-  color: #5b511f;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 9px;
-}
-
-.emptyFilterNotice {
-  position: absolute;
-  z-index: 58;
-  bottom: 20px;
-  left: 50%;
-  max-width: min(440px, calc(100% - 80px));
-  padding: 8px 12px;
-  border: 1px solid #dddaf2;
-  border-radius: 9px;
-  background: rgb(255 255 255 / 95%);
-  color: #5f599a;
-  box-shadow: 0 5px 16px rgb(31 28 51 / 12%);
-  font-size: 10px;
-  font-weight: 620;
-  text-align: center;
-  transform: translateX(-50%);
-  pointer-events: none;
-}
-
 .canvasGrid {
   box-sizing: border-box;
   height: 100%;
@@ -591,6 +486,7 @@
 }
 
 .documentPane {
+  position: relative;
   min-width: 0;
   min-height: 0;
   display: grid;
@@ -707,8 +603,8 @@
 .reviewCommentLayer {
   position: absolute;
   z-index: 3;
-  inset: 0;
-  overflow: visible;
+  inset: 36px 0 0;
+  overflow: hidden;
   pointer-events: none;
 }
 
@@ -718,7 +614,7 @@
   overflow: visible;
   pointer-events: none;
   transform: translate3d(
-    calc(-1 * var(--review-comment-scroll-x, 0px)),
+    0,
     calc(-1 * var(--review-comment-scroll-y, 0px)),
     0
   );

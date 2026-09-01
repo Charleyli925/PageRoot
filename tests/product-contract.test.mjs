@@ -156,7 +156,7 @@ test("Prompt, protocol, helper, and finalizer agree on frozen input plus control
   assert.match(protocol, /AI 输出文件命名/);
   assert.match(protocol, /`USER_SUPPLEMENT\.json` 只能由受控 helper 追加/);
   assert.match(protocol, /Prompt 只引用\s*这份通用合同，不重复 Stable ID 或 Runtime 规则/);
-  assert.match(protocol, /新项目默认创建空文件/);
+  assert.match(protocol, /新项目首次打开时默认创建包含“项目目标、目标受众、内容与事实规则、视觉与表达、AI 修改边界”五段/);
   assert.match(protocol, /^# PageRoot Change Request 协议$/m);
   assert.match(protocol, /v3 Attempt \/ finalizer CLI `--workspace` \/ `--project-id` 是历史归档/);
   assert.match(protocol, /finalize-attempt\.mjs --project-root/);

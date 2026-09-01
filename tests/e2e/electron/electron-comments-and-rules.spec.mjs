@@ -7,6 +7,7 @@ import {
   chooseClipboardDelivery,
   closePageRootGracefully,
   createSourceFixture,
+  documentToken,
   expectCheckpointPersisted,
   existsSync,
   fixtureBuffer,
@@ -48,6 +49,78 @@ function managedDraftComment(managedSourcePath, text) {
   }
   return null;
 }
+
+async function retainedEditorDocumentToken(page) {
+  return page.locator(
+    '[data-testid="workbench-document-canvas-pool"] iframe[title*="HTML"]',
+  ).first().evaluate((frameElement) => {
+    const key = "__PAGEROOT_NATIVE_QA_DOCUMENT_TOKEN__";
+    const view = frameElement.contentWindow;
+    if (!view) throw new Error("Retained PageRoot edit iframe has no active window.");
+    if (!view[key]) view[key] = crypto.randomUUID();
+    return view[key];
+  });
+}
+
+test("长期规则入口打开唯一 PROJECT.md 标签并保留 HTML 画布", async () => {
+  test.setTimeout(90_000);
+  const fixture = createSourceFixture("project-rules-first-stage.html");
+  const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
+  try {
+    const { frame } = await loadedDiskFrame(
+      launched.page,
+      fixture.sourcePath,
+      "list-item",
+    );
+    const beforeDocumentToken = await documentToken(launched.page);
+    const sidebarToggle = launched.page.getByRole("button", { name: "展开左侧边栏" });
+    if (await sidebarToggle.count()) await sidebarToggle.click();
+    const rulesEntry = launched.page.locator(".sidebar-project-rules-row");
+    await expect(rulesEntry).toBeVisible();
+    await expect(rulesEntry).toContainText("长期规则");
+    await expect(rulesEntry).toContainText("PROJECT.md");
+
+    await rulesEntry.click();
+    const rulesTab = launched.page.getByRole("tab", { name: "长期规则", exact: true });
+    await expect(rulesTab).toHaveAttribute("aria-selected", "true");
+    const editor = launched.page.getByRole("textbox", { name: "PROJECT.md 内容" });
+    await expect(editor).toBeVisible();
+    await expect(editor).toHaveValue(/## 项目目标/u);
+    await editor.fill("只修改首页标题");
+    await expect(editor).toHaveValue("只修改首页标题");
+    await editor.selectText();
+    await launched.page.getByRole("toolbar", { name: "Markdown 基础格式" })
+      .getByRole("button", { name: "加粗" })
+      .click();
+    await expect(editor).toHaveValue("**只修改首页标题**");
+    await launched.page.keyboard.press("Meta+s");
+
+    const managedSourcePath = await managedWorkingCopyPath(
+      launched.page,
+      fixture.sourcePath,
+    );
+    await expect.poll(() => readFileSync(
+      path.join(path.dirname(managedSourcePath), "PROJECT.md"),
+      "utf8",
+    )).toContain("只修改首页标题");
+
+    await rulesEntry.click();
+    await expect(launched.page.getByRole("tab", { name: "长期规则", exact: true }))
+      .toHaveCount(1);
+    await expect.poll(() => retainedEditorDocumentToken(launched.page)).toBe(beforeDocumentToken);
+
+    const documentTab = launched.page.locator(".workbench-tab")
+      .filter({ hasNotText: "长期规则" })
+      .getByRole("tab")
+      .first();
+    await documentTab.click();
+    await expect.poll(() => documentToken(launched.page)).toBe(beforeDocumentToken);
+    await expect(frame.locator(caseSelector("list-item"))).toBeVisible();
+  } finally {
+    await stopPageRoot(launched.electronApp, launched.isolatedUserData);
+    removeSourceFixture(fixture.sourceDirectory);
+  }
+});
 
 test("selected-text comments persist stable identity and stay exact after text replacement", async () => {
   test.setTimeout(90_000);

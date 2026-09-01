@@ -12,10 +12,9 @@ const FACT_STRUCTURE_CHANGES = new Set([
   "added",
   "removed",
   "moved",
+  "reordered",
   "attribute",
   "style",
-  "css-source",
-  "script-source",
 ]);
 const FACT_KEY_PATTERN = /^[a-z0-9:_-]{1,160}$/iu;
 export const REVIEW_PROJECTION_FACTS_PER_ELEMENT_LIMIT = 24;

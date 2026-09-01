@@ -142,8 +142,6 @@ explicit seven-state hierarchy.
 
 final result: passed
 
----
-
 ## Comment, safe page-switching and update-header polish
 
 Date: 2026-07-31
@@ -2697,5 +2695,49 @@ Date: 2026-08-28
 - [x] One top-level AI assistant toggle owns open and close.
 - [x] Agent chooser is compact, dismissible, correctly layered, and aligned with actions.
 - [x] Removed copy does not appear in app or Electron contracts.
+
+final result: passed
+
+---
+
+# Start page as a lightweight work-resume surface
+
+Date: 2026-09-01
+
+## Comparison target
+
+- Source visual truth: the user-provided start-page structure and state rules in this task. It supersedes the previous centered `继续编辑 HTML` action stack and the start-page recent-files list.
+- Rendered implementation:
+  - `output/design-qa/start-page/start-page-1440x900.png`
+  - `output/design-qa/start-page/start-page-960x720.png`
+
+## Viewport and states
+
+- Isolated Electron windows at `1440 x 900` and `960 x 720` CSS pixels, captured at 2x device scale.
+- Registry-backed continuing project with exact project name, active Working Copy file name, and one pending Candidate.
+- The final screenshots exclude the unrelated import-success toast so the start-page hierarchy can be judged directly.
+
+## Functional and visual checks
+
+- `继续编辑` opens the Registry project through the existing registered-project navigation path and reuses the active Start tab.
+- The pending-Candidate row is keyboard focusable and Enter opens the corresponding project; no intermediate explanation view is introduced.
+- The page refreshes existing Recent and Registry projections on mount without adding a new persistence or task owner.
+- The populated page uses one 840px content column, top alignment, one violet `新建项目` action, one light resume card, and border-only task rows. The left project sidebar remains the full project navigator.
+- Both tested windows have no horizontal overflow, clipped content, card/action collision, or hidden primary control. Focus rings and reduced-motion overrides remain explicit.
+
+## Findings
+
+- The previous oversized centered icon, parallel `查看现有项目` / `从 Finder 打开 HTML` actions, and recent-file list duplicated the sidebar's navigation role. They were removed.
+- Only the existing Registry `hasPendingCandidate` fact is projected as a task. Comment, conflict, Runtime, sync, and protocol facts were not inferred or duplicated into a new view-level task model.
+- No P0, P1, or P2 visual, interaction, accessibility, clipping, or stacking issue remained in the final populated state.
+
+## Checklist
+
+- [x] Top-aligned 760–880px-class content column with no enclosing panel.
+- [x] One-project `继续编辑` card with project and HTML identity.
+- [x] Lightweight actionable task rows hidden as a section when empty.
+- [x] One stable `新建项目` action; sidebar uses the same product wording.
+- [x] First-project empty-state structure stays concise and uses the same single action.
+- [x] Real isolated Electron interaction, compact-window fit, keyboard path, and screenshot evidence.
 
 final result: passed

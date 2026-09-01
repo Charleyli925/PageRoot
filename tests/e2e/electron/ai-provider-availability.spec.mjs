@@ -170,8 +170,9 @@ test("Qoder ACP Agent Bridge streams public execution text without clipboard or 
       projectRecord.projectId,
     );
     expect(candidates).toHaveLength(1);
-    expect(readFileSync(candidates[0], "utf8"))
-      .toContain('data-pageroot-qoder-acp="e2e"');
+    const qoderCandidate = readFileSync(candidates[0], "utf8");
+    expect(qoderCandidate).toContain('data-pageroot-qoder-acp="e2e"');
+    expect(qoderCandidate).toContain("Qoder \u5df2\u66f4\u65b0\uff1a\u771f\u5b9e");
 
     await launched.page.getByRole("button", { name: "审阅对比" }).click();
     await expect(launched.page.getByTestId("ai-review-workspace"))
@@ -295,8 +296,9 @@ test("Codex ACP shares the public execution stream and retains its frozen identi
       projectRecord.projectId,
     );
     expect(candidates).toHaveLength(1);
-    expect(readFileSync(candidates[0], "utf8"))
-      .toContain('data-pageroot-codex-acp="e2e"');
+    const codexCandidate = readFileSync(candidates[0], "utf8");
+    expect(codexCandidate).toContain('data-pageroot-codex-acp="e2e"');
+    expect(codexCandidate).toContain("Codex \u5df2\u66f4\u65b0\uff1a\u771f\u5b9e");
 
     await launched.page.getByRole("button", { name: "审阅对比" }).click();
     await expect(launched.page.getByTestId("ai-review-workspace"))

@@ -17,6 +17,7 @@ import { inflateSync } from "node:zlib";
 import { expect } from "@playwright/test";
 
 import { sha256 } from "../../../bridge/lifecycle-core.mjs";
+import { ProjectFileRepository } from "../../../bridge/project-file-repository.mjs";
 import {
   activateNativeEdit,
   caseSelector,
@@ -513,10 +514,31 @@ export async function openRecentProject(page, sourcePath, options) {
     await page.getByRole("button", { name: "新标签页" }).click();
   }
   await startPage.waitFor({ state: "visible" });
-  await startPage.getByRole("button", {
-    name: path.basename(sourcePath),
-    exact: true,
-  }).click();
+  const sidebar = page.locator(".workbench-global-sidebar");
+  if (await sidebar.getAttribute("data-open") !== "true") {
+    await page.getByRole("button", { name: "展开左侧边栏" }).click();
+  }
+  const projectName = path.basename(sourcePath, path.extname(sourcePath));
+  let projectRow = sidebar.getByRole("button", { name: projectName, exact: true });
+  if (await projectRow.count() === 0) {
+    const activeSourcePath = await page.evaluate(
+      async () => (await window.htmlAIProjects?.getActiveProject())?.sourcePath || "",
+    );
+    const repository = new ProjectFileRepository({
+      projectsRoot: path.dirname(path.dirname(activeSourcePath)),
+    });
+    await repository.importExternal({
+      sourcePath,
+      expectedSourceSha256: sha256(readFileSync(sourcePath)),
+    });
+    await page.getByRole("button", { name: "收起左侧边栏" }).click();
+    await page.getByRole("button", { name: "展开左侧边栏" }).click();
+    projectRow = sidebar.getByRole("button", { name: projectName, exact: true });
+  }
+  if (await projectRow.getAttribute("aria-expanded") !== "true") {
+    await projectRow.click();
+  }
+  await projectRow.locator("xpath=..").locator(".sidebar-version-file").first().click();
   await waitForProjectReady(page);
   await expect.poll(async () => {
     const active = await page.evaluate(
@@ -768,7 +790,7 @@ export const REVIEW_PROJECTION_CASES = Object.freeze([
     ownerSelector: '[data-review-brand-row="added"]',
     rangeSelector: null,
     expectedFrameCount: 1,
-    expectedMaskCount: 1,
+    expectedMaskCount: 0,
     tolerance: 0.75,
     negativeSelectors: [
       '[data-review-brand-row="alpha"] [data-pageroot-review-overlay-box]',
@@ -872,17 +894,26 @@ export async function assertOverlayMaskEquivalence(frame) {
         && left + elementWidth <= width
         && top + elementHeight <= height;
     };
-    return boxes.length === holes.length && boxes.every((box, index) => {
-      const hole = holes[index];
-      return insideDocument(box)
-        && insideDocument(hole)
-        && Math.abs(Number(box.getAttribute("data-left")) - Number(hole.getAttribute("data-left"))) < .02
-        && Math.abs(Number(box.getAttribute("data-top")) - Number(hole.getAttribute("data-top"))) < .02
-        && Math.abs(Number(box.getAttribute("data-width")) - Number(hole.getAttribute("data-width"))) < .02
-        && Math.abs(Number(box.getAttribute("data-height")) - Number(hole.getAttribute("data-height"))) < .02
-        && Boolean(box.getAttribute("data-path"))
-        && box.getAttribute("data-path") === hole.getAttribute("d");
-    });
+    return holes.length <= boxes.length && holes.every((hole) => boxes.some((box) => (
+      (
+        (box.getAttribute("data-types") || "").split(/\s+/u).includes("text")
+        || box.getAttribute("data-active") === "true"
+      )
+      && box.getAttribute("data-pageroot-review-overlay-box")
+        === hole.getAttribute("data-pageroot-review-mask-hole")
+      && box.getAttribute("data-pageroot-review-semantic-owner")
+        === hole.getAttribute("data-pageroot-review-semantic-owner")
+      && box.getAttribute("data-pageroot-review-fact")
+        === hole.getAttribute("data-pageroot-review-fact")
+      && insideDocument(box)
+      && insideDocument(hole)
+      && Math.abs(Number(box.getAttribute("data-left")) - Number(hole.getAttribute("data-left"))) < .02
+      && Math.abs(Number(box.getAttribute("data-top")) - Number(hole.getAttribute("data-top"))) < .02
+      && Math.abs(Number(box.getAttribute("data-width")) - Number(hole.getAttribute("data-width"))) < .02
+      && Math.abs(Number(box.getAttribute("data-height")) - Number(hole.getAttribute("data-height"))) < .02
+      && Boolean(box.getAttribute("data-path"))
+      && box.getAttribute("data-path") === hole.getAttribute("d")
+    )));
   });
 }
 
