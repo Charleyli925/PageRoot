@@ -21,7 +21,7 @@ export const CANVAS_POINTER_CAPABILITIES = Object.freeze({
     kind: "comment-ai",
     hint: "可添加评论交给 AI",
     spoken: "仅可评论",
-    cursor: "help",
+    cursor: "default",
   }),
 });
 

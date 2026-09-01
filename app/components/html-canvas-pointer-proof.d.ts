@@ -13,7 +13,7 @@ export type CanvasPointerCapability = Readonly<{
   kind: CanvasPointerCapabilityKind;
   hint: string;
   spoken: string;
-  cursor: "text" | "pointer" | "help";
+  cursor: "default" | "text" | "pointer";
 }>;
 
 export const CANVAS_POINTER_CAPABILITIES: Readonly<

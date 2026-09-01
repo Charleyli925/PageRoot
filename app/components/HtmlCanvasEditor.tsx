@@ -407,13 +407,14 @@ const EDITOR_DOCUMENT_STYLES = `
 
   [data-html-canvas-editing] {
     cursor: text !important;
-    box-shadow: 0 0 0 5px rgba(90, 85, 223, 0.14) !important;
+    outline: none !important;
   }
 
   [data-html-canvas-native-editing] {
     -webkit-user-select: text !important;
     user-select: text !important;
     caret-color: currentColor !important;
+    outline: none !important;
   }
 
   html[data-html-canvas-locked] [contenteditable] {
@@ -431,12 +432,6 @@ const EDITOR_DOCUMENT_STYLES = `
   html[data-html-canvas-pointer="pointer"] body,
   html[data-html-canvas-pointer="pointer"] body * {
     cursor: pointer !important;
-  }
-
-  html[data-html-canvas-pointer="help"],
-  html[data-html-canvas-pointer="help"] body,
-  html[data-html-canvas-pointer="help"] body * {
-    cursor: help !important;
   }
 
   noscript {

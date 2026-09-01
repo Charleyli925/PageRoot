@@ -46,7 +46,7 @@ test("unmapped targets stay comment-only", () => {
     sourceResolution: "ambiguous",
   });
   assert.equal(capability.hint, "可添加评论交给 AI");
-  assert.equal(capability.cursor, "help");
+  assert.equal(capability.cursor, "default");
 });
 
 test("empty modules have no substance and filled modules do", () => {
