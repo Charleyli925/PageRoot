@@ -3879,6 +3879,7 @@ async function coordinateApplicationExit(reason, intent = "quit") {
   let coordinatedCloseAuthority = null;
   coordinatedExit = (async () => {
     let result = null;
+    let retryCount = 0;
     while (true) {
       result = await requestRendererClose(reason);
       coordinatedCloseAuthority = closeAuthorityFromResult(result);
@@ -3902,13 +3903,16 @@ async function coordinateApplicationExit(reason, intent = "quit") {
         result: "unknown",
         surface: "global",
       });
-      const retry = !e2eNativeDialogsSuppressed && shouldRetryCloseBlock(result);
+      const retry = !e2eNativeDialogsSuppressed && shouldRetryCloseBlock(result, {
+        retryCount,
+        maxRetries: 1,
+      });
       if (retry) {
-        if (coordinatedCloseAuthority) {
-          externalFileOpenDelivery.releaseBarrier(coordinatedCloseAuthority);
-          externalFileOpenDelivery.abortClose(coordinatedCloseAuthority);
-        }
+        // Every attempt owns a distinct renderer freeze. Release it before the
+        // single bounded retry so the next request can change the condition.
+        finishCloseAbort(coordinatedCloseAuthority, result.reason);
         presentMainWindow();
+        retryCount += 1;
         await new Promise((resolve) => {
           setTimeout(resolve, 400);
         });

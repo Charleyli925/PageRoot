@@ -153,11 +153,12 @@ export class ProjectWorkflow {
     sourcePath?: string | null;
     projectId?: string | null;
     fromDeferred?: boolean;
+    switchPrepared?: boolean;
     transactionId?: string | null;
   }): Promise<ProjectWorkflowOutcome>;
   acceptProject(
     project: ProjectWorkflowProject,
-    input?: { kind?: string; operationId?: string; sourcePath?: string | null; transactionId?: string | null },
+    input?: { kind?: string; operationId?: string; sourcePath?: string | null; switchPrepared?: boolean; transactionId?: string | null },
   ): ProjectWorkflowOutcome;
   cancelProjectApplication(applicationId: string): boolean;
   acceptBrowserProject(input: {

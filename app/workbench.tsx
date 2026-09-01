@@ -5873,6 +5873,24 @@ export default function Workbench() {
     "--workbench-sidebar-width-saved": `${workspacePreferencesController.panelWidths.sidebarWidth}px`,
     "--workbench-inspector-width": `${workspacePreferencesController.panelWidths.inspectorWidth}px`,
   } as CSSProperties), [workspacePreferencesController.panelWidths.inspectorWidth, workspacePreferencesController.panelWidths.sidebarWidth]);
+  const documentPersistenceBannerVisible = Boolean(
+    !settingsPageActive
+    && !projectRulesPageActive
+    && !workspaceIssue
+    && !externalSourcePreview
+    && (persistState === "conflict" || persistState === "failed"),
+  );
+  const persistenceDiagnostic = [
+    `persistState: ${persistState}`,
+    `reason: ${persistError || "unknown"}`,
+    `projectId: ${projectId || "unbound"}`,
+    `documentId: ${documentId || "unbound"}`,
+    `sourcePath: ${sourcePath || "unbound"}`,
+    `editRevision: ${editRevision}`,
+    `lastPersistedRevision: ${lastPersistedRevision}`,
+    `sourceSha256: ${sourceSha256 || "unknown"}`,
+    `pendingWrite: ${documentSnapshot.hasPendingWrite ? "true" : "false"}`,
+  ].join("\n");
   return (
     <>
       <RendererStartupPerformance />
@@ -5896,6 +5914,7 @@ export default function Workbench() {
         data-round-state={runInProgress ? "processing" : viewMode}
         data-canvas-mode={canvasMode}
         data-handoff-preview={runInProgress && handoffPreviewOpen ? "true" : undefined}
+        data-document-persistence-banner={documentPersistenceBannerVisible ? "true" : undefined}
         data-persist-state={persistState}
         data-edit-revision={String(editRevision)}
         data-persisted-revision={String(lastPersistedRevision)}
@@ -6020,19 +6039,28 @@ export default function Workbench() {
         </section>
       ) : null}
 
-      {!settingsPageActive
-      && !projectRulesPageActive
-      && !workspaceIssue
-      && !externalSourcePreview
-      && (persistState === "conflict" || persistState === "failed") ? (
-        <section className="source-conflict-banner" role="alert">
+      {documentPersistenceBannerVisible ? (
+        <section className="source-conflict-banner document-persistence-banner" role="alert">
           <div>
             <strong>{persistState === "conflict" ? "源文件在磁盘上被其他程序修改了" : "当前修改还没有写入文件"}</strong>
             <span>{persistState === "conflict"
               ? (persistError || "您的编辑内容仍在，可先预览外部版本再决定。")
               : (persistError || "工作台保留了当前编辑内容，不会假装已经更新。")}</span>
+            <details className="persistence-error-details">
+              <summary>错误详情</summary>
+              <pre>{persistenceDiagnostic}</pre>
+            </details>
           </div>
           <button type="button" onClick={() => void exportCurrentHtml()}>导出当前 HTML</button>
+          <button
+            type="button"
+            onClick={() => {
+              void copyText(persistenceDiagnostic).then(
+                () => setFileStatusNotice("错误详情已复制"),
+                () => setFileStatusNotice("无法复制错误详情"),
+              );
+            }}
+          >复制错误详情</button>
           {persistState === "conflict" ? (
             <button type="button" onClick={() => void previewExternalSource()}>
               预览外部版本

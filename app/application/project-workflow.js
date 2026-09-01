@@ -762,6 +762,7 @@ export class ProjectWorkflow {
     sourcePath,
     projectId,
     fromDeferred = false,
+    switchPrepared = false,
     transactionId = null,
   } = {}) {
     const openIntent = planProjectOpen({
@@ -817,7 +818,9 @@ export class ProjectWorkflow {
             "这次打开没有返回可安全切换的 HTML。",
           );
         }
-        const switchOutcome = await this.prepareSwitch({ fromDeferred });
+        const switchOutcome = switchPrepared
+          ? succeeded({ prepared: true })
+          : await this.prepareSwitch({ fromDeferred });
         if (this.#snapshot.close.phase === "ready") {
           return blocked(
             "PROJECT_OPEN_CLOSE_COMMITTED",
@@ -851,7 +854,9 @@ export class ProjectWorkflow {
         return succeeded({ operationId, applicationId: accepted, opened: true });
       }
 
-      const switchOutcome = await this.prepareSwitch({ fromDeferred });
+      const switchOutcome = switchPrepared
+        ? succeeded({ prepared: true })
+        : await this.prepareSwitch({ fromDeferred });
       if (this.#snapshot.close.phase === "ready") {
         return blocked(
           "PROJECT_OPEN_CLOSE_COMMITTED",
@@ -954,6 +959,7 @@ export class ProjectWorkflow {
     kind = "accepted",
     operationId = this.#nextOpenOperation(),
     sourcePath = null,
+    switchPrepared = false,
     transactionId = null,
   } = {}) {
     if (this.#snapshot.close.phase === "ready") {
@@ -966,6 +972,7 @@ export class ProjectWorkflow {
       kind,
       operationId,
       sourcePath,
+      switchPrepared,
       transactionId,
     });
     return accepted

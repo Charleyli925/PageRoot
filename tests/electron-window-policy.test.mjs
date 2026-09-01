@@ -53,7 +53,10 @@ test("Electron automation stays backgrounded unless foreground debugging is expl
     mainProcess,
     /if \(e2eNativeDialogsSuppressed\) \{[\s\S]*?reportSuppressedNativeDialog\([\s\S]*?\} else \{[\s\S]*?dialog\.showErrorBox\(/u,
   );
-  assert.match(mainProcess, /shouldRetryCloseBlock\(result\)/u);
+  assert.match(
+    mainProcess,
+    /shouldRetryCloseBlock\(result, \{[\s\S]*?retryCount,[\s\S]*?maxRetries: 1/u,
+  );
   assert.doesNotMatch(mainProcess, /dialog\.showMessageBox/u);
 
   assert.match(appFixture, /window\.isVisible\(\)/u);

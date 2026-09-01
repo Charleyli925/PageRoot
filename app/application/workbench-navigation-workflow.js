@@ -214,12 +214,57 @@ export class WorkbenchNavigationWorkflow {
         next = this.#tabs.snapshot.tabs.find((tab) => !before.has(tab.tabId)) || null;
       }
       if (!next) return { outcome: rejected("WORKBENCH_TAB_CLOSE_FAILED", "无法安全关闭这个标签页。") };
-      const activated = await this.#activateTab(active, next.tabId, {});
-      if (activated.outcome.status !== "succeeded") return activated;
+      if (closing.kind === "document") {
+        const prepared = await this.#projectWorkflow.prepareSwitch();
+        if (prepared?.status !== "succeeded") {
+          return { outcome: rejected(
+            prepared?.code || "WORKBENCH_TAB_CLOSE_BLOCKED",
+            String(prepared?.reason || "当前 HTML 尚未安全收口。"),
+          ) };
+        }
+        this.#captureCurrentSurface(closing);
+      }
       this.#tabs.close(tabId);
       this.#surfaceCache?.remove(tabId);
       if (closing.kind === "document") {
         this.#browserDocuments?.remove(closing.projectId, closing.documentId);
+      }
+      // Protection is settled before the tab authority is removed. From this
+      // point rollback may preserve the successor, but must not resurrect the
+      // document the user already closed.
+      active.priorTabs = this.#tabs.captureAuthority();
+      const activated = await this.#activateTab(active, next.tabId, {
+        force: true,
+        skipPrepare: true,
+        skipCapture: true,
+        switchPrepared: closing.kind === "document",
+        currentOverride: closing,
+      });
+      if (activated.outcome.status !== "succeeded") {
+        const before = new Set(this.#tabs.snapshot.tabs.map((tab) => tab.tabId));
+        this.#tabs.createStart({ focus: false });
+        const fallback = this.#tabs.snapshot.tabs.find((tab) => !before.has(tab.tabId))
+          || this.#tabs.snapshot.tabs.find((tab) => tab.kind === "start");
+        if (!fallback) return activated;
+        this.#tabs.beginSwitch(fallback.tabId, { force: true });
+        this.#tabs.commitStart(fallback.tabId);
+        active.priorTabs = this.#tabs.captureAuthority();
+        const receipt = Object.freeze({
+          transactionId: active.transactionId,
+          applicationId: null,
+          projectId: null,
+          documentId: null,
+          epoch: Number(this.#controller.getSnapshot()?.projectSession?.epoch) || 0,
+          tabId: fallback.tabId,
+          kind: "start",
+        });
+        return {
+          outcome: rejected(
+            activated.outcome.code || "WORKBENCH_TAB_SUCCESSOR_FAILED",
+            activated.outcome.reason || "标签页已关闭，但后继 HTML 暂时无法打开。",
+          ),
+          receipt,
+        };
       }
       return {
         ...activated,
@@ -551,23 +596,31 @@ export class WorkbenchNavigationWorkflow {
     return this.#finishOpened(active, outcome, { deadlineMs: 15_000 });
   }
 
-  async #activateTab(active, tabId, { deadlineMs = 15_000 } = {}) {
+  async #activateTab(active, tabId, {
+    deadlineMs = 15_000,
+    force = false,
+    skipPrepare = false,
+    skipCapture = false,
+    switchPrepared = false,
+    currentOverride = null,
+  } = {}) {
     const target = this.#tabs.resolveTab(tabId);
     if (!target) return { outcome: rejected("WORKBENCH_TAB_NOT_FOUND", "这个标签页已经关闭。") };
-    if (target.tabId === this.#tabs.snapshot.activeTabId) {
+    if (target.tabId === this.#tabs.snapshot.activeTabId && !force) {
       return { outcome: succeeded({ unchanged: true }) };
     }
-    const current = this.#tabs.resolveTab(this.#tabs.snapshot.activeTabId);
+    const current = currentOverride
+      || this.#tabs.resolveTab(this.#tabs.snapshot.activeTabId);
     this.#surfaceCache?.touch(target.tabId);
     active.expectedTabId = target.tabId;
-    this.#tabs.beginSwitch(target.tabId);
+    this.#tabs.beginSwitch(target.tabId, { force });
     this.#session.transition(active.transactionId, "preparing");
     if (target.kind === "start" || target.kind === "settings") {
       // Start -> Start changes presentation focus only. The retained document
       // controller was already fenced and unmounted by the first Start
       // activation, so a second drain would incorrectly let a transient React
       // view transition reject a valid queued new-tab command.
-      const prepared = current?.kind === "start" || current?.kind === "settings"
+      const prepared = skipPrepare || current?.kind === "start" || current?.kind === "settings"
         ? succeeded()
         : await this.#projectWorkflow.prepareSwitch();
       if (prepared?.status !== "succeeded") {
@@ -576,7 +629,7 @@ export class WorkbenchNavigationWorkflow {
           String(prepared?.reason || "当前 HTML 尚未安全收口。"),
         ) };
       }
-      if (current?.kind === "document") this.#captureCurrentSurface(current);
+      if (!skipCapture && current?.kind === "document") this.#captureCurrentSurface(current);
       const committed = target.kind === "start"
         ? this.#tabs.commitStart(target.tabId)
         : this.#tabs.commitSettings(target.tabId);
@@ -597,7 +650,7 @@ export class WorkbenchNavigationWorkflow {
       return { outcome: succeeded({ tabId: target.tabId }), receipt };
     }
     if (target.kind === "project-rules") {
-      const prepared = current?.kind === "start" || current?.kind === "settings"
+      const prepared = skipPrepare || current?.kind === "start" || current?.kind === "settings"
         ? succeeded()
         : await this.#projectWorkflow.prepareSwitch();
       if (prepared?.status !== "succeeded") {
@@ -606,7 +659,7 @@ export class WorkbenchNavigationWorkflow {
           String(prepared?.reason || "当前页面尚未安全收口。"),
         ) };
       }
-      if (current?.kind === "document") this.#captureCurrentSurface(current);
+      if (!skipCapture && current?.kind === "document") this.#captureCurrentSurface(current);
       const project = this.#controller.getSnapshot()?.projectSession;
       const context = project && project.projectId && project.documentId && project.sourcePath
         ? {
@@ -646,7 +699,7 @@ export class WorkbenchNavigationWorkflow {
       this.#session.transition(active.transactionId, "canvas-verified", { receipt });
       return { outcome: succeeded({ tabId: target.tabId }), receipt };
     }
-    if (current?.kind === "document") this.#captureCurrentSurface(current);
+    if (!skipCapture && current?.kind === "document") this.#captureCurrentSurface(current);
     if (
       (current?.kind === "settings" || current?.kind === "project-rules")
       && this.#tabs.snapshot.runtimeOwnerTabId === target.tabId
@@ -685,11 +738,13 @@ export class WorkbenchNavigationWorkflow {
       ? this.#projectWorkflow.acceptProject(browserProject, {
         kind: "browser-memory",
         transactionId: active.transactionId,
+        switchPrepared,
       })
       : await this.#projectWorkflow.openProject({
         kind: "registered",
         projectId: target.projectId,
         transactionId: active.transactionId,
+        switchPrepared,
       });
     return this.#finishOpened(active, outcome, { deadlineMs });
   }

@@ -1029,6 +1029,15 @@ copy their own boolean lists. An obligation may request a final verification
 without reporting permanent pending state; an already acknowledged aggregate
 must drain as a no-op without advancing its revision.
 
+Source durability and detach protection are separate facts. A failed/conflict
+source write may resolve the reversible switch/close obligation only after
+`DocumentWorkflow` writes and reads back the exact current revision from the
+Main-owned recovery journal (or verifies an exact export receipt) and matches
+context plus HTML Hash. That evidence never changes `persistState` to `idle`,
+never authorizes an irreversible overwrite, and remains document-scoped. Tab
+layout persistence is restart-convenience metadata and is excluded from the
+content-safety close aggregate.
+
 After the aggregate drains, `ProjectWorkflow` asks `DocumentWorkflow` to
 reconcile source close readiness against the independently hashed frozen HTML
 and `DocumentSession` authority. An acknowledged
@@ -1037,6 +1046,11 @@ is not itself a blocker; only an unresolved exact-byte check may trigger the
 bounded authoritative source read. Matching bytes repair the projection, while
 confirmed divergence or invalid source integrity remains fail-closed in its
 owning renderer recovery surface.
+
+Electron may automatically repeat a transient close request once. It must
+first send `close-aborted` for the exact request and release renderer/navigation
+freeze ownership. A second blocked result returns to an operable window; a
+fixed-interval unbounded retry is not a recovery state.
 
 A lazily opened page with no durable material closes as a no-op and remains
 unregistered. If it contains a comment, composer recovery, tombstone or edit

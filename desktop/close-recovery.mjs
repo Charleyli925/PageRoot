@@ -65,8 +65,13 @@ export function shouldPresentNativeCloseBlock() {
   return false;
 }
 
-export function shouldRetryCloseBlock(result) {
-  return Boolean(result && result.ready === false && result.retry === true);
+export function shouldRetryCloseBlock(result, { retryCount = 0, maxRetries = 1 } = {}) {
+  return Boolean(
+    result
+    && result.ready === false
+    && result.retry === true
+    && Number(retryCount) < Number(maxRetries),
+  );
 }
 
 export function closeAbortPayload(requestId, error) {

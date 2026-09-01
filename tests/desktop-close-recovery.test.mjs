@@ -284,6 +284,7 @@ test("renderer-owned close blockers stay in the application and may retry withou
   });
   assert.equal(shouldPresentNativeCloseBlock(inAppResult), false);
   assert.equal(shouldRetryCloseBlock(inAppResult), true);
+  assert.equal(shouldRetryCloseBlock(inAppResult, { retryCount: 1 }), false);
 
   const legacyOrTimeoutResult = normalizeCloseResult({
     requestId: "close-request-0004",
@@ -294,6 +295,22 @@ test("renderer-owned close blockers stay in the application and may retry withou
   assert.equal(shouldPresentNativeCloseBlock(legacyOrTimeoutResult), false);
   assert.equal(shouldRetryCloseBlock(legacyOrTimeoutResult), false);
   assert.equal(shouldRetryCloseBlock({ ready: true, retry: true }), false);
+});
+
+test("Main releases each renderer close freeze and retries at most once", () => {
+  const source = readFileSync(new URL("../desktop/main.mjs", import.meta.url), "utf8");
+  const begin = source.indexOf("async function coordinateApplicationExit");
+  const end = source.indexOf("async function coordinateApplicationRelaunch", begin);
+  const closeFlow = source.slice(begin, end);
+  assert.match(closeFlow, /let retryCount = 0/u);
+  assert.match(
+    closeFlow,
+    /shouldRetryCloseBlock\(result, \{[\s\S]*?retryCount,[\s\S]*?maxRetries: 1/u,
+  );
+  assert.match(
+    closeFlow,
+    /if \(retry\) \{[\s\S]*?finishCloseAbort\(coordinatedCloseAuthority, result\.reason\)[\s\S]*?retryCount \+= 1/u,
+  );
 });
 
 test("close result normalization rejects unsupported presentation values", () => {

@@ -21,6 +21,13 @@ PageRoot edits local files and renders user-controlled HTML, so its default poli
 - Same-directory filename changes with a fixed HTML extension, source Hash
   precondition, no-overwrite destination check and a crash-recoverable
   operation journal
+- Main-owned document recovery journals under `userData` with fixed versioned
+  storage, strict project/document/context/revision/Hash validation, temporary
+  write + fsync + atomic rename + directory fsync, read-back verification and
+  CAS receipts for replacement/deletion. The narrow preload API exposes only
+  commit/read/remove/list outcomes; it never returns the journal directory,
+  `userData` path or arbitrary filesystem-read capability. Journal evidence may
+  authorize reversible detach, but never a source overwrite or conflict adopt.
 - Per-process Bridge authentication token and managed workspace boundaries
 - Narrow Edit-menu IPC: the main process sends only `undo`/`redo` intent, and
   native field history exposes only Electron's fixed undo/redo commands; the

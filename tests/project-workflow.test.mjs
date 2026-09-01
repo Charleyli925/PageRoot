@@ -1086,6 +1086,41 @@ test("a Registry project open routes only its projectId through the desktop auth
   assert.equal(fenceCount, 2, "the outgoing Canvas is fenced by one prepareSwitch only");
 });
 
+test("a pre-protected Registry successor does not repeat the outgoing switch drain", async (t) => {
+  let prepareCount = 0;
+  const harness = createHarness({
+    projectOpen: {
+      async openRegistered() {
+        return {
+          name: "B",
+          sourcePath: B_PATH,
+          html: B_HTML,
+          sha256: sha256(B_HTML),
+        };
+      },
+    },
+  });
+  t.after(() => harness.workflow.dispose());
+  harness.workflow.prepareSwitch = async () => {
+    prepareCount += 1;
+    return succeeded({ prepared: true });
+  };
+
+  const opening = await harness.workflow.openProject({
+    kind: "registered",
+    projectId: "project_catalog_b",
+    switchPrepared: true,
+  });
+
+  assert.equal(opening.status, "succeeded");
+  await waitFor(
+    () => harness.projectSession.context?.sourcePath === B_PATH
+      && !harness.workflow.projectHydrating,
+    "pre-protected registered successor did not publish",
+  );
+  assert.equal(prepareCount, 0);
+});
+
 test("a Registry project opens from Start without fencing an unmounted Canvas", async (t) => {
   let fenceCount = 0;
   const harness = createHarness({

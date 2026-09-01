@@ -86,7 +86,7 @@ test("global sidebar owns the full shell column and start page has no card surfa
   const sidebar = lastCssRule(css, ".workbench-global-sidebar");
   const shell = lastCssRule(css, ".workbench > .workbench-global-sidebar");
   assert.match(shell, /grid-column:\s*1/u);
-  assert.match(shell, /grid-row:\s*1 \/ 4/u);
+  assert.match(shell, /grid-row:\s*1 \/ -1/u);
   assert.doesNotMatch(sidebar, /position:\s*fixed/u);
 
   const startContent = lastCssRule(css, ".workbench-start-content");
@@ -224,6 +224,29 @@ test("embedded review stays in the content row instead of covering the header", 
 
   const header = lastCssRule(css, ".workbench-header");
   assert.doesNotMatch(header, /z-index:\s*80/u);
+});
+
+test("document persistence failures occupy a workspace row with copyable details", async () => {
+  const shell = await readFile(
+    new URL("../app/styles/workbench-shell.css", import.meta.url),
+    "utf8",
+  );
+  const workbench = await readFile(new URL("../app/workbench.tsx", import.meta.url), "utf8");
+  assert.match(
+    shell,
+    /\.workbench\[data-document-persistence-banner="true"\][\s\S]*?grid-template-rows:[\s\S]*?auto[\s\S]*?minmax\(0, 1fr\)/u,
+  );
+  assert.match(
+    shell,
+    /\.workbench > \.document-persistence-banner\s*\{[\s\S]*?position:\s*relative[\s\S]*?grid-column:\s*2[\s\S]*?grid-row:\s*3/u,
+  );
+  assert.match(
+    shell,
+    /\.workbench > \.document-persistence-banner span\s*\{[\s\S]*?overflow-wrap:\s*anywhere[\s\S]*?white-space:\s*normal/u,
+  );
+  assert.match(workbench, /className="source-conflict-banner document-persistence-banner"/u);
+  assert.match(workbench, /<summary>错误详情<\/summary>/u);
+  assert.match(workbench, />复制错误详情<\/button>/u);
 });
 
 test("a hover tooltip stays pointer-scoped and yields to the surface it opened", async () => {

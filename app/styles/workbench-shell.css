@@ -74,6 +74,58 @@
   min-height: 0;
 }
 
+.workbench[data-document-persistence-banner="true"] {
+  grid-template-rows:
+    var(--workbench-tabbar-height)
+    var(--workbench-header-height)
+    auto
+    minmax(0, 1fr);
+}
+
+.workbench[data-document-persistence-banner="true"] > .review-scroll-stage,
+.workbench[data-document-persistence-banner="true"] > [data-testid="ai-review-workspace"] {
+  grid-row: 4;
+}
+
+.workbench > .document-persistence-banner {
+  position: relative;
+  z-index: 26;
+  top: auto;
+  right: auto;
+  left: auto;
+  grid-column: 2;
+  grid-row: 3;
+  margin: 8px 12px;
+  box-shadow: 0 8px 22px rgb(165 73 67 / 14%);
+}
+
+.workbench > .document-persistence-banner span {
+  overflow: visible;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+  white-space: normal;
+}
+
+.persistence-error-details {
+  margin-top: 2px;
+  font-size: 10px;
+}
+
+.persistence-error-details summary {
+  width: max-content;
+  cursor: pointer;
+  font-weight: 650;
+}
+
+.persistence-error-details pre {
+  max-height: 112px;
+  margin: 6px 0 0;
+  overflow: auto;
+  font: 10px/1.5 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
 .workbench > .workbench-start-page {
   grid-column: 2;
   grid-row: 2 / 4;
@@ -81,12 +133,12 @@
 
 .workbench > .workbench-global-sidebar {
   grid-column: 1;
-  grid-row: 1 / 4;
+  grid-row: 1 / -1;
 }
 
 .workbench > .workbench-settings-sidebar {
   grid-column: 1;
-  grid-row: 1 / 4;
+  grid-row: 1 / -1;
 }
 
 /* The stage is the only place where a context inspector may consume width. */

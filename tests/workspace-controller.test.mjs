@@ -46,7 +46,7 @@ test("Qoder compatibility actions stay pinned to the Qoder workflow", () => {
   );
 });
 
-test("workspace close freezes navigation before awaiting and pins the final tabs revision", () => {
+test("workspace close freezes navigation but keeps tab layout persistence best-effort", () => {
   const source = readFileSync(
     new URL("../app/application/workspace-controller.js", import.meta.url),
     "utf8",
@@ -55,12 +55,13 @@ test("workspace close freezes navigation before awaiting and pins the final tabs
   const firstAwait = source.indexOf("await navigation.prepareClose(input)", beginClose);
   assert.ok(beginClose >= 0);
   assert.ok(firstAwait > beginClose);
-  assert.match(source, /pinCloseRevision\(\)/u);
-  assert.match(source, /throughRevision: persistenceRevision/u);
-  assert.match(
-    source,
-    /requestedRevision \|\| 0\) !== persistenceRevision/u,
+  const prepareCloseBody = source.slice(
+    beginClose,
+    source.indexOf("abortClose(input)", beginClose),
   );
+  assert.doesNotMatch(prepareCloseBody, /pinCloseRevision\(\)/u);
+  assert.doesNotMatch(prepareCloseBody, /workbenchTabsPersistenceCoordinator\?\.drain/u);
+  assert.doesNotMatch(prepareCloseBody, /acknowledgedRevision/u);
   assert.match(source, /navigation\.commitClose\(\{ requestId \}\)/u);
   assert.match(source, /releaseCloseRevision\(\)/u);
   assert.match(
