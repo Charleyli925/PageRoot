@@ -4477,7 +4477,9 @@ export default function Workbench() {
     currentCommentSessionSnapshot,
     queueReviewCommentFocus,
   ]);
-  resumeCommentEditRef.current = resumeCommentEdit;
+  useEffect(() => {
+    resumeCommentEditRef.current = resumeCommentEdit;
+  }, [resumeCommentEdit]);
 
   const updateCommentEditDraft = useCallback((draftText: string) => {
     if (!currentCommentSessionSnapshot().editSession) return;

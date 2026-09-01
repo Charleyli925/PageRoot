@@ -362,7 +362,10 @@ export function sidebarActionBar({
     const title = candidateVersionLabel
       ? `${candidateVersionLabel} 等待你的决定`
       : "AI 修改已完成";
-    const decisionDetail = "你可以先看变化，也可以直接采用。";
+    const decisionDetail = failureMessage
+      || (candidateStatus === "attention"
+        ? "这次变化较大，先对比审阅。"
+        : "你可以先看变化，也可以直接采用。");
     // An `attention` candidate offers review only: adopting a large change
     // without looking at it is not a choice PageRoot should offer.
     // Already comparing: offering 「审阅对比」 here would point at the screen the user
@@ -372,17 +375,17 @@ export function sidebarActionBar({
       return {
         kind: "decision",
         title,
-        detail: candidateStatus === "attention"
+        detail: candidateStatus === "attention" && !failureMessage
           ? "这次变化较大，核对后再决定。"
           : decisionDetail,
         actions: [{ id: "adopt", label: "采纳这一版", tone: "primary" }],
       };
     }
-    if (candidateStatus === "attention") {
+    if (candidateStatus === "attention" && !failureMessage) {
       return {
         kind: "decision",
         title,
-        detail: "这次变化较大，先对比审阅。",
+        detail: decisionDetail,
         actions: [{ id: "review", label: "审阅对比", tone: "primary" }],
       };
     }
