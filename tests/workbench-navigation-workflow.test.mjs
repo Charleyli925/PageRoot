@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import { WorkbenchNavigationSession } from "../app/application/workbench-navigation-session.js";
@@ -15,6 +16,17 @@ const C = { projectId: "project_gamma", documentId: "doc_gamma", name: "Gamma" }
 const D = { projectId: "project_delta", documentId: "doc_delta", name: "Delta" };
 
 const nextTurn = () => new Promise((resolve) => setImmediate(resolve));
+
+test("Start recovery export protects the journal source path", async () => {
+  const source = await readFile(new URL(
+    "../app/workbench/workbench-sidebar-container.tsx",
+    import.meta.url,
+  ), "utf8");
+  assert.match(
+    source,
+    /exportHtmlCopy\?\.\(\{\s*html:\s*recovered\.html,\s*sourcePath:\s*journal\.sourcePath,/u,
+  );
+});
 
 function assertAlignedNavigation(harness, expectedProject) {
   const snapshot = harness.tabs.snapshot;

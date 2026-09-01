@@ -228,6 +228,7 @@ export const WorkbenchStartPageContainer = memo(function WorkbenchStartPageConta
           expectedJournalSha256: journal.journalSha256,
         }).then((recovered) => recovered && window.htmlAIProjects?.exportHtmlCopy?.({
           html: recovered.html,
+          sourcePath: journal.sourcePath,
           suggestedName: localFileNameFromSourcePath(journal.sourcePath),
         }));
       }}
