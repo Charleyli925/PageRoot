@@ -778,7 +778,7 @@ test("semantic structure edit rebuilds the disposable page and reruns its script
   });
 });
 
-test("a real user scroll during positioning becomes the latest handoff target", {
+test("a real user scroll during runtime handoff becomes the latest handoff target", {
   tag: ["@gate-smoke", "@smoke-editing"],
 }, async () => {
   const html = `<!doctype html>
@@ -833,23 +833,6 @@ test("a real user scroll during positioning becomes the latest handoff target", 
     const moveDownBox = await moveDownButton.boundingBox();
     expect(moveDownBox).not.toBeNull();
     await armRuntimeHandoffSamples(page);
-    // Use the already-visible toolbar coordinate so Playwright does not first
-    // scroll the shared stage while locating the operation.
-    await page.mouse.click(
-      moveDownBox.x + moveDownBox.width / 2,
-      moveDownBox.y + moveDownBox.height / 2,
-    );
-    // The fixture holds its candidate layout in motion for a bounded number of
-    // rAFs, giving this real user gesture a deterministic positioning window.
-    await page.waitForFunction(() => (
-      document.querySelector('[data-testid="html-canvas-editor"]')
-        ?.getAttribute('data-runtime-handoff') === 'positioning'
-    ));
-    const stageBox = await reviewStage.boundingBox();
-    expect(stageBox).not.toBeNull();
-    // Drag the native scrollbar thumb. This is a real pointer gesture and
-    // directly exercises the handoff's scrollbar-drag intent channel, including
-    // hosts where a wheel over the scrollbar does not bubble a wheel event.
     const scrollbarDrag = await reviewStage.evaluate((element) => {
       const rect = element.getBoundingClientRect();
       const maximum = Math.max(1, element.scrollHeight - element.clientHeight);
@@ -866,6 +849,18 @@ test("a real user scroll during positioning becomes the latest handoff target", 
         endY: rect.top + thumbHeight / 2 + targetRatio * travel,
       };
     });
+    // Use the already-visible toolbar coordinate so Playwright does not first
+    // scroll the shared stage while locating the operation.
+    await page.mouse.click(
+      moveDownBox.x + moveDownBox.width / 2,
+      moveDownBox.y + moveDownBox.height / 2,
+    );
+    // Drag the native scrollbar thumb. This is a real pointer gesture and
+    // directly exercises the handoff's scrollbar-drag intent channel, including
+    // hosts where a wheel over the scrollbar does not bubble a wheel event.
+    // The coordinates are captured before the operation so the gesture starts
+    // in the same event turn as preparing/positioning, before a fast candidate
+    // can settle without observing the user's intent.
     await page.mouse.move(scrollbarDrag.x, scrollbarDrag.startY);
     await page.mouse.down();
     await page.mouse.move(scrollbarDrag.x, scrollbarDrag.endY, { steps: 12 });
@@ -891,15 +886,15 @@ test("a real user scroll during positioning becomes the latest handoff target", 
       };
       requestAnimationFrame(waitForStableScroll);
     }));
-    const sawUserPositioning = await page.evaluate(() => {
+    const sawUserHandoffScroll = await page.evaluate(() => {
       const samples = window.__PAGEROOT_RUNTIME_HANDOFF_SAMPLES__ || [];
       return samples.some((sample) => (
-        sample.handoffState === "positioning"
+        (sample.handoffState === "preparing" || sample.handoffState === "positioning")
         && Number(sample.sharedScrollTop) > 600
         && sample.viewportAnchorStableId
       ));
     });
-    expect(sawUserPositioning).toBe(true);
+    expect(sawUserHandoffScroll).toBe(true);
     const userViewportSample = await page.evaluate(() => {
       const samples = window.__PAGEROOT_RUNTIME_HANDOFF_SAMPLES__ || [];
       return [...samples].reverse().find((sample) => (
