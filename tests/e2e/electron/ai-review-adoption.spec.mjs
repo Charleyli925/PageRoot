@@ -2378,7 +2378,7 @@ ${REVIEW_MASK_UNION_BEFORE}
     if (await sidebar.getAttribute("data-open") !== "true") {
       await launched.page.getByRole("button", { name: "展开左侧边栏" }).click();
     }
-    await sidebar.getByRole("button", { name: "打开 HTML", exact: true }).click();
+    await sidebar.getByRole("button", { name: "新建项目", exact: true }).click();
     const pickerFrame = await loadedDiskFrame(
       launched.page,
       pickerSourcePath,

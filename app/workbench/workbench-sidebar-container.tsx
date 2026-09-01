@@ -3,6 +3,8 @@
 import {
   memo,
   useCallback,
+  useEffect,
+  useState,
   useSyncExternalStore,
 } from "react";
 import { ArrowLeftIcon } from "@phosphor-icons/react/dist/csr/ArrowLeft";
@@ -164,30 +166,41 @@ export const WorkbenchStartPageContainer = memo(function WorkbenchStartPageConta
   capability,
   activeTabId,
   onOpenLocal,
-  onOpenRecent,
-  onOpenSidebar,
+  onOpenRegistered,
 }: {
   capability: ProjectCatalogCapability;
   activeTabId: string;
   onOpenLocal(): void;
-  onOpenRecent(sourcePath: string): void;
-  onOpenSidebar(): void;
+  onOpenRegistered(project: RegisteredProject): void;
 }) {
   const catalog = useSyncExternalStore(
     capability.subscribe,
     capability.getSnapshot,
     capability.getSnapshot,
   );
+  const [catalogReady, setCatalogReady] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    void Promise.allSettled([
+      capability.commands.refreshRecents(),
+      capability.commands.refreshRegistered(),
+    ]).then(() => {
+      if (active) setCatalogReady(true);
+    });
+    return () => {
+      active = false;
+    };
+  }, [capability]);
+
   return (
     <WorkbenchStartPage
       activeTabId={activeTabId}
-      recentProjects={[...catalog.recent]}
-      onOpenLocal={onOpenLocal}
-      onOpenRecent={onOpenRecent}
-      onOpenSidebar={() => {
-        onOpenSidebar();
-        void capability.commands.refreshRegistered();
-      }}
+      registeredProjects={[...catalog.registered]}
+      catalogReady={catalogReady}
+      catalogError={catalog.error}
+      onCreateProject={onOpenLocal}
+      onOpenProject={onOpenRegistered}
     />
   );
 });

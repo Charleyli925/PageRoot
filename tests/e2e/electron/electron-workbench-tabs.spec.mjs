@@ -95,13 +95,11 @@ test("Electron tab keyboard navigation manages focus and a persisted Start suppr
     await expect(reopened.page.locator("main.workbench")).toHaveAttribute("data-project-state", "unbound");
     await expect(reopenedTabs.getByRole("tab").nth(1)).not.toHaveText("HTML");
 
-    await reopened.page.getByRole("button", { name: "查看现有项目" }).click();
-    const sidebar = reopened.page.locator(".workbench-global-sidebar");
-    await sidebar.getByRole("button", {
-      name: path.basename(fixture.sourcePath, path.extname(fixture.sourcePath)),
-      exact: true,
-    }).click();
-    await sidebar.locator(".sidebar-version-file").first().click();
+    const startPage = reopened.page.locator(".workbench-start-page");
+    await expect(startPage.getByRole("heading", { name: "开始" })).toBeVisible();
+    await expect(startPage.getByRole("button", { name: "新建项目" })).toBeVisible();
+    await expect(startPage.getByRole("heading", { name: "继续编辑" })).toBeVisible();
+    await startPage.locator(".workbench-start-resume").click();
     await expect(reopenedTabs.getByRole("tab")).toHaveCount(1, { timeout: 60_000 });
     await expect(reopenedTabs.getByRole("tab").first()).toHaveAttribute("aria-selected", "true");
     await loadedDiskFrame(reopened.page, fixture.sourcePath, "list-item");

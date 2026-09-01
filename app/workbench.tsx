@@ -6825,10 +6825,7 @@ export default function Workbench() {
           capability={projectCatalogCapability}
           activeTabId={activeWorkbenchTab.tabId}
           onOpenLocal={() => void openProject()}
-          onOpenRecent={(recentSourcePath) => void openProject(recentSourcePath)}
-          onOpenSidebar={() => {
-            setGlobalSidebarOpen(true);
-          }}
+          onOpenRegistered={openRegisteredWorkbenchProject}
         />
       ) : null}
       {projectRulesPageActive ? (

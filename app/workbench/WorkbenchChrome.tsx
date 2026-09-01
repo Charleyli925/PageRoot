@@ -11,7 +11,6 @@ import {
   CaretDownIcon,
   CaretRightIcon,
   FileHtmlIcon,
-  FolderOpenIcon,
   FolderSimpleIcon,
   GearSixIcon,
   PlusIcon,
@@ -23,9 +22,12 @@ import type { WorkbenchTab, WorkbenchTabsSnapshot } from "../application/workben
 import type {
   ApplicationUpdateResult,
   ProjectVersionSummary,
-  RecentProject,
   RegisteredProject,
 } from "./types";
+import {
+  formatProjectTimestamp,
+  localFileNameFromSourcePath,
+} from "./project-model";
 import {
   ProjectVersionTree,
   ProjectVersionTreeSkeleton,
@@ -188,17 +190,52 @@ export function WorkbenchTabBar({
 
 export function WorkbenchStartPage({
   activeTabId,
-  recentProjects,
-  onOpenLocal,
-  onOpenRecent,
-  onOpenSidebar,
+  registeredProjects,
+  catalogReady,
+  catalogError,
+  onCreateProject,
+  onOpenProject,
 }: {
   activeTabId: string;
-  recentProjects: RecentProject[];
-  onOpenLocal: () => void;
-  onOpenRecent: (sourcePath: string) => void;
-  onOpenSidebar: () => void;
+  registeredProjects: RegisteredProject[];
+  catalogReady: boolean;
+  catalogError: string;
+  onCreateProject: () => void;
+  onOpenProject: (project: RegisteredProject) => void;
 }) {
+  const [showAllTasks, setShowAllTasks] = useState(false);
+  const [renderedAt] = useState(Date.now);
+  const readyProjects = useMemo(() => (
+    registeredProjects
+      .filter((project) => (
+        project.availability === "ready"
+        && Boolean(project.documentId)
+        && Boolean(project.activeSourcePath)
+      ))
+      .sort((left, right) => (
+        Number(right.lastOpenedAt || 0) - Number(left.lastOpenedAt || 0)
+        || left.projectName.localeCompare(right.projectName, "zh-CN")
+      ))
+  ), [registeredProjects]);
+  const continuingProject = readyProjects[0] || null;
+  const pendingProjects = readyProjects.filter((project) => project.hasPendingCandidate);
+  const visiblePendingProjects = showAllTasks
+    ? pendingProjects
+    : pendingProjects.slice(0, 3);
+  const firstProject = catalogReady
+    && !catalogError
+    && registeredProjects.length === 0;
+
+  const formatRecency = (lastOpenedAt: number | null): string => {
+    if (!lastOpenedAt) return "";
+    const elapsed = renderedAt - lastOpenedAt;
+    if (elapsed < 0) return formatProjectTimestamp(lastOpenedAt);
+    if (elapsed < 60_000) return "刚刚";
+    if (elapsed < 60 * 60_000) return `${Math.floor(elapsed / 60_000)} 分钟前`;
+    if (elapsed < 24 * 60 * 60_000) return `${Math.floor(elapsed / (60 * 60_000))} 小时前`;
+    return formatProjectTimestamp(lastOpenedAt);
+  };
+
   return (
     <section
       id="workbench-content-outlet"
@@ -207,28 +244,88 @@ export function WorkbenchStartPage({
       aria-labelledby={`workbench-tab-${activeTabId}`}
     >
       <div className="workbench-start-content">
-        <span className="workbench-start-icon"><FileHtmlIcon aria-hidden="true" size={28} weight="duotone" /></span>
-        <h1 id="workbench-start-title">继续编辑 HTML</h1>
-        <p>从已有项目继续，或打开一份新的本地 HTML。</p>
-        <button className="workbench-start-primary" type="button" onClick={onOpenSidebar}>
-          查看现有项目
-          <CaretRightIcon aria-hidden="true" size={13} weight="bold" />
-        </button>
-        <button className="workbench-start-secondary" type="button" onClick={onOpenLocal}>
-          <FolderOpenIcon aria-hidden="true" size={16} weight="duotone" />
-          从 Finder 打开 HTML
-        </button>
-        {recentProjects.length ? (
-          <div className="workbench-start-recents">
-            <strong>最近打开</strong>
-            {recentProjects.slice(0, 4).map((project) => (
-              <button type="button" key={project.sourcePath} onClick={() => onOpenRecent(project.sourcePath)}>
-                <FileHtmlIcon aria-hidden="true" size={15} weight="duotone" />
-                <span>{project.name}</span>
-              </button>
-            ))}
-          </div>
-        ) : null}
+        <header className="workbench-start-header">
+          <h1 id="workbench-start-title">开始</h1>
+          {!firstProject ? (
+            <button className="workbench-start-primary" type="button" onClick={onCreateProject}>
+              <PlusIcon aria-hidden="true" size={14} weight="bold" />
+              新建项目
+            </button>
+          ) : null}
+        </header>
+
+        {firstProject ? (
+          <section className="workbench-start-empty" aria-labelledby="workbench-start-empty-title">
+            <h2 id="workbench-start-empty-title">开始你的第一个项目</h2>
+            <p>选择一份 HTML，在 PageRoot 中编辑、评论和交给 AI 修改。</p>
+            <button className="workbench-start-primary" type="button" onClick={onCreateProject}>
+              <PlusIcon aria-hidden="true" size={14} weight="bold" />
+              新建项目
+            </button>
+          </section>
+        ) : (
+          <>
+            {continuingProject ? (
+              <section className="workbench-start-section" aria-labelledby="workbench-start-continue-title">
+                <h2 id="workbench-start-continue-title">继续编辑</h2>
+                <button
+                  className="workbench-start-resume"
+                  type="button"
+                  onClick={() => onOpenProject(continuingProject)}
+                >
+                  <span className="workbench-start-file-icon">
+                    <FileHtmlIcon aria-hidden="true" size={18} weight="duotone" />
+                  </span>
+                  <span className="workbench-start-resume-copy">
+                    <strong>{continuingProject.projectName}</strong>
+                    <span>
+                      {localFileNameFromSourcePath(continuingProject.activeSourcePath)}
+                      {continuingProject.lastOpenedAt ? (
+                        <>
+                          <span aria-hidden="true"> · </span>
+                          <time dateTime={new Date(continuingProject.lastOpenedAt).toISOString()}>
+                            {formatRecency(continuingProject.lastOpenedAt)}
+                          </time>
+                        </>
+                      ) : null}
+                    </span>
+                  </span>
+                  <span className="workbench-start-resume-action">继续编辑</span>
+                  <CaretRightIcon aria-hidden="true" size={15} weight="bold" />
+                </button>
+              </section>
+            ) : null}
+
+            {pendingProjects.length ? (
+              <section className="workbench-start-section workbench-start-tasks" aria-labelledby="workbench-start-tasks-title">
+                <h2 id="workbench-start-tasks-title">需要处理</h2>
+                <div className="workbench-start-task-list">
+                  {visiblePendingProjects.map((project) => (
+                    <button
+                      type="button"
+                      key={project.projectId}
+                      onClick={() => onOpenProject(project)}
+                    >
+                      <span className="workbench-start-task-dot" aria-hidden="true" />
+                      <strong>{project.projectName}</strong>
+                      <span>1 个版本待审阅</span>
+                      <CaretRightIcon aria-hidden="true" size={14} weight="bold" />
+                    </button>
+                  ))}
+                  {!showAllTasks && pendingProjects.length > 3 ? (
+                    <button
+                      className="workbench-start-task-more"
+                      type="button"
+                      onClick={() => setShowAllTasks(true)}
+                    >
+                      查看全部 {pendingProjects.length} 项
+                    </button>
+                  ) : null}
+                </div>
+              </section>
+            ) : null}
+          </>
+        )}
       </div>
     </section>
   );
@@ -373,6 +470,22 @@ export function WorkbenchGlobalSidebar({
     }
   }, [loadProjectVersions, versionStates]);
 
+  useEffect(() => {
+    for (const project of importedProjects) {
+      if (
+        projectExpansionState.expandedProjectIds[project.projectId] === true
+        && !versionStates[project.projectId]
+      ) {
+        void loadImportedProject(project);
+      }
+    }
+  }, [
+    importedProjects,
+    loadImportedProject,
+    projectExpansionState.expandedProjectIds,
+    versionStates,
+  ]);
+
   const toggleImportedProject = useCallback((project: RegisteredProject) => {
     const expanded = projectExpansionState.expandedProjectIds[project.projectId] === true;
     setProjectExpansionState((state) => toggleProjectExpansion(state, project.projectId));
@@ -413,7 +526,7 @@ export function WorkbenchGlobalSidebar({
             ) : null}
           </div>
           <div className="workbench-sidebar-body">
-            <button type="button" onClick={onOpenLocal}><PlusIcon aria-hidden="true" size={14} weight="bold" />打开 HTML</button>
+            <button type="button" onClick={onOpenLocal}><PlusIcon aria-hidden="true" size={14} weight="bold" />新建项目</button>
             {openHtmlError ? (
               <p className="workbench-sidebar-error" role="alert">{openHtmlError}</p>
             ) : null}
