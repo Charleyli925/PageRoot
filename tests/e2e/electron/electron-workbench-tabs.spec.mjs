@@ -640,12 +640,16 @@ test("Electron sidebar opens an imported historical version in the existing proj
     await launched.page.getByRole("button", { name: "展开左侧边栏" }).click();
     const sidebar = launched.page.locator(".workbench-global-sidebar");
     await expect(sidebar).toHaveAttribute("data-open", "true");
-    await expect(sidebar.locator(".sidebar-project-section").first()
-      .locator(".sidebar-project-row")).toHaveAttribute("aria-expanded", "true");
+    await expect(sidebar.locator(".sidebar-project-section")).toHaveCount(1);
+    const currentProject = sidebar.locator(".sidebar-project-item")
+      .filter({ hasText: "sidebar-history-a" })
+      .first();
+    await expect(currentProject.locator(".sidebar-project-row"))
+      .toHaveAttribute("aria-expanded", "true");
     const beforeExpansion = await launched.page.evaluate(() => (
       window.htmlAIProjects?.getActiveProject()?.projectId || null
     ));
-    const importedProject = sidebar.locator(".sidebar-imported-project")
+    const importedProject = sidebar.locator(".sidebar-project-item")
       .filter({ hasText: "sidebar-history-b" })
       .first();
     await expect(importedProject).toBeVisible();
@@ -671,7 +675,7 @@ test("Electron sidebar opens an imported historical version in the existing proj
     await expect(launched.page.locator(".preview-navigation-banner").first())
       .toContainText("正在浏览");
 
-    await sidebar.locator(".sidebar-project-section").first()
+    await currentProject
       .locator(".sidebar-version-file").first().click();
     await expect(tabs).toHaveCount(2);
   } finally {
@@ -727,16 +731,20 @@ test("Electron sidebar keeps multiple project trees expanded without switching i
     await launched.page.getByRole("button", { name: "展开左侧边栏" }).click();
     const sidebar = launched.page.locator(".workbench-global-sidebar");
     await expect(sidebar).toHaveAttribute("data-open", "true");
-    await expect(sidebar.locator(".sidebar-imported-project")).toHaveCount(2, {
+    await expect(sidebar.locator(".sidebar-project-section")).toHaveCount(1);
+    await expect(sidebar.locator(".sidebar-project-item")).toHaveCount(3, {
       timeout: 30_000,
     });
     const currentProjectId = await launched.page.evaluate(() => (
       window.htmlAIProjects?.getActiveProject()?.projectId || null
     ));
-    const currentRow = sidebar.locator(".sidebar-project-row-current");
+    const currentProject = sidebar.locator(".sidebar-project-item")
+      .filter({ hasText: "sidebar-expansion-a" })
+      .first();
+    const currentRow = currentProject.locator(".sidebar-project-row");
     await expect(currentRow).toHaveAttribute("aria-expanded", "true");
 
-    const importedProject = (fileName) => sidebar.locator(".sidebar-imported-project")
+    const importedProject = (fileName) => sidebar.locator(".sidebar-project-item")
       .filter({ hasText: path.basename(fileName, path.extname(fileName)) })
       .first();
     const projectBRow = importedProject(projectB.sourcePath).locator(".sidebar-project-row");
@@ -792,7 +800,7 @@ test("Electron sidebar keeps multiple project trees expanded without switching i
     await projectCContainer.locator(".sidebar-version-file").first().click();
     await expect(tabs.filter({ hasText: "sidebar-expansion-c-with-a-very-long-file-name-for-tooltip" }))
       .toHaveAttribute("aria-selected", "true", { timeout: 60_000 });
-    await expect(sidebar.locator(".sidebar-project-row-current"))
+    await expect(currentRow)
       .toHaveAttribute("aria-expanded", "true");
   } finally {
     await stopPageRoot(launched.electronApp, launched.isolatedUserData);

@@ -3,6 +3,39 @@ export type ProjectExpansionState = Readonly<{
   touchedProjectIds: Readonly<Record<string, true>>;
 }>;
 
+export type SidebarProjectRecency = Readonly<{
+  projectId: string;
+  projectName: string;
+  lastUpdatedAt?: string | null;
+}>;
+
+function projectUpdatedTimestamp(value: unknown): number | null {
+  if (typeof value !== "string" || !value) return null;
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? timestamp : null;
+}
+
+export function compareSidebarProjects(
+  left: SidebarProjectRecency,
+  right: SidebarProjectRecency,
+): number {
+  const leftTimestamp = projectUpdatedTimestamp(left.lastUpdatedAt);
+  const rightTimestamp = projectUpdatedTimestamp(right.lastUpdatedAt);
+  if (leftTimestamp === null && rightTimestamp !== null) return 1;
+  if (leftTimestamp !== null && rightTimestamp === null) return -1;
+  if (leftTimestamp !== null && rightTimestamp !== null && leftTimestamp !== rightTimestamp) {
+    return rightTimestamp - leftTimestamp;
+  }
+  return left.projectName.localeCompare(right.projectName, "zh-CN")
+    || left.projectId.localeCompare(right.projectId);
+}
+
+export function sortSidebarProjects<T extends SidebarProjectRecency>(
+  projects: readonly T[],
+): T[] {
+  return [...projects].sort(compareSidebarProjects);
+}
+
 function copyKnownIds(ids: readonly string[]): Set<string> {
   return new Set(ids.filter((id) => typeof id === "string" && id.length > 0));
 }

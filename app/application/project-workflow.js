@@ -2820,7 +2820,7 @@ export class ProjectWorkflow {
       });
       const project = copyProject(committed);
       if (!project) {
-        throw Object.assign(new Error("导入确认没有返回可打开的项目文件。"), {
+        throw Object.assign(new Error("导入确认没有返回可打开的项目。"), {
           code: "EXTERNAL_OPEN_COMMIT_INVALID",
         });
       }

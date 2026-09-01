@@ -242,7 +242,7 @@ export function createBridgeClient({
     projectFile: (sourcePath, path) => query(
       "/file",
       { sourcePath, path },
-      "无法读取项目文件。",
+      "无法读取长期规则。",
     ),
     ensureProject: (body) => command(
       "/project/ensure",
@@ -371,7 +371,7 @@ export function createBridgeClient({
     updateProjectFile: (body) => command(
       "/project-file",
       body,
-      "无法更新 PROJECT.md。",
+      "无法更新长期规则。",
     ),
     openFolder: (body) => command(
       "/open-folder",

@@ -99,7 +99,10 @@ export const WorkbenchGlobalSidebarContainer = memo(function WorkbenchGlobalSide
   open: boolean;
   currentProjectId: string | null;
   currentProjectName: string;
+  currentProjectDocumentId: string | null;
+  currentProjectSourcePath: string | null;
   currentProjectVersions: readonly ProjectVersionSummary[];
+  activeVersionId: string | null;
   projectRulesActive: boolean;
   onToggle(): void;
   onOpenLocal(): void;

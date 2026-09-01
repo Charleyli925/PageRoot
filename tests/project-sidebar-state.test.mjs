@@ -22,6 +22,7 @@ async function loadState() {
 
 const {
   createProjectExpansionState,
+  sortSidebarProjects,
   reconcileProjectExpansionState,
   toggleProjectExpansion,
 } = await loadState();
@@ -58,4 +59,44 @@ test("removed projects are pruned without affecting retained projects", () => {
   state = reconcileProjectExpansionState(state, ["project-a", "project-c"], "project-a");
   assert.deepEqual(expanded(state), ["project-a", "project-c"]);
   assert.deepEqual(Object.keys(state.touchedProjectIds).sort(), ["project-c"]);
+});
+
+test("project rows sort by authoritative content updates and keep undated rows last", () => {
+  const projects = [
+    { projectId: "project-old", projectName: "旧项目", lastUpdatedAt: "2026-08-30T12:00:00.000Z" },
+    { projectId: "project-undated", projectName: "无时间项目", lastUpdatedAt: null },
+    { projectId: "project-new", projectName: "新项目", lastUpdatedAt: "2026-09-01T08:00:00.000Z" },
+    { projectId: "project-invalid", projectName: "无效时间项目", lastUpdatedAt: "not-a-date" },
+  ];
+
+  const sorted = sortSidebarProjects(projects);
+
+  assert.deepEqual(sorted.slice(0, 2).map((project) => project.projectId), [
+    "project-new",
+    "project-old",
+  ]);
+  assert.deepEqual(new Set(sorted.slice(2).map((project) => project.projectId)), new Set([
+    "project-invalid",
+    "project-undated",
+  ]));
+  assert.deepEqual(projects.map((project) => project.projectId), [
+    "project-old",
+    "project-undated",
+    "project-new",
+    "project-invalid",
+  ]);
+});
+
+test("projects with equal content timestamps use stable name and identity tie breakers", () => {
+  const sorted = sortSidebarProjects([
+    { projectId: "project-b", projectName: "同名", lastUpdatedAt: "2026-09-01T08:00:00.000Z" },
+    { projectId: "project-a", projectName: "同名", lastUpdatedAt: "2026-09-01T08:00:00.000Z" },
+    { projectId: "project-c", projectName: "另一个", lastUpdatedAt: "2026-09-01T08:00:00.000Z" },
+  ]);
+
+  assert.deepEqual(sorted.map((project) => project.projectId), [
+    "project-c",
+    "project-a",
+    "project-b",
+  ]);
 });

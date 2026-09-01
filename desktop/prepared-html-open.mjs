@@ -128,7 +128,7 @@ export function assertCommitAction({
   if (classification === "managed-project" && action !== "open-managed") {
     throw new ProjectFileError(
       "EXTERNAL_OPEN_ACTION_MISMATCH",
-      "已登记项目文件直接打开。",
+      "已登记项目直接打开。",
     );
   }
   if (deleteOriginal && action !== "import-new") {

@@ -28,9 +28,9 @@ const PRODUCT_ERROR_MESSAGES = Object.freeze({
   REGISTRY_BUSY:
     "项目登记表正被占用。如果是上一次异常退出留下的，稍后会自动解除，请重试。",
   UNSUPPORTED_REGISTRY_SCHEMA:
-    "项目登记表的格式无法识别。PageRoot 没有改动它，也没有改动任何项目文件；可重新打开 HTML 重建登记。",
+    "项目登记表的格式无法识别。PageRoot 没有改动它，也没有改动任何内容；可重新打开 HTML 重建登记。",
   INVALID_REGISTRY:
-    "项目登记表的内容无法校验。PageRoot 没有改动它，也没有改动任何项目文件；可重新打开 HTML 重建登记。",
+    "项目登记表的内容无法校验。PageRoot 没有改动它，也没有改动任何内容；可重新打开 HTML 重建登记。",
   PROJECT_IDENTITY_MISMATCH:
     "项目记录暂时无法核对。PageRoot 没有覆盖源文件，请重新打开后再试。",
   SOURCE_REGISTRY_MISMATCH:
@@ -64,7 +64,7 @@ const PRODUCT_ERROR_MESSAGES = Object.freeze({
   MANAGED_SOURCE_AMBIGUOUS:
     "项目中存在多个可能的当前 HTML。PageRoot 没有写入，请重新打开目标文件。",
   AMBIGUOUS_SOURCE_FILE_IDENTITY:
-    "当前 HTML 无法唯一对应到一个项目。PageRoot 没有写入，请选择正确的项目文件。",
+    "当前 HTML 无法唯一对应到一个项目。PageRoot 没有写入，请打开正确的 HTML。",
   CANDIDATE_SOURCE_CHANGED:
     "候选生成后当前工作文件已变化，PageRoot 没有采纳过期结果。请重新核对或重新发起修改。",
   DRAFT_REVISION_CONFLICT:

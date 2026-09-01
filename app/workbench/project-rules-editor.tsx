@@ -152,10 +152,9 @@ export default function ProjectRulesEditorPage({
         <header className="project-rules-editor-header">
           <div className="project-rules-editor-title-row">
             <div>
-              <p className="project-rules-editor-eyebrow">项目文件</p>
+              <p className="project-rules-editor-eyebrow">长期规则</p>
               <h1>长期规则</h1>
             </div>
-            <code>PROJECT.md</code>
           </div>
           <p className="project-rules-editor-description">
             每次 AI 修改开始时自动读取；本轮处理中的编辑从下一次任务生效。
@@ -176,7 +175,7 @@ export default function ProjectRulesEditorPage({
 
         {snapshot.error ? (
           <div className="project-rules-editor-error" role="alert">
-            <strong>PROJECT.md 暂时无法读取</strong>
+            <strong>长期规则暂时无法读取</strong>
             <span>{snapshot.error}</span>
             <button type="button" onClick={onRetry}>重试读取</button>
           </div>
@@ -213,7 +212,7 @@ export default function ProjectRulesEditorPage({
               ref={textareaRef}
               key={`${snapshot.editorGeneration}:${snapshot.open ? "open" : "closed"}`}
               className="project-rules-editor-textarea"
-              aria-label="PROJECT.md 内容"
+              aria-label="长期规则内容"
               value={editorContent}
               disabled={disabled}
               spellCheck
@@ -233,7 +232,7 @@ export default function ProjectRulesEditorPage({
               onKeyDown={onKeyDown}
             />
             <footer className="project-rules-editor-footer">
-              <span>支持基础 Markdown 格式 · 自动保存 · ⌘S 立即保存</span>
+              <span>长期规则会自动保存，也可以按 ⌘S 立即保存</span>
               {dirty && !runLocked ? (
                 <button type="button" className="project-rules-restore" onClick={onRestore}>
                   <ArrowCounterClockwiseIcon aria-hidden="true" size={14} weight="regular" />
