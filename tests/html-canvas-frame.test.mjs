@@ -3,7 +3,11 @@ import test from "node:test";
 
 import { EDIT_AUTHOR_RUNTIME_CONTRACT_VERSION } from "../app/domain/edit-runtime-contract.js";
 import {
+  clampRuntimeScroll,
   frameDocumentMatchesExpected,
+  runtimeAnchorScrollTop,
+  runtimePositionWithinTolerance,
+  RUNTIME_HANDOFF_TOLERANCE_PX,
   sameRuntimeGrant,
 } from "../app/components/html-canvas-frame.js";
 
@@ -37,4 +41,27 @@ test("frameDocumentMatchesExpected accepts either srcdoc or the written html", (
   assert.equal(frameDocumentMatchesExpected(iframe, "<html></html>", null), true);
   assert.equal(frameDocumentMatchesExpected({ srcdoc: "" }, "<html></html>", "<html></html>"), true);
   assert.equal(frameDocumentMatchesExpected({ srcdoc: "" }, "<html></html>", null), false);
+});
+
+test("runtime handoff clamps shortened documents instead of falling back to the top", () => {
+  assert.equal(clampRuntimeScroll(840, 320), 320);
+  assert.equal(clampRuntimeScroll(-20, 320), 0);
+  assert.equal(runtimeAnchorScrollTop({
+    currentScrollTop: 0,
+    currentAnchorOffsetY: 620,
+    desiredAnchorOffsetY: 180,
+    maximumScrollTop: 900,
+  }), 440);
+  assert.equal(runtimeAnchorScrollTop({
+    currentScrollTop: 0,
+    currentAnchorOffsetY: 620,
+    desiredAnchorOffsetY: 180,
+    maximumScrollTop: 240,
+  }), 240);
+});
+
+test("runtime handoff uses the two-pixel visibility contract", () => {
+  assert.equal(RUNTIME_HANDOFF_TOLERANCE_PX, 2);
+  assert.equal(runtimePositionWithinTolerance(480, 478.1), true);
+  assert.equal(runtimePositionWithinTolerance(480, 477.9), false);
 });

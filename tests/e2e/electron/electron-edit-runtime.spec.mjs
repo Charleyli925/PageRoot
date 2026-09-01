@@ -56,40 +56,147 @@ async function armRuntimeHandoffSamples(page) {
     window.__PAGEROOT_RUNTIME_CANDIDATE_FRAME__ = null;
     window.__PAGEROOT_RUNTIME_OLD_FRAME__ = oldFrame;
     window.__PAGEROOT_RUNTIME_HANDOFF_ACTIVE__ = true;
+    const reviewStage = editor.closest(".review-scroll-stage");
     const sample = () => {
       if (!window.__PAGEROOT_RUNTIME_HANDOFF_ACTIVE__) return;
       const candidate = editor.querySelector('iframe[data-frame-role="runtime-candidate"]');
       if (candidate && !window.__PAGEROOT_RUNTIME_CANDIDATE_FRAME__) {
         window.__PAGEROOT_RUNTIME_CANDIDATE_FRAME__ = candidate;
       }
+      const candidateFrame = window.__PAGEROOT_RUNTIME_CANDIDATE_FRAME__;
+      const activeFrame = Array.from(editor.querySelectorAll("iframe"))
+        .find((frame) => !frame.hasAttribute("data-frame-role"));
+      const activeStyle = activeFrame ? getComputedStyle(activeFrame) : null;
+      const candidateStyle = candidateFrame ? getComputedStyle(candidateFrame) : null;
+      const candidateGeneration = candidateFrame?.getAttribute("data-frame-generation")
+        || candidate?.getAttribute("data-frame-generation")
+        || null;
+      const selected = activeFrame?.contentDocument
+        ?.querySelector("[data-html-canvas-selected]");
+      const selectedRect = selected?.getBoundingClientRect() || null;
+      const activeFrameRect = activeFrame?.getBoundingClientRect() || null;
+      const stageRect = reviewStage?.getBoundingClientRect() || null;
+      const activeSelection = activeFrame?.contentDocument?.getSelection();
+      let caretOffsetY = null;
+      if (activeSelection?.isCollapsed && activeSelection.focusNode) {
+        try {
+          const range = activeFrame.contentDocument.createRange();
+          range.setStart(activeSelection.focusNode, activeSelection.focusOffset);
+          range.collapse(true);
+          caretOffsetY = range.getBoundingClientRect().top;
+        } catch {
+          caretOffsetY = null;
+        }
+      }
+      const visibleFrames = Array.from(editor.querySelectorAll("iframe"))
+        .filter((frame) => frame.isConnected && getComputedStyle(frame).visibility === "visible")
+        .map((frame) => ({
+          frame,
+          opacity: Number(getComputedStyle(frame).opacity),
+          zIndex: Number(getComputedStyle(frame).zIndex) || 0,
+        }))
+        .filter(({ opacity }) => opacity > 0.01)
+        .sort((left, right) => right.zIndex - left.zIndex);
+      const topFrame = visibleFrames[0]?.frame || null;
       samples.push({
-        candidateGeneration: candidate?.getAttribute("data-frame-generation") || null,
-        candidateVisibility: candidate ? getComputedStyle(candidate).visibility : null,
+        candidateGeneration,
+        candidateVisibility: candidateFrame ? candidateStyle?.visibility : null,
+        candidateOpacity: candidateFrame ? candidateStyle?.opacity : null,
+        candidatePointerEvents: candidateFrame ? candidateStyle?.pointerEvents : null,
+        newFrameOpacity: candidateFrame ? candidateStyle?.opacity : null,
+        newFramePointerEvents: candidateFrame ? candidateStyle?.pointerEvents : null,
         oldConnected: oldFrame.isConnected,
         oldGeneration: oldFrame.getAttribute("data-frame-generation"),
         oldRenderVerified: editor.getAttribute("data-render-verified"),
         oldVisibility: oldFrame.isConnected ? getComputedStyle(oldFrame).visibility : null,
+        oldOpacity: oldFrame.isConnected ? getComputedStyle(oldFrame).opacity : null,
         handoffState: editor.getAttribute("data-runtime-handoff"),
         oldSelectedCount: oldFrame.contentDocument
           ?.querySelectorAll("[data-html-canvas-selected]").length || 0,
         toolbarVisible: Boolean(
           editor.querySelector('[role="toolbar"]')?.getClientRects().length,
         ),
+        activeGeneration: activeFrame?.getAttribute("data-frame-generation") || null,
+        activeVisibility: activeStyle?.visibility || null,
+        activeOpacity: activeStyle?.opacity || null,
+        activePointerEvents: activeStyle?.pointerEvents || null,
+        topFrameGeneration: topFrame?.getAttribute("data-frame-generation") || null,
+        iframeScrollY: activeFrame?.contentWindow?.scrollY ?? null,
+        sharedScrollTop: reviewStage?.scrollTop ?? null,
+        selectedStableId: selected?.getAttribute("data-pageroot-id") || null,
+        selectionStableId: selected?.getAttribute("data-pageroot-id") || null,
+        viewportAnchorOffsetY: selectedRect?.top ?? null,
+        selectedTop: selectedRect?.top ?? null,
+        selectedScreenTop: selectedRect && activeFrameRect
+          ? activeFrameRect.top + selectedRect.top
+          : null,
+        selectedStageTop: selectedRect && activeFrameRect && stageRect
+          ? activeFrameRect.top - stageRect.top + selectedRect.top
+          : null,
+        caretOffsetY,
+        activeElement: activeFrame?.contentDocument?.activeElement?.getAttribute?.(
+          "data-native-case",
+        ) || activeFrame?.contentDocument?.activeElement?.tagName || null,
+        focused: Boolean(
+          activeFrame?.contentDocument?.activeElement
+          && activeFrame.contentDocument.activeElement !== activeFrame.contentDocument.body,
+        ),
+        layoutReady: editor.getAttribute("data-runtime-layout-ready") === "true",
       });
     };
     const observer = new MutationObserver(sample);
     observer.observe(editor, { attributes: true, childList: true, subtree: true });
     window.__PAGEROOT_RUNTIME_HANDOFF_OBSERVER__ = observer;
-    sample();
+    let animationFrame = 0;
+    const sampleLoop = () => {
+      sample();
+      if (window.__PAGEROOT_RUNTIME_HANDOFF_ACTIVE__) {
+        animationFrame = requestAnimationFrame(sampleLoop);
+      }
+    };
+    window.__PAGEROOT_RUNTIME_HANDOFF_ANIMATION_FRAME__ = () => cancelAnimationFrame(animationFrame);
+    sampleLoop();
   });
 }
 
-async function assertRuntimeHandoff(page, { requireActiveChrome = false } = {}) {
+async function assertRuntimeHandoff(page, {
+  requireActiveChrome = false,
+  expectPromotion = true,
+  assertVisualContinuity = false,
+} = {}) {
   await expect.poll(() => page.evaluate(() => (
     window.__PAGEROOT_RUNTIME_HANDOFF_SAMPLES__ || []
   ).some((sample) => sample.candidateGeneration))).toBe(true);
+  if (expectPromotion) {
+    try {
+      await expect.poll(() => page.evaluate(() => (
+        window.__PAGEROOT_RUNTIME_HANDOFF_SAMPLES__ || []
+      ).some((sample) => (
+        sample.handoffState === "active"
+        && sample.activeGeneration === sample.candidateGeneration
+      )))).toBe(true);
+    } catch (cause) {
+      const diagnostics = await page.evaluate(() => ({
+        attributes: Object.fromEntries(
+          Array.from(document.querySelector('[data-testid="html-canvas-editor"]')?.attributes || [])
+            .filter((attribute) => attribute.name.startsWith("data-"))
+            .map((attribute) => [attribute.name, attribute.value]),
+        ),
+        samples: window.__PAGEROOT_RUNTIME_HANDOFF_SAMPLES__ || [],
+      }));
+      throw new Error(`${cause.message}\nRuntime handoff diagnostics: ${JSON.stringify(diagnostics)}`);
+    }
+  } else {
+    // A failed candidate is observed at the handoff boundary. Do not wait for
+    // the runtime session's separate static-fallback policy, because that
+    // would hide the old-frame rollback this assertion is meant to inspect.
+    await expect.poll(() => page.evaluate(() => (
+      window.__PAGEROOT_RUNTIME_HANDOFF_SAMPLES__ || []
+    ).some((sample) => sample.handoffState === "preparing"))).toBe(true);
+  }
   const handoffSamples = await page.evaluate(() => {
     window.__PAGEROOT_RUNTIME_HANDOFF_ACTIVE__ = false;
+    window.__PAGEROOT_RUNTIME_HANDOFF_ANIMATION_FRAME__?.();
     window.__PAGEROOT_RUNTIME_HANDOFF_OBSERVER__?.disconnect();
     return window.__PAGEROOT_RUNTIME_HANDOFF_SAMPLES__ || [];
   });
@@ -101,7 +208,9 @@ async function assertRuntimeHandoff(page, { requireActiveChrome = false } = {}) 
     sample.oldConnected
     && sample.oldVisibility === "visible"
     && sample.oldRenderVerified === "true"
-    && sample.candidateVisibility === "hidden"
+    && sample.candidateVisibility === "visible"
+    && Number(sample.candidateOpacity) === 0
+    && sample.candidatePointerEvents === "none"
     && sample.oldGeneration !== sample.candidateGeneration
   ));
   if (!activeFrameStayedManaged) {
@@ -115,6 +224,47 @@ async function assertRuntimeHandoff(page, { requireActiveChrome = false } = {}) 
       throw new Error(`Runtime preparing chrome samples: ${JSON.stringify(preparingSamples)}`);
     }
   }
+  if (expectPromotion) {
+    const positioningSamples = candidateSamples.filter((sample) => (
+      sample.handoffState === "positioning"
+      && sample.oldConnected
+      && sample.oldVisibility === "visible"
+      && Number(sample.oldOpacity) === 1
+      && Number(sample.activeOpacity) === 0
+      && sample.activePointerEvents === "none"
+    ));
+    expect(positioningSamples.length).toBeGreaterThanOrEqual(2);
+    const activeSamples = candidateSamples.filter((sample) => (
+      sample.handoffState === "active"
+      && sample.activeGeneration === sample.candidateGeneration
+      && sample.activeVisibility === "visible"
+      && Number(sample.activeOpacity) === 1
+      && sample.activePointerEvents === "auto"
+    ));
+    expect(activeSamples.length).toBeGreaterThan(0);
+    expect(activeSamples.some((sample) => sample.topFrameGeneration === sample.candidateGeneration)).toBe(true);
+    expect(activeSamples.some((sample) => sample.layoutReady)).toBe(true);
+    if (assertVisualContinuity) {
+      const firstPreparingSample = preparingSamples.find((sample) => (
+        Number.isFinite(sample.selectedScreenTop)
+        && sample.selectedStableId
+      ));
+      const firstInteractiveSample = activeSamples.find((sample) => (
+        Number.isFinite(sample.selectedScreenTop)
+        && sample.selectedStableId === firstPreparingSample?.selectedStableId
+      ));
+      if (!firstPreparingSample || !firstInteractiveSample) {
+        throw new Error(`Runtime visual anchor samples missing: ${JSON.stringify({
+          preparingSamples,
+          activeSamples,
+        })}`);
+      }
+      expect(Math.abs(
+        firstInteractiveSample.selectedScreenTop - firstPreparingSample.selectedScreenTop,
+      )).toBeLessThanOrEqual(2);
+    }
+  }
+  return handoffSamples;
 }
 
 async function assertRuntimeCandidateReused(page) {
@@ -384,7 +534,10 @@ test("semantic structure edit rebuilds the disposable page and reruns its script
       moveDownBox.x + moveDownBox.width / 2,
       moveDownBox.y + moveDownBox.height / 2,
     );
-    await assertRuntimeHandoff(page, { requireActiveChrome: true });
+    await assertRuntimeHandoff(page, {
+      requireActiveChrome: true,
+      assertVisualContinuity: true,
+    });
 
     await expect.poll(async () => {
       try {
@@ -400,7 +553,7 @@ test("semantic structure edit rebuilds the disposable page and reruns its script
     await expect(nextFrame.locator(
       `[data-pageroot-id="${stableId}"][data-html-canvas-selected]`,
     )).toHaveCount(1);
-    await expect.poll(() => reviewStage.evaluate((element) => element.scrollTop)).toBe(480);
+    await expect.poll(() => reviewStage.evaluate((element) => element.scrollTop)).toBeCloseTo(518.5, 1);
     const workingCopyPath = await managedWorkingCopyPath(page, sourcePath);
     await expect.poll(() => readFileSync(workingCopyPath, "utf8"))
       .toMatch(/id="second"[\s\S]*id="first"/u);
@@ -409,7 +562,7 @@ test("semantic structure edit rebuilds the disposable page and reruns its script
     const beforeUndoDocument = await documentToken(page);
     await armRuntimeHandoffSamples(page);
     await clickEditHistoryMenu(electronApp, page, "undo");
-    await assertRuntimeHandoff(page);
+    await assertRuntimeHandoff(page, { assertVisualContinuity: true });
     await expect.poll(async () => {
       try {
         return await documentToken(page);
@@ -427,7 +580,7 @@ test("semantic structure edit rebuilds the disposable page and reruns its script
     const beforeRedoDocument = await documentToken(page);
     await armRuntimeHandoffSamples(page);
     await clickEditHistoryMenu(electronApp, page, "redo");
-    await assertRuntimeHandoff(page);
+    await assertRuntimeHandoff(page, { assertVisualContinuity: true });
     await expect.poll(async () => {
       try {
         return await documentToken(page);
@@ -443,6 +596,158 @@ test("semantic structure edit rebuilds the disposable page and reruns its script
       .toMatch(/id="second"[\s\S]*id="first"/u);
     expect(readFileSync(sourcePath, "utf8")).toBe(html);
     expect(readFileSync(workingCopyPath, "utf8")).not.toContain("乙甲</output>");
+    await reviewStage.evaluate((element) => {
+      element.scrollTop = 700;
+    });
+    await expect.poll(() => reviewStage.evaluate((element) => element.scrollTop))
+      .toBeCloseTo(700, 1);
+    await page.waitForTimeout(80);
+    await expect.poll(() => reviewStage.evaluate((element) => element.scrollTop))
+      .toBeCloseTo(700, 1);
+  });
+});
+
+test("long-page element duplication uses the same visible runtime handoff", {
+  tag: ["@gate-smoke", "@smoke-editing"],
+}, async () => {
+  const html = `<!doctype html>
+<html><head><title>Runtime duplicate handoff</title></head><body>
+  <div aria-hidden="true" style="height:900px"></div>
+  <main>
+    <article data-native-case="runtime-duplicate" id="duplicate-target">
+      <h2>复制目标</h2>
+      <p>这段内容用于验证长页面中复制元素的视觉连续性。</p>
+    </article>
+    <output id="duplicate-proof"></output>
+  </main>
+  <div aria-hidden="true" style="height:1800px"></div>
+  <script>
+    document.body.style.height = '0px';
+    requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(() => {
+      document.body.style.height = '';
+    })));
+    document.querySelector('#duplicate-proof').textContent =
+      '运行时复制 ' + document.querySelectorAll('[data-native-case="runtime-duplicate"]').length;
+  </script>
+</body></html>`;
+
+  await withRuntimeProject("pageroot-runtime-duplicate-e2e-", {
+    "runtime-report.html": html,
+  }, async ({ page, sourcePath }) => {
+    let frame = (await loadedDiskFrame(page, sourcePath, "runtime-duplicate")).frame;
+    await expect(frame.locator("#duplicate-proof")).toHaveText("运行时复制 1");
+    const reviewStage = page.locator(".review-scroll-stage");
+    await frame.locator('[data-native-case="runtime-duplicate"]').click();
+    await reviewStage.evaluate((element) => {
+      element.scrollTop = 480;
+    });
+    await expect.poll(() => reviewStage.evaluate((element) => element.scrollTop)).toBe(480);
+    const duplicateButton = page.getByRole("button", { name: "复制元素", exact: true });
+    await expect(duplicateButton).toBeVisible();
+    const duplicateBox = await duplicateButton.boundingBox();
+    expect(duplicateBox).not.toBeNull();
+    await armRuntimeHandoffSamples(page);
+    await page.mouse.click(
+      duplicateBox.x + duplicateBox.width / 2,
+      duplicateBox.y + duplicateBox.height / 2,
+    );
+    await assertRuntimeHandoff(page, {
+      requireActiveChrome: true,
+      assertVisualContinuity: true,
+    });
+    frame = await currentEditorFrame(page);
+    await expect(frame.locator('[data-native-case="runtime-duplicate"]')).toHaveCount(2);
+    await expect(frame.locator("#duplicate-proof")).toHaveText("运行时复制 2");
+    const duplicateIds = await frame.locator('[data-native-case="runtime-duplicate"]')
+      .evaluateAll((elements) => elements.map((element) => element.getAttribute("data-pageroot-id")));
+    expect(new Set(duplicateIds).size).toBe(2);
+    await expect.poll(() => reviewStage.evaluate((element) => element.scrollTop))
+      .toBeGreaterThan(400);
+  });
+});
+
+test("long text Enter rebuilds Runtime without moving the caret or viewport", {
+  tag: ["@gate-smoke", "@smoke-editing"],
+}, async () => {
+  const html = `<!doctype html>
+<html><head><title>Runtime Enter handoff</title></head><body>
+  <div aria-hidden="true" style="height:850px"></div>
+  <main>
+    <ol>
+      <li data-native-case="runtime-enter-parent" id="enter-parent">
+        长文本编辑回车需要保持原来的 Caret 和视口位置。
+        <ul><li>嵌套内容仍然保持源码结构。</li></ul>
+      </li>
+    </ol>
+    <output id="enter-proof"></output>
+  </main>
+  <div aria-hidden="true" style="height:1800px"></div>
+  <script>
+    document.querySelector('#enter-proof').textContent =
+      '运行时回车 ' + document.querySelectorAll('[data-native-case="runtime-enter-parent"] br').length;
+  </script>
+</body></html>`;
+
+  await withRuntimeProject("pageroot-runtime-enter-e2e-", {
+    "runtime-report.html": html,
+  }, async ({ page, sourcePath }) => {
+    let { frame } = await loadedDiskFrame(page, sourcePath, "runtime-enter-parent");
+    await expect(frame.locator("#enter-proof")).toHaveText("运行时回车 0");
+    const reviewStage = page.locator(".review-scroll-stage");
+    const parent = frame.locator('[data-native-case="runtime-enter-parent"]');
+    await parent.click();
+    await reviewStage.evaluate((element) => {
+      element.scrollTop = 480;
+    });
+    await expect.poll(() => reviewStage.evaluate((element) => element.scrollTop)).toBe(480);
+    const enterPoint = await parent.evaluate((element) => {
+      const text = Array.from(element.childNodes).find(
+        (node) => node.nodeType === Node.TEXT_NODE && node.textContent?.includes("长文本编辑"),
+      );
+      if (!(text instanceof Text)) throw new Error("Runtime Enter fixture has no direct text node.");
+      const start = text.data.indexOf("长文本编辑");
+      const range = document.createRange();
+      range.setStart(text, start);
+      range.setEnd(text, start + 1);
+      const glyph = range.getBoundingClientRect();
+      const targetRect = element.getBoundingClientRect();
+      return {
+        x: glyph.left - targetRect.left + Math.max(1, glyph.width / 2),
+        y: glyph.top - targetRect.top + Math.max(1, glyph.height / 2),
+      };
+    });
+    await parent.dblclick({ position: enterPoint, force: true });
+    await expect(parent).toHaveAttribute("contenteditable", "true");
+    await parent.evaluate((element) => {
+      const text = Array.from(element.childNodes).find(
+        (node) => node.nodeType === Node.TEXT_NODE && node.textContent?.includes("长文本编辑"),
+      );
+      if (!(text instanceof Text)) throw new Error("Runtime Enter fixture has no direct text node.");
+      const range = document.createRange();
+      range.setStart(text, Math.min(text.data.indexOf("长文本编辑") + 4, text.data.length));
+      range.collapse(true);
+      const selection = document.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+      element.focus({ preventScroll: true });
+    });
+    await armRuntimeHandoffSamples(page);
+    await parent.press("Enter");
+    await expect(parent.locator(":scope > br")).toHaveCount(1);
+    await page.keyboard.press("Escape");
+    await assertRuntimeHandoff(page, {
+      requireActiveChrome: true,
+      assertVisualContinuity: true,
+    });
+    frame = await currentEditorFrame(page);
+    await expect(frame.locator("#enter-proof")).toHaveText("运行时回车 1");
+    await expect(frame.locator('[data-native-case="runtime-enter-parent"]'))
+      .toHaveAttribute("contenteditable", "true");
+    await expect(frame.locator(
+      '[data-native-case="runtime-enter-parent"] > br[data-pageroot-id]',
+    )).toHaveCount(1);
+    await expect.poll(() => reviewStage.evaluate((element) => element.scrollTop))
+      .toBeGreaterThan(400);
   });
 });
 
@@ -486,7 +791,10 @@ test("a failed runtime candidate leaves the old active frame managed and never r
 
     await armRuntimeHandoffSamples(page);
     await toolbar.getByRole("button", { name: "下移", exact: true }).click();
-    await assertRuntimeHandoff(page, { requireActiveChrome: true });
+    await assertRuntimeHandoff(page, {
+      requireActiveChrome: true,
+      expectPromotion: false,
+    });
 
     await expect.poll(() => page.locator(".canvas-edit-surface").getAttribute(
       "data-edit-runtime-phase",

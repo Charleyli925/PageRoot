@@ -18,3 +18,39 @@ export function frameDocumentMatchesExpected(
   expectedFrameHtml: string,
   writtenHtml: string | null,
 ): boolean;
+
+export const RUNTIME_HANDOFF_TOLERANCE_PX: 2;
+
+export type RuntimeViewportSnapshot = {
+  iframeScrollX: number;
+  iframeScrollY: number;
+  sharedScrollLeft: number;
+  sharedScrollTop: number;
+  /** The authored stable element used as the visual handoff anchor. */
+  viewportAnchorStableId: string | null;
+  /** Anchor top relative to the iframe viewport, never a source authority. */
+  viewportAnchorOffsetY: number | null;
+  viewportAnchorSharedOffsetY: number | null;
+  selectedStableId: string | null;
+  nativeSelection: {
+    anchor: number;
+    focus: number;
+    affinity: "left" | "right";
+  } | null;
+  caretOffsetY: number | null;
+};
+
+export function clampRuntimeScroll(value: number, maximum: number): number;
+
+export function runtimeAnchorScrollTop(input: {
+  currentScrollTop: number;
+  currentAnchorOffsetY: number;
+  desiredAnchorOffsetY: number;
+  maximumScrollTop: number;
+}): number;
+
+export function runtimePositionWithinTolerance(
+  actual: number,
+  expected: number,
+  tolerance?: number,
+): boolean;

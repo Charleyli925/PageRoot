@@ -117,6 +117,15 @@ saved fact.**
   zoom context, and the selection resolved by stable element ID when those
   facts still have a valid target. Restoration is best-effort presentation;
   failure never permits runtime DOM to become source authority.
+- When a rebuild replaces a settled Runtime iframe, the editor uses a bounded
+  in-memory handoff snapshot: iframe and shared-workspace scroll, a stable-ID
+  visual anchor and offset, selection, native Range/Caret/Focus state, and the
+  last complete comment layout. The old iframe remains the visible, inert
+  authority while the candidate is prepared and positioned; the candidate is
+  promoted only after its layout and restored state are within the handoff
+  tolerance, then the old iframe is retired on the next frame. This is a
+  presentation handoff only, not Runtime DOM persistence or Script-state
+  migration.
 - Every completed operation materializes complete next HTML before ordinary
   autosave/Hash/CAS persistence. Reopen reads that HTML and reruns Script to
   produce ECharts, Canvas and other runtime output afresh.
@@ -126,7 +135,7 @@ saved fact.**
 
 The following are explicit non-goals and must not be reintroduced as Canvas UX
 optimizations: Runtime DOM persistence; timer/rAF/Observer/listener freeze;
-runtime snapshot restore; Canvas/SVG pixel-state save; runtime/source per-node
+persistent or per-node Runtime snapshot restore; Canvas/SVG pixel-state save; runtime/source per-node
 reconciliation; Script execution-state migration; a dual-iframe synchronization
 system; or equality of random values, current time, animation frames and other
 runtime-only state after reopen.

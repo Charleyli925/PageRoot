@@ -32,6 +32,7 @@ import {
   setTextSelection,
   stopPageRoot,
   tmpdir,
+  waitForRuntimeHandoffSettled,
   waitForFreshDiskFrame,
   withBomAndCrLf,
   writeFileSync,
@@ -217,6 +218,7 @@ test("Electron autosaves one authorized disk patch and reopens the same forward 
       firstLaunch.page,
       0,
     );
+    await waitForRuntimeHandoffSettled(firstLaunch.page);
     expect(
       readFileSync(managedSourcePath).equals(expected),
       "checkpoint/autosave must write only the authorized V1 bytes",
@@ -495,6 +497,7 @@ test("Electron persists semantic identity edits, orphans deleted comments, and c
     await launched.page.keyboard.insertText("Flattened source text");
     await launched.page.keyboard.press(keyShortcut("S"));
     let persistedRevision = await expectCheckpointPersisted(launched.page, 0);
+    await waitForRuntimeHandoffSettled(launched.page);
     let savedHtml = readFileSync(managedSourcePath, "utf8");
     expect(savedHtml).toContain(`data-pageroot-id="${targetId}"`);
     // Native rich-text replacement preserves the authored empty wrapper; the
@@ -509,6 +512,7 @@ test("Electron persists semantic identity edits, orphans deleted comments, and c
     await targets.first().click();
     await editor.getByRole("button", { name: "复制元素", exact: true }).click();
     persistedRevision = await expectCheckpointPersisted(launched.page, persistedRevision);
+    await waitForRuntimeHandoffSettled(launched.page);
     frame = await currentEditorFrame(launched.page);
     targets = frame.locator(caseSelector("identity-target"));
     await expect(targets).toHaveCount(2);
@@ -520,8 +524,11 @@ test("Electron persists semantic identity edits, orphans deleted comments, and c
     expect(duplicateIds[1]).not.toBe(targetId);
 
     await targets.nth(1).click();
+    expect(await frame.locator("[data-html-canvas-selected]").getAttribute("data-pageroot-id"))
+      .toBe(duplicateIds[1]);
     await editor.getByRole("button", { name: "上移", exact: true }).click();
     persistedRevision = await expectCheckpointPersisted(launched.page, persistedRevision);
+    await waitForRuntimeHandoffSettled(launched.page);
     frame = await currentEditorFrame(launched.page);
     targets = frame.locator(caseSelector("identity-target"));
     expect(await targets.evaluateAll((elements) => elements.map(
@@ -532,6 +539,7 @@ test("Electron persists semantic identity edits, orphans deleted comments, and c
     launched.page.once("dialog", (dialog) => dialog.accept());
     await editor.getByRole("button", { name: "删除元素", exact: true }).click();
     await expectCheckpointPersisted(launched.page, persistedRevision);
+    await waitForRuntimeHandoffSettled(launched.page);
     frame = await currentEditorFrame(launched.page);
     targets = frame.locator(caseSelector("identity-target"));
     await expect(targets).toHaveCount(1);
