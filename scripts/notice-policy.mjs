@@ -1,7 +1,6 @@
-// Notice growth freeze: production code may only keep registered setToast /
-// NoticeBar / background-result / uncatalogued surfaces, and later PRs may
-// only shrink those counts. Classification lives in the ledger; this module
-// enforces the freeze without inspecting business-object property order.
+// Notice growth freeze: production code may not grow setToast / NoticeBar /
+// background-result / uncatalogued surfaces. Generic setToast is retired;
+// remaining user-visible interruptions are the N5 GlobalInterruption catalog.
 
 import { readFile } from "node:fs/promises";
 import path from "node:path";
@@ -186,7 +185,6 @@ export async function noticeInventoryViolations(fileRecords, ledger) {
     uncataloguedLiterals += facts.uncataloguedLiterals;
   }
   const baseline = ledger.baseline || {};
-  const siteCount = Array.isArray(ledger.sites) ? ledger.sites.length : 0;
   if (createCalls > (baseline.setToastCreateCalls ?? 0)) {
     violations.push(
       `notice freeze: setToast create calls ${createCalls} exceed baseline ${baseline.setToastCreateCalls}`,
@@ -207,14 +205,12 @@ export async function noticeInventoryViolations(fileRecords, ledger) {
       `notice freeze: uncatalogued literals ${uncataloguedLiterals} exceed baseline ${baseline.uncataloguedLiterals}`,
     );
   }
-  if (createCalls !== siteCount) {
+  const leftoverClasses = (ledger.sites || []).filter((site) => site.class !== "N5");
+  if (leftoverClasses.length > 0) {
     violations.push(
-      `notice freeze: ledger has ${siteCount} sites but production has ${createCalls} setToast create calls`,
-    );
-  }
-  if (siteCount > (baseline.setToastCreateCalls ?? 0)) {
-    violations.push(
-      `notice freeze: ledger sites ${siteCount} cannot exceed create-call baseline ${baseline.setToastCreateCalls}`,
+      `notice freeze: remaining ledger sites must be N5 interruptions; found ${
+        leftoverClasses.map((site) => `${site.id}:${site.class}`).join(", ")
+      }`,
     );
   }
   return violations;

@@ -1,61 +1,30 @@
-import type { Toast } from "../app/workbench/types";
+import type { GlobalInterruption } from "../app/lib/global-interruption";
 
-const directAction: Toast = {
-  title: "导出没有完成",
-  message: "请选择新的保存位置。",
-  tone: "warning",
-  disposition: "direct-action",
-  action: { id: "retry-export", label: "重新选择位置" },
+const recopy: GlobalInterruption = {
+  kind: "handoff-recopy",
+  succeeded: true,
 };
 
-const userChoice: Toast = {
-  title: "无法确定工作文件",
-  message: "检测到多个同等候选文件；修改仍保留，请先恢复唯一文件位置。",
-  tone: "warning",
-  disposition: "user-choice",
-  action: {
-    id: "retry-project-open",
-    label: "重新选择文件",
-  },
+const exportFailed: GlobalInterruption = {
+  kind: "export-failed",
+  detail: "请选择另一个文件名或位置后重试。",
 };
 
-const backgroundResult: Toast = {
-  title: "新版本可以打开",
-  message: "当前画布没有被替换。",
-  tone: "success",
-  disposition: "background-result",
+const attachmentRejected: GlobalInterruption = {
+  kind: "attachment-rejected",
+  detail: "请选择其他文件。",
+  needsRemoval: false,
+  target: { kind: "composer", commentId: "comment-1" },
 };
 
-// @ts-expect-error A direct action cannot exist without an explicit recovery action.
-const missingDirectAction: Toast = {
-  title: "导出没有完成",
-  message: "请选择新的保存位置。",
-  tone: "warning",
-  disposition: "direct-action",
+// @ts-expect-error unknown kinds are not part of the closed interruption catalog
+const invented: GlobalInterruption = { kind: "made-up-toast" };
+
+const freeFormTitle: GlobalInterruption = {
+  kind: "export-failed",
+  detail: "请选择另一个文件名或位置后重试。",
+  // @ts-expect-error callers pass facts, not banner copy
+  title: "anything",
 };
 
-// @ts-expect-error A user-choice notice must name the action that resolves it.
-const missingUserChoiceAction: Toast = {
-  title: "无法确定工作文件",
-  message: "检测到多个同等候选文件；修改仍保留，请先恢复唯一文件位置。",
-  tone: "warning",
-  disposition: "user-choice",
-};
-
-const silentRecoveryWithAction: Toast = {
-  title: "已在后台恢复",
-  message: "当前页面仍可继续使用。",
-  tone: "info",
-  disposition: "silent-recover",
-  // @ts-expect-error Silent recovery must not acquire an actionable replay button.
-  action: { id: "retry-export", label: "重新选择位置" },
-};
-
-void [
-  directAction,
-  userChoice,
-  backgroundResult,
-  missingDirectAction,
-  missingUserChoiceAction,
-  silentRecoveryWithAction,
-];
+void [recopy, exportFailed, attachmentRejected, invented, freeFormTitle];

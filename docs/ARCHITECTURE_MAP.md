@@ -72,6 +72,9 @@ The gate must enforce responsibility, not private field names:
 - Repository internals are not a second writer.
 - Retired modules stay deleted.
 - Global Notice growth is frozen to `scripts/notice-disposition-ledger.json`.
+  Generic `setToast` is retired. Remaining interruptions are closed
+  `GlobalInterruption` kinds; lasting content-safety states use
+  `WorkspaceSafetyState` on existing workspace banners.
 - Internal reliability failures log through `reportInternalFailure()`; they must not create Notice.
 
 Do not add checks for `#privateField`, private method names, or “this call

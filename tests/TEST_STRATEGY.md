@@ -90,7 +90,7 @@ step summary 里。
 - `CommentWorkflow`：fake Bridge、RecoveryStore 和现有 Comment/Draft Session 证明
   lazy registration、单次 Draft 持久化、附件部分成功、跨项目迟到上传补偿、编辑取消
   仅删除 staged 附件，以及 unknown Draft POST 只通过 authority query 收敛而不重复
-  mutation。Workbench 只保留 File、Object URL、焦点和 Toast 映射；Browser memory
+  mutation。Workbench 只保留 File、Object URL 和焦点映射；Browser memory
   附件不得调用 Bridge。
 - `ProjectFileRepository` Request freeze：Node 集成覆盖附件-only 评论、多评论多附件的
   独立字节副本、annotations/requirements/instruction/manifest 的 attachmentId 对齐、
@@ -105,7 +105,7 @@ step summary 里。
   保存 HTML 上 Stable-ID/UTF-16 textLocator 的唯一重定位与 stale/ambiguous 阻断、
   一次 Request、unknown POST 只读 authority reconciliation、A/B 并行 polling、dispose
   late-callback fence、取消/冲突 scoped identity，以及 clipboard failure 后只重试复制。
-  Workbench 只保留 intent 和 Outcome/Event 的 Toast 映射，不持有 poll timer 或
+  Workbench 只保留 intent 和 Outcome/Event 映射，不持有 poll timer 或
   run mutation I/O。
 - `VersionWorkflow`：fake Bridge、Project/Document/Version/Run Session 与 Canvas/Hash
   Port 证明 Review candidate 只读且不可变、明确 activation 的完整 identity/hash/time
@@ -116,7 +116,7 @@ step summary 里。
   O(N) 计算；持久化样例最多 100 个且 `truncated` 与计数一致。Electron AI Review
   场景还必须看到评论目标数、实际修改元素数、目标外修改数和进入全部变化的入口；
   该警告不得阻止 Candidate 继续审阅或采纳。
-  Workbench 只保留 review filters/layout/lease、动画和 Outcome/Toast 映射；architecture
+  Workbench 只保留 review filters/layout/lease、动画和 Outcome 映射；architecture
   gate 将其直接 Bridge 调用锁定为 0。
 - `WorkspaceController`：runtime factory 是生产组合的唯一入口；它构造唯一的 Bridge
   client、共享 RunSession、`EditAuthorRuntimeSession` 与各业务 Session，并作为唯一
@@ -157,7 +157,7 @@ Workbench 只确认已提交 loading surface、传入窄 port 并消费快照。
 - 语义身份与保存：`tests/semantic-identity-save-contract.test.mjs` 独立证明八类语义操作的系统导出 `identityDelta`、标签变化不换身份、wrapper/`br` 显式新 ID，以及伪造 delta、缺少 schema/envelope/类型必填字段、携带未知字段或用不相关 `operation.html` 冒充 insert/replace kernel 物化结果的证据失败关闭。结构矩阵必须从真实 kernel 计划出发，对 delete/insert/replace/同父 move/跨父 move 各附加一条自洽的无关 patch，并证明共享纯 structure replayer 以整组 range/before/after/kind 拒绝；undo/redo 还要选中原始 forward proof。纯文本 `setText` 必须把 exact range/before/escaped-after/kind 与内核计划绑定并拒绝无关 patch，forward/undo/redo 都选择原始语义证据；受管 native `<br>` 必须由 Canvas 计划从无 ID 节点按 DOM 顺序分配 fresh ID，多换行只匹配 ID 集合但交换分配顺序也必须拒绝，预置新 ID 失败；真实 Electron 必须在首次换行保存后立即证明 controller 未进入 blocked state、live `<br>` 已同步 ID、owned/baseline canonical 已推进，再继续同一会话输入，证明 Selection 不丢且没有额外整页重建。Repository 还要用共享纯 normalizer 拒绝修改 protected attribute 的自洽 identified `setText`，并用共享 single-CSS-value validator 根据逻辑 range/quote、源位置、wrapper 数量、canonical style 字节和 ID 列表拒绝伪造或注入声明的 range-style subtree。`tests/project-semantic-identity-save.test.mjs` 必须使用真实受管 Working Copy 和 Repository，覆盖 delete、包含后代的 `setText`、`replaceSubtree`、同父/跨父 move、insert/duplicate 的保存重开，20 步且不跨重启的 Undo/Redo，Hash/CAS、原子保存与崩溃恢复。没有语义证据的 ID 删除、新增、交换、移植、伪造、重复或移动必须拒绝；仅文字/属性/样式且 binding 完整的外部修改仍走既有合同。精确 SourcePatch 回放只证明字节链，测试必须反向证明旧 `kind` 不能授权身份变化。Native Electron 再证明受管换行和其他画布操作经真实 autosave 关闭/重开保留、删除目标评论 orphan，且重启后不恢复历史。Runtime DOM/Script 生成节点不得出现在保存 HTML，保持 ADR 0065 的独立既有 Electron 证据。
 - 身份不变的语义字节同样必须失败关闭：`replaceTextRange`、`setAttribute`、非 range `setStyle` 与合并到目标/现有 wrapper 的 range style 都从 original-forward 源码独立重建完整 patch 数组，正向/撤销/重做拒绝完全缺失声明修改或附加无关 patch；矩阵覆盖跨 run 文字、属性增改删、单双/无引号和 style 更新/追加，部分 range 不得缺少 wrapper ID。
 - 导入确认与 Prepared Intent：`tests/prepared-html-open.test.mjs` 拥有公开 descriptor 不含路径、commit action 拒绝 `view-initial`、幂等 commit/finalize、较新请求取消旧 intent，以及同一原稿路径复用已 prepared/committing 的 intent。`tests/external-open-copy.test.mjs` 拥有“已经导入”确认框里版本句子的出现判定：版本一致、序号缺失或不可解析、工作稿领先于最新版时都必须为空，只有工作稿落后于最新正式版本时才给出两个真实序号和落点。`tests/project-workflow.test.mjs` 拥有确认前零 switch、冷启动 epoch 0 确认不围栏不存在的 Canvas、Canvas 失败不 finalize 删除、以及“打开之前的项目”不再导入。`tests/workspace-controller.test.mjs` 在要求 ProjectWorkflow 之前拒绝 `view-initial`。`tests/document-session.test.mjs` 与 `tests/document-workflow.test.mjs` 拥有 Canvas pending/verified/failed 与 verify 失败关闭。Electron 夹具先识别确认框再接受 `ready`；欢迎页已 ready 后仍短等确认 overlay，再点“导入并打开”或“打开之前的项目”，不得设置 `SKIP_IMPORT_CONFIRM`。`packaged-startup-smoke` 对 argv 与运行中 `open-file` 同样先驱动确认框，再断言 managed V1。不得把确认 descriptor 的空 `sourcePath` 当成已导入成功。
-- 通知合同：TypeScript 判别联合拥有 `disposition × action` 合法矩阵；`direct-action` 和 `user-choice` 必须携带受限恢复 action，`silent-recover` 与 `defer-and-resume` 明确禁止 action。Node policy 测试拥有 priority、dedupe、sticky 与 timeout；Browser 测试拥有 `aria-live`、键盘、按钮和 hover/focus pause。不得再扫描 Workbench AST 或内部 helper 名称来证明某个 `setToast` 调用是否合法。
+- 通知合同：TypeScript 封闭 `GlobalInterruption` kind 联合拥有允许的中断事实；文案只来自 `globalInterruptionPresentation()`。Node 测试拥有产品错误清洗与工作区安全状态优先级。Browser 测试拥有 `aria-live`、键盘、按钮和 hover/focus pause。不得再扫描 Workbench AST 或内部 helper 名称来证明某个 `setToast` 调用是否合法；生产 `setToast` 创建调用必须保持为 0。
 - 源码字符串合同只保留显式 architecture/security/packaging/dependency/workflow boundary。应用架构形状由 `scripts/check-architecture.mjs` 唯一拥有，`tests/architecture-boundaries.test.mjs` 只执行该 checker；当前显式清单为层级 import/retired operation，Workbench Bridge 调用为 0、final runtime factory、aggregate Session observer、唯一 Session construction owner、typed drain owner、Controller 反向 UI import 和 generic Bridge escape，及 SourcePatch + SourceTransaction 发布、精确 source freeze 及 AI 请求绑定、Edit runtime projection 禁止、native user/system priority、DOM replacement 前 lease retirement，以及 pointer capability 不得引用 `isNativeDirectEditRoot`。该集还必须保留 View Bridge call、Controller React import、generic Bridge escape、duplicate Session owner、missing drain command 的负 fixture。业务测试不得读取、拼接 Workbench/Canvas 大文件或扫描 JSX/CSS/copy/callback 顺序；它们使用 Session、算法、Browser 或 Electron 的可观察结果。`tests/rendered-html.test.mjs` 是独立例外：它必须执行真实 `dist/server/index.js`/`worker.fetch`，只验证公开 SSR 入口与已退役托管/编辑器 surface，不读取生产实现源码。`tests/workbench-css.test.mjs` 拥有 Workbench 级联入口：`app/globals.css` 必须只含固定顺序的 `@import`，拼接后的 `app/styles/` 字节保留顶栏与 tooltip 的源码顺序合同。
 - 交付合同按 owner 分层：desktop-package.test.mjs 只拥有 package.json allowlist、Bridge/Schema/资源闭包、CSP、entitlements、Info.plist 清理和固定包身份；packaged-artifact-gate.test.mjs 必须调用真实 verifier，拥有 app.asar、Bridge、Schema、metadata、retired closure、签名 profile 和 DMG/ZIP 边界；预加载 IPC、更新、Preview、窗口、Bridge 生命周期、遥测和 Workbench 行为必须留在各自 Node 或 Electron owner，不能因它们被打包而回流到 package 测试。
 - Developer Preview、Release Dry Run、Candidate 和 Release 是四个显式 trust profile。公共 release fixture 每次创建独立 package/build-info/telemetry/application-update/identity 值和独立临时目录；它不签名、不调用 Apple 命令、不访问网络，也不能以无 profile 的宽泛对象混淆正式与非正式通道。fixture Hash 期望值必须继续由测试侧独立 crypto 计算，不能调用被测 evaluator。

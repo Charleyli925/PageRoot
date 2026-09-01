@@ -15,7 +15,6 @@ import {
 
 const execFileAsync = promisify(execFile);
 const PRODUCT_ROOT = fileURLToPath(new URL("../", import.meta.url));
-const CLASSES = new Set(["N0", "N1", "N2", "N3", "N4", "N5"]);
 
 async function previousLedgerFromMain() {
   try {
@@ -29,29 +28,21 @@ async function previousLedgerFromMain() {
   }
 }
 
-test("every setToast create call has a classified ledger site", async () => {
+test("generic setToast is retired; remaining ledger sites are N5 interruptions", async () => {
   const ledger = await loadNoticeLedger();
   const workbench = await readFile(path.join(PRODUCT_ROOT, "app/workbench.tsx"), "utf8");
   const creates = extractSetToastCreates(parseModule("app/workbench.tsx", workbench));
-  assert.equal(creates.length, ledger.sites.length);
+  assert.equal(creates.length, 0);
   assert.equal(creates.length, ledger.baseline.setToastCreateCalls);
+  assert.equal(ledger.sites.length > 0, true);
 
-  for (const [index, site] of ledger.sites.entries()) {
-    assert.ok(CLASSES.has(site.class), `${site.id} has class ${site.class}`);
+  for (const site of ledger.sites) {
+    assert.equal(site.class, "N5", `${site.id} has class ${site.class}`);
     assert.equal(site.file, "app/workbench.tsx");
     assert.ok(site.owner, `${site.id} needs an owner`);
     assert.ok(site.reason, `${site.id} needs a reason`);
     assert.ok(site.fingerprint, `${site.id} needs a fingerprint`);
-    if (site.class === "N5") {
-      assert.ok(site.allowlistId, `${site.id} is N5 without allowlistId`);
-    }
-    const extracted = creates[index];
-    if (extracted.dedupeKey && site.dedupeKey) {
-      assert.ok(
-        extracted.dedupeKey.includes(site.dedupeKey) || site.dedupeKey.includes(extracted.dedupeKey.replace(/…/g, "")),
-        `${site.id} dedupeKey ${site.dedupeKey} does not match ${extracted.dedupeKey}`,
-      );
-    }
+    assert.ok(site.allowlistId, `${site.id} is N5 without allowlistId`);
   }
 });
 

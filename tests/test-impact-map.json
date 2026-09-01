@@ -1322,6 +1322,30 @@
       ]
     },
     {
+      "id": "workspace-safety-state",
+      "patterns": [
+        "^app/lib/workspace-safety-state\\.(?:js|d\\.ts)$"
+      ],
+      "suites": [
+        "typecheck"
+      ],
+      "nodeTests": [
+        "tests/workspace-safety-state.test.mjs"
+      ]
+    },
+    {
+      "id": "global-interruption",
+      "patterns": [
+        "^app/lib/global-interruption\\.(?:js|d\\.ts)$"
+      ],
+      "suites": [
+        "typecheck"
+      ],
+      "nodeTests": [
+        "tests/global-interruption.test.mjs"
+      ]
+    },
+    {
       "id": "web-ui",
       "patterns": [
         "^app/components/(?:AboutPageRootDialog|CancelAiRunDialog)\\.tsx$",

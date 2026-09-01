@@ -51,7 +51,7 @@ corruption or lost user work.
 | Canvas `readOnly` during AI | Processing run is browse-only | presentation | iframe “locked” | `interactionLocked` | unlocks when run ends | merge to run lock |
 | Patch host refuse (`data-edit-block-detail`) | Non-exact target or locked canvas does not write source | presentation / post-validate | silent refuse | Canvas + DocumentWorkflow | reload/unlock | post-validate; do not forbid entry |
 | Literal `暂时不能直接编辑` / `COMMENT_TARGET_MISSING` | n/a | n/a | n/a | n/a | n/a | delete later if docs still name them; they are not in this tree |
-| New global `setToast` / `NoticeBar` | Extra interruption besides Confirmation and workspace safety | presentation | overlay | classified ledger | silent recover / in-place / safety banner | freeze; counts may only decrease |
+| New global `setToast` / `NoticeBar` | Extra interruption besides Confirmation and workspace safety | presentation | overlay | classified ledger | silent recover / in-place / safety banner | freeze; generic `setToast` retired; remaining N5 kinds may only shrink |
 
 ## Sample now exists; deletion still needs shadow
 

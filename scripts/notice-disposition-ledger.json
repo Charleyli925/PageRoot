@@ -1,25 +1,20 @@
 {
   "version": 1,
-  "policy": "Notice growth is frozen. Later PRs may only delete sites, reclassify them, or shrink the allowlist. Do not invent replacement UI to retire a Notice. PR-B removed N0 success notices. PR-C removed N1 internal notices after owner-side one-shot recovery. PR-D removed N2 user-action notices by reusing existing controls and dropped the first-copy handoff toast because the conversation already shows the same failure.",
+  "policy": "Notice growth is frozen. Generic setToast is retired. Remaining sites are the N5 GlobalInterruption catalog; later PRs may only delete them or shrink the allowlist. Do not invent replacement UI to retire a Notice. PR-B removed N0 success notices. PR-C removed N1 internal notices after owner-side one-shot recovery. PR-D removed N2 user-action notices by reusing existing controls. PR-E moved N3 onto existing workspace-safety banners and closed the remaining interruptions as GlobalInterruption kinds.",
   "baseline": {
-    "setToastCreateCalls": 19,
+    "setToastCreateCalls": 0,
     "noticeBarJsx": 2,
-    "backgroundResultLiterals": 12,
+    "backgroundResultLiterals": 1,
     "uncataloguedLiterals": 2
   },
   "registeredFiles": {
-    "setToast": [
-      "app/workbench.tsx"
-    ],
+    "setToast": [],
     "noticeBar": [
       "app/workbench.tsx",
       "app/components/html-canvas-selection-chrome.tsx",
       "app/components/NoticeBar.tsx"
     ],
     "backgroundResult": [
-      "app/lib/notification-policy.js",
-      "app/workbench/types.ts",
-      "app/workbench.tsx",
       "desktop/usage-telemetry.mjs"
     ],
     "uncatalogued": [
@@ -31,7 +26,7 @@
     "N0": "Delete. Result is already visible or the user does not need to know.",
     "N1": "Silent recover. Internal reliability; log only unless content becomes unsavable.",
     "N2": "Reuse existing control behavior. Keep current state; do not add UI.",
-    "N3": "Workspace safety banner. Move off Toast in PR-E.",
+    "N3": "Workspace safety banner. Off Toast as of PR-E; locator/persist facts use existing workspace banners.",
     "N4": "Irreversible confirmation. Not a Toast; listed for completeness.",
     "N5": "Temporary allowlist. Keep until a designed surface exists. Do not invent UI in a cleanup PR."
   },
@@ -198,90 +193,6 @@
       "reason": "非外部打开没有现成错误位",
       "allowlistId": "project-open-failed",
       "fingerprint": "N5|无法打开这个 HTML|project-open-error|direct-action"
-    },
-    {
-      "id": "managed-working-copy-ambiguous-locator",
-      "class": "N3",
-      "owner": "document",
-      "file": "app/workbench.tsx",
-      "title": "无法确定工作文件",
-      "dedupeKey": "managed-working-copy-ambiguous",
-      "disposition": "user-choice",
-      "wave": "PR-E",
-      "reason": "工作区安全状态",
-      "fingerprint": "N3|无法确定工作文件|managed-working-copy-ambiguous|user-choice"
-    },
-    {
-      "id": "working-copy-unavailable-locator",
-      "class": "N3",
-      "owner": "document",
-      "file": "app/workbench.tsx",
-      "title": "文件暂不可用",
-      "dedupeKey": "working-copy-unavailable",
-      "disposition": "inform-in-place",
-      "wave": "PR-E",
-      "reason": "工作区安全状态",
-      "fingerprint": "N3|文件暂不可用|working-copy-unavailable|inform-in-place"
-    },
-    {
-      "id": "managed-source-identity-mismatch",
-      "class": "N3",
-      "owner": "document",
-      "file": "app/workbench.tsx",
-      "title": "无法核对工作文件",
-      "dedupeKey": "managed-source-identity-mismatch",
-      "disposition": "inform-in-place",
-      "wave": "PR-E",
-      "reason": "工作区安全状态",
-      "fingerprint": "N3|无法核对工作文件|managed-source-identity-mismatch|inform-in-place"
-    },
-    {
-      "id": "registered-project-unavailable",
-      "class": "N3",
-      "owner": "document",
-      "file": "app/workbench.tsx",
-      "title": "项目暂不可用",
-      "dedupeKey": "registered-project-unavailable",
-      "disposition": "inform-in-place",
-      "wave": "PR-E",
-      "reason": "工作区安全状态",
-      "fingerprint": "N3|项目暂不可用|registered-project-unavailable|inform-in-place"
-    },
-    {
-      "id": "working-copy-unavailable-persist",
-      "class": "N3",
-      "owner": "document",
-      "file": "app/workbench.tsx",
-      "title": "文件暂不可用",
-      "dedupeKey": "working-copy-unavailable",
-      "disposition": "inform-in-place",
-      "wave": "PR-E",
-      "reason": "工作区安全状态",
-      "fingerprint": "N3|文件暂不可用|working-copy-unavailable|inform-in-place"
-    },
-    {
-      "id": "working-copy-content-conflict",
-      "class": "N3",
-      "owner": "document",
-      "file": "app/workbench.tsx",
-      "title": "文件出现内容冲突",
-      "dedupeKey": "working-copy-content-conflict",
-      "disposition": "user-choice",
-      "wave": "PR-E",
-      "reason": "工作区安全状态",
-      "fingerprint": "N3|文件出现内容冲突|working-copy-content-conflict|user-choice"
-    },
-    {
-      "id": "managed-working-copy-ambiguous-persist",
-      "class": "N3",
-      "owner": "document",
-      "file": "app/workbench.tsx",
-      "title": "无法确定工作文件",
-      "dedupeKey": "managed-working-copy-ambiguous",
-      "disposition": "user-choice",
-      "wave": "PR-E",
-      "reason": "工作区安全状态",
-      "fingerprint": "N3|无法确定工作文件|managed-working-copy-ambiguous|user-choice"
     },
     {
       "id": "attachment-rejected",
