@@ -1,10 +1,10 @@
 {
   "version": 1,
-  "policy": "Notice growth is frozen. Later PRs may only delete sites, reclassify them, or shrink the allowlist. Do not invent replacement UI to retire a Notice.",
+  "policy": "Notice growth is frozen. Later PRs may only delete sites, reclassify them, or shrink the allowlist. Do not invent replacement UI to retire a Notice. PR-B removed N0 success notices.",
   "baseline": {
-    "setToastCreateCalls": 73,
+    "setToastCreateCalls": 61,
     "noticeBarJsx": 2,
-    "backgroundResultLiterals": 37,
+    "backgroundResultLiterals": 32,
     "uncataloguedLiterals": 2
   },
   "registeredFiles": {
@@ -158,18 +158,6 @@
   ],
   "sites": [
     {
-      "id": "working-copy-recovered",
-      "class": "N0",
-      "owner": "document",
-      "file": "app/workbench.tsx",
-      "title": "文件已自动恢复",
-      "dedupeKey": "working-copy-recovered",
-      "disposition": "background-result",
-      "wave": "PR-B",
-      "reason": "成功自动恢复，界面已是最新内容",
-      "fingerprint": "N0|文件已自动恢复|working-copy-recovered|background-result"
-    },
-    {
       "id": "workbench-tabs-restore-missing",
       "class": "N2",
       "owner": "navigation",
@@ -219,15 +207,16 @@
     },
     {
       "id": "external-html-imported",
-      "class": "N0",
+      "class": "N5",
       "owner": "import",
       "file": "app/workbench.tsx",
-      "title": "已导入 PageRoot",
+      "title": "已导入 PageRoot（仅废纸篓失败）",
       "dedupeKey": "external-html-imported",
       "disposition": "background-result",
-      "wave": "PR-B",
-      "reason": "导入成功可见；trash-failed 变体见白名单 import-trash-failed",
-      "fingerprint": "N0|已导入 PageRoot|external-html-imported|background-result"
+      "wave": "PR-D",
+      "reason": "导入成功已静默；仅在用户要求删除原文件但移入废纸篓失败时保留",
+      "fingerprint": "N5|已导入 PageRoot（仅废纸篓失败）|external-html-imported|background-result",
+      "allowlistId": "import-trash-failed"
     },
     {
       "id": "external-open-ack",
@@ -291,18 +280,6 @@
       "fingerprint": "N5|交接内容还没有复制|qoder-handoff|inform-in-place"
     },
     {
-      "id": "qoder-agent-already-has-result",
-      "class": "N0",
-      "owner": "runs",
-      "file": "app/workbench.tsx",
-      "title": "这一轮已经有结果了",
-      "dedupeKey": "qoder-agent",
-      "disposition": "inform-in-place",
-      "wave": "PR-B",
-      "reason": "决策条已展示结果",
-      "fingerprint": "N0|这一轮已经有结果了|qoder-agent|inform-in-place"
-    },
-    {
       "id": "qoder-agent-incomplete",
       "class": "N2",
       "owner": "runs",
@@ -327,18 +304,6 @@
       "fingerprint": "N2|AI 输出未通过安全校验|ai-validation-error|user-choice"
     },
     {
-      "id": "background-candidate-ready",
-      "class": "N0",
-      "owner": "runs",
-      "file": "app/workbench.tsx",
-      "title": "可以打开了",
-      "dedupeKey": "background-version",
-      "disposition": "background-result",
-      "wave": "PR-B",
-      "reason": "后台成功，切回项目即可看到",
-      "fingerprint": "N0|可以打开了|background-version|background-result"
-    },
-    {
       "id": "ai-run-cancelled-agent-may-run",
       "class": "N5",
       "owner": "runs",
@@ -350,18 +315,6 @@
       "reason": "外部 Agent 仍可能运行",
       "allowlistId": "external-agent-may-still-run",
       "fingerprint": "N5|本轮已结束|ai-run-cancelled|background-result"
-    },
-    {
-      "id": "background-run-cancelled",
-      "class": "N0",
-      "owner": "runs",
-      "file": "app/workbench.tsx",
-      "title": "已取消",
-      "dedupeKey": "background-version",
-      "disposition": "inform-in-place",
-      "wave": "PR-B",
-      "reason": "后台取消，当前画布未变",
-      "fingerprint": "N0|已取消|background-version|inform-in-place"
     },
     {
       "id": "project-application-deferred",
@@ -462,18 +415,6 @@
       "fingerprint": "N3|无法核对工作文件|managed-source-identity-mismatch|inform-in-place"
     },
     {
-      "id": "finder-filename-synced",
-      "class": "N0",
-      "owner": "project",
-      "file": "app/workbench.tsx",
-      "title": "文件名已与 Finder 同步",
-      "dedupeKey": "finder-filename-synced",
-      "disposition": "background-result",
-      "wave": "PR-B",
-      "reason": "Finder 名称已可见",
-      "fingerprint": "N0|文件名已与 Finder 同步|finder-filename-synced|background-result"
-    },
-    {
       "id": "registered-project-unavailable",
       "class": "N3",
       "owner": "document",
@@ -520,30 +461,6 @@
       "wave": "PR-E",
       "reason": "工作区安全状态",
       "fingerprint": "N3|无法确定工作文件|managed-working-copy-ambiguous|user-choice"
-    },
-    {
-      "id": "registered-project-recovered",
-      "class": "N0",
-      "owner": "document",
-      "file": "app/workbench.tsx",
-      "title": "项目位置已自动恢复",
-      "dedupeKey": "registered-project-recovered",
-      "disposition": "background-result",
-      "wave": "PR-B",
-      "reason": "已继续使用登记项目",
-      "fingerprint": "N0|项目位置已自动恢复|registered-project-recovered|background-result"
-    },
-    {
-      "id": "autosave-recovery",
-      "class": "N0",
-      "owner": "document",
-      "file": "app/workbench.tsx",
-      "title": "已恢复上次未写回的编辑",
-      "dedupeKey": "autosave-recovery",
-      "disposition": "inform-in-place",
-      "wave": "PR-B",
-      "reason": "自动恢复成功",
-      "fingerprint": "N0|已恢复上次未写回的编辑|autosave-recovery|inform-in-place"
     },
     {
       "id": "attachment-rejected",
@@ -696,30 +613,6 @@
       "fingerprint": "N1|这次编辑没有进入撤销历史|source-history-record-failed|background-result"
     },
     {
-      "id": "export-succeeded-copy",
-      "class": "N0",
-      "owner": "export",
-      "file": "app/workbench.tsx",
-      "title": "已导出 HTML 副本",
-      "dedupeKey": "export",
-      "disposition": "inform-in-place",
-      "wave": "PR-B",
-      "reason": "保存面板结果已可见",
-      "fingerprint": "N0|已导出 HTML 副本|export|inform-in-place"
-    },
-    {
-      "id": "export-succeeded-duplicate",
-      "class": "N0",
-      "owner": "export",
-      "file": "app/workbench.tsx",
-      "title": "已导出 HTML 副本",
-      "dedupeKey": "export",
-      "disposition": "inform-in-place",
-      "wave": "PR-B",
-      "reason": "保存面板结果已可见",
-      "fingerprint": "N0|已导出 HTML 副本|export|inform-in-place"
-    },
-    {
       "id": "export-failed",
       "class": "N5",
       "owner": "export",
@@ -755,18 +648,6 @@
       "wave": "PR-D",
       "reason": "冲突横幅已存在",
       "fingerprint": "N2|无法预览外部版本|external-source-preview-failed|background-result"
-    },
-    {
-      "id": "source-force-unlock-succeeded",
-      "class": "N0",
-      "owner": "document",
-      "file": "app/workbench.tsx",
-      "title": "项目已解锁",
-      "dedupeKey": "source-force-unlock",
-      "disposition": "background-result",
-      "wave": "PR-B",
-      "reason": "解锁后即可继续编辑",
-      "fingerprint": "N0|项目已解锁|source-force-unlock|background-result"
     },
     {
       "id": "source-force-unlock-failed",
@@ -949,18 +830,6 @@
       "fingerprint": "N1|已打开，但需要复核|current-version-result|background-result"
     },
     {
-      "id": "current-version-accepted",
-      "class": "N0",
-      "owner": "version",
-      "file": "app/workbench.tsx",
-      "title": "已采纳",
-      "dedupeKey": "current-version-result",
-      "disposition": "inform-in-place",
-      "wave": "PR-B",
-      "reason": "画布已是采纳后的 HTML",
-      "fingerprint": "N0|已采纳|current-version-result|inform-in-place"
-    },
-    {
       "id": "ready-version-review-failed",
       "class": "N2",
       "owner": "version",
@@ -971,18 +840,6 @@
       "wave": "PR-D",
       "reason": "不切换，审阅入口仍在",
       "fingerprint": "N2|暂时无法开始审阅|ready-version-review|inform-in-place"
-    },
-    {
-      "id": "background-external-html-kept",
-      "class": "N0",
-      "owner": "import",
-      "file": "app/workbench.tsx",
-      "title": "已保留外部 HTML",
-      "dedupeKey": "background-version",
-      "disposition": "inform-in-place",
-      "wave": "PR-B",
-      "reason": "后台导入成功",
-      "fingerprint": "N0|已保留外部 HTML|background-version|inform-in-place"
     },
     {
       "id": "history-open-failed",

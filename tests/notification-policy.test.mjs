@@ -391,11 +391,12 @@ test("nextPresentedNotice stays a pure replacement choice", () => {
   };
   assert.equal(nextPresentedNotice(current, ignored), current);
   const next = {
-    title: "项目已解锁",
-    message: "可以继续编辑",
-    tone: "success",
+    title: "副本没有导出",
+    message: "请选择另一个位置后重试。",
+    tone: "error",
+    sticky: true,
     disposition: "background-result",
-    dedupeKey: "source-force-unlock",
+    dedupeKey: "export",
   };
   assert.equal(nextPresentedNotice(null, next), next);
 });

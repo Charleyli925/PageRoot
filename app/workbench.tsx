@@ -1396,15 +1396,6 @@ export default function Workbench() {
         if (!workspaceController.matchesCurrentProjectContext(registrationEvent.context)) return;
         setProjectRegistrationError("");
         if (registrationEvent.projectName) setProjectName(registrationEvent.projectName);
-        if (registrationEvent.workingCopyRecovered) {
-          setToast({
-            title: "文件已自动恢复",
-            message: "已采用磁盘中的最新内容。",
-            tone: "success",
-            disposition: "background-result",
-            dedupeKey: "working-copy-recovered",
-          });
-        }
         return;
       }
       if (event.type === "workbench-tabs-restore-missing") {
@@ -1473,17 +1464,12 @@ export default function Workbench() {
           sourcePath?: string | null;
         }>;
         if (!openEvent.imported) return;
+        if (openEvent.disposition !== "trash-failed") return;
         const fileName = openEvent.visibleV1FileName || "项目内的 V1 文件";
-        const disposition = openEvent.disposition || "kept";
-        const message = disposition === "trashed"
-          ? `已保存为${fileName}，原文件已移至废纸篓。`
-          : disposition === "trash-failed"
-            ? `已保存为${fileName}，原文件未能移至废纸篓，仍留在原来的位置。`
-            : `已保存为${fileName}，原文件已保留。`;
         setToast({
           title: "已导入 PageRoot",
-          message,
-          tone: disposition === "trash-failed" ? "warning" : "success",
+          message: `已保存为${fileName}，原文件未能移至废纸篓，仍留在原来的位置。`,
+          tone: "warning",
           disposition: "background-result",
           dedupeKey: "external-html-imported",
           ...(openEvent.sourcePath ? {
@@ -1650,12 +1636,6 @@ export default function Workbench() {
           // result the decision bar is asking them to accept. Both statements were on
           // screen at once and the user could not tell whether the round worked.
           if (runEvent.run.candidateVersionLabel) {
-            setToast({
-              title: "这一轮已经有结果了",
-              message: "重复的发送已被忽略；先决定要不要采纳这一版。",
-              tone: "success",
-              dedupeKey: `qoder-agent:${runEvent.run.requestId}`,
-            });
             return;
           }
           setToast({
@@ -1704,19 +1684,6 @@ export default function Workbench() {
               });
             }
           }
-        } else if (
-          run
-          && state === "ready-to-open"
-          && runEvent.previousState !== "ready-to-open"
-        ) {
-          setToast({
-            title: `${run.candidateVersionLabel} 可以打开了`,
-            message: "切回项目确认后再打开，当前画布没有被替换。",
-            tone: "success",
-            disposition: "background-result",
-            dedupeKey: `background-version:${run.sourcePath}`,
-            action: { id: "open-project", label: "打开项目", sourcePath: run.sourcePath },
-          });
         }
         return;
       }
@@ -1732,13 +1699,6 @@ export default function Workbench() {
             tone: "info",
             disposition: "background-result",
             dedupeKey: `ai-run-cancelled:${runEvent.run.sourcePath}`,
-          });
-        } else if (!runEvent.current && runEvent.run) {
-          setToast({
-            title: `${runEvent.run.candidateVersionLabel} 已取消`,
-            message: "对应项目的评论仍然保留，迟到的完成信号不会被接纳。",
-            tone: "success",
-            dedupeKey: `background-version:${runEvent.run.sourcePath}`,
           });
         }
         return;
@@ -2013,18 +1973,6 @@ export default function Workbench() {
         if (typeof projectEvent.projectName === "string" && projectEvent.projectName) {
           setProjectName(projectEvent.projectName);
         }
-        if (
-          projectEvent.type === "project-source-relocated"
-          && projectEvent.contentChanged !== true
-        ) {
-          setToast({
-            title: "文件名已与 Finder 同步",
-            message: "已继续使用同一工作文件。",
-            tone: "success",
-            disposition: "background-result",
-            dedupeKey: "finder-filename-synced",
-          });
-        }
         return;
       }
       const documentEvent = event as Readonly<{
@@ -2099,29 +2047,12 @@ export default function Workbench() {
           });
         }
       }
-      if (documentEvent.type === "document-open-target-rebound") {
-        setToast({
-          title: "项目位置已自动恢复",
-          message: "已核对项目身份并继续使用登记项目。",
-          tone: "success",
-          disposition: "background-result",
-          dedupeKey: "registered-project-recovered",
-        });
-      }
       if (
         documentEvent.type === "document-persisted"
         && typeof documentEvent.lastSavedAt === "string"
         && documentEvent.lastSavedAt
       ) {
         setLastSafeWriteAt(documentEvent.lastSavedAt);
-      }
-      if (documentEvent.type === "document-recovery-queued") {
-        setToast({
-          title: "已恢复上次未写回的编辑",
-          message: "工作台正在把异常退出前的内容安全更新到源 HTML。",
-          tone: "info",
-          dedupeKey: "autosave-recovery",
-        });
       }
     });
     return () => {
@@ -3818,28 +3749,14 @@ export default function Workbench() {
     const api = window.htmlAIProjects;
     if (!api?.exportHtmlCopy) {
       downloadHtml(nextHtml, projectName);
-      setToast({
-        title: "已导出 HTML 副本",
-        message: "导出不会改变当前项目或版本历史。",
-        tone: "success",
-        dedupeKey: "export",
-      });
       return;
     }
     try {
-      const result = await api.exportHtmlCopy({
+      await api.exportHtmlCopy({
         html: nextHtml,
         sourcePath: currentProjectSessionSnapshot().sourcePath,
         suggestedName: projectName,
       });
-      if (result) {
-        setToast({
-          title: "已导出 HTML 副本",
-          message: `已保存为 ${result.name}；当前项目和版本号没有变化。`,
-          tone: "success",
-          dedupeKey: "export",
-        });
-      }
     } catch (cause) {
       const reason = productErrorMessage(
         cause,
@@ -4074,13 +3991,6 @@ export default function Workbench() {
       setExternalSourcePreview(null);
       await refreshWorkspace(context.sourcePath, context.epoch);
       setCanvasMode("edit");
-      setToast({
-        title: "项目已解锁",
-        message: "可以继续编辑，之后的修改会写回磁盘。",
-        tone: "success",
-        disposition: "background-result",
-        dedupeKey: "source-force-unlock",
-      });
     } catch (cause) {
       if (!isCurrentProjectContext(context)) return;
       setToast({
@@ -5426,17 +5336,6 @@ export default function Workbench() {
           disposition: "background-result",
           dedupeKey: "current-version-result",
         });
-      } else if (reviewed) {
-        // Accepting from review closes the comparison and swaps the canvas back to
-        // editing in one cut. Without a word the user cannot tell which version
-        // they are now editing, so name it once, quietly, and let it dismiss
-        // itself rather than raising a dialog.
-        setToast({
-          title: `已采纳 ${result.candidateLabel}`,
-          message: "现在编辑的就是这一版；上一版仍保留在项目里。",
-          tone: "success",
-          dedupeKey: "current-version-result",
-        });
       } else if (
         toastRef.current?.dedupeKey === "activate-ready-version"
         || toastRef.current?.dedupeKey === "current-version-result"
@@ -5660,13 +5559,6 @@ export default function Workbench() {
         await reloadCurrentSource({
           skipConfirmation: true,
           externalAuthorityAccepted: true,
-        });
-      } else {
-        setToast({
-          title: "已保留外部 HTML",
-          message: "对应项目的 AI 候选没有覆盖源文件；切回时会读取外部内容。",
-          tone: "success",
-          dedupeKey: `background-version:${activeRun.sourcePath}`,
         });
       }
     }
