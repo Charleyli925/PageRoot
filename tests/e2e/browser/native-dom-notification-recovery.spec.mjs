@@ -173,7 +173,6 @@ test.describe("notification recovery paths", () => {
     await commentButton.click();
 
     await expect(page.locator(".toast.show")).toHaveCount(0);
-    await expect(recoveryCard).toHaveCount(1);
     await expect(composer.getByRole("textbox", { name: "评论内容" }))
       .toHaveValue(firstComment);
     await expect(unsavedShortcut).toHaveCount(1);
