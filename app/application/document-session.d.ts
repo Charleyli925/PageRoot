@@ -21,7 +21,10 @@ export type DocumentCanvasAuthority = {
 
 export type DocumentSessionSnapshot = {
   html: string;
+  /** @deprecated Compatibility alias for persistedSourceSha256. */
   sourceSha256: string | null;
+  persistedSourceSha256: string | null;
+  workingHtmlSha256: string | null;
   canvasGeneration: number;
   canvasAuthority: DocumentCanvasAuthority;
   editRevision: number;
@@ -56,6 +59,8 @@ export class DocumentSession<TWrite = unknown> {
   constructor(options?: {
     html?: string;
     sourceSha256?: string | null;
+    persistedSourceSha256?: string | null;
+    workingHtmlSha256?: string | null;
   });
   setObserver(
     observer: ((snapshot: DocumentSessionSnapshot) => void) | null,
@@ -63,6 +68,8 @@ export class DocumentSession<TWrite = unknown> {
   update(value: {
     html?: string;
     sourceSha256?: string | null;
+    persistedSourceSha256?: string | null;
+    workingHtmlSha256?: string | null;
     editRevision?: number;
     lastPersistedRevision?: number;
     persistState?: DocumentPersistState;
@@ -72,12 +79,16 @@ export class DocumentSession<TWrite = unknown> {
   reset(value: {
     html: string;
     sourceSha256?: string | null;
+    persistedSourceSha256?: string | null;
+    workingHtmlSha256?: string | null;
     editRevision?: number;
     lastPersistedRevision?: number;
   }): DocumentSessionSnapshot;
   publishAuthority(value: {
     html: string;
-    sourceSha256: string | null;
+    sourceSha256?: string | null;
+    persistedSourceSha256?: string | null;
+    workingHtmlSha256?: string | null;
     editRevision?: number;
     lastPersistedRevision?: number;
     persistState?: DocumentPersistState;
@@ -85,9 +96,14 @@ export class DocumentSession<TWrite = unknown> {
     pendingWrite?: TWrite | null;
   }): DocumentSessionSnapshot;
   reloadCanvas(): DocumentSessionSnapshot;
+  confirmWorkingHtml(value: {
+    revision: number;
+    htmlSha256: string;
+  }): boolean;
   confirmCanvas(value: {
     generation: number;
     renderedSha256: string;
+    workingHtmlSha256?: string;
   }): boolean;
   failCanvas(value: {
     generation: number;
@@ -121,6 +137,8 @@ export class DocumentSession<TWrite = unknown> {
   }): Promise<PersistedBoundaryResult>;
   readonly html: string;
   readonly sourceSha256: string | null;
+  readonly persistedSourceSha256: string | null;
+  readonly workingHtmlSha256: string | null;
   readonly canvasGeneration: number;
   readonly canvasAuthority: DocumentCanvasAuthority;
   readonly editRevision: number;

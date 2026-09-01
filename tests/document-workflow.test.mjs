@@ -335,6 +335,59 @@ test("DocumentWorkflow remains fail-closed when journal acknowledgement Hash is 
   }), false);
 });
 
+test("DocumentWorkflow rebases an exact recovery receipt after the source file moves", async () => {
+  const before = "<!doctype html><html><body>one</body></html>";
+  const after = before.replace("one", "protected-move");
+  const movedPath = "/tmp/moved/document-workflow.html";
+  let receipt = null;
+  const recoveryJournal = {
+    async commit(input) {
+      receipt = {
+        ...input,
+        recoveryHtmlSha256: sha256(input.html),
+        journalSha256: sha256(`move:${input.sourcePath}:${input.revision}`),
+        updatedAt: "2026-09-01T00:00:00.000Z",
+      };
+      return receipt;
+    },
+    async readVerified() { return null; },
+    async rebase(input) {
+      assert.equal(input.previousSourcePath, SOURCE_PATH);
+      assert.equal(input.sourcePath, movedPath);
+      assert.equal(input.expectedJournalSha256, receipt.journalSha256);
+      receipt = {
+        ...receipt,
+        sourcePath: movedPath,
+        journalSha256: sha256(`move:${movedPath}:${receipt.revision}`),
+      };
+      return receipt;
+    },
+    async remove() { return { removed: true }; },
+  };
+  const harness = createHarness({ html: before, recoveryJournal });
+  harness.workflow.enqueueEdit({ html: after });
+  assert.equal((await harness.workflow.protectForDetach({
+    context: harness.context,
+  })).status, "succeeded");
+  const nextContext = harness.projectSession.transitionSource({
+    previousSourcePath: SOURCE_PATH,
+    sourcePath: movedPath,
+    projectId: PROJECT_ID,
+    documentId: DOCUMENT_ID,
+  });
+  const rebased = await harness.workflow.rebaseRecoveryJournal({
+    previousContext: harness.context,
+    context: nextContext,
+  });
+  assert.equal(rebased.status, "succeeded");
+  assert.equal(rebased.value.rebased, true);
+  assert.equal(harness.workflow.recoveryCheckpoint.sourcePath, movedPath);
+  assert.equal(harness.workflow.hasVerifiedRecoveryCheckpoint({
+    context: nextContext,
+    revision: 1,
+  }), true);
+});
+
 test("DocumentWorkflow accepts only an exact exported HTML Hash as detach evidence", async () => {
   const before = "<!doctype html><html><body>one</body></html>";
   const after = before.replace("one", "exported");
@@ -378,6 +431,56 @@ test("DocumentWorkflow accepts only an exact exported HTML Hash as detach eviden
     context: harness.context,
     revision: 2,
   }), false);
+});
+
+test("DocumentWorkflow can protect failed HTML before explicitly reloading the disk version", async () => {
+  const before = "<!doctype html><html><body>disk</body></html>";
+  const after = before.replace("disk", "protected-unsaved");
+  const recoveryJournal = {
+    async commit(input) {
+      return {
+        ...input,
+        recoveryHtmlSha256: sha256(input.html),
+        journalSha256: sha256(`reload:${input.revision}`),
+        updatedAt: "2026-09-02T00:00:00.000Z",
+      };
+    },
+    async readVerified() { return null; },
+    async remove() { return { removed: true }; },
+  };
+  const harness = createHarness({
+    html: before,
+    recoveryJournal,
+    bridge: {
+      async autosave() { throw new Error("disk denied"); },
+      async source() {
+        return {
+          projectId: PROJECT_ID,
+          documentId: DOCUMENT_ID,
+          sourcePath: SOURCE_PATH,
+          content: before,
+          sha256: sha256(before),
+          lastModifiedAt: "2026-09-02T00:00:00.000Z",
+        };
+      },
+    },
+  });
+  harness.workflow.enqueueEdit({ html: after });
+  assert.notEqual((await harness.workflow.flush()).status, "succeeded");
+  assert.equal((await harness.workflow.protectForDetach({
+    context: harness.context,
+  })).status, "succeeded");
+  assert.equal(harness.workflow.hasVerifiedProtectionEvidence({
+    context: harness.context,
+    revision: 1,
+  }), true);
+
+  const reloaded = await harness.workflow.reloadAuthority({ context: harness.context });
+  assert.equal(reloaded.status, "succeeded");
+  assert.equal(harness.documentSession.html, before);
+  assert.equal(harness.documentSession.persistState, "idle");
+  assert.equal(harness.documentSession.persistedSourceSha256, sha256(before));
+  assert.equal(harness.documentSession.workingHtmlSha256, sha256(before));
 });
 
 test("DocumentWorkflow restores source-history and recovery authority after a project transition reset", () => {
@@ -1352,6 +1455,187 @@ test("DocumentWorkflow prefers a newer local crash record over an older Main jou
   assert.equal(outcome.value.queued, true);
   assert.equal(harness.documentSession.html, newer);
   assert.equal(harness.documentSession.editRevision, 5);
+});
+
+test("DocumentWorkflow automatically restores a verified Main journal without local metadata", async () => {
+  const before = "<!doctype html><html><body><p>one</p></body></html>";
+  const recoveredHtml = before.replace("one", "main-only");
+  const recoveryJournal = {
+    async readVerified() {
+      return {
+        schemaVersion: "2.0.0",
+        projectId: PROJECT_ID,
+        documentId: DOCUMENT_ID,
+        sourcePath: SOURCE_PATH,
+        workingCopyId: "",
+        expectedSourceSha256: sha256(before),
+        revision: 3,
+        html: recoveredHtml,
+        recoveryHtmlSha256: sha256(recoveredHtml),
+        journalSha256: sha256("main-only-journal"),
+        updatedAt: "2026-09-01T00:00:00.000Z",
+      };
+    },
+    async commit(input) {
+      return {
+        ...input,
+        recoveryHtmlSha256: sha256(input.html),
+        journalSha256: sha256(`main-only:${input.revision}`),
+        updatedAt: "2026-09-01T00:00:01.000Z",
+      };
+    },
+    async remove() { return { removed: true }; },
+  };
+  const harness = createHarness({ html: before, recoveryJournal });
+  const outcome = await harness.workflow.recoverAutosave({
+    context: harness.context,
+    currentSourceSha256: sha256(before),
+    serverRevision: 1,
+  });
+  assert.equal(outcome.status, "succeeded");
+  assert.equal(outcome.value.queued, true);
+  assert.equal(harness.documentSession.html, recoveredHtml);
+  assert.equal(harness.documentSession.persistState, "queued");
+  assert.equal(harness.documentSession.persistedSourceSha256, sha256(before));
+  assert.equal(harness.documentSession.workingHtmlSha256, sha256(recoveredHtml));
+});
+
+test("DocumentWorkflow uses Main bytes and compatible local recovery metadata at the same revision", async () => {
+  const before = "<!doctype html><html><body><p>one</p></body></html>";
+  const recoveredHtml = before.replace("one", "merged");
+  const auditEvent = { eventId: "change_recovery_merged", kind: "test" };
+  const recoveryJournal = {
+    async readVerified() {
+      return {
+        schemaVersion: "2.0.0",
+        projectId: PROJECT_ID,
+        documentId: DOCUMENT_ID,
+        sourcePath: SOURCE_PATH,
+        workingCopyId: "",
+        expectedSourceSha256: sha256(before),
+        revision: 4,
+        html: recoveredHtml,
+        recoveryHtmlSha256: sha256(recoveredHtml),
+        journalSha256: sha256("merged-journal"),
+        updatedAt: "2026-09-01T00:00:00.000Z",
+      };
+    },
+    async commit(input) {
+      return {
+        ...input,
+        recoveryHtmlSha256: sha256(input.html),
+        journalSha256: sha256(`merged:${input.revision}`),
+        updatedAt: "2026-09-01T00:00:01.000Z",
+      };
+    },
+    async remove() { return { removed: true }; },
+  };
+  const harness = createHarness({ html: before, recoveryJournal });
+  harness.recoveryStore.write(`html-ai-recovery:${DOCUMENT_ID}`, {
+    schemaVersion: "2.0.0",
+    projectId: PROJECT_ID,
+    documentId: DOCUMENT_ID,
+    sourcePath: SOURCE_PATH,
+    expectedSourceSha256: sha256(before),
+    revision: 4,
+    html: recoveredHtml,
+    recoveryIdentity: null,
+    changeEvents: [auditEvent],
+    sourceHistoryOperations: [],
+  });
+  const outcome = await harness.workflow.recoverAutosave({
+    context: harness.context,
+    currentSourceSha256: sha256(before),
+    serverRevision: 1,
+  });
+  assert.equal(outcome.status, "succeeded");
+  assert.equal(outcome.value.queued, true);
+  assert.equal(harness.documentSession.html, recoveredHtml);
+  assert.deepEqual(harness.commentSession.changeEvents, [auditEvent]);
+});
+
+test("DocumentWorkflow keeps one journal in flight and coalesces to the latest pending HTML", async () => {
+  const before = "<!doctype html><html><body><p>one</p></body></html>";
+  const commits = [];
+  let releaseFirst;
+  const firstBlocked = new Promise((resolve) => { releaseFirst = resolve; });
+  const recoveryJournal = {
+    async commit(input) {
+      commits.push(structuredClone(input));
+      if (commits.length === 1) await firstBlocked;
+      return {
+        ...input,
+        recoveryHtmlSha256: sha256(input.html),
+        journalSha256: sha256(`coalesced:${input.revision}`),
+        updatedAt: "2026-09-01T00:00:00.000Z",
+      };
+    },
+    async readVerified() { return null; },
+    async remove() { return { removed: true }; },
+  };
+  const harness = createHarness({ html: before, recoveryJournal });
+  harness.workflow.enqueueEdit({ html: before.replace("one", "revision-1") });
+  await Promise.resolve();
+  harness.workflow.enqueueEdit({ html: before.replace("one", "revision-2") });
+  harness.workflow.enqueueEdit({ html: before.replace("one", "revision-3") });
+  assert.equal(commits.length, 1);
+  releaseFirst();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(commits.length, 2);
+  assert.equal(commits[1].revision, 3);
+  assert.equal(commits[1].html, before.replace("one", "revision-3"));
+});
+
+test("DocumentWorkflow waits for exact CAS retirement after source persistence succeeds", async () => {
+  const before = "<!doctype html><html><body><p>one</p></body></html>";
+  const after = before.replace("one", "saved-and-retired");
+  let receipt = null;
+  const removals = [];
+  const recoveryJournal = {
+    async commit(input) {
+      receipt = {
+        ...input,
+        recoveryHtmlSha256: sha256(input.html),
+        journalSha256: sha256(`retire:${input.revision}`),
+        updatedAt: "2026-09-02T00:00:00.000Z",
+      };
+      return receipt;
+    },
+    async readVerified() { return receipt; },
+    async remove(input) {
+      removals.push(structuredClone(input));
+      assert.equal(input.sourcePath, SOURCE_PATH);
+      assert.equal(input.revision, receipt.revision);
+      assert.equal(input.recoveryHtmlSha256, receipt.recoveryHtmlSha256);
+      assert.equal(input.expectedJournalSha256, receipt.journalSha256);
+      receipt = null;
+      return { removed: true };
+    },
+  };
+  const harness = createHarness({
+    html: before,
+    recoveryJournal,
+    bridge: {
+      async autosave(body) {
+        return {
+          ok: true,
+          content: body.html,
+          sha256: sha256(body.html),
+          persistedRevision: body.editRevision,
+          lastModifiedAt: "2026-09-02T00:00:01.000Z",
+          sourceHistory: sourceHistory({ sourceSha256: sha256(before) }),
+        };
+      },
+    },
+  });
+  harness.workflow.enqueueEdit({ html: after });
+  assert.equal((await harness.workflow.protectForDetach({
+    context: harness.context,
+  })).status, "succeeded");
+  assert.equal((await harness.workflow.flush({ throughRevision: 1 })).status, "succeeded");
+  assert.equal(removals.length, 1);
+  assert.equal(receipt, null);
+  assert.equal(harness.workflow.recoveryCheckpoint, null);
 });
 
 test("DocumentWorkflow never claims a newer journal receipt while deleting stale recovery", async () => {

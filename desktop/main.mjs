@@ -251,6 +251,7 @@ const PROJECT_CHANNELS = Object.freeze({
   rollbackPreparedHtmlOpen: "html-projects:rollback-prepared-open",
   commitRecoveryJournal: "html-projects:commit-recovery-journal",
   readRecoveryJournal: "html-projects:read-recovery-journal",
+  rebaseRecoveryJournal: "html-projects:rebase-recovery-journal",
   removeRecoveryJournal: "html-projects:remove-recovery-journal",
   listRecoveryJournals: "html-projects:list-recovery-journals",
   sourceFileMayHaveChanged: "html-projects:source-file-may-have-changed",
@@ -442,6 +443,17 @@ const preparedHtmlOpenStore = createPreparedHtmlOpenStore();
 const recoveryJournalStore = createRecoveryJournalStore({
   rootPath: path.join(app.getPath("userData"), "recovery-journals-v1"),
 });
+let recoveryJournalAvailable = true;
+let recoveryJournalUnavailableReason = "";
+
+function requireRecoveryJournal() {
+  if (recoveryJournalAvailable) return recoveryJournalStore;
+  const error = new Error(
+    recoveryJournalUnavailableReason || "恢复日志当前不可用，请导出当前 HTML 作为恢复副本。",
+  );
+  error.code = "RECOVERY_JOURNAL_UNAVAILABLE";
+  throw error;
+}
 const externalFileOpenExitHandoff = createExternalFileOpenExitHandoff({
   handoffPath: path.join(app.getPath("userData"), "external-open-handoff.json"),
 });
@@ -3559,10 +3571,20 @@ function registerProjectIpc() {
       cancelPreparedHtmlOpen,
       finalizePreparedHtmlOpen,
       rollbackPreparedHtmlOpen,
-      commitRecoveryJournal: (payload) => recoveryJournalStore.commit(payload),
-      readRecoveryJournal: (payload) => recoveryJournalStore.readVerified(payload),
-      removeRecoveryJournal: (payload) => recoveryJournalStore.remove(payload),
-      listRecoveryJournals: () => recoveryJournalStore.listRecoverable(),
+      commitRecoveryJournal: (payload) => requireRecoveryJournal().commit(payload),
+      readRecoveryJournal: (payload) => requireRecoveryJournal().readVerified(payload),
+      rebaseRecoveryJournal: (payload) => requireRecoveryJournal().rebase(payload),
+      removeRecoveryJournal: (payload) => requireRecoveryJournal().remove(payload),
+      listRecoveryJournals: () => recoveryJournalAvailable
+        ? recoveryJournalStore.listRecoverable()
+        : Promise.resolve({
+            entries: [],
+            invalidCount: 0,
+            scannedCount: 0,
+            totalBytes: 0,
+            truncated: false,
+            unavailable: true,
+          }),
       createPreviewSession,
       revokePreviewSession: (sessionId) => (
         ensurePreviewProtocolController().revokeSession(sessionId)
@@ -4249,7 +4271,20 @@ if (!hasSingleInstanceLock) {
     }
     installApplicationMenu();
     ensureApplicationUpdateController();
-    await recoveryJournalStore.initialize();
+    try {
+      await recoveryJournalStore.initialize();
+    } catch (error) {
+      recoveryJournalAvailable = false;
+      recoveryJournalUnavailableReason = error instanceof Error
+        ? error.message
+        : "恢复日志初始化失败。";
+      captureUsage("runtime_fault", {
+        process: "main",
+        kind: "recovery_journal_degraded",
+        reason_code: telemetryReasonCode(error?.code, "RECOVERY_JOURNAL_UNAVAILABLE"),
+        fingerprint: telemetryFingerprint(error),
+      });
+    }
     await createWindow();
   }).catch(async (error) => {
     captureUsage("runtime_fault", {

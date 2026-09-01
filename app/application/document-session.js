@@ -56,10 +56,17 @@ function boundaryBlock(code, reason, confirmed = false) {
 function initialSnapshot({
   html = "",
   sourceSha256 = null,
+  persistedSourceSha256 = sourceSha256,
+  workingHtmlSha256 = persistedSourceSha256,
 } = {}) {
+  const persistedHash = persistedSourceSha256 ? String(persistedSourceSha256) : null;
   return Object.freeze({
     html: String(html),
-    sourceSha256: sourceSha256 ? String(sourceSha256) : null,
+    // sourceSha256 remains a compatibility projection for consumers that have
+    // not yet renamed the disk CAS fact. It is never the working/canvas Hash.
+    sourceSha256: persistedHash,
+    persistedSourceSha256: persistedHash,
+    workingHtmlSha256: workingHtmlSha256 ? String(workingHtmlSha256) : null,
     canvasGeneration: 0,
     editRevision: 0,
     lastPersistedRevision: 0,
@@ -89,8 +96,13 @@ export class DocumentSession {
   }
 
   #emit(next) {
+    const persistedSourceSha256 = next.persistedSourceSha256
+      ? String(next.persistedSourceSha256)
+      : null;
     this.#snapshot = Object.freeze({
       ...next,
+      sourceSha256: persistedSourceSha256,
+      persistedSourceSha256,
       hasPendingWrite: Boolean(this.#pendingWrite),
       isFlushing: Boolean(this.#flushPromise),
     });
@@ -104,6 +116,8 @@ export class DocumentSession {
   update({
     html,
     sourceSha256,
+    persistedSourceSha256,
+    workingHtmlSha256,
     editRevision,
     lastPersistedRevision,
     persistState: nextPersistState,
@@ -111,9 +125,25 @@ export class DocumentSession {
     pendingWrite,
   }) {
     const next = { ...this.#snapshot };
-    if (html !== undefined) next.html = String(html);
-    if (sourceSha256 !== undefined) {
-      next.sourceSha256 = sourceSha256 ? String(sourceSha256) : null;
+    if (html !== undefined) {
+      const nextHtml = String(html);
+      if (nextHtml !== next.html && workingHtmlSha256 === undefined) {
+        next.workingHtmlSha256 = null;
+      }
+      next.html = nextHtml;
+    }
+    const nextPersistedHash = persistedSourceSha256 !== undefined
+      ? persistedSourceSha256
+      : sourceSha256;
+    if (nextPersistedHash !== undefined) {
+      next.persistedSourceSha256 = nextPersistedHash
+        ? String(nextPersistedHash)
+        : null;
+    }
+    if (workingHtmlSha256 !== undefined) {
+      next.workingHtmlSha256 = workingHtmlSha256
+        ? String(workingHtmlSha256)
+        : null;
     }
     if (editRevision !== undefined) {
       next.editRevision = revision(editRevision);
@@ -137,6 +167,8 @@ export class DocumentSession {
   reset({
     html,
     sourceSha256 = null,
+    persistedSourceSha256 = sourceSha256,
+    workingHtmlSha256 = persistedSourceSha256,
     editRevision = 0,
     lastPersistedRevision = 0,
   }) {
@@ -144,7 +176,10 @@ export class DocumentSession {
     const canvasGeneration = this.#snapshot.canvasGeneration + 1;
     this.#emit({
       html: String(html || ""),
-      sourceSha256: sourceSha256 ? String(sourceSha256) : null,
+      persistedSourceSha256: persistedSourceSha256
+        ? String(persistedSourceSha256)
+        : null,
+      workingHtmlSha256: workingHtmlSha256 ? String(workingHtmlSha256) : null,
       canvasGeneration,
       editRevision: revision(editRevision),
       lastPersistedRevision: revision(lastPersistedRevision),
@@ -158,6 +193,8 @@ export class DocumentSession {
   publishAuthority({
     html,
     sourceSha256,
+    persistedSourceSha256 = sourceSha256,
+    workingHtmlSha256 = persistedSourceSha256,
     editRevision,
     lastPersistedRevision,
     persistState: nextPersistState,
@@ -168,7 +205,10 @@ export class DocumentSession {
     const next = {
       ...this.#snapshot,
       html: String(html),
-      sourceSha256: sourceSha256 ? String(sourceSha256) : null,
+      persistedSourceSha256: persistedSourceSha256
+        ? String(persistedSourceSha256)
+        : null,
+      workingHtmlSha256: workingHtmlSha256 ? String(workingHtmlSha256) : null,
       canvasGeneration,
       canvasAuthority: pendingCanvasAuthority(canvasGeneration),
     };
@@ -201,13 +241,32 @@ export class DocumentSession {
     return this.#snapshot;
   }
 
-  confirmCanvas({ generation, renderedSha256 } = {}) {
+  confirmWorkingHtml({ revision: expectedRevision, htmlSha256 } = {}) {
+    const receivedRevision = revision(expectedRevision);
+    const receivedHash = htmlSha256 ? String(htmlSha256) : "";
+    if (
+      receivedRevision !== this.#snapshot.editRevision
+      || !/^sha256:[a-f0-9]{64}$/u.test(receivedHash)
+    ) return false;
+    this.#emit({
+      ...this.#snapshot,
+      workingHtmlSha256: receivedHash,
+    });
+    return true;
+  }
+
+  confirmCanvas({ generation, renderedSha256, workingHtmlSha256 } = {}) {
     const expectedGeneration = revision(generation);
-    const expectedHash = renderedSha256 ? String(renderedSha256) : "";
+    const renderedHash = renderedSha256 ? String(renderedSha256) : "";
+    const workingHash = String(this.#snapshot.workingHtmlSha256 || "");
+    const reportedWorkingHash = workingHtmlSha256
+      ? String(workingHtmlSha256)
+      : workingHash;
     if (
       expectedGeneration !== this.#snapshot.canvasGeneration
-      || !expectedHash
-      || expectedHash !== this.#snapshot.sourceSha256
+      || !/^sha256:[a-f0-9]{64}$/u.test(renderedHash)
+      || reportedWorkingHash !== workingHash
+      || renderedHash !== workingHash
     ) {
       return false;
     }
@@ -216,7 +275,7 @@ export class DocumentSession {
       canvasAuthority: canvasAuthority({
         status: "verified",
         generation: expectedGeneration,
-        renderedSha256: expectedHash,
+        renderedSha256: renderedHash,
       }),
     });
     return true;
@@ -246,19 +305,27 @@ export class DocumentSession {
       html: String(html),
       editRevision: nextRevision,
       persistError: "",
+      workingHtmlSha256: null,
       canvasAuthority: pendingCanvasAuthority(this.#snapshot.canvasGeneration),
     });
     return nextRevision;
   }
 
   setHtml(html) {
-    this.#emit({ ...this.#snapshot, html: String(html) });
+    const nextHtml = String(html);
+    this.#emit({
+      ...this.#snapshot,
+      html: nextHtml,
+      workingHtmlSha256: nextHtml === this.#snapshot.html
+        ? this.#snapshot.workingHtmlSha256
+        : null,
+    });
   }
 
   setSourceSha256(sourceSha256) {
     this.#emit({
       ...this.#snapshot,
-      sourceSha256: sourceSha256 ? String(sourceSha256) : null,
+      persistedSourceSha256: sourceSha256 ? String(sourceSha256) : null,
     });
   }
 
@@ -375,7 +442,8 @@ export class DocumentSession {
     );
     if (
       this.#snapshot.persistState === "idle"
-      && this.#snapshot.sourceSha256 === frozenSha256
+      && this.#snapshot.persistedSourceSha256 === frozenSha256
+      && this.#snapshot.workingHtmlSha256 === frozenSha256
       && this.#snapshot.lastPersistedRevision >= cutoff
     ) {
       return Object.freeze({
@@ -447,7 +515,8 @@ export class DocumentSession {
     }
 
     this.update({
-      sourceSha256: frozenSha256,
+      persistedSourceSha256: frozenSha256,
+      workingHtmlSha256: frozenSha256,
       lastPersistedRevision: Math.max(
         this.#snapshot.lastPersistedRevision,
         cutoff,
@@ -468,7 +537,15 @@ export class DocumentSession {
   }
 
   get sourceSha256() {
-    return this.#snapshot.sourceSha256;
+    return this.#snapshot.persistedSourceSha256;
+  }
+
+  get persistedSourceSha256() {
+    return this.#snapshot.persistedSourceSha256;
+  }
+
+  get workingHtmlSha256() {
+    return this.#snapshot.workingHtmlSha256;
   }
 
   get canvasGeneration() {

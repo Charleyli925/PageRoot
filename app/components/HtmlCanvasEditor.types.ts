@@ -112,6 +112,9 @@ export type HtmlCanvasEditRuntimeLoadOutcome =
 export type HtmlCanvasFreezeSnapshot = {
   ok: boolean;
   html: string;
+  /** Hash of the exact working HTML currently rendered by the Canvas. */
+  canvasRenderedSha256: string;
+  /** @deprecated Compatibility alias for canvasRenderedSha256. */
   sourceSha256: string;
   pendingMutation: HtmlCanvasMutation | null;
   reason?: string;
@@ -120,6 +123,9 @@ export type HtmlCanvasFreezeSnapshot = {
 export type HtmlCanvasCommitResult = {
   ok: boolean;
   html: string;
+  /** Hash of the exact working HTML currently rendered by the Canvas. */
+  canvasRenderedSha256: string;
+  /** @deprecated Compatibility alias for canvasRenderedSha256. */
   sourceSha256: string;
   pendingMutation: HtmlCanvasMutation | null;
   reason?: string;

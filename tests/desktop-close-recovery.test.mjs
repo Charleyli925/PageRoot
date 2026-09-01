@@ -20,6 +20,8 @@ const safeRendererState = Object.freeze({
   approvedRequestId: "close-request-0001",
   abortedRequestId: "close-request-0001",
   imposedEditorFreeze: true,
+  projectIdentityMatches: true,
+  protectionVerified: false,
   projectLocked: false,
   projectHydrating: false,
   projectLoadError: false,
@@ -233,6 +235,7 @@ test("the editor recovers only for its own safely persisted close freeze", () =>
   for (const unsafeState of [
     { abortedRequestId: "close-request-9999" },
     { imposedEditorFreeze: false },
+    { projectIdentityMatches: false },
     { projectLocked: true },
     { projectHydrating: true },
     { projectLoadError: true },
@@ -256,6 +259,26 @@ test("the editor recovers only for its own safely persisted close freeze", () =>
       `unsafe close state recovered: ${JSON.stringify(unsafeState)}`,
     );
   }
+});
+
+test("an exact protected revision unlocks after close abort without claiming source persistence", () => {
+  assert.equal(shouldRecoverEditorAfterCloseAbort({
+    ...safeRendererState,
+    protectionVerified: true,
+    persistState: "failed",
+    pendingWrite: true,
+    flushInProgress: true,
+    editRevision: 8,
+    lastPersistedRevision: 7,
+  }), true);
+  assert.equal(shouldRecoverEditorAfterCloseAbort({
+    ...safeRendererState,
+    protectionVerified: true,
+    projectIdentityMatches: false,
+    persistState: "failed",
+    editRevision: 8,
+    lastPersistedRevision: 7,
+  }), false);
 });
 
 test("close-abort payloads reject missing or malformed request identities", () => {

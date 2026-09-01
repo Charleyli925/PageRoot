@@ -34,6 +34,7 @@ const channels = Object.freeze({
   rollbackPreparedHtmlOpen: "html-projects:rollback-prepared-open",
   commitRecoveryJournal: "html-projects:commit-recovery-journal",
   readRecoveryJournal: "html-projects:read-recovery-journal",
+  rebaseRecoveryJournal: "html-projects:rebase-recovery-journal",
   removeRecoveryJournal: "html-projects:remove-recovery-journal",
   listRecoveryJournals: "html-projects:list-recovery-journals",
 });
@@ -214,6 +215,10 @@ const projectsApi = Object.freeze({
   ),
   readRecoveryJournal: (payload) => invokeProject(
     channels.readRecoveryJournal,
+    payload,
+  ),
+  rebaseRecoveryJournal: (payload) => invokeProject(
+    channels.rebaseRecoveryJournal,
     payload,
   ),
   removeRecoveryJournal: (payload) => invokeProject(

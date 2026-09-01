@@ -12,10 +12,15 @@ import path from "node:path";
 
 import { PRODUCT_MAX_HTML_BYTES } from "./product-contract.mjs";
 
-export const RECOVERY_JOURNAL_SCHEMA_VERSION = "1.0.0";
+export const RECOVERY_JOURNAL_SCHEMA_VERSION = "2.0.0";
+const LEGACY_RECOVERY_JOURNAL_SCHEMA_VERSION = "1.0.0";
 const SHA256 = /^sha256:[a-f0-9]{64}$/u;
 const MAX_ID_LENGTH = 160;
 const MAX_PATH_LENGTH = 4096;
+const DEFAULT_MAX_ENTRY_COUNT = 512;
+const DEFAULT_MAX_ENTRY_BYTES = PRODUCT_MAX_HTML_BYTES + 1_048_576;
+const DEFAULT_MAX_TOTAL_BYTES = PRODUCT_MAX_HTML_BYTES * 8;
+const DEFAULT_SCAN_TIME_MS = 2_000;
 
 function recoveryError(code, message) {
   const error = new Error(message);
@@ -46,6 +51,14 @@ function assertOptionalSha256(value, label) {
   const text = typeof value === "string" ? value : "";
   if (text && !SHA256.test(text)) throw new TypeError(`${label}无效。`);
   return text || null;
+}
+
+function assertWorkingCopyId(value) {
+  const text = typeof value === "string" ? value.trim() : "";
+  if (text.length > MAX_ID_LENGTH || text.includes("\0")) {
+    throw new TypeError("workingCopyId无效。");
+  }
+  return text;
 }
 
 function assertRevision(value) {
@@ -136,7 +149,10 @@ async function atomicWrite(filePath, content) {
 
 function normalizeEnvelope(value) {
   const raw = assertRecord(value, "恢复日志内容无效。");
-  if (raw.schemaVersion !== RECOVERY_JOURNAL_SCHEMA_VERSION) {
+  if (
+    raw.schemaVersion !== RECOVERY_JOURNAL_SCHEMA_VERSION
+    && raw.schemaVersion !== LEGACY_RECOVERY_JOURNAL_SCHEMA_VERSION
+  ) {
     throw recoveryError(
       "RECOVERY_JOURNAL_SCHEMA_UNSUPPORTED",
       "恢复日志版本不受支持。",
@@ -159,12 +175,10 @@ function normalizeEnvelope(value) {
     throw new TypeError("恢复日志 updatedAt 无效。");
   }
   return Object.freeze({
-    schemaVersion: RECOVERY_JOURNAL_SCHEMA_VERSION,
+    schemaVersion: raw.schemaVersion,
     ...locator,
     sourcePath: assertSourcePath(raw.sourcePath),
-    workingCopyId: typeof raw.workingCopyId === "string"
-      ? raw.workingCopyId.slice(0, MAX_ID_LENGTH)
-      : "",
+    workingCopyId: assertWorkingCopyId(raw.workingCopyId),
     expectedSourceSha256: assertOptionalSha256(
       raw.expectedSourceSha256,
       "expectedSourceSha256",
@@ -192,7 +206,14 @@ function publicSummary(envelope, journalSha256) {
   });
 }
 
-export function createRecoveryJournalStore({ rootPath, now = () => new Date() } = {}) {
+export function createRecoveryJournalStore({
+  rootPath,
+  now = () => new Date(),
+  maxEntryCount = DEFAULT_MAX_ENTRY_COUNT,
+  maxEntryBytes = DEFAULT_MAX_ENTRY_BYTES,
+  maxTotalBytes = DEFAULT_MAX_TOTAL_BYTES,
+  scanTimeMs = DEFAULT_SCAN_TIME_MS,
+} = {}) {
   if (typeof rootPath !== "string" || !path.isAbsolute(rootPath)) {
     throw new TypeError("恢复日志目录必须是绝对路径。");
   }
@@ -200,6 +221,13 @@ export function createRecoveryJournalStore({ rootPath, now = () => new Date() } 
   const queues = new Map();
   const entryPath = (locator) => path.join(root, `${locatorKey(locator)}.json`);
   const serialize = (envelope) => `${JSON.stringify(envelope)}\n`;
+
+  const normalizedLimits = Object.freeze({
+    maxEntryCount: Math.max(1, Number(maxEntryCount) || DEFAULT_MAX_ENTRY_COUNT),
+    maxEntryBytes: Math.max(1, Number(maxEntryBytes) || DEFAULT_MAX_ENTRY_BYTES),
+    maxTotalBytes: Math.max(1, Number(maxTotalBytes) || DEFAULT_MAX_TOTAL_BYTES),
+    scanTimeMs: Math.max(1, Number(scanTimeMs) || DEFAULT_SCAN_TIME_MS),
+  });
 
   const readEnvelope = async (locator) => {
     const filePath = entryPath(locator);
@@ -210,6 +238,12 @@ export function createRecoveryJournalStore({ rootPath, now = () => new Date() } 
         throw recoveryError(
           "RECOVERY_JOURNAL_ENTRY_UNSAFE",
           "恢复日志文件不安全。",
+        );
+      }
+      if (facts.size > normalizedLimits.maxEntryBytes) {
+        throw recoveryError(
+          "RECOVERY_JOURNAL_ENTRY_TOO_LARGE",
+          "恢复日志文件超出读取上限。",
         );
       }
       bytes = await readFile(filePath);
@@ -262,6 +296,7 @@ export function createRecoveryJournalStore({ rootPath, now = () => new Date() } 
         const html = assertHtml(input.html);
         const incomingRevision = assertRevision(input.revision);
         const incomingHtmlSha256 = sha256(html);
+        const incomingWorkingCopyId = assertWorkingCopyId(input.workingCopyId);
         const expectedJournalSha256 = assertOptionalSha256(
           input.expectedJournalSha256,
           "expectedJournalSha256",
@@ -282,6 +317,16 @@ export function createRecoveryJournalStore({ rootPath, now = () => new Date() } 
             "较旧的恢复版本不能覆盖较新的恢复副本。",
           );
         }
+        if (
+          current
+          && current.envelope.workingCopyId
+          && current.envelope.workingCopyId !== incomingWorkingCopyId
+        ) {
+          throw recoveryError(
+            "RECOVERY_JOURNAL_IDENTITY_MISMATCH",
+            "恢复日志不能跨 Working Copy 覆盖。",
+          );
+        }
         if (current && current.envelope.revision === incomingRevision) {
           if (
             current.envelope.recoveryHtmlSha256 !== incomingHtmlSha256
@@ -296,13 +341,43 @@ export function createRecoveryJournalStore({ rootPath, now = () => new Date() } 
               "同一恢复版本的内容或身份不一致。",
             );
           }
+          if (
+            current.envelope.workingCopyId !== incomingWorkingCopyId
+            && !current.envelope.workingCopyId
+            && incomingWorkingCopyId
+          ) {
+            if (!expectedJournalSha256) {
+              throw recoveryError(
+                "RECOVERY_JOURNAL_CAS_REQUIRED",
+                "补充 Working Copy 身份必须提供旧日志凭证。",
+              );
+            }
+            const upgraded = normalizeEnvelope({
+              ...current.envelope,
+              schemaVersion: RECOVERY_JOURNAL_SCHEMA_VERSION,
+              workingCopyId: incomingWorkingCopyId,
+              updatedAt: now().toISOString(),
+            });
+            await atomicWrite(entryPath(locator), serialize(upgraded));
+            const verifiedUpgrade = await readEnvelope(locator);
+            if (!verifiedUpgrade) {
+              throw recoveryError(
+                "RECOVERY_JOURNAL_READBACK_FAILED",
+                "恢复日志补充 Working Copy 身份后无法读回校验。",
+              );
+            }
+            return publicSummary(
+              verifiedUpgrade.envelope,
+              verifiedUpgrade.journalSha256,
+            );
+          }
           return publicSummary(current.envelope, current.journalSha256);
         }
         const envelope = normalizeEnvelope({
           schemaVersion: RECOVERY_JOURNAL_SCHEMA_VERSION,
           ...locator,
           sourcePath: input.sourcePath,
-          workingCopyId: input.workingCopyId,
+          workingCopyId: incomingWorkingCopyId,
           expectedSourceSha256: input.expectedSourceSha256,
           recoveryHtmlSha256: incomingHtmlSha256,
           revision: incomingRevision,
@@ -344,6 +419,67 @@ export function createRecoveryJournalStore({ rootPath, now = () => new Date() } 
       });
     },
 
+    async rebase(input) {
+      const locator = locatorFrom(input);
+      return serializeOperation(locator, async () => {
+        const verified = await readEnvelope(locator);
+        if (!verified) {
+          throw recoveryError(
+            "RECOVERY_JOURNAL_NOT_FOUND",
+            "要更新的恢复日志不存在。",
+          );
+        }
+        const expectedJournalSha256 = assertOptionalSha256(
+          input.expectedJournalSha256,
+          "expectedJournalSha256",
+        );
+        const expectedRecoveryHtmlSha256 = assertOptionalSha256(
+          input.recoveryHtmlSha256,
+          "recoveryHtmlSha256",
+        );
+        if (!expectedJournalSha256 || !expectedRecoveryHtmlSha256) {
+          throw recoveryError(
+            "RECOVERY_JOURNAL_CAS_REQUIRED",
+            "更新恢复日志必须提供完整校验凭证。",
+          );
+        }
+        const expectedWorkingCopyId = assertWorkingCopyId(input.workingCopyId);
+        const expectedRevision = assertRevision(input.revision);
+        const expectedPreviousPath = assertSourcePath(input.previousSourcePath);
+        const nextSourcePath = assertSourcePath(input.sourcePath);
+        if (
+          verified.journalSha256 !== expectedJournalSha256
+          || verified.envelope.workingCopyId !== expectedWorkingCopyId
+          || verified.envelope.revision !== expectedRevision
+          || verified.envelope.recoveryHtmlSha256 !== expectedRecoveryHtmlSha256
+          || verified.envelope.sourcePath !== expectedPreviousPath
+        ) {
+          throw recoveryError(
+            "RECOVERY_JOURNAL_CAS_MISMATCH",
+            "恢复日志身份或校验凭证已变化，未更新路径。",
+          );
+        }
+        if (verified.envelope.sourcePath === nextSourcePath) {
+          return publicSummary(verified.envelope, verified.journalSha256);
+        }
+        const envelope = normalizeEnvelope({
+          ...verified.envelope,
+          schemaVersion: RECOVERY_JOURNAL_SCHEMA_VERSION,
+          sourcePath: nextSourcePath,
+          updatedAt: now().toISOString(),
+        });
+        await atomicWrite(entryPath(locator), serialize(envelope));
+        const rebound = await readEnvelope(locator);
+        if (!rebound) {
+          throw recoveryError(
+            "RECOVERY_JOURNAL_READBACK_FAILED",
+            "恢复日志更新路径后无法读回校验。",
+          );
+        }
+        return publicSummary(rebound.envelope, rebound.journalSha256);
+      });
+    },
+
     async remove(input) {
       const locator = locatorFrom(input);
       return serializeOperation(locator, async () => {
@@ -359,7 +495,23 @@ export function createRecoveryJournalStore({ rootPath, now = () => new Date() } 
             "删除恢复日志必须提供最新校验凭证。",
           );
         }
-        if (verified.journalSha256 !== expectedJournalSha256) {
+        const expectedRecoveryHtmlSha256 = assertOptionalSha256(
+          input.recoveryHtmlSha256,
+          "recoveryHtmlSha256",
+        );
+        if (!expectedRecoveryHtmlSha256) {
+          throw recoveryError(
+            "RECOVERY_JOURNAL_CAS_REQUIRED",
+            "删除恢复日志必须提供 HTML 校验凭证。",
+          );
+        }
+        if (
+          verified.journalSha256 !== expectedJournalSha256
+          || verified.envelope.workingCopyId !== assertWorkingCopyId(input.workingCopyId)
+          || verified.envelope.revision !== assertRevision(input.revision)
+          || verified.envelope.recoveryHtmlSha256 !== expectedRecoveryHtmlSha256
+          || verified.envelope.sourcePath !== assertSourcePath(input.sourcePath)
+        ) {
           throw recoveryError(
             "RECOVERY_JOURNAL_CAS_MISMATCH",
             "恢复日志凭证已过期，未删除较新的恢复副本。",
@@ -375,10 +527,45 @@ export function createRecoveryJournalStore({ rootPath, now = () => new Date() } 
       await ensureOwnedDirectory(root);
       const entries = [];
       let invalidCount = 0;
-      for (const name of await readdir(root)) {
+      let scannedCount = 0;
+      let totalBytes = 0;
+      let truncated = false;
+      const startedAt = Date.now();
+      const names = (await readdir(root))
+        .filter((name) => /^[a-f0-9]{64}\.json$/u.test(name))
+        .sort();
+      for (const name of names) {
         if (!/^[a-f0-9]{64}\.json$/u.test(name)) continue;
+        if (
+          scannedCount >= normalizedLimits.maxEntryCount
+          || Date.now() - startedAt >= normalizedLimits.scanTimeMs
+        ) {
+          truncated = true;
+          break;
+        }
+        scannedCount += 1;
         try {
-          const bytes = await readFile(path.join(root, name));
+          const filePath = path.join(root, name);
+          const facts = await lstat(filePath);
+          if (!facts.isFile() || facts.isSymbolicLink()) {
+            throw recoveryError(
+              "RECOVERY_JOURNAL_ENTRY_UNSAFE",
+              "恢复日志文件不安全。",
+            );
+          }
+          if (
+            facts.size > normalizedLimits.maxEntryBytes
+            || totalBytes + facts.size > normalizedLimits.maxTotalBytes
+          ) {
+            invalidCount += 1;
+            if (totalBytes + facts.size > normalizedLimits.maxTotalBytes) {
+              truncated = true;
+              break;
+            }
+            continue;
+          }
+          totalBytes += facts.size;
+          const bytes = await readFile(filePath);
           const envelope = normalizeEnvelope(JSON.parse(bytes.toString("utf8")));
           if (`${locatorKey(envelope)}.json` !== name) {
             throw recoveryError(
@@ -392,7 +579,13 @@ export function createRecoveryJournalStore({ rootPath, now = () => new Date() } 
         }
       }
       entries.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
-      return Object.freeze({ entries: Object.freeze(entries), invalidCount });
+      return Object.freeze({
+        entries: Object.freeze(entries),
+        invalidCount,
+        scannedCount,
+        totalBytes,
+        truncated,
+      });
     },
   });
 }

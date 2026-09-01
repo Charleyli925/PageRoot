@@ -619,7 +619,8 @@ export class VersionWorkflow {
       }
       this.#documentSession.publishAuthority({
         html: content,
-        sourceSha256: previous.document.sourceSha256,
+        persistedSourceSha256: previous.document.persistedSourceSha256,
+        workingHtmlSha256: sha256,
       });
       this.#versionSession.enterHistory(String(version.id));
       this.#canvasPort.invalidateRenderAcks();
@@ -1391,7 +1392,8 @@ export class VersionWorkflow {
     if (!this.#isNavigationCurrent(operation)) return false;
     this.#documentSession.publishAuthority({
       html: previous.document.html,
-      sourceSha256: previous.document.sourceSha256,
+      persistedSourceSha256: previous.document.persistedSourceSha256,
+      workingHtmlSha256: previous.document.workingHtmlSha256,
       editRevision: previous.document.editRevision,
       lastPersistedRevision: previous.document.lastPersistedRevision,
       persistState: previous.document.persistState,

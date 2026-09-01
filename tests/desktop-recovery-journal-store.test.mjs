@@ -8,6 +8,18 @@ import { createRecoveryJournalStore } from "../desktop/recovery-journal-store.mj
 
 const HASH_A = `sha256:${"a".repeat(64)}`;
 
+function removalReceipt(receipt) {
+  return {
+    projectId: receipt.projectId,
+    documentId: receipt.documentId,
+    sourcePath: receipt.sourcePath,
+    workingCopyId: receipt.workingCopyId,
+    revision: receipt.revision,
+    recoveryHtmlSha256: receipt.recoveryHtmlSha256,
+    expectedJournalSha256: receipt.journalSha256,
+  };
+}
+
 function checkpoint(overrides = {}) {
   return {
     projectId: "project_0123456789abcdef",
@@ -77,8 +89,7 @@ test("recovery journal refuses stale CAS commit and stale removal", async (t) =>
   );
   await assert.rejects(
     store.remove({
-      projectId: first.projectId,
-      documentId: first.documentId,
+      ...removalReceipt(first),
       expectedJournalSha256: first.journalSha256,
     }),
     (error) => error.code === "RECOVERY_JOURNAL_CAS_MISMATCH",
@@ -95,6 +106,61 @@ test("recovery journal refuses stale CAS commit and stale removal", async (t) =>
     store.remove({ projectId: second.projectId, documentId: second.documentId }),
     (error) => error.code === "RECOVERY_JOURNAL_CAS_REQUIRED",
   );
+});
+
+test("recovery journal upgrades a previously unknown Working Copy only by CAS", async (t) => {
+  const { store } = await fixture(t);
+  const unbound = await store.commit(checkpoint({ workingCopyId: "" }));
+  await assert.rejects(
+    store.commit(checkpoint({ workingCopyId: "working_bound" })),
+    (error) => error.code === "RECOVERY_JOURNAL_CAS_REQUIRED",
+  );
+  const bound = await store.commit(checkpoint({
+    workingCopyId: "working_bound",
+    expectedJournalSha256: unbound.journalSha256,
+  }));
+  assert.equal(bound.workingCopyId, "working_bound");
+  await assert.rejects(
+    store.commit(checkpoint({
+      revision: 8,
+      workingCopyId: "working_other",
+      html: "<!doctype html><html><body>other working copy</body></html>",
+      expectedJournalSha256: bound.journalSha256,
+    })),
+    (error) => error.code === "RECOVERY_JOURNAL_IDENTITY_MISMATCH",
+  );
+});
+
+test("recovery journal rebases a moved source only with the full receipt identity", async (t) => {
+  const { store } = await fixture(t);
+  const first = await store.commit(checkpoint());
+  const moved = await store.rebase({
+    projectId: first.projectId,
+    documentId: first.documentId,
+    previousSourcePath: first.sourcePath,
+    sourcePath: "/tmp/moved/report.html",
+    workingCopyId: first.workingCopyId,
+    revision: first.revision,
+    recoveryHtmlSha256: first.recoveryHtmlSha256,
+    expectedJournalSha256: first.journalSha256,
+  });
+  assert.equal(moved.sourcePath, "/tmp/moved/report.html");
+  assert.notEqual(moved.journalSha256, first.journalSha256);
+  assert.equal((await store.readVerified(first)).html, checkpoint().html);
+  await assert.rejects(
+    store.rebase({
+      projectId: moved.projectId,
+      documentId: moved.documentId,
+      previousSourcePath: moved.sourcePath,
+      sourcePath: "/tmp/other/report.html",
+      workingCopyId: "different-working-copy",
+      revision: moved.revision,
+      recoveryHtmlSha256: moved.recoveryHtmlSha256,
+      expectedJournalSha256: moved.journalSha256,
+    }),
+    (error) => error.code === "RECOVERY_JOURNAL_CAS_MISMATCH",
+  );
+  assert.deepEqual(await store.remove(removalReceipt(moved)), { removed: true });
 });
 
 test("one corrupt recovery entry does not hide other recoverable documents", async (t) => {
@@ -141,4 +207,24 @@ test("recovery journal serializes one document without blocking another", async 
   const listed = await store.listRecoverable();
   assert.equal(listed.entries.length, 2);
   assert.notEqual(left.journalSha256, right.journalSha256);
+});
+
+test("recovery journal scan applies entry and total byte bounds", async (t) => {
+  const parent = await mkdtemp(path.join(os.tmpdir(), "pageroot-recovery-bounded-"));
+  t.after(async () => {
+    const { rm } = await import("node:fs/promises");
+    await rm(parent, { recursive: true, force: true });
+  });
+  const rootPath = path.join(parent, "journals");
+  const store = createRecoveryJournalStore({
+    rootPath,
+    maxEntryCount: 1,
+    maxTotalBytes: 10_000,
+  });
+  await store.commit(checkpoint({ documentId: "doc_1111111111111111" }));
+  await store.commit(checkpoint({ documentId: "doc_2222222222222222" }));
+  const listed = await store.listRecoverable();
+  assert.equal(listed.entries.length, 1);
+  assert.equal(listed.scannedCount, 1);
+  assert.equal(listed.truncated, true);
 });

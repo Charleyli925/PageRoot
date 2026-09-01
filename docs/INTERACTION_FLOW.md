@@ -1108,7 +1108,10 @@ A 项目 processing 时切换 B 项目：
 - 草稿会执行一次最终校验；若内容、删除记录和 edit event 的权威指纹未变化，该校验是 no-op，不发起 POST，也不增加 revision。
 - 草稿 revision 冲突或 POST 结果未知时自动读取权威草稿、重放未确认 operation 并在有新前提后有限重试。只有无法确定性合并的真实语义冲突才阻止离开。
 - 若 `editRevision > lastPersistedRevision` 却意外缺少 queued write，关闭或切换边界必须从当前内存 HTML、revision 与待审计事件重建恢复写入，不能永久停在“未保存”。
-- 源文件写回失败不等于用户内容没有受保护。Main Process 以每文档原子恢复日志保存完整 HTML，并读回校验 project/document/context、revision 和 HTML Hash。只有当前 revision 的证据可允许切换标签、关闭文档或退出；`failed/conflict` 状态继续显示，不伪装原文件已更新，也不授权覆盖外部冲突。
+- 源文件写回失败不等于用户内容没有受保护。Main Process 以每文档原子恢复日志保存完整 HTML，并读回校验 project/document/Working Copy、revision 和 HTML Hash。只有 `workingHtmlSha256 = canvasRenderedSha256 = protectionHtmlSha256` 的当前 revision 证据可允许切换标签、关闭文档或退出；`persistedSourceSha256` 仍是磁盘最后确认的 Hash，`failed/conflict` 状态继续显示，不伪装原文件已更新，也不授权覆盖外部冲突。
+- 恢复日志的核心身份不以路径为准；受管 Working Copy 改名或移动时使用旧 receipt 和完整文档/revision/HTML Hash 做 CAS rebase。连续编辑最多保留一个 in-flight 和一个 latest pending 日志；切换或关闭只等待最新 revision。源文件成功写回后使用完整 receipt CAS 删除并确认日志退役。
+- Main 日志与 local recovery 同 revision、同 HTML Hash 时，Main 验证的 HTML 字节是内容权威，local 只补充 recovery identity、change events 和 history metadata。Main-only 记录在源 Hash 与文档身份一致时直接恢复为待写入，不因缺少 local metadata 伪造 conflict。
+- 恢复日志目录初始化或扫描失败时应用继续创建主窗口，只降级恢复凭证能力并保留导出 HTML 出口。扫描按文件数、单文件字节、总字节和时间设上限；损坏记录单独隔离，Start 只展示通过校验的摘要。
 - 关闭复核以冻结 HTML 的真实字节 Hash 和 `lastPersistedRevision >= cutoffRevision` 为准，不要求用户读取顶栏状态，也不要求 Canvas 临时 Hash 或 revision 投影逐字相等。内部投影落后时静默修正；只有本地证据不足时才限时回读源文件，字节一致就继续关闭。权威回读确认外部内容不同或完整性失败时，返回应用内持久恢复入口；一次瞬时回读失败只保持页面并在下次关闭继续核对。
 - Renderer 已知的关闭阻断由对应 Canvas、横幅或流程面板解释。Electron 在一次短暂失败后先对精确 request 发送 `close-aborted`、释放 renderer/navigation freeze，最多 400ms 后自动重试一次；仍失败就恢复可操作窗口，不再循环重试相同前置条件，也不重复弹 macOS 警告框。
 - 旧项目的登记或 autosave 失败回调只能写入旧项目恢复记录，不能占用当前项目的 pending write。

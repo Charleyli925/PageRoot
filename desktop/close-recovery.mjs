@@ -162,6 +162,8 @@ export function shouldRecoverEditorAfterCloseAbort({
   approvedRequestId,
   abortedRequestId,
   imposedEditorFreeze,
+  projectIdentityMatches,
+  protectionVerified,
   projectLocked,
   projectHydrating,
   projectLoadError,
@@ -176,21 +178,26 @@ export function shouldRecoverEditorAfterCloseAbort({
   editRevision,
   lastPersistedRevision,
 }) {
-  return Boolean(
+  const sharedBoundaryIsSafe = Boolean(
     imposedEditorFreeze
     && typeof approvedRequestId === "string"
     && approvedRequestId === abortedRequestId
+    && projectIdentityMatches
     && !projectLocked
     && !projectHydrating
     && !projectLoadError
     && !viewTransitioning
     && !submissionPending
-    && persistState === "idle"
-    && !pendingWrite
-    && !flushInProgress
     && !draftPending
     && !draftFlushInProgress
     && !draftPersistError
+  );
+  if (!sharedBoundaryIsSafe) return false;
+  if (protectionVerified) return true;
+  return Boolean(
+    persistState === "idle"
+    && !pendingWrite
+    && !flushInProgress
     && Number.isSafeInteger(editRevision)
     && Number.isSafeInteger(lastPersistedRevision)
     && editRevision <= lastPersistedRevision

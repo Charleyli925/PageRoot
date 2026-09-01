@@ -54,6 +54,21 @@ function stale(identity) {
   });
 }
 
+function matchesCloseProjectIdentity(projectSession, context) {
+  if (!context || typeof context !== "object") return false;
+  const liveContext = projectSession.context;
+  if (!liveContext) return false;
+  const baseMatches = projectSession.matches({
+    epoch: context.epoch,
+    projectId: context.projectId,
+    documentId: context.documentId,
+    sourcePath: context.sourcePath,
+  });
+  if (!baseMatches) return false;
+  return String(liveContext.workingCopyId || "")
+    === String(context.workingCopyId || "");
+}
+
 function copyOpenRequest(value) {
   if (!value || typeof value.requestId !== "string" || !value.requestId) return null;
   return Object.freeze({
@@ -219,11 +234,22 @@ function documentIsStable(session) {
   );
 }
 
-function documentHasProtectionEvidence(workflow, input) {
-  if (typeof workflow?.hasVerifiedProtectionEvidence === "function") {
-    return workflow.hasVerifiedProtectionEvidence(input) === true;
+function documentProtectionEvidence(workflow, input) {
+  if (typeof workflow?.verifiedProtectionEvidence === "function") {
+    return workflow.verifiedProtectionEvidence(input) || null;
   }
-  return workflow?.hasVerifiedRecoveryCheckpoint?.(input) === true;
+  if (typeof workflow?.hasVerifiedProtectionEvidence === "function") {
+    return workflow.hasVerifiedProtectionEvidence(input) === true
+      ? Object.freeze({ kind: "legacyVerified", htmlSha256: null })
+      : null;
+  }
+  return workflow?.hasVerifiedRecoveryCheckpoint?.(input) === true
+    ? Object.freeze({ kind: "legacyVerified", htmlSha256: null })
+    : null;
+}
+
+function documentHasProtectionEvidence(workflow, input) {
+  return Boolean(documentProtectionEvidence(workflow, input));
 }
 
 function projectErrorCode(cause, fallback) {
@@ -290,6 +316,7 @@ export class ProjectWorkflow {
   #closeLifecycle = {
     preparingRequestId: null,
     frozenRequestId: null,
+    frozenContext: null,
     abortedRequestIds: new Set(),
   };
 
@@ -649,9 +676,10 @@ export class ProjectWorkflow {
         editRevision: document.editRevision,
         lastPersistedRevision: document.lastPersistedRevision,
         sourcePath: this.#projectSession.sourcePath,
-        sourceSha256: document.sourceSha256,
+        persistedSourceSha256: document.persistedSourceSha256,
+        workingHtmlSha256: document.workingHtmlSha256,
         canvasStatus: document.canvasAuthority?.status,
-        renderedSha256: document.canvasAuthority?.renderedSha256,
+        canvasRenderedSha256: document.canvasAuthority?.renderedSha256,
       });
       if (entry.action === "continue" && validationLease.action === "reuse-verified") {
         this.#emit({
@@ -688,10 +716,11 @@ export class ProjectWorkflow {
       if (!drained.ok) {
         return blocked("PROJECT_SWITCH_DRAIN_BLOCKED", drained.reason);
       }
-      const recoveryProtected = documentHasProtectionEvidence(this.#documentWorkflow, {
+      const protectionEvidence = documentProtectionEvidence(this.#documentWorkflow, {
         context: this.#projectSession.context,
         revision: cutoffRevision,
       });
+      const recoveryProtected = Boolean(protectionEvidence);
       const afterDrain = planProjectSwitchAfterDrain({
         editRevision: this.#documentSession.editRevision,
         cutoffRevision,
@@ -727,8 +756,10 @@ export class ProjectWorkflow {
           sourcePath: this.#projectSession.sourcePath,
           lastPersistedRevision: this.#documentSession.lastPersistedRevision,
           cutoffRevision,
-          committedSourceSha256: committed?.sourceSha256,
-          documentSourceSha256: this.#documentSession.sourceSha256,
+          persistedSourceSha256: this.#documentSession.persistedSourceSha256,
+          workingHtmlSha256: this.#documentSession.workingHtmlSha256,
+          canvasRenderedSha256: committed?.canvasRenderedSha256 || committed?.sourceSha256,
+          protectionHtmlSha256: protectionEvidence?.htmlSha256 || "",
           recoveryProtected,
         });
         if (afterCanvas.kind === "reject") {
@@ -1151,8 +1182,11 @@ export class ProjectWorkflow {
         }
         imposedEditorFreeze = true;
         frozenHtml = frozen.html;
-        frozenSourceSha256 = frozen.sourceSha256;
+        frozenSourceSha256 = frozen.canvasRenderedSha256 || frozen.sourceSha256;
         lifecycle.frozenRequestId = closeRequestId;
+        lifecycle.frozenContext = this.#projectSession.context
+          ? Object.freeze({ ...this.#projectSession.context })
+          : null;
         if (
           frozen.html !== this.#documentSession.html
           && (Boolean(this.#projectSession.sourcePath) || Boolean(frozen.pendingMutation))
@@ -1206,6 +1240,16 @@ export class ProjectWorkflow {
       if (abortPlan.kind === "reject") {
         return inAppBlock(abortPlan.reason);
       }
+      if (
+        imposedEditorFreeze
+        && lifecycle.frozenContext
+        && !matchesCloseProjectIdentity(this.#projectSession, lifecycle.frozenContext)
+      ) {
+        return inAppBlock("关闭核对期间当前项目身份已变化。", false);
+      }
+      if (imposedEditorFreeze && this.#projectSession.context) {
+        lifecycle.frozenContext = Object.freeze({ ...this.#projectSession.context });
+      }
       ready = true;
       this.#setClose("ready", closeRequestId);
       return { ready: true };
@@ -1221,6 +1265,7 @@ export class ProjectWorkflow {
       if (!ready && imposedEditorFreeze && !this.#runSession.activeLocked) {
         if (lifecycle.frozenRequestId === closeRequestId) {
           lifecycle.frozenRequestId = null;
+          lifecycle.frozenContext = null;
         }
         this.#canvasPort.unlock?.();
       }
@@ -1245,11 +1290,23 @@ export class ProjectWorkflow {
       lifecycle.abortedRequestIds.delete(closeRequestId);
       return;
     }
+    const projectIdentityMatches = Boolean(
+      lifecycle.frozenContext
+      && matchesCloseProjectIdentity(this.#projectSession, lifecycle.frozenContext)
+    );
+    const protectionVerified = projectIdentityMatches && Boolean(
+      documentProtectionEvidence(this.#documentWorkflow, {
+        context: this.#projectSession.context,
+        revision: this.#documentSession.editRevision,
+      })
+    );
     const draftState = this.#draftSession.inspect();
     const mayRecover = this.#policies.shouldRecoverAfterCloseAbort({
       approvedRequestId: lifecycle.frozenRequestId,
       abortedRequestId: closeRequestId,
       imposedEditorFreeze: true,
+      projectIdentityMatches,
+      protectionVerified,
       projectLocked: this.#runSession.activeLocked,
       projectHydrating: this.projectHydrating,
       projectLoadError: Boolean(this.projectLoadError),
@@ -1266,6 +1323,7 @@ export class ProjectWorkflow {
     });
     if (!mayRecover) return;
     lifecycle.frozenRequestId = null;
+    lifecycle.frozenContext = null;
     lifecycle.abortedRequestIds.delete(closeRequestId);
     this.#canvasPort.unlock?.();
     this.#setClose("idle", null);
@@ -1641,6 +1699,10 @@ export class ProjectWorkflow {
       if (!transitioned || !this.#projectSession.context) {
         throw new Error("文件已重命名，但当前项目身份已经变化。");
       }
+      await this.#documentWorkflow.rebaseRecoveryJournal?.({
+        previousContext: context,
+        context: transitioned,
+      });
 
       const [recents, hydrated] = await Promise.all([
         this.refreshRecents(),
@@ -1756,6 +1818,8 @@ export class ProjectWorkflow {
     openTarget = null,
   }) {
     const canonicalSourcePath = String(nextSourcePath || "");
+    const documentAuthority = this.#documentWorkflow.captureProjectTransitionAuthority?.();
+    const pendingWrite = this.#documentSession.pendingWrite;
     const nextOpenTarget = rebasedManagedOpenTarget(
       openTarget,
       canonicalSourcePath,
@@ -1773,16 +1837,22 @@ export class ProjectWorkflow {
       documentId: context.documentId,
       ...(nextOpenTarget ? { openTarget: nextOpenTarget } : {}),
     });
-    this.#documentSession.publishAuthority({
-      html: this.#documentSession.html,
-      sourceSha256: expectedSha256,
-      pendingWrite: null,
-    });
-    this.#documentWorkflow.clearRecovery({
-      documentId: context.documentId,
-      sourcePath: previousSourcePath,
-    });
+    if (pendingWrite && transitioned) {
+      this.#documentSession.setPendingWrite({
+        ...pendingWrite,
+        ...transitioned,
+        sourcePath: canonicalSourcePath,
+        expectedSourceSha256: expectedSha256,
+      });
+    }
     this.#documentWorkflow.resetForProjectTransition();
+    if (documentAuthority && transitioned) {
+      this.#documentWorkflow.restoreProjectTransitionAuthority?.({
+        authority: documentAuthority,
+        context: transitioned,
+        sourceSha256: expectedSha256,
+      });
+    }
     this.#commentWorkflow.resetForProjectTransition();
     this.#projectRulesWorkflow.resetForProjectTransition();
     return transitioned;
@@ -1989,6 +2059,10 @@ export class ProjectWorkflow {
           if (!transitioned || !this.#projectSession.context) {
             throw new Error("文件位置已恢复，但当前项目身份已经变化。");
           }
+          await this.#documentWorkflow.rebaseRecoveryJournal?.({
+            previousContext: liveContext,
+            context: transitioned,
+          });
           const recents = await this.refreshRecents();
           if (recents.status !== "succeeded") {
             return unknown(operationId, "文件位置已经恢复，但项目状态还没有完成刷新。");
@@ -3813,7 +3887,8 @@ export class ProjectWorkflow {
     this.#documentWorkflow.resetForProjectTransition();
     this.#documentSession.publishAuthority({
       html: previous.document.html,
-      sourceSha256: previous.document.sourceSha256,
+      persistedSourceSha256: previous.document.persistedSourceSha256,
+      workingHtmlSha256: previous.document.workingHtmlSha256,
       editRevision: previous.document.editRevision,
       lastPersistedRevision: previous.document.lastPersistedRevision,
       persistState: previous.document.persistState,

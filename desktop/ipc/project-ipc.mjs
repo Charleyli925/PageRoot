@@ -87,6 +87,10 @@ export function registerProjectIpc({
     trustedProject(handlers.readRecoveryJournal, "recovery_journal_read"),
   );
   ipcMain.handle(
+    PROJECT_CHANNELS.rebaseRecoveryJournal,
+    trustedProject(handlers.rebaseRecoveryJournal, "recovery_journal_rebase"),
+  );
+  ipcMain.handle(
     PROJECT_CHANNELS.removeRecoveryJournal,
     trustedProject(handlers.removeRecoveryJournal, "recovery_journal_remove"),
   );

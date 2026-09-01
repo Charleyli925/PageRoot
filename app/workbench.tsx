@@ -352,6 +352,8 @@ const INITIAL_VERSION_SNAPSHOT: VersionSessionSnapshot<Version> = {
 const INITIAL_DOCUMENT_SNAPSHOT: DocumentSessionSnapshot = {
   html: DEFAULT_PROJECT_HTML,
   sourceSha256: null,
+  persistedSourceSha256: null,
+  workingHtmlSha256: null,
   canvasGeneration: 0,
   canvasAuthority: {
     status: "idle",

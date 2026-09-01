@@ -147,6 +147,21 @@ test("usage telemetry starts only after the renderer is ready to show", async ()
   assert.match(mainProcess, /telemetry-failed/u);
 });
 
+test("a recovery journal initialization failure degrades before the main window is created", async () => {
+  const mainProcess = await readFile(sourceUrl("../desktop/main.mjs"), "utf8");
+  const coldStart = mainProcess.slice(mainProcess.indexOf("app.whenReady().then"));
+  const recoveryInitialization = coldStart.indexOf("await recoveryJournalStore.initialize()");
+  const degradedCapability = coldStart.indexOf("recoveryJournalAvailable = false", recoveryInitialization);
+  const createWindow = coldStart.indexOf("await createWindow()", recoveryInitialization);
+  assert.ok(recoveryInitialization >= 0);
+  assert.ok(degradedCapability > recoveryInitialization);
+  assert.ok(createWindow > degradedCapability);
+  assert.match(
+    coldStart.slice(recoveryInitialization, createWindow),
+    /catch \(error\)[\s\S]*?recovery_journal_degraded/u,
+  );
+});
+
 test("final-exit IPC unregister and close-abort registration include workbench tabs", async () => {
   const [mainProcess, windowIpc, projectIpc] = await Promise.all([
     readFile(sourceUrl("../desktop/main.mjs"), "utf8"),

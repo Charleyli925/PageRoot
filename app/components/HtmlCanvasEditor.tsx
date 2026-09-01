@@ -5011,10 +5011,12 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   const checkpointPendingEdit = useCallback((): HtmlCanvasCommitResult => {
     const committed = checkpointNativeEdit("manual");
     const sourceIndex = sourceIndexRef.current;
+    const canvasRenderedSha256 = sourceIndex?.sourceSha256 || "";
     return {
       ok: committed.ok,
       html: frameSourceHtmlRef.current,
-      sourceSha256: sourceIndex?.sourceSha256 || "",
+      canvasRenderedSha256,
+      sourceSha256: canvasRenderedSha256,
       pendingMutation: committed.mutation,
       ...(committed.reason ? { reason: committed.reason } : {}),
     };
@@ -5034,10 +5036,12 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     });
     const sourceIndex = sourceIndexRef.current;
     if (!committed.ok) {
+      const canvasRenderedSha256 = sourceIndex?.sourceSha256 || "";
       return {
         ok: false,
         html: frameSourceHtmlRef.current,
-        sourceSha256: sourceIndex?.sourceSha256 || "",
+        canvasRenderedSha256,
+        sourceSha256: canvasRenderedSha256,
         pendingMutation: null,
         ...(committed.reason ? { reason: committed.reason } : {}),
       };
@@ -5071,6 +5075,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       return {
         ok: true,
         html: frameSourceHtmlRef.current,
+        canvasRenderedSha256: sourceIndexRef.current?.sourceSha256 || "",
         sourceSha256: sourceIndexRef.current?.sourceSha256 || "",
         pendingMutation: committed.mutation,
       };
@@ -5123,6 +5128,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     return {
       ok: true,
       html: frameSourceHtmlRef.current,
+      canvasRenderedSha256: sourceIndexRef.current?.sourceSha256 || "",
       sourceSha256: sourceIndexRef.current?.sourceSha256 || "",
       pendingMutation: committed.mutation,
     };
@@ -5314,6 +5320,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     return {
       ok: true,
       html: frozenHtml,
+      canvasRenderedSha256: committed.canvasRenderedSha256,
       sourceSha256: committed.sourceSha256,
       pendingMutation: committed.pendingMutation,
     };

@@ -3,6 +3,7 @@ import type {
   DesktopProjectsApi,
   DocumentRecoveryJournalCommit,
   DocumentRecoveryJournalLocator,
+  DocumentRecoveryJournalRebase,
 } from "./types";
 
 export function createDesktopRecoveryJournalPort(
@@ -18,6 +19,11 @@ export function createDesktopRecoveryJournalPort(
     readVerified: (input: Readonly<Record<string, unknown>>) => (
       api.readRecoveryJournal!(input as DocumentRecoveryJournalLocator)
     ),
+    ...(api.rebaseRecoveryJournal ? {
+      rebase: (input: Readonly<Record<string, unknown>>) => (
+        api.rebaseRecoveryJournal!(input as DocumentRecoveryJournalRebase)
+      ),
+    } : {}),
     remove: (input: Readonly<Record<string, unknown>>) => (
       api.removeRecoveryJournal!(input as DocumentRecoveryJournalLocator)
     ),

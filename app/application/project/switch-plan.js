@@ -60,8 +60,11 @@ export function planProjectSwitchValidationLease({
   lastPersistedRevision = 0,
   sourcePath = "",
   sourceSha256 = "",
+  persistedSourceSha256 = sourceSha256,
+  workingHtmlSha256 = persistedSourceSha256,
   canvasStatus = "idle",
   renderedSha256 = "",
+  canvasRenderedSha256 = renderedSha256,
 } = {}) {
   const reusable = obligationsResolved
     && !hasPendingNativeEdit
@@ -71,9 +74,11 @@ export function planProjectSwitchValidationLease({
     && !flushInFlight
     && Number(editRevision) === Number(lastPersistedRevision)
     && Boolean(sourcePath)
-    && Boolean(sourceSha256)
+    && Boolean(persistedSourceSha256)
+    && Boolean(workingHtmlSha256)
     && canvasStatus === "verified"
-    && String(renderedSha256) === String(sourceSha256);
+    && String(canvasRenderedSha256) === String(workingHtmlSha256)
+    && String(workingHtmlSha256) === String(persistedSourceSha256);
   return Object.freeze({
     kind: "ready",
     action: reusable ? "reuse-verified" : "full-check",
@@ -114,6 +119,10 @@ export function planProjectSwitchAfterCanvas({
   cutoffRevision = 0,
   committedSourceSha256 = "",
   documentSourceSha256 = "",
+  persistedSourceSha256 = documentSourceSha256,
+  workingHtmlSha256 = persistedSourceSha256,
+  canvasRenderedSha256 = committedSourceSha256,
+  protectionHtmlSha256 = "",
   recoveryProtected = false,
 } = {}) {
   if (!needsCanvasCommit) {
@@ -133,15 +142,24 @@ export function planProjectSwitchAfterCanvas({
       reason: String(finalFenceReason || "当前画布尚未完成最终安全收口。"),
     });
   }
-  if (
-    !recoveryProtected
-    &&
-    sourcePath
-    && (
-      Number(lastPersistedRevision) !== Number(cutoffRevision)
-      || String(documentSourceSha256 || "") !== String(committedSourceSha256 || "")
-    )
-  ) {
+  const workingHash = String(workingHtmlSha256 || "");
+  const canvasHash = String(canvasRenderedSha256 || "");
+  if (recoveryProtected && (
+    !workingHash
+    || canvasHash !== workingHash
+    || String(protectionHtmlSha256 || "") !== workingHash
+  )) {
+    return Object.freeze({
+      kind: "reject",
+      code: "PROJECT_SWITCH_PROTECTION_MISMATCH",
+      reason: "当前 HTML、画布与恢复保护凭证不一致。",
+    });
+  }
+  if (!recoveryProtected && sourcePath && (
+    Number(lastPersistedRevision) !== Number(cutoffRevision)
+    || String(persistedSourceSha256 || "") !== workingHash
+    || canvasHash !== workingHash
+  )) {
     return Object.freeze({
       kind: "reject",
       code: "PROJECT_SWITCH_SOURCE_MISMATCH",

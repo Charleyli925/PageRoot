@@ -196,6 +196,12 @@ test("preload exposes a narrow verified recovery journal API", async () => {
     projectId: payload.projectId,
     documentId: payload.documentId,
   });
+  await api.rebaseRecoveryJournal({
+    projectId: payload.projectId,
+    documentId: payload.documentId,
+    previousSourcePath: payload.sourcePath,
+    sourcePath: "/tmp/moved-report.html",
+  });
   await api.removeRecoveryJournal({
     projectId: payload.projectId,
     documentId: payload.documentId,
@@ -207,6 +213,12 @@ test("preload exposes a narrow verified recovery journal API", async () => {
     ["html-projects:read-recovery-journal", {
       projectId: payload.projectId,
       documentId: payload.documentId,
+    }],
+    ["html-projects:rebase-recovery-journal", {
+      projectId: payload.projectId,
+      documentId: payload.documentId,
+      previousSourcePath: payload.sourcePath,
+      sourcePath: "/tmp/moved-report.html",
     }],
     ["html-projects:remove-recovery-journal", {
       projectId: payload.projectId,

@@ -2590,6 +2590,20 @@ async function route(request, response) {
     return;
   }
   if (request.method === "POST" && url.pathname === "/autosave") {
+    if (
+      process.env.PAGEROOT_E2E === "1"
+      && process.env.PAGEROOT_E2E_AUTOSAVE_FAILURE === "1"
+    ) {
+      await readBody(request);
+      sendJson(response, 503, {
+        ok: false,
+        error: {
+          code: "E2E_AUTOSAVE_FAILED",
+          message: "E2E injected a permanent autosave failure.",
+        },
+      });
+      return;
+    }
     const body = await readBody(request);
     sendJson(response, 200, await saveAutosave(body));
     return;

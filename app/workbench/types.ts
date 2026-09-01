@@ -172,12 +172,17 @@ export type DesktopProjectsApi = {
   readRecoveryJournal?: (payload: DocumentRecoveryJournalLocator & {
     expectedJournalSha256?: string | null;
   }) => Promise<(DocumentRecoveryJournalSummary & { html: string }) | null>;
+  rebaseRecoveryJournal?: (payload: DocumentRecoveryJournalRebase) => Promise<DocumentRecoveryJournalSummary>;
   removeRecoveryJournal?: (payload: DocumentRecoveryJournalLocator & {
     expectedJournalSha256?: string | null;
   }) => Promise<{ removed: boolean }>;
   listRecoveryJournals?: () => Promise<{
     entries: DocumentRecoveryJournalSummary[];
     invalidCount: number;
+    scannedCount?: number;
+    totalBytes?: number;
+    truncated?: boolean;
+    unavailable?: boolean;
   }>;
   readHtml?: (sourcePath: string) => Promise<HtmlProject>;
   listRecentProjects: () => Promise<RecentProject[]>;
@@ -227,8 +232,17 @@ export type DocumentRecoveryJournalCommit = DocumentRecoveryJournalLocator & {
   html: string;
 };
 
+export type DocumentRecoveryJournalRebase = DocumentRecoveryJournalLocator & {
+  previousSourcePath: string;
+  sourcePath: string;
+  workingCopyId: string;
+  revision: number;
+  recoveryHtmlSha256: string;
+  expectedJournalSha256: string;
+};
+
 export type DocumentRecoveryJournalSummary = DocumentRecoveryJournalLocator & {
-  schemaVersion: "1.0.0";
+  schemaVersion: "1.0.0" | "2.0.0";
   sourcePath: string;
   workingCopyId: string;
   expectedSourceSha256: string | null;

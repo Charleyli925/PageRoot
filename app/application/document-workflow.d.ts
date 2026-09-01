@@ -26,6 +26,7 @@ export type DocumentWorkflowRecoveryStore = Readonly<{
 export type DocumentWorkflowRecoveryJournal = Readonly<{
   commit(input: Readonly<Record<string, unknown>>): Promise<Readonly<Record<string, unknown>>>;
   readVerified(input: Readonly<Record<string, unknown>>): Promise<Readonly<Record<string, unknown>> | null>;
+  rebase?(input: Readonly<Record<string, unknown>>): Promise<Readonly<Record<string, unknown>>>;
   remove(input: Readonly<Record<string, unknown>>): Promise<Readonly<{ removed: boolean }>>;
 }>;
 
@@ -93,6 +94,16 @@ export class DocumentWorkflow {
     context?: ProjectContext | null;
     revision?: number;
   }): boolean;
+  verifiedProtectionEvidence(input?: {
+    context?: ProjectContext | null;
+    revision?: number;
+  }): Readonly<{
+    kind: "recoveryVerified" | "exportVerified";
+    revision: number;
+    htmlSha256: string;
+    journalSha256?: string;
+    path?: string;
+  }> | null;
   recordVerifiedExport(input: {
     context?: ProjectContext | null;
     html: string;
@@ -110,6 +121,10 @@ export class DocumentWorkflow {
   }): boolean;
   resetForProjectTransition(options?: { clearRecovery?: boolean; context?: Partial<ProjectContext> }): void;
   clearRecovery(context?: Partial<ProjectContext>): void;
+  rebaseRecoveryJournal(input: {
+    previousContext: Partial<ProjectContext>;
+    context: Partial<ProjectContext>;
+  }): Promise<DocumentWorkflowOutcome<Record<string, unknown>>>;
   clearAutosaveTimer(): void;
   clearAudit(): void;
   activateSourceHistory(input: {

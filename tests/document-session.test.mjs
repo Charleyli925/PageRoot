@@ -306,7 +306,16 @@ test("beginEdit pending the current canvas generation without rebuilding it", ()
     generation: 1,
     renderedSha256: sha256(edited),
   }), false);
-  session.setSourceSha256(sha256(edited));
+  assert.equal(session.persistedSourceSha256, digest);
+  assert.equal(session.confirmWorkingHtml({
+    revision: 1,
+    htmlSha256: sha256(edited),
+  }), true);
+  assert.equal(session.confirmCanvas({
+    generation: 1,
+    renderedSha256: sha256("different"),
+    workingHtmlSha256: sha256("different"),
+  }), false);
   assert.equal(session.confirmCanvas({
     generation: 1,
     renderedSha256: sha256(edited),

@@ -22,10 +22,12 @@ PageRoot edits local files and renders user-controlled HTML, so its default poli
   precondition, no-overwrite destination check and a crash-recoverable
   operation journal
 - Main-owned document recovery journals under `userData` with fixed versioned
-  storage, strict project/document/context/revision/Hash validation, temporary
+  storage, strict project/document/Working-Copy/revision/Hash validation, temporary
   write + fsync + atomic rename + directory fsync, read-back verification and
-  CAS receipts for replacement/deletion. The narrow preload API exposes only
-  commit/read/remove/list outcomes; it never returns the journal directory,
+  CAS receipts for replacement/path-rebase/deletion. File count, entry bytes,
+  total scan bytes and scan duration are bounded, and one corrupt entry is
+  isolated. The narrow preload API exposes only commit/read/rebase/remove/list
+  outcomes; it never returns the journal directory,
   `userData` path or arbitrary filesystem-read capability. Journal evidence may
   authorize reversible detach, but never a source overwrite or conflict adopt.
 - Per-process Bridge authentication token and managed workspace boundaries
