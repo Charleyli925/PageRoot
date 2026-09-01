@@ -89,6 +89,14 @@ export function importsModule(handle, specifier) {
   return moduleSpecifiers(handle).includes(specifier);
 }
 
+function argumentKind(argument) {
+  if (argument.kind === ts.SyntaxKind.NullKeyword) return "null";
+  if (ts.isObjectLiteralExpression(argument)) return "object";
+  if (ts.isStringLiteral(argument) || ts.isNoSubstitutionTemplateLiteral(argument)) return "string";
+  if (ts.isTemplateExpression(argument)) return "template";
+  return "other";
+}
+
 export function callExpressions(handle) {
   const values = [];
   eachNode(handle, (node) => {
@@ -104,7 +112,21 @@ export function callExpressions(handle) {
         if (ts.isTemplateExpression(argument)) return argument.head.text;
         return null;
       }),
+      argKinds: node.arguments.map((argument) => argumentKind(argument)),
     });
+  });
+  return values;
+}
+
+export function jsxElementNames(handle) {
+  const values = [];
+  eachNode(handle, (node) => {
+    if (
+      (ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node))
+      && ts.isIdentifier(node.tagName)
+    ) {
+      values.push(node.tagName.text);
+    }
   });
   return values;
 }

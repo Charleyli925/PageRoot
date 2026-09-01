@@ -1,0 +1,1049 @@
+{
+  "version": 1,
+  "policy": "Notice growth is frozen. Later PRs may only delete sites, reclassify them, or shrink the allowlist. Do not invent replacement UI to retire a Notice.",
+  "baseline": {
+    "setToastCreateCalls": 73,
+    "noticeBarJsx": 2,
+    "backgroundResultLiterals": 37,
+    "uncataloguedLiterals": 2
+  },
+  "registeredFiles": {
+    "setToast": [
+      "app/workbench.tsx"
+    ],
+    "noticeBar": [
+      "app/workbench.tsx",
+      "app/components/html-canvas-selection-chrome.tsx",
+      "app/components/NoticeBar.tsx"
+    ],
+    "backgroundResult": [
+      "app/lib/notification-policy.js",
+      "app/workbench/types.ts",
+      "app/workbench.tsx",
+      "app/workbench/comment-relink-model.js",
+      "desktop/usage-telemetry.mjs"
+    ],
+    "uncatalogued": [
+      "app/application/usage-telemetry.ts",
+      "desktop/usage-telemetry.mjs"
+    ]
+  },
+  "classes": {
+    "N0": "Delete. Result is already visible or the user does not need to know.",
+    "N1": "Silent recover. Internal reliability; log only unless content becomes unsavable.",
+    "N2": "Reuse existing control behavior. Keep current state; do not add UI.",
+    "N3": "Workspace safety banner. Move off Toast in PR-E.",
+    "N4": "Irreversible confirmation. Not a Toast; listed for completeness.",
+    "N5": "Temporary allowlist. Keep until a designed surface exists. Do not invent UI in a cleanup PR."
+  },
+  "n4": [
+    {
+      "id": "delete",
+      "owner": "confirm",
+      "reason": "删除文件或项目"
+    },
+    {
+      "id": "discard-unsaved",
+      "owner": "confirm",
+      "reason": "放弃未保存修改"
+    },
+    {
+      "id": "overwrite-external",
+      "owner": "confirm",
+      "reason": "覆盖磁盘或外部最新内容"
+    }
+  ],
+  "allowlist": [
+    {
+      "id": "import-trash-failed",
+      "owner": "import",
+      "reason": "用户明确要求删除原文件，但移入废纸篓失败；导入成功本身可静默，这一支无法从界面判断原文件是否还在",
+      "removalCondition": "完成导入后原文件处置结果的现成反馈设计",
+      "siteIds": [
+        "external-html-imported"
+      ]
+    },
+    {
+      "id": "handoff-copy-failed",
+      "owner": "runs",
+      "reason": "交接复制失败时，剪贴板没有其他可感知结果，用户无法判断点击是否生效",
+      "removalCondition": "完成剪贴板动作的无文案反馈设计",
+      "siteIds": [
+        "qoder-handoff-copy-failed"
+      ]
+    },
+    {
+      "id": "external-agent-may-still-run",
+      "owner": "runs",
+      "reason": "用户结束已交给外部 Agent 的任务，但 PageRoot 无法保证外部进程停止",
+      "removalCondition": "完成外部 Agent 仍可能运行的封闭 GlobalInterruption 设计",
+      "siteIds": [
+        "ai-run-cancelled-agent-may-run"
+      ]
+    },
+    {
+      "id": "external-open-unavailable",
+      "owner": "import",
+      "reason": "外部投放 HTML 后没有现成错误位，用户无法判断文件是否被接收",
+      "removalCondition": "完成外部打开失败闭环设计",
+      "siteIds": [
+        "external-project-open-unavailable"
+      ]
+    },
+    {
+      "id": "project-open-failed",
+      "owner": "project",
+      "reason": "从最近项目或选择器打开失败时，非外部路径没有现成错误位",
+      "removalCondition": "复用或设计打开失败的现成位置，且不新增通用错误区",
+      "siteIds": [
+        "project-open-error"
+      ]
+    },
+    {
+      "id": "attachment-rejected",
+      "owner": "attachments",
+      "reason": "附件大小、数量超限或格式不支持时，用户必须知道文件为什么没有加入；当前没有经过设计的现成反馈位置",
+      "removalCondition": "完成附件拒绝原因的现成反馈设计，且不新增卡片红字",
+      "siteIds": [
+        "attachment-rejected",
+        "attachment-batch-partial-open",
+        "attachment-batch-partial-closed"
+      ]
+    },
+    {
+      "id": "show-in-folder-failed",
+      "owner": "finder",
+      "reason": "在文件夹中显示失败后，现有入口只是恢复可点击，用户无法判断是否执行",
+      "removalCondition": "完成 Finder 动作失败闭环设计，且不改按钮文案或布局",
+      "siteIds": [
+        "show-project-in-folder-error"
+      ]
+    },
+    {
+      "id": "open-in-browser-failed",
+      "owner": "browser",
+      "reason": "在默认浏览器打开失败后，用户无法判断点击是否生效",
+      "removalCondition": "完成浏览器打开失败闭环设计，且不改按钮文案或布局",
+      "siteIds": [
+        "open-project-in-default-browser-error"
+      ]
+    },
+    {
+      "id": "browser-file-unsupported",
+      "owner": "browser",
+      "reason": "浏览器选择不支持的编码或类型时，没有现成错误位说明文件为什么没打开",
+      "removalCondition": "复用已有文件打开错误位置，且不扩展成通用错误区",
+      "siteIds": [
+        "browser-file-error"
+      ]
+    },
+    {
+      "id": "export-failed",
+      "owner": "export",
+      "reason": "导出失败且系统保存面板已经关闭，用户无法从现有界面判断导出是否成功",
+      "removalCondition": "完成原生保存失败闭环设计",
+      "siteIds": [
+        "export-failed"
+      ]
+    },
+    {
+      "id": "handoff-recopy",
+      "owner": "runs",
+      "reason": "重新复制交接内容无论成功或失败，剪贴板都没有其他可感知结果",
+      "removalCondition": "完成剪贴板动作的无文案反馈设计",
+      "siteIds": [
+        "handoff-recopy"
+      ]
+    }
+  ],
+  "sites": [
+    {
+      "id": "working-copy-recovered",
+      "class": "N0",
+      "owner": "document",
+      "file": "app/workbench.tsx",
+      "title": "文件已自动恢复",
+      "dedupeKey": "working-copy-recovered",
+      "disposition": "background-result",
+      "wave": "PR-B",
+      "reason": "成功自动恢复，界面已是最新内容",
+      "fingerprint": "N0|文件已自动恢复|working-copy-recovered|background-result"
+    },
+    {
+      "id": "workbench-tabs-restore-missing",
+      "class": "N2",
+      "owner": "navigation",
+      "file": "app/workbench.tsx",
+      "title": "无法恢复 HTML",
+      "dedupeKey": "workbench-restored-projects-missing",
+      "disposition": "background-result",
+      "wave": "PR-D",
+      "reason": "侧栏已打开，可从 Finder 重开",
+      "fingerprint": "N2|无法恢复 HTML|workbench-restored-projects-missing|background-result"
+    },
+    {
+      "id": "workbench-tabs-persistence-failed",
+      "class": "N1",
+      "owner": "navigation",
+      "file": "app/workbench.tsx",
+      "title": "标签页状态未安全保存",
+      "dedupeKey": "workbench-tabs-persistence-failed",
+      "disposition": "background-result",
+      "wave": "PR-C",
+      "reason": "内部持久化瞬时失败",
+      "fingerprint": "N1|标签页状态未安全保存|workbench-tabs-persistence-failed|background-result"
+    },
+    {
+      "id": "workbench-restore-settle-failed",
+      "class": "N1",
+      "owner": "navigation",
+      "file": "app/workbench.tsx",
+      "title": "HTML 已打开，但恢复未完成",
+      "dedupeKey": "workbench-restore-settle-failed",
+      "disposition": "direct-action",
+      "wave": "PR-C",
+      "reason": "Hydration 未完成，应静默重试",
+      "fingerprint": "N1|HTML 已打开，但恢复未完成|workbench-restore-settle-failed|direct-action"
+    },
+    {
+      "id": "workbench-restore-failed",
+      "class": "N2",
+      "owner": "navigation",
+      "file": "app/workbench.tsx",
+      "title": "无法恢复这个 HTML",
+      "dedupeKey": "workbench-restore-failed",
+      "disposition": "background-result",
+      "wave": "PR-D",
+      "reason": "侧栏已打开",
+      "fingerprint": "N2|无法恢复这个 HTML|workbench-restore-failed|background-result"
+    },
+    {
+      "id": "external-html-imported",
+      "class": "N0",
+      "owner": "import",
+      "file": "app/workbench.tsx",
+      "title": "已导入 PageRoot",
+      "dedupeKey": "external-html-imported",
+      "disposition": "background-result",
+      "wave": "PR-B",
+      "reason": "导入成功可见；trash-failed 变体见白名单 import-trash-failed",
+      "fingerprint": "N0|已导入 PageRoot|external-html-imported|background-result"
+    },
+    {
+      "id": "external-open-ack",
+      "class": "N1",
+      "owner": "import",
+      "file": "app/workbench.tsx",
+      "title": "HTML 已处理，等待 Finder 回执",
+      "dedupeKey": "external-open-ack",
+      "disposition": "direct-action",
+      "wave": "PR-C",
+      "reason": "Finder 回执瞬时失败",
+      "fingerprint": "N1|HTML 已处理，等待 Finder 回执|external-open-ack|direct-action"
+    },
+    {
+      "id": "canvas-verification-failed",
+      "class": "N1",
+      "owner": "canvas",
+      "file": "app/workbench.tsx",
+      "title": "画布确认失败",
+      "dedupeKey": "canvas-verification-failed",
+      "disposition": "direct-action",
+      "wave": "PR-C",
+      "reason": "Canvas ACK 应自动重试",
+      "fingerprint": "N1|画布确认失败|canvas-verification-failed|direct-action"
+    },
+    {
+      "id": "current-version-refresh-warning",
+      "class": "N1",
+      "owner": "version",
+      "file": "app/workbench.tsx",
+      "title": "已打开，但需要复核",
+      "dedupeKey": "current-version-result",
+      "disposition": "background-result",
+      "wave": "PR-C",
+      "reason": "内部复核未完成",
+      "fingerprint": "N1|已打开，但需要复核|current-version-result|background-result"
+    },
+    {
+      "id": "attachment-cleanup-failed",
+      "class": "N1",
+      "owner": "attachments",
+      "file": "app/workbench.tsx",
+      "title": "附件已从评论中移除",
+      "dedupeKey": "attachment-cleanup",
+      "disposition": "background-result",
+      "wave": "PR-C",
+      "reason": "评论已更新，副本清理是内部问题",
+      "fingerprint": "N1|附件已从评论中移除|attachment-cleanup|background-result"
+    },
+    {
+      "id": "qoder-handoff-copy-failed",
+      "class": "N5",
+      "owner": "runs",
+      "file": "app/workbench.tsx",
+      "title": "交接内容还没有复制",
+      "dedupeKey": "qoder-handoff",
+      "disposition": "inform-in-place",
+      "wave": "PR-D",
+      "reason": "剪贴板失败从界面无法判断",
+      "allowlistId": "handoff-copy-failed",
+      "fingerprint": "N5|交接内容还没有复制|qoder-handoff|inform-in-place"
+    },
+    {
+      "id": "qoder-agent-already-has-result",
+      "class": "N0",
+      "owner": "runs",
+      "file": "app/workbench.tsx",
+      "title": "这一轮已经有结果了",
+      "dedupeKey": "qoder-agent",
+      "disposition": "inform-in-place",
+      "wave": "PR-B",
+      "reason": "决策条已展示结果",
+      "fingerprint": "N0|这一轮已经有结果了|qoder-agent|inform-in-place"
+    },
+    {
+      "id": "qoder-agent-incomplete",
+      "class": "N2",
+      "owner": "runs",
+      "file": "app/workbench.tsx",
+      "title": "Qoder CLI 没有完成本轮",
+      "dedupeKey": "qoder-agent",
+      "disposition": "user-choice",
+      "wave": "PR-D",
+      "reason": "AI 面板已有本轮状态",
+      "fingerprint": "N2|Qoder CLI 没有完成本轮|qoder-agent|user-choice"
+    },
+    {
+      "id": "ai-validation-error",
+      "class": "N2",
+      "owner": "runs",
+      "file": "app/workbench.tsx",
+      "title": "AI 输出未通过安全校验",
+      "dedupeKey": "ai-validation-error",
+      "disposition": "user-choice",
+      "wave": "PR-D",
+      "reason": "AI 面板已有失败状态",
+      "fingerprint": "N2|AI 输出未通过安全校验|ai-validation-error|user-choice"
+    },
+    {
+      "id": "background-candidate-ready",
+      "class": "N0",
+      "owner": "runs",
+      "file": "app/workbench.tsx",
+      "title": "可以打开了",
+      "dedupeKey": "background-version",
+      "disposition": "background-result",
+      "wave": "PR-B",
+      "reason": "后台成功，切回项目即可看到",
+      "fingerprint": "N0|可以打开了|background-version|background-result"
+    },
+    {
+      "id": "ai-run-cancelled-agent-may-run",
+      "class": "N5",
+      "owner": "runs",
+      "file": "app/workbench.tsx",
+      "title": "本轮已结束",
+      "dedupeKey": "ai-run-cancelled",
+      "disposition": "background-result",
+      "wave": "PR-D",
+      "reason": "外部 Agent 仍可能运行",
+      "allowlistId": "external-agent-may-still-run",
+      "fingerprint": "N5|本轮已结束|ai-run-cancelled|background-result"
+    },
+    {
+      "id": "background-run-cancelled",
+      "class": "N0",
+      "owner": "runs",
+      "file": "app/workbench.tsx",
+      "title": "已取消",
+      "dedupeKey": "background-version",
+      "disposition": "inform-in-place",
+      "wave": "PR-B",
+      "reason": "后台取消，当前画布未变",
+      "fingerprint": "N0|已取消|background-version|inform-in-place"
+    },
+    {
+      "id": "project-application-deferred",
+      "class": "N1",
+      "owner": "project",
+      "file": "app/workbench.tsx",
+      "title": "当前 HTML 尚未完成安全切换",
+      "dedupeKey": "project-application-deferred",
+      "disposition": "direct-action",
+      "wave": "PR-C",
+      "reason": "延迟切换应自动继续",
+      "fingerprint": "N1|当前 HTML 尚未完成安全切换|project-application-deferred|direct-action"
+    },
+    {
+      "id": "external-project-open-deferred",
+      "class": "N1",
+      "owner": "project",
+      "file": "app/workbench.tsx",
+      "title": "暂不能切换 / 等待 Finder 回执",
+      "dedupeKey": "external-project-open-deferred",
+      "disposition": "direct-action",
+      "wave": "PR-C",
+      "reason": "延迟打开或回执失败",
+      "fingerprint": "N1|暂不能切换 / 等待 Finder 回执|external-project-open-deferred|direct-action"
+    },
+    {
+      "id": "external-project-open-unavailable",
+      "class": "N5",
+      "owner": "import",
+      "file": "app/workbench.tsx",
+      "title": "无法接收外部 HTML",
+      "dedupeKey": "external-project-open-unavailable",
+      "disposition": "background-result",
+      "wave": "PR-D",
+      "reason": "投放后无其他可见结果",
+      "allowlistId": "external-open-unavailable",
+      "fingerprint": "N5|无法接收外部 HTML|external-project-open-unavailable|background-result"
+    },
+    {
+      "id": "project-open-error",
+      "class": "N5",
+      "owner": "project",
+      "file": "app/workbench.tsx",
+      "title": "无法打开这个 HTML",
+      "dedupeKey": "project-open-error",
+      "disposition": "direct-action",
+      "wave": "PR-D",
+      "reason": "非外部打开没有现成错误位",
+      "allowlistId": "project-open-failed",
+      "fingerprint": "N5|无法打开这个 HTML|project-open-error|direct-action"
+    },
+    {
+      "id": "close-source-reconciliation",
+      "class": "N1",
+      "owner": "project",
+      "file": "app/workbench.tsx",
+      "title": "当前页面仍保持开启",
+      "dedupeKey": "close-source-reconciliation",
+      "disposition": "background-result",
+      "wave": "PR-C",
+      "reason": "关闭对账内部状态",
+      "fingerprint": "N1|当前页面仍保持开启|close-source-reconciliation|background-result"
+    },
+    {
+      "id": "managed-working-copy-ambiguous-locator",
+      "class": "N3",
+      "owner": "document",
+      "file": "app/workbench.tsx",
+      "title": "无法确定工作文件",
+      "dedupeKey": "managed-working-copy-ambiguous",
+      "disposition": "user-choice",
+      "wave": "PR-E",
+      "reason": "工作区安全状态",
+      "fingerprint": "N3|无法确定工作文件|managed-working-copy-ambiguous|user-choice"
+    },
+    {
+      "id": "working-copy-unavailable-locator",
+      "class": "N3",
+      "owner": "document",
+      "file": "app/workbench.tsx",
+      "title": "文件暂不可用",
+      "dedupeKey": "working-copy-unavailable",
+      "disposition": "inform-in-place",
+      "wave": "PR-E",
+      "reason": "工作区安全状态",
+      "fingerprint": "N3|文件暂不可用|working-copy-unavailable|inform-in-place"
+    },
+    {
+      "id": "managed-source-identity-mismatch",
+      "class": "N3",
+      "owner": "document",
+      "file": "app/workbench.tsx",
+      "title": "无法核对工作文件",
+      "dedupeKey": "managed-source-identity-mismatch",
+      "disposition": "inform-in-place",
+      "wave": "PR-E",
+      "reason": "工作区安全状态",
+      "fingerprint": "N3|无法核对工作文件|managed-source-identity-mismatch|inform-in-place"
+    },
+    {
+      "id": "finder-filename-synced",
+      "class": "N0",
+      "owner": "project",
+      "file": "app/workbench.tsx",
+      "title": "文件名已与 Finder 同步",
+      "dedupeKey": "finder-filename-synced",
+      "disposition": "background-result",
+      "wave": "PR-B",
+      "reason": "Finder 名称已可见",
+      "fingerprint": "N0|文件名已与 Finder 同步|finder-filename-synced|background-result"
+    },
+    {
+      "id": "registered-project-unavailable",
+      "class": "N3",
+      "owner": "document",
+      "file": "app/workbench.tsx",
+      "title": "项目暂不可用",
+      "dedupeKey": "registered-project-unavailable",
+      "disposition": "inform-in-place",
+      "wave": "PR-E",
+      "reason": "工作区安全状态",
+      "fingerprint": "N3|项目暂不可用|registered-project-unavailable|inform-in-place"
+    },
+    {
+      "id": "working-copy-unavailable-persist",
+      "class": "N3",
+      "owner": "document",
+      "file": "app/workbench.tsx",
+      "title": "文件暂不可用",
+      "dedupeKey": "working-copy-unavailable",
+      "disposition": "inform-in-place",
+      "wave": "PR-E",
+      "reason": "工作区安全状态",
+      "fingerprint": "N3|文件暂不可用|working-copy-unavailable|inform-in-place"
+    },
+    {
+      "id": "working-copy-content-conflict",
+      "class": "N3",
+      "owner": "document",
+      "file": "app/workbench.tsx",
+      "title": "文件出现内容冲突",
+      "dedupeKey": "working-copy-content-conflict",
+      "disposition": "user-choice",
+      "wave": "PR-E",
+      "reason": "工作区安全状态",
+      "fingerprint": "N3|文件出现内容冲突|working-copy-content-conflict|user-choice"
+    },
+    {
+      "id": "managed-working-copy-ambiguous-persist",
+      "class": "N3",
+      "owner": "document",
+      "file": "app/workbench.tsx",
+      "title": "无法确定工作文件",
+      "dedupeKey": "managed-working-copy-ambiguous",
+      "disposition": "user-choice",
+      "wave": "PR-E",
+      "reason": "工作区安全状态",
+      "fingerprint": "N3|无法确定工作文件|managed-working-copy-ambiguous|user-choice"
+    },
+    {
+      "id": "registered-project-recovered",
+      "class": "N0",
+      "owner": "document",
+      "file": "app/workbench.tsx",
+      "title": "项目位置已自动恢复",
+      "dedupeKey": "registered-project-recovered",
+      "disposition": "background-result",
+      "wave": "PR-B",
+      "reason": "已继续使用登记项目",
+      "fingerprint": "N0|项目位置已自动恢复|registered-project-recovered|background-result"
+    },
+    {
+      "id": "autosave-recovery",
+      "class": "N0",
+      "owner": "document",
+      "file": "app/workbench.tsx",
+      "title": "已恢复上次未写回的编辑",
+      "dedupeKey": "autosave-recovery",
+      "disposition": "inform-in-place",
+      "wave": "PR-B",
+      "reason": "自动恢复成功",
+      "fingerprint": "N0|已恢复上次未写回的编辑|autosave-recovery|inform-in-place"
+    },
+    {
+      "id": "attachment-rejected",
+      "class": "N5",
+      "owner": "attachments",
+      "file": "app/workbench.tsx",
+      "title": "附件没有加入",
+      "dedupeKey": "attachment-batch",
+      "disposition": "direct-action",
+      "wave": "PR-D",
+      "reason": "超限或不支持，用户必须知道原因",
+      "allowlistId": "attachment-rejected",
+      "fingerprint": "N5|附件没有加入|attachment-batch|direct-action"
+    },
+    {
+      "id": "attachment-upload-failed",
+      "class": "N2",
+      "owner": "attachments",
+      "file": "app/workbench.tsx",
+      "title": "附件尚未加入",
+      "dedupeKey": "submit-blocked",
+      "disposition": "direct-action",
+      "wave": "PR-D",
+      "reason": "选择器仍可重试",
+      "fingerprint": "N2|附件尚未加入|submit-blocked|direct-action"
+    },
+    {
+      "id": "attachment-batch-partial-open",
+      "class": "N5",
+      "owner": "attachments",
+      "file": "app/workbench.tsx",
+      "title": "附件部分未加入",
+      "dedupeKey": "attachment-batch",
+      "disposition": "direct-action",
+      "wave": "PR-D",
+      "reason": "部分文件未加入且无局部错误位",
+      "allowlistId": "attachment-rejected",
+      "fingerprint": "N5|附件部分未加入|attachment-batch|direct-action"
+    },
+    {
+      "id": "attachment-batch-partial-closed",
+      "class": "N5",
+      "owner": "attachments",
+      "file": "app/workbench.tsx",
+      "title": "附件部分未加入",
+      "dedupeKey": "attachment-batch",
+      "disposition": "background-result",
+      "wave": "PR-D",
+      "reason": "评论已关闭，用户看不到局部状态",
+      "allowlistId": "attachment-rejected",
+      "fingerprint": "N5|附件部分未加入|attachment-batch|background-result"
+    },
+    {
+      "id": "attachment-preview-failed",
+      "class": "N2",
+      "owner": "attachments",
+      "file": "app/workbench.tsx",
+      "title": "图片暂时无法预览",
+      "dedupeKey": "attachment-preview",
+      "disposition": "background-result",
+      "wave": "PR-D",
+      "reason": "附件仍保留，可再点预览",
+      "fingerprint": "N2|图片暂时无法预览|attachment-preview|background-result"
+    },
+    {
+      "id": "attachment-download-failed",
+      "class": "N2",
+      "owner": "attachments",
+      "file": "app/workbench.tsx",
+      "title": "附件暂时无法打开",
+      "dedupeKey": "attachment-download",
+      "disposition": "background-result",
+      "wave": "PR-D",
+      "reason": "附件仍保留，可再点打开",
+      "fingerprint": "N2|附件暂时无法打开|attachment-download|background-result"
+    },
+    {
+      "id": "workbench-tab-busy",
+      "class": "N2",
+      "owner": "navigation",
+      "file": "app/workbench.tsx",
+      "title": "标签页正在切换",
+      "dedupeKey": "workbench-tab",
+      "disposition": "inform-in-place",
+      "wave": "PR-D",
+      "reason": "保持当前标签，完成后自动继续",
+      "fingerprint": "N2|标签页正在切换|workbench-tab|inform-in-place"
+    },
+    {
+      "id": "show-project-in-folder-error",
+      "class": "N5",
+      "owner": "finder",
+      "file": "app/workbench.tsx",
+      "title": "无法在文件夹中打开",
+      "dedupeKey": "show-project-in-folder-error",
+      "disposition": "background-result",
+      "wave": "PR-D",
+      "reason": "Finder 动作无其他可感知结果",
+      "allowlistId": "show-in-folder-failed",
+      "fingerprint": "N5|无法在文件夹中打开|show-project-in-folder-error|background-result"
+    },
+    {
+      "id": "open-project-in-default-browser-error",
+      "class": "N5",
+      "owner": "browser",
+      "file": "app/workbench.tsx",
+      "title": "无法在默认浏览器中打开",
+      "dedupeKey": "open-project-in-default-browser-error",
+      "disposition": "background-result",
+      "wave": "PR-D",
+      "reason": "浏览器动作无其他可感知结果",
+      "allowlistId": "open-in-browser-failed",
+      "fingerprint": "N5|无法在默认浏览器中打开|open-project-in-default-browser-error|background-result"
+    },
+    {
+      "id": "browser-file-error",
+      "class": "N5",
+      "owner": "browser",
+      "file": "app/workbench.tsx",
+      "title": "文件编码不支持 / 文件无法打开",
+      "dedupeKey": "browser-file-error",
+      "disposition": "direct-action",
+      "wave": "PR-D",
+      "reason": "浏览器打开失败没有现成错误位",
+      "allowlistId": "browser-file-unsupported",
+      "fingerprint": "N5|文件编码不支持 / 文件无法打开|browser-file-error|direct-action"
+    },
+    {
+      "id": "source-history-record-failed-edit",
+      "class": "N1",
+      "owner": "history",
+      "file": "app/workbench.tsx",
+      "title": "这次编辑没有进入撤销历史",
+      "dedupeKey": "source-history-record-failed",
+      "disposition": "background-result",
+      "wave": "PR-C",
+      "reason": "内部历史记录失败",
+      "fingerprint": "N1|这次编辑没有进入撤销历史|source-history-record-failed|background-result"
+    },
+    {
+      "id": "source-history-record-failed-edit-followup",
+      "class": "N1",
+      "owner": "history",
+      "file": "app/workbench.tsx",
+      "title": "这次编辑没有进入撤销历史",
+      "dedupeKey": "source-history-record-failed",
+      "disposition": "background-result",
+      "wave": "PR-C",
+      "reason": "内部历史记录失败",
+      "fingerprint": "N1|这次编辑没有进入撤销历史|source-history-record-failed|background-result"
+    },
+    {
+      "id": "export-succeeded-copy",
+      "class": "N0",
+      "owner": "export",
+      "file": "app/workbench.tsx",
+      "title": "已导出 HTML 副本",
+      "dedupeKey": "export",
+      "disposition": "inform-in-place",
+      "wave": "PR-B",
+      "reason": "保存面板结果已可见",
+      "fingerprint": "N0|已导出 HTML 副本|export|inform-in-place"
+    },
+    {
+      "id": "export-succeeded-duplicate",
+      "class": "N0",
+      "owner": "export",
+      "file": "app/workbench.tsx",
+      "title": "已导出 HTML 副本",
+      "dedupeKey": "export",
+      "disposition": "inform-in-place",
+      "wave": "PR-B",
+      "reason": "保存面板结果已可见",
+      "fingerprint": "N0|已导出 HTML 副本|export|inform-in-place"
+    },
+    {
+      "id": "export-failed",
+      "class": "N5",
+      "owner": "export",
+      "file": "app/workbench.tsx",
+      "title": "副本没有导出",
+      "dedupeKey": "export",
+      "disposition": "direct-action",
+      "wave": "PR-D",
+      "reason": "保存面板已关闭，失败不可见",
+      "allowlistId": "export-failed",
+      "fingerprint": "N5|副本没有导出|export|direct-action"
+    },
+    {
+      "id": "source-reload-failed",
+      "class": "N2",
+      "owner": "document",
+      "file": "app/workbench.tsx",
+      "title": "重新载入失败",
+      "dedupeKey": "source-reload",
+      "disposition": "background-result",
+      "wave": "PR-D",
+      "reason": "保持当前内容，入口仍可点",
+      "fingerprint": "N2|重新载入失败|source-reload|background-result"
+    },
+    {
+      "id": "external-source-preview-failed",
+      "class": "N2",
+      "owner": "document",
+      "file": "app/workbench.tsx",
+      "title": "无法预览外部版本",
+      "dedupeKey": "external-source-preview-failed",
+      "disposition": "background-result",
+      "wave": "PR-D",
+      "reason": "冲突横幅已存在",
+      "fingerprint": "N2|无法预览外部版本|external-source-preview-failed|background-result"
+    },
+    {
+      "id": "source-force-unlock-succeeded",
+      "class": "N0",
+      "owner": "document",
+      "file": "app/workbench.tsx",
+      "title": "项目已解锁",
+      "dedupeKey": "source-force-unlock",
+      "disposition": "background-result",
+      "wave": "PR-B",
+      "reason": "解锁后即可继续编辑",
+      "fingerprint": "N0|项目已解锁|source-force-unlock|background-result"
+    },
+    {
+      "id": "source-force-unlock-failed",
+      "class": "N2",
+      "owner": "document",
+      "file": "app/workbench.tsx",
+      "title": "强制解锁失败",
+      "dedupeKey": "source-force-unlock-failed",
+      "disposition": "user-choice",
+      "wave": "PR-D",
+      "reason": "冲突横幅仍在",
+      "fingerprint": "N2|强制解锁失败|source-force-unlock-failed|user-choice"
+    },
+    {
+      "id": "source-history-undo-redo-failed",
+      "class": "N2",
+      "owner": "history",
+      "file": "app/workbench.tsx",
+      "title": "撤销未完成 / 重做未完成",
+      "dedupeKey": "source-history",
+      "disposition": "user-choice",
+      "wave": "PR-D",
+      "reason": "保持当前版本，可再点撤销",
+      "fingerprint": "N2|撤销未完成 / 重做未完成|source-history|user-choice"
+    },
+    {
+      "id": "unfinished-comment-edit",
+      "class": "N2",
+      "owner": "comments",
+      "file": "app/workbench.tsx",
+      "title": "上一条评论修改还未确认",
+      "dedupeKey": "unfinished-comment-edit",
+      "disposition": "direct-action",
+      "wave": "PR-D",
+      "reason": "草稿仍在，保存按钮仍可点",
+      "fingerprint": "N2|上一条评论修改还未确认|unfinished-comment-edit|direct-action"
+    },
+    {
+      "id": "unfinished-comment-draft-composer",
+      "class": "N2",
+      "owner": "comments",
+      "file": "app/workbench.tsx",
+      "title": "上一条评论还未保存",
+      "dedupeKey": "unfinished-comment-draft",
+      "disposition": "direct-action",
+      "wave": "PR-D",
+      "reason": "草稿仍在",
+      "fingerprint": "N2|上一条评论还未保存|unfinished-comment-draft|direct-action"
+    },
+    {
+      "id": "comment-unsaved-before-registration",
+      "class": "N2",
+      "owner": "comments",
+      "file": "app/workbench.tsx",
+      "title": "评论尚未保存",
+      "dedupeKey": "project-registration",
+      "disposition": "direct-action",
+      "wave": "PR-D",
+      "reason": "草稿仍在",
+      "fingerprint": "N2|评论尚未保存|project-registration|direct-action"
+    },
+    {
+      "id": "unfinished-comment-draft-new",
+      "class": "N2",
+      "owner": "comments",
+      "file": "app/workbench.tsx",
+      "title": "上一条评论还未保存",
+      "dedupeKey": "unfinished-comment-draft",
+      "disposition": "direct-action",
+      "wave": "PR-D",
+      "reason": "应聚焦已有草稿",
+      "fingerprint": "N2|上一条评论还未保存|unfinished-comment-draft|direct-action"
+    },
+    {
+      "id": "reveal-ai-task-failed",
+      "class": "N2",
+      "owner": "runs",
+      "file": "app/workbench.tsx",
+      "title": "AI任务暂时无法打开",
+      "dedupeKey": "reveal-ai-task",
+      "disposition": "background-result",
+      "wave": "PR-D",
+      "reason": "AI 面板仍在",
+      "fingerprint": "N2|AI任务暂时无法打开|reveal-ai-task|background-result"
+    },
+    {
+      "id": "unfinished-comment-draft-submit",
+      "class": "N2",
+      "owner": "comments",
+      "file": "app/workbench.tsx",
+      "title": "还有一条评论未保存",
+      "dedupeKey": "unfinished-comment-draft",
+      "disposition": "direct-action",
+      "wave": "PR-D",
+      "reason": "草稿仍在，发送未执行",
+      "fingerprint": "N2|还有一条评论未保存|unfinished-comment-draft|direct-action"
+    },
+    {
+      "id": "unsafe-comment-targets",
+      "class": "N2",
+      "owner": "comments",
+      "file": "app/workbench.tsx",
+      "title": "评论需要重新定位",
+      "dedupeKey": "unsafe-comment-targets",
+      "disposition": "background-result",
+      "wave": "PR-D",
+      "reason": "评论栏已有重新定位卡片",
+      "fingerprint": "N2|评论需要重新定位|unsafe-comment-targets|background-result"
+    },
+    {
+      "id": "source-history-record-failed-submit",
+      "class": "N1",
+      "owner": "history",
+      "file": "app/workbench.tsx",
+      "title": "当前编辑没有进入撤销历史",
+      "dedupeKey": "source-history-record-failed",
+      "disposition": "direct-action",
+      "wave": "PR-C",
+      "reason": "内部历史记录失败",
+      "fingerprint": "N1|当前编辑没有进入撤销历史|source-history-record-failed|direct-action"
+    },
+    {
+      "id": "run-submission-failed",
+      "class": "N2",
+      "owner": "runs",
+      "file": "app/workbench.tsx",
+      "title": "项目记录尚未建立 / 暂时无法发送本轮要求",
+      "dedupeKey": "run-submission-failed",
+      "disposition": "direct-action",
+      "wave": "PR-D",
+      "reason": "发送按钮仍可点",
+      "fingerprint": "N2|项目记录尚未建立 / 暂时无法发送本轮要求|run-submission-failed|direct-action"
+    },
+    {
+      "id": "activate-ready-version",
+      "class": "N1",
+      "owner": "version",
+      "file": "app/workbench.tsx",
+      "title": "新版本已提交，编辑画布仍在准备",
+      "dedupeKey": "activate-ready-version",
+      "disposition": "background-result",
+      "wave": "PR-C",
+      "reason": "内部画布恢复；打不开时保持当前版本",
+      "fingerprint": "N1|新版本已提交，编辑画布仍在准备|activate-ready-version|background-result"
+    },
+    {
+      "id": "background-version-generated",
+      "class": "N1",
+      "owner": "version",
+      "file": "app/workbench.tsx",
+      "title": "已生成 / 已生成但需要检查",
+      "dedupeKey": "background-version",
+      "disposition": "background-result",
+      "wave": "PR-C",
+      "reason": "成功可见；协议异常属内部状态",
+      "fingerprint": "N1|已生成 / 已生成但需要检查|background-version|background-result"
+    },
+    {
+      "id": "current-version-protocol-warning",
+      "class": "N1",
+      "owner": "version",
+      "file": "app/workbench.tsx",
+      "title": "已打开，但需要检查",
+      "dedupeKey": "current-version-result",
+      "disposition": "inform-in-place",
+      "wave": "PR-C",
+      "reason": "已安全提交版本的内部协议异常",
+      "fingerprint": "N1|已打开，但需要检查|current-version-result|inform-in-place"
+    },
+    {
+      "id": "current-version-verification-warning",
+      "class": "N1",
+      "owner": "version",
+      "file": "app/workbench.tsx",
+      "title": "已打开，但需要复核",
+      "dedupeKey": "current-version-result",
+      "disposition": "background-result",
+      "wave": "PR-C",
+      "reason": "内部复核",
+      "fingerprint": "N1|已打开，但需要复核|current-version-result|background-result"
+    },
+    {
+      "id": "current-version-accepted",
+      "class": "N0",
+      "owner": "version",
+      "file": "app/workbench.tsx",
+      "title": "已采纳",
+      "dedupeKey": "current-version-result",
+      "disposition": "inform-in-place",
+      "wave": "PR-B",
+      "reason": "画布已是采纳后的 HTML",
+      "fingerprint": "N0|已采纳|current-version-result|inform-in-place"
+    },
+    {
+      "id": "ready-version-review-failed",
+      "class": "N2",
+      "owner": "version",
+      "file": "app/workbench.tsx",
+      "title": "暂时无法开始审阅",
+      "dedupeKey": "ready-version-review",
+      "disposition": "inform-in-place",
+      "wave": "PR-D",
+      "reason": "不切换，审阅入口仍在",
+      "fingerprint": "N2|暂时无法开始审阅|ready-version-review|inform-in-place"
+    },
+    {
+      "id": "background-external-html-kept",
+      "class": "N0",
+      "owner": "import",
+      "file": "app/workbench.tsx",
+      "title": "已保留外部 HTML",
+      "dedupeKey": "background-version",
+      "disposition": "inform-in-place",
+      "wave": "PR-B",
+      "reason": "后台导入成功",
+      "fingerprint": "N0|已保留外部 HTML|background-version|inform-in-place"
+    },
+    {
+      "id": "history-open-failed",
+      "class": "N2",
+      "owner": "history",
+      "file": "app/workbench.tsx",
+      "title": "无法打开这个历史版本",
+      "dedupeKey": "history-navigation",
+      "disposition": "background-result",
+      "wave": "PR-D",
+      "reason": "保持当前版本",
+      "fingerprint": "N2|无法打开这个历史版本|history-navigation|background-result"
+    },
+    {
+      "id": "history-return-current-failed",
+      "class": "N2",
+      "owner": "history",
+      "file": "app/workbench.tsx",
+      "title": "无法返回当前 HTML",
+      "dedupeKey": "history-navigation",
+      "disposition": "background-result",
+      "wave": "PR-D",
+      "reason": "保持当前历史视图",
+      "fingerprint": "N2|无法返回当前 HTML|history-navigation|background-result"
+    },
+    {
+      "id": "history-continue-editing-failed",
+      "class": "N2",
+      "owner": "history",
+      "file": "app/workbench.tsx",
+      "title": "无法基于此版本继续编辑",
+      "dedupeKey": "history-continue-editing",
+      "disposition": "background-result",
+      "wave": "PR-D",
+      "reason": "保持当前历史版本",
+      "fingerprint": "N2|无法基于此版本继续编辑|history-continue-editing|background-result"
+    },
+    {
+      "id": "handoff-recopy",
+      "class": "N5",
+      "owner": "runs",
+      "file": "app/workbench.tsx",
+      "title": "本轮要求已复制 / 复制没有成功",
+      "dedupeKey": "handoff-recopied",
+      "disposition": "inform-in-place",
+      "wave": "PR-D",
+      "reason": "剪贴板动作无其他可感知结果",
+      "allowlistId": "handoff-recopy",
+      "fingerprint": "N5|本轮要求已复制 / 复制没有成功|handoff-recopied|inform-in-place"
+    },
+    {
+      "id": "default-agent-selection-failed",
+      "class": "N2",
+      "owner": "settings",
+      "file": "app/workbench.tsx",
+      "title": "默认 Agent 未更改",
+      "dedupeKey": "default-agent-selection-failed",
+      "disposition": "inform-in-place",
+      "wave": "PR-D",
+      "reason": "控件恢复旧值",
+      "fingerprint": "N2|默认 Agent 未更改|default-agent-selection-failed|inform-in-place"
+    }
+  ]
+}

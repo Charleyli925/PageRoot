@@ -1100,7 +1100,7 @@ Hashes, state transitions and fault injection.
 
 ### Architecture gate assertion forms
 
-`scripts/check-architecture.mjs` enforces the boundaries above as five explicit
+`scripts/check-architecture.mjs` enforces the boundaries above as six explicit
 responsibility groups:
 
 - `layerBoundaryViolations`: import direction between Domain, Application,
@@ -1115,9 +1115,15 @@ responsibility groups:
   native error box is the startup failure that happens before a renderer exists.
   Content-loss confirms (delete, overwrite, abandon unsaved edits) must be
   registered in `ALLOWED_WINDOW_CONFIRM_PREFIXES`.
+- `noticePolicyViolations` plus the inventory ratchet in
+  `scripts/notice-policy.mjs`: production `setToast` creates, `NoticeBar` JSX,
+  `background-result` and `uncatalogued` literals are frozen to
+  `scripts/notice-disposition-ledger.json`. Counts may only decrease. New
+  wrapper aliases of `setToast` fail. Changing a registered Notice must
+  reclassify or delete it; the N5 allowlist may only shrink.
 
 The gate uses structural queries from `scripts/architecture-ast-query.mjs`
-(`moduleSpecifiers`, `callNames`, `callExpressions`, `newExpressionNames`, filesystem-write
+(`moduleSpecifiers`, `callNames`, `callExpressions`, `jsxElementNames`, `newExpressionNames`, filesystem-write
 classification and literal comparisons). These queries operate on dependency,
 call, construction and data-category facts. They do not assert private fields,
 private methods, exact object properties or the spelling/order of a business

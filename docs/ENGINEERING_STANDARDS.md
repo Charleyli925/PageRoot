@@ -43,7 +43,11 @@ do not forbid editing.
 
 User confirmation is reserved for deleting a project, discarding edits that
 cannot be autosaved, explicitly overwriting an external change, and
-unrecoverable identity or permission changes.
+unrecoverable identity or permission changes. Global Notice growth is frozen:
+do not add `setToast({...})`, a new `NoticeBar`, or free-form
+`background-result` copy. Classify or delete an existing site in
+`scripts/notice-disposition-ledger.json`. Do not invent replacement error UI
+to retire a Notice.
 
 Do not remove an irreversible authority-boundary protection unless an
 equivalent protection remains. Reversible interaction, presentation and
