@@ -21,9 +21,11 @@ test("AI smoke configuration selects review activation and broad-edit regression
   assert.deepEqual(tagged, [
     "a verified AI result stays pending through desktop review until the user accepts it",
     "a broad but related AI return is accepted without a target-scope error",
-    "stable-ID review gates movement, attributes and styles through visible output",
+    "stable-ID Review keeps movement, reorder, attributes and styles position-bound",
     "a rewrite outside <main> is still reviewed",
-    "Review exposes Candidate changes outside the comment target without blocking adoption",
+    "Review keeps Candidate scope diagnostics out of the comparison canvas",
+    "CSS and Script comment-only changes stay out of Review",
+    "a safe simple CSS selector creates one position-bound element change",
     "source Review preserves multi-host text evidence and hidden changes without visual confirmation",
   ]);
   for (const source of sources) {
