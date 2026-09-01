@@ -270,22 +270,46 @@ test("recovery journal serializes one document without blocking another", async 
   assert.notEqual(left.journalSha256, right.journalSha256);
 });
 
-test("recovery journal scan applies entry and total byte bounds", async (t) => {
+test("recovery journal scan paginates every verified entry within total byte bounds", async (t) => {
   const parent = await mkdtemp(path.join(os.tmpdir(), "pageroot-recovery-bounded-"));
   t.after(async () => {
     const { rm } = await import("node:fs/promises");
     await rm(parent, { recursive: true, force: true });
   });
   const rootPath = path.join(parent, "journals");
+  const writer = createRecoveryJournalStore({ rootPath });
+  await writer.commit(checkpoint({
+    documentId: "doc_1111111111111111",
+    html: `<!doctype html><html><body>${"a".repeat(2_000)}</body></html>`,
+  }));
+  await writer.commit(checkpoint({
+    documentId: "doc_2222222222222222",
+    html: `<!doctype html><html><body>${"b".repeat(2_000)}</body></html>`,
+  }));
+  const names = (await readdir(rootPath)).sort();
+  const sizes = await Promise.all(names.map(async (name) => (
+    (await readFile(path.join(rootPath, name))).byteLength
+  )));
+  const pageBytes = Math.max(...sizes) + 1;
   const store = createRecoveryJournalStore({
     rootPath,
-    maxEntryCount: 1,
-    maxTotalBytes: 10_000,
+    maxEntryBytes: pageBytes,
+    maxTotalBytes: pageBytes,
   });
-  await store.commit(checkpoint({ documentId: "doc_1111111111111111" }));
-  await store.commit(checkpoint({ documentId: "doc_2222222222222222" }));
-  const listed = await store.listRecoverable();
-  assert.equal(listed.entries.length, 1);
-  assert.equal(listed.scannedCount, 1);
-  assert.equal(listed.truncated, true);
+
+  const first = await store.listRecoverable();
+  assert.equal(first.entries.length, 1);
+  assert.equal(first.scannedCount, 1);
+  assert.equal(first.truncated, true);
+  assert.match(first.nextCursor, /^[a-f0-9]{64}\.json$/u);
+
+  const second = await store.listRecoverable({ cursor: first.nextCursor });
+  assert.equal(second.entries.length, 1);
+  assert.equal(second.scannedCount, 1);
+  assert.equal(second.truncated, false);
+  assert.equal(second.nextCursor, null);
+  assert.deepEqual(
+    new Set([...first.entries, ...second.entries].map((entry) => entry.documentId)),
+    new Set(["doc_1111111111111111", "doc_2222222222222222"]),
+  );
 });

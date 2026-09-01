@@ -1699,10 +1699,15 @@ export class ProjectWorkflow {
       if (!transitioned || !this.#projectSession.context) {
         throw new Error("文件已重命名，但当前项目身份已经变化。");
       }
-      await this.#documentWorkflow.rebaseRecoveryJournal?.({
+      const journalRebase = await this.#documentWorkflow.rebaseRecoveryJournal?.({
         previousContext: context,
         context: transitioned,
       });
+      if (journalRebase && journalRebase.status !== "succeeded") {
+        throw new Error(String(
+          journalRebase.reason || "文件已重命名，但恢复日志没有完成路径更新。",
+        ));
+      }
 
       const [recents, hydrated] = await Promise.all([
         this.refreshRecents(),
@@ -2059,10 +2064,15 @@ export class ProjectWorkflow {
           if (!transitioned || !this.#projectSession.context) {
             throw new Error("文件位置已恢复，但当前项目身份已经变化。");
           }
-          await this.#documentWorkflow.rebaseRecoveryJournal?.({
+          const journalRebase = await this.#documentWorkflow.rebaseRecoveryJournal?.({
             previousContext: liveContext,
             context: transitioned,
           });
+          if (journalRebase && journalRebase.status !== "succeeded") {
+            throw new Error(String(
+              journalRebase.reason || "文件位置已恢复，但恢复日志没有完成路径更新。",
+            ));
+          }
           const recents = await this.refreshRecents();
           if (recents.status !== "succeeded") {
             return unknown(operationId, "文件位置已经恢复，但项目状态还没有完成刷新。");

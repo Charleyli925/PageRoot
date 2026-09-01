@@ -176,12 +176,13 @@ export type DesktopProjectsApi = {
   removeRecoveryJournal?: (payload: DocumentRecoveryJournalLocator & {
     expectedJournalSha256?: string | null;
   }) => Promise<{ removed: boolean }>;
-  listRecoveryJournals?: () => Promise<{
+  listRecoveryJournals?: (payload?: { cursor?: string | null }) => Promise<{
     entries: DocumentRecoveryJournalSummary[];
     invalidCount: number;
     scannedCount?: number;
     totalBytes?: number;
     truncated?: boolean;
+    nextCursor?: string | null;
     unavailable?: boolean;
   }>;
   readHtml?: (sourcePath: string) => Promise<HtmlProject>;

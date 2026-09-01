@@ -185,6 +185,8 @@ export const WorkbenchStartPageContainer = memo(function WorkbenchStartPageConta
   );
   const [catalogReady, setCatalogReady] = useState(false);
   const [recoveryJournals, setRecoveryJournals] = useState<DocumentRecoveryJournalSummary[]>([]);
+  const [recoveryNextCursor, setRecoveryNextCursor] = useState<string | null>(null);
+  const [recoveryLoading, setRecoveryLoading] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -192,7 +194,10 @@ export const WorkbenchStartPageContainer = memo(function WorkbenchStartPageConta
       capability.commands.refreshRecents(),
       capability.commands.refreshRegistered(),
       window.htmlAIProjects?.listRecoveryJournals?.().then((result) => {
-        if (active) setRecoveryJournals(result.entries);
+        if (active) {
+          setRecoveryJournals(result.entries);
+          setRecoveryNextCursor(result.nextCursor || null);
+        }
       }),
     ]).then(() => {
       if (active) setCatalogReady(true);
@@ -209,6 +214,8 @@ export const WorkbenchStartPageContainer = memo(function WorkbenchStartPageConta
       catalogReady={catalogReady}
       catalogError={catalog.error}
       recoveryJournals={recoveryJournals}
+      hasMoreRecoveryJournals={Boolean(recoveryNextCursor)}
+      recoveryJournalsLoading={recoveryLoading}
       onCreateProject={onOpenLocal}
       onOpenProject={onOpenRegistered}
       onOpenRecovery={(journal) => {
@@ -231,6 +238,27 @@ export const WorkbenchStartPageContainer = memo(function WorkbenchStartPageConta
           sourcePath: journal.sourcePath,
           suggestedName: localFileNameFromSourcePath(journal.sourcePath),
         }));
+      }}
+      onLoadMoreRecovery={() => {
+        if (!recoveryNextCursor || recoveryLoading) return;
+        setRecoveryLoading(true);
+        void window.htmlAIProjects?.listRecoveryJournals?.({
+          cursor: recoveryNextCursor,
+        }).then((result) => {
+          setRecoveryJournals((current) => {
+            const merged = new Map(current.map((journal) => [
+              `${journal.projectId}:${journal.documentId}`,
+              journal,
+            ]));
+            for (const journal of result.entries) {
+              merged.set(`${journal.projectId}:${journal.documentId}`, journal);
+            }
+            return [...merged.values()].sort((left, right) => (
+              right.updatedAt.localeCompare(left.updatedAt)
+            ));
+          });
+          setRecoveryNextCursor(result.nextCursor || null);
+        }).catch(() => {}).finally(() => setRecoveryLoading(false));
       }}
     />
   );

@@ -340,6 +340,8 @@ test("DocumentWorkflow rebases an exact recovery receipt after the source file m
   const after = before.replace("one", "protected-move");
   const movedPath = "/tmp/moved/document-workflow.html";
   let receipt = null;
+  let rebaseCalls = 0;
+  let readCalls = 0;
   const recoveryJournal = {
     async commit(input) {
       receipt = {
@@ -350,11 +352,16 @@ test("DocumentWorkflow rebases an exact recovery receipt after the source file m
       };
       return receipt;
     },
-    async readVerified() { return null; },
+    async readVerified() {
+      readCalls += 1;
+      return receipt;
+    },
     async rebase(input) {
+      rebaseCalls += 1;
       assert.equal(input.previousSourcePath, SOURCE_PATH);
       assert.equal(input.sourcePath, movedPath);
       assert.equal(input.expectedJournalSha256, receipt.journalSha256);
+      if (rebaseCalls === 1) throw new Error("transient rebase failure");
       receipt = {
         ...receipt,
         sourcePath: movedPath,
@@ -381,11 +388,118 @@ test("DocumentWorkflow rebases an exact recovery receipt after the source file m
   });
   assert.equal(rebased.status, "succeeded");
   assert.equal(rebased.value.rebased, true);
+  assert.equal(rebaseCalls, 2);
+  assert.equal(readCalls, 1);
   assert.equal(harness.workflow.recoveryCheckpoint.sourcePath, movedPath);
   assert.equal(harness.workflow.hasVerifiedRecoveryCheckpoint({
     context: nextContext,
     revision: 1,
   }), true);
+});
+
+test("DocumentWorkflow adopts Main authority when a journal rebase ACK is lost", async () => {
+  const before = "<!doctype html><html><body>one</body></html>";
+  const after = before.replace("one", "lost-ack");
+  const movedPath = "/tmp/moved/lost-ack.html";
+  let receipt = null;
+  let rebaseCalls = 0;
+  const recoveryJournal = {
+    async commit(input) {
+      receipt = {
+        ...input,
+        recoveryHtmlSha256: sha256(input.html),
+        journalSha256: sha256(`lost-ack:${input.sourcePath}`),
+        updatedAt: "2026-09-01T00:00:00.000Z",
+      };
+      return receipt;
+    },
+    async readVerified() { return receipt; },
+    async rebase() {
+      rebaseCalls += 1;
+      receipt = {
+        ...receipt,
+        sourcePath: movedPath,
+        journalSha256: sha256(`lost-ack:${movedPath}`),
+      };
+      throw new Error("ACK lost after publish");
+    },
+    async remove() { return { removed: true }; },
+  };
+  const harness = createHarness({ html: before, recoveryJournal });
+  harness.workflow.enqueueEdit({ html: after });
+  assert.equal((await harness.workflow.protectForDetach({
+    context: harness.context,
+  })).status, "succeeded");
+  const nextContext = harness.projectSession.transitionSource({
+    previousSourcePath: SOURCE_PATH,
+    sourcePath: movedPath,
+    projectId: PROJECT_ID,
+    documentId: DOCUMENT_ID,
+  });
+
+  const rebased = await harness.workflow.rebaseRecoveryJournal({
+    previousContext: harness.context,
+    context: nextContext,
+  });
+
+  assert.equal(rebased.status, "succeeded");
+  assert.equal(rebaseCalls, 1);
+  assert.equal(harness.workflow.recoveryCheckpoint.sourcePath, movedPath);
+});
+
+test("detach retries a stranded journal rebase after a moved source settles", async () => {
+  const before = "<!doctype html><html><body>one</body></html>";
+  const after = before.replace("one", "retry-on-detach");
+  const movedPath = "/tmp/moved/retry-on-detach.html";
+  let receipt = null;
+  let rebaseCalls = 0;
+  const recoveryJournal = {
+    async commit(input) {
+      receipt = {
+        ...input,
+        recoveryHtmlSha256: sha256(input.html),
+        journalSha256: sha256(`detach:${input.sourcePath}`),
+        updatedAt: "2026-09-01T00:00:00.000Z",
+      };
+      return receipt;
+    },
+    async readVerified() { return receipt; },
+    async rebase() {
+      rebaseCalls += 1;
+      if (rebaseCalls < 3) throw new Error("injected transient rebase failure");
+      receipt = {
+        ...receipt,
+        sourcePath: movedPath,
+        journalSha256: sha256(`detach:${movedPath}`),
+      };
+      return receipt;
+    },
+    async remove() { return { removed: true }; },
+  };
+  const harness = createHarness({ html: before, recoveryJournal });
+  harness.workflow.enqueueEdit({ html: after });
+  assert.equal((await harness.workflow.protectForDetach({
+    context: harness.context,
+  })).status, "succeeded");
+  const nextContext = harness.projectSession.transitionSource({
+    previousSourcePath: SOURCE_PATH,
+    sourcePath: movedPath,
+    projectId: PROJECT_ID,
+    documentId: DOCUMENT_ID,
+  });
+  assert.equal((await harness.workflow.rebaseRecoveryJournal({
+    previousContext: harness.context,
+    context: nextContext,
+  })).status, "rejected");
+
+  const protectedDetach = await harness.workflow.protectForDetach({
+    context: nextContext,
+  });
+
+  assert.equal(protectedDetach.status, "succeeded");
+  assert.equal(protectedDetach.value.evidence, "recoveryVerified");
+  assert.equal(rebaseCalls, 3);
+  assert.equal(harness.workflow.recoveryCheckpoint.sourcePath, movedPath);
 });
 
 test("DocumentWorkflow accepts only an exact exported HTML Hash as detach evidence", async () => {

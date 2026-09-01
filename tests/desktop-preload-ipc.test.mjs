@@ -206,7 +206,7 @@ test("preload exposes a narrow verified recovery journal API", async () => {
     projectId: payload.projectId,
     documentId: payload.documentId,
   });
-  await api.listRecoveryJournals();
+  await api.listRecoveryJournals({ cursor: `${"a".repeat(64)}.json` });
 
   assert.deepEqual(calls, [
     ["html-projects:commit-recovery-journal", payload],
@@ -224,7 +224,7 @@ test("preload exposes a narrow verified recovery journal API", async () => {
       projectId: payload.projectId,
       documentId: payload.documentId,
     }],
-    ["html-projects:list-recovery-journals"],
+    ["html-projects:list-recovery-journals", { cursor: `${"a".repeat(64)}.json` }],
   ]);
   for (const exposedName of Object.keys(api)) {
     assert.doesNotMatch(exposedName, /(?:journalPath|userDataPath|readFile)/u);

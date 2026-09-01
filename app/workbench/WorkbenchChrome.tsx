@@ -195,18 +195,24 @@ export function WorkbenchStartPage({
   catalogReady,
   catalogError,
   recoveryJournals,
+  hasMoreRecoveryJournals,
+  recoveryJournalsLoading,
   onCreateProject,
   onOpenProject,
   onOpenRecovery,
+  onLoadMoreRecovery,
 }: {
   activeTabId: string;
   registeredProjects: RegisteredProject[];
   catalogReady: boolean;
   catalogError: string;
   recoveryJournals: DocumentRecoveryJournalSummary[];
+  hasMoreRecoveryJournals: boolean;
+  recoveryJournalsLoading: boolean;
   onCreateProject: () => void;
   onOpenProject: (project: RegisteredProject) => void;
   onOpenRecovery: (journal: DocumentRecoveryJournalSummary) => void;
+  onLoadMoreRecovery: () => void;
 }) {
   const [showAllTasks, setShowAllTasks] = useState(false);
   const [renderedAt] = useState(Date.now);
@@ -230,7 +236,8 @@ export function WorkbenchStartPage({
   const firstProject = catalogReady
     && !catalogError
     && registeredProjects.length === 0
-    && recoveryJournals.length === 0;
+    && recoveryJournals.length === 0
+    && !hasMoreRecoveryJournals;
   const recoveryCanOpen = (journal: DocumentRecoveryJournalSummary) => (
     readyProjects.some((project) => (
       project.projectId === journal.projectId
@@ -277,7 +284,7 @@ export function WorkbenchStartPage({
           </section>
         ) : (
           <>
-            {recoveryJournals.length ? (
+            {recoveryJournals.length || hasMoreRecoveryJournals ? (
               <section className="workbench-start-section workbench-start-recovery" aria-labelledby="workbench-start-recovery-title">
                 <h2 id="workbench-start-recovery-title">可恢复修改</h2>
                 <div className="workbench-start-recovery-list">
@@ -301,6 +308,16 @@ export function WorkbenchStartPage({
                     </button>
                   ))}
                 </div>
+                {hasMoreRecoveryJournals ? (
+                  <button
+                    className="workbench-start-recovery-more"
+                    type="button"
+                    disabled={recoveryJournalsLoading}
+                    onClick={onLoadMoreRecovery}
+                  >
+                    {recoveryJournalsLoading ? "正在校验…" : "加载更多恢复记录"}
+                  </button>
+                ) : null}
               </section>
             ) : null}
             {continuingProject ? (

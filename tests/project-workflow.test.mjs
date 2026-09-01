@@ -2897,6 +2897,38 @@ test("Finder locator rebase keeps IDs, publishes the new path, and does not load
   assert.ok(harness.events.some((event) => event.type === "project-source-relocated"));
 });
 
+test("Finder relocation is not reported settled when journal rebase cannot reconcile", async (t) => {
+  const harness = createHarness({
+    openTarget: managedOpenTarget(),
+    documentWorkflow: {
+      async rebaseRecoveryJournal() {
+        return {
+          status: "rejected",
+          code: "DOCUMENT_RECOVERY_REBASE_REJECTED",
+          reason: "journal rebase unavailable",
+        };
+      },
+    },
+    projectOpen: {
+      async reconcileActiveManagedSource(payload) {
+        return locatorResult(payload);
+      },
+      async listRecent() { return []; },
+      async listRegistered() { return []; },
+    },
+  });
+  t.after(() => harness.workflow.dispose());
+
+  const outcome = await harness.workflow.reconcileExternalSourceLocator({
+    reason: "watch",
+    previousSourcePath: OLD_PATH,
+  });
+
+  assert.notEqual(outcome.status, "succeeded");
+  assert.match(outcome.reason, /journal rebase unavailable/u);
+  assert.ok(!harness.events.some((event) => event.type === "project-source-relocated"));
+});
+
 test("present-file watch hints only hash-observe and do not drain switch", async (t) => {
   const reconcileCalls = [];
   const rulesWorkflow = {

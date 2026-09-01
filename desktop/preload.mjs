@@ -225,7 +225,9 @@ const projectsApi = Object.freeze({
     channels.removeRecoveryJournal,
     payload,
   ),
-  listRecoveryJournals: () => invokeProject(channels.listRecoveryJournals),
+  listRecoveryJournals: (payload) => payload
+    ? invokeProject(channels.listRecoveryJournals, payload)
+    : invokeProject(channels.listRecoveryJournals),
   onSourceFileChanged: (listener) => {
     if (typeof listener !== "function") {
       throw new TypeError("onSourceFileChanged listener must be a function.");

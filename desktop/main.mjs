@@ -3575,14 +3575,15 @@ function registerProjectIpc() {
       readRecoveryJournal: (payload) => requireRecoveryJournal().readVerified(payload),
       rebaseRecoveryJournal: (payload) => requireRecoveryJournal().rebase(payload),
       removeRecoveryJournal: (payload) => requireRecoveryJournal().remove(payload),
-      listRecoveryJournals: () => recoveryJournalAvailable
-        ? recoveryJournalStore.listRecoverable()
+      listRecoveryJournals: (payload) => recoveryJournalAvailable
+        ? recoveryJournalStore.listRecoverable(payload)
         : Promise.resolve({
             entries: [],
             invalidCount: 0,
             scannedCount: 0,
             totalBytes: 0,
             truncated: false,
+            nextCursor: null,
             unavailable: true,
           }),
       createPreviewSession,

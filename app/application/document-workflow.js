@@ -415,6 +415,30 @@ export class DocumentWorkflow {
     })) {
       return succeeded({ protected: true, evidence: "exportVerified" });
     }
+    const strandedReceipt = this.#recoveryJournalReceipt;
+    if (
+      strandedReceipt
+      && sameRecoveryDocument(strandedReceipt, activeContext)
+      && !this.#codecs.sameSourcePath(strandedReceipt.sourcePath, activeContext.sourcePath)
+    ) {
+      const rebased = await this.rebaseRecoveryJournal({
+        previousContext: {
+          ...activeContext,
+          sourcePath: strandedReceipt.sourcePath,
+          ...(activeContext.exactSourcePath
+            ? { exactSourcePath: strandedReceipt.sourcePath }
+            : {}),
+        },
+        context: activeContext,
+      });
+      if (rebased.status !== "succeeded") return rebased;
+      if (this.hasVerifiedRecoveryCheckpoint({
+        context: activeContext,
+        revision: this.#documentSession.editRevision,
+      })) {
+        return succeeded({ protected: true, evidence: "recoveryVerified" });
+      }
+    }
     if (!this.canProtectForDetach(activeContext)) {
       return blocked(
         "DOCUMENT_RECOVERY_JOURNAL_UNAVAILABLE",
@@ -523,17 +547,7 @@ export class DocumentWorkflow {
     ) {
       return succeeded({ rebased: false });
     }
-    try {
-      const journal = await this.#recoveryJournal.rebase({
-        projectId: receipt.projectId,
-        documentId: receipt.documentId,
-        previousSourcePath: receipt.sourcePath,
-        sourcePath: next.sourcePath,
-        workingCopyId: String(receipt.workingCopyId || ""),
-        revision: receipt.revision,
-        recoveryHtmlSha256: receipt.recoveryHtmlSha256,
-        expectedJournalSha256: receipt.journalSha256,
-      });
+    const publishRebased = (journal) => {
       const checkpoint = this.#checkpointFromJournal(journal, next);
       if (!checkpoint) {
         throw invalidAcknowledgement(
@@ -549,16 +563,59 @@ export class DocumentWorkflow {
         this.#recoveryCheckpoint = checkpoint;
       }
       return succeeded({ rebased: true, checkpoint });
+    };
+    const rebase = (authority) => this.#recoveryJournal.rebase({
+      projectId: authority.projectId,
+      documentId: authority.documentId,
+      previousSourcePath: authority.sourcePath,
+      sourcePath: next.sourcePath,
+      workingCopyId: String(authority.workingCopyId || ""),
+      revision: authority.revision,
+      recoveryHtmlSha256: authority.recoveryHtmlSha256,
+      expectedJournalSha256: authority.journalSha256,
+    });
+    try {
+      return publishRebased(await rebase(receipt));
     } catch (cause) {
+      let finalCause = cause;
+      try {
+        const authority = await this.#recoveryJournal.readVerified({
+          projectId: receipt.projectId,
+          documentId: receipt.documentId,
+        });
+        if (
+          !authority
+          || !sameRecoveryDocument(authority, receipt)
+          || Number(authority.revision) !== Number(receipt.revision)
+          || String(authority.recoveryHtmlSha256 || "") !== receipt.recoveryHtmlSha256
+        ) {
+          throw invalidAcknowledgement(
+            "恢复日志路径更新后的 Main 权威与当前恢复凭证不一致。",
+            "DOCUMENT_RECOVERY_REBASE_AUTHORITY_MISMATCH",
+          );
+        }
+        if (this.#codecs.sameSourcePath(authority.sourcePath, next.sourcePath)) {
+          return publishRebased(authority);
+        }
+        if (!this.#codecs.sameSourcePath(authority.sourcePath, receipt.sourcePath)) {
+          throw invalidAcknowledgement(
+            "恢复日志已经指向另一个文件位置。",
+            "DOCUMENT_RECOVERY_REBASE_PATH_MISMATCH",
+          );
+        }
+        return publishRebased(await rebase(authority));
+      } catch (reconcileCause) {
+        finalCause = reconcileCause;
+      }
       this.#emit({
         type: "document-recovery-rebase-failed",
         context: next,
         previousContext: previous,
-        reason: this.#codecs.errorMessage(cause, "恢复日志无法更新到新文件位置。"),
+        reason: this.#codecs.errorMessage(finalCause, "恢复日志无法更新到新文件位置。"),
       });
       return rejected(
         "DOCUMENT_RECOVERY_REBASE_REJECTED",
-        this.#codecs.errorMessage(cause, "恢复日志无法更新到新文件位置。"),
+        this.#codecs.errorMessage(finalCause, "恢复日志无法更新到新文件位置。"),
       );
     }
   }

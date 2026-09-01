@@ -435,6 +435,24 @@
   white-space: nowrap;
 }
 
+.workbench-start-recovery-more {
+  align-self: start;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.workbench-start-recovery-more:hover:not(:disabled) {
+  color: var(--ink);
+}
+
+.workbench-start-recovery-more:disabled {
+  cursor: default;
+  opacity: .66;
+}
+
 .workbench-start-recovery-list small {
   color: var(--muted);
   font-size: 11px;

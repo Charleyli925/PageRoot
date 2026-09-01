@@ -233,10 +233,17 @@ export function createRecoveryJournalStore({
   const entryPath = (locator) => path.join(root, `${locatorKey(locator)}.json`);
   const serialize = (envelope) => `${JSON.stringify(envelope)}\n`;
 
+  const normalizedMaxEntryBytes = Math.max(
+    1,
+    Number(maxEntryBytes) || DEFAULT_MAX_ENTRY_BYTES,
+  );
   const normalizedLimits = Object.freeze({
     maxEntryCount: Math.max(1, Number(maxEntryCount) || DEFAULT_MAX_ENTRY_COUNT),
-    maxEntryBytes: Math.max(1, Number(maxEntryBytes) || DEFAULT_MAX_ENTRY_BYTES),
-    maxTotalBytes: Math.max(1, Number(maxTotalBytes) || DEFAULT_MAX_TOTAL_BYTES),
+    maxEntryBytes: normalizedMaxEntryBytes,
+    maxTotalBytes: Math.max(
+      normalizedMaxEntryBytes,
+      Number(maxTotalBytes) || DEFAULT_MAX_TOTAL_BYTES,
+    ),
     scanTimeMs: Math.max(1, Number(scanTimeMs) || DEFAULT_SCAN_TIME_MS),
   });
 
@@ -554,8 +561,15 @@ export function createRecoveryJournalStore({
       });
     },
 
-    async listRecoverable() {
+    async listRecoverable(input = {}) {
       await ensureOwnedDirectory(root);
+      const cursor = typeof input?.cursor === "string" ? input.cursor : "";
+      if (cursor && !/^[a-f0-9]{64}\.json$/u.test(cursor)) {
+        throw recoveryError(
+          "RECOVERY_JOURNAL_CURSOR_INVALID",
+          "恢复日志分页凭证无效。",
+        );
+      }
       const entries = [];
       let invalidCount = 0;
       let scannedCount = 0;
@@ -565,16 +579,23 @@ export function createRecoveryJournalStore({
       const names = (await readdir(root))
         .filter((name) => /^[a-f0-9]{64}\.json$/u.test(name))
         .sort();
-      for (const name of names) {
-        if (!/^[a-f0-9]{64}\.json$/u.test(name)) continue;
+      let nextIndex = cursor
+        ? names.findIndex((name) => name.localeCompare(cursor) > 0)
+        : 0;
+      if (nextIndex < 0) nextIndex = names.length;
+      let lastConsumedName = cursor || null;
+      for (; nextIndex < names.length; nextIndex += 1) {
         if (
           scannedCount >= normalizedLimits.maxEntryCount
-          || Date.now() - startedAt >= normalizedLimits.scanTimeMs
+          || (
+            scannedCount > 0
+            && Date.now() - startedAt >= normalizedLimits.scanTimeMs
+          )
         ) {
           truncated = true;
           break;
         }
-        scannedCount += 1;
+        const name = names[nextIndex];
         try {
           const filePath = path.join(root, name);
           const facts = await lstat(filePath);
@@ -586,14 +607,15 @@ export function createRecoveryJournalStore({
           }
           if (
             facts.size > normalizedLimits.maxEntryBytes
-            || totalBytes + facts.size > normalizedLimits.maxTotalBytes
           ) {
             invalidCount += 1;
-            if (totalBytes + facts.size > normalizedLimits.maxTotalBytes) {
-              truncated = true;
-              break;
-            }
+            scannedCount += 1;
+            lastConsumedName = name;
             continue;
+          }
+          if (totalBytes + facts.size > normalizedLimits.maxTotalBytes) {
+            truncated = true;
+            break;
           }
           totalBytes += facts.size;
           const bytes = await readFile(filePath);
@@ -608,7 +630,10 @@ export function createRecoveryJournalStore({
         } catch {
           invalidCount += 1;
         }
+        scannedCount += 1;
+        lastConsumedName = name;
       }
+      if (nextIndex < names.length) truncated = true;
       entries.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
       return Object.freeze({
         entries: Object.freeze(entries),
@@ -616,6 +641,7 @@ export function createRecoveryJournalStore({
         scannedCount,
         totalBytes,
         truncated,
+        nextCursor: truncated ? lastConsumedName : null,
       });
     },
   });
