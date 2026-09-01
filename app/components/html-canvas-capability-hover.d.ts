@@ -48,7 +48,7 @@ export function clipCanvasTargetRectToViewport(
 ): CanvasHoverHitRect | null;
 
 export type CanvasCapabilityHoverSnapshot = Readonly<{
-  cursor: "default" | "text" | "pointer" | "help";
+  cursor: "default" | "text" | "pointer";
   outline: boolean;
   hint: boolean;
   capability: ResolvedCanvasTarget | null;

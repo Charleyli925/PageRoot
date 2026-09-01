@@ -57,6 +57,7 @@ export type RegisteredProject = {
   hasPendingCandidate: boolean;
   availability: "ready" | "unavailable" | "invalid";
   availabilityReason?: string | null;
+  lastUpdatedAt: string | null;
   lastOpenedAt: number | null;
 };
 

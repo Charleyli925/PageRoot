@@ -8,7 +8,6 @@ import {
   useState,
 } from "react";
 import {
-  CaretDownIcon,
   CaretRightIcon,
   FileHtmlIcon,
   FolderSimpleIcon,
@@ -36,6 +35,7 @@ import {
 import { WorkbenchResizer } from "./workbench-resizer";
 import {
   createProjectExpansionState,
+  sortSidebarProjects,
   reconcileProjectExpansionState,
   toggleProjectExpansion,
   type ProjectExpansionState,
@@ -337,7 +337,10 @@ export function WorkbenchGlobalSidebar({
   projectsError,
   currentProjectId,
   currentProjectName,
+  currentProjectDocumentId,
+  currentProjectSourcePath,
   currentProjectVersions,
+  activeVersionId,
   projectRulesActive,
   onToggle,
   onOpenLocal,
@@ -361,7 +364,10 @@ export function WorkbenchGlobalSidebar({
   projectsError?: string;
   currentProjectId: string | null;
   currentProjectName: string;
+  currentProjectDocumentId: string | null;
+  currentProjectSourcePath: string | null;
   currentProjectVersions: readonly ProjectVersionSummary[];
+  activeVersionId: string | null;
   projectRulesActive: boolean;
   onToggle: () => void;
   onOpenLocal: () => void;
@@ -390,14 +396,53 @@ export function WorkbenchGlobalSidebar({
   const requestTokensRef = useRef(new Map<string, number>());
   const requestSequenceRef = useRef(0);
 
-  const knownProjectIdsKey = useMemo(() => {
-    const ids = new Set<string>();
-    if (currentProjectId) ids.add(currentProjectId);
+  const fallbackProjectLastUpdatedAt = useMemo(() => {
+    const timestamps = currentProjectVersions
+      .map((version) => Date.parse(String(version.modifiedAt || "")))
+      .filter((timestamp) => Number.isFinite(timestamp));
+    return timestamps.length > 0
+      ? new Date(Math.max(...timestamps)).toISOString()
+      : null;
+  }, [currentProjectVersions]);
+
+  const projects = useMemo(() => {
+    const byId = new Map<string, RegisteredProject>();
     for (const project of registeredProjects) {
-      if (project.projectId) ids.add(project.projectId);
+      if (project.projectId) byId.set(project.projectId, project);
     }
-    return [...ids].join("\u0000");
-  }, [currentProjectId, registeredProjects]);
+    if (currentProjectId && !byId.has(currentProjectId)) {
+      byId.set(currentProjectId, {
+        projectId: currentProjectId,
+        documentId: currentProjectDocumentId,
+        projectName: currentProjectName || "尚未打开项目",
+        registeredProjectRootPath: "",
+        activeWorkingCopyId: null,
+        activeSourcePath: currentProjectSourcePath,
+        currentBasedOnVersionId: activeVersionId,
+        latestOfficialVersionId: null,
+        hasPendingCandidate: false,
+        availability: currentProjectDocumentId && currentProjectSourcePath
+          ? "ready"
+          : "unavailable",
+        availabilityReason: null,
+        lastUpdatedAt: fallbackProjectLastUpdatedAt,
+        lastOpenedAt: null,
+      });
+    }
+    return sortSidebarProjects([...byId.values()]);
+  }, [
+    activeVersionId,
+    currentProjectDocumentId,
+    currentProjectId,
+    currentProjectName,
+    currentProjectSourcePath,
+    fallbackProjectLastUpdatedAt,
+    registeredProjects,
+  ]);
+
+  const knownProjectIdsKey = useMemo(() => {
+    return projects.map((project) => project.projectId).join("\u0000");
+  }, [projects]);
 
   useEffect(() => {
     const knownProjectIds = knownProjectIdsKey ? knownProjectIdsKey.split("\u0000") : [];
@@ -417,11 +462,9 @@ export function WorkbenchGlobalSidebar({
     }
   }, [currentProjectId, knownProjectIdsKey]);
 
-  const importedProjects = useMemo(
-    () => registeredProjects
-      .filter((project) => project.projectId !== currentProjectId)
-      .slice(0, 12),
-    [currentProjectId, registeredProjects],
+  const otherProjects = useMemo(
+    () => projects.filter((project) => project.projectId !== currentProjectId),
+    [currentProjectId, projects],
   );
 
   const loadImportedProject = useCallback(async (
@@ -471,7 +514,7 @@ export function WorkbenchGlobalSidebar({
   }, [loadProjectVersions, versionStates]);
 
   useEffect(() => {
-    for (const project of importedProjects) {
+    for (const project of otherProjects) {
       if (
         projectExpansionState.expandedProjectIds[project.projectId] === true
         && !versionStates[project.projectId]
@@ -480,13 +523,13 @@ export function WorkbenchGlobalSidebar({
       }
     }
   }, [
-    importedProjects,
+    otherProjects,
     loadImportedProject,
     projectExpansionState.expandedProjectIds,
     versionStates,
   ]);
 
-  const toggleImportedProject = useCallback((project: RegisteredProject) => {
+  const toggleOtherProject = useCallback((project: RegisteredProject) => {
     const expanded = projectExpansionState.expandedProjectIds[project.projectId] === true;
     setProjectExpansionState((state) => toggleProjectExpansion(state, project.projectId));
     if (!expanded) void loadImportedProject(project);
@@ -526,76 +569,57 @@ export function WorkbenchGlobalSidebar({
             ) : null}
           </div>
           <div className="workbench-sidebar-body">
-            <button type="button" onClick={onOpenLocal}><PlusIcon aria-hidden="true" size={14} weight="bold" />新建项目</button>
+            <button type="button" onClick={onOpenLocal}>
+              <PlusIcon aria-hidden="true" size={16} weight="bold" />
+              <span>新建项目</span>
+            </button>
             {openHtmlError ? (
               <p className="workbench-sidebar-error" role="alert">{openHtmlError}</p>
             ) : null}
-            <section className="sidebar-project-section" aria-labelledby="sidebar-current-project-heading">
-              <h2 id="sidebar-current-project-heading">当前项目</h2>
-              <button
-                className="sidebar-project-row sidebar-project-row-current"
-                type="button"
-                aria-current={currentProjectId ? "true" : undefined}
-                aria-expanded={Boolean(currentProjectId && projectExpansionState.expandedProjectIds[currentProjectId])}
-                disabled={!currentProjectId}
-                onClick={() => currentProjectId && toggleProject(currentProjectId)}
-              >
-                {currentProjectId && projectExpansionState.expandedProjectIds[currentProjectId]
-                  ? <CaretDownIcon aria-hidden="true" size={13} weight="bold" />
-                  : <CaretRightIcon aria-hidden="true" size={13} weight="bold" />}
-                <FolderSimpleIcon className="sidebar-project-icon" aria-hidden="true" size={14} weight="regular" />
-                <span className="sidebar-project-name">{currentProjectName || "尚未打开项目"}</span>
-              </button>
-              <button
-                className="sidebar-project-rules-row"
-                type="button"
-                disabled={!currentProjectId}
-                aria-current={projectRulesActive ? "page" : undefined}
-                data-selected={projectRulesActive ? "true" : undefined}
-                onClick={onOpenProjectRules}
-              >
-                <PencilSimpleIcon aria-hidden="true" size={14} weight="regular" />
-                <span className="sidebar-project-rules-copy">
-                  <strong>长期规则</strong>
-                  <small>PROJECT.md</small>
-                </span>
-              </button>
-              {currentProjectId && projectExpansionState.expandedProjectIds[currentProjectId] ? (
-                <ProjectVersionTree
-                  key={currentProjectId}
-                  versions={currentProjectVersions}
-                  isCurrentProject
-                  onOpenVersion={onOpenCurrentVersion}
-                />
-              ) : null}
-            </section>
-            <section className="sidebar-project-section" aria-labelledby="sidebar-imported-project-heading">
-              <h2 id="sidebar-imported-project-heading">已导入项目</h2>
+            <section className="sidebar-project-section" aria-labelledby="sidebar-project-heading">
+              <h2 id="sidebar-project-heading">项目</h2>
               {projectsError ? <span className="workbench-sidebar-error" role="status">{projectsError}</span> : null}
-              {importedProjects.length ? importedProjects.map((project) => {
+              {projects.length ? projects.map((project) => {
+                const isCurrentProject = project.projectId === currentProjectId;
                 const expanded = projectExpansionState.expandedProjectIds[project.projectId] === true;
                 const state = versionStates[project.projectId];
                 return (
-                  <div className="sidebar-imported-project" key={project.projectId}>
+                  <div className="sidebar-project-item" key={project.projectId}>
                     <button
                       className="sidebar-project-row"
                       type="button"
-                      aria-current={project.projectId === currentProjectId ? "true" : undefined}
                       aria-expanded={expanded}
                       data-availability={project.availability}
-                      onClick={() => toggleImportedProject(project)}
+                      onClick={() => {
+                        if (isCurrentProject) toggleProject(project.projectId);
+                        else toggleOtherProject(project);
+                      }}
                     >
-                      {expanded
-                        ? <CaretDownIcon aria-hidden="true" size={13} weight="bold" />
-                        : <CaretRightIcon aria-hidden="true" size={13} weight="bold" />}
-                      <FolderSimpleIcon className="sidebar-project-icon" aria-hidden="true" size={14} weight="regular" />
+                      <FolderSimpleIcon className="sidebar-project-icon" aria-hidden="true" size={16} weight="regular" />
                       <span className="sidebar-project-name">{project.projectName}</span>
-                      {project.hasPendingCandidate ? (
-                        <span className="sidebar-project-pending" aria-label="有候选待审阅" title="有候选待审阅" />
-                      ) : null}
                     </button>
+                    {isCurrentProject ? (
+                      <button
+                        className="sidebar-project-rules-row"
+                        type="button"
+                        aria-current={projectRulesActive ? "page" : undefined}
+                        data-selected={projectRulesActive ? "true" : undefined}
+                        onClick={onOpenProjectRules}
+                      >
+                        <PencilSimpleIcon aria-hidden="true" size={16} weight="regular" />
+                        <span className="sidebar-project-rules-name">长期规则</span>
+                      </button>
+                    ) : null}
                     {expanded ? (
-                      !state || state.status === "loading" ? (
+                      isCurrentProject ? (
+                        <ProjectVersionTree
+                          key={currentProjectId}
+                          versions={currentProjectVersions}
+                          isCurrentProject
+                          activeVersionId={activeVersionId}
+                          onOpenVersion={onOpenCurrentVersion}
+                        />
+                      ) : !state || state.status === "loading" ? (
                         <ProjectVersionTreeSkeleton />
                       ) : state.status === "error" ? (
                         <div className="sidebar-project-load-error" role="status">
@@ -606,6 +630,7 @@ export function WorkbenchGlobalSidebar({
                         <ProjectVersionTree
                           versions={state.versions}
                           isCurrentProject={false}
+                          activeVersionId={null}
                           onOpenVersion={(version) => onOpenRegisteredVersion(project, version)}
                         />
                       )
@@ -613,7 +638,7 @@ export function WorkbenchGlobalSidebar({
                   </div>
                 );
               }) : (
-                <span className="sidebar-project-empty">暂无其他已导入项目</span>
+                <span className="sidebar-project-empty">暂无项目</span>
               )}
             </section>
           </div>

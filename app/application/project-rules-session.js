@@ -131,7 +131,7 @@ export class ProjectRulesSession {
       content: "",
       savedContent: "",
       loading: false,
-      error: String(error || "项目文件暂时无法读取；未显示任何可编辑的替代内容。"),
+      error: String(error || "长期规则暂时无法读取；未显示任何可编辑的替代内容。"),
     });
     return true;
   }

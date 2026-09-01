@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import {
@@ -184,4 +185,18 @@ test("selection chrome projection reuses equal geometry and invalidates changed 
     changedAction.selectedPagePresentationAction,
     first.selectedPagePresentationAction,
   );
+});
+
+test("native editing keeps one selected outline without PageRoot edit chrome", async () => {
+  const editor = await readFile(new URL(
+    "../app/components/HtmlCanvasEditor.tsx",
+    import.meta.url,
+  ), "utf8");
+  const editingStyle = editor.match(
+    /\[data-html-canvas-editing\]\s*\{[\s\S]*?\n\s*\}/u,
+  )?.[0];
+  assert.ok(editingStyle, "missing native editing style contract");
+  assert.match(editingStyle, /outline:\s*none\s*!important/u);
+  assert.doesNotMatch(editingStyle, /box-shadow|border/u);
+  assert.doesNotMatch(editor, /data-html-canvas-pointer="help"|cursor:\s*help/u);
 });

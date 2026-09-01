@@ -26,7 +26,6 @@ import type { ProjectVersionSummary } from "./types";
 const SIDEBAR_VERSION_ROW_HEIGHT = 34;
 const SIDEBAR_VERSION_LANE_WIDTH = 13;
 const SIDEBAR_VERSION_TRACK_MARGIN = 8;
-const SIDEBAR_VERSION_TRACK_TO_ICON = 6;
 const SIDEBAR_VERSION_LANE_COUNT = 4;
 const SIDEBAR_VERSION_NODE_RADIUS = 3.5;
 
@@ -200,13 +199,13 @@ function SidebarVersionFileName({
   version,
   parent,
   reducedMotion,
-  isCurrentWorkingCopy = version.isActiveWorkingCopy,
+  isActiveVersion = false,
   onOpen,
 }: {
   version: ProjectVersionSummary;
   parent: ProjectVersionSummary | null;
   reducedMotion: boolean;
-  isCurrentWorkingCopy?: boolean;
+  isActiveVersion?: boolean;
   onOpen: () => void;
 }) {
   const buttonRef = useRef<HTMLButtonElement>(null);
@@ -256,10 +255,10 @@ function SidebarVersionFileName({
         ref={buttonRef}
         className="sidebar-version-file"
         type="button"
-        aria-label={isCurrentWorkingCopy
-          ? `${version.displayFileName}，当前版本`
+        aria-label={isActiveVersion
+          ? `${version.displayFileName}，当前页面`
           : version.displayFileName}
-        aria-current={isCurrentWorkingCopy ? "true" : undefined}
+        aria-current={isActiveVersion ? "page" : undefined}
         aria-describedby={interaction.tooltipVisible ? tooltipId : undefined}
         onClick={onOpen}
         {...interaction.handlers}
@@ -276,7 +275,7 @@ function SidebarVersionFileName({
             {version.displayFileName}
           </span>
         </span>
-        {isCurrentWorkingCopy ? <span className="sr-only">当前版本</span> : null}
+        {isActiveVersion ? <span className="sr-only">当前页面</span> : null}
       </button>
       <SidebarTooltip
         id={tooltipId}
@@ -348,10 +347,12 @@ export function ProjectVersionTree({
   versions,
   onOpenVersion,
   isCurrentProject = true,
+  activeVersionId = null,
 }: {
   versions: readonly ProjectVersionSummary[];
   onOpenVersion: (version: ProjectVersionSummary) => void;
   isCurrentProject?: boolean;
+  activeVersionId?: string | null;
 }) {
   const reducedMotion = usePrefersReducedMotion();
   const now = useSidebarClock();
@@ -380,17 +381,12 @@ export function ProjectVersionTree({
     }
     return path;
   }, [versions]);
-  const rowByIndex = useMemo(
-    () => new Map(layout.rows.map((row) => [row.row, row])),
-    [layout.rows],
-  );
   const railWidth = SIDEBAR_VERSION_TRACK_MARGIN
     + Math.max(0, layout.laneCount - 1) * SIDEBAR_VERSION_LANE_WIDTH
     + 2;
   const treeStyle: SidebarStyle = {
     "--sidebar-version-rail-width": `${railWidth}px`,
     "--sidebar-version-row-height": `${SIDEBAR_VERSION_ROW_HEIGHT}px`,
-    "--sidebar-version-track-to-icon": `${SIDEBAR_VERSION_TRACK_TO_ICON}px`,
   };
 
   if (!versions.length) {
@@ -411,15 +407,9 @@ export function ProjectVersionTree({
         aria-hidden="true"
       >
         {layout.segments.map((segment) => {
-          const from = rowByIndex.get(segment.fromRow);
-          const to = rowByIndex.get(segment.toRow);
-          const current = Boolean(
-            from && to && currentPath.has(from.versionId) && currentPath.has(to.versionId),
-          );
           return (
             <path
               className="sidebar-version-rail-path"
-              data-current={current ? "true" : undefined}
               d={`M${laneCenter(segment.lane)} ${rowCenter(segment.fromRow)}V${rowCenter(segment.toRow)}`}
               key={`s${segment.lane}-${segment.fromRow}-${segment.toRow}`}
               stroke={laneStroke(segment.lane)}
@@ -427,14 +417,12 @@ export function ProjectVersionTree({
           );
         })}
         {layout.edges.map((edge) => {
-          const current = currentPath.has(edge.toVersionId);
           const from = laneCenter(edge.fromLane);
           const to = laneCenter(edge.toLane);
           const top = rowCenter(edge.fromRow);
           return (
             <path
               className="sidebar-version-rail-path"
-              data-current={current ? "true" : undefined}
               d={`M${from} ${top}H${to}V${rowCenter(edge.toRow)}`}
               key={`e${edge.fromVersionId}-${edge.toVersionId}`}
               stroke={laneStroke(edge.toLane)}
@@ -442,21 +430,20 @@ export function ProjectVersionTree({
           );
         })}
         {layout.rows.map((row) => {
-          const current = isCurrentProject
-            && byId.get(row.versionId)?.isActiveWorkingCopy === true;
-          const onCurrentPath = currentPath.has(row.versionId);
+          const selected = isCurrentProject
+            && Boolean(activeVersionId)
+            && row.versionId === activeVersionId;
           const center = { cx: laneCenter(row.lane), cy: rowCenter(row.row) };
           return (
             <g key={`n${row.versionId}`}>
               <circle
                 className="sidebar-version-node"
-                data-current={current ? "true" : undefined}
-                data-current-path={onCurrentPath ? "true" : undefined}
+                data-selected={selected ? "true" : undefined}
                 {...center}
                 r={SIDEBAR_VERSION_NODE_RADIUS}
                 stroke={laneStroke(row.lane)}
               />
-              {current ? (
+              {selected ? (
                 <circle
                   className="sidebar-version-node-center"
                   {...center}
@@ -474,26 +461,26 @@ export function ProjectVersionTree({
           if (!version) return null;
           const parentId = version.basedOnVersionId || version.previousVersionId || null;
           const parent = parentId ? byId.get(parentId) || null : null;
-          const current = isCurrentProject && version.isActiveWorkingCopy;
           const onCurrentPath = currentPath.has(version.versionId);
+          const selected = isCurrentProject
+            && Boolean(activeVersionId)
+            && version.versionId === activeVersionId;
           return (
             <div
               className="sidebar-version-row"
-              data-current={current ? "true" : undefined}
-              data-current-path={onCurrentPath ? "true" : undefined}
+              data-selected={selected ? "true" : undefined}
+              data-working-copy-path={onCurrentPath ? "true" : undefined}
               data-latest={version.isLatestOfficial ? "true" : undefined}
               key={version.versionId}
               role="treeitem"
               aria-level={row.lane + 1}
-              aria-selected={current}
+              aria-selected={selected}
             >
               <SidebarVersionFileName
                 version={version}
                 parent={parent}
                 reducedMotion={reducedMotion}
-                // Imported summaries retain their local lineage data, but
-                // never advertise a globally current file to assistive tech.
-                isCurrentWorkingCopy={current}
+                isActiveVersion={selected}
                 onOpen={() => onOpenVersion(version)}
               />
               <SidebarVersionTime

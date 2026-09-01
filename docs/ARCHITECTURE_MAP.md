@@ -119,13 +119,17 @@ ProjectSession + ProjectWorkflow + ProjectRulesWorkflow + VersionSession
 ```
 
 The global sidebar owns the visible project context, safe project switching, the
-fixed `PROJECT.md` entry and the fixed settings entry. The “长期规则” row is
-not part of the version timeline: it opens the singleton `project-rules` tab in
-the workbench and never receives a version date. `ProjectRulesSession` and
-`ProjectRulesWorkflow` remain fact and lifecycle owners for persistence,
-autosave and close/switch safety; the editor is only a projection over that
-workflow. The document canvas remains mounted while the rules tab is visible,
-so switching presentation does not rebuild the HTML iframe.
+single mixed project list and the fixed settings entry. The current project
+contains the “长期规则” row; it is not part of the version timeline and opens
+the singleton `project-rules` tab in the workbench without a version date.
+Project rows are deduplicated by `projectId` and ordered by the authoritative
+content-update timestamp; opening a project does not update that order.
+`ProjectRulesSession` and `ProjectRulesWorkflow` remain fact and lifecycle
+owners for persistence, autosave and close/switch safety; the editor is only a
+projection over that workflow. The document canvas remains mounted while the
+rules tab is visible, so switching presentation does not rebuild the HTML
+iframe. The repository may continue to persist the rules in its internal
+`PROJECT.md` file without exposing that filename in the UI.
 
 ## Run and navigation render boundaries
 
