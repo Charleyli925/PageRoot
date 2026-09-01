@@ -6393,6 +6393,10 @@ export default function Workbench() {
   const projectCatalogCapability = workspaceController
     ? workspaceController.projectCatalog as ProjectCatalogCapability
     : null;
+  const browserEditingRuntimeActive = runtimeCapabilitiesReady
+    && runtimeCapabilitiesRef.current.sourceEditing === "enabled"
+    && runtimeCapabilitiesRef.current.projectOpening === "browser-file";
+  const canMountUnboundCanvas = Boolean(documentRuntimeTabId) || browserEditingRuntimeActive;
   const currentProjectDisplayName = currentProjectNameFromFile(sourcePath, projectName);
   const currentProjectSidebarVersions = useMemo(() => (
     projectId && documentId
@@ -6861,7 +6865,7 @@ export default function Workbench() {
                   activeSourceSha256={sourceSha256} activeCanvasGeneration={canvasGeneration}
                   retainedTabIds={retainedCanvasKeys.map((entry) => entry.tabId)}
                   onEvict={evictRuntimeCanvas}
-                  activeElement={documentRuntimeTabId
+                  activeElement={canMountUnboundCanvas
                     && !(editRuntimePreparing && !activeRuntimeCanvasUsable)
                     ? <HtmlCanvasEditor
                   key={`editor-authority-${documentRuntimeTabId || "none"}-${canvasGeneration}`}
@@ -6948,7 +6952,7 @@ export default function Workbench() {
               </>
             ) : null}
           </div>
-          {canvasMode === "preview" && documentRuntimeTabId ? (
+          {canvasMode === "preview" && (documentRuntimeTabId || browserPreviewOnly) ? (
             <HtmlInteractionPreview
               key={`preview-authority-${canvasGeneration}`}
               ref={interactionPreviewRef}
