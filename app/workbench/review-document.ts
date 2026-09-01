@@ -293,6 +293,13 @@ function presentationElement(
     element.matches("[data-pageroot-review-text],[data-pageroot-review-structure]")
   ));
   if (preciseMarker) return preciseMarker;
+  const stableHost = [
+    ...(root.hasAttribute("data-pageroot-id") ? [root] : []),
+    ...root.querySelectorAll("[data-pageroot-id]"),
+  ].find((element) => evidenceStableIds.includes(
+    element.getAttribute("data-pageroot-id") || "",
+  ));
+  if (stableHost) return stableHost;
   return markers.find((element) => {
       const stableId = element.closest("[data-pageroot-id]")?.getAttribute("data-pageroot-id") || "";
       return evidenceStableIds.includes(stableId);
@@ -307,9 +314,35 @@ function reviewPresentationForChange(
   changeId: string,
   evidenceStableIds: readonly string[],
 ): ReviewPresentation {
+  const preciseStableIds = [...new Set([pair.before, pair.after].flatMap((root) => {
+    if (!root) return [];
+    const selector = `[data-pageroot-review-marker="${changeId}"]`;
+    return [
+      ...(root.matches(selector) ? [root] : []),
+      ...root.querySelectorAll(selector),
+    ].flatMap((element) => {
+      if (!element.matches("[data-pageroot-review-text],[data-pageroot-review-structure]")) {
+        return [];
+      }
+      const stableId = element.closest("[data-pageroot-id]")
+        ?.getAttribute("data-pageroot-id") || "";
+      return stableId ? [stableId] : [];
+    });
+  }))];
+  const presentationStableIds = preciseStableIds.length
+    ? preciseStableIds
+    : evidenceStableIds;
   return {
-    before: revealStepsForElement(presentationElement(pair.before, changeId, evidenceStableIds)),
-    after: revealStepsForElement(presentationElement(pair.after, changeId, evidenceStableIds)),
+    before: revealStepsForElement(presentationElement(
+      pair.before,
+      changeId,
+      presentationStableIds,
+    )),
+    after: revealStepsForElement(presentationElement(
+      pair.after,
+      changeId,
+      presentationStableIds,
+    )),
   };
 }
 
