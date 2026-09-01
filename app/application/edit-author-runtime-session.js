@@ -52,8 +52,9 @@ function sameKey(left, right) {
 
 function normalizedGrant(value, request) {
   const allowedLibraryOrigins = new Set([
-    "bundled", "network", "local", "inline",
+    "bundled", "bundled-compatible", "disk-cache", "network", "local", "inline",
   ]);
+  const resourceMode = value?.resourceMode === undefined ? "exact" : value.resourceMode;
   if (
     !isRecord(value)
     || value.contractVersion !== EDIT_AUTHOR_RUNTIME_CONTRACT_VERSION
@@ -70,6 +71,13 @@ function normalizedGrant(value, request) {
     || value.byteLength > EDIT_AUTHOR_RUNTIME_BUDGET.aggregateScriptBytes
     || value.canvasGeneration !== request.canvasGeneration
     || typeof request.programIdentity !== "string"
+    || !["exact", "compatible"].includes(resourceMode)
+    || (
+      value.recoveryAvailable !== undefined
+      && typeof value.recoveryAvailable !== "boolean"
+    )
+    || (resourceMode === "compatible" && value.recoveryAvailable !== true)
+    || (resourceMode === "exact" && value.recoveryAvailable === true)
     || (
       value.libraryOrigins !== undefined
       && (
@@ -88,6 +96,8 @@ function normalizedGrant(value, request) {
     scriptCount: value.scriptCount,
     byteLength: value.byteLength,
     libraryOrigins: Object.freeze([...(value.libraryOrigins || [])]),
+    resourceMode,
+    recoveryAvailable: resourceMode === "compatible",
     canvasGeneration: request.canvasGeneration,
     programIdentity: request.programIdentity,
   });
@@ -104,6 +114,9 @@ export class EditAuthorRuntimeSession {
   #snapshot = frozenSnapshot();
   #identity = null;
   #pendingPreparation = null;
+  #activeRequest = null;
+  #recoveryGrant = null;
+  #recoveryConsumed = false;
   #attemptGeneration = 0;
   #requestSequence = 0;
   #disposed = false;
@@ -111,7 +124,12 @@ export class EditAuthorRuntimeSession {
   constructor({ port = null } = {}) {
     if (
       port !== null
-      && (!isRecord(port) || typeof port.prepare !== "function" || typeof port.revoke !== "function")
+      && (
+        !isRecord(port)
+        || typeof port.prepare !== "function"
+        || (port.recover !== undefined && typeof port.recover !== "function")
+        || typeof port.revoke !== "function"
+      )
     ) {
       throw new TypeError("EditAuthorRuntimeSession requires a narrow prepare/revoke port.");
     }
@@ -147,9 +165,21 @@ export class EditAuthorRuntimeSession {
     void Promise.resolve(this.#port.revoke(grant.sessionId)).catch(() => undefined);
   }
 
+  #revokeActiveGrants() {
+    const grants = [this.#snapshot.grant, this.#recoveryGrant];
+    const revoked = new Set();
+    for (const grant of grants) {
+      if (!grant?.sessionId || revoked.has(grant.sessionId)) continue;
+      revoked.add(grant.sessionId);
+      this.#revoke(grant);
+    }
+    this.#recoveryGrant = null;
+  }
+
   #transitionToStatic(phase, lastOutcome, identity = this.#identity) {
     this.#pendingPreparation = null;
-    this.#revoke(this.#snapshot.grant);
+    this.#activeRequest = null;
+    this.#revokeActiveGrants();
     this.#emit({
       phase,
       sourceSha256: identity?.sourceSha256 || null,
@@ -205,7 +235,9 @@ export class EditAuthorRuntimeSession {
 
     this.#attemptGeneration += 1;
     this.#pendingPreparation = null;
-    this.#revoke(this.#snapshot.grant);
+    this.#activeRequest = null;
+    this.#recoveryConsumed = false;
+    this.#revokeActiveGrants();
     this.#identity = identity;
     const attemptGeneration = this.#attemptGeneration;
     if (!sourceIsAuthoritative) {
@@ -267,6 +299,7 @@ export class EditAuthorRuntimeSession {
       programIdentity,
       canvasGeneration: identity.canvasGeneration,
     });
+    this.#activeRequest = request;
     this.#pendingPreparation = Object.freeze({
       attemptGeneration,
       identity,
@@ -352,6 +385,73 @@ export class EditAuthorRuntimeSession {
     return true;
   }
 
+  #recoverCompatibleRuntime(grant, outcome) {
+    const request = this.#activeRequest;
+    const identity = this.#identity;
+    if (
+      this.#recoveryConsumed
+      || !request
+      || !identity
+      || grant.resourceMode !== "compatible"
+      || grant.recoveryAvailable !== true
+      || typeof this.#port?.recover !== "function"
+    ) {
+      this.#transitionToStatic(
+        "static-fallback",
+        outcome === "rejected" ? "rejected" : "runtime-failed",
+      );
+      return;
+    }
+    this.#recoveryConsumed = true;
+    this.#recoveryGrant = grant;
+    const attemptGeneration = this.#attemptGeneration;
+    this.#emit({
+      phase: "recovering",
+      sourceSha256: grant.sourceSha256,
+      sourcePath: identity.sourcePath,
+      canvasGeneration: grant.canvasGeneration,
+      lastOutcome: outcome === "rejected" ? "compatible-rejected" : "compatible-failed",
+    });
+    void Promise.resolve(this.#port.recover({
+      sessionId: grant.sessionId,
+      sourceSha256: grant.sourceSha256,
+      programIdentity: grant.programIdentity,
+      canvasGeneration: grant.canvasGeneration,
+    })).then((result) => {
+      if (
+        this.#disposed
+        || attemptGeneration !== this.#attemptGeneration
+        || !sameKey(this.#identity, identity)
+      ) {
+        this.#revoke(result);
+        return;
+      }
+      const exactGrant = normalizedGrant(result, request);
+      if (!exactGrant || exactGrant.resourceMode !== "exact") {
+        this.#revoke(result);
+        this.#transitionToStatic("static-fallback", "recovery-failed", identity);
+        return;
+      }
+      this.#revoke(this.#recoveryGrant);
+      this.#recoveryGrant = null;
+      this.#emit({
+        phase: "ready",
+        sourceSha256: identity.sourceSha256,
+        sourcePath: identity.sourcePath,
+        canvasGeneration: identity.canvasGeneration,
+        grant: exactGrant,
+        lastOutcome: "recovery-ready",
+      });
+    }).catch(() => {
+      if (
+        this.#disposed
+        || attemptGeneration !== this.#attemptGeneration
+        || !sameKey(this.#identity, identity)
+      ) return;
+      this.#transitionToStatic("static-fallback", "recovery-failed", identity);
+    });
+  }
+
   settleRuntime({ sessionId, sourceSha256, canvasGeneration, outcome } = {}) {
     const grant = this.#snapshot.grant;
     if (
@@ -372,6 +472,10 @@ export class EditAuthorRuntimeSession {
       });
       return true;
     }
+    if (grant.resourceMode === "compatible") {
+      this.#recoverCompatibleRuntime(grant, outcome);
+      return true;
+    }
     this.#transitionToStatic(
       "static-fallback",
       outcome === "rejected" ? "rejected" : "runtime-failed",
@@ -383,9 +487,10 @@ export class EditAuthorRuntimeSession {
     if (this.#disposed) return;
     this.#disposed = true;
     this.#attemptGeneration += 1;
-    this.#revoke(this.#snapshot.grant);
+    this.#revokeActiveGrants();
     this.#identity = null;
     this.#pendingPreparation = null;
+    this.#activeRequest = null;
     this.#listeners.clear();
     this.#snapshot = frozenSnapshot();
   }

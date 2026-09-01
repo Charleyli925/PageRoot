@@ -344,7 +344,12 @@ const INITIAL_DOCUMENT_SNAPSHOT: DocumentSessionSnapshot = {
   hasPendingWrite: false,
   isFlushing: false,
 };
-const EDIT_RUNTIME_PENDING_PHASES = new Set(["preparing", "ready", "running"]);
+const EDIT_RUNTIME_PENDING_PHASES = new Set([
+  "preparing",
+  "recovering",
+  "ready",
+  "running",
+]);
 const INITIAL_COMMENT_SNAPSHOT: CommentSessionSnapshot<
   CommentItem,
   DirectEditEvent,
@@ -865,6 +870,7 @@ export default function Workbench() {
         ...(editRuntimeApi ? {
           editRuntime: {
             prepare: (request) => editRuntimeApi.prepare(request),
+            recover: (request) => editRuntimeApi.recover?.(request) ?? Promise.resolve(null),
             revoke: (sessionId) => editRuntimeApi.revoke(sessionId),
           },
         } : {}),

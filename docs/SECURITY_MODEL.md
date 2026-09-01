@@ -94,13 +94,27 @@ PageRoot edits local files and renders user-controlled HTML, so its default poli
   cannot register a generated object against a future parser-node identity;
   copied public markers remain non-authoritative. The bootstrap does not
   freeze author activity or audit Runtime DOM. Exact ECharts 5.5.0 minified CDN
-  references use the packaged SHA-verified library; other reviewed URLs are
-  fetched per resource session and are not retained in a private disk cache.
+  references use the packaged SHA-verified library. Exact-version allowlisted
+  ECharts core URLs may be retained in a private content-addressed byte store:
+  canonical URL metadata never replaces SHA-256 verification, corrupted entries
+  fail open to the bounded network loader, and the store owns neither source nor
+  execution authority. Exact immutable redirects must retain version, core
+  filename and query identity before their bytes may be cached under the
+  requested URL. Only the three standard query-free 5.4.3 core URLs, without an
+  integrity attribute or any additional executable `src` attribute, may
+  temporarily resolve to packaged 5.5.0. That compatible resource set is
+  immutable; exact bytes arriving later
+  only update the store unless the compatible runtime failed and consumes its
+  one authorized recovery. Recovery is re-authorized in Main against the bound
+  canonical source path, source Hash, authored-program identity and Canvas
+  generation before it can inherit the original resource root.
   Under the accepted product risk in ADR 0065, author scripts in that iframe can reach
   renderer-exposed contextBridge APIs on the parent. The iframe itself still
   has no Node integration and no preload or IPC sender of its own. Capture
-  preparation, provenance or load failure revokes the session and renders static
-  Edit. Edit must not answer a security concern by converting to PNG.
+  Terminal preparation, provenance, recovery or load failure revokes the session
+  and renders static Edit. A still-running exact resource download is recoverable
+  coordination, not a terminal security decision. Edit must not answer a security
+  concern by converting to PNG.
   Main admits two concurrent preparations and retains a bounded recent request-
   ID replay window. Completed IDs age out, so renderer IDs cannot grow memory
   without bound and ordinary use cannot exhaust the app lifetime.

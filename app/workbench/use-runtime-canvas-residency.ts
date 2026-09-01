@@ -103,9 +103,10 @@ export function useRuntimeCanvasResidency({
     )),
   ), [activeSourceSha256, activeTabId, keys]);
   const runtimePhase = editRuntimeSnapshot?.phase ?? "static";
-  const runtimePreparing = canvasMode === "edit" && runtimePhase === "preparing";
+  const runtimePreparing = canvasMode === "edit"
+    && ["preparing", "recovering"].includes(runtimePhase);
   const runtimeRenderPending = canvasMode === "edit"
-    && ["preparing", "ready", "running"].includes(runtimePhase);
+    && ["preparing", "recovering", "ready", "running"].includes(runtimePhase);
   const runtimeGrant = canvasMode === "edit"
     && ["ready", "running", "settled"].includes(runtimePhase)
     ? editRuntimeSnapshot?.grant ?? null
@@ -115,7 +116,7 @@ export function useRuntimeCanvasResidency({
     const sourceSha256 = editRuntimeSnapshot?.sourceSha256;
     const canvasGeneration = editRuntimeSnapshot?.canvasGeneration;
     if (
-      !runtimePreparing
+      runtimePhase !== "preparing"
       || !sourceSha256
       || typeof canvasGeneration !== "number"
       || !Number.isSafeInteger(canvasGeneration)
@@ -126,7 +127,7 @@ export function useRuntimeCanvasResidency({
     editRuntimeSnapshot?.canvasGeneration,
     editRuntimeSnapshot?.sourcePath,
     editRuntimeSnapshot?.sourceSha256,
-    runtimePreparing,
+    runtimePhase,
     startPreparation,
   ]);
 

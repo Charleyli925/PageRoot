@@ -661,3 +661,37 @@ test("Electron Edit renders a source-relative ECharts page in the editable ifram
     expect(readFileSync(sourcePath, "utf8")).toBe(html);
   });
 });
+
+test("Electron Edit renders the reviewed ECharts 5.4.3 URL immediately with packaged compatible bytes", {
+  tag: ["@gate-smoke", "@smoke-editing"],
+}, async () => {
+  const html = `<!doctype html>
+<html><head><title>Compatible Runtime</title></head><body>
+  <main id="chart" data-native-case="echarts-compatible-runtime" style="width:320px;height:180px"></main>
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+  <script>
+    echarts.init(document.querySelector('#chart')).setOption({
+      animation: false,
+      xAxis: { type: 'category', data: ['A', 'B', 'C'] },
+      yAxis: { type: 'value' },
+      series: [{ type: 'bar', data: [1, 2, 3] }],
+    });
+  </script>
+</body></html>`;
+  await withRuntimeProject("pageroot-echarts-compatible-e2e-", {
+    "runtime-report.html": html,
+  }, async ({ page, sourcePath }) => {
+    const { frame } = await loadedDiskFrame(
+      page,
+      sourcePath,
+      "echarts-compatible-runtime",
+    );
+    await expect(frame.locator("#chart canvas")).toHaveCount(1);
+    await expect(page.getByTestId("html-canvas-editor")).toHaveAttribute(
+      "data-runtime-library-origins",
+      /bundled-compatible/u,
+    );
+    await expect(page.getByTestId("edit-runtime-static-fallback")).toHaveCount(0);
+    expect(readFileSync(sourcePath, "utf8")).toBe(html);
+  });
+});

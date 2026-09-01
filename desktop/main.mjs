@@ -138,10 +138,12 @@ import {
   createEditRuntimeProtocolController,
   registerEditRuntimeProtocolScheme,
 } from "./edit-runtime-protocol.mjs";
+import { createEditRuntimeLibraryStore } from "./edit-runtime-library-store.mjs";
 import {
   EDIT_AUTHOR_RUNTIME_CONTRACT_VERSION,
   editRuntimeProgramIdentity,
   isEditRuntimeRequestId,
+  isEditRuntimeSessionId,
 } from "../app/domain/edit-runtime-contract.js";
 import {
   createEditRuntimePreparationFence,
@@ -292,6 +294,7 @@ const PREVIEW_CHANNELS = Object.freeze({
 });
 const EDIT_RUNTIME_CHANNELS = Object.freeze({
   prepare: "html-edit-runtime:prepare",
+  recover: "html-edit-runtime:recover",
   revoke: "html-edit-runtime:revoke",
 });
 const EDIT_CHANNELS = Object.freeze({
@@ -463,6 +466,9 @@ function ensureEditRuntimeProtocolController() {
       protocolApi: protocol,
       netFetch: (url, options) => net.fetch(url, options),
       bundledEchartsPath,
+      runtimeLibraryStore: createEditRuntimeLibraryStore({
+        userDataPath: app.getPath("userData"),
+      }),
     });
     editRuntimeProtocolController.install();
   }
@@ -2003,6 +2009,12 @@ async function prepareEditAuthorRuntime(payload) {
     session = await ensureEditRuntimeProtocolController().createSession({
       html: activeSource.html,
       sourcePath: assetSourcePath,
+      recoveryIdentity: {
+        sourceSha256: activeSource.sha256,
+        authoritySourcePath: activeSource.sourcePath,
+        programIdentity: payload.programIdentity,
+        canvasGeneration: payload.canvasGeneration,
+      },
     });
     return Object.freeze({
       contractVersion: session.contractVersion,
@@ -2012,9 +2024,12 @@ async function prepareEditAuthorRuntime(payload) {
       resourceSha256: session.resourceSha256,
       documentBasePath: session.documentBasePath,
       libraryOrigins: session.libraryOrigins,
+      resourceMode: session.resourceMode,
+      recoveryAvailable: session.recoveryAvailable,
       scriptCount: session.scriptCount,
       byteLength: session.byteLength,
       canvasGeneration: payload.canvasGeneration,
+      programIdentity: payload.programIdentity,
     });
   } catch (cause) {
     if (session) {
@@ -2028,6 +2043,55 @@ async function prepareEditAuthorRuntime(payload) {
   } finally {
     releasePreparation();
   }
+}
+
+async function recoverEditAuthorRuntime(payload) {
+  assertExactPayload(payload, [
+    "sessionId",
+    "sourceSha256",
+    "programIdentity",
+    "canvasGeneration",
+  ]);
+  if (
+    !isEditRuntimeSessionId(payload.sessionId)
+    || typeof payload.sourceSha256 !== "string"
+    || typeof payload.programIdentity !== "string"
+    || !Number.isSafeInteger(payload.canvasGeneration)
+    || payload.canvasGeneration < 0
+  ) {
+    throw new Error("Edit runtime recovery identity is invalid.");
+  }
+  const activeSourcePath = await currentActivePath();
+  if (!activeSourcePath) throw new Error("Edit runtime recovery requires an active source path.");
+  const activeSource = await readHtmlFile({
+    sourcePath: activeSourcePath,
+    maxHtmlBytes: MAX_HTML_BYTES,
+  });
+  if (
+    payload.sourceSha256.toLowerCase() !== activeSource.sha256
+    || payload.programIdentity !== editRuntimeProgramIdentity(activeSource.html)
+  ) {
+    throw new Error("Edit runtime recovery source is no longer authoritative.");
+  }
+  const session = await ensureEditRuntimeProtocolController().recoverSession({
+    ...payload,
+    authoritySourcePath: activeSource.sourcePath,
+  });
+  return Object.freeze({
+    contractVersion: session.contractVersion,
+    sessionId: session.sessionId,
+    executionId: session.executionId,
+    sourceSha256: activeSource.sha256,
+    resourceSha256: session.resourceSha256,
+    documentBasePath: session.documentBasePath,
+    libraryOrigins: session.libraryOrigins,
+    resourceMode: session.resourceMode,
+    recoveryAvailable: session.recoveryAvailable,
+    scriptCount: session.scriptCount,
+    byteLength: session.byteLength,
+    canvasGeneration: payload.canvasGeneration,
+    programIdentity: payload.programIdentity,
+  });
 }
 
 const revokeEditAuthorRuntime = (sessionId) => (
@@ -3478,6 +3542,7 @@ function registerProjectIpc() {
         ensurePreviewProtocolController().revokeSession(sessionId)
       ),
       prepareEditAuthorRuntime,
+      recoverEditAuthorRuntime,
       revokeEditAuthorRuntime,
     },
   });

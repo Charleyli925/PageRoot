@@ -185,6 +185,7 @@ export const REQUIRED_APP_SOURCE_FILES = [
   "desktop/preview-protocol.mjs",
   "desktop/imported-asset-root.mjs",
   "desktop/edit-runtime-bootstrap.mjs",
+  "desktop/edit-runtime-library-store.mjs",
   "desktop/edit-runtime-protocol.mjs",
   "desktop/edit-runtime-preparation-fence.mjs",
   "app/domain/edit-runtime-contract.js",

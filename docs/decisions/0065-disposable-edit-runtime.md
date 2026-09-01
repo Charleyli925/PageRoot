@@ -2,7 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-08-30
-- Supersedes: [ADR 0025](archive/0025-edit-direct-one-shot-runtime.md), [ADR 0058](archive/0058-bounded-canvas-svg-edit-runtime.md), and the library-store/prewarm/freeze portions of [ADR 0054](0054-bundled-echarts-and-five-canvas-residency.md)
+- Supersedes: [ADR 0025](archive/0025-edit-direct-one-shot-runtime.md), [ADR 0058](archive/0058-bounded-canvas-svg-edit-runtime.md), and the prewarm/freeze/Runtime-cache portions of [ADR 0054](0054-bundled-echarts-and-five-canvas-residency.md). The verified immutable byte-store portion was restored on 2026-09-01 without restoring Runtime state.
 - Does not change: Preview isolation, Review's static-source facts, or complete-HTML persistence
 
 ## Context
@@ -36,6 +36,16 @@ source or be reconciled node by node.
   Workers stay
   CSP-disabled because worker bytes are outside the frozen author-script
   closure and its Hash/budget checks.
+- Exact-version allowlisted ECharts core bytes may be retained in a bounded,
+  content-addressed Main store. The exact three 5.4.3 minified core URLs may
+  use packaged 5.5.0 only when the tag has no integrity constraint and every
+  other executable script has no `src` attribute. Version, filename and query
+  identity remain fixed across redirects before exact bytes enter the store. This
+  compatible variant starts the background exact download but never mutates
+  its resource session. First successful runtime wins; compatible success
+  locks the current generation, while compatible failure may consume one new
+  immutable exact session from the same initial preparation after Main confirms
+  the original source path, Hash, program identity and Canvas generation.
 - Before author scripts execute, the fixed bootstrap opens one parent-owned
   registration capability. The parent editor deletes that entry after the
   bootstrap captures its private batch port. Once parsing reaches the complete
@@ -82,7 +92,7 @@ source or be reconciled node by node.
   serialized to source, save, Version, export, Request, Candidate or Review.
   Source HTML plus stable IDs remains the only persistence authority.
 - The former visual-signal gate, host discovery, real-paint/quiet-frame probe,
-  runtime mutation audit, activity freeze, script prewarm, disk cache and
+  runtime mutation audit, activity freeze, script prewarm, Runtime/DOM cache and
   per-node runtime snapshot reconciliation are retired.
 
 ## Editing-canvas experience and persistence contract
