@@ -120,9 +120,14 @@ import {
   tabAssociations,
 } from "./html-canvas-page-view";
 import {
+  clampRuntimeScroll,
   frameDocumentMatchesExpected,
+  runtimeAnchorScrollTop,
+  runtimePositionWithinTolerance,
   sameRuntimeGrant,
   type RuntimeFrameContext,
+  type RuntimeHandoffLayoutFingerprint,
+  type RuntimeViewportSnapshot,
 } from "./html-canvas-frame";
 import { useCanvasPresentationScroll } from "./html-canvas-presentation-scroll";
 import {
@@ -192,6 +197,7 @@ import {
   type SelectionChromeProjection,
 } from "./html-canvas-selection-chrome-contract";
 import type {
+  HtmlCanvasCommentLayoutState,
   HtmlCanvasCommentedTarget,
   HtmlCanvasCommitResult,
   HtmlCanvasEditRuntimeLoadOutcome,
@@ -511,6 +517,14 @@ type RuntimeActiveFrameSnapshot = {
     top: number;
   } | null;
   pendingFrameRestoreEpoch: number;
+  nativeSessionNeedsCanonicalFence: boolean;
+  nativeEditNeedsReload: boolean;
+  pendingNativeEditResume: PendingNativeEditResume | null;
+  selectedElement: HTMLElement | null;
+  selectedSourceSelection: HtmlCanvasSelection | null;
+  activeTextRange: ActiveTextRange | null;
+  toolbarVisible: boolean;
+  runtimeGeneratedSelection: boolean;
   connectedFrame: {
     iframe: HTMLIFrameElement;
     generation: number;
@@ -530,14 +544,644 @@ type RuntimeCandidate = {
   outcomeReported: boolean;
   previousPendingSelection: HtmlCanvasSelection | null;
   previousPendingToolbarVisible: boolean;
-  handoffFrameViewport: { left: number; top: number } | null;
-  handoffSharedViewport: {
-    element: HTMLElement;
-    left: number;
-    top: number;
-  } | null;
+  viewportSnapshot: RuntimeViewportSnapshot;
+  sharedViewportElement: HTMLElement | null;
+  handoffScrollState: RuntimeHandoffScrollState;
+  refreshViewportSnapshot: (
+    channel: RuntimeHandoffScrollChannel,
+    iframe?: HTMLIFrameElement | null,
+  ) => void;
+  markProgrammaticScroll: (
+    channel: RuntimeHandoffScrollChannel,
+    left: number,
+    top: number,
+  ) => void;
+  handoffScrollCleanup: () => void;
   previousActive: RuntimeActiveFrameSnapshot;
 };
+
+type RuntimeHandoffScrollChannel = "frame" | "shared";
+type RuntimeProgrammaticScrollSuppression = {
+  epoch: number;
+  left: number;
+  top: number;
+};
+type RuntimeHandoffScrollChannelState = {
+  epoch: number;
+  programmaticScrollEpoch: number;
+  userIntentEpoch: number;
+  userIntentPending: boolean;
+  pointerDragging: boolean;
+  programmaticScrollSuppression: RuntimeProgrammaticScrollSuppression | null;
+};
+type RuntimeHandoffScrollState = {
+  frame: RuntimeHandoffScrollChannelState;
+  shared: RuntimeHandoffScrollChannelState;
+};
+
+function createRuntimeHandoffScrollChannelState(): RuntimeHandoffScrollChannelState {
+  return {
+    epoch: 0,
+    programmaticScrollEpoch: 0,
+    userIntentEpoch: 0,
+    userIntentPending: false,
+    pointerDragging: false,
+    programmaticScrollSuppression: null,
+  };
+}
+
+function createRuntimeHandoffScrollState(): RuntimeHandoffScrollState {
+  return {
+    frame: createRuntimeHandoffScrollChannelState(),
+    shared: createRuntimeHandoffScrollChannelState(),
+  };
+}
+
+function isRuntimeScrollKey(event: KeyboardEvent): boolean {
+  if (event.altKey || event.ctrlKey || event.metaKey) return false;
+  return [
+    "ArrowDown",
+    "ArrowLeft",
+    "ArrowRight",
+    "ArrowUp",
+    "End",
+    "Home",
+    "PageDown",
+    "PageUp",
+    " ",
+    "Spacebar",
+  ].includes(event.key);
+}
+
+function documentScrollbarPointerDown(
+  documentNode: Document,
+  event: PointerEvent,
+): boolean {
+  const view = documentNode.defaultView;
+  const scrollingElement = documentNode.scrollingElement
+    || documentNode.documentElement;
+  if (!view || !scrollingElement) return false;
+  const verticalScrollbarWidth = Math.max(
+    12,
+    view.innerWidth - scrollingElement.clientWidth,
+  );
+  const horizontalScrollbarHeight = Math.max(
+    12,
+    view.innerHeight - scrollingElement.clientHeight,
+  );
+  const vertical = scrollingElement.scrollHeight > scrollingElement.clientHeight + 1
+    && event.clientX >= view.innerWidth - verticalScrollbarWidth;
+  const horizontal = scrollingElement.scrollWidth > scrollingElement.clientWidth + 1
+    && event.clientY >= view.innerHeight - horizontalScrollbarHeight;
+  return vertical || horizontal;
+}
+
+function sharedScrollbarPointerDown(
+  element: HTMLElement,
+  event: PointerEvent,
+): boolean {
+  const rect = element.getBoundingClientRect();
+  const verticalScrollbarWidth = Math.max(12, element.offsetWidth - element.clientWidth);
+  const horizontalScrollbarHeight = Math.max(12, element.offsetHeight - element.clientHeight);
+  const vertical = element.scrollHeight > element.clientHeight + 1
+    && event.clientX >= rect.right - verticalScrollbarWidth
+    && event.clientX <= rect.right
+    && event.clientY >= rect.top
+    && event.clientY <= rect.bottom;
+  const horizontal = element.scrollWidth > element.clientWidth + 1
+    && event.clientY >= rect.bottom - horizontalScrollbarHeight
+    && event.clientX >= rect.left
+    && event.clientX <= rect.right;
+  return vertical || horizontal;
+}
+
+function nullableRuntimePositionWithinTolerance(
+  actual: number | null,
+  expected: number | null,
+): boolean {
+  if (actual === null || expected === null) return actual === expected;
+  return runtimePositionWithinTolerance(actual, expected);
+}
+
+function sameRuntimeHandoffNativeSelection(
+  actual: RuntimeViewportSnapshot["nativeSelection"],
+  expected: RuntimeViewportSnapshot["nativeSelection"],
+): boolean {
+  if (!actual || !expected) return actual === expected;
+  return actual.affinity === expected.affinity
+    && runtimePositionWithinTolerance(actual.anchor, expected.anchor)
+    && runtimePositionWithinTolerance(actual.focus, expected.focus);
+}
+
+function runtimeHandoffLayoutFingerprintWithinTolerance(
+  actual: RuntimeHandoffLayoutFingerprint,
+  expected: RuntimeHandoffLayoutFingerprint,
+): boolean {
+  if (
+    actual.viewportAnchorStableId !== expected.viewportAnchorStableId
+    || actual.selectedStableId !== expected.selectedStableId
+    || !sameRuntimeHandoffNativeSelection(actual.nativeSelection, expected.nativeSelection)
+  ) return false;
+  const numericFields: Array<keyof RuntimeHandoffLayoutFingerprint> = [
+    "iframeWidth",
+    "iframeHeight",
+    "documentClientWidth",
+    "documentClientHeight",
+    "documentScrollWidth",
+    "documentScrollHeight",
+    "sharedClientWidth",
+    "sharedClientHeight",
+    "sharedScrollWidth",
+    "sharedScrollHeight",
+    "iframeScrollX",
+    "iframeScrollY",
+    "sharedScrollLeft",
+    "sharedScrollTop",
+    "viewportAnchorOffsetY",
+    "viewportAnchorSharedOffsetY",
+    "caretOffsetY",
+  ];
+  return numericFields.every((field) => nullableRuntimePositionWithinTolerance(
+    actual[field] as number | null,
+    expected[field] as number | null,
+  ));
+}
+
+function attachRuntimeHandoffScrollListeners({
+  candidate,
+  iframe,
+  sharedScrollElement,
+  includeShared,
+  onFrameScroll,
+  onSharedScroll,
+}: {
+  candidate: RuntimeCandidate;
+  iframe: HTMLIFrameElement | null;
+  sharedScrollElement: HTMLElement | null;
+  includeShared: boolean;
+  onFrameScroll?: () => void;
+  onSharedScroll?: () => void;
+}): () => void {
+  const frameDocument = iframe?.contentDocument;
+  const sharedDocument = sharedScrollElement?.ownerDocument;
+  const cleanups: Array<() => void> = [];
+  const stateFor = (channel: RuntimeHandoffScrollChannel) => (
+    candidate.handoffScrollState[channel]
+  );
+  const schedulePendingIntentExpiry = (
+    channel: RuntimeHandoffScrollChannel,
+    epoch: number,
+    sourceFrame: HTMLIFrameElement | null,
+  ) => {
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        const state = stateFor(channel);
+        if (
+          state.userIntentPending
+          && state.userIntentEpoch === epoch
+        ) {
+          state.userIntentPending = false;
+          candidate.refreshViewportSnapshot(channel, sourceFrame);
+        }
+      });
+    });
+  };
+  const markUserIntent = (
+    channel: RuntimeHandoffScrollChannel,
+    sourceFrame: HTMLIFrameElement | null,
+  ) => {
+    const state = stateFor(channel);
+    state.epoch += 1;
+    state.userIntentEpoch = state.epoch;
+    state.userIntentPending = true;
+    state.programmaticScrollSuppression = null;
+    candidate.refreshViewportSnapshot(channel, sourceFrame);
+    schedulePendingIntentExpiry(channel, state.userIntentEpoch, sourceFrame);
+  };
+  const handleScroll = (
+    channel: RuntimeHandoffScrollChannel,
+    sourceFrame: HTMLIFrameElement | null,
+    onScroll?: () => void,
+  ) => {
+    const state = stateFor(channel);
+    if (state.programmaticScrollSuppression) {
+      const currentPosition = channel === "frame"
+        ? {
+            left: sourceFrame?.contentWindow?.scrollX ?? 0,
+            top: sourceFrame?.contentWindow?.scrollY ?? 0,
+          }
+        : {
+            left: sharedScrollElement?.scrollLeft ?? 0,
+            top: sharedScrollElement?.scrollTop ?? 0,
+          };
+      const suppression = state.programmaticScrollSuppression;
+      if (
+        runtimePositionWithinTolerance(currentPosition.left, suppression.left)
+        && runtimePositionWithinTolerance(currentPosition.top, suppression.top)
+      ) {
+        state.programmaticScrollSuppression = null;
+        onScroll?.();
+        return;
+      }
+      // A scroll sample that does not land at the programmatic target cannot
+      // be consumed by this epoch. Let the normal intent channels classify it.
+      state.programmaticScrollSuppression = null;
+    }
+    if (state.userIntentPending || state.pointerDragging) {
+      // Keep the gesture alive until two rAFs after its latest scroll sample.
+      // Native scrollbar drags do not consistently emit pointermove, so the
+      // active drag flag and the scroll itself both renew the user epoch.
+      markUserIntent(channel, sourceFrame);
+    }
+    // An unclassified scroll is not evidence of user intent. It may have been
+    // caused by a focus/reflow operation, so leave the handoff target unchanged
+    // and let the positioning loop restore it.
+    onScroll?.();
+  };
+  const markProgrammaticScroll = (
+    channel: RuntimeHandoffScrollChannel,
+    left: number,
+    top: number,
+  ) => {
+    const state = stateFor(channel);
+    state.epoch += 1;
+    state.programmaticScrollEpoch = state.epoch;
+    state.programmaticScrollSuppression = {
+      epoch: state.programmaticScrollEpoch,
+      left,
+      top,
+    };
+    const suppressionEpoch = state.programmaticScrollEpoch;
+    window.requestAnimationFrame(() => {
+      if (
+        state.programmaticScrollSuppression?.epoch === suppressionEpoch
+        && state.programmaticScrollEpoch === suppressionEpoch
+      ) state.programmaticScrollSuppression = null;
+    });
+  };
+
+  // The positioning loop calls this through the candidate state. Keeping the
+  // epoch marker on the same state as the intent listeners means a trusted
+  // scroll event generated by scrollTo() cannot be mistaken for input.
+  candidate.markProgrammaticScroll = markProgrammaticScroll;
+
+  if (frameDocument) {
+    const frameScroll = () => handleScroll("frame", iframe, onFrameScroll);
+    const frameIntent = () => {
+      markUserIntent("frame", iframe);
+      if (includeShared && sharedScrollElement) markUserIntent("shared", iframe);
+    };
+    const framePointerDown = (event: Event) => {
+      const pointer = event as PointerEvent;
+      if (documentScrollbarPointerDown(frameDocument, pointer)) {
+        stateFor("frame").pointerDragging = true;
+        markUserIntent("frame", iframe);
+      }
+    };
+    const framePointerMove = (event: Event) => {
+      const pointer = event as PointerEvent;
+      if (
+        pointer.buttons !== 0
+        && (
+          stateFor("frame").pointerDragging
+          || documentScrollbarPointerDown(frameDocument, pointer)
+        )
+      ) {
+        stateFor("frame").pointerDragging = true;
+        markUserIntent("frame", iframe);
+      }
+    };
+    const framePointerEnd = () => {
+      stateFor("frame").pointerDragging = false;
+    };
+    const frameKeyDown = (event: Event) => {
+      if (isRuntimeScrollKey(event as KeyboardEvent)) {
+        markUserIntent("frame", iframe);
+        if (includeShared && sharedScrollElement) markUserIntent("shared", iframe);
+      }
+    };
+    frameDocument.addEventListener("scroll", frameScroll, true);
+    frameDocument.addEventListener("wheel", frameIntent, { capture: true, passive: true });
+    frameDocument.addEventListener("touchmove", frameIntent, { capture: true, passive: true });
+    frameDocument.addEventListener("pointerdown", framePointerDown, true);
+    frameDocument.addEventListener("pointermove", framePointerMove, true);
+    frameDocument.addEventListener("pointerup", framePointerEnd, true);
+    frameDocument.addEventListener("pointercancel", framePointerEnd, true);
+    frameDocument.addEventListener("keydown", frameKeyDown, true);
+    cleanups.push(() => {
+      frameDocument.removeEventListener("scroll", frameScroll, true);
+      frameDocument.removeEventListener("wheel", frameIntent, true);
+      frameDocument.removeEventListener("touchmove", frameIntent, true);
+      frameDocument.removeEventListener("pointerdown", framePointerDown, true);
+      frameDocument.removeEventListener("pointermove", framePointerMove, true);
+      frameDocument.removeEventListener("pointerup", framePointerEnd, true);
+      frameDocument.removeEventListener("pointercancel", framePointerEnd, true);
+      frameDocument.removeEventListener("keydown", frameKeyDown, true);
+      stateFor("frame").pointerDragging = false;
+    });
+  }
+
+  if (includeShared && sharedScrollElement) {
+    const sharedScroll = () => handleScroll("shared", iframe, onSharedScroll);
+    const sharedIntent = () => markUserIntent("shared", iframe);
+    const sharedDocumentIntent = (event: Event) => {
+      const target = event.target;
+      if (
+        target === sharedScrollElement
+        || (target instanceof Node && sharedScrollElement.contains(target))
+      ) markUserIntent("shared", iframe);
+    };
+    const sharedPointerDown = (event: Event) => {
+      const pointer = event as PointerEvent;
+      if (sharedScrollbarPointerDown(sharedScrollElement, pointer)) {
+        stateFor("shared").pointerDragging = true;
+        markUserIntent("shared", iframe);
+      }
+    };
+    const sharedPointerMove = (event: Event) => {
+      const pointer = event as PointerEvent;
+      if (
+        pointer.buttons !== 0
+        && (
+          stateFor("shared").pointerDragging
+          || sharedScrollbarPointerDown(sharedScrollElement, pointer)
+        )
+      ) {
+        stateFor("shared").pointerDragging = true;
+        markUserIntent("shared", iframe);
+      }
+    };
+    const sharedPointerEnd = () => {
+      stateFor("shared").pointerDragging = false;
+    };
+    const sharedKeyDown = (event: Event) => {
+      const keyEvent = event as KeyboardEvent;
+      if (isRuntimeScrollKey(keyEvent)) {
+        markUserIntent("shared", iframe);
+      }
+    };
+    sharedScrollElement.addEventListener("scroll", sharedScroll);
+    sharedScrollElement.addEventListener("wheel", sharedIntent, { capture: true, passive: true });
+    sharedScrollElement.addEventListener("touchmove", sharedIntent, { capture: true, passive: true });
+    sharedScrollElement.addEventListener("pointerdown", sharedPointerDown, true);
+    sharedScrollElement.addEventListener("pointermove", sharedPointerMove, true);
+    sharedScrollElement.addEventListener("pointerup", sharedPointerEnd, true);
+    sharedScrollElement.addEventListener("pointercancel", sharedPointerEnd, true);
+    sharedDocument?.addEventListener("pointerdown", sharedPointerDown, true);
+    sharedDocument?.addEventListener("pointermove", sharedPointerMove, true);
+    sharedDocument?.addEventListener("pointerup", sharedPointerEnd, true);
+    sharedDocument?.addEventListener("pointercancel", sharedPointerEnd, true);
+    sharedDocument?.addEventListener("wheel", sharedDocumentIntent, { capture: true, passive: true });
+    sharedDocument?.addEventListener("touchmove", sharedDocumentIntent, { capture: true, passive: true });
+    sharedDocument?.addEventListener("keydown", sharedKeyDown, true);
+    cleanups.push(() => {
+      sharedScrollElement.removeEventListener("scroll", sharedScroll);
+      sharedScrollElement.removeEventListener("wheel", sharedIntent, true);
+      sharedScrollElement.removeEventListener("touchmove", sharedIntent, true);
+      sharedScrollElement.removeEventListener("pointerdown", sharedPointerDown, true);
+      sharedScrollElement.removeEventListener("pointermove", sharedPointerMove, true);
+      sharedScrollElement.removeEventListener("pointerup", sharedPointerEnd, true);
+      sharedScrollElement.removeEventListener("pointercancel", sharedPointerEnd, true);
+      sharedDocument?.removeEventListener("pointerdown", sharedPointerDown, true);
+      sharedDocument?.removeEventListener("pointermove", sharedPointerMove, true);
+      sharedDocument?.removeEventListener("pointerup", sharedPointerEnd, true);
+      sharedDocument?.removeEventListener("pointercancel", sharedPointerEnd, true);
+      sharedDocument?.removeEventListener("wheel", sharedDocumentIntent, true);
+      sharedDocument?.removeEventListener("touchmove", sharedDocumentIntent, true);
+      sharedDocument?.removeEventListener("keydown", sharedKeyDown, true);
+      stateFor("shared").pointerDragging = false;
+    });
+  }
+
+  return () => {
+    for (const cleanup of cleanups) cleanup();
+  };
+}
+
+function runtimeSourceElementForStableId(
+  documentNode: Document,
+  sourceIndex: SourceIndexValue | null,
+  stableId: string | null | undefined,
+): Element | null {
+  if (!sourceIndex || !stableId || !isValidPagerootElementId(stableId)) return null;
+  const sourceEntry = sourceIndex.byPagerootId.get(stableId);
+  if (!sourceEntry || sourceEntry.type !== "element") return null;
+  const matches = Array.from(documentNode.querySelectorAll<HTMLElement>(
+    `[${SOURCE_NODE_ATTRIBUTE}]`,
+  )).filter((element) => (
+    element.getAttribute(SOURCE_NODE_ATTRIBUTE) === sourceEntry.nodeId
+    && element.getAttribute(PAGEROOT_ELEMENT_ID_ATTRIBUTE) === stableId
+  ));
+  return matches.length === 1 ? matches[0] : null;
+}
+
+function runtimeStableIdForElement(
+  element: Element | null,
+  sourceIndex: SourceIndexValue | null,
+): string | null {
+  const stableId = element?.getAttribute(PAGEROOT_ELEMENT_ID_ATTRIBUTE);
+  const sourceNodeId = element?.getAttribute(SOURCE_NODE_ATTRIBUTE);
+  const sourceEntry = sourceNodeId
+    ? sourceIndex?.byNodeId.get(sourceNodeId)
+    : null;
+  if (
+    !stableId
+    || !isValidPagerootElementId(stableId)
+    || sourceEntry?.type !== "element"
+    || sourceEntry.pagerootId !== stableId
+  ) return null;
+  return stableId;
+}
+
+function runtimeAnchorOffsetIsClamped({
+  currentScrollTop,
+  currentAnchorOffsetY,
+  desiredAnchorOffsetY,
+  maximumScrollTop,
+}: {
+  currentScrollTop: number;
+  currentAnchorOffsetY: number;
+  desiredAnchorOffsetY: number;
+  maximumScrollTop: number;
+}): boolean {
+  const idealScrollTop = currentScrollTop + currentAnchorOffsetY - desiredAnchorOffsetY;
+  return !runtimePositionWithinTolerance(
+    idealScrollTop,
+    clampRuntimeScroll(idealScrollTop, maximumScrollTop),
+  );
+}
+
+function runtimeCaretOffsetY(
+  documentNode: Document,
+  rootElement: Element | null,
+): number | null {
+  const selection = documentNode.getSelection();
+  const focusNode = selection?.focusNode;
+  if (
+    !selection
+    || !focusNode
+    || !rootElement
+    || (focusNode !== rootElement && !rootElement.contains(focusNode))
+  ) return null;
+  try {
+    const range = documentNode.createRange();
+    range.setStart(focusNode, selection.focusOffset);
+    range.collapse(true);
+    const rect = range.getClientRects()[0] || range.getBoundingClientRect();
+    return Number.isFinite(rect.top) ? rect.top : null;
+  } catch {
+    return null;
+  }
+}
+
+function captureRuntimeViewportSnapshot({
+  iframe,
+  sharedScrollElement,
+  sourceIndex,
+  selectedElement,
+  selectedSourceSelection,
+  nativeSelection,
+  caretOffsetYOverride,
+}: {
+  iframe: HTMLIFrameElement | null;
+  sharedScrollElement: HTMLElement | null;
+  sourceIndex: SourceIndexValue | null;
+  selectedElement: Element | null;
+  selectedSourceSelection: HtmlCanvasSelection | null;
+  nativeSelection: RuntimeViewportSnapshot["nativeSelection"];
+  caretOffsetYOverride?: number | null;
+}): RuntimeViewportSnapshot {
+  const documentNode = iframe?.contentDocument;
+  const frameView = iframe?.contentWindow;
+  const frameScrollX = Number(frameView?.scrollX || 0);
+  const frameScrollY = Number(frameView?.scrollY || 0);
+  const selectedStableId = (
+    isValidPagerootElementId(selectedSourceSelection?.elementId)
+      ? selectedSourceSelection?.elementId
+      : runtimeStableIdForElement(selectedElement, sourceIndex)
+  ) || null;
+  const measuredCaretOffsetY = documentNode
+    ? runtimeCaretOffsetY(documentNode, selectedElement)
+    : null;
+  const caretOffsetY = typeof caretOffsetYOverride === "number"
+    ? caretOffsetYOverride
+    : measuredCaretOffsetY;
+  const frameHeight = iframe?.clientHeight || 0;
+  const preferredAnchor = (
+    documentNode && selectedStableId
+      ? runtimeSourceElementForStableId(documentNode, sourceIndex, selectedStableId)
+      : null
+  ) || (
+    selectedElement && runtimeStableIdForElement(selectedElement, sourceIndex)
+      ? selectedElement
+      : null
+  );
+  const anchorCandidates = documentNode && sourceIndex
+    ? Array.from(documentNode.querySelectorAll<HTMLElement>(
+      `[${SOURCE_NODE_ATTRIBUTE}]`,
+    )).filter((element) => (
+      runtimeStableIdForElement(element, sourceIndex)
+      && element.getBoundingClientRect().bottom > 0
+      && element.getBoundingClientRect().top < frameHeight
+    ))
+    : [];
+  const anchorElement = preferredAnchor
+    || anchorCandidates.sort((left, right) => (
+      Math.abs(left.getBoundingClientRect().top)
+      - Math.abs(right.getBoundingClientRect().top)
+    ))[0]
+    || null;
+  const viewportAnchorStableId = runtimeStableIdForElement(anchorElement, sourceIndex);
+  const anchorRect = anchorElement?.getBoundingClientRect();
+  const viewportAnchorOffsetY = viewportAnchorStableId
+    ? anchorRect?.top ?? null
+    : null;
+  const iframeRect = iframe?.getBoundingClientRect();
+  const sharedRect = sharedScrollElement?.getBoundingClientRect();
+  const viewportAnchorSharedOffsetY = viewportAnchorStableId
+    && anchorRect
+    && iframeRect
+    && sharedRect
+    ? iframeRect.top - sharedRect.top + anchorRect.top
+    : null;
+  return {
+    iframeScrollX: Number.isFinite(frameScrollX) ? frameScrollX : 0,
+    iframeScrollY: Number.isFinite(frameScrollY) ? frameScrollY : 0,
+    sharedScrollLeft: sharedScrollElement?.scrollLeft || 0,
+    sharedScrollTop: sharedScrollElement?.scrollTop || 0,
+    viewportAnchorStableId,
+    viewportAnchorOffsetY: Number.isFinite(Number(viewportAnchorOffsetY))
+      ? Number(viewportAnchorOffsetY)
+      : null,
+    viewportAnchorSharedOffsetY: Number.isFinite(Number(viewportAnchorSharedOffsetY))
+      ? Number(viewportAnchorSharedOffsetY)
+      : null,
+    selectedStableId,
+    nativeSelection: nativeSelection
+      ? { ...nativeSelection }
+      : null,
+    caretOffsetY,
+  };
+}
+
+function runtimeTextNodeForSourceId(
+  documentNode: Document,
+  sourceIndex: SourceIndexValue,
+  textNodeId: string,
+): Text | null {
+  const sourceText = sourceIndex.byNodeId.get(textNodeId);
+  if (sourceText?.type !== "text" || !sourceText.parentId) return null;
+  const sourceParent = sourceIndex.byNodeId.get(sourceText.parentId);
+  if (sourceParent?.type !== "element") return null;
+  const escapedParentId = sourceParent.nodeId
+    .replace(/\\/g, "\\\\")
+    .replace(/"/g, '\\"');
+  const parentElement = documentNode.querySelector<HTMLElement>(
+    `[${SOURCE_NODE_ATTRIBUTE}="${escapedParentId}"]`,
+  );
+  const childIndex = sourceParent.childIds.indexOf(textNodeId);
+  const candidate = childIndex >= 0
+    ? parentElement?.childNodes[childIndex]
+    : null;
+  return candidate?.nodeType === 3
+    && sourceTextNodeForDomText(candidate as Text, sourceIndex)?.nodeId === textNodeId
+    ? candidate as Text
+    : null;
+}
+
+function restoreRuntimeTextSelection(
+  documentNode: Document,
+  sourceIndex: SourceIndexValue,
+  previousRange: ActiveTextRange,
+  target: HtmlCanvasSelection,
+): ActiveTextRange | null {
+  const firstSegment = previousRange.segments[0];
+  const lastSegment = previousRange.segments.at(-1);
+  if (!firstSegment || !lastSegment) return null;
+  const startNode = runtimeTextNodeForSourceId(
+    documentNode,
+    sourceIndex,
+    firstSegment.textNodeId,
+  );
+  const endNode = runtimeTextNodeForSourceId(
+    documentNode,
+    sourceIndex,
+    lastSegment.textNodeId,
+  );
+  if (!startNode || !endNode) return null;
+  try {
+    const range = documentNode.createRange();
+    range.setStart(startNode, firstSegment.startOffset);
+    range.setEnd(endNode, lastSegment.endOffset);
+    const selection = documentNode.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+    const restored = activeTextRangeFromDocument(documentNode, sourceIndex);
+    return restored ? { ...restored, target } : null;
+  } catch {
+    return null;
+  }
+}
 
 function canvasTargetOutlineStyle(
   container: HTMLElement | null,
@@ -624,6 +1268,7 @@ type NativeEditFenceBookmark = {
   selection: NativeEditSelection;
   focus: boolean;
   toolbarVisible: boolean;
+  caretOffsetY?: number | null;
   fragmentTargetRef?: SourceTargetRef;
 };
 
@@ -643,6 +1288,7 @@ type NativeEditCommitResult = {
 
 type FinishNativeEditingOptions = {
   replayQueuedUserCommand?: boolean;
+  resumeAfterRuntimeHandoff?: boolean;
 };
 
 
@@ -1070,6 +1716,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     left: number;
     top: number;
   } | null>(null);
+  const lastValidCommentLayoutRef = useRef<HtmlCanvasCommentLayoutState | null>(null);
   const expectedFrameHtmlRef = useRef<string | null>(null);
   const expectedFrameTokenRef = useRef<string | null>(null);
   const frameLoadGenerationRef = useRef(0);
@@ -1083,6 +1730,8 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   const runtimeCandidateRef = useRef<RuntimeCandidate | null>(null);
   const runtimeCandidateIframeRef = useRef<HTMLIFrameElement | null>(null);
   const runtimePromotionRef = useRef<RuntimeCandidate | null>(null);
+  const runtimeRetiringCleanupFrameRef = useRef<number | null>(null);
+  const runtimeRetiringGenerationRef = useRef<number | null>(null);
   const finalizeRuntimePromotionRef = useRef<(candidate: RuntimeCandidate) => void>(
     () => undefined,
   );
@@ -1359,6 +2008,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       preserveViewport?: boolean;
       immediate?: boolean;
       forceStatic?: boolean;
+      forceRuntimeHandoff?: boolean;
       reuseDocument?: boolean;
     } = {},
   ) => {
@@ -1379,7 +2029,15 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       && !activeNativeEditRef.current
       && !options.immediate
       && !options.forceStatic
-      && source !== frameSourceHtmlRef.current
+      // A native editable-island commit has already advanced the source
+      // authority in place, but the disposable Runtime document still needs
+      // to be rebuilt. Treat that explicit rerender request like a source
+      // change so Enter and copy share the same visible handoff path.
+      && (
+        source !== frameSourceHtmlRef.current
+        || runtimeNeedsRerenderRef.current
+        || options.forceRuntimeHandoff
+      )
       && startRuntimeCandidateRef.current(source)
     ) return;
     cancelRuntimeCandidateRef.current();
@@ -1692,11 +2350,36 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     }
   }, [documentBaseHref, editRuntimeGrant, staticAssetBaseHref]);
 
+  const clearRuntimeRetiringFrame = useCallback(() => {
+    const cleanupFrame = runtimeRetiringCleanupFrameRef.current;
+    if (cleanupFrame !== null) window.cancelAnimationFrame(cleanupFrame);
+    runtimeRetiringCleanupFrameRef.current = null;
+    runtimeRetiringGenerationRef.current = null;
+    setRuntimeRetiringRender(null);
+  }, []);
+
+  const scheduleRuntimeRetiringFrameRemoval = useCallback((generation: number) => {
+    const cleanupFrame = runtimeRetiringCleanupFrameRef.current;
+    if (cleanupFrame !== null) window.cancelAnimationFrame(cleanupFrame);
+    runtimeRetiringGenerationRef.current = generation;
+    runtimeRetiringCleanupFrameRef.current = window.requestAnimationFrame(() => {
+      runtimeRetiringCleanupFrameRef.current = null;
+      if (runtimeRetiringGenerationRef.current !== generation) return;
+      runtimeRetiringGenerationRef.current = null;
+      setRuntimeRetiringRender(null);
+      if (containerRef.current?.getAttribute("data-runtime-handoff") === "active") {
+        containerRef.current.removeAttribute("data-runtime-handoff");
+      }
+    });
+  }, []);
+
   const cancelRuntimeCandidate = useCallback((
     outcome: Exclude<HtmlCanvasEditRuntimeLoadOutcome, "ready"> = "failed",
   ) => {
     const candidate = runtimeCandidateRef.current;
     if (!candidate) return;
+    candidate.handoffScrollCleanup();
+    candidate.handoffScrollCleanup = () => undefined;
     candidate.registrationCleanup();
     if (candidate.runtimeFrame && !candidate.outcomeReported) {
       candidate.outcomeReported = true;
@@ -1704,6 +2387,10 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     }
     pendingSelectionRef.current = candidate.previousPendingSelection;
     pendingToolbarVisibleRef.current = candidate.previousPendingToolbarVisible;
+    // A candidate that is cancelled before it reaches active is not a valid
+    // internal checkpoint continuation. Do not let its stale resume request
+    // turn the previous frame back into a contenteditable surface.
+    pendingNativeEditResumeRef.current = null;
     runtimeCandidateRef.current = null;
     runtimeCandidateIframeRef.current = null;
     setRuntimeCandidateRender(null);
@@ -1722,24 +2409,34 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       || currentRuntime.elementGeneration !== frameLoadGenerationRef.current
     ) return false;
 
+    if (runtimeRetiringGenerationRef.current !== null) {
+      clearRuntimeRetiringFrame();
+    }
     cancelRuntimeCandidateRef.current();
     const previousPendingSelection = pendingSelectionRef.current;
     const previousPendingToolbarVisible = pendingToolbarVisibleRef.current;
+    const previousPendingNativeEditResume = pendingNativeEditResumeRef.current;
     const currentFrame = iframeRef.current;
-    const currentFrameView = currentFrame?.contentWindow;
-    const handoffFrameViewport = currentFrameView
-      ? { left: currentFrameView.scrollX, top: currentFrameView.scrollY }
-      : null;
+    const activeEditForViewport = activeNativeEditRef.current as ActiveNativeEdit | null;
     const sharedScrollElement = containerRef.current?.closest<HTMLElement>(
       ".review-scroll-stage",
     ) ?? null;
-    const handoffSharedViewport = sharedScrollElement
-      ? {
-          element: sharedScrollElement,
-          left: sharedScrollElement.scrollLeft,
-          top: sharedScrollElement.scrollTop,
-        }
-      : null;
+    const previousSelectedElement = selectedElementRef.current;
+    const previousSelectedSourceSelection = selectedSourceSelectionRef.current;
+    const previousActiveTextRange = cloneActiveTextRange(activeTextRangeRef.current);
+    const viewportSnapshot = captureRuntimeViewportSnapshot({
+      iframe: currentFrame,
+      sharedScrollElement,
+      sourceIndex: sourceIndexRef.current,
+      selectedElement: activeEditForViewport?.selectionElement
+        ?? previousSelectedElement,
+      selectedSourceSelection: previousSelectedSourceSelection,
+      nativeSelection: activeEditForViewport?.selection
+        ?? retainNativeEditFocusRef.current?.selection
+        ?? previousPendingNativeEditResume?.selection
+        ?? null,
+      caretOffsetYOverride: previousPendingNativeEditResume?.caretOffsetY,
+    });
     if (!pendingSelectionRef.current && selectedSourceSelectionRef.current) {
       pendingSelectionRef.current = selectedSourceSelectionRef.current;
     }
@@ -1848,6 +2545,15 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       return true;
     }
 
+    if (pendingNativeEditResumeRef.current) {
+      pendingNativeEditResumeRef.current = {
+        ...pendingNativeEditResumeRef.current,
+        expectedFrameGeneration: candidateGeneration,
+        sourceRevision: sourceIndex?.sourceSha256
+          ?? pendingNativeEditResumeRef.current.sourceRevision,
+      };
+    }
+
     const candidate: RuntimeCandidate = {
       source,
       sourceIndex,
@@ -1865,8 +2571,12 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       outcomeReported: false,
       previousPendingSelection,
       previousPendingToolbarVisible,
-      handoffFrameViewport,
-      handoffSharedViewport,
+      viewportSnapshot,
+      sharedViewportElement: sharedScrollElement,
+      handoffScrollState: createRuntimeHandoffScrollState(),
+      refreshViewportSnapshot: () => undefined,
+      markProgrammaticScroll: () => undefined,
+      handoffScrollCleanup: () => undefined,
       previousActive: {
         render: frameRender,
         cleanupFrame: cleanupFrameRef.current,
@@ -1887,9 +2597,68 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         pendingFrameViewport: pendingFrameViewportRef.current,
         pendingSharedViewport: pendingSharedViewportRef.current,
         pendingFrameRestoreEpoch: pendingFrameRestoreEpochRef.current,
+        nativeSessionNeedsCanonicalFence: nativeSessionNeedsCanonicalFenceRef.current,
+        nativeEditNeedsReload: nativeEditNeedsReloadRef.current,
+        pendingNativeEditResume: previousPendingNativeEditResume,
+        selectedElement: previousSelectedElement,
+        selectedSourceSelection: previousSelectedSourceSelection,
+        activeTextRange: previousActiveTextRange,
+        toolbarVisible: toolbarVisibleRef.current,
+        runtimeGeneratedSelection: runtimeGeneratedSelectionRef.current,
         connectedFrame: connectedFrameRef.current,
       },
     };
+    candidate.refreshViewportSnapshot = (channel, sourceFrame = currentFrame) => {
+      const sourceDocument = sourceFrame?.contentDocument;
+      if (!sourceDocument) return;
+      const sourceIsPreviousActive = sourceFrame === currentFrame;
+      const sourceIndexForSnapshot = sourceIsPreviousActive
+        ? candidate.previousActive.sourceIndex
+        : candidate.sourceIndex;
+      const selectedElementForSnapshot = sourceIsPreviousActive
+        ? candidate.previousActive.selectedElement ?? selectedElementRef.current
+        : selectedElementRef.current;
+      const selectedSourceSelectionForSnapshot = (
+        sourceIsPreviousActive
+          ? candidate.previousActive.selectedSourceSelection
+          : selectedSourceSelectionRef.current
+      ) ?? selectedSourceSelectionRef.current;
+      const latest = captureRuntimeViewportSnapshot({
+        iframe: sourceFrame,
+        sharedScrollElement: candidate.sharedViewportElement,
+        sourceIndex: sourceIndexForSnapshot,
+        selectedElement: selectedElementForSnapshot,
+        selectedSourceSelection: selectedSourceSelectionForSnapshot,
+        nativeSelection: candidate.viewportSnapshot.nativeSelection,
+        caretOffsetYOverride: candidate.viewportSnapshot.caretOffsetY,
+      });
+      const previous = candidate.viewportSnapshot;
+      const anchorStableId = latest.viewportAnchorStableId
+        || previous.viewportAnchorStableId;
+      if (channel === "frame") {
+        Object.assign(previous, {
+          iframeScrollX: latest.iframeScrollX,
+          iframeScrollY: latest.iframeScrollY,
+          viewportAnchorStableId: anchorStableId,
+          viewportAnchorOffsetY: latest.viewportAnchorOffsetY,
+          viewportAnchorSharedOffsetY: latest.viewportAnchorSharedOffsetY,
+        });
+      } else {
+        Object.assign(previous, {
+          sharedScrollLeft: latest.sharedScrollLeft,
+          sharedScrollTop: latest.sharedScrollTop,
+          viewportAnchorStableId: anchorStableId,
+          viewportAnchorSharedOffsetY: latest.viewportAnchorSharedOffsetY,
+        });
+      }
+      if (latest.selectedStableId) previous.selectedStableId = latest.selectedStableId;
+    };
+    candidate.handoffScrollCleanup = attachRuntimeHandoffScrollListeners({
+      candidate,
+      iframe: currentFrame,
+      sharedScrollElement,
+      includeShared: true,
+    });
     if (runtimeFrame) {
       const registrationProperty = editRuntimeRegistrationProperty(
         runtimeFrame.grant.executionId,
@@ -2011,7 +2780,13 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     runtimeCandidateRef.current = candidate;
     setRuntimeCandidateRender(candidate.render);
     return true;
-  }, [documentBaseHref, editRuntimeGrant, frameRender, staticAssetBaseHref]);
+  }, [
+    clearRuntimeRetiringFrame,
+    documentBaseHref,
+    editRuntimeGrant,
+    frameRender,
+    staticAssetBaseHref,
+  ]);
   startRuntimeCandidateRef.current = startRuntimeCandidate;
 
   const finalizeRuntimeCandidatePromotion = useCallback((candidate: RuntimeCandidate) => {
@@ -2021,10 +2796,12 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     // and runtime registration only after that handoff point.
     candidate.previousActive.runtimeSourceRegistrationCleanup();
     candidate.previousActive.cleanupFrame();
+    candidate.handoffScrollCleanup();
+    candidate.handoffScrollCleanup = () => undefined;
     runtimePromotionRef.current = null;
-    setRuntimeRetiringRender(null);
-    containerRef.current?.removeAttribute("data-runtime-handoff");
-  }, []);
+    containerRef.current?.setAttribute("data-runtime-handoff", "active");
+    scheduleRuntimeRetiringFrameRemoval(candidate.previousActive.render.elementGeneration);
+  }, [scheduleRuntimeRetiringFrameRemoval]);
   finalizeRuntimePromotionRef.current = finalizeRuntimeCandidatePromotion;
 
   const rollbackRuntimeCandidatePromotion = useCallback((
@@ -2033,8 +2810,38 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   ): boolean => {
     if (runtimePromotionRef.current !== candidate) return false;
     const previous = candidate.previousActive;
+    // During promotion the candidate browsing context occupies iframeRef;
+    // runtimeCandidateIframeRef has already been cleared by promoteRuntimeCandidate.
+    const candidateDocument = iframeRef.current?.contentDocument;
+    const activeCandidateNativeEdit = activeNativeEditRef.current;
+    if (
+      activeCandidateNativeEdit
+      && candidateDocument
+      && activeCandidateNativeEdit.rootElement.ownerDocument === candidateDocument
+    ) {
+      const checkpointTimer = nativeEditCheckpointTimerRef.current;
+      if (checkpointTimer !== null) window.clearTimeout(checkpointTimer);
+      nativeEditCheckpointTimerRef.current = null;
+      currentNativeEditLeaseRef.current = null;
+      activeNativeEditRef.current = null;
+      nativeCommandQueueRef.current.discardPendingNativeCommands("session-ended");
+      retainNativeEditFocusRef.current = null;
+      activeCandidateNativeEdit.rootElement.removeAttribute("data-html-canvas-editing");
+      activeCandidateNativeEdit.session.dispose();
+      activeCandidateNativeEdit.releaseHost?.();
+      activeCandidateNativeEdit.rootElement.ownerDocument.getSelection()?.removeAllRanges();
+      activeTextRangeRef.current = null;
+      setIsEditing(false);
+      setHasTextRange(false);
+    }
     const currentCleanup = cleanupFrameRef.current;
     if (currentCleanup !== previous.cleanupFrame) currentCleanup();
+    const cleanupFrame = runtimeRetiringCleanupFrameRef.current;
+    if (cleanupFrame !== null) window.cancelAnimationFrame(cleanupFrame);
+    runtimeRetiringCleanupFrameRef.current = null;
+    runtimeRetiringGenerationRef.current = null;
+    candidate.handoffScrollCleanup();
+    candidate.handoffScrollCleanup = () => undefined;
     candidate.registrationCleanup();
     if (candidate.runtimeFrame && !candidate.outcomeReported) {
       candidate.runtimeFrame.settled = true;
@@ -2062,13 +2869,35 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     appliedPageViewContextRef.current = previous.appliedPageViewContext;
     activeFrameConnectionPendingRef.current = previous.activeFrameConnectionPending;
     runtimeNeedsRerenderRef.current = previous.runtimeNeedsRerender;
+    nativeSessionNeedsCanonicalFenceRef.current = previous.nativeSessionNeedsCanonicalFence;
+    nativeEditNeedsReloadRef.current = previous.nativeEditNeedsReload;
     pendingFrameViewportRef.current = previous.pendingFrameViewport;
     pendingSharedViewportRef.current = previous.pendingSharedViewport;
+    // Runtime activation failed after promotion. The old frame remains the
+    // source-backed rollback target, but the failed checkpoint must not
+    // restore native editing on that frame implicitly.
+    pendingNativeEditResumeRef.current = null;
     // Invalidate every rAF scheduled by the failed candidate before restoring
     // the previous generation's pending viewport/selection state.
     pendingFrameRestoreEpochRef.current = previous.pendingFrameRestoreEpoch + 1;
     pendingSelectionRef.current = candidate.previousPendingSelection;
     pendingToolbarVisibleRef.current = candidate.previousPendingToolbarVisible;
+    selectedElementRef.current?.removeAttribute("data-html-canvas-selected");
+    selectedElementRef.current?.removeAttribute(GLOBAL_SELECTION_ATTRIBUTE);
+    selectedElementRef.current = previous.selectedElement;
+    if (previous.selectedElement?.isConnected && previous.selectedSourceSelection) {
+      previous.selectedElement.setAttribute(
+        "data-html-canvas-selected",
+        previous.selectedSourceSelection.level,
+      );
+      previous.selectedElement.toggleAttribute(
+        GLOBAL_SELECTION_ATTRIBUTE,
+        isPageRootSelection(previous.selectedSourceSelection),
+      );
+    }
+    selectedSourceSelectionRef.current = previous.selectedSourceSelection;
+    activeTextRangeRef.current = previous.activeTextRange;
+    runtimeGeneratedSelectionRef.current = previous.runtimeGeneratedSelection;
     cleanupFrameRef.current = previous.cleanupFrame;
     connectedFrameRef.current = previous.connectedFrame;
     containerRef.current?.setAttribute(
@@ -2080,6 +2909,10 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       setFrameRender(previous.render);
       setRuntimeRetiringRender(null);
       setRuntimeCandidateRender(null);
+      setSelection(previous.selectedSourceSelection);
+      setRuntimeGeneratedSelection(previous.runtimeGeneratedSelection);
+      setToolbarVisible(previous.toolbarVisible);
+      setHasTextRange(Boolean(previous.activeTextRange));
     });
     return true;
   }, []);
@@ -2111,8 +2944,17 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
 
     const promotedGeneration = candidate.render.elementGeneration;
     const previous = candidate.previousActive;
-    pendingFrameViewportRef.current = candidate.handoffFrameViewport;
-    pendingSharedViewportRef.current = candidate.handoffSharedViewport;
+    pendingFrameViewportRef.current = {
+      left: candidate.viewportSnapshot.iframeScrollX,
+      top: candidate.viewportSnapshot.iframeScrollY,
+    };
+    pendingSharedViewportRef.current = candidate.sharedViewportElement
+      ? {
+          element: candidate.sharedViewportElement,
+          left: candidate.viewportSnapshot.sharedScrollLeft,
+          top: candidate.viewportSnapshot.sharedScrollTop,
+        }
+      : null;
     pendingFrameRestoreEpochRef.current += 1;
     candidate.registrationCleanup();
     runtimeCandidateRef.current = null;
@@ -2134,7 +2976,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     expectedFrameTokenRef.current = candidate.verificationToken;
     renderedSourceHtmlRef.current = null;
     runtimeNeedsRerenderRef.current = false;
-    containerRef.current?.setAttribute("data-runtime-handoff", "committing");
+    containerRef.current?.setAttribute("data-runtime-handoff", "positioning");
     runtimePromotionRef.current = candidate;
     flushSync(() => {
       setRuntimeRetiringRender(previous.render);
@@ -2267,10 +3109,25 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     });
   }, []);
 
-  const updateOverlayPosition = useCallback(() => {
+  const updateOverlayPosition = useCallback((
+    options: { allowRuntimeHandoff?: boolean } = {},
+  ) => {
     const container = containerRef.current;
     const iframe = iframeRef.current;
     const documentNode = iframe?.contentDocument;
+    const runtimeHandoff = container?.getAttribute("data-runtime-handoff");
+    if (runtimeHandoff === "positioning" && !options.allowRuntimeHandoff) {
+      const lastValidLayout = lastValidCommentLayoutRef.current;
+      if (lastValidLayout) {
+        container?.setAttribute("data-runtime-layout-ready", "true");
+        // Keep the last complete layout authoritative while the candidate is
+        // still being positioned. Publishing it again lets the surrounding
+        // review surface retain its geometry without observing a transient
+        // empty measurement from the new document.
+        onCommentLayoutRef.current?.(lastValidLayout);
+      }
+      return;
+    }
     const element = canvasVisualTargetElement(
       selectedElementRef.current,
       sourceIndexRef.current,
@@ -2290,6 +3147,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       && renderedSourceHtmlRef.current === frameSourceHtmlRef.current,
     );
     if (!container || !iframe || !documentNode?.body) {
+      container?.removeAttribute("data-runtime-layout-ready");
       onCommentLayoutRef.current?.({
         sourceSha256,
         viewContextGeneration,
@@ -2329,6 +3187,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       && frameWidth > 0
     );
     if (!measurementReady) {
+      container.removeAttribute("data-runtime-layout-ready");
       onCommentLayoutRef.current?.({
         sourceSha256,
         viewContextGeneration,
@@ -2357,7 +3216,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     const commentLayoutsByTargetId = new Map(
       commentLayouts.map((layout) => [layout.targetId, layout]),
     );
-    onCommentLayoutRef.current?.({
+    const layoutState: HtmlCanvasCommentLayoutState = {
       sourceSha256,
       viewContextGeneration,
       ready: true,
@@ -2367,7 +3226,10 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       contentHeight: naturalDocumentContentHeight(documentNode, frameHeight),
       clientHeight: frameHeight,
       targets: commentLayouts,
-    });
+    };
+    lastValidCommentLayoutRef.current = layoutState;
+    container.setAttribute("data-runtime-layout-ready", "true");
+    onCommentLayoutRef.current?.(layoutState);
 
     if (lockedRef.current) {
       setOverlayPosition(null);
@@ -2689,7 +3551,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       updateSelectedStyle();
       updateMoveAvailability();
       observeSelectedElement(liveTarget);
-      requestAnimationFrame(updateOverlayPosition);
+      requestAnimationFrame(() => updateOverlayPosition());
       return true;
     } catch {
       return false;
@@ -3093,15 +3955,22 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         appliedMutation,
       );
       if (!previewStayedMounted) {
-        pendingSelectionRef.current = appliedMutation.target;
-        pendingToolbarVisibleRef.current = toolbarVisibleRef.current;
-        selectedSourceSelectionRef.current = appliedMutation.target;
+        const selectionDeleted = mutation.property === "delete";
+        pendingSelectionRef.current = selectionDeleted
+          ? null
+          : appliedMutation.target;
+        pendingToolbarVisibleRef.current = selectionDeleted
+          ? false
+          : toolbarVisibleRef.current;
+        selectedSourceSelectionRef.current = selectionDeleted
+          ? null
+          : appliedMutation.target;
         const currentRuntime = runtimeFrameRef.current;
         const preserveRuntimeActiveFrame = Boolean(
           currentRuntime?.settled
           && currentRuntime.elementGeneration === frameLoadGenerationRef.current,
         );
-        if (!preserveRuntimeActiveFrame) {
+        if (selectionDeleted || !preserveRuntimeActiveFrame) {
           renderedSourceHtmlRef.current = null;
           selectedElementRef.current?.removeAttribute("data-html-canvas-selected");
           selectedElementRef.current = null;
@@ -3326,6 +4195,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         selection,
         focus: true,
         toolbarVisible: true,
+        caretOffsetY: runtimeCaretOffsetY(documentNode, rootElement),
         ...(active.fragmentTargetRef
           ? { fragmentTargetRef: active.fragmentTargetRef }
           : {}),
@@ -3610,7 +4480,10 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   const finishNativeEditing = useCallback((
     shouldApply: boolean,
     trigger: NativeEditCheckpointTrigger = "manual",
-    { replayQueuedUserCommand = false }: FinishNativeEditingOptions = {},
+    {
+      replayQueuedUserCommand = false,
+      resumeAfterRuntimeHandoff = false,
+    }: FinishNativeEditingOptions = {},
   ): NativeEditCommitResult => {
     const active = activeNativeEditRef.current;
     if (!active) return { ok: true, mutation: null };
@@ -3645,6 +4518,30 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         runtimeFrameRef.current?.settled
         && runtimeFrameRef.current.elementGeneration === frameLoadGenerationRef.current
       ) ? runtimeFrameRef.current : null;
+      const runtimeNativeResume = resumeAfterRuntimeHandoff
+        && settledRuntimeFrame
+        && runtimeNeedsRerenderRef.current
+        ? {
+            fenceId: ++nativeEditFenceSequenceRef.current,
+            target,
+            selection: { ...active.selection },
+            focus: Boolean(
+              rootElement.ownerDocument.activeElement === rootElement
+              || (
+                rootElement.ownerDocument.activeElement
+                && rootElement.contains(rootElement.ownerDocument.activeElement)
+              ),
+            ),
+            toolbarVisible: toolbarVisibleRef.current,
+            caretOffsetY: runtimeCaretOffsetY(
+              rootElement.ownerDocument,
+              rootElement,
+            ),
+            ...(active.fragmentTargetRef
+              ? { fragmentTargetRef: active.fragmentTargetRef }
+              : {}),
+          }
+        : null;
       const frameReloadRequired = (
         nativeEditNeedsReloadRef.current
         || !rootElement.isConnected
@@ -3664,7 +4561,13 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       rootElement.ownerDocument.getSelection()?.removeAllRanges();
       if (settledRuntimeFrame && runtimeNeedsRerenderRef.current) {
         runtimeNeedsRerenderRef.current = false;
-        pendingNativeEditResumeRef.current = null;
+        pendingNativeEditResumeRef.current = runtimeNativeResume
+          ? {
+              ...runtimeNativeResume,
+              expectedFrameGeneration: frameLoadGenerationRef.current + 1,
+              sourceRevision: sourceIndexRef.current?.sourceSha256 ?? "",
+            }
+          : null;
         // Keep the current runtime document authoritative while the replacement
         // candidate is prepared. The native session has already ended, but its
         // selection host is still the managed visual target in the old frame.
@@ -3675,7 +4578,10 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         selectedSourceSelectionRef.current = target;
         pendingSelectionRef.current = target;
         pendingToolbarVisibleRef.current = true;
-        loadFrameSource(source, { preserveViewport: true });
+        loadFrameSource(source, {
+          preserveViewport: true,
+          forceRuntimeHandoff: true,
+        });
         replayCompletedUserCommand();
         return { ...committed, frameReloading: true };
       }
@@ -3733,7 +4639,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       updateSelectedStyle();
       updateMoveAvailability();
       observeSelectedElement(selectionElement);
-      requestAnimationFrame(updateOverlayPosition);
+      requestAnimationFrame(() => updateOverlayPosition());
       replayCompletedUserCommand();
       return { ...committed, frameReloading: false };
     } finally {
@@ -3763,7 +4669,9 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         () => resetSelection(commitPendingEdit, true),
       )
     ) return;
-    const committed = finishNativeEditing(commitPendingEdit, "manual");
+    const committed = finishNativeEditing(commitPendingEdit, "manual", {
+      resumeAfterRuntimeHandoff: false,
+    });
     if (!committed.ok) return;
     pendingFrameRestoreEpochRef.current += 1;
     pendingNativeEditResumeRef.current = null;
@@ -3797,6 +4705,16 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     if (!container || !documentNode) return undefined;
     const clearOnOutsidePointer = (event: PointerEvent) => {
       if (!selectedElementRef.current) return;
+      const sharedScrollElement = container.closest<HTMLElement>(
+        ".review-scroll-stage",
+      );
+      // Scrolling the shared stage is not an outside selection gesture. In
+      // particular, a native scrollbar pointerdown must leave the selected
+      // target and its handoff anchor available while the drag is in flight.
+      if (
+        sharedScrollElement
+        && sharedScrollbarPointerDown(sharedScrollElement, event)
+      ) return;
       const target = event.target;
       if (!(target instanceof Node)) return;
       if (toolbarRef.current?.contains(target)) return;
@@ -3850,7 +4768,9 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
               undefined,
               levelOverride,
             ));
-        const committed = finishNativeEditing(true, "manual");
+        const committed = finishNativeEditing(true, "manual", {
+          resumeAfterRuntimeHandoff: false,
+        });
         if (!committed.ok) return activeNativeEdit.target;
         if (committed.frameReloading) {
           pendingSelectionRef.current = requestedTarget;
@@ -3907,7 +4827,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           behavior: "auto",
         });
       }
-      requestAnimationFrame(updateOverlayPosition);
+      requestAnimationFrame(() => updateOverlayPosition());
       return nextSelection;
     },
     [finishNativeEditing, observeSelectedElement, updateMoveAvailability, updateOverlayPosition, updateSelectedStyle],
@@ -4203,10 +5123,18 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         clearNativeEditCheckpointTimer();
         if (state.dirty && !state.composing) {
           const scheduledLease = { ...active.lease };
+          const lineBreakCheckpoint = state.inputType === "insertParagraph"
+            || state.inputType === "insertLineBreak";
           nativeEditCheckpointTimerRef.current = window.setTimeout(() => {
             nativeEditCheckpointTimerRef.current = null;
             if (!nativeEditLeasesMatch(currentNativeEditLeaseRef.current, scheduledLease)) return;
-            nativeEditCheckpointRef.current();
+            if (lineBreakCheckpoint) {
+              finishNativeEditingRef.current(true, "automatic", {
+                resumeAfterRuntimeHandoff: true,
+              });
+            } else {
+              nativeEditCheckpointRef.current();
+            }
           }, state.requiresCanonicalReconcile
             ? 0
             : NATIVE_EDIT_CHECKPOINT_DELAY_MS);
@@ -4426,12 +5354,16 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         if (deferNativeCommandRef.current(
           "target-switch",
           () => {
-            const committed = finishNativeEditing(true, "manual");
+            const committed = finishNativeEditing(true, "manual", {
+              resumeAfterRuntimeHandoff: false,
+            });
             if (committed.ok) window.queueMicrotask(() => moveSelected(direction));
           },
           { direction },
         )) return true;
-        const committed = finishNativeEditing(true, "manual");
+        const committed = finishNativeEditing(true, "manual", {
+          resumeAfterRuntimeHandoff: false,
+        });
         if (!committed.ok || committed.frameReloading) return false;
       }
       const element = selectedElementRef.current;
@@ -4554,14 +5486,18 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       if (deferNativeCommandRef.current(
         "target-switch",
         () => {
-          const committed = finishNativeEditing(true, "manual");
+          const committed = finishNativeEditing(true, "manual", {
+            resumeAfterRuntimeHandoff: false,
+          });
           if (committed.ok) {
             window.queueMicrotask(() => applySelectedStructureOperation(action, destination));
           }
         },
         { action, destination },
       )) return true;
-      const committed = finishNativeEditing(true, "manual");
+      const committed = finishNativeEditing(true, "manual", {
+        resumeAfterRuntimeHandoff: false,
+      });
       if (!committed.ok || committed.frameReloading) return false;
     }
     if (
@@ -4633,12 +5569,16 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       if (deferNativeCommandRef.current(
         "target-switch",
         () => {
-          const committed = finishNativeEditing(true, "manual");
+          const committed = finishNativeEditing(true, "manual", {
+            resumeAfterRuntimeHandoff: false,
+          });
           if (committed.ok) window.queueMicrotask(() => insertElement(options));
         },
         options,
       )) return true;
-      const committed = finishNativeEditing(true, "manual");
+      const committed = finishNativeEditing(true, "manual", {
+        resumeAfterRuntimeHandoff: false,
+      });
       if (!committed.ok || committed.frameReloading) return false;
     }
     if (readOnlyRef.current || !enableReorderRef.current) return false;
@@ -4679,7 +5619,9 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           { targetId: point.selection.id },
         )
       ) return activeNativeEditRef.current?.target ?? point.selection;
-      const committed = finishNativeEditing(true, "manual");
+      const committed = finishNativeEditing(true, "manual", {
+        resumeAfterRuntimeHandoff: false,
+      });
       if (!committed.ok) return activeNativeEditRef.current?.target ?? point.selection;
       selectedElementRef.current?.removeAttribute("data-html-canvas-selected");
       selectedElementRef.current = null;
@@ -4693,7 +5635,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       setSelectedInsertionId(point.selection.id);
       setSelection(point.selection);
       onSelectRef.current?.(point.selection);
-      requestAnimationFrame(updateOverlayPosition);
+      requestAnimationFrame(() => updateOverlayPosition());
       if (requestComment) requestCommentForTarget(point.selection);
       return point.selection;
     },
@@ -4806,7 +5748,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
             element.scrollIntoView({ behavior: "smooth", block: "center", inline: "nearest" });
           }
         }
-        requestAnimationFrame(updateOverlayPosition);
+        requestAnimationFrame(() => updateOverlayPosition());
         return selectedValue;
       } catch (cause) {
         reportBlockedEdit(cause);
@@ -4915,6 +5857,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         || (activeElement && active.rootElement.contains(activeElement)),
       ),
       toolbarVisible: toolbarVisibleRef.current,
+      caretOffsetY: runtimeCaretOffsetY(documentNode, active.rootElement),
       ...(active.fragmentTargetRef
         ? { fragmentTargetRef: active.fragmentTargetRef }
         : {}),
@@ -5029,7 +5972,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       trigger?: NativeEditCheckpointTrigger;
     } = {},
   ): HtmlCanvasCommitResult => {
-    const resumeEditing = options.resumeEditing ?? true;
+    const resumeEditing = options.resumeEditing ?? false;
     const preserveForHistory = options.preserveForHistory ?? false;
     const committed = checkpointNativeEdit(options.trigger ?? "fence", {
       deferPreviewReconcile: true,
@@ -5223,7 +6166,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         "editable-island-in-place",
       );
       containerRef.current?.setAttribute("data-render-verified", "true");
-      requestAnimationFrame(updateOverlayPosition);
+      requestAnimationFrame(() => updateOverlayPosition());
       return true;
     } catch {
       containerRef.current?.setAttribute(
@@ -5336,7 +6279,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     iframeRef.current?.contentDocument?.documentElement.removeAttribute(
       "data-html-canvas-locked",
     );
-    requestAnimationFrame(updateOverlayPosition);
+    requestAnimationFrame(() => updateOverlayPosition());
     return true;
   }, [controlledInteractionLocked, enableReorder, readOnly, updateOverlayPosition]);
 
@@ -5365,7 +6308,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       appliedPageViewContextRef.current,
     );
     appliedPageViewContextRef.current = nextContext;
-    requestAnimationFrame(updateOverlayPosition);
+    requestAnimationFrame(() => updateOverlayPosition());
     return true;
   }, [updateOverlayPosition]);
 
@@ -5424,7 +6367,9 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       if (lockedRef.current || readOnlyRef.current) return false;
       let frameReloading = false;
       if (activeNativeEditRef.current) {
-        const committed = finishNativeEditing(true, "manual");
+        const committed = finishNativeEditing(true, "manual", {
+          resumeAfterRuntimeHandoff: false,
+        });
         if (!committed.ok) return false;
         frameReloading = Boolean(committed.frameReloading);
       }
@@ -5439,7 +6384,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         }
       }
       if (action.isCurrent) {
-        requestAnimationFrame(updateOverlayPosition);
+        requestAnimationFrame(() => updateOverlayPosition());
         return true;
       }
       const documentKey = pageViewDocumentKeyRef.current;
@@ -5588,14 +6533,14 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   }, [updateOverlayPosition]);
 
   useEffect(() => {
-    requestAnimationFrame(updateOverlayPosition);
+    requestAnimationFrame(() => updateOverlayPosition());
   }, [commentedTargets, updateOverlayPosition]);
 
   const selectedTargetId = selection?.id ?? null;
   const hasOverlayPosition = overlayPosition !== null;
   useEffect(() => {
     if (!selectedTargetId || !hasOverlayPosition) return;
-    requestAnimationFrame(updateOverlayPosition);
+    requestAnimationFrame(() => updateOverlayPosition());
   }, [hasOverlayPosition, selectedTargetId, updateOverlayPosition]);
 
   useEffect(() => {
@@ -5613,7 +6558,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     // tree while that provisional document is being replaced.
     documentNode?.documentElement?.toggleAttribute("data-html-canvas-locked", shouldLock);
     if (shouldLock) clearSelection();
-    requestAnimationFrame(updateOverlayPosition);
+    requestAnimationFrame(() => updateOverlayPosition());
   }, [
     clearSelection,
     controlledInteractionLocked,
@@ -5641,8 +6586,16 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       runtimePromotionRef.current = null;
       const runtimeCandidate = runtimeCandidateRef.current;
       runtimeCandidateRef.current = null;
+      runtimeCandidate?.handoffScrollCleanup();
       runtimeCandidate?.registrationCleanup();
+      if (runtimePromotion && runtimePromotion !== runtimeCandidate) {
+        runtimePromotion.handoffScrollCleanup();
+      }
       runtimeCandidateIframeRef.current = null;
+      const retiringCleanupFrame = runtimeRetiringCleanupFrameRef.current;
+      if (retiringCleanupFrame !== null) window.cancelAnimationFrame(retiringCleanupFrame);
+      runtimeRetiringCleanupFrameRef.current = null;
+      runtimeRetiringGenerationRef.current = null;
       const runtimeFrame = runtimeFrameRef.current;
       runtimeFrameRef.current = null;
       runtimeSourceRegistrationCleanupRef.current();
@@ -5712,11 +6665,22 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         || runtimeSourceElements.executionId !== runtimeFrame.grant.executionId
       ) return false;
     }
+    const promotedCandidate = runtimePromotionRef.current;
+    const isRuntimePromotion = Boolean(
+      promotedCandidate
+      && promotedCandidate.render.elementGeneration === connectedFrameGeneration
+      && (
+        !promotedCandidate.runtimeFrame
+        || promotedCandidate.runtimeFrame === runtimeFrame
+      ),
+    );
     hoverControllerRef.current?.hide();
-    renderedSourceHtmlRef.current = frameSourceHtmlRef.current;
-    containerRef.current?.setAttribute("data-render-verified", "true");
-    performance.mark("pageroot:canvas:render-verified", { detail: Object.freeze({ content: runtimeFrame ? "runtime-loaded" : "static-complete" }) });
-    fencedDocumentCleanupRef.current();
+    if (!isRuntimePromotion) {
+      renderedSourceHtmlRef.current = frameSourceHtmlRef.current;
+      containerRef.current?.setAttribute("data-render-verified", "true");
+      performance.mark("pageroot:canvas:render-verified", { detail: Object.freeze({ content: runtimeFrame ? "runtime-loaded" : "static-complete" }) });
+      fencedDocumentCleanupRef.current();
+    }
 
     let editorStyle = documentNode.head.querySelector<HTMLStyleElement>(`style[${EDITOR_STYLE_ATTRIBUTE}]`);
     if (!editorStyle) {
@@ -5794,7 +6758,9 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       if (activeNativeEditRef.current?.rootElement.contains(event.target as Node)) return;
       const activeEdit = activeNativeEditRef.current;
       if (activeEdit?.mode === "text-fragment") {
-        const committed = finishNativeEditing(true, "manual");
+        const committed = finishNativeEditing(true, "manual", {
+          resumeAfterRuntimeHandoff: false,
+        });
         if (!committed.ok || committed.frameReloading) return;
       }
       if (captureTextRange()) {
@@ -5842,7 +6808,9 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       if (activeNativeEditRef.current?.rootElement.contains(event.target as Node)) return;
       const activeEdit = activeNativeEditRef.current;
       if (activeEdit?.mode === "text-fragment") {
-        const committed = finishNativeEditing(true, "manual");
+        const committed = finishNativeEditing(true, "manual", {
+          resumeAfterRuntimeHandoff: false,
+        });
         if (!committed.ok || committed.frameReloading) return;
       }
       if (lockedRef.current) return;
@@ -5933,7 +6901,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         const save = () => {
           if (!lockedRef.current) {
             if (!fencePendingEdit({
-              resumeEditing: true,
+              resumeEditing: false,
               trigger: "save",
             }).ok) return;
           }
@@ -6187,6 +7155,33 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     documentNode.addEventListener("scroll", handleScroll, true);
     iframe.addEventListener("pointerleave", handlePointerLeave);
 
+    const pendingSelection = pendingSelectionRef.current;
+    const pendingToolbarVisible = pendingToolbarVisibleRef.current;
+    const pendingViewport = pendingFrameViewportRef.current;
+    const pendingSharedViewport = pendingSharedViewportRef.current;
+    const pendingNativeResume = pendingNativeEditResumeRef.current;
+    const pendingRestoreEpoch = pendingFrameRestoreEpochRef.current;
+    const sharedScrollElementForHandoff = isRuntimePromotion
+      ? pendingSharedViewport?.element ?? null
+      : null;
+    const handleSharedScroll = () => {
+      updateOverlayPosition();
+    };
+    sharedScrollElementForHandoff?.addEventListener("scroll", handleSharedScroll);
+    if (isRuntimePromotion && promotedCandidate) {
+      const previousScrollCleanup = promotedCandidate.handoffScrollCleanup;
+      const candidateScrollCleanup = attachRuntimeHandoffScrollListeners({
+        candidate: promotedCandidate,
+        iframe,
+        sharedScrollElement: null,
+        includeShared: false,
+      });
+      promotedCandidate.handoffScrollCleanup = () => {
+        candidateScrollCleanup();
+        previousScrollCleanup();
+      };
+    }
+
     cleanupFrameRef.current = () => {
       documentNode.removeEventListener("click", handleClick, true);
       documentNode.removeEventListener("mousedown", handleMouseDown, true);
@@ -6207,6 +7202,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       documentNode.removeEventListener("keydown", handleKeyDown, true);
       documentNode.removeEventListener("scroll", handleScroll, true);
       layoutObserver?.disconnect();
+      sharedScrollElementForHandoff?.removeEventListener("scroll", handleSharedScroll);
       if (
         connectedFrameRef.current?.iframe === iframe
         && connectedFrameRef.current.generation === connectedFrameGeneration
@@ -6216,12 +7212,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       iframe,
       generation: connectedFrameGeneration,
     };
-    const pendingSelection = pendingSelectionRef.current;
-    const pendingToolbarVisible = pendingToolbarVisibleRef.current;
-    const pendingViewport = pendingFrameViewportRef.current;
-    const pendingSharedViewport = pendingSharedViewportRef.current;
-    const pendingNativeResume = pendingNativeEditResumeRef.current;
-    const pendingRestoreEpoch = pendingFrameRestoreEpochRef.current;
     containerRef.current?.setAttribute(
       "data-native-fence-resume",
       `connected:${connectedFrameGeneration}:${pendingSelection?.id ?? "none"}:${pendingNativeResume?.fenceId ?? "none"}`,
@@ -6230,7 +7220,515 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     pendingToolbarVisibleRef.current = false;
     pendingFrameViewportRef.current = null;
     pendingSharedViewportRef.current = null;
-    requestAnimationFrame(() => {
+    const positionRuntimeHandoff = (candidate: RuntimeCandidate) => {
+      let attempts = 0;
+      let stableCount = 0;
+      let previousFingerprint: RuntimeHandoffLayoutFingerprint | null = null;
+      let selectionRestored = !pendingSelection && !pendingNativeResume;
+      let nativeResumeAttempted = !pendingNativeResume;
+      let nativeResumeFailed = false;
+      const startedAt = performance.now();
+      const snapshot = candidate.viewportSnapshot;
+      const frameView = documentNode.defaultView;
+      if (candidate.runtimeFrame?.activation === "ready") {
+        candidate.runtimeFrame.settled = true;
+        containerRef.current?.setAttribute(
+          "data-runtime-bootstrap-count",
+          String(documentNode.querySelectorAll("[data-pageroot-edit-runtime-bootstrap]").length),
+        );
+      }
+
+      const isCurrent = () => {
+        return runtimePromotionRef.current === candidate
+          && iframe === iframeRef.current
+          && iframe.contentDocument === documentNode
+          && frameLoadGenerationRef.current === connectedFrameGeneration
+          && expectedFrameTokenRef.current === expectedToken
+          && containerRef.current?.getAttribute("data-runtime-handoff") === "positioning";
+      };
+      const userScrollIntentPending = (
+        channel: RuntimeHandoffScrollChannel,
+      ) => candidate.handoffScrollState[channel].userIntentPending;
+      const markProgrammaticScroll = (
+        channel: RuntimeHandoffScrollChannel,
+        left: number,
+        top: number,
+      ) => {
+        candidate.markProgrammaticScroll(channel, left, top);
+      };
+      const failHandoff = () => {
+        if (!isCurrent()) return;
+        const rolledBack = rollbackRuntimePromotionRef.current(candidate, "failed");
+        if (rolledBack && candidate.runtimeFrame) {
+          startRuntimeCandidateRef.current(candidate.source, { runtimeFallback: true });
+        }
+      };
+      const scheduleNextAttempt = () => {
+        if (!isCurrent()) return;
+        attempts += 1;
+        if (
+          attempts >= Math.ceil(EDIT_AUTHOR_RUNTIME_BUDGET.runtimeDeadlineMs / 16) + 30
+          || performance.now() - startedAt >= EDIT_AUTHOR_RUNTIME_BUDGET.runtimeDeadlineMs
+        ) {
+          failHandoff();
+          return;
+        }
+        requestAnimationFrame(attemptPositioning);
+      };
+      const maximumFrameScrollTop = () => Math.max(
+        0,
+        (documentNode.scrollingElement || documentNode.documentElement).scrollHeight
+          - iframe.clientHeight,
+      );
+      const maximumFrameScrollLeft = () => Math.max(
+        0,
+        (documentNode.scrollingElement || documentNode.documentElement).scrollWidth
+          - iframe.clientWidth,
+      );
+      const frameScrollTarget = () => {
+        const maximum = maximumFrameScrollTop();
+        let targetTop = clampRuntimeScroll(snapshot.iframeScrollY, maximum);
+        if (
+          snapshot.viewportAnchorStableId
+          && snapshot.viewportAnchorOffsetY !== null
+        ) {
+          const anchor = runtimeSourceElementForStableId(
+            documentNode,
+            sourceIndexRef.current,
+            snapshot.viewportAnchorStableId,
+          );
+          const anchorTop = anchor?.getBoundingClientRect().top;
+          const desiredAnchorOffsetY = snapshot.viewportAnchorOffsetY;
+          if (
+            anchor
+            && desiredAnchorOffsetY !== null
+            && anchorTop !== undefined
+            && Number.isFinite(anchorTop)
+          ) {
+            targetTop = runtimeAnchorScrollTop({
+              currentScrollTop: frameView?.scrollY || 0,
+              currentAnchorOffsetY: anchorTop,
+              desiredAnchorOffsetY: desiredAnchorOffsetY,
+              maximumScrollTop: maximum,
+            });
+          }
+        }
+        return targetTop;
+      };
+      const restoreFrameViewport = () => {
+        if (!frameView || userScrollIntentPending("frame")) {
+          return frameView?.scrollY || 0;
+        }
+        const targetTop = frameScrollTarget();
+        const targetLeft = clampRuntimeScroll(
+          snapshot.iframeScrollX,
+          maximumFrameScrollLeft(),
+        );
+        if (
+          !runtimePositionWithinTolerance(frameView.scrollY, targetTop)
+          || !runtimePositionWithinTolerance(frameView.scrollX, targetLeft)
+        ) {
+          markProgrammaticScroll("frame", targetLeft, targetTop);
+          frameView.scrollTo({ left: targetLeft, top: targetTop, behavior: "auto" });
+        }
+        return targetTop;
+      };
+      const sharedAnchorViewportOffset = () => {
+        if (
+          !pendingSharedViewport
+          || snapshot.viewportAnchorStableId === null
+          || snapshot.viewportAnchorSharedOffsetY === null
+        ) return null;
+        const anchor = runtimeSourceElementForStableId(
+          documentNode,
+          sourceIndexRef.current,
+          snapshot.viewportAnchorStableId,
+        );
+        const anchorRect = anchor?.getBoundingClientRect();
+        const iframeRect = iframe.getBoundingClientRect();
+        const sharedRect = pendingSharedViewport.element.getBoundingClientRect();
+        if (!anchor || !anchorRect || !iframeRect || !sharedRect) return null;
+        return iframeRect.top - sharedRect.top + anchorRect.top;
+      };
+      const sharedScrollTarget = () => {
+        if (!pendingSharedViewport) return null;
+        const element = pendingSharedViewport.element;
+        const maximum = Math.max(0, element.scrollHeight - element.clientHeight);
+        let targetTop = clampRuntimeScroll(snapshot.sharedScrollTop, maximum);
+        const currentAnchorOffsetY = sharedAnchorViewportOffset();
+        if (
+          currentAnchorOffsetY !== null
+          && snapshot.viewportAnchorSharedOffsetY !== null
+        ) {
+          targetTop = runtimeAnchorScrollTop({
+            currentScrollTop: element.scrollTop,
+            currentAnchorOffsetY,
+            desiredAnchorOffsetY: snapshot.viewportAnchorSharedOffsetY,
+            maximumScrollTop: maximum,
+          });
+        }
+        return targetTop;
+      };
+      const restoreSharedViewportForHandoff = () => {
+        if (!pendingSharedViewport || userScrollIntentPending("shared")) {
+          return pendingSharedViewport?.element.scrollTop || 0;
+        }
+        const element = pendingSharedViewport.element;
+        if (!element.isConnected) return element.scrollTop;
+        const targetTop = sharedScrollTarget() ?? element.scrollTop;
+        const targetLeft = clampRuntimeScroll(
+          snapshot.sharedScrollLeft,
+          Math.max(0, element.scrollWidth - element.clientWidth),
+        );
+        if (
+          !runtimePositionWithinTolerance(element.scrollTop, targetTop)
+          || !runtimePositionWithinTolerance(element.scrollLeft, targetLeft)
+        ) {
+          markProgrammaticScroll("shared", targetLeft, targetTop);
+          element.scrollTo({ left: targetLeft, top: targetTop, behavior: "auto" });
+        }
+        return targetTop;
+      };
+      const restoreSelectionAndNativeEdit = () => {
+        if (!selectionRestored) {
+          const target = pendingSelection ?? pendingNativeResume?.target ?? null;
+          if (!target || lockedRef.current) {
+            selectionRestored = true;
+          } else {
+            const restoredTarget = selectTarget(target, {
+              reveal: false,
+              showToolbar: pendingNativeResume?.toolbarVisible
+                ?? pendingToolbarVisible,
+            });
+            selectionRestored = Boolean(restoredTarget);
+            containerRef.current?.setAttribute(
+              "data-native-fence-resume",
+              `positioning-selected:${restoredTarget?.id ?? "none"}`,
+            );
+            if (
+              !pendingNativeResume
+              && restoredTarget
+              && candidate.previousActive.activeTextRange
+              && sourceIndexRef.current
+            ) {
+              const restoredTextRange = restoreRuntimeTextSelection(
+                documentNode,
+                sourceIndexRef.current,
+                candidate.previousActive.activeTextRange,
+                restoredTarget,
+              );
+              activeTextRangeRef.current = restoredTextRange;
+              setHasTextRange(Boolean(restoredTextRange));
+              if (restoredTextRange) updateSelectedStyle();
+            }
+          }
+        }
+        if (nativeResumeAttempted || !pendingNativeResume || !selectionRestored) return;
+        const resumeIsCurrent = (
+          pendingNativeEditResumeRef.current?.fenceId === pendingNativeResume.fenceId
+          && pendingNativeResume.expectedFrameGeneration === connectedFrameGeneration
+          && pendingNativeResume.sourceRevision === sourceIndexRef.current?.sourceSha256
+        );
+        if (!resumeIsCurrent) {
+          pendingNativeEditResumeRef.current = null;
+          nativeResumeAttempted = true;
+          return;
+        }
+        if (!pendingNativeResume.focus) {
+          pendingNativeEditResumeRef.current = null;
+          nativeResumeAttempted = true;
+          return;
+        }
+        if (
+          pendingNativeResume.fragmentTargetRef
+          && selectedElementRef.current
+          && sourceIndexRef.current
+        ) {
+          const restoredFragmentRange = activeRangeForTextFragmentTarget(
+            selectedElementRef.current,
+            sourceIndexRef.current,
+            pendingNativeResume.target,
+            pendingNativeResume.fragmentTargetRef,
+          );
+          activeTextRangeRef.current = restoredFragmentRange;
+          setHasTextRange(Boolean(restoredFragmentRange));
+        }
+        const resumed = startEditing(undefined, pendingNativeResume.selection);
+        const active = activeNativeEditRef.current;
+        if (resumed && active) {
+          active.rootElement.focus({ preventScroll: true });
+          active.session.restoreSelection(pendingNativeResume.selection);
+          pendingNativeEditResumeRef.current = null;
+          nativeResumeAttempted = true;
+          containerRef.current?.setAttribute("data-native-fence-resume", "positioning-resumed");
+        } else {
+          nativeResumeFailed = true;
+          nativeResumeAttempted = true;
+          containerRef.current?.setAttribute("data-native-fence-resume", "positioning-resume-failed");
+        }
+      };
+      const correctCaretViewport = () => {
+        const desiredCaretOffsetY = snapshot.caretOffsetY;
+        if (
+          !frameView
+          || userScrollIntentPending("frame")
+          || desiredCaretOffsetY === null
+        ) return;
+        const active = activeNativeEditRef.current;
+        if (!active || active.rootElement.ownerDocument !== documentNode) return;
+        const caretTop = runtimeCaretOffsetY(documentNode, active.rootElement);
+        if (caretTop === null || !Number.isFinite(caretTop)) return;
+        const targetTop = runtimeAnchorScrollTop({
+          currentScrollTop: frameView.scrollY,
+          currentAnchorOffsetY: caretTop,
+          desiredAnchorOffsetY: desiredCaretOffsetY,
+          maximumScrollTop: maximumFrameScrollTop(),
+        });
+        if (!runtimePositionWithinTolerance(frameView.scrollY, targetTop)) {
+          markProgrammaticScroll("frame", frameView.scrollX, targetTop);
+          frameView.scrollTo({
+            left: frameView.scrollX,
+            top: targetTop,
+            behavior: "auto",
+          });
+        }
+      };
+      const captureLayoutFingerprint = (): RuntimeHandoffLayoutFingerprint => {
+        const scrollingElement = documentNode.scrollingElement
+          || documentNode.documentElement;
+        const sharedElement = pendingSharedViewport?.element
+          ?? candidate.sharedViewportElement;
+        const active = activeNativeEditRef.current;
+        let nativeSelection: RuntimeViewportSnapshot["nativeSelection"] = null;
+        if (active?.rootElement.ownerDocument === documentNode) {
+          try {
+            nativeSelection = { ...active.session.getSelection() };
+          } catch {
+            nativeSelection = null;
+          }
+        }
+        const viewport = captureRuntimeViewportSnapshot({
+          iframe,
+          sharedScrollElement: sharedElement,
+          sourceIndex: sourceIndexRef.current,
+          selectedElement: selectedElementRef.current,
+          selectedSourceSelection: selectedSourceSelectionRef.current
+            ?? pendingSelection
+            ?? pendingNativeResume?.target
+            ?? null,
+          nativeSelection,
+        });
+        return {
+          iframeWidth: iframe.clientWidth,
+          iframeHeight: iframe.clientHeight,
+          documentClientWidth: scrollingElement?.clientWidth || 0,
+          documentClientHeight: scrollingElement?.clientHeight || 0,
+          documentScrollWidth: scrollingElement?.scrollWidth || 0,
+          documentScrollHeight: scrollingElement?.scrollHeight || 0,
+          sharedClientWidth: sharedElement?.clientWidth ?? null,
+          sharedClientHeight: sharedElement?.clientHeight ?? null,
+          sharedScrollWidth: sharedElement?.scrollWidth ?? null,
+          sharedScrollHeight: sharedElement?.scrollHeight ?? null,
+          iframeScrollX: viewport.iframeScrollX,
+          iframeScrollY: viewport.iframeScrollY,
+          sharedScrollLeft: sharedElement?.scrollLeft ?? null,
+          sharedScrollTop: sharedElement?.scrollTop ?? null,
+          viewportAnchorStableId: viewport.viewportAnchorStableId,
+          viewportAnchorOffsetY: viewport.viewportAnchorOffsetY,
+          viewportAnchorSharedOffsetY: viewport.viewportAnchorSharedOffsetY,
+          selectedStableId: viewport.selectedStableId,
+          nativeSelection: viewport.nativeSelection,
+          caretOffsetY: viewport.caretOffsetY,
+        };
+      };
+      const updateStableFingerprint = () => {
+        const currentFingerprint = captureLayoutFingerprint();
+        stableCount = previousFingerprint
+          && runtimeHandoffLayoutFingerprintWithinTolerance(
+            currentFingerprint,
+            previousFingerprint,
+          )
+          ? stableCount + 1
+          : 1;
+        previousFingerprint = currentFingerprint;
+        return stableCount;
+      };
+      const validateHandoff = () => {
+        if (!frameView || !documentNode.body || iframe.clientHeight <= 0 || iframe.clientWidth <= 0) {
+          return false;
+        }
+        if (
+          userScrollIntentPending("frame")
+          || userScrollIntentPending("shared")
+        ) return false;
+        const expectedSelectedId = snapshot.selectedStableId
+          ?? pendingSelection?.elementId
+          ?? pendingNativeResume?.target.elementId
+          ?? null;
+        const actualSelectedId = runtimeStableIdForElement(
+          selectedElementRef.current,
+          sourceIndexRef.current,
+        );
+        if (expectedSelectedId && actualSelectedId !== expectedSelectedId) {
+          return false;
+        }
+        if (nativeResumeFailed) return false;
+        if (pendingNativeResume && pendingNativeResume.focus) {
+          const active = activeNativeEditRef.current;
+          const activeElement = documentNode.activeElement;
+          if (
+            !active
+            || active.rootElement.ownerDocument !== documentNode
+            || !activeElement
+            || (activeElement !== active.rootElement && !active.rootElement.contains(activeElement))
+          ) return false;
+          const actualSelection = active.session.getSelection();
+          if (
+            actualSelection.anchor !== pendingNativeResume.selection.anchor
+            || actualSelection.focus !== pendingNativeResume.selection.focus
+          ) return false;
+          if (snapshot.caretOffsetY !== null) {
+            const caretTop = runtimeCaretOffsetY(documentNode, active.rootElement);
+            if (
+              caretTop === null
+              || !runtimePositionWithinTolerance(caretTop, snapshot.caretOffsetY)
+            ) return false;
+          }
+        }
+        const expectedTop = frameScrollTarget();
+        if (!runtimePositionWithinTolerance(frameView.scrollY, expectedTop)) {
+          return false;
+        }
+        if (!runtimePositionWithinTolerance(
+          frameView.scrollX,
+          clampRuntimeScroll(snapshot.iframeScrollX, maximumFrameScrollLeft()),
+        )) return false;
+        if (snapshot.viewportAnchorStableId && snapshot.viewportAnchorOffsetY !== null) {
+          const anchor = runtimeSourceElementForStableId(
+            documentNode,
+            sourceIndexRef.current,
+            snapshot.viewportAnchorStableId,
+          );
+          if (anchor) {
+            const anchorTop = anchor.getBoundingClientRect().top;
+            const anchorActual = pendingSharedViewport
+              && snapshot.viewportAnchorSharedOffsetY !== null
+              ? sharedAnchorViewportOffset()
+              : anchorTop;
+            const anchorExpected = pendingSharedViewport
+              && snapshot.viewportAnchorSharedOffsetY !== null
+              ? snapshot.viewportAnchorSharedOffsetY
+              : snapshot.viewportAnchorOffsetY;
+            if (
+              anchorActual === null
+              || (
+                !runtimePositionWithinTolerance(anchorActual, anchorExpected)
+                && !runtimeAnchorOffsetIsClamped({
+                  currentScrollTop: pendingSharedViewport
+                    ? pendingSharedViewport.element.scrollTop
+                    : frameView.scrollY,
+                  currentAnchorOffsetY: anchorActual,
+                  desiredAnchorOffsetY: anchorExpected,
+                  maximumScrollTop: pendingSharedViewport
+                    ? Math.max(
+                      0,
+                      pendingSharedViewport.element.scrollHeight
+                        - pendingSharedViewport.element.clientHeight,
+                    )
+                    : maximumFrameScrollTop(),
+                })
+              )
+            ) {
+              return false;
+            }
+          }
+        }
+        if (
+          pendingSharedViewport
+          && !runtimePositionWithinTolerance(
+            pendingSharedViewport.element.scrollTop,
+            sharedScrollTarget() ?? pendingSharedViewport.element.scrollTop,
+          )
+        ) return false;
+        if (
+          pendingSharedViewport
+          && !runtimePositionWithinTolerance(
+            pendingSharedViewport.element.scrollLeft,
+            clampRuntimeScroll(
+              snapshot.sharedScrollLeft,
+              Math.max(
+                0,
+                pendingSharedViewport.element.scrollWidth
+                  - pendingSharedViewport.element.clientWidth,
+              ),
+            ),
+          )
+        ) return false;
+        return true;
+      };
+      const activateHandoff = () => {
+        if (!isCurrent()) return false;
+        if (!validateHandoff()) return false;
+        flushSync(() => {
+          renderedSourceHtmlRef.current = frameSourceHtmlRef.current;
+          containerRef.current?.setAttribute("data-render-verified", "true");
+          performance.mark("pageroot:canvas:render-verified", { detail: Object.freeze({ content: "runtime-loaded" }) });
+          updateOverlayPosition({ allowRuntimeHandoff: true });
+          containerRef.current?.setAttribute("data-runtime-handoff", "active");
+        });
+        fencedDocumentCleanupRef.current();
+        activeFrameConnectionPendingRef.current = false;
+        const connectedRuntimeFrame = runtimeFrameRef.current;
+        if (
+          connectedRuntimeFrame?.elementGeneration === connectedFrameGeneration
+          && connectedRuntimeFrame.activation === "ready"
+        ) {
+          if (!runtimeReadyReportedRef.current.has(connectedRuntimeFrame)) {
+            runtimeReadyReportedRef.current.add(connectedRuntimeFrame);
+            candidate.outcomeReported = true;
+            onEditRuntimeLoadOutcomeRef.current?.(connectedRuntimeFrame.grant, "ready");
+          }
+        }
+        finalizeRuntimePromotionRef.current(candidate);
+        return true;
+      };
+      const attemptPositioning = () => {
+        if (!isCurrent()) return;
+        const bodyRect = documentNode.body?.getBoundingClientRect();
+        if (
+          !bodyRect
+          || !Number.isFinite(bodyRect.width)
+          || !Number.isFinite(bodyRect.height)
+          || iframe.clientHeight <= 0
+          || iframe.clientWidth <= 0
+        ) {
+          scheduleNextAttempt();
+          return;
+        }
+        restoreFrameViewport();
+        restoreSharedViewportForHandoff();
+        restoreSelectionAndNativeEdit();
+        requestAnimationFrame(() => {
+          if (!isCurrent()) return;
+          restoreFrameViewport();
+          restoreSharedViewportForHandoff();
+          correctCaretViewport();
+          if (
+            userScrollIntentPending("frame")
+            || userScrollIntentPending("shared")
+          ) {
+            stableCount = 0;
+            previousFingerprint = null;
+            scheduleNextAttempt();
+            return;
+          }
+          if (updateStableFingerprint() >= 2 && activateHandoff()) return;
+          scheduleNextAttempt();
+        });
+      };
+      requestAnimationFrame(attemptPositioning);
+    };
+    const restoreConnectedFrame = () => {
       if (
         iframe.contentDocument !== documentNode
         || frameLoadGenerationRef.current !== connectedFrameGeneration
@@ -6387,17 +7885,22 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       ) {
         activeFrameConnectionPendingRef.current = false;
       }
-      const promotedCandidate = runtimePromotionRef.current;
+      const activePromotedCandidate = runtimePromotionRef.current;
       if (
-        promotedCandidate
-        && promotedCandidate.render.elementGeneration === connectedFrameGeneration
+        activePromotedCandidate
+        && activePromotedCandidate.render.elementGeneration === connectedFrameGeneration
         && (
-          !promotedCandidate.runtimeFrame
-          || promotedCandidate.runtimeFrame === connectedRuntimeFrame
+          !activePromotedCandidate.runtimeFrame
+          || activePromotedCandidate.runtimeFrame === connectedRuntimeFrame
         )
         && (!connectedRuntimeFrame || connectedRuntimeFrame.settled)
-      ) finalizeRuntimePromotionRef.current(promotedCandidate);
-    });
+      ) finalizeRuntimePromotionRef.current(activePromotedCandidate);
+    };
+    if (isRuntimePromotion && promotedCandidate) {
+      positionRuntimeHandoff(promotedCandidate);
+    } else {
+      requestAnimationFrame(restoreConnectedFrame);
+    }
     return true;
   }, [
     canvasTargetIdentityScopeForGeneration,
@@ -6414,6 +7917,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     selectedElementHasSourceMutationAuthority,
     startEditing,
     updateOverlayPosition,
+    updateSelectedStyle,
     fallBackToStaticRuntimeFrame,
   ]);
   connectFrameRef.current = connectFrame;
@@ -6608,7 +8112,9 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         // first, then let the guarded source-range patch below own the wrapper.
         // Keep the captured range: finishNativeEditing clears the live range
         // as part of retiring the fragment session.
-        const committed = finishNativeEditing(true, "style");
+        const committed = finishNativeEditing(true, "style", {
+          resumeAfterRuntimeHandoff: false,
+        });
         if (!committed.ok || committed.frameReloading) return;
         activeNativeEdit = null;
         element = selectedElementRef.current;
@@ -6659,7 +8165,9 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         activeNativeEdit
         && !(activeRange && TEXT_RANGE_EDITABLE_PROPERTIES.has(property))
       ) {
-        const committed = finishNativeEditing(true, "style");
+        const committed = finishNativeEditing(true, "style", {
+          resumeAfterRuntimeHandoff: false,
+        });
         if (!committed.ok) return;
         activeNativeEdit = null;
       }
@@ -6871,7 +8379,9 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         return;
       }
       if (activeNativeEditRef.current) {
-        finishNativeEditing(true);
+        finishNativeEditing(true, "manual", {
+          resumeAfterRuntimeHandoff: false,
+        });
         return;
       }
       iframeRef.current?.focus();
@@ -6922,13 +8432,20 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     && selection
     && hoverChrome.capability.visualElement === selectedVisualTargetElement,
   );
-  const selectedOutlineStyle = canvasTargetOutlineStyle(
-    containerRef.current,
-    iframeRef.current,
-    selectedVisualTargetElement,
-    Boolean(selection && isPageRootSelection(selection)),
-  );
+  const runtimeHandoffPositioning = containerRef.current?.getAttribute(
+    "data-runtime-handoff",
+  ) === "positioning";
+  const selectedOutlineStyle = runtimeHandoffPositioning
+    ? selectionChromeProjectionRef.current?.selectedOutlineStyle
+    : canvasTargetOutlineStyle(
+        containerRef.current,
+        iframeRef.current,
+        selectedVisualTargetElement,
+        Boolean(selection && isPageRootSelection(selection)),
+      );
   const showHoverOutline = Boolean(
+    !runtimeHandoffPositioning
+    &&
     pointerCapabilityHoverEnabled
     && hoverChrome.outline
     && hoverChrome.capability
@@ -6937,6 +8454,8 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     && !interactionLocked
   );
   const showHoverHint = Boolean(
+    !runtimeHandoffPositioning
+    &&
     pointerCapabilityHoverEnabled
     && hoverChrome.outline
     && hoverChrome.hint
@@ -7150,7 +8669,9 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         ? { ...selection, textLocator: capturedTextLocator }
         : selection;
       if (activeNativeEditRef.current) {
-        const committed = finishNativeEditing(true, "manual");
+        const committed = finishNativeEditing(true, "manual", {
+          resumeAfterRuntimeHandoff: false,
+        });
         if (!committed.ok) return;
       }
       requestCommentForTarget(commentTarget);
@@ -7321,8 +8842,9 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           tabIndex={-1}
           style={{
             gridColumn: "1",
-            gridRow: "2",
-            visibility: "hidden",
+            gridRow: "1",
+            visibility: "visible",
+            opacity: 1,
             pointerEvents: "none",
           }}
         />
@@ -7345,8 +8867,9 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           tabIndex={-1}
           style={{
             gridColumn: "1",
-            gridRow: "2",
-            visibility: "hidden",
+            gridRow: "1",
+            visibility: "visible",
+            opacity: 0,
             pointerEvents: "none",
           }}
           onLoad={(event) => {

@@ -398,6 +398,16 @@ async function waitForFreshFenceFrame(page, editor, previousDocumentToken) {
   return currentEditorFrame(page);
 }
 
+async function currentFrameAfterOptionalFence(page, editor, previousDocumentToken) {
+  const currentDocumentToken = await documentToken(page);
+  if (currentDocumentToken !== previousDocumentToken) {
+    await expect(editor).toHaveAttribute("data-render-verified", "true");
+  }
+  const frame = await currentEditorFrame(page);
+  await expect(frame.locator('[contenteditable="true"]')).toHaveCount(0);
+  return frame;
+}
+
 function uniqueLiteralForCandidate(source, text) {
   const normalized = text.trim();
   const codePoints = Array.from(normalized);
@@ -786,7 +796,7 @@ test("a real complex HTML file keeps layout and editable-island source authority
   await waitForFreshFenceFrame(page, editor, previousDocumentToken);
   previousDocumentToken = await documentToken(page);
   const modified = await exportCurrentHtml(page);
-  let currentFrame = await waitForFreshFenceFrame(
+  let currentFrame = await currentFrameAfterOptionalFence(
     page,
     editor,
     previousDocumentToken,

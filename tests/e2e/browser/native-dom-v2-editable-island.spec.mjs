@@ -126,6 +126,19 @@ test("start, middle and end all support insert, delete and line break", async ({
       );
       await page.keyboard.press("Enter");
       await expect.poll(() => authoredInnerHtml(target)).toContain("<br>");
+      // Enter checkpoints and exits the native session by default. Re-enter
+      // explicitly before the next edit instead of relying on an implicit
+      // resume from the preceding checkpoint.
+      await activateNativeEdit(frame, fixtureCase.id);
+      await target.evaluate((element) => {
+        const range = element.ownerDocument.createRange();
+        range.setStart(element, element.childNodes.length);
+        range.collapse(true);
+        const selection = element.ownerDocument.getSelection();
+        selection?.removeAllRanges();
+        selection?.addRange(range);
+        element.focus({ preventScroll: true });
+      });
       await page.keyboard.press("Backspace");
       expect(
         await editor.getAttribute("data-edit-block-detail"),

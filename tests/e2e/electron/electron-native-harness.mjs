@@ -184,13 +184,6 @@ export async function waitForFreshDiskFrame(page, previousDocumentToken, caseId)
     (selector) => Boolean(document.querySelector(selector)),
     caseSelector(caseId),
   );
-  await expect.poll(() => nativeEditingState(page, caseId)).toMatchObject({
-    targetIsActive: true,
-    contenteditable: "true",
-    isContentEditable: true,
-    activeCase: caseId,
-    selectionInside: true,
-  });
   return frame;
 }
 
@@ -296,6 +289,24 @@ export async function expectCheckpointPersisted(page, afterRevision) {
     synchronized: true,
   });
   return Number(await indicator.getAttribute("data-persisted-revision"));
+}
+
+export async function waitForRuntimeHandoffSettled(page) {
+  const editor = page
+    .getByTestId("html-canvas-editor")
+    .filter({ visible: true })
+    .first();
+  await expect.poll(async () => ({
+    handoffState: await editor.getAttribute("data-runtime-handoff"),
+    activeFrameCount: await editor.locator("iframe:not([data-frame-role])").count(),
+    retiringFrameCount: await editor.locator(
+      'iframe[data-frame-role="runtime-retiring"]',
+    ).count(),
+  }), { timeout: 30_000 }).toMatchObject({
+    handoffState: null,
+    activeFrameCount: 1,
+    retiringFrameCount: 0,
+  });
 }
 
 export async function clickEditHistoryMenu(electronApp, page, direction) {

@@ -1559,7 +1559,7 @@ export class ProjectWorkflow {
       }
 
       const committed = this.#canvasPort.fencePendingEdit?.({
-        resumeEditing: true,
+        resumeEditing: false,
         trigger: "project-rename",
       });
       if (!committed || !committed.ok) {
@@ -1935,7 +1935,7 @@ export class ProjectWorkflow {
     }
 
     const committed = this.#canvasPort.fencePendingEdit?.({
-      resumeEditing: true,
+      resumeEditing: false,
       trigger: "source-locator-reconcile",
     });
     if (committed && !committed.ok) {

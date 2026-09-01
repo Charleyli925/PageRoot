@@ -582,3 +582,44 @@
   grid-row: 1;
   border-top: 0;
 }
+
+/* Runtime handoff keeps the connected document as the visual authority until
+   the replacement has restored its viewport, selection, and layout. */
+.editor[data-runtime-handoff="preparing"] > iframe[data-frame-role="runtime-candidate"] {
+  z-index: 1;
+  visibility: visible;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.editor[data-runtime-handoff="positioning"] > iframe[data-frame-role="runtime-retiring"] {
+  z-index: 2;
+  visibility: visible;
+  opacity: 1;
+  pointer-events: none;
+}
+
+.editor[data-runtime-handoff="positioning"] > iframe:not([data-frame-role]) {
+  z-index: 1;
+  visibility: visible;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.editor[data-runtime-handoff="positioning"] .toolbar {
+  pointer-events: none;
+}
+
+.editor[data-runtime-handoff="active"] > iframe[data-frame-role="runtime-retiring"] {
+  z-index: 1;
+  visibility: visible;
+  opacity: 1;
+  pointer-events: none;
+}
+
+.editor[data-runtime-handoff="active"] > iframe:not([data-frame-role]) {
+  z-index: 2;
+  visibility: visible;
+  opacity: 1;
+  pointer-events: auto;
+}

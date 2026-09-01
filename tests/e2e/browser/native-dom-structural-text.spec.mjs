@@ -226,9 +226,6 @@ test("mixed block parents fall back to safe inline hosts and exact bare-text fra
   });
   await expect(fragmentHost).toHaveText("，新版裸文本你");
   await page.keyboard.press("Meta+s");
-  await expect(fragmentHost).toHaveAttribute("contenteditable", "true");
-  await expect(fragmentHost).toHaveText("，新版裸文本你");
-  await page.keyboard.press("Escape");
   await expect(fragmentHost).toHaveCount(0);
   expected = replaceExactOnce(expected, "，裸文本", "，新版裸文本你");
   expect((await exportCurrentHtml(page)).equals(expected)).toBe(true);
