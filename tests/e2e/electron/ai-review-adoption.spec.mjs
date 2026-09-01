@@ -402,17 +402,15 @@ ${REVIEW_MASK_UNION_BEFORE}
       String(reviewReloadRevision + 1),
     );
     const reviewSidebar = reviewWorkspace.getByTestId("ai-conversation-sidebar");
-    await expect(launched.page.getByTestId("ai-conversation-sidebar")).toHaveCount(1);
-    await expect(reviewSidebar).toBeVisible();
+    await expect(launched.page.getByTestId("ai-conversation-sidebar")).toHaveCount(0);
     const reviewAiEntry = launched.page.getByRole("button", { name: "AI 助手" });
-    await expect(reviewAiEntry).toHaveAttribute("aria-expanded", "true");
-    await reviewAiEntry.click();
-    await expect(reviewSidebar).toHaveCount(0);
+    await expect(reviewAiEntry).toHaveAttribute("aria-expanded", "false");
     await expect(launched.page.getByTestId("review-show-conversation")).toHaveCount(0);
     await expect(reviewAiEntry).toHaveCount(1);
-    await expect(reviewAiEntry).toHaveAttribute("aria-expanded", "false");
     await reviewAiEntry.click();
-    await expect(launched.page.getByTestId("ai-conversation-sidebar")).toBeVisible();
+    await expect(reviewSidebar).toBeVisible();
+    await expect(reviewAiEntry).toHaveAttribute("aria-expanded", "true");
+    await expect(launched.page.locator(".toast")).toHaveCount(0);
     // 审阅工具固定复用工作台顶栏，不再在画布内提供第二套浮动条或收起把手。
     await expect(launched.page.getByRole("button", { name: "收起审阅工具" }))
       .toHaveCount(0);
@@ -494,9 +492,10 @@ ${REVIEW_MASK_UNION_BEFORE}
       hasText: frozenReviewComment,
     });
     await expect(reviewCommentMarker).toHaveCount(1);
-    await expect(reviewCommentMarkers.filter({
+    const ordinaryReviewCommentMarker = reviewCommentMarkers.filter({
       hasText: ordinaryReviewCommentText,
-    })).toHaveCount(1);
+    });
+    await expect(ordinaryReviewCommentMarker).toHaveCount(1);
     // 只读评论标记与 AI 预览共用同一个组件。它是可聚焦控件而不是静态说明，
     // 因为气泡是读到评论正文的唯一入口，键盘用户必须够得到。
     await expect(reviewCommentMarker).toHaveJSProperty("tagName", "BUTTON");
@@ -520,13 +519,62 @@ ${REVIEW_MASK_UNION_BEFORE}
       (element, text) => element.innerHTML.includes(text),
       frozenReviewComment,
     )).toBe(false);
+    const beforeReviewViewport = launched.page.locator(
+      'section[data-side="before"] [aria-label="修改前画布滚动区"]',
+    );
+    const reviewMarkerRailGeometry = async () => {
+      const [markerBox, viewportBox] = await Promise.all([
+        reviewCommentMarker.boundingBox(),
+        beforeReviewViewport.boundingBox(),
+      ]);
+      if (!markerBox || !viewportBox) return null;
+      return {
+        markerRight: markerBox.x + markerBox.width,
+        viewportRight: viewportBox.x + viewportBox.width,
+      };
+    };
+    const railBeforeHorizontalScroll = await reviewMarkerRailGeometry();
+    expect(railBeforeHorizontalScroll).not.toBeNull();
+    expect(Math.abs(
+      railBeforeHorizontalScroll.viewportRight - railBeforeHorizontalScroll.markerRight,
+    )).toBeLessThanOrEqual(4);
+    await beforeReviewViewport.evaluate((element) => {
+      element.scrollLeft = element.scrollWidth - element.clientWidth;
+    });
+    await expect.poll(async () => {
+      const current = await reviewMarkerRailGeometry();
+      return current && railBeforeHorizontalScroll
+        ? Math.abs(current.markerRight - railBeforeHorizontalScroll.markerRight)
+        : Infinity;
+    }).toBeLessThanOrEqual(1);
+    await beforeReviewFrame.locator(caseSelector("list-item"))
+      .evaluate((element) => element.scrollIntoView({ block: "center" }));
+    await expect.poll(async () => {
+      const [markerBox, viewportBox] = await Promise.all([
+        reviewCommentMarker.boundingBox(),
+        beforeReviewViewport.boundingBox(),
+      ]);
+      const scrollY = await launched.page.locator('section[data-side="before"]')
+        .evaluate((element) => getComputedStyle(element).getPropertyValue(
+          "--review-comment-scroll-y",
+        ));
+      return {
+        inside: Boolean(markerBox && viewportBox
+          && markerBox.y >= viewportBox.y
+          && markerBox.y + markerBox.height <= viewportBox.y + viewportBox.height),
+        markerBox,
+        viewportBox,
+        scrollY,
+      };
+    }).toMatchObject({ inside: true });
     await reviewCommentMarker.hover();
     const reviewCommentBubble = reviewCommentMarker.getByTestId("review-comment-bubble");
     await expect(reviewCommentBubble).toContainText(frozenReviewComment);
     await expect(reviewCommentBubble).toBeVisible();
-    const beforeReviewViewport = launched.page.locator(
-      'section[data-side="before"] [aria-label="修改前画布滚动区"]',
-    );
+    await expect(beforeReviewFrame.locator("[data-pageroot-review-comment-highlight]"))
+      .toHaveCount(1);
+    await expect(afterReviewFrame.locator("[data-pageroot-review-comment-highlight]"))
+      .toHaveCount(1);
     await expect.poll(async () => {
       const [bubbleBox, viewportBox] = await Promise.all([
         reviewCommentBubble.boundingBox(),
@@ -576,11 +624,24 @@ ${REVIEW_MASK_UNION_BEFORE}
     await launched.page.keyboard.press("Enter");
     await launched.page.keyboard.press("Space");
     await expect(reviewCommentBubble).toBeVisible();
+    await ordinaryReviewCommentMarker.hover();
+    await expect.poll(() => beforeReviewFrame.locator(
+      "[data-pageroot-review-comment-highlight]",
+    ).count()).toBeGreaterThan(0);
+    await launched.page.locator('section[data-side="before"] > header').hover();
+    // Leaving the second marker must not clear the first marker that still owns
+    // keyboard focus. The parent active-key set owns the combined highlight.
+    await expect(beforeReviewFrame.locator("[data-pageroot-review-comment-highlight]"))
+      .toHaveCount(1);
     await expect(launched.page.locator(
       'section[data-side="before"] [data-testid="review-comment-marker"]',
     )).toHaveCount(2);
     await reviewCommentMarker.blur();
     await expect(reviewCommentBubble).toBeHidden();
+    await expect(beforeReviewFrame.locator("[data-pageroot-review-comment-highlight]"))
+      .toHaveCount(0);
+    await expect(afterReviewFrame.locator("[data-pageroot-review-comment-highlight]"))
+      .toHaveCount(0);
     // 接下来继续操作始终固定在工作台顶栏中的审阅控件。
     await expect(liveReviewTools).toBeVisible();
     await expect(beforeReviewFrame.locator('[data-review-tab-panel="two"]'))
@@ -812,7 +873,7 @@ ${REVIEW_MASK_UNION_BEFORE}
       )).toHaveCount(1);
       await expect(frame.locator(
         `[data-pageroot-review-mask-hole][data-pageroot-review-semantic-owner="${owner}"]`,
-      )).toHaveCount(1);
+      )).toHaveCount(0);
     }
     await expect(beforeReviewFrame.locator(
       '[data-review-atomic-stable-before] [data-pageroot-review-text], [data-review-atomic-stable-after] [data-pageroot-review-text]',
@@ -848,7 +909,7 @@ ${REVIEW_MASK_UNION_BEFORE}
     )).not.toHaveCount(0);
     await expect(beforeReviewFrame.locator(
       `[data-pageroot-review-region-bar="${filteredFocusChangeId}"]`,
-    )).toBeVisible();
+    ).first()).toBeVisible();
     // Re-selecting the same filter keeps the user's position; page markers
     // remain the explicit way to move to another change.
     await launched.page.getByRole("button", { name: "文字变化" }).click();
@@ -953,7 +1014,9 @@ ${REVIEW_MASK_UNION_BEFORE}
           && outer.right >= inner.right - tolerance
           && outer.bottom >= inner.bottom - tolerance
         );
-        return [...document.querySelectorAll("[data-pageroot-review-text]")].every((marker) => {
+        return [...document.querySelectorAll(
+          '[data-pageroot-review-text][data-pageroot-review-confirmed="true"]',
+        )].every((marker) => {
           const groupId = marker.getAttribute("data-pageroot-review-text-group") || "";
           const tone = marker.getAttribute("data-pageroot-review-text") === "removed"
             ? "text-removed"
@@ -1259,13 +1322,20 @@ ${REVIEW_MASK_UNION_BEFORE}
     await expect(afterReviewFrame.locator(
       '[data-review-anchor-only] [data-pageroot-review-text]',
     )).toHaveCount(0);
-    const anchorOnlyChangeId = await afterReviewFrame.locator(
+    const anchorOnlySectionChangeId = await afterReviewFrame.locator(
       "[data-review-anchor-only-section]",
     ).getAttribute("data-pageroot-review-id");
-    expect(anchorOnlyChangeId).toBeTruthy();
+    expect(anchorOnlySectionChangeId).toBeTruthy();
     await expect(afterReviewFrame.locator(
       "[data-review-anchor-only]",
-    )).toHaveAttribute("data-pageroot-review-anchor-change", anchorOnlyChangeId);
+    )).toHaveAttribute("data-pageroot-review-anchor-change", anchorOnlySectionChangeId);
+    const anchorOnlyChangeId = await beforeReviewFrame.locator(
+      '[data-review-anchor-only] [data-pageroot-review-text="removed"]',
+    ).getAttribute("data-pageroot-review-marker");
+    expect(anchorOnlyChangeId).toBeTruthy();
+    await expect(beforeReviewFrame.locator(
+      '[data-review-anchor-only] [data-pageroot-review-text="removed"]',
+    )).toHaveAttribute("data-pageroot-review-confirmed", "true");
     const anchorOffsets = await afterReviewFrame.locator(
       "[data-review-anchor-only]",
     ).evaluate((anchor) => String(
@@ -1693,12 +1763,18 @@ ${REVIEW_MASK_UNION_BEFORE}
         && Math.abs(frameRect.width - (rowRect.width + 6)) < .75
         && Math.abs(frameRect.height - (rowRect.height + 6)) < .75;
     })).toBe(true);
-    await expect(beforeReviewFrame.locator(
-      '[data-review-metrics] [data-pageroot-review-structure]',
-    )).toHaveCount(0);
-    await expect(afterReviewFrame.locator(
-      '[data-review-metrics] [data-pageroot-review-structure]',
-    )).toHaveCount(0);
+    for (const frame of [beforeReviewFrame, afterReviewFrame]) {
+      const metricStructureFacts = await frame.locator(
+        '[data-review-metrics] [data-pageroot-review-structure]',
+      ).evaluateAll((elements) => elements.map((element) => ({
+        tag: element.tagName,
+        marker: element.getAttribute("data-pageroot-review-structure"),
+      })));
+      expect(metricStructureFacts).toHaveLength(3);
+      expect(metricStructureFacts.every((fact) => (
+        fact.tag === "ARTICLE" && fact.marker === "style"
+      ))).toBe(true);
+    }
     const sourceRewriteSelector = [
       "[data-review-mixed-copy] [data-pageroot-review-structure]",
       "[data-review-break-layout] [data-pageroot-review-structure]",
@@ -1725,9 +1801,10 @@ ${REVIEW_MASK_UNION_BEFORE}
         .toHaveAttribute("data-pageroot-review-structure", "style");
       await expect(frame.locator("[data-review-layout-only]"))
         .toHaveAttribute("data-pageroot-review-projection-facts", /"structureChange":"style"/u);
-      await expect(frame.locator(
-        '[data-review-metrics] [data-pageroot-review-marker]',
-      )).toHaveCount(0);
+      await expect(frame.locator("html"))
+        .not.toHaveAttribute("data-pageroot-review-confirmed", /.+/u);
+      await expect(frame.locator("html"))
+        .not.toHaveAttribute("data-pageroot-review-projection-facts", /css-source|script-source/u);
       await expect(frame.locator(
         '[data-review-mask-stage] [data-pageroot-review-structure="style"]',
       )).toHaveCount(2);
@@ -2601,7 +2678,7 @@ test("a committed version that the desktop cannot activate stays visibly blocked
   }
 });
 
-test("stable-ID review reports movement, source attributes, styles, and author source", {
+test("stable-ID Review keeps movement, reorder, attributes and styles position-bound", {
   tag: ["@gate-smoke", "@smoke-review"],
 }, async () => {
   const fixture = createSourceFixture("stable-id-review.html", (source) => source.replace(
@@ -2724,9 +2801,7 @@ test("stable-ID review reports movement, source attributes, styles, and author s
         "attribute",
         "style",
       ]));
-      await expect.poll(() => structureKinds(frame.locator("html"))).toEqual(
-        expect.arrayContaining(["css-source", "script-source"]),
-      );
+      await expect.poll(() => structureKinds(frame.locator("html"))).toEqual([]);
       const falsePresenceFacts = await card.evaluate((element) => (
         JSON.parse(element.getAttribute("data-pageroot-review-projection-facts") || "[]")
           .filter((fact) => fact.structureChange === "added" || fact.structureChange === "removed")
@@ -2768,6 +2843,9 @@ test("stable-ID review reports movement, source attributes, styles, and author s
     await expect(addedScript).toHaveAttribute("data-pageroot-id", /^pr1_[a-f0-9]{32}$/u);
     expect(await addedCss.getAttribute("data-pageroot-id"))
       .not.toBe(await addedScript.getAttribute("data-pageroot-id"));
+    for (const sourceElement of [addedCss, addedScript]) {
+      await expect(sourceElement).not.toHaveAttribute("data-pageroot-review-marker", /change-/u);
+    }
     await expect(beforeFrame.locator(
       '[data-stable-review-card] [data-pageroot-review-text="removed"], [data-stable-review-card][data-pageroot-review-text="removed"]',
     ).first()).toBeAttached();
@@ -2795,20 +2873,18 @@ test("stable-ID review reports movement, source attributes, styles, and author s
         `[data-stable-review-static] [data-pageroot-review-text="${tone}"], [data-stable-review-static][data-pageroot-review-text="${tone}"]`,
       ).first()).toBeAttached();
     }
-    await expect.poll(async () => {
-      const facts = await afterFrame.locator('[data-stable-review-order="a"], [data-stable-review-order="b"]')
-        .evaluateAll((elements) => elements.flatMap((element) => (
-          JSON.parse(element.getAttribute("data-pageroot-review-projection-facts") || "[]")
-        )));
-      return facts.filter((fact) => fact.structureChange === "moved").length;
-    }).toBe(1);
-    await expect.poll(async () => {
-      const facts = await afterFrame.locator('[data-stable-review-exact="a"], [data-stable-review-exact="b"]')
-        .evaluateAll((elements) => elements.flatMap((element) => (
-          JSON.parse(element.getAttribute("data-pageroot-review-projection-facts") || "[]")
-        )));
-      return facts.filter((fact) => fact.structureChange === "moved").length;
-    }).toBe(1);
+    for (const frame of [beforeFrame, afterFrame]) {
+      await expect.poll(() => structureKinds(frame.locator('[data-stable-review-column="a"]')))
+        .toEqual(expect.arrayContaining(["reordered"]));
+      await expect.poll(() => structureKinds(frame.locator("[data-stable-review-root]")))
+        .toEqual(expect.arrayContaining(["reordered"]));
+      await expect(frame.locator(
+        '[data-stable-review-order="a"] [data-pageroot-review-text], '
+        + '[data-stable-review-order="b"] [data-pageroot-review-text], '
+        + '[data-stable-review-exact="a"] [data-pageroot-review-text], '
+        + '[data-stable-review-exact="b"] [data-pageroot-review-text]',
+      )).toHaveCount(0);
+    }
     await launched.page.getByRole("button", { name: "元素变化" }).click();
     await expect.poll(() => afterFrame.locator(
       '[data-pageroot-review-overlay-box][data-tone="structure"]',
@@ -2892,7 +2968,7 @@ test("a rewrite outside <main> is still reviewed", {
   }
 });
 
-test("Review exposes Candidate changes outside the comment target without blocking adoption", {
+test("Review keeps Candidate scope diagnostics out of the comparison canvas", {
   tag: ["@gate-smoke", "@smoke-review"],
 }, async () => {
   test.setTimeout(120_000);
@@ -2919,16 +2995,145 @@ test("Review exposes Candidate changes outside the comment target without blocki
     await launched.page.getByRole("button", { name: "审阅对比" }).click();
     await expect(launched.page.getByTestId("ai-review-workspace"))
       .toBeVisible({ timeout: 30_000 });
-    const impact = launched.page.getByTestId("review-impact-summary");
-    await expect(impact).toBeVisible({ timeout: 30_000 });
-    await expect(impact).toContainText("1 本轮评论目标");
-    await expect(impact).toContainText("实际修改元素");
-    await expect(impact).toContainText("目标之外修改");
-    await expect(impact).toContainText("评论目标之外的修改仍保留为上下文");
-    await expect(impact.getByRole("button", { name: "查看超范围修改" }))
-      .toBeVisible();
+    await expect(launched.page.getByTestId("review-impact-summary")).toHaveCount(0);
+    await expect(launched.page.getByTestId("review-visual-status")).toHaveCount(0);
     await expect(launched.page.getByRole("button", { name: "采纳修改" }))
       .toBeVisible();
+  } finally {
+    await stopPageRoot(launched.electronApp, launched.isolatedUserData);
+    removeSourceFixture(fixture.sourceDirectory);
+  }
+});
+
+test("CSS and Script comment-only changes stay out of Review", {
+  tag: ["@gate-smoke", "@smoke-review"],
+}, async () => {
+  test.setTimeout(120_000);
+  const fixture = createSourceFixture("source-only-diagnostics.html");
+  const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
+  try {
+    const request = await addCommentAndSubmit(
+      launched.page,
+      launched.electronApp,
+      fixture.sourcePath,
+    );
+    writeAiOutput(request.requestRoot, (base) => base
+      .replace("    :root {", "    /* source-only QA */\n    :root {")
+      .replace(
+        'document.documentElement.dataset.authorScriptRan = "true";',
+        '/* source-only QA */ document.documentElement.dataset.authorScriptRan = "true";',
+      ));
+    runOfficialFinalizer(request.requestRoot, request.changeRequest);
+    await expect(launched.page.getByTestId("ai-conversation-action-bar"))
+      .toContainText("等待你的决定", { timeout: 30_000 });
+
+    await launched.page.getByRole("button", { name: "审阅对比" }).click();
+    await expect(launched.page.getByTestId("ai-review-workspace")).toHaveCount(0);
+    await expect(launched.page.locator(".toast"))
+      .toContainText("这次没有产生有效变化", { timeout: 30_000 });
+    await expect(launched.page.locator(".toast"))
+      .toContainText("没有找到能够定位到页面具体位置的内容、结构或视觉变化");
+  } finally {
+    await stopPageRoot(launched.electronApp, launched.isolatedUserData);
+    removeSourceFixture(fixture.sourceDirectory);
+  }
+});
+
+test("a safe simple CSS selector creates one position-bound element change", {
+  tag: ["@gate-smoke", "@smoke-review"],
+}, async () => {
+  test.setTimeout(120_000);
+  const fixture = createSourceFixture("mapped-css-review.html");
+  const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
+  try {
+    const request = await addCommentAndSubmit(
+      launched.page,
+      launched.electronApp,
+      fixture.sourcePath,
+    );
+    writeAiOutput(request.requestRoot, (base) => base.replace(
+      "  </style>",
+      '    [data-native-case="vertical-copy"] { color: rgb(180, 20, 30); }\n  </style>',
+    ));
+    runOfficialFinalizer(request.requestRoot, request.changeRequest);
+    await expect(launched.page.getByTestId("ai-conversation-action-bar"))
+      .toContainText("等待你的决定", { timeout: 30_000 });
+
+    await launched.page.getByRole("button", { name: "审阅对比" }).click();
+    await expect(launched.page.getByTestId("ai-review-workspace"))
+      .toBeVisible({ timeout: 30_000 });
+    const beforeFrame = launched.page.frameLocator('iframe[title^="修改前"]');
+    const afterFrame = launched.page.frameLocator('iframe[title^="修改后"]');
+    for (const frame of [beforeFrame, afterFrame]) {
+      await expect(frame.locator('[data-native-case="vertical-copy"]'))
+        .toHaveAttribute("data-pageroot-review-structure", "style");
+      await expect(frame.locator('[data-native-case="vertical-copy"]'))
+        .toHaveAttribute("data-pageroot-review-confirmed", "true");
+    }
+    await expect(afterFrame.locator('[data-pageroot-review-structure="style"]'))
+      .toHaveCount(1);
+  } finally {
+    await stopPageRoot(launched.electronApp, launched.isolatedUserData);
+    removeSourceFixture(fixture.sourceDirectory);
+  }
+});
+
+test("source Review preserves multi-host text evidence and hidden changes without visual confirmation", {
+  tag: ["@gate-smoke", "@smoke-review"],
+}, async () => {
+  test.setTimeout(120_000);
+  const SECTION_ID = "pr1_aaaaaaaaaaaa4aaa8aaaaaaaaaaaaaaa";
+  const FIRST_ID = "pr1_bbbbbbbbbbbb4bbb8bbbbbbbbbbbbbbb";
+  const SECOND_ID = "pr1_cccccccccccc4ccc8ccccccccccccccc";
+  const HIDDEN_ID = "pr1_dddddddddddd4ddd8ddddddddddddddd";
+  const fixture = createSourceFixture("multi-host-hidden-review.html", (source) => source.replace(
+    "  </main>",
+    `    <p data-review-multi-host data-pageroot-id="${SECTION_ID}">
+      <span data-pageroot-id="${FIRST_ID}">第一段旧文字</span>
+      <span data-pageroot-id="${SECOND_ID}">第二段旧文字</span>
+    </p>
+    <div style="display:none!important;visibility:hidden;opacity:0" data-review-hidden-source data-pageroot-id="${HIDDEN_ID}">隐藏旧文字</div>
+  </main>`,
+  ));
+  const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
+  try {
+    const request = await addCommentAndSubmit(
+      launched.page,
+      launched.electronApp,
+      fixture.sourcePath,
+    );
+    writeAiOutput(request.requestRoot, (base) => base
+      .replace("第一段旧文字", "第一段新文字")
+      .replace("第二段旧文字", "第二段新文字")
+      .replace("隐藏旧文字", "隐藏新文字"));
+    runOfficialFinalizer(request.requestRoot, request.changeRequest);
+    await expect(launched.page.getByTestId("ai-conversation-action-bar"))
+      .toContainText("等待你的决定", { timeout: 30_000 });
+    await launched.page.getByRole("button", { name: "审阅对比" }).click();
+    await expect(launched.page.getByTestId("ai-review-workspace"))
+      .toBeVisible({ timeout: 30_000 });
+
+    const beforeFrame = launched.page.frameLocator('iframe[title^="修改前"]');
+    const afterFrame = launched.page.frameLocator('iframe[title^="修改后"]');
+    const addedMarkers = afterFrame.locator(
+      '[data-review-multi-host] [data-pageroot-review-text="added"]',
+    );
+    await expect(addedMarkers.filter({ hasText: "新" })).toHaveCount(2);
+    const changeIds = await addedMarkers.filter({ hasText: "新" }).evaluateAll((elements) => (
+      elements.map((element) => element.getAttribute("data-pageroot-review-marker"))
+    ));
+    expect(new Set(changeIds).size).toBe(1);
+    await expect(beforeFrame.locator(
+      '[data-review-multi-host] [data-pageroot-review-text="removed"]',
+    ).filter({ hasText: "旧" })).toHaveCount(2);
+
+    const hiddenAfter = afterFrame.locator("[data-review-hidden-source]");
+    await expect(hiddenAfter).toBeAttached();
+    await expect(hiddenAfter.locator('[data-pageroot-review-text="added"]'))
+      .toBeAttached();
+    await expect(hiddenAfter.locator('[data-pageroot-review-text="added"]'))
+      .toHaveAttribute("data-pageroot-review-confirmed", "true");
+    await expect(launched.page.getByTestId("review-visual-status")).toHaveCount(0);
   } finally {
     await stopPageRoot(launched.electronApp, launched.isolatedUserData);
     removeSourceFixture(fixture.sourceDirectory);

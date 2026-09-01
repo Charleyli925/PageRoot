@@ -50,13 +50,12 @@ test("projection keeps text and source-structure facts in the existing filters",
   assert.deepEqual(reviewProjectionFactsForFilter(facts, "text"), [removedText]);
 });
 
-test("movement, attributes, styles, and source changes remain structure facts", () => {
+test("movement, reorder, attributes, and element styles remain structure facts", () => {
   for (const structureChange of [
     "moved",
+    "reordered",
     "attribute",
     "style",
-    "css-source",
-    "script-source",
   ]) {
     const normalized = normalizeReviewProjectionFact({
       ...addedElement,
@@ -65,6 +64,15 @@ test("movement, attributes, styles, and source changes remain structure facts", 
     });
     assert.equal(normalized?.type, "structure");
     assert.equal(normalized?.structureChange, structureChange);
+  }
+  for (const sourceOnly of ["css-source", "script-source"]) {
+    const normalized = normalizeReviewProjectionFact({
+      ...addedElement,
+      structureChange: sourceOnly,
+      summary: "页面源码调整",
+    });
+    assert.ok(normalized);
+    assert.equal(normalized.structureChange, undefined);
   }
 });
 

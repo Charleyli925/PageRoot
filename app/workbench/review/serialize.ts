@@ -50,14 +50,14 @@ export const REVIEW_DOCUMENT_STYLE = String.raw`
     word-spacing: inherit !important;
   }
 
-  html[data-pageroot-review-filter="all"] [data-pageroot-review-marker-types~="structure"],
-  html[data-pageroot-review-filter="structure"] [data-pageroot-review-marker-types~="structure"] {
+  html[data-pageroot-review-filter="all"] [data-pageroot-review-confirmed="true"][data-pageroot-review-marker-types~="structure"],
+  html[data-pageroot-review-filter="structure"] [data-pageroot-review-confirmed="true"][data-pageroot-review-marker-types~="structure"] {
     position: relative !important;
     outline: calc(1.5px * var(--pageroot-review-ui-scale)) dashed ${REVIEW_STRUCTURE_TONE_COLOR} !important;
     outline-offset: calc(2px * var(--pageroot-review-ui-scale)) !important;
   }
 
-  html[data-pageroot-review-filter="structure"] [data-pageroot-review-marker-types~="structure"] {
+  html[data-pageroot-review-filter="structure"] [data-pageroot-review-confirmed="true"][data-pageroot-review-marker-types~="structure"] {
     outline-color: ${REVIEW_STRUCTURE_TONE_COLOR} !important;
   }
 
@@ -281,8 +281,17 @@ ${REVIEW_TEXT_EVIDENCE_MARKER_CSS}
     line-height: 1.2 !important;
     white-space: nowrap !important;
     text-overflow: ellipsis !important;
-    pointer-events: auto !important;
+    opacity: 0 !important;
+    visibility: hidden !important;
+    pointer-events: none !important;
     cursor: pointer !important;
+  }
+
+  [data-pageroot-review-overlay-box][data-hover="true"] [data-pageroot-review-overlay-label],
+  [data-pageroot-review-overlay-box][data-active="true"] [data-pageroot-review-overlay-label] {
+    opacity: 1 !important;
+    visibility: visible !important;
+    pointer-events: auto !important;
   }
 
   /* At the document's very top there is no room above the box, so the caption
@@ -352,7 +361,7 @@ ${REVIEW_TEXT_EVIDENCE_MARKER_CSS}
   }
 
   html:not([data-pageroot-review-overlays="true"])[data-pageroot-review-filter]
-    [data-pageroot-review-marker][data-pageroot-review-primary="true"][data-pageroot-review-active="true"]::after {
+    [data-pageroot-review-confirmed="true"][data-pageroot-review-marker][data-pageroot-review-primary="true"][data-pageroot-review-active="true"]::after {
     position: absolute !important;
     z-index: 2147483000 !important;
     top: calc(-24px * var(--pageroot-review-ui-scale)) !important;
@@ -424,6 +433,7 @@ export function prepareDocument(
   sourcePath?: string,
   externalBootstrap = false,
   reviewCommentBindings: readonly ReviewCommentBootstrapBinding[] = [],
+  reviewVisualStableIds: readonly string[] = [],
 ): {
   html: string;
   bootstrapJavaScript: string;
@@ -458,10 +468,13 @@ export function prepareDocument(
     sessionId,
     side,
     reviewCommentBindings,
+    reviewVisualStableIds,
   );
   const bootstrapFallbackJavaScript = reviewBootstrap(
     sessionId,
     side,
+    [],
+    reviewVisualStableIds,
   );
   if (externalBootstrap) {
     bootstrap.src = REVIEW_BOOTSTRAP_PATH;

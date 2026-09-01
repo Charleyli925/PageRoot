@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, type KeyboardEvent, type PointerEvent } from "react";
+import { useCallback, useEffect, useRef, type KeyboardEvent, type PointerEvent } from "react";
 
 import styles from "./read-only-comment-marker.module.css";
 
@@ -41,6 +41,7 @@ export type ReadOnlyCommentMarkerProps = {
   initialVertical?: "above" | "below" | "center";
   testId?: string;
   bubbleTestId?: string;
+  onActiveChange?: (active: boolean) => void;
 };
 
 const EDGE_MARGIN = 96;
@@ -80,8 +81,23 @@ export default function ReadOnlyCommentMarker({
   initialVertical = "center",
   testId = "read-only-comment-marker",
   bubbleTestId = "read-only-comment-bubble",
+  onActiveChange,
 }: ReadOnlyCommentMarkerProps) {
   const count = group.items.length;
+  const activeRef = useRef({ pointer: false, focus: false });
+  const onActiveChangeRef = useRef(onActiveChange);
+  useEffect(() => {
+    onActiveChangeRef.current = onActiveChange;
+  }, [onActiveChange]);
+  const publishActive = useCallback(() => {
+    onActiveChangeRef.current?.(activeRef.current.pointer || activeRef.current.focus);
+  }, []);
+
+  useEffect(() => () => {
+    if (!activeRef.current.pointer && !activeRef.current.focus) return;
+    activeRef.current = { pointer: false, focus: false };
+    onActiveChangeRef.current?.(false);
+  }, []);
 
   // Hover and keyboard focus open the same bubble through the same measurement,
   // so a keyboard user is never left without the comment body.
@@ -95,11 +111,25 @@ export default function ReadOnlyCommentMarker({
 
   const handlePointerEnter = useCallback((event: PointerEvent<HTMLButtonElement>) => {
     reposition(event.currentTarget);
-  }, [reposition]);
+    activeRef.current.pointer = true;
+    publishActive();
+  }, [publishActive, reposition]);
+
+  const handlePointerLeave = useCallback(() => {
+    activeRef.current.pointer = false;
+    publishActive();
+  }, [publishActive]);
 
   const handleFocus = useCallback((event: { currentTarget: HTMLButtonElement }) => {
     reposition(event.currentTarget);
-  }, [reposition]);
+    activeRef.current.focus = true;
+    publishActive();
+  }, [publishActive, reposition]);
+
+  const handleBlur = useCallback(() => {
+    activeRef.current.focus = false;
+    publishActive();
+  }, [publishActive]);
 
   // The marker is read-only. Enter and Space must not activate anything, and in
   // particular must never open the editing toolbar or move the selection.
@@ -121,7 +151,9 @@ export default function ReadOnlyCommentMarker({
       aria-label={markerLabel(group.items)}
       style={{ left, top }}
       onPointerEnter={handlePointerEnter}
+      onPointerLeave={handlePointerLeave}
       onFocus={handleFocus}
+      onBlur={handleBlur}
       onKeyDown={handleKeyDown}
       onClick={(event) => event.preventDefault()}
     >

@@ -9,6 +9,11 @@ export type ReviewStableIdTopology = {
   addedIds: string[];
   removedIds: string[];
   movedIds: string[];
+  reorderedRanges: Array<{
+    parentId: string;
+    beforeIds: string[];
+    afterIds: string[];
+  }>;
   duplicateIds: string[];
 };
 

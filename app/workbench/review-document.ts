@@ -24,13 +24,15 @@ import {
   clearReservedReviewMarkup,
   helperText,
   normalizedMarkup,
-  panelPathForElement,
   regionGroupLabel,
   reviewProjectionFactsForElement,
 } from "./review/parse";
 import {
   reviewBootstrap,
 } from "./review/runtime-projection";
+import {
+  buildReviewVisualEvidence,
+} from "./review/review-visual-model.js";
 import {
   buildReviewSemanticPairGraphSteps,
   pairSections,
@@ -45,15 +47,17 @@ import {
   markSemanticTextDifferences,
 } from "./review/text-diff";
 import {
-  annotateStablePageSourceAggregate,
   annotateStableSourceDifferences,
 } from "./review/stable-source-diff";
 import type {
   ReviewChange,
   ReviewChangeType,
+  ReviewDiagnostic,
   ReviewDocumentBuildOptions,
   ReviewDocuments,
   ReviewOutlineItem,
+  ReviewPresentation,
+  ReviewRevealStep,
   ReviewSemanticPairGraph,
   SectionPair,
 } from "./review/types";
@@ -66,9 +70,12 @@ export type {
   ReviewChangeType,
   ReviewCommentGroup,
   ReviewCommentTarget,
+  ReviewDiagnostic,
   ReviewDocumentBuildOptions,
   ReviewDocuments,
   ReviewImpact,
+  ReviewPresentation,
+  ReviewRevealStep,
   ReviewFilter,
   ReviewOutlineItem,
   ReviewSide,
@@ -134,10 +141,9 @@ function attachChangeMarkerMetadata(
     added: "新增元素",
     removed: "删除元素",
     moved: "移动元素",
+    reordered: "元素顺序调整",
     attribute: "属性调整",
     style: "样式调整",
-    "css-source": "CSS 源码调整",
-    "script-source": "Script 源码调整",
   }[change] || "元素调整");
   const attachRoots = (roots: Array<Element | null>) => roots.forEach((root) => {
     if (!root) return;
@@ -229,18 +235,115 @@ function attachChangeMarkerMetadata(
   attachRoots([pair.before, pair.after]);
 }
 
-function attachSourceChangeMarkerMetadata(
-  before: Element,
-  after: Element,
+function visualStableIdsForChange(pair: SectionPair, changeId: string) {
+  const stableIds = new Set<string>();
+  [pair.before, pair.after].forEach((root) => {
+    if (!root) return;
+    [root, ...root.querySelectorAll(`[data-pageroot-review-marker="${changeId}"]`)]
+      .filter((element) => element.getAttribute("data-pageroot-review-marker") === changeId)
+      .forEach((element) => {
+        const stableHost = element.closest("[data-pageroot-id]");
+        const stableId = stableHost?.getAttribute("data-pageroot-id") || "";
+        if (stableId) stableIds.add(stableId);
+      });
+  });
+  if (!stableIds.size) {
+    const rootStableId = (pair.after || pair.before)?.getAttribute("data-pageroot-id") || "";
+    if (rootStableId) stableIds.add(rootStableId);
+  }
+  return [...stableIds];
+}
+
+function revealStepsForElement(element: Element | null): ReviewRevealStep[] {
+  if (!element) return [];
+  const steps: ReviewRevealStep[] = [];
+  let candidate: Element | null = element;
+  while (candidate && candidate !== element.ownerDocument.body) {
+    if (candidate.getAttribute("data-pageroot-review-panel-container") === "true") {
+      const key = candidate.getAttribute("data-pageroot-review-panel-key") || "";
+      if (key) steps.unshift({ kind: "panel", key });
+    }
+    if (candidate.tagName === "DETAILS") {
+      const stableId = candidate.getAttribute("data-pageroot-id") || "";
+      if (stableId) steps.unshift({ kind: "details", stableId });
+    }
+    candidate = candidate.parentElement;
+  }
+  const seen = new Set<string>();
+  return steps.filter((step) => {
+    const key = step.kind === "panel" ? `panel:${step.key}` : `details:${step.stableId}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function presentationElement(
+  root: Element | null,
   changeId: string,
-  helper: string,
-) {
-  attachChangeMarkerMetadata(
-    { before, after, beforeIndex: -1, afterIndex: -1 },
-    changeId,
-    helper,
-    false,
-  );
+  evidenceStableIds: readonly string[],
+): Element | null {
+  if (!root) return null;
+  const selector = `[data-pageroot-review-marker="${changeId}"]`;
+  const markers = [
+    ...(root.matches(selector) ? [root] : []),
+    ...root.querySelectorAll(selector),
+  ];
+  const preciseMarker = markers.find((element) => (
+    element.matches("[data-pageroot-review-text],[data-pageroot-review-structure]")
+  ));
+  if (preciseMarker) return preciseMarker;
+  const stableHost = [
+    ...(root.hasAttribute("data-pageroot-id") ? [root] : []),
+    ...root.querySelectorAll("[data-pageroot-id]"),
+  ].find((element) => evidenceStableIds.includes(
+    element.getAttribute("data-pageroot-id") || "",
+  ));
+  if (stableHost) return stableHost;
+  return markers.find((element) => {
+      const stableId = element.closest("[data-pageroot-id]")?.getAttribute("data-pageroot-id") || "";
+      return evidenceStableIds.includes(stableId);
+    })
+    || markers.find((element) => element.getAttribute("data-pageroot-review-primary") === "true")
+    || markers[0]
+    || root;
+}
+
+function reviewPresentationForChange(
+  pair: SectionPair,
+  changeId: string,
+  evidenceStableIds: readonly string[],
+): ReviewPresentation {
+  const preciseStableIds = [...new Set([pair.before, pair.after].flatMap((root) => {
+    if (!root) return [];
+    const selector = `[data-pageroot-review-marker="${changeId}"]`;
+    return [
+      ...(root.matches(selector) ? [root] : []),
+      ...root.querySelectorAll(selector),
+    ].flatMap((element) => {
+      if (!element.matches("[data-pageroot-review-text],[data-pageroot-review-structure]")) {
+        return [];
+      }
+      const stableId = element.closest("[data-pageroot-id]")
+        ?.getAttribute("data-pageroot-id") || "";
+      return stableId ? [stableId] : [];
+    });
+  }))];
+  const presentationStableIds = preciseStableIds.length
+    ? preciseStableIds
+    : evidenceStableIds;
+  return {
+    before: revealStepsForElement(presentationElement(
+      pair.before,
+      changeId,
+      presentationStableIds,
+    )),
+    after: revealStepsForElement(presentationElement(
+      pair.after,
+      changeId,
+      presentationStableIds,
+    )),
+  };
 }
 
 function hasPreannotatedStableDifference(pair: SectionPair): boolean {
@@ -250,11 +353,37 @@ function hasPreannotatedStableDifference(pair: SectionPair): boolean {
   ));
 }
 
+export function pageSourceOnlyReviewDiagnostics(
+  beforeHtml: string,
+  afterHtml: string,
+): ReviewDiagnostic[] | null {
+  if (typeof DOMParser === "undefined" || beforeHtml === afterHtml) return null;
+  const visual = buildReviewVisualEvidence(beforeHtml, afterHtml, "source-only-check");
+  if (visual.binding.identity !== "supported" || visual.evidence.length) return null;
+  const parser = new DOMParser();
+  const beforeDocument = parser.parseFromString(beforeHtml, "text/html");
+  const afterDocument = parser.parseFromString(afterHtml, "text/html");
+  clearReservedReviewMarkup(beforeDocument);
+  clearReservedReviewMarkup(afterDocument);
+  const analysis = annotateStableSourceDifferences(beforeDocument, afterDocument);
+  if (beforeDocument.querySelector("[data-pageroot-review-structure]")
+    || afterDocument.querySelector("[data-pageroot-review-structure]")) return null;
+  const diagnostics = analysis.sourceKinds.map((kind) => ({
+    kind,
+    summary: kind === "css-source" ? "CSS 源码发生变化" : "Script 源码发生变化",
+  }));
+  return diagnostics.length ? diagnostics : null;
+}
+
 function* buildReviewDocumentSteps(
   beforeHtml: string,
   afterHtml: string,
   options: ReviewDocumentBuildOptions,
 ): Generator<string, ReviewDocuments, void> {
+  const visual = buildReviewVisualEvidence(beforeHtml, afterHtml, options.sessionId);
+  const visualStableIds = (side: "before" | "after") => visual.evidence
+    .filter((evidence) => side === "before" ? evidence.beforePresent : evidence.afterPresent)
+    .map((evidence) => evidence.stableId);
   if (typeof DOMParser === "undefined") {
     return {
       before: beforeHtml,
@@ -263,26 +392,37 @@ function* buildReviewDocumentSteps(
         before: reviewBootstrap(
           options.sessionId,
           "before",
+          [],
+          visualStableIds("before"),
         ),
         after: reviewBootstrap(
           options.sessionId,
           "after",
+          [],
+          visualStableIds("after"),
         ),
       },
       bootstrapFallbackJavaScript: {
         before: reviewBootstrap(
           options.sessionId,
           "before",
+          [],
+          visualStableIds("before"),
         ),
         after: reviewBootstrap(
           options.sessionId,
           "after",
+          [],
+          visualStableIds("after"),
         ),
       },
       changes: [],
       outline: [],
       commentGroups: [],
       commentTargets: [],
+      visualBinding: visual.binding,
+      visualEvidence: visual.evidence,
+      diagnostics: [],
       ...(options.reviewImpact ? { reviewImpact: options.reviewImpact } : {}),
     };
   }
@@ -303,6 +443,10 @@ function* buildReviewDocumentSteps(
   );
   const commentGroups = commentAnnotations.groups;
   const reviewCommentTargets = commentAnnotations.targets;
+  const preparedVisualStableIds = (side: "before" | "after") => [...new Set([
+    ...visualStableIds(side),
+    ...reviewCommentTargets.flatMap((target) => target.stableId ? [target.stableId] : []),
+  ])];
   [beforeDocument, afterDocument].forEach((document) => {
     document.querySelectorAll(`[${REVIEW_SOURCE_NODE_ATTRIBUTE}]`).forEach((element) => {
       element.removeAttribute(REVIEW_SOURCE_NODE_ATTRIBUTE);
@@ -316,6 +460,63 @@ function* buildReviewDocumentSteps(
   const stableSourceAnalysis = annotateStableSourceDifferences(beforeDocument, afterDocument);
   const ambiguousPersistentIds = new Set(stableSourceAnalysis.ambiguousPersistentIds);
   yield "stable-source";
+  if (
+    visual.binding.identity === "supported"
+    && visual.evidence.length === 0
+    && stableSourceAnalysis.sourceKinds.length > 0
+    && !beforeDocument.querySelector("[data-pageroot-review-structure]")
+    && !afterDocument.querySelector("[data-pageroot-review-structure]")
+  ) {
+    const diagnostics: ReviewDiagnostic[] = stableSourceAnalysis.sourceKinds.map((kind) => ({
+      kind,
+      summary: kind === "css-source" ? "CSS 源码发生变化" : "Script 源码发生变化",
+    }));
+    const reviewCommentBindings = reviewCommentBootstrapBindings(
+      beforeDocument,
+      reviewCommentTargets,
+    );
+    clearReviewCommentScopeAttributes(beforeDocument);
+    const preparedBefore = prepareDocument(
+      beforeDocument,
+      "before",
+      options.sessionId,
+      options.sourcePath,
+      options.externalBootstrap,
+      reviewCommentBindings,
+      preparedVisualStableIds("before"),
+    );
+    yield "prepare-before";
+    const preparedAfter = prepareDocument(
+      afterDocument,
+      "after",
+      options.sessionId,
+      options.sourcePath,
+      options.externalBootstrap,
+      [],
+      preparedVisualStableIds("after"),
+    );
+    yield "prepare-after";
+    return {
+      before: preparedBefore.html,
+      after: preparedAfter.html,
+      bootstrapJavaScript: {
+        before: preparedBefore.bootstrapJavaScript,
+        after: preparedAfter.bootstrapJavaScript,
+      },
+      bootstrapFallbackJavaScript: {
+        before: preparedBefore.bootstrapFallbackJavaScript,
+        after: preparedAfter.bootstrapFallbackJavaScript,
+      },
+      changes: [],
+      outline: [],
+      commentGroups,
+      commentTargets: reviewCommentTargets,
+      visualBinding: visual.binding,
+      visualEvidence: visual.evidence,
+      diagnostics,
+      ...(options.reviewImpact ? { reviewImpact: options.reviewImpact } : {}),
+    };
+  }
   // Freeze authored candidate regions and their pairing before moved-text
   // annotation inserts disposable review spans. The pre-pass may mutate text
   // nodes, but it must never redefine which authored element owns a movement.
@@ -363,10 +564,10 @@ function* buildReviewDocumentSteps(
       ? helperText(types, Boolean(pair.before), Boolean(pair.after), pair)
       : "本轮未修改";
     if (changeId) attachChangeMarkerMetadata(pair, changeId, helper);
-    const panelPath = panelPathForElement(pair.after).length
-      ? panelPathForElement(pair.after)
-      : panelPathForElement(pair.before);
-    const panelKey = panelPath.at(-1);
+    const evidenceStableIds = changeId ? visualStableIdsForChange(pair, changeId) : [];
+    const presentation = changeId
+      ? reviewPresentationForChange(pair, changeId, evidenceStableIds)
+      : undefined;
     [pair.before, pair.after].forEach((element) => {
       if (!element) return;
       element.setAttribute("data-pageroot-outline-id", outlineId);
@@ -380,13 +581,13 @@ function* buildReviewDocumentSteps(
     if (changeId) {
       changes.push({
         id: changeId,
+        ...(evidenceStableIds.length ? { evidenceStableIds } : {}),
         label,
         helper,
         types,
         beforePresent: Boolean(pair.before),
         afterPresent: Boolean(pair.after),
-        ...(panelKey ? { panelKey } : {}),
-        ...(panelPath.length ? { panelPath } : {}),
+        presentation: presentation!,
       });
     }
     const preferredElement = pair.after || pair.before;
@@ -398,56 +599,15 @@ function* buildReviewDocumentSteps(
       helper,
       types,
       ...(changeId ? { changeId } : {}),
-      ...(panelKey ? { panelKey } : {}),
-      ...(panelPath.length ? { panelPath } : {}),
+      ...(presentation ? { presentation } : {}),
     });
     if ((pairIndex + 1) % 24 === 0) yield "change-annotation";
   }
 
-  if (stableSourceAnalysis.sourceKinds.length) {
-    const changeId = `change-${changes.length + 1}`;
-    const outlineId = `outline-${outline.length + 1}`;
-    const labels = stableSourceAnalysis.sourceKinds.map((kind) => (
-      kind === "css-source" ? "CSS" : "Script"
-    ));
-    const helper = `${labels.join("、")} 源码调整`;
-    const label = labels.length === 1 ? `${labels[0]} 源码` : "页面源码";
-    // Page-level source facts are deliberately attached only after semantic
-    // text/structure analysis. Marking <html> earlier would make every authored
-    // descendant look covered by one structural ancestor and suppress precise
-    // text facts.
-    const sourceKinds = new Set(stableSourceAnalysis.sourceKinds);
-    annotateStablePageSourceAggregate(beforeDocument, sourceKinds);
-    annotateStablePageSourceAggregate(afterDocument, sourceKinds);
-    attachSourceChangeMarkerMetadata(
-      beforeDocument.documentElement,
-      afterDocument.documentElement,
-      changeId,
-      helper,
-    );
-    [beforeDocument.documentElement, afterDocument.documentElement].forEach((element) => {
-      element.setAttribute("data-pageroot-outline-id", outlineId);
-      element.setAttribute("data-pageroot-review-id", changeId);
-      element.setAttribute("data-pageroot-review-types", "structure");
-      element.setAttribute("data-pageroot-review-summary", helper);
-    });
-    changes.push({
-      id: changeId,
-      label,
-      helper,
-      types: ["structure"],
-      beforePresent: true,
-      afterPresent: true,
-    });
-    outline.push({
-      id: outlineId,
-      group: "页面源码",
-      label,
-      helper,
-      types: ["structure"],
-      changeId,
-    });
-  }
+  const diagnostics: ReviewDiagnostic[] = stableSourceAnalysis.sourceKinds.map((kind) => ({
+    kind,
+    summary: kind === "css-source" ? "CSS 源码发生变化" : "Script 源码发生变化",
+  }));
 
   // Comment attributes are analyzer-only scope hints. Bind every resolved
   // source target in the private first bootstrap, then remove the hints before
@@ -464,6 +624,7 @@ function* buildReviewDocumentSteps(
     options.sourcePath,
     options.externalBootstrap,
     reviewCommentBindings,
+    preparedVisualStableIds("before"),
   );
   yield "prepare-before";
   const preparedAfter = prepareDocument(
@@ -473,6 +634,7 @@ function* buildReviewDocumentSteps(
     options.sourcePath,
     options.externalBootstrap,
     [],
+    preparedVisualStableIds("after"),
   );
   yield "prepare-after";
   return {
@@ -490,6 +652,9 @@ function* buildReviewDocumentSteps(
     outline,
     commentGroups,
     commentTargets: reviewCommentTargets,
+    visualBinding: visual.binding,
+    visualEvidence: visual.evidence,
+    diagnostics,
     ...(options.reviewImpact ? { reviewImpact: options.reviewImpact } : {}),
   };
 }
@@ -515,22 +680,29 @@ export function buildReviewShellDocuments(
   afterHtml: string,
   options: ReviewDocumentBuildOptions,
 ): ReviewDocuments {
+  const visual = buildReviewVisualEvidence(beforeHtml, afterHtml, options.sessionId);
+  const visualStableIds = (side: "before" | "after") => visual.evidence
+    .filter((evidence) => side === "before" ? evidence.beforePresent : evidence.afterPresent)
+    .map((evidence) => evidence.stableId);
   if (typeof DOMParser === "undefined") {
     return {
       before: beforeHtml,
       after: afterHtml,
       bootstrapJavaScript: {
-        before: reviewBootstrap(options.sessionId, "before"),
-        after: reviewBootstrap(options.sessionId, "after"),
+        before: reviewBootstrap(options.sessionId, "before", [], visualStableIds("before")),
+        after: reviewBootstrap(options.sessionId, "after", [], visualStableIds("after")),
       },
       bootstrapFallbackJavaScript: {
-        before: reviewBootstrap(options.sessionId, "before"),
-        after: reviewBootstrap(options.sessionId, "after"),
+        before: reviewBootstrap(options.sessionId, "before", [], visualStableIds("before")),
+        after: reviewBootstrap(options.sessionId, "after", [], visualStableIds("after")),
       },
       changes: [],
       outline: [],
       commentGroups: [],
       commentTargets: [],
+      visualBinding: visual.binding,
+      visualEvidence: visual.evidence,
+      diagnostics: [],
       ...(options.reviewImpact ? { reviewImpact: options.reviewImpact } : {}),
     };
   }
@@ -545,6 +717,8 @@ export function buildReviewShellDocuments(
     options.sessionId,
     options.sourcePath,
     options.externalBootstrap,
+    [],
+    visualStableIds("before"),
   );
   const preparedAfter = prepareDocument(
     afterDocument,
@@ -552,6 +726,8 @@ export function buildReviewShellDocuments(
     options.sessionId,
     options.sourcePath,
     options.externalBootstrap,
+    [],
+    visualStableIds("after"),
   );
   return {
     before: preparedBefore.html,
@@ -568,6 +744,9 @@ export function buildReviewShellDocuments(
     outline: [],
     commentGroups: [],
     commentTargets: [],
+    visualBinding: visual.binding,
+    visualEvidence: visual.evidence,
+    diagnostics: [],
     ...(options.reviewImpact ? { reviewImpact: options.reviewImpact } : {}),
   };
 }

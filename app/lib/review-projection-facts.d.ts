@@ -20,10 +20,9 @@ export type ReviewProjectionFact = {
     | "added"
     | "removed"
     | "moved"
+    | "reordered"
     | "attribute"
-    | "style"
-    | "css-source"
-    | "script-source";
+    | "style";
   summary?: string;
 };
 

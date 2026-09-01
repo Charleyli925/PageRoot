@@ -209,7 +209,10 @@ import {
   useDocumentSurfaceHandoff,
 } from "./workbench/document-surface-presentation";
 import { markDocumentSurfacePrewarmed, markProjectApplied, markProjectHydrationStage, RendererStartupPerformance } from "./workbench/performance-timeline";
-import type { ReviewDocuments } from "./workbench/review-document";
+import {
+  pageSourceOnlyReviewDiagnostics,
+  type ReviewDocuments,
+} from "./workbench/review-document";
 import { useRuntimeBridgeConnectionReady } from "./workbench/runtime-bridge-connection";
 import { WorkbenchTabBarContainer } from "./workbench/workbench-navigation-container";
 import { WorkbenchResizer } from "./workbench/workbench-resizer";
@@ -783,6 +786,7 @@ export default function Workbench() {
     onOpenAgentSettings: openAgentSettings,
   });
   const revealAiConversation = aiConversation.reveal;
+  const hideAiConversation = aiConversation.hide;
   const editRuntimeSnapshot = workspaceControllerSnapshot?.editRuntime ?? null;
   const runtimeCanvasResidency = useRuntimeCanvasResidency({
     tabIds: workbenchTabsSnapshot.tabs.map((tab) => tab.tabId),
@@ -5591,6 +5595,23 @@ export default function Workbench() {
       ) {
         throw new Error("当前冻结 HTML 已发生变化，无法开始安全对比。");
       }
+      const sourceOnlyDiagnostics = pageSourceOnlyReviewDiagnostics(
+        frozenHtml,
+        candidate.content,
+      );
+      if (sourceOnlyDiagnostics) {
+        reviewAnalysisSession.clear();
+        setReadyReviewSession(null);
+        setToast(null);
+        setToast({
+          title: "这次没有产生有效变化",
+          message: "没有找到能够定位到页面具体位置的内容、结构或视觉变化。",
+          tone: "success",
+          disposition: "background-result",
+          dedupeKey: "ready-version-no-visible-review-change",
+        });
+        return;
+      }
       const externalBootstrap = Boolean(window.htmlAIPreview);
       const sessionId = `review-${Date.now().toString(36)}-${++reviewSessionSequenceRef.current}`;
       const beforeLabel = run.basedOnVersionId
@@ -5607,13 +5628,6 @@ export default function Workbench() {
         comments: currentCommentSessionSnapshot().comments,
         externalBootstrap,
         sessionId,
-        onShell: (documents) => {
-          if (!isCurrentProjectContext(reviewContext)) return;
-          setReadyReviewSession({ operationKey, sessionId, documents,
-            beforeHtml: frozenHtml, sourcePath: candidate.sourcePath,
-            beforeLabel, afterLabel });
-          performance.mark("pageroot:review:shell-visible");
-        },
       });
       const analyzedRun = currentRunSessionSnapshot().activeRun;
       if (
@@ -5622,6 +5636,22 @@ export default function Workbench() {
         || activeRunOperationKey(analyzedRun) !== operationKey
         || !isCurrentProjectContext(reviewContext)
       ) return;
+      if (!preparedReview.documents.changes.length) {
+        setReadyReviewSession(null);
+        // The review action owns this result. Clear any older import/background
+        // notice before publishing it so notification priority cannot hide it.
+        setToast(null);
+        setToast({
+          title: "这次没有产生有效变化",
+          message: "没有找到能够定位到页面具体位置的内容、结构或视觉变化。",
+          tone: "success",
+          disposition: "background-result",
+          dedupeKey: "ready-version-no-visible-review-change",
+        });
+        return;
+      }
+      hideAiConversation();
+      setToast(null);
       setReadyReviewSession({
         operationKey,
         sessionId: preparedReview.sessionId,
@@ -5651,6 +5681,7 @@ export default function Workbench() {
     currentCommentSessionSnapshot,
     currentRunSessionSnapshot,
     fenceAndFreezeCurrentCanvas,
+    hideAiConversation,
     isCurrentProjectContext,
     reviewAnalysisSession,
     reviewPreparing,
@@ -6252,7 +6283,6 @@ export default function Workbench() {
       fileName={localFileNameFromSourcePath(readyReviewSession.sourcePath) || currentSourceFileName}
       accepting={openingReadyVersion}
       activeRunError={activeRun?.status === "ready-to-open" ? activeRun.error : undefined}
-      candidateAssessmentAttention={activeRun?.candidateAssessment?.status === "attention"}
       onAbout={openAboutPageRoot}
       onCancelBefore={cancelActiveRun}
       onNotify={setToast}
@@ -7042,7 +7072,7 @@ export default function Workbench() {
         onOpenUserNotice={() => void openUserNotice()}
       />
 
-      {toast ? (
+      {toast && !readyReviewSession ? (
         <NoticeBar
           className="toast"
           title={toast.title}

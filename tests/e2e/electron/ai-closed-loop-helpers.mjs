@@ -768,7 +768,7 @@ export const REVIEW_PROJECTION_CASES = Object.freeze([
     ownerSelector: '[data-review-brand-row="added"]',
     rangeSelector: null,
     expectedFrameCount: 1,
-    expectedMaskCount: 1,
+    expectedMaskCount: 0,
     tolerance: 0.75,
     negativeSelectors: [
       '[data-review-brand-row="alpha"] [data-pageroot-review-overlay-box]',
@@ -872,17 +872,26 @@ export async function assertOverlayMaskEquivalence(frame) {
         && left + elementWidth <= width
         && top + elementHeight <= height;
     };
-    return boxes.length === holes.length && boxes.every((box, index) => {
-      const hole = holes[index];
-      return insideDocument(box)
-        && insideDocument(hole)
-        && Math.abs(Number(box.getAttribute("data-left")) - Number(hole.getAttribute("data-left"))) < .02
-        && Math.abs(Number(box.getAttribute("data-top")) - Number(hole.getAttribute("data-top"))) < .02
-        && Math.abs(Number(box.getAttribute("data-width")) - Number(hole.getAttribute("data-width"))) < .02
-        && Math.abs(Number(box.getAttribute("data-height")) - Number(hole.getAttribute("data-height"))) < .02
-        && Boolean(box.getAttribute("data-path"))
-        && box.getAttribute("data-path") === hole.getAttribute("d");
-    });
+    return holes.length <= boxes.length && holes.every((hole) => boxes.some((box) => (
+      (
+        (box.getAttribute("data-types") || "").split(/\s+/u).includes("text")
+        || box.getAttribute("data-active") === "true"
+      )
+      && box.getAttribute("data-pageroot-review-overlay-box")
+        === hole.getAttribute("data-pageroot-review-mask-hole")
+      && box.getAttribute("data-pageroot-review-semantic-owner")
+        === hole.getAttribute("data-pageroot-review-semantic-owner")
+      && box.getAttribute("data-pageroot-review-fact")
+        === hole.getAttribute("data-pageroot-review-fact")
+      && insideDocument(box)
+      && insideDocument(hole)
+      && Math.abs(Number(box.getAttribute("data-left")) - Number(hole.getAttribute("data-left"))) < .02
+      && Math.abs(Number(box.getAttribute("data-top")) - Number(hole.getAttribute("data-top"))) < .02
+      && Math.abs(Number(box.getAttribute("data-width")) - Number(hole.getAttribute("data-width"))) < .02
+      && Math.abs(Number(box.getAttribute("data-height")) - Number(hole.getAttribute("data-height"))) < .02
+      && Boolean(box.getAttribute("data-path"))
+      && box.getAttribute("data-path") === hole.getAttribute("d")
+    )));
   });
 }
 

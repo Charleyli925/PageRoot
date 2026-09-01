@@ -99,10 +99,15 @@ const app = acp.agent({ name: "pageroot-e2e-qoder" })
       path: `${requestRoot}/input/base/index.html`,
     });
     const outputPath = `${requestRoot}/attempts/${authority.attemptId}/output/candidate.html`;
-    const candidate = input.content.replace(
-      /<body([^>]*)>/iu,
-      '<body$1 data-pageroot-qoder-acp="e2e">',
-    );
+    const candidate = input.content
+      .replace(
+        /<body([^>]*)>/iu,
+        '<body$1 data-pageroot-qoder-acp="e2e">',
+      )
+      .replace(
+        /(<h1\b[^>]*>)\u771f\u5b9e /iu,
+        "$1Qoder \u5df2\u66f4\u65b0\uff1a\u771f\u5b9e ",
+      );
     await client.notify(acp.methods.client.session.update, {
       sessionId,
       update: {
