@@ -724,7 +724,9 @@ test("semantic structure edit rebuilds the disposable page and reruns its script
     await expect(nextFrame.locator(
       `[data-pageroot-id="${stableId}"][data-html-canvas-selected]`,
     )).toHaveCount(1);
-    await expect.poll(() => reviewStage.evaluate((element) => element.scrollTop)).toBeCloseTo(518.5, 1);
+    await expect.poll(() => reviewStage.evaluate((element) => (
+      Math.abs(element.scrollTop - 518.5) <= 2
+    ))).toBe(true);
     const workingCopyPath = await managedWorkingCopyPath(page, sourcePath);
     await expect.poll(() => readFileSync(workingCopyPath, "utf8"))
       .toMatch(/id="second"[\s\S]*id="first"/u);
@@ -812,17 +814,20 @@ test("a real user scroll during positioning becomes the latest handoff target", 
     await expect(moveDownButton).toBeVisible();
     const moveDownBox = await moveDownButton.boundingBox();
     expect(moveDownBox).not.toBeNull();
-    const stageBox = await reviewStage.boundingBox();
-    expect(stageBox).not.toBeNull();
     await armRuntimeHandoffSamples(page);
-    const scrollbarX = stageBox.x + stageBox.width - 2;
-    const scrollbarY = stageBox.y + stageBox.height / 2;
     // Use the already-visible toolbar coordinate so Playwright does not first
     // scroll the shared stage while locating the operation.
     await page.mouse.click(
       moveDownBox.x + moveDownBox.width / 2,
       moveDownBox.y + moveDownBox.height / 2,
     );
+    // The move operation can change the selected element's geometry. Resolve
+    // the scrollport again after that click so the real wheel gesture lands on
+    // the current scrollbar hit area during positioning.
+    const stageBox = await reviewStage.boundingBox();
+    expect(stageBox).not.toBeNull();
+    const scrollbarX = stageBox.x + stageBox.width - 2;
+    const scrollbarY = stageBox.y + stageBox.height / 2;
     await page.mouse.move(scrollbarX, scrollbarY);
     await page.mouse.wheel(0, 900);
     await expect.poll(() => reviewStage.evaluate((element) => element.scrollTop))

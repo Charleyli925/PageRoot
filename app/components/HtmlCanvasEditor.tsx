@@ -2387,7 +2387,10 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     }
     pendingSelectionRef.current = candidate.previousPendingSelection;
     pendingToolbarVisibleRef.current = candidate.previousPendingToolbarVisible;
-    pendingNativeEditResumeRef.current = candidate.previousActive.pendingNativeEditResume;
+    // A candidate that is cancelled before it reaches active is not a valid
+    // internal checkpoint continuation. Do not let its stale resume request
+    // turn the previous frame back into a contenteditable surface.
+    pendingNativeEditResumeRef.current = null;
     runtimeCandidateRef.current = null;
     runtimeCandidateIframeRef.current = null;
     setRuntimeCandidateRender(null);
@@ -2870,7 +2873,10 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     nativeEditNeedsReloadRef.current = previous.nativeEditNeedsReload;
     pendingFrameViewportRef.current = previous.pendingFrameViewport;
     pendingSharedViewportRef.current = previous.pendingSharedViewport;
-    pendingNativeEditResumeRef.current = previous.pendingNativeEditResume;
+    // Runtime activation failed after promotion. The old frame remains the
+    // source-backed rollback target, but the failed checkpoint must not
+    // restore native editing on that frame implicitly.
+    pendingNativeEditResumeRef.current = null;
     // Invalidate every rAF scheduled by the failed candidate before restoring
     // the previous generation's pending viewport/selection state.
     pendingFrameRestoreEpochRef.current = previous.pendingFrameRestoreEpoch + 1;
