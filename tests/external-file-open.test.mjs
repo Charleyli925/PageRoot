@@ -5,6 +5,7 @@ import {
   createExternalFileOpenDeliveryCoordinator,
   createExternalFileOpenExitHandoff,
   createExternalFileOpenMailbox,
+  createExternalOpenFailureMailbox,
   externalOpenFailurePresentation,
   externalHtmlPathsFromArgv,
   normalizeExternalHtmlPath,
@@ -102,6 +103,19 @@ test("native external-open failures use stable product errors instead of raw pat
       message: "源 HTML 已不存在。",
     },
   );
+});
+
+test("external-open failures wait in a mailbox until the renderer can present them inline", () => {
+  const mailbox = createExternalOpenFailureMailbox();
+  assert.equal(mailbox.peek(), null);
+  const published = mailbox.publish({
+    title: "无法打开这个 HTML",
+    message: "无法读取这个 HTML 文件。请确认文件仍存在且具有访问权限。",
+  });
+  assert.deepEqual(mailbox.peek(), published);
+  assert.deepEqual(mailbox.take(), published);
+  assert.equal(mailbox.peek(), null);
+  assert.equal(mailbox.take(), null);
 });
 
 test("external opens received after committed shutdown are handed to the next launch in order", () => {

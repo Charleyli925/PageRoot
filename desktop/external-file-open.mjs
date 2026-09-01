@@ -94,6 +94,31 @@ export function externalOpenFailurePresentation(error) {
   return EXTERNAL_OPEN_FAILURE;
 }
 
+export function createExternalOpenFailureMailbox() {
+  let pendingIssue = null;
+  return Object.freeze({
+    publish(issue) {
+      pendingIssue = Object.freeze({
+        title: typeof issue?.title === "string" && issue.title.trim()
+          ? issue.title.trim()
+          : "无法打开这个 HTML",
+        message: typeof issue?.message === "string" && issue.message.trim()
+          ? issue.message.trim()
+          : EXTERNAL_OPEN_FAILURE.message,
+      });
+      return pendingIssue;
+    },
+    take() {
+      const issue = pendingIssue;
+      pendingIssue = null;
+      return issue;
+    },
+    peek() {
+      return pendingIssue;
+    },
+  });
+}
+
 /**
  * Carries one native external-open intent across a shutdown that has already
  * been committed. The main process must not accept a new request into an

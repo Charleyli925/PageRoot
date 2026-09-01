@@ -9,6 +9,7 @@ import {
   normalizeCloseResult,
   runGuardedFinalExit,
   shouldPresentNativeCloseBlock,
+  shouldRetryCloseBlock,
   shouldRecoverEditorAfterCloseAbort,
   stopBridgeOrNotifyCloseAborted,
 } from "../desktop/close-recovery.mjs";
@@ -266,28 +267,33 @@ test("close-abort payloads reject missing or malformed request identities", () =
   });
 });
 
-test("renderer-owned close blockers stay in the application instead of opening a native alert", () => {
+test("renderer-owned close blockers stay in the application and may retry without a native alert", () => {
   const inAppResult = normalizeCloseResult({
     requestId: "close-request-0003",
     ready: false,
     reason: "源文件正在自动复核。",
     presentation: "in-app",
+    retry: true,
   });
   assert.deepEqual(inAppResult, {
     requestId: "close-request-0003",
     ready: false,
     reason: "源文件正在自动复核。",
     presentation: "in-app",
+    retry: true,
   });
   assert.equal(shouldPresentNativeCloseBlock(inAppResult), false);
+  assert.equal(shouldRetryCloseBlock(inAppResult), true);
 
   const legacyOrTimeoutResult = normalizeCloseResult({
     requestId: "close-request-0004",
     ready: false,
     reason: "Renderer 没有完成关闭确认。",
   });
-  assert.equal(legacyOrTimeoutResult.presentation, "native");
-  assert.equal(shouldPresentNativeCloseBlock(legacyOrTimeoutResult), true);
+  assert.equal(legacyOrTimeoutResult.presentation, "in-app");
+  assert.equal(shouldPresentNativeCloseBlock(legacyOrTimeoutResult), false);
+  assert.equal(shouldRetryCloseBlock(legacyOrTimeoutResult), false);
+  assert.equal(shouldRetryCloseBlock({ ready: true, retry: true }), false);
 });
 
 test("close result normalization rejects unsupported presentation values", () => {

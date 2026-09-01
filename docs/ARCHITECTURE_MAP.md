@@ -40,7 +40,7 @@ the Bridge client, construct Sessions, or own debounce, polling, or drain.
 | Canvas edit runtime | `EditAuthorRuntimeSession` owns the scoped resource grant; source HTML remains authoritative | Canvas rebuild/rerun in `HtmlCanvasEditor`; `DocumentWorkflow` persists complete HTML | `edit-runtime-contract.js`, `HtmlCanvasEditor.tsx`, `desktop/edit-runtime-protocol.mjs`, `desktop/edit-runtime-bootstrap.mjs` |
 | Preview | disposable preview session | Desktop preview protocol | `desktop/` preview owner, `HtmlInteractionPreview` |
 | Project open / switch / close | `ProjectSession` | `ProjectWorkflow` | `project-workflow.js`, `project/open-intent.js`, `project/switch-plan.js`, `project/close-plan.js`, `project/source-locator-plan.js` |
-| External open | Main mailbox + `ExternalFileOpenSession` + `ProjectApplicationSession` | `ProjectWorkflow` | `desktop/prepared-html-open.mjs`, `app/workbench/ExternalHtmlOpenDialog.tsx` |
+| External open | Main mailbox + `ExternalFileOpenSession` + `ProjectApplicationSession` | `ProjectWorkflow` | `desktop/prepared-html-open.mjs`, Workbench auto-confirm of `openConfirmation` |
 | Close and drain | unique `DrainCoordinator` | `ProjectWorkflow` close op | `app/application/project-workflow.js` |
 | Packaging and release | exact Git Tree | release workflows | `docs/RELEASING.md` |
 | Conversation handoff | `ConversationRepository` / `ConversationSession` | `ConversationWorkflow` | `app/workbench/AiConversationSidebar.tsx` |

@@ -192,6 +192,7 @@ export class ProjectWorkflow {
     ready: boolean;
     reason?: string;
     presentation?: "in-app" | "native";
+    retry?: boolean;
   }>>;
   abortClose(input: { requestId: string }): void;
   hasPending(boundary: string): boolean;

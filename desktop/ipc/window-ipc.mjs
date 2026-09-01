@@ -11,6 +11,7 @@ export function registerWindowIpc({
   reportCloseResult,
   acknowledgeWorkspaceRecoveryReady,
   peekExternalOpenReady,
+  peekExternalOpenFailed,
   relaunchApplication,
   applyNativeHistory,
   getUiPreferences,
@@ -32,6 +33,10 @@ export function registerWindowIpc({
   ipcMain.handle(
     APP_CHANNELS.externalOpenReady,
     trusted(peekExternalOpenReady),
+  );
+  ipcMain.handle(
+    APP_CHANNELS.externalOpenFailedReady,
+    trusted(peekExternalOpenFailed),
   );
   ipcMain.handle(
     APP_CHANNELS.relaunch,
@@ -83,6 +88,7 @@ export function unregisterWindowIpc({
     APP_CHANNELS.closeResult,
     APP_CHANNELS.workspaceRecoveryReady,
     APP_CHANNELS.externalOpenReady,
+    APP_CHANNELS.externalOpenFailedReady,
     APP_CHANNELS.relaunch,
     EDIT_CHANNELS.nativeHistory,
   ]) {

@@ -26,8 +26,7 @@ Bridge route adapters
   application-session snapshots to view props and callbacks, but it may not
   recreate a session-owned fact as an independently writable ref or state
   variable.
-- Workbench presentation files (`presentation.tsx`, `ExternalHtmlOpenDialog.tsx`
-  and `*-view.tsx`) are
+- Workbench presentation files (`presentation.tsx` and `*-view.tsx`) are
   snapshot-and-callback views. They may import domain types and pure Workbench
   models, but not `app/application` sessions or services.
 - Application modules own session identity, request generations, mutation
@@ -1069,7 +1068,7 @@ Hashes, state transitions and fault injection.
 
 ### Architecture gate assertion forms
 
-`scripts/check-architecture.mjs` enforces the boundaries above as four explicit
+`scripts/check-architecture.mjs` enforces the boundaries above as five explicit
 responsibility groups:
 
 - `layerBoundaryViolations`: import direction between Domain, Application,
@@ -1079,9 +1078,14 @@ responsibility groups:
 - `escapeBoundaryViolations`: typed Bridge access, browser persistence,
   endpoint knowledge and provider-neutral workflow boundaries;
 - `retiredArtifactViolations`: deleted production modules and their imports.
+- `dialogPolicyViolations`: `dialog.showErrorBox`, ordinary
+  `dialog.showMessageBox`, and unregistered `window.confirm`. The only remaining
+  native error box is the startup failure that happens before a renderer exists.
+  Content-loss confirms (delete, overwrite, abandon unsaved edits) must be
+  registered in `ALLOWED_WINDOW_CONFIRM_PREFIXES`.
 
 The gate uses structural queries from `scripts/architecture-ast-query.mjs`
-(`moduleSpecifiers`, `callNames`, `newExpressionNames`, filesystem-write
+(`moduleSpecifiers`, `callNames`, `callExpressions`, `newExpressionNames`, filesystem-write
 classification and literal comparisons). These queries operate on dependency,
 call, construction and data-category facts. They do not assert private fields,
 private methods, exact object properties or the spelling/order of a business

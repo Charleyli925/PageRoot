@@ -1260,8 +1260,6 @@
         "^app/workbench\\.tsx$",
         "^app/workbench/(?:comment-rail-view|comment-rail-contract|file-header-view|run-conversation-outlet|workbench-navigation-container)\\.(?:ts|tsx)$",
         "^tests/comment-rail-contract\\.test\\.mjs$",
-        "^app/workbench/ExternalHtmlOpenDialog\\.tsx$",
-        "^app/workbench/external-html-open-dialog\\.module\\.css$",
         "^app/workbench/(?:browser-io|comment-model|project-model|record-model|types)\\.ts$"
       ],
       "suites": [
@@ -1320,7 +1318,7 @@
     {
       "id": "web-ui",
       "patterns": [
-        "^app/components/(?:AboutPageRootDialog|CancelAiRunDialog|RestartUpdateDialog)\\.tsx$",
+        "^app/components/(?:AboutPageRootDialog|CancelAiRunDialog)\\.tsx$",
         "^app/(?:page|layout)\\.tsx$"
       ],
       "suites": [

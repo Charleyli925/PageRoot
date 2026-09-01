@@ -37,8 +37,6 @@ import HtmlInteractionPreview, {
 } from "./components/HtmlInteractionPreview";
 import { useAiConversation } from "./workbench/use-ai-conversation";
 import NoticeBar from "./components/NoticeBar";
-import RestartUpdateDialog from "./components/RestartUpdateDialog";
-import ExternalHtmlOpenDialog from "./workbench/ExternalHtmlOpenDialog";
 import {
   MAX_ATTACHMENT_BYTES,
   MAX_COMMENT_ATTACHMENTS,
@@ -561,6 +559,26 @@ export default function Workbench() {
     ?? INITIAL_EXTERNAL_FILE_OPEN_SNAPSHOT;
   const openConfirmation =
     workspaceControllerSnapshot?.project?.openConfirmation || null;
+  useEffect(() => {
+    if (!workspaceController || !openConfirmation || openConfirmation.busy) return;
+    if (autoConfirmedOpenRequestRef.current === openConfirmation.requestId) return;
+    autoConfirmedOpenRequestRef.current = openConfirmation.requestId;
+    if (openConfirmation.deleteOriginal === true) {
+      if (!window.confirm("成功导入后会将原文件移至废纸篓。确定继续吗？")) {
+        void workspaceController.cancelExternalOpen({
+          requestId: openConfirmation.requestId,
+        });
+        return;
+      }
+    }
+    void workspaceController.confirmExternalOpen({
+      requestId: openConfirmation.requestId,
+      action: openConfirmation.classification === "new-external"
+        ? "import-new"
+        : "continue-current",
+      deleteOriginal: openConfirmation.deleteOriginal === true,
+    });
+  }, [openConfirmation, workspaceController]);
   const projectApplicationSnapshot =
     workspaceControllerSnapshot?.project?.projectApplication
     ?? INITIAL_PROJECT_APPLICATION_SNAPSHOT;
@@ -1308,7 +1326,6 @@ export default function Workbench() {
     useState<ApplicationUpdateResult | null>(null);
   const [aboutOpen, setAboutOpen] = useState(false);
   const [settingsCategory, setSettingsCategory] = useState<SettingsCategory>("general");
-  const [restartUpdateOpen, setRestartUpdateOpen] = useState(false);
   const [applicationVersion, setApplicationVersion] = useState("");
   const [desktopUpdatesAvailable, setDesktopUpdatesAvailable] = useState(false);
   const [manualUpdateCheckPending, setManualUpdateCheckPending] = useState(false);
@@ -1316,7 +1333,10 @@ export default function Workbench() {
   const [repositoryOpenFailed, setRepositoryOpenFailed] = useState(false);
   const [releaseNotesOpenFailed, setReleaseNotesOpenFailed] = useState(false);
   const [userNoticeOpenFailed, setUserNoticeOpenFailed] = useState(false);
-  const promptedUpdateVersionRef = useRef<string | null>(null);
+  const [pendingExit, setPendingExit] = useState(false);
+  const [fileStatusNotice, setFileStatusNotice] = useState<string | null>(null);
+  const [openHtmlError, setOpenHtmlError] = useState<string | null>(null);
+  const autoConfirmedOpenRequestRef = useRef<string | null>(null);
   const [toast, setToastState] = useState<Toast>(null);
   const setToast = useCallback((next: Toast) => {
     const memory = noticeDismissalMemoryRef.current;
@@ -1903,18 +1923,14 @@ export default function Workbench() {
         return;
       }
       if (projectEvent.type === "project-open-failed") {
-        const external = projectEvent.kind === "external";
         const message = String(
           projectEvent.reason || "文件暂时无法完成安全切换。",
         );
-        setToast(external ? {
-          title: "无法打开 QoderWork 中的 HTML",
-          message,
-          tone: "error",
-          sticky: true,
-          disposition: "background-result",
-          dedupeKey: "external-project-open-error",
-        } : {
+        if (projectEvent.kind === "external") {
+          setOpenHtmlError(message);
+          return;
+        }
+        setToast({
           title: "无法打开这个 HTML",
           message,
           tone: "error",
@@ -2236,15 +2252,6 @@ export default function Workbench() {
   ]);
 
   useEffect(() => {
-    reportInterruptionPresence(
-      "update_restart_confirmation",
-      restartUpdateOpen,
-      "panel",
-      "dismissed",
-    );
-  }, [reportInterruptionPresence, restartUpdateOpen]);
-
-  useEffect(() => {
     const updates = window.htmlAIUpdates;
     if (!updates) return undefined;
     let active = true;
@@ -2320,6 +2327,15 @@ export default function Workbench() {
         message: issue.message
           || "当前页面内容仍保留。可先导出当前 HTML，再重新打开源页。",
       });
+    });
+  }, []);
+
+  useEffect(() => {
+    const lifecycle = window.htmlAIAppLifecycle;
+    if (!lifecycle?.onExternalOpenFailed) return undefined;
+    return lifecycle.onExternalOpenFailed((issue) => {
+      setOpenHtmlError(issue.message || "无法读取这个 HTML 文件。");
+      setGlobalSidebarOpen(true);
     });
   }, []);
 
@@ -2419,19 +2435,6 @@ export default function Workbench() {
       return false;
     }
   }, []);
-
-  useEffect(() => {
-    const version = updateResult?.latestVersion;
-    if (
-      updateResult?.status !== "downloaded"
-      || !version
-      || promptedUpdateVersionRef.current === version
-    ) {
-      return;
-    }
-    promptedUpdateVersionRef.current = version;
-    setRestartUpdateOpen(true);
-  }, [updateResult]);
 
   const viewingVersion = useMemo(
     () => versions.find((version) => version.id === viewingVersionId) || null,
@@ -2963,22 +2966,24 @@ export default function Workbench() {
   // Workbench only creates CanvasChangeInput and delegates durable source
   // authority to the composed application Workflow.
   const flushAutosave = useCallback(async (throughRevision?: number): Promise<boolean> => {
-    if (!workspaceController) return false;
+    if (!workspaceController || workspaceIssue) return false;
     const outcome = await requiredWorkspaceController(workspaceController)
       .flushDocument({ throughRevision });
     return outcome.status === "succeeded";
-  }, [workspaceController]);
+  }, [workspaceController, workspaceIssue]);
 
   const enqueueAutosave = useCallback((
     nextHtml: string,
     mutation?: HtmlCanvasMutation,
     sourceTransaction?: HtmlCanvasSourceTransaction,
   ): DocumentEditOutcome => {
-    if (!workspaceController) {
+    if (!workspaceController || workspaceIssue) {
       return {
         status: "blocked",
         code: "DOCUMENT_WORKFLOW_UNAVAILABLE",
-        reason: "项目资料初始化尚未就绪，当前修改没有被接受。",
+        reason: workspaceIssue
+          ? "本地项目资料暂时不可用，已暂停保存。"
+          : "项目资料初始化尚未就绪，当前修改没有被接受。",
       };
     }
     return requiredWorkspaceController(workspaceController)
@@ -2988,7 +2993,7 @@ export default function Workbench() {
         sourceTransaction,
         context: workspaceControllerRef.current?.getCurrentProjectContext() || undefined,
       });
-  }, [workspaceController]);
+  }, [workspaceController, workspaceIssue]);
 
   const refreshWorkspace = useCallback(async (
     sourceOverride?: string | null,
@@ -3369,11 +3374,11 @@ export default function Workbench() {
       const detail = (event as CustomEvent<PrepareCloseDetail>).detail;
       if (!detail || typeof detail.waitUntil !== "function") return;
       // The desktop shell only accepts checks registered synchronously.
-      void workspacePreferencesController.flush(detail.deadlineAt).catch(() => false);
       detail.waitUntil(workspaceController.prepareClose({
         requestId: detail.requestId,
         deadlineAt: detail.deadlineAt,
       }) as Promise<CloseReadiness>);
+      setPendingExit(true);
     };
     window.addEventListener("html-ai:prepare-close", handlePrepareClose);
     return () => window.removeEventListener(
@@ -3388,6 +3393,7 @@ export default function Workbench() {
       const detail = (event as CustomEvent<CloseAbortedDetail>).detail;
       if (!detail || typeof detail.requestId !== "string") return;
       workspaceController.abortClose({ requestId: detail.requestId });
+      setPendingExit(false);
     };
     window.addEventListener("html-ai:close-aborted", handleCloseAborted);
     return () => window.removeEventListener(
@@ -3395,6 +3401,12 @@ export default function Workbench() {
       handleCloseAborted,
     );
   }, [workspaceController]);
+
+  useEffect(() => {
+    if (!fileStatusNotice || pendingExit) return undefined;
+    const timer = window.setTimeout(() => setFileStatusNotice(null), 2500);
+    return () => window.clearTimeout(timer);
+  }, [fileStatusNotice, pendingExit]);
 
   useEffect(() => {
     if (!workspaceController) return undefined;
@@ -3416,6 +3428,7 @@ export default function Workbench() {
   }, [workspaceController, workspacePreferencesController]);
   const openProject = useCallback(async (recentPath?: string) => {
     if (!workspaceController) return;
+    setOpenHtmlError(null);
     await workspaceController.openProject({
       kind: recentPath ? "recent" : "local",
       sourcePath: recentPath || null,
@@ -3948,12 +3961,7 @@ export default function Workbench() {
         sourceTransitionOperationRef.current !== operationId
         || !isCurrentProjectContext(context)
       ) return;
-      setToast({
-        title: "已重新载入外部文件",
-        message: "工作台现在显示磁盘上的最新内容。",
-        tone: "success",
-        dedupeKey: "source-reload",
-      });
+      setFileStatusNotice("已加载磁盘最新版本");
     } catch (cause) {
       if (!isCurrentProjectContext(context)) return;
       setToast({
@@ -6440,6 +6448,16 @@ export default function Workbench() {
         />
       </> : null}
 
+      {pendingExit || fileStatusNotice ? (
+        <section
+          className="workbench-chrome-status"
+          data-tone={pendingExit ? "exit" : "info"}
+          role="status"
+        >
+          {pendingExit ? "正在保存，完成后将退出" : fileStatusNotice}
+        </section>
+      ) : null}
+
       {!settingsPageActive && startupIssue ? (
         <section className="startup-issue" role="alert">
           <div>
@@ -6464,8 +6482,11 @@ export default function Workbench() {
           <button type="button" onClick={() => void exportCurrentHtml()}>
             导出当前 HTML
           </button>
+          <button type="button" onClick={() => void openProject()}>
+            重新定位文件
+          </button>
           <button type="button" onClick={() => void relaunchApp()}>
-            重新打开源页
+            重新打开
           </button>
         </section>
       ) : null}
@@ -6611,11 +6632,12 @@ export default function Workbench() {
         onResizeCommit={(width) => workspacePreferencesController.commitPanelWidth("sidebar", width)}
         onDownloadOrRestartUpdate={() => {
           if (updateDownloaded) {
-            setRestartUpdateOpen(true);
+            void installDownloadedUpdate();
           } else if (updateResult?.status === "available") {
             void downloadAvailableUpdate();
           }
         }}
+        openHtmlError={openHtmlError}
       /> : null}
       <WorkbenchDocumentSurfaceCache
         snapshot={documentSurfaceCacheSnapshot}
@@ -6671,7 +6693,9 @@ export default function Workbench() {
           onClose={closeSettingsPage}
           onCheckForUpdates={() => void checkForApplicationUpdates()}
           onDownloadUpdate={() => void downloadAvailableUpdate()}
-          onRequestRestart={() => setRestartUpdateOpen(true)}
+          onRequestRestart={() => {
+            void installDownloadedUpdate();
+          }}
           onOpenReleaseNotes={() => void openReleaseNotes()}
           onCheckUsability={checkAgentUsability}
           onCopyGuidance={copyAgentGuidance}
@@ -6887,32 +6911,6 @@ export default function Workbench() {
         />
       ) : null}
 
-      {openConfirmation ? (
-        <ExternalHtmlOpenDialog key={openConfirmation.requestId}
-          confirmation={openConfirmation}
-          deleteOriginal={openConfirmation.deleteOriginal === true}
-          busy={openConfirmation.busy === true}
-          onDeleteOriginalChange={(next) => {
-            workspaceController?.setExternalOpenDeleteOriginal({
-              requestId: openConfirmation.requestId,
-              deleteOriginal: next,
-            });
-          }}
-          onCancel={() => {
-            void workspaceController?.cancelExternalOpen({
-              requestId: openConfirmation.requestId,
-            });
-          }}
-          onConfirm={(action) => {
-            void workspaceController?.confirmExternalOpen({
-              requestId: openConfirmation.requestId,
-              action,
-              deleteOriginal: openConfirmation.deleteOriginal === true,
-            });
-          }}
-        />
-      ) : null}
-
       <CancelAiRunDialog
         open={cancelRunConfirmationOpen}
         onClose={() => setCancelRunConfirmationKey(null)}
@@ -6927,16 +6925,6 @@ export default function Workbench() {
           if (matchesConfirmation) {
             void cancelActiveRun({ agentMayBeRunning: true });
           }
-        }}
-      />
-
-      <RestartUpdateDialog
-        open={restartUpdateOpen && updateDownloaded}
-        installing={updateResult?.status === "installing"}
-        onClose={() => setRestartUpdateOpen(false)}
-        onRestartNow={() => {
-          setRestartUpdateOpen(false);
-          void installDownloadedUpdate();
         }}
       />
 

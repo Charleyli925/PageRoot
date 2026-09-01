@@ -42,6 +42,8 @@ const appChannels = Object.freeze({
   workspaceRecoveryReady: "html-app:workspace-recovery-ready",
   externalOpenRequested: "html-app:external-open-requested",
   externalOpenReady: "html-app:external-open-ready",
+  externalOpenFailed: "html-app:external-open-failed",
+  externalOpenFailedReady: "html-app:external-open-failed-ready",
   bridgeReady: "html-app:bridge-ready",
   relaunch: "html-app:relaunch",
   openUserNotice: "html-app:open-user-notice",
@@ -365,6 +367,7 @@ const closeAbortListeners = new Map();
 const aboutRequestListeners = new Map();
 const workspaceUnavailableListeners = new Map();
 const externalOpenListeners = new Map();
+const externalOpenFailedListeners = new Map();
 function normalizedWorkspaceIssue(payload) {
   return Object.freeze({
     title: typeof payload?.title === "string"
@@ -439,11 +442,12 @@ const appLifecycleApi = Object.freeze({
     requestId,
     ready: true,
   }),
-  reportBlocked: (requestId, reason, presentation = "native") => ipcRenderer.invoke(appChannels.closeResult, {
+  reportBlocked: (requestId, reason, presentation = "in-app", retry = false) => ipcRenderer.invoke(appChannels.closeResult, {
     requestId,
     ready: false,
     reason,
     presentation,
+    ...(retry === true ? { retry: true } : {}),
   }),
   onWorkspaceUnavailable: (listener) => {
     if (typeof listener !== "function") {
@@ -509,6 +513,33 @@ const appLifecycleApi = Object.freeze({
   getInitialExternalOpen: async () => {
     const payload = await ipcRenderer.invoke(appChannels.externalOpenReady);
     return normalizedExternalOpenRequest(payload);
+  },
+  onExternalOpenFailed: (listener) => {
+    if (typeof listener !== "function") {
+      throw new TypeError("onExternalOpenFailed listener must be a function.");
+    }
+    const wrapped = (_event, payload) => listener(Object.freeze({
+      title: typeof payload?.title === "string" && payload.title.trim()
+        ? payload.title.trim()
+        : "无法打开这个 HTML",
+      message: typeof payload?.message === "string" && payload.message.trim()
+        ? payload.message.trim()
+        : "无法读取这个 HTML 文件。请确认文件仍存在且具有访问权限。",
+    }));
+    externalOpenFailedListeners.set(listener, wrapped);
+    ipcRenderer.on(appChannels.externalOpenFailed, wrapped);
+    void ipcRenderer.invoke(appChannels.externalOpenFailedReady)
+      .then((payload) => {
+        if (externalOpenFailedListeners.get(listener) !== wrapped || !payload) return;
+        wrapped(null, payload);
+      })
+      .catch(() => {});
+    return () => {
+      const registered = externalOpenFailedListeners.get(listener);
+      if (!registered) return;
+      externalOpenFailedListeners.delete(listener);
+      ipcRenderer.removeListener(appChannels.externalOpenFailed, registered);
+    };
   },
   relaunch: () => ipcRenderer.invoke(appChannels.relaunch),
   openUserNotice: () => invokeProject(appChannels.openUserNotice),

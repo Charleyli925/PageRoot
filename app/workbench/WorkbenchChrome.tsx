@@ -252,6 +252,7 @@ export function WorkbenchGlobalSidebar({
   onOpenSettings,
   onDownloadOrRestartUpdate,
   onResizeCommit,
+  openHtmlError,
 }: {
   open: boolean;
   registeredProjects: RegisteredProject[];
@@ -276,6 +277,7 @@ export function WorkbenchGlobalSidebar({
   onOpenSettings: () => void;
   onDownloadOrRestartUpdate: () => void;
   onResizeCommit?: (width: number) => void;
+  openHtmlError?: string | null;
 }) {
   const [projectExpansionState, setProjectExpansionState] = useState<ProjectExpansionState>(
     () => createProjectExpansionState(currentProjectId),
@@ -405,6 +407,9 @@ export function WorkbenchGlobalSidebar({
           </div>
           <div className="workbench-sidebar-body">
             <button type="button" onClick={onOpenLocal}><PlusIcon aria-hidden="true" size={14} weight="bold" />打开 HTML</button>
+            {openHtmlError ? (
+              <p className="workbench-sidebar-error" role="alert">{openHtmlError}</p>
+            ) : null}
             <section className="sidebar-project-section" aria-labelledby="sidebar-current-project-heading">
               <h2 id="sidebar-current-project-heading">当前项目</h2>
               <button

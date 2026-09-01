@@ -13,6 +13,7 @@ export function normalizeCloseResult(payload) {
     "ready",
     "reason",
     "presentation",
+    "retry",
   ]);
   if (Object.keys(payload).some((key) => !allowedKeys.has(key))) {
     throw new TypeError("关闭确认结果包含未支持的字段。");
@@ -30,6 +31,9 @@ export function normalizeCloseResult(payload) {
   if (payload.ready && payload.presentation !== undefined) {
     throw new TypeError("已就绪的关闭确认不能声明阻断出口。");
   }
+  if (payload.ready && payload.retry !== undefined) {
+    throw new TypeError("已就绪的关闭确认不能声明重试。");
+  }
   if (
     !payload.ready
     && payload.presentation !== undefined
@@ -37,6 +41,9 @@ export function normalizeCloseResult(payload) {
     && payload.presentation !== "native"
   ) {
     throw new TypeError("关闭阻断出口无效。");
+  }
+  if (!payload.ready && payload.retry !== undefined && payload.retry !== true && payload.retry !== false) {
+    throw new TypeError("关闭重试标记无效。");
   }
   const reason = payload.ready
     ? null
@@ -49,16 +56,17 @@ export function normalizeCloseResult(payload) {
     reason,
     presentation: payload.ready
       ? null
-      : payload.presentation || "native",
+      : payload.presentation || "in-app",
+    retry: payload.ready ? false : payload.retry === true,
   });
 }
 
-export function shouldPresentNativeCloseBlock(result) {
-  return Boolean(
-    result
-    && result.ready === false
-    && result.presentation !== "in-app",
-  );
+export function shouldPresentNativeCloseBlock() {
+  return false;
+}
+
+export function shouldRetryCloseBlock(result) {
+  return Boolean(result && result.ready === false && result.retry === true);
 }
 
 export function closeAbortPayload(requestId, error) {

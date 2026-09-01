@@ -153,38 +153,23 @@ test("existing inode identity protects hard links to the source", async (t) => {
   );
 });
 
-test("selecting the source shows a native retry path and reopens the save dialog", async (t) => {
+test("selecting the source auto-generates a free copy name instead of warning", async (t) => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "html-ai-export-retry-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const sourcePath = path.join(directory, "source.html");
   const defaultPath = path.join(directory, "source-副本.html");
   await writeFile(sourcePath, "<html></html>", "utf8");
-  const selections = [
-    { canceled: false, filePath: sourcePath },
-    { canceled: false, filePath: defaultPath },
-  ];
-  const shownDefaults = [];
-  let warningCount = 0;
 
   const selected = await selectExportDestination({
     defaultPath,
     protectedPaths: [sourcePath],
-    showSaveDialog: async (safeDefaultPath) => {
-      shownDefaults.push(safeDefaultPath);
-      return selections.shift();
-    },
-    showProtectedWarning: async () => {
-      warningCount += 1;
-      return true;
-    },
+    showSaveDialog: async () => ({ canceled: false, filePath: sourcePath }),
   });
 
   assert.equal(selected, defaultPath);
-  assert.deepEqual(shownDefaults, [defaultPath, defaultPath]);
-  assert.equal(warningCount, 1);
 });
 
-test("canceling after selecting the source is a normal null result", async (t) => {
+test("canceling the save dialog is a normal null result", async (t) => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "html-ai-export-cancel-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const sourcePath = path.join(directory, "source.html");
@@ -193,8 +178,7 @@ test("canceling after selecting the source is a normal null result", async (t) =
   const selected = await selectExportDestination({
     defaultPath: path.join(directory, "source-副本.html"),
     protectedPaths: [sourcePath],
-    showSaveDialog: async () => ({ canceled: false, filePath: sourcePath }),
-    showProtectedWarning: async () => false,
+    showSaveDialog: async () => ({ canceled: true }),
   });
 
   assert.equal(selected, null);

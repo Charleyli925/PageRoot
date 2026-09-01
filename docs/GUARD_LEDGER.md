@@ -34,7 +34,7 @@ corruption or lost user work.
 
 | Guard | Invariant | Class | User cost | Duplicate | Recovery | Decision |
 | --- | --- | --- | --- | --- | --- | --- |
-| External HTML import confirmation | Do not import or retarget active/recent before consent | authority | modal | no | no | keep |
+| External HTML import confirmation | Do not trash the original without consent | authority | confirm only when deleting original | no | no | degrade |
 | Source conflict banner | External write must not overwrite editor bytes | authority | banner | no | preview / force-unlock / retry | keep |
 | Request freeze before AI submit | Freeze persisted HTML/revision before creating a Request | authority | send waits on save | Drain + autosave | flush then continue | keep |
 | `RUN_SUBMISSION_TARGET_UNSAFE` | Current comment must resolve exact by stable element ID; legacy comment must remain exact/rebound; missing stable ID cannot fall back to a similar node | authority | cannot send; relink card | rail `canLocateTarget` | explicit relink then continue send | keep; extra Toast → degrade |
@@ -43,7 +43,7 @@ corruption or lost user work.
 | `PROJECT.md` unsaved close/switch | Rules must land before fold/switch | authority | blocks close/switch | no | autosave/drain | keep |
 | Browser preview read-only | Pure browser has no edit/comment/AI write | authority | permanent read-only | runtime capabilities | no | keep |
 | Cancel AI run dialog | Do not silently drop an Agent that may still be writing | authority | modal | no | no | keep |
-| Restart-update dialog | Installing an update exits the process | authority | modal | no | no | keep |
+| Restart-update dialog | Installing an update exits the process | authority | non-blocking badge + close drain | close drain | no | degrade |
 | Canvas ACK vs “safely saved” | Visible canvas Hash must match authoritative HTML | reversible | header pending; sticky retry on failure | Workbench effect + DocumentWorkflow | one reread + rebuild | merge to DocumentSession; Toast → degrade |
 | Deferred external/application retry | Switch only after drain/Canvas is safe | reversible | sticky “continue switch” | Session auto-resume + Toast | blocker-transition resume | cancel user block when auto-resume works |
 | Catalog/recent refresh failure | A failed listing must not freeze the current document | reversible | sidebar error | no | next refresh | degrade |

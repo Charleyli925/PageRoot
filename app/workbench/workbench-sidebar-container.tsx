@@ -114,6 +114,7 @@ export const WorkbenchGlobalSidebarContainer = memo(function WorkbenchGlobalSide
   onOpenSettings(): void;
   onDownloadOrRestartUpdate(): void;
   onResizeCommit?(width: number): void;
+  openHtmlError?: string | null;
 }) {
   const catalog = useSyncExternalStore(
     capability.subscribe,

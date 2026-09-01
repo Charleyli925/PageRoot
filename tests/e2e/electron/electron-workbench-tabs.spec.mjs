@@ -41,8 +41,6 @@ test("Electron tab keyboard navigation manages focus and a persisted Start suppr
   let reopened = null;
   try {
     await loadedDiskFrame(firstLaunch.page, fixture.sourcePath, "list-item");
-    await expect(firstLaunch.page.getByRole("button", { name: "导入并打开" }))
-      .toBeHidden({ timeout: 30_000 });
     const tablist = firstLaunch.page.getByRole("tablist", { name: "已打开的页面" });
     await expect(tablist.getByRole("tab")).toHaveCount(1);
     await firstLaunch.page.getByRole("button", { name: "新标签页" }).click();

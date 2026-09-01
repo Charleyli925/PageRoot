@@ -1052,7 +1052,8 @@ export class ProjectWorkflow {
       return {
         ready: false,
         reason: identityPlan.reason,
-        presentation: identityPlan.presentation,
+        presentation: "in-app",
+        retry: false,
       };
     }
     const closeRequestId = String(requestId || "");
@@ -1061,10 +1062,11 @@ export class ProjectWorkflow {
     let frozenSourceSha256 = null;
     let ready = false;
     const lifecycle = this.#closeLifecycle;
-    const inAppBlock = (reason) => ({
+    const inAppBlock = (reason, retry = true) => ({
       ready: false,
       reason: String(reason),
       presentation: "in-app",
+      retry,
     });
     const projectOpenInFlight = () => (
       this.#snapshot.open.phase === "opening"
@@ -1108,7 +1110,10 @@ export class ProjectWorkflow {
         ),
       });
       if (hydrationPlan.kind === "reject") {
-        return inAppBlock(hydrationPlan.reason);
+        return inAppBlock(
+          hydrationPlan.reason,
+          hydrationPlan.code !== "PROJECT_CLOSE_LOAD_ERROR_DIRTY",
+        );
       }
       if (hydrationPlan.action === "allow-hydration" || hydrationPlan.action === "allow-load-error") {
         ready = true;
@@ -1191,11 +1196,10 @@ export class ProjectWorkflow {
       this.#setClose("ready", closeRequestId);
       return { ready: true };
     } catch (cause) {
-      return {
-        ready: false,
-        reason: cause instanceof Error ? cause.message : "关闭前安全写入检查失败。",
-        presentation: "native",
-      };
+      return inAppBlock(
+        cause instanceof Error ? cause.message : "关闭前安全写入检查失败。",
+        false,
+      );
     } finally {
       if (lifecycle.preparingRequestId === closeRequestId) {
         lifecycle.preparingRequestId = null;

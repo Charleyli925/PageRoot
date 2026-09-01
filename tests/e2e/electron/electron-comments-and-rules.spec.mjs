@@ -580,8 +580,7 @@ test("automatic update actions keep the sidebar product geometry and split About
     })).toBeVisible();
     await expect(launched.page.getByRole("dialog", {
       name: "现在重启并安装更新？",
-    })).toBeVisible();
-    await launched.page.getByRole("button", { name: "稍后" }).click();
+    })).toHaveCount(0);
     await expect(launched.page.locator("dialog.restart-update-dialog[open]"))
       .toHaveCount(0);
     const downloadedGeometry = await captureSidebarProduct();
@@ -1015,7 +1014,9 @@ test("workspace failure keeps the current page visible with export and relaunch 
     await expect(recovery).toBeVisible();
     await expect(recovery.getByRole("button", { name: "导出当前 HTML" }))
       .toBeVisible();
-    await expect(recovery.getByRole("button", { name: "重新打开源页" }))
+    await expect(recovery.getByRole("button", { name: "重新定位文件" }))
+      .toBeVisible();
+    await expect(recovery.getByRole("button", { name: "重新打开" }))
       .toBeVisible();
     const globalCommentButton = launched.page.locator('aside[aria-label="本轮评论"]')
       .getByRole("button", { name: "全局评论", exact: true });

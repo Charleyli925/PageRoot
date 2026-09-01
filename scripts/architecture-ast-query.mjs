@@ -89,14 +89,28 @@ export function importsModule(handle, specifier) {
   return moduleSpecifiers(handle).includes(specifier);
 }
 
-export function callNames(handle) {
-  const names = [];
+export function callExpressions(handle) {
+  const values = [];
   eachNode(handle, (node) => {
     if (!ts.isCallExpression(node)) return;
     const pathName = expressionPath(node.expression);
-    if (pathName) names.push(pathName.split(".").at(-1));
+    if (!pathName) return;
+    values.push({
+      path: pathName,
+      args: node.arguments.map((argument) => {
+        if (ts.isStringLiteral(argument) || ts.isNoSubstitutionTemplateLiteral(argument)) {
+          return argument.text;
+        }
+        if (ts.isTemplateExpression(argument)) return argument.head.text;
+        return null;
+      }),
+    });
   });
-  return names;
+  return values;
+}
+
+export function callNames(handle) {
+  return callExpressions(handle).map((call) => call.path.split(".").at(-1));
 }
 
 export function hasCallName(handle, name) {

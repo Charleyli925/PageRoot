@@ -508,6 +508,7 @@ export class WorkspaceController {
     ready: boolean;
     reason?: string;
     presentation?: "in-app" | "native";
+    retry?: boolean;
   }>>;
   abortClose(input: { requestId: string }): void;
   hasPendingDrain(boundary: string): boolean;
