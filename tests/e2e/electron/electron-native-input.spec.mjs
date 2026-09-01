@@ -230,6 +230,13 @@ test("Electron autosaves one authorized disk patch and reopens the same forward 
       previousDocumentToken,
       "source-fidelity",
     );
+    await expect.poll(() => nativeEditingState(frame, "source-fidelity"))
+      .toMatchObject({
+        targetIsActive: false,
+        contenteditable: null,
+        isContentEditable: false,
+        selectionInside: false,
+      });
     expect(await retiredNativeHostState(firstLaunch.page)).toEqual({
       contenteditable: null,
       editingMarker: null,
@@ -316,7 +323,7 @@ test("Electron assigns Stable ID to a native line break and reopens it from mana
       "v2-island-checkpoint-preserved",
     );
     expect(await documentToken(frame)).toBe(initialDocument);
-    await expect(target).toHaveAttribute("contenteditable", "true");
+    await expect(target).not.toHaveAttribute("contenteditable", "true");
     const savedHtml = readFileSync(managedSourcePath, "utf8");
     const identifiedBreaks = savedHtml.match(
       /<br data-pageroot-id="pr1_[0-9a-f]{12}4[0-9a-f]{3}[89ab][0-9a-f]{15}">/gu,
@@ -329,6 +336,8 @@ test("Electron assigns Stable ID to a native line break and reopens it from mana
     expect(await target.evaluate((element) => (
       element.ownerDocument.defaultView.__pagerootManagedLineBreakHost === element
     ))).toBe(true);
+    await activateNativeEdit(frame, "managed-line-break");
+    await target.press("End");
     await launched.page.keyboard.insertText("Omega");
     expect(await documentToken(frame)).toBe(initialDocument);
     await expect(target).toContainText("Omega");
@@ -623,9 +632,11 @@ test("Electron keeps the active text selection and comment anchors stable after 
     frame = await currentEditorFrame(launched.page);
     await expect.poll(() => nativeEditingState(frame, "source-fidelity"))
       .toMatchObject({
-        targetIsActive: true,
-        activeCase: "source-fidelity",
-        selectionInside: true,
+        targetIsActive: false,
+        contenteditable: null,
+        isContentEditable: false,
+        activeCase: null,
+        selectionInside: false,
       });
 
     const reviewStage = launched.page.locator(".review-scroll-stage");
@@ -676,10 +687,11 @@ test("Electron keeps the active text selection and comment anchors stable after 
     frame = await currentEditorFrame(launched.page);
     await expect.poll(() => nativeEditingState(frame, "source-fidelity"))
       .toMatchObject({
-        targetIsActive: true,
-        contenteditable: "true",
-        activeCase: "source-fidelity",
-        selectionInside: true,
+        targetIsActive: false,
+        contenteditable: null,
+        isContentEditable: false,
+        activeCase: null,
+        selectionInside: false,
       });
     await expect(commentCard).toHaveAttribute("data-resolution", /^(?:exact|rebound)$/u);
     await expect(commentCard.getByText("原位置已变化")).toHaveCount(0);
@@ -786,17 +798,25 @@ test("Electron persists an Apple Pinyin boundary composition with left affinity"
         previousDocumentToken,
         "heading-inline",
       );
+      await expect.poll(() => nativeEditingState(firstLaunch.page, "heading-inline"))
+        .toMatchObject({
+          targetIsActive: false,
+          contenteditable: null,
+          isContentEditable: false,
+          activeCase: null,
+          selectionInside: false,
+        });
     } else {
       frame = await currentEditorFrame(firstLaunch.page);
       await expect(editor).toHaveAttribute("data-render-verified", "true");
       await expect(editor).toHaveAttribute("data-runtime-bootstrap-count", "1");
       await expect.poll(() => nativeEditingState(firstLaunch.page, "heading-inline"))
         .toMatchObject({
-          targetIsActive: true,
-          contenteditable: "true",
-          isContentEditable: true,
-          activeCase: "heading-inline",
-          selectionInside: true,
+          targetIsActive: false,
+          contenteditable: null,
+          isContentEditable: false,
+          activeCase: null,
+          selectionInside: false,
         });
     }
     expect(

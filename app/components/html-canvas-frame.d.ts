@@ -40,6 +40,29 @@ export type RuntimeViewportSnapshot = {
   caretOffsetY: number | null;
 };
 
+export type RuntimeHandoffLayoutFingerprint = {
+  iframeWidth: number;
+  iframeHeight: number;
+  documentClientWidth: number;
+  documentClientHeight: number;
+  documentScrollWidth: number;
+  documentScrollHeight: number;
+  sharedClientWidth: number | null;
+  sharedClientHeight: number | null;
+  sharedScrollWidth: number | null;
+  sharedScrollHeight: number | null;
+  iframeScrollX: number;
+  iframeScrollY: number;
+  sharedScrollLeft: number | null;
+  sharedScrollTop: number | null;
+  viewportAnchorStableId: string | null;
+  viewportAnchorOffsetY: number | null;
+  viewportAnchorSharedOffsetY: number | null;
+  selectedStableId: string | null;
+  nativeSelection: RuntimeViewportSnapshot["nativeSelection"];
+  caretOffsetY: number | null;
+};
+
 export function clampRuntimeScroll(value: number, maximum: number): number;
 
 export function runtimeAnchorScrollTop(input: {

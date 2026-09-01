@@ -126,6 +126,7 @@ import {
   runtimePositionWithinTolerance,
   sameRuntimeGrant,
   type RuntimeFrameContext,
+  type RuntimeHandoffLayoutFingerprint,
   type RuntimeViewportSnapshot,
 } from "./html-canvas-frame";
 import { useCanvasPresentationScroll } from "./html-canvas-presentation-scroll";
@@ -545,11 +546,417 @@ type RuntimeCandidate = {
   previousPendingToolbarVisible: boolean;
   viewportSnapshot: RuntimeViewportSnapshot;
   sharedViewportElement: HTMLElement | null;
-  userFrameScrollDuringHandoff: boolean;
-  userSharedScrollDuringHandoff: boolean;
+  handoffScrollState: RuntimeHandoffScrollState;
+  refreshViewportSnapshot: (
+    channel: RuntimeHandoffScrollChannel,
+    iframe?: HTMLIFrameElement | null,
+  ) => void;
+  markProgrammaticScroll: (
+    channel: RuntimeHandoffScrollChannel,
+    left: number,
+    top: number,
+  ) => void;
   handoffScrollCleanup: () => void;
   previousActive: RuntimeActiveFrameSnapshot;
 };
+
+type RuntimeHandoffScrollChannel = "frame" | "shared";
+type RuntimeProgrammaticScrollSuppression = {
+  epoch: number;
+  left: number;
+  top: number;
+};
+type RuntimeHandoffScrollChannelState = {
+  epoch: number;
+  programmaticScrollEpoch: number;
+  userIntentEpoch: number;
+  userIntentPending: boolean;
+  pointerDragging: boolean;
+  programmaticScrollSuppression: RuntimeProgrammaticScrollSuppression | null;
+};
+type RuntimeHandoffScrollState = {
+  frame: RuntimeHandoffScrollChannelState;
+  shared: RuntimeHandoffScrollChannelState;
+};
+
+function createRuntimeHandoffScrollChannelState(): RuntimeHandoffScrollChannelState {
+  return {
+    epoch: 0,
+    programmaticScrollEpoch: 0,
+    userIntentEpoch: 0,
+    userIntentPending: false,
+    pointerDragging: false,
+    programmaticScrollSuppression: null,
+  };
+}
+
+function createRuntimeHandoffScrollState(): RuntimeHandoffScrollState {
+  return {
+    frame: createRuntimeHandoffScrollChannelState(),
+    shared: createRuntimeHandoffScrollChannelState(),
+  };
+}
+
+function isRuntimeScrollKey(event: KeyboardEvent): boolean {
+  if (event.altKey || event.ctrlKey || event.metaKey) return false;
+  return [
+    "ArrowDown",
+    "ArrowLeft",
+    "ArrowRight",
+    "ArrowUp",
+    "End",
+    "Home",
+    "PageDown",
+    "PageUp",
+    " ",
+    "Spacebar",
+  ].includes(event.key);
+}
+
+function documentScrollbarPointerDown(
+  documentNode: Document,
+  event: PointerEvent,
+): boolean {
+  const view = documentNode.defaultView;
+  const scrollingElement = documentNode.scrollingElement
+    || documentNode.documentElement;
+  if (!view || !scrollingElement) return false;
+  const verticalScrollbarWidth = Math.max(
+    12,
+    view.innerWidth - scrollingElement.clientWidth,
+  );
+  const horizontalScrollbarHeight = Math.max(
+    12,
+    view.innerHeight - scrollingElement.clientHeight,
+  );
+  const vertical = scrollingElement.scrollHeight > scrollingElement.clientHeight + 1
+    && event.clientX >= view.innerWidth - verticalScrollbarWidth;
+  const horizontal = scrollingElement.scrollWidth > scrollingElement.clientWidth + 1
+    && event.clientY >= view.innerHeight - horizontalScrollbarHeight;
+  return vertical || horizontal;
+}
+
+function sharedScrollbarPointerDown(
+  element: HTMLElement,
+  event: PointerEvent,
+): boolean {
+  const rect = element.getBoundingClientRect();
+  const verticalScrollbarWidth = Math.max(12, element.offsetWidth - element.clientWidth);
+  const horizontalScrollbarHeight = Math.max(12, element.offsetHeight - element.clientHeight);
+  const vertical = element.scrollHeight > element.clientHeight + 1
+    && event.clientX >= rect.right - verticalScrollbarWidth
+    && event.clientX <= rect.right
+    && event.clientY >= rect.top
+    && event.clientY <= rect.bottom;
+  const horizontal = element.scrollWidth > element.clientWidth + 1
+    && event.clientY >= rect.bottom - horizontalScrollbarHeight
+    && event.clientX >= rect.left
+    && event.clientX <= rect.right;
+  return vertical || horizontal;
+}
+
+function nullableRuntimePositionWithinTolerance(
+  actual: number | null,
+  expected: number | null,
+): boolean {
+  if (actual === null || expected === null) return actual === expected;
+  return runtimePositionWithinTolerance(actual, expected);
+}
+
+function sameRuntimeHandoffNativeSelection(
+  actual: RuntimeViewportSnapshot["nativeSelection"],
+  expected: RuntimeViewportSnapshot["nativeSelection"],
+): boolean {
+  if (!actual || !expected) return actual === expected;
+  return actual.affinity === expected.affinity
+    && runtimePositionWithinTolerance(actual.anchor, expected.anchor)
+    && runtimePositionWithinTolerance(actual.focus, expected.focus);
+}
+
+function runtimeHandoffLayoutFingerprintWithinTolerance(
+  actual: RuntimeHandoffLayoutFingerprint,
+  expected: RuntimeHandoffLayoutFingerprint,
+): boolean {
+  if (
+    actual.viewportAnchorStableId !== expected.viewportAnchorStableId
+    || actual.selectedStableId !== expected.selectedStableId
+    || !sameRuntimeHandoffNativeSelection(actual.nativeSelection, expected.nativeSelection)
+  ) return false;
+  const numericFields: Array<keyof RuntimeHandoffLayoutFingerprint> = [
+    "iframeWidth",
+    "iframeHeight",
+    "documentClientWidth",
+    "documentClientHeight",
+    "documentScrollWidth",
+    "documentScrollHeight",
+    "sharedClientWidth",
+    "sharedClientHeight",
+    "sharedScrollWidth",
+    "sharedScrollHeight",
+    "iframeScrollX",
+    "iframeScrollY",
+    "sharedScrollLeft",
+    "sharedScrollTop",
+    "viewportAnchorOffsetY",
+    "viewportAnchorSharedOffsetY",
+    "caretOffsetY",
+  ];
+  return numericFields.every((field) => nullableRuntimePositionWithinTolerance(
+    actual[field] as number | null,
+    expected[field] as number | null,
+  ));
+}
+
+function attachRuntimeHandoffScrollListeners({
+  candidate,
+  iframe,
+  sharedScrollElement,
+  includeShared,
+  onFrameScroll,
+  onSharedScroll,
+}: {
+  candidate: RuntimeCandidate;
+  iframe: HTMLIFrameElement | null;
+  sharedScrollElement: HTMLElement | null;
+  includeShared: boolean;
+  onFrameScroll?: () => void;
+  onSharedScroll?: () => void;
+}): () => void {
+  const frameDocument = iframe?.contentDocument;
+  const sharedDocument = sharedScrollElement?.ownerDocument;
+  const cleanups: Array<() => void> = [];
+  const stateFor = (channel: RuntimeHandoffScrollChannel) => (
+    candidate.handoffScrollState[channel]
+  );
+  const schedulePendingIntentExpiry = (
+    channel: RuntimeHandoffScrollChannel,
+    epoch: number,
+    sourceFrame: HTMLIFrameElement | null,
+  ) => {
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        const state = stateFor(channel);
+        if (
+          state.userIntentPending
+          && state.userIntentEpoch === epoch
+        ) {
+          state.userIntentPending = false;
+          candidate.refreshViewportSnapshot(channel, sourceFrame);
+        }
+      });
+    });
+  };
+  const markUserIntent = (
+    channel: RuntimeHandoffScrollChannel,
+    sourceFrame: HTMLIFrameElement | null,
+  ) => {
+    const state = stateFor(channel);
+    state.epoch += 1;
+    state.userIntentEpoch = state.epoch;
+    state.userIntentPending = true;
+    state.programmaticScrollSuppression = null;
+    candidate.refreshViewportSnapshot(channel, sourceFrame);
+    schedulePendingIntentExpiry(channel, state.userIntentEpoch, sourceFrame);
+  };
+  const handleScroll = (
+    channel: RuntimeHandoffScrollChannel,
+    sourceFrame: HTMLIFrameElement | null,
+    onScroll?: () => void,
+  ) => {
+    const state = stateFor(channel);
+    if (state.programmaticScrollSuppression) {
+      const currentPosition = channel === "frame"
+        ? {
+            left: sourceFrame?.contentWindow?.scrollX ?? 0,
+            top: sourceFrame?.contentWindow?.scrollY ?? 0,
+          }
+        : {
+            left: sharedScrollElement?.scrollLeft ?? 0,
+            top: sharedScrollElement?.scrollTop ?? 0,
+          };
+      const suppression = state.programmaticScrollSuppression;
+      if (
+        runtimePositionWithinTolerance(currentPosition.left, suppression.left)
+        && runtimePositionWithinTolerance(currentPosition.top, suppression.top)
+      ) {
+        state.programmaticScrollSuppression = null;
+        onScroll?.();
+        return;
+      }
+      // A scroll sample that does not land at the programmatic target cannot
+      // be consumed by this epoch. Let the normal intent channels classify it.
+      state.programmaticScrollSuppression = null;
+    }
+    if (state.userIntentPending || state.pointerDragging) {
+      // Keep the gesture alive until two rAFs after its latest scroll sample.
+      // Native scrollbar drags do not consistently emit pointermove, so the
+      // active drag flag and the scroll itself both renew the user epoch.
+      markUserIntent(channel, sourceFrame);
+    }
+    // An unclassified scroll is not evidence of user intent. It may have been
+    // caused by a focus/reflow operation, so leave the handoff target unchanged
+    // and let the positioning loop restore it.
+    onScroll?.();
+  };
+  const markProgrammaticScroll = (
+    channel: RuntimeHandoffScrollChannel,
+    left: number,
+    top: number,
+  ) => {
+    const state = stateFor(channel);
+    state.epoch += 1;
+    state.programmaticScrollEpoch = state.epoch;
+    state.programmaticScrollSuppression = {
+      epoch: state.programmaticScrollEpoch,
+      left,
+      top,
+    };
+    const suppressionEpoch = state.programmaticScrollEpoch;
+    window.requestAnimationFrame(() => {
+      if (
+        state.programmaticScrollSuppression?.epoch === suppressionEpoch
+        && state.programmaticScrollEpoch === suppressionEpoch
+      ) state.programmaticScrollSuppression = null;
+    });
+  };
+
+  // The positioning loop calls this through the candidate state. Keeping the
+  // epoch marker on the same state as the intent listeners means a trusted
+  // scroll event generated by scrollTo() cannot be mistaken for input.
+  candidate.markProgrammaticScroll = markProgrammaticScroll;
+
+  if (frameDocument) {
+    const frameScroll = () => handleScroll("frame", iframe, onFrameScroll);
+    const frameIntent = () => {
+      markUserIntent("frame", iframe);
+      if (includeShared && sharedScrollElement) markUserIntent("shared", iframe);
+    };
+    const framePointerDown = (event: Event) => {
+      const pointer = event as PointerEvent;
+      if (documentScrollbarPointerDown(frameDocument, pointer)) {
+        stateFor("frame").pointerDragging = true;
+        markUserIntent("frame", iframe);
+      }
+    };
+    const framePointerMove = (event: Event) => {
+      const pointer = event as PointerEvent;
+      if (
+        pointer.buttons !== 0
+        && (
+          stateFor("frame").pointerDragging
+          || documentScrollbarPointerDown(frameDocument, pointer)
+        )
+      ) {
+        stateFor("frame").pointerDragging = true;
+        markUserIntent("frame", iframe);
+      }
+    };
+    const framePointerEnd = () => {
+      stateFor("frame").pointerDragging = false;
+    };
+    const frameKeyDown = (event: Event) => {
+      if (isRuntimeScrollKey(event as KeyboardEvent)) {
+        markUserIntent("frame", iframe);
+        if (includeShared && sharedScrollElement) markUserIntent("shared", iframe);
+      }
+    };
+    frameDocument.addEventListener("scroll", frameScroll, true);
+    frameDocument.addEventListener("wheel", frameIntent, { capture: true, passive: true });
+    frameDocument.addEventListener("touchmove", frameIntent, { capture: true, passive: true });
+    frameDocument.addEventListener("pointerdown", framePointerDown, true);
+    frameDocument.addEventListener("pointermove", framePointerMove, true);
+    frameDocument.addEventListener("pointerup", framePointerEnd, true);
+    frameDocument.addEventListener("pointercancel", framePointerEnd, true);
+    frameDocument.addEventListener("keydown", frameKeyDown, true);
+    cleanups.push(() => {
+      frameDocument.removeEventListener("scroll", frameScroll, true);
+      frameDocument.removeEventListener("wheel", frameIntent, true);
+      frameDocument.removeEventListener("touchmove", frameIntent, true);
+      frameDocument.removeEventListener("pointerdown", framePointerDown, true);
+      frameDocument.removeEventListener("pointermove", framePointerMove, true);
+      frameDocument.removeEventListener("pointerup", framePointerEnd, true);
+      frameDocument.removeEventListener("pointercancel", framePointerEnd, true);
+      frameDocument.removeEventListener("keydown", frameKeyDown, true);
+      stateFor("frame").pointerDragging = false;
+    });
+  }
+
+  if (includeShared && sharedScrollElement) {
+    const sharedScroll = () => handleScroll("shared", iframe, onSharedScroll);
+    const sharedIntent = () => markUserIntent("shared", iframe);
+    const sharedDocumentIntent = (event: Event) => {
+      const target = event.target;
+      if (
+        target === sharedScrollElement
+        || (target instanceof Node && sharedScrollElement.contains(target))
+      ) markUserIntent("shared", iframe);
+    };
+    const sharedPointerDown = (event: Event) => {
+      const pointer = event as PointerEvent;
+      if (sharedScrollbarPointerDown(sharedScrollElement, pointer)) {
+        stateFor("shared").pointerDragging = true;
+        markUserIntent("shared", iframe);
+      }
+    };
+    const sharedPointerMove = (event: Event) => {
+      const pointer = event as PointerEvent;
+      if (
+        pointer.buttons !== 0
+        && (
+          stateFor("shared").pointerDragging
+          || sharedScrollbarPointerDown(sharedScrollElement, pointer)
+        )
+      ) {
+        stateFor("shared").pointerDragging = true;
+        markUserIntent("shared", iframe);
+      }
+    };
+    const sharedPointerEnd = () => {
+      stateFor("shared").pointerDragging = false;
+    };
+    const sharedKeyDown = (event: Event) => {
+      const keyEvent = event as KeyboardEvent;
+      if (isRuntimeScrollKey(keyEvent)) {
+        markUserIntent("shared", iframe);
+      }
+    };
+    sharedScrollElement.addEventListener("scroll", sharedScroll);
+    sharedScrollElement.addEventListener("wheel", sharedIntent, { capture: true, passive: true });
+    sharedScrollElement.addEventListener("touchmove", sharedIntent, { capture: true, passive: true });
+    sharedScrollElement.addEventListener("pointerdown", sharedPointerDown, true);
+    sharedScrollElement.addEventListener("pointermove", sharedPointerMove, true);
+    sharedScrollElement.addEventListener("pointerup", sharedPointerEnd, true);
+    sharedScrollElement.addEventListener("pointercancel", sharedPointerEnd, true);
+    sharedDocument?.addEventListener("pointerdown", sharedPointerDown, true);
+    sharedDocument?.addEventListener("pointermove", sharedPointerMove, true);
+    sharedDocument?.addEventListener("pointerup", sharedPointerEnd, true);
+    sharedDocument?.addEventListener("pointercancel", sharedPointerEnd, true);
+    sharedDocument?.addEventListener("wheel", sharedDocumentIntent, { capture: true, passive: true });
+    sharedDocument?.addEventListener("touchmove", sharedDocumentIntent, { capture: true, passive: true });
+    sharedDocument?.addEventListener("keydown", sharedKeyDown, true);
+    cleanups.push(() => {
+      sharedScrollElement.removeEventListener("scroll", sharedScroll);
+      sharedScrollElement.removeEventListener("wheel", sharedIntent, true);
+      sharedScrollElement.removeEventListener("touchmove", sharedIntent, true);
+      sharedScrollElement.removeEventListener("pointerdown", sharedPointerDown, true);
+      sharedScrollElement.removeEventListener("pointermove", sharedPointerMove, true);
+      sharedScrollElement.removeEventListener("pointerup", sharedPointerEnd, true);
+      sharedScrollElement.removeEventListener("pointercancel", sharedPointerEnd, true);
+      sharedDocument?.removeEventListener("pointerdown", sharedPointerDown, true);
+      sharedDocument?.removeEventListener("pointermove", sharedPointerMove, true);
+      sharedDocument?.removeEventListener("pointerup", sharedPointerEnd, true);
+      sharedDocument?.removeEventListener("pointercancel", sharedPointerEnd, true);
+      sharedDocument?.removeEventListener("wheel", sharedDocumentIntent, true);
+      sharedDocument?.removeEventListener("touchmove", sharedDocumentIntent, true);
+      sharedDocument?.removeEventListener("keydown", sharedKeyDown, true);
+      stateFor("shared").pointerDragging = false;
+    });
+  }
+
+  return () => {
+    for (const cleanup of cleanups) cleanup();
+  };
+}
 
 function runtimeSourceElementForStableId(
   documentNode: Document,
@@ -2163,8 +2570,9 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       previousPendingToolbarVisible,
       viewportSnapshot,
       sharedViewportElement: sharedScrollElement,
-      userFrameScrollDuringHandoff: false,
-      userSharedScrollDuringHandoff: false,
+      handoffScrollState: createRuntimeHandoffScrollState(),
+      refreshViewportSnapshot: () => undefined,
+      markProgrammaticScroll: () => undefined,
       handoffScrollCleanup: () => undefined,
       previousActive: {
         render: frameRender,
@@ -2197,18 +2605,57 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         connectedFrame: connectedFrameRef.current,
       },
     };
-    const markUserFrameScroll = (event: Event) => {
-      if (event.isTrusted) candidate.userFrameScrollDuringHandoff = true;
+    candidate.refreshViewportSnapshot = (channel, sourceFrame = currentFrame) => {
+      const sourceDocument = sourceFrame?.contentDocument;
+      if (!sourceDocument) return;
+      const sourceIsPreviousActive = sourceFrame === currentFrame;
+      const sourceIndexForSnapshot = sourceIsPreviousActive
+        ? candidate.previousActive.sourceIndex
+        : candidate.sourceIndex;
+      const selectedElementForSnapshot = sourceIsPreviousActive
+        ? candidate.previousActive.selectedElement ?? selectedElementRef.current
+        : selectedElementRef.current;
+      const selectedSourceSelectionForSnapshot = (
+        sourceIsPreviousActive
+          ? candidate.previousActive.selectedSourceSelection
+          : selectedSourceSelectionRef.current
+      ) ?? selectedSourceSelectionRef.current;
+      const latest = captureRuntimeViewportSnapshot({
+        iframe: sourceFrame,
+        sharedScrollElement: candidate.sharedViewportElement,
+        sourceIndex: sourceIndexForSnapshot,
+        selectedElement: selectedElementForSnapshot,
+        selectedSourceSelection: selectedSourceSelectionForSnapshot,
+        nativeSelection: candidate.viewportSnapshot.nativeSelection,
+        caretOffsetYOverride: candidate.viewportSnapshot.caretOffsetY,
+      });
+      const previous = candidate.viewportSnapshot;
+      const anchorStableId = latest.viewportAnchorStableId
+        || previous.viewportAnchorStableId;
+      if (channel === "frame") {
+        Object.assign(previous, {
+          iframeScrollX: latest.iframeScrollX,
+          iframeScrollY: latest.iframeScrollY,
+          viewportAnchorStableId: anchorStableId,
+          viewportAnchorOffsetY: latest.viewportAnchorOffsetY,
+          viewportAnchorSharedOffsetY: latest.viewportAnchorSharedOffsetY,
+        });
+      } else {
+        Object.assign(previous, {
+          sharedScrollLeft: latest.sharedScrollLeft,
+          sharedScrollTop: latest.sharedScrollTop,
+          viewportAnchorStableId: anchorStableId,
+          viewportAnchorSharedOffsetY: latest.viewportAnchorSharedOffsetY,
+        });
+      }
+      if (latest.selectedStableId) previous.selectedStableId = latest.selectedStableId;
     };
-    const markUserSharedScroll = (event: Event) => {
-      if (event.isTrusted) candidate.userSharedScrollDuringHandoff = true;
-    };
-    currentFrame?.contentDocument?.addEventListener("scroll", markUserFrameScroll, true);
-    sharedScrollElement?.addEventListener("scroll", markUserSharedScroll);
-    candidate.handoffScrollCleanup = () => {
-      currentFrame?.contentDocument?.removeEventListener("scroll", markUserFrameScroll, true);
-      sharedScrollElement?.removeEventListener("scroll", markUserSharedScroll);
-    };
+    candidate.handoffScrollCleanup = attachRuntimeHandoffScrollListeners({
+      candidate,
+      iframe: currentFrame,
+      sharedScrollElement,
+      includeShared: true,
+    });
     if (runtimeFrame) {
       const registrationProperty = editRuntimeRegistrationProperty(
         runtimeFrame.grant.executionId,
@@ -4029,7 +4476,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     trigger: NativeEditCheckpointTrigger = "manual",
     {
       replayQueuedUserCommand = false,
-      resumeAfterRuntimeHandoff = true,
+      resumeAfterRuntimeHandoff = false,
     }: FinishNativeEditingOptions = {},
   ): NativeEditCommitResult => {
     const active = activeNativeEditRef.current;
@@ -4252,6 +4699,16 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     if (!container || !documentNode) return undefined;
     const clearOnOutsidePointer = (event: PointerEvent) => {
       if (!selectedElementRef.current) return;
+      const sharedScrollElement = container.closest<HTMLElement>(
+        ".review-scroll-stage",
+      );
+      // Scrolling the shared stage is not an outside selection gesture. In
+      // particular, a native scrollbar pointerdown must leave the selected
+      // target and its handoff anchor available while the drag is in flight.
+      if (
+        sharedScrollElement
+        && sharedScrollbarPointerDown(sharedScrollElement, event)
+      ) return;
       const target = event.target;
       if (!(target instanceof Node)) return;
       if (toolbarRef.current?.contains(target)) return;
@@ -4660,10 +5117,18 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         clearNativeEditCheckpointTimer();
         if (state.dirty && !state.composing) {
           const scheduledLease = { ...active.lease };
+          const lineBreakCheckpoint = state.inputType === "insertParagraph"
+            || state.inputType === "insertLineBreak";
           nativeEditCheckpointTimerRef.current = window.setTimeout(() => {
             nativeEditCheckpointTimerRef.current = null;
             if (!nativeEditLeasesMatch(currentNativeEditLeaseRef.current, scheduledLease)) return;
-            nativeEditCheckpointRef.current();
+            if (lineBreakCheckpoint) {
+              finishNativeEditingRef.current(true, "automatic", {
+                resumeAfterRuntimeHandoff: true,
+              });
+            } else {
+              nativeEditCheckpointRef.current();
+            }
           }, state.requiresCanonicalReconcile
             ? 0
             : NATIVE_EDIT_CHECKPOINT_DELAY_MS);
@@ -5501,7 +5966,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       trigger?: NativeEditCheckpointTrigger;
     } = {},
   ): HtmlCanvasCommitResult => {
-    const resumeEditing = options.resumeEditing ?? true;
+    const resumeEditing = options.resumeEditing ?? false;
     const preserveForHistory = options.preserveForHistory ?? false;
     const committed = checkpointNativeEdit(options.trigger ?? "fence", {
       deferPreviewReconcile: true,
@@ -6203,12 +6668,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         || promotedCandidate.runtimeFrame === runtimeFrame
       ),
     );
-    let userFrameScrollDuringHandoff = Boolean(
-      promotedCandidate?.userFrameScrollDuringHandoff,
-    );
-    let userSharedScrollDuringHandoff = Boolean(
-      promotedCandidate?.userSharedScrollDuringHandoff,
-    );
     hoverControllerRef.current?.hide();
     if (!isRuntimePromotion) {
       renderedSourceHtmlRef.current = frameSourceHtmlRef.current;
@@ -6436,7 +6895,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         const save = () => {
           if (!lockedRef.current) {
             if (!fencePendingEdit({
-              resumeEditing: true,
+              resumeEditing: false,
               trigger: "save",
             }).ok) return;
           }
@@ -6629,11 +7088,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       if (lockedRef.current) event.preventDefault();
     };
 
-    const handleScroll = (event: Event) => {
-      if (isRuntimePromotion && event.isTrusted) {
-        userFrameScrollDuringHandoff = true;
-        if (promotedCandidate) promotedCandidate.userFrameScrollDuringHandoff = true;
-      }
+    const handleScroll = () => {
       hoverControllerRef.current?.hide();
       updateOverlayPosition();
     };
@@ -6703,14 +7158,23 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     const sharedScrollElementForHandoff = isRuntimePromotion
       ? pendingSharedViewport?.element ?? null
       : null;
-    const handleSharedScroll = (event: Event) => {
-      if (event.isTrusted) {
-        userSharedScrollDuringHandoff = true;
-        if (promotedCandidate) promotedCandidate.userSharedScrollDuringHandoff = true;
-      }
+    const handleSharedScroll = () => {
       updateOverlayPosition();
     };
     sharedScrollElementForHandoff?.addEventListener("scroll", handleSharedScroll);
+    if (isRuntimePromotion && promotedCandidate) {
+      const previousScrollCleanup = promotedCandidate.handoffScrollCleanup;
+      const candidateScrollCleanup = attachRuntimeHandoffScrollListeners({
+        candidate: promotedCandidate,
+        iframe,
+        sharedScrollElement: null,
+        includeShared: false,
+      });
+      promotedCandidate.handoffScrollCleanup = () => {
+        candidateScrollCleanup();
+        previousScrollCleanup();
+      };
+    }
 
     cleanupFrameRef.current = () => {
       documentNode.removeEventListener("click", handleClick, true);
@@ -6752,7 +7216,8 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     pendingSharedViewportRef.current = null;
     const positionRuntimeHandoff = (candidate: RuntimeCandidate) => {
       let attempts = 0;
-      let settledFrames = 0;
+      let stableCount = 0;
+      let previousFingerprint: RuntimeHandoffLayoutFingerprint | null = null;
       let selectionRestored = !pendingSelection && !pendingNativeResume;
       let nativeResumeAttempted = !pendingNativeResume;
       let nativeResumeFailed = false;
@@ -6767,18 +7232,23 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         );
       }
 
-      const syncUserScrollIntent = () => {
-        userFrameScrollDuringHandoff ||= candidate.userFrameScrollDuringHandoff;
-        userSharedScrollDuringHandoff ||= candidate.userSharedScrollDuringHandoff;
-      };
       const isCurrent = () => {
-        syncUserScrollIntent();
         return runtimePromotionRef.current === candidate
           && iframe === iframeRef.current
           && iframe.contentDocument === documentNode
           && frameLoadGenerationRef.current === connectedFrameGeneration
           && expectedFrameTokenRef.current === expectedToken
           && containerRef.current?.getAttribute("data-runtime-handoff") === "positioning";
+      };
+      const userScrollIntentPending = (
+        channel: RuntimeHandoffScrollChannel,
+      ) => candidate.handoffScrollState[channel].userIntentPending;
+      const markProgrammaticScroll = (
+        channel: RuntimeHandoffScrollChannel,
+        left: number,
+        top: number,
+      ) => {
+        candidate.markProgrammaticScroll(channel, left, top);
       };
       const failHandoff = () => {
         if (!isCurrent()) return;
@@ -6813,8 +7283,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         const maximum = maximumFrameScrollTop();
         let targetTop = clampRuntimeScroll(snapshot.iframeScrollY, maximum);
         if (
-          !userFrameScrollDuringHandoff
-          && snapshot.viewportAnchorStableId
+          snapshot.viewportAnchorStableId
           && snapshot.viewportAnchorOffsetY !== null
         ) {
           const anchor = runtimeSourceElementForStableId(
@@ -6841,13 +7310,21 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         return targetTop;
       };
       const restoreFrameViewport = () => {
-        if (!frameView || userFrameScrollDuringHandoff) return frameView?.scrollY || 0;
+        if (!frameView || userScrollIntentPending("frame")) {
+          return frameView?.scrollY || 0;
+        }
         const targetTop = frameScrollTarget();
         const targetLeft = clampRuntimeScroll(
           snapshot.iframeScrollX,
           maximumFrameScrollLeft(),
         );
-        frameView.scrollTo({ left: targetLeft, top: targetTop, behavior: "auto" });
+        if (
+          !runtimePositionWithinTolerance(frameView.scrollY, targetTop)
+          || !runtimePositionWithinTolerance(frameView.scrollX, targetLeft)
+        ) {
+          markProgrammaticScroll("frame", targetLeft, targetTop);
+          frameView.scrollTo({ left: targetLeft, top: targetTop, behavior: "auto" });
+        }
         return targetTop;
       };
       const sharedAnchorViewportOffset = () => {
@@ -6872,24 +7349,22 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         const element = pendingSharedViewport.element;
         const maximum = Math.max(0, element.scrollHeight - element.clientHeight);
         let targetTop = clampRuntimeScroll(snapshot.sharedScrollTop, maximum);
-        if (!userSharedScrollDuringHandoff) {
-          const currentAnchorOffsetY = sharedAnchorViewportOffset();
-          if (
-            currentAnchorOffsetY !== null
-            && snapshot.viewportAnchorSharedOffsetY !== null
-          ) {
-            targetTop = runtimeAnchorScrollTop({
-              currentScrollTop: element.scrollTop,
-              currentAnchorOffsetY,
-              desiredAnchorOffsetY: snapshot.viewportAnchorSharedOffsetY,
-              maximumScrollTop: maximum,
-            });
-          }
+        const currentAnchorOffsetY = sharedAnchorViewportOffset();
+        if (
+          currentAnchorOffsetY !== null
+          && snapshot.viewportAnchorSharedOffsetY !== null
+        ) {
+          targetTop = runtimeAnchorScrollTop({
+            currentScrollTop: element.scrollTop,
+            currentAnchorOffsetY,
+            desiredAnchorOffsetY: snapshot.viewportAnchorSharedOffsetY,
+            maximumScrollTop: maximum,
+          });
         }
         return targetTop;
       };
       const restoreSharedViewportForHandoff = () => {
-        if (!pendingSharedViewport || userSharedScrollDuringHandoff) {
+        if (!pendingSharedViewport || userScrollIntentPending("shared")) {
           return pendingSharedViewport?.element.scrollTop || 0;
         }
         const element = pendingSharedViewport.element;
@@ -6899,7 +7374,11 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           snapshot.sharedScrollLeft,
           Math.max(0, element.scrollWidth - element.clientWidth),
         );
-        if (!runtimePositionWithinTolerance(element.scrollTop, targetTop)) {
+        if (
+          !runtimePositionWithinTolerance(element.scrollTop, targetTop)
+          || !runtimePositionWithinTolerance(element.scrollLeft, targetLeft)
+        ) {
+          markProgrammaticScroll("shared", targetLeft, targetTop);
           element.scrollTo({ left: targetLeft, top: targetTop, behavior: "auto" });
         }
         return targetTop;
@@ -6984,26 +7463,98 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       };
       const correctCaretViewport = () => {
         const desiredCaretOffsetY = snapshot.caretOffsetY;
-        if (!frameView || userFrameScrollDuringHandoff || desiredCaretOffsetY === null) return;
+        if (
+          !frameView
+          || userScrollIntentPending("frame")
+          || desiredCaretOffsetY === null
+        ) return;
         const active = activeNativeEditRef.current;
         if (!active || active.rootElement.ownerDocument !== documentNode) return;
         const caretTop = runtimeCaretOffsetY(documentNode, active.rootElement);
         if (caretTop === null || !Number.isFinite(caretTop)) return;
-        frameView.scrollTo({
-          left: frameView.scrollX,
-          top: runtimeAnchorScrollTop({
-            currentScrollTop: frameView.scrollY,
-            currentAnchorOffsetY: caretTop,
-            desiredAnchorOffsetY: desiredCaretOffsetY,
-            maximumScrollTop: maximumFrameScrollTop(),
-          }),
-          behavior: "auto",
+        const targetTop = runtimeAnchorScrollTop({
+          currentScrollTop: frameView.scrollY,
+          currentAnchorOffsetY: caretTop,
+          desiredAnchorOffsetY: desiredCaretOffsetY,
+          maximumScrollTop: maximumFrameScrollTop(),
         });
+        if (!runtimePositionWithinTolerance(frameView.scrollY, targetTop)) {
+          markProgrammaticScroll("frame", frameView.scrollX, targetTop);
+          frameView.scrollTo({
+            left: frameView.scrollX,
+            top: targetTop,
+            behavior: "auto",
+          });
+        }
+      };
+      const captureLayoutFingerprint = (): RuntimeHandoffLayoutFingerprint => {
+        const scrollingElement = documentNode.scrollingElement
+          || documentNode.documentElement;
+        const sharedElement = pendingSharedViewport?.element
+          ?? candidate.sharedViewportElement;
+        const active = activeNativeEditRef.current;
+        let nativeSelection: RuntimeViewportSnapshot["nativeSelection"] = null;
+        if (active?.rootElement.ownerDocument === documentNode) {
+          try {
+            nativeSelection = { ...active.session.getSelection() };
+          } catch {
+            nativeSelection = null;
+          }
+        }
+        const viewport = captureRuntimeViewportSnapshot({
+          iframe,
+          sharedScrollElement: sharedElement,
+          sourceIndex: sourceIndexRef.current,
+          selectedElement: selectedElementRef.current,
+          selectedSourceSelection: selectedSourceSelectionRef.current
+            ?? pendingSelection
+            ?? pendingNativeResume?.target
+            ?? null,
+          nativeSelection,
+        });
+        return {
+          iframeWidth: iframe.clientWidth,
+          iframeHeight: iframe.clientHeight,
+          documentClientWidth: scrollingElement?.clientWidth || 0,
+          documentClientHeight: scrollingElement?.clientHeight || 0,
+          documentScrollWidth: scrollingElement?.scrollWidth || 0,
+          documentScrollHeight: scrollingElement?.scrollHeight || 0,
+          sharedClientWidth: sharedElement?.clientWidth ?? null,
+          sharedClientHeight: sharedElement?.clientHeight ?? null,
+          sharedScrollWidth: sharedElement?.scrollWidth ?? null,
+          sharedScrollHeight: sharedElement?.scrollHeight ?? null,
+          iframeScrollX: viewport.iframeScrollX,
+          iframeScrollY: viewport.iframeScrollY,
+          sharedScrollLeft: sharedElement?.scrollLeft ?? null,
+          sharedScrollTop: sharedElement?.scrollTop ?? null,
+          viewportAnchorStableId: viewport.viewportAnchorStableId,
+          viewportAnchorOffsetY: viewport.viewportAnchorOffsetY,
+          viewportAnchorSharedOffsetY: viewport.viewportAnchorSharedOffsetY,
+          selectedStableId: viewport.selectedStableId,
+          nativeSelection: viewport.nativeSelection,
+          caretOffsetY: viewport.caretOffsetY,
+        };
+      };
+      const updateStableFingerprint = () => {
+        const currentFingerprint = captureLayoutFingerprint();
+        stableCount = previousFingerprint
+          && runtimeHandoffLayoutFingerprintWithinTolerance(
+            currentFingerprint,
+            previousFingerprint,
+          )
+          ? stableCount + 1
+          : 1;
+        previousFingerprint = currentFingerprint;
+        return stableCount;
       };
       const validateHandoff = () => {
         if (!frameView || !documentNode.body || iframe.clientHeight <= 0 || iframe.clientWidth <= 0) {
           return false;
         }
+        if (
+          userScrollIntentPending("frame")
+          || userScrollIntentPending("shared")
+        ) return false;
         const expectedSelectedId = snapshot.selectedStableId
           ?? pendingSelection?.elementId
           ?? pendingNativeResume?.target.elementId
@@ -7038,58 +7589,73 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
             ) return false;
           }
         }
-        if (!userFrameScrollDuringHandoff) {
-          const expectedTop = frameScrollTarget();
-          if (!runtimePositionWithinTolerance(frameView.scrollY, expectedTop)) {
-            return false;
-          }
-          if (snapshot.viewportAnchorStableId && snapshot.viewportAnchorOffsetY !== null) {
-            const anchor = runtimeSourceElementForStableId(
-              documentNode,
-              sourceIndexRef.current,
-              snapshot.viewportAnchorStableId,
-            );
-            if (anchor) {
-              const anchorTop = anchor.getBoundingClientRect().top;
-              const anchorActual = pendingSharedViewport
-                && snapshot.viewportAnchorSharedOffsetY !== null
-                ? sharedAnchorViewportOffset()
-                : anchorTop;
-              const anchorExpected = pendingSharedViewport
-                && snapshot.viewportAnchorSharedOffsetY !== null
-                ? snapshot.viewportAnchorSharedOffsetY
-                : snapshot.viewportAnchorOffsetY;
-              if (
-                anchorActual === null
-                || (
-                  !runtimePositionWithinTolerance(anchorActual, anchorExpected)
-                  && !runtimeAnchorOffsetIsClamped({
-                    currentScrollTop: pendingSharedViewport
-                      ? pendingSharedViewport.element.scrollTop
-                      : frameView.scrollY,
-                    currentAnchorOffsetY: anchorActual,
-                    desiredAnchorOffsetY: anchorExpected,
-                    maximumScrollTop: pendingSharedViewport
-                      ? Math.max(
-                        0,
-                        pendingSharedViewport.element.scrollHeight
-                          - pendingSharedViewport.element.clientHeight,
-                      )
-                      : maximumFrameScrollTop(),
-                  })
-                )
-              ) {
-                return false;
-              }
+        const expectedTop = frameScrollTarget();
+        if (!runtimePositionWithinTolerance(frameView.scrollY, expectedTop)) {
+          return false;
+        }
+        if (!runtimePositionWithinTolerance(
+          frameView.scrollX,
+          clampRuntimeScroll(snapshot.iframeScrollX, maximumFrameScrollLeft()),
+        )) return false;
+        if (snapshot.viewportAnchorStableId && snapshot.viewportAnchorOffsetY !== null) {
+          const anchor = runtimeSourceElementForStableId(
+            documentNode,
+            sourceIndexRef.current,
+            snapshot.viewportAnchorStableId,
+          );
+          if (anchor) {
+            const anchorTop = anchor.getBoundingClientRect().top;
+            const anchorActual = pendingSharedViewport
+              && snapshot.viewportAnchorSharedOffsetY !== null
+              ? sharedAnchorViewportOffset()
+              : anchorTop;
+            const anchorExpected = pendingSharedViewport
+              && snapshot.viewportAnchorSharedOffsetY !== null
+              ? snapshot.viewportAnchorSharedOffsetY
+              : snapshot.viewportAnchorOffsetY;
+            if (
+              anchorActual === null
+              || (
+                !runtimePositionWithinTolerance(anchorActual, anchorExpected)
+                && !runtimeAnchorOffsetIsClamped({
+                  currentScrollTop: pendingSharedViewport
+                    ? pendingSharedViewport.element.scrollTop
+                    : frameView.scrollY,
+                  currentAnchorOffsetY: anchorActual,
+                  desiredAnchorOffsetY: anchorExpected,
+                  maximumScrollTop: pendingSharedViewport
+                    ? Math.max(
+                      0,
+                      pendingSharedViewport.element.scrollHeight
+                        - pendingSharedViewport.element.clientHeight,
+                    )
+                    : maximumFrameScrollTop(),
+                })
+              )
+            ) {
+              return false;
             }
           }
         }
         if (
-          !userSharedScrollDuringHandoff
-          && pendingSharedViewport
+          pendingSharedViewport
           && !runtimePositionWithinTolerance(
             pendingSharedViewport.element.scrollTop,
             sharedScrollTarget() ?? pendingSharedViewport.element.scrollTop,
+          )
+        ) return false;
+        if (
+          pendingSharedViewport
+          && !runtimePositionWithinTolerance(
+            pendingSharedViewport.element.scrollLeft,
+            clampRuntimeScroll(
+              snapshot.sharedScrollLeft,
+              Math.max(
+                0,
+                pendingSharedViewport.element.scrollWidth
+                  - pendingSharedViewport.element.clientWidth,
+              ),
+            ),
           )
         ) return false;
         return true;
@@ -7138,11 +7704,19 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         restoreSelectionAndNativeEdit();
         requestAnimationFrame(() => {
           if (!isCurrent()) return;
-          settledFrames += 1;
           restoreFrameViewport();
           restoreSharedViewportForHandoff();
           correctCaretViewport();
-          if (settledFrames >= 2 && activateHandoff()) return;
+          if (
+            userScrollIntentPending("frame")
+            || userScrollIntentPending("shared")
+          ) {
+            stableCount = 0;
+            previousFingerprint = null;
+            scheduleNextAttempt();
+            return;
+          }
+          if (updateStableFingerprint() >= 2 && activateHandoff()) return;
           scheduleNextAttempt();
         });
       };
@@ -7337,6 +7911,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     selectedElementHasSourceMutationAuthority,
     startEditing,
     updateOverlayPosition,
+    updateSelectedStyle,
     fallBackToStaticRuntimeFrame,
   ]);
   connectFrameRef.current = connectFrame;

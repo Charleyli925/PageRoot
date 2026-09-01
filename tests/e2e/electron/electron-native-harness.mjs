@@ -184,13 +184,6 @@ export async function waitForFreshDiskFrame(page, previousDocumentToken, caseId)
     (selector) => Boolean(document.querySelector(selector)),
     caseSelector(caseId),
   );
-  await expect.poll(() => nativeEditingState(page, caseId)).toMatchObject({
-    targetIsActive: true,
-    contenteditable: "true",
-    isContentEditable: true,
-    activeCase: caseId,
-    selectionInside: true,
-  });
   return frame;
 }
 

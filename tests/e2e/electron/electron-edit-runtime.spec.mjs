@@ -54,14 +54,19 @@ async function armRuntimeHandoffSamples(page) {
     const samples = [];
     window.__PAGEROOT_RUNTIME_HANDOFF_SAMPLES__ = samples;
     window.__PAGEROOT_RUNTIME_CANDIDATE_FRAME__ = null;
+    window.__PAGEROOT_RUNTIME_CANDIDATE_FRAMES__ = Object.create(null);
     window.__PAGEROOT_RUNTIME_OLD_FRAME__ = oldFrame;
     window.__PAGEROOT_RUNTIME_HANDOFF_ACTIVE__ = true;
     const reviewStage = editor.closest(".review-scroll-stage");
-    const sample = () => {
+    const sample = (rafSequence = null) => {
       if (!window.__PAGEROOT_RUNTIME_HANDOFF_ACTIVE__) return;
       const candidate = editor.querySelector('iframe[data-frame-role="runtime-candidate"]');
-      if (candidate && !window.__PAGEROOT_RUNTIME_CANDIDATE_FRAME__) {
-        window.__PAGEROOT_RUNTIME_CANDIDATE_FRAME__ = candidate;
+      if (candidate) {
+        const generation = candidate.getAttribute("data-frame-generation");
+        if (generation) {
+          window.__PAGEROOT_RUNTIME_CANDIDATE_FRAMES__[generation] = candidate;
+          window.__PAGEROOT_RUNTIME_CANDIDATE_FRAME__ = candidate;
+        }
       }
       const candidateFrame = window.__PAGEROOT_RUNTIME_CANDIDATE_FRAME__;
       const activeFrame = Array.from(editor.querySelectorAll("iframe"))
@@ -77,6 +82,8 @@ async function armRuntimeHandoffSamples(page) {
       const activeFrameRect = activeFrame?.getBoundingClientRect() || null;
       const stageRect = reviewStage?.getBoundingClientRect() || null;
       const activeSelection = activeFrame?.contentDocument?.getSelection();
+      const activeScrollingElement = activeFrame?.contentDocument?.scrollingElement;
+      const sharedScrollElement = reviewStage;
       let caretOffsetY = null;
       if (activeSelection?.isCollapsed && activeSelection.focusNode) {
         try {
@@ -98,7 +105,11 @@ async function armRuntimeHandoffSamples(page) {
         .filter(({ opacity }) => opacity > 0.01)
         .sort((left, right) => right.zIndex - left.zIndex);
       const topFrame = visibleFrames[0]?.frame || null;
+      const topFrameStyle = topFrame ? getComputedStyle(topFrame) : null;
+      const selectionAnchorOffset = activeSelection?.anchorOffset ?? null;
+      const selectionFocusOffset = activeSelection?.focusOffset ?? null;
       samples.push({
+        rafSequence,
         candidateGeneration,
         candidateVisibility: candidateFrame ? candidateStyle?.visibility : null,
         candidateOpacity: candidateFrame ? candidateStyle?.opacity : null,
@@ -121,10 +132,30 @@ async function armRuntimeHandoffSamples(page) {
         activeOpacity: activeStyle?.opacity || null,
         activePointerEvents: activeStyle?.pointerEvents || null,
         topFrameGeneration: topFrame?.getAttribute("data-frame-generation") || null,
+        topFrameIsActive: topFrame === activeFrame,
+        topFrameVisibility: topFrameStyle?.visibility || null,
+        topFrameOpacity: topFrameStyle?.opacity || null,
+        topFramePointerEvents: topFrameStyle?.pointerEvents || null,
         iframeScrollY: activeFrame?.contentWindow?.scrollY ?? null,
-        sharedScrollTop: reviewStage?.scrollTop ?? null,
+        iframeScrollX: activeFrame?.contentWindow?.scrollX ?? null,
+        sharedScrollTop: sharedScrollElement?.scrollTop ?? null,
+        sharedScrollLeft: sharedScrollElement?.scrollLeft ?? null,
+        iframeWidth: activeFrame?.clientWidth ?? null,
+        iframeHeight: activeFrame?.clientHeight ?? null,
+        documentClientWidth: activeScrollingElement?.clientWidth ?? null,
+        documentClientHeight: activeScrollingElement?.clientHeight ?? null,
+        documentScrollWidth: activeScrollingElement?.scrollWidth ?? null,
+        documentScrollHeight: activeScrollingElement?.scrollHeight ?? null,
+        sharedClientWidth: sharedScrollElement?.clientWidth ?? null,
+        sharedClientHeight: sharedScrollElement?.clientHeight ?? null,
+        sharedScrollWidth: sharedScrollElement?.scrollWidth ?? null,
+        sharedScrollHeight: sharedScrollElement?.scrollHeight ?? null,
         selectedStableId: selected?.getAttribute("data-pageroot-id") || null,
         selectionStableId: selected?.getAttribute("data-pageroot-id") || null,
+        viewportAnchorStableId: selected?.getAttribute("data-pageroot-id") || null,
+        selectionAnchorOffset,
+        selectionFocusOffset,
+        selectionCollapsed: activeSelection?.isCollapsed ?? null,
         viewportAnchorOffsetY: selectedRect?.top ?? null,
         selectedTop: selectedRect?.top ?? null,
         selectedScreenTop: selectedRect && activeFrameRect
@@ -144,12 +175,14 @@ async function armRuntimeHandoffSamples(page) {
         layoutReady: editor.getAttribute("data-runtime-layout-ready") === "true",
       });
     };
-    const observer = new MutationObserver(sample);
+    const observer = new MutationObserver(() => sample(null));
     observer.observe(editor, { attributes: true, childList: true, subtree: true });
     window.__PAGEROOT_RUNTIME_HANDOFF_OBSERVER__ = observer;
     let animationFrame = 0;
+    let rafSequence = 0;
     const sampleLoop = () => {
-      sample();
+      rafSequence += 1;
+      sample(rafSequence);
       if (window.__PAGEROOT_RUNTIME_HANDOFF_ACTIVE__) {
         animationFrame = requestAnimationFrame(sampleLoop);
       }
@@ -163,6 +196,8 @@ async function assertRuntimeHandoff(page, {
   requireActiveChrome = false,
   expectPromotion = true,
   assertVisualContinuity = false,
+  expectedFocus,
+  expectedViewportSample,
 } = {}) {
   await expect.poll(() => page.evaluate(() => (
     window.__PAGEROOT_RUNTIME_HANDOFF_SAMPLES__ || []
@@ -225,42 +260,178 @@ async function assertRuntimeHandoff(page, {
     }
   }
   if (expectPromotion) {
-    const positioningSamples = candidateSamples.filter((sample) => (
-      sample.handoffState === "positioning"
+    const positioningRafSamples = candidateSamples.filter((sample) => (
+      Number.isInteger(sample.rafSequence)
+      && sample.handoffState === "positioning"
       && sample.oldConnected
       && sample.oldVisibility === "visible"
       && Number(sample.oldOpacity) === 1
       && Number(sample.activeOpacity) === 0
       && sample.activePointerEvents === "none"
     ));
-    expect(positioningSamples.length).toBeGreaterThanOrEqual(2);
-    const activeSamples = candidateSamples.filter((sample) => (
+    const positioningRafSequences = new Set(
+      positioningRafSamples.map((sample) => sample.rafSequence),
+    );
+    expect(positioningRafSequences.size).toBeGreaterThanOrEqual(2);
+
+    const firstPreparingSample = preparingSamples.find((sample) => (
+      sample.viewportAnchorStableId
+      || sample.selectionStableId
+      || Number.isFinite(sample.iframeScrollY)
+    ));
+    expect(firstPreparingSample).toBeTruthy();
+    expect(firstPreparingSample.viewportAnchorStableId).toBeTruthy();
+    expect(firstPreparingSample.selectionStableId).toBeTruthy();
+    const handoffBaselineSample = expectedViewportSample || [...handoffSamples].reverse().find((sample) => (
+      !sample.candidateGeneration
+      && sample.selectionStableId === firstPreparingSample.selectionStableId
+      && Number.isFinite(sample.iframeScrollY)
+    )) || firstPreparingSample;
+    expect(handoffBaselineSample.viewportAnchorStableId).toBeTruthy();
+    expect(handoffBaselineSample.selectionStableId).toBeTruthy();
+
+    const activeStateSamples = candidateSamples.filter((sample) => (
       sample.handoffState === "active"
-      && sample.activeGeneration === sample.candidateGeneration
+    ));
+    const isTopmostActiveSample = (sample) => (
+      sample.activeGeneration === sample.candidateGeneration
       && sample.activeVisibility === "visible"
       && Number(sample.activeOpacity) === 1
       && sample.activePointerEvents === "auto"
+      && sample.topFrameGeneration === sample.candidateGeneration
+      && sample.topFrameIsActive
+      && sample.topFrameVisibility === "visible"
+      && Number(sample.topFrameOpacity) === 1
+      && sample.topFramePointerEvents === "auto"
+      && sample.layoutReady
+    );
+    const positionMatches = (actual, expected) => (
+      Number.isFinite(expected)
+        && Number.isFinite(actual)
+        && Math.abs(actual - expected) <= 2
+    );
+    const activeViewportMatches = (sample) => {
+      const focusExpectation = typeof expectedFocus === "boolean"
+        ? expectedFocus
+        : handoffBaselineSample.focused;
+      if (
+        sample.viewportAnchorStableId !== handoffBaselineSample.viewportAnchorStableId
+        || sample.selectionStableId !== handoffBaselineSample.selectionStableId
+        || sample.focused !== focusExpectation
+      ) return false;
+      if (
+        focusExpectation
+        && typeof expectedFocus !== "boolean"
+        && sample.activeElement !== handoffBaselineSample.activeElement
+      ) return false;
+      if (Number.isFinite(handoffBaselineSample.selectionAnchorOffset)) {
+        if (
+          !positionMatches(sample.selectionAnchorOffset, handoffBaselineSample.selectionAnchorOffset)
+          || !positionMatches(sample.selectionFocusOffset, handoffBaselineSample.selectionFocusOffset)
+          || sample.selectionCollapsed !== handoffBaselineSample.selectionCollapsed
+        ) return false;
+      }
+      if (Number.isFinite(handoffBaselineSample.caretOffsetY)
+        && !positionMatches(sample.caretOffsetY, handoffBaselineSample.caretOffsetY)) {
+        return false;
+      }
+      if (
+        Number.isFinite(handoffBaselineSample.viewportAnchorSharedOffsetY)
+        && !positionMatches(
+          sample.viewportAnchorSharedOffsetY,
+          handoffBaselineSample.viewportAnchorSharedOffsetY,
+        )
+      ) return false;
+      if (
+        Number.isFinite(handoffBaselineSample.selectedStageTop)
+        && !positionMatches(sample.selectedStageTop, handoffBaselineSample.selectedStageTop)
+      ) return false;
+      if (!Number.isFinite(handoffBaselineSample.selectedStageTop)) {
+        if (
+          !positionMatches(sample.iframeScrollY, handoffBaselineSample.iframeScrollY)
+          || !positionMatches(sample.sharedScrollTop, handoffBaselineSample.sharedScrollTop)
+        ) return false;
+      }
+      return true;
+    };
+    const firstTopmostRafIndex = activeStateSamples.findIndex((sample) => (
+      Number.isInteger(sample.rafSequence) && isTopmostActiveSample(sample)
     ));
-    expect(activeSamples.length).toBeGreaterThan(0);
-    expect(activeSamples.some((sample) => sample.topFrameGeneration === sample.candidateGeneration)).toBe(true);
-    expect(activeSamples.some((sample) => sample.layoutReady)).toBe(true);
+    expect(firstTopmostRafIndex).toBeGreaterThanOrEqual(0);
+    expect(activeStateSamples.slice(0, firstTopmostRafIndex + 1).every(
+      (sample) => isTopmostActiveSample(sample) && activeViewportMatches(sample),
+    )).toBe(true);
+    const firstTopmostActiveSample = activeStateSamples[firstTopmostRafIndex];
+    expect(firstTopmostActiveSample.viewportAnchorStableId)
+      .toBe(handoffBaselineSample.viewportAnchorStableId);
+    expect(firstTopmostActiveSample.selectionStableId)
+      .toBe(handoffBaselineSample.selectionStableId);
+    expect(firstTopmostActiveSample.layoutReady).toBe(true);
+    const focusExpectation = typeof expectedFocus === "boolean"
+      ? expectedFocus
+      : handoffBaselineSample.focused;
+    expect(firstTopmostActiveSample.focused).toBe(focusExpectation);
+    if (focusExpectation && typeof expectedFocus !== "boolean") {
+      expect(firstTopmostActiveSample.activeElement).toBe(handoffBaselineSample.activeElement);
+    }
+    if (
+      Number.isFinite(handoffBaselineSample.selectionAnchorOffset)
+    ) {
+      expect(Number.isFinite(firstTopmostActiveSample.selectionAnchorOffset)).toBe(true);
+      expect(Number.isFinite(firstTopmostActiveSample.selectionFocusOffset)).toBe(true);
+      expect(Math.abs(
+        firstTopmostActiveSample.selectionAnchorOffset
+          - handoffBaselineSample.selectionAnchorOffset,
+      )).toBeLessThanOrEqual(2);
+      expect(Math.abs(
+        firstTopmostActiveSample.selectionFocusOffset
+          - handoffBaselineSample.selectionFocusOffset,
+      )).toBeLessThanOrEqual(2);
+      expect(firstTopmostActiveSample.selectionCollapsed)
+        .toBe(handoffBaselineSample.selectionCollapsed);
+    }
+    if (
+      Number.isFinite(handoffBaselineSample.caretOffsetY)
+    ) {
+      expect(Number.isFinite(firstTopmostActiveSample.caretOffsetY)).toBe(true);
+      expect(Math.abs(
+        firstTopmostActiveSample.caretOffsetY - handoffBaselineSample.caretOffsetY,
+      )).toBeLessThanOrEqual(2);
+    }
+    if (Number.isFinite(handoffBaselineSample.viewportAnchorSharedOffsetY)) {
+      expect(Number.isFinite(firstTopmostActiveSample.viewportAnchorSharedOffsetY)).toBe(true);
+      expect(Math.abs(
+        firstTopmostActiveSample.viewportAnchorSharedOffsetY
+          - handoffBaselineSample.viewportAnchorSharedOffsetY,
+      )).toBeLessThanOrEqual(2);
+    }
+    if (
+      Number.isFinite(handoffBaselineSample.selectedStageTop)
+    ) {
+      expect(Number.isFinite(firstTopmostActiveSample.selectedStageTop)).toBe(true);
+      expect(Math.abs(
+        firstTopmostActiveSample.selectedStageTop - handoffBaselineSample.selectedStageTop,
+      )).toBeLessThanOrEqual(2);
+    } else {
+      expect(Number.isFinite(firstTopmostActiveSample.iframeScrollY)).toBe(true);
+      expect(Number.isFinite(firstTopmostActiveSample.sharedScrollTop)).toBe(true);
+      expect(Math.abs(
+        firstTopmostActiveSample.iframeScrollY - handoffBaselineSample.iframeScrollY,
+      )).toBeLessThanOrEqual(2);
+      expect(Math.abs(
+        firstTopmostActiveSample.sharedScrollTop - handoffBaselineSample.sharedScrollTop,
+      )).toBeLessThanOrEqual(2);
+    }
+
     if (assertVisualContinuity) {
-      const firstPreparingSample = preparingSamples.find((sample) => (
-        Number.isFinite(sample.selectedScreenTop)
-        && sample.selectedStableId
-      ));
-      const firstInteractiveSample = activeSamples.find((sample) => (
-        Number.isFinite(sample.selectedScreenTop)
-        && sample.selectedStableId === firstPreparingSample?.selectedStableId
-      ));
-      if (!firstPreparingSample || !firstInteractiveSample) {
+      if (!firstPreparingSample || !firstTopmostActiveSample) {
         throw new Error(`Runtime visual anchor samples missing: ${JSON.stringify({
           preparingSamples,
-          activeSamples,
+          activeStateSamples,
         })}`);
       }
       expect(Math.abs(
-        firstInteractiveSample.selectedScreenTop - firstPreparingSample.selectedScreenTop,
+        firstTopmostActiveSample.selectedScreenTop - handoffBaselineSample.selectedScreenTop,
       )).toBeLessThanOrEqual(2);
     }
   }
@@ -607,6 +778,92 @@ test("semantic structure edit rebuilds the disposable page and reruns its script
   });
 });
 
+test("a real user scroll during positioning becomes the latest handoff target", {
+  tag: ["@gate-smoke", "@smoke-editing"],
+}, async () => {
+  const html = `<!doctype html>
+<html><head><title>Runtime user scroll handoff</title></head><body>
+  <div aria-hidden="true" style="height:600px"></div>
+  <section>
+    <p id="first" data-native-case="runtime-user-scroll">甲</p>
+    <p id="second">乙</p>
+    <output id="runtime-order"></output>
+    <div aria-hidden="true" style="height:1800px"></div>
+  </section>
+  <script>
+    document.querySelector('#runtime-order').textContent = Array.from(
+      document.querySelectorAll('section > p'),
+      (node) => node.textContent,
+    ).join('');
+  </script>
+</body></html>`;
+
+  await withRuntimeProject("pageroot-runtime-user-scroll-e2e-", {
+    "runtime-report.html": html,
+  }, async ({ page, sourcePath }) => {
+    const { frame } = await loadedDiskFrame(page, sourcePath, "runtime-user-scroll");
+    const reviewStage = page.locator(".review-scroll-stage");
+    await frame.locator('[data-native-case="runtime-user-scroll"]').click();
+    await reviewStage.evaluate((element) => {
+      element.scrollTop = 480;
+    });
+    await expect.poll(() => reviewStage.evaluate((element) => element.scrollTop)).toBe(480);
+    const moveDownButton = page.getByRole("button", { name: "下移", exact: true });
+    await expect(moveDownButton).toBeVisible();
+    const moveDownBox = await moveDownButton.boundingBox();
+    expect(moveDownBox).not.toBeNull();
+    const stageBox = await reviewStage.boundingBox();
+    expect(stageBox).not.toBeNull();
+    await armRuntimeHandoffSamples(page);
+    const scrollbarX = stageBox.x + stageBox.width - 2;
+    const scrollbarY = stageBox.y + stageBox.height / 2;
+    // Use the already-visible toolbar coordinate so Playwright does not first
+    // scroll the shared stage while locating the operation.
+    await page.mouse.click(
+      moveDownBox.x + moveDownBox.width / 2,
+      moveDownBox.y + moveDownBox.height / 2,
+    );
+    await page.mouse.move(scrollbarX, scrollbarY);
+    await page.mouse.wheel(0, 900);
+    await expect.poll(() => reviewStage.evaluate((element) => element.scrollTop))
+      .toBeGreaterThan(700);
+    const sawUserPositioning = await page.evaluate(() => {
+      const samples = window.__PAGEROOT_RUNTIME_HANDOFF_SAMPLES__ || [];
+      return samples.some((sample) => (
+        sample.handoffState === "positioning"
+        && Number(sample.sharedScrollTop) > 600
+        && sample.viewportAnchorStableId
+      ));
+    });
+    expect(sawUserPositioning).toBe(true);
+    const userViewportSample = await page.evaluate(() => {
+      const samples = window.__PAGEROOT_RUNTIME_HANDOFF_SAMPLES__ || [];
+      return [...samples].reverse().find((sample) => (
+        sample.handoffState === "positioning"
+        && Number(sample.sharedScrollTop) > 600
+        && sample.viewportAnchorStableId
+      )) || null;
+    });
+    expect(userViewportSample).not.toBeNull();
+    const userScrollTop = await reviewStage.evaluate((element) => element.scrollTop);
+    const expectedUserViewportSample = {
+      ...userViewportSample,
+      sharedScrollTop: userScrollTop,
+      // Assert the latest scroll and stable-ID anchor captured during the
+      // wheel gesture, not an intermediate screen coordinate.
+      selectedStageTop: null,
+      selectedScreenTop: null,
+    };
+    await assertRuntimeHandoff(page, {
+      requireActiveChrome: true,
+      expectedViewportSample: expectedUserViewportSample,
+    });
+    await expect.poll(() => reviewStage.evaluate((element) => element.scrollTop))
+      .toBeCloseTo(userScrollTop, 1);
+    expect(userScrollTop).toBeGreaterThan(700);
+  });
+});
+
 test("long-page element duplication uses the same visible runtime handoff", {
   tag: ["@gate-smoke", "@smoke-editing"],
 }, async () => {
@@ -661,6 +918,28 @@ test("long-page element duplication uses the same visible runtime handoff", {
     const duplicateIds = await frame.locator('[data-native-case="runtime-duplicate"]')
       .evaluateAll((elements) => elements.map((element) => element.getAttribute("data-pageroot-id")));
     expect(new Set(duplicateIds).size).toBe(2);
+    await expect.poll(() => reviewStage.evaluate((element) => element.scrollTop))
+      .toBeGreaterThan(400);
+
+    const secondDuplicateButton = page.getByRole("button", { name: "复制元素", exact: true });
+    await expect(secondDuplicateButton).toBeVisible();
+    const secondDuplicateBox = await secondDuplicateButton.boundingBox();
+    expect(secondDuplicateBox).not.toBeNull();
+    await armRuntimeHandoffSamples(page);
+    await page.mouse.click(
+      secondDuplicateBox.x + secondDuplicateBox.width / 2,
+      secondDuplicateBox.y + secondDuplicateBox.height / 2,
+    );
+    await assertRuntimeHandoff(page, {
+      requireActiveChrome: true,
+      assertVisualContinuity: true,
+    });
+    frame = await currentEditorFrame(page);
+    await expect(frame.locator('[data-native-case="runtime-duplicate"]')).toHaveCount(3);
+    await expect(frame.locator("#duplicate-proof")).toHaveText("运行时复制 3");
+    const secondDuplicateIds = await frame.locator('[data-native-case="runtime-duplicate"]')
+      .evaluateAll((elements) => elements.map((element) => element.getAttribute("data-pageroot-id")));
+    expect(new Set(secondDuplicateIds).size).toBe(3);
     await expect.poll(() => reviewStage.evaluate((element) => element.scrollTop))
       .toBeGreaterThan(400);
   });
@@ -734,7 +1013,6 @@ test("long text Enter rebuilds Runtime without moving the caret or viewport", {
     await armRuntimeHandoffSamples(page);
     await parent.press("Enter");
     await expect(parent.locator(":scope > br")).toHaveCount(1);
-    await page.keyboard.press("Escape");
     await assertRuntimeHandoff(page, {
       requireActiveChrome: true,
       assertVisualContinuity: true,
@@ -746,6 +1024,47 @@ test("long text Enter rebuilds Runtime without moving the caret or viewport", {
     await expect(frame.locator(
       '[data-native-case="runtime-enter-parent"] > br[data-pageroot-id]',
     )).toHaveCount(1);
+    await page.keyboard.insertText("后续输入");
+    await expect(frame.locator('[data-native-case="runtime-enter-parent"]'))
+      .toContainText("后续输入");
+    await expect.poll(() => reviewStage.evaluate((element) => element.scrollTop))
+      .toBeGreaterThan(400);
+  });
+});
+
+test("Escape commits native editing and leaves contenteditable exited", {
+  tag: ["@gate-smoke", "@smoke-editing"],
+}, async () => {
+  const html = `<!doctype html>
+<html><head><title>Runtime Escape handoff</title></head><body>
+  <div aria-hidden="true" style="height:850px"></div>
+  <main>
+    <p data-native-case="runtime-escape-parent" id="escape-parent">
+      Escape 后提交仍然保持源码文字和视口位置。
+    </p>
+  </main>
+  <div aria-hidden="true" style="height:1800px"></div>
+</body></html>`;
+
+  await withRuntimeProject("pageroot-runtime-escape-e2e-", {
+    "runtime-report.html": html,
+  }, async ({ page, sourcePath }) => {
+    const { frame } = await loadedDiskFrame(page, sourcePath, "runtime-escape-parent");
+    const reviewStage = page.locator(".review-scroll-stage");
+    const target = frame.locator('[data-native-case="runtime-escape-parent"]');
+    await target.click();
+    await reviewStage.evaluate((element) => {
+      element.scrollTop = 480;
+    });
+    await expect.poll(() => reviewStage.evaluate((element) => element.scrollTop)).toBe(480);
+    await target.dblclick({ force: true });
+    await expect(target).toHaveAttribute("contenteditable", "true");
+    await target.press("End");
+    await page.keyboard.insertText(" Escape输入");
+    await expect(target).toContainText("Escape输入");
+    await page.keyboard.press("Escape");
+    await expect(target).toContainText("Escape输入");
+    await expect(target).not.toHaveAttribute("contenteditable", "true");
     await expect.poll(() => reviewStage.evaluate((element) => element.scrollTop))
       .toBeGreaterThan(400);
   });
@@ -825,6 +1144,65 @@ test("a failed runtime candidate leaves the old active frame managed and never r
     await expect.poll(() => page.locator(".canvas-edit-surface").getAttribute(
       "data-edit-runtime-phase",
     )).toBe("running");
+  });
+});
+
+test("a failed candidate during text editing rolls back to the previous active frame", {
+  tag: ["@gate-smoke", "@smoke-editing"],
+}, async () => {
+  const html = `<!doctype html>
+<html><head><title>Runtime text candidate rollback</title></head><body>
+  <div aria-hidden="true" style="height:850px"></div>
+  <main>
+    <p data-native-case="runtime-text-candidate-failure" id="text-failure">
+      文字编辑失败触发后仍需保留换行和后续编辑能力。
+    </p>
+  </main>
+  <div aria-hidden="true" style="height:1800px"></div>
+  <script>
+    if (document.querySelector('[data-native-case="runtime-text-candidate-failure"] br')) {
+      const marker = document.querySelector('meta[data-html-canvas-render-verification]');
+      marker?.setAttribute('data-html-canvas-render-verification', 'invalid-text-candidate');
+      marker?.setAttribute('content', 'invalid-text-candidate');
+    }
+  </script>
+</body></html>`;
+
+  await withRuntimeProject("pageroot-runtime-text-candidate-failure-e2e-", {
+    "runtime-report.html": html,
+  }, async ({ page, sourcePath }) => {
+    let { frame } = await loadedDiskFrame(page, sourcePath, "runtime-text-candidate-failure");
+    const reviewStage = page.locator(".review-scroll-stage");
+    const target = frame.locator('[data-native-case="runtime-text-candidate-failure"]');
+    await target.click();
+    await reviewStage.evaluate((element) => {
+      element.scrollTop = 480;
+    });
+    await expect.poll(() => reviewStage.evaluate((element) => element.scrollTop)).toBe(480);
+    await target.dblclick({ force: true });
+    await expect(target).toHaveAttribute("contenteditable", "true");
+    await target.press("End");
+    await armRuntimeHandoffSamples(page);
+    await target.press("Enter");
+    await expect(target.locator(":scope > br")).toHaveCount(1);
+    await assertRuntimeHandoff(page, {
+      requireActiveChrome: true,
+      expectPromotion: false,
+    });
+    await page.waitForTimeout(4_500);
+    frame = await currentEditorFrame(page);
+    const rollbackTarget = frame.locator('[data-native-case="runtime-text-candidate-failure"]');
+    await expect(rollbackTarget).not.toHaveAttribute("contenteditable", "true");
+    await expect(rollbackTarget.locator(":scope > br")).toHaveCount(1);
+    await expect(rollbackTarget).toContainText("失败触发");
+    await expect.poll(() => page.evaluate(() => {
+      const editor = document.querySelector('[data-testid="html-canvas-editor"]');
+      const activeFrame = editor?.querySelector('iframe[title*="HTML"]');
+      const oldFrame = window.__PAGEROOT_RUNTIME_OLD_FRAME__;
+      return Boolean(activeFrame && oldFrame && activeFrame === oldFrame);
+    })).toBe(true);
+    await expect.poll(() => reviewStage.evaluate((element) => element.scrollTop))
+      .toBeGreaterThan(400);
   });
 });
 

@@ -3274,7 +3274,7 @@ export default function Workbench() {
         // boundary: capture delivered native input and wait for its exact revision
         // to be acknowledged before asking the main process to launch the file.
         const committed = editorRef.current?.fencePendingEdit({
-          resumeEditing: true,
+          resumeEditing: false,
           trigger: "save",
         });
         if (!committed || !committed.ok) {
@@ -3503,7 +3503,7 @@ export default function Workbench() {
     // rely on the iframe focusout timer to race the button click: a freshly
     // delivered input may still be waiting for its normal debounce checkpoint.
     const committed = editorRef.current?.fencePendingEdit({
-      resumeEditing: true,
+      resumeEditing: false,
       trigger: "export",
     });
     if (committed && !committed.ok) {
@@ -3801,7 +3801,7 @@ export default function Workbench() {
       )
     ) return;
     const committed = editorRef.current?.fencePendingEdit({
-      resumeEditing: true,
+      resumeEditing: false,
       trigger: "save",
     });
     if (!committed || !committed.ok) {
