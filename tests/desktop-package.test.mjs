@@ -38,6 +38,7 @@ const APP_FILE_ALLOWLIST = [
   "desktop/close-recovery.mjs",
   "desktop/product-contract.mjs",
   "desktop/qoder-handoff.mjs",
+  "desktop/recovery-journal-store.mjs",
   "desktop/product-links.mjs",
   "desktop/application-update.mjs",
   "desktop/usage-telemetry.mjs",

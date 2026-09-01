@@ -170,6 +170,55 @@ test("preload exposes no Agent executable, spawn, command, or path capability", 
   for (const [name, value] of Object.entries(worlds)) visit(value, name);
 });
 
+test("preload exposes a narrow verified recovery journal API", async () => {
+  const calls = [];
+  const api = await loadPreload(async (...args) => {
+    calls.push(args);
+    if (args[0] === "html-projects:list-recovery-journals") {
+      return success({ entries: [], invalidCount: 0 });
+    }
+    return success({
+      projectId: "project_0123456789abcdef",
+      documentId: "doc_0123456789abcdef",
+      journalSha256: `sha256:${"b".repeat(64)}`,
+    });
+  });
+  const payload = {
+    projectId: "project_0123456789abcdef",
+    documentId: "doc_0123456789abcdef",
+    sourcePath: "/tmp/report.html",
+    revision: 2,
+    html: "<!doctype html><html></html>",
+  };
+
+  await api.commitRecoveryJournal(payload);
+  await api.readRecoveryJournal({
+    projectId: payload.projectId,
+    documentId: payload.documentId,
+  });
+  await api.removeRecoveryJournal({
+    projectId: payload.projectId,
+    documentId: payload.documentId,
+  });
+  await api.listRecoveryJournals();
+
+  assert.deepEqual(calls, [
+    ["html-projects:commit-recovery-journal", payload],
+    ["html-projects:read-recovery-journal", {
+      projectId: payload.projectId,
+      documentId: payload.documentId,
+    }],
+    ["html-projects:remove-recovery-journal", {
+      projectId: payload.projectId,
+      documentId: payload.documentId,
+    }],
+    ["html-projects:list-recovery-journals"],
+  ]);
+  for (const exposedName of Object.keys(api)) {
+    assert.doesNotMatch(exposedName, /(?:journalPath|userDataPath|readFile)/u);
+  }
+});
+
 test("preload exposes one narrow disposable Edit runtime resource port", async () => {
   const calls = [];
   const { editRuntime } = await loadPreloadApis(async (...args) => {

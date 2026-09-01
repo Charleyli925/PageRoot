@@ -7,6 +7,7 @@ import type { CommentWorkflowCodecs } from "./comment-workflow-codecs.js";
 import type {
   DocumentWorkflowCanvasPort,
   DocumentWorkflowOutcome,
+  DocumentWorkflowRecoveryJournal,
   DocumentWorkflowRecoveryStore,
 } from "./document-workflow.js";
 import type { DocumentWorkflowCodecs } from "./document-workflow-codecs.js";
@@ -264,6 +265,7 @@ export type WorkspaceControllerConstruction = Readonly<{
   documentWorkflow?: Readonly<{
     codecs: DocumentWorkflowCodecs;
     recoveryStore: DocumentWorkflowRecoveryStore;
+    recoveryJournal?: DocumentWorkflowRecoveryJournal | null;
     canvas?: Omit<DocumentWorkflowCanvasPort, "invalidateRenderAcks">;
     scheduler?: Readonly<{
       setTimeout(callback: () => void, delayMs: number): unknown;
@@ -335,10 +337,10 @@ export type RuntimeWorkspaceControllerConstruction = Readonly<{
   recoveryStore?: RecoveryStore;
   documentWorkflow: Omit<
     NonNullable<WorkspaceControllerConstruction["documentWorkflow"]>,
-    "recoveryStore"
+    "recoveryStore" | "recoveryJournal"
   > & Partial<Pick<
     NonNullable<WorkspaceControllerConstruction["documentWorkflow"]>,
-    "recoveryStore"
+    "recoveryStore" | "recoveryJournal"
   >>;
   commentWorkflow: Omit<
     NonNullable<WorkspaceControllerConstruction["commentWorkflow"]>,
@@ -660,6 +662,12 @@ export class WorkspaceController {
   }): Promise<DocumentWorkflowOutcome<Record<string, unknown>>>;
   reconcileDocumentBoundary(input: Record<string, unknown>): Promise<DocumentWorkflowOutcome<PersistedBoundaryResult>>;
   recoverDocumentAutosave(input: Record<string, unknown>): Promise<DocumentWorkflowOutcome<Record<string, unknown>>>;
+  recordDocumentExportEvidence(input: {
+    context?: ProjectContext | null;
+    html: string;
+    revision: number;
+    exported: { path: string; sha256: string };
+  }): Promise<DocumentWorkflowOutcome<Record<string, unknown>>>;
   adoptDocumentConflictCandidate(input: Record<string, unknown>): DocumentWorkflowOutcome<Record<string, unknown>>;
   resetDocumentWorkflow(input?: Record<string, unknown>): void;
   clearDocumentRecovery(context?: Partial<ProjectContext>): void;

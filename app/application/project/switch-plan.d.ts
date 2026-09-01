@@ -38,6 +38,7 @@ export function planProjectSwitchAfterDrain(input?: {
   pendingWrite?: boolean;
   flushInFlight?: boolean;
   hasHistoryAction?: boolean;
+  recoveryProtected?: boolean;
 }): ProjectSwitchPlan;
 
 export function planProjectSwitchAfterCanvas(input?: {
@@ -51,4 +52,5 @@ export function planProjectSwitchAfterCanvas(input?: {
   cutoffRevision?: number;
   committedSourceSha256?: string;
   documentSourceSha256?: string;
+  recoveryProtected?: boolean;
 }): ProjectSwitchPlan;

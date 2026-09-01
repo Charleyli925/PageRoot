@@ -84,6 +84,7 @@ import { registerAgentIpc, unregisterAgentIpc } from "./ipc/agent-ipc.mjs";
 import { registerUpdateIpc, unregisterUpdateIpc } from "./ipc/update-ipc.mjs";
 import { registerWindowIpc, unregisterWindowIpc } from "./ipc/window-ipc.mjs";
 import { createWindowLifecycle } from "./app-lifecycle.mjs";
+import { createRecoveryJournalStore } from "./recovery-journal-store.mjs";
 import { createStartupPerformanceTimeline } from "./startup-performance-timeline.mjs";
 import {
   closeAbortPayload,
@@ -248,6 +249,10 @@ const PROJECT_CHANNELS = Object.freeze({
   cancelPreparedHtmlOpen: "html-projects:cancel-prepared-open",
   finalizePreparedHtmlOpen: "html-projects:finalize-prepared-open",
   rollbackPreparedHtmlOpen: "html-projects:rollback-prepared-open",
+  commitRecoveryJournal: "html-projects:commit-recovery-journal",
+  readRecoveryJournal: "html-projects:read-recovery-journal",
+  removeRecoveryJournal: "html-projects:remove-recovery-journal",
+  listRecoveryJournals: "html-projects:list-recovery-journals",
   sourceFileMayHaveChanged: "html-projects:source-file-may-have-changed",
 });
 const APP_CHANNELS = Object.freeze({
@@ -434,6 +439,9 @@ const externalFileOpenMailbox = createExternalFileOpenMailbox();
 const externalOpenFailureMailbox = createExternalOpenFailureMailbox();
 const externalFileOpenDelivery = createExternalFileOpenDeliveryCoordinator();
 const preparedHtmlOpenStore = createPreparedHtmlOpenStore();
+const recoveryJournalStore = createRecoveryJournalStore({
+  rootPath: path.join(app.getPath("userData"), "recovery-journals-v1"),
+});
 const externalFileOpenExitHandoff = createExternalFileOpenExitHandoff({
   handoffPath: path.join(app.getPath("userData"), "external-open-handoff.json"),
 });
@@ -3551,6 +3559,10 @@ function registerProjectIpc() {
       cancelPreparedHtmlOpen,
       finalizePreparedHtmlOpen,
       rollbackPreparedHtmlOpen,
+      commitRecoveryJournal: (payload) => recoveryJournalStore.commit(payload),
+      readRecoveryJournal: (payload) => recoveryJournalStore.readVerified(payload),
+      removeRecoveryJournal: (payload) => recoveryJournalStore.remove(payload),
+      listRecoveryJournals: () => recoveryJournalStore.listRecoverable(),
       createPreviewSession,
       revokePreviewSession: (sessionId) => (
         ensurePreviewProtocolController().revokeSession(sessionId)
@@ -4233,6 +4245,7 @@ if (!hasSingleInstanceLock) {
     }
     installApplicationMenu();
     ensureApplicationUpdateController();
+    await recoveryJournalStore.initialize();
     await createWindow();
   }).catch(async (error) => {
     captureUsage("runtime_fault", {

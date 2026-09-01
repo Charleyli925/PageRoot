@@ -86,10 +86,11 @@ export function planProjectSwitchAfterDrain({
   pendingWrite = false,
   flushInFlight = false,
   hasHistoryAction = false,
+  recoveryProtected = false,
 } = {}) {
   if (
     Number(editRevision) !== Number(cutoffRevision)
-    || pendingWrite
+    || (pendingWrite && !recoveryProtected)
     || flushInFlight
     || hasHistoryAction
   ) {
@@ -113,6 +114,7 @@ export function planProjectSwitchAfterCanvas({
   cutoffRevision = 0,
   committedSourceSha256 = "",
   documentSourceSha256 = "",
+  recoveryProtected = false,
 } = {}) {
   if (!needsCanvasCommit) {
     return Object.freeze({ kind: "ready" });
@@ -132,6 +134,8 @@ export function planProjectSwitchAfterCanvas({
     });
   }
   if (
+    !recoveryProtected
+    &&
     sourcePath
     && (
       Number(lastPersistedRevision) !== Number(cutoffRevision)

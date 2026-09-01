@@ -600,6 +600,7 @@ export class WorkspaceController {
         ports: {
           hash: this.#hashPort,
           recoveryStore: documentWorkflow.recoveryStore,
+          recoveryJournal: documentWorkflow.recoveryJournal || null,
           canvas: {
             invalidateRenderAcks: this.#canvasPort.invalidateRenderAcks,
             verifyRendered: documentWorkflow.canvas?.verifyRendered,
@@ -1835,6 +1836,10 @@ export class WorkspaceController {
 
   recoverDocumentAutosave(input) {
     return this.#requireDocumentWorkflow().recoverAutosave(input);
+  }
+
+  recordDocumentExportEvidence(input) {
+    return this.#requireDocumentWorkflow().recordVerifiedExport(input);
   }
 
   adoptDocumentConflictCandidate(input) {

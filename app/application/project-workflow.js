@@ -219,6 +219,13 @@ function documentIsStable(session) {
   );
 }
 
+function documentHasProtectionEvidence(workflow, input) {
+  if (typeof workflow?.hasVerifiedProtectionEvidence === "function") {
+    return workflow.hasVerifiedProtectionEvidence(input) === true;
+  }
+  return workflow?.hasVerifiedRecoveryCheckpoint?.(input) === true;
+}
+
 function projectErrorCode(cause, fallback) {
   if (isBridgeRequestError(cause) && cause.code) return cause.code;
   return cause && typeof cause === "object" && cause.code
@@ -681,12 +688,17 @@ export class ProjectWorkflow {
       if (!drained.ok) {
         return blocked("PROJECT_SWITCH_DRAIN_BLOCKED", drained.reason);
       }
+      const recoveryProtected = documentHasProtectionEvidence(this.#documentWorkflow, {
+        context: this.#projectSession.context,
+        revision: cutoffRevision,
+      });
       const afterDrain = planProjectSwitchAfterDrain({
         editRevision: this.#documentSession.editRevision,
         cutoffRevision,
         pendingWrite: Boolean(this.#documentSession.pendingWrite),
         flushInFlight: Boolean(this.#documentSession.flushPromise),
         hasHistoryAction: this.#documentWorkflow.hasHistoryAction,
+        recoveryProtected,
       });
       if (afterDrain.kind === "reject") {
         return blocked(afterDrain.code, afterDrain.reason);
@@ -717,6 +729,7 @@ export class ProjectWorkflow {
           cutoffRevision,
           committedSourceSha256: committed?.sourceSha256,
           documentSourceSha256: this.#documentSession.sourceSha256,
+          recoveryProtected,
         });
         if (afterCanvas.kind === "reject") {
           return blocked(afterCanvas.code, afterCanvas.reason);
@@ -1156,6 +1169,10 @@ export class ProjectWorkflow {
         imposedEditorFreeze
         && this.#projectSession.sourcePath
         && frozenHtml !== null
+        && !documentHasProtectionEvidence(this.#documentWorkflow, {
+          context: this.#projectSession.context,
+          revision: cutoffRevision,
+        })
       ) {
         const boundaryOutcome = await this.#documentWorkflow.reconcileBoundary({
           frozenHtml,
@@ -2146,7 +2163,7 @@ export class ProjectWorkflow {
     this.#drainCoordinator.replace("source", {
       label: "等待当前 HTML 写回",
       inspect: (boundary) => this.#inspectSourceObligation(boundary),
-      drain: async () => {
+      drain: async ({ boundary }) => {
         if (this.#documentWorkflow.hasHistoryAction) {
           const history = await this.#documentWorkflow.waitForHistoryAction();
           if (history.status !== "succeeded") return false;
@@ -2154,7 +2171,12 @@ export class ProjectWorkflow {
         const outcome = await this.#documentWorkflow.flush({
           throughRevision: this.#documentSession.editRevision,
         });
-        return outcome.status === "succeeded";
+        if (outcome.status === "succeeded") return true;
+        if (boundary !== "switch" && boundary !== "close") return false;
+        const protectedOutcome = await this.#documentWorkflow.protectForDetach?.({
+          context: this.#projectSession.context,
+        });
+        return protectedOutcome?.status === "succeeded";
       },
     });
     this.#drainCoordinator.replace("draft", {
@@ -2181,13 +2203,32 @@ export class ProjectWorkflow {
         reason: "当前编辑尚未绑定本地 HTML，请先导出或打开本地文件。",
       };
     }
+    const detachBoundary = boundary === "switch" || boundary === "close";
+    const recoveryProtected = detachBoundary
+      && documentHasProtectionEvidence(this.#documentWorkflow, {
+        context: this.#projectSession.context,
+        revision: this.#documentSession.editRevision,
+      });
+    if (recoveryProtected) return { state: "resolved" };
     if (this.#documentSession.persistState === "conflict") {
+      if (detachBoundary && this.#documentWorkflow.canProtectForDetach?.() === true) {
+        return {
+          state: "pending",
+          reason: "正在校验当前 HTML 的恢复副本。",
+        };
+      }
       return {
         state: "blocked",
         reason: "当前 HTML 与外部文件存在冲突，请先选择保留哪一份。",
       };
     }
     if (this.#documentSession.persistState === "failed") {
+      if (detachBoundary && this.#documentWorkflow.canProtectForDetach?.() === true) {
+        return {
+          state: "pending",
+          reason: "正在校验当前 HTML 的恢复副本。",
+        };
+      }
       return {
         state: "blocked",
         reason: this.#documentSession.persistError

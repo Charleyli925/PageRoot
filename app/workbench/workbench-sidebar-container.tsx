@@ -14,6 +14,7 @@ import { UserCircleIcon } from "@phosphor-icons/react/dist/csr/UserCircle";
 import type { ProjectCatalogControllerCapability } from "../application/workspace-controller-capabilities.js";
 import type {
   ApplicationUpdateResult,
+  DocumentRecoveryJournalSummary,
   ProjectVersionSummary,
   RecentProject,
   RegisteredProject,
@@ -24,6 +25,7 @@ import {
   type ProjectVersionLoadResult,
 } from "./WorkbenchChrome";
 import type { SettingsCategory } from "./settings-types";
+import { localFileNameFromSourcePath } from "./project-model";
 
 export type { SettingsCategory } from "./settings-types";
 
@@ -182,12 +184,16 @@ export const WorkbenchStartPageContainer = memo(function WorkbenchStartPageConta
     capability.getSnapshot,
   );
   const [catalogReady, setCatalogReady] = useState(false);
+  const [recoveryJournals, setRecoveryJournals] = useState<DocumentRecoveryJournalSummary[]>([]);
 
   useEffect(() => {
     let active = true;
     void Promise.allSettled([
       capability.commands.refreshRecents(),
       capability.commands.refreshRegistered(),
+      window.htmlAIProjects?.listRecoveryJournals?.().then((result) => {
+        if (active) setRecoveryJournals(result.entries);
+      }),
     ]).then(() => {
       if (active) setCatalogReady(true);
     });
@@ -202,8 +208,29 @@ export const WorkbenchStartPageContainer = memo(function WorkbenchStartPageConta
       registeredProjects={[...catalog.registered]}
       catalogReady={catalogReady}
       catalogError={catalog.error}
+      recoveryJournals={recoveryJournals}
       onCreateProject={onOpenLocal}
       onOpenProject={onOpenRegistered}
+      onOpenRecovery={(journal) => {
+        const project = catalog.registered.find((candidate) => (
+          candidate.projectId === journal.projectId
+          && candidate.documentId === journal.documentId
+          && candidate.availability === "ready"
+          && Boolean(candidate.activeSourcePath)
+        ));
+        if (project) {
+          onOpenRegistered(project);
+          return;
+        }
+        void window.htmlAIProjects?.readRecoveryJournal?.({
+          projectId: journal.projectId,
+          documentId: journal.documentId,
+          expectedJournalSha256: journal.journalSha256,
+        }).then((recovered) => recovered && window.htmlAIProjects?.exportHtmlCopy?.({
+          html: recovered.html,
+          suggestedName: localFileNameFromSourcePath(journal.sourcePath),
+        }));
+      }}
     />
   );
 });

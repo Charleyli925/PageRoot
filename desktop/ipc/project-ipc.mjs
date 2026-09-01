@@ -79,6 +79,22 @@ export function registerProjectIpc({
     trustedProject(handlers.rollbackPreparedHtmlOpen, "prepared_open_rollback"),
   );
   ipcMain.handle(
+    PROJECT_CHANNELS.commitRecoveryJournal,
+    trustedProject(handlers.commitRecoveryJournal, "recovery_journal_commit"),
+  );
+  ipcMain.handle(
+    PROJECT_CHANNELS.readRecoveryJournal,
+    trustedProject(handlers.readRecoveryJournal, "recovery_journal_read"),
+  );
+  ipcMain.handle(
+    PROJECT_CHANNELS.removeRecoveryJournal,
+    trustedProject(handlers.removeRecoveryJournal, "recovery_journal_remove"),
+  );
+  ipcMain.handle(
+    PROJECT_CHANNELS.listRecoveryJournals,
+    trustedProject(handlers.listRecoveryJournals, "recovery_journal_list"),
+  );
+  ipcMain.handle(
     PREVIEW_CHANNELS.createSession,
     trustedProject(
       handlers.createPreviewSession,

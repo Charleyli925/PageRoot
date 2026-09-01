@@ -159,6 +159,7 @@ function createHarness({
   policies = {},
   projectRulesWorkflow: rulesWorkflow = {},
   navigation = null,
+  documentWorkflow: documentWorkflowOverrides = {},
   initialProject = true,
   openTarget = null,
 } = {}) {
@@ -272,6 +273,15 @@ function createHarness({
     async recoverAutosave() {
       return succeeded({ recovered: false });
     },
+    canProtectForDetach() {
+      return false;
+    },
+    hasVerifiedRecoveryCheckpoint() {
+      return false;
+    },
+    async protectForDetach() {
+      return { status: "blocked", code: "NO_RECOVERY", reason: "no recovery" };
+    },
     adoptConflictCandidate() {
       return succeeded({ adopted: true });
     },
@@ -281,6 +291,7 @@ function createHarness({
       this.observeCount += 1;
       return succeeded(this.observeResult);
     },
+    ...documentWorkflowOverrides,
   };
   let unlockCount = 0;
   let fenceCount = 0;
@@ -531,6 +542,67 @@ test("a dirty document cannot reuse the Canvas validation lease", async (t) => {
   assert.equal(outcome.status, "succeeded");
   assert.equal(outcome.value.validationLease, undefined);
   assert.ok(harness.fenceCount > 0);
+});
+
+test("a failed source write can switch only after an exact recovery checkpoint", async (t) => {
+  let checkpointVerified = false;
+  const harness = createHarness({
+    documentWorkflow: {
+      async flush() {
+        return { status: "rejected", code: "SOURCE_WRITE_FAILED", reason: "disk denied" };
+      },
+      canProtectForDetach() {
+        return true;
+      },
+      hasVerifiedRecoveryCheckpoint({ revision } = {}) {
+        return checkpointVerified && revision === 1;
+      },
+      async protectForDetach() {
+        checkpointVerified = true;
+        return succeeded({ protected: true, evidence: "recoveryVerified" });
+      },
+    },
+  });
+  t.after(() => harness.workflow.dispose());
+  harness.documentSession.beginEdit(OLD_HTML.replace("old", "protected"));
+  harness.documentSession.setPersistence({ state: "failed", error: "disk denied" });
+
+  const outcome = await harness.workflow.prepareSwitch();
+  assert.equal(outcome.status, "succeeded");
+  assert.equal(checkpointVerified, true);
+  assert.equal(harness.documentSession.persistState, "failed");
+  assert.equal(harness.documentSession.lastPersistedRevision, 0);
+});
+
+test("a failed source write can close after recovery evidence without claiming source persistence", async (t) => {
+  let checkpointVerified = false;
+  const harness = createHarness({
+    documentWorkflow: {
+      async flush() {
+        return { status: "rejected", code: "SOURCE_WRITE_FAILED", reason: "disk denied" };
+      },
+      canProtectForDetach() { return true; },
+      hasVerifiedProtectionEvidence({ revision } = {}) {
+        return checkpointVerified && revision === 1;
+      },
+      async protectForDetach() {
+        checkpointVerified = true;
+        return succeeded({ protected: true, evidence: "recoveryVerified" });
+      },
+    },
+  });
+  t.after(() => harness.workflow.dispose());
+  harness.documentSession.beginEdit(OLD_HTML.replace("old", "protected"));
+  harness.documentSession.setPersistence({ state: "failed", error: "disk denied" });
+
+  const result = await harness.workflow.prepareClose({
+    requestId: "close_recovery_001",
+    deadlineAt: Date.now() + 5_000,
+  });
+  assert.deepEqual(result, { ready: true });
+  assert.equal(checkpointVerified, true);
+  assert.equal(harness.documentSession.persistState, "failed");
+  assert.equal(harness.documentSession.lastPersistedRevision, 0);
 });
 
 test("a startup catalog read cannot delay or supersede a newer local open", async (t) => {

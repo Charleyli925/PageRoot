@@ -23,6 +23,12 @@ export type DocumentWorkflowRecoveryStore = Readonly<{
   remove(keys: string | string[]): boolean;
 }>;
 
+export type DocumentWorkflowRecoveryJournal = Readonly<{
+  commit(input: Readonly<Record<string, unknown>>): Promise<Readonly<Record<string, unknown>>>;
+  readVerified(input: Readonly<Record<string, unknown>>): Promise<Readonly<Record<string, unknown>> | null>;
+  remove(input: Readonly<Record<string, unknown>>): Promise<Readonly<{ removed: boolean }>>;
+}>;
+
 export type DocumentWorkflowTransitionAuthority = Readonly<{
   recoveryIdentity: unknown;
   sourceHistory: OpenDocumentMemoryHistory | null;
@@ -59,6 +65,7 @@ export type DocumentWorkflowConstruction = Readonly<{
   ports: Readonly<{
     hash: Readonly<{ sha256(html: string): Promise<string> }>;
     recoveryStore: DocumentWorkflowRecoveryStore;
+    recoveryJournal?: DocumentWorkflowRecoveryJournal | null;
     canvas: DocumentWorkflowCanvasPort;
   }>;
   scheduler?: Readonly<{
@@ -74,8 +81,27 @@ export class DocumentWorkflow {
   dispose(): void;
   readonly hasHistoryAction: boolean;
   readonly recoveryIdentity: unknown;
+  readonly recoveryCheckpoint: Readonly<Record<string, unknown>> | null;
   readonly pendingAuditEvents: unknown[];
   replaceRecoveryIdentity(identity: unknown): unknown;
+  canProtectForDetach(context?: ProjectContext | null): boolean;
+  hasVerifiedRecoveryCheckpoint(input?: {
+    context?: ProjectContext | null;
+    revision?: number;
+  }): boolean;
+  hasVerifiedProtectionEvidence(input?: {
+    context?: ProjectContext | null;
+    revision?: number;
+  }): boolean;
+  recordVerifiedExport(input: {
+    context?: ProjectContext | null;
+    html: string;
+    revision: number;
+    exported: { path: string; sha256: string };
+  }): Promise<DocumentWorkflowOutcome<Record<string, unknown>>>;
+  protectForDetach(input?: {
+    context?: ProjectContext | null;
+  }): Promise<DocumentWorkflowOutcome<Record<string, unknown>>>;
   captureProjectTransitionAuthority(): DocumentWorkflowTransitionAuthority;
   restoreProjectTransitionAuthority(input?: {
     authority?: DocumentWorkflowTransitionAuthority | null;
