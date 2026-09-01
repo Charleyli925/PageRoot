@@ -115,11 +115,42 @@ function authorSourceInventory(
     .join("\u0001");
 }
 
+function normalizedCssWhitespace(value: string): string {
+  let result = "";
+  let quote = "";
+  let escaped = false;
+  let pendingWhitespace = false;
+  for (const character of value) {
+    if (quote) {
+      result += character;
+      if (escaped) escaped = false;
+      else if (character === "\\") escaped = true;
+      else if (character === quote) quote = "";
+      continue;
+    }
+    if (character === '"' || character === "'") {
+      if (pendingWhitespace && result) result += " ";
+      pendingWhitespace = false;
+      quote = character;
+      result += character;
+      continue;
+    }
+    if (/\s/u.test(character)) {
+      pendingWhitespace = true;
+      continue;
+    }
+    if (pendingWhitespace && result) result += " ";
+    pendingWhitespace = false;
+    result += character;
+  }
+  return result.trim();
+}
+
 function normalizedCssDeclarations(value: string): string {
   return value
     .replace(/\/\*[\s\S]*?\*\//gu, "")
     .split(";")
-    .map((declaration) => declaration.trim().replace(/\s*:\s*/u, ":"))
+    .map((declaration) => normalizedCssWhitespace(declaration).replace(/\s*:\s*/u, ":"))
     .filter(Boolean)
     .join(";");
 }
