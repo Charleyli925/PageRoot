@@ -2965,6 +2965,8 @@ function reviewBootstrap(
       element.style.setProperty("outline", "none", "important");
       element.style.setProperty("opacity", "1", "important");
       element.style.setProperty("filter", "none", "important");
+      element.style.setProperty("backdrop-filter", "none", "important");
+      element.style.setProperty("-webkit-backdrop-filter", "none", "important");
       element.style.setProperty("transform", "none", "important");
       element.style.setProperty("pointer-events", "none", "important");
       if (!fill) return;
@@ -3037,11 +3039,10 @@ function reviewBootstrap(
     dim.setAttribute("fill-opacity", dimOpacity);
     resetMaskPrimitive(dim, "#ffffff");
     dim.style.setProperty("fill-opacity", dimOpacity, "important");
-    dim.style.setProperty(
-      "backdrop-filter",
-      "grayscale(var(--pageroot-review-context-grayscale)) saturate(var(--pageroot-review-context-saturation)) blur(1px)",
-      "important",
-    );
+    // Chromium composites backdrop-filter across the full SVG rect before its
+    // luminance mask is punched out, which dims the active region even though
+    // the outline and hole share the same canonical path. The reset above also
+    // prevents authored CSS from restoring that filter on Review-owned nodes.
     svg.append(dim);
     layer.append(svg);
     }

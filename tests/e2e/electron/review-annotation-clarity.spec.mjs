@@ -369,6 +369,68 @@ async function activateFocusGroup(beforeFrame, afterFrame, group) {
   )))).toEqual([group.id, group.id]);
 }
 
+async function captureAuthoredElement(frame, selector) {
+  return frame.locator(selector).screenshot({
+    animations: "disabled",
+    style: `
+      [data-pageroot-review-overlay-box],
+      [data-pageroot-review-text-marks],
+      [data-pageroot-review-region-bar] {
+        visibility: hidden !important;
+      }
+    `,
+  });
+}
+
+async function comparePngPixels(page, left, right) {
+  return page.evaluate(async ({ leftBase64, rightBase64 }) => {
+    const decode = async (base64) => {
+      const binary = atob(base64);
+      const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
+      const bitmap = await createImageBitmap(new Blob([bytes], { type: "image/png" }));
+      const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+      const context = canvas.getContext("2d");
+      context.drawImage(bitmap, 0, 0);
+      const pixels = context.getImageData(0, 0, bitmap.width, bitmap.height).data;
+      bitmap.close();
+      return { width: canvas.width, height: canvas.height, pixels };
+    };
+    const [leftImage, rightImage] = await Promise.all([
+      decode(leftBase64),
+      decode(rightBase64),
+    ]);
+    if (
+      leftImage.width !== rightImage.width
+      || leftImage.height !== rightImage.height
+    ) return { dimensionsMatch: false };
+    let changedPixels = 0;
+    let channelDelta = 0;
+    let maxChannelDelta = 0;
+    for (let offset = 0; offset < leftImage.pixels.length; offset += 4) {
+      let pixelChanged = false;
+      for (let channel = 0; channel < 3; channel += 1) {
+        const delta = Math.abs(
+          leftImage.pixels[offset + channel] - rightImage.pixels[offset + channel],
+        );
+        channelDelta += delta;
+        maxChannelDelta = Math.max(maxChannelDelta, delta);
+        if (delta > 0) pixelChanged = true;
+      }
+      if (pixelChanged) changedPixels += 1;
+    }
+    const pixelCount = leftImage.width * leftImage.height;
+    return {
+      dimensionsMatch: true,
+      changedPixelRatio: changedPixels / pixelCount,
+      meanChannelDelta: channelDelta / (pixelCount * 3),
+      maxChannelDelta,
+    };
+  }, {
+    leftBase64: left.toString("base64"),
+    rightBase64: right.toString("base64"),
+  });
+}
+
 test("the review projection annotates a dense report cleanly and accurately", async () => {
   test.setTimeout(240_000);
   const fixture = createSourceFixture({
@@ -623,6 +685,19 @@ test("the review projection annotates a dense report cleanly and accurately", as
       { type: "structure", structureChange: "style" },
     );
     expect(inlineStyleGroupA.id).not.toBe(inlineStyleGroupB.id);
+    for (const frame of [beforeFrame, afterFrame]) {
+      await frame.locator("head").evaluate((head) => {
+        const authoredStyle = document.createElement("style");
+        authoredStyle.textContent = `
+          svg rect,
+          [data-pageroot-review-mask-dim] {
+            backdrop-filter: grayscale(1) blur(3px) !important;
+            -webkit-backdrop-filter: grayscale(1) blur(3px) !important;
+          }
+        `;
+        head.append(authoredStyle);
+      });
+    }
     await activateFocusGroup(beforeFrame, afterFrame, inlineStyleGroupA);
     for (const frame of [beforeFrame, afterFrame]) {
       const inlineBox = frame.locator(
@@ -633,6 +708,10 @@ test("the review projection annotates a dense report cleanly and accurately", as
         `[data-pageroot-review-overlay-box][data-pageroot-review-focus-group="${inlineStyleGroupB.id}"]`,
       )).toHaveCount(0);
       await expect(frame.locator("[data-pageroot-review-mask-hole]")).toHaveCount(1);
+      await expect(frame.locator("[data-pageroot-review-mask-dim]")).toHaveCSS(
+        "backdrop-filter",
+        "none",
+      );
       await expect.poll(() => inlineBox.evaluate((box) => {
         const paragraph = document.querySelector("[data-review-inline-a]");
         if (!paragraph) return false;
@@ -648,6 +727,47 @@ test("the review projection annotates a dense report cleanly and accurately", as
       path: path.join(captureDirectory, "review-focus-inline-isolated.png"),
       animations: "disabled",
     });
+    const focusedInsidePixels = await Promise.all([beforeFrame, afterFrame].map(
+      (frame) => captureAuthoredElement(frame, "[data-review-inline-a]"),
+    ));
+    const focusedOutsidePixels = await Promise.all([beforeFrame, afterFrame].map(
+      (frame) => captureAuthoredElement(frame, "[data-review-single-style]"),
+    ));
+    await afterFrame.locator(
+      `[data-pageroot-review-region-bar][data-pageroot-review-focus-group="${inlineStyleGroupA.id}"]`,
+    ).first().evaluate((bar) => bar.click());
+    await expect.poll(async () => Promise.all([beforeFrame, afterFrame].map((frame) => (
+      frame.locator("html").getAttribute("data-pageroot-review-focus-group")
+    )))).toEqual(["", ""]);
+    const overviewInsidePixels = await Promise.all([beforeFrame, afterFrame].map(
+      (frame) => captureAuthoredElement(frame, "[data-review-inline-a]"),
+    ));
+    const overviewOutsidePixels = await Promise.all([beforeFrame, afterFrame].map(
+      (frame) => captureAuthoredElement(frame, "[data-review-single-style]"),
+    ));
+    for (const [index, focusedPixels] of focusedInsidePixels.entries()) {
+      const insideComparison = await comparePngPixels(
+        launched.page,
+        focusedPixels,
+        overviewInsidePixels[index],
+      );
+      const outsideComparison = await comparePngPixels(
+        launched.page,
+        focusedOutsidePixels[index],
+        overviewOutsidePixels[index],
+      );
+      expect(insideComparison.dimensionsMatch).toBe(true);
+      expect(outsideComparison.dimensionsMatch).toBe(true);
+      // Locator screenshots can shift glyph antialiasing by a fraction after
+      // focus navigation, so compare decoded pixels with a narrow tolerance.
+      // The active region must remain visually unchanged while its surrounding
+      // context is materially faded.
+      expect(insideComparison.meanChannelDelta).toBeLessThan(.75);
+      expect(outsideComparison.meanChannelDelta).toBeGreaterThan(2);
+      expect(outsideComparison.meanChannelDelta).toBeGreaterThan(
+        insideComparison.meanChannelDelta * 5,
+      );
+    }
     await activateFocusGroup(beforeFrame, afterFrame, paragraphTwoGroup);
     await expect(launched.page.getByRole("button", { name: "原始大小", exact: true }))
       .toHaveAttribute("aria-pressed", "true");
