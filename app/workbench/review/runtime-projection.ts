@@ -2949,14 +2949,6 @@ function reviewBootstrap(
     layer.style.setProperty("width", documentWidth + "px", "important");
     layer.style.setProperty("height", height + "px", "important");
     const namespace = "http://www.w3.org/2000/svg";
-    if (merged.length) {
-    const svg = document.createElementNS(namespace, "svg");
-    svg.setAttribute("data-pageroot-review-mask-layer", "true");
-    svg.setAttribute("width", String(documentWidth));
-    svg.setAttribute("height", String(height));
-    svg.setAttribute("viewBox", "0 0 " + documentWidth + " " + height);
-    svg.style.setProperty("width", documentWidth + "px", "important");
-    svg.style.setProperty("height", height + "px", "important");
     const resetMaskPrimitive = (element, fill = "") => {
       element.style.setProperty("display", "block", "important");
       element.style.setProperty("margin", "0", "important");
@@ -2965,6 +2957,9 @@ function reviewBootstrap(
       element.style.setProperty("outline", "none", "important");
       element.style.setProperty("opacity", "1", "important");
       element.style.setProperty("filter", "none", "important");
+      element.style.setProperty("backdrop-filter", "none", "important");
+      element.style.setProperty("-webkit-backdrop-filter", "none", "important");
+      element.style.setProperty("mix-blend-mode", "normal", "important");
       element.style.setProperty("transform", "none", "important");
       element.style.setProperty("pointer-events", "none", "important");
       if (!fill) return;
@@ -2972,6 +2967,15 @@ function reviewBootstrap(
       element.style.setProperty("fill-opacity", "1", "important");
       element.style.setProperty("stroke", "none", "important");
     };
+    if (merged.length) {
+    const svg = document.createElementNS(namespace, "svg");
+    svg.setAttribute("data-pageroot-review-mask-layer", "true");
+    svg.setAttribute("width", String(documentWidth));
+    svg.setAttribute("height", String(height));
+    svg.setAttribute("viewBox", "0 0 " + documentWidth + " " + height);
+    svg.style.setProperty("width", documentWidth + "px", "important");
+    svg.style.setProperty("height", height + "px", "important");
+    resetMaskPrimitive(svg);
     const mask = document.createElementNS(namespace, "mask");
     const maskId = "pageroot-review-mask-"
       + reviewMaskSessionKey + "-" + side + "-" + projectionEpoch + "-" + (++overlayMaskSequence);
@@ -3037,11 +3041,10 @@ function reviewBootstrap(
     dim.setAttribute("fill-opacity", dimOpacity);
     resetMaskPrimitive(dim, "#ffffff");
     dim.style.setProperty("fill-opacity", dimOpacity, "important");
-    dim.style.setProperty(
-      "backdrop-filter",
-      "grayscale(var(--pageroot-review-context-grayscale)) saturate(var(--pageroot-review-context-saturation)) blur(1px)",
-      "important",
-    );
+    // Chromium composites backdrop-filter across the full SVG rect before its
+    // luminance mask is punched out, which dims the active region even though
+    // the outline and hole share the same canonical path. The reset above also
+    // prevents authored CSS from restoring that filter on Review-owned nodes.
     svg.append(dim);
     layer.append(svg);
     }
@@ -3054,6 +3057,7 @@ function reviewBootstrap(
       marksSvg.setAttribute("viewBox", "0 0 " + documentWidth + " " + height);
       marksSvg.style.setProperty("width", documentWidth + "px", "important");
       marksSvg.style.setProperty("height", height + "px", "important");
+      resetMaskPrimitive(marksSvg);
       const strikeRuns = [];
       const addedDots = [];
       const activeAtomKeys = new RuntimeVisualSet();
@@ -3307,8 +3311,6 @@ function reviewBootstrap(
       Math.min(100, Number(currentState.transparency ?? 18)),
     ) / 100;
     root.style.setProperty("--pageroot-review-context-opacity", String(transparency));
-    root.style.setProperty("--pageroot-review-context-grayscale", String((1 - transparency) * .55));
-    root.style.setProperty("--pageroot-review-context-saturation", String(.7 + transparency * .3));
     root.style.setProperty("--pageroot-review-ui-scale", String(1 / Math.max(
       .32,
       Math.min(1, Number(currentState.scale || 1)),

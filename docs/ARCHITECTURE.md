@@ -222,9 +222,15 @@ the historical synthetic-spike decision.
   paths as black holes, so `outlinePaths = maskHoles` and overlapping holes remain a set union rather than an
   `evenodd` XOR and mask and frame cannot diverge. Its per-render identifier is
   scoped to the review session, side and projection epoch. The disposable
-  projection uses reserved attributes plus an explicit presentation reset and
-  important geometry, preventing authored `svg`/`div` rules from restyling its
-  mask primitives or frames. Stable
+  projection uses reserved attributes plus inline and static important resets,
+  preventing authored `svg`/`div` rules from restyling its mask primitives or
+  frames. The context layer is a masked semi-transparent white fade only:
+  active holes preserve authored pixels, while the outside follows context
+  visibility. Review mask primitives prohibit `filter`, `backdrop-filter` and
+  `mix-blend-mode`; real backdrop blur is not part of the formal Review
+  contract because Chromium may composite it before applying the SVG hole.
+  Mask correctness is proved from final rendered pixels as well as DOM paths.
+  Stable
   outline regions remain navigation-only. `page-presentation-dom` is the
   shared explicit-ID and strict indexed-Tab discovery contract consumed by
   Canvas comment presentation and formal review. Before/after panel and action keys

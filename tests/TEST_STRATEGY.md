@@ -348,7 +348,12 @@ Workbench 只确认已提交 loading surface、传入窄 port 并消费快照。
   内部元素和文字零重复；新增编号 `<br>` 行仍是文字事实；稳定 ID 的兄弟/跨父
   移动、普通属性、内联样式和 CSS/Script 源码变化进入元素事实，纯换行及
   Canvas/SVG Runtime 绘制仍为零变化。段落两字或五处修改均为一个阅读块框和一个标签；两个远距离段落是两个 focus group，点击各自 bar 后必须揭示并滚动到对应段落。同一 CSS 规则命中的六张卡在满足 75% 与 grid/flex/list/repeated-card 条件时提升为一个容器框，单卡仍框自身；同一规则命中两个局部容器时保留一个 group 下两个 region，相同 inline delta 即使同父级也必须是不同 group。Node 必须覆盖 `displayScope`/`geometryMode` 分离、change-scoped atom key、group/region/payload 上限和重复 ID 拒绝；Browser 必须证明 257-group 或畸形 plan 只关闭 box/mask 而不删除精确红绿证据、multi-host atom 合法聚合、parser-time decoy 与 live prototype 篡改失败关闭。Electron 必须覆盖再次点击与 Escape 返回总览、筛选不激活、单侧新增/删除另一侧无 mask/scroll，以及段落文字和段落样式分别使用 text-content/element-box。50%–200% 缩放、resize 与字体变化后，前后页保持同一 `activeFocusGroupId`，框与遮罩孔保持同一 canonical `pathData`，
-  评论、Tab、同步/独立滚动、缩放和采纳闭环继续运行。
+  评论、Tab、同步/独立滚动、缩放和采纳闭环继续运行。真实 Electron 像素
+  oracle 还必须在同一侧比较总览/聚焦的稳定作者元素：框内像素基本不变，
+  框外明显接近白色；即使作者 CSS 全局设置
+  `filter`/`backdrop-filter`/`mix-blend-mode !important`，Review 自有 mask
+  primitive 仍不得被污染。DOM path、属性或 computed style 不能单独证明最终
+  遮罩正确。
 - 审阅滚动回归必须直接证明页面概览会递增手势代次、取消待执行跟随帧并保留语义映射；评论布局契约还必须接受超出 100,000px 的有限长文档坐标，同时继续拒绝非有限值和超过安全上限的坐标。
 - 评论标记必须覆盖无 `id`、`data-*`、`name`、`aria-label` 的 class-only 普通目标；私有绑定、评论正文和 locator map 不进入 authored HTML 或后续 bootstrap，恶意作者 listener 不能抢先伪造评论端口。
 - 应用更新：Node 用伪 updater 证明 stable-only、点击后单次下载、差分开启、普通退出不安装、仅 downloaded 状态可安装和错误降级；Preload/Workbench 合同证明状态快照、下载/安装意图、无 Canvas 完成横幅与重启确认保持窄边界。

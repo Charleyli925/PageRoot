@@ -29,8 +29,6 @@ import type {
 export const REVIEW_DOCUMENT_STYLE = String.raw`
   html {
     --pageroot-review-context-opacity: .18;
-    --pageroot-review-context-grayscale: .45;
-    --pageroot-review-context-saturation: .75;
     --pageroot-review-ui-scale: 1;
     scroll-behavior: auto !important;
     overflow-anchor: none !important;
@@ -81,6 +79,9 @@ ${REVIEW_TEXT_EVIDENCE_MARKER_CSS}
     background: transparent !important;
     opacity: 1 !important;
     filter: none !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    mix-blend-mode: normal !important;
     transform: none !important;
     pointer-events: none !important;
   }
@@ -105,6 +106,9 @@ ${REVIEW_TEXT_EVIDENCE_MARKER_CSS}
     box-shadow: none !important;
     opacity: 1 !important;
     filter: none !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    mix-blend-mode: normal !important;
     transform: none !important;
     pointer-events: none !important;
   }
@@ -120,6 +124,9 @@ ${REVIEW_TEXT_EVIDENCE_MARKER_CSS}
     outline: none !important;
     opacity: 1 !important;
     filter: none !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    mix-blend-mode: normal !important;
     transform: none !important;
     pointer-events: none !important;
   }
@@ -157,6 +164,9 @@ ${REVIEW_TEXT_EVIDENCE_MARKER_CSS}
     background: transparent !important;
     opacity: 1 !important;
     filter: none !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    mix-blend-mode: normal !important;
     transform: none !important;
     pointer-events: none !important;
   }
