@@ -1650,11 +1650,15 @@ test("latest Runtime candidate wins across slow ECharts, native editing, history
 
     const candidateIds = [];
     const waitForNewCandidate = async (previousId) => {
-      await expect.poll(async () => {
-        const candidateId = await editor.getAttribute("data-runtime-candidate-id");
-        return Boolean(candidateId && candidateId !== previousId);
-      }).toBe(true);
-      return editor.getAttribute("data-runtime-candidate-id");
+      const candidateHandle = await page.waitForFunction((priorCandidateId) => {
+        const candidateId = document.querySelector(
+          '[data-testid="html-canvas-editor"]',
+        )?.getAttribute("data-runtime-candidate-id");
+        return candidateId && candidateId !== priorCandidateId ? candidateId : false;
+      }, previousId, { polling: "raf", timeout: 10_000 });
+      const candidateId = await candidateHandle.jsonValue();
+      await candidateHandle.dispose();
+      return candidateId;
     };
     const captureNextCandidate = async (trigger) => {
       const previousId = await editor.getAttribute("data-runtime-candidate-id");
@@ -1774,16 +1778,25 @@ test("latest Runtime candidate wins across slow ECharts, native editing, history
       selection?.addRange(range);
       element.focus();
     });
-    const beforeEnterCandidate = await editor.getAttribute("data-runtime-candidate-id");
+    const lastKnownGoodBeforeEnter = await editor.getAttribute(
+      "data-runtime-last-known-good-id",
+    );
     await heading.press("Enter");
-    const enterCandidate = await waitForNewCandidate(beforeEnterCandidate);
+    await expect.poll(async () => {
+      const candidateId = await editor.getAttribute("data-runtime-last-known-good-id");
+      return candidateId && candidateId !== lastKnownGoodBeforeEnter
+        ? candidateId
+        : null;
+    }, { timeout: 12_000 }).not.toBeNull();
+    const enterCandidate = await editor.getAttribute("data-runtime-last-known-good-id");
     expect(enterCandidate).toBeTruthy();
     candidateIds.push(enterCandidate);
+    await expect(editor).not.toHaveAttribute("data-runtime-candidate-id", /.+/u);
     await expect.poll(() => readFileSync(workingCopyPath, "utf8")).toContain("你好");
     const enterRevision = await expectCheckpointPersisted(page, textRevision);
 
     // Undo and redo intentionally arrive before the slow candidate settles.
-    const beforeUndoCandidate = enterCandidate;
+    const beforeUndoCandidate = await editor.getAttribute("data-runtime-candidate-id");
     await clickEditHistoryMenu(electronApp, page, "undo");
     const undoCandidate = await waitForNewCandidate(beforeUndoCandidate);
     expect(undoCandidate).toBeTruthy();
@@ -1793,7 +1806,48 @@ test("latest Runtime candidate wins across slow ECharts, native editing, history
     const redoCandidate = await waitForNewCandidate(undoCandidate);
     expect(redoCandidate).toBeTruthy();
     candidateIds.push(redoCandidate);
-    await expectCheckpointPersisted(page, undoRevision);
+    const redoRevision = await expectCheckpointPersisted(page, undoRevision);
+    await clickEditHistoryMenu(electronApp, page, "undo");
+    const secondUndoCandidate = await waitForNewCandidate(redoCandidate);
+    candidateIds.push(secondUndoCandidate);
+    const secondUndoRevision = await expectCheckpointPersisted(page, redoRevision);
+    await clickEditHistoryMenu(electronApp, page, "redo");
+    const secondRedoCandidate = await waitForNewCandidate(secondUndoCandidate);
+    candidateIds.push(secondRedoCandidate);
+    await expectCheckpointPersisted(page, secondUndoRevision);
+
+    // The history fence created a pending browser-edit resume. Three candidates
+    // are superseded before the fourth activates; the winner must inherit the
+    // same target and caret transaction rather than observe cancel(A/B/C).
+    expect(new Set([
+      undoCandidate,
+      redoCandidate,
+      secondUndoCandidate,
+      secondRedoCandidate,
+    ]).size).toBe(4);
+    await expect.poll(() => page.evaluate(() => (
+      window.__PAGEROOT_RUNTIME_RELEASES__?.length || 0
+    ))).toBeGreaterThan(0);
+    await page.evaluate(() => {
+      const releases = window.__PAGEROOT_RUNTIME_RELEASES__ || [];
+      window.__PAGEROOT_RUNTIME_RELEASES__ = [];
+      releases.forEach((release) => release());
+    });
+    await expect.poll(() => surface.getAttribute("data-edit-runtime-outcome"), {
+      timeout: 12_000,
+    }).toBe("ready");
+    frame = await currentEditorFrame(page);
+    heading = frame.locator('[data-native-case="runtime-latest-wins-text"]').first();
+    await expect(heading).toHaveAttribute("contenteditable", "true");
+    await expect.poll(() => heading.evaluate((element) => {
+      const selection = document.getSelection();
+      return Boolean(
+        selection?.rangeCount
+        && selection.isCollapsed
+        && selection.anchorNode
+        && element.contains(selection.anchorNode),
+      );
+    })).toBe(true);
 
     // A true latest candidate activation failure must preserve the old dynamic
     // view and shared grant. The following source checkpoint removes the fault
@@ -2122,10 +2176,17 @@ test("a failed runtime candidate leaves the old active frame managed and never r
       sourcePath,
       "runtime-candidate-failure",
     );
+    const workingCopyPath = await managedWorkingCopyPath(page, sourcePath);
+    const lastKnownGoodSource = readFileSync(workingCopyPath, "utf8");
     await frame.locator('[data-native-case="runtime-candidate-failure"]').click();
     const toolbar = page.getByRole("toolbar", { name: /编辑/u });
     await expect(toolbar).toBeVisible();
     await expect(toolbar.getByRole("button", { name: "下移", exact: true })).toBeVisible();
+    await toolbar.getByRole("button", { name: /给.+留评论/u }).click();
+    const commentComposer = page.getByRole("region", { name: "添加评论" });
+    await commentComposer.getByRole("textbox", { name: "评论内容" })
+      .fill("保留这次结构调整。");
+    await commentComposer.getByRole("button", { name: "评论", exact: true }).click();
 
     await armRuntimeHandoffSamples(page);
     await toolbar.getByRole("button", { name: "下移", exact: true }).click();
@@ -2168,6 +2229,31 @@ test("a failed runtime candidate leaves the old active frame managed and never r
     await expect.poll(() => page.locator(".canvas-edit-surface").getAttribute(
       "data-edit-runtime-phase",
     )).toBe("settled");
+
+    const latestWorkingSource = readFileSync(workingCopyPath, "utf8");
+    const lastKnownGoodHash = buildSourceIndex(lastKnownGoodSource).sourceSha256;
+    const latestWorkingHash = buildSourceIndex(latestWorkingSource).sourceSha256;
+    expect(latestWorkingHash).not.toBe(lastKnownGoodHash);
+
+    await page.getByRole("button", { name: /AI 助手/u }).click();
+    await chooseClipboardDelivery(page);
+    await expect(page.getByText(
+      "最新页面还没有完成显示，请重新加载动态内容后再发起修改。",
+      { exact: true },
+    )).toHaveCount(1);
+    await expect(page.getByTestId("html-canvas-editor")).toHaveAttribute(
+      "data-working-source-sha256",
+      latestWorkingHash,
+    );
+    await expect(page.getByTestId("html-canvas-editor")).toHaveAttribute(
+      "data-rendered-projection-sha256",
+      lastKnownGoodHash,
+    );
+    await expect(page.getByTestId("html-canvas-editor")).toHaveAttribute(
+      "data-rendered-projection-stale",
+      "true",
+    );
+    await expect(page.getByTestId("ai-conversation-action-bar")).toHaveCount(0);
   });
 });
 
@@ -2313,7 +2399,7 @@ test("unsupported Script programs enter an explicit static Edit state", async ()
     await expect(page.getByTestId("edit-runtime-static-fallback")).toContainText(
       "部分动态内容未加载",
     );
-    await expect(page.getByRole("button", { name: "重新加载动态内容" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "重新加载动态内容" })).toHaveCount(0);
     await expect(page.locator(".canvas-edit-surface")).toHaveAttribute(
       "data-edit-runtime-phase",
       "static-fallback",

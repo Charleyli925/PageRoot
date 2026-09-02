@@ -454,6 +454,7 @@ export class WorkspaceController {
     candidateGeneration: number;
     candidateSourceRevision: string;
     outcome: "ready" | "rejected" | "failed" | "superseded";
+    preserveLastKnownGood: boolean;
   }): boolean;
   retryEditAuthorRuntime(): boolean;
   evaluateFirstEditGuide(input: FirstEditGuideEligibilityInput): FirstEditGuideSnapshot | null;

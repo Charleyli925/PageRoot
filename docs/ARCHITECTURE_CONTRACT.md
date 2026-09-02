@@ -558,8 +558,19 @@ Once a usable Runtime is active, a newer candidate's preparation, connection,
 positioning or activation failure destroys only that candidate and preserves
 the previous frame, viewport, Selection and edit capability. A true static
 fallback is disclosed as “部分动态内容未加载”, remains dismissible, and offers
-“重新加载动态内容”; a successful retry removes the notice. The Workbench must
+“重新加载动态内容” only for transient preparation, execution or exact-recovery
+failures; unsupported programs and an unavailable desktop runtime expose no
+ineffective retry. A successful retry removes the notice. The Workbench must
 not interpret iframe `load` alone as Runtime success.
+The candidate controller is the sole owner of whether a physical
+last-known-good iframe exists. It reports that settlement fact to
+`EditAuthorRuntimeSession`; the application session never reconstructs or
+caches its own boolean. The Canvas freeze contract reports the latest complete
+working-source Hash separately from the visible verified-projection Hash and a
+stale-projection flag. A preserved older iframe never advances the latter.
+Project switch, close and AI submission fail closed until the visible
+projection has caught up; they never substitute the working-source Hash for a
+missing or stale rendered Hash.
 Runtime DOM never becomes SourcePatch, Source HTML, save, Version, export,
 Request, Candidate or Review input.
 

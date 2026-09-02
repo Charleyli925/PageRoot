@@ -5,11 +5,18 @@ import {
   editRuntimeProgramIdentity,
   isEditRuntimeDocumentBasePath,
   isEditRuntimeSourceSha256,
+  unsupportedEditRuntimeProgramReason,
 } from "../domain/edit-runtime-contract.js";
 
 function isRecord(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
+
+const RETRYABLE_STATIC_FALLBACK_OUTCOMES = new Set([
+  "prepare-failed",
+  "runtime-failed",
+  "recovery-failed",
+]);
 
 function frozenSnapshot({
   phase = "static",
@@ -26,6 +33,8 @@ function frozenSnapshot({
     canvasGeneration: Number.isSafeInteger(canvasGeneration) ? canvasGeneration : null,
     grant,
     lastOutcome,
+    retryAvailable: phase === "static-fallback"
+      && RETRYABLE_STATIC_FALLBACK_OUTCOMES.has(lastOutcome),
   });
 }
 
@@ -143,7 +152,6 @@ export class EditAuthorRuntimeSession {
   #recoveryGrant = null;
   #recoveryConsumed = false;
   #runtimeAttempt = null;
-  #hasLastKnownGood = false;
   #attemptGeneration = 0;
   #requestSequence = 0;
   #disposed = false;
@@ -207,7 +215,6 @@ export class EditAuthorRuntimeSession {
     this.#pendingPreparation = null;
     this.#activeRequest = null;
     this.#runtimeAttempt = null;
-    this.#hasLastKnownGood = false;
     this.#revokeActiveGrants();
     this.#emit({
       phase,
@@ -267,7 +274,6 @@ export class EditAuthorRuntimeSession {
     this.#activeRequest = null;
     this.#recoveryConsumed = false;
     this.#runtimeAttempt = null;
-    this.#hasLastKnownGood = false;
     this.#revokeActiveGrants();
     this.#identity = identity;
     const attemptGeneration = this.#attemptGeneration;
@@ -283,6 +289,9 @@ export class EditAuthorRuntimeSession {
     }
     const scriptContract = collectEditRuntimeScripts(identity.html);
     const programIdentity = editRuntimeProgramIdentity(identity.html);
+    const unsupportedProgram = scriptContract.executableScripts.some((script) => (
+      unsupportedEditRuntimeProgramReason(script.inline)
+    ));
     if (
       scriptContract.executableScripts.length < 1
       && !scriptContract.unsupportedReason
@@ -298,6 +307,7 @@ export class EditAuthorRuntimeSession {
     }
     if (
       scriptContract.unsupportedReason
+      || unsupportedProgram
       || scriptContract.executableScripts.length > EDIT_AUTHOR_RUNTIME_BUDGET.scriptCount
       || !programIdentity
     ) {
@@ -509,6 +519,7 @@ export class EditAuthorRuntimeSession {
     candidateGeneration,
     candidateSourceRevision,
     outcome,
+    preserveLastKnownGood = false,
   } = {}) {
     const grant = this.#snapshot.grant;
     const attempt = normalizedRuntimeAttempt({
@@ -530,7 +541,7 @@ export class EditAuthorRuntimeSession {
     // successor attempt can begin without revocation or static degradation.
     if (outcome === "superseded") {
       this.#emit({
-        phase: this.#hasLastKnownGood ? "settled" : "ready",
+        phase: preserveLastKnownGood ? "settled" : "ready",
         sourceSha256: grant.sourceSha256,
         sourcePath: this.#identity?.sourcePath || null,
         canvasGeneration: grant.canvasGeneration,
@@ -540,7 +551,6 @@ export class EditAuthorRuntimeSession {
       return true;
     }
     if (outcome === "ready") {
-      this.#hasLastKnownGood = true;
       this.#emit({
         phase: "settled",
         sourceSha256: grant.sourceSha256,
@@ -551,7 +561,7 @@ export class EditAuthorRuntimeSession {
       });
       return true;
     }
-    if (this.#hasLastKnownGood) {
+    if (preserveLastKnownGood) {
       this.#emit({
         phase: "settled",
         sourceSha256: grant.sourceSha256,
@@ -579,6 +589,7 @@ export class EditAuthorRuntimeSession {
       this.#disposed
       || !identity
       || this.#snapshot.phase !== "static-fallback"
+      || !this.#snapshot.retryAvailable
     ) return false;
     this.#identity = null;
     const snapshot = this.refresh({
@@ -600,7 +611,6 @@ export class EditAuthorRuntimeSession {
     this.#pendingPreparation = null;
     this.#activeRequest = null;
     this.#runtimeAttempt = null;
-    this.#hasLastKnownGood = false;
     this.#listeners.clear();
     this.#snapshot = frozenSnapshot();
   }

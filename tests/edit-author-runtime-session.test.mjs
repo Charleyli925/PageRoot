@@ -71,8 +71,14 @@ function beginRuntime(session, grant, overrides = {}) {
   return session.beginRuntime({ ...grant, ...attempt });
 }
 
-function settleRuntime(session, grant, outcome, attempt = runtimeAttempts.get(session)) {
-  return session.settleRuntime({ ...grant, ...attempt, outcome });
+function settleRuntime(
+  session,
+  grant,
+  outcome,
+  attempt = runtimeAttempts.get(session),
+  settlement = {},
+) {
+  return session.settleRuntime({ ...grant, ...attempt, outcome, ...settlement });
 }
 
 test("one canvas generation prepares at most once despite source and autosave changes", async () => {
@@ -283,7 +289,9 @@ test("a superseded disposable frame keeps the shared runtime grant alive", async
 
   assert.equal(beginRuntime(session, grant), true);
   assert.equal(
-    settleRuntime(session, grant, "superseded"),
+    settleRuntime(session, grant, "superseded", undefined, {
+      preserveLastKnownGood: true,
+    }),
     true,
   );
   assert.equal(session.snapshot.phase, "settled");
@@ -336,12 +344,46 @@ test("a real candidate failure after supersession preserves last-known-good", as
   beginRuntime(session, grant);
   settleRuntime(session, grant, "ready");
   beginRuntime(session, grant);
-  settleRuntime(session, grant, "superseded");
+  settleRuntime(session, grant, "superseded", undefined, {
+    preserveLastKnownGood: true,
+  });
   assert.equal(beginRuntime(session, grant), true);
-  assert.equal(settleRuntime(session, grant, "failed"), true);
+  assert.equal(settleRuntime(session, grant, "failed", undefined, {
+    preserveLastKnownGood: true,
+  }), true);
   assert.equal(session.snapshot.phase, "settled");
   assert.equal(session.snapshot.lastOutcome, "candidate-failed");
   assert.deepEqual(revoked, []);
+});
+
+test("a remounted controller cannot preserve a session-only last-known-good", async () => {
+  const revoked = [];
+  const session = new EditAuthorRuntimeSession({
+    port: {
+      prepare: async (request) => success(request),
+      revoke: async (sessionId) => revoked.push(sessionId),
+    },
+  });
+
+  session.refresh(input());
+  session.startPreparation(input());
+  await flushAsync();
+  const grant = session.snapshot.grant;
+  beginRuntime(session, grant);
+  settleRuntime(session, grant, "ready");
+  assert.equal(session.snapshot.phase, "settled");
+
+  // A same-generation Canvas remount creates a fresh physical controller.
+  // Its first candidate has no old iframe even though the application phase
+  // previously observed a successful Runtime.
+  beginRuntime(session, grant);
+  assert.equal(settleRuntime(session, grant, "failed", undefined, {
+    preserveLastKnownGood: false,
+  }), true);
+
+  assert.equal(session.snapshot.phase, "static-fallback");
+  assert.equal(session.snapshot.lastOutcome, "runtime-failed");
+  assert.deepEqual(revoked, [grant.sessionId]);
 });
 
 test("the first successful compatible runtime locks the canvas without recovery", async () => {
@@ -511,6 +553,28 @@ test("failed preparation reaches an explicit static fallback", async () => {
   assert.equal(session.snapshot.phase, "static-fallback");
   assert.equal(session.snapshot.grant, null);
   assert.equal(session.snapshot.lastOutcome, "prepare-failed");
+  assert.equal(session.snapshot.retryAvailable, true);
+});
+
+test("a deterministic runtime rejection does not offer an ineffective retry", async () => {
+  const session = new EditAuthorRuntimeSession({
+    port: {
+      prepare: async (request) => success(request),
+      revoke: async () => {},
+    },
+  });
+
+  session.refresh(input());
+  session.startPreparation(input());
+  await flushAsync();
+  const grant = session.snapshot.grant;
+  beginRuntime(session, grant);
+  settleRuntime(session, grant, "rejected");
+
+  assert.equal(session.snapshot.phase, "static-fallback");
+  assert.equal(session.snapshot.lastOutcome, "rejected");
+  assert.equal(session.snapshot.retryAvailable, false);
+  assert.equal(session.retry(), false);
 });
 
 test("static fallback can retry preparation and disappear after success", async () => {
@@ -554,7 +618,42 @@ test("an unsupported authored program publishes static fallback before preparati
 
   assert.equal(session.snapshot.phase, "static-fallback");
   assert.equal(session.snapshot.lastOutcome, "unsupported-program");
+  assert.equal(session.snapshot.retryAvailable, false);
+  assert.equal(session.retry(), false);
   assert.equal(requests.length, 0);
+});
+
+test("a relative module import is classified as unsupported before preparation", () => {
+  const requests = [];
+  const session = new EditAuthorRuntimeSession({
+    port: {
+      prepare: async (request) => {
+        requests.push(request);
+        return success(request);
+      },
+      revoke: async () => {},
+    },
+  });
+
+  session.refresh(input({
+    html: "<!doctype html><html><body><script type=\"module\">import value from './module.js';</script></body></html>",
+  }));
+
+  assert.equal(session.snapshot.phase, "static-fallback");
+  assert.equal(session.snapshot.lastOutcome, "unsupported-program");
+  assert.equal(session.snapshot.retryAvailable, false);
+  assert.deepEqual(requests, []);
+});
+
+test("desktop-unavailable static fallback does not offer an ineffective retry", () => {
+  const session = new EditAuthorRuntimeSession();
+
+  session.refresh(input());
+
+  assert.equal(session.snapshot.phase, "static-fallback");
+  assert.equal(session.snapshot.lastOutcome, "desktop-unavailable");
+  assert.equal(session.snapshot.retryAvailable, false);
+  assert.equal(session.retry(), false);
 });
 
 test("ordinary, Canvas and SVG scripts use the same preparation owner", async () => {

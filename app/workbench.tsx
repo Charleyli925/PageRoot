@@ -4809,6 +4809,7 @@ export default function Workbench() {
       if (
         outcome.code === "RUN_SUBMISSION_NATIVE_EDIT"
         || outcome.code === "RUN_SUBMISSION_FREEZE"
+        || outcome.code === "RUN_SUBMISSION_CANVAS_STALE"
       ) {
         editorRef.current?.showCommitBlocked(outcome.reason);
         return;
@@ -6354,9 +6355,13 @@ export default function Workbench() {
               {staticFallbackNoticeIdentity ? (
                 <EditRuntimeStaticFallbackNotice
                   key={staticFallbackNoticeIdentity}
-                  onRetry={() => {
-                    workspaceControllerRef.current?.retryEditAuthorRuntime();
-                  }}
+                  {...(editRuntimeSnapshot?.retryAvailable
+                    ? {
+                        onRetry: () => {
+                          workspaceControllerRef.current?.retryEditAuthorRuntime();
+                        },
+                      }
+                    : {})}
                 />
               ) : null}
               {editRuntimePreparing && !activeRuntimeCanvasUsable ? (
@@ -6398,7 +6403,7 @@ export default function Workbench() {
                       candidateSourceRevision: attempt.sourceRevision,
                     });
                   }}
-                  onEditRuntimeLoadOutcome={(grant, outcome: HtmlCanvasEditRuntimeLoadOutcome, attempt) => {
+                  onEditRuntimeLoadOutcome={(grant, outcome: HtmlCanvasEditRuntimeLoadOutcome, attempt, settlement) => {
                     workspaceControllerRef.current?.settleEditAuthorRuntime({
                       sessionId: grant.sessionId,
                       sourceSha256: grant.sourceSha256,
@@ -6407,6 +6412,7 @@ export default function Workbench() {
                       candidateGeneration: attempt.generation,
                       candidateSourceRevision: attempt.sourceRevision,
                       outcome,
+                      preserveLastKnownGood: settlement.preserveLastKnownGood,
                     });
                     if (outcome === "ready" && documentRuntimeTabId) {
                       retainRuntimeCanvas(

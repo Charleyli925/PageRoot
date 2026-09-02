@@ -6,7 +6,7 @@ import { XIcon } from "@phosphor-icons/react/dist/csr/X";
 export default function EditRuntimeStaticFallbackNotice({
   onRetry,
 }: {
-  onRetry: () => void;
+  onRetry?: () => void;
 }) {
   const [dismissed, setDismissed] = useState(false);
   if (dismissed) return null;
@@ -20,13 +20,15 @@ export default function EditRuntimeStaticFallbackNotice({
     >
       <strong>部分动态内容未加载</strong>
       <span>页面仍可编辑和保存。</span>
-      <button
-        type="button"
-        className="edit-runtime-static-fallback__retry"
-        onClick={onRetry}
-      >
-        重新加载动态内容
-      </button>
+      {onRetry ? (
+        <button
+          type="button"
+          className="edit-runtime-static-fallback__retry"
+          onClick={onRetry}
+        >
+          重新加载动态内容
+        </button>
+      ) : null}
       <button
         type="button"
         className="edit-runtime-static-fallback__close"

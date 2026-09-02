@@ -769,7 +769,8 @@ export class ProjectWorkflow {
           cutoffRevision,
           persistedSourceSha256: this.#documentSession.persistedSourceSha256,
           workingHtmlSha256: this.#documentSession.workingHtmlSha256,
-          canvasRenderedSha256: committed?.canvasRenderedSha256 || committed?.sourceSha256,
+          canvasRenderedSha256: committed?.renderedProjectionSha256
+            || committed?.canvasRenderedSha256,
           protectionHtmlSha256: protectionEvidence?.htmlSha256 || "",
           recoveryProtected,
         });
@@ -1193,7 +1194,22 @@ export class ProjectWorkflow {
         }
         imposedEditorFreeze = true;
         frozenHtml = frozen.html;
-        frozenSourceSha256 = frozen.canvasRenderedSha256 || frozen.sourceSha256;
+        const workingSourceSha256 = String(
+          frozen.workingSourceSha256 || frozen.sourceSha256 || "",
+        );
+        const renderedProjectionSha256 = String(
+          frozen.renderedProjectionSha256 || frozen.canvasRenderedSha256 || "",
+        );
+        if (
+          frozen.renderedProjectionStale === true
+          || !workingSourceSha256
+          || renderedProjectionSha256 !== workingSourceSha256
+        ) {
+          return inAppBlock(
+            "最新页面还没有完成显示，已取消关闭。请重新加载动态内容后再试。",
+          );
+        }
+        frozenSourceSha256 = workingSourceSha256;
         lifecycle.frozenRequestId = closeRequestId;
         lifecycle.frozenContext = this.#projectSession.context
           ? Object.freeze({ ...this.#projectSession.context })
