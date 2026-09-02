@@ -117,8 +117,8 @@ test("shipped Codex ACP and 源页 HTTP deliveries can be newly frozen", () => {
     {
       providerId: "pageroot",
       runtimeId: "http",
-      requestedModelId: "pageroot:deepseek-chat",
-      resolvedModelId: "pageroot:deepseek-chat",
+      requestedModelId: "pageroot:deepseek-v4-pro",
+      resolvedModelId: "pageroot:deepseek-v4-pro",
       reasoning,
     },
   ]) {
@@ -126,8 +126,49 @@ test("shipped Codex ACP and 源页 HTTP deliveries can be newly frozen", () => {
       mode: "managed-agent",
       selection,
       trustPolicyVersion: "trusted-local-agent-v1",
+      configuration: {
+        schemaVersion: "1.0.0",
+        providerId: selection.providerId,
+        runtimeId: selection.runtimeId,
+        vendorId: selection.providerId === "pageroot" ? "deepseek" : null,
+        baseUrlOrigin: selection.providerId === "pageroot" ? "https://api.deepseek.com" : null,
+        modelId: selection.resolvedModelId,
+        reasoning: "auto",
+        capabilityRevision: "2026-09-03.1",
+        credentialGeneration: selection.providerId === "pageroot" ? 1 : 0,
+        configurationDigest: `sha256:${"a".repeat(64)}`,
+      },
     };
     assert.deepEqual(normalizeNewAgentDelivery(delivery).selection.providerId, selection.providerId);
     assert.equal(legacyDriverForAgentDelivery(delivery), null);
   }
+});
+
+test("configuration reasoning must match the frozen selection", () => {
+  const delivery = {
+    mode: "managed-agent",
+    selection: {
+      providerId: "pageroot",
+      runtimeId: "http",
+      requestedModelId: "pageroot:model-a",
+      resolvedModelId: "pageroot:model-a",
+      reasoning: { requested: "high", applied: "high", resolution: "exact" },
+    },
+    trustPolicyVersion: "trusted-local-agent-v1",
+    configuration: {
+      schemaVersion: "1.0.0",
+      providerId: "pageroot",
+      runtimeId: "http",
+      vendorId: "custom",
+      baseUrlOrigin: "https://api.example.com",
+      modelId: "pageroot:model-a",
+      reasoning: "auto",
+      capabilityRevision: "1",
+      credentialGeneration: 1,
+      configurationDigest: `sha256:${"b".repeat(64)}`,
+    },
+  };
+  assert.throws(() => normalizeNewAgentDelivery(delivery), {
+    code: "AGENT_DELIVERY_INVALID",
+  });
 });

@@ -67,6 +67,7 @@ function preserveUseFailureAfterLocalReady(previous) {
         previous.status === "unavailable"
         && [
           "account-capacity",
+          "endpoint-region-mismatch",
           "restart-required",
           "service-unavailable",
           "timeout",

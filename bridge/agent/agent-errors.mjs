@@ -17,13 +17,6 @@ export function failAgentRuntime(code, message, options) {
   throw agentRuntimeError(code, message, options);
 }
 
-export const AGENT_CAPACITY_FAILURE_PATTERN =
-  /capacity|quota|no available model|model unavailable|credit usage limit|upgrade your subscription plan/iu;
-
-export function isAgentCapacityFailureText(value) {
-  return AGENT_CAPACITY_FAILURE_PATTERN.test(String(value || ""));
-}
-
 const MAX_SESSION_API_KEY_CHARS = 512;
 
 export function cleanSessionApiKey(value) {
@@ -44,5 +37,8 @@ export function sessionCredentialEnvironment(credential) {
     PAGEROOT_API_KEY: key,
     PAGEROOT_API_VENDOR: vendorId,
     PAGEROOT_API_BASE_URL: baseUrl,
+    PAGEROOT_API_CREDENTIAL_GENERATION: String(
+      Number.isSafeInteger(credential.credentialGeneration) ? credential.credentialGeneration : 0,
+    ),
   });
 }

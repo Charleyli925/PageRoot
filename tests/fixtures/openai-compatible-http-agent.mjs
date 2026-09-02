@@ -31,7 +31,7 @@ function appliedReasoning(payload) {
   if (payload?.thinking?.type === "disabled") return "none";
   const effort = String(payload?.reasoning_effort || "").trim();
   if (["low", "high", "max"].includes(effort)) return effort;
-  return "high";
+  return "auto";
 }
 
 export function mutateOpenAiCompatibleCandidateHtml(html, reasoning) {
@@ -39,7 +39,7 @@ export function mutateOpenAiCompatibleCandidateHtml(html, reasoning) {
     "<!DOCTYPE html><html><head><title>e2e</title></head>",
     "<body><h1>真实 </h1></body></html>",
   ].join("");
-  const applied = String(reasoning || "high").replace(/[^a-z]/gu, "").slice(0, 16) || "high";
+  const applied = String(reasoning || "auto").replace(/[^a-z]/gu, "").slice(0, 16) || "auto";
   return source
     .replace(
       /<body([^>]*)>/iu,
@@ -54,27 +54,25 @@ export function mutateOpenAiCompatibleCandidateHtml(html, reasoning) {
 export function startOpenAiCompatibleHttpAgent({
   mode = "ready",
   host = "127.0.0.1",
+  rejectedApiKeys = [],
 } = {}) {
+  const rejected = new Set(rejectedApiKeys.map((value) => String(value)));
   return new Promise((resolve, reject) => {
     const server = createServer((request, response) => {
       void (async () => {
         const url = new URL(request.url || "/", `http://${host}`);
         if (mode === "hang") return;
+        const apiKey = String(request.headers.authorization || "").replace(/^Bearer\s+/iu, "");
+        if (rejected.has(apiKey)) {
+          sendJson(response, 401, { error: { code: "invalid_api_key", message: "invalid token" } });
+          return;
+        }
         if (mode === "auth-required") {
           sendJson(response, 401, { error: { message: "invalid token" } });
           return;
         }
         if (mode === "capacity") {
           sendJson(response, 429, { error: { message: "quota exceeded" } });
-          return;
-        }
-        if (request.method === "GET" && url.pathname.endsWith("/models")) {
-          sendJson(response, 200, {
-            data: [
-              { id: "deepseek-v4-flash" },
-              { id: "deepseek-v4-pro" },
-            ],
-          });
           return;
         }
         if (request.method === "POST" && url.pathname.endsWith("/chat/completions")) {

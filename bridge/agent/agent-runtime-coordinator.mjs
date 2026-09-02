@@ -21,6 +21,11 @@ import {
   httpAgentLaunchBaseUrl,
   resolveOpenAiCompatibleVendor,
 } from "../../shared/openai-compatible-vendors.mjs";
+import {
+  createAgentConfigurationSnapshot,
+  publicAgentConfigurationSnapshot,
+  sameAgentConfiguration,
+} from "./agent-configuration-snapshot.mjs";
 
 export const TRUSTED_LOCAL_AGENT_POLICY_VERSION = "trusted-local-agent-v1";
 
@@ -164,6 +169,7 @@ export class AgentRuntimeCoordinator {
   #preflightCleanupUnconfirmed = false;
   #externalRedeemTicket = null;
   #sessionCredentials = new Map();
+  #sessionCredentialGeneration = new Map();
 
   constructor({
     resolveTask,
@@ -323,7 +329,7 @@ export class AgentRuntimeCoordinator {
     });
   }
 
-  setSessionCredential(providerId, apiKey, extras = {}) {
+  async updateAgentConfiguration(providerId, candidate = {}) {
     const id = cleanAgentText(providerId, 32);
     if (id !== PAGEROOT_PROVIDER_ID) {
       failAgentRuntime(
@@ -332,8 +338,12 @@ export class AgentRuntimeCoordinator {
         { status: 409 },
       );
     }
-    const key = cleanSessionApiKey(apiKey);
-    const vendor = resolveOpenAiCompatibleVendor(extras?.vendorId, extras?.baseUrl);
+    const currentCredential = this.#sessionCredentials.get(id) || null;
+    const key = cleanSessionApiKey(candidate.apiKey || currentCredential?.apiKey);
+    const vendor = resolveOpenAiCompatibleVendor(
+      candidate?.vendorId || currentCredential?.vendorId,
+      candidate?.baseUrl || currentCredential?.baseUrl,
+    );
     if (!key || !vendor) {
       failAgentRuntime(
         "AGENT_SESSION_CREDENTIAL_INVALID",
@@ -341,22 +351,93 @@ export class AgentRuntimeCoordinator {
         { status: 400 },
       );
     }
-    this.#sessionCredentials.set(id, Object.freeze({
+    const generation = (this.#sessionCredentialGeneration.get(id) || 0) + 1;
+    this.#sessionCredentialGeneration.set(id, generation);
+    if (currentCredential) {
+      // Preserve the last usable Token/vendor while rebasing its generation.
+      // This invalidates every already-issued configuration snapshot even when
+      // the candidate validation below fails.
+      this.#sessionCredentials.set(id, Object.freeze({
+        ...currentCredential,
+        credentialGeneration: generation,
+      }));
+    }
+    for (const [ticketId, ticket] of this.#tickets) {
+      if (ticket.providerId === id) this.#tickets.delete(ticketId);
+    }
+    const nextCredential = Object.freeze({
       apiKey: key,
       vendorId: vendor.id,
       baseUrl: vendor.baseUrl,
-    }));
+      credentialGeneration: generation,
+    });
+    const requestedSelection = canonicalSelection(candidate.selection || {
+      providerId: PAGEROOT_PROVIDER_ID,
+      runtimeId: "http",
+      requestedModelId: null,
+      resolvedModelId: null,
+      reasoning: { requested: null, applied: null, resolution: "provider-default" },
+    }, TRUSTED_LOCAL_AGENT_POLICY_VERSION);
+    if (requestedSelection.providerId !== id || requestedSelection.runtimeId !== "http") {
+      failAgentRuntime("AGENT_SELECTION_UNSUPPORTED", "Token 与当前 Agent 选择不匹配。", { status: 409 });
+    }
+    const candidateEnvironment = Object.freeze({
+      ...this.#environment,
+      ...sessionCredentialEnvironment({
+        ...nextCredential,
+        baseUrl: httpAgentLaunchBaseUrl(this.#environment, nextCredential.baseUrl),
+      }),
+    });
+    // Validate against a candidate environment before replacing the current
+    // in-memory credential. A failed Token/vendor switch leaves the old usable
+    // connection intact; its old one-use tickets stay invalidated and require
+    // a fresh preflight before the next Request.
+    const prepared = await this.#providerRegistry.preflightForSelection(
+      requestedSelection,
+      "execution",
+      { environment: candidateEnvironment },
+    );
+    this.#assertAcceptingStarts();
+    if (this.#sessionCredentialGeneration.get(id) !== generation) {
+      failAgentRuntime(
+        "AGENT_SESSION_CREDENTIAL_STALE",
+        "更新的连接操作已取代本次结果。",
+        { status: 409 },
+      );
+    }
+    this.#sessionCredentials.set(id, nextCredential);
+    for (const [ticketId, ticket] of this.#tickets) {
+      if (ticket.providerId === id) this.#tickets.delete(ticketId);
+    }
     return Object.freeze({
       ok: true,
+      status: "ready",
       providerId: id,
       vendorId: vendor.id,
+      vendorDisplayName: vendor.displayName,
+      baseUrl: vendor.baseUrl,
       configured: true,
+      modelCount: prepared.evidence.modelCount,
+      models: prepared.evidence.models ?? [],
+      selection: prepared.selection,
+      configuration: publicAgentConfigurationSnapshot(prepared.configuration),
     });
+  }
+
+  setSessionCredential(providerId, apiKey, extras = {}) {
+    return this.updateAgentConfiguration(providerId, { ...extras, apiKey });
   }
 
   clearSessionCredential(providerId) {
     const id = cleanAgentText(providerId, 32);
+    this.#sessionCredentialGeneration.set(
+      id,
+      (this.#sessionCredentialGeneration.get(id) || 0) + 1,
+    );
     this.#sessionCredentials.delete(id);
+    for (const [ticketId, ticket] of this.#tickets) {
+      if (ticket.providerId === id) this.#tickets.delete(ticketId);
+    }
     return Object.freeze({
       ok: true,
       providerId: id,
@@ -431,6 +512,14 @@ export class AgentRuntimeCoordinator {
       );
     }
     const resolvedSelection = prepared.selection;
+    const configuration = prepared.configuration || createAgentConfigurationSnapshot({
+      providerId: prepared.providerId,
+      runtimeId: prepared.runtimeId,
+      installation: prepared.installation,
+      installationDigest: prepared.installationDigest,
+      selection: resolvedSelection,
+      capabilityRevision: prepared.evidence?.capabilityRevision || prepared.evidence?.version,
+    });
     const fingerprint = selectionFingerprint(resolvedSelection);
     const preflightId = `preflight_${randomUUID().replaceAll("-", "")}`;
     const createdAt = this.#clock.now();
@@ -446,6 +535,7 @@ export class AgentRuntimeCoordinator {
       securityProfile: prepared.securityProfile,
       installation: prepared.installation,
       installationDigest: prepared.installationDigest,
+      configuration,
       capabilities: prepared.capabilities,
       evidence: prepared.evidence,
       selection: resolvedSelection,
@@ -463,6 +553,7 @@ export class AgentRuntimeCoordinator {
       modelCount: prepared.evidence.modelCount,
       models: prepared.evidence.models ?? [],
       selection: resolvedSelection,
+      configuration: publicAgentConfigurationSnapshot(configuration),
       selectionFingerprint: fingerprint,
       expiresAt: new Date(createdAt + PREFLIGHT_TTL_MS).toISOString(),
     });
@@ -501,7 +592,10 @@ export class AgentRuntimeCoordinator {
         { status: 409 },
       );
     }
-    const verified = await this.#providerRegistry.verifyTicket(ticket, { purpose: expectedPurpose });
+    const verified = await this.#providerRegistry.verifyTicket(ticket, {
+      purpose: expectedPurpose,
+      environment: this.#environmentForProvider(ticket.providerId),
+    });
     if (verified.providerId !== ticket.providerId || verified.runtimeId !== ticket.runtimeId
       || verified.securityProfile !== ticket.securityProfile) {
       failAgentRuntime("AGENT_PROVIDER_TICKET_INVALID", "Agent provider ticket binding is invalid.", {
@@ -590,7 +684,14 @@ export class AgentRuntimeCoordinator {
     return true;
   }
 
-  async submit({ driver, selection, trustPolicyAccepted, preflightId, ...identityInput } = {}) {
+  async submit({
+    driver,
+    selection,
+    trustPolicyAccepted,
+    preflightId,
+    configurationDigest,
+    ...identityInput
+  } = {}) {
     this.#assertAcceptingStarts();
     validateTrustPolicy(trustPolicyAccepted);
     const requestedSelection = this.#selectionForInput({
@@ -623,6 +724,13 @@ export class AgentRuntimeCoordinator {
       driver,
       selection: requestedSelection,
     });
+    if (ticket.configuration?.configurationDigest !== String(configurationDigest || "")) {
+      failAgentRuntime(
+        "AGENT_CONFIGURATION_CHANGED",
+        "Agent configuration does not match its preflight ticket.",
+        { status: 409 },
+      );
+    }
     if (!this.#resolveTask) throw new TypeError("Execution authority is not configured.");
     const task = await this.#resolveTask(identity);
     this.#assertAcceptingStarts();
@@ -646,6 +754,7 @@ export class AgentRuntimeCoordinator {
       || delivery.selection.providerId !== ticket.providerId
       || delivery.selection.runtimeId !== ticket.runtimeId
       || !selectionMatchesTicket(ticket.selection, delivery.selection)
+      || !sameAgentConfiguration(delivery.configuration, ticket.configuration)
       || delivery.trustPolicyVersion !== TRUSTED_LOCAL_AGENT_POLICY_VERSION) {
       failAgentRuntime("AGENT_DELIVERY_NOT_AUTHORIZED", "本轮 Request 没有授权所选 Agent 自动执行。", {
         status: 409,
@@ -686,6 +795,28 @@ export class AgentRuntimeCoordinator {
       ownerToken: this.#ownerToken,
       clock: this.#clock,
     });
+    const executionEnvironment = this.#environmentForProvider(ticket.providerId);
+    try {
+      await this.#providerRegistry.verifyTicket(ticket, {
+        purpose: "execution",
+        environment: executionEnvironment,
+      });
+      if (ticket.providerId === PAGEROOT_PROVIDER_ID) {
+        const currentGeneration = Number(
+          this.#environmentForProvider(ticket.providerId).PAGEROOT_API_CREDENTIAL_GENERATION || 0,
+        );
+        if (currentGeneration !== ticket.configuration?.credentialGeneration) {
+          failAgentRuntime(
+            "AGENT_CONFIGURATION_CHANGED",
+            "Agent configuration changed before runtime launch.",
+            { status: 409 },
+          );
+        }
+      }
+    } catch (cause) {
+      if (!existing?.lease) await this.#leaseStore.release(lease).catch(() => false);
+      throw cause;
+    }
     if (!this.#acceptingStarts) {
       const released = await this.#leaseStore.release(lease).catch(() => false);
       if (released !== true) this.#preflightCleanupUnconfirmed = true;
@@ -738,7 +869,7 @@ export class AgentRuntimeCoordinator {
     const runtimePromise = this.#providerRegistry.run(ticket, {
       policy,
       prompt: finalizerPrompt(policy),
-      baseEnvironment: this.#environmentForProvider(ticket.providerId),
+      baseEnvironment: executionEnvironment,
       cancellationSignal: controller.signal,
       onEvent: observe,
     });
@@ -753,7 +884,7 @@ export class AgentRuntimeCoordinator {
         entry.phase = "cancelled";
       } else {
         entry.state = "completed";
-        entry.phase = "awaiting-validation";
+        entry.phase = "preparing-review";
       }
       entry.retryable = false;
       if (entry.cancelState === "requested") entry.cancelState = "provider-acknowledged";
@@ -877,6 +1008,7 @@ export class AgentRuntimeCoordinator {
     this.#acceptingStarts = false;
     this.#tickets.clear();
     this.#sessionCredentials.clear();
+    this.#sessionCredentialGeneration.clear();
     this.#shutdownPromise = (async () => {
       const startTimeout = timeoutAfter(
         this.#cancelTimeoutMs,

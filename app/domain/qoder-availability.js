@@ -13,6 +13,7 @@ const FAILURE_REASONS = Object.freeze({
   QODER_AUTH_REQUIRED: "auth-required",
   QODER_ACCOUNT_CAPACITY_UNAVAILABLE: "account-capacity",
   QODER_CAPACITY_UNAVAILABLE: "account-capacity",
+  QODER_MODEL_CATALOG_EMPTY: "service-unavailable",
   QODER_PREFLIGHT_TIMEOUT: "timeout",
   QODER_COMMAND_CHANGED: "restart-required",
   QODER_VERSION_MISMATCH: "restart-required",

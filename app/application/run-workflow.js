@@ -12,6 +12,8 @@ import {
 } from "../../shared/agent-delivery.mjs";
 
 const SHA256 = /^sha256:[a-f0-9]{64}$/u;
+const SOURCE_AGENT_MAX_CONTEXT_BYTES = 2 * 1024 * 1024;
+const SOURCE_AGENT_RESERVED_CONTEXT_BYTES = 256 * 1024;
 const POLL_DELAYS_MS = Object.freeze({
   reconcile: 500,
   starting: 500,
@@ -23,12 +25,99 @@ const POLL_DELAYS_MS = Object.freeze({
 const NON_RETRYABLE_AGENT_ERRORS = new Set([
   "ACP_PROCESS_CLEANUP_UNCONFIRMED",
   "AGENT_DELIVERY_NOT_AUTHORIZED",
+  "AGENT_CONFIGURATION_CHANGED",
   "AGENT_RESTART_RECOVERY_REQUIRED",
   "AGENT_RETRY_BLOCKED",
   "AGENT_RETRY_OUTPUT_PRESENT",
   "AGENT_TASK_NOT_PROCESSING",
   "AGENT_TASK_POLICY_INVALID",
 ]);
+
+function sourceAgentSupportsAttachment(attachment) {
+  const mediaType = String(attachment?.mediaType || "").toLowerCase();
+  if (mediaType.startsWith("text/")
+    || ["application/json", "application/xml", "application/javascript"].includes(mediaType)
+    || mediaType.endsWith("+json")
+    || mediaType.endsWith("+xml")) return true;
+  if (mediaType && mediaType !== "application/octet-stream") return false;
+  return /\.(?:txt|md|markdown|json|jsonl|csv|tsv|xml|html?|css|js|jsx|ts|tsx|yml|yaml|toml|ini|log|sql|py|rb|go|rs|java|c|h|cpp|hpp|sh|zsh|fish)$/iu
+    .test(String(attachment?.fileName || ""));
+}
+
+function unsupportedSourceAgentAttachment(comments) {
+  for (const comment of Array.isArray(comments) ? comments : []) {
+    const unsupported = (comment?.attachments || []).find(
+      (attachment) => !sourceAgentSupportsAttachment(attachment),
+    );
+    if (unsupported) return unsupported;
+  }
+  return null;
+}
+
+async function verifiedSourceAgentAttachmentBytes(bridgeClient, sourcePath, comments) {
+  let total = 0;
+  for (const comment of Array.isArray(comments) ? comments : []) {
+    for (const attachment of comment?.attachments || []) {
+      if (!sourceAgentSupportsAttachment(attachment) || !attachment?.relativePath) {
+        throw responseError(
+          "RUN_AGENT_ATTACHMENT_UNSUPPORTED",
+          "源页 Agent 暂不支持此附件，可改用 Qoder、Codex 或复制给其他 AI。",
+        );
+      }
+      if (typeof bridgeClient?.attachment !== "function") {
+        throw responseError(
+          "RUN_AGENT_ATTACHMENT_UNVERIFIED",
+          "附件内容尚无法校验，本轮 Request 不会创建。",
+        );
+      }
+      const blob = await bridgeClient.attachment(sourcePath, attachment.relativePath);
+      if (!blob || typeof blob.arrayBuffer !== "function") {
+        throw responseError(
+          "RUN_AGENT_ATTACHMENT_UNVERIFIED",
+          "附件内容尚无法校验，本轮 Request 不会创建。",
+        );
+      }
+      const bytes = new Uint8Array(await blob.arrayBuffer());
+      if (!bytes.byteLength || bytes.includes(0)) {
+        throw responseError(
+          "RUN_AGENT_ATTACHMENT_UNSUPPORTED",
+          "源页 Agent 只能发送可验证的 UTF-8 文本附件。",
+        );
+      }
+      try {
+        new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+      } catch {
+        throw responseError(
+          "RUN_AGENT_ATTACHMENT_UNSUPPORTED",
+          "源页 Agent 只能发送可验证的 UTF-8 文本附件。",
+        );
+      }
+      total += bytes.byteLength;
+    }
+  }
+  return total;
+}
+
+function sourceAgentBudgetExceeded(delivery, preflight, html, comments, attachmentBytes = 0) {
+  if (delivery?.selection?.providerId !== "pageroot") return false;
+  const modelId = delivery.selection.resolvedModelId || delivery.selection.requestedModelId;
+  const model = (preflight?.models || []).find((entry) => entry?.id === modelId);
+  const htmlBytes = new TextEncoder().encode(String(html || "")).byteLength;
+  let taskBytes = SOURCE_AGENT_RESERVED_CONTEXT_BYTES + htmlBytes + attachmentBytes;
+  for (const comment of Array.isArray(comments) ? comments : []) {
+    taskBytes += new TextEncoder().encode(String(comment?.text || "")).byteLength;
+  }
+  if (taskBytes > SOURCE_AGENT_MAX_CONTEXT_BYTES) return true;
+  if (!model?.contextWindow || !model?.recommendedMaxInputTokens || !model?.maxOutputTokens) {
+    return false; // Custom still observes the runtime hard limit above.
+  }
+  const inputTokens = Math.ceil(taskBytes / 3);
+  const outputTokens = Math.ceil((htmlBytes / 3) * 1.15);
+  return model.supportsCompleteHtml !== true
+    || inputTokens > model.recommendedMaxInputTokens
+    || outputTokens > model.maxOutputTokens
+    || inputTokens + outputTokens > model.contextWindow;
+}
 
 function succeeded(value) {
   return Object.freeze({ status: "succeeded", value });
@@ -697,6 +786,16 @@ export class RunWorkflow {
     let comments = this.#commentsForSubmission();
     const commentOutcome = this.#validateComments(comments);
     if (commentOutcome) return commentOutcome;
+    if (
+      frozenAgentDelivery.mode === MANAGED_AGENT_MODE
+      && frozenAgentDelivery.selection?.providerId === "pageroot"
+      && unsupportedSourceAgentAttachment(comments)
+    ) {
+      return blocked(
+        "RUN_AGENT_ATTACHMENT_UNSUPPORTED",
+        "源页 Agent 暂不支持此附件，可改用 Qoder、Codex 或复制给其他 AI。",
+      );
+    }
 
     const submission = this.#runSession.beginSubmission({ sourcePath });
     if (!submission) {
@@ -720,6 +819,9 @@ export class RunWorkflow {
         frozenAgentDelivery = Object.freeze({
           ...frozenAgentDelivery,
           selection: agentPreflight.selection,
+          ...(agentPreflight.configuration
+            ? { configuration: agentPreflight.configuration }
+            : {}),
         });
       }
       const registered = await this.#ensureRegistered({
@@ -734,6 +836,10 @@ export class RunWorkflow {
       comments = this.#commentsForSubmission();
       const registeredCommentOutcome = this.#validateComments(comments);
       if (registeredCommentOutcome) return registeredCommentOutcome;
+      const sourceAgentAttachmentBytes = frozenAgentDelivery.selection?.providerId === "pageroot"
+        ? await verifiedSourceAgentAttachmentBytes(this.#bridgeClient, context.sourcePath, comments)
+        : 0;
+      if (!this.#isCurrentContext(context)) return stale(context);
 
       // No await precedes this source-authority fence. It captures the exact
       // HTML bytes and retires native editing before the Request is prepared.
@@ -775,6 +881,19 @@ export class RunWorkflow {
         return rejected(
           "RUN_SUBMISSION_FREEZE_HASH_MISMATCH",
           "冻结 HTML 的内容或项目身份已经变化，本轮不会发送。",
+        );
+      }
+      if (sourceAgentBudgetExceeded(
+        frozenAgentDelivery,
+        agentPreflight,
+        frozen.html,
+        comments,
+        sourceAgentAttachmentBytes,
+      )) {
+        this.#canvasPort.unlock();
+        return blocked(
+          "RUN_AGENT_PROMPT_TOO_LARGE",
+          "当前页面可能超过所选模型的完整输出能力，请更换模型或使用 Qoder/Codex。",
         );
       }
       if (frozen.html !== this.#documentSession.html) {
@@ -856,6 +975,18 @@ export class RunWorkflow {
           persistedCommentOutcome.reason,
         );
       }
+      if (
+        frozenAgentDelivery.selection?.providerId === "pageroot"
+        && unsupportedSourceAgentAttachment(persistedComments)
+      ) {
+        throw responseError(
+          "RUN_AGENT_ATTACHMENT_UNSUPPORTED",
+          "源页 Agent 暂不支持此附件，可改用 Qoder、Codex 或复制给其他 AI。",
+        );
+      }
+      const persistedCommentSnapshot = JSON.stringify(
+        persistedComments.map(this.#codecs.persistedComment),
+      );
       const textLocatorValidation = revalidateCommentTextLocators(
         persistedComments,
         this.#documentSession.html,
@@ -867,6 +998,34 @@ export class RunWorkflow {
         );
       }
       persistedComments = textLocatorValidation.comments;
+      const finalAttachmentBytes = frozenAgentDelivery.selection?.providerId === "pageroot"
+        ? await verifiedSourceAgentAttachmentBytes(
+            this.#bridgeClient,
+            context.sourcePath,
+            persistedComments,
+          )
+        : 0;
+      const currentCommentSnapshot = JSON.stringify(
+        this.#commentsForSubmission().map(this.#codecs.persistedComment),
+      );
+      if (currentCommentSnapshot !== persistedCommentSnapshot) {
+        throw responseError(
+          "RUN_SUBMISSION_COMMENTS_CHANGED",
+          "最新评论在冻结边界内发生变化，请重新确认后再发送。",
+        );
+      }
+      if (sourceAgentBudgetExceeded(
+        frozenAgentDelivery,
+        agentPreflight,
+        frozen.html,
+        persistedComments,
+        finalAttachmentBytes,
+      )) {
+        throw responseError(
+          "RUN_AGENT_PROMPT_TOO_LARGE",
+          "当前页面可能超过所选模型的完整输出能力，请更换模型或使用 Qoder/Codex。",
+        );
+      }
       const persistedEvents = this.#commentSession.changeEvents.map(
         (event) => ({ ...event }),
       );
@@ -1300,6 +1459,7 @@ export class RunWorkflow {
         selection: delivery.selection,
         trustPolicyAccepted: delivery.trustPolicyVersion,
         preflightId: preflight.preflightId,
+        configurationDigest: delivery.configuration?.configurationDigest,
       });
       if (!this.#runSession.hasRun(run)) return stale(run);
       const next = agentHandoffState(run, result?.session);
@@ -1978,24 +2138,37 @@ export class RunWorkflow {
     return this.#agentCatalog.select(selection);
   }
 
-  selectAgentModel(modelId) {
-    return this.#agentCatalog.selectModel(modelId);
+  selectAgentModel(modelId, expectedSelection) {
+    return this.#agentCatalog.selectModel(modelId, expectedSelection);
   }
 
-  selectAgentReasoning(reasoning) {
-    return this.#agentCatalog.selectReasoning(reasoning);
+  selectAgentReasoning(reasoning, expectedSelection) {
+    return this.#agentCatalog.selectReasoning(reasoning, expectedSelection);
   }
 
   connectAgentApiKey(selection, apiKey, extras) {
     return this.#agentCatalog.connectWithApiKey(selection, apiKey, extras)
-      .then((preflight) => succeeded({
+      .then((connection) => succeeded({
         availability: this.#agentCatalog.availability(selection),
         models: this.#agentCatalog.provider(selection)?.models || [],
-        preflightId: preflight?.preflightId || null,
+        connection: this.#agentCatalog.provider(selection)?.connection || null,
+        selection: connection?.selection || null,
       }))
       .catch((cause) => rejected(
         errorCode(cause, "AGENT_SESSION_CREDENTIAL_INVALID"),
         this.#codecs.errorMessage(cause, "API Token 没有接通。"),
+      ));
+  }
+
+  disconnectAgentApiKey(selection) {
+    return this.#agentCatalog.disconnectApiKey(selection)
+      .then(() => succeeded({
+        availability: this.#agentCatalog.availability(selection),
+        models: [],
+      }))
+      .catch((cause) => rejected(
+        errorCode(cause, "AGENT_SESSION_CREDENTIAL_CLEAR_FAILED"),
+        this.#codecs.errorMessage(cause, "断开连接没有完成。"),
       ));
   }
 

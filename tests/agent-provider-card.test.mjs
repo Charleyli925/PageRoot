@@ -35,6 +35,17 @@ test("the legacy Qoder card is a presentation-only wrapper over the neutral card
   ]) assert.ok(card.includes(contract), contract);
   assert.match(card, /data-testid="settings-agent-vendor"/u);
   assert.match(card, /API Token/u);
+  assert.match(card, /Model ID/u);
+  assert.match(card, /当前连接：/u);
+  assert.match(card, /断开连接/u);
+  assert.match(card, /Token 仅在本次打开期间保留/u);
+  assert.match(card, /验证成功后才会替换当前连接/u);
+  assert.match(card, /选择其他模型/u);
+  assert.match(card, /高级设置/u);
+  assert.match(card, /思考深度/u);
+  assert.match(card, /修改接口/u);
+  assert.match(card, /connection\?\.vendorId === "custom"/u);
+  assert.match(card, /connection && onDisconnectApiKey/u);
   assert.doesNotMatch(card, /Anthropic/u);
 });
 
@@ -56,4 +67,11 @@ test("About is product information while Settings owns Agent checks and update c
   assert.match(settings, /onRequestRestart/u);
   assert.match(settings, /if \(!force && \(/u);
   assert.match(settings, /checkInFlightRef\.current/u);
+  assert.ok(
+    settings.indexOf("const checked = await onCheckSelection(candidateSelection)")
+      < settings.indexOf("const committed = onSelectAgentModel(modelId, selectedCard.selection)"),
+    "a model selection must validate before it becomes current",
+  );
+  assert.match(settings, /checked\.status !== "succeeded"/u);
+  assert.match(settings, /onSelectAgentReasoning\(reasoning, selectedCard\.selection\)/u);
 });

@@ -48,6 +48,7 @@ const REQUIRED_BRIDGE_FILES = [
   "workspace-bridge-shutdown.mjs",
   "agent-bridge-service.mjs",
   "agent/agent-runtime-coordinator.mjs",
+  "agent/agent-configuration-snapshot.mjs",
   "agent/agent-session-projector.mjs",
   "agent/agent-lease-store.mjs",
   "agent/agent-events.mjs",
@@ -57,6 +58,7 @@ const REQUIRED_BRIDGE_FILES = [
   "agent/providers/qoder-provider.mjs",
   "agent/providers/codex-acp-provider.mjs",
   "agent/providers/openai-compatible-provider.mjs",
+  "agent/providers/openai-compatible-vendor-adapters.mjs",
   "agent/catalog/agent-catalog.mjs",
   "agent/catalog/agent-installer.mjs",
   "agent/catalog/qoder-managed-release.mjs",
@@ -141,6 +143,7 @@ export const REQUIRED_SHARED_FILES = [
   "conversation.mjs",
   "agent-delivery.mjs",
   "openai-compatible-vendors.mjs",
+  "supported-agent-models.mjs",
   "agent-feature-gates.mjs",
   "task-spec.mjs",
 ];

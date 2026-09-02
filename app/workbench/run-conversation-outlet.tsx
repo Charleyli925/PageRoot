@@ -53,6 +53,7 @@ export const RunConversationOutlet = memo(function RunConversationOutlet({
       candidateVersionLabel={activeRun?.candidateVersionLabel ?? null}
       candidateStatus={activeRun?.candidateAssessment?.status ?? null}
       failureMessage={activeRun?.errorDetail || activeRun?.error || null}
+      failureCode={activeRun?.errorCode || null}
       agentText={currentHandoff?.visibleText || ""}
       agentUpdates={currentHandoff?.visibleTextUpdates || []}
       agentTextTruncated={currentHandoff?.textTruncated === true}

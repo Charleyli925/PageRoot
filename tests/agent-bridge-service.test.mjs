@@ -110,7 +110,9 @@ process.exit(2);
   return { root, home, bundle, launcher };
 }
 
-function taskAuthority(identity = IDENTITY) {
+const preflightTickets = new WeakMap();
+
+function taskAuthority(identity = IDENTITY, ticket = null) {
   return {
     run: {
       ...identity,
@@ -123,7 +125,19 @@ function taskAuthority(identity = IDENTITY) {
     request: {
       request: {
         agentDelivery: {
-          mode: "qoder-acp",
+          mode: "managed-agent",
+          selection: ticket?.selection || {
+            providerId: "qoder",
+            runtimeId: "acp",
+            requestedModelId: null,
+            resolvedModelId: null,
+            reasoning: {
+              requested: null,
+              applied: null,
+              resolution: "provider-default",
+            },
+          },
+          configuration: ticket?.configuration || null,
           trustPolicyVersion: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
         },
       },
@@ -146,28 +160,35 @@ function fakePolicy() {
 }
 
 async function preflight(service) {
-  return service.preflight({
+  const ticket = await service.preflight({
     driver: "qoder-acp",
     trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
   });
+  preflightTickets.set(service, ticket);
+  return ticket;
 }
 
 function createService(command, overrides = {}) {
-  return new AgentBridgeService({
+  const { resolveTask, ...serviceOverrides } = overrides;
+  let service;
+  service = new AgentBridgeService({
     environment: {
       ...process.env,
       PAGEROOT_E2E: "1",
       PAGEROOT_QODER_ACP_ALLOW_TEST_COMMAND: "1",
       PAGEROOT_QODER_ACP_COMMAND: command,
     },
-    resolveTask: async () => taskAuthority(),
+    resolveTask: async (identity) => resolveTask
+      ? resolveTask(identity, preflightTickets.get(service))
+      : taskAuthority(identity, preflightTickets.get(service)),
     policyLoader: async () => fakePolicy(),
     leaseStore: {
       acquire: async ({ ownerToken }) => ({ path: "memory-agent-lease", ownerToken }),
       release: async () => true,
     },
-    ...overrides,
+    ...serviceOverrides,
   });
+  return service;
 }
 
 async function waitForState(service, state, identity = IDENTITY) {
@@ -212,6 +233,7 @@ test("Agent Bridge preflight is explicit, bounded, and consumed by one Qoder tas
     driver: "qoder-acp",
     trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
     preflightId: ticket.preflightId,
+    configurationDigest: ticket.configuration.configurationDigest,
   });
   assert.equal(started.accepted, true);
   assert.equal(started.session.state, "starting");
@@ -236,7 +258,7 @@ test("Agent Bridge preflight is explicit, bounded, and consumed by one Qoder tas
   resolveRun({ stopReason: "end_turn" });
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(service.status(IDENTITY).state, "completed");
-  assert.equal(service.status(IDENTITY).phase, "awaiting-validation");
+  assert.equal(service.status(IDENTITY).phase, "preparing-review");
 });
 
 test("verified npm Qoder uses the trusted runtime under Finder's sparse PATH", async (t) => {
@@ -246,13 +268,14 @@ test("verified npm Qoder uses the trusted runtime under Finder's sparse PATH", a
     PATH: "/usr/bin:/bin",
   };
   let observed = null;
-  const service = new AgentBridgeService({
+  let service;
+  service = new AgentBridgeService({
     environment,
     commandResolver: ({ environment: commandEnvironment }) => resolveQoderAcpCommand({
       environment: commandEnvironment,
       homeDirectory: fixture.home,
     }),
-    resolveTask: async () => taskAuthority(),
+    resolveTask: async () => taskAuthority(IDENTITY, preflightTickets.get(service)),
     policyLoader: async () => fakePolicy(),
     leaseStore: {
       acquire: async ({ ownerToken }) => ({ path: "memory-agent-lease", ownerToken }),
@@ -274,6 +297,7 @@ test("verified npm Qoder uses the trusted runtime under Finder's sparse PATH", a
     driver: "qoder-acp",
     trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
     preflightId: ticket.preflightId,
+    configurationDigest: ticket.configuration.configurationDigest,
   });
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(observed.useVerifiedJavaScriptRuntime, true);
@@ -402,13 +426,13 @@ test("preflight failures state that no Request exists yet", async (t) => {
     ],
     [
       "no available model capacity",
-      "QODER_CAPACITY_UNAVAILABLE",
-      "Qoder 账号当前没有可用模型容量。",
+      "QODER_PREFLIGHT_FAILED",
+      "Qoder CLI 预检没有完成。",
     ],
     [
       "You've reached your credit usage limit. Please upgrade your subscription plan.",
-      "QODER_CAPACITY_UNAVAILABLE",
-      "Qoder 账号当前没有可用模型容量。",
+      "QODER_PREFLIGHT_FAILED",
+      "Qoder CLI 预检没有完成。",
     ],
     [
       "unexpected preflight failure",
@@ -442,7 +466,7 @@ test("verified npm preflight normalizes version and empty-model failures before 
       { manifestVersion: "1.1.28", reportedVersion: "1.1.27" },
       "QODER_VERSION_MISMATCH",
     ],
-    ["empty-model-list", { models: [] }, "QODER_CAPACITY_UNAVAILABLE"],
+    ["empty-model-list", { models: [] }, "QODER_MODEL_CATALOG_EMPTY"],
   ]) {
     await t.test(name, async (caseTest) => {
       const fixture = await createVerifiedNpmCommand(caseTest, fixtureOptions);
@@ -474,6 +498,7 @@ test("every locally generated preflight error uses the pre-Request copy contract
     "QODER_VERSION_INVALID",
     "QODER_VERSION_MISMATCH",
     "QODER_CAPACITY_UNAVAILABLE",
+    "QODER_MODEL_CATALOG_EMPTY",
     "QODER_COMMAND_NOT_FOUND",
     "QODER_COMMAND_UNTRUSTED",
     "QODER_VERSION_UNSUPPORTED",
@@ -554,6 +579,7 @@ test("Agent Bridge cancellation aborts the managed task before reporting stopped
     driver: "qoder-acp",
     trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
     preflightId: ticket.preflightId,
+    configurationDigest: ticket.configuration.configurationDigest,
   });
 
   const cancelled = await service.cancel(IDENTITY);
@@ -598,6 +624,7 @@ test("Agent Bridge cancellation never reports stopped after cleanup is unconfirm
     driver: "qoder-acp",
     trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
     preflightId: ticket.preflightId,
+    configurationDigest: ticket.configuration.configurationDigest,
   });
   await new Promise((resolve) => setImmediate(resolve));
 
@@ -640,6 +667,7 @@ test("Agent Bridge cancellation timeout stays live and fails closed", async (t) 
     driver: "qoder-acp",
     trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
     preflightId: ticket.preflightId,
+    configurationDigest: ticket.configuration.configurationDigest,
   });
   await new Promise((resolve) => setImmediate(resolve));
 
@@ -699,20 +727,26 @@ test("Agent Bridge persistent lease blocks a second service from racing the same
     IDENTITY.requestId,
   );
   await mkdir(requestPath, { recursive: true });
-  const authority = taskAuthority();
-  authority.run.requestPath = requestPath;
   const environment = {
     ...process.env,
     PAGEROOT_E2E: "1",
     PAGEROOT_QODER_ACP_ALLOW_TEST_COMMAND: "1",
     PAGEROOT_QODER_ACP_COMMAND: command,
   };
-  const createLeasedService = (runTask) => new AgentBridgeService({
-    environment,
-    resolveTask: async () => authority,
-    policyLoader: async () => fakePolicy(),
-    runTask,
-  });
+  const createLeasedService = (runTask) => {
+    let service;
+    service = new AgentBridgeService({
+      environment,
+      resolveTask: async () => {
+        const authority = taskAuthority(IDENTITY, preflightTickets.get(service));
+        authority.run.requestPath = requestPath;
+        return authority;
+      },
+      policyLoader: async () => fakePolicy(),
+      runTask,
+    });
+    return service;
+  };
   const first = createLeasedService(({ cancellationSignal, onEvent }) => new Promise(
     (_resolve, reject) => {
       onEvent({ kind: "initialized", agentName: "pageroot-e2e-qoder" });
@@ -730,6 +764,7 @@ test("Agent Bridge persistent lease blocks a second service from racing the same
     driver: "qoder-acp",
     trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
     preflightId: firstTicket.preflightId,
+    configurationDigest: firstTicket.configuration.configurationDigest,
   });
 
   let secondRunCalls = 0;
@@ -744,6 +779,7 @@ test("Agent Bridge persistent lease blocks a second service from racing the same
       driver: "qoder-acp",
       trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
       preflightId: secondTicket.preflightId,
+      configurationDigest: secondTicket.configuration.configurationDigest,
     }),
     (error) => error?.code === "AGENT_RESTART_RECOVERY_REQUIRED",
   );
@@ -771,6 +807,7 @@ test("Agent Bridge rejects a policy retry that would overwrite an unfinalized ou
       driver: "qoder-acp",
       trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
       preflightId: ticket.preflightId,
+      configurationDigest: ticket.configuration.configurationDigest,
     }),
     (error) => (
       error instanceof AgentBridgeError
@@ -780,7 +817,7 @@ test("Agent Bridge rejects a policy retry that would overwrite an unfinalized ou
   );
 });
 
-test("Agent Bridge identifies a real Qoder credit limit after Request creation", async (t) => {
+test("Agent Bridge uses only a structured Qoder credit-limit error after Request creation", async (t) => {
   const command = await createFakeCommand(t);
   const root = await mkdtemp(path.join(os.tmpdir(), "pageroot-agent-capacity-test-"));
   t.after(() => rm(root, { recursive: true, force: true }));
@@ -791,10 +828,8 @@ test("Agent Bridge identifies a real Qoder credit limit after Request creation",
       completionPath: path.join(root, "completion.json"),
     }),
     runTask: async () => {
-      const error = new Error(
-        "You've reached your credit usage limit. Please upgrade your subscription plan.",
-      );
-      error.code = 500;
+      const error = new Error("structured provider failure");
+      error.code = "QODER_ACCOUNT_CAPACITY_UNAVAILABLE";
       throw error;
     },
   });
@@ -805,6 +840,7 @@ test("Agent Bridge identifies a real Qoder credit limit after Request creation",
     driver: "qoder-acp",
     trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
     preflightId: ticket.preflightId,
+    configurationDigest: ticket.configuration.configurationDigest,
   });
 
   const failed = await waitForState(service, "failed");
@@ -844,6 +880,7 @@ test("Agent Bridge marks output written before failure as cancel-and-new only", 
     driver: "qoder-acp",
     trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
     preflightId: ticket.preflightId,
+    configurationDigest: ticket.configuration.configurationDigest,
   });
   const failed = await waitForState(service, "failed");
   assert.equal(failed.state, "failed");
@@ -886,6 +923,7 @@ test("Agent Bridge keeps an uncertain cleanup fenced and blocks same-Request ret
     driver: "qoder-acp",
     trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
     preflightId: firstTicket.preflightId,
+    configurationDigest: firstTicket.configuration.configurationDigest,
   });
   const failed = await waitForState(service, "failed");
   assert.equal(failed.errorCode, "AGENT_RESTART_RECOVERY_REQUIRED");
@@ -900,6 +938,7 @@ test("Agent Bridge keeps an uncertain cleanup fenced and blocks same-Request ret
       driver: "qoder-acp",
       trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
       preflightId: retryTicket.preflightId,
+      configurationDigest: retryTicket.configuration.configurationDigest,
     }),
     (error) => error?.code === "AGENT_RESTART_RECOVERY_REQUIRED",
   );
@@ -924,7 +963,7 @@ test("cleanup-unconfirmed fences survive terminal TTL and capacity pruning", asy
     clock: { now: () => now },
     terminalSessionTtlMs: 1,
     maxRetainedSessions: 1,
-    resolveTask: async (identity) => taskAuthority(identity),
+    resolveTask: async (identity, ticket) => taskAuthority(identity, ticket),
     policyLoader: async () => ({
       ...fakePolicy(),
       outputPath: path.join(root, "output", "candidate.html"),
@@ -944,6 +983,7 @@ test("cleanup-unconfirmed fences survive terminal TTL and capacity pruning", asy
       driver: "qoder-acp",
       trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
       preflightId: ticket.preflightId,
+      configurationDigest: ticket.configuration.configurationDigest,
     });
     const failed = await waitForState(service, "failed", identity);
     assert.equal(failed.errorCode, "AGENT_RESTART_RECOVERY_REQUIRED");
@@ -985,6 +1025,7 @@ test("Agent Bridge shutdown rejects when an owned Agent never confirms cleanup",
     driver: "qoder-acp",
     trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
     preflightId: ticket.preflightId,
+    configurationDigest: ticket.configuration.configurationDigest,
   });
   await new Promise((resolve) => setImmediate(resolve));
 
@@ -1074,6 +1115,7 @@ test("Agent Bridge treats directories and special files at result paths as resid
         driver: "qoder-acp",
         trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
         preflightId: ticket.preflightId,
+        configurationDigest: ticket.configuration.configurationDigest,
       });
       const failed = await waitForState(service, "failed");
       assert.equal(failed.errorCode, "AGENT_RETRY_OUTPUT_PRESENT");

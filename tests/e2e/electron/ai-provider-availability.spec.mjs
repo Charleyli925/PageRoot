@@ -341,13 +341,15 @@ test("源页 Agent settings stays a Token card and does not block switching back
   }
 });
 
-test("源页 Agent connects with a Token, chooses model and thinking depth, then reviews a Candidate", {
+test("源页 Agent connects to one verified fixed model and reviews a Candidate", {
   tag: ["@smoke-provider"],
 }, async () => {
   test.setTimeout(180_000);
   const fixture = createSourceFixture("pageroot-http-agent-bridge.html");
   const qoderCommand = createQoderAcpE2ECommand(fixture.sourceDirectory);
-  const httpAgent = await startPagerootHttpAgent();
+  const httpAgent = await startPagerootHttpAgent({
+    rejectedApiKeys: ["sk-e2e-invalid-replacement"],
+  });
   const launched = await launchPageRoot({
     activeSourcePath: fixture.sourcePath,
     injectedEnv: {
@@ -369,10 +371,23 @@ test("源页 Agent connects with a Token, chooses model and thinking depth, then
     await expect(pagerootCard.getByText("需要 Token", { exact: true }))
       .toBeVisible({ timeout: 20_000 });
     await pagerootCard.getByLabel("API Token").fill("sk-e2e-pageroot");
-    await pagerootCard.getByRole("button", { name: "连接" }).click();
+    await pagerootCard.getByRole("button", { name: "连接", exact: true }).click();
     await expect(pagerootCard.getByText("已连接", { exact: true }))
       .toBeVisible({ timeout: 30_000 });
     await expect(pagerootCard.getByText("可从侧栏发送")).toBeVisible();
+    await expect(pagerootCard.getByTestId("settings-agent-current-connection"))
+      .toContainText("DeepSeek");
+    await expect(pagerootCard.getByText("Token 仅在本次打开期间保留。"))
+      .toBeVisible();
+    await pagerootCard.getByRole("button", { name: "更换 Token" }).click();
+    await pagerootCard.getByTestId("settings-agent-vendor").selectOption("openai");
+    await pagerootCard.getByLabel("API Token").fill("sk-e2e-invalid-replacement");
+    await pagerootCard.getByRole("button", { name: "连接", exact: true }).click();
+    await expect(pagerootCard.getByText(/Token 无效|Token 没有接通/u))
+      .toBeVisible({ timeout: 20_000 });
+    await expect(pagerootCard.getByText("已连接", { exact: true })).toBeVisible();
+    await expect(pagerootCard.getByTestId("settings-agent-current-connection"))
+      .toContainText("DeepSeek");
     await launched.page.screenshot({
       path: path.join(AI_ASSISTANT_VISUAL_OUTPUT, "pageroot-settings-connected.png"),
       fullPage: false,
@@ -383,20 +398,10 @@ test("源页 Agent connects with a Token, chooses model and thinking depth, then
     await expect(sidebar.getByTestId("ai-conversation-agent"))
       .toContainText("源页", { timeout: 20_000 });
     await expect(sidebar.getByTestId("ai-conversation-model")).toBeVisible();
-    await expect(sidebar.getByTestId("ai-conversation-reasoning"))
-      .toContainText("思考 · 高");
-    await sidebar.getByTestId("ai-conversation-model").click();
-    await sidebar.getByTestId("ai-conversation-model-choices")
-      .getByRole("button", { name: "V4 Pro" })
-      .click();
     await expect(sidebar.getByTestId("ai-conversation-model"))
       .toContainText("V4 Pro");
-    await sidebar.getByTestId("ai-conversation-reasoning").click();
-    await sidebar.getByTestId("ai-conversation-reasoning-choices")
-      .getByRole("button", { name: "低" })
-      .click();
-    await expect(sidebar.getByTestId("ai-conversation-reasoning"))
-      .toContainText("思考 · 低");
+    await expect(sidebar.getByTestId("ai-conversation-model-choices")).toHaveCount(0);
+    await expect(sidebar.getByTestId("ai-conversation-reasoning")).toHaveCount(0);
     await launched.page.screenshot({
       path: path.join(AI_ASSISTANT_VISUAL_OUTPUT, "pageroot-composer-ready.png"),
       fullPage: false,
@@ -458,7 +463,7 @@ test("源页 Agent connects with a Token, chooses model and thinking depth, then
     expect(candidates).toHaveLength(1);
     const pagerootCandidate = readFileSync(candidates[0], "utf8");
     expect(pagerootCandidate).toContain('data-pageroot-http-agent="e2e"');
-    expect(pagerootCandidate).toContain('data-pageroot-http-reasoning="low"');
+    expect(pagerootCandidate).toContain('data-pageroot-http-reasoning="auto"');
     expect(pagerootCandidate).toContain("源页已更新：真实");
     await launched.page.getByRole("button", { name: "审阅对比" }).click();
     await expect(launched.page.getByTestId("ai-review-workspace"))
@@ -499,8 +504,9 @@ test("源页 Agent keeps the Token card and next step when the Token is rejected
     await settingsPage.getByTestId("settings-agent-scheme").selectOption({ label: "源页" });
     const pagerootCard = settingsPage.locator(".pageroot-availability-card");
     await pagerootCard.getByLabel("API Token").fill("sk-e2e-invalid");
-    await pagerootCard.getByRole("button", { name: "连接" }).click();
-    await expect(pagerootCard.getByText("Token 没有接通。")).toBeVisible({ timeout: 20_000 });
+    await pagerootCard.getByRole("button", { name: "连接", exact: true }).click();
+    await expect(pagerootCard.getByText(/Token 无效|Token 没有接通/u))
+      .toBeVisible({ timeout: 20_000 });
     await expect(pagerootCard.getByText("需要 Token", { exact: true })).toBeVisible();
     await launched.page.getByRole("button", { name: "返回工作台" }).click();
     const sidebar = launched.page.getByTestId("ai-conversation-sidebar");
@@ -635,7 +641,7 @@ test("Qoder installed while PageRoot is open refreshes in place and continues on
   }
 });
 
-test("Qoder capacity exhaustion stays unavailable without recovery buttons or a Request", {
+test("Qoder unstructured capacity wording stays generic with retry and no Request", {
   tag: ["@smoke-provider"],
 }, async () => {
   test.setTimeout(120_000);
@@ -663,15 +669,14 @@ test("Qoder capacity exhaustion stays unavailable without recovery buttons or a 
     );
     await launched.page.getByRole("button", { name: /AI 助手/u }).click();
     const settingsSection = await openQoderAvailability(launched.page);
-    await expect(
-      settingsSection.getByText("额度已用完", { exact: true }),
-    ).toBeVisible();
-    await expect(settingsSection.getByRole("button", { name: /检测|重新/u })).toHaveCount(0);
+    await expect(settingsSection.getByText("暂不可用 · 连接没有完成", { exact: true }))
+      .toBeVisible();
+    await expect(launched.page.getByTestId("settings-agent-scheme")).toBeVisible();
+    await expect(settingsSection.getByRole("button", { name: "重试", exact: true })).toBeVisible();
     expect(requestPosts).toBe(0);
     await launched.page.evaluate(() => window.dispatchEvent(new Event("focus")));
-    await expect(
-      settingsSection.getByText("额度已用完", { exact: true }),
-    ).toBeVisible();
+    await expect(settingsSection.getByText("暂不可用 · 连接没有完成", { exact: true }))
+      .toBeVisible();
     expect(requestPosts).toBe(0);
     expect(readFileSync(fixture.sourcePath).equals(fixture.original)).toBe(true);
   } finally {

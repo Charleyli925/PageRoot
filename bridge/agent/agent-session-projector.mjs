@@ -1,17 +1,32 @@
 export function executionPhaseForEvent(event, current) {
+  let next;
   switch (event?.kind) {
-    case "initialized": return "starting-session";
-    case "file-read": return "reading-task";
-    case "file-written": return "writing-candidate";
-    case "terminal-created": return "finalizing";
+    case "initialized": next = "starting-session"; break;
+    case "request-sent": next = "sending-task"; break;
+    case "generation-started": next = "generating-modification"; break;
+    case "html-validation-completed": next = "validating-html"; break;
+    case "review-preparation-started": next = "preparing-review"; break;
+    case "file-read": next = "reading-task"; break;
+    case "file-written": next = "writing-candidate"; break;
+    case "terminal-created": next = "finalizing"; break;
     case "completion":
     case "completion-verified":
     case "turn-stopping":
-    case "turn-stopped": return "awaiting-validation";
+    case "turn-stopped": next = "preparing-review"; break;
     case "cancel-requested":
     case "host-cancelling": return "cancelling";
     default: return current;
   }
+  const publicOrder = [
+    "starting-session",
+    "sending-task",
+    "generating-modification",
+    "validating-html",
+    "preparing-review",
+  ];
+  const currentRank = publicOrder.indexOf(current);
+  const nextRank = publicOrder.indexOf(next);
+  return currentRank >= 0 && nextRank >= 0 && nextRank < currentRank ? current : next;
 }
 
 const MAX_VISIBLE_TEXT_UPDATES = 80;

@@ -76,6 +76,11 @@ export function sidebarResolvedIntent(
   state: string,
 ): SidebarIntent;
 
+export function sidebarFailureRetryable(
+  activeRun?: { requestId?: string | null; attemptId?: string | null } | null,
+  activeHandoff?: { requestId?: string | null; attemptId?: string | null; retryable?: boolean } | null,
+): boolean;
+
 export function conversationReadyForDocument(
   conversation: {
     status?: string;
@@ -102,6 +107,8 @@ export function sidebarActionBar(options?: {
   candidateVersionLabel?: string | null;
   candidateStatus?: string | null;
   failureMessage?: string | null;
+  failureCode?: string | null;
+  failureRetryable?: boolean;
   deliveryMode?: "managed-agent" | "clipboard";
   handoffStatus?: string | null;
 }): SidebarActionBar | null;
@@ -134,6 +141,15 @@ export function sidebarRunProgress(options?: {
   agentUpdates?: readonly unknown[];
   agentTextTruncated?: boolean;
 }): SidebarRunProgress | null;
+
+export function sidebarAgentStageSteps(options?: {
+  state?: string;
+  phase?: string | null;
+}): readonly Readonly<{
+  key: string;
+  label: string;
+  state: "completed" | "current" | "pending";
+}>[];
 
 export function sidebarTimestampLabel(
   value: unknown,

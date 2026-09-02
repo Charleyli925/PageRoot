@@ -17,7 +17,6 @@ import { sha256 } from "../../lifecycle-core.mjs";
 import { loadExecutionPolicy } from "../policies/execution-policy.mjs";
 import { terminateManagedProcess } from "../hosts/execution-host.mjs";
 import { acpProcessEnvironment } from "../runtimes/acp-protocol.mjs";
-import { isAgentCapacityFailureText } from "../agent-errors.mjs";
 import { openVerifiedAgentExecutable } from "../runtimes/acp-verified-javascript.mjs";
 import {
   AgentProviderError,
@@ -421,8 +420,6 @@ function classifyCodexAcpFailure(cause) {
     return "CODEX_ACCOUNT_CAPACITY_UNAVAILABLE";
   }
   if (isCodexAcpAuthFailure(cause)) return "CODEX_AUTH_REQUIRED";
-  const combined = `${cause?.stdout || ""}\n${cause?.stderr || ""}\n${cause?.message || ""}`;
-  if (isAgentCapacityFailureText(combined)) return "CODEX_ACCOUNT_CAPACITY_UNAVAILABLE";
   if (cause?.killed || cause?.code === "ETIMEDOUT" || cause?.signal === "SIGTERM") {
     return "CODEX_PREFLIGHT_TIMEOUT";
   }
@@ -814,9 +811,6 @@ export function createCodexAcpProvider({
         stderr: `${cause?.stderr || ""}\n${cause?.agentStderr || ""}`,
       })) {
         return "CODEX_AUTH_REQUIRED";
-      }
-      if (isAgentCapacityFailureText(`${cause?.message || ""}\n${cause?.stderr || ""}\n${cause?.agentStderr || ""}`)) {
-        return "CODEX_ACCOUNT_CAPACITY_UNAVAILABLE";
       }
       return mapped || "CODEX_ACP_RUN_FAILED";
     },

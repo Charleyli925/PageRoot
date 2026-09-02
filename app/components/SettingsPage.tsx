@@ -65,6 +65,8 @@ export type SettingsPageProps = {
   ) => Promise<boolean>;
   onRetryWorkspacePreferences: () => void;
   onSelectAgent: (selection: AgentSelection) => void;
+  onSelectAgentModel: (modelId: string, expectedSelection: AgentSelection) => AgentSelection | null;
+  onSelectAgentReasoning: (reasoning: string, expectedSelection: AgentSelection) => AgentSelection | null;
   onCheckForUpdates: () => void;
   onDownloadUpdate: () => void;
   onRequestRestart: () => void;
@@ -78,8 +80,9 @@ export type SettingsPageProps = {
   onConnectApiKey: (
     selection: AgentSelection,
     apiKey: string,
-    extras?: Readonly<{ vendorId?: string; baseUrl?: string }>,
+    extras?: Readonly<{ vendorId?: string; baseUrl?: string; modelId?: string }>,
   ) => Promise<AgentActionOutcome>;
+  onDisconnectApiKey: (selection: AgentSelection) => Promise<AgentActionOutcome>;
   onClose: () => void;
 };
 
@@ -271,9 +274,13 @@ function AgentSettings({
   actionButtonRef,
   onSelect,
   onCheck,
+  onCheckSelection,
   onCopyGuidance,
   onInstall,
   onConnectApiKey,
+  onDisconnectApiKey,
+  onSelectAgentModel,
+  onSelectAgentReasoning,
 }: {
   currentAgentName: string;
   choices: readonly SettingsAgentChoice[];
@@ -283,9 +290,13 @@ function AgentSettings({
   actionButtonRef: Ref<HTMLButtonElement>;
   onSelect(selection: AgentSelection): void;
   onCheck(): void;
+  onCheckSelection(selection: AgentSelection): Promise<AgentActionOutcome>;
   onCopyGuidance(kind: AgentProviderGuidanceKind, selection: AgentSelection): Promise<AgentActionOutcome>;
   onInstall(selection: AgentSelection): Promise<AgentActionOutcome>;
-  onConnectApiKey(selection: AgentSelection, apiKey: string, extras?: Readonly<{ vendorId?: string; baseUrl?: string }>): Promise<AgentActionOutcome>;
+  onConnectApiKey(selection: AgentSelection, apiKey: string, extras?: Readonly<{ vendorId?: string; baseUrl?: string; modelId?: string }>): Promise<AgentActionOutcome>;
+  onDisconnectApiKey(selection: AgentSelection): Promise<AgentActionOutcome>;
+  onSelectAgentModel(modelId: string, expectedSelection: AgentSelection): AgentSelection | null;
+  onSelectAgentReasoning(reasoning: string, expectedSelection: AgentSelection): AgentSelection | null;
 }) {
   const selectedCard = cards.find((card) => {
     const id = `${card.selection.providerId}:${card.selection.runtimeId}`;
@@ -328,8 +339,12 @@ function AgentSettings({
         <div className="settings-agent-rows">
           {selectedCard ? (
             <AgentProviderCard
-              key={`${selectedCard.selection.providerId}:${selectedCard.selection.runtimeId}`}
+              key={`${selectedCard.selection.providerId}:${selectedCard.selection.runtimeId}:${selectedCard.connection?.vendorId || "none"}:${selectedCard.connection?.baseUrl || ""}:${selectedCard.selection.resolvedModelId || "none"}`}
               availability={selectedCard.availability}
+              connection={selectedCard.connection}
+              models={selectedCard.models}
+              selectedModelId={selectedCard.selection.resolvedModelId}
+              selectedReasoningId={selectedCard.selection.reasoning.requested || "auto"}
               presentation={selectedCard.presentation}
               surface="settings"
               actionButtonRef={actionButtonRef}
@@ -340,6 +355,47 @@ function AgentSettings({
                 return { status: "succeeded" };
               }}
               onConnectApiKey={(apiKey, extras) => onConnectApiKey(selectedCard.selection, apiKey, extras)}
+              onDisconnectApiKey={() => onDisconnectApiKey(selectedCard.selection)}
+              onSelectModel={async (modelId) => {
+                if (selectedCard.connection) {
+                  return onConnectApiKey(selectedCard.selection, "", {
+                    vendorId: selectedCard.connection.vendorId,
+                    baseUrl: selectedCard.connection.baseUrl,
+                    modelId: modelId.replace(/^pageroot:/u, ""),
+                  });
+                }
+                const candidateSelection = {
+                  ...selectedCard.selection,
+                  requestedModelId: modelId,
+                  resolvedModelId: modelId,
+                  reasoning: {
+                    requested: null,
+                    applied: null,
+                    resolution: "provider-default",
+                  },
+                };
+                const checked = await onCheckSelection(candidateSelection);
+                if (!checked || checked.status !== "succeeded") return checked;
+                const committed = onSelectAgentModel(modelId, selectedCard.selection);
+                return committed
+                  ? { status: "succeeded" }
+                  : { status: "rejected", reason: "模型选择已经变化，请重新选择。" };
+              }}
+              onSelectReasoning={async (reasoning) => {
+                const automatic = reasoning === "auto";
+                const candidateSelection = {
+                  ...selectedCard.selection,
+                  reasoning: automatic
+                    ? { requested: null, applied: null, resolution: "provider-default" }
+                    : { requested: reasoning, applied: reasoning, resolution: "exact" },
+                } as AgentSelection;
+                const checked = await onCheckSelection(candidateSelection);
+                if (!checked || checked.status !== "succeeded") return checked;
+                const committed = onSelectAgentReasoning(reasoning, selectedCard.selection);
+                return committed
+                  ? { status: "succeeded" }
+                  : { status: "rejected", reason: "思考深度已经变化，请重新选择。" };
+              }}
             />
           ) : (
             <p className="settings-empty-state">当前没有可配置的 Agent。</p>
@@ -361,7 +417,7 @@ function UpdatesSettings({
   onDownloadUpdate,
   onRequestRestart,
   onOpenReleaseNotes,
-}: Omit<SettingsPageProps, "activeTabId" | "category" | "initialFocus" | "currentAgentName" | "workspacePreferences" | "workspacePreferencesSaving" | "workspacePreferencesError" | "agentChoices" | "selectedAgentChoiceId" | "agentCards" | "onUpdateWorkspacePreference" | "onRetryWorkspacePreferences" | "onSelectAgent" | "onClose" | "onCheckUsability" | "onCopyGuidance" | "onInstall" | "onConnectApiKey">) {
+}: Omit<SettingsPageProps, "activeTabId" | "category" | "initialFocus" | "currentAgentName" | "workspacePreferences" | "workspacePreferencesSaving" | "workspacePreferencesError" | "agentChoices" | "selectedAgentChoiceId" | "agentCards" | "onUpdateWorkspacePreference" | "onRetryWorkspacePreferences" | "onSelectAgent" | "onSelectAgentModel" | "onSelectAgentReasoning" | "onClose" | "onCheckUsability" | "onCopyGuidance" | "onInstall" | "onConnectApiKey" | "onDisconnectApiKey">) {
   const presentation = updatePresentation({
     result: updateResult,
     updatesAvailable,
@@ -481,6 +537,8 @@ export default function SettingsPage({
   onUpdateWorkspacePreference,
   onRetryWorkspacePreferences,
   onSelectAgent,
+  onSelectAgentModel,
+  onSelectAgentReasoning,
   onCheckForUpdates,
   onDownloadUpdate,
   onRequestRestart,
@@ -489,6 +547,7 @@ export default function SettingsPage({
   onCopyGuidance,
   onInstall,
   onConnectApiKey,
+  onDisconnectApiKey,
   onClose,
 }: SettingsPageProps) {
   const pageRef = useRef<HTMLElement>(null);
@@ -645,9 +704,13 @@ export default function SettingsPage({
             actionButtonRef={agentActionRef}
             onSelect={onSelectAgent}
             onCheck={() => requestAgentCheck(true)}
+            onCheckSelection={onCheckUsability}
             onCopyGuidance={onCopyGuidance}
             onInstall={onInstall}
             onConnectApiKey={onConnectApiKey}
+            onDisconnectApiKey={onDisconnectApiKey}
+            onSelectAgentModel={onSelectAgentModel}
+            onSelectAgentReasoning={onSelectAgentReasoning}
           />
         ) : (
           <UpdatesSettings

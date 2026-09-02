@@ -81,6 +81,7 @@ function success(value) {
 test("preload declares one immutable desktop runtime capability manifest", async () => {
   const { runtime } = await loadPreloadApis(async () => success(null));
   assert.equal(runtime.capabilities.sourceEditing, "enabled");
+  assert.equal(runtime.betaAgentModelsEnabled, false);
   assert.equal(runtime.capabilities.projectOpening, "desktop-dialog");
   assert.equal(runtime.capabilities.attachmentPersistence, "bridge");
   assert.equal(runtime.capabilities.closeCoordination, "electron-handshake");

@@ -1651,6 +1651,18 @@ async function setAgentSessionCredential(body) {
   return agentBridgeService.setSessionCredential(providerId, body.apiKey, {
     vendorId: body.vendorId,
     baseUrl: body.baseUrl,
+    selection: body.selection,
+  });
+}
+
+async function updateAgentConfiguration(body) {
+  const providerId = String(body?.providerId || "").trim();
+  if (body?.disconnect === true) return agentBridgeService.clearSessionCredential(providerId);
+  return agentBridgeService.updateAgentConfiguration(providerId, {
+    apiKey: body.apiKey,
+    vendorId: body.vendorId,
+    baseUrl: body.baseUrl,
+    selection: body.selection,
   });
 }
 
@@ -1697,6 +1709,7 @@ async function startAgent(body) {
     selection: delivery.selection,
     trustPolicyAccepted: delivery.trustPolicyVersion,
     preflightId: body.preflightId,
+    configurationDigest: body.configurationDigest,
     projectId: target.projectId,
     documentId: target.documentId,
     sourcePath: target.exactSourcePath,
@@ -2724,6 +2737,11 @@ async function route(request, response) {
   if (request.method === "POST" && url.pathname === "/agent/session-credential") {
     const body = await readBody(request);
     sendJson(response, 200, await setAgentSessionCredential(body));
+    return;
+  }
+  if (request.method === "POST" && url.pathname === "/agent/configuration") {
+    const body = await readBody(request);
+    sendJson(response, 200, await updateAgentConfiguration(body));
     return;
   }
   if (request.method === "POST" && url.pathname === "/agent/preflight") {

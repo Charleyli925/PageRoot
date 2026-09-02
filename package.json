@@ -46,6 +46,7 @@
     "test:packaged-startup": "playwright test --config tests/e2e/electron/playwright.packaged-startup.config.mjs",
     "test:bridge": "node --test tests/workspace-bridge.test.mjs",
     "spike:qoder-acp": "node scripts/qoder-acp-spike.mjs",
+    "smoke:agent-vendors:real": "node scripts/smoke-openai-compatible-vendors.mjs --require-all",
     "benchmark:review-analysis": "node scripts/benchmark-review-analysis.mjs",
     "benchmark:html-workflows": "node scripts/benchmark-html-workflows.mjs",
     "benchmark:persistence": "npm run desktop:renderer && node scripts/benchmark-persistence.mjs",
@@ -233,6 +234,10 @@
         "to": "bridge/agent/agent-runtime-coordinator.mjs"
       },
       {
+        "from": "bridge/agent/agent-configuration-snapshot.mjs",
+        "to": "bridge/agent/agent-configuration-snapshot.mjs"
+      },
+      {
         "from": "bridge/agent/agent-session-projector.mjs",
         "to": "bridge/agent/agent-session-projector.mjs"
       },
@@ -267,6 +272,10 @@
       {
         "from": "bridge/agent/providers/openai-compatible-provider.mjs",
         "to": "bridge/agent/providers/openai-compatible-provider.mjs"
+      },
+      {
+        "from": "bridge/agent/providers/openai-compatible-vendor-adapters.mjs",
+        "to": "bridge/agent/providers/openai-compatible-vendor-adapters.mjs"
       },
       {
         "from": "bridge/agent/catalog/agent-catalog.mjs",
@@ -483,6 +492,10 @@
       {
         "from": "shared/openai-compatible-vendors.mjs",
         "to": "shared/openai-compatible-vendors.mjs"
+      },
+      {
+        "from": "shared/supported-agent-models.mjs",
+        "to": "shared/supported-agent-models.mjs"
       },
       {
         "from": "shared/agent-feature-gates.mjs",

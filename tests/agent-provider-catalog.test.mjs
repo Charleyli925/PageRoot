@@ -16,7 +16,7 @@ import {
 
 const TRUST = "trusted-local-agent-v1";
 
-test("the shared Agent chooser exposes 源页 Agent plus both ACP providers", () => {
+test("the shared Agent chooser exposes 源页 Agent plus both ACP providers without unverified built-ins", () => {
   assert.deepEqual(
     defaultAgentProviders().map(({ providerId }) => providerId),
     ["pageroot", "qoder", "codex"],
@@ -27,15 +27,12 @@ test("the shared Agent chooser exposes 源页 Agent plus both ACP providers", ()
   assert.equal(PAGEROOT_AGENT_PROVIDER.presentation.credentialKind, "api-token");
   assert.equal(PAGEROOT_AGENT_PROVIDER.presentation.logoSrc, "./brand-logo.png");
   assert.equal(PAGEROOT_AGENT_PROVIDER.presentation.supportsReasoning, true);
-  assert.deepEqual(
-    PAGEROOT_AGENT_PROVIDER.presentation.reasoningChoices.map(({ id }) => id),
-    ["none", "low", "high", "max"],
-  );
+  assert.equal(PAGEROOT_AGENT_PROVIDER.presentation.reasoningChoices, undefined);
   assert.notEqual(QODER_AGENT_PROVIDER.presentation.supportsReasoning, true);
   assert.notEqual(CODEX_AGENT_PROVIDER.presentation.supportsReasoning, true);
   assert.deepEqual(
     PAGEROOT_AGENT_PROVIDER.presentation.vendors.map(({ id }) => id),
-    ["deepseek", "zhipu", "dashscope", "openai", "custom"],
+    ["custom"],
   );
   assert.equal(
     CODEX_AGENT_PROVIDER.presentation.localReadDisclosure,
@@ -56,6 +53,26 @@ test("the shared Agent chooser exposes 源页 Agent plus both ACP providers", ()
       },
     })[0].presentation.availability({ status: "unavailable", reason: "account-capacity" }).statusLabel,
     "额度已用完",
+  );
+  assert.equal(PAGEROOT_AGENT_PROVIDER.failureReason("AGENT_BALANCE_INSUFFICIENT"), "account-capacity");
+  assert.equal(PAGEROOT_AGENT_PROVIDER.failureReason("AGENT_MODEL_ACCESS_DENIED"), "model-unavailable");
+  assert.equal(
+    PAGEROOT_AGENT_PROVIDER.failureReason("AGENT_ENDPOINT_REGION_MISMATCH"),
+    "endpoint-region-mismatch",
+  );
+  assert.equal(
+    agentProviderCardsFromCatalog({
+      providers: {
+        pageroot: {
+          ...PAGEROOT_AGENT_PROVIDER,
+          availability: { status: "unavailable", reason: "endpoint-region-mismatch" },
+        },
+      },
+    })[0].presentation.availability({
+      status: "unavailable",
+      reason: "endpoint-region-mismatch",
+    }).statusLabel,
+    "暂不可用 · 接口地区不匹配",
   );
 });
 
@@ -613,4 +630,85 @@ test("selectReasoning changes only PageRoot thinking depth", () => {
   });
   assert.equal(catalog.selectReasoning("not-a-depth").reasoning.resolution, "exact");
   assert.equal(catalog.freezeSelected().reasoning.requested, "low");
+});
+
+test("late model and reasoning commits cannot mutate a newly selected provider", () => {
+  const catalog = new AgentCatalogState({
+    bridgeClient: {
+      async preflightAgent() {
+        return { status: "ready" };
+      },
+    },
+    providers: [QODER_AGENT_PROVIDER, CODEX_AGENT_PROVIDER],
+    selected: QODER_AGENT_PROVIDER.selection,
+  });
+  const expectedQoder = catalog.freezeSelected();
+  const selectedCodex = catalog.select(CODEX_AGENT_PROVIDER.selection);
+
+  assert.equal(catalog.selectModel("qoder:late-model", expectedQoder), null);
+  assert.equal(catalog.selectReasoning("high", expectedQoder), null);
+  assert.deepEqual(catalog.freezeSelected(), selectedCodex);
+  assert.equal(catalog.selectModel("qoder:cross-provider", selectedCodex), null);
+  assert.deepEqual(catalog.freezeSelected(), selectedCodex);
+});
+
+test("Token replacement publishes atomically, clears old model state, and can disconnect", async () => {
+  const requests = [];
+  let failNext = false;
+  const initial = PAGEROOT_AGENT_PROVIDER.selection;
+  const catalog = new AgentCatalogState({
+    bridgeClient: {
+      async preflightAgent() { throw new Error("not used"); },
+      async setAgentSessionCredential(request) {
+        requests.push(request);
+        if (request.disconnect === true) return { ok: true, configured: false };
+        if (failNext) throw Object.assign(new Error("Token 无效"), { code: "AGENT_AUTH_REQUIRED" });
+        return {
+          ok: true,
+          status: "ready",
+          vendorId: request.vendorId,
+          vendorDisplayName: request.vendorId === "openai" ? "OpenAI" : "DeepSeek",
+          baseUrl: request.vendorId === "openai"
+            ? "https://api.openai.com/v1"
+            : "https://api.deepseek.com/v1",
+          installationDigest: `sha256:${"a".repeat(64)}`,
+          selection: {
+            ...initial,
+            resolvedModelId: request.vendorId === "openai"
+              ? "pageroot:gpt-5"
+              : "pageroot:deepseek-v4-pro",
+          },
+          models: [{
+            id: request.vendorId === "openai" ? "pageroot:gpt-5" : "pageroot:deepseek-v4-pro",
+            isDefault: true,
+            reasoningChoices: [{ id: "auto", label: "自动" }],
+          }],
+        };
+      },
+    },
+    providers: [PAGEROOT_AGENT_PROVIDER],
+    selected: initial,
+    clock: { now: () => 10 },
+  });
+
+  await catalog.connectWithApiKey(initial, "sk-old", { vendorId: "deepseek" });
+  assert.equal(catalog.freezeSelected().resolvedModelId, "pageroot:deepseek-v4-pro");
+  assert.equal(catalog.provider().connection.vendorDisplayName, "DeepSeek");
+  failNext = true;
+  await assert.rejects(
+    catalog.connectWithApiKey(catalog.freezeSelected(), "sk-bad", { vendorId: "openai" }),
+    (error) => error?.code === "AGENT_AUTH_REQUIRED",
+  );
+  assert.equal(catalog.freezeSelected().resolvedModelId, "pageroot:deepseek-v4-pro");
+  assert.equal(catalog.provider().connection.vendorDisplayName, "DeepSeek");
+  failNext = false;
+  await catalog.connectWithApiKey(catalog.freezeSelected(), "sk-new", { vendorId: "openai" });
+  assert.equal(catalog.freezeSelected().resolvedModelId, "pageroot:gpt-5");
+  assert.deepEqual(catalog.provider().models.map((model) => model.id), ["pageroot:gpt-5"]);
+  await catalog.disconnectApiKey(catalog.freezeSelected());
+  assert.equal(catalog.availability().status, "auth-required");
+  assert.equal(catalog.provider().credentialConfigured, false);
+  assert.deepEqual(catalog.provider().models, []);
+  assert.equal(catalog.freezeSelected().resolvedModelId, null);
+  assert.equal(requests.at(-1).disconnect, true);
 });

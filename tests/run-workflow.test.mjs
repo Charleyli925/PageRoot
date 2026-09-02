@@ -207,6 +207,7 @@ function createHarness({
     availability: [],
     preflight: [],
     startAgent: [],
+    attachment: [],
     handoff: [],
     unlock: 0,
     fence: 0,
@@ -229,8 +230,45 @@ function createHarness({
       calls.availability.push(true);
       return { status: "ready" };
     },
+    async attachment(nextSourcePath, relativePath) {
+      calls.attachment.push([nextSourcePath, relativePath]);
+      return new Blob(["verified text attachment"], { type: "text/plain" });
+    },
     async preflightAgent(request) {
       calls.preflight.push(request);
+      if (request.selection?.providerId === "pageroot") {
+        const resolved = request.selection.resolvedModelId
+          || request.selection.requestedModelId
+          || "pageroot:deepseek-v4-pro";
+        return {
+          status: "ready",
+          preflightId: "preflight_test",
+          expiresAt: "2026-08-11T00:02:00.000Z",
+          selection: {
+            ...request.selection,
+            resolvedModelId: resolved,
+          },
+          configuration: {
+            schemaVersion: "1.0.0",
+            providerId: "pageroot",
+            runtimeId: "http",
+            vendorId: "deepseek",
+            baseUrlOrigin: "https://api.deepseek.com",
+            modelId: resolved,
+            reasoning: "auto",
+            capabilityRevision: "2026-09-03.1",
+            credentialGeneration: 1,
+            configurationDigest: `sha256:${"a".repeat(64)}`,
+          },
+          models: [{
+            id: resolved,
+            contextWindow: 1_000_000,
+            recommendedMaxInputTokens: 500_000,
+            maxOutputTokens: 384_000,
+            supportsCompleteHtml: true,
+          }],
+        };
+      }
       return {
         status: "ready",
         preflightId: "preflight_test",
@@ -334,7 +372,7 @@ test("submit freezes the exact source, creates one Request, and confirms handoff
 
   const outcome = await harness.workflow.submit({ projectName: "landing.html" });
 
-  assert.equal(outcome.status, "succeeded");
+  assert.equal(outcome.status, "succeeded", JSON.stringify(outcome));
   assert.equal(harness.calls.fence, 1);
   assert.equal(harness.calls.createRequest.length, 1);
   assert.equal(harness.calls.handoff.length, 1);
@@ -351,6 +389,299 @@ test("submit freezes the exact source, creates one Request, and confirms handoff
   const duplicate = await harness.workflow.submit({ projectName: "landing.html" });
   assert.equal(duplicate.status, "blocked");
   assert.equal(harness.calls.createRequest.length, 1);
+});
+
+test("源页 Agent blocks binary attachments before preflight or Request creation", async () => {
+  const harness = createHarness({
+    comments: [{
+      commentId: "comment_image",
+      text: "按图片调整布局",
+      target: {
+        id: "target_image",
+        selector: "main",
+        sourceAnchor: { sourceSha256: sha256(HTML_A) },
+      },
+      attachments: [{
+        attachmentId: "attachment_image",
+        fileName: "reference.png",
+        mediaType: "image/png",
+      }],
+    }],
+  });
+  harness.workflow.selectAgent({
+    providerId: "pageroot",
+    runtimeId: "http",
+    requestedModelId: null,
+    resolvedModelId: null,
+    reasoning: { requested: null, applied: null, resolution: "provider-default" },
+  });
+
+  const outcome = await harness.workflow.submit({ deliveryMode: "managed-agent" });
+
+  assert.equal(outcome.status, "blocked");
+  assert.equal(outcome.code, "RUN_AGENT_ATTACHMENT_UNSUPPORTED");
+  assert.match(outcome.reason, /暂不支持此附件/u);
+  assert.equal(harness.calls.preflight.length, 0);
+  assert.equal(harness.calls.createRequest.length, 0);
+});
+
+test("源页 Agent keeps text attachments in the ordinary frozen Request", async () => {
+  const harness = createHarness({
+    comments: [{
+      commentId: "comment_text_attachment",
+      text: "按文本要求调整",
+      target: {
+        id: "target_text_attachment",
+        selector: "main",
+        sourceAnchor: { sourceSha256: sha256(HTML_A) },
+      },
+      attachments: [{
+        attachmentId: "attachment_text",
+        fileName: "requirements.txt",
+        mediaType: "text/plain",
+        relativePath: "attachments/requirements.txt",
+      }],
+    }],
+  });
+  harness.workflow.selectAgent({
+    providerId: "pageroot",
+    runtimeId: "http",
+    requestedModelId: null,
+    resolvedModelId: null,
+    reasoning: { requested: null, applied: null, resolution: "provider-default" },
+  });
+
+  const outcome = await harness.workflow.submit({ deliveryMode: "managed-agent" });
+
+  assert.equal(outcome.status, "succeeded", JSON.stringify(outcome));
+  assert.equal(harness.calls.createRequest.length, 1);
+  assert.equal(
+    harness.calls.createRequest[0].comments[0].attachments[0].attachmentId,
+    "attachment_text",
+  );
+});
+
+test("源页 Agent accepts a known text filename when the browser omits its MIME type", async () => {
+  const harness = createHarness({
+    comments: [{
+      commentId: "comment_unknown_text_attachment",
+      text: "按文本要求调整",
+      target: {
+        id: "target_unknown_text_attachment",
+        selector: "main",
+        sourceAnchor: { sourceSha256: sha256(HTML_A) },
+      },
+      attachments: [{
+        attachmentId: "attachment_unknown_text",
+        fileName: "requirements.md",
+        mediaType: "application/octet-stream",
+        relativePath: "attachments/requirements.md",
+      }],
+    }],
+  });
+  harness.workflow.selectAgent({
+    providerId: "pageroot",
+    runtimeId: "http",
+    requestedModelId: null,
+    resolvedModelId: null,
+    reasoning: { requested: null, applied: null, resolution: "provider-default" },
+  });
+
+  const outcome = await harness.workflow.submit({ deliveryMode: "managed-agent" });
+
+  assert.equal(outcome.status, "succeeded");
+  assert.equal(harness.calls.createRequest.length, 1);
+});
+
+test("源页 Agent verifies attachment bytes and blocks disguised binary before Request creation", async () => {
+  const harness = createHarness({
+    comments: [{
+      commentId: "comment_disguised_binary",
+      text: "按文本要求调整",
+      target: {
+        id: "target_disguised_binary",
+        selector: "main",
+        sourceAnchor: { sourceSha256: sha256(HTML_A) },
+      },
+      attachments: [{
+        attachmentId: "attachment_disguised_binary",
+        fileName: "requirements.txt",
+        mediaType: "text/plain",
+        relativePath: "attachments/requirements.txt",
+      }],
+    }],
+    bridge: {
+      async attachment() {
+        return new Blob([new Uint8Array([0, 255, 1])], { type: "text/plain" });
+      },
+    },
+  });
+  harness.workflow.selectAgent({
+    providerId: "pageroot",
+    runtimeId: "http",
+    requestedModelId: null,
+    resolvedModelId: null,
+    reasoning: { requested: null, applied: null, resolution: "provider-default" },
+  });
+
+  const outcome = await harness.workflow.submit({ deliveryMode: "managed-agent" });
+
+  assert.equal(outcome.status, "rejected");
+  assert.equal(outcome.code, "RUN_AGENT_ATTACHMENT_UNSUPPORTED");
+  assert.equal(harness.calls.createRequest.length, 0);
+});
+
+test("源页 Agent revalidates the exact comment snapshot after drain before creating a Request", async () => {
+  const drainEntered = deferred();
+  const drainResult = deferred();
+  const target = {
+    id: "target_attachment_swap",
+    selector: "main",
+    sourceAnchor: { sourceSha256: sha256(HTML_A) },
+  };
+  const harness = createHarness({
+    comments: [{
+      commentId: "comment_attachment_swap",
+      text: "按附件调整",
+      target,
+      attachments: [{
+        attachmentId: "attachment_text_before_drain",
+        fileName: "requirements.txt",
+        mediaType: "text/plain",
+        relativePath: "attachments/requirements.txt",
+      }],
+    }],
+    drain: async () => {
+      drainEntered.resolve();
+      return drainResult.promise;
+    },
+  });
+  harness.workflow.selectAgent({
+    providerId: "pageroot",
+    runtimeId: "http",
+    requestedModelId: null,
+    resolvedModelId: null,
+    reasoning: { requested: null, applied: null, resolution: "provider-default" },
+  });
+
+  const submitted = harness.workflow.submit({ deliveryMode: "managed-agent" });
+  await drainEntered.promise;
+  harness.commentSession.setComments([{
+    commentId: "comment_attachment_swap",
+    text: "按附件调整",
+    target,
+    attachments: [{
+      attachmentId: "attachment_image_after_drain",
+      fileName: "reference.png",
+      mediaType: "image/png",
+      relativePath: "attachments/reference.png",
+    }],
+  }]);
+  drainResult.resolve({ ok: true });
+
+  const outcome = await submitted;
+  assert.equal(outcome.status, "rejected");
+  assert.equal(outcome.code, "RUN_AGENT_ATTACHMENT_UNSUPPORTED");
+  assert.equal(harness.calls.createRequest.length, 0);
+});
+
+test("源页 Agent blocks an over-budget complete HTML rewrite before Request creation", async () => {
+  const configurationDigest = `sha256:${"b".repeat(64)}`;
+  const modelId = "pageroot:deepseek-v4-pro";
+  const harness = createHarness({
+    bridge: {
+      async preflightAgent(request) {
+        return {
+          status: "ready",
+          preflightId: "preflight_small_budget",
+          expiresAt: "2026-08-11T00:02:00.000Z",
+          selection: {
+            ...request.selection,
+            requestedModelId: null,
+            resolvedModelId: modelId,
+          },
+          configuration: {
+            schemaVersion: "1.0.0",
+            providerId: "pageroot",
+            runtimeId: "http",
+            vendorId: "deepseek",
+            baseUrlOrigin: "https://api.deepseek.com",
+            modelId,
+            reasoning: "auto",
+            capabilityRevision: "2026-09-03.1",
+            credentialGeneration: 1,
+            configurationDigest,
+          },
+          models: [{
+            id: modelId,
+            contextWindow: 1_000,
+            recommendedMaxInputTokens: 500,
+            maxOutputTokens: 200,
+            supportsCompleteHtml: true,
+          }],
+        };
+      },
+    },
+  });
+  harness.workflow.selectAgent({
+    providerId: "pageroot",
+    runtimeId: "http",
+    requestedModelId: null,
+    resolvedModelId: null,
+    reasoning: { requested: null, applied: null, resolution: "provider-default" },
+  });
+
+  const outcome = await harness.workflow.submit({ deliveryMode: "managed-agent" });
+
+  assert.equal(outcome.status, "blocked", JSON.stringify(outcome));
+  assert.equal(outcome.code, "RUN_AGENT_PROMPT_TOO_LARGE");
+  assert.match(outcome.reason, /完整输出能力/u);
+  assert.equal(harness.calls.createRequest.length, 0);
+  assert.equal(harness.calls.unlock, 1);
+});
+
+test("Custom compatible mode still enforces the HTTP runtime hard context limit before Request", async () => {
+  const modelId = "pageroot:manual-model";
+  const largeHtml = `<!doctype html><html><body><main>${"x".repeat(1_900_000)}</main></body></html>`;
+  const harness = createHarness({
+    html: largeHtml,
+    bridge: {
+      async preflightAgent(request) {
+        return {
+          status: "ready",
+          preflightId: "preflight_custom_hard_limit",
+          expiresAt: "2026-08-11T00:02:00.000Z",
+          selection: { ...request.selection, resolvedModelId: modelId },
+          configuration: {
+            schemaVersion: "1.0.0",
+            providerId: "pageroot",
+            runtimeId: "http",
+            vendorId: "custom",
+            baseUrlOrigin: "https://api.example.com",
+            modelId,
+            reasoning: "auto",
+            capabilityRevision: "2026-09-03.1",
+            credentialGeneration: 1,
+            configurationDigest: `sha256:${"d".repeat(64)}`,
+          },
+          models: [{ id: modelId, supportsCompleteHtml: false }],
+        };
+      },
+    },
+  });
+  harness.workflow.selectAgent({
+    providerId: "pageroot",
+    runtimeId: "http",
+    requestedModelId: modelId,
+    resolvedModelId: null,
+    reasoning: { requested: null, applied: null, resolution: "provider-default" },
+  });
+
+  const outcome = await harness.workflow.submit({ deliveryMode: "managed-agent" });
+
+  assert.equal(outcome.status, "blocked", JSON.stringify(outcome));
+  assert.equal(outcome.code, "RUN_AGENT_PROMPT_TOO_LARGE");
+  assert.equal(harness.calls.createRequest.length, 0);
 });
 
 test("submit rejects a latest working source whose visible projection is still last-known-good", async () => {

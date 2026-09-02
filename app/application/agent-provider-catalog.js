@@ -15,8 +15,8 @@ import {
 import {
   PAGEROOT_PROVIDER_ID,
   PAGEROOT_RUNTIME_ID,
+  DEFAULT_OPENAI_COMPATIBLE_REASONING,
   normalizeOpenAiCompatibleReasoning,
-  publicOpenAiCompatibleReasoningChoices,
   publicOpenAiCompatibleVendors,
 } from "../../shared/openai-compatible-vendors.mjs";
 
@@ -27,6 +27,7 @@ const QODER_FAILURE_REASONS = Object.freeze({
   AGENT_AUTH_REQUIRED: "auth-required",
   QODER_ACCOUNT_CAPACITY_UNAVAILABLE: "account-capacity",
   QODER_CAPACITY_UNAVAILABLE: "account-capacity",
+  QODER_MODEL_CATALOG_EMPTY: "service-unavailable",
   AGENT_ACCOUNT_CAPACITY_UNAVAILABLE: "account-capacity",
   QODER_PREFLIGHT_TIMEOUT: "timeout",
   AGENT_PREFLIGHT_TIMEOUT: "timeout",
@@ -196,8 +197,16 @@ export const CODEX_AGENT_PROVIDER = Object.freeze({
 const PAGEROOT_FAILURE_REASONS = Object.freeze({
   AGENT_AUTH_REQUIRED: "auth-required",
   AGENT_ACCOUNT_CAPACITY_UNAVAILABLE: "account-capacity",
+  AGENT_BALANCE_INSUFFICIENT: "account-capacity",
+  AGENT_PLAN_LIMIT: "account-capacity",
   AGENT_PREFLIGHT_TIMEOUT: "timeout",
   AGENT_TURN_TIMEOUT: "timeout",
+  AGENT_MODEL_ID_REQUIRED: "model-unavailable",
+  AGENT_MODEL_CATALOG_EMPTY: "model-unavailable",
+  AGENT_MODEL_NOT_RELEASED: "model-unavailable",
+  AGENT_MODEL_ACCESS_DENIED: "model-unavailable",
+  AGENT_SELECTION_UNSUPPORTED: "model-unavailable",
+  AGENT_ENDPOINT_REGION_MISMATCH: "endpoint-region-mismatch",
 });
 
 const PAGEROOT_PRESENTATION = Object.freeze({
@@ -222,7 +231,6 @@ const PAGEROOT_PRESENTATION = Object.freeze({
   credentialKind: "api-token",
   supportsReasoning: true,
   vendors: publicOpenAiCompatibleVendors(),
-  reasoningChoices: publicOpenAiCompatibleReasoningChoices(),
   apiKeyLabel: "连接",
   replaceTokenLabel: "更换 Token",
   stopLabel: "停止源页 Agent 并继续编辑",
@@ -327,6 +335,20 @@ export function agentAvailabilityCardPresentation(presentation, availability) {
       tone: "attention",
     });
   }
+  if (availability?.reason === "model-unavailable") {
+    return Object.freeze({
+      statusLabel: "暂不可用 · 模型不可用",
+      detail: "请选择其他模型，或重新读取模型列表。",
+      tone: "attention",
+    });
+  }
+  if (availability?.reason === "endpoint-region-mismatch") {
+    return Object.freeze({
+      statusLabel: "暂不可用 · 接口地区不匹配",
+      detail: "请修改兼容接口，或更换厂商。",
+      tone: "attention",
+    });
+  }
   return Object.freeze({
     statusLabel: "暂不可用 · 连接没有完成",
     detail: "本轮任务尚未创建，当前页面不受影响。",
@@ -390,6 +412,7 @@ export function agentProviderCardsFromCatalog(snapshot) {
       availability: provider.availability,
       models: Array.isArray(provider.models) ? provider.models : Object.freeze([]),
       credentialConfigured: provider.credentialConfigured === true,
+      connection: provider.connection || null,
     })));
 }
 
@@ -403,6 +426,7 @@ function frozenProviderEntry(descriptor, previous = null) {
     installationDigest: previous?.installationDigest || null,
     models: previous?.models || Object.freeze([]),
     credentialConfigured: previous?.credentialConfigured === true,
+    connection: previous?.connection || null,
   });
 }
 
@@ -431,8 +455,19 @@ function publicModels(value) {
       id,
       displayName: String(item?.displayName || id).trim().slice(0, 80) || id,
       isDefault: item?.isDefault === true,
+      providerModelId: String(item?.providerModelId || "").trim().slice(0, 80) || null,
+      releaseChannel: String(item?.releaseChannel || "").trim().slice(0, 40) || null,
+      contextWindow: Number(item?.contextWindow || 0) || null,
+      recommendedMaxInputTokens: Number(item?.recommendedMaxInputTokens || 0) || null,
+      maxOutputTokens: Number(item?.maxOutputTokens || 0) || null,
+      supportsCompleteHtml: item?.supportsCompleteHtml === true,
+      reasoningChoices: Object.freeze((Array.isArray(item?.reasoningChoices)
+        ? item.reasoningChoices
+        : []).map((choice) => Object.freeze({
+        id: String(choice?.id || "").trim().slice(0, 40),
+        label: String(choice?.label || choice?.id || "").trim().slice(0, 40),
+      })).filter((choice) => choice.id && choice.label)),
     }));
-    if (models.length >= 40) break;
   }
   return Object.freeze(models);
 }
@@ -890,24 +925,44 @@ export class AgentCatalogState {
     return Object.freeze({ kind, copied: true });
   }
 
-  selectModel(modelId) {
-    if (!this.#selected) return null;
+  selectModel(modelId, expectedSelection = this.#selected) {
+    if (!this.#selected || !expectedSelection) return null;
+    const expected = freezeAgentSelection(expectedSelection);
+    if (agentPreflightKey(this.#selected) !== agentPreflightKey(expected)) return null;
     const id = typeof modelId === "string" && modelId.trim()
       ? modelId.trim().slice(0, 80)
       : null;
+    if (id && !id.startsWith(`${expected.providerId}:`)) return null;
     return this.select({
-      ...this.#selected,
+      ...expected,
       requestedModelId: id,
       resolvedModelId: id,
+      reasoning: {
+        requested: null,
+        applied: null,
+        resolution: "provider-default",
+      },
     });
   }
 
-  selectReasoning(reasoning) {
-    if (!this.#selected) return null;
+  selectReasoning(reasoning, expectedSelection = this.#selected) {
+    if (!this.#selected || !expectedSelection) return null;
+    const expected = freezeAgentSelection(expectedSelection);
+    if (agentPreflightKey(this.#selected) !== agentPreflightKey(expected)) return null;
+    if (String(reasoning || "") === DEFAULT_OPENAI_COMPATIBLE_REASONING) {
+      return this.select({
+        ...expected,
+        reasoning: {
+          requested: null,
+          applied: null,
+          resolution: "provider-default",
+        },
+      });
+    }
     const requested = normalizeOpenAiCompatibleReasoning(reasoning);
-    if (!requested) return this.#selected;
+    if (!requested) return expected;
     return this.select({
-      ...this.#selected,
+      ...expected,
       reasoning: {
         requested,
         applied: requested,
@@ -928,24 +983,106 @@ export class AgentCatalogState {
     const frozen = freezeAgentSelection(selection);
     const provider = this.provider(frozen);
     if (!provider) throw this.#unsupportedProvider(frozen.providerId);
-    if (typeof this.#bridgeClient.setAgentSessionCredential !== "function") {
+    const updateConfiguration = typeof this.#bridgeClient.updateAgentConfiguration === "function"
+      ? (body) => this.#bridgeClient.updateAgentConfiguration(body)
+      : typeof this.#bridgeClient.setAgentSessionCredential === "function"
+        ? (body) => this.#bridgeClient.setAgentSessionCredential(body)
+        : null;
+    if (!updateConfiguration) {
       throw Object.assign(new Error("API Token 无法保存。"), {
         code: "AGENT_SESSION_CREDENTIAL_UNSUPPORTED",
       });
     }
-    await this.#bridgeClient.setAgentSessionCredential({
+    // Candidate configuration edits invalidate every old renderer ticket at
+    // the start of the transaction. Provider/model/readiness state is not
+    // replaced unless the Bridge commits the candidate below.
+    this.#invalidateProvider(frozen.providerId);
+    const manualModelId = String(extras.modelId || "").trim().slice(0, 80);
+    const requestedSelection = freezeAgentSelection({
+      ...frozen,
+      requestedModelId: manualModelId
+        ? `${frozen.providerId}:${manualModelId.replace(/^pageroot:/u, "")}`
+        : null,
+      resolvedModelId: null,
+      reasoning: { requested: null, applied: null, resolution: "provider-default" },
+    });
+    const result = await updateConfiguration({
       providerId: frozen.providerId,
       apiKey,
       vendorId: extras.vendorId || null,
       baseUrl: extras.baseUrl || null,
+      selection: requestedSelection,
     });
-    this.#patchProvider(frozen.providerId, { credentialConfigured: true });
-    const preflight = await this.preflight(
-      this.freezeProviderSelection(frozen.providerId) || frozen,
-      { force: true },
+    if (result?.status !== "ready" || !result?.selection) {
+      throw Object.assign(new Error("API Token 没有返回可执行配置。"), {
+        code: "AGENT_SESSION_CREDENTIAL_INVALID",
+      });
+    }
+    const returnedSelection = freezeAgentSelection(result.selection);
+    this.#invalidateProvider(frozen.providerId);
+    if (this.#selected?.providerId === frozen.providerId) this.#selected = returnedSelection;
+    const current = this.#providers.get(frozen.providerId);
+    this.#providers.set(frozen.providerId, Object.freeze({
+      ...current,
+      models: publicModels(result.models),
+      credentialConfigured: true,
+      connection: Object.freeze({
+        vendorId: String(result.vendorId || extras.vendorId || ""),
+        vendorDisplayName: String(result.vendorDisplayName || extras.vendorId || ""),
+        baseUrl: String(result.baseUrl || extras.baseUrl || ""),
+      }),
+      availability: readyAgentProviderAvailability(validDate(this.#clock)),
+      installationDigest: String(result.installationDigest || "") || null,
+    }));
+    this.#publish();
+    return result;
+  }
+
+  async disconnectApiKey(selection = this.freezeSelected()) {
+    const frozen = freezeAgentSelection(selection);
+    const provider = this.provider(frozen);
+    const updateConfiguration = typeof this.#bridgeClient.updateAgentConfiguration === "function"
+      ? (body) => this.#bridgeClient.updateAgentConfiguration(body)
+      : typeof this.#bridgeClient.setAgentSessionCredential === "function"
+        ? (body) => this.#bridgeClient.setAgentSessionCredential(body)
+        : null;
+    if (!provider || !updateConfiguration) {
+      throw this.#unsupportedProvider(frozen.providerId);
+    }
+    await updateConfiguration({
+      providerId: frozen.providerId,
+      disconnect: true,
+    });
+    this.#invalidateProvider(frozen.providerId);
+    const resetSelection = freezeAgentSelection(provider.selection);
+    if (this.#selected?.providerId === frozen.providerId) this.#selected = resetSelection;
+    this.#providers.set(frozen.providerId, Object.freeze({
+      ...provider,
+      models: Object.freeze([]),
+      credentialConfigured: false,
+      connection: null,
+      installationDigest: null,
+      availability: agentProviderAvailabilityFromFailureReason(
+        "auth-required",
+        provider.availability,
+        validDate(this.#clock),
+      ),
+    }));
+    this.#publish();
+    return Object.freeze({ configured: false });
+  }
+
+  #invalidateProvider(providerId) {
+    this.#generationByProvider.set(
+      providerId,
+      (this.#generationByProvider.get(providerId) || 0) + 1,
     );
-    this.discardTicket(preflight);
-    return preflight;
+    for (const [key, inflight] of this.#inflightBySelection) {
+      if (inflight.providerId === providerId) this.#inflightBySelection.delete(key);
+    }
+    for (const [key, preflight] of this.#preflightBySelection) {
+      if (preflight?.selection?.providerId === providerId) this.#preflightBySelection.delete(key);
+    }
   }
 
   #isSelected(selection) {

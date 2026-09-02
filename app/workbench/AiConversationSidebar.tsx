@@ -65,6 +65,8 @@ export type AiConversationSidebarProps = {
   candidateStatus?: string | null;
   runStatus?: string | null;
   failureMessage?: string | null;
+  failureCode?: string | null;
+  failureRetryable?: boolean;
   contextLabel?: string | null;
   pendingCommentCount?: number;
   queued?: boolean;
@@ -182,6 +184,8 @@ export default function AiConversationSidebar({
   candidateStatus = null,
   runStatus = null,
   failureMessage = null,
+  failureCode = null,
+  failureRetryable = true,
   contextLabel = null,
   pendingCommentCount = 0,
   queued = false,
@@ -234,6 +238,8 @@ export default function AiConversationSidebar({
       candidateVersionLabel,
       candidateStatus,
       failureMessage,
+      failureCode,
+      failureRetryable,
       deliveryMode,
       handoffStatus,
     }),
@@ -242,6 +248,8 @@ export default function AiConversationSidebar({
       candidateVersionLabel,
       deliveryMode,
       failureMessage,
+      failureCode,
+      failureRetryable,
       handoffStatus,
       runStatus,
       state,

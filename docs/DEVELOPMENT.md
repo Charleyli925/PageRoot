@@ -245,6 +245,13 @@ name fails during source review rather than after formal packaging begins.
 
 `npm run ci:health` is a local/manual summary of recent `ci.yml` conclusions and retry-recovered jobs. It is not a scheduled workflow and not a merge gate. Reports are written under `output/ci-health/`.
 
+The native HTTP Agent has a credential-backed protocol smoke that is intentionally
+outside the synthetic test suite. Before a release candidate that changes vendor
+adapters, run `npm run smoke:agent-vendors:real` with the four
+`PAGEROOT_SMOKE_<VENDOR>_API_KEY` secrets (and optional matching `_MODEL`
+overrides). It calls each real `/models` and `/chat/completions` endpoint, never
+prints a Token, and must pass for DeepSeek, 智谱, 阿里通义, and OpenAI.
+
 ## Design constraints
 
 - Treat the current HTML bytes as authoritative.
