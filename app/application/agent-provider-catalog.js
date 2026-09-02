@@ -12,6 +12,13 @@ import {
   defaultManagedAgentDelivery,
   TRUSTED_LOCAL_AGENT_POLICY_VERSION,
 } from "../../shared/agent-delivery.mjs";
+import {
+  PAGEROOT_PROVIDER_ID,
+  PAGEROOT_RUNTIME_ID,
+  normalizeOpenAiCompatibleReasoning,
+  publicOpenAiCompatibleReasoningChoices,
+  publicOpenAiCompatibleVendors,
+} from "../../shared/openai-compatible-vendors.mjs";
 
 const QODER_FAILURE_REASONS = Object.freeze({
   QODER_COMMAND_NOT_FOUND: "not-installed",
@@ -39,14 +46,15 @@ const QODER_PRESENTATION = Object.freeze({
   cardClassName: "qoder-availability-card",
   primaryActionDataAttribute: "data-qoder-primary",
   guidancePurposePrefix: "qoder",
-  readyDetail: "真实预检已完成，可直接交给 Qoder 修改",
-  notInstalledDetail: "如需从 PageRoot 直接发送，还需要 Qoder CLI。",
-  authRequiredDetail: "完成 Qoder 登录后即可直接发送。",
+  readyDetail: "已接通，可直接交给 Qoder 修改",
+  notInstalledDetail: "安装后即可从侧栏直接发送。",
+  authRequiredDetail: "登录后即可从侧栏直接发送。",
+  loginLabel: "复制登录指令",
   invalidInstallationDetail: "当前安装不是 PageRoot 支持的独立 Qoder CLI。",
   restartRequiredDetail: "Qoder CLI 已发生变化，重新打开 PageRoot 后即可继续。",
   checkingDetail: "正在自动检查 Qoder CLI…",
-  capacityStatusLabel: "暂不可用 · Qoder 额度已用完",
-  capacityDetail: "Qoder 账号当前没有可用模型容量。",
+  capacityStatusLabel: "额度已用完",
+  capacityDetail: "换源页 Agent 或 Codex，或复制任务给别的 AI。",
   timeoutDetail: "Qoder CLI 预检没有在规定时间内完成。",
   startUnavailable: "当前 Request 还不能启动 Qoder CLI。",
   startBusy: "Qoder CLI 正在启动，请等待当前操作完成。",
@@ -98,6 +106,8 @@ const CODEX_FAILURE_REASONS = Object.freeze({
   CODEX_COMMAND_NOT_FOUND: "not-installed",
   AGENT_COMMAND_NOT_FOUND: "not-installed",
   CODEX_AUTH_REQUIRED: "auth-required",
+  CODEX_ACCOUNT_CAPACITY_UNAVAILABLE: "account-capacity",
+  AGENT_ACCOUNT_CAPACITY_UNAVAILABLE: "account-capacity",
   CODEX_APP_SERVER_TIMEOUT: "timeout",
   CODEX_TURN_TIMEOUT: "timeout",
   CODEX_PREFLIGHT_TIMEOUT: "timeout",
@@ -121,9 +131,12 @@ const CODEX_PRESENTATION = Object.freeze({
   primaryActionDataAttribute: "data-codex-primary",
   guidancePurposePrefix: "codex",
   installLabel: "安装 Codex",
-  readyDetail: "真实预检已完成，可直接交给 Codex 修改",
-  notInstalledDetail: "如需从 PageRoot 直接发送，还需要安装 Codex。",
-  authRequiredDetail: "完成 Codex 登录后即可直接发送。",
+  readyDetail: "已接通，可直接交给 Codex 修改",
+  notInstalledDetail: "安装后即可从侧栏直接发送。",
+  authRequiredDetail: "登录 ChatGPT 后即可从侧栏直接发送。",
+  capacityStatusLabel: "额度已用完",
+  capacityDetail: "换源页 Agent 或 Qoder，或复制任务给别的 AI。",
+  loginLabel: "复制登录指令",
   invalidInstallationDetail: "当前安装不是 PageRoot 支持的独立 Codex ACP。",
   restartRequiredDetail: "Codex ACP 已发生变化，重新打开 PageRoot 后即可继续。",
   checkingDetail: "正在检查 Codex…",
@@ -133,7 +146,7 @@ const CODEX_PRESENTATION = Object.freeze({
   startFailure: "Codex 没有启动。本轮 Request 已保留，可安全结束后重试。",
   restartLabel: "重新启动 Codex",
   restartSupported: true,
-  settingsSupported: false,
+  settingsSupported: true,
   stopLabel: "停止 Codex 并继续编辑",
   frozenPreviewDetail: "这是本轮冻结并交给 Codex 的只读任务资料",
   localReadDisclosure: "Codex 修改时可能读取这台 Mac 上的本机文件。",
@@ -180,8 +193,70 @@ export const CODEX_AGENT_PROVIDER = Object.freeze({
   guidanceInstruction: codexGuidanceInstruction,
 });
 
+const PAGEROOT_FAILURE_REASONS = Object.freeze({
+  AGENT_AUTH_REQUIRED: "auth-required",
+  AGENT_ACCOUNT_CAPACITY_UNAVAILABLE: "account-capacity",
+  AGENT_PREFLIGHT_TIMEOUT: "timeout",
+  AGENT_TURN_TIMEOUT: "timeout",
+});
+
+const PAGEROOT_PRESENTATION = Object.freeze({
+  displayName: "源页 Agent",
+  agentName: "源页",
+  logoSrc: "./brand-logo.png",
+  cardClassName: "pageroot-availability-card",
+  primaryActionDataAttribute: "data-pageroot-primary",
+  readyDetail: "可从侧栏发送",
+  authRequiredDetail: "填入 Token 后发送",
+  capacityStatusLabel: "额度已用完",
+  capacityDetail: "换厂商，或复制任务给别的 AI。",
+  checkingDetail: "正在连接…",
+  timeoutDetail: "连接超时，请重试。",
+  startUnavailable: "当前还不能发送。",
+  startBusy: "正在处理，请稍候。",
+  startFailure: "没有完成。本轮已保留。",
+  restartLabel: "重新发送",
+  restartSupported: true,
+  settingsSupported: true,
+  supportsApiKey: true,
+  credentialKind: "api-token",
+  supportsReasoning: true,
+  vendors: publicOpenAiCompatibleVendors(),
+  reasoningChoices: publicOpenAiCompatibleReasoningChoices(),
+  apiKeyLabel: "连接",
+  replaceTokenLabel: "更换 Token",
+  stopLabel: "停止源页 Agent 并继续编辑",
+  frozenPreviewDetail: "这是本轮冻结并交给源页 Agent 的只读任务资料",
+});
+
+export const PAGEROOT_AGENT_PROVIDER = Object.freeze({
+  providerId: PAGEROOT_PROVIDER_ID,
+  runtimeId: PAGEROOT_RUNTIME_ID,
+  securityProfile: "client-mediated",
+  trustPolicyVersion: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
+  installable: false,
+  selection: freezeAgentSelection(Object.freeze({
+    providerId: PAGEROOT_PROVIDER_ID,
+    runtimeId: PAGEROOT_RUNTIME_ID,
+    requestedModelId: null,
+    resolvedModelId: null,
+    reasoning: Object.freeze({
+      requested: null,
+      applied: null,
+      resolution: "provider-default",
+    }),
+  })),
+  presentation: PAGEROOT_PRESENTATION,
+  failureReason(code) {
+    return PAGEROOT_FAILURE_REASONS[String(code || "")] || "service-unavailable";
+  },
+  guidanceInstruction() {
+    return "";
+  },
+});
+
 export function defaultAgentProviders() {
-  return Object.freeze([QODER_AGENT_PROVIDER, CODEX_AGENT_PROVIDER]);
+  return Object.freeze([PAGEROOT_AGENT_PROVIDER, QODER_AGENT_PROVIDER, CODEX_AGENT_PROVIDER]);
 }
 
 export function agentAvailabilityCardPresentation(presentation, availability) {
@@ -201,6 +276,13 @@ export function agentAvailabilityCardPresentation(presentation, availability) {
     });
   }
   if (status === "auth-required") {
+    if (presentation.credentialKind === "api-token") {
+      return Object.freeze({
+        statusLabel: "需要 Token",
+        detail: presentation.authRequiredDetail,
+        tone: "attention",
+      });
+    }
     const waitingForLogin = availability?.guidanceCopied === "login";
     return Object.freeze({
       statusLabel: waitingForLogin ? "等待登录" : "需要登录",
@@ -267,10 +349,21 @@ export function agentProviderCardPresentation(provider) {
         copiedLabel: "重新安装",
       }),
       login: Object.freeze({
-        label: "复制指令粘贴至 Agent",
+        label: presentation.loginLabel || "复制登录指令",
         copiedLabel: "重新复制",
       }),
+      recheck: Object.freeze({
+        label: "重试",
+        copiedLabel: "重试",
+      }),
+      apiKey: Object.freeze({
+        label: presentation.replaceTokenLabel || "更换 Token",
+        copiedLabel: presentation.apiKeyLabel || "连接",
+      }),
     }),
+    supportsApiKey: presentation.supportsApiKey === true,
+    credentialKind: presentation.credentialKind || null,
+    vendors: Array.isArray(presentation.vendors) ? presentation.vendors : Object.freeze([]),
   });
 }
 
@@ -278,7 +371,9 @@ export function agentProviderCardsFromCatalog(snapshot) {
   const selected = snapshot?.selected || null;
   return Object.freeze(Object.values(snapshot?.providers ?? {})
     .filter((provider) => (
-      provider.installable === true
+      provider.providerId === selected?.providerId
+      || provider.installable === true
+      || provider.presentation?.supportsApiKey === true
       || provider.availability?.status === "auth-required"
       || provider.availability?.status === "not-installed"
     ))
@@ -293,6 +388,8 @@ export function agentProviderCardsFromCatalog(snapshot) {
         : provider.selection,
       presentation: agentProviderCardPresentation(provider),
       availability: provider.availability,
+      models: Array.isArray(provider.models) ? provider.models : Object.freeze([]),
+      credentialConfigured: provider.credentialConfigured === true,
     })));
 }
 
@@ -304,6 +401,8 @@ function frozenProviderEntry(descriptor, previous = null) {
     installState: previous?.installState || descriptor.installState || "idle",
     availability: previous?.availability || INITIAL_AGENT_PROVIDER_AVAILABILITY,
     installationDigest: previous?.installationDigest || null,
+    models: previous?.models || Object.freeze([]),
+    credentialConfigured: previous?.credentialConfigured === true,
   });
 }
 
@@ -318,6 +417,24 @@ function validDate(clock) {
 function preflightExpired(preflight, clock) {
   const expiresAt = Date.parse(String(preflight?.expiresAt || ""));
   return !Number.isFinite(expiresAt) || expiresAt <= clock.now();
+}
+
+function publicModels(value) {
+  if (!Array.isArray(value)) return Object.freeze([]);
+  const models = [];
+  const seen = new Set();
+  for (const item of value) {
+    const id = String(item?.id || "").trim().slice(0, 80);
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    models.push(Object.freeze({
+      id,
+      displayName: String(item?.displayName || id).trim().slice(0, 80) || id,
+      isDefault: item?.isDefault === true,
+    }));
+    if (models.length >= 40) break;
+  }
+  return Object.freeze(models);
 }
 
 function preflightResolvedRequestedSelection(requested, returned) {
@@ -392,7 +509,11 @@ export class AgentCatalogState {
       })));
       this.#generationByProvider.set(descriptor.providerId, 0);
     }
-    const initial = selected || providers[0]?.selection || null;
+    const defaultSelection = defaultManagedAgentDelivery().selection;
+    const initial = selected
+      || providers.find((provider) => provider.providerId === defaultSelection.providerId)?.selection
+      || providers[0]?.selection
+      || null;
     this.#selected = initial ? freezeAgentSelection(initial) : null;
   }
 
@@ -638,6 +759,13 @@ export class AgentCatalogState {
         if (finalKey !== key) this.#preflightBySelection.delete(key);
         if (wasSelected || this.#canProjectAvailability(frozen)) {
           this.#setProviderDigest(frozen.providerId, result.installationDigest);
+          const current = this.#providers.get(frozen.providerId);
+          if (current) {
+            this.#providers.set(frozen.providerId, Object.freeze({
+              ...current,
+              models: publicModels(result.models),
+            }));
+          }
           this.#setAvailability(
             frozen.providerId,
             readyAgentProviderAvailability(validDate(this.#clock)),
@@ -760,6 +888,64 @@ export class AgentCatalogState {
       validDate(this.#clock),
     ));
     return Object.freeze({ kind, copied: true });
+  }
+
+  selectModel(modelId) {
+    if (!this.#selected) return null;
+    const id = typeof modelId === "string" && modelId.trim()
+      ? modelId.trim().slice(0, 80)
+      : null;
+    return this.select({
+      ...this.#selected,
+      requestedModelId: id,
+      resolvedModelId: id,
+    });
+  }
+
+  selectReasoning(reasoning) {
+    if (!this.#selected) return null;
+    const requested = normalizeOpenAiCompatibleReasoning(reasoning);
+    if (!requested) return this.#selected;
+    return this.select({
+      ...this.#selected,
+      reasoning: {
+        requested,
+        applied: requested,
+        resolution: "exact",
+      },
+    });
+  }
+
+  noteRunFailure(selection, code) {
+    if (!selection) return null;
+    const frozen = freezeAgentSelection(selection);
+    const provider = this.provider(frozen);
+    if (!provider) return null;
+    return this.#setFailure(frozen, { code }, provider.availability);
+  }
+
+  async connectWithApiKey(selection, apiKey, extras = {}) {
+    const frozen = freezeAgentSelection(selection);
+    const provider = this.provider(frozen);
+    if (!provider) throw this.#unsupportedProvider(frozen.providerId);
+    if (typeof this.#bridgeClient.setAgentSessionCredential !== "function") {
+      throw Object.assign(new Error("API Token 无法保存。"), {
+        code: "AGENT_SESSION_CREDENTIAL_UNSUPPORTED",
+      });
+    }
+    await this.#bridgeClient.setAgentSessionCredential({
+      providerId: frozen.providerId,
+      apiKey,
+      vendorId: extras.vendorId || null,
+      baseUrl: extras.baseUrl || null,
+    });
+    this.#patchProvider(frozen.providerId, { credentialConfigured: true });
+    const preflight = await this.preflight(
+      this.freezeProviderSelection(frozen.providerId) || frozen,
+      { force: true },
+    );
+    this.discardTicket(preflight);
+    return preflight;
   }
 
   #isSelected(selection) {

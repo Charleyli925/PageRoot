@@ -86,6 +86,7 @@ import {
   INITIAL_QODER_AVAILABILITY,
 } from "./domain/qoder-availability.js";
 import { agentProviderCardsFromCatalog } from "./application/agent-provider-catalog.js";
+import { DEFAULT_OPENAI_COMPATIBLE_REASONING } from "../shared/openai-compatible-vendors.mjs";
 import { createWorkspaceControllerCodecs } from "./application/workspace-controller-codecs.js";
 import { createBrowserFileTabIdentity } from "./application/browser-file-tab-identity.js";
 import { createDesktopRecoveryJournalPort } from "./workbench/desktop-recovery-journal-port";
@@ -711,6 +712,25 @@ export default function Workbench() {
     || agentPresentation.displayName
     || frozenAgentSelection?.providerId
     || null;
+  const agentModels = Array.isArray(frozenProvider?.models)
+    ? frozenProvider.models.map((model) => ({
+      id: String(model.id),
+      displayName: String(model.displayName || model.id),
+    }))
+    : [];
+  const selectedModelId = frozenAgentSelection?.requestedModelId
+    || frozenAgentSelection?.resolvedModelId
+    || agentModels.find((model) => model.id)?.id
+    || null;
+  const reasoningChoices = frozenProvider?.presentation?.supportsReasoning === true
+    && Array.isArray(frozenProvider.presentation.reasoningChoices)
+    ? frozenProvider.presentation.reasoningChoices.map((choice) => ({
+      id: String(choice.id),
+      label: String(choice.label || choice.id),
+    }))
+    : [];
+  const selectedReasoningId = frozenAgentSelection?.reasoning?.requested
+    || (reasoningChoices.length ? DEFAULT_OPENAI_COMPATIBLE_REASONING : null);
   const agentProviderChoices = Object.values(agentCatalogSnapshot?.providers ?? {}).map(
     (provider) => ({
       id: `${provider.providerId}:${provider.runtimeId}`,
@@ -770,9 +790,14 @@ export default function Workbench() {
     agentActionName: agentPresentation.agentName || agentPresentation.displayName,
     agentSettingsName: agentPresentation.displayName || agentPresentation.agentName,
     agentSettingsSupported: agentPresentation.settingsSupported !== false,
+    credentialKind: frozenProvider?.presentation?.credentialKind === "api-token"
+      ? "api-token"
+      : null,
     agentPresentation: sidebarAgentPresentation,
-    agentChoices: agentProviderChoices,
-    selectedAgentChoiceId,
+    models: agentModels,
+    selectedModelId,
+    reasoningChoices,
+    selectedReasoningId,
     // The header's mode comes from Request authority, not from a local guess.
     activeRun: runSnapshot.activeRun,
     activeHandoff: runSnapshot.activeHandoff,
@@ -4932,6 +4957,13 @@ export default function Workbench() {
   const installAgent = useCallback(async (selection?: AgentSelection | null) => (
     workspaceController?.installAgent(selection) ?? null
   ), [workspaceController]);
+  const connectAgentApiKey = useCallback(async (
+    selection: AgentSelection,
+    apiKey: string,
+    extras?: Readonly<{ vendorId?: string; baseUrl?: string }>,
+  ) => (
+    workspaceController?.connectAgentApiKey(selection, apiKey, extras) ?? null
+  ), [workspaceController]);
   useEffect(() => {
     deferredEditorReplayRef.current.generateRequest = () => {
       void generateRequest(deferredEditorReplayRef.current.agentDeliveryMode, true);
@@ -6302,6 +6334,7 @@ export default function Workbench() {
           onCheckUsability={checkAgentUsability}
           onCopyGuidance={copyAgentGuidance}
           onInstall={installAgent}
+          onConnectApiKey={connectAgentApiKey}
         />
       ) : null}
       {!settingsPageActive && startPageActive && projectCatalogCapability ? (

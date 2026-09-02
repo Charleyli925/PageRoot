@@ -324,6 +324,11 @@ export function createBridgeClient({
       body,
       "Agent 安装停止结果暂时无法确认。",
     ),
+    setAgentSessionCredential: (body) => command(
+      "/agent/session-credential",
+      body,
+      "API Token 没有接通。",
+    ),
     startAgent: (body) => command(
       "/agent/start",
       body,

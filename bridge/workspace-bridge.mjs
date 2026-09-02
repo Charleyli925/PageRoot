@@ -1643,6 +1643,17 @@ async function installAgent(body) {
   });
 }
 
+async function setAgentSessionCredential(body) {
+  const providerId = String(body?.providerId || "").trim();
+  if (body?.apiKey == null || body?.apiKey === "") {
+    return agentBridgeService.clearSessionCredential(providerId);
+  }
+  return agentBridgeService.setSessionCredential(providerId, body.apiKey, {
+    vendorId: body.vendorId,
+    baseUrl: body.baseUrl,
+  });
+}
+
 async function cancelAgentInstall(body) {
   const providerId = String(body?.providerId || "").trim();
   const snapshot = await agentBridgeService.cancelInstall(providerId);
@@ -2708,6 +2719,11 @@ async function route(request, response) {
   if (request.method === "POST" && url.pathname === "/agent/install/cancel") {
     const body = await readBody(request);
     sendJson(response, 200, await cancelAgentInstall(body));
+    return;
+  }
+  if (request.method === "POST" && url.pathname === "/agent/session-credential") {
+    const body = await readBody(request);
+    sendJson(response, 200, await setAgentSessionCredential(body));
     return;
   }
   if (request.method === "POST" && url.pathname === "/agent/preflight") {

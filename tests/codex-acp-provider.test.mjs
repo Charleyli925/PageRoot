@@ -99,6 +99,7 @@ test("the default registry registers Codex through the shared ACP runtime", () =
   assert.equal(provider.securityProfile, "client-mediated");
   assert.deepEqual(provider.legacyDrivers, []);
   assert.equal(catalog.filter((entry) => entry.runtimeId === "acp").length, 2);
+  assert.equal(catalog.find((entry) => entry.providerId === "pageroot")?.runtimeId, "http");
 });
 
 test("public catalog projection never includes command, path or stderr", async (t) => {

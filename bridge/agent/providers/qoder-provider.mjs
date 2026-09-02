@@ -19,6 +19,7 @@ import {
   qoderAcpEnvironment,
   runVerifiedQoderJavaScript,
 } from "../../qoder-acp-client.mjs";
+import { isAgentCapacityFailureText } from "../agent-errors.mjs";
 import {
   AgentProviderError,
   agentProviderError,
@@ -32,8 +33,6 @@ export const MIN_QODER_VERSION = "1.1.27";
 
 const MAX_PUBLIC_MODELS = 40;
 const SAFE_MODEL_ID = /^[A-Za-z0-9][A-Za-z0-9._/:+-]{0,79}$/u;
-const QODER_CAPACITY_FAILURE_PATTERN =
-  /capacity|quota|no available model|model unavailable|credit usage limit|upgrade your subscription plan/iu;
 const execFileAsync = promisify(execFile);
 
 function fail(code, message, options) {
@@ -60,6 +59,45 @@ export function parsePublicModels(stdout) {
     if (models.length >= MAX_PUBLIC_MODELS) break;
   }
   return Object.freeze(models);
+}
+
+export function namespaceQoderModels(models) {
+  return Object.freeze((Array.isArray(models) ? models : []).map((model, index) => {
+    const localId = String(model?.id || "").replace(/^qoder:/u, "");
+    return Object.freeze({
+      id: `qoder:${localId}`,
+      providerModelId: localId,
+      displayName: cleanProviderText(model?.displayName || localId, 80) || localId,
+      isDefault: index === 0,
+    });
+  }));
+}
+
+function localQoderModelId(modelId) {
+  const value = String(modelId || "");
+  return value.startsWith("qoder:") ? value.slice("qoder:".length) : value;
+}
+
+function resolvedQoderSelection(selection, { evidence } = {}) {
+  const models = evidence?.models || [];
+  const requestedId = selection?.requestedModelId || null;
+  const selected = requestedId
+    ? models.find((model) => model.id === requestedId)
+    : models.find((model) => model.isDefault) || models[0];
+  if (requestedId && !selected) {
+    fail("AGENT_SELECTION_UNSUPPORTED", "The requested Qoder model is unavailable.", { status: 409 });
+  }
+  return Object.freeze({
+    providerId: QODER_PROVIDER_ID,
+    runtimeId: QODER_RUNTIME_ID,
+    requestedModelId: requestedId,
+    resolvedModelId: selected?.id || null,
+    reasoning: Object.freeze({
+      requested: null,
+      applied: null,
+      resolution: "provider-default",
+    }),
+  });
 }
 
 export function qoderFailure(code) {
@@ -137,7 +175,7 @@ export function classifyQoderPreflightFailure(cause) {
   if (/not logged in|sign in|login required|unauthenticated/iu.test(combined)) {
     return "QODER_AUTH_REQUIRED";
   }
-  if (QODER_CAPACITY_FAILURE_PATTERN.test(combined)) {
+  if (isAgentCapacityFailureText(combined)) {
     return "QODER_CAPACITY_UNAVAILABLE";
   }
   if (cause?.killed || cause?.code === "ETIMEDOUT" || cause?.signal === "SIGTERM") {
@@ -147,18 +185,27 @@ export function classifyQoderPreflightFailure(cause) {
 }
 
 export function classifyQoderRunFailure(cause) {
+  const mapped = cleanProviderText(cause?.code, 120);
+  if (
+    mapped === "AGENT_ACCOUNT_CAPACITY_UNAVAILABLE"
+    || mapped === "QODER_ACCOUNT_CAPACITY_UNAVAILABLE"
+    || mapped === "QODER_CAPACITY_UNAVAILABLE"
+  ) {
+    return "QODER_ACCOUNT_CAPACITY_UNAVAILABLE";
+  }
   const combined = `${cause?.message || ""}\n${cause?.qoderStderr || ""}`;
   if (/not logged in|sign in|login required|unauthenticated/iu.test(combined)) {
     return "QODER_AUTH_REQUIRED";
   }
-  if (QODER_CAPACITY_FAILURE_PATTERN.test(combined)) {
+  if (isAgentCapacityFailureText(combined)) {
     return "QODER_ACCOUNT_CAPACITY_UNAVAILABLE";
   }
-  return cleanProviderText(cause?.code, 120) || "QODER_ACP_RUN_FAILED";
+  return mapped || "QODER_ACP_RUN_FAILED";
 }
 
 const QODER_RUNTIME_CODE_MAP = Object.freeze({
   ACP_CANCELLED: "AGENT_CANCELLED",
+  AGENT_ACCOUNT_CAPACITY_UNAVAILABLE: "QODER_ACCOUNT_CAPACITY_UNAVAILABLE",
   ACP_OUTPUT_PREEXISTS: "AGENT_OUTPUT_PREEXISTS",
   ACP_COMPLETION_PREEXISTS: "AGENT_COMPLETION_PREEXISTS",
   ACP_PROCESS_CLEANUP_UNCONFIRMED: "AGENT_PROCESS_CLEANUP_UNCONFIRMED",
@@ -472,7 +519,7 @@ export async function preflightQoder(command, environment) {
     return Object.freeze({
       version: reportedVersion,
       modelCount: models.length,
-      models: parsePublicModels(modelResult.stdout),
+      models: namespaceQoderModels(parsePublicModels(modelResult.stdout)),
     });
   } catch (cause) {
     const code = cause?.code === "ACP_PREFLIGHT_CLEANUP_UNCONFIRMED"
@@ -546,6 +593,7 @@ export function createQoderProvider({
       turnTimeoutMs,
     }) {
       const installation = ticket.installation;
+      const modelId = localQoderModelId(ticket.selection?.resolvedModelId);
       return Object.freeze({
         securityProfile: "client-mediated",
         command: installation.command,
@@ -553,7 +601,7 @@ export function createQoderProvider({
           path: installation.command,
           identity: installation.identity,
         },
-        args: ["--acp"],
+        args: modelId ? ["--acp", "-m", modelId] : ["--acp"],
         policy,
         prompt,
         environment: {},
@@ -569,6 +617,7 @@ export function createQoderProvider({
     },
     classifyRunFailure: classifyQoderRunFailure,
     failureMessage: qoderFailure,
+    resolveSelection: resolvedQoderSelection,
   });
 }
 

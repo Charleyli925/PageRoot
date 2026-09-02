@@ -276,6 +276,9 @@ export interface ConversationControllerCapability {
 
 export interface AgentSelectionControllerCapability {
   selectAgent(selection: AgentSelection): AgentSelection;
+  selectAgentModel(modelId: string | null): AgentSelection | null;
+  selectAgentReasoning(reasoning: string | null): AgentSelection | null;
+  connectAgentApiKey(selection: AgentSelection, apiKey: string, extras?: Readonly<{ vendorId?: string; baseUrl?: string }>): Promise<RunWorkflowOutcome>;
   checkAgentUsability(selection?: AgentSelection): Promise<RunWorkflowOutcome>;
 }
 

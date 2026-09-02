@@ -9,6 +9,7 @@ import {
   assertObject,
 } from "../policies/execution-policy.mjs";
 import { createExecutionHost } from "../hosts/execution-host.mjs";
+import { isAgentCapacityFailureText } from "../agent-errors.mjs";
 
 const SAFE_ACP_ENVIRONMENT_NAMES = Object.freeze(new Set([
   "HOME",
@@ -480,6 +481,12 @@ export async function runAcpTask({
             };
           }
           const chunk = visibleText.append(visibleTextChunk(message.update));
+          if (isAgentCapacityFailureText(chunk) || isAgentCapacityFailureText(visibleText.value)) {
+            throw acpPolicyError(
+              "AGENT_ACCOUNT_CAPACITY_UNAVAILABLE",
+              "当前账号额度已用完。",
+            );
+          }
           if (chunk) {
             const messageId = String(
               message.update?.messageId

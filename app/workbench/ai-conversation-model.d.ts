@@ -143,12 +143,14 @@ export function sidebarTimestampLabel(
 export function sidebarSendState(options?: {
   state?: string;
   catalogStatus?: SidebarCatalogStatus;
+  catalogReason?: string | null;
   queued?: boolean;
   intent?: SidebarIntent;
   pendingCommentCount?: number;
   agentName?: string;
   agentSettingsName?: string;
   agentSettingsSupported?: boolean;
+  credentialKind?: "api-token" | null;
 }): SidebarSendState;
 
 export function sidebarCopyTaskState(options?: {
@@ -172,9 +174,21 @@ export type SidebarAgentLine = {
 
 export function sidebarAgentLine(options?: {
   catalogStatus?: SidebarCatalogStatus;
-  agentDisplayName?: string | null;
-  agentChoiceCount?: number;
+  modelDisplayName?: string | null;
+  modelChoiceCount?: number;
 }): SidebarAgentLine | null;
+
+export type SidebarReasoningLine = {
+  text: string;
+  selectedId: string | null;
+  choosable: boolean;
+};
+
+export function sidebarReasoningLine(options?: {
+  choices?: readonly Readonly<{ id: string; label: string }>[];
+  selectedId?: string | null;
+  defaultId?: string;
+}): SidebarReasoningLine | null;
 
 export const SIDEBAR_STATES: ReadonlySet<string>;
 export const INTENT_MODIFY: "modify";

@@ -31,8 +31,12 @@ const QODER_CARD_PRESENTATION = Object.freeze({
       copiedLabel: "重新安装",
     }),
     login: Object.freeze({
-      label: "复制指令粘贴至 Agent",
+      label: "复制登录指令",
       copiedLabel: "重新复制",
+    }),
+    recheck: Object.freeze({
+      label: "重试",
+      copiedLabel: "重试",
     }),
   }),
 });

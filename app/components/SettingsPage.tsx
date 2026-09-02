@@ -75,6 +75,11 @@ export type SettingsPageProps = {
     selection: AgentSelection,
   ) => Promise<AgentActionOutcome>;
   onInstall: (selection: AgentSelection) => Promise<AgentActionOutcome>;
+  onConnectApiKey: (
+    selection: AgentSelection,
+    apiKey: string,
+    extras?: Readonly<{ vendorId?: string; baseUrl?: string }>,
+  ) => Promise<AgentActionOutcome>;
   onClose: () => void;
 };
 
@@ -139,12 +144,14 @@ function SettingsSelect({
   label,
   disabled,
   options,
+  testId,
   onChange,
 }: {
   value: string;
   label: string;
   disabled?: boolean;
   options: readonly Readonly<{ value: string; label: string }>[];
+  testId?: string;
   onChange(value: string): void;
 }) {
   return (
@@ -153,6 +160,7 @@ function SettingsSelect({
       value={value}
       disabled={disabled}
       aria-label={label}
+      data-testid={testId}
       onChange={(event) => onChange(event.target.value)}
     >
       {options.map((option) => (
@@ -265,6 +273,7 @@ function AgentSettings({
   onCheck,
   onCopyGuidance,
   onInstall,
+  onConnectApiKey,
 }: {
   currentAgentName: string;
   choices: readonly SettingsAgentChoice[];
@@ -276,7 +285,12 @@ function AgentSettings({
   onCheck(): void;
   onCopyGuidance(kind: AgentProviderGuidanceKind, selection: AgentSelection): Promise<AgentActionOutcome>;
   onInstall(selection: AgentSelection): Promise<AgentActionOutcome>;
+  onConnectApiKey(selection: AgentSelection, apiKey: string, extras?: Readonly<{ vendorId?: string; baseUrl?: string }>): Promise<AgentActionOutcome>;
 }) {
+  const selectedCard = cards.find((card) => {
+    const id = `${card.selection.providerId}:${card.selection.runtimeId}`;
+    return id === selectedChoiceId;
+  }) || cards[0] || null;
   return (
     <div className="settings-page-sections">
       <SettingsSection title="默认 Agent">
@@ -289,6 +303,7 @@ function AgentSettings({
             value={selectedChoiceId || choices[0]?.id || ""}
             disabled={!choices.length}
             label="默认 Agent"
+            testId="settings-agent-scheme"
             options={choices.map((choice) => ({ value: choice.id, label: choice.label }))}
             onChange={(id) => {
               const choice = choices.find((item) => item.id === id);
@@ -300,7 +315,6 @@ function AgentSettings({
 
       <SettingsSection title="连接状态">
         <div className="settings-agent-toolbar">
-          <span>安装、登录和连接状态会在这里显示。</span>
           <button
             className="settings-secondary-action"
             type="button"
@@ -312,17 +326,22 @@ function AgentSettings({
           </button>
         </div>
         <div className="settings-agent-rows">
-          {cards.length ? cards.map((card, index) => (
+          {selectedCard ? (
             <AgentProviderCard
-              key={`${card.selection.providerId}:${card.selection.runtimeId}`}
-              availability={card.availability}
-              presentation={card.presentation}
+              key={`${selectedCard.selection.providerId}:${selectedCard.selection.runtimeId}`}
+              availability={selectedCard.availability}
+              presentation={selectedCard.presentation}
               surface="settings"
-              actionButtonRef={index === 0 ? actionButtonRef : undefined}
-              onCopyGuidance={(kind) => onCopyGuidance(kind, card.selection)}
-              onInstall={() => onInstall(card.selection)}
+              actionButtonRef={actionButtonRef}
+              onCopyGuidance={(kind) => onCopyGuidance(kind, selectedCard.selection)}
+              onInstall={() => onInstall(selectedCard.selection)}
+              onRecheck={async () => {
+                onCheck();
+                return { status: "succeeded" };
+              }}
+              onConnectApiKey={(apiKey, extras) => onConnectApiKey(selectedCard.selection, apiKey, extras)}
             />
-          )) : (
+          ) : (
             <p className="settings-empty-state">当前没有可配置的 Agent。</p>
           )}
         </div>
@@ -342,7 +361,7 @@ function UpdatesSettings({
   onDownloadUpdate,
   onRequestRestart,
   onOpenReleaseNotes,
-}: Omit<SettingsPageProps, "activeTabId" | "category" | "initialFocus" | "currentAgentName" | "workspacePreferences" | "workspacePreferencesSaving" | "workspacePreferencesError" | "agentChoices" | "selectedAgentChoiceId" | "agentCards" | "onUpdateWorkspacePreference" | "onRetryWorkspacePreferences" | "onSelectAgent" | "onClose" | "onCheckUsability" | "onCopyGuidance" | "onInstall">) {
+}: Omit<SettingsPageProps, "activeTabId" | "category" | "initialFocus" | "currentAgentName" | "workspacePreferences" | "workspacePreferencesSaving" | "workspacePreferencesError" | "agentChoices" | "selectedAgentChoiceId" | "agentCards" | "onUpdateWorkspacePreference" | "onRetryWorkspacePreferences" | "onSelectAgent" | "onClose" | "onCheckUsability" | "onCopyGuidance" | "onInstall" | "onConnectApiKey">) {
   const presentation = updatePresentation({
     result: updateResult,
     updatesAvailable,
@@ -469,6 +488,7 @@ export default function SettingsPage({
   onCheckUsability,
   onCopyGuidance,
   onInstall,
+  onConnectApiKey,
   onClose,
 }: SettingsPageProps) {
   const pageRef = useRef<HTMLElement>(null);
@@ -486,36 +506,48 @@ export default function SettingsPage({
 
   const requestAgentCheck = useCallback((force = false) => {
     const cards = agentCardsRef.current;
-    if (!force && cards.every((card) => (
-      card.availability.status === "ready" || card.availability.status === "checking"
-    ))) return;
+    const selected = cards.find((card) => (
+      `${card.selection.providerId}:${card.selection.runtimeId}` === selectedAgentChoiceId
+    )) || cards[0];
+    if (!selected) return;
+    if (!force && (
+      selected.availability.status === "ready" || selected.availability.status === "checking"
+    )) return;
     const now = Date.now();
-    const guidanceKey = cards.map((card) => card.availability.guidanceCopied).join("|");
+    const guidanceKey = String(selected.availability.guidanceCopied || "");
     const guidanceChanged = guidanceKey !== lastCheckGuidanceRef.current;
-    if (
+    // Switching Agent always uses force. The previous scheme's in-flight check
+    // must not suppress the newly selected card, or Codex/源页 stay on the
+    // initial "检测中" forever.
+    if (!force && (
       checkInFlightRef.current
-      || (!force && !guidanceChanged && now - lastCheckStartedAtRef.current < 1_500)
-    ) return;
+      || (!guidanceChanged && now - lastCheckStartedAtRef.current < 1_500)
+    )) return;
     lastCheckStartedAtRef.current = now;
     lastCheckGuidanceRef.current = guidanceKey;
     checkInFlightRef.current = true;
     setAgentCheckPending(true);
-    Promise.all(cards.map((card) => Promise.resolve(onCheckUsability(card.selection))))
+    Promise.resolve(onCheckUsability(selected.selection))
       .catch(() => undefined)
       .finally(() => {
         checkInFlightRef.current = false;
         setAgentCheckPending(false);
       });
-  }, [onCheckUsability]);
+  }, [onCheckUsability, selectedAgentChoiceId]);
 
   useEffect(() => {
     if (category !== "agent") return undefined;
     requestAgentCheck(true);
     const handleReturnToApp = () => {
       if (document.visibilityState === "visible") {
-        const unresolved = agentCardsRef.current.some((card) => (
-          !["ready", "checking"].includes(card.availability.status)
-        ));
+        const unresolved = (() => {
+          const selected = agentCardsRef.current.find((card) => (
+            `${card.selection.providerId}:${card.selection.runtimeId}` === selectedAgentChoiceId
+          )) || agentCardsRef.current[0];
+          return Boolean(
+            selected && !["ready", "checking"].includes(selected.availability.status),
+          );
+        })();
         if (unresolved) requestAgentCheck(true);
       }
     };
@@ -615,6 +647,7 @@ export default function SettingsPage({
             onCheck={() => requestAgentCheck(true)}
             onCopyGuidance={onCopyGuidance}
             onInstall={onInstall}
+            onConnectApiKey={onConnectApiKey}
           />
         ) : (
           <UpdatesSettings

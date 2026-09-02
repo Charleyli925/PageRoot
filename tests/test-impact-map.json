@@ -1685,6 +1685,23 @@
       ]
     },
     {
+      "id": "agent-provider-pageroot-http",
+      "patterns": [
+        "^bridge/agent/providers/openai-compatible-provider\\.mjs$",
+        "^bridge/agent/runtimes/http-runtime\\.mjs$",
+        "^shared/openai-compatible-vendors\\.mjs$",
+        "^tests/fixtures/openai-compatible-http-agent\\.mjs$"
+      ],
+      "suites": [
+        "typecheck",
+        "ai-provider-smoke"
+      ],
+      "nodeTests": [
+        "tests/openai-compatible-agent.test.mjs",
+        "tests/agent-provider-catalog.test.mjs"
+      ]
+    },
+    {
       "id": "agent-provider-codex-acp",
       "patterns": [
         "^bridge/agent/providers/codex-acp-provider\\.mjs$",
@@ -1748,7 +1765,7 @@
       "id": "agent-renderer-projection",
       "patterns": [
         "^app/components/(?:AboutPageRootDialog|AgentDeliveryButton|AgentProviderCard)\\.tsx$",
-        "^shared/(?:agent-delivery|agent-feature-gates)\\.mjs$"
+        "^shared/(?:agent-delivery|agent-feature-gates|openai-compatible-vendors)\\.mjs$"
       ],
       "suites": [
         "typecheck",
@@ -1757,7 +1774,8 @@
       "nodeTests": [
         "tests/agent-provider-card.test.mjs",
         "tests/agent-delivery-codec.test.mjs",
-        "tests/agent-model-catalog.test.mjs"
+        "tests/agent-model-catalog.test.mjs",
+        "tests/openai-compatible-agent.test.mjs"
       ]
     },
     {

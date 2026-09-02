@@ -17,6 +17,7 @@ import { sha256 } from "../../lifecycle-core.mjs";
 import { loadExecutionPolicy } from "../policies/execution-policy.mjs";
 import { terminateManagedProcess } from "../hosts/execution-host.mjs";
 import { acpProcessEnvironment } from "../runtimes/acp-protocol.mjs";
+import { isAgentCapacityFailureText } from "../agent-errors.mjs";
 import { openVerifiedAgentExecutable } from "../runtimes/acp-verified-javascript.mjs";
 import {
   AgentProviderError,
@@ -412,17 +413,28 @@ function isCodexAcpAuthFailure(cause) {
 }
 
 function classifyCodexAcpFailure(cause) {
+  const mapped = cleanProviderText(cause?.code, 120);
+  if (
+    mapped === "AGENT_ACCOUNT_CAPACITY_UNAVAILABLE"
+    || mapped === "CODEX_ACCOUNT_CAPACITY_UNAVAILABLE"
+  ) {
+    return "CODEX_ACCOUNT_CAPACITY_UNAVAILABLE";
+  }
   if (isCodexAcpAuthFailure(cause)) return "CODEX_AUTH_REQUIRED";
+  const combined = `${cause?.stdout || ""}\n${cause?.stderr || ""}\n${cause?.message || ""}`;
+  if (isAgentCapacityFailureText(combined)) return "CODEX_ACCOUNT_CAPACITY_UNAVAILABLE";
   if (cause?.killed || cause?.code === "ETIMEDOUT" || cause?.signal === "SIGTERM") {
     return "CODEX_PREFLIGHT_TIMEOUT";
   }
-  return cleanProviderText(cause?.code, 120) || "CODEX_PREFLIGHT_FAILED";
+  return mapped || "CODEX_PREFLIGHT_FAILED";
 }
 
 export function codexAcpFailure(code) {
   switch (code) {
     case "CODEX_AUTH_REQUIRED":
       return "Codex 尚未登录。请先在 Codex CLI 完成登录，再重试本轮。";
+    case "CODEX_ACCOUNT_CAPACITY_UNAVAILABLE":
+      return "Codex 账号当前没有可用额度。本轮 Request 已保留，可稍后重试或复制给其他 Agent。";
     case "CODEX_COMMAND_NOT_FOUND":
       return "没有找到独立安装的 Codex ACP。请先安装 Codex，或改用复制任务。";
     case "CODEX_COMMAND_UNTRUSTED":
@@ -444,6 +456,8 @@ export function codexAcpPreflightFailure(code) {
       return "Codex 预检进程未确认停止。PageRoot 尚未创建本轮 Request；为避免失去控制，本次不能继续，应用也不会退出。";
     case "CODEX_AUTH_REQUIRED":
       return "Codex 尚未登录。PageRoot 尚未创建本轮 Request；请先完成登录，再重试或改用复制任务。";
+    case "CODEX_ACCOUNT_CAPACITY_UNAVAILABLE":
+      return "Codex 账号当前没有可用额度。PageRoot 尚未创建本轮 Request；当前 HTML 和评论保持不变，可稍后重试或改用复制任务。";
     case "CODEX_COMMAND_NOT_FOUND":
       return "没有找到独立安装的 Codex ACP。PageRoot 尚未创建本轮 Request；请先安装，或改用复制任务。";
     case "CODEX_COMMAND_UNTRUSTED":
@@ -473,6 +487,7 @@ function normalizedPreflightError(cause) {
 
 const RUNTIME_CODE_MAP = Object.freeze({
   ACP_CANCELLED: "AGENT_CANCELLED",
+  AGENT_ACCOUNT_CAPACITY_UNAVAILABLE: "CODEX_ACCOUNT_CAPACITY_UNAVAILABLE",
   ACP_OUTPUT_PREEXISTS: "AGENT_OUTPUT_PREEXISTS",
   ACP_COMPLETION_PREEXISTS: "AGENT_COMPLETION_PREEXISTS",
   ACP_PROCESS_CLEANUP_UNCONFIRMED: "AGENT_PROCESS_CLEANUP_UNCONFIRMED",
@@ -787,13 +802,23 @@ export function createCodexAcpProvider({
       });
     },
     classifyRunFailure(cause) {
+      const mapped = cleanProviderText(cause?.code, 120);
+      if (
+        mapped === "AGENT_ACCOUNT_CAPACITY_UNAVAILABLE"
+        || mapped === "CODEX_ACCOUNT_CAPACITY_UNAVAILABLE"
+      ) {
+        return "CODEX_ACCOUNT_CAPACITY_UNAVAILABLE";
+      }
       if (isCodexAcpAuthFailure({
         ...cause,
         stderr: `${cause?.stderr || ""}\n${cause?.agentStderr || ""}`,
       })) {
         return "CODEX_AUTH_REQUIRED";
       }
-      return cleanProviderText(cause?.code, 120) || "CODEX_ACP_RUN_FAILED";
+      if (isAgentCapacityFailureText(`${cause?.message || ""}\n${cause?.stderr || ""}\n${cause?.agentStderr || ""}`)) {
+        return "CODEX_ACCOUNT_CAPACITY_UNAVAILABLE";
+      }
+      return mapped || "CODEX_ACP_RUN_FAILED";
     },
     failureMessage: codexAcpFailure,
     resolveSelection: resolvedSelection,

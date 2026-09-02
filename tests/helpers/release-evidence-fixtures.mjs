@@ -81,6 +81,7 @@ const BRIDGE_FILES = [
   "agent/providers/provider-registry.mjs",
   "agent/providers/qoder-provider.mjs",
   "agent/providers/codex-acp-provider.mjs",
+  "agent/providers/openai-compatible-provider.mjs",
   "agent/catalog/agent-catalog.mjs",
   "agent/catalog/agent-installer.mjs",
   "agent/catalog/qoder-managed-release.mjs",
@@ -90,6 +91,7 @@ const BRIDGE_FILES = [
   "agent/runtimes/acp-protocol.mjs",
   "agent/runtimes/acp-process.mjs",
   "agent/runtimes/acp-verified-javascript.mjs",
+  "agent/runtimes/http-runtime.mjs",
   "agent/policies/execution-policy.mjs",
   "agent/hosts/execution-host.mjs",
   "qoder-acp-client.mjs",
@@ -468,6 +470,11 @@ export async function createSyntheticAppBundle(t, {
     ),
     writeFixtureFile(
       productRoot,
+      "shared/openai-compatible-vendors.mjs",
+      "export const PAGEROOT_PROVIDER_ID = 'pageroot';\n",
+    ),
+    writeFixtureFile(
+      productRoot,
       "shared/agent-feature-gates.mjs",
       "export const AGENT_FEATURE_GATES = Object.freeze({ codexDiscussion: false });\n",
     ),
@@ -562,6 +569,7 @@ export async function createSyntheticAppBundle(t, {
       "source-style-value.mjs",
       "conversation.mjs",
       "agent-delivery.mjs",
+      "openai-compatible-vendors.mjs",
       "agent-feature-gates.mjs",
       "task-spec.mjs",
     ].map((fileName) => copyFixtureFile(

@@ -8,7 +8,8 @@
 
 > **当前产品覆盖规则（2026-08-26）：** Qoder 与 Codex 都不再提供新 Discussion Turn。
 > AI 侧栏只保留历史 Conversation 可读、Execution 进度、Candidate 决策和基于页面评论的
-> “交给 AI 修改”。本文其余 Discussion、讨论草稿、讨论 Host、讨论路由和讨论并发章节仅作
+> “交给 AI 修改”。源页 HTTP Agent（ADR 0069）在侧栏可选模型和思考深度；Qoder 与 Codex
+> 仍不提供思考深度控件。本文其余 Discussion、讨论草稿、讨论 Host、讨论路由和讨论并发章节仅作
 > 已交付方案的历史记录，不再是实现或验收要求。旧记录中的 `discussion` mode 和 `discuss`
 > draft intent 只为无损读取保留，不能成为新的发送能力。
 

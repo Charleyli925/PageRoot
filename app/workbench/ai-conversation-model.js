@@ -477,12 +477,14 @@ export function sidebarActionBar({
 export function sidebarSendState({
   state,
   catalogStatus = "ready",
+  catalogReason = null,
   queued = false,
   intent = INTENT_MODIFY,
   pendingCommentCount = 0,
   agentName = "Agent",
   agentSettingsName = "Agent",
   agentSettingsSupported = true,
+  credentialKind = null,
 } = {}) {
   const boundedAgentName = String(agentName || "Agent").trim().slice(0, 80) || "Agent";
   const boundedAgentSettingsName = String(agentSettingsName || boundedAgentName)
@@ -565,14 +567,18 @@ export function sidebarSendState({
       return {
         kind: "status",
         canSend: false,
-        label: `请先登录 ${boundedAgentName}`,
-        reason: `在 ${boundedAgentName} 中完成登录后返回 Stemmio`,
+        label: credentialKind === "api-token"
+          ? `请先连接 ${boundedAgentName}`
+          : `请先登录 ${boundedAgentName}`,
+        reason: `在设置中接通 ${boundedAgentName} 后即可发送`,
       };
     }
     return {
       kind: "open-agent-settings",
       canSend: false,
-      label: `登录 ${boundedAgentSettingsName}`,
+      label: credentialKind === "api-token"
+        ? `连接 ${boundedAgentSettingsName}`
+        : `登录 ${boundedAgentSettingsName}`,
       reason: null,
     };
   }
@@ -582,7 +588,7 @@ export function sidebarSendState({
         kind: "status",
         canSend: false,
         label: `${boundedAgentName} runtime 不可用`,
-        reason: "请重新安装当前版本的 Stemmio",
+        reason: "请重新安装当前版本的源页",
       };
     }
     return {
@@ -593,6 +599,22 @@ export function sidebarSendState({
     };
   }
   if (catalogStatus === "unavailable") {
+    if (catalogReason === "account-capacity") {
+      return {
+        kind: "open-agent-settings",
+        canSend: false,
+        label: "额度已用完",
+        reason: null,
+      };
+    }
+    if (agentSettingsSupported) {
+      return {
+        kind: "open-agent-settings",
+        canSend: false,
+        label: `设置 ${boundedAgentSettingsName}`,
+        reason: null,
+      };
+    }
     return {
       kind: "status",
       canSend: false,
@@ -698,18 +720,19 @@ export function sidebarCopyTaskState({
  * available" while nothing has been read would assert a fact about the user's
  * account that PageRoot has not established, and the unavailable cases already
  * explain themselves on the send button (PRD §10.2) — a second line there would
- * be noise. So the honest default is silence.
+ * be noise. So the honest default is silence. The Agent name is a read-only
+ * identity that opens Settings; this line is only the model.
  *
  * Returns null when the line should not render at all.
  */
 export function sidebarAgentLine({
   catalogStatus = "ready",
-  agentDisplayName = null,
-  agentChoiceCount = 0,
+  modelDisplayName = null,
+  modelChoiceCount = 0,
 } = {}) {
-  const name = typeof agentDisplayName === "string" ? agentDisplayName.trim() : "";
+  const name = typeof modelDisplayName === "string" ? modelDisplayName.trim() : "";
   if (catalogStatus === "checking" && !name) {
-    return Object.freeze({ kind: "checking", text: "正在连接 Agent…", choosable: false });
+    return Object.freeze({ kind: "checking", text: "正在连接…", choosable: false });
   }
   if (!name) return null;
   return Object.freeze({
@@ -717,7 +740,29 @@ export function sidebarAgentLine({
     text: name,
     // A picker is offered only when there is a real choice to make. PRD §10.1
     // forbids a dropdown that opens onto a single item.
-    choosable: Number(agentChoiceCount) > 1,
+    choosable: Number(modelChoiceCount) > 1,
+  });
+}
+
+/**
+ * The Composer's thinking-depth line.
+ *
+ * Only PageRoot's native HTTP Agent exposes a real choice. Qoder and Codex stay
+ * on provider-default reasoning, so this line is absent there.
+ */
+export function sidebarReasoningLine({
+  choices = [],
+  selectedId = null,
+  defaultId = "high",
+} = {}) {
+  if (!Array.isArray(choices) || choices.length === 0) return null;
+  const selected = choices.find((choice) => choice.id === selectedId)
+    || choices.find((choice) => choice.id === defaultId)
+    || choices[0];
+  return Object.freeze({
+    text: `思考 · ${String(selected?.label || selected?.id || "").trim()}`,
+    selectedId: selected?.id || null,
+    choosable: choices.length > 1,
   });
 }
 

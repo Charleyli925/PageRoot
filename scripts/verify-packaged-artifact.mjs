@@ -56,6 +56,7 @@ const REQUIRED_BRIDGE_FILES = [
   "agent/providers/provider-registry.mjs",
   "agent/providers/qoder-provider.mjs",
   "agent/providers/codex-acp-provider.mjs",
+  "agent/providers/openai-compatible-provider.mjs",
   "agent/catalog/agent-catalog.mjs",
   "agent/catalog/agent-installer.mjs",
   "agent/catalog/qoder-managed-release.mjs",
@@ -65,6 +66,7 @@ const REQUIRED_BRIDGE_FILES = [
   "agent/runtimes/acp-protocol.mjs",
   "agent/runtimes/acp-process.mjs",
   "agent/runtimes/acp-verified-javascript.mjs",
+  "agent/runtimes/http-runtime.mjs",
   "agent/policies/execution-policy.mjs",
   "agent/hosts/execution-host.mjs",
   "qoder-acp-client.mjs",
@@ -138,6 +140,7 @@ export const REQUIRED_SHARED_FILES = [
   "source-style-value.mjs",
   "conversation.mjs",
   "agent-delivery.mjs",
+  "openai-compatible-vendors.mjs",
   "agent-feature-gates.mjs",
   "task-spec.mjs",
 ];

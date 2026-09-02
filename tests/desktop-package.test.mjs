@@ -70,6 +70,7 @@ const BRIDGE_FILES = [
   "agent/providers/provider-registry.mjs",
   "agent/providers/qoder-provider.mjs",
   "agent/providers/codex-acp-provider.mjs",
+  "agent/providers/openai-compatible-provider.mjs",
   "agent/catalog/agent-catalog.mjs",
   "agent/catalog/agent-installer.mjs",
   "agent/catalog/qoder-managed-release.mjs",
@@ -79,6 +80,7 @@ const BRIDGE_FILES = [
   "agent/runtimes/acp-protocol.mjs",
   "agent/runtimes/acp-process.mjs",
   "agent/runtimes/acp-verified-javascript.mjs",
+  "agent/runtimes/http-runtime.mjs",
   "agent/policies/execution-policy.mjs",
   "agent/hosts/execution-host.mjs",
   "qoder-acp-client.mjs",
@@ -150,6 +152,7 @@ const SHARED_FILES = [
   "source-style-value.mjs",
   "conversation.mjs",
   "agent-delivery.mjs",
+  "openai-compatible-vendors.mjs",
   "agent-feature-gates.mjs",
   "task-spec.mjs",
 ];
@@ -376,11 +379,11 @@ test("packaged legal notice and icon remain available as reviewed resources", as
     stat(new URL("../desktop/resources/icon.icns", import.meta.url)),
   ]);
   assert.match(notice, /AI Agent 生成或修改的内容可能不准确/u);
-  assert.match(notice, /选择“Qoder CLI”“Codex”或“复制任务”/u);
+  assert.match(notice, /选择“源页 Agent”“Qoder CLI”“Codex”或“复制任务”/u);
   assert.match(notice, /Codex 修改时可能以当前用户的读取权限访问/u);
   assert.match(notice, /不构成对本机读取权限的完整操作系统隔离/u);
   assert.match(notice, /只有用户明确采纳后才成为正式版本/u);
-  assert.match(privacy, /用户主动选择 Qoder CLI 或 Codex/u);
+  assert.match(privacy, /用户主动选择源页 Agent、Qoder CLI 或 Codex/u);
   assert.match(privacy, /将完成任务所需的内容发送至 Codex 服务/u);
   assert.match(notice, /Apache License 2\.0/u);
   assert.ok(iconInfo.size > 100_000);

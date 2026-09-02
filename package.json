@@ -265,6 +265,10 @@
         "to": "bridge/agent/providers/codex-acp-provider.mjs"
       },
       {
+        "from": "bridge/agent/providers/openai-compatible-provider.mjs",
+        "to": "bridge/agent/providers/openai-compatible-provider.mjs"
+      },
+      {
         "from": "bridge/agent/catalog/agent-catalog.mjs",
         "to": "bridge/agent/catalog/agent-catalog.mjs"
       },
@@ -299,6 +303,10 @@
       {
         "from": "bridge/agent/runtimes/acp-verified-javascript.mjs",
         "to": "bridge/agent/runtimes/acp-verified-javascript.mjs"
+      },
+      {
+        "from": "bridge/agent/runtimes/http-runtime.mjs",
+        "to": "bridge/agent/runtimes/http-runtime.mjs"
       },
       {
         "from": "bridge/agent/policies/execution-policy.mjs",
@@ -471,6 +479,10 @@
       {
         "from": "shared/agent-delivery.mjs",
         "to": "shared/agent-delivery.mjs"
+      },
+      {
+        "from": "shared/openai-compatible-vendors.mjs",
+        "to": "shared/openai-compatible-vendors.mjs"
       },
       {
         "from": "shared/agent-feature-gates.mjs",

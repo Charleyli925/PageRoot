@@ -37,6 +37,7 @@ const INTEGRATION_TESTS = new Set([
   "codex-acp-provider.test.mjs",
   "acp-runtime.test.mjs",
   "agent-provider-contract.test.mjs",
+  "openai-compatible-agent.test.mjs",
   "agent-runtime-coordinator.test.mjs",
   "agent-bridge-service.test.mjs",
   "agent-bridge-workspace.test.mjs",

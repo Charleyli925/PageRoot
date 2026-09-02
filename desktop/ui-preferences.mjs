@@ -31,7 +31,7 @@ const PROJECT_ID_PATTERN = /^project_[A-Za-z0-9_-]{1,180}$/u;
 const GUIDE_STATUSES = new Set(["pending", "presented", "dismissed"]);
 const GUIDE_ACTIONS = new Set(["presented", "dismissed"]);
 const MOTION_VALUES = new Set(["system", "reduced"]);
-const AGENT_PROVIDER_IDS = new Set(["qoder", "codex"]);
+const AGENT_PROVIDER_IDS = new Set(["pageroot", "qoder", "codex"]);
 const WORKSPACE_KEYS = new Set(Object.keys(WORKSPACE_PREFERENCE_DEFAULTS));
 
 // Main owns the only durable preference writer. Keeping writes in one queue is

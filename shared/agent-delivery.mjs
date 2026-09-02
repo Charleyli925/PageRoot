@@ -128,16 +128,30 @@ export function agentDeliveryIsManaged(value) {
   }
 }
 
+const SHIPPED_MANAGED_BINDINGS = Object.freeze([
+  Object.freeze({ providerId: "qoder", runtimeId: "acp", legacyDriver: LEGACY_QODER_ACP_MODE }),
+  Object.freeze({ providerId: "codex", runtimeId: "acp", legacyDriver: null }),
+  Object.freeze({ providerId: "pageroot", runtimeId: "http", legacyDriver: null }),
+]);
+
+function shippedManagedBinding(selection) {
+  return SHIPPED_MANAGED_BINDINGS.find((binding) => (
+    binding.providerId === selection.providerId
+    && binding.runtimeId === selection.runtimeId
+  )) || null;
+}
+
 export function legacyDriverForAgentDelivery(value) {
   const delivery = normalizeAgentDelivery(value);
   if (delivery.mode !== MANAGED_AGENT_MODE) return null;
-  if (delivery.selection.providerId === "qoder" && delivery.selection.runtimeId === "acp") {
-    return LEGACY_QODER_ACP_MODE;
+  const binding = shippedManagedBinding(delivery.selection);
+  if (!binding) {
+    const error = new Error("The persisted Agent provider is not installed in this build.");
+    error.name = "AgentDeliveryError";
+    error.code = "AGENT_PROVIDER_UNSUPPORTED";
+    throw error;
   }
-  const error = new Error("The persisted Agent provider is not installed in this build.");
-  error.name = "AgentDeliveryError";
-  error.code = "AGENT_PROVIDER_UNSUPPORTED";
-  throw error;
+  return binding.legacyDriver;
 }
 
 // New durable writes are narrower than historical reads. Unknown providers are

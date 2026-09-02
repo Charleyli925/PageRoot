@@ -17,6 +17,8 @@ export type AgentProviderPresentation = Readonly<{
   localReadDisclosure?: string;
   stopLabel?: string;
   frozenPreviewDetail?: string;
+  credentialKind?: "api-token" | null;
+  supportsReasoning?: boolean;
   [key: string]: unknown;
 }>;
 export type AgentProviderDescriptor = Readonly<{
@@ -35,6 +37,12 @@ export type AgentProviderDescriptor = Readonly<{
 export type AgentProviderEntry = AgentProviderDescriptor & Readonly<{
   availability: AgentProviderAvailabilitySnapshot;
   installationDigest: string | null;
+  models?: readonly Readonly<{
+    id: string;
+    displayName: string;
+    isDefault?: boolean;
+  }>[];
+  credentialConfigured?: boolean;
 }>;
 export type AgentPreflight = Readonly<Record<string, unknown> & {
   status: string;
@@ -51,6 +59,7 @@ export type AgentCatalogSnapshot = Readonly<{
   preflightBySelection: Readonly<Record<string, AgentPreflight>>;
 }>;
 
+export const PAGEROOT_AGENT_PROVIDER: AgentProviderDescriptor;
 export const QODER_AGENT_PROVIDER: AgentProviderDescriptor;
 export const CODEX_AGENT_PROVIDER: AgentProviderDescriptor;
 export function defaultAgentProviders(): readonly AgentProviderDescriptor[];
@@ -68,12 +77,21 @@ export function agentProviderCardPresentation(provider: AgentProviderDescriptor 
   actions: Readonly<{
     install: Readonly<{ label: string; copiedLabel: string }>;
     login: Readonly<{ label: string; copiedLabel: string }>;
+    recheck: Readonly<{ label: string; copiedLabel: string }>;
+    apiKey: Readonly<{ label: string; copiedLabel: string }>;
   }>;
+  supportsApiKey?: boolean;
+  credentialKind?: "api-token" | null;
+  vendors?: readonly Readonly<{ id: string; label: string; needsBaseUrl?: boolean }>[];
+  supportsReasoning?: boolean;
+  reasoningChoices?: readonly Readonly<{ id: string; label: string }>[];
 }>;
 export function agentProviderCardsFromCatalog(snapshot: AgentCatalogSnapshot | null | undefined): readonly Readonly<{
   selection: AgentSelection;
   presentation: ReturnType<typeof agentProviderCardPresentation>;
   availability: AgentProviderAvailabilitySnapshot;
+  models: readonly Readonly<{ id: string; displayName: string; isDefault?: boolean }>[];
+  credentialConfigured: boolean;
 }>[];
 export class AgentCatalogState {
   constructor(options?: {
@@ -87,6 +105,14 @@ export class AgentCatalogState {
   subscribe(listener: (snapshot: AgentCatalogSnapshot) => void): () => void;
   dispose(): void;
   select(selection: AgentSelection): AgentSelection;
+  selectModel(modelId: string | null): AgentSelection | null;
+  selectReasoning(reasoning: string | null): AgentSelection | null;
+  noteRunFailure(selection: AgentSelection | null | undefined, code: unknown): AgentProviderAvailabilitySnapshot | null;
+  connectWithApiKey(
+    selection: AgentSelection,
+    apiKey: string,
+    extras?: Readonly<{ vendorId?: string; baseUrl?: string }>,
+  ): Promise<AgentPreflight>;
   freezeSelected(): AgentSelection | null;
   freezeProviderSelection(providerId: string): AgentSelection | null;
   provider(selection?: AgentSelection | null): AgentProviderEntry | null;

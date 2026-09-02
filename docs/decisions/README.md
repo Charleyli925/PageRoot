@@ -1,6 +1,6 @@
 # Architecture Decision Records
 
-<!-- adr-history-max: 0068 -->
+<!-- adr-history-max: 0069 -->
 <!-- adr-history-gaps: 0020 -->
 
 This is the default reading path for decisions that still constrain PageRoot.
@@ -10,7 +10,7 @@ Historical and superseded decisions remain available from the archive index.
 
 The repository has one historical gap, `0020`, which is intentionally never
 reused. The four collisions found in the first curation pass were assigned
-`0055` through `0058`; future ADRs must use the next number above `0068`.
+`0055` through `0058`; future ADRs must use the next number above `0069`.
 
 ## Active decisions
 
@@ -62,6 +62,7 @@ reused. The four collisions found in the first curation pass were assigned
 | 0066 | [Review pairs persistent IDs and reports source changes](0066-stable-id-source-review.md) | Living source-fact authority; visual enhancement extended by ADR 0068 |
 | 0067 | [AI Candidate identity is validated before PageRoot assigns new IDs](0067-ai-candidate-source-identity.md) | Living |
 | 0068 | [Review keeps source facts authoritative and adds visual enhancement](0068-review-visual-verdict-gate.md) | Living |
+| 0069 | [PageRoot native OpenAI-compatible Agent](0069-pageroot-native-openai-compatible-agent.md) | Living |
 
 ## Reading guide
 

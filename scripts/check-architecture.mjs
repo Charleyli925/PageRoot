@@ -106,6 +106,7 @@ const APPROVED_PERSISTENCE_OWNERS = new Set([
   "bridge/agent/agent-lease-store.mjs",
   "bridge/agent/catalog/agent-installer.mjs",
   "bridge/agent/hosts/execution-host.mjs",
+  "bridge/agent/runtimes/http-runtime.mjs",
   "bridge/ai-task-projection.mjs",
   "bridge/lifecycle-core.mjs",
   "bridge/project-file-repository.mjs",

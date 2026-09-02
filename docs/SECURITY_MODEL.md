@@ -48,7 +48,10 @@ PageRoot edits local files and renders user-controlled HTML, so its default poli
   and `--list-models`, verifies executable realpath/mode/content identity and
   obtains an opaque short-lived ticket; a changed executable invalidates that
   ticket. Arbitrary command overrides are enabled only when both dedicated E2E
-  environment fences are present.
+  environment fences are present. The 源页 HTTP Agent may redirect preflight and
+  chat to a loopback `127.0.0.1` base URL only when both `PAGEROOT_E2E=1` and
+  `PAGEROOT_HTTP_AGENT_ALLOW_TEST_BASE_URL=1` are set; production never honors
+  `PAGEROOT_HTTP_AGENT_BASE_URL`.
 - Fixed app-resource lookup for the packaged user statement and disclaimer;
   the renderer can request it but cannot choose a local path
 - Default-browser opening accepts only an already known HTML source path,
@@ -296,14 +299,17 @@ Every provider, ticket and launch descriptor freezes one `securityProfile`.
 The installed Qoder and Codex ACP mappings are `client-mediated`: the Host
 modules can allow or deny only file and terminal requests sent through the ACP
 Client Host. They do not constrain native file or command operations performed
-inside the Agent process. There is no registered `agent-native` mapping and no
-Codex executable or private runtime in the packaged application. Both installed
-ACP providers use one fresh ephemeral session with approval `never`; strict
-configuration disables MCP, skills, plugins, apps, Web/browser/computer use,
-memories and subagents. The turn uses a workspace-write sandbox rooted only at
-the Request output directory, with tool network access disabled and the system
-temporary roots excluded. Any permission request, unsupported ACP request,
-unconfirmed process-group cleanup, write residue beside the unique Candidate or
+inside the Agent process. The PageRoot native HTTP Agent is also
+`client-mediated`: PageRoot mediates every file read and the unique Candidate
+write, and the vendor model never receives filesystem or terminal access. There
+is no registered `agent-native` mapping and no Codex executable or private
+runtime in the packaged application. Both installed ACP providers use one fresh
+ephemeral session with approval `never`; strict configuration disables MCP,
+skills, plugins, apps, Web/browser/computer use, memories and subagents. The
+turn uses a workspace-write sandbox rooted only at the Request output
+directory, with tool network access disabled and the system temporary roots
+excluded. Any permission request, unsupported ACP request, unconfirmed
+process-group cleanup, write residue beside the unique Candidate or
 fixed-finalizer failure fails closed before Candidate publication. Unknown or
 mixed ticket/launch profiles fail closed, and any future registered
 `agent-native` provider requires its own sandbox conformance and security gate
@@ -322,9 +328,21 @@ records remain data only and cannot reopen an Agent process.
 The driver may retain at most 16 KiB of raw Qoder stderr only inside the live
 Bridge promise to classify authentication/capacity/process failures. It is
 discarded after classification and never enters public Agent status, PageRoot
-telemetry, reports or user-facing errors. Absolute Request paths necessarily
+telemetry, reports or user-facing errors. Agent visible text that matches a
+capacity failure is classified the same way and must not be projected as chat.
+Absolute Request paths necessarily
 appear in the user-authorized Qoder task prompt and may therefore be processed
 by Qoder; the user statement and Privacy notice disclose that third-party path.
+
+The 源页 Agent may be connected with a vendor API Token (DeepSeek, 智谱,
+阿里通义, OpenAI, or another OpenAI-compatible HTTPS endpoint). Renderer posts
+`POST /agent/session-credential` with `vendorId` and optional `baseUrl`; Bridge
+keeps the secret in coordinator process memory and injects only
+`PAGEROOT_API_KEY` / `PAGEROOT_API_VENDOR` / `PAGEROOT_API_BASE_URL` into this
+provider's preflight and HTTP launch. Empty `apiKey` clears it. The secret is
+never written to disk, `ui-preferences.json`, logs, GET responses or renderer
+snapshots. Shutdown discards it. Anthropic is not registered. Codex and Qoder
+do not accept a session Token.
 
 This is an explicit trusted-local-Agent policy, not hostile-process isolation.
 The Qoder subprocess still runs with the signed-in local user's OS identity and

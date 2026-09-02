@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   FORBIDDEN_MESSAGE_KEYS,
   sidebarAgentLine,
+  sidebarReasoningLine,
   conversationLoadedForView,
   conversationReadyForDocument,
   sidebarActionBar,
@@ -246,6 +247,14 @@ test("Agent connection recovery is an explicit sidebar action, not a send", () =
     reason: null,
   });
 
+  const connect = sidebarSendState({
+    state: "preview-ready",
+    catalogStatus: "auth-required",
+    credentialKind: "api-token",
+    agentSettingsName: "源页 Agent",
+  });
+  assert.equal(connect.label, "连接 源页 Agent");
+
   const install = sidebarSendState({
     state: "preview-ready",
     catalogStatus: "not-installed",
@@ -259,21 +268,40 @@ test("Agent connection recovery is an explicit sidebar action, not a send", () =
     catalogStatus: "unavailable",
     hasText: true,
   });
-  assert.equal(unavailable.kind, "status");
-  assert.equal(unavailable.label, "Agent 暂不可用");
+  assert.equal(unavailable.kind, "open-agent-settings");
+  assert.equal(unavailable.label, "设置 Agent");
+
+  const capacity = sidebarSendState({
+    state: "preview-ready",
+    catalogStatus: "unavailable",
+    catalogReason: "account-capacity",
+    hasText: true,
+  });
+  assert.equal(capacity.kind, "open-agent-settings");
+  assert.equal(capacity.label, "额度已用完");
+
+  const timeout = sidebarSendState({
+    state: "preview-ready",
+    catalogStatus: "unavailable",
+    catalogReason: "timeout",
+    hasText: true,
+  });
+  assert.equal(timeout.kind, "open-agent-settings");
+  assert.equal(timeout.label, "设置 Agent");
 
   const codexLogin = sidebarSendState({
     state: "preview-ready",
     catalogStatus: "auth-required",
     hasText: true,
     agentName: "Codex",
-    agentSettingsSupported: false,
+    agentSettingsName: "Codex",
+    agentSettingsSupported: true,
   });
   assert.deepEqual(codexLogin, {
-    kind: "status",
+    kind: "open-agent-settings",
     canSend: false,
-    label: "请先登录 Codex",
-    reason: "在 Codex 中完成登录后返回 Stemmio",
+    label: "登录 Codex",
+    reason: null,
   });
 
   const codexModify = sidebarSendState({
@@ -323,30 +351,58 @@ test("mode copy stays short and names only the current user-facing state", () =>
   assert.equal(sidebarModePresentation("unknown-state").label, "待发送");
 });
 
-test("the Agent selector names only the Agent and opens only for a real choice", () => {
+test("the Composer names the current model and opens only for a real choice", () => {
   assert.deepEqual(sidebarAgentLine({ catalogStatus: "checking" }), {
-    kind: "checking", text: "正在连接 Agent…", choosable: false,
+    kind: "checking", text: "正在连接…", choosable: false,
   });
   assert.deepEqual(sidebarAgentLine({
     catalogStatus: "checking",
-    agentDisplayName: "Codex",
-    agentChoiceCount: 2,
+    modelDisplayName: "PageRoot-E2E",
+    modelChoiceCount: 2,
   }), {
-    kind: "checking", text: "Codex", choosable: true,
+    kind: "checking", text: "PageRoot-E2E", choosable: true,
   });
 
   assert.equal(sidebarAgentLine({ catalogStatus: "ready" }), null);
-  assert.equal(sidebarAgentLine({ catalogStatus: "ready", agentDisplayName: "   " }), null);
+  assert.equal(sidebarAgentLine({ catalogStatus: "ready", modelDisplayName: "   " }), null);
   assert.equal(sidebarAgentLine({ catalogStatus: "auth-required" }), null);
   assert.equal(sidebarAgentLine({ catalogStatus: "not-installed" }), null);
   assert.equal(sidebarAgentLine({ catalogStatus: "unavailable" }), null);
 
-  const single = sidebarAgentLine({ agentDisplayName: "Qoder", agentChoiceCount: 1 });
-  assert.equal(single.text, "Qoder");
+  const single = sidebarAgentLine({ modelDisplayName: "PageRoot-E2E", modelChoiceCount: 1 });
+  assert.equal(single.text, "PageRoot-E2E");
   assert.equal(single.choosable, false);
 
-  const many = sidebarAgentLine({ agentDisplayName: "Codex", agentChoiceCount: 3 });
+  const many = sidebarAgentLine({ modelDisplayName: "gpt-5", modelChoiceCount: 3 });
   assert.equal(many.choosable, true);
+});
+
+test("the Composer names thinking depth only when the Agent actually offers it", () => {
+  assert.equal(sidebarReasoningLine({}), null);
+  assert.equal(sidebarReasoningLine({ choices: [] }), null);
+
+  const defaults = sidebarReasoningLine({
+    choices: [
+      { id: "none", label: "关闭" },
+      { id: "low", label: "低" },
+      { id: "high", label: "高" },
+      { id: "max", label: "最深" },
+    ],
+  });
+  assert.equal(defaults.text, "思考 · 高");
+  assert.equal(defaults.selectedId, "high");
+  assert.equal(defaults.choosable, true);
+
+  const explicit = sidebarReasoningLine({
+    choices: [
+      { id: "none", label: "关闭" },
+      { id: "low", label: "低" },
+      { id: "high", label: "高" },
+    ],
+    selectedId: "none",
+  });
+  assert.equal(explicit.text, "思考 · 关闭");
+  assert.equal(explicit.selectedId, "none");
 });
 
 test("the header's mode is derived from Request authority, not guessed", () => {

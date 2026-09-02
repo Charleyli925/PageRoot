@@ -80,7 +80,9 @@ Product discovery accepts a protected standalone `@qoder-ai/qodercli` package
 at version 1.1.27 or newer. It intentionally rejects the executable embedded in
 Qoder.app and ordinary `PAGEROOT_QODER_ACP_COMMAND` overrides. Tests may inject
 a synthetic executable only with both `PAGEROOT_E2E=1` and
-`PAGEROOT_QODER_ACP_ALLOW_TEST_COMMAND=1`. The readiness probe runs before
+`PAGEROOT_QODER_ACP_ALLOW_TEST_COMMAND=1`. The 源页 HTTP Agent may use a
+loopback `127.0.0.1` chat endpoint only with both `PAGEROOT_E2E=1` and
+`PAGEROOT_HTTP_AGENT_ALLOW_TEST_BASE_URL=1`. The readiness probe runs before
 Request creation; a failed CLI/version/login/model-list check must leave no new
 Request, and a successful ticket is reused by the immediately following
 submission instead of probing twice. Same-Request retry is allowed only while the current
