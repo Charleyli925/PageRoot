@@ -4,7 +4,6 @@ import type {
   HtmlCanvasCommentLayoutState,
   HtmlCanvasSelection,
 } from "../components/HtmlCanvasEditor";
-import type { RelinkNoticeCopy } from "./comment-relink-model.js";
 import type {
   CommentAttachment,
   CommentEditSession,
@@ -76,9 +75,6 @@ export type CommentRailModel = {
   composerInCurrentTab: boolean;
   composerTop: number | undefined;
   focusedCommentId: string | null;
-  relinkRailCardVisible: boolean;
-  relinkCardCopy: RelinkNoticeCopy;
-  relinkCardActive: boolean;
   projectLoadError: string | null | undefined;
   draftTargetScope: string;
   attachmentUploadCount: number;
@@ -108,7 +104,6 @@ export type CommentRailContainerContext = {
   changeEvents: DirectEditEvent[];
   interactionLocked: boolean;
   unfinishedEditedComment: CommentItem | null | undefined;
-  unsafeRelinkCommentItems: CommentItem[];
   projectLoadError: string | null | undefined;
   otherTabCommentsContextKey: string;
   attachmentObjectUrls: Record<string, string>;
@@ -124,7 +119,6 @@ export type CommentRailActions = {
   requestDeleteComment: (commentId: string) => void;
   clearDeleteRequest: () => void;
   focusCommentTarget: (target: HtmlCanvasSelection, commentId: string) => void;
-  startUnsafeTargetRelink: () => void;
   cancelTargetRelink: () => void;
   onRetryProjectHydration: () => void;
   closeCommentComposer: () => void;

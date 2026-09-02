@@ -616,12 +616,11 @@ test("author Script cannot add source authority after Runtime starts or save Run
     )).toBe(await frame.locator("#source-id-decoy").getAttribute(
       "data-html-ai-source-node-id",
     ));
+    page.once("dialog", (dialog) => dialog.accept());
     await toolbar.getByRole("button", { name: "删除元素", exact: true }).click();
     await expect(frame.locator("#source-id-late")).toHaveCount(1);
     await expect(frame.locator("#source-id-decoy")).toHaveCount(1);
 
-    await page.keyboard.press("Escape");
-    await expect(toolbar).toBeHidden();
     await frame.locator("#runtime-body-generated").click();
     await expect(toolbar.getByRole("button", { name: /留评论/u })).toBeVisible();
     await expect(toolbar.getByRole("button", { name: "编辑", exact: true })).toHaveCount(0);

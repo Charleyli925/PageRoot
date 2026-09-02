@@ -4,7 +4,6 @@ import test from "node:test";
 import {
   canLocateTarget,
   commentHasContent,
-  relinkNoticeCopy,
   unsafeRelinkComments,
 } from "../app/workbench/comment-relink-model.js";
 
@@ -74,18 +73,4 @@ test("commentHasContent accepts text or attachments", () => {
   assert.equal(commentHasContent({ text: "有字", attachments: [] }), true);
   assert.equal(commentHasContent({ text: "", attachments: [{}] }), true);
   assert.equal(commentHasContent({ text: "  ", attachments: [] }), false);
-});
-
-test("the rail card copy never promises submission, whatever the count", () => {
-  const single = relinkNoticeCopy([comment()]);
-  assert.equal(single.count, 1);
-  assert.equal(single.title, "1 条评论需要重新定位");
-  assert.equal(single.actionLabel, "选择新位置");
-  assert.ok(!single.detail.includes("发送"));
-
-  const many = relinkNoticeCopy([comment(), comment({ commentId: "comment_2" })]);
-  assert.equal(many.count, 2);
-  assert.equal(many.title, "2 条评论需要重新定位");
-  assert.equal(many.actionLabel, "开始重新定位");
-  assert.ok(!many.detail.includes("发送"));
 });

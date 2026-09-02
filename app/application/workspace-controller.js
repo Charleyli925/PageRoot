@@ -514,6 +514,7 @@ export class WorkspaceController {
         flush: (input) => this.flushDraft(input),
         commit: (input) => this.commitComment(input),
         delete: (input) => this.deleteComment(input),
+        deleteForElements: (input) => this.deleteCommentsForElementIds(input),
         discardComposer: () => this.discardCommentComposer(),
         cancelEdit: (input) => this.cancelCommentEdit(input),
         removeComposerAttachment: (input) => this.removeComposerAttachment(input),
@@ -1913,6 +1914,10 @@ export class WorkspaceController {
 
   deleteComment(input) {
     return this.#requireCommentWorkflow().deleteComment(input);
+  }
+
+  deleteCommentsForElementIds(input) {
+    return this.#requireCommentWorkflow().deleteCommentsForElementIds(input);
   }
 
   discardCommentComposer() {

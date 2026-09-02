@@ -752,3 +752,79 @@ test("missing edit or comment targets fail closed on intent commands", () => {
   );
   assert.equal(harness.workflow.updateEditDraft("x").status, "blocked");
 });
+
+test("deleting a source subtree removes its saved comments and draft in one durable update", async () => {
+  const harness = createHarness();
+  const removedRootId = "pr1_aaaaaaaaaaaa4aaa8aaaaaaaaaaaaaaa";
+  const removedChildId = "pr1_bbbbbbbbbbbb4bbb8bbbbbbbbbbbbbbb";
+  const survivingId = "pr1_cccccccccccc4ccc8ccccccccccccccc";
+  const rootAttachment = attachment({
+    attachmentId: "attachment_removed_root",
+    commentId: "comment_removed_root",
+  });
+  const draftAttachment = attachment({
+    attachmentId: "attachment_removed_draft",
+    commentId: "comment_removed_draft",
+  });
+  harness.commentSession.update({
+    comments: [
+      {
+        commentId: "comment_removed_root",
+        target: { ...target("target_removed_root"), elementId: removedRootId },
+        sourceAnchor: { ...target("target_removed_root"), elementId: removedRootId },
+        text: "删除根元素时一起删除",
+        attachments: [rootAttachment],
+      },
+      {
+        commentId: "comment_removed_child",
+        target: { ...target("target_removed_child"), elementId: removedChildId },
+        sourceAnchor: { ...target("target_removed_child"), elementId: removedChildId },
+        text: "删除后代元素时一起删除",
+      },
+      {
+        commentId: "comment_survives",
+        target: { ...target("target_survives"), elementId: survivingId },
+        sourceAnchor: { ...target("target_survives"), elementId: survivingId },
+        text: "保留",
+      },
+    ],
+    composerCommentId: "comment_removed_draft",
+    composerTarget: { ...target("target_removed_draft"), elementId: removedChildId },
+    composerDraft: "尚未保存",
+    composerAttachments: [draftAttachment],
+    editSession: {
+      commentId: "comment_removed_root",
+      baselineText: "删除根元素时一起删除",
+      draftText: "正在编辑",
+      baselineAttachments: [rootAttachment],
+      draftAttachments: [rootAttachment],
+    },
+  });
+
+  const outcome = harness.workflow.deleteCommentsForElementIds({
+    elementIds: [removedRootId, removedChildId],
+  });
+
+  assert.equal(outcome.status, "succeeded");
+  assert.deepEqual(
+    harness.commentSession.comments.map((comment) => comment.commentId),
+    ["comment_survives"],
+  );
+  assert.deepEqual(
+    [...harness.commentSession.deletedCommentIds].sort(),
+    ["comment_removed_child", "comment_removed_draft", "comment_removed_root"],
+  );
+  assert.equal(harness.commentSession.composerTarget, null);
+  assert.equal(harness.commentSession.composerDraft, "");
+  assert.equal(harness.commentSession.editSession, null);
+  assert.deepEqual(
+    harness.attachmentDeletes.map((write) => write.relativePath).sort(),
+    [draftAttachment.relativePath, rootAttachment.relativePath].sort(),
+  );
+  const flushed = await harness.workflow.flushDraft();
+  assert.equal(flushed.status, "succeeded");
+  assert.deepEqual(
+    harness.draftWrites.at(-1).comments.map((comment) => comment.commentId),
+    ["comment_survives"],
+  );
+});

@@ -1,9 +1,6 @@
 "use client";
 
-import {
-  memo,
-  type CSSProperties,
-} from "react";
+import { memo, type CSSProperties } from "react";
 import { ArrowDownIcon } from "@phosphor-icons/react/dist/csr/ArrowDown";
 import { ArrowUpIcon } from "@phosphor-icons/react/dist/csr/ArrowUp";
 import { CopySimpleIcon } from "@phosphor-icons/react/dist/csr/CopySimple";
@@ -57,6 +54,8 @@ export const HtmlCanvasSelectionChrome = memo(function HtmlCanvasSelectionChrome
     textFormatRequiresSelection,
     enableReorder,
     moveAvailability,
+    deleteCommentCount,
+    deleteCommentDraftIncluded,
     spacingMenuRef,
     spacingMenuOpen,
     usageProjectId,
@@ -493,7 +492,16 @@ export const HtmlCanvasSelectionChrome = memo(function HtmlCanvasSelectionChrome
                 data-tooltip="删除元素"
                 data-tooltip-side="below"
                 onClick={() => {
-                  if (window.confirm(`确定删除“${selection.label}”及其全部内容吗？`)) {
+                  const commentWarning = deleteCommentCount > 0
+                    ? `\n\n关联的 ${deleteCommentCount} 条评论${deleteCommentDraftIncluded
+                      ? "和未保存草稿"
+                      : ""}也会一起删除。`
+                    : deleteCommentDraftIncluded
+                      ? "\n\n未保存的评论草稿也会一起删除。"
+                      : "";
+                  if (window.confirm(
+                    `确定删除“${selection.label}”及其全部内容吗？${commentWarning}`,
+                  )) {
                     onDeleteSelected();
                   }
                 }}

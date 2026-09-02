@@ -530,7 +530,6 @@ export default function Workbench() {
     new Map<string, LifecycleState | "none">(),
   );
   const interruptionPresenceRef = useRef(new Map<string, boolean>());
-  const resumeSubmissionAfterRelinkRef = useRef(false);
   const normalizeCurrentGlobalCommentsRef = useRef<() => CommentItem[]>(() => []);
   const automaticProjectRegistrationRef = useRef("");
   const projectRegistrationPreparationRef = useRef("");
@@ -1362,11 +1361,6 @@ export default function Workbench() {
     useState<string | null>(null);
   const [reviewPreparing, setReviewPreparing] = useState(false);
   const [openingReadyVersion, setOpeningReadyVersion] = useState(false);
-  // Comment ids a blocked send was parked on. The send stays pending exactly
-  // while at least one of them is still unsafe, so the promise lapses by
-  // derivation — re-proofs, external reloads and cancels need no effect.
-  const [submissionRelinkPendingIds, setSubmissionRelinkPendingIds] =
-    useState<readonly string[]>([]);
   const [runtimeCapabilitiesReady, setRuntimeCapabilitiesReady] = useState(false);
   const [browserPreviewOnly, setBrowserPreviewOnly] = useState(false);
   const [browserEditingRuntimeActive, setBrowserEditingRuntimeActive] = useState(false);
@@ -1697,7 +1691,6 @@ export default function Workbench() {
         setAttachmentObjectUrls({});
         setPreviewAttachment(null);
         commentEditResumePendingRef.current = null;
-        resumeSubmissionAfterRelinkRef.current = false;
         commentCanvasPort.resetLayout();
         setCanvasMode(
           runtimeCapabilitiesRef.current.sourceEditing !== "enabled"
@@ -2319,20 +2312,6 @@ export default function Workbench() {
     [comments],
   );
   const activeCommentCount = activeCommentItems.length;
-  const unsafeRelinkCommentItems = useMemo(
-    () => unsafeRelinkComments(activeCommentItems),
-    [activeCommentItems],
-  );
-  const unsafeRelinkCommentIds = useMemo(
-    () => new Set(unsafeRelinkCommentItems.map((comment) => comment.commentId)),
-    [unsafeRelinkCommentItems],
-  );
-  // Derived, never healed inside an effect (React Compiler forbids the
-  // cascading setState): pending means one of the parked comments is still
-  // unsafe, so the send's resumption promise survives until the set drains.
-  const submissionRelinkPending = submissionRelinkPendingIds.some(
-    (commentId) => unsafeRelinkCommentIds.has(commentId),
-  );
   const unfinishedEditedComment = commentEditSession
     ? activeCommentItems.find(
         (comment) => comment.commentId === commentEditSession.commentId,
@@ -2441,6 +2420,7 @@ export default function Workbench() {
       count: number;
       label: string;
       showMarker?: boolean;
+      hasDraft?: boolean;
     }>();
     for (const comment of visibleCommentItems) {
       const sourceTarget = commentSourceAnchor(comment) || comment.target;
@@ -2480,6 +2460,7 @@ export default function Workbench() {
       const markerKey = commentMarkerGroupKey(markerTarget);
       const current = grouped.get(markerKey);
       if (current) {
+        current.hasDraft = true;
         if (!current.layoutTargets.some((entry) => entry.target.id === sourceTarget.id)) {
           current.layoutTargets.push({
             target: sourceTarget,
@@ -2497,6 +2478,7 @@ export default function Workbench() {
           count: 0,
           label: visualHint?.label || insertionLabel(sourceTarget),
           showMarker: false,
+          hasDraft: true,
         });
       }
     }
@@ -3446,6 +3428,23 @@ export default function Workbench() {
     // enqueueDocumentEdit synchronously publishes its direct-edit audit event.
     // Re-read the Controller aggregate before reconciling targets so this
     // mutation cannot overwrite that new event with the pre-command snapshot.
+    const removedElementIds = sourceTransaction?.semanticOperation?.type === "deleteElement"
+      ? [...new Set(sourceTransaction.identityDelta?.removedElementIds || [])]
+      : [];
+    if (removedElementIds.length > 0) {
+      const deletedComments = workspaceController?.comments.commands.deleteForElements({
+        elementIds: removedElementIds,
+      });
+      if (deletedComments && deletedComments.status !== "succeeded") {
+        reportInternalFailure({
+          area: "comments",
+          operation: "delete-with-source-element",
+          code: "comment-element-delete-sync-failed",
+          recovered: false,
+          cause: deletedComments.status,
+        });
+      }
+    }
     const settledComments = currentCommentSessionSnapshot();
     const activeTargets = [
       ...settledComments.comments.map((comment) => (
@@ -4047,87 +4046,35 @@ export default function Workbench() {
       || !presentation.relinkSelectionArmed
       || !canSaveCommentTarget(target)
     ) return false;
-    if (relinkingId === "__composer") {
-      const currentTarget = currentComments.composerTarget;
-      const nextTarget = currentTarget
-        ? { ...target, id: currentTarget.id }
-        : target;
-      controller?.rebindCommentComposer(nextTarget);
-      commentCanvasPort.setSelection(nextTarget);
-      commentCanvasPort.clearRelink();
-      commentCanvasPort.setComposerOpen(true);
-      queueReviewPairReveal(nextTarget, "__composer");
-      requestComposerFocus();
-      return true;
-    }
-    const current = currentComments.comments.find(
-      (comment) => comment.commentId === relinkingId,
-    );
-    if (!current) {
+    if (relinkingId !== "__composer") {
       commentCanvasPort.clearRelink();
       return false;
     }
-    const rebound = controller?.rebindCommentTarget({
-      commentId: relinkingId,
-      target,
-    });
-    if (rebound?.status !== "succeeded") {
-      return false;
-    }
-    const nextTarget = (rebound.value as {
-      target: HtmlCanvasSelection;
-    }).target;
-    const nextComments = (rebound.value as {
-      comments: CommentItem[];
-    }).comments;
+    const currentTarget = currentComments.composerTarget;
+    const nextTarget = currentTarget
+      ? { ...target, id: currentTarget.id }
+      : target;
+    controller?.rebindCommentComposer(nextTarget);
     commentCanvasPort.setSelection(nextTarget);
     commentCanvasPort.clearRelink();
-    updateFocusedComment(relinkingId);
-    queueReviewPairReveal(nextTarget, relinkingId);
-    const remainingUnsafe = unsafeRelinkComments(nextComments);
-    if (remainingUnsafe.length > 0) {
-      // No toast here: the rail card shows the remaining count on its own
-      // durable surface while the chain advances automatically.
-      window.requestAnimationFrame(() => {
-        beginTargetRelink(remainingUnsafe[0].commentId);
-      });
-    } else {
-      setSubmissionRelinkPendingIds([]);
-      if (resumeSubmissionAfterRelinkRef.current) {
-        resumeSubmissionAfterRelinkRef.current = false;
-        window.requestAnimationFrame(() => {
-          deferredEditorReplayRef.current.generateRequest?.();
-        });
-      }
-    }
+    commentCanvasPort.setComposerOpen(true);
+    queueReviewPairReveal(nextTarget, "__composer");
+    requestComposerFocus();
     return true;
   }, [
-    beginTargetRelink,
     commentCanvasPort,
     currentCommentSessionSnapshot,
     queueReviewPairReveal,
     requestComposerFocus,
-    updateFocusedComment,
   ]);
 
   const cancelTargetRelink = useCallback(() => {
     const relinkingId = commentCanvasPort.getSnapshot().relinkingTarget;
     commentCanvasPort.clearRelink();
-    resumeSubmissionAfterRelinkRef.current = false;
-    setSubmissionRelinkPendingIds([]);
     if (relinkingId === "__composer") {
       requestComposerFocus();
     }
   }, [commentCanvasPort, requestComposerFocus]);
-
-  // The durable relink entry on the comment rail. The surface is persistent,
-  // so a click lost to a reflow window can simply be repeated (#281).
-  const startUnsafeTargetRelink = useCallback(() => {
-    if (unsafeRelinkCommentItems.length === 0) return;
-    resumeSubmissionAfterRelinkRef.current = submissionRelinkPending;
-    beginTargetRelink(unsafeRelinkCommentItems[0].commentId);
-    setCanvasMode("edit");
-  }, [beginTargetRelink, submissionRelinkPending, unsafeRelinkCommentItems]);
 
   const clearCurrentComposer = useCallback(() => {
     workspaceControllerRef.current?.cancelCommentComposer();
@@ -4843,13 +4790,12 @@ export default function Workbench() {
         const unsafeTargets = unsafeRelinkComments(
           currentCommentSessionSnapshot().comments,
         );
-        // A blocked send is only recoverable on the edit canvas; flip back so
-        // the persistent rail card (the durable #281 entry) is on screen even
-        // when the send was issued from the AI sidebar in preview mode.
         setCanvasMode("edit");
-        setSubmissionRelinkPendingIds(
-          unsafeTargets.map((comment) => comment.commentId),
-        );
+        const firstUnsafe = unsafeTargets[0];
+        if (firstUnsafe) {
+          updateFocusedComment(firstUnsafe.commentId);
+          queueReviewPairReveal(firstUnsafe.target, firstUnsafe.commentId);
+        }
         return;
       }
       if (
@@ -4960,9 +4906,11 @@ export default function Workbench() {
     projectHydrating,
     projectLoadError,
     projectName,
+    queueReviewPairReveal,
     requestComposerFocus,
     resumeCurrentComposer,
     showUnfinishedCommentEditNotice,
+    updateFocusedComment,
     viewMode,
     workspaceController,
   ]);
@@ -5853,7 +5801,6 @@ export default function Workbench() {
     changeEvents,
     interactionLocked,
     unfinishedEditedComment,
-    unsafeRelinkCommentItems,
     projectLoadError,
     otherTabCommentsContextKey,
     attachmentObjectUrls,
@@ -5863,7 +5810,6 @@ export default function Workbench() {
     resumeCurrentComposer,
     resumeCommentEdit,
     focusCommentTarget,
-    startUnsafeTargetRelink,
     cancelTargetRelink,
     onRetryProjectHydration: retryProjectHydrationFromCommentRail,
     closeCommentComposer,
@@ -5912,7 +5858,6 @@ export default function Workbench() {
     resumeCommentEdit,
     resumeCurrentComposer,
     retryProjectHydrationFromCommentRail,
-    startUnsafeTargetRelink,
     updateCommentDraftFromRail,
     updateCommentEditDraft,
     uploadAttachments,

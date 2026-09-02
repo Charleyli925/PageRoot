@@ -459,7 +459,7 @@ test("Electron separates focused-field undo from current-open Canvas undo and re
   }
 });
 
-test("Electron persists semantic identity edits, orphans deleted comments, and clears history on relaunch", {
+test("Electron persists semantic identity edits, deletes target comments, and clears history on relaunch", {
   tag: ["@gate-smoke", "@smoke-editing"],
 }, async () => {
   test.setTimeout(240_000);
@@ -545,14 +545,19 @@ test("Electron persists semantic identity edits, orphans deleted comments, and c
     ))).toEqual([duplicateIds[1], duplicateIds[0]]);
 
     await targets.nth(1).click();
-    launched.page.once("dialog", (dialog) => dialog.accept());
+    let deleteDialogMessage = "";
+    launched.page.once("dialog", async (dialog) => {
+      deleteDialogMessage = dialog.message();
+      await dialog.accept();
+    });
     await editor.getByRole("button", { name: "删除元素", exact: true }).click();
+    expect(deleteDialogMessage).toContain("关联的 1 条评论也会一起删除");
     await expectCheckpointPersisted(launched.page, persistedRevision);
     await waitForRuntimeHandoffSettled(launched.page);
     frame = await currentEditorFrame(launched.page);
     targets = frame.locator(caseSelector("identity-target"));
     await expect(targets).toHaveCount(1);
-    await expect(comment).toHaveAttribute("data-resolution", "orphaned");
+    await expect(comment).toHaveCount(0);
     savedHtml = readFileSync(managedSourcePath, "utf8");
     expect(savedHtml).not.toContain(`data-pageroot-id="${targetId}"`);
     expect(savedHtml).toContain(`data-pageroot-id="${duplicateIds[1]}"`);
@@ -569,7 +574,7 @@ test("Electron persists semantic identity edits, orphans deleted comments, and c
     ));
     await expect(frame.locator(caseSelector("identity-target"))).toHaveCount(1);
     const reopenedComment = launched.page.locator(".comment-card").filter({ hasText: commentText });
-    await expect(reopenedComment).toHaveAttribute("data-resolution", "orphaned");
+    await expect(reopenedComment).toHaveCount(0);
     const reopenedBytes = readFileSync(managedSourcePath);
     await frame.locator(caseSelector("identity-target")).click();
     await clickEditHistoryMenu(activeApp, launched.page, "undo");

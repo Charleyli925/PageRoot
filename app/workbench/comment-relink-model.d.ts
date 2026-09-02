@@ -10,14 +10,3 @@ export function commentHasContent(
 export function unsafeRelinkComments(
   comments: readonly CommentItem[],
 ): CommentItem[];
-
-export type RelinkNoticeCopy = {
-  count: number;
-  title: string;
-  detail: string;
-  actionLabel: string;
-};
-
-export function relinkNoticeCopy(
-  comments: readonly CommentItem[],
-): RelinkNoticeCopy;

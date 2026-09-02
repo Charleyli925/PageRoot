@@ -113,6 +113,42 @@ async function expectQuietComposerActions(composer) {
     .toBe("rgb(90, 85, 223)");
 }
 
+test("deleting a source module confirms and removes descendant comments", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1600, height: 900 });
+  await page.goto("/");
+  const { frame } = await loadFixture(page, "module-padding-hit.html", {
+    buffer: fixtureBuffer("module-padding-hit.html"),
+  });
+  const commentText = "这条评论会随所属模块一起删除";
+  await saveComment(page, frame, "module-padding-copy", commentText);
+  const savedCard = page.locator(".comment-card").filter({ hasText: commentText });
+  await expect(savedCard).toBeVisible();
+
+  const sourceModule = frame.locator(caseSelector("filled-module"));
+  await sourceModule.click({ position: { x: 20, y: 20 } });
+  const toolbar = page.getByRole("toolbar", { name: /编辑/u });
+  let deleteDialogMessage = "";
+  page.once("dialog", async (dialog) => {
+    deleteDialogMessage = dialog.message();
+    await dialog.dismiss();
+  });
+  await toolbar.getByRole("button", { name: "删除元素", exact: true }).click();
+  expect(deleteDialogMessage).toContain("关联的 1 条评论也会一起删除");
+  await expect(sourceModule).toHaveCount(1);
+  await expect(savedCard).toHaveCount(1);
+
+  page.once("dialog", async (dialog) => {
+    expect(dialog.message()).toContain("关联的 1 条评论也会一起删除");
+    await dialog.accept();
+  });
+  await toolbar.getByRole("button", { name: "删除元素", exact: true }).click();
+  await expect(sourceModule).toHaveCount(0);
+  await expect(savedCard).toHaveCount(0);
+  await expect(page.getByText("评论位置已丢失")).toHaveCount(0);
+});
+
 test("comment textareas focus immediately and use Enter to save with Shift+Enter for new lines", async ({
   page,
 }, testInfo) => {

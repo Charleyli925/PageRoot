@@ -102,6 +102,9 @@ export class CommentWorkflow {
   commitComment(input?: { commentId?: string }): Promise<CommentWorkflowOutcome>;
   editComment(input: { commentId: string }): CommentWorkflowOutcome;
   deleteComment(input: { commentId: string }): CommentWorkflowOutcome;
+  deleteCommentsForElementIds(input: {
+    elementIds: string[];
+  }): CommentWorkflowOutcome;
   discardComposer(): CommentWorkflowOutcome;
   cancelCommentEdit(input?: { commentId?: string }): CommentWorkflowOutcome;
   removeComposerAttachment(input: { attachmentId: string }): CommentWorkflowOutcome;

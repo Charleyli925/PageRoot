@@ -86,6 +86,8 @@ export type SelectionChromeModel = {
   textFormatRequiresSelection: boolean;
   enableReorder: boolean;
   moveAvailability: MoveAvailability;
+  deleteCommentCount: number;
+  deleteCommentDraftIncluded: boolean;
   spacingMenuRef: RefObject<HTMLDetailsElement | null>;
   spacingMenuOpen: boolean;
   usageProjectId?: string;

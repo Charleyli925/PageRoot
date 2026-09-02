@@ -40,22 +40,3 @@ export function unsafeRelinkComments(comments) {
       && !canLocateTarget(comment.sourceAnchor || comment.target),
   );
 }
-
-/**
- * Copy for the persistent rail card. The card is the durable entry; its words
- * must not promise submission, because relink can also start outside a send.
- *
- * @param {ReadonlyArray<import("./types").CommentItem>} comments
- * @returns {import("./comment-relink-model").RelinkNoticeCopy}
- */
-export function relinkNoticeCopy(comments) {
-  const count = comments.length;
-  return {
-    count,
-    title: `${count} 条评论需要重新定位`,
-    detail: count === 1
-      ? "请选择这条评论的新位置，评论和附件已保留。"
-      : "将从第 1 条开始，完成后自动进入下一条。",
-    actionLabel: count === 1 ? "选择新位置" : "开始重新定位",
-  };
-}

@@ -134,6 +134,9 @@ export interface CommentControllerCommands {
   flush(input?: Readonly<Record<string, unknown>>): Promise<CommentWorkflowOutcome>;
   commit(input?: Readonly<{ commentId?: string }>): Promise<CommentWorkflowOutcome>;
   delete(input: Readonly<{ commentId: string }>): CommentWorkflowOutcome;
+  deleteForElements(input: Readonly<{
+    elementIds: readonly string[];
+  }>): CommentWorkflowOutcome;
   discardComposer(): CommentWorkflowOutcome;
   cancelEdit(input?: Readonly<{ commentId?: string }>): CommentWorkflowOutcome;
   removeComposerAttachment(

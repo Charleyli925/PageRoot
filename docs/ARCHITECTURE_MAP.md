@@ -100,7 +100,7 @@ changes. `CommentRailContainer` owns capability-local subscriptions, disclosure,
 delete confirmation, composer/edit refs, the attachment picker, card measurement,
 virtualization, rail scrolling and reveal/focus timing. `commentCanvasPort`
 stabilizes disposable cross-region presentation: Canvas selection, layout authority,
-target geometry, document height, composer/edit/focus disclosure and relink/picker
+target geometry, document height, composer/edit/focus disclosure and draft-target/picker
 intents; it never owns comment facts. Workbench's aggregate
 subscription may suppress composer-text and edit-text-only revisions; saved
 comments, attachment structure, persistence errors and every non-comment

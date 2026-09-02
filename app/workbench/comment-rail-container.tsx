@@ -30,7 +30,6 @@ import {
   commentVisualHintForSelection,
   isExplicitGlobalCommentTarget,
 } from "./comment-model";
-import { relinkNoticeCopy } from "./comment-relink-model.js";
 import {
   composerViewFields,
   deriveComposerState,
@@ -338,15 +337,8 @@ export const CommentRailContainer = memo(function CommentRailContainer({
     && context.unfinishedEditedComment
     && commentEditSessionHasChanges(workingCopyEditSession),
   );
-  const relinkRailCardVisible = Boolean(
-    commentLayoutReady
-    && context.viewMode === "current"
-    && !context.interactionLocked
-    && context.unsafeRelinkCommentItems.length > 0,
-  );
   const commentRailStatusTop = Math.max(78, commentHeaderHeight + 16);
-  const commentRailMinimumTop = commentRailStatusTop
-    + (relinkRailCardVisible ? 96 : 0);
+  const commentRailMinimumTop = commentRailStatusTop;
   const isLocatable = useCallback((target: HtmlCanvasSelection): boolean => {
     const sourceTarget = sourceTargetForSelection(target);
     const layout = targetLayouts[sourceTarget.id];
@@ -985,12 +977,6 @@ export const CommentRailContainer = memo(function CommentRailContainer({
     composerInCurrentTab,
     composerTop: commentRailLayout.composerTop,
     focusedCommentId: canvasSnapshot.focusedCommentId,
-    relinkRailCardVisible,
-    relinkCardCopy: relinkNoticeCopy(context.unsafeRelinkCommentItems),
-    relinkCardActive: Boolean(
-      canvasSnapshot.relinkingTarget
-      && canvasSnapshot.relinkingTarget !== "__composer"
-    ),
     projectLoadError: context.projectLoadError,
     draftTargetScope: draftScope(draftTarget),
     attachmentUploadCount,
@@ -1034,9 +1020,7 @@ export const CommentRailContainer = memo(function CommentRailContainer({
     pendingDeleteCommentId,
     context.projectLoadError,
     canvasSnapshot.focusedCommentId,
-    canvasSnapshot.relinkingTarget,
     context.unfinishedEditedComment,
-    context.unsafeRelinkCommentItems,
     context.viewMode,
     context.visibleCommentItems,
     draftInCurrentTab,
@@ -1048,7 +1032,6 @@ export const CommentRailContainer = memo(function CommentRailContainer({
     otherTabCommentEntryCount,
     otherTabCommentGroups,
     otherTabCommentsOpen,
-    relinkRailCardVisible,
     renderedVisibleCommentItems,
     snapshot.workingCopy,
     sortedVisibleCommentItems,
