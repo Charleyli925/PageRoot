@@ -568,8 +568,10 @@ last-known-good iframe exists. It reports that settlement fact to
 caches its own boolean. The Canvas freeze contract reports the latest complete
 working-source Hash separately from the visible verified-projection Hash and a
 stale-projection flag. A preserved older iframe never advances the latter.
-Project switch, close and AI submission fail closed until the visible
-projection has caught up; they never substitute the working-source Hash for a
+Project switch and AI submission fail closed until the visible projection has
+caught up. Close uses a separate source-protection contract: it may reconcile
+and protect the frozen working bytes while retaining the older rendered Hash
+as an explicit stale fact, but never substitutes the working-source Hash for a
 missing or stale rendered Hash.
 Runtime DOM never becomes SourcePatch, Source HTML, save, Version, export,
 Request, Candidate or Review input.

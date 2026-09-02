@@ -1200,14 +1200,22 @@ export class ProjectWorkflow {
         const renderedProjectionSha256 = String(
           frozen.renderedProjectionSha256 || frozen.canvasRenderedSha256 || "",
         );
-        if (
-          frozen.renderedProjectionStale === true
-          || !workingSourceSha256
-          || renderedProjectionSha256 !== workingSourceSha256
-        ) {
-          return inAppBlock(
-            "最新页面还没有完成显示，已取消关闭。请重新加载动态内容后再试。",
-          );
+        if (!workingSourceSha256) {
+          return inAppBlock("当前完整 HTML 还没有形成，已取消关闭。");
+        }
+        const projectionStale = frozen.renderedProjectionStale === true
+          || renderedProjectionSha256 !== workingSourceSha256;
+        if (projectionStale) {
+          // Close is a source-protection boundary, not a claim that the user
+          // has already seen the latest projection. Preserve the older
+          // rendered Hash as a distinct fact and reconcile the frozen working
+          // bytes below; project switch and AI submission keep their stronger
+          // visible-projection gate.
+          this.#emit({
+            type: "project-close-source-safe-projection-stale",
+            workingSourceSha256,
+            renderedProjectionSha256,
+          });
         }
         frozenSourceSha256 = workingSourceSha256;
         lifecycle.frozenRequestId = closeRequestId;

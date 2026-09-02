@@ -1117,7 +1117,7 @@ A 项目 processing 时切换 B 项目：
 - 恢复日志的核心身份不以路径为准；受管 Working Copy 改名或移动时使用旧 receipt 和完整文档/revision/HTML Hash 做 CAS rebase。连续编辑最多保留一个 in-flight 和一个 latest pending 日志；切换或关闭只等待最新 revision。源文件成功写回后使用完整 receipt CAS 删除并确认日志退役。
 - Main 日志与 local recovery 同 revision、同 HTML Hash 时，Main 验证的 HTML 字节是内容权威，local 只补充 recovery identity、change events 和 history metadata。Main-only 记录在源 Hash 与文档身份一致时直接恢复为待写入，不因缺少 local metadata 伪造 conflict。
 - 恢复日志目录初始化或扫描失败时应用继续创建主窗口，只降级恢复凭证能力并保留导出 HTML 出口。扫描按文件数、单文件字节、总字节和时间设上限；损坏记录单独隔离，Start 只展示通过校验的摘要。
-- 关闭复核分别记录最新完整 HTML 的 working-source Hash 和当前可见已验证投影的 rendered-projection Hash。候选失败而保留上一张 Runtime 时，后者仍是旧 Hash，不得冒充最新源码。关闭、项目切换和 AI 提交在两者不一致时保持页面可操作并阻止越过边界；只有最新页面真正加载验证后才可继续。源文件持久保护仍以冻结 HTML 的 working-source Hash 和 `lastPersistedRevision >= cutoffRevision` 核对，不把可见投影当作源码权威。
+- 关闭复核分别记录最新完整 HTML 的 working-source Hash 和当前可见已验证投影的 rendered-projection Hash。候选失败而保留上一张 Runtime 时，后者仍是旧 Hash，不得冒充最新源码。项目切换和 AI 提交在两者不一致时保持页面可操作并阻止越过边界；只有最新页面真正加载验证后才可继续。关闭走独立的“源码安全、视觉尚未更新”合同：可继续核对并保护冻结的 working-source HTML，同时保留旧 rendered-projection Hash 和 stale 事实，不得宣称用户已看到最新页面。源文件持久保护仍以冻结 HTML 的 working-source Hash 和 `lastPersistedRevision >= cutoffRevision` 核对，不把可见投影当作源码权威。
 - Renderer 已知的关闭阻断由对应 Canvas、横幅或流程面板解释。Electron 在一次短暂失败后先对精确 request 发送 `close-aborted`、释放 renderer/navigation freeze，最多 400ms 后自动重试一次；仍失败就恢复可操作窗口，不再循环重试相同前置条件，也不重复弹 macOS 警告框。
 - 旧项目的登记或 autosave 失败回调只能写入旧项目恢复记录，不能占用当前项目的 pending write。
 - 源 HTML 写入失败与评论记录失败共用一个全局持久恢复提示：源文件问题优先，否则由评论问题提供“重试记录评论”。源文件失败横幅占用工作区 Grid 独立行，正文可换行，可展开并复制当前项目/文档/revision/Hash 诊断，不被左侧栏遮挡。右侧评论栏不再重复同一错误。

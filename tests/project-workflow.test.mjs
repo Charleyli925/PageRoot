@@ -615,7 +615,7 @@ test("project switch rejects a last-known-good projection that still renders old
   assert.ok(staleFenceCount >= 2);
 });
 
-test("close keeps the project open while the visible projection is last-known-good", async (t) => {
+test("close protects the latest source without claiming a stale projection is current", async (t) => {
   const latestHtml = OLD_HTML.replace("old", "latest structure");
   const oldRenderedSha256 = sha256(OLD_HTML);
   let reconciliationCount = 0;
@@ -648,11 +648,15 @@ test("close keeps the project open while the visible projection is last-known-go
     deadlineAt: Date.now() + 2_000,
   });
 
-  assert.equal(outcome.ready, false);
-  assert.match(outcome.reason, /最新页面还没有完成显示/u);
-  assert.equal(reconciliationCount, 0);
-  assert.equal(harness.unlockCount, 1);
-  assert.equal(harness.workflow.getSnapshot().close.phase, "idle");
+  assert.deepEqual(outcome, { ready: true });
+  assert.equal(reconciliationCount, 1);
+  assert.equal(harness.unlockCount, 0);
+  assert.equal(harness.workflow.getSnapshot().close.phase, "ready");
+  assert.equal(harness.events.some((event) => (
+    event.type === "project-close-source-safe-projection-stale"
+    && event.workingSourceSha256 === sha256(latestHtml)
+    && event.renderedProjectionSha256 === oldRenderedSha256
+  )), true);
 });
 
 test("a failed source write can switch only after an exact recovery checkpoint", async (t) => {
