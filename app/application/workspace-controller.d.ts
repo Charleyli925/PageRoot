@@ -587,12 +587,15 @@ export class WorkspaceController {
   selectAgent(
     selection: import("../domain/agent-provider-state.js").AgentSelection,
   ): import("../domain/agent-provider-state.js").AgentSelection;
-  selectAgentModel(modelId: string | null): import("../domain/agent-provider-state.js").AgentSelection | null;
-  selectAgentReasoning(reasoning: string | null): import("../domain/agent-provider-state.js").AgentSelection | null;
+  selectAgentModel(modelId: string | null, expectedSelection?: import("../domain/agent-provider-state.js").AgentSelection | null): import("../domain/agent-provider-state.js").AgentSelection | null;
+  selectAgentReasoning(reasoning: string | null, expectedSelection?: import("../domain/agent-provider-state.js").AgentSelection | null): import("../domain/agent-provider-state.js").AgentSelection | null;
   connectAgentApiKey(
     selection: import("../domain/agent-provider-state.js").AgentSelection,
     apiKey: string,
-    extras?: Readonly<{ vendorId?: string; baseUrl?: string }>,
+    extras?: Readonly<{ vendorId?: string; baseUrl?: string; modelId?: string }>,
+  ): Promise<RunWorkflowOutcome>;
+  disconnectAgentApiKey(
+    selection: import("../domain/agent-provider-state.js").AgentSelection,
   ): Promise<RunWorkflowOutcome>;
   refreshQoderAvailability(): Promise<RunWorkflowOutcome>;
   checkQoderUsability(): Promise<RunWorkflowOutcome>;

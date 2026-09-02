@@ -329,6 +329,11 @@ export function createBridgeClient({
       body,
       "API Token 没有接通。",
     ),
+    updateAgentConfiguration: (body) => command(
+      "/agent/configuration",
+      body,
+      "Agent 配置没有更新。",
+    ),
     startAgent: (body) => command(
       "/agent/start",
       body,

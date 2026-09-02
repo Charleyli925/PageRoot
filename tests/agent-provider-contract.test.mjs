@@ -13,6 +13,7 @@ import {
   normalizeQoderRuntimeError,
   normalizedQoderPreflightError,
 } from "../bridge/agent/providers/qoder-provider.mjs";
+import { createCodexAcpProvider } from "../bridge/agent/providers/codex-acp-provider.mjs";
 import {
   acpDriverProfile,
   createRestrictedQoderAcpHost,
@@ -284,6 +285,7 @@ test("provider boundary normalizes ACP raw failures before coordinator ownership
 
 test("Bridge keeps preflight internals private while public execution sessions identify their provider", async (t) => {
   const { fixture, registry } = fixtureRegistry();
+  let requestConfiguration = null;
   const service = new AgentBridgeService({
     providerRegistry: registry,
     resolveTask: async () => ({
@@ -298,7 +300,9 @@ test("Bridge keeps preflight internals private while public execution sessions i
       request: {
         request: {
           agentDelivery: {
-            mode: "qoder-acp",
+            mode: "managed-agent",
+            selection: providerSelection(),
+            configuration: requestConfiguration,
             trustPolicyVersion: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
           },
         },
@@ -334,6 +338,7 @@ test("Bridge keeps preflight internals private while public execution sessions i
       },
       trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
       preflightId: mismatchedTicket.preflightId,
+      configurationDigest: mismatchedTicket.configuration.configurationDigest,
     }),
     (error) => error?.code === "AGENT_PROVIDER_TICKET_INVALID",
   );
@@ -348,12 +353,14 @@ test("Bridge keeps preflight internals private while public execution sessions i
   for (const internal of ["providerId", "runtimeId", "installation", "installationDigest", "capabilities"]) {
     assert.equal(internal in ready, false, `${internal} must stay Bridge-internal`);
   }
+  requestConfiguration = ready.configuration;
 
   const started = await service.submit({
     ...IDENTITY,
     driver: "qoder-acp",
     trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
     preflightId: ready.preflightId,
+    configurationDigest: ready.configuration.configurationDigest,
   });
   assert.equal(started.accepted, true);
   assert.equal(started.session.driver, "qoder-acp");
@@ -367,7 +374,7 @@ test("Bridge keeps preflight internals private while public execution sessions i
   assert.ok(fixture.calls.includes("runtime:run"));
 });
 
-test("Qoder raw failures retain the golden authentication and capacity classes", () => {
+test("Qoder visible output cannot be mistaken for a capacity failure", () => {
   assert.equal(
     normalizedQoderPreflightError(Object.assign(new Error("private install detail"), {
       code: "ENOENT",
@@ -380,6 +387,21 @@ test("Qoder raw failures retain the golden authentication and capacity classes",
   );
   assert.equal(
     classifyQoderRunFailure({ qoderStderr: "Credit usage limit. Upgrade your subscription plan." }),
+    "QODER_ACP_RUN_FAILED",
+  );
+  assert.equal(
+    classifyQoderRunFailure({ code: "QODER_ACCOUNT_CAPACITY_UNAVAILABLE" }),
     "QODER_ACCOUNT_CAPACITY_UNAVAILABLE",
   );
+});
+
+test("Codex visible output cannot be mistaken for a quota or model-availability error", () => {
+  const provider = createCodexAcpProvider();
+  assert.equal(provider.classifyRunFailure({
+    message: "capacity quota model unavailable",
+    agentStderr: "ordinary assistant text",
+  }), "CODEX_ACP_RUN_FAILED");
+  assert.equal(provider.classifyRunFailure({
+    code: "CODEX_ACCOUNT_CAPACITY_UNAVAILABLE",
+  }), "CODEX_ACCOUNT_CAPACITY_UNAVAILABLE");
 });

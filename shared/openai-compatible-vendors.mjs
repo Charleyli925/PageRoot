@@ -1,64 +1,24 @@
-// OpenAI-compatible vendors for PageRoot's native HTTP Agent.
-// Anthropic is intentionally absent.
+import {
+  betaAgentModelsEnabled,
+  recommendedAgentModel,
+  supportedAgentModel,
+  supportedAgentModelsForVendor,
+} from "./supported-agent-models.mjs";
 
 const HTTPS_ORIGIN = /^https:\/\//u;
 
 export const PAGEROOT_PROVIDER_ID = "pageroot";
 export const PAGEROOT_RUNTIME_ID = "http";
 
-export const OPENAI_COMPATIBLE_VENDORS = Object.freeze([
-  Object.freeze({
-    id: "deepseek",
-    displayName: "DeepSeek",
-    baseUrl: "https://api.deepseek.com/v1",
-    needsBaseUrl: false,
-    defaultModels: Object.freeze([
-      Object.freeze({ id: "deepseek-v4-flash", displayName: "V4 Flash" }),
-      Object.freeze({ id: "deepseek-v4-pro", displayName: "V4 Pro" }),
-    ]),
-  }),
-  Object.freeze({
-    id: "zhipu",
-    displayName: "智谱",
-    baseUrl: "https://open.bigmodel.cn/api/paas/v4",
-    needsBaseUrl: false,
-    defaultModels: Object.freeze([
-      Object.freeze({ id: "glm-4.5", displayName: "GLM-4.5" }),
-      Object.freeze({ id: "glm-4.5-air", displayName: "GLM-4.5 Air" }),
-      Object.freeze({ id: "glm-4-flash", displayName: "GLM-4 Flash" }),
-      Object.freeze({ id: "glm-4-plus", displayName: "GLM-4 Plus" }),
-    ]),
-  }),
-  Object.freeze({
-    id: "dashscope",
-    displayName: "阿里通义",
-    baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
-    needsBaseUrl: false,
-    defaultModels: Object.freeze([
-      Object.freeze({ id: "qwen-plus", displayName: "Qwen Plus" }),
-      Object.freeze({ id: "qwen-turbo", displayName: "Qwen Turbo" }),
-      Object.freeze({ id: "qwen-max", displayName: "Qwen Max" }),
-    ]),
-  }),
-  Object.freeze({
-    id: "openai",
-    displayName: "OpenAI",
-    baseUrl: "https://api.openai.com/v1",
-    needsBaseUrl: false,
-    defaultModels: Object.freeze([
-      Object.freeze({ id: "gpt-4.1", displayName: "GPT-4.1" }),
-      Object.freeze({ id: "gpt-4o", displayName: "GPT-4o" }),
-      Object.freeze({ id: "gpt-4o-mini", displayName: "GPT-4o mini" }),
-    ]),
-  }),
-  Object.freeze({
-    id: "custom",
-    displayName: "其他兼容接口",
-    baseUrl: "",
-    needsBaseUrl: true,
-    defaultModels: Object.freeze([]),
-  }),
-]);
+const VENDORS = [
+  { id: "deepseek", displayName: "DeepSeek", baseUrl: "https://api.deepseek.com/v1", needsBaseUrl: false },
+  { id: "zhipu", displayName: "智谱", baseUrl: "https://open.bigmodel.cn/api/paas/v4", needsBaseUrl: false },
+  { id: "dashscope", displayName: "阿里通义", baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1", needsBaseUrl: false },
+  { id: "openai", displayName: "OpenAI", baseUrl: "https://api.openai.com/v1", needsBaseUrl: false },
+  { id: "custom", displayName: "其他兼容接口", baseUrl: "", needsBaseUrl: true },
+];
+
+export const OPENAI_COMPATIBLE_VENDORS = Object.freeze(VENDORS.map(Object.freeze));
 
 export function openaiCompatibleVendor(vendorId) {
   return OPENAI_COMPATIBLE_VENDORS.find((vendor) => vendor.id === vendorId) || null;
@@ -68,32 +28,18 @@ export function normalizeOpenAiCompatibleBaseUrl(value) {
   const text = String(value || "").trim();
   if (!text || !HTTPS_ORIGIN.test(text) || text.length > 200) return "";
   let url;
-  try {
-    url = new URL(text);
-  } catch {
-    return "";
-  }
-  if (url.protocol !== "https:" || url.username || url.password || url.search || url.hash) {
-    return "";
-  }
-  if (!url.hostname || url.hostname === "localhost" || url.hostname.endsWith(".local")) {
-    return "";
-  }
+  try { url = new URL(text); } catch { return ""; }
+  if (url.protocol !== "https:" || url.username || url.password || url.search || url.hash) return "";
+  if (!url.hostname || url.hostname === "localhost" || url.hostname.endsWith(".local")) return "";
   return `${url.origin}${url.pathname}`.replace(/\/+$/u, "");
 }
 
 export function resolveOpenAiCompatibleVendor(vendorId, baseUrl) {
   const vendor = openaiCompatibleVendor(String(vendorId || "").trim());
   if (!vendor) return null;
-  if (vendor.needsBaseUrl) {
-    const resolved = normalizeOpenAiCompatibleBaseUrl(baseUrl);
-    if (!resolved) return null;
-    return Object.freeze({
-      ...vendor,
-      baseUrl: resolved,
-    });
-  }
-  return vendor;
+  if (!vendor.needsBaseUrl) return vendor;
+  const resolved = normalizeOpenAiCompatibleBaseUrl(baseUrl);
+  return resolved ? Object.freeze({ ...vendor, baseUrl: resolved }) : null;
 }
 
 const LOOPBACK_HTTP = /^https?:\/\/127\.0\.0\.1(?::\d+)?(?:\/[A-Za-z0-9._~!$&'()*+,;=:@%-]*)?$/u;
@@ -108,69 +54,94 @@ export function testOpenAiCompatibleBaseUrl(environment = {}) {
   const text = String(environment.PAGEROOT_HTTP_AGENT_BASE_URL || "").trim();
   if (!text || text.length > 200 || !LOOPBACK_HTTP.test(text)) return "";
   let url;
-  try {
-    url = new URL(text);
-  } catch {
-    return "";
-  }
-  if (
-    !["http:", "https:"].includes(url.protocol)
-    || url.hostname !== "127.0.0.1"
-    || url.username
-    || url.password
-    || url.search
-    || url.hash
-  ) {
-    return "";
-  }
+  try { url = new URL(text); } catch { return ""; }
+  if (!["http:", "https:"].includes(url.protocol) || url.hostname !== "127.0.0.1"
+    || url.username || url.password || url.search || url.hash) return "";
   return `${url.origin}${url.pathname}`.replace(/\/+$/u, "");
 }
 
 export function httpAgentLaunchBaseUrl(environment, vendorBaseUrl) {
-  if (httpAgentTestOverrideEnabled(environment)) {
-    return testOpenAiCompatibleBaseUrl(environment);
-  }
-  return String(vendorBaseUrl || "");
+  return httpAgentTestOverrideEnabled(environment)
+    ? testOpenAiCompatibleBaseUrl(environment)
+    : String(vendorBaseUrl || "");
 }
 
 export const OPENAI_COMPATIBLE_REASONING_CHOICES = Object.freeze([
+  Object.freeze({ id: "auto", label: "自动" }),
   Object.freeze({ id: "none", label: "关闭" }),
   Object.freeze({ id: "low", label: "低" }),
   Object.freeze({ id: "high", label: "高" }),
   Object.freeze({ id: "max", label: "最深" }),
+  Object.freeze({ id: "enabled", label: "开启" }),
 ]);
-export const DEFAULT_OPENAI_COMPATIBLE_REASONING = "high";
+export const DEFAULT_OPENAI_COMPATIBLE_REASONING = "auto";
 
-export function normalizeOpenAiCompatibleReasoning(value) {
-  const id = String(value || "").trim();
-  return OPENAI_COMPATIBLE_REASONING_CHOICES.some((choice) => choice.id === id) ? id : "";
-}
+const CHOICE_BY_ID = new Map(OPENAI_COMPATIBLE_REASONING_CHOICES.map((choice) => [choice.id, choice]));
 
-export function openaiCompatibleChatThinkingFields(vendorId, reasoning) {
-  const effort = normalizeOpenAiCompatibleReasoning(reasoning) || DEFAULT_OPENAI_COMPATIBLE_REASONING;
-  if (String(vendorId || "") === "openai") {
-    if (effort === "none") return Object.freeze({});
-    return Object.freeze({
-      reasoning_effort: effort === "max" ? "high" : effort,
-    });
+export function openAiCompatibleModelCapability(vendorId, modelId, { includeBeta = true } = {}) {
+  if (vendorId === "custom") {
+    return Object.freeze({ reasoningChoices: Object.freeze([CHOICE_BY_ID.get("auto")]), model: null });
   }
-  if (effort === "none") {
-    return Object.freeze({ thinking: Object.freeze({ type: "disabled" }) });
-  }
+  const entry = supportedAgentModel(vendorId, modelId, { includeBeta });
+  const ids = entry?.reasoningOptions || ["auto"];
   return Object.freeze({
-    thinking: Object.freeze({ type: "enabled" }),
-    reasoning_effort: effort,
+    reasoningChoices: Object.freeze(ids.map((id) => CHOICE_BY_ID.get(id)).filter(Boolean)),
+    model: entry,
   });
 }
 
-export function publicOpenAiCompatibleReasoningChoices() {
-  return OPENAI_COMPATIBLE_REASONING_CHOICES;
+export function normalizeOpenAiCompatibleReasoning(value) {
+  const id = String(value || "").trim();
+  return CHOICE_BY_ID.has(id) ? id : "";
 }
 
-export function publicOpenAiCompatibleVendors() {
-  return Object.freeze(OPENAI_COMPATIBLE_VENDORS.map((vendor) => Object.freeze({
+export function openaiCompatibleChatThinkingFields(vendorId, modelId, reasoning) {
+  const requested = normalizeOpenAiCompatibleReasoning(reasoning);
+  const supported = openAiCompatibleModelCapability(vendorId, modelId).reasoningChoices
+    .some((choice) => choice.id === requested);
+  if (!requested || requested === "auto" || !supported || vendorId === "custom") return Object.freeze({});
+  if (vendorId === "openai") return Object.freeze({ reasoning_effort: requested });
+  if (vendorId === "dashscope") return Object.freeze({ enable_thinking: requested !== "none" });
+  if (requested === "none") return Object.freeze({ thinking: Object.freeze({ type: "disabled" }) });
+  return Object.freeze({
+    thinking: Object.freeze({ type: "enabled" }),
+    ...(requested !== "enabled" ? { reasoning_effort: requested } : {}),
+  });
+}
+
+export function publicOpenAiCompatibleReasoningChoices(vendorId, modelId) {
+  return openAiCompatibleModelCapability(vendorId, modelId).reasoningChoices;
+}
+
+export function publicModelsForVendor(vendorId, environment = {}) {
+  if (vendorId === "custom") return Object.freeze([]);
+  const includeBeta = betaAgentModelsEnabled(environment);
+  return Object.freeze(supportedAgentModelsForVendor(vendorId, { includeBeta }).map((entry) => Object.freeze({
+    id: `${PAGEROOT_PROVIDER_ID}:${entry.modelId}`,
+    providerModelId: entry.modelId,
+    displayName: entry.displayName,
+    isDefault: entry.recommended === true,
+    releaseChannel: entry.releaseChannel,
+    contextWindow: entry.contextWindow,
+    recommendedMaxInputTokens: entry.recommendedMaxInputTokens,
+    maxOutputTokens: entry.maxOutputTokens,
+    supportsCompleteHtml: entry.supportsCompleteHtml,
+    reasoningChoices: entry.reasoningOptions.map((id) => CHOICE_BY_ID.get(id)).filter(Boolean),
+  })));
+}
+
+export function publicOpenAiCompatibleVendors({
+  includeBeta = globalThis.htmlAIRuntime?.betaAgentModelsEnabled === true,
+} = {}) {
+  return Object.freeze(OPENAI_COMPATIBLE_VENDORS.filter((vendor) => (
+    vendor.id === "custom"
+    || supportedAgentModelsForVendor(vendor.id, { includeBeta }).length > 0
+  )).map((vendor) => Object.freeze({
     id: vendor.id,
     label: vendor.displayName,
     needsBaseUrl: vendor.needsBaseUrl === true,
+    compatibilityMode: vendor.id === "custom",
   })));
 }
+
+export { betaAgentModelsEnabled, recommendedAgentModel, supportedAgentModel };

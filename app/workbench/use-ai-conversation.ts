@@ -9,6 +9,8 @@ import type { ActiveRun } from "../domain/run-lifecycle.js";
 import type { RunHandoffState } from "../application/run-session.js";
 import {
   conversationLoadedForView,
+  sidebarAgentStageSteps,
+  sidebarFailureRetryable,
   sidebarStateFromRun,
   type SidebarCatalogStatus,
 } from "./ai-conversation-model.js";
@@ -151,14 +153,6 @@ export function useAiConversation({
     onDeliverModification?.("clipboard");
   }, [onDeliverModification]);
 
-  const onSelectModel = useCallback((modelId: string) => {
-    controllerRef.current?.selectAgentModel(modelId);
-  }, [controllerRef]);
-
-  const onSelectReasoning = useCallback((reasoning: string) => {
-    controllerRef.current?.selectAgentReasoning(reasoning);
-  }, [controllerRef]);
-
   const sidebarProps = useMemo(() => ({
     state,
     title: conversation?.title ?? "",
@@ -177,13 +171,13 @@ export function useAiConversation({
     selectedModelId,
     reasoningChoices,
     selectedReasoningId,
-    onSelectModel,
-    onSelectReasoning,
     // The decision bar needs to name the version it is deciding about, and the
     // assessment decides whether adopting without looking is offered at all.
     candidateVersionLabel: activeRun?.candidateVersionLabel ?? null,
     candidateStatus: activeRun?.candidateAssessment?.status ?? null,
     failureMessage: activeRun?.error ?? null,
+    failureCode: activeHandoff?.errorCode || null,
+    failureRetryable: sidebarFailureRetryable(activeRun, activeHandoff),
     pendingCommentCount,
     agentText: activeHandoff?.visibleText || "",
     agentUpdates: activeHandoff?.visibleTextUpdates || [],
@@ -198,6 +192,10 @@ export function useAiConversation({
     runCommentCount: activeRun?.commentCount ?? pendingCommentCount,
     sourceFileName,
     handoffStatus: activeHandoff?.status || null,
+    runSteps: sidebarAgentStageSteps({
+      state,
+      phase: activeHandoff?.phase || (submissionPending ? "preparing-delivery" : ""),
+    }),
     // An explicit allowlist of settled loads (see conversationLoadedForView):
     // the empty-state copy must never appear before the load settles, because
     // the session drops draft writes until it has published a conversation.
@@ -231,8 +229,6 @@ export function useAiConversation({
     onCopyTask,
     onDecision,
     onOpenAgentSettings,
-    onSelectModel,
-    onSelectReasoning,
   ]);
 
   return { open, visible, toggle, reveal, hide, sidebarProps };

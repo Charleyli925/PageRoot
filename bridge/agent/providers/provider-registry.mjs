@@ -15,6 +15,10 @@ import {
   TRUSTED_LOCAL_AGENT_POLICY_VERSION,
 } from "../../../shared/agent-delivery.mjs";
 import { createAgentCatalog, defaultAgentsRoot } from "../catalog/agent-catalog.mjs";
+import {
+  createAgentConfigurationSnapshot,
+  sameAgentConfiguration,
+} from "../agent-configuration-snapshot.mjs";
 
 function unsupportedDriver() {
   throw agentProviderError(
@@ -191,6 +195,15 @@ export function createProviderRegistry({ providers = [], runtimeRegistry } = {})
           : requestedSelection,
         provider,
       );
+      const installationDigest = provider.installationDigest(installation);
+      const configuration = createAgentConfigurationSnapshot({
+        providerId: provider.providerId,
+        runtimeId: provider.runtimeId,
+        installation,
+        installationDigest,
+        selection: resolvedSelection,
+        capabilityRevision: provider.capabilityRevision || evidence.capabilityRevision || evidence.version,
+      });
       return Object.freeze({
         ...(legacyDriver ? { driver: legacyDriver } : {}),
         purpose,
@@ -198,7 +211,8 @@ export function createProviderRegistry({ providers = [], runtimeRegistry } = {})
         runtimeId: provider.runtimeId,
         securityProfile: provider.securityProfile,
         installation,
-        installationDigest: provider.installationDigest(installation),
+        installationDigest,
+        configuration,
         capabilities: provider.capabilities,
         evidence,
         selection: resolvedSelection,
@@ -272,15 +286,34 @@ export function createProviderRegistry({ providers = [], runtimeRegistry } = {})
     preflight({ driver, environment, purpose = "execution" }) {
       return prepareForSelection(selectionFromDriver(driver), purpose, environment, driver);
     },
-    async verifyTicket(ticket, { purpose = ticket?.purpose } = {}) {
+    async verifyTicket(ticket, { purpose = ticket?.purpose, environment } = {}) {
       const { provider } = resolveTicket(ticket, purpose);
-      await provider.assertInstallationUnchanged(ticket.installation);
+      await provider.assertInstallationUnchanged(ticket.installation, { environment });
       if (provider.installationDigest(ticket.installation) !== ticket.installationDigest) {
         throw agentProviderError(
           "AGENT_PROVIDER_TICKET_INVALID",
           "Agent installation identity no longer matches its preflight ticket.",
           { status: 409 },
         );
+      }
+      if (ticket.configuration) {
+        const current = createAgentConfigurationSnapshot({
+          providerId: ticket.providerId,
+          runtimeId: ticket.runtimeId,
+          installation: ticket.installation,
+          installationDigest: ticket.installationDigest,
+          selection: ticket.selection,
+          capabilityRevision: provider.capabilityRevision
+            || ticket.evidence?.capabilityRevision
+            || ticket.evidence?.version,
+        });
+        if (!sameAgentConfiguration(ticket.configuration, current)) {
+          throw agentProviderError(
+            "AGENT_CONFIGURATION_CHANGED",
+            "Agent configuration no longer matches its preflight ticket.",
+            { status: 409 },
+          );
+        }
       }
       return ticket;
     },

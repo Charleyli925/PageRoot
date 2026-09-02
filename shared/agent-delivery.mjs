@@ -8,6 +8,7 @@ const REASONING_RESOLUTIONS = new Set([
   "provider-default",
   "unsupported",
 ]);
+const SHA256 = /^sha256:[a-f0-9]{64}$/u;
 
 function deliveryError(message) {
   const error = new Error(message);
@@ -60,6 +61,29 @@ function reasoningSelection(value) {
   return Object.freeze({ requested, applied, resolution });
 }
 
+function configurationSnapshot(value) {
+  const input = record(value, "Agent configuration snapshot");
+  const configurationDigest = String(input.configurationDigest || "");
+  if (!SHA256.test(configurationDigest)) {
+    throw deliveryError("Agent configuration digest is invalid.");
+  }
+  const nullable = (candidate) => candidate === null || candidate === undefined
+    ? null
+    : String(candidate).slice(0, 200);
+  return Object.freeze({
+    schemaVersion: String(input.schemaVersion || "1.0.0"),
+    providerId: boundedIdentity(input.providerId, "configuration providerId"),
+    runtimeId: boundedIdentity(input.runtimeId, "configuration runtimeId"),
+    vendorId: nullable(input.vendorId),
+    baseUrlOrigin: nullable(input.baseUrlOrigin),
+    modelId: nullable(input.modelId),
+    reasoning: String(input.reasoning || "auto").slice(0, 80),
+    capabilityRevision: String(input.capabilityRevision || "1").slice(0, 80),
+    credentialGeneration: Math.max(0, Number(input.credentialGeneration) || 0),
+    configurationDigest,
+  });
+}
+
 export function defaultManagedAgentDelivery() {
   return Object.freeze({
     mode: MANAGED_AGENT_MODE,
@@ -107,16 +131,31 @@ export function normalizeAgentDelivery(value, { allowLegacy = true } = {}) {
       throw deliveryError(`${label} must use the selected provider namespace.`);
     }
   }
+  const runtimeId = boundedIdentity(selection.runtimeId, "runtimeId");
+  const normalizedConfiguration = input.configuration
+    ? configurationSnapshot(input.configuration)
+    : null;
+  if (normalizedConfiguration && (
+    normalizedConfiguration.providerId !== providerId
+    || normalizedConfiguration.runtimeId !== runtimeId
+    || normalizedConfiguration.modelId !== (resolvedModelId || requestedModelId)
+    || normalizedConfiguration.reasoning !== (
+      selection.reasoning?.applied || selection.reasoning?.requested || "auto"
+    )
+  )) {
+    throw deliveryError("Agent configuration does not match its selection.");
+  }
   return Object.freeze({
     mode: MANAGED_AGENT_MODE,
     selection: Object.freeze({
       providerId,
-      runtimeId: boundedIdentity(selection.runtimeId, "runtimeId"),
+      runtimeId,
       requestedModelId,
       resolvedModelId,
       reasoning: reasoningSelection(selection.reasoning),
     }),
     trustPolicyVersion: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
+    ...(normalizedConfiguration ? { configuration: normalizedConfiguration } : {}),
   });
 }
 
@@ -160,6 +199,11 @@ export function legacyDriverForAgentDelivery(value) {
 // can actually dispatch now.
 export function normalizeNewAgentDelivery(value) {
   const delivery = normalizeAgentDelivery(value, { allowLegacy: false });
-  if (delivery.mode === MANAGED_AGENT_MODE) legacyDriverForAgentDelivery(delivery);
+  if (delivery.mode === MANAGED_AGENT_MODE) {
+    legacyDriverForAgentDelivery(delivery);
+    if (!delivery.configuration) {
+      throw deliveryError("New managed Agent Requests require a configuration snapshot.");
+    }
+  }
   return delivery;
 }

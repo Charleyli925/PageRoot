@@ -716,19 +716,22 @@ export default function Workbench() {
     ? frozenProvider.models.map((model) => ({
       id: String(model.id),
       displayName: String(model.displayName || model.id),
+      reasoningChoices: Array.isArray(model.reasoningChoices)
+        ? model.reasoningChoices.map((choice: { id?: unknown; label?: unknown }) => ({
+          id: String(choice.id),
+          label: String(choice.label || choice.id),
+        }))
+        : [],
     }))
     : [];
   const selectedModelId = frozenAgentSelection?.requestedModelId
     || frozenAgentSelection?.resolvedModelId
     || agentModels.find((model) => model.id)?.id
     || null;
-  const reasoningChoices = frozenProvider?.presentation?.supportsReasoning === true
-    && Array.isArray(frozenProvider.presentation.reasoningChoices)
-    ? frozenProvider.presentation.reasoningChoices.map((choice) => ({
-      id: String(choice.id),
-      label: String(choice.label || choice.id),
-    }))
-    : [];
+  const selectedAgentModel = agentModels.find((model) => model.id === selectedModelId)
+    || agentModels.find((model) => model.id)
+    || null;
+  const reasoningChoices = selectedAgentModel?.reasoningChoices || [];
   const selectedReasoningId = frozenAgentSelection?.reasoning?.requested
     || (reasoningChoices.length ? DEFAULT_OPENAI_COMPATIBLE_REASONING : null);
   const agentProviderChoices = Object.values(agentCatalogSnapshot?.providers ?? {}).map(
@@ -794,9 +797,11 @@ export default function Workbench() {
       ? "api-token"
       : null,
     agentPresentation: sidebarAgentPresentation,
-    models: agentModels,
+    models: selectedAgentModel
+      ? [selectedAgentModel]
+      : agentModels,
     selectedModelId,
-    reasoningChoices,
+    reasoningChoices: [],
     selectedReasoningId,
     // The header's mode comes from Request authority, not from a local guess.
     activeRun: runSnapshot.activeRun,
@@ -4835,8 +4840,10 @@ export default function Workbench() {
         outcome.code === "RUN_SUBMISSION_NATIVE_EDIT"
         || outcome.code === "RUN_SUBMISSION_FREEZE"
         || outcome.code === "RUN_SUBMISSION_CANVAS_STALE"
+        || outcome.code === "RUN_AGENT_ATTACHMENT_UNSUPPORTED"
       ) {
         editorRef.current?.showCommitBlocked(outcome.reason);
+        if (outcome.code === "RUN_AGENT_ATTACHMENT_UNSUPPORTED") revealAiConversation();
         return;
       }
       if (outcome.code === "RUN_SUBMISSION_LOCKED") {
@@ -4960,9 +4967,18 @@ export default function Workbench() {
   const connectAgentApiKey = useCallback(async (
     selection: AgentSelection,
     apiKey: string,
-    extras?: Readonly<{ vendorId?: string; baseUrl?: string }>,
+    extras?: Readonly<{ vendorId?: string; baseUrl?: string; modelId?: string }>,
   ) => (
     workspaceController?.connectAgentApiKey(selection, apiKey, extras) ?? null
+  ), [workspaceController]);
+  const disconnectAgentApiKey = useCallback(async (selection: AgentSelection) => (
+    workspaceController?.disconnectAgentApiKey(selection) ?? null
+  ), [workspaceController]);
+  const selectSettingsAgentModel = useCallback((modelId: string, expectedSelection: AgentSelection) => (
+    workspaceController?.selectAgentModel(modelId, expectedSelection) ?? null
+  ), [workspaceController]);
+  const selectSettingsAgentReasoning = useCallback((reasoning: string, expectedSelection: AgentSelection) => (
+    workspaceController?.selectAgentReasoning(reasoning, expectedSelection) ?? null
   ), [workspaceController]);
   useEffect(() => {
     deferredEditorReplayRef.current.generateRequest = () => {
@@ -5680,6 +5696,22 @@ export default function Workbench() {
   // Same authority the process view used, reached from the conversation so the
   // decision no longer requires a panel over the page.
   const handleAiDecision = useCallback((actionId: string) => {
+    if (actionId === "resend-agent") {
+      if (activeRun) void workspaceControllerRef.current?.runs.commands.startAgent({ run: activeRun });
+      return;
+    }
+    if (["reconnect-agent", "change-agent-model", "change-agent-provider", "switch-agent"].includes(actionId)) {
+      workspaceControllerRef.current?.runs.commands.dismiss();
+      setHandoffPreviewOpen(false);
+      setCanvasMode("edit");
+      editorRef.current?.unlockNow?.();
+      openAgentSettings();
+      return;
+    }
+    if (actionId === "copy-task") {
+      if (activeRun) void workspaceControllerRef.current?.runs.commands.copyHandoff({ run: activeRun });
+      return;
+    }
     if (actionId === "review") { void reviewReadyResult(); return; }
     if (actionId === "adopt") { void activateReadyResult(); return; }
     if (actionId === "adopt-ai" || actionId === "keep-external") {
@@ -5711,6 +5743,7 @@ export default function Workbench() {
   }, [
     activateReadyResult,
     activeRun,
+    openAgentSettings,
     requestActiveRunEnd,
     resolveAiConflict,
     reviewReadyResult,
@@ -6335,6 +6368,9 @@ export default function Workbench() {
           onCopyGuidance={copyAgentGuidance}
           onInstall={installAgent}
           onConnectApiKey={connectAgentApiKey}
+          onDisconnectApiKey={disconnectAgentApiKey}
+          onSelectAgentModel={selectSettingsAgentModel}
+          onSelectAgentReasoning={selectSettingsAgentReasoning}
         />
       ) : null}
       {!settingsPageActive && startPageActive && projectCatalogCapability ? (

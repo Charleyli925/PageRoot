@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { createAgentEventReducer } from "../bridge/agent/agent-events.mjs";
-import { publicVisibleTextUpdates } from "../bridge/agent/agent-session-projector.mjs";
+import {
+  executionPhaseForEvent,
+  publicVisibleTextUpdates,
+} from "../bridge/agent/agent-session-projector.mjs";
 import {
   AgentRuntimeCoordinator,
   TRUSTED_LOCAL_AGENT_POLICY_VERSION,
@@ -14,6 +17,24 @@ const IDENTITY = Object.freeze({
   requestId: "req_runtime_contract",
   attemptId: "attempt_001",
   sourcePath: "/tmp/runtime-contract.html",
+});
+const CONFIGURATION = Object.freeze({
+  schemaVersion: "1.0.0",
+  providerId: "synthetic-provider",
+  runtimeId: "synthetic-runtime",
+  vendorId: null,
+  baseUrlOrigin: null,
+  modelId: null,
+  reasoning: "auto",
+  capabilityRevision: "1.0.0",
+  credentialGeneration: 0,
+  configurationDigest: `sha256:${"c".repeat(64)}`,
+});
+
+test("unknown and late phases preserve the latest trusted monotonic stage", () => {
+  assert.equal(executionPhaseForEvent({ kind: "vendor-private-event" }, "generating-modification"), "generating-modification");
+  assert.equal(executionPhaseForEvent({ kind: "initialized" }, "validating-html"), "validating-html");
+  assert.equal(executionPhaseForEvent({ kind: "review-preparation-started" }, "validating-html"), "preparing-review");
 });
 
 function deferred() {
@@ -54,6 +75,7 @@ function registry({ run, verifyTicket, preflight } = {}) {
     capabilities,
     evidence: Object.freeze({ version: "1.0.0", modelCount: 1, models: [] }),
     selection,
+    configuration: CONFIGURATION,
   });
   return {
     resolveDriver(driver) {
@@ -107,7 +129,7 @@ function registry({ run, verifyTicket, preflight } = {}) {
   };
 }
 
-function executionAuthority() {
+function executionAuthority(configuration = CONFIGURATION) {
   return {
     run: {
       ...IDENTITY,
@@ -133,11 +155,45 @@ function executionAuthority() {
             },
           },
           trustPolicyVersion: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
+          configuration,
         },
       },
     },
   };
 }
+
+test("Frozen Requests cannot alter configuration audit fields behind a valid digest", async () => {
+  for (const [field, value] of [
+    ["vendorId", "tampered-vendor"],
+    ["baseUrlOrigin", "https://tampered.example"],
+    ["reasoning", "high"],
+    ["capabilityRevision", "tampered-revision"],
+    ["credentialGeneration", 99],
+  ]) {
+    const tampered = Object.freeze({ ...CONFIGURATION, [field]: value });
+    const coordinator = new AgentRuntimeCoordinator({
+      providerRegistry: registry(),
+      resolveTask: async () => executionAuthority(tampered),
+      leaseStore: {
+        acquire: async ({ ownerToken }) => ({ key: "lease", path: "memory", ownerToken }),
+        release: async () => true,
+      },
+    });
+    const ticket = await ready(coordinator);
+    await assert.rejects(
+      coordinator.submit({
+        ...IDENTITY,
+        driver: "synthetic-driver",
+        trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
+        preflightId: ticket.preflightId,
+        configurationDigest: ticket.configuration.configurationDigest,
+      }),
+      (error) => error?.code === "AGENT_DELIVERY_NOT_AUTHORIZED",
+      field,
+    );
+    await coordinator.shutdown();
+  }
+});
 
 async function ready(coordinator, purpose = "execution") {
   return coordinator.preflight({
@@ -191,6 +247,108 @@ test("preflight rejects removed purposes and execution tickets are one-use, TTL-
   await coordinator.shutdown();
 });
 
+test("HTTP launch cannot mix an old ticket with a configuration committed during final verification", async () => {
+  const pagerootSelection = Object.freeze({
+    providerId: "pageroot",
+    runtimeId: "http",
+    requestedModelId: "pageroot:deepseek-v4-pro",
+    resolvedModelId: "pageroot:deepseek-v4-pro",
+    reasoning: Object.freeze({ requested: null, applied: null, resolution: "provider-default" }),
+  });
+  const configurationFor = (environment) => {
+    const generation = Number(environment?.PAGEROOT_API_CREDENTIAL_GENERATION || 0);
+    return Object.freeze({
+      schemaVersion: "1.0.0",
+      providerId: "pageroot",
+      runtimeId: "http",
+      vendorId: String(environment?.PAGEROOT_API_VENDOR || "deepseek"),
+      baseUrlOrigin: "https://api.deepseek.com",
+      modelId: pagerootSelection.resolvedModelId,
+      reasoning: "auto",
+      capabilityRevision: "test-revision",
+      credentialGeneration: generation,
+      configurationDigest: `sha256:${String(Math.max(1, generation)).slice(-1).repeat(64)}`,
+    });
+  };
+  let coordinator;
+  let verifyCount = 0;
+  let runtimeCalls = 0;
+  let frozenConfiguration = null;
+  const pagerootRegistry = {
+    resolveSelection: () => ({}),
+    assertCapabilityForSelection: () => true,
+    preflightForSelection: async (_selection, purpose, { environment }) => ({
+      purpose,
+      providerId: "pageroot",
+      runtimeId: "http",
+      securityProfile: "client-mediated",
+      installation: Object.freeze({ generation: Number(environment.PAGEROOT_API_CREDENTIAL_GENERATION) }),
+      installationDigest: `sha256:${"a".repeat(64)}`,
+      configuration: configurationFor(environment),
+      capabilities: Object.freeze({ availability: true, preflight: true, execution: true }),
+      evidence: Object.freeze({ version: "1.0.0", modelCount: 1, models: [] }),
+      selection: pagerootSelection,
+    }),
+    verifyTicket: async (ticket) => {
+      verifyCount += 1;
+      if (verifyCount === 2) {
+        await coordinator.updateAgentConfiguration("pageroot", {
+          apiKey: "sk-new",
+          vendorId: "deepseek",
+          selection: pagerootSelection,
+        });
+      }
+      return ticket;
+    },
+    loadExecutionPolicy: async (_ticket, input) => ({
+      ...input,
+      manifestPath: "/tmp/manifest.json",
+      finalizer: { command: "/bin/false", args: [], cwd: "/tmp", env: {} },
+    }),
+    run: async () => { runtimeCalls += 1; },
+    classifyRunFailure: (_ticket, cause) => cause?.code || "AGENT_RUN_FAILED",
+    failureMessage: (_ticket, code) => `failure:${code}`,
+    failureMessageForSelection: (_selection, code) => `failure:${code}`,
+    preflightFailureMessageForSelection: (_selection, code) => `preflight:${code}`,
+  };
+  coordinator = new AgentRuntimeCoordinator({
+    providerRegistry: pagerootRegistry,
+    resolveTask: async () => ({
+      ...executionAuthority(),
+      request: { request: { agentDelivery: {
+        mode: "managed-agent",
+        selection: pagerootSelection,
+        configuration: frozenConfiguration,
+        trustPolicyVersion: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
+      } } },
+    }),
+    leaseStore: {
+      acquire: async ({ ownerToken }) => ({ key: "lease", path: "memory", ownerToken }),
+      release: async () => true,
+    },
+  });
+  const connected = await coordinator.updateAgentConfiguration("pageroot", {
+    apiKey: "sk-old",
+    vendorId: "deepseek",
+    selection: pagerootSelection,
+  });
+  const ticket = await coordinator.preflight({
+    selection: connected.selection,
+    trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
+  });
+  frozenConfiguration = ticket.configuration;
+
+  await assert.rejects(() => coordinator.submit({
+    ...IDENTITY,
+    selection: ticket.selection,
+    trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
+    preflightId: ticket.preflightId,
+    configurationDigest: ticket.configuration.configurationDigest,
+  }), (error) => error?.code === "AGENT_CONFIGURATION_CHANGED");
+  assert.equal(runtimeCalls, 0);
+  await coordinator.shutdown();
+});
+
 test("release false keeps the lease fence and blocks shutdown", async () => {
   const coordinator = new AgentRuntimeCoordinator({
     providerRegistry: registry(),
@@ -207,6 +365,7 @@ test("release false keeps the lease fence and blocks shutdown", async () => {
     driver: "synthetic-driver",
     trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
     preflightId: ticket.preflightId,
+    configurationDigest: ticket.configuration.configurationDigest,
   });
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(coordinator.executionStatus(IDENTITY).errorCode, "AGENT_RESTART_RECOVERY_REQUIRED");
@@ -240,6 +399,7 @@ test("durable cancellation is never written after cleanup or lease release fails
     driver: "synthetic-driver",
     trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
     preflightId: ticket.preflightId,
+    configurationDigest: ticket.configuration.configurationDigest,
   });
   await assert.rejects(
     coordinator.cancelDurableExecution({
@@ -348,6 +508,7 @@ test("execution status projects only public Agent text with frozen provider iden
     driver: "synthetic-driver",
     trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
     preflightId: ticket.preflightId,
+    configurationDigest: ticket.configuration.configurationDigest,
   });
   await new Promise((resolve) => setImmediate(resolve));
   const running = coordinator.executionStatus(IDENTITY);
@@ -397,6 +558,7 @@ test("cancellation keeps late Agent narration out of the public session", async 
     driver: "synthetic-driver",
     trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
     preflightId: ticket.preflightId,
+    configurationDigest: ticket.configuration.configurationDigest,
   });
   await new Promise((resolve) => setImmediate(resolve));
   await coordinator.cancelExecution(IDENTITY);

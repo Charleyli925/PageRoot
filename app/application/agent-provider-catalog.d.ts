@@ -41,8 +41,15 @@ export type AgentProviderEntry = AgentProviderDescriptor & Readonly<{
     id: string;
     displayName: string;
     isDefault?: boolean;
+    providerModelId?: string | null;
+    reasoningChoices?: readonly Readonly<{ id: string; label: string }>[];
   }>[];
   credentialConfigured?: boolean;
+  connection?: Readonly<{
+    vendorId: string;
+    vendorDisplayName: string;
+    baseUrl: string;
+  }> | null;
 }>;
 export type AgentPreflight = Readonly<Record<string, unknown> & {
   status: string;
@@ -82,7 +89,7 @@ export function agentProviderCardPresentation(provider: AgentProviderDescriptor 
   }>;
   supportsApiKey?: boolean;
   credentialKind?: "api-token" | null;
-  vendors?: readonly Readonly<{ id: string; label: string; needsBaseUrl?: boolean }>[];
+  vendors?: readonly Readonly<{ id: string; label: string; needsBaseUrl?: boolean; compatibilityMode?: boolean }>[];
   supportsReasoning?: boolean;
   reasoningChoices?: readonly Readonly<{ id: string; label: string }>[];
 }>;
@@ -90,8 +97,15 @@ export function agentProviderCardsFromCatalog(snapshot: AgentCatalogSnapshot | n
   selection: AgentSelection;
   presentation: ReturnType<typeof agentProviderCardPresentation>;
   availability: AgentProviderAvailabilitySnapshot;
-  models: readonly Readonly<{ id: string; displayName: string; isDefault?: boolean }>[];
+  models: readonly Readonly<{
+    id: string;
+    displayName: string;
+    isDefault?: boolean;
+    providerModelId?: string | null;
+    reasoningChoices?: readonly Readonly<{ id: string; label: string }>[];
+  }>[];
   credentialConfigured: boolean;
+  connection: AgentProviderEntry["connection"];
 }>[];
 export class AgentCatalogState {
   constructor(options?: {
@@ -105,14 +119,15 @@ export class AgentCatalogState {
   subscribe(listener: (snapshot: AgentCatalogSnapshot) => void): () => void;
   dispose(): void;
   select(selection: AgentSelection): AgentSelection;
-  selectModel(modelId: string | null): AgentSelection | null;
-  selectReasoning(reasoning: string | null): AgentSelection | null;
+  selectModel(modelId: string | null, expectedSelection?: AgentSelection | null): AgentSelection | null;
+  selectReasoning(reasoning: string | null, expectedSelection?: AgentSelection | null): AgentSelection | null;
   noteRunFailure(selection: AgentSelection | null | undefined, code: unknown): AgentProviderAvailabilitySnapshot | null;
   connectWithApiKey(
     selection: AgentSelection,
     apiKey: string,
-    extras?: Readonly<{ vendorId?: string; baseUrl?: string }>,
-  ): Promise<AgentPreflight>;
+    extras?: Readonly<{ vendorId?: string; baseUrl?: string; modelId?: string }>,
+  ): Promise<unknown>;
+  disconnectApiKey(selection?: AgentSelection | null): Promise<unknown>;
   freezeSelected(): AgentSelection | null;
   freezeProviderSelection(providerId: string): AgentSelection | null;
   provider(selection?: AgentSelection | null): AgentProviderEntry | null;

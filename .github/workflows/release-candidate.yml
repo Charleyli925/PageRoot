@@ -68,13 +68,25 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           PAGEROOT_POSTHOG_TOKEN: ${{ secrets.PAGEROOT_POSTHOG_TOKEN }}
+          PAGEROOT_SMOKE_DEEPSEEK_API_KEY: ${{ secrets.PAGEROOT_SMOKE_DEEPSEEK_API_KEY }}
+          PAGEROOT_SMOKE_ZHIPU_API_KEY: ${{ secrets.PAGEROOT_SMOKE_ZHIPU_API_KEY }}
+          PAGEROOT_SMOKE_DASHSCOPE_API_KEY: ${{ secrets.PAGEROOT_SMOKE_DASHSCOPE_API_KEY }}
+          PAGEROOT_SMOKE_OPENAI_API_KEY: ${{ secrets.PAGEROOT_SMOKE_OPENAI_API_KEY }}
         run: |
-          for name in CSC_LINK CSC_KEY_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD PAGEROOT_POSTHOG_TOKEN; do
+          for name in CSC_LINK CSC_KEY_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD PAGEROOT_POSTHOG_TOKEN PAGEROOT_SMOKE_DEEPSEEK_API_KEY PAGEROOT_SMOKE_ZHIPU_API_KEY PAGEROOT_SMOKE_DASHSCOPE_API_KEY PAGEROOT_SMOKE_OPENAI_API_KEY; do
             test -n "${!name}" || {
               echo "Required release credential is not configured: $name" >&2
               exit 1
             }
           done
+      - name: Verify fixed Agent models through the production chain
+        timeout-minutes: 45
+        env:
+          PAGEROOT_SMOKE_DEEPSEEK_API_KEY: ${{ secrets.PAGEROOT_SMOKE_DEEPSEEK_API_KEY }}
+          PAGEROOT_SMOKE_ZHIPU_API_KEY: ${{ secrets.PAGEROOT_SMOKE_ZHIPU_API_KEY }}
+          PAGEROOT_SMOKE_DASHSCOPE_API_KEY: ${{ secrets.PAGEROOT_SMOKE_DASHSCOPE_API_KEY }}
+          PAGEROOT_SMOKE_OPENAI_API_KEY: ${{ secrets.PAGEROOT_SMOKE_OPENAI_API_KEY }}
+        run: npm run smoke:agent-vendors:real
       - name: Prove hosted Electron scheduling before product checks
         timeout-minutes: 5
         run: >-

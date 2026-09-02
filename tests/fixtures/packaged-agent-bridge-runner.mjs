@@ -210,13 +210,8 @@ async function run() {
       changeEvents: [],
       agentDelivery: {
         mode: "managed-agent",
-        selection: {
-          providerId: "qoder",
-          runtimeId: "acp",
-          requestedModelId: null,
-          resolvedModelId: null,
-          reasoning: { requested: null, applied: null, resolution: "provider-default" },
-        },
+        selection: preflight.body.selection,
+        configuration: preflight.body.configuration,
         trustPolicyVersion,
       },
     });
@@ -230,6 +225,7 @@ async function run() {
       driver: "qoder-acp",
       trustPolicyAccepted: trustPolicyVersion,
       preflightId: preflight.body.preflightId,
+      configurationDigest: preflight.body.configuration.configurationDigest,
     });
     assert.equal(started.response.status, 202, JSON.stringify(started.body));
 

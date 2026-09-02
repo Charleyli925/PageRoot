@@ -19,7 +19,6 @@ import {
   qoderAcpEnvironment,
   runVerifiedQoderJavaScript,
 } from "../../qoder-acp-client.mjs";
-import { isAgentCapacityFailureText } from "../agent-errors.mjs";
 import {
   AgentProviderError,
   agentProviderError,
@@ -107,6 +106,8 @@ export function qoderFailure(code) {
     case "QODER_ACCOUNT_CAPACITY_UNAVAILABLE":
     case "QODER_CAPACITY_UNAVAILABLE":
       return "Qoder 账号当前没有可用模型容量。本轮 Request 已保留，可稍后重试或复制给其他 Agent。";
+    case "QODER_MODEL_CATALOG_EMPTY":
+      return "Qoder 当前没有返回可用模型。Request 与当前 HTML 均已保留，可重试或改用复制任务。";
     case "QODER_COMMAND_NOT_FOUND":
       return "没有找到独立安装的 Qoder CLI。请先安装 Qoder CLI，或改用复制任务。";
     case "QODER_COMMAND_UNTRUSTED":
@@ -149,6 +150,8 @@ export function qoderPreflightFailure(code) {
     case "QODER_ACCOUNT_CAPACITY_UNAVAILABLE":
     case "QODER_CAPACITY_UNAVAILABLE":
       return "Qoder 账号当前没有可用模型容量。PageRoot 尚未创建本轮 Request；当前 HTML 和评论保持不变，可稍后重试或改用复制任务。";
+    case "QODER_MODEL_CATALOG_EMPTY":
+      return "Qoder 当前没有返回可用模型。PageRoot 尚未创建本轮 Request；当前 HTML 和评论保持不变，可重试或改用复制任务。";
     case "QODER_PREFLIGHT_TIMEOUT":
       return "Qoder CLI 预检超时。PageRoot 尚未创建本轮 Request；当前 HTML 和评论保持不变，可重试或改用复制任务。";
     default:
@@ -175,9 +178,6 @@ export function classifyQoderPreflightFailure(cause) {
   if (/not logged in|sign in|login required|unauthenticated/iu.test(combined)) {
     return "QODER_AUTH_REQUIRED";
   }
-  if (isAgentCapacityFailureText(combined)) {
-    return "QODER_CAPACITY_UNAVAILABLE";
-  }
   if (cause?.killed || cause?.code === "ETIMEDOUT" || cause?.signal === "SIGTERM") {
     return "QODER_PREFLIGHT_TIMEOUT";
   }
@@ -196,9 +196,6 @@ export function classifyQoderRunFailure(cause) {
   const combined = `${cause?.message || ""}\n${cause?.qoderStderr || ""}`;
   if (/not logged in|sign in|login required|unauthenticated/iu.test(combined)) {
     return "QODER_AUTH_REQUIRED";
-  }
-  if (isAgentCapacityFailureText(combined)) {
-    return "QODER_ACCOUNT_CAPACITY_UNAVAILABLE";
   }
   return mapped || "QODER_ACP_RUN_FAILED";
 }
@@ -515,7 +512,7 @@ export async function preflightQoder(command, environment) {
       .split(/\r?\n/u)
       .map((line) => cleanProviderText(line, 160))
       .filter((line) => line && line.toUpperCase() !== "MODEL");
-    if (models.length === 0) fail("QODER_CAPACITY_UNAVAILABLE", "Qoder 当前没有返回可用模型。");
+    if (models.length === 0) fail("QODER_MODEL_CATALOG_EMPTY", "Qoder 当前没有返回可用模型。");
     return Object.freeze({
       version: reportedVersion,
       modelCount: models.length,

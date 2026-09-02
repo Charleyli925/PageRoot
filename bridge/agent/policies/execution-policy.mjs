@@ -220,6 +220,7 @@ async function verifyFrozenEntry(requestRoot, manifest, relativePath) {
     path: file.path,
     relativePath,
     role: String(entry.role || "unknown"),
+    mediaType: String(entry.mediaType || "application/octet-stream"),
     byteLength: bytes.byteLength,
     sha256: entry.sha256,
   });

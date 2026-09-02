@@ -163,6 +163,15 @@ test("release commands use one automated artifact lane with full tests and packa
   assert.doesNotMatch(verifier, /scope-validator\.mjs/);
   assert.match(verifier, /packaged Bridge dependency smoke/);
   assert.match(verifier, /packaged Qoder ACP closed-loop smoke/);
+  const packagedAgentRunner = await readFile(
+    new URL("./fixtures/packaged-agent-bridge-runner.mjs", import.meta.url),
+    "utf8",
+  );
+  assert.match(packagedAgentRunner, /configuration: preflight\.body\.configuration/u);
+  assert.match(
+    packagedAgentRunner,
+    /configurationDigest: preflight\.body\.configuration\.configurationDigest/u,
+  );
 
   const layout = expectedArtifactLayout({ productRoot, packageJson, arch: "arm64" });
   assert.match(layout.appPath, /release\/mac-arm64\/PageRoot\.app$/);

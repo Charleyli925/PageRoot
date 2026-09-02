@@ -4,10 +4,12 @@ import test from "node:test";
 import {
   FORBIDDEN_MESSAGE_KEYS,
   sidebarAgentLine,
+  sidebarAgentStageSteps,
   sidebarReasoningLine,
   conversationLoadedForView,
   conversationReadyForDocument,
   sidebarActionBar,
+  sidebarFailureRetryable,
   sidebarActorInitial,
   sidebarMessageStream,
   sidebarModePresentation,
@@ -383,14 +385,15 @@ test("the Composer names thinking depth only when the Agent actually offers it",
 
   const defaults = sidebarReasoningLine({
     choices: [
+      { id: "auto", label: "自动" },
       { id: "none", label: "关闭" },
       { id: "low", label: "低" },
       { id: "high", label: "高" },
       { id: "max", label: "最深" },
     ],
   });
-  assert.equal(defaults.text, "思考 · 高");
-  assert.equal(defaults.selectedId, "high");
+  assert.equal(defaults.text, "思考 · 自动");
+  assert.equal(defaults.selectedId, "auto");
   assert.equal(defaults.choosable, true);
 
   const explicit = sidebarReasoningLine({
@@ -403,6 +406,25 @@ test("the Composer names thinking depth only when the Agent actually offers it",
   });
   assert.equal(explicit.text, "思考 · 关闭");
   assert.equal(explicit.selectedId, "none");
+});
+
+test("managed Agent progress exposes the four public execution stages", () => {
+  const generating = sidebarAgentStageSteps({
+    state: "processing",
+    phase: "generating-modification",
+  });
+  assert.deepEqual(generating.map((step) => [step.label, step.state]), [
+    ["正在发送任务", "completed"],
+    ["正在生成修改", "current"],
+    ["正在校验 HTML", "pending"],
+    ["正在准备审阅", "pending"],
+  ]);
+  const ready = sidebarAgentStageSteps({ state: "ready-to-open", phase: "completed" });
+  assert.equal(ready.every((step) => step.state === "completed"), true);
+  const cancelling = sidebarAgentStageSteps({ state: "processing", phase: "cancelling" });
+  assert.deepEqual(cancelling.map((step) => step.state), [
+    "completed", "current", "pending", "pending",
+  ]);
 });
 
 test("the header's mode is derived from Request authority, not guessed", () => {
@@ -467,7 +489,50 @@ test("conflict and failed results keep their recovery decisions in the conversat
     failureMessage: "Candidate validation failed",
   });
   assert.equal(failure.title, "Candidate validation failed");
-  assert.equal(failure.actions[0].id, "return-editing");
+  assert.deepEqual(failure.actions.map((action) => action.id), [
+    "resend-agent", "switch-agent", "copy-task", "return-editing",
+  ]);
+
+  const nonRetryable = sidebarActionBar({
+    state: "run-error",
+    runStatus: "error",
+    failureCode: "AGENT_RESTART_RECOVERY_REQUIRED",
+    failureRetryable: false,
+  });
+  assert.deepEqual(nonRetryable.actions.map((action) => action.id), [
+    "switch-agent", "copy-task", "return-editing",
+  ]);
+});
+
+test("a pending submission error without a handoff cannot offer a dead resend", () => {
+  assert.equal(sidebarFailureRetryable({ requestId: "pending" }, null), false);
+  assert.equal(
+    sidebarFailureRetryable(
+      { requestId: "request_001", attemptId: "attempt_001" },
+      { requestId: "request_001", attemptId: "attempt_001", retryable: true },
+    ),
+    true,
+  );
+  assert.equal(
+    sidebarFailureRetryable(
+      { requestId: "request_001", attemptId: "attempt_001" },
+      { requestId: "request_001", attemptId: "attempt_001", retryable: false },
+    ),
+    false,
+  );
+  assert.equal(
+    sidebarFailureRetryable(
+      { requestId: "pending", attemptId: "attempt_002" },
+      { requestId: "request_old", attemptId: "attempt_001", retryable: true },
+    ),
+    false,
+  );
+  const actionBar = sidebarActionBar({
+    state: "run-error",
+    runStatus: "error",
+    failureRetryable: sidebarFailureRetryable({ requestId: "pending" }, null),
+  });
+  assert.equal(actionBar.actions.some((action) => action.id === "resend-agent"), false);
 });
 
 test("the Composer sends only the page-comment modification", () => {

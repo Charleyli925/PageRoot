@@ -1708,16 +1708,20 @@ export class WorkspaceController {
     return this.#requireRunWorkflow().selectAgent(selection);
   }
 
-  selectAgentModel(modelId) {
-    return this.#requireRunWorkflow().selectAgentModel(modelId);
+  selectAgentModel(modelId, expectedSelection) {
+    return this.#requireRunWorkflow().selectAgentModel(modelId, expectedSelection);
   }
 
-  selectAgentReasoning(reasoning) {
-    return this.#requireRunWorkflow().selectAgentReasoning(reasoning);
+  selectAgentReasoning(reasoning, expectedSelection) {
+    return this.#requireRunWorkflow().selectAgentReasoning(reasoning, expectedSelection);
   }
 
   connectAgentApiKey(selection, apiKey, extras) {
     return this.#requireRunWorkflow().connectAgentApiKey(selection, apiKey, extras);
+  }
+
+  disconnectAgentApiKey(selection) {
+    return this.#requireRunWorkflow().disconnectAgentApiKey(selection);
   }
 
   refreshQoderAvailability() {

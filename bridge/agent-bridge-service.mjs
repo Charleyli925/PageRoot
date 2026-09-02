@@ -81,6 +81,10 @@ export class AgentBridgeService {
     return this.#coordinator.setSessionCredential(providerId, apiKey, extras);
   }
 
+  updateAgentConfiguration(providerId, candidate) {
+    return this.#coordinator.updateAgentConfiguration(providerId, candidate);
+  }
+
   clearSessionCredential(providerId) {
     return this.#coordinator.clearSessionCredential(providerId);
   }

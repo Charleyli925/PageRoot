@@ -1,0 +1,33 @@
+name: Agent Vendor Smoke
+
+on:
+  schedule:
+    - cron: "17 18 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: agent-vendor-smoke
+  cancel-in-progress: true
+
+jobs:
+  formal-chain:
+    name: formal-agent-chain
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22.13.0
+          cache: npm
+      - run: npm ci
+      - name: Run every fixed model through the production Agent chain
+        env:
+          PAGEROOT_SMOKE_DEEPSEEK_API_KEY: ${{ secrets.PAGEROOT_SMOKE_DEEPSEEK_API_KEY }}
+          PAGEROOT_SMOKE_ZHIPU_API_KEY: ${{ secrets.PAGEROOT_SMOKE_ZHIPU_API_KEY }}
+          PAGEROOT_SMOKE_DASHSCOPE_API_KEY: ${{ secrets.PAGEROOT_SMOKE_DASHSCOPE_API_KEY }}
+          PAGEROOT_SMOKE_OPENAI_API_KEY: ${{ secrets.PAGEROOT_SMOKE_OPENAI_API_KEY }}
+        run: npm run smoke:agent-vendors:real

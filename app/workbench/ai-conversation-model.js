@@ -136,6 +136,39 @@ const RUN_PROGRESS_STATES = Object.freeze([
   "review-view",
 ]);
 
+const AGENT_STAGE_DEFINITIONS = Object.freeze([
+  Object.freeze({ key: "send", label: "正在发送任务" }),
+  Object.freeze({ key: "generate", label: "正在生成修改" }),
+  Object.freeze({ key: "validate", label: "正在校验 HTML" }),
+  Object.freeze({ key: "review", label: "正在准备审阅" }),
+]);
+
+export function sidebarAgentStageSteps({ state, phase } = {}) {
+  const currentState = String(state || "");
+  if (!RUN_PROGRESS_STATES.includes(currentState)) return Object.freeze([]);
+  if (["ready-to-open", "review-view"].includes(currentState)) {
+    return Object.freeze(AGENT_STAGE_DEFINITIONS.map((step) => Object.freeze({
+      ...step,
+      state: "completed",
+    })));
+  }
+  const value = String(phase || "");
+  const currentIndex = ["preparing-delivery", "launching", "starting", "starting-session", "sending-task"]
+    .includes(value) || currentState === "preparing-delivery"
+    ? 0
+    : ["request-sent", "generation-started", "generating-modification", "reading-task", "running", "cancelling", "stopping"]
+      .includes(value)
+      ? 1
+      : ["html-validation-completed", "validating-html", "awaiting-validation"]
+        .includes(value)
+        ? 2
+        : 3;
+  return Object.freeze(AGENT_STAGE_DEFINITIONS.map((step, index) => Object.freeze({
+    ...step,
+    state: index < currentIndex ? "completed" : index === currentIndex ? "current" : "pending",
+  })));
+}
+
 export function sidebarRunProgress({
   state,
   steps = [],
@@ -315,6 +348,16 @@ export function conversationLoadedForView(conversation) {
   return conversation.status === "idle" && conversation.context != null;
 }
 
+export function sidebarFailureRetryable(activeRun, activeHandoff) {
+  if (
+    activeRun
+    && activeHandoff
+    && activeHandoff.requestId === activeRun.requestId
+    && activeHandoff.attemptId === activeRun.attemptId
+  ) return activeHandoff.retryable === true;
+  return activeRun?.requestId !== "pending";
+}
+
 /**
  * The action bar. Derived entirely from current product state — never from a
  * message — so a decision stays visible at any scroll position and history
@@ -328,6 +371,8 @@ export function sidebarActionBar({
   candidateVersionLabel = null,
   candidateStatus = null,
   failureMessage = null,
+  failureCode = null,
+  failureRetryable = true,
   deliveryMode = "managed-agent",
   handoffStatus = null,
 } = {}) {
@@ -343,11 +388,27 @@ export function sidebarActionBar({
     };
   }
   if (state === "run-error") {
+    const code = String(failureCode || "");
+    const recovery = code === "AGENT_AUTH_REQUIRED" || code === "AGENT_CONFIGURATION_CHANGED"
+      ? { id: "reconnect-agent", label: "重新连接", tone: "quiet" }
+      : ["AGENT_MODEL_ACCESS_DENIED", "AGENT_SELECTION_UNSUPPORTED", "AGENT_OUTPUT_TRUNCATED", "AGENT_PROMPT_TOO_LARGE"].includes(code)
+        ? { id: "change-agent-model", label: "更换模型", tone: "quiet" }
+        : ["AGENT_BALANCE_INSUFFICIENT", "AGENT_PLAN_LIMIT", "AGENT_ENDPOINT_REGION_MISMATCH"].includes(code)
+          ? { id: "change-agent-provider", label: "更换厂商", tone: "quiet" }
+          : null;
     return {
       kind: "blocked",
       title: failureMessage || "AI 输出没有通过安全校验",
       detail: "当前页面和评论仍保持原样。",
-      actions: [{ id: "return-editing", label: "返回编辑", tone: "quiet" }],
+      actions: [
+        ...(failureRetryable === false
+          ? []
+          : [{ id: "resend-agent", label: "重新发送", tone: "primary" }]),
+        ...(recovery ? [recovery] : []),
+        { id: "switch-agent", label: "切换 Agent", tone: "quiet" },
+        { id: "copy-task", label: "复制任务", tone: "quiet" },
+        { id: "return-editing", label: "返回编辑", tone: "quiet" },
+      ],
     };
   }
   if (state === "ready-to-open" || state === "review-view") {
@@ -753,7 +814,7 @@ export function sidebarAgentLine({
 export function sidebarReasoningLine({
   choices = [],
   selectedId = null,
-  defaultId = "high",
+  defaultId = "auto",
 } = {}) {
   if (!Array.isArray(choices) || choices.length === 0) return null;
   const selected = choices.find((choice) => choice.id === selectedId)

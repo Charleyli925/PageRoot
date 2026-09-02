@@ -363,6 +363,9 @@ const runtimeConfig = Object.freeze({
   bridgePort,
   bridgeAuthToken,
   appVersion,
+  betaAgentModelsEnabled: typeof process !== "undefined"
+    && (process.env?.PAGEROOT_ENABLE_BETA_AGENT_MODELS === "1"
+      || process.env?.PAGEROOT_E2E === "1"),
   getBridgeConnection: () => bridgeConnection,
   onBridgeReady: (listener) => {
     if (typeof listener !== "function") throw new TypeError("listener must be a function.");

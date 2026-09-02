@@ -237,6 +237,7 @@ function deriveRunProgressCopy({
       "writing-candidate": [`${agentName} 正在修改页面…`, "当前 HTML 不会被直接覆盖"],
       finalizing: [`${agentName} 正在整理修改结果…`, "PageRoot 将独立检查返回的页面"],
       "awaiting-validation": ["Agent 已返回，正在校验并保存…", "当前 HTML 不会被直接覆盖"],
+      "preparing-review": ["PageRoot 正在准备审阅…", "检查通过后才会进入审阅"],
       cancelling: [`正在停止 ${agentName}…`, "停止完成前本轮仍保持锁定"],
     }[handoff.phase] || [`${agentName} 正在处理…`, "PageRoot 正在接收受管 Agent 进度"];
     return progressPresentationCopy(

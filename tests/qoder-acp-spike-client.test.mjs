@@ -863,7 +863,7 @@ test("ACP execution projects public Agent messages and marks a bounded text tail
   const fixture = await createFixture(t);
   const observed = {
     visibleTextChunks: [
-      "先读取冻结任务。\u0000",
+      "先读取 capacity、quota 和 model unavailable 说明。\u0000",
       "再写入 Candidate。",
       "x".repeat((64 * 1024) + 32),
     ],
@@ -878,13 +878,13 @@ test("ACP execution projects public Agent messages and marks a bounded text tail
     turnTimeoutMs: 4_000,
   });
 
-  assert.equal(result.visibleText.startsWith("先读取冻结任务。再写入 Candidate。"), true);
+  assert.equal(result.visibleText.startsWith("先读取 capacity、quota 和 model unavailable 说明。再写入 Candidate。"), true);
   assert.equal(result.visibleText.includes("\u0000"), false);
   assert.equal(Buffer.byteLength(result.visibleText, "utf8"), 64 * 1024);
   assert.equal(result.visibleTextTruncated, true);
   assert.deepEqual(
     events.filter((event) => event.kind === "visible-text").map((event) => event.text).slice(0, 2),
-    ["先读取冻结任务。", "再写入 Candidate。"],
+    ["先读取 capacity、quota 和 model unavailable 说明。", "再写入 Candidate。"],
   );
   assert.equal(events.filter((event) => event.kind === "visible-text-truncated").length, 1);
 });
