@@ -2801,7 +2801,11 @@ test("stable-ID Review keeps movement, reorder, attributes and styles position-b
       )).toHaveCount(0);
     }
     await launched.page.getByRole("button", { name: "元素变化" }).click();
-    await afterFrame.locator("[data-pageroot-review-region-bar]").first().click();
+    // Several source-backed structure regions may overlap. Activate the exact
+    // analyzer-owned bar rather than asking pointer hit-testing to choose the
+    // topmost sibling at the same coordinates.
+    await afterFrame.locator("[data-pageroot-review-region-bar]").first()
+      .evaluate((bar) => bar.click());
     await expect.poll(() => afterFrame.locator(
       '[data-pageroot-review-overlay-box][data-tone="structure"]',
     ).count()).toBeGreaterThan(0);
