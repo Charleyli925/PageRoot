@@ -930,7 +930,7 @@ test("runtime tables, SVG and Canvas keep visual comments source-anchored", {
       .toHaveAttribute("placeholder", "输入对整个页面的修改要求…");
     await globalComposer.getByRole("button", { name: "关闭评论编辑器" }).click();
 
-    await reopenedFrame.locator("#runtime-page-table").click();
+    await reopenedFrame.locator("#runtime-page-table caption").click();
     const reopenedToolbar = page.getByRole("toolbar", { name: /评论/u });
     await reopenedToolbar.getByRole("button", { name: /给页面级数据表留评论/u }).click();
     const recoveredComposer = page.getByRole("region", { name: "添加评论" });
