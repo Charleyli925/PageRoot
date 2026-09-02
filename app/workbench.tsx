@@ -5475,12 +5475,16 @@ export default function Workbench() {
         const current = pendingSidebarHistoryRef.current;
         if (!current || current.versionId !== pending.versionId) return;
         const opened = await viewHistoryVersion(sidebarSummaryVersion(current));
-        if (opened !== null) {
+        if (opened === true) {
           if (pendingSidebarHistoryRef.current?.versionId === current.versionId) {
             pendingSidebarHistoryRef.current = null;
           }
           return;
         }
+        // Project activation can invalidate the first history request after it
+        // was admitted. Preserve the explicit sidebar intent and retry against
+        // the newly applied project context instead of settling on its Working
+        // Copy. The existing deadline keeps deterministic failures bounded.
         await retryDelay();
       }
     };

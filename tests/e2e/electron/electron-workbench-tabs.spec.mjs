@@ -636,6 +636,13 @@ test("Electron sidebar opens an imported historical version in the existing proj
       expect(promoted.promoted).toBe(true);
       target = promoted.target;
     }
+    const importedSummary = await repository.listRegisteredProjectVersionSummaries({
+      projectId: target.projectId,
+    });
+    const historicalVersion = importedSummary.versions.find((version) => (
+      version.ordinal === 1 && !version.isActiveWorkingCopy
+    ));
+    expect(historicalVersion).toBeTruthy();
 
     await launched.page.getByRole("button", { name: "展开左侧边栏" }).click();
     const sidebar = launched.page.locator(".workbench-global-sidebar");
@@ -663,7 +670,10 @@ test("Electron sidebar opens an imported historical version in the existing proj
 
     const tabs = launched.page.getByRole("tablist", { name: "已打开的页面" }).getByRole("tab");
     await expect(tabs).toHaveCount(1);
-    await importedProject.locator(".sidebar-version-file").first().click();
+    await importedProject.getByRole("button", {
+      name: historicalVersion.displayFileName,
+      exact: true,
+    }).click();
     await expect(tabs).toHaveCount(2, { timeout: 60_000 });
     await expect(tabs.filter({ hasText: "sidebar-history-b" }))
       .toHaveAttribute("aria-selected", "true", { timeout: 60_000 });
