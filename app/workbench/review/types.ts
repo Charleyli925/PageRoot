@@ -50,6 +50,7 @@ export type ReviewDocuments = {
   bootstrapFallbackJavaScript: Record<ReviewSide, string>;
   changes: ReviewChange[];
   outline: ReviewOutlineItem[];
+  focusGroups: ReviewFocusGroup[];
   commentGroups: ReviewCommentGroup[];
   commentTargets: ReviewCommentTarget[];
   /** Pending source candidates are private input to the frame observer. */
@@ -57,6 +58,49 @@ export type ReviewDocuments = {
   visualEvidence: SourceEvidence[];
   diagnostics: ReviewDiagnostic[];
   reviewImpact?: ReviewImpact;
+};
+
+export type ReviewDisplayScope =
+  | "paragraph"
+  | "list-item"
+  | "cell"
+  | "component"
+  | "container";
+
+export type ReviewFocusGeometryMode =
+  | "text-content"
+  | "element-box"
+  | "container-box"
+  | "numbered-line-range";
+
+export type ReviewFocusGroupPlan = {
+  id: string;
+  kind: "text" | "style" | "structure";
+  changeId: string;
+  changeIds: string[];
+  displayGroupId: string;
+  displayScope: ReviewDisplayScope;
+  /** changeId-scoped references whose fact portion is reviewProjectionFactKey. */
+  atomKeys: string[];
+  presentation: ReviewPresentation;
+  /** Analyzer-owned plans; Runtime may only measure these declared regions. */
+  regions: Record<ReviewSide, ReviewFocusRegionPlan[]>;
+  presence: Record<ReviewSide, boolean>;
+};
+
+/** Compatibility alias while the public contract adopts the explicit Plan name. */
+export type ReviewFocusGroup = ReviewFocusGroupPlan;
+
+export type ReviewFocusRegionPlan = {
+  id: string;
+  side: ReviewSide;
+  correlationKey: string;
+  primaryChangeId: string;
+  changeIds: string[];
+  geometryMode: ReviewFocusGeometryMode;
+  displayOwnerIds: string[];
+  atomKeys: string[];
+  presentation: ReviewRevealStep[];
 };
 
 export type ReviewImpact = {
@@ -176,4 +220,8 @@ export type ReviewTextEvidenceGroup = {
   operation: ReviewTextChangeOperation;
   semanticOwnerId: string;
   geometryOwnerId: string;
+  displayGroupId: string;
+  displayOwnerId: string;
+  displayScope: ReviewDisplayScope;
+  geometryMode: ReviewFocusGeometryMode;
 };

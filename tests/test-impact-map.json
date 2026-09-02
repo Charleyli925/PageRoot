@@ -1244,9 +1244,22 @@
       ]
     },
     {
+      "id": "review-focus-state",
+      "patterns": [
+        "^app/lib/review-focus-state\\.(?:d\\.ts|js)$",
+        "^app/workbench/review-state\\.ts$"
+      ],
+      "suites": [
+        "typecheck"
+      ],
+      "nodeTests": [
+        "tests/review-state.test.mjs"
+      ]
+    },
+    {
       "id": "review-ui-state",
       "patterns": [
-        "^app/workbench/(?:AiReviewWorkspace|comment-rail-view|comment-rail-contract|file-header-view|presentation|review-state|review-toolbar-controls|run-conversation-outlet|workbench-header-shell)\\.(?:ts|tsx)$",
+        "^app/workbench/(?:AiReviewWorkspace|comment-rail-view|comment-rail-contract|file-header-view|presentation|review-toolbar-controls|run-conversation-outlet|workbench-header-shell)\\.(?:ts|tsx)$",
         "^app/workbench/ai-review-workspace\\.module\\.css$"
       ],
       "suites": [

@@ -24,6 +24,8 @@ import {
   stableElementIdentity,
 } from "./parse";
 import type {
+  ReviewDisplayScope,
+  ReviewFocusGeometryMode,
   ReviewSemanticPairGraph,
   ReviewSemanticPairNode,
   ReviewSemanticUnit,
@@ -31,6 +33,62 @@ import type {
   SectionPair,
   TextRange,
 } from "./types";
+
+export function resolveReviewDisplayOwner(unit: ReviewSemanticUnit): {
+  element: Element;
+  displayScope: ReviewDisplayScope;
+  geometryMode: ReviewFocusGeometryMode;
+} {
+  const hasComplexContainerContent = (element: Element) => [...element.children].some((child) => (
+    isReviewAtomicContentElement(child)
+    || isReviewTextBlockElement(child)
+  ));
+  if (unit.kind === "br-line") return {
+    element: unit.element,
+    displayScope: "list-item",
+    geometryMode: "numbered-line-range",
+  };
+  // A direct-flow unit owned by li/td/th is the simple form. Complex items and
+  // cells expose their nested reading block as a separate semantic unit, so it
+  // naturally takes text-content geometry below.
+  if (unit.element.matches("li") && !hasComplexContainerContent(unit.element)) return {
+    element: unit.element,
+    displayScope: "list-item",
+    geometryMode: "element-box",
+  };
+  if (unit.element.matches("td, th") && !hasComplexContainerContent(unit.element)) return {
+    element: unit.element,
+    displayScope: "cell",
+    geometryMode: "element-box",
+  };
+  if (unit.element.matches(
+    "button, input, select, textarea, summary, a[href], [role='button'], [role='tab'], [role='menuitem']",
+  )) return {
+    element: unit.element,
+    displayScope: "component",
+    geometryMode: "element-box",
+  };
+  if (
+    unit.kind === "leaf-text-block"
+    || unit.kind === "direct-flow"
+    || unit.element.matches("p, h1, h2, h3, h4, h5, h6, blockquote, address, pre, caption, dd, dt, figcaption")
+  ) return {
+    element: unit.element,
+    displayScope: unit.element.matches("li")
+      ? "list-item"
+      : unit.element.matches("td, th") ? "cell" : "paragraph",
+    geometryMode: "text-content",
+  };
+  return {
+    element: unit.element,
+    displayScope: "container",
+    geometryMode: "container-box",
+  };
+}
+
+export function reviewDisplayScopeForUnit(unit: ReviewSemanticUnit): ReviewDisplayScope {
+  return resolveReviewDisplayOwner(unit).displayScope;
+}
 
 export const REVIEW_LEAF_TEXT_OWNER_TAGS = new Set([
   "ADDRESS",

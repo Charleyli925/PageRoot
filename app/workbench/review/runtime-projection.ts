@@ -1,12 +1,9 @@
-import {
-  aggregateReviewBadgeLabels,
-  reviewBadgeFactCount,
-  reviewBadgeLabelText,
-} from "../../lib/review-badge-aggregation.js";
-import {
-  reviewRegionAnnotations,
-} from "../../lib/review-region-annotation.js";
 import { OPAQUE_SANDBOX_STORAGE_BOOTSTRAP } from "../../lib/opaque-sandbox-storage.js";
+import {
+  REVIEW_PROJECTION_FACTS_SERIALIZED_LENGTH_LIMIT,
+  normalizeReviewExactAtomOccurrences,
+  normalizeReviewFocusGroupPlans,
+} from "../../lib/review-projection-facts.js";
 import {
   alignReviewTextEvidenceDotRows,
   reviewTextEvidenceGraphemeEnd,
@@ -20,6 +17,7 @@ import {
 import type {
   ReviewBootstrapElementBinding,
   ReviewCommentBootstrapBinding,
+  ReviewFocusGroupPlan,
   ReviewSide,
 } from "./types";
 
@@ -95,6 +93,8 @@ function reviewBootstrap(
   side: ReviewSide,
   reviewCommentBindings: readonly ReviewCommentBootstrapBinding[] = [],
   reviewVisualStableIds: readonly string[] = [],
+  reviewFocusGroupPlans: readonly ReviewFocusGroupPlan[] = [],
+  reviewExactAtomOccurrences: readonly { atomKey: string; count: number }[] = [],
 ): string {
   const serializedBootstrapPayload = (value: unknown) => (
     JSON.stringify(value).replace(/</gu, "\\u003c")
@@ -113,6 +113,14 @@ function reviewBootstrap(
   const reviewVisualInitialStableIds = Object.freeze(
     ${serializedBootstrapPayload(reviewVisualStableIds)},
   );
+  const normalizeReviewFocusGroupPlans = ${normalizeReviewFocusGroupPlans.toString()};
+  const reviewFocusGroupPlans = Object.freeze(normalizeReviewFocusGroupPlans(
+    ${serializedBootstrapPayload(reviewFocusGroupPlans)},
+  ));
+  const normalizeReviewExactAtomOccurrences = ${normalizeReviewExactAtomOccurrences.toString()};
+  const reviewExactAtomOccurrences = Object.freeze(normalizeReviewExactAtomOccurrences(
+    ${serializedBootstrapPayload(reviewExactAtomOccurrences)},
+  ));
   // A script-enabled opaque sandbox intentionally has no durable origin. The
   // shared bootstrap supplies one frame-local compatibility surface so an
   // authored chart cannot abort merely by reading storage.
@@ -121,10 +129,7 @@ function reviewBootstrap(
   const reviewTextEvidenceIsPunctuationCode = ${reviewTextEvidenceIsPunctuationCode.toString()};
   const reviewTextEvidenceMarkGeometry = ${reviewTextEvidenceMarkGeometry.toString()};
   const alignReviewTextEvidenceDotRows = ${alignReviewTextEvidenceDotRows.toString()};
-  const reviewBadgeLabelText = ${reviewBadgeLabelText.toString()};
-  const reviewBadgeFactCount = ${reviewBadgeFactCount.toString()};
-  const aggregateReviewBadgeLabels = ${aggregateReviewBadgeLabels.toString()};
-  const reviewRegionAnnotations = ${reviewRegionAnnotations.toString()};
+  const reviewProjectionFactsSerializedLengthLimit = ${REVIEW_PROJECTION_FACTS_SERIALIZED_LENGTH_LIMIT};
   const runtimeVisualBindCall = (method) => Function.prototype.call.bind(method);
   const runtimeVisualFunctionHasInstance = runtimeVisualBindCall(
     Function.prototype[Symbol.hasInstance],
@@ -136,6 +141,8 @@ function reviewBootstrap(
   const runtimeVisualBoolean = Boolean;
   const runtimeVisualMathFloor = Math.floor.bind(Math);
   const runtimeVisualMathImul = Math.imul.bind(Math);
+  const runtimeVisualMathMin = Math.min.bind(Math);
+  const runtimeVisualMathMax = Math.max.bind(Math);
   const runtimeVisualNumberIsFinite = Number.isFinite.bind(Number);
   const runtimeVisualSetTimeout = window.setTimeout.bind(window);
   const runtimeVisualRequestAnimationFrame = window.requestAnimationFrame.bind(window);
@@ -144,13 +151,24 @@ function reviewBootstrap(
   const runtimeVisualArrayForEach = runtimeVisualBindCall(Array.prototype.forEach);
   const runtimeVisualArrayJoin = runtimeVisualBindCall(Array.prototype.join);
   const runtimeVisualArrayMap = runtimeVisualBindCall(Array.prototype.map);
+  const runtimeVisualArrayFind = runtimeVisualBindCall(Array.prototype.find);
+  const runtimeVisualArrayFindIndex = runtimeVisualBindCall(Array.prototype.findIndex);
+  const runtimeVisualArrayFilter = runtimeVisualBindCall(Array.prototype.filter);
+  const runtimeVisualArrayFlatMap = runtimeVisualBindCall(Array.prototype.flatMap);
+  const runtimeVisualArraySort = runtimeVisualBindCall(Array.prototype.sort);
+  const runtimeVisualArraySlice = runtimeVisualBindCall(Array.prototype.slice);
+  const runtimeVisualArrayShift = runtimeVisualBindCall(Array.prototype.shift);
+  const runtimeVisualArraySplice = runtimeVisualBindCall(Array.prototype.splice);
+  const runtimeVisualArrayIncludes = runtimeVisualBindCall(Array.prototype.includes);
   const runtimeVisualArraySome = runtimeVisualBindCall(Array.prototype.some);
+  const runtimeVisualArrayEvery = runtimeVisualBindCall(Array.prototype.every);
   const runtimeVisualArrayIsArray = Array.isArray.bind(Array);
   const runtimeVisualStringCharCodeAt = runtimeVisualBindCall(
     String.prototype.charCodeAt,
   );
   const runtimeVisualStringToLowerCase = runtimeVisualBindCall(String.prototype.toLowerCase);
   const runtimeVisualStringToUpperCase = runtimeVisualBindCall(String.prototype.toUpperCase);
+  const runtimeVisualStringSplit = runtimeVisualBindCall(String.prototype.split);
   const runtimeVisualStringFromCharCode = String.fromCharCode.bind(String);
   const runtimeVisualRegExpExec = runtimeVisualBindCall(RegExp.prototype.exec);
   const runtimeVisualDocumentQuerySelectorAll = runtimeVisualBindCall(
@@ -172,6 +190,11 @@ function reviewBootstrap(
     Element.prototype.querySelectorAll,
   );
   const runtimeVisualElementMatches = runtimeVisualBindCall(Element.prototype.matches);
+  const runtimeVisualElementClosest = runtimeVisualBindCall(Element.prototype.closest);
+  const runtimeVisualElementContains = runtimeVisualBindCall(Element.prototype.contains);
+  const runtimeVisualHTMLElementIsContentEditable = runtimeVisualBindCall(
+    Object.getOwnPropertyDescriptor(HTMLElement.prototype, "isContentEditable").get,
+  );
   const runtimeVisualElementGetClientRects = runtimeVisualBindCall(
     Element.prototype.getClientRects,
   );
@@ -205,6 +228,9 @@ function reviewBootstrap(
   );
   const runtimeVisualNodeTextContent = runtimeVisualBindCall(
     Object.getOwnPropertyDescriptor(Node.prototype, "textContent").get,
+  );
+  const runtimeVisualNodeCompareDocumentPosition = runtimeVisualBindCall(
+    Node.prototype.compareDocumentPosition,
   );
   const runtimeVisualElementTagName = runtimeVisualBindCall(
     Object.getOwnPropertyDescriptor(Element.prototype, "tagName").get,
@@ -247,6 +273,9 @@ function reviewBootstrap(
   const runtimeVisualMutationRecordOldValue = runtimeVisualBindCall(
     Object.getOwnPropertyDescriptor(MutationRecord.prototype, "oldValue").get,
   );
+  const runtimeVisualMutationRecordAttributeName = runtimeVisualBindCall(
+    Object.getOwnPropertyDescriptor(MutationRecord.prototype, "attributeName").get,
+  );
   const runtimeVisualDomRectListLength = runtimeVisualBindCall(
     Object.getOwnPropertyDescriptor(DOMRectList.prototype, "length").get,
   );
@@ -257,6 +286,7 @@ function reviewBootstrap(
   const runtimeVisualMapForEach = runtimeVisualBindCall(Map.prototype.forEach);
   const runtimeVisualSetHas = runtimeVisualBindCall(Set.prototype.has);
   const runtimeVisualSetAdd = runtimeVisualBindCall(Set.prototype.add);
+  const runtimeVisualSetForEach = runtimeVisualBindCall(Set.prototype.forEach);
   const runtimeVisualStringify = JSON.stringify.bind(JSON);
   const runtimeVisualIsInstance = (constructor, value) => (
     runtimeVisualFunctionHasInstance(constructor, value)
@@ -321,7 +351,13 @@ function reviewBootstrap(
   let confirmedVisualChangeIds = new RuntimeVisualSet();
   let mirroringPanel = false;
   let mirroringAction = false;
-  let currentState = { filter: "all", focus: "all", transparency: 18, scale: 1 };
+  let currentState = {
+    filter: "all",
+    focus: "all",
+    activeFocusGroupId: null,
+    transparency: 18,
+    scale: 1,
+  };
   const reviewParent = parent;
   const postToParent = reviewParent.postMessage.bind(reviewParent);
   const runtimeVisualAddEventListener = addEventListener.bind(window);
@@ -671,23 +707,23 @@ function reviewBootstrap(
     if (request?.type === "comment-highlight" && request.sessionId === sessionId
       && request.side === side && Array.isArray(request.stableIds)) {
       renderReviewCommentHighlight(request.active === true
-        ? request.stableIds.slice(0, 32)
+        ? runtimeVisualArraySlice(request.stableIds, 0, 32)
         : []);
       return;
     }
     if (request?.type === "verdicts" && request.sessionId === sessionId && request.side === side
       && Array.isArray(request.changed)) {
-      runtimeVisualQueryElements('[data-pageroot-review-confirmed="true"]').forEach((element) => {
+      runtimeVisualArrayForEach(runtimeVisualQueryElements('[data-pageroot-review-confirmed="true"]'), (element) => {
         runtimeVisualElementRemoveAttribute(element, "data-pageroot-review-confirmed");
       });
-      runtimeVisualQueryElements('[data-pageroot-review-runtime-visual-marker="true"]').forEach((element) => {
+      runtimeVisualArrayForEach(runtimeVisualQueryElements('[data-pageroot-review-runtime-visual-marker="true"]'), (element) => {
         runtimeVisualElementRemoveAttribute(element, "data-pageroot-review-marker");
         runtimeVisualElementRemoveAttribute(element, "data-pageroot-review-marker-types");
         runtimeVisualElementRemoveAttribute(element, "data-pageroot-review-summary");
         runtimeVisualElementRemoveAttribute(element, "data-pageroot-review-runtime-visual-marker");
       });
       const nextConfirmed = new RuntimeVisualSet();
-      request.changed.forEach((candidate) => {
+      runtimeVisualArrayForEach(request.changed, (candidate) => {
         const changeId = safeKey(candidate?.id);
         if (!changeId) return;
         runtimeVisualSetAdd(nextConfirmed, changeId);
@@ -696,12 +732,16 @@ function reviewBootstrap(
         if (!element) return;
         if (runtimeVisualElementGetAttribute(element, "data-pageroot-review-marker")) return;
         runtimeVisualElementSetAttribute(element, "data-pageroot-review-marker", changeId);
-        runtimeVisualElementSetAttribute(element, "data-pageroot-review-marker-types", candidate.types?.join(" ") || "structure");
+        runtimeVisualElementSetAttribute(
+          element,
+          "data-pageroot-review-marker-types",
+          candidate.types ? runtimeVisualArrayJoin(candidate.types, " ") : "structure",
+        );
         runtimeVisualElementSetAttribute(element, "data-pageroot-review-summary", "元素变化");
         runtimeVisualElementSetAttribute(element, "data-pageroot-review-active", "true");
         runtimeVisualElementSetAttribute(element, "data-pageroot-review-runtime-visual-marker", "true");
       });
-      runtimeVisualQueryElements("[data-pageroot-review-marker]").forEach((element) => {
+      runtimeVisualArrayForEach(runtimeVisualQueryElements("[data-pageroot-review-marker]"), (element) => {
         const changeId = safeKey(runtimeVisualElementGetAttribute(
           element,
           "data-pageroot-review-marker",
@@ -816,11 +856,21 @@ function reviewBootstrap(
     }
     return result;
   };
-  const safePanelPath = (value) => [...new Set(
-    (Array.isArray(value) ? value : String(value || "").split(/\s+/))
-      .map(safeKey)
-      .filter(Boolean),
-  )];
+  const safePanelPath = (value) => {
+    const source = runtimeVisualArrayIsArray(value)
+      ? value
+      : runtimeVisualStringSplit(RuntimeVisualString(value || ""), /\s+/u);
+    const safeValues = runtimeVisualArrayFilter(
+      runtimeVisualArrayMap(source, safeKey),
+      runtimeVisualBoolean,
+    );
+    const unique = [];
+    runtimeVisualSetForEach(
+      new RuntimeVisualSet(safeValues),
+      (entry) => runtimeVisualArrayPush(unique, entry),
+    );
+    return unique;
+  };
   const safeStableId = (value) => {
     const stableId = RuntimeVisualString(value || "");
     return runtimeVisualRegExpExec(/^pr1_[0-9a-f]{32}$/iu, stableId) !== null
@@ -830,7 +880,7 @@ function reviewBootstrap(
   const safeRevealSteps = (value) => {
     if (!Array.isArray(value)) return [];
     const seen = new Set();
-    return value.flatMap((candidate) => {
+    return runtimeVisualArrayFlatMap(value, (candidate) => {
       if (!candidate || typeof candidate !== "object") return [];
       if (candidate.kind === "panel") {
         const key = safeKey(candidate.key);
@@ -1124,6 +1174,143 @@ function reviewBootstrap(
   const reviewCommentDeferredBindings = reviewCommentBindingRegistry.deferredBindings;
   const reviewCommentInvalidSourceNodeIds = reviewCommentBindingRegistry.invalidBindingIds;
   const reviewVisualAllowedStableIds = new RuntimeVisualSet(reviewVisualInitialStableIds);
+  const reviewFocusAllowedOwnerIds = new RuntimeVisualSet();
+  runtimeVisualArrayForEach(reviewFocusGroupPlans, (plan) => {
+    runtimeVisualArrayForEach(plan.regions[side] || [], (region) => {
+      runtimeVisualArrayForEach(region.displayOwnerIds, (ownerId) => {
+        runtimeVisualSetAdd(reviewFocusAllowedOwnerIds, ownerId);
+      });
+    });
+  });
+  const reviewExactAtomOccurrenceCounts = new RuntimeVisualMap();
+  const safeProjectionIdentityPart = (value) => {
+    const candidate = RuntimeVisualString(value || "");
+    return runtimeVisualRegExpExec(/^[a-z0-9:_-]{1,160}$/iu, candidate) === null
+      ? ""
+      : candidate;
+  };
+  runtimeVisualArrayForEach(reviewExactAtomOccurrences, (entry) => {
+    const atomKey = RuntimeVisualString(entry?.atomKey || "");
+    const parts = runtimeVisualStringSplit(atomKey, "\u001e");
+    const factParts = parts.length === 2 ? runtimeVisualStringSplit(parts[1], "\u001f") : [];
+    const count = Number(entry?.count);
+    if (
+      parts.length !== 2
+      || safeProjectionIdentityPart(parts[0]) !== parts[0]
+      || factParts.length !== 4
+      || (factParts[0] !== "text" && factParts[0] !== "structure")
+      || safeProjectionIdentityPart(factParts[1]) !== factParts[1]
+      || safeProjectionIdentityPart(factParts[2]) !== factParts[2]
+      || (factParts[3] && safeProjectionIdentityPart(factParts[3]) !== factParts[3])
+      || !runtimeVisualNumberIsFinite(count)
+      || count < 1
+      || count > 128
+      || runtimeVisualMathFloor(count) !== count
+      || runtimeVisualMapHas(reviewExactAtomOccurrenceCounts, atomKey)
+    ) return;
+    runtimeVisualMapSet(reviewExactAtomOccurrenceCounts, atomKey, count);
+  });
+  const reviewFocusOwnerElements = new RuntimeVisualMap();
+  const reviewFocusInvalidOwnerIds = new RuntimeVisualSet();
+  const reviewFocusAtomEntries = new RuntimeVisualMap();
+  const reviewFocusInvalidAtomKeys = new RuntimeVisualSet();
+  const reviewFocusAncestorForOwnerId = (element, ownerId) => {
+    let candidate = element;
+    while (candidate) {
+      const currentIds = RuntimeVisualString(runtimeVisualElementGetAttribute(
+        candidate,
+        "data-pageroot-review-display-owner",
+      ) || "");
+      if (runtimeVisualArraySome(
+        runtimeVisualStringSplit(currentIds, /\s+/u),
+        (currentId) => currentId === ownerId,
+      )) return candidate;
+      candidate = candidate.parentElement;
+    }
+    return null;
+  };
+  const captureReviewFocusOwner = (element, rawOwnerIds = "") => {
+    if (!runtimeVisualIsInstance(RuntimeVisualElement, element)) return;
+    const serializedOwnerIds = RuntimeVisualString(
+      rawOwnerIds || runtimeVisualElementGetAttribute(
+        element,
+        "data-pageroot-review-display-owner",
+      ) || "",
+    );
+    runtimeVisualArrayForEach(runtimeVisualStringSplit(serializedOwnerIds, /\s+/u), (ownerId) => {
+      if (!runtimeVisualSetHas(reviewFocusAllowedOwnerIds, ownerId)) return;
+      const existing = runtimeVisualMapGet(reviewFocusOwnerElements, ownerId);
+      if (existing && existing !== element) runtimeVisualSetAdd(reviewFocusInvalidOwnerIds, ownerId);
+      else if (!existing) runtimeVisualMapSet(reviewFocusOwnerElements, ownerId, element);
+    });
+  };
+  const captureReviewFocusAtom = (
+    element,
+    rawChangeId = "",
+    rawSerializedFacts = "",
+    rawTextTone = "",
+  ) => {
+    if (!runtimeVisualIsInstance(RuntimeVisualElement, element)) return;
+    const changeId = safeKey(rawChangeId || runtimeVisualElementGetAttribute(
+      element,
+      "data-pageroot-review-marker",
+    ));
+    const serializedFacts = RuntimeVisualString(rawSerializedFacts || runtimeVisualElementGetAttribute(
+      element,
+      "data-pageroot-review-projection-facts",
+    ) || "");
+    if (!changeId || !serializedFacts) return;
+    runtimeVisualArrayForEach(projectionFactsForSerialized(serializedFacts), (fact) => {
+      const atomKey = changeId + "\u001e" + projectionFactIdentity(fact);
+      const expectedCount = runtimeVisualMapGet(reviewExactAtomOccurrenceCounts, atomKey) || 0;
+      if (!expectedCount || runtimeVisualSetHas(reviewFocusInvalidAtomKeys, atomKey)) return;
+      const displayOwnerId = fact.displayOwnerId
+        || fact.geometryOwnerId
+        || fact.semanticOwnerId;
+      const displayOwnerElement = reviewFocusAncestorForOwnerId(element, displayOwnerId);
+      if (
+        !displayOwnerElement
+        || !runtimeVisualElementContains(displayOwnerElement, element)
+      ) {
+        runtimeVisualSetAdd(reviewFocusInvalidAtomKeys, atomKey);
+        return;
+      }
+      const entries = runtimeVisualMapGet(reviewFocusAtomEntries, atomKey) || [];
+      if (runtimeVisualArraySome(entries, (entry) => entry.element === element)) return;
+      if (entries.length >= expectedCount) {
+        runtimeVisualSetAdd(reviewFocusInvalidAtomKeys, atomKey);
+        return;
+      }
+      runtimeVisualArrayPush(entries, {
+        atomKey,
+        changeId,
+        element,
+        fact,
+        displayOwnerElement,
+        displayOwnerId,
+        textContent: RuntimeVisualString(runtimeVisualNodeTextContent(element) || ""),
+        textTone: RuntimeVisualString(rawTextTone || runtimeVisualElementGetAttribute(
+          element,
+          "data-pageroot-review-text",
+        ) || ""),
+        serializedFacts,
+      });
+      runtimeVisualMapSet(reviewFocusAtomEntries, atomKey, entries);
+    });
+  };
+  const captureReviewFocusTree = (node) => {
+    if (!runtimeVisualIsInstance(RuntimeVisualElement, node)) return;
+    captureReviewFocusOwner(node);
+    runtimeVisualArrayForEach(
+      runtimeVisualElementQuerySelectorAll(node, "[data-pageroot-review-display-owner]"),
+      (element) => captureReviewFocusOwner(element),
+    );
+    captureReviewFocusAtom(node);
+    runtimeVisualArrayForEach(
+      runtimeVisualElementQuerySelectorAll(node, "[data-pageroot-review-marker]"),
+      (element) => captureReviewFocusAtom(element),
+    );
+  };
   const reviewVisualIdentityElements = new RuntimeVisualMap();
   const reviewVisualInvalidStableIds = new RuntimeVisualSet();
   const captureReviewVisualElement = (element, rawStableId = "") => {
@@ -1142,6 +1329,7 @@ function reviewBootstrap(
   const captureReviewVisualTree = (node) => {
     if (!runtimeVisualIsInstance(RuntimeVisualElement, node)) return;
     captureReviewVisualElement(node);
+    captureReviewFocusTree(node);
     runtimeVisualArrayForEach(
       runtimeVisualElementQuerySelectorAll(node, "[data-pageroot-id]"),
       (element) => captureReviewVisualElement(element),
@@ -1151,6 +1339,10 @@ function reviewBootstrap(
     runtimeVisualQueryElements("[data-pageroot-id]"),
     (element) => captureReviewVisualElement(element),
   );
+  runtimeVisualArrayForEach(
+    runtimeVisualQueryElements("[data-pageroot-review-display-owner]"),
+    (element) => captureReviewFocusOwner(element),
+  );
   let privateInitialBindingsBootstrapped = false;
   let privateInitialBindingsClosed = false;
   const captureInitialBindings = (records = []) => {
@@ -1159,6 +1351,52 @@ function reviewBootstrap(
       privateInitialBindingsBootstrapped = true;
       reviewCommentBindingRegistry.captureAll();
     }
+    // Attribute mutations can remove both halves of an atom identity before
+    // the observer callback runs. Reconstruct every marker/fact combination
+    // seen in this delivery from oldValue plus the current companion values,
+    // and bind those originals before considering newly added authored nodes.
+    const atomAttributeHistories = new RuntimeVisualMap();
+    runtimeVisualArrayForEach(records, (record) => {
+      if (runtimeVisualMutationRecordType(record) !== "attributes") return;
+      const element = runtimeVisualMutationRecordTarget(record);
+      if (!runtimeVisualIsInstance(RuntimeVisualElement, element)) return;
+      const attributeName = runtimeVisualMutationRecordAttributeName(record);
+      if (
+        attributeName !== "data-pageroot-review-marker"
+        && attributeName !== "data-pageroot-review-projection-facts"
+        && attributeName !== "data-pageroot-review-text"
+      ) return;
+      let history = runtimeVisualMapGet(atomAttributeHistories, element);
+      if (!history) {
+        history = { marker: [], facts: [], tones: [] };
+        runtimeVisualArrayPush(history.marker, runtimeVisualElementGetAttribute(
+          element,
+          "data-pageroot-review-marker",
+        ) || "");
+        runtimeVisualArrayPush(history.facts, runtimeVisualElementGetAttribute(
+          element,
+          "data-pageroot-review-projection-facts",
+        ) || "");
+        runtimeVisualArrayPush(history.tones, runtimeVisualElementGetAttribute(
+          element,
+          "data-pageroot-review-text",
+        ) || "");
+        runtimeVisualMapSet(atomAttributeHistories, element, history);
+      }
+      const oldValue = runtimeVisualMutationRecordOldValue(record) || "";
+      if (attributeName === "data-pageroot-review-marker") runtimeVisualArrayPush(history.marker, oldValue);
+      if (attributeName === "data-pageroot-review-projection-facts") runtimeVisualArrayPush(history.facts, oldValue);
+      if (attributeName === "data-pageroot-review-text") runtimeVisualArrayPush(history.tones, oldValue);
+    });
+    runtimeVisualMapForEach(atomAttributeHistories, (history, element) => {
+      runtimeVisualArrayForEach(history.marker, (changeId) => {
+        runtimeVisualArrayForEach(history.facts, (serializedFacts) => {
+          runtimeVisualArrayForEach(history.tones, (tone) => {
+            captureReviewFocusAtom(element, changeId, serializedFacts, tone);
+          });
+        });
+      });
+    });
     runtimeVisualArrayForEach(records, (record) => {
       const recordType = runtimeVisualMutationRecordType(record);
       if (recordType === "attributes") {
@@ -1167,6 +1405,11 @@ function reviewBootstrap(
           runtimeVisualMutationRecordOldValue(record),
         );
         captureReviewVisualElement(runtimeVisualMutationRecordTarget(record));
+        captureReviewFocusOwner(
+          runtimeVisualMutationRecordTarget(record),
+          runtimeVisualMutationRecordOldValue(record),
+        );
+        captureReviewFocusOwner(runtimeVisualMutationRecordTarget(record));
         return;
       }
       if (recordType !== "childList") return;
@@ -1193,7 +1436,10 @@ function reviewBootstrap(
       }
     });
   };
-  const initialBindingObserver = reviewCommentInitialBindings.length || reviewVisualInitialStableIds.length
+  const initialBindingObserver = reviewCommentInitialBindings.length
+    || reviewVisualInitialStableIds.length
+    || reviewFocusAllowedOwnerIds.size
+    || reviewExactAtomOccurrenceCounts.size
     ? new RuntimeVisualMutationObserver(captureInitialBindings)
     : null;
   if (initialBindingObserver && runtimeVisualDocumentRoot) {
@@ -1206,7 +1452,13 @@ function reviewBootstrap(
         childList: true,
         attributes: true,
         attributeOldValue: true,
-        attributeFilter: ["data-pageroot-id"],
+        attributeFilter: [
+          "data-pageroot-id",
+          "data-pageroot-review-display-owner",
+          "data-pageroot-review-marker",
+          "data-pageroot-review-projection-facts",
+          "data-pageroot-review-text",
+        ],
       },
     );
   }
@@ -1237,6 +1489,67 @@ function reviewBootstrap(
       "[data-pageroot-id=\"" + stableId + "\"]",
     );
     return matches.length === 1 && matches[0] === element ? element : null;
+  };
+  const reviewFocusOwnerElement = (rawOwnerId) => {
+    const ownerId = RuntimeVisualString(rawOwnerId || "");
+    if (
+      !runtimeVisualSetHas(reviewFocusAllowedOwnerIds, ownerId)
+      || runtimeVisualSetHas(reviewFocusInvalidOwnerIds, ownerId)
+    ) return null;
+    const element = runtimeVisualMapGet(reviewFocusOwnerElements, ownerId);
+    if (!element || !runtimeVisualNodeIsConnected(element)) return null;
+    const currentIds = RuntimeVisualString(runtimeVisualElementGetAttribute(
+      element,
+      "data-pageroot-review-display-owner",
+    ) || "");
+    return runtimeVisualArraySome(
+      runtimeVisualStringSplit(currentIds, /\s+/u),
+      (candidate) => candidate === ownerId,
+    ) ? element : null;
+  };
+  const reviewFocusAtomEntriesForKey = (rawAtomKey) => {
+    const atomKey = RuntimeVisualString(rawAtomKey || "");
+    if (
+      !runtimeVisualMapHas(reviewExactAtomOccurrenceCounts, atomKey)
+      || runtimeVisualSetHas(reviewFocusInvalidAtomKeys, atomKey)
+    ) return [];
+    const entries = runtimeVisualMapGet(reviewFocusAtomEntries, atomKey) || [];
+    if (entries.length !== runtimeVisualMapGet(reviewExactAtomOccurrenceCounts, atomKey)) return [];
+    const valid = [];
+    runtimeVisualArrayForEach(entries, (entry) => {
+      if (!runtimeVisualNodeIsConnected(entry.element)) return;
+      const currentOwnerIds = RuntimeVisualString(runtimeVisualElementGetAttribute(
+        entry.displayOwnerElement,
+        "data-pageroot-review-display-owner",
+      ) || "");
+      if (
+        !runtimeVisualNodeIsConnected(entry.displayOwnerElement)
+        || !runtimeVisualArraySome(
+          runtimeVisualStringSplit(currentOwnerIds, /\s+/u),
+          (candidate) => candidate === entry.displayOwnerId,
+        )
+        || !runtimeVisualElementContains(entry.displayOwnerElement, entry.element)
+        || (
+          runtimeVisualSetHas(reviewFocusAllowedOwnerIds, entry.displayOwnerId)
+          && reviewFocusOwnerElement(entry.displayOwnerId) !== entry.displayOwnerElement
+        )
+      ) return;
+      if (runtimeVisualElementGetAttribute(entry.element, "data-pageroot-review-marker") !== entry.changeId) return;
+      if ((runtimeVisualElementGetAttribute(
+        entry.element,
+        "data-pageroot-review-projection-facts",
+      ) || "") !== entry.serializedFacts) return;
+      if (entry.fact.type === "text" && (
+        RuntimeVisualString(runtimeVisualNodeTextContent(entry.element) || "") !== entry.textContent
+        || entry.textTone !== entry.fact.tone
+        || runtimeVisualElementGetAttribute(
+          entry.element,
+          "data-pageroot-review-text",
+        ) !== entry.textTone
+      )) return;
+      runtimeVisualArrayPush(valid, entry);
+    });
+    return valid.length === entries.length ? valid : [];
   };
   const isSafePanelControl = (element) => element instanceof Element && element.matches(
     '[data-pageroot-review-panel-control="true"]',
@@ -1737,7 +2050,14 @@ function reviewBootstrap(
       }
     });
   };
-  const focusChangeTarget = (changeId, target, panelPath, behavior = "auto") => {
+  const focusChangeTarget = (
+    changeId,
+    target,
+    panelPath,
+    behavior = "auto",
+    regionId = "",
+    focusGroupId = "",
+  ) => {
     revealTarget(target, panelPath);
     requestAnimationFrame(() => {
       const reportHorizontalFootprint = (rect, documentSpace = false) => {
@@ -1756,11 +2076,17 @@ function reviewBootstrap(
           || right < left
           || right > maximum
         ) return;
-        post("focus-horizontal-footprint", { changeId, left, right });
+        post("focus-horizontal-footprint", {
+          changeId,
+          focusGroupId,
+          regionId,
+          left,
+          right,
+        });
       };
-      const visibleBox = document.querySelector(
-        '[data-pageroot-review-overlay-box="' + changeId + '"]',
-      );
+      const visibleBox = document.querySelector(regionId
+        ? '[data-pageroot-review-overlay-box][data-pageroot-review-focus-region="' + regionId + '"]'
+        : '[data-pageroot-review-overlay-box="' + changeId + '"]');
       if (visibleBox) {
         reportHorizontalFootprint({
           left: visibleBox.getAttribute("data-left"),
@@ -1835,6 +2161,8 @@ function reviewBootstrap(
     const fact = { id, type, semanticOwnerId };
     const geometryOwnerId = safeProjectionFactKey(value.geometryOwnerId);
     const textGroup = safeProjectionFactKey(value.textGroup);
+    const displayGroupId = safeProjectionFactKey(value.displayGroupId);
+    const displayOwnerId = safeProjectionFactKey(value.displayOwnerId);
     const structureChange = [
       "added",
       "removed",
@@ -1849,6 +2177,18 @@ function reviewBootstrap(
       .includes(value.scope)
       ? value.scope
       : "";
+    const displayScope = ["paragraph", "list-item", "cell", "component", "container"]
+      .includes(value.displayScope)
+      ? value.displayScope
+      : "";
+    const geometryMode = [
+      "text-content",
+      "element-box",
+      "container-box",
+      "numbered-line-range",
+    ].includes(value.geometryMode)
+      ? value.geometryMode
+      : "";
     const operation = ["none", "insert", "delete", "replace"].includes(value.operation)
       ? value.operation
       : "";
@@ -1856,6 +2196,10 @@ function reviewBootstrap(
     const summary = safeProjectionSummary(value.summary);
     if (geometryOwnerId) fact.geometryOwnerId = geometryOwnerId;
     if (textGroup) fact.textGroup = textGroup;
+    if (displayGroupId) fact.displayGroupId = displayGroupId;
+    if (displayOwnerId) fact.displayOwnerId = displayOwnerId;
+    if (displayScope) fact.displayScope = displayScope;
+    if (geometryMode) fact.geometryMode = geometryMode;
     if (structureChange) fact.structureChange = structureChange;
     if (scope) fact.scope = scope;
     if (operation) fact.operation = operation;
@@ -1869,27 +2213,33 @@ function reviewBootstrap(
     fact.semanticOwnerId,
     fact.geometryOwnerId || "",
   ].join("\u001f");
-  const projectionFactsForElement = (element, fallbackSequence) => {
-    const serialized = element.getAttribute("data-pageroot-review-projection-facts");
+  const projectionFactsForSerialized = (serialized) => {
     if (serialized) {
+      if (serialized.length > reviewProjectionFactsSerializedLengthLimit) return [];
       try {
         const parsed = JSON.parse(serialized);
         if (!Array.isArray(parsed) || parsed.length > 24) return [];
-        const seen = new Set();
         const facts = [];
         for (const value of parsed) {
           const fact = normalizeProjectionFact(value);
           if (!fact) return [];
           const key = projectionFactIdentity(fact);
-          if (seen.has(key)) continue;
-          seen.add(key);
-          facts.push(fact);
+          const existingIndex = facts.findIndex((candidate) => (
+            projectionFactIdentity(candidate) === key
+          ));
+          if (existingIndex >= 0) facts[existingIndex] = { ...facts[existingIndex], ...fact };
+          else facts.push(fact);
         }
         return facts;
       } catch {
         return [];
       }
     }
+    return [];
+  };
+  const projectionFactsForElement = (element, fallbackSequence) => {
+    const serialized = element.getAttribute("data-pageroot-review-projection-facts");
+    if (serialized) return projectionFactsForSerialized(serialized);
     const changeId = element.getAttribute("data-pageroot-review-marker") || "";
     const semanticOwnerId = element.getAttribute("data-pageroot-review-semantic-owner")
       || ("fallback-owner-" + changeId + "-" + fallbackSequence);
@@ -1906,11 +2256,15 @@ function reviewBootstrap(
         scope: "text",
         tone: element.getAttribute("data-pageroot-review-text") === "removed" ? "removed" : "added",
         textGroup,
+        displayGroupId: "display-fact-" + textGroup,
+        displayOwnerId: geometryOwnerId || semanticOwnerId,
+        displayScope: "paragraph",
+        geometryMode: "text-content",
         operation: element.getAttribute("data-pageroot-review-text-operation") || "",
         summary: element.getAttribute("data-pageroot-review-summary") || "",
       });
     }
-    if (markerTypes(element).includes("structure")) {
+    if (runtimeVisualArrayIncludes(markerTypes(element), "structure")) {
       const structureChange = element.getAttribute("data-pageroot-review-structure") || "changed";
       facts.push({
         id: "structure-" + semanticOwnerId + "-" + structureChange,
@@ -1918,6 +2272,10 @@ function reviewBootstrap(
         semanticOwnerId,
         ...(geometryOwnerId ? { geometryOwnerId } : {}),
         scope: "element",
+        displayGroupId: "display-fact-structure-" + semanticOwnerId,
+        displayOwnerId: geometryOwnerId || semanticOwnerId,
+        displayScope: "container",
+        geometryMode: "element-box",
         structureChange,
         summary: element.getAttribute("data-pageroot-review-summary")
           || structureSummary(structureChange),
@@ -1929,173 +2287,78 @@ function reviewBootstrap(
   // geometry decisions taken before rendering must use the same number or they
   // will judge two rectangles apart that end up overlapping on screen.
   const overlayInset = 3;
-  const recordContains = (outer, inner, tolerance = 2) => (
-    inner.left >= outer.left - tolerance
-    && inner.top >= outer.top - tolerance
-    && inner.right <= outer.right + tolerance
-    && inner.bottom <= outer.bottom + tolerance
-  );
-  const recordNestsWithin = (outer, inner) => {
-    if (
-      outer.element === inner.element
-      || !outer.element.contains(inner.element)
-      || !recordContains(outer, inner)
-      || outer.changeId !== inner.changeId
-      || outer.semanticOwnerId !== inner.semanticOwnerId
-      || outer.factIdentity !== inner.factIdentity
-      || outer.tone !== "structure"
-      || inner.tone !== "structure"
-    ) return false;
-    // Containment is only a rendering dedupe for repeated records of the same
-    // structure fact. An independently owned nested fact remains independently
-    // visible even when its rectangle sits wholly inside another change.
-    return true;
-  };
-  const recordsAreClose = (left, right, gap = 10) => {
-    const horizontalOverlap = Math.max(0, Math.min(left.right, right.right) - Math.max(left.left, right.left));
-    const verticalOverlap = Math.max(0, Math.min(left.bottom, right.bottom) - Math.max(left.top, right.top));
-    const minimumWidth = Math.max(1, Math.min(left.right - left.left, right.right - right.left));
-    const minimumHeight = Math.max(1, Math.min(left.bottom - left.top, right.bottom - right.top));
-    const continuousLineGap = Math.max(gap, Math.min(18, minimumHeight * .8));
-    const horizontalGap = Math.max(0, Math.max(left.left, right.left) - Math.min(left.right, right.right));
-    const verticalGap = Math.max(0, Math.max(left.top, right.top) - Math.min(left.bottom, right.bottom));
-    return (horizontalOverlap > 0 && verticalOverlap > 0)
-      || (verticalGap <= continuousLineGap && horizontalOverlap / minimumWidth >= .35)
-      || (horizontalGap <= gap && verticalOverlap / minimumHeight >= .35);
-  };
-  const fuseConnectedFragments = (rawFragments) => {
-    const fragments = rawFragments.map((fragment) => ({ ...fragment }));
-    for (let pass = 0; pass < 2; pass += 1) {
-      fragments.forEach((left, leftIndex) => fragments.forEach((right, rightIndex) => {
-        if (leftIndex >= rightIndex) return;
-        const horizontalOverlap = Math.max(0, Math.min(left.right, right.right) - Math.max(left.left, right.left));
-        const verticalOverlap = Math.max(0, Math.min(left.bottom, right.bottom) - Math.max(left.top, right.top));
-        const verticalGap = Math.max(0, Math.max(left.top, right.top) - Math.min(left.bottom, right.bottom));
-        const horizontalGap = Math.max(0, Math.max(left.left, right.left) - Math.min(left.right, right.right));
-        const minimumWidth = Math.max(1, Math.min(left.right - left.left, right.right - right.left));
-        const minimumHeight = Math.max(1, Math.min(left.bottom - left.top, right.bottom - right.top));
-        const continuousLineGap = Math.max(10, Math.min(18, minimumHeight * .8));
-        if (
-          verticalGap > 0
-          && verticalGap <= continuousLineGap
-          && horizontalOverlap / minimumWidth >= .35
-        ) {
-          const midpoint = (Math.min(left.bottom, right.bottom) + Math.max(left.top, right.top)) / 2;
-          if (left.top <= right.top) {
-            left.bottom = midpoint;
-            right.top = midpoint;
-          } else {
-            right.bottom = midpoint;
-            left.top = midpoint;
-          }
-        } else if (horizontalGap > 0 && horizontalGap <= 10 && verticalOverlap / minimumHeight >= .35) {
-          const midpoint = (Math.min(left.right, right.right) + Math.max(left.left, right.left)) / 2;
-          if (left.left <= right.left) {
-            left.right = midpoint;
-            right.left = midpoint;
-          } else {
-            right.right = midpoint;
-            left.left = midpoint;
-          }
-        }
-      }));
-    }
-    return fragments;
-  };
-  const mergeRecordGroup = (records) => {
-    const fragments = fuseConnectedFragments(records.flatMap((record) => (
-      record.fragments || [{
-        left: record.left,
-        top: record.top,
-        right: record.right,
-        bottom: record.bottom,
-      }]
-    )));
-    const factCount = new Set(records.map((record) => record.factIdentity)).size;
-    return {
-      ...records[0],
-      ownerKey: records[0].ownerKey || "",
-      scope: records[0].scope,
-      labelPrimary: records.some((record) => record.labelPrimary !== false),
-      labelCount: Math.max(reviewBadgeFactCount(records[0]), factCount),
-      fragments,
-      left: Math.min(...fragments.map((record) => record.left)),
-      top: Math.min(...fragments.map((record) => record.top)),
-      right: Math.max(...fragments.map((record) => record.right)),
-      bottom: Math.max(...fragments.map((record) => record.bottom)),
-      types: [...new Set(records.flatMap((record) => record.types))],
-      tones: [...new Set(records.flatMap((record) => record.tones))],
-    };
-  };
-  const mergeConnectedRecords = (records, canMerge) => {
-    const remaining = [...records];
-    const merged = [];
-    while (remaining.length) {
-      const group = [remaining.shift()];
-      let expanded = true;
-      while (expanded) {
-        expanded = false;
-        for (let index = remaining.length - 1; index >= 0; index -= 1) {
-          if (!group.some((record) => canMerge(record, remaining[index]))) continue;
-          group.push(remaining.splice(index, 1)[0]);
-          expanded = true;
-        }
-      }
-      merged.push(mergeRecordGroup(group));
-    }
-    return merged;
-  };
   const allModeSummary = (types, summary) => {
     if (summary === "新增元素" || summary === "删除元素") return summary;
     if (types.length === 1 && summary) return summary;
-    if (types.includes("text") && types.includes("structure")) return "文字、元素调整";
-    if (types.includes("text")) return "文字调整";
-    if (types.includes("structure")) return "元素调整";
+    if (runtimeVisualArrayIncludes(types, "text") && runtimeVisualArrayIncludes(types, "structure")) return "文字、元素调整";
+    if (runtimeVisualArrayIncludes(types, "text")) return "文字调整";
+    if (runtimeVisualArrayIncludes(types, "structure")) return "元素调整";
     return "内容调整";
   };
   const roundedCoordinate = (value) => Math.round(value * 4) / 4;
   const unionPath = (rawRects, offsetLeft = 0, offsetTop = 0) => {
-    const rects = rawRects.map((rect) => ({
+    const rects = runtimeVisualArrayMap(rawRects, (rect) => ({
       left: roundedCoordinate(rect.left - offsetLeft),
       top: roundedCoordinate(rect.top - offsetTop),
       right: roundedCoordinate(rect.right - offsetLeft),
       bottom: roundedCoordinate(rect.bottom - offsetTop),
     }));
-    const xs = [...new Set(rects.flatMap((rect) => [rect.left, rect.right]))].sort((a, b) => a - b);
-    const ys = [...new Set(rects.flatMap((rect) => [rect.top, rect.bottom]))].sort((a, b) => a - b);
-    const filled = ys.slice(0, -1).map((top, row) => xs.slice(0, -1).map((left, column) => {
+    const xSet = new RuntimeVisualSet(runtimeVisualArrayFlatMap(
+      rects,
+      (rect) => [rect.left, rect.right],
+    ));
+    const xs = [];
+    runtimeVisualSetForEach(xSet, (value) => runtimeVisualArrayPush(xs, value));
+    runtimeVisualArraySort(xs, (left, right) => left - right);
+    const ySet = new RuntimeVisualSet(runtimeVisualArrayFlatMap(
+      rects,
+      (rect) => [rect.top, rect.bottom],
+    ));
+    const ys = [];
+    runtimeVisualSetForEach(ySet, (value) => runtimeVisualArrayPush(ys, value));
+    runtimeVisualArraySort(ys, (top, bottom) => top - bottom);
+    const filled = runtimeVisualArrayMap(runtimeVisualArraySlice(ys, 0, -1), (top, row) => (
+      runtimeVisualArrayMap(runtimeVisualArraySlice(xs, 0, -1), (left, column) => {
       const centerX = (left + xs[column + 1]) / 2;
       const centerY = (top + ys[row + 1]) / 2;
-      return rects.some((rect) => centerX >= rect.left && centerX <= rect.right && centerY >= rect.top && centerY <= rect.bottom);
-    }));
+      return runtimeVisualArraySome(rects, (rect) => centerX >= rect.left && centerX <= rect.right
+        && centerY >= rect.top && centerY <= rect.bottom);
+      })
+    ));
     const edges = [];
     const hasCell = (row, column) => runtimeVisualBoolean(filled[row]?.[column]);
-    filled.forEach((row, rowIndex) => row.forEach((inside, columnIndex) => {
+    runtimeVisualArrayForEach(filled, (row, rowIndex) => runtimeVisualArrayForEach(
+      row,
+      (inside, columnIndex) => {
       if (!inside) return;
       const left = xs[columnIndex];
       const right = xs[columnIndex + 1];
       const top = ys[rowIndex];
       const bottom = ys[rowIndex + 1];
-      if (!hasCell(rowIndex - 1, columnIndex)) edges.push([[left, top], [right, top]]);
-      if (!hasCell(rowIndex, columnIndex + 1)) edges.push([[right, top], [right, bottom]]);
-      if (!hasCell(rowIndex + 1, columnIndex)) edges.push([[right, bottom], [left, bottom]]);
-      if (!hasCell(rowIndex, columnIndex - 1)) edges.push([[left, bottom], [left, top]]);
-    }));
+      if (!hasCell(rowIndex - 1, columnIndex)) runtimeVisualArrayPush(edges, [[left, top], [right, top]]);
+      if (!hasCell(rowIndex, columnIndex + 1)) runtimeVisualArrayPush(edges, [[right, top], [right, bottom]]);
+      if (!hasCell(rowIndex + 1, columnIndex)) runtimeVisualArrayPush(edges, [[right, bottom], [left, bottom]]);
+      if (!hasCell(rowIndex, columnIndex - 1)) runtimeVisualArrayPush(edges, [[left, bottom], [left, top]]);
+      },
+    ));
     const pointKey = (point) => point[0] + "," + point[1];
     const paths = [];
     while (edges.length) {
-      const edge = edges.shift();
+      const edge = runtimeVisualArrayShift(edges);
       const points = [edge[0], edge[1]];
       const startKey = pointKey(edge[0]);
       let currentKey = pointKey(edge[1]);
       while (currentKey !== startKey) {
-        const nextIndex = edges.findIndex((candidate) => pointKey(candidate[0]) === currentKey);
+        const nextIndex = runtimeVisualArrayFindIndex(
+          edges,
+          (candidate) => pointKey(candidate[0]) === currentKey,
+        );
         if (nextIndex < 0) break;
-        const next = edges.splice(nextIndex, 1)[0];
-        points.push(next[1]);
+        const next = runtimeVisualArraySplice(edges, nextIndex, 1)[0];
+        runtimeVisualArrayPush(points, next[1]);
         currentKey = pointKey(next[1]);
       }
-      const simplified = points.filter((point, index) => {
+      const simplified = runtimeVisualArrayFilter(points, (point, index) => {
         if (index === 0 || index === points.length - 1) return true;
         const previous = points[index - 1];
         const next = points[index + 1];
@@ -2103,24 +2366,21 @@ function reviewBootstrap(
           || (previous[1] === point[1] && point[1] === next[1]));
       });
       if (simplified.length > 2) {
-        paths.push("M " + simplified.map((point) => point[0] + " " + point[1]).join(" L ") + " Z");
+        runtimeVisualArrayPush(paths, "M " + runtimeVisualArrayJoin(runtimeVisualArrayMap(
+          simplified,
+          (point) => point[0] + " " + point[1],
+        ), " L ") + " Z");
       }
     }
-    return paths.join(" ");
-  };
-  const recordsOverlapStrongly = (left, right) => {
-    const width = Math.max(0, Math.min(left.right, right.right) - Math.max(left.left, right.left));
-    const height = Math.max(0, Math.min(left.bottom, right.bottom) - Math.max(left.top, right.top));
-    const intersection = width * height;
-    const leftArea = Math.max(1, (left.right - left.left) * (left.bottom - left.top));
-    const rightArea = Math.max(1, (right.right - right.left) * (right.bottom - right.top));
-    return intersection / Math.min(leftArea, rightArea) >= .62;
+    return runtimeVisualArrayJoin(paths, " ");
   };
   const rangeClientRects = (element) => {
     const range = document.createRange();
     range.selectNodeContents(element);
-    const rects = [...range.getClientRects()]
-      .filter((rect) => rect.width > 1 && rect.height > 1);
+    const rects = runtimeVisualArrayFilter(
+      [...range.getClientRects()],
+      (rect) => rect.width > 1 && rect.height > 1,
+    );
     range.detach();
     return rects;
   };
@@ -2137,9 +2397,57 @@ function reviewBootstrap(
     }
     return false;
   };
-  const contentTextRects = (element, respectGeometryOwners = false) => {
+  const reviewDirectFlowBoundarySelector = [
+    "address", "article", "aside", "audio", "blockquote", "button", "canvas",
+    "details", "div", "dl", "fieldset", "figure", "footer", "form",
+    "h1", "h2", "h3", "h4", "h5", "h6", "header", "hr", "iframe",
+    "img", "input", "main", "nav", "ol", "p", "picture", "pre",
+    "section", "select", "summary", "table", "textarea", "ul", "video",
+  ].join(",");
+  const directFlowSegmentId = (owner, node) => {
+    let directChild = node;
+    while (directChild && directChild.parentNode !== owner) directChild = directChild.parentNode;
+    if (!directChild) return -1;
+    let segment = 0;
+    const children = owner.childNodes;
+    for (let index = 0; index < children.length; index += 1) {
+      const child = children[index];
+      const boundary = runtimeVisualIsInstance(RuntimeVisualElement, child)
+        && runtimeVisualElementMatches(child, reviewDirectFlowBoundarySelector);
+      if (child === directChild) return boundary ? -1 : segment;
+      if (boundary) segment += 1;
+    }
+    return -1;
+  };
+  const directFlowSegmentsForAtoms = (owner, atoms) => {
+    const segments = new RuntimeVisualSet();
+    runtimeVisualArrayForEach(atoms, (atom) => {
+      const segment = directFlowSegmentId(owner, atom.element);
+      if (segment >= 0) runtimeVisualSetAdd(segments, segment);
+    });
+    return segments;
+  };
+  const directFlowSegmentBoundaryNodes = (owner, targetSegment) => {
+    let first = null;
+    let last = null;
+    let segment = 0;
+    const children = owner.childNodes;
+    for (let index = 0; index < children.length; index += 1) {
+      const child = children[index];
+      const boundary = runtimeVisualIsInstance(RuntimeVisualElement, child)
+        && runtimeVisualElementMatches(child, reviewDirectFlowBoundarySelector);
+      if (!boundary && segment === targetSegment) {
+        if (!first) first = child;
+        last = child;
+      }
+      if (boundary) segment += 1;
+    }
+    return { first, last };
+  };
+  const contentTextRects = (element, respectGeometryOwners = false, atoms = []) => {
     const rects = [];
     const ownerId = element.getAttribute("data-pageroot-review-geometry-owner") || "";
+    const directFlowSegments = directFlowSegmentsForAtoms(element, atoms);
     const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
     let node = walker.nextNode();
     while (node) {
@@ -2147,365 +2455,248 @@ function reviewBootstrap(
       if (
         (node.textContent || "").trim()
         && parent
+        && (
+          !directFlowSegments.size
+          || runtimeVisualSetHas(directFlowSegments, directFlowSegmentId(element, node))
+        )
         && (!respectGeometryOwners || !crossesGeometryOwner(node, element, ownerId))
         && !parent.closest("script, style, noscript, template")
       ) {
         const range = document.createRange();
         range.selectNodeContents(node);
-        [...range.getClientRects()]
-          .filter((rect) => rect.width > 1 && rect.height > 1)
-          .forEach((rect) => rects.push(rect));
+        runtimeVisualArrayForEach(runtimeVisualArrayFilter(
+          [...range.getClientRects()],
+          (rect) => rect.width > 1 && rect.height > 1,
+        ), (rect) => runtimeVisualArrayPush(rects, rect));
         range.detach();
       }
       node = walker.nextNode();
     }
-    return rects.length ? rects : [element.getBoundingClientRect()];
+    return rects;
   };
-  const textFootprintOwner = (element, geometryOwnerId) => {
-    let candidate = element.parentElement;
-    while (candidate) {
-      if (
-        geometryOwnerId
-        && candidate.getAttribute("data-pageroot-review-geometry-owner") === geometryOwnerId
-        && !candidate.hasAttribute("data-pageroot-review-text")
-      ) return candidate;
+  const boundsForRects = (rects) => rects.length ? {
+    left: runtimeVisualMathMin(...runtimeVisualArrayMap(rects, (rect) => rect.left)),
+    top: runtimeVisualMathMin(...runtimeVisualArrayMap(rects, (rect) => rect.top)),
+    right: runtimeVisualMathMax(...runtimeVisualArrayMap(rects, (rect) => rect.right)),
+    bottom: runtimeVisualMathMax(...runtimeVisualArrayMap(rects, (rect) => rect.bottom)),
+  } : null;
+  const nearestCommonDisplayContainer = (elements) => {
+    const uniqueSet = new RuntimeVisualSet(elements);
+    const unique = [];
+    runtimeVisualSetForEach(uniqueSet, (element) => runtimeVisualArrayPush(unique, element));
+    if (unique.length < 2) return null;
+    let candidate = unique[0].parentElement;
+    while (candidate && candidate !== document.body && candidate !== document.documentElement) {
+      if (runtimeVisualElementTagName(candidate) !== "MAIN"
+        && runtimeVisualArrayEvery(unique, (element) => runtimeVisualElementContains(candidate, element))) {
+        return candidate;
+      }
       candidate = candidate.parentElement;
     }
     return null;
   };
-  const recordsShareTextLine = (left, right) => {
-    const overlap = Math.max(0, Math.min(left.bottom, right.bottom) - Math.max(left.top, right.top));
-    const minimumHeight = Math.max(1, Math.min(left.bottom - left.top, right.bottom - right.top));
-    const leftCenter = (left.top + left.bottom) / 2;
-    const rightCenter = (right.top + right.bottom) / 2;
-    return overlap / minimumHeight >= .5
-      || Math.abs(leftCenter - rightCenter) <= minimumHeight * .45;
+  const directDisplayBranch = (container, element) => {
+    let branch = element;
+    while (branch.parentElement && branch.parentElement !== container) branch = branch.parentElement;
+    return branch.parentElement === container ? branch : null;
   };
-  const textLineGroups = (records) => [...records]
-    .sort((left, right) => left.top - right.top || left.left - right.left)
-    .reduce((lines, record) => {
-      const line = lines.find((candidate) => candidate.some((item) => (
-        recordsShareTextLine(item, record)
-      )));
-      if (line) line.push(record);
-      else lines.push([record]);
-      return lines;
-    }, []);
-  const mergeTextLineIntervals = (records) => [...records]
-    .sort((left, right) => left.left - right.left)
-    .reduce((intervals, record) => {
-      const previous = intervals.at(-1);
-      if (!previous) {
-        intervals.push({ ...record });
-        return intervals;
+  const repeatedCardContainer = (container, branches) => {
+    if (branches.length < 2) return false;
+    const tokens = runtimeVisualArrayMap(branches, (branch) => (
+      runtimeVisualArrayFilter(runtimeVisualStringSplit(
+        runtimeVisualStringToLowerCase(runtimeVisualElementGetAttribute(branch, "class") || ""),
+        /\s+/u,
+      ), (token) => (
+        runtimeVisualRegExpExec(/(?:^|-)(?:card|tile|metric|kpi|stat)(?:-|$)/u, token) !== null
+      ))
+    ));
+    return runtimeVisualArrayEvery(tokens, (entry) => entry.length)
+      && runtimeVisualArraySome(tokens[0], (token) => runtimeVisualArrayEvery(
+        tokens,
+        (entry) => runtimeVisualArraySome(entry, (candidate) => candidate === token),
+      ));
+  };
+  const promotableStyleContainer = (elements) => {
+    const container = nearestCommonDisplayContainer(elements);
+    if (!container) return null;
+    const visibleElements = runtimeVisualArrayFilter(elements, (element) => {
+      const style = runtimeVisualGetComputedStyle(element);
+      const rect = runtimeVisualElementGetBoundingClientRect(element);
+      return style.display !== "none" && style.visibility !== "hidden"
+        && rect.width > 1 && rect.height > 1;
+    });
+    const branchSet = new RuntimeVisualSet(runtimeVisualArrayFilter(runtimeVisualArrayMap(visibleElements, (element) => (
+      directDisplayBranch(container, element)
+    )), runtimeVisualBoolean));
+    const branches = [];
+    runtimeVisualSetForEach(branchSet, (branch) => runtimeVisualArrayPush(branches, branch));
+    const children = [];
+    const childCollection = runtimeVisualElementChildren(container);
+    for (let index = 0; index < runtimeVisualHtmlCollectionLength(childCollection); index += 1) {
+      const child = runtimeVisualHtmlCollectionItem(childCollection, index);
+      if (child) runtimeVisualArrayPush(children, child);
+    }
+    const eligible = runtimeVisualArrayFilter(children, (child) => {
+      const style = runtimeVisualGetComputedStyle(child);
+      const rect = runtimeVisualElementGetBoundingClientRect(child);
+      return style.display !== "none" && style.visibility !== "hidden"
+        && rect.width > 1 && rect.height > 1;
+    });
+    if (branches.length < 2 || !eligible.length || branches.length / eligible.length < .75) return null;
+    const display = runtimeVisualGetComputedStyle(container).display;
+    const semantic = runtimeVisualRegExpExec(/^(?:inline-)?(?:grid|flex)$/u, display) !== null
+      || runtimeVisualElementMatches(container, "ul, ol, [role='list']")
+      || repeatedCardContainer(container, branches);
+    return semantic ? container : null;
+  };
+  const numberedLineBounds = (owner, atoms) => {
+    const marker = runtimeVisualArrayFind(
+      atoms,
+      (atom) => runtimeVisualElementContains(owner, atom.element),
+    )?.element;
+    if (!marker) return null;
+    const markerSegment = directFlowSegmentId(owner, marker);
+    if (markerSegment < 0) return null;
+    const breaks = [];
+    const breakNodes = runtimeVisualElementQuerySelectorAll(owner, "br");
+    for (let index = 0; index < runtimeVisualNodeListLength(breakNodes); index += 1) {
+      const element = runtimeVisualNodeListItem(breakNodes, index);
+      if (element && directFlowSegmentId(owner, element) === markerSegment) {
+        runtimeVisualArrayPush(breaks, element);
       }
-      const minimumHeight = Math.max(
-        1,
-        Math.min(previous.bottom - previous.top, record.bottom - record.top),
+    }
+    let previous = null;
+    let next = null;
+    for (const element of breaks) {
+      const position = runtimeVisualNodeCompareDocumentPosition(element, marker);
+      if (position & Node.DOCUMENT_POSITION_FOLLOWING) previous = element;
+      if (!next && position & Node.DOCUMENT_POSITION_PRECEDING) next = element;
+    }
+    const segmentBounds = directFlowSegmentBoundaryNodes(owner, markerSegment);
+    if (!segmentBounds.first || !segmentBounds.last) return null;
+    const range = document.createRange();
+    if (previous) range.setStartAfter(previous);
+    else range.setStartBefore(segmentBounds.first);
+    if (next) range.setEndBefore(next);
+    else range.setEndAfter(segmentBounds.last);
+    const bounds = boundsForRects(runtimeVisualArrayFilter(
+      [...range.getClientRects()],
+      (rect) => rect.width > 1 && rect.height > 1,
+    ));
+    range.detach();
+    return bounds;
+  };
+  const resolveReviewFocusGeometry = (plans, atoms) => {
+    const atomsByKey = new RuntimeVisualMap();
+    runtimeVisualArrayForEach(atoms, (atom) => {
+      const matches = runtimeVisualMapGet(atomsByKey, atom.atomKey) || [];
+      runtimeVisualArrayPush(matches, atom);
+      runtimeVisualMapSet(atomsByKey, atom.atomKey, matches);
+    });
+    return runtimeVisualArrayFlatMap(plans, (plan) => runtimeVisualArrayFlatMap(
+      plan.regions[side] || [],
+      (region) => {
+      const regionAtoms = runtimeVisualArrayFlatMap(region.atomKeys, (atomKey) => (
+        runtimeVisualMapGet(atomsByKey, atomKey) || []
+      ));
+      if (!regionAtoms.length) return [];
+      const owners = runtimeVisualArrayFlatMap(region.displayOwnerIds, (ownerId) => {
+        const owner = reviewFocusOwnerElement(ownerId);
+        return owner ? [{ ownerId, owner }] : [];
+      });
+      if (!owners.length) return [];
+      const promoted = plan.kind === "style"
+        && region.geometryMode === "container-box"
+        ? promotableStyleContainer(runtimeVisualArrayMap(owners, (entry) => entry.owner))
+        : null;
+      const geometryOwners = promoted
+        ? [{ ownerId: region.id, owner: promoted }]
+        : owners;
+      return runtimeVisualArrayFlatMap(geometryOwners, ({ ownerId, owner }, ownerIndex) => {
+      const ownerAtoms = promoted
+        ? regionAtoms
+        : runtimeVisualArrayFilter(regionAtoms, (atom) => (
+          atom.displayOwnerId === ownerId
+        ));
+      if (!ownerAtoms.length) return [];
+      const semanticLineBounds = region.geometryMode === "numbered-line-range"
+        ? numberedLineBounds(owner, ownerAtoms)
+        : null;
+      const textContentBounds = region.geometryMode === "text-content"
+        ? boundsForRects(contentTextRects(owner, true, ownerAtoms))
+        : null;
+      if (
+        (region.geometryMode === "text-content" && !textContentBounds)
+        || (region.geometryMode === "numbered-line-range" && !semanticLineBounds)
+      ) return [];
+      const rect = semanticLineBounds || textContentBounds
+        || runtimeVisualElementGetBoundingClientRect(owner);
+      if (rect.width <= 1 || rect.height <= 1) return [];
+      const representative = ownerAtoms[0];
+      const toneSet = new RuntimeVisualSet(runtimeVisualArrayFlatMap(ownerAtoms, (atom) => atom.tones));
+      const typeSet = new RuntimeVisualSet(runtimeVisualArrayFlatMap(ownerAtoms, (atom) => atom.types));
+      const tones = [];
+      const types = [];
+      runtimeVisualSetForEach(toneSet, (tone) => runtimeVisualArrayPush(tones, tone));
+      runtimeVisualSetForEach(typeSet, (type) => runtimeVisualArrayPush(types, type));
+      const evidenceUiScale = 1 / Math.max(
+        .32,
+        Math.min(1, Number(currentState.scale || 1)),
       );
-      const gap = Math.max(0, record.left - previous.right);
-      if (gap <= Math.max(10, minimumHeight * .9)) {
-        previous.left = Math.min(previous.left, record.left);
-        previous.top = Math.min(previous.top, record.top);
-        previous.right = Math.max(previous.right, record.right);
-        previous.bottom = Math.max(previous.bottom, record.bottom);
-      } else {
-        intervals.push({ ...record });
-      }
-      return intervals;
-    }, []);
-  const expandTinyTextInterval = (record, ownerBounds, em) => {
-    const height = Math.max(1, record.bottom - record.top);
-    // A readable minimum is a property of the text, not of its line box. Sizing
-    // it from the line box made a two-character edit inside generous leading
-    // reserve roughly three characters of width, so the frame visibly cut into
-    // the untouched glyph on each side.
-    const glyph = Number.isFinite(em) && em > 0 ? em : height * 0.62;
-    const minimumWidth = Math.max(16, glyph * 1.5);
-    if (record.right - record.left >= minimumWidth || !ownerBounds) return record;
-    const leftBoundary = ownerBounds.left;
-    const rightBoundary = ownerBounds.right;
-    if (rightBoundary <= leftBoundary) return record;
-    if (rightBoundary - leftBoundary <= minimumWidth) {
-      return { ...record, left: leftBoundary, right: rightBoundary };
-    }
-    const center = (record.left + record.right) / 2;
-    let left = center - minimumWidth / 2;
-    let right = center + minimumWidth / 2;
-    if (left < leftBoundary) {
-      right += leftBoundary - left;
-      left = leftBoundary;
-    }
-    if (right > rightBoundary) {
-      left -= right - rightBoundary;
-      right = rightBoundary;
-    }
-    return {
-      ...record,
-      left: Math.max(leftBoundary, left),
-      right: Math.min(rightBoundary, right),
-    };
-  };
-  const boundsForRects = (rects) => rects.length ? {
-    left: Math.min(...rects.map((rect) => rect.left)),
-    top: Math.min(...rects.map((rect) => rect.top)),
-    right: Math.max(...rects.map((rect) => rect.right)),
-    bottom: Math.max(...rects.map((rect) => rect.bottom)),
-  } : null;
-  const ownerContentRecords = (owner) => contentTextRects(owner, true)
-    .filter((rect) => rect.width > 1 && rect.height > 1)
-    .map((rect) => ({
-      left: rect.left + scrollX,
-      top: rect.top + scrollY,
-      right: rect.right + scrollX,
-      bottom: rect.bottom + scrollY,
-    }));
-  const textOwnerAllowsParagraph = (owner) => {
-    if (!owner || !owner.matches(
-      "p, h1, h2, h3, h4, h5, h6, li, td, th, caption, div",
-    )) return false;
-    const style = getComputedStyle(owner);
-    if (
-      runtimeVisualRegExpExec(/^(?:inline-)?(?:grid|flex)$/u, style.display) !== null
-      || (style.columnCount !== "auto" && Number(style.columnCount) > 1)
-    ) return false;
-    if (owner.matches("div") && owner.querySelector(
-      ":scope > address, :scope > article, :scope > aside, :scope > blockquote, :scope > div, :scope > dl, :scope > figure, :scope > form, :scope > h1, :scope > h2, :scope > h3, :scope > h4, :scope > h5, :scope > h6, :scope > ol, :scope > p, :scope > section, :scope > table, :scope > ul",
-    )) return false;
-    return true;
-  };
-  const textLineModel = (records, index) => {
-    const intervals = mergeTextLineIntervals(records);
-    const bounds = boundsForRects(intervals);
-    const continuous = !intervals.some((interval, intervalIndex) => {
-      const next = intervals[intervalIndex + 1];
-      if (!next) return false;
-      const height = Math.max(1, Math.min(
-        interval.bottom - interval.top,
-        next.bottom - next.top,
-      ));
-      return next.left - interval.right > Math.max(24, height * 2);
-    });
-    return bounds ? { index, records, intervals, bounds, continuous } : null;
-  };
-  const ownerTextLineModels = (owner) => textLineGroups(ownerContentRecords(owner))
-    .map(textLineModel)
-    .filter(Boolean);
-  const readableParagraphBounds = (owner, lines) => {
-    // Two changed lines of one paragraph deserve one paragraph rectangle: a box
-    // per line stacks parallel outlines around continuous prose.
-    if (!textOwnerAllowsParagraph(owner) || lines.length < 2) return null;
-    if (lines.some((line) => !line.continuous)) return null;
-    const separatedRows = lines.some((line, index) => {
-      const next = lines[index + 1];
-      if (!next) return false;
-      const height = Math.max(1, Math.min(
-        line.bounds.bottom - line.bounds.top,
-        next.bounds.bottom - next.bounds.top,
-      ));
-      return next.bounds.top - line.bounds.bottom > Math.max(18, height * 1.5);
-    });
-    return separatedRows ? null : boundsForRects(lines.map((line) => line.bounds));
-  };
-  const additionEvidenceClearance = (record) => {
-    if (record.tone !== "text-added") return 0;
-    const fontSize = Number.parseFloat(getComputedStyle(record.element).fontSize || "0");
-    const uiScale = 1 / Math.max(.32, Math.min(1, Number(currentState.scale || 1)));
-    return reviewTextEvidenceMarkGeometry(record, fontSize, uiScale).addedClearance;
-  };
-  const textEvidenceEnvelope = (record) => ({
-    left: record.left,
-    top: record.top,
-    right: record.right,
-    bottom: record.bottom + additionEvidenceClearance(record),
-  });
-  const lineForTextRecord = (record, lines) => lines.find((line) => (
-    recordsShareTextLine(line.bounds, record)
-  )) || null;
-  const readablePhraseRecord = (records, ownerLine) => {
-    const base = records[0];
-    const exactBounds = boundsForRects(records);
-    if (!exactBounds) return null;
-    const em = Number.parseFloat(getComputedStyle(base.element).fontSize || "0");
-    const readableBounds = expandTinyTextInterval(exactBounds, ownerLine?.bounds || null, em);
-    const bounds = boundsForRects([
-      readableBounds,
-      ...records.map(textEvidenceEnvelope),
-    ]);
-    return bounds ? {
-      ...base,
-      ...bounds,
-      textGroups: [base.textGroup],
-      scope: "text-phrase",
-    } : null;
-  };
-  const recordsByTextGroup = (records) => records.reduce((groups, record) => {
-    const phrase = groups.get(record.textGroup) || [];
-    phrase.push(record);
-    groups.set(record.textGroup, phrase);
-    return groups;
-  }, new Map());
-  const textScopeOwnerKey = (record) => [
-    record.changeId,
-    record.semanticOwnerId,
-    record.geometryOwnerId,
-    record.textOperation,
-    record.tone,
-  ].join("|");
-  const promoteTextScopeRecords = (records) => {
-    const base = records[0];
-    const owner = textFootprintOwner(base.element, base.geometryOwnerId);
-    const ownerLines = owner ? ownerTextLineModels(owner) : [];
-    if (!owner || !ownerLines.length) {
-      return textLineGroups(records).flatMap((line, lineIndex) => {
-        return [...recordsByTextGroup(line).values()]
-          .map((phrase) => readablePhraseRecord(phrase, null))
-          .filter(Boolean)
-          .map((record) => ({ ...record, visualLine: String(lineIndex + 1) }));
-      });
-    }
-    const recordsByLine = new Map();
-    const unassigned = [];
-    records.forEach((record) => {
-      const line = lineForTextRecord(record, ownerLines);
-      if (!line) {
-        unassigned.push(record);
-        return;
-      }
-      const lineRecords = recordsByLine.get(line.index) || [];
-      lineRecords.push(record);
-      recordsByLine.set(line.index, lineRecords);
-    });
-    const lineResults = [];
-    const lineDecisions = ownerLines.map((line) => {
-      const lineRecords = recordsByLine.get(line.index) || [];
-      if (!lineRecords.length) return null;
-      const phraseRecords = recordsByTextGroup(lineRecords);
-      const evidenceBounds = boundsForRects(lineRecords);
-      const lineWidth = Math.max(1, line.bounds.right - line.bounds.left);
-      const spanRatio = evidenceBounds
-        ? (evidenceBounds.right - evidenceBounds.left) / lineWidth
-        : 0;
-      return {
-        line,
-        lineRecords,
-        phraseRecords,
-        phrases: [...phraseRecords.values()]
-          .map((phrase) => readablePhraseRecord(phrase, line))
-          .filter(Boolean),
-        // Only the semantic signals — several changed phrases, or evidence across
-        // most of the line — say the line itself was rewritten. That is the
-        // signal the paragraph rectangle is allowed to read.
-        semanticPromote: line.continuous && (phraseRecords.size >= 3 || spanRatio >= .6),
-        promote: line.continuous && (phraseRecords.size >= 3 || spanRatio >= .6),
-      };
-    }).filter(Boolean);
-    // Promotion exists to stop boxes stacking, so a collision is itself a
-    // promotion reason. Tight leading makes a narrow phrase rectangle reach into
-    // the line above or below, and two crossing outlines around one sentence read
-    // as noise; the line rectangle both lines share is the clean answer. This is
-    // a local layout accident, so it never feeds the paragraph decision below.
-    lineDecisions.forEach((decision, index) => {
-      const next = lineDecisions[index + 1];
-      if (!next) return;
-      const collides = decision.phrases.some((left) => next.phrases.some((right) => (
-        Math.min(left.right, right.right) - Math.max(left.left, right.left) > -overlayInset * 2
-        && Math.min(left.bottom, right.bottom) - Math.max(left.top, right.top) > -overlayInset * 2
-      )));
-      if (!collides) return;
-      if (decision.line.continuous) decision.promote = true;
-      if (next.line.continuous) next.promote = true;
-    });
-    let promotedLineCount = 0;
-    lineDecisions.forEach((decision) => {
-      const { line, lineRecords, phraseRecords, phrases, promote } = decision;
-      if (decision.semanticPromote) promotedLineCount += 1;
-      if (promote) {
-        const textGroups = [...phraseRecords.keys()];
-        const bounds = boundsForRects([
-          line.bounds,
-          ...lineRecords.map(textEvidenceEnvelope),
-        ]);
-        if (bounds) lineResults.push({
-          ...lineRecords[0],
-          ...bounds,
-          element: owner,
-          textGroup: textGroups[0],
-          textGroups,
-          scope: "text-line",
-          visualLine: String(line.index + 1),
-        });
-        return;
-      }
-      phrases.forEach((record) => lineResults.push({
-        ...record,
-        visualLine: String(line.index + 1),
-      }));
-    });
-    // The semantic signal earns a paragraph rectangle on its own. A collision may
-    // also earn one, but only when every line of the owner carries evidence: that
-    // way the rectangle can never reach over an untouched opening or closing line
-    // and misreport where the change is. A wrapped insertion whose every line is
-    // touched therefore reads as one rectangle instead of a ladder of line boxes.
-    const everyLineHasEvidence = lineDecisions.length === ownerLines.length;
-    const everyLinePromoted = lineDecisions.every((decision) => decision.promote);
-    if (
-      !unassigned.length
-      && (
-        promotedLineCount / ownerLines.length >= .75
-        || (everyLineHasEvidence && everyLinePromoted)
+      const addedEvidenceClearance = runtimeVisualArraySome(
+        tones,
+        (tone) => tone === "text-added",
       )
-    ) {
-      const paragraphBounds = readableParagraphBounds(owner, ownerLines);
-      const bounds = paragraphBounds ? boundsForRects([
-        paragraphBounds,
-        ...records.map(textEvidenceEnvelope),
-      ]) : null;
-      if (bounds) {
-        const textGroups = [...new Set(records.map((record) => record.textGroup))];
-        return [{
-          ...base,
-          ...bounds,
-          element: owner,
-          textGroup: textGroups[0],
-          textGroups,
-          scope: "text-block",
-          visualLine: "block",
-          summary: base.textOperation === "replace" ? "段落改写" : base.summary,
-          labelPrimary: true,
-        }];
-      }
-    }
-    if (unassigned.length) {
-      textLineGroups(unassigned).forEach((line, lineIndex) => {
-        recordsByTextGroup(line).forEach((phrase) => {
-          const record = readablePhraseRecord(phrase, null);
-          if (record) lineResults.push({
-            ...record,
-            visualLine: "unassigned-" + String(lineIndex + 1),
-          });
-        });
+        ? Math.max(...runtimeVisualArrayMap(runtimeVisualArrayFilter(
+          ownerAtoms,
+          (atom) => atom.tone === "text-added",
+        ), (atom) => {
+          const em = Number.parseFloat(
+            runtimeVisualGetComputedStyle(atom.element).fontSize || "0",
+          ) || 16;
+          const dotRadius = Math.max(1.3, em * .08) * evidenceUiScale;
+          const dotGap = Math.max(.7, em * .04) * evidenceUiScale;
+          return dotGap + dotRadius + dotRadius * 1.17;
+        }), 0)
+        : 0;
+      return [{
+        ...representative,
+        element: owner,
+        focusGroupId: plan.id,
+        focusRegionId: region.id,
+        displayGroupId: plan.displayGroupId,
+        displayScope: plan.displayScope,
+        geometryMode: region.geometryMode,
+        ownerKey: region.id + ":" + String(ownerIndex + 1),
+        changeId: region.primaryChangeId,
+        changeIds: region.changeIds,
+        factKey: runtimeVisualArrayJoin(runtimeVisualArrayMap(
+          ownerAtoms,
+          (atom) => atom.factKey,
+        ), " "),
+        atomKeys: (() => {
+          const keys = [];
+          runtimeVisualSetForEach(
+            new RuntimeVisualSet(runtimeVisualArrayMap(ownerAtoms, (atom) => atom.atomKey)),
+            (atomKey) => runtimeVisualArrayPush(keys, atomKey),
+          );
+          return keys;
+        })(),
+        scope: runtimeVisualArraySome(types, (type) => type === "text")
+          ? "text-block"
+          : plan.displayScope,
+        summary: allModeSummary(types, representative.summary),
+        tones,
+        tone: tones.length > 1 ? "mixed" : tones[0],
+        types,
+        addedEvidenceClearance,
+        left: rect.left + scrollX,
+        top: rect.top + scrollY,
+        right: rect.right + scrollX,
+        bottom: rect.bottom + scrollY,
+      }];
       });
-    }
-    return lineResults;
-  };
-  const readableTextRecords = (records) => {
-    const groups = new Map();
-    records.forEach((record) => {
-      const key = textScopeOwnerKey(record);
-      const group = groups.get(key) || [];
-      group.push(record);
-      groups.set(key, group);
-    });
-    const readable = [...groups.values()].flatMap(promoteTextScopeRecords)
-      .sort((left, right) => left.top - right.top || left.left - right.left);
-    const labelled = new Set();
-    return readable.map((record) => {
-      const key = textScopeOwnerKey(record);
-      const labelPrimary = record.labelPrimary === true || !labelled.has(key);
-      labelled.add(key);
-      return { ...record, labelPrimary };
-    });
+    }));
   };
   // Hover preview: moving the pointer over a change region previews its
   // precise outline without a click. The projection layer itself never takes
@@ -2557,50 +2748,35 @@ function reviewBootstrap(
     if (projectionTransitioning) return;
     document.querySelector('[data-pageroot-review-projection-layer]')?.remove();
     const filter = currentState.filter || "all";
+    // Phase 1: collect immutable source-backed atoms. Their exact identities
+    // continue to own evidence marks and never become display grouping keys.
+    const collectReviewAtoms = () => {
     const records = [];
-    const projectionEntriesByElement = new RuntimeVisualMap();
-    let markerSequence = 0;
-    const appendProjectionEntry = (element, rawChangeId, rawFact) => {
-      const changeId = safeKey(rawChangeId);
-      const fact = normalizeProjectionFact(rawFact);
-      if (!changeId || rawChangeId !== changeId || !fact) return;
-      const entries = runtimeVisualMapGet(projectionEntriesByElement, element) || [];
-      const factIdentity = projectionFactIdentity(fact);
-      let duplicate = false;
-      runtimeVisualArrayForEach(entries, (entry) => {
-        if (
-          entry.changeId === changeId
-          && projectionFactIdentity(entry.fact) === factIdentity
-        ) duplicate = true;
-      });
-      if (!duplicate) runtimeVisualArrayPush(entries, { changeId, fact });
-      runtimeVisualMapSet(projectionEntriesByElement, element, entries);
-    };
-    document.querySelectorAll('[data-pageroot-review-marker]').forEach((element) => {
-      markerSequence += 1;
-      const changeId = element.getAttribute("data-pageroot-review-marker") || "";
-      if (!runtimeVisualSetHas(confirmedVisualChangeIds, changeId)) return;
-      projectionFactsForElement(element, markerSequence).forEach((fact) => {
-        appendProjectionEntry(element, changeId, fact);
-      });
-    });
-    runtimeVisualMapForEach(projectionEntriesByElement, (entries, element) => {
-      runtimeVisualArrayForEach(entries, ({ changeId, fact }) => {
-        if (filter !== "all" && fact.type !== filter) return;
+    runtimeVisualMapForEach(reviewExactAtomOccurrenceCounts, (_expectedCount, atomKey) => {
+          runtimeVisualArrayForEach(reviewFocusAtomEntriesForKey(atomKey), (entry) => {
+          if (!runtimeVisualSetHas(confirmedVisualChangeIds, entry.changeId)) return;
+          const { element, changeId, fact } = entry;
+          if (filter !== "all" && fact.type !== filter) return;
           const semanticOwnerId = fact.semanticOwnerId;
           const geometryOwnerId = fact.geometryOwnerId || "";
           const factKey = fact.type + ":" + fact.id;
           const factIdentity = projectionFactIdentity(fact);
+          const factAtomKey = changeId + "\u001e" + factIdentity;
+          if (factAtomKey !== atomKey) return;
           if (fact.type === "text") {
             const textTone = fact.tone === "removed" ? "text-removed" : "text-added";
             const textGroup = fact.textGroup || fact.id;
-            rangeClientRects(element).forEach((rect) => records.push({
+            runtimeVisualArrayForEach(rangeClientRects(element), (rect) => runtimeVisualArrayPush(records, {
               element,
               changeId,
               semanticOwnerId,
               geometryOwnerId,
               factKey,
               factIdentity,
+              atomKey: factAtomKey,
+              displayGroupId: fact.displayGroupId || ("display-fact-" + fact.id),
+              displayOwnerId: fact.displayOwnerId || geometryOwnerId || semanticOwnerId,
+              displayScope: fact.displayScope || "paragraph",
               ownerKey: "",
               textGroup,
               textOperation: fact.operation || "",
@@ -2619,13 +2795,17 @@ function reviewBootstrap(
           const scope = "element";
           const structureChange = fact.structureChange || "";
           const summary = fact.summary || structureSummary(structureChange);
-          [element.getBoundingClientRect()].forEach((rect) => records.push({
+          runtimeVisualArrayForEach([runtimeVisualElementGetBoundingClientRect(element)], (rect) => runtimeVisualArrayPush(records, {
             element,
             changeId,
             semanticOwnerId,
             geometryOwnerId,
             factKey,
             factIdentity,
+            atomKey: factAtomKey,
+            displayGroupId: fact.displayGroupId || ("display-fact-" + fact.id),
+            displayOwnerId: fact.displayOwnerId || geometryOwnerId || semanticOwnerId,
+            displayScope: fact.displayScope || "container",
             ownerKey: "",
             structureChange,
             scope,
@@ -2638,122 +2818,87 @@ function reviewBootstrap(
             right: rect.right + scrollX,
             bottom: rect.bottom + scrollY,
           }));
-      });
+          });
     });
-    const visibleRecords = records
-      .filter((rect) => rect.right - rect.left > 1 && rect.bottom - rect.top > 1)
-      .sort((left, right) => left.changeId.localeCompare(right.changeId) || left.top - right.top || left.left - right.left);
-    const readableRecords = [
-      ...visibleRecords.filter((record) => (
-        record.tone !== "text-added" && record.tone !== "text-removed"
-      )),
-      ...readableTextRecords(visibleRecords.filter((record) => (
-        record.tone === "text-added" || record.tone === "text-removed"
-      ))),
-    ].sort((left, right) => left.changeId.localeCompare(right.changeId) || left.top - right.top || left.left - right.left);
-    const structureDominators = filter === "all"
-      ? readableRecords.filter((record) => (
-        record.tone === "structure"
-        && (record.structureChange === "added" || record.structureChange === "removed")
-      ))
-      : [];
-    const ownerFilteredRecords = readableRecords.filter((record) => !(
-      (record.tone === "text-added" || record.tone === "text-removed")
-      && structureDominators.some((candidate) => (
-        candidate.changeId === record.changeId
-        && candidate.semanticOwnerId === record.semanticOwnerId
-      ))
-    ));
-    const minimalRecords = ownerFilteredRecords.filter((record, index) => {
-      if (record.tone === "text-added" || record.tone === "text-removed") return true;
-      return !ownerFilteredRecords.some((candidate, candidateIndex) => {
-        if (
-          index === candidateIndex
-          || record.changeId !== candidate.changeId
-          || record.semanticOwnerId !== candidate.semanticOwnerId
-          || record.factIdentity !== candidate.factIdentity
-          || record.tone !== candidate.tone
-        ) return false;
-        const recordArea = (record.right - record.left) * (record.bottom - record.top);
-        const candidateArea = (candidate.right - candidate.left) * (candidate.bottom - candidate.top);
-        return candidateArea < recordArea * .86 && recordContains(record, candidate);
-      });
-    });
-    const textRecords = minimalRecords.filter((record) => (
-      record.tone === "text-added" || record.tone === "text-removed"
-    ));
-    const nonTextRecords = minimalRecords.filter((record) => (
-      record.tone !== "text-added" && record.tone !== "text-removed"
-    ));
-    // Collapse only duplicate geometry records for the same structure fact.
-    // Containment alone is never evidence that an independently owned nested
-    // fact is redundant.
-    const containedRecords = mergeConnectedRecords(
-      [...nonTextRecords].sort((left, right) => (
-        (right.right - right.left) * (right.bottom - right.top)
-        - (left.right - left.left) * (left.bottom - left.top)
-      )),
-      (left, right) => left.changeId === right.changeId && (
-        recordNestsWithin(left, right) || recordNestsWithin(right, left)
-      ),
+    return records;
+    };
+    const records = collectReviewAtoms();
+    const visibleRecords = runtimeVisualArrayFilter(
+      records,
+      (rect) => rect.right - rect.left > 1 && rect.bottom - rect.top > 1,
     );
-    let merged = [
-      ...textRecords,
-      ...mergeConnectedRecords(containedRecords, (left, right) => (
-        left.changeId === right.changeId
-        && left.semanticOwnerId === right.semanticOwnerId
-        && left.factIdentity === right.factIdentity
-        && left.tone === right.tone
-        && recordsAreClose(left, right)
-      )),
-    ].sort((left, right) => left.changeId.localeCompare(right.changeId) || left.top - right.top || left.left - right.left);
-    if (filter === "all") {
-      merged = mergeConnectedRecords(merged, (left, right) => (
-        !left.types.includes("text")
-        && !right.types.includes("text")
-        && left.changeId === right.changeId
-        && left.semanticOwnerId === right.semanticOwnerId
-        // “全部变化” may suppress a structural child by its explicit owner
-        // rule, but it must never turn merely adjacent independent facts into
-        // one outline or one mask hole.
-        && left.factIdentity === right.factIdentity
-        && recordsOverlapStrongly(left, right)
-      )).map((record) => ({
-        ...record,
-        tone: record.tones.length > 1 ? "mixed" : record.tones[0],
-        summary: allModeSummary(record.types, record.summary),
-      }));
-    }
+    runtimeVisualArraySort(
+      visibleRecords,
+      (left, right) => left.changeId.localeCompare(right.changeId)
+        || left.top - right.top || left.left - right.left,
+    );
+    // The analyzer owns grouping and region identity. Runtime only resolves the
+    // current geometry of declared atom keys and owner ids.
+    const resolvedGroups = resolveReviewFocusGeometry(reviewFocusGroupPlans, visibleRecords);
+    runtimeVisualArraySort(
+      resolvedGroups,
+      (left, right) => left.changeId.localeCompare(right.changeId)
+        || left.top - right.top || left.left - right.left,
+    );
+    const requestedFocusGroupId = safeProjectionFactKey(currentState.activeFocusGroupId);
+    const activeFocusGroupId = runtimeVisualArraySome(reviewFocusGroupPlans, (plan) => (
+      plan.id === requestedFocusGroupId
+    )) ? requestedFocusGroupId : "";
+    let merged = activeFocusGroupId
+      ? runtimeVisualArrayFilter(
+        resolvedGroups,
+        (record) => record.focusGroupId === activeFocusGroupId,
+      )
+      : [];
     const inset = overlayInset;
     // Measure the authored document after the previous projection layer has
     // been removed. The projection may consume this width but must never grow
     // it: an inset at the right edge must not create horizontal scrolling.
-    const documentWidth = Math.max(
+    const documentWidth = runtimeVisualMathMax(
       innerWidth,
       document.documentElement.scrollWidth,
       document.body?.scrollWidth || 0,
     );
-    const height = Math.max(innerHeight, documentHeight());
-    merged = merged.flatMap((record) => {
-      const renderFragments = (record.fragments || [{
+    const height = runtimeVisualMathMax(innerHeight, documentHeight());
+    merged = runtimeVisualArrayFlatMap(merged, (record) => {
+      const renderFragments = runtimeVisualArrayFilter(runtimeVisualArrayMap(
+        record.fragments || [{
         left: record.left,
         top: record.top,
         right: record.right,
         bottom: record.bottom,
-      }]).map((fragment) => ({
+        }],
+        (fragment) => ({
         left: clamp(fragment.left - inset, 0, documentWidth),
         top: clamp(fragment.top - inset, 0, height),
         right: clamp(fragment.right + inset, 0, documentWidth),
-        bottom: clamp(fragment.bottom + inset, 0, height),
-      })).filter((fragment) => (
+        bottom: clamp(
+          fragment.bottom + runtimeVisualMathMax(inset, record.addedEvidenceClearance || 0),
+          0,
+          height,
+        ),
+        }),
+      ), (fragment) => (
         fragment.right - fragment.left > 0
         && fragment.bottom - fragment.top > 0
       ));
       if (!renderFragments.length) return [];
-      const left = Math.min(...renderFragments.map((fragment) => fragment.left));
-      const top = Math.min(...renderFragments.map((fragment) => fragment.top));
-      const right = Math.max(...renderFragments.map((fragment) => fragment.right));
-      const bottom = Math.max(...renderFragments.map((fragment) => fragment.bottom));
+      const left = runtimeVisualMathMin(...runtimeVisualArrayMap(
+        renderFragments,
+        (fragment) => fragment.left,
+      ));
+      const top = runtimeVisualMathMin(...runtimeVisualArrayMap(
+        renderFragments,
+        (fragment) => fragment.top,
+      ));
+      const right = runtimeVisualMathMax(...runtimeVisualArrayMap(
+        renderFragments,
+        (fragment) => fragment.right,
+      ));
+      const bottom = runtimeVisualMathMax(...runtimeVisualArrayMap(
+        renderFragments,
+        (fragment) => fragment.bottom,
+      ));
       return [{
         ...record,
         left,
@@ -2764,55 +2909,39 @@ function reviewBootstrap(
         pathData: unionPath(renderFragments),
       }];
     });
-    if (!merged.length) {
-      overlayHoverRegions = [];
-      overlayElementsByChange = new RuntimeVisualMap();
-      setHoverChange("");
-      return;
-    }
-    // One contiguous stretch of a change carries one caption and one
-    // page-edge revision bar. A change may touch places far apart on the
-    // page, so captions and bars follow its spatial clusters instead of one
-    // distant caption per changeId; navigation and the 变化区域 count stay
-    // per change. Caption chrome is counter-scaled to a constant screen size,
-    // so the cluster reach grows as the canvas shrinks; adjacent same-caption
-    // stretches still collapse to one representative, and a focused change
-    // always keeps its own captions.
-    const badgeUiScale = 1 / Math.max(.32, Math.min(1, Number(currentState.scale || 1)));
-    const regions = reviewRegionAnnotations(
-      merged,
-      { clusterGap: 28 * badgeUiScale },
+    // Navigation bars remain available for every resolved group in overview;
+    // only the active group's first outline carries the single public label.
+    const badgeUiScale = 1 / runtimeVisualMathMax(
+      .32,
+      runtimeVisualMathMin(1, Number(currentState.scale || 1)),
     );
-    const labelledAnchors = aggregateReviewBadgeLabels(regions.map((region) => ({
-      changeId: region.changeId,
-      summary: region.summary,
-      left: region.left,
-      right: region.right,
-      // Cluster by caption anchor: the caption sits at the region's top edge,
-      // so two captions crowd when they share a column and their anchors sit
-      // within one caption's reach — not merely because two tall regions'
-      // edges come close somewhere far below the captions.
-      top: region.top,
-      bottom: region.top,
-    })), {
-      focus: currentState.focus,
-      labelReach: 26 * badgeUiScale,
-    });
-    const labelByCarrier = new RuntimeVisualMap();
-    regions.forEach((region, regionIndex) => {
-      const anchor = labelledAnchors[regionIndex];
-      if (!anchor || anchor.labelPrimary === false) return;
-      const focused = currentState.focus !== "all" && currentState.focus === region.changeId;
-      // At rest a genuine cluster of same-caption stretches reads
-      // "{caption} ×N" (N stretches nearby); a focused stretch always speaks
-      // for itself with per-kind fact counts and never carries the cluster
-      // count.
-      runtimeVisualMapSet(labelByCarrier, region.carrier, {
-        text: focused
-          ? region.detail
-          : reviewBadgeLabelText(region.summary, anchor.labelCount || 1),
-        clusterCount: focused ? 1 : (anchor.labelCount || 1),
+    const regionsById = new RuntimeVisualMap();
+    runtimeVisualArrayForEach(resolvedGroups, (record) => {
+      const existing = runtimeVisualMapGet(regionsById, record.focusRegionId);
+      if (existing) {
+        existing.left = runtimeVisualMathMin(existing.left, record.left);
+        existing.top = runtimeVisualMathMin(existing.top, record.top);
+        existing.right = runtimeVisualMathMax(existing.right, record.right);
+        existing.bottom = runtimeVisualMathMax(existing.bottom, record.bottom);
+        return;
+      }
+      runtimeVisualMapSet(regionsById, record.focusRegionId, {
+        changeId: record.changeId,
+        focusGroupId: record.focusGroupId,
+        regionId: record.focusRegionId,
+        left: record.left,
+        top: record.top,
+        right: record.right,
+        bottom: record.bottom,
+        carrier: record,
       });
+    });
+    const regions = [];
+    runtimeVisualMapForEach(regionsById, (region) => runtimeVisualArrayPush(regions, region));
+    const labelByCarrier = new RuntimeVisualMap();
+    if (merged[0]) runtimeVisualMapSet(labelByCarrier, merged[0], {
+      text: merged[0].summary,
+      clusterCount: 1,
     });
     overlayElementsByChange = new RuntimeVisualMap();
     const layer = document.createElement("div");
@@ -2820,6 +2949,7 @@ function reviewBootstrap(
     layer.style.setProperty("width", documentWidth + "px", "important");
     layer.style.setProperty("height", height + "px", "important");
     const namespace = "http://www.w3.org/2000/svg";
+    if (merged.length) {
     const svg = document.createElementNS(namespace, "svg");
     svg.setAttribute("data-pageroot-review-mask-layer", "true");
     svg.setAttribute("width", String(documentWidth));
@@ -2865,19 +2995,17 @@ function reviewBootstrap(
     maskBackground.setAttribute("fill", "#ffffff");
     resetMaskPrimitive(maskBackground, "#ffffff");
     mask.append(maskBackground);
-    const emphasizedRecords = merged.filter((record) => (
-      record.types.includes("text")
-      || (currentState.focus !== "all" && currentState.focus === record.changeId)
-    ));
-    emphasizedRecords.forEach((record) => {
+    const emphasizedRecords = merged;
+    runtimeVisualArrayForEach(emphasizedRecords, (record) => {
       const hole = document.createElementNS(namespace, "path");
       hole.setAttribute("data-pageroot-review-mask-hole", record.changeId);
       hole.setAttribute("data-pageroot-review-semantic-owner", record.semanticOwnerId || "");
       hole.setAttribute("data-pageroot-review-geometry-owner", record.geometryOwnerId || "");
       hole.setAttribute("data-pageroot-review-fact", record.factKey || "");
+      hole.setAttribute("data-pageroot-review-focus-group", record.focusGroupId || "");
       if (record.textGroup) hole.setAttribute("data-text-group", record.textGroup);
       if (record.textGroups?.length) {
-        hole.setAttribute("data-text-groups", record.textGroups.join(" "));
+        hole.setAttribute("data-text-groups", runtimeVisualArrayJoin(record.textGroups, " "));
       }
       if (record.ownerKey) {
         hole.setAttribute("data-pageroot-review-mask-owner", record.ownerKey);
@@ -2909,8 +3037,14 @@ function reviewBootstrap(
     dim.setAttribute("fill-opacity", dimOpacity);
     resetMaskPrimitive(dim, "#ffffff");
     dim.style.setProperty("fill-opacity", dimOpacity, "important");
+    dim.style.setProperty(
+      "backdrop-filter",
+      "grayscale(var(--pageroot-review-context-grayscale)) saturate(var(--pageroot-review-context-saturation)) blur(1px)",
+      "important",
+    );
     svg.append(dim);
     layer.append(svg);
+    }
     if (filter === "all" || filter === "text") {
       const uiScale = 1 / Math.max(.32, Math.min(1, Number(currentState.scale || 1)));
       const marksSvg = document.createElementNS(namespace, "svg");
@@ -2922,12 +3056,27 @@ function reviewBootstrap(
       marksSvg.style.setProperty("height", height + "px", "important");
       const strikeRuns = [];
       const addedDots = [];
-      document.querySelectorAll("[data-pageroot-review-text]").forEach((marker) => {
-        const markerChangeId = marker.getAttribute("data-pageroot-review-marker") || "";
-        if (!runtimeVisualSetHas(confirmedVisualChangeIds, markerChangeId)) return;
-        const tone = marker.getAttribute("data-pageroot-review-text") || "";
+      const activeAtomKeys = new RuntimeVisualSet();
+      if (activeFocusGroupId) runtimeVisualArrayForEach(reviewFocusGroupPlans, (plan) => {
+        if (plan.id !== activeFocusGroupId) return;
+        runtimeVisualArrayForEach(plan.atomKeys, (atomKey) => {
+          runtimeVisualSetAdd(activeAtomKeys, atomKey);
+        });
+      });
+      const markedElements = new RuntimeVisualSet();
+      runtimeVisualArrayForEach(visibleRecords, (atom) => {
+        if (!runtimeVisualArraySome(atom.types, (type) => type === "text")) return;
+        if (activeFocusGroupId && !runtimeVisualSetHas(activeAtomKeys, atom.atomKey)) return;
+        const entry = runtimeVisualArrayFind(
+          reviewFocusAtomEntriesForKey(atom.atomKey),
+          (candidate) => candidate.element === atom.element,
+        );
+        if (!entry || runtimeVisualSetHas(markedElements, entry.element)) return;
+        runtimeVisualSetAdd(markedElements, entry.element);
+        const marker = entry.element;
+        const tone = entry.fact.tone || "";
         if (tone !== "added" && tone !== "removed") return;
-        const fontSize = Number.parseFloat(getComputedStyle(marker).fontSize || "0");
+        const fontSize = Number.parseFloat(runtimeVisualGetComputedStyle(marker).fontSize || "0");
         const walker = document.createTreeWalker(marker, NodeFilter.SHOW_TEXT);
         let node = walker.nextNode();
         while (node) {
@@ -2961,14 +3110,14 @@ function reviewBootstrap(
                   bottom: rect.bottom + scrollY,
                 }, fontSize, uiScale);
                 if (tone === "added") {
-                  addedDots.push({
+                  runtimeVisualArrayPush(addedDots, {
                     x: geometry.dotX,
                     y: geometry.dotY,
-                    radius: geometry.dotRadius,
+                    radius: geometry.dotRadius * 1.17,
                     em: geometry.em,
                   });
                 } else {
-                  strikeRuns.push(geometry);
+                  runtimeVisualArrayPush(strikeRuns, geometry);
                 }
               }
             }
@@ -2977,7 +3126,7 @@ function reviewBootstrap(
           node = walker.nextNode();
         }
       });
-      alignReviewTextEvidenceDotRows(addedDots).forEach((dot) => {
+      runtimeVisualArrayForEach(alignReviewTextEvidenceDotRows(addedDots), (dot) => {
         const circle = document.createElementNS(namespace, "circle");
         circle.setAttribute("data-pageroot-review-text-mark", "added");
         circle.setAttribute("cx", String(dot.x));
@@ -2985,10 +3134,13 @@ function reviewBootstrap(
         circle.setAttribute("r", String(dot.radius));
         marksSvg.append(circle);
       });
-      strikeRuns.sort((left, right) => left.strikeY - right.strikeY || left.strikeLeft - right.strikeLeft);
+      runtimeVisualArraySort(
+        strikeRuns,
+        (left, right) => left.strikeY - right.strikeY || left.strikeLeft - right.strikeLeft,
+      );
       const mergedStrikes = [];
-      strikeRuns.forEach((run) => {
-        const previous = mergedStrikes.at(-1);
+      runtimeVisualArrayForEach(strikeRuns, (run) => {
+        const previous = mergedStrikes[mergedStrikes.length - 1];
         if (
           previous
           && Math.abs(previous.strikeY - run.strikeY) <= Math.max(1, run.strikeThickness)
@@ -3001,9 +3153,9 @@ function reviewBootstrap(
           previous.gap = run.gap;
           return;
         }
-        mergedStrikes.push({ ...run });
+        runtimeVisualArrayPush(mergedStrikes, { ...run });
       });
-      mergedStrikes.forEach((run) => {
+      runtimeVisualArrayForEach(mergedStrikes, (run) => {
         const line = document.createElementNS(namespace, "line");
         line.setAttribute("data-pageroot-review-text-mark", "removed");
         line.setAttribute("x1", String(run.strikeLeft));
@@ -3016,30 +3168,34 @@ function reviewBootstrap(
       });
       layer.append(marksSvg);
     }
-    merged.forEach((record) => {
+    runtimeVisualArrayForEach(merged, (record) => {
       const box = document.createElement("div");
       box.setAttribute("data-pageroot-review-overlay-box", record.changeId);
       box.setAttribute("data-pageroot-review-semantic-owner", record.semanticOwnerId || "");
       box.setAttribute("data-pageroot-review-geometry-owner", record.geometryOwnerId || "");
       box.setAttribute("data-pageroot-review-fact", record.factKey || "");
+      box.setAttribute("data-pageroot-review-focus-group", record.focusGroupId || "");
+      box.setAttribute("data-pageroot-review-focus-region", record.focusRegionId || "");
+      box.setAttribute("data-pageroot-review-display-group", record.displayGroupId || "");
       if (record.ownerKey) {
         box.setAttribute("data-pageroot-review-overlay-owner", record.ownerKey);
       }
       box.dataset.tone = record.tone;
-      box.dataset.tones = record.tones.join(" ");
-      box.dataset.types = record.types.join(" ");
+      box.dataset.tones = runtimeVisualArrayJoin(record.tones, " ");
+      box.dataset.types = runtimeVisualArrayJoin(record.types, " ");
       box.dataset.scope = record.scope || "element";
       box.dataset.summary = record.summary;
       if (record.textGroup) box.dataset.textGroup = record.textGroup;
-      if (record.textGroups?.length) box.dataset.textGroups = record.textGroups.join(" ");
+      if (record.textGroups?.length) {
+        box.dataset.textGroups = runtimeVisualArrayJoin(record.textGroups, " ");
+      }
       if (record.textOperation) box.dataset.textOperation = record.textOperation;
       if (record.visualLine) box.dataset.visualLine = record.visualLine;
       box.setAttribute(
         "data-pageroot-review-fragment-count",
         String((record.renderFragments || []).length || 1),
       );
-      const active = currentState.focus !== "all" && currentState.focus === record.changeId;
-      box.dataset.active = active ? "true" : "false";
+      box.dataset.active = "true";
       const left = record.left;
       const top = record.top;
       const width = record.right - record.left;
@@ -3081,7 +3237,11 @@ function reviewBootstrap(
         label.addEventListener("click", (event) => {
           event.preventDefault();
           event.stopPropagation();
-          post("select-change", { changeId: record.changeId });
+          post("select-change", {
+            changeId: record.changeId,
+            focusGroupId: record.focusGroupId,
+            regionId: record.focusRegionId,
+          });
         });
         box.append(label);
       }
@@ -3090,11 +3250,13 @@ function reviewBootstrap(
       runtimeVisualMapSet(overlayElementsByChange, record.changeId, hoverElements);
       layer.append(box);
     });
-    regions.forEach((region) => {
-      const focusedRegion = currentState.focus !== "all" && currentState.focus === region.changeId;
+    runtimeVisualArrayForEach(regions, (region) => {
+      const focusedRegion = activeFocusGroupId === region.focusGroupId;
       const regionElements = runtimeVisualMapGet(overlayElementsByChange, region.changeId) || [];
       const bar = document.createElement("div");
       bar.setAttribute("data-pageroot-review-region-bar", region.changeId);
+      bar.setAttribute("data-pageroot-review-focus-group", region.focusGroupId || "");
+      bar.setAttribute("data-pageroot-review-focus-region", region.regionId || "");
       bar.dataset.active = focusedRegion ? "true" : "false";
       const barTop = Math.max(0, region.top - inset);
       const barHeight = Math.max(8 * badgeUiScale, region.bottom + inset - barTop);
@@ -3104,7 +3266,11 @@ function reviewBootstrap(
       bar.setAttribute("data-top", String(barTop));
       bar.setAttribute("data-height", String(barHeight));
       bar.addEventListener("click", () => {
-        post("select-change", { changeId: region.changeId });
+        post("select-change", {
+          changeId: region.changeId,
+          focusGroupId: region.focusGroupId,
+          regionId: region.regionId,
+        });
       });
       bar.addEventListener("pointerenter", () => setHoverChange(region.changeId));
       bar.addEventListener("pointerleave", () => setHoverChange(""));
@@ -3112,7 +3278,7 @@ function reviewBootstrap(
       layer.append(bar);
       runtimeVisualMapSet(overlayElementsByChange, region.changeId, regionElements);
     });
-    overlayHoverRegions = regions.map((region) => ({
+    overlayHoverRegions = runtimeVisualArrayMap(regions, (region) => ({
       changeId: region.changeId,
       left: region.left - inset,
       top: region.top - inset,
@@ -3123,29 +3289,40 @@ function reviewBootstrap(
     hoveredChangeId = "";
     setHoverChange(rehover);
     document.body.append(layer);
-    document.documentElement.dataset.pagerootReviewOverlays = merged.length ? "true" : "false";
+    document.documentElement.dataset.pagerootReviewOverlays = resolvedGroups.length ? "true" : "false";
     scheduleLayoutReport();
   }
   const applyState = (state) => {
     currentState = { ...currentState, ...state };
+    const requestedFocusGroupId = safeProjectionFactKey(currentState.activeFocusGroupId);
+    currentState.activeFocusGroupId = runtimeVisualArraySome(reviewFocusGroupPlans, (plan) => (
+      plan.id === requestedFocusGroupId
+    )) ? requestedFocusGroupId : null;
     const root = document.documentElement;
-    root.dataset.pagerootReviewFilter = state.filter || "all";
-    root.dataset.pagerootReviewFocus = state.focus || "all";
-    const transparency = Math.max(0, Math.min(100, Number(state.transparency ?? 18))) / 100;
+    root.dataset.pagerootReviewFilter = currentState.filter || "all";
+    root.dataset.pagerootReviewFocus = currentState.focus || "all";
+    root.dataset.pagerootReviewFocusGroup = currentState.activeFocusGroupId || "";
+    const transparency = Math.max(
+      0,
+      Math.min(100, Number(currentState.transparency ?? 18)),
+    ) / 100;
     root.style.setProperty("--pageroot-review-context-opacity", String(transparency));
     root.style.setProperty("--pageroot-review-context-grayscale", String((1 - transparency) * .55));
     root.style.setProperty("--pageroot-review-context-saturation", String(.7 + transparency * .3));
-    root.style.setProperty("--pageroot-review-ui-scale", String(1 / Math.max(.32, Math.min(1, Number(state.scale || 1)))));
-    document.querySelectorAll("[data-pageroot-outline-id]").forEach((element) => {
-      element.dataset.pagerootReviewActive = state.focus === "all"
-        || element.dataset.pagerootReviewId === state.focus
-        || element.dataset.pagerootOutlineId === state.focus
+    root.style.setProperty("--pageroot-review-ui-scale", String(1 / Math.max(
+      .32,
+      Math.min(1, Number(currentState.scale || 1)),
+    )));
+    runtimeVisualArrayForEach(runtimeVisualQueryElements("[data-pageroot-outline-id]"), (element) => {
+      element.dataset.pagerootReviewActive = currentState.focus === "all"
+        || element.dataset.pagerootReviewId === currentState.focus
+        || element.dataset.pagerootOutlineId === currentState.focus
         ? "true"
         : "false";
     });
-    document.querySelectorAll("[data-pageroot-review-marker]").forEach((element) => {
-      element.dataset.pagerootReviewActive = state.focus !== "all"
-        && element.getAttribute("data-pageroot-review-marker") === state.focus
+    runtimeVisualArrayForEach(runtimeVisualQueryElements("[data-pageroot-review-marker]"), (element) => {
+      element.dataset.pagerootReviewActive = currentState.focus !== "all"
+        && element.getAttribute("data-pageroot-review-marker") === currentState.focus
         ? "true"
         : "false";
     });
@@ -3179,7 +3356,21 @@ function reviewBootstrap(
     if (message.type === "mirror-action") mirrorAction(message);
     if (message.type === "focus-change") {
       const changeId = String(message.changeId || "").replace(/[^a-z0-9-]/gi, "");
-      const target = document.querySelector('[data-pageroot-review-id="' + changeId + '"]');
+      const focusGroupId = safeProjectionFactKey(message.focusGroupId);
+      const regionId = safeProjectionFactKey(message.regionId);
+      const focusPlan = runtimeVisualArrayFind(
+        reviewFocusGroupPlans,
+        (plan) => plan.id === focusGroupId,
+      );
+      const focusRegion = focusPlan ? runtimeVisualArrayFind(focusPlan.regions[side], (region) => (
+        region.id === regionId && region.primaryChangeId === changeId
+      )) : null;
+      const target = focusRegion
+        ? reviewFocusOwnerElement(focusRegion.displayOwnerIds[0])
+        : !focusGroupId && !regionId
+          ? document.querySelector('[data-pageroot-review-id="' + changeId + '"]')
+          : null;
+      if ((focusGroupId || regionId) && (!focusRegion || !target)) return;
       focusChangeTarget(
         changeId,
         target,
@@ -3187,6 +3378,8 @@ function reviewBootstrap(
           ? message.revealSteps
           : message.panelPath?.length ? message.panelPath : message.panelKey,
         message.behavior === "smooth" ? "smooth" : "auto",
+        focusRegion?.id || "",
+        focusPlan?.id || "",
       );
     }
     if (message.type === "focus-outline") {
@@ -3293,6 +3486,23 @@ function reviewBootstrap(
   addEventListener("touchstart", announceScrollIntent, { capture: true, passive: true });
   addEventListener("pointerdown", announceScrollIntent, { capture: true, passive: true });
   addEventListener("keydown", (event) => {
+    const editableElement = runtimeVisualIsInstance(RuntimeVisualElement, event.target)
+      ? event.target
+      : null;
+    const editableTarget = editableElement && (
+      runtimeVisualBoolean(runtimeVisualElementClosest(editableElement, "input, textarea, select"))
+      || runtimeVisualBoolean(runtimeVisualHTMLElementIsContentEditable(editableElement))
+    );
+    if (
+      event.key === "Escape"
+      && !event.defaultPrevented
+      && !editableTarget
+      && currentState.activeFocusGroupId
+    ) {
+      event.preventDefault();
+      post("leave-focus");
+      return;
+    }
     const scrollKeys = new Set([
       "ArrowUp",
       "ArrowDown",
@@ -3304,12 +3514,9 @@ function reviewBootstrap(
       "Spacebar",
     ]);
     if (!scrollKeys.has(event.key)) return;
-    if (
-      event.target instanceof Element
-      && event.target.closest('input, textarea, select, [contenteditable="true"]')
-    ) return;
+    if (editableTarget) return;
     announceScrollIntent();
-  }, true);
+  });
   addEventListener("scroll", () => {
     const command = activeScrollCommand;
     const commandMatches = command

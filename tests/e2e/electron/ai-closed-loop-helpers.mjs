@@ -815,7 +815,7 @@ export const REVIEW_PROJECTION_CASES = Object.freeze([
     ownerSelector: '[data-review-brand-row="added"]',
     rangeSelector: null,
     expectedFrameCount: 1,
-    expectedMaskCount: 0,
+    expectedMaskCount: 1,
     tolerance: 0.75,
     negativeSelectors: [
       '[data-review-brand-row="alpha"] [data-pageroot-review-overlay-box]',
@@ -830,7 +830,10 @@ export async function assertReviewControlDefaults(page, beforeReviewFrame) {
   ), { timeout: 30_000 }).toBe("all");
   await expect.poll(async () => beforeReviewFrame.locator("html").getAttribute(
     "data-pageroot-review-focus",
-  )).not.toBe("all");
+  )).toBe("all");
+  await expect.poll(async () => beforeReviewFrame.locator("html").getAttribute(
+    "data-pageroot-review-focus-group",
+  )).toBe("");
   await expect(page.getByRole("slider", {
     name: "非修改区域上下文可见度",
   })).toHaveValue("18");
@@ -842,30 +845,12 @@ export async function assertReviewControlDefaults(page, beforeReviewFrame) {
     .toHaveAttribute("aria-pressed", "true");
   await expect(page.getByRole("button", { name: "原始大小", exact: true }))
     .toHaveAttribute("aria-pressed", "true");
-  await expect.poll(async () => {
-    const footprint = await beforeReviewFrame.locator(
-      '[data-pageroot-review-overlay-box][data-active="true"]',
-    ).first().evaluate((box) => ({
-      left: Number(box.getAttribute("data-left")),
-      right: Number(box.getAttribute("data-left")) + Number(box.getAttribute("data-width")),
-      top: Number(box.getAttribute("data-top")),
-      bottom: Number(box.getAttribute("data-top")) + Number(box.getAttribute("data-height")),
-      scrollTop: scrollY,
-      viewportHeight: innerHeight,
-    })).catch(() => null);
-    if (!footprint) return false;
-    if (
-      footprint.bottom <= footprint.scrollTop
-      || footprint.top >= footprint.scrollTop + footprint.viewportHeight
-    ) return false;
-    return page.locator('[aria-label="修改前画布滚动区"]').evaluate((viewport, geometry) => {
-      const frame = viewport.querySelector("iframe");
-      if (!frame || frame.offsetWidth <= 0) return false;
-      const scale = frame.getBoundingClientRect().width / frame.offsetWidth;
-      return geometry.right * scale > viewport.scrollLeft
-        && geometry.left * scale < viewport.scrollLeft + viewport.clientWidth;
-    }, footprint);
-  }, { timeout: 30_000 }).toBe(true);
+  await expect(beforeReviewFrame.locator("[data-pageroot-review-overlay-box]")).toHaveCount(0);
+  await expect(beforeReviewFrame.locator("[data-pageroot-review-mask-hole]")).toHaveCount(0);
+  await expect(beforeReviewFrame.locator("[data-pageroot-review-mask-dim]")).toHaveCount(0);
+  await expect.poll(async () => beforeReviewFrame.locator(
+    "[data-pageroot-review-region-bar]",
+  ).count(), { timeout: 30_000 }).toBeGreaterThan(0);
 }
 
 export async function assertReviewChangeOutline(beforeReviewFrame, afterReviewFrame) {
@@ -877,9 +862,23 @@ export async function assertReviewChangeOutline(beforeReviewFrame, afterReviewFr
 }
 
 export async function assertProjectionGeometryCase(frame, geometryCase) {
-  const owner = await frame.locator(geometryCase.ownerSelector)
-    .getAttribute("data-pageroot-review-semantic-owner");
+  const ownerElement = frame.locator(geometryCase.ownerSelector);
+  const owner = await ownerElement.getAttribute("data-pageroot-review-semantic-owner");
   expect(owner, `${geometryCase.id} must retain a semantic owner`).toBeTruthy();
+  const focusGroupId = await ownerElement.evaluate((element) => {
+    const changeId = element.getAttribute("data-pageroot-review-marker") || "";
+    const facts = JSON.parse(
+      element.getAttribute("data-pageroot-review-projection-facts") || "[]",
+    );
+    const fact = facts.find((candidate) => candidate.type === "structure") || facts[0];
+    const displayGroupId = fact?.displayGroupId || `display-fact-${fact?.id || ""}`;
+    return fact?.structureChange === "style"
+      ? `focus-${displayGroupId}`
+      : `focus-${changeId}-${displayGroupId}`;
+  });
+  await frame.locator(
+    `[data-pageroot-review-region-bar][data-pageroot-review-focus-group="${focusGroupId}"]`,
+  ).first().click();
   const frames = frame.locator(
     `[data-pageroot-review-overlay-box][data-tone="${geometryCase.changeType}"][data-pageroot-review-semantic-owner="${owner}"]`,
   );

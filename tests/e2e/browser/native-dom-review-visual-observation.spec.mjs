@@ -6,6 +6,17 @@ import { generatedReviewBootstrap } from "../../helpers/generated-review-bootstr
 
 const HOST_ID = "pr1_11111111111141118111111111111111";
 const DETAILS_ID = "pr1_22222222222242229222222222222222";
+const PROJECTION_LAYER_TEST_STYLE = `<style>
+  [data-pageroot-review-projection-layer],
+  [data-pageroot-review-mask-layer],
+  [data-pageroot-review-text-marks],
+  [data-pageroot-review-overlay-box] {
+    position: absolute !important;
+    top: 0 !important;
+    left: 0 !important;
+    pointer-events: none !important;
+  }
+</style>`;
 
 async function observe(page, {
   body = `<main data-pageroot-id="${HOST_ID}">same</main>`,
@@ -300,10 +311,67 @@ test("a genuinely tainted Canvas proves the unreadable branch", async ({ page })
 test("source projection activates existing text UI without creating replacement changes", {
   tag: ["@gate-smoke", "@smoke-review"],
 }, async ({ page }) => {
-  const bootstrap = generatedReviewBootstrap([], "after", [HOST_ID]);
-  await page.setContent(`<!doctype html><script>${bootstrap}</script><p data-pageroot-id="${HOST_ID}"><span data-pageroot-review-text="added" data-pageroot-review-marker="change-1" data-pageroot-review-marker-types="text" data-pageroot-review-summary="新增内容">new</span></p>`);
-  await expect(page.locator('[data-pageroot-review-overlay-box="change-1"]')).toHaveCount(1);
+  // Earlier cases install bootstrap listeners in the same Playwright page.
+  // Navigate once so this stateful focus assertion owns a fresh Window realm.
+  await page.goto("about:blank");
+  const factValue = {
+    id: "text-1",
+    type: "text",
+    semanticOwnerId: "semantic-owner-1",
+    geometryOwnerId: "geometry-owner-1",
+    scope: "text",
+    tone: "added",
+    textGroup: "text-group-1",
+    displayGroupId: "display-text-1",
+    displayOwnerId: "display-owner-1",
+    displayScope: "paragraph",
+    geometryMode: "text-content",
+    operation: "insert",
+    summary: "新增内容",
+  };
+  const atomKey = `change-1\u001e${[
+    factValue.type,
+    factValue.id,
+    factValue.semanticOwnerId,
+    factValue.geometryOwnerId,
+  ].join("\u001f")}`;
+  const focusGroupPlans = [{
+    id: "focus-change-1-display-text-1",
+    kind: "text",
+    changeId: "change-1",
+    changeIds: ["change-1"],
+    displayGroupId: "display-text-1",
+    displayScope: "paragraph",
+    atomKeys: [atomKey],
+    presentation: { before: [], after: [] },
+    regions: {
+      before: [],
+      after: [{
+        id: "region-after-text-1",
+        side: "after",
+        correlationKey: "locality-text-1",
+        primaryChangeId: "change-1",
+        changeIds: ["change-1"],
+        geometryMode: "text-content",
+        displayOwnerIds: ["display-owner-1"],
+        atomKeys: [atomKey],
+        presentation: [],
+      }],
+    },
+    presence: { before: false, after: true },
+  }];
+  const bootstrap = generatedReviewBootstrap(
+    [],
+    "after",
+    [HOST_ID],
+    focusGroupPlans,
+    [{ atomKey, count: 1 }],
+  );
+  const fact = JSON.stringify([factValue]).replaceAll('"', "&quot;");
+  await page.setContent(`<!doctype html><script>${bootstrap}</script><p data-pageroot-id="${HOST_ID}" data-pageroot-review-geometry-owner="geometry-owner-1" data-pageroot-review-display-owner="display-owner-1"><span data-pageroot-review-text="added" data-pageroot-review-marker="change-1" data-pageroot-review-marker-types="text" data-pageroot-review-summary="新增内容" data-pageroot-review-projection-facts="${fact}">new</span></p>`);
+  await expect(page.locator('[data-pageroot-review-overlay-box="change-1"]')).toHaveCount(0);
   await expect(page.locator('[data-pageroot-review-text-mark="added"]')).not.toHaveCount(0);
+  await expect(page.locator("[data-pageroot-review-mask-dim]")).toHaveCount(0);
   const activated = await page.evaluate(async ({ stableId }) => {
     let port = null;
     addEventListener("message", (event) => {
@@ -329,6 +397,23 @@ test("source projection activates existing text UI without creating replacement 
     return Boolean(port);
   }, { stableId: HOST_ID });
   expect(activated).toBe(true);
+  const focusGroupId = await page.locator("[data-pageroot-review-region-bar]")
+    .first().getAttribute("data-pageroot-review-focus-group");
+  expect(focusGroupId).toBeTruthy();
+  await page.evaluate((activeFocusGroupId) => postMessage({
+    source: "pageroot-ai-review-parent",
+    sessionId: "review-session",
+    type: "state",
+    state: {
+      filter: "all",
+      focus: "change-1",
+      activeFocusGroupId,
+      transparency: 18,
+      scale: 1,
+    },
+  }, "*"), focusGroupId);
+  await expect(page.locator("html"))
+    .toHaveAttribute("data-pageroot-review-focus-group", focusGroupId);
   await expect(page.locator('[data-pageroot-review-overlay-box="change-1"]')).toHaveCount(1);
   await expect(page.locator('[data-pageroot-review-text-mark="added"]')).not.toHaveCount(0);
   await expect(page.locator("[data-pageroot-review-mask-dim]")).toHaveCount(1);
@@ -341,4 +426,368 @@ test("source projection activates existing text UI without creating replacement 
     stableIds: [],
   }));
   await expect(page.locator("[data-pageroot-review-comment-highlight]")).toHaveCount(0);
+});
+
+function exactTextFocusFixture() {
+  const factValue = {
+    id: "text-1",
+    type: "text",
+    semanticOwnerId: "semantic-owner-1",
+    geometryOwnerId: "geometry-owner-1",
+    scope: "text",
+    tone: "added",
+    textGroup: "text-group-1",
+    displayGroupId: "display-text-1",
+    displayOwnerId: "display-owner-1",
+    displayScope: "paragraph",
+    geometryMode: "text-content",
+    operation: "insert",
+    summary: "新增内容",
+  };
+  const atomKey = `change-1\u001e${[
+    factValue.type,
+    factValue.id,
+    factValue.semanticOwnerId,
+    factValue.geometryOwnerId,
+  ].join("\u001f")}`;
+  const region = {
+    id: "region-after-text-1",
+    side: "after",
+    correlationKey: "locality-text-1",
+    primaryChangeId: "change-1",
+    changeIds: ["change-1"],
+    geometryMode: "text-content",
+    displayOwnerIds: ["display-owner-1"],
+    atomKeys: [atomKey],
+    presentation: [],
+  };
+  const plan = {
+    id: "focus-change-1-display-text-1",
+    kind: "text",
+    changeId: "change-1",
+    changeIds: ["change-1"],
+    displayGroupId: "display-text-1",
+    displayScope: "paragraph",
+    atomKeys: [atomKey],
+    presentation: { before: [], after: [] },
+    regions: { before: [], after: [region] },
+    presence: { before: false, after: true },
+  };
+  return { atomKey, factValue, plan };
+}
+
+test("an invalid semantic plan preserves exact source evidence without a box or mask", async ({ page }) => {
+  await page.goto("about:blank");
+  const { atomKey, factValue, plan } = exactTextFocusFixture();
+  const oversizedPlans = Array.from({ length: 257 }, (_, index) => ({
+    ...plan,
+    id: `focus-change-1-display-text-${index + 1}`,
+    displayGroupId: `display-text-${index + 1}`,
+    regions: {
+      before: [],
+      after: [{
+        ...plan.regions.after[0],
+        id: `region-after-text-${index + 1}`,
+        correlationKey: `locality-text-${index + 1}`,
+      }],
+    },
+  }));
+  const bootstrap = generatedReviewBootstrap(
+    [],
+    "after",
+    [],
+    oversizedPlans,
+    [{ atomKey, count: 1 }],
+  );
+  const fact = JSON.stringify([factValue]).replaceAll('"', "&quot;");
+  await page.setContent(`<!doctype html><script>${bootstrap}</script><p data-pageroot-review-display-owner="display-owner-1"><span data-pageroot-review-text="added" data-pageroot-review-marker="change-1" data-pageroot-review-projection-facts="${fact}">new</span></p>`);
+  await expect(page.locator('[data-pageroot-review-text-mark="added"]')).not.toHaveCount(0);
+  await expect(page.locator("[data-pageroot-review-region-bar]")).toHaveCount(0);
+  await expect(page.locator("[data-pageroot-review-overlay-box]")).toHaveCount(0);
+  await expect(page.locator("[data-pageroot-review-mask-dim]")).toHaveCount(0);
+});
+
+test("one exact atom may span several source marker occurrences but remains one focus box", async ({ page }) => {
+  await page.goto("about:blank");
+  const { atomKey, factValue, plan } = exactTextFocusFixture();
+  const bootstrap = generatedReviewBootstrap(
+    [],
+    "after",
+    [],
+    [plan],
+    [{ atomKey, count: 2 }],
+  );
+  const fact = JSON.stringify([factValue]).replaceAll('"', "&quot;");
+  await page.setContent(`<!doctype html><script>${bootstrap}</script><p data-pageroot-review-display-owner="display-owner-1"><span data-pageroot-review-text="added" data-pageroot-review-marker="change-1" data-pageroot-review-projection-facts="${fact}">new</span> context <span data-pageroot-review-text="added" data-pageroot-review-marker="change-1" data-pageroot-review-projection-facts="${fact}">words</span></p>`);
+  await expect(page.locator('[data-pageroot-review-text-mark="added"]')).toHaveCount(8);
+  await page.evaluate(() => {
+    Array.prototype.flatMap = () => [];
+    Array.prototype.find = () => undefined;
+    Array.prototype.some = () => false;
+    Array.prototype.filter = () => [];
+    Array.prototype.map = () => [];
+    Array.prototype.forEach = () => {};
+    Element.prototype.contains = () => false;
+  });
+  await page.evaluate((activeFocusGroupId) => postMessage({
+    source: "pageroot-ai-review-parent",
+    sessionId: "review-session",
+    type: "state",
+    state: { filter: "all", focus: "change-1", activeFocusGroupId, transparency: 18, scale: 1 },
+  }, "*"), plan.id);
+  const box = page.locator('[data-pageroot-review-overlay-box="change-1"]');
+  const hole = page.locator("[data-pageroot-review-mask-hole]");
+  await expect(box).toHaveCount(1);
+  await expect(hole).toHaveCount(1);
+  const boxPath = await box.getAttribute("data-path");
+  expect(boxPath).toBeTruthy();
+  expect(await hole.getAttribute("d")).toBe(boxPath);
+});
+
+test("Escape inside every valid contenteditable form stays with the editor", async ({ page }) => {
+  await page.goto("about:blank");
+  const { atomKey, factValue, plan } = exactTextFocusFixture();
+  const bootstrap = generatedReviewBootstrap(
+    [],
+    "after",
+    [],
+    [plan],
+    [{ atomKey, count: 1 }],
+  );
+  const fact = JSON.stringify([factValue]).replaceAll('"', "&quot;");
+  await page.setContent(`<!doctype html><script>${bootstrap}</script>
+    <p data-pageroot-review-display-owner="display-owner-1">
+      <span data-pageroot-review-text="added" data-pageroot-review-marker="change-1"
+        data-pageroot-review-projection-facts="${fact}">new</span>
+    </p>
+    <p id="bare-editable" contenteditable>bare editable</p>
+    <p id="plaintext-editable" contenteditable="plaintext-only">plaintext editable</p>`);
+  await page.evaluate((activeFocusGroupId) => {
+    window.__reviewLeaveFocusMessages = 0;
+    addEventListener("message", (event) => {
+      if (event.data?.source === "pageroot-ai-review" && event.data?.type === "leave-focus") {
+        window.__reviewLeaveFocusMessages += 1;
+      }
+    });
+    postMessage({
+      source: "pageroot-ai-review-parent",
+      sessionId: "review-session",
+      type: "state",
+      state: {
+        filter: "all",
+        focus: "change-1",
+        activeFocusGroupId,
+        transparency: 18,
+        scale: 1,
+      },
+    }, "*");
+  }, plan.id);
+  await expect(page.locator("[data-pageroot-review-overlay-box]")).toHaveCount(1);
+  for (const selector of ["#bare-editable", "#plaintext-editable"]) {
+    await page.locator(selector).press("Escape");
+    await expect(page.locator("[data-pageroot-review-overlay-box]")).toHaveCount(1);
+  }
+  await expect.poll(() => page.evaluate(() => window.__reviewLeaveFocusMessages)).toBe(0);
+});
+
+test("text-content geometry stays inside one loose reading flow of a complex item", async ({ page }) => {
+  await page.goto("about:blank");
+  const { atomKey, factValue, plan } = exactTextFocusFixture();
+  const bootstrap = generatedReviewBootstrap(
+    [], "after", [], [plan], [{ atomKey, count: 1 }],
+  );
+  const fact = JSON.stringify([factValue]).replaceAll('"', "&quot;");
+  await page.setContent(`<!doctype html>${PROJECTION_LAYER_TEST_STYLE}<style>li{width:320px}#nested-block{margin:90px 0}</style>
+    <script>${bootstrap}</script><ul><li data-pageroot-review-geometry-owner="geometry-owner-1"
+      data-pageroot-review-display-owner="display-owner-1">
+      prefix <span data-pageroot-review-text="added" data-pageroot-review-marker="change-1"
+        data-pageroot-review-projection-facts="${fact}">new</span> context
+      <p id="nested-block">unchanged nested paragraph</p>
+      unchanged suffix
+    </li></ul>`);
+  await page.evaluate((activeFocusGroupId) => postMessage({
+    source: "pageroot-ai-review-parent",
+    sessionId: "review-session",
+    type: "state",
+    state: { filter: "all", focus: "change-1", activeFocusGroupId, transparency: 18, scale: 1 },
+  }, "*"), plan.id);
+  const box = page.locator("[data-pageroot-review-overlay-box]");
+  await expect(box).toHaveCount(1);
+  const geometry = await page.evaluate(() => ({
+    boxBottom: Number(document.querySelector("[data-pageroot-review-overlay-box]").dataset.top)
+      + Number(document.querySelector("[data-pageroot-review-overlay-box]").dataset.height),
+    nested: document.querySelector("#nested-block").getBoundingClientRect().toJSON(),
+  }));
+  expect(geometry.boxBottom).toBeLessThan(geometry.nested.top);
+  expect(await page.locator("[data-pageroot-review-mask-hole]").getAttribute("d"))
+    .toBe(await box.getAttribute("data-path"));
+});
+
+test("numbered-line geometry ignores br elements inside nested blocks", async ({ page }) => {
+  await page.goto("about:blank");
+  const fixture = exactTextFocusFixture();
+  fixture.factValue.displayScope = "list-item";
+  fixture.factValue.geometryMode = "numbered-line-range";
+  fixture.plan.displayScope = "list-item";
+  fixture.plan.regions.after[0].geometryMode = "numbered-line-range";
+  const bootstrap = generatedReviewBootstrap(
+    [], "after", [], [fixture.plan], [{ atomKey: fixture.atomKey, count: 1 }],
+  );
+  const fact = JSON.stringify([fixture.factValue]).replaceAll('"', "&quot;");
+  await page.setContent(`<!doctype html>${PROJECTION_LAYER_TEST_STYLE}<script>${bootstrap}</script><ul><li
+    data-pageroot-review-geometry-owner="geometry-owner-1"
+    data-pageroot-review-display-owner="display-owner-1">
+    <p id="nested-lines">nested one<br>nested two</p>
+    <span id="numbered-first">1. first line</span><br>
+    <span>2. </span><span data-pageroot-review-text="added"
+      data-pageroot-review-marker="change-1"
+      data-pageroot-review-projection-facts="${fact}">new line</span>
+  </li></ul>`);
+  await page.evaluate((activeFocusGroupId) => postMessage({
+    source: "pageroot-ai-review-parent",
+    sessionId: "review-session",
+    type: "state",
+    state: { filter: "all", focus: "change-1", activeFocusGroupId, transparency: 18, scale: 1 },
+  }, "*"), fixture.plan.id);
+  const box = page.locator("[data-pageroot-review-overlay-box]");
+  await expect(box).toHaveCount(1);
+  const geometry = await page.evaluate(() => ({
+    boxTop: Number(document.querySelector("[data-pageroot-review-overlay-box]").dataset.top),
+    nested: document.querySelector("#nested-lines").getBoundingClientRect().toJSON(),
+    first: document.querySelector("#numbered-first").getBoundingClientRect().toJSON(),
+  }));
+  expect(geometry.boxTop).toBeGreaterThanOrEqual(geometry.first.bottom - 3.5);
+  expect(geometry.boxTop).toBeGreaterThan(geometry.nested.bottom);
+});
+
+test("hidden changed branches never satisfy container promotion coverage", async ({ page }) => {
+  await page.goto("about:blank");
+  const changeId = "change-1";
+  const facts = Array.from({ length: 4 }, (_, index) => ({
+    id: `style-${index + 1}`,
+    type: "structure",
+    semanticOwnerId: `semantic-${index + 1}`,
+    geometryOwnerId: `geometry-${index + 1}`,
+    structureChange: "style",
+    displayGroupId: "display-css-shared",
+    displayOwnerId: `owner-${index + 1}`,
+    displayScope: "component",
+    geometryMode: "element-box",
+    summary: "样式调整",
+  }));
+  const atomKeys = facts.map((fact) => `${changeId}\u001e${[
+    fact.type, fact.id, fact.semanticOwnerId, fact.geometryOwnerId,
+  ].join("\u001f")}`);
+  const plan = {
+    id: "focus-display-css-shared",
+    kind: "style",
+    changeId,
+    changeIds: [changeId],
+    displayGroupId: "display-css-shared",
+    displayScope: "component",
+    atomKeys,
+    presentation: { before: [], after: [] },
+    regions: {
+      before: [],
+      after: [{
+        id: "region-after-shared",
+        side: "after",
+        correlationKey: "locality-shared",
+        primaryChangeId: changeId,
+        changeIds: [changeId],
+        geometryMode: "container-box",
+        displayOwnerIds: facts.map((fact) => fact.displayOwnerId),
+        atomKeys,
+        presentation: [],
+      }],
+    },
+    presence: { before: false, after: true },
+  };
+  const bootstrap = generatedReviewBootstrap(
+    [],
+    "after",
+    [],
+    [plan],
+    atomKeys.map((atomKey) => ({ atomKey, count: 1 })),
+  );
+  const targets = facts.map((fact, index) => {
+    const serialized = JSON.stringify([fact]).replaceAll('"', "&quot;");
+    const hidden = index < 3 ? ' style="display:none"' : "";
+    return `<div data-pageroot-review-display-owner="${fact.displayOwnerId}"${hidden}
+      data-pageroot-review-marker="${changeId}"
+      data-pageroot-review-projection-facts="${serialized}">changed ${index + 1}</div>`;
+  }).join("");
+  await page.setContent(`<!doctype html>${PROJECTION_LAYER_TEST_STYLE}<style>
+    #grid{display:grid;grid-template-columns:repeat(5,120px);gap:8px}
+  </style><script>${bootstrap}</script><div id="grid">${targets}
+    <div>unchanged 1</div><div>unchanged 2</div><div>unchanged 3</div><div>unchanged 4</div>
+  </div>`);
+  await page.evaluate((activeFocusGroupId) => postMessage({
+    source: "pageroot-ai-review-parent",
+    sessionId: "review-session",
+    type: "state",
+    state: { filter: "all", focus: "change-1", activeFocusGroupId, transparency: 18, scale: 1 },
+  }, "*"), plan.id);
+  const box = page.locator("[data-pageroot-review-overlay-box]");
+  await expect(box).toHaveCount(1);
+  const geometry = await page.evaluate(() => ({
+    boxWidth: Number(document.querySelector("[data-pageroot-review-overlay-box]").dataset.width),
+    gridWidth: document.querySelector("#grid").getBoundingClientRect().width,
+  }));
+  expect(geometry.boxWidth).toBeLessThan(geometry.gridWidth / 2);
+  await expect(page.locator("[data-pageroot-review-mask-hole]")).toHaveCount(1);
+});
+
+test("moving exact atom attributes to a parser-time decoy fails closed", async ({ page }) => {
+  await page.goto("about:blank");
+  const { atomKey, factValue, plan } = exactTextFocusFixture();
+  const bootstrap = generatedReviewBootstrap(
+    [],
+    "after",
+    [],
+    [plan],
+    [{ atomKey, count: 1 }],
+  );
+  const fact = JSON.stringify([factValue]).replaceAll('"', "&quot;");
+  await page.setContent(`<!doctype html><script>${bootstrap}</script><p data-pageroot-review-display-owner="display-owner-1"><span id="source" data-pageroot-review-text="added" data-pageroot-review-marker="change-1" data-pageroot-review-projection-facts="${fact}">new</span><span id="decoy">forged</span><script>for (const name of ["data-pageroot-review-text", "data-pageroot-review-marker", "data-pageroot-review-projection-facts"]) { const value = source.getAttribute(name); source.removeAttribute(name); decoy.setAttribute(name, value); } source.remove();</script></p>`);
+  await expect(page.locator('[data-pageroot-review-text-mark="added"]')).toHaveCount(0);
+  await expect(page.locator("[data-pageroot-review-region-bar]")).toHaveCount(0);
+  await expect(page.locator("[data-pageroot-review-overlay-box]")).toHaveCount(0);
+});
+
+test("reparenting an exact atom outside its captured display owner fails closed", async ({ page }) => {
+  await page.goto("about:blank");
+  const { atomKey, factValue, plan } = exactTextFocusFixture();
+  const bootstrap = generatedReviewBootstrap(
+    [],
+    "after",
+    [],
+    [plan],
+    [{ atomKey, count: 1 }],
+  );
+  const fact = JSON.stringify([factValue]).replaceAll('"', "&quot;");
+  await page.setContent(`<!doctype html><script>${bootstrap}</script>
+    <p data-pageroot-review-display-owner="display-owner-1">
+      <span id="exact-marker" data-pageroot-review-text="added"
+        data-pageroot-review-marker="change-1"
+        data-pageroot-review-projection-facts="${fact}">new</span>
+    </p>
+    <div id="authored-destination" style="margin-top:200px"></div>
+    <script>document.querySelector("#authored-destination").append(document.querySelector("#exact-marker"));</script>`);
+  await expect(page.locator('[data-pageroot-review-text-mark="added"]')).toHaveCount(0);
+  await page.evaluate((activeFocusGroupId) => postMessage({
+    source: "pageroot-ai-review-parent",
+    sessionId: "review-session",
+    type: "state",
+    state: {
+      filter: "all",
+      focus: "change-1",
+      activeFocusGroupId,
+      transparency: 18,
+      scale: 1,
+    },
+  }, "*"), plan.id);
+  await expect(page.locator("[data-pageroot-review-overlay-box]")).toHaveCount(0);
+  await expect(page.locator("[data-pageroot-review-mask-hole]")).toHaveCount(0);
+  await expect(page.locator("[data-pageroot-review-mask-dim]")).toHaveCount(0);
 });

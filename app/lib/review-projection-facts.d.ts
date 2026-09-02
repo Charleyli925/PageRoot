@@ -7,6 +7,19 @@ export type ReviewProjectionFactScope =
   | "text-block"
   | "element";
 
+export type ReviewProjectionDisplayScope =
+  | "paragraph"
+  | "list-item"
+  | "cell"
+  | "component"
+  | "container";
+
+export type ReviewFocusGeometryMode =
+  | "text-content"
+  | "element-box"
+  | "container-box"
+  | "numbered-line-range";
+
 export type ReviewProjectionFact = {
   id: string;
   type: ReviewProjectionFactType;
@@ -16,6 +29,11 @@ export type ReviewProjectionFact = {
   operation?: "none" | "insert" | "delete" | "replace";
   tone?: "added" | "removed";
   textGroup?: string;
+  /** Disposable presentation grouping; never part of exact fact identity. */
+  displayGroupId?: string;
+  displayOwnerId?: string;
+  displayScope?: ReviewProjectionDisplayScope;
+  geometryMode?: ReviewFocusGeometryMode;
   structureChange?:
     | "added"
     | "removed"
@@ -27,6 +45,9 @@ export type ReviewProjectionFact = {
 };
 
 export const REVIEW_PROJECTION_FACTS_PER_ELEMENT_LIMIT: number;
+export const REVIEW_PROJECTION_FACTS_SERIALIZED_LENGTH_LIMIT: number;
+export const REVIEW_EXACT_ATOM_OCCURRENCE_LIMIT: number;
+export const REVIEW_EXACT_ATOM_OCCURRENCE_SERIALIZED_LENGTH_LIMIT: number;
 
 export class ReviewProjectionFactOverflowError extends Error {
   code: "REVIEW_PROJECTION_FACTS_OVERFLOW";
@@ -50,3 +71,8 @@ export function reviewProjectionFactsForFilter(
   facts: readonly unknown[],
   filter: "all" | ReviewProjectionFactType,
 ): ReviewProjectionFact[];
+export function normalizeReviewFocusGroupPlans(value: unknown): unknown[];
+export function normalizeReviewExactAtomOccurrences(value: unknown): Array<{
+  atomKey: string;
+  count: number;
+}>;

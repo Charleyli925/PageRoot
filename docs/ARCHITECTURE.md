@@ -138,7 +138,7 @@ the historical synthetic-spike decision.
   executor applies the accepted context. It never invokes authored handlers,
   serializes the preview DOM or creates a second interaction mode.
 - Formal AI review owns one disposable reducer with independent page, change
-  filter, context visibility, navigation, canonical presentation path, scroll
+  filter, context visibility, navigation, active focus-group, canonical presentation path, scroll
   and zoom fields. A cancellable, byte-bounded `ReviewAnalysisSession` yields
   between parse/control/pair/annotation/serialization phases and after bounded
   semantic row/list-item batches, then caches multiple
@@ -195,16 +195,31 @@ the historical synthetic-spike decision.
   rebinding by guess. This comment capability does not authorize runtime host
   discovery. Only the before bootstrap reports geometry, so authored code
   cannot react to a comment marker.
-  Exact leaf text
-  ranges remain immutable evidence; a separate readable-footprint planner
-  groups nearby ranges, keeps stable sentence gaps separate, records exact
-  stable-sentence offsets as disposable geometry boundaries, gives tiny phrases
-  a bounded line-local width and promotes dense multi-line rewrites to their
-  smallest semantic text owner. Local wrapped copy renders as separate
-  rectangular line frames with one group label instead of a stepped union
-  polygon. Global context masking consumes those same final canonical records:
+  Exact leaf text ranges remain immutable evidence. Presentation is a separate,
+  explicit contract: `displayScope` names the reading semantics while
+  `geometryMode` independently selects text-content, element-box, container-box
+  or numbered-line Range measurement; neither field enters the exact fact key.
+  Paragraphs, headings, blockquotes and direct flow resolve to one complete
+  reading block; simple list items/cells and components use their full element,
+  complex list items/cells keep the smallest inner reading block, and numbered
+  `br` lines stay separate. A simple-selector CSS source may span several
+  targets; each inline-style attribute remains its own operation even when a
+  sibling has the same property delta. Shared CSS targets promote only when at
+  least two branches cover 75% of a Runtime-proven grid/flex/list/repeated-card
+  container. Geometry or distance never creates a group.
+  The analyzer is the sole author of bounded `ReviewFocusGroupPlan` records,
+  including change-scoped exact atom keys, per-side region IDs, correlation,
+  presentation, owner IDs, geometry modes and presence. The first bootstrap
+  validates and privately binds that plan; Runtime resolves current owners and
+  geometry but never reconstructs group membership or IDs. Exact-evidence
+  occurrence bindings are validated independently, so an invalid/oversized
+  semantic plan closes frames and masks without erasing red/green source facts.
+  `changeId` remains navigation identity and `activeFocusGroupId` alone owns
+  visual focus.
+  Overview has no outline or dim mask. Focus rendering consumes one set of final
+  canonical outline records, and global context masking consumes those records:
   one SVG luminance mask keeps a full-page white background and adds the record
-  paths as black holes, so overlapping holes remain a set union rather than an
+  paths as black holes, so `outlinePaths = maskHoles` and overlapping holes remain a set union rather than an
   `evenodd` XOR and mask and frame cannot diverge. Its per-render identifier is
   scoped to the review session, side and projection epoch. The disposable
   projection uses reserved attributes plus an explicit presentation reset and

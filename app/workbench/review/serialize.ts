@@ -4,11 +4,16 @@ import {
   REVIEW_TEXT_EVIDENCE_REMOVED_COLOR,
 } from "../../lib/review-text-evidence-marks.js";
 import {
+  normalizeReviewExactAtomOccurrences,
+  reviewProjectionFactKey,
+} from "../../lib/review-projection-facts.js";
+import {
   REVIEW_BASE_ATTRIBUTE,
   REVIEW_BOOTSTRAP_ATTRIBUTE,
   REVIEW_BOOTSTRAP_PATH,
   REVIEW_STYLE_ID,
 } from "./constants";
+import { reviewProjectionFactsForElement } from "./parse";
 import {
   reviewBootstrap,
 } from "./runtime-projection";
@@ -17,6 +22,7 @@ import {
 } from "./tones";
 import type {
   ReviewCommentBootstrapBinding,
+  ReviewFocusGroupPlan,
   ReviewSide,
 } from "./types";
 
@@ -52,13 +58,7 @@ export const REVIEW_DOCUMENT_STYLE = String.raw`
 
   html[data-pageroot-review-filter="all"] [data-pageroot-review-confirmed="true"][data-pageroot-review-marker-types~="structure"],
   html[data-pageroot-review-filter="structure"] [data-pageroot-review-confirmed="true"][data-pageroot-review-marker-types~="structure"] {
-    position: relative !important;
-    outline: calc(1.5px * var(--pageroot-review-ui-scale)) dashed ${REVIEW_STRUCTURE_TONE_COLOR} !important;
-    outline-offset: calc(2px * var(--pageroot-review-ui-scale)) !important;
-  }
-
-  html[data-pageroot-review-filter="structure"] [data-pageroot-review-confirmed="true"][data-pageroot-review-marker-types~="structure"] {
-    outline-color: ${REVIEW_STRUCTURE_TONE_COLOR} !important;
+    outline: none !important;
   }
 
 ${REVIEW_TEXT_EVIDENCE_MARKER_CSS}
@@ -434,6 +434,7 @@ export function prepareDocument(
   externalBootstrap = false,
   reviewCommentBindings: readonly ReviewCommentBootstrapBinding[] = [],
   reviewVisualStableIds: readonly string[] = [],
+  reviewFocusGroupPlans: readonly ReviewFocusGroupPlan[] = [],
 ): {
   html: string;
   bootstrapJavaScript: string;
@@ -457,6 +458,7 @@ export function prepareDocument(
   document.documentElement.dataset.pagerootReviewSide = side;
   document.documentElement.dataset.pagerootReviewFilter = "all";
   document.documentElement.dataset.pagerootReviewFocus = "all";
+  document.documentElement.dataset.pagerootReviewFocusGroup = "";
 
   const style = document.createElement("style");
   style.id = REVIEW_STYLE_ID;
@@ -464,17 +466,46 @@ export function prepareDocument(
 
   const bootstrap = document.createElement("script");
   bootstrap.setAttribute(REVIEW_BOOTSTRAP_ATTRIBUTE, "true");
+  // Exact evidence remains available even when the independent semantic focus
+  // plan is rejected. The trusted analyzer also tells Runtime how many source
+  // marker occurrences legitimately carry each logical atom, so repeated text
+  // fragments are accepted without admitting authored decoys.
+  const exactAtomOccurrenceCounts = new Map<string, number>();
+  document.querySelectorAll(
+    "[data-pageroot-review-marker][data-pageroot-review-projection-facts]",
+  ).forEach((element) => {
+    const changeId = element.getAttribute("data-pageroot-review-marker") || "";
+    if (!changeId) return;
+    reviewProjectionFactsForElement(element).forEach((fact) => {
+      const factKey = reviewProjectionFactKey(fact);
+      if (!factKey) return;
+      const atomKey = `${changeId}\u001e${factKey}`;
+      exactAtomOccurrenceCounts.set(atomKey, (exactAtomOccurrenceCounts.get(atomKey) || 0) + 1);
+    });
+  });
+  const requestedExactAtomOccurrences = [...exactAtomOccurrenceCounts]
+    .map(([atomKey, count]) => ({ atomKey, count }));
+  const reviewExactAtomOccurrences = normalizeReviewExactAtomOccurrences(
+    requestedExactAtomOccurrences,
+  );
+  if (reviewExactAtomOccurrences.length !== requestedExactAtomOccurrences.length) {
+    throw new Error("Review exact atom occurrence payload exceeds its bootstrap contract.");
+  }
   const bootstrapJavaScript = reviewBootstrap(
     sessionId,
     side,
     reviewCommentBindings,
     reviewVisualStableIds,
+    reviewFocusGroupPlans,
+    reviewExactAtomOccurrences,
   );
   const bootstrapFallbackJavaScript = reviewBootstrap(
     sessionId,
     side,
     [],
     reviewVisualStableIds,
+    reviewFocusGroupPlans,
+    reviewExactAtomOccurrences,
   );
   if (externalBootstrap) {
     bootstrap.src = REVIEW_BOOTSTRAP_PATH;
