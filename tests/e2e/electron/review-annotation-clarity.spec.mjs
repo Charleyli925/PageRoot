@@ -787,12 +787,14 @@ test("the review projection annotates a dense report cleanly and accurately", as
       const activeBoxes = [...sides.before.boxes, ...sides.after.boxes]
         .filter((box) => box.active === "true");
       if (!activeBoxes.length) return "no active box";
-      const claimed = activeBoxes.every((box) => !restsTransparent(box.borderColor));
+      const claimed = activeBoxes.every((box) => (
+        box.borderColor === "rgb(109, 92, 231)"
+      ));
       const noInactiveBoxes = [...sides.before.boxes, ...sides.after.boxes]
         .every((box) => box.active === "true");
       const barClaimed = [...sides.before.bars, ...sides.after.bars]
         .some((bar) => bar.active === "true");
-      if (!claimed) return "active box still transparent";
+      if (!claimed) return "active box lacks the canonical purple border";
       if (!noInactiveBoxes) return "an inactive group still rendered a box";
       if (!barClaimed) return "no active revision bar";
       return "ok";
