@@ -5,6 +5,7 @@ import type {
 } from "./native-edit-types";
 import type { NoticeUsageCapture } from "./NoticeBar";
 import type { EditRuntimeGrant } from "../domain/edit-runtime-contract.js";
+import type { EditRuntimeCandidateIdentity } from "./edit-runtime-candidate-controller.js";
 import type {
   SemanticIdentityDelta,
   SemanticOperation,
@@ -137,6 +138,8 @@ export type HtmlCanvasEditRuntimeLoadOutcome =
   | "rejected"
   | "failed"
   | "superseded";
+
+export type HtmlCanvasEditRuntimeAttempt = EditRuntimeCandidateIdentity;
 
 export type HtmlCanvasFreezeSnapshot = {
   ok: boolean;
@@ -311,11 +314,15 @@ export type HtmlCanvasEditorProps = {
   /** A main-process-authorized, source-bound disposable runtime grant. */
   editRuntimeGrant?: EditRuntimeGrant | null;
   /** State-owner transition when a visible disposable document begins loading. */
-  onEditRuntimeLoadStart?: (grant: EditRuntimeGrant) => void;
+  onEditRuntimeLoadStart?: (
+    grant: EditRuntimeGrant,
+    attempt: HtmlCanvasEditRuntimeAttempt,
+  ) => void;
   /** State-owner transition after the disposable document loads or fails. */
   onEditRuntimeLoadOutcome?: (
     grant: EditRuntimeGrant,
     outcome: HtmlCanvasEditRuntimeLoadOutcome,
+    attempt: HtmlCanvasEditRuntimeAttempt,
   ) => void;
   /** Mirrors the authored page scroll coordinate into the host comment rail. */
   onCommentLayout?: (state: HtmlCanvasCommentLayoutState) => void;

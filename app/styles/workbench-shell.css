@@ -272,7 +272,7 @@
   left: 50%;
   display: flex;
   gap: 8px;
-  align-items: baseline;
+  align-items: center;
   max-width: calc(100% - 32px);
   padding: 8px 12px;
   border: 1px solid #d8c58f;
@@ -287,7 +287,7 @@
   color: #74633a;
 }
 
-.edit-runtime-static-fallback button {
+.edit-runtime-static-fallback__close {
   display: inline-grid;
   place-items: center;
   flex: none;
@@ -302,13 +302,30 @@
   cursor: pointer;
 }
 
-.edit-runtime-static-fallback button:hover {
+.edit-runtime-static-fallback__close:hover {
   background: rgb(116 99 58 / 10%);
 }
 
 .edit-runtime-static-fallback button:focus-visible {
   outline: 2px solid #9a6917;
   outline-offset: 1px;
+}
+
+.edit-runtime-static-fallback__retry {
+  flex: none;
+  min-height: 28px;
+  padding: 3px 9px;
+  border: 1px solid rgb(116 99 58 / 32%);
+  border-radius: 7px;
+  color: #5d491b;
+  background: rgb(255 255 255 / 48%);
+  font: inherit;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.edit-runtime-static-fallback__retry:hover {
+  background: rgb(255 255 255 / 72%);
 }
 
 .workbench-chrome-status {

@@ -613,11 +613,17 @@ test("workspace controller owns one Edit runtime attempt per source path and can
   const ready = harness.controller.getSnapshot().editRuntime;
   assert.equal(ready?.phase, "ready");
   assert.equal(prepares.length, 1);
+  const runtimeAttempt = {
+    candidateId: "runtime-controller-candidate-1",
+    candidateGeneration: 1,
+    candidateSourceRevision: ready?.grant?.sourceSha256,
+  };
   assert.equal(
     harness.controller.beginEditAuthorRuntime({
       sessionId: ready?.grant?.sessionId,
       sourceSha256: ready?.grant?.sourceSha256,
       canvasGeneration: ready?.grant?.canvasGeneration,
+      ...runtimeAttempt,
     }),
     true,
   );
@@ -626,6 +632,7 @@ test("workspace controller owns one Edit runtime attempt per source path and can
       sessionId: ready?.grant?.sessionId,
       sourceSha256: ready?.grant?.sourceSha256,
       canvasGeneration: ready?.grant?.canvasGeneration,
+      ...runtimeAttempt,
       outcome: "ready",
     }),
     true,

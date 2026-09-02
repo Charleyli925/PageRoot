@@ -6342,6 +6342,7 @@ export default function Workbench() {
           <div
             className="canvas-edit-surface"
             data-edit-runtime-phase={editRuntimePhase}
+            data-edit-runtime-outcome={editRuntimeSnapshot?.lastOutcome || undefined}
             hidden={canvasMode !== "edit"}
             aria-hidden={canvasMode !== "edit" || Boolean(effectiveVisibleCachedSurface)}
             inert={effectiveVisibleCachedSurface ? true : undefined}
@@ -6353,6 +6354,9 @@ export default function Workbench() {
               {staticFallbackNoticeIdentity ? (
                 <EditRuntimeStaticFallbackNotice
                   key={staticFallbackNoticeIdentity}
+                  onRetry={() => {
+                    workspaceControllerRef.current?.retryEditAuthorRuntime();
+                  }}
                 />
               ) : null}
               {editRuntimePreparing && !activeRuntimeCanvasUsable ? (
@@ -6384,18 +6388,24 @@ export default function Workbench() {
                     }
                   }}
                   editRuntimeGrant={editRuntimeGrant}
-                  onEditRuntimeLoadStart={(grant) => {
+                  onEditRuntimeLoadStart={(grant, attempt) => {
                     workspaceControllerRef.current?.beginEditAuthorRuntime({
                       sessionId: grant.sessionId,
                       sourceSha256: grant.sourceSha256,
                       canvasGeneration: grant.canvasGeneration,
+                      candidateId: attempt.candidateId,
+                      candidateGeneration: attempt.generation,
+                      candidateSourceRevision: attempt.sourceRevision,
                     });
                   }}
-                  onEditRuntimeLoadOutcome={(grant, outcome: HtmlCanvasEditRuntimeLoadOutcome) => {
+                  onEditRuntimeLoadOutcome={(grant, outcome: HtmlCanvasEditRuntimeLoadOutcome, attempt) => {
                     workspaceControllerRef.current?.settleEditAuthorRuntime({
                       sessionId: grant.sessionId,
                       sourceSha256: grant.sourceSha256,
                       canvasGeneration: grant.canvasGeneration,
+                      candidateId: attempt.candidateId,
+                      candidateGeneration: attempt.generation,
+                      candidateSourceRevision: attempt.sourceRevision,
                       outcome,
                     });
                     if (outcome === "ready" && documentRuntimeTabId) {

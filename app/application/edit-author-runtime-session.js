@@ -50,6 +50,31 @@ function sameKey(left, right) {
     && left.canvasGeneration === right.canvasGeneration;
 }
 
+function normalizedRuntimeAttempt(value) {
+  const candidateId = String(value?.candidateId || "");
+  const candidateSourceRevision = String(value?.candidateSourceRevision || "").toLowerCase();
+  if (
+    !candidateId
+    || candidateId.length > 128
+    || !Number.isSafeInteger(value?.candidateGeneration)
+    || value.candidateGeneration < 0
+    || !isEditRuntimeSourceSha256(candidateSourceRevision)
+  ) return null;
+  return Object.freeze({
+    candidateId,
+    candidateGeneration: value.candidateGeneration,
+    candidateSourceRevision,
+  });
+}
+
+function sameRuntimeAttempt(left, right) {
+  return Boolean(left)
+    && Boolean(right)
+    && left.candidateId === right.candidateId
+    && left.candidateGeneration === right.candidateGeneration
+    && left.candidateSourceRevision === right.candidateSourceRevision;
+}
+
 function normalizedGrant(value, request) {
   const allowedLibraryOrigins = new Set([
     "bundled", "bundled-compatible", "disk-cache", "network", "local", "inline",
@@ -117,6 +142,8 @@ export class EditAuthorRuntimeSession {
   #activeRequest = null;
   #recoveryGrant = null;
   #recoveryConsumed = false;
+  #runtimeAttempt = null;
+  #hasLastKnownGood = false;
   #attemptGeneration = 0;
   #requestSequence = 0;
   #disposed = false;
@@ -179,6 +206,8 @@ export class EditAuthorRuntimeSession {
   #transitionToStatic(phase, lastOutcome, identity = this.#identity) {
     this.#pendingPreparation = null;
     this.#activeRequest = null;
+    this.#runtimeAttempt = null;
+    this.#hasLastKnownGood = false;
     this.#revokeActiveGrants();
     this.#emit({
       phase,
@@ -237,6 +266,8 @@ export class EditAuthorRuntimeSession {
     this.#pendingPreparation = null;
     this.#activeRequest = null;
     this.#recoveryConsumed = false;
+    this.#runtimeAttempt = null;
+    this.#hasLastKnownGood = false;
     this.#revokeActiveGrants();
     this.#identity = identity;
     const attemptGeneration = this.#attemptGeneration;
@@ -366,15 +397,33 @@ export class EditAuthorRuntimeSession {
     return true;
   }
 
-  beginRuntime({ sessionId, sourceSha256, canvasGeneration } = {}) {
+  beginRuntime({
+    sessionId,
+    sourceSha256,
+    canvasGeneration,
+    candidateId,
+    candidateGeneration,
+    candidateSourceRevision,
+  } = {}) {
     const grant = this.#snapshot.grant;
+    const attempt = normalizedRuntimeAttempt({
+      candidateId,
+      candidateGeneration,
+      candidateSourceRevision,
+    });
     if (
       !["ready", "running", "settled"].includes(this.#snapshot.phase)
       || !grant
+      || !attempt
       || grant.sessionId !== String(sessionId || "").toLowerCase()
       || grant.sourceSha256 !== String(sourceSha256 || "").toLowerCase()
       || grant.canvasGeneration !== canvasGeneration
     ) return false;
+    if (
+      this.#snapshot.phase === "running"
+      && sameRuntimeAttempt(this.#runtimeAttempt, attempt)
+    ) return true;
+    this.#runtimeAttempt = attempt;
     this.#emit({
       phase: "running",
       sourceSha256: grant.sourceSha256,
@@ -452,21 +501,46 @@ export class EditAuthorRuntimeSession {
     });
   }
 
-  settleRuntime({ sessionId, sourceSha256, canvasGeneration, outcome } = {}) {
+  settleRuntime({
+    sessionId,
+    sourceSha256,
+    canvasGeneration,
+    candidateId,
+    candidateGeneration,
+    candidateSourceRevision,
+    outcome,
+  } = {}) {
     const grant = this.#snapshot.grant;
+    const attempt = normalizedRuntimeAttempt({
+      candidateId,
+      candidateGeneration,
+      candidateSourceRevision,
+    });
     if (
       this.#snapshot.phase !== "running"
       || !grant
+      || !sameRuntimeAttempt(this.#runtimeAttempt, attempt)
       || grant.sessionId !== String(sessionId || "").toLowerCase()
       || grant.sourceSha256 !== String(sourceSha256 || "").toLowerCase()
       || grant.canvasGeneration !== canvasGeneration
     ) return false;
-    // Repeated source edits reuse one immutable resource grant for this canvas
-    // generation. Replacing an in-flight disposable iframe is coordination,
-    // not evidence that the authored program failed. Keep the grant running so
-    // the newest frame can publish the authoritative ready/failure outcome.
-    if (outcome === "superseded") return true;
+    this.#runtimeAttempt = null;
+    // Replacing a disposable iframe is coordination, never authored-program
+    // failure. Return the shared grant to the last truthful usable phase so a
+    // successor attempt can begin without revocation or static degradation.
+    if (outcome === "superseded") {
+      this.#emit({
+        phase: this.#hasLastKnownGood ? "settled" : "ready",
+        sourceSha256: grant.sourceSha256,
+        sourcePath: this.#identity?.sourcePath || null,
+        canvasGeneration: grant.canvasGeneration,
+        grant,
+        lastOutcome: "superseded",
+      });
+      return true;
+    }
     if (outcome === "ready") {
+      this.#hasLastKnownGood = true;
       this.#emit({
         phase: "settled",
         sourceSha256: grant.sourceSha256,
@@ -474,6 +548,17 @@ export class EditAuthorRuntimeSession {
         canvasGeneration: grant.canvasGeneration,
         grant,
         lastOutcome: "ready",
+      });
+      return true;
+    }
+    if (this.#hasLastKnownGood) {
+      this.#emit({
+        phase: "settled",
+        sourceSha256: grant.sourceSha256,
+        sourcePath: this.#identity?.sourcePath || null,
+        canvasGeneration: grant.canvasGeneration,
+        grant,
+        lastOutcome: outcome === "rejected" ? "candidate-rejected" : "candidate-failed",
       });
       return true;
     }
@@ -488,6 +573,24 @@ export class EditAuthorRuntimeSession {
     return true;
   }
 
+  retry() {
+    const identity = this.#identity;
+    if (
+      this.#disposed
+      || !identity
+      || this.#snapshot.phase !== "static-fallback"
+    ) return false;
+    this.#identity = null;
+    const snapshot = this.refresh({
+      html: identity.html,
+      sourceSha256: identity.sourceSha256,
+      sourcePath: identity.sourcePath,
+      canvasGeneration: identity.canvasGeneration,
+      sourceIsAuthoritative: true,
+    });
+    return snapshot.phase === "preparing";
+  }
+
   dispose() {
     if (this.#disposed) return;
     this.#disposed = true;
@@ -496,6 +599,8 @@ export class EditAuthorRuntimeSession {
     this.#identity = null;
     this.#pendingPreparation = null;
     this.#activeRequest = null;
+    this.#runtimeAttempt = null;
+    this.#hasLastKnownGood = false;
     this.#listeners.clear();
     this.#snapshot = frozenSnapshot();
   }

@@ -442,13 +442,20 @@ export class WorkspaceController {
     sessionId: string;
     sourceSha256: string;
     canvasGeneration: number;
+    candidateId: string;
+    candidateGeneration: number;
+    candidateSourceRevision: string;
   }): boolean;
   settleEditAuthorRuntime(input: {
     sessionId: string;
     sourceSha256: string;
     canvasGeneration: number;
+    candidateId: string;
+    candidateGeneration: number;
+    candidateSourceRevision: string;
     outcome: "ready" | "rejected" | "failed" | "superseded";
   }): boolean;
+  retryEditAuthorRuntime(): boolean;
   evaluateFirstEditGuide(input: FirstEditGuideEligibilityInput): FirstEditGuideSnapshot | null;
   dismissFirstEditGuide(): Promise<FirstEditGuideSnapshot | null>;
   getCurrentProjectContext(): ProjectContext | null;

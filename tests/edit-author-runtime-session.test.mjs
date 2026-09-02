@@ -57,6 +57,24 @@ function input(overrides = {}) {
   };
 }
 
+let runtimeAttemptSequence = 0;
+const runtimeAttempts = new WeakMap();
+
+function beginRuntime(session, grant, overrides = {}) {
+  const attempt = {
+    candidateId: `runtime-test-${(++runtimeAttemptSequence).toString(36)}`,
+    candidateGeneration: runtimeAttemptSequence,
+    candidateSourceRevision: grant.sourceSha256,
+    ...overrides,
+  };
+  runtimeAttempts.set(session, attempt);
+  return session.beginRuntime({ ...grant, ...attempt });
+}
+
+function settleRuntime(session, grant, outcome, attempt = runtimeAttempts.get(session)) {
+  return session.settleRuntime({ ...grant, ...attempt, outcome });
+}
+
 test("one canvas generation prepares at most once despite source and autosave changes", async () => {
   const requests = [];
   const session = new EditAuthorRuntimeSession({
@@ -231,8 +249,8 @@ test("settled runtime grant can render another disposable frame", async () => {
   await flushAsync();
   const grant = session.snapshot.grant;
   assert.ok(grant);
-  assert.equal(session.beginRuntime(grant), true);
-  assert.equal(session.settleRuntime({ ...grant, outcome: "ready" }), true);
+  assert.equal(beginRuntime(session, grant), true);
+  assert.equal(settleRuntime(session, grant, "ready"), true);
   assert.equal(session.snapshot.phase, "settled");
   session.refresh(input({
     html: HTML + "<!-- comment changed nothing in canvas key -->",
@@ -240,8 +258,8 @@ test("settled runtime grant can render another disposable frame", async () => {
   }));
 
   assert.equal(requests.length, 1);
-  assert.equal(session.beginRuntime(grant), true);
-  assert.equal(session.settleRuntime({ ...grant, outcome: "ready" }), true);
+  assert.equal(beginRuntime(session, grant), true);
+  assert.equal(settleRuntime(session, grant, "ready"), true);
   assert.deepEqual(revoked, []);
 });
 
@@ -259,24 +277,49 @@ test("a superseded disposable frame keeps the shared runtime grant alive", async
   await flushAsync();
   const grant = session.snapshot.grant;
   assert.ok(grant);
-  assert.equal(session.beginRuntime(grant), true);
-  assert.equal(session.settleRuntime({ ...grant, outcome: "ready" }), true);
+  assert.equal(beginRuntime(session, grant), true);
+  assert.equal(settleRuntime(session, grant, "ready"), true);
   assert.equal(session.snapshot.phase, "settled");
 
-  assert.equal(session.beginRuntime(grant), true);
+  assert.equal(beginRuntime(session, grant), true);
   assert.equal(
-    session.settleRuntime({ ...grant, outcome: "superseded" }),
+    settleRuntime(session, grant, "superseded"),
     true,
   );
-  assert.equal(session.snapshot.phase, "running");
+  assert.equal(session.snapshot.phase, "settled");
   assert.equal(session.snapshot.grant?.sessionId, grant.sessionId);
-  assert.equal(session.beginRuntime(grant), true);
-  assert.equal(session.settleRuntime({ ...grant, outcome: "ready" }), true);
+  assert.equal(beginRuntime(session, grant), true);
+  assert.equal(settleRuntime(session, grant, "ready"), true);
   assert.equal(session.snapshot.phase, "settled");
   assert.deepEqual(revoked, []);
 });
 
-test("a real failure after supersession still retires the runtime grant", async () => {
+test("an old candidate callback cannot settle a newer running attempt", async () => {
+  const session = new EditAuthorRuntimeSession({
+    port: {
+      prepare: async (request) => success(request),
+      revoke: async () => {},
+    },
+  });
+
+  session.refresh(input());
+  session.startPreparation(input());
+  await flushAsync();
+  const grant = session.snapshot.grant;
+  assert.ok(grant);
+  assert.equal(beginRuntime(session, grant), true);
+  const oldAttempt = runtimeAttempts.get(session);
+  assert.equal(beginRuntime(session, grant), true);
+  const latestAttempt = runtimeAttempts.get(session);
+
+  assert.notEqual(oldAttempt.candidateId, latestAttempt.candidateId);
+  assert.equal(settleRuntime(session, grant, "failed", oldAttempt), false);
+  assert.equal(session.snapshot.phase, "running");
+  assert.equal(settleRuntime(session, grant, "ready", latestAttempt), true);
+  assert.equal(session.snapshot.phase, "settled");
+});
+
+test("a real candidate failure after supersession preserves last-known-good", async () => {
   const revoked = [];
   const session = new EditAuthorRuntimeSession({
     port: {
@@ -290,15 +333,15 @@ test("a real failure after supersession still retires the runtime grant", async 
   await flushAsync();
   const grant = session.snapshot.grant;
   assert.ok(grant);
-  session.beginRuntime(grant);
-  session.settleRuntime({ ...grant, outcome: "ready" });
-  session.beginRuntime(grant);
-  session.settleRuntime({ ...grant, outcome: "superseded" });
-  assert.equal(session.beginRuntime(grant), true);
-  assert.equal(session.settleRuntime({ ...grant, outcome: "failed" }), true);
-  assert.equal(session.snapshot.phase, "static-fallback");
-  assert.equal(session.snapshot.lastOutcome, "runtime-failed");
-  assert.deepEqual(revoked, [grant.sessionId]);
+  beginRuntime(session, grant);
+  settleRuntime(session, grant, "ready");
+  beginRuntime(session, grant);
+  settleRuntime(session, grant, "superseded");
+  assert.equal(beginRuntime(session, grant), true);
+  assert.equal(settleRuntime(session, grant, "failed"), true);
+  assert.equal(session.snapshot.phase, "settled");
+  assert.equal(session.snapshot.lastOutcome, "candidate-failed");
+  assert.deepEqual(revoked, []);
 });
 
 test("the first successful compatible runtime locks the canvas without recovery", async () => {
@@ -323,8 +366,8 @@ test("the first successful compatible runtime locks the canvas without recovery"
   await flushAsync();
   const grant = session.snapshot.grant;
   assert.equal(grant?.resourceMode, "compatible");
-  assert.equal(session.beginRuntime(grant), true);
-  assert.equal(session.settleRuntime({ ...grant, outcome: "ready" }), true);
+  assert.equal(beginRuntime(session, grant), true);
+  assert.equal(settleRuntime(session, grant, "ready"), true);
   await flushAsync();
 
   assert.equal(session.snapshot.phase, "settled");
@@ -356,13 +399,13 @@ test("a failed compatible runtime consumes one exact recovery and then becomes t
   await flushAsync();
   const compatible = session.snapshot.grant;
   assert.ok(compatible);
-  assert.equal(session.beginRuntime(compatible), true);
-  assert.equal(session.settleRuntime({ ...compatible, outcome: "failed" }), true);
+  assert.equal(beginRuntime(session, compatible), true);
+  assert.equal(settleRuntime(session, compatible, "failed"), true);
   assert.equal(session.snapshot.phase, "recovering");
   assert.equal(session.snapshot.grant, null);
   assert.equal(recoveries, 1);
   assert.equal(
-    session.settleRuntime({ ...compatible, outcome: "failed" }),
+    settleRuntime(session, compatible, "failed"),
     false,
   );
 
@@ -403,8 +446,8 @@ test("a stale exact recovery is revoked after the canvas generation changes", as
   session.startPreparation(input());
   await flushAsync();
   const compatible = session.snapshot.grant;
-  session.beginRuntime(compatible);
-  session.settleRuntime({ ...compatible, outcome: "rejected" });
+  beginRuntime(session, compatible);
+  settleRuntime(session, compatible, "rejected");
   session.refresh(input({
     canvasGeneration: 5,
     sourceSha256: "sha256:" + "d".repeat(64),
@@ -445,8 +488,8 @@ test("an unavailable compatible recovery terminates in static fallback", async (
   session.startPreparation(input());
   await flushAsync();
   const compatible = session.snapshot.grant;
-  session.beginRuntime(compatible);
-  session.settleRuntime({ ...compatible, outcome: "failed" });
+  beginRuntime(session, compatible);
+  settleRuntime(session, compatible, "failed");
   await flushAsync();
 
   assert.equal(session.snapshot.phase, "static-fallback");
@@ -468,6 +511,31 @@ test("failed preparation reaches an explicit static fallback", async () => {
   assert.equal(session.snapshot.phase, "static-fallback");
   assert.equal(session.snapshot.grant, null);
   assert.equal(session.snapshot.lastOutcome, "prepare-failed");
+});
+
+test("static fallback can retry preparation and disappear after success", async () => {
+  let attempts = 0;
+  const session = new EditAuthorRuntimeSession({
+    port: {
+      prepare: async (request) => {
+        attempts += 1;
+        return attempts === 1 ? null : success(request);
+      },
+      revoke: async () => {},
+    },
+  });
+
+  session.refresh(input());
+  session.startPreparation(input());
+  await flushAsync();
+  assert.equal(session.snapshot.phase, "static-fallback");
+
+  assert.equal(session.retry(), true);
+  assert.equal(session.snapshot.phase, "preparing");
+  assert.equal(session.startPreparation(input()), true);
+  await flushAsync();
+  assert.equal(session.snapshot.phase, "ready");
+  assert.equal(session.snapshot.lastOutcome, null);
 });
 
 test("an unsupported authored program publishes static fallback before preparation", () => {

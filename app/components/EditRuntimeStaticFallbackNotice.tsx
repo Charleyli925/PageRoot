@@ -3,7 +3,11 @@
 import { useState } from "react";
 import { XIcon } from "@phosphor-icons/react/dist/csr/X";
 
-export default function EditRuntimeStaticFallbackNotice() {
+export default function EditRuntimeStaticFallbackNotice({
+  onRetry,
+}: {
+  onRetry: () => void;
+}) {
   const [dismissed, setDismissed] = useState(false);
   if (dismissed) return null;
 
@@ -14,11 +18,19 @@ export default function EditRuntimeStaticFallbackNotice() {
       role="status"
       aria-live="polite"
     >
-      <strong>脚本未在编辑画布中运行</strong>
-      <span>此页面已静态显示；源码编辑和保存仍然有效。</span>
+      <strong>部分动态内容未加载</strong>
+      <span>页面仍可编辑和保存。</span>
       <button
         type="button"
-        aria-label="关闭脚本运行提示"
+        className="edit-runtime-static-fallback__retry"
+        onClick={onRetry}
+      >
+        重新加载动态内容
+      </button>
+      <button
+        type="button"
+        className="edit-runtime-static-fallback__close"
+        aria-label="关闭动态内容提示"
         onClick={() => setDismissed(true)}
       >
         <XIcon aria-hidden="true" size={14} weight="bold" />

@@ -42,12 +42,19 @@ export class EditAuthorRuntimeSession {
     sessionId?: string;
     sourceSha256?: string;
     canvasGeneration?: number;
+    candidateId?: string;
+    candidateGeneration?: number;
+    candidateSourceRevision?: string;
   }): boolean;
   settleRuntime(input?: {
     sessionId?: string;
     sourceSha256?: string;
     canvasGeneration?: number;
+    candidateId?: string;
+    candidateGeneration?: number;
+    candidateSourceRevision?: string;
     outcome?: "ready" | "rejected" | "failed" | "superseded";
   }): boolean;
+  retry(): boolean;
   dispose(): void;
 }

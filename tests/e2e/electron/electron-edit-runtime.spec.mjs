@@ -1596,6 +1596,374 @@ test("overlapping edits supersede an old Runtime handoff without losing charts o
   });
 });
 
+test("latest Runtime candidate wins across slow ECharts, native editing, history and recovery", {
+  tag: ["@gate-smoke", "@smoke-editing"],
+}, async () => {
+  const html = `<!doctype html>
+<html><head><title>Runtime latest wins</title></head><body>
+  <div aria-hidden="true" style="height:850px"></div>
+  <main>
+    <article data-native-case="runtime-latest-wins" style="padding:24px">
+      <h2 data-native-case="runtime-latest-wins-text">连续编辑 Word 目标</h2>
+      <div id="latest-wins-chart" style="width:320px;height:180px"></div>
+    </article>
+    <output id="latest-wins-proof"></output>
+  </main>
+  <div aria-hidden="true" style="height:1800px"></div>
+  <script src="echarts.js"></script>
+  <script>
+    const heading = document.querySelector('[data-native-case="runtime-latest-wins-text"]');
+    const chart = document.querySelector('#latest-wins-chart');
+    echarts.init(chart).setOption({ series: [{ type: 'bar', data: [1, 2, 3] }] });
+    document.querySelector('#latest-wins-proof').textContent =
+      '运行时卡片 ' + document.querySelectorAll('[data-native-case="runtime-latest-wins"]').length;
+    if (heading?.textContent.includes('候选失败')) {
+      throw new Error('synthetic latest candidate activation failure');
+    }
+  </script>
+  <script type="module" src="slow-module.js"></script>
+</body></html>`;
+
+  await withRuntimeProject("pageroot-runtime-latest-wins-e2e-", {
+    "runtime-report.html": html,
+    "echarts.js": ECHARTS_STUB,
+    "slow-module.js": [
+      "parent.__PAGEROOT_RUNTIME_MODULE_COUNT__ =",
+      "  (parent.__PAGEROOT_RUNTIME_MODULE_COUNT__ || 0) + 1;",
+      "if (parent.__PAGEROOT_RUNTIME_MODULE_COUNT__ > 1) {",
+      "  await new Promise((resolve) => {",
+      "    (parent.__PAGEROOT_RUNTIME_RELEASES__ ||= []).push(resolve);",
+      "  });",
+      "}",
+    ].join("\n"),
+  }, async ({ electronApp, page, sourcePath }) => {
+    const editor = page.getByTestId("html-canvas-editor");
+    const surface = page.locator(".canvas-edit-surface");
+    const reviewStage = page.locator(".review-scroll-stage");
+    const workingCopyPath = await managedWorkingCopyPath(page, sourcePath);
+    let frame = (await loadedDiskFrame(page, sourcePath, "runtime-latest-wins")).frame;
+    await expect(frame.locator("#latest-wins-chart canvas")).toHaveCount(1);
+    await reviewStage.evaluate((element) => {
+      element.scrollTop = 480;
+    });
+    await expect.poll(() => reviewStage.evaluate((element) => element.scrollTop)).toBe(480);
+
+    const candidateIds = [];
+    const waitForNewCandidate = async (previousId) => {
+      await expect.poll(async () => {
+        const candidateId = await editor.getAttribute("data-runtime-candidate-id");
+        return Boolean(candidateId && candidateId !== previousId);
+      }).toBe(true);
+      return editor.getAttribute("data-runtime-candidate-id");
+    };
+    const captureNextCandidate = async (trigger) => {
+      const previousId = await editor.getAttribute("data-runtime-candidate-id");
+      await trigger();
+      const candidateId = await waitForNewCandidate(previousId);
+      expect(candidateId).toBeTruthy();
+      candidateIds.push(candidateId);
+      const activeFrame = await currentEditorFrame(page);
+      await expect(activeFrame.locator("#latest-wins-chart canvas")).toHaveCount(1);
+      await expect(editor.locator('iframe[data-frame-role="runtime-retiring"]')).toHaveCount(0);
+      await expect(page.getByTestId("edit-runtime-static-fallback")).toHaveCount(0);
+      return candidateId;
+    };
+
+    await frame.locator('[data-native-case="runtime-latest-wins"]').click({
+      position: { x: 6, y: 6 },
+    });
+    const duplicateButton = page.getByRole("button", { name: "复制元素", exact: true });
+    await expect(duplicateButton).toBeVisible();
+    for (let index = 0; index < 3; index += 1) {
+      await captureNextCandidate(() => duplicateButton.click({ force: true }));
+    }
+
+    // Re-enter the still-visible last-known-good document while the latest
+    // candidate is preparing. Promotion must pause for the browser edit/IME
+    // transaction instead of moving it across Documents.
+    frame = await currentEditorFrame(page);
+    let heading = frame.locator('[data-native-case="runtime-latest-wins-text"]').first();
+    const beforeNativeCandidate = await editor.getAttribute("data-runtime-candidate-id");
+    await duplicateButton.evaluate((button) => {
+      button.click();
+      const editorElement = document.querySelector('[data-testid="html-canvas-editor"]');
+      const activeFrame = editorElement?.querySelector('iframe:not([data-frame-role])');
+      const editTarget = activeFrame?.contentDocument?.querySelector(
+        '[data-native-case="runtime-latest-wins-text"]',
+      );
+      if (!(editTarget instanceof activeFrame.contentWindow.HTMLElement)) {
+        throw new Error("Latest-wins active heading is missing.");
+      }
+      const rect = editTarget.getBoundingClientRect();
+      editTarget.dispatchEvent(new MouseEvent("dblclick", {
+        bubbles: true,
+        cancelable: true,
+        clientX: rect.left + Math.max(1, rect.width / 2),
+        clientY: rect.top + Math.max(1, rect.height / 2),
+      }));
+    });
+    const nativeCandidate = await waitForNewCandidate(beforeNativeCandidate);
+    expect(nativeCandidate).toBeTruthy();
+    candidateIds.push(nativeCandidate);
+    expect(new Set(candidateIds).size).toBe(4);
+    await expect(heading).toHaveAttribute("contenteditable", "true");
+    await heading.evaluate((element) => {
+      const text = element.firstChild;
+      if (!(text instanceof Text)) throw new Error("Latest-wins IME text is missing.");
+      const selection = document.getSelection();
+      const range = document.createRange();
+      range.setStart(text, text.data.length);
+      range.collapse(true);
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+      element.dispatchEvent(new CompositionEvent("compositionstart", {
+        bubbles: true,
+        data: "pinyin",
+      }));
+      text.data += "pinyin";
+      element.dispatchEvent(new InputEvent("beforeinput", {
+        bubbles: true,
+        cancelable: false,
+        data: "pinyin",
+        inputType: "insertCompositionText",
+        isComposing: true,
+      }));
+      element.dispatchEvent(new InputEvent("input", {
+        bubbles: true,
+        data: "pinyin",
+        inputType: "insertCompositionText",
+        isComposing: true,
+      }));
+    });
+    await expect(editor).toHaveAttribute("data-runtime-candidate-phase", "preparing");
+    await expect(editor.locator('iframe[data-frame-role="runtime-retiring"]')).toHaveCount(0);
+    expect(readFileSync(workingCopyPath, "utf8")).not.toContain("pinyin");
+    await heading.evaluate((element) => {
+      element.dispatchEvent(new CompositionEvent("compositionend", {
+        bubbles: true,
+        data: "",
+      }));
+    });
+    await expect(heading).not.toContainText("pinyin");
+    expect(readFileSync(workingCopyPath, "utf8")).not.toContain("pinyin");
+
+    frame = await currentEditorFrame(page);
+    heading = frame.locator('[data-native-case="runtime-latest-wins-text"]').first();
+    await heading.click({ force: true });
+    await heading.dblclick({ force: true });
+    await expect(heading).toHaveAttribute("contenteditable", "true");
+    await heading.press("End");
+    const revisionBeforeText = Number(await page.locator("[data-persist-state]").first()
+      .getAttribute("data-persisted-revision"));
+    await page.keyboard.insertText("你好");
+    await expect(heading).toContainText("你好");
+    await page.keyboard.insertText("                        ");
+    await expect.poll(() => readFileSync(workingCopyPath, "utf8")).toContain("你好");
+    await expect.poll(() => readFileSync(workingCopyPath, "utf8"))
+      .toMatch(/(?:&nbsp;| ){8}/u);
+    const textRevision = await expectCheckpointPersisted(page, revisionBeforeText);
+    frame = await currentEditorFrame(page);
+    heading = frame.locator('[data-native-case="runtime-latest-wins-text"]').first();
+    await expect(heading).toHaveAttribute("contenteditable", "true");
+    await heading.evaluate((element) => {
+      const range = document.createRange();
+      range.selectNodeContents(element);
+      range.collapse(false);
+      const selection = document.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+      element.focus();
+    });
+    const beforeEnterCandidate = await editor.getAttribute("data-runtime-candidate-id");
+    await heading.press("Enter");
+    const enterCandidate = await waitForNewCandidate(beforeEnterCandidate);
+    expect(enterCandidate).toBeTruthy();
+    candidateIds.push(enterCandidate);
+    await expect.poll(() => readFileSync(workingCopyPath, "utf8")).toContain("你好");
+    const enterRevision = await expectCheckpointPersisted(page, textRevision);
+
+    // Undo and redo intentionally arrive before the slow candidate settles.
+    const beforeUndoCandidate = enterCandidate;
+    await clickEditHistoryMenu(electronApp, page, "undo");
+    const undoCandidate = await waitForNewCandidate(beforeUndoCandidate);
+    expect(undoCandidate).toBeTruthy();
+    candidateIds.push(undoCandidate);
+    const undoRevision = await expectCheckpointPersisted(page, enterRevision);
+    await clickEditHistoryMenu(electronApp, page, "redo");
+    const redoCandidate = await waitForNewCandidate(undoCandidate);
+    expect(redoCandidate).toBeTruthy();
+    candidateIds.push(redoCandidate);
+    await expectCheckpointPersisted(page, undoRevision);
+
+    // A true latest candidate activation failure must preserve the old dynamic
+    // view and shared grant. The following source checkpoint removes the fault
+    // and proves that a later candidate can still win.
+    frame = await currentEditorFrame(page);
+    heading = frame.locator('[data-native-case="runtime-latest-wins-text"]').first();
+    await heading.click();
+    await heading.dblclick({ force: true });
+    await expect(heading).toHaveAttribute("contenteditable", "true");
+    await heading.press("End");
+    await page.keyboard.insertText("        候选失败");
+    const pendingResolverCount = await page.evaluate(() => (
+      window.__PAGEROOT_RUNTIME_RELEASES__?.length || 0
+    ));
+    const beforeFailureCandidate = await editor.getAttribute("data-runtime-candidate-id");
+    await page.keyboard.press("Escape");
+    const failureCandidate = await waitForNewCandidate(beforeFailureCandidate);
+    expect(failureCandidate).toBeTruthy();
+    candidateIds.push(failureCandidate);
+    await expect.poll(() => page.evaluate(() => (
+      window.__PAGEROOT_RUNTIME_RELEASES__?.length || 0
+    ))).toBeGreaterThan(pendingResolverCount);
+    await page.evaluate(() => {
+      const releases = window.__PAGEROOT_RUNTIME_RELEASES__ || [];
+      window.__PAGEROOT_RUNTIME_RELEASES__ = [];
+      releases.forEach((release) => release());
+    });
+    const lastKnownGoodBeforeFailure = await editor.getAttribute(
+      "data-runtime-last-known-good-id",
+    );
+    expect(lastKnownGoodBeforeFailure).toBeTruthy();
+    await expect.poll(() => surface.getAttribute("data-edit-runtime-outcome"), {
+      timeout: 12_000,
+    }).toBe("candidate-failed");
+    await expect(surface).toHaveAttribute("data-edit-runtime-phase", "settled");
+    await expect(editor).not.toHaveAttribute("data-runtime-candidate-id", /.+/u);
+    await expect(editor).toHaveAttribute(
+      "data-runtime-last-known-good-id",
+      lastKnownGoodBeforeFailure,
+    );
+    await expect(page.getByTestId("edit-runtime-static-fallback")).toHaveCount(0);
+    frame = await currentEditorFrame(page);
+    await expect(frame.locator("#latest-wins-chart canvas")).toHaveCount(1);
+
+    heading = frame.locator('[data-native-case="runtime-latest-wins-text"]').first();
+    await heading.click();
+    await heading.dblclick({ force: true });
+    await expect(heading).toHaveAttribute("contenteditable", "true");
+    await heading.evaluate((element) => {
+      const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+      let startText = null;
+      let markerText = null;
+      let text = walker.nextNode();
+      while (text instanceof Text) {
+        if (!startText && text.data.includes("你好")) startText = text;
+        if (text.data.includes("候选失败")) {
+          markerText = text;
+          break;
+        }
+        text = walker.nextNode();
+      }
+      if (!(startText instanceof Text) || !(markerText instanceof Text)) {
+        throw new Error("Editable spaces or failure marker text is missing.");
+      }
+      const markerEnd = markerText.data.indexOf("候选失败") + "候选失败".length;
+      const range = document.createRange();
+      range.setStart(startText, startText.data.indexOf("你好") + "你好".length);
+      range.setEnd(markerText, markerEnd);
+      const selection = document.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+    });
+    await page.keyboard.press("Backspace");
+    await expect(heading).not.toContainText("候选失败");
+    await page.keyboard.press("Escape");
+    const recoveryCandidate = await waitForNewCandidate(null);
+    candidateIds.push(recoveryCandidate);
+    await expect.poll(() => page.evaluate(() => (
+      window.__PAGEROOT_RUNTIME_RELEASES__?.length || 0
+    ))).toBeGreaterThan(0);
+    await page.evaluate(() => {
+      const releases = window.__PAGEROOT_RUNTIME_RELEASES__ || [];
+      window.__PAGEROOT_RUNTIME_RELEASES__ = [];
+      releases.forEach((release) => release());
+    });
+    await expect.poll(() => surface.getAttribute("data-edit-runtime-phase"), {
+      timeout: 12_000,
+    }).toBe("settled");
+    await expect(surface).toHaveAttribute("data-edit-runtime-outcome", "ready");
+    await expect(page.getByTestId("edit-runtime-static-fallback")).toHaveCount(0);
+
+    frame = await currentEditorFrame(page);
+    await expect(frame.locator("#latest-wins-chart canvas")).toHaveCount(1);
+    heading = frame.locator('[data-native-case="runtime-latest-wins-text"]').first();
+    await heading.click();
+    await heading.dblclick({ force: true });
+    await expect(heading).toHaveAttribute("contenteditable", "true");
+    await heading.evaluate((element) => {
+      const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+      let text = walker.nextNode();
+      while (text instanceof Text && !text.data.includes("你好")) {
+        text = walker.nextNode();
+      }
+      if (!(text instanceof Text)) throw new Error("Editable space text is missing.");
+      const start = text.data.indexOf("你好") + "你好".length;
+      if (!/ {8}/u.test(text.data.slice(start))) {
+        throw new Error("Expected editable spaces are missing.");
+      }
+      const range = document.createRange();
+      range.setStart(text, start);
+      range.setEnd(text, text.data.length);
+      const selection = document.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+    });
+    await page.keyboard.press("Backspace");
+    await expect.poll(() => heading.textContent()).not.toMatch(/ {8}/u);
+    await page.keyboard.press("Escape");
+    const spaceDeleteCandidate = await waitForNewCandidate(null);
+    await expect.poll(() => page.evaluate(() => (
+      window.__PAGEROOT_RUNTIME_RELEASES__?.length || 0
+    ))).toBeGreaterThan(0);
+    await page.evaluate(() => {
+      const releases = window.__PAGEROOT_RUNTIME_RELEASES__ || [];
+      window.__PAGEROOT_RUNTIME_RELEASES__ = [];
+      releases.forEach((release) => release());
+    });
+    await expect(editor).toHaveAttribute(
+      "data-runtime-last-known-good-id",
+      spaceDeleteCandidate,
+      { timeout: 12_000 },
+    );
+    await expect(surface).toHaveAttribute("data-edit-runtime-outcome", "ready");
+    await expect(page.getByTestId("edit-runtime-static-fallback")).toHaveCount(0);
+
+    frame = await currentEditorFrame(page);
+    await expect(frame.locator("#latest-wins-chart canvas")).toHaveCount(1);
+    await expect(frame.locator('[data-native-case="runtime-latest-wins"]')).toHaveCount(5);
+    await expect(frame.locator("#latest-wins-proof")).toHaveText("运行时卡片 5");
+    await expect(editor.locator('iframe:not([data-frame-role])')).toHaveCount(1);
+    await expect(editor.locator('iframe[data-frame-role="runtime-candidate"]')).toHaveCount(0);
+    await expect(editor.locator('iframe[data-frame-role="runtime-retiring"]')).toHaveCount(0);
+    await expect.poll(() => reviewStage.evaluate((element) => element.scrollTop))
+      .toBeGreaterThan(400);
+
+    const finalSource = readFileSync(workingCopyPath, "utf8");
+    expect(finalSource).toContain("你好");
+    expect(finalSource).not.toContain("pinyin");
+    const finalHeadingSource = finalSource.match(
+      /<h2[^>]*data-native-case="runtime-latest-wins-text"[^>]*>([\s\S]*?)<\/h2>/u,
+    )?.[1] ?? "";
+    expect(finalHeadingSource).not.toContain("候选失败");
+    expect(finalHeadingSource).not.toMatch(/(?:&nbsp;| ){8}/u);
+    const finalIndex = buildSourceIndex(finalSource);
+    const finalStableIds = await frame.locator('[data-native-case="runtime-latest-wins"]')
+      .evaluateAll((elements) => elements.map(
+        (element) => element.getAttribute("data-pageroot-id"),
+      ));
+    expect(finalStableIds.every(Boolean)).toBe(true);
+    expect(new Set(finalStableIds).size).toBe(5);
+    expect(finalIndex.byPagerootId.size).toBeGreaterThanOrEqual(5);
+    await expect(editor).toHaveAttribute(
+      "data-runtime-last-known-good-source-revision",
+      finalIndex.sourceSha256,
+    );
+    const finalCandidateId = await editor.getAttribute("data-runtime-last-known-good-id");
+    expect(candidateIds).not.toContain(finalCandidateId);
+  });
+});
+
 test("long text Enter rebuilds Runtime without moving the caret or viewport", {
   tag: ["@gate-smoke", "@smoke-editing"],
 }, async () => {
@@ -1768,7 +2136,12 @@ test("a failed runtime candidate leaves the old active frame managed and never r
 
     await expect.poll(() => page.locator(".canvas-edit-surface").getAttribute(
       "data-edit-runtime-phase",
-    )).toBe("running");
+    )).toBe("settled");
+    await expect(page.locator(".canvas-edit-surface")).toHaveAttribute(
+      "data-edit-runtime-outcome",
+      "candidate-failed",
+    );
+    await expect(page.getByTestId("edit-runtime-static-fallback")).toHaveCount(0);
     const oldFrameState = await page.evaluate(() => {
       const editor = document.querySelector('[data-testid="html-canvas-editor"]');
       const oldFrame = window.__PAGEROOT_RUNTIME_OLD_FRAME__;
@@ -1794,7 +2167,7 @@ test("a failed runtime candidate leaves the old active frame managed and never r
     expect(page.url()).toBe(beforeUrl);
     await expect.poll(() => page.locator(".canvas-edit-surface").getAttribute(
       "data-edit-runtime-phase",
-    )).toBe("running");
+    )).toBe("settled");
   });
 });
 
@@ -1938,20 +2311,60 @@ test("unsupported Script programs enter an explicit static Edit state", async ()
   }, async ({ page, sourcePath }) => {
     const { frame } = await loadedDiskFrame(page, sourcePath, "static-runtime-fallback");
     await expect(page.getByTestId("edit-runtime-static-fallback")).toContainText(
-      "脚本未在编辑画布中运行",
+      "部分动态内容未加载",
     );
+    await expect(page.getByRole("button", { name: "重新加载动态内容" })).toBeVisible();
     await expect(page.locator(".canvas-edit-surface")).toHaveAttribute(
       "data-edit-runtime-phase",
       "static-fallback",
     );
     await expect(frame.locator("body")).not.toHaveAttribute("data-runtime-marker", "executed");
-    await page.getByRole("button", { name: "关闭脚本运行提示" }).click();
+    await page.getByRole("button", { name: "关闭动态内容提示" }).click();
     await expect(page.getByTestId("edit-runtime-static-fallback")).toHaveCount(0);
     await expect(page.locator(".canvas-edit-surface")).toHaveAttribute(
       "data-edit-runtime-phase",
       "static-fallback",
     );
     expect(readFileSync(sourcePath, "utf8")).toBe(html);
+  });
+});
+
+test("static fallback can reload dynamic content and dismiss itself after success", async () => {
+  const html = `<!doctype html>
+<html><head><title>Runtime retry</title></head><body>
+  <main data-native-case="runtime-retry">动态内容重试</main>
+  <script>
+    parent.__PAGEROOT_RUNTIME_RETRY_COUNT__ =
+      (parent.__PAGEROOT_RUNTIME_RETRY_COUNT__ || 0) + 1;
+    if (parent.__PAGEROOT_RUNTIME_RETRY_COUNT__ === 1) {
+      throw new Error('synthetic first activation failure');
+    }
+    document.body.dataset.runtimeRetryReady = 'true';
+  </script>
+</body></html>`;
+
+  await withRuntimeProject("pageroot-runtime-retry-e2e-", {
+    "runtime-report.html": html,
+  }, async ({ page, sourcePath }) => {
+    await loadedDiskFrame(page, sourcePath, "runtime-retry");
+    await expect(page.getByTestId("edit-runtime-static-fallback")).toContainText(
+      "部分动态内容未加载",
+    );
+    await expect(page.locator(".canvas-edit-surface")).toHaveAttribute(
+      "data-edit-runtime-phase",
+      "static-fallback",
+    );
+
+    await page.getByRole("button", { name: "重新加载动态内容" }).click();
+    await expect(page.getByTestId("edit-runtime-static-fallback")).toHaveCount(0);
+    await expect.poll(() => page.locator(".canvas-edit-surface").getAttribute(
+      "data-edit-runtime-phase",
+    ), { timeout: 12_000 }).toBe("settled");
+    const frame = await currentEditorFrame(page);
+    await expect(frame.locator("body")).toHaveAttribute("data-runtime-retry-ready", "true");
+    await expect(frame.locator('[data-native-case="runtime-retry"]')).toHaveText(
+      "动态内容重试",
+    );
   });
 });
 
