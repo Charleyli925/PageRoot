@@ -511,6 +511,12 @@ source change materializes complete HTML, rebuilds the disposable frame and
 reruns the author program. Native input may postpone that rebuild until editing
 finishes. The resource session may be reused only while exact authored script
 markup/body identity is unchanged; a Script change requires a new generation.
+When a newer source edit replaces an in-flight disposable frame using that same
+resource session, the older frame settles as `superseded`, not as an authored
+program failure; only the newest frame may publish the terminal ready/failure
+outcome. A text Selection retained across the handoff is presentation only and
+is discarded when its target or source text segments no longer match, without
+blocking a fresh native edit session on the current exact target.
 The same one-time private capability returns an activation-result callback bound
 to the source window, session, execution and frame token. Resource errors,
 synchronous author errors and immediate unhandled rejections through the

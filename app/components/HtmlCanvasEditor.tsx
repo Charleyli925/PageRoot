@@ -1290,6 +1290,26 @@ function cloneActiveTextRange(
   };
 }
 
+function textRangeMatchesTarget(
+  range: ActiveTextRange,
+  target: HtmlCanvasSelection | null,
+): boolean {
+  if (!target) return false;
+  return Boolean(
+    range.target.id === target.id
+    || (
+      range.target.elementId
+      && target.elementId
+      && range.target.elementId === target.elementId
+    )
+    || (
+      range.target.nodeId
+      && target.nodeId
+      && range.target.nodeId === target.nodeId
+    )
+  );
+}
+
 type NativeEditFenceBookmark = {
   fenceId: number;
   target: HtmlCanvasSelection;
@@ -2048,7 +2068,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       // A newer authoritative source update may arrive during the final handoff
       // frame. Roll back the not-yet-settled promotion before starting that load
       // so the retiring document remains the only live active context.
-      rollbackRuntimePromotionRef.current(promotedCandidate, "failed");
+      rollbackRuntimePromotionRef.current(promotedCandidate, "superseded");
     }
     const currentRuntime = runtimeFrameRef.current;
     const runtimeIsCurrent = Boolean(
@@ -2445,7 +2465,9 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     if (runtimeRetiringGenerationRef.current !== null) {
       clearRuntimeRetiringFrame();
     }
-    cancelRuntimeCandidateRef.current();
+    const supersededRuntimeGrant = runtimeCandidateRef.current?.runtimeFrame?.grant
+      ?? null;
+    cancelRuntimeCandidateRef.current("superseded");
     const previousPendingSelection = pendingSelectionRef.current;
     const previousPendingToolbarVisible = pendingToolbarVisibleRef.current;
     const previousPendingNativeEditResume = pendingNativeEditResumeRef.current;
@@ -2506,6 +2528,9 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       sourceMapFailed = true;
     }
     if (sourceMapFailed) {
+      if (supersededRuntimeGrant) {
+        onEditRuntimeLoadOutcomeRef.current?.(supersededRuntimeGrant, "failed");
+      }
       pendingSelectionRef.current = previousPendingSelection;
       pendingToolbarVisibleRef.current = previousPendingToolbarVisible;
       containerRef.current?.removeAttribute("data-runtime-handoff");
@@ -2564,6 +2589,9 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       });
     }
     if (!prepared) {
+      if (supersededRuntimeGrant && !runtimeGrant) {
+        onEditRuntimeLoadOutcomeRef.current?.(supersededRuntimeGrant, "failed");
+      }
       pendingSelectionRef.current = previousPendingSelection;
       pendingToolbarVisibleRef.current = previousPendingToolbarVisible;
       containerRef.current?.removeAttribute("data-runtime-handoff");
@@ -5004,6 +5032,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   ): boolean => {
     hoverControllerRef.current?.hide();
     containerRef.current?.setAttribute("data-native-start-status", "starting");
+    containerRef.current?.removeAttribute("data-native-stale-range-discarded");
     containerRef.current?.removeAttribute("data-native-host-mode");
     containerRef.current?.removeAttribute("data-native-event-delivery-mode");
     if (readOnlyRef.current) {
@@ -5029,7 +5058,22 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       containerRef.current?.setAttribute("data-native-start-status", "runtime-display-only");
       return false;
     }
-    const priorRange = activeTextRangeRef.current;
+    let priorRange = activeTextRangeRef.current;
+    if (
+      priorRange
+      && !textRangeMatchesTarget(priorRange, selectedSourceSelectionRef.current)
+    ) {
+      // Text Selection is disposable presentation. A selection retained from
+      // the previous runtime frame must not block entry into a newly selected
+      // source target after that frame is replaced.
+      priorRange = null;
+      activeTextRangeRef.current = null;
+      setHasTextRange(false);
+      containerRef.current?.setAttribute(
+        "data-native-stale-range-discarded",
+        "target",
+      );
+    }
     const islandHostElement = nativeEditHostForElement(selectedElement, sourceIndex);
     const hintedTextNode = !islandHostElement && caretPoint
       ? directTextNodeAtPoint(
@@ -5113,9 +5157,26 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
             rootTargetRef,
             { allowEmpty: true, ignoreComments: true },
           );
-      const activationLogicalRange = priorRange
-        ? sourceSegmentsToTextRange(projection, priorRange.segments)
-        : null;
+      let activationLogicalRange = null;
+      if (priorRange) {
+        try {
+          activationLogicalRange = sourceSegmentsToTextRange(
+            projection,
+            priorRange.segments,
+          );
+        } catch {
+          // A handoff can preserve a logical target while source offsets and
+          // text-node IDs advance. Discard only that stale range; the current
+          // source target remains eligible for a fresh native edit session.
+          priorRange = null;
+          activeTextRangeRef.current = null;
+          setHasTextRange(false);
+          containerRef.current?.setAttribute(
+            "data-native-stale-range-discarded",
+            "segments",
+          );
+        }
+      }
       let sourceInnerHtml = fragmentCandidate?.sourceInnerHtml ?? "";
       if (mode === "editable-island") {
         const islandCapability = isEditableIslandTarget(

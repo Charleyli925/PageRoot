@@ -287,6 +287,30 @@
   color: #74633a;
 }
 
+.edit-runtime-static-fallback button {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 24px;
+  height: 24px;
+  margin: -3px -5px -3px 2px;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  color: #74633a;
+  background: transparent;
+  cursor: pointer;
+}
+
+.edit-runtime-static-fallback button:hover {
+  background: rgb(116 99 58 / 10%);
+}
+
+.edit-runtime-static-fallback button:focus-visible {
+  outline: 2px solid #9a6917;
+  outline-offset: 1px;
+}
+
 .workbench-chrome-status {
   position: fixed;
   z-index: 90;

@@ -245,6 +245,62 @@ test("settled runtime grant can render another disposable frame", async () => {
   assert.deepEqual(revoked, []);
 });
 
+test("a superseded disposable frame keeps the shared runtime grant alive", async () => {
+  const revoked = [];
+  const session = new EditAuthorRuntimeSession({
+    port: {
+      prepare: async (request) => success(request),
+      revoke: async (sessionId) => revoked.push(sessionId),
+    },
+  });
+
+  session.refresh(input());
+  assert.equal(session.startPreparation(input()), true);
+  await flushAsync();
+  const grant = session.snapshot.grant;
+  assert.ok(grant);
+  assert.equal(session.beginRuntime(grant), true);
+  assert.equal(session.settleRuntime({ ...grant, outcome: "ready" }), true);
+  assert.equal(session.snapshot.phase, "settled");
+
+  assert.equal(session.beginRuntime(grant), true);
+  assert.equal(
+    session.settleRuntime({ ...grant, outcome: "superseded" }),
+    true,
+  );
+  assert.equal(session.snapshot.phase, "running");
+  assert.equal(session.snapshot.grant?.sessionId, grant.sessionId);
+  assert.equal(session.beginRuntime(grant), true);
+  assert.equal(session.settleRuntime({ ...grant, outcome: "ready" }), true);
+  assert.equal(session.snapshot.phase, "settled");
+  assert.deepEqual(revoked, []);
+});
+
+test("a real failure after supersession still retires the runtime grant", async () => {
+  const revoked = [];
+  const session = new EditAuthorRuntimeSession({
+    port: {
+      prepare: async (request) => success(request),
+      revoke: async (sessionId) => revoked.push(sessionId),
+    },
+  });
+
+  session.refresh(input());
+  session.startPreparation(input());
+  await flushAsync();
+  const grant = session.snapshot.grant;
+  assert.ok(grant);
+  session.beginRuntime(grant);
+  session.settleRuntime({ ...grant, outcome: "ready" });
+  session.beginRuntime(grant);
+  session.settleRuntime({ ...grant, outcome: "superseded" });
+  assert.equal(session.beginRuntime(grant), true);
+  assert.equal(session.settleRuntime({ ...grant, outcome: "failed" }), true);
+  assert.equal(session.snapshot.phase, "static-fallback");
+  assert.equal(session.snapshot.lastOutcome, "runtime-failed");
+  assert.deepEqual(revoked, [grant.sessionId]);
+});
+
 test("the first successful compatible runtime locks the canvas without recovery", async () => {
   let recoveries = 0;
   const session = new EditAuthorRuntimeSession({

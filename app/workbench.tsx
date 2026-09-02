@@ -13,6 +13,7 @@ import {
 import { ClockCounterClockwiseIcon } from "@phosphor-icons/react/dist/csr/ClockCounterClockwise";
 import { EyeIcon } from "@phosphor-icons/react/dist/csr/Eye";
 import AttachmentLightbox from "./components/AttachmentLightbox";
+import EditRuntimeStaticFallbackNotice from "./components/EditRuntimeStaticFallbackNotice";
 import HtmlCanvasEditor from "./components/HtmlCanvasEditor";
 import HtmlDisplaySurface from "./components/HtmlDisplaySurface";
 import type {
@@ -812,6 +813,13 @@ export default function Workbench() {
     runtimePreparing: editRuntimePreparing, runtimeRenderPending: editRuntimeRenderPending,
     runtimeGrant: editRuntimeGrant,
   } = runtimeCanvasResidency;
+  const staticFallbackNoticeIdentity = editRuntimePhase === "static-fallback"
+    ? [
+        editRuntimeSnapshot?.sourcePath || sourcePath || "no-source",
+        editRuntimeSnapshot?.canvasGeneration ?? canvasGeneration,
+        editRuntimeSnapshot?.lastOutcome || "unknown",
+      ].join(":")
+    : null;
   const [pageViewContext, setPageViewContext] =
     useState<PageViewContext | null>(null);
   const [interactivePreviewTransport, setInteractivePreviewTransport] =
@@ -6342,16 +6350,10 @@ export default function Workbench() {
               <div className="canvas-loading" role="status">正在识别运行环境…</div>
             ) : !browserPreviewOnly ? (
               <>
-              {editRuntimePhase === "static-fallback" ? (
-                <section
-                  className="edit-runtime-static-fallback"
-                  data-testid="edit-runtime-static-fallback"
-                  role="status"
-                  aria-live="polite"
-                >
-                  <strong>脚本未在编辑画布中运行</strong>
-                  <span>此页面已静态显示；源码编辑和保存仍然有效。</span>
-                </section>
+              {staticFallbackNoticeIdentity ? (
+                <EditRuntimeStaticFallbackNotice
+                  key={staticFallbackNoticeIdentity}
+                />
               ) : null}
               {editRuntimePreparing && !activeRuntimeCanvasUsable ? (
                 <HtmlDisplaySurface

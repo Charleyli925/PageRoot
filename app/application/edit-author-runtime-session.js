@@ -369,7 +369,7 @@ export class EditAuthorRuntimeSession {
   beginRuntime({ sessionId, sourceSha256, canvasGeneration } = {}) {
     const grant = this.#snapshot.grant;
     if (
-      !["ready", "settled"].includes(this.#snapshot.phase)
+      !["ready", "running", "settled"].includes(this.#snapshot.phase)
       || !grant
       || grant.sessionId !== String(sessionId || "").toLowerCase()
       || grant.sourceSha256 !== String(sourceSha256 || "").toLowerCase()
@@ -461,6 +461,11 @@ export class EditAuthorRuntimeSession {
       || grant.sourceSha256 !== String(sourceSha256 || "").toLowerCase()
       || grant.canvasGeneration !== canvasGeneration
     ) return false;
+    // Repeated source edits reuse one immutable resource grant for this canvas
+    // generation. Replacing an in-flight disposable iframe is coordination,
+    // not evidence that the authored program failed. Keep the grant running so
+    // the newest frame can publish the authoritative ready/failure outcome.
+    if (outcome === "superseded") return true;
     if (outcome === "ready") {
       this.#emit({
         phase: "settled",

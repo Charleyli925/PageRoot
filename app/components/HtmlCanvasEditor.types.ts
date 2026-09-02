@@ -135,7 +135,8 @@ export type HtmlCanvasInteractionMode = "editing" | "processing" | "history";
 export type HtmlCanvasEditRuntimeLoadOutcome =
   | "ready"
   | "rejected"
-  | "failed";
+  | "failed"
+  | "superseded";
 
 export type HtmlCanvasFreezeSnapshot = {
   ok: boolean;

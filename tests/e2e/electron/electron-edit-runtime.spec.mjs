@@ -1485,6 +1485,117 @@ test("long-page element duplication uses the same visible runtime handoff", {
   });
 });
 
+test("overlapping edits supersede an old Runtime handoff without losing charts or text editing", {
+  tag: ["@gate-smoke", "@smoke-editing"],
+}, async () => {
+  const html = `<!doctype html>
+<html><head><title>Runtime supersession</title></head><body>
+  <main>
+    <article data-native-case="runtime-supersession" id="supersession-target" style="padding:24px">
+      <h2 data-native-case="runtime-supersession-text">连续编辑目标</h2>
+      <div id="supersession-chart" style="width:320px;height:180px"></div>
+    </article>
+    <output id="supersession-proof"></output>
+  </main>
+  <script src="echarts.js"></script>
+  <script>
+    let layoutFrame = 0;
+    const pulseLayout = () => {
+      layoutFrame += 1;
+      document.querySelector('[data-native-case="runtime-supersession"]').style.paddingBottom =
+        (layoutFrame % 2 === 0 ? '24px' : '28px');
+      if (layoutFrame < 30) {
+        requestAnimationFrame(pulseLayout);
+      } else {
+        document.querySelector('[data-native-case="runtime-supersession"]').style.paddingBottom = '';
+      }
+    };
+    requestAnimationFrame(pulseLayout);
+    document.querySelector('#supersession-proof').textContent =
+      '运行时卡片 ' + document.querySelectorAll('[data-native-case="runtime-supersession"]').length;
+    echarts.init(document.querySelector('#supersession-chart')).setOption({
+      series: [{ type: 'bar', data: [1, 2, 3] }],
+    });
+  </script>
+  <script type="module" src="slow-module.js"></script>
+</body></html>`;
+
+  await withRuntimeProject("pageroot-runtime-supersession-e2e-", {
+    "runtime-report.html": html,
+    "echarts.js": ECHARTS_STUB,
+    "slow-module.js": "await new Promise((resolve) => setTimeout(resolve, 500));",
+  }, async ({ page, sourcePath }) => {
+    let frame = (await loadedDiskFrame(page, sourcePath, "runtime-supersession")).frame;
+    const workingCopyPath = await managedWorkingCopyPath(page, sourcePath);
+    await expect(frame.locator("#supersession-chart canvas")).toHaveCount(1);
+    await frame.locator('[data-native-case="runtime-supersession"]').click({
+      position: { x: 6, y: 6 },
+    });
+    const duplicateButton = page.getByRole("button", { name: "复制元素", exact: true });
+    await expect(duplicateButton).toBeVisible();
+
+    await duplicateButton.click();
+    await expect(page.getByTestId("html-canvas-editor")).toHaveAttribute(
+      "data-runtime-handoff",
+      "preparing",
+    );
+    await duplicateButton.click({ force: true });
+
+    await expect.poll(() => page.locator(".canvas-edit-surface").getAttribute(
+      "data-edit-runtime-phase",
+    )).toBe("settled");
+    await expect(page.getByTestId("edit-runtime-static-fallback")).toHaveCount(0);
+    frame = await currentEditorFrame(page);
+    await expect(frame.locator('[data-native-case="runtime-supersession"]')).toHaveCount(3);
+    await expect(frame.locator("#supersession-proof")).toHaveText("运行时卡片 3");
+    await expect(frame.locator("#supersession-chart canvas")).toHaveCount(1);
+
+    const text = frame.locator('[data-native-case="runtime-supersession-text"]').first();
+    await text.click();
+    await text.dblclick({ force: true });
+    await expect.poll(async () => ({
+      contenteditable: await text.getAttribute("contenteditable"),
+      editor: await page.getByTestId("html-canvas-editor").evaluate((element) => ({
+        startStatus: element.getAttribute("data-native-start-status"),
+        blockedDetail: element.getAttribute("data-edit-block-detail"),
+        renderVerified: element.getAttribute("data-render-verified"),
+        runtimeHandoff: element.getAttribute("data-runtime-handoff"),
+      })),
+    })).toEqual({
+      contenteditable: "true",
+      editor: {
+        startStatus: "started",
+        blockedDetail: null,
+        renderVerified: "true",
+        runtimeHandoff: null,
+      },
+    });
+    await expect(page.getByTestId("html-canvas-editor")).toHaveAttribute(
+      "data-native-stale-range-discarded",
+      /target|segments/u,
+    );
+    await text.press("End");
+    await page.keyboard.insertText("                        ");
+    await page.keyboard.press("Escape");
+    await expect.poll(() => page.locator(".canvas-edit-surface").getAttribute(
+      "data-edit-runtime-phase",
+    )).toBe("settled");
+    await expect.poll(() => readFileSync(workingCopyPath, "utf8"))
+      .toMatch(/(?:&nbsp;| ){8}/u);
+    frame = await currentEditorFrame(page);
+    await expect(frame.locator("#supersession-chart canvas")).toHaveCount(1);
+    const editedText = frame.locator('[data-native-case="runtime-supersession-text"]').first();
+    await editedText.click();
+    await editedText.dblclick({ force: true });
+    await expect(editedText).toHaveAttribute("contenteditable", "true");
+    await page.keyboard.insertText("仍可继续编辑");
+    await page.keyboard.press("Escape");
+    await expect(page.getByTestId("edit-runtime-static-fallback")).toHaveCount(0);
+    await expect.poll(() => readFileSync(workingCopyPath, "utf8"))
+      .toContain("仍可继续编辑");
+  });
+});
+
 test("long text Enter rebuilds Runtime without moving the caret or viewport", {
   tag: ["@gate-smoke", "@smoke-editing"],
 }, async () => {
@@ -1834,6 +1945,12 @@ test("unsupported Script programs enter an explicit static Edit state", async ()
       "static-fallback",
     );
     await expect(frame.locator("body")).not.toHaveAttribute("data-runtime-marker", "executed");
+    await page.getByRole("button", { name: "关闭脚本运行提示" }).click();
+    await expect(page.getByTestId("edit-runtime-static-fallback")).toHaveCount(0);
+    await expect(page.locator(".canvas-edit-surface")).toHaveAttribute(
+      "data-edit-runtime-phase",
+      "static-fallback",
+    );
     expect(readFileSync(sourcePath, "utf8")).toBe(html);
   });
 });

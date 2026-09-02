@@ -47,7 +47,7 @@ export class EditAuthorRuntimeSession {
     sessionId?: string;
     sourceSha256?: string;
     canvasGeneration?: number;
-    outcome?: "ready" | "rejected" | "failed";
+    outcome?: "ready" | "rejected" | "failed" | "superseded";
   }): boolean;
   dispose(): void;
 }

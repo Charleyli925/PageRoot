@@ -447,7 +447,7 @@ export class WorkspaceController {
     sessionId: string;
     sourceSha256: string;
     canvasGeneration: number;
-    outcome: "ready" | "rejected" | "failed";
+    outcome: "ready" | "rejected" | "failed" | "superseded";
   }): boolean;
   evaluateFirstEditGuide(input: FirstEditGuideEligibilityInput): FirstEditGuideSnapshot | null;
   dismissFirstEditGuide(): Promise<FirstEditGuideSnapshot | null>;
