@@ -2782,3 +2782,56 @@ Date: 2026-09-02
 - [x] Exceptional target loss stays card-local with a concrete recovery instruction.
 
 final result: passed
+
+## AI Agent closed loop — 源页 / Qoder / Codex one-row Composer
+
+Date: 2026-09-02
+
+### Comparison target
+
+- Source visual truth: the existing AI sidebar Composer in `output/design-qa/ai-assistant-redesign/` (Qoder processing and result-ready frames) plus Settings' one-card Agent section.
+- Product decision that supersedes PRD §2.5 / §10.5 for 源页 HTTP Agent only: the sidebar may name model and thinking depth when the selected Agent actually offers a choice. Qoder and Codex remain provider-default with no thinking-depth control.
+
+### Required fidelity surfaces
+
+- Fonts and typography: Composer chips stay 11px / 680 weight on the system stack; thinking depth reads `思考 · 高` so the control is self-explanatory without a tooltip.
+- Spacing and layout rhythm: Agent identity, model and thinking depth stay on one Composer row with the delivery actions. Chips ellipsize (`max-width: 108px`) instead of wrapping, so Qoder's existing same-row geometry contract is preserved.
+- Colors and visual tokens: one indigo send button, quiet chip chrome, brand mark `./brand-logo.png` for 源页 Agent. No second accent, no new dialog, no NoticeBar.
+- Copy: Settings shows only the selected Agent. Token Agents recover with “连接 …”; Qoder/Codex keep “登录 …”. Status words stay on the card (`需要 Token` / `已连接`); the extra toolbar sentence was removed.
+- Icons and control states: 源页 uses the product brand mark; Codex keeps the OpenAI glyph; Qoder keeps its logo. No emoji or one-off SVG.
+- Accessibility: thinking-depth and model triggers keep `aria-label` and exclusive lists; Escape and outside pointer close the open list.
+
+### Findings
+
+- P1: a third chip with only “高” failed 秒懂. Fixed by prefixing `思考 ·`.
+- P1: Token Agents used “登录”, which is a Qoder/Codex fact. Fixed by `credentialKind === "api-token"` → “连接”.
+- P2: 源页 Agent used the Code icon, colliding with a developer-tool reading. Fixed by the brand logo.
+- P2: Settings explained the dropdown in a second sentence. Removed; the control already names the Agent.
+- No remaining P0/P1/P2 layout jump, second emphasis color, or extra modal.
+
+final result: passed
+
+## AI Agent closed loop — 源页 HTTP Composer and Token card
+
+Date: 2026-09-02
+
+### Comparison target
+
+- Source visual truth: the Qoder Composer frames in `output/design-qa/ai-assistant-redesign/` plus the existing one-card Settings Agent section.
+- New rendered evidence: `output/design-qa/ai-assistant-redesign/pageroot-settings-connected.png`, `pageroot-composer-ready.png`, `pageroot-result-ready.png`.
+
+### Required fidelity surfaces
+
+- Fonts and typography: same 11px / 680 Composer chips; thinking depth still reads `思考 · 低` / `思考 · 高`; DeepSeek models use short `V4 Flash` / `V4 Pro` so the chip does not truncate the distinguishing word.
+- Spacing and layout rhythm: Agent, model and thinking depth stay on one row with delivery actions. No wrap, no second surface.
+- Colors and visual tokens: one indigo send button, quiet chip chrome, brand mark. Token form reuses the existing card field chrome.
+- Copy: `需要 Token` / `填入 Token 后发送` / `连接`; after success `已连接` / `可从侧栏发送`. Rejected Token stays on the card: `Token 没有接通。` Sidebar next step is `连接 源页 Agent`.
+- Icons and control states: 源页 brand mark in Settings and sidebar. No extra dialog.
+- Accessibility: Token field keeps `aria-label="API Token"`; vendor select keeps `aria-label="厂商"`.
+
+### Findings
+
+- No remaining P0/P1/P2 crowding, second accent, or copy lecture. The three chips remain self-explanatory.
+
+final result: passed
+

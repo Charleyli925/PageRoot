@@ -1345,6 +1345,7 @@ export class RunWorkflow {
           retryable: !NON_RETRYABLE_AGENT_ERRORS.has(code),
         });
       }
+      this.#agentCatalog.noteRunFailure(deliveryForRun(run)?.selection, code);
       this.#emitEvent({
         type: "run-agent-failed",
         run,
@@ -1639,6 +1640,7 @@ export class RunWorkflow {
         ["failed", "interrupted"].includes(agentState.status)
         && previousHandoff?.status !== agentState.status
       ) {
+        this.#agentCatalog.noteRunFailure(deliveryForRun(run)?.selection, agentState.errorCode);
         this.#emitEvent({
           type: "run-agent-failed",
           run,
@@ -1974,6 +1976,27 @@ export class RunWorkflow {
 
   selectAgent(selection) {
     return this.#agentCatalog.select(selection);
+  }
+
+  selectAgentModel(modelId) {
+    return this.#agentCatalog.selectModel(modelId);
+  }
+
+  selectAgentReasoning(reasoning) {
+    return this.#agentCatalog.selectReasoning(reasoning);
+  }
+
+  connectAgentApiKey(selection, apiKey, extras) {
+    return this.#agentCatalog.connectWithApiKey(selection, apiKey, extras)
+      .then((preflight) => succeeded({
+        availability: this.#agentCatalog.availability(selection),
+        models: this.#agentCatalog.provider(selection)?.models || [],
+        preflightId: preflight?.preflightId || null,
+      }))
+      .catch((cause) => rejected(
+        errorCode(cause, "AGENT_SESSION_CREDENTIAL_INVALID"),
+        this.#codecs.errorMessage(cause, "API Token 没有接通。"),
+      ));
   }
 
   #publishSnapshot() {

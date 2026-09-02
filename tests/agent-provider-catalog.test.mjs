@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   AgentCatalogState,
   CODEX_AGENT_PROVIDER,
+  PAGEROOT_AGENT_PROVIDER,
   QODER_AGENT_PROVIDER,
   agentProviderCardsFromCatalog,
   defaultAgentProviders,
@@ -15,17 +16,34 @@ import {
 
 const TRUST = "trusted-local-agent-v1";
 
-test("the shared Agent chooser exposes both ACP providers", () => {
+test("the shared Agent chooser exposes 源页 Agent plus both ACP providers", () => {
   assert.deepEqual(
     defaultAgentProviders().map(({ providerId }) => providerId),
-    ["qoder", "codex"],
+    ["pageroot", "qoder", "codex"],
+  );
+  assert.equal(PAGEROOT_AGENT_PROVIDER.runtimeId, "http");
+  assert.equal(PAGEROOT_AGENT_PROVIDER.securityProfile, "client-mediated");
+  assert.equal(PAGEROOT_AGENT_PROVIDER.installable, false);
+  assert.equal(PAGEROOT_AGENT_PROVIDER.presentation.credentialKind, "api-token");
+  assert.equal(PAGEROOT_AGENT_PROVIDER.presentation.logoSrc, "./brand-logo.png");
+  assert.equal(PAGEROOT_AGENT_PROVIDER.presentation.supportsReasoning, true);
+  assert.deepEqual(
+    PAGEROOT_AGENT_PROVIDER.presentation.reasoningChoices.map(({ id }) => id),
+    ["none", "low", "high", "max"],
+  );
+  assert.notEqual(QODER_AGENT_PROVIDER.presentation.supportsReasoning, true);
+  assert.notEqual(CODEX_AGENT_PROVIDER.presentation.supportsReasoning, true);
+  assert.deepEqual(
+    PAGEROOT_AGENT_PROVIDER.presentation.vendors.map(({ id }) => id),
+    ["deepseek", "zhipu", "dashscope", "openai", "custom"],
   );
   assert.equal(
     CODEX_AGENT_PROVIDER.presentation.localReadDisclosure,
     "Codex 修改时可能读取这台 Mac 上的本机文件。",
   );
   assert.equal(QODER_AGENT_PROVIDER.installable, true);
-  assert.equal(CODEX_AGENT_PROVIDER.installable, true);
+  assert.equal(CODEX_AGENT_PROVIDER.presentation.settingsSupported, true);
+  assert.notEqual(CODEX_AGENT_PROVIDER.presentation.supportsApiKey, true);
   assert.equal(CODEX_AGENT_PROVIDER.runtimeId, "acp");
   assert.equal(CODEX_AGENT_PROVIDER.securityProfile, "client-mediated");
   assert.equal(
@@ -37,7 +55,7 @@ test("the shared Agent chooser exposes both ACP providers", () => {
         },
       },
     })[0].presentation.availability({ status: "unavailable", reason: "account-capacity" }).statusLabel,
-    "暂不可用 · Qoder 额度已用完",
+    "额度已用完",
   );
 });
 
@@ -556,4 +574,43 @@ test("post-install availability rechecks the provider's resolved selected author
   await catalog.install(requested);
   assert.equal(availabilitySelections.at(-1).resolvedModelId, "qoder:qoder-default");
   assert.equal(catalog.freezeSelected().resolvedModelId, "qoder:qoder-default");
+});
+
+test("selectModel changes only the selected model identity", () => {
+  const catalog = new AgentCatalogState({
+    bridgeClient: {
+      async preflightAgent() {
+        return { status: "ready" };
+      },
+    },
+    providers: [QODER_AGENT_PROVIDER],
+    selected: QODER_AGENT_PROVIDER.selection,
+  });
+  const next = catalog.selectModel("qoder:PageRoot-E2E");
+  assert.equal(next.providerId, "qoder");
+  assert.equal(next.runtimeId, "acp");
+  assert.equal(next.requestedModelId, "qoder:PageRoot-E2E");
+  assert.equal(catalog.freezeSelected().requestedModelId, "qoder:PageRoot-E2E");
+});
+
+test("selectReasoning changes only PageRoot thinking depth", () => {
+  const catalog = new AgentCatalogState({
+    bridgeClient: {
+      async preflightAgent() {
+        return { status: "ready" };
+      },
+    },
+    providers: [PAGEROOT_AGENT_PROVIDER],
+    selected: PAGEROOT_AGENT_PROVIDER.selection,
+  });
+  const next = catalog.selectReasoning("low");
+  assert.equal(next.providerId, "pageroot");
+  assert.equal(next.runtimeId, "http");
+  assert.deepEqual(next.reasoning, {
+    requested: "low",
+    applied: "low",
+    resolution: "exact",
+  });
+  assert.equal(catalog.selectReasoning("not-a-depth").reasoning.resolution, "exact");
+  assert.equal(catalog.freezeSelected().reasoning.requested, "low");
 });

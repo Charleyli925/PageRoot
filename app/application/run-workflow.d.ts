@@ -182,4 +182,11 @@ export class RunWorkflow {
   }): Promise<RunWorkflowOutcome<{ recovered: number; attempted: number }>>;
   freezeAgentSelection(): AgentSelection | null;
   selectAgent(selection: AgentSelection): AgentSelection;
+  selectAgentModel(modelId: string | null): AgentSelection | null;
+  selectAgentReasoning(reasoning: string | null): AgentSelection | null;
+  connectAgentApiKey(
+    selection: AgentSelection,
+    apiKey: string,
+    extras?: Readonly<{ vendorId?: string; baseUrl?: string }>,
+  ): Promise<RunWorkflowOutcome>;
 }

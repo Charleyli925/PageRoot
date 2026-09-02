@@ -4,7 +4,7 @@ import path from "node:path";
 
 import { nowIso } from "../lifecycle-core.mjs";
 import { createAgentEventReducer, canonicalAgentEvent } from "./agent-events.mjs";
-import { cleanAgentText, failAgentRuntime, AgentRuntimeError } from "./agent-errors.mjs";
+import { cleanAgentText, cleanSessionApiKey, failAgentRuntime, sessionCredentialEnvironment, AgentRuntimeError } from "./agent-errors.mjs";
 import { defaultAgentLeaseStore } from "./agent-lease-store.mjs";
 import {
   executionPhaseForEvent,
@@ -16,6 +16,11 @@ import {
   defaultManagedAgentDelivery,
   normalizeAgentDelivery,
 } from "../../shared/agent-delivery.mjs";
+import {
+  PAGEROOT_PROVIDER_ID,
+  httpAgentLaunchBaseUrl,
+  resolveOpenAiCompatibleVendor,
+} from "../../shared/openai-compatible-vendors.mjs";
 
 export const TRUSTED_LOCAL_AGENT_POLICY_VERSION = "trusted-local-agent-v1";
 
@@ -60,6 +65,24 @@ function selectionFingerprint(selection) {
 
 function sameSelection(left, right) {
   return selectionFingerprint(left) === selectionFingerprint(right);
+}
+
+function selectionMatchesTicket(ticketSelection, submittedSelection) {
+  if (!submittedSelection) return true;
+  if (sameSelection(ticketSelection, submittedSelection)) return true;
+  if (
+    ticketSelection.providerId !== submittedSelection.providerId
+    || ticketSelection.runtimeId !== submittedSelection.runtimeId
+  ) return false;
+  if ((submittedSelection.requestedModelId || null) !== (ticketSelection.requestedModelId || null)) {
+    return false;
+  }
+  if (
+    submittedSelection.resolvedModelId
+    && submittedSelection.resolvedModelId !== ticketSelection.resolvedModelId
+  ) return false;
+  return (submittedSelection.reasoning?.requested || null)
+    === (ticketSelection.reasoning?.requested || null);
 }
 
 function validateExecutionIdentity(value) {
@@ -140,6 +163,7 @@ export class AgentRuntimeCoordinator {
   #shutdownConfirmed = false;
   #preflightCleanupUnconfirmed = false;
   #externalRedeemTicket = null;
+  #sessionCredentials = new Map();
 
   constructor({
     resolveTask,
@@ -286,6 +310,64 @@ export class AgentRuntimeCoordinator {
     }
   }
 
+  #environmentForProvider(providerId) {
+    if (providerId !== PAGEROOT_PROVIDER_ID) return this.#environment;
+    const credential = this.#sessionCredentials.get(PAGEROOT_PROVIDER_ID);
+    if (!credential) return this.#environment;
+    return Object.freeze({
+      ...this.#environment,
+      ...sessionCredentialEnvironment({
+        ...credential,
+        baseUrl: httpAgentLaunchBaseUrl(this.#environment, credential.baseUrl),
+      }),
+    });
+  }
+
+  setSessionCredential(providerId, apiKey, extras = {}) {
+    const id = cleanAgentText(providerId, 32);
+    if (id !== PAGEROOT_PROVIDER_ID) {
+      failAgentRuntime(
+        "AGENT_SESSION_CREDENTIAL_UNSUPPORTED",
+        "当前 Agent 不支持 API Token。",
+        { status: 409 },
+      );
+    }
+    const key = cleanSessionApiKey(apiKey);
+    const vendor = resolveOpenAiCompatibleVendor(extras?.vendorId, extras?.baseUrl);
+    if (!key || !vendor) {
+      failAgentRuntime(
+        "AGENT_SESSION_CREDENTIAL_INVALID",
+        "API Token 无效。",
+        { status: 400 },
+      );
+    }
+    this.#sessionCredentials.set(id, Object.freeze({
+      apiKey: key,
+      vendorId: vendor.id,
+      baseUrl: vendor.baseUrl,
+    }));
+    return Object.freeze({
+      ok: true,
+      providerId: id,
+      vendorId: vendor.id,
+      configured: true,
+    });
+  }
+
+  clearSessionCredential(providerId) {
+    const id = cleanAgentText(providerId, 32);
+    this.#sessionCredentials.delete(id);
+    return Object.freeze({
+      ok: true,
+      providerId: id,
+      configured: false,
+    });
+  }
+
+  sessionCredentialConfigured(providerId) {
+    return this.#sessionCredentials.has(cleanAgentText(providerId, 32));
+  }
+
   async availability({ driver, selection } = {}) {
     const requestedSelection = this.#selectionForInput({ selection, driver });
     if (!this.#acceptingStarts) {
@@ -297,7 +379,7 @@ export class AgentRuntimeCoordinator {
       });
     }
     const result = await this.#providerRegistry.availabilityForSelection(requestedSelection, {
-      environment: this.#environment,
+      environment: this.#environmentForProvider(requestedSelection.providerId),
     });
     return Object.freeze({ ok: true, ...result, ...(driver ? { driver } : {}) });
   }
@@ -331,7 +413,7 @@ export class AgentRuntimeCoordinator {
       prepared = await this.#providerRegistry.preflightForSelection(
         requestedSelection,
         ticketPurpose,
-        { environment: this.#environment },
+        { environment: this.#environmentForProvider(requestedSelection.providerId) },
       );
     } catch (cause) {
       if (cause?.code === "AGENT_PREFLIGHT_CLEANUP_UNCONFIRMED") {
@@ -406,7 +488,7 @@ export class AgentRuntimeCoordinator {
     // cross-purpose ticket is never replayable after the failed attempt.
     this.#tickets.delete(preflightId);
     const selectionMismatch = selection
-      && ticket.selectionFingerprint !== selectionFingerprint(selection);
+      && !selectionMatchesTicket(ticket.selection, selection);
     if (ticket.purpose !== expectedPurpose || (driver && ticket.driver !== driver)) {
       failAgentRuntime("AGENT_PREFLIGHT_PURPOSE_MISMATCH", "Agent 预检与本次操作不匹配，请重新检查。", {
         status: 409,
@@ -563,7 +645,7 @@ export class AgentRuntimeCoordinator {
     if (delivery?.mode !== "managed-agent"
       || delivery.selection.providerId !== ticket.providerId
       || delivery.selection.runtimeId !== ticket.runtimeId
-      || !sameSelection(delivery.selection, ticket.selection)
+      || !selectionMatchesTicket(ticket.selection, delivery.selection)
       || delivery.trustPolicyVersion !== TRUSTED_LOCAL_AGENT_POLICY_VERSION) {
       failAgentRuntime("AGENT_DELIVERY_NOT_AUTHORIZED", "本轮 Request 没有授权所选 Agent 自动执行。", {
         status: 409,
@@ -656,7 +738,7 @@ export class AgentRuntimeCoordinator {
     const runtimePromise = this.#providerRegistry.run(ticket, {
       policy,
       prompt: finalizerPrompt(policy),
-      baseEnvironment: this.#environment,
+      baseEnvironment: this.#environmentForProvider(ticket.providerId),
       cancellationSignal: controller.signal,
       onEvent: observe,
     });
@@ -794,6 +876,7 @@ export class AgentRuntimeCoordinator {
     if (this.#shutdownPromise) return this.#shutdownPromise;
     this.#acceptingStarts = false;
     this.#tickets.clear();
+    this.#sessionCredentials.clear();
     this.#shutdownPromise = (async () => {
       const startTimeout = timeoutAfter(
         this.#cancelTimeoutMs,

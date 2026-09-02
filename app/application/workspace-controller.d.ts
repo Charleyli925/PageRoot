@@ -587,6 +587,13 @@ export class WorkspaceController {
   selectAgent(
     selection: import("../domain/agent-provider-state.js").AgentSelection,
   ): import("../domain/agent-provider-state.js").AgentSelection;
+  selectAgentModel(modelId: string | null): import("../domain/agent-provider-state.js").AgentSelection | null;
+  selectAgentReasoning(reasoning: string | null): import("../domain/agent-provider-state.js").AgentSelection | null;
+  connectAgentApiKey(
+    selection: import("../domain/agent-provider-state.js").AgentSelection,
+    apiKey: string,
+    extras?: Readonly<{ vendorId?: string; baseUrl?: string }>,
+  ): Promise<RunWorkflowOutcome>;
   refreshQoderAvailability(): Promise<RunWorkflowOutcome>;
   checkQoderUsability(): Promise<RunWorkflowOutcome>;
   copyQoderGuidance(input: {

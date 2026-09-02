@@ -35,7 +35,7 @@ Local gates: `npm run gate:edit` while editing; `npm run task:finish` before pub
 - Irreversible source commits fail closed on ambiguous targets, stale hashes, external writes, invalid patch scope, identity failures and unsafe paths. Layout preflight, outline and other presentation checks must not refuse edit entry.
 - Privileged filesystem behavior stays behind the Electron/Bridge boundary with narrow validated IPC.
 - AI output remains untrusted until protocol, identity, hash, path and complete-HTML checks pass. Authored scripts are part of the user's requested HTML. Weak page continuity forces review instead of failing an otherwise usable candidate.
-- QoderWork handoff remains clipboard-only unless the user explicitly authorizes a different product boundary. The only currently authorized automatic path is ADR 0032's per-task `trusted-local-agent-v1` Qoder ACP driver.
+- QoderWork handoff remains clipboard-only unless the user explicitly authorizes a different product boundary. Authorized automatic paths are ADR 0032's Qoder ACP driver, ADR 0053's Codex ACP adapter, and ADR 0069's PageRoot native OpenAI-compatible HTTP Agent. Anthropic is not authorized.
 - Tests and fixtures use synthetic data only. Never commit real user HTML, attachments, project records, credentials, personal paths, logs or generated binaries.
 
 1. Keep the architecture small, explicit, and internally consistent; prefer the smallest coherent solution and avoid speculative abstractions, compatibility layers, or parallel flows.

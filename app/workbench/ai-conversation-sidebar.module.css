@@ -320,23 +320,58 @@
   outline-offset: 2px;
 }
 
-/* Every mutable control lives here. */
+/* Every mutable control lives here. Height stays put so a status change
+ * does not jump the thread. */
 .composer {
   display: flex;
   flex-direction: column;
+  justify-content: flex-end;
   gap: 8px;
+  min-height: 92px;
   padding: 12px 14px 14px;
   border-top: 1px solid rgb(32 29 49 / 8%);
 }
 
-.agentSelector {
-  position: relative;
+.identityActions {
   min-width: 0;
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  overflow: visible;
 }
 
-.agentTrigger,
-.agentStatic {
+.schemeTrigger {
   min-width: 0;
+  min-height: 30px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 6px 0 2px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #45434f;
+  font-size: 11px;
+  font-weight: 680;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.schemeTrigger:hover {
+  background: #f1f0f6;
+  color: #201d31;
+}
+
+.schemeTrigger:focus-visible,
+.agentTrigger:focus-visible {
+  outline: 3px solid rgb(90 85 223 / 32%);
+  outline-offset: 1px;
+}
+
+.agentTrigger {
+  min-width: 0;
+  max-width: 108px;
   min-height: 30px;
   display: inline-flex;
   align-items: center;
@@ -349,6 +384,27 @@
   font-size: 11px;
   font-weight: 680;
   white-space: nowrap;
+  cursor: pointer;
+}
+
+.agentTrigger > span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.agentStatic {
+  min-width: 0;
+  min-height: 30px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 2px;
+  border: 0;
+  background: transparent;
+  color: #6b6878;
+  font-size: 11px;
+  font-weight: 550;
+  white-space: nowrap;
 }
 
 .agentTrigger:hover {
@@ -357,9 +413,20 @@
   color: #201d31;
 }
 
-.agentTrigger:focus-visible {
-  outline: 3px solid rgb(90 85 223 / 32%);
-  outline-offset: 1px;
+.identityPickers {
+  position: relative;
+  z-index: 3;
+  min-width: 0;
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  overflow: visible;
+}
+
+.agentSelector {
+  position: relative;
+  min-width: 0;
 }
 
 .agentChoiceMark {
@@ -448,6 +515,7 @@
 }
 
 .composerActions {
+  min-height: 30px;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -456,6 +524,8 @@
 
 .deliveryActions {
   min-width: 0;
+  flex: none;
+  min-height: 30px;
   margin-left: auto;
   display: flex;
   align-items: center;

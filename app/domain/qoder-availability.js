@@ -78,8 +78,8 @@ export function qoderAvailabilityPresentation(availability) {
   }
   if (availability?.reason === "account-capacity") {
     return Object.freeze({
-      statusLabel: "暂不可用 · Qoder 额度已用完",
-      detail: "Qoder 账号当前没有可用模型容量。",
+      statusLabel: "额度已用完",
+      detail: "换 Codex，或复制任务给别的 AI。",
       tone: "attention",
     });
   }

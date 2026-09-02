@@ -11,6 +11,7 @@ import {
 import {
   sidebarActionBar,
   sidebarAgentLine,
+  sidebarReasoningLine,
   sidebarActorInitial,
   sidebarMessageStream,
   sidebarModePresentation,
@@ -44,17 +45,22 @@ export type AiConversationSidebarProps = {
   title: string;
   messages: readonly unknown[];
   catalogStatus?: SidebarCatalogStatus;
+  catalogReason?: string | null;
   agentDisplayName?: string | null;
   agentActionName?: string | null;
   agentSettingsName?: string | null;
   agentSettingsSupported?: boolean;
-  agentChoiceCount?: number;
-  agentChoices?: readonly Readonly<{
+  credentialKind?: "api-token" | null;
+  models?: readonly Readonly<{
+    id: string;
+    displayName: string;
+  }>[];
+  selectedModelId?: string | null;
+  reasoningChoices?: readonly Readonly<{
     id: string;
     label: string;
-    logoSrc?: string | null;
   }>[];
-  selectedAgentChoiceId?: string | null;
+  selectedReasoningId?: string | null;
   candidateVersionLabel?: string | null;
   candidateStatus?: string | null;
   runStatus?: string | null;
@@ -66,7 +72,8 @@ export type AiConversationSidebarProps = {
   onSend?: () => void;
   onAction?: (actionId: string) => void;
   onOpenAgentSettings?: () => void;
-  onSelectAgentChoice?: (choiceId: string) => void;
+  onSelectModel?: (modelId: string) => void;
+  onSelectReasoning?: (reasoning: string) => void;
   /** Hands the same round to the clipboard instead of the local Agent. */
   onCopyTask?: () => void;
   /** What the selected Agent is saying while it works (ADR 0037). */
@@ -161,13 +168,16 @@ export default function AiConversationSidebar({
   title,
   messages,
   catalogStatus = "ready",
+  catalogReason = null,
   agentDisplayName = null,
   agentActionName = "Agent",
   agentSettingsName = "Agent",
   agentSettingsSupported = true,
-  agentChoiceCount = 0,
-  agentChoices = [],
-  selectedAgentChoiceId = null,
+  credentialKind = null,
+  models = [],
+  selectedModelId = null,
+  reasoningChoices = [],
+  selectedReasoningId = null,
   candidateVersionLabel = null,
   candidateStatus = null,
   runStatus = null,
@@ -179,7 +189,8 @@ export default function AiConversationSidebar({
   onSend,
   onAction,
   onOpenAgentSettings,
-  onSelectAgentChoice,
+  onSelectModel,
+  onSelectReasoning,
   onCopyTask,
   deliveryMode = "managed-agent",
   agentText = "",
@@ -195,7 +206,7 @@ export default function AiConversationSidebar({
   sourceFileName = null,
   handoffStatus = null,
 }: AiConversationSidebarProps) {
-  const [agentChoicesOpen, setAgentChoicesOpen] = useState(false);
+  const [openChoice, setOpenChoice] = useState<null | "model" | "reasoning">(null);
   const [hasUnseenContent, setHasUnseenContent] = useState(false);
   const [copyFeedback, setCopyFeedback] = useState<CopyFeedback>(null);
   const streamRef = useRef<HTMLDivElement | null>(null);
@@ -203,6 +214,7 @@ export default function AiConversationSidebar({
   const liveMessageRef = useRef<HTMLElement | null>(null);
   const agentSelectorRef = useRef<HTMLDivElement | null>(null);
   const agentSelectorButtonRef = useRef<HTMLButtonElement | null>(null);
+  const reasoningSelectorButtonRef = useRef<HTMLButtonElement | null>(null);
   const followingRef = useRef(true);
   const contentKeyRef = useRef<string | null>(null);
   const runKeyRef = useRef<string | null>(null);
@@ -238,12 +250,14 @@ export default function AiConversationSidebar({
   const send = sidebarSendState({
     state,
     catalogStatus,
+    catalogReason,
     queued,
     intent: activeIntent,
     pendingCommentCount,
     agentName: resolvedAgentActionName,
     agentSettingsName: resolvedAgentSettingsName,
     agentSettingsSupported,
+    credentialKind,
   });
   // The clipboard button does not read the model catalog: copying is a branch
   // of the same round that never consults the selected Agent, so an unreadable catalog must
@@ -261,11 +275,18 @@ export default function AiConversationSidebar({
     agentUpdates,
     agentTextTruncated,
   });
+  const selectedModel = models.find((model) => model.id === selectedModelId) || models[0] || null;
   const agentLine = sidebarAgentLine({
     catalogStatus,
-    agentDisplayName,
-    agentChoiceCount,
+    modelDisplayName: selectedModel?.displayName || selectedModel?.id || null,
+    modelChoiceCount: models.length,
   });
+  const reasoningLine = sidebarReasoningLine({
+    choices: reasoningChoices,
+    selectedId: selectedReasoningId,
+  });
+  const schemeName = (typeof agentDisplayName === "string" && agentDisplayName.trim())
+    || resolvedAgentActionName;
   const resolvedFileName = sourceFileName?.trim() || "当前 HTML";
   const contextContents = `${Math.max(0, Number(runCommentCount ?? pendingCommentCount) || 0)} 条评论、当前 HTML 和项目规则`;
   const runSummary = runKey
@@ -350,17 +371,18 @@ export default function AiConversationSidebar({
   }, []);
 
   useEffect(() => {
-    if (!agentChoicesOpen) return undefined;
+    if (!openChoice) return undefined;
     const closeOnOutsidePointer = (event: PointerEvent) => {
       if (!agentSelectorRef.current?.contains(event.target as Node)) {
-        setAgentChoicesOpen(false);
+        setOpenChoice(null);
       }
     };
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
       event.preventDefault();
-      setAgentChoicesOpen(false);
-      agentSelectorButtonRef.current?.focus();
+      setOpenChoice(null);
+      (openChoice === "reasoning" ? reasoningSelectorButtonRef : agentSelectorButtonRef)
+        .current?.focus();
     };
     document.addEventListener("pointerdown", closeOnOutsidePointer, true);
     document.addEventListener("keydown", closeOnEscape);
@@ -368,7 +390,7 @@ export default function AiConversationSidebar({
       document.removeEventListener("pointerdown", closeOnOutsidePointer, true);
       document.removeEventListener("keydown", closeOnEscape);
     };
-  }, [agentChoicesOpen]);
+  }, [openChoice]);
 
   useEffect(() => {
     if (runKey && runKey !== runKeyRef.current) {
@@ -669,104 +691,166 @@ export default function AiConversationSidebar({
         ) : null}
 
         <div className={styles.composerActions}>
-          <div ref={agentSelectorRef} className={styles.agentSelector}>
-            {agentLine?.choosable ? (
-              <button
-                ref={agentSelectorButtonRef}
-                id="ai-conversation-agent-selector"
-                type="button"
-                className={styles.agentTrigger}
-                data-testid="ai-conversation-agent"
-                onClick={() => setAgentChoicesOpen((value) => !value)}
-                aria-expanded={agentChoicesOpen}
-                aria-controls="ai-conversation-agent-choices"
-                aria-label={`当前 Agent ${agentLine.text}，点击切换`}
-              >
-                <AgentChoiceMark label={agentLine.text} logoSrc={agentPresentation?.logoSrc} />
-                <span>{agentLine.text}</span>
-                <span className={styles.agentChevron} aria-hidden="true">▾</span>
-              </button>
-            ) : agentLine ? (
-              <span className={styles.agentStatic} data-testid="ai-conversation-agent">
-                <AgentChoiceMark label={agentLine.text} logoSrc={agentPresentation?.logoSrc} />
-                <span>{agentLine.text}</span>
-              </span>
-            ) : null}
+          <div className={styles.identityActions}>
+            <button
+              type="button"
+              className={styles.schemeTrigger}
+              data-testid="ai-conversation-agent"
+              onClick={() => onOpenAgentSettings?.()}
+              aria-label={`当前 Agent ${schemeName}，去设置`}
+            >
+              <AgentChoiceMark label={schemeName} logoSrc={agentPresentation?.logoSrc} />
+              <span>{schemeName}</span>
+            </button>
 
-            {agentChoicesOpen && agentChoices.length > 1 ? (
-              <div
-                id="ai-conversation-agent-choices"
-                className={styles.agentChoices}
-                aria-label="选择 Agent"
-                data-testid="ai-conversation-agent-choices"
-              >
-                {agentChoices.map((choice) => (
+            <div ref={agentSelectorRef} className={styles.identityPickers}>
+              <div className={styles.agentSelector}>
+                {agentLine?.choosable ? (
                   <button
-                    key={choice.id}
+                    ref={agentSelectorButtonRef}
+                    id="ai-conversation-model-selector"
                     type="button"
-                    aria-pressed={choice.id === selectedAgentChoiceId}
-                    className={styles.agentChoice}
-                    onPointerDown={(event) => {
-                      // Keep focus on the trigger for pointer selection. The
-                      // option disappears after selection, so letting the browser
-                      // focus it first would drop focus back to body.
-                      event.preventDefault();
-                    }}
-                    onClick={() => {
-                      agentSelectorButtonRef.current?.focus();
-                      onSelectAgentChoice?.(choice.id);
-                      setAgentChoicesOpen(false);
-                    }}
+                    className={styles.agentTrigger}
+                    data-testid="ai-conversation-model"
+                    onClick={() => setOpenChoice((value) => (value === "model" ? null : "model"))}
+                    aria-expanded={openChoice === "model"}
+                    aria-controls="ai-conversation-model-choices"
+                    aria-label={`当前模型 ${agentLine.text}，点击切换`}
                   >
-                    <AgentChoiceMark label={choice.label} logoSrc={choice.logoSrc} />
-                    <strong>{choice.label}</strong>
+                    <span>{agentLine.text}</span>
+                    <span className={styles.agentChevron} aria-hidden="true">▾</span>
                   </button>
-                ))}
+                ) : agentLine ? (
+                  <span className={styles.agentStatic} data-testid="ai-conversation-model">
+                    <span>{agentLine.text}</span>
+                  </span>
+                ) : null}
+
+                {openChoice === "model" && models.length > 1 ? (
+                  <div
+                    id="ai-conversation-model-choices"
+                    className={styles.agentChoices}
+                    aria-label="选择模型"
+                    data-testid="ai-conversation-model-choices"
+                  >
+                    {models.map((model) => (
+                      <button
+                        key={model.id}
+                        type="button"
+                        aria-pressed={model.id === (selectedModel?.id || selectedModelId)}
+                        className={styles.agentChoice}
+                        onPointerDown={(event) => {
+                          event.preventDefault();
+                        }}
+                        onClick={() => {
+                          agentSelectorButtonRef.current?.focus();
+                          onSelectModel?.(model.id);
+                          setOpenChoice(null);
+                        }}
+                      >
+                        <strong>{model.displayName}</strong>
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
               </div>
-            ) : null}
+
+              {reasoningLine ? (
+                <div className={styles.agentSelector}>
+                  {reasoningLine.choosable ? (
+                    <button
+                      ref={reasoningSelectorButtonRef}
+                      id="ai-conversation-reasoning-selector"
+                      type="button"
+                      className={styles.agentTrigger}
+                      data-testid="ai-conversation-reasoning"
+                      onClick={() => setOpenChoice((value) => (value === "reasoning" ? null : "reasoning"))}
+                      aria-expanded={openChoice === "reasoning"}
+                      aria-controls="ai-conversation-reasoning-choices"
+                      aria-label={`当前思考深度 ${reasoningLine.text}，点击切换`}
+                    >
+                      <span>{reasoningLine.text}</span>
+                      <span className={styles.agentChevron} aria-hidden="true">▾</span>
+                    </button>
+                  ) : (
+                    <span className={styles.agentStatic} data-testid="ai-conversation-reasoning">
+                      <span>{reasoningLine.text}</span>
+                    </span>
+                  )}
+
+                  {openChoice === "reasoning" && reasoningChoices.length > 1 ? (
+                    <div
+                      id="ai-conversation-reasoning-choices"
+                      className={styles.agentChoices}
+                      aria-label="选择思考深度"
+                      data-testid="ai-conversation-reasoning-choices"
+                    >
+                      {reasoningChoices.map((choice) => (
+                        <button
+                          key={choice.id}
+                          type="button"
+                          aria-pressed={choice.id === reasoningLine.selectedId}
+                          className={styles.agentChoice}
+                          onPointerDown={(event) => {
+                            event.preventDefault();
+                          }}
+                          onClick={() => {
+                            reasoningSelectorButtonRef.current?.focus();
+                            onSelectReasoning?.(choice.id);
+                            setOpenChoice(null);
+                          }}
+                        >
+                          <strong>{choice.label}</strong>
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
           </div>
 
-          {state === "preview-ready" || state === "no-change" ? (
-            <div className={styles.deliveryActions}>
-              {activeIntent === "modify" && onCopyTask ? (
-                <button
-                  type="button"
-                  className={styles.copyTask}
-                  data-testid="ai-conversation-copy-task"
-                  disabled={!copyTask.canCopy}
-                  onClick={() => onCopyTask()}
-                >
-                  复制给别的 AI
-                </button>
-              ) : null}
-              {send.kind === "status" ? (
-                send.label ? (
-                  <span
-                    className={styles.sendStatus}
-                    data-testid="ai-conversation-agent-status"
-                    aria-live="polite"
-                  >
-                    {send.label}
-                  </span>
-                ) : null
-              ) : (
-                <button
-                  type="button"
-                  className={styles.send}
-                  data-testid="ai-conversation-send"
-                  disabled={send.kind === "send" && !send.canSend}
-                  onClick={() => {
-                    if (send.kind === "open-agent-settings") {
-                      onOpenAgentSettings?.();
-                      return;
-                    }
-                    onSend?.();
-                  }}
+          {(state === "preview-ready" || state === "no-change") ? (
+          <div className={styles.deliveryActions}>
+            {activeIntent === "modify" && onCopyTask ? (
+              <button
+                type="button"
+                className={styles.copyTask}
+                data-testid="ai-conversation-copy-task"
+                disabled={!copyTask.canCopy}
+                onClick={() => onCopyTask()}
+              >
+                复制给别的 AI
+              </button>
+            ) : null}
+            {send.kind === "status" ? (
+              send.label ? (
+                <span
+                  className={styles.sendStatus}
+                  data-testid="ai-conversation-agent-status"
+                  aria-live="polite"
                 >
                   {send.label}
-                </button>
-              )}
-            </div>
+                </span>
+              ) : null
+            ) : (
+              <button
+                type="button"
+                className={styles.send}
+                data-testid="ai-conversation-send"
+                disabled={send.kind === "send" && !send.canSend}
+                onClick={() => {
+                  if (send.kind === "open-agent-settings") {
+                    onOpenAgentSettings?.();
+                    return;
+                  }
+                  onSend?.();
+                }}
+              >
+                {send.label}
+              </button>
+            )}
+          </div>
           ) : null}
         </div>
       </div>

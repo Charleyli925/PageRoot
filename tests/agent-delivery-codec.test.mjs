@@ -99,3 +99,35 @@ test("new writers reject legacy delivery while its historical projection stays r
     code: "AGENT_DELIVERY_INVALID",
   });
 });
+
+test("shipped Codex ACP and 源页 HTTP deliveries can be newly frozen", () => {
+  const reasoning = {
+    requested: null,
+    applied: null,
+    resolution: "provider-default",
+  };
+  for (const selection of [
+    {
+      providerId: "codex",
+      runtimeId: "acp",
+      requestedModelId: null,
+      resolvedModelId: null,
+      reasoning,
+    },
+    {
+      providerId: "pageroot",
+      runtimeId: "http",
+      requestedModelId: "pageroot:deepseek-chat",
+      resolvedModelId: "pageroot:deepseek-chat",
+      reasoning,
+    },
+  ]) {
+    const delivery = {
+      mode: "managed-agent",
+      selection,
+      trustPolicyVersion: "trusted-local-agent-v1",
+    };
+    assert.deepEqual(normalizeNewAgentDelivery(delivery).selection.providerId, selection.providerId);
+    assert.equal(legacyDriverForAgentDelivery(delivery), null);
+  }
+});

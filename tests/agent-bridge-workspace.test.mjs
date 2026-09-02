@@ -381,9 +381,12 @@ test("public Agent catalog exposes installable Qoder and Codex without paths", a
   });
   const listed = await bridge.requestJson("/agent/providers");
   assert.equal(listed.response.status, 200, JSON.stringify(listed.body));
+  const pageroot = listed.body.providers.find((item) => item.providerId === "pageroot");
   const qoder = listed.body.providers.find((item) => item.providerId === "qoder");
   const codex = listed.body.providers.find((item) => item.providerId === "codex");
   const serialized = JSON.stringify(listed.body);
+  assert.equal(pageroot.installable, false);
+  assert.equal(pageroot.runtimeId, "http");
   assert.equal(qoder.installable, true);
   assert.equal(codex.installable, true);
   assert.equal(codex.runtimeId, "acp");

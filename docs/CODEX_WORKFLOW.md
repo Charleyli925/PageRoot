@@ -22,7 +22,9 @@ Qoder and Codex both use the shared ACP runtime. Codex is discovered as an
 independent user or PageRoot-managed `codex-acp` installation; the packaged
 application contains neither a private Codex App Server path nor a native Codex
 binary. Package verification checks that absence while the ACP catalog retains
-the managed adapter/native closure and its integrity checks.
+the managed adapter/native closure and its integrity checks. 源页 Agent is a
+separate `pageroot`/`http` path: PageRoot calls the user-selected OpenAI-compatible
+HTTPS endpoint with a session Token and never grants the model filesystem access.
 
 ## Standard commands
 

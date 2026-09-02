@@ -7,6 +7,10 @@
 > Implementation note (2026-08-29): The later Codex ACP cut-over completed the
 > planned removal of the bundled Codex App Server. The catalog and installer
 > remain the authority for Codex's external managed closure.
+>
+> Implementation note (2026-09-02): ADR 0069 later authorized a PageRoot-owned
+> `pageroot`/`http` Agent with user-supplied vendor Tokens. That path is
+> `client-mediated`, not `agent-native`, and is outside this catalog/installer.
 
 ## Context
 

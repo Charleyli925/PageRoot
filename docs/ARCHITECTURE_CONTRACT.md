@@ -105,7 +105,9 @@ The renderer's main workspace facts are partitioned as follows:
   runtime dispatch point. The Qoder provider owns installation identity,
   version, login/model preflight and raw-error normalization. The Codex ACP
   provider owns the same facts for `providerId: "codex"`; missing login is
-  `session/new` JSON-RPC `-32000`, not advertised `authMethods`. Unknown IDs fail
+  `session/new` JSON-RPC `-32000`, not advertised `authMethods`. The PageRoot
+  native provider owns vendor Token preflight and `/chat/completions` for
+  `providerId: "pageroot"` / `runtimeId: "http"`. Unknown IDs fail
   closed; opaque installation facts, digests and capabilities stay inside the
   ticket;
 - Bridge Agent catalog/installer: `AgentCatalog` owns the product ACP
@@ -113,7 +115,8 @@ The renderer's main workspace facts are partitioned as follows:
   `AgentInstaller` owns in-flight install jobs, atomic verified layout under
   `userData/agents` and shutdown drain. Coordinator does not own install. This
   is a product allowlist, not a live public registry; Qoder and Codex ACP are
-  the installable shipped ACP entries. The packaged application contains no
+  the installable shipped ACP entries. `pageroot`/`http` is a non-installable
+  shipped HTTP Agent (ADR 0069). The packaged application contains no
   private Codex runtime or native Codex package;
 - Bridge Agent Host/Policy Ports: `bridge/agent/policies/` owns the execution
   policy and freezes all readable files, including comment-attachment bytes,

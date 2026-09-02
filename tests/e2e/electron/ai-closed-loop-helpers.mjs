@@ -37,6 +37,7 @@ import {
   stopPageRoot,
   waitForProjectReady,
 } from "./helpers/pageroot-app-fixture.mjs";
+import { startOpenAiCompatibleHttpAgent } from "../../fixtures/openai-compatible-http-agent.mjs";
 
 export {
   existsSync,
@@ -345,11 +346,35 @@ export function createCodexAcpE2ECommand(directory, {
   return command;
 }
 
+export function startPagerootHttpAgent(options) {
+  return startOpenAiCompatibleHttpAgent(options);
+}
+
+export function pagerootHttpAgentEnv(baseUrl) {
+  return {
+    PAGEROOT_HTTP_AGENT_ALLOW_TEST_BASE_URL: "1",
+    PAGEROOT_HTTP_AGENT_BASE_URL: baseUrl,
+  };
+}
+
 // The destination is chosen in the AI conversation now; the dialog over the page is gone.
 // A specific change is reached by clicking its page marker. This keeps the E2E helper
 // aligned with the review contract: markers locate changes, while the toolbar only
 // controls filtering and view state.
 // Qoder availability lives in the tabbed Settings page; About remains product-only.
+export async function openAgentSettingsPage(page) {
+  const sidebar = page.locator(".workbench-global-sidebar");
+  if (await sidebar.getAttribute("data-open") !== "true") {
+    await page.getByRole("button", { name: "展开左侧边栏" }).click();
+  }
+  await expect(sidebar).toHaveAttribute("data-open", "true");
+  await sidebar.getByRole("button", { name: "设置", exact: true }).click();
+  await page.getByRole("button", { name: "AI Agent", exact: true }).click();
+  const settings = page.locator(".workbench-settings-page");
+  await expect(settings).toBeVisible();
+  return settings;
+}
+
 export async function openQoderAvailability(page) {
   const sidebar = page.locator(".workbench-global-sidebar");
   if (await sidebar.getAttribute("data-open") !== "true") {

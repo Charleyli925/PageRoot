@@ -150,6 +150,7 @@ test("workspace preference decoding clamps damaged values and strict writes reje
   assert.throws(() => normalizeWorkspacePatch({ sidebarWidth: 999 }), /范围/u);
   assert.throws(() => normalizeWorkspacePatch({ unknown: true }), /未知字段/u);
   assert.throws(() => normalizeWorkspacePatch({ defaultAgentProviderId: "gemini" }), /默认 Agent/u);
+  assert.equal(normalizeWorkspacePatch({ defaultAgentProviderId: "pageroot" }).defaultAgentProviderId, "pageroot");
 });
 
 test("present and dismiss are install-level and dismissed is terminal", async (t) => {

@@ -77,6 +77,14 @@ export class AgentBridgeService {
 
   status(input) { return this.#coordinator.executionStatus(input); }
 
+  setSessionCredential(providerId, apiKey, extras) {
+    return this.#coordinator.setSessionCredential(providerId, apiKey, extras);
+  }
+
+  clearSessionCredential(providerId) {
+    return this.#coordinator.clearSessionCredential(providerId);
+  }
+
   interrupted(input, options = {}) {
     return this.#coordinator.interrupted(
       input,

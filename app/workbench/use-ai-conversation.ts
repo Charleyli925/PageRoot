@@ -6,7 +6,6 @@ import type { AiConversationControllerCapability } from "../application/workspac
 import type { ConversationSessionSnapshot } from "../application/conversation-session.js";
 import type { QoderAvailabilitySnapshot } from "../domain/qoder-availability.js";
 import type { ActiveRun } from "../domain/run-lifecycle.js";
-import type { AgentSelection } from "../domain/agent-provider-state.js";
 import type { RunHandoffState } from "../application/run-session.js";
 import {
   conversationLoadedForView,
@@ -34,19 +33,23 @@ export type UseAiConversationOptions = {
   agentActionName?: string | null;
   agentSettingsName?: string | null;
   agentSettingsSupported?: boolean;
+  credentialKind?: "api-token" | null;
   agentPresentation?: Readonly<{
     providerId: string;
     displayName: string;
     agentName: string;
     logoSrc: string | null;
   }> | null;
-  agentChoices?: readonly Readonly<{
+  models?: readonly Readonly<{
+    id: string;
+    displayName: string;
+  }>[];
+  selectedModelId?: string | null;
+  reasoningChoices?: readonly Readonly<{
     id: string;
     label: string;
-    logoSrc?: string | null;
-    selection: AgentSelection;
   }>[];
-  selectedAgentChoiceId?: string | null;
+  selectedReasoningId?: string | null;
   activeRun: ActiveRun | null;
   activeHandoff?: RunHandoffState | null;
   submissionPending?: boolean;
@@ -80,9 +83,12 @@ export function useAiConversation({
   agentActionName = "Agent",
   agentSettingsName = "Agent",
   agentSettingsSupported = true,
+  credentialKind = null,
   agentPresentation = null,
-  agentChoices = [],
-  selectedAgentChoiceId = null,
+  models = [],
+  selectedModelId = null,
+  reasoningChoices = [],
+  selectedReasoningId = null,
   activeRun,
   activeHandoff = null,
   submissionPending = false,
@@ -145,11 +151,13 @@ export function useAiConversation({
     onDeliverModification?.("clipboard");
   }, [onDeliverModification]);
 
-  const onSelectAgentChoice = useCallback((choiceId: string) => {
-    const choice = agentChoices.find((candidate) => candidate.id === choiceId);
-    if (!choice) return;
-    controllerRef.current?.selectAgent(choice.selection);
-  }, [agentChoices, controllerRef]);
+  const onSelectModel = useCallback((modelId: string) => {
+    controllerRef.current?.selectAgentModel(modelId);
+  }, [controllerRef]);
+
+  const onSelectReasoning = useCallback((reasoning: string) => {
+    controllerRef.current?.selectAgentReasoning(reasoning);
+  }, [controllerRef]);
 
   const sidebarProps = useMemo(() => ({
     state,
@@ -158,15 +166,19 @@ export function useAiConversation({
     // The selected Agent's availability is the model catalog's readiness: one owner supplies
     // both, so the Composer can never claim ready while the Agent is not.
     catalogStatus: (qoderAvailability?.status ?? "unavailable") as SidebarCatalogStatus,
+    catalogReason: qoderAvailability?.reason ?? null,
     agentDisplayName,
     agentActionName,
     agentSettingsName,
     agentSettingsSupported,
+    credentialKind,
     agentPresentation,
-    agentChoiceCount: agentChoices.length,
-    agentChoices: agentChoices.map(({ id, label, logoSrc }) => ({ id, label, logoSrc })),
-    selectedAgentChoiceId,
-    onSelectAgentChoice,
+    models,
+    selectedModelId,
+    reasoningChoices,
+    selectedReasoningId,
+    onSelectModel,
+    onSelectReasoning,
     // The decision bar needs to name the version it is deciding about, and the
     // assessment decides whether adopting without looking is offered at all.
     candidateVersionLabel: activeRun?.candidateVersionLabel ?? null,
@@ -202,9 +214,12 @@ export function useAiConversation({
     agentActionName,
     agentSettingsName,
     agentSettingsSupported,
+    credentialKind,
     agentPresentation,
-    agentChoices,
-    selectedAgentChoiceId,
+    models,
+    selectedModelId,
+    reasoningChoices,
+    selectedReasoningId,
     activeHandoff,
     activeRun,
     projectId,
@@ -216,7 +231,8 @@ export function useAiConversation({
     onCopyTask,
     onDecision,
     onOpenAgentSettings,
-    onSelectAgentChoice,
+    onSelectModel,
+    onSelectReasoning,
   ]);
 
   return { open, visible, toggle, reveal, hide, sidebarProps };

@@ -396,11 +396,9 @@
   min-height: 32px;
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 12px;
   margin-bottom: 10px;
-  color: #85838e;
-  font-size: 11px;
 }
 
 .settings-agent-rows {
@@ -411,13 +409,15 @@
 }
 
 .settings-agent-rows .qoder-availability-card,
-.settings-agent-rows .codex-availability-card {
+.settings-agent-rows .codex-availability-card,
+.settings-agent-rows .pageroot-availability-card {
   border-top: 0;
   border-bottom: 1px solid #ecebf0;
 }
 
 .settings-agent-rows .qoder-availability-card:last-child,
-.settings-agent-rows .codex-availability-card:last-child {
+.settings-agent-rows .codex-availability-card:last-child,
+.settings-agent-rows .pageroot-availability-card:last-child {
   border-bottom: 0;
 }
 
@@ -456,14 +456,16 @@
 }
 
 .settings-agent-rows .qoder-card-control {
-  width: 140px;
+  width: auto;
   min-width: 140px;
+  max-width: 220px;
   min-height: 34px;
   display: flex;
+  flex-wrap: wrap;
   flex-direction: row;
   align-items: center;
   justify-content: flex-end;
-  gap: 10px;
+  gap: 8px;
 }
 
 .settings-agent-rows .qoder-card-status,
@@ -478,6 +480,10 @@
   padding: 0 10px;
   border-radius: 8px;
   font-size: 10px;
+}
+
+.settings-agent-rows .qoder-card-apikey {
+  padding: 0 18px 14px;
 }
 
 .settings-empty-state {
@@ -556,7 +562,9 @@
   line-height: 1.5;
 }
 
-.qoder-availability-card {
+.qoder-availability-card,
+.codex-availability-card,
+.pageroot-availability-card {
   width: 100%;
   overflow: hidden;
   border-top: 1px solid #e3e0eb;
@@ -673,11 +681,15 @@
   background: #c39b52;
 }
 
-.qoder-availability-card[data-status="not-installed"] .qoder-card-status i {
+.qoder-availability-card[data-status="not-installed"] .qoder-card-status i,
+.codex-availability-card[data-status="not-installed"] .qoder-card-status i,
+.pageroot-availability-card[data-status="not-installed"] .qoder-card-status i {
   background: #5147d6;
 }
 
-.qoder-availability-card[data-status="unavailable"] .qoder-card-status i {
+.qoder-availability-card[data-status="unavailable"] .qoder-card-status i,
+.codex-availability-card[data-status="unavailable"] .qoder-card-status i,
+.pageroot-availability-card[data-status="unavailable"] .qoder-card-status i {
   background: #d25248;
 }
 
@@ -725,6 +737,85 @@
 .qoder-card-control > button:focus-visible {
   outline: 2px solid rgb(90 85 223 / 35%);
   outline-offset: 2px;
+}
+
+.qoder-card-control > button[data-kind="api-key"] {
+  width: auto;
+  background: transparent;
+  color: #55525f;
+}
+
+.qoder-card-control > button[data-kind="api-key"]:hover:not(:disabled) {
+  background: #f1f0f6;
+  color: #201d31;
+}
+
+.qoder-card-apikey {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 0 16px 14px;
+}
+
+.qoder-card-apikey-vendor,
+.qoder-card-apikey-base,
+.qoder-card-apikey .qoder-card-error {
+  grid-column: 1 / -1;
+}
+
+.qoder-card-apikey-vendor {
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid #e3e0eb;
+  border-radius: 8px;
+  background: #fff;
+  color: #2b2936;
+  font-size: 12px;
+}
+
+.qoder-card-apikey-vendor:focus-visible {
+  outline: 2px solid rgb(90 85 223 / 35%);
+  outline-offset: 1px;
+}
+
+.qoder-card-apikey input {
+  min-width: 0;
+  flex: 1;
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid #e3e0eb;
+  border-radius: 8px;
+  background: #fff;
+  color: #2b2936;
+  font-size: 12px;
+}
+
+.qoder-card-apikey input:focus-visible {
+  outline: 2px solid rgb(90 85 223 / 35%);
+  outline-offset: 1px;
+}
+
+.qoder-card-apikey button {
+  height: 30px;
+  flex: none;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--indigo);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 680;
+  cursor: pointer;
+}
+
+.qoder-card-apikey button:disabled {
+  opacity: .58;
+  cursor: wait;
+}
+
+.settings-agent-rows .qoder-card-apikey {
+  padding: 0 18px 14px;
 }
 
 @media (max-width: 640px) {

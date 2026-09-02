@@ -6,7 +6,9 @@ import {
 } from "./agent-provider-contract.mjs";
 import { createQoderProvider } from "./qoder-provider.mjs";
 import { createCodexAcpProvider } from "./codex-acp-provider.mjs";
+import { createOpenAiCompatibleProvider } from "./openai-compatible-provider.mjs";
 import { createAcpRuntime } from "../runtimes/acp-runtime.mjs";
+import { createHttpRuntime } from "../runtimes/http-runtime.mjs";
 import { createRuntimeRegistry } from "../runtimes/runtime-registry.mjs";
 import {
   normalizeAgentDelivery,
@@ -333,8 +335,11 @@ export function createDefaultProviderRegistry({
     agentsRoot: agentsRoot || defaultAgentsRoot(),
     ...(installerOptions ? { installerOptions } : {}),
   });
-  const runtimes = [createAcpRuntime({ ...(runTask ? { runTask } : {}) })];
-  const providers = [createQoderProvider({
+  const runtimes = [
+    createAcpRuntime({ ...(runTask ? { runTask } : {}) }),
+    createHttpRuntime(),
+  ];
+  const providers = [createOpenAiCompatibleProvider(), createQoderProvider({
     ...(commandResolver ? { commandResolver } : {}),
     ...(preflightRunner ? { preflightRunner } : {}),
     ...(policyLoader ? { policyLoader } : {}),

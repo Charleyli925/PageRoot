@@ -20,7 +20,7 @@ test("the legacy Qoder card is a presentation-only wrapper over the neutral card
     'cardClassName: "qoder-availability-card"',
     'primaryActionDataAttribute: "data-qoder-primary"',
     '安装 Qoder CLI',
-    '复制指令粘贴至 Agent',
+    '复制登录指令',
   ]) assert.match(wrapper, new RegExp(literal, "u"));
 
   for (const contract of [
@@ -28,11 +28,14 @@ test("the legacy Qoder card is a presentation-only wrapper over the neutral card
     "data-surface={surface}",
     'aria-live="polite"',
     'aria-atomic="true"',
-    "ref={actionButtonRef}",
-    "{...primaryActionData}",
+    "ref={index === 0 ? actionButtonRef : undefined}",
+    "{...(index === 0 ? primaryActionData : {})}",
     '正在复制…',
     '正在安装…',
   ]) assert.ok(card.includes(contract), contract);
+  assert.match(card, /data-testid="settings-agent-vendor"/u);
+  assert.match(card, /API Token/u);
+  assert.doesNotMatch(card, /Anthropic/u);
 });
 
 test("About is product information while Settings owns Agent checks and update controls", async () => {
@@ -51,4 +54,6 @@ test("About is product information while Settings owns Agent checks and update c
   assert.match(settings, /onCheckForUpdates/u);
   assert.match(settings, /onDownloadUpdate/u);
   assert.match(settings, /onRequestRestart/u);
+  assert.match(settings, /if \(!force && \(/u);
+  assert.match(settings, /checkInFlightRef\.current/u);
 });

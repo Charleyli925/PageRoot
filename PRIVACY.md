@@ -29,14 +29,13 @@
 
 Renderer 发来的事件会在主进程再次按严格白名单过滤；未声明的事件和字段直接丢弃。
 
-上述“不收集、不回传”只描述 PageRoot 自己的产品遥测。用户主动选择 Qoder CLI 或 Codex
-自动执行后，本轮冻结 HTML、评论、附件、项目规则、Request 内本机文件路径，以及相应
-Agent 账号或会话所需元数据，可能按该 Agent 的服务条款和隐私政策由其服务处理。Codex 是
-应用内置、按本轮启动的本机 Agent；修改时可能以当前用户的读取权限访问这台 Mac 上的其他
-本机文件，并将完成任务所需的内容发送至 Codex 服务。选择复制任务时，只有用户主动粘贴或
-发送后才进入相应第三方服务。ACP 文件与命令限制及 Codex Execution sandbox 都不是对本机
-读取权限的完整隔离；两个 Agent 的结果都必须先进入 PageRoot 候选审阅，只有用户明确采纳
-后才会成为正式版本。
+上述“不收集、不回传”只描述 PageRoot 自己的产品遥测。用户主动选择源页 Agent、Qoder CLI 或 Codex
+自动执行后，本轮冻结 HTML、评论、附件、项目规则，以及相应账号、会话或厂商接口所需元数据，
+可能按该 Agent 或所选厂商的服务条款和隐私政策由其服务处理。源页 Agent 只把冻结任务发给用户
+指定的 HTTPS 接口，模型不获得本机文件系统权限。Codex 修改时可能以当前用户的读取权限访问这台
+Mac 上的其他本机文件，并将完成任务所需的内容发送至 Codex 服务。选择复制任务时，只有用户主动
+粘贴或发送后才进入相应第三方服务。ACP 文件与命令限制不是对本机读取权限的完整隔离；所有
+Agent 的结果都必须先进入 PageRoot 候选审阅，只有用户明确采纳后才会成为正式版本。
 
 ## 如何区分安装、会话与项目
 
@@ -65,7 +64,7 @@ Agent 账号或会话所需元数据，可能按该 Agent 的服务条款和隐�
 
 PageRoot’s packaged desktop app sends a limited, allowlisted set of product-usage and fault events by default. It does not send HTML, page text, comments, prompts, AI output, attachments, clipboard contents, filenames, paths, account identifiers, Mac serial numbers, raw error messages, or stack traces. A random per-install ID, a random per-launch session ID, and HMAC-derived project pseudonyms are used instead of hardware identity.
 
-That boundary applies only to PageRoot product telemetry. When the user explicitly chooses managed Qoder or Codex execution, that Agent may process frozen task content, Request-local file paths, and account or session metadata under its own terms and privacy policy. The bundled, per-request Codex Agent may use the current user’s read access to inspect other local files and send task-required content to the Codex service. Clipboard delivery reaches a third-party Agent only after the user pastes or sends it. ACP restrictions and the Codex execution sandbox do not fully isolate local read access. Both managed paths produce a reviewable Candidate first; only explicit adoption creates a formal Version.
+That boundary applies only to PageRoot product telemetry. When the user explicitly chooses 源页 Agent, managed Qoder or Codex execution, that Agent or vendor API may process frozen task content and account or session metadata under its own terms and privacy policy. 源页 Agent sends only the frozen task to the user-selected HTTPS endpoint and does not grant the model filesystem access. The Codex ACP Agent may use the current user’s read access to inspect other local files and send task-required content to the Codex service. Clipboard delivery reaches a third-party Agent only after the user pastes or sends it. ACP restrictions do not fully isolate local read access. All managed paths produce a reviewable Candidate first; only explicit adoption creates a formal Version.
 
 Events are sent over HTTPS to PageRoot’s PostHog US Cloud project with person-profile processing and GeoIP resolution disabled. The source IP is necessarily visible to network recipients while the connection is made, but PageRoot does not add it to event properties. There is no session replay or automatic event capture. Telemetry failures never block editing or persistence.
 

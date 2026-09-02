@@ -1130,7 +1130,7 @@ test("a failed Qoder preflight creates no Request and leaves editing recoverable
 
 test("capacity and timeout preflight failures keep truthful recovery reasons", async () => {
   for (const [code, reason, statusLabel] of [
-    ["QODER_ACCOUNT_CAPACITY_UNAVAILABLE", "account-capacity", "暂不可用 · Qoder 额度已用完"],
+    ["QODER_ACCOUNT_CAPACITY_UNAVAILABLE", "account-capacity", "额度已用完"],
     ["QODER_PREFLIGHT_TIMEOUT", "timeout", "暂不可用 · 连接超时"],
   ]) {
     const error = Object.assign(new Error(code), { code });
