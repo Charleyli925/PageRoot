@@ -794,7 +794,7 @@ test("runtime tables, SVG and Canvas keep visual comments source-anchored", {
       await commentButton.click();
       const nextComposer = page.getByRole("region", { name: "添加评论" });
       await expect(nextComposer).toBeVisible();
-      if (selector === "#runtime-page-table") {
+      if (selector.startsWith("#runtime-page-table")) {
         await expect(nextComposer).toContainText("页面级数据表");
         await expect(nextComposer.getByRole("textbox", { name: "评论内容" }))
           .toHaveAttribute("placeholder", "输入对这部分内容的修改要求…");
@@ -819,7 +819,7 @@ test("runtime tables, SVG and Canvas keep visual comments source-anchored", {
       "收益趋势画布",
     );
     await saveRuntimeComment(
-      "#runtime-page-table",
+      "#runtime-page-table caption",
       "请保留页面级数据表的汇总行。",
       "页面级数据表",
     );
