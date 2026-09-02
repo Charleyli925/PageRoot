@@ -13,6 +13,7 @@ import {
 import { ClockCounterClockwiseIcon } from "@phosphor-icons/react/dist/csr/ClockCounterClockwise";
 import { EyeIcon } from "@phosphor-icons/react/dist/csr/Eye";
 import AttachmentLightbox from "./components/AttachmentLightbox";
+import EditRuntimeStaticFallbackNotice from "./components/EditRuntimeStaticFallbackNotice";
 import HtmlCanvasEditor from "./components/HtmlCanvasEditor";
 import HtmlDisplaySurface from "./components/HtmlDisplaySurface";
 import type {
@@ -812,6 +813,13 @@ export default function Workbench() {
     runtimePreparing: editRuntimePreparing, runtimeRenderPending: editRuntimeRenderPending,
     runtimeGrant: editRuntimeGrant,
   } = runtimeCanvasResidency;
+  const staticFallbackNoticeIdentity = editRuntimePhase === "static-fallback"
+    ? [
+        editRuntimeSnapshot?.sourcePath || sourcePath || "no-source",
+        editRuntimeSnapshot?.canvasGeneration ?? canvasGeneration,
+        editRuntimeSnapshot?.lastOutcome || "unknown",
+      ].join(":")
+    : null;
   const [pageViewContext, setPageViewContext] =
     useState<PageViewContext | null>(null);
   const [interactivePreviewTransport, setInteractivePreviewTransport] =
@@ -4801,6 +4809,7 @@ export default function Workbench() {
       if (
         outcome.code === "RUN_SUBMISSION_NATIVE_EDIT"
         || outcome.code === "RUN_SUBMISSION_FREEZE"
+        || outcome.code === "RUN_SUBMISSION_CANVAS_STALE"
       ) {
         editorRef.current?.showCommitBlocked(outcome.reason);
         return;
@@ -5466,12 +5475,16 @@ export default function Workbench() {
         const current = pendingSidebarHistoryRef.current;
         if (!current || current.versionId !== pending.versionId) return;
         const opened = await viewHistoryVersion(sidebarSummaryVersion(current));
-        if (opened !== null) {
+        if (opened === true) {
           if (pendingSidebarHistoryRef.current?.versionId === current.versionId) {
             pendingSidebarHistoryRef.current = null;
           }
           return;
         }
+        // Project activation can invalidate the first history request after it
+        // was admitted. Preserve the explicit sidebar intent and retry against
+        // the newly applied project context instead of settling on its Working
+        // Copy. The existing deadline keeps deterministic failures bounded.
         await retryDelay();
       }
     };
@@ -6334,6 +6347,7 @@ export default function Workbench() {
           <div
             className="canvas-edit-surface"
             data-edit-runtime-phase={editRuntimePhase}
+            data-edit-runtime-outcome={editRuntimeSnapshot?.lastOutcome || undefined}
             hidden={canvasMode !== "edit"}
             aria-hidden={canvasMode !== "edit" || Boolean(effectiveVisibleCachedSurface)}
             inert={effectiveVisibleCachedSurface ? true : undefined}
@@ -6342,16 +6356,17 @@ export default function Workbench() {
               <div className="canvas-loading" role="status">正在识别运行环境…</div>
             ) : !browserPreviewOnly ? (
               <>
-              {editRuntimePhase === "static-fallback" ? (
-                <section
-                  className="edit-runtime-static-fallback"
-                  data-testid="edit-runtime-static-fallback"
-                  role="status"
-                  aria-live="polite"
-                >
-                  <strong>脚本未在编辑画布中运行</strong>
-                  <span>此页面已静态显示；源码编辑和保存仍然有效。</span>
-                </section>
+              {staticFallbackNoticeIdentity ? (
+                <EditRuntimeStaticFallbackNotice
+                  key={staticFallbackNoticeIdentity}
+                  {...(editRuntimeSnapshot?.retryAvailable
+                    ? {
+                        onRetry: () => {
+                          workspaceControllerRef.current?.retryEditAuthorRuntime();
+                        },
+                      }
+                    : {})}
+                />
               ) : null}
               {editRuntimePreparing && !activeRuntimeCanvasUsable ? (
                 <HtmlDisplaySurface
@@ -6382,19 +6397,26 @@ export default function Workbench() {
                     }
                   }}
                   editRuntimeGrant={editRuntimeGrant}
-                  onEditRuntimeLoadStart={(grant) => {
+                  onEditRuntimeLoadStart={(grant, attempt) => {
                     workspaceControllerRef.current?.beginEditAuthorRuntime({
                       sessionId: grant.sessionId,
                       sourceSha256: grant.sourceSha256,
                       canvasGeneration: grant.canvasGeneration,
+                      candidateId: attempt.candidateId,
+                      candidateGeneration: attempt.generation,
+                      candidateSourceRevision: attempt.sourceRevision,
                     });
                   }}
-                  onEditRuntimeLoadOutcome={(grant, outcome: HtmlCanvasEditRuntimeLoadOutcome) => {
+                  onEditRuntimeLoadOutcome={(grant, outcome: HtmlCanvasEditRuntimeLoadOutcome, attempt, settlement) => {
                     workspaceControllerRef.current?.settleEditAuthorRuntime({
                       sessionId: grant.sessionId,
                       sourceSha256: grant.sourceSha256,
                       canvasGeneration: grant.canvasGeneration,
+                      candidateId: attempt.candidateId,
+                      candidateGeneration: attempt.generation,
+                      candidateSourceRevision: attempt.sourceRevision,
                       outcome,
+                      preserveLastKnownGood: settlement.preserveLastKnownGood,
                     });
                     if (outcome === "ready" && documentRuntimeTabId) {
                       retainRuntimeCanvas(

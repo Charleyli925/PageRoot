@@ -1,6 +1,8 @@
 import type { EditRuntimeGrant } from "../domain/edit-runtime-contract.js";
+import type { EditRuntimeCandidateIdentity } from "./edit-runtime-candidate-controller.js";
 
 export type RuntimeFrameContext = {
+  attempt: EditRuntimeCandidateIdentity;
   verificationToken: string;
   grant: EditRuntimeGrant;
   elementGeneration: number;

@@ -257,6 +257,10 @@ function createHarness({
   const frozen = freeze || (() => ({
     ok: true,
     html,
+    workingSourceSha256: sha256(html),
+    renderedProjectionSha256: sha256(html),
+    renderedProjectionStale: false,
+    canvasRenderedSha256: sha256(html),
     sourceSha256: sha256(html),
     pendingMutation: null,
   }));
@@ -347,6 +351,30 @@ test("submit freezes the exact source, creates one Request, and confirms handoff
   const duplicate = await harness.workflow.submit({ projectName: "landing.html" });
   assert.equal(duplicate.status, "blocked");
   assert.equal(harness.calls.createRequest.length, 1);
+});
+
+test("submit rejects a latest working source whose visible projection is still last-known-good", async () => {
+  const oldHtml = HTML_A.replace("Welcome", "Previous visible page");
+  const harness = createHarness({
+    freeze: () => ({
+      ok: true,
+      html: HTML_A,
+      workingSourceSha256: sha256(HTML_A),
+      renderedProjectionSha256: sha256(oldHtml),
+      renderedProjectionStale: true,
+      canvasRenderedSha256: sha256(oldHtml),
+      sourceSha256: sha256(HTML_A),
+      pendingMutation: null,
+    }),
+  });
+
+  const outcome = await harness.workflow.submit({ projectName: "landing.html" });
+
+  assert.equal(outcome.status, "blocked");
+  assert.equal(outcome.code, "RUN_SUBMISSION_CANVAS_STALE");
+  assert.equal(harness.calls.unlock, 1);
+  assert.equal(harness.calls.createRequest.length, 0);
+  assert.equal(harness.runSession.activeRun, null);
 });
 
 test("submit refreshes a unique text quote against the final saved HTML before creating the Request", async () => {

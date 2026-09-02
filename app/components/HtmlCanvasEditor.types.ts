@@ -5,6 +5,7 @@ import type {
 } from "./native-edit-types";
 import type { NoticeUsageCapture } from "./NoticeBar";
 import type { EditRuntimeGrant } from "../domain/edit-runtime-contract.js";
+import type { EditRuntimeCandidateIdentity } from "./edit-runtime-candidate-controller.js";
 import type {
   SemanticIdentityDelta,
   SemanticOperation,
@@ -135,14 +136,30 @@ export type HtmlCanvasInteractionMode = "editing" | "processing" | "history";
 export type HtmlCanvasEditRuntimeLoadOutcome =
   | "ready"
   | "rejected"
-  | "failed";
+  | "failed"
+  | "superseded";
+
+export type HtmlCanvasEditRuntimeAttempt = EditRuntimeCandidateIdentity;
+
+export type HtmlCanvasEditRuntimeSettlement = Readonly<{
+  /** The physical candidate controller still has a usable active Runtime iframe. */
+  preserveLastKnownGood: boolean;
+  /** A real failure has no usable Runtime projection and may enter static fallback. */
+  shouldUseStaticFallback: boolean;
+}>;
 
 export type HtmlCanvasFreezeSnapshot = {
   ok: boolean;
   html: string;
-  /** Hash of the exact working HTML currently rendered by the Canvas. */
+  /** Hash of the latest complete source returned in html. */
+  workingSourceSha256: string;
+  /** Hash of the source bytes represented by the currently visible verified projection. */
+  renderedProjectionSha256: string;
+  /** True when the visible projection is only a last-known-good view of older source. */
+  renderedProjectionStale: boolean;
+  /** Compatibility name for renderedProjectionSha256. Never aliases working source. */
   canvasRenderedSha256: string;
-  /** @deprecated Compatibility alias for canvasRenderedSha256. */
+  /** @deprecated Compatibility alias for workingSourceSha256. */
   sourceSha256: string;
   pendingMutation: HtmlCanvasMutation | null;
   reason?: string;
@@ -151,9 +168,15 @@ export type HtmlCanvasFreezeSnapshot = {
 export type HtmlCanvasCommitResult = {
   ok: boolean;
   html: string;
-  /** Hash of the exact working HTML currently rendered by the Canvas. */
+  /** Hash of the latest complete source returned in html. */
+  workingSourceSha256: string;
+  /** Hash of the source bytes represented by the currently visible verified projection. */
+  renderedProjectionSha256: string;
+  /** True when the visible projection is only a last-known-good view of older source. */
+  renderedProjectionStale: boolean;
+  /** Compatibility name for renderedProjectionSha256. Never aliases working source. */
   canvasRenderedSha256: string;
-  /** @deprecated Compatibility alias for canvasRenderedSha256. */
+  /** @deprecated Compatibility alias for workingSourceSha256. */
   sourceSha256: string;
   pendingMutation: HtmlCanvasMutation | null;
   reason?: string;
@@ -310,11 +333,16 @@ export type HtmlCanvasEditorProps = {
   /** A main-process-authorized, source-bound disposable runtime grant. */
   editRuntimeGrant?: EditRuntimeGrant | null;
   /** State-owner transition when a visible disposable document begins loading. */
-  onEditRuntimeLoadStart?: (grant: EditRuntimeGrant) => void;
+  onEditRuntimeLoadStart?: (
+    grant: EditRuntimeGrant,
+    attempt: HtmlCanvasEditRuntimeAttempt,
+  ) => void;
   /** State-owner transition after the disposable document loads or fails. */
   onEditRuntimeLoadOutcome?: (
     grant: EditRuntimeGrant,
     outcome: HtmlCanvasEditRuntimeLoadOutcome,
+    attempt: HtmlCanvasEditRuntimeAttempt,
+    settlement: HtmlCanvasEditRuntimeSettlement,
   ) => void;
   /** Mirrors the authored page scroll coordinate into the host comment rail. */
   onCommentLayout?: (state: HtmlCanvasCommentLayoutState) => void;

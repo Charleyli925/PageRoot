@@ -5,11 +5,18 @@ import {
   editRuntimeProgramIdentity,
   isEditRuntimeDocumentBasePath,
   isEditRuntimeSourceSha256,
+  unsupportedEditRuntimeProgramReason,
 } from "../domain/edit-runtime-contract.js";
 
 function isRecord(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
+
+const RETRYABLE_STATIC_FALLBACK_OUTCOMES = new Set([
+  "prepare-failed",
+  "runtime-failed",
+  "recovery-failed",
+]);
 
 function frozenSnapshot({
   phase = "static",
@@ -26,6 +33,8 @@ function frozenSnapshot({
     canvasGeneration: Number.isSafeInteger(canvasGeneration) ? canvasGeneration : null,
     grant,
     lastOutcome,
+    retryAvailable: phase === "static-fallback"
+      && RETRYABLE_STATIC_FALLBACK_OUTCOMES.has(lastOutcome),
   });
 }
 
@@ -48,6 +57,31 @@ function sameKey(left, right) {
     && Boolean(right)
     && left.sourcePath === right.sourcePath
     && left.canvasGeneration === right.canvasGeneration;
+}
+
+function normalizedRuntimeAttempt(value) {
+  const candidateId = String(value?.candidateId || "");
+  const candidateSourceRevision = String(value?.candidateSourceRevision || "").toLowerCase();
+  if (
+    !candidateId
+    || candidateId.length > 128
+    || !Number.isSafeInteger(value?.candidateGeneration)
+    || value.candidateGeneration < 0
+    || !isEditRuntimeSourceSha256(candidateSourceRevision)
+  ) return null;
+  return Object.freeze({
+    candidateId,
+    candidateGeneration: value.candidateGeneration,
+    candidateSourceRevision,
+  });
+}
+
+function sameRuntimeAttempt(left, right) {
+  return Boolean(left)
+    && Boolean(right)
+    && left.candidateId === right.candidateId
+    && left.candidateGeneration === right.candidateGeneration
+    && left.candidateSourceRevision === right.candidateSourceRevision;
 }
 
 function normalizedGrant(value, request) {
@@ -117,6 +151,7 @@ export class EditAuthorRuntimeSession {
   #activeRequest = null;
   #recoveryGrant = null;
   #recoveryConsumed = false;
+  #runtimeAttempt = null;
   #attemptGeneration = 0;
   #requestSequence = 0;
   #disposed = false;
@@ -179,6 +214,7 @@ export class EditAuthorRuntimeSession {
   #transitionToStatic(phase, lastOutcome, identity = this.#identity) {
     this.#pendingPreparation = null;
     this.#activeRequest = null;
+    this.#runtimeAttempt = null;
     this.#revokeActiveGrants();
     this.#emit({
       phase,
@@ -237,6 +273,7 @@ export class EditAuthorRuntimeSession {
     this.#pendingPreparation = null;
     this.#activeRequest = null;
     this.#recoveryConsumed = false;
+    this.#runtimeAttempt = null;
     this.#revokeActiveGrants();
     this.#identity = identity;
     const attemptGeneration = this.#attemptGeneration;
@@ -252,6 +289,9 @@ export class EditAuthorRuntimeSession {
     }
     const scriptContract = collectEditRuntimeScripts(identity.html);
     const programIdentity = editRuntimeProgramIdentity(identity.html);
+    const unsupportedProgram = scriptContract.executableScripts.some((script) => (
+      unsupportedEditRuntimeProgramReason(script.inline)
+    ));
     if (
       scriptContract.executableScripts.length < 1
       && !scriptContract.unsupportedReason
@@ -267,6 +307,7 @@ export class EditAuthorRuntimeSession {
     }
     if (
       scriptContract.unsupportedReason
+      || unsupportedProgram
       || scriptContract.executableScripts.length > EDIT_AUTHOR_RUNTIME_BUDGET.scriptCount
       || !programIdentity
     ) {
@@ -366,15 +407,33 @@ export class EditAuthorRuntimeSession {
     return true;
   }
 
-  beginRuntime({ sessionId, sourceSha256, canvasGeneration } = {}) {
+  beginRuntime({
+    sessionId,
+    sourceSha256,
+    canvasGeneration,
+    candidateId,
+    candidateGeneration,
+    candidateSourceRevision,
+  } = {}) {
     const grant = this.#snapshot.grant;
+    const attempt = normalizedRuntimeAttempt({
+      candidateId,
+      candidateGeneration,
+      candidateSourceRevision,
+    });
     if (
-      !["ready", "settled"].includes(this.#snapshot.phase)
+      !["ready", "running", "settled"].includes(this.#snapshot.phase)
       || !grant
+      || !attempt
       || grant.sessionId !== String(sessionId || "").toLowerCase()
       || grant.sourceSha256 !== String(sourceSha256 || "").toLowerCase()
       || grant.canvasGeneration !== canvasGeneration
     ) return false;
+    if (
+      this.#snapshot.phase === "running"
+      && sameRuntimeAttempt(this.#runtimeAttempt, attempt)
+    ) return true;
+    this.#runtimeAttempt = attempt;
     this.#emit({
       phase: "running",
       sourceSha256: grant.sourceSha256,
@@ -452,15 +511,45 @@ export class EditAuthorRuntimeSession {
     });
   }
 
-  settleRuntime({ sessionId, sourceSha256, canvasGeneration, outcome } = {}) {
+  settleRuntime({
+    sessionId,
+    sourceSha256,
+    canvasGeneration,
+    candidateId,
+    candidateGeneration,
+    candidateSourceRevision,
+    outcome,
+    preserveLastKnownGood = false,
+  } = {}) {
     const grant = this.#snapshot.grant;
+    const attempt = normalizedRuntimeAttempt({
+      candidateId,
+      candidateGeneration,
+      candidateSourceRevision,
+    });
     if (
       this.#snapshot.phase !== "running"
       || !grant
+      || !sameRuntimeAttempt(this.#runtimeAttempt, attempt)
       || grant.sessionId !== String(sessionId || "").toLowerCase()
       || grant.sourceSha256 !== String(sourceSha256 || "").toLowerCase()
       || grant.canvasGeneration !== canvasGeneration
     ) return false;
+    this.#runtimeAttempt = null;
+    // Replacing a disposable iframe is coordination, never authored-program
+    // failure. Return the shared grant to the last truthful usable phase so a
+    // successor attempt can begin without revocation or static degradation.
+    if (outcome === "superseded") {
+      this.#emit({
+        phase: preserveLastKnownGood ? "settled" : "ready",
+        sourceSha256: grant.sourceSha256,
+        sourcePath: this.#identity?.sourcePath || null,
+        canvasGeneration: grant.canvasGeneration,
+        grant,
+        lastOutcome: "superseded",
+      });
+      return true;
+    }
     if (outcome === "ready") {
       this.#emit({
         phase: "settled",
@@ -469,6 +558,17 @@ export class EditAuthorRuntimeSession {
         canvasGeneration: grant.canvasGeneration,
         grant,
         lastOutcome: "ready",
+      });
+      return true;
+    }
+    if (preserveLastKnownGood) {
+      this.#emit({
+        phase: "settled",
+        sourceSha256: grant.sourceSha256,
+        sourcePath: this.#identity?.sourcePath || null,
+        canvasGeneration: grant.canvasGeneration,
+        grant,
+        lastOutcome: outcome === "rejected" ? "candidate-rejected" : "candidate-failed",
       });
       return true;
     }
@@ -483,6 +583,25 @@ export class EditAuthorRuntimeSession {
     return true;
   }
 
+  retry() {
+    const identity = this.#identity;
+    if (
+      this.#disposed
+      || !identity
+      || this.#snapshot.phase !== "static-fallback"
+      || !this.#snapshot.retryAvailable
+    ) return false;
+    this.#identity = null;
+    const snapshot = this.refresh({
+      html: identity.html,
+      sourceSha256: identity.sourceSha256,
+      sourcePath: identity.sourcePath,
+      canvasGeneration: identity.canvasGeneration,
+      sourceIsAuthoritative: true,
+    });
+    return snapshot.phase === "preparing";
+  }
+
   dispose() {
     if (this.#disposed) return;
     this.#disposed = true;
@@ -491,6 +610,7 @@ export class EditAuthorRuntimeSession {
     this.#identity = null;
     this.#pendingPreparation = null;
     this.#activeRequest = null;
+    this.#runtimeAttempt = null;
     this.#listeners.clear();
     this.#snapshot = frozenSnapshot();
   }

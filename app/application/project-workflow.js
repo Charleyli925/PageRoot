@@ -769,7 +769,8 @@ export class ProjectWorkflow {
           cutoffRevision,
           persistedSourceSha256: this.#documentSession.persistedSourceSha256,
           workingHtmlSha256: this.#documentSession.workingHtmlSha256,
-          canvasRenderedSha256: committed?.canvasRenderedSha256 || committed?.sourceSha256,
+          canvasRenderedSha256: committed?.renderedProjectionSha256
+            || committed?.canvasRenderedSha256,
           protectionHtmlSha256: protectionEvidence?.htmlSha256 || "",
           recoveryProtected,
         });
@@ -1193,7 +1194,30 @@ export class ProjectWorkflow {
         }
         imposedEditorFreeze = true;
         frozenHtml = frozen.html;
-        frozenSourceSha256 = frozen.canvasRenderedSha256 || frozen.sourceSha256;
+        const workingSourceSha256 = String(
+          frozen.workingSourceSha256 || frozen.sourceSha256 || "",
+        );
+        const renderedProjectionSha256 = String(
+          frozen.renderedProjectionSha256 || frozen.canvasRenderedSha256 || "",
+        );
+        if (!workingSourceSha256) {
+          return inAppBlock("当前完整 HTML 还没有形成，已取消关闭。");
+        }
+        const projectionStale = frozen.renderedProjectionStale === true
+          || renderedProjectionSha256 !== workingSourceSha256;
+        if (projectionStale) {
+          // Close is a source-protection boundary, not a claim that the user
+          // has already seen the latest projection. Preserve the older
+          // rendered Hash as a distinct fact and reconcile the frozen working
+          // bytes below; project switch and AI submission keep their stronger
+          // visible-projection gate.
+          this.#emit({
+            type: "project-close-source-safe-projection-stale",
+            workingSourceSha256,
+            renderedProjectionSha256,
+          });
+        }
+        frozenSourceSha256 = workingSourceSha256;
         lifecycle.frozenRequestId = closeRequestId;
         lifecycle.frozenContext = this.#projectSession.context
           ? Object.freeze({ ...this.#projectSession.context })

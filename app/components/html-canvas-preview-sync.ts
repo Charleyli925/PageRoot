@@ -9,6 +9,7 @@ import { isEditableIslandTarget } from "../lib/editable-island.js";
 import { isTransparentSourceTextElement } from "../lib/source-text-map.js";
 import { disableExecutableMarkup } from "./html-preview-sandbox.js";
 import { escapedSourceNodeId } from "./html-canvas-page-view";
+import { PAGEROOT_ELEMENT_ID_ATTRIBUTE } from "../../shared/pageroot-element-identity.mjs";
 import type {
   SourceElementValue,
   SourceIndexValue,
@@ -474,6 +475,53 @@ export function refreshMountedPreviewSourceNodeIds(
   }
   plan.apply();
   return true;
+}
+
+export type StableMountedSourceNodeRefresh = Readonly<{
+  element: HTMLElement;
+  pagerootId: string;
+  nextNodeId: string;
+}>;
+
+/**
+ * Rebinds only live elements whose persistent Stable ID still resolves exactly
+ * in the latest source. Missing structural additions remain absent from the
+ * last-known-good DOM; they do not prevent unchanged elements from retaining
+ * safe source mutation authority while a replacement Runtime is prepared.
+ */
+export function refreshStableMountedPreviewSourceNodeIds(
+  documentNode: Document,
+  nextIndex: SourceIndexValue,
+): readonly StableMountedSourceNodeRefresh[] {
+  const ViewHTMLElement = documentNode.defaultView?.HTMLElement;
+  const updates = sourceBackedPreviewElements(documentNode).flatMap((element) => {
+    if (!ViewHTMLElement || !(element instanceof ViewHTMLElement)) return [];
+    const pagerootId = element.getAttribute(PAGEROOT_ELEMENT_ID_ATTRIBUTE);
+    const nextElement = pagerootId ? nextIndex.byPagerootId.get(pagerootId) : null;
+    if (
+      !pagerootId
+      || !nextElement
+      || nextElement.type !== "element"
+      || nextElement.tagName !== element.tagName.toLowerCase()
+    ) return [];
+    return [{ element, pagerootId, nextNodeId: nextElement.nodeId }];
+  });
+  const previousValues = updates.map(({ element }) => ({
+    element,
+    nodeId: element.getAttribute(SOURCE_NODE_ATTRIBUTE),
+  }));
+  try {
+    updates.forEach(({ element, nextNodeId }) => {
+      element.setAttribute(SOURCE_NODE_ATTRIBUTE, nextNodeId);
+    });
+  } catch (cause) {
+    previousValues.forEach(({ element, nodeId }) => {
+      if (nodeId === null) element.removeAttribute(SOURCE_NODE_ATTRIBUTE);
+      else element.setAttribute(SOURCE_NODE_ATTRIBUTE, nodeId);
+    });
+    throw cause;
+  }
+  return updates;
 }
 
 export function adoptCanonicalHistoryIslandInPlace(options: {

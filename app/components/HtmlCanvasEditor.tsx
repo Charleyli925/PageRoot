@@ -149,6 +149,7 @@ import {
   nativeTextFragmentForRange,
   nativeTextFragmentForElement,
   refreshMountedPreviewSourceNodeIds,
+  refreshStableMountedPreviewSourceNodeIds,
   sourceTextNodeForDomText,
   sourceBackedPreviewElements,
   alignPreviewSourceSurface,
@@ -200,6 +201,11 @@ import {
   type SelectionChromeModel,
   type SelectionChromeProjection,
 } from "./html-canvas-selection-chrome-contract";
+import {
+  EditRuntimeCandidateController,
+  type EditRuntimeCandidateIdentity,
+  type EditRuntimeCandidateSettlement,
+} from "./edit-runtime-candidate-controller.js";
 import type {
   HtmlCanvasCommentLayoutState,
   HtmlCanvasCommentedTarget,
@@ -224,6 +230,7 @@ export type {
   HtmlCanvasCommentLayoutState,
   HtmlCanvasCommitResult,
   HtmlCanvasEditRuntimeLoadOutcome,
+  HtmlCanvasEditRuntimeAttempt,
   HtmlCanvasEditorHandle,
   HtmlCanvasEditorProps,
   HtmlCanvasFingerprint,
@@ -535,6 +542,7 @@ type RuntimeActiveFrameSnapshot = {
   expectedFrameHtml: string | null;
   expectedFrameToken: string | null;
   renderedSourceHtml: string | null;
+  renderedProjectionSha256: string;
   appliedPageViewContext: PageViewContext | null;
   activeFrameConnectionPending: boolean;
   runtimeNeedsRerender: boolean;
@@ -560,6 +568,7 @@ type RuntimeActiveFrameSnapshot = {
 };
 
 type RuntimeCandidate = {
+  attempt: EditRuntimeCandidateIdentity;
   source: string;
   sourceIndex: SourceIndexValue | null;
   prepared: string;
@@ -569,7 +578,6 @@ type RuntimeCandidate = {
   sourceElements: RuntimeSourceElements | null;
   registrationCleanup: () => void;
   loaded: boolean;
-  outcomeReported: boolean;
   previousPendingSelection: HtmlCanvasSelection | null;
   previousPendingToolbarVisible: boolean;
   viewportSnapshot: RuntimeViewportSnapshot;
@@ -586,6 +594,12 @@ type RuntimeCandidate = {
   ) => void;
   handoffScrollCleanup: () => void;
   previousActive: RuntimeActiveFrameSnapshot;
+};
+
+type RuntimeCandidateTransfer = {
+  pendingSelection: HtmlCanvasSelection | null;
+  pendingToolbarVisible: boolean;
+  pendingNativeEditResume: PendingNativeEditResume | null;
 };
 
 type RuntimeHandoffScrollChannel = "frame" | "shared";
@@ -1290,6 +1304,26 @@ function cloneActiveTextRange(
   };
 }
 
+function textRangeMatchesTarget(
+  range: ActiveTextRange,
+  target: HtmlCanvasSelection | null,
+): boolean {
+  if (!target) return false;
+  return Boolean(
+    range.target.id === target.id
+    || (
+      range.target.elementId
+      && target.elementId
+      && range.target.elementId === target.elementId
+    )
+    || (
+      range.target.nodeId
+      && target.nodeId
+      && range.target.nodeId === target.nodeId
+    )
+  );
+}
+
 type NativeEditFenceBookmark = {
   fenceId: number;
   target: HtmlCanvasSelection;
@@ -1303,6 +1337,11 @@ type NativeEditFenceBookmark = {
 type PendingNativeEditResume = NativeEditFenceBookmark & {
   expectedFrameGeneration: number;
   sourceRevision: string;
+  candidateId?: string;
+};
+
+type StartNativeEditingOptions = {
+  runtimeResumeCandidate?: EditRuntimeCandidateIdentity;
 };
 
 type NativeFormatShortcut = "bold" | "italic" | "underline";
@@ -1732,8 +1771,13 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   const lastEmittedHtmlRef = useRef<string | null>(null);
   const pendingHtmlEchoesRef = useRef<string[]>([]);
   const renderedSourceHtmlRef = useRef<string | null>(null);
+  const renderedProjectionSha256Ref = useRef("");
   const frameSourceHtmlRef = useRef(html);
   const sourceIndexRef = useRef<SourceIndexValue | null>(null);
+  const latestSourceProjectionRef = useRef<{
+    source: string;
+    sourceIndex: SourceIndexValue | null;
+  }>({ source: html, sourceIndex: null });
   const pendingSelectionRef = useRef<HtmlCanvasSelection | null>(null);
   const pendingToolbarVisibleRef = useRef(false);
   const pendingFrameRestoreEpochRef = useRef(0);
@@ -1758,6 +1802,11 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   const runtimeSourceElementsRef = useRef<RuntimeSourceElements | null>(null);
   const runtimeSourceRegistrationCleanupRef = useRef<() => void>(() => undefined);
   const runtimeNeedsRerenderRef = useRef(false);
+  const lastEditRuntimeGrantRef = useRef(editRuntimeGrant);
+  const runtimeCandidateControllerRef = useRef<EditRuntimeCandidateController | null>(null);
+  if (!runtimeCandidateControllerRef.current) {
+    runtimeCandidateControllerRef.current = new EditRuntimeCandidateController();
+  }
   const runtimeCandidateRef = useRef<RuntimeCandidate | null>(null);
   const runtimeCandidateIframeRef = useRef<HTMLIFrameElement | null>(null);
   const runtimePromotionRef = useRef<RuntimeCandidate | null>(null);
@@ -1778,16 +1827,21 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     candidate: RuntimeCandidate,
     outcome: Exclude<HtmlCanvasEditRuntimeLoadOutcome, "ready">,
   ) => boolean>(() => false);
-  const cancelRuntimeCandidateRef = useRef<(outcome?: Exclude<HtmlCanvasEditRuntimeLoadOutcome, "ready">) => void>(
-    () => undefined,
+  const cancelRuntimeCandidateRef = useRef<(
+    candidate: RuntimeCandidate,
+    outcome?: Exclude<HtmlCanvasEditRuntimeLoadOutcome, "ready">,
+    transfer?: RuntimeCandidateTransfer | null,
+  ) => boolean>(
+    () => false,
   );
-  const startRuntimeCandidateRef = useRef<(source: string, options?: { runtimeFallback?: boolean }) => boolean>(
+  const startRuntimeCandidateRef = useRef<(source: string) => boolean>(
     () => false,
   );
   const connectRuntimeCandidateRef = useRef<(
     iframe: HTMLIFrameElement,
     generation: number,
   ) => boolean>(() => false);
+  const updateOverlayPositionRef = useRef<() => void>(() => undefined);
   const imperativeLockRef = useRef(false);
   const lastPropRef = useRef({ html, baseHref: documentBaseHref });
   const semanticRevisionRef = useRef(semanticRevision);
@@ -2033,6 +2087,84 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     return () => window.clearTimeout(timer);
   }, [editFeedback, editFeedbackPaused]);
 
+  const syncRuntimeCandidateDiagnostics = useCallback(() => {
+    const root = containerRef.current;
+    if (!root) return;
+    const snapshot = runtimeCandidateControllerRef.current!.snapshot;
+    const latest = snapshot.latestCandidate;
+    const lastKnownGood = snapshot.lastKnownGood;
+    if (latest) {
+      root.setAttribute("data-runtime-candidate-id", latest.candidateId);
+      root.setAttribute("data-runtime-candidate-generation", String(latest.generation));
+      root.setAttribute("data-runtime-candidate-source-revision", latest.sourceRevision);
+      root.setAttribute("data-runtime-candidate-phase", snapshot.latestPhase || "preparing");
+    } else {
+      root.removeAttribute("data-runtime-candidate-id");
+      root.removeAttribute("data-runtime-candidate-generation");
+      root.removeAttribute("data-runtime-candidate-source-revision");
+      root.removeAttribute("data-runtime-candidate-phase");
+    }
+    if (lastKnownGood) {
+      root.setAttribute("data-runtime-last-known-good-id", lastKnownGood.candidateId);
+      root.setAttribute(
+        "data-runtime-last-known-good-generation",
+        String(lastKnownGood.generation),
+      );
+      root.setAttribute(
+        "data-runtime-last-known-good-source-revision",
+        lastKnownGood.sourceRevision,
+      );
+    } else {
+      root.removeAttribute("data-runtime-last-known-good-id");
+      root.removeAttribute("data-runtime-last-known-good-generation");
+      root.removeAttribute("data-runtime-last-known-good-source-revision");
+    }
+    root.setAttribute(
+      "data-runtime-ignored-callback-count",
+      String(snapshot.ignoredCallbackCount),
+    );
+  }, []);
+
+  const beginRuntimeAttempt = useCallback((
+    generation: number,
+    sourceRevision: string,
+  ): EditRuntimeCandidateIdentity => {
+    const { identity } = runtimeCandidateControllerRef.current!.beginCandidate({
+      generation,
+      sourceRevision,
+    });
+    syncRuntimeCandidateDiagnostics();
+    return identity;
+  }, [syncRuntimeCandidateDiagnostics]);
+
+  const endRuntimeNativeEdit = useCallback(() => {
+    runtimeCandidateControllerRef.current!.endNativeEdit();
+    syncRuntimeCandidateDiagnostics();
+  }, [syncRuntimeCandidateDiagnostics]);
+
+  const completeRuntimeAttempt = useCallback((
+    frame: RuntimeFrameContext,
+    outcome: HtmlCanvasEditRuntimeLoadOutcome,
+  ): EditRuntimeCandidateSettlement => {
+    const settlement = runtimeCandidateControllerRef.current!.settle(
+      frame.attempt,
+      outcome,
+    );
+    syncRuntimeCandidateDiagnostics();
+    if (!settlement.accepted) return settlement;
+    frame.settled = true;
+    onEditRuntimeLoadOutcomeRef.current?.(
+      frame.grant,
+      outcome,
+      frame.attempt,
+      {
+        preserveLastKnownGood: settlement.preserveLastKnownGood,
+        shouldUseStaticFallback: settlement.shouldUseStaticFallback,
+      },
+    );
+    return settlement;
+  }, [syncRuntimeCandidateDiagnostics]);
+
   const loadFrameSource = useCallback((
     source: string,
     options: {
@@ -2048,7 +2180,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       // A newer authoritative source update may arrive during the final handoff
       // frame. Roll back the not-yet-settled promotion before starting that load
       // so the retiring document remains the only live active context.
-      rollbackRuntimePromotionRef.current(promotedCandidate, "failed");
+      rollbackRuntimePromotionRef.current(promotedCandidate, "superseded");
     }
     const currentRuntime = runtimeFrameRef.current;
     const runtimeIsCurrent = Boolean(
@@ -2071,7 +2203,10 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       )
       && startRuntimeCandidateRef.current(source)
     ) return;
-    cancelRuntimeCandidateRef.current();
+    const pendingCandidate = runtimeCandidateRef.current;
+    if (pendingCandidate) {
+      cancelRuntimeCandidateRef.current(pendingCandidate, "superseded");
+    }
     performance.mark("pageroot:canvas:load-start");
     const frameView = iframeRef.current?.contentWindow;
     pendingFrameViewportRef.current = options.preserveViewport && frameView
@@ -2114,7 +2249,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     const retiringRuntimeFrame = runtimeFrameRef.current;
     runtimeFrameRef.current = null;
     if (retiringRuntimeFrame && !retiringRuntimeFrame.settled) {
-      onEditRuntimeLoadOutcomeRef.current?.(retiringRuntimeFrame.grant, "failed");
+      completeRuntimeAttempt(retiringRuntimeFrame, "superseded");
     }
     pendingFrameRestoreEpochRef.current += 1;
     if (!reuseCandidate) {
@@ -2137,12 +2272,14 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     try {
       const sourceIndex = buildSourceIndex(source);
       sourceIndexRef.current = sourceIndex;
+      latestSourceProjectionRef.current = { source, sourceIndex };
       instrumentedSource = instrumentPreviewHtml(sourceIndex, {
         attributeName: SOURCE_NODE_ATTRIBUTE,
       }).html;
       setEditFeedback(null);
     } catch (cause) {
       sourceIndexRef.current = null;
+      latestSourceProjectionRef.current = { source, sourceIndex: null };
       void cause;
       const message = "页面仍可正常浏览。请重新载入后再试，或添加评论说明要改什么。";
       setEditFeedback({
@@ -2162,6 +2299,11 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     let verificationToken = token;
     let prepared: string | null = null;
     if (runtimeGrant) {
+      const attempt = beginRuntimeAttempt(
+        nextFrameGeneration,
+        sourceIndex?.sourceSha256 ?? runtimeGrant.sourceSha256,
+      );
+      onEditRuntimeLoadStartRef.current?.(runtimeGrant, attempt);
       if (
         sourceIndex?.source === source
         && editRuntimeProgramIdentity(source) === runtimeGrant.programIdentity
@@ -2185,6 +2327,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
             verificationToken = runtimeToken;
             runtimeNeedsRerenderRef.current = false;
             runtimeFrame = {
+              attempt,
               grant: runtimeGrant,
               verificationToken: runtimeToken,
               elementGeneration: nextFrameGeneration,
@@ -2195,7 +2338,14 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         }
       }
       if (!runtimeFrame) {
-        onEditRuntimeLoadOutcomeRef.current?.(runtimeGrant, "rejected");
+        completeRuntimeAttempt({
+          attempt,
+          grant: runtimeGrant,
+          verificationToken,
+          elementGeneration: nextFrameGeneration,
+          activation: "failed",
+          settled: false,
+        }, "rejected");
       }
     }
     if (!prepared) {
@@ -2212,6 +2362,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     expectedFrameTokenRef.current = verificationToken;
     expectedFrameHtmlRef.current = prepared;
     renderedSourceHtmlRef.current = null;
+    renderedProjectionSha256Ref.current = "";
     containerRef.current?.removeAttribute("data-runtime-bootstrap-count");
     runtimeFrameRef.current = runtimeFrame;
     if (runtimeFrame) {
@@ -2232,6 +2383,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           const iframe = iframeRef.current;
           if (
             !current
+            || !runtimeCandidateControllerRef.current!.accepts(runtimeFrame.attempt)
             || current.elementGeneration !== runtimeFrame.elementGeneration
             || identity?.sessionId !== runtimeFrame.grant.sessionId
             || current.grant.executionId !== runtimeFrame.grant.executionId
@@ -2260,6 +2412,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
             const activeIframe = iframeRef.current;
             if (
               !Array.isArray(candidates)
+              || !runtimeCandidateControllerRef.current!.accepts(runtimeFrame.attempt)
               || !activeIframe
               || active?.elementGeneration !== runtimeFrame.elementGeneration
               || active.grant.executionId !== runtimeFrame.grant.executionId
@@ -2307,6 +2460,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
             const activeIframe = iframeRef.current;
             if (
               active !== runtimeFrame
+              || !runtimeCandidateControllerRef.current!.accepts(runtimeFrame.attempt)
               || active.activation !== "pending"
               || sourceWindow !== activeIframe?.contentWindow
             ) return false;
@@ -2335,7 +2489,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           }
         };
       }
-      onEditRuntimeLoadStartRef.current?.(runtimeFrame.grant);
     }
     const iframe = iframeRef.current;
     if (reuseCandidate && iframe && prepared && !runtimeFrame) {
@@ -2381,7 +2534,13 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     } else {
       replaceFrameElement();
     }
-  }, [documentBaseHref, editRuntimeGrant, staticAssetBaseHref]);
+  }, [
+    beginRuntimeAttempt,
+    completeRuntimeAttempt,
+    documentBaseHref,
+    editRuntimeGrant,
+    staticAssetBaseHref,
+  ]);
 
   const clearRuntimeRetiringFrame = useCallback(() => {
     const cleanupFrame = runtimeRetiringCleanupFrameRef.current;
@@ -2407,33 +2566,49 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   }, []);
 
   const cancelRuntimeCandidate = useCallback((
+    candidate: RuntimeCandidate,
     outcome: Exclude<HtmlCanvasEditRuntimeLoadOutcome, "ready"> = "failed",
-  ) => {
-    const candidate = runtimeCandidateRef.current;
-    if (!candidate) return;
+    transfer: RuntimeCandidateTransfer | null = null,
+  ): boolean => {
+    if (
+      runtimeCandidateRef.current !== candidate
+      || !runtimeCandidateControllerRef.current!.accepts(candidate.attempt)
+    ) {
+      syncRuntimeCandidateDiagnostics();
+      return false;
+    }
     candidate.handoffScrollCleanup();
     candidate.handoffScrollCleanup = () => undefined;
     candidate.registrationCleanup();
-    if (candidate.runtimeFrame && !candidate.outcomeReported) {
-      candidate.outcomeReported = true;
-      onEditRuntimeLoadOutcomeRef.current?.(candidate.runtimeFrame.grant, outcome);
-    }
-    pendingSelectionRef.current = candidate.previousPendingSelection;
-    pendingToolbarVisibleRef.current = candidate.previousPendingToolbarVisible;
-    // A candidate that is cancelled before it reaches active is not a valid
-    // internal checkpoint continuation. Do not let its stale resume request
-    // turn the previous frame back into a contenteditable surface.
-    pendingNativeEditResumeRef.current = null;
+    if (candidate.runtimeFrame) completeRuntimeAttempt(candidate.runtimeFrame, outcome);
+    else runtimeCandidateControllerRef.current!.settle(candidate.attempt, outcome);
+    pendingSelectionRef.current = transfer
+      ? transfer.pendingSelection
+      : candidate.previousPendingSelection;
+    const restoredToolbarVisible = transfer?.pendingToolbarVisible ?? (
+      candidate.previousPendingToolbarVisible || Boolean(
+        candidate.previousActive.toolbarVisible
+        && candidate.previousActive.selectedSourceSelection
+      )
+    );
+    pendingToolbarVisibleRef.current = restoredToolbarVisible;
+    setToolbarVisible(restoredToolbarVisible);
+    // Supersession transfers the latest intent explicitly. Other terminal
+    // outcomes drop it so a failed candidate cannot resume editing in the
+    // previous Document with a stale generation/revision lease.
+    pendingNativeEditResumeRef.current = transfer?.pendingNativeEditResume ?? null;
     runtimeCandidateRef.current = null;
     runtimeCandidateIframeRef.current = null;
     setRuntimeCandidateRender(null);
     containerRef.current?.removeAttribute("data-runtime-handoff");
-  }, []);
+    requestAnimationFrame(() => updateOverlayPositionRef.current());
+    syncRuntimeCandidateDiagnostics();
+    return true;
+  }, [completeRuntimeAttempt, syncRuntimeCandidateDiagnostics]);
   cancelRuntimeCandidateRef.current = cancelRuntimeCandidate;
 
   const startRuntimeCandidate = useCallback((
     source: string,
-    options: { runtimeFallback?: boolean } = {},
   ): boolean => {
     const currentRuntime = runtimeFrameRef.current;
     if (
@@ -2445,10 +2620,27 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     if (runtimeRetiringGenerationRef.current !== null) {
       clearRuntimeRetiringFrame();
     }
-    cancelRuntimeCandidateRef.current();
-    const previousPendingSelection = pendingSelectionRef.current;
-    const previousPendingToolbarVisible = pendingToolbarVisibleRef.current;
-    const previousPendingNativeEditResume = pendingNativeEditResumeRef.current;
+    const supersededCandidate = runtimeCandidateRef.current;
+    const supersededTransfer: RuntimeCandidateTransfer | null = supersededCandidate
+      ? {
+          pendingSelection: pendingSelectionRef.current,
+          pendingToolbarVisible: pendingToolbarVisibleRef.current,
+          pendingNativeEditResume: pendingNativeEditResumeRef.current,
+        }
+      : null;
+    if (supersededCandidate) {
+      cancelRuntimeCandidateRef.current(
+        supersededCandidate,
+        "superseded",
+        supersededTransfer,
+      );
+    }
+    const previousPendingSelection = supersededTransfer?.pendingSelection
+      ?? pendingSelectionRef.current;
+    const previousPendingToolbarVisible = supersededTransfer?.pendingToolbarVisible
+      ?? pendingToolbarVisibleRef.current;
+    const previousPendingNativeEditResume = supersededTransfer?.pendingNativeEditResume
+      ?? pendingNativeEditResumeRef.current;
     const currentFrame = iframeRef.current;
     const activeEditForViewport = activeNativeEditRef.current as ActiveNativeEdit | null;
     const sharedScrollElement = containerRef.current?.closest<HTMLElement>(
@@ -2488,10 +2680,12 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     let sourceMapFailed = false;
     try {
       sourceIndex = buildSourceIndex(source);
+      latestSourceProjectionRef.current = { source, sourceIndex };
       instrumentedSource = instrumentPreviewHtml(sourceIndex, {
         attributeName: SOURCE_NODE_ATTRIBUTE,
       }).html;
     } catch (cause) {
+      latestSourceProjectionRef.current = { source, sourceIndex: null };
       setEditFeedback({
         code: "canvas_c01_source_map",
         title: "暂时不能直接编辑这个页面",
@@ -2508,11 +2702,21 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     if (sourceMapFailed) {
       pendingSelectionRef.current = previousPendingSelection;
       pendingToolbarVisibleRef.current = previousPendingToolbarVisible;
+      pendingNativeEditResumeRef.current = null;
       containerRef.current?.removeAttribute("data-runtime-handoff");
       return true;
     }
 
-    const runtimeGrant = options.runtimeFallback ? null : editRuntimeGrant;
+    const runtimeGrant = editRuntimeGrant;
+    if (!runtimeGrant || !sourceIndex) {
+      pendingSelectionRef.current = previousPendingSelection;
+      pendingToolbarVisibleRef.current = previousPendingToolbarVisible;
+      pendingNativeEditResumeRef.current = null;
+      containerRef.current?.removeAttribute("data-runtime-handoff");
+      return true;
+    }
+    const attempt = beginRuntimeAttempt(candidateGeneration, sourceIndex.sourceSha256);
+    onEditRuntimeLoadStartRef.current?.(runtimeGrant, attempt);
     let runtimeFrame: RuntimeFrameContext | null = null;
     let verificationToken = `frame_${candidateGeneration}_${
       globalThis.crypto?.randomUUID?.()
@@ -2541,6 +2745,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         if (prepared) {
           verificationToken = runtimeToken;
           runtimeFrame = {
+            attempt,
             grant: runtimeGrant,
             verificationToken: runtimeToken,
             elementGeneration: candidateGeneration,
@@ -2550,22 +2755,18 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         }
       }
     }
-    if (runtimeGrant && !runtimeFrame) {
-      onEditRuntimeLoadOutcomeRef.current?.(runtimeGrant, "rejected");
-    }
-    if (!prepared) {
-      prepared = prepareCanvasFrameDocument(instrumentedSource, verificationToken, {
-        mode: "static",
-        baseUrl: staticAssetBaseHref,
-        editorStyles: EDITOR_DOCUMENT_STYLES,
-      }) || prepareVerifiedFrameDocument(instrumentedSource, verificationToken, {
-        baseUrl: staticAssetBaseHref,
-        editorStyles: EDITOR_DOCUMENT_STYLES,
-      });
-    }
-    if (!prepared) {
+    if (!runtimeFrame || !prepared) {
+      completeRuntimeAttempt({
+        attempt,
+        grant: runtimeGrant,
+        verificationToken,
+        elementGeneration: candidateGeneration,
+        activation: "failed",
+        settled: false,
+      }, "rejected");
       pendingSelectionRef.current = previousPendingSelection;
       pendingToolbarVisibleRef.current = previousPendingToolbarVisible;
+      pendingNativeEditResumeRef.current = null;
       containerRef.current?.removeAttribute("data-runtime-handoff");
       setEditFeedback({
         code: "canvas_c01_source_map",
@@ -2582,12 +2783,14 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       pendingNativeEditResumeRef.current = {
         ...pendingNativeEditResumeRef.current,
         expectedFrameGeneration: candidateGeneration,
+        candidateId: attempt.candidateId,
         sourceRevision: sourceIndex?.sourceSha256
           ?? pendingNativeEditResumeRef.current.sourceRevision,
       };
     }
 
     const candidate: RuntimeCandidate = {
+      attempt,
       source,
       sourceIndex,
       prepared,
@@ -2601,7 +2804,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       sourceElements: null,
       registrationCleanup: () => undefined,
       loaded: false,
-      outcomeReported: false,
       previousPendingSelection,
       previousPendingToolbarVisible,
       viewportSnapshot,
@@ -2624,6 +2826,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         expectedFrameHtml: expectedFrameHtmlRef.current,
         expectedFrameToken: expectedFrameTokenRef.current,
         renderedSourceHtml: renderedSourceHtmlRef.current,
+        renderedProjectionSha256: renderedProjectionSha256Ref.current,
         appliedPageViewContext: appliedPageViewContextRef.current,
         activeFrameConnectionPending: activeFrameConnectionPendingRef.current,
         runtimeNeedsRerender: runtimeNeedsRerenderRef.current,
@@ -2710,6 +2913,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           const iframe = runtimeCandidateIframeRef.current;
           if (
             activeCandidate !== candidate
+            || !runtimeCandidateControllerRef.current!.accepts(candidate.attempt)
             || identity?.sessionId !== runtimeFrame.grant.sessionId
             || identity?.executionId !== runtimeFrame.grant.executionId
             || identity?.frameToken !== runtimeFrame.verificationToken
@@ -2735,6 +2939,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
             const activeIframe = runtimeCandidateIframeRef.current;
             if (
               !Array.isArray(candidates)
+              || !runtimeCandidateControllerRef.current!.accepts(candidate.attempt)
               || currentCandidate !== candidate
               || !activeIframe
               || sourceWindow !== activeIframe?.contentWindow
@@ -2780,6 +2985,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
             const activeIframe = runtimeCandidateIframeRef.current;
             if (
               currentCandidate !== candidate
+              || !runtimeCandidateControllerRef.current!.accepts(candidate.attempt)
               || runtimeFrame.activation !== "pending"
               || sourceWindow !== activeIframe?.contentWindow
             ) return false;
@@ -2808,22 +3014,26 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           }
         };
       }
-      onEditRuntimeLoadStartRef.current?.(runtimeFrame.grant);
     }
     runtimeCandidateRef.current = candidate;
     setRuntimeCandidateRender(candidate.render);
     return true;
   }, [
+    beginRuntimeAttempt,
     clearRuntimeRetiringFrame,
+    completeRuntimeAttempt,
     documentBaseHref,
     editRuntimeGrant,
     frameRender,
-    staticAssetBaseHref,
   ]);
   startRuntimeCandidateRef.current = startRuntimeCandidate;
 
   const finalizeRuntimeCandidatePromotion = useCallback((candidate: RuntimeCandidate) => {
-    if (runtimePromotionRef.current !== candidate) return;
+    if (
+      runtimePromotionRef.current !== candidate
+      || runtimeCandidateControllerRef.current!.snapshot.lastKnownGood?.candidateId
+        !== candidate.attempt.candidateId
+    ) return;
     // The old active browsing context remains authoritative until the new frame
     // has connected and restored the logical selection. Release its listeners
     // and runtime registration only after that handoff point.
@@ -2866,6 +3076,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       activeTextRangeRef.current = null;
       setIsEditing(false);
       setHasTextRange(false);
+      runtimeCandidateControllerRef.current!.endNativeEdit();
     }
     const currentCleanup = cleanupFrameRef.current;
     if (currentCleanup !== previous.cleanupFrame) currentCleanup();
@@ -2876,11 +3087,8 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     candidate.handoffScrollCleanup();
     candidate.handoffScrollCleanup = () => undefined;
     candidate.registrationCleanup();
-    if (candidate.runtimeFrame && !candidate.outcomeReported) {
-      candidate.runtimeFrame.settled = true;
-      candidate.outcomeReported = true;
-      onEditRuntimeLoadOutcomeRef.current?.(candidate.runtimeFrame.grant, outcome);
-    }
+    if (candidate.runtimeFrame) completeRuntimeAttempt(candidate.runtimeFrame, outcome);
+    else runtimeCandidateControllerRef.current!.settle(candidate.attempt, outcome);
     runtimeCandidateRef.current = null;
     runtimeCandidateIframeRef.current = null;
     runtimePromotionRef.current = null;
@@ -2893,12 +3101,26 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       previous.frameGeneration,
     );
     nativeDomGenerationRef.current = previous.nativeDomGeneration;
-    sourceIndexRef.current = previous.sourceIndex;
-    frameSourceHtmlRef.current = previous.frameSourceHtml;
+    const latestSourceProjection = latestSourceProjectionRef.current;
+    const previousProjectionIsLatest = Boolean(
+      previous.sourceIndex
+      && latestSourceProjection.sourceIndex
+      && previous.sourceIndex.sourceSha256 === latestSourceProjection.sourceIndex.sourceSha256
+      && previous.frameSourceHtml === latestSourceProjection.source,
+    );
+    sourceIndexRef.current = previousProjectionIsLatest
+      ? previous.sourceIndex
+      : latestSourceProjection.sourceIndex;
+    frameSourceHtmlRef.current = previousProjectionIsLatest
+      ? previous.frameSourceHtml
+      : latestSourceProjection.source;
     frameWrittenHtmlRef.current = previous.frameWrittenHtml;
     expectedFrameHtmlRef.current = previous.expectedFrameHtml;
     expectedFrameTokenRef.current = previous.expectedFrameToken;
-    renderedSourceHtmlRef.current = previous.renderedSourceHtml;
+    renderedSourceHtmlRef.current = previousProjectionIsLatest
+      ? previous.renderedSourceHtml
+      : null;
+    renderedProjectionSha256Ref.current = previous.renderedProjectionSha256;
     appliedPageViewContextRef.current = previous.appliedPageViewContext;
     activeFrameConnectionPendingRef.current = previous.activeFrameConnectionPending;
     runtimeNeedsRerenderRef.current = previous.runtimeNeedsRerender;
@@ -2947,12 +3169,19 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       setToolbarVisible(previous.toolbarVisible);
       setHasTextRange(Boolean(previous.activeTextRange));
     });
+    syncRuntimeCandidateDiagnostics();
     return true;
-  }, []);
+  }, [completeRuntimeAttempt, syncRuntimeCandidateDiagnostics]);
   rollbackRuntimePromotionRef.current = rollbackRuntimeCandidatePromotion;
 
   const promoteRuntimeCandidate = useCallback((candidate: RuntimeCandidate): boolean => {
-    if (runtimeCandidateRef.current !== candidate) return false;
+    if (
+      runtimeCandidateRef.current !== candidate
+      || !runtimeCandidateControllerRef.current!.accepts(candidate.attempt)
+    ) {
+      syncRuntimeCandidateDiagnostics();
+      return false;
+    }
     const iframe = runtimeCandidateIframeRef.current;
     const documentNode = iframe?.contentDocument;
     if (!iframe || !documentNode?.documentElement) return false;
@@ -2974,6 +3203,11 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     } catch {
       return false;
     }
+    if (!runtimeCandidateControllerRef.current!.beginPositioning(candidate.attempt)) {
+      syncRuntimeCandidateDiagnostics();
+      return false;
+    }
+    syncRuntimeCandidateDiagnostics();
 
     const promotedGeneration = candidate.render.elementGeneration;
     const previous = candidate.previousActive;
@@ -3023,26 +3257,17 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     }
     if (!connectFrameRef.current(promotedIframe, promotedGeneration)) {
       rollbackRuntimePromotionRef.current(candidate, "failed");
-      if (candidate.runtimeFrame) {
-        startRuntimeCandidateRef.current(candidate.source, { runtimeFallback: true });
-      }
       return false;
     }
     return true;
-  }, []);
+  }, [syncRuntimeCandidateDiagnostics]);
 
   const failRuntimeCandidate = useCallback((
     candidate: RuntimeCandidate,
     outcome: Exclude<HtmlCanvasEditRuntimeLoadOutcome, "ready">,
   ): boolean => {
     if (runtimeCandidateRef.current !== candidate) return false;
-    const source = candidate.source;
-    cancelRuntimeCandidateRef.current(outcome);
-    if (candidate.runtimeFrame) {
-      startRuntimeCandidateRef.current(source, { runtimeFallback: true });
-      return true;
-    }
-    return false;
+    return cancelRuntimeCandidateRef.current(candidate, outcome);
   }, []);
   failRuntimeCandidateActivationRef.current = failRuntimeCandidate;
 
@@ -3053,6 +3278,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     const candidate = runtimeCandidateRef.current;
     if (
       !candidate
+      || !runtimeCandidateControllerRef.current!.accepts(candidate.attempt)
       || candidate.render.elementGeneration !== candidateGeneration
       || iframe !== runtimeCandidateIframeRef.current
     ) return false;
@@ -3069,8 +3295,12 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       || (candidate.runtimeFrame && candidate.runtimeFrame.activation !== "ready")
       || (candidate.runtimeFrame && !candidate.sourceElements)
     ) return false;
+    if (!runtimeCandidateControllerRef.current!.canPromote(candidate.attempt)) {
+      syncRuntimeCandidateDiagnostics();
+      return false;
+    }
     return promoteRuntimeCandidate(candidate);
-  }, [promoteRuntimeCandidate]);
+  }, [promoteRuntimeCandidate, syncRuntimeCandidateDiagnostics]);
   connectRuntimeCandidateRef.current = connectRuntimeCandidate;
 
   const fallBackToStaticRuntimeFrame = useCallback((
@@ -3084,8 +3314,10 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       || current.elementGeneration !== frame.elementGeneration
       || !sameRuntimeGrant(current.grant, frame.grant)
     ) return false;
-    current.settled = true;
+    const settlement = completeRuntimeAttempt(current, outcome);
+    if (!settlement.accepted) return false;
     runtimeFrameRef.current = null;
+    if (!settlement.shouldUseStaticFallback) return true;
     // A rejected or timed-out program never replaces this iframe with another
     // executable document. The same authoritative source resumes as static.
     loadFrameSource(frameSourceHtmlRef.current, {
@@ -3093,9 +3325,8 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       immediate: true,
       forceStatic: true,
     });
-    onEditRuntimeLoadOutcomeRef.current?.(frame.grant, outcome);
     return true;
-  }, [loadFrameSource]);
+  }, [completeRuntimeAttempt, loadFrameSource]);
   failActiveRuntimeFrameRef.current = fallBackToStaticRuntimeFrame;
 
   const updateSelectedStyle = useCallback(() => {
@@ -3210,6 +3441,26 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     const frameOffsetTop = iframeRect.top - containerRect.top;
     const frameHeight = iframe.clientHeight;
     const frameWidth = iframe.clientWidth;
+    const positionSelectedOverlay = (): boolean => {
+      if (!element?.isConnected) return false;
+      const elementRect = element.getBoundingClientRect();
+      if (elementRect.bottom < 0 || elementRect.top > frameHeight) return false;
+      const elementLeft = frameOffsetLeft + elementRect.left;
+      const elementTop = frameOffsetTop + elementRect.top;
+      const toolbarWidth = toolbarRef.current?.offsetWidth
+        || Math.min(700, Math.max(120, containerRect.width - 16));
+      const toolbarHeight = toolbarRef.current?.offsetHeight || 42;
+      const maxToolbarLeft = Math.max(8, containerRect.width - toolbarWidth - 8);
+      const aboveTop = elementTop - toolbarHeight - 10;
+      const toolbarTop = aboveTop >= 8
+        ? aboveTop
+        : elementTop + elementRect.height + 10;
+      setOverlayPosition({
+        toolbarLeft: Math.max(8, Math.min(maxToolbarLeft, elementLeft)),
+        toolbarTop: Math.max(8, toolbarTop),
+      });
+      return true;
+    };
     const scrollingElement = documentNode.scrollingElement || documentNode.documentElement;
     const frameView = documentNode.defaultView;
     const scrollTop = Math.max(
@@ -3237,7 +3488,18 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         clientHeight: frameHeight,
         targets: [],
       });
-      if (!preservePreparedFrameOverlay) setOverlayPosition(null);
+      const selectedSourceElement = selectedElementRef.current;
+      const lastKnownGoodSelectionProven = Boolean(
+        runtimeFrameRef.current?.settled
+        && selectedSourceElement?.isConnected
+        && currentRuntimeSourceProof()?.(selectedSourceElement),
+      );
+      if (
+        !lastKnownGoodSelectionProven
+        || !positionSelectedOverlay()
+      ) {
+        if (!preservePreparedFrameOverlay) setOverlayPosition(null);
+      }
       setInsertionPoints([]);
       setCommentMarkers([]);
       insertionPointsRef.current = [];
@@ -3278,28 +3540,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       return;
     }
 
-    if (element?.isConnected) {
-      const elementRect = element.getBoundingClientRect();
-      const isVisible = elementRect.bottom >= 0 && elementRect.top <= frameHeight;
-      if (isVisible) {
-        const elementLeft = frameOffsetLeft + elementRect.left;
-        const elementTop = frameOffsetTop + elementRect.top;
-        const toolbarWidth = toolbarRef.current?.offsetWidth
-          || Math.min(700, Math.max(120, containerRect.width - 16));
-        const toolbarHeight = toolbarRef.current?.offsetHeight || 42;
-        const maxToolbarLeft = Math.max(8, containerRect.width - toolbarWidth - 8);
-        const aboveTop = elementTop - toolbarHeight - 10;
-        const toolbarTop = aboveTop >= 8
-          ? aboveTop
-          : elementTop + elementRect.height + 10;
-        setOverlayPosition({
-          toolbarLeft: Math.max(8, Math.min(maxToolbarLeft, elementLeft)),
-          toolbarTop: Math.max(8, toolbarTop),
-        });
-      } else {
-        if (!preservePreparedFrameOverlay) setOverlayPosition(null);
-      }
-    } else {
+    if (!positionSelectedOverlay()) {
       if (!preservePreparedFrameOverlay) setOverlayPosition(null);
     }
 
@@ -3327,6 +3568,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       isProvenSourceElement: currentRuntimeSourceProof(),
     }));
   }, [currentRuntimeSourceProof]);
+  updateOverlayPositionRef.current = updateOverlayPosition;
 
   const observeSelectedElement = useCallback(
     (element: HTMLElement, runtimeGenerated = false) => {
@@ -3545,6 +3787,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       sourceIndexRef.current = result.sourceIndex;
       frameSourceHtmlRef.current = result.html;
       renderedSourceHtmlRef.current = result.html;
+      renderedProjectionSha256Ref.current = result.sourceIndex.sourceSha256;
       containerRef.current?.setAttribute("data-render-verified", "true");
       pendingFrameRestoreEpochRef.current += 1;
       pendingSelectionRef.current = null;
@@ -3626,6 +3869,48 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       recovery: "none",
     });
     onEditBlockedRef.current?.(message);
+  }, []);
+
+  const advanceLastKnownGoodRuntimeProjection = useCallback((
+    source: string,
+    nextIndex: SourceIndexValue,
+  ): boolean => {
+    const activeRuntime = runtimeFrameRef.current;
+    const documentNode = iframeRef.current?.contentDocument;
+    if (
+      !activeRuntime?.settled
+      || activeRuntime.elementGeneration !== frameLoadGenerationRef.current
+      || !documentNode?.documentElement
+    ) return false;
+
+    let stableIdsRebound = false;
+    try {
+      const stableUpdates = refreshStableMountedPreviewSourceNodeIds(
+        documentNode,
+        nextIndex,
+      );
+      const registered = runtimeSourceElementsRef.current;
+      stableUpdates.forEach(({ element, pagerootId, nextNodeId }) => {
+        if (
+          registered?.elements.has(element)
+          && registered.pagerootIds.get(element) === pagerootId
+        ) {
+          element.setAttribute(EDIT_RUNTIME_SOURCE_MARKER_ATTRIBUTE, nextNodeId);
+          registered.markerSourceNodeIds.set(element, nextNodeId);
+        }
+      });
+      stableIdsRebound = true;
+    } catch {
+      // The last-known-good document remains visible. Advancing source
+      // authority below intentionally makes any unproved old mapping
+      // non-editable until a newer candidate succeeds.
+    }
+    sourceIndexRef.current = nextIndex;
+    frameSourceHtmlRef.current = source;
+    latestSourceProjectionRef.current = { source, sourceIndex: nextIndex };
+    renderedSourceHtmlRef.current = null;
+    runtimeNeedsRerenderRef.current = true;
+    return stableIdsRebound;
   }, []);
 
   const applySourceCommand = useCallback((
@@ -3817,6 +4102,10 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         reportBlockedEdit(new Error("宿主状态已锁定，本次画布修改未被接受。"));
         return null;
       }
+      latestSourceProjectionRef.current = {
+        source: result.html,
+        sourceIndex: result.sourceIndex,
+      };
       semanticRevisionRef.current = semanticResult?.nextRevision
         ?? semanticRevisionRef.current + 1;
       if (!blockedDetailAtCommandStart) setEditFeedback(null);
@@ -3927,6 +4216,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         if (!refreshedProjection) {
           nativeEditNeedsReloadRef.current = true;
           renderedSourceHtmlRef.current = null;
+          renderedProjectionSha256Ref.current = "";
           containerRef.current?.setAttribute(
             "data-native-commit-path",
             "v2-text-fragment-empty-fence",
@@ -3961,13 +4251,17 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         activeNativeEdit.projection = refreshedProjection;
         activeNativeEdit.sourceInnerHtml = nextSourceInnerHtml;
         activeNativeEdit.selection = options.islandTextCommit.selection;
-        nativeEditNeedsReloadRef.current = !refreshedMountedSourceIds;
-        renderedSourceHtmlRef.current = refreshedMountedSourceIds
+        const renderedProjectionRemainsExact = Boolean(refreshedMountedSourceIds);
+        nativeEditNeedsReloadRef.current = !renderedProjectionRemainsExact;
+        renderedSourceHtmlRef.current = renderedProjectionRemainsExact
           ? result.html
           : null;
+        renderedProjectionSha256Ref.current = renderedProjectionRemainsExact
+          ? result.sourceIndex.sourceSha256
+          : "";
         containerRef.current?.setAttribute(
           "data-native-commit-path",
-          !refreshedMountedSourceIds
+          !renderedProjectionRemainsExact
             ? activeNativeEdit.mode === "text-fragment"
               ? "v2-text-fragment-fence-deferred"
               : "v2-island-fence-deferred"
@@ -3995,6 +4289,14 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         appliedMutation,
       );
       if (!previewStayedMounted) {
+        const activeRuntime = runtimeFrameRef.current;
+        if (
+          activeRuntime?.settled
+          && activeRuntime.elementGeneration === frameLoadGenerationRef.current
+          && iframeRef.current?.contentDocument
+        ) {
+          advanceLastKnownGoodRuntimeProjection(result.html, result.sourceIndex);
+        }
         const selectionDeleted = mutation.property === "delete";
         pendingSelectionRef.current = selectionDeleted
           ? null
@@ -4032,6 +4334,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       return null;
     }
   }, [
+    advanceLastKnownGoodRuntimeProjection,
     currentRuntimeSourceProof,
     loadFrameSource,
     reportBlockedEdit,
@@ -4216,6 +4519,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     const documentNode = rootElement.ownerDocument;
     currentNativeEditLeaseRef.current = null;
     activeNativeEditRef.current = null;
+    endRuntimeNativeEdit();
     discardPendingNativeCommands("session-ended");
     retainNativeEditFocusRef.current = null;
     installFencedDocumentGuardRef.current(documentNode);
@@ -4243,7 +4547,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       target,
       selection,
     );
-  }, [clearNativeEditCheckpointTimer, discardPendingNativeCommands]);
+  }, [clearNativeEditCheckpointTimer, discardPendingNativeCommands, endRuntimeNativeEdit]);
 
   const restoreRejectedNativeCheckpoint = useCallback((
     active: ActiveNativeEdit,
@@ -4589,6 +4893,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       );
       currentNativeEditLeaseRef.current = null;
       activeNativeEditRef.current = null;
+      endRuntimeNativeEdit();
       discardPendingNativeCommands("session-ended");
       retainNativeEditFocusRef.current = null;
       rootElement.removeAttribute("data-html-canvas-editing");
@@ -4644,6 +4949,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         nativeSessionNeedsCanonicalFenceRef.current = false;
         fencedDocumentCleanupRef.current();
         renderedSourceHtmlRef.current = source;
+        renderedProjectionSha256Ref.current = sourceIndexRef.current?.sourceSha256 ?? "";
       }
       // releaseHost() removes the transient pageroot-text-fragment wrapper.
       // The source parent remains the rebind target for the following style
@@ -4671,6 +4977,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       selectedSourceSelectionRef.current = target;
       selectionElement.setAttribute("data-html-canvas-selected", target.level);
       renderedSourceHtmlRef.current = source;
+      renderedProjectionSha256Ref.current = sourceIndexRef.current?.sourceSha256 ?? "";
       containerRef.current?.setAttribute("data-render-verified", "true");
       setSelection(target);
       setToolbarVisible(true);
@@ -4689,6 +4996,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     checkpointNativeEdit,
     clearNativeEditCheckpointTimer,
     discardPendingNativeCommands,
+    endRuntimeNativeEdit,
     loadFrameSource,
     observeSelectedElement,
     updateMoveAvailability,
@@ -5001,13 +5309,27 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   const startEditing = useCallback((
     caretPoint?: TextCaretPoint,
     restoredSelection?: NativeEditSelection,
+    options: StartNativeEditingOptions = {},
   ): boolean => {
     hoverControllerRef.current?.hide();
     containerRef.current?.setAttribute("data-native-start-status", "starting");
+    containerRef.current?.removeAttribute("data-native-stale-range-discarded");
     containerRef.current?.removeAttribute("data-native-host-mode");
     containerRef.current?.removeAttribute("data-native-event-delivery-mode");
     if (readOnlyRef.current) {
       containerRef.current?.setAttribute("data-native-start-status", "read-only");
+      return false;
+    }
+    const runtimePromotion = runtimePromotionRef.current;
+    const runtimeResumeCandidate = options.runtimeResumeCandidate;
+    if (
+      (runtimePromotion && runtimePromotion.attempt.candidateId !== runtimeResumeCandidate?.candidateId)
+      || (!runtimePromotion && runtimeResumeCandidate)
+    ) {
+      containerRef.current?.setAttribute(
+        "data-native-start-status",
+        "runtime-handoff-positioning",
+      );
       return false;
     }
     const existing = activeNativeEditRef.current;
@@ -5029,7 +5351,22 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       containerRef.current?.setAttribute("data-native-start-status", "runtime-display-only");
       return false;
     }
-    const priorRange = activeTextRangeRef.current;
+    let priorRange = activeTextRangeRef.current;
+    if (
+      priorRange
+      && !textRangeMatchesTarget(priorRange, selectedSourceSelectionRef.current)
+    ) {
+      // Text Selection is disposable presentation. A selection retained from
+      // the previous runtime frame must not block entry into a newly selected
+      // source target after that frame is replaced.
+      priorRange = null;
+      activeTextRangeRef.current = null;
+      setHasTextRange(false);
+      containerRef.current?.setAttribute(
+        "data-native-stale-range-discarded",
+        "target",
+      );
+    }
     const islandHostElement = nativeEditHostForElement(selectedElement, sourceIndex);
     const hintedTextNode = !islandHostElement && caretPoint
       ? directTextNodeAtPoint(
@@ -5103,6 +5440,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     });
     let mountedFragment: ReturnType<typeof mountNativeTextFragmentHost> = null;
     let createdSession: IslandEditingController | null = null;
+    let runtimeNativeEditStarted = false;
     try {
       const rootTargetRef = sourceTargetRefForSelection(target);
       const fragmentTargetRef = fragmentCandidate?.textTargetRef ?? null;
@@ -5113,9 +5451,26 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
             rootTargetRef,
             { allowEmpty: true, ignoreComments: true },
           );
-      const activationLogicalRange = priorRange
-        ? sourceSegmentsToTextRange(projection, priorRange.segments)
-        : null;
+      let activationLogicalRange = null;
+      if (priorRange) {
+        try {
+          activationLogicalRange = sourceSegmentsToTextRange(
+            projection,
+            priorRange.segments,
+          );
+        } catch {
+          // A handoff can preserve a logical target while source offsets and
+          // text-node IDs advance. Discard only that stale range; the current
+          // source target remains eligible for a fresh native edit session.
+          priorRange = null;
+          activeTextRangeRef.current = null;
+          setHasTextRange(false);
+          containerRef.current?.setAttribute(
+            "data-native-stale-range-discarded",
+            "segments",
+          );
+        }
+      }
       let sourceInnerHtml = fragmentCandidate?.sourceInnerHtml ?? "";
       if (mode === "editable-island") {
         const islandCapability = isEditableIslandTarget(
@@ -5334,6 +5689,13 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           affinity: "right",
         },
       };
+      if (!runtimeCandidateControllerRef.current!.beginNativeEdit({
+        candidate: runtimeResumeCandidate ?? null,
+      })) {
+        throw new Error("Runtime handoff is not ready for this native edit transaction.");
+      }
+      runtimeNativeEditStarted = true;
+      syncRuntimeCandidateDiagnostics();
       activeNativeEditRef.current = active;
       retainNativeEditFocusRef.current = null;
       containerRef.current?.removeAttribute("data-edit-block-detail");
@@ -5376,6 +5738,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       containerRef.current?.setAttribute("data-native-start-status", "started");
       return true;
     } catch (cause) {
+      if (runtimeNativeEditStarted) endRuntimeNativeEdit();
       createdSession?.dispose();
       mountedFragment?.release();
       containerRef.current?.setAttribute(
@@ -5388,11 +5751,13 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     }
   }, [
     clearNativeEditCheckpointTimer,
+    endRuntimeNativeEdit,
     finishNativeEditing,
     refreshNativeEditRangeState,
     reportBlockedEdit,
     selectElement,
     selectedElementHasSourceMutationAuthority,
+    syncRuntimeCandidateDiagnostics,
     updateOverlayPosition,
   ]);
 
@@ -5437,6 +5802,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     clearNativeEditCheckpointTimer();
     currentNativeEditLeaseRef.current = null;
     activeNativeEditRef.current = null;
+    endRuntimeNativeEdit();
     discardPendingNativeCommands("session-ended");
     retainNativeEditFocusRef.current = null;
     // Retire the old lease and all native listeners before removing the
@@ -6058,6 +6424,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     clearNativeEditCheckpointTimer();
     currentNativeEditLeaseRef.current = null;
     activeNativeEditRef.current = null;
+    endRuntimeNativeEdit();
     discardPendingNativeCommands("session-ended");
     retainNativeEditFocusRef.current = null;
     installFencedDocumentGuard(documentNode);
@@ -6072,6 +6439,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   }, [
     clearNativeEditCheckpointTimer,
     discardPendingNativeCommands,
+    endRuntimeNativeEdit,
     installFencedDocumentGuard,
   ]);
 
@@ -6144,19 +6512,36 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   }, [loadFrameSource]);
   queueNativeFenceReloadRef.current = queueNativeFenceReload;
 
+  const currentProjectionHashes = useCallback(() => {
+    const workingSourceSha256 = sourceIndexRef.current?.sourceSha256 || "";
+    const renderedProjectionSha256 = renderedProjectionSha256Ref.current;
+    const renderedProjectionStale = workingSourceSha256 !== renderedProjectionSha256;
+    const root = containerRef.current;
+    root?.setAttribute("data-working-source-sha256", workingSourceSha256);
+    root?.setAttribute("data-rendered-projection-sha256", renderedProjectionSha256);
+    root?.setAttribute(
+      "data-rendered-projection-stale",
+      renderedProjectionStale ? "true" : "false",
+    );
+    return {
+      workingSourceSha256,
+      renderedProjectionSha256,
+      renderedProjectionStale,
+      canvasRenderedSha256: renderedProjectionSha256,
+      sourceSha256: workingSourceSha256,
+    };
+  }, []);
+
   const checkpointPendingEdit = useCallback((): HtmlCanvasCommitResult => {
     const committed = checkpointNativeEdit("manual");
-    const sourceIndex = sourceIndexRef.current;
-    const canvasRenderedSha256 = sourceIndex?.sourceSha256 || "";
     return {
       ok: committed.ok,
       html: frameSourceHtmlRef.current,
-      canvasRenderedSha256,
-      sourceSha256: canvasRenderedSha256,
+      ...currentProjectionHashes(),
       pendingMutation: committed.mutation,
       ...(committed.reason ? { reason: committed.reason } : {}),
     };
-  }, [checkpointNativeEdit]);
+  }, [checkpointNativeEdit, currentProjectionHashes]);
 
   const fencePendingEdit = useCallback((
     options: {
@@ -6170,14 +6555,11 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     const committed = checkpointNativeEdit(options.trigger ?? "fence", {
       deferPreviewReconcile: true,
     });
-    const sourceIndex = sourceIndexRef.current;
     if (!committed.ok) {
-      const canvasRenderedSha256 = sourceIndex?.sourceSha256 || "";
       return {
         ok: false,
         html: frameSourceHtmlRef.current,
-        canvasRenderedSha256,
-        sourceSha256: canvasRenderedSha256,
+        ...currentProjectionHashes(),
         pendingMutation: null,
         ...(committed.reason ? { reason: committed.reason } : {}),
       };
@@ -6211,8 +6593,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       return {
         ok: true,
         html: frameSourceHtmlRef.current,
-        canvasRenderedSha256: sourceIndexRef.current?.sourceSha256 || "",
-        sourceSha256: sourceIndexRef.current?.sourceSha256 || "",
+        ...currentProjectionHashes(),
         pendingMutation: committed.mutation,
       };
     }
@@ -6264,11 +6645,15 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     return {
       ok: true,
       html: frameSourceHtmlRef.current,
-      canvasRenderedSha256: sourceIndexRef.current?.sourceSha256 || "",
-      sourceSha256: sourceIndexRef.current?.sourceSha256 || "",
+      ...currentProjectionHashes(),
       pendingMutation: committed.mutation,
     };
-  }, [checkpointNativeEdit, detachNativeEditForFence, queueNativeFenceReload]);
+  }, [
+    checkpointNativeEdit,
+    currentProjectionHashes,
+    detachNativeEditForFence,
+    queueNativeFenceReload,
+  ]);
 
   const commitPendingEdit = useCallback((): HtmlCanvasCommitResult => (
     fencePendingEdit({ resumeEditing: false })
@@ -6322,7 +6707,10 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       // outside the active editable island is unchanged.
       sourceIndexRef.current = nextIndex;
       frameSourceHtmlRef.current = source;
+      latestSourceProjectionRef.current = { source, sourceIndex: nextIndex };
       renderedSourceHtmlRef.current = source;
+      renderedProjectionSha256Ref.current = nextIndex.sourceSha256;
+      runtimeNeedsRerenderRef.current = true;
       pendingFrameRestoreEpochRef.current += 1;
       pendingNativeEditResumeRef.current = null;
       pendingSelectionRef.current = null;
@@ -6376,6 +6764,14 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     selection?: NativeEditSelection | null,
   ): boolean => {
     if (activeNativeEditRef.current) detachNativeEditForFence();
+    const runtimePromotion = runtimePromotionRef.current;
+    if (runtimePromotion) {
+      rollbackRuntimePromotionRef.current(runtimePromotion, "superseded");
+    }
+    const runtimeCandidate = runtimeCandidateRef.current;
+    if (runtimeCandidate) {
+      cancelRuntimeCandidateRef.current(runtimeCandidate, "superseded");
+    }
     const bookmark = pendingHistoryBookmarkRef.current;
     pendingHistoryBookmarkRef.current = null;
     pendingHistoryCanonicalFenceRef.current = false;
@@ -6391,6 +6787,42 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       resumeTarget,
       selection ?? bookmark?.selection,
     )) return true;
+    const activeRuntime = runtimeFrameRef.current;
+    if (
+      activeRuntime?.settled
+      && activeRuntime.elementGeneration === frameLoadGenerationRef.current
+    ) {
+      try {
+        const nextIndex = buildSourceIndex(source);
+        advanceLastKnownGoodRuntimeProjection(source, nextIndex);
+        pendingSelectionRef.current = resumeTarget;
+        pendingToolbarVisibleRef.current = Boolean(resumeTarget);
+        selectedSourceSelectionRef.current = resumeTarget;
+        pendingNativeEditResumeRef.current = bookmark && resumeTarget
+          ? {
+              ...bookmark,
+              fenceId: ++nativeEditFenceSequenceRef.current,
+              target: resumeTarget,
+              selection: selection ?? bookmark.selection,
+              focus: true,
+              expectedFrameGeneration: frameLoadGenerationRef.current + 1,
+              sourceRevision: nextIndex.sourceSha256,
+            }
+          : null;
+        loadFrameSource(source, {
+          preserveViewport: true,
+          forceRuntimeHandoff: true,
+        });
+        containerRef.current?.setAttribute(
+          "data-history-adopt-path",
+          "runtime-candidate",
+        );
+        return true;
+      } catch {
+        // Without a valid source index the existing fail-closed reload path
+        // remains the only safe recovery.
+      }
+    }
     containerRef.current?.setAttribute(
       "data-history-adopt-path",
       "frame-reload-fallback",
@@ -6404,8 +6836,10 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     );
     return true;
   }, [
+    advanceLastKnownGoodRuntimeProjection,
     adoptEditableIslandHistoryInPlace,
     detachNativeEditForFence,
+    loadFrameSource,
     queueNativeFenceReload,
   ]);
 
@@ -6458,6 +6892,9 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     return {
       ok: true,
       html: frozenHtml,
+      workingSourceSha256: committed.workingSourceSha256,
+      renderedProjectionSha256: committed.renderedProjectionSha256,
+      renderedProjectionStale: committed.renderedProjectionStale,
       canvasRenderedSha256: committed.canvasRenderedSha256,
       sourceSha256: committed.sourceSha256,
       pendingMutation: committed.pendingMutation,
@@ -6722,6 +7159,25 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   ]);
 
   useEffect(() => {
+    const previousGrant = lastEditRuntimeGrantRef.current;
+    lastEditRuntimeGrantRef.current = editRuntimeGrant;
+    if (
+      !previewAssetsReady
+      || !frameInitializedRef.current
+      || !editRuntimeGrant
+      || (
+        previousGrant?.sessionId === editRuntimeGrant.sessionId
+        && previousGrant.executionId === editRuntimeGrant.executionId
+      )
+      || sameRuntimeGrant(runtimeFrameRef.current?.grant, editRuntimeGrant)
+    ) return;
+    loadFrameSource(frameSourceHtmlRef.current, {
+      preserveViewport: true,
+      immediate: true,
+    });
+  }, [editRuntimeGrant, loadFrameSource, previewAssetsReady]);
+
+  useEffect(() => {
     const handleWindowResize = () => updateOverlayPosition();
     window.addEventListener("resize", handleWindowResize);
     return () => window.removeEventListener("resize", handleWindowResize);
@@ -6772,6 +7228,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       activeNativeEdit?.session.fenceDispose();
       activeNativeEdit?.releaseHost?.();
       activeNativeEditRef.current = null;
+      endRuntimeNativeEdit();
       discardPendingNativeCommands("unmounted");
       retainNativeEditFocusRef.current = null;
       pendingNativeEditResumeRef.current = null;
@@ -6796,8 +7253,9 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       runtimeSourceRegistrationCleanupRef.current();
       runtimeSourceElementsRef.current = null;
       if (runtimeFrame && !runtimeFrame.settled) {
-        onEditRuntimeLoadOutcomeRef.current?.(runtimeFrame.grant, "failed");
+        completeRuntimeAttempt(runtimeFrame, "superseded");
       }
+      runtimeCandidateControllerRef.current!.reset();
       fencedDocumentCleanupRef.current();
       const activeCleanup = cleanupFrameRef.current;
       activeCleanup();
@@ -6811,7 +7269,12 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       );
       resizeObserverRef.current?.disconnect();
     };
-  }, [clearNativeEditCheckpointTimer, discardPendingNativeCommands]);
+  }, [
+    clearNativeEditCheckpointTimer,
+    completeRuntimeAttempt,
+    discardPendingNativeCommands,
+    endRuntimeNativeEdit,
+  ]);
 
   const connectFrame = useCallback((
     iframe: HTMLIFrameElement,
@@ -6875,6 +7338,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     hoverControllerRef.current?.hide();
     if (!isRuntimePromotion) {
       renderedSourceHtmlRef.current = frameSourceHtmlRef.current;
+      renderedProjectionSha256Ref.current = sourceIndexRef.current?.sourceSha256 ?? "";
       containerRef.current?.setAttribute("data-render-verified", "true");
       performance.mark("pageroot:canvas:render-verified", { detail: Object.freeze({ content: runtimeFrame ? "runtime-loaded" : "static-complete" }) });
       fencedDocumentCleanupRef.current();
@@ -7482,6 +7946,8 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
 
       const isCurrent = () => {
         return runtimePromotionRef.current === candidate
+          && runtimeCandidateControllerRef.current!.snapshot.latestCandidate?.candidateId
+            === candidate.attempt.candidateId
           && iframe === iframeRef.current
           && iframe.contentDocument === documentNode
           && frameLoadGenerationRef.current === connectedFrameGeneration
@@ -7500,10 +7966,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       };
       const failHandoff = () => {
         if (!isCurrent()) return;
-        const rolledBack = rollbackRuntimePromotionRef.current(candidate, "failed");
-        if (rolledBack && candidate.runtimeFrame) {
-          startRuntimeCandidateRef.current(candidate.source, { runtimeFallback: true });
-        }
+        rollbackRuntimePromotionRef.current(candidate, "failed");
       };
       const scheduleNextAttempt = () => {
         if (!isCurrent()) return;
@@ -7670,6 +8133,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           pendingNativeEditResumeRef.current?.fenceId === pendingNativeResume.fenceId
           && pendingNativeResume.expectedFrameGeneration === connectedFrameGeneration
           && pendingNativeResume.sourceRevision === sourceIndexRef.current?.sourceSha256
+          && pendingNativeResume.candidateId === candidate.attempt.candidateId
         );
         if (!resumeIsCurrent) {
           pendingNativeEditResumeRef.current = null;
@@ -7695,7 +8159,11 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           activeTextRangeRef.current = restoredFragmentRange;
           setHasTextRange(Boolean(restoredFragmentRange));
         }
-        const resumed = startEditing(undefined, pendingNativeResume.selection);
+        const resumed = startEditing(
+          undefined,
+          pendingNativeResume.selection,
+          { runtimeResumeCandidate: candidate.attempt },
+        );
         const active = activeNativeEditRef.current;
         if (resumed && active) {
           active.rootElement.focus({ preventScroll: true });
@@ -7833,8 +8301,18 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
             const caretTop = runtimeCaretOffsetY(documentNode, active.rootElement);
             if (
               caretTop === null
-              || !runtimePositionWithinTolerance(caretTop, snapshot.caretOffsetY)
-            ) return false;
+              || (
+                !runtimePositionWithinTolerance(caretTop, snapshot.caretOffsetY)
+                && !runtimeAnchorOffsetIsClamped({
+                  currentScrollTop: frameView.scrollY,
+                  currentAnchorOffsetY: caretTop,
+                  desiredAnchorOffsetY: snapshot.caretOffsetY,
+                  maximumScrollTop: maximumFrameScrollTop(),
+                })
+              )
+            ) {
+              return false;
+            }
           }
         }
         const expectedTop = frameScrollTarget();
@@ -7913,6 +8391,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         if (!validateHandoff()) return false;
         flushSync(() => {
           renderedSourceHtmlRef.current = frameSourceHtmlRef.current;
+          renderedProjectionSha256Ref.current = sourceIndexRef.current?.sourceSha256 ?? "";
           containerRef.current?.setAttribute("data-render-verified", "true");
           performance.mark("pageroot:canvas:render-verified", { detail: Object.freeze({ content: "runtime-loaded" }) });
           updateOverlayPosition({ allowRuntimeHandoff: true });
@@ -7926,9 +8405,9 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           && connectedRuntimeFrame.activation === "ready"
         ) {
           if (!runtimeReadyReportedRef.current.has(connectedRuntimeFrame)) {
+            const settlement = completeRuntimeAttempt(connectedRuntimeFrame, "ready");
+            if (!settlement.accepted) return false;
             runtimeReadyReportedRef.current.add(connectedRuntimeFrame);
-            candidate.outcomeReported = true;
-            onEditRuntimeLoadOutcomeRef.current?.(connectedRuntimeFrame.grant, "ready");
           }
         }
         finalizeRuntimePromotionRef.current(candidate);
@@ -8114,12 +8593,10 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         && connectedRuntimeFrame?.activation === "ready"
       ) {
         if (!runtimeReadyReportedRef.current.has(connectedRuntimeFrame)) {
-          runtimeReadyReportedRef.current.add(connectedRuntimeFrame);
-          const promotedCandidate = runtimePromotionRef.current;
-          if (promotedCandidate?.runtimeFrame === connectedRuntimeFrame) {
-            promotedCandidate.outcomeReported = true;
+          const settlement = completeRuntimeAttempt(connectedRuntimeFrame, "ready");
+          if (settlement.accepted) {
+            runtimeReadyReportedRef.current.add(connectedRuntimeFrame);
           }
-          onEditRuntimeLoadOutcomeRef.current?.(connectedRuntimeFrame.grant, "ready");
         }
         activeFrameConnectionPendingRef.current = false;
       } else if (
@@ -8148,6 +8625,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     canvasTargetIdentityScopeForGeneration,
     captureTextRange,
     clearSelection,
+    completeRuntimeAttempt,
     currentRuntimeSourceProof,
     executePagePresentationAction,
     fencePendingEdit,
@@ -8244,15 +8722,24 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     ) return undefined;
     let animationFrame = 0;
     let attempts = 0;
-    const startedAt = performance.now();
+    let startedAt = performance.now();
     const connectParsedCandidate = () => {
       const current = runtimeCandidateRef.current;
       const iframe = runtimeCandidateIframeRef.current;
       if (
         current !== candidate
+        || !runtimeCandidateControllerRef.current!.accepts(candidate.attempt)
         || !iframe
         || candidate.render.elementGeneration !== candidateRender.elementGeneration
       ) return;
+      if (runtimeCandidateControllerRef.current!.snapshot.nativeEdit?.kind === "user") {
+        // A browser-native edit transaction owns the active Document until its
+        // checkpoint has produced complete source HTML. Candidate readiness is
+        // allowed to wait, but its deadline must not charge time to the user.
+        startedAt = performance.now();
+        animationFrame = requestAnimationFrame(connectParsedCandidate);
+        return;
+      }
       if (connectRuntimeCandidateRef.current(
         iframe,
         candidateRender.elementGeneration,
@@ -8272,7 +8759,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       if (attempts < retryLimit) {
         animationFrame = requestAnimationFrame(connectParsedCandidate);
       } else {
-        cancelRuntimeCandidateRef.current();
+        failRuntimeCandidate(candidate, "failed");
         setEditFeedback({
           code: "canvas_c01_source_map",
           title: "页面预览没有完成",
@@ -9117,8 +9604,9 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           ? "allow-same-origin allow-scripts"
           : "allow-same-origin"}
         onLoad={(event) => {
-          connectFrame(event.currentTarget, frameRender.elementGeneration);
-          restoreInitialScroll();
+          if (connectFrame(event.currentTarget, frameRender.elementGeneration)) {
+            restoreInitialScroll();
+          }
         }}
       />
       {runtimeRetiringRender ? (
@@ -9151,6 +9639,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           ref={runtimeCandidateIframeRef}
           data-frame-generation={runtimeCandidateRender.elementGeneration}
           data-frame-role="runtime-candidate"
+          data-runtime-candidate-id={runtimeCandidateRef.current?.attempt.candidateId}
           className={styles.frame}
           title="Canvas runtime candidate"
           srcDoc={runtimeCandidateRender.html}
@@ -9170,6 +9659,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
             const candidate = runtimeCandidateRef.current;
             if (
               candidate
+              && runtimeCandidateControllerRef.current!.accepts(candidate.attempt)
               && candidate.render.elementGeneration === runtimeCandidateRender.elementGeneration
             ) candidate.loaded = true;
             connectRuntimeCandidateRef.current(

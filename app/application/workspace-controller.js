@@ -1102,6 +1102,10 @@ export class WorkspaceController {
     return this.#editRuntimeSession?.settleRuntime(input) || false;
   }
 
+  retryEditAuthorRuntime() {
+    return this.#editRuntimeSession?.retry() || false;
+  }
+
   evaluateFirstEditGuide(input) {
     return this.#firstEditGuideSession?.evaluate(input) || null;
   }

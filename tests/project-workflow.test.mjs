@@ -313,6 +313,9 @@ function createHarness({
       return {
         ok: true,
         html: documentSession.html,
+        workingSourceSha256: canvasRenderedSha256,
+        renderedProjectionSha256: canvasRenderedSha256,
+        renderedProjectionStale: false,
         canvasRenderedSha256,
         sourceSha256: canvasRenderedSha256,
       };
@@ -322,6 +325,9 @@ function createHarness({
       return {
         ok: true,
         html: documentSession.html,
+        workingSourceSha256: canvasRenderedSha256,
+        renderedProjectionSha256: canvasRenderedSha256,
+        renderedProjectionStale: false,
         canvasRenderedSha256,
         sourceSha256: canvasRenderedSha256,
         pendingMutation: null,
@@ -576,6 +582,81 @@ test("a dirty document cannot reuse the Canvas validation lease", async (t) => {
   assert.equal(outcome.status, "succeeded");
   assert.equal(outcome.value.validationLease, undefined);
   assert.ok(harness.fenceCount > 0);
+});
+
+test("project switch rejects a last-known-good projection that still renders older source", async (t) => {
+  const latestHtml = OLD_HTML.replace("old", "latest structure");
+  const oldRenderedSha256 = sha256(OLD_HTML);
+  let staleFenceCount = 0;
+  let harness;
+  harness = createHarness({
+    canvas: {
+      fencePendingEdit: () => {
+        staleFenceCount += 1;
+        return {
+          ok: true,
+          html: harness.documentSession.html,
+          workingSourceSha256: sha256(harness.documentSession.html),
+          renderedProjectionSha256: oldRenderedSha256,
+          renderedProjectionStale: true,
+          canvasRenderedSha256: oldRenderedSha256,
+          sourceSha256: sha256(harness.documentSession.html),
+        };
+      },
+    },
+  });
+  t.after(() => harness.workflow.dispose());
+  harness.documentSession.beginEdit(latestHtml);
+
+  const outcome = await harness.workflow.prepareSwitch();
+
+  assert.equal(outcome.status, "blocked");
+  assert.equal(outcome.code, "PROJECT_SWITCH_SOURCE_MISMATCH");
+  assert.ok(staleFenceCount >= 2);
+});
+
+test("close protects the latest source without claiming a stale projection is current", async (t) => {
+  const latestHtml = OLD_HTML.replace("old", "latest structure");
+  const oldRenderedSha256 = sha256(OLD_HTML);
+  let reconciliationCount = 0;
+  let harness;
+  harness = createHarness({
+    canvas: {
+      freeze: () => ({
+        ok: true,
+        html: harness.documentSession.html,
+        workingSourceSha256: sha256(harness.documentSession.html),
+        renderedProjectionSha256: oldRenderedSha256,
+        renderedProjectionStale: true,
+        canvasRenderedSha256: oldRenderedSha256,
+        sourceSha256: sha256(harness.documentSession.html),
+        pendingMutation: null,
+      }),
+    },
+    documentWorkflow: {
+      async reconcileBoundary() {
+        reconciliationCount += 1;
+        return succeeded({ reconciled: true });
+      },
+    },
+  });
+  t.after(() => harness.workflow.dispose());
+  harness.documentSession.beginEdit(latestHtml);
+
+  const outcome = await harness.workflow.prepareClose({
+    requestId: "close_stale_last_known_good",
+    deadlineAt: Date.now() + 2_000,
+  });
+
+  assert.deepEqual(outcome, { ready: true });
+  assert.equal(reconciliationCount, 1);
+  assert.equal(harness.unlockCount, 0);
+  assert.equal(harness.workflow.getSnapshot().close.phase, "ready");
+  assert.equal(harness.events.some((event) => (
+    event.type === "project-close-source-safe-projection-stale"
+    && event.workingSourceSha256 === sha256(latestHtml)
+    && event.renderedProjectionSha256 === oldRenderedSha256
+  )), true);
 });
 
 test("a failed source write can switch only after an exact recovery checkpoint", async (t) => {
@@ -1281,6 +1362,10 @@ test("a Registry project open routes only its projectId through the desktop auth
         return {
           ok: true,
           html: harness.documentSession.html,
+          workingSourceSha256: harness.documentSession.sourceSha256,
+          renderedProjectionSha256: harness.documentSession.sourceSha256,
+          renderedProjectionStale: false,
+          canvasRenderedSha256: harness.documentSession.sourceSha256,
           sourceSha256: harness.documentSession.sourceSha256,
         };
       },
@@ -3262,6 +3347,10 @@ test("cancelling the local picker does not drain the current project", async (t)
         return {
           ok: true,
           html: OLD_HTML,
+          workingSourceSha256: sha256(OLD_HTML),
+          renderedProjectionSha256: sha256(OLD_HTML),
+          renderedProjectionStale: false,
+          canvasRenderedSha256: sha256(OLD_HTML),
           sourceSha256: sha256(OLD_HTML),
         };
       },
@@ -3404,6 +3493,10 @@ test("a new-external picker result shows confirmation without switching", async 
         return {
           ok: true,
           html: OLD_HTML,
+          workingSourceSha256: sha256(OLD_HTML),
+          renderedProjectionSha256: sha256(OLD_HTML),
+          renderedProjectionStale: false,
+          canvasRenderedSha256: sha256(OLD_HTML),
           sourceSha256: sha256(OLD_HTML),
         };
       },

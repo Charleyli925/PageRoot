@@ -19,6 +19,7 @@ export type EditAuthorRuntimeSnapshot = Readonly<{
   canvasGeneration: number | null;
   grant: EditRuntimeGrant | null;
   lastOutcome: string | null;
+  retryAvailable: boolean;
 }>;
 
 export type EditAuthorRuntimePort = EditRuntimePort;
@@ -42,12 +43,20 @@ export class EditAuthorRuntimeSession {
     sessionId?: string;
     sourceSha256?: string;
     canvasGeneration?: number;
+    candidateId?: string;
+    candidateGeneration?: number;
+    candidateSourceRevision?: string;
   }): boolean;
   settleRuntime(input?: {
     sessionId?: string;
     sourceSha256?: string;
     canvasGeneration?: number;
-    outcome?: "ready" | "rejected" | "failed";
+    candidateId?: string;
+    candidateGeneration?: number;
+    candidateSourceRevision?: string;
+    outcome?: "ready" | "rejected" | "failed" | "superseded";
+    preserveLastKnownGood?: boolean;
   }): boolean;
+  retry(): boolean;
   dispose(): void;
 }

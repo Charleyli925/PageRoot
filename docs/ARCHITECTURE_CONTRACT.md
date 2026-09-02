@@ -511,6 +511,22 @@ source change materializes complete HTML, rebuilds the disposable frame and
 reruns the author program. Native input may postpone that rebuild until editing
 finishes. The resource session may be reused only while exact authored script
 markup/body identity is unchanged; a Script change requires a new generation.
+`EditRuntimeCandidateController` owns a unique identity, source revision and
+`preparing → positioning → terminal` decision for every disposable candidate.
+When a newer source edit replaces an in-flight frame using the same resource
+session, the older frame settles as `superseded`, not as an authored-program
+failure. Every load, activation, deadline, animation-frame, microtask and
+positioning result must prove the current candidate identity before changing
+state; only the latest candidate may publish `ready`, `rejected` or `failed`.
+The controller also owns the last-known-good frame identity and the native-edit
+transaction gate; React owns only the fenced iframe, viewport and Selection
+effects. A user Native Edit or IME composition may let a candidate prepare but
+cannot promote or retire a browsing context. Promotion waits until that
+browser transaction has ended and its checkpoint has produced the latest
+complete source HTML. A text Selection retained across the handoff is
+presentation only and is discarded when its target or source text segments no
+longer match, without blocking a fresh native edit session on the current exact
+target.
 The same one-time private capability returns an activation-result callback bound
 to the source window, session, execution and frame token. Resource errors,
 synchronous author errors and immediate unhandled rejections through the
@@ -537,8 +553,26 @@ permanent application-lifetime allowance or requires PageRoot to restart. An
 unavailable resource remains a recoverable preparation state while its
 independent bounded download is active. A terminal preparation, exact recovery,
 load, provenance or execution-deadline failure selects an explicit
-script-disabled static Edit state; the Workbench must disclose that author
-Script did not run and must not interpret iframe `load` alone as Runtime success.
+script-disabled static Edit state only when no last-known-good Runtime exists.
+Once a usable Runtime is active, a newer candidate's preparation, connection,
+positioning or activation failure destroys only that candidate and preserves
+the previous frame, viewport, Selection and edit capability. A true static
+fallback is disclosed as “部分动态内容未加载”, remains dismissible, and offers
+“重新加载动态内容” only for transient preparation, execution or exact-recovery
+failures; unsupported programs and an unavailable desktop runtime expose no
+ineffective retry. A successful retry removes the notice. The Workbench must
+not interpret iframe `load` alone as Runtime success.
+The candidate controller is the sole owner of whether a physical
+last-known-good iframe exists. It reports that settlement fact to
+`EditAuthorRuntimeSession`; the application session never reconstructs or
+caches its own boolean. The Canvas freeze contract reports the latest complete
+working-source Hash separately from the visible verified-projection Hash and a
+stale-projection flag. A preserved older iframe never advances the latter.
+Project switch and AI submission fail closed until the visible projection has
+caught up. Close uses a separate source-protection contract: it may reconcile
+and protect the frozen working bytes while retaining the older rendered Hash
+as an explicit stale fact, but never substitutes the working-source Hash for a
+missing or stale rendered Hash.
 Runtime DOM never becomes SourcePatch, Source HTML, save, Version, export,
 Request, Candidate or Review input.
 

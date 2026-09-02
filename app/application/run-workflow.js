@@ -740,11 +740,28 @@ export class RunWorkflow {
       const frozen = this.#canvasPort.freeze(
         "画布还没有形成可验证的 HTML 快照，本轮不会发送。",
       );
-      if (!frozen?.ok || !SHA256.test(String(frozen.sourceSha256 || ""))) {
+      const frozenWorkingSourceSha256 = String(
+        frozen?.workingSourceSha256 || frozen?.sourceSha256 || "",
+      );
+      const frozenRenderedProjectionSha256 = String(
+        frozen?.renderedProjectionSha256 || frozen?.canvasRenderedSha256 || "",
+      );
+      if (!frozen?.ok || !SHA256.test(frozenWorkingSourceSha256)) {
         if (frozen?.ok) this.#canvasPort.unlock();
         return blocked(
           "RUN_SUBMISSION_FREEZE",
           frozen?.reason || "画布还没有形成可验证的 HTML 快照，本轮不会发送。",
+        );
+      }
+      if (
+        frozen.renderedProjectionStale === true
+        || !SHA256.test(frozenRenderedProjectionSha256)
+        || frozenRenderedProjectionSha256 !== frozenWorkingSourceSha256
+      ) {
+        this.#canvasPort.unlock();
+        return blocked(
+          "RUN_SUBMISSION_CANVAS_STALE",
+          "最新页面还没有完成显示，请重新加载动态内容后再发起修改。",
         );
       }
       if (!this.#runSession.freezeSubmission(submission)) {
@@ -753,7 +770,7 @@ export class RunWorkflow {
       }
       const frozenHash = await this.#hashPort.sha256(String(frozen.html || ""));
       const hashContextCurrent = this.#isCurrentContext(context);
-      if (frozenHash !== frozen.sourceSha256 || !hashContextCurrent) {
+      if (frozenHash !== frozenWorkingSourceSha256 || !hashContextCurrent) {
         this.#canvasPort.unlock();
         return rejected(
           "RUN_SUBMISSION_FREEZE_HASH_MISMATCH",
@@ -780,7 +797,7 @@ export class RunWorkflow {
         projectName: String(projectName || "未命名页面"),
         comments: comments.map((comment) => ({ ...comment })),
         changeEvents: this.#commentSession.changeEvents.map((event) => ({ ...event })),
-        frozenSourceSha256: frozen.sourceSha256,
+        frozenSourceSha256: frozenWorkingSourceSha256,
         freezeCutoffRevision,
       });
       pendingRun = this.#pendingRun({
@@ -819,7 +836,7 @@ export class RunWorkflow {
       }
       const persistedSourceSha256 = this.#documentSession.sourceSha256;
       if (
-        persistedSourceSha256 !== frozen.sourceSha256
+        persistedSourceSha256 !== frozenWorkingSourceSha256
         || !this.#isCurrentContext(context)
       ) {
         throw responseError(
