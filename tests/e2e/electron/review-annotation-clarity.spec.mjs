@@ -374,7 +374,6 @@ async function captureAuthoredElement(frame, selector) {
     animations: "disabled",
     style: `
       [data-pageroot-review-overlay-box],
-      [data-pageroot-review-text-marks],
       [data-pageroot-review-region-bar] {
         visibility: hidden !important;
       }
@@ -732,6 +731,18 @@ test("the review projection annotates a dense report cleanly and accurately", as
         "none",
       );
       await expect(frame.locator("[data-pageroot-review-mask-dim]")).toHaveCSS(
+        "mix-blend-mode",
+        "normal",
+      );
+      await expect(frame.locator("[data-pageroot-review-text-marks]")).toHaveCSS(
+        "backdrop-filter",
+        "none",
+      );
+      await expect(frame.locator("[data-pageroot-review-text-marks]")).toHaveCSS(
+        "filter",
+        "none",
+      );
+      await expect(frame.locator("[data-pageroot-review-text-marks]")).toHaveCSS(
         "mix-blend-mode",
         "normal",
       );

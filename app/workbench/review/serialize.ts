@@ -164,6 +164,9 @@ ${REVIEW_TEXT_EVIDENCE_MARKER_CSS}
     background: transparent !important;
     opacity: 1 !important;
     filter: none !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    mix-blend-mode: normal !important;
     transform: none !important;
     pointer-events: none !important;
   }

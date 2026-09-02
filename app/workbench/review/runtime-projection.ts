@@ -2949,14 +2949,6 @@ function reviewBootstrap(
     layer.style.setProperty("width", documentWidth + "px", "important");
     layer.style.setProperty("height", height + "px", "important");
     const namespace = "http://www.w3.org/2000/svg";
-    if (merged.length) {
-    const svg = document.createElementNS(namespace, "svg");
-    svg.setAttribute("data-pageroot-review-mask-layer", "true");
-    svg.setAttribute("width", String(documentWidth));
-    svg.setAttribute("height", String(height));
-    svg.setAttribute("viewBox", "0 0 " + documentWidth + " " + height);
-    svg.style.setProperty("width", documentWidth + "px", "important");
-    svg.style.setProperty("height", height + "px", "important");
     const resetMaskPrimitive = (element, fill = "") => {
       element.style.setProperty("display", "block", "important");
       element.style.setProperty("margin", "0", "important");
@@ -2975,6 +2967,14 @@ function reviewBootstrap(
       element.style.setProperty("fill-opacity", "1", "important");
       element.style.setProperty("stroke", "none", "important");
     };
+    if (merged.length) {
+    const svg = document.createElementNS(namespace, "svg");
+    svg.setAttribute("data-pageroot-review-mask-layer", "true");
+    svg.setAttribute("width", String(documentWidth));
+    svg.setAttribute("height", String(height));
+    svg.setAttribute("viewBox", "0 0 " + documentWidth + " " + height);
+    svg.style.setProperty("width", documentWidth + "px", "important");
+    svg.style.setProperty("height", height + "px", "important");
     resetMaskPrimitive(svg);
     const mask = document.createElementNS(namespace, "mask");
     const maskId = "pageroot-review-mask-"
@@ -3057,6 +3057,7 @@ function reviewBootstrap(
       marksSvg.setAttribute("viewBox", "0 0 " + documentWidth + " " + height);
       marksSvg.style.setProperty("width", documentWidth + "px", "important");
       marksSvg.style.setProperty("height", height + "px", "important");
+      resetMaskPrimitive(marksSvg);
       const strikeRuns = [];
       const addedDots = [];
       const activeAtomKeys = new RuntimeVisualSet();
