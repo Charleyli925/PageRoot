@@ -155,53 +155,126 @@ function normalizedCssDeclarations(value: string): string {
     .join(";");
 }
 
-function simpleCssRuleMap(document: Document): Map<string, string> {
-  const rules = new Map<string, string>();
+function simpleCssRuleMap(document: Document): Map<string, {
+  selectors: string[];
+  declarations: string;
+}> {
+  const rules = new Map<string, { selectors: string[]; declarations: string }>();
   document.querySelectorAll("style").forEach((style) => {
     const source = (style.textContent || "").replace(/\/\*[\s\S]*?\*\//gu, "");
     const pattern = /([^{}]+)\{([^{}]*)\}/gu;
     let match = pattern.exec(source);
     while (match) {
-      match[1].split(",").map((selector) => selector.trim()).filter((selector) => (
+      const selectors = match[1].split(",").map((selector) => selector.trim()).filter((selector) => (
         selector
         && !selector.startsWith("@")
         && !/[\s>+~:]/u.test(selector)
         && /^(?:[a-z][\w-]*)?(?:#[\w-]+)?(?:\.[\w-]+)*(?:\[[\w-]+(?:[~|^$*]?=(?:"[^"]*"|'[^']*'|[^\]\s]+))?\])*$/iu.test(selector)
-      )).forEach((selector) => {
+      )).sort();
+      if (selectors.length) {
         const declarations = normalizedCssDeclarations(match![2]);
-        const previous = rules.get(selector);
-        rules.set(selector, previous ? `${previous}\u0001${declarations}` : declarations);
-      });
+        const key = selectors.join("\u001f");
+        const previous = rules.get(key);
+        rules.set(key, {
+          selectors,
+          declarations: previous
+            ? `${previous.declarations}\u0001${declarations}`
+            : declarations,
+        });
+      }
       match = pattern.exec(source);
     }
   });
   return rules;
 }
 
-function changedSimpleCssSelectors(beforeDocument: Document, afterDocument: Document): string[] {
+function changedSimpleCssSelectors(beforeDocument: Document, afterDocument: Document): Array<{
+  selectors: string[];
+  ruleKey: string;
+  before: string;
+  after: string;
+}> {
   const before = simpleCssRuleMap(beforeDocument);
   const after = simpleCssRuleMap(afterDocument);
-  return [...new Set([...before.keys(), ...after.keys()])].filter((selector) => (
-    before.get(selector) !== after.get(selector)
-  ));
+  return [...new Set([...before.keys(), ...after.keys()])].flatMap((ruleKey) => {
+    const beforeRule = before.get(ruleKey);
+    const afterRule = after.get(ruleKey);
+    const beforeDeclarations = beforeRule?.declarations || "";
+    const afterDeclarations = afterRule?.declarations || "";
+    return beforeDeclarations === afterDeclarations
+      ? []
+      : [{
+        selectors: beforeRule?.selectors || afterRule?.selectors || [],
+        ruleKey,
+        before: beforeDeclarations,
+        after: afterDeclarations,
+      }];
+  });
+}
+
+function deterministicReviewHash(value: string): string {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(36);
+}
+
+function displayScopeForElement(element: Element) {
+  if (element.matches("li")) return "list-item" as const;
+  if (element.matches("td, th")) return "cell" as const;
+  if (element.matches("button, input, select, textarea, a[href], [role='button']")) {
+    return "component" as const;
+  }
+  if (element.matches("p, h1, h2, h3, h4, h5, h6, blockquote, pre")) {
+    return "paragraph" as const;
+  }
+  return "container" as const;
+}
+
+function inlineStyleDeltaKey(before: Element, after: Element): string {
+  const properties = new Set<string>();
+  for (const style of [before.getAttribute("style") || "", after.getAttribute("style") || ""]) {
+    style.split(";").forEach((declaration) => {
+      const separator = declaration.indexOf(":");
+      if (separator > 0) properties.add(declaration.slice(0, separator).trim().toLowerCase());
+    });
+  }
+  return [...properties].sort().flatMap((property) => {
+    const beforeValue = (before as HTMLElement).style.getPropertyValue(property).trim();
+    const afterValue = (after as HTMLElement).style.getPropertyValue(property).trim();
+    return beforeValue === afterValue ? [] : [`${property}:${beforeValue}\u0000${afterValue}`];
+  }).join("\u0001");
 }
 
 function annotateStructureFact(
   element: Element,
   id: string,
   kind: StableSourceChangeKind,
+  displayGroupId = `display-stable-${kind}-${id}`,
+  factId = `stable-${kind}-${id}`,
 ) {
   const semanticOwnerId = `stable-${id}`;
   const geometryOwnerId = `stable-geometry-${id}`;
   element.setAttribute("data-pageroot-review-structure", kind);
   element.setAttribute("data-pageroot-review-semantic-owner", semanticOwnerId);
   element.setAttribute("data-pageroot-review-geometry-owner", geometryOwnerId);
+  const displayOwnerId = `display-owner-stable-${id}`;
+  const displayOwners = new Set(
+    (element.getAttribute("data-pageroot-review-display-owner") || "").split(/\s+/u).filter(Boolean),
+  );
+  displayOwners.add(displayOwnerId);
+  element.setAttribute("data-pageroot-review-display-owner", [...displayOwners].join(" "));
   appendProjectionFactToElement(element, {
-    id: `stable-${kind}-${id}`,
+    id: factId,
     type: "structure",
     semanticOwnerId,
     geometryOwnerId,
     scope: "element",
+    displayGroupId,
+    displayOwnerId,
+    displayScope: displayScopeForElement(element),
     structureChange: kind,
     summary: CHANGE_SUMMARIES[kind],
   });
@@ -250,8 +323,10 @@ export function annotateStableSourceDifferences(
     if (isScript || isCssSource) return;
 
     if ((before.getAttribute("style") || "") !== (after.getAttribute("style") || "")) {
-      annotateStructureFact(before, id, "style");
-      annotateStructureFact(after, id, "style");
+      const deltaKey = inlineStyleDeltaKey(before, after);
+      const groupId = `display-inline-${deterministicReviewHash(deltaKey || id)}`;
+      annotateStructureFact(before, id, "style", groupId);
+      annotateStructureFact(after, id, "style", groupId);
     }
     if (
       before.namespaceURI !== after.namespaceURI
@@ -271,17 +346,34 @@ export function annotateStableSourceDifferences(
     }
   });
 
-  changedSimpleCssSelectors(beforeDocument, afterDocument).forEach((selector) => {
+  changedSimpleCssSelectors(beforeDocument, afterDocument).forEach((rule) => {
+    const selectorHash = deterministicReviewHash(
+      `${rule.ruleKey}\u0000${rule.before}\u0000${rule.after}`,
+    );
+    const displayGroupId = `display-css-${selectorHash}`;
     ([beforeDocument, afterDocument] as const).forEach((document) => {
-      try {
-        document.querySelectorAll(selector).forEach((element) => {
+      rule.selectors.forEach((selector) => {
+        let matches: Element[];
+        try {
+          matches = [...document.querySelectorAll(selector)];
+        } catch {
+          // Selector parsing is deliberately best-effort. Complex or invalid
+          // selectors stay in diagnostics and never become a page-level marker.
+          return;
+        }
+        matches.forEach((element) => {
           const id = sourceId(element);
-          if (id && topology.commonIds.includes(id)) annotateStructureFact(element, id, "style");
+          if (id && topology.commonIds.includes(id)) {
+            annotateStructureFact(
+              element,
+              id,
+              "style",
+              displayGroupId,
+              `stable-style-css-${selectorHash}-${id}`,
+            );
+          }
         });
-      } catch {
-        // Selector parsing is deliberately best-effort. Complex or invalid
-        // selectors stay in diagnostics and never become a page-level marker.
-      }
+      });
     });
   });
 

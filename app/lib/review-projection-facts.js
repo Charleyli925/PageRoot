@@ -6,6 +6,13 @@ const FACT_SCOPES = new Set([
   "text-block",
   "element",
 ]);
+const FACT_DISPLAY_SCOPES = new Set([
+  "paragraph",
+  "list-item",
+  "cell",
+  "component",
+  "container",
+]);
 const FACT_OPERATIONS = new Set(["none", "insert", "delete", "replace"]);
 const FACT_TONES = new Set(["added", "removed"]);
 const FACT_STRUCTURE_CHANGES = new Set([
@@ -18,6 +25,9 @@ const FACT_STRUCTURE_CHANGES = new Set([
 ]);
 const FACT_KEY_PATTERN = /^[a-z0-9:_-]{1,160}$/iu;
 export const REVIEW_PROJECTION_FACTS_PER_ELEMENT_LIMIT = 24;
+// Closed over the largest legal 24-fact JSON payload, including worst-case
+// summary escaping. Runtime uses the same ceiling before parsing authored DOM.
+export const REVIEW_PROJECTION_FACTS_SERIALIZED_LENGTH_LIMIT = 65_536;
 const MAX_SUMMARY_LENGTH = 80;
 
 export class ReviewProjectionFactOverflowError extends Error {
@@ -62,6 +72,12 @@ export function normalizeReviewProjectionFact(value) {
     ? value.tone
     : undefined;
   const textGroup = optionalKey(value.textGroup);
+  const displayGroupId = optionalKey(value.displayGroupId);
+  const displayOwnerId = optionalKey(value.displayOwnerId);
+  const displayScope = typeof value.displayScope === "string"
+    && FACT_DISPLAY_SCOPES.has(value.displayScope)
+    ? value.displayScope
+    : undefined;
   const structureChange = typeof value.structureChange === "string"
     && FACT_STRUCTURE_CHANGES.has(value.structureChange)
     ? value.structureChange
@@ -73,6 +89,9 @@ export function normalizeReviewProjectionFact(value) {
   if (operation) fact.operation = operation;
   if (tone) fact.tone = tone;
   if (textGroup) fact.textGroup = textGroup;
+  if (displayGroupId) fact.displayGroupId = displayGroupId;
+  if (displayOwnerId) fact.displayOwnerId = displayOwnerId;
+  if (displayScope) fact.displayScope = displayScope;
   if (structureChange) fact.structureChange = structureChange;
   if (summary) fact.summary = summary;
   return fact;
@@ -156,7 +175,10 @@ export function serializeReviewProjectionFacts(facts) {
 }
 
 export function parseReviewProjectionFacts(value) {
-  if (typeof value !== "string" || value.length > 12_000) return [];
+  if (
+    typeof value !== "string"
+    || value.length > REVIEW_PROJECTION_FACTS_SERIALIZED_LENGTH_LIMIT
+  ) return [];
   try {
     const parsed = JSON.parse(value);
     if (!Array.isArray(parsed)) return [];

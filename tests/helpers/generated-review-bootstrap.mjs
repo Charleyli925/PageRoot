@@ -11,6 +11,9 @@ import {
   reviewTextEvidenceMarkGeometry,
 } from "../../app/lib/review-text-evidence-marks.js";
 import {
+  REVIEW_PROJECTION_FACTS_SERIALIZED_LENGTH_LIMIT,
+} from "../../app/lib/review-projection-facts.js";
+import {
   aggregateReviewBadgeLabels,
   reviewBadgeFactCount,
   reviewBadgeLabelText,
@@ -53,6 +56,7 @@ export function generatedReviewBootstrap(
   ).outputText;
   const context = vm.createContext({
     REVIEW_BOOTSTRAP_IDENTITY_ATTRIBUTE_LIMIT: 24,
+    REVIEW_PROJECTION_FACTS_SERIALIZED_LENGTH_LIMIT,
     REVIEW_COMMENT_BINDING_SOURCE_BOX_ATTRIBUTES: [
       "class",
       "height",

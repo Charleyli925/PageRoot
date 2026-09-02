@@ -840,16 +840,17 @@ AI 候选通过检查并进入待打开状态后，正常连续性候选显示�
 
 审阅比对覆盖整页作者内容：`<main>`（或页面唯一的内容包裹层）内部按现有规则逐层展开为区域，同时 `<body>` 直属的页脚、页头、导航等同级内容各自作为一个区域参与比对，顺序与文档顺序一致。单文件页面没有“站点装饰”可以跳过：页脚口径说明被改写同样是用户内容的变化，不得因为它在 `<main>` 之外而沉默消失。
 
-审阅显示由六个正交状态轴组成，任何控件只能写自己的状态轴：
+审阅显示由七个正交状态轴组成，任何控件只能写自己的状态轴：
 
 - `pageView`：`双页 / 左页·修改前 / 右页·修改后`，任一时刻恰好选中一个。页面按钮只改变可见页面，不改变变化类型、上下文可见度或当前定位；必须点击明确的“双页”返回双页，不使用隐藏手势。
 - `changeFilter`：`全部 / 文字 / 元素`，任一时刻恰好选中一个。筛选按钮只改变框选与虚化所读取的变化集合，不强制返回双页、不改变上下文可见度或缩放；两个类型按钮各带一个与画布标注同色的差异色点（文字为删除红与新增绿，元素为紫），色值与页内标注同源。切换筛选时，若当前定位目标在新筛选下已不再匹配，则一并把定位目标移到该筛选的第一处变化；当前目标仍匹配时保持用户所在位置不动。没有匹配变化时保留所选筛选、不移动定位并显示空态。
 - `contextVisibility`：0–100 的非变化上下文 opacity。标签以约一个字符间距紧跟数值；滑杆只改变可见度，不选择变化、不打开 Tab、不改变页面或筛选。0 完全不可见，100 完全无遮挡。
 - `navigationTarget`：页面变化标记和当前活动说明共同使用的定位目标。它只负责安全揭示目标所在 Tab、滚动和活动提示，不参与变化集合、框选、虚化、单双页或缩放决策。
+- `activeFocusGroupId`：当前唯一的视觉聚焦组，`null` 表示总览。它不替代 `changeId` 或 `navigationTarget`；一个 change 可以有多个阅读块/样式组。前后两页始终接收同一个 group ID，某侧没有该组时保持无框、无虚化。
 - `pagePresentationState`：父级审阅协调器持有两页共享的完整 Tab 路径，并协调折叠、业务按钮与 input/select/textarea 状态。它与滚动模式无关，用户从任一侧操作或点击变化标记都写入同一状态，再向两侧同步；无法建立安全对应时静默保持当前侧结果，不增加打扰提示。
 - `scrollMode + zoomMode`：同步/独立只控制滚动跟随，适应/100% 只控制画布比例，均不得关闭页面动作同步或改写上述状态。
 
-进入审阅的默认组合是 `双页 + 全部变化 + 上下文可见度 18% + 同步滚动 + 100%`，并以当前 `documents + session` 为身份只初始化一次第一处变化：同时设为导航目标、安全揭示其 Tab 路径，并用无动画的初始定位让该变化真正进入视口。同一组文档后续的 frame ready、重绘或状态投影不得重复定位而打断用户，更换文档或 Session 也不得沿用上一组的初始化 ref。“导航到第一处”不等于只显示第一处，当前筛选中的全部变化仍保持清晰并显示边界。用户可自行切到“适应”，单双页共用同一个缩放轴。页面预览三个按钮使用紧凑的固有宽度。单双页都让文档视口尽量铺满 Canvas：除 pane 边框和双页分隔外只留极小间隙，不保留装饰性大留白。
+进入审阅的默认组合是 `双页 + 全部变化 + 上下文可见度 18% + 同步滚动 + 100%`，但视觉状态是总览：`navigationTarget = all`、`activeFocusGroupId = null`。总览保留精确字符点/删除线、页边变化 bar 与导航入口，不画紫框、不生成遮罩，也不虚化页面。用户选择变化或具体 bar 后才同时定位 change 并激活该变化的一个 focus group；同一组文档后续的 frame ready、重绘或状态投影不得重复定位而打断用户。用户可自行切到“适应”，单双页共用同一个缩放轴。页面预览三个按钮使用紧凑的固有宽度。单双页都让文档视口尽量铺满 Canvas：除 pane 边框和双页分隔外只留极小间隙，不保留装饰性大留白。
 
 审阅工具不再占用 Canvas 内部空间，也没有展开/收起把手。它们与编辑/预览/审阅模式、项目、文件动作和 AI 入口同处第二层工具栏；进入审阅只改变控件可用性和选中态，不移动两页的位置、尺寸、滚动位置或框选测量。
 
@@ -871,6 +872,7 @@ AI 候选通过检查并进入待打开状态后，正常连续性候选显示�
 审阅分析只读取冻结的修改前/修改后 HTML，不执行候选来生成源码差异，也没有 Review 专用截图、像素比较、主进程 owner 或 IPC。源码文字、新增/删除、移动和明确属性变化仍是用户可见的正式事实；完整、有效且全文唯一的 `data-pageroot-id` 只决定能否使用精确连续性与当前帧视觉增强。旧版本缺失、partial、invalid 或 duplicate Stable ID 时，视觉增强显示 `不支持`，既有源码语义配对仍保留，不把差异隐藏成空审阅。
 
 1. 源码事实仍复用 `text` 与 `structure` 两类投影。文字使用 `insert/delete/replace` 和两侧独立的 `evidenceRanges`、`phraseGroups`、`anchorOffset`；`evidenceRanges` 是唯一字符级证据。视觉观察不得生成替代性的通用 change，也不得覆盖这些 wrapper、changeId 或精确范围。
+   每个原子事实另带可选 `displayGroupId / displayOwnerId / displayScope`，只决定阅读展示。普通段落、标题、引用与 direct-flow 的最小展示单位是完整阅读块；自动换行和同段多处字符变化仍是一组。`li`、`td/th` 与按钮等控件分别使用列表项、单元格与组件 scope；编号 `<br>` 行保持逐条独立。公开紫框不输出 phrase/line scope。
 2. 有完整 Stable ID 时，同一 ID 是两文档间最强的持久配对键，可以跨父级、顺序和标签变化保持连续性；一个 change 用 `evidenceStableIds[]` 保留多宿主关系。没有完整 Stable ID 时继续使用已有源码语义 matcher，但不提供 Stable-ID 视觉增强。
 3. 真正只在一侧存在的元素写成 `新增元素` 或 `删除元素`。只标最外层 unmatched 子树；后代元素和后代文字不重复打标。两侧共有的稳定 ID 不得因移动退化成删除加新增。稳定同级顺序用共同 ID 序列比较，单纯插入不把后续兄弟误报为移动。
 4. 当前两个审阅 iframe 是 best-effort 观测表面。第一段 owned bootstrap 经随机 challenge 的 `MessagePort` 返回计划内 Stable ID 的可见文字、computed presentation、图像、SVG、Canvas 2D 及其最近 Stable host 所拥有的运行时后代摘要。它与作者 Script 同 realm，不是隔离安全证明；source Hash 是父级标签，不是 iframe 自算的内容凭证。
@@ -880,7 +882,9 @@ AI 候选通过检查并进入待打开状态后，正常连续性候选显示�
 
 修改前 pane 的右边缘是 React 拥有的固定评论轨道。标记横坐标不随 HTML 横向滚动，纵坐标跟随目标；只有显式全局评论停在轨道顶部，运行时 `body` 安全锚点评论仍跟随实际表格或图表，过近标记聚合为 `评2` / `评3`。Hover 与键盘 Focus 展开原评论 Bubble，并通过私有 frame 端口同时高亮修改前目标和修改后同 Stable ID 元素；删除目标只高亮左页。父级维护 active key Set；marker 卸载、文档替换、frame reload 与 port 关闭都发送 inactive，评论正文和附件始终不进入 authored HTML。
 
-页面变化标记使用克制的紫色边线与淡底色，未变化内容按上下文可见度降低对比度。点击标记只更新 `navigationTarget`，并在两侧安全揭示目标所在 Tab、滚动到目标和显示活动提示，保持当时的 `pageView + changeFilter + contextVisibility + zoomMode`。
+页面变化标记使用克制的紫色边线与淡底色。点击标记同时更新 `navigationTarget` 与一个 `activeFocusGroupId`，并在两侧安全揭示目标所在 Tab、滚动到目标和显示活动提示，保持当时的 `pageView + changeFilter + contextVisibility + zoomMode`。同一 simple CSS 规则、或相同 inline-style property delta 的目标共享展示组；只有最近共同容器覆盖至少 75% 的可见同级分支（至少两个），且 Runtime 证明它是 grid/flex/list/repeated-card 时，才提升成一个容器框。否则各目标保持自身区域，绝不按距离合并；`html/body/main` 不得成为提升容器。
+
+Runtime 投影固定分四步：收集精确 atom → 建立 display focus groups → 解析当前几何 → 渲染 active focus。只有 active group 画紫框与唯一标签；无 `×N`，无 phrase/line promotion。遮罩孔直接复用完全相同的 active outline `pathData`，即 `outlinePaths = maskHoles`；没有 active outline 时不创建 mask。框外使用稳定白色淡化并降低 grayscale/saturation，支持时附加约 1px backdrop blur，降级时仍保持白色淡化。
 
 编辑画布的评论归组、定位与正式审阅共用同一份 Page Presentation Tab 识别器：同时覆盖 `aria-controls` / `href` / `data-p` / `data-tab` 显式关联，以及同父级、数量一致、唯一激活的索引式旧 Tab。两页的 panel 与 action key 在冻结的修改前/修改后文档之间成对生成，优先使用显式目标身份，再使用同一 panel 内的控件类型、语义与位置，避免 AI 改文案或调整顺序后左右失配。Tab、折叠、业务按钮以及 input/select/textarea 的值与选中态始终双向镜像；导航、提交、弹窗、下载和宿主 IPC 仍被隔离层阻止。
 

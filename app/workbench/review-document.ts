@@ -55,6 +55,8 @@ import type {
   ReviewDiagnostic,
   ReviewDocumentBuildOptions,
   ReviewDocuments,
+  ReviewDisplayScope,
+  ReviewFocusGroup,
   ReviewOutlineItem,
   ReviewPresentation,
   ReviewRevealStep,
@@ -77,6 +79,8 @@ export type {
   ReviewPresentation,
   ReviewRevealStep,
   ReviewFilter,
+  ReviewFocusGroup,
+  ReviewFocusRegionPlan,
   ReviewOutlineItem,
   ReviewSide,
 } from "./review/types";
@@ -96,10 +100,12 @@ function* annotateChangePairSteps(
   pair: SectionPair,
   usePersistentIdentity: boolean,
   ambiguousPersistentIds: ReadonlySet<string>,
+  ownerNamespace: string,
 ): Generator<"semantic-row", ReviewChangeType[], void> {
   const graph = yield* buildReviewSemanticPairGraphSteps(pair, {
     usePersistentIdentity,
     ambiguousPersistentIds,
+    ownerNamespace,
   });
   return yield* changeTypesForSemanticGraphSteps(graph);
 }
@@ -183,6 +189,13 @@ function attachChangeMarkerMetadata(
         const geometryOwnerId = element.getAttribute("data-pageroot-review-geometry-owner") || "";
         const textGroup = element.getAttribute("data-pageroot-review-text-group")
           || `text-marker-${index + 1}`;
+        const displayGroupId = element.getAttribute("data-pageroot-review-display-group")
+          || `display-${semanticOwnerId}`;
+        const displayOwnerId = element.getAttribute("data-pageroot-review-display-owner")
+          ?.split(/\s+/u).find(Boolean)
+          || `display-owner-${semanticOwnerId}`;
+        const displayScope = element.getAttribute("data-pageroot-review-display-scope")
+          || "paragraph";
         facts = appendTrustedReviewProjectionFact(facts, {
           id: textGroup,
           type: "text",
@@ -193,6 +206,9 @@ function attachChangeMarkerMetadata(
             ? "removed"
             : "added",
           textGroup,
+          displayGroupId,
+          displayOwnerId,
+          displayScope,
           ...(normalizedTextOperation ? { operation: normalizedTextOperation } : {}),
           summary: textSummary,
         });
@@ -202,6 +218,13 @@ function attachChangeMarkerMetadata(
           || `fallback-owner-${changeId}-structure-${index + 1}`;
         const geometryOwnerId = element.getAttribute("data-pageroot-review-geometry-owner") || "";
         const structureChange = element.getAttribute("data-pageroot-review-structure") || "changed";
+        const displayGroupId = element.getAttribute("data-pageroot-review-display-group")
+          || `display-${semanticOwnerId}`;
+        const displayOwnerId = element.getAttribute("data-pageroot-review-display-owner")
+          ?.split(/\s+/u).find(Boolean)
+          || `display-owner-${semanticOwnerId}`;
+        const displayScope = element.getAttribute("data-pageroot-review-display-scope")
+          || "container";
         if (!facts.some((fact) => (
           fact.type === "structure"
           && fact.semanticOwnerId === semanticOwnerId
@@ -213,6 +236,9 @@ function attachChangeMarkerMetadata(
             semanticOwnerId,
             ...(geometryOwnerId ? { geometryOwnerId } : {}),
             scope: "element",
+            displayGroupId,
+            displayOwnerId,
+            displayScope,
             structureChange,
             summary: structureSummary(structureChange),
           });
@@ -233,6 +259,92 @@ function attachChangeMarkerMetadata(
     });
   });
   attachRoots([pair.before, pair.after]);
+}
+
+function reviewFocusGroupsForDocuments(
+  beforeDocument: Document,
+  afterDocument: Document,
+): ReviewFocusGroup[] {
+  type MutableGroup = {
+    changeIds: Set<string>;
+    displayGroupId: string;
+    displayScope: ReviewDisplayScope;
+    kinds: Set<"text" | "style" | "structure">;
+    displayOwnerIds: Set<string>;
+    atomIds: Set<string>;
+    sideAtoms: Record<"before" | "after", Set<string>>;
+  };
+  const groups = new Map<string, MutableGroup>();
+  ([
+    ["before", beforeDocument],
+    ["after", afterDocument],
+  ] as const).forEach(([side, document]) => {
+    document.querySelectorAll(`[${REVIEW_PROJECTION_FACTS_ATTRIBUTE}][data-pageroot-review-marker]`)
+      .forEach((element) => {
+        const changeId = element.getAttribute("data-pageroot-review-marker") || "";
+        reviewProjectionFactsForElement(element).forEach((fact) => {
+          const displayGroupId = fact.displayGroupId || `display-fact-${fact.id}`;
+          const displayOwnerId = fact.displayOwnerId
+            || fact.geometryOwnerId
+            || fact.semanticOwnerId;
+          const displayScope = fact.displayScope || (fact.type === "text" ? "paragraph" : "container");
+          const sharedStyleGroup = fact.type === "structure" && fact.structureChange === "style";
+          const key = sharedStyleGroup ? displayGroupId : `${changeId}-${displayGroupId}`;
+          let group = groups.get(key);
+          if (!group) {
+            group = {
+              changeIds: new Set(),
+              displayGroupId,
+              displayScope,
+              kinds: new Set(),
+              displayOwnerIds: new Set(),
+              atomIds: new Set(),
+              sideAtoms: { before: new Set(), after: new Set() },
+            };
+            groups.set(key, group);
+          }
+          group.displayOwnerIds.add(displayOwnerId);
+          group.changeIds.add(changeId);
+          group.kinds.add(fact.type === "text"
+            ? "text"
+            : fact.structureChange === "style" ? "style" : "structure");
+          group.atomIds.add(fact.id);
+          group.sideAtoms[side].add(fact.id);
+        });
+      });
+  });
+  return [...groups.values()].map((group) => {
+    const changeIds = [...group.changeIds].sort();
+    const changeId = changeIds[0] || "";
+    const displayOwnerIds = [...group.displayOwnerIds].sort();
+    const atomIds = [...group.atomIds].sort();
+    const regions = (side: "before" | "after") => group.sideAtoms[side].size
+      ? [{
+        id: `region-${side}-${group.displayGroupId}`,
+        side,
+        geometry: "runtime" as const,
+        displayOwnerIds,
+        atomIds: [...group.sideAtoms[side]].sort(),
+      }]
+      : [];
+    return {
+      id: `focus-${group.kinds.has("style") ? group.displayGroupId : `${changeId}-${group.displayGroupId}`}`,
+      kind: group.kinds.has("text")
+        ? "text" as const
+        : group.kinds.has("style") ? "style" as const : "structure" as const,
+      changeId,
+      changeIds,
+      displayGroupId: group.displayGroupId,
+      displayOwnerId: displayOwnerIds[0] || "",
+      displayOwnerIds,
+      displayScope: group.displayScope,
+      atomIds,
+      regions: { before: regions("before"), after: regions("after") },
+      beforePresent: group.sideAtoms.before.size > 0,
+      afterPresent: group.sideAtoms.after.size > 0,
+    };
+  }).sort((left, right) => left.changeId.localeCompare(right.changeId)
+    || left.id.localeCompare(right.id));
 }
 
 function visualStableIdsForChange(pair: SectionPair, changeId: string) {
@@ -418,6 +530,7 @@ function* buildReviewDocumentSteps(
       },
       changes: [],
       outline: [],
+      focusGroups: [],
       commentGroups: [],
       commentTargets: [],
       visualBinding: visual.binding,
@@ -509,6 +622,7 @@ function* buildReviewDocumentSteps(
       },
       changes: [],
       outline: [],
+      focusGroups: [],
       commentGroups,
       commentTargets: reviewCommentTargets,
       visualBinding: visual.binding,
@@ -551,6 +665,7 @@ function* buildReviewDocumentSteps(
         pair,
         stableSourceAnalysis.hasPersistentContinuity,
         ambiguousPersistentIds,
+        `section-${pairIndex + 1}`,
       );
       let annotationStep = annotationSteps.next();
       while (!annotationStep.done) {
@@ -608,6 +723,7 @@ function* buildReviewDocumentSteps(
     kind,
     summary: kind === "css-source" ? "CSS 源码发生变化" : "Script 源码发生变化",
   }));
+  const focusGroups = reviewFocusGroupsForDocuments(beforeDocument, afterDocument);
 
   // Comment attributes are analyzer-only scope hints. Bind every resolved
   // source target in the private first bootstrap, then remove the hints before
@@ -650,6 +766,7 @@ function* buildReviewDocumentSteps(
     },
     changes,
     outline,
+    focusGroups,
     commentGroups,
     commentTargets: reviewCommentTargets,
     visualBinding: visual.binding,
@@ -698,6 +815,7 @@ export function buildReviewShellDocuments(
       },
       changes: [],
       outline: [],
+      focusGroups: [],
       commentGroups: [],
       commentTargets: [],
       visualBinding: visual.binding,
@@ -742,6 +860,7 @@ export function buildReviewShellDocuments(
     },
     changes: [],
     outline: [],
+    focusGroups: [],
     commentGroups: [],
     commentTargets: [],
     visualBinding: visual.binding,

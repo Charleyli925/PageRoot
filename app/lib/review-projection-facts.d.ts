@@ -7,6 +7,13 @@ export type ReviewProjectionFactScope =
   | "text-block"
   | "element";
 
+export type ReviewProjectionDisplayScope =
+  | "paragraph"
+  | "list-item"
+  | "cell"
+  | "component"
+  | "container";
+
 export type ReviewProjectionFact = {
   id: string;
   type: ReviewProjectionFactType;
@@ -16,6 +23,10 @@ export type ReviewProjectionFact = {
   operation?: "none" | "insert" | "delete" | "replace";
   tone?: "added" | "removed";
   textGroup?: string;
+  /** Disposable presentation grouping; never part of exact fact identity. */
+  displayGroupId?: string;
+  displayOwnerId?: string;
+  displayScope?: ReviewProjectionDisplayScope;
   structureChange?:
     | "added"
     | "removed"
@@ -27,6 +38,7 @@ export type ReviewProjectionFact = {
 };
 
 export const REVIEW_PROJECTION_FACTS_PER_ELEMENT_LIMIT: number;
+export const REVIEW_PROJECTION_FACTS_SERIALIZED_LENGTH_LIMIT: number;
 
 export class ReviewProjectionFactOverflowError extends Error {
   code: "REVIEW_PROJECTION_FACTS_OVERFLOW";

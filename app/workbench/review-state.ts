@@ -1,4 +1,8 @@
 import type { ReviewFilter, ReviewPresentation, ReviewSide } from "./review-document";
+import {
+  DEFAULT_ACTIVE_REVIEW_FOCUS_GROUP_ID,
+  nextActiveReviewFocusGroupId,
+} from "../lib/review-focus-state.js";
 
 export type ReviewPageView = "split" | ReviewSide;
 export type ReviewChangeFilter = ReviewFilter;
@@ -10,6 +14,7 @@ export type ReviewState = {
   changeFilter: ReviewChangeFilter;
   contextVisibility: number;
   navigationTarget: string;
+  activeFocusGroupId: string | null;
   pagePresentation: ReviewPresentation;
   scrollMode: ReviewScrollMode;
   zoomMode: ReviewZoomMode;
@@ -20,6 +25,7 @@ export type ReviewStateAction =
   | { type: "set-change-filter"; value: ReviewChangeFilter }
   | { type: "set-context-visibility"; value: number }
   | { type: "set-navigation-target"; value: string }
+  | { type: "set-active-focus-group"; value: string | null }
   | { type: "set-page-presentation"; value: ReviewPresentation }
   | { type: "set-scroll-mode"; value: ReviewScrollMode }
   | { type: "set-zoom-mode"; value: ReviewZoomMode };
@@ -29,6 +35,7 @@ export const DEFAULT_REVIEW_STATE: ReviewState = {
   changeFilter: "all",
   contextVisibility: 18,
   navigationTarget: "all",
+  activeFocusGroupId: DEFAULT_ACTIVE_REVIEW_FOCUS_GROUP_ID,
   pagePresentation: { before: [], after: [] },
   scrollMode: "linked",
   zoomMode: "actual",
@@ -55,6 +62,15 @@ export function reduceReviewState(
       return state.navigationTarget === action.value
         ? state
         : { ...state, navigationTarget: action.value };
+    case "set-active-focus-group": {
+      const activeFocusGroupId = nextActiveReviewFocusGroupId(
+        state.activeFocusGroupId,
+        action.value,
+      );
+      return state.activeFocusGroupId === activeFocusGroupId
+        ? state
+        : { ...state, activeFocusGroupId };
+    }
     case "set-page-presentation": {
       const normalize = (side: ReviewSide) => {
         const seen = new Set<string>();

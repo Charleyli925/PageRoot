@@ -300,10 +300,28 @@ test("a genuinely tainted Canvas proves the unreadable branch", async ({ page })
 test("source projection activates existing text UI without creating replacement changes", {
   tag: ["@gate-smoke", "@smoke-review"],
 }, async ({ page }) => {
+  // Earlier cases install bootstrap listeners in the same Playwright page.
+  // Navigate once so this stateful focus assertion owns a fresh Window realm.
+  await page.goto("about:blank");
   const bootstrap = generatedReviewBootstrap([], "after", [HOST_ID]);
-  await page.setContent(`<!doctype html><script>${bootstrap}</script><p data-pageroot-id="${HOST_ID}"><span data-pageroot-review-text="added" data-pageroot-review-marker="change-1" data-pageroot-review-marker-types="text" data-pageroot-review-summary="新增内容">new</span></p>`);
-  await expect(page.locator('[data-pageroot-review-overlay-box="change-1"]')).toHaveCount(1);
+  const fact = JSON.stringify([{
+    id: "text-1",
+    type: "text",
+    semanticOwnerId: "semantic-owner-1",
+    geometryOwnerId: "geometry-owner-1",
+    scope: "text",
+    tone: "added",
+    textGroup: "text-group-1",
+    displayGroupId: "display-text-1",
+    displayOwnerId: "display-owner-1",
+    displayScope: "paragraph",
+    operation: "insert",
+    summary: "新增内容",
+  }]).replaceAll('"', "&quot;");
+  await page.setContent(`<!doctype html><script>${bootstrap}</script><p data-pageroot-id="${HOST_ID}" data-pageroot-review-geometry-owner="geometry-owner-1" data-pageroot-review-display-owner="display-owner-1"><span data-pageroot-review-text="added" data-pageroot-review-marker="change-1" data-pageroot-review-marker-types="text" data-pageroot-review-summary="新增内容" data-pageroot-review-projection-facts="${fact}">new</span></p>`);
+  await expect(page.locator('[data-pageroot-review-overlay-box="change-1"]')).toHaveCount(0);
   await expect(page.locator('[data-pageroot-review-text-mark="added"]')).not.toHaveCount(0);
+  await expect(page.locator("[data-pageroot-review-mask-dim]")).toHaveCount(0);
   const activated = await page.evaluate(async ({ stableId }) => {
     let port = null;
     addEventListener("message", (event) => {
@@ -329,6 +347,23 @@ test("source projection activates existing text UI without creating replacement 
     return Boolean(port);
   }, { stableId: HOST_ID });
   expect(activated).toBe(true);
+  const focusGroupId = await page.locator("[data-pageroot-review-region-bar]")
+    .first().getAttribute("data-pageroot-review-focus-group");
+  expect(focusGroupId).toBeTruthy();
+  await page.evaluate((activeFocusGroupId) => postMessage({
+    source: "pageroot-ai-review-parent",
+    sessionId: "review-session",
+    type: "state",
+    state: {
+      filter: "all",
+      focus: "change-1",
+      activeFocusGroupId,
+      transparency: 18,
+      scale: 1,
+    },
+  }, "*"), focusGroupId);
+  await expect(page.locator("html"))
+    .toHaveAttribute("data-pageroot-review-focus-group", focusGroupId);
   await expect(page.locator('[data-pageroot-review-overlay-box="change-1"]')).toHaveCount(1);
   await expect(page.locator('[data-pageroot-review-text-mark="added"]')).not.toHaveCount(0);
   await expect(page.locator("[data-pageroot-review-mask-dim]")).toHaveCount(1);

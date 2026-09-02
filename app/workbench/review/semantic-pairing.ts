@@ -24,6 +24,7 @@ import {
   stableElementIdentity,
 } from "./parse";
 import type {
+  ReviewDisplayScope,
   ReviewSemanticPairGraph,
   ReviewSemanticPairNode,
   ReviewSemanticUnit,
@@ -31,6 +32,23 @@ import type {
   SectionPair,
   TextRange,
 } from "./types";
+
+export function reviewDisplayScopeForUnit(unit: ReviewSemanticUnit): ReviewDisplayScope {
+  // Numbered <br> rows are semantic list items even though they share one DOM
+  // owner. Runtime resolves the row between its neighbouring <br> elements.
+  if (unit.kind === "br-line") return "list-item";
+  if (unit.kind === "list-item" || unit.element.matches("li")) return "list-item";
+  if (unit.kind === "table-cell" || unit.element.matches("td, th")) return "cell";
+  if (unit.element.matches(
+    "button, input, select, textarea, summary, a[href], [role='button'], [role='tab'], [role='menuitem']",
+  )) return "component";
+  if (
+    unit.kind === "leaf-text-block"
+    || unit.kind === "direct-flow"
+    || unit.element.matches("p, h1, h2, h3, h4, h5, h6, blockquote, address, pre, caption, dd, dt, figcaption")
+  ) return "paragraph";
+  return "container";
+}
 
 export const REVIEW_LEAF_TEXT_OWNER_TAGS = new Set([
   "ADDRESS",

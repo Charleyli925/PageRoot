@@ -1,7 +1,9 @@
 import {
+  reviewDisplayScopeForUnit,
   semanticElementName,
 } from "./semantic-pairing";
 import type {
+  ReviewDisplayScope,
   ReviewSemanticPairGraph,
 } from "./types";
 
@@ -11,9 +13,19 @@ export type StructureDifferenceStats = {
   changed: boolean;
 };
 
-export function markStructureElement(element: Element, tone: string, semanticOwnerId: string) {
+export function markStructureElement(
+  element: Element,
+  tone: string,
+  semanticOwnerId: string,
+  geometryOwnerId: string,
+  displayScope: ReviewDisplayScope,
+) {
   element.setAttribute("data-pageroot-review-structure", tone);
   element.setAttribute("data-pageroot-review-semantic-owner", semanticOwnerId);
+  element.setAttribute("data-pageroot-review-geometry-owner", geometryOwnerId);
+  element.setAttribute("data-pageroot-review-display-group", `display-${semanticOwnerId}`);
+  element.setAttribute("data-pageroot-review-display-owner", `display-owner-${semanticOwnerId}`);
+  element.setAttribute("data-pageroot-review-display-scope", displayScope);
 }
 
 export function* markStructureDifferenceSteps(
@@ -36,10 +48,22 @@ export function* markStructureDifferenceSteps(
     const stableCommon = beforeElement?.getAttribute("data-pageroot-review-stable-common") === "true"
       || afterElement?.getAttribute("data-pageroot-review-stable-common") === "true";
     if (!beforeElement && afterElement && ownsElement && !stableCommon) {
-      markStructureElement(afterElement, "added", pair.semanticOwnerId);
+      markStructureElement(
+        afterElement,
+        "added",
+        pair.semanticOwnerId,
+        pair.geometryOwnerId,
+        reviewDisplayScopeForUnit(pair.after!),
+      );
       stats.added.push(semanticElementName(afterElement));
     } else if (beforeElement && !afterElement && ownsElement && !stableCommon) {
-      markStructureElement(beforeElement, "removed", pair.semanticOwnerId);
+      markStructureElement(
+        beforeElement,
+        "removed",
+        pair.semanticOwnerId,
+        pair.geometryOwnerId,
+        reviewDisplayScopeForUnit(pair.before!),
+      );
       stats.removed.push(semanticElementName(beforeElement));
     } else if ((beforeElement && afterElement) || stableCommon) {
       for (let index = pair.children.length - 1; index >= 0; index -= 1) {

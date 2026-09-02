@@ -68,6 +68,12 @@ function rewriteReport(source) {
   )?.[0];
   return source
     .replace("边缘旧值", "边缘新值")
+    .replace("只替换两个字", "只替换两处词")
+    .replace(
+      "第二段包含甲指标、乙指标、丙指标、丁指标和戊指标。",
+      "第二段包含新甲口径、新乙口径、新丙口径、新丁口径和新戊口径。",
+    )
+    .replace("border-left: 2px solid #ddd", "border-left: 5px solid #6d5ce7")
     .replace(ordinaryModule || "\u0000", "")
     .replace(TREND_BEFORE, TREND_AFTER)
     .replace(NOTE_BEFORE, NOTE_AFTER)
@@ -318,6 +324,40 @@ async function activeFootprintVisibleInOuterViewport(page, frame, side) {
     }, footprint);
 }
 
+async function focusGroupForFact(frame, selector, predicate) {
+  return frame.locator(selector).evaluate((root, expected) => {
+    const elements = [
+      root,
+      ...root.querySelectorAll("[data-pageroot-review-projection-facts]"),
+    ];
+    for (const element of elements) {
+      const facts = JSON.parse(
+        element.getAttribute("data-pageroot-review-projection-facts") || "[]",
+      );
+      const fact = facts.find((candidate) => Object.entries(expected).every(
+        ([key, value]) => candidate[key] === value,
+      ));
+      if (!fact) continue;
+      const changeId = element.getAttribute("data-pageroot-review-marker") || "";
+      const id = fact.structureChange === "style"
+        ? `focus-${fact.displayGroupId}`
+        : `focus-${changeId}-${fact.displayGroupId}`;
+      return { id, changeId, displayGroupId: fact.displayGroupId };
+    }
+    return null;
+  }, predicate);
+}
+
+async function activateFocusGroup(beforeFrame, afterFrame, group) {
+  expect(group).toBeTruthy();
+  await afterFrame.locator(
+    `[data-pageroot-review-region-bar][data-pageroot-review-focus-group="${group.id}"]`,
+  ).first().evaluate((bar) => bar.click());
+  await expect.poll(async () => Promise.all([beforeFrame, afterFrame].map((frame) => (
+    frame.locator("html").getAttribute("data-pageroot-review-focus-group")
+  )))).toEqual([group.id, group.id]);
+}
+
 test("the review projection annotates a dense report cleanly and accurately", async () => {
   test.setTimeout(240_000);
   const fixture = createSourceFixture({
@@ -346,15 +386,129 @@ test("the review projection annotates a dense report cleanly and accurately", as
     const beforeFrame = launched.page.frameLocator('iframe[title^="修改前"]');
     const afterFrame = launched.page.frameLocator('iframe[title^="修改后"]');
     await expect.poll(
-      async () => afterFrame.locator("[data-pageroot-review-overlay-box]").count(),
+      async () => afterFrame.locator("[data-pageroot-review-region-bar]").count(),
       { timeout: 30_000 },
     ).toBeGreaterThan(0);
+    for (const frame of [beforeFrame, afterFrame]) {
+      await expect(frame.locator("[data-pageroot-review-overlay-box]")).toHaveCount(0);
+      await expect(frame.locator("[data-pageroot-review-mask-hole]")).toHaveCount(0);
+      await expect(frame.locator("[data-pageroot-review-mask-dim]")).toHaveCount(0);
+    }
+    const overviewEvidence = {
+      before: await readProjection(beforeFrame),
+      after: await readProjection(afterFrame),
+    };
+    const paragraphOneGroup = await focusGroupForFact(
+      afterFrame,
+      "[data-review-paragraph-one]",
+      { type: "text" },
+    );
+    const paragraphTwoGroup = await focusGroupForFact(
+      afterFrame,
+      "[data-review-paragraph-two]",
+      { type: "text" },
+    );
+    expect(paragraphOneGroup.id).not.toBe(paragraphTwoGroup.id);
+    for (const group of [paragraphOneGroup, paragraphTwoGroup]) {
+      await activateFocusGroup(beforeFrame, afterFrame, group);
+      for (const frame of [beforeFrame, afterFrame]) {
+        const boxes = frame.locator(
+          `[data-pageroot-review-overlay-box][data-pageroot-review-focus-group="${group.id}"]`,
+        );
+        await expect(boxes).toHaveCount(1);
+        await expect(boxes).toHaveAttribute("data-scope", "text-block");
+        await expect(boxes.locator("[data-pageroot-review-overlay-label]")).toHaveCount(1);
+        await expect(boxes.locator("[data-pageroot-review-overlay-label]")).not.toContainText("×");
+        await expect(frame.locator("[data-pageroot-review-overlay-box]")).toHaveCount(1);
+        await expect(frame.locator("[data-pageroot-review-mask-hole]")).toHaveCount(1);
+      }
+    }
+    const cssGroup = await focusGroupForFact(
+      afterFrame,
+      '.metric[data-report-metric="overall"]',
+      { type: "structure", structureChange: "style" },
+    );
+    await activateFocusGroup(beforeFrame, afterFrame, cssGroup);
+    for (const frame of [beforeFrame, afterFrame]) {
+      const cssBox = frame.locator(
+        `[data-pageroot-review-overlay-box][data-pageroot-review-focus-group="${cssGroup.id}"]`,
+      );
+      await expect(cssBox).toHaveCount(1);
+      await expect(cssBox).toHaveAttribute("data-scope", "container");
+      await expect(cssBox.locator("[data-pageroot-review-overlay-label]")).toHaveCount(1);
+      await expect(frame.locator("[data-pageroot-review-mask-hole]")).toHaveCount(1);
+      await expect.poll(() => cssBox.evaluate((box) => {
+        const grid = document.querySelector(".metrics");
+        if (!grid) return false;
+        const boxRect = box.getBoundingClientRect();
+        const gridRect = grid.getBoundingClientRect();
+        return Math.abs(boxRect.left - (gridRect.left - 3)) < .75
+          && Math.abs(boxRect.top - (gridRect.top - 3)) < .75
+          && Math.abs(boxRect.width - (gridRect.width + 6)) < .75
+          && Math.abs(boxRect.height - (gridRect.height + 6)) < .75;
+      })).toBe(true);
+    }
+    const singleStyleGroup = await focusGroupForFact(
+      afterFrame,
+      "[data-review-single-style]",
+      { type: "structure", structureChange: "style" },
+    );
+    await activateFocusGroup(beforeFrame, afterFrame, singleStyleGroup);
+    for (const frame of [beforeFrame, afterFrame]) {
+      const singleBox = frame.locator(
+        `[data-pageroot-review-overlay-box][data-pageroot-review-focus-group="${singleStyleGroup.id}"]`,
+      );
+      await expect(singleBox).toHaveCount(1);
+      await expect.poll(() => singleBox.evaluate((box) => {
+        const owner = document.querySelector("[data-review-single-style]");
+        if (!owner) return false;
+        const boxRect = box.getBoundingClientRect();
+        const ownerRect = owner.getBoundingClientRect();
+        return Math.abs(boxRect.left - (ownerRect.left - 3)) < .75
+          && Math.abs(boxRect.top - (ownerRect.top - 3)) < .75
+          && Math.abs(boxRect.width - (ownerRect.width + 6)) < .75
+          && Math.abs(boxRect.height - (ownerRect.height + 6)) < .75;
+      })).toBe(true);
+    }
+    await activateFocusGroup(beforeFrame, afterFrame, paragraphTwoGroup);
     await expect(launched.page.getByRole("button", { name: "原始大小", exact: true }))
       .toHaveAttribute("aria-pressed", "true");
     await expect.poll(async () => Promise.all([
       activeFootprintVisibleInOuterViewport(launched.page, beforeFrame, "before"),
       activeFootprintVisibleInOuterViewport(launched.page, afterFrame, "after"),
     ]).then((visible) => visible.every(Boolean)), { timeout: 30_000 }).toBe(true);
+
+    const activePathsMatch = (frame) => frame.locator("html").evaluate(() => {
+      const boxes = [...document.querySelectorAll("[data-pageroot-review-overlay-box]")]
+        .map((box) => box.getAttribute("data-path") || "").sort();
+      const holes = [...document.querySelectorAll("[data-pageroot-review-mask-hole]")]
+        .map((hole) => hole.getAttribute("d") || "").sort();
+      return boxes.length > 0 && JSON.stringify(boxes) === JSON.stringify(holes);
+    });
+    for (const frame of [beforeFrame, afterFrame]) {
+      await frame.locator("html").evaluate(async () => {
+        const style = document.createElement("style");
+        style.id = "review-dynamic-font-test";
+        style.textContent = "body, body * { font-family: Menlo, monospace !important; }";
+        document.head.append(style);
+        await document.fonts?.ready;
+        dispatchEvent(new Event("resize"));
+      });
+    }
+    await expect.poll(async () => Promise.all([
+      activePathsMatch(beforeFrame),
+      activePathsMatch(afterFrame),
+    ]).then((matches) => matches.every(Boolean))).toBe(true);
+    for (const frame of [beforeFrame, afterFrame]) {
+      await frame.locator("html").evaluate(() => {
+        document.getElementById("review-dynamic-font-test")?.remove();
+        dispatchEvent(new Event("resize"));
+      });
+    }
+    await expect.poll(async () => Promise.all([
+      activePathsMatch(beforeFrame),
+      activePathsMatch(afterFrame),
+    ]).then((matches) => matches.every(Boolean))).toBe(true);
 
     const captureDirectory = path.join(productRoot, "output", "design-qa");
     mkdirSync(captureDirectory, { recursive: true });
@@ -390,19 +544,13 @@ test("the review projection annotates a dense report cleanly and accurately", as
         projection.documentWidth,
         `${side}: projection chrome must not widen the authored document`,
       ).toBeLessThanOrEqual(projection.authoredDocumentWidth + 0.01);
+      expect(projection.holes.length, `${side}: active outlines and holes share one record set`)
+        .toBe(projection.boxes.length);
       expect(
-        projection.boxes.some((box) => (
-          box.fact.includes("stable-style") || box.summary.includes("样式调整")
-        )),
-        `${side}: simple-selector CSS must bind to concrete elements`,
-      ).toBe(true);
-      expect(projection.holes.length, `${side}: quiet element changes must not all cut mask holes`)
-        .toBeLessThanOrEqual(projection.boxes.length);
-      expect(
-        projection.boxes.filter((box) => box.active !== "true" && !box.types.includes("text"))
-          .every((box) => box.labelVisible === false),
-        `${side}: inactive element captions must remain quiet`,
-      ).toBe(true);
+        projection.boxes.filter((box) => box.labelVisible).length,
+        `${side}: one active focus group has at most one label`,
+      ).toBeLessThanOrEqual(1);
+      expect(projection.boxes.every((box) => !box.label.includes("×"))).toBe(true);
       projection.holes.forEach((hole) => {
         const box = projection.boxes.find((candidate) => (
           candidate.changeId === hole.changeId
@@ -410,10 +558,7 @@ test("the review projection annotates a dense report cleanly and accurately", as
           && candidate.fact === hole.fact
         ));
         expect(box, `${side}: every emphasized mask hole needs a canonical box`).toBeTruthy();
-        expect(
-          box.types.includes("text") || box.active === "true",
-          `${side}: only text or the active element change may cut a mask hole`,
-        ).toBe(true);
+        expect(box.active, `${side}: only active focus records cut mask holes`).toBe("true");
         for (const [kind, geometry] of [["box", box], ["hole", hole]]) {
           expect(geometry.left, `${side}: ${kind} ${box.changeId} crosses the left edge`)
             .toBeGreaterThanOrEqual(0);
@@ -487,13 +632,24 @@ test("the review projection annotates a dense report cleanly and accurately", as
       expect(ordinary.descendantText, `${side}: unmatched ordinary div repeats text facts`).toBe(0);
       expect(ordinary.descendantStructure, `${side}: unmatched ordinary div repeats structure facts`).toBe(0);
     }
-    const edgeOwner = await afterFrame.locator("[data-review-edge-added]")
-      .getAttribute("data-pageroot-review-semantic-owner");
     const edgeChangeId = await afterFrame.locator("[data-review-edge-added]")
       .getAttribute("data-pageroot-review-marker");
-    const edgeBox = projections.after.boxes.find((box) => (
+    const edgeDisplayGroupId = await afterFrame.locator("[data-review-edge-added]")
+      .evaluate((element) => JSON.parse(
+        element.getAttribute("data-pageroot-review-projection-facts") || "[]",
+      )[0]?.displayGroupId || "");
+    const edgeFocusGroupId = `focus-${edgeChangeId}-${edgeDisplayGroupId}`;
+    await afterFrame.locator(
+      `[data-pageroot-review-region-bar][data-pageroot-review-focus-group="${edgeFocusGroupId}"]`,
+    ).first().evaluate((bar) => bar.click());
+    await expect(afterFrame.locator("html"))
+      .toHaveAttribute("data-pageroot-review-focus-group", edgeFocusGroupId);
+    await expect(afterFrame.locator(
+      `[data-pageroot-review-overlay-box][data-pageroot-review-focus-group="${edgeFocusGroupId}"]`,
+    )).toHaveCount(1);
+    const edgeProjection = await readProjection(afterFrame);
+    const edgeBox = edgeProjection.boxes.find((box) => (
       box.changeId === edgeChangeId
-      && box.owner === edgeOwner
       && box.types.includes("structure")
     ));
     expect(edgeBox, "right-edge addition must produce one structural footprint").toBeTruthy();
@@ -510,7 +666,7 @@ test("the review projection annotates a dense report cleanly and accurately", as
     expect(
       edgeBox.left + edgeBox.width,
       `right-edge structural footprint must clamp to the authored edge: ${JSON.stringify({ edgeBox, edgeElementGeometry })}`,
-    ).toBeCloseTo(projections.after.authoredDocumentWidth, 5);
+    ).toBeCloseTo(edgeProjection.authoredDocumentWidth, 5);
 
     expect(edgeChangeId).toBeTruthy();
     const outerViewports = {
@@ -565,15 +721,12 @@ test("the review projection annotates a dense report cleanly and accurately", as
         ).toBeUndefined();
         expect(box.borderWidth, `${side}: outlines must stay thin`).toBeLessThanOrEqual(4);
       }
-      // Two outlines crossing each other around one sentence read as noise even
-      // when neither contains the other. Stacked line or block rectangles of one
-      // owner are a legitimate exception: each has to reach below its glyphs to
-      // keep the green dots inside its own footprint, so at tight leading they
-      // share a hairline edge.
+      // Two independent outlines crossing around one semantic owner read as
+      // noise. Text presentation is reading-block only.
       const stackedRun = (left, right) => (
         left.owner === right.owner
-        && ["text-line", "text-block"].includes(left.scope)
-        && ["text-line", "text-block"].includes(right.scope)
+        && left.scope === "text-block"
+        && right.scope === "text-block"
       );
       for (const box of projection.boxes) {
         const crossing = projection.boxes.find((candidate) => (
@@ -594,54 +747,24 @@ test("the review projection annotates a dense report cleanly and accurately", as
       }
     }
 
-    // 1a. Resting state is quiet. A confirmed change shows no outline color
-    //     until hover or focus reaches for it — the entry state focuses the
-    //     first change, so its own boxes are the one allowed claim. Captions
-    //     and revision bars follow a change's contiguous stretches: a change
-    //     never carries more captions than stretches, a resting caption
-    //     carries a ×N multiplier exactly when it represents a genuine
-    //     cluster of N nearby same-caption stretches, and every change is
-    //     indexed by at least one page-edge revision bar.
-    const restsTransparent = (color) => (
-      color === "transparent" || /^rgba\(\d+, \d+, \d+, 0\)$/u.test(color)
-    );
+    // 1a. Focus renders only the active semantic group. It owns one public
+    //     caption without an internal-fragment multiplier; navigation bars
+    //     remain the overview index for all groups.
     for (const [side, projection] of Object.entries(projections)) {
       const captionsByChange = new Map();
       for (const box of projection.boxes) {
-        if (box.active !== "true") {
-          expect(
-            restsTransparent(box.borderColor),
-            `${side}: "${box.summary}" rests with a visible ${box.borderColor} outline`,
-          ).toBe(true);
-        }
+        expect(box.active, `${side}: rendered boxes belong to the active group`).toBe("true");
         if (!box.label) continue;
-        if (box.active !== "true") {
-          if (box.labelCount > 1) {
-            expect(
-              box.label.endsWith(` ×${box.labelCount}`),
-              `${side}: cluster caption "${box.label}" must end with ×${box.labelCount}`,
-            ).toBe(true);
-          } else {
-            expect(
-              box.label.includes(" ×"),
-              `${side}: resting caption "${box.label}" carries a multiplier without a cluster`,
-            ).toBe(false);
-          }
-        }
+        expect(box.label.includes(" ×"), `${side}: focus label exposes fragment counts`)
+          .toBe(false);
         captionsByChange.set(box.changeId, (captionsByChange.get(box.changeId) || 0) + 1);
       }
       const barsByChange = new Map();
       for (const bar of projection.bars) {
         barsByChange.set(bar.changeId, (barsByChange.get(bar.changeId) || 0) + 1);
       }
-      for (const [changeId, count] of captionsByChange) {
-        expect(
-          count,
-          `${side}: change ${changeId} carries ${count} captions for ${barsByChange.get(changeId) || 0} stretches`,
-        ).toBeLessThanOrEqual(barsByChange.get(changeId) || 0);
-      }
-      expect(captionsByChange.size, `${side}: no caption anchors the page`)
-        .toBeGreaterThan(0);
+      expect([...captionsByChange.values()].reduce((sum, count) => sum + count, 0),
+        `${side}: active focus must have at most one caption`).toBeLessThanOrEqual(1);
       for (const box of projection.boxes) {
         expect(
           barsByChange.has(box.changeId),
@@ -654,33 +777,7 @@ test("the review projection annotates a dense report cleanly and accurately", as
       }
     }
 
-    // 1b. Hover previews without claiming: pointing at a resting change shows
-    //     its outline, and leaving the page rests it again.
-    await afterFrame.locator("html").evaluate(() => {
-      const box = [...document.querySelectorAll("[data-pageroot-review-overlay-box]")]
-        .find((candidate) => (
-          candidate.dataset.active !== "true"
-        ));
-      if (!box) throw new Error("no resting box to hover");
-      const rect = box.getBoundingClientRect();
-      window.dispatchEvent(new PointerEvent("pointermove", {
-        clientX: rect.left + rect.width / 2,
-        clientY: rect.top + rect.height / 2,
-      }));
-    });
-    await expect.poll(async () => afterFrame.locator(
-      '[data-pageroot-review-overlay-box][data-hover="true"]',
-    ).count(), { timeout: 10_000 }).toBeGreaterThan(0);
-    await afterFrame.locator("html").evaluate(() => {
-      window.dispatchEvent(new PointerEvent("pointerout"));
-    });
-    await expect.poll(async () => afterFrame.locator(
-      '[data-pageroot-review-overlay-box][data-hover="true"]',
-    ).count(), { timeout: 10_000 }).toBe(0);
-
-    // 1c. Focus claims the outline: clicking a page marker colors its own
-    //     boxes and highlights its revision bar while every other confirmed
-    //     change stays at rest.
+    // 1b. Focus claims exactly one semantic group; inactive groups have no box.
     await afterFrame.locator("[data-pageroot-review-region-bar]").first().click();
     await expect.poll(async () => {
       const sides = {
@@ -691,21 +788,20 @@ test("the review projection annotates a dense report cleanly and accurately", as
         .filter((box) => box.active === "true");
       if (!activeBoxes.length) return "no active box";
       const claimed = activeBoxes.every((box) => !restsTransparent(box.borderColor));
-      const othersRest = [...sides.before.boxes, ...sides.after.boxes]
-        .filter((box) => box.active !== "true")
-        .every((box) => restsTransparent(box.borderColor));
+      const noInactiveBoxes = [...sides.before.boxes, ...sides.after.boxes]
+        .every((box) => box.active === "true");
       const barClaimed = [...sides.before.bars, ...sides.after.bars]
         .some((bar) => bar.active === "true");
       if (!claimed) return "active box still transparent";
-      if (!othersRest) return "a resting box is colored";
+      if (!noInactiveBoxes) return "an inactive group still rendered a box";
       if (!barClaimed) return "no active revision bar";
       return "ok";
     }, { timeout: 15_000 }).toBe("ok");
 
     // 2. The strike must read as a dashed rule. A round cap adds one stroke
     //    thickness to every dash and removes it from every gap.
-    expect(projections.before.strikes.length).toBeGreaterThan(0);
-    for (const strike of projections.before.strikes) {
+    expect(overviewEvidence.before.strikes.length).toBeGreaterThan(0);
+    for (const strike of overviewEvidence.before.strikes) {
       const [dash, gap] = strike.dashArray.split(" ").map(Number);
       expect(gap - strike.thickness, `dash pattern ${strike.dashArray} @ ${strike.thickness}px`)
         .toBeGreaterThan(1);
@@ -714,11 +810,11 @@ test("the review projection annotates a dense report cleanly and accurately", as
 
     // 3. Green dots: exactly one per written character, centred on it, never on
     //    punctuation, and one shared baseline per rendered row.
-    const dots = projections.after.dots;
+    const dots = overviewEvidence.after.dots;
     expect(dots.length).toBeGreaterThan(0);
     const positions = new Set(dots.map((dot) => `${Math.round(dot.x)}|${Math.round(dot.y)}`));
     expect(positions.size, "a character must not be dotted twice").toBe(dots.length);
-    const nearestGlyph = (dot) => projections.after.glyphs
+    const nearestGlyph = (dot) => overviewEvidence.after.glyphs
       .slice()
       .sort((left, right) => (
         Math.abs(left.centerX - dot.x) - Math.abs(right.centerX - dot.x)
@@ -737,7 +833,7 @@ test("the review projection annotates a dense report cleanly and accurately", as
     }
     // One dot per written character and none anywhere else: the dot count must
     // equal the number of letters, digits and ideographs under the markers.
-    const writtenGlyphs = projections.after.glyphs.filter((glyph) => (
+    const writtenGlyphs = overviewEvidence.after.glyphs.filter((glyph) => (
       !/[\p{P}\p{S}\s]/u.test(glyph.character)
     ));
     expect(dots.length, "every written character gets one dot and nothing else does")
@@ -791,12 +887,20 @@ test("the review projection annotates a dense report cleanly and accurately", as
       expect(nested.text, `${side}: wholly changed elements must not repeat text marks`).toBe(0);
     }
 
+    await activateFocusGroup(beforeFrame, afterFrame, singleStyleGroup);
     for (const [filter, name] of [["文字变化", "text"], ["元素变化", "structure"]]) {
       await launched.page.getByRole("button", { name: filter, exact: true }).click();
       await expect.poll(
         async () => afterFrame.locator("html").getAttribute("data-pageroot-review-filter"),
         { timeout: 15_000 },
       ).toBe(name);
+      for (const frame of [beforeFrame, afterFrame]) {
+        await expect(frame.locator("html"))
+          .toHaveAttribute("data-pageroot-review-focus-group", "");
+        await expect(frame.locator("[data-pageroot-review-overlay-box]")).toHaveCount(0);
+        await expect(frame.locator("[data-pageroot-review-mask-hole]")).toHaveCount(0);
+        await expect(frame.locator("[data-pageroot-review-mask-dim]")).toHaveCount(0);
+      }
       await launched.page.screenshot({
         path: path.join(captureDirectory, `review-annotation-${name}.png`),
         animations: "disabled",

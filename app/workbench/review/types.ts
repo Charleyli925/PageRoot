@@ -50,6 +50,7 @@ export type ReviewDocuments = {
   bootstrapFallbackJavaScript: Record<ReviewSide, string>;
   changes: ReviewChange[];
   outline: ReviewOutlineItem[];
+  focusGroups: ReviewFocusGroup[];
   commentGroups: ReviewCommentGroup[];
   commentTargets: ReviewCommentTarget[];
   /** Pending source candidates are private input to the frame observer. */
@@ -57,6 +58,38 @@ export type ReviewDocuments = {
   visualEvidence: SourceEvidence[];
   diagnostics: ReviewDiagnostic[];
   reviewImpact?: ReviewImpact;
+};
+
+export type ReviewDisplayScope =
+  | "paragraph"
+  | "list-item"
+  | "cell"
+  | "component"
+  | "container";
+
+export type ReviewFocusGroup = {
+  id: string;
+  kind: "text" | "style" | "structure";
+  changeId: string;
+  changeIds: string[];
+  displayGroupId: string;
+  /** Primary owner retained for simple consumers; groups may have many owners. */
+  displayOwnerId: string;
+  displayOwnerIds: string[];
+  displayScope: ReviewDisplayScope;
+  atomIds: string[];
+  /** Region plans only; the disposable Runtime resolves current geometry. */
+  regions: Record<ReviewSide, ReviewFocusRegionPlan[]>;
+  beforePresent: boolean;
+  afterPresent: boolean;
+};
+
+export type ReviewFocusRegionPlan = {
+  id: string;
+  side: ReviewSide;
+  geometry: "runtime";
+  displayOwnerIds: string[];
+  atomIds: string[];
 };
 
 export type ReviewImpact = {
@@ -176,4 +209,7 @@ export type ReviewTextEvidenceGroup = {
   operation: ReviewTextChangeOperation;
   semanticOwnerId: string;
   geometryOwnerId: string;
+  displayGroupId: string;
+  displayOwnerId: string;
+  displayScope: ReviewDisplayScope;
 };

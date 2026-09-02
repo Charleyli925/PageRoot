@@ -8,6 +8,7 @@ import {
   parseReviewProjectionFacts,
   ReviewProjectionFactOverflowError,
   REVIEW_PROJECTION_FACTS_PER_ELEMENT_LIMIT,
+  REVIEW_PROJECTION_FACTS_SERIALIZED_LENGTH_LIMIT,
   reviewProjectionFactKey,
   reviewProjectionFactsCanMerge,
   reviewProjectionFactsForFilter,
@@ -36,6 +37,9 @@ const removedText = {
   tone: "removed",
   textGroup: "text-group-1",
   summary: "删除内容",
+  displayGroupId: "display-paragraph-1",
+  displayOwnerId: "display-owner-paragraph-1",
+  displayScope: "paragraph",
 };
 
 test("projection keeps text and source-structure facts in the existing filters", () => {
@@ -102,6 +106,35 @@ test("only the same fact and owners may merge", () => {
   assert.equal(reviewProjectionFactsCanMerge(addedElement, geometrySibling), false);
   assert.notEqual(reviewProjectionFactKey(addedElement), reviewProjectionFactKey(removedText));
   assert.notEqual(reviewProjectionFactKey(addedElement), reviewProjectionFactKey(geometrySibling));
+  assert.equal(
+    reviewProjectionFactKey(removedText),
+    reviewProjectionFactKey({
+      ...removedText,
+      displayGroupId: "another-display-group",
+      displayOwnerId: "another-display-owner",
+      displayScope: "container",
+    }),
+    "presentation grouping must not replace exact atom identity",
+  );
+});
+
+test("display grouping is bounded, optional, and uses semantic public scopes", () => {
+  for (const displayScope of ["paragraph", "list-item", "cell", "component", "container"]) {
+    assert.equal(normalizeReviewProjectionFact({ ...removedText, displayScope })?.displayScope, displayScope);
+  }
+  const legacy = normalizeReviewProjectionFact({
+    id: "legacy-text",
+    type: "text",
+    semanticOwnerId: "legacy-owner",
+  });
+  assert.ok(legacy);
+  assert.equal(legacy.displayGroupId, undefined);
+  assert.equal(legacy.displayOwnerId, undefined);
+  assert.equal(legacy.displayScope, undefined);
+  assert.equal(normalizeReviewProjectionFact({
+    ...removedText,
+    displayScope: "text-line",
+  })?.displayScope, undefined);
 });
 
 test("a repeated fact updates itself without deleting an independent fact", () => {
@@ -123,6 +156,32 @@ test("malformed serialized facts fail closed", () => {
     type: "structure",
     semanticOwnerId: "semantic-owner-4",
   }])), []);
+});
+
+test("the largest legal fact set round-trips inside the parser byte ceiling", () => {
+  const key = "a".repeat(160);
+  const summary = "\\\"".repeat(40);
+  const facts = Array.from(
+    { length: REVIEW_PROJECTION_FACTS_PER_ELEMENT_LIMIT },
+    (_, index) => ({
+      id: `${String(index).padStart(3, "0")}${key}`.slice(0, 160),
+      type: "text",
+      semanticOwnerId: key,
+      geometryOwnerId: key,
+      scope: "text-block",
+      operation: "replace",
+      tone: "added",
+      textGroup: key,
+      displayGroupId: key,
+      displayOwnerId: key,
+      displayScope: "paragraph",
+      structureChange: "style",
+      summary,
+    }),
+  );
+  const serialized = serializeReviewProjectionFacts(facts);
+  assert.ok(serialized.length <= REVIEW_PROJECTION_FACTS_SERIALIZED_LENGTH_LIMIT);
+  assert.deepEqual(parseReviewProjectionFacts(serialized), facts);
 });
 
 test("trusted analysis fails explicitly instead of dropping a twenty-fifth fact", () => {

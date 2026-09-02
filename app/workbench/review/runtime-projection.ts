@@ -1,12 +1,7 @@
-import {
-  aggregateReviewBadgeLabels,
-  reviewBadgeFactCount,
-  reviewBadgeLabelText,
-} from "../../lib/review-badge-aggregation.js";
-import {
-  reviewRegionAnnotations,
-} from "../../lib/review-region-annotation.js";
 import { OPAQUE_SANDBOX_STORAGE_BOOTSTRAP } from "../../lib/opaque-sandbox-storage.js";
+import {
+  REVIEW_PROJECTION_FACTS_SERIALIZED_LENGTH_LIMIT,
+} from "../../lib/review-projection-facts.js";
 import {
   alignReviewTextEvidenceDotRows,
   reviewTextEvidenceGraphemeEnd,
@@ -121,10 +116,7 @@ function reviewBootstrap(
   const reviewTextEvidenceIsPunctuationCode = ${reviewTextEvidenceIsPunctuationCode.toString()};
   const reviewTextEvidenceMarkGeometry = ${reviewTextEvidenceMarkGeometry.toString()};
   const alignReviewTextEvidenceDotRows = ${alignReviewTextEvidenceDotRows.toString()};
-  const reviewBadgeLabelText = ${reviewBadgeLabelText.toString()};
-  const reviewBadgeFactCount = ${reviewBadgeFactCount.toString()};
-  const aggregateReviewBadgeLabels = ${aggregateReviewBadgeLabels.toString()};
-  const reviewRegionAnnotations = ${reviewRegionAnnotations.toString()};
+  const reviewProjectionFactsSerializedLengthLimit = ${REVIEW_PROJECTION_FACTS_SERIALIZED_LENGTH_LIMIT};
   const runtimeVisualBindCall = (method) => Function.prototype.call.bind(method);
   const runtimeVisualFunctionHasInstance = runtimeVisualBindCall(
     Function.prototype[Symbol.hasInstance],
@@ -321,7 +313,13 @@ function reviewBootstrap(
   let confirmedVisualChangeIds = new RuntimeVisualSet();
   let mirroringPanel = false;
   let mirroringAction = false;
-  let currentState = { filter: "all", focus: "all", transparency: 18, scale: 1 };
+  let currentState = {
+    filter: "all",
+    focus: "all",
+    activeFocusGroupId: null,
+    transparency: 18,
+    scale: 1,
+  };
   const reviewParent = parent;
   const postToParent = reviewParent.postMessage.bind(reviewParent);
   const runtimeVisualAddEventListener = addEventListener.bind(window);
@@ -1835,6 +1833,8 @@ function reviewBootstrap(
     const fact = { id, type, semanticOwnerId };
     const geometryOwnerId = safeProjectionFactKey(value.geometryOwnerId);
     const textGroup = safeProjectionFactKey(value.textGroup);
+    const displayGroupId = safeProjectionFactKey(value.displayGroupId);
+    const displayOwnerId = safeProjectionFactKey(value.displayOwnerId);
     const structureChange = [
       "added",
       "removed",
@@ -1849,6 +1849,10 @@ function reviewBootstrap(
       .includes(value.scope)
       ? value.scope
       : "";
+    const displayScope = ["paragraph", "list-item", "cell", "component", "container"]
+      .includes(value.displayScope)
+      ? value.displayScope
+      : "";
     const operation = ["none", "insert", "delete", "replace"].includes(value.operation)
       ? value.operation
       : "";
@@ -1856,6 +1860,9 @@ function reviewBootstrap(
     const summary = safeProjectionSummary(value.summary);
     if (geometryOwnerId) fact.geometryOwnerId = geometryOwnerId;
     if (textGroup) fact.textGroup = textGroup;
+    if (displayGroupId) fact.displayGroupId = displayGroupId;
+    if (displayOwnerId) fact.displayOwnerId = displayOwnerId;
+    if (displayScope) fact.displayScope = displayScope;
     if (structureChange) fact.structureChange = structureChange;
     if (scope) fact.scope = scope;
     if (operation) fact.operation = operation;
@@ -1872,18 +1879,20 @@ function reviewBootstrap(
   const projectionFactsForElement = (element, fallbackSequence) => {
     const serialized = element.getAttribute("data-pageroot-review-projection-facts");
     if (serialized) {
+      if (serialized.length > reviewProjectionFactsSerializedLengthLimit) return [];
       try {
         const parsed = JSON.parse(serialized);
         if (!Array.isArray(parsed) || parsed.length > 24) return [];
-        const seen = new Set();
         const facts = [];
         for (const value of parsed) {
           const fact = normalizeProjectionFact(value);
           if (!fact) return [];
           const key = projectionFactIdentity(fact);
-          if (seen.has(key)) continue;
-          seen.add(key);
-          facts.push(fact);
+          const existingIndex = facts.findIndex((candidate) => (
+            projectionFactIdentity(candidate) === key
+          ));
+          if (existingIndex >= 0) facts[existingIndex] = { ...facts[existingIndex], ...fact };
+          else facts.push(fact);
         }
         return facts;
       } catch {
@@ -1906,6 +1915,9 @@ function reviewBootstrap(
         scope: "text",
         tone: element.getAttribute("data-pageroot-review-text") === "removed" ? "removed" : "added",
         textGroup,
+        displayGroupId: "display-fact-" + textGroup,
+        displayOwnerId: geometryOwnerId || semanticOwnerId,
+        displayScope: "paragraph",
         operation: element.getAttribute("data-pageroot-review-text-operation") || "",
         summary: element.getAttribute("data-pageroot-review-summary") || "",
       });
@@ -1918,6 +1930,9 @@ function reviewBootstrap(
         semanticOwnerId,
         ...(geometryOwnerId ? { geometryOwnerId } : {}),
         scope: "element",
+        displayGroupId: "display-fact-structure-" + semanticOwnerId,
+        displayOwnerId: geometryOwnerId || semanticOwnerId,
+        displayScope: "container",
         structureChange,
         summary: element.getAttribute("data-pageroot-review-summary")
           || structureSummary(structureChange),
@@ -1929,122 +1944,6 @@ function reviewBootstrap(
   // geometry decisions taken before rendering must use the same number or they
   // will judge two rectangles apart that end up overlapping on screen.
   const overlayInset = 3;
-  const recordContains = (outer, inner, tolerance = 2) => (
-    inner.left >= outer.left - tolerance
-    && inner.top >= outer.top - tolerance
-    && inner.right <= outer.right + tolerance
-    && inner.bottom <= outer.bottom + tolerance
-  );
-  const recordNestsWithin = (outer, inner) => {
-    if (
-      outer.element === inner.element
-      || !outer.element.contains(inner.element)
-      || !recordContains(outer, inner)
-      || outer.changeId !== inner.changeId
-      || outer.semanticOwnerId !== inner.semanticOwnerId
-      || outer.factIdentity !== inner.factIdentity
-      || outer.tone !== "structure"
-      || inner.tone !== "structure"
-    ) return false;
-    // Containment is only a rendering dedupe for repeated records of the same
-    // structure fact. An independently owned nested fact remains independently
-    // visible even when its rectangle sits wholly inside another change.
-    return true;
-  };
-  const recordsAreClose = (left, right, gap = 10) => {
-    const horizontalOverlap = Math.max(0, Math.min(left.right, right.right) - Math.max(left.left, right.left));
-    const verticalOverlap = Math.max(0, Math.min(left.bottom, right.bottom) - Math.max(left.top, right.top));
-    const minimumWidth = Math.max(1, Math.min(left.right - left.left, right.right - right.left));
-    const minimumHeight = Math.max(1, Math.min(left.bottom - left.top, right.bottom - right.top));
-    const continuousLineGap = Math.max(gap, Math.min(18, minimumHeight * .8));
-    const horizontalGap = Math.max(0, Math.max(left.left, right.left) - Math.min(left.right, right.right));
-    const verticalGap = Math.max(0, Math.max(left.top, right.top) - Math.min(left.bottom, right.bottom));
-    return (horizontalOverlap > 0 && verticalOverlap > 0)
-      || (verticalGap <= continuousLineGap && horizontalOverlap / minimumWidth >= .35)
-      || (horizontalGap <= gap && verticalOverlap / minimumHeight >= .35);
-  };
-  const fuseConnectedFragments = (rawFragments) => {
-    const fragments = rawFragments.map((fragment) => ({ ...fragment }));
-    for (let pass = 0; pass < 2; pass += 1) {
-      fragments.forEach((left, leftIndex) => fragments.forEach((right, rightIndex) => {
-        if (leftIndex >= rightIndex) return;
-        const horizontalOverlap = Math.max(0, Math.min(left.right, right.right) - Math.max(left.left, right.left));
-        const verticalOverlap = Math.max(0, Math.min(left.bottom, right.bottom) - Math.max(left.top, right.top));
-        const verticalGap = Math.max(0, Math.max(left.top, right.top) - Math.min(left.bottom, right.bottom));
-        const horizontalGap = Math.max(0, Math.max(left.left, right.left) - Math.min(left.right, right.right));
-        const minimumWidth = Math.max(1, Math.min(left.right - left.left, right.right - right.left));
-        const minimumHeight = Math.max(1, Math.min(left.bottom - left.top, right.bottom - right.top));
-        const continuousLineGap = Math.max(10, Math.min(18, minimumHeight * .8));
-        if (
-          verticalGap > 0
-          && verticalGap <= continuousLineGap
-          && horizontalOverlap / minimumWidth >= .35
-        ) {
-          const midpoint = (Math.min(left.bottom, right.bottom) + Math.max(left.top, right.top)) / 2;
-          if (left.top <= right.top) {
-            left.bottom = midpoint;
-            right.top = midpoint;
-          } else {
-            right.bottom = midpoint;
-            left.top = midpoint;
-          }
-        } else if (horizontalGap > 0 && horizontalGap <= 10 && verticalOverlap / minimumHeight >= .35) {
-          const midpoint = (Math.min(left.right, right.right) + Math.max(left.left, right.left)) / 2;
-          if (left.left <= right.left) {
-            left.right = midpoint;
-            right.left = midpoint;
-          } else {
-            right.right = midpoint;
-            left.left = midpoint;
-          }
-        }
-      }));
-    }
-    return fragments;
-  };
-  const mergeRecordGroup = (records) => {
-    const fragments = fuseConnectedFragments(records.flatMap((record) => (
-      record.fragments || [{
-        left: record.left,
-        top: record.top,
-        right: record.right,
-        bottom: record.bottom,
-      }]
-    )));
-    const factCount = new Set(records.map((record) => record.factIdentity)).size;
-    return {
-      ...records[0],
-      ownerKey: records[0].ownerKey || "",
-      scope: records[0].scope,
-      labelPrimary: records.some((record) => record.labelPrimary !== false),
-      labelCount: Math.max(reviewBadgeFactCount(records[0]), factCount),
-      fragments,
-      left: Math.min(...fragments.map((record) => record.left)),
-      top: Math.min(...fragments.map((record) => record.top)),
-      right: Math.max(...fragments.map((record) => record.right)),
-      bottom: Math.max(...fragments.map((record) => record.bottom)),
-      types: [...new Set(records.flatMap((record) => record.types))],
-      tones: [...new Set(records.flatMap((record) => record.tones))],
-    };
-  };
-  const mergeConnectedRecords = (records, canMerge) => {
-    const remaining = [...records];
-    const merged = [];
-    while (remaining.length) {
-      const group = [remaining.shift()];
-      let expanded = true;
-      while (expanded) {
-        expanded = false;
-        for (let index = remaining.length - 1; index >= 0; index -= 1) {
-          if (!group.some((record) => canMerge(record, remaining[index]))) continue;
-          group.push(remaining.splice(index, 1)[0]);
-          expanded = true;
-        }
-      }
-      merged.push(mergeRecordGroup(group));
-    }
-    return merged;
-  };
   const allModeSummary = (types, summary) => {
     if (summary === "新增元素" || summary === "删除元素") return summary;
     if (types.length === 1 && summary) return summary;
@@ -2061,12 +1960,15 @@ function reviewBootstrap(
       right: roundedCoordinate(rect.right - offsetLeft),
       bottom: roundedCoordinate(rect.bottom - offsetTop),
     }));
-    const xs = [...new Set(rects.flatMap((rect) => [rect.left, rect.right]))].sort((a, b) => a - b);
-    const ys = [...new Set(rects.flatMap((rect) => [rect.top, rect.bottom]))].sort((a, b) => a - b);
+    const xs = [...new Set(rects.flatMap((rect) => [rect.left, rect.right]))]
+      .sort((left, right) => left - right);
+    const ys = [...new Set(rects.flatMap((rect) => [rect.top, rect.bottom]))]
+      .sort((top, bottom) => top - bottom);
     const filled = ys.slice(0, -1).map((top, row) => xs.slice(0, -1).map((left, column) => {
       const centerX = (left + xs[column + 1]) / 2;
       const centerY = (top + ys[row + 1]) / 2;
-      return rects.some((rect) => centerX >= rect.left && centerX <= rect.right && centerY >= rect.top && centerY <= rect.bottom);
+      return rects.some((rect) => centerX >= rect.left && centerX <= rect.right
+        && centerY >= rect.top && centerY <= rect.bottom);
     }));
     const edges = [];
     const hasCell = (row, column) => runtimeVisualBoolean(filled[row]?.[column]);
@@ -2107,14 +2009,6 @@ function reviewBootstrap(
       }
     }
     return paths.join(" ");
-  };
-  const recordsOverlapStrongly = (left, right) => {
-    const width = Math.max(0, Math.min(left.right, right.right) - Math.max(left.left, right.left));
-    const height = Math.max(0, Math.min(left.bottom, right.bottom) - Math.max(left.top, right.top));
-    const intersection = width * height;
-    const leftArea = Math.max(1, (left.right - left.left) * (left.bottom - left.top));
-    const rightArea = Math.max(1, (right.right - right.left) * (right.bottom - right.top));
-    return intersection / Math.min(leftArea, rightArea) >= .62;
   };
   const rangeClientRects = (element) => {
     const range = document.createRange();
@@ -2173,340 +2067,189 @@ function reviewBootstrap(
     }
     return null;
   };
-  const recordsShareTextLine = (left, right) => {
-    const overlap = Math.max(0, Math.min(left.bottom, right.bottom) - Math.max(left.top, right.top));
-    const minimumHeight = Math.max(1, Math.min(left.bottom - left.top, right.bottom - right.top));
-    const leftCenter = (left.top + left.bottom) / 2;
-    const rightCenter = (right.top + right.bottom) / 2;
-    return overlap / minimumHeight >= .5
-      || Math.abs(leftCenter - rightCenter) <= minimumHeight * .45;
-  };
-  const textLineGroups = (records) => [...records]
-    .sort((left, right) => left.top - right.top || left.left - right.left)
-    .reduce((lines, record) => {
-      const line = lines.find((candidate) => candidate.some((item) => (
-        recordsShareTextLine(item, record)
-      )));
-      if (line) line.push(record);
-      else lines.push([record]);
-      return lines;
-    }, []);
-  const mergeTextLineIntervals = (records) => [...records]
-    .sort((left, right) => left.left - right.left)
-    .reduce((intervals, record) => {
-      const previous = intervals.at(-1);
-      if (!previous) {
-        intervals.push({ ...record });
-        return intervals;
-      }
-      const minimumHeight = Math.max(
-        1,
-        Math.min(previous.bottom - previous.top, record.bottom - record.top),
-      );
-      const gap = Math.max(0, record.left - previous.right);
-      if (gap <= Math.max(10, minimumHeight * .9)) {
-        previous.left = Math.min(previous.left, record.left);
-        previous.top = Math.min(previous.top, record.top);
-        previous.right = Math.max(previous.right, record.right);
-        previous.bottom = Math.max(previous.bottom, record.bottom);
-      } else {
-        intervals.push({ ...record });
-      }
-      return intervals;
-    }, []);
-  const expandTinyTextInterval = (record, ownerBounds, em) => {
-    const height = Math.max(1, record.bottom - record.top);
-    // A readable minimum is a property of the text, not of its line box. Sizing
-    // it from the line box made a two-character edit inside generous leading
-    // reserve roughly three characters of width, so the frame visibly cut into
-    // the untouched glyph on each side.
-    const glyph = Number.isFinite(em) && em > 0 ? em : height * 0.62;
-    const minimumWidth = Math.max(16, glyph * 1.5);
-    if (record.right - record.left >= minimumWidth || !ownerBounds) return record;
-    const leftBoundary = ownerBounds.left;
-    const rightBoundary = ownerBounds.right;
-    if (rightBoundary <= leftBoundary) return record;
-    if (rightBoundary - leftBoundary <= minimumWidth) {
-      return { ...record, left: leftBoundary, right: rightBoundary };
-    }
-    const center = (record.left + record.right) / 2;
-    let left = center - minimumWidth / 2;
-    let right = center + minimumWidth / 2;
-    if (left < leftBoundary) {
-      right += leftBoundary - left;
-      left = leftBoundary;
-    }
-    if (right > rightBoundary) {
-      left -= right - rightBoundary;
-      right = rightBoundary;
-    }
-    return {
-      ...record,
-      left: Math.max(leftBoundary, left),
-      right: Math.min(rightBoundary, right),
-    };
-  };
   const boundsForRects = (rects) => rects.length ? {
     left: Math.min(...rects.map((rect) => rect.left)),
     top: Math.min(...rects.map((rect) => rect.top)),
     right: Math.max(...rects.map((rect) => rect.right)),
     bottom: Math.max(...rects.map((rect) => rect.bottom)),
   } : null;
-  const ownerContentRecords = (owner) => contentTextRects(owner, true)
-    .filter((rect) => rect.width > 1 && rect.height > 1)
-    .map((rect) => ({
-      left: rect.left + scrollX,
-      top: rect.top + scrollY,
-      right: rect.right + scrollX,
-      bottom: rect.bottom + scrollY,
-    }));
-  const textOwnerAllowsParagraph = (owner) => {
-    if (!owner || !owner.matches(
-      "p, h1, h2, h3, h4, h5, h6, li, td, th, caption, div",
-    )) return false;
-    const style = getComputedStyle(owner);
-    if (
-      runtimeVisualRegExpExec(/^(?:inline-)?(?:grid|flex)$/u, style.display) !== null
-      || (style.columnCount !== "auto" && Number(style.columnCount) > 1)
-    ) return false;
-    if (owner.matches("div") && owner.querySelector(
-      ":scope > address, :scope > article, :scope > aside, :scope > blockquote, :scope > div, :scope > dl, :scope > figure, :scope > form, :scope > h1, :scope > h2, :scope > h3, :scope > h4, :scope > h5, :scope > h6, :scope > ol, :scope > p, :scope > section, :scope > table, :scope > ul",
-    )) return false;
-    return true;
-  };
-  const textLineModel = (records, index) => {
-    const intervals = mergeTextLineIntervals(records);
-    const bounds = boundsForRects(intervals);
-    const continuous = !intervals.some((interval, intervalIndex) => {
-      const next = intervals[intervalIndex + 1];
-      if (!next) return false;
-      const height = Math.max(1, Math.min(
-        interval.bottom - interval.top,
-        next.bottom - next.top,
-      ));
-      return next.left - interval.right > Math.max(24, height * 2);
-    });
-    return bounds ? { index, records, intervals, bounds, continuous } : null;
-  };
-  const ownerTextLineModels = (owner) => textLineGroups(ownerContentRecords(owner))
-    .map(textLineModel)
-    .filter(Boolean);
-  const readableParagraphBounds = (owner, lines) => {
-    // Two changed lines of one paragraph deserve one paragraph rectangle: a box
-    // per line stacks parallel outlines around continuous prose.
-    if (!textOwnerAllowsParagraph(owner) || lines.length < 2) return null;
-    if (lines.some((line) => !line.continuous)) return null;
-    const separatedRows = lines.some((line, index) => {
-      const next = lines[index + 1];
-      if (!next) return false;
-      const height = Math.max(1, Math.min(
-        line.bounds.bottom - line.bounds.top,
-        next.bounds.bottom - next.bounds.top,
-      ));
-      return next.bounds.top - line.bounds.bottom > Math.max(18, height * 1.5);
-    });
-    return separatedRows ? null : boundsForRects(lines.map((line) => line.bounds));
-  };
-  const additionEvidenceClearance = (record) => {
-    if (record.tone !== "text-added") return 0;
-    const fontSize = Number.parseFloat(getComputedStyle(record.element).fontSize || "0");
-    const uiScale = 1 / Math.max(.32, Math.min(1, Number(currentState.scale || 1)));
-    return reviewTextEvidenceMarkGeometry(record, fontSize, uiScale).addedClearance;
-  };
-  const textEvidenceEnvelope = (record) => ({
-    left: record.left,
-    top: record.top,
-    right: record.right,
-    bottom: record.bottom + additionEvidenceClearance(record),
-  });
-  const lineForTextRecord = (record, lines) => lines.find((line) => (
-    recordsShareTextLine(line.bounds, record)
-  )) || null;
-  const readablePhraseRecord = (records, ownerLine) => {
-    const base = records[0];
-    const exactBounds = boundsForRects(records);
-    if (!exactBounds) return null;
-    const em = Number.parseFloat(getComputedStyle(base.element).fontSize || "0");
-    const readableBounds = expandTinyTextInterval(exactBounds, ownerLine?.bounds || null, em);
-    const bounds = boundsForRects([
-      readableBounds,
-      ...records.map(textEvidenceEnvelope),
-    ]);
-    return bounds ? {
-      ...base,
-      ...bounds,
-      textGroups: [base.textGroup],
-      scope: "text-phrase",
-    } : null;
-  };
-  const recordsByTextGroup = (records) => records.reduce((groups, record) => {
-    const phrase = groups.get(record.textGroup) || [];
-    phrase.push(record);
-    groups.set(record.textGroup, phrase);
-    return groups;
-  }, new Map());
-  const textScopeOwnerKey = (record) => [
-    record.changeId,
-    record.semanticOwnerId,
-    record.geometryOwnerId,
-    record.textOperation,
-    record.tone,
-  ].join("|");
-  const promoteTextScopeRecords = (records) => {
-    const base = records[0];
-    const owner = textFootprintOwner(base.element, base.geometryOwnerId);
-    const ownerLines = owner ? ownerTextLineModels(owner) : [];
-    if (!owner || !ownerLines.length) {
-      return textLineGroups(records).flatMap((line, lineIndex) => {
-        return [...recordsByTextGroup(line).values()]
-          .map((phrase) => readablePhraseRecord(phrase, null))
-          .filter(Boolean)
-          .map((record) => ({ ...record, visualLine: String(lineIndex + 1) }));
-      });
+  const displayOwnerForAtom = (atom) => {
+    const ownerId = atom.displayOwnerId || "";
+    if (ownerId) {
+      const owner = document.querySelector(
+        '[data-pageroot-review-display-owner~="' + ownerId + '"]',
+      );
+      if (owner) return owner;
     }
-    const recordsByLine = new Map();
-    const unassigned = [];
-    records.forEach((record) => {
-      const line = lineForTextRecord(record, ownerLines);
-      if (!line) {
-        unassigned.push(record);
-        return;
-      }
-      const lineRecords = recordsByLine.get(line.index) || [];
-      lineRecords.push(record);
-      recordsByLine.set(line.index, lineRecords);
-    });
-    const lineResults = [];
-    const lineDecisions = ownerLines.map((line) => {
-      const lineRecords = recordsByLine.get(line.index) || [];
-      if (!lineRecords.length) return null;
-      const phraseRecords = recordsByTextGroup(lineRecords);
-      const evidenceBounds = boundsForRects(lineRecords);
-      const lineWidth = Math.max(1, line.bounds.right - line.bounds.left);
-      const spanRatio = evidenceBounds
-        ? (evidenceBounds.right - evidenceBounds.left) / lineWidth
-        : 0;
-      return {
-        line,
-        lineRecords,
-        phraseRecords,
-        phrases: [...phraseRecords.values()]
-          .map((phrase) => readablePhraseRecord(phrase, line))
-          .filter(Boolean),
-        // Only the semantic signals — several changed phrases, or evidence across
-        // most of the line — say the line itself was rewritten. That is the
-        // signal the paragraph rectangle is allowed to read.
-        semanticPromote: line.continuous && (phraseRecords.size >= 3 || spanRatio >= .6),
-        promote: line.continuous && (phraseRecords.size >= 3 || spanRatio >= .6),
-      };
-    }).filter(Boolean);
-    // Promotion exists to stop boxes stacking, so a collision is itself a
-    // promotion reason. Tight leading makes a narrow phrase rectangle reach into
-    // the line above or below, and two crossing outlines around one sentence read
-    // as noise; the line rectangle both lines share is the clean answer. This is
-    // a local layout accident, so it never feeds the paragraph decision below.
-    lineDecisions.forEach((decision, index) => {
-      const next = lineDecisions[index + 1];
-      if (!next) return;
-      const collides = decision.phrases.some((left) => next.phrases.some((right) => (
-        Math.min(left.right, right.right) - Math.max(left.left, right.left) > -overlayInset * 2
-        && Math.min(left.bottom, right.bottom) - Math.max(left.top, right.top) > -overlayInset * 2
-      )));
-      if (!collides) return;
-      if (decision.line.continuous) decision.promote = true;
-      if (next.line.continuous) next.promote = true;
-    });
-    let promotedLineCount = 0;
-    lineDecisions.forEach((decision) => {
-      const { line, lineRecords, phraseRecords, phrases, promote } = decision;
-      if (decision.semanticPromote) promotedLineCount += 1;
-      if (promote) {
-        const textGroups = [...phraseRecords.keys()];
-        const bounds = boundsForRects([
-          line.bounds,
-          ...lineRecords.map(textEvidenceEnvelope),
-        ]);
-        if (bounds) lineResults.push({
-          ...lineRecords[0],
-          ...bounds,
-          element: owner,
-          textGroup: textGroups[0],
-          textGroups,
-          scope: "text-line",
-          visualLine: String(line.index + 1),
-        });
-        return;
-      }
-      phrases.forEach((record) => lineResults.push({
-        ...record,
-        visualLine: String(line.index + 1),
-      }));
-    });
-    // The semantic signal earns a paragraph rectangle on its own. A collision may
-    // also earn one, but only when every line of the owner carries evidence: that
-    // way the rectangle can never reach over an untouched opening or closing line
-    // and misreport where the change is. A wrapped insertion whose every line is
-    // touched therefore reads as one rectangle instead of a ladder of line boxes.
-    const everyLineHasEvidence = lineDecisions.length === ownerLines.length;
-    const everyLinePromoted = lineDecisions.every((decision) => decision.promote);
-    if (
-      !unassigned.length
-      && (
-        promotedLineCount / ownerLines.length >= .75
-        || (everyLineHasEvidence && everyLinePromoted)
-      )
-    ) {
-      const paragraphBounds = readableParagraphBounds(owner, ownerLines);
-      const bounds = paragraphBounds ? boundsForRects([
-        paragraphBounds,
-        ...records.map(textEvidenceEnvelope),
-      ]) : null;
-      if (bounds) {
-        const textGroups = [...new Set(records.map((record) => record.textGroup))];
-        return [{
-          ...base,
-          ...bounds,
-          element: owner,
-          textGroup: textGroups[0],
-          textGroups,
-          scope: "text-block",
-          visualLine: "block",
-          summary: base.textOperation === "replace" ? "段落改写" : base.summary,
-          labelPrimary: true,
-        }];
-      }
+    if (atom.geometryOwnerId) {
+      const textOwner = atom.types.includes("text")
+        ? textFootprintOwner(atom.element, atom.geometryOwnerId)
+        : null;
+      const geometryOwner = textOwner || atom.element.closest(
+        '[data-pageroot-review-geometry-owner="' + atom.geometryOwnerId + '"]',
+      ) || document.querySelector(
+        '[data-pageroot-review-geometry-owner="' + atom.geometryOwnerId + '"]',
+      );
+      if (geometryOwner) return geometryOwner;
     }
-    if (unassigned.length) {
-      textLineGroups(unassigned).forEach((line, lineIndex) => {
-        recordsByTextGroup(line).forEach((phrase) => {
-          const record = readablePhraseRecord(phrase, null);
-          if (record) lineResults.push({
-            ...record,
-            visualLine: "unassigned-" + String(lineIndex + 1),
-          });
-        });
-      });
-    }
-    return lineResults;
+    return atom.element;
   };
-  const readableTextRecords = (records) => {
+  const nearestCommonDisplayContainer = (elements) => {
+    const unique = [...new Set(elements)];
+    if (unique.length < 2) return null;
+    let candidate = unique[0].parentElement;
+    while (candidate && candidate !== document.body && candidate !== document.documentElement) {
+      if (candidate.tagName !== "MAIN" && unique.every((element) => candidate.contains(element))) {
+        return candidate;
+      }
+      candidate = candidate.parentElement;
+    }
+    return null;
+  };
+  const directDisplayBranch = (container, element) => {
+    let branch = element;
+    while (branch.parentElement && branch.parentElement !== container) branch = branch.parentElement;
+    return branch.parentElement === container ? branch : null;
+  };
+  const repeatedCardContainer = (container, branches) => {
+    if (branches.length < 2) return false;
+    const tokens = branches.map((branch) => (
+      (branch.getAttribute("class") || "").toLowerCase().split(/\s+/).filter((token) => (
+        /(?:^|-)(?:card|tile|metric|kpi|stat)(?:-|$)/u.test(token)
+      ))
+    ));
+    return tokens.every((entry) => entry.length)
+      && tokens[0].some((token) => tokens.every((entry) => entry.includes(token)));
+  };
+  const promotableStyleContainer = (elements) => {
+    const container = nearestCommonDisplayContainer(elements);
+    if (!container) return null;
+    const branches = [...new Set(elements.map((element) => (
+      directDisplayBranch(container, element)
+    )).filter(Boolean))];
+    const eligible = [...container.children].filter((child) => {
+      const style = getComputedStyle(child);
+      const rect = child.getBoundingClientRect();
+      return style.display !== "none" && style.visibility !== "hidden"
+        && rect.width > 1 && rect.height > 1;
+    });
+    if (branches.length < 2 || !eligible.length || branches.length / eligible.length < .75) return null;
+    const display = getComputedStyle(container).display;
+    const semantic = /^(?:inline-)?(?:grid|flex)$/u.test(display)
+      || container.matches("ul, ol, [role='list']")
+      || repeatedCardContainer(container, branches);
+    return semantic ? container : null;
+  };
+  const reviewFocusGroupId = (changeId, displayGroupId, structureChange) => {
+    const groupKey = structureChange === "style"
+      ? displayGroupId
+      : changeId + "-" + displayGroupId;
+    return "focus-" + groupKey;
+  };
+  const buildReviewFocusGroups = (atoms) => {
     const groups = new Map();
-    records.forEach((record) => {
-      const key = textScopeOwnerKey(record);
-      const group = groups.get(key) || [];
-      group.push(record);
-      groups.set(key, group);
+    atoms.forEach((atom) => {
+      const displayGroupId = atom.displayGroupId || ("display-fact-" + atom.factIdentity);
+      const focusGroupId = reviewFocusGroupId(
+        atom.changeId,
+        displayGroupId,
+        atom.structureChange,
+      );
+      const current = groups.get(focusGroupId) || {
+        id: focusGroupId,
+        changeId: atom.changeId,
+        displayGroupId,
+        displayScope: atom.displayScope || (atom.types.includes("text") ? "paragraph" : "container"),
+        changeIds: new Set(),
+        atoms: [],
+      };
+      current.changeIds.add(atom.changeId);
+      current.atoms.push(atom);
+      groups.set(focusGroupId, current);
     });
-    const readable = [...groups.values()].flatMap(promoteTextScopeRecords)
-      .sort((left, right) => left.top - right.top || left.left - right.left);
-    const labelled = new Set();
-    return readable.map((record) => {
-      const key = textScopeOwnerKey(record);
-      const labelPrimary = record.labelPrimary === true || !labelled.has(key);
-      labelled.add(key);
-      return { ...record, labelPrimary };
-    });
+    return [...groups.values()].map((group) => ({
+      ...group,
+      changeId: [...group.changeIds].sort()[0] || group.changeId,
+    }));
   };
+  const numberedLineBounds = (owner, atoms) => {
+    if (owner.matches("li")) return null;
+    const marker = atoms.find((atom) => owner.contains(atom.element))?.element;
+    if (!marker) return null;
+    const breaks = [...owner.querySelectorAll("br")];
+    const previous = breaks.filter((element) => (
+      element.compareDocumentPosition(marker) & Node.DOCUMENT_POSITION_FOLLOWING
+    )).at(-1) || null;
+    const next = breaks.find((element) => (
+      element.compareDocumentPosition(marker) & Node.DOCUMENT_POSITION_PRECEDING
+    )) || null;
+    const range = document.createRange();
+    if (previous) range.setStartAfter(previous);
+    else range.setStart(owner, 0);
+    if (next) range.setEndBefore(next);
+    else range.setEnd(owner, owner.childNodes.length);
+    const bounds = boundsForRects(
+      [...range.getClientRects()].filter((rect) => rect.width > 1 && rect.height > 1),
+    );
+    range.detach();
+    return bounds;
+  };
+  const resolveReviewFocusGeometry = (groups) => groups.flatMap((group) => {
+    const owners = [...new Set(group.atoms.map(displayOwnerForAtom))];
+    const styleGroup = group.atoms.every((atom) => atom.structureChange === "style");
+    const promoted = styleGroup ? promotableStyleContainer(owners) : null;
+    const geometryOwners = promoted ? [promoted] : owners;
+    return geometryOwners.flatMap((owner, ownerIndex) => {
+      const ownerAtoms = promoted
+        ? group.atoms
+        : group.atoms.filter((atom) => displayOwnerForAtom(atom) === owner);
+      const semanticLineBounds = group.displayScope === "list-item"
+        ? numberedLineBounds(owner, ownerAtoms)
+        : null;
+      const paragraphBounds = group.displayScope === "paragraph"
+        ? boundsForRects(contentTextRects(owner, true))
+        : null;
+      const rect = semanticLineBounds || paragraphBounds || owner.getBoundingClientRect();
+      if (rect.width <= 1 || rect.height <= 1) return [];
+      const representative = ownerAtoms[0] || group.atoms[0];
+      const tones = [...new Set(ownerAtoms.flatMap((atom) => atom.tones))];
+      const types = [...new Set(ownerAtoms.flatMap((atom) => atom.types))];
+      const evidenceUiScale = 1 / Math.max(
+        .32,
+        Math.min(1, Number(currentState.scale || 1)),
+      );
+      const addedEvidenceClearance = tones.includes("text-added")
+        ? Math.max(...ownerAtoms.filter((atom) => atom.tone === "text-added").map((atom) => {
+          const em = Number.parseFloat(getComputedStyle(atom.element).fontSize || "0") || 16;
+          const dotRadius = Math.max(1.3, em * .08) * evidenceUiScale;
+          const dotGap = Math.max(.7, em * .04) * evidenceUiScale;
+          return dotGap + dotRadius + dotRadius * 1.17;
+        }), 0)
+        : 0;
+      return [{
+        ...representative,
+        element: owner,
+        focusGroupId: group.id,
+        displayGroupId: group.displayGroupId,
+        displayScope: group.displayScope,
+        ownerKey: group.id + ":" + String(ownerIndex + 1),
+        changeId: [...new Set(ownerAtoms.map((atom) => atom.changeId))].sort()[0]
+          || group.changeId,
+        factKey: ownerAtoms.map((atom) => atom.factKey).join(" "),
+        atomIds: [...new Set(ownerAtoms.map((atom) => atom.factIdentity))],
+        scope: types.includes("text") ? "text-block" : group.displayScope,
+        summary: allModeSummary(types, representative.summary),
+        tones,
+        tone: tones.length > 1 ? "mixed" : tones[0],
+        types,
+        addedEvidenceClearance,
+        left: rect.left + scrollX,
+        top: rect.top + scrollY,
+        right: rect.right + scrollX,
+        bottom: rect.bottom + scrollY,
+      }];
+    });
+  });
   // Hover preview: moving the pointer over a change region previews its
   // precise outline without a click. The projection layer itself never takes
   // pointer events, so hit-testing rides the document's pointer stream, one
@@ -2557,6 +2300,9 @@ function reviewBootstrap(
     if (projectionTransitioning) return;
     document.querySelector('[data-pageroot-review-projection-layer]')?.remove();
     const filter = currentState.filter || "all";
+    // Phase 1: collect immutable source-backed atoms. Their exact identities
+    // continue to own evidence marks and never become display grouping keys.
+    const collectReviewAtoms = () => {
     const records = [];
     const projectionEntriesByElement = new RuntimeVisualMap();
     let markerSequence = 0;
@@ -2601,6 +2347,9 @@ function reviewBootstrap(
               geometryOwnerId,
               factKey,
               factIdentity,
+              displayGroupId: fact.displayGroupId || ("display-fact-" + fact.id),
+              displayOwnerId: fact.displayOwnerId || geometryOwnerId || semanticOwnerId,
+              displayScope: fact.displayScope || "paragraph",
               ownerKey: "",
               textGroup,
               textOperation: fact.operation || "",
@@ -2626,6 +2375,9 @@ function reviewBootstrap(
             geometryOwnerId,
             factKey,
             factIdentity,
+            displayGroupId: fact.displayGroupId || ("display-fact-" + fact.id),
+            displayOwnerId: fact.displayOwnerId || geometryOwnerId || semanticOwnerId,
+            displayScope: fact.displayScope || "container",
             ownerKey: "",
             structureChange,
             scope,
@@ -2640,90 +2392,23 @@ function reviewBootstrap(
           }));
       });
     });
+    return records;
+    };
+    const records = collectReviewAtoms();
     const visibleRecords = records
       .filter((rect) => rect.right - rect.left > 1 && rect.bottom - rect.top > 1)
       .sort((left, right) => left.changeId.localeCompare(right.changeId) || left.top - right.top || left.left - right.left);
-    const readableRecords = [
-      ...visibleRecords.filter((record) => (
-        record.tone !== "text-added" && record.tone !== "text-removed"
-      )),
-      ...readableTextRecords(visibleRecords.filter((record) => (
-        record.tone === "text-added" || record.tone === "text-removed"
-      ))),
-    ].sort((left, right) => left.changeId.localeCompare(right.changeId) || left.top - right.top || left.left - right.left);
-    const structureDominators = filter === "all"
-      ? readableRecords.filter((record) => (
-        record.tone === "structure"
-        && (record.structureChange === "added" || record.structureChange === "removed")
-      ))
+    // Phase 2 groups atoms by explicit semantic presentation identity. Phase 3
+    // resolves current geometry from display owners; no distance threshold can
+    // merge facts from different groups.
+    const focusGroups = buildReviewFocusGroups(visibleRecords);
+    const resolvedGroups = resolveReviewFocusGeometry(focusGroups)
+      .sort((left, right) => left.changeId.localeCompare(right.changeId)
+        || left.top - right.top || left.left - right.left);
+    const activeFocusGroupId = safeProjectionFactKey(currentState.activeFocusGroupId);
+    let merged = activeFocusGroupId
+      ? resolvedGroups.filter((record) => record.focusGroupId === activeFocusGroupId)
       : [];
-    const ownerFilteredRecords = readableRecords.filter((record) => !(
-      (record.tone === "text-added" || record.tone === "text-removed")
-      && structureDominators.some((candidate) => (
-        candidate.changeId === record.changeId
-        && candidate.semanticOwnerId === record.semanticOwnerId
-      ))
-    ));
-    const minimalRecords = ownerFilteredRecords.filter((record, index) => {
-      if (record.tone === "text-added" || record.tone === "text-removed") return true;
-      return !ownerFilteredRecords.some((candidate, candidateIndex) => {
-        if (
-          index === candidateIndex
-          || record.changeId !== candidate.changeId
-          || record.semanticOwnerId !== candidate.semanticOwnerId
-          || record.factIdentity !== candidate.factIdentity
-          || record.tone !== candidate.tone
-        ) return false;
-        const recordArea = (record.right - record.left) * (record.bottom - record.top);
-        const candidateArea = (candidate.right - candidate.left) * (candidate.bottom - candidate.top);
-        return candidateArea < recordArea * .86 && recordContains(record, candidate);
-      });
-    });
-    const textRecords = minimalRecords.filter((record) => (
-      record.tone === "text-added" || record.tone === "text-removed"
-    ));
-    const nonTextRecords = minimalRecords.filter((record) => (
-      record.tone !== "text-added" && record.tone !== "text-removed"
-    ));
-    // Collapse only duplicate geometry records for the same structure fact.
-    // Containment alone is never evidence that an independently owned nested
-    // fact is redundant.
-    const containedRecords = mergeConnectedRecords(
-      [...nonTextRecords].sort((left, right) => (
-        (right.right - right.left) * (right.bottom - right.top)
-        - (left.right - left.left) * (left.bottom - left.top)
-      )),
-      (left, right) => left.changeId === right.changeId && (
-        recordNestsWithin(left, right) || recordNestsWithin(right, left)
-      ),
-    );
-    let merged = [
-      ...textRecords,
-      ...mergeConnectedRecords(containedRecords, (left, right) => (
-        left.changeId === right.changeId
-        && left.semanticOwnerId === right.semanticOwnerId
-        && left.factIdentity === right.factIdentity
-        && left.tone === right.tone
-        && recordsAreClose(left, right)
-      )),
-    ].sort((left, right) => left.changeId.localeCompare(right.changeId) || left.top - right.top || left.left - right.left);
-    if (filter === "all") {
-      merged = mergeConnectedRecords(merged, (left, right) => (
-        !left.types.includes("text")
-        && !right.types.includes("text")
-        && left.changeId === right.changeId
-        && left.semanticOwnerId === right.semanticOwnerId
-        // “全部变化” may suppress a structural child by its explicit owner
-        // rule, but it must never turn merely adjacent independent facts into
-        // one outline or one mask hole.
-        && left.factIdentity === right.factIdentity
-        && recordsOverlapStrongly(left, right)
-      )).map((record) => ({
-        ...record,
-        tone: record.tones.length > 1 ? "mixed" : record.tones[0],
-        summary: allModeSummary(record.types, record.summary),
-      }));
-    }
     const inset = overlayInset;
     // Measure the authored document after the previous projection layer has
     // been removed. The projection may consume this width but must never grow
@@ -2744,7 +2429,11 @@ function reviewBootstrap(
         left: clamp(fragment.left - inset, 0, documentWidth),
         top: clamp(fragment.top - inset, 0, height),
         right: clamp(fragment.right + inset, 0, documentWidth),
-        bottom: clamp(fragment.bottom + inset, 0, height),
+        bottom: clamp(
+          fragment.bottom + Math.max(inset, record.addedEvidenceClearance || 0),
+          0,
+          height,
+        ),
       })).filter((fragment) => (
         fragment.right - fragment.left > 0
         && fragment.bottom - fragment.top > 0
@@ -2764,55 +2453,22 @@ function reviewBootstrap(
         pathData: unionPath(renderFragments),
       }];
     });
-    if (!merged.length) {
-      overlayHoverRegions = [];
-      overlayElementsByChange = new RuntimeVisualMap();
-      setHoverChange("");
-      return;
-    }
-    // One contiguous stretch of a change carries one caption and one
-    // page-edge revision bar. A change may touch places far apart on the
-    // page, so captions and bars follow its spatial clusters instead of one
-    // distant caption per changeId; navigation and the 变化区域 count stay
-    // per change. Caption chrome is counter-scaled to a constant screen size,
-    // so the cluster reach grows as the canvas shrinks; adjacent same-caption
-    // stretches still collapse to one representative, and a focused change
-    // always keeps its own captions.
+    // Navigation bars remain available for every resolved group in overview;
+    // only the active group's first outline carries the single public label.
     const badgeUiScale = 1 / Math.max(.32, Math.min(1, Number(currentState.scale || 1)));
-    const regions = reviewRegionAnnotations(
-      merged,
-      { clusterGap: 28 * badgeUiScale },
-    );
-    const labelledAnchors = aggregateReviewBadgeLabels(regions.map((region) => ({
-      changeId: region.changeId,
-      summary: region.summary,
-      left: region.left,
-      right: region.right,
-      // Cluster by caption anchor: the caption sits at the region's top edge,
-      // so two captions crowd when they share a column and their anchors sit
-      // within one caption's reach — not merely because two tall regions'
-      // edges come close somewhere far below the captions.
-      top: region.top,
-      bottom: region.top,
-    })), {
-      focus: currentState.focus,
-      labelReach: 26 * badgeUiScale,
-    });
+    const regions = resolvedGroups.map((record) => ({
+      changeId: record.changeId,
+      focusGroupId: record.focusGroupId,
+      left: record.left,
+      top: record.top,
+      right: record.right,
+      bottom: record.bottom,
+      carrier: record,
+    }));
     const labelByCarrier = new RuntimeVisualMap();
-    regions.forEach((region, regionIndex) => {
-      const anchor = labelledAnchors[regionIndex];
-      if (!anchor || anchor.labelPrimary === false) return;
-      const focused = currentState.focus !== "all" && currentState.focus === region.changeId;
-      // At rest a genuine cluster of same-caption stretches reads
-      // "{caption} ×N" (N stretches nearby); a focused stretch always speaks
-      // for itself with per-kind fact counts and never carries the cluster
-      // count.
-      runtimeVisualMapSet(labelByCarrier, region.carrier, {
-        text: focused
-          ? region.detail
-          : reviewBadgeLabelText(region.summary, anchor.labelCount || 1),
-        clusterCount: focused ? 1 : (anchor.labelCount || 1),
-      });
+    if (merged[0]) runtimeVisualMapSet(labelByCarrier, merged[0], {
+      text: merged[0].summary,
+      clusterCount: 1,
     });
     overlayElementsByChange = new RuntimeVisualMap();
     const layer = document.createElement("div");
@@ -2820,6 +2476,7 @@ function reviewBootstrap(
     layer.style.setProperty("width", documentWidth + "px", "important");
     layer.style.setProperty("height", height + "px", "important");
     const namespace = "http://www.w3.org/2000/svg";
+    if (merged.length) {
     const svg = document.createElementNS(namespace, "svg");
     svg.setAttribute("data-pageroot-review-mask-layer", "true");
     svg.setAttribute("width", String(documentWidth));
@@ -2865,16 +2522,14 @@ function reviewBootstrap(
     maskBackground.setAttribute("fill", "#ffffff");
     resetMaskPrimitive(maskBackground, "#ffffff");
     mask.append(maskBackground);
-    const emphasizedRecords = merged.filter((record) => (
-      record.types.includes("text")
-      || (currentState.focus !== "all" && currentState.focus === record.changeId)
-    ));
+    const emphasizedRecords = merged;
     emphasizedRecords.forEach((record) => {
       const hole = document.createElementNS(namespace, "path");
       hole.setAttribute("data-pageroot-review-mask-hole", record.changeId);
       hole.setAttribute("data-pageroot-review-semantic-owner", record.semanticOwnerId || "");
       hole.setAttribute("data-pageroot-review-geometry-owner", record.geometryOwnerId || "");
       hole.setAttribute("data-pageroot-review-fact", record.factKey || "");
+      hole.setAttribute("data-pageroot-review-focus-group", record.focusGroupId || "");
       if (record.textGroup) hole.setAttribute("data-text-group", record.textGroup);
       if (record.textGroups?.length) {
         hole.setAttribute("data-text-groups", record.textGroups.join(" "));
@@ -2909,8 +2564,14 @@ function reviewBootstrap(
     dim.setAttribute("fill-opacity", dimOpacity);
     resetMaskPrimitive(dim, "#ffffff");
     dim.style.setProperty("fill-opacity", dimOpacity, "important");
+    dim.style.setProperty(
+      "backdrop-filter",
+      "grayscale(var(--pageroot-review-context-grayscale)) saturate(var(--pageroot-review-context-saturation)) blur(1px)",
+      "important",
+    );
     svg.append(dim);
     layer.append(svg);
+    }
     if (filter === "all" || filter === "text") {
       const uiScale = 1 / Math.max(.32, Math.min(1, Number(currentState.scale || 1)));
       const marksSvg = document.createElementNS(namespace, "svg");
@@ -2925,6 +2586,18 @@ function reviewBootstrap(
       document.querySelectorAll("[data-pageroot-review-text]").forEach((marker) => {
         const markerChangeId = marker.getAttribute("data-pageroot-review-marker") || "";
         if (!runtimeVisualSetHas(confirmedVisualChangeIds, markerChangeId)) return;
+        if (activeFocusGroupId) {
+          const belongsToActiveGroup = runtimeVisualArraySome(visibleRecords, (atom) => (
+            atom.element === marker
+            && atom.types.includes("text")
+            && reviewFocusGroupId(
+              atom.changeId,
+              atom.displayGroupId,
+              atom.structureChange,
+            ) === activeFocusGroupId
+          ));
+          if (!belongsToActiveGroup) return;
+        }
         const tone = marker.getAttribute("data-pageroot-review-text") || "";
         if (tone !== "added" && tone !== "removed") return;
         const fontSize = Number.parseFloat(getComputedStyle(marker).fontSize || "0");
@@ -2964,7 +2637,7 @@ function reviewBootstrap(
                   addedDots.push({
                     x: geometry.dotX,
                     y: geometry.dotY,
-                    radius: geometry.dotRadius,
+                    radius: geometry.dotRadius * 1.17,
                     em: geometry.em,
                   });
                 } else {
@@ -3022,6 +2695,8 @@ function reviewBootstrap(
       box.setAttribute("data-pageroot-review-semantic-owner", record.semanticOwnerId || "");
       box.setAttribute("data-pageroot-review-geometry-owner", record.geometryOwnerId || "");
       box.setAttribute("data-pageroot-review-fact", record.factKey || "");
+      box.setAttribute("data-pageroot-review-focus-group", record.focusGroupId || "");
+      box.setAttribute("data-pageroot-review-display-group", record.displayGroupId || "");
       if (record.ownerKey) {
         box.setAttribute("data-pageroot-review-overlay-owner", record.ownerKey);
       }
@@ -3038,8 +2713,7 @@ function reviewBootstrap(
         "data-pageroot-review-fragment-count",
         String((record.renderFragments || []).length || 1),
       );
-      const active = currentState.focus !== "all" && currentState.focus === record.changeId;
-      box.dataset.active = active ? "true" : "false";
+      box.dataset.active = "true";
       const left = record.left;
       const top = record.top;
       const width = record.right - record.left;
@@ -3081,7 +2755,10 @@ function reviewBootstrap(
         label.addEventListener("click", (event) => {
           event.preventDefault();
           event.stopPropagation();
-          post("select-change", { changeId: record.changeId });
+          post("select-change", {
+            changeId: record.changeId,
+            focusGroupId: record.focusGroupId,
+          });
         });
         box.append(label);
       }
@@ -3091,10 +2768,11 @@ function reviewBootstrap(
       layer.append(box);
     });
     regions.forEach((region) => {
-      const focusedRegion = currentState.focus !== "all" && currentState.focus === region.changeId;
+      const focusedRegion = activeFocusGroupId === region.focusGroupId;
       const regionElements = runtimeVisualMapGet(overlayElementsByChange, region.changeId) || [];
       const bar = document.createElement("div");
       bar.setAttribute("data-pageroot-review-region-bar", region.changeId);
+      bar.setAttribute("data-pageroot-review-focus-group", region.focusGroupId || "");
       bar.dataset.active = focusedRegion ? "true" : "false";
       const barTop = Math.max(0, region.top - inset);
       const barHeight = Math.max(8 * badgeUiScale, region.bottom + inset - barTop);
@@ -3104,7 +2782,10 @@ function reviewBootstrap(
       bar.setAttribute("data-top", String(barTop));
       bar.setAttribute("data-height", String(barHeight));
       bar.addEventListener("click", () => {
-        post("select-change", { changeId: region.changeId });
+        post("select-change", {
+          changeId: region.changeId,
+          focusGroupId: region.focusGroupId,
+        });
       });
       bar.addEventListener("pointerenter", () => setHoverChange(region.changeId));
       bar.addEventListener("pointerleave", () => setHoverChange(""));
@@ -3123,29 +2804,36 @@ function reviewBootstrap(
     hoveredChangeId = "";
     setHoverChange(rehover);
     document.body.append(layer);
-    document.documentElement.dataset.pagerootReviewOverlays = merged.length ? "true" : "false";
+    document.documentElement.dataset.pagerootReviewOverlays = resolvedGroups.length ? "true" : "false";
     scheduleLayoutReport();
   }
   const applyState = (state) => {
     currentState = { ...currentState, ...state };
     const root = document.documentElement;
-    root.dataset.pagerootReviewFilter = state.filter || "all";
-    root.dataset.pagerootReviewFocus = state.focus || "all";
-    const transparency = Math.max(0, Math.min(100, Number(state.transparency ?? 18))) / 100;
+    root.dataset.pagerootReviewFilter = currentState.filter || "all";
+    root.dataset.pagerootReviewFocus = currentState.focus || "all";
+    root.dataset.pagerootReviewFocusGroup = currentState.activeFocusGroupId || "";
+    const transparency = Math.max(
+      0,
+      Math.min(100, Number(currentState.transparency ?? 18)),
+    ) / 100;
     root.style.setProperty("--pageroot-review-context-opacity", String(transparency));
     root.style.setProperty("--pageroot-review-context-grayscale", String((1 - transparency) * .55));
     root.style.setProperty("--pageroot-review-context-saturation", String(.7 + transparency * .3));
-    root.style.setProperty("--pageroot-review-ui-scale", String(1 / Math.max(.32, Math.min(1, Number(state.scale || 1)))));
+    root.style.setProperty("--pageroot-review-ui-scale", String(1 / Math.max(
+      .32,
+      Math.min(1, Number(currentState.scale || 1)),
+    )));
     document.querySelectorAll("[data-pageroot-outline-id]").forEach((element) => {
-      element.dataset.pagerootReviewActive = state.focus === "all"
-        || element.dataset.pagerootReviewId === state.focus
-        || element.dataset.pagerootOutlineId === state.focus
+      element.dataset.pagerootReviewActive = currentState.focus === "all"
+        || element.dataset.pagerootReviewId === currentState.focus
+        || element.dataset.pagerootOutlineId === currentState.focus
         ? "true"
         : "false";
     });
     document.querySelectorAll("[data-pageroot-review-marker]").forEach((element) => {
-      element.dataset.pagerootReviewActive = state.focus !== "all"
-        && element.getAttribute("data-pageroot-review-marker") === state.focus
+      element.dataset.pagerootReviewActive = currentState.focus !== "all"
+        && element.getAttribute("data-pageroot-review-marker") === currentState.focus
         ? "true"
         : "false";
     });

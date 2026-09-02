@@ -5,6 +5,7 @@ import {
 } from "../../lib/review-text-diff.js";
 import {
   flattenReviewSemanticPairs,
+  reviewDisplayScopeForUnit,
 } from "./semantic-pairing";
 import {
   REVIEW_MOVED_TEXT_ACCOUNTED_ATTRIBUTE,
@@ -77,6 +78,9 @@ export function applyTextFootprintMetadata(
   marker.dataset.pagerootReviewTextOperation = group.operation;
   marker.dataset.pagerootReviewSemanticOwner = group.semanticOwnerId;
   marker.dataset.pagerootReviewGeometryOwner = group.geometryOwnerId;
+  marker.dataset.pagerootReviewDisplayGroup = group.displayGroupId;
+  marker.dataset.pagerootReviewDisplayOwner = group.displayOwnerId;
+  marker.dataset.pagerootReviewDisplayScope = group.displayScope;
 }
 
 export function wrapTextRanges(
@@ -132,6 +136,13 @@ export function markSemanticTextFootprintOwner(
     "data-pageroot-review-geometry-owner",
     groups[0]?.geometryOwnerId || "",
   );
+  const displayOwners = new Set(
+    (unit.element.getAttribute("data-pageroot-review-display-owner") || "")
+      .split(/\s+/u)
+      .filter(Boolean),
+  );
+  groups.forEach((group) => displayOwners.add(group.displayOwnerId));
+  unit.element.setAttribute("data-pageroot-review-display-owner", [...displayOwners].join(" "));
 }
 
 export function markSemanticTextDifferences(graph: ReviewSemanticPairGraph): {
@@ -180,6 +191,14 @@ export function markSemanticTextDifferences(graph: ReviewSemanticPairGraph): {
       operation: plan.operation,
       semanticOwnerId: pair.semanticOwnerId,
       geometryOwnerId,
+      // Precise phrase ranges remain independent facts, while every phrase in
+      // one semantic reading unit points at the same public focus group.
+      // Unmatched one-sided children intentionally inherit a semantic owner.
+      // Include this pair's group base so separate numbered <br> rows never
+      // collapse back into one visual group through that inherited identity.
+      displayGroupId: `display-${pair.semanticOwnerId}-${groupBase}`,
+      displayOwnerId: `display-owner-${pair.semanticOwnerId}-${groupBase}`,
+      displayScope: reviewDisplayScopeForUnit(pair.before || pair.after!),
     }));
     const beforeGroups = createGroups(plan.before.phraseGroups, pair.geometryOwnerId);
     const afterGroups = createGroups(plan.after.phraseGroups, pair.geometryOwnerId);

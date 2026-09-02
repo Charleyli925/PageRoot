@@ -552,6 +552,14 @@ test("Workbench and review surfaces route to architecture or observable runtime 
     "ai-review-smoke",
   ]);
 
+  const reviewFocusState = selectGatePlan({
+    map,
+    lane: "task",
+    changedFiles: ["app/workbench/review-state.ts"],
+  });
+  assert.deepEqual(reviewFocusState.selectedNodeTests, ["tests/review-state.test.mjs"]);
+  assert.deepEqual(suiteIds(reviewFocusState), ["typecheck", "lint", "node-targeted"]);
+
   const commentRail = selectGatePlan({
     map,
     lane: "task",

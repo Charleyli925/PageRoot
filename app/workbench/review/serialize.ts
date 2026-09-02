@@ -457,6 +457,7 @@ export function prepareDocument(
   document.documentElement.dataset.pagerootReviewSide = side;
   document.documentElement.dataset.pagerootReviewFilter = "all";
   document.documentElement.dataset.pagerootReviewFocus = "all";
+  document.documentElement.dataset.pagerootReviewFocusGroup = "";
 
   const style = document.createElement("style");
   style.id = REVIEW_STYLE_ID;
