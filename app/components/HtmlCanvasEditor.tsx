@@ -4866,7 +4866,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           behavior: "auto",
         });
       }
-      requestAnimationFrame(updateOverlayPosition);
+      requestAnimationFrame(() => updateOverlayPosition());
       return nextSelectionWithContext;
     },
     [finishNativeEditing, observeSelectedElement, updateMoveAvailability, updateOverlayPosition, updateSelectedStyle],
@@ -5919,7 +5919,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
             element.scrollIntoView({ behavior: "smooth", block: "center", inline: "nearest" });
           }
         }
-        requestAnimationFrame(updateOverlayPosition);
+        requestAnimationFrame(() => updateOverlayPosition());
         return sourceSelection;
       } catch (cause) {
         reportBlockedEdit(cause);
