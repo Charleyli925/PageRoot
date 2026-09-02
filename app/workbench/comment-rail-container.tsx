@@ -868,12 +868,12 @@ export const CommentRailContainer = memo(function CommentRailContainer({
             - (commentRailLayout.composerTop as number)
             - composerHeight
           : 0;
-        const boundedRailOffset = Math.max(
-          request.itemKey === "__composer"
-            ? Math.min(nextRailOffset, composerBottomOffset)
-            : nextRailOffset,
-          commentRailMinimumOffset,
-        );
+        const boundedRailOffset = request.itemKey === "__composer"
+          ? Math.max(
+              Math.min(nextRailOffset, composerBottomOffset),
+              commentRailMinimumOffset,
+            )
+          : nextRailOffset;
         commentRailOffsetRef.current = boundedRailOffset;
         setCommentRailFollowsFocus(true);
         setCommentRailOffset(boundedRailOffset);
