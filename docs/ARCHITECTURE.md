@@ -196,16 +196,26 @@ the historical synthetic-spike decision.
   discovery. Only the before bootstrap reports geometry, so authored code
   cannot react to a comment marker.
   Exact leaf text ranges remain immutable evidence. Presentation is a separate,
-  explicit contract: every atom may name a bounded display group, display owner
-  and semantic scope without changing its fact key. Paragraphs, headings,
-  blockquotes and direct flow resolve to one complete reading block; list items,
-  cells and components keep their semantic owner, while numbered `br` lines stay
-  separate. Shared simple-selector CSS and identical inline-property deltas may
-  promote to their nearest non-page container only when at least two targets
-  cover 75% of its visible direct branches and Runtime proves grid/flex/list or
-  repeated-card semantics. Geometry or distance never creates a group.
-  `ReviewFocusGroup` maps atoms to per-side Runtime region plans; `changeId`
-  remains navigation identity and `activeFocusGroupId` alone owns visual focus.
+  explicit contract: `displayScope` names the reading semantics while
+  `geometryMode` independently selects text-content, element-box, container-box
+  or numbered-line Range measurement; neither field enters the exact fact key.
+  Paragraphs, headings, blockquotes and direct flow resolve to one complete
+  reading block; simple list items/cells and components use their full element,
+  complex list items/cells keep the smallest inner reading block, and numbered
+  `br` lines stay separate. A simple-selector CSS source may span several
+  targets; each inline-style attribute remains its own operation even when a
+  sibling has the same property delta. Shared CSS targets promote only when at
+  least two branches cover 75% of a Runtime-proven grid/flex/list/repeated-card
+  container. Geometry or distance never creates a group.
+  The analyzer is the sole author of bounded `ReviewFocusGroupPlan` records,
+  including change-scoped exact atom keys, per-side region IDs, correlation,
+  presentation, owner IDs, geometry modes and presence. The first bootstrap
+  validates and privately binds that plan; Runtime resolves current owners and
+  geometry but never reconstructs group membership or IDs. Exact-evidence
+  occurrence bindings are validated independently, so an invalid/oversized
+  semantic plan closes frames and masks without erasing red/green source facts.
+  `changeId` remains navigation identity and `activeFocusGroupId` alone owns
+  visual focus.
   Overview has no outline or dim mask. Focus rendering consumes one set of final
   canonical outline records, and global context masking consumes those records:
   one SVG luminance mask keeps a full-page white background and adds the record

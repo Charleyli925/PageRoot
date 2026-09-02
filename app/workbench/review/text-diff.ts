@@ -5,7 +5,7 @@ import {
 } from "../../lib/review-text-diff.js";
 import {
   flattenReviewSemanticPairs,
-  reviewDisplayScopeForUnit,
+  resolveReviewDisplayOwner,
 } from "./semantic-pairing";
 import {
   REVIEW_MOVED_TEXT_ACCOUNTED_ATTRIBUTE,
@@ -79,8 +79,9 @@ export function applyTextFootprintMetadata(
   marker.dataset.pagerootReviewSemanticOwner = group.semanticOwnerId;
   marker.dataset.pagerootReviewGeometryOwner = group.geometryOwnerId;
   marker.dataset.pagerootReviewDisplayGroup = group.displayGroupId;
-  marker.dataset.pagerootReviewDisplayOwner = group.displayOwnerId;
+  marker.dataset.pagerootReviewDisplayOwnerRef = group.displayOwnerId;
   marker.dataset.pagerootReviewDisplayScope = group.displayScope;
+  marker.dataset.pagerootReviewGeometryMode = group.geometryMode;
 }
 
 export function wrapTextRanges(
@@ -182,6 +183,7 @@ export function markSemanticTextDifferences(graph: ReviewSemanticPairGraph): {
       differences,
     );
     if (plan.operation === "none") return;
+    const displayOwner = resolveReviewDisplayOwner(pair.before || pair.after!);
     const createGroups = (
       ranges: TextRange[][],
       geometryOwnerId: string,
@@ -198,7 +200,8 @@ export function markSemanticTextDifferences(graph: ReviewSemanticPairGraph): {
       // collapse back into one visual group through that inherited identity.
       displayGroupId: `display-${pair.semanticOwnerId}-${groupBase}`,
       displayOwnerId: `display-owner-${pair.semanticOwnerId}-${groupBase}`,
-      displayScope: reviewDisplayScopeForUnit(pair.before || pair.after!),
+      displayScope: displayOwner.displayScope,
+      geometryMode: displayOwner.geometryMode,
     }));
     const beforeGroups = createGroups(plan.before.phraseGroups, pair.geometryOwnerId);
     const afterGroups = createGroups(plan.after.phraseGroups, pair.geometryOwnerId);

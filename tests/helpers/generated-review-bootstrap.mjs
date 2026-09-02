@@ -11,6 +11,8 @@ import {
   reviewTextEvidenceMarkGeometry,
 } from "../../app/lib/review-text-evidence-marks.js";
 import {
+  normalizeReviewExactAtomOccurrences,
+  normalizeReviewFocusGroupPlans,
   REVIEW_PROJECTION_FACTS_SERIALIZED_LENGTH_LIMIT,
 } from "../../app/lib/review-projection-facts.js";
 import {
@@ -32,6 +34,8 @@ export function generatedReviewBootstrap(
   reviewCommentBindings = [],
   side = "before",
   reviewVisualStableIds = [],
+  reviewFocusGroupPlans = [],
+  reviewExactAtomOccurrences = [],
 ) {
   const sourceFile = ts.createSourceFile(
     "runtime-projection.ts",
@@ -57,6 +61,8 @@ export function generatedReviewBootstrap(
   const context = vm.createContext({
     REVIEW_BOOTSTRAP_IDENTITY_ATTRIBUTE_LIMIT: 24,
     REVIEW_PROJECTION_FACTS_SERIALIZED_LENGTH_LIMIT,
+    normalizeReviewFocusGroupPlans,
+    normalizeReviewExactAtomOccurrences,
     REVIEW_COMMENT_BINDING_SOURCE_BOX_ATTRIBUTES: [
       "class",
       "height",
@@ -88,10 +94,14 @@ export function generatedReviewBootstrap(
   );
   assert.ok(injected.length > 0, "expected to find toString() injections to verify");
   new vm.Script(transpiled).runInContext(context);
-  return context.reviewBootstrap(
+  const bootstrap = context.reviewBootstrap(
     "review-session",
     side,
     reviewCommentBindings,
     reviewVisualStableIds,
+    reviewFocusGroupPlans,
+    reviewExactAtomOccurrences,
   );
+  new vm.Script(bootstrap);
+  return bootstrap;
 }

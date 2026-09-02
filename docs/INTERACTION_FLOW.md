@@ -872,7 +872,7 @@ AI 候选通过检查并进入待打开状态后，正常连续性候选显示�
 审阅分析只读取冻结的修改前/修改后 HTML，不执行候选来生成源码差异，也没有 Review 专用截图、像素比较、主进程 owner 或 IPC。源码文字、新增/删除、移动和明确属性变化仍是用户可见的正式事实；完整、有效且全文唯一的 `data-pageroot-id` 只决定能否使用精确连续性与当前帧视觉增强。旧版本缺失、partial、invalid 或 duplicate Stable ID 时，视觉增强显示 `不支持`，既有源码语义配对仍保留，不把差异隐藏成空审阅。
 
 1. 源码事实仍复用 `text` 与 `structure` 两类投影。文字使用 `insert/delete/replace` 和两侧独立的 `evidenceRanges`、`phraseGroups`、`anchorOffset`；`evidenceRanges` 是唯一字符级证据。视觉观察不得生成替代性的通用 change，也不得覆盖这些 wrapper、changeId 或精确范围。
-   每个原子事实另带可选 `displayGroupId / displayOwnerId / displayScope`，只决定阅读展示。普通段落、标题、引用与 direct-flow 的最小展示单位是完整阅读块；自动换行和同段多处字符变化仍是一组。`li`、`td/th` 与按钮等控件分别使用列表项、单元格与组件 scope；编号 `<br>` 行保持逐条独立。公开紫框不输出 phrase/line scope。
+   每个原子事实另带可选 `displayGroupId / displayOwnerId / displayScope / geometryMode`，只决定阅读展示且不进入精确事实身份。`displayScope` 表示段落、列表项、单元格、组件或容器，`geometryMode` 独立表示文字内容、完整元素、完整容器或编号行 Range。文字段落按阅读内容框选；样式及新增/删除/移动始终按完整元素；简单 `li`、`td/th` 与按钮等控件按完整组件，复杂列表项/单元格继续落到内部最小阅读块；编号 `<br>` 行逐条独立。自动换行和同段多处字符变化仍是一组，公开紫框不输出 phrase/line scope。
 2. 有完整 Stable ID 时，同一 ID 是两文档间最强的持久配对键，可以跨父级、顺序和标签变化保持连续性；一个 change 用 `evidenceStableIds[]` 保留多宿主关系。没有完整 Stable ID 时继续使用已有源码语义 matcher，但不提供 Stable-ID 视觉增强。
 3. 真正只在一侧存在的元素写成 `新增元素` 或 `删除元素`。只标最外层 unmatched 子树；后代元素和后代文字不重复打标。两侧共有的稳定 ID 不得因移动退化成删除加新增。稳定同级顺序用共同 ID 序列比较，单纯插入不把后续兄弟误报为移动。
 4. 当前两个审阅 iframe 是 best-effort 观测表面。第一段 owned bootstrap 经随机 challenge 的 `MessagePort` 返回计划内 Stable ID 的可见文字、computed presentation、图像、SVG、Canvas 2D 及其最近 Stable host 所拥有的运行时后代摘要。它与作者 Script 同 realm，不是隔离安全证明；source Hash 是父级标签，不是 iframe 自算的内容凭证。
@@ -882,9 +882,9 @@ AI 候选通过检查并进入待打开状态后，正常连续性候选显示�
 
 修改前 pane 的右边缘是 React 拥有的固定评论轨道。标记横坐标不随 HTML 横向滚动，纵坐标跟随目标；只有显式全局评论停在轨道顶部，运行时 `body` 安全锚点评论仍跟随实际表格或图表，过近标记聚合为 `评2` / `评3`。Hover 与键盘 Focus 展开原评论 Bubble，并通过私有 frame 端口同时高亮修改前目标和修改后同 Stable ID 元素；删除目标只高亮左页。父级维护 active key Set；marker 卸载、文档替换、frame reload 与 port 关闭都发送 inactive，评论正文和附件始终不进入 authored HTML。
 
-页面变化标记使用克制的紫色边线与淡底色。点击标记同时更新 `navigationTarget` 与一个 `activeFocusGroupId`，并在两侧安全揭示目标所在 Tab、滚动到目标和显示活动提示，保持当时的 `pageView + changeFilter + contextVisibility + zoomMode`。同一 simple CSS 规则、或相同 inline-style property delta 的目标共享展示组；只有最近共同容器覆盖至少 75% 的可见同级分支（至少两个），且 Runtime 证明它是 grid/flex/list/repeated-card 时，才提升成一个容器框。否则各目标保持自身区域，绝不按距离合并；`html/body/main` 不得成为提升容器。
+页面变化标记使用克制的紫色边线与淡底色。点击标记同时更新 `navigationTarget` 与一个 `activeFocusGroupId`，并使用该正式 group/region 自带的当前侧 `presentation` 揭示 Tab/Details，再分别滚动到两侧同一 `correlationKey` 的 region；缺失的一侧不改 presentation、不滚动、不生成空遮罩。相同 simple CSS 规则可共享一个 group，并按各自最近局部容器形成多个 region；每个 inline-style attribute 始终是单目标操作，不能因 property delta 相同而合并。只有共同容器覆盖至少 75% 的可见同级分支（至少两个），且 Runtime 证明它是 grid/flex/list/repeated-card 时，CSS region 才提升成容器框。否则各目标保持自身范围，绝不按距离合并；`html/body/main` 不得成为提升容器。
 
-Runtime 投影固定分四步：收集精确 atom → 建立 display focus groups → 解析当前几何 → 渲染 active focus。只有 active group 画紫框与唯一标签；无 `×N`，无 phrase/line promotion。遮罩孔直接复用完全相同的 active outline `pathData`，即 `outlinePaths = maskHoles`；没有 active outline 时不创建 mask。框外使用稳定白色淡化并降低 grayscale/saturation，支持时附加约 1px backdrop blur，降级时仍保持白色淡化。
+分析层唯一生成并校验正式 Focus Group plan；Runtime 只按 plan 的 `atomKeys/displayOwnerIds` 解析实时几何并渲染 active focus，不重新拼 group key、分成员或做 phrase/line promotion。只有 active group 画紫框与唯一标签；无 `×N`。遮罩孔直接复用完全相同的 active outline `pathData`，即 `outlinePaths = maskHoles`；没有 active outline 时不创建 mask。框外使用稳定白色淡化并降低 grayscale/saturation，支持时附加约 1px backdrop blur，降级时仍保持白色淡化。再次点击当前 bar/标签或在无对话框、无编辑控件消费的情况下按 Escape，会只清空 `activeFocusGroupId` 并保留当前滚动及 Tab/Details；用户手动切换承载内容的 Tab 也回到总览。筛选可更新导航目标，但不得自动激活紫框。
 
 编辑画布的评论归组、定位与正式审阅共用同一份 Page Presentation Tab 识别器：同时覆盖 `aria-controls` / `href` / `data-p` / `data-tab` 显式关联，以及同父级、数量一致、唯一激活的索引式旧 Tab。两页的 panel 与 action key 在冻结的修改前/修改后文档之间成对生成，优先使用显式目标身份，再使用同一 panel 内的控件类型、语义与位置，避免 AI 改文案或调整顺序后左右失配。Tab、折叠、业务按钮以及 input/select/textarea 的值与选中态始终双向镜像；导航、提交、弹窗、下载和宿主 IPC 仍被隔离层阻止。
 

@@ -161,6 +161,7 @@ type ReviewMessage = {
   challenge?: unknown;
   changeId?: string;
   focusGroupId?: string;
+  regionId?: string;
   behavior?: ScrollBehavior;
   right?: number;
 };
@@ -1169,38 +1170,84 @@ export default function AiReviewWorkspace({
     behavior: ScrollBehavior = "smooth",
     requestedFocusGroupId?: string,
     activateFocusGroup = true,
+    requestedRegionId?: string,
+    requestedSide?: ReviewSide,
   ) => {
     const selectedChange = reviewChanges.find((change) => change.id === changeId);
-    const selectedFocusGroup = activateFocusGroup
-      ? documents.focusGroups.find((group) => (
-        group.changeIds.includes(changeId)
-        && (!requestedFocusGroupId || group.id === requestedFocusGroupId)
+    const changeGroups = documents.focusGroups.filter((group) => group.changeIds.includes(changeId));
+    const requestedGroup = requestedFocusGroupId
+      ? changeGroups.find((group) => group.id === requestedFocusGroupId) || null
+      : null;
+    // Explicit region navigation is a capability carried by the formal plan.
+    // An unknown group or region must fail closed instead of silently focusing
+    // a different group that happens to belong to the same change.
+    if (requestedFocusGroupId && !requestedGroup) return;
+    if ((requestedRegionId && !requestedSide) || (!requestedRegionId && requestedSide)) return;
+    const selectedFocusGroup = requestedGroup || changeGroups[0] || null;
+    const selectedRegion = requestedGroup && requestedRegionId && requestedSide
+      ? requestedGroup.regions[requestedSide].find((region) => (
+        region.id === requestedRegionId
+        && region.primaryChangeId === changeId
       )) || null
       : null;
+    if (requestedRegionId && !selectedRegion) return;
+    const nextActiveFocusGroupId = requestedGroup
+      ? activeFocusGroupId === requestedGroup.id ? null : requestedGroup.id
+      : changeGroups.length === 1 ? changeGroups[0].id : null;
+    reviewStateRef.current = {
+      ...reviewStateRef.current,
+      focus: changeId,
+      ...(activateFocusGroup ? { activeFocusGroupId: nextActiveFocusGroupId } : {}),
+    };
     dispatchReviewState({ type: "set-navigation-target", value: changeId });
-    dispatchReviewState({
-      type: "set-active-focus-group",
-      value: selectedFocusGroup?.id || null,
-    });
+    if (activateFocusGroup) dispatchReviewState({
+        type: "set-active-focus-group",
+        value: nextActiveFocusGroupId,
+      });
+    // Re-selecting the active group is the explicit exit to overview. Keep the
+    // current scroll and disclosure state untouched while the overlay state is
+    // cleared by the normal state broadcast.
+    if (activateFocusGroup && requestedGroup && nextActiveFocusGroupId === null) return;
+    const regionForSide = (side: ReviewSide) => {
+      if (!selectedFocusGroup) return null;
+      if (selectedRegion) {
+        if (side === requestedSide) return selectedRegion;
+        return selectedFocusGroup.regions[side].find((region) => (
+          region.correlationKey === selectedRegion.correlationKey
+        )) || null;
+      }
+      return selectedFocusGroup.regions[side][0] || null;
+    };
+    const presentation: ReviewPresentation = selectedFocusGroup
+      ? {
+        before: selectedRegion
+          ? regionForSide("before")?.presentation || []
+          : regionForSide("before")?.presentation || selectedFocusGroup.presentation.before,
+        after: selectedRegion
+          ? regionForSide("after")?.presentation || []
+          : regionForSide("after")?.presentation || selectedFocusGroup.presentation.after,
+      }
+      : selectedChange?.presentation || { before: [], after: [] };
     const focusChange = () => {
       (["before", "after"] as ReviewSide[]).forEach((side) => {
+        const region = regionForSide(side);
+        if (selectedFocusGroup && !region) return;
         postToFrame(framesRef.current[side], sessionId, {
           type: "focus-change",
-          changeId,
-          revealSteps: selectedChange?.presentation[side] || [],
+          changeId: region?.primaryChangeId || changeId,
+          focusGroupId: selectedFocusGroup?.id,
+          regionId: region?.id,
+          revealSteps: presentation[side],
           behavior,
         });
       });
     };
-    if (selectedChange && (
-      selectedChange.presentation.before.length
-      || selectedChange.presentation.after.length
-    )) {
-      coordinatePagePresentation(selectedChange.presentation, focusChange);
+    if (presentation.before.length || presentation.after.length) {
+      coordinatePagePresentation(presentation, focusChange);
     } else {
       focusChange();
     }
-  }, [coordinatePagePresentation, documents.focusGroups, reviewChanges, sessionId]);
+  }, [activeFocusGroupId, coordinatePagePresentation, documents.focusGroups, reviewChanges, sessionId]);
 
   useLayoutEffect(() => {
     const handleMessage = (event: MessageEvent<ReviewMessage>) => {
@@ -1357,11 +1404,22 @@ export default function AiReviewWorkspace({
       }
       if (message.type === "focus-horizontal-footprint") {
         const changeId = typeof message.changeId === "string" ? message.changeId : "";
+        const focusGroupId = typeof message.focusGroupId === "string" ? message.focusGroupId : "";
         const selectedChange = reviewChanges.find((change) => change.id === changeId);
-        if (
-          changeId !== reviewStateRef.current.focus
-          || !selectedChange
-        ) return;
+        const activeGroup = documents.focusGroups.find((group) => (
+          group.id === reviewStateRef.current.activeFocusGroupId
+        ));
+        if (activeGroup) {
+          if (activeGroup.id !== focusGroupId || !activeGroup.changeIds.includes(changeId)) return;
+          focusHorizontalFootprint(
+            message.side,
+            Number(message.left),
+            Number(message.right),
+            false,
+          );
+          return;
+        }
+        if (changeId !== reviewStateRef.current.focus || !selectedChange) return;
         focusHorizontalFootprint(
           message.side,
           Number(message.left),
@@ -1403,6 +1461,13 @@ export default function AiReviewWorkspace({
         && message.actionKey
       ) {
         if (message.panelControl) return;
+        if (message.type === "action" && reviewStateRef.current.activeFocusGroupId) {
+          reviewStateRef.current = {
+            ...reviewStateRef.current,
+            activeFocusGroupId: null,
+          };
+          dispatchReviewState({ type: "set-active-focus-group", value: null });
+        }
         const follower: ReviewSide = message.side === "before" ? "after" : "before";
         postToFrame(framesRef.current[follower], sessionId, {
           type: "mirror-action",
@@ -1416,6 +1481,13 @@ export default function AiReviewWorkspace({
         return;
       }
       if (message.type === "panel-change") {
+        if (reviewStateRef.current.activeFocusGroupId) {
+          reviewStateRef.current = {
+            ...reviewStateRef.current,
+            activeFocusGroupId: null,
+          };
+          dispatchReviewState({ type: "set-active-focus-group", value: null });
+        }
         const panelPath = message.panelPath?.length
           ? message.panelPath
           : message.panelKey
@@ -1444,8 +1516,13 @@ export default function AiReviewWorkspace({
           const focusGroupId = typeof message.focusGroupId === "string"
             ? message.focusGroupId
             : undefined;
-          selectChange(changeId, "smooth", focusGroupId);
+          const regionId = typeof message.regionId === "string" ? message.regionId : undefined;
+          selectChange(changeId, "smooth", focusGroupId, true, regionId, message.side);
         }
+        return;
+      }
+      if (message.type === "leave-focus" && reviewStateRef.current.activeFocusGroupId) {
+        dispatchReviewState({ type: "set-active-focus-group", value: null });
         return;
       }
     };
@@ -1570,6 +1647,42 @@ export default function AiReviewWorkspace({
     if (!matching.length || matching.some((change) => change.id === focus)) return;
     selectChange(matching[0].id, "smooth", undefined, false);
   }, [activeFocusGroupId, documents.focusGroups, focus, reviewChanges, selectChange]);
+
+  useEffect(() => {
+    if (!activeFocusGroupId) return;
+    const activeGroup = documents.focusGroups.find((group) => group.id === activeFocusGroupId);
+    const matchesFilter = activeGroup && (
+      filter === "all"
+      || (filter === "text" ? activeGroup.kind === "text" : activeGroup.kind !== "text")
+    );
+    if (!matchesFilter) dispatchReviewState({ type: "set-active-focus-group", value: null });
+  }, [activeFocusGroupId, documents.focusGroups, filter]);
+
+  useEffect(() => {
+    const leaveFocus = (event: KeyboardEvent) => {
+      const target = event.target instanceof Element ? event.target : null;
+      const activeElement = document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+      const editableTarget = Boolean(
+        target?.closest("input, textarea, select")
+        || (target instanceof HTMLElement && target.isContentEditable)
+        || activeElement?.closest("input, textarea, select")
+        || activeElement?.isContentEditable,
+      );
+      if (
+        event.key !== "Escape"
+        || event.defaultPrevented
+        || confirmationAction
+        || editableTarget
+        || !reviewStateRef.current.activeFocusGroupId
+      ) return;
+      event.preventDefault();
+      dispatchReviewState({ type: "set-active-focus-group", value: null });
+    };
+    window.addEventListener("keydown", leaveFocus);
+    return () => window.removeEventListener("keydown", leaveFocus);
+  }, [confirmationAction]);
 
   const selectPreviewMode = useCallback((mode: ReviewPageView) => {
     dispatchReviewState({ type: "set-page-view", value: mode });

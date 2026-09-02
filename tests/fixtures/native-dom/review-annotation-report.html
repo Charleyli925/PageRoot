@@ -28,6 +28,8 @@
       .metric-unit { margin-left: 3px; font-size: 12px; font-weight: 400; color: #6b6f85; }
       .up { color: #c74f4a; font-size: 13px; font-weight: 700; }
       .metric-note { color: #555767; font-size: 12px; line-height: 1.8; }
+      .locality-target { color: #556070; }
+      .locality-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
       .caliber { margin: 10px 0 0; color: #8b8fa3; font-size: 12px; }
       section { margin: 20px 0 0; }
       h2 { margin: 0 0 2px; font-size: 14px; }
@@ -85,6 +87,10 @@
       </div>
       <p class="caliber">含内容意图口径</p>
       <div data-review-single-style style="border-left: 2px solid #ddd; padding-left: 8px">单卡样式范围</div>
+      <p data-review-inline-a style="color:#555;background:#fff;padding:4px;border:1px solid #ddd;width:320px">第一模块相同内联差异</p>
+      <div class="locality-grid" data-review-locality-grid="one">
+        <span class="locality-target">第一局部容器</span><span>第一容器上下文</span>
+      </div>
     </div>
 
     <section>
@@ -92,7 +98,11 @@
       <p class="section-note">Q2 大盘 96.2 亿次/日 · YoY +18% · 抖音流量增速放缓份额收缩、微信 &amp; 红书接管增量</p>
       <p class="trend-copy" data-report-paragraph="trend">内容平台搜索挤压传统搜索引擎与传统电商的趋势不变，但大盘增量呈现增速放缓态势——26Q2 国内主流平台日均搜索请求次数 96.2 亿次，YoY +18%；较 26 年 1&amp;2 月双月大盘增速 +20% 回落 2pp；增速放缓的同时结构变化加剧：抖系份额收缩、微信与小红书接棒增长；大盘增长动能加速向内容平台迁移。</p>
       <p data-review-paragraph-one>第一段保持完整阅读块，只替换两个字。</p>
-      <p data-review-paragraph-two>第二段包含甲指标、乙指标、丙指标、丁指标和戊指标。</p>
+      <p data-review-paragraph-two style="margin-top:260px">第二段包含甲指标、乙指标、丙指标、丁指标和戊指标。</p>
+      <p data-review-inline-b style="color:#555;background:#fff;padding:4px;border:1px solid #ddd;width:320px">第二模块相同内联差异</p>
+      <div class="locality-grid" data-review-locality-grid="two">
+        <span class="locality-target">第二局部容器</span><span>第二容器上下文</span>
+      </div>
       <ul>
         <li data-native-case="list-item" data-native-mode="native-editable">列表项中的文字保持项目符号和缩进。</li>
         <li>抖系（抖音综搜 + 商城搜）日均搜索 46.6 亿次，份额收缩 0.7pp 至 48.4%</li>

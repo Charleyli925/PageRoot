@@ -67,6 +67,9 @@ async function activateReviewMarkerGroup(frame, marker) {
       : `focus-${changeId}-${displayGroupId}`;
   });
   expect(focusGroupId).toBeTruthy();
+  if (await frame.locator("html").getAttribute("data-pageroot-review-focus-group") === focusGroupId) {
+    return focusGroupId;
+  }
   await frame.locator(
     `[data-pageroot-review-region-bar][data-pageroot-review-focus-group="${focusGroupId}"]`,
   ).first().evaluate((bar) => bar.click());

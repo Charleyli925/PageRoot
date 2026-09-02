@@ -1,6 +1,8 @@
 // Review analysis facade: parse → pair → diff → bind → project → serialize.
 import {
   appendTrustedReviewProjectionFact,
+  normalizeReviewFocusGroupPlans,
+  reviewProjectionFactKey,
   serializeReviewProjectionFacts,
 } from "../lib/review-projection-facts.js";
 import {
@@ -56,6 +58,7 @@ import type {
   ReviewDocumentBuildOptions,
   ReviewDocuments,
   ReviewDisplayScope,
+  ReviewFocusGeometryMode,
   ReviewFocusGroup,
   ReviewOutlineItem,
   ReviewPresentation,
@@ -79,7 +82,9 @@ export type {
   ReviewPresentation,
   ReviewRevealStep,
   ReviewFilter,
+  ReviewFocusGeometryMode,
   ReviewFocusGroup,
+  ReviewFocusGroupPlan,
   ReviewFocusRegionPlan,
   ReviewOutlineItem,
   ReviewSide,
@@ -191,11 +196,14 @@ function attachChangeMarkerMetadata(
           || `text-marker-${index + 1}`;
         const displayGroupId = element.getAttribute("data-pageroot-review-display-group")
           || `display-${semanticOwnerId}`;
-        const displayOwnerId = element.getAttribute("data-pageroot-review-display-owner")
+        const displayOwnerId = element.getAttribute("data-pageroot-review-display-owner-ref")
+          || element.getAttribute("data-pageroot-review-display-owner")
           ?.split(/\s+/u).find(Boolean)
           || `display-owner-${semanticOwnerId}`;
         const displayScope = element.getAttribute("data-pageroot-review-display-scope")
           || "paragraph";
+        const geometryMode = element.getAttribute("data-pageroot-review-geometry-mode")
+          || "text-content";
         facts = appendTrustedReviewProjectionFact(facts, {
           id: textGroup,
           type: "text",
@@ -209,6 +217,7 @@ function attachChangeMarkerMetadata(
           displayGroupId,
           displayOwnerId,
           displayScope,
+          geometryMode,
           ...(normalizedTextOperation ? { operation: normalizedTextOperation } : {}),
           summary: textSummary,
         });
@@ -220,11 +229,14 @@ function attachChangeMarkerMetadata(
         const structureChange = element.getAttribute("data-pageroot-review-structure") || "changed";
         const displayGroupId = element.getAttribute("data-pageroot-review-display-group")
           || `display-${semanticOwnerId}`;
-        const displayOwnerId = element.getAttribute("data-pageroot-review-display-owner")
+        const displayOwnerId = element.getAttribute("data-pageroot-review-display-owner-ref")
+          || element.getAttribute("data-pageroot-review-display-owner")
           ?.split(/\s+/u).find(Boolean)
           || `display-owner-${semanticOwnerId}`;
         const displayScope = element.getAttribute("data-pageroot-review-display-scope")
           || "container";
+        const geometryMode = element.getAttribute("data-pageroot-review-geometry-mode")
+          || "element-box";
         if (!facts.some((fact) => (
           fact.type === "structure"
           && fact.semanticOwnerId === semanticOwnerId
@@ -239,6 +251,7 @@ function attachChangeMarkerMetadata(
             displayGroupId,
             displayOwnerId,
             displayScope,
+            geometryMode,
             structureChange,
             summary: structureSummary(structureChange),
           });
@@ -270,9 +283,108 @@ function reviewFocusGroupsForDocuments(
     displayGroupId: string;
     displayScope: ReviewDisplayScope;
     kinds: Set<"text" | "style" | "structure">;
-    displayOwnerIds: Set<string>;
-    atomIds: Set<string>;
-    sideAtoms: Record<"before" | "after", Set<string>>;
+    sideEntries: Record<"before" | "after", Array<{
+      changeId: string;
+      atomKey: string;
+      ownerId: string;
+      element: Element;
+      geometryMode: ReviewFocusGeometryMode;
+      locality: string;
+    }>>;
+  };
+  const shortHash = (value: string) => {
+    let hash = 0x811c9dc5;
+    for (let index = 0; index < value.length; index += 1) {
+      hash ^= value.charCodeAt(index);
+      hash = Math.imul(hash, 0x01000193);
+    }
+    return (hash >>> 0).toString(36);
+  };
+  const localPath = (element: Element | null) => {
+    if (!element) return "root";
+    const path: string[] = [];
+    const stableElement = element.closest("[data-pageroot-id]");
+    const stable = stableElement?.getAttribute("data-pageroot-id") || "";
+    let candidate: Element | null = element;
+    while (
+      candidate?.parentElement
+      && candidate !== candidate.ownerDocument.body
+      && candidate !== stableElement
+    ) {
+      path.unshift(`${candidate.localName}-${[...candidate.parentElement.children].indexOf(candidate)}`);
+      candidate = candidate.parentElement;
+      if (path.length >= 12) break;
+    }
+    return stable
+      ? `stable-${stable}-${shortHash(path.join("/") || "self")}`
+      : `path-${shortHash(path.join("/"))}`;
+  };
+  const isRepeatedContainer = (element: Element) => {
+    if (element.children.length < 2) return false;
+    const roleCounts = new Map<string, number>();
+    [...element.children].forEach((child) => {
+      [...child.classList].forEach((className) => {
+        if (!/(?:^|-)(?:card|tile|metric|kpi|stat)(?:-|$)/iu.test(className)) return;
+        const role = className.toLowerCase();
+        roleCounts.set(role, (roleCounts.get(role) || 0) + 1);
+      });
+    });
+    return [...roleCounts.values()].some((count) => count >= 2);
+  };
+  const stylesheetCollectionSelectors = new WeakMap<Document, string[]>();
+  const collectionSelectorsForDocument = (document: Document) => {
+    const cached = stylesheetCollectionSelectors.get(document);
+    if (cached) return cached;
+    const selectors: string[] = [];
+    document.querySelectorAll("style").forEach((style) => {
+      const source = (style.textContent || "").replace(/\/\*[\s\S]*?\*\//gu, "");
+      const pattern = /([^{}]+)\{([^{}]*)\}/gu;
+      let match = pattern.exec(source);
+      while (match) {
+        if (/(?:^|;)\s*display\s*:\s*(?:inline-)?(?:grid|flex)\b/iu.test(match[2])) {
+          match[1].split(",").map((selector) => selector.trim()).forEach((selector) => {
+            if (selector && !selector.startsWith("@")) selectors.push(selector);
+          });
+        }
+        match = pattern.exec(source);
+      }
+    });
+    stylesheetCollectionSelectors.set(document, selectors);
+    return selectors;
+  };
+  const matchesStylesheetCollection = (element: Element) => collectionSelectorsForDocument(
+    element.ownerDocument,
+  ).some((selector) => {
+    try {
+      return element.matches(selector);
+    } catch {
+      return false;
+    }
+  });
+  const isStyleCollectionContainer = (element: Element) => {
+    const authoredStyle = element.getAttribute("style") || "";
+    return element.matches("ul, ol, [role='list']")
+      || /(?:^|;)\s*display\s*:\s*(?:inline-)?(?:grid|flex)\b/iu.test(authoredStyle)
+      || matchesStylesheetCollection(element)
+      || isRepeatedContainer(element);
+  };
+  const styleLocality = (element: Element) => {
+    let candidate = element.parentElement;
+    while (
+      candidate
+      && candidate !== candidate.ownerDocument.body
+      && candidate !== candidate.ownerDocument.documentElement
+      && candidate.tagName !== "MAIN"
+    ) {
+      if (isStyleCollectionContainer(candidate)) return localPath(candidate);
+      if (candidate.matches(
+        "article, section, aside, nav, header, footer, form, fieldset, table, [role='group']",
+      )) break;
+      candidate = candidate.parentElement;
+    }
+    // Without a collection boundary, each CSS target is its own locality.
+    // Runtime may only promote members already placed in one analyzer region.
+    return localPath(element);
   };
   const groups = new Map<string, MutableGroup>();
   ([
@@ -288,6 +400,9 @@ function reviewFocusGroupsForDocuments(
             || fact.geometryOwnerId
             || fact.semanticOwnerId;
           const displayScope = fact.displayScope || (fact.type === "text" ? "paragraph" : "container");
+          const geometryMode = fact.geometryMode || (fact.type === "text"
+            ? "text-content" as const
+            : "element-box" as const);
           const sharedStyleGroup = fact.type === "structure" && fact.structureChange === "style";
           const key = sharedStyleGroup ? displayGroupId : `${changeId}-${displayGroupId}`;
           let group = groups.get(key);
@@ -297,36 +412,66 @@ function reviewFocusGroupsForDocuments(
               displayGroupId,
               displayScope,
               kinds: new Set(),
-              displayOwnerIds: new Set(),
-              atomIds: new Set(),
-              sideAtoms: { before: new Set(), after: new Set() },
+              sideEntries: { before: [], after: [] },
             };
             groups.set(key, group);
           }
-          group.displayOwnerIds.add(displayOwnerId);
           group.changeIds.add(changeId);
           group.kinds.add(fact.type === "text"
             ? "text"
             : fact.structureChange === "style" ? "style" : "structure");
-          group.atomIds.add(fact.id);
-          group.sideAtoms[side].add(fact.id);
+          const factKey = reviewProjectionFactKey(fact);
+          const atomKey = factKey ? `${changeId}\u001e${factKey}` : "";
+          if (atomKey) group.sideEntries[side].push({
+            changeId,
+            atomKey,
+            ownerId: displayOwnerId,
+            element,
+            geometryMode,
+            locality: sharedStyleGroup ? styleLocality(element) : displayGroupId,
+          });
         });
       });
   });
   return [...groups.values()].map((group) => {
     const changeIds = [...group.changeIds].sort();
     const changeId = changeIds[0] || "";
-    const displayOwnerIds = [...group.displayOwnerIds].sort();
-    const atomIds = [...group.atomIds].sort();
-    const regions = (side: "before" | "after") => group.sideAtoms[side].size
-      ? [{
-        id: `region-${side}-${group.displayGroupId}`,
-        side,
-        geometry: "runtime" as const,
-        displayOwnerIds,
-        atomIds: [...group.sideAtoms[side]].sort(),
-      }]
-      : [];
+    const atomKeys = [...new Set(
+      [...group.sideEntries.before, ...group.sideEntries.after].map((entry) => entry.atomKey),
+    )].sort();
+    const regions = (side: "before" | "after") => {
+      const buckets = new Map<string, typeof group.sideEntries.before>();
+      const sideEntries = group.sideEntries[side];
+      sideEntries.forEach((entry) => {
+        const bucket = buckets.get(entry.locality) || [];
+        bucket.push(entry);
+        buckets.set(entry.locality, bucket);
+      });
+      return [...buckets.entries()].map(([locality, entries]) => {
+        const ownerIds = [...new Set(entries.map((entry) => entry.ownerId))].sort();
+        const regionAtomKeys = [...new Set(entries.map((entry) => entry.atomKey))].sort();
+        const regionChangeIds = [...new Set(entries.map((entry) => entry.changeId))].sort();
+        const styleContainerCandidate = group.kinds.has("style") && ownerIds.length >= 2;
+        const presentationOwner = entries[0]?.element.ownerDocument.querySelector(
+          `[data-pageroot-review-display-owner~="${entries[0]?.ownerId || ""}"]`,
+        );
+        return {
+          id: `region-${side}-${shortHash(`${group.displayGroupId}\u001f${locality}`)}`,
+          side,
+          correlationKey: `locality-${shortHash(locality)}`,
+          primaryChangeId: regionChangeIds[0] || changeId,
+          changeIds: regionChangeIds,
+          geometryMode: styleContainerCandidate
+            ? "container-box" as const
+            : entries[0]?.geometryMode || "container-box" as const,
+          displayOwnerIds: ownerIds,
+          atomKeys: regionAtomKeys,
+          presentation: revealStepsForElement(presentationOwner || entries[0]?.element || null),
+        };
+      });
+    };
+    const beforeRegions = regions("before");
+    const afterRegions = regions("after");
     return {
       id: `focus-${group.kinds.has("style") ? group.displayGroupId : `${changeId}-${group.displayGroupId}`}`,
       kind: group.kinds.has("text")
@@ -335,13 +480,14 @@ function reviewFocusGroupsForDocuments(
       changeId,
       changeIds,
       displayGroupId: group.displayGroupId,
-      displayOwnerId: displayOwnerIds[0] || "",
-      displayOwnerIds,
       displayScope: group.displayScope,
-      atomIds,
-      regions: { before: regions("before"), after: regions("after") },
-      beforePresent: group.sideAtoms.before.size > 0,
-      afterPresent: group.sideAtoms.after.size > 0,
+      atomKeys,
+      presentation: {
+        before: beforeRegions[0]?.presentation || [],
+        after: afterRegions[0]?.presentation || [],
+      },
+      regions: { before: beforeRegions, after: afterRegions },
+      presence: { before: beforeRegions.length > 0, after: afterRegions.length > 0 },
     };
   }).sort((left, right) => left.changeId.localeCompare(right.changeId)
     || left.id.localeCompare(right.id));
@@ -723,7 +869,9 @@ function* buildReviewDocumentSteps(
     kind,
     summary: kind === "css-source" ? "CSS 源码发生变化" : "Script 源码发生变化",
   }));
-  const focusGroups = reviewFocusGroupsForDocuments(beforeDocument, afterDocument);
+  const focusGroups = normalizeReviewFocusGroupPlans(
+    reviewFocusGroupsForDocuments(beforeDocument, afterDocument),
+  ) as ReviewFocusGroup[];
 
   // Comment attributes are analyzer-only scope hints. Bind every resolved
   // source target in the private first bootstrap, then remove the hints before
@@ -741,6 +889,7 @@ function* buildReviewDocumentSteps(
     options.externalBootstrap,
     reviewCommentBindings,
     preparedVisualStableIds("before"),
+    focusGroups,
   );
   yield "prepare-before";
   const preparedAfter = prepareDocument(
@@ -751,6 +900,7 @@ function* buildReviewDocumentSteps(
     options.externalBootstrap,
     [],
     preparedVisualStableIds("after"),
+    focusGroups,
   );
   yield "prepare-after";
   return {

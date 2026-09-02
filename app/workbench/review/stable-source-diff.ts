@@ -233,6 +233,42 @@ function displayScopeForElement(element: Element) {
   return "container" as const;
 }
 
+function geometryModeForElement(element: Element) {
+  // Structure and style facts always measure the complete affected element.
+  // A shared style region may promote several such owners to container-box at
+  // the Focus Group planning boundary, never at exact-fact creation time.
+  void element;
+  return "element-box" as const;
+}
+
+function localElementIdentity(element: Element | null): string {
+  if (!element) return "root";
+  const persistentId = sourceId(element);
+  if (persistentId) return `stable-${persistentId}`;
+  const path: string[] = [];
+  let candidate: Element | null = element;
+  while (candidate && candidate !== candidate.ownerDocument.documentElement) {
+    const parent: Element | null = candidate.parentElement;
+    if (!parent) break;
+    path.unshift(`${candidate.localName}-${[...parent.children].indexOf(candidate)}`);
+    const anchorId = sourceId(parent);
+    if (anchorId) {
+      path.unshift(`stable-${anchorId}`);
+      break;
+    }
+    candidate = parent;
+    if (path.length >= 12) break;
+  }
+  return path.join("_") || element.localName;
+}
+
+function nearestSemanticContainerIdentity(element: Element): string {
+  const container = element.closest(
+    "li, td, th, article, section, aside, nav, header, footer, form, fieldset, ul, ol, table, [role='list'], [role='group']",
+  );
+  return localElementIdentity(container || element.parentElement);
+}
+
 function inlineStyleDeltaKey(before: Element, after: Element): string {
   const properties = new Set<string>();
   for (const style of [before.getAttribute("style") || "", after.getAttribute("style") || ""]) {
@@ -266,6 +302,7 @@ function annotateStructureFact(
   );
   displayOwners.add(displayOwnerId);
   element.setAttribute("data-pageroot-review-display-owner", [...displayOwners].join(" "));
+  element.setAttribute("data-pageroot-review-geometry-mode", geometryModeForElement(element));
   appendProjectionFactToElement(element, {
     id: factId,
     type: "structure",
@@ -275,6 +312,7 @@ function annotateStructureFact(
     displayGroupId,
     displayOwnerId,
     displayScope: displayScopeForElement(element),
+    geometryMode: geometryModeForElement(element),
     structureChange: kind,
     summary: CHANGE_SUMMARIES[kind],
   });
@@ -324,7 +362,17 @@ export function annotateStableSourceDifferences(
 
     if ((before.getAttribute("style") || "") !== (after.getAttribute("style") || "")) {
       const deltaKey = inlineStyleDeltaKey(before, after);
-      const groupId = `display-inline-${deterministicReviewHash(deltaKey || id)}`;
+      const beforeLocality = `${nearestSemanticContainerIdentity(before)}\u0000${localElementIdentity(before.parentElement)}`;
+      const afterLocality = `${nearestSemanticContainerIdentity(after)}\u0000${localElementIdentity(after.parentElement)}`;
+      // Identity continuity is already proven for the element. Locality is
+      // deliberately side-independent only when the semantic container and
+      // stable parent identities agree; moved targets cannot merge sections.
+      const locality = beforeLocality === afterLocality ? beforeLocality : `moved-${id}`;
+      // An inline style attribute is an operation on one persistent element,
+      // not a shared source rule. Keep the locality in the identity to prevent
+      // cross-module collisions, and keep the target id so sibling elements
+      // with identical deltas never become one synthetic operation.
+      const groupId = `display-inline-${deterministicReviewHash(`${deltaKey || id}\u0000${locality}\u0000${id}`)}`;
       annotateStructureFact(before, id, "style", groupId);
       annotateStructureFact(after, id, "style", groupId);
     }

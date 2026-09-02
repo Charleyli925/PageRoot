@@ -67,29 +67,40 @@ export type ReviewDisplayScope =
   | "component"
   | "container";
 
-export type ReviewFocusGroup = {
+export type ReviewFocusGeometryMode =
+  | "text-content"
+  | "element-box"
+  | "container-box"
+  | "numbered-line-range";
+
+export type ReviewFocusGroupPlan = {
   id: string;
   kind: "text" | "style" | "structure";
   changeId: string;
   changeIds: string[];
   displayGroupId: string;
-  /** Primary owner retained for simple consumers; groups may have many owners. */
-  displayOwnerId: string;
-  displayOwnerIds: string[];
   displayScope: ReviewDisplayScope;
-  atomIds: string[];
-  /** Region plans only; the disposable Runtime resolves current geometry. */
+  /** changeId-scoped references whose fact portion is reviewProjectionFactKey. */
+  atomKeys: string[];
+  presentation: ReviewPresentation;
+  /** Analyzer-owned plans; Runtime may only measure these declared regions. */
   regions: Record<ReviewSide, ReviewFocusRegionPlan[]>;
-  beforePresent: boolean;
-  afterPresent: boolean;
+  presence: Record<ReviewSide, boolean>;
 };
+
+/** Compatibility alias while the public contract adopts the explicit Plan name. */
+export type ReviewFocusGroup = ReviewFocusGroupPlan;
 
 export type ReviewFocusRegionPlan = {
   id: string;
   side: ReviewSide;
-  geometry: "runtime";
+  correlationKey: string;
+  primaryChangeId: string;
+  changeIds: string[];
+  geometryMode: ReviewFocusGeometryMode;
   displayOwnerIds: string[];
-  atomIds: string[];
+  atomKeys: string[];
+  presentation: ReviewRevealStep[];
 };
 
 export type ReviewImpact = {
@@ -212,4 +223,5 @@ export type ReviewTextEvidenceGroup = {
   displayGroupId: string;
   displayOwnerId: string;
   displayScope: ReviewDisplayScope;
+  geometryMode: ReviewFocusGeometryMode;
 };
