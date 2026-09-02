@@ -1318,14 +1318,15 @@ test("a real user scroll during runtime handoff becomes the latest handoff targe
       '[data-testid="html-canvas-editor"]',
     ).getAttribute("data-runtime-handoff"))
       .toMatch(/preparing|positioning/u);
-    // PageDown is a real user gesture and directly exercises the handoff's
-    // scroll-key intent channel without depending on a native scrollbar thumb
-    // whose geometry is changing while the candidate layout is unsettled.
+    // End is a real scroll-key gesture with a deterministic destination.
+    // PageDown advances by the focused element's platform-dependent viewport;
+    // hosted macOS can move only a few pixels and never exercise the intended
+    // handoff target even though the key event itself was delivered.
     await reviewStage.evaluate((element) => {
       element.setAttribute("tabindex", "0");
       element.focus();
     });
-    await page.keyboard.press("PageDown");
+    await page.keyboard.press("End");
     await expect.poll(() => reviewStage.evaluate((element) => element.scrollTop))
       .toBeGreaterThan(700);
     // Let the browser finish its final scroll sample before choosing the
@@ -1364,7 +1365,11 @@ test("a real user scroll during runtime handoff becomes the latest handoff targe
     const userViewportSample = await page.evaluate(() => {
       const samples = window.__PAGEROOT_RUNTIME_HANDOFF_SAMPLES__ || [];
       return [...samples].reverse().find((sample) => (
-        (sample.handoffState === "positioning" || sample.handoffState === "active")
+        (
+          sample.handoffState === "preparing"
+          || sample.handoffState === "positioning"
+          || sample.handoffState === "active"
+        )
         && Number(sample.sharedScrollTop) > 600
         && sample.viewportAnchorStableId
       )) || null;
