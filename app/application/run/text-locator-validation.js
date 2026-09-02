@@ -77,16 +77,19 @@ export function revalidateCommentTextLocators(comments, html) {
   try {
     sourceIndex = buildSourceIndex(String(html ?? ""));
   } catch {
-    const comment = comments.find((item) => item?.target?.textLocator);
+    const comment = comments.find((item) => (
+      item?.sourceAnchor?.textLocator || item?.target?.textLocator
+    ));
     return comment ? failed(comment) : { ok: true, comments };
   }
 
   let changed = false;
   const normalized = comments.map((comment) => {
-    const locator = comment?.target?.textLocator;
+    const sourceTarget = comment?.sourceAnchor || comment?.target;
+    const locator = sourceTarget?.textLocator || comment?.target?.textLocator;
     if (locator === undefined || locator === null) return comment;
 
-    const elementId = String(comment?.target?.elementId || "");
+    const elementId = String(sourceTarget?.elementId || "");
     const element = sourceIndex.byPagerootId.get(elementId);
     if (
       !element
@@ -109,16 +112,24 @@ export function revalidateCommentTextLocators(comments, html) {
     const startOffset = uniqueQuoteOffset(text, locator.quote);
     if (startOffset === null) return failed(comment);
     changed = true;
+    const nextTextLocator = {
+      ...locator,
+      startOffset,
+      endOffset: startOffset + locator.quote.length,
+    };
+    const nextSourceTarget = {
+      ...sourceTarget,
+      textLocator: nextTextLocator,
+    };
+    const visualHint = comment.visualHint || comment.target?.visualHint;
     return {
       ...comment,
-      target: {
-        ...comment.target,
-        textLocator: {
-          ...locator,
-          startOffset,
-          endOffset: startOffset + locator.quote.length,
-        },
-      },
+      target: visualHint
+        ? { ...nextSourceTarget, label: visualHint.label, visualHint }
+        : nextSourceTarget,
+      ...(comment.sourceAnchor || sourceTarget
+        ? { sourceAnchor: nextSourceTarget }
+        : {}),
     };
   });
 

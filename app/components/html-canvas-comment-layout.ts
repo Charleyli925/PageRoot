@@ -3,6 +3,7 @@ import { sourceTargetRefForSelection } from "../lib/canvas-target-rebind.js";
 import type { PageTabAssociation } from "../lib/page-presentation-dom";
 import type {
   HtmlCanvasCommentedTarget,
+  HtmlCanvasCommentLayoutTarget,
   HtmlCanvasCommentLayoutState,
   HtmlCanvasSelection,
   HtmlCanvasTargetResolution,
@@ -15,6 +16,7 @@ import {
   isRenderedCommentTarget,
   tabAssociationForElement,
 } from "./html-canvas-page-view";
+import { runtimeVisualTargetForHint } from "./html-canvas-runtime-target";
 import {
   defaultGlobalCommentElement,
   inferSelectionLevel,
@@ -35,6 +37,42 @@ export type InsertionPoint = {
 
 export type CommentTargetLayout = HtmlCanvasCommentLayoutState["targets"][number];
 
+function separateCommentMarkers(
+  markers: HtmlCanvasCommentMarker[],
+  containerWidth: number,
+  containerHeight: number,
+): HtmlCanvasCommentMarker[] {
+  const minLeft = 18;
+  const maxLeft = Math.max(minLeft, containerWidth - 18);
+  const minTop = 18;
+  const maxTop = Math.max(minTop, containerHeight - 18);
+  const separation = 34;
+  const placed: HtmlCanvasCommentMarker[] = [];
+  return markers.map((marker) => {
+    const candidateOffsets = [[0, 0]];
+    for (let distance = separation; distance <= separation * 6; distance += separation) {
+      candidateOffsets.push(
+        [0, -distance],
+        [0, distance],
+        [-distance, 0],
+        [distance, 0],
+      );
+    }
+    const position = candidateOffsets
+      .map(([offsetLeft, offsetTop]) => ({
+        left: Math.max(minLeft, Math.min(maxLeft, marker.left + offsetLeft)),
+        top: Math.max(minTop, Math.min(maxTop, marker.top + offsetTop)),
+      }))
+      .find(({ left, top }) => placed.every((existing) => (
+        Math.abs(existing.left - left) >= separation
+        || Math.abs(existing.top - top) >= separation
+      )));
+    const next = position ? { ...marker, ...position } : marker;
+    placed.push(next);
+    return next;
+  });
+}
+
 function querySourceElement(
   documentNode: Document,
   nodeId: string,
@@ -46,10 +84,11 @@ function querySourceElement(
 
 export function measureCommentTargetLayouts(options: {
   documentNode: Document;
-  layoutTargets: readonly HtmlCanvasSelection[];
+  layoutTargets: readonly HtmlCanvasCommentLayoutTarget[];
   sourceIndex: SourceIndexValue | null;
   scrollTop: number;
   commentTabAssociations: readonly PageTabAssociation[];
+  isProvenSourceElement?: ((element: HTMLElement) => boolean) | null;
 }): CommentTargetLayout[] {
   const {
     documentNode,
@@ -57,8 +96,10 @@ export function measureCommentTargetLayouts(options: {
     sourceIndex,
     scrollTop,
     commentTabAssociations,
+    isProvenSourceElement,
   } = options;
-  return layoutTargets.map((target) => {
+  return layoutTargets.map((entry) => {
+    const target = entry.target;
     const missing = (resolution: HtmlCanvasTargetResolution) => ({
       targetId: target.id,
       status: "missing" as const,
@@ -81,8 +122,16 @@ export function measureCommentTargetLayouts(options: {
         targetElement = querySourceElement(documentNode, String(resolution.target.nodeId));
       }
       if (!targetElement) return missing(targetResolution);
-      const targetRect = targetElement.getBoundingClientRect();
-      const visible = isRenderedCommentTarget(targetElement);
+      const visualElement = entry.visualHint
+        ? runtimeVisualTargetForHint(targetElement, entry.visualHint, {
+            isProvenSourceElement,
+          }) ?? targetElement
+        : targetElement;
+      const measuredElement = isRenderedCommentTarget(visualElement)
+        ? visualElement
+        : targetElement;
+      const targetRect = measuredElement.getBoundingClientRect();
+      const visible = isRenderedCommentTarget(measuredElement);
       const tabAssociation = tabAssociationForElement(
         targetElement,
         commentTabAssociations,
@@ -293,6 +342,7 @@ export function layoutCommentMarkers(options: {
   frameOffsetTop: number;
   containerWidth: number;
   containerHeight: number;
+  isProvenSourceElement?: ((element: HTMLElement) => boolean) | null;
 }): HtmlCanvasCommentMarker[] {
   const {
     documentNode,
@@ -305,6 +355,7 @@ export function layoutCommentMarkers(options: {
     frameOffsetTop,
     containerWidth,
     containerHeight,
+    isProvenSourceElement,
   } = options;
   const nextCommentMarkers: HtmlCanvasCommentMarker[] = [];
   commentedTargets.forEach((rawTarget, targetIndex) => {
@@ -323,10 +374,19 @@ export function layoutCommentMarkers(options: {
       targetElement = null;
     }
     if (!targetElement) return;
-    const targetRect = targetElement.getBoundingClientRect();
+    const visualElement = rawTarget.visualHint
+      ? runtimeVisualTargetForHint(targetElement, rawTarget.visualHint, {
+          isProvenSourceElement,
+        }) ?? targetElement
+      : targetElement;
+    const measuredElement = isRenderedCommentTarget(visualElement)
+      ? visualElement
+      : targetElement;
+    const targetRect = measuredElement.getBoundingClientRect();
     if (targetRect.bottom < 0 || targetRect.top > frameHeight) return;
     const isGlobalPageTarget = isPageRootElement(targetElement)
-      && target.level === "module";
+      && target.level === "module"
+      && !rawTarget.visualHint;
     const tabControl = commentTabAssociations.find((association) => (
       association.control === targetElement
       || association.control.contains(targetElement)
@@ -334,9 +394,12 @@ export function layoutCommentMarkers(options: {
     const markerAnchorRect = tabControl?.getBoundingClientRect() ?? targetRect;
     nextCommentMarkers.push({
       key: target.id || `${target.selector}:${targetIndex}`,
-      selection: selectionForElement(targetElement, sourceIndex, target),
+      selection: {
+        ...selectionForElement(targetElement, sourceIndex, target),
+        ...(rawTarget.visualHint ? { visualHint: rawTarget.visualHint } : {}),
+      },
       count: rawTarget.count,
-      label: rawTarget.label,
+      label: rawTarget.label || rawTarget.visualHint?.label,
       placement: tabControl ? "tab-side" : "target-corner",
       left: isGlobalPageTarget
         ? Math.max(18, Math.min(containerWidth - 28, frameOffsetLeft + 18))
@@ -374,5 +437,5 @@ export function layoutCommentMarkers(options: {
             ),
     });
   });
-  return nextCommentMarkers;
+  return separateCommentMarkers(nextCommentMarkers, containerWidth, containerHeight);
 }

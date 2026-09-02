@@ -500,6 +500,22 @@ test("project-file Request becomes a Candidate on finalization and a Version onl
   assert.equal(ensured.response.status, 200, JSON.stringify(ensured.body));
 
   const taskText = "将标题改为 Candidate。确保标题保持可读；本轮不需要修改导航栏。";
+  const runtimeSourceAnchor = {
+    targetId: "target_candidate",
+    elementId: "pr1_11111111111141118111111111111111",
+    label: "财务数据表",
+    level: "subregion",
+    selector: "main",
+    resolution: "exact",
+  };
+  const runtimeVisualHint = {
+    runtimeGenerated: true,
+    kind: "table",
+    label: "财务数据表",
+    renderedText: "项目（百万元） 2025Q1 2025Q2 2026Q2",
+    relativePath: "table:nth-of-type(1)",
+    relativeBox: { x: 0.1, y: 0.2, width: 0.8, height: 0.3 },
+  };
   const projectRules = "# 本轮前的长期规则\n\n- 只修改标题。\n";
   const savedRules = await postJson(bridge, "/project-file", {
     sourcePath: ensured.body.sourcePath,
@@ -519,6 +535,8 @@ test("project-file Request becomes a Candidate on finalization and a Version onl
       commentId: "comment_candidate",
       text: taskText,
       target: { targetId: "target_candidate" },
+      sourceAnchor: runtimeSourceAnchor,
+      visualHint: runtimeVisualHint,
       attachments: [],
     }],
     targets: [{ targetId: "target_candidate" }],
@@ -583,7 +601,11 @@ test("project-file Request becomes a Candidate on finalization and a Version onl
   assert.match(prompt, /本轮不需要修改导航栏/u);
   assert.match(prompt, /## 冻结输入与输出/u);
   assert.match(prompt, /## 完成/u);
-  assert.doesNotMatch(prompt, /data-pageroot-id|Runtime DOM|Stable ID/u);
+  assert.match(prompt, /运行时可见内容评论规则/u);
+  assert.match(prompt, /财务数据表/u);
+  assert.match(prompt, /table:nth-of-type\(1\)/u);
+  assert.match(prompt, /项目（百万元） 2025Q1 2025Q2 2026Q2/u);
+  assert.doesNotMatch(prompt, /data-pageroot-id|data-html-ai-source-node-id/u);
 
   const outputPath = join(
     ensured.body.projectRoot,

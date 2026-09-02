@@ -21,8 +21,17 @@ export const COMMENT_VIRTUAL_OVERSCAN = 1_000;
  * @returns {string}
  */
 export function commentMarkerGroupKey(target) {
+  const visualHint = target?.visualHint;
+  const visualKey = visualHint
+    ? [
+        visualHint.runtimeGenerated === true ? "runtime" : "",
+        visualHint.kind || "",
+        visualHint.relativePath || "",
+        visualHint.label || "",
+      ].join("\u0000")
+    : "";
   if (target?.elementId) {
-    return [target.elementId, target.level || ""].join("\u0000");
+    return [target.elementId, target.level || "", visualKey].join("\u0000");
   }
   const anchor = target?.sourceAnchor;
   if (anchor) {
@@ -33,6 +42,7 @@ export function commentMarkerGroupKey(target) {
       anchor.startOffset ?? "",
       anchor.endOffset ?? "",
       target.textQuote || target.text || "",
+      visualKey,
     ].join("\u0000");
   }
   return [
@@ -40,6 +50,7 @@ export function commentMarkerGroupKey(target) {
     target?.level || "",
     target?.textQuote || target?.text || "",
     target?.id || "",
+    visualKey,
   ].join("\u0000");
 }
 

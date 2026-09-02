@@ -1157,9 +1157,29 @@ function projectFilePromptForRequest(target, request, taskSpec) {
   const objective = promptListItem(taskSpec.objective);
   const scopePolicy = String(taskSpec.scopePolicy || "");
   const scopeLabel = TASK_SCOPE_LABELS[scopePolicy] || scopePolicy;
+  const visualContextByTargetId = new Map(
+    (Array.isArray(request.comments) ? request.comments : []).flatMap((comment) => {
+      const sourceAnchor = comment?.sourceAnchor || comment?.target;
+      const targetId = String(sourceAnchor?.targetId || sourceAnchor?.id || "");
+      const hint = comment?.visualHint || comment?.target?.visualHint;
+      return targetId && hint?.runtimeGenerated === true
+        ? [[targetId, hint]]
+        : [];
+    }),
+  );
   const instructionLines = taskSpec.instructions.map((instruction) => {
     const targets = instruction.targetRefs.join("、");
-    return `- ${promptListItem(instruction.text)}\n  - 目标：${targets}`;
+    const visualLines = instruction.targetRefs.flatMap((targetId) => {
+      const hint = visualContextByTargetId.get(targetId);
+      if (!hint) return [];
+      const box = hint.relativeBox
+        ? `相对位置：${hint.relativeBox.x},${hint.relativeBox.y},${hint.relativeBox.width},${hint.relativeBox.height}`
+        : "";
+      return [
+        `  - 可见对象：${promptListItem(hint.label)}；类型：${promptListItem(hint.kind)}${hint.relativePath ? `；宿主内路径：${promptListItem(hint.relativePath)}` : ""}${box ? `；${box}` : ""}${hint.renderedText ? `；可见文字摘要：${promptListItem(hint.renderedText)}` : ""}`,
+      ];
+    });
+    return `- ${promptListItem(instruction.text)}\n  - 目标源码锚点：${targets}${visualLines.length > 0 ? `\n${visualLines.join("\n")}` : ""}`;
   });
   const acceptanceLines = [
     ...taskSpec.globalAcceptanceCriteria.map((criterion) => (
@@ -1172,7 +1192,7 @@ function projectFilePromptForRequest(target, request, taskSpec) {
     )),
   ];
   const nonGoalLines = taskSpec.nonGoals.map((nonGoal) => `- ${promptListItem(nonGoal)}`);
-  return `# PageRoot AI Candidate\n\n## 本轮目标\n\n${objective}\n\n## 修改范围\n\n${scopeLabel}（\`${scopePolicy}\`）\n\n## 本轮要求\n\n${instructionLines.join("\n")}\n\n## 验收标准\n\n${acceptanceLines.length > 0 ? acceptanceLines.join("\n") : "评论中没有额外明确验收条目。"}\n\n## 明确不做\n\n${nonGoalLines.length > 0 ? nonGoalLines.join("\n") : "评论中没有额外明确的不做项。"}\n\n## 冻结输入与输出\n\n从 \`${inputManifestPath}\` 开始，严格按 \`readOrder\` 读取。跨任务不变的合同在 \`input/AI_RULES.md\`；本轮 Task Spec 以 \`${changeRequestPath}\` 为准。\n\n- 项目长期规则：\`${projectRulesPath}\`\n- 冻结 HTML：\`${inputPath}\`\n- 评论、目标与审计上下文：\`${annotationsPath}\`\n- 唯一输出：\`${outputPath}\`\n\n## 完成\n\n完成输出写入后，最后执行唯一最终化命令：\n\n\`\`\`sh\n${projectFileFinalizerCommand(target, request)}\n\`\`\`\n`;
+  return `# PageRoot AI Candidate\n\n## 本轮目标\n\n${objective}\n\n## 修改范围\n\n${scopeLabel}（\`${scopePolicy}\`）\n\n## 本轮要求\n\n${instructionLines.join("\n")}\n\n## 运行时可见内容评论规则\n\n评论可能指向由某个源码宿主生成的表格、图表、SVG、Canvas 或其他可见内容。每条评论的 \`sourceAnchor\` 是唯一拥有保存、跨版本重绑和源码定位权限的稳定源码 TargetRef；\`visualHint\` 只用于区分用户实际看到的对象。用户评论的是由该源码宿主生成的可见内容。请修改生成该内容的 HTML、数据或 Script，不要修改或保存临时 Runtime DOM，也不要把 \`visualHint\` 当作源码身份或编辑权限。\n\n${acceptanceLines.length > 0 ? `## 验收标准\n\n${acceptanceLines.join("\n")}\n\n` : ""}## 明确不做\n\n${nonGoalLines.length > 0 ? nonGoalLines.join("\n") : "评论中没有额外明确的不做项。"}\n\n## 冻结输入与输出\n\n从 \`${inputManifestPath}\` 开始，严格按 \`readOrder\` 读取。跨任务不变的合同在 \`input/AI_RULES.md\`；本轮 Task Spec 以 \`${changeRequestPath}\` 为准。\n\n- 项目长期规则：\`${projectRulesPath}\`\n- 冻结 HTML：\`${inputPath}\`\n- 评论、目标与审计上下文：\`${annotationsPath}\`\n- 唯一输出：\`${outputPath}\`\n\n## 完成\n\n完成输出写入后，最后执行唯一最终化命令：\n\n\`\`\`sh\n${projectFileFinalizerCommand(target, request)}\n\`\`\`\n`;
 }
 
 function projectFileReadyPayload({ request, candidate, target }) {
@@ -1318,7 +1338,11 @@ async function createProjectFileRequest(body) {
     requestId,
     "PROMPT.md",
   )} 中的单轮任务，完成后运行其中的最终化（finalizer）命令。`;
-  const prompt = projectFilePromptForRequest(target, promptDescriptor, taskSpec);
+  const prompt = projectFilePromptForRequest(
+    target,
+    { ...promptDescriptor, comments: request.comments },
+    taskSpec,
+  );
   try {
     const durable = await projectFileRepository.prepareRequest({
       target,

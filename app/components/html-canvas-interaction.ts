@@ -345,13 +345,16 @@ export function findCanvasHitSourceElement(target: EventTarget | null): HTMLElem
   return element.closest<HTMLElement>(`[${SOURCE_NODE_ATTRIBUTE}]`) ?? element;
 }
 
-export function findCanvasSelectionElement(target: EventTarget | null): HTMLElement | null {
+export function findCanvasSelectionElement(
+  target: EventTarget | null,
+  options: { preserveRuntimeSurface?: boolean } = {},
+): HTMLElement | null {
   const selected = findSelectableElement(target);
   if (!selected) return null;
   const element = compoundValueSelectionRoot(selected);
   const ownsMediaSurface = element.matches(MEDIA_SURFACE_SELECTOR)
     || Boolean(element.querySelector(MEDIA_SURFACE_SELECTOR));
-  if (!ownsMediaSurface) return element;
+  if (!ownsMediaSurface || options.preserveRuntimeSurface) return element;
   let candidate: HTMLElement | null = element;
   while (candidate && candidate !== candidate.ownerDocument.body) {
     if (

@@ -113,11 +113,8 @@ test("SVG comments keep the exact source node and reject runtime-only children",
     "编辑SVG 圆形 · 运行时数据点",
   );
   await toolbar.getByRole("button", { name: /留评论/u }).click();
-  await expect(page.getByText("请选择可定位的源码元素", { exact: true }))
+  await expect(page.getByText("暂时无法建立评论位置", { exact: true }))
     .toBeVisible();
-  await expect(page.getByText(
-    /这部分内容由页面运行时生成，无法对应到源码/u,
-  )).toBeVisible();
   await expect(page.getByRole("region", { name: "添加评论" })).toHaveCount(0);
 
   await line.evaluate((element) => element.setAttribute("hidden", ""));

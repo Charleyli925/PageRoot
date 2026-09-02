@@ -26,6 +26,13 @@ import {
   nativeTextFragmentForElement,
 } from "./html-canvas-preview-sync";
 import {
+  createRuntimeVisualTargetIndex,
+  type RuntimeVisualTargetIndex,
+  runtimeVisualTargetAtPoint,
+  runtimeVisualHintForTarget,
+  runtimeVisualTargetElement,
+} from "./html-canvas-runtime-target";
+import {
   inferSelectionLevel,
   selectionForElement,
 } from "./html-canvas-selection";
@@ -66,11 +73,19 @@ export function canStartNativeTextEditAtTarget({
 }
 
 export type ResolvedCanvasTarget = Readonly<{
-  /** The precise DOM object under the pointer. */
+  /** The precise runtime/source DOM object under the pointer. */
   hitElement: HTMLElement;
-  /** The long-lived source object consumed by selection and operations. */
-  targetElement: HTMLElement;
+  /** Runtime targets remain comment-only and ambiguous. */
+  operationTarget: HTMLElement;
   /** The object whose geometry owns hover, selected chrome and the toolbar. */
+  visualTarget: HTMLElement;
+  /** The nearest privately proven exact source host used only for comments. */
+  commentAnchor: SourceTargetRef | null;
+  /** UI selection form of commentAnchor; never used as an operation target. */
+  commentAnchorSelection: HtmlCanvasSelection | null;
+  /** Compatibility alias for operationTarget. */
+  targetElement: HTMLElement;
+  /** Compatibility alias for visualTarget. */
   visualElement: HTMLElement;
   selection: HtmlCanvasSelection;
   sourceRef: SourceTargetRef | null;
@@ -85,6 +100,7 @@ export type CanvasTargetIdentityScope = {
   readonly generation: number;
   readonly targetObjectKeys: WeakMap<HTMLElement, string>;
   readonly visualObjectKeys: WeakMap<HTMLElement, string>;
+  runtimeVisualTargetIndex: RuntimeVisualTargetIndex | null;
 };
 
 /** @deprecated Use ResolvedCanvasTarget. Kept as a narrow compatibility name. */
@@ -124,6 +140,7 @@ export function createCanvasTargetIdentityScope(
     generation: normalizedGeneration(generation),
     targetObjectKeys: new WeakMap<HTMLElement, string>(),
     visualObjectKeys: new WeakMap<HTMLElement, string>(),
+    runtimeVisualTargetIndex: null,
   };
 }
 
@@ -210,7 +227,7 @@ export function canvasVisualTargetElement(
 ): HTMLElement | null {
   if (!element || !sourceIndex) return element;
   if (options.runtimeGenerated) {
-    return element.closest("svg, math") as HTMLElement | null ?? element;
+    return runtimeVisualTargetElement(element) ?? element;
   }
   const dedicatedSurface = element.closest("svg, math") as HTMLElement | null;
   if (dedicatedSurface?.hasAttribute(SOURCE_NODE_ATTRIBUTE)) return dedicatedSurface;
@@ -257,10 +274,34 @@ export function resolveCanvasTarget({
   if (!enabled || !documentNode || !sourceIndex) return null;
   if (isCanvasRootElement(eventTarget)) return null;
   const generation = normalizedGeneration(rawGeneration);
+  const identityScope = rawIdentityScope?.generation === generation
+    ? rawIdentityScope
+    : createCanvasTargetIdentityScope(generation);
+  if (
+    isProvenRuntimeSourceElement
+    && point
+    && (
+      !identityScope.runtimeVisualTargetIndex
+      || identityScope.runtimeVisualTargetIndex.disposed
+    )
+  ) {
+    identityScope.runtimeVisualTargetIndex = createRuntimeVisualTargetIndex(documentNode);
+  }
   const dedicatedSurface = point
     ? findDedicatedSourceSurfaceAtPoint(documentNode, point)
     : null;
   const directSelection = findCanvasSelectionElement(eventTarget);
+  const runtimeDirectSelection = findCanvasSelectionElement(eventTarget, {
+    preserveRuntimeSurface: true,
+  });
+  const runtimePointTarget = point
+    ? runtimeVisualTargetAtPoint({
+        documentNode,
+        point,
+        isProvenSourceElement: isProvenRuntimeSourceElement,
+        runtimeVisualTargetIndex: identityScope.runtimeVisualTargetIndex,
+      })
+    : null;
   // A dedicated surface such as <canvas> needs point-based selection so its
   // wrapping module is never selected. For a concrete child inside an SVG,
   // however, keep that child as the exact comment target instead of widening
@@ -271,22 +312,32 @@ export function resolveCanvasTarget({
     && dedicatedSurface.contains(directSelection)
     ? directSelection
     : null;
-  const hit = directSurfaceChild
-    ?? dedicatedSurface
-    ?? findCanvasHitSourceElement(eventTarget)
-    ?? directSelection;
   // In a Runtime frame, public source/stable-ID attributes are locators only.
   // The exact selected object must belong to the generation's sealed private
   // authority set; otherwise even a perfectly copied identity remains
   // display/comment-only.
   const runtimeGenerated = Boolean(
+    runtimePointTarget
+    || (
     isProvenRuntimeSourceElement
     && directSelection
     && !isProvenRuntimeSourceElement(directSelection)
+    )
   ) || eventTargetsRuntimeGeneratedNode(
     eventTarget,
     isProvenRuntimeSourceElement,
   );
+  const hit = runtimeGenerated
+    ? directSurfaceChild
+      ?? runtimePointTarget
+      ?? runtimeDirectSelection
+      ?? dedicatedSurface
+      ?? directSelection
+      ?? findCanvasHitSourceElement(eventTarget)
+    : directSurfaceChild
+      ?? dedicatedSurface
+      ?? findCanvasHitSourceElement(eventTarget)
+      ?? directSelection;
   if (
     !hit
     || (
@@ -315,29 +366,57 @@ export function resolveCanvasTarget({
     ? selectionForElement(targetElement, null, undefined, "ambiguous")
     : selectionForElement(targetElement, sourceIndex);
   const sourceRef = sourceRefForSelection(selection, runtimeGenerated);
+  const commentAnchorData = runtimeGenerated
+    ? runtimeCommentAnchorForTarget(
+        targetElement,
+        documentNode,
+        sourceIndex,
+        isProvenRuntimeSourceElement,
+      )
+    : {
+        element: targetElement,
+        selection,
+        ref: sourceRef,
+      };
+  const visualElement = runtimeGenerated
+    ? runtimeVisualTargetElement(targetElement) ?? targetElement
+    : canvasVisualTargetElement(
+      targetElement,
+      sourceIndex,
+      { runtimeGenerated },
+    ) ?? targetElement;
+  const visualHint = runtimeGenerated && commentAnchorData?.element
+    ? runtimeVisualHintForTarget({
+        sourceHost: commentAnchorData.element,
+        visualTarget: visualElement,
+        cache: identityScope.runtimeVisualTargetIndex?.hintCache,
+      })
+    : null;
+  const selectionWithVisualHint = visualHint
+    ? {
+        ...selection,
+        label: visualHint.label,
+        visualHint,
+      }
+    : selection;
   const capability = canvasPointerCapabilityFromProof({
     canStartTextEdit,
-    sourceResolution: selection.resolution as HtmlCanvasTargetResolution,
+    sourceResolution: selectionWithVisualHint.resolution as HtmlCanvasTargetResolution,
   });
-  const visualElement = canvasVisualTargetElement(
-    targetElement,
-    sourceIndex,
-    { runtimeGenerated },
-  )
-    ?? targetElement;
-  const identityScope = rawIdentityScope?.generation === generation
-    ? rawIdentityScope
-    : createCanvasTargetIdentityScope(generation);
   return Object.freeze({
     ...capability,
     hitElement: hit,
     targetElement,
+    operationTarget: targetElement,
+    visualTarget: visualElement,
+    commentAnchor: commentAnchorData?.ref ?? null,
+    commentAnchorSelection: commentAnchorData?.selection ?? null,
     visualElement,
-    selection,
+    selection: selectionWithVisualHint,
     sourceRef,
     targetKey: canvasTargetKeyFor({
       element: targetElement,
-      selection,
+      selection: selectionWithVisualHint,
       sourceRef,
       generation,
       identityScope,
@@ -352,6 +431,57 @@ export function resolveCanvasTarget({
     generation,
     runtimeGenerated,
   });
+}
+
+function runtimeCommentAnchorForTarget(
+  targetElement: HTMLElement,
+  documentNode: Document,
+  sourceIndex: SourceIndexValue,
+  isProvenRuntimeSourceElement: ((element: HTMLElement) => boolean) | null,
+): {
+  element: HTMLElement;
+  selection: HtmlCanvasSelection;
+  ref: SourceTargetRef;
+} | null {
+  if (!isProvenRuntimeSourceElement) return null;
+  let current: HTMLElement | null = targetElement;
+  let pageFallback: {
+    element: HTMLElement;
+    selection: HtmlCanvasSelection;
+    ref: SourceTargetRef;
+  } | null = null;
+  while (current) {
+    if (isProvenRuntimeSourceElement(current)) {
+      const rawSelection = selectionForElement(
+        current,
+        sourceIndex,
+        undefined,
+        "exact",
+      );
+      const isPageRoot = current === documentNode.body
+        || current === documentNode.documentElement;
+      const selection = isPageRoot
+        ? {
+            ...rawSelection,
+            label: "整个页面",
+            selector: "body",
+            level: "module" as const,
+            tagName: "body",
+            text: "",
+            resolution: "exact" as const,
+          }
+        : rawSelection;
+      const ref = sourceTargetRefForSelection(selection) as SourceTargetRef;
+      if (isValidPagerootElementId(selection.elementId)) {
+        return { element: current, selection, ref };
+      }
+      if (isPageRoot && selection.resolution === "exact") {
+        pageFallback = { element: current, selection, ref };
+      }
+    }
+    current = current.parentElement;
+  }
+  return pageFallback;
 }
 
 export function resolveCanvasPointerHit(input: CanvasPointerHitInput): CanvasPointerHit {

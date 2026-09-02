@@ -136,11 +136,12 @@ export function annotateReviewComments(
   const groups = new Map<Element, CommentItem[]>();
   comments.forEach((comment) => {
     if (!comment.text.trim() && !comment.attachments?.length) return;
+    const sourceTarget = comment.sourceAnchor || comment.target;
     const element = resolvedCommentElement(
       document,
       sourceIndex,
       sourceElementsByNodeId,
-      comment.target,
+      sourceTarget,
     );
     if (!element) return;
     const existing = groups.get(element);
@@ -164,7 +165,7 @@ export function annotateReviewComments(
           document,
           sourceIndex,
           element,
-          item.target,
+          item.sourceAnchor || item.target,
         ),
         null,
       );

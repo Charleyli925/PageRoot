@@ -108,3 +108,72 @@ test("stable element identity groups moved comments without selector or Hash equ
     }),
   );
 });
+
+test("runtime comments on one source host keep distinct visual objects apart", () => {
+  const sourceTarget = {
+    id: "target_comment_001",
+    elementId: "pr1_11111111111141118111111111111111",
+    selector: "main",
+    level: "part",
+    sourceAnchor: {
+      sourceSha256: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      startOffset: 10,
+      endOffset: 20,
+    },
+  };
+  const first = {
+    ...sourceTarget,
+    visualHint: {
+      runtimeGenerated: true,
+      kind: "table",
+      label: "财务数据表",
+      renderedText: "项目 2025Q1 2025Q2",
+      relativePath: "table:nth-of-type(1)",
+      relativeBox: { x: 0, y: 0, width: 0.4, height: 0.2 },
+    },
+  };
+  const second = {
+    ...sourceTarget,
+    visualHint: {
+      ...first.visualHint,
+      label: "利润数据表",
+      renderedText: "利润 2025Q1 2025Q2",
+      relativePath: "table:nth-of-type(2)",
+      relativeBox: { x: 0, y: 0.4, width: 0.4, height: 0.2 },
+    },
+  };
+  assert.notEqual(commentMarkerGroupKey(first), commentMarkerGroupKey(second));
+  assert.equal(
+    commentMarkerGroupKey(first),
+    commentMarkerGroupKey({ ...first, id: "target_comment_002" }),
+  );
+});
+
+test("runtime marker identity survives rendered text and box changes", () => {
+  const target = {
+    id: "target_comment_runtime_stable",
+    elementId: "pr1_11111111111141118111111111111111",
+    selector: "main",
+    level: "part",
+    visualHint: {
+      runtimeGenerated: true,
+      kind: "table",
+      label: "财务数据表",
+      renderedText: "项目 2025Q1",
+      relativePath: "table:nth-of-type(1)",
+      relativeBox: { x: 0.1, y: 0.2, width: 0.4, height: 0.2 },
+    },
+  };
+  assert.equal(
+    commentMarkerGroupKey(target),
+    commentMarkerGroupKey({
+      ...target,
+      id: "target_comment_runtime_changed",
+      visualHint: {
+        ...target.visualHint,
+        renderedText: "项目 2025Q1 2025Q2 2026Q2",
+        relativeBox: { x: 0.08, y: 0.19, width: 0.55, height: 0.22 },
+      },
+    }),
+  );
+});

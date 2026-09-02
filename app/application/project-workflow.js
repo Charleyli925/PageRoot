@@ -69,6 +69,17 @@ function matchesCloseProjectIdentity(projectSession, context) {
     === String(context.workingCopyId || "");
 }
 
+function commentSourceTarget(comment) {
+  return comment?.sourceAnchor || comment?.target || null;
+}
+
+function commentTargetForDisplay(sourceTarget, comment) {
+  const visualHint = comment?.visualHint || comment?.target?.visualHint;
+  return visualHint
+    ? { ...sourceTarget, label: visualHint.label, visualHint }
+    : sourceTarget;
+}
+
 function copyOpenRequest(value) {
   if (!value || typeof value.requestId !== "string" || !value.requestId) return null;
   return Object.freeze({
@@ -3562,15 +3573,21 @@ export class ProjectWorkflow {
         const rebound = this.#codecs.rebindTargetsPreservingGlobal(
           this.#documentSession.html,
           [
-            ...recovered.comments.map((comment) => comment.target),
-            ...(recovered.composerTarget ? [recovered.composerTarget] : []),
+            ...recovered.comments.map(commentSourceTarget),
+            ...(recovered.composerTarget
+              ? [recovered.composerTarget.commentAnchor || recovered.composerTarget]
+              : []),
           ],
         );
         const targets = new Map(rebound.map((target) => [target.id, target]));
         const recoveredComments = recovered.comments.map((comment) => ({
           ...comment,
-          target: targets.get(comment.target.id) || {
-            ...comment.target,
+          target: commentTargetForDisplay(targets.get(commentSourceTarget(comment)?.id) || {
+            ...commentSourceTarget(comment),
+            resolution: "orphaned",
+          }, comment),
+          sourceAnchor: targets.get(commentSourceTarget(comment)?.id) || {
+            ...commentSourceTarget(comment),
             resolution: "orphaned",
           },
         }));
@@ -3593,10 +3610,15 @@ export class ProjectWorkflow {
           ? recoveredEditSession
           : null;
         const composerTarget = recovered.composerTarget
-          ? targets.get(recovered.composerTarget.id) || {
-              ...recovered.composerTarget,
-              resolution: "orphaned",
-            }
+          ? commentTargetForDisplay(
+              targets.get(
+                (recovered.composerTarget.commentAnchor || recovered.composerTarget).id,
+              ) || {
+                ...(recovered.composerTarget.commentAnchor || recovered.composerTarget),
+                resolution: "orphaned",
+              },
+              recovered.composerTarget,
+            )
           : null;
         this.#commentSession.update({
           comments: recoveredComments,

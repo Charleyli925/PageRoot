@@ -107,6 +107,17 @@ function sameOpenRoute(left, right, sameSourcePath) {
   );
 }
 
+function commentSourceTarget(comment) {
+  return comment?.sourceAnchor || comment?.target || null;
+}
+
+function commentTargetForDisplay(sourceTarget, comment) {
+  const visualHint = comment?.visualHint || comment?.target?.visualHint;
+  return visualHint
+    ? { ...sourceTarget, label: visualHint.label, visualHint }
+    : sourceTarget;
+}
+
 function invalidAcknowledgement(message, code) {
   const error = new Error(message);
   error.code = code;
@@ -2467,16 +2478,23 @@ export class DocumentWorkflow {
 
   #rebindTargets(html) {
     const targets = [
-      ...this.#commentSession.comments.map((comment) => comment.target),
+      ...this.#commentSession.comments.map(commentSourceTarget),
       ...this.#commentSession.changeEvents.map((event) => event.target),
-      ...(this.#commentSession.composerTarget ? [this.#commentSession.composerTarget] : []),
+      ...(this.#commentSession.composerTarget
+        ? [this.#commentSession.composerTarget.commentAnchor || this.#commentSession.composerTarget]
+        : []),
     ];
     const rebound = this.#codecs.rebindTargetsPreservingGlobal(html, targets);
     const byId = new Map(rebound.map((target) => [target.id, target]));
     this.#commentSession.update({
       comments: this.#commentSession.comments.map((comment) => ({
         ...comment,
-        target: byId.get(comment.target.id) || comment.target,
+        target: commentTargetForDisplay(
+          byId.get(commentSourceTarget(comment)?.id) || commentSourceTarget(comment),
+          comment,
+        ),
+        sourceAnchor: byId.get(commentSourceTarget(comment)?.id)
+          || commentSourceTarget(comment),
       })),
       changeEvents: this.#commentSession.changeEvents.map((event) => ({
         ...event,
@@ -2484,9 +2502,13 @@ export class DocumentWorkflow {
       })),
     });
     if (this.#commentSession.composerTarget) {
+      const composerTarget = this.#commentSession.composerTarget;
+      const sourceTarget = composerTarget.commentAnchor || composerTarget;
       this.#commentSession.setComposerTarget(
-        byId.get(this.#commentSession.composerTarget.id)
-        || this.#commentSession.composerTarget,
+        commentTargetForDisplay(
+          byId.get(sourceTarget.id) || sourceTarget,
+          composerTarget,
+        ),
       );
     }
   }
@@ -2571,9 +2593,11 @@ export class DocumentWorkflow {
         : null,
     };
     const targets = [
-      ...this.#commentSession.comments.map((comment) => comment.target),
+      ...this.#commentSession.comments.map(commentSourceTarget),
       ...this.#commentSession.changeEvents.map((event) => event.target),
-      ...(this.#commentSession.composerTarget ? [this.#commentSession.composerTarget] : []),
+      ...(this.#commentSession.composerTarget
+        ? [this.#commentSession.composerTarget.commentAnchor || this.#commentSession.composerTarget]
+        : []),
       ...(rawTarget ? [rawTarget] : []),
     ];
     const rebound = transition.fromTarget && transition.toTarget
@@ -2588,8 +2612,15 @@ export class DocumentWorkflow {
     this.#commentSession.update({
       comments: this.#commentSession.comments.map((comment) => ({
         ...comment,
-        target: byId.get(comment.target.id) || {
-          ...comment.target,
+        target: commentTargetForDisplay(
+          byId.get(commentSourceTarget(comment)?.id) || {
+            ...commentSourceTarget(comment),
+            resolution: "orphaned",
+          },
+          comment,
+        ),
+        sourceAnchor: byId.get(commentSourceTarget(comment)?.id) || {
+          ...commentSourceTarget(comment),
           resolution: "orphaned",
         },
       })),
@@ -2602,11 +2633,16 @@ export class DocumentWorkflow {
       })),
     });
     if (this.#commentSession.composerTarget) {
+      const composerTarget = this.#commentSession.composerTarget;
+      const sourceTarget = composerTarget.commentAnchor || composerTarget;
       this.#commentSession.setComposerTarget(
-        byId.get(this.#commentSession.composerTarget.id) || {
-          ...this.#commentSession.composerTarget,
-          resolution: "orphaned",
-        },
+        commentTargetForDisplay(
+          byId.get(sourceTarget.id) || {
+            ...sourceTarget,
+            resolution: "orphaned",
+          },
+          composerTarget,
+        ),
       );
     }
     const historyTarget = rawTarget ? byId.get(rawTarget.id) || rawTarget : null;

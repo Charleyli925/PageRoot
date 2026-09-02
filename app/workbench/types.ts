@@ -1,4 +1,7 @@
-import type { HtmlCanvasSelection } from "../components/HtmlCanvasEditor";
+import type {
+  HtmlCanvasRuntimeVisualHint,
+  HtmlCanvasSelection,
+} from "../components/HtmlCanvasEditor";
 import type { DraftSnapshot } from "../application/draft-session.js";
 import type { RuntimeCapabilities } from "../application/runtime-capabilities.js";
 import type { SourceHistoryDirection, SourceHistoryEntry } from "../domain/source-history.js";
@@ -416,6 +419,10 @@ export type CommentItem = {
   createdAt: string;
   updatedAt: string;
   target: HtmlCanvasSelection;
+  /** Exact source host used for persistence and cross-version resolution. */
+  sourceAnchor?: HtmlCanvasSelection;
+  /** Runtime-only visual context; it never grants source authority. */
+  visualHint?: HtmlCanvasRuntimeVisualHint;
   text: string;
   attachments?: CommentAttachment[];
   baseVersionId: string | null;

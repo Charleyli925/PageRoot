@@ -1744,15 +1744,18 @@ export class RunWorkflow {
         "最新评论在冻结边界内发生变化，请重新确认后再发送。",
       );
     }
-    const unsafe = comments.find((comment) => (
-      !this.#codecs.canLocateTarget(comment.target)
-      || (
-        sourceSha256
-        && comment.target?.sourceAnchor?.sourceSha256
-        && !comment.target?.textLocator
-        && comment.target.sourceAnchor.sourceSha256 !== sourceSha256
-      )
-    ));
+    const unsafe = comments.find((comment) => {
+      const sourceTarget = comment?.sourceAnchor || comment?.target;
+      return (
+        !this.#codecs.canLocateTarget(sourceTarget)
+        || (
+          sourceSha256
+          && sourceTarget?.sourceAnchor?.sourceSha256
+          && !sourceTarget?.textLocator
+          && sourceTarget.sourceAnchor.sourceSha256 !== sourceSha256
+        )
+      );
+    });
     if (unsafe) {
       return blocked(
         "RUN_SUBMISSION_TARGET_UNSAFE",

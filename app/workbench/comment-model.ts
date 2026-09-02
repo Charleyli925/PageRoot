@@ -12,6 +12,8 @@ import type {
 import { isRecord } from "./record-model";
 import { canLocateTarget } from "./comment-relink-model.js";
 import { isValidPagerootElementId } from "../../shared/pageroot-element-identity.mjs";
+import { normalizeRuntimeVisualHint } from "../lib/runtime-comment-hint.js";
+import type { HtmlCanvasRuntimeVisualHint } from "../components/HtmlCanvasEditor.types";
 
 // The relink predicates live in comment-relink-model (plain JS so Node tests
 // can pin them); re-exported here for existing consumers.
@@ -36,9 +38,55 @@ export function exactGlobalPageTarget(
   };
 }
 
+/**
+ * A runtime selection is deliberately not a source target. Its private,
+ * ephemeral commentAnchor is the only source selection that comment code may
+ * use for persistence or relinking.
+ */
+export function commentAnchorForSelection(
+  target: HtmlCanvasSelection | null | undefined,
+): HtmlCanvasSelection | null {
+  return target?.commentAnchor ?? target ?? null;
+}
+
+export function commentVisualHintForSelection(
+  target: HtmlCanvasSelection | null | undefined,
+): HtmlCanvasRuntimeVisualHint | undefined {
+  const normalized = normalizeRuntimeVisualHint(target?.visualHint);
+  return normalized || undefined;
+}
+
+/**
+ * A body source anchor is only a true global comment when the user selected
+ * the global entry point. Runtime comments may use body as their safe source
+ * fallback while retaining a visual hint for the generated object.
+ */
+export function isExplicitGlobalCommentTarget(
+  target: HtmlCanvasSelection | null | undefined,
+): boolean {
+  const sourceTarget = commentAnchorForSelection(target);
+  return Boolean(
+    sourceTarget
+    && isGlobalPageTarget(sourceTarget)
+    && !commentVisualHintForSelection(target),
+  );
+}
+
+export function commentSourceAnchor(
+  comment: Pick<CommentItem, "target" | "sourceAnchor"> | null | undefined,
+): HtmlCanvasSelection | null {
+  return comment?.sourceAnchor
+    ?? commentAnchorForSelection(comment?.target)
+    ?? null;
+}
+
 export function canSaveCommentTarget(target: HtmlCanvasSelection): boolean {
-  return target.resolution === "exact"
-    && (isGlobalPageTarget(target) || isValidPagerootElementId(target.elementId));
+  const anchor = commentAnchorForSelection(target);
+  return Boolean(
+    anchor
+    && anchor.resolution === "exact"
+    && (isGlobalPageTarget(anchor) || isValidPagerootElementId(anchor.elementId)),
+  );
 }
 
 export function rebindTargetsPreservingGlobal(
@@ -96,16 +144,31 @@ export function normalizeGlobalCommentTargets(comments: CommentItem[]): {
 } {
   let changed = false;
   const normalized = comments.map((comment) => {
-    if (!isGlobalPageTarget(comment.target)) return comment;
-    const target = exactGlobalPageTarget(comment.target);
+    const sourceTarget = commentSourceAnchor(comment);
+    if (!sourceTarget || !isGlobalPageTarget(sourceTarget)) return comment;
+    const target = exactGlobalPageTarget(sourceTarget);
     if (
       comment.target.tagName === target.tagName
       && comment.target.label === target.label
       && comment.target.text === target.text
       && comment.target.resolution === target.resolution
+      && comment.sourceAnchor?.tagName === target.tagName
+      && comment.sourceAnchor?.label === target.label
+      && comment.sourceAnchor?.text === target.text
+      && comment.sourceAnchor?.resolution === target.resolution
     ) return comment;
     changed = true;
-    return { ...comment, target };
+    const visualHint = comment.visualHint
+      || commentVisualHintForSelection(comment.target);
+    const visualTarget = visualHint
+      ? { ...independentCommentTarget(target, comment.commentId), label: visualHint.label, visualHint }
+      : independentCommentTarget(target, comment.commentId);
+    return {
+      ...comment,
+      target: visualTarget,
+      sourceAnchor: independentCommentTarget(target, comment.commentId),
+      ...(visualHint ? { visualHint } : {}),
+    };
   });
   return { comments: changed ? normalized : comments, changed };
 }
@@ -217,6 +280,7 @@ export function selectionFromRecord(raw: unknown): HtmlCanvasSelection {
       ? resolutionValue
       : "orphaned"
   ) as HtmlCanvasSelection["resolution"];
+  const normalizedVisualHint = normalizeRuntimeVisualHint(item.visualHint);
   const selection: HtmlCanvasSelection = {
     id: String(item.targetId || ""),
     ...(item.elementId ? { elementId: String(item.elementId) } : {}),
@@ -287,6 +351,9 @@ export function selectionFromRecord(raw: unknown): HtmlCanvasSelection {
           },
         }
       : {}),
+    ...(normalizedVisualHint
+      ? { visualHint: normalizedVisualHint as HtmlCanvasRuntimeVisualHint }
+      : {}),
   };
   return isGlobalPageTarget(selection)
     ? exactGlobalPageTarget(selection)
@@ -346,12 +413,18 @@ export function persistedTargetRef(
 }
 
 export function persistedComment(comment: CommentItem) {
+  const sourceTarget = commentSourceAnchor(comment) || comment.target;
+  const sourceAnchor = persistedTargetRef(sourceTarget);
+  const visualHint = comment.visualHint
+    || commentVisualHintForSelection(comment.target);
   return {
     ...comment,
     ...(comment.attachments?.length
       ? { attachments: comment.attachments.map(persistedAttachment) }
       : {}),
-    target: persistedTargetRef(comment.target),
+    target: sourceAnchor,
+    sourceAnchor,
+    ...(visualHint ? { visualHint } : {}),
   };
 }
 
@@ -370,14 +443,27 @@ export function commentsFromRecords(raw: unknown): CommentItem[] {
     const commentId = String(
       value.commentId || value.id || `comment_unknown_${index + 1}`,
     );
+    const recordedSourceAnchor = isRecord(value.sourceAnchor)
+      && (
+        value.sourceAnchor.targetId
+        || value.sourceAnchor.elementId
+        || value.sourceAnchor.selector
+      )
+      ? value.sourceAnchor
+      : value.target || value;
+    const sourceAnchor = selectionFromRecord(recordedSourceAnchor);
+    const visualHint = normalizeRuntimeVisualHint(value.visualHint);
+    const persistedSourceAnchor = independentCommentTarget(sourceAnchor, commentId);
+    const target = visualHint
+      ? { ...persistedSourceAnchor, label: visualHint.label, visualHint }
+      : persistedSourceAnchor;
     return [{
       commentId,
       createdAt,
       updatedAt: String(value.updatedAt || createdAt),
-      target: independentCommentTarget(
-        selectionFromRecord(value.target || value),
-        commentId,
-      ),
+      target,
+      sourceAnchor: persistedSourceAnchor,
+      ...(visualHint ? { visualHint } : {}),
       text: String(value.text || ""),
       ...(Array.isArray(value.attachments)
         ? {
@@ -399,9 +485,10 @@ export function commentsFromRecords(raw: unknown): CommentItem[] {
 export function uniqueTargets(comments: CommentItem[]): HtmlCanvasSelection[] {
   const seen = new Set<string>();
   return comments.flatMap((comment) => {
-    if (seen.has(comment.target.id)) return [];
-    seen.add(comment.target.id);
-    return [comment.target];
+    const target = commentSourceAnchor(comment) || comment.target;
+    if (seen.has(target.id)) return [];
+    seen.add(target.id);
+    return [target];
   });
 }
 

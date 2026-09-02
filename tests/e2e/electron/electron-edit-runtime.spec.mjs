@@ -4,8 +4,11 @@ import { buildSourceIndex } from "../../../app/lib/source-index.js";
 
 import {
   ECHARTS_STUB,
+  bridgeJson,
   clickEditHistoryMenu,
+  chooseClipboardDelivery,
   currentEditorFrame,
+  existsSync,
   documentToken,
   expectCheckpointPersisted,
   launchPageRoot,
@@ -484,7 +487,7 @@ test("author script cannot preclaim a future parser-authored source object", {
   }, async ({ page, sourcePath }) => {
     const { frame } = await loadedDiskFrame(page, sourcePath, "runtime-preclaim");
     await expect(frame.locator("#runtime-preclaim-decoy")).toHaveText("伪造源码按钮");
-    const toolbar = page.getByRole("toolbar", { name: /编辑/u });
+    const toolbar = page.getByRole("toolbar");
 
     await frame.locator("#runtime-preclaim-decoy").click();
     await expect(toolbar.getByRole("button", { name: /留评论/u })).toBeVisible();
@@ -593,7 +596,7 @@ test("author Script cannot add source authority after Runtime starts or save Run
     await expect(frame.locator("body")).not.toHaveAttribute("data-worker-executed", "true");
 
     await frame.locator("#runtime-generated").click();
-    const toolbar = page.getByRole("toolbar", { name: /编辑/u });
+    const toolbar = page.getByRole("toolbar");
     await expect(toolbar.getByRole("button", { name: /留评论/u })).toBeVisible();
     await expect(toolbar.getByRole("button", { name: "编辑", exact: true })).toHaveCount(0);
     await expect(toolbar.getByRole("button", { name: "删除元素", exact: true })).toHaveCount(0);
@@ -642,6 +645,481 @@ test("author Script cannot add source authority after Runtime starts or save Run
     const reopened = await loadedDiskFrame(page, sourcePath, "runtime-host");
     await expect(reopened.frame.locator("#runtime-generated")).toHaveText("运行时按钮");
     await expect.poll(() => documentToken(page)).not.toBe(firstDocumentToken);
+  });
+});
+
+test("runtime tables, SVG and Canvas keep visual comments source-anchored", {
+  tag: ["@gate-smoke", "@smoke-editing"],
+}, async () => {
+  test.setTimeout(120_000);
+  const html = `<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><title>运行时评论</title>
+<style>
+  body { margin: 0; padding: 24px; font: 16px/1.5 system-ui, sans-serif; background: #f7f7fb; }
+  main { max-width: 720px; margin: 0 auto; padding: 20px; background: white; border-radius: 12px; }
+  #runtime-output { display: grid; gap: 16px; }
+  #runtime-page-table { margin-bottom: 16px; }
+  table { width: 100%; border-collapse: collapse; background: #fff; }
+  th, td { border: 1px solid #d8d9e3; padding: 7px 10px; text-align: left; }
+  caption { padding: 8px; text-align: left; font-weight: 700; }
+  svg, canvas { display: block; width: 100%; height: 120px; border: 1px solid #d8d9e3; background: #fff; }
+</style></head><body>
+<main data-native-case="runtime-comment-host"><h1>财报运行时视图</h1><div id="runtime-output"></div></main>
+<script>
+  const output = document.querySelector('#runtime-output');
+  const makeTable = (id, label, rows) => {
+    const table = document.createElement('table');
+    table.id = id;
+    table.setAttribute('aria-label', label);
+    const caption = document.createElement('caption');
+    caption.textContent = label;
+    table.append(caption);
+    const head = document.createElement('tr');
+    for (const value of ['项目', '2025Q1', '2025Q2', '2026Q2']) {
+      const cell = document.createElement('th');
+      cell.textContent = value;
+      head.append(cell);
+    }
+    table.append(head);
+    for (const row of rows) {
+      const line = document.createElement('tr');
+      for (const value of row) {
+        const cell = document.createElement('td');
+        cell.textContent = value;
+        line.append(cell);
+      }
+      table.append(line);
+    }
+    output.append(table);
+  };
+  makeTable('runtime-table-first', '财务数据表', [
+    ['营业收入', '1,000', '1,120', '1,260'],
+    ['净利润', '120', '138', '151'],
+  ]);
+  makeTable('runtime-table-second', '利润数据表', [
+    ['毛利率', '22%', '24%', '26%'],
+    ['经营现金流', '88', '96', '109'],
+  ]);
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.id = 'runtime-svg';
+  svg.setAttribute('aria-label', '季度趋势示意图');
+  svg.setAttribute('viewBox', '0 0 640 120');
+  const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+  rect.setAttribute('x', '18');
+  rect.setAttribute('y', '18');
+  rect.setAttribute('width', '240');
+  rect.setAttribute('height', '70');
+  rect.setAttribute('fill', '#c9c5ff');
+  svg.append(rect);
+  output.append(svg);
+  const canvas = document.createElement('canvas');
+  canvas.id = 'runtime-canvas';
+  canvas.setAttribute('aria-label', '收益趋势画布');
+  canvas.width = 640;
+  canvas.height = 120;
+  const context = canvas.getContext('2d');
+  context.fillStyle = '#d9f4e8';
+  context.fillRect(18, 18, 260, 70);
+  output.append(canvas);
+  const pageTable = document.createElement('table');
+  pageTable.id = 'runtime-page-table';
+  pageTable.setAttribute('aria-label', '页面级数据表');
+  const pageCaption = document.createElement('caption');
+  pageCaption.textContent = '页面级数据表';
+  pageTable.append(pageCaption);
+  const pageRow = document.createElement('tr');
+  for (const value of ['总计', '2026Q2', '1,260']) {
+    const cell = document.createElement('td');
+    cell.textContent = value;
+    pageRow.append(cell);
+  }
+  pageTable.append(pageRow);
+  document.body.prepend(pageTable);
+</script></body></html>`;
+
+  await withRuntimeProject("pageroot-runtime-comment-dual-anchor-e2e-", {
+    "runtime-report.html": html,
+  }, async ({ page, sourcePath, electronApp }) => {
+    const { frame } = await loadedDiskFrame(page, sourcePath, "runtime-comment-host");
+    const toolbar = page.getByRole("toolbar", { name: /评论/u });
+    const table = frame.locator("#runtime-table-first");
+    await expect(table).toBeVisible();
+    await table.locator("caption").click();
+    await expect(toolbar).toHaveAttribute("aria-label", "评论财务数据表");
+    await expect(toolbar.getByRole("button", { name: /给财务数据表留评论/u })).toBeVisible();
+    await expect(toolbar.getByRole("button", { name: "编辑", exact: true })).toHaveCount(0);
+    await expect(toolbar.getByRole("button", { name: "复制元素", exact: true })).toHaveCount(0);
+    await expect(toolbar.getByRole("button", { name: "删除元素", exact: true })).toHaveCount(0);
+    await expect(toolbar.getByRole("button", { name: "上移", exact: true })).toHaveCount(0);
+    await expect(toolbar.getByRole("button", { name: "下移", exact: true })).toHaveCount(0);
+
+    const selectedOutline = page.getByTestId("html-canvas-editor").locator(
+      '[data-testid="canvas-target-outline"][data-tone="selected"]',
+    );
+    await expect(selectedOutline).toBeVisible();
+    const tableBox = await table.boundingBox();
+    const outlineBox = await selectedOutline.boundingBox();
+    expect(tableBox).not.toBeNull();
+    expect(outlineBox).not.toBeNull();
+    expect(Math.abs((outlineBox?.x || 0) - (tableBox?.x || 0))).toBeLessThan(4);
+    expect(Math.abs((outlineBox?.y || 0) - (tableBox?.y || 0))).toBeLessThan(4);
+    expect(Math.abs((outlineBox?.width || 0) - (tableBox?.width || 0))).toBeLessThan(4);
+    expect(Math.abs((outlineBox?.height || 0) - (tableBox?.height || 0))).toBeLessThan(4);
+
+    await toolbar.getByRole("button", { name: /给财务数据表留评论/u }).click();
+    const composer = page.getByRole("region", { name: "添加评论" });
+    await expect(composer).toBeVisible();
+    await expect(composer).toContainText("财务数据表");
+    await expect(composer).not.toContainText(/运行时节点|源码宿主|ambiguous/u);
+    const firstCommentText = "请核对财务数据表的 2026Q2 数值。";
+    await composer.getByRole("textbox", { name: "评论内容" }).fill(firstCommentText);
+    await composer.getByRole("button", { name: "评论", exact: true }).click();
+    await expect(page.locator(".comment-card").filter({ hasText: firstCommentText }))
+      .toHaveCount(1);
+
+    const saveRuntimeComment = async (selector, text, label) => {
+      const target = frame.locator(selector);
+      if (selector === "#runtime-canvas") {
+        const box = await target.boundingBox();
+        expect(box).not.toBeNull();
+        await page.mouse.click(
+          (box?.x || 0) + (box?.width || 0) / 2,
+          (box?.y || 0) + (box?.height || 0) / 2,
+        );
+      } else {
+        await target.click();
+      }
+      const commentButton = toolbar.getByRole("button", { name: new RegExp(`给${label}留评论`, "u") });
+      await expect(commentButton).toBeVisible();
+      await commentButton.click();
+      const nextComposer = page.getByRole("region", { name: "添加评论" });
+      await expect(nextComposer).toBeVisible();
+      if (selector.startsWith("#runtime-page-table")) {
+        await expect(nextComposer).toContainText("页面级数据表");
+        await expect(nextComposer.getByRole("textbox", { name: "评论内容" }))
+          .toHaveAttribute("placeholder", "输入对这部分内容的修改要求…");
+      }
+      await nextComposer.getByRole("textbox", { name: "评论内容" }).fill(text);
+      await nextComposer.getByRole("button", { name: "评论", exact: true }).click();
+      await expect(page.locator(".comment-card").filter({ hasText: text })).toHaveCount(1);
+    };
+    await saveRuntimeComment(
+      "#runtime-table-second caption",
+      "请单独检查利润数据表。",
+      "利润数据表",
+    );
+    await saveRuntimeComment(
+      "#runtime-svg",
+      "请保留这张趋势示意图的比例。",
+      "季度趋势示意图",
+    );
+    await saveRuntimeComment(
+      "#runtime-canvas",
+      "请核对无文字画布中的收益曲线。",
+      "收益趋势画布",
+    );
+    await saveRuntimeComment(
+      "#runtime-page-table caption",
+      "请保留页面级数据表的汇总行。",
+      "页面级数据表",
+    );
+
+    const managedSourcePath = await managedWorkingCopyPath(page, sourcePath);
+    const readDraftComments = async () => {
+      const response = await bridgeJson(
+        page,
+        `/workspace?sourcePath=${encodeURIComponent(managedSourcePath)}`,
+      );
+      return response.body?.runtimeState?.draft?.comments
+        || response.body?.activeDraft?.comments
+        || [];
+    };
+    await expect.poll(async () => (await readDraftComments()).length, { timeout: 30_000 })
+      .toBe(5);
+    const draftComments = await readDraftComments();
+    const firstRecord = draftComments.find((comment) => comment.text === firstCommentText);
+    expect(firstRecord).toBeTruthy();
+    const sourceHostId = await frame.locator("#runtime-output")
+      .getAttribute("data-pageroot-id");
+    expect(firstRecord.sourceAnchor.resolution).toBe("exact");
+    expect(firstRecord.sourceAnchor.elementId).toBe(sourceHostId);
+    expect(firstRecord.target.elementId).toBe(sourceHostId);
+    expect(firstRecord.target.visualHint).toBeUndefined();
+    expect(firstRecord.visualHint).toMatchObject({
+      runtimeGenerated: true,
+      kind: "table",
+      label: "财务数据表",
+      relativePath: "table:nth-of-type(1)",
+    });
+    expect(firstRecord.visualHint.relativeBox).toEqual(expect.objectContaining({
+      x: expect.any(Number),
+      y: expect.any(Number),
+      width: expect.any(Number),
+      height: expect.any(Number),
+    }));
+    expect(firstRecord).not.toHaveProperty("outerHTML");
+    expect(firstRecord).not.toHaveProperty("event");
+
+    const secondRecord = draftComments.find((comment) => comment.text === "请单独检查利润数据表。");
+    expect(secondRecord.visualHint.kind).toBe("table");
+    expect(secondRecord.visualHint.relativePath).toBe("table:nth-of-type(2)");
+    expect(secondRecord.visualHint.relativePath).not.toBe(firstRecord.visualHint.relativePath);
+
+    const svgRecord = draftComments.find((comment) => comment.text.includes("趋势示意图"));
+    const canvasRecord = draftComments.find((comment) => comment.text.includes("无文字画布"));
+    expect(svgRecord.visualHint.kind).toBe("svg");
+    expect(canvasRecord.visualHint.kind).toBe("canvas");
+    expect(svgRecord.visualHint.renderedText).toBeUndefined();
+    expect(canvasRecord.visualHint.renderedText).toBeUndefined();
+    expect(svgRecord.visualHint.relativePath).toBeTruthy();
+    expect(canvasRecord.visualHint.relativePath).toBeTruthy();
+    const pageTableRecord = draftComments.find((comment) => comment.text.includes("页面级数据表"));
+    const bodySourceHostId = await frame.locator("body").getAttribute("data-pageroot-id");
+    expect(pageTableRecord.sourceAnchor).toMatchObject({
+      resolution: "exact",
+      elementId: bodySourceHostId,
+      level: "module",
+      selector: "body",
+    });
+    expect(pageTableRecord.visualHint).toMatchObject({
+      runtimeGenerated: true,
+      kind: "table",
+      label: "页面级数据表",
+      relativePath: "table",
+    });
+    expect(pageTableRecord.target.visualHint).toBeUndefined();
+
+    expect(readFileSync(sourcePath, "utf8")).toBe(html);
+    const tablist = page.getByRole("tablist", { name: "已打开的页面" });
+    const documentTab = tablist.getByRole("tab").first();
+    await page.getByRole("button", { name: "新标签页" }).click();
+    await documentTab.click();
+    const reopened = await loadedDiskFrame(page, sourcePath, "runtime-comment-host");
+    const reopenedFrame = reopened.frame;
+    await expect.poll(async () => (await readDraftComments()).length, { timeout: 30_000 })
+      .toBe(5);
+    const marker = page.getByRole("button", { name: "财务数据表", exact: true });
+    await expect(marker).toBeVisible();
+    const reopenedTableBox = await reopenedFrame.locator("#runtime-table-first").boundingBox();
+    const markerBox = await marker.boundingBox();
+    expect(reopenedTableBox).not.toBeNull();
+    expect(markerBox).not.toBeNull();
+    expect(markerBox?.x || 0).toBeGreaterThanOrEqual((reopenedTableBox?.x || 0) - 24);
+    expect(markerBox?.x || 0).toBeLessThanOrEqual((reopenedTableBox?.x || 0) + (reopenedTableBox?.width || 0) + 24);
+    expect(markerBox?.y || 0).toBeGreaterThanOrEqual((reopenedTableBox?.y || 0) - 24);
+    expect(markerBox?.y || 0).toBeLessThanOrEqual((reopenedTableBox?.y || 0) + (reopenedTableBox?.height || 0) + 24);
+    const pageMarker = page.getByRole("button", { name: "页面级数据表", exact: true });
+    await expect(pageMarker).toBeVisible();
+    const reopenedPageTableBox = await reopenedFrame.locator("#runtime-page-table").boundingBox();
+    const pageMarkerBox = await pageMarker.boundingBox();
+    expect(reopenedPageTableBox).not.toBeNull();
+    expect(pageMarkerBox).not.toBeNull();
+    expect(pageMarkerBox?.x || 0).toBeGreaterThanOrEqual((reopenedPageTableBox?.x || 0) - 24);
+    expect(pageMarkerBox?.x || 0).toBeLessThanOrEqual((reopenedPageTableBox?.x || 0) + (reopenedPageTableBox?.width || 0) + 24);
+    expect(pageMarkerBox?.y || 0).toBeGreaterThanOrEqual((reopenedPageTableBox?.y || 0) - 24);
+    expect(pageMarkerBox?.y || 0).toBeLessThanOrEqual((reopenedPageTableBox?.y || 0) + (reopenedPageTableBox?.height || 0) + 24);
+    const pageCommentCard = page.locator(".comment-card").filter({
+      hasText: "请保留页面级数据表的汇总行。",
+    });
+    await expect(pageCommentCard).toContainText("页面级数据表");
+
+    await page.getByRole("button", { name: "全局评论" }).click();
+    const globalComposer = page.getByRole("region", { name: "添加评论" });
+    await expect(globalComposer).toContainText("全局评论");
+    await expect(globalComposer.getByRole("textbox", { name: "评论内容" }))
+      .toHaveAttribute("placeholder", "输入对整个页面的修改要求…");
+    await globalComposer.getByRole("button", { name: "关闭评论编辑器" }).click();
+
+    await reopenedFrame.locator("#runtime-page-table caption").click();
+    const reopenedToolbar = page.getByRole("toolbar", { name: /评论/u });
+    await reopenedToolbar.getByRole("button", { name: /给页面级数据表留评论/u }).click();
+    const recoveredComposer = page.getByRole("region", { name: "添加评论" });
+    await recoveredComposer.getByRole("textbox", { name: "评论内容" })
+      .fill("页面级数据表草稿");
+    await recoveredComposer.getByRole("button", { name: "关闭评论编辑器" }).click();
+    await expect(page.locator(".draft-comment-card").filter({ hasText: "页面级数据表" }))
+      .toBeVisible();
+    await page.getByRole("button", { name: "新标签页" }).click();
+    await documentTab.click();
+    const draftReopened = await loadedDiskFrame(page, sourcePath, "runtime-comment-host");
+    const draftCard = page.locator(".draft-comment-card").filter({
+      hasText: "页面级数据表",
+    });
+    await expect(draftCard).toBeVisible();
+    await draftCard.click();
+    const restoredDraftComposer = page.getByRole("region", { name: "添加评论" });
+    await expect(restoredDraftComposer).toContainText("表格");
+    await expect(restoredDraftComposer.getByRole("textbox", { name: "评论内容" }))
+      .toHaveAttribute("placeholder", "输入对这部分内容的修改要求…");
+    await restoredDraftComposer.getByRole("button", { name: "删除未保存评论" }).click();
+    await expect(page.getByRole("alert").filter({ hasText: "删除这条未保存评论" }))
+      .toBeVisible();
+    await page.getByRole("alert").getByRole("button", { name: "删除", exact: true }).click();
+    const reopenedFrameAfterDraft = draftReopened.frame;
+
+    await reopenedFrameAfterDraft.evaluate(() => {
+      document.querySelector("#runtime-table-first")?.remove();
+    });
+    await page.setViewportSize({ width: 1279, height: 720 });
+    await expect(marker).toBeVisible();
+    const fallbackHostBox = await reopenedFrameAfterDraft.locator("#runtime-output").boundingBox();
+    const fallbackMarkerBox = await marker.boundingBox();
+    expect(fallbackHostBox).not.toBeNull();
+    expect(fallbackMarkerBox).not.toBeNull();
+    expect(fallbackMarkerBox?.x || 0).toBeGreaterThanOrEqual((fallbackHostBox?.x || 0) - 24);
+    expect(fallbackMarkerBox?.x || 0).toBeLessThanOrEqual((fallbackHostBox?.x || 0) + (fallbackHostBox?.width || 0) + 24);
+    await marker.click();
+    await expect(reopenedFrameAfterDraft.locator("#runtime-output"))
+      .toHaveAttribute("data-html-canvas-selected", "part");
+    const fallbackToolbar = page.getByRole("toolbar", { name: /评论/u });
+    await expect(fallbackToolbar.getByRole("button", { name: "编辑", exact: true }))
+      .toHaveCount(0);
+    await expect(fallbackToolbar.getByRole("button", { name: "删除元素", exact: true }))
+      .toHaveCount(0);
+    await expect(fallbackToolbar.getByRole("button", { name: "上移", exact: true }))
+      .toHaveCount(0);
+    await expect(fallbackToolbar.getByRole("button", { name: "下移", exact: true }))
+      .toHaveCount(0);
+    await expect(reopenedFrameAfterDraft.locator("#runtime-table-second"))
+      .not.toHaveAttribute("data-html-canvas-selected", /.+/u);
+    await expect(page.locator(".comment-card").filter({ hasText: firstCommentText }))
+      .toHaveCount(1);
+
+    await electronApp.evaluate(({ clipboard }) => clipboard.clear());
+    await page.getByRole("button", { name: /AI 助手/u }).click();
+    await chooseClipboardDelivery(page);
+    await expect(page.getByTestId("ai-conversation-action-bar"))
+      .toContainText("任务已复制，等你的 AI 改完");
+    let promptPath = "";
+    await expect.poll(async () => {
+      const copied = await electronApp.evaluate(({ clipboard }) => clipboard.readText());
+      promptPath = copied.match(/请执行\s+(.+?\/PROMPT\.md)\s+中的单轮任务/u)?.[1] || "";
+      return Boolean(promptPath && existsSync(promptPath));
+    }, { timeout: 20_000 }).toBe(true);
+    const requestRoot = path.dirname(promptPath);
+    const requestRecord = JSON.parse(
+      readFileSync(path.join(requestRoot, "request.json"), "utf8"),
+    );
+    const annotations = JSON.parse(
+      readFileSync(path.join(requestRoot, "input", "annotations", "records.json"), "utf8"),
+    );
+    const runtimeRequestComments = requestRecord.request.comments.filter(
+      (comment) => comment.visualHint?.runtimeGenerated === true,
+    );
+    expect(runtimeRequestComments).toHaveLength(5);
+    expect(runtimeRequestComments.map((comment) => comment.visualHint.relativePath))
+      .toEqual(expect.arrayContaining([
+        "table:nth-of-type(1)",
+        "table:nth-of-type(2)",
+      ]));
+    expect(runtimeRequestComments.every((comment) => (
+      comment.sourceAnchor?.elementId
+      && comment.target?.elementId === comment.sourceAnchor.elementId
+      && !comment.target?.visualHint
+    ))).toBe(true);
+    expect(requestRecord.request.taskSpec.scopePolicy)
+      .toBe("targets-plus-required-dependencies");
+    const prompt = readFileSync(promptPath, "utf8");
+    expect(prompt).toContain("财务数据表");
+    expect(prompt).toContain("利润数据表");
+    expect(prompt).toContain("table:nth-of-type(1)");
+    expect(prompt).toContain("table:nth-of-type(2)");
+    expect(prompt).toContain("请修改生成该内容的 HTML、数据或 Script");
+    const annotatedFirstTable = annotations.comments.find(
+      (comment) => comment.visualHint?.relativePath === "table:nth-of-type(1)",
+    );
+    const annotatedSecondTable = annotations.comments.find(
+      (comment) => comment.visualHint?.relativePath === "table:nth-of-type(2)",
+    );
+    expect(annotatedFirstTable?.sourceAnchor?.elementId).toBe(sourceHostId);
+    expect(annotatedSecondTable?.sourceAnchor?.elementId).toBe(sourceHostId);
+  });
+});
+
+test("dense runtime tables keep pointer hit testing bounded", {
+  tag: ["@gate-smoke", "@smoke-editing"],
+}, async () => {
+  test.setTimeout(120_000);
+  const html = `<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><title>运行时命中性能</title>
+<style>
+  html, body { margin: 0; padding: 0; }
+  body { font: 14px/1.2 system-ui, sans-serif; }
+  main { padding: 16px; }
+  table { width: 720px; table-layout: fixed; border-collapse: collapse; }
+  td { width: 36px; height: 26px; padding: 2px; border: 1px solid #d8d9e3; }
+</style></head><body>
+<main data-native-case="runtime-perf-host"><div id="runtime-perf-output"></div></main>
+<script>
+  const table = document.createElement('table');
+  table.id = 'runtime-perf-table';
+  const body = document.createElement('tbody');
+  for (let row = 0; row < 50; row += 1) {
+    const line = document.createElement('tr');
+    for (let column = 0; column < 20; column += 1) {
+      const cell = document.createElement('td');
+      cell.textContent = row + ':' + column;
+      line.append(cell);
+    }
+    body.append(line);
+  }
+  table.append(body);
+  document.querySelector('#runtime-perf-output').append(table);
+</script></body></html>`;
+
+  await withRuntimeProject("pageroot-runtime-pointer-perf-e2e-", {
+    "runtime-report.html": html,
+  }, async ({ page, sourcePath }) => {
+    const { frame } = await loadedDiskFrame(page, sourcePath, "runtime-perf-host");
+    const table = frame.locator("#runtime-perf-table");
+    await expect(table).toBeVisible();
+    await expect(table.locator("td")).toHaveCount(1_000);
+    await frame.evaluate(() => {
+      const runtimeTable = document.querySelector("#runtime-perf-table");
+      const state = { bcr: 0, runtimeBcr: 0, qsa: 0 };
+      const originalBcr = Element.prototype.getBoundingClientRect;
+      const originalQsa = Document.prototype.querySelectorAll;
+      Element.prototype.getBoundingClientRect = function countedBcr() {
+        state.bcr += 1;
+        if (this === runtimeTable || runtimeTable?.contains(this)) state.runtimeBcr += 1;
+        return originalBcr.call(this);
+      };
+      Document.prototype.querySelectorAll = function countedQsa(...args) {
+        state.qsa += 1;
+        return originalQsa.apply(this, args);
+      };
+      window.__PAGEROOT_RUNTIME_POINTER_PERF__ = state;
+    });
+    const box = await table.boundingBox();
+    expect(box).not.toBeNull();
+    await frame.evaluate(() => {
+      document.querySelector("#runtime-perf-table").style.pointerEvents = "none";
+    });
+    await page.mouse.move((box?.x || 0) + 12, (box?.y || 0) + 12);
+    await page.waitForTimeout(100);
+    await frame.evaluate(() => {
+      const state = window.__PAGEROOT_RUNTIME_POINTER_PERF__;
+      if (state) {
+        state.bcr = 0;
+        state.runtimeBcr = 0;
+        state.qsa = 0;
+      }
+    });
+    for (let index = 0; index < 30; index += 1) {
+      await page.mouse.move(
+        (box?.x || 0) + 10 + (index % 20) * ((box?.width || 720) / 20),
+        (box?.y || 0) + 10 + (index % 12) * 24,
+      );
+    }
+    await page.waitForTimeout(100);
+    const metrics = await frame.evaluate(() => window.__PAGEROOT_RUNTIME_POINTER_PERF__);
+    expect(metrics).toMatchObject({
+      bcr: expect.any(Number),
+      runtimeBcr: expect.any(Number),
+      qsa: expect.any(Number),
+    });
+    expect(metrics.runtimeBcr).toBeLessThan(180);
+    expect(metrics.qsa).toBeLessThan(100);
   });
 });
 

@@ -1,10 +1,11 @@
 import { isValidPagerootElementId } from "../../../shared/pageroot-element-identity.mjs";
 
 export function isSavableCommentTarget(target) {
-  const globalPageTarget = String(target?.selector || "").trim().toLowerCase() === "body"
-    && target?.level === "module";
-  return target?.resolution === "exact"
-    && (globalPageTarget || isValidPagerootElementId(target?.elementId));
+  const anchor = target?.commentAnchor || target;
+  const globalPageTarget = String(anchor?.selector || "").trim().toLowerCase() === "body"
+    && anchor?.level === "module";
+  return anchor?.resolution === "exact"
+    && (globalPageTarget || isValidPagerootElementId(anchor?.elementId));
 }
 
 export function planCommentCommit({
@@ -28,14 +29,11 @@ export function planCommentCommit({
       reason: "请先选择要评论的内容。",
     });
   }
-  if (
-    !String(target.resolution || "")
-    || !isSavableCommentTarget(target)
-  ) {
+  if (!isSavableCommentTarget(target)) {
     return Object.freeze({
       kind: "reject",
       code: "COMMENT_TARGET_UNSAFE",
-      reason: "当前评论位置需要重新选择后才能保存。",
+      reason: "当前内容暂时无法建立安全的评论位置。",
     });
   }
   if (Number(uploadCount) > 0) {
