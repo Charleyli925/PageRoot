@@ -780,6 +780,78 @@ export class CommentWorkflow {
     return succeeded({ deleted, editSession, attachments: [...attachments.values()], context });
   }
 
+  deleteCommentsForElementIds({ elementIds } = {}) {
+    if (this.#disposed) {
+      return blocked("COMMENT_WORKFLOW_DISPOSED", "评论工作流已停止。");
+    }
+    const removedElementIds = new Set(
+      (Array.isArray(elementIds) ? elementIds : [])
+        .map((elementId) => String(elementId || ""))
+        .filter(Boolean),
+    );
+    if (removedElementIds.size === 0) {
+      return succeeded({ deleted: [], composerDiscarded: false, attachments: [] });
+    }
+    const targetWasRemoved = (target) => removedElementIds.has(
+      String(commentSourceTarget(target?.sourceAnchor || target?.target || target)?.elementId || ""),
+    );
+    const deleted = this.#commentSession.comments.filter(targetWasRemoved);
+    const deletedIds = new Set(deleted.map((comment) => comment.commentId));
+    const composerDiscarded = Boolean(
+      this.#commentSession.composerTarget
+      && targetWasRemoved(this.#commentSession.composerTarget),
+    );
+    const editSession = this.#commentSession.editSession
+      && deletedIds.has(this.#commentSession.editSession.commentId)
+      ? this.#commentSession.editSession
+      : null;
+    if (deleted.length === 0 && !composerDiscarded && !editSession) {
+      return succeeded({ deleted: [], composerDiscarded: false, attachments: [] });
+    }
+    const context = copyContext(this.#projectSession.context);
+    const attachments = new Map(
+      [
+        ...deleted.flatMap((comment) => comment.attachments || []),
+        ...(editSession?.draftAttachments || []),
+        ...(composerDiscarded ? this.#commentSession.composerAttachments : []),
+      ].map((attachment) => [attachment.attachmentId, attachment]),
+    );
+    this.#commentSession.update({
+      comments: this.#commentSession.comments.filter(
+        (comment) => !deletedIds.has(comment.commentId),
+      ),
+      deletedCommentIds: [
+        ...new Set([
+          ...this.#commentSession.deletedCommentIds,
+          ...deletedIds,
+          ...(composerDiscarded && this.#commentSession.composerCommentId
+            ? [this.#commentSession.composerCommentId]
+            : []),
+        ]),
+      ],
+      ...(editSession ? { editSession: null } : {}),
+      ...(composerDiscarded
+        ? {
+            composerDraft: "",
+            composerCommentId: null,
+            composerAttachments: [],
+            composerTarget: null,
+          }
+        : {}),
+    });
+    this.queueDraft();
+    for (const attachment of attachments.values()) {
+      void this.deleteAttachment({ attachment, context });
+    }
+    return succeeded({
+      deleted,
+      composerDiscarded,
+      editSession,
+      attachments: [...attachments.values()],
+      context,
+    });
+  }
+
   discardComposer() {
     if (this.#uploadCount > 0) {
       return blocked("ATTACHMENT_UPLOAD_PENDING", "请等待附件添加完成后再删除草稿。");

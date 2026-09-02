@@ -68,9 +68,6 @@ export const CommentRailView = memo(function CommentRailView({
     composerInCurrentTab,
     composerTop,
     focusedCommentId,
-    relinkRailCardVisible,
-    relinkCardCopy,
-    relinkCardActive,
     projectLoadError,
     draftTargetScope,
     attachmentUploadCount,
@@ -111,7 +108,6 @@ export const CommentRailView = memo(function CommentRailView({
     requestDeleteComment,
     clearDeleteRequest,
     focusCommentTarget,
-    startUnsafeTargetRelink,
     cancelTargetRelink,
     onRetryProjectHydration,
     closeCommentComposer,
@@ -352,29 +348,6 @@ export const CommentRailView = memo(function CommentRailView({
                   : ""}
             </span>
 
-            {relinkRailCardVisible ? (
-              <section
-                className="comment-target-recovery rail-status-card rail-relink-status"
-                role="status"
-                aria-label="评论需要重新定位"
-                data-html-canvas-preserve-selection="true"
-                style={{ top: `${commentRailStatusTop}px` }}
-              >
-                <span>
-                  <strong>{relinkCardCopy.title}</strong>
-                  <small>{relinkCardCopy.detail}</small>
-                </span>
-                <button
-                  type="button"
-                  onClick={startUnsafeTargetRelink}
-                >{relinkCardActive
-                  ? "正在等待选择…"
-                  : relinkCardCopy.actionLabel}</button>
-                {relinkCardActive ? (
-                  <button type="button" onClick={cancelTargetRelink}>取消</button>
-                ) : null}
-              </section>
-            ) : null}
             {projectLoadError ? (
               <section
                 className="round-lock-card rail-status-card"
@@ -676,18 +649,9 @@ export const CommentRailView = memo(function CommentRailView({
                       onClick={(event) => event.stopPropagation()}
                     >
                       <span>
-                        <strong>原位置已变化</strong>
-                        <small>评论和附件仍保留，重新关联后即可发送。</small>
+                        <strong>评论位置已丢失</strong>
+                        <small>建议删除这条评论，并在正确位置重新评论。</small>
                       </span>
-                      <button
-                        type="button"
-                        onClick={() => beginTargetRelink(comment.commentId)}
-                      >{relinkingTarget === comment.commentId
-                        ? "正在等待选择…"
-                        : "重新选择目标"}</button>
-                      {relinkingTarget === comment.commentId ? (
-                        <button type="button" onClick={cancelTargetRelink}>取消</button>
-                      ) : null}
                     </div>
                   ) : null}
                   {editing ? (

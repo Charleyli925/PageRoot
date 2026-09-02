@@ -196,6 +196,8 @@ export type HtmlCanvasCommentedTarget = {
   label?: string;
   /** Report target layout without rendering a saved-comment marker. */
   showMarker?: boolean;
+  /** A current unsaved composer draft shares this source target. */
+  hasDraft?: boolean;
 };
 
 export type HtmlCanvasCommentLayoutState = {

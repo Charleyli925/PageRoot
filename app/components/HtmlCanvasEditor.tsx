@@ -250,6 +250,26 @@ import {
 } from "./html-preview-sandbox.js";
 import styles from "./HtmlCanvasEditor.module.css";
 
+function sourceSubtreeElementIds(
+  sourceIndex: SourceIndexValue | null,
+  rootElementId: string | undefined,
+): Set<string> {
+  const root = rootElementId ? sourceIndex?.byPagerootId.get(rootElementId) : null;
+  if (!root || root.type !== "element") return new Set();
+  const elementIds = new Set<string>();
+  const pending = [root];
+  while (pending.length > 0) {
+    const element = pending.pop();
+    if (!element) continue;
+    if (element.pagerootId) elementIds.add(element.pagerootId);
+    for (const childNodeId of element.childElementIds) {
+      const child = sourceIndex?.byNodeId.get(childNodeId);
+      if (child?.type === "element") pending.push(child);
+    }
+  }
+  return elementIds;
+}
+
 function reconcileAllocatedLineBreakIds(
   hostElement: HTMLElement,
   previousSourceInnerHtml: string,
@@ -8928,6 +8948,33 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   const toggleSpacingMenu = useCallback(() => {
     setSpacingMenuOpen((open) => !open);
   }, []);
+  const deleteCommentCount = useMemo(() => {
+    const removedElementIds = sourceSubtreeElementIds(
+      sourceIndexRef.current,
+      selection?.elementId,
+    );
+    if (removedElementIds.size === 0) return 0;
+    return commentedTargets.reduce((count, entry) => {
+      const sourceTarget = entry.target.commentAnchor ?? entry.target;
+      return sourceTarget.elementId && removedElementIds.has(sourceTarget.elementId)
+        ? count + Math.max(0, Number(entry.count || 0))
+        : count;
+    }, 0);
+  }, [commentedTargets, selection?.elementId]);
+  const deleteCommentDraftIncluded = useMemo(() => {
+    const removedElementIds = sourceSubtreeElementIds(
+      sourceIndexRef.current,
+      selection?.elementId,
+    );
+    return removedElementIds.size > 0 && commentedTargets.some((entry) => {
+      const sourceTarget = entry.target.commentAnchor ?? entry.target;
+      return Boolean(
+        entry.hasDraft
+        && sourceTarget.elementId
+        && removedElementIds.has(sourceTarget.elementId),
+      );
+    });
+  }, [commentedTargets, selection?.elementId]);
   const selectionChromeModel = useMemo<SelectionChromeModel>(() => ({
     hover: deriveCapabilityHoverState({
       enabled: pointerCapabilityHoverEnabled,
@@ -8965,6 +9012,8 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     textFormatRequiresSelection,
     enableReorder: enableReorder && !runtimeGeneratedSelection,
     moveAvailability,
+    deleteCommentCount,
+    deleteCommentDraftIncluded,
     spacingMenuRef,
     spacingMenuOpen,
     usageProjectId,
@@ -8972,6 +9021,8 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   }), [
     canvasTransitionActive,
     commentMarkers,
+    deleteCommentCount,
+    deleteCommentDraftIncluded,
     editFeedback,
     editFeedbackActionAvailable,
     enableReorder,

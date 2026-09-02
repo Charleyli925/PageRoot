@@ -318,7 +318,7 @@ fallback；用户先持久取消旧 Request 形成 fence，再重新发送并建
 
 `insertion-point` 的 `sourceAnchor` 必须是位于唯一父节点真实子节点边界上的零宽范围，即 `startOffset=endOffset`；不能使用旧 insertion `anchor` 对象或仅凭同级序号猜测位置。
 
-offset 统一按 JavaScript UTF-16 code unit 计算。Request 只能把 `exact` 或 `rebound` 目标列入可执行范围；`ambiguous` 和 `orphaned` 评论仍保留审计记录，但必须先重新绑定才能驱动 AI 建版。
+offset 统一按 JavaScript UTF-16 code unit 计算。Request 只能把 `exact` 或 `rebound` 目标列入可执行范围；异常保留的 `ambiguous` 和 `orphaned` 评论仍保留审计记录，但不能驱动 AI 建版。当前产品不提供重新定位入口；用户需删除失联评论并在正确位置重新评论。
 
 ### 5.3 `annotations`
 

@@ -93,7 +93,7 @@ Stale queries, expired Canvas acknowledgements, catalog refresh failures, lost B
 
 ### Presentation and edit eligibility (fail-open)
 
-Layout preflight, hover/outline trust, Review runtime capture completeness, comment-marker location and UI projection lag must not refuse the user. Enter edit first; validate afterwards with MutationObserver, patch scope and the source commit. Keep a comment whose target failed, marked for relink. Hide a failed outline; do not forbid editing.
+Layout preflight, hover/outline trust, Review runtime capture completeness, comment-marker location and UI projection lag must not refuse the user. Enter edit first; validate afterwards with MutationObserver, patch scope and the source commit. Keep a comment whose target failed outside an explicit element delete, mark its location as lost, and direct the user to delete and comment again. Hide a failed outline; do not forbid editing.
 
 ### Trust, protocol and release
 

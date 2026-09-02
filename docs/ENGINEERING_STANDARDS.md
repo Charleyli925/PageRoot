@@ -38,10 +38,11 @@ retry that cannot change the precondition is a loop, not recovery.
 Layout preflight, hover/outline trust, Review annotation projection,
 comment-marker location and UI projection lag. Let the user continue. Enter
 edit first.
-Keep a comment whose target failed, marked for relink. Hide a failed outline;
-do not forbid editing.
+Keep a comment whose target failed outside an explicit source-element delete,
+mark its location as lost, and offer the delete-and-comment-again recovery path.
+Hide a failed outline; do not forbid editing.
 
-User confirmation is reserved for deleting a project, discarding edits that
+User confirmation is reserved for deleting a project or source element, discarding edits that
 cannot be autosaved, explicitly overwriting an external change, and
 unrecoverable identity or permission changes. Lasting content-safety states
 use existing workspace banners via `WorkspaceSafetyState`. Generic `setToast`

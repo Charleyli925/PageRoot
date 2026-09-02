@@ -2741,3 +2741,44 @@ Date: 2026-09-01
 - [x] Real isolated Electron interaction, compact-window fit, keyboard path, and screenshot evidence.
 
 final result: passed
+
+---
+
+# Element delete and comment-anchor protection
+
+Date: 2026-09-02
+
+## Comparison target
+
+- Source visual truth: the user screenshot showing the obsolete comment-rail relink card, superseded by the request to prevent normal target loss and keep exceptional guidance inside the affected comment card.
+- Existing product truth: reuse the established element-delete confirmation, adding only a conditional comment consequence line.
+
+## Viewport and states
+
+- Browser editing surface at `1600 x 900` CSS pixels using an identified Working Copy fixture.
+- One saved comment on a descendant heading, followed by selection of its containing source module.
+- The first delete click opens the existing confirmation; cancel preserves both facts, while the second confirmation removes both.
+
+## Functional and visual checks
+
+- The confirmation names the selected module and explicitly states that one associated comment will also be deleted.
+- The existing delete confirmation is unchanged when there are no comments; when comments exist, it appends only the associated-comment consequence line.
+- The normal delete path consumes the semantic operation's removed Stable ID set, including descendants; the comment card and marker disappear with the module instead of becoming `orphaned`.
+- Exceptional externally orphaned comments show only the card-local `评论位置已丢失` guidance and existing delete action; no global relink card or automatic send resumption remains.
+- Cancel closes the existing confirmation without changing the source or comments; no parallel confirmation surface or new focus system is introduced.
+
+## Findings
+
+- The first visual pass right-aligned the 340px confirmation to a toolbar near the left viewport edge and clipped its leading copy. The final version chooses left or right alignment from toolbar geometry and uses a 420px bounded width.
+- No remaining P0, P1, or P2 visual, interaction, accessibility, clipping or stacking issue was found in the final state.
+
+## Checklist
+
+- [x] Destructive result is explained before commit.
+- [x] Associated comment count includes descendant source targets.
+- [x] Cancel preserves the element and comments.
+- [x] Confirm removes source and comment facts together.
+- [x] No normal delete-created orphan card remains.
+- [x] Exceptional target loss stays card-local with a concrete recovery instruction.
+
+final result: passed

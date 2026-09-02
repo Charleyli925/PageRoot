@@ -358,14 +358,7 @@ test("Electron preview mounts the modification-only AI sidebar across reopen", a
 });
 
 
-// Unquarantined and hardened by the #281 product fix: the relink action now
-// lives on the persistent comment-rail card instead of a toast button, which
-// could be detached mid-click by a reflow window with no retry loop for a
-// human. The card survives reflows, so its button-state flip is a
-// deterministic oracle and the original send still resumes after every
-// target is re-proven.
-
-test("multiple orphaned comments relink in sequence and resume the original send", async () => {
+test("orphaned comments stay card-local and block send without a relink flow", async () => {
   test.setTimeout(120_000);
   const fixture = createSourceFixture("orphaned-comments-resume-send.html");
   const firstLaunch = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
@@ -448,7 +441,7 @@ test("multiple orphaned comments relink in sequence and resume the original send
     activeLaunch = await launchPageRoot({
       isolatedUserData: firstLaunch.isolatedUserData,
     });
-    const { frame: recoveredFrame } = await loadedDiskFrame(
+    await loadedDiskFrame(
       activeLaunch.page,
       managedSourcePath,
       "flex-copy",
@@ -459,34 +452,31 @@ test("multiple orphaned comments relink in sequence and resume the original send
       .toHaveAttribute("data-resolution", "orphaned");
     await expect(recoveredComments.filter({ hasText: secondComment }))
       .toHaveAttribute("data-resolution", "orphaned");
+    await expect(recoveredComments.filter({ hasText: firstComment }))
+      .toContainText("建议删除这条评论，并在正确位置重新评论");
+    await expect(recoveredComments.filter({ hasText: secondComment }))
+      .toContainText("建议删除这条评论，并在正确位置重新评论");
 
     await activeLaunch.page.getByRole("button", { name: /AI 助手/u }).click();
     await chooseClipboardDelivery(activeLaunch.page);
-    // The relink entry is a persistent card on the comment rail, not a toast
-    // button: a toast could be detached mid-click by a reflow window and a
-    // human has no retry loop (#281). The rail is outside the canvas flow, so
-    // the card's button-state flip ("正在等待选择…") is the deterministic
-    // oracle that the handler ran; no re-click loop is needed.
-    const relinkCard = activeLaunch.page.locator(".comment-rail .rail-relink-status");
-    await expect(relinkCard).toContainText("2 条评论需要重新定位");
-    await relinkCard.getByRole("button", { name: "开始重新定位" }).click();
-    await expect(relinkCard.getByRole("button", { name: "正在等待选择…" }))
-      .toBeVisible();
-
-    await recoveredFrame.locator(caseSelector("flex-copy")).click();
-    await expect(relinkCard).toContainText("1 条评论需要重新定位");
+    await expect(activeLaunch.page.locator(".comment-rail .rail-relink-status"))
+      .toHaveCount(0);
+    await expect(activeLaunch.page.getByText(/评论需要重新定位/u)).toHaveCount(0);
     await expect(recoveredComments.filter({ hasText: firstComment }))
-      .toHaveAttribute("data-resolution", "exact");
-    await expect(recoveredComments.filter({ hasText: secondComment }))
-      .toHaveAttribute("data-resolution", "orphaned");
-
-    await recoveredFrame.locator(caseSelector("grid-card")).click();
-    await expect(activeLaunch.page.getByTestId("ai-conversation-action-bar"))
-      .toContainText("任务已复制，等你的 AI 改完", { timeout: 30_000 });
+      .toHaveAttribute("data-focused", "true");
     await expect.poll(
       () => requestDirectoryCount(activeLaunch.workspace),
-      { timeout: 20_000 },
-    ).toBe(1);
+    ).toBe(0);
+
+    const firstLostCard = recoveredComments.filter({ hasText: firstComment });
+    await firstLostCard.hover();
+    await firstLostCard.getByRole("button", { name: "删除评论" }).click();
+    await firstLostCard.getByRole("button", { name: "删除", exact: true }).click();
+    const secondLostCard = recoveredComments.filter({ hasText: secondComment });
+    await secondLostCard.hover();
+    await secondLostCard.getByRole("button", { name: "删除评论" }).click();
+    await secondLostCard.getByRole("button", { name: "删除", exact: true }).click();
+    await expect(recoveredComments).toHaveCount(0);
   } finally {
     if (activeLaunch !== firstLaunch) {
       await stopPageRoot(activeLaunch.electronApp, firstLaunch.isolatedUserData);
