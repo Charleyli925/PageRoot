@@ -691,8 +691,10 @@ test("the review projection annotates a dense report cleanly and accurately", as
         authoredStyle.textContent = `
           svg rect,
           [data-pageroot-review-mask-dim] {
+            filter: blur(20px) !important;
             backdrop-filter: grayscale(1) blur(3px) !important;
             -webkit-backdrop-filter: grayscale(1) blur(3px) !important;
+            mix-blend-mode: multiply !important;
           }
         `;
         head.append(authoredStyle);
@@ -711,6 +713,14 @@ test("the review projection annotates a dense report cleanly and accurately", as
       await expect(frame.locator("[data-pageroot-review-mask-dim]")).toHaveCSS(
         "backdrop-filter",
         "none",
+      );
+      await expect(frame.locator("[data-pageroot-review-mask-dim]")).toHaveCSS(
+        "filter",
+        "none",
+      );
+      await expect(frame.locator("[data-pageroot-review-mask-dim]")).toHaveCSS(
+        "mix-blend-mode",
+        "normal",
       );
       await expect.poll(() => inlineBox.evaluate((box) => {
         const paragraph = document.querySelector("[data-review-inline-a]");

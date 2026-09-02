@@ -2967,6 +2967,7 @@ function reviewBootstrap(
       element.style.setProperty("filter", "none", "important");
       element.style.setProperty("backdrop-filter", "none", "important");
       element.style.setProperty("-webkit-backdrop-filter", "none", "important");
+      element.style.setProperty("mix-blend-mode", "normal", "important");
       element.style.setProperty("transform", "none", "important");
       element.style.setProperty("pointer-events", "none", "important");
       if (!fill) return;
@@ -3308,8 +3309,6 @@ function reviewBootstrap(
       Math.min(100, Number(currentState.transparency ?? 18)),
     ) / 100;
     root.style.setProperty("--pageroot-review-context-opacity", String(transparency));
-    root.style.setProperty("--pageroot-review-context-grayscale", String((1 - transparency) * .55));
-    root.style.setProperty("--pageroot-review-context-saturation", String(.7 + transparency * .3));
     root.style.setProperty("--pageroot-review-ui-scale", String(1 / Math.max(
       .32,
       Math.min(1, Number(currentState.scale || 1)),
