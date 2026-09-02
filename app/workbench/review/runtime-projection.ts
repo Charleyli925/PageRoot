@@ -2975,6 +2975,7 @@ function reviewBootstrap(
       element.style.setProperty("fill-opacity", "1", "important");
       element.style.setProperty("stroke", "none", "important");
     };
+    resetMaskPrimitive(svg);
     const mask = document.createElementNS(namespace, "mask");
     const maskId = "pageroot-review-mask-"
       + reviewMaskSessionKey + "-" + side + "-" + projectionEpoch + "-" + (++overlayMaskSequence);

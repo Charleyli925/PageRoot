@@ -689,6 +689,7 @@ test("the review projection annotates a dense report cleanly and accurately", as
       await frame.locator("head").evaluate((head) => {
         const authoredStyle = document.createElement("style");
         authoredStyle.textContent = `
+          svg,
           svg rect,
           [data-pageroot-review-mask-dim] {
             filter: blur(20px) !important;
@@ -710,6 +711,18 @@ test("the review projection annotates a dense report cleanly and accurately", as
         `[data-pageroot-review-overlay-box][data-pageroot-review-focus-group="${inlineStyleGroupB.id}"]`,
       )).toHaveCount(0);
       await expect(frame.locator("[data-pageroot-review-mask-hole]")).toHaveCount(1);
+      await expect(frame.locator("[data-pageroot-review-mask-layer]")).toHaveCSS(
+        "backdrop-filter",
+        "none",
+      );
+      await expect(frame.locator("[data-pageroot-review-mask-layer]")).toHaveCSS(
+        "filter",
+        "none",
+      );
+      await expect(frame.locator("[data-pageroot-review-mask-layer]")).toHaveCSS(
+        "mix-blend-mode",
+        "normal",
+      );
       await expect(frame.locator("[data-pageroot-review-mask-dim]")).toHaveCSS(
         "backdrop-filter",
         "none",
