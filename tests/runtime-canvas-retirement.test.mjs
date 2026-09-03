@@ -1,14 +1,37 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import test from "node:test";
 
-test("multi-tab Runtime Canvas retention is disabled while the old pool remains", () => {
+test("the Workbench owns one active Runtime Canvas and no multi-tab pool", () => {
   const workbench = readFileSync(new URL("../app/workbench.tsx", import.meta.url), "utf8");
-  const residency = readFileSync(
-    new URL("../app/workbench/use-runtime-canvas-residency.ts", import.meta.url),
+  const preparation = readFileSync(
+    new URL("../app/workbench/use-edit-runtime-preparation.ts", import.meta.url),
     "utf8",
   );
-  assert.match(workbench, /retentionEnabled:\s*false/u);
-  assert.match(residency, /if \(!retentionEnabled\) \{\s*session\.reconcile\(\[\]\)/u);
-  assert.match(workbench, /<WorkbenchDocumentCanvasPool/u);
+  const activeHost = readFileSync(
+    new URL("../app/workbench/WorkbenchActiveDocumentCanvas.tsx", import.meta.url),
+    "utf8",
+  );
+  assert.equal(
+    existsSync(new URL("../app/workbench/WorkbenchDocumentCanvasPool.tsx", import.meta.url)),
+    false,
+  );
+  assert.equal(
+    existsSync(new URL("../app/workbench/use-runtime-canvas-residency.ts", import.meta.url)),
+    false,
+  );
+  assert.doesNotMatch(workbench, /WorkbenchDocumentCanvasPool|useRuntimeCanvasResidency/u);
+  assert.match(workbench, /data-testid="workbench-active-document-canvas"/u);
+  assert.match(workbench, /data-runtime-hot-limit=\{1\}/u);
+  assert.match(workbench, /<WorkbenchActiveDocumentCanvas/u);
+  assert.doesNotMatch(preparation, /\[\.\.\.|\.filter\(|\.slice\(/u);
+  assert.match(workbench, /&& !editRuntimePreparing/u);
+  assert.match(workbench, /cachedSurfaceInteractionPassthrough/u);
+  assert.match(workbench, /visibleCachedSurface\?\.tabId === documentRuntimeTabId/u);
+  assert.match(activeHost, /data-testid="workbench-active-document-canvas-host"/u);
+  assert.match(activeHost, /data-runtime-hot-limit=\{1\}/u);
+  assert.doesNotMatch(
+    activeHost,
+    /DOCUMENT_CANVAS_POOL_MINIMUM|WorkbenchDocumentCanvasPool|retainedTabIds|\.map\(|\.slice\(/u,
+  );
 });

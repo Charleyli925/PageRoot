@@ -50,7 +50,7 @@ reused. The four collisions found in the first curation pass were assigned
 | 0051 | [HTML readiness is progressive and scroll never waits for Canvas verification](0051-progressive-scrollable-html-readiness.md) | Living |
 | 0052 | [Product ACP catalog and managed installer](0052-acp-catalog-installer.md) | Living |
 | 0053 | [Codex chooser uses ACP; App Server stays packaged-unregistered](0053-codex-acp-adapter.md) | Living; implementation metadata records the completed removal |
-| 0054 | [bundle common ECharts bytes and retain five exact frozen Canvases](0054-bundled-echarts-and-five-canvas-residency.md) | Living in part; only bundled ECharts and script-disabled Canvas residency remain |
+| 0054 | [bundle common ECharts bytes and retain five exact frozen Canvases](0054-bundled-echarts-and-five-canvas-residency.md) | Living in part; bundled ECharts and the immutable byte store remain, multi-Canvas residency is retired |
 | 0057 | [Mutable records preserve unknown members instead of dropping or refusing them](0057-forward-compatible-record-members.md) | Living |
 | 0059 | [Source elements use a persistent PageRoot identity](0059-persistent-source-element-identity.md) | Living |
 | 0060 | [Managed Working Copies materialize source element identity once](0060-working-copy-source-element-identity-migration.md) | Living |

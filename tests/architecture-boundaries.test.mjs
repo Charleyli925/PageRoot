@@ -228,6 +228,13 @@ test("retired production modules and imports stay outside the graph", () => {
     }).join("\n"),
     /retired module/u,
   );
+  assert.match(
+    retiredArtifactViolations({
+      file: "app/example.tsx",
+      source: 'import Pool from "./workbench/WorkbenchDocumentCanvasPool";',
+    }).join("\n"),
+    /retired module/u,
+  );
 });
 
 test("the architecture checker contains no implementation-shape assertions", async () => {

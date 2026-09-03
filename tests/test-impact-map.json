@@ -1069,10 +1069,12 @@
         "^app/domain/edit-runtime-contract\\.(?:js|d\\.ts)$",
         "^app/components/(?:HtmlCanvasEditor(?:\\.types)?|HtmlDisplaySurface(?:\\.module)?|html-canvas-selection-chrome(?:-contract)?|html-preview-sandbox)\\.(?:tsx|ts|js|css|d\\.ts)$",
         "^app/workbench\\.tsx$",
+        "^app/workbench/WorkbenchActiveDocumentCanvas\\.tsx$",
+        "^app/workbench/use-edit-runtime-preparation\\.ts$",
         "^desktop/(?:edit-runtime-bootstrap|edit-runtime-protocol|edit-runtime-preparation-fence|edit-runtime-library-store)\\.mjs$",
         "^desktop/main\\.mjs$",
         "^docs/decisions/(?:0065-disposable-edit-runtime|archive/(?:0025-edit-direct-one-shot-runtime|0058-bounded-canvas-svg-edit-runtime))\\.md$",
-        "^tests/(?:edit-author-runtime-session|edit-runtime-bootstrap|edit-runtime-preparation-fence|edit-runtime-contract|edit-runtime-protocol|edit-runtime-library-store|html-canvas-frame)\\.test\\.mjs$"
+        "^tests/(?:edit-author-runtime-session|edit-runtime-bootstrap|edit-runtime-preparation-fence|edit-runtime-contract|edit-runtime-protocol|edit-runtime-library-store|html-canvas-frame|runtime-canvas-retirement)\\.test\\.mjs$"
       ],
       "suites": [
         "typecheck",
