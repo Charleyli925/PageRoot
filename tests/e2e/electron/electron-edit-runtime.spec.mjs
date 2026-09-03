@@ -3,6 +3,7 @@ import { expect, test } from "@playwright/test";
 import { buildSourceIndex } from "../../../app/lib/source-index.js";
 
 import {
+  activateNativeEdit,
   ECHARTS_STUB,
   bridgeJson,
   clickEditHistoryMenu,
@@ -19,6 +20,7 @@ import {
   path,
   readFileSync,
   removeValidatedTemporaryDirectory,
+  setTextSelection,
   stopPageRoot,
   tmpdir,
   writeFileSync,
@@ -1539,12 +1541,24 @@ test("overlapping edits supersede an old Runtime handoff without losing charts o
     const duplicateButton = page.getByRole("button", { name: "复制元素", exact: true });
     await expect(duplicateButton).toBeVisible();
 
+    const firstCandidatePending = page.waitForFunction(() => (
+      document.querySelector('[data-testid="html-canvas-editor"]')
+        ?.getAttribute("data-runtime-candidate-id") || false
+    ));
     await duplicateButton.click();
-    await expect(page.getByTestId("html-canvas-editor")).toHaveAttribute(
-      "data-runtime-handoff",
-      "preparing",
-    );
+    const firstCandidateHandle = await firstCandidatePending;
+    const firstCandidateId = await firstCandidateHandle.jsonValue();
+    await firstCandidateHandle.dispose();
+    const secondCandidatePending = page.waitForFunction((previousId) => {
+      const nextId = document.querySelector('[data-testid="html-canvas-editor"]')
+        ?.getAttribute("data-runtime-candidate-id");
+      return nextId && nextId !== previousId ? nextId : false;
+    }, firstCandidateId);
     await duplicateButton.click({ force: true });
+    const secondCandidateHandle = await secondCandidatePending;
+    const secondCandidateId = await secondCandidateHandle.jsonValue();
+    await secondCandidateHandle.dispose();
+    expect(secondCandidateId).not.toBe(firstCandidateId);
 
     await expect.poll(() => page.locator(".canvas-edit-surface").getAttribute(
       "data-edit-runtime-phase",
@@ -1601,7 +1615,154 @@ test("overlapping edits supersede an old Runtime handoff without losing charts o
   });
 });
 
-test("latest Runtime candidate wins across slow ECharts, native editing, history and recovery", {
+test("Runtime style edits stay in one document and coalesce at selection boundary", {
+  tag: ["@gate-smoke", "@smoke-editing"],
+}, async () => {
+  const html = `<!doctype html>
+<html><head><title>Runtime style coalescing</title></head><body>
+  <main>
+    <article style="padding:24px"><h2 data-native-case="runtime-style-first">甲</h2></article>
+    <article style="padding:24px"><h2 data-native-case="runtime-style-second">乙</h2></article>
+    <output id="runtime-style-proof"></output>
+  </main>
+  <script>
+    const runtimeStyleCards = document.querySelectorAll('[data-native-case^="runtime-style-"]');
+    const forgedRuntimeStyleCard = runtimeStyleCards[0].cloneNode(true);
+    forgedRuntimeStyleCard.removeAttribute('data-native-case');
+    forgedRuntimeStyleCard.setAttribute('data-runtime-forged-clone', 'true');
+    runtimeStyleCards[0].before(forgedRuntimeStyleCard);
+    document.querySelector('#runtime-style-proof').textContent =
+      'runtime-ready:' + runtimeStyleCards.length;
+  </script>
+  <script type="module" src="slow-module.js"></script>
+</body></html>`;
+
+  await withRuntimeProject("pageroot-runtime-style-coalescing-e2e-", {
+    "runtime-report.html": html,
+    "slow-module.js": [
+      "parent.__PAGEROOT_STYLE_RUNTIME_COUNT__ =",
+      "  (parent.__PAGEROOT_STYLE_RUNTIME_COUNT__ || 0) + 1;",
+      "if (parent.__PAGEROOT_STYLE_RUNTIME_COUNT__ > 1) {",
+      "  await new Promise((resolve) => setTimeout(resolve, 600));",
+      "}",
+    ].join("\n"),
+  }, async ({ page, sourcePath }) => {
+    const editor = page.getByTestId("html-canvas-editor");
+    const workingCopyPath = await managedWorkingCopyPath(page, sourcePath);
+    let frame = (await loadedDiskFrame(page, sourcePath, "runtime-style-first")).frame;
+    const first = frame.locator(
+      '[data-native-case="runtime-style-first"]:not([data-runtime-forged-clone])',
+    );
+    const forgedFirst = frame.locator(
+      '[data-runtime-forged-clone="true"]',
+    );
+    await expect(forgedFirst).toHaveCount(1);
+    await first.click();
+    await expect(first).toHaveAttribute("data-html-canvas-selected", "part");
+    const initialDocument = await documentToken(page);
+    const initialGeneration = await editor.locator('iframe:not([data-frame-role])')
+      .getAttribute("data-frame-generation");
+    const toolbar = editor.getByRole("toolbar");
+    await expect(toolbar).toBeVisible();
+    await toolbar.getByText("样式与间距", { exact: true }).click();
+    await toolbar.getByLabel("内边距（像素）").fill("20");
+    await expect.poll(() => readFileSync(workingCopyPath, "utf8"))
+      .toMatch(/padding-top:\s*20px/u);
+    await toolbar.getByLabel("内边距（像素）").fill("22");
+    await expect.poll(() => readFileSync(workingCopyPath, "utf8"))
+      .toMatch(/padding-top:\s*22px/u);
+    await expect(first).toHaveCSS("padding-top", "22px");
+    await expect(forgedFirst).toHaveCSS("padding-top", "0px");
+
+    await expect.poll(() => documentToken(page)).toBe(initialDocument);
+    await expect(editor.locator('iframe:not([data-frame-role])')).toHaveAttribute(
+      "data-frame-generation",
+      initialGeneration,
+    );
+    await expect(editor.locator('iframe[data-frame-role="runtime-candidate"]')).toHaveCount(0);
+    await expect(editor).toHaveAttribute("data-runtime-refresh-pending", "");
+    await expect(editor).toHaveAttribute(
+      "data-runtime-refresh-pending-source-revision",
+      /^sha256:[a-f0-9]{64}$/u,
+    );
+    await expect.poll(async () => Number(
+      await editor.getAttribute("data-runtime-refresh-coalesced-count"),
+    )).toBeGreaterThanOrEqual(2);
+
+    const latestSourceRevision = buildSourceIndex(
+      readFileSync(workingCopyPath, "utf8"),
+    ).sourceSha256;
+    await frame.locator('[data-native-case="runtime-style-second"]').click();
+    await expect(editor).toHaveAttribute("data-runtime-refresh-decision", "candidate-now");
+    await expect(editor).toHaveAttribute("data-runtime-refresh-reason", "selection-changed");
+    await expect.poll(() => page.locator(".canvas-edit-surface").getAttribute(
+      "data-edit-runtime-phase",
+    )).toBe("settled");
+    await expect(editor).toHaveAttribute(
+      "data-runtime-last-known-good-source-revision",
+      latestSourceRevision,
+    );
+    frame = await currentEditorFrame(page);
+    await expect(frame.locator('[data-native-case="runtime-style-first"]'))
+      .toHaveCSS("padding-top", "22px");
+    await expect(editor.locator('iframe[data-frame-role="runtime-candidate"]')).toHaveCount(0);
+    await expect(editor).not.toHaveAttribute("data-runtime-refresh-pending", "");
+  });
+});
+
+test("Runtime range styling never grants a forged clone source authority", {
+  tag: ["@gate-smoke", "@smoke-editing"],
+}, async () => {
+  const html = `<!doctype html>
+<html><head><title>Runtime forged range</title></head><body>
+  <main><p data-native-case="runtime-forged-range">甲乙</p></main>
+  <script>
+    document.querySelector('[data-native-case="runtime-forged-range"]');
+  </script>
+</body></html>`;
+
+  await withRuntimeProject("pageroot-runtime-forged-range-e2e-", {
+    "runtime-report.html": html,
+  }, async ({ page, sourcePath }) => {
+    const editor = page.getByTestId("html-canvas-editor");
+    const workingCopyPath = await managedWorkingCopyPath(page, sourcePath);
+    const frame = (await loadedDiskFrame(page, sourcePath, "runtime-forged-range")).frame;
+    const target = frame.locator(
+      '[data-native-case="runtime-forged-range"]:not([data-runtime-forged-clone])',
+    );
+    await activateNativeEdit(frame, "runtime-forged-range");
+    await expect(target).toHaveAttribute("contenteditable", "true");
+    await setTextSelection(frame, "runtime-forged-range", 0, 1);
+    const beforeDocument = await documentToken(page);
+    const toolbar = editor.getByRole("toolbar");
+    await expect(toolbar).toHaveAttribute("data-text-range", "true");
+    await target.evaluate((element) => {
+      const forged = element.cloneNode(true);
+      if (!(forged instanceof HTMLElement)) throw new Error("Runtime forged clone failed.");
+      forged.removeAttribute("data-native-case");
+      forged.removeAttribute("contenteditable");
+      forged.removeAttribute("data-html-canvas-editing");
+      forged.removeAttribute("data-html-canvas-selected");
+      forged.setAttribute("data-runtime-forged-clone", "true");
+      element.before(forged);
+    });
+    const forged = frame.locator('[data-runtime-forged-clone="true"]');
+    await expect(forged).toHaveCount(1);
+    const bold = toolbar
+      .getByRole("button", { name: "加粗", exact: true });
+    await expect(bold).toBeEnabled();
+    await bold.click();
+
+    await expect.poll(() => readFileSync(workingCopyPath, "utf8"))
+      .toMatch(/<span[^>]*font-weight:\s*700/iu);
+    await expect(target.locator('span[style*="font-weight"]')).toHaveCount(1);
+    await expect(forged.locator('span[style*="font-weight"]')).toHaveCount(0);
+    await expect.poll(() => documentToken(page)).toBe(beforeDocument);
+    await expect(editor.locator('iframe[data-frame-role="runtime-candidate"]')).toHaveCount(0);
+  });
+});
+
+test("latest Runtime candidate wins across slow ECharts, native editing and recovery", {
   tag: ["@gate-smoke", "@smoke-editing"],
 }, async () => {
   const html = `<!doctype html>
@@ -1641,7 +1802,7 @@ test("latest Runtime candidate wins across slow ECharts, native editing, history
       "  });",
       "}",
     ].join("\n"),
-  }, async ({ electronApp, page, sourcePath }) => {
+  }, async ({ page, sourcePath }) => {
     const editor = page.getByTestId("html-canvas-editor");
     const surface = page.locator(".canvas-edit-surface");
     const reviewStage = page.locator(".review-scroll-stage");
@@ -1654,6 +1815,16 @@ test("latest Runtime candidate wins across slow ECharts, native editing, history
     await expect.poll(() => reviewStage.evaluate((element) => element.scrollTop)).toBe(480);
 
     const candidateIds = [];
+    const currentActiveRuntimeFrame = async () => {
+      const activeIframe = editor.locator('iframe:not([data-frame-role])');
+      await expect(activeIframe).toHaveCount(1);
+      const activeHandle = await activeIframe.elementHandle();
+      const activeFrame = await activeHandle?.contentFrame();
+      if (!activeFrame || activeFrame.isDetached()) {
+        throw new Error("Latest-wins active Runtime frame is unavailable.");
+      }
+      return activeFrame;
+    };
     const waitForNewCandidate = async (previousId) => {
       const candidateHandle = await page.waitForFunction((priorCandidateId) => {
         const candidateId = document.querySelector(
@@ -1672,8 +1843,17 @@ test("latest Runtime candidate wins across slow ECharts, native editing, history
       const candidateId = await candidatePending;
       expect(candidateId).toBeTruthy();
       candidateIds.push(candidateId);
-      const activeFrame = await currentEditorFrame(page);
-      await expect(activeFrame.locator("#latest-wins-chart canvas")).toHaveCount(1);
+      await expect.poll(() => page.evaluate(() => {
+        const activeFrame = document.querySelector(
+          '[data-testid="html-canvas-editor"] iframe:not([data-frame-role])',
+        );
+        return Boolean(
+          activeFrame instanceof HTMLIFrameElement
+          && activeFrame.isConnected
+          && getComputedStyle(activeFrame).visibility === "visible"
+          && activeFrame.contentDocument?.querySelector("#latest-wins-chart canvas"),
+        );
+      })).toBe(true);
       await expect(editor.locator('iframe[data-frame-role="runtime-retiring"]')).toHaveCount(0);
       await expect(page.getByTestId("edit-runtime-static-fallback")).toHaveCount(0);
       return candidateId;
@@ -1684,17 +1864,9 @@ test("latest Runtime candidate wins across slow ECharts, native editing, history
     });
     const duplicateButton = page.getByRole("button", { name: "复制元素", exact: true });
     await expect(duplicateButton).toBeVisible();
-    for (let index = 0; index < 3; index += 1) {
-      await captureNextCandidate(() => duplicateButton.click({ force: true }));
-    }
-
-    // Re-enter the still-visible last-known-good document while the latest
-    // candidate is preparing. Promotion must pause for the browser edit/IME
-    // transaction instead of moving it across Documents.
-    frame = await currentEditorFrame(page);
-    let heading = frame.locator('[data-native-case="runtime-latest-wins-text"]').first();
-    const beforeNativeCandidate = await editor.getAttribute("data-runtime-candidate-id");
-    const nativeCandidatePending = waitForNewCandidate(beforeNativeCandidate);
+    await captureNextCandidate(() => duplicateButton.click({ force: true }));
+    const previousCandidate = await editor.getAttribute("data-runtime-candidate-id");
+    const editingCandidatePending = waitForNewCandidate(previousCandidate);
     await duplicateButton.evaluate((button) => {
       button.click();
       const editorElement = document.querySelector('[data-testid="html-canvas-editor"]');
@@ -1702,21 +1874,26 @@ test("latest Runtime candidate wins across slow ECharts, native editing, history
       const editTarget = activeFrame?.contentDocument?.querySelector(
         '[data-native-case="runtime-latest-wins-text"]',
       );
-      if (!(editTarget instanceof activeFrame.contentWindow.HTMLElement)) {
+      if (!(activeFrame instanceof HTMLIFrameElement)
+        || !(editTarget instanceof activeFrame.contentWindow.HTMLElement)) {
         throw new Error("Latest-wins active heading is missing.");
       }
       const rect = editTarget.getBoundingClientRect();
-      editTarget.dispatchEvent(new MouseEvent("dblclick", {
+      const eventInit = {
         bubbles: true,
         cancelable: true,
         clientX: rect.left + Math.max(1, rect.width / 2),
         clientY: rect.top + Math.max(1, rect.height / 2),
-      }));
+      };
+      editTarget.dispatchEvent(new MouseEvent("click", { ...eventInit, detail: 1 }));
+      editTarget.dispatchEvent(new MouseEvent("dblclick", { ...eventInit, detail: 2 }));
     });
-    const nativeCandidate = await nativeCandidatePending;
-    expect(nativeCandidate).toBeTruthy();
-    candidateIds.push(nativeCandidate);
-    expect(new Set(candidateIds).size).toBe(4);
+    const editingCandidate = await editingCandidatePending;
+    candidateIds.push(editingCandidate);
+    expect(new Set(candidateIds).size).toBe(2);
+    await expect(editor).toHaveAttribute("data-runtime-candidate-id", editingCandidate);
+    frame = await currentActiveRuntimeFrame();
+    let heading = frame.locator('[data-native-case="runtime-latest-wins-text"]').first();
     await expect(heading).toHaveAttribute("contenteditable", "true");
     await heading.evaluate((element) => {
       const text = element.firstChild;
@@ -1746,7 +1923,7 @@ test("latest Runtime candidate wins across slow ECharts, native editing, history
         isComposing: true,
       }));
     });
-    await expect(editor).toHaveAttribute("data-runtime-candidate-phase", "preparing");
+    await expect(editor).toHaveAttribute("data-runtime-candidate-id", editingCandidate);
     await expect(editor.locator('iframe[data-frame-role="runtime-retiring"]')).toHaveCount(0);
     expect(readFileSync(workingCopyPath, "utf8")).not.toContain("pinyin");
     await heading.evaluate((element) => {
@@ -1758,10 +1935,8 @@ test("latest Runtime candidate wins across slow ECharts, native editing, history
     await expect(heading).not.toContainText("pinyin");
     expect(readFileSync(workingCopyPath, "utf8")).not.toContain("pinyin");
 
-    frame = await currentEditorFrame(page);
+    frame = await currentActiveRuntimeFrame();
     heading = frame.locator('[data-native-case="runtime-latest-wins-text"]').first();
-    await heading.click({ force: true });
-    await heading.dblclick({ force: true });
     await expect(heading).toHaveAttribute("contenteditable", "true");
     await heading.press("End");
     const revisionBeforeText = Number(await page.locator("[data-persist-state]").first()
@@ -1769,10 +1944,10 @@ test("latest Runtime candidate wins across slow ECharts, native editing, history
     await page.keyboard.insertText("你好");
     await expect(heading).toContainText("你好");
     await page.keyboard.insertText("                        ");
+    const textRevision = await expectCheckpointPersisted(page, revisionBeforeText);
     await expect.poll(() => readFileSync(workingCopyPath, "utf8")).toContain("你好");
     await expect.poll(() => readFileSync(workingCopyPath, "utf8"))
       .toMatch(/(?:&nbsp;| ){8}/u);
-    const textRevision = await expectCheckpointPersisted(page, revisionBeforeText);
     frame = await currentEditorFrame(page);
     heading = frame.locator('[data-native-case="runtime-latest-wins-text"]').first();
     await expect(heading).toHaveAttribute("contenteditable", "true");
@@ -1813,43 +1988,18 @@ test("latest Runtime candidate wins across slow ECharts, native editing, history
     }
     await expect(heading).toHaveAttribute("contenteditable", "true");
     await expect.poll(() => readFileSync(workingCopyPath, "utf8")).toContain("你好");
-    const enterRevision = await expectCheckpointPersisted(page, textRevision);
+    await expectCheckpointPersisted(page, textRevision);
 
-    // History remains an explicit edit-session boundary and therefore keeps
-    // its existing latest-wins Runtime candidate path.
-    const beforeUndoCandidate = await editor.getAttribute("data-runtime-candidate-id");
-    const undoCandidatePending = waitForNewCandidate(beforeUndoCandidate);
-    await clickEditHistoryMenu(electronApp, page, "undo");
-    const undoCandidate = await undoCandidatePending;
-    expect(undoCandidate).toBeTruthy();
-    candidateIds.push(undoCandidate);
-    const undoRevision = await expectCheckpointPersisted(page, enterRevision);
-    const redoCandidatePending = waitForNewCandidate(undoCandidate);
-    await clickEditHistoryMenu(electronApp, page, "redo");
-    const redoCandidate = await redoCandidatePending;
-    expect(redoCandidate).toBeTruthy();
-    candidateIds.push(redoCandidate);
-    const redoRevision = await expectCheckpointPersisted(page, undoRevision);
-    const secondUndoCandidatePending = waitForNewCandidate(redoCandidate);
-    await clickEditHistoryMenu(electronApp, page, "undo");
-    const secondUndoCandidate = await secondUndoCandidatePending;
-    candidateIds.push(secondUndoCandidate);
-    const secondUndoRevision = await expectCheckpointPersisted(page, redoRevision);
-    const secondRedoCandidatePending = waitForNewCandidate(secondUndoCandidate);
-    await clickEditHistoryMenu(electronApp, page, "redo");
-    const secondRedoCandidate = await secondRedoCandidatePending;
-    candidateIds.push(secondRedoCandidate);
-    await expectCheckpointPersisted(page, secondUndoRevision);
-
-    // The history fence created a pending browser-edit resume. Three candidates
-    // are superseded before the fourth activates; the winner must inherit the
-    // same target and caret transaction rather than observe cancel(A/B/C).
-    expect(new Set([
-      undoCandidate,
-      redoCandidate,
-      secondUndoCandidate,
-      secondRedoCandidate,
-    ]).size).toBe(4);
+    // The explicit edit boundary coalesces the text and Enter checkpoints into
+    // one newest candidate. The two earlier structural candidates remain
+    // blocked and superseded; only this source revision may activate.
+    const beforeBoundaryCandidate = await editor.getAttribute("data-runtime-candidate-id");
+    const boundaryCandidatePending = waitForNewCandidate(beforeBoundaryCandidate);
+    await page.keyboard.press("Escape");
+    const boundaryCandidate = await boundaryCandidatePending;
+    expect(boundaryCandidate).toBeTruthy();
+    candidateIds.push(boundaryCandidate);
+    expect(new Set(candidateIds).size).toBe(candidateIds.length);
     await expect.poll(() => page.evaluate(() => (
       window.__PAGEROOT_RUNTIME_RELEASES__?.length || 0
     ))).toBeGreaterThan(0);
@@ -1861,18 +2011,15 @@ test("latest Runtime candidate wins across slow ECharts, native editing, history
     await expect.poll(() => surface.getAttribute("data-edit-runtime-outcome"), {
       timeout: 12_000,
     }).toBe("ready");
+    await expect(editor).toHaveAttribute(
+      "data-runtime-last-known-good-id",
+      boundaryCandidate,
+    );
     frame = await currentEditorFrame(page);
     heading = frame.locator('[data-native-case="runtime-latest-wins-text"]').first();
-    await expect(heading).toHaveAttribute("contenteditable", "true");
-    await expect.poll(() => heading.evaluate((element) => {
-      const selection = document.getSelection();
-      return Boolean(
-        selection?.rangeCount
-        && selection.isCollapsed
-        && selection.anchorNode
-        && element.contains(selection.anchorNode),
-      );
-    })).toBe(true);
+    await expect(heading).not.toHaveAttribute("contenteditable", "true");
+    await expect(heading).toHaveAttribute("data-html-canvas-selected", "part");
+    await expect(heading).toContainText("你好");
 
     // A true latest candidate activation failure must preserve the old dynamic
     // view and shared grant. The following source checkpoint removes the fault
@@ -2013,13 +2160,31 @@ test("latest Runtime candidate wins across slow ECharts, native editing, history
 
     frame = await currentEditorFrame(page);
     await expect(frame.locator("#latest-wins-chart canvas")).toHaveCount(1);
-    await expect(frame.locator('[data-native-case="runtime-latest-wins"]')).toHaveCount(5);
-    await expect(frame.locator("#latest-wins-proof")).toHaveText("运行时卡片 5");
+    await expect(frame.locator('[data-native-case="runtime-latest-wins"]')).toHaveCount(3);
+    await expect(frame.locator("#latest-wins-proof")).toHaveText("运行时卡片 3");
     await expect(editor.locator('iframe:not([data-frame-role])')).toHaveCount(1);
     await expect(editor.locator('iframe[data-frame-role="runtime-candidate"]')).toHaveCount(0);
     await expect(editor.locator('iframe[data-frame-role="runtime-retiring"]')).toHaveCount(0);
-    await expect.poll(() => reviewStage.evaluate((element) => element.scrollTop))
-      .toBeGreaterThan(400);
+    await expect.poll(() => page.evaluate(() => {
+      const stage = document.querySelector(".review-scroll-stage");
+      const activeIframe = document.querySelector(
+        '[data-testid="html-canvas-editor"] iframe:not([data-frame-role])',
+      );
+      const anchor = activeIframe?.contentDocument?.querySelector(
+        '[data-native-case="runtime-latest-wins-text"]',
+      );
+      if (!(stage instanceof HTMLElement)
+        || !(activeIframe instanceof HTMLIFrameElement)
+        || !(anchor instanceof activeIframe.contentWindow.HTMLElement)) {
+        return false;
+      }
+      const stageRect = stage.getBoundingClientRect();
+      const iframeRect = activeIframe.getBoundingClientRect();
+      const anchorRect = anchor.getBoundingClientRect();
+      const anchorTop = iframeRect.top + anchorRect.top;
+      const anchorBottom = iframeRect.top + anchorRect.bottom;
+      return anchorBottom >= stageRect.top && anchorTop <= stageRect.bottom;
+    })).toBe(true);
 
     const finalSource = readFileSync(workingCopyPath, "utf8");
     expect(finalSource).toContain("你好");
@@ -2035,7 +2200,7 @@ test("latest Runtime candidate wins across slow ECharts, native editing, history
         (element) => element.getAttribute("data-pageroot-id"),
       ));
     expect(finalStableIds.every(Boolean)).toBe(true);
-    expect(new Set(finalStableIds).size).toBe(5);
+    expect(new Set(finalStableIds).size).toBe(3);
     expect(finalIndex.byPagerootId.size).toBeGreaterThanOrEqual(5);
     await expect(editor).toHaveAttribute(
       "data-runtime-last-known-good-source-revision",
