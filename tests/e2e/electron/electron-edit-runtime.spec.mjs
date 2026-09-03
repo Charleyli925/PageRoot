@@ -2629,7 +2629,7 @@ test("compatible ECharts activation failure recovers exactly once with exact 5.4
     await expect(frame.locator("#chart canvas")).toHaveCount(1);
     await expect.poll(() => page.evaluate(() => (
       window.__PAGEROOT_ECHARTS_EXACT_RECOVERY__ || []
-    ))).toEqual(["5.5.0", "5.4.3"]);
+    ))).toEqual(["5.6.0", "5.4.3"]);
     await expect(page.getByTestId("html-canvas-editor")).toHaveAttribute(
       "data-runtime-library-origins",
       /(?:network|disk-cache)/u,

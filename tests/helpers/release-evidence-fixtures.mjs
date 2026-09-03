@@ -206,15 +206,15 @@ function fixtureExtraResources() {
     },
     {
       from: "node_modules/echarts/dist/echarts.min.js",
-      to: "edit-runtime-libraries/echarts/5.5.0/echarts.min.js",
+      to: "edit-runtime-libraries/echarts/5.6.0/echarts.min.js",
     },
     {
       from: "node_modules/echarts/LICENSE",
-      to: "edit-runtime-libraries/echarts/5.5.0/LICENSE",
+      to: "edit-runtime-libraries/echarts/5.6.0/LICENSE",
     },
     {
       from: "node_modules/echarts/NOTICE",
-      to: "edit-runtime-libraries/echarts/5.5.0/NOTICE",
+      to: "edit-runtime-libraries/echarts/5.6.0/NOTICE",
     },
     {
       from: "output/release-metadata/build-info.json",
@@ -610,9 +610,9 @@ export async function createSyntheticAppBundle(t, {
     writeFixtureFile(productRoot, "node_modules/echarts/dist/echarts.min.js", "globalThis.echarts = Object.freeze({});\n"),
     writeFixtureFile(productRoot, "node_modules/echarts/LICENSE", "Apache License 2.0 fixture\n"),
     writeFixtureFile(productRoot, "node_modules/echarts/NOTICE", "Apache ECharts fixture notice\n"),
-    writeFixtureFile(resourcesPath, "edit-runtime-libraries/echarts/5.5.0/echarts.min.js", "globalThis.echarts = Object.freeze({});\n"),
-    writeFixtureFile(resourcesPath, "edit-runtime-libraries/echarts/5.5.0/LICENSE", "Apache License 2.0 fixture\n"),
-    writeFixtureFile(resourcesPath, "edit-runtime-libraries/echarts/5.5.0/NOTICE", "Apache ECharts fixture notice\n"),
+    writeFixtureFile(resourcesPath, "edit-runtime-libraries/echarts/5.6.0/echarts.min.js", "globalThis.echarts = Object.freeze({});\n"),
+    writeFixtureFile(resourcesPath, "edit-runtime-libraries/echarts/5.6.0/LICENSE", "Apache License 2.0 fixture\n"),
+    writeFixtureFile(resourcesPath, "edit-runtime-libraries/echarts/5.6.0/NOTICE", "Apache ECharts fixture notice\n"),
     writeFixtureFile(
       productRoot,
       "output/release-metadata/build-info.json",

@@ -478,7 +478,7 @@ function ensureEditRuntimeProtocolController() {
           process.resourcesPath,
           "edit-runtime-libraries",
           "echarts",
-          "5.5.0",
+          "5.6.0",
           "echarts.min.js",
         )
       : path.resolve(directory, "../node_modules/echarts/dist/echarts.min.js");

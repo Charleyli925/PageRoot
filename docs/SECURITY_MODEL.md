@@ -110,7 +110,7 @@ PageRoot edits local files and renders user-controlled HTML, so its default poli
   session, execution and frame token; script resource errors, synchronous
   activation errors and immediate unhandled rejections fail the activation.
   This signal does not inspect pixels, Canvas contents or later Runtime
-  behavior. Exact ECharts 5.5.0 minified CDN
+  behavior. Exact ECharts 5.6.0 minified CDN
   references use the packaged SHA-verified library. Exact-version allowlisted
   ECharts core URLs may be retained in a private content-addressed byte store:
   canonical URL metadata never replaces SHA-256 verification, corrupted entries
@@ -119,7 +119,7 @@ PageRoot edits local files and renders user-controlled HTML, so its default poli
   filename and query identity before their bytes may be cached under the
   requested URL. Only the three standard query-free 5.4.3 core URLs, without an
   integrity attribute or any additional executable `src` attribute, may
-  temporarily resolve to packaged 5.5.0. That compatible resource set is
+  temporarily resolve to packaged 5.6.0. That compatible resource set is
   immutable; exact bytes arriving later
   only update the store unless the compatible runtime failed and consumes its
   one authorized recovery. Recovery is re-authorized in Main against the bound

@@ -914,8 +914,8 @@ export async function verifyAppBundle({
   for (const fileName of ["echarts.min.js", "LICENSE", "NOTICE"]) {
     await assertFilesEqual(
       path.join(productRoot, "node_modules", "echarts", fileName === "echarts.min.js" ? "dist/echarts.min.js" : fileName),
-      path.join(resourcesPath, "edit-runtime-libraries", "echarts", "5.5.0", fileName),
-      `bundled ECharts 5.5.0 ${fileName}`,
+      path.join(resourcesPath, "edit-runtime-libraries", "echarts", "5.6.0", fileName),
+      `bundled ECharts 5.6.0 ${fileName}`,
     );
   }
 

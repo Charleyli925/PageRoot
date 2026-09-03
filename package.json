@@ -207,15 +207,15 @@
     "extraResources": [
       {
         "from": "node_modules/echarts/dist/echarts.min.js",
-        "to": "edit-runtime-libraries/echarts/5.5.0/echarts.min.js"
+        "to": "edit-runtime-libraries/echarts/5.6.0/echarts.min.js"
       },
       {
         "from": "node_modules/echarts/LICENSE",
-        "to": "edit-runtime-libraries/echarts/5.5.0/LICENSE"
+        "to": "edit-runtime-libraries/echarts/5.6.0/LICENSE"
       },
       {
         "from": "node_modules/echarts/NOTICE",
-        "to": "edit-runtime-libraries/echarts/5.5.0/NOTICE"
+        "to": "edit-runtime-libraries/echarts/5.6.0/NOTICE"
       },
       {
         "from": "bridge/workspace-bridge.mjs",

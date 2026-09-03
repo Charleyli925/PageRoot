@@ -90,7 +90,7 @@ the historical synthetic-spike decision.
   Same-origin `window.parent` access, including renderer-exposed preload APIs,
   remains the accepted in-place-editing cost. Unsupported programs fail closed
   to static Edit. An exact cached ECharts library wins; the narrowly reviewed
-  5.4.3 core CDN mapping may render immediately with packaged 5.5.0 while the
+  5.4.3 core CDN mapping may render immediately with packaged 5.6.0 while the
   exact bytes download into a verified content-addressed store. The first
   successful runtime locks the current Canvas generation. Exact bytes never
   replace a successful compatible page; only a failed compatible run may

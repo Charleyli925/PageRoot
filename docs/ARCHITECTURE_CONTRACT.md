@@ -539,7 +539,7 @@ the verification token remain necessary but are not sufficient for Runtime
 success. This is an execution-failure signal, not a visual or Canvas probe.
 When the exact query-free 5.4.3 ECharts core URL is not cached, has no authored
 integrity constraint, and the executable program contains no other `src`
-attribute, Main may freeze packaged 5.5.0 bytes as a
+attribute, Main may freeze packaged 5.6.0 bytes as a
 separate compatible resource variant while downloading exact bytes in the
 background. The current resource set never mutates. The first successful
 runtime wins the Canvas generation; exact bytes arriving after compatible
@@ -600,7 +600,7 @@ same first live-document `base[href]`; href-less base elements, inert
 absolute or escaping bases fail closed.
 The dependency compatibility surface is separately finite: only the three
 standard, query-free ECharts 5.4.3 minified core CDN URLs may use packaged
-5.5.0, only when all other executable scripts are inline. Near matches,
+5.6.0, only when all other executable scripts are inline. Near matches,
 version ranges, unknown paths and additional plugin/library scripts never use
 that substitution.
 The bootstrap may hold and redeliver `DOMContentLoaded`

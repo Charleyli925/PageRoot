@@ -28,7 +28,7 @@ source or be reconciled node by node.
 - Main verifies the active source path, exact HTML Hash, Canvas generation and
   resource budgets before preparing a scoped `pageroot-edit-runtime:` resource
   closure. Inline and contained local scripts are supported. Exact reviewed
-  ECharts 5.5.0 CDN URLs may resolve to pinned packaged bytes. Module import
+  ECharts 5.6.0 CDN URLs may resolve to pinned packaged bytes. Module import
   graphs remain unsupported and fail closed to an explicit static Edit state.
   Main admits at most two concurrent preparations and retains only a bounded
   recent request-ID replay window. Completed identities age out; ordinary use
@@ -38,7 +38,7 @@ source or be reconciled node by node.
   closure and its Hash/budget checks.
 - Exact-version allowlisted ECharts core bytes may be retained in a bounded,
   content-addressed Main store. The exact three 5.4.3 minified core URLs may
-  use packaged 5.5.0 only when the tag has no integrity constraint and every
+  use packaged 5.6.0 only when the tag has no integrity constraint and every
   other executable script has no `src` attribute. Version, filename and query
   identity remain fixed across redirects before exact bytes enter the store. This
   compatible variant starts the background exact download but never mutates
