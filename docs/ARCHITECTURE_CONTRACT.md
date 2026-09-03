@@ -480,7 +480,15 @@ runtime before the initial editable frame becomes interactive. The sole
 to `(sourcePath, canvasGeneration)` rather than an autosave revision, source
 echo or comment state. It accepts one exact persisted-source prepare result
 only for the same source SHA and generation; a late old result is revoked and a
-settled session cannot prepare again. Its `preparing` snapshot first commits
+settled session cannot prepare again. The stable attempt key is distinct from
+the latest retry identity: every valid refresh observes current Working HTML,
+but only a persisted idle revision becomes eligible for explicit retry. This
+observation never auto-prepares on text, style, autosave or comment changes.
+At click time `WorkspaceController` supplies the current `DocumentSession`
+HTML, persisted SHA and revision state; pending or failed persistence cannot
+fall back to the failure-time HTML. Async preparation and recovery remain
+fenced to the exact attempted HTML/SHA as well as the stable key. Its
+`preparing` snapshot first commits
 the non-interactive loading surface; only that presentation acknowledgement
 starts the narrow prepare port, so a fast grant cannot promote a static iframe
 that has already mounted.
@@ -545,7 +553,9 @@ state; only the latest candidate may publish `ready`, `rejected` or `failed`.
 The coordinator also owns the last-known-good frame identity and the native-edit
 transaction gate; React owns only the fenced slot DOM, viewport and Selection
 effects. Candidate Script runs while its slot is hidden; after validation and
-minimal presentation positioning, visibility changes atomically and the former
+immediately before positioning React re-captures the minimal anchor from the
+still-visible Active frame, so Candidate-time scrolling or reselection replaces
+the older launch snapshot. After minimal positioning, visibility changes atomically and the former
 active slot is cleared to an inert empty document on the next frame. A user
 Native Edit or IME composition may let a candidate prepare but
 cannot promote or retire a browsing context. Promotion waits until that
@@ -580,15 +590,19 @@ permanent application-lifetime allowance or requires PageRoot to restart. An
 unavailable resource remains a recoverable preparation state while its
 independent bounded download is active. A terminal preparation, exact recovery,
 load, provenance or execution-deadline failure selects an explicit
-script-disabled static Edit state only when no last-known-good Runtime exists.
-Once a usable Runtime is active, a newer candidate's preparation, connection,
-positioning or activation failure destroys only that candidate and preserves
-the previous frame, viewport, Selection and edit capability. A true static
-fallback is disclosed as “部分动态内容未加载”, remains dismissible, and offers
-“重新加载动态内容” only for transient preparation, execution or exact-recovery
-failures; unsupported programs and an unavailable desktop runtime expose no
-ineffective retry. A successful retry removes the notice. The Workbench must
-not interpret iframe `load` alone as Runtime success.
+script-disabled static Edit projection. A dynamic Candidate failure prepares
+the latest Working HTML once more with Script disabled while the prior frame
+remains visible. Static success promotes that latest editable source; static
+failure preserves the prior last-known-good frame as read-only without rolling
+Working back. The severe notice cannot be dismissed and retains reload plus
+export actions. Direct unsupported, desktop-unavailable or preparation-failed
+static pages use the distinct `direct-static-visible` projection and say that
+the current static page is already displayed; they never imply a Candidate is
+still preparing. Only transient preparation, execution or exact-recovery
+failures expose an effective retry. Retry always freezes the latest persisted
+Working HTML/SHA observed at the click, never the failure-time request. A
+successful retry removes the notice. The Workbench must not interpret iframe
+`load` alone as Runtime success.
 The frame coordinator is the sole owner of whether a physical
 last-known-good iframe exists. It reports that settlement fact to
 `EditAuthorRuntimeSession`; the application session never reconstructs or
@@ -654,7 +668,9 @@ without ending native editing. Continuous input, delete, paste, Enter,
 composition completion, common text styles, autosave, Cmd+S, comment save,
 attachment save and export use this boundary; they retain the iframe,
 contenteditable host, Selection, caret and focus, and never start a Runtime
-candidate merely to acknowledge persistence. A hard leave ends native editing.
+candidate merely to acknowledge persistence. On an editable static fallback,
+the same checkpoint updates the Session's next retry input only after the
+revision is persisted; it still does not execute Script. A hard leave ends native editing.
 Text-range formatting always allocates any persistent wrapper through
 SourcePatch, updates the current iframe in place and resumes the logical range;
 only nodes imported by that trusted patch may extend Runtime's private source

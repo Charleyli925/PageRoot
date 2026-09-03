@@ -1302,7 +1302,7 @@ test("same-source history cancellation reloads through a fixed Runtime candidate
   });
 });
 
-test("runtime handoff restores the captured Presentation Anchor without scroll-intent state", {
+test("runtime handoff refreshes the Presentation Anchor after candidate-time scrolling", {
   tag: ["@gate-smoke", "@smoke-editing"],
 }, async () => {
   const html = `<!doctype html>
@@ -1320,10 +1320,20 @@ test("runtime handoff restores the captured Presentation Anchor without scroll-i
       (node) => node.textContent,
     ).join('');
   </script>
+  <script type="module" src="slow-anchor.js"></script>
 </body></html>`;
 
   await withRuntimeProject("pageroot-runtime-presentation-anchor-e2e-", {
     "runtime-report.html": html,
+    "slow-anchor.js": [
+      "parent.__PAGEROOT_ANCHOR_MODULE_COUNT__ =",
+      "  (parent.__PAGEROOT_ANCHOR_MODULE_COUNT__ || 0) + 1;",
+      "if (parent.__PAGEROOT_ANCHOR_MODULE_COUNT__ > 1) {",
+      "  await new Promise((resolve) => {",
+      "    (parent.__PAGEROOT_ANCHOR_RELEASES__ ||= []).push(resolve);",
+      "  });",
+      "}",
+    ].join("\n"),
   }, async ({ page, sourcePath }) => {
     const { frame } = await loadedDiskFrame(
       page,
@@ -1344,14 +1354,26 @@ test("runtime handoff restores the captured Presentation Anchor without scroll-i
       moveDownBox.x + moveDownBox.width / 2,
       moveDownBox.y + moveDownBox.height / 2,
     );
-    // Runtime switching restores one immutable Presentation Anchor. It does not
-    // maintain a parallel cross-frame scroll-intent state machine.
+    await expect.poll(() => page.evaluate(() => (
+      window.__PAGEROOT_ANCHOR_RELEASES__?.length || 0
+    ))).toBeGreaterThan(0);
+    await reviewStage.evaluate((element) => {
+      element.scrollTop = 720;
+    });
+    const latestUserScrollTop = await reviewStage.evaluate((element) => element.scrollTop);
+    expect(latestUserScrollTop).toBeGreaterThan(600);
+    await page.evaluate(() => {
+      const releases = window.__PAGEROOT_ANCHOR_RELEASES__ || [];
+      window.__PAGEROOT_ANCHOR_RELEASES__ = [];
+      releases.forEach((release) => release());
+    });
     await assertRuntimeHandoff(page, {
       requireActiveChrome: true,
       assertVisualContinuity: true,
     });
-    await expect.poll(() => reviewStage.evaluate((element) => element.scrollTop))
-      .toBeGreaterThan(400);
+    await expect.poll(async () => Math.abs(
+      await reviewStage.evaluate((element) => element.scrollTop) - latestUserScrollTop,
+    )).toBeLessThanOrEqual(8);
   });
 });
 
@@ -2399,6 +2421,14 @@ test("dynamic and static candidate failure preserves latest HTML behind a read-o
     const editor = page.getByTestId("html-canvas-editor").filter({ visible: true }).first();
     await expect(editor).toHaveAttribute(
       "data-runtime-degradation",
+      "static-preparing",
+      { timeout: 12_000 },
+    );
+    const preparingNotice = page.getByTestId("edit-runtime-static-fallback");
+    await preparingNotice.getByRole("button", { name: "关闭动态内容提示" }).click();
+    await expect(page.getByTestId("edit-runtime-static-fallback")).toHaveCount(0);
+    await expect(editor).toHaveAttribute(
+      "data-runtime-degradation",
       "last-known-good-readonly",
       { timeout: 12_000 },
     );
@@ -2410,6 +2440,8 @@ test("dynamic and static candidate failure preserves latest HTML behind a read-o
       .toBeVisible();
     await expect(degradationNotice.getByRole("button", { name: "导出当前 HTML", exact: true }))
       .toBeVisible();
+    await expect(degradationNotice.getByRole("button", { name: "关闭动态内容提示" }))
+      .toHaveCount(0);
 
     const latestSource = readFileSync(workingCopyPath, "utf8");
     const latestSourceHash = buildSourceIndex(latestSource).sourceSha256;
@@ -2616,13 +2648,20 @@ test("unsupported Script programs enter an explicit static Edit state", async ()
   }, async ({ page, sourcePath }) => {
     const { frame } = await loadedDiskFrame(page, sourcePath, "static-runtime-fallback");
     await expect(page.getByTestId("edit-runtime-static-fallback")).toContainText(
-      "部分动态内容未加载",
+      "部分动态内容未运行",
+    );
+    await expect(page.getByTestId("edit-runtime-static-fallback")).toContainText(
+      "当前已显示静态页面，仍可编辑和保存。",
     );
     await expect(page.getByRole("button", { name: "重新加载动态内容" })).toHaveCount(0);
     await expect(page.locator(".canvas-edit-surface")).toHaveAttribute(
       "data-edit-runtime-phase",
       "static-fallback",
     );
+    const editor = page.getByTestId("html-canvas-editor").filter({ visible: true }).first();
+    await expect(editor).toHaveAttribute("data-render-verified", "true");
+    await expect(editor.locator('iframe[data-runtime-slot-role="active"]'))
+      .toHaveAttribute("sandbox", "allow-same-origin");
     await expect(frame.locator("body")).not.toHaveAttribute("data-runtime-marker", "executed");
     await page.getByRole("button", { name: "关闭动态内容提示" }).click();
     await expect(page.getByTestId("edit-runtime-static-fallback")).toHaveCount(0);
@@ -2661,6 +2700,31 @@ test("static fallback can reload dynamic content and dismiss itself after succes
     const editor = page.getByTestId("html-canvas-editor").filter({ visible: true }).first();
     await expect(editor.locator('iframe[data-runtime-slot-role="active"]')).toBeVisible();
     await expect(editor).toHaveAttribute("data-render-verified", "true");
+    const workingCopyPath = await managedWorkingCopyPath(page, sourcePath);
+    let frame = await currentEditorFrame(page);
+    const retryTarget = frame.locator('[data-native-case="runtime-retry"]');
+    await retryTarget.evaluate((element) => {
+      const rect = element.getBoundingClientRect();
+      const eventInit = {
+        bubbles: true,
+        cancelable: true,
+        clientX: rect.left + Math.max(1, rect.width / 2),
+        clientY: rect.top + Math.max(1, rect.height / 2),
+      };
+      element.dispatchEvent(new MouseEvent("click", { ...eventInit, detail: 1 }));
+      element.dispatchEvent(new MouseEvent("dblclick", { ...eventInit, detail: 2 }));
+    });
+    await expect(retryTarget).toHaveAttribute("contenteditable", "true");
+    await retryTarget.press("End");
+    const revisionBeforeEdit = Number(await page.locator("[data-persist-state]").first()
+      .getAttribute("data-persisted-revision"));
+    await page.keyboard.insertText(" 已保存的新文字");
+    await page.keyboard.press("Escape");
+    await expectCheckpointPersisted(page, revisionBeforeEdit);
+    await expect.poll(() => readFileSync(workingCopyPath, "utf8"))
+      .toContain("已保存的新文字");
+    const latestWorkingSource = readFileSync(workingCopyPath, "utf8");
+    const latestWorkingHash = buildSourceIndex(latestWorkingSource).sourceSha256;
     await page.evaluate(() => {
       window.__PAGEROOT_RUNTIME_RETRY_SLOT_TRANSITIONS__ = [];
       window.__PAGEROOT_RUNTIME_RETRY_SLOT_OBSERVER__?.disconnect();
@@ -2686,11 +2750,11 @@ test("static fallback can reload dynamic content and dismiss itself after succes
       window.__PAGEROOT_RUNTIME_RETRY_SLOT_OBSERVER__ = observer;
     });
     await page.getByRole("button", { name: "重新加载动态内容" }).click();
-    const { frame } = await loadedDiskFrame(page, sourcePath, "runtime-retry");
-    await expect(page.getByTestId("edit-runtime-static-fallback")).toHaveCount(0);
+    ({ frame } = await loadedDiskFrame(page, sourcePath, "runtime-retry"));
     await expect.poll(() => page.locator(".canvas-edit-surface").getAttribute(
       "data-edit-runtime-phase",
     ), { timeout: 12_000 }).toBe("settled");
+    await expect(page.getByTestId("edit-runtime-static-fallback")).toHaveCount(0);
     await expect(frame.locator("body")).toHaveAttribute("data-runtime-retry-ready", "true");
     await expect.poll(() => page.evaluate(() => (
       window.__PAGEROOT_RUNTIME_RETRY_COUNT__ || 0
@@ -2708,7 +2772,11 @@ test("static fallback can reload dynamic content and dismiss itself after succes
       }),
     ]));
     await expect(frame.locator('[data-native-case="runtime-retry"]')).toHaveText(
-      "动态内容重试",
+      "动态内容重试 已保存的新文字",
+    );
+    await expect(editor).toHaveAttribute(
+      "data-runtime-last-known-good-source-revision",
+      latestWorkingHash,
     );
   });
 });

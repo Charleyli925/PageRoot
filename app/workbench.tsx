@@ -853,13 +853,6 @@ export default function Workbench() {
     runtimePreparing: editRuntimePreparing, runtimeRenderPending: editRuntimeRenderPending,
     runtimeGrant: editRuntimeGrant,
   } = runtimeCanvasResidency;
-  const staticFallbackNoticeIdentity = editRuntimePhase === "static-fallback"
-    ? [
-        editRuntimeSnapshot?.sourcePath || sourcePath || "no-source",
-        editRuntimeSnapshot?.canvasGeneration ?? canvasGeneration,
-        editRuntimeSnapshot?.lastOutcome || "unknown",
-      ].join(":")
-    : null;
   const runtimeDegradationKey = `${sourcePath || "no-source"}:${canvasGeneration}`;
   const [runtimeDegradationSnapshot, setRuntimeDegradationSnapshot] = useState<{
     key: string;
@@ -868,6 +861,17 @@ export default function Workbench() {
   const runtimeDegradation = runtimeDegradationSnapshot.key === runtimeDegradationKey
     ? runtimeDegradationSnapshot.state
     : "none";
+  const runtimeNoticeState: HtmlCanvasRuntimeDegradation | "direct-static-visible" = (
+    editRuntimePhase === "static-fallback" && runtimeDegradation === "none"
+  ) ? "direct-static-visible" : runtimeDegradation;
+  const staticFallbackNoticeIdentity = editRuntimePhase === "static-fallback"
+    ? [
+        editRuntimeSnapshot?.sourcePath || sourcePath || "no-source",
+        editRuntimeSnapshot?.canvasGeneration ?? canvasGeneration,
+        editRuntimeSnapshot?.lastOutcome || "unknown",
+        runtimeNoticeState,
+      ].join(":")
+    : null;
   const [pageViewContext, setPageViewContext] =
     useState<PageViewContext | null>(null);
   const [interactivePreviewTransport, setInteractivePreviewTransport] =
@@ -6466,7 +6470,7 @@ export default function Workbench() {
               {staticFallbackNoticeIdentity ? (
                 <EditRuntimeStaticFallbackNotice
                   key={staticFallbackNoticeIdentity}
-                  state={runtimeDegradation}
+                  state={runtimeNoticeState}
                   {...(editRuntimeSnapshot?.retryAvailable
                     ? {
                         onRetry: () => {

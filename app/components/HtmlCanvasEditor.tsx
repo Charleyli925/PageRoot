@@ -2797,6 +2797,24 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     } catch {
       return false;
     }
+    // Candidate preparation may outlive the user's next browse or scroll
+    // gesture. The still-visible Active frame is the latest presentation
+    // intent, so refresh the small anchor immediately before positioning.
+    const activeFrame = iframeRef.current;
+    const activeOuterScrollElement = containerRef.current?.closest<HTMLElement>(
+      ".review-scroll-stage",
+    ) ?? null;
+    candidate.presentationAnchor = captureRuntimePresentationAnchor({
+      iframe: activeFrame,
+      outerScrollElement: activeOuterScrollElement,
+      sourceIndex: sourceIndexRef.current,
+      selectedElement: selectedElementRef.current,
+      selectedSourceSelection: selectedSourceSelectionRef.current,
+    });
+    pendingSelectionRef.current = selectedSourceSelectionRef.current;
+    pendingToolbarVisibleRef.current = Boolean(
+      selectedSourceSelectionRef.current && toolbarVisibleRef.current,
+    );
     if (!runtimeFrameCoordinatorRef.current!.beginPositioning(candidate.attempt)) {
       syncRuntimeCandidateDiagnostics();
       return false;

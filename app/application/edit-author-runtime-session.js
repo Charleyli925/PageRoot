@@ -61,6 +61,12 @@ function sameKey(left, right) {
     && left.canvasGeneration === right.canvasGeneration;
 }
 
+function sameExactIdentity(left, right) {
+  return sameKey(left, right)
+    && left.sourceSha256 === right.sourceSha256
+    && left.html === right.html;
+}
+
 function normalizedRuntimeAttempt(value) {
   const candidateId = String(value?.candidateId || "");
   const candidateSourceRevision = String(value?.candidateSourceRevision || "").toLowerCase();
@@ -149,6 +155,8 @@ export class EditAuthorRuntimeSession {
   #listeners = new Set();
   #snapshot = frozenSnapshot();
   #identity = null;
+  #latestSourceIdentity = null;
+  #latestSourceAuthoritative = false;
   #pendingPreparation = null;
   #activeRequest = null;
   #recoveryGrant = null;
@@ -213,7 +221,13 @@ export class EditAuthorRuntimeSession {
     this.#recoveryGrant = null;
   }
 
-  #transitionToStatic(phase, lastOutcome, identity = this.#identity) {
+  #transitionToStatic(
+    phase,
+    lastOutcome,
+    identity = this.#latestSourceAuthoritative
+      ? this.#latestSourceIdentity
+      : this.#identity,
+  ) {
     this.#pendingPreparation = null;
     this.#activeRequest = null;
     this.#runtimeAttempt = null;
@@ -251,6 +265,8 @@ export class EditAuthorRuntimeSession {
     }) : null;
 
     if (!identity) {
+      this.#latestSourceIdentity = null;
+      this.#latestSourceAuthoritative = false;
       if (this.#identity || this.#snapshot.phase !== "static") {
         this.#attemptGeneration += 1;
         this.#identity = null;
@@ -258,6 +274,8 @@ export class EditAuthorRuntimeSession {
       }
       return this.#snapshot;
     }
+    this.#latestSourceIdentity = identity;
+    this.#latestSourceAuthoritative = Boolean(sourceIsAuthoritative);
     const authorityJustBecameAvailable = (
       sameKey(this.#identity, identity)
       && sourceIsAuthoritative
@@ -291,6 +309,18 @@ export class EditAuthorRuntimeSession {
     // canvas generation. It is only a precondition wait; the first matching
     // authoritative snapshot must still be able to prepare the final frame.
     if (sameKey(this.#identity, identity) && !authorityJustBecameAvailable) {
+      if (
+        this.#snapshot.phase === "static-fallback"
+        && this.#snapshot.sourceSha256 !== identity.sourceSha256
+      ) {
+        this.#emit({
+          phase: "static-fallback",
+          sourceSha256: identity.sourceSha256,
+          sourcePath: identity.sourcePath,
+          canvasGeneration: identity.canvasGeneration,
+          lastOutcome: this.#snapshot.lastOutcome,
+        });
+      }
       return this.#snapshot;
     }
 
@@ -393,7 +423,7 @@ export class EditAuthorRuntimeSession {
       || !pending
       || pending.started
       || this.#snapshot.phase !== "preparing"
-      || !sameKey(this.#identity, pending.identity)
+      || !sameExactIdentity(this.#identity, pending.identity)
       || pending.identity.sourceSha256 !== String(sourceSha256 || "").toLowerCase()
       || pending.identity.canvasGeneration !== canvasGeneration
     ) return false;
@@ -403,7 +433,7 @@ export class EditAuthorRuntimeSession {
       if (
         this.#disposed
         || attemptGeneration !== this.#attemptGeneration
-        || !sameKey(this.#identity, identity)
+        || !sameExactIdentity(this.#identity, identity)
       ) {
         this.#revoke(result);
         return;
@@ -425,7 +455,7 @@ export class EditAuthorRuntimeSession {
       if (
         this.#disposed
         || attemptGeneration !== this.#attemptGeneration
-        || !sameKey(this.#identity, identity)
+        || !sameExactIdentity(this.#identity, identity)
       ) return;
       this.#transitionToStatic("static-fallback", "prepare-failed", identity);
     });
@@ -505,7 +535,7 @@ export class EditAuthorRuntimeSession {
       if (
         this.#disposed
         || attemptGeneration !== this.#attemptGeneration
-        || !sameKey(this.#identity, identity)
+        || !sameExactIdentity(this.#identity, identity)
       ) {
         this.#revoke(result);
         return;
@@ -530,7 +560,7 @@ export class EditAuthorRuntimeSession {
       if (
         this.#disposed
         || attemptGeneration !== this.#attemptGeneration
-        || !sameKey(this.#identity, identity)
+        || !sameExactIdentity(this.#identity, identity)
       ) return;
       this.#transitionToStatic("static-fallback", "recovery-failed", identity);
     });
@@ -604,11 +634,13 @@ export class EditAuthorRuntimeSession {
     return true;
   }
 
-  retry() {
-    const identity = this.#identity;
+  retry(currentSource = null) {
+    if (currentSource) this.refresh(currentSource);
+    const identity = this.#latestSourceIdentity;
     if (
       this.#disposed
       || !identity
+      || !this.#latestSourceAuthoritative
       || this.#snapshot.phase !== "static-fallback"
       || !this.#snapshot.retryAvailable
     ) return false;
@@ -629,6 +661,8 @@ export class EditAuthorRuntimeSession {
     this.#attemptGeneration += 1;
     this.#revokeActiveGrants();
     this.#identity = null;
+    this.#latestSourceIdentity = null;
+    this.#latestSourceAuthoritative = false;
     this.#pendingPreparation = null;
     this.#activeRequest = null;
     this.#runtimeAttempt = null;

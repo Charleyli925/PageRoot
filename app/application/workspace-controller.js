@@ -1103,7 +1103,7 @@ export class WorkspaceController {
   }
 
   retryEditAuthorRuntime() {
-    return this.#editRuntimeSession?.retry() || false;
+    return this.#editRuntimeSession?.retry(this.#currentEditAuthorRuntimeInput()) || false;
   }
 
   evaluateFirstEditGuide(input) {
@@ -2291,11 +2291,10 @@ export class WorkspaceController {
     });
   }
 
-  #refreshEditAuthorRuntime() {
-    if (!this.#editRuntimeSession) return;
+  #currentEditAuthorRuntimeInput() {
     const document = this.#documentSession.snapshot;
     const sourcePath = this.#projectSession.sourcePath;
-    this.#editRuntimeSession.refresh({
+    return {
       html: document.html,
       sourceSha256: document.sourceSha256,
       canvasGeneration: document.canvasGeneration,
@@ -2305,7 +2304,12 @@ export class WorkspaceController {
         && document.editRevision === document.lastPersistedRevision
         && document.persistState === "idle"
       ),
-    });
+    };
+  }
+
+  #refreshEditAuthorRuntime() {
+    if (!this.#editRuntimeSession) return;
+    this.#editRuntimeSession.refresh(this.#currentEditAuthorRuntimeInput());
   }
 
   #refreshDocumentSurfaceCache() {

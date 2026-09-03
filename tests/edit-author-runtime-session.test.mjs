@@ -667,6 +667,52 @@ test("static fallback can retry preparation and disappear after success", async 
   assert.equal(session.snapshot.lastOutcome, null);
 });
 
+test("static fallback retry uses the latest persisted source without auto-preparing edits", async () => {
+  const requests = [];
+  let attempts = 0;
+  const session = new EditAuthorRuntimeSession({
+    port: {
+      prepare: async (request) => {
+        requests.push(request);
+        attempts += 1;
+        return attempts === 1 ? null : success(request);
+      },
+      revoke: async () => {},
+    },
+  });
+  const latestHtml = HTML.replace("chart-host", "latest-chart-host");
+  const latestSha = "sha256:" + "e".repeat(64);
+
+  session.refresh(input());
+  session.startPreparation(input());
+  await flushAsync();
+  assert.equal(session.snapshot.phase, "static-fallback");
+
+  session.refresh(input({
+    html: latestHtml,
+    sourceSha256: SOURCE_SHA,
+    sourceIsAuthoritative: false,
+  }));
+  assert.equal(session.retry(), false, "an unsaved latest edit cannot fall back to old HTML");
+  assert.equal(requests.length, 1);
+
+  session.refresh(input({ html: latestHtml, sourceSha256: latestSha }));
+  assert.equal(session.snapshot.phase, "static-fallback");
+  assert.equal(session.snapshot.sourceSha256, latestSha);
+  assert.equal(requests.length, 1, "a same-canvas source revision does not auto-prepare");
+
+  assert.equal(session.retry(), true);
+  assert.equal(session.startPreparation(input({
+    html: latestHtml,
+    sourceSha256: latestSha,
+  })), true);
+  await flushAsync();
+  assert.equal(requests.length, 2);
+  assert.equal(requests[1].html, latestHtml);
+  assert.equal(requests[1].sourceSha256, latestSha);
+  assert.equal(session.snapshot.phase, "ready");
+});
+
 test("an unsupported authored program publishes static fallback before preparation", () => {
   const requests = [];
   const session = new EditAuthorRuntimeSession({
