@@ -498,6 +498,16 @@ export async function addComment(page, sourcePath, text = (
   const active = await page.evaluate(
     () => window.htmlAIProjects?.getActiveProject(),
   );
+  const editor = page.getByTestId("html-canvas-editor").filter({ visible: true }).first();
+  // A fixed-slot Runtime promotion can finish between resolving a frame and
+  // clicking it. Start the comment gesture only after the active slot is
+  // stable, then resolve the current frame instead of retaining the retiring
+  // iframe from the handoff.
+  await expect(editor).not.toHaveAttribute(
+    "data-runtime-handoff",
+    /^(?:preparing|positioning|active)$/u,
+    { timeout: 60_000 },
+  );
   const frame = await loadedDiskFrame(page, active?.sourcePath || sourcePath);
   const target = frame.locator(targetSelector || caseSelector(targetCase));
   await page.keyboard.press("Escape");
