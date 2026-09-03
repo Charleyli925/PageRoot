@@ -2437,8 +2437,6 @@ test("a queued static fallback follows the latest Working HTML after Native Edit
       editTarget.dispatchEvent(new MouseEvent("dblclick", { ...eventInit, detail: 2 }));
     });
     await expect(editor).toHaveAttribute("data-runtime-candidate-id", /.+/u);
-    const dynamicCandidateId = await editor.getAttribute("data-runtime-candidate-id");
-    expect(dynamicCandidateId).toBeTruthy();
 
     frame = await currentEditorFrame(page);
     const activeTarget = frame.locator(
