@@ -30,9 +30,9 @@ display cache before normal activation and then prewarm inactive tabs while the
 app is idle. Those bytes remain presentation-only and are never persisted with
 the tab identities.
 
-Formal Review retains its existing exact operation/base/candidate/path/comment
-cache entries across tab applications. Candidate-ready state may precompute one
-entry in the background. On an uncached explicit Review, a minimally prepared
+Formal Review retains exact operation/base/candidate/path/comment cache entries
+created by an explicit Review command across tab applications. Candidate-ready
+state does not precompute Review data. On an uncached explicit Review, a minimally prepared
 before/after transport mounts first with the same sandbox/bootstrap policy; the
 semantic diff, comment annotations and optional runtime visual facts replace
 that shell when ready.
@@ -63,6 +63,7 @@ path. It never restores obsolete review bytes as current authority.
 - Tab activation shows only read-only cached HTML and still invokes the normal
   project-open workflow.
 - Review cache survives a tab application, stale in-flight work is cancelled,
-  and uncached Review publishes its shell before semantic analysis completes.
+  Candidate-ready state starts no analysis, and uncached explicit Review
+  publishes its shell before semantic analysis completes.
 - Candidate publication occurs before awaited Canvas verification, while the
   run completes only after verification succeeds.

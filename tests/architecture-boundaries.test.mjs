@@ -221,6 +221,13 @@ test("retired production modules and imports stay outside the graph", () => {
     retiredArtifactViolations({ file: "app/lib/format-skeleton.js", source: "" }).join("\n"),
     /retired production modules/u,
   );
+  assert.match(
+    retiredArtifactViolations({
+      file: "app/example.tsx",
+      source: 'import ReviewAnalysisPrewarm from "./workbench/ReviewAnalysisPrewarm";',
+    }).join("\n"),
+    /retired module/u,
+  );
 });
 
 test("the architecture checker contains no implementation-shape assertions", async () => {

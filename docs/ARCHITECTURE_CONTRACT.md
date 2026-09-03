@@ -781,8 +781,8 @@ an oversized serialized payload fails closed rather than being treated as a
 complete review.
 
 Exact completed review entries survive unrelated tab applications; only stale
-in-flight analysis is cancelled. Candidate-ready state may prewarm the same
-cache key. Explicit Review waits for complete analyzed documents before opening;
+in-flight analysis is cancelled. Candidate-ready state does not start analysis;
+only the explicit Review command may populate the cache and it waits for complete analyzed documents before opening;
 a Candidate with diagnostics but no position-bound change stays outside Review
 and uses the existing no-effective-page-change result.
 

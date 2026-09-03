@@ -294,7 +294,7 @@
       "patterns": [
         "^app/application/workspace-controller(?:-capabilities)?\\.d\\.ts$",
         "^app/application/workbench-navigation-workflow\\.d\\.ts$",
-        "^app/workbench/(?:ReviewAnalysisPrewarm|document-surface-presentation|use-ai-conversation)\\.(?:ts|tsx)$",
+        "^app/workbench/(?:document-surface-presentation|use-ai-conversation)\\.(?:ts|tsx)$",
         "^tests/workspace-controller-capabilities\\.typecheck\\.ts$"
       ],
       "entryInterfaces": [
@@ -306,7 +306,6 @@
       "implementationFiles": [
         "app/application/workspace-controller.d.ts",
         "app/application/workbench-navigation-workflow.d.ts",
-        "app/workbench/ReviewAnalysisPrewarm.tsx",
         "app/workbench/document-surface-presentation.ts",
         "app/workbench/use-ai-conversation.ts"
       ],
