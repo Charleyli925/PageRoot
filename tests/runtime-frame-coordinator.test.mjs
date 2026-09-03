@@ -65,7 +65,7 @@ test("latest wins reuses the inactive slot and rejects an expired slot lease", (
   assert.equal(coordinator.snapshot.ignoredCallbackCount, 2);
 });
 
-test("native editing gates positioning and only a matching resume may finalize", () => {
+test("native editing and candidate positioning never overlap", () => {
   const coordinator = new RuntimeFrameCoordinator();
   const candidate = begin(coordinator, 8);
 
@@ -74,10 +74,6 @@ test("native editing gates positioning and only a matching resume may finalize",
   assert.equal(coordinator.endNativeEdit(), true);
   assert.equal(coordinator.beginPositioning(candidate), true);
   assert.equal(coordinator.beginNativeEdit(), false);
-  assert.equal(coordinator.beginNativeEdit({
-    candidate: { ...candidate, candidateId: `${candidate.candidateId}-stale` },
-  }), false);
-  assert.equal(coordinator.beginNativeEdit({ candidate }), true);
   assert.equal(coordinator.canFinalize(candidate), true);
   assert.equal(coordinator.settle(candidate, "ready").accepted, true);
 });
@@ -118,11 +114,52 @@ test("failure preserves the active slot and last-known-good identity", () => {
   assert.deepEqual(coordinator.settle(failed, "failed"), {
     accepted: true,
     preserveLastKnownGood: true,
-    shouldUseStaticFallback: false,
+    shouldUseStaticFallback: true,
   });
   assert.equal(coordinator.snapshot.activeSlotId, "b");
   assert.equal(coordinator.snapshot.slots.b.phase, "active");
   assert.equal(coordinator.snapshot.slots.a.phase, "empty");
+  assert.equal(coordinator.snapshot.lastKnownGood?.candidateId, active.candidateId);
+});
+
+test("a failed dynamic candidate can be replaced by one static-disabled lease", () => {
+  const coordinator = new RuntimeFrameCoordinator();
+  const active = begin(coordinator, 1);
+  promote(coordinator, active);
+  const dynamic = begin(coordinator, 2);
+
+  assert.equal(coordinator.settle(dynamic, "failed").shouldUseStaticFallback, true);
+  const fallback = coordinator.beginCandidate({
+    generation: 3,
+    sourceRevision: `sha256:${"2".repeat(64)}`,
+    kind: "static-disabled",
+  }).identity;
+
+  assert.equal(fallback.slotId, dynamic.slotId);
+  assert.equal(fallback.slotLease, dynamic.slotLease + 1);
+  assert.equal(fallback.kind, "static-disabled");
+  assert.equal(coordinator.accepts(dynamic), false);
+  promote(coordinator, fallback);
+  assert.equal(coordinator.snapshot.activeSlotId, fallback.slotId);
+  assert.equal(coordinator.snapshot.lastKnownGood?.kind, "static-disabled");
+});
+
+test("a failed static-disabled candidate preserves the old active without another fallback", () => {
+  const coordinator = new RuntimeFrameCoordinator();
+  const active = begin(coordinator, 1);
+  promote(coordinator, active);
+  const fallback = coordinator.beginCandidate({
+    generation: 2,
+    sourceRevision: `sha256:${"2".repeat(64)}`,
+    kind: "static-disabled",
+  }).identity;
+
+  assert.deepEqual(coordinator.settle(fallback, "failed"), {
+    accepted: true,
+    preserveLastKnownGood: true,
+    shouldUseStaticFallback: false,
+  });
+  assert.equal(coordinator.snapshot.activeSlotId, active.slotId);
   assert.equal(coordinator.snapshot.lastKnownGood?.candidateId, active.candidateId);
 });
 

@@ -895,11 +895,14 @@ export async function loadedDiskFrame(
   const editor = page.getByTestId("html-canvas-editor").filter({ visible: true }).first();
   await editor.waitFor({ state: "visible", timeout });
   await expect(editor).toHaveAttribute("data-render-verified", "true", { timeout });
-  const iframe = editor.locator('iframe[title*="HTML"]').first();
-  await iframe.waitFor({ state: "attached", timeout });
   let frame = null;
   await expect.poll(async () => {
     try {
+      const handoff = await editor.getAttribute("data-runtime-handoff");
+      const candidateId = await editor.getAttribute("data-runtime-candidate-id");
+      if (handoff || candidateId) return false;
+      const iframe = editor.locator('iframe[data-runtime-slot-role="active"]');
+      if (await iframe.count() !== 1) return false;
       const iframeHandle = await iframe.elementHandle();
       const candidate = await iframeHandle?.contentFrame() || null;
       if (!candidate) return false;

@@ -60,8 +60,9 @@
 | Renderer edit, project-picker, attachment-persistence, close-coordination and interactive-preview capabilities | Runtime capability resolver | immutable preload manifest; fail-closed browser default | Workbench presentation host adapters |
 | Volatile interactive-preview document, bootstrap, allowed source-relative asset root, completed-frame identity set and one-way pre-load scriptless navigation-fallback flag | Main-process preview protocol controller plus the owning window's navigation fence | none; bounded in-memory session/window state only; the fallback cannot be reversed inside a session | isolated preview iframe and the script-disabled edit iframe's resource base |
 | Current preview/edit display context, safe reveal transition and per-surface render acknowledgement | Workbench page-view context state | none; source-bound in-memory projection tagged by `DocumentSession` Canvas generation and rendered source Hash | `HtmlCanvasEditor`, `HtmlInteractionPreview` and toolbar |
-| Disposable Edit author-runtime program identity, scoped prepare grant, public phase/load outcome and at-most-once compatible recovery | `EditAuthorRuntimeSession`, composed by `WorkspaceController`; Main owns exact-source admission and immutable compatible/exact resource sessions derived from one preparation | none; bounded process memory only. One resource closure is keyed by `(sourcePath, canvasGeneration)` and may serve repeated disposable frames while exact authored script identity is unchanged. An execution failure carries across an equivalent presentation-only Canvas generation and waits for explicit retry. It does not own or cache physical last-known-good availability | Workbench loading acknowledgement and the frame coordinator's identity-bound settlement result; Runtime DOM never enters persistence |
+| Disposable Edit author-runtime program identity, scoped prepare grant, public phase/load outcome, latest persisted retry identity and at-most-once compatible recovery | `EditAuthorRuntimeSession`, composed by `WorkspaceController`; `DocumentSession` remains the sole source owner and Main owns exact-source admission plus immutable compatible/exact resource sessions | none; bounded process memory only. Attempt admission remains keyed by `(sourcePath, canvasGeneration)` so source checkpoints never auto-prepare. Within that key the Session separately tracks the latest persisted `{HTML, source SHA}` only for explicit retry; failure-time HTML cannot be reused after Working advances. It does not own or cache physical last-known-good availability | Workbench loading acknowledgement, Controller-provided current Document identity and the frame coordinator's identity-bound settlement result; Runtime DOM never enters persistence |
 | Two fixed Edit Runtime slots, slot leases, active/latest-candidate phase, last-known-good identity, ignored stale callbacks and Native Edit/IME promotion gate | Pure `RuntimeFrameCoordinator`; `HtmlCanvasEditor` owns only the corresponding two iframe DOM effects, minimal presentation anchor and Selection effects | none; bounded renderer memory only. Stable state is exactly one loaded active slot plus one inert empty slot. `superseded` is coordination, never authored-program failure; a former active slot is cleared on the next frame after promotion | candidate load/activation/deadline/rAF/microtask/position callbacks and `EditAuthorRuntimeSession`; only the latest identity and current slot lease can publish a terminal result |
+| Current Edit Runtime degradation presentation (`none`, `static-preparing`, `static-visible`, `last-known-good-readonly`) | `HtmlCanvasEditor`; Workbench only derives `direct-static-visible` when `EditAuthorRuntimeSession` reports a direct static fallback before any Editor failure transition | none; disposable renderer presentation. Workbench may dismiss a non-severe notice for only its current state; a transition to `last-known-good-readonly` remounts the notice and permanently retains reload/export recovery actions | Workbench notice and read-only projection; it cannot change Working HTML, Runtime outcome or slot identity |
 | Exact-version external ECharts script bytes, URL metadata and LRU | Main `desktop/edit-runtime-library-store.mjs` | `Application Support/PageRoot/edit-runtime-library-cache/v1`; content-addressed blobs plus atomically replaced bounded index; bytes are verified on every read and are never source or runtime-session authority | `desktop/edit-runtime-protocol.mjs` resource preparation only; compatible success never promotes later exact bytes into the current Canvas |
 | Imported project's original sibling-asset directory | Main `importedAssetRoots` in `userData/html-projects.json` plus process `activeImportedAssetSourcePath` | desktop project state keyed by project root; renderer never receives the original path | preview protocol, edit-runtime protocol and the script-disabled Edit iframe resource base |
 | AI review page view, change filter, context visibility, navigation target, canonical page-presentation path, scroll mode and zoom mode | `AiReviewWorkspace` review reducer | none; disposable state bound to the frozen before/after pair | review toolbar, content map and isolated review frames |
@@ -297,18 +298,25 @@ Rules:
   candidate immediately. `HtmlCanvasEditor` stores only the latest pending
   source revision/reason/count for diagnostics. It is not save authority and
   never retains an intermediate iframe revision.
-- An active last-known-good Edit Runtime remains visible and editable while the
-  latest candidate prepares. Candidate preparation, connection, positioning or
-  activation failure cannot select static fallback when that prior Runtime is
-  still usable. During a Native Edit or IME transaction no candidate may
-  promote and no active frame may retire; the complete source checkpoint must
-  finish first. Only a first real execution failure without any usable Runtime
-  may publish `static-fallback`.
+- An active last-known-good Edit Runtime remains visible while the latest
+  candidate prepares. A failed dynamic Candidate leases one Script-disabled
+  Candidate for the latest Working revision; its predecessor identity and
+  source revision prevent an older failure from superseding newer work. During
+  Native Edit or IME no Candidate may promote and no active frame may retire.
+  If that deferred static request becomes stale while Native Edit advances the
+  source, `HtmlCanvasEditor` replaces it with one request for the latest full
+  Working HTML instead of treating the dropped request as a settled fallback.
+  If the static Candidate succeeds it becomes the editable latest source; if it
+  also fails, the last-known-good frame stays visible but read-only while reload
+  and export remain available. Working HTML never rolls back.
 - `RuntimeFrameCoordinator` uses exactly two fixed DOM slots. Candidate
   preparation never changes the visible active slot; promotion flips the slot
   roles only after source/runtime proof and hidden positioning succeed, then
   clears the former active document on the next animation frame. A stale
-  callback cannot act after its slot lease has been reused.
+  callback cannot act after its slot lease has been reused. Immediately before
+  positioning, `HtmlCanvasEditor` re-captures the small Presentation Anchor
+  from the still-visible Active frame so scrolling during preparation is the
+  current user intent rather than an old restoration target.
 - AI review state fields are orthogonal. Page, filter, visibility, navigation,
   page presentation, scroll and zoom actions may update only their own reducer field. Review
   navigation can reveal a hidden panel in both frames but cannot become a

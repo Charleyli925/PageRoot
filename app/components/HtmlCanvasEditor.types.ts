@@ -139,6 +139,12 @@ export type HtmlCanvasEditRuntimeLoadOutcome =
   | "failed"
   | "superseded";
 
+export type HtmlCanvasRuntimeDegradation =
+  | "none"
+  | "static-preparing"
+  | "static-visible"
+  | "last-known-good-readonly";
+
 export type HtmlCanvasEditRuntimeAttempt = RuntimeFrameIdentity;
 
 export type HtmlCanvasEditRuntimeSettlement = Readonly<{
@@ -351,6 +357,8 @@ export type HtmlCanvasEditorProps = {
     attempt: HtmlCanvasEditRuntimeAttempt,
     settlement: HtmlCanvasEditRuntimeSettlement,
   ) => void;
+  /** Reports renderer-only degradation without changing Working HTML authority. */
+  onRuntimeDegradationChange?: (state: HtmlCanvasRuntimeDegradation) => void;
   /** Mirrors the authored page scroll coordinate into the host comment rail. */
   onCommentLayout?: (state: HtmlCanvasCommentLayoutState) => void;
   /** Opens the host product's comment composer for the current selection. */

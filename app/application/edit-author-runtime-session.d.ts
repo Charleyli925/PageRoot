@@ -57,6 +57,12 @@ export class EditAuthorRuntimeSession {
     outcome?: "ready" | "rejected" | "failed" | "superseded";
     preserveLastKnownGood?: boolean;
   }): boolean;
-  retry(): boolean;
+  retry(input?: {
+    html?: string;
+    sourceSha256?: string;
+    canvasGeneration?: number;
+    sourcePath?: string;
+    sourceIsAuthoritative?: boolean;
+  } | null): boolean;
   dispose(): void;
 }

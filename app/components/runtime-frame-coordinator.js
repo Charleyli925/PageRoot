@@ -6,6 +6,7 @@ const TERMINAL_OUTCOMES = new Set([
 ]);
 
 const SLOT_IDS = Object.freeze(["a", "b"]);
+const CANDIDATE_KINDS = Object.freeze(["dynamic", "static-disabled"]);
 let coordinatorSequence = 0;
 
 function otherSlot(slotId) {
@@ -19,6 +20,7 @@ function normalizedIdentity(value) {
     || !Number.isSafeInteger(value.generation)
     || value.generation < 0
     || typeof value.sourceRevision !== "string"
+    || !CANDIDATE_KINDS.includes(value.kind)
     || !SLOT_IDS.includes(value.slotId)
     || !Number.isSafeInteger(value.slotLease)
     || value.slotLease < 1
@@ -29,6 +31,7 @@ function normalizedIdentity(value) {
   }
   return {
     candidateId: String(value.candidateId || ""),
+    kind: value.kind,
     generation: value.generation,
     sourceRevision: value.sourceRevision,
     slotId: value.slotId,
@@ -39,6 +42,7 @@ function normalizedIdentity(value) {
 function frozenIdentity(value) {
   return Object.freeze({
     candidateId: value.candidateId,
+    kind: value.kind,
     generation: value.generation,
     sourceRevision: value.sourceRevision,
     slotId: value.slotId,
@@ -50,6 +54,7 @@ function sameIdentity(left, right) {
   return Boolean(left)
     && Boolean(right)
     && left.candidateId === right.candidateId
+    && left.kind === right.kind
     && left.generation === right.generation
     && left.sourceRevision === right.sourceRevision
     && left.slotId === right.slotId
@@ -117,13 +122,14 @@ export class RuntimeFrameCoordinator {
     });
   }
 
-  beginCandidate({ generation, sourceRevision } = {}) {
+  beginCandidate({ generation, sourceRevision, kind = "dynamic" } = {}) {
     const previous = this.#latest;
     const slotId = previous?.slotId
       || (this.#activeSlotId ? otherSlot(this.#activeSlotId) : "a");
     const slot = this.#slots[slotId];
     const input = {
       candidateId: "pending",
+      kind,
       generation,
       sourceRevision,
       slotId,
@@ -132,6 +138,7 @@ export class RuntimeFrameCoordinator {
     normalizedIdentity(input);
     const identity = Object.freeze({
       candidateId: `${this.#coordinatorId}-${(++this.#candidateSequence).toString(36)}-${generation.toString(36)}`,
+      kind,
       generation,
       sourceRevision,
       slotId,
@@ -187,31 +194,10 @@ export class RuntimeFrameCoordinator {
 
   canFinalize(candidate) {
     if (!this.accepts(candidate) || this.#latest?.phase !== "positioning") return false;
-    return this.#nativeEdit === null
-      || (
-        this.#nativeEdit.kind === "resume"
-        && this.#nativeEdit.candidateId === this.#latest.candidateId
-      );
+    return this.#nativeEdit === null;
   }
 
-  beginNativeEdit({ candidate = null } = {}) {
-    if (candidate) {
-      let normalized;
-      try {
-        normalized = normalizedIdentity(candidate);
-      } catch {
-        return false;
-      }
-      if (
-        !sameIdentity(this.#latest, normalized)
-        || this.#latest?.phase !== "positioning"
-      ) return false;
-      this.#nativeEdit = {
-        kind: "resume",
-        candidateId: normalized.candidateId,
-      };
-      return true;
-    }
+  beginNativeEdit() {
     if (this.#latest?.phase === "positioning") return false;
     this.#nativeEdit = { kind: "user", candidateId: null };
     return true;
@@ -270,18 +256,13 @@ export class RuntimeFrameCoordinator {
             identity: null,
           };
     }
-    if (
-      this.#nativeEdit?.kind === "resume"
-      && this.#nativeEdit.candidateId === identity.candidateId
-      && outcome !== "ready"
-    ) this.#nativeEdit = null;
     this.#latest = null;
     return Object.freeze({
       accepted: true,
       preserveLastKnownGood,
       shouldUseStaticFallback: (
         (outcome === "failed" || outcome === "rejected")
-        && !preserveLastKnownGood
+        && identity.kind === "dynamic"
       ),
     });
   }

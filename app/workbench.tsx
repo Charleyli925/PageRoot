@@ -23,6 +23,7 @@ import type {
   HtmlCanvasMutation,
   HtmlCanvasSelection,
   HtmlCanvasRuntimeVisualHint,
+  HtmlCanvasRuntimeDegradation,
   HtmlCanvasSourceTransaction,
   NativeDeferredCommandAuthority,
   NativeDeferredCommandDiscardReason,
@@ -852,11 +853,23 @@ export default function Workbench() {
     runtimePreparing: editRuntimePreparing, runtimeRenderPending: editRuntimeRenderPending,
     runtimeGrant: editRuntimeGrant,
   } = runtimeCanvasResidency;
+  const runtimeDegradationKey = `${sourcePath || "no-source"}:${canvasGeneration}`;
+  const [runtimeDegradationSnapshot, setRuntimeDegradationSnapshot] = useState<{
+    key: string;
+    state: HtmlCanvasRuntimeDegradation;
+  }>({ key: runtimeDegradationKey, state: "none" });
+  const runtimeDegradation = runtimeDegradationSnapshot.key === runtimeDegradationKey
+    ? runtimeDegradationSnapshot.state
+    : "none";
+  const runtimeNoticeState: HtmlCanvasRuntimeDegradation | "direct-static-visible" = (
+    editRuntimePhase === "static-fallback" && runtimeDegradation === "none"
+  ) ? "direct-static-visible" : runtimeDegradation;
   const staticFallbackNoticeIdentity = editRuntimePhase === "static-fallback"
     ? [
         editRuntimeSnapshot?.sourcePath || sourcePath || "no-source",
         editRuntimeSnapshot?.canvasGeneration ?? canvasGeneration,
         editRuntimeSnapshot?.lastOutcome || "unknown",
+        runtimeNoticeState,
       ].join(":")
     : null;
   const [pageViewContext, setPageViewContext] =
@@ -6457,6 +6470,7 @@ export default function Workbench() {
               {staticFallbackNoticeIdentity ? (
                 <EditRuntimeStaticFallbackNotice
                   key={staticFallbackNoticeIdentity}
+                  state={runtimeNoticeState}
                   {...(editRuntimeSnapshot?.retryAvailable
                     ? {
                         onRetry: () => {
@@ -6464,6 +6478,9 @@ export default function Workbench() {
                         },
                       }
                     : {})}
+                  onExport={() => {
+                    void exportCurrentHtml();
+                  }}
                 />
               ) : null}
               {editRuntimePreparing && !activeRuntimeCanvasUsable ? (
@@ -6525,6 +6542,9 @@ export default function Workbench() {
                       );
                     }
                   }}
+                  onRuntimeDegradationChange={(state) => {
+                    setRuntimeDegradationSnapshot({ key: runtimeDegradationKey, state });
+                  }}
                   onCommentLayout={commentCanvasPort.publishLayout}
                   onSelect={handleCanvasSelection}
                   onRequestComment={openCommentComposer}
@@ -6558,7 +6578,9 @@ export default function Workbench() {
                     || viewTransitioning
                     || persistState === "conflict"
                   }
-                  readOnly={viewMode === "history"}
+                  readOnly={viewMode === "history"
+                    || runtimeDegradation === "static-preparing"
+                    || runtimeDegradation === "last-known-good-readonly"}
                   interactionMode={viewMode === "history"
                     ? "history"
                     : runInProgress || projectHydrating || workspaceIssue

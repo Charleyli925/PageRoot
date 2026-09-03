@@ -327,7 +327,7 @@ test("an old candidate callback cannot settle a newer running attempt", async ()
   assert.equal(session.snapshot.phase, "settled");
 });
 
-test("a real candidate failure after supersession preserves last-known-good", async () => {
+test("a real candidate failure after supersession enters retryable static degradation", async () => {
   const revoked = [];
   const session = new EditAuthorRuntimeSession({
     port: {
@@ -351,9 +351,12 @@ test("a real candidate failure after supersession preserves last-known-good", as
   assert.equal(settleRuntime(session, grant, "failed", undefined, {
     preserveLastKnownGood: true,
   }), true);
-  assert.equal(session.snapshot.phase, "settled");
+  assert.equal(session.snapshot.phase, "static-fallback");
   assert.equal(session.snapshot.lastOutcome, "candidate-failed");
-  assert.deepEqual(revoked, []);
+  assert.equal(session.snapshot.retryAvailable, true);
+  assert.equal(session.snapshot.grant, null);
+  await flushAsync();
+  assert.deepEqual(revoked, [grant.sessionId]);
 });
 
 test("a remounted controller cannot preserve a session-only last-known-good", async () => {
@@ -662,6 +665,52 @@ test("static fallback can retry preparation and disappear after success", async 
   await flushAsync();
   assert.equal(session.snapshot.phase, "ready");
   assert.equal(session.snapshot.lastOutcome, null);
+});
+
+test("static fallback retry uses the latest persisted source without auto-preparing edits", async () => {
+  const requests = [];
+  let attempts = 0;
+  const session = new EditAuthorRuntimeSession({
+    port: {
+      prepare: async (request) => {
+        requests.push(request);
+        attempts += 1;
+        return attempts === 1 ? null : success(request);
+      },
+      revoke: async () => {},
+    },
+  });
+  const latestHtml = HTML.replace("chart-host", "latest-chart-host");
+  const latestSha = "sha256:" + "e".repeat(64);
+
+  session.refresh(input());
+  session.startPreparation(input());
+  await flushAsync();
+  assert.equal(session.snapshot.phase, "static-fallback");
+
+  session.refresh(input({
+    html: latestHtml,
+    sourceSha256: SOURCE_SHA,
+    sourceIsAuthoritative: false,
+  }));
+  assert.equal(session.retry(), false, "an unsaved latest edit cannot fall back to old HTML");
+  assert.equal(requests.length, 1);
+
+  session.refresh(input({ html: latestHtml, sourceSha256: latestSha }));
+  assert.equal(session.snapshot.phase, "static-fallback");
+  assert.equal(session.snapshot.sourceSha256, latestSha);
+  assert.equal(requests.length, 1, "a same-canvas source revision does not auto-prepare");
+
+  assert.equal(session.retry(), true);
+  assert.equal(session.startPreparation(input({
+    html: latestHtml,
+    sourceSha256: latestSha,
+  })), true);
+  await flushAsync();
+  assert.equal(requests.length, 2);
+  assert.equal(requests[1].html, latestHtml);
+  assert.equal(requests[1].sourceSha256, latestSha);
+  assert.equal(session.snapshot.phase, "ready");
 });
 
 test("an unsupported authored program publishes static fallback before preparation", () => {
