@@ -65,6 +65,7 @@ class RuntimeCanvasResidencySession {
 }
 
 export function useRuntimeCanvasResidency({
+  retentionEnabled,
   tabIds,
   activeTabId,
   activeSourceSha256,
@@ -73,6 +74,7 @@ export function useRuntimeCanvasResidency({
   editRuntimeSnapshot,
   startPreparation,
 }: {
+  retentionEnabled: boolean;
   tabIds: readonly string[];
   activeTabId: string | null;
   activeSourceSha256: string | null;
@@ -89,19 +91,21 @@ export function useRuntimeCanvasResidency({
     canvasGeneration: number,
     cacheable = true,
   ) => {
+    if (!retentionEnabled) return;
     session.retain(tabId, sourceSha256, canvasGeneration, cacheable);
-  }, [session]);
+  }, [retentionEnabled, session]);
   const evict = useCallback((tabId: string) => {
+    if (!retentionEnabled) return;
     session.evict(tabId);
-  }, [session]);
-  const activeRetained = useMemo(() => Boolean(
+  }, [retentionEnabled, session]);
+  const activeRetained = useMemo(() => retentionEnabled && Boolean(
     activeTabId
     && activeSourceSha256
     && keys.some((entry) => (
       entry.tabId === activeTabId
       && entry.sourceSha256 === activeSourceSha256
     )),
-  ), [activeSourceSha256, activeTabId, keys]);
+  ), [activeSourceSha256, activeTabId, keys, retentionEnabled]);
   const runtimePhase = editRuntimeSnapshot?.phase ?? "static";
   const runtimePreparing = canvasMode === "edit"
     && ["preparing", "recovering"].includes(runtimePhase);
@@ -132,13 +136,17 @@ export function useRuntimeCanvasResidency({
   ]);
 
   useEffect(() => {
+    if (!retentionEnabled) {
+      session.reconcile([]);
+      return;
+    }
     session.reconcile(tabIds);
-  }, [session, tabIds]);
+  }, [retentionEnabled, session, tabIds]);
   useEffect(() => {
-    if (activeRetained && activeTabId && activeSourceSha256) {
+    if (retentionEnabled && activeRetained && activeTabId && activeSourceSha256) {
       session.retain(activeTabId, activeSourceSha256, activeCanvasGeneration);
     }
-  }, [activeCanvasGeneration, activeRetained, activeSourceSha256, activeTabId, session]);
+  }, [activeCanvasGeneration, activeRetained, activeSourceSha256, activeTabId, retentionEnabled, session]);
 
   return Object.freeze({
     keys,

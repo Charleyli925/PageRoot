@@ -832,6 +832,7 @@ export default function Workbench() {
   const hideAiConversation = aiConversation.hide;
   const editRuntimeSnapshot = workspaceControllerSnapshot?.editRuntime ?? null;
   const runtimeCanvasResidency = useRuntimeCanvasResidency({
+    retentionEnabled: false,
     tabIds: workbenchTabsSnapshot.tabs.map((tab) => tab.tabId),
     activeTabId: workbenchTabsSnapshot.activeTabId, activeSourceSha256: sourceSha256,
     activeCanvasGeneration: canvasGeneration, canvasMode, editRuntimeSnapshot,
