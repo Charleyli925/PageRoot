@@ -176,10 +176,12 @@ export class AgentRuntimeCoordinator {
     environment = process.env,
     clock = Date,
     commandResolver,
+    diagnoseRunner,
     policyLoader,
     runTask,
     preflightRunner,
     codexCommandResolver,
+    codexDiagnoseRunner,
     codexPreflightRunner,
     providerRegistry,
     leaseStore = defaultAgentLeaseStore,
@@ -215,10 +217,12 @@ export class AgentRuntimeCoordinator {
     this.#clock = clock;
     this.#providerRegistry = providerRegistry || createDefaultProviderRegistry({
       commandResolver,
+      ...(diagnoseRunner ? { diagnoseRunner } : {}),
       ...(policyLoader ? { policyLoader } : {}),
       ...(runTask ? { runTask } : {}),
       ...(preflightRunner ? { preflightRunner } : {}),
       ...(codexCommandResolver ? { codexCommandResolver } : {}),
+      ...(codexDiagnoseRunner ? { codexDiagnoseRunner } : {}),
       ...(codexPreflightRunner ? { codexPreflightRunner } : {}),
       ...(agentCatalog ? { agentCatalog } : {}),
       ...(agentsRoot ? { agentsRoot } : {}),
@@ -463,6 +467,45 @@ export class AgentRuntimeCoordinator {
       environment: this.#environmentForProvider(requestedSelection.providerId),
     });
     return Object.freeze({ ok: true, ...result, ...(driver ? { driver } : {}) });
+  }
+
+  async diagnose({ driver, selection } = {}) {
+    const requestedSelection = this.#selectionForInput({ selection, driver });
+    const checkedAt = nowIso(this.#clock);
+    if (!this.#acceptingStarts) {
+      return Object.freeze({
+        ok: true,
+        diagnostic: Object.freeze({
+          readiness: "connection-failed",
+          cause: "AGENT_BRIDGE_DISPOSED",
+          operation: "diagnose",
+          checkedAt,
+          activeInstallation: null,
+        }),
+        ...(driver ? { driver } : {}),
+      });
+    }
+    const result = typeof this.#providerRegistry.diagnoseForSelection === "function"
+      ? await this.#providerRegistry.diagnoseForSelection(requestedSelection, {
+        environment: this.#environmentForProvider(requestedSelection.providerId),
+        checkedAt,
+      })
+      : await this.#providerRegistry.availabilityForSelection(requestedSelection, {
+        environment: this.#environmentForProvider(requestedSelection.providerId),
+      });
+    const diagnostic = result.diagnostic || Object.freeze({
+      readiness: result.status === "ready" ? "ready" : "connection-failed",
+      cause: result.reason || (result.status === "ready" ? null : "connection-failed"),
+      operation: "diagnose",
+      checkedAt,
+      activeInstallation: null,
+    });
+    return Object.freeze({
+      ok: true,
+      ...result,
+      diagnostic: Object.freeze({ ...diagnostic, checkedAt, operation: "diagnose" }),
+      ...(driver ? { driver } : {}),
+    });
   }
 
   preflight(input = {}) {

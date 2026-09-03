@@ -1744,6 +1744,10 @@ export class WorkspaceController {
     return this.#requireRunWorkflow().installAgent(selection);
   }
 
+  cancelAgentInstall(selection) {
+    return this.#requireRunWorkflow().cancelAgentInstall(selection);
+  }
+
   refreshAgentAvailability() {
     return this.#requireRunWorkflow().refreshAgentAvailability();
   }

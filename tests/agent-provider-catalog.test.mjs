@@ -593,6 +593,83 @@ test("post-install availability rechecks the provider's resolved selected author
   assert.equal(catalog.freezeSelected().resolvedModelId, "qoder:qoder-default");
 });
 
+test("diagnosis is side-effect free and does not create a preflight ticket or mutate selection", async () => {
+  const selected = freezeAgentSelection(QODER_AGENT_PROVIDER.selection);
+  let diagnoseCalls = 0;
+  let preflightCalls = 0;
+  const catalog = new AgentCatalogState({
+    bridgeClient: {
+      async preflightAgent() {
+        preflightCalls += 1;
+        return { status: "ready", preflightId: "unused" };
+      },
+      async agentDiagnose(request) {
+        diagnoseCalls += 1;
+        assert.deepEqual(request.selection, selected);
+        return {
+          status: "ready",
+          diagnostic: {
+            readiness: "ready",
+            cause: null,
+            operation: "diagnose",
+            checkedAt: "2026-08-11T00:00:00.000Z",
+            activeInstallation: null,
+          },
+        };
+      },
+    },
+    providers: [QODER_AGENT_PROVIDER],
+    selected,
+    clock: { now: () => Date.parse("2026-08-11T00:00:00.000Z") },
+  });
+
+  const before = catalog.freezeSelected();
+  const result = await catalog.diagnose();
+  assert.equal(diagnoseCalls, 1);
+  assert.equal(preflightCalls, 0);
+  assert.equal(result.diagnostic.activeInstallation, null);
+  assert.deepEqual(catalog.getSnapshot().preflightBySelection, {});
+  assert.deepEqual(catalog.freezeSelected(), before);
+  assert.equal(catalog.availability().status, "ready");
+});
+
+test("install cancellation projects cancelling state and uses the existing Bridge route", async () => {
+  const selected = freezeAgentSelection(QODER_AGENT_PROVIDER.selection);
+  const states = [];
+  let cancelled;
+  const catalog = new AgentCatalogState({
+    bridgeClient: {
+      async preflightAgent() { return { status: "ready" }; },
+      async cancelAgentInstall(body) {
+        cancelled = body;
+        states.push(catalog.provider(selected).installState);
+        return { ok: true, providerId: "qoder", installState: "idle" };
+      },
+      async agentDiagnose() {
+        return {
+          status: "not-installed",
+          diagnostic: {
+            readiness: "not-installed",
+            cause: "not-installed",
+            operation: "diagnose",
+            checkedAt: "2026-08-11T00:00:00.000Z",
+            activeInstallation: null,
+          },
+        };
+      },
+    },
+    providers: [QODER_AGENT_PROVIDER],
+    selected,
+    clock: { now: () => Date.parse("2026-08-11T00:00:00.000Z") },
+  });
+  catalog.provider(selected);
+  const outcome = await catalog.cancelInstall();
+  assert.deepEqual(cancelled, { providerId: "qoder" });
+  assert.deepEqual(states, ["cancelling"]);
+  assert.equal(outcome.installState, "idle");
+  assert.equal(catalog.provider(selected).installState, "idle");
+});
+
 test("selectModel changes only the selected model identity", () => {
   const catalog = new AgentCatalogState({
     bridgeClient: {

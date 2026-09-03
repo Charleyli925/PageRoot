@@ -77,6 +77,7 @@ export function defineAgentProvider(value) {
   const capabilities = normalizedCapabilities(value.capabilities);
   const requiredMethods = [
     "resolveInstallation",
+    "diagnose",
     "preflight",
     "assertInstallationUnchanged",
     "installationDigest",

@@ -31,6 +31,11 @@ export function createSyntheticQoderProviderFixture({
       calls.push("provider:resolve-installation");
       return installation;
     },
+    async diagnose(received) {
+      calls.push("provider:diagnose");
+      if (received !== installation) throw new Error("fixture installation mismatch");
+      return Object.freeze({ readiness: "ready", cause: null, activeInstallation: null });
+    },
     async preflight(received) {
       calls.push("provider:preflight");
       if (received !== installation) throw new Error("fixture installation mismatch");

@@ -8,6 +8,7 @@ export type AgentProviderCardData = Readonly<{
   selection: AgentSelection;
   presentation: AgentProviderCardPresentation;
   availability: AgentProviderAvailabilitySnapshot;
+  installState?: "idle" | "installing" | "failed" | "cancelling";
   models?: readonly Readonly<{
     id: string;
     displayName: string;

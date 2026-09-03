@@ -32,6 +32,8 @@ test("the legacy Qoder card is a presentation-only wrapper over the neutral card
     "{...(index === 0 ? primaryActionData : {})}",
     '正在复制…',
     '正在安装…',
+    'cancel-install',
+    'onCancelInstall',
   ]) assert.ok(card.includes(contract), contract);
   assert.match(card, /data-testid="settings-agent-vendor"/u);
   assert.match(card, /API Token/u);

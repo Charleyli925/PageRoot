@@ -77,6 +77,7 @@ export type SettingsPageProps = {
     selection: AgentSelection,
   ) => Promise<AgentActionOutcome>;
   onInstall: (selection: AgentSelection) => Promise<AgentActionOutcome>;
+  onCancelInstall: (selection: AgentSelection) => Promise<AgentActionOutcome>;
   onConnectApiKey: (
     selection: AgentSelection,
     apiKey: string,
@@ -277,6 +278,7 @@ function AgentSettings({
   onCheckSelection,
   onCopyGuidance,
   onInstall,
+  onCancelInstall,
   onConnectApiKey,
   onDisconnectApiKey,
   onSelectAgentModel,
@@ -289,10 +291,11 @@ function AgentSettings({
   checking: boolean;
   actionButtonRef: Ref<HTMLButtonElement>;
   onSelect(selection: AgentSelection): void;
-  onCheck(): void;
+  onCheck(): Promise<AgentActionOutcome>;
   onCheckSelection(selection: AgentSelection): Promise<AgentActionOutcome>;
   onCopyGuidance(kind: AgentProviderGuidanceKind, selection: AgentSelection): Promise<AgentActionOutcome>;
   onInstall(selection: AgentSelection): Promise<AgentActionOutcome>;
+  onCancelInstall(selection: AgentSelection): Promise<AgentActionOutcome>;
   onConnectApiKey(selection: AgentSelection, apiKey: string, extras?: Readonly<{ vendorId?: string; baseUrl?: string; modelId?: string }>): Promise<AgentActionOutcome>;
   onDisconnectApiKey(selection: AgentSelection): Promise<AgentActionOutcome>;
   onSelectAgentModel(modelId: string, expectedSelection: AgentSelection): AgentSelection | null;
@@ -350,10 +353,9 @@ function AgentSettings({
               actionButtonRef={actionButtonRef}
               onCopyGuidance={(kind) => onCopyGuidance(kind, selectedCard.selection)}
               onInstall={() => onInstall(selectedCard.selection)}
-              onRecheck={async () => {
-                onCheck();
-                return { status: "succeeded" };
-              }}
+              installState={selectedCard.installState}
+              onCancelInstall={() => onCancelInstall(selectedCard.selection)}
+              onRecheck={() => onCheckSelection(selectedCard.selection)}
               onConnectApiKey={(apiKey, extras) => onConnectApiKey(selectedCard.selection, apiKey, extras)}
               onDisconnectApiKey={() => onDisconnectApiKey(selectedCard.selection)}
               onSelectModel={async (modelId) => {
@@ -417,7 +419,7 @@ function UpdatesSettings({
   onDownloadUpdate,
   onRequestRestart,
   onOpenReleaseNotes,
-}: Omit<SettingsPageProps, "activeTabId" | "category" | "initialFocus" | "currentAgentName" | "workspacePreferences" | "workspacePreferencesSaving" | "workspacePreferencesError" | "agentChoices" | "selectedAgentChoiceId" | "agentCards" | "onUpdateWorkspacePreference" | "onRetryWorkspacePreferences" | "onSelectAgent" | "onSelectAgentModel" | "onSelectAgentReasoning" | "onClose" | "onCheckUsability" | "onCopyGuidance" | "onInstall" | "onConnectApiKey" | "onDisconnectApiKey">) {
+}: Omit<SettingsPageProps, "activeTabId" | "category" | "initialFocus" | "currentAgentName" | "workspacePreferences" | "workspacePreferencesSaving" | "workspacePreferencesError" | "agentChoices" | "selectedAgentChoiceId" | "agentCards" | "onUpdateWorkspacePreference" | "onRetryWorkspacePreferences" | "onSelectAgent" | "onSelectAgentModel" | "onSelectAgentReasoning" | "onClose" | "onCheckUsability" | "onCopyGuidance" | "onInstall" | "onCancelInstall" | "onConnectApiKey" | "onDisconnectApiKey">) {
   const presentation = updatePresentation({
     result: updateResult,
     updatesAvailable,
@@ -546,6 +548,7 @@ export default function SettingsPage({
   onCheckUsability,
   onCopyGuidance,
   onInstall,
+  onCancelInstall,
   onConnectApiKey,
   onDisconnectApiKey,
   onClose,
@@ -563,15 +566,15 @@ export default function SettingsPage({
     agentCardsRef.current = agentCards;
   }, [agentCards]);
 
-  const requestAgentCheck = useCallback((force = false) => {
+  const requestAgentCheck = useCallback((force = false): Promise<AgentActionOutcome> => {
     const cards = agentCardsRef.current;
     const selected = cards.find((card) => (
       `${card.selection.providerId}:${card.selection.runtimeId}` === selectedAgentChoiceId
     )) || cards[0];
-    if (!selected) return;
+    if (!selected) return Promise.resolve(null);
     if (!force && (
       selected.availability.status === "ready" || selected.availability.status === "checking"
-    )) return;
+    )) return Promise.resolve({ status: "succeeded" });
     const now = Date.now();
     const guidanceKey = String(selected.availability.guidanceCopied || "");
     const guidanceChanged = guidanceKey !== lastCheckGuidanceRef.current;
@@ -581,17 +584,20 @@ export default function SettingsPage({
     if (!force && (
       checkInFlightRef.current
       || (!guidanceChanged && now - lastCheckStartedAtRef.current < 1_500)
-    )) return;
+    )) return Promise.resolve({ status: "succeeded" });
     lastCheckStartedAtRef.current = now;
     lastCheckGuidanceRef.current = guidanceKey;
     checkInFlightRef.current = true;
     setAgentCheckPending(true);
-    Promise.resolve(onCheckUsability(selected.selection))
-      .catch(() => undefined)
-      .finally(() => {
+    const check = Promise.resolve(onCheckUsability(selected.selection));
+    check.then(() => {
+        checkInFlightRef.current = false;
+        setAgentCheckPending(false);
+      }, () => {
         checkInFlightRef.current = false;
         setAgentCheckPending(false);
       });
+    return check;
   }, [onCheckUsability, selectedAgentChoiceId]);
 
   useEffect(() => {
@@ -603,11 +609,15 @@ export default function SettingsPage({
           const selected = agentCardsRef.current.find((card) => (
             `${card.selection.providerId}:${card.selection.runtimeId}` === selectedAgentChoiceId
           )) || agentCardsRef.current[0];
-          return Boolean(
-            selected && !["ready", "checking"].includes(selected.availability.status),
-          );
+          return Boolean(selected && (
+            selected.installState === "installing"
+            || (
+              selected.availability.status === "auth-required"
+              && selected.availability.guidanceCopied === "login"
+            )
+          ));
         })();
-        if (unresolved) requestAgentCheck(true);
+        if (unresolved) void requestAgentCheck(true);
       }
     };
     window.addEventListener("focus", handleReturnToApp);
@@ -616,7 +626,7 @@ export default function SettingsPage({
       window.removeEventListener("focus", handleReturnToApp);
       document.removeEventListener("visibilitychange", handleReturnToApp);
     };
-  }, [category, requestAgentCheck]);
+  }, [category, requestAgentCheck, selectedAgentChoiceId]);
 
   useEffect(() => {
     const focusFrame = requestAnimationFrame(() => {
@@ -707,6 +717,7 @@ export default function SettingsPage({
             onCheckSelection={onCheckUsability}
             onCopyGuidance={onCopyGuidance}
             onInstall={onInstall}
+            onCancelInstall={onCancelInstall}
             onConnectApiKey={onConnectApiKey}
             onDisconnectApiKey={onDisconnectApiKey}
             onSelectAgentModel={onSelectAgentModel}

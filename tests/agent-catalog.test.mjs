@@ -6,7 +6,7 @@ import test from "node:test";
 
 import { createAgentCatalog } from "../bridge/agent/catalog/agent-catalog.mjs";
 import { QODER_MANAGED_RELEASE } from "../bridge/agent/catalog/qoder-managed-release.mjs";
-import { resolveQoderAcpCommand } from "../bridge/agent/providers/qoder-provider.mjs";
+import { diagnoseQoder, resolveQoderAcpCommand } from "../bridge/agent/providers/qoder-provider.mjs";
 
 async function isolatedHome(t) {
   const root = await realpath(
@@ -100,6 +100,16 @@ test("managed Qoder is used only when no user CLI exists", async (t) => {
   });
   assert.equal(resolved.installSource, "managed");
   assert.equal(resolved.command, managed);
+});
+
+test("Qoder diagnosis uses only version and model-list commands", async (t) => {
+  const root = await isolatedHome(t);
+  const command = path.join(root, "qoder-diagnose");
+  await writeFile(command, "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo 1.1.27; else echo MODEL; echo PageRoot-E2E; fi\n", { mode: 0o755 });
+  await chmod(command, 0o755);
+  const diagnostic = await diagnoseQoder({ command, version: "1.1.27", source: "e2e-override" }, {});
+  assert.equal(diagnostic.readiness, "ready");
+  assert.equal(diagnostic.activeInstallation, null);
 });
 
 test("an invalid user installation is not treated as missing and does not fall through to managed", async (t) => {

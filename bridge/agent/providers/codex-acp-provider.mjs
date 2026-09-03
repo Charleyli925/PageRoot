@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import {
   access,
   constants as fsConstants,
@@ -9,6 +9,7 @@ import {
 } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { promisify } from "node:util";
 
 import * as acp from "@agentclientprotocol/sdk";
 import semver from "semver";
@@ -35,6 +36,7 @@ const SAFE_MODEL_ID = /^[A-Za-z0-9][A-Za-z0-9._/:+-]{0,79}$/u;
 const SAFE_REASONING = /^[A-Za-z0-9][A-Za-z0-9._-]{0,39}$/u;
 const AUTH_FAILURE_PATTERN = /not logged in|sign in|login required|unauthenticated|auth required|chatgpt login/iu;
 const ACP_AUTH_REQUIRED_CODE = -32000;
+const execFileAsync = promisify(execFile);
 
 function fail(code, message, options) {
   throw agentProviderError(code, message, options);
@@ -194,7 +196,10 @@ async function assertProtectedNativeBinary(nativeRoot) {
   if (looksLikeBundledPageRootCodex(binary)) {
     fail("CODEX_COMMAND_UNTRUSTED", "PageRoot will not use an executable bundled inside the application for ACP.");
   }
-  return fileIdentity(binary);
+  return Object.freeze({
+    command: binary,
+    identity: await fileIdentity(binary),
+  });
 }
 
 async function findNativeRoot(packageRoot) {
@@ -260,14 +265,15 @@ export async function validateNpmCodexAcpCommand(candidate, {
   if (!nativeRoot) {
     fail("CODEX_COMMAND_UNTRUSTED", "Codex ACP native package was not found beside the adapter.");
   }
-  const nativeIdentity = await assertProtectedNativeBinary(nativeRoot);
+  const native = await assertProtectedNativeBinary(nativeRoot);
   const nodeModulesRoot = path.join(path.dirname(packageRoot), "node_modules");
   const nodeModulesInformation = await lstat(nodeModulesRoot).catch(() => null);
   return Object.freeze({
     command: executable,
     version: manifest.version,
     identity,
-    nativeIdentity,
+    nativeIdentity: native.identity,
+    nativeCommand: native.command,
     nodeModulesRoot: nodeModulesInformation?.isDirectory() ? nodeModulesRoot : null,
     source: "verified-npm-package",
     installSource: "user",
@@ -286,65 +292,78 @@ export async function resolveCodexAcpCommand({
   if (configured && !testOverride) {
     fail("CODEX_COMMAND_UNTRUSTED", "PAGEROOT_CODEX_ACP_COMMAND 只允许用于显式 E2E 测试。");
   }
+
+  // Collect every source before validating/selecting one. This keeps a stale
+  // global shim from masking a healthy PageRoot-managed installation and
+  // makes the source priority explicit: configured test path, managed, user.
+  const [managedResult, userResult] = await Promise.all([
+    typeof managedCandidates === "function"
+      ? Promise.resolve().then(() => managedCandidates()).then(
+        (value) => Array.isArray(value) ? value : [],
+        () => [],
+      )
+      : Promise.resolve([]),
+    commandCandidates(environment, homeDirectory),
+  ]);
+  const diagnostics = [];
+  const candidatesFor = async (candidates, source, expectedVersion = null) => {
+    for (const candidate of candidates) {
+      try {
+        const resolved = await validateNpmCodexAcpCommand(candidate, {
+          ...(expectedVersion ? { expectedVersion } : {}),
+        });
+        if (resolved) return Object.freeze({ ...resolved, installSource: source });
+      } catch (cause) {
+        if (cause instanceof AgentProviderError) {
+          diagnostics.push({ source, cause });
+          continue;
+        }
+        throw cause;
+      }
+    }
+    return null;
+  };
+
   if (testOverride) {
     if (!path.isAbsolute(configured)) {
-      fail("CODEX_COMMAND_UNTRUSTED", "测试 Codex ACP 命令必须是绝对路径。");
-    }
-    const executable = await realpath(configured).catch(() => null);
-    if (!executable) fail("CODEX_COMMAND_NOT_FOUND", "测试 Codex ACP 命令不存在。");
-    return Object.freeze({
-      command: executable,
-      version: null,
-      identity: await fileIdentity(executable),
-      nativeIdentity: null,
-      nodeModulesRoot: null,
-      source: "e2e-override",
-      installSource: "none",
-    });
-  }
-
-  let discoveredError = null;
-  for (const candidate of await commandCandidates(environment, homeDirectory)) {
-    try {
-      const resolved = await validateNpmCodexAcpCommand(candidate);
-      if (resolved) {
-        return Object.freeze({
-          ...resolved,
-          installSource: "user",
-        });
-      }
-    } catch (cause) {
-      if (cause instanceof AgentProviderError) {
-        discoveredError ||= cause;
-        continue;
-      }
-      throw cause;
-    }
-  }
-  if (discoveredError) throw discoveredError;
-
-  if (typeof managedCandidates !== "function") {
-    fail("CODEX_COMMAND_NOT_FOUND", "没有找到独立安装的 Codex ACP。", { status: 404 });
-  }
-  for (const candidate of await managedCandidates()) {
-    try {
-      const resolved = await validateNpmCodexAcpCommand(candidate, {
-        expectedVersion: MIN_CODEX_ACP_VERSION,
+      diagnostics.push({
+        source: "explicit",
+        cause: agentProviderError(
+          "CODEX_COMMAND_UNTRUSTED",
+          "测试 Codex ACP 命令必须是绝对路径。",
+        ),
       });
-      if (resolved) {
-        return Object.freeze({
-          ...resolved,
-          installSource: "managed",
+    } else {
+      const executable = await realpath(configured).catch(() => null);
+      if (executable) {
+        try {
+          return Object.freeze({
+            command: executable,
+            version: null,
+            identity: await fileIdentity(executable),
+            nativeIdentity: null,
+            nodeModulesRoot: null,
+            source: "e2e-override",
+            installSource: "explicit",
+          });
+        } catch (cause) {
+          if (cause instanceof AgentProviderError) diagnostics.push({ source: "explicit", cause });
+          else throw cause;
+        }
+      } else {
+        diagnostics.push({
+          source: "explicit",
+          cause: agentProviderError("CODEX_COMMAND_NOT_FOUND", "测试 Codex ACP 命令不存在.", { status: 404 }),
         });
       }
-    } catch (cause) {
-      if (cause instanceof AgentProviderError) {
-        discoveredError ||= cause;
-        continue;
-      }
-      throw cause;
     }
   }
+
+  const managed = await candidatesFor(managedResult, "managed", MIN_CODEX_ACP_VERSION);
+  if (managed) return managed;
+  const user = await candidatesFor(userResult, "user");
+  if (user) return user;
+  const discoveredError = diagnostics[0]?.cause;
   if (discoveredError) throw discoveredError;
   fail("CODEX_COMMAND_NOT_FOUND", "没有找到独立安装的 Codex ACP。", { status: 404 });
 }
@@ -680,6 +699,119 @@ export async function probeCodexAcp(command, environment = process.env) {
   }
 }
 
+async function initializeCodexAcpForDiagnosis(command, environment) {
+  const processGroup = process.platform !== "win32";
+  const envOverrides = launchEnvironment(command);
+  const childEnvironment = {
+    ...acpProcessEnvironment(envOverrides, environment),
+  };
+  const executableHandle = command.identity
+    ? await openVerifiedAgentExecutable(command.command, {
+      path: command.command,
+      identity: command.identity,
+    })
+    : null;
+  let child;
+  try {
+    child = spawn(command.command, [], {
+      cwd: os.tmpdir(),
+      env: childEnvironment,
+      detached: processGroup,
+      shell: false,
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+  } finally {
+    await executableHandle?.close().catch(() => {});
+  }
+  let stderr = "";
+  child.stderr?.setEncoding("utf8");
+  child.stderr?.on("data", (chunk) => {
+    stderr = `${stderr}${chunk}`.slice(-16 * 1024);
+  });
+  try {
+    child.stdin.write(`${JSON.stringify({
+      jsonrpc: "2.0",
+      id: 1,
+      method: acp.methods.agent.initialize,
+      params: {
+        protocolVersion: acp.PROTOCOL_VERSION,
+        clientCapabilities: { fs: { readTextFile: false, writeTextFile: false } },
+        clientInfo: {
+          name: "pageroot-agent-bridge",
+          title: "PageRoot Agent Bridge",
+          version: "1.0.0",
+        },
+      },
+    })}\n`);
+    const initialized = await readNdjsonResponse(child, 1, 15_000);
+    if (initialized.error) {
+      const error = new Error(initialized.error.message || "Codex ACP initialize failed.");
+      error.stderr = stderr;
+      error.jsonrpcCode = initialized.error.code;
+      fail(classifyCodexAcpFailure(error), initialized.error.message || "Codex ACP initialize failed.");
+    }
+    const agentName = cleanProviderText(initialized.result?.agentInfo?.name, 80);
+    if (!/codex/iu.test(agentName)) {
+      fail("ACP_AGENT_IDENTITY_MISMATCH", "The selected ACP executable did not identify itself as Codex.");
+    }
+    // initialize proves the adapter is reachable, but without native login
+    // status it cannot prove that the account is authenticated.
+    return Object.freeze({
+      readiness: "connection-failed",
+      cause: "CODEX_AUTH_UNVERIFIED",
+      activeInstallation: null,
+    });
+  } catch (cause) {
+    if (cause instanceof AgentProviderError) throw cause;
+    fail(classifyCodexAcpFailure({ ...cause, stderr }), "Codex ACP diagnosis failed.", { status: 503 });
+  } finally {
+    child.stdin?.end();
+    if (!(await terminateManagedProcess(child, { processGroup }))) {
+      fail("AGENT_PREFLIGHT_CLEANUP_UNCONFIRMED", "Codex diagnosis process did not stop.", { status: 503 });
+    }
+  }
+}
+
+export async function diagnoseCodexAcp(command, environment = process.env) {
+  if (typeof command?.nativeCommand === "string" && command.nativeCommand) {
+    const executableHandle = command.nativeIdentity
+      ? await openVerifiedAgentExecutable(command.nativeCommand, {
+        path: command.nativeCommand,
+        identity: command.nativeIdentity,
+      })
+      : null;
+    try {
+      const result = await execFileAsync(command.nativeCommand, ["login", "status"], {
+        cwd: os.tmpdir(),
+        env: acpProcessEnvironment(launchEnvironment(command), environment),
+        encoding: "utf8",
+        timeout: 15_000,
+        maxBuffer: 64 * 1024,
+        windowsHide: true,
+      });
+      const output = `${result.stdout || ""}\n${result.stderr || ""}`;
+      if (AUTH_FAILURE_PATTERN.test(output)) {
+        fail("CODEX_AUTH_REQUIRED", "Codex 尚未登录。", { status: 401 });
+      }
+      return Object.freeze({ readiness: "ready", cause: null, activeInstallation: null });
+    } catch (cause) {
+      if (cause instanceof AgentProviderError) throw cause;
+      const output = `${cause?.stdout || ""}\n${cause?.stderr || ""}\n${cause?.message || ""}`;
+      if (AUTH_FAILURE_PATTERN.test(output)) {
+        fail("CODEX_AUTH_REQUIRED", "Codex 尚未登录。", { status: 401 });
+      }
+      fail(
+        cause?.code === "ETIMEDOUT" ? "CODEX_DIAGNOSE_TIMEOUT" : "CODEX_CONNECTION_FAILED",
+        "Codex 登录状态无法确认。",
+        { status: 503 },
+      );
+    } finally {
+      await executableHandle?.close().catch(() => {});
+    }
+  }
+  return initializeCodexAcpForDiagnosis(command, environment);
+}
+
 function resolvedSelection(selection, { evidence } = {}) {
   const models = evidence?.models || [];
   const requestedId = selection?.requestedModelId || null;
@@ -721,12 +853,14 @@ function resolvedSelection(selection, { evidence } = {}) {
 
 export function createCodexAcpProvider({
   commandResolver = resolveCodexAcpCommand,
+  diagnoseRunner = diagnoseCodexAcp,
   preflightRunner = probeCodexAcp,
   policyLoader = loadExecutionPolicy,
   managedCandidates,
 } = {}) {
   if (
     typeof commandResolver !== "function"
+    || typeof diagnoseRunner !== "function"
     || typeof preflightRunner !== "function"
     || typeof policyLoader !== "function"
   ) {
@@ -748,6 +882,7 @@ export function createCodexAcpProvider({
       modelCatalog: true,
     },
     resolveInstallation: ({ environment }) => resolveInstallation({ environment }),
+    diagnose: (installation, { environment }) => diagnoseRunner(installation, environment),
     preflight: (installation, { environment }) => preflightRunner(installation, environment),
     assertInstallationUnchanged: assertCodexAcpInstallationUnchanged,
     installationDigest,

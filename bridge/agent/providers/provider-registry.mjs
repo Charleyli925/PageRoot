@@ -78,6 +78,42 @@ function sameSelection(left, right) {
     && left.reasoning.resolution === right.reasoning.resolution;
 }
 
+function diagnosticReadiness(result, cause = null) {
+  if (result?.status === "ready") return "ready";
+  if (result?.status === "not-installed") return "not-installed";
+  if (result?.status === "auth-required") return "auth-required";
+  if (result?.reason === "invalid-installation") return "invalid-installation";
+  if (["AGENT_AUTH_REQUIRED", "CODEX_AUTH_REQUIRED", "QODER_AUTH_REQUIRED"].includes(cause?.code)) {
+    return "auth-required";
+  }
+  if (["AGENT_COMMAND_NOT_FOUND", "CODEX_COMMAND_NOT_FOUND", "QODER_COMMAND_NOT_FOUND"].includes(cause?.code)) {
+    return "not-installed";
+  }
+  if ([
+    "AGENT_INSTALLATION_UNTRUSTED",
+    "CODEX_COMMAND_UNTRUSTED",
+    "QODER_COMMAND_UNTRUSTED",
+    "CODEX_VERSION_UNSUPPORTED",
+    "QODER_VERSION_UNSUPPORTED",
+    "CODEX_VERSION_MISMATCH",
+    "QODER_VERSION_MISMATCH",
+  ].includes(cause?.code)) return "invalid-installation";
+  return "connection-failed";
+}
+
+function diagnosticCause(result, cause = null) {
+  const raw = result?.reason || cause?.code || "connection-failed";
+  return String(raw).replace(/[^A-Za-z0-9_-]/gu, "").slice(0, 80) || "connection-failed";
+}
+
+function diagnosticActiveInstallation(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const phase = String(value.phase || "");
+  return ["installing", "cancelling"].includes(phase)
+    ? Object.freeze({ phase })
+    : null;
+}
+
 export function createProviderRegistry({ providers = [], runtimeRegistry } = {}) {
   if (!runtimeRegistry || typeof runtimeRegistry.resolve !== "function") {
     throw new TypeError("Provider registry requires a runtime registry.");
@@ -277,6 +313,70 @@ export function createProviderRegistry({ providers = [], runtimeRegistry } = {})
         return provider.availabilityFailure(cause);
       }
     },
+    async diagnoseForSelection(selection, { environment, checkedAt = null } = {}) {
+      const { provider } = resolveSelection(selection);
+      const operation = "diagnose";
+      if (provider.capabilities.availability !== true) {
+        return Object.freeze({
+          status: "unavailable",
+          reason: "check-failed",
+          diagnostic: Object.freeze({
+            readiness: "connection-failed",
+            cause: "AGENT_CAPABILITY_UNSUPPORTED",
+            operation,
+            checkedAt,
+            activeInstallation: null,
+          }),
+        });
+      }
+      try {
+        const installation = await provider.resolveInstallation({ environment });
+        const diagnosis = await provider.diagnose(installation, {
+          environment,
+          selection,
+        });
+        const readiness = [
+          "ready",
+          "not-installed",
+          "auth-required",
+          "invalid-installation",
+          "connection-failed",
+        ].includes(diagnosis?.readiness)
+          ? diagnosis.readiness
+          : "connection-failed";
+        const cause = readiness === "ready"
+          ? null
+          : String(diagnosis?.cause || "connection-failed").replace(/[^A-Za-z0-9_-]/gu, "").slice(0, 80)
+            || "connection-failed";
+        return Object.freeze({
+          status: readiness === "ready" ? "ready" : readiness === "not-installed"
+            ? "not-installed"
+            : readiness === "auth-required" ? "auth-required" : "unavailable",
+          ...(readiness === "ready" || readiness === "not-installed" || readiness === "auth-required"
+            ? {}
+            : { reason: readiness === "invalid-installation" ? "invalid-installation" : "check-failed" }),
+          diagnostic: Object.freeze({
+            readiness,
+            cause,
+            operation,
+            checkedAt,
+            activeInstallation: diagnosticActiveInstallation(diagnosis?.activeInstallation),
+          }),
+        });
+      } catch (cause) {
+        const availability = provider.availabilityFailure(cause);
+        return Object.freeze({
+          ...availability,
+          diagnostic: Object.freeze({
+            readiness: diagnosticReadiness(availability, cause),
+            cause: diagnosticCause(availability, cause),
+            operation,
+            checkedAt,
+            activeInstallation: null,
+          }),
+        });
+      }
+    },
     preflightForSelection(selection, purpose, { environment } = {}) {
       return prepareForSelection(selection, purpose, environment);
     },
@@ -356,10 +456,12 @@ export function createProviderRegistry({ providers = [], runtimeRegistry } = {})
 export function createDefaultProviderRegistry({
   commandResolver,
   preflightRunner,
+  diagnoseRunner,
   policyLoader,
   runTask,
   codexCommandResolver,
   codexPreflightRunner,
+  codexDiagnoseRunner,
   agentCatalog,
   agentsRoot,
   installerOptions,
@@ -374,12 +476,14 @@ export function createDefaultProviderRegistry({
   ];
   const providers = [createOpenAiCompatibleProvider(), createQoderProvider({
     ...(commandResolver ? { commandResolver } : {}),
+    ...(diagnoseRunner ? { diagnoseRunner } : {}),
     ...(preflightRunner ? { preflightRunner } : {}),
     ...(policyLoader ? { policyLoader } : {}),
     managedCandidates: () => catalog.managedCommandCandidates("qoder"),
   })];
   providers.push(createCodexAcpProvider({
     ...(codexCommandResolver ? { commandResolver: codexCommandResolver } : {}),
+    ...(codexDiagnoseRunner ? { diagnoseRunner: codexDiagnoseRunner } : {}),
     ...(codexPreflightRunner ? { preflightRunner: codexPreflightRunner } : {}),
     managedCandidates: () => catalog.managedCommandCandidates("codex"),
   }));

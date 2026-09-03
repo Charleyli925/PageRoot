@@ -17,6 +17,7 @@ const visibleTextGateMs = Math.max(
   0,
   Math.min(5_000, Number.parseInt(visibleTextGateArgument?.slice("--visible-text-gate-ms=".length) || "0", 10) || 0),
 );
+const sessionMarkerArgument = process.argv.find((argument) => argument.startsWith("--session-marker="));
 
 const sessionId = "session_pageroot_e2e_codex";
 let requestRoot = "";
@@ -51,6 +52,9 @@ const app = acp.agent({ name: "pageroot-e2e-codex" })
     },
   }))
   .onRequest(acp.methods.agent.session.new, ({ params }) => {
+    if (sessionMarkerArgument) {
+      writeFileSync(sessionMarkerArgument.slice("--session-marker=".length), "session.new\n", "utf8");
+    }
     if (authRequired) {
       throw acp.RequestError.authRequired(undefined, "Not logged in. Login required.");
     }

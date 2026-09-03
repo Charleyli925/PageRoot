@@ -67,6 +67,12 @@ export class AgentBridgeService {
     );
   }
 
+  diagnose(input = {}) {
+    return this.#coordinator.diagnose(
+      input.selection || input.driver ? input : { driver: LEGACY_DRIVER },
+    );
+  }
+
   preflight(input) { return this.#coordinator.preflight(input); }
 
   redeemCommandTicket(preflightId, options) {

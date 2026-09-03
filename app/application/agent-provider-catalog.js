@@ -3,6 +3,8 @@ import {
   agentPreflightKey,
   agentProviderAvailabilityFromFailureReason,
   agentProviderAvailabilityFromLocalResult,
+  agentProviderAvailabilityFromDiagnostic,
+  agentDiagnosticSnapshot,
   agentProviderAvailabilityWithCopiedGuidance,
   checkingAgentProviderAvailability,
   freezeAgentSelection,
@@ -413,6 +415,7 @@ export function agentProviderCardsFromCatalog(snapshot) {
       models: Array.isArray(provider.models) ? provider.models : Object.freeze([]),
       credentialConfigured: provider.credentialConfigured === true,
       connection: provider.connection || null,
+      diagnostic: provider.diagnostic || null,
     })));
 }
 
@@ -427,6 +430,7 @@ function frozenProviderEntry(descriptor, previous = null) {
     models: previous?.models || Object.freeze([]),
     credentialConfigured: previous?.credentialConfigured === true,
     connection: previous?.connection || null,
+    diagnostic: previous?.diagnostic || descriptor.diagnostic || null,
   });
 }
 
@@ -690,6 +694,53 @@ export class AgentCatalogState {
     }
   }
 
+  async diagnose(selection = this.freezeSelected()) {
+    const frozen = freezeAgentSelection(selection);
+    const provider = this.provider(frozen);
+    if (!provider) throw this.#unsupportedProvider(frozen.providerId);
+    const generation = (this.#generationByProvider.get(frozen.providerId) || 0) + 1;
+    this.#generationByProvider.set(frozen.providerId, generation);
+    const previous = provider.availability;
+    this.#setAvailability(frozen.providerId, checkingAgentProviderAvailability(previous));
+    try {
+      const diagnoseMethod = typeof this.#bridgeClient.agentDiagnose === "function"
+        ? (input) => this.#bridgeClient.agentDiagnose(input)
+        : typeof this.#bridgeClient.agentAvailability === "function"
+          ? (input) => this.#bridgeClient.agentAvailability(input)
+          : typeof this.#bridgeClient.qoderAvailability === "function"
+            ? (input) => this.#bridgeClient.qoderAvailability(input)
+            : null;
+      if (!diagnoseMethod) {
+        throw Object.assign(new Error("Agent diagnosis is unavailable."), {
+          code: "AGENT_DIAGNOSE_UNAVAILABLE",
+        });
+      }
+      const result = await diagnoseMethod({ selection: frozen });
+      if (
+        this.#disposed
+        || this.#generationByProvider.get(frozen.providerId) !== generation
+      ) return null;
+      const diagnostic = agentDiagnosticSnapshot(result?.diagnostic, validDate(this.#clock));
+      const availability = result?.diagnostic
+        ? agentProviderAvailabilityFromDiagnostic(diagnostic, previous, diagnostic.checkedAt)
+        : agentProviderAvailabilityFromLocalResult(result, previous, validDate(this.#clock));
+      const current = this.#providers.get(frozen.providerId);
+      if (current) {
+        this.#providers.set(frozen.providerId, Object.freeze({ ...current, diagnostic }));
+      }
+      this.#setAvailability(frozen.providerId, availability);
+      return Object.freeze({ result, diagnostic, availability });
+    } catch (cause) {
+      if (
+        !this.#disposed
+        && this.#generationByProvider.get(frozen.providerId) === generation
+      ) {
+        this.#setFailure(frozen, cause, previous);
+      }
+      throw cause;
+    }
+  }
+
   preflight(selection = this.freezeSelected(), {
     force = false,
     purpose = "execution",
@@ -886,14 +937,44 @@ export class AgentCatalogState {
         installState: "idle",
         installSource: "managed",
       });
-      return this.refreshAvailability(
+      return this.diagnose(
         this.freezeProviderSelection(frozen.providerId) || frozen,
       );
     } catch (cause) {
       this.#patchProvider(frozen.providerId, { installState: "failed" });
-      await this.refreshAvailability(
+      await this.diagnose(
         this.freezeProviderSelection(frozen.providerId) || frozen,
       ).catch(() => null);
+      throw cause;
+    }
+  }
+
+  async cancelInstall(selection = this.freezeSelected()) {
+    const frozen = freezeAgentSelection(selection);
+    const provider = this.provider(frozen);
+    if (!provider) throw this.#unsupportedProvider(frozen.providerId);
+    if (provider.installable !== true) {
+      throw Object.assign(new Error("This Agent cannot be installed from PageRoot."), {
+        code: "AGENT_INSTALL_UNSUPPORTED",
+      });
+    }
+    if (typeof this.#bridgeClient.cancelAgentInstall !== "function") {
+      throw Object.assign(new Error("Agent install cancellation is unavailable."), {
+        code: "AGENT_INSTALL_UNSUPPORTED",
+      });
+    }
+    this.#patchProvider(frozen.providerId, { installState: "cancelling" });
+    try {
+      const result = await this.#bridgeClient.cancelAgentInstall({ providerId: frozen.providerId });
+      this.#patchProvider(frozen.providerId, {
+        installState: ["idle", "failed"].includes(result?.installState)
+          ? result.installState
+          : "idle",
+      });
+      await this.diagnose(this.freezeProviderSelection(frozen.providerId) || frozen).catch(() => null);
+      return result;
+    } catch (cause) {
+      this.#patchProvider(frozen.providerId, { installState: "failed" });
       throw cause;
     }
   }

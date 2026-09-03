@@ -6,6 +6,23 @@ export const AGENT_PROVIDER_AVAILABILITY_STATUSES = Object.freeze([
   "unavailable",
 ]);
 
+// Diagnostics are the safe, side-effect-free projection used by Settings.
+// Keep this separate from availability/preflight: a diagnostic never carries
+// an installation path, command, or process output back to the renderer.
+export const AGENT_DIAGNOSTIC_READINESS = Object.freeze([
+  "checking",
+  "ready",
+  "not-installed",
+  "auth-required",
+  "invalid-installation",
+  "connection-failed",
+]);
+
+export const AGENT_DIAGNOSTIC_OPERATIONS = Object.freeze([
+  "diagnose",
+  "refresh",
+]);
+
 export const AGENT_PROVIDER_GUIDANCE_KINDS = Object.freeze(["install", "login"]);
 
 export const INITIAL_AGENT_PROVIDER_AVAILABILITY = Object.freeze({
@@ -16,6 +33,76 @@ export const INITIAL_AGENT_PROVIDER_AVAILABILITY = Object.freeze({
   guidanceCopied: null,
   guidanceCopiedAt: null,
 });
+
+function cleanDiagnosticCause(value) {
+  const cause = String(value || "connection-failed").trim();
+  return /^[A-Za-z0-9_-]{1,80}$/u.test(cause) ? cause : "connection-failed";
+}
+
+function cleanActiveInstallation(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const phase = String(value.phase || "");
+  return ["installing", "cancelling"].includes(phase)
+    ? Object.freeze({ phase })
+    : null;
+}
+
+export function agentDiagnosticSnapshot(value = {}, checkedAt = null) {
+  const readiness = AGENT_DIAGNOSTIC_READINESS.includes(value?.readiness)
+    ? value.readiness
+    : "connection-failed";
+  return Object.freeze({
+    readiness,
+    cause: readiness === "ready" ? null : cleanDiagnosticCause(value?.cause),
+    operation: AGENT_DIAGNOSTIC_OPERATIONS.includes(value?.operation)
+      ? value.operation
+      : "diagnose",
+    checkedAt: cleanDate(value?.checkedAt || checkedAt),
+    activeInstallation: cleanActiveInstallation(value?.activeInstallation),
+  });
+}
+
+export function agentProviderAvailabilityFromDiagnostic(
+  diagnostic,
+  previous = INITIAL_AGENT_PROVIDER_AVAILABILITY,
+  checkedAt = null,
+) {
+  const snapshot = agentDiagnosticSnapshot(diagnostic, checkedAt);
+  if (snapshot.readiness === "ready") {
+    // Diagnosis is a real Bridge check, so Settings may show the connection as
+    // ready. The send path still performs its own formal preflight/ticket.
+    return readyAgentProviderAvailability(snapshot.checkedAt, "local");
+  }
+  if (snapshot.readiness === "not-installed") {
+    return agentProviderAvailabilityFromFailureReason(
+      "not-installed",
+      previous,
+      snapshot.checkedAt,
+    );
+  }
+  if (snapshot.readiness === "auth-required") {
+    return agentProviderAvailabilityFromFailureReason(
+      "auth-required",
+      previous,
+      snapshot.checkedAt,
+    );
+  }
+  const cause = String(snapshot.cause || "");
+  const reason = cause.includes("CAPACITY") || cause.includes("BALANCE") || cause.includes("PLAN")
+    ? "account-capacity"
+    : cause.includes("TIMEOUT")
+      ? "timeout"
+      : cause.includes("MODEL") || cause.includes("SELECTION")
+        ? "model-unavailable"
+        : snapshot.readiness === "invalid-installation"
+          ? "invalid-installation"
+          : "service-unavailable";
+  return agentProviderAvailabilityFromFailureReason(
+    reason,
+    previous,
+    snapshot.checkedAt,
+  );
+}
 
 function cleanDate(value) {
   return typeof value === "string" && value ? value : null;
@@ -118,11 +205,11 @@ export function agentProviderAvailabilityFromLocalResult(
   });
 }
 
-export function readyAgentProviderAvailability(checkedAt = null) {
+export function readyAgentProviderAvailability(checkedAt = null, lastCheck = "use") {
   return snapshot({
     status: "ready",
     reason: null,
-    lastCheck: "use",
+    lastCheck: lastCheck === "local" ? "local" : "use",
     checkedAt,
   });
 }

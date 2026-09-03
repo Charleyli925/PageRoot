@@ -499,6 +499,38 @@ async function executePreflightCommand(command, args, environment, timeout) {
   });
 }
 
+// Settings diagnosis intentionally uses only the CLI's read-only version and
+// model-list commands. It never starts the ACP runtime or creates a ticket.
+export async function diagnoseQoder(command, environment) {
+  try {
+    const versionResult = await executePreflightCommand(command, ["--version"], environment, 10_000);
+    const reportedVersion = cleanProviderText(versionResult.stdout, 80).split(/\s+/u)[0];
+    if (!semver.valid(reportedVersion)) fail("QODER_VERSION_INVALID", "Qoder CLI 没有返回可验证的版本号。");
+    if (command.version && reportedVersion !== command.version) {
+      fail("QODER_VERSION_MISMATCH", "Qoder CLI 版本与安装清单不一致。");
+    }
+    const modelResult = await executePreflightCommand(command, ["--list-models"], environment, 30_000);
+    const models = parsePublicModels(modelResult.stdout);
+    if (models.length === 0) fail("QODER_MODEL_CATALOG_EMPTY", "Qoder 当前没有返回可用模型。");
+    return Object.freeze({
+      readiness: "ready",
+      cause: null,
+      activeInstallation: null,
+    });
+  } catch (cause) {
+    const code = cause instanceof AgentProviderError
+      ? cause.code
+      : classifyQoderPreflightFailure(cause);
+    fail(code, qoderFailure(code), {
+      status: code === "QODER_AUTH_REQUIRED"
+        ? 401
+        : Number.isSafeInteger(cause?.status)
+          ? cause.status
+          : 503,
+    });
+  }
+}
+
 export async function preflightQoder(command, environment) {
   try {
     const versionResult = await executePreflightCommand(command, ["--version"], environment, 10_000);
@@ -536,12 +568,14 @@ export async function preflightQoder(command, environment) {
 
 export function createQoderProvider({
   commandResolver = resolveQoderAcpCommand,
+  diagnoseRunner = diagnoseQoder,
   preflightRunner = preflightQoder,
   policyLoader = loadQoderAcpTaskPolicy,
   managedCandidates,
 } = {}) {
   if (
     typeof commandResolver !== "function"
+    || typeof diagnoseRunner !== "function"
     || typeof preflightRunner !== "function"
     || typeof policyLoader !== "function"
   ) {
@@ -563,6 +597,7 @@ export function createQoderProvider({
       modelCatalog: true,
     },
     resolveInstallation: ({ environment }) => resolveInstallation({ environment }),
+    diagnose: (installation, { environment }) => diagnoseRunner(installation, environment),
     preflight: (installation, { environment }) => preflightRunner(installation, environment),
     assertInstallationUnchanged: assertQoderInstallationUnchanged,
     installationDigest,

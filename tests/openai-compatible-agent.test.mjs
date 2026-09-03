@@ -151,6 +151,60 @@ test("preflight validates the selected fixed model with chat/completions and nev
   assert.equal(calls[0].body.model, "deepseek-v4-pro");
 });
 
+test("HTTP diagnosis performs a read-only models probe and never invokes preflight chat", async () => {
+  const calls = [];
+  let chatCalls = 0;
+  const provider = createOpenAiCompatibleProvider({
+    fetchImpl: async (url, init) => {
+      calls.push({ url: String(url), method: init.method, body: init.body });
+      return jsonResponse(200, { data: [] });
+    },
+    completeChat: async () => {
+      chatCalls += 1;
+      return HTML;
+    },
+  });
+  const environment = {
+    PAGEROOT_API_KEY: "sk-diagnose",
+    PAGEROOT_API_VENDOR: "custom",
+    PAGEROOT_API_BASE_URL: "https://api.example.com/v1",
+    PAGEROOT_API_CREDENTIAL_GENERATION: "1",
+  };
+  const installation = provider.resolveInstallation({ environment });
+  const diagnostic = await provider.diagnose(installation, { environment });
+  assert.equal(diagnostic.readiness, "ready");
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].method, "GET");
+  assert.match(calls[0].url, /\/models$/u);
+  assert.equal(calls[0].body, undefined);
+  assert.equal(chatCalls, 0);
+});
+
+test("HTTP diagnosis distinguishes authentication and network failures", async () => {
+  const environment = {
+    PAGEROOT_API_KEY: "sk-diagnose",
+    PAGEROOT_API_VENDOR: "custom",
+    PAGEROOT_API_BASE_URL: "https://api.example.com/v1",
+    PAGEROOT_API_CREDENTIAL_GENERATION: "1",
+  };
+  const authProvider = createOpenAiCompatibleProvider({
+    fetchImpl: async () => jsonResponse(401, { error: { code: "invalid_api_key" } }),
+  });
+  const installation = authProvider.resolveInstallation({ environment });
+  await assert.rejects(
+    authProvider.diagnose(installation, { environment }),
+    (error) => error?.code === "AGENT_AUTH_REQUIRED",
+  );
+  const networkProvider = createOpenAiCompatibleProvider({
+    fetchImpl: async () => { throw new Error("socket closed"); },
+  });
+  const networkInstallation = networkProvider.resolveInstallation({ environment });
+  await assert.rejects(
+    networkProvider.diagnose(networkInstallation, { environment }),
+    (error) => error?.code === "AGENT_NETWORK_INTERRUPTED",
+  );
+});
+
 test("Custom requires a manual Model ID and validates that exact ID", async () => {
   let model = "";
   const provider = createOpenAiCompatibleProvider({

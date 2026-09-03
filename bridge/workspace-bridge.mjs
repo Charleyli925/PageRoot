@@ -1628,6 +1628,11 @@ async function agentAvailability(selectionInput = null) {
   return agentBridgeService.availability(selection ? { selection } : {});
 }
 
+async function agentDiagnose(selectionInput = null) {
+  const selection = availabilitySelection(selectionInput);
+  return agentBridgeService.diagnose(selection ? { selection } : {});
+}
+
 async function agentProviders() {
   return agentBridgeService.providers();
 }
@@ -2718,6 +2723,10 @@ async function route(request, response) {
   }
   if (request.method === "GET" && url.pathname === "/agent/availability") {
     sendJson(response, 200, await agentAvailability(url.searchParams.get("selection")));
+    return;
+  }
+  if (request.method === "GET" && url.pathname === "/agent/diagnose") {
+    sendJson(response, 200, await agentDiagnose(url.searchParams.get("selection")));
     return;
   }
   if (request.method === "GET" && url.pathname === "/agent/providers") {

@@ -4965,6 +4965,9 @@ export default function Workbench() {
   const installAgent = useCallback(async (selection?: AgentSelection | null) => (
     workspaceController?.installAgent(selection) ?? null
   ), [workspaceController]);
+  const cancelAgentInstall = useCallback(async (selection?: AgentSelection | null) => (
+    workspaceController?.cancelAgentInstall(selection) ?? null
+  ), [workspaceController]);
   const connectAgentApiKey = useCallback(async (
     selection: AgentSelection,
     apiKey: string,
@@ -6368,6 +6371,7 @@ export default function Workbench() {
           onCheckUsability={checkAgentUsability}
           onCopyGuidance={copyAgentGuidance}
           onInstall={installAgent}
+          onCancelInstall={cancelAgentInstall}
           onConnectApiKey={connectAgentApiKey}
           onDisconnectApiKey={disconnectAgentApiKey}
           onSelectAgentModel={selectSettingsAgentModel}

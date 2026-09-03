@@ -585,10 +585,7 @@ export class RunWorkflow {
       const refreshed = await this.#agentCatalog.refreshAvailability();
       if (this.#disposed) return stale({ kind: "agent-availability" });
       if (String(refreshed?.result?.status || "") === "ready") {
-        // Local discovery is intentionally a weak check. Follow it with the
-        // same forced preflight used by the send path instead of ever exposing
-        // the local result as a green connection state.
-        return this.checkAgentUsability();
+        return succeeded({ availability: this.#agentCatalog.availability() });
       }
       return succeeded({ availability: this.#agentCatalog.availability() });
     } catch (cause) {
@@ -609,8 +606,7 @@ export class RunWorkflow {
       return blocked("RUN_WORKFLOW_DISPOSED", `${displayName} 状态检查已经停止。`);
     }
     try {
-      const preflight = await this.#agentCatalog.preflight(frozen, { force: true });
-      this.#agentCatalog.discardTicket(preflight);
+      await this.#agentCatalog.diagnose(frozen);
       return succeeded({ availability: this.#agentCatalog.availability(frozen) });
     } catch (cause) {
       return rejected(
@@ -654,7 +650,7 @@ export class RunWorkflow {
       .then((refreshed) => {
         if (this.#disposed) return stale({ kind: "agent-availability" });
         if (String(refreshed?.result?.status || "") === "ready") {
-          return this.checkQoderUsability();
+          return succeeded({ availability: this.#agentCatalog.availability(selection) });
         }
         return succeeded({ availability: this.#agentCatalog.availability(selection) });
       })
@@ -671,8 +667,7 @@ export class RunWorkflow {
       return blocked("RUN_WORKFLOW_DISPOSED", "Qoder CLI 状态检查已经停止。");
     }
     try {
-      const preflight = await this.#agentCatalog.preflight(selection, { force: true });
-      this.#agentCatalog.discardTicket(preflight);
+      await this.#agentCatalog.diagnose(selection);
       return succeeded({ availability: this.#agentCatalog.availability(selection) });
     } catch (cause) {
       return rejected(
@@ -707,13 +702,8 @@ export class RunWorkflow {
       return blocked("RUN_WORKFLOW_DISPOSED", `${displayName} 安装已经停止。`);
     }
     try {
-      const refreshed = await this.#agentCatalog.install(frozen);
+      await this.#agentCatalog.install(frozen);
       if (this.#disposed) return stale({ kind: "agent-install" });
-      if (String(refreshed?.result?.status || "") === "ready") {
-        return this.checkAgentUsability(
-          this.#agentCatalog.freezeProviderSelection(frozen.providerId) || frozen,
-        );
-      }
       return succeeded({ availability: this.#agentCatalog.availability(frozen) });
     } catch (cause) {
       return rejected(
@@ -730,16 +720,31 @@ export class RunWorkflow {
       return blocked("RUN_WORKFLOW_DISPOSED", "Qoder CLI 安装已经停止。");
     }
     try {
-      const refreshed = await this.#agentCatalog.install(selection);
+      await this.#agentCatalog.install(selection);
       if (this.#disposed) return stale({ kind: "agent-install" });
-      if (String(refreshed?.result?.status || "") === "ready") {
-        return this.checkQoderUsability();
-      }
       return succeeded({ availability: this.#agentCatalog.availability(selection) });
     } catch (cause) {
       return rejected(
         errorCode(cause, "AGENT_INSTALL_FAILED"),
         this.#codecs.errorMessage(cause, "暂时无法安装 Qoder CLI。"),
+      );
+    }
+  }
+
+  async cancelAgentInstall(selection = this.#agentCatalog.freezeSelected()) {
+    const frozen = selection || this.#agentCatalog.freezeSelected();
+    const displayName = this.#agentCatalog.presentation(frozen).displayName || "Agent";
+    if (!frozen) return rejected("AGENT_PROVIDER_UNSUPPORTED", `${displayName} 不可用。`);
+    if (this.#disposed) {
+      return blocked("RUN_WORKFLOW_DISPOSED", `${displayName} 安装已经停止。`);
+    }
+    try {
+      const result = await this.#agentCatalog.cancelInstall(frozen);
+      return succeeded({ result, availability: this.#agentCatalog.availability(frozen) });
+    } catch (cause) {
+      return rejected(
+        errorCode(cause, "AGENT_INSTALL_CANCEL_FAILED"),
+        this.#codecs.errorMessage(cause, `暂时无法取消 ${displayName} 安装。`),
       );
     }
   }

@@ -1,6 +1,7 @@
 import { sha256 } from "../../lifecycle-core.mjs";
 import { completeOpenAiCompatibleChat } from "../runtimes/http-runtime.mjs";
 import { agentProviderError, defineAgentProvider } from "./agent-provider-contract.mjs";
+import { openAiCompatibleVendorAdapter } from "./openai-compatible-vendor-adapters.mjs";
 import { loadExecutionPolicy } from "../policies/execution-policy.mjs";
 import {
   PAGEROOT_PROVIDER_ID,
@@ -136,6 +137,48 @@ function wrapProviderError(cause, fallbackMessage) {
   });
 }
 
+async function diagnoseOpenAiCompatibleConnection({
+  fetchImpl,
+  installation,
+  environment,
+} = {}) {
+  const credential = credentialFromEnvironment(environment);
+  if (!credential
+    || credential.vendorId !== installation?.vendorId
+    || credential.baseUrl !== installation?.baseUrl
+    || credential.credentialGeneration !== installation?.credentialGeneration
+    || sha256(Buffer.from(credential.apiKey, "utf8")) !== installation?.credentialDigest) {
+    fail("AGENT_AUTH_REQUIRED", "连接配置已变化，请重新连接。", { status: 401 });
+  }
+  let response;
+  try {
+    response = await fetchImpl(`${String(installation.baseUrl).replace(/\/+$/u, "")}/models`, {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${credential.apiKey}`,
+        Accept: "application/json",
+      },
+      signal: AbortSignal.timeout(15_000),
+    });
+  } catch {
+    fail("AGENT_NETWORK_INTERRUPTED", "模型接口没有接通。", { status: 502 });
+  }
+  if (!response?.ok) {
+    let payload = null;
+    try { payload = JSON.parse(await response.text()); } catch { payload = null; }
+    const adapter = openAiCompatibleVendorAdapter(installation.vendorId);
+    const code = adapter.normalizeError({ status: response?.status, payload });
+    fail(code, "模型接口没有接通。", {
+      status: response?.status === 401 || response?.status === 403 ? 401 : 502,
+    });
+  }
+  return Object.freeze({
+    readiness: "ready",
+    cause: null,
+    activeInstallation: null,
+  });
+}
+
 export function createOpenAiCompatibleProvider({
   fetchImpl = fetch,
   completeChat = completeOpenAiCompatibleChat,
@@ -162,6 +205,11 @@ export function createOpenAiCompatibleProvider({
         credentialDigest: sha256(Buffer.from(credential.apiKey, "utf8")),
       });
     },
+    diagnose: (installation, { environment } = {}) => diagnoseOpenAiCompatibleConnection({
+      fetchImpl,
+      installation,
+      environment,
+    }),
     async preflight(installation, { environment, selection } = {}) {
       const credential = credentialFromEnvironment(environment);
       if (!credential || credential.vendorId !== installation.vendorId
