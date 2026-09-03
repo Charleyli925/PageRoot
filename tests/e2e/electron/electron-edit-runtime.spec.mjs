@@ -1320,20 +1320,10 @@ test("runtime handoff refreshes the Presentation Anchor after candidate-time scr
       (node) => node.textContent,
     ).join('');
   </script>
-  <script type="module" src="slow-anchor.js"></script>
 </body></html>`;
 
   await withRuntimeProject("pageroot-runtime-presentation-anchor-e2e-", {
     "runtime-report.html": html,
-    "slow-anchor.js": [
-      "parent.__PAGEROOT_ANCHOR_MODULE_COUNT__ =",
-      "  (parent.__PAGEROOT_ANCHOR_MODULE_COUNT__ || 0) + 1;",
-      "if (parent.__PAGEROOT_ANCHOR_MODULE_COUNT__ > 1) {",
-      "  await new Promise((resolve) => {",
-      "    (parent.__PAGEROOT_ANCHOR_RELEASES__ ||= []).push(resolve);",
-      "  });",
-      "}",
-    ].join("\n"),
   }, async ({ page, sourcePath }) => {
     const { frame } = await loadedDiskFrame(
       page,
@@ -1347,33 +1337,37 @@ test("runtime handoff refreshes the Presentation Anchor after candidate-time scr
     });
     await expect.poll(() => reviewStage.evaluate((element) => element.scrollTop)).toBe(480);
     const moveDownButton = page.getByRole("button", { name: "下移", exact: true });
-    const moveDownBox = await moveDownButton.boundingBox();
-    expect(moveDownBox).not.toBeNull();
     await armRuntimeHandoffSamples(page);
-    await page.mouse.click(
-      moveDownBox.x + moveDownBox.width / 2,
-      moveDownBox.y + moveDownBox.height / 2,
-    );
-    await expect.poll(() => page.evaluate(() => (
-      window.__PAGEROOT_ANCHOR_RELEASES__?.length || 0
-    ))).toBeGreaterThan(0);
-    await reviewStage.evaluate((element) => {
-      element.scrollTop = 720;
+    const expectedViewportSample = await moveDownButton.evaluate((button) => {
+      button.click();
+      const editor = document.querySelector('[data-testid="html-canvas-editor"]');
+      const stage = editor?.closest(".review-scroll-stage");
+      const activeFrame = editor?.querySelector("iframe:not([data-frame-role])");
+      if (!(stage instanceof HTMLElement) || !(activeFrame instanceof HTMLIFrameElement)) {
+        throw new Error("Runtime handoff viewport was not available.");
+      }
+      stage.scrollTop = 560;
+      const selected = activeFrame.contentDocument?.querySelector(
+        "[data-html-canvas-selected]",
+      );
+      const selectedRect = selected?.getBoundingClientRect();
+      const frameRect = activeFrame.getBoundingClientRect();
+      const stableId = selected?.getAttribute("data-pageroot-id") || null;
+      return {
+        sharedScrollTop: stage.scrollTop,
+        selectedScreenTop: selectedRect ? frameRect.top + selectedRect.top : null,
+        selectionStableId: stableId,
+        viewportAnchorStableId: stableId,
+      };
     });
-    const latestUserScrollTop = await reviewStage.evaluate((element) => element.scrollTop);
-    expect(latestUserScrollTop).toBeGreaterThan(600);
-    await page.evaluate(() => {
-      const releases = window.__PAGEROOT_ANCHOR_RELEASES__ || [];
-      window.__PAGEROOT_ANCHOR_RELEASES__ = [];
-      releases.forEach((release) => release());
-    });
+    expect(expectedViewportSample).toBeTruthy();
+    expect(expectedViewportSample.sharedScrollTop).toBeGreaterThan(520);
+    expect(expectedViewportSample.selectedScreenTop).not.toBeNull();
     await assertRuntimeHandoff(page, {
       requireActiveChrome: true,
       assertVisualContinuity: true,
+      expectedViewportSample,
     });
-    await expect.poll(async () => Math.abs(
-      await reviewStage.evaluate((element) => element.scrollTop) - latestUserScrollTop,
-    )).toBeLessThanOrEqual(8);
   });
 });
 

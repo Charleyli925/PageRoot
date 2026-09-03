@@ -660,13 +660,15 @@ function captureRuntimePresentationAnchor({
   const anchorElement = selectedAnchor || firstVisibleAnchor;
   const viewportAnchorStableId = runtimeStableIdForElement(anchorElement, sourceIndex);
   const anchorTop = anchorElement?.getBoundingClientRect().top;
+  const frameTop = iframe?.getBoundingClientRect().top;
+  const anchorScreenTop = Number(anchorTop) + Number(frameTop);
   const iframeWidth = iframe?.clientWidth || 0;
   const renderedWidth = iframe?.getBoundingClientRect().width || iframeWidth;
   return {
     selectedStableId,
     viewportAnchorStableId,
-    viewportAnchorScreenOffsetY: Number.isFinite(Number(anchorTop))
-      ? Number(anchorTop)
+    viewportAnchorScreenOffsetY: Number.isFinite(anchorScreenTop)
+      ? anchorScreenTop
       : null,
     iframeScrollLeft: Number(frameView?.scrollX || 0),
     iframeScrollTop: Number(frameView?.scrollY || 0),
@@ -2160,10 +2162,12 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       runtimeInactiveCleanupFrameRef.current = null;
       if (runtimeInactiveGenerationRef.current !== generation) return;
       runtimeInactiveGenerationRef.current = null;
-      setRuntimeInactiveRender(null);
-      if (containerRef.current?.getAttribute("data-runtime-handoff") === "active") {
-        containerRef.current.removeAttribute("data-runtime-handoff");
-      }
+      flushSync(() => {
+        setRuntimeInactiveRender(null);
+        if (containerRef.current?.getAttribute("data-runtime-handoff") === "active") {
+          containerRef.current.removeAttribute("data-runtime-handoff");
+        }
+      });
     });
   }, []);
 
@@ -7672,14 +7676,16 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         if (!frameView) return;
         const element = anchorElement();
         const currentAnchorTop = element?.getBoundingClientRect().top;
+        const currentAnchorScreenTop = Number(currentAnchorTop)
+          + iframe.getBoundingClientRect().top;
         const targetTop = (
           element
           && anchor.viewportAnchorScreenOffsetY !== null
-          && Number.isFinite(Number(currentAnchorTop))
+          && Number.isFinite(currentAnchorScreenTop)
         )
           ? runtimeAnchorScrollTop({
               currentScrollTop: frameView.scrollY,
-              currentAnchorOffsetY: Number(currentAnchorTop),
+              currentAnchorOffsetY: currentAnchorScreenTop,
               desiredAnchorOffsetY: anchor.viewportAnchorScreenOffsetY,
               maximumScrollTop: maximumFrameScrollTop(),
             })
@@ -7720,7 +7726,8 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         if (!frameView) return;
         const element = anchorElement();
         if (!element || anchor.viewportAnchorScreenOffsetY === null) return;
-        const currentTop = element.getBoundingClientRect().top;
+        const currentTop = iframe.getBoundingClientRect().top
+          + element.getBoundingClientRect().top;
         const viewportHeight = iframe.clientHeight;
         if (
           Math.abs(currentTop - anchor.viewportAnchorScreenOffsetY)
@@ -7738,7 +7745,9 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           behavior: "auto",
         });
         const corrected = element.getBoundingClientRect();
-        const residual = corrected.top - anchor.viewportAnchorScreenOffsetY;
+        const residual = iframe.getBoundingClientRect().top
+          + corrected.top
+          - anchor.viewportAnchorScreenOffsetY;
         const outer = containerRef.current?.closest<HTMLElement>(".review-scroll-stage");
         if (
           outer
