@@ -23,6 +23,7 @@ import type {
   HtmlCanvasMutation,
   HtmlCanvasSelection,
   HtmlCanvasRuntimeVisualHint,
+  HtmlCanvasRuntimeDegradation,
   HtmlCanvasSourceTransaction,
   NativeDeferredCommandAuthority,
   NativeDeferredCommandDiscardReason,
@@ -859,6 +860,14 @@ export default function Workbench() {
         editRuntimeSnapshot?.lastOutcome || "unknown",
       ].join(":")
     : null;
+  const runtimeDegradationKey = `${sourcePath || "no-source"}:${canvasGeneration}`;
+  const [runtimeDegradationSnapshot, setRuntimeDegradationSnapshot] = useState<{
+    key: string;
+    state: HtmlCanvasRuntimeDegradation;
+  }>({ key: runtimeDegradationKey, state: "none" });
+  const runtimeDegradation = runtimeDegradationSnapshot.key === runtimeDegradationKey
+    ? runtimeDegradationSnapshot.state
+    : "none";
   const [pageViewContext, setPageViewContext] =
     useState<PageViewContext | null>(null);
   const [interactivePreviewTransport, setInteractivePreviewTransport] =
@@ -6457,6 +6466,7 @@ export default function Workbench() {
               {staticFallbackNoticeIdentity ? (
                 <EditRuntimeStaticFallbackNotice
                   key={staticFallbackNoticeIdentity}
+                  state={runtimeDegradation}
                   {...(editRuntimeSnapshot?.retryAvailable
                     ? {
                         onRetry: () => {
@@ -6464,6 +6474,9 @@ export default function Workbench() {
                         },
                       }
                     : {})}
+                  onExport={() => {
+                    void exportCurrentHtml();
+                  }}
                 />
               ) : null}
               {editRuntimePreparing && !activeRuntimeCanvasUsable ? (
@@ -6525,6 +6538,9 @@ export default function Workbench() {
                       );
                     }
                   }}
+                  onRuntimeDegradationChange={(state) => {
+                    setRuntimeDegradationSnapshot({ key: runtimeDegradationKey, state });
+                  }}
                   onCommentLayout={commentCanvasPort.publishLayout}
                   onSelect={handleCanvasSelection}
                   onRequestComment={openCommentComposer}
@@ -6558,7 +6574,9 @@ export default function Workbench() {
                     || viewTransitioning
                     || persistState === "conflict"
                   }
-                  readOnly={viewMode === "history"}
+                  readOnly={viewMode === "history"
+                    || runtimeDegradation === "static-preparing"
+                    || runtimeDegradation === "last-known-good-readonly"}
                   interactionMode={viewMode === "history"
                     ? "history"
                     : runInProgress || projectHydrating || workspaceIssue

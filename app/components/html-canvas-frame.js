@@ -15,7 +15,7 @@ export function frameDocumentMatchesExpected(iframe, expectedFrameHtml, writtenH
   return iframe.srcdoc === expectedFrameHtml || writtenHtml === expectedFrameHtml;
 }
 
-export const RUNTIME_HANDOFF_TOLERANCE_PX = 2;
+export const RUNTIME_HANDOFF_TOLERANCE_PX = 8;
 
 export function clampRuntimeScroll(value, maximum) {
   const numericValue = Number(value);

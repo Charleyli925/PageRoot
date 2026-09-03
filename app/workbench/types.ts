@@ -392,6 +392,7 @@ declare global {
             atUnixMs: number;
           }>>;
         }> | null;
+        e2eStaticCandidateFailure?: boolean;
       }>;
     };
     __PAGEROOT_HYDRATION_STAGE__?: string;

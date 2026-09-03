@@ -16,6 +16,8 @@ const RETRYABLE_STATIC_FALLBACK_OUTCOMES = new Set([
   "prepare-failed",
   "runtime-failed",
   "recovery-failed",
+  "candidate-failed",
+  "candidate-rejected",
 ]);
 
 function frozenSnapshot({
@@ -585,14 +587,10 @@ export class EditAuthorRuntimeSession {
       return true;
     }
     if (preserveLastKnownGood) {
-      this.#emit({
-        phase: "settled",
-        sourceSha256: grant.sourceSha256,
-        sourcePath: this.#identity?.sourcePath || null,
-        canvasGeneration: grant.canvasGeneration,
-        grant,
-        lastOutcome: outcome === "rejected" ? "candidate-rejected" : "candidate-failed",
-      });
+      this.#transitionToStatic(
+        "static-fallback",
+        outcome === "rejected" ? "candidate-rejected" : "candidate-failed",
+      );
       return true;
     }
     if (grant.resourceMode === "compatible") {

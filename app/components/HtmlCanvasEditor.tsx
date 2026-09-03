@@ -127,11 +127,9 @@ import {
   clampRuntimeScroll,
   frameDocumentMatchesExpected,
   runtimeAnchorScrollTop,
-  runtimePositionWithinTolerance,
+  RUNTIME_HANDOFF_TOLERANCE_PX,
   sameRuntimeGrant,
   type RuntimeFrameContext,
-  type RuntimeHandoffLayoutFingerprint,
-  type RuntimeViewportSnapshot,
 } from "./html-canvas-frame";
 import { useCanvasPresentationScroll } from "./html-canvas-presentation-scroll";
 import {
@@ -154,7 +152,6 @@ import {
   nativeTextFragmentForElement,
   refreshMountedPreviewSourceNodeIds,
   refreshStableMountedPreviewSourceNodeIds,
-  sourceTextNodeForDomText,
   sourceBackedPreviewElements,
   alignPreviewSourceSurface,
   sourceTextParentsForSegments,
@@ -221,6 +218,7 @@ import type {
   HtmlCanvasFreezeSnapshot,
   HtmlCanvasInteractionMode,
   HtmlCanvasMutation,
+  HtmlCanvasRuntimeDegradation,
   HtmlCanvasSelection,
   HtmlCanvasSelectionLevel,
   HtmlCanvasSourceTransaction,
@@ -242,6 +240,7 @@ export type {
   HtmlCanvasFreezeSnapshot,
   HtmlCanvasInteractionMode,
   HtmlCanvasMutation,
+  HtmlCanvasRuntimeDegradation,
   HtmlCanvasSelection,
   HtmlCanvasSourceTransaction,
   HtmlCanvasTargetResolution,
@@ -393,44 +392,6 @@ function sourceTextNodeForFragmentReplacement(
   )) ?? null;
 }
 
-function activeRangeForTextFragmentTarget(
-  parentElement: HTMLElement,
-  sourceIndex: SourceIndexValue,
-  target: HtmlCanvasSelection,
-  textTargetRef: SourceTargetRef,
-): ActiveTextRange | null {
-  try {
-    const resolution = resolveTargetRef(sourceIndex, textTargetRef);
-    const sourceText = resolution.target;
-    if (
-      (
-        resolution.resolution === "ambiguous"
-        || resolution.resolution === "orphaned"
-      )
-      || sourceText?.type !== "text"
-      || sourceText.parentId !== target.nodeId
-    ) return null;
-    const textNode = Array.from(parentElement.childNodes).find((node): node is Text => (
-      node.nodeType === 3
-      && sourceTextNodeForDomText(node as Text, sourceIndex)?.nodeId === sourceText.nodeId
-    )) ?? null;
-    if (!textNode || sourceText.value.length === 0) return null;
-    return {
-      target,
-      segments: [{
-        textNodeId: sourceText.nodeId,
-        startOffset: 0,
-        endOffset: sourceText.value.length,
-      }],
-      text: sourceText.value,
-      styleElements: [parentElement],
-      direction: "forward",
-    };
-  } catch {
-    return null;
-  }
-}
-
 const EDITOR_DOCUMENT_STYLES = `
   /*
    * The shared review stage owns page scrolling. A root-frame scrollbar changes
@@ -540,6 +501,17 @@ type RuntimeRefreshPending = {
   coalescedCount: number;
 };
 
+type RuntimePresentationAnchor = {
+  selectedStableId: string | null;
+  viewportAnchorStableId: string | null;
+  viewportAnchorScreenOffsetY: number | null;
+  iframeScrollLeft: number;
+  iframeScrollTop: number;
+  outerScrollLeft: number | null;
+  outerScrollTop: number | null;
+  zoom: number;
+};
+
 type RuntimeActiveFrameSnapshot = {
   slotId: RuntimeFrameSlotId;
   render: RuntimeCandidateRender;
@@ -556,23 +528,7 @@ type RuntimeActiveFrameSnapshot = {
   expectedFrameToken: string | null;
   renderedSourceHtml: string | null;
   renderedProjectionSha256: string;
-  appliedPageViewContext: PageViewContext | null;
-  activeFrameConnectionPending: boolean;
-  runtimeNeedsRerender: boolean;
-  runtimeRefreshPending: RuntimeRefreshPending | null;
-  pendingFrameViewport: { left: number; top: number } | null;
-  pendingSharedViewport: {
-    element: HTMLElement;
-    left: number;
-    top: number;
-  } | null;
-  pendingFrameRestoreEpoch: number;
-  nativeSessionNeedsCanonicalFence: boolean;
-  nativeEditNeedsReload: boolean;
-  pendingNativeEditResume: PendingNativeEditResume | null;
-  selectedElement: HTMLElement | null;
   selectedSourceSelection: HtmlCanvasSelection | null;
-  activeTextRange: ActiveTextRange | null;
   toolbarVisible: boolean;
   runtimeGeneratedSelection: boolean;
   connectedFrame: {
@@ -594,103 +550,26 @@ type RuntimeCandidate = {
   loaded: boolean;
   previousPendingSelection: HtmlCanvasSelection | null;
   previousPendingToolbarVisible: boolean;
-  viewportSnapshot: RuntimeViewportSnapshot;
-  sharedViewportElement: HTMLElement | null;
-  handoffScrollState: RuntimeHandoffScrollState;
-  refreshViewportSnapshot: (
-    channel: RuntimeHandoffScrollChannel,
-    iframe?: HTMLIFrameElement | null,
-  ) => void;
-  markProgrammaticScroll: (
-    channel: RuntimeHandoffScrollChannel,
-    left: number,
-    top: number,
-  ) => void;
-  handoffScrollCleanup: () => void;
+  presentationAnchor: RuntimePresentationAnchor;
   previousActive: RuntimeActiveFrameSnapshot;
 };
 
 type RuntimeCandidateTransfer = {
   pendingSelection: HtmlCanvasSelection | null;
   pendingToolbarVisible: boolean;
-  pendingNativeEditResume: PendingNativeEditResume | null;
 };
 
-type RuntimeHandoffScrollChannel = "frame" | "shared";
-type RuntimeProgrammaticScrollSuppression = {
-  epoch: number;
-  left: number;
-  top: number;
-};
-type RuntimeHandoffScrollChannelState = {
-  epoch: number;
-  programmaticScrollEpoch: number;
-  userIntentEpoch: number;
-  userIntentPending: boolean;
-  pointerDragging: boolean;
-  programmaticScrollSuppression: RuntimeProgrammaticScrollSuppression | null;
-};
-type RuntimeHandoffScrollState = {
-  frame: RuntimeHandoffScrollChannelState;
-  shared: RuntimeHandoffScrollChannelState;
+type RuntimeCandidateStartOptions = {
+  kind?: RuntimeFrameIdentity["kind"];
 };
 
-function createRuntimeHandoffScrollChannelState(): RuntimeHandoffScrollChannelState {
-  return {
-    epoch: 0,
-    programmaticScrollEpoch: 0,
-    userIntentEpoch: 0,
-    userIntentPending: false,
-    pointerDragging: false,
-    programmaticScrollSuppression: null,
-  };
-}
-
-function createRuntimeHandoffScrollState(): RuntimeHandoffScrollState {
-  return {
-    frame: createRuntimeHandoffScrollChannelState(),
-    shared: createRuntimeHandoffScrollChannelState(),
-  };
-}
-
-function isRuntimeScrollKey(event: KeyboardEvent): boolean {
-  if (event.altKey || event.ctrlKey || event.metaKey) return false;
-  return [
-    "ArrowDown",
-    "ArrowLeft",
-    "ArrowRight",
-    "ArrowUp",
-    "End",
-    "Home",
-    "PageDown",
-    "PageUp",
-    " ",
-    "Spacebar",
-  ].includes(event.key);
-}
-
-function documentScrollbarPointerDown(
-  documentNode: Document,
-  event: PointerEvent,
-): boolean {
-  const view = documentNode.defaultView;
-  const scrollingElement = documentNode.scrollingElement
-    || documentNode.documentElement;
-  if (!view || !scrollingElement) return false;
-  const verticalScrollbarWidth = Math.max(
-    12,
-    view.innerWidth - scrollingElement.clientWidth,
-  );
-  const horizontalScrollbarHeight = Math.max(
-    12,
-    view.innerHeight - scrollingElement.clientHeight,
-  );
-  const vertical = scrollingElement.scrollHeight > scrollingElement.clientHeight + 1
-    && event.clientX >= view.innerWidth - verticalScrollbarWidth;
-  const horizontal = scrollingElement.scrollWidth > scrollingElement.clientWidth + 1
-    && event.clientY >= view.innerHeight - horizontalScrollbarHeight;
-  return vertical || horizontal;
-}
+type DeferredRuntimeCandidate = {
+  lease: number;
+  source: string;
+  sourceRevision: string;
+  kind: RuntimeFrameIdentity["kind"];
+  predecessorCandidateId: string | null;
+};
 
 function sharedScrollbarPointerDown(
   element: HTMLElement,
@@ -709,309 +588,6 @@ function sharedScrollbarPointerDown(
     && event.clientX >= rect.left
     && event.clientX <= rect.right;
   return vertical || horizontal;
-}
-
-function nullableRuntimePositionWithinTolerance(
-  actual: number | null,
-  expected: number | null,
-): boolean {
-  if (actual === null || expected === null) return actual === expected;
-  return runtimePositionWithinTolerance(actual, expected);
-}
-
-function sameRuntimeHandoffNativeSelection(
-  actual: RuntimeViewportSnapshot["nativeSelection"],
-  expected: RuntimeViewportSnapshot["nativeSelection"],
-): boolean {
-  if (!actual || !expected) return actual === expected;
-  return actual.affinity === expected.affinity
-    && runtimePositionWithinTolerance(actual.anchor, expected.anchor)
-    && runtimePositionWithinTolerance(actual.focus, expected.focus);
-}
-
-function runtimeHandoffLayoutFingerprintWithinTolerance(
-  actual: RuntimeHandoffLayoutFingerprint,
-  expected: RuntimeHandoffLayoutFingerprint,
-): boolean {
-  if (
-    actual.viewportAnchorStableId !== expected.viewportAnchorStableId
-    || actual.selectedStableId !== expected.selectedStableId
-    || !sameRuntimeHandoffNativeSelection(actual.nativeSelection, expected.nativeSelection)
-  ) return false;
-  const numericFields: Array<keyof RuntimeHandoffLayoutFingerprint> = [
-    "iframeWidth",
-    "iframeHeight",
-    "documentClientWidth",
-    "documentClientHeight",
-    "documentScrollWidth",
-    "documentScrollHeight",
-    "sharedClientWidth",
-    "sharedClientHeight",
-    "sharedScrollWidth",
-    "sharedScrollHeight",
-    "iframeScrollX",
-    "iframeScrollY",
-    "sharedScrollLeft",
-    "sharedScrollTop",
-    "viewportAnchorOffsetY",
-    "viewportAnchorSharedOffsetY",
-    "caretOffsetY",
-  ];
-  return numericFields.every((field) => nullableRuntimePositionWithinTolerance(
-    actual[field] as number | null,
-    expected[field] as number | null,
-  ));
-}
-
-function attachRuntimeHandoffScrollListeners({
-  candidate,
-  iframe,
-  sharedScrollElement,
-  includeShared,
-  onFrameScroll,
-  onSharedScroll,
-}: {
-  candidate: RuntimeCandidate;
-  iframe: HTMLIFrameElement | null;
-  sharedScrollElement: HTMLElement | null;
-  includeShared: boolean;
-  onFrameScroll?: () => void;
-  onSharedScroll?: () => void;
-}): () => void {
-  const frameDocument = iframe?.contentDocument;
-  const sharedDocument = sharedScrollElement?.ownerDocument;
-  const cleanups: Array<() => void> = [];
-  const stateFor = (channel: RuntimeHandoffScrollChannel) => (
-    candidate.handoffScrollState[channel]
-  );
-  const schedulePendingIntentExpiry = (
-    channel: RuntimeHandoffScrollChannel,
-    epoch: number,
-    sourceFrame: HTMLIFrameElement | null,
-  ) => {
-    window.requestAnimationFrame(() => {
-      window.requestAnimationFrame(() => {
-        const state = stateFor(channel);
-        if (
-          state.userIntentPending
-          && state.userIntentEpoch === epoch
-        ) {
-          state.userIntentPending = false;
-          candidate.refreshViewportSnapshot(channel, sourceFrame);
-        }
-      });
-    });
-  };
-  const markUserIntent = (
-    channel: RuntimeHandoffScrollChannel,
-    sourceFrame: HTMLIFrameElement | null,
-  ) => {
-    const state = stateFor(channel);
-    state.epoch += 1;
-    state.userIntentEpoch = state.epoch;
-    state.userIntentPending = true;
-    state.programmaticScrollSuppression = null;
-    candidate.refreshViewportSnapshot(channel, sourceFrame);
-    schedulePendingIntentExpiry(channel, state.userIntentEpoch, sourceFrame);
-  };
-  const handleScroll = (
-    channel: RuntimeHandoffScrollChannel,
-    sourceFrame: HTMLIFrameElement | null,
-    onScroll?: () => void,
-  ) => {
-    const state = stateFor(channel);
-    if (state.programmaticScrollSuppression) {
-      const currentPosition = channel === "frame"
-        ? {
-            left: sourceFrame?.contentWindow?.scrollX ?? 0,
-            top: sourceFrame?.contentWindow?.scrollY ?? 0,
-          }
-        : {
-            left: sharedScrollElement?.scrollLeft ?? 0,
-            top: sharedScrollElement?.scrollTop ?? 0,
-          };
-      const suppression = state.programmaticScrollSuppression;
-      if (
-        runtimePositionWithinTolerance(currentPosition.left, suppression.left)
-        && runtimePositionWithinTolerance(currentPosition.top, suppression.top)
-      ) {
-        state.programmaticScrollSuppression = null;
-        onScroll?.();
-        return;
-      }
-      // A scroll sample that does not land at the programmatic target cannot
-      // be consumed by this epoch. Let the normal intent channels classify it.
-      state.programmaticScrollSuppression = null;
-    }
-    if (state.userIntentPending || state.pointerDragging) {
-      // Keep the gesture alive until two rAFs after its latest scroll sample.
-      // Native scrollbar drags do not consistently emit pointermove, so the
-      // active drag flag and the scroll itself both renew the user epoch.
-      markUserIntent(channel, sourceFrame);
-    }
-    // An unclassified scroll is not evidence of user intent. It may have been
-    // caused by a focus/reflow operation, so leave the handoff target unchanged
-    // and let the positioning loop restore it.
-    onScroll?.();
-  };
-  const markProgrammaticScroll = (
-    channel: RuntimeHandoffScrollChannel,
-    left: number,
-    top: number,
-  ) => {
-    const state = stateFor(channel);
-    state.epoch += 1;
-    state.programmaticScrollEpoch = state.epoch;
-    state.programmaticScrollSuppression = {
-      epoch: state.programmaticScrollEpoch,
-      left,
-      top,
-    };
-    const suppressionEpoch = state.programmaticScrollEpoch;
-    window.requestAnimationFrame(() => {
-      if (
-        state.programmaticScrollSuppression?.epoch === suppressionEpoch
-        && state.programmaticScrollEpoch === suppressionEpoch
-      ) state.programmaticScrollSuppression = null;
-    });
-  };
-
-  // The positioning loop calls this through the candidate state. Keeping the
-  // epoch marker on the same state as the intent listeners means a trusted
-  // scroll event generated by scrollTo() cannot be mistaken for input.
-  candidate.markProgrammaticScroll = markProgrammaticScroll;
-
-  if (frameDocument) {
-    const frameScroll = () => handleScroll("frame", iframe, onFrameScroll);
-    const frameIntent = () => {
-      markUserIntent("frame", iframe);
-      if (includeShared && sharedScrollElement) markUserIntent("shared", iframe);
-    };
-    const framePointerDown = (event: Event) => {
-      const pointer = event as PointerEvent;
-      if (documentScrollbarPointerDown(frameDocument, pointer)) {
-        stateFor("frame").pointerDragging = true;
-        markUserIntent("frame", iframe);
-      }
-    };
-    const framePointerMove = (event: Event) => {
-      const pointer = event as PointerEvent;
-      if (
-        pointer.buttons !== 0
-        && (
-          stateFor("frame").pointerDragging
-          || documentScrollbarPointerDown(frameDocument, pointer)
-        )
-      ) {
-        stateFor("frame").pointerDragging = true;
-        markUserIntent("frame", iframe);
-      }
-    };
-    const framePointerEnd = () => {
-      stateFor("frame").pointerDragging = false;
-    };
-    const frameKeyDown = (event: Event) => {
-      if (isRuntimeScrollKey(event as KeyboardEvent)) {
-        markUserIntent("frame", iframe);
-        if (includeShared && sharedScrollElement) markUserIntent("shared", iframe);
-      }
-    };
-    frameDocument.addEventListener("scroll", frameScroll, true);
-    frameDocument.addEventListener("wheel", frameIntent, { capture: true, passive: true });
-    frameDocument.addEventListener("touchmove", frameIntent, { capture: true, passive: true });
-    frameDocument.addEventListener("pointerdown", framePointerDown, true);
-    frameDocument.addEventListener("pointermove", framePointerMove, true);
-    frameDocument.addEventListener("pointerup", framePointerEnd, true);
-    frameDocument.addEventListener("pointercancel", framePointerEnd, true);
-    frameDocument.addEventListener("keydown", frameKeyDown, true);
-    cleanups.push(() => {
-      frameDocument.removeEventListener("scroll", frameScroll, true);
-      frameDocument.removeEventListener("wheel", frameIntent, true);
-      frameDocument.removeEventListener("touchmove", frameIntent, true);
-      frameDocument.removeEventListener("pointerdown", framePointerDown, true);
-      frameDocument.removeEventListener("pointermove", framePointerMove, true);
-      frameDocument.removeEventListener("pointerup", framePointerEnd, true);
-      frameDocument.removeEventListener("pointercancel", framePointerEnd, true);
-      frameDocument.removeEventListener("keydown", frameKeyDown, true);
-      stateFor("frame").pointerDragging = false;
-    });
-  }
-
-  if (includeShared && sharedScrollElement) {
-    const sharedScroll = () => handleScroll("shared", iframe, onSharedScroll);
-    const sharedIntent = () => markUserIntent("shared", iframe);
-    const sharedDocumentIntent = (event: Event) => {
-      const target = event.target;
-      if (
-        target === sharedScrollElement
-        || (target instanceof Node && sharedScrollElement.contains(target))
-      ) markUserIntent("shared", iframe);
-    };
-    const sharedPointerDown = (event: Event) => {
-      const pointer = event as PointerEvent;
-      if (sharedScrollbarPointerDown(sharedScrollElement, pointer)) {
-        stateFor("shared").pointerDragging = true;
-        markUserIntent("shared", iframe);
-      }
-    };
-    const sharedPointerMove = (event: Event) => {
-      const pointer = event as PointerEvent;
-      if (
-        pointer.buttons !== 0
-        && (
-          stateFor("shared").pointerDragging
-          || sharedScrollbarPointerDown(sharedScrollElement, pointer)
-        )
-      ) {
-        stateFor("shared").pointerDragging = true;
-        markUserIntent("shared", iframe);
-      }
-    };
-    const sharedPointerEnd = () => {
-      stateFor("shared").pointerDragging = false;
-    };
-    const sharedKeyDown = (event: Event) => {
-      const keyEvent = event as KeyboardEvent;
-      if (isRuntimeScrollKey(keyEvent)) {
-        markUserIntent("shared", iframe);
-      }
-    };
-    sharedScrollElement.addEventListener("scroll", sharedScroll);
-    sharedScrollElement.addEventListener("wheel", sharedIntent, { capture: true, passive: true });
-    sharedScrollElement.addEventListener("touchmove", sharedIntent, { capture: true, passive: true });
-    sharedScrollElement.addEventListener("pointerdown", sharedPointerDown, true);
-    sharedScrollElement.addEventListener("pointermove", sharedPointerMove, true);
-    sharedScrollElement.addEventListener("pointerup", sharedPointerEnd, true);
-    sharedScrollElement.addEventListener("pointercancel", sharedPointerEnd, true);
-    sharedDocument?.addEventListener("pointerdown", sharedPointerDown, true);
-    sharedDocument?.addEventListener("pointermove", sharedPointerMove, true);
-    sharedDocument?.addEventListener("pointerup", sharedPointerEnd, true);
-    sharedDocument?.addEventListener("pointercancel", sharedPointerEnd, true);
-    sharedDocument?.addEventListener("wheel", sharedDocumentIntent, { capture: true, passive: true });
-    sharedDocument?.addEventListener("touchmove", sharedDocumentIntent, { capture: true, passive: true });
-    sharedDocument?.addEventListener("keydown", sharedKeyDown, true);
-    cleanups.push(() => {
-      sharedScrollElement.removeEventListener("scroll", sharedScroll);
-      sharedScrollElement.removeEventListener("wheel", sharedIntent, true);
-      sharedScrollElement.removeEventListener("touchmove", sharedIntent, true);
-      sharedScrollElement.removeEventListener("pointerdown", sharedPointerDown, true);
-      sharedScrollElement.removeEventListener("pointermove", sharedPointerMove, true);
-      sharedScrollElement.removeEventListener("pointerup", sharedPointerEnd, true);
-      sharedScrollElement.removeEventListener("pointercancel", sharedPointerEnd, true);
-      sharedDocument?.removeEventListener("pointerdown", sharedPointerDown, true);
-      sharedDocument?.removeEventListener("pointermove", sharedPointerMove, true);
-      sharedDocument?.removeEventListener("pointerup", sharedPointerEnd, true);
-      sharedDocument?.removeEventListener("pointercancel", sharedPointerEnd, true);
-      sharedDocument?.removeEventListener("wheel", sharedDocumentIntent, true);
-      sharedDocument?.removeEventListener("touchmove", sharedDocumentIntent, true);
-      sharedDocument?.removeEventListener("keydown", sharedKeyDown, true);
-      stateFor("shared").pointerDragging = false;
-    });
-  }
-
-  return () => {
-    for (const cleanup of cleanups) cleanup();
-  };
 }
 
 function runtimeSourceElementForStableId(
@@ -1049,194 +625,57 @@ function runtimeStableIdForElement(
   return stableId;
 }
 
-function runtimeAnchorOffsetIsClamped({
-  currentScrollTop,
-  currentAnchorOffsetY,
-  desiredAnchorOffsetY,
-  maximumScrollTop,
-}: {
-  currentScrollTop: number;
-  currentAnchorOffsetY: number;
-  desiredAnchorOffsetY: number;
-  maximumScrollTop: number;
-}): boolean {
-  const idealScrollTop = currentScrollTop + currentAnchorOffsetY - desiredAnchorOffsetY;
-  return !runtimePositionWithinTolerance(
-    idealScrollTop,
-    clampRuntimeScroll(idealScrollTop, maximumScrollTop),
-  );
-}
-
-function runtimeCaretOffsetY(
-  documentNode: Document,
-  rootElement: Element | null,
-): number | null {
-  const selection = documentNode.getSelection();
-  const focusNode = selection?.focusNode;
-  if (
-    !selection
-    || !focusNode
-    || !rootElement
-    || (focusNode !== rootElement && !rootElement.contains(focusNode))
-  ) return null;
-  try {
-    const range = documentNode.createRange();
-    range.setStart(focusNode, selection.focusOffset);
-    range.collapse(true);
-    const rect = range.getClientRects()[0] || range.getBoundingClientRect();
-    return Number.isFinite(rect.top) ? rect.top : null;
-  } catch {
-    return null;
-  }
-}
-
-function captureRuntimeViewportSnapshot({
+function captureRuntimePresentationAnchor({
   iframe,
-  sharedScrollElement,
+  outerScrollElement,
   sourceIndex,
   selectedElement,
   selectedSourceSelection,
-  nativeSelection,
-  caretOffsetYOverride,
 }: {
   iframe: HTMLIFrameElement | null;
-  sharedScrollElement: HTMLElement | null;
+  outerScrollElement: HTMLElement | null;
   sourceIndex: SourceIndexValue | null;
   selectedElement: Element | null;
   selectedSourceSelection: HtmlCanvasSelection | null;
-  nativeSelection: RuntimeViewportSnapshot["nativeSelection"];
-  caretOffsetYOverride?: number | null;
-}): RuntimeViewportSnapshot {
+}): RuntimePresentationAnchor {
   const documentNode = iframe?.contentDocument;
   const frameView = iframe?.contentWindow;
-  const frameScrollX = Number(frameView?.scrollX || 0);
-  const frameScrollY = Number(frameView?.scrollY || 0);
   const selectedStableId = (
     isValidPagerootElementId(selectedSourceSelection?.elementId)
       ? selectedSourceSelection?.elementId
       : runtimeStableIdForElement(selectedElement, sourceIndex)
   ) || null;
-  const measuredCaretOffsetY = documentNode
-    ? runtimeCaretOffsetY(documentNode, selectedElement)
+  const selectedAnchor = documentNode && selectedStableId
+    ? runtimeSourceElementForStableId(documentNode, sourceIndex, selectedStableId)
     : null;
-  const caretOffsetY = typeof caretOffsetYOverride === "number"
-    ? caretOffsetYOverride
-    : measuredCaretOffsetY;
-  const frameHeight = iframe?.clientHeight || 0;
-  const preferredAnchor = (
-    documentNode && selectedStableId
-      ? runtimeSourceElementForStableId(documentNode, sourceIndex, selectedStableId)
-      : null
-  ) || (
-    selectedElement && runtimeStableIdForElement(selectedElement, sourceIndex)
-      ? selectedElement
-      : null
-  );
-  const anchorCandidates = documentNode && sourceIndex
-    ? Array.from(documentNode.querySelectorAll<HTMLElement>(
-      `[${SOURCE_NODE_ATTRIBUTE}]`,
-    )).filter((element) => (
-      runtimeStableIdForElement(element, sourceIndex)
-      && element.getBoundingClientRect().bottom > 0
-      && element.getBoundingClientRect().top < frameHeight
-    ))
-    : [];
-  const anchorElement = preferredAnchor
-    || anchorCandidates.sort((left, right) => (
-      Math.abs(left.getBoundingClientRect().top)
-      - Math.abs(right.getBoundingClientRect().top)
-    ))[0]
-    || null;
+  const firstVisibleAnchor = documentNode && sourceIndex
+    ? Array.from(documentNode.querySelectorAll<HTMLElement>(`[${SOURCE_NODE_ATTRIBUTE}]`))
+      .find((element) => {
+        const rect = element.getBoundingClientRect();
+        return Boolean(runtimeStableIdForElement(element, sourceIndex))
+          && rect.bottom > 0
+          && rect.top < (iframe?.clientHeight || 0);
+      }) ?? null
+    : null;
+  const anchorElement = selectedAnchor || firstVisibleAnchor;
   const viewportAnchorStableId = runtimeStableIdForElement(anchorElement, sourceIndex);
-  const anchorRect = anchorElement?.getBoundingClientRect();
-  const viewportAnchorOffsetY = viewportAnchorStableId
-    ? anchorRect?.top ?? null
-    : null;
-  const iframeRect = iframe?.getBoundingClientRect();
-  const sharedRect = sharedScrollElement?.getBoundingClientRect();
-  const viewportAnchorSharedOffsetY = viewportAnchorStableId
-    && anchorRect
-    && iframeRect
-    && sharedRect
-    ? iframeRect.top - sharedRect.top + anchorRect.top
-    : null;
+  const anchorTop = anchorElement?.getBoundingClientRect().top;
+  const iframeWidth = iframe?.clientWidth || 0;
+  const renderedWidth = iframe?.getBoundingClientRect().width || iframeWidth;
   return {
-    iframeScrollX: Number.isFinite(frameScrollX) ? frameScrollX : 0,
-    iframeScrollY: Number.isFinite(frameScrollY) ? frameScrollY : 0,
-    sharedScrollLeft: sharedScrollElement?.scrollLeft || 0,
-    sharedScrollTop: sharedScrollElement?.scrollTop || 0,
-    viewportAnchorStableId,
-    viewportAnchorOffsetY: Number.isFinite(Number(viewportAnchorOffsetY))
-      ? Number(viewportAnchorOffsetY)
-      : null,
-    viewportAnchorSharedOffsetY: Number.isFinite(Number(viewportAnchorSharedOffsetY))
-      ? Number(viewportAnchorSharedOffsetY)
-      : null,
     selectedStableId,
-    nativeSelection: nativeSelection
-      ? { ...nativeSelection }
+    viewportAnchorStableId,
+    viewportAnchorScreenOffsetY: Number.isFinite(Number(anchorTop))
+      ? Number(anchorTop)
       : null,
-    caretOffsetY,
+    iframeScrollLeft: Number(frameView?.scrollX || 0),
+    iframeScrollTop: Number(frameView?.scrollY || 0),
+    outerScrollLeft: outerScrollElement?.scrollLeft ?? null,
+    outerScrollTop: outerScrollElement?.scrollTop ?? null,
+    zoom: iframeWidth > 0 && Number.isFinite(renderedWidth / iframeWidth)
+      ? renderedWidth / iframeWidth
+      : 1,
   };
-}
-
-function runtimeTextNodeForSourceId(
-  documentNode: Document,
-  sourceIndex: SourceIndexValue,
-  textNodeId: string,
-): Text | null {
-  const sourceText = sourceIndex.byNodeId.get(textNodeId);
-  if (sourceText?.type !== "text" || !sourceText.parentId) return null;
-  const sourceParent = sourceIndex.byNodeId.get(sourceText.parentId);
-  if (sourceParent?.type !== "element") return null;
-  const escapedParentId = sourceParent.nodeId
-    .replace(/\\/g, "\\\\")
-    .replace(/"/g, '\\"');
-  const parentElement = documentNode.querySelector<HTMLElement>(
-    `[${SOURCE_NODE_ATTRIBUTE}="${escapedParentId}"]`,
-  );
-  const childIndex = sourceParent.childIds.indexOf(textNodeId);
-  const candidate = childIndex >= 0
-    ? parentElement?.childNodes[childIndex]
-    : null;
-  return candidate?.nodeType === 3
-    && sourceTextNodeForDomText(candidate as Text, sourceIndex)?.nodeId === textNodeId
-    ? candidate as Text
-    : null;
-}
-
-function restoreRuntimeTextSelection(
-  documentNode: Document,
-  sourceIndex: SourceIndexValue,
-  previousRange: ActiveTextRange,
-  target: HtmlCanvasSelection,
-): ActiveTextRange | null {
-  const firstSegment = previousRange.segments[0];
-  const lastSegment = previousRange.segments.at(-1);
-  if (!firstSegment || !lastSegment) return null;
-  const startNode = runtimeTextNodeForSourceId(
-    documentNode,
-    sourceIndex,
-    firstSegment.textNodeId,
-  );
-  const endNode = runtimeTextNodeForSourceId(
-    documentNode,
-    sourceIndex,
-    lastSegment.textNodeId,
-  );
-  if (!startNode || !endNode) return null;
-  try {
-    const range = documentNode.createRange();
-    range.setStart(startNode, firstSegment.startOffset);
-    range.setEnd(endNode, lastSegment.endOffset);
-    const selection = documentNode.getSelection();
-    selection?.removeAllRanges();
-    selection?.addRange(range);
-    const restored = activeTextRangeFromDocument(documentNode, sourceIndex);
-    return restored ? { ...restored, target } : null;
-  } catch {
-    return null;
-  }
 }
 
 function canvasTargetOutlineStyle(
@@ -1344,18 +783,7 @@ type NativeEditFenceBookmark = {
   selection: NativeEditSelection;
   focus: boolean;
   toolbarVisible: boolean;
-  caretOffsetY?: number | null;
   fragmentTargetRef?: SourceTargetRef;
-};
-
-type PendingNativeEditResume = NativeEditFenceBookmark & {
-  expectedFrameGeneration: number;
-  sourceRevision: string;
-  candidateId?: string;
-};
-
-type StartNativeEditingOptions = {
-  runtimeResumeCandidate?: RuntimeFrameIdentity;
 };
 
 type NativeFormatShortcut = "bold" | "italic" | "underline";
@@ -1369,7 +797,6 @@ type NativeEditCommitResult = {
 
 type FinishNativeEditingOptions = {
   replayQueuedUserCommand?: boolean;
-  resumeAfterRuntimeHandoff?: boolean;
   deferRuntimeRefresh?: boolean;
 };
 
@@ -1652,6 +1079,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     editRuntimeGrant = null,
     onEditRuntimeLoadStart,
     onEditRuntimeLoadOutcome,
+    onRuntimeDegradationChange,
     onCommentLayout,
     onRequestComment,
     onReady,
@@ -1750,7 +1178,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   const nativeSessionNeedsCanonicalFenceRef = useRef(false);
   const nativeEditFenceSequenceRef = useRef(0);
   const currentNativeEditLeaseRef = useRef<ActiveNativeEdit["lease"] | null>(null);
-  const pendingNativeEditResumeRef = useRef<PendingNativeEditResume | null>(null);
   const pendingHistoryBookmarkRef = useRef<NativeEditFenceBookmark | null>(null);
   const pendingHistoryCanonicalFenceRef = useRef(false);
   const fencedDocumentCleanupRef = useRef<() => void>(() => undefined);
@@ -1761,7 +1188,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     source: string,
     bookmark: NativeEditFenceBookmark | null,
     target: HtmlCanvasSelection | null,
-    selection?: NativeEditSelection,
   ) => void>(() => undefined);
   const applyNativeFormatShortcutRef = useRef<(
     shortcut: NativeFormatShortcut,
@@ -1826,7 +1252,10 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     runtimeFrameCoordinatorRef.current = new RuntimeFrameCoordinator();
   }
   const runtimeCandidateRef = useRef<RuntimeCandidate | null>(null);
-  const deferredRuntimeCandidateSourceRef = useRef<string | null>(null);
+  const deferredRuntimeCandidateRef = useRef<DeferredRuntimeCandidate | null>(null);
+  const deferredRuntimeCandidateLeaseRef = useRef(0);
+  const lastRuntimeCandidateFailureRef = useRef<string | null>(null);
+  const replayDeferredRuntimeCandidateRef = useRef<() => void>(() => undefined);
   const runtimeCandidateIframeRef = useRef<HTMLIFrameElement | null>(null);
   const runtimePromotionRef = useRef<RuntimeCandidate | null>(null);
   const runtimeInactiveCleanupFrameRef = useRef<number | null>(null);
@@ -1853,7 +1282,10 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   ) => boolean>(
     () => false,
   );
-  const startRuntimeCandidateRef = useRef<(source: string) => boolean>(
+  const startRuntimeCandidateRef = useRef<(
+    source: string,
+    options?: RuntimeCandidateStartOptions,
+  ) => boolean>(
     () => false,
   );
   const connectRuntimeCandidateRef = useRef<(
@@ -1870,6 +1302,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   const onInteractionRef = useRef(onInteraction);
   const onEditRuntimeLoadStartRef = useRef(onEditRuntimeLoadStart);
   const onEditRuntimeLoadOutcomeRef = useRef(onEditRuntimeLoadOutcome);
+  const onRuntimeDegradationChangeRef = useRef(onRuntimeDegradationChange);
   const onCommentLayoutRef = useRef(onCommentLayout);
   const onRequestCommentRef = useRef(onRequestComment);
   const onRequestFlushRef = useRef(onRequestFlush);
@@ -1890,6 +1323,10 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   const controlledInteractionLocked = controlledMode !== "editing";
   const [imperativeLocked, setImperativeLocked] = useState(false);
   const interactionLocked = controlledInteractionLocked || imperativeLocked;
+  const [runtimeDegradation, setRuntimeDegradation] = useState<HtmlCanvasRuntimeDegradation>("none");
+  const runtimeFallbackReadOnly = runtimeDegradation === "static-preparing"
+    || runtimeDegradation === "last-known-good-readonly";
+  const effectiveReadOnly = readOnly || runtimeFallbackReadOnly;
   const renderedMode: HtmlCanvasInteractionMode =
     controlledMode === "history"
       ? "history"
@@ -1906,13 +1343,16 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   onInteractionRef.current = onInteraction;
   onEditRuntimeLoadStartRef.current = onEditRuntimeLoadStart;
   onEditRuntimeLoadOutcomeRef.current = onEditRuntimeLoadOutcome;
+  onRuntimeDegradationChangeRef.current = onRuntimeDegradationChange;
   onCommentLayoutRef.current = onCommentLayout;
   onRequestCommentRef.current = onRequestComment;
   onRequestFlushRef.current = onRequestFlush;
   onRequestExportRef.current = onRequestExport;
   onRequestHistoryRef.current = onRequestHistory;
   onEditBlockedRef.current = onEditBlocked;
-  readOnlyRef.current = readOnly || controlledInteractionLocked || imperativeLockRef.current;
+  readOnlyRef.current = effectiveReadOnly
+    || controlledInteractionLocked
+    || imperativeLockRef.current;
   lockedRef.current = controlledInteractionLocked || imperativeLockRef.current;
   enableReorderRef.current = enableReorder && !lockedRef.current;
   commentedTargetsRef.current = commentedTargets;
@@ -2195,13 +1635,22 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     );
   }, []);
 
+  const publishRuntimeDegradation = useCallback((
+    state: HtmlCanvasRuntimeDegradation,
+  ) => {
+    setRuntimeDegradation(state);
+    onRuntimeDegradationChangeRef.current?.(state);
+  }, []);
+
   const beginRuntimeAttempt = useCallback((
     generation: number,
     sourceRevision: string,
+    kind: RuntimeFrameIdentity["kind"] = "dynamic",
   ): RuntimeFrameIdentity => {
     const { identity } = runtimeFrameCoordinatorRef.current!.beginCandidate({
       generation,
       sourceRevision,
+      kind,
     });
     syncRuntimeCandidateDiagnostics();
     return identity;
@@ -2210,14 +1659,57 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   const endRuntimeNativeEdit = useCallback(() => {
     runtimeFrameCoordinatorRef.current!.endNativeEdit();
     syncRuntimeCandidateDiagnostics();
-    window.requestAnimationFrame(() => {
-      const source = deferredRuntimeCandidateSourceRef.current;
-      if (!source || activeNativeEditRef.current) return;
-      if (startRuntimeCandidateRef.current(source)) {
-        deferredRuntimeCandidateSourceRef.current = null;
-      }
-    });
+    window.requestAnimationFrame(() => replayDeferredRuntimeCandidateRef.current());
   }, [syncRuntimeCandidateDiagnostics]);
+
+  const deferRuntimeCandidate = useCallback((
+    source: string,
+    sourceRevision: string,
+    kind: RuntimeFrameIdentity["kind"],
+    predecessorCandidateId: string | null = null,
+  ): DeferredRuntimeCandidate | null => {
+    const latest = latestSourceProjectionRef.current;
+    if (
+      latest.source !== source
+      || (
+        latest.sourceIndex
+        && latest.sourceIndex.sourceSha256 !== sourceRevision
+      )
+    ) return null;
+    const request: DeferredRuntimeCandidate = {
+      lease: deferredRuntimeCandidateLeaseRef.current + 1,
+      source,
+      sourceRevision,
+      kind,
+      predecessorCandidateId,
+    };
+    deferredRuntimeCandidateLeaseRef.current = request.lease;
+    deferredRuntimeCandidateRef.current = request;
+    window.requestAnimationFrame(() => replayDeferredRuntimeCandidateRef.current());
+    return request;
+  }, []);
+
+  const deferLatestStaticRuntimeCandidate = useCallback((
+    predecessorCandidateId: string,
+  ): DeferredRuntimeCandidate | null => {
+    const latest = latestSourceProjectionRef.current;
+    let sourceIndex = latest.sourceIndex;
+    if (!sourceIndex) {
+      try {
+        sourceIndex = buildSourceIndex(latest.source);
+        latestSourceProjectionRef.current = { source: latest.source, sourceIndex };
+      } catch {
+        return null;
+      }
+    }
+    lastRuntimeCandidateFailureRef.current = predecessorCandidateId;
+    return deferRuntimeCandidate(
+      latest.source,
+      sourceIndex.sourceSha256,
+      "static-disabled",
+      predecessorCandidateId,
+    );
+  }, [deferRuntimeCandidate]);
 
   const completeRuntimeAttempt = useCallback((
     frame: RuntimeFrameContext,
@@ -2230,6 +1722,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     syncRuntimeCandidateDiagnostics();
     if (!settlement.accepted) return settlement;
     frame.settled = true;
+    if (outcome === "ready") publishRuntimeDegradation("none");
     onEditRuntimeLoadOutcomeRef.current?.(
       frame.grant,
       outcome,
@@ -2240,7 +1733,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       },
     );
     return settlement;
-  }, [syncRuntimeCandidateDiagnostics]);
+  }, [publishRuntimeDegradation, syncRuntimeCandidateDiagnostics]);
 
   const loadFrameSource = useCallback((
     source: string,
@@ -2253,13 +1746,13 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     } = {},
   ) => {
     if (options.forceStatic) {
-      deferredRuntimeCandidateSourceRef.current = null;
+      deferredRuntimeCandidateRef.current = null;
     }
     const promotedCandidate = runtimePromotionRef.current;
     if (promotedCandidate) {
       // A newer authoritative source update may arrive during the final handoff
       // frame. Roll back the not-yet-settled promotion before starting that load
-      // so the retiring document remains the only live active context.
+      // so the previous document remains the only live active context.
       rollbackRuntimePromotionRef.current(promotedCandidate, "superseded");
     }
     const currentRuntime = runtimeFrameRef.current;
@@ -2296,7 +1789,12 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       // document. A first mount proceeds below as static; a retry or recovery
       // arriving while that document is still connecting waits for the same
       // proof. No later lifecycle can execute Script directly in Active.
-      deferredRuntimeCandidateSourceRef.current = source;
+      try {
+        const sourceRevision = buildSourceIndex(source).sourceSha256;
+        deferRuntimeCandidate(source, sourceRevision, "dynamic");
+      } catch {
+        deferredRuntimeCandidateRef.current = null;
+      }
       if (expectedFrameHtmlRef.current) return;
     }
     const pendingCandidate = runtimeCandidateRef.current;
@@ -2342,10 +1840,10 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     hoverControllerRef.current?.hide();
     cleanupFrameRef.current();
     connectedFrameRef.current = null;
-    const retiringRuntimeFrame = runtimeFrameRef.current;
+    const previousRuntimeFrame = runtimeFrameRef.current;
     runtimeFrameRef.current = null;
-    if (retiringRuntimeFrame && !retiringRuntimeFrame.settled) {
-      completeRuntimeAttempt(retiringRuntimeFrame, "superseded");
+    if (previousRuntimeFrame && !previousRuntimeFrame.settled) {
+      completeRuntimeAttempt(previousRuntimeFrame, "superseded");
     }
     pendingFrameRestoreEpochRef.current += 1;
     if (!reuseCandidate) {
@@ -2392,7 +1890,10 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     const sourceIndex = sourceIndexRef.current;
     const runtimeGrant = options.forceStatic
       || reuseCandidate
-      || deferredRuntimeCandidateSourceRef.current === source
+      || (
+        deferredRuntimeCandidateRef.current?.source === source
+        && deferredRuntimeCandidateRef.current.kind === "dynamic"
+      )
       ? null
       : editRuntimeGrant;
     let runtimeFrame: RuntimeFrameContext | null = null;
@@ -2636,6 +2137,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     beginRuntimeAttempt,
     clearRuntimeRefreshPending,
     completeRuntimeAttempt,
+    deferRuntimeCandidate,
     documentBaseHref,
     editRuntimeGrant,
     frameRender.elementGeneration,
@@ -2677,8 +2179,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       syncRuntimeCandidateDiagnostics();
       return false;
     }
-    candidate.handoffScrollCleanup();
-    candidate.handoffScrollCleanup = () => undefined;
     candidate.registrationCleanup();
     if (candidate.runtimeFrame) completeRuntimeAttempt(candidate.runtimeFrame, outcome);
     else runtimeFrameCoordinatorRef.current!.settle(candidate.attempt, outcome);
@@ -2693,10 +2193,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     );
     pendingToolbarVisibleRef.current = restoredToolbarVisible;
     setToolbarVisible(restoredToolbarVisible);
-    // Supersession transfers the latest intent explicitly. Other terminal
-    // outcomes drop it so a failed candidate cannot resume editing in the
-    // previous Document with a stale generation/revision lease.
-    pendingNativeEditResumeRef.current = transfer?.pendingNativeEditResume ?? null;
     runtimeCandidateRef.current = null;
     runtimeCandidateIframeRef.current = null;
     setRuntimeCandidateRender(null);
@@ -2709,7 +2205,10 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
 
   const startRuntimeCandidate = useCallback((
     source: string,
+    options: RuntimeCandidateStartOptions = {},
   ): boolean => {
+    const candidateKind = options.kind ?? "dynamic";
+    const staticDisabled = candidateKind === "static-disabled";
     const currentRuntime = runtimeFrameRef.current;
     const activeFrameReady = currentRuntime
       ? currentRuntime.settled
@@ -2733,7 +2232,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       ? {
           pendingSelection: pendingSelectionRef.current,
           pendingToolbarVisible: pendingToolbarVisibleRef.current,
-          pendingNativeEditResume: pendingNativeEditResumeRef.current,
         }
       : null;
     if (supersededCandidate) {
@@ -2747,28 +2245,18 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       ?? pendingSelectionRef.current;
     const previousPendingToolbarVisible = supersededTransfer?.pendingToolbarVisible
       ?? pendingToolbarVisibleRef.current;
-    const previousPendingNativeEditResume = supersededTransfer?.pendingNativeEditResume
-      ?? pendingNativeEditResumeRef.current;
     const currentFrame = iframeRef.current;
-    const activeEditForViewport = activeNativeEditRef.current as ActiveNativeEdit | null;
     const sharedScrollElement = containerRef.current?.closest<HTMLElement>(
       ".review-scroll-stage",
     ) ?? null;
     const previousSelectedElement = selectedElementRef.current;
     const previousSelectedSourceSelection = selectedSourceSelectionRef.current;
-    const previousActiveTextRange = cloneActiveTextRange(activeTextRangeRef.current);
-    const viewportSnapshot = captureRuntimeViewportSnapshot({
+    const presentationAnchor = captureRuntimePresentationAnchor({
       iframe: currentFrame,
-      sharedScrollElement,
+      outerScrollElement: sharedScrollElement,
       sourceIndex: sourceIndexRef.current,
-      selectedElement: activeEditForViewport?.selectionElement
-        ?? previousSelectedElement,
+      selectedElement: previousSelectedElement,
       selectedSourceSelection: previousSelectedSourceSelection,
-      nativeSelection: activeEditForViewport?.selection
-        ?? retainNativeEditFocusRef.current?.selection
-        ?? previousPendingNativeEditResume?.selection
-        ?? null,
-      caretOffsetYOverride: previousPendingNativeEditResume?.caretOffsetY,
     });
     if (!pendingSelectionRef.current && selectedSourceSelectionRef.current) {
       pendingSelectionRef.current = selectedSourceSelectionRef.current;
@@ -2810,28 +2298,54 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     if (sourceMapFailed) {
       pendingSelectionRef.current = previousPendingSelection;
       pendingToolbarVisibleRef.current = previousPendingToolbarVisible;
-      pendingNativeEditResumeRef.current = null;
       containerRef.current?.removeAttribute("data-runtime-handoff");
+      if (staticDisabled) publishRuntimeDegradation("last-known-good-readonly");
       return true;
     }
 
-    const runtimeGrant = editRuntimeGrant;
-    if (!runtimeGrant || !sourceIndex) {
+    const runtimeGrant = staticDisabled ? null : editRuntimeGrant;
+    if ((!staticDisabled && !runtimeGrant) || !sourceIndex) {
       pendingSelectionRef.current = previousPendingSelection;
       pendingToolbarVisibleRef.current = previousPendingToolbarVisible;
-      pendingNativeEditResumeRef.current = null;
       containerRef.current?.removeAttribute("data-runtime-handoff");
+      if (staticDisabled) publishRuntimeDegradation("last-known-good-readonly");
       return true;
     }
-    const attempt = beginRuntimeAttempt(candidateGeneration, sourceIndex.sourceSha256);
-    onEditRuntimeLoadStartRef.current?.(runtimeGrant, attempt);
+    const attempt = beginRuntimeAttempt(
+      candidateGeneration,
+      sourceIndex.sourceSha256,
+      candidateKind,
+    );
+    if (runtimeGrant) onEditRuntimeLoadStartRef.current?.(runtimeGrant, attempt);
     let runtimeFrame: RuntimeFrameContext | null = null;
     let verificationToken = `frame_${candidateGeneration}_${
       globalThis.crypto?.randomUUID?.()
       ?? `${Date.now()}_${Math.random().toString(36).slice(2)}`
     }`;
     let prepared: string | null = null;
-    if (
+    if (staticDisabled) {
+      prepared = prepareCanvasFrameDocument(
+        instrumentedSource,
+        verificationToken,
+        {
+          mode: "static",
+          baseUrl: staticAssetBaseHref,
+          editorStyles: EDITOR_DOCUMENT_STYLES,
+        },
+      ) || prepareVerifiedFrameDocument(instrumentedSource, verificationToken, {
+        baseUrl: staticAssetBaseHref,
+        editorStyles: EDITOR_DOCUMENT_STYLES,
+      });
+      if (
+        prepared
+        && window.htmlAIRuntime?.diagnostics?.e2eStaticCandidateFailure === true
+      ) {
+        prepared = prepared.replaceAll(
+          verificationToken,
+          `${verificationToken}-invalid-static-candidate`,
+        );
+      }
+    } else if (
       runtimeGrant
       && sourceIndex?.source === source
       && editRuntimeProgramIdentity(source) === runtimeGrant.programIdentity
@@ -2863,38 +2377,39 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         }
       }
     }
-    if (!runtimeFrame || !prepared) {
-      completeRuntimeAttempt({
-        attempt,
-        grant: runtimeGrant,
-        verificationToken,
-        elementGeneration: candidateGeneration,
-        activation: "failed",
-        settled: false,
-      }, "rejected");
+    if ((!staticDisabled && !runtimeFrame) || !prepared) {
+      if (runtimeGrant) {
+        completeRuntimeAttempt({
+          attempt,
+          grant: runtimeGrant,
+          verificationToken,
+          elementGeneration: candidateGeneration,
+          activation: "failed",
+          settled: false,
+        }, "rejected");
+        publishRuntimeDegradation("static-preparing");
+        if (!deferLatestStaticRuntimeCandidate(attempt.candidateId)) {
+          lastRuntimeCandidateFailureRef.current = null;
+          publishRuntimeDegradation("last-known-good-readonly");
+        }
+      } else {
+        runtimeFrameCoordinatorRef.current!.settle(attempt, "rejected");
+        publishRuntimeDegradation("last-known-good-readonly");
+      }
       pendingSelectionRef.current = previousPendingSelection;
       pendingToolbarVisibleRef.current = previousPendingToolbarVisible;
-      pendingNativeEditResumeRef.current = null;
       containerRef.current?.removeAttribute("data-runtime-handoff");
       setEditFeedback({
         code: "canvas_c01_source_map",
-        title: "页面预览没有完成",
-        message: "当前画布仍保持上一帧完整内容，请重新载入后再试。",
+        title: staticDisabled ? "静态页面也没有完成" : "页面预览没有完成",
+        message: staticDisabled
+          ? "当前画布已切为只读；最新 HTML 仍可重新加载或导出。"
+          : "正在用最新 HTML 准备静态页面。",
         tone: "error",
         sticky: true,
         recovery: "reload",
       });
       return true;
-    }
-
-    if (pendingNativeEditResumeRef.current) {
-      pendingNativeEditResumeRef.current = {
-        ...pendingNativeEditResumeRef.current,
-        expectedFrameGeneration: candidateGeneration,
-        candidateId: attempt.candidateId,
-        sourceRevision: sourceIndex?.sourceSha256
-          ?? pendingNativeEditResumeRef.current.sourceRevision,
-      };
     }
 
     const candidate: RuntimeCandidate = {
@@ -2914,12 +2429,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       loaded: false,
       previousPendingSelection,
       previousPendingToolbarVisible,
-      viewportSnapshot,
-      sharedViewportElement: sharedScrollElement,
-      handoffScrollState: createRuntimeHandoffScrollState(),
-      refreshViewportSnapshot: () => undefined,
-      markProgrammaticScroll: () => undefined,
-      handoffScrollCleanup: () => undefined,
+      presentationAnchor,
       previousActive: {
         slotId: activeRuntimeSlotId,
         render: frameRender,
@@ -2936,77 +2446,12 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         expectedFrameToken: expectedFrameTokenRef.current,
         renderedSourceHtml: renderedSourceHtmlRef.current,
         renderedProjectionSha256: renderedProjectionSha256Ref.current,
-        appliedPageViewContext: appliedPageViewContextRef.current,
-        activeFrameConnectionPending: activeFrameConnectionPendingRef.current,
-        runtimeNeedsRerender: runtimeNeedsRerenderRef.current,
-        runtimeRefreshPending: runtimeRefreshPendingRef.current
-          ? { ...runtimeRefreshPendingRef.current }
-          : null,
-        pendingFrameViewport: pendingFrameViewportRef.current,
-        pendingSharedViewport: pendingSharedViewportRef.current,
-        pendingFrameRestoreEpoch: pendingFrameRestoreEpochRef.current,
-        nativeSessionNeedsCanonicalFence: nativeSessionNeedsCanonicalFenceRef.current,
-        nativeEditNeedsReload: nativeEditNeedsReloadRef.current,
-        pendingNativeEditResume: previousPendingNativeEditResume,
-        selectedElement: previousSelectedElement,
         selectedSourceSelection: previousSelectedSourceSelection,
-        activeTextRange: previousActiveTextRange,
         toolbarVisible: toolbarVisibleRef.current,
         runtimeGeneratedSelection: runtimeGeneratedSelectionRef.current,
         connectedFrame: connectedFrameRef.current,
       },
     };
-    candidate.refreshViewportSnapshot = (channel, sourceFrame = currentFrame) => {
-      const sourceDocument = sourceFrame?.contentDocument;
-      if (!sourceDocument) return;
-      const sourceIsPreviousActive = sourceFrame === currentFrame;
-      const sourceIndexForSnapshot = sourceIsPreviousActive
-        ? candidate.previousActive.sourceIndex
-        : candidate.sourceIndex;
-      const selectedElementForSnapshot = sourceIsPreviousActive
-        ? candidate.previousActive.selectedElement ?? selectedElementRef.current
-        : selectedElementRef.current;
-      const selectedSourceSelectionForSnapshot = (
-        sourceIsPreviousActive
-          ? candidate.previousActive.selectedSourceSelection
-          : selectedSourceSelectionRef.current
-      ) ?? selectedSourceSelectionRef.current;
-      const latest = captureRuntimeViewportSnapshot({
-        iframe: sourceFrame,
-        sharedScrollElement: candidate.sharedViewportElement,
-        sourceIndex: sourceIndexForSnapshot,
-        selectedElement: selectedElementForSnapshot,
-        selectedSourceSelection: selectedSourceSelectionForSnapshot,
-        nativeSelection: candidate.viewportSnapshot.nativeSelection,
-        caretOffsetYOverride: candidate.viewportSnapshot.caretOffsetY,
-      });
-      const previous = candidate.viewportSnapshot;
-      const anchorStableId = latest.viewportAnchorStableId
-        || previous.viewportAnchorStableId;
-      if (channel === "frame") {
-        Object.assign(previous, {
-          iframeScrollX: latest.iframeScrollX,
-          iframeScrollY: latest.iframeScrollY,
-          viewportAnchorStableId: anchorStableId,
-          viewportAnchorOffsetY: latest.viewportAnchorOffsetY,
-          viewportAnchorSharedOffsetY: latest.viewportAnchorSharedOffsetY,
-        });
-      } else {
-        Object.assign(previous, {
-          sharedScrollLeft: latest.sharedScrollLeft,
-          sharedScrollTop: latest.sharedScrollTop,
-          viewportAnchorStableId: anchorStableId,
-          viewportAnchorSharedOffsetY: latest.viewportAnchorSharedOffsetY,
-        });
-      }
-      if (latest.selectedStableId) previous.selectedStableId = latest.selectedStableId;
-    };
-    candidate.handoffScrollCleanup = attachRuntimeHandoffScrollListeners({
-      candidate,
-      iframe: currentFrame,
-      sharedScrollElement,
-      includeShared: true,
-    });
     if (runtimeFrame) {
       const registrationProperty = editRuntimeRegistrationProperty(
         runtimeFrame.grant.executionId,
@@ -3128,21 +2573,80 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       }
     }
     runtimeCandidateRef.current = candidate;
-    if (deferredRuntimeCandidateSourceRef.current === source) {
-      deferredRuntimeCandidateSourceRef.current = null;
+    if (candidateKind === "dynamic") {
+      lastRuntimeCandidateFailureRef.current = null;
     }
+    deferredRuntimeCandidateRef.current = null;
     setRuntimeCandidateRender(candidate.render);
     return true;
   }, [
     beginRuntimeAttempt,
     clearRuntimeInactiveSlot,
     completeRuntimeAttempt,
+    deferLatestStaticRuntimeCandidate,
     documentBaseHref,
     editRuntimeGrant,
     frameRender,
     activeRuntimeSlotId,
+    publishRuntimeDegradation,
+    staticAssetBaseHref,
   ]);
   startRuntimeCandidateRef.current = startRuntimeCandidate;
+
+  const replayDeferredRuntimeCandidate = useCallback(() => {
+    const request = deferredRuntimeCandidateRef.current;
+    if (!request || activeNativeEditRef.current) return;
+    if (
+      request.predecessorCandidateId
+      && lastRuntimeCandidateFailureRef.current !== request.predecessorCandidateId
+    ) {
+      if (deferredRuntimeCandidateRef.current?.lease === request.lease) {
+        deferredRuntimeCandidateRef.current = null;
+      }
+      return;
+    }
+    const latest = latestSourceProjectionRef.current;
+    if (
+      latest.source !== request.source
+      || (
+        latest.sourceIndex
+        && latest.sourceIndex.sourceSha256 !== request.sourceRevision
+      )
+    ) {
+      if (deferredRuntimeCandidateRef.current?.lease === request.lease) {
+        deferredRuntimeCandidateRef.current = null;
+      }
+      return;
+    }
+    if (runtimeCandidateRef.current || runtimePromotionRef.current) {
+      if (deferredRuntimeCandidateRef.current?.lease === request.lease) {
+        deferredRuntimeCandidateRef.current = null;
+      }
+      return;
+    }
+    const activeIdentity = runtimeFrameCoordinatorRef.current!.snapshot.lastKnownGood;
+    if (
+      activeIdentity?.sourceRevision === request.sourceRevision
+      && activeIdentity.kind === request.kind
+    ) {
+      if (deferredRuntimeCandidateRef.current?.lease === request.lease) {
+        deferredRuntimeCandidateRef.current = null;
+      }
+      lastRuntimeCandidateFailureRef.current = null;
+      if (request.kind === "static-disabled") {
+        publishRuntimeDegradation("static-visible");
+      }
+      return;
+    }
+    const started = startRuntimeCandidateRef.current(request.source, {
+      kind: request.kind,
+    });
+    if (
+      started
+      && deferredRuntimeCandidateRef.current?.lease === request.lease
+    ) deferredRuntimeCandidateRef.current = null;
+  }, [publishRuntimeDegradation]);
+  replayDeferredRuntimeCandidateRef.current = replayDeferredRuntimeCandidate;
 
   const finalizeRuntimeCandidatePromotion = useCallback((candidate: RuntimeCandidate) => {
     if (
@@ -3155,8 +2659,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     // and runtime registration only after that handoff point.
     candidate.previousActive.runtimeSourceRegistrationCleanup();
     candidate.previousActive.cleanupFrame();
-    candidate.handoffScrollCleanup();
-    candidate.handoffScrollCleanup = () => undefined;
     runtimePromotionRef.current = null;
     containerRef.current?.setAttribute("data-runtime-handoff", "active");
     scheduleRuntimeInactiveSlotClear(candidate.previousActive.render.elementGeneration);
@@ -3200,8 +2702,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     if (cleanupFrame !== null) window.cancelAnimationFrame(cleanupFrame);
     runtimeInactiveCleanupFrameRef.current = null;
     runtimeInactiveGenerationRef.current = null;
-    candidate.handoffScrollCleanup();
-    candidate.handoffScrollCleanup = () => undefined;
     candidate.registrationCleanup();
     if (candidate.runtimeFrame) completeRuntimeAttempt(candidate.runtimeFrame, outcome);
     else runtimeFrameCoordinatorRef.current!.settle(candidate.attempt, outcome);
@@ -3217,61 +2717,31 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       previous.frameGeneration,
     );
     nativeDomGenerationRef.current = previous.nativeDomGeneration;
-    const latestSourceProjection = latestSourceProjectionRef.current;
-    const previousProjectionIsLatest = Boolean(
-      previous.sourceIndex
-      && latestSourceProjection.sourceIndex
-      && previous.sourceIndex.sourceSha256 === latestSourceProjection.sourceIndex.sourceSha256
-      && previous.frameSourceHtml === latestSourceProjection.source,
-    );
-    sourceIndexRef.current = previousProjectionIsLatest
-      ? previous.sourceIndex
-      : latestSourceProjection.sourceIndex;
-    frameSourceHtmlRef.current = previousProjectionIsLatest
-      ? previous.frameSourceHtml
-      : latestSourceProjection.source;
+    // Projection refs describe the visible last-known-good frame. The latest
+    // Working HTML remains independently authoritative in latestSourceProjectionRef.
+    sourceIndexRef.current = previous.sourceIndex;
+    frameSourceHtmlRef.current = previous.frameSourceHtml;
     frameWrittenHtmlRef.current = previous.frameWrittenHtml;
     expectedFrameHtmlRef.current = previous.expectedFrameHtml;
     expectedFrameTokenRef.current = previous.expectedFrameToken;
-    renderedSourceHtmlRef.current = previousProjectionIsLatest
-      ? previous.renderedSourceHtml
-      : null;
+    renderedSourceHtmlRef.current = previous.renderedSourceHtml;
     renderedProjectionSha256Ref.current = previous.renderedProjectionSha256;
-    appliedPageViewContextRef.current = previous.appliedPageViewContext;
-    activeFrameConnectionPendingRef.current = previous.activeFrameConnectionPending;
-    runtimeNeedsRerenderRef.current = previous.runtimeNeedsRerender;
-    runtimeRefreshPendingRef.current = previous.runtimeRefreshPending
-      ? { ...previous.runtimeRefreshPending }
-      : null;
-    syncRuntimeRefreshDiagnostics();
-    nativeSessionNeedsCanonicalFenceRef.current = previous.nativeSessionNeedsCanonicalFence;
-    nativeEditNeedsReloadRef.current = previous.nativeEditNeedsReload;
-    pendingFrameViewportRef.current = previous.pendingFrameViewport;
-    pendingSharedViewportRef.current = previous.pendingSharedViewport;
+    activeFrameConnectionPendingRef.current = false;
+    pendingFrameViewportRef.current = null;
+    pendingSharedViewportRef.current = null;
     // Runtime activation failed after promotion. The old frame remains the
     // source-backed rollback target, but the failed checkpoint must not
     // restore native editing on that frame implicitly.
-    pendingNativeEditResumeRef.current = null;
     // Invalidate every rAF scheduled by the failed candidate before restoring
     // the previous generation's pending viewport/selection state.
-    pendingFrameRestoreEpochRef.current = previous.pendingFrameRestoreEpoch + 1;
+    pendingFrameRestoreEpochRef.current += 1;
     pendingSelectionRef.current = candidate.previousPendingSelection;
     pendingToolbarVisibleRef.current = candidate.previousPendingToolbarVisible;
     selectedElementRef.current?.removeAttribute("data-html-canvas-selected");
     selectedElementRef.current?.removeAttribute(GLOBAL_SELECTION_ATTRIBUTE);
-    selectedElementRef.current = previous.selectedElement;
-    if (previous.selectedElement?.isConnected && previous.selectedSourceSelection) {
-      previous.selectedElement.setAttribute(
-        "data-html-canvas-selected",
-        previous.selectedSourceSelection.level,
-      );
-      previous.selectedElement.toggleAttribute(
-        GLOBAL_SELECTION_ATTRIBUTE,
-        isPageRootSelection(previous.selectedSourceSelection),
-      );
-    }
+    selectedElementRef.current = null;
     selectedSourceSelectionRef.current = previous.selectedSourceSelection;
-    activeTextRangeRef.current = previous.activeTextRange;
+    activeTextRangeRef.current = null;
     runtimeGeneratedSelectionRef.current = previous.runtimeGeneratedSelection;
     cleanupFrameRef.current = previous.cleanupFrame;
     connectedFrameRef.current = previous.connectedFrame;
@@ -3288,14 +2758,13 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       setSelection(previous.selectedSourceSelection);
       setRuntimeGeneratedSelection(previous.runtimeGeneratedSelection);
       setToolbarVisible(previous.toolbarVisible);
-      setHasTextRange(Boolean(previous.activeTextRange));
+      setHasTextRange(false);
     });
     syncRuntimeCandidateDiagnostics();
     return true;
   }, [
     completeRuntimeAttempt,
     syncRuntimeCandidateDiagnostics,
-    syncRuntimeRefreshDiagnostics,
   ]);
   rollbackRuntimePromotionRef.current = rollbackRuntimeCandidatePromotion;
 
@@ -3336,17 +2805,8 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
 
     const promotedGeneration = candidate.render.elementGeneration;
     const previous = candidate.previousActive;
-    pendingFrameViewportRef.current = {
-      left: candidate.viewportSnapshot.iframeScrollX,
-      top: candidate.viewportSnapshot.iframeScrollY,
-    };
-    pendingSharedViewportRef.current = candidate.sharedViewportElement
-      ? {
-          element: candidate.sharedViewportElement,
-          left: candidate.viewportSnapshot.sharedScrollLeft,
-          top: candidate.viewportSnapshot.sharedScrollTop,
-        }
-      : null;
+    pendingFrameViewportRef.current = null;
+    pendingSharedViewportRef.current = null;
     pendingFrameRestoreEpochRef.current += 1;
     candidate.registrationCleanup();
     runtimeCandidateRef.current = null;
@@ -3393,8 +2853,21 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     outcome: Exclude<HtmlCanvasEditRuntimeLoadOutcome, "ready">,
   ): boolean => {
     if (runtimeCandidateRef.current !== candidate) return false;
-    return cancelRuntimeCandidateRef.current(candidate, outcome);
-  }, []);
+    const candidateKind = candidate.attempt.kind;
+    const cancelled = cancelRuntimeCandidateRef.current(candidate, outcome);
+    if (!cancelled || outcome === "superseded") return cancelled;
+    if (candidateKind === "static-disabled") {
+      lastRuntimeCandidateFailureRef.current = null;
+      publishRuntimeDegradation("last-known-good-readonly");
+      return true;
+    }
+    publishRuntimeDegradation("static-preparing");
+    if (!deferLatestStaticRuntimeCandidate(candidate.attempt.candidateId)) {
+      lastRuntimeCandidateFailureRef.current = null;
+      publishRuntimeDegradation("last-known-good-readonly");
+    }
+    return true;
+  }, [deferLatestStaticRuntimeCandidate, publishRuntimeDegradation]);
   failRuntimeCandidateActivationRef.current = failRuntimeCandidate;
 
   const connectRuntimeCandidate = useCallback((
@@ -3534,7 +3007,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     const targetIds = sortedCommentLayoutTargetIds(layoutTargets);
     const textEditing = Boolean(
       activeNativeEditRef.current
-      || pendingNativeEditResumeRef.current,
     );
     const preservePreparedFrameOverlay = Boolean(
       container?.getAttribute("data-runtime-handoff") === "preparing"
@@ -4793,13 +4265,11 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         selection,
         focus: true,
         toolbarVisible: true,
-        caretOffsetY: runtimeCaretOffsetY(documentNode, rootElement),
         ...(active.fragmentTargetRef
           ? { fragmentTargetRef: active.fragmentTargetRef }
           : {}),
       },
       target,
-      selection,
     );
   }, [clearNativeEditCheckpointTimer, discardPendingNativeCommands, endRuntimeNativeEdit]);
 
@@ -5080,7 +4550,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     trigger: NativeEditCheckpointTrigger = "manual",
     {
       replayQueuedUserCommand = false,
-      resumeAfterRuntimeHandoff = false,
       deferRuntimeRefresh = false,
     }: FinishNativeEditingOptions = {},
   ): NativeEditCommitResult => {
@@ -5117,30 +4586,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         runtimeFrameRef.current?.settled
         && runtimeFrameRef.current.elementGeneration === frameLoadGenerationRef.current
       ) ? runtimeFrameRef.current : null;
-      const runtimeNativeResume = resumeAfterRuntimeHandoff
-        && settledRuntimeFrame
-        && runtimeNeedsRerenderRef.current
-        ? {
-            fenceId: ++nativeEditFenceSequenceRef.current,
-            target,
-            selection: { ...active.selection },
-            focus: Boolean(
-              rootElement.ownerDocument.activeElement === rootElement
-              || (
-                rootElement.ownerDocument.activeElement
-                && rootElement.contains(rootElement.ownerDocument.activeElement)
-              ),
-            ),
-            toolbarVisible: toolbarVisibleRef.current,
-            caretOffsetY: runtimeCaretOffsetY(
-              rootElement.ownerDocument,
-              rootElement,
-            ),
-            ...(active.fragmentTargetRef
-              ? { fragmentTargetRef: active.fragmentTargetRef }
-              : {}),
-          }
-        : null;
       const frameReloadRequired = (
         nativeEditNeedsReloadRef.current
         || !rootElement.isConnected
@@ -5164,13 +4609,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         && runtimeNeedsRerenderRef.current
         && !deferRuntimeRefresh
       ) {
-        pendingNativeEditResumeRef.current = runtimeNativeResume
-          ? {
-              ...runtimeNativeResume,
-              expectedFrameGeneration: frameLoadGenerationRef.current + 1,
-              sourceRevision: sourceIndexRef.current?.sourceSha256 ?? "",
-            }
-          : null;
         // Keep the current runtime document authoritative while the replacement
         // candidate is prepared. The native session has already ended, but its
         // selection host is still the managed visual target in the old frame.
@@ -5192,7 +4630,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         // An explicit finish never resumes native editing after the new frame
         // is connected. This is essential when a direct-text fragment was
         // deleted: its source target no longer exists to restore.
-        pendingNativeEditResumeRef.current = null;
         selectedElementRef.current = null;
         pendingSelectionRef.current = target;
         pendingToolbarVisibleRef.current = true;
@@ -5216,7 +4653,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         ? selectionElement.isConnected
         : rootElement.isConnected && selectionElement.isConnected;
       if (!previewHostStillMounted) {
-        pendingNativeEditResumeRef.current = null;
         selectedElementRef.current = null;
         pendingSelectionRef.current = target;
         pendingToolbarVisibleRef.current = true;
@@ -5301,12 +4737,10 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       )
     ) return;
     const committed = finishNativeEditing(commitPendingEdit, "manual", {
-      resumeAfterRuntimeHandoff: false,
       deferRuntimeRefresh,
     });
     if (!committed.ok) return;
     pendingFrameRestoreEpochRef.current += 1;
-    pendingNativeEditResumeRef.current = null;
     pendingSelectionRef.current = null;
     pendingToolbarVisibleRef.current = false;
     selectedElementRef.current?.removeAttribute("data-html-canvas-selected");
@@ -5414,7 +4848,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
               levelOverride,
             ));
         const committed = finishNativeEditing(true, "manual", {
-          resumeAfterRuntimeHandoff: false,
         });
         if (!committed.ok) return activeNativeEdit.target;
         if (committed.frameReloading) {
@@ -5615,7 +5048,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   const startEditing = useCallback((
     caretPoint?: TextCaretPoint,
     restoredSelection?: NativeEditSelection,
-    options: StartNativeEditingOptions = {},
   ): boolean => {
     hoverControllerRef.current?.hide();
     containerRef.current?.setAttribute("data-native-start-status", "starting");
@@ -5627,11 +5059,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       return false;
     }
     const runtimePromotion = runtimePromotionRef.current;
-    const runtimeResumeCandidate = options.runtimeResumeCandidate;
-    if (
-      (runtimePromotion && runtimePromotion.attempt.candidateId !== runtimeResumeCandidate?.candidateId)
-      || (!runtimePromotion && runtimeResumeCandidate)
-    ) {
+    if (runtimePromotion) {
       containerRef.current?.setAttribute(
         "data-native-start-status",
         "runtime-handoff-positioning",
@@ -5987,9 +5415,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           affinity: "right",
         },
       };
-      if (!runtimeFrameCoordinatorRef.current!.beginNativeEdit({
-        candidate: runtimeResumeCandidate ?? null,
-      })) {
+      if (!runtimeFrameCoordinatorRef.current!.beginNativeEdit()) {
         throw new Error("Runtime handoff is not ready for this native edit transaction.");
       }
       runtimeNativeEditStarted = true;
@@ -6133,7 +5559,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           "target-switch",
           () => {
             const committed = finishNativeEditing(true, "manual", {
-              resumeAfterRuntimeHandoff: false,
               deferRuntimeRefresh: true,
             });
             if (committed.ok) window.queueMicrotask(() => moveSelected(direction));
@@ -6141,7 +5566,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           { direction },
         )) return true;
         const committed = finishNativeEditing(true, "manual", {
-          resumeAfterRuntimeHandoff: false,
           deferRuntimeRefresh: true,
         });
         if (!committed.ok || committed.frameReloading) return false;
@@ -6267,7 +5691,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         "target-switch",
         () => {
           const committed = finishNativeEditing(true, "manual", {
-            resumeAfterRuntimeHandoff: false,
             deferRuntimeRefresh: true,
           });
           if (committed.ok) {
@@ -6277,7 +5700,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         { action, destination },
       )) return true;
       const committed = finishNativeEditing(true, "manual", {
-        resumeAfterRuntimeHandoff: false,
         deferRuntimeRefresh: true,
       });
       if (!committed.ok || committed.frameReloading) return false;
@@ -6352,7 +5774,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         "target-switch",
         () => {
           const committed = finishNativeEditing(true, "manual", {
-            resumeAfterRuntimeHandoff: false,
             deferRuntimeRefresh: true,
           });
           if (committed.ok) window.queueMicrotask(() => insertElement(options));
@@ -6360,7 +5781,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         options,
       )) return true;
       const committed = finishNativeEditing(true, "manual", {
-        resumeAfterRuntimeHandoff: false,
         deferRuntimeRefresh: true,
       });
       if (!committed.ok || committed.frameReloading) return false;
@@ -6404,7 +5824,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         )
       ) return activeNativeEditRef.current?.target ?? point.selection;
       const committed = finishNativeEditing(true, "manual", {
-        resumeAfterRuntimeHandoff: false,
       });
       if (!committed.ok) return activeNativeEditRef.current?.target ?? point.selection;
       selectedElementRef.current?.removeAttribute("data-html-canvas-selected");
@@ -6720,7 +6139,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         || (activeElement && active.rootElement.contains(activeElement)),
       ),
       toolbarVisible: toolbarVisibleRef.current,
-      caretOffsetY: runtimeCaretOffsetY(documentNode, active.rootElement),
       ...(active.fragmentTargetRef
         ? { fragmentTargetRef: active.fragmentTargetRef }
         : {}),
@@ -6751,41 +6169,14 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     source: string,
     bookmark: NativeEditFenceBookmark | null,
     target: HtmlCanvasSelection | null,
-    selection?: NativeEditSelection,
     options: { reuseDocument?: boolean } = {},
   ) => {
     nativeEditFenceSequenceRef.current += 1;
-    const fenceId = nativeEditFenceSequenceRef.current;
     const reuseDocument = options.reuseDocument === true;
-    const expectedFrameGeneration = reuseDocument
-      ? frameLoadGenerationRef.current
-      : frameLoadGenerationRef.current + 1;
-    const sourceRevision = (() => {
-      try {
-        return buildSourceIndex(source).sourceSha256;
-      } catch {
-        return "";
-      }
-    })();
     pendingSelectionRef.current = target;
     pendingToolbarVisibleRef.current = target
       ? bookmark?.toolbarVisible ?? toolbarVisibleRef.current
       : false;
-    pendingNativeEditResumeRef.current = bookmark && target
-      ? {
-          ...bookmark,
-          fenceId,
-          target,
-          selection: selection ?? bookmark.selection,
-          focus: true,
-          expectedFrameGeneration,
-          sourceRevision,
-        }
-      : null;
-    containerRef.current?.setAttribute(
-      "data-native-fence-resume",
-      `queued:${target?.id ?? "none"}:${target?.resolution ?? "none"}:${expectedFrameGeneration}`,
-    );
     selectedSourceSelectionRef.current = target;
     const currentRuntime = runtimeFrameRef.current;
     const preserveRuntimeActiveFrame = Boolean(
@@ -6803,16 +6194,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       immediate: !reuseDocument,
       reuseDocument,
     });
-    containerRef.current?.setAttribute(
-      "data-native-fence-resume",
-      `loaded:${frameLoadGenerationRef.current}:${expectedFrameTokenRef.current
-        && (
-          iframeRef.current?.srcdoc.includes(expectedFrameTokenRef.current)
-          || frameWrittenHtmlRef.current?.includes(expectedFrameTokenRef.current)
-        )
-        ? "current"
-        : "stale"}`,
-    );
   }, [loadFrameSource]);
   queueNativeFenceReloadRef.current = queueNativeFenceReload;
 
@@ -6917,7 +6298,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       : false;
     if (endBehavior === "leave-canvas" && !preserveForHistory) {
       pendingFrameRestoreEpochRef.current += 1;
-      pendingNativeEditResumeRef.current = null;
       pendingSelectionRef.current = null;
       pendingToolbarVisibleRef.current = false;
       const sourceProjectionCurrent = Boolean(
@@ -6951,7 +6331,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       fencedDocumentCleanupRef.current();
       if (!resumeEditing) {
         pendingFrameRestoreEpochRef.current += 1;
-        pendingNativeEditResumeRef.current = null;
         pendingSelectionRef.current = null;
         pendingToolbarVisibleRef.current = false;
       }
@@ -6967,11 +6346,9 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         frameSourceHtmlRef.current,
         resumeEditing ? bookmark : null,
         target,
-        bookmark?.selection,
       );
     } else if (!resumeEditing && !preserveForHistory) {
       pendingFrameRestoreEpochRef.current += 1;
-      pendingNativeEditResumeRef.current = null;
       pendingSelectionRef.current = null;
       pendingToolbarVisibleRef.current = false;
     }
@@ -7048,7 +6425,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         "history-editable-island",
       );
       pendingFrameRestoreEpochRef.current += 1;
-      pendingNativeEditResumeRef.current = null;
       pendingSelectionRef.current = null;
       pendingToolbarVisibleRef.current = false;
       nativeDomGenerationRef.current += 1;
@@ -7139,17 +6515,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         pendingSelectionRef.current = resumeTarget;
         pendingToolbarVisibleRef.current = Boolean(resumeTarget);
         selectedSourceSelectionRef.current = resumeTarget;
-        pendingNativeEditResumeRef.current = bookmark && resumeTarget
-          ? {
-              ...bookmark,
-              fenceId: ++nativeEditFenceSequenceRef.current,
-              target: resumeTarget,
-              selection: selection ?? bookmark.selection,
-              focus: true,
-              expectedFrameGeneration: frameLoadGenerationRef.current + 1,
-              sourceRevision: nextIndex.sourceSha256,
-            }
-          : null;
         loadFrameSource(source, {
           preserveViewport: true,
           forceRuntimeHandoff: true,
@@ -7172,7 +6537,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       source,
       bookmark,
       resumeTarget,
-      selection ?? bookmark?.selection,
       { reuseDocument: true },
     );
     return true;
@@ -7198,7 +6562,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       frameSourceHtmlRef.current,
       bookmark,
       bookmark?.target ?? selectedSourceSelectionRef.current,
-      bookmark?.selection,
     );
     return true;
   }, [queueNativeFenceReload]);
@@ -7251,14 +6614,14 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     setImperativeLocked(false);
     if (controlledInteractionLocked) return false;
     lockedRef.current = false;
-    readOnlyRef.current = readOnly;
+    readOnlyRef.current = effectiveReadOnly;
     enableReorderRef.current = enableReorder;
     iframeRef.current?.contentDocument?.documentElement.removeAttribute(
       "data-html-canvas-locked",
     );
     requestAnimationFrame(() => updateOverlayPosition());
     return true;
-  }, [controlledInteractionLocked, enableReorder, readOnly, updateOverlayPosition]);
+  }, [controlledInteractionLocked, effectiveReadOnly, enableReorder, updateOverlayPosition]);
 
   const showCommitBlocked = useCallback((reason?: string) => {
     setEditFeedback({
@@ -7345,7 +6708,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       let frameReloading = false;
       if (activeNativeEditRef.current) {
         const committed = finishNativeEditing(true, "manual", {
-          resumeAfterRuntimeHandoff: false,
         });
         if (!committed.ok) return false;
         frameReloading = Boolean(committed.frameReloading);
@@ -7482,7 +6844,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     }
     if (html === lastEmittedHtmlRef.current && previous.baseHref === documentBaseHref) return;
     if (activeNativeEditRef.current) detachNativeEditForFence();
-    pendingNativeEditResumeRef.current = null;
     pendingHistoryBookmarkRef.current = null;
     pendingHistoryCanonicalFenceRef.current = false;
     const preserveRuntimeActiveFrame = Boolean(
@@ -7507,7 +6868,9 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     const previousGrant = lastEditRuntimeGrantRef.current;
     lastEditRuntimeGrantRef.current = editRuntimeGrant;
     if (!editRuntimeGrant) {
-      deferredRuntimeCandidateSourceRef.current = null;
+      if (deferredRuntimeCandidateRef.current?.kind === "dynamic") {
+        deferredRuntimeCandidateRef.current = null;
+      }
       return;
     }
     if (
@@ -7550,7 +6913,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     }
     const shouldLock = controlledInteractionLocked || imperativeLockRef.current;
     lockedRef.current = shouldLock;
-    readOnlyRef.current = readOnly || shouldLock;
+    readOnlyRef.current = effectiveReadOnly || shouldLock;
     enableReorderRef.current = enableReorder && !shouldLock;
     // During a frame navigation Chromium can expose a transient Document before
     // its root element exists. Lock synchronization must not abort the React
@@ -7562,7 +6925,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     clearSelection,
     controlledInteractionLocked,
     enableReorder,
-    readOnly,
+    effectiveReadOnly,
     unlockNow,
     updateOverlayPosition,
   ]);
@@ -7579,22 +6942,17 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       endRuntimeNativeEdit();
       discardPendingNativeCommands("unmounted");
       retainNativeEditFocusRef.current = null;
-      pendingNativeEditResumeRef.current = null;
       pendingHistoryBookmarkRef.current = null;
       pendingHistoryCanonicalFenceRef.current = false;
       const runtimePromotion = runtimePromotionRef.current;
       runtimePromotionRef.current = null;
       const runtimeCandidate = runtimeCandidateRef.current;
       runtimeCandidateRef.current = null;
-      deferredRuntimeCandidateSourceRef.current = null;
-      runtimeCandidate?.handoffScrollCleanup();
+      deferredRuntimeCandidateRef.current = null;
       runtimeCandidate?.registrationCleanup();
-      if (runtimePromotion && runtimePromotion !== runtimeCandidate) {
-        runtimePromotion.handoffScrollCleanup();
-      }
       runtimeCandidateIframeRef.current = null;
-      const retiringCleanupFrame = runtimeInactiveCleanupFrameRef.current;
-      if (retiringCleanupFrame !== null) window.cancelAnimationFrame(retiringCleanupFrame);
+      const previousCleanupFrame = runtimeInactiveCleanupFrameRef.current;
+      if (previousCleanupFrame !== null) window.cancelAnimationFrame(previousCleanupFrame);
       runtimeInactiveCleanupFrameRef.current = null;
       runtimeInactiveGenerationRef.current = null;
       const runtimeFrame = runtimeFrameRef.current;
@@ -7692,13 +7050,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       performance.mark("pageroot:canvas:render-verified", { detail: Object.freeze({ content: runtimeFrame ? "runtime-loaded" : "static-complete" }) });
       fencedDocumentCleanupRef.current();
       if (!runtimeFrame) {
-        window.requestAnimationFrame(() => {
-          const source = deferredRuntimeCandidateSourceRef.current;
-          if (!source || activeNativeEditRef.current) return;
-          if (startRuntimeCandidateRef.current(source)) {
-            deferredRuntimeCandidateSourceRef.current = null;
-          }
-        });
+        window.requestAnimationFrame(() => replayDeferredRuntimeCandidateRef.current());
       }
     }
 
@@ -7824,7 +7176,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       const activeEdit = activeNativeEditRef.current;
       if (activeEdit?.mode === "text-fragment") {
         const committed = finishNativeEditing(true, "manual", {
-          resumeAfterRuntimeHandoff: false,
         });
         if (!committed.ok || committed.frameReloading) return;
       }
@@ -7875,7 +7226,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       const activeEdit = activeNativeEditRef.current;
       if (activeEdit?.mode === "text-fragment") {
         const committed = finishNativeEditing(true, "manual", {
-          resumeAfterRuntimeHandoff: false,
         });
         if (!committed.ok || committed.frameReloading) return;
       }
@@ -8215,7 +7565,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     const pendingToolbarVisible = pendingToolbarVisibleRef.current;
     const pendingViewport = pendingFrameViewportRef.current;
     const pendingSharedViewport = pendingSharedViewportRef.current;
-    const pendingNativeResume = pendingNativeEditResumeRef.current;
     const pendingRestoreEpoch = pendingFrameRestoreEpochRef.current;
     const sharedScrollElementForHandoff = isRuntimePromotion
       ? pendingSharedViewport?.element ?? null
@@ -8224,19 +7573,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       updateOverlayPosition();
     };
     sharedScrollElementForHandoff?.addEventListener("scroll", handleSharedScroll);
-    if (isRuntimePromotion && promotedCandidate) {
-      const previousScrollCleanup = promotedCandidate.handoffScrollCleanup;
-      const candidateScrollCleanup = attachRuntimeHandoffScrollListeners({
-        candidate: promotedCandidate,
-        iframe,
-        sharedScrollElement: null,
-        includeShared: false,
-      });
-      promotedCandidate.handoffScrollCleanup = () => {
-        candidateScrollCleanup();
-        previousScrollCleanup();
-      };
-    }
 
     cleanupFrameRef.current = () => {
       cancelPendingHoverResolution();
@@ -8269,23 +7605,12 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       iframe,
       generation: connectedFrameGeneration,
     };
-    containerRef.current?.setAttribute(
-      "data-native-fence-resume",
-      `connected:${connectedFrameGeneration}:${pendingSelection?.id ?? "none"}:${pendingNativeResume?.fenceId ?? "none"}`,
-    );
     pendingSelectionRef.current = null;
     pendingToolbarVisibleRef.current = false;
     pendingFrameViewportRef.current = null;
     pendingSharedViewportRef.current = null;
     const positionRuntimeHandoff = (candidate: RuntimeCandidate) => {
-      let attempts = 0;
-      let stableCount = 0;
-      let previousFingerprint: RuntimeHandoffLayoutFingerprint | null = null;
-      let selectionRestored = !pendingSelection && !pendingNativeResume;
-      let nativeResumeAttempted = !pendingNativeResume;
-      let nativeResumeFailed = false;
-      const startedAt = performance.now();
-      const snapshot = candidate.viewportSnapshot;
+      const anchor = candidate.presentationAnchor;
       const frameView = documentNode.defaultView;
       if (candidate.runtimeFrame?.activation === "ready") {
         candidate.runtimeFrame.settled = true;
@@ -8295,456 +7620,138 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         );
       }
 
-      const isCurrent = () => {
-        return runtimePromotionRef.current === candidate
-          && runtimeFrameCoordinatorRef.current!.snapshot.latestCandidate?.candidateId
-            === candidate.attempt.candidateId
-          && iframe === iframeRef.current
-          && iframe.contentDocument === documentNode
-          && frameLoadGenerationRef.current === connectedFrameGeneration
-          && expectedFrameTokenRef.current === expectedToken
-          && containerRef.current?.getAttribute("data-runtime-handoff") === "positioning";
-      };
-      const userScrollIntentPending = (
-        channel: RuntimeHandoffScrollChannel,
-      ) => candidate.handoffScrollState[channel].userIntentPending;
-      const markProgrammaticScroll = (
-        channel: RuntimeHandoffScrollChannel,
-        left: number,
-        top: number,
-      ) => {
-        candidate.markProgrammaticScroll(channel, left, top);
-      };
-      const failHandoff = () => {
-        if (!isCurrent()) return;
-        rollbackRuntimePromotionRef.current(candidate, "failed");
-      };
-      const scheduleNextAttempt = () => {
-        if (!isCurrent()) return;
-        attempts += 1;
-        if (
-          attempts >= Math.ceil(EDIT_AUTHOR_RUNTIME_BUDGET.runtimeDeadlineMs / 16) + 30
-          || performance.now() - startedAt >= EDIT_AUTHOR_RUNTIME_BUDGET.runtimeDeadlineMs
-        ) {
-          failHandoff();
-          return;
-        }
-        requestAnimationFrame(attemptPositioning);
-      };
+      const isCurrent = () => (
+        runtimePromotionRef.current === candidate
+        && runtimeFrameCoordinatorRef.current!.snapshot.latestCandidate?.candidateId
+          === candidate.attempt.candidateId
+        && iframe === iframeRef.current
+        && iframe.contentDocument === documentNode
+        && frameLoadGenerationRef.current === connectedFrameGeneration
+        && expectedFrameTokenRef.current === expectedToken
+        && containerRef.current?.getAttribute("data-runtime-handoff") === "positioning"
+      );
       const maximumFrameScrollTop = () => Math.max(
         0,
-        (documentNode.scrollingElement || documentNode.documentElement).scrollHeight
-          - iframe.clientHeight,
+        (documentNode.scrollingElement?.scrollHeight || 0) - iframe.clientHeight,
       );
       const maximumFrameScrollLeft = () => Math.max(
         0,
-        (documentNode.scrollingElement || documentNode.documentElement).scrollWidth
-          - iframe.clientWidth,
+        (documentNode.scrollingElement?.scrollWidth || 0) - iframe.clientWidth,
       );
-      const frameScrollTarget = () => {
-        const maximum = maximumFrameScrollTop();
-        let targetTop = clampRuntimeScroll(snapshot.iframeScrollY, maximum);
-        if (
-          snapshot.viewportAnchorStableId
-          && snapshot.viewportAnchorOffsetY !== null
-        ) {
-          const anchor = runtimeSourceElementForStableId(
-            documentNode,
-            sourceIndexRef.current,
-            snapshot.viewportAnchorStableId,
-          );
-          const anchorTop = anchor?.getBoundingClientRect().top;
-          const desiredAnchorOffsetY = snapshot.viewportAnchorOffsetY;
-          if (
-            anchor
-            && desiredAnchorOffsetY !== null
-            && anchorTop !== undefined
-            && Number.isFinite(anchorTop)
-          ) {
-            targetTop = runtimeAnchorScrollTop({
-              currentScrollTop: frameView?.scrollY || 0,
-              currentAnchorOffsetY: anchorTop,
-              desiredAnchorOffsetY: desiredAnchorOffsetY,
-              maximumScrollTop: maximum,
-            });
-          }
-        }
-        return targetTop;
+      const anchorElement = () => runtimeSourceElementForStableId(
+        documentNode,
+        sourceIndexRef.current,
+        anchor.viewportAnchorStableId,
+      );
+      const positionFrame = () => {
+        if (!frameView) return;
+        const element = anchorElement();
+        const currentAnchorTop = element?.getBoundingClientRect().top;
+        const targetTop = (
+          element
+          && anchor.viewportAnchorScreenOffsetY !== null
+          && Number.isFinite(Number(currentAnchorTop))
+        )
+          ? runtimeAnchorScrollTop({
+              currentScrollTop: frameView.scrollY,
+              currentAnchorOffsetY: Number(currentAnchorTop),
+              desiredAnchorOffsetY: anchor.viewportAnchorScreenOffsetY,
+              maximumScrollTop: maximumFrameScrollTop(),
+            })
+          : clampRuntimeScroll(anchor.iframeScrollTop, maximumFrameScrollTop());
+        frameView.scrollTo({
+          left: clampRuntimeScroll(anchor.iframeScrollLeft, maximumFrameScrollLeft()),
+          top: targetTop,
+          behavior: "auto",
+        });
       };
-      const restoreFrameViewport = () => {
-        if (!frameView || userScrollIntentPending("frame")) {
-          return frameView?.scrollY || 0;
-        }
-        const targetTop = frameScrollTarget();
-        const targetLeft = clampRuntimeScroll(
-          snapshot.iframeScrollX,
-          maximumFrameScrollLeft(),
-        );
+      const positionOuterViewport = () => {
+        const outer = containerRef.current?.closest<HTMLElement>(".review-scroll-stage");
         if (
-          !runtimePositionWithinTolerance(frameView.scrollY, targetTop)
-          || !runtimePositionWithinTolerance(frameView.scrollX, targetLeft)
-        ) {
-          markProgrammaticScroll("frame", targetLeft, targetTop);
-          frameView.scrollTo({ left: targetLeft, top: targetTop, behavior: "auto" });
-        }
-        return targetTop;
-      };
-      const sharedAnchorViewportOffset = () => {
-        if (
-          !pendingSharedViewport
-          || snapshot.viewportAnchorStableId === null
-          || snapshot.viewportAnchorSharedOffsetY === null
-        ) return null;
-        const anchor = runtimeSourceElementForStableId(
-          documentNode,
-          sourceIndexRef.current,
-          snapshot.viewportAnchorStableId,
-        );
-        const anchorRect = anchor?.getBoundingClientRect();
-        const iframeRect = iframe.getBoundingClientRect();
-        const sharedRect = pendingSharedViewport.element.getBoundingClientRect();
-        if (!anchor || !anchorRect || !iframeRect || !sharedRect) return null;
-        return iframeRect.top - sharedRect.top + anchorRect.top;
-      };
-      const sharedScrollTarget = () => {
-        if (!pendingSharedViewport) return null;
-        const element = pendingSharedViewport.element;
-        const maximum = Math.max(0, element.scrollHeight - element.clientHeight);
-        let targetTop = clampRuntimeScroll(snapshot.sharedScrollTop, maximum);
-        const currentAnchorOffsetY = sharedAnchorViewportOffset();
-        if (
-          currentAnchorOffsetY !== null
-          && snapshot.viewportAnchorSharedOffsetY !== null
-        ) {
-          targetTop = runtimeAnchorScrollTop({
-            currentScrollTop: element.scrollTop,
-            currentAnchorOffsetY,
-            desiredAnchorOffsetY: snapshot.viewportAnchorSharedOffsetY,
-            maximumScrollTop: maximum,
-          });
-        }
-        return targetTop;
-      };
-      const restoreSharedViewportForHandoff = () => {
-        if (!pendingSharedViewport || userScrollIntentPending("shared")) {
-          return pendingSharedViewport?.element.scrollTop || 0;
-        }
-        const element = pendingSharedViewport.element;
-        if (!element.isConnected) return element.scrollTop;
-        const targetTop = sharedScrollTarget() ?? element.scrollTop;
-        const targetLeft = clampRuntimeScroll(
-          snapshot.sharedScrollLeft,
-          Math.max(0, element.scrollWidth - element.clientWidth),
-        );
-        if (
-          !runtimePositionWithinTolerance(element.scrollTop, targetTop)
-          || !runtimePositionWithinTolerance(element.scrollLeft, targetLeft)
-        ) {
-          markProgrammaticScroll("shared", targetLeft, targetTop);
-          element.scrollTo({ left: targetLeft, top: targetTop, behavior: "auto" });
-        }
-        return targetTop;
-      };
-      const restoreSelectionAndNativeEdit = () => {
-        if (!selectionRestored) {
-          const target = pendingSelection ?? pendingNativeResume?.target ?? null;
-          if (!target || lockedRef.current) {
-            selectionRestored = true;
-          } else {
-            const restoredTarget = selectTarget(target, {
-              reveal: false,
-              showToolbar: pendingNativeResume?.toolbarVisible
-                ?? pendingToolbarVisible,
-            });
-            selectionRestored = Boolean(restoredTarget);
-            containerRef.current?.setAttribute(
-              "data-native-fence-resume",
-              `positioning-selected:${restoredTarget?.id ?? "none"}`,
-            );
-            if (
-              !pendingNativeResume
-              && restoredTarget
-              && candidate.previousActive.activeTextRange
-              && sourceIndexRef.current
-            ) {
-              const restoredTextRange = restoreRuntimeTextSelection(
-                documentNode,
-                sourceIndexRef.current,
-                candidate.previousActive.activeTextRange,
-                restoredTarget,
-              );
-              activeTextRangeRef.current = restoredTextRange;
-              setHasTextRange(Boolean(restoredTextRange));
-              if (restoredTextRange) updateSelectedStyle();
-            }
-          }
-        }
-        if (nativeResumeAttempted || !pendingNativeResume || !selectionRestored) return;
-        const resumeIsCurrent = (
-          pendingNativeEditResumeRef.current?.fenceId === pendingNativeResume.fenceId
-          && pendingNativeResume.expectedFrameGeneration === connectedFrameGeneration
-          && pendingNativeResume.sourceRevision === sourceIndexRef.current?.sourceSha256
-          && pendingNativeResume.candidateId === candidate.attempt.candidateId
-        );
-        if (!resumeIsCurrent) {
-          pendingNativeEditResumeRef.current = null;
-          nativeResumeAttempted = true;
-          return;
-        }
-        if (!pendingNativeResume.focus) {
-          pendingNativeEditResumeRef.current = null;
-          nativeResumeAttempted = true;
-          return;
-        }
-        if (
-          pendingNativeResume.fragmentTargetRef
-          && selectedElementRef.current
-          && sourceIndexRef.current
-        ) {
-          const restoredFragmentRange = activeRangeForTextFragmentTarget(
-            selectedElementRef.current,
-            sourceIndexRef.current,
-            pendingNativeResume.target,
-            pendingNativeResume.fragmentTargetRef,
-          );
-          activeTextRangeRef.current = restoredFragmentRange;
-          setHasTextRange(Boolean(restoredFragmentRange));
-        }
-        const resumed = startEditing(
-          undefined,
-          pendingNativeResume.selection,
-          { runtimeResumeCandidate: candidate.attempt },
-        );
-        const active = activeNativeEditRef.current;
-        if (resumed && active) {
-          active.rootElement.focus({ preventScroll: true });
-          active.session.restoreSelection(pendingNativeResume.selection);
-          pendingNativeEditResumeRef.current = null;
-          nativeResumeAttempted = true;
-          containerRef.current?.setAttribute("data-native-fence-resume", "positioning-resumed");
-        } else {
-          nativeResumeFailed = true;
-          nativeResumeAttempted = true;
-          containerRef.current?.setAttribute("data-native-fence-resume", "positioning-resume-failed");
-        }
-      };
-      const correctCaretViewport = () => {
-        const desiredCaretOffsetY = snapshot.caretOffsetY;
-        if (
-          !frameView
-          || userScrollIntentPending("frame")
-          || desiredCaretOffsetY === null
+          !outer
+          || anchor.outerScrollLeft === null
+          || anchor.outerScrollTop === null
         ) return;
-        const active = activeNativeEditRef.current;
-        if (!active || active.rootElement.ownerDocument !== documentNode) return;
-        const caretTop = runtimeCaretOffsetY(documentNode, active.rootElement);
-        if (caretTop === null || !Number.isFinite(caretTop)) return;
+        outer.scrollTo({
+          left: clampRuntimeScroll(
+            anchor.outerScrollLeft,
+            Math.max(0, outer.scrollWidth - outer.clientWidth),
+          ),
+          top: clampRuntimeScroll(
+            anchor.outerScrollTop,
+            Math.max(0, outer.scrollHeight - outer.clientHeight),
+          ),
+          behavior: "auto",
+        });
+      };
+      const restoreLogicalSelection = () => {
+        if (!pendingSelection || lockedRef.current) return;
+        selectTarget(pendingSelection, {
+          reveal: false,
+          showToolbar: pendingToolbarVisible,
+        });
+      };
+      const correctAnchorOnce = () => {
+        if (!frameView) return;
+        const element = anchorElement();
+        if (!element || anchor.viewportAnchorScreenOffsetY === null) return;
+        const currentTop = element.getBoundingClientRect().top;
+        const viewportHeight = iframe.clientHeight;
+        if (
+          Math.abs(currentTop - anchor.viewportAnchorScreenOffsetY)
+            <= RUNTIME_HANDOFF_TOLERANCE_PX
+        ) return;
         const targetTop = runtimeAnchorScrollTop({
           currentScrollTop: frameView.scrollY,
-          currentAnchorOffsetY: caretTop,
-          desiredAnchorOffsetY: desiredCaretOffsetY,
+          currentAnchorOffsetY: currentTop,
+          desiredAnchorOffsetY: anchor.viewportAnchorScreenOffsetY,
           maximumScrollTop: maximumFrameScrollTop(),
         });
-        if (!runtimePositionWithinTolerance(frameView.scrollY, targetTop)) {
-          markProgrammaticScroll("frame", frameView.scrollX, targetTop);
-          frameView.scrollTo({
-            left: frameView.scrollX,
-            top: targetTop,
+        frameView.scrollTo({
+          left: frameView.scrollX,
+          top: targetTop,
+          behavior: "auto",
+        });
+        const corrected = element.getBoundingClientRect();
+        const residual = corrected.top - anchor.viewportAnchorScreenOffsetY;
+        const outer = containerRef.current?.closest<HTMLElement>(".review-scroll-stage");
+        if (
+          outer
+          && Math.abs(residual) > RUNTIME_HANDOFF_TOLERANCE_PX
+        ) {
+          outer.scrollTo({
+            left: outer.scrollLeft,
+            top: clampRuntimeScroll(
+              outer.scrollTop + residual,
+              Math.max(0, outer.scrollHeight - outer.clientHeight),
+            ),
             behavior: "auto",
           });
         }
-      };
-      const captureLayoutFingerprint = (): RuntimeHandoffLayoutFingerprint => {
-        const scrollingElement = documentNode.scrollingElement
-          || documentNode.documentElement;
-        const sharedElement = pendingSharedViewport?.element
-          ?? candidate.sharedViewportElement;
-        const active = activeNativeEditRef.current;
-        let nativeSelection: RuntimeViewportSnapshot["nativeSelection"] = null;
-        if (active?.rootElement.ownerDocument === documentNode) {
-          try {
-            nativeSelection = { ...active.session.getSelection() };
-          } catch {
-            nativeSelection = null;
+        const visibleRect = element.getBoundingClientRect();
+        const frameRect = iframe.getBoundingClientRect();
+        const outerRect = outer?.getBoundingClientRect();
+        if (outer && outerRect) {
+          const screenTop = frameRect.top + visibleRect.top;
+          const screenBottom = frameRect.top + visibleRect.bottom;
+          if (screenTop < outerRect.top) {
+            outer.scrollTop -= outerRect.top - screenTop;
+          } else if (screenBottom > outerRect.bottom) {
+            outer.scrollTop += screenBottom - outerRect.bottom;
           }
+        } else if (visibleRect.bottom <= 0 || visibleRect.top >= viewportHeight) {
+          element.scrollIntoView({ block: "nearest", inline: "nearest" });
         }
-        const viewport = captureRuntimeViewportSnapshot({
-          iframe,
-          sharedScrollElement: sharedElement,
-          sourceIndex: sourceIndexRef.current,
-          selectedElement: selectedElementRef.current,
-          selectedSourceSelection: selectedSourceSelectionRef.current
-            ?? pendingSelection
-            ?? pendingNativeResume?.target
-            ?? null,
-          nativeSelection,
-        });
-        return {
-          iframeWidth: iframe.clientWidth,
-          iframeHeight: iframe.clientHeight,
-          documentClientWidth: scrollingElement?.clientWidth || 0,
-          documentClientHeight: scrollingElement?.clientHeight || 0,
-          documentScrollWidth: scrollingElement?.scrollWidth || 0,
-          documentScrollHeight: scrollingElement?.scrollHeight || 0,
-          sharedClientWidth: sharedElement?.clientWidth ?? null,
-          sharedClientHeight: sharedElement?.clientHeight ?? null,
-          sharedScrollWidth: sharedElement?.scrollWidth ?? null,
-          sharedScrollHeight: sharedElement?.scrollHeight ?? null,
-          iframeScrollX: viewport.iframeScrollX,
-          iframeScrollY: viewport.iframeScrollY,
-          sharedScrollLeft: sharedElement?.scrollLeft ?? null,
-          sharedScrollTop: sharedElement?.scrollTop ?? null,
-          viewportAnchorStableId: viewport.viewportAnchorStableId,
-          viewportAnchorOffsetY: viewport.viewportAnchorOffsetY,
-          viewportAnchorSharedOffsetY: viewport.viewportAnchorSharedOffsetY,
-          selectedStableId: viewport.selectedStableId,
-          nativeSelection: viewport.nativeSelection,
-          caretOffsetY: viewport.caretOffsetY,
-        };
-      };
-      const updateStableFingerprint = () => {
-        const currentFingerprint = captureLayoutFingerprint();
-        stableCount = previousFingerprint
-          && runtimeHandoffLayoutFingerprintWithinTolerance(
-            currentFingerprint,
-            previousFingerprint,
-          )
-          ? stableCount + 1
-          : 1;
-        previousFingerprint = currentFingerprint;
-        return stableCount;
-      };
-      const validateHandoff = () => {
-        if (!frameView || !documentNode.body || iframe.clientHeight <= 0 || iframe.clientWidth <= 0) {
-          return false;
-        }
-        if (
-          userScrollIntentPending("frame")
-          || userScrollIntentPending("shared")
-        ) return false;
-        const expectedSelectedId = snapshot.selectedStableId
-          ?? pendingSelection?.elementId
-          ?? pendingNativeResume?.target.elementId
-          ?? null;
-        const actualSelectedId = runtimeStableIdForElement(
-          selectedElementRef.current,
-          sourceIndexRef.current,
-        );
-        if (expectedSelectedId && actualSelectedId !== expectedSelectedId) {
-          return false;
-        }
-        if (nativeResumeFailed) return false;
-        if (pendingNativeResume && pendingNativeResume.focus) {
-          const active = activeNativeEditRef.current;
-          const activeElement = documentNode.activeElement;
-          if (
-            !active
-            || active.rootElement.ownerDocument !== documentNode
-            || !activeElement
-            || (activeElement !== active.rootElement && !active.rootElement.contains(activeElement))
-          ) return false;
-          const actualSelection = active.session.getSelection();
-          if (
-            actualSelection.anchor !== pendingNativeResume.selection.anchor
-            || actualSelection.focus !== pendingNativeResume.selection.focus
-          ) return false;
-          if (snapshot.caretOffsetY !== null) {
-            const caretTop = runtimeCaretOffsetY(documentNode, active.rootElement);
-            if (
-              caretTop === null
-              || (
-                !runtimePositionWithinTolerance(caretTop, snapshot.caretOffsetY)
-                && !runtimeAnchorOffsetIsClamped({
-                  currentScrollTop: frameView.scrollY,
-                  currentAnchorOffsetY: caretTop,
-                  desiredAnchorOffsetY: snapshot.caretOffsetY,
-                  maximumScrollTop: maximumFrameScrollTop(),
-                })
-              )
-            ) {
-              return false;
-            }
-          }
-        }
-        const expectedTop = frameScrollTarget();
-        if (!runtimePositionWithinTolerance(frameView.scrollY, expectedTop)) {
-          return false;
-        }
-        if (!runtimePositionWithinTolerance(
-          frameView.scrollX,
-          clampRuntimeScroll(snapshot.iframeScrollX, maximumFrameScrollLeft()),
-        )) return false;
-        if (snapshot.viewportAnchorStableId && snapshot.viewportAnchorOffsetY !== null) {
-          const anchor = runtimeSourceElementForStableId(
-            documentNode,
-            sourceIndexRef.current,
-            snapshot.viewportAnchorStableId,
-          );
-          if (anchor) {
-            const anchorTop = anchor.getBoundingClientRect().top;
-            const anchorActual = pendingSharedViewport
-              && snapshot.viewportAnchorSharedOffsetY !== null
-              ? sharedAnchorViewportOffset()
-              : anchorTop;
-            const anchorExpected = pendingSharedViewport
-              && snapshot.viewportAnchorSharedOffsetY !== null
-              ? snapshot.viewportAnchorSharedOffsetY
-              : snapshot.viewportAnchorOffsetY;
-            if (
-              anchorActual === null
-              || (
-                !runtimePositionWithinTolerance(anchorActual, anchorExpected)
-                && !runtimeAnchorOffsetIsClamped({
-                  currentScrollTop: pendingSharedViewport
-                    ? pendingSharedViewport.element.scrollTop
-                    : frameView.scrollY,
-                  currentAnchorOffsetY: anchorActual,
-                  desiredAnchorOffsetY: anchorExpected,
-                  maximumScrollTop: pendingSharedViewport
-                    ? Math.max(
-                      0,
-                      pendingSharedViewport.element.scrollHeight
-                        - pendingSharedViewport.element.clientHeight,
-                    )
-                    : maximumFrameScrollTop(),
-                })
-              )
-            ) {
-              return false;
-            }
-          }
-        }
-        if (
-          pendingSharedViewport
-          && !runtimePositionWithinTolerance(
-            pendingSharedViewport.element.scrollTop,
-            sharedScrollTarget() ?? pendingSharedViewport.element.scrollTop,
-          )
-        ) return false;
-        if (
-          pendingSharedViewport
-          && !runtimePositionWithinTolerance(
-            pendingSharedViewport.element.scrollLeft,
-            clampRuntimeScroll(
-              snapshot.sharedScrollLeft,
-              Math.max(
-                0,
-                pendingSharedViewport.element.scrollWidth
-                  - pendingSharedViewport.element.clientWidth,
-              ),
-            ),
-          )
-        ) return false;
-        return true;
       };
       const activateHandoff = () => {
-        if (!isCurrent()) return false;
-        if (!validateHandoff()) return false;
+        if (!isCurrent()) return;
         flushSync(() => {
           renderedSourceHtmlRef.current = frameSourceHtmlRef.current;
           renderedProjectionSha256Ref.current = sourceIndexRef.current?.sourceSha256 ?? "";
           containerRef.current?.setAttribute("data-render-verified", "true");
-          performance.mark("pageroot:canvas:render-verified", { detail: Object.freeze({ content: "runtime-loaded" }) });
+          performance.mark("pageroot:canvas:render-verified", {
+            detail: Object.freeze({ content: "runtime-loaded" }),
+          });
           updateOverlayPosition({ allowRuntimeHandoff: true });
           containerRef.current?.setAttribute("data-runtime-handoff", "active");
         });
@@ -8757,48 +7764,47 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         ) {
           if (!runtimeReadyReportedRef.current.has(connectedRuntimeFrame)) {
             const settlement = completeRuntimeAttempt(connectedRuntimeFrame, "ready");
-            if (!settlement.accepted) return false;
+            if (!settlement.accepted) return;
             runtimeReadyReportedRef.current.add(connectedRuntimeFrame);
           }
+        } else if (candidate.attempt.kind === "static-disabled") {
+          const settlement = runtimeFrameCoordinatorRef.current!.settle(
+            candidate.attempt,
+            "ready",
+          );
+          if (!settlement.accepted) return;
+          publishRuntimeDegradation("static-visible");
         }
         finalizeRuntimePromotionRef.current(candidate);
-        return true;
       };
-      const attemptPositioning = () => {
+      let remainingReadinessFrames = 30;
+      const positionWhenReady = () => {
         if (!isCurrent()) return;
         const bodyRect = documentNode.body?.getBoundingClientRect();
         if (
-          !bodyRect
-          || !Number.isFinite(bodyRect.width)
-          || !Number.isFinite(bodyRect.height)
-          || iframe.clientHeight <= 0
-          || iframe.clientWidth <= 0
+          (
+            !bodyRect
+            || !Number.isFinite(bodyRect.width)
+            || !Number.isFinite(bodyRect.height)
+            || iframe.clientHeight <= 0
+            || iframe.clientWidth <= 0
+          )
+          && remainingReadinessFrames > 0
         ) {
-          scheduleNextAttempt();
+          remainingReadinessFrames -= 1;
+          requestAnimationFrame(positionWhenReady);
           return;
         }
-        restoreFrameViewport();
-        restoreSharedViewportForHandoff();
-        restoreSelectionAndNativeEdit();
+        positionOuterViewport();
+        positionFrame();
+        restoreLogicalSelection();
         requestAnimationFrame(() => {
           if (!isCurrent()) return;
-          restoreFrameViewport();
-          restoreSharedViewportForHandoff();
-          correctCaretViewport();
-          if (
-            userScrollIntentPending("frame")
-            || userScrollIntentPending("shared")
-          ) {
-            stableCount = 0;
-            previousFingerprint = null;
-            scheduleNextAttempt();
-            return;
-          }
-          if (updateStableFingerprint() >= 2 && activateHandoff()) return;
-          scheduleNextAttempt();
+          correctAnchorOnce();
+          activateHandoff();
         });
       };
-      requestAnimationFrame(attemptPositioning);
+      requestAnimationFrame(positionWhenReady);
     };
     const restoreConnectedFrame = () => {
       if (
@@ -8806,26 +7812,32 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         || frameLoadGenerationRef.current !== connectedFrameGeneration
         || expectedFrameTokenRef.current !== expectedToken
         || pendingFrameRestoreEpochRef.current !== pendingRestoreEpoch
-      ) {
-        if (
-          pendingNativeResume
-          && pendingNativeEditResumeRef.current?.fenceId === pendingNativeResume.fenceId
-        ) pendingNativeEditResumeRef.current = null;
-        containerRef.current?.setAttribute(
-          "data-native-fence-resume",
-          `stale-frame:${[
-            iframe.contentDocument === documentNode ? null : "document",
-            frameLoadGenerationRef.current === connectedFrameGeneration ? null : "generation",
-            expectedFrameTokenRef.current === expectedToken ? null : "token",
-            pendingFrameRestoreEpochRef.current === pendingRestoreEpoch ? null : "restore",
-          ].filter(Boolean).join(",")}`,
-        );
-        return;
-      }
+      ) return;
       if (pendingViewport) {
         documentNode.defaultView?.scrollTo({
           left: pendingViewport.left,
           top: pendingViewport.top,
+          behavior: "auto",
+        });
+      }
+      if (pendingSharedViewport?.element.isConnected) {
+        pendingSharedViewport.element.scrollTo({
+          left: clampRuntimeScroll(
+            pendingSharedViewport.left,
+            Math.max(
+              0,
+              pendingSharedViewport.element.scrollWidth
+                - pendingSharedViewport.element.clientWidth,
+            ),
+          ),
+          top: clampRuntimeScroll(
+            pendingSharedViewport.top,
+            Math.max(
+              0,
+              pendingSharedViewport.element.scrollHeight
+                - pendingSharedViewport.element.clientHeight,
+            ),
+          ),
           behavior: "auto",
         });
       }
@@ -8835,9 +7847,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         && connectedRuntimeFrame.verificationToken === expectedToken,
       );
       if (connectedRuntimeFrameIsCurrent && connectedRuntimeFrame) {
-        // Proof and active handlers were already validated by connectFrame. Mark
-        // this frame internally settled before rebinding a pending native edit;
-        // the external ready outcome is still emitted only after that rebind.
         if (connectedRuntimeFrame.activation !== "ready") return;
         connectedRuntimeFrame.settled = true;
         containerRef.current?.setAttribute(
@@ -8845,98 +7854,12 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           String(documentNode.querySelectorAll("[data-pageroot-edit-runtime-bootstrap]").length),
         );
       }
-      const sharedViewportStillCurrent = () => (
-        iframe.contentDocument === documentNode
-        && frameLoadGenerationRef.current === connectedFrameGeneration
-        && expectedFrameTokenRef.current === expectedToken
-        && pendingFrameRestoreEpochRef.current === pendingRestoreEpoch
-      );
-      const restoreSharedViewport = (remainingFrames = 30) => {
-        const sharedViewport = pendingSharedViewport;
-        if (
-          !sharedViewport
-          || !sharedViewport.element.isConnected
-          || !sharedViewportStillCurrent()
-        ) return;
-        const maxTop = Math.max(
-          0,
-          sharedViewport.element.scrollHeight - sharedViewport.element.clientHeight,
-        );
-        const targetTop = Math.min(sharedViewport.top, maxTop);
-        const currentTop = sharedViewport.element.scrollTop;
-        // A zero position during the bounded rebuild window can be a transient
-        // React/layout clamp. A different non-zero position is treated as a
-        // fresh user scroll and ends restoration instead of fighting input.
-        if (Math.abs(currentTop - targetTop) > 1) {
-          if (currentTop > 1) return;
-          sharedViewport.element.scrollTo({
-            left: sharedViewport.left,
-            top: targetTop,
-            behavior: "auto",
-          });
-        }
-        if (remainingFrames > 0) {
-          requestAnimationFrame(() => restoreSharedViewport(remainingFrames - 1));
-        }
-      };
-      restoreSharedViewport();
       if (pendingSelection && !lockedRef.current) {
-        const restoredTarget = selectTarget(pendingSelection, {
+        selectTarget(pendingSelection, {
           reveal: false,
           showToolbar: pendingToolbarVisible,
         });
-        containerRef.current?.setAttribute(
-          "data-native-fence-resume",
-          `selected:${restoredTarget?.id ?? "none"}:${[
-            pendingNativeResume ? null : "no-resume",
-            pendingNativeResume?.expectedFrameGeneration === connectedFrameGeneration
-              ? null
-              : "generation",
-            pendingNativeResume?.sourceRevision === sourceIndexRef.current?.sourceSha256
-              ? null
-              : "revision",
-            pendingNativeEditResumeRef.current?.fenceId === pendingNativeResume?.fenceId
-              ? null
-              : "fence",
-          ].filter(Boolean).join(",")}`,
-        );
-        if (
-          pendingNativeResume
-          && pendingNativeResume.expectedFrameGeneration === connectedFrameGeneration
-          && pendingNativeResume.sourceRevision === sourceIndexRef.current?.sourceSha256
-          && pendingNativeEditResumeRef.current?.fenceId === pendingNativeResume.fenceId
-        ) {
-          pendingNativeEditResumeRef.current = null;
-          if (
-            pendingNativeResume.fragmentTargetRef
-            && restoredTarget
-            && selectedElementRef.current
-            && sourceIndexRef.current
-          ) {
-            const restoredFragmentRange = activeRangeForTextFragmentTarget(
-              selectedElementRef.current,
-              sourceIndexRef.current,
-              restoredTarget,
-              pendingNativeResume.fragmentTargetRef,
-            );
-            activeTextRangeRef.current = restoredFragmentRange;
-            setHasTextRange(Boolean(restoredFragmentRange));
-          }
-          const resumed = startEditing(undefined, pendingNativeResume.selection);
-          containerRef.current?.setAttribute(
-            "data-native-fence-resume",
-            resumed
-              ? "resumed"
-              : `resume-failed:${restoredTarget?.resolution ?? "none"}:${
-                  selectedElementRef.current ? "selected" : "missing"
-                }`,
-          );
-        }
       } else {
-        if (
-          pendingNativeResume
-          && pendingNativeEditResumeRef.current?.fenceId === pendingNativeResume.fenceId
-        ) pendingNativeEditResumeRef.current = null;
         updateOverlayPosition();
       }
       if (
@@ -8955,16 +7878,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       ) {
         activeFrameConnectionPendingRef.current = false;
       }
-      const activePromotedCandidate = runtimePromotionRef.current;
-      if (
-        activePromotedCandidate
-        && activePromotedCandidate.render.elementGeneration === connectedFrameGeneration
-        && (
-          !activePromotedCandidate.runtimeFrame
-          || activePromotedCandidate.runtimeFrame === connectedRuntimeFrame
-        )
-        && (!connectedRuntimeFrame || connectedRuntimeFrame.settled)
-      ) finalizeRuntimePromotionRef.current(activePromotedCandidate);
     };
     if (isRuntimePromotion && promotedCandidate) {
       positionRuntimeHandoff(promotedCandidate);
@@ -8981,13 +7894,13 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     executePagePresentationAction,
     finishNativeEditing,
     moveSelected,
+    publishRuntimeDegradation,
     resolvePagePresentationAction,
     selectResolvedTarget,
     selectTarget,
     selectedElementHasSourceMutationAuthority,
     startEditing,
     updateOverlayPosition,
-    updateSelectedStyle,
     fallBackToStaticRuntimeFrame,
   ]);
   connectFrameRef.current = connectFrame;
@@ -9110,14 +8023,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         animationFrame = requestAnimationFrame(connectParsedCandidate);
       } else {
         failRuntimeCandidate(candidate, "failed");
-        setEditFeedback({
-          code: "canvas_c01_source_map",
-          title: "页面预览没有完成",
-          message: "当前画布仍保持上一帧完整内容，请重新载入后再试。",
-          tone: "error",
-          sticky: true,
-          recovery: "reload",
-        });
       }
     };
     animationFrame = requestAnimationFrame(connectParsedCandidate);
@@ -9197,7 +8102,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         // host, apply the guarded SourcePatch in this same iframe, then resume
         // the exact logical range without running author Script.
         const committed = finishNativeEditing(true, "style", {
-          resumeAfterRuntimeHandoff: false,
           deferRuntimeRefresh: true,
         });
         if (!committed.ok || committed.frameReloading) return;
@@ -9217,7 +8121,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       ) {
         nativeSelectionAfterStyle = activeNativeEdit.session.getSelection();
         const committed = finishNativeEditing(true, "style", {
-          resumeAfterRuntimeHandoff: false,
           deferRuntimeRefresh: true,
         });
         if (!committed.ok || committed.frameReloading) return;
@@ -9479,7 +8382,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       }
       if (activeNativeEditRef.current) {
         finishNativeEditing(true, "manual", {
-          resumeAfterRuntimeHandoff: false,
         });
         return;
       }
@@ -9614,7 +8516,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     });
   }, [hoverHintCopy, hoverHintPlacement?.left, hoverHintPlacement?.top, showHoverHint]);
   const selectedPagePresentationAction = (
-    !readOnly
+    !effectiveReadOnly
     && !interactionLocked
     && !runtimeGeneratedSelection
     && selection
@@ -9861,7 +8763,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     isEditing,
     toolbarStyle: selectionChromeProjection.toolbarStyle,
     selectedPagePresentationAction: selectionChromeProjection.selectedPagePresentationAction,
-    readOnly: readOnly || runtimeGeneratedSelection,
+    readOnly: effectiveReadOnly || runtimeGeneratedSelection,
     selectedNativeEditAvailable,
     selectedStyle,
     textFormatRequiresSelection,
@@ -9889,7 +8791,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     moveAvailability,
     overlayPosition,
     pointerCapabilityHoverEnabled,
-    readOnly,
+    effectiveReadOnly,
     reloadActionLabel,
     renderedMode,
     runtimeGeneratedSelection,
@@ -9952,7 +8854,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       runtimeCandidateRender
       && candidateRuntimeSlotId === slotId,
     );
-    const isRetiring = Boolean(
+    const isPrevious = Boolean(
       !isActive
       && !isCandidate
       && runtimeInactiveRender,
@@ -9961,14 +8863,14 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       ? "active"
       : isCandidate
         ? "candidate"
-        : isRetiring
-          ? "retiring"
+        : isPrevious
+          ? "previous"
           : "inactive";
     const render = isActive
       ? frameRender
       : isCandidate
         ? runtimeCandidateRender
-        : isRetiring
+        : isPrevious
           ? runtimeInactiveRender
           : null;
     const generation = render?.elementGeneration ?? -1;
@@ -9999,14 +8901,16 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           ? activeTitle
           : isCandidate
             ? "Canvas runtime candidate"
-            : isRetiring
-              ? "Canvas runtime retiring slot"
+            : isPrevious
+              ? "Canvas previous runtime slot"
               : "Canvas runtime inactive slot"}
         sandbox={isActive
           ? render?.runtime
             ? "allow-same-origin allow-scripts"
             : "allow-same-origin"
-          : "allow-same-origin allow-scripts"}
+          : isCandidate && render && !render.runtime
+            ? "allow-same-origin"
+            : "allow-same-origin allow-scripts"}
         srcDoc={render?.html ?? EMPTY_RUNTIME_SLOT_DOCUMENT}
         aria-hidden={isActive ? undefined : true}
         tabIndex={isActive ? undefined : -1}
@@ -10041,8 +8945,9 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       style={containerStyle}
       data-testid="html-canvas-editor"
       data-locked={interactionLocked ? "true" : undefined}
+      data-runtime-degradation={runtimeDegradation === "none" ? undefined : runtimeDegradation}
       data-interaction-mode={renderedMode} data-runtime-library-origins={editRuntimeGrant?.libraryOrigins?.join(",") || undefined}
-      aria-readonly={readOnly || interactionLocked}
+      aria-readonly={effectiveReadOnly || interactionLocked}
     >
       {renderRuntimeSlot("a")}
       {renderRuntimeSlot("b")}

@@ -350,13 +350,13 @@ export async function waitForRuntimeHandoffSettled(page) {
   await expect.poll(async () => ({
     handoffState: await editor.getAttribute("data-runtime-handoff"),
     activeFrameCount: await editor.locator("iframe:not([data-frame-role])").count(),
-    retiringFrameCount: await editor.locator(
-      'iframe[data-frame-role="runtime-retiring"]',
+    previousFrameCount: await editor.locator(
+      'iframe[data-frame-role="runtime-previous"]',
     ).count(),
   }), { timeout: 30_000 }).toMatchObject({
     handoffState: null,
     activeFrameCount: 1,
-    retiringFrameCount: 0,
+    previousFrameCount: 0,
   });
 }
 

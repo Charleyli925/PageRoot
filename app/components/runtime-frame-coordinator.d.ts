@@ -2,6 +2,7 @@ export type RuntimeFrameSlotId = "a" | "b";
 
 export type RuntimeFrameIdentity = Readonly<{
   candidateId: string;
+  kind: "dynamic" | "static-disabled";
   generation: number;
   sourceRevision: string;
   slotId: RuntimeFrameSlotId;
@@ -23,7 +24,7 @@ export type RuntimeFrameCoordinatorSnapshot = Readonly<{
   latestPhase: "preparing" | "positioning" | null;
   lastKnownGood: RuntimeFrameIdentity | null;
   nativeEdit: Readonly<{
-    kind: "user" | "resume";
+    kind: "user";
     candidateId: string | null;
   }> | null;
   ignoredCallbackCount: number;
@@ -40,6 +41,7 @@ export class RuntimeFrameCoordinator {
   beginCandidate(input: {
     generation: number;
     sourceRevision: string;
+    kind?: "dynamic" | "static-disabled";
   }): Readonly<{
     identity: RuntimeFrameIdentity;
     supersededCandidate: RuntimeFrameIdentity | null;
@@ -48,7 +50,7 @@ export class RuntimeFrameCoordinator {
   canPromote(candidate: RuntimeFrameIdentity): boolean;
   beginPositioning(candidate: RuntimeFrameIdentity): boolean;
   canFinalize(candidate: RuntimeFrameIdentity): boolean;
-  beginNativeEdit(input?: { candidate?: RuntimeFrameIdentity | null }): boolean;
+  beginNativeEdit(): boolean;
   endNativeEdit(): boolean;
   settle(
     candidate: RuntimeFrameIdentity,

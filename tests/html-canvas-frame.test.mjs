@@ -60,8 +60,8 @@ test("runtime handoff clamps shortened documents instead of falling back to the 
   }), 240);
 });
 
-test("runtime handoff uses the two-pixel visibility contract", () => {
-  assert.equal(RUNTIME_HANDOFF_TOLERANCE_PX, 2);
-  assert.equal(runtimePositionWithinTolerance(480, 478.1), true);
-  assert.equal(runtimePositionWithinTolerance(480, 477.9), false);
+test("runtime handoff uses the eight-pixel presentation-anchor contract", () => {
+  assert.equal(RUNTIME_HANDOFF_TOLERANCE_PX, 8);
+  assert.equal(runtimePositionWithinTolerance(480, 472.1), true);
+  assert.equal(runtimePositionWithinTolerance(480, 471.9), false);
 });

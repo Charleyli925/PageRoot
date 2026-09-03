@@ -600,7 +600,7 @@
   pointer-events: none;
 }
 
-.editor[data-runtime-handoff="positioning"] > iframe[data-frame-role="runtime-retiring"] {
+.editor[data-runtime-handoff="positioning"] > iframe[data-frame-role="runtime-previous"] {
   z-index: 2;
   visibility: visible;
   opacity: 1;
@@ -618,7 +618,7 @@
   pointer-events: none;
 }
 
-.editor[data-runtime-handoff="active"] > iframe[data-frame-role="runtime-retiring"] {
+.editor[data-runtime-handoff="active"] > iframe[data-frame-role="runtime-previous"] {
   z-index: 1;
   visibility: visible;
   opacity: 1;

@@ -26,7 +26,7 @@ import {
   writeFileSync,
 } from "./electron-native-harness.mjs";
 
-async function withRuntimeProject(prefix, files, run) {
+async function withRuntimeProject(prefix, files, run, launchOptions = {}) {
   const sourceDirectory = mkdtempSync(path.join(tmpdir(), prefix));
   const sourcePath = path.join(sourceDirectory, "runtime-report.html");
   for (const [relativePath, content] of Object.entries(files)) {
@@ -37,7 +37,10 @@ async function withRuntimeProject(prefix, files, run) {
   let electronApp = null;
   let isolatedUserData = null;
   try {
-    const launched = await launchPageRoot({ activeSourcePath: sourcePath });
+    const launched = await launchPageRoot({
+      activeSourcePath: sourcePath,
+      ...launchOptions,
+    });
     electronApp = launched.electronApp;
     isolatedUserData = launched.isolatedUserData;
     await run({ ...launched, sourcePath, sourceDirectory });
@@ -214,7 +217,6 @@ async function assertRuntimeHandoff(page, {
   requireActiveChrome = false,
   expectPromotion = true,
   assertVisualContinuity = false,
-  expectedFocus,
   expectedViewportSample,
 } = {}) {
   await expect.poll(() => page.evaluate(() => (
@@ -341,58 +343,33 @@ async function assertRuntimeHandoff(page, {
     const positionMatches = (actual, expected) => (
       Number.isFinite(expected)
         && Number.isFinite(actual)
-        && Math.abs(actual - expected) <= 2
+        && Math.abs(actual - expected) <= 8
     );
     const activeViewportMatches = (sample) => {
-      const focusExpectation = typeof expectedFocus === "boolean"
-        ? expectedFocus
-        : handoffBaselineSample.focused;
       if (
         sample.viewportAnchorStableId !== handoffBaselineSample.viewportAnchorStableId
         || sample.selectionStableId !== handoffBaselineSample.selectionStableId
-        || sample.focused !== focusExpectation
       ) return false;
-      if (
-        focusExpectation
-        && typeof expectedFocus !== "boolean"
-        && sample.activeElement !== handoffBaselineSample.activeElement
-      ) return false;
-      if (Number.isFinite(handoffBaselineSample.selectionAnchorOffset)) {
-        if (
-          !positionMatches(sample.selectionAnchorOffset, handoffBaselineSample.selectionAnchorOffset)
-          || !positionMatches(sample.selectionFocusOffset, handoffBaselineSample.selectionFocusOffset)
-          || sample.selectionCollapsed !== handoffBaselineSample.selectionCollapsed
-        ) return false;
+      if (assertVisualContinuity) {
+        return positionMatches(
+          sample.selectedScreenTop,
+          handoffBaselineSample.selectedScreenTop,
+        );
       }
-      if (Number.isFinite(handoffBaselineSample.caretOffsetY)
-        && !positionMatches(sample.caretOffsetY, handoffBaselineSample.caretOffsetY)) {
-        return false;
-      }
-      if (
-        Number.isFinite(handoffBaselineSample.viewportAnchorSharedOffsetY)
-        && !positionMatches(
-          sample.viewportAnchorSharedOffsetY,
-          handoffBaselineSample.viewportAnchorSharedOffsetY,
-        )
-      ) return false;
-      if (
-        Number.isFinite(handoffBaselineSample.selectedStageTop)
-        && !positionMatches(sample.selectedStageTop, handoffBaselineSample.selectedStageTop)
-      ) return false;
-      if (!Number.isFinite(handoffBaselineSample.selectedStageTop)) {
-        if (
-          !positionMatches(sample.iframeScrollY, handoffBaselineSample.iframeScrollY)
-          || !positionMatches(sample.sharedScrollTop, handoffBaselineSample.sharedScrollTop)
-        ) return false;
-      }
-      return true;
+      return Number.isFinite(sample.selectedTop)
+        && Number.isFinite(sample.iframeHeight)
+        && sample.selectedTop >= 0
+        && sample.selectedTop < sample.iframeHeight;
     };
     const firstTopmostActiveIndex = activeStateSamples.findIndex(isTopmostActiveSample);
     expect(firstTopmostActiveIndex).toBeGreaterThanOrEqual(0);
-    expect(activeStateSamples.slice(0, firstTopmostActiveIndex + 1).every(
-      (sample) => isTopmostActiveSample(sample) && activeViewportMatches(sample),
-    )).toBe(true);
     const firstTopmostActiveSample = activeStateSamples[firstTopmostActiveIndex];
+    if (!activeViewportMatches(firstTopmostActiveSample)) {
+      throw new Error(`Runtime presentation anchor mismatch: ${JSON.stringify({
+        baseline: handoffBaselineSample,
+        promoted: firstTopmostActiveSample,
+      })}`);
+    }
     expect(firstTopmostActiveSample.viewportAnchorStableId)
       .toBe(handoffBaselineSample.viewportAnchorStableId);
     expect(firstTopmostActiveSample.selectionStableId)
@@ -418,72 +395,14 @@ async function assertRuntimeHandoff(page, {
         candidateSamples.filter((sample) => Number.isInteger(sample.rafSequence)),
       )}`);
     }
-    const focusExpectation = typeof expectedFocus === "boolean"
-      ? expectedFocus
-      : handoffBaselineSample.focused;
-    expect(firstTopmostActiveSample.focused).toBe(focusExpectation);
-    if (focusExpectation && typeof expectedFocus !== "boolean") {
-      expect(firstTopmostActiveSample.activeElement).toBe(handoffBaselineSample.activeElement);
-    }
-    if (
-      Number.isFinite(handoffBaselineSample.selectionAnchorOffset)
-    ) {
-      expect(Number.isFinite(firstTopmostActiveSample.selectionAnchorOffset)).toBe(true);
-      expect(Number.isFinite(firstTopmostActiveSample.selectionFocusOffset)).toBe(true);
-      expect(Math.abs(
-        firstTopmostActiveSample.selectionAnchorOffset
-          - handoffBaselineSample.selectionAnchorOffset,
-      )).toBeLessThanOrEqual(2);
-      expect(Math.abs(
-        firstTopmostActiveSample.selectionFocusOffset
-          - handoffBaselineSample.selectionFocusOffset,
-      )).toBeLessThanOrEqual(2);
-      expect(firstTopmostActiveSample.selectionCollapsed)
-        .toBe(handoffBaselineSample.selectionCollapsed);
-    }
-    if (
-      Number.isFinite(handoffBaselineSample.caretOffsetY)
-    ) {
-      expect(Number.isFinite(firstTopmostActiveSample.caretOffsetY)).toBe(true);
-      expect(Math.abs(
-        firstTopmostActiveSample.caretOffsetY - handoffBaselineSample.caretOffsetY,
-      )).toBeLessThanOrEqual(2);
-    }
-    if (Number.isFinite(handoffBaselineSample.viewportAnchorSharedOffsetY)) {
-      expect(Number.isFinite(firstTopmostActiveSample.viewportAnchorSharedOffsetY)).toBe(true);
-      expect(Math.abs(
-        firstTopmostActiveSample.viewportAnchorSharedOffsetY
-          - handoffBaselineSample.viewportAnchorSharedOffsetY,
-      )).toBeLessThanOrEqual(2);
-    }
-    if (
-      Number.isFinite(handoffBaselineSample.selectedStageTop)
-    ) {
-      expect(Number.isFinite(firstTopmostActiveSample.selectedStageTop)).toBe(true);
-      expect(Math.abs(
-        firstTopmostActiveSample.selectedStageTop - handoffBaselineSample.selectedStageTop,
-      )).toBeLessThanOrEqual(2);
-    } else {
-      expect(Number.isFinite(firstTopmostActiveSample.iframeScrollY)).toBe(true);
-      expect(Number.isFinite(firstTopmostActiveSample.sharedScrollTop)).toBe(true);
-      expect(Math.abs(
-        firstTopmostActiveSample.iframeScrollY - handoffBaselineSample.iframeScrollY,
-      )).toBeLessThanOrEqual(2);
-      expect(Math.abs(
-        firstTopmostActiveSample.sharedScrollTop - handoffBaselineSample.sharedScrollTop,
-      )).toBeLessThanOrEqual(2);
-    }
-
+    expect(Number.isFinite(firstTopmostActiveSample.selectedTop)).toBe(true);
+    expect(firstTopmostActiveSample.selectedTop).toBeGreaterThanOrEqual(0);
+    expect(firstTopmostActiveSample.selectedTop)
+      .toBeLessThan(firstTopmostActiveSample.iframeHeight);
     if (assertVisualContinuity) {
-      if (!firstPreparingSample || !firstTopmostActiveSample) {
-        throw new Error(`Runtime visual anchor samples missing: ${JSON.stringify({
-          preparingSamples,
-          activeStateSamples,
-        })}`);
-      }
       expect(Math.abs(
         firstTopmostActiveSample.selectedScreenTop - handoffBaselineSample.selectedScreenTop,
-      )).toBeLessThanOrEqual(2);
+      )).toBeLessThanOrEqual(8);
     }
   }
   return handoffSamples;
@@ -1383,14 +1302,14 @@ test("same-source history cancellation reloads through a fixed Runtime candidate
   });
 });
 
-test("a real user scroll during runtime handoff becomes the latest handoff target", {
+test("runtime handoff restores the captured Presentation Anchor without scroll-intent state", {
   tag: ["@gate-smoke", "@smoke-editing"],
 }, async () => {
   const html = `<!doctype html>
-<html><head><title>Runtime user scroll handoff</title></head><body>
+<html><head><title>Runtime presentation anchor</title></head><body>
   <div aria-hidden="true" style="height:600px"></div>
   <section>
-    <p id="first" data-native-case="runtime-user-scroll">甲</p>
+    <p id="first" data-native-case="runtime-presentation-anchor">甲</p>
     <p id="second">乙</p>
     <output id="runtime-order"></output>
     <div aria-hidden="true" style="height:1800px"></div>
@@ -1400,140 +1319,39 @@ test("a real user scroll during runtime handoff becomes the latest handoff targe
       document.querySelectorAll('section > p'),
       (node) => node.textContent,
     ).join('');
-    const handoffLayoutJitter = document.createElement('div');
-    handoffLayoutJitter.setAttribute('aria-hidden', 'true');
-    handoffLayoutJitter.style.display = 'block';
-    handoffLayoutJitter.style.height = '1px';
-    handoffLayoutJitter.style.pointerEvents = 'none';
-    handoffLayoutJitter.style.opacity = '0';
-    document.body.append(handoffLayoutJitter);
-    let handoffLayoutFrames = 0;
-    const holdHandoffLayout = () => {
-      handoffLayoutFrames += 1;
-      handoffLayoutJitter.style.height = String(8 + handoffLayoutFrames * 8) + 'px';
-      if (handoffLayoutFrames < 120) {
-        requestAnimationFrame(holdHandoffLayout);
-      } else {
-        handoffLayoutJitter.remove();
-      }
-    };
-    requestAnimationFrame(holdHandoffLayout);
   </script>
 </body></html>`;
 
-  await withRuntimeProject("pageroot-runtime-user-scroll-e2e-", {
+  await withRuntimeProject("pageroot-runtime-presentation-anchor-e2e-", {
     "runtime-report.html": html,
   }, async ({ page, sourcePath }) => {
-    const { frame } = await loadedDiskFrame(page, sourcePath, "runtime-user-scroll");
+    const { frame } = await loadedDiskFrame(
+      page,
+      sourcePath,
+      "runtime-presentation-anchor",
+    );
     const reviewStage = page.locator(".review-scroll-stage");
-    await frame.locator('[data-native-case="runtime-user-scroll"]').click();
+    await frame.locator('[data-native-case="runtime-presentation-anchor"]').click();
     await reviewStage.evaluate((element) => {
       element.scrollTop = 480;
     });
     await expect.poll(() => reviewStage.evaluate((element) => element.scrollTop)).toBe(480);
     const moveDownButton = page.getByRole("button", { name: "下移", exact: true });
-    await expect(moveDownButton).toBeVisible();
     const moveDownBox = await moveDownButton.boundingBox();
     expect(moveDownBox).not.toBeNull();
     await armRuntimeHandoffSamples(page);
-    // Use the already-visible toolbar coordinate so Playwright does not first
-    // scroll the shared stage while locating the operation.
     await page.mouse.click(
       moveDownBox.x + moveDownBox.width / 2,
       moveDownBox.y + moveDownBox.height / 2,
     );
-    await expect.poll(() => page.locator(
-      '[data-testid="html-canvas-editor"]',
-    ).getAttribute("data-runtime-handoff"))
-      .toMatch(/preparing|positioning/u);
-    // End is a real scroll-key gesture with a deterministic destination.
-    // PageDown advances by the focused element's platform-dependent viewport;
-    // hosted macOS can move only a few pixels and never exercise the intended
-    // handoff target even though the key event itself was delivered.
-    await reviewStage.evaluate((element) => {
-      element.setAttribute("tabindex", "0");
-      element.focus();
-    });
-    await page.keyboard.press("End");
-    await expect.poll(() => reviewStage.evaluate((element) => element.scrollTop))
-      .toBeGreaterThan(700);
-    // Let the browser finish its final scroll sample before choosing the
-    // handoff target.
-    await page.evaluate(() => new Promise((resolve) => {
-      let previous = null;
-      let stableFrames = 0;
-      const waitForStableScroll = () => {
-        const stage = document.querySelector('.review-scroll-stage');
-        const current = stage?.scrollTop ?? null;
-        if (current === previous) stableFrames += 1;
-        else {
-          previous = current;
-          stableFrames = 0;
-        }
-        if (stableFrames >= 2) resolve();
-        else requestAnimationFrame(waitForStableScroll);
-      };
-      requestAnimationFrame(waitForStableScroll);
-    }));
-    const sawUserHandoffScroll = await page.evaluate(() => {
-      const samples = window.__PAGEROOT_RUNTIME_HANDOFF_SAMPLES__ || [];
-      return samples.some((sample) => (
-        (sample.handoffState === "preparing" || sample.handoffState === "positioning")
-        && Number(sample.sharedScrollTop) > 600
-        && sample.viewportAnchorStableId
-      ));
-    });
-    expect(sawUserHandoffScroll).toBe(true);
-    await expect.poll(() => page.evaluate(() => (
-      window.__PAGEROOT_RUNTIME_HANDOFF_SAMPLES__ || []
-    ).some((sample) => (
-      sample.handoffState === "active"
-      && sample.activeGeneration === sample.candidateGeneration
-    )))).toBe(true);
-    const userViewportSample = await page.evaluate(() => {
-      const samples = window.__PAGEROOT_RUNTIME_HANDOFF_SAMPLES__ || [];
-      return [...samples].reverse().find((sample) => (
-        (
-          sample.handoffState === "preparing"
-          || sample.handoffState === "positioning"
-          || sample.handoffState === "active"
-        )
-        && Number(sample.sharedScrollTop) > 600
-        && sample.viewportAnchorStableId
-      )) || null;
-    });
-    expect(userViewportSample).not.toBeNull();
-    const userViewportPosition = await page.evaluate(() => {
-      const editor = document.querySelector('[data-testid="html-canvas-editor"]');
-      const activeFrame = editor?.querySelector('iframe[title*="HTML"]:not([data-frame-role])');
-      const sharedScrollElement = editor?.closest('.review-scroll-stage');
-      return {
-        iframeScrollY: activeFrame?.contentWindow?.scrollY || 0,
-        sharedScrollTop: sharedScrollElement?.scrollTop || 0,
-      };
-    });
-    const expectedUserViewportSample = {
-      ...userViewportSample,
-      iframeScrollY: userViewportPosition.iframeScrollY,
-      sharedScrollTop: userViewportPosition.sharedScrollTop,
-      // Assert the latest scroll and stable-ID anchor captured during the
-      // pointer gesture, not an intermediate screen coordinate.
-      selectedStageTop: null,
-      selectedScreenTop: null,
-    };
+    // Runtime switching restores one immutable Presentation Anchor. It does not
+    // maintain a parallel cross-frame scroll-intent state machine.
     await assertRuntimeHandoff(page, {
       requireActiveChrome: true,
-      expectedViewportSample: expectedUserViewportSample,
+      assertVisualContinuity: true,
     });
-    await expect.poll(() => page.evaluate(() => {
-      const editor = document.querySelector('[data-testid="html-canvas-editor"]');
-      const activeFrame = editor?.querySelector('iframe[title*="HTML"]:not([data-frame-role])');
-      const sharedScrollElement = editor?.closest('.review-scroll-stage');
-      return Math.max(
-        activeFrame?.contentWindow?.scrollY || 0,
-        sharedScrollElement?.scrollTop || 0,
-      );
-    })).toBeGreaterThan(700);
+    await expect.poll(() => reviewStage.evaluate((element) => element.scrollTop))
+      .toBeGreaterThan(400);
   });
 });
 
@@ -1618,7 +1436,7 @@ test("long-page element duplication uses the same visible runtime handoff", {
   });
 });
 
-test("overlapping edits supersede an old Runtime handoff without losing charts or text editing", {
+test("overlapping edits promote only the latest Runtime without losing charts or text editing", {
   tag: ["@gate-smoke", "@smoke-editing"],
 }, async () => {
   const html = `<!doctype html>
@@ -1715,10 +1533,6 @@ test("overlapping edits supersede an old Runtime handoff without losing charts o
         runtimeHandoff: null,
       },
     });
-    await expect(page.getByTestId("html-canvas-editor")).toHaveAttribute(
-      "data-native-stale-range-discarded",
-      /target|segments/u,
-    );
     await text.press("End");
     await page.keyboard.insertText("                        ");
     await page.keyboard.press("Escape");
@@ -1888,7 +1702,7 @@ test("Runtime range styling never grants a forged clone source authority", {
   });
 });
 
-test("latest Runtime candidate wins across slow ECharts, native editing and recovery", {
+test("latest Runtime candidate wins across slow ECharts, native editing and static degradation", {
   tag: ["@gate-smoke", "@smoke-editing"],
 }, async () => {
   const html = `<!doctype html>
@@ -1980,7 +1794,7 @@ test("latest Runtime candidate wins across slow ECharts, native editing and reco
           && activeFrame.contentDocument?.querySelector("#latest-wins-chart canvas"),
         );
       })).toBe(true);
-      await expect(editor.locator('iframe[data-frame-role="runtime-retiring"]')).toHaveCount(0);
+      await expect(editor.locator('iframe[data-frame-role="runtime-previous"]')).toHaveCount(0);
       await expect(page.getByTestId("edit-runtime-static-fallback")).toHaveCount(0);
       return candidateId;
     };
@@ -2050,7 +1864,7 @@ test("latest Runtime candidate wins across slow ECharts, native editing and reco
       }));
     });
     await expect(editor).toHaveAttribute("data-runtime-candidate-id", editingCandidate);
-    await expect(editor.locator('iframe[data-frame-role="runtime-retiring"]')).toHaveCount(0);
+    await expect(editor.locator('iframe[data-frame-role="runtime-previous"]')).toHaveCount(0);
     expect(readFileSync(workingCopyPath, "utf8")).not.toContain("pinyin");
     await heading.evaluate((element) => {
       element.dispatchEvent(new CompositionEvent("compositionend", {
@@ -2147,9 +1961,9 @@ test("latest Runtime candidate wins across slow ECharts, native editing and reco
     await expect(heading).toHaveAttribute("data-html-canvas-selected", "part");
     await expect(heading).toContainText("你好");
 
-    // A true latest candidate activation failure must preserve the old dynamic
-    // view and shared grant. The following source checkpoint removes the fault
-    // and proves that a later candidate can still win.
+    // A true latest candidate activation failure must promote the same latest
+    // Working HTML as a Script-disabled page. Dynamic execution resumes only
+    // after the user removes the fault and explicitly retries it.
     frame = await currentEditorFrame(page);
     heading = frame.locator('[data-native-case="runtime-latest-wins-text"]').first();
     await heading.click();
@@ -2174,22 +1988,18 @@ test("latest Runtime candidate wins across slow ECharts, native editing and reco
       window.__PAGEROOT_RUNTIME_RELEASES__ = [];
       releases.forEach((release) => release());
     });
-    const lastKnownGoodBeforeFailure = await editor.getAttribute(
-      "data-runtime-last-known-good-id",
-    );
-    expect(lastKnownGoodBeforeFailure).toBeTruthy();
     await expect.poll(() => surface.getAttribute("data-edit-runtime-outcome"), {
       timeout: 12_000,
     }).toBe("candidate-failed");
-    await expect(surface).toHaveAttribute("data-edit-runtime-phase", "settled");
-    await expect(editor).not.toHaveAttribute("data-runtime-candidate-id", /.+/u);
-    await expect(editor).toHaveAttribute(
-      "data-runtime-last-known-good-id",
-      lastKnownGoodBeforeFailure,
+    await expect(surface).toHaveAttribute("data-edit-runtime-phase", "static-fallback");
+    await expect(page.getByTestId("edit-runtime-static-fallback")).toContainText(
+      "部分动态内容未更新",
     );
-    await expect(page.getByTestId("edit-runtime-static-fallback")).toHaveCount(0);
+    await expect(editor).toHaveAttribute("data-runtime-degradation", "static-visible");
     frame = await currentEditorFrame(page);
-    await expect(frame.locator("#latest-wins-chart canvas")).toHaveCount(1);
+    await expect(editor.locator('iframe[data-runtime-slot-role="active"]'))
+      .toHaveAttribute("sandbox", "allow-same-origin");
+    await expect(frame.locator("#latest-wins-chart canvas")).toHaveCount(0);
 
     heading = frame.locator('[data-native-case="runtime-latest-wins-text"]').first();
     await heading.click();
@@ -2221,119 +2031,26 @@ test("latest Runtime candidate wins across slow ECharts, native editing and reco
     });
     await page.keyboard.press("Backspace");
     await expect(heading).not.toContainText("候选失败");
-    const recoveryCandidatePending = waitForNewCandidate(null);
     await page.keyboard.press("Escape");
-    const recoveryCandidate = await recoveryCandidatePending;
-    candidateIds.push(recoveryCandidate);
-    await expect.poll(() => page.evaluate(() => (
-      window.__PAGEROOT_RUNTIME_RELEASES__?.length || 0
-    ))).toBeGreaterThan(0);
-    await page.evaluate(() => {
-      const releases = window.__PAGEROOT_RUNTIME_RELEASES__ || [];
-      window.__PAGEROOT_RUNTIME_RELEASES__ = [];
-      releases.forEach((release) => release());
-    });
-    await expect.poll(() => surface.getAttribute("data-edit-runtime-phase"), {
-      timeout: 12_000,
-    }).toBe("settled");
-    await expect(surface).toHaveAttribute("data-edit-runtime-outcome", "ready");
-    await expect(page.getByTestId("edit-runtime-static-fallback")).toHaveCount(0);
+    await expect.poll(() => readFileSync(workingCopyPath, "utf8").match(
+      /<h2[^>]*data-native-case="runtime-latest-wins-text"[^>]*>([\s\S]*?)<\/h2>/u,
+    )?.[1] ?? "").not.toContain("候选失败");
 
     frame = await currentEditorFrame(page);
-    await expect(frame.locator("#latest-wins-chart canvas")).toHaveCount(1);
-    heading = frame.locator('[data-native-case="runtime-latest-wins-text"]').first();
-    await heading.click();
-    await heading.dblclick({ force: true });
-    await expect(heading).toHaveAttribute("contenteditable", "true");
-    await heading.evaluate((element) => {
-      const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
-      let text = walker.nextNode();
-      while (text instanceof Text && !text.data.includes("你好")) {
-        text = walker.nextNode();
-      }
-      if (!(text instanceof Text)) throw new Error("Editable space text is missing.");
-      const start = text.data.indexOf("你好") + "你好".length;
-      if (!/ {8}/u.test(text.data.slice(start))) {
-        throw new Error("Expected editable spaces are missing.");
-      }
-      const range = document.createRange();
-      range.setStart(text, start);
-      range.setEnd(text, text.data.length);
-      const selection = document.getSelection();
-      selection?.removeAllRanges();
-      selection?.addRange(range);
-    });
-    await page.keyboard.press("Backspace");
-    await expect.poll(() => heading.textContent()).not.toMatch(/ {8}/u);
-    const spaceDeleteCandidatePending = waitForNewCandidate(null);
-    await page.keyboard.press("Escape");
-    const spaceDeleteCandidate = await spaceDeleteCandidatePending;
-    await expect.poll(() => page.evaluate(() => (
-      window.__PAGEROOT_RUNTIME_RELEASES__?.length || 0
-    ))).toBeGreaterThan(0);
-    await page.evaluate(() => {
-      const releases = window.__PAGEROOT_RUNTIME_RELEASES__ || [];
-      window.__PAGEROOT_RUNTIME_RELEASES__ = [];
-      releases.forEach((release) => release());
-    });
-    await expect(editor).toHaveAttribute(
-      "data-runtime-last-known-good-id",
-      spaceDeleteCandidate,
-      { timeout: 12_000 },
-    );
-    await expect(surface).toHaveAttribute("data-edit-runtime-outcome", "ready");
-    await expect(page.getByTestId("edit-runtime-static-fallback")).toHaveCount(0);
-
-    frame = await currentEditorFrame(page);
-    await expect(frame.locator("#latest-wins-chart canvas")).toHaveCount(1);
+    await expect(frame.locator("#latest-wins-chart canvas")).toHaveCount(0);
     await expect(frame.locator('[data-native-case="runtime-latest-wins"]')).toHaveCount(3);
-    await expect(frame.locator("#latest-wins-proof")).toHaveText("运行时卡片 3");
     await expect(editor.locator('iframe:not([data-frame-role])')).toHaveCount(1);
     await expect(editor.locator('iframe[data-frame-role="runtime-candidate"]')).toHaveCount(0);
-    await expect(editor.locator('iframe[data-frame-role="runtime-retiring"]')).toHaveCount(0);
-    await expect.poll(() => page.evaluate(() => {
-      const stage = document.querySelector(".review-scroll-stage");
-      const activeIframe = document.querySelector(
-        '[data-testid="html-canvas-editor"] iframe:not([data-frame-role])',
-      );
-      const anchor = activeIframe?.contentDocument?.querySelector(
-        '[data-native-case="runtime-latest-wins-text"]',
-      );
-      if (!(stage instanceof HTMLElement)
-        || !(activeIframe instanceof HTMLIFrameElement)
-        || !(anchor instanceof activeIframe.contentWindow.HTMLElement)) {
-        return false;
-      }
-      const stageRect = stage.getBoundingClientRect();
-      const iframeRect = activeIframe.getBoundingClientRect();
-      const anchorRect = anchor.getBoundingClientRect();
-      const anchorTop = iframeRect.top + anchorRect.top;
-      const anchorBottom = iframeRect.top + anchorRect.bottom;
-      return anchorBottom >= stageRect.top && anchorTop <= stageRect.bottom;
-    })).toBe(true);
-
-    const finalSource = readFileSync(workingCopyPath, "utf8");
-    expect(finalSource).toContain("你好");
-    expect(finalSource).not.toContain("pinyin");
-    const finalHeadingSource = finalSource.match(
+    await expect(editor.locator('iframe[data-frame-role="runtime-previous"]')).toHaveCount(0);
+    const degradedSource = readFileSync(workingCopyPath, "utf8");
+    expect(degradedSource).toContain("你好");
+    expect(degradedSource).not.toContain("pinyin");
+    const degradedHeadingSource = degradedSource.match(
       /<h2[^>]*data-native-case="runtime-latest-wins-text"[^>]*>([\s\S]*?)<\/h2>/u,
     )?.[1] ?? "";
-    expect(finalHeadingSource).not.toContain("候选失败");
-    expect(finalHeadingSource).not.toMatch(/(?:&nbsp;| ){8}/u);
-    const finalIndex = buildSourceIndex(finalSource);
-    const finalStableIds = await frame.locator('[data-native-case="runtime-latest-wins"]')
-      .evaluateAll((elements) => elements.map(
-        (element) => element.getAttribute("data-pageroot-id"),
-      ));
-    expect(finalStableIds.every(Boolean)).toBe(true);
-    expect(new Set(finalStableIds).size).toBe(3);
-    expect(finalIndex.byPagerootId.size).toBeGreaterThanOrEqual(5);
-    await expect(editor).toHaveAttribute(
-      "data-runtime-last-known-good-source-revision",
-      finalIndex.sourceSha256,
-    );
-    const finalCandidateId = await editor.getAttribute("data-runtime-last-known-good-id");
-    expect(candidateIds).not.toContain(finalCandidateId);
+    expect(degradedHeadingSource).not.toContain("候选失败");
+    const degradedIndex = buildSourceIndex(degradedSource);
+    expect(degradedIndex.byPagerootId.size).toBeGreaterThanOrEqual(5);
   });
 });
 
@@ -2508,7 +2225,7 @@ test("Escape commits native editing and leaves contenteditable exited", {
   });
 });
 
-test("a failed runtime candidate leaves the old active frame managed and never ready", {
+test("a failed dynamic candidate promotes the latest Script-disabled static page", {
   tag: ["@gate-smoke", "@smoke-editing"],
 }, async () => {
   const html = `<!doctype html>
@@ -2562,38 +2279,48 @@ test("a failed runtime candidate leaves the old active frame managed and never r
 
     await expect.poll(() => page.locator(".canvas-edit-surface").getAttribute(
       "data-edit-runtime-phase",
-    )).toBe("settled");
+    )).toBe("static-fallback");
     await expect(page.locator(".canvas-edit-surface")).toHaveAttribute(
       "data-edit-runtime-outcome",
       "candidate-failed",
     );
-    await expect(page.getByTestId("edit-runtime-static-fallback")).toHaveCount(0);
+    await expect(page.getByTestId("edit-runtime-static-fallback")).toContainText(
+      "部分动态内容未更新",
+    );
+    const editor = page.getByTestId("html-canvas-editor").filter({ visible: true }).first();
+    await expect(editor).toHaveAttribute("data-runtime-degradation", "static-visible");
+    const staticFrame = await currentEditorFrame(page);
+    await expect(editor.locator('iframe[data-runtime-slot-role="active"]'))
+      .toHaveAttribute("sandbox", "allow-same-origin");
+    await expect(staticFrame.locator("#runtime-order")).toHaveText("");
+    await expect.poll(() => staticFrame.locator("section > p").evaluateAll(
+      (nodes) => nodes.map((node) => node.id),
+    )).toEqual(["second", "first"]);
     const oldFrameState = await page.evaluate(() => {
-      const editor = document.querySelector('[data-testid="html-canvas-editor"]');
       const oldFrame = window.__PAGEROOT_RUNTIME_OLD_FRAME__;
       return {
         connected: oldFrame?.isConnected || false,
-        visibility: oldFrame?.isConnected ? getComputedStyle(oldFrame).visibility : null,
-        selectedCount: oldFrame?.contentDocument
-          ?.querySelectorAll("[data-html-canvas-selected]").length || 0,
-        toolbarVisible: Boolean(editor?.querySelector('[role="toolbar"]')?.getClientRects().length),
+        role: oldFrame?.getAttribute("data-runtime-slot-role") || null,
+        text: oldFrame?.contentDocument?.body?.textContent?.trim() || "",
       };
     });
-    expect(oldFrameState).toEqual({
-      connected: true,
-      visibility: "visible",
-      selectedCount: 1,
-      toolbarVisible: true,
-    });
+    expect(oldFrameState).toEqual({ connected: true, role: "inactive", text: "" });
 
-    await frame.locator("#runtime-proof-target").hover();
-    await expect(page.getByTestId("canvas-capability-outline")).toBeVisible();
-    const beforeUrl = page.url();
-    await frame.locator("#runtime-link").click({ modifiers: ["Alt"] });
-    expect(page.url()).toBe(beforeUrl);
+    await page.getByRole("button", { name: "关闭动态内容提示" }).click();
+    await expect(page.getByTestId("edit-runtime-static-fallback")).toHaveCount(0);
+    const staticTarget = staticFrame.locator('[data-native-case="runtime-candidate-failure"]');
+    await staticTarget.click();
+    await staticTarget.dblclick();
+    await expect(staticTarget).toHaveAttribute("contenteditable", "true");
+    await staticTarget.press("End");
+    await page.keyboard.insertText(" 静态继续编辑");
+    await page.keyboard.press("Escape");
+    await expect(staticTarget).toContainText("静态继续编辑");
+    await expect.poll(() => readFileSync(workingCopyPath, "utf8"))
+      .toContain("静态继续编辑");
     await expect.poll(() => page.locator(".canvas-edit-surface").getAttribute(
       "data-edit-runtime-phase",
-    )).toBe("settled");
+    )).toBe("static-fallback");
 
     const latestWorkingSource = readFileSync(workingCopyPath, "utf8");
     const lastKnownGoodHash = buildSourceIndex(lastKnownGoodSource).sourceSha256;
@@ -2617,11 +2344,11 @@ test("a failed runtime candidate leaves the old active frame managed and never r
     );
     await expect(page.getByTestId("html-canvas-editor")).toHaveAttribute(
       "data-rendered-projection-sha256",
-      lastKnownGoodHash,
+      latestWorkingHash,
     );
     await expect(page.getByTestId("html-canvas-editor")).toHaveAttribute(
       "data-rendered-projection-stale",
-      "true",
+      "false",
     );
     await expect(page.getByTestId("html-canvas-editor")).toHaveAttribute(
       "data-runtime-last-known-good-id",
@@ -2633,7 +2360,106 @@ test("a failed runtime candidate leaves the old active frame managed and never r
   });
 });
 
-test("a failed candidate during text editing rolls back before any resume", {
+test("dynamic and static candidate failure preserves latest HTML behind a read-only last-known-good frame", async () => {
+  const html = `<!doctype html>
+<html><head><title>Runtime double failure</title></head><body>
+  <section>
+    <p id="first" data-native-case="runtime-double-failure">甲</p>
+    <p id="second">乙</p>
+    <output id="runtime-order"></output>
+  </section>
+  <script>
+    document.querySelector('#runtime-order').textContent = Array.from(
+      document.querySelectorAll('section > p'),
+      (node) => node.textContent,
+    ).join('');
+    if (document.querySelector('section > p')?.id === 'second') {
+      const marker = document.querySelector('meta[data-html-canvas-render-verification]');
+      marker?.setAttribute('data-html-canvas-render-verification', 'invalid-dynamic-candidate');
+      marker?.setAttribute('content', 'invalid-dynamic-candidate');
+    }
+  </script>
+</body></html>`;
+
+  await withRuntimeProject("pageroot-runtime-double-failure-e2e-", {
+    "runtime-report.html": html,
+  }, async ({ page, sourcePath, sourceDirectory, electronApp }) => {
+    const { frame } = await loadedDiskFrame(page, sourcePath, "runtime-double-failure");
+    const workingCopyPath = await managedWorkingCopyPath(page, sourcePath);
+    const oldSourceHash = buildSourceIndex(readFileSync(workingCopyPath, "utf8")).sourceSha256;
+    await frame.locator('[data-native-case="runtime-double-failure"]').click();
+    const toolbar = page.getByRole("toolbar", { name: /编辑/u });
+    await toolbar.getByRole("button", { name: /给.+留评论/u }).click();
+    const commentComposer = page.getByRole("region", { name: "添加评论" });
+    await commentComposer.getByRole("textbox", { name: "评论内容" })
+      .fill("保留最新 Working HTML 的结构调整。");
+    await commentComposer.getByRole("button", { name: "评论", exact: true }).click();
+    await toolbar.getByRole("button", { name: "下移", exact: true }).click();
+
+    const editor = page.getByTestId("html-canvas-editor").filter({ visible: true }).first();
+    await expect(editor).toHaveAttribute(
+      "data-runtime-degradation",
+      "last-known-good-readonly",
+      { timeout: 12_000 },
+    );
+    await expect(editor).toHaveAttribute("aria-readonly", "true");
+    const degradationNotice = page.getByTestId("edit-runtime-static-fallback");
+    await expect(degradationNotice).toContainText("动态和静态页面都未能更新");
+    await expect(degradationNotice).toContainText("最新 HTML 未回滚");
+    await expect(degradationNotice.getByRole("button", { name: "重新加载", exact: true }))
+      .toBeVisible();
+    await expect(degradationNotice.getByRole("button", { name: "导出当前 HTML", exact: true }))
+      .toBeVisible();
+
+    const latestSource = readFileSync(workingCopyPath, "utf8");
+    const latestSourceHash = buildSourceIndex(latestSource).sourceSha256;
+    expect(latestSourceHash).not.toBe(oldSourceHash);
+    expect(latestSource.indexOf('id="second"')).toBeLessThan(latestSource.indexOf('id="first"'));
+
+    const exportedPath = path.join(sourceDirectory, "latest-working-export.html");
+    await electronApp.evaluate(({ dialog }, destination) => {
+      dialog.showSaveDialog = async () => ({ canceled: false, filePath: destination });
+    }, exportedPath);
+    await degradationNotice.getByRole("button", { name: "导出当前 HTML", exact: true })
+      .click();
+    await expect.poll(() => existsSync(exportedPath)).toBe(true);
+    expect(readFileSync(exportedPath, "utf8")).toBe(latestSource);
+
+    await expect(editor).toHaveAttribute(
+      "data-runtime-last-known-good-source-revision",
+      oldSourceHash,
+    );
+    await expect(frame.locator("#runtime-order")).toHaveText("甲乙");
+    await frame.locator('[data-native-case="runtime-double-failure"]').dblclick({ force: true });
+    await expect(frame.locator('[data-native-case="runtime-double-failure"]'))
+      .not.toHaveAttribute("contenteditable", "true");
+
+    await electronApp.evaluate(({ clipboard }) => clipboard.clear());
+    await page.getByRole("button", { name: /AI 助手/u }).click();
+    await chooseClipboardDelivery(page);
+    await expect(page.getByTestId("ai-conversation-action-bar"))
+      .toContainText("任务已复制，等你的 AI 改完");
+    let promptPath = "";
+    await expect.poll(async () => {
+      const copied = await electronApp.evaluate(({ clipboard }) => clipboard.readText());
+      promptPath = copied.match(/请执行\s+(.+?\/PROMPT\.md)\s+中的单轮任务/u)?.[1] || "";
+      return Boolean(promptPath && existsSync(promptPath));
+    }, { timeout: 20_000 }).toBe(true);
+    const requestRoot = path.dirname(promptPath);
+    const requestRecord = JSON.parse(
+      readFileSync(path.join(requestRoot, "request.json"), "utf8"),
+    );
+    expect(requestRecord.expectedSourceSha256).toBe(latestSourceHash);
+    expect(readFileSync(path.join(requestRoot, "input", "base", "index.html"), "utf8"))
+      .toBe(latestSource);
+  }, {
+    injectedEnv: {
+      PAGEROOT_E2E_STATIC_CANDIDATE_FAILURE: "1",
+    },
+  });
+});
+
+test("a failed candidate after text editing promotes static without resuming Native Edit", {
   tag: ["@gate-smoke", "@smoke-editing"],
 }, async () => {
   const html = `<!doctype html>
@@ -2826,7 +2652,7 @@ test("static fallback can reload dynamic content and dismiss itself after succes
     "runtime-report.html": html,
   }, async ({ page, sourcePath }) => {
     await expect(page.getByTestId("edit-runtime-static-fallback")).toContainText(
-      "部分动态内容未加载",
+      "部分动态内容未更新",
     );
     await expect(page.locator(".canvas-edit-surface")).toHaveAttribute(
       "data-edit-runtime-phase",

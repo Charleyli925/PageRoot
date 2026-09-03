@@ -327,7 +327,7 @@ test("an old candidate callback cannot settle a newer running attempt", async ()
   assert.equal(session.snapshot.phase, "settled");
 });
 
-test("a real candidate failure after supersession preserves last-known-good", async () => {
+test("a real candidate failure after supersession enters retryable static degradation", async () => {
   const revoked = [];
   const session = new EditAuthorRuntimeSession({
     port: {
@@ -351,9 +351,12 @@ test("a real candidate failure after supersession preserves last-known-good", as
   assert.equal(settleRuntime(session, grant, "failed", undefined, {
     preserveLastKnownGood: true,
   }), true);
-  assert.equal(session.snapshot.phase, "settled");
+  assert.equal(session.snapshot.phase, "static-fallback");
   assert.equal(session.snapshot.lastOutcome, "candidate-failed");
-  assert.deepEqual(revoked, []);
+  assert.equal(session.snapshot.retryAvailable, true);
+  assert.equal(session.snapshot.grant, null);
+  await flushAsync();
+  assert.deepEqual(revoked, [grant.sessionId]);
 });
 
 test("a remounted controller cannot preserve a session-only last-known-good", async () => {
