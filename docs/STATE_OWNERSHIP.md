@@ -290,6 +290,13 @@ Rules:
   `leave-canvas` retires native editing without queuing a candidate or clearing
   `runtimeNeedsRerender`; a later unlock may refresh only as recovery. History
   retains its separate bookmark and canonical-adoption path.
+- The pure `decideEditRuntimeRefresh()` policy owns the projection decision for
+  an accepted source operation: safe static text/style/reorder stays in place;
+  Runtime text/style stays in place and coalesces one pending refresh; Runtime
+  reorder/structure or any authored-program identity change prepares a
+  candidate immediately. `HtmlCanvasEditor` stores only the latest pending
+  source revision/reason/count for diagnostics. It is not save authority and
+  never retains an intermediate iframe revision.
 - An active last-known-good Edit Runtime remains visible and editable while the
   latest candidate prepares. Candidate preparation, connection, positioning or
   activation failure cannot select static fallback when that prior Runtime is
