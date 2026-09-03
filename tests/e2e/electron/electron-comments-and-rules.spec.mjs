@@ -531,9 +531,14 @@ test("automatic update actions keep the sidebar product geometry and split About
         : 0;
       return Math.abs(actualWidth - targetWidth);
     })).toBeLessThanOrEqual(0.5);
-    await launched.page.evaluate(() => new Promise((resolve) => {
-      window.setTimeout(resolve, 220);
-    }));
+    await launched.page.evaluate(async () => {
+      const workbench = document.querySelector(".workbench");
+      if (!workbench) throw new Error("Workbench geometry owner is unavailable.");
+      await Promise.all(workbench.getAnimations().map((animation) => (
+        animation.finished.catch(() => undefined)
+      )));
+      await new Promise((resolve) => requestAnimationFrame(() => resolve()));
+    });
     const captureSidebarProduct = async ({ badgeExpected = true } = {}) => {
       const geometry = await launched.page.evaluate(() => {
         const rect = (selector) => {
