@@ -398,16 +398,6 @@ async function waitForFreshFenceFrame(page, editor, previousDocumentToken) {
   return currentEditorFrame(page);
 }
 
-async function currentFrameAfterOptionalFence(page, editor, previousDocumentToken) {
-  const currentDocumentToken = await documentToken(page);
-  if (currentDocumentToken !== previousDocumentToken) {
-    await expect(editor).toHaveAttribute("data-render-verified", "true");
-  }
-  const frame = await currentEditorFrame(page);
-  await expect(frame.locator('[contenteditable="true"]')).toHaveCount(0);
-  return frame;
-}
-
 function uniqueLiteralForCandidate(source, text) {
   const normalized = text.trim();
   const codePoints = Array.from(normalized);
@@ -791,26 +781,27 @@ test("a real complex HTML file keeps layout and editable-island source authority
   );
   await page.keyboard.insertText(replacement);
   await expect.poll(() => target.textContent()).toContain(replacement);
-  let previousDocumentToken = await documentToken(page);
+  const checkpointDocumentToken = await documentToken(page);
   await page.keyboard.press(process.platform === "darwin" ? "Meta+S" : "Control+S");
-  await waitForFreshFenceFrame(page, editor, previousDocumentToken);
-  previousDocumentToken = await documentToken(page);
+  await expect.poll(() => documentToken(page)).toBe(checkpointDocumentToken);
+  await expect(editor).toHaveAttribute("data-render-verified", "true");
+  await expect(editor.locator('iframe[data-frame-role="runtime-candidate"]'))
+    .toHaveCount(0);
   const modified = await exportCurrentHtml(page);
-  let currentFrame = await currentFrameAfterOptionalFence(
-    page,
-    editor,
-    previousDocumentToken,
-  );
   expect(
     modified.equals(expected),
     `Only the selected literal may change: ${firstByteDifference(modified, expected)}`,
   ).toBe(true);
 
+  let currentFrame = await currentEditorFrame(page);
   const remainingEditHost = currentFrame.locator('[contenteditable="true"]');
-  if (await remainingEditHost.count()) {
-    await remainingEditHost.press("Escape");
-    await expect(remainingEditHost).toHaveCount(0);
-  }
+  await expect(remainingEditHost).toHaveCount(1);
+  await expect.poll(() => remainingEditHost.evaluate((element) => (
+    element.ownerDocument.activeElement === element
+    || element.contains(element.ownerDocument.activeElement)
+  ))).toBe(true);
+  await remainingEditHost.press("Escape");
+  await expect(remainingEditHost).toHaveCount(0);
   currentFrame = await currentEditorFrame(page);
   const commentCandidate = await discoverCommentCandidate(currentFrame);
   const commentTarget = currentFrame
