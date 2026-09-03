@@ -347,10 +347,10 @@ test("managed Agent progress is provider-neutral and never claims Candidate read
     errorMessage: "会话已停止，但 Request 仍然保留。",
     retryable: false,
   });
-  assert.equal(interrupted.statusLabel, "会话已中断");
+  assert.equal(interrupted.statusLabel, "生成失败");
   assert.equal(interrupted.steps[0].state, "error");
-  assert.equal(interrupted.steps[1].detail, "旧 Request 结束后可重新发送");
-  assert.match(interrupted.summaryDetail, /Request/u);
+  assert.equal(interrupted.steps[1].detail, "本轮没有生成新版本");
+  assert.match(interrupted.summaryDetail, /未生成新版本/u);
 });
 
 test("legacy validation review choices are decoded at the domain boundary", () => {

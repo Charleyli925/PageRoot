@@ -103,11 +103,44 @@ const RUN_STATUS_TO_SIDEBAR_STATE = Object.freeze({
 
 export function sidebarStateFromRun({
   activeRun = null,
+  activeHandoff = null,
   submissionPending = false,
   reviewing = false,
 } = {}) {
   if (reviewing) return "review-view";
   const mapped = RUN_STATUS_TO_SIDEBAR_STATE[String(activeRun?.status || "")];
+  const handoffMatchesRun = Boolean(
+    activeRun
+    && activeHandoff
+    && activeRun.requestId
+    && activeRun.attemptId
+    && activeHandoff.requestId === activeRun.requestId
+    && activeHandoff.attemptId === activeRun.attemptId
+  );
+  const completionObserved = Boolean(
+    activeRun?.completionObserved === true
+    || [
+      "validating",
+      "committing",
+      "ready-to-open",
+      "awaiting-conflict-resolution",
+      "recovering-transaction",
+      "no-change",
+      "complete",
+    ].includes(String(activeRun?.status || ""))
+    || activeRun?.readyPayload
+    || activeRun?.candidateAssessment,
+  );
+  // A durable Request may still say processing after its managed handoff has
+  // failed. The matching identity is required so a stale handoff from another
+  // attempt can never turn the current round into an error. A real completion
+  // or Candidate observation retains the existing completion authority.
+  if (
+    mapped === "processing"
+    && handoffMatchesRun
+    && ["failed", "interrupted"].includes(String(activeHandoff.status || ""))
+    && completionObserved === false
+  ) return "run-error";
   if (mapped) return mapped;
   // A submission being prepared is authority in flight, not yet a run.
   if (submissionPending) return "preparing-delivery";
@@ -303,7 +336,124 @@ export function sidebarMessageStream(messages) {
       sequence: Number(message.sequence) || 0,
       createdAt: String(message.createdAt || ""),
       modelDisplayName: message.modelDisplayName || null,
+      turnId: String(message.turnId || "") || null,
+      requestId: String(message.requestId || "") || null,
+      attemptId: String(message.attemptId || "") || null,
     }));
+}
+
+function historyIdentity(value) {
+  const text = String(value ?? "").trim();
+  return text && text !== "null" && text !== "undefined" ? text : null;
+}
+
+function historyTimestamp(value) {
+  const timestamp = Date.parse(String(value || ""));
+  return Number.isFinite(timestamp) ? timestamp : null;
+}
+
+function historyTimeLabel(timestamp) {
+  if (!Number.isFinite(timestamp)) return null;
+  const date = new Date(timestamp);
+  return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+}
+
+function historyDateKey(timestamp) {
+  if (!Number.isFinite(timestamp)) return "unknown";
+  const date = new Date(timestamp);
+  return [date.getFullYear(), date.getMonth() + 1, date.getDate()]
+    .map((part) => String(part).padStart(2, "0"))
+    .join("-");
+}
+
+function historyDateLabel(timestamp) {
+  if (!Number.isFinite(timestamp)) return "历史对话";
+  const date = new Date(timestamp);
+  return `${date.getMonth() + 1}月${date.getDate()}日 · 历史对话`;
+}
+
+function currentTurnLabel(timestamp, now) {
+  const effectiveTimestamp = Number.isFinite(timestamp) ? timestamp : Number(now);
+  if (!Number.isFinite(effectiveTimestamp)) return "本轮修改";
+  const date = new Date(effectiveTimestamp);
+  const currentDate = new Date(Number.isFinite(Number(now)) ? Number(now) : Date.now());
+  const sameDay = date.getFullYear() === currentDate.getFullYear()
+    && date.getMonth() === currentDate.getMonth()
+    && date.getDate() === currentDate.getDate();
+  const prefix = sameDay ? "今天" : `${date.getMonth() + 1}月${date.getDate()}日`;
+  return `${prefix} ${historyTimeLabel(effectiveTimestamp) || "00:00"} · 本轮修改`;
+}
+
+/**
+ * Derives compact turn/date boundaries for the fact stream. The grouping never
+ * mutates or migrates the stored conversation: request and attempt identity are
+ * read from the message/turn projection, and records without both identities
+ * remain historical even when they share today's date.
+ */
+export function sidebarConversationGroups({
+  messages = [],
+  turns = [],
+  activeRun = null,
+  activeRequestId = null,
+  activeAttemptId = null,
+  now = Date.now(),
+} = {}) {
+  // Use the same immutable fact projection as the renderer. A malformed record
+  // rejected by sidebarMessageStream must not shift boundary indexes and label
+  // a later visible message with the wrong turn.
+  const sourceMessages = sidebarMessageStream(messages);
+  const turnById = new Map(
+    (Array.isArray(turns) ? turns : [])
+      .filter((turn) => turn && typeof turn === "object")
+      .map((turn) => [historyIdentity(turn.turnId), turn])
+      .filter(([turnId]) => turnId),
+  );
+  const currentRequestId = historyIdentity(activeRequestId ?? activeRun?.requestId);
+  const currentAttemptId = historyIdentity(activeAttemptId ?? activeRun?.attemptId);
+  const groups = [];
+
+  sourceMessages.forEach((message, messageIndex) => {
+    if (!message || typeof message !== "object") return;
+    const turn = turnById.get(historyIdentity(message.turnId));
+    const requestId = historyIdentity(message.requestId) || historyIdentity(turn?.requestId);
+    const attemptId = historyIdentity(message.attemptId) || historyIdentity(turn?.attemptId);
+    const current = Boolean(
+      currentRequestId
+      && currentAttemptId
+      && requestId === currentRequestId
+      && attemptId === currentAttemptId,
+    );
+    const timestamp = historyTimestamp(turn?.startedAt) ?? historyTimestamp(message.createdAt);
+    const dateKey = historyDateKey(timestamp);
+    const historicalTurnKey = historyIdentity(message.turnId)
+      || (requestId && attemptId ? `${requestId}:${attemptId}` : "legacy");
+    const key = current
+      ? `current:${currentRequestId}:${currentAttemptId}`
+      : `history:${dateKey}:${historicalTurnKey}`;
+    const previous = groups[groups.length - 1];
+    if (previous?.key === key) {
+      previous.messageIndices.push(messageIndex);
+      const messageId = historyIdentity(message.messageId);
+      if (messageId) previous.messageIds.push(messageId);
+      return;
+    }
+    const messageId = historyIdentity(message.messageId);
+    groups.push({
+      key,
+      label: current
+        ? currentTurnLabel(timestamp, now)
+        : historyDateLabel(timestamp),
+      kind: current ? "current" : "history",
+      messageIndices: [messageIndex],
+      messageIds: messageId ? [messageId] : [],
+    });
+  });
+
+  return Object.freeze(groups.map((group) => Object.freeze({
+    ...group,
+    messageIndices: Object.freeze(group.messageIndices),
+    messageIds: Object.freeze(group.messageIds),
+  })));
 }
 
 export function sidebarResolvedIntent(state) {
@@ -358,6 +508,50 @@ export function sidebarFailureRetryable(activeRun, activeHandoff) {
   return activeRun?.requestId !== "pending";
 }
 
+function boundedAgentName(value) {
+  return String(value || "Agent").trim().slice(0, 80) || "Agent";
+}
+
+function formatElapsedDuration(elapsedMs) {
+  const elapsedSeconds = Math.max(0, Math.floor(elapsedMs / 1_000));
+  const minutes = Math.floor(elapsedSeconds / 60);
+  const seconds = elapsedSeconds % 60;
+  return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+}
+
+export function sidebarExecutionStatus({
+  state,
+  providerName = "Agent",
+  startedAt = null,
+  receivedBytes = 0,
+  now = Date.now(),
+} = {}) {
+  if (state !== "processing") return null;
+  const started = Date.parse(String(startedAt || ""));
+  const current = Number(now);
+  const elapsedMs = Number.isFinite(started) && Number.isFinite(current)
+    ? Math.max(0, current - started)
+    : 0;
+  const bytes = Number.isSafeInteger(receivedBytes) && receivedBytes > 0
+    ? receivedBytes
+    : 0;
+  return Object.freeze({
+    title: `${boundedAgentName(providerName)} 正在生成`,
+    detail: `已等待 ${formatElapsedDuration(elapsedMs)} · 已接收 ${Math.ceil(bytes / 1024)} KB`,
+    elapsedMs,
+    receivedBytes: bytes,
+  });
+}
+
+function boundedFailureReason(value) {
+  const reason = String(value || "")
+    .replace(/[\u0000-\u001f\u007f]+/gu, " ")
+    .replace(/\s+/gu, " ")
+    .trim()
+    .slice(0, 180);
+  return reason || "本轮没有收到可用的完成结果。";
+}
+
 /**
  * The action bar. Derived entirely from current product state — never from a
  * message — so a decision stays visible at any scroll position and history
@@ -388,27 +582,20 @@ export function sidebarActionBar({
     };
   }
   if (state === "run-error") {
-    const code = String(failureCode || "");
-    const recovery = code === "AGENT_AUTH_REQUIRED" || code === "AGENT_CONFIGURATION_CHANGED"
-      ? { id: "reconnect-agent", label: "重新连接", tone: "quiet" }
-      : ["AGENT_MODEL_ACCESS_DENIED", "AGENT_SELECTION_UNSUPPORTED", "AGENT_OUTPUT_TRUNCATED", "AGENT_PROMPT_TOO_LARGE"].includes(code)
-        ? { id: "change-agent-model", label: "更换模型", tone: "quiet" }
-        : ["AGENT_BALANCE_INSUFFICIENT", "AGENT_PLAN_LIMIT", "AGENT_ENDPOINT_REGION_MISMATCH"].includes(code)
-          ? { id: "change-agent-provider", label: "更换厂商", tone: "quiet" }
-          : null;
+    const retryable = failureRetryable !== false;
+    const reason = boundedFailureReason(failureMessage);
     return {
       kind: "blocked",
-      title: failureMessage || "AI 输出没有通过安全校验",
-      detail: "当前页面和评论仍保持原样。",
-      actions: [
-        ...(failureRetryable === false
-          ? []
-          : [{ id: "resend-agent", label: "重新发送", tone: "primary" }]),
-        ...(recovery ? [recovery] : []),
-        { id: "switch-agent", label: "切换 Agent", tone: "quiet" },
-        { id: "copy-task", label: "复制任务", tone: "quiet" },
-        { id: "return-editing", label: "返回编辑", tone: "quiet" },
-      ],
+      title: retryable ? "生成中断" : "生成失败",
+      detail: retryable
+        ? "未生成新版本，页面未修改"
+        : `${reason} 页面未修改`,
+      actions: retryable
+        ? [
+            { id: "resend-agent", label: "重新发送", tone: "primary" },
+            { id: "dismiss", label: "结束本轮", tone: "quiet" },
+          ]
+        : [{ id: "dismiss", label: "结束本轮", tone: "quiet" }],
     };
   }
   if (state === "ready-to-open" || state === "review-view") {
@@ -489,6 +676,14 @@ export function sidebarActionBar({
           { id: "recopy", label: "再次复制", tone: "quiet" },
           { id: "cancel", label: "结束本轮", tone: "quiet" },
         ],
+      };
+    }
+    if (handoffStatus === "cancelling") {
+      return {
+        kind: "progress",
+        title: null,
+        detail: null,
+        actions: [{ id: "cancel", label: "正在结束…", tone: "quiet", disabled: true }],
       };
     }
     // The timeline above already narrates the round, and the header already says the

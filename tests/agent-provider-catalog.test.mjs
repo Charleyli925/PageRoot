@@ -52,7 +52,7 @@ test("the shared Agent chooser exposes 源页 Agent plus both ACP providers with
         },
       },
     })[0].presentation.availability({ status: "unavailable", reason: "account-capacity" }).statusLabel,
-    "额度已用完",
+    "连接失败",
   );
   assert.equal(PAGEROOT_AGENT_PROVIDER.failureReason("AGENT_BALANCE_INSUFFICIENT"), "account-capacity");
   assert.equal(PAGEROOT_AGENT_PROVIDER.failureReason("AGENT_MODEL_ACCESS_DENIED"), "model-unavailable");
@@ -72,7 +72,7 @@ test("the shared Agent chooser exposes 源页 Agent plus both ACP providers with
       status: "unavailable",
       reason: "endpoint-region-mismatch",
     }).statusLabel,
-    "暂不可用 · 接口地区不匹配",
+    "连接失败",
   );
 });
 

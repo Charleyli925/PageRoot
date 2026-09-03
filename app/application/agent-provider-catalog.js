@@ -271,89 +271,52 @@ export function defaultAgentProviders() {
 
 export function agentAvailabilityCardPresentation(presentation, availability) {
   const status = availability?.status || "checking";
+  const displayName = String(presentation.displayName || presentation.agentName || "Agent");
   if (status === "ready") {
     return Object.freeze({
-      statusLabel: "已连接",
-      detail: presentation.readyDetail,
+      statusLabel: `${displayName} · 已连接`,
+      detail: "",
       tone: "ready",
     });
   }
   if (status === "not-installed") {
     return Object.freeze({
-      statusLabel: "未安装",
-      detail: presentation.notInstalledDetail,
+      statusLabel: `${displayName} · 未安装`,
+      detail: "",
       tone: "attention",
     });
   }
   if (status === "auth-required") {
-    if (presentation.credentialKind === "api-token") {
-      return Object.freeze({
-        statusLabel: "需要 Token",
-        detail: presentation.authRequiredDetail,
-        tone: "attention",
-      });
-    }
-    const waitingForLogin = availability?.guidanceCopied === "login";
     return Object.freeze({
-      statusLabel: waitingForLogin ? "等待登录" : "需要登录",
-      detail: waitingForLogin
-        ? "完成登录后返回源页，系统会自动复检。"
-        : presentation.authRequiredDetail,
+      statusLabel: `${displayName} · 未登录`,
+      detail: "",
       tone: "attention",
     });
   }
-  if (availability?.reason === "invalid-installation") {
+  if (availability?.reason === "invalid-installation" || availability?.reason === "restart-required") {
     return Object.freeze({
-      statusLabel: "无法使用当前安装",
-      detail: presentation.invalidInstallationDetail,
-      tone: "attention",
-    });
-  }
-  if (availability?.reason === "restart-required") {
-    return Object.freeze({
-      statusLabel: "请重新打开 PageRoot",
-      detail: presentation.restartRequiredDetail,
+      statusLabel: `${displayName} · 需要修复`,
+      detail: "",
       tone: "attention",
     });
   }
   if (status === "checking") {
     return Object.freeze({
-      statusLabel: "检测中",
-      detail: presentation.checkingDetail,
+      statusLabel: `${displayName} · 正在检查…`,
+      detail: "",
       tone: "checking",
-    });
-  }
-  if (availability?.reason === "account-capacity") {
-    return Object.freeze({
-      statusLabel: presentation.capacityStatusLabel || "暂不可用 · 额度已用完",
-      detail: presentation.capacityDetail || "当前账号没有可用模型容量。",
-      tone: "attention",
-    });
-  }
-  if (availability?.reason === "timeout") {
-    return Object.freeze({
-      statusLabel: "暂不可用 · 连接超时",
-      detail: presentation.timeoutDetail,
-      tone: "attention",
     });
   }
   if (availability?.reason === "model-unavailable") {
     return Object.freeze({
-      statusLabel: "暂不可用 · 模型不可用",
-      detail: "请选择其他模型，或重新读取模型列表。",
-      tone: "attention",
-    });
-  }
-  if (availability?.reason === "endpoint-region-mismatch") {
-    return Object.freeze({
-      statusLabel: "暂不可用 · 接口地区不匹配",
-      detail: "请修改兼容接口，或更换厂商。",
+      statusLabel: "连接失败",
+      detail: "",
       tone: "attention",
     });
   }
   return Object.freeze({
-    statusLabel: "暂不可用 · 连接没有完成",
-    detail: "本轮任务尚未创建，当前页面不受影响。",
+    statusLabel: "连接失败",
+    detail: "",
     tone: "attention",
   });
 }

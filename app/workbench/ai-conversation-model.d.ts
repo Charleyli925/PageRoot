@@ -26,12 +26,24 @@ export type SidebarMessage = {
   sequence: number;
   createdAt: string;
   modelDisplayName: string | null;
+  turnId: string | null;
+  requestId: string | null;
+  attemptId: string | null;
+};
+
+export type SidebarHistoryGroup = {
+  key: string;
+  label: string;
+  kind: "current" | "history";
+  messageIndices: readonly number[];
+  messageIds: readonly string[];
 };
 
 export type SidebarAction = {
   id: string;
   label: string;
   tone: "primary" | "quiet";
+  disabled?: boolean;
 };
 
 export type SidebarActionBar = {
@@ -72,6 +84,15 @@ export function sidebarMessageStream(
   messages: readonly unknown[],
 ): SidebarMessage[];
 
+export function sidebarConversationGroups(options?: {
+  messages?: readonly unknown[];
+  turns?: readonly unknown[];
+  activeRun?: { requestId?: string | null; attemptId?: string | null } | null;
+  activeRequestId?: string | null;
+  activeAttemptId?: string | null;
+  now?: number;
+}): readonly SidebarHistoryGroup[];
+
 export function sidebarResolvedIntent(
   state: string,
 ): SidebarIntent;
@@ -80,6 +101,21 @@ export function sidebarFailureRetryable(
   activeRun?: { requestId?: string | null; attemptId?: string | null } | null,
   activeHandoff?: { requestId?: string | null; attemptId?: string | null; retryable?: boolean } | null,
 ): boolean;
+
+export type SidebarExecutionStatus = {
+  title: string;
+  detail: string;
+  elapsedMs: number;
+  receivedBytes: number;
+};
+
+export function sidebarExecutionStatus(options?: {
+  state?: string;
+  providerName?: string;
+  startedAt?: string | null;
+  receivedBytes?: number;
+  now?: number;
+}): SidebarExecutionStatus | null;
 
 export function conversationReadyForDocument(
   conversation: {
@@ -178,6 +214,11 @@ export function sidebarCopyTaskState(options?: {
 
 export function sidebarStateFromRun(options?: {
   activeRun?: { status?: string } | null;
+  activeHandoff?: {
+    requestId?: string | null;
+    attemptId?: string | null;
+    status?: string | null;
+  } | null;
   submissionPending?: boolean;
   reviewing?: boolean;
 }): string;

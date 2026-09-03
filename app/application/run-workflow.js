@@ -265,6 +265,10 @@ function agentHandoffState(run, session) {
     visibleTextUpdates: Object.freeze(visibleTextUpdates),
     textTruncated: session.textTruncated === true,
     startedAt: typeof session.startedAt === "string" ? session.startedAt : null,
+    lastActivityAt: typeof session.lastActivityAt === "string" ? session.lastActivityAt : null,
+    receivedBytes: Number.isSafeInteger(session.receivedBytes) && session.receivedBytes >= 0
+      ? session.receivedBytes
+      : 0,
     updatedAt: typeof session.updatedAt === "string" ? session.updatedAt : null,
     errorCode: session.errorCode ? String(session.errorCode) : null,
     errorMessage: session.errorMessage ? String(session.errorMessage) : null,

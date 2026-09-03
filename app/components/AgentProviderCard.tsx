@@ -84,56 +84,18 @@ function actionsForAvailability(
     return [{ kind: "install", ...presentation.actions.install }];
   }
   if (availability.status === "auth-required") {
-    if (presentation.credentialKind === "api-token") return [];
+    if (presentation.credentialKind === "api-token") {
+      return [{ kind: "api-key", label: "登录", copiedLabel: "登录" }];
+    }
     return [{ kind: "login", ...presentation.actions.login }];
   }
-  if (
-    availability.status === "ready"
-    && presentation.supportsApiKey
-    && presentation.credentialKind === "api-token"
-  ) {
-    return [{
-      kind: "api-key",
-      ...(presentation.actions.apiKey || { label: "更换 Token", copiedLabel: "更换 Token" }),
-    }];
+  if (availability.status === "unavailable" && [
+    "invalid-installation",
+    "restart-required",
+  ].includes(String(availability.reason || ""))) {
+    return [{ kind: "install", label: "修复", copiedLabel: "修复" }];
   }
-  if (
-    availability.status === "unavailable"
-    && presentation.credentialKind === "api-token"
-    && availability.reason === "account-capacity"
-  ) {
-    return [{
-      kind: "api-key",
-      label: "更换厂商",
-      copiedLabel: "更换厂商",
-    }];
-  }
-  if (
-    availability.status === "unavailable"
-    && presentation.credentialKind === "api-token"
-    && availability.reason === "model-unavailable"
-  ) {
-    return [{
-      kind: "api-key",
-      label: "选择其他模型",
-      copiedLabel: "选择其他模型",
-    }];
-  }
-  if (
-    availability.status === "unavailable"
-    && presentation.credentialKind === "api-token"
-    && availability.reason === "endpoint-region-mismatch"
-  ) {
-    return [{
-      kind: "api-key",
-      label: "修改接口",
-      copiedLabel: "修改接口",
-    }];
-  }
-  if (
-    availability.status === "unavailable"
-    && ["timeout", "service-unavailable"].includes(String(availability.reason || ""))
-  ) {
+  if (availability.status === "unavailable") {
     return [{
       kind: "recheck" as const,
       ...(presentation.actions.recheck || { label: "重试", copiedLabel: "重试" }),
@@ -175,9 +137,9 @@ export default function AgentProviderCard({
   );
   const presentation = provider.availability(availability);
   const statusPresentation = installState === "installing"
-    ? { ...presentation, statusLabel: "正在安装…", detail: "正在安装，请稍候。", tone: "checking" as const }
+    ? { ...presentation, statusLabel: "正在安装…", detail: "", tone: "checking" as const }
     : installState === "cancelling"
-      ? { ...presentation, statusLabel: "正在取消…", detail: "正在取消安装，请稍候。", tone: "checking" as const }
+      ? { ...presentation, statusLabel: "正在取消…", detail: "", tone: "checking" as const }
       : presentation;
   const currentModel = models.find((model) => model.id === selectedModelId) || models[0] || null;
   const actions = installState === "installing" || installState === "cancelling"
@@ -351,7 +313,7 @@ export default function AgentProviderCard({
         </span>
         <span className="qoder-card-copy">
           <strong>{provider.displayName}</strong>
-          <small>{presentation.detail}</small>
+          {presentation.detail ? <small>{presentation.detail}</small> : null}
         </span>
         <span className="qoder-card-control">
           <span
@@ -376,7 +338,7 @@ export default function AgentProviderCard({
                 type="button"
                 data-kind={action.kind}
                 {...(index === 0 ? primaryActionData : {})}
-                disabled={Boolean(pendingAction) || disabled}
+                disabled={Boolean(pendingAction) || disabled || installState === "cancelling"}
                 aria-label={installState === "cancelling" && action.kind === "cancel-install"
                   ? "正在取消…"
                   : installing && action.kind === "cancel-install"
@@ -418,13 +380,29 @@ export default function AgentProviderCard({
           {connection.vendorId === "custom" && connection.baseUrl ? ` · ${connection.baseUrl}` : ""}
         </p>
       ) : null}
-      {connection && models.length > 1 && onSelectModel ? (
-        <label className="qoder-card-model-choice">
-          <span>{availability.reason === "model-unavailable" ? "选择其他模型" : "当前模型"}</span>
+          {availability.status === "ready"
+        && provider.credentialKind === "api-token"
+        && provider.supportsApiKey
+        && onConnectApiKey ? (
+        <button
+          type="button"
+          data-kind="api-key"
+          disabled={Boolean(pendingAction) || disabled}
+          onClick={() => {
+            setApiKeyOpen((open) => !open);
+            setActionError("");
+          }}
+        >
+          {apiKeyOpen ? "收起配置" : (provider.actions.apiKey?.label || "更换 Token")}
+        </button>
+      ) : null}
+          {connection && models.length > 1 && onSelectModel ? (
+            <label className="qoder-card-model-choice">
+              <span>当前模型</span>
           <select
-            aria-label="选择其他模型"
+            aria-label="当前模型"
             value={selectedModelId || models[0]?.id || ""}
-            disabled={Boolean(pendingAction) || disabled}
+                    disabled={Boolean(pendingAction) || disabled}
             onChange={(event) => void selectModel(event.target.value)}
           >
             {models.map((model) => (

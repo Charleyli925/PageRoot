@@ -100,6 +100,8 @@ function recoveredAgentHandoff(run) {
     visibleTextUpdates: [],
     textTruncated: false,
     startedAt: null,
+    lastActivityAt: null,
+    receivedBytes: 0,
     updatedAt: null,
     errorCode: "AGENT_RESTART_RECOVERY_REQUIRED",
     errorMessage: "Bridge 无法证明旧 Agent 会话已经停止。请结束本轮，再重新发送。",

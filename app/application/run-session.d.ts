@@ -42,6 +42,8 @@ export type RunHandoffState = {
   textTruncated?: boolean;
   agentVersion?: string | null;
   startedAt?: string | null;
+  lastActivityAt?: string | null;
+  receivedBytes?: number;
   updatedAt?: string | null;
   errorCode?: string | null;
   errorMessage?: string | null;

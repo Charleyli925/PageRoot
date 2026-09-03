@@ -12,6 +12,8 @@ import {
   sidebarFailureRetryable,
   sidebarActorInitial,
   sidebarMessageStream,
+  sidebarConversationGroups,
+  sidebarExecutionStatus,
   sidebarModePresentation,
   sidebarResolvedIntent,
   sidebarSendState,
@@ -473,6 +475,72 @@ test("the header's mode is derived from Request authority, not guessed", () => {
   );
 });
 
+test("a matching failed handoff takes priority over a still-processing Request", () => {
+  const activeRun = {
+    requestId: "req_current",
+    attemptId: "attempt_001",
+    status: "processing",
+  };
+  assert.equal(
+    sidebarStateFromRun({
+      activeRun,
+      activeHandoff: {
+        requestId: "req_current",
+        attemptId: "attempt_001",
+        status: "failed",
+        retryable: true,
+      },
+    }),
+    "run-error",
+  );
+  assert.equal(
+    sidebarStateFromRun({
+      activeRun,
+      activeHandoff: {
+        requestId: "req_old",
+        attemptId: "attempt_001",
+        status: "failed",
+      },
+    }),
+    "processing",
+  );
+  assert.equal(
+    sidebarStateFromRun({
+      activeRun: { ...activeRun, completionObserved: true },
+      activeHandoff: {
+        requestId: "req_current",
+        attemptId: "attempt_001",
+        status: "failed",
+      },
+    }),
+    "processing",
+  );
+});
+
+test("execution status derives elapsed time and received bytes from the public projection", () => {
+  const startedAt = Date.parse("2026-08-26T12:00:00.000Z");
+  const status = sidebarExecutionStatus({
+    state: "processing",
+    providerName: "Codex",
+    startedAt: new Date(startedAt).toISOString(),
+    receivedBytes: 2_048,
+    now: startedAt + 125_000,
+  });
+  assert.equal(status.title, "Codex 正在生成");
+  assert.equal(status.detail, "已等待 02:05 · 已接收 2 KB");
+  assert.equal(
+    sidebarExecutionStatus({
+      state: "processing",
+      providerName: "Qoder",
+      startedAt: null,
+      receivedBytes: 0,
+      now: startedAt,
+    }).detail,
+    "已等待 00:00 · 已接收 0 KB",
+  );
+  assert.equal(sidebarExecutionStatus({ state: "validating" }), null);
+});
+
 test("conflict and failed results keep their recovery decisions in the conversation", () => {
   const conflict = sidebarActionBar({
     state: "ready-to-open",
@@ -488,9 +556,10 @@ test("conflict and failed results keep their recovery decisions in the conversat
     runStatus: "error",
     failureMessage: "Candidate validation failed",
   });
-  assert.equal(failure.title, "Candidate validation failed");
+  assert.equal(failure.title, "生成中断");
+  assert.equal(failure.detail, "未生成新版本，页面未修改");
   assert.deepEqual(failure.actions.map((action) => action.id), [
-    "resend-agent", "switch-agent", "copy-task", "return-editing",
+    "resend-agent", "dismiss",
   ]);
 
   const nonRetryable = sidebarActionBar({
@@ -499,9 +568,74 @@ test("conflict and failed results keep their recovery decisions in the conversat
     failureCode: "AGENT_RESTART_RECOVERY_REQUIRED",
     failureRetryable: false,
   });
-  assert.deepEqual(nonRetryable.actions.map((action) => action.id), [
-    "switch-agent", "copy-task", "return-editing",
+  assert.equal(nonRetryable.title, "生成失败");
+  assert.match(nonRetryable.detail, /本轮没有收到可用的完成结果。 页面未修改/u);
+  assert.deepEqual(nonRetryable.actions.map((action) => action.id), ["dismiss"]);
+  assert.ok(nonRetryable.actions.length <= 2);
+});
+
+test("history groups use exact Request identity and leave legacy messages historical", () => {
+  const turns = [
+    {
+      turnId: "turn_old",
+      requestId: "req_old",
+      attemptId: "attempt_001",
+      startedAt: "2026-08-25T02:30:00.000Z",
+    },
+    {
+      turnId: "turn_current",
+      requestId: "req_current",
+      attemptId: "attempt_001",
+      startedAt: "2026-08-26T02:51:00.000Z",
+    },
+    {
+      turnId: "turn_old_same_day",
+      requestId: "req_old_same_day",
+      attemptId: "attempt_002",
+      startedAt: "2026-08-25T06:30:00.000Z",
+    },
+  ];
+  const messages = [
+    factMessage({
+      messageId: "message_old",
+      turnId: "turn_old",
+      createdAt: "2026-08-25T02:31:00.000Z",
+      requestId: "req_old",
+      attemptId: "attempt_001",
+    }),
+    factMessage({
+      messageId: "message_old_same_day",
+      turnId: "turn_old_same_day",
+      createdAt: "2026-08-25T06:31:00.000Z",
+      requestId: "req_old_same_day",
+      attemptId: "attempt_002",
+    }),
+    factMessage({
+      messageId: "message_legacy",
+      turnId: "turn_legacy",
+      createdAt: "2026-08-26T03:00:00.000Z",
+      requestId: null,
+      attemptId: null,
+    }),
+    factMessage({
+      messageId: "message_current",
+      turnId: "turn_current",
+      createdAt: "2026-08-26T02:52:00.000Z",
+    }),
+  ];
+  const groups = sidebarConversationGroups({
+    messages,
+    turns,
+    activeRun: { requestId: "req_current", attemptId: "attempt_001" },
+    now: Date.parse("2026-08-26T04:00:00.000Z"),
+  });
+  assert.deepEqual(groups.map((group) => [group.kind, group.label, group.messageIds]), [
+    ["history", "8月25日 · 历史对话", ["message_old"]],
+    ["history", "8月25日 · 历史对话", ["message_old_same_day"]],
+    ["history", "8月26日 · 历史对话", ["message_legacy"]],
+    ["current", "今天 10:51 · 本轮修改", ["message_current"]],
   ]);
+  assert.equal(groups.some((group) => group.kind === "current" && group.messageIds.includes("message_legacy")), false);
 });
 
 test("a pending submission error without a handoff cannot offer a dead resend", () => {

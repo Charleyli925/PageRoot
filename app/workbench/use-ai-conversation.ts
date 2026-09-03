@@ -10,6 +10,7 @@ import type { RunHandoffState } from "../application/run-session.js";
 import {
   conversationLoadedForView,
   sidebarAgentStageSteps,
+  sidebarConversationGroups,
   sidebarFailureRetryable,
   sidebarStateFromRun,
   type SidebarCatalogStatus,
@@ -145,18 +146,33 @@ export function useAiConversation({
   }, [onDeliverModification]);
 
   const state = useMemo(
-    () => sidebarStateFromRun({ activeRun, submissionPending, reviewing }),
-    [activeRun, submissionPending, reviewing],
+    () => sidebarStateFromRun({
+      activeRun,
+      activeHandoff,
+      submissionPending,
+      reviewing,
+    }),
+    [activeRun, activeHandoff, submissionPending, reviewing],
   );
 
   const onCopyTask = useCallback(() => {
     onDeliverModification?.("clipboard");
   }, [onDeliverModification]);
 
+  // History labels are a read-only derivation. Only the sanitized boundaries
+  // reach the sidebar; turn/provider records remain owned by the conversation
+  // projection and are never renderer controls.
+  const historyGroups = useMemo(() => sidebarConversationGroups({
+    messages: conversation?.messages ?? [],
+    turns: conversation?.conversation?.turns ?? [],
+    activeRun,
+  }), [conversation, activeRun]);
+
   const sidebarProps = useMemo(() => ({
     state,
     title: conversation?.title ?? "",
     messages: conversation?.messages ?? [],
+    historyGroups,
     // The selected Agent's availability is the model catalog's readiness: one owner supplies
     // both, so the Composer can never claim ready while the Agent is not.
     catalogStatus: (qoderAvailability?.status ?? "unavailable") as SidebarCatalogStatus,
@@ -183,8 +199,10 @@ export function useAiConversation({
     agentUpdates: activeHandoff?.visibleTextUpdates || [],
     agentTextTruncated: activeHandoff?.textTruncated === true,
     agentWorking: activeHandoff?.mode === "managed-agent"
-      && ["starting", "running"].includes(activeHandoff.status),
+      && ["starting", "running", "cancelling"].includes(activeHandoff.status),
     agentStartedAt: activeHandoff?.startedAt || null,
+    agentLastActivityAt: activeHandoff?.lastActivityAt || null,
+    agentReceivedBytes: activeHandoff?.receivedBytes || 0,
     agentUpdatedAt: activeHandoff?.updatedAt || null,
     runKey: activeRun
       ? `${activeRun.requestId}:${activeRun.attemptId}`
@@ -207,6 +225,7 @@ export function useAiConversation({
   }), [
     state,
     conversation,
+    historyGroups,
     qoderAvailability,
     agentDisplayName,
     agentActionName,

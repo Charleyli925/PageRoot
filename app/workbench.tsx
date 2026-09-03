@@ -5722,6 +5722,10 @@ export default function Workbench() {
       void resolveAiConflict(actionId);
       return;
     }
+    if (actionId === "dismiss" && activeRun?.status === "processing") {
+      requestActiveRunEnd();
+      return;
+    }
     if (actionId === "return-editing" || actionId === "dismiss") {
       workspaceControllerRef.current?.runs.commands.dismiss();
       setHandoffPreviewOpen(false);
