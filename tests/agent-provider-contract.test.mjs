@@ -284,6 +284,8 @@ test("security profiles are frozen across provider, ticket, and runtime launch",
 test("provider boundary normalizes ACP raw failures before coordinator ownership", async () => {
   const mappings = {
     ACP_CANCELLED: "AGENT_CANCELLED",
+    ACP_TIMEOUT: "AGENT_TURN_TIMEOUT",
+    ACP_TURN_TIMEOUT: "AGENT_TURN_TIMEOUT",
     ACP_OUTPUT_PREEXISTS: "AGENT_OUTPUT_PREEXISTS",
     ACP_COMPLETION_PREEXISTS: "AGENT_COMPLETION_PREEXISTS",
     ACP_PROCESS_CLEANUP_UNCONFIRMED: "AGENT_PROCESS_CLEANUP_UNCONFIRMED",

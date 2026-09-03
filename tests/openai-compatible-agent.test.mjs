@@ -41,6 +41,21 @@ function jsonResponse(status, payload) {
   return new Response(JSON.stringify(payload), { status, headers: { "Content-Type": "application/json" } });
 }
 
+function sseResponse(chunks, { status = 200 } = {}) {
+  const body = new ReadableStream({
+    start(controller) {
+      for (const chunk of chunks) {
+        controller.enqueue(chunk instanceof Uint8Array ? chunk : new TextEncoder().encode(chunk));
+      }
+      controller.close();
+    },
+  });
+  return new Response(body, {
+    status,
+    headers: { "Content-Type": "text/event-stream; charset=utf-8" },
+  });
+}
+
 function selection(modelId = "deepseek-v4-pro", reasoning = null) {
   return Object.freeze({
     providerId: "pageroot",
@@ -149,6 +164,175 @@ test("preflight validates the selected fixed model with chat/completions and nev
   assert.match(calls[0].url, /\/chat\/completions$/u);
   assert.doesNotMatch(calls[0].url, /\/models$/u);
   assert.equal(calls[0].body.model, "deepseek-v4-pro");
+});
+
+test("HTTP execution streams SSE with UTF-8 chunking, multiline data, activity-only reasoning, usage and DONE", async () => {
+  const calls = [];
+  const events = [];
+  const first = HTML.slice(0, 42);
+  const second = HTML.slice(42);
+  const multiline = [
+    '{"choices":[{"delta":',
+    '{"content":' + JSON.stringify(first) + "}",
+    "}]}",
+  ].join("\n");
+  const stream = [
+    ": keep-alive\n\n",
+    multiline.split("\n").map((line) => "data: " + line).join("\n") + "\n\n",
+    "data: " + JSON.stringify({ choices: [{ delta: { reasoning_content: "hidden reasoning" } }] }) + "\n\n",
+    "data: " + JSON.stringify({ usage: { prompt_tokens: 2, completion_tokens: 3 } }) + "\n\n",
+    "data: " + JSON.stringify({ choices: [{ delta: { content: second } }] }) + "\n\n",
+    "data: [DONE]\n\n",
+  ].join("");
+  const bytes = Buffer.from(stream, "utf8");
+  const splitAt = bytes.indexOf(Buffer.from("你", "utf8")) + 1;
+  const result = await completeOpenAiCompatibleChat({
+    fetchImpl: async (_url, init) => {
+      calls.push(init);
+      return sseResponse([
+        bytes.subarray(0, splitAt),
+        bytes.subarray(splitAt, splitAt + 1),
+        bytes.subarray(splitAt + 1),
+      ]);
+    },
+    baseUrl: "https://api.example.com/v1",
+    apiKey: "sk-stream",
+    modelId: "model",
+    vendorId: "custom",
+    messages: [],
+    inactivityTimeoutMs: 500,
+    onEvent: (event) => events.push(event),
+  });
+  assert.equal(result, HTML);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].method, "POST");
+  assert.equal(calls[0].headers.Accept, "text/event-stream");
+  assert.equal(JSON.parse(calls[0].body).stream, true);
+  assert.equal(events.some((event) => event.channel === "reasoning"), true);
+  assert.equal(events.some((event) => event.channel === "usage"), true);
+  assert.equal(events.some((event) => event.channel === "heartbeat"), true);
+  assert.equal(events.some((event) => event.channel === "protocol"), true);
+  assert.equal(events.some((event) => Object.hasOwn(event, "text")), false);
+  assert.equal(
+    events.filter((event) => event.channel === "html")
+      .reduce((total, event) => total + event.byteDelta, 0),
+    Buffer.byteLength(HTML, "utf8"),
+  );
+});
+
+test("HTTP activity watchdog is sliding, classifies silence as turn timeout, and preserves cancellation", async () => {
+  const frames = [
+    "data: " + JSON.stringify({ choices: [{ delta: { content: HTML.slice(0, 20) } }] }) + "\n\n",
+    "data: " + JSON.stringify({ choices: [{ delta: { reasoning: "hidden" } }] }) + "\n\n",
+    "data: " + JSON.stringify({ usage: { completion_tokens: 1 } }) + "\n\n",
+    "data: " + JSON.stringify({ choices: [{ delta: { content: HTML.slice(20) } }] }) + "\n\n",
+    "data: [DONE]\n\n",
+  ];
+  const activeResponse = {
+    ok: true,
+    status: 200,
+    headers: { get: () => "text/event-stream" },
+    body: (async function* activityStream() {
+      for (const frame of frames) {
+        await new Promise((resolve) => setTimeout(resolve, 8));
+        yield frame;
+      }
+    }()),
+  };
+  const active = await completeOpenAiCompatibleChat({
+    fetchImpl: async () => activeResponse,
+    baseUrl: "https://api.example.com/v1",
+    apiKey: "sk-stream",
+    modelId: "model",
+    vendorId: "custom",
+    messages: [],
+    inactivityTimeoutMs: 15,
+  });
+  assert.equal(active, HTML);
+
+  const hangingResponse = {
+    ok: true,
+    status: 200,
+    headers: { get: () => "text/event-stream" },
+    body: {
+      getReader() {
+        return {
+          read: () => new Promise(() => {}),
+          releaseLock() {},
+        };
+      },
+    },
+  };
+  await assert.rejects(
+    completeOpenAiCompatibleChat({
+      fetchImpl: async () => hangingResponse,
+      baseUrl: "https://api.example.com/v1",
+      apiKey: "sk-stream",
+      modelId: "model",
+      vendorId: "custom",
+      messages: [],
+      inactivityTimeoutMs: 15,
+    }),
+    (error) => error?.code === "AGENT_TURN_TIMEOUT"
+      && error?.code !== "AGENT_PREFLIGHT_TIMEOUT",
+  );
+
+  const cancellation = new AbortController();
+  const cancelled = completeOpenAiCompatibleChat({
+    fetchImpl: async () => hangingResponse,
+    baseUrl: "https://api.example.com/v1",
+    apiKey: "sk-stream",
+    modelId: "model",
+    vendorId: "custom",
+    messages: [],
+    inactivityTimeoutMs: 1_000,
+    signal: cancellation.signal,
+  });
+  setTimeout(() => cancellation.abort(new Error("cancel test")), 5);
+  await assert.rejects(cancelled, (error) => error?.code === "AGENT_CANCELLED");
+});
+
+test("HTTP structured SSE provider errors never become HTML or visible narration", async () => {
+  const events = [];
+  await assert.rejects(
+    completeOpenAiCompatibleChat({
+      fetchImpl: async () => sseResponse([
+        "event: error\n",
+        "data: " + JSON.stringify({
+          error: { code: "rate_limit_exceeded", message: "provider-only detail" },
+        }) + "\n\n",
+      ]),
+      baseUrl: "https://api.example.com/v1",
+      apiKey: "sk-stream",
+      modelId: "model",
+      vendorId: "custom",
+      messages: [],
+      inactivityTimeoutMs: 500,
+      onEvent: (event) => events.push(event),
+    }),
+    (error) => error?.code === "AGENT_RATE_LIMITED",
+  );
+  assert.equal(events.some((event) => Object.hasOwn(event, "text")), false);
+  assert.equal(events.some((event) => event.channel === "html"), false);
+});
+
+test("HTTP drops a partial document when the SSE connection closes before DONE", async () => {
+  await assert.rejects(
+    completeOpenAiCompatibleChat({
+      fetchImpl: async () => sseResponse([
+        "data: " + JSON.stringify({
+          choices: [{ delta: { content: HTML.slice(0, 24) } }],
+        }) + "\n\n",
+      ]),
+      baseUrl: "https://api.example.com/v1",
+      apiKey: "sk-stream",
+      modelId: "model",
+      vendorId: "custom",
+      messages: [],
+      inactivityTimeoutMs: 500,
+    }),
+    (error) => error?.code === "AGENT_NETWORK_INTERRUPTED",
+  );
 });
 
 test("HTTP diagnosis performs a read-only models probe and never invokes preflight chat", async () => {

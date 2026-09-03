@@ -674,6 +674,10 @@ export class AgentRuntimeCoordinator {
       canonical?.kind === "visible-text"
       && (entry.cancelState || ["cancelling", "cancelled"].includes(entry.state))
     ) return;
+    if (
+      canonical?.kind === "activity"
+      && (entry.cancelState || ["cancelling", "cancelled"].includes(entry.state))
+    ) return;
     const reduced = this.#eventReducer.accept(canonical);
     if (!reduced.accepted) return;
     entry.eventCount = reduced.projection.eventCount;
@@ -692,6 +696,17 @@ export class AgentRuntimeCoordinator {
       if (["starting", "running"].includes(entry.state)) entry.state = "running";
       entry.agentName = cleanAgentText(reduced.event.agentName) || "Local Agent";
       entry.agentVersion = cleanAgentText(reduced.event.agentVersion) || entry.agentVersion;
+    }
+    if (reduced.event.kind === "activity") {
+      entry.lastActivityAt = nowIso(this.#clock);
+      if (reduced.event.channel === "html"
+        && Number.isSafeInteger(reduced.event.byteDelta)
+        && reduced.event.byteDelta > 0) {
+        entry.receivedBytes = Math.min(
+          Number.MAX_SAFE_INTEGER,
+          entry.receivedBytes + reduced.event.byteDelta,
+        );
+      }
     }
     this.#touch(entry);
   }
@@ -878,11 +893,13 @@ export class AgentRuntimeCoordinator {
       state: "starting",
       phase: "launching",
       startedAt: nowIso(this.#clock),
+      lastActivityAt: nowIso(this.#clock),
       updatedAt: nowIso(this.#clock),
       updatedAtMs: this.#clock.now(),
       agentName: null,
       agentVersion: ticket.evidence.version,
       eventCount: 0,
+      receivedBytes: 0,
       errorCode: null,
       errorMessage: null,
       retryable: false,
@@ -986,10 +1003,12 @@ export class AgentRuntimeCoordinator {
       state: "interrupted",
       phase: "interrupted",
       startedAt: null,
+      lastActivityAt: null,
       updatedAt: timestamp,
       agentName: null,
       agentVersion: null,
       eventCount: 0,
+      receivedBytes: 0,
       visibleText: "",
       visibleTextUpdates: [],
       textTruncated: false,

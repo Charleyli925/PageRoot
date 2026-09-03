@@ -44,7 +44,7 @@ export function acpProcessEnvironment(overrides = {}, baseEnvironment = process.
 }
 
 export const DEFAULT_ACP_STARTUP_TIMEOUT_MS = 15_000;
-export const DEFAULT_ACP_TURN_TIMEOUT_MS = 10 * 60_000;
+export const DEFAULT_ACP_TURN_TIMEOUT_MS = 45 * 60_000;
 const MAX_SESSION_UPDATES = 512;
 const MAX_ACP_FRAME_BYTES = MAX_HTML_BYTES + (2 * 1024 * 1024);
 
@@ -113,26 +113,71 @@ export class AcpFrameGuard extends Transform {
   }
 }
 
-function timeoutController(timeoutMs) {
+function clockNow(clock = Date) {
+  const value = typeof clock?.now === "function" ? clock.now() : Date.now();
+  return Number.isFinite(Number(value)) ? Number(value) : Date.now();
+}
+
+function timerPort(scheduler) {
+  return {
+    setTimeout: typeof scheduler?.setTimeout === "function"
+      ? scheduler.setTimeout.bind(scheduler)
+      : setTimeout,
+    clearTimeout: typeof scheduler?.clearTimeout === "function"
+      ? scheduler.clearTimeout.bind(scheduler)
+      : clearTimeout,
+  };
+}
+
+function timeoutController(
+  timeoutMs,
+  {
+    code = "ACP_TIMEOUT",
+    message = "The ACP operation timed out.",
+    clock = Date,
+    scheduler,
+  } = {},
+) {
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0) {
     throw new TypeError("ACP timeouts must be positive integers.");
   }
+  const timer = timerPort(scheduler);
   const controller = new AbortController();
+  let lastActivityAt = clockNow(clock);
+  let handle = null;
   let rejectExpired;
   const expired = new Promise((_resolve, reject) => {
     rejectExpired = reject;
   });
-  const timer = setTimeout(() => {
-    const error = acpPolicyError("ACP_TIMEOUT", "The ACP operation timed out.");
+  const expire = () => {
+    handle = null;
+    const elapsed = clockNow(clock) - lastActivityAt;
+    if (elapsed < timeoutMs) {
+      handle = timer.setTimeout(expire, Math.max(1, timeoutMs - elapsed));
+      return;
+    }
+    const error = acpPolicyError(code, message);
     rejectExpired(error);
     controller.abort(error);
-  }, timeoutMs);
+  };
+  const schedule = () => {
+    if (handle !== null) timer.clearTimeout(handle);
+    handle = timer.setTimeout(expire, timeoutMs);
+  };
+  schedule();
+  void expired.catch(() => {});
   return {
     controller,
     expired,
-    clear() {
-      clearTimeout(timer);
+    activity() {
+      lastActivityAt = clockNow(clock);
+      schedule();
     },
+    clear() {
+      if (handle !== null) timer.clearTimeout(handle);
+      handle = null;
+    },
+    get lastActivityAt() { return lastActivityAt; },
   };
 }
 
@@ -347,10 +392,13 @@ export async function runAcpTask({
   prompt,
   onEvent = () => {},
   startupTimeoutMs = DEFAULT_ACP_STARTUP_TIMEOUT_MS,
-  turnTimeoutMs = DEFAULT_ACP_TURN_TIMEOUT_MS,
+  inactivityTimeoutMs = DEFAULT_ACP_TURN_TIMEOUT_MS,
+  turnTimeoutMs,
   cancellationSignal,
   expectedAgentName,
   createHost,
+  clock = Date,
+  scheduler,
 } = {}) {
   const isStream = Boolean(connection?.readable && connection?.writable);
   const isAgentApp = typeof connection?.connect === "function"
@@ -373,7 +421,7 @@ export async function runAcpTask({
   const profile = acpDriverProfile(policy, createHost ? { createHost } : {});
   const host = profile.assertHost(profile.createHost(policy, onEvent));
   const client = buildClient(host);
-  const startupTimeout = timeoutController(startupTimeoutMs);
+  const startupTimeout = timeoutController(startupTimeoutMs, { clock, scheduler });
   const cancellation = cancellationGate(cancellationSignal);
   const updates = [];
   let droppedUpdateCount = 0;
@@ -438,7 +486,15 @@ export async function runAcpTask({
       ]);
       startupTimeout.clear();
       host.bindSessionId(session.sessionId);
-      const turnTimeout = timeoutController(turnTimeoutMs);
+      const turnTimeout = timeoutController(
+        Number.isSafeInteger(turnTimeoutMs) ? turnTimeoutMs : inactivityTimeoutMs,
+        {
+          code: "AGENT_TURN_TIMEOUT",
+          message: "The ACP turn produced no valid protocol activity within the inactivity window.",
+          clock,
+          scheduler,
+        },
+      );
       const turnSignal = combinedSignal(
         turnTimeout.controller.signal,
         cancellationSignal,
@@ -462,6 +518,13 @@ export async function runAcpTask({
             turnTimeout.expired,
             cancellation.promise,
           ]);
+          if (!message || typeof message !== "object"
+            || !["stop", "session_update"].includes(message.kind)) {
+            throw acpPolicyError("ACP_PROTOCOL_INVALID", "The ACP Agent emitted an invalid session event.");
+          }
+          // Every valid ACP event, including tool progress and empty updates,
+          // keeps the turn alive. stderr and user-visible prose are excluded.
+          turnTimeout.activity();
           if (message.kind === "stop") {
             onEvent(Object.freeze({ kind: "turn-stopping", stopReason: message.stopReason }));
             const completion = profile.requiresTurnCompletion

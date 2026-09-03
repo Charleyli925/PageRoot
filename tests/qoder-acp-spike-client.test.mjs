@@ -33,6 +33,7 @@ import {
   runQoderAcpTask,
   runVerifiedQoderJavaScript,
 } from "../bridge/qoder-acp-client.mjs";
+import { runAcpTask as runGenericAcpTask } from "../bridge/agent/runtimes/acp-protocol.mjs";
 import { sha256 } from "../bridge/lifecycle-core.mjs";
 import { ProjectFileRepository } from "../bridge/project-file-repository.mjs";
 import { inspectSourceElementIdentity } from "../bridge/project-file-repository/working-copy.mjs";
@@ -1414,9 +1415,64 @@ test("ACP turn timeout fails closed and requests session cancellation", async (t
       startupTimeoutMs: 1_000,
       turnTimeoutMs: 30,
     }),
-    (error) => error?.code === "ACP_TIMEOUT",
+    (error) => error?.code === "AGENT_TURN_TIMEOUT",
   );
   assert.equal(cancelled, true);
+});
+
+test("ACP activity watchdog allows a turn to run beyond one window without exposing thought text", async (t) => {
+  const fixture = await createFixture(t);
+  const sessionId = "session_activity";
+  const events = [];
+  const host = {
+    bindSessionId() {},
+    requestPermission: async () => ({ outcome: { outcome: "selected", optionId: "allow" } }),
+    readTextFile: async () => ({ content: "" }),
+    writeTextFile: async () => {},
+    createTerminal: async () => ({ terminalId: "terminal_activity" }),
+    terminalOutput: async () => ({ output: "" }),
+    waitForTerminalExit: async () => ({ exitCode: 0, signal: null }),
+    killTerminal: async () => {},
+    releaseTerminal: async () => {},
+    cancel: async () => {},
+    dispose: async () => {},
+    assertTurnCompleted: async () => {},
+  };
+  const agent = acp
+    .agent({ name: "pageroot-activity-agent" })
+    .onRequest(acp.methods.agent.initialize, () => ({
+      protocolVersion: acp.PROTOCOL_VERSION,
+      agentCapabilities: { loadSession: false },
+      authMethods: [],
+      agentInfo: { name: "pageroot-activity-agent", version: "1.0.0" },
+    }))
+    .onRequest(acp.methods.agent.session.new, () => ({ sessionId }))
+    .onRequest(acp.methods.agent.session.prompt, async ({ client }) => {
+      for (let index = 0; index < 5; index += 1) {
+        await client.notify(acp.methods.client.session.update, {
+          sessionId,
+          update: {
+            sessionUpdate: "agent_thought_chunk",
+            content: { type: "text", text: "hidden thought" },
+          },
+        });
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      return { stopReason: "end_turn" };
+    });
+
+  const result = await runGenericAcpTask({
+    connection: agent,
+    policy: fixture.policy,
+    prompt: "activity",
+    createHost: () => host,
+    onEvent: (event) => events.push(event),
+    startupTimeoutMs: 1_000,
+    turnTimeoutMs: 20,
+  });
+  assert.equal(result.stopReason, "end_turn");
+  assert.equal(result.visibleText, "");
+  assert.equal(events.some((event) => event.kind === "visible-text"), false);
 });
 
 test("external cancellation closes the ACP mutation surface and terminates stdio", async (t) => {

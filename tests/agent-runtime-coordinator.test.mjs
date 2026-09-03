@@ -490,6 +490,8 @@ test("execution status projects only public Agent text with frozen provider iden
         onEvent({ kind: "initialized", agentName: "Synthetic Agent", agentVersion: "1.0.0" });
         onEvent({ turnId: "stale_turn", kind: "visible-text", text: "迟到事件不能污染本轮。" });
         onEvent({ kind: "reasoning", text: "这段隐藏推理绝不能进入侧栏。" });
+        onEvent({ kind: "activity", channel: "html", byteDelta: 12 });
+        onEvent({ kind: "activity", channel: "reasoning", byteDelta: 999 });
         onEvent({ kind: "visible-text", text: "正在读取冻结任务。" });
         onEvent({ kind: "visible-text", text: "正在写入 Candidate。" });
         onEvent({ kind: "visible-text-truncated" });
@@ -523,7 +525,10 @@ test("execution status projects only public Agent text with frozen provider iden
   ]);
   assert.equal(running.textTruncated, true);
   assert.equal(running.visibleText.includes("隐藏推理"), false);
-  assert.equal(running.eventCount, 5);
+  assert.equal(running.eventCount, 7);
+  assert.equal(running.receivedBytes, 12);
+  assert.equal(typeof running.lastActivityAt, "string");
+  assert.equal(Object.hasOwn(running, "command"), false);
   assert.equal(running.visibleText.includes("迟到事件"), false);
 
   finish.resolve();

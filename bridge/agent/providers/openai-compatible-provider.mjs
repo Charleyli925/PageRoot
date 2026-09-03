@@ -114,6 +114,7 @@ function classifyHttpFailure(cause) {
     return "AGENT_PREFLIGHT_TIMEOUT";
   }
   const code = String(cause?.code || "");
+  if (code === "AGENT_PROTOCOL_INVALID") return "AGENT_NETWORK_INTERRUPTED";
   return code.startsWith("AGENT_") ? code : "AGENT_PROVIDER_UNAVAILABLE";
 }
 
@@ -130,6 +131,7 @@ function wrapProviderError(cause, fallbackMessage) {
     AGENT_ENDPOINT_REGION_MISMATCH: "接口地区不匹配，请修改地区或接口。",
     AGENT_PREFLIGHT_TIMEOUT: "连接超时，请重试。",
     AGENT_TURN_TIMEOUT: "连接超时，请重试。",
+    AGENT_NETWORK_INTERRUPTED: "网络连接中断，请重试。",
     AGENT_PROMPT_TOO_LARGE: "验证请求超过当前模型限制。",
   };
   return agentProviderError(code, safeMessages[code] || fallbackMessage, {
@@ -295,7 +297,15 @@ export function createOpenAiCompatibleProvider({
       return messages[code] || "暂时无法接通。";
     },
     loadExecutionPolicy: policyLoader,
-    createRuntimeLaunch({ ticket, policy, baseEnvironment, cancellationSignal, onEvent, turnTimeoutMs }) {
+    createRuntimeLaunch({
+      ticket,
+      policy,
+      baseEnvironment,
+      cancellationSignal,
+      onEvent,
+      turnTimeoutMs,
+      inactivityTimeoutMs,
+    }) {
       const credential = credentialFromEnvironment(baseEnvironment);
       const localId = localModelId(ticket.selection?.resolvedModelId);
       const model = credential?.vendorId === "custom"
@@ -317,6 +327,7 @@ export function createOpenAiCompatibleProvider({
         cancellationSignal,
         onEvent,
         ...(turnTimeoutMs ? { turnTimeoutMs } : {}),
+        ...(inactivityTimeoutMs ? { inactivityTimeoutMs } : {}),
       });
     },
     classifyRunFailure: classifyHttpFailure,
@@ -334,6 +345,7 @@ export function createOpenAiCompatibleProvider({
         AGENT_OUTPUT_TRUNCATED: "模型输出被截断。本轮 Request 已保留。",
         AGENT_PROMPT_TOO_LARGE: "当前页面可能超过模型完整输出能力，请更换模型或使用 Qoder/Codex。",
         AGENT_TURN_TIMEOUT: "网络或模型超时。本轮 Request 已保留。",
+        AGENT_NETWORK_INTERRUPTED: "网络连接中断。本轮 Request 已保留。",
         AGENT_ATTACHMENT_UNSUPPORTED: "源页 Agent 暂不支持此附件，可改用 Qoder、Codex 或复制给其他 AI。",
         AGENT_CANCELLED: "已停止。",
       };

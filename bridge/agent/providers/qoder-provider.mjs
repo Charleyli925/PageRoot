@@ -116,6 +116,10 @@ export function qoderFailure(code) {
       return "当前 Qoder CLI 版本不受支持。请更新后再试。";
     case "AGENT_CANCELLED":
       return "Qoder 已停止。";
+    case "AGENT_TURN_TIMEOUT":
+      return "Qoder 本轮连续等待过久，已停止；Request 与当前 HTML 均已保留。";
+    case "AGENT_NETWORK_INTERRUPTED":
+      return "Qoder 连接中断，Request 与当前 HTML 均已保留。";
     case "ACP_AGENT_IDENTITY_MISMATCH":
       return "ACP 进程没有证明自己是 Qoder CLI，PageRoot 已停止它。";
     case "ACP_RUNTIME_AUTHORITY_DRIFT":
@@ -193,6 +197,12 @@ export function classifyQoderRunFailure(cause) {
   ) {
     return "QODER_ACCOUNT_CAPACITY_UNAVAILABLE";
   }
+  if (["AGENT_TURN_TIMEOUT", "ACP_TURN_TIMEOUT", "ACP_TIMEOUT"].includes(mapped)) {
+    return "AGENT_TURN_TIMEOUT";
+  }
+  if (mapped === "AGENT_NETWORK_INTERRUPTED") {
+    return mapped;
+  }
   const combined = `${cause?.message || ""}\n${cause?.qoderStderr || ""}`;
   if (/not logged in|sign in|login required|unauthenticated/iu.test(combined)) {
     return "QODER_AUTH_REQUIRED";
@@ -202,6 +212,14 @@ export function classifyQoderRunFailure(cause) {
 
 const QODER_RUNTIME_CODE_MAP = Object.freeze({
   ACP_CANCELLED: "AGENT_CANCELLED",
+  ACP_TIMEOUT: "AGENT_TURN_TIMEOUT",
+  ACP_TURN_TIMEOUT: "AGENT_TURN_TIMEOUT",
+  QODER_TURN_TIMEOUT: "AGENT_TURN_TIMEOUT",
+  AGENT_TURN_TIMEOUT: "AGENT_TURN_TIMEOUT",
+  ACP_AGENT_PROCESS_ERROR: "AGENT_NETWORK_INTERRUPTED",
+  ACP_AGENT_EXITED_EARLY: "AGENT_NETWORK_INTERRUPTED",
+  ACP_CONNECTION_CLOSED: "AGENT_NETWORK_INTERRUPTED",
+  ACP_PROTOCOL_INVALID: "AGENT_NETWORK_INTERRUPTED",
   AGENT_ACCOUNT_CAPACITY_UNAVAILABLE: "QODER_ACCOUNT_CAPACITY_UNAVAILABLE",
   ACP_OUTPUT_PREEXISTS: "AGENT_OUTPUT_PREEXISTS",
   ACP_COMPLETION_PREEXISTS: "AGENT_COMPLETION_PREEXISTS",
@@ -623,6 +641,7 @@ export function createQoderProvider({
       cancellationSignal,
       onEvent,
       turnTimeoutMs,
+      inactivityTimeoutMs,
     }) {
       const installation = ticket.installation;
       const modelId = localQoderModelId(ticket.selection?.resolvedModelId);
@@ -644,6 +663,7 @@ export function createQoderProvider({
           ? /qoder|pageroot-e2e/iu
           : /qoder/iu,
         ...(turnTimeoutMs ? { turnTimeoutMs } : {}),
+        ...(inactivityTimeoutMs ? { inactivityTimeoutMs } : {}),
         onEvent,
       });
     },
