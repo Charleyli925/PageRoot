@@ -440,7 +440,10 @@ test("Electron browser A to B to A reopens exact in-memory HTML and deduplicates
     });
     await cachedA.click();
     const visibleRuntimeFrame = launched.page.getByTestId("workbench-document-canvas-pool")
-      .locator(`[data-runtime-hot-tab-id="${cachedATabId}"]:not([hidden]) iframe`);
+      .locator(
+        `[data-runtime-hot-tab-id="${cachedATabId}"]:not([hidden]) `
+        + 'iframe[data-runtime-slot-role="active"]',
+      );
     await expect(visibleRuntimeFrame).toBeVisible({ timeout: 5_000 });
     const visibleRuntimeHandle = await visibleRuntimeFrame.elementHandle();
     const visibleRuntimeDocument = await visibleRuntimeHandle.contentFrame();

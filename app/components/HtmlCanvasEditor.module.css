@@ -579,8 +579,16 @@
 }
 
 .frame {
+  grid-column: 1;
   grid-row: 1;
   border-top: 0;
+}
+
+.editor > iframe[data-runtime-slot-role="inactive"] {
+  z-index: 0;
+  visibility: hidden;
+  opacity: 0;
+  pointer-events: none;
 }
 
 /* Runtime handoff keeps the connected document as the visual authority until

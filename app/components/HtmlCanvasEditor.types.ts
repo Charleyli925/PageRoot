@@ -5,7 +5,7 @@ import type {
 } from "./native-edit-types";
 import type { NoticeUsageCapture } from "./NoticeBar";
 import type { EditRuntimeGrant } from "../domain/edit-runtime-contract.js";
-import type { EditRuntimeCandidateIdentity } from "./edit-runtime-candidate-controller.js";
+import type { RuntimeFrameIdentity } from "./runtime-frame-coordinator.js";
 import type {
   SemanticIdentityDelta,
   SemanticOperation,
@@ -139,7 +139,7 @@ export type HtmlCanvasEditRuntimeLoadOutcome =
   | "failed"
   | "superseded";
 
-export type HtmlCanvasEditRuntimeAttempt = EditRuntimeCandidateIdentity;
+export type HtmlCanvasEditRuntimeAttempt = RuntimeFrameIdentity;
 
 export type HtmlCanvasEditRuntimeSettlement = Readonly<{
   /** The physical candidate controller still has a usable active Runtime iframe. */

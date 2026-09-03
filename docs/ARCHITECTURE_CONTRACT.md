@@ -514,16 +514,23 @@ source change materializes complete HTML, rebuilds the disposable frame and
 reruns the author program. Native input may postpone that rebuild until editing
 finishes. The resource session may be reused only while exact authored script
 markup/body identity is unchanged; a Script change requires a new generation.
-`EditRuntimeCandidateController` owns a unique identity, source revision and
-`preparing → positioning → terminal` decision for every disposable candidate.
+`RuntimeFrameCoordinator` solely owns two fixed physical slots (`a` and `b`),
+their monotonically increasing slot leases, the active/candidate identities,
+and the `preparing → positioning → terminal` decision for every disposable
+candidate. Stable state contains one active loaded slot and one empty inert
+slot; it never allocates a third iframe or moves a keyed iframe between React
+positions.
 When a newer source edit replaces an in-flight frame using the same resource
 session, the older frame settles as `superseded`, not as an authored-program
 failure. Every load, activation, deadline, animation-frame, microtask and
 positioning result must prove the current candidate identity before changing
 state; only the latest candidate may publish `ready`, `rejected` or `failed`.
-The controller also owns the last-known-good frame identity and the native-edit
-transaction gate; React owns only the fenced iframe, viewport and Selection
-effects. A user Native Edit or IME composition may let a candidate prepare but
+The coordinator also owns the last-known-good frame identity and the native-edit
+transaction gate; React owns only the fenced slot DOM, viewport and Selection
+effects. Candidate Script runs while its slot is hidden; after validation and
+minimal presentation positioning, visibility changes atomically and the former
+active slot is cleared to an inert empty document on the next frame. A user
+Native Edit or IME composition may let a candidate prepare but
 cannot promote or retire a browsing context. Promotion waits until that
 browser transaction has ended and its checkpoint has produced the latest
 complete source HTML. A text Selection retained across the handoff is
@@ -565,7 +572,7 @@ fallback is disclosed as “部分动态内容未加载”, remains dismissible,
 failures; unsupported programs and an unavailable desktop runtime expose no
 ineffective retry. A successful retry removes the notice. The Workbench must
 not interpret iframe `load` alone as Runtime success.
-The candidate controller is the sole owner of whether a physical
+The frame coordinator is the sole owner of whether a physical
 last-known-good iframe exists. It reports that settlement fact to
 `EditAuthorRuntimeSession`; the application session never reconstructs or
 caches its own boolean. The Canvas freeze contract reports the latest complete

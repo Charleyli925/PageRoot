@@ -17,6 +17,7 @@ import { expect } from "@playwright/test";
 
 import { sha256 } from "../../../bridge/lifecycle-core.mjs";
 import { ProjectFileRepository } from "../../../bridge/project-file-repository.mjs";
+import { collectEditRuntimeScripts } from "../../../app/domain/edit-runtime-contract.js";
 
 import {
   activateNativeEdit,
@@ -117,12 +118,62 @@ export async function chooseClipboardDelivery(page) {
   await sidebar.getByRole("button", { name: /复制给别的 AI/u }).click();
 }
 
-export async function loadedDiskFrame(page, sourcePath, caseId) {
-  return loadDiskFrame(page, sourcePath, {
+export async function loadedDiskFrame(page, sourcePath, caseId, {
+  allowSourceNotAuthoritative = false,
+} = {}) {
+  const loaded = await loadDiskFrame(page, sourcePath, {
     expectedCase: caseId,
     includeEditor: true,
     timeout: 60_000,
   });
+  const scriptContract = collectEditRuntimeScripts(
+    readFileSync(sourcePath, "utf8"),
+  );
+  if (
+    scriptContract.executableScripts.length < 1
+    && !scriptContract.unsupportedReason
+  ) return loaded;
+  const expectedSourceRevision = sha256(readFileSync(loaded.sourcePath));
+  const editSurface = loaded.editor.locator(
+    "xpath=ancestor::*[contains(concat(' ', normalize-space(@class), ' '), ' canvas-edit-surface ')][1]",
+  );
+  await expect.poll(async () => {
+    const lastKnownGoodRevision = await loaded.editor.getAttribute(
+      "data-runtime-last-known-good-source-revision",
+    );
+    const staticFallbackVisible = await editSurface.getByTestId(
+      "edit-runtime-static-fallback",
+    ).count();
+    const runtimePhase = await editSurface.getAttribute("data-edit-runtime-phase");
+    const runtimeOutcome = await editSurface.getAttribute("data-edit-runtime-outcome");
+    let activeBootstrapCount = 0;
+    try {
+      const activeHandle = await loaded.editor.locator(
+        'iframe[data-runtime-slot-role="active"]',
+      ).elementHandle();
+      const activeFrame = await activeHandle?.contentFrame();
+      activeBootstrapCount = await activeFrame?.locator(
+        "[data-pageroot-edit-runtime-bootstrap]",
+      ).count() || 0;
+    } catch {
+      activeBootstrapCount = 0;
+    }
+    return (
+      lastKnownGoodRevision === expectedSourceRevision
+      && activeBootstrapCount === 1
+    ) || staticFallbackVisible > 0
+      || (
+        allowSourceNotAuthoritative
+        && runtimePhase === "static"
+        && runtimeOutcome === "source-not-authoritative"
+      );
+  }, { timeout: 60_000 }).toBe(true);
+  const frame = await currentEditorFrame(page);
+  await frame.waitForFunction(
+    (selector) => Boolean(document.querySelector(selector)),
+    caseSelector(caseId),
+  );
+  return { ...loaded, frame };
 }
 
 export async function openRecentProject(
