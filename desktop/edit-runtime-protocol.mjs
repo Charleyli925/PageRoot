@@ -31,10 +31,10 @@ const ALLOWED_CDN_HOSTS = new Set([
   "unpkg.com",
   "cdnjs.cloudflare.com",
 ]);
-const BUNDLED_ECHARTS_VERSION = "5.5.0";
+const BUNDLED_ECHARTS_VERSION = "5.6.0";
 const COMPATIBLE_ECHARTS_SOURCE_VERSION = "5.4.3";
 const BUNDLED_ECHARTS_SHA256 =
-  "42f8329d989b6f6539dd2b15bbdf0d82025762ac112fbb60dc57b27d7bcf3946";
+  "bf4a223524e40b77c304bec67e1222cf551f14880cf42c69dc046558e11c07b1";
 
 let schemePrivilegesRegistered = false;
 

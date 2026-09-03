@@ -41,7 +41,7 @@ const HTML = [
 ].join("");
 const REMOTE_ECHARTS_HTML = HTML.replace(
   'src="vendor/echarts.js"',
-  'src="https://cdnjs.cloudflare.com/ajax/libs/echarts/5.5.0/echarts.min.js"',
+  'src="https://cdnjs.cloudflare.com/ajax/libs/echarts/5.6.0/echarts.min.js"',
 );
 const COMPATIBLE_ECHARTS_BYTES = Buffer.from(
   "window.echarts={version:'5.4.3',init(){return {}}};",
@@ -345,10 +345,10 @@ test("remote ECharts follows at most four allowlisted redirects with no-store tr
   await writeFile(sourcePath, REMOTE_ECHARTS_HTML);
   const requests = [];
   const redirectTargets = [
-    "https://unpkg.com/echarts@5.5.0/dist/echarts.min.js",
-    "https://cdnjs.cloudflare.com/ajax/libs/echarts/5.5.0/echarts.min.js",
-    "https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js",
-    "https://unpkg.com/echarts@5.5.0/dist/echarts.min.js",
+    "https://unpkg.com/echarts@5.6.0/dist/echarts.min.js",
+    "https://cdnjs.cloudflare.com/ajax/libs/echarts/5.6.0/echarts.min.js",
+    "https://cdn.jsdelivr.net/npm/echarts@5.6.0/dist/echarts.min.js",
+    "https://unpkg.com/echarts@5.6.0/dist/echarts.min.js",
   ];
   const controller = createEditRuntimeProtocolController({
     protocolApi: { handle() {} },
@@ -387,7 +387,7 @@ test("remote ECharts rejects a redirect outside the CDN allowlist before fetchin
       fetches += 1;
       return new Response(null, {
         status: 302,
-        headers: { location: "https://evil.example/echarts/5.5.0/echarts.min.js" },
+        headers: { location: "https://evil.example/echarts/5.6.0/echarts.min.js" },
       });
     },
     randomSessionId: () => "9".repeat(32),
@@ -410,7 +410,7 @@ test("exact ECharts redirects cannot change the immutable version identity", asy
         return new Response(null, {
           status: 302,
           headers: {
-            location: "https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js",
+            location: "https://cdn.jsdelivr.net/npm/echarts@5.6.0/dist/echarts.min.js",
           },
         });
       },
