@@ -201,6 +201,7 @@ export async function prepareReviewAnalysis({
 }
 
 export default function ReviewAnalysisPrewarm({
+  enabled,
   session,
   controller,
   activeRun,
@@ -215,6 +216,7 @@ export default function ReviewAnalysisPrewarm({
   projectHydrating,
   projectLoadError,
 }: {
+  enabled: boolean;
   session: ReviewAnalysisSession<PreparedReviewDocuments>;
   controller: ReviewPreparationControllerCapability | null;
   activeRun: ActiveRun | null;
@@ -233,6 +235,7 @@ export default function ReviewAnalysisPrewarm({
   const sequenceRef = useRef(0);
 
   useEffect(() => {
+    if (!enabled) return;
     const run = activeRun;
     if (
       !run
@@ -310,6 +313,7 @@ export default function ReviewAnalysisPrewarm({
     controller,
     documentId,
     editRevision,
+    enabled,
     html,
     lastPersistedRevision,
     persistState,

@@ -5930,6 +5930,7 @@ export default function Workbench() {
     <>
       <RendererStartupPerformance />
       <ReviewAnalysisPrewarm
+        enabled={false}
         session={reviewAnalysisSession}
         controller={workspaceController}
         activeRun={activeRun} projectId={projectId} documentId={documentId}
