@@ -13,6 +13,7 @@ import {
 } from "./agent-session-projector.mjs";
 import { createDefaultProviderRegistry } from "./providers/provider-registry.mjs";
 import {
+  agentRecoveryKindForError,
   defaultManagedAgentDelivery,
   normalizeAgentDelivery,
 } from "../../shared/agent-delivery.mjs";
@@ -176,10 +177,12 @@ export class AgentRuntimeCoordinator {
     environment = process.env,
     clock = Date,
     commandResolver,
+    diagnoseRunner,
     policyLoader,
     runTask,
     preflightRunner,
     codexCommandResolver,
+    codexDiagnoseRunner,
     codexPreflightRunner,
     providerRegistry,
     leaseStore = defaultAgentLeaseStore,
@@ -215,10 +218,12 @@ export class AgentRuntimeCoordinator {
     this.#clock = clock;
     this.#providerRegistry = providerRegistry || createDefaultProviderRegistry({
       commandResolver,
+      ...(diagnoseRunner ? { diagnoseRunner } : {}),
       ...(policyLoader ? { policyLoader } : {}),
       ...(runTask ? { runTask } : {}),
       ...(preflightRunner ? { preflightRunner } : {}),
       ...(codexCommandResolver ? { codexCommandResolver } : {}),
+      ...(codexDiagnoseRunner ? { codexDiagnoseRunner } : {}),
       ...(codexPreflightRunner ? { codexPreflightRunner } : {}),
       ...(agentCatalog ? { agentCatalog } : {}),
       ...(agentsRoot ? { agentsRoot } : {}),
@@ -465,6 +470,45 @@ export class AgentRuntimeCoordinator {
     return Object.freeze({ ok: true, ...result, ...(driver ? { driver } : {}) });
   }
 
+  async diagnose({ driver, selection } = {}) {
+    const requestedSelection = this.#selectionForInput({ selection, driver });
+    const checkedAt = nowIso(this.#clock);
+    if (!this.#acceptingStarts) {
+      return Object.freeze({
+        ok: true,
+        diagnostic: Object.freeze({
+          readiness: "connection-failed",
+          cause: "AGENT_BRIDGE_DISPOSED",
+          operation: "diagnose",
+          checkedAt,
+          activeInstallation: null,
+        }),
+        ...(driver ? { driver } : {}),
+      });
+    }
+    const result = typeof this.#providerRegistry.diagnoseForSelection === "function"
+      ? await this.#providerRegistry.diagnoseForSelection(requestedSelection, {
+        environment: this.#environmentForProvider(requestedSelection.providerId),
+        checkedAt,
+      })
+      : await this.#providerRegistry.availabilityForSelection(requestedSelection, {
+        environment: this.#environmentForProvider(requestedSelection.providerId),
+      });
+    const diagnostic = result.diagnostic || Object.freeze({
+      readiness: result.status === "ready" ? "ready" : "connection-failed",
+      cause: result.reason || (result.status === "ready" ? null : "connection-failed"),
+      operation: "diagnose",
+      checkedAt,
+      activeInstallation: null,
+    });
+    return Object.freeze({
+      ok: true,
+      ...result,
+      diagnostic: Object.freeze({ ...diagnostic, checkedAt, operation: "diagnose" }),
+      ...(driver ? { driver } : {}),
+    });
+  }
+
   preflight(input = {}) {
     return this.#trackStart(() => this.#performPreflight(input));
   }
@@ -631,6 +675,10 @@ export class AgentRuntimeCoordinator {
       canonical?.kind === "visible-text"
       && (entry.cancelState || ["cancelling", "cancelled"].includes(entry.state))
     ) return;
+    if (
+      canonical?.kind === "activity"
+      && (entry.cancelState || ["cancelling", "cancelled"].includes(entry.state))
+    ) return;
     const reduced = this.#eventReducer.accept(canonical);
     if (!reduced.accepted) return;
     entry.eventCount = reduced.projection.eventCount;
@@ -650,6 +698,17 @@ export class AgentRuntimeCoordinator {
       entry.agentName = cleanAgentText(reduced.event.agentName) || "Local Agent";
       entry.agentVersion = cleanAgentText(reduced.event.agentVersion) || entry.agentVersion;
     }
+    if (reduced.event.kind === "activity") {
+      entry.lastActivityAt = nowIso(this.#clock);
+      if (reduced.event.channel === "html"
+        && Number.isSafeInteger(reduced.event.byteDelta)
+        && reduced.event.byteDelta > 0) {
+        entry.receivedBytes = Math.min(
+          Number.MAX_SAFE_INTEGER,
+          entry.receivedBytes + reduced.event.byteDelta,
+        );
+      }
+    }
     this.#touch(entry);
   }
 
@@ -664,6 +723,8 @@ export class AgentRuntimeCoordinator {
     if (released !== true) {
       entry.keepLease = true;
       entry.retryable = false;
+      entry.safeToRetry = false;
+      entry.recoveryKind = "end";
       entry.errorCode = "AGENT_RESTART_RECOVERY_REQUIRED";
       entry.errorMessage = entry.selection
         ? this.#providerRegistry.failureMessageForSelection(
@@ -835,14 +896,18 @@ export class AgentRuntimeCoordinator {
       state: "starting",
       phase: "launching",
       startedAt: nowIso(this.#clock),
+      lastActivityAt: nowIso(this.#clock),
       updatedAt: nowIso(this.#clock),
       updatedAtMs: this.#clock.now(),
       agentName: null,
       agentVersion: ticket.evidence.version,
       eventCount: 0,
+      receivedBytes: 0,
       errorCode: null,
       errorMessage: null,
       retryable: false,
+      safeToRetry: false,
+      recoveryKind: "end",
       lease,
       keepLease: false,
       cancelState: null,
@@ -887,6 +952,8 @@ export class AgentRuntimeCoordinator {
         entry.phase = "preparing-review";
       }
       entry.retryable = false;
+      entry.safeToRetry = false;
+      entry.recoveryKind = "end";
       if (entry.cancelState === "requested") entry.cancelState = "provider-acknowledged";
       this.#touch(entry);
     }).catch(async (cause) => {
@@ -902,7 +969,11 @@ export class AgentRuntimeCoordinator {
       entry.phase = controller.signal.aborted ? "cancelled" : "failed";
       entry.errorCode = code;
       entry.errorMessage = this.#providerRegistry.failureMessage(ticket, code);
-      entry.retryable = !controller.signal.aborted && !residue && !cleanupUnconfirmed;
+      entry.safeToRetry = !controller.signal.aborted && !residue && !cleanupUnconfirmed;
+      entry.retryable = entry.safeToRetry;
+      entry.recoveryKind = agentRecoveryKindForError(code, {
+        safeToRetry: entry.safeToRetry,
+      });
       entry.keepLease = cleanupUnconfirmed;
       if (entry.cancelState === "requested") entry.cancelState = "provider-acknowledged";
       this.#touch(entry);
@@ -943,14 +1014,18 @@ export class AgentRuntimeCoordinator {
       state: "interrupted",
       phase: "interrupted",
       startedAt: null,
+      lastActivityAt: null,
       updatedAt: timestamp,
       agentName: null,
       agentVersion: null,
       eventCount: 0,
+      receivedBytes: 0,
       visibleText: "",
       visibleTextUpdates: [],
       textTruncated: false,
       retryable: false,
+      safeToRetry: false,
+      recoveryKind: "end",
       errorCode: "AGENT_RESTART_RECOVERY_REQUIRED",
       errorMessage,
     });

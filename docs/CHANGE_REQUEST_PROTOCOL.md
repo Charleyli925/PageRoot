@@ -178,9 +178,10 @@ Prompt 指定的精确路径，不能自行计算、递增或改名：
 这段时间仍可编辑；后续冻结必须捕获届时最新的当前权威内容。若项目身份已经切换，整次意图
 按 stale 丢弃。
 
-打开发送弹窗或 About 时可以先执行只读本地检查：它只重新枚举磁盘上受支持的独立
-CLI 并验证包/文件身份，不运行 Qoder、不连接服务、不创建 Request、不写 output、不锁定
-Canvas。该结果是进程内展示事实，不得把旧的“未安装”跨进程持久化。
+打开设置或回到等待登录/安装状态时执行只读 `diagnose`：它可枚举
+并验证安装，执行有界的只读登录或 HTTP 可达性探测，但不创建
+preflight ticket、不建立 ACP session、不改变模型、不创建 Request、不写 output、
+不锁定 Canvas。该结果是进程内展示事实，不得跨进程持久化。
 
 `qoder-acp` 必须在冻结和 Request 发布之前完成 Bridge 的使用前检查；它重新绑定受信
 独立 CLI 的本地来源、版本、文件身份、登录态与静态模型列表，并返回短时不透明
@@ -224,6 +225,11 @@ Bridge 只能从 Registry、runtime 与该 Request 派生 ACP 文件/命令权�
 进程组已经退出、且没有 output/completion 残留时，启动失败才可重试这个 Request。Bridge
 崩溃留下的启动租约、无法确认的进程清理或任意残留都必须禁止同 Request 重启和 clipboard
 fallback；用户先持久取消旧 Request 形成 fence，再重新发送并建立新的 Request。
+
+正式执行没有固定总时长条件。HTTP SSE 和 ACP 只在连续 45 分钟没有
+收到有效 content、reasoning、usage 或 heartbeat 时产生 `AGENT_TURN_TIMEOUT`。
+半成品 HTML 仅存于 Bridge 内存；未见 SSE 完成标记、断线、取消或超时
+均不写 output，不运行 finalizer，不生成 Candidate。
 
 ### 4.2 冻结边界
 
@@ -895,6 +901,9 @@ Attempt 的 `outcome.json` 是工作台写入的严格诊断终态，不是完�
   Bridge 重启后只把处理中的会话投影为不可重试的 `interrupted`，不扫描、复活或声称旧进程
   已停止。此时“结束本轮”把 durable cancel 作为旧 Request 的 authority fence，并保守提醒
   外部 Qoder 仍可能运行；同 Request 不得再启动或改为复制，只能重新发送为新 Request。
+
+对受管 Agent，界面的“结束本轮”直接进入上述停止顺序，不弹出确认框；
+按钮在 Bridge 投影 `cancelling` 时显示“正在结束…”。
 
 - `submitting/processing/validating`：标记 Attempt 取消，恢复冻结评论，释放候选，回到 editing。
 - `awaiting-conflict-resolution`：放弃未提交候选，保留源外部内容，恢复评论。

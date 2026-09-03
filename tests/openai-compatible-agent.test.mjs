@@ -13,6 +13,7 @@ import {
   classifyOpenAiCompatibleHttpStatus,
   completeOpenAiCompatibleChat,
   createHttpRuntime,
+  DEFAULT_INACTIVITY_TIMEOUT_MS,
   extractHtmlDocument,
   readHttpAgentContext,
 } from "../bridge/agent/runtimes/http-runtime.mjs";
@@ -23,6 +24,7 @@ import { inspectSourceElementIdentity } from "../bridge/project-file-repository/
 import {
   OPENAI_COMPATIBLE_VENDORS,
   normalizeOpenAiCompatibleBaseUrl,
+  openAiCompatibleVendorDisplayNameForPublicModel,
   openaiCompatibleChatThinkingFields,
   openAiCompatibleModelCapability,
   publicModelsForVendor,
@@ -39,6 +41,63 @@ const TRUST = "trusted-local-agent-v1";
 
 function jsonResponse(status, payload) {
   return new Response(JSON.stringify(payload), { status, headers: { "Content-Type": "application/json" } });
+}
+
+function sseResponse(chunks, { status = 200 } = {}) {
+  const body = new ReadableStream({
+    start(controller) {
+      for (const chunk of chunks) {
+        controller.enqueue(chunk instanceof Uint8Array ? chunk : new TextEncoder().encode(chunk));
+      }
+      controller.close();
+    },
+  });
+  return new Response(body, {
+    status,
+    headers: { "Content-Type": "text/event-stream; charset=utf-8" },
+  });
+}
+
+function headerlessStreamResponse(chunks, { status = 200 } = {}) {
+  return new Response(new ReadableStream({
+    start(controller) {
+      for (const chunk of chunks) {
+        controller.enqueue(chunk instanceof Uint8Array ? chunk : new TextEncoder().encode(chunk));
+      }
+      controller.close();
+    },
+  }), { status });
+}
+
+function createVirtualTimer() {
+  let currentTime = 0;
+  let nextId = 1;
+  const pending = new Map();
+  return {
+    clock: { now: () => currentTime },
+    scheduler: {
+      setTimeout(callback, delay) {
+        const id = nextId;
+        nextId += 1;
+        pending.set(id, { callback, dueAt: currentTime + delay });
+        return id;
+      },
+      clearTimeout(id) {
+        pending.delete(id);
+      },
+    },
+    advance(milliseconds) {
+      currentTime += milliseconds;
+      const due = [...pending.entries()]
+        .filter(([, task]) => task.dueAt <= currentTime)
+        .sort((left, right) => left[1].dueAt - right[1].dueAt);
+      for (const [id, task] of due) {
+        if (!pending.delete(id)) continue;
+        task.callback();
+      }
+    },
+    now: () => currentTime,
+  };
 }
 
 function selection(modelId = "deepseek-v4-pro", reasoning = null) {
@@ -103,6 +162,8 @@ test("capabilities are exact-table driven and Custom sends no private reasoning 
   assert.deepEqual(openAiCompatibleModelCapability("zhipu", "glm-anything-else").reasoningChoices.map(({ id }) => id), ["auto"]);
   assert.deepEqual(openaiCompatibleChatThinkingFields("custom", "private-model", "max"), {});
   assert.deepEqual(openaiCompatibleChatThinkingFields("openai", "gpt-5.4", "high"), { reasoning_effort: "high" });
+  assert.equal(openAiCompatibleVendorDisplayNameForPublicModel("pageroot:deepseek-v4-pro"), "DeepSeek");
+  assert.equal(openAiCompatibleVendorDisplayNameForPublicModel("pageroot:private-model"), "");
 });
 
 test("vendor adapters keep request contracts separate and normalize structured failures", () => {
@@ -149,6 +210,387 @@ test("preflight validates the selected fixed model with chat/completions and nev
   assert.match(calls[0].url, /\/chat\/completions$/u);
   assert.doesNotMatch(calls[0].url, /\/models$/u);
   assert.equal(calls[0].body.model, "deepseek-v4-pro");
+});
+
+test("HTTP execution streams SSE with UTF-8 chunking, multiline data, activity-only reasoning, usage and DONE", async () => {
+  const calls = [];
+  const events = [];
+  const first = HTML.slice(0, 42);
+  const second = HTML.slice(42);
+  const multiline = [
+    '{"choices":[{"delta":',
+    '{"content":' + JSON.stringify(first) + "}",
+    "}]}",
+  ].join("\n");
+  const stream = [
+    ": keep-alive\n\n",
+    multiline.split("\n").map((line) => "data: " + line).join("\n") + "\n\n",
+    "data: " + JSON.stringify({ choices: [{ delta: { reasoning_content: "hidden reasoning" } }] }) + "\n\n",
+    "data: " + JSON.stringify({ usage: { prompt_tokens: 2, completion_tokens: 3 } }) + "\n\n",
+    "data: " + JSON.stringify({ choices: [{ delta: { content: second } }] }) + "\n\n",
+    "data: [DONE]\n\n",
+  ].join("");
+  const bytes = Buffer.from(stream, "utf8");
+  const splitAt = bytes.indexOf(Buffer.from("你", "utf8")) + 1;
+  const result = await completeOpenAiCompatibleChat({
+    fetchImpl: async (_url, init) => {
+      calls.push(init);
+      return sseResponse([
+        bytes.subarray(0, splitAt),
+        bytes.subarray(splitAt, splitAt + 1),
+        bytes.subarray(splitAt + 1),
+      ]);
+    },
+    baseUrl: "https://api.example.com/v1",
+    apiKey: "sk-stream",
+    modelId: "model",
+    vendorId: "custom",
+    messages: [],
+    inactivityTimeoutMs: 500,
+    onEvent: (event) => events.push(event),
+  });
+  assert.equal(result, HTML);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].method, "POST");
+  assert.equal(calls[0].headers.Accept, "text/event-stream");
+  assert.equal(JSON.parse(calls[0].body).stream, true);
+  assert.equal(events.some((event) => event.channel === "reasoning"), true);
+  assert.equal(events.some((event) => event.channel === "usage"), true);
+  assert.equal(events.some((event) => event.channel === "heartbeat"), true);
+  assert.equal(events.some((event) => event.channel === "protocol"), true);
+  assert.equal(events.some((event) => Object.hasOwn(event, "text")), false);
+  assert.equal(
+    events.filter((event) => event.channel === "html")
+      .reduce((total, event) => total + event.byteDelta, 0),
+    Buffer.byteLength(HTML, "utf8"),
+  );
+});
+
+test("HTTP sniffs headerless JSON and SSE without losing or duplicating the first chunk", async () => {
+  const json = await completeOpenAiCompatibleChat({
+    fetchImpl: async () => headerlessStreamResponse([
+      JSON.stringify({ choices: [{ finish_reason: "stop", message: { content: HTML } }] }),
+    ]),
+    baseUrl: "https://api.example.com/v1",
+    apiKey: "sk-stream",
+    modelId: "model",
+    vendorId: "custom",
+    messages: [],
+    inactivityTimeoutMs: 500,
+  });
+  assert.equal(json, HTML);
+
+  const split = HTML.length / 2 | 0;
+  const sse = await completeOpenAiCompatibleChat({
+    fetchImpl: async () => headerlessStreamResponse([
+      "da",
+      "ta: " + JSON.stringify({ choices: [{ delta: { content: HTML.slice(0, split) } }] }) + "\n\n",
+      "data: " + JSON.stringify({ choices: [{ delta: { content: HTML.slice(split) } }] }) + "\n\n",
+      "data: [DONE]\n\n",
+    ]),
+    baseUrl: "https://api.example.com/v1",
+    apiKey: "sk-stream",
+    modelId: "model",
+    vendorId: "custom",
+    messages: [],
+    inactivityTimeoutMs: 500,
+  });
+  assert.equal(sse, HTML);
+});
+
+test("HTTP joins many small HTML deltas once at protocol completion", async () => {
+  const fragments = Array.from({ length: 2_000 }, (_, index) => String(index % 10));
+  const opening = "<!DOCTYPE html><html><head><title>many</title></head><body><p data-pageroot-id=\"one\">";
+  const closing = "</p></body></html>";
+  const expected = `${opening}${fragments.join("")}${closing}`;
+  const content = [opening, ...fragments, closing];
+  const result = await completeOpenAiCompatibleChat({
+    fetchImpl: async () => sseResponse([
+      ...content.map((delta) => (
+        "data: " + JSON.stringify({ choices: [{ delta: { content: delta } }] }) + "\n\n"
+      )),
+      "data: [DONE]\n\n",
+    ]),
+    baseUrl: "https://api.example.com/v1",
+    apiKey: "sk-stream",
+    modelId: "model",
+    vendorId: "custom",
+    messages: [],
+    inactivityTimeoutMs: 500,
+  });
+  assert.equal(result, expected);
+});
+
+test("HTTP activity watchdog is sliding, classifies silence as turn timeout, and preserves cancellation", async () => {
+  const frames = [
+    "data: " + JSON.stringify({ choices: [{ delta: { content: HTML.slice(0, 20) } }] }) + "\n\n",
+    "data: " + JSON.stringify({ choices: [{ delta: { reasoning: "hidden" } }] }) + "\n\n",
+    "data: " + JSON.stringify({ usage: { completion_tokens: 1 } }) + "\n\n",
+    "data: " + JSON.stringify({ choices: [{ delta: { content: HTML.slice(20) } }] }) + "\n\n",
+    "data: [DONE]\n\n",
+  ];
+  const activeResponse = {
+    ok: true,
+    status: 200,
+    headers: { get: () => "text/event-stream" },
+    body: (async function* activityStream() {
+      for (const frame of frames) {
+        await new Promise((resolve) => setTimeout(resolve, 8));
+        yield frame;
+      }
+    }()),
+  };
+  const active = await completeOpenAiCompatibleChat({
+    fetchImpl: async () => activeResponse,
+    baseUrl: "https://api.example.com/v1",
+    apiKey: "sk-stream",
+    modelId: "model",
+    vendorId: "custom",
+    messages: [],
+    inactivityTimeoutMs: 15,
+  });
+  assert.equal(active, HTML);
+
+  const hangingResponse = {
+    ok: true,
+    status: 200,
+    headers: { get: () => "text/event-stream" },
+    body: {
+      getReader() {
+        return {
+          read: () => new Promise(() => {}),
+          releaseLock() {},
+        };
+      },
+    },
+  };
+  await assert.rejects(
+    completeOpenAiCompatibleChat({
+      fetchImpl: async () => hangingResponse,
+      baseUrl: "https://api.example.com/v1",
+      apiKey: "sk-stream",
+      modelId: "model",
+      vendorId: "custom",
+      messages: [],
+      inactivityTimeoutMs: 15,
+    }),
+    (error) => error?.code === "AGENT_TURN_TIMEOUT"
+      && error?.code !== "AGENT_PREFLIGHT_TIMEOUT",
+  );
+
+  const cancellation = new AbortController();
+  const cancelled = completeOpenAiCompatibleChat({
+    fetchImpl: async () => hangingResponse,
+    baseUrl: "https://api.example.com/v1",
+    apiKey: "sk-stream",
+    modelId: "model",
+    vendorId: "custom",
+    messages: [],
+    inactivityTimeoutMs: 1_000,
+    signal: cancellation.signal,
+  });
+  setTimeout(() => cancellation.abort(new Error("cancel test")), 5);
+  await assert.rejects(cancelled, (error) => error?.code === "AGENT_CANCELLED");
+});
+
+test("HTTP cancellation explicitly closes an async-iterator response body", async () => {
+  let returnCalls = 0;
+  const body = {
+    [Symbol.asyncIterator]() {
+      return {
+        next: () => new Promise(() => {}),
+        return: async () => {
+          returnCalls += 1;
+          return { done: true };
+        },
+      };
+    },
+  };
+  const cancellation = new AbortController();
+  const pending = completeOpenAiCompatibleChat({
+    fetchImpl: async () => ({
+      ok: true,
+      status: 200,
+      headers: { get: () => "text/event-stream" },
+      body,
+    }),
+    baseUrl: "https://api.example.com/v1",
+    apiKey: "sk-stream",
+    modelId: "model",
+    vendorId: "custom",
+    messages: [],
+    inactivityTimeoutMs: 1_000,
+    signal: cancellation.signal,
+  });
+  setTimeout(() => cancellation.abort(new Error("cancel iterator")), 5);
+  await assert.rejects(pending, (error) => error?.code === "AGENT_CANCELLED");
+  assert.equal(returnCalls, 1);
+});
+
+test("HTTP timeout remains bounded when a stream reader never finishes cancelling", async () => {
+  let releaseCalls = 0;
+  const startedAt = Date.now();
+  await assert.rejects(
+    completeOpenAiCompatibleChat({
+      fetchImpl: async () => ({
+        ok: true,
+        status: 200,
+        headers: { get: () => "text/event-stream" },
+        body: {
+          getReader() {
+            return {
+              read: () => new Promise(() => {}),
+              cancel: () => new Promise(() => {}),
+              releaseLock() {
+                releaseCalls += 1;
+              },
+            };
+          },
+        },
+      }),
+      baseUrl: "https://api.example.com/v1",
+      apiKey: "sk-stream",
+      modelId: "model",
+      vendorId: "custom",
+      messages: [],
+      inactivityTimeoutMs: 10,
+    }),
+    (error) => error?.code === "AGENT_TURN_TIMEOUT",
+  );
+  assert.equal(releaseCalls, 1);
+  assert.ok(Date.now() - startedAt < 1_000);
+});
+
+test("HTTP activity watchdog permits a stream whose total virtual duration exceeds 45 minutes", async () => {
+  const timer = createVirtualTimer();
+  const frames = [
+    { choices: [{ delta: { content: HTML.slice(0, 20) } }] },
+    { choices: [{ delta: { reasoning_content: "hidden" } }] },
+    { usage: { completion_tokens: 1 } },
+    { choices: [{ delta: { content: HTML.slice(20) } }] },
+  ];
+  const response = {
+    ok: true,
+    status: 200,
+    headers: { get: () => "text/event-stream" },
+    body: (async function* longRunningStream() {
+      for (const frame of frames) {
+        timer.advance(20 * 60_000);
+        yield `data: ${JSON.stringify(frame)}\n\n`;
+      }
+      yield "data: [DONE]\n\n";
+    }()),
+  };
+  const result = await completeOpenAiCompatibleChat({
+    fetchImpl: async () => response,
+    baseUrl: "https://api.example.com/v1",
+    apiKey: "sk-stream",
+    modelId: "model",
+    vendorId: "custom",
+    messages: [],
+    inactivityTimeoutMs: DEFAULT_INACTIVITY_TIMEOUT_MS,
+    clock: timer.clock,
+    scheduler: timer.scheduler,
+  });
+  assert.equal(result, HTML);
+  assert.ok(timer.now() > DEFAULT_INACTIVITY_TIMEOUT_MS);
+});
+
+test("HTTP structured SSE provider errors never become HTML or visible narration", async () => {
+  const events = [];
+  await assert.rejects(
+    completeOpenAiCompatibleChat({
+      fetchImpl: async () => sseResponse([
+        "event: error\n",
+        "data: " + JSON.stringify({
+          error: { code: "rate_limit_exceeded", message: "provider-only detail" },
+        }) + "\n\n",
+      ]),
+      baseUrl: "https://api.example.com/v1",
+      apiKey: "sk-stream",
+      modelId: "model",
+      vendorId: "custom",
+      messages: [],
+      inactivityTimeoutMs: 500,
+      onEvent: (event) => events.push(event),
+    }),
+    (error) => error?.code === "AGENT_RATE_LIMITED",
+  );
+  assert.equal(events.some((event) => Object.hasOwn(event, "text")), false);
+  assert.equal(events.some((event) => event.channel === "html"), false);
+});
+
+test("HTTP drops a partial document when the SSE connection closes before DONE", async () => {
+  await assert.rejects(
+    completeOpenAiCompatibleChat({
+      fetchImpl: async () => sseResponse([
+        "data: " + JSON.stringify({
+          choices: [{ delta: { content: HTML.slice(0, 24) } }],
+        }) + "\n\n",
+      ]),
+      baseUrl: "https://api.example.com/v1",
+      apiKey: "sk-stream",
+      modelId: "model",
+      vendorId: "custom",
+      messages: [],
+      inactivityTimeoutMs: 500,
+    }),
+    (error) => error?.code === "AGENT_NETWORK_INTERRUPTED",
+  );
+});
+
+test("Custom diagnosis validates saved configuration without requiring a models endpoint", async () => {
+  const calls = [];
+  let chatCalls = 0;
+  const provider = createOpenAiCompatibleProvider({
+    fetchImpl: async (url, init) => {
+      calls.push({ url: String(url), method: init.method, body: init.body });
+      return jsonResponse(200, { data: [] });
+    },
+    completeChat: async () => {
+      chatCalls += 1;
+      return HTML;
+    },
+  });
+  const environment = {
+    PAGEROOT_API_KEY: "sk-diagnose",
+    PAGEROOT_API_VENDOR: "custom",
+    PAGEROOT_API_BASE_URL: "https://api.example.com/v1",
+    PAGEROOT_API_CREDENTIAL_GENERATION: "1",
+  };
+  const installation = provider.resolveInstallation({ environment });
+  const diagnostic = await provider.diagnose(installation, { environment });
+  assert.equal(diagnostic.readiness, "ready");
+  assert.equal(calls.length, 0);
+  assert.equal(diagnostic.facts.installation, "configured");
+  assert.equal(diagnostic.facts.protocol, "unknown");
+  assert.equal(diagnostic.facts.service, "unknown");
+  assert.equal(chatCalls, 0);
+});
+
+test("HTTP diagnosis distinguishes authentication and network failures", async () => {
+  const environment = {
+    PAGEROOT_API_KEY: "sk-diagnose",
+    PAGEROOT_API_VENDOR: "deepseek",
+    PAGEROOT_API_BASE_URL: "https://api.deepseek.com/v1",
+    PAGEROOT_API_CREDENTIAL_GENERATION: "1",
+  };
+  const authProvider = createOpenAiCompatibleProvider({
+    fetchImpl: async () => jsonResponse(401, { error: { code: "invalid_api_key" } }),
+  });
+  const installation = authProvider.resolveInstallation({ environment });
+  await assert.rejects(
+    authProvider.diagnose(installation, { environment }),
+    (error) => error?.code === "AGENT_AUTH_REQUIRED",
+  );
+  const networkProvider = createOpenAiCompatibleProvider({
+    fetchImpl: async () => { throw new Error("socket closed"); },
+  });
+  const networkInstallation = networkProvider.resolveInstallation({ environment });
+  await assert.rejects(
+    networkProvider.diagnose(networkInstallation, { environment }),
+    (error) => error?.code === "AGENT_NETWORK_INTERRUPTED",
+  );
 });
 
 test("Custom requires a manual Model ID and validates that exact ID", async () => {

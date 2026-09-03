@@ -301,6 +301,8 @@ export type ProjectAgentHandoffState = {
   errorCode?: string | null;
   errorMessage?: string | null;
   retryable?: boolean;
+  safeToRetry?: boolean;
+  recoveryKind?: "retry" | "wait" | "reauthenticate" | "change-model" | "change-provider" | "repair-installation" | "end";
 };
 
 export type DesktopIntegrationsApi = {

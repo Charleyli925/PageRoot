@@ -369,10 +369,42 @@ test("release false keeps the lease fence and blocks shutdown", async () => {
   });
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(coordinator.executionStatus(IDENTITY).errorCode, "AGENT_RESTART_RECOVERY_REQUIRED");
+  assert.equal(coordinator.executionStatus(IDENTITY).safeToRetry, false);
+  assert.equal(coordinator.executionStatus(IDENTITY).recoveryKind, "end");
   await assert.rejects(
     coordinator.shutdown(),
     (error) => error?.code === "AGENT_SHUTDOWN_UNCONFIRMED",
   );
+});
+
+test("runtime failure keeps retry safety separate from the recovery action", async () => {
+  const coordinator = new AgentRuntimeCoordinator({
+    providerRegistry: registry({
+      run: async () => {
+        throw Object.assign(new Error("balance"), { code: "AGENT_BALANCE_INSUFFICIENT" });
+      },
+    }),
+    resolveTask: async () => executionAuthority(),
+    leaseStore: {
+      acquire: async ({ ownerToken }) => ({ key: "lease", path: "memory", ownerToken }),
+      release: async () => true,
+    },
+  });
+  const ticket = await ready(coordinator);
+  await coordinator.submit({
+    ...IDENTITY,
+    driver: "synthetic-driver",
+    trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
+    preflightId: ticket.preflightId,
+    configurationDigest: ticket.configuration.configurationDigest,
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  const session = coordinator.executionStatus(IDENTITY);
+  assert.equal(session.errorCode, "AGENT_BALANCE_INSUFFICIENT");
+  assert.equal(session.safeToRetry, true);
+  assert.equal(session.retryable, true);
+  assert.equal(session.recoveryKind, "change-provider");
+  await coordinator.shutdown();
 });
 
 test("durable cancellation is never written after cleanup or lease release fails", async () => {
@@ -490,6 +522,8 @@ test("execution status projects only public Agent text with frozen provider iden
         onEvent({ kind: "initialized", agentName: "Synthetic Agent", agentVersion: "1.0.0" });
         onEvent({ turnId: "stale_turn", kind: "visible-text", text: "迟到事件不能污染本轮。" });
         onEvent({ kind: "reasoning", text: "这段隐藏推理绝不能进入侧栏。" });
+        onEvent({ kind: "activity", channel: "html", byteDelta: 12 });
+        onEvent({ kind: "activity", channel: "reasoning", byteDelta: 999 });
         onEvent({ kind: "visible-text", text: "正在读取冻结任务。" });
         onEvent({ kind: "visible-text", text: "正在写入 Candidate。" });
         onEvent({ kind: "visible-text-truncated" });
@@ -523,7 +557,10 @@ test("execution status projects only public Agent text with frozen provider iden
   ]);
   assert.equal(running.textTruncated, true);
   assert.equal(running.visibleText.includes("隐藏推理"), false);
-  assert.equal(running.eventCount, 5);
+  assert.equal(running.eventCount, 7);
+  assert.equal(running.receivedBytes, 12);
+  assert.equal(typeof running.lastActivityAt, "string");
+  assert.equal(Object.hasOwn(running, "command"), false);
   assert.equal(running.visibleText.includes("迟到事件"), false);
 
   finish.resolve();
@@ -614,6 +651,8 @@ test("an unknown historical provider stays readable but cannot become start auth
   assert.equal(interrupted.driver, "future-provider");
   assert.equal(interrupted.state, "interrupted");
   assert.equal(interrupted.errorCode, "AGENT_RESTART_RECOVERY_REQUIRED");
+  assert.equal(interrupted.safeToRetry, false);
+  assert.equal(interrupted.recoveryKind, "end");
   assert.match(interrupted.errorMessage, /无法恢复此 Agent 会话/u);
   assert.throws(
     () => coordinator.assertSelection(selection, "execution"),

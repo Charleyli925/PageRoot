@@ -130,6 +130,7 @@ export async function runAcpProcessTask({
   environment = {},
   onEvent = () => {},
   startupTimeoutMs,
+  inactivityTimeoutMs,
   turnTimeoutMs,
   cancellationSignal,
   expectedAgentName,
@@ -138,6 +139,8 @@ export async function runAcpProcessTask({
   baseEnvironment = process.env,
   createHost,
   stderrFieldPrefix = "agent",
+  clock = Date,
+  scheduler,
 } = {}) {
   if (cancellationSignal?.aborted) {
     throw acpPolicyError("ACP_CANCELLED", "The PageRoot ACP task was cancelled.");
@@ -200,9 +203,12 @@ export async function runAcpProcessTask({
         onEvent: observeEvent,
         cancellationSignal,
         expectedAgentName,
+        ...(inactivityTimeoutMs ? { inactivityTimeoutMs } : {}),
         ...(createHost ? { createHost } : {}),
         ...(startupTimeoutMs ? { startupTimeoutMs } : {}),
         ...(turnTimeoutMs ? { turnTimeoutMs } : {}),
+        clock,
+        scheduler,
       }),
       earlyExitPromise,
     ]);

@@ -119,6 +119,35 @@ async function createManagedRequest(t, { hang = false } = {}) {
   );
   assert.equal(selectedAvailability.response.status, 200, JSON.stringify(selectedAvailability.body));
   assert.equal(selectedAvailability.body.status, "ready");
+  const diagnosis = await bridge.requestJson(
+    `/agent/diagnose?selection=${encodeURIComponent(JSON.stringify({
+      providerId: "qoder",
+      runtimeId: "acp",
+      requestedModelId: null,
+      resolvedModelId: null,
+      reasoning: { requested: null, applied: null, resolution: "provider-default" },
+    }))}`,
+  );
+  assert.equal(diagnosis.response.status, 200, JSON.stringify(diagnosis.body));
+  assert.deepEqual(Object.keys(diagnosis.body.diagnostic).sort(), [
+    "activeInstallation",
+    "cause",
+    "checkedAt",
+    "facts",
+    "operation",
+    "readiness",
+  ]);
+  assert.equal(diagnosis.body.diagnostic.readiness, "ready");
+  assert.equal(diagnosis.body.diagnostic.operation, "diagnose");
+  assert.deepEqual(Object.keys(diagnosis.body.diagnostic.facts).sort(), [
+    "authentication",
+    "installation",
+    "protocol",
+    "service",
+  ]);
+  assert.equal("command" in diagnosis.body, false);
+  assert.equal(JSON.stringify(diagnosis.body).includes("stderr"), false);
+  assert.equal(JSON.stringify(diagnosis.body).includes("index.js"), false);
   const unknownAvailability = await bridge.requestJson(
     `/agent/availability?selection=${encodeURIComponent(JSON.stringify({
       providerId: "future-agent",

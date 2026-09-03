@@ -104,6 +104,14 @@
   font-size: 11px;
 }
 
+.historyGroup {
+  margin: 2px 0 -8px;
+  color: #9a97a4;
+  font-size: 10px;
+  font-weight: 680;
+  text-align: center;
+}
+
 /*
  * A message is an avatar beside what was said — the same shape a chat has. Without
  * the avatar column the thread read as stacked paragraphs, which is why the run

@@ -52,7 +52,7 @@ test("the shared Agent chooser exposes 源页 Agent plus both ACP providers with
         },
       },
     })[0].presentation.availability({ status: "unavailable", reason: "account-capacity" }).statusLabel,
-    "额度已用完",
+    "连接失败",
   );
   assert.equal(PAGEROOT_AGENT_PROVIDER.failureReason("AGENT_BALANCE_INSUFFICIENT"), "account-capacity");
   assert.equal(PAGEROOT_AGENT_PROVIDER.failureReason("AGENT_MODEL_ACCESS_DENIED"), "model-unavailable");
@@ -72,7 +72,7 @@ test("the shared Agent chooser exposes 源页 Agent plus both ACP providers with
       status: "unavailable",
       reason: "endpoint-region-mismatch",
     }).statusLabel,
-    "暂不可用 · 接口地区不匹配",
+    "连接失败",
   );
 });
 
@@ -593,6 +593,157 @@ test("post-install availability rechecks the provider's resolved selected author
   assert.equal(catalog.freezeSelected().resolvedModelId, "qoder:qoder-default");
 });
 
+test("diagnosis is side-effect free and does not create a preflight ticket or mutate selection", async () => {
+  const selected = freezeAgentSelection(QODER_AGENT_PROVIDER.selection);
+  let diagnoseCalls = 0;
+  let preflightCalls = 0;
+  const catalog = new AgentCatalogState({
+    bridgeClient: {
+      async preflightAgent() {
+        preflightCalls += 1;
+        return { status: "ready", preflightId: "unused" };
+      },
+      async agentDiagnose(request) {
+        diagnoseCalls += 1;
+        assert.deepEqual(request.selection, selected);
+        return {
+          status: "ready",
+          diagnostic: {
+            readiness: "ready",
+            cause: null,
+            operation: "diagnose",
+            checkedAt: "2026-08-11T00:00:00.000Z",
+            activeInstallation: null,
+          },
+        };
+      },
+    },
+    providers: [QODER_AGENT_PROVIDER],
+    selected,
+    clock: { now: () => Date.parse("2026-08-11T00:00:00.000Z") },
+  });
+
+  const before = catalog.freezeSelected();
+  const result = await catalog.diagnose();
+  assert.equal(diagnoseCalls, 1);
+  assert.equal(preflightCalls, 0);
+  assert.equal(result.diagnostic.activeInstallation, null);
+  assert.equal(result.diagnostic.facts.installation.status, "ready");
+  assert.deepEqual(catalog.getSnapshot().preflightBySelection, {});
+  assert.deepEqual(catalog.freezeSelected(), before);
+  assert.equal(catalog.availability().status, "checking");
+  assert.equal(catalog.displayAvailability().status, "ready");
+});
+
+test("weak diagnosis cannot clear a stronger use-time service failure", async () => {
+  const selected = freezeAgentSelection(PAGEROOT_AGENT_PROVIDER.selection);
+  const catalog = new AgentCatalogState({
+    bridgeClient: {
+      async preflightAgent() { return { status: "ready" }; },
+      async agentDiagnose() {
+        return {
+          status: "ready",
+          diagnostic: {
+            readiness: "ready",
+            cause: null,
+            facts: {
+              installation: "configured",
+              authentication: "ready",
+              protocol: "ready",
+              service: "unknown",
+            },
+          },
+        };
+      },
+    },
+    providers: [PAGEROOT_AGENT_PROVIDER],
+    selected,
+    clock: { now: () => Date.parse("2026-08-11T00:00:00.000Z") },
+  });
+  catalog.noteRunFailure(selected, "AGENT_BALANCE_INSUFFICIENT");
+  await catalog.diagnose(selected);
+  assert.equal(catalog.availability(selected).reason, "account-capacity");
+  assert.equal(catalog.availability(selected).lastCheck, "use");
+  assert.equal(catalog.provider(selected).diagnostic.facts.service.status, "unavailable");
+  assert.equal(catalog.provider(selected).diagnostic.facts.service.source, "use");
+  assert.equal(catalog.provider(selected).diagnostic.readiness, "connection-failed");
+  assert.equal(catalog.displayAvailability(selected).reason, "account-capacity");
+});
+
+test("diagnosis is keyed single-flight and stale generations cannot publish", async () => {
+  const selected = freezeAgentSelection(QODER_AGENT_PROVIDER.selection);
+  let calls = 0;
+  let resolveFirst;
+  const firstResult = new Promise((resolve) => { resolveFirst = resolve; });
+  const catalog = new AgentCatalogState({
+    bridgeClient: {
+      async preflightAgent() { return { status: "ready" }; },
+      async agentDiagnose() {
+        calls += 1;
+        if (calls === 1) return firstResult;
+        return { status: "auth-required", diagnostic: { readiness: "auth-required", cause: "QODER_AUTH_REQUIRED" } };
+      },
+    },
+    providers: [QODER_AGENT_PROVIDER],
+    selected,
+  });
+  const first = catalog.diagnose(selected);
+  const shared = catalog.diagnose(selected);
+  assert.equal(first, shared);
+  await Promise.resolve();
+  assert.equal(calls, 1);
+  catalog.select({
+    ...selected,
+    requestedModelId: "qoder:next",
+    resolvedModelId: "qoder:next",
+  });
+  const current = catalog.diagnose(catalog.freezeSelected());
+  await Promise.resolve();
+  assert.equal(calls, 2);
+  resolveFirst({ status: "ready", diagnostic: { readiness: "ready", cause: null } });
+  assert.equal(await first, null);
+  await current;
+  assert.equal(catalog.provider().diagnostic.readiness, "auth-required");
+  catalog.dispose();
+});
+
+test("install cancellation projects cancelling state and uses the existing Bridge route", async () => {
+  const selected = freezeAgentSelection(QODER_AGENT_PROVIDER.selection);
+  const states = [];
+  let cancelled;
+  const catalog = new AgentCatalogState({
+    bridgeClient: {
+      async preflightAgent() { return { status: "ready" }; },
+      async cancelAgentInstall(body) {
+        cancelled = body;
+        states.push(catalog.provider(selected).installState);
+        return { ok: true, providerId: "qoder", installState: "idle" };
+      },
+      async agentDiagnose() {
+        return {
+          status: "not-installed",
+          diagnostic: {
+            readiness: "not-installed",
+            cause: "not-installed",
+            operation: "diagnose",
+            checkedAt: "2026-08-11T00:00:00.000Z",
+            activeInstallation: null,
+          },
+        };
+      },
+    },
+    providers: [QODER_AGENT_PROVIDER],
+    selected,
+    clock: { now: () => Date.parse("2026-08-11T00:00:00.000Z") },
+  });
+  catalog.provider(selected);
+  const outcome = await catalog.cancelInstall();
+  assert.deepEqual(cancelled, { providerId: "qoder" });
+  assert.deepEqual(states, ["cancelling"]);
+  assert.equal(outcome.installState, "idle");
+  assert.equal(catalog.provider(selected).installState, "idle");
+});
+
 test("selectModel changes only the selected model identity", () => {
   const catalog = new AgentCatalogState({
     bridgeClient: {
@@ -694,6 +845,8 @@ test("Token replacement publishes atomically, clears old model state, and can di
   await catalog.connectWithApiKey(initial, "sk-old", { vendorId: "deepseek" });
   assert.equal(catalog.freezeSelected().resolvedModelId, "pageroot:deepseek-v4-pro");
   assert.equal(catalog.provider().connection.vendorDisplayName, "DeepSeek");
+  assert.equal(catalog.provider().diagnostic.readiness, "ready");
+  assert.equal(catalog.provider().diagnostic.facts.service.source, "preflight");
   failNext = true;
   await assert.rejects(
     catalog.connectWithApiKey(catalog.freezeSelected(), "sk-bad", { vendorId: "openai" }),
@@ -707,6 +860,7 @@ test("Token replacement publishes atomically, clears old model state, and can di
   assert.deepEqual(catalog.provider().models.map((model) => model.id), ["pageroot:gpt-5"]);
   await catalog.disconnectApiKey(catalog.freezeSelected());
   assert.equal(catalog.availability().status, "auth-required");
+  assert.equal(catalog.provider().diagnostic.readiness, "auth-required");
   assert.equal(catalog.provider().credentialConfigured, false);
   assert.deepEqual(catalog.provider().models, []);
   assert.equal(catalog.freezeSelected().resolvedModelId, null);

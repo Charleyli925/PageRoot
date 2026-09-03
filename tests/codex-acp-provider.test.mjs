@@ -9,6 +9,8 @@ import { sha256 } from "../bridge/lifecycle-core.mjs";
 import { createAgentCatalog } from "../bridge/agent/catalog/agent-catalog.mjs";
 import { createDefaultProviderRegistry } from "../bridge/agent/providers/provider-registry.mjs";
 import {
+  assertCodexAcpInstallationUnchanged,
+  diagnoseCodexAcp,
   probeCodexAcp,
   resolveCodexAcpCommand,
 } from "../bridge/agent/providers/codex-acp-provider.mjs";
@@ -120,7 +122,7 @@ test("public catalog projection never includes command, path or stderr", async (
   assert.equal(serialized.includes("index.js"), false);
 });
 
-test("user-installed Codex ACP wins over a managed copy", async (t) => {
+test("PageRoot-managed Codex ACP wins over a valid user copy", async (t) => {
   const root = await isolatedHome(t);
   const agentsRoot = path.join(root, "agents");
   const managed = await writeManagedCodex(agentsRoot);
@@ -147,9 +149,9 @@ test("user-installed Codex ACP wins over a managed copy", async (t) => {
     homeDirectory: root,
     managedCandidates: () => catalog.managedCommandCandidates("codex"),
   });
-  assert.equal(resolved.installSource, "user");
-  assert.equal(resolved.command, userCommand);
-  assert.notEqual(resolved.command, managed);
+  assert.equal(resolved.installSource, "managed");
+  assert.equal(resolved.command, managed);
+  assert.notEqual(resolved.command, userCommand);
 });
 
 test("managed Codex ACP is used only when no user CLI exists", async (t) => {
@@ -167,7 +169,7 @@ test("managed Codex ACP is used only when no user CLI exists", async (t) => {
   assert.equal(resolved.command, managed);
 });
 
-test("an invalid user installation is not treated as missing and does not fall through to managed", async (t) => {
+test("an invalid user installation is diagnostic-only when managed Codex is valid", async (t) => {
   const root = await isolatedHome(t);
   const agentsRoot = path.join(root, "agents");
   await writeManagedCodex(agentsRoot);
@@ -175,13 +177,58 @@ test("an invalid user installation is not treated as missing and does not fall t
   await mkdir(bin, { recursive: true });
   await writeFile(path.join(bin, "codex-acp"), "#!/bin/sh\necho untrusted\n", { mode: 0o755 });
   const catalog = createAgentCatalog({ agentsRoot });
+  const resolved = await resolveCodexAcpCommand({
+    environment: isolatedEnvironment(root),
+    homeDirectory: root,
+    managedCandidates: () => catalog.managedCommandCandidates("codex"),
+  });
+  assert.equal(resolved.installSource, "managed");
+});
+
+test("explicit E2E Codex path wins after all candidate sources are collected", async (t) => {
+  const root = await isolatedHome(t);
+  const agentsRoot = path.join(root, "agents");
+  const managed = await writeManagedCodex(agentsRoot);
+  const explicit = await probeCommand(root);
+  const environment = {
+    ...isolatedEnvironment(root),
+    PAGEROOT_E2E: "1",
+    PAGEROOT_CODEX_ACP_ALLOW_TEST_COMMAND: "1",
+    PAGEROOT_CODEX_ACP_COMMAND: explicit.command,
+  };
+  const catalog = createAgentCatalog({ agentsRoot });
+  const resolved = await resolveCodexAcpCommand({
+    environment,
+    homeDirectory: root,
+    managedCandidates: () => catalog.managedCommandCandidates("codex"),
+  });
+  assert.equal(resolved.installSource, "explicit");
+  assert.equal(resolved.command, explicit.command);
+  assert.notEqual(resolved.command, managed);
+});
+
+test("Codex start revalidates the adapter and native executable closure", async (t) => {
+  const root = await isolatedHome(t);
+  const adapter = await probeCommand(root);
+  const nativeCommand = path.join(root, "codex-native");
+  await writeFile(nativeCommand, "#!/bin/sh\necho native-v1\n", { mode: 0o755 });
+  await chmod(nativeCommand, 0o755);
+  const nativeInformation = await lstat(nativeCommand);
+  const nativeIdentity = Object.freeze({
+    dev: nativeInformation.dev,
+    ino: nativeInformation.ino,
+    nlink: nativeInformation.nlink,
+    size: nativeInformation.size,
+    mtimeMs: nativeInformation.mtimeMs,
+    sha256: sha256(await readFile(nativeCommand)),
+  });
+  const installation = { ...adapter, nativeCommand, nativeIdentity };
+  await assertCodexAcpInstallationUnchanged(installation);
+
+  await writeFile(nativeCommand, "#!/bin/sh\necho native-v2-changed\n", { mode: 0o755 });
   await assert.rejects(
-    resolveCodexAcpCommand({
-      environment: isolatedEnvironment(root),
-      homeDirectory: root,
-      managedCandidates: () => catalog.managedCommandCandidates("codex"),
-    }),
-    (error) => error?.code === "CODEX_COMMAND_UNTRUSTED",
+    assertCodexAcpInstallationUnchanged(installation),
+    (error) => error?.code === "CODEX_COMMAND_CHANGED",
   );
 });
 
@@ -198,4 +245,51 @@ test("ACP probe classifies missing ChatGPT login as auth-required", async (t) =>
     probeCodexAcp(await probeCommand(await isolatedHome(t), "--auth-required"), process.env),
     (error) => error?.code === "CODEX_AUTH_REQUIRED",
   );
+});
+
+test("Codex diagnosis uses initialize-only fallback without opening an ACP session", async (t) => {
+  const root = await isolatedHome(t);
+  const marker = path.join(root, "session-new.marker");
+  const command = await probeCommand(root, `--session-marker=${marker}`);
+  const diagnostic = await diagnoseCodexAcp(command, {});
+  assert.equal(diagnostic.readiness, "connection-failed");
+  assert.equal(diagnostic.cause, "CODEX_AUTH_UNVERIFIED");
+  await assert.rejects(() => readFile(marker, "utf8"), { code: "ENOENT" });
+});
+
+test("Codex diagnosis uses protected native login status when available", async (t) => {
+  const root = await isolatedHome(t);
+  const native = path.join(root, "codex-native");
+  await writeFile(native, "#!/bin/sh\necho Logged in\n", { mode: 0o755 });
+  await chmod(native, 0o755);
+  const ready = await diagnoseCodexAcp({ nativeCommand: native }, {});
+  assert.equal(ready.readiness, "ready");
+
+  await writeFile(native, "#!/bin/sh\necho Not logged in\n", { mode: 0o755 });
+  await assert.rejects(
+    diagnoseCodexAcp({ nativeCommand: native }, {}),
+    (error) => error?.code === "CODEX_AUTH_REQUIRED",
+  );
+
+  await writeFile(native, "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+  await assert.rejects(
+    diagnoseCodexAcp({ nativeCommand: native }, {}),
+    (error) => error?.code === "CODEX_AUTH_UNVERIFIED",
+  );
+});
+
+test("Codex diagnosis verifies native login and ACP initialize without session/new", async (t) => {
+  const root = await isolatedHome(t);
+  const marker = path.join(root, "session-new.marker");
+  const adapter = await probeCommand(root, `--session-marker=${marker}`);
+  const native = path.join(root, "codex-native");
+  await writeFile(native, "#!/bin/sh\necho Logged in\n", { mode: 0o755 });
+  await chmod(native, 0o755);
+
+  const diagnostic = await diagnoseCodexAcp({ ...adapter, nativeCommand: native }, {});
+  assert.equal(diagnostic.readiness, "ready");
+  assert.equal(diagnostic.facts.authentication, "ready");
+  assert.equal(diagnostic.facts.protocol, "ready");
+  assert.equal(diagnostic.facts.service, "unknown");
+  await assert.rejects(() => readFile(marker, "utf8"), { code: "ENOENT" });
 });

@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  Fragment,
   useCallback,
   useEffect,
   useMemo,
@@ -19,8 +20,10 @@ import {
   sidebarRunProgress,
   sidebarSendState,
   sidebarCopyTaskState,
+  sidebarExecutionStatus,
   sidebarTimestampLabel,
   type SidebarCatalogStatus,
+  type SidebarHistoryGroup,
 } from "./ai-conversation-model.js";
 import { copyText } from "./browser-io";
 import styles from "./ai-conversation-sidebar.module.css";
@@ -44,9 +47,11 @@ export type AiConversationSidebarProps = {
   state: string;
   title: string;
   messages: readonly unknown[];
+  historyGroups?: readonly SidebarHistoryGroup[];
   catalogStatus?: SidebarCatalogStatus;
   catalogReason?: string | null;
   agentDisplayName?: string | null;
+  executionDisplayName?: string | null;
   agentActionName?: string | null;
   agentSettingsName?: string | null;
   agentSettingsSupported?: boolean;
@@ -67,6 +72,7 @@ export type AiConversationSidebarProps = {
   failureMessage?: string | null;
   failureCode?: string | null;
   failureRetryable?: boolean;
+  failureRecoveryKind?: "retry" | "wait" | "reauthenticate" | "change-model" | "change-provider" | "repair-installation" | "end" | null;
   contextLabel?: string | null;
   pendingCommentCount?: number;
   queued?: boolean;
@@ -87,6 +93,8 @@ export type AiConversationSidebarProps = {
   /** A managed Agent is actively thinking or processing this round. */
   agentWorking?: boolean;
   agentStartedAt?: string | null;
+  agentLastActivityAt?: string | null;
+  agentReceivedBytes?: number;
   agentUpdatedAt?: string | null;
   /** A frozen Request identity, used solely to follow the round the user started. */
   runKey?: string | null;
@@ -169,9 +177,11 @@ export default function AiConversationSidebar({
   state,
   title,
   messages,
+  historyGroups = [],
   catalogStatus = "ready",
   catalogReason = null,
   agentDisplayName = null,
+  executionDisplayName = null,
   agentActionName = "Agent",
   agentSettingsName = "Agent",
   agentSettingsSupported = true,
@@ -186,6 +196,7 @@ export default function AiConversationSidebar({
   failureMessage = null,
   failureCode = null,
   failureRetryable = true,
+  failureRecoveryKind = null,
   contextLabel = null,
   pendingCommentCount = 0,
   queued = false,
@@ -202,6 +213,8 @@ export default function AiConversationSidebar({
   agentTextTruncated = false,
   agentWorking = false,
   agentStartedAt = null,
+  agentLastActivityAt = null,
+  agentReceivedBytes = 0,
   agentUpdatedAt = null,
   runKey = null,
   runCommentCount = null,
@@ -213,6 +226,7 @@ export default function AiConversationSidebar({
   const [openChoice, setOpenChoice] = useState<null | "model" | "reasoning">(null);
   const [hasUnseenContent, setHasUnseenContent] = useState(false);
   const [copyFeedback, setCopyFeedback] = useState<CopyFeedback>(null);
+  const [clockNow, setClockNow] = useState(0);
   const streamRef = useRef<HTMLDivElement | null>(null);
   const bottomSentinelRef = useRef<HTMLDivElement | null>(null);
   const liveMessageRef = useRef<HTMLElement | null>(null);
@@ -228,6 +242,20 @@ export default function AiConversationSidebar({
     || "Agent";
   const resolvedAgentSettingsName = agentSettingsName || resolvedAgentActionName;
   const stream = useMemo(() => sidebarMessageStream(messages), [messages]);
+  const historyBoundaryByIndex = useMemo(() => {
+    const boundaries = new Map<number, { label: string; first: boolean; kind: string }>();
+    for (const group of historyGroups) {
+      const firstIndex = group.messageIndices[0];
+      for (const messageIndex of group.messageIndices) {
+        boundaries.set(messageIndex, {
+          label: group.label,
+          first: messageIndex === firstIndex,
+          kind: group.kind,
+        });
+      }
+    }
+    return boundaries;
+  }, [historyGroups]);
   const activeIntent = sidebarResolvedIntent(state);
   // Product state alone determines the one available action and mode copy.
   const mode = sidebarModePresentation(state);
@@ -240,6 +268,7 @@ export default function AiConversationSidebar({
       failureMessage,
       failureCode,
       failureRetryable,
+      failureRecoveryKind,
       deliveryMode,
       handoffStatus,
     }),
@@ -250,6 +279,7 @@ export default function AiConversationSidebar({
       failureMessage,
       failureCode,
       failureRetryable,
+      failureRecoveryKind,
       handoffStatus,
       runStatus,
       state,
@@ -283,6 +313,19 @@ export default function AiConversationSidebar({
     agentUpdates,
     agentTextTruncated,
   });
+  const executionStatus = agentWorking
+    ? sidebarExecutionStatus({
+        state,
+        providerName: executionDisplayName
+          || agentDisplayName
+          || agentPresentation?.displayName
+          || agentPresentation?.agentName
+          || resolvedAgentActionName,
+        startedAt: agentStartedAt,
+        receivedBytes: agentReceivedBytes,
+        now: clockNow,
+      })
+    : null;
   const selectedModel = models.find((model) => model.id === selectedModelId) || models[0] || null;
   const agentLine = sidebarAgentLine({
     catalogStatus,
@@ -293,6 +336,7 @@ export default function AiConversationSidebar({
     choices: reasoningChoices,
     selectedId: selectedReasoningId,
   });
+  const showComposerIdentity = state === "preview-ready" || state === "no-change";
   const schemeName = (typeof agentDisplayName === "string" && agentDisplayName.trim())
     || resolvedAgentActionName;
   const resolvedFileName = sourceFileName?.trim() || "当前 HTML";
@@ -328,6 +372,7 @@ export default function AiConversationSidebar({
     runProgress?.narrationTruncated ? "truncated" : "",
     actionBar?.kind || "",
     actionBar?.title || "",
+    historyGroups.map((group) => `${group.key}:${group.label}`).join(","),
     stream.map((message) => `${message.messageId}:${message.sequence}:${message.text.length}`).join(","),
   ].join("|");
 
@@ -399,6 +444,12 @@ export default function AiConversationSidebar({
       document.removeEventListener("keydown", closeOnEscape);
     };
   }, [openChoice]);
+
+  useEffect(() => {
+    if (!agentWorking && handoffStatus !== "cancelling") return undefined;
+    const timer = window.setInterval(() => setClockNow(Date.now()), 1_000);
+    return () => window.clearInterval(timer);
+  }, [agentWorking, handoffStatus, agentStartedAt, agentLastActivityAt]);
 
   useEffect(() => {
     if (runKey && runKey !== runKeyRef.current) {
@@ -473,44 +524,55 @@ export default function AiConversationSidebar({
             还没有修改记录。先在页面上写评论，再交给 AI 修改。
           </p>
         ) : (
-          stream.map((message) => {
+          stream.map((message, messageIndex) => {
             const timestamp = sidebarTimestampLabel(message.createdAt);
             const copyKey = `message:${message.messageId}`;
+            const historyBoundary = historyBoundaryByIndex.get(messageIndex);
             return (
-              <article
-                key={message.messageId}
-                className={styles.message}
-                data-actor={message.actor}
-                data-kind={message.kind}
-                data-status={message.status}
-                data-testid="ai-conversation-message"
-              >
-                {message.actor === "pageroot" ? (
-                  <PageRootAvatar />
-                ) : (
-                  <span className={styles.avatar} aria-hidden="true">
-                    {sidebarActorInitial(message.actor)}
-                  </span>
-                )}
-                <span className={styles.actor}>{message.actorLabel}</span>
-                <p className={styles.text}>{message.text}</p>
-                {timestamp || message.text ? (
-                  <div className={styles.messageMeta}>
-                    {timestamp ? <time dateTime={message.createdAt}>{timestamp}</time> : null}
-                    {message.text ? (
-                      <button type="button" onClick={() => copyMessage(copyKey, message.text)}>
-                        {copyFeedback?.key === copyKey ? copyFeedback.label : "复制"}
-                      </button>
-                    ) : null}
+              <Fragment key={`${message.messageId || "message"}:${messageIndex}`}>
+                {historyBoundary?.first ? (
+                  <div
+                    className={styles.historyGroup}
+                    data-kind={historyBoundary.kind}
+                    data-testid="ai-conversation-history-group"
+                  >
+                    {historyBoundary.label}
                   </div>
                 ) : null}
-                {message.truncated ? (
-                  <small className={styles.truncated}>部分内容已省略</small>
-                ) : null}
-                {message.status === "interrupted" ? (
-                  <small className={styles.interrupted}>这条回复没有完成</small>
-                ) : null}
-              </article>
+                <article
+                  className={styles.message}
+                  data-actor={message.actor}
+                  data-kind={message.kind}
+                  data-status={message.status}
+                  data-testid="ai-conversation-message"
+                >
+                  {message.actor === "pageroot" ? (
+                    <PageRootAvatar />
+                  ) : (
+                    <span className={styles.avatar} aria-hidden="true">
+                      {sidebarActorInitial(message.actor)}
+                    </span>
+                  )}
+                  <span className={styles.actor}>{message.actorLabel}</span>
+                  <p className={styles.text}>{message.text}</p>
+                  {timestamp || message.text ? (
+                    <div className={styles.messageMeta}>
+                      {timestamp ? <time dateTime={message.createdAt}>{timestamp}</time> : null}
+                      {message.text ? (
+                        <button type="button" onClick={() => copyMessage(copyKey, message.text)}>
+                          {copyFeedback?.key === copyKey ? copyFeedback.label : "复制"}
+                        </button>
+                      ) : null}
+                    </div>
+                  ) : null}
+                  {message.truncated ? (
+                    <small className={styles.truncated}>部分内容已省略</small>
+                  ) : null}
+                  {message.status === "interrupted" ? (
+                    <small className={styles.interrupted}>这条回复没有完成</small>
+                  ) : null}
+                </article>
+              </Fragment>
             );
           })
         )}
@@ -535,11 +597,11 @@ export default function AiConversationSidebar({
           * (ADR 0037 §4). The selected Agent's public words follow in their
           * own stable article, so the two speakers never blur together.
           */}
-        {runProgress?.liveLabel || runProgress?.headline ? (
+        {executionStatus || runProgress?.liveLabel || runProgress?.headline ? (
           <section
             className={`${styles.message} ${styles.runActivity}`}
             data-actor="pageroot"
-            data-tone={runProgress.tone}
+            data-tone={runProgress?.tone || "quiet"}
             data-testid="ai-conversation-run-progress"
             aria-label="本轮进度"
           >
@@ -556,8 +618,9 @@ export default function AiConversationSidebar({
               aria-live="polite"
               aria-atomic="true"
             >
-              {runProgress.liveLabel || runProgress.headline}
+              {executionStatus?.title || runProgress?.liveLabel || runProgress?.headline}
             </p>
+            {executionStatus ? <small className={styles.runSummaryDetail}>{executionStatus.detail}</small> : null}
           </section>
         ) : null}
 
@@ -656,6 +719,7 @@ export default function AiConversationSidebar({
                     className={styles.action}
                     data-tone={action.tone}
                     data-action-id={action.id}
+                    disabled={action.disabled === true}
                     onClick={() => onAction?.(action.id)}
                   >
                     {action.label}
@@ -699,7 +763,7 @@ export default function AiConversationSidebar({
         ) : null}
 
         <div className={styles.composerActions}>
-          <div className={styles.identityActions}>
+          {showComposerIdentity ? <div className={styles.identityActions}>
             <button
               type="button"
               className={styles.schemeTrigger}
@@ -816,7 +880,7 @@ export default function AiConversationSidebar({
                 </div>
               ) : null}
             </div>
-          </div>
+          </div> : null}
 
           {(state === "preview-ready" || state === "no-change") ? (
           <div className={styles.deliveryActions}>

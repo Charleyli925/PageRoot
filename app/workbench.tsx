@@ -86,7 +86,10 @@ import {
   INITIAL_QODER_AVAILABILITY,
 } from "./domain/qoder-availability.js";
 import { agentProviderCardsFromCatalog } from "./application/agent-provider-catalog.js";
-import { DEFAULT_OPENAI_COMPATIBLE_REASONING } from "../shared/openai-compatible-vendors.mjs";
+import {
+  DEFAULT_OPENAI_COMPATIBLE_REASONING,
+  openAiCompatibleVendorDisplayNameForPublicModel,
+} from "../shared/openai-compatible-vendors.mjs";
 import { createWorkspaceControllerCodecs } from "./application/workspace-controller-codecs.js";
 import { createBrowserFileTabIdentity } from "./application/browser-file-tab-identity.js";
 import { createDesktopRecoveryJournalPort } from "./workbench/desktop-recovery-journal-port";
@@ -712,6 +715,11 @@ export default function Workbench() {
     || agentPresentation.displayName
     || frozenAgentSelection?.providerId
     || null;
+  const executionDisplayName = frozenProvider?.connection?.vendorDisplayName
+    || openAiCompatibleVendorDisplayNameForPublicModel(
+      frozenAgentSelection?.resolvedModelId || frozenAgentSelection?.requestedModelId,
+    )
+    || agentDisplayName;
   const agentModels = Array.isArray(frozenProvider?.models)
     ? frozenProvider.models.map((model) => ({
       id: String(model.id),
@@ -790,6 +798,7 @@ export default function Workbench() {
     conversation: workspaceControllerSnapshot?.conversation ?? null,
     qoderAvailability,
     agentDisplayName,
+    executionDisplayName,
     agentActionName: agentPresentation.agentName || agentPresentation.displayName,
     agentSettingsName: agentPresentation.displayName || agentPresentation.agentName,
     agentSettingsSupported: agentPresentation.settingsSupported !== false,
@@ -4965,6 +4974,9 @@ export default function Workbench() {
   const installAgent = useCallback(async (selection?: AgentSelection | null) => (
     workspaceController?.installAgent(selection) ?? null
   ), [workspaceController]);
+  const cancelAgentInstall = useCallback(async (selection?: AgentSelection | null) => (
+    workspaceController?.cancelAgentInstall(selection) ?? null
+  ), [workspaceController]);
   const connectAgentApiKey = useCallback(async (
     selection: AgentSelection,
     apiKey: string,
@@ -5697,16 +5709,26 @@ export default function Workbench() {
   // Same authority the process view used, reached from the conversation so the
   // decision no longer requires a panel over the page.
   const handleAiDecision = useCallback((actionId: string) => {
-    if (actionId === "resend-agent") {
+    if (actionId === "resend-agent" || actionId === "retry-later") {
       if (activeRun) void workspaceControllerRef.current?.runs.commands.startAgent({ run: activeRun });
       return;
     }
-    if (["reconnect-agent", "change-agent-model", "change-agent-provider", "switch-agent"].includes(actionId)) {
-      workspaceControllerRef.current?.runs.commands.dismiss();
-      setHandoffPreviewOpen(false);
-      setCanvasMode("edit");
-      editorRef.current?.unlockNow?.();
-      openAgentSettings();
+    if ([
+      "reconnect-agent",
+      "reauthenticate-agent",
+      "change-agent-model",
+      "change-agent-provider",
+      "repair-agent-installation",
+      "switch-agent",
+    ].includes(actionId)) {
+      void (async () => {
+        if (activeRun && !(await cancelActiveRun())) return;
+        workspaceControllerRef.current?.runs.commands.dismiss();
+        setHandoffPreviewOpen(false);
+        setCanvasMode("edit");
+        editorRef.current?.unlockNow?.();
+        openAgentSettings();
+      })();
       return;
     }
     if (actionId === "copy-task") {
@@ -5717,6 +5739,10 @@ export default function Workbench() {
     if (actionId === "adopt") { void activateReadyResult(); return; }
     if (actionId === "adopt-ai" || actionId === "keep-external") {
       void resolveAiConflict(actionId);
+      return;
+    }
+    if (actionId === "dismiss" && activeRun?.status === "processing") {
+      requestActiveRunEnd();
       return;
     }
     if (actionId === "return-editing" || actionId === "dismiss") {
@@ -5744,6 +5770,7 @@ export default function Workbench() {
   }, [
     activateReadyResult,
     activeRun,
+    cancelActiveRun,
     openAgentSettings,
     requestActiveRunEnd,
     resolveAiConflict,
@@ -6368,6 +6395,7 @@ export default function Workbench() {
           onCheckUsability={checkAgentUsability}
           onCopyGuidance={copyAgentGuidance}
           onInstall={installAgent}
+          onCancelInstall={cancelAgentInstall}
           onConnectApiKey={connectAgentApiKey}
           onDisconnectApiKey={disconnectAgentApiKey}
           onSelectAgentModel={selectSettingsAgentModel}

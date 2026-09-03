@@ -606,6 +606,9 @@ export class WorkspaceController {
   installAgent(
     selection?: import("../domain/agent-provider-state.js").AgentSelection | null,
   ): Promise<RunWorkflowOutcome>;
+  cancelAgentInstall(
+    selection?: import("../domain/agent-provider-state.js").AgentSelection | null,
+  ): Promise<RunWorkflowOutcome>;
   refreshAgentAvailability(): Promise<RunWorkflowOutcome>;
   checkAgentUsability(
     selection?: import("../domain/agent-provider-state.js").AgentSelection,

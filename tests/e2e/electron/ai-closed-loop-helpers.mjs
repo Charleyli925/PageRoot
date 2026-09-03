@@ -295,6 +295,7 @@ export function createQoderAcpE2ECommand(directory, {
   pidFile = null,
   authRequired = false,
   capacityUnavailable = false,
+  runtimeFailure = false,
   visibleText = false,
   visibleTextGateMs = 0,
 } = {}) {
@@ -305,6 +306,7 @@ export function createQoderAcpE2ECommand(directory, {
     pidFile ? `--pid-file=${pidFile}` : null,
     authRequired ? "--auth-required" : null,
     capacityUnavailable ? "--capacity-unavailable" : null,
+    runtimeFailure ? "--runtime-failure" : null,
     visibleText ? "--visible-text" : null,
     visibleTextGateMs > 0 ? `--visible-text-gate-ms=${visibleTextGateMs}` : null,
   ].filter(Boolean).map(shellQuote).join(" ");

@@ -88,15 +88,22 @@ The renderer's main workspace facts are partitioned as follows:
   status, background outcomes, the one preparing/frozen/uncertain submission
   lock, and operation locks. ACP events remain bounded presentation facts and
   never become completion authority;
-- `RunWorkflow`: pre-Request Agent use-time check, Request freeze/persisted-boundary
+- `RunWorkflow`: ticketless Agent diagnosis for Settings, pre-Request Agent use-time check, Request freeze/persisted-boundary
   verification, final-saved-HTML text-locator preflight, safely fenced same-Request
   Agent start/retry, unknown-POST authority reconciliation, tracked-run polling,
   stop-before-durable-cancel ordering,
   conflict commands and confirmed clipboard fallback. It publishes through
   `RunSession` and never creates a second run store;
-- Bridge `AgentRuntimeCoordinator`: ephemeral provider/runtime/security-profile/
-  purpose-bound preflight tickets, both session lifetimes, persistent launch
-  fence, bounded canonical progress and cleanup. Legacy Services only delegate.
+- Bridge `AgentRuntimeCoordinator`: ticketless provider diagnosis, ephemeral
+  provider/runtime/security-profile/purpose-bound preflight tickets, both
+  session lifetimes, persistent launch fence, bounded canonical progress and
+  cleanup. `AgentDiagnosticSnapshot` and `PublicExecutionSession` are the only
+  renderer projections; commands, paths, stderr, hidden reasoning and partial
+  HTML remain private. Diagnostics expose only installation, authentication,
+  protocol and service facts; use-time evidence outranks weaker Settings
+  diagnosis. Execution failure projects `safeToRetry` separately from its
+  structured `recoveryKind`, so a technically clean balance/model/auth failure
+  cannot be presented as an unchanged resend. Legacy Services only delegate.
   It never owns or writes Request/Candidate/Version state; task authority is
   re-derived from the registered Repository/runtime record, and only the
   official finalizer plus Repository status path can publish a Candidate;
@@ -106,10 +113,17 @@ The renderer's main workspace facts are partitioned as follows:
   version, login/model preflight and raw-error normalization. The Codex ACP
   provider owns the same facts for `providerId: "codex"`; missing login is
   `session/new` JSON-RPC `-32000`, not advertised `authMethods`. The PageRoot
-  native provider owns vendor Token preflight and `/chat/completions` for
+  native provider owns read-only reachability diagnosis, vendor Token preflight
+  and streaming `/chat/completions` for
   `providerId: "pageroot"` / `runtimeId: "http"`. Unknown IDs fail
   closed; opaque installation facts, digests and capabilities stay inside the
   ticket;
+- Bridge Agent runtimes: HTTP SSE and ACP session updates share a sliding
+  activity watchdog. Valid content, reasoning, usage or heartbeat resets the
+  45-minute inactivity window; elapsed wall time alone never ends a turn.
+  Startup/login/preflight probes retain their short bounded timeouts. Runtime
+  silence is `AGENT_TURN_TIMEOUT`, never a preflight error, and incomplete
+  output cannot reach the finalizer;
 - Bridge Agent catalog/installer: `AgentCatalog` owns the product ACP
   allowlist, public provider projection and managed-command candidates.
   `AgentInstaller` owns in-flight install jobs, atomic verified layout under
@@ -118,6 +132,9 @@ The renderer's main workspace facts are partitioned as follows:
   the installable shipped ACP entries. `pageroot`/`http` is a non-installable
   shipped HTTP Agent (ADR 0069). The packaged application contains no
   private Codex runtime or native Codex package;
+  public catalog snapshots also hydrate Bridge-owned `installState`, including
+  an in-flight job whose original install HTTP request has not settled, so the
+  Renderer can issue exactly one cancellation without becoming a job owner;
 - Bridge Agent Host/Policy Ports: `bridge/agent/policies/` owns the execution
   policy and freezes all readable files, including comment-attachment bytes,
   output/completion paths,

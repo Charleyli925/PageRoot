@@ -65,12 +65,23 @@ is not installed it may also `POST /agent/install` for the catalog-pinned
 managed copy. It cannot provide a command, cwd, environment or filesystem path
 policy.
 
-`GET /agent/availability` is the separate disk-only status route used whenever
-delivery or About opens. It re-runs protected package discovery without
-executing Qoder, contacting the service, creating a Request or freezing the
-Canvas. Finder/Dock sparse-PATH discovery includes configured npm prefixes plus
-common nvm, Volta, fnm, mise and asdf roots, but every candidate still passes
-the same package identity checks.
+`GET /agent/diagnose` is the Settings status route. It resolves and verifies
+the selected installation, then returns four bounded facts: installation,
+authentication, protocol and service. Built-in HTTP vendors may use `/models`;
+a Custom OpenAI-compatible endpoint validates only its saved configuration and
+does not require a catalog route. Qoder uses version/model-list checks and
+Codex verifies login plus ACP `initialize` without opening a task session. The
+route creates no preflight ticket or ACP session and cannot change the selected
+model. A diagnosis is selection-keyed single-flight, and a weak Settings result
+cannot erase a stronger failure learned during preflight or execution.
+`GET /agent/availability` remains the disk-only compatibility route. Codex
+collects all candidates before applying explicit-test, managed, then
+user-global priority, so a broken lower-priority global shim cannot mask a
+valid managed installation.
+
+Before execution, the one-use ticket revalidates both the Codex ACP adapter and
+its pinned native executable identity; a changed or incomplete closure fails
+closed without spawning the Agent.
 
 Discussion is retired. The renderer and Bridge expose no discussion start,
 status or cancel route; only execution-purpose tickets are accepted. Historical
@@ -90,6 +101,23 @@ Bridge has confirmed its process group stopped and no output/completion remains.
 A crash lease, unknown cleanup or residue requires cancelling the old Request as
 an authority fence and submitting a new one. Candidate completion remains owned
 by the official finalizer plus Repository polling.
+
+HTTP execution requests SSE with `stream: true`; incremental document bytes
+stay inside Bridge and are written only after `[DONE]`, complete-HTML validation
+and the ordinary authority recheck. HTTP and ACP execution use a 45-minute
+sliding inactivity watchdog. Valid content, reasoning, usage or heartbeat
+resets it, while startup/login/preflight retain short timeouts. Runtime silence
+is `AGENT_TURN_TIMEOUT`; disconnect, cancellation and timeout never finalize a
+partial Candidate.
+
+`PublicExecutionSession` keeps retry safety separate from recovery guidance.
+`safeToRetry` says whether the same frozen Request is technically safe to run
+again; `recoveryKind` says what the user must do (`retry`, `wait`,
+`reauthenticate`, `change-model`, `change-provider`, `repair-installation` or
+`end`). Renderer actions are derived from that structured pair, never from
+provider prose. Managed-install progress is likewise hydrated from the
+Bridge-owned `installState`, so cancellation remains available while the
+original install request is pending.
 
 The purpose-bound one-use ticket stores provider/runtime IDs, a frozen security
 profile, an opaque installation digest

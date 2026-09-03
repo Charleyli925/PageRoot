@@ -11,12 +11,21 @@ if (pidFileArgument) {
 }
 const hang = process.argv.includes("--hang");
 const authRequired = process.argv.includes("--auth-required");
+if (process.argv.includes("login") && process.argv.includes("status")) {
+  if (authRequired) {
+    process.stderr.write("Not logged in. Login required.\n");
+    process.exit(1);
+  }
+  process.stdout.write("Logged in\n");
+  process.exit(0);
+}
 const visibleText = process.argv.includes("--visible-text");
 const visibleTextGateArgument = process.argv.find((argument) => argument.startsWith("--visible-text-gate-ms="));
 const visibleTextGateMs = Math.max(
   0,
   Math.min(5_000, Number.parseInt(visibleTextGateArgument?.slice("--visible-text-gate-ms=".length) || "0", 10) || 0),
 );
+const sessionMarkerArgument = process.argv.find((argument) => argument.startsWith("--session-marker="));
 
 const sessionId = "session_pageroot_e2e_codex";
 let requestRoot = "";
@@ -51,6 +60,9 @@ const app = acp.agent({ name: "pageroot-e2e-codex" })
     },
   }))
   .onRequest(acp.methods.agent.session.new, ({ params }) => {
+    if (sessionMarkerArgument) {
+      writeFileSync(sessionMarkerArgument.slice("--session-marker=".length), "session.new\n", "utf8");
+    }
     if (authRequired) {
       throw acp.RequestError.authRequired(undefined, "Not logged in. Login required.");
     }

@@ -70,7 +70,7 @@ test("Qoder ACP Agent Bridge streams public execution text without clipboard or 
     // Availability checks now belong to Settings. Return to the conversation
     // only after the selected Agent has a fresh readiness result.
     const qoderSettingsCard = await openQoderAvailability(launched.page);
-    await expect(qoderSettingsCard.getByText("已连接", { exact: true }))
+    await expect(qoderSettingsCard.getByText("Qoder CLI · 已连接", { exact: true }))
       .toBeVisible({ timeout: 60_000 });
     await closeQoderAvailability(launched.page);
     // Destination and the local-Agent action live in one compact Composer row.
@@ -222,7 +222,7 @@ test("Codex ACP shares the public execution stream and retains its frozen identi
     const settingsPage = launched.page.locator(".workbench-settings-page");
     await settingsPage.getByTestId("settings-agent-scheme").selectOption({ label: "Codex" });
     await expect(settingsPage.locator(".codex-availability-card")
-      .getByText("已连接", { exact: true }))
+      .getByText("Codex · 已连接", { exact: true }))
       .toBeVisible({ timeout: 60_000 });
     await expect(settingsPage.locator(".qoder-availability-card")).toHaveCount(0);
     await launched.page.screenshot({
@@ -247,11 +247,9 @@ test("Codex ACP shares the public execution stream and retains its frozen identi
     await expect(narration.locator("img")).toHaveCount(0);
     await expect(narration).not.toContainText("这段推理不能进入 Stemmio 侧栏。");
 
-    // Switching the idle scheme cannot rename or redirect the Request already running.
-    await sidebar.getByTestId("ai-conversation-agent").click();
-    await expect(launched.page.locator(".workbench-settings-page")).toBeVisible();
-    await launched.page.getByTestId("settings-agent-scheme").selectOption({ label: "Qoder" });
-    await launched.page.getByRole("button", { name: "返回工作台" }).click();
+    // A frozen running round exposes no Agent switch control. Its identity
+    // remains Codex until this execution completes.
+    await expect(sidebar.getByTestId("ai-conversation-agent")).toHaveCount(0);
     await expect(narration).toContainText("Codex");
     await expect(narration).toContainText(
       "先读取冻结任务。再写入 Candidate。最后等待校验。",
@@ -319,9 +317,8 @@ test("源页 Agent settings stays a Token card and does not block switching back
     const settingsPage = launched.page.locator(".workbench-settings-page");
     await settingsPage.getByTestId("settings-agent-scheme").selectOption({ label: "源页" });
     const pagerootCard = settingsPage.locator(".pageroot-availability-card");
-    await expect(pagerootCard.getByText("需要 Token", { exact: true }))
+    await expect(pagerootCard.getByText("源页 Agent · 未登录", { exact: true }))
       .toBeVisible({ timeout: 20_000 });
-    await expect(pagerootCard.getByText("填入 Token 后发送")).toBeVisible();
     await expect(pagerootCard.getByTestId("settings-agent-vendor")).toBeVisible();
     await expect(pagerootCard.getByLabel("API Token")).toBeVisible();
     await expect(settingsPage.getByText("只接通当前选中的 Agent。")).toHaveCount(0);
@@ -329,7 +326,7 @@ test("源页 Agent settings stays a Token card and does not block switching back
     await expect(settingsPage.locator(".qoder-availability-card")).toHaveCount(0);
     await settingsPage.getByTestId("settings-agent-scheme").selectOption({ label: "Qoder" });
     await expect(settingsPage.locator(".qoder-availability-card")
-      .getByText("已连接", { exact: true }))
+      .getByText("Qoder CLI · 已连接", { exact: true }))
       .toBeVisible({ timeout: 60_000 });
     await launched.page.getByRole("button", { name: "返回工作台" }).click();
     await expect(launched.page.getByTestId("ai-conversation-agent"))
@@ -349,6 +346,7 @@ test("源页 Agent connects to one verified fixed model and reviews a Candidate"
   const qoderCommand = createQoderAcpE2ECommand(fixture.sourceDirectory);
   const httpAgent = await startPagerootHttpAgent({
     rejectedApiKeys: ["sk-e2e-invalid-replacement"],
+    streamDelayMs: 150,
   });
   const launched = await launchPageRoot({
     activeSourcePath: fixture.sourcePath,
@@ -368,13 +366,12 @@ test("源页 Agent connects to one verified fixed model and reviews a Candidate"
     const settingsPage = await openAgentSettingsPage(launched.page);
     await settingsPage.getByTestId("settings-agent-scheme").selectOption({ label: "源页" });
     const pagerootCard = settingsPage.locator(".pageroot-availability-card");
-    await expect(pagerootCard.getByText("需要 Token", { exact: true }))
+    await expect(pagerootCard.getByText("源页 Agent · 未登录", { exact: true }))
       .toBeVisible({ timeout: 20_000 });
     await pagerootCard.getByLabel("API Token").fill("sk-e2e-pageroot");
     await pagerootCard.getByRole("button", { name: "连接", exact: true }).click();
-    await expect(pagerootCard.getByText("已连接", { exact: true }))
+    await expect(pagerootCard.getByText("源页 Agent · 已连接", { exact: true }))
       .toBeVisible({ timeout: 30_000 });
-    await expect(pagerootCard.getByText("可从侧栏发送")).toBeVisible();
     await expect(pagerootCard.getByTestId("settings-agent-current-connection"))
       .toContainText("DeepSeek");
     await expect(pagerootCard.getByText("Token 仅在本次打开期间保留。"))
@@ -385,7 +382,7 @@ test("源页 Agent connects to one verified fixed model and reviews a Candidate"
     await pagerootCard.getByRole("button", { name: "连接", exact: true }).click();
     await expect(pagerootCard.getByText(/Token 无效|Token 没有接通/u))
       .toBeVisible({ timeout: 20_000 });
-    await expect(pagerootCard.getByText("已连接", { exact: true })).toBeVisible();
+    await expect(pagerootCard.getByText("源页 Agent · 已连接", { exact: true })).toBeVisible();
     await expect(pagerootCard.getByTestId("settings-agent-current-connection"))
       .toContainText("DeepSeek");
     await launched.page.screenshot({
@@ -410,6 +407,13 @@ test("源页 Agent connects to one verified fixed model and reviews a Candidate"
     await expect(sidebar.getByRole("button", { name: /交给 源页 修改/u }))
       .toBeEnabled();
     await sidebar.getByRole("button", { name: /交给 源页 修改/u }).click();
+    const streamingProgress = launched.page.getByTestId("ai-conversation-run-progress");
+    await expect(streamingProgress).toContainText("DeepSeek 正在生成", { timeout: 30_000 });
+    await expect.poll(() => streamingProgress.textContent()).toMatch(
+      /已等待 \d{2}:\d{2} · 已接收 [1-9]\d* KB/u,
+    );
+    await expect(streamingProgress).not.toContainText("fixture-hidden");
+    await expect(launched.page.locator(".toast.show")).toHaveCount(0);
     await expect(launched.page.getByTestId("ai-conversation-action-bar"))
       .toContainText("等待你的决定", { timeout: 60_000 });
     const readyGeometry = await launched.page.evaluate(() => {
@@ -478,6 +482,56 @@ test("源页 Agent connects to one verified fixed model and reviews a Candidate"
   }
 });
 
+test("源页运行时余额失败 offers only provider recovery without a false resend", {
+  tag: ["@smoke-provider"],
+}, async () => {
+  test.setTimeout(180_000);
+  const fixture = createSourceFixture("pageroot-http-runtime-balance.html");
+  const httpAgent = await startPagerootHttpAgent({ mode: "runtime-balance" });
+  const launched = await launchPageRoot({
+    activeSourcePath: fixture.sourcePath,
+    injectedEnv: pagerootHttpAgentEnv(httpAgent.baseUrl),
+  });
+  try {
+    await addComment(
+      launched.page,
+      fixture.sourcePath,
+      "余额失败时保留源页并提供真实可恢复操作。",
+    );
+    await launched.page.getByRole("button", { name: /AI 助手/u }).click();
+    const settingsPage = await openAgentSettingsPage(launched.page);
+    await settingsPage.getByTestId("settings-agent-scheme").selectOption({ label: "源页" });
+    const pagerootCard = settingsPage.locator(".pageroot-availability-card");
+    await pagerootCard.getByLabel("API Token").fill("sk-e2e-balance");
+    await pagerootCard.getByRole("button", { name: "连接", exact: true }).click();
+    await expect(pagerootCard.getByText("源页 Agent · 已连接", { exact: true }))
+      .toBeVisible({ timeout: 30_000 });
+    await launched.page.getByRole("button", { name: "返回工作台" }).click();
+    const sidebar = await chooseModifyIntent(launched.page);
+    await sidebar.getByRole("button", { name: /交给 源页 修改/u }).click();
+
+    const actionBar = launched.page.getByTestId("ai-conversation-action-bar");
+    await expect(actionBar).toContainText("生成失败", { timeout: 60_000 });
+    await expect(actionBar).toContainText("页面未修改");
+    await expect(actionBar.getByRole("button")).toHaveCount(2);
+    await expect(actionBar.getByRole("button", { name: "切换 Agent" })).toBeVisible();
+    await expect(actionBar.getByRole("button", { name: "复制任务" })).toBeVisible();
+    await expect(actionBar.getByRole("button", { name: "重新发送" })).toHaveCount(0);
+    await expect(launched.page.locator(".toast.show")).toHaveCount(0);
+    expect(readFileSync(fixture.sourcePath)).toEqual(fixture.original);
+    const projectRoot = managedProjectRoots(launched.workspace)[0];
+    const projectId = JSON.parse(readFileSync(
+      path.join(projectRoot, ".pageroot", "project.json"),
+      "utf8",
+    )).projectId;
+    expect(candidateHtmlFiles(launched.workspace, projectId)).toHaveLength(0);
+  } finally {
+    await stopPageRoot(launched.electronApp, launched.isolatedUserData);
+    removeSourceFixture(fixture.sourceDirectory);
+    await httpAgent.close();
+  }
+});
+
 test("源页 Agent keeps the Token card and next step when the Token is rejected", {
   tag: ["@smoke-provider"],
 }, async () => {
@@ -507,7 +561,7 @@ test("源页 Agent keeps the Token card and next step when the Token is rejected
     await pagerootCard.getByRole("button", { name: "连接", exact: true }).click();
     await expect(pagerootCard.getByText(/Token 无效|Token 没有接通/u))
       .toBeVisible({ timeout: 20_000 });
-    await expect(pagerootCard.getByText("需要 Token", { exact: true })).toBeVisible();
+    await expect(pagerootCard.getByText("源页 Agent · 未登录", { exact: true })).toBeVisible();
     await launched.page.getByRole("button", { name: "返回工作台" }).click();
     const sidebar = launched.page.getByTestId("ai-conversation-sidebar");
     await expect(sidebar.getByRole("button", { name: "连接 源页 Agent" }))
@@ -535,9 +589,13 @@ test("Qoder settings entry opens Settings without restoring a Discussion compose
   });
   try {
     let requestPosts = 0;
+    let preflightPosts = 0;
+    let diagnoseGets = 0;
     launched.page.on("request", (request) => {
       const url = new URL(request.url());
       if (request.method() === "POST" && url.pathname === "/request") requestPosts += 1;
+      if (request.method() === "POST" && url.pathname === "/agent/preflight") preflightPosts += 1;
+      if (request.method() === "GET" && url.pathname === "/agent/diagnose") diagnoseGets += 1;
     });
     await addComment(
       launched.page,
@@ -561,16 +619,24 @@ test("Qoder settings entry opens Settings without restoring a Discussion compose
     await expect(settings).toBeVisible();
     await expect(settings.getByRole("heading", { name: "AI Agent" })).toBeVisible();
     await expect(settings.getByText("Qoder CLI", { exact: true })).toBeVisible();
-    await expect(settings.getByText("需要登录", { exact: true })).toBeVisible({ timeout: 30_000 });
+    await expect(settings.getByText("Qoder CLI · 未登录", { exact: true })).toBeVisible({ timeout: 30_000 });
     await expect(settings.getByRole("button", { name: "复制登录指令" }))
       .toBeVisible();
+    await expect.poll(() => diagnoseGets).toBeGreaterThan(0);
+    expect(preflightPosts).toBe(0);
     await settings.screenshot({
       path: path.join(QODER_VISUAL_OUTPUT, "real-settings-login.png"),
       animations: "disabled",
     });
     expect(requestPosts).toBe(0);
+    await launched.page.evaluate(() => {
+      window.dispatchEvent(new Event("focus"));
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    await launched.page.waitForTimeout(100);
+    expect(preflightPosts).toBe(0);
     await settings.getByRole("button", { name: "复制登录指令" }).click();
-    await expect(settings.getByText("等待登录", { exact: true })).toBeVisible();
+    await expect(settings.getByText("Qoder CLI · 未登录", { exact: true })).toBeVisible();
     await expect(settings.getByRole("button", { name: "重新复制" })).toBeVisible();
     await settings.screenshot({
       path: path.join(QODER_VISUAL_OUTPUT, "real-settings-waiting-login.png"),
@@ -583,7 +649,7 @@ test("Qoder settings entry opens Settings without restoring a Discussion compose
     await closeQoderAvailability(launched.page);
     await expect(sidebar.getByTestId("ai-conversation-input")).toHaveCount(0);
     const reopenedSettingsCard = await openQoderAvailability(launched.page);
-    await expect(reopenedSettingsCard.getByText("等待登录", { exact: true })).toBeVisible();
+    await expect(reopenedSettingsCard.getByText("Qoder CLI · 未登录", { exact: true })).toBeVisible();
     expect(requestPosts).toBe(0);
     expect(readFileSync(fixture.sourcePath).equals(fixture.original)).toBe(true);
   } finally {
@@ -617,16 +683,13 @@ test("Qoder installed while PageRoot is open refreshes in place and continues on
     await launched.page.getByRole("button", { name: /AI 助手/u }).click();
     const deliveryDialog = await openQoderAvailability(launched.page);
     const qoderCard = deliveryDialog;
-    await expect(qoderCard.getByText("未安装", { exact: true })).toBeVisible();
+    await expect(qoderCard.getByText("Qoder CLI · 未安装", { exact: true })).toBeVisible();
     await expect(qoderCard.getByRole("button", { name: "安装 Qoder CLI" })).toBeVisible();
     expect(requestPosts).toBe(0);
 
     createQoderAcpE2ECommand(fixture.sourceDirectory);
-    await launched.page.evaluate(() => {
-      window.dispatchEvent(new Event("focus"));
-      document.dispatchEvent(new Event("visibilitychange"));
-    });
-    await expect(qoderCard.getByText("已连接", { exact: true })).toBeVisible();
+    await launched.page.getByRole("button", { name: "重新检查" }).click();
+    await expect(qoderCard.getByText("Qoder CLI · 已连接", { exact: true })).toBeVisible();
     // The Settings card only observes availability; continuing the round is the
     // conversation's own send action.
     expect(requestPosts).toBe(0);
@@ -635,6 +698,61 @@ test("Qoder installed while PageRoot is open refreshes in place and continues on
     await chooseModifyIntent(launched.page);
     await launched.page.getByRole("button", { name: "交给 Qoder 修改" }).click();
     await expect.poll(() => requestPosts).toBe(1);
+  } finally {
+    await stopPageRoot(launched.electronApp, launched.isolatedUserData);
+    removeSourceFixture(fixture.sourceDirectory);
+  }
+});
+
+test("Qoder managed install can be cancelled while the install request is pending", {
+  tag: ["@smoke-provider"],
+}, async () => {
+  test.setTimeout(120_000);
+  const fixture = createSourceFixture("qoder-cancel-managed-install.html");
+  const launched = await launchPageRoot({
+    activeSourcePath: fixture.sourcePath,
+    injectedEnv: {
+      PAGEROOT_AGENT_INSTALL_STUB_FETCH: "pending",
+      PAGEROOT_QODER_ACP_ALLOW_TEST_COMMAND: "1",
+      PAGEROOT_QODER_ACP_COMMAND: path.join(fixture.sourceDirectory, "missing-qoder-acp"),
+    },
+  });
+  try {
+    let installPosts = 0;
+    let cancelPosts = 0;
+    let requestPosts = 0;
+    launched.page.on("request", (request) => {
+      const url = new URL(request.url());
+      if (request.method() !== "POST") return;
+      if (url.pathname === "/agent/install") installPosts += 1;
+      if (url.pathname === "/agent/install/cancel") cancelPosts += 1;
+      if (url.pathname === "/request") requestPosts += 1;
+    });
+
+    const qoderCard = await openQoderAvailability(launched.page);
+    await expect(qoderCard.getByText("Qoder CLI · 未安装", { exact: true }))
+      .toBeVisible({ timeout: 30_000 });
+    await qoderCard.getByRole("button", { name: "安装 Qoder CLI" }).click();
+
+    await expect(qoderCard.getByText("正在安装…", { exact: true })).toBeVisible();
+    const cancelButton = qoderCard.getByRole("button", { name: "取消", exact: true });
+    await expect(cancelButton).toBeVisible();
+    await expect(cancelButton).toBeEnabled();
+    await expect.poll(() => installPosts).toBe(1);
+
+    await cancelButton.click();
+    await expect.poll(() => cancelPosts).toBe(1);
+    await expect(qoderCard.getByText("Qoder CLI · 未安装", { exact: true }))
+      .toBeVisible({ timeout: 30_000 });
+    await expect(qoderCard.getByRole("button", { name: "安装 Qoder CLI" })).toBeEnabled();
+    expect(requestPosts).toBe(0);
+    expect(readFileSync(fixture.sourcePath)).toEqual(fixture.original);
+    const projectRoot = managedProjectRoots(launched.workspace)[0];
+    const projectId = JSON.parse(readFileSync(
+      path.join(projectRoot, ".pageroot", "project.json"),
+      "utf8",
+    )).projectId;
+    expect(candidateHtmlFiles(launched.workspace, projectId)).toHaveLength(0);
   } finally {
     await stopPageRoot(launched.electronApp, launched.isolatedUserData);
     removeSourceFixture(fixture.sourceDirectory);
@@ -669,13 +787,13 @@ test("Qoder unstructured capacity wording stays generic with retry and no Reques
     );
     await launched.page.getByRole("button", { name: /AI 助手/u }).click();
     const settingsSection = await openQoderAvailability(launched.page);
-    await expect(settingsSection.getByText("暂不可用 · 连接没有完成", { exact: true }))
+    await expect(settingsSection.getByText("连接失败", { exact: true }))
       .toBeVisible();
     await expect(launched.page.getByTestId("settings-agent-scheme")).toBeVisible();
     await expect(settingsSection.getByRole("button", { name: "重试", exact: true })).toBeVisible();
     expect(requestPosts).toBe(0);
     await launched.page.evaluate(() => window.dispatchEvent(new Event("focus")));
-    await expect(settingsSection.getByText("暂不可用 · 连接没有完成", { exact: true }))
+    await expect(settingsSection.getByText("连接失败", { exact: true }))
       .toBeVisible();
     expect(requestPosts).toBe(0);
     expect(readFileSync(fixture.sourcePath).equals(fixture.original)).toBe(true);
@@ -721,7 +839,7 @@ test("Qoder ACP polling waits for start and a managed stop kills the Agent", {
     // The round is started from the conversation itself; the Settings card only
     // observes availability and never launches the Agent.
     const qoderSettingsCard = await openQoderAvailability(launched.page);
-    await expect(qoderSettingsCard.getByText("已连接", { exact: true }))
+    await expect(qoderSettingsCard.getByText("Qoder CLI · 已连接", { exact: true }))
       .toBeVisible({ timeout: 60_000 });
     await closeQoderAvailability(launched.page);
     await chooseModifyIntent(launched.page);
@@ -742,6 +860,10 @@ test("Qoder ACP polling waits for start and a managed stop kills the Agent", {
     ).toBe(0);
 
     await stopButton.click();
+    const endingButton = launched.page.getByRole("button", { name: "正在结束…" });
+    await expect(endingButton).toBeVisible();
+    await expect(endingButton).toBeDisabled();
+    await expect(launched.page.locator(".toast.show")).toHaveCount(0);
     await expect(launched.page.locator('aside[aria-label="本轮评论"]')
       .getByRole("button", { name: "全局评论", exact: true }))
       .toBeEnabled({ timeout: 45_000 });

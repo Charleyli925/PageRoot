@@ -18,6 +18,42 @@ function sendJson(response, status, payload) {
   response.end(body);
 }
 
+function wait(milliseconds) {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+async function sendSse(response, content, delayMs) {
+  response.writeHead(200, {
+    "Content-Type": "text/event-stream; charset=utf-8",
+    "Cache-Control": "no-cache",
+    Connection: "keep-alive",
+  });
+  const midpoint = Math.max(1, Math.floor(content.length / 2));
+  const frames = [
+    ": fixture-heartbeat\n\n",
+    `data: ${JSON.stringify({ choices: [{ delta: { reasoning_content: "fixture-hidden" } }] })}\n\n`,
+    `data: ${JSON.stringify({ choices: [{ delta: { content: content.slice(0, midpoint) } }] })}\n\n`,
+    `data: ${JSON.stringify({ usage: { completion_tokens: 1 } })}\n\n`,
+    `data: ${JSON.stringify({ choices: [{ delta: { content: content.slice(midpoint) } }] })}\n\n`,
+    "data: [DONE]\n\n",
+  ];
+  for (const frame of frames) {
+    if (response.destroyed || response.writableEnded) return;
+    response.write(frame);
+    if (delayMs > 0) await wait(delayMs);
+  }
+  response.end();
+}
+
+function sendSseError(response, error) {
+  response.writeHead(200, {
+    "Content-Type": "text/event-stream; charset=utf-8",
+    "Cache-Control": "no-cache",
+    Connection: "keep-alive",
+  });
+  response.end(`event: error\ndata: ${JSON.stringify({ error })}\n\n`);
+}
+
 function extractFrozenHtml(messages) {
   const user = (Array.isArray(messages) ? messages : [])
     .find((message) => message?.role === "user");
@@ -55,6 +91,7 @@ export function startOpenAiCompatibleHttpAgent({
   mode = "ready",
   host = "127.0.0.1",
   rejectedApiKeys = [],
+  streamDelayMs = 25,
 } = {}) {
   const rejected = new Set(rejectedApiKeys.map((value) => String(value)));
   return new Promise((resolve, reject) => {
@@ -75,6 +112,10 @@ export function startOpenAiCompatibleHttpAgent({
           sendJson(response, 429, { error: { message: "quota exceeded" } });
           return;
         }
+        if (request.method === "GET" && url.pathname.endsWith("/models")) {
+          sendJson(response, 200, { data: [{ id: "fixture-model" }] });
+          return;
+        }
         if (request.method === "POST" && url.pathname.endsWith("/chat/completions")) {
           const raw = await collectBody(request);
           let payload = {};
@@ -83,22 +124,31 @@ export function startOpenAiCompatibleHttpAgent({
           } catch {
             payload = {};
           }
-          if (mode === "invalid-html") {
-            sendJson(response, 200, {
-              choices: [{ message: { content: "I updated the title." } }],
+          const isPreflight = raw.includes("PageRoot preflight")
+            || payload.max_tokens === 256
+            || payload.max_completion_tokens === 256;
+          if (mode === "runtime-balance" && !isPreflight) {
+            sendSseError(response, {
+              code: "insufficient_balance",
+              message: "fixture provider balance exhausted",
             });
             return;
           }
-          sendJson(response, 200, {
-            choices: [{
-              message: {
-                content: mutateOpenAiCompatibleCandidateHtml(
-                  extractFrozenHtml(payload.messages),
-                  appliedReasoning(payload),
-                ),
-              },
-            }],
-          });
+          if (mode === "invalid-html") {
+            await sendSse(response, "I updated the title.", streamDelayMs);
+            return;
+          }
+          const candidate = mutateOpenAiCompatibleCandidateHtml(
+            extractFrozenHtml(payload.messages),
+            appliedReasoning(payload),
+          );
+          if (payload.stream === true) {
+            await sendSse(response, candidate, streamDelayMs);
+          } else {
+            sendJson(response, 200, {
+              choices: [{ message: { content: candidate } }],
+            });
+          }
           return;
         }
         sendJson(response, 404, { error: { message: "not found" } });

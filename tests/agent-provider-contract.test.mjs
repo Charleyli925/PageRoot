@@ -161,6 +161,22 @@ test("selection-first dispatch supports a provider with no legacy driver", async
   assert.ok(fixture.calls.includes("runtime:run"));
 });
 
+test("diagnosis invokes the provider's real read-only probe without preflight or a ticket", async () => {
+  const { fixture, registry } = fixtureRegistry();
+  const result = await registry.diagnoseForSelection(providerSelection(), {
+    environment: {},
+    checkedAt: "2026-09-03T00:00:00.000Z",
+  });
+  assert.equal(result.status, "ready");
+  assert.equal(result.diagnostic.readiness, "ready");
+  assert.equal(result.diagnostic.activeInstallation, null);
+  assert.deepEqual(fixture.calls, [
+    "provider:resolve-installation",
+    "provider:diagnose",
+  ]);
+  assert.equal("preflightId" in result, false);
+});
+
 test("providers cannot advertise a removed Discussion capability", () => {
   assert.throws(
     () => createSyntheticQoderProviderFixture({
@@ -268,6 +284,8 @@ test("security profiles are frozen across provider, ticket, and runtime launch",
 test("provider boundary normalizes ACP raw failures before coordinator ownership", async () => {
   const mappings = {
     ACP_CANCELLED: "AGENT_CANCELLED",
+    ACP_TIMEOUT: "AGENT_TURN_TIMEOUT",
+    ACP_TURN_TIMEOUT: "AGENT_TURN_TIMEOUT",
     ACP_OUTPUT_PREEXISTS: "AGENT_OUTPUT_PREEXISTS",
     ACP_COMPLETION_PREEXISTS: "AGENT_COMPLETION_PREEXISTS",
     ACP_PROCESS_CLEANUP_UNCONFIRMED: "AGENT_PROCESS_CLEANUP_UNCONFIRMED",

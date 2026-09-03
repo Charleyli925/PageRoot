@@ -32,10 +32,13 @@ contains no private Codex runtime or native Codex package; Codex is resolved
 through the managed ACP catalog. Renderer
 `AgentCatalogState` owns provider-keyed availability, the canonical selected
 selection and selection-keyed preflight cache. `RunWorkflow` exposes the same
-projection to the delivery surface and Settings. The
-Qoder provider owns the disk-only standalone-package check and the complete
-use-time version/login/model preflight; the provider-neutral Bridge does not
-know installation paths or version rules. The ACP runtime then starts
+projection to the delivery surface and Settings. Settings calls the separate
+side-effect-free `diagnose` route: providers may verify installation, login or
+bounded protocol/service facts, but diagnosis never creates a ticket or Agent
+session and never resolves a different model. Its four public dimensions are
+installation, authentication, protocol and service; weaker Settings evidence
+cannot overwrite a stronger preflight/use failure. Only the send path performs the complete
+use-time preflight and freezes its one-use ticket. The ACP runtime then starts
 only a Request whose durable `agentDelivery` record authorizes the trusted-local
 policy. ACP progress is presentation evidence only: only the official finalizer
 plus Repository validation can create a pending-review Candidate, and only an
@@ -279,14 +282,15 @@ services.
 | Renderer draft revision, pending operations and reconciliation | `app/application/draft-session.js` |
 | Renderer comment working copy, composer and saved-comment edit projection | `app/application/comment-session.js` |
 | Active/background runs, Agent delivery projection, background outcomes, submission lifecycle locks and operation locks | `app/application/run-session.js` |
-| Renderer Agent catalog, provider-keyed availability/guidance, bounded public model catalog, selection-keyed use-time check and submission sequencing | `app/application/agent-provider-catalog.js`, `app/domain/agent-provider-state.js` and `app/application/run-workflow.js`; `qoder-availability.js` and `QoderAvailabilityCard.tsx` are compatibility wrappers only. Settings chooses and connects one Agent; the conversation sidebar consumes the selected Agent plus its model catalog. Neither card receives command, version, path, npm prefix or Token bytes |
+| Renderer Agent catalog, provider-keyed diagnostic projection, selected provider/runtime/model/reasoning, bounded public model catalog, selection-keyed use-time preflight and submission sequencing | `app/application/agent-provider-catalog.js`, `app/domain/agent-provider-state.js` and `app/application/run-workflow.js`; `qoder-availability.js` and `QoderAvailabilityCard.tsx` are compatibility wrappers only. Settings consumes `AgentDiagnosticSnapshot` and never creates an execution ticket. Neither card receives command, version, path, npm prefix or Token bytes |
 | Product ACP allowlist, managed-install inventory, in-flight install jobs and install drain | `bridge/agent/catalog/agent-catalog.mjs` and `bridge/agent/catalog/agent-installer.mjs`; Coordinator does not own install. Qoder and Codex ACP are the installable shipped ACP entries. 源页 Agent is not installable |
 | Provider-neutral dispatch, provider/runtime/security-profile/execution-purpose tickets, process/session lifetime, canonical events, cancellation-before-durable-Request and shutdown drain | `bridge/agent/agent-runtime-coordinator.mjs` plus provider/runtime registries; legacy Services are stateless façades and durable Request/Candidate authority remains in `ProjectFileRepository` |
-| Trusted-local Qoder installation discovery, package/version/login/model preflight, error classification and ACP launch descriptor | `bridge/agent/providers/qoder-provider.mjs`; user CLI discovery still wins over a PageRoot-managed copy; an invalid user installation is not treated as missing. Legacy `qoder-acp` is mapped only by the provider registry and its external projection remains compatible |
-| Codex ACP installation discovery, pinned adapter+native closure, ACP initialize/session probe and client-mediated launch | `bridge/agent/providers/codex-acp-provider.mjs`; reuses the shared `acp` runtime; missing login is `session/new` JSON-RPC `-32000`, not advertised `authMethods`; resolves only a user or PageRoot-managed installation outside the packaged application |
-| PageRoot native OpenAI-compatible HTTP Agent, vendor Token preflight and model catalog | `bridge/agent/providers/openai-compatible-provider.mjs` plus `shared/openai-compatible-vendors.mjs`; session Token stays in Coordinator memory; Anthropic is not registered |
+| Trusted-local Qoder installation discovery, read-only diagnosis, package/version/login/model preflight, error classification and ACP launch descriptor | `bridge/agent/providers/qoder-provider.mjs`; diagnosis uses only version/model-list commands and does not open ACP. Legacy `qoder-acp` is mapped only by the provider registry and its external projection remains compatible |
+| Codex ACP installation discovery, pinned adapter+native closure, read-only login diagnosis, ACP initialize/session preflight and client-mediated launch | `bridge/agent/providers/codex-acp-provider.mjs`; candidates are collected before selecting explicit test configuration, PageRoot-managed installation, then user-global installation. A broken lower-priority candidate is diagnostic only when a valid higher-priority candidate exists. Start-time verification rechecks both the adapter and native executable identities against the ticket |
+| PageRoot native OpenAI-compatible HTTP Agent, bounded diagnosis, vendor Token preflight and model catalog | `bridge/agent/providers/openai-compatible-provider.mjs` plus `shared/openai-compatible-vendors.mjs`; built-in vendors may diagnose through `/models`, while Custom validates saved configuration without assuming that route. Session Token stays in Coordinator memory; Anthropic is not registered |
 | Provider-neutral ACP protocol, process supervisor and immutable standard event envelope | `bridge/agent/runtimes/acp-runtime.mjs`, `acp-protocol.mjs`, `acp-process.mjs` and `acp-verified-javascript.mjs`; `bridge/qoder-acp-client.mjs` is a compatibility façade |
-| PageRoot native HTTP runtime: `/chat/completions`, unique output write and official finalizer | `bridge/agent/runtimes/http-runtime.mjs`; the model never receives filesystem or terminal access; Candidate authority remains the official finalizer |
+| PageRoot native HTTP runtime: streaming `/chat/completions`, unique output write and official finalizer | `bridge/agent/runtimes/http-runtime.mjs`; SSE content is accumulated only inside Bridge, while reasoning/usage/heartbeat update activity without entering narration. HTTP and ACP turns use a 45-minute sliding inactivity watchdog rather than a total-duration deadline. A disconnect, cancellation or timeout before protocol completion writes no Candidate; Candidate authority remains the official finalizer |
+| Public Agent failure recovery | `agent-runtime-coordinator.mjs` computes `safeToRetry` independently from `recoveryKind`; `agent-session-projector.mjs` exposes only that structured pair plus a bounded error. Renderer actions never infer recovery from provider text and remain capped at two |
 | Frozen execution policy and single-output client-mediated Host Port | `bridge/agent/policies/` and `bridge/agent/hosts/`; these constrain only requests made through the ACP Client Host, never native filesystem/command actions inside an Agent process |
 | Immutable Version projection and history-view transition | `app/application/version-session.js` |
 | `PROJECT.md` editor working copy, generation, composition fence and save projection facts | `app/application/project-rules-session.js` |
@@ -670,9 +674,11 @@ them as a Workbench reload would bypass the final close drain and is forbidden.
 Provider Registry owns the public Agent catalog and dispatch. The shared Agent
 Delivery codec owns durable validation and legacy read projection; the runtime
 coordinator freezes canonical selection and fingerprint in its one-use ticket.
-Workspace Bridge exposes provider, preflight, start, status and cancel routes;
-the availability route remains an alias, and handlers reuse existing session
-and Request authority.
+Workspace Bridge exposes provider, diagnose, preflight, start, status and
+cancel routes. Diagnose is read-only and ticketless; preflight is execution-only.
+Status publishes only the bounded `PublicExecutionSession` activity projection
+(`phase`, timestamps, received HTML bytes and safe error fields), never hidden
+reasoning, command arguments, paths, stderr or partial HTML.
 
 The renderer freezes a full selection synchronously at the user intent. Its
 preflight key includes provider, runtime, requested/resolved model, reasoning,

@@ -45,6 +45,7 @@ export type BridgeClient = {
   deleteAttachment(body: BridgeJson): Promise<BridgeJson>;
   createRequest(body: BridgeJson): Promise<BridgeJson>;
   agentAvailability(input?: BridgeJson): Promise<BridgeJson>;
+  agentDiagnose(input?: BridgeJson): Promise<BridgeJson>;
   qoderAvailability(input?: BridgeJson): Promise<BridgeJson>;
   agentProviders(): Promise<BridgeJson>;
   preflightAgent(body: BridgeJson): Promise<BridgeJson>;

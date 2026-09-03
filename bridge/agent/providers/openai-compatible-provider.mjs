@@ -1,6 +1,7 @@
 import { sha256 } from "../../lifecycle-core.mjs";
 import { completeOpenAiCompatibleChat } from "../runtimes/http-runtime.mjs";
 import { agentProviderError, defineAgentProvider } from "./agent-provider-contract.mjs";
+import { openAiCompatibleVendorAdapter } from "./openai-compatible-vendor-adapters.mjs";
 import { loadExecutionPolicy } from "../policies/execution-policy.mjs";
 import {
   PAGEROOT_PROVIDER_ID,
@@ -113,6 +114,7 @@ function classifyHttpFailure(cause) {
     return "AGENT_PREFLIGHT_TIMEOUT";
   }
   const code = String(cause?.code || "");
+  if (code === "AGENT_PROTOCOL_INVALID") return "AGENT_NETWORK_INTERRUPTED";
   return code.startsWith("AGENT_") ? code : "AGENT_PROVIDER_UNAVAILABLE";
 }
 
@@ -129,10 +131,75 @@ function wrapProviderError(cause, fallbackMessage) {
     AGENT_ENDPOINT_REGION_MISMATCH: "接口地区不匹配，请修改地区或接口。",
     AGENT_PREFLIGHT_TIMEOUT: "连接超时，请重试。",
     AGENT_TURN_TIMEOUT: "连接超时，请重试。",
+    AGENT_NETWORK_INTERRUPTED: "网络连接中断，请重试。",
     AGENT_PROMPT_TOO_LARGE: "验证请求超过当前模型限制。",
   };
   return agentProviderError(code, safeMessages[code] || fallbackMessage, {
     status: Number.isSafeInteger(cause?.status) ? cause.status : 502,
+  });
+}
+
+async function diagnoseOpenAiCompatibleConnection({
+  fetchImpl,
+  installation,
+  environment,
+} = {}) {
+  const credential = credentialFromEnvironment(environment);
+  if (!credential
+    || credential.vendorId !== installation?.vendorId
+    || credential.baseUrl !== installation?.baseUrl
+    || credential.credentialGeneration !== installation?.credentialGeneration
+    || sha256(Buffer.from(credential.apiKey, "utf8")) !== installation?.credentialDigest) {
+    fail("AGENT_AUTH_REQUIRED", "连接配置已变化，请重新连接。", { status: 401 });
+  }
+  if (credential.vendorId === "custom") {
+    // A Custom endpoint is intentionally manual: Settings validates only the
+    // saved configuration. The exact Model ID and service are proven by the
+    // bounded execution preflight, never by an optional /models catalog.
+    return Object.freeze({
+      readiness: "ready",
+      cause: null,
+      activeInstallation: null,
+      facts: Object.freeze({
+        installation: "configured",
+        authentication: "configured",
+        protocol: "unknown",
+        service: "unknown",
+      }),
+    });
+  }
+  let response;
+  try {
+    response = await fetchImpl(`${String(installation.baseUrl).replace(/\/+$/u, "")}/models`, {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${credential.apiKey}`,
+        Accept: "application/json",
+      },
+      signal: AbortSignal.timeout(15_000),
+    });
+  } catch {
+    fail("AGENT_NETWORK_INTERRUPTED", "模型接口没有接通。", { status: 502 });
+  }
+  if (!response?.ok) {
+    let payload = null;
+    try { payload = JSON.parse(await response.text()); } catch { payload = null; }
+    const adapter = openAiCompatibleVendorAdapter(installation.vendorId);
+    const code = adapter.normalizeError({ status: response?.status, payload });
+    fail(code, "模型接口没有接通。", {
+      status: response?.status === 401 || response?.status === 403 ? 401 : 502,
+    });
+  }
+  return Object.freeze({
+    readiness: "ready",
+    cause: null,
+    activeInstallation: null,
+    facts: Object.freeze({
+      installation: "configured",
+      authentication: "ready",
+      protocol: "ready",
+      service: "unknown",
+    }),
   });
 }
 
@@ -162,6 +229,11 @@ export function createOpenAiCompatibleProvider({
         credentialDigest: sha256(Buffer.from(credential.apiKey, "utf8")),
       });
     },
+    diagnose: (installation, { environment } = {}) => diagnoseOpenAiCompatibleConnection({
+      fetchImpl,
+      installation,
+      environment,
+    }),
     async preflight(installation, { environment, selection } = {}) {
       const credential = credentialFromEnvironment(environment);
       if (!credential || credential.vendorId !== installation.vendorId
@@ -247,7 +319,15 @@ export function createOpenAiCompatibleProvider({
       return messages[code] || "暂时无法接通。";
     },
     loadExecutionPolicy: policyLoader,
-    createRuntimeLaunch({ ticket, policy, baseEnvironment, cancellationSignal, onEvent, turnTimeoutMs }) {
+    createRuntimeLaunch({
+      ticket,
+      policy,
+      baseEnvironment,
+      cancellationSignal,
+      onEvent,
+      turnTimeoutMs,
+      inactivityTimeoutMs,
+    }) {
       const credential = credentialFromEnvironment(baseEnvironment);
       const localId = localModelId(ticket.selection?.resolvedModelId);
       const model = credential?.vendorId === "custom"
@@ -269,6 +349,7 @@ export function createOpenAiCompatibleProvider({
         cancellationSignal,
         onEvent,
         ...(turnTimeoutMs ? { turnTimeoutMs } : {}),
+        ...(inactivityTimeoutMs ? { inactivityTimeoutMs } : {}),
       });
     },
     classifyRunFailure: classifyHttpFailure,
@@ -286,6 +367,7 @@ export function createOpenAiCompatibleProvider({
         AGENT_OUTPUT_TRUNCATED: "模型输出被截断。本轮 Request 已保留。",
         AGENT_PROMPT_TOO_LARGE: "当前页面可能超过模型完整输出能力，请更换模型或使用 Qoder/Codex。",
         AGENT_TURN_TIMEOUT: "网络或模型超时。本轮 Request 已保留。",
+        AGENT_NETWORK_INTERRUPTED: "网络连接中断。本轮 Request 已保留。",
         AGENT_ATTACHMENT_UNSUPPORTED: "源页 Agent 暂不支持此附件，可改用 Qoder、Codex 或复制给其他 AI。",
         AGENT_CANCELLED: "已停止。",
       };

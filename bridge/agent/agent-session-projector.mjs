@@ -135,6 +135,10 @@ export function publicExecutionSession(entry) {
     state: entry.state,
     phase: entry.phase,
     startedAt: entry.startedAt,
+    lastActivityAt: entry.lastActivityAt || null,
+    receivedBytes: Number.isSafeInteger(entry.receivedBytes) && entry.receivedBytes >= 0
+      ? entry.receivedBytes
+      : 0,
     updatedAt: entry.updatedAt,
     agentName: entry.agentName || null,
     agentVersion: entry.agentVersion || null,
@@ -143,7 +147,11 @@ export function publicExecutionSession(entry) {
     visibleTextUpdates: Object.freeze([...(entry.visibleTextUpdates || [])]),
     textTruncated: entry.textTruncated === true,
     retryable: entry.retryable === true,
-    ...(entry.errorCode ? { errorCode: entry.errorCode } : {}),
-    ...(entry.errorMessage ? { errorMessage: entry.errorMessage } : {}),
+    safeToRetry: typeof entry.safeToRetry === "boolean"
+      ? entry.safeToRetry
+      : entry.retryable === true,
+    recoveryKind: entry.recoveryKind || "end",
+    errorCode: entry.errorCode || null,
+    errorMessage: entry.errorMessage || null,
   });
 }

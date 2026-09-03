@@ -10,7 +10,7 @@ import type {
 } from "../domain/agent-provider-state.js";
 
 type AgentActionOutcome = Readonly<{ status: string; reason?: string }> | null | undefined;
-type CardActionKind = AgentProviderGuidanceKind | "recheck" | "api-key" | "model" | "reasoning";
+type CardActionKind = AgentProviderGuidanceKind | "recheck" | "cancel-install" | "api-key" | "model" | "reasoning";
 type ApiKeyExtras = Readonly<{ vendorId?: string; baseUrl?: string; modelId?: string }>;
 type VendorOption = Readonly<{
   id: string;
@@ -43,6 +43,7 @@ export type AgentProviderCardPresentation = Readonly<{
 
 export type AgentProviderCardProps = {
   availability: AgentProviderAvailabilitySnapshot;
+  installState?: "idle" | "installing" | "failed" | "cancelling";
   connection?: Readonly<{
     vendorId: string;
     vendorDisplayName: string;
@@ -61,6 +62,7 @@ export type AgentProviderCardProps = {
   actionButtonRef?: Ref<HTMLButtonElement>;
   onCopyGuidance: (kind: AgentProviderGuidanceKind) => Promise<AgentActionOutcome>;
   onInstall?: () => Promise<AgentActionOutcome>;
+  onCancelInstall?: () => Promise<AgentActionOutcome>;
   onRecheck?: () => Promise<AgentActionOutcome>;
   onConnectApiKey?: (apiKey: string, extras?: ApiKeyExtras) => Promise<AgentActionOutcome>;
   onDisconnectApiKey?: () => Promise<AgentActionOutcome>;
@@ -82,56 +84,18 @@ function actionsForAvailability(
     return [{ kind: "install", ...presentation.actions.install }];
   }
   if (availability.status === "auth-required") {
-    if (presentation.credentialKind === "api-token") return [];
+    if (presentation.credentialKind === "api-token") {
+      return [{ kind: "api-key", label: "登录", copiedLabel: "登录" }];
+    }
     return [{ kind: "login", ...presentation.actions.login }];
   }
-  if (
-    availability.status === "ready"
-    && presentation.supportsApiKey
-    && presentation.credentialKind === "api-token"
-  ) {
-    return [{
-      kind: "api-key",
-      ...(presentation.actions.apiKey || { label: "更换 Token", copiedLabel: "更换 Token" }),
-    }];
+  if (availability.status === "unavailable" && [
+    "invalid-installation",
+    "restart-required",
+  ].includes(String(availability.reason || ""))) {
+    return [{ kind: "install", label: "修复", copiedLabel: "修复" }];
   }
-  if (
-    availability.status === "unavailable"
-    && presentation.credentialKind === "api-token"
-    && availability.reason === "account-capacity"
-  ) {
-    return [{
-      kind: "api-key",
-      label: "更换厂商",
-      copiedLabel: "更换厂商",
-    }];
-  }
-  if (
-    availability.status === "unavailable"
-    && presentation.credentialKind === "api-token"
-    && availability.reason === "model-unavailable"
-  ) {
-    return [{
-      kind: "api-key",
-      label: "选择其他模型",
-      copiedLabel: "选择其他模型",
-    }];
-  }
-  if (
-    availability.status === "unavailable"
-    && presentation.credentialKind === "api-token"
-    && availability.reason === "endpoint-region-mismatch"
-  ) {
-    return [{
-      kind: "api-key",
-      label: "修改接口",
-      copiedLabel: "修改接口",
-    }];
-  }
-  if (
-    availability.status === "unavailable"
-    && ["timeout", "service-unavailable"].includes(String(availability.reason || ""))
-  ) {
+  if (availability.status === "unavailable") {
     return [{
       kind: "recheck" as const,
       ...(presentation.actions.recheck || { label: "重试", copiedLabel: "重试" }),
@@ -142,6 +106,7 @@ function actionsForAvailability(
 
 export default function AgentProviderCard({
   availability,
+  installState = "idle",
   connection = null,
   models = [],
   selectedModelId = null,
@@ -152,6 +117,7 @@ export default function AgentProviderCard({
   actionButtonRef,
   onCopyGuidance,
   onInstall,
+  onCancelInstall,
   onRecheck,
   onConnectApiKey,
   onDisconnectApiKey,
@@ -159,6 +125,9 @@ export default function AgentProviderCard({
   onSelectReasoning,
 }: AgentProviderCardProps) {
   const [pendingAction, setPendingAction] = useState<CardActionKind | null>(null);
+  const [installPending, setInstallPending] = useState(false);
+  const [cancelPending, setCancelPending] = useState(false);
+  const [cancelRequested, setCancelRequested] = useState(false);
   const [actionError, setActionError] = useState("");
   const [apiKeyOpen, setApiKeyOpen] = useState(false);
   const [apiKey, setApiKey] = useState("");
@@ -170,15 +139,23 @@ export default function AgentProviderCard({
       : "",
   );
   const presentation = provider.availability(availability);
+  const installing = installState === "installing" || installPending;
+  const cancelling = installState === "cancelling" || cancelPending || cancelRequested;
+  const statusPresentation = installing && !cancelling
+    ? { ...presentation, statusLabel: "正在安装…", detail: "", tone: "checking" as const }
+    : cancelling
+      ? { ...presentation, statusLabel: "正在取消…", detail: "", tone: "checking" as const }
+      : presentation;
   const currentModel = models.find((model) => model.id === selectedModelId) || models[0] || null;
-  const actions = actionsForAvailability(availability, provider).filter((action) => !(
+  const actions = installing || cancelling
+    ? [{ kind: "cancel-install" as const, label: "取消", copiedLabel: "取消" }]
+    : actionsForAvailability(availability, provider).filter((action) => !(
     availability.reason === "model-unavailable"
     && connection
     && models.length > 1
     && action.kind === "api-key"
-  ));
+    ));
   const checking = availability.status === "checking";
-  const installing = pendingAction === "install";
   const tokenFormOpen = provider.credentialKind === "api-token"
     && (availability.status === "auth-required" || apiKeyOpen);
   const selectedVendor = provider.vendors?.find((vendor) => vendor.id === vendorId)
@@ -189,7 +166,46 @@ export default function AgentProviderCard({
     : {};
 
   const runAction = async (kind: CardActionKind) => {
-    if (pendingAction || disabled) return;
+    if (disabled) return;
+    if (kind === "cancel-install") {
+      if (cancelPending || cancelRequested || typeof onCancelInstall !== "function") return;
+      setCancelRequested(true);
+      setCancelPending(true);
+      setActionError("");
+      let confirmed = false;
+      try {
+        const outcome = await onCancelInstall();
+        confirmed = Boolean(outcome && ["succeeded", "stale"].includes(outcome.status));
+        if (!confirmed) {
+          setActionError("安装没有取消，请重试。");
+        }
+      } catch {
+        setActionError("安装没有取消，请重试。");
+      } finally {
+        setCancelPending(false);
+        if (!confirmed) setCancelRequested(false);
+      }
+      return;
+    }
+    if (kind === "install") {
+      if (installPending || pendingAction || typeof onInstall !== "function") return;
+      setCancelRequested(false);
+      setInstallPending(true);
+      setActionError("");
+      try {
+        const outcome = await onInstall();
+        if (!outcome || !["succeeded", "stale"].includes(outcome.status)) {
+          setActionError("安装没有完成，请重试。");
+        }
+      } catch {
+        setActionError("安装没有完成，请重试。");
+      } finally {
+        setInstallPending(false);
+        setCancelRequested(false);
+      }
+      return;
+    }
+    if (pendingAction || installPending || cancelPending) return;
     if (kind === "api-key") {
       setApiKeyOpen((open) => !open);
       setActionError("");
@@ -198,28 +214,22 @@ export default function AgentProviderCard({
     setPendingAction(kind);
     setActionError("");
     try {
-      const outcome = kind === "install" && typeof onInstall === "function"
-        ? await onInstall()
-        : kind === "recheck" && typeof onRecheck === "function"
+      const outcome = kind === "recheck" && typeof onRecheck === "function"
           ? await onRecheck()
-          : kind === "login" || kind === "install"
+          : kind === "login"
             ? await onCopyGuidance(kind)
             : null;
       const succeeded = Boolean(outcome && ["succeeded", "stale"].includes(outcome.status));
       if (!succeeded) {
         setActionError(
-          kind === "install"
-            ? "安装没有完成，请重试。"
-            : kind === "recheck"
+          kind === "recheck"
               ? "检查没有完成，请重试。"
               : "指令暂时无法复制，请重试。",
         );
       }
     } catch {
       setActionError(
-        kind === "install"
-          ? "安装没有完成，请重试。"
-          : kind === "recheck"
+        kind === "recheck"
             ? "检查没有完成，请重试。"
             : "指令暂时无法复制，请重试。",
       );
@@ -318,8 +328,8 @@ export default function AgentProviderCard({
       className={provider.cardClassName}
       data-status={availability.status}
       data-surface={surface}
-      data-tone={presentation.tone}
-      aria-busy={checking || installing || Boolean(pendingAction)}
+      data-tone={statusPresentation.tone}
+      aria-busy={checking || installing || cancelling || Boolean(pendingAction)}
     >
       <div className="qoder-card-summary">
         <span
@@ -338,24 +348,30 @@ export default function AgentProviderCard({
         </span>
         <span className="qoder-card-copy">
           <strong>{provider.displayName}</strong>
-          <small>{presentation.detail}</small>
+          {presentation.detail ? <small>{presentation.detail}</small> : null}
         </span>
         <span className="qoder-card-control">
           <span
             className="qoder-card-status"
-            data-tone={presentation.tone}
+            data-tone={statusPresentation.tone}
             aria-live="polite"
             aria-atomic="true"
           >
             <i aria-hidden="true" />
-            {presentation.statusLabel}
+            {statusPresentation.statusLabel}
           </span>
           {actions.map((action, index) => {
             const copied = action.kind === "login" || action.kind === "install"
               ? availability.guidanceCopied === action.kind
               : false;
             const label = copied ? action.copiedLabel : action.label;
-            const busy = pendingAction === action.kind;
+            const busy = action.kind === "cancel-install"
+              ? cancelPending
+              : action.kind === "install" ? installPending : pendingAction === action.kind;
+            const actionDisabled = disabled
+              || (action.kind === "cancel-install"
+                ? cancelling
+                : Boolean(pendingAction) || installPending || cancelPending);
             return (
               <button
                 key={action.kind}
@@ -363,12 +379,18 @@ export default function AgentProviderCard({
                 type="button"
                 data-kind={action.kind}
                 {...(index === 0 ? primaryActionData : {})}
-                disabled={Boolean(pendingAction) || disabled}
-                aria-label={installing && action.kind === "install" ? "正在安装…" : label}
+                disabled={actionDisabled}
+                aria-label={cancelling && action.kind === "cancel-install"
+                  ? "正在取消…"
+                  : installing && action.kind === "cancel-install"
+                    ? "取消"
+                    : installing && action.kind === "install" ? "正在安装…" : label}
                 onClick={() => void runAction(action.kind)}
               >
                 {busy
-                  ? (action.kind === "install"
+                  ? (action.kind === "cancel-install"
+                    ? "正在取消…"
+                    : action.kind === "install"
                     ? "正在安装…"
                     : action.kind === "recheck"
                       ? "正在检查…"
@@ -399,13 +421,29 @@ export default function AgentProviderCard({
           {connection.vendorId === "custom" && connection.baseUrl ? ` · ${connection.baseUrl}` : ""}
         </p>
       ) : null}
-      {connection && models.length > 1 && onSelectModel ? (
-        <label className="qoder-card-model-choice">
-          <span>{availability.reason === "model-unavailable" ? "选择其他模型" : "当前模型"}</span>
+          {availability.status === "ready"
+        && provider.credentialKind === "api-token"
+        && provider.supportsApiKey
+        && onConnectApiKey ? (
+        <button
+          type="button"
+          data-kind="api-key"
+          disabled={Boolean(pendingAction) || disabled}
+          onClick={() => {
+            setApiKeyOpen((open) => !open);
+            setActionError("");
+          }}
+        >
+          {apiKeyOpen ? "收起配置" : (provider.actions.apiKey?.label || "更换 Token")}
+        </button>
+      ) : null}
+          {connection && models.length > 1 && onSelectModel ? (
+            <label className="qoder-card-model-choice">
+              <span>当前模型</span>
           <select
-            aria-label="选择其他模型"
+            aria-label="当前模型"
             value={selectedModelId || models[0]?.id || ""}
-            disabled={Boolean(pendingAction) || disabled}
+                    disabled={Boolean(pendingAction) || disabled}
             onChange={(event) => void selectModel(event.target.value)}
           >
             {models.map((model) => (

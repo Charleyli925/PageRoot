@@ -2,11 +2,34 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  agentRecoveryKindForError,
   defaultManagedAgentDelivery,
   legacyDriverForAgentDelivery,
   normalizeAgentDelivery,
   normalizeNewAgentDelivery,
 } from "../shared/agent-delivery.mjs";
+
+test("structured Agent errors map technical retry safety to truthful recovery", () => {
+  for (const [code, recoveryKind] of [
+    ["AGENT_AUTH_REQUIRED", "reauthenticate"],
+    ["AGENT_BALANCE_INSUFFICIENT", "change-provider"],
+    ["AGENT_PLAN_LIMIT", "change-provider"],
+    ["AGENT_ENDPOINT_REGION_MISMATCH", "change-provider"],
+    ["CODEX_ACCOUNT_CAPACITY_UNAVAILABLE", "change-provider"],
+    ["AGENT_MODEL_ACCESS_DENIED", "change-model"],
+    ["AGENT_RATE_LIMITED", "wait"],
+    ["AGENT_NETWORK_INTERRUPTED", "retry"],
+    ["AGENT_PROVIDER_OVERLOADED", "retry"],
+    ["AGENT_TURN_TIMEOUT", "retry"],
+    ["AGENT_INSTALLATION_UNTRUSTED", "repair-installation"],
+    ["AGENT_RESTART_RECOVERY_REQUIRED", "end"],
+  ]) {
+    assert.equal(agentRecoveryKindForError(code, { safeToRetry: code !== "AGENT_RESTART_RECOVERY_REQUIRED" }), recoveryKind);
+  }
+  assert.equal(agentRecoveryKindForError("UNKNOWN", { safeToRetry: true }), "retry");
+  assert.equal(agentRecoveryKindForError("UNKNOWN", { safeToRetry: false }), "end");
+  assert.equal(agentRecoveryKindForError("AGENT_BALANCE_INSUFFICIENT", { safeToRetry: false }), "end");
+});
 
 test("legacy qoder-acp projects to the canonical managed Agent delivery without mutating input", () => {
   const legacy = {

@@ -33,6 +33,7 @@ if (pidFileArgument) {
   writeFileSync(pidFileArgument.slice("--pid-file=".length), `${process.pid}\n`, "utf8");
 }
 const hang = process.argv.includes("--hang");
+const runtimeFailure = process.argv.includes("--runtime-failure");
 const visibleText = process.argv.includes("--visible-text");
 const visibleTextGateArgument = process.argv.find((argument) => argument.startsWith("--visible-text-gate-ms="));
 const visibleTextGateMs = Math.max(
@@ -75,6 +76,9 @@ const app = acp.agent({ name: "pageroot-e2e-qoder" })
   })
   .onRequest(acp.methods.agent.session.prompt, async ({ params, client }) => {
     if (hang) return new Promise(() => {});
+    if (runtimeFailure) {
+      throw new Error("Synthetic ACP runtime connection interrupted.");
+    }
     if (visibleText) {
       for (const text of ["正在读取冻结任务。", "正在写入 Candidate。", "正在等待校验。"]) {
         await client.notify(acp.methods.client.session.update, {

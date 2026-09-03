@@ -3,6 +3,7 @@ import { openaiCompatibleChatThinkingFields } from "../../../shared/openai-compa
 const CONTEXT_CODES = new Set(["context_length_exceeded", "input_too_long", "prompt_too_long"]);
 const MODEL_CODES = new Set(["model_not_found", "model_not_available", "model_unavailable", "unsupported_model"]);
 const ACCESS_CODES = new Set(["model_access_denied", "permission_denied", "insufficient_permissions"]);
+const AUTH_CODES = new Set(["authentication_error", "invalid_api_key", "invalid_token", "unauthorized", "unauthenticated"]);
 const BALANCE_CODES = new Set(["insufficient_balance", "insufficient_quota_balance", "billing_not_active"]);
 const PLAN_CODES = new Set(["insufficient_quota", "quota_exceeded", "plan_limit_exceeded"]);
 const RATE_CODES = new Set(["rate_limit_exceeded", "requests_rate_limit_exceeded", "tokens_rate_limit_exceeded"]);
@@ -21,7 +22,7 @@ function normalizeError({ status, payload, transportCode } = {}) {
   if (["abort_err", "aborterror", "etimedout", "timeout_err", "timeouterror"].includes(transport)) {
     return "AGENT_TURN_TIMEOUT";
   }
-  if (numericStatus === 401) return "AGENT_AUTH_REQUIRED";
+  if (numericStatus === 401 || AUTH_CODES.has(code)) return "AGENT_AUTH_REQUIRED";
   if (numericStatus === 403 || ACCESS_CODES.has(code)) return "AGENT_MODEL_ACCESS_DENIED";
   if (BALANCE_CODES.has(code)) return "AGENT_BALANCE_INSUFFICIENT";
   if (PLAN_CODES.has(code)) return "AGENT_PLAN_LIMIT";

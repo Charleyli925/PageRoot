@@ -141,6 +141,31 @@ test("run session distinguishes managed Qoder state from clipboard handoff risk"
 
 });
 
+test("run session keeps only the public execution activity projection", () => {
+  const sourcePath = "/tmp/public-session.html";
+  const session = new RunSession({ sourcePath });
+  const activeRun = run({ sourcePath, requestId: "req_public", attemptId: "attempt_001" });
+  session.trackRun(activeRun, { activate: "always" });
+  session.publishHandoff({
+    ...activeRun,
+    mode: "managed-agent",
+    status: "running",
+    phase: "generating",
+    startedAt: "2026-08-26T02:00:00.000Z",
+    lastActivityAt: "2026-08-26T02:05:00.000Z",
+    receivedBytes: 4_096,
+    visibleText: "公开进度",
+    errorCode: null,
+    errorMessage: null,
+    retryable: true,
+  });
+
+  assert.equal(session.activeHandoff.lastActivityAt, "2026-08-26T02:05:00.000Z");
+  assert.equal(session.activeHandoff.receivedBytes, 4_096);
+  assert.equal("stderr" in session.activeHandoff, false);
+  assert.equal("reasoning" in session.activeHandoff, false);
+});
+
 test("run session treats a recovered processing run as potentially handed off", () => {
   const original = new RunSession({ sourcePath: "/tmp/page.html" });
   const current = run();

@@ -5,6 +5,7 @@ import { createRunWorkflowCodecs } from "./run-workflow-codecs.js";
 import { verifyProjectContext } from "./verified-project-context.js";
 import { AgentCatalogState } from "./agent-provider-catalog.js";
 import {
+  agentRecoveryKindForError,
   CLIPBOARD_DELIVERY_MODE,
   MANAGED_AGENT_MODE,
   TRUSTED_LOCAL_AGENT_POLICY_VERSION,
@@ -228,6 +229,9 @@ function agentHandoffState(run, session) {
     "cancelled",
   ].includes(state)) return null;
   const selection = deliveryForRun(run)?.selection || null;
+  const safeToRetry = typeof session.safeToRetry === "boolean"
+    ? session.safeToRetry
+    : session.retryable === true;
   const visibleTextUpdates = [];
   let visibleTextLength = 0;
   for (const update of Array.isArray(session?.visibleTextUpdates)
@@ -265,10 +269,18 @@ function agentHandoffState(run, session) {
     visibleTextUpdates: Object.freeze(visibleTextUpdates),
     textTruncated: session.textTruncated === true,
     startedAt: typeof session.startedAt === "string" ? session.startedAt : null,
+    lastActivityAt: typeof session.lastActivityAt === "string" ? session.lastActivityAt : null,
+    receivedBytes: Number.isSafeInteger(session.receivedBytes) && session.receivedBytes >= 0
+      ? session.receivedBytes
+      : 0,
     updatedAt: typeof session.updatedAt === "string" ? session.updatedAt : null,
     errorCode: session.errorCode ? String(session.errorCode) : null,
     errorMessage: session.errorMessage ? String(session.errorMessage) : null,
     retryable: session.retryable === true,
+    safeToRetry,
+    recoveryKind: session.recoveryKind || agentRecoveryKindForError(session.errorCode, {
+      safeToRetry,
+    }),
   };
 }
 
@@ -487,7 +499,7 @@ export class RunWorkflow {
       pendingReconciliations: frozenArray(this.#uncertainSubmissions.keys()),
       agentCatalog: this.#agentCatalog.getSnapshot(),
       agentPresentation: this.#agentCatalog.presentation(),
-      qoderAvailability: this.#agentCatalog.availability(),
+      qoderAvailability: this.#agentCatalog.displayAvailability(),
     });
   }
 
@@ -585,10 +597,7 @@ export class RunWorkflow {
       const refreshed = await this.#agentCatalog.refreshAvailability();
       if (this.#disposed) return stale({ kind: "agent-availability" });
       if (String(refreshed?.result?.status || "") === "ready") {
-        // Local discovery is intentionally a weak check. Follow it with the
-        // same forced preflight used by the send path instead of ever exposing
-        // the local result as a green connection state.
-        return this.checkAgentUsability();
+        return succeeded({ availability: this.#agentCatalog.availability() });
       }
       return succeeded({ availability: this.#agentCatalog.availability() });
     } catch (cause) {
@@ -609,8 +618,7 @@ export class RunWorkflow {
       return blocked("RUN_WORKFLOW_DISPOSED", `${displayName} 状态检查已经停止。`);
     }
     try {
-      const preflight = await this.#agentCatalog.preflight(frozen, { force: true });
-      this.#agentCatalog.discardTicket(preflight);
+      await this.#agentCatalog.diagnose(frozen);
       return succeeded({ availability: this.#agentCatalog.availability(frozen) });
     } catch (cause) {
       return rejected(
@@ -654,7 +662,7 @@ export class RunWorkflow {
       .then((refreshed) => {
         if (this.#disposed) return stale({ kind: "agent-availability" });
         if (String(refreshed?.result?.status || "") === "ready") {
-          return this.checkQoderUsability();
+          return succeeded({ availability: this.#agentCatalog.availability(selection) });
         }
         return succeeded({ availability: this.#agentCatalog.availability(selection) });
       })
@@ -671,8 +679,7 @@ export class RunWorkflow {
       return blocked("RUN_WORKFLOW_DISPOSED", "Qoder CLI 状态检查已经停止。");
     }
     try {
-      const preflight = await this.#agentCatalog.preflight(selection, { force: true });
-      this.#agentCatalog.discardTicket(preflight);
+      await this.#agentCatalog.diagnose(selection);
       return succeeded({ availability: this.#agentCatalog.availability(selection) });
     } catch (cause) {
       return rejected(
@@ -707,13 +714,8 @@ export class RunWorkflow {
       return blocked("RUN_WORKFLOW_DISPOSED", `${displayName} 安装已经停止。`);
     }
     try {
-      const refreshed = await this.#agentCatalog.install(frozen);
+      await this.#agentCatalog.install(frozen);
       if (this.#disposed) return stale({ kind: "agent-install" });
-      if (String(refreshed?.result?.status || "") === "ready") {
-        return this.checkAgentUsability(
-          this.#agentCatalog.freezeProviderSelection(frozen.providerId) || frozen,
-        );
-      }
       return succeeded({ availability: this.#agentCatalog.availability(frozen) });
     } catch (cause) {
       return rejected(
@@ -730,16 +732,31 @@ export class RunWorkflow {
       return blocked("RUN_WORKFLOW_DISPOSED", "Qoder CLI 安装已经停止。");
     }
     try {
-      const refreshed = await this.#agentCatalog.install(selection);
+      await this.#agentCatalog.install(selection);
       if (this.#disposed) return stale({ kind: "agent-install" });
-      if (String(refreshed?.result?.status || "") === "ready") {
-        return this.checkQoderUsability();
-      }
       return succeeded({ availability: this.#agentCatalog.availability(selection) });
     } catch (cause) {
       return rejected(
         errorCode(cause, "AGENT_INSTALL_FAILED"),
         this.#codecs.errorMessage(cause, "暂时无法安装 Qoder CLI。"),
+      );
+    }
+  }
+
+  async cancelAgentInstall(selection = this.#agentCatalog.freezeSelected()) {
+    const frozen = selection || this.#agentCatalog.freezeSelected();
+    const displayName = this.#agentCatalog.presentation(frozen).displayName || "Agent";
+    if (!frozen) return rejected("AGENT_PROVIDER_UNSUPPORTED", `${displayName} 不可用。`);
+    if (this.#disposed) {
+      return blocked("RUN_WORKFLOW_DISPOSED", `${displayName} 安装已经停止。`);
+    }
+    try {
+      const result = await this.#agentCatalog.cancelInstall(frozen);
+      return succeeded({ result, availability: this.#agentCatalog.availability(frozen) });
+    } catch (cause) {
+      return rejected(
+        errorCode(cause, "AGENT_INSTALL_CANCEL_FAILED"),
+        this.#codecs.errorMessage(cause, `暂时无法取消 ${displayName} 安装。`),
       );
     }
   }
@@ -1491,6 +1508,10 @@ export class RunWorkflow {
           errorCode: code,
           errorMessage: message,
           retryable: !NON_RETRYABLE_AGENT_ERRORS.has(code),
+          safeToRetry: !NON_RETRYABLE_AGENT_ERRORS.has(code),
+          recoveryKind: agentRecoveryKindForError(code, {
+            safeToRetry: !NON_RETRYABLE_AGENT_ERRORS.has(code),
+          }),
         });
       }
       this.#agentCatalog.noteRunFailure(deliveryForRun(run)?.selection, code);
@@ -1519,6 +1540,20 @@ export class RunWorkflow {
     const operationKey = this.#codecs.operationKey(run);
     if (!this.#runSession.beginOperation("cancel", operationKey)) {
       return blocked("RUN_CANCEL_BUSY", "本轮结束操作正在进行。");
+    }
+    const handoffBeforeCancel = this.#runSession.handoffForSource(run.sourcePath);
+    const publishesCancelling = Boolean(
+      handoffBeforeCancel?.mode === MANAGED_AGENT_MODE
+      && handoffBeforeCancel.requestId === run.requestId
+      && handoffBeforeCancel.attemptId === run.attemptId
+      && ["starting", "running"].includes(handoffBeforeCancel.status),
+    );
+    if (publishesCancelling) {
+      this.#runSession.publishHandoff({
+        ...handoffBeforeCancel,
+        status: "cancelling",
+        phase: "cancelling",
+      });
     }
     // Cancellation may outlive a switch away and reopen of the same project.
     // Stable project IDs alone must not let a late response mutate the newer
@@ -1564,6 +1599,13 @@ export class RunWorkflow {
     } catch (cause) {
       const tracked = this.#runSession.hasRun(run);
       const current = Boolean(tracked && context && this.#isCurrentContext(context));
+      const currentHandoff = this.#runSession.handoffForSource(run.sourcePath);
+      if (
+        publishesCancelling
+        && currentHandoff?.requestId === run.requestId
+        && currentHandoff?.attemptId === run.attemptId
+        && currentHandoff.status === "cancelling"
+      ) this.#runSession.publishHandoff(handoffBeforeCancel);
       if (tracked) {
         this.#runSession.trackRun({
           ...run,

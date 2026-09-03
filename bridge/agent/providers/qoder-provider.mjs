@@ -116,6 +116,10 @@ export function qoderFailure(code) {
       return "当前 Qoder CLI 版本不受支持。请更新后再试。";
     case "AGENT_CANCELLED":
       return "Qoder 已停止。";
+    case "AGENT_TURN_TIMEOUT":
+      return "Qoder 本轮连续等待过久，已停止；Request 与当前 HTML 均已保留。";
+    case "AGENT_NETWORK_INTERRUPTED":
+      return "Qoder 连接中断，Request 与当前 HTML 均已保留。";
     case "ACP_AGENT_IDENTITY_MISMATCH":
       return "ACP 进程没有证明自己是 Qoder CLI，PageRoot 已停止它。";
     case "ACP_RUNTIME_AUTHORITY_DRIFT":
@@ -193,6 +197,12 @@ export function classifyQoderRunFailure(cause) {
   ) {
     return "QODER_ACCOUNT_CAPACITY_UNAVAILABLE";
   }
+  if (["AGENT_TURN_TIMEOUT", "ACP_TURN_TIMEOUT", "ACP_TIMEOUT"].includes(mapped)) {
+    return "AGENT_TURN_TIMEOUT";
+  }
+  if (mapped === "AGENT_NETWORK_INTERRUPTED") {
+    return mapped;
+  }
   const combined = `${cause?.message || ""}\n${cause?.qoderStderr || ""}`;
   if (/not logged in|sign in|login required|unauthenticated/iu.test(combined)) {
     return "QODER_AUTH_REQUIRED";
@@ -202,6 +212,14 @@ export function classifyQoderRunFailure(cause) {
 
 const QODER_RUNTIME_CODE_MAP = Object.freeze({
   ACP_CANCELLED: "AGENT_CANCELLED",
+  ACP_TIMEOUT: "AGENT_TURN_TIMEOUT",
+  ACP_TURN_TIMEOUT: "AGENT_TURN_TIMEOUT",
+  QODER_TURN_TIMEOUT: "AGENT_TURN_TIMEOUT",
+  AGENT_TURN_TIMEOUT: "AGENT_TURN_TIMEOUT",
+  ACP_AGENT_PROCESS_ERROR: "AGENT_NETWORK_INTERRUPTED",
+  ACP_AGENT_EXITED_EARLY: "AGENT_NETWORK_INTERRUPTED",
+  ACP_CONNECTION_CLOSED: "AGENT_NETWORK_INTERRUPTED",
+  ACP_PROTOCOL_INVALID: "AGENT_NETWORK_INTERRUPTED",
   AGENT_ACCOUNT_CAPACITY_UNAVAILABLE: "QODER_ACCOUNT_CAPACITY_UNAVAILABLE",
   ACP_OUTPUT_PREEXISTS: "AGENT_OUTPUT_PREEXISTS",
   ACP_COMPLETION_PREEXISTS: "AGENT_COMPLETION_PREEXISTS",
@@ -499,6 +517,44 @@ async function executePreflightCommand(command, args, environment, timeout) {
   });
 }
 
+// Settings diagnosis intentionally uses only the CLI's read-only version and
+// model-list commands. It never starts the ACP runtime or creates a ticket.
+export async function diagnoseQoder(command, environment) {
+  try {
+    const versionResult = await executePreflightCommand(command, ["--version"], environment, 10_000);
+    const reportedVersion = cleanProviderText(versionResult.stdout, 80).split(/\s+/u)[0];
+    if (!semver.valid(reportedVersion)) fail("QODER_VERSION_INVALID", "Qoder CLI 没有返回可验证的版本号。");
+    if (command.version && reportedVersion !== command.version) {
+      fail("QODER_VERSION_MISMATCH", "Qoder CLI 版本与安装清单不一致。");
+    }
+    const modelResult = await executePreflightCommand(command, ["--list-models"], environment, 30_000);
+    const models = parsePublicModels(modelResult.stdout);
+    if (models.length === 0) fail("QODER_MODEL_CATALOG_EMPTY", "Qoder 当前没有返回可用模型。");
+    return Object.freeze({
+      readiness: "ready",
+      cause: null,
+      activeInstallation: null,
+      facts: Object.freeze({
+        installation: "ready",
+        authentication: "ready",
+        protocol: "unknown",
+        service: "unknown",
+      }),
+    });
+  } catch (cause) {
+    const code = cause instanceof AgentProviderError
+      ? cause.code
+      : classifyQoderPreflightFailure(cause);
+    fail(code, qoderFailure(code), {
+      status: code === "QODER_AUTH_REQUIRED"
+        ? 401
+        : Number.isSafeInteger(cause?.status)
+          ? cause.status
+          : 503,
+    });
+  }
+}
+
 export async function preflightQoder(command, environment) {
   try {
     const versionResult = await executePreflightCommand(command, ["--version"], environment, 10_000);
@@ -536,12 +592,14 @@ export async function preflightQoder(command, environment) {
 
 export function createQoderProvider({
   commandResolver = resolveQoderAcpCommand,
+  diagnoseRunner = diagnoseQoder,
   preflightRunner = preflightQoder,
   policyLoader = loadQoderAcpTaskPolicy,
   managedCandidates,
 } = {}) {
   if (
     typeof commandResolver !== "function"
+    || typeof diagnoseRunner !== "function"
     || typeof preflightRunner !== "function"
     || typeof policyLoader !== "function"
   ) {
@@ -563,6 +621,7 @@ export function createQoderProvider({
       modelCatalog: true,
     },
     resolveInstallation: ({ environment }) => resolveInstallation({ environment }),
+    diagnose: (installation, { environment }) => diagnoseRunner(installation, environment),
     preflight: (installation, { environment }) => preflightRunner(installation, environment),
     assertInstallationUnchanged: assertQoderInstallationUnchanged,
     installationDigest,
@@ -588,6 +647,7 @@ export function createQoderProvider({
       cancellationSignal,
       onEvent,
       turnTimeoutMs,
+      inactivityTimeoutMs,
     }) {
       const installation = ticket.installation;
       const modelId = localQoderModelId(ticket.selection?.resolvedModelId);
@@ -609,6 +669,7 @@ export function createQoderProvider({
           ? /qoder|pageroot-e2e/iu
           : /qoder/iu,
         ...(turnTimeoutMs ? { turnTimeoutMs } : {}),
+        ...(inactivityTimeoutMs ? { inactivityTimeoutMs } : {}),
         onEvent,
       });
     },

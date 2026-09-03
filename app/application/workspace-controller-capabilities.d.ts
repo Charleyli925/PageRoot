@@ -281,6 +281,7 @@ export interface AgentSelectionControllerCapability {
   connectAgentApiKey(selection: AgentSelection, apiKey: string, extras?: Readonly<{ vendorId?: string; baseUrl?: string; modelId?: string }>): Promise<RunWorkflowOutcome>;
   disconnectAgentApiKey(selection: AgentSelection): Promise<RunWorkflowOutcome>;
   checkAgentUsability(selection?: AgentSelection): Promise<RunWorkflowOutcome>;
+  cancelAgentInstall(selection?: AgentSelection | null): Promise<RunWorkflowOutcome>;
 }
 
 export interface ReviewPreparationControllerCapability extends WorkspaceSnapshotReader {

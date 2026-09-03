@@ -149,6 +149,7 @@ export class RunWorkflow {
   installAgent(selection?: AgentSelection | null): Promise<RunWorkflowOutcome<{
     availability: AgentProviderAvailabilitySnapshot;
   }>>;
+  cancelAgentInstall(selection?: AgentSelection | null): Promise<RunWorkflowOutcome>;
   installQoder(): Promise<RunWorkflowOutcome<{
     availability: AgentProviderAvailabilitySnapshot;
   }>>;

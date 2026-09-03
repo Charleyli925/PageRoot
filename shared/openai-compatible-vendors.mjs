@@ -24,6 +24,16 @@ export function openaiCompatibleVendor(vendorId) {
   return OPENAI_COMPATIBLE_VENDORS.find((vendor) => vendor.id === vendorId) || null;
 }
 
+export function openAiCompatibleVendorDisplayNameForPublicModel(modelId) {
+  const providerModelId = String(modelId || "").replace(/^pageroot:/u, "");
+  if (!providerModelId) return "";
+  const vendor = OPENAI_COMPATIBLE_VENDORS.find((entry) => (
+    entry.id !== "custom"
+    && supportedAgentModel(entry.id, providerModelId, { includeBeta: true })
+  ));
+  return String(vendor?.displayName || "");
+}
+
 export function normalizeOpenAiCompatibleBaseUrl(value) {
   const text = String(value || "").trim();
   if (!text || !HTTPS_ORIGIN.test(text) || text.length > 200) return "";

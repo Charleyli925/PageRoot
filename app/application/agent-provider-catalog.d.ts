@@ -1,4 +1,5 @@
 import type {
+  AgentDiagnosticSnapshot,
   AgentProviderAvailabilitySnapshot,
   AgentSelection,
 } from "../domain/agent-provider-state.js";
@@ -36,6 +37,7 @@ export type AgentProviderDescriptor = Readonly<{
 }>;
 export type AgentProviderEntry = AgentProviderDescriptor & Readonly<{
   availability: AgentProviderAvailabilitySnapshot;
+  diagnostic: AgentDiagnosticSnapshot | null;
   installationDigest: string | null;
   models?: readonly Readonly<{
     id: string;
@@ -97,6 +99,8 @@ export function agentProviderCardsFromCatalog(snapshot: AgentCatalogSnapshot | n
   selection: AgentSelection;
   presentation: ReturnType<typeof agentProviderCardPresentation>;
   availability: AgentProviderAvailabilitySnapshot;
+  installState: AgentProviderEntry["installState"];
+  diagnostic: AgentDiagnosticSnapshot | null;
   models: readonly Readonly<{
     id: string;
     displayName: string;
@@ -132,8 +136,10 @@ export class AgentCatalogState {
   freezeProviderSelection(providerId: string): AgentSelection | null;
   provider(selection?: AgentSelection | null): AgentProviderEntry | null;
   availability(selection?: AgentSelection | null): AgentProviderAvailabilitySnapshot;
+  displayAvailability(selection?: AgentSelection | null): AgentProviderAvailabilitySnapshot;
   presentation(selection?: AgentSelection | null): AgentProviderPresentation;
   refreshAvailability(selection?: AgentSelection | null): Promise<unknown>;
+  diagnose(selection?: AgentSelection | null): Promise<unknown>;
   preflight(selection?: AgentSelection | null, options?: {
     force?: boolean;
     purpose?: "execution";
@@ -148,6 +154,7 @@ export class AgentCatalogState {
   }): Promise<AgentPreflight>;
   discardTicket(preflight: AgentPreflight): boolean;
   install(selection?: AgentSelection | null): Promise<unknown>;
+  cancelInstall(selection?: AgentSelection | null): Promise<unknown>;
   copyGuidance(kind: "install" | "login", selection?: AgentSelection | null): Promise<unknown>;
 }
 export const AgentProviderCatalog: typeof AgentCatalogState;

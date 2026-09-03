@@ -151,16 +151,17 @@ function deriveRunProgressCopy({
     );
   }
   if (agentFailed) {
-    const interrupted = handoffStatus === "interrupted";
     const recoveryRequired = handoff.retryable === false;
     return progressPresentationCopy(
-      `${agentName} 需要处理`,
-      interrupted ? `${agentName} 会话已中断` : `${agentName} 没有完成本轮`,
-      interrupted ? "会话已中断" : "执行失败",
-      "本轮要求与当前 HTML 均已保留",
-      handoff.errorMessage || (recoveryRequired
-        ? "请结束旧 Request，再重新发送本轮要求。"
-        : `可重新启动 ${agentName}，或复制本轮任务给其他 Agent。`),
+      recoveryRequired ? "生成失败" : "生成中断",
+      recoveryRequired ? "生成失败" : "生成中断",
+      recoveryRequired
+        ? "生成失败"
+        : "未生成新版本，页面未修改",
+      recoveryRequired
+        ? handoff.errorMessage || "本轮没有收到可用的完成结果。"
+        : "未生成新版本，页面未修改",
+      "未生成新版本，页面未修改",
     );
   }
   if (status === "awaiting-conflict-resolution") {
@@ -321,18 +322,21 @@ function deriveRunProgressStepsFromContext({
   const [handoffStep, aiStep, validationStep, resultStep] = steps;
 
   if (agentFailed) {
+    const recoveryRequired = handoff.retryable === false;
     Object.assign(
       handoffStep,
       progressStep(
         "handoff",
-        handoffStatus === "interrupted" ? `${agentName} 会话已中断` : `${agentName} 执行失败`,
-        handoff.errorMessage || "本轮 Request 已安全保留",
+        recoveryRequired ? "生成失败" : "生成中断",
+        recoveryRequired
+          ? handoff.errorMessage || "本轮没有收到可用的完成结果。"
+          : "未生成新版本，页面未修改",
         "error",
       ),
     );
-    aiStep.detail = handoff.retryable === false
-      ? "旧 Request 结束后可重新发送"
-      : `可重新启动 ${agentName} 或复制任务`;
+    aiStep.detail = recoveryRequired
+      ? "本轮没有生成新版本"
+      : "未生成新版本，页面未修改";
     aiStep.state = "pending";
     validationStep.detail = "尚未收到可验证完成记录";
     resultStep.detail = "当前 HTML 保持不变";

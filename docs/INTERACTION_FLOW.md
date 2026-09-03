@@ -685,20 +685,20 @@ Request 持久化后，Repository 才能基于冻结 Prompt 建立 `AI任务/<�
 - 修改意图下不渲染输入框。没有评论时按钮说明去哪里写，而不是只变灰。
 
 设置页与 AI 对话侧栏共用同一份 `checking / ready / not-installed / auth-required /
-unavailable` 状态。只有打开设置才立即进入“检测中”并执行**当前方案**的真实
-preflight；窗口从外部终端返回时，只要当前方案尚未 `ready`，`focus` 与
-`visibilitychange` 会合并为一次自动复检。对话侧栏只消费最近一次可信状态，未知、检测中、
+unavailable` 状态。打开设置只执行**当前方案**无副作用的 `diagnose`，不创建
+preflight ticket 或 Agent session；窗口从外部终端返回时，只在安装中或等待登录等
+临时状态轻量刷新。并发的相同诊断共享一个 selection-keyed Promise，过期结果不能发布。
+对话侧栏只消费最近一次可信状态，未知、检测中、
 未安装、需要登录、额度用尽或连接失败时都提供进入设置的下一步，不把英文原文写进聊天。
 检测、复制登录指令、填写源页 Agent Token 和打开 About 不运行 Request、不冻结 HTML、不
-改变评论或草稿。打开 About 不触发 Agent 检查；未安装时的一键安装只写入 PageRoot 管理目录，同样不创建 Request。弱的 `/agent/availability` 只证明可信 CLI 可被发现，永远不能直接生成
-绿色状态；只有该 Agent 的完整预检成功才显示“已连接”。会话中的额度失败会收回绿灯，分类为
+改变评论或草稿。打开 About 不触发 Agent 检查；未安装时的一键安装只写入 PageRoot 管理目录，同样不创建 Request。诊断分别投影安装、认证、协议和服务四项事实；Custom 兼容接口的诊断只证明“已配置”，不要求实现 `/models`，连接或发送时的正式 preflight 才能证明模型服务。弱诊断不能覆盖正式发送或运行得到的强失败。会话中的额度失败会收回绿灯，分类为
 `account-capacity`，禁止把 Agent 可见英文错误当作聊天。
 
 设置页内状态区保持统一的 140px 控制槽，只接通当前方案，只在需要用户恢复时显示动作：
 
 - 检测中：只显示“检测中”，不显示按钮；
 - 已连接：只显示“已连接”，不显示重新检测；
-- 未安装：显示“未安装”和“安装 Qoder CLI”或“安装 Codex”；安装中显示“正在安装…”；失败后可重试；
+- 未安装：显示“未安装”和“安装 Qoder CLI”或“安装 Codex”；安装中显示“正在安装…”与可点击的“取消”，点击后原位显示“正在取消…”，完成后回到“未安装”；失败后可重试；
 - 需要登录：源页 Agent 在卡内显示厂商、Token 和连接，不弹窗；Qoder/Codex 显示“复制登录指令”。复制成功后原位变为“等待登录”
   与“重新复制”，用户即使没有点击复制按钮而在终端自行登录，返回源页也会自动复检；
 - 额度不足：显示“额度已用完”，不显示绿色状态；下一步是换方案或复制给别的 AI；
@@ -731,8 +731,12 @@ preflight；窗口从外部终端返回时，只要当前方案尚未 `ready`，
   Request 仍可结束和审阅，但不会回退成 Qoder 或剪贴板，也不显示重新启动动作。
 - runtime 初始化、读取任务、写 Candidate、finalizer 和停止事件只用于显示进度；它们不表示
   Candidate 已完成。只有 completion 与 Repository 校验通过才进入待审阅。
-- 受管 Agent 普通启动失败时，只有当前 Bridge 已确认所拥有的进程组退出且没有
-  output/completion 残留，才显示“重新启动 Agent”与“复制任务”，并只复用同一 Request。
+- 受管 Agent 失败后，Bridge 分开投影同一 Request 的技术重试安全性 `safeToRetry` 与
+  用户恢复方式 `recoveryKind`。只有 `retry` 才显示“重新发送”；限流显示稍后重试，认证、
+  模型、厂商和安装问题分别引导对应恢复动作，不能仅因没有 output/completion 残留就伪装成
+  原样重试。运行区始终最多两个操作，动作只由结构化错误码派生，不解析 provider 文案。
+  只有当前 Bridge 已确认所拥有的进程组退出且没有
+  output/completion 残留，同一 Request 才具备技术重试安全性。
   Bridge 崩溃留下启动租约、进程清理无法确认或已有残留时，本轮不可重试、不可改为复制；
   用户先结束旧 Request 形成 authority fence，再重新发送为新 Request。残留保留用于诊断，
   不覆盖现场。
@@ -1196,6 +1200,21 @@ A 项目 processing 时切换 B 项目：
 | completion 后 output 变化 | 协议违规 | 新 Attempt |
 | no-change | 不建版 | 修改要求后再提交 |
 | AI 失败或取消 | 不建版、不创建工作文件 | 修改要求后再提交 |
+
+Agent 设置与执行状态均原位收口：设置页只执行无副作用的
+diagnose，不建立 preflight ticket 或 Agent session，只在 Bridge 真实诊断
+成功后显示“已连接”。窗口重新获得焦点时，仅安装中或等待登录
+的临时状态轻量刷新。正式发送才执行 preflight 并冻结 Agent、模型与配置。
+
+执行中仅显示“Agent 正在生成”、已等待时长与已接收字节；隐藏推理和
+半成品 HTML 不显示。HTTP 与 ACP 都只在连续 45 分钟没有有效协议
+数据时中断，持续有 content、reasoning、usage 或 heartbeat 可一直运行。
+Request 仍为 `processing` 但同一 request/attempt 的受管 handoff 失败时，
+侧栏立即以失败投影为准：网络中断/无活动超时显示“重新发送 / 结束本轮”；
+限流、认证、模型、厂商/余额或安装错误显示与 `recoveryKind` 对应的真实操作，
+不会出现无效的原样重试。无法安全恢复时只显示“结束本轮”。结束会先停止受管 Agent 再持久
+取消 Request，不只隐藏界面。历史消息仅按已有日期、turn 和 request 派生
+分组；缺少当前 request/attempt 精确身份的旧错误不得归入本轮。
 | 取消后 AI 才运行 finalizer | 返回不可重试的 `cancelled` 终态，不建版 | 停止 AI Agent |
 | 浏览器文件不是 UTF-8 | 不载入、不修改原文件 | 转换编码后重新选择 |
 | 附件为空、超过 25 MB 或超过 10 个 | 无效项不加入，有效项保留 | 重新选择其他文件 |
