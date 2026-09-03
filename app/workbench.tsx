@@ -208,10 +208,10 @@ import {
 import { deriveWorkbenchInspector } from "./workbench/inspector-presentation.js";
 import { RunConversationOutlet } from "./workbench/run-conversation-outlet";
 import { WorkbenchReviewOverlay } from "./workbench/workbench-review-overlay";
+import WorkbenchActiveDocumentCanvas from "./workbench/WorkbenchActiveDocumentCanvas";
 import WorkbenchDocumentSurfaceCache from "./workbench/WorkbenchDocumentSurfaceCache";
-import WorkbenchDocumentCanvasPool from "./workbench/WorkbenchDocumentCanvasPool";
 import ProjectRulesEditorPage from "./workbench/project-rules-editor";
-import { useRuntimeCanvasResidency } from "./workbench/use-runtime-canvas-residency";
+import { useEditRuntimePreparation } from "./workbench/use-edit-runtime-preparation";
 import {
   prepareReviewAnalysis,
   preparedReviewByteSize,
@@ -831,19 +831,18 @@ export default function Workbench() {
   const revealAiConversation = aiConversation.reveal;
   const hideAiConversation = aiConversation.hide;
   const editRuntimeSnapshot = workspaceControllerSnapshot?.editRuntime ?? null;
-  const runtimeCanvasResidency = useRuntimeCanvasResidency({
-    tabIds: workbenchTabsSnapshot.tabs.map((tab) => tab.tabId),
-    activeTabId: workbenchTabsSnapshot.activeTabId, activeSourceSha256: sourceSha256,
-    activeCanvasGeneration: canvasGeneration, canvasMode, editRuntimeSnapshot,
-    startPreparation: (input) => workspaceControllerRef.current?.startEditAuthorRuntimePreparation(input),
-  });
   const {
-    keys: retainedCanvasKeys, retain: retainRuntimeCanvas, evict: evictRuntimeCanvas,
-    activeRetained: retainedRuntimeForActiveDocument,
     runtimePhase: editRuntimePhase,
-    runtimePreparing: editRuntimePreparing, runtimeRenderPending: editRuntimeRenderPending,
+    runtimePreparing: editRuntimePreparing,
+    runtimeRenderPending: editRuntimeRenderPending,
     runtimeGrant: editRuntimeGrant,
-  } = runtimeCanvasResidency;
+  } = useEditRuntimePreparation({
+    canvasMode,
+    editRuntimeSnapshot,
+    startPreparation: (input) => (
+      workspaceControllerRef.current?.startEditAuthorRuntimePreparation(input)
+    ),
+  });
   const runtimeDegradationKey = `${sourcePath || "no-source"}:${canvasGeneration}`;
   const [runtimeDegradationSnapshot, setRuntimeDegradationSnapshot] = useState<{
     key: string;
@@ -1358,19 +1357,6 @@ export default function Workbench() {
         generation,
         renderedSha256: sha256,
       }) === true;
-      if (acknowledged) {
-        const snapshot = currentControllerSnapshot();
-        const activeTab = snapshot?.workbenchTabs?.tabs.find((tab) => (
-          tab.kind === "document" && tab.tabId === snapshot.workbenchTabs?.activeTabId
-        ));
-        const disposableRuntime = Boolean(
-          snapshot?.editRuntime?.grant
-          && ["running", "settled"].includes(snapshot.editRuntime.phase),
-        );
-        if (activeTab) {
-          retainRuntimeCanvas(activeTab.tabId, sha256, generation, !disposableRuntime);
-        }
-      }
       return acknowledged;
     }
     setCanvasRenderAcks((current) => ({
@@ -1378,7 +1364,7 @@ export default function Workbench() {
       preview: sha256 ? { generation, sha256 } : null,
     }));
     return true;
-  }, [currentControllerSnapshot, currentDocumentSessionSnapshot, retainRuntimeCanvas]);
+  }, [currentDocumentSessionSnapshot]);
   const renderedContentSha256 =
     canvasRenderAcks.edit?.generation === canvasGeneration
       ? canvasRenderAcks.edit.sha256
@@ -5789,9 +5775,17 @@ export default function Workbench() {
     });
   }, [activeWorkbenchTab, navigationCapability, presentWorkbenchTabOutcome, settingsPageActive]);
   const { visibleCachedSurface, candidateCachedSurface, retainPresentedTab, completeHandoff, updateVisibleScroll, markFirstScroll } = useDocumentSurfaceHandoff({ cache: documentSurfaceCacheSnapshot, tabs: workbenchTabsSnapshot, sourceSha256, renderedSourceSha256: canvasMode === "preview" && canvasRenderAcks.preview?.generation === canvasGeneration ? canvasRenderAcks.preview.sha256 : renderedContentSha256, canvasAuthority, canvasGeneration, controller: workspaceController });
-  const activeRuntimeCanvasUsable = retainedRuntimeForActiveDocument;
-  const cachePresentationAllowed = !(canvasMode === "edit" && activeRuntimeCanvasUsable);
-  const effectiveVisibleCachedSurface = cachePresentationAllowed ? visibleCachedSurface : null;
+  const effectiveVisibleCachedSurface = visibleCachedSurface;
+  const cachedSurfaceInteractionPassthrough = Boolean(
+    canvasMode === "edit"
+    && editRuntimePhase === "static"
+    && !editRuntimePreparing
+    && documentRuntimeTabId
+    && visibleCachedSurface?.tabId === documentRuntimeTabId
+  );
+  const cachedSurfaceBlocksCanvas = Boolean(
+    effectiveVisibleCachedSurface && !cachedSurfaceInteractionPassthrough
+  );
   const retryProjectHydrationFromCommentRail = useCallback(() => {
     void workspaceController?.retryProjectHydration();
   }, [workspaceController]);
@@ -5879,6 +5873,12 @@ export default function Workbench() {
     ? workspaceController.projectCatalog as ProjectCatalogCapability
     : null;
   const canMountUnboundCanvas = Boolean(documentRuntimeTabId);
+  const activeRuntimeCanvasMounted = Boolean(
+    desktopHostReady
+    && !desktopHostIssue
+    && canMountUnboundCanvas
+    && !editRuntimePreparing,
+  );
   const currentProjectDisplayName = currentProjectNameFromFile(sourcePath, projectName);
   const currentProjectSidebarVersions = useMemo(() => (
     projectId && documentId
@@ -6227,11 +6227,12 @@ export default function Workbench() {
         snapshot={documentSurfaceCacheSnapshot}
         visibleTabId={effectiveVisibleCachedSurface?.tabId || null}
         visibleSourceSha256={effectiveVisibleCachedSurface?.sourceSha256 || null}
-        candidateTabId={cachePresentationAllowed ? candidateCachedSurface?.tabId || null : null}
-        candidateSourceSha256={cachePresentationAllowed ? candidateCachedSurface?.sourceSha256 || null : null}
+        candidateTabId={candidateCachedSurface?.tabId || null}
+        candidateSourceSha256={candidateCachedSurface?.sourceSha256 || null}
         onVisibleReady={retainPresentedTab} onHandoffComplete={completeHandoff}
         onVisibleScroll={updateVisibleScroll}
         onFirstScroll={markFirstScroll}
+        interactionPassthrough={cachedSurfaceInteractionPassthrough}
         height="var(--comment-canvas-height, 760px)"
       />
       {settingsPageActive ? (
@@ -6333,11 +6334,14 @@ export default function Workbench() {
         >
           <div
             className="canvas-edit-surface"
+            data-testid="workbench-active-document-canvas"
+            data-runtime-hot-count={activeRuntimeCanvasMounted ? 1 : 0}
+            data-runtime-hot-limit={1}
             data-edit-runtime-phase={editRuntimePhase}
             data-edit-runtime-outcome={editRuntimeSnapshot?.lastOutcome || undefined}
             hidden={canvasMode !== "edit"}
-            aria-hidden={canvasMode !== "edit" || Boolean(effectiveVisibleCachedSurface)}
-            inert={effectiveVisibleCachedSurface ? true : undefined}
+            aria-hidden={canvasMode !== "edit" || cachedSurfaceBlocksCanvas}
+            inert={cachedSurfaceBlocksCanvas ? true : undefined}
           >
             {!desktopHostReady ? (
               <div className="canvas-loading" role="status">正在识别运行环境…</div>
@@ -6348,37 +6352,34 @@ export default function Workbench() {
               </div>
             ) : (
               <>
-              {staticFallbackNoticeIdentity ? (
-                <EditRuntimeStaticFallbackNotice
-                  key={staticFallbackNoticeIdentity}
-                  state={runtimeNoticeState}
-                  {...(editRuntimeSnapshot?.retryAvailable
-                    ? {
-                        onRetry: () => {
-                          workspaceControllerRef.current?.retryEditAuthorRuntime();
-                        },
-                      }
-                    : {})}
-                  onExport={() => {
-                    void exportCurrentHtml();
-                  }}
-                />
-              ) : null}
-              {editRuntimePreparing && !activeRuntimeCanvasUsable ? (
-                <HtmlDisplaySurface
-                  html={html}
-                  sourcePath={canvasSourcePath}
-                  height="var(--comment-canvas-height, 760px)"
-                />
-              ) : null}
-              <WorkbenchDocumentCanvasPool
+                {staticFallbackNoticeIdentity ? (
+                  <EditRuntimeStaticFallbackNotice
+                    key={staticFallbackNoticeIdentity}
+                    state={runtimeNoticeState}
+                    {...(editRuntimeSnapshot?.retryAvailable
+                      ? {
+                          onRetry: () => {
+                            workspaceControllerRef.current?.retryEditAuthorRuntime();
+                          },
+                        }
+                      : {})}
+                    onExport={() => {
+                      void exportCurrentHtml();
+                    }}
+                  />
+                ) : null}
+                {editRuntimePreparing ? (
+                  <HtmlDisplaySurface
+                    html={html}
+                    sourcePath={canvasSourcePath}
+                    height="var(--comment-canvas-height, 760px)"
+                  />
+                ) : null}
+                <WorkbenchActiveDocumentCanvas
                   activeTabId={documentRuntimeTabId}
-                  activeSourceSha256={sourceSha256} activeCanvasGeneration={canvasGeneration}
-                  retainedTabIds={retainedCanvasKeys.map((entry) => entry.tabId)}
-                  onEvict={evictRuntimeCanvas}
-                  activeElement={canMountUnboundCanvas
-                    && !(editRuntimePreparing && !activeRuntimeCanvasUsable)
-                    ? <HtmlCanvasEditor
+                  activeSourceSha256={sourceSha256}
+                  activeElement={activeRuntimeCanvasMounted ? (
+                    <HtmlCanvasEditor
                   key={`editor-authority-${documentRuntimeTabId || "none"}-${canvasGeneration}`}
                   ref={editorRef}
                   html={html}
@@ -6414,14 +6415,6 @@ export default function Workbench() {
                       outcome,
                       preserveLastKnownGood: settlement.preserveLastKnownGood,
                     });
-                    if (outcome === "ready" && documentRuntimeTabId) {
-                      retainRuntimeCanvas(
-                        documentRuntimeTabId,
-                        grant.sourceSha256,
-                        grant.canvasGeneration,
-                        false,
-                      );
-                    }
                   }}
                   onRuntimeDegradationChange={(state) => {
                     setRuntimeDegradationSnapshot({ key: runtimeDegradationKey, state });
@@ -6469,8 +6462,8 @@ export default function Workbench() {
                       : "editing"}
                   enableReorder={!interactionLocked}
                   pointerCapabilityHoverEnabled={!isBuiltInWelcomePage}
-                />
-                    : null}
+                    />
+                  ) : null}
                 />
               </>
             )}
@@ -6487,7 +6480,7 @@ export default function Workbench() {
               transport="independent-url"
               onInteraction={() => workspaceControllerRef.current?.deferDocumentSurfacePrewarm()}
               onReady={handlePreviewReady}
-              presentationCovered={Boolean(effectiveVisibleCachedSurface)}
+              presentationCovered={cachedSurfaceBlocksCanvas}
               initialScrollTop={effectiveVisibleCachedSurface?.scrollTop}
               onScrollTopChange={(scrollTop) => {
                 if (activeWorkbenchTab.kind === "document") {

@@ -87,7 +87,8 @@ source or be reconciled node by node.
   the authored script markup and bodies have the same exact program identity.
   A script change requires a new Canvas generation and a newly authorized
   resource closure.
-- Script-enabled Edit pages are not retained in the inactive five-Canvas pool.
+- Inactive tabs retain no Edit page or Runtime DOM; only the selected document
+  owns the single active Canvas.
   Switching away discards the page and revokes its resource session; returning
   prepares a fresh closure and runs a fresh disposable page. Script-disabled
   static Canvases keep the existing bounded hot cache.

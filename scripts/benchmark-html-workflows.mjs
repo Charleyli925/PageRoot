@@ -467,7 +467,7 @@ async function runtimeResourceSnapshot() {
       '[data-testid="workbench-document-surface-cache"]',
     );
     const runtimePool = document.querySelector(
-      '[data-testid="workbench-document-canvas-pool"]',
+      '[data-testid="workbench-active-document-canvas"]',
     );
     const reviewWorkspace = document.querySelector('[data-testid="ai-review-workspace"]');
     const numberAttribute = (element, name) => Number(element?.getAttribute(name) || 0);
@@ -759,7 +759,7 @@ async function requestLocalHtmlOpen(page) {
 async function cacheState() {
   return launched.page.evaluate(() => {
     const root = document.querySelector('[data-testid="workbench-document-surface-cache"]');
-    const runtimePool = document.querySelector('[data-testid="workbench-document-canvas-pool"]');
+    const runtimePool = document.querySelector('[data-testid="workbench-active-document-canvas"]');
     const numberAttribute = (name) => Number(root?.getAttribute(name) || 0);
     return {
       surfaceCount: root?.querySelectorAll("[data-tab-id]").length || 0,
@@ -804,11 +804,11 @@ function assertCacheBudget(snapshot, label, { minimumRuntimeHotCount = 0 } = {})
   );
   assert(
     snapshot.runtimeHot.count <= snapshot.runtimeHot.limit,
-    `${label}: retained runtime canvases exceeded the resource budget`,
+    `${label}: active runtime canvases exceeded the resource budget`,
   );
   assert(
     snapshot.runtimeHot.count >= minimumRuntimeHotCount,
-    `${label}: retained runtime canvases fell below the ${minimumRuntimeHotCount}-canvas floor`,
+    `${label}: active runtime canvases fell below the ${minimumRuntimeHotCount}-canvas floor`,
   );
   assert(
     snapshot.runtimeHot.iframeCount >= snapshot.runtimeHot.count
@@ -830,7 +830,7 @@ function assertReviewResourcesReleased(snapshot) {
   );
   assert(
     snapshot.resources.runtimeHot.count <= snapshot.resources.runtimeHot.limit,
-    "accept: runtime hot canvases exceeded the five-canvas budget",
+    "accept: more than one active runtime canvas remained mounted",
   );
   assert(
     snapshot.resources.runtimeHot.count >= 1,

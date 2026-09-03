@@ -70,6 +70,8 @@ const RETIRED_MODULES = new Set([
   "app/application/browser-file-tab-identity.js",
   "app/application/runtime-capabilities.js",
   "app/workbench/ReviewAnalysisPrewarm.tsx",
+  "app/workbench/WorkbenchDocumentCanvasPool.tsx",
+  "app/workbench/use-runtime-canvas-residency.ts",
 ]);
 const RETIRED_IMPORT_NAMES = new Set([
   "NativeEditingController",
@@ -82,6 +84,8 @@ const RETIRED_IMPORT_NAMES = new Set([
   "browser-file-tab-identity",
   "runtime-capabilities",
   "ReviewAnalysisPrewarm",
+  "WorkbenchDocumentCanvasPool",
+  "use-runtime-canvas-residency",
 ]);
 const PROVIDER_LITERALS = ["qoder", "codex", "qoder-acp", "codex-acp"];
 const RAW_ENDPOINTS = new Set([

@@ -52,7 +52,7 @@ function managedDraftComment(managedSourcePath, text) {
 
 async function retainedEditorDocumentToken(page) {
   return page.locator(
-    '[data-testid="workbench-document-canvas-pool"] iframe[title*="HTML"]',
+    '[data-testid="workbench-active-document-canvas"] iframe[title*="HTML"]',
   ).first().evaluate((frameElement) => {
     const key = "__PAGEROOT_NATIVE_QA_DOCUMENT_TOKEN__";
     const view = frameElement.contentWindow;

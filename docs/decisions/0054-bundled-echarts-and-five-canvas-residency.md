@@ -2,9 +2,10 @@
 
 ## Status
 
-Partially superseded by [ADR 0065](0065-disposable-edit-runtime.md). Decision 1,
-the immutable verified byte-store responsibility in Decision 2, and
-script-disabled Canvas residency remain active. Script-enabled iframe
+Partially superseded by [ADR 0065](0065-disposable-edit-runtime.md) and the
+single-active-Canvas retirement. Decision 1, the immutable verified byte-store
+responsibility in Decision 2, and the bounded static document-surface cache
+remain active. Multi-tab `HtmlCanvasEditor` residency, script-enabled iframe
 residency, script prewarm and paint/freeze rules are retired.
 
 ## Context
@@ -35,24 +36,23 @@ working reports executed the same chart again.
    The four-second deadline remains only as a broken-script safety fallback.
    ECharts stays on the exact 5.5.0 CDN bytes; GHSA-fgmj-fm8m-jvvx is a dated
    reviewed exception because 6.1.0 would miss those URLs.
-5. Workbench retains the five most recently verified `HtmlCanvasEditor` iframe
-   documents. Inactive entries are hidden, inert, read-only and locked. An exact
-   `(tabId, sourceSha256)` hit cancels a duplicate runtime preparation and may
-   become interactive only after ProjectWorkflow republishes current authority.
-   A matching `canvasGeneration` with a different SHA is not a hit: persist and
-   native-edit resume still replace that document.
-6. `DocumentSurfaceCacheSession`, the runtime iframe pool and the library store
-   remain presentation/resource caches. None owns Session facts, operation IDs,
-   source commits, snapshots or rollback.
+5. Workbench keeps exactly one `HtmlCanvasEditor` for the current runtime owner.
+   A tab switch mounts the new active editor underneath the matching
+   script-disabled static projection; exact Canvas generation and source-Hash
+   verification retire that projection. Inactive tabs retain no editor iframe
+   or Runtime DOM.
+6. `DocumentSurfaceCacheSession` and the library store remain presentation and
+   resource caches. Neither owns Session facts, operation IDs, source commits,
+   snapshots or rollback.
 
 ## Consequences
 
 - A known ECharts report can render offline and no longer pays CDN cold start.
-- Five report tabs retain chart pixels, scroll state and their single execution.
-- A sixth verified Canvas evicts the least recently used iframe but keeps its
-  byte-bounded static projection.
-- Memory is bounded by five static display iframes, five frozen Canvas iframes,
-  20 source projections and the separate 128 MiB library ceiling.
+- Inactive report tabs retain byte-bounded static projections and scroll state,
+  but chart/runtime execution is recreated only for the selected document.
+- Memory is bounded by five static display iframes, one active Edit Canvas and
+  its bounded handoff slot, 20 source projections and the separate 128 MiB
+  library ceiling.
 - Correctness gates still validate source path, SHA, host bindings, script size,
   runtime audit and Canvas authority; only duplicate resource work and minimum
   waiting are removed.
