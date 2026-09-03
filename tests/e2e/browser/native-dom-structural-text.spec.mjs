@@ -226,7 +226,7 @@ test("mixed block parents fall back to safe inline hosts and exact bare-text fra
   });
   await expect(fragmentHost).toHaveText("，新版裸文本你");
   await page.keyboard.press("Meta+s");
-  await expect(fragmentHost).toHaveCount(0);
+  await expect(fragmentHost).toHaveAttribute("contenteditable", "true");
   expected = replaceExactOnce(expected, "，裸文本", "，新版裸文本你");
   expect((await exportCurrentHtml(page)).equals(expected)).toBe(true);
   await expect(mixedParent.locator(':scope > div[data-keep="chart"]')).toHaveText(
@@ -262,8 +262,14 @@ test("bare-text fragments persist toolbar and shortcut formatting through guarde
   });
   const mixedParent = frame.locator(caseSelector("mixed-parent"));
   const fragmentHost = mixedParent.locator(
-    ':scope > pageroot-text-fragment[data-pageroot-text-fragment-host="true"]',
+    'pageroot-text-fragment[data-pageroot-text-fragment-host="true"]',
   );
+  const editingHost = mixedParent.locator('[contenteditable="true"]');
+  const initialDocument = await frame.evaluate(() => {
+    const key = "__PAGEROOT_FORMAT_DOCUMENT_TOKEN__";
+    window[key] ||= crypto.randomUUID();
+    return window[key];
+  });
 
   await mixedParent.dblclick({
     position: await directTextPoint(mixedParent, "裸文本"),
@@ -274,7 +280,32 @@ test("bare-text fragments persist toolbar and shortcut formatting through guarde
   const boldButton = page.getByRole("button", { name: "加粗", exact: true });
   await expect(boldButton).toBeEnabled();
   await boldButton.click();
-  await expect(fragmentHost).toHaveCount(0);
+  await expect.poll(async () => ({
+    fragmentCount: await fragmentHost.count(),
+    startStatus: await page.getByTestId("html-canvas-editor")
+      .getAttribute("data-native-start-status"),
+    formatResume: await page.getByTestId("html-canvas-editor")
+      .getAttribute("data-native-format-resume"),
+    blockedDetail: await page.getByTestId("html-canvas-editor")
+      .getAttribute("data-edit-block-detail"),
+    candidateId: await page.getByTestId("html-canvas-editor")
+      .getAttribute("data-runtime-candidate-id"),
+    editingTags: await editingHost
+      .evaluateAll((elements) => elements.map((element) => element.tagName)),
+  })).toEqual({
+    fragmentCount: 0,
+    startStatus: "started",
+    formatResume: "source:requested:resumed",
+    blockedDetail: null,
+    candidateId: null,
+    editingTags: ["SPAN"],
+  });
+  await expect(editingHost).toHaveAttribute("contenteditable", "true");
+  await expect.poll(() => editingHost.evaluate((element) => (
+    element.ownerDocument.activeElement === element
+  ))).toBe(true);
+  expect(await frame.evaluate(() => window.__PAGEROOT_FORMAT_DOCUMENT_TOKEN__))
+    .toBe(initialDocument);
 
   let expected = replaceExactOnce(
     source,
@@ -285,6 +316,8 @@ test("bare-text fragments persist toolbar and shortcut formatting through guarde
     await exportCurrentHtml(page)
   ).toString("utf8")).toBe(expected.toString("utf8"));
   await expect(page.locator(".toast.show")).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  await expect(editingHost).toHaveCount(0);
 
   await mixedParent.dblclick({
     position: await directTextPoint(mixedParent, "文本"),
@@ -293,7 +326,12 @@ test("bare-text fragments persist toolbar and shortcut formatting through guarde
   await expect(fragmentHost).toHaveAttribute("contenteditable", "true");
   await selectTextRange(fragmentHost, 0, 2);
   await page.keyboard.press("Meta+i");
-  await expect(fragmentHost).toHaveCount(0);
+  await expect(editingHost).toHaveAttribute("contenteditable", "true");
+  await expect.poll(() => editingHost.evaluate((element) => (
+    element.ownerDocument.activeElement === element
+  ))).toBe(true);
+  expect(await frame.evaluate(() => window.__PAGEROOT_FORMAT_DOCUMENT_TOKEN__))
+    .toBe(initialDocument);
 
   expected = replaceExactOnce(
     expected,

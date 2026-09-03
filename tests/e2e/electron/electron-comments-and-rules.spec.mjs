@@ -128,7 +128,7 @@ test("selected-text comments persist stable identity and stay exact after text r
   const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
   const commentText = "这三个字需要更直接。";
   try {
-    const { frame } = await loadedDiskFrame(
+    const { editor, frame } = await loadedDiskFrame(
       launched.page,
       fixture.sourcePath,
       "list-item",
@@ -139,12 +139,27 @@ test("selected-text comments persist stable identity and stay exact after text r
     );
     await activateNativeEdit(frame, "list-item");
     await setTextSelection(frame, "list-item", 0, 3);
+    const editDocument = await documentToken(frame);
+    const editGeneration = await editor.locator('iframe:not([data-frame-role])')
+      .getAttribute("data-frame-generation");
     await launched.page.getByRole("toolbar", { name: /编辑/u })
       .getByRole("button", { name: /留评论/u })
       .click();
+    await expect(frame.locator(caseSelector("list-item")))
+      .toHaveAttribute("contenteditable", "true");
+    await expect.poll(() => documentToken(frame)).toBe(editDocument);
+    await expect(editor.locator('iframe:not([data-frame-role])'))
+      .toHaveAttribute("data-frame-generation", editGeneration);
+    await expect(editor.locator('iframe[data-frame-role="runtime-candidate"]'))
+      .toHaveCount(0);
     const composer = launched.page.getByRole("region", { name: "添加评论" });
     await composer.getByRole("textbox", { name: "评论内容" }).fill(commentText);
     await composer.getByRole("button", { name: "评论", exact: true }).click();
+    await expect(frame.locator(caseSelector("list-item")))
+      .toHaveAttribute("contenteditable", "true");
+    await expect.poll(() => documentToken(frame)).toBe(editDocument);
+    await expect(editor.locator('iframe[data-frame-role="runtime-candidate"]'))
+      .toHaveCount(0);
 
     await expect.poll(
       () => managedDraftComment(managedSourcePath, commentText),

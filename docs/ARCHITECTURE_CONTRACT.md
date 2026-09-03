@@ -571,11 +571,12 @@ last-known-good iframe exists. It reports that settlement fact to
 caches its own boolean. The Canvas freeze contract reports the latest complete
 working-source Hash separately from the visible verified-projection Hash and a
 stale-projection flag. A preserved older iframe never advances the latter.
-Project switch and AI submission fail closed until the visible projection has
-caught up. Close uses a separate source-protection contract: it may reconcile
-and protect the frozen working bytes while retaining the older rendered Hash
-as an explicit stale fact, but never substitutes the working-source Hash for a
-missing or stale rendered Hash.
+Canvas acknowledgement is presentation/cache authority only; it is not
+authorization for save, export, AI freeze, project switch or close. Those
+boundaries use the complete Working HTML plus exact persistence or recovery
+evidence while retaining an older rendered Hash as an explicit stale fact.
+They never substitute the working-source Hash for a missing or stale rendered
+Hash.
 Runtime DOM never becomes SourcePatch, Source HTML, save, Version, export,
 Request, Candidate or Review input.
 
@@ -622,6 +623,25 @@ stable-element-ID selection when each target remains valid. Every completed
 operation first materializes complete HTML and enters the ordinary Hash/CAS,
 atomic-save and recovery boundary; close/reopen must reproduce source edits
 from that HTML. Author Script then regenerates runtime presentation.
+
+A soft checkpoint materializes delivered input as complete Working HTML,
+allocates required Stable IDs and enters the ordinary autosave/recovery queue
+without ending native editing. Continuous input, delete, paste, Enter,
+composition completion, common text styles, autosave, Cmd+S, comment save,
+attachment save and export use this boundary; they retain the iframe,
+contenteditable host, Selection, caret and focus, and never start a Runtime
+candidate merely to acknowledge persistence. A hard leave ends native editing.
+Text-range formatting always allocates any persistent wrapper through
+SourcePatch, updates the current iframe in place and resumes the logical range;
+only nodes imported by that trusted patch may extend Runtime's private source
+authority registration. Author Script cannot gain authority by copying public
+Stable-ID or marker attributes.
+When its destination leaves Edit Canvas, `leave-canvas` records the same source
+checkpoint but does not rebuild or start a candidate before departure, even
+while `runtimeNeedsRerender` or the visible projection Hash is stale. An aborted
+leave may later refresh as recovery; it must not clear the stale fact to
+manufacture success. History retains its separate bookmark and canonical
+adoption behavior.
 
 This contract grants no Runtime DOM persistence, timer/rAF/Observer/listener
 freeze, runtime snapshot recovery, Canvas/SVG pixel save, runtime/source

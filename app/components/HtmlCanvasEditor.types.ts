@@ -253,13 +253,20 @@ export type HtmlCanvasEditorHandle = {
   /** Restores the authored iframe viewport without changing source. */
   scrollToTop: (scrollTop: number) => boolean;
   /** Commits delivered native input while keeping the live editing session active. */
-  checkpointPendingEdit: () => HtmlCanvasCommitResult;
-  /** Retires the editable DOM, reloads canonical source, and optionally resumes editing. */
+  checkpointPendingEdit: (options?: {
+    trigger?: NativeEditCheckpointTrigger;
+  }) => HtmlCanvasCommitResult;
+  /** Ends native editing and either refreshes the current Canvas or leaves it without refresh. */
   fencePendingEdit: (options?: {
     resumeEditing?: boolean;
     /** Keeps the active target/caret bookmark for the pending history result. */
     preserveForHistory?: boolean;
     trigger?: NativeEditCheckpointTrigger;
+    /**
+     * A leave boundary retires native editing without rebuilding the Runtime
+     * projection that the caller is about to leave.
+     */
+    endBehavior?: "refresh-current-canvas" | "leave-canvas";
   }) => HtmlCanvasCommitResult;
   commitPendingEdit: () => HtmlCanvasCommitResult;
   /** Captures pending text and synchronously blocks every mutation entrypoint. */

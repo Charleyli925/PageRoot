@@ -420,6 +420,9 @@ export class RunWorkflow {
     if (!ports.canvas || typeof ports.canvas.freeze !== "function") {
       throw new TypeError("RunWorkflow requires a Canvas freeze port.");
     }
+    if (typeof ports.canvas.checkpointPendingEdit !== "function") {
+      throw new TypeError("RunWorkflow CanvasPort must provide a soft checkpoint.");
+    }
     if (typeof ports.canvas.unlock !== "function") {
       throw new TypeError("RunWorkflow CanvasPort must provide unlock.");
     }
@@ -451,7 +454,7 @@ export class RunWorkflow {
     this.#drain = drain;
     this.#codecs = createRunWorkflowCodecs(codecs);
     this.#canvasPort = {
-      fencePendingEdit: ports.canvas.fencePendingEdit || (() => ({ ok: true })),
+      checkpointPendingEdit: ports.canvas.checkpointPendingEdit,
       freeze: ports.canvas.freeze,
       unlock: ports.canvas.unlock,
       normalizeComments: ports.canvas.normalizeComments || (() => (
@@ -772,8 +775,7 @@ export class RunWorkflow {
       return blocked(submitPlan.code, submitPlan.reason);
     }
     const sourcePath = context.sourcePath;
-    const committed = this.#canvasPort.fencePendingEdit({
-      resumeEditing: false,
+    const committed = this.#canvasPort.checkpointPendingEdit({
       trigger: "ai",
     });
     if (!committed?.ok) {
@@ -849,25 +851,11 @@ export class RunWorkflow {
       const frozenWorkingSourceSha256 = String(
         frozen?.workingSourceSha256 || frozen?.sourceSha256 || "",
       );
-      const frozenRenderedProjectionSha256 = String(
-        frozen?.renderedProjectionSha256 || frozen?.canvasRenderedSha256 || "",
-      );
       if (!frozen?.ok || !SHA256.test(frozenWorkingSourceSha256)) {
         if (frozen?.ok) this.#canvasPort.unlock();
         return blocked(
           "RUN_SUBMISSION_FREEZE",
           frozen?.reason || "画布还没有形成可验证的 HTML 快照，本轮不会发送。",
-        );
-      }
-      if (
-        frozen.renderedProjectionStale === true
-        || !SHA256.test(frozenRenderedProjectionSha256)
-        || frozenRenderedProjectionSha256 !== frozenWorkingSourceSha256
-      ) {
-        this.#canvasPort.unlock();
-        return blocked(
-          "RUN_SUBMISSION_CANVAS_STALE",
-          "最新页面还没有完成显示，请重新加载动态内容后再发起修改。",
         );
       }
       if (!this.#runSession.freezeSubmission(submission)) {

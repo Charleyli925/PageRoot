@@ -8,7 +8,7 @@ import {
   resolveProjectOpenSource,
 } from "./project/open-operation-procedure.js";
 import {
-  planProjectSwitchAfterCanvas,
+  planProjectSwitchAfterSourceProtection,
   planProjectSwitchAfterDrain,
   planProjectSwitchEntry,
   planProjectSwitchFence,
@@ -708,6 +708,7 @@ export class ProjectWorkflow {
         ? this.#canvasPort.fencePendingEdit({
             resumeEditing: false,
             trigger: "project-switch",
+            endBehavior: "leave-canvas",
           })
         : null;
       const fencePlan = planProjectSwitchFence({
@@ -744,38 +745,24 @@ export class ProjectWorkflow {
         return blocked(afterDrain.code, afterDrain.reason);
       }
       if (shouldCommitCanvas) {
-        const canvasOutcome = await this.#documentWorkflow.ensureCurrentCanvas({
-          context: this.#projectSession.context || undefined,
-        });
-        const canvasPlan = planProjectSwitchAfterCanvas({
-          needsCanvasCommit: true,
-          canvasOk: canvasOutcome.status === "succeeded",
-          canvasReason: canvasOutcome.reason,
-        });
-        if (canvasPlan.kind === "reject") {
-          return blocked(canvasPlan.code, canvasPlan.reason);
-        }
-        committed = this.#canvasPort.fencePendingEdit({
-          resumeEditing: false,
-          trigger: "project-switch",
-        });
-        const afterCanvas = planProjectSwitchAfterCanvas({
-          needsCanvasCommit: true,
-          canvasOk: true,
-          finalFenceOk: Boolean(committed?.ok),
-          finalFenceReason: committed?.reason,
+        const settledDocument = this.#documentSession.snapshot;
+        const afterSourceProtection = planProjectSwitchAfterSourceProtection({
+          needsSourceProtection: true,
           sourcePath: this.#projectSession.sourcePath,
-          lastPersistedRevision: this.#documentSession.lastPersistedRevision,
+          lastPersistedRevision: settledDocument.lastPersistedRevision,
           cutoffRevision,
-          persistedSourceSha256: this.#documentSession.persistedSourceSha256,
-          workingHtmlSha256: this.#documentSession.workingHtmlSha256,
-          canvasRenderedSha256: committed?.renderedProjectionSha256
-            || committed?.canvasRenderedSha256,
+          persistedSourceSha256: settledDocument.persistedSourceSha256,
+          workingHtmlSha256: settledDocument.workingHtmlSha256,
+          committedSourceSha256: committed?.workingSourceSha256
+            || committed?.sourceSha256,
           protectionHtmlSha256: protectionEvidence?.htmlSha256 || "",
           recoveryProtected,
         });
-        if (afterCanvas.kind === "reject") {
-          return blocked(afterCanvas.code, afterCanvas.reason);
+        if (afterSourceProtection.kind === "reject") {
+          return blocked(
+            afterSourceProtection.code,
+            afterSourceProtection.reason,
+          );
         }
       }
       return succeeded({ operationId });

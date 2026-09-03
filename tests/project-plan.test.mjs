@@ -8,7 +8,7 @@ import {
   planSourceLocatorTransition,
 } from "../app/application/project/source-locator-plan.js";
 import {
-  planProjectSwitchAfterCanvas,
+  planProjectSwitchAfterSourceProtection,
   planProjectSwitchAfterDrain,
   planProjectSwitchEntry,
   planProjectSwitchFence,
@@ -80,34 +80,35 @@ test("project switch reuses only a clean exact Canvas validation lease", () => {
   }).action, "full-check");
 });
 
-test("project switch after-canvas plan fail-closes canvas first and does not require a fence until canvas is ok", () => {
-  const canvasFail = planProjectSwitchAfterCanvas({
-    needsCanvasCommit: true,
-    canvasOk: false,
-    canvasReason: "画布未恢复。",
-  });
-  assert.equal(canvasFail.code, "PROJECT_SWITCH_CANVAS_UNVERIFIED");
+test("project switch after-drain plan validates Working HTML instead of presentation freshness", () => {
   assert.equal(
-    planProjectSwitchAfterCanvas({
-      needsCanvasCommit: true,
-      canvasOk: true,
-      finalFenceOk: false,
-    }).code,
-    "PROJECT_SWITCH_FINAL_FENCE",
-  );
-  assert.equal(
-    planProjectSwitchAfterCanvas({
-      needsCanvasCommit: true,
-      canvasOk: true,
+    planProjectSwitchAfterSourceProtection({
+      needsSourceProtection: true,
       sourcePath: "/tmp/a.html",
       lastPersistedRevision: 2,
       cutoffRevision: 1,
       committedSourceSha256: "sha256:aaa",
-      documentSourceSha256: "sha256:aaa",
+      persistedSourceSha256: "sha256:aaa",
+      workingHtmlSha256: "sha256:aaa",
     }).code,
     "PROJECT_SWITCH_SOURCE_MISMATCH",
   );
-  assert.equal(planProjectSwitchAfterCanvas({ needsCanvasCommit: false }).kind, "ready");
+  assert.equal(
+    planProjectSwitchAfterSourceProtection({
+      needsSourceProtection: true,
+      sourcePath: "/tmp/a.html",
+      lastPersistedRevision: 1,
+      cutoffRevision: 1,
+      committedSourceSha256: "sha256:aaa",
+      persistedSourceSha256: "sha256:aaa",
+      workingHtmlSha256: "sha256:aaa",
+    }).kind,
+    "ready",
+  );
+  assert.equal(
+    planProjectSwitchAfterSourceProtection({ needsSourceProtection: false }).kind,
+    "ready",
+  );
 });
 
 test("project close plans classify identity, hydration and abort without executing side effects", () => {

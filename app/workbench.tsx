@@ -1244,8 +1244,8 @@ export default function Workbench() {
           errorMessage: productErrorMessage,
         }),
         canvas: {
-          fencePendingEdit: (options: Record<string, unknown>) => (
-            editorRef.current?.fencePendingEdit(options)
+          checkpointPendingEdit: (options: Record<string, unknown>) => (
+            editorRef.current?.checkpointPendingEdit(options)
           ),
           freeze: (reason: string) => fenceAndFreezeCurrentCanvasRef.current(reason),
           unlock: () => editorRef.current?.unlockNow?.(),
@@ -2930,6 +2930,15 @@ export default function Workbench() {
           )
         );
     if (!targetIsOpen) return;
+    const checkpoint = editorRef.current?.checkpointPendingEdit({
+      trigger: "attachment",
+    });
+    if (checkpoint && !checkpoint.ok) {
+      editorRef.current?.showCommitBlocked(
+        checkpoint.reason || "请完成当前文字输入，再添加附件。",
+      );
+      return;
+    }
     const existingCount = target.kind === "composer"
       ? currentComments.composerAttachments.length
       : currentComments.editSession?.draftAttachments.length ?? 0;
@@ -3323,8 +3332,7 @@ export default function Workbench() {
         // The browser reads the on-disk file, so this action is a source-authority
         // boundary: capture delivered native input and wait for its exact revision
         // to be acknowledged before asking the main process to launch the file.
-        const committed = editorRef.current?.fencePendingEdit({
-          resumeEditing: false,
+        const committed = editorRef.current?.checkpointPendingEdit({
           trigger: "save",
         });
         if (!committed || !committed.ok) {
@@ -3335,10 +3343,7 @@ export default function Workbench() {
           return;
         }
         let launchRevision = currentDocumentSessionSnapshot().editRevision;
-        if (
-          committed.html !== currentDocumentSessionSnapshot().html
-          || committed.pendingMutation
-        ) {
+        if (committed.html !== currentDocumentSessionSnapshot().html) {
           const enqueued = enqueueAutosave(
             committed.html,
             committed.pendingMutation || undefined,
@@ -3590,8 +3595,7 @@ export default function Workbench() {
     // Export is a source-authority boundary, just like save/navigation. Do not
     // rely on the iframe focusout timer to race the button click: a freshly
     // delivered input may still be waiting for its normal debounce checkpoint.
-    const committed = editorRef.current?.fencePendingEdit({
-      resumeEditing: false,
+    const committed = editorRef.current?.checkpointPendingEdit({
       trigger: "export",
     });
     if (committed && !committed.ok) {
@@ -3646,16 +3650,6 @@ export default function Workbench() {
   // activation/history navigation has its own operation owner in VersionWorkflow.
   const beginSourceTransition = useCallback((): number | null => {
     if (isViewTransitioning()) return null;
-    const fenced = editorRef.current?.fencePendingEdit({
-      resumeEditing: false,
-      trigger: "project-switch",
-    });
-    if (!fenced || !fenced.ok) {
-      editorRef.current?.showCommitBlocked(
-        fenced?.reason || "请点回文字完成输入，再切换 HTML 视图。",
-      );
-      return null;
-    }
     const frozen = editorRef.current?.freezeNow();
     if (!frozen || !frozen.ok) {
       editorRef.current?.showCommitBlocked(
@@ -3888,8 +3882,7 @@ export default function Workbench() {
         () => deferredEditorReplayRef.current.requestUserFlush?.(),
       )
     ) return;
-    const committed = editorRef.current?.fencePendingEdit({
-      resumeEditing: false,
+    const committed = editorRef.current?.checkpointPendingEdit({
       trigger: "save",
     });
     if (!committed || !committed.ok) {
@@ -4358,6 +4351,15 @@ export default function Workbench() {
       return;
     }
     if (currentAttachmentUploadCount > 0) return;
+    const checkpoint = editorRef.current?.checkpointPendingEdit({
+      trigger: "comment",
+    });
+    if (checkpoint && !checkpoint.ok) {
+      editorRef.current?.showCommitBlocked(
+        checkpoint.reason || "请完成当前文字输入，再保存评论。",
+      );
+      return;
+    }
     const commentId = currentComments.composerCommentId
       || recordId("comment", commentCounter.current++);
     const outcome = await requiredWorkspaceController(workspaceController)
@@ -4839,7 +4841,6 @@ export default function Workbench() {
       if (
         outcome.code === "RUN_SUBMISSION_NATIVE_EDIT"
         || outcome.code === "RUN_SUBMISSION_FREEZE"
-        || outcome.code === "RUN_SUBMISSION_CANVAS_STALE"
         || outcome.code === "RUN_AGENT_ATTACHMENT_UNSUPPORTED"
       ) {
         editorRef.current?.showCommitBlocked(outcome.reason);

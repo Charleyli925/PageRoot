@@ -584,15 +584,18 @@ test("a dirty document cannot reuse the Canvas validation lease", async (t) => {
   assert.ok(harness.fenceCount > 0);
 });
 
-test("project switch rejects a last-known-good projection that still renders older source", async (t) => {
+test("project switch accepts protected Working HTML without refreshing a last-known-good projection", async (t) => {
   const latestHtml = OLD_HTML.replace("old", "latest structure");
   const oldRenderedSha256 = sha256(OLD_HTML);
   let staleFenceCount = 0;
+  let ensureCanvasCount = 0;
+  let fenceOptions = null;
   let harness;
   harness = createHarness({
     canvas: {
-      fencePendingEdit: () => {
+      fencePendingEdit: (options) => {
         staleFenceCount += 1;
+        fenceOptions = options;
         return {
           ok: true,
           html: harness.documentSession.html,
@@ -604,15 +607,22 @@ test("project switch rejects a last-known-good projection that still renders old
         };
       },
     },
+    documentWorkflow: {
+      async ensureCurrentCanvas() {
+        ensureCanvasCount += 1;
+        return succeeded({ ready: true });
+      },
+    },
   });
   t.after(() => harness.workflow.dispose());
   harness.documentSession.beginEdit(latestHtml);
 
   const outcome = await harness.workflow.prepareSwitch();
 
-  assert.equal(outcome.status, "blocked");
-  assert.equal(outcome.code, "PROJECT_SWITCH_SOURCE_MISMATCH");
-  assert.ok(staleFenceCount >= 2);
+  assert.equal(outcome.status, "succeeded", JSON.stringify(outcome));
+  assert.equal(staleFenceCount, 1);
+  assert.equal(ensureCanvasCount, 0);
+  assert.equal(fenceOptions?.endBehavior, "leave-canvas");
 });
 
 test("close protects the latest source without claiming a stale projection is current", async (t) => {
@@ -865,7 +875,11 @@ test("real Document and Project workflows protect H1 for navigation, close, and 
     const prepared = await first.workflow.prepareSwitch();
     assert.equal(prepared.status, "succeeded", destination);
     assert.equal(first.documentSession.workingHtmlSha256, sha256(h1));
-    assert.equal(first.documentSession.canvasAuthority.renderedSha256, sha256(h1));
+    assert.notEqual(
+      first.documentSession.canvasAuthority.renderedSha256,
+      sha256(h1),
+      "leave safety must not claim a presentation acknowledgement",
+    );
     assert.equal(first.documentSession.persistedSourceSha256, sha256(OLD_HTML));
     assert.equal(first.documentSession.persistState, "failed");
   }
@@ -1407,7 +1421,7 @@ test("a Registry project open routes only its projectId through the desktop auth
   assert.deepEqual(openedProjectIds, ["project_catalog_b"]);
   assert.equal(harness.documentSession.html, B_HTML);
   assert.equal(harness.calls.filter(([kind]) => kind === "source").length, 0);
-  assert.equal(fenceCount, 2, "the outgoing Canvas is fenced by one prepareSwitch only");
+  assert.equal(fenceCount, 1, "the outgoing Canvas is fenced once by prepareSwitch");
 });
 
 test("a pre-protected Registry successor does not repeat the outgoing switch drain", async (t) => {
@@ -2426,6 +2440,8 @@ test("close drains an in-flight local picker before it commits", async (t) => {
 });
 
 test("close drains project switch preparation before it commits", async (t) => {
+  let sourceReleased = false;
+  let resolveSource;
   const harness = createHarness({
     projectOpen: {
       async openLocal() {
@@ -2437,23 +2453,28 @@ test("close drains project switch preparation before it commits", async (t) => {
         };
       },
     },
+    projectRulesWorkflow: {
+      inspect() {
+        return sourceReleased
+          ? { state: "resolved" }
+          : { state: "pending", reason: "source protection pending" };
+      },
+      drain() {
+        if (sourceReleased) return Promise.resolve(true);
+        return new Promise((resolve) => {
+          resolveSource = () => {
+            sourceReleased = true;
+            resolve(true);
+          };
+        });
+      },
+    },
   });
   t.after(() => harness.workflow.dispose());
-  let canvasReleased = false;
-  let resolveCanvas;
-  harness.documentWorkflow.ensureCurrentCanvas = () => {
-    if (canvasReleased) return Promise.resolve(succeeded({ ready: true }));
-    return new Promise((resolve) => {
-      resolveCanvas = () => {
-        canvasReleased = true;
-        resolve(succeeded({ ready: true }));
-      };
-    });
-  };
 
   const opening = harness.workflow.openProject({ kind: "local" });
   await waitFor(
-    () => Boolean(resolveCanvas) && harness.workflow.getSnapshot().open.phase === "opening",
+    () => Boolean(resolveSource) && harness.workflow.getSnapshot().open.phase === "opening",
     "project switch preparation did not enter the open operation",
   );
   let closeSettled = false;
@@ -2469,7 +2490,7 @@ test("close drains project switch preparation before it commits", async (t) => {
   assert.equal(closeSettled, false);
   assert.equal(harness.workflow.getSnapshot().close.phase, "preparing");
 
-  resolveCanvas();
+  resolveSource();
   const [opened, readiness] = await Promise.all([opening, closing]);
   assert.equal(opened.status, "succeeded");
   assert.equal(opened.value.opened, true);
@@ -3596,7 +3617,6 @@ test("canvas failure after import rolls back and never finalizes a trash request
   let canvasCalls = 0;
   harness.documentWorkflow.ensureCurrentCanvas = async () => {
     canvasCalls += 1;
-    if (canvasCalls === 1) return succeeded({ ready: true });
     return {
       status: "rejected",
       code: "DOCUMENT_CANVAS_AUTHORITY_REJECTED",
@@ -3615,7 +3635,7 @@ test("canvas failure after import rolls back and never finalizes a trash request
     deleteOriginal: true,
   });
   assert.equal(confirmed.status, "rejected");
-  assert.equal(canvasCalls, 3);
+  assert.equal(canvasCalls, 2);
   assert.equal(finalized, 0);
   assert.equal(rolledBack, 1);
   assert.equal(
@@ -3665,7 +3685,7 @@ test("canvas confirmation recovers after one failed acknowledgement", async (t) 
   let canvasCalls = 0;
   harness.documentWorkflow.ensureCurrentCanvas = async () => {
     canvasCalls += 1;
-    if (canvasCalls === 2) {
+    if (canvasCalls === 1) {
       return {
         status: "rejected",
         code: "DOCUMENT_CANVAS_AUTHORITY_REJECTED",
@@ -3681,7 +3701,7 @@ test("canvas confirmation recovers after one failed acknowledgement", async (t) 
     action: "import-new",
   });
   assert.equal(confirmed.status, "succeeded");
-  assert.equal(canvasCalls, 3);
+  assert.equal(canvasCalls, 2);
   assert.equal(finalized, 1);
   assert.equal(rolledBack, 0);
   assert.equal(

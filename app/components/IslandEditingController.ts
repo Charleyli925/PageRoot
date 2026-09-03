@@ -1307,6 +1307,17 @@ export class IslandEditingController {
     }
   }
 
+  canApplyInlineStyle(): boolean {
+    if (!this.hasCurrentLease() || this.composing) return false;
+    if (!this.ensureControlledDom()) return false;
+    const range = selectionRangeInsideHost(this.hostElement);
+    return Boolean(
+      range
+      && !range.collapsed
+      && !selectionCrossesImmutableStructure(this.hostElement, range)
+    );
+  }
+
   queuePendingCommand(
     request: NativeEditPendingCommandRequest,
   ): NativeEditQueueCommandResult {

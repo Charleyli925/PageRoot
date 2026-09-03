@@ -33,7 +33,6 @@ import {
   stopPageRoot,
   tmpdir,
   waitForRuntimeHandoffSettled,
-  waitForFreshDiskFrame,
   withBomAndCrLf,
   writeFileSync,
 } from "./electron-native-harness.mjs";
@@ -218,28 +217,24 @@ test("Electron autosaves one authorized disk patch and reopens the same forward 
       firstLaunch.page,
       0,
     );
-    await waitForRuntimeHandoffSettled(firstLaunch.page);
     expect(
       readFileSync(managedSourcePath).equals(expected),
       "checkpoint/autosave must write only the authorized V1 bytes",
     ).toBe(true);
     expect(readFileSync(sourcePath)).toEqual(original);
 
-    frame = await waitForFreshDiskFrame(
-      firstLaunch.page,
-      previousDocumentToken,
-      "source-fidelity",
-    );
+    expect(await documentToken(firstLaunch.page)).toBe(previousDocumentToken);
+    frame = await currentEditorFrame(firstLaunch.page);
     await expect.poll(() => nativeEditingState(frame, "source-fidelity"))
       .toMatchObject({
-        targetIsActive: false,
-        contenteditable: null,
-        isContentEditable: false,
-        selectionInside: false,
+        targetIsActive: true,
+        contenteditable: "true",
+        isContentEditable: true,
+        selectionInside: true,
       });
     expect(await retiredNativeHostState(firstLaunch.page)).toEqual({
-      contenteditable: null,
-      editingMarker: null,
+      contenteditable: "true",
+      editingMarker: "true",
     });
 
     await expect.poll(() => frame.locator(caseSelector("source-fidelity")).textContent())
@@ -323,7 +318,9 @@ test("Electron assigns Stable ID to a native line break and reopens it from mana
       "v2-island-checkpoint-preserved",
     );
     expect(await documentToken(frame)).toBe(initialDocument);
-    await expect(target).not.toHaveAttribute("contenteditable", "true");
+    await expect(target).toHaveAttribute("contenteditable", "true");
+    await expect(editor.locator('iframe[data-frame-role="runtime-candidate"]'))
+      .toHaveCount(0);
     const savedHtml = readFileSync(managedSourcePath, "utf8");
     const identifiedBreaks = savedHtml.match(
       /<br data-pageroot-id="pr1_[0-9a-f]{12}4[0-9a-f]{3}[89ab][0-9a-f]{15}">/gu,
@@ -336,7 +333,6 @@ test("Electron assigns Stable ID to a native line break and reopens it from mana
     expect(await target.evaluate((element) => (
       element.ownerDocument.defaultView.__pagerootManagedLineBreakHost === element
     ))).toBe(true);
-    await activateNativeEdit(frame, "managed-line-break");
     await target.press("End");
     await launched.page.keyboard.insertText("Omega");
     expect(await documentToken(frame)).toBe(initialDocument);
@@ -368,6 +364,140 @@ test("Electron assigns Stable ID to a native line break and reopens it from mana
     if (activeApp) await stopPageRoot(activeApp, isolatedUserData, { cleanup: false });
     removeIsolatedUserData(isolatedUserData);
     removeValidatedTemporaryDirectory(sourceDirectory, "pageroot-native-source-e2e-");
+  }
+});
+
+test("Electron keeps full-identity text formatting in one Runtime editing transaction", {
+  tag: ["@gate-smoke", "@smoke-editing"],
+}, async () => {
+  test.setTimeout(120_000);
+  const sourceDirectory = mkdtempSync(path.join(tmpdir(), "pageroot-native-format-e2e-"));
+  const sourcePath = path.join(sourceDirectory, "full-identity-format.html");
+  const source = `<!doctype html>
+<html data-pageroot-id="pr1_00000000000040008000000000000001">
+<head data-pageroot-id="pr1_00000000000040008000000000000002">
+  <meta data-pageroot-id="pr1_00000000000040008000000000000003" charset="utf-8">
+  <title data-pageroot-id="pr1_00000000000040008000000000000004">Formatting</title>
+</head>
+<body data-pageroot-id="pr1_00000000000040008000000000000005">
+  <main data-pageroot-id="pr1_00000000000040008000000000000006">
+    <p data-pageroot-id="pr1_00000000000040008000000000000007" data-native-case="full-id-format">Alpha Beta</p>
+    <output data-pageroot-id="pr1_00000000000040008000000000000008" id="format-proof"></output>
+  </main>
+  <script data-pageroot-id="pr1_00000000000040008000000000000009">
+    document.querySelector('#format-proof').textContent = 'Runtime formatting ready';
+  </script>
+</body>
+</html>`;
+  writeFileSync(sourcePath, source, "utf8");
+  const isolatedUserData = mkdtempSync(path.join(tmpdir(), "pageroot-native-e2e-"));
+  let activeApp = null;
+  try {
+    const launched = await launchPageRoot({ isolatedUserData, activeSourcePath: sourcePath });
+    activeApp = launched.electronApp;
+    const { editor, frame } = await loadedDiskFrame(
+      launched.page,
+      sourcePath,
+      "full-id-format",
+    );
+    const workingCopyPath = await managedWorkingCopyPath(launched.page, sourcePath);
+    await activateNativeEdit(frame, "full-id-format");
+    await setTextSelection(frame, "full-id-format", 0, 5);
+    const initialDocument = await documentToken(frame);
+    const initialGeneration = await editor.locator('iframe:not([data-frame-role])')
+      .getAttribute("data-frame-generation");
+    const toolbar = editor.getByRole("toolbar");
+
+    await toolbar.getByRole("button", { name: "加粗", exact: true }).click();
+    await expect.poll(() => readFileSync(workingCopyPath, "utf8"))
+      .toMatch(/font-weight:\s*700/u);
+    await expect.poll(() => documentToken(frame)).toBe(initialDocument);
+    await expect(editor.locator('iframe:not([data-frame-role])'))
+      .toHaveAttribute("data-frame-generation", initialGeneration);
+    await expect.poll(() => editor.evaluate((element) => ({
+      candidateCount: element.querySelectorAll(
+        'iframe[data-frame-role="runtime-candidate"]',
+      ).length,
+      formatResume: element.getAttribute("data-native-format-resume"),
+      startStatus: element.getAttribute("data-native-start-status"),
+      commitPath: element.getAttribute("data-native-commit-path"),
+      previewSync: element.getAttribute("data-native-preview-sync"),
+      blockedDetail: element.getAttribute("data-edit-block-detail"),
+    }))).toEqual({
+      candidateCount: 0,
+      formatResume: "source:requested:resumed",
+      startStatus: "started",
+      commitPath: null,
+      previewSync: "ready",
+      blockedDetail: null,
+    });
+
+    await launched.page.keyboard.press(keyShortcut("I"));
+    await expect.poll(() => readFileSync(workingCopyPath, "utf8"))
+      .toMatch(/font-style:\s*italic/u);
+
+    await toolbar.getByText("样式与间距", { exact: true }).click();
+    await toolbar.getByLabel("字号（像素）").fill("28");
+    await expect.poll(() => readFileSync(workingCopyPath, "utf8"))
+      .toMatch(/font-size:\s*28px/u);
+    const color = toolbar.getByLabel("文字颜色");
+    await color.evaluate((element) => {
+      const setter = Object.getOwnPropertyDescriptor(
+        HTMLInputElement.prototype,
+        "value",
+      )?.set;
+      setter?.call(element, "#123456");
+      element.dispatchEvent(new Event("input", { bubbles: true }));
+      element.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    await expect.poll(() => readFileSync(workingCopyPath, "utf8"))
+      .toMatch(/color:\s*#123456/u);
+
+    const editingHost = frame.locator(
+      '[data-native-case="full-id-format"] [contenteditable="true"], '
+      + '[data-native-case="full-id-format"][contenteditable="true"]',
+    );
+    await expect(editingHost).toHaveCount(1);
+    await editingHost.click();
+    await editingHost.evaluate((element) => {
+      element.focus();
+      const range = element.ownerDocument.createRange();
+      range.selectNodeContents(element);
+      range.collapse(false);
+      const selection = element.ownerDocument.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+      element.ownerDocument.dispatchEvent(new Event("selectionchange"));
+    });
+    await expect.poll(() => editingHost.evaluate(() => (
+      Boolean(document.getSelection()?.isCollapsed)
+    ))).toBe(true);
+    await toolbar.getByText("样式与间距", { exact: true }).click();
+    await toolbar.getByLabel("内边距（像素）").fill("12");
+    await expect.poll(() => readFileSync(workingCopyPath, "utf8"))
+      .toMatch(/padding-top:\s*12px/u);
+    await expect.poll(() => editingHost.evaluate((element) => (
+      element.ownerDocument.activeElement === element
+      || element.contains(element.ownerDocument.activeElement)
+    ))).toBe(true);
+    await expect.poll(() => editingHost.evaluate(() => (
+      Boolean(document.getSelection()?.isCollapsed)
+    ))).toBe(true);
+    await expect.poll(() => documentToken(frame)).toBe(initialDocument);
+    await expect(editor.locator('iframe:not([data-frame-role])'))
+      .toHaveAttribute("data-frame-generation", initialGeneration);
+    await expect(editor.locator('iframe[data-frame-role="runtime-candidate"]'))
+      .toHaveCount(0);
+
+    const persisted = readFileSync(workingCopyPath, "utf8");
+    expect(persisted).toMatch(
+      /<span[^>]*style="[^"]*font-weight:\s*700[^"]*font-style:\s*italic[^"]*font-size:\s*28px[^"]*color:\s*#123456[^"]*"[^>]*data-pageroot-id="pr1_/u,
+    );
+    expect(persisted).toMatch(/padding-top:\s*12px/u);
+  } finally {
+    if (activeApp) await stopPageRoot(activeApp, isolatedUserData, { cleanup: false });
+    removeIsolatedUserData(isolatedUserData);
+    removeValidatedTemporaryDirectory(sourceDirectory, "pageroot-native-format-e2e-");
   }
 });
 
@@ -637,11 +767,11 @@ test("Electron keeps the active text selection and comment anchors stable after 
     frame = await currentEditorFrame(launched.page);
     await expect.poll(() => nativeEditingState(frame, "source-fidelity"))
       .toMatchObject({
-        targetIsActive: false,
-        contenteditable: null,
-        isContentEditable: false,
-        activeCase: null,
-        selectionInside: false,
+        targetIsActive: true,
+        contenteditable: "true",
+        isContentEditable: true,
+        activeCase: "source-fidelity",
+        selectionInside: true,
       });
 
     const reviewStage = launched.page.locator(".review-scroll-stage");
@@ -692,11 +822,11 @@ test("Electron keeps the active text selection and comment anchors stable after 
     frame = await currentEditorFrame(launched.page);
     await expect.poll(() => nativeEditingState(frame, "source-fidelity"))
       .toMatchObject({
-        targetIsActive: false,
-        contenteditable: null,
-        isContentEditable: false,
-        activeCase: null,
-        selectionInside: false,
+        targetIsActive: true,
+        contenteditable: "true",
+        isContentEditable: true,
+        activeCase: "source-fidelity",
+        selectionInside: true,
       });
     await expect(commentCard).toHaveAttribute("data-resolution", /^(?:exact|rebound)$/u);
     await expect(commentCard.getByText("原位置已变化")).toHaveCount(0);
@@ -797,33 +927,18 @@ test("Electron persists an Apple Pinyin boundary composition with left affinity"
       0,
     );
     const persistedDocumentToken = await documentToken(firstLaunch.page);
-    if (persistedDocumentToken !== previousDocumentToken) {
-      frame = await waitForFreshDiskFrame(
-        firstLaunch.page,
-        previousDocumentToken,
-        "heading-inline",
-      );
-      await expect.poll(() => nativeEditingState(firstLaunch.page, "heading-inline"))
-        .toMatchObject({
-          targetIsActive: false,
-          contenteditable: null,
-          isContentEditable: false,
-          activeCase: null,
-          selectionInside: false,
-        });
-    } else {
-      frame = await currentEditorFrame(firstLaunch.page);
-      await expect(editor).toHaveAttribute("data-render-verified", "true");
-      await expect(editor).toHaveAttribute("data-runtime-bootstrap-count", "1");
-      await expect.poll(() => nativeEditingState(firstLaunch.page, "heading-inline"))
-        .toMatchObject({
-          targetIsActive: false,
-          contenteditable: null,
-          isContentEditable: false,
-          activeCase: null,
-          selectionInside: false,
-        });
-    }
+    expect(persistedDocumentToken).toBe(previousDocumentToken);
+    frame = await currentEditorFrame(firstLaunch.page);
+    await expect(editor).toHaveAttribute("data-render-verified", "true");
+    await expect(editor).toHaveAttribute("data-runtime-bootstrap-count", "1");
+    await expect.poll(() => nativeEditingState(firstLaunch.page, "heading-inline"))
+      .toMatchObject({
+        targetIsActive: true,
+        contenteditable: "true",
+        isContentEditable: true,
+        activeCase: "heading-inline",
+        selectionInside: true,
+      });
     expect(
       readFileSync(sourcePath).equals(original),
       "the caller-owned HTML must remain byte-for-byte unchanged after V1 import",

@@ -1356,6 +1356,7 @@ type NativeEditCommitResult = {
 type FinishNativeEditingOptions = {
   replayQueuedUserCommand?: boolean;
   resumeAfterRuntimeHandoff?: boolean;
+  deferRuntimeRefresh?: boolean;
 };
 
 
@@ -2195,7 +2196,8 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       // A native editable-island commit has already advanced the source
       // authority in place, but the disposable Runtime document still needs
       // to be rebuilt. Treat that explicit rerender request like a source
-      // change so Enter and copy share the same visible handoff path.
+      // change so an eventual presentation refresh can use one visible
+      // handoff. Soft checkpoints keep the current Runtime document mounted.
       && (
         source !== frameSourceHtmlRef.current
         || runtimeNeedsRerenderRef.current
@@ -3593,13 +3595,24 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     plan: SourcePatchPlan,
     originalMutation: HtmlCanvasMutation,
     appliedMutation: HtmlCanvasMutation,
+    options: { allowRuntimeWithoutNativeEdit?: boolean } = {},
   ): boolean => {
+    const failPreviewSync = (reason: string): false => {
+      containerRef.current?.setAttribute("data-native-preview-sync", reason);
+      return false;
+    };
     const currentRuntime = runtimeFrameRef.current;
     const runtimeIsCurrent = Boolean(
       currentRuntime?.settled
       && currentRuntime.elementGeneration === frameLoadGenerationRef.current,
     );
-    if (runtimeIsCurrent && !activeNativeEditRef.current) return false;
+    const targetedRuntimeSync = runtimeIsCurrent
+      && options.allowRuntimeWithoutNativeEdit === true;
+    if (
+      runtimeIsCurrent
+      && !activeNativeEditRef.current
+      && !options.allowRuntimeWithoutNativeEdit
+    ) return false;
     if (runtimeIsCurrent) runtimeNeedsRerenderRef.current = true;
     if (
       originalMutation.kind !== "style"
@@ -3609,7 +3622,9 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     const iframe = iframeRef.current;
     const documentNode = iframe?.contentDocument;
     const LiveHTMLElement = documentNode?.defaultView?.HTMLElement;
-    if (!iframe || !documentNode?.documentElement || !LiveHTMLElement) return false;
+    if (!iframe || !documentNode?.documentElement || !LiveHTMLElement) {
+      return failPreviewSync("document-unavailable");
+    }
 
     try {
       const isTextRangeStyle = plan.type === "set-text-range-style";
@@ -3630,20 +3645,22 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       const previousElements = previousIndex.elements as SourceElementValue[];
       const nextElements = result.sourceIndex.elements as SourceElementValue[];
       const previousSurface = alignPreviewSourceSurface(previousIndex, liveNodes);
-      if (!previousSurface) return false;
-      if (previousSurface.some((entry, index) => (
+      if (!previousSurface && !targetedRuntimeSync) {
+        return failPreviewSync("previous-surface");
+      }
+      if (!targetedRuntimeSync && previousSurface?.some((entry, index) => (
         liveNodes[index].getAttribute(SOURCE_NODE_ATTRIBUTE) !== entry.nodeId
-      ))) return false;
+      ))) return failPreviewSync("previous-surface-order");
       const detachedSurface = alignPreviewSourceSurface(result.sourceIndex, detachedNodes);
       if (
         !detachedSurface
         || detachedSurface.length !== nextElements.length
-      ) return false;
+      ) return failPreviewSync("detached-surface");
 
       const previousTargetRef = plan.targetRefs.find(
         (target: SourceTargetRef) => target.targetId === originalMutation.target.id,
       ) || plan.targetRefs[0];
-      if (!previousTargetRef) return false;
+      if (!previousTargetRef) return failPreviewSync("previous-target-ref");
       const previousTarget = resolveTargetRef(previousIndex, previousTargetRef).target;
       const nextTarget = resolveTargetRef(
         result.sourceIndex,
@@ -3652,17 +3669,18 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       if (
         previousTarget?.type !== "element"
         || nextTarget?.type !== "element"
-      ) return false;
+      ) return failPreviewSync("target-resolution");
       const liveTarget = liveNodes.find((node) => (
         node.getAttribute(SOURCE_NODE_ATTRIBUTE) === previousTarget.nodeId
       ));
       const detachedTarget = detachedNodes.find((node) => (
         node.getAttribute(SOURCE_NODE_ATTRIBUTE) === nextTarget.nodeId
       ));
-      if (!(liveTarget instanceof LiveHTMLElement)) return false;
-      if (!detachedTarget) return false;
+      if (!(liveTarget instanceof LiveHTMLElement)) return failPreviewSync("live-target");
+      if (!detachedTarget) return failPreviewSync("detached-target");
 
       let selectedRangeElements: HTMLElement[] = [];
+      let trustedImportedRuntimeElements: HTMLElement[] = [];
 
       if (originalMutation.kind === "reorder") {
         const liveParent = liveTarget.parentNode;
@@ -3702,6 +3720,11 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
               documentNode.importNode(node, true)
             )),
           );
+          if (targetedRuntimeSync) {
+            trustedImportedRuntimeElements = Array.from(
+              liveTarget.querySelectorAll<HTMLElement>(`[${SOURCE_NODE_ATTRIBUTE}]`),
+            );
+          }
           const openingPatches = plan.patches.filter(
             (patch: { kind?: string }) => patch.kind === "text-range-style-open",
           );
@@ -3727,7 +3750,9 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
             );
             return selectedSpan ? [selectedSpan] : [];
           });
-          if (selectedRangeElements.length !== openingPatches.length) return false;
+          if (selectedRangeElements.length !== openingPatches.length) {
+            return failPreviewSync("range-wrapper-count");
+          }
           const coalescedElementId = (
             plan.metadata as { coalescedTextRangeElementId?: string }
           ).coalescedTextRangeElementId;
@@ -3776,14 +3801,43 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
 
       const stableNodes = sourceBackedPreviewElements(documentNode);
       const stableSurface = alignPreviewSourceSurface(result.sourceIndex, stableNodes);
-      if (!stableSurface) return false;
+      if (!stableSurface && !targetedRuntimeSync) {
+        return failPreviewSync("stable-surface");
+      }
 
       // Direct patches refresh the mounted preview and every ephemeral source
       // identity in place. The DOM remains a preview only; it is never
       // serialized back into the user's source.
-      stableSurface.forEach(({ node, nodeId }) => {
-        node.setAttribute(SOURCE_NODE_ATTRIBUTE, nodeId);
-      });
+      if (targetedRuntimeSync) {
+        const stableUpdates = refreshStableMountedPreviewSourceNodeIds(
+          documentNode,
+          result.sourceIndex,
+        );
+        const trustedImported = new Set(trustedImportedRuntimeElements);
+        const registered = runtimeSourceElementsRef.current;
+        stableUpdates.forEach(({ element: stableElement, pagerootId, nextNodeId }) => {
+          if (
+            !registered
+            || registered.elementGeneration !== currentRuntime?.elementGeneration
+            || registered.executionId !== currentRuntime?.grant.executionId
+            || (
+              !registered.elements.has(stableElement)
+              && !trustedImported.has(stableElement)
+            )
+          ) return;
+          stableElement.setAttribute(
+            EDIT_RUNTIME_SOURCE_MARKER_ATTRIBUTE,
+            nextNodeId,
+          );
+          registered.markerSourceNodeIds.set(stableElement, nextNodeId);
+          registered.pagerootIds.set(stableElement, pagerootId);
+          registered.elements.add(stableElement);
+        });
+      } else if (stableSurface) {
+        stableSurface.forEach(({ node, nodeId }) => {
+          node.setAttribute(SOURCE_NODE_ATTRIBUTE, nodeId);
+        });
+      }
       sourceIndexRef.current = result.sourceIndex;
       frameSourceHtmlRef.current = result.html;
       renderedSourceHtmlRef.current = result.html;
@@ -3793,15 +3847,22 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       pendingSelectionRef.current = null;
       pendingToolbarVisibleRef.current = false;
 
+      const stableSelectionElement = isTextRangeStyle
+        && selectedRangeElements.length === 1
+        ? selectedRangeElements[0]
+        : liveTarget;
       const stableSelection = selectionForElement(
-        liveTarget,
+        stableSelectionElement,
         result.sourceIndex,
         appliedMutation.target,
         appliedMutation.target.resolution,
       );
       selectedElementRef.current?.removeAttribute("data-html-canvas-selected");
-      selectedElementRef.current = liveTarget;
-      liveTarget.setAttribute("data-html-canvas-selected", stableSelection.level);
+      selectedElementRef.current = stableSelectionElement;
+      stableSelectionElement.setAttribute(
+        "data-html-canvas-selected",
+        stableSelection.level,
+      );
       selectedSourceSelectionRef.current = stableSelection;
       setSelection(stableSelection);
       setToolbarVisible(true);
@@ -3833,11 +3894,14 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       }
       updateSelectedStyle();
       updateMoveAvailability();
-      observeSelectedElement(liveTarget);
+      observeSelectedElement(stableSelectionElement);
       requestAnimationFrame(() => updateOverlayPosition());
+      containerRef.current?.setAttribute("data-native-preview-sync", "ready");
       return true;
-    } catch {
-      return false;
+    } catch (cause) {
+      return failPreviewSync(
+        `exception:${cause instanceof Error ? cause.message : String(cause)}`.slice(0, 240),
+      );
     }
   }, [
     observeSelectedElement,
@@ -3922,6 +3986,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         selection: NativeEditSelection;
         deferPreviewReconcile?: boolean;
       };
+      allowRuntimeInPlaceAfterNativeEdit?: boolean;
     } = {},
   ): ReturnType<typeof applyPatchPlan> | null => {
     const sourceIndex = sourceIndexRef.current;
@@ -4287,6 +4352,10 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         forwardPlan,
         mutation,
         appliedMutation,
+        {
+          allowRuntimeWithoutNativeEdit:
+            options.allowRuntimeInPlaceAfterNativeEdit === true,
+        },
       );
       if (!previewStayedMounted) {
         const activeRuntime = runtimeFrameRef.current;
@@ -4827,6 +4896,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     {
       replayQueuedUserCommand = false,
       resumeAfterRuntimeHandoff = false,
+      deferRuntimeRefresh = false,
     }: FinishNativeEditingOptions = {},
   ): NativeEditCommitResult => {
     const active = activeNativeEditRef.current;
@@ -4904,7 +4974,11 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       setIsEditing(false);
       setHasTextRange(false);
       rootElement.ownerDocument.getSelection()?.removeAllRanges();
-      if (settledRuntimeFrame && runtimeNeedsRerenderRef.current) {
+      if (
+        settledRuntimeFrame
+        && runtimeNeedsRerenderRef.current
+        && !deferRuntimeRefresh
+      ) {
         runtimeNeedsRerenderRef.current = false;
         pendingNativeEditResumeRef.current = runtimeNativeResume
           ? {
@@ -5070,6 +5144,13 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       if (toolbarRef.current?.contains(target)) return;
       const targetElement = target instanceof Element ? target : target.parentElement;
       if (targetElement?.closest('[data-html-canvas-preserve-selection="true"]')) return;
+      // App controls own their semantic checkpoint boundary. Running the
+      // generic outside-click fence on pointerdown would rebuild the Runtime
+      // before Save, Export, Preview, navigation or Run handlers can choose a
+      // source-only checkpoint or a no-refresh leave.
+      if (targetElement?.closest(
+        'a, button, input, select, textarea, [role="button"], [role="menuitem"], [role="tab"]',
+      )) return;
       clearSelection();
     };
     documentNode.addEventListener("pointerdown", clearOnOutsidePointer, true);
@@ -5592,18 +5673,10 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         clearNativeEditCheckpointTimer();
         if (state.dirty && !state.composing) {
           const scheduledLease = { ...active.lease };
-          const lineBreakCheckpoint = state.inputType === "insertParagraph"
-            || state.inputType === "insertLineBreak";
           nativeEditCheckpointTimerRef.current = window.setTimeout(() => {
             nativeEditCheckpointTimerRef.current = null;
             if (!nativeEditLeasesMatch(currentNativeEditLeaseRef.current, scheduledLease)) return;
-            if (lineBreakCheckpoint) {
-              finishNativeEditingRef.current(true, "automatic", {
-                resumeAfterRuntimeHandoff: true,
-              });
-            } else {
-              nativeEditCheckpointRef.current();
-            }
+            nativeEditCheckpointRef.current();
           }, state.requiresCanonicalReconcile
             ? 0
             : NATIVE_EDIT_CHECKPOINT_DELAY_MS);
@@ -5836,6 +5909,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           () => {
             const committed = finishNativeEditing(true, "manual", {
               resumeAfterRuntimeHandoff: false,
+              deferRuntimeRefresh: true,
             });
             if (committed.ok) window.queueMicrotask(() => moveSelected(direction));
           },
@@ -5843,6 +5917,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         )) return true;
         const committed = finishNativeEditing(true, "manual", {
           resumeAfterRuntimeHandoff: false,
+          deferRuntimeRefresh: true,
         });
         if (!committed.ok || committed.frameReloading) return false;
       }
@@ -5968,6 +6043,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         () => {
           const committed = finishNativeEditing(true, "manual", {
             resumeAfterRuntimeHandoff: false,
+            deferRuntimeRefresh: true,
           });
           if (committed.ok) {
             window.queueMicrotask(() => applySelectedStructureOperation(action, destination));
@@ -5977,6 +6053,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       )) return true;
       const committed = finishNativeEditing(true, "manual", {
         resumeAfterRuntimeHandoff: false,
+        deferRuntimeRefresh: true,
       });
       if (!committed.ok || committed.frameReloading) return false;
     }
@@ -6051,6 +6128,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         () => {
           const committed = finishNativeEditing(true, "manual", {
             resumeAfterRuntimeHandoff: false,
+            deferRuntimeRefresh: true,
           });
           if (committed.ok) window.queueMicrotask(() => insertElement(options));
         },
@@ -6058,6 +6136,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       )) return true;
       const committed = finishNativeEditing(true, "manual", {
         resumeAfterRuntimeHandoff: false,
+        deferRuntimeRefresh: true,
       });
       if (!committed.ok || committed.frameReloading) return false;
     }
@@ -6532,8 +6611,10 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     };
   }, []);
 
-  const checkpointPendingEdit = useCallback((): HtmlCanvasCommitResult => {
-    const committed = checkpointNativeEdit("manual");
+  const checkpointPendingEdit = useCallback((
+    options: { trigger?: NativeEditCheckpointTrigger } = {},
+  ): HtmlCanvasCommitResult => {
+    const committed = checkpointNativeEdit(options.trigger ?? "manual");
     return {
       ok: committed.ok,
       html: frameSourceHtmlRef.current,
@@ -6548,10 +6629,12 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       resumeEditing?: boolean;
       preserveForHistory?: boolean;
       trigger?: NativeEditCheckpointTrigger;
+      endBehavior?: "refresh-current-canvas" | "leave-canvas";
     } = {},
   ): HtmlCanvasCommitResult => {
     const resumeEditing = options.resumeEditing ?? false;
     const preserveForHistory = options.preserveForHistory ?? false;
+    const endBehavior = options.endBehavior ?? "refresh-current-canvas";
     const committed = checkpointNativeEdit(options.trigger ?? "fence", {
       deferPreviewReconcile: true,
     });
@@ -6607,6 +6690,31 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     pendingHistoryCanonicalFenceRef.current = preserveForHistory
       ? needsCanonicalFence
       : false;
+    if (endBehavior === "leave-canvas" && !preserveForHistory) {
+      pendingFrameRestoreEpochRef.current += 1;
+      pendingNativeEditResumeRef.current = null;
+      pendingSelectionRef.current = null;
+      pendingToolbarVisibleRef.current = false;
+      const sourceProjectionCurrent = Boolean(
+        sourceIndexRef.current?.sourceSha256
+        && renderedProjectionSha256Ref.current === sourceIndexRef.current.sourceSha256
+        && !nativeEditNeedsReloadRef.current,
+      );
+      if (sourceProjectionCurrent) {
+        nativeSessionNeedsCanonicalFenceRef.current = false;
+        fencedDocumentCleanupRef.current();
+      }
+      containerRef.current?.setAttribute(
+        "data-native-fence-resume",
+        `leave-canvas:${frameLoadGenerationRef.current}`,
+      );
+      return {
+        ok: true,
+        html: frameSourceHtmlRef.current,
+        ...currentProjectionHashes(),
+        pendingMutation: committed.mutation,
+      };
+    }
     const detachedRuntimeFrame = settledRuntimeFrameIsCurrent();
     if (detachedRuntimeFrame && !preserveForHistory) {
       // After the session ends, a canonical fence would rebuild before the
@@ -6863,7 +6971,11 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   }, [queueNativeFenceReload]);
 
   const freezeNow = useCallback((): HtmlCanvasFreezeSnapshot => {
-    const committed = commitPendingEdit();
+    const committed = fencePendingEdit({
+      resumeEditing: false,
+      trigger: "fence",
+      endBehavior: "leave-canvas",
+    });
     if (!committed.ok) return committed;
     const frozenHtml = committed.html;
     lastEmittedHtmlRef.current = frozenHtml;
@@ -6899,7 +7011,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       sourceSha256: committed.sourceSha256,
       pendingMutation: committed.pendingMutation,
     };
-  }, [commitPendingEdit]);
+  }, [fencePendingEdit]);
 
   const unlockNow = useCallback((): boolean => {
     imperativeLockRef.current = false;
@@ -7606,17 +7718,10 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
         event.preventDefault();
         event.stopPropagation();
-        const save = () => {
-          if (!lockedRef.current) {
-            if (!fencePendingEdit({
-              resumeEditing: false,
-              trigger: "save",
-            }).ok) return;
-          }
-          onRequestFlushRef.current?.();
-        };
-        if (deferNativeCommandRef.current("save", save)) return;
-        save();
+        // Workbench owns the single native-command deferral and the source-only
+        // checkpoint. Deferring here as well would enqueue the same save twice
+        // while the editing lease deliberately remains active.
+        onRequestFlushRef.current?.();
         return;
       }
       const activeNativeEdit = activeNativeEditRef.current;
@@ -8628,7 +8733,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     completeRuntimeAttempt,
     currentRuntimeSourceProof,
     executePagePresentationAction,
-    fencePendingEdit,
     finishNativeEditing,
     moveSelected,
     resolvePagePresentationAction,
@@ -8822,6 +8926,8 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         );
       }
       const activeRange = activeTextRangeRef.current;
+      let resumeNativeEditAfterStyle = false;
+      let nativeSelectionAfterStyle: NativeEditSelection | undefined;
       if (
         activeNativeEdit
         && TEXT_RANGE_EDITABLE_PROPERTIES.has(property)
@@ -8831,74 +8937,53 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         return;
       }
       if (
-        activeNativeEdit?.mode === "text-fragment"
+        activeNativeEdit
         && activeRange
         && TEXT_RANGE_EDITABLE_PROPERTIES.has(property)
       ) {
-        // A bare-text fragment deliberately accepts text only. Inline-style
-        // controller commands would add a <span> inside that fragment, which
-        // its normalizer correctly rejects. Finish the transient native host
-        // first, then let the guarded source-range patch below own the wrapper.
-        // Keep the captured range: finishNativeEditing clears the live range
-        // as part of retiring the fragment session.
+        if (!activeNativeEdit.session.canApplyInlineStyle()) {
+          reportBlockedEdit(new Error("当前选区无法安全应用这个文字格式。"));
+          return;
+        }
+        nativeSelectionAfterStyle = activeNativeEdit.session.getSelection();
+        // Text-range formatting is a source operation because it may allocate
+        // persistent wrapper identities. Retire only the transient native
+        // host, apply the guarded SourcePatch in this same iframe, then resume
+        // the exact logical range without running author Script.
         const committed = finishNativeEditing(true, "style", {
           resumeAfterRuntimeHandoff: false,
+          deferRuntimeRefresh: true,
         });
         if (!committed.ok || committed.frameReloading) return;
+        resumeNativeEditAfterStyle = true;
         activeNativeEdit = null;
         element = selectedElementRef.current;
         if (!element || !element.isConnected) {
           reportBlockedEdit(new Error(
-            "文字片段提交后的宿主没有精确重绑，已停止继续修改。",
+            "文字提交后的宿主没有精确重绑，已停止继续修改。",
           ));
           return;
         }
       }
       if (
         activeNativeEdit
-        && activeRange
-        && TEXT_RANGE_EDITABLE_PROPERTIES.has(property)
-      ) {
-        const styleTargets = activeRange.styleElements.filter(
-          (candidate) => candidate.isConnected,
-        );
-        const styleTarget = styleTargets[0] || element;
-        const verifiedOverride = verifyInlineStyleOverrideForTargets(
-          styleTargets.length > 0 ? styleTargets : [styleTarget],
-          config.cssProperty,
-          value,
-          activeNativeEdit,
-        );
-        if (!verifiedOverride) {
-          reportInlineStyleOverrideFailure();
-          return;
-        }
-        if (!activeNativeEdit.session.applyInlineStyle(
-          config.cssProperty,
-          value,
-          verifiedOverride.priority === "important",
-        )) {
-          reportBlockedEdit(new Error("当前选区无法安全应用这个文字格式。"));
-          retainNativeEditFocusRef.current = null;
-          return;
-        }
-        const checkpoint = checkpointNativeEdit("style");
-        if (!checkpoint.ok) {
-          retainNativeEditFocusRef.current = null;
-          return;
-        }
-        rememberNativeEditSelection(activeNativeEdit);
-        return;
-      }
-      if (
-        activeNativeEdit
         && !(activeRange && TEXT_RANGE_EDITABLE_PROPERTIES.has(property))
       ) {
+        nativeSelectionAfterStyle = activeNativeEdit.session.getSelection();
         const committed = finishNativeEditing(true, "style", {
           resumeAfterRuntimeHandoff: false,
+          deferRuntimeRefresh: true,
         });
-        if (!committed.ok) return;
+        if (!committed.ok || committed.frameReloading) return;
+        resumeNativeEditAfterStyle = true;
         activeNativeEdit = null;
+        element = selectedElementRef.current;
+        if (!element || !element.isConnected) {
+          reportBlockedEdit(new Error(
+            "文字提交后的宿主没有精确重绑，已停止继续修改。",
+          ));
+          return;
+        }
       }
       if (activeRange && TEXT_RANGE_EDITABLE_PROPERTIES.has(property)) {
         const sourceIndex = sourceIndexRef.current;
@@ -8977,7 +9062,8 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
             computedValue: verifiedOverride.computedValue,
           },
         };
-        applySourceCommand(command, mutation, {
+        const styled = applySourceCommand(command, mutation, {
+          allowRuntimeInPlaceAfterNativeEdit: resumeNativeEditAfterStyle,
           validateResult: (candidate) => {
             const expectedTargetId = activeNativeEdit?.rootTargetRef.targetId
               ?? activeRange.target.id;
@@ -8994,6 +9080,25 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
             );
           },
         });
+        const resumed = Boolean(
+          styled
+          && resumeNativeEditAfterStyle
+          && startEditing(undefined, nativeSelectionAfterStyle)
+        );
+        containerRef.current?.setAttribute(
+          "data-native-format-resume",
+          `${styled ? "source" : "rejected"}:${
+            resumeNativeEditAfterStyle ? "requested" : "not-requested"
+          }:${resumed ? "resumed" : "not-resumed"}`,
+        );
+        if (resumed && activeNativeEditRef.current) {
+          rememberNativeEditSelection(activeNativeEditRef.current);
+        }
+        if (styled && resumeNativeEditAfterStyle && !resumed) {
+          reportBlockedEdit(new Error(
+            "文字格式已写入源码，但当前编辑选择无法在原画布继续。",
+          ));
+        }
         return;
       }
       const target = selectionForElement(element, sourceIndexRef.current);
@@ -9019,14 +9124,35 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           computedValue: verifiedOverride.computedValue,
         },
       };
-      applySourceCommand({
+      const styled = applySourceCommand({
         type: "set-inline-style",
         targetRef: sourceTargetRefForSelection(target),
         property: config.cssProperty,
         value,
         ...(verifiedOverride.priority === "important" ? { important: true } : {}),
         expectedSourceSha256: sourceIndexRef.current?.sourceSha256 || "",
-      }, mutation);
+      }, mutation, {
+        allowRuntimeInPlaceAfterNativeEdit: resumeNativeEditAfterStyle,
+      });
+      const resumed = Boolean(
+        styled
+        && resumeNativeEditAfterStyle
+        && startEditing(undefined, nativeSelectionAfterStyle)
+      );
+      containerRef.current?.setAttribute(
+        "data-native-format-resume",
+        `${styled ? "source" : "rejected"}:${
+          resumeNativeEditAfterStyle ? "requested" : "not-requested"
+        }:${resumed ? "resumed" : "not-resumed"}`,
+      );
+      if (resumed && activeNativeEditRef.current) {
+        rememberNativeEditSelection(activeNativeEditRef.current);
+      }
+      if (styled && resumeNativeEditAfterStyle && !resumed) {
+        reportBlockedEdit(new Error(
+          "元素样式已写入源码，但当前编辑会话无法在原画布继续。",
+        ));
+      }
     },
     [
       applySourceCommand,
@@ -9038,6 +9164,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       reportBlockedEdit,
       restoreNativeEditSelectionForCommand,
       selectedElementHasSourceMutationAuthority,
+      startEditing,
     ],
   );
 
@@ -9419,16 +9546,14 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         ? { ...selection, textLocator: capturedTextLocator }
         : selection;
       if (activeNativeEditRef.current) {
-        const committed = finishNativeEditing(true, "manual", {
-          resumeAfterRuntimeHandoff: false,
-        });
+        const committed = checkpointNativeEdit("comment");
         if (!committed.ok) return;
       }
       requestCommentForTarget(commentTarget);
     };
     if (deferNativeCommandRef.current("comment", openComment)) return;
     openComment();
-  }, [finishNativeEditing, refreshNativeEditRangeState, requestCommentForTarget, selection]);
+  }, [checkpointNativeEdit, refreshNativeEditRangeState, requestCommentForTarget, selection]);
   const startEditingSelection = useCallback(() => {
     startEditing();
   }, [startEditing]);

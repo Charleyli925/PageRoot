@@ -84,7 +84,10 @@ export type RunWorkflowConstruction = Readonly<{
   codecs: RunWorkflowCodecs;
   ports: Readonly<{
     canvas: Readonly<{
-      fencePendingEdit?(input: Record<string, unknown>): { ok: boolean; reason?: string } | undefined;
+      checkpointPendingEdit(input: Record<string, unknown>): {
+        ok: boolean;
+        reason?: string;
+      } | undefined;
       freeze(reason: string): Record<string, unknown>;
       unlock(): void;
       normalizeComments?(): unknown[];

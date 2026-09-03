@@ -210,7 +210,7 @@ function createHarness({
     attachment: [],
     handoff: [],
     unlock: 0,
-    fence: 0,
+    checkpoint: 0,
     freeze: 0,
   };
   const client = {
@@ -328,8 +328,8 @@ function createHarness({
     codecs: codecs(),
     ports: {
       canvas: {
-        fencePendingEdit() {
-          calls.fence += 1;
+        checkpointPendingEdit() {
+          calls.checkpoint += 1;
           return { ok: true };
         },
         freeze(...args) {
@@ -373,7 +373,7 @@ test("submit freezes the exact source, creates one Request, and confirms handoff
   const outcome = await harness.workflow.submit({ projectName: "landing.html" });
 
   assert.equal(outcome.status, "succeeded", JSON.stringify(outcome));
-  assert.equal(harness.calls.fence, 1);
+  assert.equal(harness.calls.checkpoint, 1);
   assert.equal(harness.calls.createRequest.length, 1);
   assert.equal(harness.calls.handoff.length, 1);
   assert.equal(harness.runSession.activeRun?.requestId, "request_a");
@@ -684,7 +684,7 @@ test("Custom compatible mode still enforces the HTTP runtime hard context limit 
   assert.equal(harness.calls.createRequest.length, 0);
 });
 
-test("submit rejects a latest working source whose visible projection is still last-known-good", async () => {
+test("submit accepts a complete working source while the visible projection is still last-known-good", async () => {
   const oldHtml = HTML_A.replace("Welcome", "Previous visible page");
   const harness = createHarness({
     freeze: () => ({
@@ -701,11 +701,12 @@ test("submit rejects a latest working source whose visible projection is still l
 
   const outcome = await harness.workflow.submit({ projectName: "landing.html" });
 
-  assert.equal(outcome.status, "blocked");
-  assert.equal(outcome.code, "RUN_SUBMISSION_CANVAS_STALE");
-  assert.equal(harness.calls.unlock, 1);
-  assert.equal(harness.calls.createRequest.length, 0);
-  assert.equal(harness.runSession.activeRun, null);
+  assert.equal(outcome.status, "succeeded", JSON.stringify(outcome));
+  assert.equal(harness.calls.unlock, 0);
+  assert.equal(harness.calls.checkpoint, 1);
+  assert.equal(harness.calls.freeze, 1);
+  assert.equal(harness.calls.createRequest.length, 1);
+  assert.equal(harness.runSession.activeRun?.status, "processing");
 });
 
 test("submit refreshes a unique text quote against the final saved HTML before creating the Request", async () => {
@@ -792,7 +793,7 @@ test("submission planning is side-effect free and derives current comment author
   const ready = harness.workflow.planSubmission();
   assert.deepEqual(ready, { kind: "ready" });
   assert.equal(Object.isFrozen(ready), true);
-  assert.equal(harness.calls.fence, 0);
+  assert.equal(harness.calls.checkpoint, 0);
   assert.equal(harness.calls.freeze, 0);
   assert.equal(harness.calls.createRequest.length, 0);
 
@@ -813,7 +814,7 @@ test("submission planning is side-effect free and derives current comment author
     harness.workflow.planSubmission().code,
     "RUN_SUBMISSION_COMMENT_EDIT",
   );
-  assert.equal(harness.calls.fence, 0);
+  assert.equal(harness.calls.checkpoint, 0);
   assert.equal(harness.calls.createRequest.length, 0);
   harness.workflow.dispose();
 });
@@ -1157,7 +1158,7 @@ test("local Qoder refresh changes only shared availability state", async () => {
   assert.equal(harness.calls.availability.length, 1);
   assert.equal(harness.calls.preflight.length, 0);
   assert.equal(harness.calls.createRequest.length, 0);
-  assert.equal(harness.calls.fence, 0);
+  assert.equal(harness.calls.checkpoint, 0);
   assert.equal(harness.calls.freeze, 0);
   assert.equal(harness.calls.unlock, 0);
   assert.equal(harness.calls.handoff.length, 0);
@@ -1208,7 +1209,7 @@ test("a Settings usability check does not authorize a later Qoder submission", a
   assert.equal(harness.calls.preflight.length, 1);
   assert.equal(harness.calls.createRequest.length, 0);
   assert.equal(harness.workflow.getSnapshot().qoderAvailability.status, "ready");
-  assert.equal(harness.calls.fence, 0);
+  assert.equal(harness.calls.checkpoint, 0);
   assert.equal(harness.calls.freeze, 0);
   assert.equal(harness.calls.unlock, 0);
 
@@ -1479,7 +1480,7 @@ test("capacity and timeout preflight failures keep truthful recovery reasons", a
     assert.equal(qoderAvailabilityPresentation(availability).statusLabel, statusLabel);
     assert.equal(harness.calls.createRequest.length, 0);
     assert.equal(harness.calls.freeze, 0);
-    assert.equal(harness.calls.fence, 0);
+    assert.equal(harness.calls.checkpoint, 0);
     assert.equal(harness.calls.unlock, 0);
     harness.workflow.dispose();
   }

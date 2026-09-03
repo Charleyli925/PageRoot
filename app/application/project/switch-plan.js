@@ -108,12 +108,8 @@ export function planProjectSwitchAfterDrain({
   return Object.freeze({ kind: "ready" });
 }
 
-export function planProjectSwitchAfterCanvas({
-  needsCanvasCommit = false,
-  canvasOk = true,
-  canvasReason = "",
-  finalFenceOk = true,
-  finalFenceReason = "",
+export function planProjectSwitchAfterSourceProtection({
+  needsSourceProtection = false,
   sourcePath = "",
   lastPersistedRevision = 0,
   cutoffRevision = 0,
@@ -121,32 +117,17 @@ export function planProjectSwitchAfterCanvas({
   documentSourceSha256 = "",
   persistedSourceSha256 = documentSourceSha256,
   workingHtmlSha256 = persistedSourceSha256,
-  canvasRenderedSha256 = committedSourceSha256,
   protectionHtmlSha256 = "",
   recoveryProtected = false,
 } = {}) {
-  if (!needsCanvasCommit) {
+  if (!needsSourceProtection) {
     return Object.freeze({ kind: "ready" });
   }
-  if (!canvasOk) {
-    return Object.freeze({
-      kind: "reject",
-      code: "PROJECT_SWITCH_CANVAS_UNVERIFIED",
-      reason: String(canvasReason || "当前画布尚未完成自动恢复。"),
-    });
-  }
-  if (!finalFenceOk) {
-    return Object.freeze({
-      kind: "reject",
-      code: "PROJECT_SWITCH_FINAL_FENCE",
-      reason: String(finalFenceReason || "当前画布尚未完成最终安全收口。"),
-    });
-  }
   const workingHash = String(workingHtmlSha256 || "");
-  const canvasHash = String(canvasRenderedSha256 || "");
+  const committedHash = String(committedSourceSha256 || "");
   if (recoveryProtected && (
     !workingHash
-    || canvasHash !== workingHash
+    || committedHash !== workingHash
     || String(protectionHtmlSha256 || "") !== workingHash
   )) {
     return Object.freeze({
@@ -158,12 +139,12 @@ export function planProjectSwitchAfterCanvas({
   if (!recoveryProtected && sourcePath && (
     Number(lastPersistedRevision) !== Number(cutoffRevision)
     || String(persistedSourceSha256 || "") !== workingHash
-    || canvasHash !== workingHash
+    || committedHash !== workingHash
   )) {
     return Object.freeze({
       kind: "reject",
       code: "PROJECT_SWITCH_SOURCE_MISMATCH",
-      reason: "当前 HTML 与画布的最终身份不一致。",
+      reason: "当前 HTML 与已持久化源的最终身份不一致。",
     });
   }
   return Object.freeze({ kind: "ready" });

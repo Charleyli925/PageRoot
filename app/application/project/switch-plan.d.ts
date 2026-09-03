@@ -44,12 +44,8 @@ export function planProjectSwitchAfterDrain(input?: {
   recoveryProtected?: boolean;
 }): ProjectSwitchPlan;
 
-export function planProjectSwitchAfterCanvas(input?: {
-  needsCanvasCommit?: boolean;
-  canvasOk?: boolean;
-  canvasReason?: string;
-  finalFenceOk?: boolean;
-  finalFenceReason?: string;
+export function planProjectSwitchAfterSourceProtection(input?: {
+  needsSourceProtection?: boolean;
   sourcePath?: string;
   lastPersistedRevision?: number;
   cutoffRevision?: number;
@@ -57,7 +53,6 @@ export function planProjectSwitchAfterCanvas(input?: {
   documentSourceSha256?: string;
   persistedSourceSha256?: string;
   workingHtmlSha256?: string;
-  canvasRenderedSha256?: string;
   protectionHtmlSha256?: string;
   recoveryProtected?: boolean;
 }): ProjectSwitchPlan;

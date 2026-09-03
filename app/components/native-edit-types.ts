@@ -33,6 +33,8 @@ export type NativeEditCheckpointTrigger =
   | "style"
   | "save"
   | "export"
+  | "comment"
+  | "attachment"
   | "project-switch"
   | "ai"
   | "manual";

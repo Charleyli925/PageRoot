@@ -346,7 +346,7 @@ test("toolbar formatting restores one logical range across button and input focu
   expect((await selectionSnapshot(frame, "plain")).text).toBe("普通");
 });
 
-test("a collapsed iframe Selection still lets consecutive color commands use the saved lease", async ({ page }) => {
+test("a collapsed iframe Selection still lets consecutive color commands continue editing", async ({ page }) => {
   const { editor, frame } = await openFixture(page);
   const target = await activateNativeEdit(frame, "plain");
   await setTextSelection(frame, "plain", 0, 2);
@@ -377,11 +377,13 @@ test("a collapsed iframe Selection still lets consecutive color commands use the
   }, value);
 
   await setColor("#123456");
-  await expect.poll(() => authoredInnerHtml(target)).toContain("color: rgb(18, 52, 86)");
+  await expect.poll(() => authoredInnerHtml(target)).toContain("color: #123456");
   await frame.evaluate(() => {
-    const target = document.querySelector('[data-native-case="plain"][contenteditable]');
-    const text = target
-      ? document.createTreeWalker(target, NodeFilter.SHOW_TEXT).nextNode()
+    const editingHost = document.querySelector(
+      '[data-native-case="plain"] [contenteditable], [data-native-case="plain"][contenteditable]',
+    );
+    const text = editingHost
+      ? document.createTreeWalker(editingHost, NodeFilter.SHOW_TEXT).nextNode()
       : null;
     if (!(text instanceof Text)) throw new Error("Plain text fixture is incomplete.");
     const selection = document.getSelection();
@@ -392,7 +394,7 @@ test("a collapsed iframe Selection still lets consecutive color commands use the
     selection?.addRange(range);
   });
   await setColor("#654321");
-  await expect.poll(() => authoredInnerHtml(target)).toContain("color: rgb(101, 67, 33)");
+  await expect.poll(() => authoredInnerHtml(target)).toContain("color: #654321");
   expect((await selectionSnapshot(frame, "plain")).text).toBe("普通");
 });
 
@@ -423,7 +425,7 @@ test("a new host selection supersedes the retained toolbar range", async ({ page
   await setter("#123456");
 
   await expect.poll(() => authoredInnerHtml(target)).toContain(
-    '<span style="color: rgb(18, 52, 86);">段落</span>',
+    '<span style="all: unset; display: inline !important; color: #123456">段落</span>',
   );
   expect((await selectionSnapshot(frame, "plain")).text).toBe("段落");
 });

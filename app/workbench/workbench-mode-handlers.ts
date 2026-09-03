@@ -84,7 +84,8 @@ export function createWorkbenchModeHandlers({
     const enterPreview = () => {
       const committed = editorRef.current?.fencePendingEdit({
         resumeEditing: false,
-        trigger: "manual",
+        trigger: "fence",
+        endBehavior: "leave-canvas",
       });
       if (!committed || !committed.ok) {
         editorRef.current?.showCommitBlocked(
