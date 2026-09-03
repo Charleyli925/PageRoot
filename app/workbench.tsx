@@ -119,8 +119,8 @@ import {
   EDIT_AUTHOR_RUNTIME_VERIFICATION_DEADLINE_MS,
 } from "./domain/edit-runtime-contract.js";
 import {
-  BROWSER_RUNTIME_CAPABILITIES,
-  resolveRuntimeCapabilities,
+  DESKTOP_RUNTIME_CAPABILITIES,
+  assertDesktopHost,
   type RuntimeCapabilities,
 } from "./application/runtime-capabilities.js";
 import {
@@ -516,7 +516,11 @@ export default function Workbench() {
   );
   const reviewSessionSequenceRef = useRef(0);
   const runtimeCapabilitiesRef =
-    useRef<RuntimeCapabilities>(BROWSER_RUNTIME_CAPABILITIES);
+    useRef<RuntimeCapabilities>(DESKTOP_RUNTIME_CAPABILITIES);
+  const [runtimeCapabilitiesReady, setRuntimeCapabilitiesReady] = useState(false);
+  const [desktopHostIssue, setDesktopHostIssue] = useState<string | null>(null);
+  const [browserPreviewOnly] = useState(false);
+  const [browserEditingRuntimeActive] = useState(false);
   const workspaceControllerRef = useRef<WorkspaceController | null>(null);
   const verifyCanvasRenderedRef = useRef<(
     expectedHtml: string,
@@ -876,7 +880,7 @@ export default function Workbench() {
     useState<PageViewContext | null>(null);
   const [interactivePreviewTransport, setInteractivePreviewTransport] =
     useState<RuntimeCapabilities["interactivePreview"]>(
-      BROWSER_RUNTIME_CAPABILITIES.interactivePreview,
+      DESKTOP_RUNTIME_CAPABILITIES.interactivePreview,
     );
   const viewingVersionId = versionSnapshot.viewingVersionId;
   const [canvasRenderAcks, setCanvasRenderAcks] = useState<CanvasRenderAcks>({
@@ -905,7 +909,9 @@ export default function Workbench() {
     setCanvasRenderAcks({ edit: null, preview: null });
   }, []);
   useLayoutEffect(() => {
-    if (!bridgeConnectionReady) return undefined;
+    if (!bridgeConnectionReady || !runtimeCapabilitiesReady || desktopHostIssue) {
+      return undefined;
+    }
     const editRuntimeApi: DesktopEditRuntimeApi | undefined = window.htmlAIEditRuntime;
     const uiPreferencesApi: DesktopUiPreferencesApi | undefined = window.htmlAIUiPreferences;
     const controller = createRuntimeWorkspaceController({
@@ -1345,7 +1351,14 @@ export default function Workbench() {
       setWorkspaceController((current) => current === controller ? null : current);
       controller.dispose();
     };
-  }, [bridgeConnectionReady, deferEditorCommand, invalidateCanvasRenderAcks, isViewTransitioning]);
+  }, [
+    bridgeConnectionReady,
+    deferEditorCommand,
+    desktopHostIssue,
+    invalidateCanvasRenderAcks,
+    isViewTransitioning,
+    runtimeCapabilitiesReady,
+  ]);
   const invalidateEditCanvasRenderAck = useCallback(() => {
     setCanvasRenderAcks((current) => (
       current.edit ? { ...current, edit: null } : current
@@ -1421,9 +1434,6 @@ export default function Workbench() {
     useState<string | null>(null);
   const [reviewPreparing, setReviewPreparing] = useState(false);
   const [openingReadyVersion, setOpeningReadyVersion] = useState(false);
-  const [runtimeCapabilitiesReady, setRuntimeCapabilitiesReady] = useState(false);
-  const [browserPreviewOnly, setBrowserPreviewOnly] = useState(false);
-  const [browserEditingRuntimeActive, setBrowserEditingRuntimeActive] = useState(false);
   const agentHandoffState = runSnapshot.activeHandoff;
   const [updateResult, setUpdateResult] =
     useState<ApplicationUpdateResult | null>(null);
@@ -2449,18 +2459,17 @@ export default function Workbench() {
     pageViewDocumentKeyRef.current = pageViewDocumentKey;
   }, [pageViewDocumentKey]);
   useEffect(() => {
-    const capabilities = resolveRuntimeCapabilities({
-      runtimeConfig: window.htmlAIRuntime,
-    });
-    runtimeCapabilitiesRef.current = capabilities;
-    const previewOnly = capabilities.sourceEditing !== "enabled";
-    const browserEditing = capabilities.sourceEditing === "enabled"
-      && capabilities.projectOpening === "browser-file";
+    let issue: string | null = null;
+    try {
+      runtimeCapabilitiesRef.current = assertDesktopHost(window);
+    } catch (cause) {
+      issue = cause instanceof Error
+        ? cause.message
+        : "桌面运行环境未初始化。";
+    }
     const frame = window.requestAnimationFrame(() => {
-      setBrowserPreviewOnly(previewOnly);
-      setBrowserEditingRuntimeActive(browserEditing);
-      setInteractivePreviewTransport(capabilities.interactivePreview);
-      if (previewOnly) setCanvasMode("preview");
+      setDesktopHostIssue(issue);
+      setInteractivePreviewTransport(DESKTOP_RUNTIME_CAPABILITIES.interactivePreview);
       setRuntimeCapabilitiesReady(true);
     });
     return () => window.cancelAnimationFrame(frame);
@@ -6465,6 +6474,11 @@ export default function Workbench() {
           >
             {!runtimeCapabilitiesReady ? (
               <div className="canvas-loading" role="status">正在识别运行环境…</div>
+            ) : desktopHostIssue ? (
+              <div className="canvas-loading" role="alert">
+                <strong>桌面运行环境未初始化</strong>
+                <span>{desktopHostIssue}</span>
+              </div>
             ) : !browserPreviewOnly ? (
               <>
               {staticFallbackNoticeIdentity ? (

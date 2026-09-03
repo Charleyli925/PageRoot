@@ -43,6 +43,41 @@ export const DESKTOP_RUNTIME_CAPABILITIES = freezeManifest({
   interactivePreview: "independent-url",
 });
 
+const REQUIRED_DESKTOP_HOST_FUNCTIONS = Object.freeze([
+  ["htmlAIProjects", "getActiveProject"],
+  ["htmlAIProjects", "openHtml"],
+  ["htmlAIPreview", "createSession"],
+  ["htmlAIPreview", "revokeSession"],
+  ["htmlAIAppLifecycle", "onPrepareClose"],
+  ["htmlAIAppLifecycle", "onCloseAborted"],
+  ["htmlAIAppLifecycle", "reportReady"],
+  ["htmlAIAppLifecycle", "reportBlocked"],
+]);
+
+export function assertDesktopHost(host) {
+  if (!isRecord(host)) {
+    throw new TypeError("桌面运行环境未初始化：窗口主机不可用。");
+  }
+  if (
+    !isRecord(host.htmlAIRuntime)
+    || !isCapabilityManifest(host.htmlAIRuntime.capabilities)
+    || Object.entries(DESKTOP_RUNTIME_CAPABILITIES).some(
+      ([name, value]) => host.htmlAIRuntime.capabilities[name] !== value,
+    )
+  ) {
+    throw new TypeError("桌面运行环境未初始化：能力声明缺失或无效。");
+  }
+  const missing = REQUIRED_DESKTOP_HOST_FUNCTIONS
+    .filter(([owner, name]) => typeof host[owner]?.[name] !== "function")
+    .map(([owner, name]) => `${owner}.${name}`);
+  if (missing.length > 0) {
+    throw new TypeError(
+      `桌面运行环境未初始化：缺少 ${missing.join("、")}。`,
+    );
+  }
+  return DESKTOP_RUNTIME_CAPABILITIES;
+}
+
 export function resolveRuntimeCapabilities({
   runtimeConfig,
 } = {}) {

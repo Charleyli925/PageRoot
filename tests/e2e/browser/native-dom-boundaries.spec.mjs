@@ -22,25 +22,14 @@ test.beforeEach(async ({ page }) => {
   await page.goto("/");
 });
 
-test("pure browser use stays in a formal read-only preview", {
+test("a renderer without Desktop preload fails explicitly", {
   tag: ["@gate-smoke","@smoke-editing"],
 }, async ({ page }) => {
-  // Preview keeps the same compact chrome and never renders the retired
-  // persistence/status region.
-  await expect(page.locator('[class*="statusBar"]')).toHaveCount(0);
-  await expect(page.locator(".save-status")).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "编辑", exact: true })).toBeDisabled();
-  await expect(page.getByRole("button", { name: "预览", exact: true }))
-    .toHaveAttribute("aria-pressed", "true");
-  await expect(page.getByRole("button", { name: "全局评论", exact: true })).toHaveCount(0);
-  // The header no longer narrates the round; it opens the conversation, and a browser
-  // preview has no Bridge to hold one.
-  await expect(page.getByRole("button", { name: /AI 助手/u })).toBeDisabled();
+  const failure = page.locator('.canvas-loading[role="alert"]');
+  await expect(failure).toBeVisible();
+  await expect(failure).toContainText("能力声明缺失或无效");
   await expect(page.getByTestId("html-canvas-editor")).toHaveCount(0);
-
-  const preview = page.locator('iframe[title="HTML 交互预览"]');
-  await expect(preview).toBeVisible();
-  expect((await preview.getAttribute("sandbox"))?.split(/\s+/)).not.toContain("allow-same-origin");
+  await expect(page.locator('iframe[title="HTML 交互预览"]')).toHaveCount(0);
   expect(await page.evaluate(() => Boolean(window.htmlAIProjects))).toBe(false);
 });
 

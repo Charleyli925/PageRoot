@@ -4,8 +4,52 @@ import test from "node:test";
 import {
   BROWSER_RUNTIME_CAPABILITIES,
   DESKTOP_RUNTIME_CAPABILITIES,
+  assertDesktopHost,
   resolveRuntimeCapabilities,
 } from "../app/application/runtime-capabilities.js";
+
+function desktopHost(overrides = {}) {
+  return {
+    htmlAIRuntime: { capabilities: { ...DESKTOP_RUNTIME_CAPABILITIES } },
+    htmlAIProjects: {
+      getActiveProject() {},
+      openHtml() {},
+    },
+    htmlAIPreview: {
+      createSession() {},
+      revokeSession() {},
+    },
+    htmlAIAppLifecycle: {
+      onPrepareClose() {},
+      onCloseAborted() {},
+      reportReady() {},
+      reportBlocked() {},
+    },
+    ...overrides,
+  };
+}
+
+test("the production renderer admits only a complete Desktop host", () => {
+  assert.equal(assertDesktopHost(desktopHost()), DESKTOP_RUNTIME_CAPABILITIES);
+});
+
+test("the production renderer rejects a browser capability fallback", () => {
+  assert.throws(
+    () => assertDesktopHost(desktopHost({
+      htmlAIRuntime: { capabilities: { ...BROWSER_RUNTIME_CAPABILITIES } },
+    })),
+    /桌面运行环境未初始化/u,
+  );
+});
+
+test("the production renderer names a missing Desktop preload function", () => {
+  assert.throws(
+    () => assertDesktopHost(desktopHost({
+      htmlAIPreview: { createSession() {} },
+    })),
+    /htmlAIPreview\.revokeSession/u,
+  );
+});
 
 test("missing manifests fail closed even when an old projects API is present", () => {
   assert.deepEqual(

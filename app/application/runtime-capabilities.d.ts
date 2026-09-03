@@ -9,6 +9,8 @@ export type RuntimeCapabilities = Readonly<{
 export const BROWSER_RUNTIME_CAPABILITIES: RuntimeCapabilities;
 export const DESKTOP_RUNTIME_CAPABILITIES: RuntimeCapabilities;
 
+export function assertDesktopHost(host: unknown): RuntimeCapabilities;
+
 export function resolveRuntimeCapabilities(options?: {
   runtimeConfig?: {
     capabilities?: unknown;
