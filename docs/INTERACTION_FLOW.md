@@ -332,6 +332,14 @@ Script 标记与内容精确不变时，同一作用域资源会话才可复用�
 新 generation 并重新授权。保存、Version、导出和 AI 输入始终读取完整源码
 HTML，永不序列化 Runtime DOM。
 
+需要重跑作者 Script 时，编辑器只使用两个固定 iframe 槽位。当前 Active 槽
+持续可见，另一个槽在隐藏状态加载最新 Candidate；Hash、generation、Runtime
+authority、Script activation 与最小展示锚点均通过后，两个槽一次性切换可见性，
+旧槽在下一动画帧清空为空文档。快速连续修改复用同一非活动槽并增加 lease，
+任何旧 lease 的迟到回调都无权晋升。稳定状态始终只有一个加载了作者 Script 的
+Edit Frame，另一个槽为空；不存在第三个长期 retiring iframe，也不在 A/B 间同步
+Runtime DOM 或脚本状态。
+
 #### 5.1.1 编辑画布体验与持久化合同
 
 正式一致性合同只有一条：**用户对源码内容完成的编辑必须写入完整 HTML，

@@ -61,6 +61,12 @@ async function armRuntimeHandoffSamples(page) {
     window.__PAGEROOT_RUNTIME_CANDIDATE_FRAME__ = null;
     window.__PAGEROOT_RUNTIME_CANDIDATE_FRAMES__ = Object.create(null);
     window.__PAGEROOT_RUNTIME_OLD_FRAME__ = oldFrame;
+    window.__PAGEROOT_RUNTIME_SLOT_A__ = editor.querySelector(
+      'iframe[data-runtime-slot="a"]',
+    );
+    window.__PAGEROOT_RUNTIME_SLOT_B__ = editor.querySelector(
+      'iframe[data-runtime-slot="b"]',
+    );
     window.__PAGEROOT_RUNTIME_HANDOFF_ACTIVE__ = true;
     const reviewStage = editor.closest(".review-scroll-stage");
     const sample = (rafSequence = null) => {
@@ -115,6 +121,7 @@ async function armRuntimeHandoffSamples(page) {
       const selectionFocusOffset = activeSelection?.focusOffset ?? null;
       samples.push({
         rafSequence,
+        runtimeSlotCount: editor.querySelectorAll("iframe[data-runtime-slot]").length,
         candidateGeneration,
         candidateVisibility: candidateFrame ? candidateStyle?.visibility : null,
         candidateOpacity: candidateFrame ? candidateStyle?.opacity : null,
@@ -123,6 +130,12 @@ async function armRuntimeHandoffSamples(page) {
         newFramePointerEvents: candidateFrame ? candidateStyle?.pointerEvents : null,
         oldConnected: oldFrame.isConnected,
         oldGeneration: oldFrame.getAttribute("data-frame-generation"),
+        oldSlotRole: oldFrame.getAttribute("data-runtime-slot-role"),
+        oldBodyChildCount: oldFrame.contentDocument?.body?.childElementCount ?? null,
+        oldScriptCount: oldFrame.contentDocument?.querySelectorAll("script").length ?? null,
+        oldBootstrapCount: oldFrame.contentDocument?.querySelectorAll(
+          "[data-pageroot-edit-runtime-bootstrap]",
+        ).length ?? null,
         oldRenderVerified: editor.getAttribute("data-render-verified"),
         oldVisibility: oldFrame.isConnected ? getComputedStyle(oldFrame).visibility : null,
         oldOpacity: oldFrame.isConnected ? getComputedStyle(oldFrame).opacity : null,
@@ -226,6 +239,21 @@ async function assertRuntimeHandoff(page, {
       }));
       throw new Error(`${cause.message}\nRuntime handoff diagnostics: ${JSON.stringify(diagnostics)}`);
     }
+    await expect.poll(() => page.evaluate(() => {
+      const samples = window.__PAGEROOT_RUNTIME_HANDOFF_SAMPLES__ || [];
+      const firstActiveRaf = samples.find((sample) => (
+        Number.isInteger(sample.rafSequence)
+        && sample.handoffState === "active"
+        && sample.activeGeneration === sample.candidateGeneration
+      ));
+      return Boolean(
+        firstActiveRaf
+        && samples.some((sample) => (
+          Number.isInteger(sample.rafSequence)
+          && sample.rafSequence >= firstActiveRaf.rafSequence + 2
+        ))
+      );
+    })).toBe(true);
   } else {
     // A failed candidate is observed at the handoff boundary. Do not wait for
     // the runtime session's separate static-fallback policy, because that
@@ -370,6 +398,26 @@ async function assertRuntimeHandoff(page, {
     expect(firstTopmostActiveSample.selectionStableId)
       .toBe(handoffBaselineSample.selectionStableId);
     expect(firstTopmostActiveSample.layoutReady).toBe(true);
+    expect(candidateSamples.every((sample) => sample.runtimeSlotCount === 2)).toBe(true);
+    const firstActiveRaf = activeStateSamples.find((sample) => (
+      Number.isInteger(sample.rafSequence)
+      && isTopmostActiveSample(sample)
+    ));
+    expect(firstActiveRaf).toBeTruthy();
+    const oldSlotClearedWithinTwoFrames = candidateSamples.some((sample) => (
+      Number.isInteger(sample.rafSequence)
+      && sample.rafSequence >= firstActiveRaf.rafSequence
+      && sample.rafSequence <= firstActiveRaf.rafSequence + 2
+      && sample.oldSlotRole === "inactive"
+      && sample.oldBodyChildCount === 0
+      && sample.oldScriptCount === 0
+      && sample.oldBootstrapCount === 0
+    ));
+    if (!oldSlotClearedWithinTwoFrames) {
+      throw new Error(`Runtime old slot was not cleared within two frames: ${JSON.stringify(
+        candidateSamples.filter((sample) => Number.isInteger(sample.rafSequence)),
+      )}`);
+    }
     const focusExpectation = typeof expectedFocus === "boolean"
       ? expectedFocus
       : handoffBaselineSample.focused;
@@ -443,14 +491,37 @@ async function assertRuntimeHandoff(page, {
 
 async function assertRuntimeCandidateReused(page) {
   await expect.poll(() => page.evaluate(() => {
-    const active = document.querySelector(
-      '[data-testid="html-canvas-editor"] iframe[title*="HTML"]',
-    );
+    const editor = document.querySelector('[data-testid="html-canvas-editor"]');
+    const slots = Array.from(editor?.querySelectorAll('iframe[data-runtime-slot]') || []);
+    const active = slots.find((frame) => (
+      frame.getAttribute("data-runtime-slot-role") === "active"
+    ));
+    const inactive = slots.find((frame) => (
+      frame.getAttribute("data-runtime-slot-role") === "inactive"
+    ));
     return Boolean(
-      active
+      slots.length === 2
+      && slots.filter((frame) => frame.getAttribute("data-runtime-slot") === "a").length === 1
+      && slots.filter((frame) => frame.getAttribute("data-runtime-slot") === "b").length === 1
+      && window.__PAGEROOT_RUNTIME_SLOT_A__ === slots.find(
+        (frame) => frame.getAttribute("data-runtime-slot") === "a",
+      )
+      && window.__PAGEROOT_RUNTIME_SLOT_B__ === slots.find(
+        (frame) => frame.getAttribute("data-runtime-slot") === "b",
+      )
+      && window.__PAGEROOT_RUNTIME_SLOT_A__?.isConnected
+      && window.__PAGEROOT_RUNTIME_SLOT_B__?.isConnected
+      && active
       && active.isConnected
       && active === window.__PAGEROOT_RUNTIME_CANDIDATE_FRAME__
-      && active.contentDocument?.documentElement,
+      && active.contentDocument?.documentElement
+      && active.contentDocument.querySelectorAll(
+        "[data-pageroot-edit-runtime-bootstrap]",
+      ).length === 1
+      && inactive
+      && inactive.contentDocument?.body
+      && inactive.contentDocument.body.childElementCount === 0
+      && inactive.contentDocument.querySelectorAll("script").length === 0
     );
   })).toBe(true);
 }
@@ -1254,6 +1325,61 @@ test("semantic structure edit rebuilds the disposable page and reruns its script
     await page.waitForTimeout(80);
     await expect.poll(() => reviewStage.evaluate((element) => element.scrollTop))
       .toBeCloseTo(700, 1);
+  });
+});
+
+test("same-source history cancellation reloads through a fixed Runtime candidate", {
+  tag: ["@gate-smoke", "@smoke-editing"],
+}, async () => {
+  const html = `<!doctype html>
+<html><head><title>Runtime history cancel</title></head><body>
+  <p data-native-case="runtime-history-cancel">保持当前源码</p>
+  <script>
+    parent.__PAGEROOT_RUNTIME_HISTORY_CANCEL_COUNT__ =
+      (parent.__PAGEROOT_RUNTIME_HISTORY_CANCEL_COUNT__ || 0) + 1;
+  </script>
+</body></html>`;
+
+  await withRuntimeProject("pageroot-runtime-history-cancel-e2e-", {
+    "runtime-report.html": html,
+  }, async ({ electronApp, page, sourcePath }) => {
+    let { frame } = await loadedDiskFrame(
+      page,
+      sourcePath,
+      "runtime-history-cancel",
+    );
+    await expect.poll(() => page.evaluate(() => (
+      window.__PAGEROOT_RUNTIME_HISTORY_CANCEL_COUNT__
+    ))).toBe(1);
+
+    for (const expectedExecutionCount of [2, 3]) {
+      await activateNativeEdit(frame, "runtime-history-cancel");
+      await armRuntimeHandoffSamples(page);
+      const candidateStarted = page.waitForFunction(() => Boolean(
+        document.querySelector('[data-testid="html-canvas-editor"]')
+          ?.getAttribute("data-runtime-candidate-id"),
+      ));
+      await clickEditHistoryMenu(electronApp, page, "undo");
+      await candidateStarted;
+      await expect.poll(() => page.locator(".canvas-edit-surface").getAttribute(
+        "data-edit-runtime-phase",
+      )).toBe("settled");
+      await expect.poll(() => page.getByTestId("html-canvas-editor").getAttribute(
+        "data-runtime-handoff",
+      )).toBeNull();
+      await page.evaluate(() => {
+        window.__PAGEROOT_RUNTIME_HANDOFF_ACTIVE__ = false;
+        window.__PAGEROOT_RUNTIME_HANDOFF_ANIMATION_FRAME__?.();
+        window.__PAGEROOT_RUNTIME_HANDOFF_OBSERVER__?.disconnect();
+      });
+      await assertRuntimeCandidateReused(page);
+      await expect.poll(() => page.evaluate(() => (
+        window.__PAGEROOT_RUNTIME_HISTORY_CANCEL_COUNT__
+      ))).toBe(expectedExecutionCount);
+      frame = await currentEditorFrame(page);
+      await expect(frame.locator('[data-native-case="runtime-history-cancel"]'))
+        .toHaveText("保持当前源码");
+    }
   });
 });
 
@@ -2699,7 +2825,6 @@ test("static fallback can reload dynamic content and dismiss itself after succes
   await withRuntimeProject("pageroot-runtime-retry-e2e-", {
     "runtime-report.html": html,
   }, async ({ page, sourcePath }) => {
-    await loadedDiskFrame(page, sourcePath, "runtime-retry");
     await expect(page.getByTestId("edit-runtime-static-fallback")).toContainText(
       "部分动态内容未加载",
     );
@@ -2707,14 +2832,55 @@ test("static fallback can reload dynamic content and dismiss itself after succes
       "data-edit-runtime-phase",
       "static-fallback",
     );
-
+    const editor = page.getByTestId("html-canvas-editor").filter({ visible: true }).first();
+    await expect(editor.locator('iframe[data-runtime-slot-role="active"]')).toBeVisible();
+    await expect(editor).toHaveAttribute("data-render-verified", "true");
+    await page.evaluate(() => {
+      window.__PAGEROOT_RUNTIME_RETRY_SLOT_TRANSITIONS__ = [];
+      window.__PAGEROOT_RUNTIME_RETRY_SLOT_OBSERVER__?.disconnect();
+      const observer = new MutationObserver((records) => {
+        for (const record of records) {
+          if (!(record.target instanceof HTMLIFrameElement)) continue;
+          window.__PAGEROOT_RUNTIME_RETRY_SLOT_TRANSITIONS__.push({
+            slot: record.target.getAttribute("data-runtime-slot"),
+            attribute: record.attributeName,
+            previous: record.oldValue,
+            current: record.target.getAttribute(record.attributeName),
+            role: record.target.getAttribute("data-runtime-slot-role"),
+            sandbox: record.target.getAttribute("sandbox"),
+          });
+        }
+      });
+      observer.observe(document.body, {
+        attributes: true,
+        attributeOldValue: true,
+        subtree: true,
+        attributeFilter: ["data-runtime-slot-role", "sandbox"],
+      });
+      window.__PAGEROOT_RUNTIME_RETRY_SLOT_OBSERVER__ = observer;
+    });
     await page.getByRole("button", { name: "重新加载动态内容" }).click();
+    const { frame } = await loadedDiskFrame(page, sourcePath, "runtime-retry");
     await expect(page.getByTestId("edit-runtime-static-fallback")).toHaveCount(0);
     await expect.poll(() => page.locator(".canvas-edit-surface").getAttribute(
       "data-edit-runtime-phase",
     ), { timeout: 12_000 }).toBe("settled");
-    const frame = await currentEditorFrame(page);
     await expect(frame.locator("body")).toHaveAttribute("data-runtime-retry-ready", "true");
+    await expect.poll(() => page.evaluate(() => (
+      window.__PAGEROOT_RUNTIME_RETRY_COUNT__ || 0
+    ))).toBe(2);
+    const slotTransitions = await page.evaluate(() => {
+      window.__PAGEROOT_RUNTIME_RETRY_SLOT_OBSERVER__?.disconnect();
+      return window.__PAGEROOT_RUNTIME_RETRY_SLOT_TRANSITIONS__ || [];
+    });
+    expect(slotTransitions).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        attribute: "data-runtime-slot-role",
+        previous: "inactive",
+        role: "candidate",
+        sandbox: expect.stringContaining("allow-scripts"),
+      }),
+    ]));
     await expect(frame.locator('[data-native-case="runtime-retry"]')).toHaveText(
       "动态内容重试",
     );

@@ -293,7 +293,7 @@ test("a range inside a rich child keeps the complete host selected", async ({ pa
 
 test("selected chrome clips to the iframe viewport while retaining selection", async ({ page }) => {
   const { editor, frame } = await loadFixture(page, "selected-overlay-clipping.html");
-  const iframe = editor.locator("iframe");
+  const iframe = editor.locator('iframe[data-runtime-slot-role="active"]');
   const target = frame.locator(caseSelector("viewport-top-target"));
   const hoverOutline = editor.locator(
     '[data-testid="canvas-capability-outline"][data-tone="hover"]',

@@ -400,8 +400,9 @@ test("indexed script tabs keep hidden comments grouped, suppress ghost markers, 
   page.on("console", (message) => {
     if (
       message.type() === "error"
-      && !message.text().includes(
-        "Blocked script execution in 'about:srcdoc' because the document's frame is sandboxed",
+      && !(
+        message.text().includes("Blocked script execution in 'about:")
+        && message.text().includes("because the document's frame is sandboxed")
       )
     ) {
       browserErrors.push(message.text());
@@ -483,8 +484,9 @@ test("comments keep current-tab alignment, render other tabs as neutral header c
   page.on("console", (message) => {
     if (
       message.type() === "error"
-      && !message.text().includes(
-        "Blocked script execution in 'about:srcdoc' because the document's frame is sandboxed",
+      && !(
+        message.text().includes("Blocked script execution in 'about:")
+        && message.text().includes("because the document's frame is sandboxed")
       )
     ) {
       browserErrors.push(message.text());

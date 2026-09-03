@@ -135,6 +135,7 @@ test("permanent autosave failure keeps H0, protects H1, navigates, closes, and r
       restarted.page,
       managedSourcePath,
       "list-item",
+      { allowSourceNotAuthoritative: true },
     );
     await expect.poll(() => recoveredFrame.locator(caseSelector("list-item")).textContent(), {
       timeout: 60_000,

@@ -262,6 +262,29 @@ export class EditAuthorRuntimeSession {
       && this.#snapshot.phase === "static"
       && this.#snapshot.lastOutcome === "source-not-authoritative"
     );
+    const failedProgramMovedToEquivalentCanvas = Boolean(
+      this.#identity
+      && this.#snapshot.phase === "static-fallback"
+      && RETRYABLE_STATIC_FALLBACK_OUTCOMES.has(this.#snapshot.lastOutcome)
+      && this.#identity.sourcePath === identity.sourcePath
+      && this.#identity.sourceSha256 === identity.sourceSha256
+    );
+    if (failedProgramMovedToEquivalentCanvas) {
+      // Canvas verification may replace a provisional generation after a
+      // candidate has already failed. That presentation-only retry must not
+      // execute the same author program again. Carry the failure onto the
+      // equivalent latest canvas and wait for the explicit user retry.
+      this.#attemptGeneration += 1;
+      this.#identity = identity;
+      this.#emit({
+        phase: "static-fallback",
+        sourceSha256: identity.sourceSha256,
+        sourcePath: identity.sourcePath,
+        canvasGeneration: identity.canvasGeneration,
+        lastOutcome: this.#snapshot.lastOutcome,
+      });
+      return this.#snapshot;
+    }
     // A non-authoritative source cannot consume the one attempt for this
     // canvas generation. It is only a precondition wait; the first matching
     // authoritative snapshot must still be able to prepare the final frame.

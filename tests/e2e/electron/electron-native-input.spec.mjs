@@ -789,11 +789,15 @@ test("Electron keeps the active text selection and comment anchors stable after 
       window.__PAGEROOT_HISTORY_VISUAL_SAMPLES__ = [];
       window.__PAGEROOT_HISTORY_VISUAL_SAMPLING__ = true;
       const initialEditor = document.querySelector('[data-testid="html-canvas-editor"]');
-      window.__PAGEROOT_HISTORY_FRAME__ = initialEditor?.querySelector("iframe") || null;
+      window.__PAGEROOT_HISTORY_FRAME__ = initialEditor?.querySelector(
+        'iframe[data-runtime-slot-role="active"]',
+      ) || null;
       const sample = () => {
         const card = document.querySelector('[data-history-qa-card="true"]');
         const editor = document.querySelector('[data-testid="html-canvas-editor"]');
-        const frame = editor?.querySelector("iframe") || null;
+        const frame = editor?.querySelector(
+          'iframe[data-runtime-slot-role="active"]',
+        ) || null;
         const stage = document.querySelector(".review-scroll-stage");
         window.__PAGEROOT_HISTORY_VISUAL_SAMPLES__.push(card && editor && frame && stage
           ? {

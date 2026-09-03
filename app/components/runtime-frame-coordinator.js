@@ -5,7 +5,12 @@ const TERMINAL_OUTCOMES = new Set([
   "superseded",
 ]);
 
-let controllerSequence = 0;
+const SLOT_IDS = Object.freeze(["a", "b"]);
+let coordinatorSequence = 0;
+
+function otherSlot(slotId) {
+  return slotId === "a" ? "b" : "a";
+}
 
 function normalizedIdentity(value) {
   if (
@@ -14,13 +19,20 @@ function normalizedIdentity(value) {
     || !Number.isSafeInteger(value.generation)
     || value.generation < 0
     || typeof value.sourceRevision !== "string"
+    || !SLOT_IDS.includes(value.slotId)
+    || !Number.isSafeInteger(value.slotLease)
+    || value.slotLease < 1
   ) {
-    throw new TypeError("Runtime candidate identity requires a generation and source revision.");
+    throw new TypeError(
+      "Runtime frame identity requires a generation, source revision, slot, and slot lease.",
+    );
   }
   return {
     candidateId: String(value.candidateId || ""),
     generation: value.generation,
     sourceRevision: value.sourceRevision,
+    slotId: value.slotId,
+    slotLease: value.slotLease,
   };
 }
 
@@ -29,6 +41,8 @@ function frozenIdentity(value) {
     candidateId: value.candidateId,
     generation: value.generation,
     sourceRevision: value.sourceRevision,
+    slotId: value.slotId,
+    slotLease: value.slotLease,
   });
 }
 
@@ -37,16 +51,35 @@ function sameIdentity(left, right) {
     && Boolean(right)
     && left.candidateId === right.candidateId
     && left.generation === right.generation
-    && left.sourceRevision === right.sourceRevision;
+    && left.sourceRevision === right.sourceRevision
+    && left.slotId === right.slotId
+    && left.slotLease === right.slotLease;
+}
+
+function frozenSlot(slot) {
+  return Object.freeze({
+    slotId: slot.slotId,
+    slotLease: slot.slotLease,
+    phase: slot.phase,
+    identity: slot.identity ? frozenIdentity(slot.identity) : null,
+  });
 }
 
 function frozenSnapshot({
-  latest = null,
-  lastKnownGood = null,
-  nativeEdit = null,
-  ignoredCallbackCount = 0,
-} = {}) {
+  slots,
+  activeSlotId,
+  latest,
+  lastKnownGood,
+  nativeEdit,
+  ignoredCallbackCount,
+}) {
   return Object.freeze({
+    slots: Object.freeze({
+      a: frozenSlot(slots.a),
+      b: frozenSlot(slots.b),
+    }),
+    activeSlotId,
+    candidateSlotId: latest?.slotId || null,
     latestCandidate: latest ? frozenIdentity(latest) : null,
     latestPhase: latest?.phase || null,
     lastKnownGood: lastKnownGood ? frozenIdentity(lastKnownGood) : null,
@@ -56,12 +89,18 @@ function frozenSnapshot({
 }
 
 /**
- * Pure ownership for disposable Runtime candidate identity and transitions.
- * React remains responsible for iframe DOM, viewport and Selection effects.
+ * Single owner for the two physical Runtime iframe slots and candidate identity.
+ * React owns iframe DOM effects; the coordinator owns only slot leases and
+ * lifecycle transitions, so a stale callback can never acquire a reused slot.
  */
-export class EditRuntimeCandidateController {
-  #controllerId = `runtime-${(++controllerSequence).toString(36)}`;
+export class RuntimeFrameCoordinator {
+  #coordinatorId = `runtime-${(++coordinatorSequence).toString(36)}`;
   #candidateSequence = 0;
+  #slots = {
+    a: { slotId: "a", slotLease: 0, phase: "active", identity: null },
+    b: { slotId: "b", slotLease: 0, phase: "empty", identity: null },
+  };
+  #activeSlotId = "a";
   #latest = null;
   #lastKnownGood = null;
   #nativeEdit = null;
@@ -69,6 +108,8 @@ export class EditRuntimeCandidateController {
 
   get snapshot() {
     return frozenSnapshot({
+      slots: this.#slots,
+      activeSlotId: this.#activeSlotId,
       latest: this.#latest,
       lastKnownGood: this.#lastKnownGood,
       nativeEdit: this.#nativeEdit,
@@ -77,14 +118,32 @@ export class EditRuntimeCandidateController {
   }
 
   beginCandidate({ generation, sourceRevision } = {}) {
-    const input = normalizedIdentity({ generation, sourceRevision });
     const previous = this.#latest;
+    const slotId = previous?.slotId
+      || (this.#activeSlotId ? otherSlot(this.#activeSlotId) : "a");
+    const slot = this.#slots[slotId];
+    const input = {
+      candidateId: "pending",
+      generation,
+      sourceRevision,
+      slotId,
+      slotLease: slot.slotLease + 1,
+    };
+    normalizedIdentity(input);
     const identity = Object.freeze({
-      candidateId: `${this.#controllerId}-${(++this.#candidateSequence).toString(36)}-${generation.toString(36)}`,
-      generation: input.generation,
-      sourceRevision: input.sourceRevision,
+      candidateId: `${this.#coordinatorId}-${(++this.#candidateSequence).toString(36)}-${generation.toString(36)}`,
+      generation,
+      sourceRevision,
+      slotId,
+      slotLease: input.slotLease,
     });
     this.#latest = { ...identity, phase: "preparing" };
+    this.#slots[slotId] = {
+      slotId,
+      slotLease: identity.slotLease,
+      phase: "preparing",
+      identity,
+    };
     return Object.freeze({
       identity,
       supersededCandidate: previous ? frozenIdentity(previous) : null,
@@ -99,7 +158,12 @@ export class EditRuntimeCandidateController {
       this.#ignoredCallbackCount += 1;
       return false;
     }
-    if (sameIdentity(this.#latest, normalized)) return true;
+    const slot = this.#slots[normalized.slotId];
+    if (
+      sameIdentity(this.#latest, normalized)
+      && slot.slotLease === normalized.slotLease
+      && sameIdentity(slot.identity, normalized)
+    ) return true;
     this.#ignoredCallbackCount += 1;
     return false;
   }
@@ -113,6 +177,11 @@ export class EditRuntimeCandidateController {
   beginPositioning(candidate) {
     if (!this.canPromote(candidate)) return false;
     this.#latest = { ...this.#latest, phase: "positioning" };
+    const slotId = this.#latest.slotId;
+    this.#slots[slotId] = {
+      ...this.#slots[slotId],
+      phase: "positioning",
+    };
     return true;
   }
 
@@ -162,10 +231,7 @@ export class EditRuntimeCandidateController {
         shouldUseStaticFallback: false,
       });
     }
-    const directFrameReady = outcome === "ready"
-      && this.#latest?.phase === "preparing"
-      && this.#nativeEdit === null;
-    if (outcome === "ready" && !directFrameReady && !this.canFinalize(candidate)) {
+    if (outcome === "ready" && !this.canFinalize(candidate)) {
       return Object.freeze({
         accepted: false,
         preserveLastKnownGood: false,
@@ -174,7 +240,36 @@ export class EditRuntimeCandidateController {
     }
     const identity = frozenIdentity(this.#latest);
     const preserveLastKnownGood = outcome !== "ready" && Boolean(this.#lastKnownGood);
-    if (outcome === "ready") this.#lastKnownGood = identity;
+    const slotId = identity.slotId;
+    if (outcome === "ready") {
+      const previousActiveSlotId = this.#activeSlotId;
+      this.#lastKnownGood = identity;
+      this.#activeSlotId = slotId;
+      this.#slots[slotId] = {
+        ...this.#slots[slotId],
+        phase: "active",
+        identity,
+      };
+      if (previousActiveSlotId && previousActiveSlotId !== slotId) {
+        this.#slots[previousActiveSlotId] = {
+          ...this.#slots[previousActiveSlotId],
+          phase: "empty",
+          identity: null,
+        };
+      }
+    } else {
+      this.#slots[slotId] = this.#activeSlotId === slotId
+        ? {
+            ...this.#slots[slotId],
+            phase: "active",
+            identity: null,
+          }
+        : {
+            ...this.#slots[slotId],
+            phase: "empty",
+            identity: null,
+          };
+    }
     if (
       this.#nativeEdit?.kind === "resume"
       && this.#nativeEdit.candidateId === identity.candidateId
@@ -192,6 +287,11 @@ export class EditRuntimeCandidateController {
   }
 
   reset() {
+    this.#slots = {
+      a: { slotId: "a", slotLease: this.#slots.a.slotLease, phase: "active", identity: null },
+      b: { slotId: "b", slotLease: this.#slots.b.slotLease, phase: "empty", identity: null },
+    };
+    this.#activeSlotId = "a";
     this.#latest = null;
     this.#lastKnownGood = null;
     this.#nativeEdit = null;

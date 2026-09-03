@@ -386,6 +386,68 @@ test("a remounted controller cannot preserve a session-only last-known-good", as
   assert.deepEqual(revoked, [grant.sessionId]);
 });
 
+test("an equivalent canvas generation carries runtime failure until explicit retry", async () => {
+  const requests = [];
+  const session = new EditAuthorRuntimeSession({
+    port: {
+      prepare: async (request) => {
+        requests.push(request);
+        return success(request);
+      },
+      revoke: async () => {},
+    },
+  });
+
+  session.refresh(input());
+  session.startPreparation(input());
+  await flushAsync();
+  const grant = session.snapshot.grant;
+  beginRuntime(session, grant);
+  settleRuntime(session, grant, "failed");
+  assert.equal(session.snapshot.phase, "static-fallback");
+
+  session.refresh(input({ canvasGeneration: 5 }));
+  assert.equal(session.snapshot.phase, "static-fallback");
+  assert.equal(session.snapshot.canvasGeneration, 5);
+  assert.equal(session.snapshot.lastOutcome, "runtime-failed");
+  assert.equal(requests.length, 1);
+  assert.equal(session.startPreparation(input({ canvasGeneration: 5 })), false);
+
+  assert.equal(session.retry(), true);
+  assert.equal(session.startPreparation(input({ canvasGeneration: 5 })), true);
+  await flushAsync();
+  assert.equal(session.snapshot.phase, "ready");
+  assert.equal(requests.length, 2);
+});
+
+test("an equivalent canvas keeps runtime failure through an authority wait", async () => {
+  const requests = [];
+  const session = new EditAuthorRuntimeSession({
+    port: {
+      prepare: async (request) => {
+        requests.push(request);
+        return success(request);
+      },
+      revoke: async () => {},
+    },
+  });
+
+  session.refresh(input());
+  session.startPreparation(input());
+  await flushAsync();
+  const grant = session.snapshot.grant;
+  beginRuntime(session, grant);
+  settleRuntime(session, grant, "failed");
+
+  session.refresh(input({ canvasGeneration: 5, sourceIsAuthoritative: false }));
+  assert.equal(session.snapshot.phase, "static-fallback");
+  assert.equal(session.snapshot.canvasGeneration, 5);
+  session.refresh(input({ canvasGeneration: 5, sourceIsAuthoritative: true }));
+  assert.equal(session.snapshot.phase, "static-fallback");
+  assert.equal(session.snapshot.lastOutcome, "runtime-failed");
+  assert.equal(requests.length, 1);
+});
+
 test("the first successful compatible runtime locks the canvas without recovery", async () => {
   let recoveries = 0;
   const session = new EditAuthorRuntimeSession({
