@@ -2613,8 +2613,15 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         && latest.sourceIndex.sourceSha256 !== request.sourceRevision
       )
     ) {
-      if (deferredRuntimeCandidateRef.current?.lease === request.lease) {
-        deferredRuntimeCandidateRef.current = null;
+      if (deferredRuntimeCandidateRef.current?.lease !== request.lease) return;
+      deferredRuntimeCandidateRef.current = null;
+      if (
+        request.kind === "static-disabled"
+        && request.predecessorCandidateId
+        && !deferLatestStaticRuntimeCandidate(request.predecessorCandidateId)
+      ) {
+        lastRuntimeCandidateFailureRef.current = null;
+        publishRuntimeDegradation("last-known-good-readonly");
       }
       return;
     }
@@ -2645,7 +2652,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       started
       && deferredRuntimeCandidateRef.current?.lease === request.lease
     ) deferredRuntimeCandidateRef.current = null;
-  }, [publishRuntimeDegradation]);
+  }, [deferLatestStaticRuntimeCandidate, publishRuntimeDegradation]);
   replayDeferredRuntimeCandidateRef.current = replayDeferredRuntimeCandidate;
 
   const finalizeRuntimeCandidatePromotion = useCallback((candidate: RuntimeCandidate) => {

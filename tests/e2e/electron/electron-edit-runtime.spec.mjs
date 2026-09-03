@@ -2021,6 +2021,10 @@ test("latest Runtime candidate wins across slow ECharts, native editing and stat
     frame = await currentEditorFrame(page);
     await expect(editor.locator('iframe[data-runtime-slot-role="active"]'))
       .toHaveAttribute("sandbox", "allow-same-origin");
+    await expect(editor).toHaveAttribute("aria-readonly", "false");
+    await expect(page.getByTestId("edit-runtime-static-fallback")).toContainText(
+      "已显示最新源码的静态页面，仍可编辑和保存。",
+    );
     await expect(frame.locator("#latest-wins-chart canvas")).toHaveCount(0);
 
     heading = frame.locator('[data-native-case="runtime-latest-wins-text"]').first();
@@ -2379,6 +2383,114 @@ test("a failed dynamic candidate promotes the latest Script-disabled static page
     await expect(page.getByTestId("html-canvas-editor")
       .locator('iframe[data-frame-role="runtime-candidate"]'))
       .toHaveCount(0);
+  });
+});
+
+test("a queued static fallback follows the latest Working HTML after Native Edit", {
+  tag: ["@gate-smoke", "@smoke-editing"],
+}, async () => {
+  const html = `<!doctype html>
+<html><head><title>Runtime queued static latest</title></head><body>
+  <main>
+    <p data-native-case="runtime-queued-static-latest">静态候选必须跟随最新源码</p>
+  </main>
+  <script>
+    if (document.querySelectorAll('[data-native-case="runtime-queued-static-latest"]')
+      .length > 1) {
+      throw new Error('synthetic queued Runtime activation failure');
+    }
+  </script>
+</body></html>`;
+
+  await withRuntimeProject("pageroot-runtime-queued-static-latest-e2e-", {
+    "runtime-report.html": html,
+  }, async ({ page, sourcePath }) => {
+    let { frame } = await loadedDiskFrame(
+      page,
+      sourcePath,
+      "runtime-queued-static-latest",
+    );
+    const editor = page.getByTestId("html-canvas-editor").filter({ visible: true }).first();
+    const target = frame.locator(
+      '[data-native-case="runtime-queued-static-latest"]',
+    ).first();
+    await target.click();
+    await page.getByRole("button", { name: "复制元素", exact: true }).evaluate((button) => {
+      button.click();
+      const editorElement = document.querySelector('[data-testid="html-canvas-editor"]');
+      const activeFrame = editorElement?.querySelector('iframe:not([data-frame-role])');
+      const editTarget = activeFrame?.contentDocument?.querySelector(
+        '[data-native-case="runtime-queued-static-latest"]',
+      );
+      if (!(activeFrame instanceof HTMLIFrameElement)
+        || !(editTarget instanceof activeFrame.contentWindow.HTMLElement)) {
+        throw new Error("Queued-static Active target is missing.");
+      }
+      const rect = editTarget.getBoundingClientRect();
+      const eventInit = {
+        bubbles: true,
+        cancelable: true,
+        clientX: rect.left + Math.max(1, rect.width / 2),
+        clientY: rect.top + Math.max(1, rect.height / 2),
+      };
+      editTarget.dispatchEvent(new MouseEvent("click", { ...eventInit, detail: 1 }));
+      editTarget.dispatchEvent(new MouseEvent("dblclick", { ...eventInit, detail: 2 }));
+    });
+    await expect(editor).toHaveAttribute("data-runtime-candidate-id", /.+/u);
+    const dynamicCandidateId = await editor.getAttribute("data-runtime-candidate-id");
+    expect(dynamicCandidateId).toBeTruthy();
+
+    frame = await currentEditorFrame(page);
+    const activeTarget = frame.locator(
+      '[data-native-case="runtime-queued-static-latest"]',
+    ).first();
+    await expect(activeTarget).toHaveAttribute("contenteditable", "true");
+    await expect(editor).toHaveAttribute(
+      "data-runtime-degradation",
+      "static-preparing",
+      { timeout: 12_000 },
+    );
+    await expect(activeTarget).toHaveAttribute("contenteditable", "true");
+
+    const revisionBeforeLatestEdit = Number(await page.locator("[data-persist-state]").first()
+      .getAttribute("data-persisted-revision"));
+    await activeTarget.press("End");
+    await page.keyboard.insertText(" 最新来源");
+    await expect(activeTarget).toContainText("最新来源");
+    const latestTextRevision = await expectCheckpointPersisted(page, revisionBeforeLatestEdit);
+    await page.keyboard.press("Escape");
+    await expect.poll(async () => {
+      const indicator = page.locator("[data-persist-state]").first();
+      const editRevision = Number(await indicator.getAttribute("data-edit-revision"));
+      const persistedRevision = Number(await indicator.getAttribute("data-persisted-revision"));
+      return {
+        state: await indicator.getAttribute("data-persist-state"),
+        synchronized: editRevision >= latestTextRevision && editRevision === persistedRevision,
+      };
+    }, { timeout: 30_000 }).toEqual({ state: "idle", synchronized: true });
+
+    await expect(editor).toHaveAttribute(
+      "data-runtime-degradation",
+      "static-visible",
+      { timeout: 12_000 },
+    );
+    await expect(editor).not.toHaveAttribute(
+      "data-runtime-handoff",
+      /^(?:preparing|positioning|active)$/u,
+    );
+    await expect(editor.locator('iframe[data-frame-role="runtime-candidate"]')).toHaveCount(0);
+    const staticFrame = await currentEditorFrame(page);
+    await expect(editor.locator('iframe[data-runtime-slot-role="active"]'))
+      .toHaveAttribute("sandbox", "allow-same-origin");
+    await expect(staticFrame.locator(
+      '[data-native-case="runtime-queued-static-latest"]',
+    ).first()).toContainText("最新来源");
+    await expect(staticFrame.locator(
+      '[data-native-case="runtime-queued-static-latest"]',
+    )).toHaveCount(2);
+    const workingCopyPath = await managedWorkingCopyPath(page, sourcePath);
+    const latestWorkingSource = readFileSync(workingCopyPath, "utf8");
+    expect(latestWorkingSource).toContain("最新来源");
   });
 });
 

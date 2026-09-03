@@ -349,6 +349,8 @@ Anchor；用户在等待期间产生的新滚动位置优先，不能恢复 Cand
 
 Runtime 降级展示按以下状态投影：直接不支持或运行环境不可用时使用
 `direct-static-visible`，说明静态页面已经显示；动态失败后为 `static-preparing`；
+若 Native Edit 在静态请求真正启动前又推进 Working HTML，旧请求立即由唯一一份最新
+完整 HTML 的静态请求替换，不能仅清空请求并永久停留在 `static-preparing`；
 最新静态 Candidate 成功后为 `static-visible`；动态与静态都失败后为
 `last-known-good-readonly`。轻提示只可对当前状态关闭；升级为最后可用只读状态时
 必须重新出现，且持续保留“重新加载”和“导出当前 HTML”，不能彻底关闭。

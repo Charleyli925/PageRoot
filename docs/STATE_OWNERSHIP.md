@@ -303,6 +303,9 @@ Rules:
   Candidate for the latest Working revision; its predecessor identity and
   source revision prevent an older failure from superseding newer work. During
   Native Edit or IME no Candidate may promote and no active frame may retire.
+  If that deferred static request becomes stale while Native Edit advances the
+  source, `HtmlCanvasEditor` replaces it with one request for the latest full
+  Working HTML instead of treating the dropped request as a settled fallback.
   If the static Candidate succeeds it becomes the editable latest source; if it
   also fails, the last-known-good frame stays visible but read-only while reload
   and export remain available. Working HTML never rolls back.

@@ -592,7 +592,10 @@ independent bounded download is active. A terminal preparation, exact recovery,
 load, provenance or execution-deadline failure selects an explicit
 script-disabled static Edit projection. A dynamic Candidate failure prepares
 the latest Working HTML once more with Script disabled while the prior frame
-remains visible. Static success promotes that latest editable source; static
+remains visible. If Native Edit advances Working HTML before that deferred
+static request starts, the stale request is replaced by exactly one request for
+the newest complete HTML; dropping it may never leave `static-preparing` as a
+terminal state. Static success promotes that latest editable source; static
 failure preserves the prior last-known-good frame as read-only without rolling
 Working back. The severe notice cannot be dismissed and retains reload plus
 export actions. Direct unsupported, desktop-unavailable or preparation-failed
