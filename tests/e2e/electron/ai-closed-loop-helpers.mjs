@@ -508,9 +508,18 @@ export async function addComment(page, sourcePath, text = (
     /^(?:preparing|positioning|active)$/u,
     { timeout: 60_000 },
   );
+  await loadedDiskFrame(page, active?.sourcePath || sourcePath);
+  await page.keyboard.press("Escape");
+  // Escape may end a pending edit boundary and start the latest Runtime
+  // handoff. Resolve both the frame and target only after that handoff has
+  // settled; a fixed physical slot is never proof that its Document is Active.
+  await expect(editor).not.toHaveAttribute(
+    "data-runtime-handoff",
+    /^(?:preparing|positioning|active)$/u,
+    { timeout: 60_000 },
+  );
   const frame = await loadedDiskFrame(page, active?.sourcePath || sourcePath);
   const target = frame.locator(targetSelector || caseSelector(targetCase));
-  await page.keyboard.press("Escape");
   await frame.locator("body").click({ position: { x: 2, y: 2 } });
   await target.scrollIntoViewIfNeeded();
   await target.click();
