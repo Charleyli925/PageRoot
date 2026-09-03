@@ -487,11 +487,24 @@ test("a matching failed handoff takes priority over a still-processing Request",
       activeHandoff: {
         requestId: "req_current",
         attemptId: "attempt_001",
+        mode: "managed-agent",
         status: "failed",
         retryable: true,
       },
     }),
     "run-error",
+  );
+  assert.equal(
+    sidebarStateFromRun({
+      activeRun,
+      activeHandoff: {
+        requestId: "req_current",
+        attemptId: "attempt_001",
+        mode: "clipboard",
+        status: "failed",
+      },
+    }),
+    "processing",
   );
   assert.equal(
     sidebarStateFromRun({
@@ -580,54 +593,54 @@ test("history groups use exact Request identity and leave legacy messages histor
       turnId: "turn_old",
       requestId: "req_old",
       attemptId: "attempt_001",
-      startedAt: "2026-08-25T02:30:00.000Z",
+      startedAt: "2026-08-25T10:30:00.000",
     },
     {
       turnId: "turn_current",
       requestId: "req_current",
       attemptId: "attempt_001",
-      startedAt: "2026-08-26T02:51:00.000Z",
+      startedAt: "2026-08-26T10:51:00.000",
     },
     {
       turnId: "turn_old_same_day",
       requestId: "req_old_same_day",
       attemptId: "attempt_002",
-      startedAt: "2026-08-25T06:30:00.000Z",
+      startedAt: "2026-08-25T14:30:00.000",
     },
   ];
   const messages = [
     factMessage({
       messageId: "message_old",
       turnId: "turn_old",
-      createdAt: "2026-08-25T02:31:00.000Z",
+      createdAt: "2026-08-25T10:31:00.000",
       requestId: "req_old",
       attemptId: "attempt_001",
     }),
     factMessage({
       messageId: "message_old_same_day",
       turnId: "turn_old_same_day",
-      createdAt: "2026-08-25T06:31:00.000Z",
+      createdAt: "2026-08-25T14:31:00.000",
       requestId: "req_old_same_day",
       attemptId: "attempt_002",
     }),
     factMessage({
       messageId: "message_legacy",
       turnId: "turn_legacy",
-      createdAt: "2026-08-26T03:00:00.000Z",
+      createdAt: "2026-08-26T11:00:00.000",
       requestId: null,
       attemptId: null,
     }),
     factMessage({
       messageId: "message_current",
       turnId: "turn_current",
-      createdAt: "2026-08-26T02:52:00.000Z",
+      createdAt: "2026-08-26T10:52:00.000",
     }),
   ];
   const groups = sidebarConversationGroups({
     messages,
     turns,
     activeRun: { requestId: "req_current", attemptId: "attempt_001" },
-    now: Date.parse("2026-08-26T04:00:00.000Z"),
+    now: Date.parse("2026-08-26T12:00:00.000"),
   });
   assert.deepEqual(groups.map((group) => [group.kind, group.label, group.messageIds]), [
     ["history", "8月25日 · 历史对话", ["message_old"]],

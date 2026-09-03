@@ -86,7 +86,10 @@ import {
   INITIAL_QODER_AVAILABILITY,
 } from "./domain/qoder-availability.js";
 import { agentProviderCardsFromCatalog } from "./application/agent-provider-catalog.js";
-import { DEFAULT_OPENAI_COMPATIBLE_REASONING } from "../shared/openai-compatible-vendors.mjs";
+import {
+  DEFAULT_OPENAI_COMPATIBLE_REASONING,
+  openAiCompatibleVendorDisplayNameForPublicModel,
+} from "../shared/openai-compatible-vendors.mjs";
 import { createWorkspaceControllerCodecs } from "./application/workspace-controller-codecs.js";
 import { createBrowserFileTabIdentity } from "./application/browser-file-tab-identity.js";
 import { createDesktopRecoveryJournalPort } from "./workbench/desktop-recovery-journal-port";
@@ -712,6 +715,11 @@ export default function Workbench() {
     || agentPresentation.displayName
     || frozenAgentSelection?.providerId
     || null;
+  const executionDisplayName = frozenProvider?.connection?.vendorDisplayName
+    || openAiCompatibleVendorDisplayNameForPublicModel(
+      frozenAgentSelection?.resolvedModelId || frozenAgentSelection?.requestedModelId,
+    )
+    || agentDisplayName;
   const agentModels = Array.isArray(frozenProvider?.models)
     ? frozenProvider.models.map((model) => ({
       id: String(model.id),
@@ -790,6 +798,7 @@ export default function Workbench() {
     conversation: workspaceControllerSnapshot?.conversation ?? null,
     qoderAvailability,
     agentDisplayName,
+    executionDisplayName,
     agentActionName: agentPresentation.agentName || agentPresentation.displayName,
     agentSettingsName: agentPresentation.displayName || agentPresentation.agentName,
     agentSettingsSupported: agentPresentation.settingsSupported !== false,

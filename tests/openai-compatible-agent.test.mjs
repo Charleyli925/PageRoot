@@ -13,6 +13,7 @@ import {
   classifyOpenAiCompatibleHttpStatus,
   completeOpenAiCompatibleChat,
   createHttpRuntime,
+  DEFAULT_INACTIVITY_TIMEOUT_MS,
   extractHtmlDocument,
   readHttpAgentContext,
 } from "../bridge/agent/runtimes/http-runtime.mjs";
@@ -23,6 +24,7 @@ import { inspectSourceElementIdentity } from "../bridge/project-file-repository/
 import {
   OPENAI_COMPATIBLE_VENDORS,
   normalizeOpenAiCompatibleBaseUrl,
+  openAiCompatibleVendorDisplayNameForPublicModel,
   openaiCompatibleChatThinkingFields,
   openAiCompatibleModelCapability,
   publicModelsForVendor,
@@ -54,6 +56,37 @@ function sseResponse(chunks, { status = 200 } = {}) {
     status,
     headers: { "Content-Type": "text/event-stream; charset=utf-8" },
   });
+}
+
+function createVirtualTimer() {
+  let currentTime = 0;
+  let nextId = 1;
+  const pending = new Map();
+  return {
+    clock: { now: () => currentTime },
+    scheduler: {
+      setTimeout(callback, delay) {
+        const id = nextId;
+        nextId += 1;
+        pending.set(id, { callback, dueAt: currentTime + delay });
+        return id;
+      },
+      clearTimeout(id) {
+        pending.delete(id);
+      },
+    },
+    advance(milliseconds) {
+      currentTime += milliseconds;
+      const due = [...pending.entries()]
+        .filter(([, task]) => task.dueAt <= currentTime)
+        .sort((left, right) => left[1].dueAt - right[1].dueAt);
+      for (const [id, task] of due) {
+        if (!pending.delete(id)) continue;
+        task.callback();
+      }
+    },
+    now: () => currentTime,
+  };
 }
 
 function selection(modelId = "deepseek-v4-pro", reasoning = null) {
@@ -118,6 +151,8 @@ test("capabilities are exact-table driven and Custom sends no private reasoning 
   assert.deepEqual(openAiCompatibleModelCapability("zhipu", "glm-anything-else").reasoningChoices.map(({ id }) => id), ["auto"]);
   assert.deepEqual(openaiCompatibleChatThinkingFields("custom", "private-model", "max"), {});
   assert.deepEqual(openaiCompatibleChatThinkingFields("openai", "gpt-5.4", "high"), { reasoning_effort: "high" });
+  assert.equal(openAiCompatibleVendorDisplayNameForPublicModel("pageroot:deepseek-v4-pro"), "DeepSeek");
+  assert.equal(openAiCompatibleVendorDisplayNameForPublicModel("pageroot:private-model"), "");
 });
 
 test("vendor adapters keep request contracts separate and normalize structured failures", () => {
@@ -290,6 +325,109 @@ test("HTTP activity watchdog is sliding, classifies silence as turn timeout, and
   });
   setTimeout(() => cancellation.abort(new Error("cancel test")), 5);
   await assert.rejects(cancelled, (error) => error?.code === "AGENT_CANCELLED");
+});
+
+test("HTTP cancellation explicitly closes an async-iterator response body", async () => {
+  let returnCalls = 0;
+  const body = {
+    [Symbol.asyncIterator]() {
+      return {
+        next: () => new Promise(() => {}),
+        return: async () => {
+          returnCalls += 1;
+          return { done: true };
+        },
+      };
+    },
+  };
+  const cancellation = new AbortController();
+  const pending = completeOpenAiCompatibleChat({
+    fetchImpl: async () => ({
+      ok: true,
+      status: 200,
+      headers: { get: () => "text/event-stream" },
+      body,
+    }),
+    baseUrl: "https://api.example.com/v1",
+    apiKey: "sk-stream",
+    modelId: "model",
+    vendorId: "custom",
+    messages: [],
+    inactivityTimeoutMs: 1_000,
+    signal: cancellation.signal,
+  });
+  setTimeout(() => cancellation.abort(new Error("cancel iterator")), 5);
+  await assert.rejects(pending, (error) => error?.code === "AGENT_CANCELLED");
+  assert.equal(returnCalls, 1);
+});
+
+test("HTTP timeout remains bounded when a stream reader never finishes cancelling", async () => {
+  let releaseCalls = 0;
+  const startedAt = Date.now();
+  await assert.rejects(
+    completeOpenAiCompatibleChat({
+      fetchImpl: async () => ({
+        ok: true,
+        status: 200,
+        headers: { get: () => "text/event-stream" },
+        body: {
+          getReader() {
+            return {
+              read: () => new Promise(() => {}),
+              cancel: () => new Promise(() => {}),
+              releaseLock() {
+                releaseCalls += 1;
+              },
+            };
+          },
+        },
+      }),
+      baseUrl: "https://api.example.com/v1",
+      apiKey: "sk-stream",
+      modelId: "model",
+      vendorId: "custom",
+      messages: [],
+      inactivityTimeoutMs: 10,
+    }),
+    (error) => error?.code === "AGENT_TURN_TIMEOUT",
+  );
+  assert.equal(releaseCalls, 1);
+  assert.ok(Date.now() - startedAt < 1_000);
+});
+
+test("HTTP activity watchdog permits a stream whose total virtual duration exceeds 45 minutes", async () => {
+  const timer = createVirtualTimer();
+  const frames = [
+    { choices: [{ delta: { content: HTML.slice(0, 20) } }] },
+    { choices: [{ delta: { reasoning_content: "hidden" } }] },
+    { usage: { completion_tokens: 1 } },
+    { choices: [{ delta: { content: HTML.slice(20) } }] },
+  ];
+  const response = {
+    ok: true,
+    status: 200,
+    headers: { get: () => "text/event-stream" },
+    body: (async function* longRunningStream() {
+      for (const frame of frames) {
+        timer.advance(20 * 60_000);
+        yield `data: ${JSON.stringify(frame)}\n\n`;
+      }
+      yield "data: [DONE]\n\n";
+    }()),
+  };
+  const result = await completeOpenAiCompatibleChat({
+    fetchImpl: async () => response,
+    baseUrl: "https://api.example.com/v1",
+    apiKey: "sk-stream",
+    modelId: "model",
+    vendorId: "custom",
+    messages: [],
+    inactivityTimeoutMs: DEFAULT_INACTIVITY_TIMEOUT_MS,
+    clock: timer.clock,
+    scheduler: timer.scheduler,
+  });
+  assert.equal(result, HTML);
+  assert.ok(timer.now() > DEFAULT_INACTIVITY_TIMEOUT_MS);
 });
 
 test("HTTP structured SSE provider errors never become HTML or visible narration", async () => {

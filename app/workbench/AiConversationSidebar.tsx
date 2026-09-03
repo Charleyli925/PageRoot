@@ -51,6 +51,7 @@ export type AiConversationSidebarProps = {
   catalogStatus?: SidebarCatalogStatus;
   catalogReason?: string | null;
   agentDisplayName?: string | null;
+  executionDisplayName?: string | null;
   agentActionName?: string | null;
   agentSettingsName?: string | null;
   agentSettingsSupported?: boolean;
@@ -179,6 +180,7 @@ export default function AiConversationSidebar({
   catalogStatus = "ready",
   catalogReason = null,
   agentDisplayName = null,
+  executionDisplayName = null,
   agentActionName = "Agent",
   agentSettingsName = "Agent",
   agentSettingsSupported = true,
@@ -310,10 +312,14 @@ export default function AiConversationSidebar({
   const executionStatus = agentWorking
     ? sidebarExecutionStatus({
         state,
-        providerName: agentPresentation?.displayName || agentPresentation?.agentName || resolvedAgentActionName,
+        providerName: executionDisplayName
+          || agentDisplayName
+          || agentPresentation?.displayName
+          || agentPresentation?.agentName
+          || resolvedAgentActionName,
         startedAt: agentStartedAt,
         receivedBytes: agentReceivedBytes,
-        now: clockNow || Date.now(),
+        now: clockNow,
       })
     : null;
   const selectedModel = models.find((model) => model.id === selectedModelId) || models[0] || null;
@@ -436,11 +442,7 @@ export default function AiConversationSidebar({
   }, [openChoice]);
 
   useEffect(() => {
-    if (!agentWorking && handoffStatus !== "cancelling") {
-      setClockNow(0);
-      return undefined;
-    }
-    setClockNow(Date.now());
+    if (!agentWorking && handoffStatus !== "cancelling") return undefined;
     const timer = window.setInterval(() => setClockNow(Date.now()), 1_000);
     return () => window.clearInterval(timer);
   }, [agentWorking, handoffStatus, agentStartedAt, agentLastActivityAt]);

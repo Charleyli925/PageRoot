@@ -277,6 +277,17 @@ function responseIsSse(response) {
   return Boolean(response?.body);
 }
 
+async function waitForStreamCleanup(cleanup, timeoutMs = 250) {
+  const closing = Promise.resolve().then(cleanup);
+  void closing.catch(() => {});
+  let timeoutHandle;
+  const boundedWait = new Promise((resolve) => {
+    timeoutHandle = setTimeout(resolve, timeoutMs);
+  });
+  await Promise.race([closing, boundedWait]).catch(() => {});
+  clearTimeout(timeoutHandle);
+}
+
 async function* responseChunks(response, watchdog, cancellation) {
   if (typeof response?.body?.getReader === "function") {
     const reader = response.body.getReader();
@@ -297,7 +308,7 @@ async function* responseChunks(response, watchdog, cancellation) {
       }
     } finally {
       if (!exhausted && typeof reader.cancel === "function") {
-        await reader.cancel().catch(() => {});
+        await waitForStreamCleanup(() => reader.cancel());
       }
       if (typeof reader.releaseLock === "function") reader.releaseLock();
     }
@@ -305,15 +316,25 @@ async function* responseChunks(response, watchdog, cancellation) {
   }
   if (response?.body && typeof response.body[Symbol.asyncIterator] === "function") {
     const iterator = response.body[Symbol.asyncIterator]();
-    for (;;) {
-      const pending = iterator.next();
-      void pending.catch(() => {});
-      const guards = [pending];
-      if (watchdog) guards.push(watchdog.expired);
-      if (cancellation) guards.push(cancellation.promise);
-      const result = guards.length === 1 ? await pending : await Promise.race(guards);
-      if (result?.done) return;
-      if (result?.value !== undefined) yield result.value;
+    let exhausted = false;
+    try {
+      for (;;) {
+        const pending = iterator.next();
+        void pending.catch(() => {});
+        const guards = [pending];
+        if (watchdog) guards.push(watchdog.expired);
+        if (cancellation) guards.push(cancellation.promise);
+        const result = guards.length === 1 ? await pending : await Promise.race(guards);
+        if (result?.done) {
+          exhausted = true;
+          return;
+        }
+        if (result?.value !== undefined) yield result.value;
+      }
+    } finally {
+      if (!exhausted && typeof iterator.return === "function") {
+        await waitForStreamCleanup(() => iterator.return());
+      }
     }
   }
   if (typeof response?.text === "function") {

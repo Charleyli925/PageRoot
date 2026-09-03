@@ -1979,6 +1979,36 @@ test("a late cancel result cannot unlock or clear a reopened project generation"
   assert.equal(event?.current, false);
 });
 
+test("managed cancellation publishes cancelling before waiting for Bridge cleanup", async () => {
+  const cancellation = deferred();
+  const harness = createHarness({
+    bridge: {
+      async cancelActiveRun() {
+        return cancellation.promise;
+      },
+    },
+  });
+  const run = runRecord();
+  harness.runSession.trackRun(run, { activate: "always" });
+  harness.runSession.publishHandoff({
+    sourcePath: run.sourcePath,
+    requestId: run.requestId,
+    attemptId: run.attemptId,
+    mode: "managed-agent",
+    status: "running",
+    phase: "generating",
+  });
+
+  const cancelling = harness.workflow.cancel({ run });
+  assert.equal(harness.runSession.activeHandoff?.status, "cancelling");
+  assert.equal(harness.runSession.activeHandoff?.phase, "cancelling");
+
+  cancellation.resolve({});
+  const outcome = await cancelling;
+  assert.equal(outcome.status, "succeeded");
+  assert.equal(harness.runSession.activeRun, null);
+});
+
 test("a late keep-external result cannot reload a reopened project generation", async () => {
   const resolution = deferred();
   const harness = createHarness({

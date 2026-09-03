@@ -7,11 +7,14 @@ import {
   caseSelector,
   chooseClipboardDelivery,
   chooseModifyIntent,
+  closeQoderAvailability,
   closePageRootGracefully,
   createSourceFixture,
+  createQoderAcpE2ECommand,
   existsSync,
   loadedDiskFrame,
   launchPageRoot,
+  openQoderAvailability,
   openRecentProject,
   path,
   readFileSync,
@@ -24,6 +27,63 @@ import {
   workingHtmlFiles,
   writeAiOutput,
 } from "./ai-closed-loop-helpers.mjs";
+
+test("a managed Agent failure immediately replaces processing with retry or end", {
+  tag: ["@smoke-run-lifecycle"],
+}, async () => {
+  test.setTimeout(180_000);
+  const fixture = createSourceFixture("managed-agent-runtime-failure.html");
+  const qoderCommand = createQoderAcpE2ECommand(fixture.sourceDirectory, {
+    runtimeFailure: true,
+  });
+  const launched = await launchPageRoot({
+    activeSourcePath: fixture.sourcePath,
+    injectedEnv: {
+      PAGEROOT_QODER_ACP_ALLOW_TEST_COMMAND: "1",
+      PAGEROOT_QODER_ACP_COMMAND: qoderCommand,
+    },
+  });
+  try {
+    await addComment(
+      launched.page,
+      fixture.sourcePath,
+      "请验证运行中断不会产生 Candidate。",
+    );
+    await launched.page.getByRole("button", { name: /AI 助手/u }).click();
+    const qoderCard = await openQoderAvailability(launched.page);
+    await expect(qoderCard.getByText("Qoder CLI · 已连接", { exact: true }))
+      .toBeVisible({ timeout: 60_000 });
+    await closeQoderAvailability(launched.page);
+    await chooseModifyIntent(launched.page);
+    await launched.page.getByRole("button", { name: "交给 Qoder 修改" }).click();
+
+    const actionBar = launched.page.getByTestId("ai-conversation-action-bar");
+    await expect(actionBar).toContainText("生成中断", { timeout: 60_000 });
+    await expect(actionBar).toContainText("未生成新版本，页面未修改");
+    await expect(actionBar.getByRole("button")).toHaveCount(2);
+    await expect(actionBar.getByRole("button", { name: "重新发送" })).toBeVisible();
+    await expect(actionBar.getByRole("button", { name: "结束本轮" })).toBeVisible();
+    await expect(actionBar.getByText(/更换模型|切换 Agent|复制给其他 AI/u)).toHaveCount(0);
+    await expect(launched.page.locator(".toast.show")).toHaveCount(0);
+    expect(readFileSync(fixture.sourcePath)).toEqual(fixture.original);
+    expect(requestDirectoryCount(launched.workspace)).toBe(1);
+
+    await actionBar.getByRole("button", { name: "重新发送" }).click();
+    await expect(actionBar).toContainText("生成中断", { timeout: 60_000 });
+    expect(requestDirectoryCount(launched.workspace)).toBe(1);
+    expect(readFileSync(fixture.sourcePath)).toEqual(fixture.original);
+
+    await actionBar.getByRole("button", { name: "结束本轮" }).click();
+    await expect(launched.page.locator('aside[aria-label="本轮评论"]')
+      .getByRole("button", { name: "全局评论", exact: true }))
+      .toBeEnabled({ timeout: 45_000 });
+    await expect(launched.page.locator(".toast.show")).toHaveCount(0);
+    expect(readFileSync(fixture.sourcePath)).toEqual(fixture.original);
+  } finally {
+    await stopPageRoot(launched.electronApp, launched.isolatedUserData);
+    removeSourceFixture(fixture.sourceDirectory);
+  }
+});
 
 test("a clipboard handoff failure keeps the frozen Request recoverable", {
   tag: ["@smoke-run-lifecycle"],

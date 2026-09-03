@@ -33,6 +33,7 @@ export type UseAiConversationOptions = {
   conversation: ConversationSessionSnapshot | null;
   qoderAvailability: QoderAvailabilitySnapshot | null;
   agentDisplayName?: string | null;
+  executionDisplayName?: string | null;
   agentActionName?: string | null;
   agentSettingsName?: string | null;
   agentSettingsSupported?: boolean;
@@ -83,6 +84,7 @@ export function useAiConversation({
   conversation,
   qoderAvailability,
   agentDisplayName = null,
+  executionDisplayName = null,
   agentActionName = "Agent",
   agentSettingsName = "Agent",
   agentSettingsSupported = true,
@@ -178,6 +180,7 @@ export function useAiConversation({
     catalogStatus: (qoderAvailability?.status ?? "unavailable") as SidebarCatalogStatus,
     catalogReason: qoderAvailability?.reason ?? null,
     agentDisplayName,
+    executionDisplayName,
     agentActionName,
     agentSettingsName,
     agentSettingsSupported,
@@ -228,6 +231,7 @@ export function useAiConversation({
     historyGroups,
     qoderAvailability,
     agentDisplayName,
+    executionDisplayName,
     agentActionName,
     agentSettingsName,
     agentSettingsSupported,

@@ -432,6 +432,11 @@ PageRoot 维护进程内模型目录，并把“用户是否已同意本机 Qode
 
 预加载不得创建 Request、锁定页面、打开终端、弹出其他应用或自动发送消息。
 
+设置页使用独立 `diagnose`，而不是把正式 preflight 当成状态检查。
+diagnose 可以做只读安装、登录或 HTTP 可达性探测，但不创建 ticket、
+不建立 Agent session、不修改当前模型。正式发送前仍必须重新
+preflight 并把选择冻结到 Request。
+
 ### 10.4 默认模型
 
 选择优先级：
@@ -577,6 +582,16 @@ Qoder 的可见文本回复进入消息流。该能力修订 ADR 0032 中“公�
 ### 12.5 进度与权威
 
 会话初始化、session update、tool call、文件读写、终端创建、Agent stop 和文本回复都只是展示或诊断事实。只有官方 finalizer 的 completion 与 Repository 校验可以使本轮进入 Candidate 待决定状态。
+
+源页 HTTP Agent 使用 SSE 返回整页 HTML。Bridge 只在内部累积正文，
+侧栏只读取已接收字节数；reasoning、usage 和 heartbeat 仅证明连接活动。
+HTTP 与 ACP 正式执行均无固定总时长上限；连续 45 分钟无有效协议数据
+才是 `AGENT_TURN_TIMEOUT`。断线、取消、超时或 provider error 的半成品
+不写 output，不进入 finalizer。
+
+运行失败的行动不再提供更换模型、切换 Agent 或复制给其他 AI。
+可重试失败只有“重新发送”与“结束本轮”；重新发送复用该 Request
+冻结的页面、评论、provider、模型和配置，不读取之后改动的 Catalog。
 
 额度不足、容量不可用一类失败必须在侧栏出现一条清楚的 PageRoot 消息并给出下一步，不允许静默失败或只留一个无解释的灰按钮。PageRoot 不提供额度余量或成本估算界面。
 

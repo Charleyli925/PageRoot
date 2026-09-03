@@ -34,7 +34,8 @@ export const CODEX_ACP_PACKAGE_NAME = "@agentclientprotocol/codex-acp";
 const MAX_PUBLIC_MODELS = 40;
 const SAFE_MODEL_ID = /^[A-Za-z0-9][A-Za-z0-9._/:+-]{0,79}$/u;
 const SAFE_REASONING = /^[A-Za-z0-9][A-Za-z0-9._-]{0,39}$/u;
-const AUTH_FAILURE_PATTERN = /not logged in|sign in|login required|unauthenticated|auth required|chatgpt login/iu;
+const AUTH_FAILURE_PATTERN = /not logged in|not authenticated|sign in|login required|unauthenticated|auth required|chatgpt login/iu;
+const AUTH_SUCCESS_PATTERN = /logged in(?:\s+using|\s+as|\s*$)|authenticated(?:\s+using|\s+as|\s*$)/iu;
 const ACP_AUTH_REQUIRED_CODE = -32000;
 const execFileAsync = promisify(execFile);
 
@@ -337,11 +338,16 @@ export async function resolveCodexAcpCommand({
       const executable = await realpath(configured).catch(() => null);
       if (executable) {
         try {
+          const identity = await fileIdentity(executable);
           return Object.freeze({
             command: executable,
             version: null,
-            identity: await fileIdentity(executable),
-            nativeIdentity: null,
+            identity,
+            // The explicit command is an E2E-only synthetic executable. It
+            // implements both the ACP adapter and `login status`, so diagnosis
+            // can prove the same ready/auth states as a real native closure.
+            nativeCommand: executable,
+            nativeIdentity: identity,
             nodeModulesRoot: null,
             source: "e2e-override",
             installSource: "explicit",
@@ -369,14 +375,23 @@ export async function resolveCodexAcpCommand({
 }
 
 export async function assertCodexAcpInstallationUnchanged(command) {
+  const identityChanged = (current, expected) => (
+    current.dev !== expected.dev
+    || current.ino !== expected.ino
+    || current.nlink !== expected.nlink
+    || current.size !== expected.size
+    || current.mtimeMs !== expected.mtimeMs
+    || current.sha256 !== expected.sha256
+  );
   const current = await fileIdentity(command.command);
+  const nativeClosureIncomplete = Boolean(command.nativeCommand) !== Boolean(command.nativeIdentity);
+  const nativeCurrent = command.nativeCommand && command.nativeIdentity
+    ? await fileIdentity(command.nativeCommand)
+    : null;
   if (
-    current.dev !== command.identity.dev
-    || current.ino !== command.identity.ino
-    || current.nlink !== command.identity.nlink
-    || current.size !== command.identity.size
-    || current.mtimeMs !== command.identity.mtimeMs
-    || current.sha256 !== command.identity.sha256
+    identityChanged(current, command.identity)
+    || nativeClosureIncomplete
+    || (nativeCurrent && identityChanged(nativeCurrent, command.nativeIdentity))
   ) {
     fail("CODEX_COMMAND_CHANGED", "Codex ACP 在预检后发生变化，PageRoot 没有启动它。", {
       status: 409,
@@ -804,6 +819,9 @@ export async function diagnoseCodexAcp(command, environment = process.env) {
       const output = `${result.stdout || ""}\n${result.stderr || ""}`;
       if (AUTH_FAILURE_PATTERN.test(output)) {
         fail("CODEX_AUTH_REQUIRED", "Codex 尚未登录。", { status: 401 });
+      }
+      if (!AUTH_SUCCESS_PATTERN.test(output)) {
+        fail("CODEX_AUTH_UNVERIFIED", "Codex 登录状态无法确认。", { status: 503 });
       }
       return Object.freeze({ readiness: "ready", cause: null, activeInstallation: null });
     } catch (cause) {

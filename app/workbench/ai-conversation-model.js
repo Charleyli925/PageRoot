@@ -138,6 +138,7 @@ export function sidebarStateFromRun({
   if (
     mapped === "processing"
     && handoffMatchesRun
+    && activeHandoff.mode === "managed-agent"
     && ["failed", "interrupted"].includes(String(activeHandoff.status || ""))
     && completionObserved === false
   ) return "run-error";
@@ -565,7 +566,6 @@ export function sidebarActionBar({
   candidateVersionLabel = null,
   candidateStatus = null,
   failureMessage = null,
-  failureCode = null,
   failureRetryable = true,
   deliveryMode = "managed-agent",
   handoffStatus = null,

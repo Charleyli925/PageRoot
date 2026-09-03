@@ -1196,6 +1196,20 @@ A 项目 processing 时切换 B 项目：
 | completion 后 output 变化 | 协议违规 | 新 Attempt |
 | no-change | 不建版 | 修改要求后再提交 |
 | AI 失败或取消 | 不建版、不创建工作文件 | 修改要求后再提交 |
+
+Agent 设置与执行状态均原位收口：设置页只执行无副作用的
+diagnose，不建立 preflight ticket 或 Agent session，只在 Bridge 真实诊断
+成功后显示“已连接”。窗口重新获得焦点时，仅安装中或等待登录
+的临时状态轻量刷新。正式发送才执行 preflight 并冻结 Agent、模型与配置。
+
+执行中仅显示“Agent 正在生成”、已等待时长与已接收字节；隐藏推理和
+半成品 HTML 不显示。HTTP 与 ACP 都只在连续 45 分钟没有有效协议
+数据时中断，持续有 content、reasoning、usage 或 heartbeat 可一直运行。
+Request 仍为 `processing` 但同一 request/attempt 的受管 handoff 失败时，
+侧栏立即以失败投影为准：可重试时只显示“重新发送 / 结束本轮”，
+不可重试时只显示“结束本轮”。结束会先停止受管 Agent 再持久
+取消 Request，不只隐藏界面。历史消息仅按已有日期、turn 和 request 派生
+分组；缺少当前 request/attempt 精确身份的旧错误不得归入本轮。
 | 取消后 AI 才运行 finalizer | 返回不可重试的 `cancelled` 终态，不建版 | 停止 AI Agent |
 | 浏览器文件不是 UTF-8 | 不载入、不修改原文件 | 转换编码后重新选择 |
 | 附件为空、超过 25 MB 或超过 10 个 | 无效项不加入，有效项保留 | 重新选择其他文件 |

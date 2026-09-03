@@ -1529,6 +1529,20 @@ export class RunWorkflow {
     if (!this.#runSession.beginOperation("cancel", operationKey)) {
       return blocked("RUN_CANCEL_BUSY", "本轮结束操作正在进行。");
     }
+    const handoffBeforeCancel = this.#runSession.handoffForSource(run.sourcePath);
+    const publishesCancelling = Boolean(
+      handoffBeforeCancel?.mode === MANAGED_AGENT_MODE
+      && handoffBeforeCancel.requestId === run.requestId
+      && handoffBeforeCancel.attemptId === run.attemptId
+      && ["starting", "running"].includes(handoffBeforeCancel.status),
+    );
+    if (publishesCancelling) {
+      this.#runSession.publishHandoff({
+        ...handoffBeforeCancel,
+        status: "cancelling",
+        phase: "cancelling",
+      });
+    }
     // Cancellation may outlive a switch away and reopen of the same project.
     // Stable project IDs alone must not let a late response mutate the newer
     // editor generation or its active run.
@@ -1573,6 +1587,13 @@ export class RunWorkflow {
     } catch (cause) {
       const tracked = this.#runSession.hasRun(run);
       const current = Boolean(tracked && context && this.#isCurrentContext(context));
+      const currentHandoff = this.#runSession.handoffForSource(run.sourcePath);
+      if (
+        publishesCancelling
+        && currentHandoff?.requestId === run.requestId
+        && currentHandoff?.attemptId === run.attemptId
+        && currentHandoff.status === "cancelling"
+      ) this.#runSession.publishHandoff(handoffBeforeCancel);
       if (tracked) {
         this.#runSession.trackRun({
           ...run,

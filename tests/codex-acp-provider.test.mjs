@@ -9,6 +9,7 @@ import { sha256 } from "../bridge/lifecycle-core.mjs";
 import { createAgentCatalog } from "../bridge/agent/catalog/agent-catalog.mjs";
 import { createDefaultProviderRegistry } from "../bridge/agent/providers/provider-registry.mjs";
 import {
+  assertCodexAcpInstallationUnchanged,
   diagnoseCodexAcp,
   probeCodexAcp,
   resolveCodexAcpCommand,
@@ -206,6 +207,31 @@ test("explicit E2E Codex path wins after all candidate sources are collected", a
   assert.notEqual(resolved.command, managed);
 });
 
+test("Codex start revalidates the adapter and native executable closure", async (t) => {
+  const root = await isolatedHome(t);
+  const adapter = await probeCommand(root);
+  const nativeCommand = path.join(root, "codex-native");
+  await writeFile(nativeCommand, "#!/bin/sh\necho native-v1\n", { mode: 0o755 });
+  await chmod(nativeCommand, 0o755);
+  const nativeInformation = await lstat(nativeCommand);
+  const nativeIdentity = Object.freeze({
+    dev: nativeInformation.dev,
+    ino: nativeInformation.ino,
+    nlink: nativeInformation.nlink,
+    size: nativeInformation.size,
+    mtimeMs: nativeInformation.mtimeMs,
+    sha256: sha256(await readFile(nativeCommand)),
+  });
+  const installation = { ...adapter, nativeCommand, nativeIdentity };
+  await assertCodexAcpInstallationUnchanged(installation);
+
+  await writeFile(nativeCommand, "#!/bin/sh\necho native-v2-changed\n", { mode: 0o755 });
+  await assert.rejects(
+    assertCodexAcpInstallationUnchanged(installation),
+    (error) => error?.code === "CODEX_COMMAND_CHANGED",
+  );
+});
+
 test("ACP probe completes initialize, model catalog and cleanup", async (t) => {
   const evidence = await probeCodexAcp(await probeCommand(await isolatedHome(t)), process.env);
   assert.equal(evidence.protocol, "acp");
@@ -243,5 +269,11 @@ test("Codex diagnosis uses protected native login status when available", async 
   await assert.rejects(
     diagnoseCodexAcp({ nativeCommand: native }, {}),
     (error) => error?.code === "CODEX_AUTH_REQUIRED",
+  );
+
+  await writeFile(native, "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+  await assert.rejects(
+    diagnoseCodexAcp({ nativeCommand: native }, {}),
+    (error) => error?.code === "CODEX_AUTH_UNVERIFIED",
   );
 });

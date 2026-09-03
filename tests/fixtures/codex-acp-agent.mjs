@@ -11,6 +11,14 @@ if (pidFileArgument) {
 }
 const hang = process.argv.includes("--hang");
 const authRequired = process.argv.includes("--auth-required");
+if (process.argv.includes("login") && process.argv.includes("status")) {
+  if (authRequired) {
+    process.stderr.write("Not logged in. Login required.\n");
+    process.exit(1);
+  }
+  process.stdout.write("Logged in\n");
+  process.exit(0);
+}
 const visibleText = process.argv.includes("--visible-text");
 const visibleTextGateArgument = process.argv.find((argument) => argument.startsWith("--visible-text-gate-ms="));
 const visibleTextGateMs = Math.max(
