@@ -18,7 +18,7 @@
 | Durable source filename transaction, pending operation and active/recent path rebase | Desktop source-rename transaction | active-file `pendingRename` / `lastRename`, then filesystem path | trusted desktop rename port and Bridge relink |
 | Current active managed Working Copy restart cache | Main `activeManagedLocator` in the private active-file record | none; non-authoritative, fail-closed cache of the last verified identity tuple and path. Registry plus project metadata remain the only write authority. Missing cache never guesses by name or Hash | startup `getActiveProject`, Finder locator reconcile and trusted `reconcileActiveManagedSource` IPC |
 | Renderer source-rename and Finder locator rebase, expected Hash/context fence, lost-response reconciliation and synchronous Project/Document/Run publication | `ProjectWorkflow`, composed by `WorkspaceController` | none; it publishes through the existing Session owners after desktop/Bridge validate the same identity tuple. Present-file directory hints only hash-observe; missing-path hints, startup and title-bar rename drain switch and rebind | Workbench filename intent, directory-change hints and presentation-event adapter |
-| Current source bytes, disk-confirmed Hash, working-HTML Hash, edit revision, persistence projection, pending write, single-flight source flush, Canvas-rendered Hash, exact-byte boundary reconciliation and protection evidence | Renderer `DocumentSession` owns current bytes/state; `DocumentWorkflow` owns revision/context-bound verified recovery/export receipts | source HTML and runtime autosave record; Main owns the atomic per-document recovery journal while browser recovery is compatibility metadata only; journal path is a CAS-rebased location, and the Canvas generation itself is disposable | Canvas, preview readiness, source-history session and drain coordinator; reversible detach requires working = Canvas = protection Hash and never claims the source write succeeded |
+| Current source bytes, disk-confirmed Hash, working-HTML Hash, edit revision, persistence projection, pending write, single-flight source flush, Canvas-rendered Hash, exact-byte boundary reconciliation and protection evidence | Renderer `DocumentSession` owns current bytes/state; `DocumentWorkflow` owns revision/context-bound verified recovery/export receipts | source HTML and runtime autosave record; Main owns the atomic per-document recovery journal while browser recovery is compatibility metadata only; journal path is a CAS-rebased location, and the Canvas generation itself is disposable | Canvas acknowledgements authorize presentation/cache reuse only. Save/export/AI/leave consume complete Working HTML and exact persistence or recovery evidence; a stale rendered projection remains a distinct honest fact |
 | Force-unlock of a Working Copy conflict (adopt disk Hash as `saved`, no HTML write; clear `runtime.activeRequest` if present; keep `lastPersistedRevision`) | `ProjectFileRepository.forceUnlockWorkingCopy` via `POST /conflict/resolve` `force-unlock` | Working Copy state record and runtime request pointer | `DocumentWorkflow.forceUnlockConflict` / `reloadAuthority({ acceptExternalConflict: true })` and the conflict banner |
 | Allowlisted GlobalInterruption | Renderer Workbench via `globalInterruptionPresentation()` | none; closed kind union only | existing `NoticeBar` with `className="toast"` |
 | WorkspaceSafetyState | Renderer Workbench derived from `workspaceIssue` / persist / pending-exit | none; at most one kind | existing workspace-unavailable / persist banners and chrome status |
@@ -221,8 +221,8 @@ Rules:
   read-only fence while reconciliation determines whether a durable run exists.
   Workbench must derive its active lock and submission presentation from that
   snapshot rather than maintain a second boolean or ref.
-- `RunWorkflow` owns the I/O sequence around that Session fact: it fences native
-  input, freezes and drains the authoritative source, submits only one Request,
+- `RunWorkflow` owns the I/O sequence around that Session fact: it soft-checkpoints
+  native input, performs one `leave-canvas` freeze, drains the authoritative source, submits only one Request,
   reconciles an unknown POST with read-only workspace authority, and fences
   timer/late callbacks by run identity and disposal generation. Clipboard
   success means exact readback only; it never implies an external Agent has run.
@@ -284,6 +284,12 @@ Rules:
   session has no bitmap/projection state: it serves disposable script-enabled
   frames while exact program identity remains current and never persists
   runtime descendants. Edit screenshot count must be 0.
+- `HtmlCanvasEditor` owns native-edit checkpoint disposition. Soft checkpoints
+  materialize complete Working HTML and autosave/recovery evidence while
+  retaining the iframe, contenteditable, Selection, caret and focus.
+  `leave-canvas` retires native editing without queuing a candidate or clearing
+  `runtimeNeedsRerender`; a later unlock may refresh only as recovery. History
+  retains its separate bookmark and canonical-adoption path.
 - An active last-known-good Edit Runtime remains visible and editable while the
   latest candidate prepares. Candidate preparation, connection, positioning or
   activation failure cannot select static fallback when that prior Runtime is

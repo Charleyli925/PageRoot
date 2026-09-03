@@ -1667,8 +1667,9 @@ test("latest Runtime candidate wins across slow ECharts, native editing, history
     };
     const captureNextCandidate = async (trigger) => {
       const previousId = await editor.getAttribute("data-runtime-candidate-id");
+      const candidatePending = waitForNewCandidate(previousId);
       await trigger();
-      const candidateId = await waitForNewCandidate(previousId);
+      const candidateId = await candidatePending;
       expect(candidateId).toBeTruthy();
       candidateIds.push(candidateId);
       const activeFrame = await currentEditorFrame(page);
@@ -1693,6 +1694,7 @@ test("latest Runtime candidate wins across slow ECharts, native editing, history
     frame = await currentEditorFrame(page);
     let heading = frame.locator('[data-native-case="runtime-latest-wins-text"]').first();
     const beforeNativeCandidate = await editor.getAttribute("data-runtime-candidate-id");
+    const nativeCandidatePending = waitForNewCandidate(beforeNativeCandidate);
     await duplicateButton.evaluate((button) => {
       button.click();
       const editorElement = document.querySelector('[data-testid="html-canvas-editor"]');
@@ -1711,7 +1713,7 @@ test("latest Runtime candidate wins across slow ECharts, native editing, history
         clientY: rect.top + Math.max(1, rect.height / 2),
       }));
     });
-    const nativeCandidate = await waitForNewCandidate(beforeNativeCandidate);
+    const nativeCandidate = await nativeCandidatePending;
     expect(nativeCandidate).toBeTruthy();
     candidateIds.push(nativeCandidate);
     expect(new Set(candidateIds).size).toBe(4);
@@ -1786,38 +1788,56 @@ test("latest Runtime candidate wins across slow ECharts, native editing, history
     const lastKnownGoodBeforeEnter = await editor.getAttribute(
       "data-runtime-last-known-good-id",
     );
+    const candidateBeforeEnter = await editor.getAttribute("data-runtime-candidate-id");
+    const documentBeforeEnter = await documentToken(page);
+    const generationBeforeEnter = await editor.locator('iframe:not([data-frame-role])')
+      .getAttribute("data-frame-generation");
     await heading.press("Enter");
-    await expect.poll(async () => {
-      const candidateId = await editor.getAttribute("data-runtime-last-known-good-id");
-      return candidateId && candidateId !== lastKnownGoodBeforeEnter
-        ? candidateId
-        : null;
-    }, { timeout: 12_000 }).not.toBeNull();
-    const enterCandidate = await editor.getAttribute("data-runtime-last-known-good-id");
-    expect(enterCandidate).toBeTruthy();
-    candidateIds.push(enterCandidate);
-    await expect(editor).not.toHaveAttribute("data-runtime-candidate-id", /.+/u);
+    await expect(heading.locator(":scope > br[data-pageroot-id]")).toHaveCount(1);
+    await expect.poll(() => documentToken(page)).toBe(documentBeforeEnter);
+    await expect(editor.locator('iframe:not([data-frame-role])')).toHaveAttribute(
+      "data-frame-generation",
+      generationBeforeEnter,
+    );
+    await expect(editor).toHaveAttribute(
+      "data-runtime-last-known-good-id",
+      lastKnownGoodBeforeEnter,
+    );
+    if (candidateBeforeEnter) {
+      await expect(editor).toHaveAttribute(
+        "data-runtime-candidate-id",
+        candidateBeforeEnter,
+      );
+    } else {
+      await expect(editor).not.toHaveAttribute("data-runtime-candidate-id", /.+/u);
+    }
+    await expect(heading).toHaveAttribute("contenteditable", "true");
     await expect.poll(() => readFileSync(workingCopyPath, "utf8")).toContain("你好");
     const enterRevision = await expectCheckpointPersisted(page, textRevision);
 
-    // Undo and redo intentionally arrive before the slow candidate settles.
+    // History remains an explicit edit-session boundary and therefore keeps
+    // its existing latest-wins Runtime candidate path.
     const beforeUndoCandidate = await editor.getAttribute("data-runtime-candidate-id");
+    const undoCandidatePending = waitForNewCandidate(beforeUndoCandidate);
     await clickEditHistoryMenu(electronApp, page, "undo");
-    const undoCandidate = await waitForNewCandidate(beforeUndoCandidate);
+    const undoCandidate = await undoCandidatePending;
     expect(undoCandidate).toBeTruthy();
     candidateIds.push(undoCandidate);
     const undoRevision = await expectCheckpointPersisted(page, enterRevision);
+    const redoCandidatePending = waitForNewCandidate(undoCandidate);
     await clickEditHistoryMenu(electronApp, page, "redo");
-    const redoCandidate = await waitForNewCandidate(undoCandidate);
+    const redoCandidate = await redoCandidatePending;
     expect(redoCandidate).toBeTruthy();
     candidateIds.push(redoCandidate);
     const redoRevision = await expectCheckpointPersisted(page, undoRevision);
+    const secondUndoCandidatePending = waitForNewCandidate(redoCandidate);
     await clickEditHistoryMenu(electronApp, page, "undo");
-    const secondUndoCandidate = await waitForNewCandidate(redoCandidate);
+    const secondUndoCandidate = await secondUndoCandidatePending;
     candidateIds.push(secondUndoCandidate);
     const secondUndoRevision = await expectCheckpointPersisted(page, redoRevision);
+    const secondRedoCandidatePending = waitForNewCandidate(secondUndoCandidate);
     await clickEditHistoryMenu(electronApp, page, "redo");
-    const secondRedoCandidate = await waitForNewCandidate(secondUndoCandidate);
+    const secondRedoCandidate = await secondRedoCandidatePending;
     candidateIds.push(secondRedoCandidate);
     await expectCheckpointPersisted(page, secondUndoRevision);
 
@@ -1868,8 +1888,9 @@ test("latest Runtime candidate wins across slow ECharts, native editing, history
       window.__PAGEROOT_RUNTIME_RELEASES__?.length || 0
     ));
     const beforeFailureCandidate = await editor.getAttribute("data-runtime-candidate-id");
+    const failureCandidatePending = waitForNewCandidate(beforeFailureCandidate);
     await page.keyboard.press("Escape");
-    const failureCandidate = await waitForNewCandidate(beforeFailureCandidate);
+    const failureCandidate = await failureCandidatePending;
     expect(failureCandidate).toBeTruthy();
     candidateIds.push(failureCandidate);
     await expect.poll(() => page.evaluate(() => (
@@ -1927,8 +1948,9 @@ test("latest Runtime candidate wins across slow ECharts, native editing, history
     });
     await page.keyboard.press("Backspace");
     await expect(heading).not.toContainText("候选失败");
+    const recoveryCandidatePending = waitForNewCandidate(null);
     await page.keyboard.press("Escape");
-    const recoveryCandidate = await waitForNewCandidate(null);
+    const recoveryCandidate = await recoveryCandidatePending;
     candidateIds.push(recoveryCandidate);
     await expect.poll(() => page.evaluate(() => (
       window.__PAGEROOT_RUNTIME_RELEASES__?.length || 0
@@ -1970,8 +1992,9 @@ test("latest Runtime candidate wins across slow ECharts, native editing, history
     });
     await page.keyboard.press("Backspace");
     await expect.poll(() => heading.textContent()).not.toMatch(/ {8}/u);
+    const spaceDeleteCandidatePending = waitForNewCandidate(null);
     await page.keyboard.press("Escape");
-    const spaceDeleteCandidate = await waitForNewCandidate(null);
+    const spaceDeleteCandidate = await spaceDeleteCandidatePending;
     await expect.poll(() => page.evaluate(() => (
       window.__PAGEROOT_RUNTIME_RELEASES__?.length || 0
     ))).toBeGreaterThan(0);
@@ -2023,7 +2046,7 @@ test("latest Runtime candidate wins across slow ECharts, native editing, history
   });
 });
 
-test("long text Enter rebuilds Runtime without moving the caret or viewport", {
+test("long text Enter checkpoints Working HTML without replacing the Runtime document", {
   tag: ["@gate-smoke", "@smoke-editing"],
 }, async () => {
   const html = `<!doctype html>
@@ -2088,25 +2111,71 @@ test("long text Enter rebuilds Runtime without moving the caret or viewport", {
       selection?.addRange(range);
       element.focus({ preventScroll: true });
     });
-    await armRuntimeHandoffSamples(page);
-    await parent.press("Enter");
-    await expect(parent.locator(":scope > br")).toHaveCount(1);
-    await assertRuntimeHandoff(page, {
-      requireActiveChrome: true,
-      assertVisualContinuity: true,
+    const beforeDocument = await documentToken(page);
+    const beforeGeneration = await page.getByTestId("html-canvas-editor")
+      .locator('iframe:not([data-frame-role])')
+      .getAttribute("data-frame-generation");
+    const beforeCandidate = await page.getByTestId("html-canvas-editor")
+      .getAttribute("data-runtime-candidate-id");
+    for (let index = 0; index < 20; index += 1) {
+      await parent.press("Enter");
+    }
+    await expect(parent.locator(":scope > br")).toHaveCount(20);
+    const workingCopyPath = await managedWorkingCopyPath(page, sourcePath);
+    await expect.poll(() => readFileSync(workingCopyPath, "utf8"))
+      .toMatch(/runtime-enter-parent[\s\S]*<br/u);
+    await expect.poll(() => documentToken(page)).toBe(beforeDocument);
+    await expect(page.getByTestId("html-canvas-editor")
+      .locator('iframe:not([data-frame-role])'))
+      .toHaveAttribute("data-frame-generation", beforeGeneration);
+    await expect(page.getByTestId("html-canvas-editor")
+      .locator('iframe[data-frame-role="runtime-candidate"]'))
+      .toHaveCount(0);
+    expect(await page.getByTestId("html-canvas-editor")
+      .getAttribute("data-runtime-candidate-id")).toBe(beforeCandidate);
+    await expect(frame.locator("#enter-proof")).toHaveText("运行时回车 0");
+    await expect(parent).toHaveAttribute("contenteditable", "true");
+    await expect(parent.locator(":scope > br[data-pageroot-id]")).toHaveCount(20);
+    const continuity = await parent.evaluate((element) => {
+      const selection = document.getSelection();
+      return {
+        focused: document.activeElement === element || element.contains(document.activeElement),
+        collapsed: selection?.isCollapsed ?? false,
+        inside: Boolean(selection?.focusNode && element.contains(selection.focusNode)),
+      };
     });
-    frame = await currentEditorFrame(page);
-    await expect(frame.locator("#enter-proof")).toHaveText("运行时回车 1");
-    await expect(frame.locator('[data-native-case="runtime-enter-parent"]'))
-      .toHaveAttribute("contenteditable", "true");
-    await expect(frame.locator(
-      '[data-native-case="runtime-enter-parent"] > br[data-pageroot-id]',
-    )).toHaveCount(1);
+    expect(continuity).toEqual({ focused: true, collapsed: true, inside: true });
     await page.keyboard.insertText("后续输入");
-    await expect(frame.locator('[data-native-case="runtime-enter-parent"]'))
-      .toContainText("后续输入");
+    await expect(parent).toContainText("后续输入");
+    await parent.press("Meta+s");
+    await expect.poll(() => readFileSync(workingCopyPath, "utf8"))
+      .toContain("后续输入");
+    await expect.poll(() => documentToken(page)).toBe(beforeDocument);
+    await expect(parent).toHaveAttribute("contenteditable", "true");
+    await expect(page.getByTestId("html-canvas-editor")
+      .locator('iframe[data-frame-role="runtime-candidate"]'))
+      .toHaveCount(0);
+    const afterSaveContinuity = await parent.evaluate((element) => {
+      const selection = document.getSelection();
+      return {
+        focused: document.activeElement === element || element.contains(document.activeElement),
+        collapsed: selection?.isCollapsed ?? false,
+        inside: Boolean(selection?.focusNode && element.contains(selection.focusNode)),
+      };
+    });
+    expect(afterSaveContinuity).toEqual({ focused: true, collapsed: true, inside: true });
     await expect.poll(() => reviewStage.evaluate((element) => element.scrollTop))
       .toBeGreaterThan(400);
+
+    await page.getByRole("button", { name: "预览", exact: true }).click();
+    await expect(page.locator('iframe[title="HTML 交互预览"]')).toBeVisible();
+    const retainedEditor = page.getByTestId("html-canvas-editor").first();
+    await expect(retainedEditor.locator('iframe[data-frame-role="runtime-candidate"]'))
+      .toHaveCount(0);
+    await expect.poll(() => retainedEditor.locator('iframe:not([data-frame-role])')
+      .evaluate((frameElement) => (
+        frameElement.contentWindow?.__PAGEROOT_NATIVE_QA_DOCUMENT_TOKEN__ || null
+      ))).toBe(beforeDocument);
   });
 });
 
@@ -2240,12 +2309,17 @@ test("a failed runtime candidate leaves the old active frame managed and never r
     const latestWorkingHash = buildSourceIndex(latestWorkingSource).sourceSha256;
     expect(latestWorkingHash).not.toBe(lastKnownGoodHash);
 
+    const lastKnownGoodBeforeSubmission = await page.getByTestId("html-canvas-editor")
+      .getAttribute("data-runtime-last-known-good-id");
+    expect(lastKnownGoodBeforeSubmission).toBeTruthy();
     await page.getByRole("button", { name: /AI 助手/u }).click();
     await chooseClipboardDelivery(page);
+    await expect(page.getByTestId("ai-conversation-action-bar"))
+      .toContainText("任务已复制，等你的 AI 改完");
     await expect(page.getByText(
       "最新页面还没有完成显示，请重新加载动态内容后再发起修改。",
       { exact: true },
-    )).toHaveCount(1);
+    )).toHaveCount(0);
     await expect(page.getByTestId("html-canvas-editor")).toHaveAttribute(
       "data-working-source-sha256",
       latestWorkingHash,
@@ -2258,7 +2332,13 @@ test("a failed runtime candidate leaves the old active frame managed and never r
       "data-rendered-projection-stale",
       "true",
     );
-    await expect(page.getByTestId("ai-conversation-action-bar")).toHaveCount(0);
+    await expect(page.getByTestId("html-canvas-editor")).toHaveAttribute(
+      "data-runtime-last-known-good-id",
+      lastKnownGoodBeforeSubmission,
+    );
+    await expect(page.getByTestId("html-canvas-editor")
+      .locator('iframe[data-frame-role="runtime-candidate"]'))
+      .toHaveCount(0);
   });
 });
 
@@ -2297,9 +2377,26 @@ test("a failed candidate during text editing rolls back before any resume", {
     await target.dblclick({ force: true });
     await expect(target).toHaveAttribute("contenteditable", "true");
     await target.press("End");
-    await armRuntimeHandoffSamples(page);
+    const beforeDocument = await documentToken(page);
+    const beforeGeneration = await page.getByTestId("html-canvas-editor")
+      .locator('iframe:not([data-frame-role])')
+      .getAttribute("data-frame-generation");
     await target.press("Enter");
     await expect(target.locator(":scope > br")).toHaveCount(1);
+    const workingCopyPath = await managedWorkingCopyPath(page, sourcePath);
+    await expect.poll(() => readFileSync(workingCopyPath, "utf8"))
+      .toMatch(/runtime-text-candidate-failure[\s\S]*<br/u);
+    await expect.poll(() => documentToken(page)).toBe(beforeDocument);
+    await expect(page.getByTestId("html-canvas-editor")
+      .locator('iframe:not([data-frame-role])'))
+      .toHaveAttribute("data-frame-generation", beforeGeneration);
+    await expect(page.getByTestId("html-canvas-editor")
+      .locator('iframe[data-frame-role="runtime-candidate"]'))
+      .toHaveCount(0);
+    await expect(target).toHaveAttribute("contenteditable", "true");
+
+    await armRuntimeHandoffSamples(page);
+    await page.keyboard.press("Escape");
     const failedHandoffSamples = await assertRuntimeHandoff(page, {
       requireActiveChrome: true,
       expectPromotion: false,

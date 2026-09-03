@@ -295,7 +295,7 @@ export type WorkspaceControllerConstruction = Readonly<{
     runSession: import("./run-session.js").RunSession;
     codecs: RunWorkflowCodecs;
     canvas: Readonly<{
-      fencePendingEdit?(input: Record<string, unknown>): {
+      checkpointPendingEdit(input: Record<string, unknown>): {
         ok: boolean;
         reason?: string;
       } | undefined;

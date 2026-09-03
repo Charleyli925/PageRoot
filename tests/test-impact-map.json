@@ -1295,7 +1295,7 @@
       "id": "workbench-orchestration",
       "patterns": [
         "^app/workbench\\.tsx$",
-        "^app/workbench/(?:comment-rail-view|comment-rail-contract|file-header-view|run-conversation-outlet|workbench-navigation-container)\\.(?:ts|tsx)$",
+        "^app/workbench/(?:comment-rail-view|comment-rail-contract|file-header-view|run-conversation-outlet|workbench-mode-handlers|workbench-navigation-container)\\.(?:ts|tsx)$",
         "^tests/comment-rail-contract\\.test\\.mjs$",
         "^app/workbench/(?:browser-io|comment-model|project-model|record-model|types)\\.ts$"
       ],

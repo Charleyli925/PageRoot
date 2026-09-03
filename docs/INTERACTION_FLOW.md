@@ -402,7 +402,7 @@ PageRoot 0.9.0 只使用一种文字编辑路线：
 
 - 可编辑岛统一使用受控 `contenteditable="true"`。浏览器只负责焦点、光标、Selection 与 composition；普通输入、删除、换行、剪切和粘贴由 Controller 阻止默认行为后按逻辑位置执行。粘贴只读取 `text/plain`，换行固定写成 `<br>`。
 - 可视段首、段尾、行中和非空行内样式交界都必须支持输入与删除。可视段首继承右侧首字符，其余边界统一继承左侧字符；空排版标签附近同样自动放置光标，不再拒绝进入。工具栏显示下一次输入将采用的样式。
-- 整个岛在一次会话内保持打开；工具栏内部及与当前选区绑定的评论操作不会结束编辑。用户点击除此之外的页面内容或 App 区域时，系统提交当前 checkpoint，并一次性清除 `contenteditable`、选区和浮动工具栏。Escape、保存、导出、项目切换、关闭和发送同样是明确 checkpoint 边界。
+- 整个岛在一次会话内保持打开。连续输入、删除、粘贴、Enter、组词完成、常用文字样式、自动保存、⌘S、保存评论/附件和导出只做软 checkpoint：完整 Working HTML、Stable ID 和恢复证据进入同一保存队列，但保留同一 iframe、`contenteditable`、Selection、Caret 与 Focus，不启动 Runtime candidate。只有点击无关页面区域、Escape 或硬离开才结束原生编辑。项目/标签/页面切换、进入历史、Preview/Review、AI 提交和 App 关闭使用硬边界；若目标已离开 Edit Canvas，只收口完整源码并移除编辑主机，不为离开前“刷新一下”重建 Runtime。
 - IME 开始时冻结岛内容与逻辑 Selection；结束时恢复快照，并把最终候选文字只插入冻结位置一次。没有完成的 composition 在失焦时取消，不猜测候选结果。
 - 双击进入时先进入再校验。布局或文字样式指纹只记录进入后漂移，不再拒绝进入；画布文字与源码投影不一致时先按当前源码重挂该岛，重挂后仍无法对应才 fail-closed。
 - `MutationObserver` 只允许 Controller 自己发起的子节点和文字变更；脚本、浏览器命令或页面事件造成的越权 DOM 变化立即恢复到最近一次安全草稿，并在当前视口提示。
@@ -618,7 +618,7 @@ commit pending native edit checkpoint
 
 `POST /request` 最多等待 60 秒。若超时发生在请求已经发出之后，客户端不得直接解锁或再次提交，而是读取 `/workspace` 核对持久运行态。核对同样有 15 秒边界；短暂失败继续由后台下一轮自动核对，不累计为“重试”提醒，也不在本轮面板提供“重新打开源页”。只有整个工作区服务确认不可用时，Canvas 上方的持久横幅才提供导出与重新打开；成功确认没有活动任务后自动恢复编辑。
 
-原生编辑 checkpoint 或 freeze 失败时立即停止：不锁定、不建立 Request、不复制旧内容。
+原生编辑 checkpoint 或 freeze 失败时立即停止：不锁定、不建立 Request、不复制旧内容。最终 freeze 只执行一次 `leave-canvas` 收口，不先为 Runtime 发起中间刷新。只要冻结 HTML、Working Hash、项目上下文、持久 revision 与 Request 边界精确一致，可见 Runtime 仍是上一张已验证投影不阻止提交，其 stale 状态仍如实保留。
 
 冻结成功并锁定后：
 
@@ -1119,7 +1119,7 @@ A 项目 processing 时切换 B 项目：
 - 恢复日志的核心身份不以路径为准；受管 Working Copy 改名或移动时使用旧 receipt 和完整文档/revision/HTML Hash 做 CAS rebase。连续编辑最多保留一个 in-flight 和一个 latest pending 日志；切换或关闭只等待最新 revision。源文件成功写回后使用完整 receipt CAS 删除并确认日志退役。
 - Main 日志与 local recovery 同 revision、同 HTML Hash 时，Main 验证的 HTML 字节是内容权威，local 只补充 recovery identity、change events 和 history metadata。Main-only 记录在源 Hash 与文档身份一致时直接恢复为待写入，不因缺少 local metadata 伪造 conflict。
 - 恢复日志目录初始化或扫描失败时应用继续创建主窗口，只降级恢复凭证能力并保留导出 HTML 出口。扫描按文件数、单文件字节、总字节和时间设上限；损坏记录单独隔离，Start 只展示通过校验的摘要。
-- 关闭复核分别记录最新完整 HTML 的 working-source Hash 和当前可见已验证投影的 rendered-projection Hash。候选失败而保留上一张 Runtime 时，后者仍是旧 Hash，不得冒充最新源码。项目切换和 AI 提交在两者不一致时保持页面可操作并阻止越过边界；只有最新页面真正加载验证后才可继续。关闭走独立的“源码安全、视觉尚未更新”合同：可继续核对并保护冻结的 working-source HTML，同时保留旧 rendered-projection Hash 和 stale 事实，不得宣称用户已看到最新页面。源文件持久保护仍以冻结 HTML 的 working-source Hash 和 `lastPersistedRevision >= cutoffRevision` 核对，不把可见投影当作源码权威。
+- 关闭、项目切换和 AI 冻结分别记录最新完整 HTML 的 working-source Hash 和当前可见已验证投影的 rendered-projection Hash。候选失败而保留上一张 Runtime 时，后者仍是旧 Hash，不得冒充最新源码；但 Canvas acknowledgement 只是展示/缓存权威，不是保存、导出、AI 或离开授权。这些边界以 working-source HTML、当前 revision 的持久或恢复证据核对，同时保留旧 rendered-projection Hash 和 stale 事实，不得宣称用户已看到最新页面。源文件持久保护仍以冻结 HTML 的 working-source Hash 和 `lastPersistedRevision >= cutoffRevision` 核对，不把可见投影当作源码权威。
 - Renderer 已知的关闭阻断由对应 Canvas、横幅或流程面板解释。Electron 在一次短暂失败后先对精确 request 发送 `close-aborted`、释放 renderer/navigation freeze，最多 400ms 后自动重试一次；仍失败就恢复可操作窗口，不再循环重试相同前置条件，也不重复弹 macOS 警告框。
 - 旧项目的登记或 autosave 失败回调只能写入旧项目恢复记录，不能占用当前项目的 pending write。
 - 源 HTML 写入失败与评论记录失败共用一个全局持久恢复提示：源文件问题优先，否则由评论问题提供“重试记录评论”。源文件失败横幅占用工作区 Grid 独立行，正文可换行，可展开并复制当前项目/文档/revision/Hash 诊断，不被左侧栏遮挡。右侧评论栏不再重复同一错误。

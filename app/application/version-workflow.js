@@ -591,7 +591,6 @@ export class VersionWorkflow {
     try {
       const frozen = this.#freezeCurrentCanvas(
         "当前编辑画布尚未完成安全收口，无法打开历史版本。",
-        "project-switch",
       );
       if (!frozen.ok) return blocked("VERSION_HISTORY_CANVAS_FENCE", frozen.reason);
       if (!this.#isNavigationCurrent(operation)) return stale(current);
@@ -672,7 +671,6 @@ export class VersionWorkflow {
     try {
       const frozen = this.#freezeCurrentCanvas(
         "当前编辑画布尚未完成安全收口，无法返回当前 HTML。",
-        "project-switch",
       );
       if (!frozen.ok) return blocked("VERSION_CURRENT_CANVAS_FENCE", frozen.reason);
       const payload = await this.#bridgeClient.source(current.sourcePath);
@@ -773,7 +771,6 @@ export class VersionWorkflow {
     try {
       const frozen = this.#freezeCurrentCanvas(
         "当前历史视图尚未完成安全收口，无法切换到历史工作文件。",
-        "project-switch",
       );
       if (!frozen.ok) {
         return blocked("VERSION_HISTORY_CONTINUE_CANVAS_FENCE", frozen.reason);
@@ -989,7 +986,6 @@ export class VersionWorkflow {
       if (!alreadyFencedForReview) {
         const frozen = this.#freezeCurrentCanvas(
           "新版本已生成，但当前编辑画布尚未就绪。",
-          "external-refresh",
         );
         if (!frozen.ok) throw new Error(frozen.reason);
       }
@@ -1411,17 +1407,7 @@ export class VersionWorkflow {
     }
   }
 
-  #freezeCurrentCanvas(reason, trigger) {
-    const fenced = this.#canvasPort.fencePendingEdit({
-      resumeEditing: false,
-      trigger,
-    });
-    if (!fenced || !fenced.ok) {
-      return {
-        ok: false,
-        reason: fenced?.reason || "请点回文字完成输入，再切换 HTML 视图。",
-      };
-    }
+  #freezeCurrentCanvas(reason) {
     const frozen = this.#canvasPort.freeze(reason);
     if (!frozen || !frozen.ok) {
       return {
