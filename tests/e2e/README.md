@@ -1,7 +1,7 @@
 # Native DOM browser and Electron gates
 
-These suites exercise the real PageRoot canvas in Chromium and Electron. The
-browser fixtures load through the existing browser file input; the Electron
+These suites exercise the real PageRoot canvas in Chromium and Electron. Fast
+Chromium fixtures run behind a simulated Desktop preload host; the Electron
 disk-transaction gate starts from an isolated desktop recent-project record
 and opens a real temporary HTML file through the production project IPC. Both
 paths enter the same-origin edit iframe and operate authored DOM with real
@@ -162,8 +162,8 @@ PAGEROOT_REAL_HTML_PATH='/absolute/path/to/complex-page.html' npm run test:real-
 ```
 
 An override path must be an absolute existing `.html` file. The test reads it into a
-Buffer and imports that buffer through the browser file input; it never writes
-the original file. The config has `retries: 0`, uses only
+Buffer and opens those bytes through the simulated Desktop host; it never
+writes the original file. The config has `retries: 0`, uses only
 `real-complex-html.gate.mjs`, and writes its artifacts under
 `output/playwright/real-complex-html/`. A missing safe editable target or an
 explicit `select-comment`/`comment-only` target fails with candidate

@@ -122,7 +122,7 @@ function resilientEditorFrame(page) {
   };
 }
 
-function rendererHarnessProject(name, buffer, suffix = "startup") {
+function rendererHarnessProject(name, buffer) {
   const html = buffer.toString("utf8");
   const sourceSha256 = `sha256:${createHash("sha256").update(buffer).digest("hex")}`;
   const identity = sourceSha256.slice("sha256:".length);
@@ -132,8 +132,8 @@ function rendererHarnessProject(name, buffer, suffix = "startup") {
     sourcePath: null,
     html,
     sha256: sourceSha256,
-    projectId: `project_renderer_${identity}_${suffix}`,
-    documentId: `doc_renderer_${identity}_${suffix}`,
+    projectId: `project_renderer_${identity}`,
+    documentId: `doc_renderer_${identity}`,
   };
 }
 
@@ -223,10 +223,8 @@ export async function ensureDesktopRendererTestHarness(page, initialProject = nu
       },
     });
   }, initialProject);
-  await page.reload();
+  if (page.url() !== "about:blank") await page.reload();
 }
-
-export const ensureSourceEditingTestRuntime = ensureDesktopRendererTestHarness;
 
 const FIXTURE_OPEN_ATTEMPTS = 3;
 const FIXTURE_OPEN_ATTEMPT_TIMEOUT = 18_000;
@@ -244,7 +242,7 @@ async function openFixtureThroughDesktopHarness({
     if (await editor.isVisible().catch(() => false)) {
       await expect(editor).toHaveAttribute("data-render-verified", "true");
     }
-    const project = rendererHarnessProject(name, buffer, `open_${attempt}`);
+    const project = rendererHarnessProject(name, buffer);
     await page.evaluate((queuedProject) => {
       const harness = window.__PAGEROOT_RENDERER_TEST_HARNESS__;
       if (!harness || harness.kind !== "desktop-preload") {
@@ -302,8 +300,14 @@ async function openFixtureThroughDesktopHarness({
 export async function loadFixture(
   page,
   name,
-  { buffer = fixtureBuffer(name), identifiedWorkingCopy = false } = {},
+  {
+    buffer = fixtureBuffer(name),
+    identifiedWorkingCopy = false,
+    requireComplete = true,
+    requireNativeCase = true,
+  } = {},
 ) {
+  const startingFromBlankPage = page.url() === "about:blank";
   const sourceBuffer = identifiedWorkingCopy
     ? Buffer.from(materializeSourceElementIdentity(buffer.toString("utf8")).html, "utf8")
     : buffer;
@@ -318,6 +322,9 @@ export async function loadFixture(
     page,
     host.harness || host.desktop ? null : rendererHarnessProject(name, sourceBuffer),
   );
+  if (startingFromBlankPage) {
+    await page.goto("/", { waitUntil: "domcontentloaded" });
+  }
   const editor = page.getByTestId("html-canvas-editor").filter({ visible: true }).first();
   if (host.harness) {
     await openFixtureThroughDesktopHarness({
@@ -326,18 +333,6 @@ export async function loadFixture(
       name,
       buffer: sourceBuffer,
     });
-  } else if (host.desktop) {
-    await editor.waitFor({ state: "visible" });
-    await expect(editor).toHaveAttribute("data-render-verified", "true");
-    const fileInput = page.locator('input[type="file"][accept*=".html"]').first();
-    await fileInput.setInputFiles({
-      name,
-      mimeType: "text/html",
-      buffer: sourceBuffer,
-    });
-    await page.getByRole("tablist", { name: "已打开的页面" })
-      .getByRole("tab", { name, exact: true })
-      .waitFor({ state: "visible", timeout: FIXTURE_OPEN_ATTEMPT_TIMEOUT });
   }
 
   await editor.waitFor({ state: "visible" });
@@ -346,8 +341,12 @@ export async function loadFixture(
   const iframe = editor.locator('iframe[title*="HTML"]');
   await iframe.waitFor({ state: "visible" });
   const initialFrame = await currentEditorFrame(page);
-  await initialFrame.waitForFunction(() => document.readyState === "complete");
-  await initialFrame.waitForFunction(() => Boolean(document.querySelector("[data-native-case]")));
+  await initialFrame.waitForFunction((complete) => (
+    complete ? document.readyState === "complete" : document.readyState !== "loading"
+  ), requireComplete);
+  if (requireNativeCase) {
+    await initialFrame.waitForFunction(() => Boolean(document.querySelector("[data-native-case]")));
+  }
   return { editor, iframe, frame: resilientEditorFrame(page), source: sourceBuffer };
 }
 

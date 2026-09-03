@@ -352,7 +352,7 @@ ipcRenderer.on(appChannels.bridgeReady, (_event, payload) => {
   bridgeConnectionWait = null;
   for (const listener of bridgeReadyListeners) listener(next);
 });
-const runtimeCapabilities = Object.freeze({
+const desktopRuntimeCapabilities = Object.freeze({
   sourceEditing: "enabled",
   projectOpening: "desktop-dialog",
   attachmentPersistence: "bridge",
@@ -376,7 +376,7 @@ const runtimeConfig = Object.freeze({
     return () => bridgeReadyListeners.delete(listener);
   },
   getStartupTiming: () => startupTiming,
-  capabilities: runtimeCapabilities,
+  capabilities: desktopRuntimeCapabilities,
   diagnostics: Object.freeze({ startupTiming, e2eStaticCandidateFailure }),
 });
 

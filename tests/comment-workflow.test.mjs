@@ -372,7 +372,6 @@ test("attachment batches retain successful files while reporting individual fail
     ],
     target: { kind: "composer", commentId: "comment_batch" },
     source: "file-picker",
-    persistence: "bridge",
   });
 
   assert.equal(outcome.status, "succeeded");
@@ -381,83 +380,6 @@ test("attachment batches retain successful files while reporting individual fail
   assert.equal(outcome.value.failures[0].fileName, "bad.bin");
   assert.equal(harness.commentSession.composerAttachments.length, 1);
   assert.equal(harness.commentSession.composerAttachments[0].fileName, "good.png");
-});
-
-test("browser-memory attachments never invoke Bridge storage or deletion", async () => {
-  let bridgeAttachmentCalls = 0;
-  const harness = createHarness({
-    bridge: {
-      async saveAttachment() {
-        bridgeAttachmentCalls += 1;
-        throw new Error("browser memory must not write through Bridge");
-      },
-      async deleteAttachment() {
-        bridgeAttachmentCalls += 1;
-        throw new Error("browser memory must not delete through Bridge");
-      },
-      async attachment() {
-        bridgeAttachmentCalls += 1;
-        throw new Error("browser memory must not read through Bridge");
-      },
-    },
-  });
-  harness.commentSession.update({
-    composerCommentId: "comment_memory",
-    composerTarget: target(),
-  });
-
-  const uploaded = await harness.workflow.uploadAttachments({
-    files: [{ name: "memory.png", type: "image/png", size: 8 }],
-    target: { kind: "composer", commentId: "comment_memory" },
-    source: "clipboard",
-    persistence: "memory",
-  });
-  assert.equal(uploaded.status, "succeeded");
-  const memoryAttachment = uploaded.value.attachments[0].attachment;
-  assert.match(memoryAttachment.relativePath, /^memory\//u);
-  assert.equal(bridgeAttachmentCalls, 0);
-
-  const removed = harness.workflow.removeComposerAttachment({
-    attachmentId: memoryAttachment.attachmentId,
-  });
-  assert.equal(removed.status, "succeeded");
-  const read = await harness.workflow.readAttachment({
-    attachment: memoryAttachment,
-  });
-  assert.equal(read.status, "blocked");
-  assert.equal(bridgeAttachmentCalls, 0);
-});
-
-test("disabled or unknown attachment persistence never registers or writes through Bridge", async () => {
-  let bridgeAttachmentCalls = 0;
-  const harness = createHarness({
-    registered: false,
-    bridge: {
-      async saveAttachment() {
-        bridgeAttachmentCalls += 1;
-        throw new Error("disabled persistence must not write through Bridge");
-      },
-    },
-  });
-  harness.commentSession.update({
-    composerCommentId: "comment_disabled_persistence",
-    composerTarget: target(),
-  });
-
-  for (const persistence of ["none", "unknown"]) {
-    const outcome = await harness.workflow.uploadAttachments({
-      files: [{ name: "disabled.png", type: "image/png", size: 8 }],
-      target: { kind: "composer", commentId: "comment_disabled_persistence" },
-      source: "file-picker",
-      persistence,
-    });
-    assert.equal(outcome.status, "blocked");
-    assert.equal(outcome.code, "ATTACHMENT_PERSISTENCE_UNAVAILABLE");
-  }
-
-  assert.equal(harness.registrations, 0);
-  assert.equal(bridgeAttachmentCalls, 0);
-  assert.equal(harness.commentSession.composerAttachments.length, 0);
 });
 
 test("a stale upload result is compensated against its captured project identity", async () => {
@@ -481,7 +403,6 @@ test("a stale upload result is compensated against its captured project identity
     files: [{ name: "late.png", type: "image/png", size: 8 }],
     target: { kind: "composer", commentId: "comment_stale" },
     source: "file-picker",
-    persistence: "bridge",
   });
   await started.promise;
 

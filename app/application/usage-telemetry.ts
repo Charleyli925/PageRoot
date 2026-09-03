@@ -58,7 +58,6 @@ export function noticeUsageCode(dedupeKey?: string): string {
   if (key.startsWith("reveal-version-file-")) return "reveal_version_file";
   const known = new Set([
     "autosave-recovery",
-    "browser-file-error",
     "current-version-result",
     "export",
     "history-navigation",

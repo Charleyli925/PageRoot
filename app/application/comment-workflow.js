@@ -932,7 +932,7 @@ export class CommentWorkflow {
     return succeeded({ attachment, deleted: !baseline, context });
   }
 
-  async uploadAttachments({ files = [], target, source, persistence } = {}) {
+  async uploadAttachments({ files = [], target, source } = {}) {
     if (this.#disposed) {
       return blocked("COMMENT_WORKFLOW_DISPOSED", "评论工作流已停止。");
     }
@@ -941,26 +941,15 @@ export class CommentWorkflow {
     }
     const acceptedFiles = Array.isArray(files) ? files : [];
     if (acceptedFiles.length === 0) return succeeded({ attachments: [], failures: [] });
-    const mode = persistence === "memory" || persistence === "bridge"
-      ? persistence
-      : null;
-    if (!mode) {
-      return blocked(
-        "ATTACHMENT_PERSISTENCE_UNAVAILABLE",
-        "当前运行环境不支持保存评论附件。",
-      );
-    }
     let context = copyContext(this.#projectSession.context);
-    if (mode === "bridge") {
-      const sourcePath = this.#projectSession.sourcePath;
-      if (!sourcePath) {
-        return blocked("ATTACHMENT_SOURCE_MISSING", "附件需要保存在当前项目记录中；请先打开本地 HTML。");
-      }
-      const registered = await this.#ensureRegistered({ sourcePath });
-      if (registered.status !== "succeeded") return registered;
-      context = copyContext(registered.value);
-      if (!context || !this.#isCurrentContext(context)) return stale(context);
+    const sourcePath = this.#projectSession.sourcePath;
+    if (!sourcePath) {
+      return blocked("ATTACHMENT_SOURCE_MISSING", "附件需要保存在当前项目记录中；请先打开本地 HTML。");
     }
+    const registered = await this.#ensureRegistered({ sourcePath });
+    if (registered.status !== "succeeded") return registered;
+    context = copyContext(registered.value);
+    if (!context || !this.#isCurrentContext(context)) return stale(context);
     const attachments = [];
     const failures = [];
     const generation = this.#attachmentGeneration;
@@ -969,7 +958,6 @@ export class CommentWorkflow {
         file,
         target,
         source,
-        persistence: mode,
         context,
         generation,
       });
@@ -989,12 +977,6 @@ export class CommentWorkflow {
   }
 
   async readAttachment({ attachment } = {}) {
-    if (String(attachment?.relativePath || "").startsWith("memory/")) {
-      return blocked(
-        "ATTACHMENT_MEMORY_ONLY",
-        "浏览器预览中的附件只保留在当前页面内，无法读取本地项目副本。",
-      );
-    }
     const context = copyContext(this.#projectSession.context);
     if (!context || !this.#isCurrentContext(context)) {
       return blocked("ATTACHMENT_CONTEXT_UNAVAILABLE", "当前评论还没有绑定本地项目。");
@@ -1023,9 +1005,6 @@ export class CommentWorkflow {
   }
 
   async deleteAttachment({ attachment, context } = {}) {
-    if (String(attachment?.relativePath || "").startsWith("memory/")) {
-      return succeeded({ removed: false, memory: true });
-    }
     const capturedContext = copyContext(context || this.#projectSession.context);
     if (!capturedContext || !attachment?.relativePath) {
       return blocked("ATTACHMENT_CONTEXT_UNAVAILABLE", "附件没有可验证的项目身份。");
@@ -1366,13 +1345,13 @@ export class CommentWorkflow {
     });
   }
 
-  async #uploadAttachment({ file, target, source, persistence, context, generation }) {
+  async #uploadAttachment({ file, target, source, context, generation }) {
     const operationId = this.#nextOperationId("attachment-upload");
     this.#beginUpload(generation);
     try {
       const prepared = normalizedAttachmentInput(
         await this.#attachmentBinaryPort.prepare(file, {
-          includeDataBase64: persistence === "bridge",
+          includeDataBase64: true,
           source,
         }),
       );
@@ -1382,27 +1361,14 @@ export class CommentWorkflow {
       if (
         generation !== this.#attachmentGeneration
         || !attachmentTargetIsCurrent(this.#commentSession, target)
-        || (persistence === "bridge" && !this.#isCurrentContext(context))
+        || !this.#isCurrentContext(context)
       ) return stale(context, operationId);
 
       const attachmentId = this.#nextAttachmentId();
-      let attachment;
-      if (persistence === "memory") {
-        attachment = {
-          attachmentId,
-          kind: prepared.kind,
-          fileName: prepared.fileName,
-          mediaType: prepared.mediaType,
-          byteLength: prepared.byteLength,
-          sha256: `memory:${attachmentId}`,
-          relativePath: `memory/${attachmentId}/${prepared.fileName}`,
-          source: source === "clipboard" ? "clipboard" : "file-picker",
-        };
-      } else {
-        if (!prepared.dataBase64) {
-          return rejected("ATTACHMENT_INPUT_INVALID", "附件没有可写入的内容。");
-        }
-        const payload = await this.#bridgeClient.saveAttachment({
+      if (!prepared.dataBase64) {
+        return rejected("ATTACHMENT_INPUT_INVALID", "附件没有可写入的内容。");
+      }
+      const payload = await this.#bridgeClient.saveAttachment({
           projectId: context.projectId,
           documentId: context.documentId,
           sourcePath: context.sourcePath,
@@ -1414,26 +1380,21 @@ export class CommentWorkflow {
           kind: prepared.kind,
           source: source === "clipboard" ? "clipboard" : "file-picker",
           dataBase64: prepared.dataBase64,
-        });
-        attachment = this.#codecs.attachmentFromRecord(payload?.attachment);
-        if (!attachment || attachment.attachmentId !== attachmentId) {
-          return rejected("ATTACHMENT_PAYLOAD_INVALID", "附件已写入，但返回的记录不完整。" );
-        }
+      });
+      const attachment = this.#codecs.attachmentFromRecord(payload?.attachment);
+      if (!attachment || attachment.attachmentId !== attachmentId) {
+        return rejected("ATTACHMENT_PAYLOAD_INVALID", "附件已写入，但返回的记录不完整。" );
       }
       const identity = attachmentIdentity(context, target, operationId);
       if (
         generation !== this.#attachmentGeneration
         || !this.#isCurrentAttachmentIdentity(identity)
       ) {
-        if (persistence === "bridge") {
-          await this.deleteAttachment({ attachment, context });
-        }
+        await this.deleteAttachment({ attachment, context });
         return stale(context, operationId);
       }
       if (!this.#appendAttachment(target, attachment)) {
-        if (persistence === "bridge") {
-          await this.deleteAttachment({ attachment, context });
-        }
+        await this.deleteAttachment({ attachment, context });
         return stale(context, operationId);
       }
       this.queueDraft();

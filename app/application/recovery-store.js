@@ -69,7 +69,7 @@ export function createRecoveryStore(storageProvider) {
   });
 }
 
-export function createBrowserRecoveryStore() {
+export function createRendererRecoveryStore() {
   return createRecoveryStore(() => (
     typeof window === "undefined" ? null : window.localStorage
   ));

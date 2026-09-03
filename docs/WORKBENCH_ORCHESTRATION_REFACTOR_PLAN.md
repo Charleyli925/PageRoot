@@ -1014,7 +1014,7 @@ Promise、upload count 或 compensation owner 留在 React。
   Bridge 调用；直接 Bridge 调用精确收敛至 13。
 - 新增/更新 CommentWorkflow、CommentSession、ProjectWorkflow 回归、影响映射、
   测试策略、状态所有权和 architecture contract。覆盖 lazy registration 单次 Draft
-  写入、部分附件失败、browser-memory 无 Bridge、跨项目迟到上传补偿、取消编辑只清
+  写入、部分附件失败、跨项目迟到上传补偿、取消编辑只清
   staged 附件，以及 unknown Draft POST authority reconciliation。
 - 已通过本节指定 Node 集 33/33、`npm run architecture:check`、`npm run typecheck`、
   `npm run test:browser:full` 73/73、`npm run test:ai-closed-loop:smoke` 2/2，及

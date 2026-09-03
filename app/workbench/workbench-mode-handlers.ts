@@ -7,7 +7,6 @@ import type { CanvasMode } from "./types";
 type ModeHandlersInput = Readonly<{
   externalSourcePreview: boolean;
   canvasMode: CanvasMode;
-  browserPreviewOnly: boolean;
   interactionLocked: boolean;
   previewToEditPendingRef: MutableRefObject<boolean>;
   pageViewDocumentKeyRef: MutableRefObject<string>;
@@ -26,7 +25,6 @@ type ModeHandlersInput = Readonly<{
 export function createWorkbenchModeHandlers({
   externalSourcePreview,
   canvasMode,
-  browserPreviewOnly,
   interactionLocked,
   previewToEditPendingRef,
   pageViewDocumentKeyRef,
@@ -76,11 +74,7 @@ export function createWorkbenchModeHandlers({
   };
 
   const onSelectPreview = () => {
-    if (!browserPreviewOnly && interactionLocked) return;
-    if (browserPreviewOnly) {
-      setCanvasMode("preview");
-      return;
-    }
+    if (interactionLocked) return;
     const enterPreview = () => {
       const committed = editorRef.current?.fencePendingEdit({
         resumeEditing: false,

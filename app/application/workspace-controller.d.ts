@@ -59,7 +59,6 @@ import type {
 } from "./workbench-tabs-session.js";
 import type { WorkbenchNavigationSession } from "./workbench-navigation-session.js";
 import type { WorkbenchNavigationOutcome } from "./workbench-navigation-workflow.js";
-import type { BrowserDocumentSession } from "./browser-document-session.js";
 import type { DocumentSurfaceCacheSession } from "./document-surface-cache-session.js";
 import type { WorkbenchTabsPersistenceCoordinator } from "./workbench-tabs-persistence-coordinator.js";
 import type {
@@ -237,7 +236,6 @@ export type WorkspaceControllerConstruction = Readonly<{
   workbenchTabsSession?: WorkbenchTabsSession | null;
   documentSurfaceCacheSession?: DocumentSurfaceCacheSession | null;
   workbenchNavigationSession?: WorkbenchNavigationSession | null;
-  browserDocumentSession?: BrowserDocumentSession | null;
   workbenchTabsPersistenceCoordinator?: WorkbenchTabsPersistenceCoordinator | null;
   codecs: WorkspaceControllerCodecs;
   ports: Readonly<{
@@ -483,10 +481,6 @@ export class WorkspaceController {
     project: ProjectWorkflowProject,
     input?: { kind?: string; operationId?: string; sourcePath?: string | null },
   ): ProjectWorkflowOutcome;
-  acceptBrowserProject(input: {
-    operationId?: string;
-    project: ProjectWorkflowProject;
-  }): Promise<WorkbenchNavigationOutcome>;
   acceptExternalProject(input: {
     requestId: string;
     sourcePath?: string;

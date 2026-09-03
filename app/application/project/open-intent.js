@@ -1,7 +1,6 @@
 export function planProjectOpen({
   closePhase = "idle",
   kind = "local",
-  openMode = "desktop",
 } = {}) {
   if (closePhase === "ready") {
     return Object.freeze({
@@ -12,9 +11,6 @@ export function planProjectOpen({
   }
   if (kind === "startup") {
     return Object.freeze({ kind: "ready", action: "startup" });
-  }
-  if (kind === "local" && openMode === "browser-file") {
-    return Object.freeze({ kind: "ready", action: "browser-picker" });
   }
   if (kind === "local" || kind === "recent") {
     return Object.freeze({ kind: "ready", action: "open-file" });

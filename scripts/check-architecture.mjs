@@ -47,7 +47,6 @@ const RUNTIME_OWNERS = new Set([
   "FirstEditGuideSession",
   "WorkbenchTabsSession",
   "WorkbenchNavigationSession",
-  "BrowserDocumentSession",
   "WorkbenchTabsPersistenceCoordinator",
   "ConversationSession",
   "DocumentSurfaceCacheSession",
@@ -67,6 +66,9 @@ const RETIRED_MODULES = new Set([
   "app/lib/native-edit-transaction.js",
   "app/lib/native-input-intent.js",
   "app/lib/native-structural-edit-planner.js",
+  "app/application/browser-document-session.js",
+  "app/application/browser-file-tab-identity.js",
+  "app/application/runtime-capabilities.js",
 ]);
 const RETIRED_IMPORT_NAMES = new Set([
   "NativeEditingController",
@@ -75,6 +77,9 @@ const RETIRED_IMPORT_NAMES = new Set([
   "native-edit-transaction",
   "native-input-intent",
   "native-structural-edit-planner",
+  "browser-document-session",
+  "browser-file-tab-identity",
+  "runtime-capabilities",
 ]);
 const PROVIDER_LITERALS = ["qoder", "codex", "qoder-acp", "codex-acp"];
 const RAW_ENDPOINTS = new Set([

@@ -19,7 +19,6 @@ import { WorkbenchTooltipHost } from "./workbench-tooltip";
 export type WorkbenchHeaderToolbarProps = {
   runInProgress: boolean;
   canvasMode: CanvasMode;
-  browserPreviewOnly: boolean;
   viewMode: string;
   interactionLocked: boolean;
   recentRunOutcome: unknown;
@@ -41,7 +40,6 @@ export type WorkbenchHeaderToolbarProps = {
 export function WorkbenchHeaderToolbar({
   runInProgress,
   canvasMode,
-  browserPreviewOnly,
   viewMode,
   interactionLocked,
   recentRunOutcome,
@@ -73,11 +71,9 @@ export function WorkbenchHeaderToolbar({
               <button
                 type="button"
                 aria-pressed={!reviewActive && canvasMode === "edit"}
-                disabled={reviewActive || browserPreviewOnly || runInProgress || viewMode === "history"}
+                disabled={reviewActive || runInProgress || viewMode === "history"}
                 data-tooltip={
-                  browserPreviewOnly
-                    ? "浏览器预览为只读模式"
-                    : reviewActive
+                  reviewActive
                       ? "完成审阅后可继续编辑"
                     : runInProgress
                       ? "本轮还在进行，结束或采纳后可回到编辑"
@@ -91,11 +87,9 @@ export function WorkbenchHeaderToolbar({
               <button
                 type="button"
                 aria-pressed={!reviewActive && canvasMode === "preview"}
-                disabled={reviewActive || (!browserPreviewOnly && interactionLocked)}
+                disabled={reviewActive || interactionLocked}
                 data-tooltip={reviewActive
                   ? "完成审阅后可继续预览"
-                  : browserPreviewOnly
-                  ? "只读运行页面自身的脚本和交互；操作不会保存"
                   : interactionLocked
                     ? "当前状态只能使用编辑画布"
                     : undefined}

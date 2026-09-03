@@ -1,8 +1,7 @@
 import type { WorkbenchNavigationSession, WorkbenchNavigationReceipt } from "./workbench-navigation-session.js";
 import type { WorkbenchTabsSession, WorkbenchTabStatus } from "./workbench-tabs-session.js";
-import type { ProjectWorkflow, ProjectWorkflowOutcome, ProjectWorkflowProject } from "./project-workflow.js";
+import type { ProjectWorkflow, ProjectWorkflowOutcome } from "./project-workflow.js";
 import type { NavigationWorkflowControllerCapability } from "./workspace-controller-capabilities.js";
-import type { BrowserDocumentSession } from "./browser-document-session.js";
 import type { WorkbenchTabsPersistenceCoordinator } from "./workbench-tabs-persistence-coordinator.js";
 import type { DocumentSurfaceCacheSession } from "./document-surface-cache-session.js";
 export type WorkbenchNavigationOutcome = ProjectWorkflowOutcome<Record<string, unknown>> & Readonly<{
@@ -23,7 +22,6 @@ export class WorkbenchNavigationWorkflow {
     surfaceCache?: DocumentSurfaceCacheSession | null;
     projectWorkflow: ProjectWorkflow;
     controller: NavigationWorkflowControllerCapability;
-    browserDocuments?: BrowserDocumentSession | null;
     tabsPersistence?: WorkbenchTabsPersistenceCoordinator | null;
     clock?: Readonly<{ now(): number }>;
     setTimer?: (callback: () => void, delayMs: number) => unknown;
@@ -36,7 +34,6 @@ export class WorkbenchNavigationWorkflow {
   createSettings(): Promise<WorkbenchNavigationOutcome>;
   createProjectRules(): Promise<WorkbenchNavigationOutcome>;
   closeTab(tabId: string): Promise<WorkbenchNavigationOutcome>;
-  acceptBrowserProject(input: { operationId?: string; project: ProjectWorkflowProject }): Promise<WorkbenchNavigationOutcome>;
   acceptExternalProject(input: { requestId: string; sourcePath?: string }): Promise<WorkbenchNavigationOutcome>;
   confirmOpen(input?: Record<string, unknown>): Promise<WorkbenchNavigationOutcome>;
   cancelOpen(input?: Record<string, unknown>): Promise<WorkbenchNavigationOutcome>;

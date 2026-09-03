@@ -150,7 +150,6 @@ export interface CommentControllerCommands {
     files: readonly unknown[];
     target: CommentAttachmentTarget;
     source: "clipboard" | "file-picker";
-    persistence: string;
   }>): Promise<CommentWorkflowOutcome>;
   readAttachment(input: Readonly<{ attachment: unknown }>): Promise<
     CommentWorkflowOutcome<Blob>

@@ -17,4 +17,4 @@ export type RecoveryStore = {
 export function createRecoveryStore(
   storageProvider: StorageLike | null | (() => StorageLike | null),
 ): RecoveryStore;
-export function createBrowserRecoveryStore(): RecoveryStore;
+export function createRendererRecoveryStore(): RecoveryStore;

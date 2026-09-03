@@ -293,7 +293,7 @@ Workbench 只确认已提交 loading surface、传入窄 port 并消费快照。
   | orphan comment recovery | Native Electron: `orphaned comments stay card-local and block send without a relink flow`（异常失联只显示卡片删除重建建议，发送聚焦首条且不创建 Request） |
   | update/Settings | Native Electron: `automatic update actions keep the sidebar product geometry and split About from Settings`（update badge、About/restart dialog 与 Settings lifecycle）；Node/Preload owners 继续覆盖 update protocol |
   | rapid switch/close | `tests/e2e/electron/electron-project-lifecycle.spec.mjs` |
-  | workbench tabs / Start / browser-memory / Registry restore | `tests/e2e/electron/electron-workbench-tabs.spec.mjs` |
+  | workbench tabs / Start / Registry restore | `tests/e2e/electron/electron-workbench-tabs.spec.mjs` |
 
   叶子 owner 收敛后，下列重复 oracle 已删除。每行删除都保留：故障注入时主
   oracle 仍失败、至少一条 Browser/Electron/AI canary 证明产品接线、Ready 完整

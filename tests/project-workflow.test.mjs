@@ -17,7 +17,6 @@ import {
   WorkbenchTabsSession,
   projectAppliedEventToWorkbenchTabs,
 } from "../app/application/workbench-tabs-session.js";
-import { createBrowserFileTabIdentity } from "../app/application/browser-file-tab-identity.js";
 import { createEmptySourceHistory } from "../shared/source-history.mjs";
 import { stopBridgeOrNotifyCloseAborted } from "../desktop/close-recovery.mjs";
 
@@ -357,7 +356,6 @@ function createHarness({
       })
     : defaultDocumentWorkflow;
   const openPort = {
-    mode: () => "desktop-dialog",
     async openLocal() {
       return null;
     },
@@ -1628,21 +1626,18 @@ test("project application requires the synchronous navigation receipt before pre
     order.push("presentation-event");
     assert.equal(event.applicationReceipt, receipts[0]);
   });
-  const outcome = harness.workflow.acceptBrowserProject({
-    transactionId: "navigation-browser-A",
-    project: {
-      projectId: "project_browser_A",
-      documentId: "doc_browser_A",
-      name: "A",
-      sourcePath: null,
-      html: A_HTML,
-      sha256: sha256(A_HTML),
-    },
-  });
+  const outcome = harness.workflow.acceptProject({
+    projectId: "project_A",
+    documentId: "doc_A",
+    name: "A",
+    sourcePath: A_PATH,
+    html: A_HTML,
+    sha256: sha256(A_HTML),
+  }, { transactionId: "navigation-A", kind: "accepted" });
   assert.equal(outcome.status, "succeeded");
   await waitFor(() => order.includes("presentation-event"));
   assert.deepEqual(order, ["application-port", "presentation-event"]);
-  assert.equal(receipts[0].transactionId, "navigation-browser-A");
+  assert.equal(receipts[0].transactionId, "navigation-A");
   assert.equal(receipts[0].applicationId, outcome.value.applicationId);
 });
 
@@ -1694,87 +1689,6 @@ test("a terminal transaction rejects its deferred application before Controller 
   assert.deepEqual(harness.projectSession.snapshot, prior);
   assert.equal(harness.documentSession.html, OLD_HTML);
   assert.equal(applyCount, 0);
-});
-
-test("a trusted direct browser file submission still enters the accepted FIFO", async (t) => {
-  const harness = createHarness();
-  t.after(() => harness.workflow.dispose());
-  const tabsSession = new WorkbenchTabsSession();
-  const unsubscribeTabs = harness.workflow.subscribeEvents((event) => {
-    projectAppliedEventToWorkbenchTabs({ session: tabsSession, event });
-  });
-  t.after(unsubscribeTabs);
-  const identity = await createBrowserFileTabIdentity({
-    name: "browser-fixture.html",
-    size: Buffer.byteLength(A_HTML),
-    lastModified: 1_786_000_000_000,
-    sourceSha256: sha256(A_HTML),
-    sha256: async (value) => sha256(value),
-  });
-  const project = {
-    ...identity,
-    name: "browser-fixture.html",
-    sourcePath: null,
-    html: A_HTML,
-  };
-
-  const outcome = harness.workflow.acceptBrowserProject({
-    project,
-  });
-  assert.equal(outcome.status, "succeeded");
-  await waitFor(
-    () => harness.projectSession.epoch === 2
-      && harness.workflow.getSnapshot().projectApplication.status === "idle",
-    "direct browser file did not pass the accepted project boundary",
-  );
-  assert.equal(harness.projectSession.sourcePath, null);
-  assert.equal(harness.documentSession.html, A_HTML);
-  assert.equal(harness.documentSession.sourceSha256, sha256(A_HTML));
-  assert.equal(tabsSession.snapshot.tabs.length, 1);
-  assert.equal(tabsSession.snapshot.tabs[0].kind, "document");
-  assert.equal(tabsSession.snapshot.activeTabId, `document:${identity.projectId}:${identity.documentId}`);
-
-  assert.equal(harness.workflow.acceptBrowserProject({ project }).status, "succeeded");
-  await waitFor(
-    () => harness.projectSession.epoch === 3
-      && harness.workflow.getSnapshot().projectApplication.status === "idle",
-    "reselected browser file did not pass the accepted project boundary",
-  );
-  assert.equal(tabsSession.snapshot.tabs.filter((tab) => tab.kind === "document").length, 1);
-});
-
-test("a second in-memory browser file can switch after the first HTML is applied", async (t) => {
-  const harness = createHarness();
-  t.after(() => harness.workflow.dispose());
-
-  assert.equal(harness.workflow.acceptBrowserProject({
-    project: {
-      name: "browser-first.html",
-      sourcePath: null,
-      html: A_HTML,
-    },
-  }).status, "succeeded");
-  await waitFor(
-    () => harness.documentSession.html === A_HTML
-      && harness.documentSession.sourceSha256 === sha256(A_HTML)
-      && harness.workflow.getSnapshot().projectApplication.status === "idle",
-    "first in-memory HTML did not publish its Hash",
-  );
-
-  assert.equal(harness.workflow.acceptBrowserProject({
-    project: {
-      name: "browser-second.html",
-      sourcePath: null,
-      html: B_HTML,
-    },
-  }).status, "succeeded");
-  await waitFor(
-    () => harness.documentSession.html === B_HTML
-      && harness.workflow.getSnapshot().projectApplication.status === "idle",
-    "second in-memory HTML did not complete the switch fence",
-  );
-  assert.equal(harness.documentSession.sourceSha256, sha256(B_HTML));
-  assert.equal(harness.projectSession.sourcePath, null);
 });
 
 test("a stale hydration result cannot publish into a newer project locator", async (t) => {
@@ -3291,72 +3205,6 @@ test("PageRoot rename after Finder rebase uses the recovered path", async (t) =>
     harness.projectSession.context?.sourcePath,
     "/tmp/project-workflow-pageroot-new.html",
   );
-});
-
-test("browser local open requests the hidden picker without draining first", async (t) => {
-  let canvasWaiters = 0;
-  const harness = createHarness({
-    projectOpen: {
-      mode: () => "browser-file",
-    },
-  });
-  t.after(() => harness.workflow.dispose());
-  harness.documentWorkflow.ensureCurrentCanvas = () => {
-    canvasWaiters += 1;
-    return new Promise(() => {});
-  };
-
-  const pending = harness.workflow.openProject({ kind: "local" });
-  const requested = harness.events.filter(
-    (event) => event.type === "project-browser-file-requested",
-  );
-  assert.equal(requested.length, 1);
-  assert.equal(typeof requested[0].operationId, "string");
-  assert.notEqual(requested[0].operationId, "");
-  assert.equal(canvasWaiters, 0);
-  assert.equal(harness.fenceCount, 0);
-
-  const outcome = await Promise.race([
-    pending,
-    new Promise((_, reject) => {
-      setTimeout(() => {
-        reject(new Error("browser open awaited switch before requesting the picker"));
-      }, 50);
-    }),
-  ]);
-  assert.equal(outcome.status, "succeeded");
-  assert.equal(outcome.value.awaitingFile, true);
-  assert.equal(outcome.value.operationId, requested[0].operationId);
-  assert.equal(canvasWaiters, 0);
-  assert.equal(harness.fenceCount, 0);
-  assert.equal(harness.projectSession.sourcePath, OLD_PATH);
-});
-
-test("a direct browser file after an abandoned picker still enters the accepted FIFO", async (t) => {
-  const harness = createHarness({
-    projectOpen: {
-      mode: () => "browser-file",
-    },
-  });
-  t.after(() => harness.workflow.dispose());
-
-  const requested = harness.workflow.requestBrowserFilePicker();
-  assert.equal(typeof requested, "string");
-  assert.notEqual(requested, "");
-
-  const outcome = harness.workflow.acceptBrowserProject({
-    project: {
-      projectId: "project_browser_recovered",
-      documentId: "doc_browser_recovered",
-      name: "recovered-utf8.html",
-      sourcePath: null,
-      html: A_HTML,
-      sha256: sha256(A_HTML),
-    },
-  });
-  assert.equal(outcome.status, "succeeded");
-  assert.equal(outcome.value.accepted, true);
-  assert.notEqual(outcome.value.operationId, requested);
 });
 
 test("cancelling the local picker does not drain the current project", async (t) => {

@@ -8,7 +8,6 @@ import {
   workbenchStartupPriority,
 } from "../app/application/workbench-navigation-workflow.js";
 import { WorkbenchTabsSession } from "../app/application/workbench-tabs-session.js";
-import { BrowserDocumentSession } from "../app/application/browser-document-session.js";
 
 const A = { projectId: "project_alpha", documentId: "doc_alpha", name: "Alpha" };
 const B = { projectId: "project_beta", documentId: "doc_beta", name: "Beta" };
@@ -107,9 +106,6 @@ function fixture({
   confirm,
   cancel,
   acceptExternal,
-  acceptBrowser,
-  requestPicker = null,
-  browserDocuments = null,
   tabsPersistence = null,
   surfaceCache = null,
   clock = { now: () => 1_000 },
@@ -175,12 +171,6 @@ function fixture({
       calls.push("prepare");
       return { status: "succeeded", value: {} };
     },
-    requestBrowserFilePicker() {
-      if (!requestPicker) return null;
-      const operationId = requestPicker({ calls });
-      calls.push(`picker:${operationId || ""}`);
-      return operationId || null;
-    },
     async openProject(input) {
       calls.push(`open:${input.kind}:${input.projectId || input.sourcePath || ""}`);
       if (open) return open({ input, calls, apply: (project, options) => apply(input, project, options), publish, workflow, projectWorkflow: this });
@@ -191,12 +181,6 @@ function fixture({
     acceptProject(project, input) {
       calls.push(`accept:${input.kind}:${project.projectId}`);
       const applied = apply(input, project);
-      return { status: "succeeded", value: { opened: true, applicationId: applied.applicationId } };
-    },
-    acceptBrowserProject(input) {
-      calls.push("browser");
-      if (acceptBrowser) return acceptBrowser({ input, apply: (project, options) => apply(input, project, options), publish });
-      const applied = apply(input, B);
       return { status: "succeeded", value: { opened: true, applicationId: applied.applicationId } };
     },
     acceptExternalProject(input) {
@@ -226,7 +210,6 @@ function fixture({
     surfaceCache,
     projectWorkflow,
     controller,
-    browserDocuments,
     tabsPersistence,
     clock,
     ...(setTimer ? { setTimer } : {}),
@@ -307,11 +290,6 @@ const SUCCESS_INGRESS_CASES = [
     run: (harness) => harness.workflow.activateTab(`document:${B.projectId}:${B.documentId}`),
   },
   {
-    name: "browser file",
-    prepare: () => fixture(),
-    run: (harness) => harness.workflow.acceptBrowserProject({ project: B }),
-  },
-  {
     name: "OS external",
     prepare: () => fixture(),
     run: async (harness) => {
@@ -386,186 +364,6 @@ for (const ingress of DIRECT_FAILURE_CASES) {
   });
 }
 
-test("a busy navigation still requests the browser picker in the same gesture turn", async () => {
-  const pickerOps = [];
-  let releaseOpen;
-  const gate = new Promise((resolve) => { releaseOpen = resolve; });
-  const harness = fixture({
-    requestPicker: () => {
-      const operationId = `picker-${pickerOps.length + 1}`;
-      pickerOps.push(operationId);
-      return operationId;
-    },
-    open: async ({ apply }) => {
-      await gate;
-      const applied = apply(B);
-      return { status: "succeeded", value: { opened: true, applicationId: applied.applicationId } };
-    },
-  });
-  const first = harness.workflow.openProject({ kind: "recent", sourcePath: "/B.html" });
-  await nextTurn();
-  pickerOps.length = 0;
-  const second = harness.workflow.openProject({ kind: "local" });
-  assert.deepEqual(pickerOps, ["picker-1"]);
-  assert.equal(harness.navigation.snapshot.phase, "opening");
-  releaseOpen();
-  assert.equal((await first).status, "succeeded");
-  const requested = await second;
-  assert.equal(requested.status, "succeeded");
-  assert.equal(requested.value.awaitingFile, true);
-  assert.equal(harness.navigation.snapshot.phase, "awaiting-user");
-});
-
-test("in-memory browser HTML settlement does not require a disk projectId", async () => {
-  const harness = fixture({
-    acceptBrowser: ({ input, apply, publish }) => {
-      const applied = apply(input.project);
-      publish({
-        projectSession: {
-          projectId: "",
-          documentId: "",
-          epoch: applied.epoch,
-          sourcePath: null,
-        },
-        project: {
-          hydration: { phase: "idle", epoch: applied.epoch, error: null },
-          projectApplication: {
-            status: "idle",
-            activeApplicationId: null,
-            queuedApplicationId: null,
-          },
-        },
-        document: {
-          canvasAuthority: { status: "verified", error: null },
-        },
-      });
-      return { status: "succeeded", value: { opened: true, applicationId: applied.applicationId } };
-    },
-  });
-  const outcome = await harness.workflow.acceptBrowserProject({ project: B });
-  assert.equal(outcome.status, "succeeded");
-  assert.equal(harness.navigation.snapshot.phase, "idle");
-});
-
-test("idle browser local open starts ProjectWorkflow in the same turn as the gesture", async () => {
-  const harness = fixture({
-    open: ({ input }) => ({
-      status: "succeeded",
-      value: { operationId: `picker-${input.transactionId}`, awaitingFile: true },
-    }),
-  });
-  const pending = harness.workflow.openProject({ kind: "local" });
-  assert.equal(
-    harness.calls.includes("open:local:"),
-    true,
-    "picker admission must not wait for a microtask, or Chromium drops the user gesture",
-  );
-  const requested = await pending;
-  assert.equal(requested.status, "succeeded");
-  assert.equal(harness.navigation.snapshot.phase, "awaiting-user");
-});
-
-test("retrying an abandoned browser picker starts the next request in the same turn", async () => {
-  const harness = fixture({
-    open: ({ input }) => ({
-      status: "succeeded",
-      value: { operationId: `picker-${input.transactionId}`, awaitingFile: true },
-    }),
-  });
-  await harness.workflow.openProject({ kind: "local" });
-  assert.equal(harness.navigation.snapshot.phase, "awaiting-user");
-  harness.calls.length = 0;
-  const pending = harness.workflow.openProject({ kind: "local" });
-  assert.equal(
-    harness.calls.includes("open:local:"),
-    true,
-    "encoding-error retry must reopen the picker in the same click turn",
-  );
-  const requested = await pending;
-  assert.equal(requested.status, "succeeded");
-  assert.equal(harness.navigation.snapshot.phase, "awaiting-user");
-});
-
-test("browser picker continuation retains its admitted transaction and exact application receipt", async () => {
-  const harness = fixture({
-    open: async ({ input }) => ({
-      status: "succeeded",
-      value: { operationId: `picker-${input.transactionId}`, awaitingFile: true },
-    }),
-  });
-  const requested = await harness.workflow.openProject({ kind: "local" });
-  assert.equal(requested.status, "succeeded");
-  assert.equal(harness.navigation.snapshot.phase, "awaiting-user");
-  const transactionId = harness.navigation.snapshot.transactionId;
-  const accepted = await harness.workflow.acceptBrowserProject({
-    operationId: `picker-${transactionId}`,
-    project: B,
-  });
-  assert.equal(accepted.status, "succeeded");
-  assert.equal(harness.navigation.snapshot.lastReceipt.transactionId, transactionId);
-  assert.equal(harness.tabs.snapshot.activeTabId, `document:${B.projectId}:${B.documentId}`);
-});
-
-test("browser A to B to A reopens frozen bytes through the accepted application FIFO", async () => {
-  const browserDocuments = new BrowserDocumentSession();
-  const browserA = {
-    ...A,
-    name: "A.html",
-    sourcePath: null,
-    html: "<h1>A</h1>",
-    sha256: `sha256:${"a".repeat(64)}`,
-  };
-  const browserB = {
-    ...B,
-    name: "B.html",
-    sourcePath: null,
-    html: "<h1>B</h1>",
-    sha256: `sha256:${"b".repeat(64)}`,
-  };
-  browserDocuments.retain(browserA);
-  const persisted = [];
-  const harness = fixture({
-    browserDocuments,
-    tabsPersistence: { commit: (state) => persisted.push(state) },
-    acceptBrowser: ({ input, apply }) => {
-      const applied = apply(input.project);
-      return { status: "succeeded", value: { opened: true, applicationId: applied.applicationId } };
-    },
-  });
-  assert.equal((await harness.workflow.acceptBrowserProject({ project: browserB })).status, "succeeded");
-  assert.equal((await harness.workflow.activateTab(`document:${A.projectId}:${A.documentId}`)).status, "succeeded");
-  assert.equal((await harness.workflow.activateTab(`document:${B.projectId}:${B.documentId}`)).status, "succeeded");
-  assert.deepEqual(
-    harness.calls.filter((call) => call.startsWith("accept:browser-memory")),
-    [`accept:browser-memory:${A.projectId}`, `accept:browser-memory:${B.projectId}`],
-  );
-  assert.equal(harness.calls.some((call) => call === `open:registered:${A.projectId}`), false);
-  assert.equal(harness.tabs.snapshot.tabs.filter((tab) => tab.kind === "document").length, 2);
-  assert.equal(browserDocuments.resolve(A.projectId, A.documentId).html, "<h1>A</h1>");
-  assert.equal(browserDocuments.resolve(B.projectId, B.documentId).html, "<h1>B</h1>");
-  assert.equal(JSON.stringify(persisted).includes("<h1>"), false);
-  assert.equal(JSON.stringify(persisted).includes("sha256"), false);
-
-  assert.equal((await harness.workflow.acceptBrowserProject({ project: browserB })).status, "succeeded");
-  assert.equal(harness.tabs.snapshot.tabs.filter((tab) => tab.kind === "document").length, 2);
-});
-
-test("closing a browser tab removes its in-memory backing and runtime owner", async () => {
-  const browserDocuments = new BrowserDocumentSession();
-  const browserA = {
-    ...A,
-    sourcePath: null,
-    html: "A",
-    sha256: `sha256:${"a".repeat(64)}`,
-  };
-  browserDocuments.retain(browserA);
-  const harness = fixture({ browserDocuments });
-  const closed = await harness.workflow.closeTab(`document:${A.projectId}:${A.documentId}`);
-  assert.equal(closed.status, "succeeded");
-  assert.equal(browserDocuments.resolve(A.projectId, A.documentId), null);
-  assert.equal(harness.tabs.snapshot.runtimeOwnerTabId, null);
-});
-
 test("active document close protects and removes the current tab before opening its successor", async () => {
   const order = [];
   const harness = fixture({
@@ -622,53 +420,6 @@ test("active document close falls back to Start without resurrecting a failed su
     harness.tabs.snapshot.tabs.find((tab) => tab.tabId === harness.tabs.snapshot.activeTabId)?.kind,
     "start",
   );
-});
-
-test("browser pre-apply rejection restores the prior in-memory authority", async () => {
-  const browserDocuments = new BrowserDocumentSession();
-  const prior = {
-    ...B,
-    sourcePath: null,
-    html: "prior",
-    sha256: `sha256:${"a".repeat(64)}`,
-  };
-  browserDocuments.retain(prior);
-  const harness = fixture({
-    browserDocuments,
-    acceptBrowser: () => ({ status: "rejected", code: "BROWSER_REJECTED", reason: "no" }),
-  });
-  const outcome = await harness.workflow.acceptBrowserProject({
-    project: {
-      ...prior,
-      html: "replacement",
-      sha256: `sha256:${"b".repeat(64)}`,
-    },
-  });
-  assert.equal(outcome.status, "rejected");
-  assert.equal(browserDocuments.resolve(B.projectId, B.documentId).html, "prior");
-  assert.equal(harness.tabs.snapshot.activeTabId, `document:${A.projectId}:${A.documentId}`);
-});
-
-test("browser post-display failure keeps the accepted bytes and marks readiness error", async () => {
-  const browserDocuments = new BrowserDocumentSession();
-  const browserB = {
-    ...B,
-    sourcePath: null,
-    html: "browser B",
-    sha256: `sha256:${"b".repeat(64)}`,
-  };
-  const harness = fixture({
-    browserDocuments,
-    acceptBrowser: ({ input, apply }) => {
-      const applied = apply(input.project, { hydration: "failed", error: "browser hydrate" });
-      return { status: "succeeded", value: { opened: true, applicationId: applied.applicationId } };
-    },
-  });
-  const outcome = await harness.workflow.acceptBrowserProject({ project: browserB });
-  assert.equal(outcome.status, "succeeded");
-  await nextTurn();
-  assert.equal(browserDocuments.resolve(B.projectId, B.documentId).html, "browser B");
-  assertAlignedNavigation(harness, B);
 });
 
 test("external pre-apply and post-apply failures preserve the phase contract", async () => {
@@ -1152,7 +903,6 @@ test("close freeze rejects every same-tick ingress and abort or final-exit retry
     harness.workflow.openRegisteredProject({ ...B, title: B.name }),
     harness.workflow.createStart(),
     harness.workflow.closeTab(`document:${A.projectId}:${A.documentId}`),
-    harness.workflow.acceptBrowserProject({ project: B }),
     harness.workflow.acceptExternalProject({ requestId: "external-frozen" }),
     harness.workflow.confirmOpen({ requestId: "confirmation-frozen" }),
   ]);

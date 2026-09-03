@@ -14,7 +14,6 @@ export type FirstEditGuideSnapshot = Readonly<{
 
 export type FirstEditGuideEligibilityInput = Readonly<{
   desktop?: boolean;
-  browserPreviewOnly?: boolean;
   canvasMode?: "edit" | "preview";
   canvasVerified?: boolean;
   viewMode?: "current" | "history";

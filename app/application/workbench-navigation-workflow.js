@@ -48,7 +48,6 @@ export class WorkbenchNavigationWorkflow {
   #surfaceCache;
   #projectWorkflow;
   #controller;
-  #browserDocuments;
   #tabsPersistence;
   #clock;
   #setTimer;
@@ -68,7 +67,6 @@ export class WorkbenchNavigationWorkflow {
     surfaceCache = null,
     projectWorkflow,
     controller,
-    browserDocuments = null,
     tabsPersistence = null,
     clock = { now: Date.now },
     setTimer = (callback, delay) => setTimeout(callback, delay),
@@ -82,7 +80,6 @@ export class WorkbenchNavigationWorkflow {
     this.#surfaceCache = surfaceCache;
     this.#projectWorkflow = projectWorkflow;
     this.#controller = controller;
-    this.#browserDocuments = browserDocuments;
     this.#tabsPersistence = tabsPersistence;
     this.#clock = clock;
     this.#setTimer = setTimer;
@@ -91,34 +88,6 @@ export class WorkbenchNavigationWorkflow {
 
   openProject(input = {}) {
     const kind = String(input.kind || "local");
-    const pickerId = kind === "local" && !input.sourcePath
-      ? this.#projectWorkflow.requestBrowserFilePicker?.() || null
-      : null;
-    if (pickerId) {
-      if (
-        this.#active?.continuation === "browser-file"
-        && this.#session.snapshot.phase === "awaiting-user"
-      ) {
-        return Promise.resolve(succeeded({ operationId: pickerId, awaitingFile: true }));
-      }
-      return this.#admit({ kind, sourcePath: null }, (active) => {
-        active.continuation = "browser-file";
-        this.#session.transition(active.transactionId, "preparing");
-        this.#session.transition(active.transactionId, "opening");
-        this.#session.transition(active.transactionId, "awaiting-user");
-        return {
-          suspended: true,
-          outcome: succeeded({ operationId: pickerId, awaitingFile: true }),
-        };
-      });
-    }
-    if (
-      kind === "local"
-      && this.#active?.continuation === "browser-file"
-      && this.#session.snapshot.phase === "awaiting-user"
-    ) {
-      this.#rollbackAndRelease(this.#active, null);
-    }
     return this.#admit({ kind, sourcePath: input.sourcePath || null }, (active) => (
       this.#openProject(active, input)
     ));
@@ -202,9 +171,6 @@ export class WorkbenchNavigationWorkflow {
       if (snapshot.activeTabId !== tabId) {
         this.#tabs.close(tabId);
         this.#surfaceCache?.remove(tabId);
-        if (closing.kind === "document") {
-          this.#browserDocuments?.remove(closing.projectId, closing.documentId);
-        }
         return { outcome: succeeded({ tabId }) };
       }
       let next = snapshot.tabs[index + 1] || snapshot.tabs[index - 1] || null;
@@ -226,9 +192,6 @@ export class WorkbenchNavigationWorkflow {
       }
       this.#tabs.close(tabId);
       this.#surfaceCache?.remove(tabId);
-      if (closing.kind === "document") {
-        this.#browserDocuments?.remove(closing.projectId, closing.documentId);
-      }
       // Protection is settled before the tab authority is removed. From this
       // point rollback may preserve the successor, but must not resurrect the
       // document the user already closed.
@@ -270,31 +233,6 @@ export class WorkbenchNavigationWorkflow {
         ...activated,
         outcome: succeeded({ tabId, activeTabId: next.tabId }),
       };
-    });
-  }
-
-  acceptBrowserProject(input) {
-    const active = this.#active;
-    if (active?.continuation === "browser-file") {
-      return this.#continue(active, async () => {
-        active.browserAuthority = this.#browserDocuments?.retain(input?.project) || null;
-        this.#session.transition(active.transactionId, "opening");
-        active.continuation = null;
-        const outcome = this.#projectWorkflow.acceptBrowserProject({
-          ...input,
-          transactionId: active.transactionId,
-        });
-        return this.#finishOpened(active, outcome, { deadlineMs: 15_000 });
-      });
-    }
-    return this.#admit({ kind: "browser-file" }, async (next) => {
-      next.browserAuthority = this.#browserDocuments?.retain(input?.project) || null;
-      this.#session.transition(next.transactionId, "opening");
-      const outcome = this.#projectWorkflow.acceptBrowserProject({
-        ...input,
-        transactionId: next.transactionId,
-      });
-      return this.#finishOpened(next, outcome, { deadlineMs: 15_000 });
     });
   }
 
@@ -580,11 +518,6 @@ export class WorkbenchNavigationWorkflow {
     if (outcome?.status !== "succeeded") {
       return this.#finishOpened(active, outcome, { deadlineMs: 15_000 });
     }
-    if (outcome.value?.awaitingFile) {
-      active.continuation = "browser-file";
-      this.#session.transition(active.transactionId, "awaiting-user");
-      return { suspended: true, outcome };
-    }
     if (outcome.value?.awaitingConfirmation) {
       const confirmation = this.#projectWorkflow.getSnapshot().openConfirmation;
       active.requestId = String(confirmation?.requestId || "");
@@ -733,19 +666,12 @@ export class WorkbenchNavigationWorkflow {
       }
     }
     this.#session.transition(active.transactionId, "opening");
-    const browserProject = this.#browserDocuments?.resolve(target.projectId, target.documentId);
-    const outcome = browserProject
-      ? this.#projectWorkflow.acceptProject(browserProject, {
-        kind: "browser-memory",
-        transactionId: active.transactionId,
-        switchPrepared,
-      })
-      : await this.#projectWorkflow.openProject({
-        kind: "registered",
-        projectId: target.projectId,
-        transactionId: active.transactionId,
-        switchPrepared,
-      });
+    const outcome = await this.#projectWorkflow.openProject({
+      kind: "registered",
+      projectId: target.projectId,
+      transactionId: active.transactionId,
+      switchPrepared,
+    });
     return this.#finishOpened(active, outcome, { deadlineMs });
   }
 
@@ -917,16 +843,7 @@ export class WorkbenchNavigationWorkflow {
           && project.documentId === receipt.documentId
           && Number(project.epoch) === receipt.epoch,
         );
-        // In-memory browser HTML has no disk locator, so ProjectSession keeps
-        // an empty projectId after openLocator(null). Settlement still has to
-        // complete or the next picker/accept stays queued behind this one.
-        const browserMemoryAligned = Boolean(
-          receipt.projectId
-          && !project?.sourcePath
-          && !project?.projectId
-          && Number(project?.epoch) === receipt.epoch,
-        );
-        if (!sessionAligned && !browserMemoryAligned) {
+        if (!sessionAligned) {
           if (Number(project?.epoch) > receipt.epoch) settle({ ok: false, stale: true });
           return;
         }
@@ -982,10 +899,6 @@ export class WorkbenchNavigationWorkflow {
     let release;
     const completion = new Promise((resolve) => { release = resolve; });
     this.#admissionTail = predecessor.then(() => completion);
-    // Browser-file `input.click()` must run in the same user-activation turn.
-    // Queuing an idle admission behind `predecessor.then()` yields a microtask,
-    // so Chromium silently ignores the click and encoding-error "重新选择"
-    // cannot reopen the picker.
     if (!this.#busy) {
       return this.#beginAdmission(intent, execute, release);
     }
@@ -1016,7 +929,6 @@ export class WorkbenchNavigationWorkflow {
       expectedTabId: null,
       requestId: null,
       continuation: null,
-      browserAuthority: null,
       applicationId: null,
       applicationAuthorityOpen: true,
       cancelReceiptWait: null,
@@ -1086,7 +998,6 @@ export class WorkbenchNavigationWorkflow {
       : outcomeError(outcome, "WORKBENCH_NAVIGATION_REJECTED", "导航失败。");
     if (outcome.status !== "succeeded" && !result.receipt) {
       this.#tabs.restoreAuthority(active.priorTabs);
-      if (active.browserAuthority) this.#browserDocuments?.restore(active.browserAuthority);
     }
     this.#session.finish(active.transactionId, {
       receipt: result.receipt || null,
@@ -1113,7 +1024,6 @@ export class WorkbenchNavigationWorkflow {
     if (this.#active !== active) return;
     this.#expireApplicationAuthority(active);
     this.#tabs.restoreAuthority(active.priorTabs);
-    if (active.browserAuthority) this.#browserDocuments?.restore(active.browserAuthority);
     this.#session.finish(active.transactionId, { error });
     const terminal = Object.freeze({
       transactionId: active.transactionId,

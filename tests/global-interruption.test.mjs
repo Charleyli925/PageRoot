@@ -19,11 +19,4 @@ test("allowlisted copy is owned by the catalog, not the caller", () => {
   });
   assert.equal(presented?.title, "复制没有成功");
   assert.equal(presented?.actionId, null);
-  assert.equal(
-    globalInterruptionPresentation({
-      kind: "browser-file-unsupported",
-      encodingUnsupported: true,
-    })?.title,
-    "文件编码不支持",
-  );
 });
