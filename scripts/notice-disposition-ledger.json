@@ -114,15 +114,6 @@
       ]
     },
     {
-      "id": "browser-file-unsupported",
-      "owner": "browser",
-      "reason": "浏览器选择不支持的编码或类型时，没有现成错误位说明文件为什么没打开",
-      "removalCondition": "复用已有文件打开错误位置，且不扩展成通用错误区",
-      "siteIds": [
-        "browser-file-error"
-      ]
-    },
-    {
       "id": "export-failed",
       "owner": "export",
       "reason": "导出失败且系统保存面板已经关闭，用户无法从现有界面判断导出是否成功",
@@ -267,19 +258,6 @@
       "reason": "浏览器动作无其他可感知结果",
       "allowlistId": "open-in-browser-failed",
       "fingerprint": "N5|无法在默认浏览器中打开|open-project-in-default-browser-error|background-result"
-    },
-    {
-      "id": "browser-file-error",
-      "class": "N5",
-      "owner": "browser",
-      "file": "app/workbench.tsx",
-      "title": "文件编码不支持 / 文件无法打开",
-      "dedupeKey": "browser-file-error",
-      "disposition": "direct-action",
-      "wave": "PR-D",
-      "reason": "浏览器打开失败没有现成错误位",
-      "allowlistId": "browser-file-unsupported",
-      "fingerprint": "N5|文件编码不支持 / 文件无法打开|browser-file-error|direct-action"
     },
     {
       "id": "export-failed",

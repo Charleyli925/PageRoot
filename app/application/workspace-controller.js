@@ -1,7 +1,6 @@
 import { createRuntimeBridgeClient, isBridgeRequestError } from "./bridge-client.js";
 import { CommentSession } from "./comment-session.js";
 import { CommentWorkflow } from "./comment-workflow.js";
-import { BrowserDocumentSession } from "./browser-document-session.js";
 import { DocumentSession } from "./document-session.js";
 import { DocumentWorkflow } from "./document-workflow.js";
 import { DocumentSurfaceCacheSession } from "./document-surface-cache-session.js";
@@ -15,7 +14,7 @@ import { ProjectSession } from "./project-session.js";
 import { ProjectRulesSession } from "./project-rules-session.js";
 import { ProjectRulesWorkflow } from "./project-rules-workflow.js";
 import { ProjectWorkflow } from "./project-workflow.js";
-import { createBrowserRecoveryStore } from "./recovery-store.js";
+import { createRendererRecoveryStore } from "./recovery-store.js";
 import { RunSession } from "./run-session.js";
 import { RunWorkflow } from "./run-workflow.js";
 import { SourceHistorySession } from "./source-history-session.js";
@@ -152,7 +151,7 @@ export function registrationContextFromOutcome(outcome) {
 }
 
 // Runtime composition belongs to the Application boundary. Workbench supplies
-// only pure codecs and narrow browser/desktop host ports; it never constructs
+// only pure codecs and narrow desktop host ports; it never constructs
 // mutable Session facts or a Bridge client.
 export function createRuntimeWorkspaceController({
   initial = {},
@@ -166,7 +165,7 @@ export function createRuntimeWorkspaceController({
   runWorkflow,
   versionWorkflow,
   clock,
-  recoveryStore = createBrowserRecoveryStore(),
+  recoveryStore = createRendererRecoveryStore(),
 } = {}) {
   if (
     !documentWorkflow
@@ -202,7 +201,6 @@ export function createRuntimeWorkspaceController({
     workbenchTabsSession: new WorkbenchTabsSession(),
     documentSurfaceCacheSession: new DocumentSurfaceCacheSession(),
     workbenchNavigationSession: new WorkbenchNavigationSession(),
-    browserDocumentSession: new BrowserDocumentSession(),
     workbenchTabsPersistenceCoordinator: new WorkbenchTabsPersistenceCoordinator({
       port: ports.workbenchTabs || null,
       clock,
@@ -283,7 +281,6 @@ export class WorkspaceController {
   #documentSurfaceCacheSession = null;
   #documentSurfaceCacheUnsubscribe = null;
   #documentSurfaceCacheSnapshot = null;
-  #browserDocumentSession = null;
   #workbenchTabsPersistenceCoordinator = null;
   #workbenchTabsPersistenceUnsubscribe = null;
   #workbenchTabsPersistenceSnapshot = null;
@@ -383,7 +380,6 @@ export class WorkspaceController {
     workbenchTabsSession = null,
     documentSurfaceCacheSession = null,
     workbenchNavigationSession = null,
-    browserDocumentSession = null,
     workbenchTabsPersistenceCoordinator = null,
     codecs,
     ports = {},
@@ -452,7 +448,6 @@ export class WorkspaceController {
     this.#workbenchTabsSnapshot = workbenchTabsSession?.snapshot || null;
     this.#documentSurfaceCacheSession = documentSurfaceCacheSession;
     this.#documentSurfaceCacheSnapshot = documentSurfaceCacheSession?.snapshot || null;
-    this.#browserDocumentSession = browserDocumentSession;
     this.#workbenchTabsPersistenceCoordinator = workbenchTabsPersistenceCoordinator;
     this.#workbenchTabsPersistenceSnapshot = workbenchTabsPersistenceCoordinator?.snapshot || null;
     this.#navigationHostPort = ports.navigation || null;
@@ -796,7 +791,6 @@ export class WorkspaceController {
           surfaceCache: this.#documentSurfaceCacheSession,
           projectWorkflow: this.#projectWorkflow,
           controller: this,
-          browserDocuments: this.#browserDocumentSession,
           tabsPersistence: this.#workbenchTabsPersistenceCoordinator,
           clock,
         });
@@ -1037,8 +1031,6 @@ export class WorkspaceController {
     this.#workbenchTabsPersistenceCoordinator = null;
     this.#documentSurfaceCacheSession?.dispose();
     this.#documentSurfaceCacheSession = null;
-    this.#browserDocumentSession?.dispose();
-    this.#browserDocumentSession = null;
     this.#externalOpenUnsubscribe?.();
     this.#externalOpenUnsubscribe = null;
     this.#workbenchTabsSession = null;
@@ -1516,10 +1508,6 @@ export class WorkspaceController {
 
   acceptProject(project, input) {
     return this.#requireProjectWorkflow().acceptProject(project, input);
-  }
-
-  acceptBrowserProject(input) {
-    return this.#requireWorkbenchNavigationWorkflow().acceptBrowserProject(input);
   }
 
   acceptExternalProject(input) {

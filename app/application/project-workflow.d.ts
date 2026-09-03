@@ -147,7 +147,6 @@ export class ProjectWorkflow {
   refreshWorkspace(input?: Record<string, unknown>): Promise<ProjectWorkflowOutcome>;
   retryHydration(): Promise<ProjectWorkflowOutcome>;
   prepareSwitch(input?: { fromDeferred?: boolean }): Promise<ProjectWorkflowOutcome>;
-  requestBrowserFilePicker(): string | null;
   openProject(input?: {
     kind?: "local" | "recent" | "registered" | "startup";
     sourcePath?: string | null;
@@ -161,11 +160,6 @@ export class ProjectWorkflow {
     input?: { kind?: string; operationId?: string; sourcePath?: string | null; switchPrepared?: boolean; transactionId?: string | null },
   ): ProjectWorkflowOutcome;
   cancelProjectApplication(applicationId: string): boolean;
-  acceptBrowserProject(input: {
-    operationId?: string;
-    project: ProjectWorkflowProject;
-    transactionId?: string | null;
-  }): ProjectWorkflowOutcome;
   acceptExternalProject(input: {
     requestId: string;
     sourcePath?: string;

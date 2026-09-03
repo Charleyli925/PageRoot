@@ -16,11 +16,6 @@ export const CAPABILITY_SMOKE_SUITES = {
     tag: "@smoke-review",
     config: "tests/e2e/browser/playwright.smoke.config.mjs",
   },
-  "browser-notification-smoke": {
-    runtime: "browser",
-    tag: "@smoke-notification",
-    config: "tests/e2e/browser/playwright.smoke.config.mjs",
-  },
   "electron-editing-smoke": {
     runtime: "electron",
     tag: "@smoke-editing",

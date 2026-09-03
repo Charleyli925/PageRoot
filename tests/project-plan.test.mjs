@@ -18,7 +18,7 @@ import {
 test("project open plan rejects a closing window and classifies the remaining intents", () => {
   assert.equal(planProjectOpen({ closePhase: "ready" }).code, "PROJECT_OPEN_CLOSE_COMMITTED");
   assert.equal(planProjectOpen({ kind: "startup" }).action, "startup");
-  assert.equal(planProjectOpen({ kind: "local", openMode: "browser-file" }).action, "browser-picker");
+  assert.equal(planProjectOpen({ kind: "local" }).action, "open-file");
   assert.equal(planProjectOpen({ kind: "recent" }).action, "open-file");
   assert.equal(planProjectOpen({ kind: "registered" }).action, "open-registered");
 });

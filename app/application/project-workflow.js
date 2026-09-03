@@ -312,7 +312,6 @@ export class ProjectWorkflow {
   #openSequence = 0;
   #applicationSequence = 0;
   #pendingOpen = null;
-  #browserOpenOperationId = null;
   #openConfirmation = null;
   #externalAckPending = new Map();
   #renamePromise = null;
@@ -425,7 +424,7 @@ export class ProjectWorkflow {
     if (!ports.canvas || typeof ports.canvas.freeze !== "function") {
       throw new TypeError("ProjectWorkflow requires a CanvasAuthorityPort.");
     }
-    if (!ports.projectOpen || typeof ports.projectOpen.mode !== "function") {
+    if (!ports.projectOpen) {
       throw new TypeError("ProjectWorkflow requires a ProjectOpenPort.");
     }
     if (!ports.viewState || typeof ports.viewState.isTransitioning !== "function") {
@@ -776,17 +775,6 @@ export class ProjectWorkflow {
     }
   }
 
-  requestBrowserFilePicker() {
-    if (this.#disposed || this.#snapshot.close.phase === "ready") return null;
-    if (this.#projectOpenPort.mode() !== "browser-file") return null;
-    const operationId = this.#nextOpenOperation();
-    this.#setOpen("opening", operationId, null);
-    this.#pendingOpen = null;
-    this.#browserOpenOperationId = operationId;
-    this.#emit({ type: "project-browser-file-requested", operationId });
-    return operationId;
-  }
-
   async openProject({
     kind = "local",
     sourcePath,
@@ -798,25 +786,11 @@ export class ProjectWorkflow {
     const openIntent = planProjectOpen({
       closePhase: this.#snapshot.close.phase,
       kind,
-      openMode: this.#projectOpenPort.mode(),
     });
     if (openIntent.kind === "reject") {
       return blocked(openIntent.code, openIntent.reason);
     }
     if (openIntent.action === "startup") return this.#openStartup({ transactionId });
-    if (openIntent.action === "browser-picker") {
-      // Request the hidden file input in this same user-activation turn.
-      // Awaiting prepareSwitch() first yields past the click, so Chromium
-      // silently ignores input.click() and encoding-error "重新选择" cannot
-      // reopen the picker. The accepted-project FIFO still fences on apply.
-      const operationId = this.requestBrowserFilePicker();
-      return operationId
-        ? succeeded({ operationId, awaitingFile: true })
-        : blocked(
-          "PROJECT_OPEN_CLOSE_COMMITTED",
-          "当前窗口正在关闭，新的 HTML 将由下一次启动接收。",
-        );
-    }
     const operationId = this.#nextOpenOperation();
     this.#setOpen("opening", operationId, null);
     try {
@@ -949,40 +923,6 @@ export class ProjectWorkflow {
         this.#setOpen("idle", null, this.#pendingOpen?.kind || null);
       }
     }
-  }
-
-  acceptBrowserProject({ operationId, project, transactionId = null } = {}) {
-    if (this.#snapshot.close.phase === "ready") {
-      return blocked(
-        "PROJECT_OPEN_CLOSE_COMMITTED",
-        "当前窗口正在关闭，没有接收新的 HTML。",
-      );
-    }
-    if (!operationId) {
-      // Direct hidden-input population (Playwright, encoding-error 重新选择)
-      // is trusted even if an earlier picker command left a pending operation.
-      this.#browserOpenOperationId = null;
-      return this.acceptProject(project, {
-        kind: "browser-file",
-        operationId: this.#nextOpenOperation(),
-        sourcePath: null,
-        transactionId,
-      });
-    }
-    if (operationId !== this.#browserOpenOperationId) {
-      return stale({ operationId: String(operationId || ""), kind: "browser-file" });
-    }
-    this.#browserOpenOperationId = null;
-    const accepted = this.#enqueueAcceptedProject(project, {
-      kind: "browser-file",
-      operationId,
-      sourcePath: null,
-      transactionId,
-    });
-    this.#setOpen("idle", null, null);
-    return accepted
-      ? succeeded({ operationId, applicationId: accepted, accepted: true, opened: true })
-      : rejected("PROJECT_APPLICATION_REJECTED", "无法安排当前 HTML 的安全切换。");
   }
 
   acceptProject(project, {

@@ -48,15 +48,12 @@ Bridge route adapters
   Bridge owner.
 - `scripts/check-architecture.mjs` enforces the dependency direction. Do not
   weaken the gate to land a feature.
-- Runtime capability decoding has one ingress:
-  `app/application/runtime-capabilities.js`. Source editing, project opening,
-  attachment persistence, close coordination and interactive preview transport
-  are independent declarations. The immutable preload manifest is the only
-  authority: a missing or malformed manifest fails closed to the browser
-  capability set;
-  consumers may not infer the whole runtime from the presence of one preload
-  API. Electron owns desktop close safety through its acknowledged handshake;
-  `beforeunload` is only the browser fallback.
+- Production rendering is Desktop-only. `app/application/desktop-host.js`
+  validates the immutable preload manifest and the required project, preview
+  and close-handshake functions before the Controller is constructed. Missing
+  or malformed Desktop authority fails closed with an explicit initialization
+  error. Electron owns close safety through its acknowledged handshake; there
+  is no browser product fallback.
 
 ## State ownership
 
@@ -245,7 +242,7 @@ Session/Workflow construction or Session ref in Workbench. The gate also forbids
 Workbench, component or desktop imports from Application composition code.
 
 Workbench navigation has one application transaction contract. Startup restore,
-local/recent/Registry selection, tab activation, browser file continuation, OS
+local/recent/Registry selection, tab activation, OS
 external FIFO delivery and confirmation continuations enter the same admission
 order. Each admitted intent owns one `transactionId` and moves through:
 
@@ -871,7 +868,7 @@ Desktop Prepared Intent commit is the only path that may later call
 captured context, plus their composer/edit identity, for their complete
 asynchronous lifetime. `CommentWorkflow` is the only renderer application
 owner that may stage an attachment, call its Bridge repository, or compensate a
-late write; browser-memory attachments never acquire that Bridge capability.
+late write. Desktop attachments always use the registered project Bridge path.
 
 `SourceHistorySession` is the sole Canvas undo owner. It owns one memory-only
 cursor and at most 20 exact operation pairs for the currently open HTML, plus

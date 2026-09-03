@@ -22,7 +22,6 @@ function pendingPreferences(overrides = {}) {
 function eligibleInput(overrides = {}) {
   return {
     desktop: true,
-    browserPreviewOnly: false,
     canvasMode: "edit",
     canvasVerified: true,
     viewMode: "current",

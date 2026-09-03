@@ -10,7 +10,6 @@ export const GLOBAL_INTERRUPTION_KINDS = Object.freeze([
   "attachment-batch-partial",
   "show-in-folder-failed",
   "open-in-browser-failed",
-  "browser-file-unsupported",
   "export-failed",
   "handoff-recopy",
   "review-no-visible-change",
@@ -122,19 +121,6 @@ export function globalInterruptionPresentation(interruption) {
         actionId: null,
         actionLabel: null,
         usageKey: "open-project-in-default-browser-error",
-      };
-    case "browser-file-unsupported":
-      return {
-        kind: interruption.kind,
-        title: interruption.encodingUnsupported ? "文件编码不支持" : "文件无法打开",
-        message: interruption.encodingUnsupported
-          ? "原文件没有被修改。请先转换为 UTF-8，再重新选择。"
-          : "请选择 .html 或 .htm 文件后重试。",
-        tone: "warning",
-        dismissMs: null,
-        actionId: "retry-project-open",
-        actionLabel: "重新选择",
-        usageKey: "browser-file-error",
       };
     case "export-failed":
       return {

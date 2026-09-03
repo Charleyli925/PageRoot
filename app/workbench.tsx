@@ -6,7 +6,6 @@ import {
   useMemo,
   useRef,
   useState,
-  type ChangeEvent,
   type ClipboardEvent,
   type CSSProperties,
 } from "react";
@@ -92,7 +91,6 @@ import {
   openAiCompatibleVendorDisplayNameForPublicModel,
 } from "../shared/openai-compatible-vendors.mjs";
 import { createWorkspaceControllerCodecs } from "./application/workspace-controller-codecs.js";
-import { createBrowserFileTabIdentity } from "./application/browser-file-tab-identity.js";
 import { createDesktopRecoveryJournalPort } from "./workbench/desktop-recovery-journal-port";
 import type { CommentSessionSnapshot } from "./application/comment-session.js";
 import type { DocumentSessionSnapshot } from "./application/document-session.js";
@@ -118,11 +116,7 @@ import type { AgentSelection } from "./domain/agent-provider-state.js";
 import {
   EDIT_AUTHOR_RUNTIME_VERIFICATION_DEADLINE_MS,
 } from "./domain/edit-runtime-contract.js";
-import {
-  BROWSER_RUNTIME_CAPABILITIES,
-  resolveRuntimeCapabilities,
-  type RuntimeCapabilities,
-} from "./application/runtime-capabilities.js";
+import { assertDesktopHost } from "./application/desktop-host.js";
 import {
   captureUsageEvent,
   countBucket,
@@ -279,8 +273,6 @@ import type {
   Version,
   WorkspaceIssue,
 } from "./workbench/types";
-const BROWSER_PREVIEW_LOGO_PLACEHOLDER =
-  "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cdefs%3E%3ClinearGradient id='g' x2='1' y2='1'%3E%3Cstop stop-color='%236550e8'/%3E%3Cstop offset='1' stop-color='%23d45df2'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='64' height='64' rx='15' fill='url(%23g)'/%3E%3Cpath d='M23 23 13 32l10 9M41 23l10 9-10 9M36 16 28 48' fill='none' stroke='white' stroke-width='5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E";
 const PROJECT_REPOSITORY_URL = "https://github.com/Charleyli925/PageRoot";
 const LATEST_RELEASE_PAGE_URL =
   "https://github.com/Charleyli925/PageRoot/releases/latest";
@@ -503,7 +495,6 @@ export default function Workbench() {
     return { ...frozen, ok: true as const, html: frozen.html };
   }, []);
   const fenceAndFreezeCurrentCanvasRef = useRef(fenceAndFreezeCurrentCanvas);
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const [commentCanvasPort] = useState(createCommentCanvasPort);
   const reviewStageRef = useRef<HTMLDivElement>(null);
   const commentCounter = useRef(1);
@@ -515,8 +506,8 @@ export default function Workbench() {
     }),
   );
   const reviewSessionSequenceRef = useRef(0);
-  const runtimeCapabilitiesRef =
-    useRef<RuntimeCapabilities>(BROWSER_RUNTIME_CAPABILITIES);
+  const [desktopHostReady, setDesktopHostReady] = useState(false);
+  const [desktopHostIssue, setDesktopHostIssue] = useState<string | null>(null);
   const workspaceControllerRef = useRef<WorkspaceController | null>(null);
   const verifyCanvasRenderedRef = useRef<(
     expectedHtml: string,
@@ -561,8 +552,8 @@ export default function Workbench() {
     ?? INITIAL_PROJECT_RULES_SNAPSHOT;
   const settingsPageActive = activeWorkbenchTab?.kind === "settings";
   const startPageActive = activeWorkbenchTab?.kind === "start"
-    && typeof window !== "undefined"
-    && Boolean(window.htmlAIProjects);
+    && desktopHostReady
+    && !desktopHostIssue;
   const projectRulesPageActive = activeWorkbenchTab?.kind === "project-rules";
   const documentRuntimeTabId = activeWorkbenchTab?.kind === "document"
     ? activeWorkbenchTab.tabId
@@ -874,10 +865,6 @@ export default function Workbench() {
     : null;
   const [pageViewContext, setPageViewContext] =
     useState<PageViewContext | null>(null);
-  const [interactivePreviewTransport, setInteractivePreviewTransport] =
-    useState<RuntimeCapabilities["interactivePreview"]>(
-      BROWSER_RUNTIME_CAPABILITIES.interactivePreview,
-    );
   const viewingVersionId = versionSnapshot.viewingVersionId;
   const [canvasRenderAcks, setCanvasRenderAcks] = useState<CanvasRenderAcks>({
     edit: null,
@@ -905,7 +892,9 @@ export default function Workbench() {
     setCanvasRenderAcks({ edit: null, preview: null });
   }, []);
   useLayoutEffect(() => {
-    if (!bridgeConnectionReady) return undefined;
+    if (!bridgeConnectionReady || !desktopHostReady || desktopHostIssue) {
+      return undefined;
+    }
     const editRuntimeApi: DesktopEditRuntimeApi | undefined = window.htmlAIEditRuntime;
     const uiPreferencesApi: DesktopUiPreferencesApi | undefined = window.htmlAIUiPreferences;
     const controller = createRuntimeWorkspaceController({
@@ -1124,7 +1113,6 @@ export default function Workbench() {
             ),
           },
           projectOpen: {
-            mode: () => runtimeCapabilitiesRef.current.projectOpening,
             openLocal: async () => window.htmlAIProjects?.openHtml() ?? null,
             openRecent: async (sourcePath: string) => {
               const api = window.htmlAIProjects;
@@ -1345,7 +1333,14 @@ export default function Workbench() {
       setWorkspaceController((current) => current === controller ? null : current);
       controller.dispose();
     };
-  }, [bridgeConnectionReady, deferEditorCommand, invalidateCanvasRenderAcks, isViewTransitioning]);
+  }, [
+    bridgeConnectionReady,
+    deferEditorCommand,
+    desktopHostIssue,
+    invalidateCanvasRenderAcks,
+    isViewTransitioning,
+    desktopHostReady,
+  ]);
   const invalidateEditCanvasRenderAck = useCallback(() => {
     setCanvasRenderAcks((current) => (
       current.edit ? { ...current, edit: null } : current
@@ -1421,9 +1416,6 @@ export default function Workbench() {
     useState<string | null>(null);
   const [reviewPreparing, setReviewPreparing] = useState(false);
   const [openingReadyVersion, setOpeningReadyVersion] = useState(false);
-  const [runtimeCapabilitiesReady, setRuntimeCapabilitiesReady] = useState(false);
-  const [browserPreviewOnly, setBrowserPreviewOnly] = useState(false);
-  const [browserEditingRuntimeActive, setBrowserEditingRuntimeActive] = useState(false);
   const agentHandoffState = runSnapshot.activeHandoff;
   const [updateResult, setUpdateResult] =
     useState<ApplicationUpdateResult | null>(null);
@@ -1709,14 +1701,6 @@ export default function Workbench() {
         );
         return;
       }
-      if (projectEvent.type === "project-browser-file-requested") {
-        const input = fileInputRef.current;
-        if (input) {
-          input.dataset.projectOperationId = String(projectEvent.operationId || "");
-          input.click();
-        }
-        return;
-      }
       if (projectEvent.type === "project-applied") {
         const project = projectEvent.project as HtmlProject;
         markProjectApplied(projectEvent.operationId, projectEvent.epoch);
@@ -1752,11 +1736,7 @@ export default function Workbench() {
         setPreviewAttachment(null);
         commentEditResumePendingRef.current = null;
         commentCanvasPort.resetLayout();
-        setCanvasMode(
-          runtimeCapabilitiesRef.current.sourceEditing !== "enabled"
-            ? "preview"
-            : "edit",
-        );
+        setCanvasMode("edit");
         setSourceViewTransitioning(false);
         setProjectRegistrationError("");
         setOpeningReadyVersion(Boolean(
@@ -2311,7 +2291,6 @@ export default function Workbench() {
     workspaceController,
   ]);
   const interactionLocked = runInProgress
-    || browserPreviewOnly
     || projectHydrating
     || Boolean(projectLoadError)
     || Boolean(workspaceIssue)
@@ -2327,9 +2306,7 @@ export default function Workbench() {
   );
   useEffect(() => {
     workspaceController?.evaluateFirstEditGuide({
-      desktop: runtimeCapabilitiesReady
-        && runtimeCapabilitiesRef.current.projectOpening === "desktop-dialog",
-      browserPreviewOnly,
+      desktop: desktopHostReady,
       canvasMode,
       canvasVerified: Boolean(
         documentSnapshot.canvasAuthority?.status === "verified"
@@ -2349,7 +2326,6 @@ export default function Workbench() {
       projectId,
     });
   }, [
-    browserPreviewOnly,
     canvasGeneration,
     canvasMode,
     documentSnapshot.canvasAuthority,
@@ -2360,7 +2336,7 @@ export default function Workbench() {
     projectLoadError,
     readyReviewSession,
     runInProgress,
-    runtimeCapabilitiesReady,
+    desktopHostReady,
     sourceSha256,
     viewMode,
     workspaceController,
@@ -2377,19 +2353,7 @@ export default function Workbench() {
         (comment) => comment.commentId === commentEditSession.commentId,
       ) ?? null
     : null;
-  const interactionPreviewHtml = useMemo(() => {
-    if (externalSourcePreview?.html) return externalSourcePreview.html;
-    if (!browserPreviewOnly || projectName !== WELCOME_PROJECT_NAME) return html;
-    return html.replace(
-      /(["'])(?:\.\/)?brand-logo\.png\1/iu,
-      (_matched, quote: string) => `${quote}${BROWSER_PREVIEW_LOGO_PLACEHOLDER}${quote}`,
-    );
-  }, [
-    browserPreviewOnly,
-    externalSourcePreview,
-    html,
-    projectName,
-  ]);
+  const interactionPreviewHtml = externalSourcePreview?.html || html;
   const pageViewDocumentKey = [
     viewMode,
     sourcePath || documentId || projectId || "memory",
@@ -2449,19 +2413,17 @@ export default function Workbench() {
     pageViewDocumentKeyRef.current = pageViewDocumentKey;
   }, [pageViewDocumentKey]);
   useEffect(() => {
-    const capabilities = resolveRuntimeCapabilities({
-      runtimeConfig: window.htmlAIRuntime,
-    });
-    runtimeCapabilitiesRef.current = capabilities;
-    const previewOnly = capabilities.sourceEditing !== "enabled";
-    const browserEditing = capabilities.sourceEditing === "enabled"
-      && capabilities.projectOpening === "browser-file";
+    let issue: string | null = null;
+    try {
+      assertDesktopHost(window);
+    } catch (cause) {
+      issue = cause instanceof Error
+        ? cause.message
+        : "桌面运行环境未初始化。";
+    }
     const frame = window.requestAnimationFrame(() => {
-      setBrowserPreviewOnly(previewOnly);
-      setBrowserEditingRuntimeActive(browserEditing);
-      setInteractivePreviewTransport(capabilities.interactivePreview);
-      if (previewOnly) setCanvasMode("preview");
-      setRuntimeCapabilitiesReady(true);
+      setDesktopHostIssue(issue);
+      setDesktopHostReady(true);
     });
     return () => window.cancelAnimationFrame(frame);
   }, []);
@@ -3016,7 +2978,6 @@ export default function Workbench() {
         files: uploadFiles,
         target,
         source,
-        persistence: runtimeCapabilitiesRef.current.attachmentPersistence,
       });
     if (outcome.status !== "succeeded") {
       return;
@@ -3193,24 +3154,6 @@ export default function Workbench() {
     return () => window.clearTimeout(timer);
   }, [fileStatusNotice, pendingExit]);
 
-  useEffect(() => {
-    if (!workspaceController) return undefined;
-    const beforeUnload = (event: BeforeUnloadEvent) => {
-      if (
-        runtimeCapabilitiesRef.current.closeCoordination
-        === "electron-handshake"
-      ) return;
-      void workspacePreferencesController.flush(Date.now() + 3_000).catch(() => false);
-      if (!workspaceController.hasPendingDrain("close")) return;
-      event.preventDefault();
-      event.returnValue = "";
-      void workspaceController.drainCloseFallback({
-        deadlineAt: Date.now() + 3_000,
-      });
-    };
-    window.addEventListener("beforeunload", beforeUnload);
-    return () => window.removeEventListener("beforeunload", beforeUnload);
-  }, [workspaceController, workspacePreferencesController]);
   const openProject = useCallback(async (recentPath?: string) => {
     if (!workspaceController) return;
     setOpenHtmlError(null);
@@ -3410,46 +3353,6 @@ export default function Workbench() {
     workspaceController,
   ]);
 
-  const handleBrowserFile = useCallback(async (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.currentTarget.files?.[0];
-    const operationId = event.currentTarget.dataset.projectOperationId || "";
-    delete event.currentTarget.dataset.projectOperationId;
-    event.currentTarget.value = "";
-    if (!file || !workspaceController) return;
-    try {
-      // File.text() consumes the UTF-8 signature. Decode the original bytes
-      // ourselves so an authored BOM remains part of the SourcePatch truth.
-      const fileHtml = new TextDecoder("utf-8", {
-        fatal: true,
-        ignoreBOM: true,
-      }).decode(await file.arrayBuffer());
-      const sourceSha256 = await browserSha256(fileHtml);
-      const tabIdentity = await createBrowserFileTabIdentity({
-        name: file.name,
-        size: file.size,
-        lastModified: file.lastModified,
-        sourceSha256,
-        sha256: browserSha256,
-      });
-      workspaceController.acceptBrowserProject({
-        operationId,
-        project: {
-          ...tabIdentity,
-          name: file.name,
-          sourcePath: null,
-          html: fileHtml,
-          sha256: sourceSha256,
-        },
-      });
-    } catch (cause) {
-      const encodingUnsupported = cause instanceof TypeError;
-      setInterruption({
-        kind: "browser-file-unsupported",
-        encodingUnsupported,
-      });
-    }
-  }, [workspaceController]);
-
   const handleCanvasChange = useCallback((
     nextHtml: string,
     mutation?: HtmlCanvasMutation,
@@ -3458,8 +3361,6 @@ export default function Workbench() {
     const currentRun = currentRunSessionSnapshot();
     const currentDocument = currentDocumentSessionSnapshot();
     if (
-      runtimeCapabilitiesRef.current.sourceEditing !== "enabled"
-      ||
       currentRun.activeLocked
       || projectHydrating
       || projectLoadError
@@ -3930,8 +3831,7 @@ export default function Workbench() {
     fromDeferred = false,
   ): Promise<boolean> => {
     if (
-      runtimeCapabilitiesRef.current.sourceEditing !== "enabled"
-      || !currentProjectSessionSnapshot().sourcePath
+      !currentProjectSessionSnapshot().sourcePath
       || currentRunSessionSnapshot().activeLocked
       || projectHydrating
       || projectLoadError
@@ -5676,12 +5576,7 @@ export default function Workbench() {
         void exportCurrentHtml();
         return;
       case "retry-project-open":
-        if (fileInputRef.current) {
-          // Keep this click in the interruption's user-activation turn. Navigation
-          // admission may still be busy finishing the current HTML, and a
-          // queued input.click() is ignored by Chromium.
-          fileInputRef.current.click();
-        }
+        void openProject();
         return;
       case "open-attachment-picker":
         if (
@@ -5796,7 +5691,7 @@ export default function Workbench() {
       attention={Boolean(activeRun?.candidateVersionLabel) || runInProgress}
       disabled={!aiConversation.visible && (
         generating || projectHydrating || Boolean(projectLoadError)
-        || viewTransitioning || viewMode === "history" || browserPreviewOnly
+        || viewTransitioning || viewMode === "history"
       )}
       expanded={aiConversation.visible}
       onToggle={() => {
@@ -5816,7 +5711,6 @@ export default function Workbench() {
   const createModeHandlers = () => createWorkbenchModeHandlers({
     externalSourcePreview: Boolean(externalSourcePreview),
     canvasMode,
-    browserPreviewOnly,
     interactionLocked,
     previewToEditPendingRef,
     pageViewDocumentKeyRef,
@@ -5984,8 +5878,7 @@ export default function Workbench() {
   const projectCatalogCapability = workspaceController
     ? workspaceController.projectCatalog as ProjectCatalogCapability
     : null;
-  const canMountUnboundCanvas = Boolean(documentRuntimeTabId)
-    || browserEditingRuntimeActive;
+  const canMountUnboundCanvas = Boolean(documentRuntimeTabId);
   const currentProjectDisplayName = currentProjectNameFromFile(sourcePath, projectName);
   const currentProjectSidebarVersions = useMemo(() => (
     projectId && documentId
@@ -6089,7 +5982,6 @@ export default function Workbench() {
         <WorkbenchHeaderView
           runInProgress={runInProgress}
           canvasMode={canvasMode}
-          browserPreviewOnly={browserPreviewOnly}
           viewMode={viewMode}
           interactionLocked={interactionLocked}
           recentRunOutcome={recentRunOutcome}
@@ -6128,13 +6020,6 @@ export default function Workbench() {
             if (canvasMode === "preview") interactionPreviewRef.current?.reload();
           }}
           reopenRecentRunOutcome={reopenRecentRunOutcome}
-        />
-        <input
-          ref={fileInputRef}
-          className="sr-only"
-          type="file"
-          accept=".html,.htm,text/html"
-          onChange={(event) => void handleBrowserFile(event)}
         />
       </> : null}
 
@@ -6463,9 +6348,14 @@ export default function Workbench() {
             aria-hidden={canvasMode !== "edit" || Boolean(effectiveVisibleCachedSurface)}
             inert={effectiveVisibleCachedSurface ? true : undefined}
           >
-            {!runtimeCapabilitiesReady ? (
+            {!desktopHostReady ? (
               <div className="canvas-loading" role="status">正在识别运行环境…</div>
-            ) : !browserPreviewOnly ? (
+            ) : desktopHostIssue ? (
+              <div className="canvas-loading" role="alert">
+                <strong>桌面运行环境未初始化</strong>
+                <span>{desktopHostIssue}</span>
+              </div>
+            ) : (
               <>
               {staticFallbackNoticeIdentity ? (
                 <EditRuntimeStaticFallbackNotice
@@ -6592,9 +6482,9 @@ export default function Workbench() {
                     : null}
                 />
               </>
-            ) : null}
+            )}
           </div>
-          {canvasMode === "preview" && (documentRuntimeTabId || browserPreviewOnly) ? (
+          {canvasMode === "preview" && documentRuntimeTabId ? (
             <HtmlInteractionPreview
               key={`preview-authority-${canvasGeneration}`}
               ref={interactionPreviewRef}
@@ -6603,7 +6493,7 @@ export default function Workbench() {
               sourcePath={sourcePath || undefined}
               height="100%"
               comments={comments}
-              transport={interactivePreviewTransport}
+              transport="independent-url"
               onInteraction={() => workspaceControllerRef.current?.deferDocumentSurfacePrewarm()}
               onReady={handlePreviewReady}
               presentationCovered={Boolean(effectiveVisibleCachedSurface)}

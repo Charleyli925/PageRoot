@@ -3,7 +3,6 @@ import type {
   HtmlCanvasSelection,
 } from "../components/HtmlCanvasEditor";
 import type { DraftSnapshot } from "../application/draft-session.js";
-import type { RuntimeCapabilities } from "../application/runtime-capabilities.js";
 import type { SourceHistoryDirection, SourceHistoryEntry } from "../domain/source-history.js";
 import type {
   CandidateAssessment,
@@ -382,7 +381,13 @@ declare global {
           atUnixMs: number;
         }>>;
       }> | null;
-      capabilities?: RuntimeCapabilities;
+      capabilities?: Readonly<{
+        sourceEditing: "enabled";
+        projectOpening: "desktop-dialog";
+        attachmentPersistence: "bridge";
+        closeCoordination: "electron-handshake";
+        interactivePreview: "independent-url";
+      }>;
       diagnostics?: Readonly<{
         startupTiming: Readonly<{
           schemaVersion: 1;

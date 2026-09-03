@@ -30,7 +30,6 @@ export function isFirstEditGuideEligible(input, snapshot) {
   if (snapshot.status === "presented" && snapshot.visible !== true) return false;
   if (snapshot.status !== "pending" && snapshot.status !== "presented") return false;
   if (input.desktop !== true) return false;
-  if (input.browserPreviewOnly === true) return false;
   if (input.canvasMode !== "edit") return false;
   if (input.canvasVerified !== true) return false;
   if (input.viewMode !== "current") return false;

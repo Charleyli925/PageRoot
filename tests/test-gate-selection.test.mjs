@@ -136,7 +136,7 @@ const TASK_OWNER_CASES = [
   {
     file: "app/components/NoticeBar.tsx",
     nodeTests: ["tests/notification-policy.test.mjs"],
-    suites: ["typecheck", "lint", "node-targeted", "build-web", "browser-notification-smoke"],
+    suites: ["typecheck", "lint", "node-targeted", "build-web", "browser-comments-smoke"],
     directOwners: ["tests/notification-policy.test.mjs"],
     unrelatedOwners: ["tests/architecture-boundaries.test.mjs", "tests/html-preview-sandbox.test.mjs"],
   },
@@ -726,9 +726,9 @@ test("Qoder ACP transport changes select Qoder and ACP owners without the packag
   assert.equal(plan.selectedNodeTests.includes("tests/desktop-package.test.mjs"), false);
 });
 
-test("notification, comment, and presentation Browser owners select their own smoke lane", () => {
+test("notification, comment, and presentation Browser owners select their smoke lane", () => {
   const cases = [
-    ["tests/e2e/browser/native-dom-notification-recovery.spec.mjs", "browser-notification-smoke"],
+    ["tests/e2e/browser/native-dom-notification-recovery.spec.mjs", "browser-comments-smoke"],
     ["tests/e2e/browser/native-dom-comment-tabs.spec.mjs", "browser-comments-smoke"],
     ["tests/e2e/browser/native-dom-presentation-actions.spec.mjs", "browser-editing-smoke"],
   ];

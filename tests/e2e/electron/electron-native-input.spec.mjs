@@ -5,6 +5,7 @@ import {
   caseSelector,
   clickEditHistoryMenu,
   closePageRootGracefully,
+  createSourceFixture,
   currentEditorFrame,
   documentToken,
   expectCheckpointPersisted,
@@ -13,7 +14,6 @@ import {
   installInputRecorder,
   keyShortcut,
   launchPageRoot,
-  loadFixture,
   loadedDiskFrame,
   managedWorkingCopyPath,
   mkdtempSync,
@@ -24,6 +24,7 @@ import {
   recordedInputEvents,
   rememberCurrentNativeHost,
   removeIsolatedUserData,
+  removeSourceFixture,
   removeValidatedTemporaryDirectory,
   replaceUniqueBytes,
   replaceEditableIslandBytes,
@@ -55,12 +56,19 @@ function sourceFidelityExpected(managedSource, replacement) {
 test("Electron shows continuous source text immediately without rebuilding the iframe", {
   tag: ["@gate-smoke","@smoke-editing"],
 }, async () => {
-  const { electronApp, page, isolatedUserData } = await launchPageRoot();
+  const fixture = createSourceFixture("continuous-source-text.html");
+  const { electronApp, page, isolatedUserData } = await launchPageRoot({
+    activeSourcePath: fixture.sourcePath,
+  });
   try {
-    const { editor, frame } = await loadFixture(page, "complex-layout.html");
+    const { editor, frame } = await loadedDiskFrame(
+      page,
+      fixture.sourcePath,
+      "list-item",
+    );
     const initialDocument = await documentToken(frame);
-    await activateNativeEdit(frame, "heading-inline");
-    expect(await nativeEditingState(frame, "heading-inline")).toMatchObject({
+    await activateNativeEdit(frame, "list-item");
+    expect(await nativeEditingState(frame, "list-item")).toMatchObject({
       contenteditable: "true",
       isContentEditable: true,
       activeIsLegacySurface: false,
@@ -69,16 +77,16 @@ test("Electron shows continuous source text immediately without rebuilding the i
     await expect(page.getByTestId("canvas-target-outline")).toHaveCount(1);
     await expect(page.getByTestId("canvas-capability-outline")).toHaveCount(0);
     await expect(page.getByTestId("canvas-target-outline")).toBeVisible();
-    expect(await frame.locator(caseSelector("heading-inline")).evaluate((element) => {
+    expect(await frame.locator(caseSelector("list-item")).evaluate((element) => {
       const style = getComputedStyle(element);
       return { boxShadow: style.boxShadow, outlineStyle: style.outlineStyle };
     })).toEqual({ boxShadow: "none", outlineStyle: "none" });
     await installInputRecorder(frame);
-    await setTextSelection(frame, "heading-inline", 3, 9);
+    await setTextSelection(frame, "list-item", 3, 9);
     await page.keyboard.insertText("Electron原位");
 
     expect(await documentToken(frame)).toBe(initialDocument);
-    expect(await frame.locator(caseSelector("heading-inline")).textContent()).toContain("Electron原位");
+    expect(await frame.locator(caseSelector("list-item")).textContent()).toContain("Electron原位");
     const events = await recordedInputEvents(frame);
     expect(events.some(({ type, inputType }) => type === "beforeinput" && inputType === "insertText")).toBe(true);
     expect(events.some(({ type }) => type === "input")).toBe(false);
@@ -89,29 +97,38 @@ test("Electron shows continuous source text immediately without rebuilding the i
     });
     await expect(toolbar).toHaveCount(0);
     await expect(frame.locator("[data-html-canvas-selected]")).toHaveCount(0);
-    await expect(frame.locator(caseSelector("heading-inline")))
+    await expect(frame.locator(caseSelector("list-item")))
       .not.toHaveAttribute("contenteditable", "true");
 
-    await activateNativeEdit(frame, "heading-inline");
+    const resumedFrame = await currentEditorFrame(page);
+    await activateNativeEdit(resumedFrame, "list-item");
     await expect(toolbar).toBeVisible();
-    await expect(frame.locator("[data-html-canvas-selected]")).toHaveCount(1);
+    await expect(resumedFrame.locator("[data-html-canvas-selected]")).toHaveCount(1);
 
     await page.locator(".workbench-header").click({
       position: { x: 720, y: 4 },
     });
     await expect(toolbar).toHaveCount(0);
-    await expect(frame.locator("[data-html-canvas-selected]")).toHaveCount(0);
-    await expect(frame.locator(caseSelector("heading-inline")))
+    await expect(resumedFrame.locator("[data-html-canvas-selected]")).toHaveCount(0);
+    await expect(resumedFrame.locator(caseSelector("list-item")))
       .not.toHaveAttribute("contenteditable", "true");
   } finally {
     await stopPageRoot(electronApp, isolatedUserData);
+    removeSourceFixture(fixture.sourceDirectory);
   }
 });
 
 test("Electron proves one V2 editable-island lane across complex projections", async () => {
-  const { electronApp, page, isolatedUserData } = await launchPageRoot();
+  const fixture = createSourceFixture("editable-island-lane.html");
+  const { electronApp, page, isolatedUserData } = await launchPageRoot({
+    activeSourcePath: fixture.sourcePath,
+  });
   try {
-    const { editor, frame } = await loadFixture(page, "complex-layout.html");
+    const { editor, frame } = await loadedDiskFrame(
+      page,
+      fixture.sourcePath,
+      "collapsed-whitespace-copy",
+    );
     const controlledCase = "collapsed-whitespace-copy";
     await frame.locator(caseSelector(controlledCase)).scrollIntoViewIfNeeded();
     const beforeGeometry = await geometrySnapshot(frame, controlledCase);
@@ -160,6 +177,7 @@ test("Electron proves one V2 editable-island lane across complex projections", a
     )).toContain("电观察器保护");
   } finally {
     await stopPageRoot(electronApp, isolatedUserData);
+    removeSourceFixture(fixture.sourceDirectory);
   }
 });
 
@@ -1012,9 +1030,12 @@ test("Electron persists an Apple Pinyin boundary composition with left affinity"
 });
 
 test("Electron Chromium commits a composition without leaving interim pinyin", async () => {
-  const { electronApp, page, isolatedUserData } = await launchPageRoot();
+  const fixture = createSourceFixture("chromium-composition.html");
+  const { electronApp, page, isolatedUserData } = await launchPageRoot({
+    activeSourcePath: fixture.sourcePath,
+  });
   try {
-    const { frame } = await loadFixture(page, "complex-layout.html");
+    const { frame } = await loadedDiskFrame(page, fixture.sourcePath, "list-item");
     await activateNativeEdit(frame, "list-item");
     await installInputRecorder(frame);
     await setTextSelection(frame, "list-item", 0, 3);
@@ -1034,5 +1055,6 @@ test("Electron Chromium commits a composition without leaving interim pinyin", a
     expect(events.some(({ type }) => type === "compositionend")).toBe(true);
   } finally {
     await stopPageRoot(electronApp, isolatedUserData);
+    removeSourceFixture(fixture.sourceDirectory);
   }
 });

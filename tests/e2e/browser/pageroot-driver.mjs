@@ -122,39 +122,116 @@ function resilientEditorFrame(page) {
   };
 }
 
-export async function ensureSourceEditingTestRuntime(page) {
-  const hasEditingRuntime = await page.evaluate(
-    () => window.htmlAIRuntime?.capabilities?.sourceEditing === "enabled",
-  );
-  if (hasEditingRuntime) return;
+function rendererHarnessProject(name, buffer) {
+  const html = buffer.toString("utf8");
+  const sourceSha256 = `sha256:${createHash("sha256").update(buffer).digest("hex")}`;
+  const identity = sourceSha256.slice("sha256:".length);
+  return {
+    openKind: "project",
+    name,
+    sourcePath: null,
+    html,
+    sha256: sourceSha256,
+    projectId: `project_renderer_${identity}`,
+    documentId: `doc_renderer_${identity}`,
+  };
+}
 
-  await page.addInitScript(() => {
+export async function ensureDesktopRendererTestHarness(page, initialProject = null) {
+  const hasDesktopHost = await page.evaluate(() => (
+    window.__PAGEROOT_RENDERER_TEST_HARNESS__?.kind === "desktop-preload"
+    || (
+      window.htmlAIRuntime?.capabilities?.projectOpening === "desktop-dialog"
+      && typeof window.htmlAIProjects?.openHtml === "function"
+    )
+  ));
+  if (hasDesktopHost) return;
+
+  await page.addInitScript((startupProject) => {
+    const state = {
+      kind: "desktop-preload",
+      activeProject: startupProject,
+      openQueue: [],
+      previewUrls: new Map(),
+    };
+    Object.defineProperty(window, "__PAGEROOT_RENDERER_TEST_HARNESS__", {
+      configurable: true,
+      value: state,
+    });
     Object.defineProperty(window, "htmlAIRuntime", {
       configurable: true,
       value: {
         bridgePort: "1",
-        bridgeAuthToken: "browser-e2e-memory-only",
+        bridgeAuthToken: "renderer-harness-desktop-token-00000001",
         appVersion: "0.0.0-test",
+        getBridgeConnection: () => ({
+          bridgePort: "1",
+          bridgeAuthToken: "renderer-harness-desktop-token-00000001",
+          appVersion: "0.0.0-test",
+        }),
         capabilities: {
           sourceEditing: "enabled",
-          projectOpening: "browser-file",
-          attachmentPersistence: "memory",
-          closeCoordination: "browser-beforeunload",
-          interactivePreview: "srcdoc",
+          projectOpening: "desktop-dialog",
+          attachmentPersistence: "bridge",
+          closeCoordination: "electron-handshake",
+          interactivePreview: "independent-url",
         },
       },
     });
-  });
-  await page.reload();
+    Object.defineProperty(window, "htmlAIProjects", {
+      configurable: true,
+      value: {
+        getActiveProject: async () => state.activeProject,
+        openHtml: async () => {
+          const project = state.openQueue.shift() || null;
+          if (project) state.activeProject = project;
+          return project;
+        },
+        openRecent: async () => null,
+        listRecentProjects: async () => [],
+        listRegisteredProjects: async () => [],
+      },
+    });
+    Object.defineProperty(window, "htmlAIPreview", {
+      configurable: true,
+      value: {
+        createSession: async ({ html, bootstrapJavaScript }) => {
+          const sessionId = crypto.randomUUID();
+          const documentHtml = String(html).replace(
+            /<\/body\s*>/iu,
+            `<script>${bootstrapJavaScript}<\/script></body>`,
+          );
+          const url = URL.createObjectURL(new Blob([documentHtml], { type: "text/html" }));
+          state.previewUrls.set(sessionId, url);
+          return { sessionId, url };
+        },
+        revokeSession: async (sessionId) => {
+          const url = state.previewUrls.get(sessionId);
+          if (url) URL.revokeObjectURL(url);
+          state.previewUrls.delete(sessionId);
+          return { revoked: Boolean(url) };
+        },
+      },
+    });
+    Object.defineProperty(window, "htmlAIAppLifecycle", {
+      configurable: true,
+      value: {
+        onPrepareClose: () => () => {},
+        onCloseAborted: () => () => {},
+        reportReady: async () => ({ accepted: true }),
+        reportBlocked: async () => ({ accepted: true }),
+      },
+    });
+  }, initialProject);
+  if (page.url() !== "about:blank") await page.reload();
 }
 
 const FIXTURE_OPEN_ATTEMPTS = 3;
 const FIXTURE_OPEN_ATTEMPT_TIMEOUT = 18_000;
 
-async function openFixtureThroughHiddenInput({
+async function openFixtureThroughDesktopHarness({
   page,
   editor,
-  fileInput,
   name,
   buffer,
 }) {
@@ -162,11 +239,34 @@ async function openFixtureThroughHiddenInput({
   let lastError;
 
   for (let attempt = 1; attempt <= FIXTURE_OPEN_ATTEMPTS; attempt += 1) {
-    await fileInput.setInputFiles({
-      name,
-      mimeType: "text/html",
-      buffer,
-    });
+    if (await editor.isVisible().catch(() => false)) {
+      await expect(editor).toHaveAttribute("data-render-verified", "true");
+    }
+    const project = rendererHarnessProject(name, buffer);
+    await page.evaluate((queuedProject) => {
+      const harness = window.__PAGEROOT_RENDERER_TEST_HARNESS__;
+      if (!harness || harness.kind !== "desktop-preload") {
+        throw new Error("Desktop Renderer Test Harness is unavailable.");
+      }
+      harness.openQueue.push(queuedProject);
+    }, project);
+    const startCreateProject = page.locator(".workbench-start-page")
+      .getByRole("button", { name: "新建项目", exact: true })
+      .first();
+    if (await startCreateProject.isVisible().catch(() => false)) {
+      await startCreateProject.click();
+    } else {
+      const expandSidebar = page.getByRole("button", {
+        name: "展开左侧边栏",
+        exact: true,
+      });
+      if (await expandSidebar.isVisible().catch(() => false)) {
+        await expandSidebar.click();
+      }
+      await page.locator(".workbench-global-sidebar")
+        .getByRole("button", { name: "新建项目", exact: true })
+        .click();
+    }
     try {
       await fixtureTitle.waitFor({
         state: "visible",
@@ -177,14 +277,12 @@ async function openFixtureThroughHiddenInput({
       lastError = error;
       if (attempt === FIXTURE_OPEN_ATTEMPTS) break;
 
-      // Directly assigning the hidden input skips the pre-picker
-      // prepareProjectSwitch() call used by the real Open action. The input
-      // handler still runs its own switch fence, and may reject one submission
-      // while a just-launched canvas finishes draining. Re-prove the old canvas
-      // is healthy and clear the input before one bounded re-submission.
-      await expect(editor).toHaveAttribute("data-render-verified", "true");
-      await fileInput.waitFor({ state: "attached" });
-      await fileInput.setInputFiles([]);
+      // The renderer harness uses the real Desktop open command and the same
+      // switch fence. Re-prove the old canvas before one bounded re-submission
+      // if a just-launched editor was still finishing its first verification.
+      if (await editor.isVisible().catch(() => false)) {
+        await expect(editor).toHaveAttribute("data-render-verified", "true");
+      }
     }
   }
 
@@ -202,44 +300,53 @@ async function openFixtureThroughHiddenInput({
 export async function loadFixture(
   page,
   name,
-  { buffer = fixtureBuffer(name), identifiedWorkingCopy = false } = {},
+  {
+    buffer = fixtureBuffer(name),
+    identifiedWorkingCopy = false,
+    requireComplete = true,
+    requireNativeCase = true,
+  } = {},
 ) {
-  // Pure browser use is a formal read-only preview. These source-editing tests
-  // exercise the desktop renderer, so expose only the narrow capability marker
-  // needed to mount its editor before loading an in-memory fixture.
-  await ensureSourceEditingTestRuntime(page);
-  // The real UI opens the file picker only after prepareProjectSwitch() has
-  // confirmed that the current canvas can commit. Setting a hidden file input
-  // directly bypasses that user-facing gate, so first wait for the initial
-  // canvas to reach the same ready state.
-  const editor = page.getByTestId("html-canvas-editor").filter({ visible: true }).first();
-  await editor.waitFor({ state: "visible" });
-  // Keep this readiness check locator-backed. React hydration may replace the
-  // server-rendered editor node after it first becomes visible; an
-  // ElementHandle captured before that replacement would wait forever on a
-  // detached node even though the current Canvas is already verified.
-  await expect(editor).toHaveAttribute("data-render-verified", "true");
-
-  const fileInput = page.locator('input[type="file"][accept*=".html"]').first();
-  await fileInput.waitFor({ state: "attached" });
+  const startingFromBlankPage = page.url() === "about:blank";
   const sourceBuffer = identifiedWorkingCopy
     ? Buffer.from(materializeSourceElementIdentity(buffer.toString("utf8")).html, "utf8")
     : buffer;
-  await openFixtureThroughHiddenInput({
+  const host = await page.evaluate(() => ({
+    harness: window.__PAGEROOT_RENDERER_TEST_HARNESS__?.kind === "desktop-preload",
+    desktop: window.htmlAIRuntime?.capabilities?.projectOpening === "desktop-dialog"
+      && typeof window.htmlAIProjects?.openHtml === "function",
+  }));
+  // Fast browser tests exercise the Renderer through a simulated Desktop
+  // preload boundary. They do not expose or validate a second Browser product.
+  await ensureDesktopRendererTestHarness(
     page,
-    editor,
-    fileInput,
-    name,
-    buffer: sourceBuffer,
-  });
+    host.harness || host.desktop ? null : rendererHarnessProject(name, sourceBuffer),
+  );
+  if (startingFromBlankPage) {
+    await page.goto("/", { waitUntil: "domcontentloaded" });
+  }
+  const editor = page.getByTestId("html-canvas-editor").filter({ visible: true }).first();
+  if (host.harness) {
+    await openFixtureThroughDesktopHarness({
+      page,
+      editor,
+      name,
+      buffer: sourceBuffer,
+    });
+  }
 
+  await editor.waitFor({ state: "visible" });
   await expect(editor).toHaveAttribute("data-render-verified", "true");
 
   const iframe = editor.locator('iframe[title*="HTML"]');
   await iframe.waitFor({ state: "visible" });
   const initialFrame = await currentEditorFrame(page);
-  await initialFrame.waitForFunction(() => document.readyState === "complete");
-  await initialFrame.waitForFunction(() => Boolean(document.querySelector("[data-native-case]")));
+  await initialFrame.waitForFunction((complete) => (
+    complete ? document.readyState === "complete" : document.readyState !== "loading"
+  ), requireComplete);
+  if (requireNativeCase) {
+    await initialFrame.waitForFunction(() => Boolean(document.querySelector("[data-native-case]")));
+  }
   return { editor, iframe, frame: resilientEditorFrame(page), source: sourceBuffer };
 }
 

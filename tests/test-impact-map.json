@@ -113,12 +113,6 @@
         "build-web"
       ]
     },
-    "browser-notification-smoke": {
-      "description": "Capability canary for notice recovery, keyboard dismissal and page preservation.",
-      "prerequisites": [
-        "build-web"
-      ]
-    },
     "electron-editing-smoke": {
       "description": "Capability canary for authored DOM input, disposable Edit runtime rerender and persisted composition.",
       "prerequisites": [
@@ -257,7 +251,6 @@
         "browser-editing-smoke",
         "browser-comments-smoke",
         "browser-review-smoke",
-        "browser-notification-smoke",
         "real-html",
         "electron-smoke",
         "electron-editing-smoke",
@@ -625,7 +618,6 @@
       ],
       "nodeTests": [
         "tests/workbench-tabs-session.test.mjs",
-        "tests/browser-document-session.test.mjs",
         "tests/workbench-navigation-workflow.test.mjs",
         "tests/document-surface-cache-session.test.mjs",
         "tests/workbench-tabs-persistence-coordinator.test.mjs",
@@ -635,18 +627,18 @@
       ]
     },
     {
-      "id": "browser-file-tab-identity",
+      "id": "desktop-host",
       "patterns": [
-        "^app/application/browser-file-tab-identity\\.(?:js|d\\.ts)$",
-        "^tests/browser-file-tab-identity\\.test\\.mjs$"
+        "^app/application/desktop-host\\.(?:js|d\\.ts)$",
+        "^desktop/preload\\.mjs$"
       ],
       "suites": [
         "typecheck",
-        "browser-smoke"
+        "electron-smoke"
       ],
       "nodeTests": [
-        "tests/browser-file-tab-identity.test.mjs",
-        "tests/project-workflow.test.mjs"
+        "tests/desktop-host.test.mjs",
+        "tests/desktop-preload-ipc.test.mjs"
       ]
     },
     {
@@ -875,18 +867,6 @@
       ],
       "nodeTests": [
         "tests/comment-relink.test.mjs"
-      ]
-    },
-    {
-      "id": "runtime-capabilities",
-      "patterns": [
-        "^app/application/runtime-capabilities\\.(?:js|d\\.ts)$"
-      ],
-      "suites": [
-        "typecheck"
-      ],
-      "nodeTests": [
-        "tests/runtime-capabilities.test.mjs"
       ]
     },
     {
@@ -1346,7 +1326,7 @@
       ],
       "suites": [
         "typecheck",
-        "browser-notification-smoke"
+        "browser-comments-smoke"
       ],
       "nodeTests": [
         "tests/notification-policy.test.mjs"
@@ -2162,7 +2142,7 @@
     {
       "id": "browser-e2e-comments",
       "patterns": [
-        "^tests/e2e/browser/native-dom-(?:comment-tabs|comment-stress|compound-value-comment)\\.spec\\.mjs$"
+        "^tests/e2e/browser/native-dom-(?:comment-tabs|comment-stress|compound-value-comment|notification-recovery)\\.spec\\.mjs$"
       ],
       "suites": [
         "browser-comments-smoke"
@@ -2176,16 +2156,6 @@
       ],
       "suites": [
         "browser-review-smoke"
-      ],
-      "nodeTests": []
-    },
-    {
-      "id": "browser-e2e-notification",
-      "patterns": [
-        "^tests/e2e/browser/native-dom-notification-recovery\\.spec\\.mjs$"
-      ],
-      "suites": [
-        "browser-notification-smoke"
       ],
       "nodeTests": []
     },

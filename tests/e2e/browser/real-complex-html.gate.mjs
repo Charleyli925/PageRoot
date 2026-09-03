@@ -13,8 +13,8 @@ import {
 import {
   currentEditorFrame,
   documentToken,
-  ensureSourceEditingTestRuntime,
   exportCurrentHtml,
+  loadFixture,
   replaceEditableIslandTextBytes,
   sha256,
 } from "./pageroot-driver.mjs";
@@ -334,22 +334,13 @@ async function loadRealHtml(page, sourcePath, source, { navigate = true } = {}) 
     : await documentToken(page).catch(() => null);
   if (navigate) {
     await page.goto("/", { waitUntil: "domcontentloaded", timeout: 15_000 });
-    await ensureSourceEditingTestRuntime(page);
   }
   const name = path.basename(sourcePath);
-  const displayName = name.replace(/\.html?$/iu, "");
-  // Setting the hidden input directly bypasses prepareProjectSwitch(), so wait
-  // for the initial canvas to reach the same commit-ready state as the real UI.
-  const editor = page.getByTestId("html-canvas-editor").filter({ visible: true }).first();
-  await editor.waitFor({ state: "visible" });
-  await expect(editor).toHaveAttribute("data-render-verified", "true");
-
-  const fileInput = page.locator('input[type="file"][accept*=".html"]').first();
-  await fileInput.waitFor({ state: "attached" });
-  await fileInput.setInputFiles({ name, mimeType: "text/html", buffer: source });
-  await page.getByRole("tablist", { name: "已打开的页面" })
-    .getByRole("tab").filter({ hasText: displayName }).first()
-    .waitFor({ state: "visible" });
+  const { editor, iframe, frame } = await loadFixture(page, name, {
+    buffer: source,
+    requireComplete: false,
+    requireNativeCase: false,
+  });
   if (previousToken) {
     await expect.poll(
       () => documentToken(page),
@@ -357,11 +348,6 @@ async function loadRealHtml(page, sourcePath, source, { navigate = true } = {}) 
     ).not.toBe(previousToken);
   }
 
-  await expect(editor).toHaveAttribute("data-render-verified", "true");
-  const iframe = editor.locator('iframe[title*="HTML"]');
-  await iframe.waitFor({ state: "visible" });
-  const frame = await (await iframe.elementHandle())?.contentFrame();
-  if (!frame) throw new Error("The real HTML preview did not expose a same-origin edit frame.");
   // A user HTML file may intentionally keep external media or fonts pending.
   // DOM readiness is sufficient for source-backed editing; waiting for the
   // window load event would make the real-file gate hang on unrelated assets.

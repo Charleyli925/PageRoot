@@ -410,7 +410,6 @@ test("indexed script tabs keep hidden comments grouped, suppress ghost markers, 
   });
   page.on("pageerror", (error) => browserErrors.push(error.message));
   await page.setViewportSize({ width: 1600, height: 900 });
-  await page.goto("/");
   const { frame, iframe } = await loadFixture(page, "indexed-script-tabs.html", {
     buffer: fixtureBuffer("indexed-script-tabs.html"),
   });
@@ -494,7 +493,6 @@ test("comments keep current-tab alignment, render other tabs as neutral header c
   });
   page.on("pageerror", (error) => browserErrors.push(error.message));
   await page.setViewportSize({ width: 1600, height: 900 });
-  await page.goto("/");
   const { frame } = await loadFixture(page, "tabbed-comments.html", {
     buffer: fixtureBuffer("tabbed-comments.html"),
   });

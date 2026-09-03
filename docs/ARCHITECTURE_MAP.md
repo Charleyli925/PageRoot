@@ -27,7 +27,7 @@ the Bridge client, construct Sessions, or own debounce, polling, or drain.
 
 | Domain | Fact owner | Operation owner | Entry |
 | --- | --- | --- | --- |
-| Navigation and tabs | `WorkbenchTabsSession`, `WorkbenchNavigationSession`, `BrowserDocumentSession` | `WorkbenchNavigationWorkflow` | `workspace-controller-capabilities.d.ts` (`controller.navigation`), `workbench-navigation-container.tsx` |
+| Navigation and tabs | `WorkbenchTabsSession`, `WorkbenchNavigationSession` | `WorkbenchNavigationWorkflow` | `workspace-controller-capabilities.d.ts` (`controller.navigation`), `workbench-navigation-container.tsx` |
 | Document save and detach protection | `DocumentSession` owns current bytes/durability; Main recovery journal owns crash bytes | `DocumentWorkflow` owns source write plus verified recovery/export evidence | `document-workflow.js`, `document/save-plan.js`, `verified-project-context.js`, `desktop/recovery-journal-store.mjs` |
 | Source element identity migration | `ProjectFileRepository` Working Copy state | `ProjectFileRepository` serialized migration transaction | `bridge/project-file-repository.mjs`, `bridge/project-file-repository/working-copy.mjs` |
 | Semantic source editing | immutable semantic document state, stable-ID operation intent and lineage | pure `SemanticOperationKernel`; SourcePatch is its internal materializer; Canvas owns only current-open invocation | `app/lib/semantic-operation-kernel.js`, `app/lib/source-structure-edit.js`, `app/lib/source-patch-engine.js`, `app/components/html-canvas-structure-commands.ts`, `schemas/semantic-operation.v1.schema.json` |

@@ -7,7 +7,6 @@ export const GLOBAL_INTERRUPTION_KINDS: readonly [
   "attachment-batch-partial",
   "show-in-folder-failed",
   "open-in-browser-failed",
-  "browser-file-unsupported",
   "export-failed",
   "handoff-recopy",
   "review-no-visible-change",
@@ -50,7 +49,6 @@ export type GlobalInterruption =
     }
   | { kind: "show-in-folder-failed"; detail?: string }
   | { kind: "open-in-browser-failed"; detail?: string }
-  | { kind: "browser-file-unsupported"; encodingUnsupported?: boolean }
   | { kind: "export-failed"; detail: string }
   | { kind: "handoff-recopy"; succeeded: boolean }
   | { kind: "review-no-visible-change" };
