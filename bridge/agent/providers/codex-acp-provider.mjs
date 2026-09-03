@@ -726,7 +726,9 @@ export async function probeCodexAcp(command, environment = process.env) {
   }
 }
 
-async function initializeCodexAcpForDiagnosis(command, environment) {
+async function initializeCodexAcpForDiagnosis(command, environment, {
+  authenticationVerified = false,
+} = {}) {
   const processGroup = process.platform !== "win32";
   const envOverrides = launchEnvironment(command);
   const childEnvironment = {
@@ -781,12 +783,16 @@ async function initializeCodexAcpForDiagnosis(command, environment) {
     if (!/codex/iu.test(agentName)) {
       fail("ACP_AGENT_IDENTITY_MISMATCH", "The selected ACP executable did not identify itself as Codex.");
     }
-    // initialize proves the adapter is reachable, but without native login
-    // status it cannot prove that the account is authenticated.
     return Object.freeze({
-      readiness: "connection-failed",
-      cause: "CODEX_AUTH_UNVERIFIED",
+      readiness: authenticationVerified ? "ready" : "connection-failed",
+      cause: authenticationVerified ? null : "CODEX_AUTH_UNVERIFIED",
       activeInstallation: null,
+      facts: Object.freeze({
+        installation: "ready",
+        authentication: authenticationVerified ? "ready" : "unknown",
+        protocol: "ready",
+        service: "unknown",
+      }),
     });
   } catch (cause) {
     if (cause instanceof AgentProviderError) throw cause;
@@ -823,7 +829,22 @@ export async function diagnoseCodexAcp(command, environment = process.env) {
       if (!AUTH_SUCCESS_PATTERN.test(output)) {
         fail("CODEX_AUTH_UNVERIFIED", "Codex 登录状态无法确认。", { status: 503 });
       }
-      return Object.freeze({ readiness: "ready", cause: null, activeInstallation: null });
+      if (typeof command?.command === "string" && command.command) {
+        return initializeCodexAcpForDiagnosis(command, environment, {
+          authenticationVerified: true,
+        });
+      }
+      return Object.freeze({
+        readiness: "ready",
+        cause: null,
+        activeInstallation: null,
+        facts: Object.freeze({
+          installation: "ready",
+          authentication: "ready",
+          protocol: "unknown",
+          service: "unknown",
+        }),
+      });
     } catch (cause) {
       if (cause instanceof AgentProviderError) throw cause;
       const output = `${cause?.stdout || ""}\n${cause?.stderr || ""}\n${cause?.message || ""}`;

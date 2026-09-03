@@ -106,6 +106,8 @@ function recoveredAgentHandoff(run) {
     errorCode: "AGENT_RESTART_RECOVERY_REQUIRED",
     errorMessage: "Bridge 无法证明旧 Agent 会话已经停止。请结束本轮，再重新发送。",
     retryable: false,
+    safeToRetry: false,
+    recoveryKind: "end",
   });
 }
 

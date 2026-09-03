@@ -152,6 +152,22 @@ async function diagnoseOpenAiCompatibleConnection({
     || sha256(Buffer.from(credential.apiKey, "utf8")) !== installation?.credentialDigest) {
     fail("AGENT_AUTH_REQUIRED", "连接配置已变化，请重新连接。", { status: 401 });
   }
+  if (credential.vendorId === "custom") {
+    // A Custom endpoint is intentionally manual: Settings validates only the
+    // saved configuration. The exact Model ID and service are proven by the
+    // bounded execution preflight, never by an optional /models catalog.
+    return Object.freeze({
+      readiness: "ready",
+      cause: null,
+      activeInstallation: null,
+      facts: Object.freeze({
+        installation: "configured",
+        authentication: "configured",
+        protocol: "unknown",
+        service: "unknown",
+      }),
+    });
+  }
   let response;
   try {
     response = await fetchImpl(`${String(installation.baseUrl).replace(/\/+$/u, "")}/models`, {
@@ -178,6 +194,12 @@ async function diagnoseOpenAiCompatibleConnection({
     readiness: "ready",
     cause: null,
     activeInstallation: null,
+    facts: Object.freeze({
+      installation: "configured",
+      authentication: "ready",
+      protocol: "ready",
+      service: "unknown",
+    }),
   });
 }
 

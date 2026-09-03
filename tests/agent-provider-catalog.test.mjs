@@ -628,9 +628,83 @@ test("diagnosis is side-effect free and does not create a preflight ticket or mu
   assert.equal(diagnoseCalls, 1);
   assert.equal(preflightCalls, 0);
   assert.equal(result.diagnostic.activeInstallation, null);
+  assert.equal(result.diagnostic.facts.installation.status, "ready");
   assert.deepEqual(catalog.getSnapshot().preflightBySelection, {});
   assert.deepEqual(catalog.freezeSelected(), before);
-  assert.equal(catalog.availability().status, "ready");
+  assert.equal(catalog.availability().status, "checking");
+  assert.equal(catalog.displayAvailability().status, "ready");
+});
+
+test("weak diagnosis cannot clear a stronger use-time service failure", async () => {
+  const selected = freezeAgentSelection(PAGEROOT_AGENT_PROVIDER.selection);
+  const catalog = new AgentCatalogState({
+    bridgeClient: {
+      async preflightAgent() { return { status: "ready" }; },
+      async agentDiagnose() {
+        return {
+          status: "ready",
+          diagnostic: {
+            readiness: "ready",
+            cause: null,
+            facts: {
+              installation: "configured",
+              authentication: "ready",
+              protocol: "ready",
+              service: "unknown",
+            },
+          },
+        };
+      },
+    },
+    providers: [PAGEROOT_AGENT_PROVIDER],
+    selected,
+    clock: { now: () => Date.parse("2026-08-11T00:00:00.000Z") },
+  });
+  catalog.noteRunFailure(selected, "AGENT_BALANCE_INSUFFICIENT");
+  await catalog.diagnose(selected);
+  assert.equal(catalog.availability(selected).reason, "account-capacity");
+  assert.equal(catalog.availability(selected).lastCheck, "use");
+  assert.equal(catalog.provider(selected).diagnostic.facts.service.status, "unavailable");
+  assert.equal(catalog.provider(selected).diagnostic.facts.service.source, "use");
+  assert.equal(catalog.provider(selected).diagnostic.readiness, "connection-failed");
+  assert.equal(catalog.displayAvailability(selected).reason, "account-capacity");
+});
+
+test("diagnosis is keyed single-flight and stale generations cannot publish", async () => {
+  const selected = freezeAgentSelection(QODER_AGENT_PROVIDER.selection);
+  let calls = 0;
+  let resolveFirst;
+  const firstResult = new Promise((resolve) => { resolveFirst = resolve; });
+  const catalog = new AgentCatalogState({
+    bridgeClient: {
+      async preflightAgent() { return { status: "ready" }; },
+      async agentDiagnose() {
+        calls += 1;
+        if (calls === 1) return firstResult;
+        return { status: "auth-required", diagnostic: { readiness: "auth-required", cause: "QODER_AUTH_REQUIRED" } };
+      },
+    },
+    providers: [QODER_AGENT_PROVIDER],
+    selected,
+  });
+  const first = catalog.diagnose(selected);
+  const shared = catalog.diagnose(selected);
+  assert.equal(first, shared);
+  await Promise.resolve();
+  assert.equal(calls, 1);
+  catalog.select({
+    ...selected,
+    requestedModelId: "qoder:next",
+    resolvedModelId: "qoder:next",
+  });
+  const current = catalog.diagnose(catalog.freezeSelected());
+  await Promise.resolve();
+  assert.equal(calls, 2);
+  resolveFirst({ status: "ready", diagnostic: { readiness: "ready", cause: null } });
+  assert.equal(await first, null);
+  await current;
+  assert.equal(catalog.provider().diagnostic.readiness, "auth-required");
+  catalog.dispose();
 });
 
 test("install cancellation projects cancelling state and uses the existing Bridge route", async () => {
@@ -771,6 +845,8 @@ test("Token replacement publishes atomically, clears old model state, and can di
   await catalog.connectWithApiKey(initial, "sk-old", { vendorId: "deepseek" });
   assert.equal(catalog.freezeSelected().resolvedModelId, "pageroot:deepseek-v4-pro");
   assert.equal(catalog.provider().connection.vendorDisplayName, "DeepSeek");
+  assert.equal(catalog.provider().diagnostic.readiness, "ready");
+  assert.equal(catalog.provider().diagnostic.facts.service.source, "preflight");
   failNext = true;
   await assert.rejects(
     catalog.connectWithApiKey(catalog.freezeSelected(), "sk-bad", { vendorId: "openai" }),
@@ -784,6 +860,7 @@ test("Token replacement publishes atomically, clears old model state, and can di
   assert.deepEqual(catalog.provider().models.map((model) => model.id), ["pageroot:gpt-5"]);
   await catalog.disconnectApiKey(catalog.freezeSelected());
   assert.equal(catalog.availability().status, "auth-required");
+  assert.equal(catalog.provider().diagnostic.readiness, "auth-required");
   assert.equal(catalog.provider().credentialConfigured, false);
   assert.deepEqual(catalog.provider().models, []);
   assert.equal(catalog.freezeSelected().resolvedModelId, null);

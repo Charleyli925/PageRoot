@@ -45,6 +45,15 @@ async function sendSse(response, content, delayMs) {
   response.end();
 }
 
+function sendSseError(response, error) {
+  response.writeHead(200, {
+    "Content-Type": "text/event-stream; charset=utf-8",
+    "Cache-Control": "no-cache",
+    Connection: "keep-alive",
+  });
+  response.end(`event: error\ndata: ${JSON.stringify({ error })}\n\n`);
+}
+
 function extractFrozenHtml(messages) {
   const user = (Array.isArray(messages) ? messages : [])
     .find((message) => message?.role === "user");
@@ -114,6 +123,16 @@ export function startOpenAiCompatibleHttpAgent({
             payload = JSON.parse(raw);
           } catch {
             payload = {};
+          }
+          const isPreflight = raw.includes("PageRoot preflight")
+            || payload.max_tokens === 256
+            || payload.max_completion_tokens === 256;
+          if (mode === "runtime-balance" && !isPreflight) {
+            sendSseError(response, {
+              code: "insufficient_balance",
+              message: "fixture provider balance exhausted",
+            });
+            return;
           }
           if (mode === "invalid-html") {
             await sendSse(response, "I updated the title.", streamDelayMs);

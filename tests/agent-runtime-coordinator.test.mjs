@@ -369,10 +369,42 @@ test("release false keeps the lease fence and blocks shutdown", async () => {
   });
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(coordinator.executionStatus(IDENTITY).errorCode, "AGENT_RESTART_RECOVERY_REQUIRED");
+  assert.equal(coordinator.executionStatus(IDENTITY).safeToRetry, false);
+  assert.equal(coordinator.executionStatus(IDENTITY).recoveryKind, "end");
   await assert.rejects(
     coordinator.shutdown(),
     (error) => error?.code === "AGENT_SHUTDOWN_UNCONFIRMED",
   );
+});
+
+test("runtime failure keeps retry safety separate from the recovery action", async () => {
+  const coordinator = new AgentRuntimeCoordinator({
+    providerRegistry: registry({
+      run: async () => {
+        throw Object.assign(new Error("balance"), { code: "AGENT_BALANCE_INSUFFICIENT" });
+      },
+    }),
+    resolveTask: async () => executionAuthority(),
+    leaseStore: {
+      acquire: async ({ ownerToken }) => ({ key: "lease", path: "memory", ownerToken }),
+      release: async () => true,
+    },
+  });
+  const ticket = await ready(coordinator);
+  await coordinator.submit({
+    ...IDENTITY,
+    driver: "synthetic-driver",
+    trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
+    preflightId: ticket.preflightId,
+    configurationDigest: ticket.configuration.configurationDigest,
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  const session = coordinator.executionStatus(IDENTITY);
+  assert.equal(session.errorCode, "AGENT_BALANCE_INSUFFICIENT");
+  assert.equal(session.safeToRetry, true);
+  assert.equal(session.retryable, true);
+  assert.equal(session.recoveryKind, "change-provider");
+  await coordinator.shutdown();
 });
 
 test("durable cancellation is never written after cleanup or lease release fails", async () => {
@@ -619,6 +651,8 @@ test("an unknown historical provider stays readable but cannot become start auth
   assert.equal(interrupted.driver, "future-provider");
   assert.equal(interrupted.state, "interrupted");
   assert.equal(interrupted.errorCode, "AGENT_RESTART_RECOVERY_REQUIRED");
+  assert.equal(interrupted.safeToRetry, false);
+  assert.equal(interrupted.recoveryKind, "end");
   assert.match(interrupted.errorMessage, /无法恢复此 Agent 会话/u);
   assert.throws(
     () => coordinator.assertSelection(selection, "execution"),

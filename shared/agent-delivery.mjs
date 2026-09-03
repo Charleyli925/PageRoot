@@ -2,6 +2,81 @@ export const MANAGED_AGENT_MODE = "managed-agent";
 export const CLIPBOARD_DELIVERY_MODE = "clipboard";
 export const LEGACY_QODER_ACP_MODE = "qoder-acp";
 export const TRUSTED_LOCAL_AGENT_POLICY_VERSION = "trusted-local-agent-v1";
+export const AGENT_RECOVERY_KINDS = Object.freeze([
+  "retry",
+  "wait",
+  "reauthenticate",
+  "change-model",
+  "change-provider",
+  "repair-installation",
+  "end",
+]);
+
+const RECOVERY_BY_ERROR = Object.freeze(new Map([
+  ...[
+    "AGENT_AUTH_REQUIRED",
+    "AGENT_SESSION_CREDENTIAL_INVALID",
+    "AGENT_SESSION_CREDENTIAL_STALE",
+    "CODEX_AUTH_REQUIRED",
+    "QODER_AUTH_REQUIRED",
+  ].map((code) => [code, "reauthenticate"]),
+  ...[
+    "AGENT_ACCOUNT_CAPACITY_UNAVAILABLE",
+    "AGENT_BALANCE_INSUFFICIENT",
+    "AGENT_PLAN_LIMIT",
+    "AGENT_ENDPOINT_REGION_MISMATCH",
+    "CODEX_ACCOUNT_CAPACITY_UNAVAILABLE",
+    "QODER_ACCOUNT_CAPACITY_UNAVAILABLE",
+    "QODER_CAPACITY_UNAVAILABLE",
+  ].map((code) => [code, "change-provider"]),
+  ...[
+    "AGENT_MODEL_ACCESS_DENIED",
+    "AGENT_MODEL_CATALOG_EMPTY",
+    "AGENT_MODEL_ID_REQUIRED",
+    "AGENT_MODEL_NOT_RELEASED",
+    "AGENT_PROMPT_TOO_LARGE",
+    "AGENT_SELECTION_UNSUPPORTED",
+    "CODEX_MODEL_CATALOG_EMPTY",
+    "QODER_MODEL_CATALOG_EMPTY",
+  ].map((code) => [code, "change-model"]),
+  ["AGENT_RATE_LIMITED", "wait"],
+  ...[
+    "AGENT_NETWORK_INTERRUPTED",
+    "AGENT_PROVIDER_OVERLOADED",
+    "AGENT_PROVIDER_UNAVAILABLE",
+    "AGENT_TURN_TIMEOUT",
+    "ACP_TURN_TIMEOUT",
+    "CODEX_TURN_TIMEOUT",
+    "QODER_TURN_TIMEOUT",
+  ].map((code) => [code, "retry"]),
+  ...[
+    "AGENT_COMMAND_NOT_FOUND",
+    "AGENT_INSTALLATION_CHANGED",
+    "AGENT_INSTALLATION_UNTRUSTED",
+    "ACP_AGENT_EXECUTABLE_CHANGED",
+    "ACP_AGENT_EXECUTABLE_INVALID",
+    "CODEX_COMMAND_CHANGED",
+    "CODEX_COMMAND_NOT_FOUND",
+    "CODEX_INSTALLATION_CHANGED",
+    "CODEX_INSTALLATION_MISSING",
+    "CODEX_INSTALLATION_UNTRUSTED",
+    "CODEX_VERSION_MISMATCH",
+    "CODEX_VERSION_UNSUPPORTED",
+    "QODER_COMMAND_CHANGED",
+    "QODER_COMMAND_NOT_FOUND",
+    "QODER_COMMAND_UNTRUSTED",
+    "QODER_VERSION_INVALID",
+    "QODER_VERSION_MISMATCH",
+    "QODER_VERSION_UNSUPPORTED",
+  ].map((code) => [code, "repair-installation"]),
+]));
+
+export function agentRecoveryKindForError(code, { safeToRetry = false } = {}) {
+  if (!safeToRetry) return "end";
+  const mapped = RECOVERY_BY_ERROR.get(String(code || ""));
+  if (mapped) return mapped;
+  return "retry";
+}
 
 const REASONING_RESOLUTIONS = new Set([
   "exact",

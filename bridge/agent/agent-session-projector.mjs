@@ -147,6 +147,10 @@ export function publicExecutionSession(entry) {
     visibleTextUpdates: Object.freeze([...(entry.visibleTextUpdates || [])]),
     textTruncated: entry.textTruncated === true,
     retryable: entry.retryable === true,
+    safeToRetry: typeof entry.safeToRetry === "boolean"
+      ? entry.safeToRetry
+      : entry.retryable === true,
+    recoveryKind: entry.recoveryKind || "end",
     errorCode: entry.errorCode || null,
     errorMessage: entry.errorMessage || null,
   });

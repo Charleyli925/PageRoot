@@ -59,7 +59,8 @@ test("a managed Agent failure immediately replaces processing with retry or end"
 
     const actionBar = launched.page.getByTestId("ai-conversation-action-bar");
     await expect(actionBar).toContainText("生成中断", { timeout: 60_000 });
-    await expect(actionBar).toContainText("未生成新版本，页面未修改");
+    await expect(actionBar).toContainText("Qoder CLI 没有完成本轮任务");
+    await expect(actionBar).toContainText("页面未修改");
     await expect(actionBar.getByRole("button")).toHaveCount(2);
     await expect(actionBar.getByRole("button", { name: "重新发送" })).toBeVisible();
     await expect(actionBar.getByRole("button", { name: "结束本轮" })).toBeVisible();

@@ -99,7 +99,7 @@ export function sidebarResolvedIntent(
 
 export function sidebarFailureRetryable(
   activeRun?: { requestId?: string | null; attemptId?: string | null } | null,
-  activeHandoff?: { requestId?: string | null; attemptId?: string | null; retryable?: boolean } | null,
+  activeHandoff?: { requestId?: string | null; attemptId?: string | null; retryable?: boolean; safeToRetry?: boolean } | null,
 ): boolean;
 
 export type SidebarExecutionStatus = {
@@ -145,6 +145,7 @@ export function sidebarActionBar(options?: {
   failureMessage?: string | null;
   failureCode?: string | null;
   failureRetryable?: boolean;
+  failureRecoveryKind?: "retry" | "wait" | "reauthenticate" | "change-model" | "change-provider" | "repair-installation" | "end" | null;
   deliveryMode?: "managed-agent" | "clipboard";
   handoffStatus?: string | null;
 }): SidebarActionBar | null;

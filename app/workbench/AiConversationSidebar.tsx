@@ -72,6 +72,7 @@ export type AiConversationSidebarProps = {
   failureMessage?: string | null;
   failureCode?: string | null;
   failureRetryable?: boolean;
+  failureRecoveryKind?: "retry" | "wait" | "reauthenticate" | "change-model" | "change-provider" | "repair-installation" | "end" | null;
   contextLabel?: string | null;
   pendingCommentCount?: number;
   queued?: boolean;
@@ -195,6 +196,7 @@ export default function AiConversationSidebar({
   failureMessage = null,
   failureCode = null,
   failureRetryable = true,
+  failureRecoveryKind = null,
   contextLabel = null,
   pendingCommentCount = 0,
   queued = false,
@@ -266,6 +268,7 @@ export default function AiConversationSidebar({
       failureMessage,
       failureCode,
       failureRetryable,
+      failureRecoveryKind,
       deliveryMode,
       handoffStatus,
     }),
@@ -276,6 +279,7 @@ export default function AiConversationSidebar({
       failureMessage,
       failureCode,
       failureRetryable,
+      failureRecoveryKind,
       handoffStatus,
       runStatus,
       state,

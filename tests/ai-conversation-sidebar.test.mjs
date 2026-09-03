@@ -570,7 +570,7 @@ test("conflict and failed results keep their recovery decisions in the conversat
     failureMessage: "Candidate validation failed",
   });
   assert.equal(failure.title, "生成中断");
-  assert.equal(failure.detail, "未生成新版本，页面未修改");
+  assert.equal(failure.detail, "Candidate validation failed 页面未修改");
   assert.deepEqual(failure.actions.map((action) => action.id), [
     "resend-agent", "dismiss",
   ]);
@@ -585,6 +585,29 @@ test("conflict and failed results keep their recovery decisions in the conversat
   assert.match(nonRetryable.detail, /本轮没有收到可用的完成结果。 页面未修改/u);
   assert.deepEqual(nonRetryable.actions.map((action) => action.id), ["dismiss"]);
   assert.ok(nonRetryable.actions.length <= 2);
+});
+
+test("structured recovery kinds expose only actions that can resolve the failure", () => {
+  const matrix = [
+    ["retry", ["resend-agent", "dismiss"]],
+    ["wait", ["retry-later", "dismiss"]],
+    ["reauthenticate", ["reauthenticate-agent", "dismiss"]],
+    ["change-model", ["change-agent-model", "dismiss"]],
+    ["change-provider", ["change-agent-provider", "copy-task"]],
+    ["repair-installation", ["repair-agent-installation", "dismiss"]],
+    ["end", ["dismiss"]],
+  ];
+  for (const [failureRecoveryKind, actions] of matrix) {
+    const result = sidebarActionBar({
+      state: "run-error",
+      failureMessage: "结构化失败原因。",
+      failureRecoveryKind,
+      failureRetryable: failureRecoveryKind !== "end",
+    });
+    assert.deepEqual(result.actions.map((action) => action.id), actions);
+    assert.match(result.detail, /结构化失败原因。 页面未修改/u);
+    assert.ok(result.actions.length <= 2);
+  }
 });
 
 test("history groups use exact Request identity and leave legacy messages historical", () => {
@@ -664,6 +687,18 @@ test("a pending submission error without a handoff cannot offer a dead resend", 
     sidebarFailureRetryable(
       { requestId: "request_001", attemptId: "attempt_001" },
       { requestId: "request_001", attemptId: "attempt_001", retryable: false },
+    ),
+    false,
+  );
+  assert.equal(
+    sidebarFailureRetryable(
+      { requestId: "request_001", attemptId: "attempt_001" },
+      {
+        requestId: "request_001",
+        attemptId: "attempt_001",
+        retryable: true,
+        safeToRetry: false,
+      },
     ),
     false,
   );

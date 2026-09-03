@@ -114,6 +114,34 @@ function diagnosticActiveInstallation(value) {
     : null;
 }
 
+const DIAGNOSTIC_FACT_STATUSES = new Set([
+  "unknown", "configured", "ready", "missing", "invalid", "required", "failed", "unavailable",
+]);
+
+function publicDiagnosticFacts(value, readiness, cause = null) {
+  const raw = value?.facts && typeof value.facts === "object" && !Array.isArray(value.facts)
+    ? value.facts
+    : {};
+  const defaults = {
+    installation: readiness === "not-installed" ? "missing"
+      : readiness === "invalid-installation" ? "invalid" : "ready",
+    authentication: readiness === "auth-required" ? "required" : "unknown",
+    protocol: readiness === "connection-failed" ? "failed" : "unknown",
+    service: "unknown",
+  };
+  return Object.freeze(Object.fromEntries([
+    "installation", "authentication", "protocol", "service",
+  ].map((name) => {
+    const input = raw[name] && typeof raw[name] === "object" ? raw[name] : { status: raw[name] };
+    const status = DIAGNOSTIC_FACT_STATUSES.has(input?.status) ? input.status : defaults[name];
+    const factCause = ["unknown", "configured", "ready"].includes(status)
+      ? null
+      : String(input?.cause || cause?.code || value?.cause || "connection-failed")
+        .replace(/[^A-Za-z0-9_-]/gu, "").slice(0, 80) || "connection-failed";
+    return [name, Object.freeze({ status, cause: factCause, source: "diagnose" })];
+  })));
+}
+
 export function createProviderRegistry({ providers = [], runtimeRegistry } = {}) {
   if (!runtimeRegistry || typeof runtimeRegistry.resolve !== "function") {
     throw new TypeError("Provider registry requires a runtime registry.");
@@ -326,6 +354,9 @@ export function createProviderRegistry({ providers = [], runtimeRegistry } = {})
             operation,
             checkedAt,
             activeInstallation: null,
+            facts: publicDiagnosticFacts(null, "connection-failed", {
+              code: "AGENT_CAPABILITY_UNSUPPORTED",
+            }),
           }),
         });
       }
@@ -361,6 +392,7 @@ export function createProviderRegistry({ providers = [], runtimeRegistry } = {})
             operation,
             checkedAt,
             activeInstallation: diagnosticActiveInstallation(diagnosis?.activeInstallation),
+            facts: publicDiagnosticFacts(diagnosis, readiness, cause ? { code: cause } : null),
           }),
         });
       } catch (cause) {
@@ -373,6 +405,7 @@ export function createProviderRegistry({ providers = [], runtimeRegistry } = {})
             operation,
             checkedAt,
             activeInstallation: null,
+            facts: publicDiagnosticFacts(null, diagnosticReadiness(availability, cause), cause),
           }),
         });
       }

@@ -534,6 +534,12 @@ export async function diagnoseQoder(command, environment) {
       readiness: "ready",
       cause: null,
       activeInstallation: null,
+      facts: Object.freeze({
+        installation: "ready",
+        authentication: "ready",
+        protocol: "unknown",
+        service: "unknown",
+      }),
     });
   } catch (cause) {
     const code = cause instanceof AgentProviderError

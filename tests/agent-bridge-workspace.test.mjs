@@ -133,11 +133,18 @@ async function createManagedRequest(t, { hang = false } = {}) {
     "activeInstallation",
     "cause",
     "checkedAt",
+    "facts",
     "operation",
     "readiness",
   ]);
   assert.equal(diagnosis.body.diagnostic.readiness, "ready");
   assert.equal(diagnosis.body.diagnostic.operation, "diagnose");
+  assert.deepEqual(Object.keys(diagnosis.body.diagnostic.facts).sort(), [
+    "authentication",
+    "installation",
+    "protocol",
+    "service",
+  ]);
   assert.equal("command" in diagnosis.body, false);
   assert.equal(JSON.stringify(diagnosis.body).includes("stderr"), false);
   assert.equal(JSON.stringify(diagnosis.body).includes("index.js"), false);

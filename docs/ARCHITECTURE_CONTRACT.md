@@ -99,7 +99,11 @@ The renderer's main workspace facts are partitioned as follows:
   session lifetimes, persistent launch fence, bounded canonical progress and
   cleanup. `AgentDiagnosticSnapshot` and `PublicExecutionSession` are the only
   renderer projections; commands, paths, stderr, hidden reasoning and partial
-  HTML remain private. Legacy Services only delegate.
+  HTML remain private. Diagnostics expose only installation, authentication,
+  protocol and service facts; use-time evidence outranks weaker Settings
+  diagnosis. Execution failure projects `safeToRetry` separately from its
+  structured `recoveryKind`, so a technically clean balance/model/auth failure
+  cannot be presented as an unchanged resend. Legacy Services only delegate.
   It never owns or writes Request/Candidate/Version state; task authority is
   re-derived from the registered Repository/runtime record, and only the
   official finalizer plus Repository status path can publish a Candidate;
@@ -128,6 +132,9 @@ The renderer's main workspace facts are partitioned as follows:
   the installable shipped ACP entries. `pageroot`/`http` is a non-installable
   shipped HTTP Agent (ADR 0069). The packaged application contains no
   private Codex runtime or native Codex package;
+  public catalog snapshots also hydrate Bridge-owned `installState`, including
+  an in-flight job whose original install HTTP request has not settled, so the
+  Renderer can issue exactly one cancellation without becoming a job owner;
 - Bridge Agent Host/Policy Ports: `bridge/agent/policies/` owns the execution
   policy and freezes all readable files, including comment-attachment bytes,
   output/completion paths,

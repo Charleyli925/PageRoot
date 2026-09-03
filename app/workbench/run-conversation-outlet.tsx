@@ -55,6 +55,10 @@ export const RunConversationOutlet = memo(function RunConversationOutlet({
       candidateStatus={activeRun?.candidateAssessment?.status ?? null}
       failureMessage={currentHandoff?.errorMessage || activeRun?.errorDetail || activeRun?.error || null}
       failureCode={currentHandoff?.errorCode || activeRun?.errorCode || null}
+      failureRetryable={typeof currentHandoff?.safeToRetry === "boolean"
+        ? currentHandoff.safeToRetry
+        : currentHandoff?.retryable === true}
+      failureRecoveryKind={currentHandoff?.recoveryKind || null}
       agentText={currentHandoff?.visibleText || ""}
       agentUpdates={currentHandoff?.visibleTextUpdates || []}
       agentTextTruncated={currentHandoff?.textTruncated === true}

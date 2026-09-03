@@ -271,10 +271,47 @@ function responseContentType(response) {
   return String(response?.headers?.get?.("content-type") || "").toLowerCase();
 }
 
-function responseIsSse(response) {
+async function responseIsSse(response, watchdog, cancellation) {
   const contentType = responseContentType(response);
   if (contentType) return contentType.includes("text/event-stream");
-  return Boolean(response?.body);
+  if (typeof response?.clone !== "function") return false;
+  let clone;
+  try {
+    clone = response.clone();
+  } catch {
+    return false;
+  }
+  if (typeof clone?.body?.getReader !== "function") return false;
+  const reader = clone.body.getReader();
+  const decoder = new TextDecoder("utf-8", { fatal: true });
+  let prefix = "";
+  let exhausted = false;
+  try {
+    while (prefix.length < 4_096) {
+      const pending = reader.read();
+      void pending.catch(() => {});
+      const guards = [pending];
+      if (watchdog) guards.push(watchdog.expired);
+      if (cancellation) guards.push(cancellation.promise);
+      const result = guards.length === 1 ? await pending : await Promise.race(guards);
+      if (result?.done) {
+        exhausted = true;
+        prefix += decoder.decode();
+      } else if (result?.value !== undefined) {
+        prefix += decoder.decode(result.value, { stream: true });
+      }
+      const inspected = prefix.replace(/^\uFEFF/u, "").trimStart();
+      if (inspected.startsWith("{") || inspected.startsWith("[")) return false;
+      if (/^(?::|data:|event:|id:|retry:)/u.test(inspected)) return true;
+      if (result?.done || /[\r\n]/u.test(inspected)) return false;
+    }
+    return false;
+  } finally {
+    if (!exhausted && typeof reader.cancel === "function") {
+      await waitForStreamCleanup(() => reader.cancel());
+    }
+    if (typeof reader.releaseLock === "function") reader.releaseLock();
+  }
 }
 
 async function waitForStreamCleanup(cleanup, timeoutMs = 250) {
@@ -355,12 +392,14 @@ function streamProtocolError(adapter, response, payload, eventType = "") {
   }
 }
 
-function appendHtmlDelta(current, delta) {
-  const next = [current, delta].join("");
-  if (Buffer.byteLength(next, "utf8") > MAX_HTML_BYTES) {
+function appendHtmlDelta(chunks, receivedBytes, delta) {
+  const byteDelta = Buffer.byteLength(delta, "utf8");
+  const nextBytes = receivedBytes + byteDelta;
+  if (nextBytes > MAX_HTML_BYTES) {
     fail("AGENT_OUTPUT_INVALID", "模型没有返回完整 HTML。", { status: 422 });
   }
-  return next;
+  chunks.push(delta);
+  return Object.freeze({ receivedBytes: nextBytes, byteDelta });
 }
 
 /**
@@ -380,7 +419,8 @@ export async function consumeOpenAiCompatibleSse(
   let lineBuffer = "";
   let dataLines = [];
   let eventType = "";
-  let html = "";
+  const htmlChunks = [];
+  let receivedHtmlBytes = 0;
   let done = false;
   let hasFrame = false;
 
@@ -408,8 +448,9 @@ export async function consumeOpenAiCompatibleSse(
       if (typeof delta.content === "string") {
         emitted = true;
         if (delta.content) {
-          html = appendHtmlDelta(html, delta.content);
-          activity("html", Buffer.byteLength(delta.content, "utf8"));
+          const appended = appendHtmlDelta(htmlChunks, receivedHtmlBytes, delta.content);
+          receivedHtmlBytes = appended.receivedBytes;
+          activity("html", appended.byteDelta);
         } else {
           activity("protocol", 0);
         }
@@ -507,7 +548,7 @@ export async function consumeOpenAiCompatibleSse(
       { status: 502 },
     );
   }
-  return html;
+  return htmlChunks.join("");
 }
 
 export async function completeOpenAiCompatibleChat({
@@ -561,9 +602,9 @@ export async function completeOpenAiCompatibleChat({
     if (cause instanceof Error && /^AGENT_/u.test(String(cause.code || ""))) throw cause;
     fail("AGENT_NETWORK_INTERRUPTED", "模型接口没有接通。", { status: 502 });
   }
-  const isSse = responseIsSse(response);
   let content;
   try {
+    const isSse = await responseIsSse(response, watchdog, cancellation);
     if (isSse) {
       content = await consumeOpenAiCompatibleSse(response, {
         adapter,

@@ -136,6 +136,7 @@ export class AgentCatalogState {
   freezeProviderSelection(providerId: string): AgentSelection | null;
   provider(selection?: AgentSelection | null): AgentProviderEntry | null;
   availability(selection?: AgentSelection | null): AgentProviderAvailabilitySnapshot;
+  displayAvailability(selection?: AgentSelection | null): AgentProviderAvailabilitySnapshot;
   presentation(selection?: AgentSelection | null): AgentProviderPresentation;
   refreshAvailability(selection?: AgentSelection | null): Promise<unknown>;
   diagnose(selection?: AgentSelection | null): Promise<unknown>;

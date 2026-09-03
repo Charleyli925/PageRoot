@@ -505,7 +505,9 @@ export function sidebarFailureRetryable(activeRun, activeHandoff) {
     && activeHandoff
     && activeHandoff.requestId === activeRun.requestId
     && activeHandoff.attemptId === activeRun.attemptId
-  ) return activeHandoff.retryable === true;
+  ) return typeof activeHandoff.safeToRetry === "boolean"
+    ? activeHandoff.safeToRetry
+    : activeHandoff.retryable === true;
   return activeRun?.requestId !== "pending";
 }
 
@@ -567,6 +569,7 @@ export function sidebarActionBar({
   candidateStatus = null,
   failureMessage = null,
   failureRetryable = true,
+  failureRecoveryKind = null,
   deliveryMode = "managed-agent",
   handoffStatus = null,
 } = {}) {
@@ -582,20 +585,50 @@ export function sidebarActionBar({
     };
   }
   if (state === "run-error") {
-    const retryable = failureRetryable !== false;
+    const recoveryKind = [
+      "retry",
+      "wait",
+      "reauthenticate",
+      "change-model",
+      "change-provider",
+      "repair-installation",
+      "end",
+    ].includes(failureRecoveryKind)
+      ? failureRecoveryKind
+      : failureRetryable !== false ? "retry" : "end";
     const reason = boundedFailureReason(failureMessage);
+    const recoveryActions = {
+      retry: [
+        { id: "resend-agent", label: "重新发送", tone: "primary" },
+        { id: "dismiss", label: "结束本轮", tone: "quiet" },
+      ],
+      wait: [
+        { id: "retry-later", label: "稍后重试", tone: "primary" },
+        { id: "dismiss", label: "结束本轮", tone: "quiet" },
+      ],
+      reauthenticate: [
+        { id: "reauthenticate-agent", label: "重新登录", tone: "primary" },
+        { id: "dismiss", label: "结束本轮", tone: "quiet" },
+      ],
+      "change-model": [
+        { id: "change-agent-model", label: "更换模型", tone: "primary" },
+        { id: "dismiss", label: "结束本轮", tone: "quiet" },
+      ],
+      "change-provider": [
+        { id: "change-agent-provider", label: "切换 Agent", tone: "primary" },
+        { id: "copy-task", label: "复制任务", tone: "quiet" },
+      ],
+      "repair-installation": [
+        { id: "repair-agent-installation", label: "修复安装", tone: "primary" },
+        { id: "dismiss", label: "结束本轮", tone: "quiet" },
+      ],
+      end: [{ id: "dismiss", label: "结束本轮", tone: "quiet" }],
+    };
     return {
       kind: "blocked",
-      title: retryable ? "生成中断" : "生成失败",
-      detail: retryable
-        ? "未生成新版本，页面未修改"
-        : `${reason} 页面未修改`,
-      actions: retryable
-        ? [
-            { id: "resend-agent", label: "重新发送", tone: "primary" },
-            { id: "dismiss", label: "结束本轮", tone: "quiet" },
-          ]
-        : [{ id: "dismiss", label: "结束本轮", tone: "quiet" }],
+      title: ["retry", "wait"].includes(recoveryKind) ? "生成中断" : "生成失败",
+      detail: `${reason} 页面未修改`,
+      actions: recoveryActions[recoveryKind],
     };
   }
   if (state === "ready-to-open" || state === "review-view") {

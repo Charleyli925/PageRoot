@@ -5,6 +5,7 @@ import { createRunWorkflowCodecs } from "./run-workflow-codecs.js";
 import { verifyProjectContext } from "./verified-project-context.js";
 import { AgentCatalogState } from "./agent-provider-catalog.js";
 import {
+  agentRecoveryKindForError,
   CLIPBOARD_DELIVERY_MODE,
   MANAGED_AGENT_MODE,
   TRUSTED_LOCAL_AGENT_POLICY_VERSION,
@@ -228,6 +229,9 @@ function agentHandoffState(run, session) {
     "cancelled",
   ].includes(state)) return null;
   const selection = deliveryForRun(run)?.selection || null;
+  const safeToRetry = typeof session.safeToRetry === "boolean"
+    ? session.safeToRetry
+    : session.retryable === true;
   const visibleTextUpdates = [];
   let visibleTextLength = 0;
   for (const update of Array.isArray(session?.visibleTextUpdates)
@@ -273,6 +277,10 @@ function agentHandoffState(run, session) {
     errorCode: session.errorCode ? String(session.errorCode) : null,
     errorMessage: session.errorMessage ? String(session.errorMessage) : null,
     retryable: session.retryable === true,
+    safeToRetry,
+    recoveryKind: session.recoveryKind || agentRecoveryKindForError(session.errorCode, {
+      safeToRetry,
+    }),
   };
 }
 
@@ -491,7 +499,7 @@ export class RunWorkflow {
       pendingReconciliations: frozenArray(this.#uncertainSubmissions.keys()),
       agentCatalog: this.#agentCatalog.getSnapshot(),
       agentPresentation: this.#agentCatalog.presentation(),
-      qoderAvailability: this.#agentCatalog.availability(),
+      qoderAvailability: this.#agentCatalog.displayAvailability(),
     });
   }
 
@@ -1500,6 +1508,10 @@ export class RunWorkflow {
           errorCode: code,
           errorMessage: message,
           retryable: !NON_RETRYABLE_AGENT_ERRORS.has(code),
+          safeToRetry: !NON_RETRYABLE_AGENT_ERRORS.has(code),
+          recoveryKind: agentRecoveryKindForError(code, {
+            safeToRetry: !NON_RETRYABLE_AGENT_ERRORS.has(code),
+          }),
         });
       }
       this.#agentCatalog.noteRunFailure(deliveryForRun(run)?.selection, code);

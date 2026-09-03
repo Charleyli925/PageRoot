@@ -72,6 +72,39 @@ const QODER_PRESENTATION = Object.freeze({
 
 const AGENT_SECURITY_PROFILES = new Set(["client-mediated", "agent-native"]);
 
+function diagnosticFailureUpdate(code, source) {
+  const normalized = String(code || "AGENT_PROVIDER_UNAVAILABLE");
+  const fact = (status) => ({ status, cause: normalized, source });
+  if (["AGENT_AUTH_REQUIRED", "CODEX_AUTH_REQUIRED", "QODER_AUTH_REQUIRED"].includes(normalized)) {
+    return Object.freeze({
+      readiness: "auth-required",
+      facts: { authentication: fact("required") },
+    });
+  }
+  if (["AGENT_COMMAND_NOT_FOUND", "CODEX_COMMAND_NOT_FOUND", "QODER_COMMAND_NOT_FOUND"].includes(normalized)) {
+    return Object.freeze({
+      readiness: "not-installed",
+      facts: { installation: fact("missing") },
+    });
+  }
+  if (/INSTALLATION|COMMAND_CHANGED|COMMAND_UNTRUSTED|VERSION_(?:INVALID|MISMATCH|UNSUPPORTED)/u.test(normalized)) {
+    return Object.freeze({
+      readiness: "invalid-installation",
+      facts: { installation: fact("invalid") },
+    });
+  }
+  if (/PROTOCOL|ACP_AGENT_IDENTITY/u.test(normalized)) {
+    return Object.freeze({
+      readiness: "connection-failed",
+      facts: { protocol: fact("failed") },
+    });
+  }
+  return Object.freeze({
+    readiness: "connection-failed",
+    facts: { service: fact("unavailable") },
+  });
+}
+
 function qoderGuidanceInstruction(kind) {
   if (kind === "login") {
     return [
@@ -273,6 +306,13 @@ export function agentAvailabilityCardPresentation(presentation, availability) {
   const status = availability?.status || "checking";
   const displayName = String(presentation.displayName || presentation.agentName || "Agent");
   if (status === "ready") {
+    if (availability?.reason === "configuration-saved") {
+      return Object.freeze({
+        statusLabel: `${displayName} · 已配置`,
+        detail: "发送时验证模型",
+        tone: "ready",
+      });
+    }
     return Object.freeze({
       statusLabel: `${displayName} · 已连接`,
       detail: "",
@@ -354,6 +394,23 @@ export function agentProviderCardPresentation(provider) {
   });
 }
 
+function agentProviderDisplayAvailability(provider) {
+  if (!provider) return INITIAL_AGENT_PROVIDER_AVAILABILITY;
+  const diagnosticAvailability = provider.diagnostic
+    ? agentProviderAvailabilityFromDiagnostic(
+      provider.diagnostic,
+      provider.availability,
+      provider.diagnostic.checkedAt,
+    )
+    : provider.availability;
+  return provider.providerId === PAGEROOT_PROVIDER_ID
+    && diagnosticAvailability.status === "ready"
+    && provider.diagnostic?.facts?.protocol?.status === "unknown"
+    && provider.diagnostic?.facts?.service?.status === "unknown"
+    ? Object.freeze({ ...diagnosticAvailability, reason: "configuration-saved" })
+    : diagnosticAvailability;
+}
+
 export function agentProviderCardsFromCatalog(snapshot) {
   const selected = snapshot?.selected || null;
   return Object.freeze(Object.values(snapshot?.providers ?? {})
@@ -364,7 +421,9 @@ export function agentProviderCardsFromCatalog(snapshot) {
       || provider.availability?.status === "auth-required"
       || provider.availability?.status === "not-installed"
     ))
-    .map((provider) => Object.freeze({
+    .map((provider) => {
+      const availability = agentProviderDisplayAvailability(provider);
+      return Object.freeze({
       // Preflight may resolve a provider default model. Keep that resolved
       // selection for the selected card; other cards remain descriptor-backed
       // until the user selects them.
@@ -374,12 +433,14 @@ export function agentProviderCardsFromCatalog(snapshot) {
         ? selected
         : provider.selection,
       presentation: agentProviderCardPresentation(provider),
-      availability: provider.availability,
+      availability,
       models: Array.isArray(provider.models) ? provider.models : Object.freeze([]),
       credentialConfigured: provider.credentialConfigured === true,
       connection: provider.connection || null,
+      installState: provider.installState || "idle",
       diagnostic: provider.diagnostic || null,
-    })));
+      });
+    }));
 }
 
 function frozenProviderEntry(descriptor, previous = null) {
@@ -470,6 +531,7 @@ export class AgentCatalogState {
   #selected = null;
   #preflightBySelection = new Map();
   #inflightBySelection = new Map();
+  #diagnoseInflightBySelection = new Map();
   #spentPreflightIds = new Set();
   #generationByProvider = new Map();
   #listeners = new Set();
@@ -539,6 +601,7 @@ export class AgentCatalogState {
     this.#listeners.clear();
     this.#preflightBySelection.clear();
     this.#inflightBySelection.clear();
+    this.#diagnoseInflightBySelection.clear();
     this.#spentPreflightIds.clear();
   }
 
@@ -570,6 +633,11 @@ export class AgentCatalogState {
         this.#inflightBySelection.delete(key);
       }
     }
+    for (const [key, inflight] of this.#diagnoseInflightBySelection) {
+      if (inflight.providerId === frozen.providerId) {
+        this.#diagnoseInflightBySelection.delete(key);
+      }
+    }
     this.#publish();
     return frozen;
   }
@@ -595,6 +663,10 @@ export class AgentCatalogState {
 
   availability(selection = this.#selected) {
     return this.provider(selection)?.availability || INITIAL_AGENT_PROVIDER_AVAILABILITY;
+  }
+
+  displayAvailability(selection = this.#selected) {
+    return agentProviderDisplayAvailability(this.provider(selection));
   }
 
   presentation(selection = this.#selected) {
@@ -657,51 +729,81 @@ export class AgentCatalogState {
     }
   }
 
-  async diagnose(selection = this.freezeSelected()) {
+  diagnose(selection = this.freezeSelected()) {
     const frozen = freezeAgentSelection(selection);
     const provider = this.provider(frozen);
-    if (!provider) throw this.#unsupportedProvider(frozen.providerId);
+    if (!provider) return Promise.reject(this.#unsupportedProvider(frozen.providerId));
+    const key = agentPreflightKey(frozen, {
+      installationDigest: provider.installationDigest || "",
+      purpose: "diagnose",
+    });
+    const inflight = this.#diagnoseInflightBySelection.get(key);
+    if (inflight) return inflight.promise;
     const generation = (this.#generationByProvider.get(frozen.providerId) || 0) + 1;
     this.#generationByProvider.set(frozen.providerId, generation);
-    const previous = provider.availability;
-    this.#setAvailability(frozen.providerId, checkingAgentProviderAvailability(previous));
-    try {
-      const diagnoseMethod = typeof this.#bridgeClient.agentDiagnose === "function"
-        ? (input) => this.#bridgeClient.agentDiagnose(input)
-        : typeof this.#bridgeClient.agentAvailability === "function"
-          ? (input) => this.#bridgeClient.agentAvailability(input)
-          : typeof this.#bridgeClient.qoderAvailability === "function"
-            ? (input) => this.#bridgeClient.qoderAvailability(input)
-            : null;
-      if (!diagnoseMethod) {
-        throw Object.assign(new Error("Agent diagnosis is unavailable."), {
-          code: "AGENT_DIAGNOSE_UNAVAILABLE",
-        });
+    const checking = (async () => {
+      const previousDiagnostic = this.#providers.get(frozen.providerId)?.diagnostic || null;
+      try {
+        // Bridge AgentInstaller owns install state. Hydrate it before running a
+        // side-effect-free diagnosis so a reopened Settings page can cancel an
+        // installation already in flight.
+        await this.#applyPublicCatalog();
+        const diagnoseMethod = typeof this.#bridgeClient.agentDiagnose === "function"
+          ? (input) => this.#bridgeClient.agentDiagnose(input)
+          : typeof this.#bridgeClient.agentAvailability === "function"
+            ? (input) => this.#bridgeClient.agentAvailability(input)
+            : typeof this.#bridgeClient.qoderAvailability === "function"
+              ? (input) => this.#bridgeClient.qoderAvailability(input)
+              : null;
+        if (!diagnoseMethod) {
+          throw Object.assign(new Error("Agent diagnosis is unavailable."), {
+            code: "AGENT_DIAGNOSE_UNAVAILABLE",
+          });
+        }
+        const result = await diagnoseMethod({ selection: frozen });
+        if (
+          this.#disposed
+          || this.#generationByProvider.get(frozen.providerId) !== generation
+        ) return null;
+        const diagnostic = agentDiagnosticSnapshot(
+          result?.diagnostic || result,
+          validDate(this.#clock),
+          previousDiagnostic,
+        );
+        const current = this.#providers.get(frozen.providerId);
+        if (current) {
+          this.#providers.set(frozen.providerId, Object.freeze({ ...current, diagnostic }));
+          this.#publish();
+        }
+        return Object.freeze({ result, diagnostic, availability: current?.availability || provider.availability });
+      } catch (cause) {
+        if (
+          !this.#disposed
+          && this.#generationByProvider.get(frozen.providerId) === generation
+        ) {
+          const current = this.#providers.get(frozen.providerId);
+          const diagnostic = agentDiagnosticSnapshot({
+            readiness: "connection-failed",
+            cause: cause?.code || "AGENT_DIAGNOSE_UNAVAILABLE",
+            operation: "diagnose",
+          }, validDate(this.#clock), previousDiagnostic);
+          if (current) {
+            this.#providers.set(frozen.providerId, Object.freeze({ ...current, diagnostic }));
+            this.#publish();
+          }
+        }
+        throw cause;
+      } finally {
+        if (this.#diagnoseInflightBySelection.get(key)?.promise === checking) {
+          this.#diagnoseInflightBySelection.delete(key);
+        }
       }
-      const result = await diagnoseMethod({ selection: frozen });
-      if (
-        this.#disposed
-        || this.#generationByProvider.get(frozen.providerId) !== generation
-      ) return null;
-      const diagnostic = agentDiagnosticSnapshot(result?.diagnostic, validDate(this.#clock));
-      const availability = result?.diagnostic
-        ? agentProviderAvailabilityFromDiagnostic(diagnostic, previous, diagnostic.checkedAt)
-        : agentProviderAvailabilityFromLocalResult(result, previous, validDate(this.#clock));
-      const current = this.#providers.get(frozen.providerId);
-      if (current) {
-        this.#providers.set(frozen.providerId, Object.freeze({ ...current, diagnostic }));
-      }
-      this.#setAvailability(frozen.providerId, availability);
-      return Object.freeze({ result, diagnostic, availability });
-    } catch (cause) {
-      if (
-        !this.#disposed
-        && this.#generationByProvider.get(frozen.providerId) === generation
-      ) {
-        this.#setFailure(frozen, cause, previous);
-      }
-      throw cause;
-    }
+    })();
+    this.#diagnoseInflightBySelection.set(key, Object.freeze({
+      providerId: frozen.providerId,
+      promise: checking,
+    }));
+    return checking;
   }
 
   preflight(selection = this.freezeSelected(), {
@@ -815,6 +917,11 @@ export class AgentCatalogState {
               models: publicModels(result.models),
             }));
           }
+          this.#setDiagnosticFacts(frozen.providerId, {
+            authentication: { status: "ready", cause: null, source: "preflight" },
+            protocol: { status: "ready", cause: null, source: "preflight" },
+            service: { status: "ready", cause: null, source: "preflight" },
+          }, { publish: false, readiness: "ready", cause: null });
           this.#setAvailability(
             frozen.providerId,
             readyAgentProviderAvailability(validDate(this.#clock)),
@@ -829,6 +936,13 @@ export class AgentCatalogState {
           && this.#generationByProvider.get(frozen.providerId) === generation
           && this.#canProjectAvailability(frozen)
         ) {
+          const code = String(cause?.code || "AGENT_PREFLIGHT_FAILED");
+          const failure = diagnosticFailureUpdate(code, "preflight");
+          this.#setDiagnosticFacts(frozen.providerId, failure.facts, {
+            publish: false,
+            readiness: failure.readiness,
+            cause: code,
+          });
           this.#setFailure(frozen, cause, previous);
         }
         throw cause;
@@ -892,6 +1006,7 @@ export class AgentCatalogState {
         code: "AGENT_INSTALL_UNSUPPORTED",
       });
     }
+    this.#invalidateProvider(frozen.providerId);
     this.#patchProvider(frozen.providerId, { installState: "installing" });
     this.#setAvailability(frozen.providerId, checkingAgentProviderAvailability(provider.availability));
     try {
@@ -904,10 +1019,12 @@ export class AgentCatalogState {
         this.freezeProviderSelection(frozen.providerId) || frozen,
       );
     } catch (cause) {
-      this.#patchProvider(frozen.providerId, { installState: "failed" });
+      const cancelled = cause?.code === "AGENT_INSTALL_CANCELLED";
+      this.#patchProvider(frozen.providerId, { installState: cancelled ? "idle" : "failed" });
       await this.diagnose(
         this.freezeProviderSelection(frozen.providerId) || frozen,
       ).catch(() => null);
+      if (cancelled) return Object.freeze({ cancelled: true, installState: "idle" });
       throw cause;
     }
   }
@@ -926,6 +1043,7 @@ export class AgentCatalogState {
         code: "AGENT_INSTALL_UNSUPPORTED",
       });
     }
+    this.#invalidateProvider(frozen.providerId);
     this.#patchProvider(frozen.providerId, { installState: "cancelling" });
     try {
       const result = await this.#bridgeClient.cancelAgentInstall({ providerId: frozen.providerId });
@@ -1020,7 +1138,14 @@ export class AgentCatalogState {
     const frozen = freezeAgentSelection(selection);
     const provider = this.provider(frozen);
     if (!provider) return null;
-    return this.#setFailure(frozen, { code }, provider.availability);
+    const availability = this.#setFailure(frozen, { code }, provider.availability);
+    const normalizedCode = String(code || "AGENT_PROVIDER_UNAVAILABLE");
+    const failure = diagnosticFailureUpdate(normalizedCode, "use");
+    this.#setDiagnosticFacts(frozen.providerId, failure.facts, {
+      readiness: failure.readiness,
+      cause: normalizedCode,
+    });
+    return availability;
   }
 
   async connectWithApiKey(selection, apiKey, extras = {}) {
@@ -1066,6 +1191,19 @@ export class AgentCatalogState {
     this.#invalidateProvider(frozen.providerId);
     if (this.#selected?.providerId === frozen.providerId) this.#selected = returnedSelection;
     const current = this.#providers.get(frozen.providerId);
+    const checkedAt = validDate(this.#clock);
+    const diagnostic = agentDiagnosticSnapshot({
+      readiness: "ready",
+      cause: null,
+      operation: "diagnose",
+      checkedAt,
+      facts: {
+        installation: { status: "configured", source: "preflight" },
+        authentication: { status: "ready", source: "preflight" },
+        protocol: { status: "ready", source: "preflight" },
+        service: { status: "ready", source: "preflight" },
+      },
+    }, checkedAt, current?.diagnostic);
     this.#providers.set(frozen.providerId, Object.freeze({
       ...current,
       models: publicModels(result.models),
@@ -1075,7 +1213,8 @@ export class AgentCatalogState {
         vendorDisplayName: String(result.vendorDisplayName || extras.vendorId || ""),
         baseUrl: String(result.baseUrl || extras.baseUrl || ""),
       }),
-      availability: readyAgentProviderAvailability(validDate(this.#clock)),
+      availability: readyAgentProviderAvailability(checkedAt),
+      diagnostic,
       installationDigest: String(result.installationDigest || "") || null,
     }));
     this.#publish();
@@ -1100,6 +1239,7 @@ export class AgentCatalogState {
     this.#invalidateProvider(frozen.providerId);
     const resetSelection = freezeAgentSelection(provider.selection);
     if (this.#selected?.providerId === frozen.providerId) this.#selected = resetSelection;
+    const checkedAt = validDate(this.#clock);
     this.#providers.set(frozen.providerId, Object.freeze({
       ...provider,
       models: Object.freeze([]),
@@ -1109,8 +1249,20 @@ export class AgentCatalogState {
       availability: agentProviderAvailabilityFromFailureReason(
         "auth-required",
         provider.availability,
-        validDate(this.#clock),
+        checkedAt,
       ),
+      diagnostic: agentDiagnosticSnapshot({
+        readiness: "auth-required",
+        cause: "AGENT_AUTH_REQUIRED",
+        operation: "diagnose",
+        checkedAt,
+        facts: {
+          installation: { status: "configured", source: "use" },
+          authentication: { status: "required", cause: "AGENT_AUTH_REQUIRED", source: "use" },
+          protocol: { status: "unknown", source: "use" },
+          service: { status: "unknown", source: "use" },
+        },
+      }, checkedAt),
     }));
     this.#publish();
     return Object.freeze({ configured: false });
@@ -1123,6 +1275,9 @@ export class AgentCatalogState {
     );
     for (const [key, inflight] of this.#inflightBySelection) {
       if (inflight.providerId === providerId) this.#inflightBySelection.delete(key);
+    }
+    for (const [key, inflight] of this.#diagnoseInflightBySelection) {
+      if (inflight.providerId === providerId) this.#diagnoseInflightBySelection.delete(key);
     }
     for (const [key, preflight] of this.#preflightBySelection) {
       if (preflight?.selection?.providerId === providerId) this.#preflightBySelection.delete(key);
@@ -1163,6 +1318,37 @@ export class AgentCatalogState {
     if (!provider) return;
     this.#providers.set(providerId, Object.freeze({ ...provider, ...patch }));
     this.#publish();
+  }
+
+  #setDiagnosticFacts(providerId, facts, {
+    publish = true,
+    readiness = null,
+    cause = undefined,
+  } = {}) {
+    const provider = this.#providers.get(providerId);
+    if (!provider) return null;
+    const previous = provider.diagnostic || agentDiagnosticSnapshot({
+      readiness: "connection-failed",
+      cause: "AGENT_DIAGNOSTIC_UNVERIFIED",
+      operation: "diagnose",
+    }, validDate(this.#clock));
+    const diagnostic = agentDiagnosticSnapshot({
+      ...previous,
+      readiness: [
+        "checking",
+        "ready",
+        "not-installed",
+        "auth-required",
+        "invalid-installation",
+        "connection-failed",
+      ].includes(readiness) ? readiness : previous.readiness,
+      cause: cause === undefined ? previous.cause : cause,
+      checkedAt: validDate(this.#clock),
+      facts: { ...previous.facts, ...facts },
+    }, validDate(this.#clock), previous);
+    this.#providers.set(providerId, Object.freeze({ ...provider, diagnostic }));
+    if (publish) this.#publish();
+    return diagnostic;
   }
 
   async #applyPublicCatalog() {

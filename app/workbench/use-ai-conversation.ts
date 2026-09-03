@@ -197,6 +197,7 @@ export function useAiConversation({
     failureMessage: activeRun?.error ?? null,
     failureCode: activeHandoff?.errorCode || null,
     failureRetryable: sidebarFailureRetryable(activeRun, activeHandoff),
+    failureRecoveryKind: activeHandoff?.recoveryKind || null,
     pendingCommentCount,
     agentText: activeHandoff?.visibleText || "",
     agentUpdates: activeHandoff?.visibleTextUpdates || [],

@@ -125,6 +125,9 @@ export default function AgentProviderCard({
   onSelectReasoning,
 }: AgentProviderCardProps) {
   const [pendingAction, setPendingAction] = useState<CardActionKind | null>(null);
+  const [installPending, setInstallPending] = useState(false);
+  const [cancelPending, setCancelPending] = useState(false);
+  const [cancelRequested, setCancelRequested] = useState(false);
   const [actionError, setActionError] = useState("");
   const [apiKeyOpen, setApiKeyOpen] = useState(false);
   const [apiKey, setApiKey] = useState("");
@@ -136,13 +139,15 @@ export default function AgentProviderCard({
       : "",
   );
   const presentation = provider.availability(availability);
-  const statusPresentation = installState === "installing"
+  const installing = installState === "installing" || installPending;
+  const cancelling = installState === "cancelling" || cancelPending || cancelRequested;
+  const statusPresentation = installing && !cancelling
     ? { ...presentation, statusLabel: "正在安装…", detail: "", tone: "checking" as const }
-    : installState === "cancelling"
+    : cancelling
       ? { ...presentation, statusLabel: "正在取消…", detail: "", tone: "checking" as const }
       : presentation;
   const currentModel = models.find((model) => model.id === selectedModelId) || models[0] || null;
-  const actions = installState === "installing" || installState === "cancelling"
+  const actions = installing || cancelling
     ? [{ kind: "cancel-install" as const, label: "取消", copiedLabel: "取消" }]
     : actionsForAvailability(availability, provider).filter((action) => !(
     availability.reason === "model-unavailable"
@@ -151,7 +156,6 @@ export default function AgentProviderCard({
     && action.kind === "api-key"
     ));
   const checking = availability.status === "checking";
-  const installing = installState === "installing" || pendingAction === "install";
   const tokenFormOpen = provider.credentialKind === "api-token"
     && (availability.status === "auth-required" || apiKeyOpen);
   const selectedVendor = provider.vendors?.find((vendor) => vendor.id === vendorId)
@@ -162,7 +166,46 @@ export default function AgentProviderCard({
     : {};
 
   const runAction = async (kind: CardActionKind) => {
-    if (pendingAction || disabled) return;
+    if (disabled) return;
+    if (kind === "cancel-install") {
+      if (cancelPending || cancelRequested || typeof onCancelInstall !== "function") return;
+      setCancelRequested(true);
+      setCancelPending(true);
+      setActionError("");
+      let confirmed = false;
+      try {
+        const outcome = await onCancelInstall();
+        confirmed = Boolean(outcome && ["succeeded", "stale"].includes(outcome.status));
+        if (!confirmed) {
+          setActionError("安装没有取消，请重试。");
+        }
+      } catch {
+        setActionError("安装没有取消，请重试。");
+      } finally {
+        setCancelPending(false);
+        if (!confirmed) setCancelRequested(false);
+      }
+      return;
+    }
+    if (kind === "install") {
+      if (installPending || pendingAction || typeof onInstall !== "function") return;
+      setCancelRequested(false);
+      setInstallPending(true);
+      setActionError("");
+      try {
+        const outcome = await onInstall();
+        if (!outcome || !["succeeded", "stale"].includes(outcome.status)) {
+          setActionError("安装没有完成，请重试。");
+        }
+      } catch {
+        setActionError("安装没有完成，请重试。");
+      } finally {
+        setInstallPending(false);
+        setCancelRequested(false);
+      }
+      return;
+    }
+    if (pendingAction || installPending || cancelPending) return;
     if (kind === "api-key") {
       setApiKeyOpen((open) => !open);
       setActionError("");
@@ -171,30 +214,22 @@ export default function AgentProviderCard({
     setPendingAction(kind);
     setActionError("");
     try {
-      const outcome = kind === "cancel-install" && typeof onCancelInstall === "function"
-        ? await onCancelInstall()
-        : kind === "install" && typeof onInstall === "function"
-        ? await onInstall()
-        : kind === "recheck" && typeof onRecheck === "function"
+      const outcome = kind === "recheck" && typeof onRecheck === "function"
           ? await onRecheck()
-          : kind === "login" || kind === "install"
+          : kind === "login"
             ? await onCopyGuidance(kind)
             : null;
       const succeeded = Boolean(outcome && ["succeeded", "stale"].includes(outcome.status));
       if (!succeeded) {
         setActionError(
-          kind === "install" || kind === "cancel-install"
-            ? "安装没有完成，请重试。"
-            : kind === "recheck"
+          kind === "recheck"
               ? "检查没有完成，请重试。"
               : "指令暂时无法复制，请重试。",
         );
       }
     } catch {
       setActionError(
-        kind === "install" || kind === "cancel-install"
-          ? "安装没有完成，请重试。"
-          : kind === "recheck"
+        kind === "recheck"
             ? "检查没有完成，请重试。"
             : "指令暂时无法复制，请重试。",
       );
@@ -294,7 +329,7 @@ export default function AgentProviderCard({
       data-status={availability.status}
       data-surface={surface}
       data-tone={statusPresentation.tone}
-      aria-busy={checking || installing || installState === "cancelling" || Boolean(pendingAction)}
+      aria-busy={checking || installing || cancelling || Boolean(pendingAction)}
     >
       <div className="qoder-card-summary">
         <span
@@ -330,7 +365,13 @@ export default function AgentProviderCard({
               ? availability.guidanceCopied === action.kind
               : false;
             const label = copied ? action.copiedLabel : action.label;
-            const busy = pendingAction === action.kind;
+            const busy = action.kind === "cancel-install"
+              ? cancelPending
+              : action.kind === "install" ? installPending : pendingAction === action.kind;
+            const actionDisabled = disabled
+              || (action.kind === "cancel-install"
+                ? cancelling
+                : Boolean(pendingAction) || installPending || cancelPending);
             return (
               <button
                 key={action.kind}
@@ -338,8 +379,8 @@ export default function AgentProviderCard({
                 type="button"
                 data-kind={action.kind}
                 {...(index === 0 ? primaryActionData : {})}
-                disabled={Boolean(pendingAction) || disabled || installState === "cancelling"}
-                aria-label={installState === "cancelling" && action.kind === "cancel-install"
+                disabled={actionDisabled}
+                aria-label={cancelling && action.kind === "cancel-install"
                   ? "正在取消…"
                   : installing && action.kind === "cancel-install"
                     ? "取消"

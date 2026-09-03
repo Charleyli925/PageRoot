@@ -13,6 +13,7 @@ import {
 } from "./agent-session-projector.mjs";
 import { createDefaultProviderRegistry } from "./providers/provider-registry.mjs";
 import {
+  agentRecoveryKindForError,
   defaultManagedAgentDelivery,
   normalizeAgentDelivery,
 } from "../../shared/agent-delivery.mjs";
@@ -722,6 +723,8 @@ export class AgentRuntimeCoordinator {
     if (released !== true) {
       entry.keepLease = true;
       entry.retryable = false;
+      entry.safeToRetry = false;
+      entry.recoveryKind = "end";
       entry.errorCode = "AGENT_RESTART_RECOVERY_REQUIRED";
       entry.errorMessage = entry.selection
         ? this.#providerRegistry.failureMessageForSelection(
@@ -903,6 +906,8 @@ export class AgentRuntimeCoordinator {
       errorCode: null,
       errorMessage: null,
       retryable: false,
+      safeToRetry: false,
+      recoveryKind: "end",
       lease,
       keepLease: false,
       cancelState: null,
@@ -947,6 +952,8 @@ export class AgentRuntimeCoordinator {
         entry.phase = "preparing-review";
       }
       entry.retryable = false;
+      entry.safeToRetry = false;
+      entry.recoveryKind = "end";
       if (entry.cancelState === "requested") entry.cancelState = "provider-acknowledged";
       this.#touch(entry);
     }).catch(async (cause) => {
@@ -962,7 +969,11 @@ export class AgentRuntimeCoordinator {
       entry.phase = controller.signal.aborted ? "cancelled" : "failed";
       entry.errorCode = code;
       entry.errorMessage = this.#providerRegistry.failureMessage(ticket, code);
-      entry.retryable = !controller.signal.aborted && !residue && !cleanupUnconfirmed;
+      entry.safeToRetry = !controller.signal.aborted && !residue && !cleanupUnconfirmed;
+      entry.retryable = entry.safeToRetry;
+      entry.recoveryKind = agentRecoveryKindForError(code, {
+        safeToRetry: entry.safeToRetry,
+      });
       entry.keepLease = cleanupUnconfirmed;
       if (entry.cancelState === "requested") entry.cancelState = "provider-acknowledged";
       this.#touch(entry);
@@ -1013,6 +1024,8 @@ export class AgentRuntimeCoordinator {
       visibleTextUpdates: [],
       textTruncated: false,
       retryable: false,
+      safeToRetry: false,
+      recoveryKind: "end",
       errorCode: "AGENT_RESTART_RECOVERY_REQUIRED",
       errorMessage,
     });

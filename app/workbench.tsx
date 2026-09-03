@@ -5709,16 +5709,26 @@ export default function Workbench() {
   // Same authority the process view used, reached from the conversation so the
   // decision no longer requires a panel over the page.
   const handleAiDecision = useCallback((actionId: string) => {
-    if (actionId === "resend-agent") {
+    if (actionId === "resend-agent" || actionId === "retry-later") {
       if (activeRun) void workspaceControllerRef.current?.runs.commands.startAgent({ run: activeRun });
       return;
     }
-    if (["reconnect-agent", "change-agent-model", "change-agent-provider", "switch-agent"].includes(actionId)) {
-      workspaceControllerRef.current?.runs.commands.dismiss();
-      setHandoffPreviewOpen(false);
-      setCanvasMode("edit");
-      editorRef.current?.unlockNow?.();
-      openAgentSettings();
+    if ([
+      "reconnect-agent",
+      "reauthenticate-agent",
+      "change-agent-model",
+      "change-agent-provider",
+      "repair-agent-installation",
+      "switch-agent",
+    ].includes(actionId)) {
+      void (async () => {
+        if (activeRun && !(await cancelActiveRun())) return;
+        workspaceControllerRef.current?.runs.commands.dismiss();
+        setHandoffPreviewOpen(false);
+        setCanvasMode("edit");
+        editorRef.current?.unlockNow?.();
+        openAgentSettings();
+      })();
       return;
     }
     if (actionId === "copy-task") {
@@ -5760,6 +5770,7 @@ export default function Workbench() {
   }, [
     activateReadyResult,
     activeRun,
+    cancelActiveRun,
     openAgentSettings,
     requestActiveRunEnd,
     resolveAiConflict,

@@ -19,6 +19,11 @@ export type AgentDiagnosticSnapshot = Readonly<{
   operation: "diagnose" | "refresh";
   checkedAt: string | null;
   activeInstallation: Readonly<{ phase: "installing" | "cancelling" }> | null;
+  facts: Readonly<Record<"installation" | "authentication" | "protocol" | "service", Readonly<{
+    status: "unknown" | "configured" | "ready" | "missing" | "invalid" | "required" | "failed" | "unavailable";
+    cause: string | null;
+    source: "diagnose" | "preflight" | "use";
+  }>>>;
 }>;
 export type AgentProviderAvailabilitySnapshot = Readonly<{
   status: AgentProviderAvailabilityStatus;
@@ -48,10 +53,12 @@ export const AGENT_PROVIDER_AVAILABILITY_STATUSES: readonly AgentProviderAvailab
 export const AGENT_PROVIDER_GUIDANCE_KINDS: readonly AgentProviderGuidanceKind[];
 export const AGENT_DIAGNOSTIC_READINESS: readonly AgentDiagnosticReadiness[];
 export const AGENT_DIAGNOSTIC_OPERATIONS: readonly AgentDiagnosticSnapshot["operation"][];
+export const AGENT_DIAGNOSTIC_FACT_STATUSES: readonly AgentDiagnosticSnapshot["facts"][keyof AgentDiagnosticSnapshot["facts"]]["status"][];
 export const INITIAL_AGENT_PROVIDER_AVAILABILITY: AgentProviderAvailabilitySnapshot;
 export function agentDiagnosticSnapshot(
   value?: Partial<AgentDiagnosticSnapshot>,
   checkedAt?: string | null,
+  previous?: AgentDiagnosticSnapshot | null,
 ): AgentDiagnosticSnapshot;
 export function agentProviderAvailabilityFromDiagnostic(
   diagnostic: Partial<AgentDiagnosticSnapshot>,

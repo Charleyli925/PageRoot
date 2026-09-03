@@ -482,6 +482,56 @@ test("源页 Agent connects to one verified fixed model and reviews a Candidate"
   }
 });
 
+test("源页运行时余额失败 offers only provider recovery without a false resend", {
+  tag: ["@smoke-provider"],
+}, async () => {
+  test.setTimeout(180_000);
+  const fixture = createSourceFixture("pageroot-http-runtime-balance.html");
+  const httpAgent = await startPagerootHttpAgent({ mode: "runtime-balance" });
+  const launched = await launchPageRoot({
+    activeSourcePath: fixture.sourcePath,
+    injectedEnv: pagerootHttpAgentEnv(httpAgent.baseUrl),
+  });
+  try {
+    await addComment(
+      launched.page,
+      fixture.sourcePath,
+      "余额失败时保留源页并提供真实可恢复操作。",
+    );
+    await launched.page.getByRole("button", { name: /AI 助手/u }).click();
+    const settingsPage = await openAgentSettingsPage(launched.page);
+    await settingsPage.getByTestId("settings-agent-scheme").selectOption({ label: "源页" });
+    const pagerootCard = settingsPage.locator(".pageroot-availability-card");
+    await pagerootCard.getByLabel("API Token").fill("sk-e2e-balance");
+    await pagerootCard.getByRole("button", { name: "连接", exact: true }).click();
+    await expect(pagerootCard.getByText("源页 Agent · 已连接", { exact: true }))
+      .toBeVisible({ timeout: 30_000 });
+    await launched.page.getByRole("button", { name: "返回工作台" }).click();
+    const sidebar = await chooseModifyIntent(launched.page);
+    await sidebar.getByRole("button", { name: /交给 源页 修改/u }).click();
+
+    const actionBar = launched.page.getByTestId("ai-conversation-action-bar");
+    await expect(actionBar).toContainText("生成失败", { timeout: 60_000 });
+    await expect(actionBar).toContainText("页面未修改");
+    await expect(actionBar.getByRole("button")).toHaveCount(2);
+    await expect(actionBar.getByRole("button", { name: "切换 Agent" })).toBeVisible();
+    await expect(actionBar.getByRole("button", { name: "复制任务" })).toBeVisible();
+    await expect(actionBar.getByRole("button", { name: "重新发送" })).toHaveCount(0);
+    await expect(launched.page.locator(".toast.show")).toHaveCount(0);
+    expect(readFileSync(fixture.sourcePath)).toEqual(fixture.original);
+    const projectRoot = managedProjectRoots(launched.workspace)[0];
+    const projectId = JSON.parse(readFileSync(
+      path.join(projectRoot, ".pageroot", "project.json"),
+      "utf8",
+    )).projectId;
+    expect(candidateHtmlFiles(launched.workspace, projectId)).toHaveLength(0);
+  } finally {
+    await stopPageRoot(launched.electronApp, launched.isolatedUserData);
+    removeSourceFixture(fixture.sourceDirectory);
+    await httpAgent.close();
+  }
+});
+
 test("源页 Agent keeps the Token card and next step when the Token is rejected", {
   tag: ["@smoke-provider"],
 }, async () => {
@@ -648,6 +698,61 @@ test("Qoder installed while PageRoot is open refreshes in place and continues on
     await chooseModifyIntent(launched.page);
     await launched.page.getByRole("button", { name: "交给 Qoder 修改" }).click();
     await expect.poll(() => requestPosts).toBe(1);
+  } finally {
+    await stopPageRoot(launched.electronApp, launched.isolatedUserData);
+    removeSourceFixture(fixture.sourceDirectory);
+  }
+});
+
+test("Qoder managed install can be cancelled while the install request is pending", {
+  tag: ["@smoke-provider"],
+}, async () => {
+  test.setTimeout(120_000);
+  const fixture = createSourceFixture("qoder-cancel-managed-install.html");
+  const launched = await launchPageRoot({
+    activeSourcePath: fixture.sourcePath,
+    injectedEnv: {
+      PAGEROOT_AGENT_INSTALL_STUB_FETCH: "pending",
+      PAGEROOT_QODER_ACP_ALLOW_TEST_COMMAND: "1",
+      PAGEROOT_QODER_ACP_COMMAND: path.join(fixture.sourceDirectory, "missing-qoder-acp"),
+    },
+  });
+  try {
+    let installPosts = 0;
+    let cancelPosts = 0;
+    let requestPosts = 0;
+    launched.page.on("request", (request) => {
+      const url = new URL(request.url());
+      if (request.method() !== "POST") return;
+      if (url.pathname === "/agent/install") installPosts += 1;
+      if (url.pathname === "/agent/install/cancel") cancelPosts += 1;
+      if (url.pathname === "/request") requestPosts += 1;
+    });
+
+    const qoderCard = await openQoderAvailability(launched.page);
+    await expect(qoderCard.getByText("Qoder CLI · 未安装", { exact: true }))
+      .toBeVisible({ timeout: 30_000 });
+    await qoderCard.getByRole("button", { name: "安装 Qoder CLI" }).click();
+
+    await expect(qoderCard.getByText("正在安装…", { exact: true })).toBeVisible();
+    const cancelButton = qoderCard.getByRole("button", { name: "取消", exact: true });
+    await expect(cancelButton).toBeVisible();
+    await expect(cancelButton).toBeEnabled();
+    await expect.poll(() => installPosts).toBe(1);
+
+    await cancelButton.click();
+    await expect.poll(() => cancelPosts).toBe(1);
+    await expect(qoderCard.getByText("Qoder CLI · 未安装", { exact: true }))
+      .toBeVisible({ timeout: 30_000 });
+    await expect(qoderCard.getByRole("button", { name: "安装 Qoder CLI" })).toBeEnabled();
+    expect(requestPosts).toBe(0);
+    expect(readFileSync(fixture.sourcePath)).toEqual(fixture.original);
+    const projectRoot = managedProjectRoots(launched.workspace)[0];
+    const projectId = JSON.parse(readFileSync(
+      path.join(projectRoot, ".pageroot", "project.json"),
+      "utf8",
+    )).projectId;
+    expect(candidateHtmlFiles(launched.workspace, projectId)).toHaveLength(0);
   } finally {
     await stopPageRoot(launched.electronApp, launched.isolatedUserData);
     removeSourceFixture(fixture.sourceDirectory);

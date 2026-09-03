@@ -1237,6 +1237,10 @@ test("Settings keeps checking and guiding Qoder while Codex is selected", async 
   assert.equal(harness.workflow.freezeAgentSelection().providerId, "codex");
   assert.equal(
     harness.workflow.getSnapshot().agentCatalog.providers.qoder.availability.status,
+    "checking",
+  );
+  assert.equal(
+    harness.workflow.getSnapshot().agentCatalog.providers.qoder.diagnostic.readiness,
     "ready",
   );
 
@@ -1279,7 +1283,7 @@ test("Settings rechecks the resolved current Qoder selection", async () => {
   const refreshed = await harness.workflow.refreshQoderAvailability();
   assert.equal(refreshed.status, "succeeded");
   assert.equal(harness.calls.preflight.length, 0);
-  assert.equal(harness.workflow.getSnapshot().qoderAvailability.status, "checking");
+  assert.equal(harness.workflow.getSnapshot().qoderAvailability.status, "ready");
   harness.workflow.dispose();
 });
 
@@ -1532,7 +1536,7 @@ test("concurrent automatic Qoder checks share one diagnosis promise", async () =
   const first = harness.workflow.checkQoderUsability();
   const second = harness.workflow.checkQoderUsability();
   await new Promise((resolve) => setImmediate(resolve));
-  assert.equal(harness.calls.diagnose.length, 2);
+  assert.equal(harness.calls.diagnose.length, 1);
   diagnosis.resolve({
     status: "ready",
     diagnostic: {
@@ -1622,6 +1626,8 @@ test("Qoder output residue is projected as non-retryable", async () => {
 
   assert.equal(harness.runSession.activeHandoff?.status, "failed");
   assert.equal(harness.runSession.activeHandoff?.retryable, false);
+  assert.equal(harness.runSession.activeHandoff?.safeToRetry, false);
+  assert.equal(harness.runSession.activeHandoff?.recoveryKind, "end");
   assert.equal((await harness.workflow.copyHandoff()).code, "RUN_AGENT_RECOVERY_REQUIRED");
   assert.equal(harness.calls.handoff.length, 0);
   harness.workflow.dispose();

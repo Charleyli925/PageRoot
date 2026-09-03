@@ -23,6 +23,25 @@ export const AGENT_DIAGNOSTIC_OPERATIONS = Object.freeze([
   "refresh",
 ]);
 
+export const AGENT_DIAGNOSTIC_FACT_STATUSES = Object.freeze([
+  "unknown",
+  "configured",
+  "ready",
+  "missing",
+  "invalid",
+  "required",
+  "failed",
+  "unavailable",
+]);
+
+const AGENT_DIAGNOSTIC_FACT_SOURCES = new Set(["diagnose", "preflight", "use"]);
+const AGENT_DIAGNOSTIC_FACT_NAMES = Object.freeze([
+  "installation",
+  "authentication",
+  "protocol",
+  "service",
+]);
+
 export const AGENT_PROVIDER_GUIDANCE_KINDS = Object.freeze(["install", "login"]);
 
 export const INITIAL_AGENT_PROVIDER_AVAILABILITY = Object.freeze({
@@ -47,18 +66,69 @@ function cleanActiveInstallation(value) {
     : null;
 }
 
-export function agentDiagnosticSnapshot(value = {}, checkedAt = null) {
+export function agentDiagnosticSnapshot(value = {}, checkedAt = null, previous = null) {
   const readiness = AGENT_DIAGNOSTIC_READINESS.includes(value?.readiness)
     ? value.readiness
     : "connection-failed";
+  const previousFacts = previous?.facts
+    ? previous.facts
+    : {};
+  const rawFacts = value?.facts && typeof value.facts === "object" && !Array.isArray(value.facts)
+    ? value.facts
+    : {};
+  const fallbackStatuses = {
+    installation: readiness === "not-installed" ? "missing"
+      : readiness === "invalid-installation" ? "invalid" : "ready",
+    authentication: readiness === "auth-required" ? "required" : "unknown",
+    protocol: readiness === "connection-failed" ? "failed" : "unknown",
+    service: "unknown",
+  };
+  const facts = Object.freeze(Object.fromEntries(AGENT_DIAGNOSTIC_FACT_NAMES.map((name) => {
+    const raw = rawFacts[name];
+    const candidate = raw && typeof raw === "object" && !Array.isArray(raw)
+      ? raw
+      : { status: raw };
+    const status = AGENT_DIAGNOSTIC_FACT_STATUSES.includes(candidate?.status)
+      ? candidate.status
+      : fallbackStatuses[name];
+    const source = AGENT_DIAGNOSTIC_FACT_SOURCES.has(candidate?.source)
+      ? candidate.source
+      : "diagnose";
+    const cause = status === "ready" || status === "configured" || status === "unknown"
+      ? null
+      : cleanDiagnosticCause(candidate?.cause || value?.cause);
+    const next = Object.freeze({ status, cause, source });
+    const previous = previousFacts[name];
+    if (name === "service"
+      && previous?.status
+      && previous.status !== "unknown"
+      && source === "diagnose") {
+      return [name, previous];
+    }
+    return [name, next];
+  })));
+  const incomingService = rawFacts.service && typeof rawFacts.service === "object"
+    ? rawFacts.service
+    : { status: rawFacts.service, source: "diagnose" };
+  const preservesStrongerServiceFailure = readiness === "ready"
+    && previous?.readiness
+    && previousFacts.service?.source !== "diagnose"
+    && ["failed", "unavailable"].includes(previousFacts.service?.status)
+    && (!incomingService.source || incomingService.source === "diagnose");
+  const effectiveReadiness = preservesStrongerServiceFailure
+    ? previous.readiness
+    : readiness;
   return Object.freeze({
-    readiness,
-    cause: readiness === "ready" ? null : cleanDiagnosticCause(value?.cause),
+    readiness: effectiveReadiness,
+    cause: effectiveReadiness === "ready"
+      ? null
+      : cleanDiagnosticCause(preservesStrongerServiceFailure ? previous.cause : value?.cause),
     operation: AGENT_DIAGNOSTIC_OPERATIONS.includes(value?.operation)
       ? value.operation
       : "diagnose",
     checkedAt: cleanDate(value?.checkedAt || checkedAt),
     activeInstallation: cleanActiveInstallation(value?.activeInstallation),
+    facts,
   });
 }
 
@@ -71,6 +141,9 @@ export function agentProviderAvailabilityFromDiagnostic(
   if (snapshot.readiness === "ready") {
     // Diagnosis is a real Bridge check, so Settings may show the connection as
     // ready. The send path still performs its own formal preflight/ticket.
+    if (preserveUseFailureAfterLocalReady(previous)) {
+      return snapshotAvailability({ ...previous, checkedAt: snapshot.checkedAt });
+    }
     return readyAgentProviderAvailability(snapshot.checkedAt, "local");
   }
   if (snapshot.readiness === "not-installed") {
@@ -112,7 +185,7 @@ function cleanGuidanceKind(value) {
   return AGENT_PROVIDER_GUIDANCE_KINDS.includes(value) ? value : null;
 }
 
-function snapshot({
+function snapshotAvailability({
   status,
   reason = null,
   lastCheck = null,
@@ -135,7 +208,7 @@ function snapshot({
 export function checkingAgentProviderAvailability(
   previous = INITIAL_AGENT_PROVIDER_AVAILABILITY,
 ) {
-  return snapshot({
+  return snapshotAvailability({
     status: "checking",
     reason: "checking",
     lastCheck: previous.lastCheck,
@@ -172,9 +245,9 @@ export function agentProviderAvailabilityFromLocalResult(
   const status = String(result?.status || "unavailable");
   if (status === "ready") {
     if (preserveUseFailureAfterLocalReady(previous)) {
-      return snapshot({ ...previous, checkedAt });
+      return snapshotAvailability({ ...previous, checkedAt });
     }
-    return snapshot({
+    return snapshotAvailability({
       status: "checking",
       reason: "checking",
       lastCheck: "local",
@@ -184,7 +257,7 @@ export function agentProviderAvailabilityFromLocalResult(
     });
   }
   if (status === "not-installed") {
-    return snapshot({
+    return snapshotAvailability({
       status: "not-installed",
       reason: "not-installed",
       lastCheck: "local",
@@ -193,7 +266,7 @@ export function agentProviderAvailabilityFromLocalResult(
       guidanceCopiedAt: previous.guidanceCopiedAt,
     });
   }
-  return snapshot({
+  return snapshotAvailability({
     status: "unavailable",
     reason: result?.reason === "invalid-installation"
       ? "invalid-installation"
@@ -206,7 +279,7 @@ export function agentProviderAvailabilityFromLocalResult(
 }
 
 export function readyAgentProviderAvailability(checkedAt = null, lastCheck = "use") {
-  return snapshot({
+  return snapshotAvailability({
     status: "ready",
     reason: null,
     lastCheck: lastCheck === "local" ? "local" : "use",
@@ -219,7 +292,7 @@ export function agentProviderAvailabilityFromFailureReason(
   previous = INITIAL_AGENT_PROVIDER_AVAILABILITY,
   checkedAt = null,
 ) {
-  return snapshot({
+  return snapshotAvailability({
     status: reason === "not-installed"
       ? "not-installed"
       : reason === "auth-required"
@@ -239,7 +312,7 @@ export function agentProviderAvailabilityWithCopiedGuidance(
   copiedAt = null,
 ) {
   if (!AGENT_PROVIDER_GUIDANCE_KINDS.includes(kind)) return previous;
-  return snapshot({
+  return snapshotAvailability({
     ...previous,
     guidanceCopied: kind,
     guidanceCopiedAt: copiedAt,

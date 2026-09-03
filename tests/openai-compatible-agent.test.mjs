@@ -58,6 +58,17 @@ function sseResponse(chunks, { status = 200 } = {}) {
   });
 }
 
+function headerlessStreamResponse(chunks, { status = 200 } = {}) {
+  return new Response(new ReadableStream({
+    start(controller) {
+      for (const chunk of chunks) {
+        controller.enqueue(chunk instanceof Uint8Array ? chunk : new TextEncoder().encode(chunk));
+      }
+      controller.close();
+    },
+  }), { status });
+}
+
 function createVirtualTimer() {
   let currentTime = 0;
   let nextId = 1;
@@ -253,6 +264,61 @@ test("HTTP execution streams SSE with UTF-8 chunking, multiline data, activity-o
       .reduce((total, event) => total + event.byteDelta, 0),
     Buffer.byteLength(HTML, "utf8"),
   );
+});
+
+test("HTTP sniffs headerless JSON and SSE without losing or duplicating the first chunk", async () => {
+  const json = await completeOpenAiCompatibleChat({
+    fetchImpl: async () => headerlessStreamResponse([
+      JSON.stringify({ choices: [{ finish_reason: "stop", message: { content: HTML } }] }),
+    ]),
+    baseUrl: "https://api.example.com/v1",
+    apiKey: "sk-stream",
+    modelId: "model",
+    vendorId: "custom",
+    messages: [],
+    inactivityTimeoutMs: 500,
+  });
+  assert.equal(json, HTML);
+
+  const split = HTML.length / 2 | 0;
+  const sse = await completeOpenAiCompatibleChat({
+    fetchImpl: async () => headerlessStreamResponse([
+      "da",
+      "ta: " + JSON.stringify({ choices: [{ delta: { content: HTML.slice(0, split) } }] }) + "\n\n",
+      "data: " + JSON.stringify({ choices: [{ delta: { content: HTML.slice(split) } }] }) + "\n\n",
+      "data: [DONE]\n\n",
+    ]),
+    baseUrl: "https://api.example.com/v1",
+    apiKey: "sk-stream",
+    modelId: "model",
+    vendorId: "custom",
+    messages: [],
+    inactivityTimeoutMs: 500,
+  });
+  assert.equal(sse, HTML);
+});
+
+test("HTTP joins many small HTML deltas once at protocol completion", async () => {
+  const fragments = Array.from({ length: 2_000 }, (_, index) => String(index % 10));
+  const opening = "<!DOCTYPE html><html><head><title>many</title></head><body><p data-pageroot-id=\"one\">";
+  const closing = "</p></body></html>";
+  const expected = `${opening}${fragments.join("")}${closing}`;
+  const content = [opening, ...fragments, closing];
+  const result = await completeOpenAiCompatibleChat({
+    fetchImpl: async () => sseResponse([
+      ...content.map((delta) => (
+        "data: " + JSON.stringify({ choices: [{ delta: { content: delta } }] }) + "\n\n"
+      )),
+      "data: [DONE]\n\n",
+    ]),
+    baseUrl: "https://api.example.com/v1",
+    apiKey: "sk-stream",
+    modelId: "model",
+    vendorId: "custom",
+    messages: [],
+    inactivityTimeoutMs: 500,
+  });
+  assert.equal(result, expected);
 });
 
 test("HTTP activity watchdog is sliding, classifies silence as turn timeout, and preserves cancellation", async () => {
@@ -473,7 +539,7 @@ test("HTTP drops a partial document when the SSE connection closes before DONE",
   );
 });
 
-test("HTTP diagnosis performs a read-only models probe and never invokes preflight chat", async () => {
+test("Custom diagnosis validates saved configuration without requiring a models endpoint", async () => {
   const calls = [];
   let chatCalls = 0;
   const provider = createOpenAiCompatibleProvider({
@@ -495,18 +561,18 @@ test("HTTP diagnosis performs a read-only models probe and never invokes preflig
   const installation = provider.resolveInstallation({ environment });
   const diagnostic = await provider.diagnose(installation, { environment });
   assert.equal(diagnostic.readiness, "ready");
-  assert.equal(calls.length, 1);
-  assert.equal(calls[0].method, "GET");
-  assert.match(calls[0].url, /\/models$/u);
-  assert.equal(calls[0].body, undefined);
+  assert.equal(calls.length, 0);
+  assert.equal(diagnostic.facts.installation, "configured");
+  assert.equal(diagnostic.facts.protocol, "unknown");
+  assert.equal(diagnostic.facts.service, "unknown");
   assert.equal(chatCalls, 0);
 });
 
 test("HTTP diagnosis distinguishes authentication and network failures", async () => {
   const environment = {
     PAGEROOT_API_KEY: "sk-diagnose",
-    PAGEROOT_API_VENDOR: "custom",
-    PAGEROOT_API_BASE_URL: "https://api.example.com/v1",
+    PAGEROOT_API_VENDOR: "deepseek",
+    PAGEROOT_API_BASE_URL: "https://api.deepseek.com/v1",
     PAGEROOT_API_CREDENTIAL_GENERATION: "1",
   };
   const authProvider = createOpenAiCompatibleProvider({

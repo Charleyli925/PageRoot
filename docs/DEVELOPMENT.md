@@ -66,12 +66,17 @@ managed copy. It cannot provide a command, cwd, environment or filesystem path
 policy.
 
 `GET /agent/diagnose` is the Settings status route. It resolves and verifies
-the selected installation, then runs only the provider's bounded read-only
-diagnostic (`/models`, Qoder version/model-list, or protected Codex login
-status). It creates no preflight ticket or ACP session and cannot change the
-selected model. `GET /agent/availability` remains the disk-only compatibility
-route. Codex collects all candidates before applying explicit-test, managed,
-then user-global priority, so a broken lower-priority global shim cannot mask a
+the selected installation, then returns four bounded facts: installation,
+authentication, protocol and service. Built-in HTTP vendors may use `/models`;
+a Custom OpenAI-compatible endpoint validates only its saved configuration and
+does not require a catalog route. Qoder uses version/model-list checks and
+Codex verifies login plus ACP `initialize` without opening a task session. The
+route creates no preflight ticket or ACP session and cannot change the selected
+model. A diagnosis is selection-keyed single-flight, and a weak Settings result
+cannot erase a stronger failure learned during preflight or execution.
+`GET /agent/availability` remains the disk-only compatibility route. Codex
+collects all candidates before applying explicit-test, managed, then
+user-global priority, so a broken lower-priority global shim cannot mask a
 valid managed installation.
 
 Before execution, the one-use ticket revalidates both the Codex ACP adapter and
@@ -104,6 +109,15 @@ sliding inactivity watchdog. Valid content, reasoning, usage or heartbeat
 resets it, while startup/login/preflight retain short timeouts. Runtime silence
 is `AGENT_TURN_TIMEOUT`; disconnect, cancellation and timeout never finalize a
 partial Candidate.
+
+`PublicExecutionSession` keeps retry safety separate from recovery guidance.
+`safeToRetry` says whether the same frozen Request is technically safe to run
+again; `recoveryKind` says what the user must do (`retry`, `wait`,
+`reauthenticate`, `change-model`, `change-provider`, `repair-installation` or
+`end`). Renderer actions are derived from that structured pair, never from
+provider prose. Managed-install progress is likewise hydrated from the
+Bridge-owned `installState`, so cancellation remains available while the
+original install request is pending.
 
 The purpose-bound one-use ticket stores provider/runtime IDs, a frozen security
 profile, an opaque installation digest

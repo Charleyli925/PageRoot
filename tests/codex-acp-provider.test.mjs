@@ -277,3 +277,19 @@ test("Codex diagnosis uses protected native login status when available", async 
     (error) => error?.code === "CODEX_AUTH_UNVERIFIED",
   );
 });
+
+test("Codex diagnosis verifies native login and ACP initialize without session/new", async (t) => {
+  const root = await isolatedHome(t);
+  const marker = path.join(root, "session-new.marker");
+  const adapter = await probeCommand(root, `--session-marker=${marker}`);
+  const native = path.join(root, "codex-native");
+  await writeFile(native, "#!/bin/sh\necho Logged in\n", { mode: 0o755 });
+  await chmod(native, 0o755);
+
+  const diagnostic = await diagnoseCodexAcp({ ...adapter, nativeCommand: native }, {});
+  assert.equal(diagnostic.readiness, "ready");
+  assert.equal(diagnostic.facts.authentication, "ready");
+  assert.equal(diagnostic.facts.protocol, "ready");
+  assert.equal(diagnostic.facts.service, "unknown");
+  await assert.rejects(() => readFile(marker, "utf8"), { code: "ENOENT" });
+});

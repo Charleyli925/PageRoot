@@ -76,18 +76,29 @@ const PROJECT_FILE_ROOT = path.resolve(
   process.env.HTML_AI_PROJECT_FILES_ROOT || DEFAULT_PROJECT_FILE_ROOT,
 );
 
+function e2eAgentInstallFetch(_url, { signal } = {}) {
+  if (process.env.PAGEROOT_AGENT_INSTALL_STUB_FETCH === "pending") {
+    return new Promise((_, reject) => {
+      const abort = () => reject(signal?.reason || new Error("Agent install cancelled."));
+      if (signal?.aborted) abort();
+      else signal?.addEventListener("abort", abort, { once: true });
+    });
+  }
+  return Promise.resolve({
+    ok: false,
+    status: 503,
+    async arrayBuffer() {
+      return new ArrayBuffer(0);
+    },
+  });
+}
+
 const agentBridgeService = new AgentBridgeService({
   resolveTask: resolveAgentBridgeTask,
-  ...(process.env.PAGEROOT_E2E === "1" && process.env.PAGEROOT_AGENT_INSTALL_STUB_FETCH === "1"
+  ...(process.env.PAGEROOT_E2E === "1" && process.env.PAGEROOT_AGENT_INSTALL_STUB_FETCH
     ? {
       installerOptions: {
-        fetchImpl: async () => ({
-          ok: false,
-          status: 503,
-          async arrayBuffer() {
-            return new ArrayBuffer(0);
-          },
-        }),
+        fetchImpl: e2eAgentInstallFetch,
       },
     }
     : {}),
