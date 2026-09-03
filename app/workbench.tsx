@@ -212,11 +212,11 @@ import WorkbenchDocumentSurfaceCache from "./workbench/WorkbenchDocumentSurfaceC
 import WorkbenchDocumentCanvasPool from "./workbench/WorkbenchDocumentCanvasPool";
 import ProjectRulesEditorPage from "./workbench/project-rules-editor";
 import { useRuntimeCanvasResidency } from "./workbench/use-runtime-canvas-residency";
-import ReviewAnalysisPrewarm, {
+import {
   prepareReviewAnalysis,
   preparedReviewByteSize,
   type PreparedReviewDocuments,
-} from "./workbench/ReviewAnalysisPrewarm";
+} from "./workbench/review-analysis";
 import {
   rememberActiveDocumentPresentation,
   readyVersionPublicationMatches,
@@ -5929,15 +5929,6 @@ export default function Workbench() {
   return (
     <>
       <RendererStartupPerformance />
-      <ReviewAnalysisPrewarm
-        session={reviewAnalysisSession}
-        controller={workspaceController}
-        activeRun={activeRun} projectId={projectId} documentId={documentId}
-        sourceSha256={sourceSha256} editRevision={editRevision}
-        lastPersistedRevision={lastPersistedRevision} persistState={persistState}
-        html={html} comments={comments} projectHydrating={projectHydrating}
-        projectLoadError={projectLoadError}
-      />
       <main
         className="workbench"
         style={workbenchStyle}

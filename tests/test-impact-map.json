@@ -873,7 +873,7 @@
       "id": "review-analysis-session",
       "patterns": [
         "^app/application/review-analysis-session\\.(?:js|d\\.ts)$",
-        "^app/workbench/ReviewAnalysisPrewarm\\.tsx$"
+        "^app/workbench/review-analysis\\.ts$"
       ],
       "suites": [
         "typecheck",

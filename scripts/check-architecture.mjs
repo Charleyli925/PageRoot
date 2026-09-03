@@ -69,6 +69,7 @@ const RETIRED_MODULES = new Set([
   "app/application/browser-document-session.js",
   "app/application/browser-file-tab-identity.js",
   "app/application/runtime-capabilities.js",
+  "app/workbench/ReviewAnalysisPrewarm.tsx",
 ]);
 const RETIRED_IMPORT_NAMES = new Set([
   "NativeEditingController",
@@ -80,6 +81,7 @@ const RETIRED_IMPORT_NAMES = new Set([
   "browser-document-session",
   "browser-file-tab-identity",
   "runtime-capabilities",
+  "ReviewAnalysisPrewarm",
 ]);
 const PROVIDER_LITERALS = ["qoder", "codex", "qoder-acp", "codex-acp"];
 const RAW_ENDPOINTS = new Set([

@@ -1,10 +1,26 @@
 import assert from "node:assert/strict";
+import { existsSync, readFileSync } from "node:fs";
 import test from "node:test";
 
 import {
   ReviewAnalysisCancelledError,
   ReviewAnalysisSession,
 } from "../app/application/review-analysis-session.js";
+
+test("Review analysis runs only after the explicit Review command", () => {
+  const workbench = readFileSync(new URL("../app/workbench.tsx", import.meta.url), "utf8");
+  const reviewAnalysis = readFileSync(
+    new URL("../app/workbench/review-analysis.ts", import.meta.url),
+    "utf8",
+  );
+  assert.equal(
+    existsSync(new URL("../app/workbench/ReviewAnalysisPrewarm.tsx", import.meta.url)),
+    false,
+  );
+  assert.doesNotMatch(workbench, /ReviewAnalysisPrewarm|review:prewarmed/u);
+  assert.doesNotMatch(reviewAnalysis, /useEffect|prepareReviewCandidate|review-prewarm/u);
+  assert.match(workbench, /await prepareReviewAnalysis\(/u);
+});
 
 test("review analysis yields, coalesces identical work, and caches bounded results", async () => {
   let computes = 0;
