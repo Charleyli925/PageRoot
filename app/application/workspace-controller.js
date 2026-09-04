@@ -2023,7 +2023,7 @@ export class WorkspaceController {
       ));
     }
     const activeSource = sourcePath || this.#projectSession.sourcePath;
-    const expectedHash = expectedSourceSha256 || this.#documentSession.sourceSha256;
+    const expectedHash = expectedSourceSha256 || this.#documentSession.persistedSourceSha256;
     if (!activeSource || !expectedHash) {
       return Promise.resolve(blocked(
         "PROJECT_REGISTRATION_PRECONDITION",
@@ -2282,7 +2282,7 @@ export class WorkspaceController {
     const sourcePath = this.#projectSession.sourcePath;
     return {
       html: document.html,
-      sourceSha256: document.sourceSha256,
+      sourceSha256: document.persistedSourceSha256,
       canvasGeneration: document.canvasGeneration,
       sourcePath,
       sourceIsAuthoritative: Boolean(
@@ -2323,7 +2323,7 @@ export class WorkspaceController {
         this.#projectSession.sourcePath,
         identity.sourcePath,
       )
-      && this.#documentSession.sourceSha256 === identity.expectedSourceSha256,
+      && this.#documentSession.persistedSourceSha256 === identity.expectedSourceSha256,
     );
   }
 
@@ -2538,25 +2538,25 @@ export class WorkspaceController {
       this.#documentWorkflow?.replaceRecoveryIdentity(recoveryIdentity);
       const documentAlreadyMatchesCanonical = Boolean(
         currentDocument.html === nextDocumentHtml
-        && currentDocument.sourceSha256 === nextSourceSha256,
+        && currentDocument.persistedSourceSha256 === nextSourceSha256,
       );
       if (shouldAdoptCanonicalSource && !documentAlreadyMatchesCanonical) {
         if (currentDocument.html !== nextDocumentHtml) {
           this.#documentSession.publishAuthority({
             html: nextDocumentHtml,
-            sourceSha256: nextSourceSha256,
+            persistedSourceSha256: nextSourceSha256,
           });
           this.#canvasPort.invalidateRenderAcks();
         } else {
           // The renderer already holds the exact canonical bytes. Repair only
           // its source identity; recreating the disposable canvas would abort
           // an otherwise valid author-runtime page for no source-level reason.
-          this.#documentSession.update({ sourceSha256: nextSourceSha256 });
+          this.#documentSession.update({ persistedSourceSha256: nextSourceSha256 });
         }
       } else if (!documentAlreadyMatchesCanonical) {
         this.#documentSession.update({
           html: nextDocumentHtml,
-          sourceSha256: nextSourceSha256,
+          persistedSourceSha256: nextSourceSha256,
         });
       }
       this.#versionSession.hydrate({

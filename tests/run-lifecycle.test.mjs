@@ -12,21 +12,23 @@ import {
   validationReviewFromRecord,
 } from "../app/domain/run-lifecycle.js";
 
-test("legacy lifecycle names are decoded only at the domain boundary", () => {
-  assert.equal(canonicalLifecycleState("waiting"), "processing");
-  assert.equal(canonicalLifecycleState("result-ready"), "validating");
-  assert.equal(canonicalLifecycleState("canceled"), "cancelled");
-  assert.equal(canonicalLifecycleState("unknown"), "processing");
+test("unknown lifecycle names fail closed instead of becoming a current state", () => {
+  assert.equal(canonicalLifecycleState("waiting"), "error");
+  assert.equal(canonicalLifecycleState("result-ready"), "error");
+  assert.equal(canonicalLifecycleState("canceled"), "error");
+  assert.equal(canonicalLifecycleState("unknown"), "error");
+  assert.equal(canonicalLifecycleState("processing"), "processing");
+  assert.equal(canonicalLifecycleState("cancelled"), "cancelled");
 });
 
-test("legacy completed payload with a Version becomes ready-to-open", () => {
-  assert.equal(
-    canonicalLifecycleState("completed", { readyVersion: true }),
-    "ready-to-open",
-  );
+test("a ready Version still maps the current ready status to ready-to-open", () => {
   assert.equal(
     canonicalLifecycleState("ready", { readyVersion: true }),
     "ready-to-open",
+  );
+  assert.equal(
+    canonicalLifecycleState("complete", { readyVersion: true }),
+    "complete",
   );
 });
 
@@ -390,19 +392,10 @@ test("candidate assessment exposes only the renderer fields needed for review", 
   assert.equal(candidateAssessmentFromRecord({ status: "unknown" }), null);
 });
 
-test("candidate assessment carries valid Stable-ID impact facts to Review", () => {
+test("candidate assessment ignores retired full-array impact facts", () => {
   const changedId = "pr1_00000000000040008000000000000000";
   const outsideId = "pr1_11111111111141118000000000000000";
-  assert.deepEqual(candidateAssessmentFromRecord({
-    status: "ready",
-    issueCodes: [],
-    health: { completeDocument: true, bodyHasContent: true },
-    continuity: { status: "related" },
-    changedStableElementIds: [changedId, outsideId],
-    requestedTargetElementIds: [changedId],
-    outsideRequestedTargetElementIds: [outsideId],
-    requestedTargetCount: 1,
-  }), {
+  const assessment = candidateAssessmentFromRecord({
     status: "ready",
     issueCodes: [],
     health: { completeDocument: true, bodyHasContent: true },
@@ -412,6 +405,13 @@ test("candidate assessment carries valid Stable-ID impact facts to Review", () =
     outsideRequestedTargetElementIds: [outsideId],
     requestedTargetCount: 1,
   });
+  assert.deepEqual(assessment, {
+    status: "ready",
+    issueCodes: [],
+    health: { completeDocument: true, bodyHasContent: true },
+    continuity: { status: "related" },
+  });
+  assert.equal("changedStableElementIds" in assessment, false);
 });
 
 test("bounded Candidate impact facts reach Review without expanding the renderer payload", () => {
@@ -442,12 +442,12 @@ test("bounded Candidate impact facts reach Review without expanding the renderer
   });
 });
 
-test("active run records decode transport aliases into one canonical model", () => {
+test("active run records require the current status field", () => {
   assert.deepEqual(activeRunFromRecord({
     projectId: "project_1",
     documentId: "document_1",
     requestId: "req_0001",
-    lifecycleState: "waiting",
+    status: "processing",
     candidateVersionOrdinal: 3,
     error: { message: "later" },
     conflict: {

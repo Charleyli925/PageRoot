@@ -76,7 +76,7 @@ export function createWorkbenchModeHandlers({
   const onSelectPreview = () => {
     if (interactionLocked) return;
     const enterPreview = () => {
-      const committed = editorRef.current?.fencePendingEdit({
+      const committed = editorRef.current?.freezeWorkingSource({
         resumeEditing: false,
         trigger: "fence",
         endBehavior: "leave-canvas",

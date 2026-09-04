@@ -353,7 +353,6 @@ const INITIAL_VERSION_SNAPSHOT: VersionSessionSnapshot<Version> = {
 };
 const INITIAL_DOCUMENT_SNAPSHOT: DocumentSessionSnapshot = {
   html: DEFAULT_PROJECT_HTML,
-  sourceSha256: null,
   persistedSourceSha256: null,
   workingHtmlSha256: null,
   canvasGeneration: 0,
@@ -624,7 +623,7 @@ export default function Workbench() {
     workspaceControllerSnapshot?.project?.projectApplication
     ?? INITIAL_PROJECT_APPLICATION_SNAPSHOT;
   const html = documentSnapshot.html;
-  const sourceSha256 = documentSnapshot.sourceSha256;
+  const sourceSha256 = documentSnapshot.persistedSourceSha256;
   const canvasGeneration = documentSnapshot.canvasGeneration;
   const editRevision = documentSnapshot.editRevision;
   const lastPersistedRevision = documentSnapshot.lastPersistedRevision;
@@ -1080,8 +1079,8 @@ export default function Workbench() {
                 onDiscard?: (reason: NativeDeferredCommandDiscardReason) => void;
               },
             ) => deferEditorCommand(kind, run, undefined, options),
-            fencePendingEdit: (options: Record<string, unknown>) => (
-              editorRef.current?.fencePendingEdit(options)
+            freezeWorkingSource: (options: Record<string, unknown>) => (
+              editorRef.current?.freezeWorkingSource(options)
             ),
             freeze: (reason?: string) => fenceAndFreezeCurrentCanvasRef.current(
               reason || "当前编辑画布尚未完成安全收口。",
@@ -1252,8 +1251,8 @@ export default function Workbench() {
           errorMessage: productErrorMessage,
         }),
         canvas: {
-          checkpointPendingEdit: (options: Record<string, unknown>) => (
-            editorRef.current?.checkpointPendingEdit(options)
+          checkpointNativeTextIntent: (options: Record<string, unknown>) => (
+            editorRef.current?.checkpointNativeTextIntent(options)
           ),
           freeze: (reason: string) => fenceAndFreezeCurrentCanvasRef.current(reason),
           unlock: () => editorRef.current?.unlockNow?.(),
@@ -1302,8 +1301,8 @@ export default function Workbench() {
               onDiscard?: (reason: NativeDeferredCommandDiscardReason) => void;
             },
           ) => deferEditorCommand(kind, run, undefined, options),
-          fencePendingEdit: (options: Record<string, unknown>) => (
-            editorRef.current?.fencePendingEdit(options)
+          freezeWorkingSource: (options: Record<string, unknown>) => (
+            editorRef.current?.freezeWorkingSource(options)
           ),
           freeze: (reason: string) => fenceAndFreezeCurrentCanvasRef.current(reason),
           verifyRendered: (
@@ -2684,7 +2683,7 @@ export default function Workbench() {
           !cancelled
           && currentDocumentSessionSnapshot().html === expectedHtml
           && currentDocumentSessionSnapshot().canvasGeneration === expectedGeneration
-          && currentDocumentSessionSnapshot().sourceSha256 === renderedSha256
+          && currentDocumentSessionSnapshot().workingHtmlSha256 === renderedSha256
         ) {
           acknowledgeCanvasRender("edit", expectedGeneration, renderedSha256);
         }
@@ -2900,7 +2899,7 @@ export default function Workbench() {
           )
         );
     if (!targetIsOpen) return;
-    const checkpoint = editorRef.current?.checkpointPendingEdit({
+    const checkpoint = editorRef.current?.checkpointNativeTextIntent({
       trigger: "attachment",
     });
     if (checkpoint && !checkpoint.ok) {
@@ -3283,7 +3282,7 @@ export default function Workbench() {
         // The browser reads the on-disk file, so this action is a source-authority
         // boundary: capture delivered native input and wait for its exact revision
         // to be acknowledged before asking the main process to launch the file.
-        const committed = editorRef.current?.checkpointPendingEdit({
+        const committed = editorRef.current?.checkpointNativeTextIntent({
           trigger: "save",
         });
         if (!committed || !committed.ok) {
@@ -3504,7 +3503,7 @@ export default function Workbench() {
     // Export is a source-authority boundary, just like save/navigation. Do not
     // rely on the iframe focusout timer to race the button click: a freshly
     // delivered input may still be waiting for its normal debounce checkpoint.
-    const committed = editorRef.current?.checkpointPendingEdit({
+    const committed = editorRef.current?.checkpointNativeTextIntent({
       trigger: "export",
     });
     if (committed && !committed.ok) {
@@ -3791,7 +3790,7 @@ export default function Workbench() {
         () => deferredEditorReplayRef.current.requestUserFlush?.(),
       )
     ) return;
-    const committed = editorRef.current?.checkpointPendingEdit({
+    const committed = editorRef.current?.checkpointNativeTextIntent({
       trigger: "save",
     });
     if (!committed || !committed.ok) {
@@ -3845,7 +3844,7 @@ export default function Workbench() {
         { onDiscard: () => resolveDeferred?.(false) },
       )) return deferred;
     }
-    const fenced = editorRef.current?.fencePendingEdit({
+    const fenced = editorRef.current?.freezeWorkingSource({
       resumeEditing: false,
       preserveForHistory: true,
       trigger: "fence",
@@ -4255,7 +4254,7 @@ export default function Workbench() {
       return;
     }
     if (currentAttachmentUploadCount > 0) return;
-    const checkpoint = editorRef.current?.checkpointPendingEdit({
+    const checkpoint = editorRef.current?.checkpointNativeTextIntent({
       trigger: "comment",
     });
     if (checkpoint && !checkpoint.ok) {

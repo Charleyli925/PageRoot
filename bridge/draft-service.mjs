@@ -6,14 +6,13 @@ import { decodeDraftCommandOperationId } from "./draft-command-decoder.mjs";
 import { normalizeProvenance } from "../shared/provenance.mjs";
 
 const COMMENT_ID_PATTERN = /^comment_[A-Za-z0-9_-]+$/;
-const COMMENT_ID_KEYS = ["commentId", "id"];
-const EVENT_ID_KEYS = ["eventId", "id"];
+const COMMENT_ID_KEYS = ["commentId"];
+const EVENT_ID_KEYS = ["eventId"];
 const APPLIED_OPERATION_LIMIT = 256;
 
 // Forward compatibility. Every member this build owns is rebuilt from the
 // authoritative aggregate, and every member a newer PageRoot added is carried
-// through read -> modify -> write unchanged. `editEvents` is the retired alias
-// of `changeEvents`, so it counts as known and is not carried twice.
+// through read -> modify -> write unchanged.
 //
 // The five envelope members are known for a different reason. The repository
 // stores a Draft as `{ schemaVersion, projectId, documentId, workingCopyId,
@@ -30,12 +29,11 @@ const KNOWN_DRAFT_KEYS = new Set([
   "annotationsRelativePath",
   "annotationsSha256",
   "commentIds",
-  "editEventIds",
+  "changeEventIds",
   "draftRevision",
   "updatedAt",
   "comments",
   "changeEvents",
-  "editEvents",
   "deletedCommentIds",
   "appliedOperationIds",
 ]);
@@ -120,8 +118,8 @@ export function activeDraftSnapshot(runtimeDraft, now = () => (
     commentIds: Array.isArray(draft.commentIds)
       ? draft.commentIds
       : authoritative.comments.map((comment) => comment.commentId).filter(Boolean),
-    editEventIds: Array.isArray(draft.editEventIds)
-      ? draft.editEventIds
+    changeEventIds: Array.isArray(draft.changeEventIds)
+      ? draft.changeEventIds
       : authoritative.changeEvents.map((event) => event.eventId).filter(Boolean),
     draftRevision: authoritative.draftRevision,
     updatedAt: draft.updatedAt ?? now(),
@@ -216,7 +214,7 @@ export function applyDraftCommand(
     : stampProvenance(
         mergeRecords(body?.comments, COMMENT_ID_KEYS, randomUUID)
           .filter((comment) => !deleted.has(
-            String(comment.commentId || comment.id || ""),
+            String(comment.commentId || ""),
           )),
         COMMENT_ID_KEYS,
         provenance,

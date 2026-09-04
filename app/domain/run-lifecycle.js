@@ -37,30 +37,17 @@ const COMPLETION_OBSERVED = new Set([
   "no-change",
   "complete",
 ]);
-const LEGACY_DECODER = new Map([
-  ["waiting", "processing"],
-  ["importing", "validating"],
-  ["result-ready", "validating"],
-  ["awaiting-check-decision", "validating"],
-  ["version-created", "complete"],
-  ["completed", "complete"],
-  ["canceled", "cancelled"],
-]);
 
 export function canonicalLifecycleState(
   value,
-  { readyVersion = false, fallback = "processing" } = {},
+  { readyVersion = false, fallback = "error" } = {},
 ) {
   const raw = String(value || "");
-  if (
-    readyVersion
-    && ["version-created", "completed", "complete", "ready"].includes(raw)
-  ) {
+  if (readyVersion && raw === "ready") {
     return "ready-to-open";
   }
-  const decoded = LEGACY_DECODER.get(raw) ?? raw;
-  if (CANONICAL.has(decoded)) return decoded;
-  return CANONICAL.has(fallback) ? fallback : "processing";
+  if (CANONICAL.has(raw)) return raw;
+  return CANONICAL.has(fallback) ? fallback : "error";
 }
 
 export function isLockedLifecycleState(value) {
@@ -499,11 +486,6 @@ export function candidateAssessmentFromRecord(value) {
       status: continuity.status === "related" ? "related" : "uncertain",
     },
   };
-  const legacyImpactArrayFields = [
-    "changedStableElementIds",
-    "requestedTargetElementIds",
-    "outsideRequestedTargetElementIds",
-  ];
   const boundedImpactFields = [
     "changedElementCount",
     "requestedTargetCount",
@@ -512,10 +494,6 @@ export function candidateAssessmentFromRecord(value) {
     "outsideTargetElementIdSample",
     "truncated",
   ];
-  const hasLegacyImpact = legacyImpactArrayFields.every(
-    (field) => Array.isArray(value[field]),
-  ) && Number.isSafeInteger(value.requestedTargetCount)
-    && value.requestedTargetCount >= 0;
   const hasBoundedImpact = boundedImpactFields.every(
     (field) => Object.hasOwn(value, field),
   );
@@ -553,25 +531,6 @@ export function candidateAssessmentFromRecord(value) {
       assessment.changedElementIdSample = changed;
       assessment.outsideTargetElementIdSample = outside;
       assessment.truncated = value.truncated;
-    }
-  } else if (hasLegacyImpact) {
-    const validUniqueIds = (ids) => (
-      ids.every((id) => isValidPagerootElementId(id))
-      && new Set(ids).size === ids.length
-    );
-    const changed = value.changedStableElementIds.map(String);
-    const requested = value.requestedTargetElementIds.map(String);
-    const outside = value.outsideRequestedTargetElementIds.map(String);
-    if (
-      validUniqueIds(changed)
-      && validUniqueIds(requested)
-      && validUniqueIds(outside)
-      && outside.every((id) => changed.includes(id))
-    ) {
-      assessment.changedStableElementIds = changed;
-      assessment.requestedTargetElementIds = requested;
-      assessment.outsideRequestedTargetElementIds = outside;
-      assessment.requestedTargetCount = value.requestedTargetCount;
     }
   }
   return assessment;
@@ -667,9 +626,7 @@ export function activeRunFromRecord(raw) {
   if (!requestId) return null;
   const candidateVersionId = String(raw.candidateVersionId || "");
   const candidateVersionOrdinal = Number(raw.candidateVersionOrdinal);
-  const status = canonicalLifecycleState(
-    raw.status || raw.lifecycleState || "processing",
-  );
+  const status = canonicalLifecycleState(raw.status || "processing");
   const completionObserved = raw.completionObserved === true
     || COMPLETION_OBSERVED.has(status);
   const localizedError = raw.error
@@ -697,7 +654,7 @@ export function activeRunFromRecord(raw) {
     ...(agentDelivery ? { agentDelivery } : {}),
     status,
     sourcePath: String(raw.sourcePath || ""),
-    baseSnapshotSha256: String(raw.baseSnapshotSha256 || raw.sourceSha256 || ""),
+    baseSnapshotSha256: String(raw.baseSnapshotSha256 || ""),
     previousVersionId: raw.previousVersionId
       ? String(raw.previousVersionId)
       : null,

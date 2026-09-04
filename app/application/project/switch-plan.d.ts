@@ -27,7 +27,6 @@ export function planProjectSwitchValidationLease(input?: {
   editRevision?: number;
   lastPersistedRevision?: number;
   sourcePath?: string;
-  sourceSha256?: string;
   persistedSourceSha256?: string;
   workingHtmlSha256?: string;
   canvasStatus?: string;
@@ -50,7 +49,6 @@ export function planProjectSwitchAfterSourceProtection(input?: {
   lastPersistedRevision?: number;
   cutoffRevision?: number;
   committedSourceSha256?: string;
-  documentSourceSha256?: string;
   persistedSourceSha256?: string;
   workingHtmlSha256?: string;
   protectionHtmlSha256?: string;

@@ -178,7 +178,7 @@ function createHarness({
     : null;
   const documentSession = new DocumentSession({
     html: OLD_HTML,
-    sourceSha256: sha256(OLD_HTML),
+    persistedSourceSha256: sha256(OLD_HTML),
   });
   const commentSession = new CommentSession();
   const draftSession = createDraftSession(oldContext);
@@ -304,7 +304,7 @@ function createHarness({
   let fenceCount = 0;
   const canvasPort = {
     deferCommand: () => false,
-    fencePendingEdit: () => {
+    freezeWorkingSource: () => {
       fenceCount += 1;
       const canvasRenderedSha256 = sha256(documentSession.html);
       return {
@@ -521,7 +521,7 @@ test("startup publishes the initial active project without fencing a nonexistent
   const harness = createHarness({
     initialProject: false,
     canvas: {
-      fencePendingEdit: () => null,
+      freezeWorkingSource: () => null,
     },
     projectOpen: {
       async getActive() {
@@ -589,7 +589,7 @@ test("project switch accepts protected Working HTML without refreshing a last-kn
   let harness;
   harness = createHarness({
     canvas: {
-      fencePendingEdit: (options) => {
+      freezeWorkingSource: (options) => {
         staleFenceCount += 1;
         fenceOptions = options;
         return {
@@ -1303,7 +1303,7 @@ test("source rename settles before the catalog refresh and never downgrades on c
   const outcome = await pending;
   assert.equal(outcome.status, "succeeded");
   assert.equal(harness.projectSession.context?.sourcePath, RENAMED_PATH);
-  assert.equal(harness.documentSession.sourceSha256, sha256(OLD_HTML));
+  assert.equal(harness.documentSession.persistedSourceSha256, sha256(OLD_HTML));
 
   settleCatalog.reject(new Error("catalog unavailable"));
   await waitFor(
@@ -1343,16 +1343,16 @@ test("a Registry project open routes only its projectId through the desktop auth
       },
     },
     canvas: {
-      fencePendingEdit() {
+      freezeWorkingSource() {
         fenceCount += 1;
         return {
           ok: true,
           html: harness.documentSession.html,
-          workingSourceSha256: harness.documentSession.sourceSha256,
-          renderedProjectionSha256: harness.documentSession.sourceSha256,
+          workingSourceSha256: harness.documentSession.persistedSourceSha256,
+          renderedProjectionSha256: harness.documentSession.persistedSourceSha256,
           renderedProjectionStale: false,
-          canvasRenderedSha256: harness.documentSession.sourceSha256,
-          sourceSha256: harness.documentSession.sourceSha256,
+          canvasRenderedSha256: harness.documentSession.persistedSourceSha256,
+          sourceSha256: harness.documentSession.persistedSourceSha256,
         };
       },
     },
@@ -1437,7 +1437,7 @@ test("a Registry project opens from Start without fencing an unmounted Canvas", 
     initialProject: false,
     canvas: {
       isMounted: () => false,
-      fencePendingEdit: () => {
+      freezeWorkingSource: () => {
         fenceCount += 1;
         return null;
       },
@@ -1475,7 +1475,7 @@ test("a retained Controller can switch Registry projects while Start owns the un
   const harness = createHarness({
     canvas: {
       isMounted: () => false,
-      fencePendingEdit: () => {
+      freezeWorkingSource: () => {
         fenceCount += 1;
         return null;
       },
@@ -1626,7 +1626,7 @@ test("a terminal transaction rejects its deferred application before Controller 
           ? {
               ok: true,
               html: harness.documentSession.html,
-              sourceSha256: harness.documentSession.sourceSha256,
+              sourceSha256: harness.documentSession.persistedSourceSha256,
             }
           : { ok: false, reason: "defer once" };
       },
@@ -1682,7 +1682,7 @@ test("a stale hydration result cannot publish into a newer project locator", asy
   });
   await waitFor(() => Boolean(resolveWorkspace));
   harness.projectSession.openLocator(B_PATH);
-  harness.documentSession.reset({ html: B_HTML, sourceSha256: sha256(B_HTML) });
+  harness.documentSession.reset({ html: B_HTML, persistedSourceSha256: sha256(B_HTML) });
   resolveWorkspace(workspacePayload(OLD_PATH, OLD_HTML));
 
   const outcome = await pending;
@@ -1793,7 +1793,7 @@ test("native input delivered after the switch drain defers without losing the ac
         const frozen = {
           ok: true,
           html: harness.documentSession.html,
-          sourceSha256: harness.documentSession.sourceSha256,
+          sourceSha256: harness.documentSession.persistedSourceSha256,
           pendingMutation: null,
         };
         if (firstFreeze) {
@@ -2519,7 +2519,7 @@ test("a Canvas acknowledgement failure rolls the hydration publication back", as
   assert.equal(outcome.status, "rejected");
   assert.equal(harness.workflow.projectLoadError, "canvas acknowledgement missing");
   assert.equal(harness.documentSession.html, OLD_HTML);
-  assert.equal(harness.documentSession.sourceSha256, sha256(OLD_HTML));
+  assert.equal(harness.documentSession.persistedSourceSha256, sha256(OLD_HTML));
   assert.equal(harness.projectSession.context.projectId, "project_old");
   assert.equal(harness.versionSession.snapshot.latestVersionId, "version_old");
   assert.deepEqual(
@@ -2596,7 +2596,7 @@ test("source rename is a typed ProjectWorkflow transition with one synchronous S
   });
   assert.equal(harness.projectSession.context?.sourcePath, RENAMED_PATH);
   assert.equal(harness.projectSession.context?.projectId, "project_old");
-  assert.equal(harness.documentSession.sourceSha256, sha256(OLD_HTML));
+  assert.equal(harness.documentSession.persistedSourceSha256, sha256(OLD_HTML));
   assert.equal(harness.runSession.snapshot.activeSourcePath, RENAMED_PATH);
   assert.equal(harness.documentWorkflow.resetCount, 1);
   assert.equal(harness.commentWorkflow.resetCount, 1);
@@ -2765,7 +2765,7 @@ test("a late source rename result cannot rebase a newer project Session", async 
   const pending = harness.workflow.renameSource({ stem: "renamed" });
   await waitFor(() => Boolean(resolveRename));
   harness.projectSession.openLocator(B_PATH);
-  harness.documentSession.reset({ html: B_HTML, sourceSha256: sha256(B_HTML) });
+  harness.documentSession.reset({ html: B_HTML, persistedSourceSha256: sha256(B_HTML) });
   resolveRename({
     operationId: renamePayload.operationId,
     previousSourcePath: OLD_PATH,
@@ -2880,7 +2880,7 @@ test("Finder locator rebase keeps IDs, publishes the new path, and does not load
   assert.equal(harness.projectSession.openTarget?.workingCopyId, "work_ver_0001");
   assert.equal(harness.projectSession.openTarget?.versionId, "ver_0001");
   assert.equal(harness.documentSession.html, OLD_HTML);
-  assert.equal(harness.documentSession.sourceSha256, sha256(OLD_HTML));
+  assert.equal(harness.documentSession.persistedSourceSha256, sha256(OLD_HTML));
   assert.equal(harness.runSession.snapshot.activeSourcePath, RENAMED_PATH);
   assert.equal(harness.documentWorkflow.observeCount, 1);
   assert.equal(reconcileCalls.length, 1);
@@ -3115,7 +3115,7 @@ test("Finder content-changed rebase keeps editor HTML and asks DocumentWorkflow 
   assert.equal(outcome.value.relocated, true);
   assert.equal(outcome.value.contentChanged, true);
   assert.equal(harness.documentSession.html, OLD_HTML);
-  assert.equal(harness.documentSession.sourceSha256, sha256(OLD_HTML));
+  assert.equal(harness.documentSession.persistedSourceSha256, sha256(OLD_HTML));
   assert.equal(harness.documentWorkflow.observeCount, 1);
 });
 
@@ -3184,7 +3184,7 @@ test("cancelling the local picker does not drain the current project", async (t)
   let fenced = 0;
   const harness = createHarness({
     canvas: {
-      fencePendingEdit: () => {
+      freezeWorkingSource: () => {
         fenced += 1;
         return {
           ok: true,
@@ -3217,7 +3217,7 @@ test("startup confirmation commits without fencing a nonexistent Canvas", async 
   const harness = createHarness({
     initialProject: false,
     canvas: {
-      fencePendingEdit: () => {
+      freezeWorkingSource: () => {
         fenced += 1;
         return null;
       },
@@ -3330,7 +3330,7 @@ test("a new-external picker result shows confirmation without switching", async 
   let committed = null;
   const harness = createHarness({
     canvas: {
-      fencePendingEdit: () => {
+      freezeWorkingSource: () => {
         fenced += 1;
         return {
           ok: true,

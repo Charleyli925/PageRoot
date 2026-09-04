@@ -84,7 +84,7 @@ export type RunWorkflowConstruction = Readonly<{
   codecs: RunWorkflowCodecs;
   ports: Readonly<{
     canvas: Readonly<{
-      checkpointPendingEdit(input: Record<string, unknown>): {
+      checkpointNativeTextIntent(input: Record<string, unknown>): {
         ok: boolean;
         reason?: string;
       } | undefined;

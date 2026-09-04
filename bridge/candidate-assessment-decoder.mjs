@@ -3,7 +3,6 @@ import { isDeepStrictEqual } from "node:util";
 import {
   IMPACT_SAMPLE_LIMIT,
   assessHtmlCandidate,
-  candidateAssessmentDecision,
 } from "./candidate-assessment.mjs";
 import {
   assertSchemaVersion,
@@ -31,9 +30,6 @@ const ROOT_FIELDS = new Set([
   "issueCodes",
   "health",
   "continuity",
-  "changedStableElementIds",
-  "requestedTargetElementIds",
-  "outsideRequestedTargetElementIds",
   "changedElementCount",
   "outsideTargetCount",
   "changedElementIdSample",
@@ -41,7 +37,6 @@ const ROOT_FIELDS = new Set([
   "truncated",
   "requestedTargetCount",
   "assessedAt",
-  "executable",
 ]);
 const REQUIRED_ROOT_FIELDS = [
   "schemaVersion",
@@ -63,7 +58,6 @@ const REQUIRED_ROOT_FIELDS = [
 const HEALTH_FIELDS = new Set([
   "completeDocument",
   "bodyHasContent",
-  "executableSurfaceUnchanged",
 ]);
 const CONTINUITY_FIELDS = new Set([
   "status",
@@ -81,17 +75,6 @@ const CONTINUITY_FIELDS = new Set([
   "outputParseErrorCount",
 ]);
 const OVERLAP_FIELDS = new Set(["score", "shared", "base", "output"]);
-const EXECUTABLE_FIELDS = new Set([
-  "unchanged",
-  "baseCount",
-  "outputCount",
-  "changedCount",
-]);
-const LEGACY_IMPACT_ARRAY_FIELDS = [
-  "changedStableElementIds",
-  "requestedTargetElementIds",
-  "outsideRequestedTargetElementIds",
-];
 const BOUNDED_IMPACT_FIELDS = [
   "changedElementCount",
   "requestedTargetCount",
@@ -171,19 +154,6 @@ function assertOverlap(value, label) {
   }
   for (const field of ["shared", "base", "output"]) {
     assertNonNegativeInteger(overlap[field], `${label}.${field}`);
-  }
-}
-
-function assertStableIdArray(value, label) {
-  if (
-    !Array.isArray(value)
-    || value.some((id) => !isValidPagerootElementId(id))
-    || new Set(value).size !== value.length
-  ) {
-    throw decodeError(
-      "CANDIDATE_ASSESSMENT_INVALID",
-      `${label} must contain unique valid Stable IDs.`,
-    );
   }
 }
 
@@ -287,48 +257,17 @@ function assertCandidateAssessmentShape(assessment, label) {
     assertOverlap(continuity[field], `${label}.continuity.${field}`);
   }
 
-  const hasLegacyImpact = LEGACY_IMPACT_ARRAY_FIELDS.some(
-    (field) => Object.hasOwn(value, field),
-  );
   const hasBoundedImpact = BOUNDED_IMPACT_MARKER_FIELDS.some(
     (field) => Object.hasOwn(value, field),
   );
   if (
     Object.hasOwn(value, "requestedTargetCount")
-    && !hasLegacyImpact
     && !hasBoundedImpact
   ) {
     throw decodeError(
       "CANDIDATE_ASSESSMENT_INVALID",
       label + " has incomplete impact evidence.",
     );
-  }
-  if (hasLegacyImpact && hasBoundedImpact) {
-    throw decodeError(
-      "CANDIDATE_ASSESSMENT_INVALID",
-      label + " mixes legacy and bounded impact evidence.",
-    );
-  }
-  if (hasLegacyImpact) {
-    assertRequiredFields(
-      value,
-      [...LEGACY_IMPACT_ARRAY_FIELDS, "requestedTargetCount"],
-      label,
-    );
-    LEGACY_IMPACT_ARRAY_FIELDS.forEach((field) => {
-      assertStableIdArray(value[field], `${label}.${field}`);
-    });
-    assertNonNegativeInteger(
-      value.requestedTargetCount,
-      `${label}.requestedTargetCount`,
-    );
-    const changed = new Set(value.changedStableElementIds);
-    if (value.outsideRequestedTargetElementIds.some((id) => !changed.has(id))) {
-      throw decodeError(
-        "CANDIDATE_ASSESSMENT_INVALID",
-        `${label}.outsideRequestedTargetElementIds must be a subset of changedStableElementIds.`,
-      );
-    }
   }
   if (hasBoundedImpact) {
     assertRequiredFields(value, BOUNDED_IMPACT_FIELDS, label);
@@ -362,39 +301,6 @@ function assertCandidateAssessmentShape(assessment, label) {
       );
     }
   }
-
-  const hasRetiredExecutable = Object.hasOwn(value, "executable");
-  const hasRetiredHealth = Object.hasOwn(
-    health,
-    "executableSurfaceUnchanged",
-  );
-  if (hasRetiredExecutable !== hasRetiredHealth) {
-    throw decodeError(
-      "CANDIDATE_ASSESSMENT_INVALID",
-      `${label} must retain the retired executable fields as a pair.`,
-    );
-  }
-  if (hasRetiredExecutable) {
-    const executable = assertExactFields(
-      value.executable,
-      EXECUTABLE_FIELDS,
-      `${label}.executable`,
-    );
-    assertRequiredFields(executable, [...EXECUTABLE_FIELDS], `${label}.executable`);
-    if (
-      typeof health.executableSurfaceUnchanged !== "boolean"
-      || typeof executable.unchanged !== "boolean"
-      || health.executableSurfaceUnchanged !== executable.unchanged
-    ) {
-      throw decodeError(
-        "CANDIDATE_ASSESSMENT_INVALID",
-        `${label} has inconsistent retired executable evidence.`,
-      );
-    }
-    for (const field of ["baseCount", "outputCount", "changedCount"]) {
-      assertNonNegativeInteger(executable[field], `${label}.executable.${field}`);
-    }
-  }
   return value;
 }
 
@@ -415,10 +321,8 @@ function assertExpectedIdentity(value, expected, label) {
 }
 
 /**
- * Decode the short-lived Developer Preview executable-surface policy into the
- * current candidate assessment. The small policy-only export intentionally
- * supports focused current-policy tests; persisted input must use the strict
- * decoder below.
+ * Policy-only view of a current candidate assessment. Persisted input must
+ * already be the current shape; retired executable-surface fields stay invalid.
  */
 export function normalizeCandidateAssessmentPolicy(assessment) {
   const value = assessment && typeof assessment === "object"
@@ -427,21 +331,15 @@ export function normalizeCandidateAssessmentPolicy(assessment) {
     : {};
   const health = value.health && typeof value.health === "object"
     && !Array.isArray(value.health)
-    ? { ...value.health }
+    ? value.health
     : {};
-  const hasRetiredPolicyEvidence = Object.hasOwn(value, "executable")
-    || Object.hasOwn(health, "executableSurfaceUnchanged");
-  const current = { ...value };
-  delete current.executable;
-  delete health.executableSurfaceUnchanged;
-  const decision = hasRetiredPolicyEvidence
-    ? candidateAssessmentDecision({
-      completeDocument: health.completeDocument,
-      bodyHasContent: health.bodyHasContent,
-      continuityStatus: value.continuity?.status,
-    })
-    : { status: value.status, issueCodes: value.issueCodes };
-  return { ...current, ...decision, health };
+  return {
+    ...value,
+    health: {
+      completeDocument: health.completeDocument === true,
+      bodyHasContent: health.bodyHasContent === true,
+    },
+  };
 }
 
 export function decodeCandidateAssessmentRecord(
@@ -487,9 +385,6 @@ export function decodeHistoricalCandidateAssessment(
       `${label} no longer matches its sealed HTML evidence.`,
     );
   }
-  const hasLegacyImpact = LEGACY_IMPACT_ARRAY_FIELDS.every(
-    (field) => Object.hasOwn(normalized, field),
-  ) && Object.hasOwn(normalized, "requestedTargetCount");
   const hasBoundedImpact = BOUNDED_IMPACT_FIELDS.every(
     (field) => Object.hasOwn(normalized, field),
   );
@@ -511,14 +406,7 @@ export function decodeHistoricalCandidateAssessment(
     }),
     assessedAt: normalized.assessedAt,
   };
-  if (hasLegacyImpact) {
-    Object.assign(current, {
-      changedStableElementIds: normalized.changedStableElementIds,
-      requestedTargetElementIds: normalized.requestedTargetElementIds,
-      outsideRequestedTargetElementIds: normalized.outsideRequestedTargetElementIds,
-      requestedTargetCount: normalized.requestedTargetCount,
-    });
-  } else if (hasBoundedImpact) {
+  if (hasBoundedImpact) {
     Object.assign(current, {
       changedElementCount: normalized.changedElementCount,
       requestedTargetCount: normalized.requestedTargetCount,

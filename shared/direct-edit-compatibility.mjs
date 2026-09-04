@@ -1,12 +1,9 @@
 const VERSION_ID_PATTERN = /^ver_(\d{4,})$/;
 const DIRECT_EDIT_FIELDS = new Set([
   "eventId",
-  "id",
   "createdAt",
   "revision",
-  "capturedRevision",
   "basedOnVersionId",
-  "baseVersionId",
   "kind",
   "property",
   "historyId",
@@ -87,10 +84,9 @@ function fallbackRevision(value, label) {
 }
 
 /**
- * Converts both historic direct-edit field names to the persisted v3 identity.
- * A caller may supply trusted freeze fallbacks for an unsaved current Draft,
- * or explicitly preserve an unassigned mutable-Draft Version; neither option
- * applies when decoding an immutable Version archive.
+ * Reads the current persisted Version identity on a direct-edit record.
+ * Draft freeze may supply trusted fallbacks for an unsaved Working Copy;
+ * immutable Version archives must carry their own complete identity.
  */
 export function decodeDirectEditIdentity(value, {
   fallbackBasedOnVersionId,
@@ -100,19 +96,9 @@ export function decodeDirectEditIdentity(value, {
   label = "direct edit",
 } = {}) {
   const record = assertKnownFields(value, label);
-  const hasCurrentVersion = Object.hasOwn(record, "basedOnVersionId");
-  const hasLegacyVersion = Object.hasOwn(record, "baseVersionId");
-  if (hasCurrentVersion && hasLegacyVersion) {
-    throw decodeError(
-      "DIRECT_EDIT_IDENTITY_AMBIGUOUS",
-      `${label} cannot contain both basedOnVersionId and baseVersionId.`,
-    );
-  }
-  const rawVersion = hasCurrentVersion
+  const rawVersion = Object.hasOwn(record, "basedOnVersionId")
     ? record.basedOnVersionId
-    : hasLegacyVersion
-      ? record.baseVersionId
-      : undefined;
+    : undefined;
   const basedOnVersionId = rawVersion === undefined
     || rawVersion === null
     || rawVersion === ""
@@ -121,19 +107,9 @@ export function decodeDirectEditIdentity(value, {
       : fallbackVersionId(fallbackBasedOnVersionId, label)
     : decodeVersionId(rawVersion, `${label}.basedOnVersionId`);
 
-  const hasCurrentRevision = Object.hasOwn(record, "revision");
-  const hasLegacyRevision = Object.hasOwn(record, "capturedRevision");
-  if (hasCurrentRevision && hasLegacyRevision) {
-    throw decodeError(
-      "DIRECT_EDIT_IDENTITY_AMBIGUOUS",
-      `${label} cannot contain both revision and capturedRevision.`,
-    );
-  }
-  const rawRevision = hasCurrentRevision
+  const rawRevision = Object.hasOwn(record, "revision")
     ? record.revision
-    : hasLegacyRevision
-      ? record.capturedRevision
-      : undefined;
+    : undefined;
   const revision = rawRevision === undefined
     || rawRevision === null
     || (

@@ -25,7 +25,7 @@ function capture(session, id, html = `<p>${id}</p>`) {
     },
     document: {
       html,
-      sourceSha256: hash(id),
+      persistedSourceSha256: hash(id),
       editRevision: 2,
       lastPersistedRevision: 2,
       persistState: "idle",

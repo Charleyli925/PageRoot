@@ -77,7 +77,12 @@ test("Candidate v4 schema admits sealed submitted and normalized identity eviden
   assert.deepEqual(schema.properties.identityReport, { $ref: "#/$defs/identityReport" });
   assert.equal(
     schema.required.includes("identityReport"),
-    false,
-    "old sealed schema-v4 Candidates remain readable",
+    true,
+    "sealed schema-v4 Candidates require identity evidence",
+  );
+  assert.equal(
+    schema.required.includes("submittedOutputSha256"),
+    true,
+    "sealed schema-v4 Candidates require submitted output Hash",
   );
 });

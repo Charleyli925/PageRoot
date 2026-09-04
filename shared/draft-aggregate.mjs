@@ -1,5 +1,5 @@
-const COMMENT_ID_KEYS = ["commentId", "id"];
-const EVENT_ID_KEYS = ["eventId", "id"];
+const COMMENT_ID_KEYS = ["commentId"];
+const EVENT_ID_KEYS = ["eventId"];
 const OPERATION_ID_PATTERN = /^draftop_[A-Za-z0-9_-]{12,160}$/;
 
 function isRecord(value) {
@@ -66,9 +66,7 @@ export function normalizeAuthoritativeDraft(value) {
     comments: Array.isArray(raw.comments) ? raw.comments : [],
     changeEvents: Array.isArray(raw.changeEvents)
       ? raw.changeEvents
-      : Array.isArray(raw.editEvents)
-        ? raw.editEvents
-        : [],
+      : [],
     deletedCommentIds: uniqueStrings(raw.deletedCommentIds),
     appliedOperationIds: uniqueStrings(raw.appliedOperationIds),
   };

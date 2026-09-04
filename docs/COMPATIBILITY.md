@@ -8,10 +8,8 @@ only the decoder's canonical output.
 An explicitly bounded storage migration is listed separately when historical
 mutable metadata must be completed before the canonical model can be read.
 
-No entry below has enough release-inventory or on-disk census evidence to set a
-truthful calendar deletion date. Each is therefore **not scheduled**: its next
-removal step is a separate conditional PR after the stated evidence is
-collected. A guessed date is not a support-window policy.
+Retired Developer Preview readers are marked **(removed)** and must not return.
+Remaining live entries still do not have a calendar deletion date.
 
 ## Forward compatibility for mutable records
 
@@ -57,28 +55,21 @@ level, not per file: `runtime-state.json` is preserved at its root and in
 - Not yet covered: nothing. `project.json` is written once at import and never
   rewritten, so it is an immutable record and stays strict by design.
 
-## Draft operation IDs
+## Draft operation IDs (removed)
 
-- Historical producer and version: an older packaged renderer with no recorded
-  semantic version sent an otherwise valid `/draft` command without
-  `operationId`. Its acknowledgement could be persisted as
-  `draftop_legacy_*`.
-- Current consumer: `bridge/draft-service.mjs` command ingress and Draft
-  acknowledgement reconciliation.
-- Decoder and canonical output:
-  `bridge/draft-command-decoder.mjs` maps a missing ID to a newly generated
-  current `draftop_<id>`. Existing `draftop_legacy_*` values remain opaque,
-  readable acknowledgement IDs; nothing creates them.
+- Historical producer and version: an older packaged renderer could send an
+  otherwise valid `/draft` command without `operationId`.
+- Current consumer: none. `bridge/draft-command-decoder.mjs` requires a current
+  `draftop_` identifier and fails closed when it is missing.
+- Decoder and canonical output: removed. Existing `draftop_legacy_*`
+  acknowledgements remain opaque, readable IDs; nothing creates them.
 - Historical fixtures:
   `fixtures/compatibility-decoders/draft-command.missing-operation-id.json`
-  and `fixtures/compatibility-decoders/draft-authority.current.json`.
-- Disk persistence read: yes, only from `draft/annotations.json` through the
-  authoritative aggregate; the decoder does not rewrite that file.
-- Support window and deletion evidence: retain while a supported packaged
-  renderer can omit `operationId` or an on-disk Draft can contain the legacy
-  prefix. Before deletion, inventory supported renderer builds and perform a
-  read-only managed-project census proving neither condition remains. Expected
-  removal time: not scheduled pending that evidence.
+  now proves fail-closed ingress.
+- Disk persistence read: current Draft aggregates still accept already stored
+  `draftop_*` acknowledgements, including the retired prefix.
+- Support window and deletion evidence: Developer Preview history may be
+  reset. Auto-generation at ingress is gone.
 
 ## Project storage metadata migration
 
@@ -182,49 +173,30 @@ level, not per file: `runtime-state.json` is preserved at its root and in
   evidence only.
 - Current consumer: current Comment/Draft records, Canvas target resolution,
   Request freeze and read-only historical Version projection.
-- Decoder and canonical output: `selectionFromRecord` may still display old
-  fields. Official location uses only `elementId`; ID-less historical refs are
-  `orphaned`. There is no Shadow scorer and no official selector/fingerprint
-  fallback. New local-comment producers emit a valid stable ID and capture
-  Hash; whole-page comments persist the body's `elementId`.
+- Decoder and canonical output: `selectionFromRecord` requires `targetId`.
+  Official location uses only `elementId`; ID-less refs are `orphaned`. There
+  is no Shadow scorer and no official selector/fingerprint/`id` fallback.
+  New local-comment producers emit a valid stable ID and capture Hash.
 - Support window and deletion evidence: Developer Preview history may be
-  reset. Do not restore a parallel official reader for selector, fingerprint
-  or source-offset scoring.
+  reset. Do not restore a parallel official reader for selector, fingerprint,
+  DOM `id`, `data-ai-id` or source-offset scoring.
 
-## Direct-edit identity names
+## Direct-edit identity names (removed)
 
-- Historical producer and version: an early Workbench/Draft producer with no
-  stored semantic version used `baseVersionId` and `capturedRevision`; current
-  immutable Version archives use `basedOnVersionId` and `revision`.
-- Current consumer: the Request freeze adapter in
-  `bridge/workspace-bridge.mjs`, mutable Draft ingress and immutable Version
-  history ingress in `app/workbench/version-model.ts`.
-- Decoder and canonical output:
-  `shared/direct-edit-compatibility.mjs` yields the persisted canonical pair
-  `{ basedOnVersionId, revision }`. The Workbench-only
-  `app/workbench/version-compatibility-decoder.js` passes that same canonical
-  pair into the `DirectEditEvent` view model. Mutable Draft ingress retains the
-  Workbench `change_*` event identity and an explicitly unassigned based-on
-  Version until Request freeze can apply its trusted fallback; immutable
-  Version ingress still requires its normalized `edit_*` identity and complete
-  local Version pair. New Workbench producers emit only canonical identity
-  names and read the synchronous `VersionSession` authority when assigned. A
-  transient
-  `capturedRevision: 0` may use only the trusted freeze revision and is never
-  written into a Version archive. The existing legacy envelope `id` is also
-  accepted only here when `eventId` is absent; both forms together fail closed.
+- Historical producer and version: an early Workbench/Draft producer used
+  `baseVersionId` and `capturedRevision`; current records use
+  `basedOnVersionId` and `revision`.
+- Current consumer: `shared/direct-edit-compatibility.mjs` accepts only the
+  canonical pair. Unknown fields, including the retired aliases, fail closed.
+- Decoder and canonical output: removed. Comments persist
+  `basedOnVersionId`. Draft events use `change_*` identities; Version archives
+  keep `edit_*` identities.
 - Historical fixtures:
-  `fixtures/compatibility-decoders/version-edit-event.legacy-aliases.json` and
-  `fixtures/compatibility-decoders/draft-authority.current.json`; the current
-  disk archive oracle is
-  `fixtures/v3/annotation-records.frozen.json`.
-- Disk persistence read: yes. Draft input may be frozen; immutable Version
-  archive records are read-only. Unknown keys, dual alias pairs, invalid
-  revisions, and Version IDs outside the safe integer range fail closed.
-- Support window and deletion evidence: retain until a read-only scan of
-  supported Draft/Version records proves the legacy pair is absent and the
-  matching early Workbench build is outside the supported upgrade window.
-  Expected removal time: not scheduled pending that evidence.
+  `fixtures/compatibility-decoders/version-edit-event.legacy-aliases.json`
+  now proves fail-closed ingress.
+- Support window and deletion evidence: Developer Preview history may be
+  reset. Architecture gates forbid `baseVersionId`, `capturedRevision`,
+  `editEvents` and `editEventIds` from returning in production code.
 
 ## Request freeze direct-edit defaults
 
@@ -246,23 +218,18 @@ level, not per file: `runtime-state.json` is preserved at its root and in
   inventory proves every supported freeze event has a canonical identity.
   Expected removal time: not scheduled pending that evidence.
 
-## Run lifecycle aliases
+## Run lifecycle aliases (removed)
 
 - Historical producer and version: earlier run records used
   `waiting`, `importing`, `result-ready`, `awaiting-check-decision`,
   `version-created`, `completed`, or `canceled`.
-- Current consumer: `app/domain/run-lifecycle.js`.
-- Decoder and canonical output: `canonicalLifecycleState` maps those names
-  to the current lifecycle vocabulary, with a ready Version separately shown
-  as `ready-to-open`. Unknown values resolve to the caller's canonical
-  fallback (processing by default) instead of becoming a new lifecycle
-  authority.
+- Current consumer: none. `canonicalLifecycleState` accepts only the current
+  lifecycle vocabulary. Unknown names fail closed to `error`.
+- Decoder and canonical output: removed. A current `ready` status with a
+  ready Version still presents as `ready-to-open`.
 - Historical proof: `tests/run-lifecycle.test.mjs`.
-- Disk persistence read: yes, when historical run state is projected; the
-  decoder does not rewrite the record.
-- Support window and deletion evidence: retain until a managed-history census
-  and supported-build inventory prove no alias remains readable. Expected
-  removal time: not scheduled pending that evidence.
+- Support window and deletion evidence: Developer Preview history may be
+  reset.
 
 ## Legacy user-data and workspace paths
 
@@ -285,30 +252,20 @@ level, not per file: `runtime-state.json` is preserved at its root and in
   launched a PageRoot-named install still re-open HTML files to rebuild
   Recent; project content is not migrated or deleted.
 
-## Developer Preview candidate assessments
+## Developer Preview candidate assessments (removed)
 
 - Historical producer and version: the short-lived 2026-08-04 Developer
-  Preview emitted v1 `candidate-assessment.json` either without the retired
-  executable-surface pair or with
-  `health.executableSurfaceUnchanged` plus `executable`.
-- Current consumer: Version history and archived terminal-outcome reads in
-  `bridge/workspace-bridge.mjs`.
-- Decoder and canonical output:
-  `bridge/candidate-assessment-decoder.mjs` validates strict input, requires
-  the retired fields to appear as a consistent pair, verifies sealed HTML
-  evidence, recomputes current document-health/continuity policy, and returns
-  a v1 assessment without either retired field.
-- Historical fixtures:
-  `fixtures/candidate-assessment-compat/candidate-assessment.pre-executable-dev.json`,
-  `fixtures/candidate-assessment-compat/candidate-assessment.retired-executable-dev.json`,
-  and their sealed `base.html` / `output.html`.
-- Disk persistence read: yes, immutable Attempt/Version evidence only; old
-  assessments and terminal outcomes are never rewritten.
-- Support window and deletion evidence: retain while August 2026 Developer
-  Preview records remain inside the supported upgrade window. Delete only
-  after a managed-history inventory proves those records are outside support
-  and no supported project needs the reader. Expected removal time: not
-  scheduled pending that evidence.
+  Preview emitted v1 `candidate-assessment.json` with
+  `health.executableSurfaceUnchanged` plus `executable`, or Candidate records
+  without `identityReport`.
+- Current consumer: none. Schema and decoder accept only the current bounded
+  assessment and require Candidate `identityReport`.
+- Decoder and canonical output: removed. Sealed HTML Hash verification still
+  runs for current assessments.
+- Historical fixtures remain as negative evidence in
+  `fixtures/candidate-assessment-compat/`.
+- Support window and deletion evidence: Developer Preview history may be
+  reset.
 
 ## Legacy release update manifest
 
@@ -334,8 +291,11 @@ level, not per file: `runtime-state.json` is preserved at its root and in
 
 ## Decoder test contract
 
-`tests/compatibility-decoders.test.mjs` proves that historical and current
-fixtures arrive at their documented canonical model, current producers do not
-create retired shapes, and unknown fields, invalid dual forms, and out-of-range
-Version identities fail closed. `tests/workspace-bridge.test.mjs` additionally
+`tests/compatibility-decoders.test.mjs` proves that retired historical
+fixtures fail closed, current producers do not create retired shapes, and
+unknown fields remain invalid. `tests/workspace-bridge.test.mjs` additionally
 proves the sealed historical Candidate path without mutating its evidence.
+
+Native text APIs are `checkpointNativeTextIntent()`, `endNativeTextIntent()`
+and `freezeWorkingSource()`. Architecture gates forbid
+`checkpointPendingEdit`, `fencePendingEdit` and `commitPendingEdit`.

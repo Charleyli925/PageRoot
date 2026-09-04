@@ -58,7 +58,7 @@ function safeAttachmentFileName(value, label) {
 
 function targetIdForComment(comment, label) {
   const sourceTarget = comment?.sourceAnchor || comment?.target;
-  const targetId = String(sourceTarget?.id || sourceTarget?.targetId || "");
+  const targetId = String(sourceTarget?.targetId || "");
   if (!TARGET_ID.test(targetId)) {
     throw attachmentError(
       "REQUEST_ATTACHMENT_INVALID",

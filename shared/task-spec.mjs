@@ -130,9 +130,9 @@ function scopePolicyFor(comments, targets) {
 }
 
 function instructionFromComment(comment, index) {
-  const commentId = String(comment?.commentId || comment?.id || "");
+  const commentId = String(comment?.commentId || "");
   const sourceTarget = comment?.sourceAnchor || comment?.target;
-  const targetId = String(sourceTarget?.targetId || sourceTarget?.id || "");
+  const targetId = String(sourceTarget?.targetId || "");
   if (!TARGET_ID.test(targetId)) {
     throw taskSpecError(`comments[${index}] has no valid target.`);
   }
@@ -229,7 +229,7 @@ export function assertTaskSpec(value, { requireAttachmentResolution = true } = {
   const targetIds = new Set();
   const targets = value.targets.map((target, index) => {
     if (!isRecord(target)) throw taskSpecError(`taskSpec.targets[${index}] is invalid.`);
-    const targetId = String(target.targetId || target.id || "");
+    const targetId = String(target.targetId || "");
     if (!TARGET_ID.test(targetId) || targetIds.has(targetId)) {
       throw taskSpecError(`taskSpec.targets[${index}] identity is invalid.`);
     }

@@ -72,6 +72,7 @@ const RETIRED_MODULES = new Set([
   "app/workbench/ReviewAnalysisPrewarm.tsx",
   "app/workbench/WorkbenchDocumentCanvasPool.tsx",
   "app/workbench/use-runtime-canvas-residency.ts",
+  "app/lib/version-audit-records.js",
 ]);
 const RETIRED_IMPORT_NAMES = new Set([
   "NativeEditingController",
@@ -86,11 +87,21 @@ const RETIRED_IMPORT_NAMES = new Set([
   "ReviewAnalysisPrewarm",
   "WorkbenchDocumentCanvasPool",
   "use-runtime-canvas-residency",
+  "version-audit-records",
 ]);
 const RETIRED_PRODUCTION_LITERALS = new Set([
   ["", "source-history", "action"].join("/"),
   ["source-history", "v1"].join("."),
   ["source-history", "v1", "schema", "json"].join("."),
+]);
+const RETIRED_COMPAT_IDENTIFIERS = new Set([
+  "commitPendingEdit",
+  "fencePendingEdit",
+  "checkpointPendingEdit",
+  "baseVersionId",
+  "capturedRevision",
+  "editEvents",
+  "editEventIds",
 ]);
 const SOURCE_NODE_ID_LITERAL = ["data", "html", "ai", "source", "node", "id"].join("-");
 const SOURCE_NODE_ID_ALLOWED_FILES = new Set([
@@ -357,6 +368,13 @@ export function retiredArtifactViolations({ file = "", source = "", module = nul
   const violations = [];
   if (RETIRED_MODULES.has(file)) {
     violations.push(`${file}: retired production modules cannot return`);
+  }
+  for (const name of RETIRED_COMPAT_IDENTIFIERS) {
+    if (hasIdentifier(handle, name)) {
+      violations.push(
+        `${file}: retired compatibility identifier ${name} cannot return`,
+      );
+    }
   }
   for (const specifier of moduleSpecifiers(handle)) {
     const basename = path.posix.basename(specifier).replace(/\.[^.]+$/u, "");

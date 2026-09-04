@@ -291,7 +291,7 @@ export type WorkspaceControllerConstruction = Readonly<{
     runSession: import("./run-session.js").RunSession;
     codecs: RunWorkflowCodecs;
     canvas: Readonly<{
-      checkpointPendingEdit(input: Record<string, unknown>): {
+      checkpointNativeTextIntent(input: Record<string, unknown>): {
         ok: boolean;
         reason?: string;
       } | undefined;

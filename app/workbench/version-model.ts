@@ -1,12 +1,6 @@
 import {
-  candidateAssessmentFromRecord,
-  validationReviewFromRecord,
-} from "../domain/run-lifecycle.js";
-import { versionAuditCollections } from "../lib/version-audit-records";
-import {
   commentSourceAnchor,
   commentVisualHintForSelection,
-  commentsFromRecords,
   insertionLabel,
   selectionFromRecord,
 } from "./comment-model";
@@ -186,63 +180,7 @@ export function versionsFromWorkspace(
           : null,
       }];
     }
-    if (!isRecord(raw.manifest) || raw.manifest.schemaVersion !== "3.0.0") {
-      return [];
-    }
-    const manifest = raw.manifest;
-    const id = String(manifest.versionId || "");
-    if (!id) return [];
-    const sourceType = String(manifest.sourceType || "");
-    if (sourceType !== "initial" && sourceType !== "internal-ai") return [];
-    const auditCollections = versionAuditCollections(raw);
-    return [{
-      id,
-      ordinal: Number(manifest.versionOrdinal),
-      label: displayVersionLabel(Number(manifest.versionOrdinal)),
-      summary: String(manifest.summary),
-      generatedAt: String(manifest.generatedAt),
-      source: (
-        sourceType === "internal-ai" ? "内部 AI" : "初始页面"
-      ) as Version["source"],
-      // Legacy records carry the round's comments inline, so they never need the
-      // separately read requirement.
-      requirement: null,
-      contentSha256: String(manifest.contentSha256 || raw.contentSha256 || ""),
-      previousVersionId: manifest.previousVersionId
-        ? String(manifest.previousVersionId)
-        : null,
-      basedOnVersionId: manifest.basedOnVersionId
-        ? String(manifest.basedOnVersionId)
-        : null,
-      requestId: manifest.requestId ? String(manifest.requestId) : null,
-      attemptId: manifest.attemptId ? String(manifest.attemptId) : null,
-      committed: raw.committed !== false,
-      comments: commentsFromRecords(auditCollections.comments).map((comment) => ({
-        ...comment,
-        ...(manifest.requestId && !comment.requestId
-          ? { requestId: String(manifest.requestId) }
-          : {}),
-        ...(manifest.attemptId && !comment.attemptId
-          ? { attemptId: String(manifest.attemptId) }
-          : {}),
-        resultVersionId: id,
-      })),
-      directEdits: changesFromRecords(auditCollections.editEvents),
-      supplements: supplementsFromRecords(raw.supplements),
-      validationReview: validationReviewFromRecord(raw.validationReview),
-      candidateAssessment: candidateAssessmentFromRecord(
-        raw.candidateAssessment,
-      ),
-      workingCopyId: raw.workingCopyId ? String(raw.workingCopyId) : null,
-      displayFileName: raw.displayFileName ? String(raw.displayFileName) : undefined,
-      modifiedAt: raw.modifiedAt ? String(raw.modifiedAt) : undefined,
-      isActiveWorkingCopy: raw.isActiveWorkingCopy === true,
-      isLatestOfficial: raw.isLatestOfficial === true,
-      differsFromBase: raw.differsFromBase === true,
-      saveState: ["saved", "saving", "failed"].includes(String(raw.saveState || ""))
-        ? String(raw.saveState) as Version["saveState"]
-        : null,
-    }];
+    return [];
   }).sort((a, b) => b.ordinal - a.ordinal);
 }
 

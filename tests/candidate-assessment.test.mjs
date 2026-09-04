@@ -231,7 +231,7 @@ test("candidate impact scope crosses unlabelled source wrappers", () => {
   assert.equal(assessment.outsideTargetCount, 0);
 });
 
-test("historical script-change conclusions are normalized out of current policy", () => {
+test("current candidate policy does not interpret retired executable-surface fields", () => {
   const current = assessHtmlCandidate({
     baseHtml: documentHtml(),
     outputHtml: documentHtml().replace(
@@ -256,9 +256,10 @@ test("historical script-change conclusions are normalized out of current policy"
   };
 
   const normalized = normalizeCandidateAssessmentPolicy(legacy);
-  assert.equal(normalized.status, "ready");
-  assert.deepEqual(normalized.issueCodes, []);
-  assert.equal("executable" in normalized, false);
+  assert.equal(normalized.status, "blocked");
+  assert.deepEqual(normalized.issueCodes, ["EXECUTABLE_CONTENT_CHANGED"]);
+  assert.equal("executable" in normalized, true);
+  assert.equal(normalized.health.completeDocument, current.health.completeDocument);
   assert.equal("executableSurfaceUnchanged" in normalized.health, false);
 
   const currentRecordWithUnexpectedConclusion = {
@@ -268,6 +269,12 @@ test("historical script-change conclusions are normalized out of current policy"
   };
   assert.deepEqual(
     normalizeCandidateAssessmentPolicy(currentRecordWithUnexpectedConclusion),
-    currentRecordWithUnexpectedConclusion,
+    {
+      ...currentRecordWithUnexpectedConclusion,
+      health: {
+        completeDocument: current.health.completeDocument,
+        bodyHasContent: current.health.bodyHasContent,
+      },
+    },
   );
 });

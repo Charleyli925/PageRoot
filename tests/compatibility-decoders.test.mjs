@@ -42,24 +42,25 @@ async function fixtureBuffer(relativePath) {
 
 const randomUUID = () => "compatibility_decoder_0001";
 
-test("legacy Draft commands and persisted acknowledgements decode without new legacy ids", async () => {
+test("legacy Draft commands without operationId fail closed", async () => {
   const legacyCommand = await fixture(
     "compatibility-decoders/draft-command.missing-operation-id.json",
   );
-  const command = applyDraftCommand({
-    draftRevision: legacyCommand.expectedDraftRevision,
-  }, legacyCommand, { randomUUID });
-  assert.match(command.operationId, /^draftop_(?!legacy_)/u);
-  assert.equal(command.next.appliedOperationIds[0], command.operationId);
-  assert.match(createDraftOperationId(randomUUID), /^draftop_(?!legacy_)/u);
-  assert.match(
-    decodeDraftCommandOperationId(undefined, { randomUUID }).operationId,
-    /^draftop_(?!legacy_)/u,
+  assert.throws(
+    () => applyDraftCommand({
+      draftRevision: legacyCommand.expectedDraftRevision,
+    }, legacyCommand, { randomUUID }),
+    (error) => error.code === "INVALID_DRAFT_OPERATION_ID",
   );
   assert.throws(
-    () => decodeDraftCommandOperationId("not-a-draft-operation", { randomUUID }),
+    () => decodeDraftCommandOperationId(undefined),
     /operationId/u,
   );
+  assert.throws(
+    () => decodeDraftCommandOperationId("not-a-draft-operation"),
+    /operationId/u,
+  );
+  assert.match(createDraftOperationId(randomUUID), /^draftop_(?!legacy_)/u);
 
   const persistedDraft = await fixture(
     "compatibility-decoders/draft-authority.current.json",
@@ -72,27 +73,15 @@ test("legacy Draft commands and persisted acknowledgements decode without new le
   );
 });
 
-test("direct-edit aliases decode once and reject unknown, ambiguous, and out-of-range input", async () => {
+test("direct-edit aliases fail closed and current records keep one identity pair", async () => {
   const legacy = await fixture(
     "compatibility-decoders/version-edit-event.legacy-aliases.json",
   );
-  assert.deepEqual(decodeDirectEditIdentity(legacy), {
-    basedOnVersionId: "ver_0004",
-    revision: 4,
-  });
-  assert.deepEqual(
-    decodeVersionAuditChange(legacy),
-    {
-      eventId: "edit_legacy_title",
-      createdAt: "2026-08-04T07:45:14.371Z",
-      kind: "text",
-      target: legacy.target,
-      before: "旧标题",
-      after: "新标题",
-      basedOnVersionId: "ver_0004",
-      revision: 4,
-    },
+  assert.throws(
+    () => decodeDirectEditIdentity(legacy),
+    (error) => error.code === "UNKNOWN_DIRECT_EDIT_FIELD",
   );
+  assert.equal(decodeVersionAuditChange(legacy), null);
   const currentArchive = await fixture("v3/annotation-records.frozen.json");
   const current = decodeVersionAuditChange(currentArchive.editEvents[0]);
   assert.equal(current?.basedOnVersionId, "ver_0005");
@@ -104,32 +93,14 @@ test("direct-edit aliases decode once and reject unknown, ambiguous, and out-of-
     () => decodeDirectEditIdentity({ ...legacy, unknown: true }),
     (error) => error.code === "UNKNOWN_DIRECT_EDIT_FIELD",
   );
-  assert.throws(
-    () => decodeDirectEditIdentity({
-      ...legacy,
-      basedOnVersionId: "ver_0004",
-    }),
-    (error) => error.code === "DIRECT_EDIT_IDENTITY_AMBIGUOUS",
-  );
-  assert.throws(
-    () => decodeDirectEditIdentity({
-      ...legacy,
-      baseVersionId: "ver_9007199254740992",
-    }),
-    (error) => error.code === "DIRECT_EDIT_VERSION_OUT_OF_RANGE",
-  );
-  assert.equal(decodeVersionAuditChange({ ...legacy, unknown: true }), null);
 
   const draftAuthority = await fixture(
     "compatibility-decoders/draft-authority.current.json",
   );
-  const draftEvent = draftAuthority.editEvents[0];
+  const draftEvent = draftAuthority.changeEvents[0];
   assert.equal(decodeVersionAuditChange(draftEvent), null);
   assert.deepEqual(
-    decodeDraftAuditChange({
-      ...draftEvent,
-      baseVersionId: null,
-    }),
+    decodeDraftAuditChange(draftEvent),
     {
       eventId: "change_fixture_current",
       createdAt: "2026-08-04T07:45:14.371Z",
@@ -137,13 +108,13 @@ test("direct-edit aliases decode once and reject unknown, ambiguous, and out-of-
       target: draftEvent.target,
       before: "旧标题",
       after: "新标题",
-      basedOnVersionId: null,
+      basedOnVersionId: "ver_0004",
       revision: 4,
     },
   );
 });
 
-test("Developer Preview candidate-assessment shapes decode to one sealed canonical record", async () => {
+test("retired Developer Preview candidate-assessment shapes fail closed", async () => {
   const [current, retired, baseBuffer, outputBuffer] = await Promise.all([
     fixture("candidate-assessment-compat/candidate-assessment.pre-executable-dev.json"),
     fixture("candidate-assessment-compat/candidate-assessment.retired-executable-dev.json"),
@@ -151,11 +122,13 @@ test("Developer Preview candidate-assessment shapes decode to one sealed canonic
     fixtureBuffer("candidate-assessment-compat/output.html"),
   ]);
   const canonicalCurrent = decodeCandidateAssessmentRecord(current);
-  const canonicalRetired = decodeCandidateAssessmentRecord(retired);
-  assert.deepEqual(canonicalRetired, canonicalCurrent);
   assert.deepEqual(
-    decodeHistoricalCandidateAssessment(retired, { baseBuffer, outputBuffer }),
+    decodeHistoricalCandidateAssessment(current, { baseBuffer, outputBuffer }),
     canonicalCurrent,
+  );
+  assert.throws(
+    () => decodeCandidateAssessmentRecord(retired),
+    (error) => error.code === "CANDIDATE_ASSESSMENT_INVALID",
   );
   assert.equal("executable" in canonicalCurrent, false);
   assert.equal(

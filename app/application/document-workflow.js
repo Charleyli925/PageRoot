@@ -837,7 +837,7 @@ export class DocumentWorkflow {
       }
       this.#documentSession.publishAuthority({
         html,
-        sourceSha256,
+        persistedSourceSha256: sourceSha256,
         pendingWrite: null,
         persistState: "idle",
         persistError: "",
@@ -976,7 +976,7 @@ export class DocumentWorkflow {
       const editRevision = this.#documentSession.editRevision;
       this.#documentSession.publishAuthority({
         html,
-        sourceSha256,
+        persistedSourceSha256: sourceSha256,
         pendingWrite: null,
         persistState: "idle",
         persistError: "",
@@ -1088,7 +1088,7 @@ export class DocumentWorkflow {
         if (!this.#isCurrent(activeContext)) return stale(activeContext);
         this.#documentSession.publishAuthority({
           html: repairedHtml,
-          sourceSha256: repairedSha256,
+          persistedSourceSha256: repairedSha256,
           pendingWrite: null,
           persistState: "idle",
           persistError: "",
@@ -1214,7 +1214,7 @@ export class DocumentWorkflow {
       ) {
         return stale(liveContext);
       }
-      if (diskSha256 === this.#documentSession.sourceSha256) {
+      if (diskSha256 === this.#documentSession.persistedSourceSha256) {
         if (lastModifiedAt) {
           this.#emit({
             type: "document-boundary-reconciled",
@@ -1596,7 +1596,7 @@ export class DocumentWorkflow {
   #createWrite(context, html, nextRevision) {
     return {
       ...context,
-      expectedSourceSha256: this.#documentSession.sourceSha256,
+      expectedSourceSha256: this.#documentSession.persistedSourceSha256,
       html: String(html),
       revision: revision(nextRevision),
       events: [...this.#auditPending],
@@ -1828,7 +1828,7 @@ export class DocumentWorkflow {
           write = {
             ...write,
             ...registration.value,
-            expectedSourceSha256: this.#documentSession.sourceSha256,
+            expectedSourceSha256: this.#documentSession.persistedSourceSha256,
           };
           writeContext = registration.value;
           this.#updateQueuedWriteAfterRegistration(write);

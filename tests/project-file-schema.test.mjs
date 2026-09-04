@@ -174,7 +174,7 @@ test("v4 schemas accept repository-produced identity, Working Copy, Candidate an
   const legacyCandidateWithoutIdentityEvidence = structuredClone(candidateRecord);
   delete legacyCandidateWithoutIdentityEvidence.submittedOutputSha256;
   delete legacyCandidateWithoutIdentityEvidence.identityReport;
-  await validate("candidate.v4.schema.json", legacyCandidateWithoutIdentityEvidence);
+  await validateRejects("candidate.v4.schema.json", legacyCandidateWithoutIdentityEvidence);
   assert.match(candidateRuntime.activeRequest.candidateOutputSha256, /^sha256:[a-f0-9]{64}$/u);
   assert.match(candidateRuntime.activeRequest.candidateRecordSha256, /^sha256:[a-f0-9]{64}$/u);
   const missingCandidateSeal = structuredClone(candidateRuntime);

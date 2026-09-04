@@ -69,7 +69,7 @@ export type VersionWorkflowCanvasPort = Readonly<{
     run: () => void,
     options?: Record<string, unknown>,
   ): boolean;
-  fencePendingEdit?(input: Record<string, unknown>): {
+  freezeWorkingSource?(input: Record<string, unknown>): {
     ok: boolean;
     reason?: string;
   } | undefined;

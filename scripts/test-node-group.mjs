@@ -60,7 +60,6 @@ const INTEGRATION_TESTS = new Set([
   "schema-contract.test.mjs",
   "targeted-change-schema.test.mjs",
   "user-supplement.test.mjs",
-  "version-history-records.test.mjs",
   "workspace-bridge.test.mjs",
 ]);
 

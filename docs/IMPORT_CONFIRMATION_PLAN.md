@@ -673,7 +673,7 @@ epoch = 0（冷启动尚未绑定项目，例如上次打开的是待确认外�
   → success receipt
 ```
 
-必须删除“先 accept/activate，再由第二个 application重复 prepareSwitch”的双重围栏；一个 `applicationId` 只执行一次最终 switch fence和一次 commit。若为兼容保留 helper，测试要证明没有重复作者 runtime或重复 activate。冷启动确认不得因 `fencePendingEdit` 返回空而挡住导入。
+必须删除“先 accept/activate，再由第二个 application重复 prepareSwitch”的双重围栏；一个 `applicationId` 只执行一次最终 switch fence和一次 commit。若为兼容保留 helper，测试要证明没有重复作者 runtime或重复 activate。冷启动确认不得因 `freezeWorkingSource` 返回空而挡住导入。
 
 #### 5.9.4 Canvas 失败
 

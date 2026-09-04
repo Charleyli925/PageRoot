@@ -413,7 +413,6 @@ test("version workflow changes retain candidate, history, Canvas and AI coverage
   });
   assert.deepEqual(plan.selectedNodeTests, [
     "tests/run-session.test.mjs",
-    "tests/version-history-records.test.mjs",
     "tests/version-review-plan.test.mjs",
     "tests/version-session.test.mjs",
     "tests/version-workflow.test.mjs",

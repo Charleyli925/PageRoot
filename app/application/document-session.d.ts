@@ -21,8 +21,6 @@ export type DocumentCanvasAuthority = {
 
 export type DocumentSessionSnapshot = {
   html: string;
-  /** @deprecated Compatibility alias for persistedSourceSha256. */
-  sourceSha256: string | null;
   persistedSourceSha256: string | null;
   workingHtmlSha256: string | null;
   canvasGeneration: number;
@@ -58,7 +56,6 @@ export type PersistedBoundaryResult =
 export class DocumentSession<TWrite = unknown> {
   constructor(options?: {
     html?: string;
-    sourceSha256?: string | null;
     persistedSourceSha256?: string | null;
     workingHtmlSha256?: string | null;
   });
@@ -67,7 +64,6 @@ export class DocumentSession<TWrite = unknown> {
   ): void;
   update(value: {
     html?: string;
-    sourceSha256?: string | null;
     persistedSourceSha256?: string | null;
     workingHtmlSha256?: string | null;
     editRevision?: number;
@@ -78,7 +74,6 @@ export class DocumentSession<TWrite = unknown> {
   }): DocumentSessionSnapshot;
   reset(value: {
     html: string;
-    sourceSha256?: string | null;
     persistedSourceSha256?: string | null;
     workingHtmlSha256?: string | null;
     editRevision?: number;
@@ -86,7 +81,6 @@ export class DocumentSession<TWrite = unknown> {
   }): DocumentSessionSnapshot;
   publishAuthority(value: {
     html: string;
-    sourceSha256?: string | null;
     persistedSourceSha256?: string | null;
     workingHtmlSha256?: string | null;
     editRevision?: number;
@@ -111,7 +105,7 @@ export class DocumentSession<TWrite = unknown> {
   }): boolean;
   beginEdit(html: string): number;
   setHtml(html: string): void;
-  setSourceSha256(sourceSha256: string | null): void;
+  setPersistedSourceSha256(persistedSourceSha256: string | null): void;
   setEditRevision(value: number): void;
   setLastPersistedRevision(value: number): void;
   setPersistence(value?: {
@@ -136,7 +130,6 @@ export class DocumentSession<TWrite = unknown> {
     acceptsSource: (source: Record<string, unknown>) => boolean;
   }): Promise<PersistedBoundaryResult>;
   readonly html: string;
-  readonly sourceSha256: string | null;
   readonly persistedSourceSha256: string | null;
   readonly workingHtmlSha256: string | null;
   readonly canvasGeneration: number;

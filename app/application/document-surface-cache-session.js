@@ -147,7 +147,7 @@ export class DocumentSurfaceCacheSession {
     const projectId = String(project?.projectId || "");
     const documentId = String(project?.documentId || "");
     const sourcePath = String(project?.sourcePath || "");
-    const sourceSha256 = String(document?.sourceSha256 || "");
+    const sourceSha256 = String(document?.persistedSourceSha256 || "");
     const html = typeof document?.html === "string" ? document.html : null;
     if (
       tab?.kind !== "document"

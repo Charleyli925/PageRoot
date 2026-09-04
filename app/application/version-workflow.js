@@ -280,7 +280,7 @@ export class VersionWorkflow {
     this.#hashPort = ports.hash;
     this.#canvasPort = {
       deferCommand: ports.canvas.deferCommand || null,
-      fencePendingEdit: ports.canvas.fencePendingEdit || (() => ({ ok: true })),
+      freezeWorkingSource: ports.canvas.freezeWorkingSource || (() => ({ ok: true })),
       freeze: ports.canvas.freeze,
       verifyRendered: ports.canvas.verifyRendered,
       invalidateRenderAcks: ports.canvas.invalidateRenderAcks,
@@ -681,7 +681,7 @@ export class VersionWorkflow {
       if (!SHA256.test(sha256) || await this.#hashPort.sha256(content) !== sha256) {
         throw new Error("当前源 HTML 与声明 Hash 不一致。");
       }
-      this.#documentSession.publishAuthority({ html: content, sourceSha256: sha256 });
+      this.#documentSession.publishAuthority({ html: content, persistedSourceSha256: sha256 });
       this.#versionSession.returnCurrent({
         currentBasedOnVersionId:
           payload.currentBasedOnVersionId || previous.version.currentBasedOnVersionId,

@@ -11,7 +11,7 @@ function sha256(value) {
 test("document session owns source bytes, revisions and pending write", () => {
   const session = new DocumentSession({
     html: "<main>one</main>",
-    sourceSha256: "sha256:one",
+    persistedSourceSha256: "sha256:one",
   });
   const revision = session.beginEdit("<main>two</main>");
   const write = { revision, html: session.html };
@@ -30,14 +30,14 @@ test("document session owns source bytes, revisions and pending write", () => {
 test("authoritative source publication replaces bytes and Hash in one generation", () => {
   const session = new DocumentSession({
     html: "<main>old</main>",
-    sourceSha256: "sha256:old",
+    persistedSourceSha256: "sha256:old",
   });
   const observed = [];
   session.setObserver((snapshot) => observed.push(snapshot));
 
   const snapshot = session.publishAuthority({
     html: "<main>new</main>",
-    sourceSha256: "sha256:new",
+    persistedSourceSha256: "sha256:new",
     editRevision: 7,
     lastPersistedRevision: 7,
     persistState: "idle",
@@ -47,7 +47,7 @@ test("authoritative source publication replaces bytes and Hash in one generation
 
   assert.equal(observed.length, 1);
   assert.equal(snapshot.html, "<main>new</main>");
-  assert.equal(snapshot.sourceSha256, "sha256:new");
+  assert.equal(snapshot.persistedSourceSha256, "sha256:new");
   assert.equal(snapshot.canvasGeneration, 1);
   assert.equal(session.pendingWrite, null);
 });
@@ -55,7 +55,7 @@ test("authoritative source publication replaces bytes and Hash in one generation
 test("canvas recovery advances only the disposable render generation", () => {
   const session = new DocumentSession({
     html: "<main>same</main>",
-    sourceSha256: "sha256:same",
+    persistedSourceSha256: "sha256:same",
   });
   const before = session.snapshot;
 
@@ -63,7 +63,7 @@ test("canvas recovery advances only the disposable render generation", () => {
 
   assert.equal(after.canvasGeneration, before.canvasGeneration + 1);
   assert.equal(after.html, before.html);
-  assert.equal(after.sourceSha256, before.sourceSha256);
+  assert.equal(after.persistedSourceSha256, before.persistedSourceSha256);
   assert.equal(after.editRevision, before.editRevision);
 });
 
@@ -74,7 +74,7 @@ test("document conflict rejects later edit revisions until reset", () => {
   assert.equal(session.beginEdit("three"), 1);
   assert.equal(session.html, "two");
 
-  session.reset({ html: "external", sourceSha256: "sha256:external" });
+  session.reset({ html: "external", persistedSourceSha256: "sha256:external" });
   assert.equal(session.persistState, "idle");
   assert.equal(session.pendingWrite, null);
   assert.equal(session.editRevision, 0);
@@ -115,7 +115,7 @@ test("document snapshot exposes only derived write and flush state", () => {
 test("a stale canvas hash does not block a boundary whose exact bytes were safely persisted", async () => {
   const html = "<main>saved</main>";
   const sourceSha256 = sha256(html);
-  const session = new DocumentSession({ html, sourceSha256 });
+  const session = new DocumentSession({ html, persistedSourceSha256: sourceSha256 });
   session.update({
     editRevision: 4,
     lastPersistedRevision: 6,
@@ -149,7 +149,7 @@ test("a stale persisted projection is silently repaired from authoritative sourc
   const sourceSha256 = sha256(html);
   const session = new DocumentSession({
     html,
-    sourceSha256: sha256("<main>old</main>"),
+    persistedSourceSha256: sha256("<main>old</main>"),
   });
   session.update({ editRevision: 3, lastPersistedRevision: 2 });
 
@@ -172,7 +172,7 @@ test("a stale persisted projection is silently repaired from authoritative sourc
     sourceSha256,
     lastModifiedAt: "2026-08-04T10:00:00.000Z",
   });
-  assert.equal(session.sourceSha256, sourceSha256);
+  assert.equal(session.persistedSourceSha256, sourceSha256);
   assert.equal(session.lastPersistedRevision, 3);
   assert.equal(session.persistState, "idle");
 });
@@ -182,7 +182,7 @@ test("only confirmed authoritative divergence becomes a source conflict", async 
   const externalHtml = "<main>external</main>";
   const session = new DocumentSession({
     html,
-    sourceSha256: sha256("<main>old</main>"),
+    persistedSourceSha256: sha256("<main>old</main>"),
   });
   session.update({ editRevision: 2, lastPersistedRevision: 1 });
 
@@ -209,7 +209,7 @@ test("a transient authoritative read failure stays recoverable and does not inve
   const html = "<main>local</main>";
   const session = new DocumentSession({
     html,
-    sourceSha256: sha256("<main>old</main>"),
+    persistedSourceSha256: sha256("<main>old</main>"),
   });
   session.update({ editRevision: 2, lastPersistedRevision: 1 });
 
@@ -234,7 +234,7 @@ test("invalid authoritative content integrity is confirmed before recovery is es
   const html = "<main>local</main>";
   const session = new DocumentSession({
     html,
-    sourceSha256: sha256("<main>old</main>"),
+    persistedSourceSha256: sha256("<main>old</main>"),
   });
   session.update({ editRevision: 2, lastPersistedRevision: 1 });
 
@@ -259,10 +259,10 @@ test("invalid authoritative content integrity is confirmed before recovery is es
 test("source publication puts the new canvas generation into pending until an exact ACK", () => {
   const html = "<main>canvas</main>";
   const digest = sha256(html);
-  const session = new DocumentSession({ html, sourceSha256: digest });
+  const session = new DocumentSession({ html, persistedSourceSha256: digest });
   assert.equal(session.canvasAuthority.status, "idle");
 
-  session.publishAuthority({ html, sourceSha256: digest });
+  session.publishAuthority({ html, persistedSourceSha256: digest });
   assert.equal(session.canvasAuthority.status, "pending");
   assert.equal(session.canvasAuthority.generation, 1);
 
@@ -290,7 +290,7 @@ test("source publication puts the new canvas generation into pending until an ex
 test("beginEdit pending the current canvas generation without rebuilding it", () => {
   const html = "<main>one</main>";
   const digest = sha256(html);
-  const session = new DocumentSession({ html, sourceSha256: digest });
+  const session = new DocumentSession({ html, persistedSourceSha256: digest });
   session.reloadCanvas();
   assert.equal(session.confirmCanvas({
     generation: 1,
@@ -326,7 +326,7 @@ test("a late canvas ACK cannot change a newer generation or a failed verificatio
   const html = "<main>one</main>";
   const session = new DocumentSession({
     html,
-    sourceSha256: sha256(html),
+    persistedSourceSha256: sha256(html),
   });
   session.reloadCanvas();
   assert.equal(session.failCanvas({
@@ -337,7 +337,7 @@ test("a late canvas ACK cannot change a newer generation or a failed verificatio
 
   session.publishAuthority({
     html: "<main>two</main>",
-    sourceSha256: sha256("<main>two</main>"),
+    persistedSourceSha256: sha256("<main>two</main>"),
   });
   assert.equal(session.confirmCanvas({
     generation: 1,

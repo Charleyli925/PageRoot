@@ -433,7 +433,7 @@ export type CommentItem = {
   visualHint?: HtmlCanvasRuntimeVisualHint;
   text: string;
   attachments?: CommentAttachment[];
-  baseVersionId: string | null;
+  basedOnVersionId: string | null;
   requestId?: string;
   attemptId?: string;
   resultVersionId?: string;
