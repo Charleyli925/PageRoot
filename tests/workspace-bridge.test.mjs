@@ -65,6 +65,16 @@ test("retired Discussion routes expose no Bridge authority", async (t) => {
   }
 });
 
+test("retired source history action route exposes no Bridge authority", async (t) => {
+  const environment = await createBridgeTestEnvironment(t, {
+    prefix: "pageroot-bridge-no-source-history-action-",
+  });
+  const bridge = await environment.start();
+  const response = await bridge.postJson("/source-history/action", {});
+  assert.equal(response.response.status, 404);
+  assert.equal(response.body.error.code, "NOT_FOUND");
+});
+
 test("configured bridge authentication protects every route and leaves CORS preflight usable", async (t) => {
   const environment = await createBridgeTestEnvironment(t, {
     prefix: "pageroot-bridge-auth-",

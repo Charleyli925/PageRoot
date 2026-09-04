@@ -914,7 +914,7 @@ test("unmanaged HTML stays an import source and mutations fail closed without a 
   assert.equal(await readFile(sourcePath, "utf8"), original);
 });
 
-test("v4 attachments, empty source history and absent conflicts stay bound to the project root", async (t) => {
+test("v4 attachments and absent conflicts stay bound to the project root", async (t) => {
   const environment = await createBridgeTestEnvironment(t, {
     prefix: "pageroot-v4-attachments-",
   });
@@ -928,6 +928,7 @@ test("v4 attachments, empty source history and absent conflicts stay bound to th
     expectedSourceSha256: preview.body.currentHtmlSha256,
   });
   assert.equal(ensured.response.status, 200, JSON.stringify(ensured.body));
+  assert.equal("sourceHistory" in ensured.body, false);
   const workingPath = ensured.body.sourcePath;
   const commentId = "comment_attach";
   const attachmentId = "attachment_one";
@@ -974,19 +975,6 @@ test("v4 attachments, empty source history and absent conflicts stay bound to th
     ensured.body.projectRoot,
     saved.body.attachment.relativePath,
   )));
-
-  const history = await postJson(bridge, "/source-history/action", {
-    sourcePath: workingPath,
-    projectId: ensured.body.projectId,
-    documentId: ensured.body.documentId,
-    actionId: "sourceaction_noop_undo",
-    direction: "undo",
-    expectedSourceSha256: ensured.body.sourceSha256,
-  });
-  assert.equal(history.response.status, 200, JSON.stringify(history.body));
-  assert.equal(history.body.status, "history-no-op");
-  assert.equal(history.body.content, html("attach"));
-  assert.equal(history.body.sourceHistory.cursor, 0);
 
   const emptyConflict = await bridge.requestJson(
     `/conflict-candidate?sourcePath=${encodeURIComponent(workingPath)}`,

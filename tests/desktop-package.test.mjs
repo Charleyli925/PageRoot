@@ -183,7 +183,6 @@ const SCHEMA_FILES = [
   "promotion-transaction.v4.schema.json",
   "runtime-state.v3.schema.json",
   "scope-report.v1.schema.json",
-  "source-history.v1.schema.json",
   "source-element-identity-migration.v1.schema.json",
   "task-spec.v1.schema.json",
   "user-supplement.v1.schema.json",

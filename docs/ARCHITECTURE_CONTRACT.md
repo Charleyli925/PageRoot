@@ -42,10 +42,9 @@ Bridge route adapters
 - Bridge routes decode transport input and delegate. Durable state changes run
   under the Project File repository boundary. `/autosave` retains only
   route-specific validation and response encoding; `ProjectFileRepository`
-  owns the current-source write. `/source-history/action` does not persist a
-  Bridge journal: a registered v4 project returns current source bytes and
-  empty history. The retired v3 `SourceTransaction` service is not a live
-  Bridge owner.
+  owns the current-source write. The persistent source-history journal, decoder
+  and Bridge action route are retired. The retired v3 `SourceTransaction`
+  service is not a live Bridge owner.
 - `scripts/check-architecture.mjs` enforces the dependency direction. Do not
   weaken the gate to land a feature.
 - Production rendering is Desktop-only. `app/application/desktop-host.js`
@@ -877,8 +876,8 @@ pending-save evidence until autosave acknowledges it. React state may display
 capabilities but cannot maintain a parallel stack. Switching HTML, closing the
 document or restarting clears the cursor; recovery evidence may finish an
 interrupted complete-HTML save but never rebuild undo capability. The preview
-DOM, browser editing history, legacy Bridge journal and edit-audit list are not
-current history authorities.
+DOM, browser editing history, the retired Bridge journal and edit-audit list are
+not current history authorities.
 
 The semantic source-operation foundation is a pure pre-persistence boundary.
 It accepts only complete identity-v1 HTML plus an operation carrying stable
@@ -981,8 +980,8 @@ formal Version history.
 Autosave then enters `ProjectFileRepository`. It is the only live Bridge-side
 owner of the current-source write for a registered v4 Project File. The retired
 v3 `SourceTransaction` kernel is not on this path. An AI Version publication
-remains a separate immutable transaction. `/source-history/action` does not
-apply a persisted journal; it returns current source bytes and empty history.
+remains a separate immutable transaction. Undo/Redo has no Bridge action route
+or persistent journal.
 
 That same Repository is the sole source-element identity migration owner. New
 imports preserve the external file and immutable V1 snapshot while writing an
@@ -1040,19 +1039,19 @@ locators are UTF-16 ranges inside the owning element's decoded descendant text.
 ID-less historical TargetRefs keep the legacy resolver and immutable Version
 records are never rewritten. See ADR 0061.
 
-A Bridge-acknowledged history result may advance the mounted editable-island
+A Renderer-applied history result may advance the mounted editable-island
 projection without replacing its iframe only after exact old/new target
 resolution through the recorded TargetRef transition, byte-equal source
 prefix/suffix outside the island and a complete next-`SourceIndex` DOM mapping
 all succeed. This is a projection optimization, not another history application
-path: canonical bytes still come only from the Bridge. Failure at any proof
-point retires the frame and loads the canonical source through the normal
-verified fallback.
+path: the session applies exact source patches locally and persists the complete
+result through normal autosave. Failure at any proof point retires the frame and
+loads the canonical source through the normal verified fallback.
 
-The history journal is bounded and may be reset only at a proven current source
-Hash. A forward edit after undo truncates redo. Source mismatch never attempts
-best-effort patching and never serializes preview DOM; it creates a new history
-boundary or reports the existing source conflict.
+The Renderer history stack is bounded to 20 edits and resets at an open-document
+boundary. A forward edit after undo truncates redo. Source mismatch never
+attempts best-effort patching and never serializes preview DOM; it clears the
+session history or reports the existing source conflict.
 
 An inode change is not by itself proof of a new document because PageRoot's
 same-directory atomic replacement intentionally changes it. The Bridge may
@@ -1114,7 +1113,7 @@ React refs or reproducing mutable snapshots; Workbench only renders the
 Controller projection and dispatches durable commands.
 
 A Canvas undo/redo request uses the same native-edit checkpoint and source
-autosave obligations before it reads the durable history cursor. It does not
+autosave obligations before it reads the Renderer memory cursor. It does not
 drain or mutate comment cards, attachments or project rules. Focused native
 text controls keep their platform-local input history and do not invoke this
 Canvas drain. Project-rule autosave is not eligible while its native control

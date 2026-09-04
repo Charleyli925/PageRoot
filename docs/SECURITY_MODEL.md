@@ -11,8 +11,8 @@ PageRoot edits local files and renders user-controlled HTML, so its default poli
   requires one Registry record whose `projectId`, registered root path,
   recovered root identity, `project.json`, and manifest mappings agree
 - Hash-checked v4 Working Copy saves with same-directory atomic replacement
-  and fail-closed external-modification checks; `/source-history/action` on a
-  v4 project returns the current bytes and empty history rather than a v3
+  and fail-closed external-modification checks; Canvas Undo/Redo persists only
+  through this normal save route, with no separate Bridge history action or
   journal
 - Repository-owned source-element identity migration with sealed before/after
   Hashes, complete recovery bytes and the same Working Copy CAS writer; only a

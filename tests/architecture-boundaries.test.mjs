@@ -235,6 +235,20 @@ test("retired production modules and imports stay outside the graph", () => {
     }).join("\n"),
     /retired module/u,
   );
+  assert.match(
+    retiredArtifactViolations({
+      file: "app/application/example.js",
+      source: 'export const endpoint = "/source-history/action";',
+    }).join("\n"),
+    /source-history compatibility literal/u,
+  );
+  assert.match(
+    retiredArtifactViolations({
+      file: "bridge/example.mjs",
+      source: 'export const schema = "source-history.v1";',
+    }).join("\n"),
+    /source-history compatibility literal/u,
+  );
 });
 
 test("the architecture checker contains no implementation-shape assertions", async () => {

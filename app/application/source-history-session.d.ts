@@ -18,7 +18,6 @@ export type SourceHistoryContext = {
 
 export type OpenDocumentMemoryHistory = {
   scope: "open-document-memory";
-  schemaVersion: 1;
   projectId: string;
   documentId: string;
   sourcePath: string;
@@ -26,8 +25,6 @@ export type OpenDocumentMemoryHistory = {
   cursor: number;
   revision: number;
   entries: SourceHistoryEntry[];
-  appliedActions: [];
-  updatedAt: string;
 };
 
 export type CanvasSourceTransaction = {
@@ -73,7 +70,6 @@ export class SourceHistorySession {
   acknowledge(
     context: SourceHistoryContext,
     sentOperations: SourceHistoryEntry[],
-    historyValue: unknown,
     sourceSha256: string,
   ): SourceHistoryAcknowledgeResult;
   apply(

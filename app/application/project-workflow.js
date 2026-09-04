@@ -3701,12 +3701,11 @@ export class ProjectWorkflow {
           nextProjectId
           && nextDocumentId
           && authoritativeHash
-          && this.#codecs.isRecord(supplementalPayload.sourceHistory)
         ) {
           this.#documentWorkflow.activateSourceHistory({
             context,
             sourceSha256: authoritativeHash,
-            history: supplementalPayload.sourceHistory,
+            history: null,
             preservePending: Boolean(this.#documentSession.pendingWrite),
           });
         }

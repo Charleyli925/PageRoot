@@ -46,12 +46,10 @@ the remaining cost of capturing attribution now is only the cost of writing it.
 Applied to the Draft aggregate: comments and change events, which is the live v4
 record for "what the user said about the page".
 
-Deliberately not applied to `history/source-operations.json`. The v4 Bridge never
-appends to that journal — `runSourceHistoryAction` returns `history-no-op` with a
-freshly created empty history, and no production caller of
-`appendSourceHistoryOperations` exists. Decorating a journal nothing writes would
-add an unverifiable field. When that journal is revived, its entries must carry
-provenance under the same rule.
+Deliberately not applied to the persistent source-history journal. The v4 Bridge
+never appended to it, and the journal, decoder and action route are now retired.
+Decorating a record nothing writes would add an unverifiable field; any future
+durable history design would require a new contract rather than reviving it.
 
 ## Consequences
 

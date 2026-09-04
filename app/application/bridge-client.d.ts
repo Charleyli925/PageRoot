@@ -39,7 +39,6 @@ export type BridgeClient = {
   ensureProject(body: BridgeJson): Promise<BridgeJson>;
   reconcileManagedWorkingCopy(body: BridgeJson): Promise<BridgeJson>;
   autosave(body: BridgeJson): Promise<BridgeJson>;
-  sourceHistoryAction(body: BridgeJson): Promise<BridgeJson>;
   saveDraft(body: BridgeJson): Promise<BridgeJson>;
   saveAttachment(body: BridgeJson): Promise<BridgeJson>;
   deleteAttachment(body: BridgeJson): Promise<BridgeJson>;

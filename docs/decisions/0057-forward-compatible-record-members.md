@@ -26,10 +26,9 @@ has never seen?".
   project, not just the one that changed. The Runtime `historyActivation` receipt
   used the same `hasExactKeys` rejection, so a single added member made the whole
   Runtime unreadable.
-- `history/source-operations.json` did the opposite and the most damaging thing.
-  `cleanEntry`, `cleanPatch`, `cleanSelection`, `cleanAppliedAction` and
-  `normalizeSourceHistory` rebuilt each object from a fixed field list, so an
-  unknown member was **silently discarded**, and the next `atomicWriteJson`
+- The now-retired persistent source-history record once did the opposite and
+  the most damaging thing. Its fixed-field decoder rebuilt each object, so an
+  unknown member was **silently discarded**, and the next atomic write
   persisted the truncated record. The user lost data with no error anywhere.
 - `activeDraftSnapshot` rebuilt the Draft top level the same way, discarding
   unknown top-level members while passing comment and event objects through.

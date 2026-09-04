@@ -110,7 +110,6 @@ Bridge 调用基线分布：
 | `workspace` | 6 | registration/project/run workflow |
 | `source` | 6 | document/project/version workflow |
 | `versionFile` | 3 | version workflow |
-| `sourceHistoryAction` | 2 | document workflow |
 | `resolveConflict` | 2 | document/run workflow，各一条 |
 | 其余 11 个方法 | 各 1 | 对应 workflow |
 
@@ -385,8 +384,8 @@ Application 层不得直接访问 React ref 或 `window.*`。Controller 通过�
 2. 所有编辑仍只来自已接受的 SourcePatch；Selection、IME、TargetRef 和未命中范围
    字节保持现有 oracle。
 3. Hash、CAS、expected revision、SourceTransaction、同目录原子替换、fsync、
-   source-history 和 restart recovery 不得弱化。
-4. `/autosave`、`/source-history/action`、`/draft`、`/request`、Version、Attachment
+   Renderer source history 和 restart recovery 不得弱化。
+4. `/autosave`、`/draft`、`/request`、Version、Attachment
    的路由、payload、响应、错误码和存储 Schema 不变。
 5. mutation 网络失败仍是 unknown outcome；不得自动重放同一无新前提 POST。
 6. registered mutation 必须捕获完整
@@ -612,7 +611,7 @@ npm run task:finish
   期间读写 ref；现有 pure codec 保持注入，未反向 import Workbench。
 - 直接 Workbench Bridge 调用从 30 降至 28：已移除 registration 的 `workspace`
   和 `ensureProject`。剩余预算已由 architecture gate 精确锁定为 `workspace` 5、
-  `source` 6、`versionFile` 3、`sourceHistoryAction` 2、`resolveConflict` 2，及
+  `source` 6、`versionFile` 3、`resolveConflict` 2，及
   `activateReadyVersion`、`attachment`、`autosave`、`cancelActiveRun`、
   `createRequest`、`deleteAttachment`、`openFolder`、`projectFile`、
   `saveAttachment`、`status` 各 1。
@@ -640,10 +639,10 @@ intent；新 `DocumentWorkflow` 只拥有异步编排。
 
 - `flushAutosave`、`enqueueAutosave`、`clearAutosaveTimer`；
 - `persistRecoveryLog`、`auditPendingRef`、`auditInFlightKeysRef`；
-- `historyActionPromiseRef`、`requestSourceHistoryAction`；
+- `historyActionPromiseRef` 与 Renderer history orchestration；
 - `ensureCurrentDocumentCanvas`、`reloadCurrentSource`；
 - close 内 `DocumentSession.reconcilePersistedBoundary()` 的 Bridge source callback；
-- `bridgeClient.autosave`、`sourceHistoryAction`、`source`、source conflict
+- `bridgeClient.autosave`、`source`、source conflict
   `resolveConflict`。
 
 根因：DocumentSession 已拥有 pending write 和 flush Promise，但创建 Promise、timer、
@@ -719,7 +718,7 @@ owner 留在 React。
 
 ### 8.6 停止条件
 
-- 需要改变 `/autosave` 或 `/source-history/action` schema；
+- 需要改变 `/autosave` schema；
 - 无法在不复制 pending write/flush authority 的情况下实现 workflow；
 - target rebind 需要把 DOM/React state 引入 Application；
 - Electron exact-byte、restart recovery 或 rapid switch/close 任一 oracle 退化；
@@ -751,11 +750,11 @@ owner 留在 React。
   autosave timer、recovery/audit/history Promise refs 和对应 Bridge 编排 callback。
 - Workbench 的直接 Bridge 调用由 28 收敛至 20；architecture gate 对 20 个调用的
   精确 allowlist 和禁留 timer/flush/history owner 都已锁定。未改变 `/autosave`、
-  `/source-history/action`、Bridge SourceTransaction、persisted schema 或 Patch
+  Bridge SourceTransaction、persisted schema 或 Patch
   transport。
 - 新增 Node workflow 回归覆盖 700ms 合并、较早 ack 不覆盖较新 write、未登记首次
   写入、recovery reconstruction、stale race、ack 失配、unknown autosave authority
-  reconciliation、unknown history action 的同 actionId 重放。
+  reconciliation 与 Renderer history action 的保存失败恢复。
 - 已通过 8.5 的指定 Node 集、`npm run test:bridge`、`npm run architecture:check`、
   `npm run typecheck`、`npm run task:finish`（79 Node、28 Browser、8 Electron、2 AI
   smoke），以及 `npm run test:electron:full` 19/19。Draft PR #150 已建立；不进入

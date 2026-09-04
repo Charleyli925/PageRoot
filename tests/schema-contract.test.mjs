@@ -1,9 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import {
-  access,
-  readFile,
-} from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 
@@ -50,7 +47,6 @@ const pairs = [
   ["runtime-state.v3.schema.json", "runtime-state.ready-to-open.json"],
   ["runtime-state.v3.schema.json", "runtime-state.ready.json"],
   ["runtime-state.v3.schema.json", "runtime-state.submitting.json"],
-  ["source-history.v1.schema.json", "source-history.current.json"],
   [
     "runtime-state.v3.schema.json",
     "runtime-state.recovering-transaction.json",

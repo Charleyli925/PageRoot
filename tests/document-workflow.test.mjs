@@ -11,11 +11,6 @@ import { SourceHistorySession } from "../app/application/source-history-session.
 import { VersionSession } from "../app/application/version-session.js";
 import { auditEventKey, removeAcknowledgedAuditEvents } from "../app/lib/audit-events.js";
 import { appendDirectEditEvent } from "../app/lib/direct-edit-events.js";
-import {
-  appendSourceHistoryOperations,
-  createEmptySourceHistory,
-} from "../shared/source-history.mjs";
-
 const SOURCE_PATH = "/tmp/document-workflow.html";
 const PROJECT_ID = "project_document_workflow";
 const DOCUMENT_ID = "document_document_workflow";
@@ -74,28 +69,6 @@ function createRecoveryStore() {
       return values;
     },
   };
-}
-
-function sourceHistory({
-  sourceSha256,
-  entries = [],
-  projectId = PROJECT_ID,
-  documentId = DOCUMENT_ID,
-} = {}) {
-  const history = createEmptySourceHistory({
-    projectId,
-    documentId,
-    sourceSha256,
-    now: () => "2026-08-11T00:00:00.000Z",
-  });
-  if (entries.length === 0) return history;
-  return appendSourceHistoryOperations(history, entries, {
-    projectId,
-    documentId,
-    sourceSha256,
-    targetSourceSha256: entries.at(-1).afterSourceSha256,
-    now: () => "2026-08-11T00:00:01.000Z",
-  });
 }
 
 function operation(before, after) {
@@ -171,7 +144,7 @@ function createHarness({
   sourceHistorySession.activate(
     context,
     sha256(html),
-    sourceHistory({ sourceSha256: sha256(html) }),
+    null,
   );
   const scheduler = createScheduler();
   const recoveryStore = createRecoveryStore();
@@ -195,9 +168,6 @@ function createHarness({
     },
     async workspace() {
       return {};
-    },
-    async sourceHistoryAction() {
-      throw new Error("history test double was not configured");
     },
     async resolveConflict() {
       return {};
@@ -634,7 +604,6 @@ test("DocumentWorkflow restores source-history and recovery authority after a pr
 test("DocumentWorkflow coalesces a 100ms source write and only accepts exact HTML/Hash acknowledgement", async () => {
   const before = "<!doctype html><html><body><p>one</p></body></html>";
   const after = before.replace("one", "two");
-  const history = sourceHistory({ sourceSha256: sha256(before) });
   const calls = [];
   const harness = createHarness({
     html: before,
@@ -647,7 +616,6 @@ test("DocumentWorkflow coalesces a 100ms source write and only accepts exact HTM
           sha256: sha256(body.html),
           persistedRevision: body.editRevision,
           lastModifiedAt: "2026-08-11T00:00:01.000Z",
-          sourceHistory: history,
         };
       },
     },
@@ -672,7 +640,6 @@ test("DocumentWorkflow coalesces a 100ms source write and only accepts exact HTM
 test("DocumentWorkflow flushes a native-edit checkpoint immediately", async () => {
   const before = "<!doctype html><html><body><p>one</p></body></html>";
   const after = before.replace("one", "two");
-  const history = sourceHistory({ sourceSha256: sha256(before) });
   const calls = [];
   const harness = createHarness({
     html: before,
@@ -685,7 +652,6 @@ test("DocumentWorkflow flushes a native-edit checkpoint immediately", async () =
           sha256: sha256(body.html),
           persistedRevision: body.editRevision,
           lastModifiedAt: "2026-08-11T00:00:01.000Z",
-          sourceHistory: history,
         };
       },
     },
@@ -740,7 +706,6 @@ test("DocumentWorkflow rebinds a moved Working Copy before the next autosave", a
           sha256: sha256(body.html),
           persistedRevision: body.editRevision,
           lastModifiedAt: "2026-08-11T00:00:01.000Z",
-          sourceHistory: sourceHistory({ sourceSha256: sha256(body.html) }),
           openTarget: currentTarget,
           activeDraft: {
             draftRevision: 0,
@@ -829,7 +794,6 @@ test("DocumentWorkflow drains a newer queued write after an earlier acknowledgem
           sha256: sha256(body.html),
           persistedRevision: body.editRevision,
           lastModifiedAt: "2026-08-11T00:00:02.000Z",
-          sourceHistory: sourceHistory({ sourceSha256: sha256(before) }),
         });
       },
     },
@@ -846,7 +810,6 @@ test("DocumentWorkflow drains a newer queued write after an earlier acknowledgem
     sha256: sha256(middle),
     persistedRevision: 1,
     lastModifiedAt: "2026-08-11T00:00:01.000Z",
-    sourceHistory: sourceHistory({ sourceSha256: sha256(before) }),
   });
 
   assert.equal((await flushing).status, "succeeded");
@@ -877,7 +840,6 @@ test("DocumentWorkflow accepts an older ACK and drains the newer source-history 
           sha256: sha256(body.html),
           persistedRevision: body.editRevision,
           lastModifiedAt: `2026-08-11T00:00:0${calls.length}.000Z`,
-          sourceHistory: sourceHistory({ sourceSha256: sha256(body.html) }),
         });
       },
     },
@@ -901,7 +863,6 @@ test("DocumentWorkflow accepts an older ACK and drains the newer source-history 
     sha256: sha256(middle),
     persistedRevision: 1,
     lastModifiedAt: "2026-08-11T00:00:01.000Z",
-    sourceHistory: sourceHistory({ sourceSha256: sha256(middle) }),
   });
 
   assert.equal((await flushing).status, "succeeded");
@@ -955,7 +916,6 @@ test("DocumentWorkflow reconstructs a missing pending write and rebinds comment 
           sha256: sha256(body.html),
           persistedRevision: body.editRevision,
           lastModifiedAt: "2026-08-11T00:00:01.000Z",
-          sourceHistory: sourceHistory({ sourceSha256: sha256(before) }),
           currentExactVersionId: "version_002",
         };
       },
@@ -1002,7 +962,6 @@ test("DocumentWorkflow registers an unbound source write before its first autosa
           sha256: sha256(body.html),
           persistedRevision: body.editRevision,
           lastModifiedAt: "2026-08-11T00:00:01.000Z",
-          sourceHistory: sourceHistory({ sourceSha256: sha256(before) }),
         };
       },
     },
@@ -1051,7 +1010,6 @@ test("DocumentWorkflow settles a failed first registration as a retryable persis
           sha256: sha256(body.html),
           persistedRevision: body.editRevision,
           lastModifiedAt: "2026-08-11T00:00:01.000Z",
-          sourceHistory: sourceHistory({ sourceSha256: sha256(before) }),
         };
       },
     },
@@ -1126,7 +1084,6 @@ test("DocumentWorkflow rekeys recovery to registered identity before the first a
     sha256: sha256(after),
     persistedRevision: 1,
     lastModifiedAt: "2026-08-11T00:00:01.000Z",
-    sourceHistory: sourceHistory({ sourceSha256: sha256(before) }),
   });
   assert.equal((await flushing).status, "succeeded");
 });
@@ -1154,7 +1111,6 @@ test("DocumentWorkflow returns stale after a durable acknowledgement races a new
     sha256: sha256(after),
     persistedRevision: 1,
     lastModifiedAt: "2026-08-11T00:00:01.000Z",
-    sourceHistory: sourceHistory({ sourceSha256: sha256(before) }),
   });
 
   assert.equal((await flushing).status, "stale");
@@ -1196,11 +1152,7 @@ test("DocumentWorkflow leaves the next document Source History untouched by a st
   harness.sourceHistorySession.activate(
     nextContext,
     sha256(nextBefore),
-    sourceHistory({
-      sourceSha256: sha256(nextBefore),
-      projectId: nextProjectId,
-      documentId: nextDocumentId,
-    }),
+    null,
   );
   harness.sourceHistorySession.record(
     nextContext,
@@ -1208,7 +1160,6 @@ test("DocumentWorkflow leaves the next document Source History untouched by a st
     1,
   );
   const expectedSnapshot = structuredClone(harness.sourceHistorySession.snapshot);
-  delete expectedSnapshot.updatedAt;
   const expectedPending = harness.sourceHistorySession.pendingOperations;
   const nextRecoveryKey = `html-ai-recovery:${nextDocumentId}`;
   harness.recoveryStore.write(nextRecoveryKey, { documentId: nextDocumentId, keep: true });
@@ -1226,13 +1177,11 @@ test("DocumentWorkflow leaves the next document Source History untouched by a st
     sha256: sha256(after),
     persistedRevision: 1,
     lastModifiedAt: "2026-08-11T00:00:01.000Z",
-    sourceHistory: sourceHistory({ sourceSha256: sha256(before) }),
   });
 
   assert.equal((await flushing).status, "stale");
   assert.equal(activateCalls, 0, "inactive-context ACK must not reactivate the old document");
   const actualSnapshot = harness.sourceHistorySession.snapshot;
-  delete actualSnapshot.updatedAt;
   assert.deepEqual(actualSnapshot, expectedSnapshot);
   assert.deepEqual(harness.sourceHistorySession.pendingOperations, expectedPending);
   assert.equal(harness.sourceHistorySession.capabilities.sourceSha256, sha256(nextAfter));
@@ -1254,7 +1203,6 @@ test("DocumentWorkflow rebuilds Source History for an invalid ACK in the current
           sha256: sha256(body.html),
           persistedRevision: body.editRevision,
           lastModifiedAt: "2026-08-11T00:00:01.000Z",
-          sourceHistory: sourceHistory({ sourceSha256: sha256(after) }),
         };
       },
     },
@@ -1287,7 +1235,6 @@ test("DocumentWorkflow preserves recovery and fails closed when autosave acknowl
           sha256: sha256(body.html.replace("two", "three")),
           persistedRevision: body.editRevision,
           lastModifiedAt: "2026-08-11T00:00:01.000Z",
-          sourceHistory: sourceHistory({ sourceSha256: sha256(before) }),
         };
       },
     },
@@ -1407,7 +1354,6 @@ test("DocumentWorkflow preserves a prior external acceptance when reloading its 
 test("DocumentWorkflow reconciles an unknown autosave only after reading matching authority", async () => {
   const before = "<!doctype html><html><body><p>one</p></body></html>";
   const after = before.replace("one", "two");
-  const history = sourceHistory({ sourceSha256: sha256(after) });
   const calls = [];
   const harness = createHarness({
     html: before,
@@ -1424,7 +1370,6 @@ test("DocumentWorkflow reconciles an unknown autosave only after reading matchin
           currentHtmlSha256: sha256(after),
           lastPersistedRevision: 1,
           lastModifiedAt: "2026-08-11T00:00:01.000Z",
-          sourceHistory: history,
         };
       },
       async source() {
@@ -1487,7 +1432,6 @@ test("DocumentWorkflow restores a matching crash record into the same durable qu
     sha256: sha256(body.html),
     persistedRevision: body.editRevision,
     lastModifiedAt: "2026-08-11T00:00:03.000Z",
-    sourceHistory: sourceHistory({ sourceSha256: sha256(before) }),
   });
 
   const recovered = await harness.workflow.recoverAutosave({
@@ -1737,7 +1681,6 @@ test("DocumentWorkflow waits for exact CAS retirement after source persistence s
           sha256: sha256(body.html),
           persistedRevision: body.editRevision,
           lastModifiedAt: "2026-09-02T00:00:01.000Z",
-          sourceHistory: sourceHistory({ sourceSha256: sha256(before) }),
         };
       },
     },

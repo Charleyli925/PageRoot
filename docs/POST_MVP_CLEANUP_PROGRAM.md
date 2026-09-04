@@ -113,12 +113,12 @@ startup no longer searches `HTML AI 工作台/项目记录`, `YuanYe/项目记�
 otherwise the leftover default is `Documents/PageRoot/项目记录`. v4 projects
 still live under `HTML_AI_PROJECT_FILES_ROOT` / `Documents/PageRoot/项目`.
 
-**What stays.** Attachment, conflict, and source-history HTTP routes remain.
-They now resolve a v4 project root (or 404). Attachments still use
-`draft/attachments/...` under that root. A v4 project has no v3 conflict or
-source-history store, so conflict reads return an empty payload and history
-actions return current source bytes plus empty history. The v3 Attempt
-finalizer CLI `--workspace` / `--project-id` is gone; `--project-root` remains.
+**What stays.** Attachment and conflict HTTP routes remain. They resolve a v4
+project root (or 404), and attachments still use `draft/attachments/...` under
+that root. A v4 project has no v3 conflict store, so conflict reads return an
+empty payload. The source-history HTTP route and persistent journal format are
+retired. The v3 Attempt finalizer CLI `--workspace` / `--project-id` is gone;
+`--project-root` remains.
 
 ## What P1-B changes, and why
 

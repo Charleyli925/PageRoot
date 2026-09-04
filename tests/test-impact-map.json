@@ -796,6 +796,19 @@
       ]
     },
     {
+      "id": "source-history-retirement",
+      "patterns": [
+        "^schemas/source-history\\.v1\\.schema\\.json$",
+        "^fixtures/v3/source-history\\.current\\.json$",
+        "^package\\.json$",
+        "^tests/source-history-retirement\\.test\\.mjs$"
+      ],
+      "suites": [],
+      "nodeTests": [
+        "tests/source-history-retirement.test.mjs"
+      ]
+    },
+    {
       "id": "conversation",
       "patterns": [
         "^shared/conversation\\.mjs$",
@@ -1956,7 +1969,6 @@
       "id": "schemas",
       "patterns": [
         "^schemas/.*\\.json$",
-        "^fixtures/v3/source-history\\.current\\.json$",
         "^fixtures/(?:candidate-assessment-compat|compatibility-decoders)/.*$"
       ],
       "suites": [],

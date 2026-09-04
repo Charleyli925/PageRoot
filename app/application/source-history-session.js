@@ -47,69 +47,6 @@ function validateOperationShape(operation, label) {
   return null;
 }
 
-function persistedHistorySourceSha256(history) {
-  if (!isRecord(history) || !Array.isArray(history.entries)) return null;
-  const entries = history.entries;
-  const cursor = Number(history.cursor);
-  if (
-    !Number.isSafeInteger(cursor)
-    || cursor < 0
-    || cursor > entries.length
-    || !validSha256(history.baseSourceSha256)
-  ) return { error: "persisted-history-state" };
-  let expected = String(history.baseSourceSha256);
-  const operationIds = new Set();
-  for (const entry of entries) {
-    const shapeError = validateOperationShape(entry, "persisted-history");
-    if (
-      shapeError
-      || operationIds.has(entry.operationId)
-      || entry.beforeSourceSha256 !== expected
-    ) return { error: shapeError || "persisted-history-chain" };
-    operationIds.add(entry.operationId);
-    expected = entry.afterSourceSha256;
-  }
-  return {
-    sourceSha256: cursor === 0
-      ? String(history.baseSourceSha256)
-      : String(entries[cursor - 1].afterSourceSha256),
-    entries,
-    cursor,
-  };
-}
-
-function persistedHistoryConfirms({ history, context, operations, sourceSha256Value }) {
-  // PR10 deliberately exposes a history-no-op response. The exact autosave
-  // HTML/hash acknowledgement remains the durable proof in that mode. When a
-  // history journal is present, however, it must independently agree with the
-  // acknowledged operation prefix.
-  if (history === null || history === undefined) return null;
-  if (!isRecord(history)) return "persisted-history-record";
-  for (const key of ["projectId", "documentId"]) {
-    if (
-      history[key] !== undefined
-      && String(history[key] || "") !== String(context?.[key] || "")
-    ) return "persisted-history-context";
-  }
-  const persisted = persistedHistorySourceSha256(history);
-  if (!persisted || persisted.error) return persisted?.error || "persisted-history-record";
-  if (persisted.entries.length === 0) {
-    return persisted.sourceSha256 === sourceSha256Value
-      ? null
-      : "persisted-history-sha";
-  }
-  if (persisted.sourceSha256 !== sourceSha256Value) return "persisted-history-sha";
-  const limit = persisted.cursor - operations.length;
-  for (let start = 0; start <= limit; start += 1) {
-    const candidate = persisted.entries.slice(start, start + operations.length);
-    if (candidate.length === operations.length
-      && candidate.every((entry, index) => sameOperation(entry, operations[index]))) {
-      return null;
-    }
-  }
-  return "persisted-history-operations";
-}
-
 function sameContext(left, right) {
   return Boolean(
     left
@@ -150,7 +87,6 @@ function applyExactPatches(source, patches) {
 function memorySnapshot(context, entries, cursor, currentSourceSha256) {
   return {
     scope: "open-document-memory",
-    schemaVersion: 1,
     projectId: String(context?.projectId || ""),
     documentId: String(context?.documentId || ""),
     sourcePath: String(context?.sourcePath || ""),
@@ -158,8 +94,6 @@ function memorySnapshot(context, entries, cursor, currentSourceSha256) {
     cursor,
     revision: entries.length,
     entries: structuredClone(entries),
-    appliedActions: [],
-    updatedAt: new Date().toISOString(),
   };
 }
 
@@ -293,7 +227,7 @@ export class SourceHistorySession {
     return true;
   }
 
-  acknowledge(context, sentOperations, historyValue, sourceSha256Value) {
+  acknowledge(context, sentOperations, sourceSha256Value) {
     if (!this.isActive(context)) {
       return acknowledgementInvalid("inactive-context");
     }
@@ -354,15 +288,6 @@ export class SourceHistorySession {
     }
     if (remaining.length === 0 && this.#currentSourceSha256 !== acknowledgedSourceSha256) {
       return acknowledgementInvalid("acknowledged-sha-not-local-head");
-    }
-    if (sentOperations.length > 0) {
-      const historyError = persistedHistoryConfirms({
-        history: historyValue,
-        context,
-        operations: sentOperations,
-        sourceSha256Value: acknowledgedSourceSha256,
-      });
-      if (historyError) return acknowledgementInvalid(historyError);
     }
     this.#pending = remaining;
     return remaining.length === 0
