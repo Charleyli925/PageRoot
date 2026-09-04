@@ -382,6 +382,15 @@ function hasNativeTextFragmentPseudoContent(element: HTMLElement): boolean {
   });
 }
 
+function fragmentTextSourcePatch(
+  patches: Array<{ kind?: string; startOffset: number }>,
+) {
+  return patches.find((patch) => {
+    const kind = String(patch.kind ?? "").replace(/^(?:inverse:)+/, "");
+    return kind === "direct-text-node" || kind === "semantic:replace-text-range";
+  }) ?? null;
+}
+
 function sourceTextNodeForFragmentReplacement(
   sourceIndex: SourceIndexValue,
   startOffset: number,
@@ -843,6 +852,12 @@ function semanticOperationForSourceCommand(
   const resolution = targetRef ? resolveTargetRef(sourceIndex, targetRef) : null;
   const sourceTarget = resolution?.target;
   if (sourceTarget?.type !== "element" || !sourceTarget.pagerootId) {
+    return null;
+  }
+  // Fragment writes stay on the SourcePatch `direct-text-node` plan. Semantic
+  // replaceTextRange matches those bytes, but Canvas still rebases the
+  // transient host from that patch kind and nextFragmentHtml metadata.
+  if (command.type === "update-direct-text-node") {
     return null;
   }
   const target = createSemanticElementPrecondition(sourceIndex, sourceTarget.pagerootId);
@@ -3801,7 +3816,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           ? String(forwardMetadata.nextFragmentHtml ?? "")
           : null;
         const fragmentPatch = activeNativeEdit.mode === "text-fragment"
-          ? result.patches.find((patch) => patch.kind === "direct-text-node")
+          ? fragmentTextSourcePatch(result.patches)
           : null;
         const refreshedFragmentNode = activeNativeEdit.mode === "text-fragment"
           && fragmentPatch
@@ -4385,9 +4400,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
             validationSucceeded = true;
             return;
           }
-          const fragmentPatch = candidate.patches.find(
-            (patch) => patch.kind === "direct-text-node",
-          );
+          const fragmentPatch = fragmentTextSourcePatch(candidate.patches);
           if (!fragmentPatch) {
             throw new Error("V2 可编辑岛源码结果与当前草稿不一致。");
           }

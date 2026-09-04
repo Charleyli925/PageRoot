@@ -332,7 +332,7 @@ function resolvePageViewContextFromIndex(sourceIndex, context) {
     if (!sourceState) continue;
     entries.push({
       entry,
-      sourceNodeId: resolution.target.pagerootId ?? resolution.target.nodeId,
+      sourceNodeId: sourceElementKey(resolution.target),
       resolution: resolution.resolution,
       sourceState,
     });
@@ -376,6 +376,20 @@ function sourceAriaBooleanIsAbsentOrFalse(element, name) {
   if (!attribute.valid) return false;
   if (!attribute.present) return true;
   return String(attribute.value ?? "").trim() === "false";
+}
+
+function sourceElementKey(element) {
+  // Persistent identity when present; parse-local handle only inside this
+  // SourceIndex. Mixing the two as Map keys drops presentation actions after
+  // the first page-view context is applied.
+  return element.pagerootId || element.nodeId;
+}
+
+function sourceElementByKey(sourceIndex, key) {
+  const byStableId = sourceIndex.byPagerootId.get(key);
+  if (byStableId?.type === "element") return byStableId;
+  const byParseKey = sourceIndex.byNodeId.get(key);
+  return byParseKey?.type === "element" ? byParseKey : null;
 }
 
 function sourceParent(sourceIndex, element) {
@@ -476,7 +490,7 @@ function presentationStateMap(sourceIndex, context, documentKey) {
 function effectiveStateFor(sourceIndex, states, element) {
   const sourceState = sourcePresentationState(element);
   if (!sourceState) return null;
-  return states.get(element.nodeId) ?? {
+  return states.get(sourceElementKey(element)) ?? {
     classTokens: [...sourceState.classTokens],
     hidden: sourceState.hidden,
     open: sourceState.open,
@@ -518,8 +532,8 @@ function contextFromPresentationStates({
   generation,
 }) {
   const entries = [];
-  for (const [nodeId, state] of states) {
-    const element = sourceIndex.byNodeId.get(nodeId);
+  for (const [elementKey, state] of states) {
+    const element = sourceElementByKey(sourceIndex, elementKey);
     if (element?.type !== "element") return undefined;
     const entry = frozenContextEntry(sourceIndex, element, state);
     if (entry) entries.push(entry);
@@ -641,13 +655,13 @@ function resolveTabAction({
   const isCurrent = selectedIndexes[0] === targetIndex;
   if (!isCurrent) {
     tabs.forEach((tab, index) => {
-      states.set(tab.nodeId, {
+      states.set(sourceElementKey(tab), {
         ...tabStates[index],
         ariaSelected: index === targetIndex ? "true" : "false",
       });
     });
     panels.forEach((panel, index) => {
-      states.set(panel.nodeId, {
+      states.set(sourceElementKey(panel), {
         ...panelStates[index],
         hidden: index !== targetIndex,
       });
@@ -693,7 +707,7 @@ function resolveDetailsAction({
   ) return null;
   const state = effectiveStateFor(sourceIndex, states, details);
   if (!state) return null;
-  states.set(details.nodeId, {
+  states.set(sourceElementKey(details), {
     ...state,
     open: !state.open,
   });
@@ -785,11 +799,11 @@ function resolveDisclosureAction({
     || panelState.hidden !== (controlState.ariaExpanded === "false")
   ) return null;
   const expanded = controlState.ariaExpanded === "true";
-  states.set(control.nodeId, {
+  states.set(sourceElementKey(control), {
     ...controlState,
     ariaExpanded: expanded ? "false" : "true",
   });
-  states.set(panel.nodeId, {
+  states.set(sourceElementKey(panel), {
     ...panelState,
     hidden: expanded,
   });

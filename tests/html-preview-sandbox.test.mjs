@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import {
@@ -35,4 +36,15 @@ test("preview sandbox derives an encoded directory base without query state", ()
     "https://example.com/a/",
   );
   assert.equal(baseHrefFromSourcePath("relative/page.html"), undefined);
+});
+
+test("runtime source markers stay Stable-ID-only and skip unmarked injections", async () => {
+  const source = await readFile(
+    new URL("../app/components/html-preview-sandbox.js", import.meta.url),
+    "utf8",
+  );
+  assert.match(source, /isValidPagerootElementId\(pagerootId\) \? pagerootId : null/u);
+  assert.match(source, /if \(!marker\) continue;/u);
+  assert.doesNotMatch(source, /synthetic:/u);
+  assert.doesNotMatch(source, /data-html-ai-source-node-id/u);
 });

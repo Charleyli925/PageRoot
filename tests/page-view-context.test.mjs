@@ -52,7 +52,7 @@ const RAW_PRESENTATION_HTML = `<!doctype html>
 </body>
 </html>`;
 
-const PRESENTATION_HTML = RAW_PRESENTATION_HTML;
+const PRESENTATION_HTML = materializeSourceElementIdentity(RAW_PRESENTATION_HTML).html;
 
 const DATA_LINKED_TAB_HTML = `<!doctype html>
 <html>

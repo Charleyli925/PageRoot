@@ -5,10 +5,11 @@ import {
   caseSelector,
   exportCurrentHtml,
   fixtureBuffer,
+  identifiedHtmlBuffer,
   keyShortcut,
   loadFixture,
+  replaceEditableIslandTextByCase,
   nativeEditingState,
-  replaceEditableIslandBytes,
   setTextSelection,
   sha256,
   withBomAndCrLf,
@@ -16,6 +17,10 @@ import {
 
 const originalToken = "SOURCE_FIDELITY_TOKEN_001";
 const replacement = "逐字节替换_OK";
+
+function identifiedBomSource() {
+  return withBomAndCrLf(identifiedHtmlBuffer(fixtureBuffer("source-fidelity.html")));
+}
 
 function firstByteDifference(actual, expected) {
   const limit = Math.min(actual.length, expected.length);
@@ -47,13 +52,18 @@ test.beforeEach(async ({ page }) => {
 test("one text edit changes only the authorized UTF-8 bytes, including BOM and CRLF", {
   tag: ["@gate-smoke","@smoke-editing"],
 }, async ({ page }) => {
-  const original = withBomAndCrLf(fixtureBuffer("source-fidelity.html"));
-  const expected = replaceEditableIslandBytes(
-    original,
+  const original = identifiedBomSource();
+  const { frame } = await loadFixture(page, "source-fidelity.html", {
+    buffer: original,
+    identifiedWorkingCopy: false,
+  });
+  const before = await exportCurrentHtml(page);
+  const expected = replaceEditableIslandTextByCase(
+    before,
     "source-fidelity",
-    `<span title='single-quoted' data-order-b="2" data-order-a='1'>${replacement}</span>`,
+    originalToken,
+    replacement,
   );
-  const { frame } = await loadFixture(page, "source-fidelity.html", { buffer: original });
   await activateNativeEdit(frame, "source-fidelity");
   await setTextSelection(frame, "source-fidelity", 0, originalToken.length);
   await page.keyboard.insertText(replacement);
@@ -72,13 +82,18 @@ test("one text edit changes only the authorized UTF-8 bytes, including BOM and C
 test("source reversal shortcuts are blocked and never change committed bytes", {
   tag: ["@gate-smoke","@smoke-editing"],
 }, async ({ page }) => {
-  const original = withBomAndCrLf(fixtureBuffer("source-fidelity.html"));
-  const expected = replaceEditableIslandBytes(
-    original,
+  const original = identifiedBomSource();
+  const { frame } = await loadFixture(page, "source-fidelity.html", {
+    buffer: original,
+    identifiedWorkingCopy: false,
+  });
+  const before = await exportCurrentHtml(page);
+  const expected = replaceEditableIslandTextByCase(
+    before,
     "source-fidelity",
-    `<span title='single-quoted' data-order-b="2" data-order-a='1'>${replacement}</span>`,
+    originalToken,
+    replacement,
   );
-  const { frame } = await loadFixture(page, "source-fidelity.html", { buffer: original });
   await activateNativeEdit(frame, "source-fidelity");
   await setTextSelection(frame, "source-fidelity", 0, originalToken.length);
   await page.keyboard.insertText(replacement);
@@ -103,8 +118,11 @@ test("source reversal shortcuts are blocked and never change committed bytes", {
 });
 
 test("selection and comment-only interaction never changes source bytes", async ({ page }) => {
-  const original = fixtureBuffer("complex-layout.html");
-  const { frame } = await loadFixture(page, "complex-layout.html", { buffer: original });
+  const original = identifiedHtmlBuffer(fixtureBuffer("complex-layout.html"));
+  const { frame } = await loadFixture(page, "complex-layout.html", {
+    buffer: original,
+    identifiedWorkingCopy: false,
+  });
   await frame.locator(caseSelector("vertical-copy")).dblclick();
   await frame.locator(caseSelector("canvas-surface")).dispatchEvent("click", {
     bubbles: true,

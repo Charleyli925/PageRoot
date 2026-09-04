@@ -4,8 +4,9 @@ import {
   caseSelector,
   exportCurrentHtml,
   fixtureBuffer,
+  identifiedHtmlBuffer,
   loadFixture,
-  replaceEditableIslandBytes,
+  replaceEditableIslandTextByCase,
 } from "./pageroot-driver.mjs";
 
 async function activateAtLeadingText(page, frame, caseId) {
@@ -108,9 +109,10 @@ test("nested list headings and wbr text edit without changing their authored str
   page,
 }) => {
   await page.goto("/");
-  const source = fixtureBuffer("structural-text.html");
+  const source = identifiedHtmlBuffer(fixtureBuffer("structural-text.html"));
   const { frame } = await loadFixture(page, "structural-text.html", {
     buffer: source,
+    identifiedWorkingCopy: false,
   });
 
   const nested = await activateAtLeadingText(page, frame, "nested-list-title");
@@ -125,10 +127,11 @@ test("nested list headings and wbr text edit without changing their authored str
   await page.keyboard.press("Escape");
   await expect(nested).not.toHaveAttribute("contenteditable", "true");
 
-  const nestedExpected = replaceEditableIslandBytes(
+  const nestedExpected = replaceEditableIslandTextByCase(
     source,
     "nested-list-title",
-    '发现与验证阶段<ul data-keep="yes"><li>访谈 12 位内容创作者</li><li>审计现有流程</li></ul>',
+    "发现阶段",
+    "发现与验证阶段",
   );
   expect((await exportCurrentHtml(page)).equals(nestedExpected)).toBe(true);
 
@@ -152,10 +155,11 @@ test("nested list headings and wbr text edit without changing their authored str
   await page.keyboard.press("Escape");
   await expect(wbr).not.toHaveAttribute("contenteditable", "true");
 
-  const expected = replaceEditableIslandBytes(
+  const expected = replaceEditableIslandTextByCase(
     nestedExpected,
     "wbr-text",
-    "软换行机会：Hypertextual<wbr>Markup<wbr>Language",
+    "Hypertext",
+    "Hypertextual",
   );
   expect((await exportCurrentHtml(page)).equals(expected)).toBe(true);
 });
@@ -166,9 +170,10 @@ test("mixed block parents fall back to safe inline hosts and exact bare-text fra
   page,
 }) => {
   await page.goto("/");
-  const source = fixtureBuffer("structural-text.html");
+  const source = identifiedHtmlBuffer(fixtureBuffer("structural-text.html"));
   const { frame } = await loadFixture(page, "structural-text.html", {
     buffer: source,
+    identifiedWorkingCopy: false,
   });
   const mixedParent = frame.locator(caseSelector("mixed-parent"));
   const mixedInline = frame.locator(caseSelector("mixed-inline"));
@@ -182,8 +187,8 @@ test("mixed block parents fall back to safe inline hosts and exact bare-text fra
   await page.keyboard.press("Escape");
   let expected = replaceExactOnce(
     source,
-    '<b data-native-case="mixed-inline">强调文字</b>',
-    '<b data-native-case="mixed-inline">强化文字</b>',
+    ">强调文字</b>",
+    ">强化文字</b>",
   );
   expect((await exportCurrentHtml(page)).equals(expected)).toBe(true);
 
@@ -244,8 +249,8 @@ test("mixed block parents fall back to safe inline hosts and exact bare-text fra
   await page.keyboard.press("Escape");
   expected = replaceExactOnce(
     expected,
-    '<strong data-native-case="ordinary-inline-child">安全</strong>',
-    '<strong data-native-case="ordinary-inline-child">继续安全</strong>',
+    ">安全</strong>",
+    ">继续安全</strong>",
   );
   expect((await exportCurrentHtml(page)).equals(expected)).toBe(true);
 });
@@ -256,9 +261,10 @@ test("bare-text fragments persist toolbar and shortcut formatting through guarde
   page,
 }) => {
   await page.goto("/");
-  const source = fixtureBuffer("structural-text.html");
+  const source = identifiedHtmlBuffer(fixtureBuffer("structural-text.html"));
   const { frame } = await loadFixture(page, "structural-text.html", {
     buffer: source,
+    identifiedWorkingCopy: false,
   });
   const mixedParent = frame.locator(caseSelector("mixed-parent"));
   const fragmentHost = mixedParent.locator(
@@ -309,12 +315,18 @@ test("bare-text fragments persist toolbar and shortcut formatting through guarde
 
   let expected = replaceExactOnce(
     source,
-    '，裸文本<span data-keep="tail">',
-    '，<span style="all: unset; display: inline !important; font-weight: 700">裸</span>文本<span data-keep="tail">',
+    "，裸文本<span",
+    '，<span style="all: unset; display: inline !important; font-weight: 700">裸</span>文本<span',
   );
   await expect.poll(async () => (
-    await exportCurrentHtml(page)
-  ).toString("utf8")).toBe(expected.toString("utf8"));
+    (await exportCurrentHtml(page)).toString("utf8").replace(
+      / data-pageroot-id="pr1_[a-f0-9]{32}"/gu,
+      "",
+    )
+  )).toBe(expected.toString("utf8").replace(
+    / data-pageroot-id="pr1_[a-f0-9]{32}"/gu,
+    "",
+  ));
   await expect(page.locator(".toast.show")).toHaveCount(0);
   await page.keyboard.press("Escape");
   await expect(editingHost).toHaveCount(0);
@@ -335,12 +347,18 @@ test("bare-text fragments persist toolbar and shortcut formatting through guarde
 
   expected = replaceExactOnce(
     expected,
-    '</span>文本<span data-keep="tail">',
-    '</span><span style="all: unset; display: inline !important; font-style: italic">文本</span><span data-keep="tail">',
+    "</span>文本<span",
+    '</span><span style="all: unset; display: inline !important; font-style: italic">文本</span><span',
   );
   await expect.poll(async () => (
-    await exportCurrentHtml(page)
-  ).toString("utf8")).toBe(expected.toString("utf8"));
+    (await exportCurrentHtml(page)).toString("utf8").replace(
+      / data-pageroot-id="pr1_[a-f0-9]{32}"/gu,
+      "",
+    )
+  )).toBe(expected.toString("utf8").replace(
+    / data-pageroot-id="pr1_[a-f0-9]{32}"/gu,
+    "",
+  ));
   await expect(page.locator(".toast.show")).toHaveCount(0);
   await expect(mixedParent.locator(':scope > div[data-keep="chart"]')).toHaveText(
     "图表结构保持",
@@ -354,9 +372,10 @@ test("deleting a bare-text fragment ends its session without a blocked resume", 
   page,
 }) => {
   await page.goto("/");
-  const source = fixtureBuffer("structural-text.html");
+  const source = identifiedHtmlBuffer(fixtureBuffer("structural-text.html"));
   const { editor, frame } = await loadFixture(page, "structural-text.html", {
     buffer: source,
+    identifiedWorkingCopy: false,
   });
   const mixedParent = frame.locator(caseSelector("mixed-parent"));
   const fragmentHost = mixedParent.locator(
@@ -373,8 +392,8 @@ test("deleting a bare-text fragment ends its session without a blocked resume", 
 
   const expected = replaceExactOnce(
     source,
-    '，裸文本<span data-keep="tail">',
-    '<span data-keep="tail">',
+    "，裸文本<span",
+    "<span",
   );
   await expect(fragmentHost).toHaveCount(0);
   await expect(mixedParent).not.toHaveAttribute("contenteditable", "true");

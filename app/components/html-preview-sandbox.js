@@ -161,6 +161,8 @@ export function prepareVerifiedFrameDocument(
 }
 
 function uniqueRuntimeMarker(element) {
+  // Runtime source proof is Stable-ID-only. PageRoot-owned injections such as
+  // the protocol <base> are not source objects and must not mint a second ID.
   const pagerootId = element.getAttribute(PAGEROOT_ELEMENT_ID_ATTRIBUTE);
   return isValidPagerootElementId(pagerootId) ? pagerootId : null;
 }
@@ -248,10 +250,12 @@ export function prepareDisposableRuntimeFrameDocument(
   const seenMarkers = new Set();
   for (const element of sourceElements) {
     const marker = uniqueRuntimeMarker(element);
-    if (!marker || seenMarkers.has(marker)) return null;
+    if (!marker) continue;
+    if (seenMarkers.has(marker)) return null;
     seenMarkers.add(marker);
     element.setAttribute(EDIT_RUNTIME_SOURCE_MARKER_ATTRIBUTE, marker);
   }
+  if (seenMarkers.size === 0) return null;
   const scriptNodes = Array.from(parsed.querySelectorAll("script"));
   if (scriptNodes.length !== scriptContract.scripts.length) return null;
   for (let ordinal = 0; ordinal < scriptNodes.length; ordinal += 1) {

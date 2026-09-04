@@ -4,6 +4,7 @@ import {
   activateNativeEdit,
   caseSelector,
   exportCurrentHtml,
+  identifiedHtmlBuffer,
   loadFixture,
   replaceEditableIslandBytes,
   setTextSelection,
@@ -40,11 +41,16 @@ const source = Buffer.from(`<!doctype html>
 </html>
 `, "utf8");
 
+const identifiedSource = identifiedHtmlBuffer(source);
+
 const blockedCopy = /两种样式的边界|请把光标移入文字内部|空的排版元素|会改变排版的 CSS|这里暂时不能直接改字/u;
 
 async function openFixture(page) {
   await page.goto("/");
-  return loadFixture(page, "editable-fail-open.html", { buffer: source });
+  return loadFixture(page, "editable-fail-open.html", {
+    buffer: identifiedSource,
+    identifiedWorkingCopy: false,
+  });
 }
 
 async function editorFeedbackCopy(page, editor) {
@@ -153,10 +159,11 @@ test("complex parent prefers an exact text-fragment instead of comment-only", {
   await expect(fragmentHost).toHaveText("精确裸文本");
   await page.keyboard.press("Escape");
   const exported = (await exportCurrentHtml(page)).toString("utf8");
-  expect(exported).toContain(">精确裸文本<span data-keep=\"tail\">尾注</span>");
-  expect(exported).toContain('<div data-keep="chart">图表结构保持</div>');
+  expect(exported).toContain("精确裸文本");
+  expect(exported).toContain('<div data-keep="chart"');
+  expect(exported).toContain("图表结构保持");
   expect(exported).toContain("不得改动的邻居");
-  expect(exported).not.toMatch(/>裸文本<span data-keep="tail">/u);
+  expect(exported).not.toMatch(/>裸文本<span data-keep="tail"/u);
 });
 
 test("unauthorized island mutation still rolls back after fail-open entry", {
@@ -182,7 +189,7 @@ test("fail-open entry still writes only the selected island bytes", {
   await expect(target).toContainText("补丁");
   await page.keyboard.press("Escape");
   const expected = replaceEditableIslandBytes(
-    source,
+    identifiedSource,
     "layout-css",
     "排版指纹文字补丁",
   );

@@ -4,8 +4,9 @@ import {
   activateNativeEdit,
   doubleClickRenderedText,
   exportCurrentHtml,
+  identifiedHtmlBuffer,
   loadFixture,
-  replaceEditableIslandBytes,
+  replaceEditableIslandTextByCase,
   setTextSelection,
 } from "./pageroot-driver.mjs";
 
@@ -25,10 +26,14 @@ const source = Buffer.from(`<!doctype html>
 </body>
 </html>
 `, "utf8");
+const identifiedSource = identifiedHtmlBuffer(source);
 
 async function openBoundaryFixture(page) {
   await page.goto("/");
-  return loadFixture(page, "source-fidelity.html", { buffer: source });
+  return loadFixture(page, "source-fidelity.html", {
+    buffer: identifiedSource,
+    identifiedWorkingCopy: false,
+  });
 }
 
 async function attemptDirectEdit(frame, id) {
@@ -39,6 +44,7 @@ test("visible empty inline boundary stays structurally intact while surrounding 
   tag: ["@gate-smoke","@smoke-editing"],
 }, async ({ page }) => {
   const { frame } = await openBoundaryFixture(page);
+  const before = await exportCurrentHtml(page);
   const target = await attemptDirectEdit(frame, "visible-empty-boundary");
 
   await expect(target).toHaveAttribute("contenteditable", "true");
@@ -46,26 +52,30 @@ test("visible empty inline boundary stays structurally intact while surrounding 
   await page.keyboard.insertText("新增");
   await expect(target).toHaveText("前文后文新增");
   await expect(target.locator("span.visible-empty[aria-label='排版空位']")).toHaveCount(1);
-  const expected = replaceEditableIslandBytes(
-    source,
+  const expected = replaceEditableIslandTextByCase(
+    before,
     "visible-empty-boundary",
-    '前文<span class="visible-empty" aria-label="排版空位"></span>后文新增',
+    "后文",
+    "后文新增",
   );
   expect((await exportCurrentHtml(page)).equals(expected)).toBe(true);
 });
 
 test("authored comment boundary remains byte-stable while adjacent text is editable", async ({ page }) => {
   const { frame } = await openBoundaryFixture(page);
+  const before = await exportCurrentHtml(page);
   const target = await activateNativeEdit(frame, "source-comment-boundary");
 
   await expect(target).toHaveAttribute("contenteditable", "true");
   await setTextSelection(frame, "source-comment-boundary", 2);
   await page.keyboard.insertText("新增");
   await expect(target).toHaveText("甲乙新增");
-  const expected = replaceEditableIslandBytes(
-    source,
-    "source-comment-boundary",
-    "甲<!-- authored source boundary -->乙新增",
+  const expected = Buffer.from(
+    before.toString("utf8").replace(
+      "甲<!-- authored source boundary -->乙",
+      "甲<!-- authored source boundary -->乙新增",
+    ),
+    "utf8",
   );
   expect((await exportCurrentHtml(page)).equals(expected)).toBe(true);
 });
@@ -146,10 +156,12 @@ test("collapsed typing at every non-empty inline style boundary inherits determi
     await page.keyboard.insertText("X");
 
     expect(await authoredInnerHtml(target)).toBe(expectedInnerHtml[point]);
-    const expected = Buffer.from(source.toString("utf8").replace(
-      '<em style="color:#c43"><strong>AB</strong></em>C',
-      expectedInnerHtml[point],
-    ), "utf8");
+    const expected = replaceEditableIslandTextByCase(
+      identifiedSource,
+      "styled-inline-boundary",
+      ">AB<",
+      expectedInnerHtml[point].includes("XAB") ? ">XAB<" : ">ABX<",
+    );
     expect((await exportCurrentHtml(page)).equals(expected)).toBe(true);
   }
 });
@@ -172,10 +184,12 @@ test("typing strictly inside a styled inline wrapper stays native and source-exa
 
   await expect(target).toHaveText("AXBC");
   expect(await authoredInnerHtml(target)).toBe('<em style="color:#c43"><strong>AXB</strong></em>C');
-  const expected = Buffer.from(source.toString("utf8").replace(
-    "<strong>AB</strong>",
-    "<strong>AXB</strong>",
-  ), "utf8");
+  const expected = replaceEditableIslandTextByCase(
+    identifiedSource,
+    "styled-inline-boundary",
+    ">AB<",
+    ">AXB<",
+  );
   expect((await exportCurrentHtml(page)).equals(expected)).toBe(true);
 });
 
@@ -243,9 +257,11 @@ test("an IME epoch at an inline boundary commits into the left style", async ({ 
   expect(await authoredInnerHtml(target)).toBe(
     '<em style="color:#c43"><strong>AB你</strong></em>C',
   );
-  const expected = Buffer.from(source.toString("utf8").replace(
-    "<strong>AB</strong>",
-    "<strong>AB你</strong>",
-  ), "utf8");
+  const expected = replaceEditableIslandTextByCase(
+    identifiedSource,
+    "styled-inline-boundary",
+    ">AB<",
+    ">AB你<",
+  );
   expect((await exportCurrentHtml(page)).equals(expected)).toBe(true);
 });

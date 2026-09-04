@@ -32,6 +32,11 @@ export function loadCaseManifest() {
   return JSON.parse(readFileSync(path.join(fixtureRoot, "cases.json"), "utf8"));
 }
 
+export function identifiedHtmlBuffer(buffer) {
+  const text = Buffer.isBuffer(buffer) ? buffer.toString("utf8") : String(buffer);
+  return Buffer.from(materializeSourceElementIdentity(text).html, "utf8");
+}
+
 export function withBomAndCrLf(buffer) {
   const source = buffer.toString("utf8").replace(/\r?\n/g, "\r\n");
   return Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from(source, "utf8")]);
@@ -302,13 +307,14 @@ export async function loadFixture(
   name,
   {
     buffer = fixtureBuffer(name),
-    identifiedWorkingCopy = false,
+    identifiedWorkingCopy,
     requireComplete = true,
     requireNativeCase = true,
   } = {},
 ) {
   const startingFromBlankPage = page.url() === "about:blank";
-  const sourceBuffer = identifiedWorkingCopy
+  const identifyWorkingCopy = identifiedWorkingCopy ?? requireComplete;
+  const sourceBuffer = identifyWorkingCopy
     ? Buffer.from(materializeSourceElementIdentity(buffer.toString("utf8")).html, "utf8")
     : buffer;
   const host = await page.evaluate(() => ({
@@ -915,6 +921,23 @@ export async function exportCurrentHtml(page, shortcut) {
   return Buffer.concat(chunks);
 }
 
+export function replaceEditableIslandTextByCase(source, caseId, beforeText, afterText) {
+  const beforeInnerHtml = editableIslandInnerHtml(source, caseId);
+  const first = beforeInnerHtml.indexOf(beforeText);
+  if (first < 0 || beforeInnerHtml.indexOf(beforeText, first + beforeText.length) >= 0) {
+    throw new Error(
+      `Editable island oracle token must occur exactly once inside ${caseId}: ${beforeText}`,
+    );
+  }
+  return replaceEditableIslandBytes(
+    source,
+    caseId,
+    beforeInnerHtml.slice(0, first)
+      + afterText
+      + beforeInnerHtml.slice(first + beforeText.length),
+  );
+}
+
 export function replaceUniqueBytes(source, beforeText, afterText) {
   const before = Buffer.from(beforeText, "utf8");
   const after = Buffer.from(afterText, "utf8");
@@ -929,7 +952,7 @@ export function replaceUniqueBytes(source, beforeText, afterText) {
   ]);
 }
 
-export function replaceEditableIslandBytes(source, caseId, nextInnerHtml) {
+export function editableIslandInnerHtml(source, caseId) {
   const buffer = Buffer.isBuffer(source) ? source : Buffer.from(source);
   const sourceText = buffer.toString("utf8");
   const index = buildSourceIndex(sourceText);
@@ -939,10 +962,20 @@ export function replaceEditableIslandBytes(source, caseId, nextInnerHtml) {
   if (!element) {
     throw new Error(`Editable island fixture target is missing: ${caseId}`);
   }
-  const beforeInnerHtml = sourceText.slice(
+  return sourceText.slice(
     element.contentRange.startOffset,
     element.contentRange.endOffset,
   );
+}
+
+export function replaceEditableIslandBytes(source, caseId, nextInnerHtml) {
+  const buffer = Buffer.isBuffer(source) ? source : Buffer.from(source);
+  const sourceText = buffer.toString("utf8");
+  const beforeInnerHtml = editableIslandInnerHtml(sourceText, caseId);
+  const index = buildSourceIndex(sourceText);
+  const element = index.elements.find((candidate) => (
+    candidate.stableAttributes?.["data-native-case"] === caseId
+  ));
   const normalized = normalizeEditableIslandHtml(nextInnerHtml, {
     baselineInnerHtml: beforeInnerHtml,
   });
@@ -963,7 +996,8 @@ export function replaceEditableIslandTextBytes(
   const buffer = Buffer.isBuffer(source) ? source : Buffer.from(source);
   const sourceText = buffer.toString("utf8");
   const index = buildSourceIndex(sourceText);
-  const element = index.byNodeId.get(sourceNodeId);
+  const element = index.byPagerootId.get(sourceNodeId)
+    ?? index.byNodeId.get(sourceNodeId);
   if (!element || element.type !== "element") {
     throw new Error(`Editable island source element is missing: ${sourceNodeId}`);
   }

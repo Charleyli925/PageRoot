@@ -3,11 +3,12 @@ import { expect, test } from "@playwright/test";
 import {
   caseSelector,
   exportCurrentHtml,
+  identifiedHtmlBuffer,
   loadFixture,
 } from "./pageroot-driver.mjs";
 
 function computedStyleFixture() {
-  return Buffer.from(`<!doctype html>
+  return identifiedHtmlBuffer(Buffer.from(`<!doctype html>
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8">
@@ -47,7 +48,7 @@ function computedStyleFixture() {
     <p data-native-case="structural-target" data-native-mode="native-editable">Structural selector target</p>
   </main>
 </body>
-</html>`, "utf8");
+</html>`, "utf8"));
 }
 
 async function selectTarget(page, frame, editor, caseId) {
