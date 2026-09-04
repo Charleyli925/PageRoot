@@ -17,7 +17,7 @@ import type { HtmlCanvasRuntimeVisualHint } from "../components/HtmlCanvasEditor
 
 // The relink predicates live in comment-relink-model (plain JS so Node tests
 // can pin them); re-exported here for existing consumers.
-export { canLocateTarget, commentHasContent } from "./comment-relink-model.js";
+export { canLocateTarget, commentHasContent, globalPageCommentTargetFromHtml } from "./comment-relink-model.js";
 
 export function isGlobalPageTarget(target: HtmlCanvasSelection): boolean {
   return target.selector.trim().toLowerCase() === "body"

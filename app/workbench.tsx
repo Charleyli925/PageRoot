@@ -160,6 +160,7 @@ import {
   commentHasContent,
   commentsFromRecords,
   formatFileSize,
+  globalPageCommentTargetFromHtml,
   independentCommentTarget,
   insertionLabel,
   normalizeGlobalCommentTargets,
@@ -4159,15 +4160,10 @@ export default function Workbench() {
       return;
     }
     setCanvasMode("edit");
-    const globalTarget: HtmlCanvasSelection = {
-      id: "target_global_page",
-      label: "整个页面",
-      selector: "body",
-      level: "module",
-      tagName: "body",
-      text: "",
-      resolution: "exact",
-    };
+    const globalTarget = globalPageCommentTargetFromHtml(
+      currentDocumentSessionSnapshot().html,
+    );
+    if (!globalTarget) return;
     const wasRelinking = Boolean(commentCanvasPort.getSnapshot().relinkingTarget);
     editorRef.current?.clearSelection();
     commentCanvasPort.setSelection(null);
@@ -4179,6 +4175,7 @@ export default function Workbench() {
     openCommentComposer(globalTarget);
   }, [
     commentCanvasPort,
+    currentDocumentSessionSnapshot,
     finishTargetRelink,
     interactionLocked,
     openCommentComposer,

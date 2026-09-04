@@ -15,12 +15,46 @@
 // has one home; comment-model.ts re-exports them for existing consumers.
 
 import { isValidPagerootElementId } from "../../shared/pageroot-element-identity.mjs";
+import { buildSourceIndex } from "../lib/source-index.js";
 
 /** @param {{ resolution?: string, elementId?: string, commentAnchor?: { resolution?: string, elementId?: string } }} target */
 export function canLocateTarget(target) {
   const persist = target?.commentAnchor || target;
   return (persist?.resolution === "exact" || persist?.resolution === "rebound")
     && isValidPagerootElementId(persist?.elementId);
+}
+
+/**
+ * Explicit whole-page comments persist against the body's Stable ID.
+ * A body without a valid ID cannot be saved; the caller must not invent a
+ * selector-only global target.
+ *
+ * @param {string} html
+ * @returns {{
+ *   id: string,
+ *   elementId: string,
+ *   label: string,
+ *   selector: string,
+ *   level: "module",
+ *   tagName: "body",
+ *   text: string,
+ *   resolution: "exact",
+ * } | null}
+ */
+export function globalPageCommentTargetFromHtml(html) {
+  const index = buildSourceIndex(String(html || ""));
+  const body = index.elements.find((element) => element.tagName === "body");
+  if (!isValidPagerootElementId(body?.pagerootId)) return null;
+  return Object.freeze({
+    id: "target_global_page",
+    elementId: body.pagerootId,
+    label: "整个页面",
+    selector: "body",
+    level: "module",
+    tagName: "body",
+    text: "",
+    resolution: "exact",
+  });
 }
 
 /**

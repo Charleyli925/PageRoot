@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   canLocateTarget,
   commentHasContent,
+  globalPageCommentTargetFromHtml,
   unsafeRelinkComments,
 } from "../app/workbench/comment-relink-model.js";
 
@@ -78,4 +79,22 @@ test("commentHasContent accepts text or attachments", () => {
   assert.equal(commentHasContent({ text: "有字", attachments: [] }), true);
   assert.equal(commentHasContent({ text: "", attachments: [{}] }), true);
   assert.equal(commentHasContent({ text: "  ", attachments: [] }), false);
+});
+
+test("globalPageCommentTargetFromHtml binds the body's Stable ID", () => {
+  const html = `<!doctype html><html><body data-pageroot-id="${ELEMENT_ID}"><p>欢迎</p></body></html>`;
+  assert.deepEqual(globalPageCommentTargetFromHtml(html), {
+    id: "target_global_page",
+    elementId: ELEMENT_ID,
+    label: "整个页面",
+    selector: "body",
+    level: "module",
+    tagName: "body",
+    text: "",
+    resolution: "exact",
+  });
+  assert.equal(
+    globalPageCommentTargetFromHtml("<!doctype html><html><body><p>无身份</p></body></html>"),
+    null,
+  );
 });
