@@ -46,31 +46,6 @@ function createScheduler() {
   };
 }
 
-function createRecoveryStore() {
-  const values = new Map();
-  const normalize = (keys) => (Array.isArray(keys) ? keys : [keys])
-    .map(String)
-    .filter(Boolean);
-  return {
-    readRecords(keys) {
-      return normalize(keys)
-        .filter((key) => values.has(key))
-        .map((key) => ({ key, value: values.get(key) }));
-    },
-    write(keys, value) {
-      for (const key of normalize(keys)) values.set(key, structuredClone(value));
-      return true;
-    },
-    remove(keys) {
-      for (const key of normalize(keys)) values.delete(key);
-      return true;
-    },
-    get values() {
-      return values;
-    },
-  };
-}
-
 function operation(before, after) {
   let startOffset = 0;
   while (
@@ -147,7 +122,6 @@ function createHarness({
     null,
   );
   const scheduler = createScheduler();
-  const recoveryStore = createRecoveryStore();
   const canvas = {
     invalidations: 0,
     history: [],
@@ -205,7 +179,6 @@ function createHarness({
     },
     ports: {
       hash: { sha256: async (value) => sha256(value) },
-      recoveryStore,
       ...(recoveryJournal ? { recoveryJournal } : {}),
       canvas,
     },
@@ -222,7 +195,6 @@ function createHarness({
     versionSession,
     sourceHistorySession,
     scheduler,
-    recoveryStore,
     canvas,
   };
 }
@@ -626,7 +598,6 @@ test("DocumentWorkflow coalesces a 100ms source write and only accepts exact HTM
   assert.equal(queued.value.revision, 1);
   assert.deepEqual(harness.scheduler.pending.map((task) => task.delay), [100]);
   assert.equal(harness.documentSession.persistState, "queued");
-  assert.equal(harness.recoveryStore.values.size, 2);
 
   const outcome = await harness.workflow.flush({ throughRevision: 1 });
   assert.equal(outcome.status, "succeeded");
@@ -634,7 +605,6 @@ test("DocumentWorkflow coalesces a 100ms source write and only accepts exact HTM
   assert.equal(calls[0].html, after);
   assert.equal(harness.documentSession.sourceSha256, sha256(after));
   assert.equal(harness.documentSession.persistState, "idle");
-  assert.equal(harness.recoveryStore.values.size, 0);
 });
 
 test("DocumentWorkflow flushes a native-edit checkpoint immediately", async () => {
@@ -1027,7 +997,6 @@ test("DocumentWorkflow settles a failed first registration as a retryable persis
   assert.equal(autosaves, 0);
   assert.equal(harness.documentSession.persistState, "failed");
   assert.equal(harness.documentSession.pendingWrite?.html, after);
-  assert.equal(harness.recoveryStore.values.size, 1);
   const failure = events.find((event) => event.type === "document-persistence-failed");
   assert.equal(failure?.code, "PROJECT_REGISTRATION_UNAVAILABLE");
   assert.equal(failure?.fatal, false);
@@ -1046,9 +1015,23 @@ test("DocumentWorkflow rekeys recovery to registered identity before the first a
   let resolveAutosave;
   let enteredAutosave;
   const autosaveEntered = new Promise((resolve) => { enteredAutosave = resolve; });
+  const commits = [];
   const harness = createHarness({
     html: before,
     registered: false,
+    recoveryJournal: {
+      async commit(input) {
+        commits.push(structuredClone(input));
+        return {
+          ...input,
+          recoveryHtmlSha256: sha256(input.html),
+          journalSha256: sha256(`rekey:${input.revision}:${input.html}`),
+          updatedAt: "2026-08-11T00:00:00.000Z",
+        };
+      },
+      async readVerified() { return null; },
+      async remove() { return { removed: true }; },
+    },
     ensureRegistered: async () => {
       const context = harness.projectSession.register({
         epoch: harness.projectSession.epoch,
@@ -1069,14 +1052,15 @@ test("DocumentWorkflow rekeys recovery to registered identity before the first a
   harness.workflow.enqueueEdit({ html: after });
   const flushing = harness.workflow.flush();
   await autosaveEntered;
+  await Promise.resolve();
+  await Promise.resolve();
 
-  assert.equal(harness.recoveryStore.values.size, 2);
-  for (const record of harness.recoveryStore.values.values()) {
-    assert.equal(record.projectId, PROJECT_ID);
-    assert.equal(record.documentId, DOCUMENT_ID);
-    assert.equal(record.sourcePath, SOURCE_PATH);
-    assert.equal(record.html, after);
-  }
+  assert.ok(commits.some((record) => (
+    record.projectId === PROJECT_ID
+    && record.documentId === DOCUMENT_ID
+    && record.sourcePath === SOURCE_PATH
+    && record.html === after
+  )));
 
   resolveAutosave({
     ok: true,
@@ -1161,8 +1145,6 @@ test("DocumentWorkflow leaves the next document Source History untouched by a st
   );
   const expectedSnapshot = structuredClone(harness.sourceHistorySession.snapshot);
   const expectedPending = harness.sourceHistorySession.pendingOperations;
-  const nextRecoveryKey = `html-ai-recovery:${nextDocumentId}`;
-  harness.recoveryStore.write(nextRecoveryKey, { documentId: nextDocumentId, keep: true });
 
   let activateCalls = 0;
   const activate = harness.sourceHistorySession.activate.bind(harness.sourceHistorySession);
@@ -1185,10 +1167,6 @@ test("DocumentWorkflow leaves the next document Source History untouched by a st
   assert.deepEqual(actualSnapshot, expectedSnapshot);
   assert.deepEqual(harness.sourceHistorySession.pendingOperations, expectedPending);
   assert.equal(harness.sourceHistorySession.capabilities.sourceSha256, sha256(nextAfter));
-  assert.deepEqual(harness.recoveryStore.values.get(nextRecoveryKey), {
-    documentId: nextDocumentId,
-    keep: true,
-  });
 });
 
 test("DocumentWorkflow rebuilds Source History for an invalid ACK in the current context", async () => {
@@ -1247,7 +1225,6 @@ test("DocumentWorkflow preserves recovery and fails closed when autosave acknowl
   assert.equal(outcome.code, "INVALID_AUTOSAVE_ACK");
   assert.equal(harness.documentSession.persistState, "failed");
   assert.equal(harness.documentSession.pendingWrite?.html, after);
-  assert.equal(harness.recoveryStore.values.size, 2);
 });
 
 test("DocumentWorkflow keeps an externally accepted source when its canvas cannot render", async () => {
@@ -1390,13 +1367,11 @@ test("DocumentWorkflow reconciles an unknown autosave only after reading matchin
   assert.equal(calls.length, 1);
   assert.equal(harness.documentSession.sourceSha256, sha256(after));
   assert.equal(harness.documentSession.persistState, "idle");
-  assert.equal(harness.recoveryStore.values.size, 0);
 });
 
-test("DocumentWorkflow restores a matching crash record into the same durable queue", async () => {
+test("DocumentWorkflow restores a matching crash journal into the same durable queue", async () => {
   const before = "<!doctype html><html><body><p>one</p></body></html>";
   const after = before.replace("one", "two");
-  const harness = createHarness({ html: before });
   const recoveryIdentity = {
     schemaVersion: "1.0.0",
     token: sha256("recovery"),
@@ -1407,22 +1382,34 @@ test("DocumentWorkflow restores a matching crash record into the same durable qu
     sourceSha256: sha256(before),
     editRevision: 2,
   };
-  harness.workflow.replaceRecoveryIdentity(recoveryIdentity);
-  harness.recoveryStore.write(
-    `html-ai-recovery:${DOCUMENT_ID}`,
-    {
-      schemaVersion: "2.0.0",
-      projectId: PROJECT_ID,
-      documentId: DOCUMENT_ID,
-      sourcePath: SOURCE_PATH,
-      recoveryIdentity,
-      expectedSourceSha256: sha256(before),
-      revision: 2,
-      html: after,
-      changeEvents: [],
-      sourceHistoryOperations: [],
+  const recoveryJournal = {
+    async readVerified() {
+      return {
+        schemaVersion: "2.0.0",
+        projectId: PROJECT_ID,
+        documentId: DOCUMENT_ID,
+        sourcePath: SOURCE_PATH,
+        workingCopyId: "",
+        expectedSourceSha256: sha256(before),
+        revision: 2,
+        html: after,
+        recoveryHtmlSha256: sha256(after),
+        journalSha256: sha256("crash-journal"),
+        updatedAt: "2026-09-01T00:00:00.000Z",
+      };
     },
-  );
+    async commit(input) {
+      return {
+        ...input,
+        recoveryHtmlSha256: sha256(input.html),
+        journalSha256: sha256(`crash:${input.revision}`),
+        updatedAt: "2026-09-01T00:00:03.000Z",
+      };
+    },
+    async remove() { return { removed: true }; },
+  };
+  const harness = createHarness({ html: before, recoveryJournal });
+  harness.workflow.replaceRecoveryIdentity(recoveryIdentity);
   harness.client.autosave = async (body) => ({
     ok: true,
     content: body.html,
@@ -1447,20 +1434,23 @@ test("DocumentWorkflow restores a matching crash record into the same durable qu
   assert.equal(harness.documentSession.persistState, "idle");
 });
 
-test("DocumentWorkflow prefers a newer local crash record over an older Main journal", async () => {
+test("DocumentWorkflow does not recover document HTML without a Main journal", async () => {
   const before = "<!doctype html><html><body><p>one</p></body></html>";
-  const older = before.replace("one", "older-main");
-  const newer = before.replace("one", "newer-local");
-  const recoveryIdentity = {
-    schemaVersion: "1.0.0",
-    token: sha256("newer-recovery"),
-    projectId: PROJECT_ID,
-    documentId: DOCUMENT_ID,
-    sourcePath: SOURCE_PATH,
-    basedOnVersionId: "version_001",
-    sourceSha256: sha256(before),
-    editRevision: 4,
-  };
+  const harness = createHarness({ html: before });
+  const outcome = await harness.workflow.recoverAutosave({
+    context: harness.context,
+    currentSourceSha256: sha256(before),
+    serverRevision: 2,
+  });
+  assert.equal(outcome.status, "succeeded");
+  assert.equal(outcome.value.recovered, false);
+  assert.equal(harness.documentSession.html, before);
+  assert.equal(harness.documentSession.pendingWrite, null);
+});
+
+test("DocumentWorkflow restores only verified Main journal HTML", async () => {
+  const before = "<!doctype html><html><body><p>one</p></body></html>";
+  const journalHtml = before.replace("one", "older-main");
   const recoveryJournal = {
     async readVerified() {
       return {
@@ -1470,8 +1460,8 @@ test("DocumentWorkflow prefers a newer local crash record over an older Main jou
         sourcePath: SOURCE_PATH,
         expectedSourceSha256: sha256(before),
         revision: 2,
-        html: older,
-        recoveryHtmlSha256: sha256(older),
+        html: journalHtml,
+        recoveryHtmlSha256: sha256(journalHtml),
         journalSha256: sha256("older-journal"),
         updatedAt: "2026-09-01T00:00:00.000Z",
       };
@@ -1487,20 +1477,6 @@ test("DocumentWorkflow prefers a newer local crash record over an older Main jou
     async remove() { return { removed: true }; },
   };
   const harness = createHarness({ html: before, recoveryJournal });
-  harness.workflow.replaceRecoveryIdentity(recoveryIdentity);
-  harness.recoveryStore.write(`html-ai-recovery:${DOCUMENT_ID}`, {
-    schemaVersion: "2.0.0",
-    projectId: PROJECT_ID,
-    documentId: DOCUMENT_ID,
-    sourcePath: SOURCE_PATH,
-    recoveryIdentity,
-    expectedSourceSha256: sha256(before),
-    revision: 4,
-    html: newer,
-    changeEvents: [],
-    sourceHistoryOperations: [],
-  });
-
   const outcome = await harness.workflow.recoverAutosave({
     context: harness.context,
     currentSourceSha256: sha256(before),
@@ -1508,8 +1484,8 @@ test("DocumentWorkflow prefers a newer local crash record over an older Main jou
   });
   assert.equal(outcome.status, "succeeded");
   assert.equal(outcome.value.queued, true);
-  assert.equal(harness.documentSession.html, newer);
-  assert.equal(harness.documentSession.editRevision, 5);
+  assert.equal(harness.documentSession.html, journalHtml);
+  assert.equal(harness.documentSession.editRevision, 3);
 });
 
 test("DocumentWorkflow automatically restores a verified Main journal without local metadata", async () => {
@@ -1555,10 +1531,9 @@ test("DocumentWorkflow automatically restores a verified Main journal without lo
   assert.equal(harness.documentSession.workingHtmlSha256, sha256(recoveredHtml));
 });
 
-test("DocumentWorkflow uses Main bytes and compatible local recovery metadata at the same revision", async () => {
+test("DocumentWorkflow restores Main journal HTML without browser audit events", async () => {
   const before = "<!doctype html><html><body><p>one</p></body></html>";
   const recoveredHtml = before.replace("one", "merged");
-  const auditEvent = { eventId: "change_recovery_merged", kind: "test" };
   const recoveryJournal = {
     async readVerified() {
       return {
@@ -1586,18 +1561,6 @@ test("DocumentWorkflow uses Main bytes and compatible local recovery metadata at
     async remove() { return { removed: true }; },
   };
   const harness = createHarness({ html: before, recoveryJournal });
-  harness.recoveryStore.write(`html-ai-recovery:${DOCUMENT_ID}`, {
-    schemaVersion: "2.0.0",
-    projectId: PROJECT_ID,
-    documentId: DOCUMENT_ID,
-    sourcePath: SOURCE_PATH,
-    expectedSourceSha256: sha256(before),
-    revision: 4,
-    html: recoveredHtml,
-    recoveryIdentity: null,
-    changeEvents: [auditEvent],
-    sourceHistoryOperations: [],
-  });
   const outcome = await harness.workflow.recoverAutosave({
     context: harness.context,
     currentSourceSha256: sha256(before),
@@ -1606,7 +1569,7 @@ test("DocumentWorkflow uses Main bytes and compatible local recovery metadata at
   assert.equal(outcome.status, "succeeded");
   assert.equal(outcome.value.queued, true);
   assert.equal(harness.documentSession.html, recoveredHtml);
-  assert.deepEqual(harness.commentSession.changeEvents, [auditEvent]);
+  assert.deepEqual(harness.commentSession.changeEvents, []);
 });
 
 test("DocumentWorkflow keeps one journal in flight and coalesces to the latest pending HTML", async () => {

@@ -107,6 +107,7 @@ const PARSE_KEY_ALLOWED_FILES = new Set([
   ["app", "lib", "target-resolver.js"].join("/"),
 ]);
 const PAGE_VIEW_CONTEXT_FILE = ["app", "lib", "page-view-context.js"].join("/");
+const DOCUMENT_WORKFLOW_FILE = ["app", "application", "document-workflow.js"].join("/");
 const PAGE_VIEW_CONTEXT_RETIRED_ADAPTERS =
   /\bdata-p\b|\bdata-tab\b|resolveDataLinkedTabAction|resolveIndexedHandlerTabAction|SIMPLE_INDEXED_TAB_HANDLER|LEGACY_TAB_/u;
 const PROVIDER_LITERALS = ["qoder", "codex", "qoder-acp", "codex-acp"];
@@ -384,6 +385,17 @@ export function retiredArtifactViolations({ file = "", source = "", module = nul
   if (hasIdentifier(handle, "liveExactCommandTarget")) {
     violations.push(
       `${file}: liveExactCommandTarget cannot return; SourcePatch authorizes only by Stable ID`,
+    );
+  }
+  if (
+    file === DOCUMENT_WORKFLOW_FILE
+    && (
+      hasIdentifier(handle, "recoveryStore")
+      || source.includes("html-ai-recovery")
+    )
+  ) {
+    violations.push(
+      `${file}: document HTML recovery is Main journal only`,
     );
   }
   if (

@@ -789,7 +789,6 @@ test("real Document and Project workflows protect H1 for navigation, close, and 
       sha256(OLD_HTML),
       null,
     );
-    const recoveryValues = new Map();
     return new DocumentWorkflow({
       bridgeClient: client,
       ensureRegistered: async () => succeeded(projectSession.context),
@@ -817,21 +816,6 @@ test("real Document and Project workflows protect H1 for navigation, close, and 
       },
       ports: {
         hash: { sha256: async (value) => sha256(value) },
-        recoveryStore: {
-          readRecords: (keys) => (Array.isArray(keys) ? keys : [keys])
-            .filter((key) => recoveryValues.has(key))
-            .map((key) => ({ key, value: recoveryValues.get(key) })),
-          write(keys, value) {
-            for (const key of Array.isArray(keys) ? keys : [keys]) {
-              recoveryValues.set(key, structuredClone(value));
-            }
-            return true;
-          },
-          remove(keys) {
-            for (const key of Array.isArray(keys) ? keys : [keys]) recoveryValues.delete(key);
-            return true;
-          },
-        },
         recoveryJournal,
         canvas: canvasPort,
       },

@@ -1149,9 +1149,10 @@ content-safety close aggregate.
 
 The recovery-journal identity is project + document + Working Copy + revision
 and HTML Hash; `sourcePath` is a rebased location. A path change requires the
-prior journal receipt and an exact CAS rebase. Main HTML bytes win over the
-compatibility browser record at an equal revision/Hash, while the browser
-record may contribute recovery identity, audit events and history metadata.
+prior journal receipt and an exact CAS rebase. Document HTML crash recovery
+reads only that verified Main journal. Browser RecoveryStore records are
+comment-draft metadata and never contribute HTML bytes, recovery identity,
+audit events or history operations to `DocumentWorkflow`.
 Journal writes retain at most one in-flight record and one latest pending
 record. Startup scan failure degrades the journal capability without preventing
 window creation; bounded scans isolate corrupt entries and Start lists only

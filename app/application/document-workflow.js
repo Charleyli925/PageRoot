@@ -151,7 +151,6 @@ export class DocumentWorkflow {
   #sourceHistorySession;
   #codecs;
   #hashPort;
-  #recoveryStore;
   #recoveryJournal;
   #canvasPort;
   #scheduler;
@@ -215,14 +214,6 @@ export class DocumentWorkflow {
       throw new TypeError("DocumentWorkflow requires a HashPort.");
     }
     if (
-      !ports.recoveryStore
-      || typeof ports.recoveryStore.readRecords !== "function"
-      || typeof ports.recoveryStore.write !== "function"
-      || typeof ports.recoveryStore.remove !== "function"
-    ) {
-      throw new TypeError("DocumentWorkflow requires a RecoveryStore port.");
-    }
-    if (
       ports.recoveryJournal
       && (
         typeof ports.recoveryJournal.commit !== "function"
@@ -255,7 +246,6 @@ export class DocumentWorkflow {
     this.#sourceHistorySession = sourceHistorySession;
     this.#codecs = createDocumentWorkflowCodecs(codecs);
     this.#hashPort = ports.hash;
-    this.#recoveryStore = ports.recoveryStore;
     this.#recoveryJournal = ports.recoveryJournal || null;
     this.#canvasPort = ports.canvas;
     this.#scheduler = scheduler;
@@ -1361,9 +1351,6 @@ export class DocumentWorkflow {
     if (!activeContext) {
       return blocked("DOCUMENT_CONTEXT_REQUIRED", "当前页面尚未完成项目身份初始化。");
     }
-    const keys = this.#recoveryKeys(activeContext);
-    let raw = null;
-    let recoveredKey = "";
     let journalRaw = null;
     if (this.#recoveryJournal && activeContext.projectId && activeContext.documentId) {
       try {
@@ -1404,55 +1391,20 @@ export class DocumentWorkflow {
         });
       }
     }
-    const localRecord = this.#recoveryStore.readRecords(keys)
-      .filter((record) => this.#codecs.isRecord(record?.value))
-      .sort((left, right) => revision(right.value.revision) - revision(left.value.revision))[0]
-      || null;
-    const candidates = [
-      ...(journalRaw ? [{ raw: journalRaw, key: "main-recovery-journal" }] : []),
-      ...(localRecord ? [{ raw: localRecord.value, key: String(localRecord.key || "") }] : []),
-    ].filter((candidate) => (
-      String(candidate.raw.projectId || "") === activeContext.projectId
-      && String(candidate.raw.documentId || "") === activeContext.documentId
+    const raw = journalRaw
+      && String(journalRaw.projectId || "") === activeContext.projectId
+      && String(journalRaw.documentId || "") === activeContext.documentId
       && (
-        !String(candidate.raw.workingCopyId || "")
+        !String(journalRaw.workingCopyId || "")
         || !String(activeContext.workingCopyId || "")
-        || String(candidate.raw.workingCopyId) === String(activeContext.workingCopyId)
+        || String(journalRaw.workingCopyId) === String(activeContext.workingCopyId)
       )
-      && typeof candidate.raw.html === "string"
-      && /<html(?:\s|>)/iu.test(candidate.raw.html)
-    )).sort((left, right) => (
-      revision(right.raw.revision) - revision(left.raw.revision)
-      || Number(right.key === "main-recovery-journal")
-        - Number(left.key === "main-recovery-journal")
-    ));
-    if (candidates[0]) {
-      raw = candidates[0].raw;
-      recoveredKey = candidates[0].key;
-      if (
-        journalRaw
-        && localRecord
-        && revision(journalRaw.revision) === revision(localRecord.value.revision)
-        && await this.#hashPort.sha256(String(localRecord.value.html || ""))
-          === String(journalRaw.recoveryHtmlSha256 || "")
-      ) {
-        raw = {
-          ...localRecord.value,
-          ...journalRaw,
-          html: journalRaw.html,
-          recoveryIdentity: localRecord.value.recoveryIdentity,
-          changeEvents: localRecord.value.changeEvents,
-          sourceHistoryOperations: localRecord.value.sourceHistoryOperations,
-        };
-        recoveredKey = "main-recovery-journal";
-      }
-      if (recoveredKey === "main-recovery-journal") {
-        this.#recoveryCheckpoint = this.#recoveryJournalReceipt;
-      }
-    }
-    if (
-      !raw
-    ) return succeeded({ recovered: false });
+      && typeof journalRaw.html === "string"
+      && /<html(?:\s|>)/iu.test(journalRaw.html)
+      ? journalRaw
+      : null;
+    if (!raw) return succeeded({ recovered: false });
+    this.#recoveryCheckpoint = this.#recoveryJournalReceipt;
 
     try {
       const recoveredHtml = raw.html;
@@ -1467,9 +1419,6 @@ export class DocumentWorkflow {
           persistState: "idle",
           persistError: "",
         });
-        if (recoveredKey && recoveredKey !== "main-recovery-journal") {
-          this.#recoveryStore.remove(recoveredKey);
-        }
         this.#scheduleRecoveryJournal(null, activeContext);
         return succeeded({ recovered: false, reconciled: true });
       }
@@ -1484,12 +1433,10 @@ export class DocumentWorkflow {
         ...recoveredEvents.filter((event) => !existingIds.has(event.eventId)),
       ];
       const storedIdentity = this.#codecs.recoveryIdentityFromRecord(raw.recoveryIdentity);
-      const mainJournalIdentityMatches = recoveredKey === "main-recovery-journal"
-        && sameRecoveryDocument(raw, activeContext);
       const canRebaseSafely = Boolean(
         (
           identityMatches(storedIdentity, this.#recoveryIdentity, this.#codecs.sameSourcePath)
-          || mainJournalIdentityMatches
+          || sameRecoveryDocument(raw, activeContext)
         )
         && String(raw.expectedSourceSha256 || "") === String(currentSourceSha256 || ""),
       );
@@ -1677,32 +1624,8 @@ export class DocumentWorkflow {
     this.#documentSession.setPersistence({ state: "queued", error: "" });
   }
 
-  #recoveryKeys(context = {}) {
-    const documentId = String(context?.documentId || this.#projectSession.documentId || "");
-    const sourcePath = String(context?.sourcePath || this.#projectSession.sourcePath || "");
-    return [
-      documentId ? `html-ai-recovery:${documentId}` : "",
-      sourcePath ? `html-ai-recovery:${sourcePath}` : "",
-    ].filter(Boolean);
-  }
-
   #persistRecovery(write, context) {
-    const keys = this.#recoveryKeys(write || context);
-    if (keys.length === 0) return false;
     this.#scheduleRecoveryJournal(write, context);
-    if (!write) return this.#recoveryStore.remove(keys);
-    return this.#recoveryStore.write(keys, {
-      schemaVersion: "2.0.0",
-      projectId: write.projectId,
-      documentId: write.documentId,
-      sourcePath: write.sourcePath,
-      recoveryIdentity: write.recoveryIdentity,
-      expectedSourceSha256: write.expectedSourceSha256,
-      revision: write.revision,
-      html: write.html,
-      changeEvents: write.events.map(this.#codecs.persistedChangeEvent),
-      sourceHistoryOperations: write.historyOperations,
-    });
   }
 
   #checkpointFromJournal(journal, context) {
@@ -2145,15 +2068,6 @@ export class DocumentWorkflow {
     if (nextWrite) {
       this.#documentSession.setPendingWrite(nextWrite);
       this.#persistRecovery(nextWrite, acknowledgedContext);
-      if (
-        rebound.routingChanged
-        && !this.#codecs.sameSourcePath(
-          writeContext.sourcePath,
-          acknowledgedContext.sourcePath,
-        )
-      ) {
-        this.#recoveryStore.remove(`html-ai-recovery:${writeContext.sourcePath}`);
-      }
     } else {
       this.#persistRecovery(null, writeContext);
       if (rebound.routingChanged) this.#persistRecovery(null, acknowledgedContext);

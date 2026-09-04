@@ -8,7 +8,6 @@ import type {
   DocumentWorkflowCanvasPort,
   DocumentWorkflowOutcome,
   DocumentWorkflowRecoveryJournal,
-  DocumentWorkflowRecoveryStore,
 } from "./document-workflow.js";
 import type { DocumentWorkflowCodecs } from "./document-workflow-codecs.js";
 import type { CommentSession } from "./comment-session.js";
@@ -262,7 +261,6 @@ export type WorkspaceControllerConstruction = Readonly<{
   }>;
   documentWorkflow?: Readonly<{
     codecs: DocumentWorkflowCodecs;
-    recoveryStore: DocumentWorkflowRecoveryStore;
     recoveryJournal?: DocumentWorkflowRecoveryJournal | null;
     canvas?: Omit<DocumentWorkflowCanvasPort, "invalidateRenderAcks">;
     scheduler?: Readonly<{
@@ -335,10 +333,10 @@ export type RuntimeWorkspaceControllerConstruction = Readonly<{
   recoveryStore?: RecoveryStore;
   documentWorkflow: Omit<
     NonNullable<WorkspaceControllerConstruction["documentWorkflow"]>,
-    "recoveryStore" | "recoveryJournal"
+    "recoveryJournal"
   > & Partial<Pick<
     NonNullable<WorkspaceControllerConstruction["documentWorkflow"]>,
-    "recoveryStore" | "recoveryJournal"
+    "recoveryJournal"
   >>;
   commentWorkflow: Omit<
     NonNullable<WorkspaceControllerConstruction["commentWorkflow"]>,

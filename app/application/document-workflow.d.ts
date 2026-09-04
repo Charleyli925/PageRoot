@@ -17,12 +17,6 @@ export type DocumentWorkflowOutcome<T> =
   | Readonly<{ status: "unknown"; operationId: string; reason: string }>
   | Readonly<{ status: "stale"; context: ProjectContext }>;
 
-export type DocumentWorkflowRecoveryStore = Readonly<{
-  readRecords(keys: string | string[]): Array<{ key: string; value: unknown }>;
-  write(keys: string | string[], value: unknown): boolean;
-  remove(keys: string | string[]): boolean;
-}>;
-
 export type DocumentWorkflowRecoveryJournal = Readonly<{
   commit(input: Readonly<Record<string, unknown>>): Promise<Readonly<Record<string, unknown>>>;
   readVerified(input: Readonly<Record<string, unknown>>): Promise<Readonly<Record<string, unknown>> | null>;
@@ -65,7 +59,6 @@ export type DocumentWorkflowConstruction = Readonly<{
   codecs: DocumentWorkflowCodecs;
   ports: Readonly<{
     hash: Readonly<{ sha256(html: string): Promise<string> }>;
-    recoveryStore: DocumentWorkflowRecoveryStore;
     recoveryJournal?: DocumentWorkflowRecoveryJournal | null;
     canvas: DocumentWorkflowCanvasPort;
   }>;

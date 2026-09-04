@@ -457,6 +457,7 @@
       "patterns": [
         "^app/application/comment-workflow(?:-codecs)?\\.(?:js|d\\.ts)$",
         "^app/application/comment/commit-plan\\.(?:js|d\\.ts)$",
+        "^app/application/recovery-store\\.(?:js|d\\.ts)$",
         "^tests/comment-workflow\\.test\\.mjs$",
         "^tests/comment-commit-plan\\.test\\.mjs$"
       ],
@@ -468,6 +469,7 @@
         "tests/comment-workflow.test.mjs",
         "tests/comment-commit-plan.test.mjs",
         "tests/comment-session.test.mjs",
+        "tests/recovery-store.test.mjs",
         "tests/draft-session.test.mjs",
         "tests/attachment-selection.test.mjs",
         "tests/attachment-storage.test.mjs",
@@ -496,14 +498,13 @@
     {
       "id": "document-session",
       "patterns": [
-        "^app/application/(?:document-session|recovery-store)\\.(?:js|d\\.ts)$"
+        "^app/application/document-session\\.(?:js|d\\.ts)$"
       ],
       "suites": [
         "typecheck"
       ],
       "nodeTests": [
-        "tests/document-session.test.mjs",
-        "tests/recovery-store.test.mjs"
+        "tests/document-session.test.mjs"
       ]
     },
     {
@@ -522,7 +523,6 @@
         "tests/document-workflow.test.mjs",
         "tests/document-save-plan.test.mjs",
         "tests/document-session.test.mjs",
-        "tests/recovery-store.test.mjs",
         "tests/source-history-session.test.mjs",
         "tests/source-history.test.mjs",
         "tests/audit-events.test.mjs"

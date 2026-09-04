@@ -286,6 +286,13 @@ test("retired production modules and imports stay outside the graph", () => {
   );
   assert.match(
     retiredArtifactViolations({
+      file: "app/application/document-workflow.js",
+      source: 'this.#recoveryStore.write("html-ai-recovery:doc", {});',
+    }).join("\n"),
+    /document HTML recovery is Main journal only/u,
+  );
+  assert.match(
+    retiredArtifactViolations({
       file: "app/workbench/review/runtime-projection.ts",
       source: "const pattern = /^element:\\d+:\\d+:[a-z]/iu;",
     }).join("\n"),

@@ -209,7 +209,6 @@ export function createRuntimeWorkspaceController({
     ports,
     documentWorkflow: {
       ...documentWorkflow,
-      recoveryStore: documentWorkflow.recoveryStore || recoveryStore,
     },
     commentWorkflow: {
       ...commentWorkflow,
@@ -606,7 +605,6 @@ export class WorkspaceController {
         codecs: documentWorkflow.codecs,
         ports: {
           hash: this.#hashPort,
-          recoveryStore: documentWorkflow.recoveryStore,
           recoveryJournal: documentWorkflow.recoveryJournal || null,
           canvas: {
             invalidateRenderAcks: this.#canvasPort.invalidateRenderAcks,

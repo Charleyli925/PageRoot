@@ -304,7 +304,7 @@ services.
 | Durable Project File Registry, Working Copy CAS, Version/Candidate and Request/Draft records | `bridge/project-file-repository.mjs` façade over `bridge/project-file-repository/` internals (path safety, Registry, Working Copy CAS, Version/Candidate, Request/Draft). Callers keep importing the façade; there is no second persistence owner |
 | Close, switch, submit and history obligations | `app/application/drain-coordinator.js` |
 | Late query rejection and monotonic draft reads | `app/application/project-query-fence.js` |
-| Crash recovery | Main-process `desktop/recovery-journal-store.mjs` owns per-document atomic, read-back verified journals under `userData`; `app/application/recovery-store.js` remains a compatibility input and cannot by itself authorize detach without exact read-back/Hash verification |
+| Crash recovery | Main-process `desktop/recovery-journal-store.mjs` owns per-document atomic, read-back verified journals under `userData`. `DocumentWorkflow` restores document HTML only from that journal. `app/application/recovery-store.js` remains the comment-draft RecoveryStore and is not a document-HTML authority |
 | Desktop renderer host assertion before Controller construction | `app/application/desktop-host.js` |
 | Same-directory source rename, operation journal and durable active/recent path rebase | `desktop/source-rename.mjs` |
 | Directory-change hint, live source-file early warning and non-authoritative active managed locator cache | `desktop/source-file-watch.mjs`, `desktop/active-managed-locator.mjs` |
