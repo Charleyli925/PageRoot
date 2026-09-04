@@ -92,6 +92,12 @@ const RETIRED_PRODUCTION_LITERALS = new Set([
   ["source-history", "v1"].join("."),
   ["source-history", "v1", "schema", "json"].join("."),
 ]);
+const SOURCE_NODE_ID_LITERAL = ["data", "html", "ai", "source", "node", "id"].join("-");
+const SOURCE_NODE_ID_ALLOWED_FILES = new Set([
+  ["app", "lib", "source-index.js"].join("/"),
+  ["app", "components", "IslandEditingController.ts"].join("/"),
+  ["shared", "editable-island.mjs"].join("/"),
+]);
 const PAGE_VIEW_CONTEXT_FILE = ["app", "lib", "page-view-context.js"].join("/");
 const PAGE_VIEW_CONTEXT_RETIRED_ADAPTERS =
   /\bdata-p\b|\bdata-tab\b|resolveDataLinkedTabAction|resolveIndexedHandlerTabAction|SIMPLE_INDEXED_TAB_HANDLER|LEGACY_TAB_/u;
@@ -345,6 +351,11 @@ export function retiredArtifactViolations({ file = "", source = "", module = nul
   for (const literal of stringLiterals(handle)) {
     if (RETIRED_PRODUCTION_LITERALS.has(literal)) {
       violations.push(`${file}: retired source-history compatibility literal cannot return`);
+    }
+    if (literal === SOURCE_NODE_ID_LITERAL && !SOURCE_NODE_ID_ALLOWED_FILES.has(file)) {
+      violations.push(
+        `${file}: Source Node ID cannot leave source-index internals or Runtime DOM`,
+      );
     }
   }
   if (

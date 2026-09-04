@@ -410,7 +410,7 @@ Source 逐节点对账；Script 执行状态迁移；为绝对无刷新建立双
 - 旧 revision 的写入可以完成，但不得把新内存内容回滚。
 - 队列继续处理最新 revision，直至 `lastPersistedRevision=editRevision`。
 - 持久化完成后保持正常编辑状态；用户无需阅读内部写入阶段。
-- `contenteditable`、IME 快照、运行时 nodeId 和逻辑选区只存在于当前会话；不能保存为第二份 HTML 或长期 JSON。
+- `contenteditable`、IME 快照和逻辑选区只存在于当前会话；不能保存为第二份 HTML 或长期 JSON。元素身份只保存 `data-pageroot-id`。
 - flex/grid 文字只有在源码、运行时布局和 CSS selector 均安全时，才随首个真实 Patch 创建唯一 canonical 直接文字项；双击本身不修改源码。
 - 直接源码编辑的 `operationTarget` 任何目标为 `ambiguous`、`orphaned`，或 patch 越出已解析源码范围时都必须 fail-closed，保留当前源码并要求用户重新定位；运行时目标的 `ambiguous` 只表示 comment-only 视觉操作，不阻断其已验证 `commentAnchor` 的评论。
 - 行内透明节点向上寻找宿主时，只有新候选仍是安全可编辑岛才继续提升；遇到复杂父容器时回退到最近的安全行内节点。

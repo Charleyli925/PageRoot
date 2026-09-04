@@ -1,4 +1,3 @@
-import { SOURCE_NODE_ATTRIBUTE } from "../lib/source-patch-core.js";
 import { sourceTargetRefForSelection } from "../lib/canvas-target-rebind.js";
 import {
   PAGEROOT_ELEMENT_ID_ATTRIBUTE,
@@ -182,8 +181,6 @@ export function canvasTargetKeyFor({
       .find((candidate) => isValidPagerootElementId(candidate));
     if (elementId) return `element:${elementId}`;
     if (sourceRef?.targetId) return `target:${sourceRef.targetId}`;
-    const nodeId = element.getAttribute(SOURCE_NODE_ATTRIBUTE) || selection.nodeId;
-    if (nodeId) return `node:${normalized}:${nodeId}`;
   }
   return transientTargetKeyForElement(
     element,
@@ -210,8 +207,6 @@ function canvasVisualKeyFor({
   if (!runtimeGenerated) {
     const elementId = element.getAttribute(PAGEROOT_ELEMENT_ID_ATTRIBUTE);
     if (isValidPagerootElementId(elementId)) return `element:${elementId}`;
-    const nodeId = element.getAttribute(SOURCE_NODE_ATTRIBUTE);
-    if (nodeId) return `node:${normalized}:${nodeId}`;
   }
   return transientTargetKeyForElement(
     element,
@@ -230,7 +225,7 @@ export function canvasVisualTargetElement(
     return runtimeVisualTargetElement(element) ?? element;
   }
   const dedicatedSurface = element.closest("svg, math") as HTMLElement | null;
-  if (dedicatedSurface?.hasAttribute(SOURCE_NODE_ATTRIBUTE)) return dedicatedSurface;
+  if (dedicatedSurface?.hasAttribute(PAGEROOT_ELEMENT_ID_ATTRIBUTE)) return dedicatedSurface;
   return nativeEditHostForElement(element, sourceIndex) ?? element;
 }
 

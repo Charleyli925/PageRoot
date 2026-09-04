@@ -77,8 +77,8 @@ test("the checked-in targeted-change manifest is an executable release gate", as
           textQuote: expected.textQuote,
           resolution: "ambiguous",
         });
-        assert.equal(resolution.resolution, "ambiguous", expected.label);
-        assert.equal(resolution.candidates.length, candidates.length);
+        assert.equal(resolution.resolution, "orphaned", expected.label);
+        assert.equal(resolution.reason, "pageroot-identity-incomplete");
         continue;
       }
 
@@ -162,7 +162,7 @@ test("fixed Unicode/style/reorder fixtures enforce exact source patches and fail
   });
   assert.equal(
     resolveTargetRef(buildSourceIndex(externallyReordered), betaRef).resolution,
-    "rebound",
+    "orphaned",
   );
 });
 

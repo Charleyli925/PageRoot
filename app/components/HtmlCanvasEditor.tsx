@@ -38,11 +38,9 @@ import {
   isValidPagerootElementId,
 } from "../../shared/pageroot-element-identity.mjs";
 import {
-  SOURCE_NODE_ATTRIBUTE,
   applyPatchPlan,
   buildSourceIndex,
   createTargetRef,
-  instrumentPreviewHtml,
   planSemanticOperationPatch,
   planSourcePatch,
   resolveTargetRef,
@@ -103,6 +101,12 @@ import {
   type MoveAvailability,
 } from "./html-canvas-selection";
 import {
+  SOURCE_ELEMENT_ATTRIBUTE,
+  registerProvedStableSourceElements,
+  sourceElementId,
+  uniqueSourceElement,
+} from "./html-canvas-source-element";
+import {
   insertStructureCommand,
   selectedStructureCommand,
   type SelectedStructureAction,
@@ -150,7 +154,6 @@ import {
   nativeEditHostForElement,
   nativeTextFragmentForRange,
   nativeTextFragmentForElement,
-  refreshMountedPreviewSourceNodeIds,
   refreshStableMountedPreviewSourceNodeIds,
   sourceBackedPreviewElements,
   alignPreviewSourceSurface,
@@ -485,7 +488,6 @@ type RuntimeSourceElements = {
   elementGeneration: number;
   executionId: string;
   elements: WeakSet<HTMLElement>;
-  markerSourceNodeIds: WeakMap<HTMLElement, string>;
   pagerootIds: WeakMap<HTMLElement, string>;
 };
 
@@ -598,13 +600,7 @@ function runtimeSourceElementForStableId(
   if (!sourceIndex || !stableId || !isValidPagerootElementId(stableId)) return null;
   const sourceEntry = sourceIndex.byPagerootId.get(stableId);
   if (!sourceEntry || sourceEntry.type !== "element") return null;
-  const matches = Array.from(documentNode.querySelectorAll<HTMLElement>(
-    `[${SOURCE_NODE_ATTRIBUTE}]`,
-  )).filter((element) => (
-    element.getAttribute(SOURCE_NODE_ATTRIBUTE) === sourceEntry.nodeId
-    && element.getAttribute(PAGEROOT_ELEMENT_ID_ATTRIBUTE) === stableId
-  ));
-  return matches.length === 1 ? matches[0] : null;
+  return uniqueSourceElement(documentNode, stableId);
 }
 
 function runtimeStableIdForElement(
@@ -612,15 +608,12 @@ function runtimeStableIdForElement(
   sourceIndex: SourceIndexValue | null,
 ): string | null {
   const stableId = element?.getAttribute(PAGEROOT_ELEMENT_ID_ATTRIBUTE);
-  const sourceNodeId = element?.getAttribute(SOURCE_NODE_ATTRIBUTE);
-  const sourceEntry = sourceNodeId
-    ? sourceIndex?.byNodeId.get(sourceNodeId)
-    : null;
+  const sourceEntry = stableId ? sourceIndex?.byPagerootId.get(stableId) : null;
   if (
     !stableId
     || !isValidPagerootElementId(stableId)
     || sourceEntry?.type !== "element"
-    || sourceEntry.pagerootId !== stableId
+    || sourceEntry.tagName !== element?.localName
   ) return null;
   return stableId;
 }
@@ -649,7 +642,7 @@ function captureRuntimePresentationAnchor({
     ? runtimeSourceElementForStableId(documentNode, sourceIndex, selectedStableId)
     : null;
   const firstVisibleAnchor = documentNode && sourceIndex
-    ? Array.from(documentNode.querySelectorAll<HTMLElement>(`[${SOURCE_NODE_ATTRIBUTE}]`))
+    ? Array.from(documentNode.querySelectorAll<HTMLElement>(`[${SOURCE_ELEMENT_ATTRIBUTE}]`))
       .find((element) => {
         const rect = element.getBoundingClientRect();
         return Boolean(runtimeStableIdForElement(element, sourceIndex))
@@ -726,7 +719,8 @@ type ActiveNativeEdit = {
   sourceInnerHtml: string;
   fragmentTargetRef: SourceTargetRef | null;
   fragmentTextNodeId: string | null;
-  liveNodeId: string | null;
+  liveElementId: string | null;
+  directTextOrdinal: number | null;
   releaseHost: (() => void) | null;
   session: IslandEditingController;
   selection: NativeEditSelection;
@@ -820,6 +814,14 @@ type InlineStyleOverride = {
   priority: InlineStylePriority;
   computedValue: string;
 };
+
+function sourceIndexIdentityReady(sourceIndex: SourceIndexValue | null | undefined): boolean {
+  const identity = (sourceIndex as {
+    pagerootIdentity?: { complete?: unknown; valid?: unknown };
+  } | null | undefined)?.pagerootIdentity;
+  return identity?.complete === true && identity?.valid === true;
+}
+
 type PagePresentationActionCache = {
   target: HtmlCanvasSelection;
   sourceIndex: ReturnType<typeof buildSourceIndex>;
@@ -1375,25 +1377,24 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     ) return null;
     const registered = runtimeSourceElementsRef.current;
     return (element: HTMLElement) => {
-      const registeredMarkerId = registered?.markerSourceNodeIds.get(element);
       const registeredPagerootId = registered?.pagerootIds.get(element);
-      const liveSourceNodeId = element.getAttribute(SOURCE_NODE_ATTRIBUTE);
-      const liveSourceEntry = liveSourceNodeId
-        ? sourceIndexRef.current?.byNodeId.get(liveSourceNodeId)
+      const livePagerootId = element.getAttribute(PAGEROOT_ELEMENT_ID_ATTRIBUTE);
+      const liveSourceEntry = livePagerootId
+        ? sourceIndexRef.current?.byPagerootId.get(livePagerootId)
         : null;
       return Boolean(
         registered
         && registered.elementGeneration === runtimeFrame.elementGeneration
         && registered.executionId === runtimeFrame.grant.executionId
         && registered.elements.has(element)
-        && registeredMarkerId
-        && registeredMarkerId === element.getAttribute(
+        && element.isConnected
+        && registeredPagerootId
+        && registeredPagerootId === livePagerootId
+        && registeredPagerootId === element.getAttribute(
           EDIT_RUNTIME_SOURCE_MARKER_ATTRIBUTE,
         )
-        && registeredPagerootId
-        && registeredPagerootId === element.getAttribute(PAGEROOT_ELEMENT_ID_ATTRIBUTE)
         && liveSourceEntry?.type === "element"
-        && liveSourceEntry.pagerootId === registeredPagerootId
+        && liveSourceEntry.tagName === element.localName
       );
     };
   }, []);
@@ -1869,9 +1870,9 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       const sourceIndex = buildSourceIndex(source);
       sourceIndexRef.current = sourceIndex;
       latestSourceProjectionRef.current = { source, sourceIndex };
-      instrumentedSource = instrumentPreviewHtml(sourceIndex, {
-        attributeName: SOURCE_NODE_ATTRIBUTE,
-      }).html;
+      if (!sourceIndexIdentityReady(sourceIndex)) {
+        throw new Error("PAGEROOT_IDENTITY_INCOMPLETE");
+      }
       setEditFeedback(null);
     } catch (cause) {
       sourceIndexRef.current = null;
@@ -1999,15 +2000,13 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           }
           runtimeSourceRegistrationCleanupRef.current = () => undefined;
           const elements = new WeakSet<HTMLElement>();
-          const elementsBySourceNodeId = new Map<string, HTMLElement>();
-          const sourceNodeIdByElement = new WeakMap<HTMLElement, string>();
+          const claimedByPagerootId = new Map<string, HTMLElement>();
           const pagerootIdByElement = new WeakMap<HTMLElement, string>();
-          const conflictedSourceNodeIds = new Set<string>();
+          const conflictedPagerootIds = new Set<string>();
           runtimeSourceElementsRef.current = {
             elementGeneration: runtimeFrame.elementGeneration,
             executionId: runtimeFrame.grant.executionId,
             elements,
-            markerSourceNodeIds: sourceNodeIdByElement,
             pagerootIds: pagerootIdByElement,
           };
           const registerProved = (candidates: unknown) => {
@@ -2021,42 +2020,16 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
               || active.grant.executionId !== runtimeFrame.grant.executionId
               || sourceWindow !== activeIframe?.contentWindow
             ) return false;
-            const sourceIndex = sourceIndexRef.current;
-            for (const value of candidates) {
-              const element = value as HTMLElement;
-              if (
-                element?.nodeType !== 1
-                || typeof element.getAttribute !== "function"
-                || element.ownerDocument !== activeIframe.contentDocument
-              ) continue;
-              const sourceNodeId = element.getAttribute(SOURCE_NODE_ATTRIBUTE);
-              const sourceEntry = sourceNodeId
-                ? sourceIndex?.byNodeId.get(sourceNodeId)
-                : null;
-              const pagerootId = sourceEntry?.type === "element"
-                ? sourceEntry.pagerootId
-                : null;
-              if (
-                sourceNodeId
-                && pagerootId
-                && element.getAttribute(PAGEROOT_ELEMENT_ID_ATTRIBUTE) === pagerootId
-                && element.getAttribute(EDIT_RUNTIME_SOURCE_MARKER_ATTRIBUTE) === sourceNodeId
-              ) {
-                if (conflictedSourceNodeIds.has(sourceNodeId)) continue;
-                const existing = elementsBySourceNodeId.get(sourceNodeId);
-                if (existing && existing !== element) {
-                  elements.delete(existing);
-                  elementsBySourceNodeId.delete(sourceNodeId);
-                  conflictedSourceNodeIds.add(sourceNodeId);
-                  continue;
-                }
-                elementsBySourceNodeId.set(sourceNodeId, element);
-                sourceNodeIdByElement.set(element, sourceNodeId);
-                pagerootIdByElement.set(element, pagerootId);
-                elements.add(element);
-              }
-            }
-            return true;
+            return registerProvedStableSourceElements({
+              candidates,
+              documentNode: activeIframe.contentDocument,
+              sourceIndex: sourceIndexRef.current,
+              elements,
+              pagerootIds: pagerootIdByElement,
+              claimed: claimedByPagerootId,
+              conflicted: conflictedPagerootIds,
+              markerAttribute: EDIT_RUNTIME_SOURCE_MARKER_ATTRIBUTE,
+            });
           };
           const reportActivationOutcome = (outcome: unknown) => {
             const active = runtimeFrameRef.current;
@@ -2281,9 +2254,9 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     try {
       sourceIndex = buildSourceIndex(source);
       latestSourceProjectionRef.current = { source, sourceIndex };
-      instrumentedSource = instrumentPreviewHtml(sourceIndex, {
-        attributeName: SOURCE_NODE_ATTRIBUTE,
-      }).html;
+      if (!sourceIndexIdentityReady(sourceIndex)) {
+        throw new Error("PAGEROOT_IDENTITY_INCOMPLETE");
+      }
     } catch (cause) {
       latestSourceProjectionRef.current = { source, sourceIndex: null };
       setEditFeedback({
@@ -2484,15 +2457,13 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
             delete parentGlobals[registrationProperty];
           }
           const elements = new WeakSet<HTMLElement>();
-          const elementsBySourceNodeId = new Map<string, HTMLElement>();
-          const sourceNodeIdByElement = new WeakMap<HTMLElement, string>();
+          const claimedByPagerootId = new Map<string, HTMLElement>();
           const pagerootIdByElement = new WeakMap<HTMLElement, string>();
-          const conflictedSourceNodeIds = new Set<string>();
+          const conflictedPagerootIds = new Set<string>();
           candidate.sourceElements = {
             elementGeneration: candidateGeneration,
             executionId: runtimeFrame.grant.executionId,
             elements,
-            markerSourceNodeIds: sourceNodeIdByElement,
             pagerootIds: pagerootIdByElement,
           };
           const registerProved = (candidates: unknown) => {
@@ -2505,41 +2476,16 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
               || !activeIframe
               || sourceWindow !== activeIframe?.contentWindow
             ) return false;
-            for (const value of candidates) {
-              const element = value as HTMLElement;
-              if (
-                element?.nodeType !== 1
-                || typeof element.getAttribute !== "function"
-                || element.ownerDocument !== activeIframe.contentDocument
-              ) continue;
-              const sourceNodeId = element.getAttribute(SOURCE_NODE_ATTRIBUTE);
-              const sourceEntry = sourceNodeId
-                ? sourceIndex?.byNodeId.get(sourceNodeId)
-                : null;
-              const pagerootId = sourceEntry?.type === "element"
-                ? sourceEntry.pagerootId
-                : null;
-              if (
-                sourceNodeId
-                && pagerootId
-                && element.getAttribute(PAGEROOT_ELEMENT_ID_ATTRIBUTE) === pagerootId
-                && element.getAttribute(EDIT_RUNTIME_SOURCE_MARKER_ATTRIBUTE) === sourceNodeId
-              ) {
-                if (conflictedSourceNodeIds.has(sourceNodeId)) continue;
-                const existing = elementsBySourceNodeId.get(sourceNodeId);
-                if (existing && existing !== element) {
-                  elements.delete(existing);
-                  elementsBySourceNodeId.delete(sourceNodeId);
-                  conflictedSourceNodeIds.add(sourceNodeId);
-                  continue;
-                }
-                elementsBySourceNodeId.set(sourceNodeId, element);
-                sourceNodeIdByElement.set(element, sourceNodeId);
-                pagerootIdByElement.set(element, pagerootId);
-                elements.add(element);
-              }
-            }
-            return true;
+            return registerProvedStableSourceElements({
+              candidates,
+              documentNode: activeIframe.contentDocument,
+              sourceIndex,
+              elements,
+              pagerootIds: pagerootIdByElement,
+              claimed: claimedByPagerootId,
+              conflicted: conflictedPagerootIds,
+              markerAttribute: EDIT_RUNTIME_SOURCE_MARKER_ATTRIBUTE,
+            });
           };
           const reportActivationOutcome = (outcome: unknown) => {
             const currentCandidate = runtimeCandidateRef.current;
@@ -3254,10 +3200,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         && "segments" in mutationBefore
         && Array.isArray(mutationBefore.segments)
       );
-      const instrumentedNext = instrumentPreviewHtml(result.sourceIndex, {
-        attributeName: SOURCE_NODE_ATTRIBUTE,
-      }).html;
-      const detachedDocument = new DOMParser().parseFromString(instrumentedNext, "text/html");
+      const detachedDocument = new DOMParser().parseFromString(result.html, "text/html");
       const liveNodes = sourceBackedPreviewElements(documentNode);
       const detachedNodes = sourceBackedPreviewElements(detachedDocument);
       const previousElements = previousIndex.elements as SourceElementValue[];
@@ -3267,7 +3210,8 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         return failPreviewSync("previous-surface");
       }
       if (!targetedRuntimeSync && previousSurface?.some((entry, index) => (
-        liveNodes[index].getAttribute(SOURCE_NODE_ATTRIBUTE) !== entry.nodeId
+        liveNodes[index].getAttribute(SOURCE_ELEMENT_ATTRIBUTE)
+          !== previousElements[index]?.pagerootId
       ))) return failPreviewSync("previous-surface-order");
       const detachedSurface = alignPreviewSourceSurface(result.sourceIndex, detachedNodes);
       if (
@@ -3289,7 +3233,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         || nextTarget?.type !== "element"
       ) return failPreviewSync("target-resolution");
       const liveTargetCandidates = liveNodes.filter((node) => (
-        node.getAttribute(SOURCE_NODE_ATTRIBUTE) === previousTarget.nodeId
+        node.getAttribute(SOURCE_ELEMENT_ATTRIBUTE) === previousTarget.pagerootId
       ));
       const liveTarget = targetedRuntimeSync
         ? (() => {
@@ -3308,7 +3252,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           })()
         : liveTargetCandidates[0];
       const detachedTarget = detachedNodes.find((node) => (
-        node.getAttribute(SOURCE_NODE_ATTRIBUTE) === nextTarget.nodeId
+        node.getAttribute(SOURCE_ELEMENT_ATTRIBUTE) === nextTarget.pagerootId
       ));
       if (!(liveTarget instanceof LiveHTMLElement)) return failPreviewSync("live-target");
       if (!detachedTarget) return failPreviewSync("detached-target");
@@ -3326,7 +3270,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         const sourceBackedSiblings = Array.from(liveParent.children).filter(
           (element): element is Element => (
             element instanceof documentNode.defaultView!.Element
-            && element.hasAttribute(SOURCE_NODE_ATTRIBUTE)
+            && element.hasAttribute(SOURCE_ELEMENT_ATTRIBUTE)
           ),
         );
         const nextParent = nextTarget.parentId
@@ -3356,7 +3300,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           );
           if (targetedRuntimeSync) {
             trustedImportedRuntimeElements = Array.from(
-              liveTarget.querySelectorAll<HTMLElement>(`[${SOURCE_NODE_ATTRIBUTE}]`),
+              liveTarget.querySelectorAll<HTMLElement>(`[${SOURCE_ELEMENT_ATTRIBUTE}]`),
             );
           }
           const openingPatches = plan.patches.filter(
@@ -3375,12 +3319,12 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
               element.tagName === "span"
               && element.startTagRange.startOffset === shiftedStartOffset
             ));
-            return insertedSpan ? [insertedSpan.nodeId] : [];
+            return insertedSpan ? [insertedSpan.pagerootId] : [];
           });
-          selectedRangeElements = insertedSpanNodeIds.flatMap((nodeId) => {
-            const escapedNodeId = nodeId.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+          selectedRangeElements = insertedSpanNodeIds.flatMap((pagerootId) => {
+            if (!pagerootId) return [];
             const selectedSpan = liveTarget.querySelector<HTMLElement>(
-              `[${SOURCE_NODE_ATTRIBUTE}="${escapedNodeId}"]`,
+              `[${SOURCE_ELEMENT_ATTRIBUTE}="${pagerootId.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"]`,
             );
             return selectedSpan ? [selectedSpan] : [];
           });
@@ -3392,17 +3336,15 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           ).coalescedTextRangeElementId;
           if (openingPatches.length === 0 && coalescedElementId) {
             const previousStyleElementIndex = previousElements.findIndex(
-              (element) => element.nodeId === coalescedElementId,
+              (element) => element.pagerootId === coalescedElementId
+                || element.nodeId === coalescedElementId,
             );
             const nextStyleElementId = previousStyleElementIndex >= 0
-              ? nextElements[previousStyleElementIndex]?.nodeId
+              ? nextElements[previousStyleElementIndex]?.pagerootId
               : null;
             if (!nextStyleElementId) return false;
-            const escapedStyleElementId = nextStyleElementId
-              .replace(/\\/g, "\\\\")
-              .replace(/"/g, '\\"');
             const selectedStyleElement = liveTarget.querySelector<HTMLElement>(
-              `[${SOURCE_NODE_ATTRIBUTE}="${escapedStyleElementId}"]`,
+              `[${SOURCE_ELEMENT_ATTRIBUTE}="${nextStyleElementId.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"]`,
             );
             if (!selectedStyleElement) return false;
             selectedRangeElements = [selectedStyleElement];
@@ -3449,7 +3391,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         );
         const trustedImported = new Set(trustedImportedRuntimeElements);
         const registered = runtimeSourceElementsRef.current;
-        stableUpdates.forEach(({ element: stableElement, pagerootId, nextNodeId }) => {
+        stableUpdates.forEach(({ element: stableElement, pagerootId }) => {
           if (
             !registered
             || registered.elementGeneration !== currentRuntime?.elementGeneration
@@ -3461,15 +3403,10 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           ) return;
           stableElement.setAttribute(
             EDIT_RUNTIME_SOURCE_MARKER_ATTRIBUTE,
-            nextNodeId,
+            pagerootId,
           );
-          registered.markerSourceNodeIds.set(stableElement, nextNodeId);
           registered.pagerootIds.set(stableElement, pagerootId);
           registered.elements.add(stableElement);
-        });
-      } else if (stableSurface) {
-        stableSurface.forEach(({ node, nodeId }) => {
-          node.setAttribute(SOURCE_NODE_ATTRIBUTE, nodeId);
         });
       }
       sourceIndexRef.current = result.sourceIndex;
@@ -3589,13 +3526,12 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         nextIndex,
       );
       const registered = runtimeSourceElementsRef.current;
-      stableUpdates.forEach(({ element, pagerootId, nextNodeId }) => {
+      stableUpdates.forEach(({ element, pagerootId }) => {
         if (
           registered?.elements.has(element)
           && registered.pagerootIds.get(element) === pagerootId
         ) {
-          element.setAttribute(EDIT_RUNTIME_SOURCE_MARKER_ATTRIBUTE, nextNodeId);
-          registered.markerSourceNodeIds.set(element, nextNodeId);
+          element.setAttribute(EDIT_RUNTIME_SOURCE_MARKER_ATTRIBUTE, pagerootId);
         }
       });
       stableIdsRebound = true;
@@ -3902,35 +3838,29 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           ...activeNativeEdit.lease,
           sourceRevision: result.sourceSha256,
         };
-        const refreshedMountedSourceIds = refreshMountedPreviewSourceNodeIds(
-          activeNativeEdit.rootElement.ownerDocument,
-          sourceIndex,
-          result.sourceIndex,
-          {
-            session: activeNativeEdit.session,
-            excludeRoot: activeNativeEdit.rootElement,
-          },
-        );
-        if (refreshedIsland) {
-          activeNativeEdit.session.runExpectedMutation(() => {
-            activeNativeEdit.rootElement
-              .querySelectorAll(`[${SOURCE_NODE_ATTRIBUTE}]`)
-              .forEach((element) => element.removeAttribute(SOURCE_NODE_ATTRIBUTE));
-            activeNativeEdit.rootElement.setAttribute(
-              SOURCE_NODE_ATTRIBUTE,
-              refreshedIsland.element.nodeId,
-            );
-          });
-        }
         sourceIndexRef.current = result.sourceIndex;
         frameSourceHtmlRef.current = result.html;
         activeNativeEdit.rootTargetRef = refreshedRootRef;
         activeNativeEdit.fragmentTargetRef = refreshedFragmentRef;
-        activeNativeEdit.liveNodeId = refreshedIsland?.element.nodeId
-          ?? refreshedFragmentNode?.parentId
-          ?? activeNativeEdit.liveNodeId;
+        const nextLiveElementId = refreshedIsland?.element.pagerootId
+          ?? refreshedFragmentRef?.elementId
+          ?? activeNativeEdit.liveElementId;
+        activeNativeEdit.liveElementId = typeof nextLiveElementId === "string"
+          ? nextLiveElementId
+          : activeNativeEdit.liveElementId;
         activeNativeEdit.fragmentTextNodeId = refreshedFragmentNode?.nodeId
           ?? (nextFragmentHtml === "" ? null : activeNativeEdit.fragmentTextNodeId);
+        if (refreshedFragmentNode?.parentId) {
+          const fragmentParent = result.sourceIndex.byNodeId.get(
+            refreshedFragmentNode.parentId,
+          );
+          const ordinal = fragmentParent?.textNodeIds?.indexOf(
+            refreshedFragmentNode.nodeId,
+          );
+          if (Number.isInteger(ordinal) && ordinal >= 0) {
+            activeNativeEdit.directTextOrdinal = ordinal;
+          }
+        }
         activeNativeEdit.target = appliedMutation.target;
         selectedSourceSelectionRef.current = appliedMutation.target;
         setSelection(appliedMutation.target);
@@ -3973,7 +3903,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         activeNativeEdit.projection = refreshedProjection;
         activeNativeEdit.sourceInnerHtml = nextSourceInnerHtml;
         activeNativeEdit.selection = options.islandTextCommit.selection;
-        const renderedProjectionRemainsExact = Boolean(refreshedMountedSourceIds);
+        const renderedProjectionRemainsExact = true;
         nativeEditNeedsReloadRef.current = !renderedProjectionRemainsExact;
         renderedSourceHtmlRef.current = renderedProjectionRemainsExact
           ? result.html
@@ -4403,8 +4333,10 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
             type: "update-direct-text-node" as const,
             targetRef: active.rootTargetRef,
             textTargetRef: active.fragmentTargetRef!,
-            nodeId: active.liveNodeId ?? undefined,
-            textNodeId: active.fragmentTextNodeId ?? undefined,
+            elementId: active.liveElementId ?? undefined,
+            parentElementId: active.liveElementId ?? undefined,
+            hostElementId: active.liveElementId ?? undefined,
+            directTextOrdinal: active.directTextOrdinal ?? 0,
             beforeFragmentHtml: previousInnerHtml,
             nextFragmentHtml: nextInnerHtml,
             expectedSourceSha256: active.projection.sourceSha256,
@@ -4412,7 +4344,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         : {
             type: "replace-editable-island" as const,
             targetRef: active.rootTargetRef,
-            nodeId: active.liveNodeId ?? undefined,
+            elementId: active.liveElementId ?? undefined,
             beforeInnerHtml: previousInnerHtml,
             nextInnerHtml,
             expectedSourceSha256: active.projection.sourceSha256,
@@ -4857,7 +4789,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
               ...options,
               fromQueuedCommand: true,
             }),
-            { targetId: element.getAttribute(SOURCE_NODE_ATTRIBUTE) },
+            { targetId: sourceElementId(element) },
           )
         ) return activeNativeEdit.target;
         const requestedTarget = options.selectionOverride
@@ -5008,17 +4940,16 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           sourceTargetRefForSelection(commentAnchor),
           { surface: "comments" },
         );
-        const sourceNodeId = resolved.target?.type === "element"
-          ? resolved.target.nodeId
-          : commentAnchor.nodeId;
-        if (sourceNodeId) {
-          const escapedSourceNodeId = String(sourceNodeId)
-            .replace(/\\/g, "\\\\")
-            .replace(/"/g, '\\"');
+        const sourceElementIdValue = resolved.target?.type === "element"
+          ? resolved.target.pagerootId
+          : commentAnchor.elementId;
+        if (sourceElementIdValue) {
           resolvedAnchorElement = iframeRef.current?.contentDocument
-            ?.querySelector<HTMLElement>(
-              `[${SOURCE_NODE_ATTRIBUTE}="${escapedSourceNodeId}"]`,
-            ) ?? null;
+            ? uniqueSourceElement(
+              iframeRef.current.contentDocument,
+              sourceElementIdValue,
+            )
+            : null;
         }
       } catch {
         resolvedAnchorElement = null;
@@ -5151,15 +5082,14 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       let blockedCause: Error = new Error(
         "这段可见内容不是当前源码中的唯一静态文字，无法安全进入原位编辑。",
       );
-      const selectedNodeId = selectedElement.getAttribute(SOURCE_NODE_ATTRIBUTE);
-      const selectedSourceNode = selectedNodeId
-        ? sourceIndex.byNodeId.get(selectedNodeId)
+      const selectedSource = sourceElementId(selectedElement)
+        ? sourceIndex.byPagerootId.get(sourceElementId(selectedElement)!)
         : null;
-      if (selectedSourceNode?.type === "element") {
+      if (selectedSource?.type === "element") {
         try {
           const selectedTargetRef = createTargetRef(
             sourceIndex,
-            selectedSourceNode,
+            selectedSource,
             { level: "subregion" },
           ) as SourceTargetRef;
           const islandCapability = isEditableIslandTarget(
@@ -5271,12 +5201,12 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         if (fragmentCandidate) {
           fragmentCandidate.textNode.data = projection.text;
         } else {
-          const hostNodeId = islandHostElement!.getAttribute(SOURCE_NODE_ATTRIBUTE);
+          const hostElementId = sourceElementId(islandHostElement!);
           if (
-            !hostNodeId
+            !hostElementId
             || !remountNativeHostFromSource(
               islandHostElement!,
-              hostNodeId,
+              hostElementId,
               sourceIndex,
             )
           ) {
@@ -5433,9 +5363,12 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         sourceInnerHtml,
         fragmentTargetRef,
         fragmentTextNodeId: fragmentCandidate?.textNodeId ?? null,
-        liveNodeId: (
+        liveElementId: (
           fragmentCandidate?.parentElement ?? islandHostElement
-        )?.getAttribute(SOURCE_NODE_ATTRIBUTE) ?? target.nodeId ?? null,
+        ) ? sourceElementId(
+          fragmentCandidate?.parentElement ?? islandHostElement!,
+        ) ?? target.elementId ?? null : target.elementId ?? null,
+        directTextOrdinal: fragmentCandidate?.directTextOrdinal ?? null,
         releaseHost: mountedFragment?.release ?? null,
         session,
         lease,
@@ -5526,12 +5459,12 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       active.mode !== "editable-island"
       ||
       activeNativeEditRef.current !== active
-      || !target.nodeId
+      || !target.elementId
       || !active.rootElement.isConnected
     ) return false;
     const canonicalTarget = canonicalNativeHostPreview(
       active.rootElement,
-      target.nodeId,
+      target.elementId,
       nextIndex,
     );
     const parentNode = active.rootElement.parentNode;
@@ -5543,15 +5476,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     if (!(nextRoot instanceof active.rootElement.ownerDocument.defaultView!.HTMLElement)) {
       return false;
     }
-    if (!refreshMountedPreviewSourceNodeIds(
-      active.rootElement.ownerDocument,
-      previousIndex,
-      nextIndex,
-      {
-        session: active.session,
-        excludeRoot: active.rootElement,
-      },
-    )) return false;
 
     clearNativeEditCheckpointTimer();
     currentNativeEditLeaseRef.current = null;
@@ -5940,11 +5864,10 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           onSelectRef.current?.(unresolved);
           return unresolved;
         }
-        const nodeId = String(resolution.target.nodeId);
-        const escapedNodeId = nodeId.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
-        const element = documentNode.querySelector<HTMLElement>(
-          `[${SOURCE_NODE_ATTRIBUTE}="${escapedNodeId}"]`,
-        );
+        const elementId = String(resolution.target.pagerootId ?? "");
+        const element = elementId
+          ? uniqueSourceElement(documentNode, elementId)
+          : null;
         if (!element) return {
           ...sourceTarget,
           resolution: "orphaned",
@@ -6086,12 +6009,10 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     const activeRange = documentNode
       ? activeTextRangeFromDocument(documentNode, sourceIndexRef.current)
       : null;
-    if (!documentNode || !activeRange?.target.nodeId) return null;
-    const escapedNodeId = activeRange.target.nodeId
-      .replace(/\\/g, "\\\\")
-      .replace(/"/g, '\\"');
-    const targetElement = documentNode.querySelector<HTMLElement>(
-      `[${SOURCE_NODE_ATTRIBUTE}="${escapedNodeId}"]`,
+    if (!documentNode || !activeRange?.target.elementId) return null;
+    const targetElement = uniqueSourceElement(
+      documentNode,
+      activeRange.target.elementId,
     );
     if (!targetElement) return null;
     activeTextRangeRef.current = activeRange;
@@ -6150,11 +6071,11 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         )
       : active.target;
     active.target = currentTarget;
-    const liveSourceNodeId = active.selectionElement.getAttribute(SOURCE_NODE_ATTRIBUTE);
+    const liveElementId = sourceElementId(active.selectionElement);
     containerRef.current?.setAttribute(
       "data-native-fence-target",
-      `${liveSourceNodeId ?? "none"}:${
-        liveSourceNodeId && sourceIndexRef.current?.byNodeId.has(liveSourceNodeId)
+      `${liveElementId ?? "none"}:${
+        liveElementId && sourceIndexRef.current?.byPagerootId.has(liveElementId)
           ? "mapped"
           : "missing"
       }:${currentTarget.resolution}`,

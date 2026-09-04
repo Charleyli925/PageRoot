@@ -5,8 +5,6 @@ import {
   buildSourceIndex,
   createInsertionPointTargetRef,
   createTargetRef,
-  getTargetResolverShadowStats,
-  resetTargetResolverShadowStats,
   resolveTargetRef,
 } from "../app/lib/source-patch-core.js";
 
@@ -16,8 +14,7 @@ const ID_BETA = "pr1_3333333333334333a333333333333333";
 
 const MANAGED = `<!doctype html><html data-pageroot-id="${ID_ROOT}"><head data-pageroot-id="${ID_BETA}"><title data-pageroot-id="pr1_4444444444444444b444444444444444">t</title></head><body data-pageroot-id="pr1_55555555555545558555555555555555"><section data-pageroot-id="${ID_ALPHA}" class="old" data-key="a"><h2 data-pageroot-id="pr1_66666666666646669666666666666666">Alpha 唯一标题</h2></section></body></html>`;
 
-test("unmanaged HTML still uses the legacy resolver as the official result", () => {
-  resetTargetResolverShadowStats();
+test("incomplete identity HTML cannot use selector or fingerprint fallback", () => {
   const html = `<main id="root"><section class="old" data-key="a"><h2>Alpha 唯一标题</h2></section><section data-key="b"><h2>Beta</h2></section></main>`;
   const index = buildSourceIndex(html);
   const alpha = index.elements.find(
@@ -29,12 +26,11 @@ test("unmanaged HTML still uses the legacy resolver as the official result", () 
     surface: "edit",
   });
   assert.equal(index.pagerootIdentity.complete, false);
-  assert.equal(rebound.resolution, "rebound");
-  assert.equal(getTargetResolverShadowStats().edit.fallbackOnlySuccess, 0);
+  assert.equal(rebound.resolution, "orphaned");
+  assert.equal(rebound.reason, "pageroot-identity-incomplete");
 });
 
-test("managed Working Copy locates only by elementId and shadows fallback-only success", () => {
-  resetTargetResolverShadowStats();
+test("managed Working Copy locates only by elementId", () => {
   const index = buildSourceIndex(MANAGED);
   assert.equal(index.pagerootIdentity.complete, true);
   const alpha = index.byPagerootId.get(ID_ALPHA);
@@ -42,19 +38,15 @@ test("managed Working Copy locates only by elementId and shadows fallback-only s
   const official = resolveTargetRef(index, withId, { surface: "edit" });
   assert.equal(official.resolution, "exact");
   assert.equal(official.reason, "stable-element-and-source-hash-match");
-  assert.equal(getTargetResolverShadowStats().edit.fallbackOnlySuccess, 0);
 
   const idLess = { ...withId };
   delete idLess.elementId;
   const orphaned = resolveTargetRef(index, idLess, { surface: "comments" });
   assert.equal(orphaned.resolution, "orphaned");
   assert.equal(orphaned.reason, "managed-element-id-required");
-  assert.equal(getTargetResolverShadowStats().comments.fallbackOnlySuccess, 1);
-  assert.equal(getTargetResolverShadowStats().edit.fallbackOnlySuccess, 0);
 });
 
-test("managed documents orphan ID-less historical refs and count fallback-only shadow hits", () => {
-  resetTargetResolverShadowStats();
+test("managed documents orphan ID-less historical refs", () => {
   const index = buildSourceIndex(MANAGED);
   const historical = {
     targetId: "target_legacy_comment",
@@ -78,12 +70,9 @@ test("managed documents orphan ID-less historical refs and count fallback-only s
   const official = resolveTargetRef(index, historical, { surface: "review" });
   assert.equal(official.resolution, "orphaned");
   assert.equal(official.reason, "managed-element-id-required");
-  assert.equal(getTargetResolverShadowStats().review.fallbackOnlySuccess, 1);
-  assert.equal(getTargetResolverShadowStats().review.shadowSuccess, 1);
 });
 
 test("a deleted managed ID stays orphaned even if a similar node remains", () => {
-  resetTargetResolverShadowStats();
   const index = buildSourceIndex(MANAGED);
   const alpha = index.byPagerootId.get(ID_ALPHA);
   const target = createTargetRef(index, alpha.nodeId);
@@ -99,8 +88,7 @@ test("a deleted managed ID stays orphaned even if a similar node remains", () =>
   assert.equal(official.target, null);
 });
 
-test("whole-page body comments stay exact on managed documents without counting fallback-only", () => {
-  resetTargetResolverShadowStats();
+test("whole-page comments require the body Stable ID", () => {
   const index = buildSourceIndex(MANAGED);
   const body = index.elements.find((element) => element.tagName === "body");
   const official = resolveTargetRef(index, {
@@ -110,14 +98,21 @@ test("whole-page body comments stay exact on managed documents without counting 
     selector: "body",
     resolution: "exact",
   }, { surface: "comments" });
-  assert.equal(official.resolution, "exact");
-  assert.equal(official.target?.nodeId, body.nodeId);
-  assert.equal(official.reason, "whole-page-body-semantic");
-  assert.equal(getTargetResolverShadowStats().comments.fallbackOnlySuccess, 0);
+  assert.equal(official.resolution, "orphaned");
+  assert.equal(official.reason, "managed-element-id-required");
+
+  const withId = resolveTargetRef(index, {
+    targetId: "target_page",
+    elementId: body.pagerootId,
+    label: "整个页面",
+    level: "module",
+    resolution: "exact",
+  }, { surface: "comments" });
+  assert.equal(withId.resolution, "exact");
+  assert.equal(withId.target?.pagerootId, body.pagerootId);
 });
 
 test("managed insertion points require a parent elementId", () => {
-  resetTargetResolverShadowStats();
   const index = buildSourceIndex(MANAGED);
   const body = index.elements.find((element) => element.tagName === "body");
   const insertion = createInsertionPointTargetRef(index, { parentId: body.nodeId });
@@ -129,5 +124,4 @@ test("managed insertion points require a parent elementId", () => {
   const orphaned = resolveTargetRef(index, idLess, { surface: "edit" });
   assert.equal(orphaned.resolution, "orphaned");
   assert.equal(orphaned.reason, "managed-insertion-requires-parent-id");
-  assert.equal(getTargetResolverShadowStats().edit.fallbackOnlySuccess >= 1, true);
 });

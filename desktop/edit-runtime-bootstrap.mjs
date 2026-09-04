@@ -28,7 +28,7 @@ export function createEditRuntimeBootstrap({ executionId, sessionId } = {}) {
   }
   const configuration = JSON.stringify({
     markerAttribute: EDIT_RUNTIME_SOURCE_MARKER_ATTRIBUTE,
-    sourceNodeAttribute: "data-html-ai-source-node-id",
+    stableIdAttribute: "data-pageroot-id",
     scriptStubAttribute: "data-pageroot-edit-runtime-script",
     disabledScriptAttribute: "data-html-canvas-disabled-script",
     originalScriptTypeAttribute: "data-html-canvas-original-script-type",
@@ -57,37 +57,33 @@ export function createEditRuntimeBootstrap({ executionId, sessionId } = {}) {
     if (!root || root.nodeType !== Node.ELEMENT_NODE) return [];
     const elements = (
       root.hasAttribute(config.markerAttribute)
-      || root.hasAttribute(config.sourceNodeAttribute)
+      || root.hasAttribute(config.stableIdAttribute)
     ) ? [root] : [];
     return elements.concat(Array.from(root.querySelectorAll(
-      "[" + config.markerAttribute + "],[" + config.sourceNodeAttribute + "]",
+      "[" + config.markerAttribute + "],[" + config.stableIdAttribute + "]",
     )));
   };
 
   const reject = (element) => {
     element.removeAttribute(config.markerAttribute);
-    element.removeAttribute(config.sourceNodeAttribute);
   };
 
   const proveParsedSource = () => {
     const claimedIds = new Set();
     const sourceElements = [];
     for (const element of candidates(document.documentElement)) {
-      const sourceNodeId = element.getAttribute(config.markerAttribute) || "";
-      if (!sourceNodeId) {
+      const markerId = element.getAttribute(config.markerAttribute) || "";
+      const stableId = element.getAttribute(config.stableIdAttribute) || "";
+      if (!markerId || !stableId || markerId !== stableId) {
         reject(element);
         continue;
       }
-      const publicSourceNodeId = element.getAttribute(config.sourceNodeAttribute) || "";
-      if (
-        claimedIds.has(sourceNodeId)
-        || (publicSourceNodeId && publicSourceNodeId !== sourceNodeId)
-      ) {
+      if (claimedIds.has(stableId)) {
         reject(element);
         continue;
       }
-      claimedIds.add(sourceNodeId);
-      if (publicSourceNodeId === sourceNodeId) sourceElements.push(element);
+      claimedIds.add(stableId);
+      sourceElements.push(element);
     }
     if (sourceElements.length > 0 && typeof registerProved === "function") {
       registerProved(sourceElements);
@@ -105,7 +101,7 @@ export function createEditRuntimeBootstrap({ executionId, sessionId } = {}) {
       for (const attribute of Array.from(placeholder.attributes)) {
         if (
           attribute.name === config.markerAttribute
-          || attribute.name === config.sourceNodeAttribute
+          || attribute.name === config.stableIdAttribute
           || attribute.name === config.scriptStubAttribute
           || attribute.name === config.disabledScriptAttribute
           || attribute.name === config.originalScriptTypeAttribute

@@ -447,27 +447,15 @@ async function assertRuntimeCandidateReused(page) {
 
 function parserPreclaimFixture() {
   const futurePagerootId = "pr1_123456789abc4def8abc000000000006";
-  const nodeIdPlaceholder = "__FUTURE_SOURCE_NODE_ID__";
-  const template = `<!doctype html>
+  return `<!doctype html>
 <html data-pageroot-id="pr1_123456789abc4def8abc000000000001"><head data-pageroot-id="pr1_123456789abc4def8abc000000000002"><title data-pageroot-id="pr1_123456789abc4def8abc000000000003">Preclaim</title><script data-pageroot-id="pr1_123456789abc4def8abc000000000004">
     const decoy = document.createElement('button');
     decoy.id = 'runtime-preclaim-decoy';
     decoy.textContent = '伪造源码按钮';
     decoy.setAttribute('data-pageroot-id', '${futurePagerootId}');
-    decoy.setAttribute('data-html-ai-source-node-id', '${nodeIdPlaceholder}');
-    decoy.setAttribute('data-pageroot-edit-runtime-source', '${nodeIdPlaceholder}');
+    decoy.setAttribute('data-pageroot-edit-runtime-source', '${futurePagerootId}');
     document.documentElement.append(decoy);
   </script></head><body data-pageroot-id="pr1_123456789abc4def8abc000000000005"><button id="future-source" data-native-case="runtime-preclaim" data-pageroot-id="${futurePagerootId}">真实源码按钮</button></body></html>`;
-  let sourceNodeId = nodeIdPlaceholder;
-  let html = template;
-  for (let attempt = 0; attempt < 8; attempt += 1) {
-    html = template.replaceAll(nodeIdPlaceholder, sourceNodeId);
-    const next = buildSourceIndex(html).byPagerootId.get(futurePagerootId)?.nodeId;
-    if (!next) throw new Error("Unable to resolve future source-node identity.");
-    if (next === sourceNodeId) return html;
-    sourceNodeId = next;
-  }
-  throw new Error("Future source-node identity did not stabilize.");
 }
 
 test("author script cannot preclaim a future parser-authored source object", {
@@ -513,23 +501,30 @@ test("author Script cannot add source authority after Runtime starts or save Run
     const sourceIdLate = document.querySelector('#source-id-late');
     const sourceIdDecoy = document.querySelector('#source-id-decoy');
     sourceIdForged.setAttribute(
-      'data-html-ai-source-node-id',
-      sourceIdDecoy.getAttribute('data-html-ai-source-node-id'),
+      'data-pageroot-id',
+      sourceIdDecoy.getAttribute('data-pageroot-id'),
+    );
+    sourceIdForged.setAttribute(
+      'data-pageroot-edit-runtime-source',
+      sourceIdDecoy.getAttribute('data-pageroot-edit-runtime-source'),
     );
     window.__mutateSelectedSourceIdentity = () => {
       sourceIdLate.setAttribute(
-        'data-html-ai-source-node-id',
-        sourceIdDecoy.getAttribute('data-html-ai-source-node-id'),
+        'data-pageroot-id',
+        sourceIdDecoy.getAttribute('data-pageroot-id'),
+      );
+      sourceIdLate.setAttribute(
+        'data-pageroot-edit-runtime-source',
+        sourceIdDecoy.getAttribute('data-pageroot-edit-runtime-source'),
       );
     };
     const generated = document.createElement('button');
     generated.id = 'runtime-generated';
     generated.textContent = '运行时按钮';
-    const copiedSourceId = host.getAttribute('data-html-ai-source-node-id');
+    const copiedPagerootId = host.getAttribute('data-pageroot-id');
     const copiedRuntimeMarker = host.getAttribute('data-pageroot-edit-runtime-source');
     generated.setAttribute('data-pageroot-edit-runtime-source', copiedRuntimeMarker);
-    generated.setAttribute('data-html-ai-source-node-id', copiedSourceId);
-    generated.setAttribute('data-pageroot-id', host.getAttribute('data-pageroot-id'));
+    generated.setAttribute('data-pageroot-id', copiedPagerootId);
     const copiedProofProperty = Object.getOwnPropertyNames(host).find(
       (name) => name.startsWith('__pageroot_edit_source_'),
     );
@@ -604,9 +599,9 @@ test("author Script cannot add source authority after Runtime starts or save Run
     await expect(toolbar.getByRole("button", { name: "删除元素", exact: true })).toBeVisible();
     await frame.evaluate(() => window.__mutateSelectedSourceIdentity());
     await expect.poll(async () => frame.locator("#source-id-late").getAttribute(
-      "data-html-ai-source-node-id",
+      "data-pageroot-id",
     )).toBe(await frame.locator("#source-id-decoy").getAttribute(
-      "data-html-ai-source-node-id",
+      "data-pageroot-id",
     ));
     page.once("dialog", (dialog) => dialog.accept());
     await toolbar.getByRole("button", { name: "删除元素", exact: true }).click();
@@ -618,13 +613,13 @@ test("author Script cannot add source authority after Runtime starts or save Run
     await expect(toolbar.getByRole("button", { name: "编辑", exact: true })).toHaveCount(0);
 
     const provenance = await frame.locator("#runtime-generated").evaluate((node) => ({
-      generatedSourceId: node.getAttribute("data-html-ai-source-node-id"),
+      generatedPagerootId: node.getAttribute("data-pageroot-id"),
       runtimeMarker: node.getAttribute("data-pageroot-edit-runtime-source"),
-      hostSourceId: node.closest("[data-html-ai-source-node-id]")
-        ?.getAttribute("data-html-ai-source-node-id") || null,
+      hostPagerootId: node.closest("[data-pageroot-id]")
+        ?.getAttribute("data-pageroot-id") || null,
     }));
-    expect(provenance.generatedSourceId).toBe(provenance.hostSourceId);
-    expect(provenance.runtimeMarker).toBe(provenance.generatedSourceId);
+    expect(provenance.generatedPagerootId).toBe(provenance.hostPagerootId);
+    expect(provenance.runtimeMarker).toBe(provenance.generatedPagerootId);
     expect(readFileSync(sourcePath, "utf8")).toBe(html);
     expect(readFileSync(sourcePath, "utf8")).not.toContain('<button id="runtime-generated"');
 

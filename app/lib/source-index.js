@@ -9,6 +9,9 @@ import {
 } from "./pageroot-element-identity.js";
 
 export const SOURCE_NODE_ATTRIBUTE = "data-html-ai-source-node-id";
+// parseKey / nodeId is a single-parse handle inside SourceIndex. It must not
+// leave source-index / source-patch, enter Runtime DOM, TargetRef, Selection,
+// comments, Review or history, or authorize edits.
 
 const VOID_ELEMENTS = new Set([
   "area",

@@ -227,7 +227,8 @@ export function createPageViewContext({
   for (const rawEntry of snapshot.entries) {
     const sourceNodeId = String(rawEntry?.sourceNodeId ?? "");
     if (!sourceNodeId || sourceNodeCounts.get(sourceNodeId) !== 1) continue;
-    const element = sourceIndex.byNodeId.get(sourceNodeId);
+    const element = sourceIndex.byPagerootId.get(sourceNodeId)
+      ?? sourceIndex.byNodeId.get(sourceNodeId);
     if (
       !element
       || element.type !== "element"
@@ -331,7 +332,7 @@ function resolvePageViewContextFromIndex(sourceIndex, context) {
     if (!sourceState) continue;
     entries.push({
       entry,
-      sourceNodeId: resolution.target.nodeId,
+      sourceNodeId: resolution.target.pagerootId ?? resolution.target.nodeId,
       resolution: resolution.resolution,
       sourceState,
     });

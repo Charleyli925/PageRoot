@@ -1,5 +1,4 @@
 import {
-  SOURCE_NODE_ATTRIBUTE,
   applyPatchPlan,
   createTargetRef,
   resolveTargetRef,
@@ -8,6 +7,7 @@ import {
   sourceTargetRefForSelection,
   targetLevelForSelection,
 } from "../lib/canvas-target-rebind.js";
+import { sourceElementFromDom } from "./html-canvas-source-element";
 import { selectorForElement } from "./html-canvas-dom";
 import type {
   HtmlCanvasSelection,
@@ -301,13 +301,11 @@ export function selectionForElement(
 ): HtmlCanvasSelection {
   const selector = selectorForElement(element);
   const level = levelOverride ?? identityTarget?.level ?? inferSelectionLevel(element);
-  const nodeId = sourceIndex
-    ? element.getAttribute(SOURCE_NODE_ATTRIBUTE) || undefined
-    : undefined;
+  const sourceElement = sourceElementFromDom(element, sourceIndex);
   let targetRef: SourceTargetRef | null = null;
-  if (sourceIndex && nodeId) {
+  if (sourceIndex && sourceElement) {
     try {
-      targetRef = createTargetRef(sourceIndex, nodeId, {
+      targetRef = createTargetRef(sourceIndex, sourceElement, {
         level: targetLevelForSelection(level),
         ...(identityTarget?.id ? { targetId: identityTarget.id } : {}),
         ...(identityTarget?.label ? { label: identityTarget.label } : {}),
@@ -319,12 +317,11 @@ export function selectionForElement(
   const rect = element.getBoundingClientRect();
   const view = element.ownerDocument.defaultView;
   return {
-    id: targetRef?.targetId || nodeId || element.getAttribute("data-ai-id") || element.id || selector,
+    id: targetRef?.targetId || sourceElement?.pagerootId || element.getAttribute("data-ai-id") || element.id || selector,
     ...(targetRef?.elementId ? { elementId: targetRef.elementId } : {}),
     ...(targetRef?.expectedSourceSha256
       ? { expectedSourceSha256: targetRef.expectedSourceSha256 }
       : {}),
-    ...(nodeId ? { nodeId } : {}),
     label: level === "module" && isPageRootElement(element)
       ? "整个页面"
       : readableLabel(element),

@@ -207,8 +207,8 @@ test("TargetResolver returns exact, rebound after reorder/class change, ambiguou
 
   const reordered = `<main id="root"><section data-key="b"><h2>Beta</h2></section><section class="renamed" data-key="a"><h2>Alpha 唯一标题</h2></section></main>`;
   const rebound = resolveTargetRef(buildSourceIndex(reordered), alphaRef);
-  assert.equal(rebound.resolution, "rebound");
-  assert.equal(rebound.target.stableAttributes["data-key"], "a");
+  assert.equal(rebound.resolution, "orphaned");
+  assert.equal(rebound.reason, "pageroot-identity-incomplete");
 
   const classOnlyBase = `<main><section class="old"><h2>只出现一次</h2></section><section><h2>其他</h2></section></main>`;
   const classOnlyIndex = buildSourceIndex(classOnlyBase);
@@ -217,7 +217,7 @@ test("TargetResolver returns exact, rebound after reorder/class change, ambiguou
   );
   const classOnlyRef = createTargetRef(classOnlyIndex, classOnlyTarget.nodeId);
   const classChanged = `<!-- shifted --><main><section class="new"><h2>只出现一次</h2></section><section><h2>其他</h2></section></main>`;
-  assert.equal(resolveTargetRef(buildSourceIndex(classChanged), classOnlyRef).resolution, "rebound");
+  assert.equal(resolveTargetRef(buildSourceIndex(classChanged), classOnlyRef).resolution, "orphaned");
 
   const duplicates = `<main><section><h2>相同</h2></section><section><h2>相同</h2></section></main>`;
   const duplicateIndex = buildSourceIndex(duplicates);
@@ -226,8 +226,7 @@ test("TargetResolver returns exact, rebound after reorder/class change, ambiguou
     duplicateIndex.elements.filter((element) => element.tagName === "section")[0].nodeId,
   );
   const ambiguous = resolveTargetRef(buildSourceIndex(`<!-- shifted -->${duplicates}`), duplicateRef);
-  assert.equal(ambiguous.resolution, "ambiguous");
-  assert.equal(ambiguous.candidates.length, 2);
+  assert.equal(ambiguous.resolution, "orphaned");
 
   const removed = `<main id="root"><section data-key="b"><h2>Beta</h2></section></main>`;
   assert.equal(resolveTargetRef(buildSourceIndex(removed), alphaRef).resolution, "orphaned");
@@ -243,9 +242,7 @@ test("anonymous SVG shapes rebind through authored geometry without weakening tr
   const targetRef = createTargetRef(baseIndex, firstRect.nodeId);
   const shifted = `<!-- unrelated source edit -->${base}`;
   const rebound = resolveTargetRef(buildSourceIndex(shifted), targetRef);
-  assert.equal(rebound.resolution, "rebound");
-  assert.equal(rebound.target?.stableAttributes.x, "4");
-  assert.equal(rebound.target?.stableAttributes.width, "24");
+  assert.equal(rebound.resolution, "orphaned");
 
   const trulyRepeated = `<svg><rect x="4" y="4" width="24" height="12"></rect><rect x="4" y="4" width="24" height="12"></rect></svg>`;
   const repeatedIndex = buildSourceIndex(trulyRepeated);
@@ -257,8 +254,7 @@ test("anonymous SVG shapes rebind through authored geometry without weakening tr
     buildSourceIndex(`<!-- shifted -->${trulyRepeated}`),
     repeatedRef,
   );
-  assert.equal(ambiguous.resolution, "ambiguous");
-  assert.equal(ambiguous.candidates.length, 2);
+  assert.equal(ambiguous.resolution, "orphaned");
 });
 
 test("inline formatting wrappers preserve complete element TargetRef text identity", () => {
@@ -274,13 +270,7 @@ test("inline formatting wrappers preserve complete element TargetRef text identi
   const resolution = resolveTargetRef(formattedIndex, targetRef);
 
   assert.equal(targetRef.textQuote, "打开原生对话框");
-  assert.equal(resolution.resolution, "rebound");
-  assert.equal(resolution.target?.textContent, "打开原生对话框");
-  const refreshed = createTargetRef(formattedIndex, resolution.target, {
-    targetId: targetRef.targetId,
-  });
-  assert.equal(refreshed.textQuote, "打开原生对话框");
-  assert.equal(refreshed.fingerprint.textPrefix, "打开原生对话框");
+  assert.equal(resolution.resolution, "orphaned");
 });
 
 test("insertion-point refs rebind through stable parent and sibling fingerprints", () => {
@@ -315,11 +305,7 @@ test("insertion-point refs rebind through stable parent and sibling fingerprints
   const next = `<main id="root"><section data-key="c">C</section><section data-key="a">A</section><section data-key="b">B</section></main>`;
   const nextIndex = buildSourceIndex(next);
   const rebound = resolveTargetRef(nextIndex, targetRef);
-  const nextB = nextIndex.elements.find(
-    (element) => element.stableAttributes["data-key"] === "b",
-  );
-  assert.equal(rebound.resolution, "rebound");
-  assert.equal(rebound.target.offset, nextB.range.startOffset);
+  assert.equal(rebound.resolution, "orphaned");
 });
 
 test("createTargetRef rejects inconsistent levels and text level anchors the actual single text node", () => {
@@ -372,13 +358,13 @@ test("createTargetRef rejects inconsistent levels and text level anchors the act
     ...textRef,
     level: "module",
   });
-  assert.equal(forgedModule.target?.type, "element");
+  assert.equal(forgedModule.resolution, "orphaned");
   const elementRef = createTargetRef(index, plain.nodeId);
   const forgedText = resolveTargetRef(index, {
     ...elementRef,
     level: "text",
   });
-  assert.equal(forgedText.target?.type, "text");
+  assert.equal(forgedText.resolution, "orphaned");
 });
 
 test("insertion exact validates zero-width in-bounds child boundary and parent identity", () => {
@@ -449,6 +435,6 @@ test("insertion rebound never treats positional nth selector as parent identity"
 
   const reordered = `<main><section><p>共同前缀</p><i>B</i></section><section><p>共同前缀</p><i>A</i></section></main>`;
   const resolution = resolveTargetRef(buildSourceIndex(reordered), targetRef);
-  assert.equal(resolution.resolution, "ambiguous");
-  assert.equal(resolution.candidates.length, 2);
+  assert.equal(resolution.resolution, "orphaned");
+  assert.equal(resolution.reason, "pageroot-identity-incomplete");
 });

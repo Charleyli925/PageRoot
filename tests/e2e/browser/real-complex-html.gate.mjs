@@ -61,7 +61,7 @@ function editableSourceElementIds(source) {
 
 async function discoverVisibleEditableHosts(frame, source) {
   const eligibleIds = [...editableSourceElementIds(source)];
-  return frame.locator("[data-html-ai-source-node-id]").evaluateAll(
+  return frame.locator("[data-pageroot-id]").evaluateAll(
     (elements, allowedSourceIds) => {
       const allowed = new Set(allowedSourceIds);
       const transparent = new Set([
@@ -69,9 +69,9 @@ async function discoverVisibleEditableHosts(frame, source) {
         "em", "i", "ins", "kbd", "label", "mark", "q", "s", "samp", "small",
         "span", "strong", "sub", "sup", "time", "u", "var",
       ]);
-      const sourceIdOf = (element) => element.getAttribute("data-html-ai-source-node-id");
+      const sourceIdOf = (element) => element.getAttribute("data-pageroot-id");
       const sourceParent = (element) => element.parentElement?.closest(
-        "[data-html-ai-source-node-id]",
+        "[data-pageroot-id]",
       ) ?? null;
       const stableDomSelector = (element) => {
         const parts = [];
@@ -91,7 +91,7 @@ async function discoverVisibleEditableHosts(frame, source) {
       for (let node = walker.nextNode(); node; node = walker.nextNode()) {
         const match = /\S/u.exec(node.data);
         if (!match || !node.parentElement) continue;
-        let host = node.parentElement.closest("[data-html-ai-source-node-id]");
+        let host = node.parentElement.closest("[data-pageroot-id]");
         while (host) {
           const style = getComputedStyle(host);
           const standalone = style.display !== "inline" && style.display !== "contents";
@@ -314,7 +314,7 @@ async function waitForEditableHost(frame, editor, expectedTarget, label) {
     const active = frame.locator('[contenteditable="true"]');
     const activeCount = await active.count();
     const activeId = activeCount > 0
-      ? await active.first().getAttribute("data-html-ai-source-node-id")
+      ? await active.first().getAttribute("data-pageroot-id")
       : null;
     throw new Error(
       `${label} did not activate. `
@@ -404,7 +404,7 @@ function uniqueLiteralForCandidate(source, text) {
 }
 
 async function discoverEditableCandidate(frame, source) {
-  const candidates = await frame.locator("[data-html-ai-source-node-id]").evaluateAll((elements) => {
+  const candidates = await frame.locator("[data-pageroot-id]").evaluateAll((elements) => {
     const preferredTags = new Set(["p", "h1", "h2", "h3", "h4", "h5", "h6", "li", "td", "th"]);
     const tagPriority = new Map([
       ["p", 0],
@@ -432,7 +432,7 @@ async function discoverEditableCandidate(frame, source) {
       const style = getComputedStyle(element);
       return {
         index,
-        sourceId: element.getAttribute("data-html-ai-source-node-id"),
+        sourceId: element.getAttribute("data-pageroot-id"),
         tagName: element.localName,
         text: element.textContent || "",
         childElementCount: element.childElementCount,
@@ -486,7 +486,7 @@ async function discoverEditableCandidate(frame, source) {
 }
 
 async function discoverCommentCandidate(frame) {
-  const candidates = await frame.locator("[data-html-ai-source-node-id]").evaluateAll((elements) => {
+  const candidates = await frame.locator("[data-pageroot-id]").evaluateAll((elements) => {
     const dedicatedEditorRoots = new Set([
       "input", "textarea", "select", "option", "script", "style", "template", "title",
       "canvas", "iframe", "svg", "math",
@@ -512,7 +512,7 @@ async function discoverCommentCandidate(frame) {
       );
       return {
         index,
-        sourceId: element.getAttribute("data-html-ai-source-node-id"),
+        sourceId: element.getAttribute("data-pageroot-id"),
         tagName,
         text: (element.textContent || "").trim().slice(0, 80),
         rendered: rect.width > 2 && rect.height > 2
@@ -556,7 +556,7 @@ async function visualGeometrySnapshot(handle) {
       width: Math.round(rect.width * 10) / 10,
       height: Math.round(rect.height * 10) / 10,
     });
-    const visibleSourceRects = Array.from(document.querySelectorAll("[data-html-ai-source-node-id]"))
+    const visibleSourceRects = Array.from(document.querySelectorAll("[data-pageroot-id]"))
       .filter((element) => {
         const rect = element.getBoundingClientRect();
         const style = getComputedStyle(element);
@@ -566,7 +566,7 @@ async function visualGeometrySnapshot(handle) {
           && style.display !== "none" && style.visibility !== "hidden";
       })
       .map((element) => ({
-        sourceId: element.getAttribute("data-html-ai-source-node-id"),
+        sourceId: element.getAttribute("data-pageroot-id"),
         rect: roundedRect(element.getBoundingClientRect()),
       }));
     const targetRect = target.getBoundingClientRect();
@@ -697,7 +697,7 @@ test("a real complex HTML file keeps layout and editable-island source authority
   const beforeDocument = await documentToken(frame);
 
   const candidate = await discoverEditableCandidate(frame, original);
-  const sourceNodes = frame.locator("[data-html-ai-source-node-id]");
+  const sourceNodes = frame.locator("[data-pageroot-id]");
   const target = await sourceNodes.nth(candidate.index).elementHandle();
   if (!target) throw new Error(`Editable candidate detached before activation: ${JSON.stringify(candidate)}`);
   await target.scrollIntoViewIfNeeded();
@@ -792,7 +792,7 @@ test("a real complex HTML file keeps layout and editable-island source authority
   const commentCandidate = await discoverCommentCandidate(currentFrame);
   const commentTarget = currentFrame
     .locator(
-      `[data-html-ai-source-node-id="${escapeAttributeValue(commentCandidate.sourceId)}"]`,
+      `[data-pageroot-id="${escapeAttributeValue(commentCandidate.sourceId)}"]`,
     );
   await expect(commentTarget, `Comment candidate must stay uniquely source-backed: ${JSON.stringify(commentCandidate)}`)
     .toHaveCount(1);
@@ -910,7 +910,7 @@ test(`the real complex page edits every visible V2 host at start, middle and end
       await activate();
       const active = loaded.frame.locator('[contenteditable="true"]');
       await expect(active).toHaveCount(1);
-      const activeId = await active.getAttribute("data-html-ai-source-node-id");
+      const activeId = await active.getAttribute("data-pageroot-id");
       if (!activeId) throw new Error("Activated host lost its source identity.");
       if (testedHostPaths.has(host.domSelector)) {
         throw new Error(`Duplicate editable-host DOM path: ${host.domSelector}`);
@@ -1015,7 +1015,7 @@ test("reported nested-list headings and wbr text preserve real authored structur
   const nested = frame.locator("#panel-outline > ol > li").first();
   const nestedHandle = await nested.elementHandle();
   if (!nestedHandle) throw new Error("The reported nested-list heading is missing.");
-  const nestedSourceId = await nested.getAttribute("data-html-ai-source-node-id");
+  const nestedSourceId = await nested.getAttribute("data-pageroot-id");
   if (!nestedSourceId) throw new Error("The nested-list heading lost source identity.");
   await nested.dblclick({
     position: await renderedTokenPosition(nestedHandle, "发现阶段"),
@@ -1046,10 +1046,10 @@ test("reported nested-list headings and wbr text preserve real authored structur
   const wbrCandidate = frame.locator("#panel-terms p").filter({
     hasText: "软换行机会：HypertextMarkupLanguage",
   });
-  const wbrSourceId = await wbrCandidate.getAttribute("data-html-ai-source-node-id");
+  const wbrSourceId = await wbrCandidate.getAttribute("data-pageroot-id");
   if (!wbrSourceId) throw new Error("The wbr paragraph lost source identity.");
   const wbr = frame.locator(
-    `[data-html-ai-source-node-id="${escapeAttributeValue(wbrSourceId)}"]`,
+    `[data-pageroot-id="${escapeAttributeValue(wbrSourceId)}"]`,
   );
   const wbrHandle = await wbr.elementHandle();
   if (!wbrHandle) throw new Error("The reported wbr paragraph is missing.");
@@ -1097,22 +1097,22 @@ test("reported real-page end boundaries round-trip with only island normalizatio
   const scenarios = [
     {
       name: "header brand",
-      selector: "header.site-header a.brand-lockup > span:last-child[data-html-ai-source-node-id]",
+      selector: "header.site-header a.brand-lockup > span:last-child[data-pageroot-id]",
       boundaryToken: "2030",
     },
     {
       name: "hero real-world paragraph",
-      selector: ".hero .hero-lede[data-html-ai-source-node-id]",
+      selector: ".hero .hero-lede[data-pageroot-id]",
       boundaryToken: "保存。",
     },
     {
       name: "start-browsing link",
-      selector: '.hero .button-row > a.button[href="#dashboard"][data-html-ai-source-node-id]',
+      selector: '.hero .button-row > a.button[href="#dashboard"][data-pageroot-id]',
       boundaryToken: "开始浏览",
     },
     {
       name: "module-ordering paragraph",
-      selector: "#dashboard .section-heading > p:not(.kicker)[data-html-ai-source-node-id]",
+      selector: "#dashboard .section-heading > p:not(.kicker)[data-pageroot-id]",
       boundaryToken: "模块排序。",
     },
   ];
@@ -1129,7 +1129,7 @@ test("reported real-page end boundaries round-trip with only island normalizatio
       position: await renderedTokenPosition(handle, scenario.boundaryToken),
     });
     await waitForEditableHost(frame, editor, target, scenario.name);
-    const sourceId = await target.getAttribute("data-html-ai-source-node-id");
+    const sourceId = await target.getAttribute("data-pageroot-id");
     if (!sourceId) throw new Error(`${scenario.name} lost its source identity.`);
     const beforeText = await target.textContent();
     const boundaryStart = beforeText.lastIndexOf(scenario.boundaryToken);

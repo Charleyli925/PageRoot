@@ -77,9 +77,14 @@ async function authoredInnerHtml(target) {
   return target.evaluate((element) => {
     const clone = element.cloneNode(true);
     if (!(clone instanceof HTMLElement)) throw new Error("Expected HTMLElement.");
-    clone.querySelectorAll("[data-html-ai-source-node-id]").forEach((node) => {
-      node.removeAttribute("data-html-ai-source-node-id");
-    });
+    const attributes = [
+      "data-pageroot-id",
+      "data-pageroot-edit-runtime-source",
+      "data-html-ai-source-node-id",
+    ];
+    for (const node of [clone, ...clone.querySelectorAll("*")]) {
+      for (const attribute of attributes) node.removeAttribute(attribute);
+    }
     return clone.innerHTML;
   });
 }

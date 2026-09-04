@@ -117,9 +117,12 @@ async function authoredInnerHtml(target) {
   return target.evaluate((element) => {
     const clone = element.cloneNode(true);
     if (!(clone instanceof HTMLElement)) throw new Error("Expected an HTML element clone.");
-    clone.querySelectorAll("[data-html-ai-source-node-id]").forEach((node) => {
-      node.removeAttribute("data-html-ai-source-node-id");
+    clone.querySelectorAll("*").forEach((node) => {
+      node.removeAttribute("data-pageroot-id");
+      node.removeAttribute("data-pageroot-edit-runtime-source");
     });
+    clone.removeAttribute("data-pageroot-id");
+    clone.removeAttribute("data-pageroot-edit-runtime-source");
     return clone.innerHTML;
   });
 }

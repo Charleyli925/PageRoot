@@ -354,20 +354,22 @@ scopes.
 `SourceIndex` also recognizes the ADR 0059 `data-pageroot-id` contract and maps
 only valid, document-unique values back to exact source element records. Missing,
 malformed and duplicated identities are diagnostics, not an instruction from
-the parser to rewrite HTML. ADR 0060 gives `ProjectFileRepository` the separate
-one-time migration authority: new imports create an identified managed Working
-Copy while preserving the external file and immutable V1 bytes; legacy managed
-Working Copies materialize missing IDs only through a Hash-checked recoverable
-transaction on editable workspace entry. Invalid identities fail closed.
-ADR 0061 makes that index the exclusive resolver for managed Working Copy
-TargetRefs: official location uses only a valid unique `elementId`. Selector,
+the parser to rewrite HTML. The persistent element identity is only
+`data-pageroot-id`. Parser-local handles (`nodeId` / `parseKey`) stay inside
+`SourceIndex` / `SourcePatchEngine` for one parse of one revision: they never
+enter Runtime DOM, TargetRef, Selection, comments, Review or history.
+ADR 0060 gives `ProjectFileRepository` the separate one-time migration
+authority: new imports create an identified managed Working Copy while
+preserving the external file and immutable V1 bytes; legacy managed Working
+Copies materialize missing IDs only through a Hash-checked recoverable
+transaction on editable workspace entry. Incomplete or invalid identities fail
+closed and do not enable direct edit. ADR 0061 makes that index the exclusive
+resolver: official location uses only a valid unique `elementId`. Selector,
 ancestor fingerprint, source-offset distance and text prefix/suffix scoring
-still exist as a shadow of the old resolver so edit, comments and Review can
-count fallback-only success; they cannot become the official result. Deletion
-or a missing ID is orphaned without heuristic fallback. Whole-page comments
-keep the deterministic `selector=body + level=module` semantic target.
-ID-less historical TargetRefs against unmanaged or identity-absent HTML retain
-the legacy resolver. Semantic saving remains outside this foundation.
+are not an official result. Deletion or a missing ID is orphaned without
+heuristic fallback. `html`, `head` and `body` carry Stable IDs like every other
+element; whole-page comments use the body's `elementId`. Semantic saving remains
+outside this foundation.
 
 The external original and the hidden V1 snapshot remain byte-exact copies of
 the first imported HTML, without PageRoot Stable ID metadata. The visible V1

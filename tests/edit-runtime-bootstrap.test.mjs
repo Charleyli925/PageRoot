@@ -40,9 +40,10 @@ test("disposable runtime bootstrap proves the parsed source set before author wo
     "async author scripts must not block deferred DOMContentLoaded",
   );
   assert.doesNotMatch(source, /MutationObserver/u);
-  assert.match(source, /markerAttribute \+ "\],\[" \+ config\.sourceNodeAttribute/u);
+  assert.match(source, /markerAttribute \+ "\],\[" \+ config\.stableIdAttribute/u);
   assert.match(source, /data-pageroot-edit-runtime-source/u);
-  assert.match(source, /data-html-ai-source-node-id/u);
+  assert.match(source, /data-pageroot-id/u);
+  assert.doesNotMatch(source, /data-html-ai-source-node-id/u);
   assert.doesNotMatch(source, /__pageroot_edit_source_/u);
   assert.match(source, /event\.preventDefault/u);
   assert.doesNotMatch(source, /setInterval|clearInterval|requestAnimationFrame/u);

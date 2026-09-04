@@ -98,7 +98,7 @@ async function currentEditorFrame(page) {
 
 async function sourceTextInventory(frame) {
   return frame.evaluate(() => {
-    const sourceAttribute = "data-html-ai-source-node-id";
+    const sourceAttribute = "data-pageroot-id";
     const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
     const inventory = [];
     for (let node = walker.nextNode(); node; node = walker.nextNode()) {
@@ -160,7 +160,7 @@ async function withCurrentStableEditorFrame(page, operation) {
 
 async function textHitForOrdinal(frame, ordinal) {
   return frame.evaluate(async (wantedOrdinal) => {
-    const sourceAttribute = "data-html-ai-source-node-id";
+    const sourceAttribute = "data-pageroot-id";
     const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
     let currentOrdinal = 0;
     let wanted = null;
@@ -210,7 +210,7 @@ async function textHitForOrdinal(frame, ordinal) {
 
 async function resultForOrdinal(frame, ordinal) {
   return frame.evaluate((wantedOrdinal) => {
-    const sourceAttribute = "data-html-ai-source-node-id";
+    const sourceAttribute = "data-pageroot-id";
     const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
     let currentOrdinal = 0;
     let wanted = null;

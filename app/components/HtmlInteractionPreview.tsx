@@ -19,11 +19,8 @@ import {
   type RawPageViewSnapshot,
 } from "../lib/page-view-context.js";
 import { OPAQUE_SANDBOX_STORAGE_BOOTSTRAP } from "../lib/opaque-sandbox-storage.js";
-import {
-  SOURCE_NODE_ATTRIBUTE,
-  buildSourceIndex,
-  instrumentPreviewHtml,
-} from "../lib/source-index.js";
+import { PAGEROOT_ELEMENT_ID_ATTRIBUTE } from "../../shared/pageroot-element-identity.mjs";
+import { buildSourceIndex } from "../lib/source-index.js";
 import {
   MAX_PREVIEW_COMMENT_GROUPS,
   previewCommentMarkerGroups,
@@ -107,7 +104,7 @@ function previewBootstrapJavaScript({
   const config = JSON.stringify({
     channelToken,
     sourceSha256,
-    sourceNodeAttribute: SOURCE_NODE_ATTRIBUTE,
+    sourceNodeAttribute: PAGEROOT_ELEMENT_ID_ATTRIBUTE,
     protocol: PAGE_VIEW_CONTEXT_PROTOCOL,
     version: PAGE_VIEW_CONTEXT_VERSION,
     requestType: CAPTURE_REQUEST_TYPE,
@@ -400,16 +397,7 @@ function preparePreviewDocument(
     };
   }
 
-  let instrumentedSource = source;
-  try {
-    instrumentedSource = instrumentPreviewHtml(sourceIndex, {
-      attributeName: SOURCE_NODE_ATTRIBUTE,
-    }).html;
-  } catch {
-    // The page can still be previewed when it already uses the reserved
-    // attribute; only the optional view-context handoff is unavailable.
-  }
-  const parsed = new DOMParser().parseFromString(instrumentedSource, "text/html");
+  const parsed = new DOMParser().parseFromString(source, "text/html");
   if (baseUrl && !parsed.head.querySelector("base")) {
     const base = parsed.createElement("base");
     base.href = baseUrl;

@@ -1,4 +1,4 @@
-import { SOURCE_NODE_ATTRIBUTE } from "./source-patch-core.js";
+import { PAGEROOT_ELEMENT_ID_ATTRIBUTE } from "../../shared/pageroot-element-identity.mjs";
 
 export type PageTabAssociation = {
   panel: HTMLElement;
@@ -123,7 +123,7 @@ function relatedTabGroupParents(
 }
 
 function associationKey(panel: HTMLElement, fallback: string): string {
-  return panel.getAttribute(SOURCE_NODE_ATTRIBUTE)
+  return panel.getAttribute(PAGEROOT_ELEMENT_ID_ATTRIBUTE)
     || panel.id
     || panel.getAttribute("data-page")
     || panel.getAttribute("data-panel")
@@ -152,7 +152,7 @@ function inferredIndexedTabAssociations(
       group.members.some((element) => existing.some((entry) => entry.panel === element))
       || !group.members.every((element) => (
         !isIndexedTabControl(element)
-        && (!requireSourceBackedPanels || element.hasAttribute(SOURCE_NODE_ATTRIBUTE))
+        && (!requireSourceBackedPanels || element.hasAttribute(PAGEROOT_ELEMENT_ID_ATTRIBUTE))
       ))
     ) return false;
     return group.members.filter(isVisible).length === 1

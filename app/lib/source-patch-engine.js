@@ -106,60 +106,61 @@ function commandTargetRef(index, command, key = "targetRef") {
   if (liveTargetRef) return liveTargetRef;
   const targetRef = command[key];
   if (targetRef) return cleanTargetRef(targetRef);
-  const nodeId = key === "targetRef" ? command.nodeId : command.beforeNodeId;
-  if (!nodeId) {
-    fail("TARGET_REQUIRED", `Edit command is missing ${key}.`);
-  }
-  return createTargetRef(index, nodeId, {
-    level: key === "targetRef" ? command.level : "subregion",
-  });
+  fail("TARGET_REQUIRED", `Edit command is missing ${key}.`);
 }
 
-function liveNodeIdFromCommand(command, key) {
+function liveElementIdFromCommand(command, key) {
   if (key === "textTargetRef") {
-    return typeof command.textNodeId === "string" && command.textNodeId
-      ? command.textNodeId
-      : null;
+    return command.textTargetRef?.elementId
+      || command.hostElementId
+      || command.parentElementId
+      || null;
+  }
+  if (key === "beforeTargetRef") {
+    return command.beforeElementId || command.beforeTargetRef?.elementId || null;
   }
   if (key === "targetRef") {
-    return typeof command.nodeId === "string" && command.nodeId
-      ? command.nodeId
-      : null;
+    return command.elementId || command.targetRef?.elementId || null;
   }
   return null;
 }
 
 function liveExactCommandTarget(index, command, key = "targetRef") {
-  // Live locate: the preview already stamped data-html-ai-source-node-id.
-  // Matching sourceSha256 makes that nodeId the exact anchor; fingerprint
-  // scoring is only for rebound after the source itself has changed.
-  const nodeId = liveNodeIdFromCommand(command, key);
-  if (!nodeId) return null;
+  const elementId = liveElementIdFromCommand(command, key);
+  if (!elementId) return null;
   const expected = command.expectedSourceSha256 ?? index.sourceSha256;
   if (expected !== index.sourceSha256) return null;
-  const node = index.byNodeId.get(nodeId);
-  if (!node) {
+  const element = index.byPagerootId.get(elementId);
+  if (!element || element.type !== "element") {
     fail(
       "TARGET_ORPHANED",
-      "The live source node id is no longer in this source.",
-      { nodeId, key },
+      "The live Stable ID is no longer in this source.",
+      { elementId, key },
     );
   }
   const original = command[key];
-  const expectedType = key === "textTargetRef" ? "text" : "element";
-  if (node.type !== expectedType) {
-    fail(
-      "UNSUPPORTED_TARGET_TYPE",
-      `This edit requires a ${expectedType} target.`,
-      { actualType: node.type, nodeId, key },
-    );
+  if (key === "textTargetRef") {
+    if (!Number.isInteger(command.directTextOrdinal)) return null;
+    const ordinal = command.directTextOrdinal;
+    const textNodeId = element.textNodeIds?.[ordinal];
+    const node = textNodeId ? index.byNodeId.get(textNodeId) : null;
+    if (!node || node.type !== "text") {
+      fail(
+        "UNSUPPORTED_TARGET_TYPE",
+        "This edit requires a text target.",
+        { elementId, key, directTextOrdinal: ordinal },
+      );
+    }
+    return createTargetRef(index, node, {
+      targetId: original?.targetId,
+      label: original?.label,
+      level: "text",
+    });
   }
-  return createTargetRef(index, node, {
+  return createTargetRef(index, element, {
     targetId: original?.targetId,
     label: original?.label,
-    level: key === "textTargetRef"
-      ? "text"
-      : (original?.level ?? command.level ?? "subregion"),
+    level: original?.level ?? command.level ?? "subregion",
   });
 }
 
@@ -1477,7 +1478,7 @@ export function planTextRangeStylePatch(indexOrHtml, command, replay = null) {
           endOffset: segment.endOffset,
         })),
         writeScope: "existing-text-range-wrapper-inline-style",
-        coalescedTextRangeElementId: segmentParent.nodeId,
+        coalescedTextRangeElementId: segmentParent.pagerootId ?? segmentParent.nodeId,
       },
     );
   }

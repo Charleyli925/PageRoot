@@ -25,8 +25,6 @@ export {
   cleanTargetRef,
   createInsertionPointTargetRef,
   createTargetRef,
-  getTargetResolverShadowStats,
-  resetTargetResolverShadowStats,
   resolveFromPreview,
   resolveTargetRef,
 } from "./target-resolver.js";

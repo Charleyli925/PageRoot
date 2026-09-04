@@ -11,8 +11,9 @@ import {
 } from "../app/lib/page-view-context.js";
 import { buildSourceIndex } from "../app/lib/source-index.js";
 import { createTargetRef } from "../app/lib/target-resolver.js";
+import { materializeSourceElementIdentity } from "../bridge/project-file-repository/working-copy.mjs";
 
-const TAB_HTML = `<!doctype html>
+const RAW_TAB_HTML = `<!doctype html>
 <html>
 <head>
   <style>
@@ -31,7 +32,9 @@ const TAB_HTML = `<!doctype html>
 </body>
 </html>`;
 
-const PRESENTATION_HTML = `<!doctype html>
+const TAB_HTML = materializeSourceElementIdentity(RAW_TAB_HTML).html;
+
+const RAW_PRESENTATION_HTML = `<!doctype html>
 <html>
 <body>
   <nav role="tablist" aria-label="报告页签">
@@ -48,6 +51,8 @@ const PRESENTATION_HTML = `<!doctype html>
   <a id="outside-link" href="https://example.com/">外部链接</a>
 </body>
 </html>`;
+
+const PRESENTATION_HTML = RAW_PRESENTATION_HTML;
 
 const DATA_LINKED_TAB_HTML = `<!doctype html>
 <html>
@@ -113,7 +118,7 @@ function sourceNodeId(index, id) {
     (candidate) => candidate.stableAttributes.id === id,
   );
   assert.ok(element, `missing synthetic source element #${id}`);
-  return element.nodeId;
+  return element.pagerootId || element.nodeId;
 }
 
 function targetRef(index, id) {
@@ -248,8 +253,9 @@ test("page view context rebinds to edited source without copying runtime DOM", (
   const resolved = resolvePageViewContext(editedHtml, context);
   const resolvedIds = new Set(
     resolved.entries.map(({ sourceNodeId }) => (
-      resolved.sourceIndex.byNodeId.get(sourceNodeId)?.stableAttributes.id
-    )),
+      resolved.sourceIndex.byPagerootId.get(sourceNodeId)
+        ?? resolved.sourceIndex.byNodeId.get(sourceNodeId)
+    )?.stableAttributes.id),
   );
   assert.deepEqual(
     [...resolvedIds].sort(),
@@ -331,7 +337,10 @@ test("semantic Tab actions switch only disposable presentation context", () => {
 
   const resolved = resolvePageViewContext(html, action.nextContext);
   const stateById = new Map(resolved.entries.map((item) => [
-    resolved.sourceIndex.byNodeId.get(item.sourceNodeId)?.stableAttributes.id,
+    (
+      resolved.sourceIndex.byPagerootId.get(item.sourceNodeId)
+        ?? resolved.sourceIndex.byNodeId.get(item.sourceNodeId)
+    )?.stableAttributes.id,
     item.entry,
   ]));
   assert.equal(stateById.get("tab-one")?.ariaSelected, "false");
@@ -422,7 +431,10 @@ test("details and strict local disclosure actions preserve existing context", ()
 
   const resolved = resolvePageViewContext(html, disclosureAction.nextContext);
   const stateById = new Map(resolved.entries.map((item) => [
-    resolved.sourceIndex.byNodeId.get(item.sourceNodeId)?.stableAttributes.id,
+    (
+      resolved.sourceIndex.byPagerootId.get(item.sourceNodeId)
+        ?? resolved.sourceIndex.byNodeId.get(item.sourceNodeId)
+    )?.stableAttributes.id,
     item.entry,
   ]));
   assert.equal(stateById.get("notes")?.open, true);

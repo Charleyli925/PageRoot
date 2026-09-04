@@ -375,8 +375,9 @@ The resolver also returns one `HtmlCanvasSelection`, its `SourceTargetRef` when
 the source mapping is exact, a non-persistent `targetKey`, the current DOM
 generation and the Runtime fail-closed proof. `targetKey` is only an interaction
 identity; it is never persisted or used as source authority. Its priority is a
-valid `elementId`, the current `TargetRef.targetId`, the current generation's
-`nodeId`, and finally a generation-scoped WeakMap key.
+valid `elementId`, then the current `TargetRef.targetId`, and finally a
+generation-scoped WeakMap key. Parse-local SourceIndex handles never become
+target identity.
 
 The following invariants are normative:
 
@@ -618,7 +619,12 @@ Runtime DOM never becomes SourcePatch, Source HTML, save, Version, export,
 Request, Candidate or Review input.
 
 `data-pageroot-id` is persistent source identity, not Runtime edit authority.
-An equal ID on another DOM object grants nothing by itself. For each Runtime
+An equal ID on another DOM object grants nothing by itself. Runtime source
+proof is a private `WeakMap<Element, PagerootElementId>` sealed before author
+Script activation: it answers whether this DOM object is the original parsed
+source object. It is not a second identity. Offset-derived Source Node IDs are
+not written onto Runtime DOM, do not authorize edits, and are never refreshed
+across Working HTML revisions. For each Runtime
 generation, the private source-object authority set is established exactly once
 before author Script activation and is then sealed. A registered object may be
 revoked when its live identity fails, but author code can never add another
@@ -1031,15 +1037,15 @@ Current managed TargetRefs add `elementId` and the expected canonical source
 Hash, refreshed by deterministic current-source rebind. A complete managed
 Working Copy selects one official resolver contract: only the valid unique
 SourceIndex ID entry may resolve. Tag changes retain that identity; deletion
-or a missing/invalid ID is orphaned without heuristic fallback. The old
-selector, ancestor-fingerprint, source-offset and text-affix scorer still runs
-in shadow and records fallback-only success by surface (edit, comments,
-Review); it must not replace the official result. A source target that survives while its
+or a missing/invalid ID is orphaned without heuristic fallback. Selector,
+ancestor-fingerprint, source-offset and text-affix scoring are not an official
+result and are not retained as a shadow path. Incomplete identity HTML may
+resolve the same-revision source-anchor only; it cannot rebound across a
+hash change and cannot enable direct Canvas edit. A source target that survives while its
 current Canvas projection cannot display it remains the same target with a
 missing/hidden presentation state, never a guessed replacement. `targetId` remains per-record identity; optional selected-text
 locators are UTF-16 ranges inside the owning element's decoded descendant text.
-ID-less TargetRefs against unmanaged or identity-absent HTML keep the legacy
-resolver. Whole-page comments keep `selector=body + level=module`. Immutable
+Whole-page comments use the body's `elementId`. Immutable
 Version records are never rewritten. See ADR 0061.
 
 A Renderer-applied history result may advance the mounted editable-island

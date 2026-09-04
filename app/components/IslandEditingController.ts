@@ -1069,7 +1069,7 @@ export class IslandEditingController {
         dirty,
         draftPending: dirty || this.composing || Boolean(this.pendingCommand),
         composing: this.composing,
-        requiresCanonicalReconcile: dirty,
+        requiresCanonicalReconcile: false,
         selection: this.getSelection(),
         inputType: this.lastInputType,
       });
@@ -1222,6 +1222,36 @@ export class IslandEditingController {
         consider(textNode, length);
       }
       current = walker.nextNode();
+    }
+    const breaks = Array.from(this.hostElement.querySelectorAll<HTMLElement>("br"));
+    for (const br of breaks) {
+      const rect = br.getBoundingClientRect();
+      if (!rect || (rect.width === 0 && rect.height === 0 && rect.x === 0 && rect.y === 0)) {
+        continue;
+      }
+      const considerBreak = (side: "before" | "after") => {
+        const range = documentNode.createRange();
+        if (side === "before") range.setStartBefore(br);
+        else range.setStartAfter(br);
+        range.collapse(true);
+        const dx = point.clientX < rect.left
+          ? rect.left - point.clientX
+          : point.clientX > rect.right
+            ? point.clientX - rect.right
+            : 0;
+        const dy = point.clientY < rect.top
+          ? rect.top - point.clientY
+          : point.clientY > rect.bottom
+            ? point.clientY - rect.bottom
+            : 0;
+        const distance = dx * dx + dy * dy;
+        if (distance < bestDistance) {
+          bestRange = range;
+          bestDistance = distance;
+        }
+      };
+      considerBreak("before");
+      considerBreak("after");
     }
     return bestRange;
   }

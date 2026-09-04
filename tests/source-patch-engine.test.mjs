@@ -12,6 +12,7 @@ import {
   sourceSha256,
   validatePatchScope,
 } from "../app/lib/source-patch-core.js";
+import { materializeSourceElementIdentity } from "../bridge/project-file-repository/working-copy.mjs";
 function elementBy(index, predicate) {
   const element = index.elements.find(predicate);
   assert.ok(element, "expected source element");
@@ -229,7 +230,7 @@ test("text range style stays layout-transparent and reuses a whole selected wrap
     first.html,
     /打开<span style="all: unset; display: inline !important; font-weight: 700">原生<\/span>对话框/u,
   );
-  assert.equal(resolveTargetRef(first.sourceIndex, originalTarget).resolution, "rebound");
+  assert.equal(resolveTargetRef(first.sourceIndex, originalTarget).resolution, "orphaned");
   const wrapper = elementBy(
     first.sourceIndex,
     (element) => element.tagName === "span" && element.textContent === "原生",
@@ -459,7 +460,7 @@ test("sibling reorder moves exact source fragments with leading comments, preser
   for (const section of Object.values(sections)) {
     assert.equal(result.html.includes(section.raw), true);
   }
-  assert.equal(resolveTargetRef(result.sourceIndex, aRef).resolution, "rebound");
+  assert.equal(resolveTargetRef(result.sourceIndex, aRef).resolution, "orphaned");
   assert.equal(result.scopeReport.outsideUnchanged, true);
   assert.equal(applyPatchPlan(result.inversePlan, result.html).html, html);
 });
@@ -1117,8 +1118,8 @@ test("direct text fragments do not bypass safe islands or dedicated editor roots
   }
 });
 
-test("live nodeId plus matching source hash skips fingerprint scoring for island patches", () => {
-  const html = `<p>相同</p><p>相同</p>`;
+test("live elementId plus matching source hash patches that island without fingerprint scoring", () => {
+  const html = materializeSourceElementIdentity(`<p>相同</p><p>相同</p>`).html;
   const index = buildSourceIndex(html);
   const paragraphs = index.elements.filter((element) => element.tagName === "p");
   assert.equal(paragraphs.length, 2);
@@ -1129,64 +1130,68 @@ test("live nodeId plus matching source hash skips fingerprint scoring for island
   const result = applyPatchPlan(planSourcePatch({
     type: "replace-editable-island",
     targetRef: firstRef,
-    nodeId: paragraphs[1].nodeId,
+    elementId: paragraphs[1].pagerootId,
     beforeInnerHtml: "相同",
     nextInnerHtml: "第二段",
     expectedSourceSha256: index.sourceSha256,
   }, index), html);
 
-  assert.equal(result.html, `<p>相同</p><p>第二段</p>`);
+  const nextParagraphs = result.sourceIndex.elements.filter((element) => element.tagName === "p");
+  assert.equal(nextParagraphs[0].textContent, "相同");
+  assert.equal(nextParagraphs[1].textContent, "第二段");
   assert.equal(result.patches.length, 1);
   assert.equal(result.patches[0].startOffset, paragraphs[1].contentRange.startOffset);
   assert.equal(applyPatchPlan(result.inversePlan, result.html).html, html);
 });
 
-test("live text nodeId plus matching source hash patches only that text fragment", () => {
-  const html = `<div id="mixed"><section>KEEP</section>相同<span>尾</span>相同</div>`;
+test("live text ordinal plus matching source hash patches only that text fragment", () => {
+  const html = materializeSourceElementIdentity(
+    `<div id="mixed"><section>KEEP</section>相同<span>尾</span>相同</div>`,
+  ).html;
   const index = buildSourceIndex(html);
   const parent = elementBy(index, (element) => element.stableAttributes.id === "mixed");
   const textNodes = index.textNodes.filter((node) => node.value === "相同");
   assert.equal(textNodes.length, 2);
+  const secondOrdinal = parent.textNodeIds.indexOf(textNodes[1].nodeId);
   const result = applyPatchPlan(planSourcePatch({
     type: "update-direct-text-node",
     targetRef: createTargetRef(index, parent.nodeId, { level: "subregion" }),
     textTargetRef: createTargetRef(index, textNodes[0].nodeId, { level: "text" }),
-    nodeId: parent.nodeId,
-    textNodeId: textNodes[1].nodeId,
+    elementId: parent.pagerootId,
+    parentElementId: parent.pagerootId,
+    directTextOrdinal: secondOrdinal,
     beforeFragmentHtml: "相同",
     nextFragmentHtml: "第二段",
     expectedSourceSha256: index.sourceSha256,
   }, index), html);
 
-  assert.equal(
-    result.html,
-    `<div id="mixed"><section>KEEP</section>相同<span>尾</span>第二段</div>`,
-  );
+  assert.equal(result.sourceIndex.textNodes.filter((node) => node.value === "相同").length, 1);
+  assert.equal(result.sourceIndex.textNodes.some((node) => node.value === "第二段"), true);
   assert.equal(result.patches[0].startOffset, textNodes[1].range.startOffset);
 });
 
-test("live nodeId never bypasses a stale source hash", () => {
-  const html = `<p>相同</p><p>相同</p>`;
+test("live elementId never bypasses a stale source hash", () => {
+  const html = materializeSourceElementIdentity(`<p>相同</p><p>相同</p>`).html;
   const index = buildSourceIndex(html);
   const paragraphs = index.elements.filter((element) => element.tagName === "p");
   assertPatchError("STALE_SOURCE_HASH", () => planSourcePatch({
     type: "replace-editable-island",
     targetRef: createTargetRef(index, paragraphs[0].nodeId, { level: "subregion" }),
-    nodeId: paragraphs[1].nodeId,
+    elementId: paragraphs[1].pagerootId,
     beforeInnerHtml: "相同",
     nextInnerHtml: "第二段",
     expectedSourceSha256: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
   }, index));
 });
 
-test("live nodeId that left the current source fails closed without fingerprint fallback", () => {
-  const html = `<p>唯一</p>`;
+test("live elementId that left the current source fails closed without fingerprint fallback", () => {
+  const html = materializeSourceElementIdentity(`<p>唯一</p>`).html;
   const index = buildSourceIndex(html);
   const paragraph = elementBy(index, (element) => element.tagName === "p");
   assertPatchError("TARGET_ORPHANED", () => planSourcePatch({
     type: "replace-editable-island",
     targetRef: createTargetRef(index, paragraph.nodeId, { level: "subregion" }),
-    nodeId: "missing-live-node",
+    elementId: "pr1_99999999999949999999999999999999",
     beforeInnerHtml: "唯一",
     nextInnerHtml: "新版",
     expectedSourceSha256: index.sourceSha256,

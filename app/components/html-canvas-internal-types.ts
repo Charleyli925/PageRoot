@@ -11,6 +11,7 @@ export type SourceIndexValue = ReturnType<typeof buildSourceIndex>;
 export type SourceElementValue = {
   type: "element";
   nodeId: string;
+  pagerootId?: string | null;
   tagName: string;
   parentId: string | null;
   previousElementSiblingId: string | null;
