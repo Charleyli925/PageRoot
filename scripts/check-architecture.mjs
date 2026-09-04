@@ -92,6 +92,9 @@ const RETIRED_PRODUCTION_LITERALS = new Set([
   ["source-history", "v1"].join("."),
   ["source-history", "v1", "schema", "json"].join("."),
 ]);
+const PAGE_VIEW_CONTEXT_FILE = ["app", "lib", "page-view-context.js"].join("/");
+const PAGE_VIEW_CONTEXT_RETIRED_ADAPTERS =
+  /\bdata-p\b|\bdata-tab\b|resolveDataLinkedTabAction|resolveIndexedHandlerTabAction|SIMPLE_INDEXED_TAB_HANDLER|LEGACY_TAB_/u;
 const PROVIDER_LITERALS = ["qoder", "codex", "qoder-acp", "codex-acp"];
 const RAW_ENDPOINTS = new Set([
   "/workspace",
@@ -343,6 +346,12 @@ export function retiredArtifactViolations({ file = "", source = "", module = nul
     if (RETIRED_PRODUCTION_LITERALS.has(literal)) {
       violations.push(`${file}: retired source-history compatibility literal cannot return`);
     }
+  }
+  if (
+    file === PAGE_VIEW_CONTEXT_FILE
+    && PAGE_VIEW_CONTEXT_RETIRED_ADAPTERS.test(source)
+  ) {
+    violations.push(`${file}: retired page-view tab adapters cannot return`);
   }
   return violations;
 }

@@ -98,7 +98,7 @@ test("edit mode reveals semantic source content without running authored actions
   expect((await exportCurrentHtml(page)).equals(original)).toBe(true);
 });
 
-test("explicit data-linked tabs switch safely without running scripts, changing bytes, or resetting page scroll", async ({
+test("explicit data-linked tabs stay inert in edit mode without running scripts or changing bytes", async ({
   page,
 }) => {
   const original = fixtureBuffer("indexed-script-tabs.html");
@@ -110,31 +110,19 @@ test("explicit data-linked tabs switch safely without running scripts, changing 
   const firstPanel = frame.locator("#chart0");
   const secondPanel = frame.locator("#chart1");
   const secondTab = frame.locator(caseSelector("indexed-tab-two"));
-  const reviewStage = page.locator(".review-scroll-stage");
 
   await expect(firstPanel).toBeVisible();
   await expect(secondPanel).toBeHidden();
   await secondTab.click();
   await expect(firstPanel).toBeVisible();
   await expect(secondPanel).toBeHidden();
+  await expect(editor.getByRole("button", {
+    name: /^(?:切换到此页签|当前页签)$/u,
+  })).toHaveCount(0);
 
-  const action = editor.getByRole("button", {
-    name: "切换到此页签",
-    exact: true,
-  });
-  await expect(action).toBeVisible();
-  const scrollTopBefore = await reviewStage.evaluate(
-    (element) => element.scrollTop,
-  );
-  expect(scrollTopBefore).toBeGreaterThan(0);
-
-  await action.click();
-  await expect(firstPanel).toBeHidden();
-  await expect(secondPanel).toBeVisible();
-  await expect.poll(async () => Math.abs(
-    (await reviewStage.evaluate((element) => element.scrollTop))
-      - scrollTopBefore,
-  )).toBeLessThanOrEqual(1);
+  await secondTab.click({ modifiers: ["Alt"] });
+  await expect(firstPanel).toBeVisible();
+  await expect(secondPanel).toBeHidden();
 
   expect(await frame.evaluate(() => ({
     authorAction: document.documentElement.dataset.authorAction ?? null,
@@ -146,7 +134,7 @@ test("explicit data-linked tabs switch safely without running scripts, changing 
   expect((await exportCurrentHtml(page)).equals(original)).toBe(true);
 });
 
-test("constant-index onclick tabs switch safely without executing their handler", async ({
+test("constant-index onclick tabs stay inert in edit mode without executing their handler", async ({
   page,
 }) => {
   const original = fixtureBuffer("onclick-indexed-tabs.html");
@@ -157,7 +145,6 @@ test("constant-index onclick tabs switch safely without executing their handler"
   );
   const firstPanel = frame.locator("#chart0");
   const secondPanel = frame.locator("#chart1");
-  const fourthPanel = frame.locator("#chart3");
   const secondTab = frame.locator(caseSelector("onclick-indexed-tab-two"));
   const fourthTab = frame.locator(caseSelector("onclick-indexed-tab-four"));
 
@@ -166,23 +153,16 @@ test("constant-index onclick tabs switch safely without executing their handler"
   await secondTab.click();
   await expect(firstPanel).toBeVisible();
   await expect(secondPanel).toBeHidden();
-
-  const action = editor.getByRole("button", {
-    name: "切换到此页签",
-    exact: true,
-  });
-  await expect(action).toBeVisible();
-  await action.click();
-  await expect(firstPanel).toBeHidden();
-  await expect(secondPanel).toBeVisible();
+  await expect(editor.getByRole("button", {
+    name: /^(?:切换到此页签|当前页签)$/u,
+  })).toHaveCount(0);
 
   await fourthTab.click({ modifiers: ["Alt"] });
+  await expect(firstPanel).toBeVisible();
   await expect(secondPanel).toBeHidden();
-  await expect(fourthPanel).toBeVisible();
   await expect(editor.getByRole("button", {
-    name: "当前页签",
-    exact: true,
-  })).toBeVisible();
+    name: /^(?:切换到此页签|当前页签)$/u,
+  })).toHaveCount(0);
 
   expect(await frame.evaluate(() => ({
     authorAction: document.documentElement.dataset.authorAction ?? null,

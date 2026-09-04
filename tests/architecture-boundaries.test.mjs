@@ -249,6 +249,13 @@ test("retired production modules and imports stay outside the graph", () => {
     }).join("\n"),
     /source-history compatibility literal/u,
   );
+  assert.match(
+    retiredArtifactViolations({
+      file: "app/lib/page-view-context.js",
+      source: 'const name = "data-p";',
+    }).join("\n"),
+    /retired page-view tab adapters/u,
+  );
 });
 
 test("the architecture checker contains no implementation-shape assertions", async () => {

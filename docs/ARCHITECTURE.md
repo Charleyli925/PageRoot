@@ -136,10 +136,10 @@ the historical synthetic-spike decision.
   policy only; authored nested `overflow: auto` containers retain their own
   scrolling behavior.
 - Edit-mode presentation actions reuse that same context. A pure allowlist
-  resolver recognizes strict source-backed Tabs, bounded explicit-ID and
-  constant-index legacy Tabs, native details and local disclosures; one Canvas
-  executor applies the accepted context. It never invokes authored handlers,
-  serializes the preview DOM or creates a second interaction mode.
+  resolver recognizes strict source-backed ARIA Tabs, native details and local
+  disclosures; one Canvas executor applies the accepted context. It never
+  invokes authored handlers, serializes the preview DOM or creates a second
+  interaction mode.
 - Formal AI review owns one disposable reducer with independent page, change
   filter, context visibility, navigation, active focus-group, canonical presentation path, scroll
   and zoom fields. A cancellable, byte-bounded `ReviewAnalysisSession` yields
