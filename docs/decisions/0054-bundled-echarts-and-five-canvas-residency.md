@@ -39,7 +39,9 @@ working reports executed the same chart again.
 5. Workbench keeps exactly one `HtmlCanvasEditor` for the current runtime owner.
    A tab switch mounts the new active editor underneath the matching
    script-disabled static projection; exact Canvas generation and source-Hash
-   verification retire that projection. Inactive tabs retain no editor iframe
+   verification retire that projection. Same-document Runtime refresh stays
+   inside the editor's A/B slots and must not unmount the editor or cover it
+   with DocumentSurfaceCache. Inactive tabs retain no editor iframe
    or Runtime DOM.
 6. `DocumentSurfaceCacheSession` and the library store remain presentation and
    resource caches. Neither owns Session facts, operation IDs, source commits,

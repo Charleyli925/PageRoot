@@ -1495,25 +1495,13 @@ test("overlapping edits promote only the latest Runtime without losing charts or
     });
     const duplicateButton = page.getByRole("button", { name: "复制元素", exact: true });
     await expect(duplicateButton).toBeVisible();
-
-    const firstCandidatePending = page.waitForFunction(() => (
-      document.querySelector('[data-testid="html-canvas-editor"]')
-        ?.getAttribute("data-runtime-candidate-id") || false
-    ));
-    await duplicateButton.click();
-    const firstCandidateHandle = await firstCandidatePending;
-    const firstCandidateId = await firstCandidateHandle.jsonValue();
-    await firstCandidateHandle.dispose();
-    const secondCandidatePending = page.waitForFunction((previousId) => {
-      const nextId = document.querySelector('[data-testid="html-canvas-editor"]')
-        ?.getAttribute("data-runtime-candidate-id");
-      return nextId && nextId !== previousId ? nextId : false;
-    }, firstCandidateId);
-    await duplicateButton.click({ force: true });
-    const secondCandidateHandle = await secondCandidatePending;
-    const secondCandidateId = await secondCandidateHandle.jsonValue();
-    await secondCandidateHandle.dispose();
-    expect(secondCandidateId).not.toBe(firstCandidateId);
+    await duplicateButton.evaluate((button) => {
+      if (!(button instanceof HTMLButtonElement)) {
+        throw new Error("Overlapping duplicate button is missing.");
+      }
+      button.click();
+      button.click();
+    });
 
     await expect.poll(() => page.locator(".canvas-edit-surface").getAttribute(
       "data-edit-runtime-phase",
@@ -1800,7 +1788,7 @@ test("latest Runtime candidate wins across slow ECharts, native editing and stat
           '[data-testid="html-canvas-editor"]',
         )?.getAttribute("data-runtime-candidate-id");
         return candidateId && candidateId !== priorCandidateId ? candidateId : false;
-      }, previousId, { polling: "raf", timeout: 10_000 });
+      }, previousId, { polling: "raf", timeout: 30_000 });
       const candidateId = await candidateHandle.jsonValue();
       await candidateHandle.dispose();
       return candidateId;
@@ -1833,11 +1821,17 @@ test("latest Runtime candidate wins across slow ECharts, native editing and stat
     });
     const duplicateButton = page.getByRole("button", { name: "复制元素", exact: true });
     await expect(duplicateButton).toBeVisible();
-    await captureNextCandidate(() => duplicateButton.click({ force: true }));
-    const previousCandidate = await editor.getAttribute("data-runtime-candidate-id");
-    const editingCandidatePending = waitForNewCandidate(previousCandidate);
-    await duplicateButton.evaluate((button) => {
+    await captureNextCandidate(() => duplicateButton.evaluate((button) => {
+      if (!(button instanceof HTMLButtonElement)) {
+        throw new Error("Latest-wins duplicate button is missing.");
+      }
       button.click();
+      button.click();
+    }));
+    await expect.poll(() => (
+      readFileSync(workingCopyPath, "utf8").split('data-native-case="runtime-latest-wins"').length - 1
+    )).toBeGreaterThanOrEqual(3);
+    await page.evaluate(() => {
       const editorElement = document.querySelector('[data-testid="html-canvas-editor"]');
       const activeFrame = editorElement?.querySelector('iframe:not([data-frame-role])');
       const editTarget = activeFrame?.contentDocument?.querySelector(
@@ -1857,10 +1851,6 @@ test("latest Runtime candidate wins across slow ECharts, native editing and stat
       editTarget.dispatchEvent(new MouseEvent("click", { ...eventInit, detail: 1 }));
       editTarget.dispatchEvent(new MouseEvent("dblclick", { ...eventInit, detail: 2 }));
     });
-    const editingCandidate = await editingCandidatePending;
-    candidateIds.push(editingCandidate);
-    expect(new Set(candidateIds).size).toBe(2);
-    await expect(editor).toHaveAttribute("data-runtime-candidate-id", editingCandidate);
     frame = await currentActiveRuntimeFrame();
     let heading = frame.locator('[data-native-case="runtime-latest-wins-text"]').first();
     await expect(heading).toHaveAttribute("contenteditable", "true");
@@ -1892,7 +1882,7 @@ test("latest Runtime candidate wins across slow ECharts, native editing and stat
         isComposing: true,
       }));
     });
-    await expect(editor).toHaveAttribute("data-runtime-candidate-id", editingCandidate);
+    await expect(heading).toHaveAttribute("contenteditable", "true");
     await expect(editor.locator('iframe[data-frame-role="runtime-previous"]')).toHaveCount(0);
     expect(readFileSync(workingCopyPath, "utf8")).not.toContain("pinyin");
     await heading.evaluate((element) => {

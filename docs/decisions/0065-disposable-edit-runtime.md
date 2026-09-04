@@ -91,7 +91,12 @@ source or be reconciled node by node.
   owns the single active Canvas.
   Switching away discards the page and revokes its resource session; returning
   prepares a fresh closure and runs a fresh disposable page. Script-disabled
-  static Canvases keep the existing bounded hot cache.
+  static Canvases keep the existing bounded hot cache for other tabs only.
+  Runtime preparing does not unmount the active `HtmlCanvasEditor` or replace
+  it with an outer static Surface. A Workbench-owned HTML replacement
+  (adopted Version, disk reload, history) writes Active as static first so
+  Canvas verify can acknowledge the new bytes; hidden A/B Candidates are only
+  for script refresh of the already-mounted document.
 - Runtime DOM, Canvas pixels, form state and generated nodes are never
   serialized to source, save, Version, export, Request, Candidate or Review.
   Source HTML plus stable IDs remains the only persistence authority.

@@ -23,7 +23,6 @@ export default function WorkbenchDocumentSurfaceCache({
   onHandoffComplete,
   onVisibleScroll,
   onFirstScroll,
-  interactionPassthrough = false,
   height,
 }: {
   snapshot: DocumentSurfaceCacheSnapshot;
@@ -35,7 +34,6 @@ export default function WorkbenchDocumentSurfaceCache({
   onHandoffComplete: (token: DocumentSurfaceCacheToken) => void;
   onVisibleScroll: (tabId: string, scrollTop: number) => void;
   onFirstScroll: (tabId: string, scrollTop: number) => void;
-  interactionPassthrough?: boolean;
   height: string;
 }) {
   const rootRef = useRef<HTMLDivElement>(null);
@@ -160,8 +158,6 @@ export default function WorkbenchDocumentSurfaceCache({
       data-max-hot-entries={snapshot.limits.maxHotEntries}
       data-max-cache-entries={snapshot.limits.maxEntries}
       data-max-cache-bytes={snapshot.limits.maxBytes}
-      data-interaction-passthrough={interactionPassthrough ? "true" : undefined}
-      style={interactionPassthrough ? { pointerEvents: "none" } : undefined}
       aria-hidden={!renderedPresentedToken}
     >
       {hotEntries.map((entry) => (

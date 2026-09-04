@@ -108,6 +108,12 @@ const PARSE_KEY_ALLOWED_FILES = new Set([
 ]);
 const PAGE_VIEW_CONTEXT_FILE = ["app", "lib", "page-view-context.js"].join("/");
 const DOCUMENT_WORKFLOW_FILE = ["app", "application", "document-workflow.js"].join("/");
+const WORKBENCH_FILE = ["app", "workbench.tsx"].join("/");
+const ACTIVE_DOCUMENT_CANVAS_FILE = [
+  "app",
+  "workbench",
+  "WorkbenchActiveDocumentCanvas.tsx",
+].join("/");
 const TEXT_FRAGMENT_HOST_LITERAL = ["pageroot", "text", "fragment"].join("-");
 const PAGE_VIEW_CONTEXT_RETIRED_ADAPTERS =
   /\bdata-p\b|\bdata-tab\b|resolveDataLinkedTabAction|resolveIndexedHandlerTabAction|SIMPLE_INDEXED_TAB_HANDLER|LEGACY_TAB_/u;
@@ -401,6 +407,16 @@ export function retiredArtifactViolations({ file = "", source = "", module = nul
   if (source.includes(TEXT_FRAGMENT_HOST_LITERAL)) {
     violations.push(
       `${file}: disposable text-fragment hosts cannot return`,
+    );
+  }
+  if (file === WORKBENCH_FILE && hasIdentifier(handle, "HtmlDisplaySurface")) {
+    violations.push(
+      `${file}: Workbench cannot replace the live editor with HtmlDisplaySurface`,
+    );
+  }
+  if (file === ACTIVE_DOCUMENT_CANVAS_FILE && hasIdentifier(handle, "cloneElement")) {
+    violations.push(
+      `${file}: cloneElement canvas host cannot return`,
     );
   }
   if (

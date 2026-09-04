@@ -42,7 +42,12 @@
   `WorkspaceController` 和一个挂载的业务文档；最近三个标签可保留脚本禁用、只读且无序列化能力的
   显示 iframe，较早标签在 48 MiB / 8 项预算内保留精确 HTML 与滚动/页面视图投影，超出预算只保留身份。
   切回缓存标签先显示页面，再由正常 Registry/OpenTarget 打开链路核对并接管；非活动标签绝不保留
-  contenteditable、Selection、IME、编辑观察器或保存权威。
+  contenteditable、Selection、IME、编辑观察器或保存权威。活动文档始终挂载唯一
+  `HtmlCanvasEditor`：脚本刷新只在编辑器内部短暂 A/B Candidate 完成，不得在 Runtime
+  preparing 时整页换成静态 Surface，也不得让同一文档的 Cache 挡住文字输入。
+  采纳新 Version、从磁盘重载或恢复历史时，工作台推入的新 HTML 先写入 Active
+  静态帧并完成画布核对，再在同一编辑器内做 Runtime A/B；不得把整份新源码只丢进
+  隐藏 Candidate 而让 Active 继续显示上一份 HTML。
   从活动开始页继续项目、处理待办或新建项目时，该开始标签原位变成目标文档；只有用户明确点击「+」
   创建的其他开始标签会保留。若目标文档已存在，则移除当前空白标签并聚焦已有标签。
 - 关闭标签不删除项目、对话、Candidate 或后台 AI 任务。关闭活动文档标签先为当前 revision 取得源文件写回或已读回校验的恢复保护，再原子移除当前标签，最后打开后继标签；后继打开失败时进入开始页，不复活已关闭文档。

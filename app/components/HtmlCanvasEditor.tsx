@@ -6362,6 +6362,9 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     () => ({
       getSourceHtml: () => frameSourceHtmlRef.current,
       getRenderedSourceHtml: () => renderedSourceHtmlRef.current,
+      rebuildActiveFrame: () => {
+        loadFrameSource(frameSourceHtmlRef.current, { forceStatic: true });
+      },
       getScrollTop,
       scrollToTop,
       checkpointPendingEdit,
@@ -6397,6 +6400,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       deferNativeCommand,
       freezeNow,
       getScrollTop,
+      loadFrameSource,
       deleteSelected,
       duplicateSelected,
       insertElement,
@@ -6446,15 +6450,16 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     if (activeNativeEditRef.current) detachNativeEditForFence();
     pendingHistoryBookmarkRef.current = null;
     pendingHistoryCanonicalFenceRef.current = false;
-    const preserveRuntimeActiveFrame = Boolean(
-      html !== frameSourceHtmlRef.current
-      && runtimeFrameRef.current?.settled
-      && runtimeFrameRef.current.elementGeneration === frameLoadGenerationRef.current,
-    );
-    if (!preserveRuntimeActiveFrame) resetSelection(false);
+    resetSelection(false);
     lastEmittedHtmlRef.current = null;
     pendingHtmlEchoesRef.current = [];
-    loadFrameSource(html);
+    // Workbench-owned HTML is a new source authority (adopted Version, disk
+    // reload, history). Echoes already returned above. A settled Runtime
+    // Active frame must not absorb that replacement into a hidden A/B
+    // candidate: Canvas verify and edit unlock wait for Active
+    // getRenderedSourceHtml(). Same-document script refresh stays on the
+    // grant effect's forceRuntimeHandoff path.
+    loadFrameSource(html, { forceStatic: true });
   }, [
     detachNativeEditForFence,
     documentBaseHref,

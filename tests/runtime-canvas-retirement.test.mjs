@@ -12,6 +12,10 @@ test("the Workbench owns one active Runtime Canvas and no multi-tab pool", () =>
     new URL("../app/workbench/WorkbenchActiveDocumentCanvas.tsx", import.meta.url),
     "utf8",
   );
+  const handoff = readFileSync(
+    new URL("../app/workbench/document-surface-presentation.ts", import.meta.url),
+    "utf8",
+  );
   assert.equal(
     existsSync(new URL("../app/workbench/WorkbenchDocumentCanvasPool.tsx", import.meta.url)),
     false,
@@ -24,10 +28,19 @@ test("the Workbench owns one active Runtime Canvas and no multi-tab pool", () =>
   assert.match(workbench, /data-testid="workbench-active-document-canvas"/u);
   assert.match(workbench, /data-runtime-hot-limit=\{1\}/u);
   assert.match(workbench, /<WorkbenchActiveDocumentCanvas/u);
+  assert.match(workbench, /<HtmlCanvasEditor/u);
+  assert.match(
+    workbench,
+    /key=\{`editor-authority-\$\{documentRuntimeTabId \|\| "none"\}`\}/u,
+  );
+  assert.doesNotMatch(workbench, /editor-authority-\$\{documentRuntimeTabId[^}]*canvasGeneration/u);
   assert.doesNotMatch(preparation, /\[\.\.\.|\.filter\(|\.slice\(/u);
-  assert.match(workbench, /&& !editRuntimePreparing/u);
-  assert.match(workbench, /cachedSurfaceInteractionPassthrough/u);
-  assert.match(workbench, /visibleCachedSurface\?\.tabId === documentRuntimeTabId/u);
+  assert.doesNotMatch(workbench, /editRuntimePreparing/u);
+  assert.doesNotMatch(workbench, /HtmlDisplaySurface/u);
+  assert.doesNotMatch(workbench, /cachedSurfaceInteractionPassthrough/u);
+  assert.doesNotMatch(activeHost, /cloneElement/u);
+  assert.doesNotMatch(handoff, /\bactiveCandidate\b/u);
+  assert.match(handoff, /pendingToken/u);
   assert.match(activeHost, /data-testid="workbench-active-document-canvas-host"/u);
   assert.match(activeHost, /data-runtime-hot-limit=\{1\}/u);
   assert.doesNotMatch(

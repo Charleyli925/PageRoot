@@ -794,8 +794,12 @@ and uses the existing no-effective-page-change result.
 Successful Candidate adoption and stale Review invalidation clear the prepared
 document cache immediately. Unmounting the Review workspace then releases its
 paired preview sessions and iframes. Workbench keeps exactly one active Edit
-Canvas; inactive document tabs retain only bounded script-disabled static
-projections and never retain an `HtmlCanvasEditor` or Runtime DOM.
+Canvas mounted for the current document; script refresh stays inside that
+editor's bounded A/B Runtime slots. Inactive document tabs retain only bounded
+script-disabled static projections and never retain an `HtmlCanvasEditor` or
+Runtime DOM. DocumentSurfaceCache may cover a pending tab switch; it must not
+replace or inert the same document's live editor during text input or Runtime
+refresh.
 
 Formal Review has no runtime-snapshot supplement. The trusted
 `AiReviewWorkspace` begins with the immutable static document pair and keeps
