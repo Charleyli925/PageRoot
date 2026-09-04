@@ -26,62 +26,12 @@
     {
       "if": {
         "anyOf": [
-          { "required": ["changedStableElementIds"] },
-          { "required": ["requestedTargetElementIds"] },
-          { "required": ["outsideRequestedTargetElementIds"] }
-        ]
-      },
-      "then": {
-        "required": [
-          "changedStableElementIds",
-          "requestedTargetElementIds",
-          "outsideRequestedTargetElementIds",
-          "requestedTargetCount"
-        ],
-        "not": {
-          "anyOf": [
-            { "required": ["changedElementCount"] },
-            { "required": ["outsideTargetCount"] },
-            { "required": ["changedElementIdSample"] },
-            { "required": ["outsideTargetElementIdSample"] },
-            { "required": ["truncated"] }
-          ]
-        }
-      }
-    },
-    {
-      "if": {
-        "required": ["requestedTargetCount"]
-      },
-      "then": {
-        "anyOf": [
-          {
-            "required": [
-              "changedStableElementIds",
-              "requestedTargetElementIds",
-              "outsideRequestedTargetElementIds"
-            ]
-          },
-          {
-            "required": [
-              "changedElementCount",
-              "outsideTargetCount",
-              "changedElementIdSample",
-              "outsideTargetElementIdSample",
-              "truncated"
-            ]
-          }
-        ]
-      }
-    },
-    {
-      "if": {
-        "anyOf": [
           { "required": ["changedElementCount"] },
           { "required": ["outsideTargetCount"] },
           { "required": ["changedElementIdSample"] },
           { "required": ["outsideTargetElementIdSample"] },
-          { "required": ["truncated"] }
+          { "required": ["truncated"] },
+          { "required": ["requestedTargetCount"] }
         ]
       },
       "then": {
@@ -92,41 +42,7 @@
           "changedElementIdSample",
           "outsideTargetElementIdSample",
           "truncated"
-        ],
-        "not": {
-          "anyOf": [
-            { "required": ["changedStableElementIds"] },
-            { "required": ["requestedTargetElementIds"] },
-            { "required": ["outsideRequestedTargetElementIds"] }
-          ]
-        }
-      }
-    },
-    {
-      "if": {
-        "type": "object",
-        "required": ["executable"]
-      },
-      "then": {
-        "type": "object",
-        "properties": {
-          "health": {
-            "type": "object",
-            "required": ["executableSurfaceUnchanged"]
-          }
-        }
-      },
-      "else": {
-        "type": "object",
-        "properties": {
-          "health": {
-            "type": "object",
-            "not": {
-              "type": "object",
-              "required": ["executableSurfaceUnchanged"]
-            }
-          }
-        }
+        ]
       }
     }
   ],
@@ -185,12 +101,7 @@
       "required": ["completeDocument", "bodyHasContent"],
       "properties": {
         "completeDocument": { "type": "boolean" },
-        "bodyHasContent": { "type": "boolean" },
-        "executableSurfaceUnchanged": {
-          "type": "boolean",
-          "deprecated": true,
-          "description": "Retired compatibility evidence. Readers must not use this field to accept, block, or warn about a candidate."
-        }
+        "bodyHasContent": { "type": "boolean" }
       }
     },
     "continuity": {
@@ -227,21 +138,6 @@
         "outputParseErrorCount": { "type": "integer", "minimum": 0 }
       }
     },
-    "changedStableElementIds": {
-      "type": "array",
-      "uniqueItems": true,
-      "items": { "type": "string", "pattern": "^pr1_[0-9a-f]{12}4[0-9a-f]{3}[89ab][0-9a-f]{15}$" }
-    },
-    "requestedTargetElementIds": {
-      "type": "array",
-      "uniqueItems": true,
-      "items": { "type": "string", "pattern": "^pr1_[0-9a-f]{12}4[0-9a-f]{3}[89ab][0-9a-f]{15}$" }
-    },
-    "outsideRequestedTargetElementIds": {
-      "type": "array",
-      "uniqueItems": true,
-      "items": { "type": "string", "pattern": "^pr1_[0-9a-f]{12}4[0-9a-f]{3}[89ab][0-9a-f]{15}$" }
-    },
     "changedElementCount": {
       "type": "integer",
       "minimum": 0
@@ -268,19 +164,6 @@
     "requestedTargetCount": {
       "type": "integer",
       "minimum": 0
-    },
-    "executable": {
-      "deprecated": true,
-      "description": "Retired compatibility evidence. Readers must not use this field to accept, block, or warn about a candidate.",
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["unchanged", "baseCount", "outputCount", "changedCount"],
-      "properties": {
-        "unchanged": { "type": "boolean" },
-        "baseCount": { "type": "integer", "minimum": 0 },
-        "outputCount": { "type": "integer", "minimum": 0 },
-        "changedCount": { "type": "integer", "minimum": 0 }
-      }
     },
     "assessedAt": {
       "type": "string",

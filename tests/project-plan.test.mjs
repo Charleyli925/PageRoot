@@ -61,7 +61,7 @@ test("project switch reuses only a clean exact Canvas validation lease", () => {
     editRevision: 4,
     lastPersistedRevision: 4,
     sourcePath: "/tmp/a.html",
-    sourceSha256: "sha256:aaa",
+    persistedSourceSha256: "sha256:aaa",
     canvasStatus: "verified",
     renderedSha256: "sha256:aaa",
   };

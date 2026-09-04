@@ -144,7 +144,7 @@ function createHarness({
   projectSession.openLocator(SOURCE_PATH);
   const documentSession = new DocumentSession({
     html,
-    sourceSha256: sha256(html),
+    persistedSourceSha256: sha256(html),
   });
   if (initialDocument) documentSession.update(initialDocument);
   const client = bridgeClient || {
@@ -218,7 +218,7 @@ function createProjectRulesHarness() {
   const runSession = new RunSession({ sourcePath: SOURCE_PATH });
   const documentSession = new DocumentSession({
     html: "<main>local source</main>",
-    sourceSha256: sha256("<main>local source</main>"),
+    persistedSourceSha256: sha256("<main>local source</main>"),
   });
   const commentSession = new CommentSession();
   let persisted = "# Original rules";
@@ -293,7 +293,7 @@ test("workspace controller accepts its injected test Session set and publishes c
   });
   assert.deepEqual(harness.projectSession.context, context);
   assert.equal(harness.documentSession.html, "<main>canonical source</main>");
-  assert.equal(harness.documentSession.sourceSha256, sha256("<main>canonical source</main>"));
+  assert.equal(harness.documentSession.persistedSourceSha256, sha256("<main>canonical source</main>"));
   assert.equal(harness.versionSession.snapshot.versions[0].id, "V1");
   assert.equal(harness.draftSession.isActive(context), true);
   assert.equal(harness.sourceHistorySession.isActive(context), true);
@@ -718,7 +718,7 @@ test("workspace controller starts the disposable runtime when its initial source
   assert.equal(ready?.phase, "ready");
   assert.equal(ready?.canvasGeneration, canvasGeneration);
 
-  harness.documentSession.setSourceSha256(sha256(html + "<!-- source echo -->"));
+  harness.documentSession.setPersistedSourceSha256(sha256(html + "<!-- source echo -->"));
   await settleAsyncRuntime();
   assert.equal(prepares.length, 1);
   harness.controller.dispose();
@@ -762,7 +762,7 @@ test("workspace controller rejects split RunSession composition for project rule
     projectSession: new ProjectSession(),
     documentSession: new DocumentSession({
       html: "<main>source</main>",
-      sourceSha256: sha256("<main>source</main>"),
+      persistedSourceSha256: sha256("<main>source</main>"),
     }),
     commentSession: new CommentSession(),
     draftSession: new DraftSession({ bridgeClient: { async saveDraft() {} } }),
@@ -855,7 +855,7 @@ test("a changed expected source Hash retires registration before Session publica
   const newerHtml = "<main>newer source</main>";
   harness.documentSession.update({
     html: newerHtml,
-    sourceSha256: sha256(newerHtml),
+    persistedSourceSha256: sha256(newerHtml),
   });
   resolveEnsure(registrationPayload());
 
@@ -895,7 +895,7 @@ test("a source switch retires an in-flight registration instead of blocking the 
   harness.projectSession.openLocator(NEXT_SOURCE_PATH);
   const second = harness.controller.ensureRegistered({
     sourcePath: NEXT_SOURCE_PATH,
-    expectedSourceSha256: harness.documentSession.sourceSha256,
+    expectedSourceSha256: harness.documentSession.persistedSourceSha256,
   });
 
   assert.notEqual(first, second);
@@ -965,7 +965,7 @@ test("an existing project recovers its Draft authority without creating a second
   });
 
   const outcome = await harness.controller.ensureRegistered({
-    expectedSourceSha256: harness.documentSession.sourceSha256,
+    expectedSourceSha256: harness.documentSession.persistedSourceSha256,
   });
   assert.deepEqual(registrationContextFromOutcome(outcome), context);
   assert.equal(ensureCount, 0);

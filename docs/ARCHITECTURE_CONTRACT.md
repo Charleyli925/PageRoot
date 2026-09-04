@@ -1219,24 +1219,15 @@ reassociate a project, and grants no write authority. Remove this migration
   `storageDirectoryName=projectId` in place without renaming or scanning
   directories. Remove this adapter only when 0.9.0 project records leave the
   supported upgrade window. v1/v2 and incomplete records remain unsupported.
-- Older packaged Draft renderers may omit an `operationId`; the Draft command
-  decoder allocates a current `draftop_` ID while previously persisted
-  `draftop_legacy_*` acknowledgements remain readable. Direct-edit ingress
-  decodes the historical `baseVersionId` / `capturedRevision` pair to the
-  immutable Version pair `basedOnVersionId` / `revision`; the Workbench view
-  receives only its canonical `DirectEditEvent` projection. Unknown fields,
-  dual forms, and unsafe Version ranges fail closed. These adapters never
-  write a retired name.
-- Historical Versions and archived failed/no-change outcomes produced by the
-  short-lived August 2026 Developer Previews may use either `1.0.0`
-  `candidate-assessment.json` shape: without executable-surface fields or with
-  the now-retired pair. The candidate-assessment decoder validates either shape,
-  verifies frozen base and immutable candidate evidence as ordinary files against all
-  exact/comparison Hashes, deterministically re-runs current document-health
-  and continuity assessment, and exposes a canonical result without retired
-  fields. It never rewrites the Attempt; old script conclusions never affect
-  current status, and archived outcomes remain terminal. Remove the adapter
-  when those Developer Preview records leave the supported upgrade window.
+- Draft commands must carry a current `draftop_` identifier. Missing
+  `operationId` values fail closed. Previously persisted
+  `draftop_legacy_*` acknowledgements remain readable opaque IDs; nothing
+  creates them. Direct-edit ingress accepts only
+  `basedOnVersionId` / `revision`. Unknown fields fail closed.
+- Candidate records require `identityReport` and `submittedOutputSha256`.
+  `candidate-assessment.json` accepts only the current bounded impact shape.
+  Retired executable-surface fields and full-array impact facts fail closed.
+  Sealed HTML Hash verification still runs for current assessments.
 
 The full producer, fixture, persistence and deletion-evidence register is
 [`COMPATIBILITY.md`](COMPATIBILITY.md). The legacy Release
@@ -1269,7 +1260,9 @@ responsibility groups:
   approved persistence owners;
 - `escapeBoundaryViolations`: typed Bridge access, browser persistence,
   endpoint knowledge and provider-neutral workflow boundaries;
-- `retiredArtifactViolations`: deleted production modules and their imports.
+- `retiredArtifactViolations`: deleted production modules, their imports, and
+  retired compatibility identifiers (`commitPendingEdit`, `baseVersionId`,
+  `editEvents` and related aliases).
 - `dialogPolicyViolations`: `dialog.showErrorBox`, ordinary
   `dialog.showMessageBox`, and unregistered `window.confirm`. The only remaining
   native error box is the startup failure that happens before a renderer exists.

@@ -4471,19 +4471,19 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   }, [loadFrameSource, recordRuntimeRefreshDecision]);
 
   const resetSelection = useCallback((
-    commitPendingEdit: boolean,
+    commitNativeText: boolean,
     fromQueuedCommand = false,
     deferRuntimeRefresh = false,
   ) => {
     if (
-      commitPendingEdit
+      commitNativeText
       && !fromQueuedCommand
       && deferNativeCommandRef.current(
         "target-switch",
-        () => resetSelection(commitPendingEdit, true, deferRuntimeRefresh),
+        () => resetSelection(commitNativeText, true, deferRuntimeRefresh),
       )
     ) return;
-    const committed = finishNativeEditing(commitPendingEdit, "manual", {
+    const committed = finishNativeEditing(commitNativeText, "manual", {
       deferRuntimeRefresh,
     });
     if (!committed.ok) return;
@@ -5862,11 +5862,10 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       renderedProjectionSha256,
       renderedProjectionStale,
       canvasRenderedSha256: renderedProjectionSha256,
-      sourceSha256: workingSourceSha256,
     };
   }, []);
 
-  const checkpointPendingEdit = useCallback((
+  const checkpointNativeTextIntent = useCallback((
     options: { trigger?: NativeEditCheckpointTrigger } = {},
   ): HtmlCanvasCommitResult => {
     const committed = checkpointNativeEdit(options.trigger ?? "manual");
@@ -5879,7 +5878,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     };
   }, [checkpointNativeEdit, currentProjectionHashes]);
 
-  const fencePendingEdit = useCallback((
+  const freezeWorkingSource = useCallback((
     options: {
       resumeEditing?: boolean;
       preserveForHistory?: boolean;
@@ -6014,9 +6013,9 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     queueNativeFenceReload,
   ]);
 
-  const commitPendingEdit = useCallback((): HtmlCanvasCommitResult => (
-    fencePendingEdit({ resumeEditing: false })
-  ), [fencePendingEdit]);
+  const endNativeTextIntent = useCallback((): HtmlCanvasCommitResult => (
+    freezeWorkingSource({ resumeEditing: false })
+  ), [freezeWorkingSource]);
 
   const adoptEditableIslandHistoryInPlace = useCallback((
     source: string,
@@ -6216,7 +6215,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   }, [queueNativeFenceReload]);
 
   const freezeNow = useCallback((): HtmlCanvasFreezeSnapshot => {
-    const committed = fencePendingEdit({
+    const committed = freezeWorkingSource({
       resumeEditing: false,
       trigger: "fence",
       endBehavior: "leave-canvas",
@@ -6253,10 +6252,9 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       renderedProjectionSha256: committed.renderedProjectionSha256,
       renderedProjectionStale: committed.renderedProjectionStale,
       canvasRenderedSha256: committed.canvasRenderedSha256,
-      sourceSha256: committed.sourceSha256,
       pendingMutation: committed.pendingMutation,
     };
-  }, [fencePendingEdit]);
+  }, [freezeWorkingSource]);
 
   const unlockNow = useCallback((): boolean => {
     imperativeLockRef.current = false;
@@ -6419,9 +6417,9 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       },
       getScrollTop,
       scrollToTop,
-      checkpointPendingEdit,
-      fencePendingEdit,
-      commitPendingEdit,
+      checkpointNativeTextIntent,
+      freezeWorkingSource,
+      endNativeTextIntent,
       freezeNow,
       unlockNow,
       showCommitBlocked,
@@ -6446,9 +6444,9 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     [
       applyPageViewContextNow,
       clearSelection,
-      checkpointPendingEdit,
-      fencePendingEdit,
-      commitPendingEdit,
+      checkpointNativeTextIntent,
+      freezeWorkingSource,
+      endNativeTextIntent,
       deferNativeCommand,
       freezeNow,
       getScrollTop,

@@ -22,9 +22,8 @@ function decodeAuditChange(value, {
       label,
     });
     const hasEventId = Object.hasOwn(value, "eventId");
-    const hasLegacyId = Object.hasOwn(value, "id");
-    if (hasEventId && hasLegacyId) return null;
-    const eventId = String(hasEventId ? value.eventId : value.id ?? "");
+    if (!hasEventId) return null;
+    const eventId = String(value.eventId ?? "");
     const kind = String(value.kind ?? "");
     if (
       !eventIdPattern.test(eventId)
@@ -73,7 +72,7 @@ export function decodeVersionAuditChange(value) {
 export function decodeDraftAuditChange(value) {
   return decodeAuditChange(value, {
     label: "Draft edit event",
-    eventIdPattern: /^(?:change|edit)_[A-Za-z0-9_-]+$/u,
+    eventIdPattern: /^change_[A-Za-z0-9_-]+$/u,
     preserveUnassignedVersion: true,
   });
 }

@@ -132,7 +132,7 @@ function createHarness({
   const initialHtml = currentPath === SOURCE_B ? B_HTML : BASE_HTML;
   const documentSession = new DocumentSession({
     html: initialHtml,
-    sourceSha256: sha256(initialHtml),
+    persistedSourceSha256: sha256(initialHtml),
   });
   const versionSession = new VersionSession();
   versionSession.hydrate({
@@ -319,7 +319,7 @@ function createHarness({
       if (!sameSourcePath(projectSession.sourcePath, prepared.previousSourcePath)) {
         commentWorkflow.resetForProjectTransition();
       }
-      documentSession.publishAuthority({ html, sourceSha256, pendingWrite: null });
+      documentSession.publishAuthority({ html, persistedSourceSha256: sourceSha256, pendingWrite: null });
       if (publishSessions) publishSessions(projectSession.context);
       else publishVersion();
       calls.invalidate += 1;
@@ -343,7 +343,7 @@ function createHarness({
       });
       documentSession.publishAuthority({
         html: previous.document.html,
-        sourceSha256: previous.document.sourceSha256,
+        persistedSourceSha256: previous.document.persistedSourceSha256,
       });
       versionSession.restoreSnapshot(previous.version);
       commentSession.update(previous.comment);
@@ -402,7 +402,7 @@ function createHarness({
     ports: {
       hash: { sha256: async (html) => sha256(html) },
       canvas: {
-        fencePendingEdit: () => ({ ok: true }),
+        freezeWorkingSource: () => ({ ok: true }),
         freeze: () => ({ ok: true, html: documentSession.html }),
         async verifyRendered(html, hash, nextContext) {
           calls.render.push({ html, hash, context: nextContext });
@@ -746,7 +746,7 @@ test("history failure restores the complete prior Document and Version snapshot"
 
   assert.equal(outcome.status, "rejected");
   assert.equal(harness.documentSession.html, BASE_HTML);
-  assert.equal(harness.documentSession.sourceSha256, sha256(BASE_HTML));
+  assert.equal(harness.documentSession.persistedSourceSha256, sha256(BASE_HTML));
   assert.equal(harness.versionSession.snapshot.viewMode, "current");
   assert.equal(harness.versionSession.snapshot.currentExactVersionId, "ver_0001");
   assert.equal(harness.calls.render.at(-1)?.html, BASE_HTML);
@@ -757,7 +757,7 @@ test("history rollback retains persistence advanced by a successful drain", asyn
     onDrain: async ({ documentSession }) => {
       documentSession.publishAuthority({
         html: DRAINED_HTML,
-        sourceSha256: sha256(DRAINED_HTML),
+        persistedSourceSha256: sha256(DRAINED_HTML),
         editRevision: 1,
         lastPersistedRevision: 1,
         persistState: "idle",
@@ -772,7 +772,7 @@ test("history rollback retains persistence advanced by a successful drain", asyn
   });
   harness.documentSession.publishAuthority({
     html: DRAINED_HTML,
-    sourceSha256: sha256(BASE_HTML),
+    persistedSourceSha256: sha256(BASE_HTML),
     editRevision: 1,
     lastPersistedRevision: 0,
     persistState: "writing",
@@ -792,7 +792,7 @@ test("history rollback retains persistence advanced by a successful drain", asyn
 
   assert.equal(outcome.status, "rejected");
   assert.equal(harness.documentSession.html, DRAINED_HTML);
-  assert.equal(harness.documentSession.sourceSha256, sha256(DRAINED_HTML));
+  assert.equal(harness.documentSession.persistedSourceSha256, sha256(DRAINED_HTML));
   assert.equal(harness.documentSession.editRevision, 1);
   assert.equal(harness.documentSession.lastPersistedRevision, 1);
   assert.equal(harness.documentSession.persistState, "idle");
@@ -805,7 +805,7 @@ test("history rollback retains persistence advanced before a later drain failure
     onDrain: async ({ documentSession }) => {
       documentSession.publishAuthority({
         html: DRAINED_HTML,
-        sourceSha256: sha256(DRAINED_HTML),
+        persistedSourceSha256: sha256(DRAINED_HTML),
         editRevision: 1,
         lastPersistedRevision: 1,
         persistState: "idle",
@@ -817,7 +817,7 @@ test("history rollback retains persistence advanced before a later drain failure
   });
   harness.documentSession.publishAuthority({
     html: DRAINED_HTML,
-    sourceSha256: sha256(BASE_HTML),
+    persistedSourceSha256: sha256(BASE_HTML),
     editRevision: 1,
     lastPersistedRevision: 0,
     persistState: "writing",
@@ -838,7 +838,7 @@ test("history rollback retains persistence advanced before a later drain failure
   assert.equal(outcome.status, "rejected");
   assert.equal(harness.calls.versionFile.length, 0);
   assert.equal(harness.documentSession.html, DRAINED_HTML);
-  assert.equal(harness.documentSession.sourceSha256, sha256(DRAINED_HTML));
+  assert.equal(harness.documentSession.persistedSourceSha256, sha256(DRAINED_HTML));
   assert.equal(harness.documentSession.editRevision, 1);
   assert.equal(harness.documentSession.lastPersistedRevision, 1);
   assert.equal(harness.documentSession.persistState, "idle");
@@ -871,7 +871,7 @@ test("history stays read-only and return-current validates canonical source iden
   mismatched.versionSession.enterHistory("ver_0001");
   mismatched.documentSession.publishAuthority({
     html: HISTORY_HTML,
-    sourceSha256: sha256(BASE_HTML),
+    persistedSourceSha256: sha256(BASE_HTML),
   });
   const returned = await mismatched.workflow.returnToCurrent({
     context: mismatched.context,
@@ -1176,7 +1176,7 @@ test("return-current rereads canonical source and restores current Version autho
   harness.versionSession.enterHistory("ver_0001");
   harness.documentSession.publishAuthority({
     html: HISTORY_HTML,
-    sourceSha256: sha256(BASE_HTML),
+    persistedSourceSha256: sha256(BASE_HTML),
   });
 
   const outcome = await harness.workflow.returnToCurrent({

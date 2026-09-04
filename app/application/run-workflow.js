@@ -432,7 +432,7 @@ export class RunWorkflow {
     if (!ports.canvas || typeof ports.canvas.freeze !== "function") {
       throw new TypeError("RunWorkflow requires a Canvas freeze port.");
     }
-    if (typeof ports.canvas.checkpointPendingEdit !== "function") {
+    if (typeof ports.canvas.checkpointNativeTextIntent !== "function") {
       throw new TypeError("RunWorkflow CanvasPort must provide a soft checkpoint.");
     }
     if (typeof ports.canvas.unlock !== "function") {
@@ -466,7 +466,7 @@ export class RunWorkflow {
     this.#drain = drain;
     this.#codecs = createRunWorkflowCodecs(codecs);
     this.#canvasPort = {
-      checkpointPendingEdit: ports.canvas.checkpointPendingEdit,
+      checkpointNativeTextIntent: ports.canvas.checkpointNativeTextIntent,
       freeze: ports.canvas.freeze,
       unlock: ports.canvas.unlock,
       normalizeComments: ports.canvas.normalizeComments || (() => (
@@ -792,7 +792,7 @@ export class RunWorkflow {
       return blocked(submitPlan.code, submitPlan.reason);
     }
     const sourcePath = context.sourcePath;
-    const committed = this.#canvasPort.checkpointPendingEdit({
+    const committed = this.#canvasPort.checkpointNativeTextIntent({
       trigger: "ai",
     });
     if (!committed?.ok) {
@@ -845,7 +845,7 @@ export class RunWorkflow {
       }
       const registered = await this.#ensureRegistered({
         sourcePath: context.sourcePath,
-        expectedSourceSha256: this.#documentSession.sourceSha256,
+        expectedSourceSha256: this.#documentSession.persistedSourceSha256,
       });
       if (!this.#isCurrentContext(context)) return stale(context);
       if (registered?.status !== "succeeded") return registered || rejected(
@@ -866,7 +866,7 @@ export class RunWorkflow {
         "画布还没有形成可验证的 HTML 快照，本轮不会发送。",
       );
       const frozenWorkingSourceSha256 = String(
-        frozen?.workingSourceSha256 || frozen?.sourceSha256 || "",
+        frozen?.workingSourceSha256 || "",
       );
       if (!frozen?.ok || !SHA256.test(frozenWorkingSourceSha256)) {
         if (frozen?.ok) this.#canvasPort.unlock();
@@ -958,7 +958,7 @@ export class RunWorkflow {
             : String(drained?.reason || "冻结边界尚未完成。"),
         );
       }
-      const persistedSourceSha256 = this.#documentSession.sourceSha256;
+      const persistedSourceSha256 = this.#documentSession.persistedSourceSha256;
       if (
         persistedSourceSha256 !== frozenWorkingSourceSha256
         || !this.#isCurrentContext(context)

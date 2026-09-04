@@ -55,16 +55,12 @@ function boundaryBlock(code, reason, confirmed = false) {
 
 function initialSnapshot({
   html = "",
-  sourceSha256 = null,
-  persistedSourceSha256 = sourceSha256,
+  persistedSourceSha256 = null,
   workingHtmlSha256 = persistedSourceSha256,
 } = {}) {
   const persistedHash = persistedSourceSha256 ? String(persistedSourceSha256) : null;
   return Object.freeze({
     html: String(html),
-    // sourceSha256 remains a compatibility projection for consumers that have
-    // not yet renamed the disk CAS fact. It is never the working/canvas Hash.
-    sourceSha256: persistedHash,
     persistedSourceSha256: persistedHash,
     workingHtmlSha256: workingHtmlSha256 ? String(workingHtmlSha256) : null,
     canvasGeneration: 0,
@@ -101,7 +97,6 @@ export class DocumentSession {
       : null;
     this.#snapshot = Object.freeze({
       ...next,
-      sourceSha256: persistedSourceSha256,
       persistedSourceSha256,
       hasPendingWrite: Boolean(this.#pendingWrite),
       isFlushing: Boolean(this.#flushPromise),
@@ -115,7 +110,6 @@ export class DocumentSession {
 
   update({
     html,
-    sourceSha256,
     persistedSourceSha256,
     workingHtmlSha256,
     editRevision,
@@ -132,12 +126,9 @@ export class DocumentSession {
       }
       next.html = nextHtml;
     }
-    const nextPersistedHash = persistedSourceSha256 !== undefined
-      ? persistedSourceSha256
-      : sourceSha256;
-    if (nextPersistedHash !== undefined) {
-      next.persistedSourceSha256 = nextPersistedHash
-        ? String(nextPersistedHash)
+    if (persistedSourceSha256 !== undefined) {
+      next.persistedSourceSha256 = persistedSourceSha256
+        ? String(persistedSourceSha256)
         : null;
     }
     if (workingHtmlSha256 !== undefined) {
@@ -166,8 +157,7 @@ export class DocumentSession {
 
   reset({
     html,
-    sourceSha256 = null,
-    persistedSourceSha256 = sourceSha256,
+    persistedSourceSha256 = null,
     workingHtmlSha256 = persistedSourceSha256,
     editRevision = 0,
     lastPersistedRevision = 0,
@@ -192,8 +182,7 @@ export class DocumentSession {
 
   publishAuthority({
     html,
-    sourceSha256,
-    persistedSourceSha256 = sourceSha256,
+    persistedSourceSha256 = null,
     workingHtmlSha256 = persistedSourceSha256,
     editRevision,
     lastPersistedRevision,
@@ -322,10 +311,12 @@ export class DocumentSession {
     });
   }
 
-  setSourceSha256(sourceSha256) {
+  setPersistedSourceSha256(persistedSourceSha256) {
     this.#emit({
       ...this.#snapshot,
-      persistedSourceSha256: sourceSha256 ? String(sourceSha256) : null,
+      persistedSourceSha256: persistedSourceSha256
+        ? String(persistedSourceSha256)
+        : null,
     });
   }
 
@@ -534,10 +525,6 @@ export class DocumentSession {
 
   get html() {
     return this.#snapshot.html;
-  }
-
-  get sourceSha256() {
-    return this.#snapshot.persistedSourceSha256;
   }
 
   get persistedSourceSha256() {

@@ -432,7 +432,7 @@ export class CommentWorkflow {
     } else if (!this.#draftSession.isActive(context)) {
       const registered = await this.#ensureRegistered({
         sourcePath: context.sourcePath,
-        expectedSourceSha256: this.#documentSession.sourceSha256,
+        expectedSourceSha256: this.#documentSession.persistedSourceSha256,
         adoptCanonicalSource: false,
       });
       const registeredContext = registrationContext(registered);
@@ -684,7 +684,7 @@ export class CommentWorkflow {
       ...(attachments.length > 0
         ? { attachments: attachments.map(this.#codecs.persistedAttachment) }
         : {}),
-      baseVersionId: this.#versionSession.snapshot.currentBasedOnVersionId,
+      basedOnVersionId: this.#versionSession.snapshot.currentBasedOnVersionId,
     };
     this.#commentSession.update({
       comments: [...this.#commentSession.comments, comment],

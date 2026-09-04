@@ -255,7 +255,9 @@
     "sourceWorkingCopyId",
     "expectedSourceSha256",
     "outputRelativePath",
+    "submittedOutputSha256",
     "outputSha256",
+    "identityReport",
     "assessment",
     "status",
     "createdAt"

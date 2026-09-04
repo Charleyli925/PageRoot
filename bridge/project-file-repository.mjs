@@ -5822,20 +5822,24 @@ export class ProjectFileRepository {
         );
       }
     }
-    if (candidate.identityReport !== undefined) {
-      assertCandidateIdentityReport(candidate.identityReport);
-      if (
-        candidate.identityReport.outputSha256 !== candidate.outputSha256
-        || candidate.identityReport.submittedOutputSha256
-          !== (candidate.submittedOutputSha256 ?? candidate.outputSha256)
-      ) {
-        throw new ProjectFileRepositoryError(
-          "CANDIDATE_IDENTITY_REPORT_INVALID",
-          "Candidate source identity evidence does not match its sealed output.",
-        );
-      }
-      assertCandidateSourceIdentityOutput(candidate.identityReport, output.html);
+    if (!candidate.identityReport) {
+      throw new ProjectFileRepositoryError(
+        "CANDIDATE_IDENTITY_REPORT_INVALID",
+        "Candidate source identity evidence is required.",
+      );
     }
+    assertCandidateIdentityReport(candidate.identityReport);
+    if (
+      candidate.identityReport.outputSha256 !== candidate.outputSha256
+      || candidate.identityReport.submittedOutputSha256
+        !== (candidate.submittedOutputSha256 ?? candidate.outputSha256)
+    ) {
+      throw new ProjectFileRepositoryError(
+        "CANDIDATE_IDENTITY_REPORT_INVALID",
+        "Candidate source identity evidence does not match its sealed output.",
+      );
+    }
+    assertCandidateSourceIdentityOutput(candidate.identityReport, output.html);
     return {
       candidate,
       candidatePath,

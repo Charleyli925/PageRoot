@@ -223,6 +223,20 @@ test("retired production modules and imports stay outside the graph", () => {
   );
   assert.match(
     retiredArtifactViolations({
+      file: "app/lib/version-audit-records.js",
+      source: "",
+    }).join("\n"),
+    /retired production modules/u,
+  );
+  assert.match(
+    retiredArtifactViolations({
+      file: "app/example.js",
+      source: "export function commitPendingEdit() {}",
+    }).join("\n"),
+    /retired compatibility identifier commitPendingEdit/u,
+  );
+  assert.match(
+    retiredArtifactViolations({
       file: "app/example.tsx",
       source: 'import ReviewAnalysisPrewarm from "./workbench/ReviewAnalysisPrewarm";',
     }).join("\n"),

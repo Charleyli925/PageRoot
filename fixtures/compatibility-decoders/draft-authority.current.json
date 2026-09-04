@@ -3,13 +3,13 @@
   "draftRevision": 4,
   "updatedAt": "2026-08-04T07:45:14.371Z",
   "comments": [],
-  "editEvents": [
+  "changeEvents": [
     {
       "eventId": "change_fixture_current",
       "createdAt": "2026-08-04T07:45:14.371Z",
       "kind": "text",
-      "baseVersionId": "ver_0004",
-      "capturedRevision": 4,
+      "basedOnVersionId": "ver_0004",
+      "revision": 4,
       "target": {
         "targetId": "target_fixture_title",
         "label": "页面标题",

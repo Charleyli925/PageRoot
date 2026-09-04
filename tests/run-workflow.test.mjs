@@ -177,7 +177,7 @@ function createHarness({
   });
   const documentSession = new DocumentSession({
     html,
-    sourceSha256: sha256(html),
+    persistedSourceSha256: sha256(html),
   });
   const commentSession = new CommentSession();
   commentSession.setComments(comments || [{
@@ -314,14 +314,13 @@ function createHarness({
     renderedProjectionSha256: sha256(html),
     renderedProjectionStale: false,
     canvasRenderedSha256: sha256(html),
-    sourceSha256: sha256(html),
     pendingMutation: null,
   }));
   const documentWorkflow = {
     enqueueEdit({ html: nextHtml }) {
       const revision = documentSession.beginEdit(nextHtml);
       documentSession.update({
-        sourceSha256: sha256(nextHtml),
+        persistedSourceSha256: sha256(nextHtml),
         lastPersistedRevision: revision,
         persistState: "idle",
       });
@@ -343,7 +342,7 @@ function createHarness({
     codecs: codecs(),
     ports: {
       canvas: {
-        checkpointPendingEdit() {
+        checkpointNativeTextIntent() {
           calls.checkpoint += 1;
           return { ok: true };
         },

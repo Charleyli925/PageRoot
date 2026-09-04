@@ -760,7 +760,6 @@
         "tests/version-workflow.test.mjs",
         "tests/version-review-plan.test.mjs",
         "tests/version-session.test.mjs",
-        "tests/version-history-records.test.mjs",
         "tests/run-session.test.mjs"
       ]
     },

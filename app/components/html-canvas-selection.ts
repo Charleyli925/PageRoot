@@ -317,7 +317,7 @@ export function selectionForElement(
   const rect = element.getBoundingClientRect();
   const view = element.ownerDocument.defaultView;
   return {
-    id: targetRef?.targetId || sourceElement?.pagerootId || element.getAttribute("data-ai-id") || element.id || selector,
+    id: targetRef?.targetId || sourceElement?.pagerootId || selector,
     ...(targetRef?.elementId ? { elementId: targetRef.elementId } : {}),
     ...(targetRef?.expectedSourceSha256
       ? { expectedSourceSha256: targetRef.expectedSourceSha256 }

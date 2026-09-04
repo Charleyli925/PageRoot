@@ -165,8 +165,6 @@ export type HtmlCanvasFreezeSnapshot = {
   renderedProjectionStale: boolean;
   /** Compatibility name for renderedProjectionSha256. Never aliases working source. */
   canvasRenderedSha256: string;
-  /** @deprecated Compatibility alias for workingSourceSha256. */
-  sourceSha256: string;
   pendingMutation: HtmlCanvasMutation | null;
   reason?: string;
 };
@@ -182,8 +180,6 @@ export type HtmlCanvasCommitResult = {
   renderedProjectionStale: boolean;
   /** Compatibility name for renderedProjectionSha256. Never aliases working source. */
   canvasRenderedSha256: string;
-  /** @deprecated Compatibility alias for workingSourceSha256. */
-  sourceSha256: string;
   pendingMutation: HtmlCanvasMutation | null;
   reason?: string;
 };
@@ -264,12 +260,15 @@ export type HtmlCanvasEditorHandle = {
   getScrollTop: () => number;
   /** Restores the authored iframe viewport without changing source. */
   scrollToTop: (scrollTop: number) => boolean;
-  /** Commits delivered native input while keeping the live editing session active. */
-  checkpointPendingEdit: (options?: {
+  /** Saves the current native text intent without ending it. Runtime stays live. */
+  checkpointNativeTextIntent: (options?: {
     trigger?: NativeEditCheckpointTrigger;
   }) => HtmlCanvasCommitResult;
-  /** Ends native editing and either refreshes the current Canvas or leaves it without refresh. */
-  fencePendingEdit: (options?: {
+  /**
+   * Freezes Working Copy source for a leave/submit/history boundary.
+   * May rebuild Runtime after the caller decides whether source changed.
+   */
+  freezeWorkingSource: (options?: {
     resumeEditing?: boolean;
     /** Keeps the active target/caret bookmark for the pending history result. */
     preserveForHistory?: boolean;
@@ -280,7 +279,8 @@ export type HtmlCanvasEditorHandle = {
      */
     endBehavior?: "refresh-current-canvas" | "leave-canvas";
   }) => HtmlCanvasCommitResult;
-  commitPendingEdit: () => HtmlCanvasCommitResult;
+  /** Ends the native text intent without a later resume. */
+  endNativeTextIntent: () => HtmlCanvasCommitResult;
   /** Captures pending text and synchronously blocks every mutation entrypoint. */
   freezeNow: () => HtmlCanvasFreezeSnapshot;
   /** Releases an imperative freeze when the controlled mode is editing. */

@@ -111,7 +111,7 @@ function createHarness({
   if (registered) projectSession.register(context);
   const documentSession = new DocumentSession({
     html,
-    sourceSha256: sha256(html),
+    persistedSourceSha256: sha256(html),
   });
   const commentSession = new CommentSession();
   const versionSession = new VersionSession();
@@ -603,7 +603,7 @@ test("DocumentWorkflow coalesces a 100ms source write and only accepts exact HTM
   assert.equal(outcome.status, "succeeded");
   assert.equal(calls.length, 1);
   assert.equal(calls[0].html, after);
-  assert.equal(harness.documentSession.sourceSha256, sha256(after));
+  assert.equal(harness.documentSession.persistedSourceSha256, sha256(after));
   assert.equal(harness.documentSession.persistState, "idle");
 });
 
@@ -942,7 +942,7 @@ test("DocumentWorkflow registers an unbound source write before its first autosa
 
   assert.equal(outcome.status, "succeeded");
   assert.equal(registrations, 1);
-  assert.equal(harness.documentSession.sourceSha256, sha256(after));
+  assert.equal(harness.documentSession.persistedSourceSha256, sha256(after));
 });
 
 test("DocumentWorkflow settles a failed first registration as a retryable persistence failure", async () => {
@@ -1269,7 +1269,7 @@ test("DocumentWorkflow keeps an externally accepted source when its canvas canno
     action: "force-unlock",
   }]);
   assert.equal(harness.documentSession.html, external);
-  assert.equal(harness.documentSession.sourceSha256, sha256(external));
+  assert.equal(harness.documentSession.persistedSourceSha256, sha256(external));
   assert.equal(harness.documentSession.pendingWrite, null);
   assert.equal(harness.documentSession.persistState, "idle");
   assert.equal(harness.documentSession.canvasAuthority.status, "failed");
@@ -1365,7 +1365,7 @@ test("DocumentWorkflow reconciles an unknown autosave only after reading matchin
   assert.equal(outcome.status, "succeeded");
   assert.equal(outcome.value.reconciled, true);
   assert.equal(calls.length, 1);
-  assert.equal(harness.documentSession.sourceSha256, sha256(after));
+  assert.equal(harness.documentSession.persistedSourceSha256, sha256(after));
   assert.equal(harness.documentSession.persistState, "idle");
 });
 
@@ -1717,7 +1717,7 @@ test("DocumentWorkflow applies current-open undo locally and saves the resulting
   assert.equal(calls[0].html, after);
   assert.equal(calls[1].html, before);
   assert.equal(harness.documentSession.html, before);
-  assert.equal(harness.documentSession.sourceSha256, sha256(before));
+  assert.equal(harness.documentSession.persistedSourceSha256, sha256(before));
   assert.equal(harness.canvas.history.length, 1);
   assert.equal(harness.sourceHistorySession.capabilities.canRedo, true);
 });
@@ -1756,7 +1756,7 @@ test("DocumentWorkflow force-unlock adopts disk HTML and clears persistence conf
 
   assert.equal(outcome.status, "succeeded");
   assert.equal(harness.documentSession.html, external);
-  assert.equal(harness.documentSession.sourceSha256, sha256(external));
+  assert.equal(harness.documentSession.persistedSourceSha256, sha256(external));
   assert.equal(harness.documentSession.persistState, "idle");
   assert.equal(harness.documentSession.pendingWrite, null);
   assert.equal(harness.documentSession.lastPersistedRevision, 3);
@@ -1906,7 +1906,7 @@ test("observeExternalSourceChange enters conflict without adopting disk bytes", 
   assert.equal(outcome.value.conflict, true);
   assert.equal(harness.documentSession.persistState, "conflict");
   assert.equal(harness.documentSession.html, html);
-  assert.equal(harness.documentSession.sourceSha256, sha256(html));
+  assert.equal(harness.documentSession.persistedSourceSha256, sha256(html));
 });
 
 test("observeExternalSourceChange ignores stale paths and in-flight writes", async () => {

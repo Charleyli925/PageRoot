@@ -527,7 +527,7 @@ test("only a frozen project rules file may be empty in an input manifest", async
   assert.equal(validate(emptyBaseHtml), false);
 });
 
-test("the candidate assessment Schema accepts only current and paired retired executable-field shapes", async () => {
+test("the candidate assessment Schema accepts only the current bounded shape", async () => {
   const { ajv, validate } = await validator(
     "candidate-assessment.v1.schema.json",
   );
@@ -568,7 +568,7 @@ test("the candidate assessment Schema accepts only current and paired retired ex
       import.meta.url,
     ),
   );
-  assertValid(ajv, validate, legacy, "legacy candidate assessment");
+  assert.equal(validate(legacy), false);
 
   const healthOnly = structuredClone(current);
   healthOnly.health.executableSurfaceUnchanged = false;

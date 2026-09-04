@@ -1162,7 +1162,7 @@ function projectFilePromptForRequest(target, request, taskSpec) {
   const visualContextByTargetId = new Map(
     (Array.isArray(request.comments) ? request.comments : []).flatMap((comment) => {
       const sourceAnchor = comment?.sourceAnchor || comment?.target;
-      const targetId = String(sourceAnchor?.targetId || sourceAnchor?.id || "");
+      const targetId = String(sourceAnchor?.targetId || "");
       const hint = comment?.visualHint || comment?.target?.visualHint;
       return targetId && hint?.runtimeGenerated === true
         ? [[targetId, hint]]

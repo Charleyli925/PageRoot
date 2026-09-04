@@ -695,7 +695,7 @@ export class ProjectWorkflow {
         this.#emit({
           type: "project-switch-validation-reused",
           operationId,
-          sourceSha256: document.sourceSha256,
+          sourceSha256: document.persistedSourceSha256,
         });
         return succeeded({ operationId, validationLease: "reused" });
       }
@@ -704,7 +704,7 @@ export class ProjectWorkflow {
         || this.#canvasPort.isMounted();
       const shouldCommitCanvas = !this.#isHistoryView() && canvasIsMounted;
       let committed = shouldCommitCanvas
-        ? this.#canvasPort.fencePendingEdit({
+        ? this.#canvasPort.freezeWorkingSource({
             resumeEditing: false,
             trigger: "project-switch",
             endBehavior: "leave-canvas",
@@ -752,8 +752,7 @@ export class ProjectWorkflow {
           cutoffRevision,
           persistedSourceSha256: settledDocument.persistedSourceSha256,
           workingHtmlSha256: settledDocument.workingHtmlSha256,
-          committedSourceSha256: committed?.workingSourceSha256
-            || committed?.sourceSha256,
+          committedSourceSha256: committed?.workingSourceSha256,
           protectionHtmlSha256: protectionEvidence?.htmlSha256 || "",
           recoveryProtected,
         });
@@ -1122,7 +1121,7 @@ export class ProjectWorkflow {
         imposedEditorFreeze = true;
         frozenHtml = frozen.html;
         const workingSourceSha256 = String(
-          frozen.workingSourceSha256 || frozen.sourceSha256 || "",
+          frozen.workingSourceSha256 || "",
         );
         const renderedProjectionSha256 = String(
           frozen.renderedProjectionSha256 || frozen.canvasRenderedSha256 || "",
@@ -1468,7 +1467,7 @@ export class ProjectWorkflow {
   async #runSourceRename({ stem, deadlineAt } = {}) {
     let context = this.#projectSession.context;
     let previousSourcePath = context?.sourcePath || "";
-    let expectedSha256 = this.#documentSession.sourceSha256;
+    let expectedSha256 = this.#documentSession.persistedSourceSha256;
     const requestedStem = normalizedRenameStem(stem, previousSourcePath);
     const operationId = this.#nextOperationId("source-rename");
     const renameDeadline = Number(deadlineAt) || Date.now() + SWITCH_DEADLINE_MS;
@@ -1488,7 +1487,7 @@ export class ProjectWorkflow {
         }
         context = this.#projectSession.context;
         previousSourcePath = context?.sourcePath || previousSourcePath;
-        expectedSha256 = this.#documentSession.sourceSha256;
+        expectedSha256 = this.#documentSession.persistedSourceSha256;
         if (!context || !this.#projectSession.matches(context)) {
           return stale(context || { sourcePath: previousSourcePath });
         }
@@ -1520,7 +1519,7 @@ export class ProjectWorkflow {
         return succeeded({ context, unchanged: true, sourcePath: previousSourcePath });
       }
 
-      const committed = this.#canvasPort.fencePendingEdit?.({
+      const committed = this.#canvasPort.freezeWorkingSource?.({
         resumeEditing: false,
         trigger: "project-rename",
       });
@@ -1562,7 +1561,7 @@ export class ProjectWorkflow {
         this.#disposed
         || !this.#projectSession.matches(context)
         || !this.#codecs.sameSourcePath(this.#projectSession.sourcePath, previousSourcePath)
-        || this.#documentSession.sourceSha256 !== expectedSha256
+        || this.#documentSession.persistedSourceSha256 !== expectedSha256
         || !documentIsStable(this.#documentSession)
         || this.#documentWorkflow.hasHistoryAction
       ) {
@@ -1647,7 +1646,7 @@ export class ProjectWorkflow {
       if (
         this.#disposed
         || !this.#projectSession.matches(context)
-        || this.#documentSession.sourceSha256 !== expectedSha256
+        || this.#documentSession.persistedSourceSha256 !== expectedSha256
       ) return stale(context);
 
       const nextSourcePath = String(result.sourcePath);
@@ -1896,7 +1895,7 @@ export class ProjectWorkflow {
       );
     }
 
-    const committed = this.#canvasPort.fencePendingEdit?.({
+    const committed = this.#canvasPort.freezeWorkingSource?.({
       resumeEditing: false,
       trigger: "source-locator-reconcile",
     });
@@ -1970,7 +1969,7 @@ export class ProjectWorkflow {
     const canReconcileManaged = Boolean(
       openTarget
       && typeof this.#projectOpenPort.reconcileActiveManagedSource === "function"
-      && SHA256.test(this.#documentSession.sourceSha256 || "")
+      && SHA256.test(this.#documentSession.persistedSourceSha256 || "")
     );
     const operationId = this.#nextOperationId("source-locator");
     try {
@@ -1983,7 +1982,7 @@ export class ProjectWorkflow {
           documentId: liveContext.documentId,
           workingCopyId: String(openTarget.workingCopyId),
           versionId: String(openTarget.versionId),
-          expectedSourceSha256: this.#documentSession.sourceSha256,
+          expectedSourceSha256: this.#documentSession.persistedSourceSha256,
           reason: requestedReason,
           ...(watcherGeneration > 0 ? { watcherGeneration } : {}),
         });
@@ -2015,7 +2014,7 @@ export class ProjectWorkflow {
           liveContext.sourcePath,
         );
         if (pathChanged) {
-          const expectedSha256 = this.#documentSession.sourceSha256;
+          const expectedSha256 = this.#documentSession.persistedSourceSha256;
           const transitioned = this.#publishSourceLocatorChange({
             previousSourcePath: liveContext.sourcePath,
             nextSourcePath,
@@ -2436,7 +2435,7 @@ export class ProjectWorkflow {
     }
     if (this.#snapshot.close.phase === "ready") return "complete";
     // In-memory browser HTML has no disk Hash. Confirming the next switch
-    // fence requires DocumentSession.sourceSha256, so fill it before publish.
+    // fence requires DocumentSession.persistedSourceSha256, so fill it before publish.
     if (!project.sha256) {
       project = Object.freeze({
         ...project,
@@ -3190,7 +3189,7 @@ export class ProjectWorkflow {
     this.#documentWorkflow.resetForProjectTransition();
     this.#documentSession.reset({
       html: project.html,
-      sourceSha256: project.sha256 || null,
+      persistedSourceSha256: project.sha256 || null,
     });
     this.#setHydration({
       phase: project.sourcePath ? "hydrating" : "idle",
@@ -3262,10 +3261,10 @@ export class ProjectWorkflow {
       && openingTarget
       && this.#projectSession.projectId
       && this.#projectSession.documentId
-      && openingDocument.sourceSha256
+      && openingDocument.persistedSourceSha256
       && openingTarget.projectId === this.#projectSession.projectId
       && openingTarget.documentId === this.#projectSession.documentId
-      && openingTarget.sourceSha256 === openingDocument.sourceSha256
+      && openingTarget.sourceSha256 === openingDocument.persistedSourceSha256
       && this.#codecs.sameSourcePath(openingTarget.exactSourcePath, activeSource)
     );
     let sourceBoundaryFrozen = false;
@@ -3307,7 +3306,7 @@ export class ProjectWorkflow {
         exactOpeningAuthority: hasExactOpeningAuthority ? {
           projectId: this.#projectSession.projectId,
           documentId: this.#projectSession.documentId,
-          sourceSha256: openingDocument.sourceSha256,
+          sourceSha256: openingDocument.persistedSourceSha256,
           openTarget: openingTarget,
         } : null,
         sameSourcePath: this.#codecs.sameSourcePath,
@@ -3368,7 +3367,7 @@ export class ProjectWorkflow {
       const currentDocumentClean = projection.clean;
       const cleanProjectionMismatch = projection.cleanMismatch;
       let authoritativeHtml = currentDocument.html;
-      let authoritativeHash = currentDocument.sourceSha256 || workspaceHash;
+      let authoritativeHash = currentDocument.persistedSourceSha256 || workspaceHash;
       let authoritativeLastModifiedAt = String(payload.lastModifiedAt || "");
       let legacyVersionAuthority = null;
       if (preparedTransition?.activatedProject) {
@@ -3403,8 +3402,8 @@ export class ProjectWorkflow {
         authoritativeHash = workspaceHash;
       } else if (
         workspaceHash
-        && currentDocument.sourceSha256
-        && workspaceHash !== currentDocument.sourceSha256
+        && currentDocument.persistedSourceSha256
+        && workspaceHash !== currentDocument.persistedSourceSha256
       ) {
         throw new Error("本地编辑期间源文件身份发生变化，已停止刷新以保留当前内容。");
       }
@@ -3451,13 +3450,13 @@ export class ProjectWorkflow {
         if (mustAdoptSource || authoritativeHtml !== currentDocument.html) {
           this.#documentSession.publishAuthority({
             html: authoritativeHtml,
-            sourceSha256: authoritativeHash,
+            persistedSourceSha256: authoritativeHash,
           });
           this.#canvasPort.invalidateRenderAcks?.();
         } else {
           this.#documentSession.update({
             html: authoritativeHtml,
-            sourceSha256: authoritativeHash,
+            persistedSourceSha256: authoritativeHash,
           });
         }
         publishVersion();
@@ -3922,7 +3921,7 @@ export class ProjectWorkflow {
     this.#documentWorkflow.restoreProjectTransitionAuthority({
       authority: previous.documentWorkflow,
       context,
-      sourceSha256: previous.document.sourceSha256,
+      sourceSha256: previous.document.persistedSourceSha256,
     });
     this.#canvasPort.invalidateRenderAcks?.();
     return Object.freeze({
@@ -4078,7 +4077,7 @@ export class ProjectWorkflow {
     }
     this.#documentSession.publishAuthority({
       html,
-      sourceSha256,
+      persistedSourceSha256: sourceSha256,
       pendingWrite: null,
     });
     if (typeof publishSessions === "function") {

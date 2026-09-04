@@ -437,17 +437,15 @@ export function persistedChangeEvent(event: DirectEditEvent) {
 
 export function commentsFromRecords(raw: unknown): CommentItem[] {
   if (!Array.isArray(raw)) return [];
-  return raw.flatMap((value, index) => {
+  return raw.flatMap((value) => {
     if (!isRecord(value)) return [];
     const createdAt = String(value.createdAt || "");
-    const commentId = String(
-      value.commentId || value.id || `comment_unknown_${index + 1}`,
-    );
+    const commentId = String(value.commentId || "");
+    if (!commentId) return [];
     const recordedSourceAnchor = isRecord(value.sourceAnchor)
       && (
         value.sourceAnchor.targetId
         || value.sourceAnchor.elementId
-        || value.sourceAnchor.selector
       )
       ? value.sourceAnchor
       : value.target || value;
@@ -472,7 +470,7 @@ export function commentsFromRecords(raw: unknown): CommentItem[] {
               .filter((item): item is CommentAttachment => Boolean(item)),
           }
         : {}),
-      baseVersionId: value.baseVersionId ? String(value.baseVersionId) : null,
+      basedOnVersionId: value.basedOnVersionId ? String(value.basedOnVersionId) : null,
       ...(value.requestId ? { requestId: String(value.requestId) } : {}),
       ...(value.attemptId ? { attemptId: String(value.attemptId) } : {}),
       ...(value.resultVersionId

@@ -127,7 +127,7 @@ function createHarness({
   runSession = new RunSession({ sourcePath: SOURCE_PATH }),
   documentSession = new DocumentSession({
     html: "<main><p>正文</p></main>",
-    sourceSha256: SOURCE_SHA256,
+    persistedSourceSha256: SOURCE_SHA256,
   }),
   bridge = {},
 } = {}) {
@@ -442,7 +442,7 @@ test("cancelling an edit cleans only attachments staged during that edit", () =>
       target: target("target_comment_edit"),
       text: "原评论",
       attachments: [baseline],
-      baseVersionId: "V1",
+      basedOnVersionId: "V1",
     }],
     editSession: {
       commentId: "comment_edit",
@@ -496,7 +496,7 @@ test("an unknown Draft POST reconciles authority without a second mutation", asy
     updatedAt: "2026-08-11T00:00:00.000Z",
     target: target("target_unknown"),
     text: "保留这条评论",
-    baseVersionId: "V1",
+    basedOnVersionId: "V1",
   }]);
 
   const outcome = await harness.workflow.flushDraft({ boundary: "submit" });
@@ -539,7 +539,7 @@ test("rebindCommentTarget is the unique comment-location commit path", () => {
     updatedAt: "2026-08-11T00:00:00.000Z",
     target: target("target_old"),
     text: "位置失效",
-    baseVersionId: "V1",
+    basedOnVersionId: "V1",
   }]);
 
   const outcome = harness.workflow.rebindCommentTarget({
@@ -567,7 +567,7 @@ test("relinking a runtime comment to a source target clears the old visual hint"
     sourceAnchor: sourceHost,
     visualHint: runtimeTarget(sourceHost, "财务数据表", "table:nth-of-type(1)").visualHint,
     text: "运行时评论",
-    baseVersionId: "V1",
+    basedOnVersionId: "V1",
   }]);
 
   const outcome = harness.workflow.rebindCommentTarget({
@@ -595,7 +595,7 @@ test("relinking between runtime objects replaces the visual hint", () => {
     sourceAnchor: sourceHost,
     visualHint: firstRuntime.visualHint,
     text: "运行时评论",
-    baseVersionId: "V1",
+    basedOnVersionId: "V1",
   }]);
 
   const outcome = harness.workflow.rebindCommentTarget({
@@ -619,7 +619,7 @@ test("relinking a source comment to a runtime object adds a new visual hint", ()
     target: sourceHost,
     sourceAnchor: sourceHost,
     text: "源码评论",
-    baseVersionId: "V1",
+    basedOnVersionId: "V1",
   }]);
 
   const runtime = runtimeTarget(sourceHost, "财务数据表", "table:nth-of-type(1)");
@@ -642,7 +642,7 @@ test("beginEdit and confirmEdit keep an exclusive editing session", () => {
     updatedAt: "2026-08-11T00:00:00.000Z",
     target: target("target_edit_intent"),
     text: "原评论",
-    baseVersionId: "V1",
+    basedOnVersionId: "V1",
   }]);
 
   const started = harness.workflow.beginEdit({ commentId: "comment_edit_intent" });

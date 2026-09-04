@@ -70,12 +70,12 @@ test("draft command makes tombstones dominant and operations idempotent", () => 
 test("active draft snapshot exposes only one authoritative aggregate", () => {
   assert.deepEqual(activeDraftSnapshot({
     draftRevision: 2,
-    editEvents: [{ eventId: "edit_1" }],
+    changeEvents: [{ eventId: "edit_1" }],
   }, now), {
     annotationsRelativePath: "draft/annotations.json",
     annotationsSha256: "",
     commentIds: [],
-    editEventIds: ["edit_1"],
+    changeEventIds: ["edit_1"],
     draftRevision: 2,
     updatedAt: "2026-07-26T00:00:00.000Z",
     comments: [],
