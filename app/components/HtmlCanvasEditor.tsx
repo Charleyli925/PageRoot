@@ -1865,7 +1865,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     const randomPart = globalThis.crypto?.randomUUID?.()
       ?? `${Date.now()}_${Math.random().toString(36).slice(2)}`;
     const token = `frame_${frameLoadGenerationRef.current}_${randomPart}`;
-    let instrumentedSource = source;
+    const instrumentedSource = source;
     try {
       const sourceIndex = buildSourceIndex(source);
       sourceIndexRef.current = sourceIndex;
@@ -2249,7 +2249,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     );
     frameGenerationSequenceRef.current = candidateGeneration;
     let sourceIndex: SourceIndexValue | null = null;
-    let instrumentedSource = source;
+    const instrumentedSource = source;
     let sourceMapFailed = false;
     try {
       sourceIndex = buildSourceIndex(source);
