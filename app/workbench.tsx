@@ -4661,16 +4661,11 @@ export default function Workbench() {
     const visualHint = commentVisualHintForSelection(target);
     const matchesTarget = (comment: CommentItem) => {
       const commentAnchor = commentSourceAnchor(comment) || comment.target;
-      const sourceMatches = commentAnchor.id === sourceTarget.id
-        || Boolean(
-          commentAnchor.elementId
-          && commentAnchor.elementId === sourceTarget.elementId
-          && commentAnchor.level === sourceTarget.level,
-        )
-        || (
-          commentAnchor.selector === sourceTarget.selector
-          && commentAnchor.level === sourceTarget.level
-        );
+      const sourceMatches = Boolean(
+        commentAnchor.elementId
+        && sourceTarget.elementId
+        && commentAnchor.elementId === sourceTarget.elementId,
+      );
       if (!sourceMatches) return false;
       const commentHint = comment.visualHint
         || commentVisualHintForSelection(comment.target);

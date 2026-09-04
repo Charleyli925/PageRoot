@@ -27,7 +27,7 @@ test("incomplete identity HTML cannot use selector or fingerprint fallback", () 
   });
   assert.equal(index.pagerootIdentity.complete, false);
   assert.equal(rebound.resolution, "orphaned");
-  assert.equal(rebound.reason, "pageroot-identity-incomplete");
+  assert.equal(rebound.reason, "managed-element-id-required");
 });
 
 test("managed Working Copy locates only by elementId", () => {

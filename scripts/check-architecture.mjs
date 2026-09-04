@@ -376,6 +376,16 @@ export function retiredArtifactViolations({ file = "", source = "", module = nul
       `${file}: instrumentPreviewHtml cannot return; parseKey must not be written onto DOM`,
     );
   }
+  if (hasIdentifier(handle, "resolveFromPreview")) {
+    violations.push(
+      `${file}: resolveFromPreview cannot return; preview parseKey is not an edit authority`,
+    );
+  }
+  if (hasIdentifier(handle, "liveExactCommandTarget")) {
+    violations.push(
+      `${file}: liveExactCommandTarget cannot return; SourcePatch authorizes only by Stable ID`,
+    );
+  }
   if (
     !PARSE_KEY_ALLOWED_FILES.has(file)
     && source.includes(PARSE_KEY_PATTERN_SOURCE)

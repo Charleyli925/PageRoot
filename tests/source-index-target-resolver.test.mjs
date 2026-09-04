@@ -6,9 +6,9 @@ import {
   buildSourceIndex,
   createInsertionPointTargetRef,
   createTargetRef,
-  resolveFromPreview,
   resolveTargetRef,
 } from "../app/lib/source-patch-core.js";
+import { materializeSourceElementIdentity } from "../bridge/project-file-repository/working-copy.mjs";
 
 function resolveNthOfTypeSelector(index, selector) {
   let candidates = [];
@@ -142,33 +142,21 @@ test("fallback selectors use CSS nth-of-type ordinals across mixed-tag siblings"
   }
 });
 
-test("TargetResolver returns exact, rebound after reorder/class change, ambiguous, and orphaned", () => {
+test("TargetResolver orphans ID-less refs instead of scoring selectors", () => {
   const base = `<main id="root"><section class="old" data-key="a"><h2>Alpha 唯一标题</h2></section><section data-key="b"><h2>Beta</h2></section></main>`;
   const baseIndex = buildSourceIndex(base);
   const alpha = baseIndex.elements.find(
     (element) => element.stableAttributes["data-key"] === "a",
   );
   const alphaRef = createTargetRef(baseIndex, alpha.nodeId, { level: "module" });
-  assert.deepEqual(
-    Object.keys(alphaRef).sort(),
-    [
-      "expectedSourceSha256",
-      "fingerprint",
-      "label",
-      "level",
-      "resolution",
-      "selector",
-      "sourceAnchor",
-      "targetId",
-      "textQuote",
-    ],
-  );
-  assert.equal(resolveTargetRef(baseIndex, alphaRef).resolution, "exact");
+  assert.equal(alphaRef.elementId, undefined);
+  assert.equal(resolveTargetRef(baseIndex, alphaRef).resolution, "orphaned");
+  assert.equal(resolveTargetRef(baseIndex, alphaRef).reason, "managed-element-id-required");
 
   const reordered = `<main id="root"><section data-key="b"><h2>Beta</h2></section><section class="renamed" data-key="a"><h2>Alpha 唯一标题</h2></section></main>`;
   const rebound = resolveTargetRef(buildSourceIndex(reordered), alphaRef);
   assert.equal(rebound.resolution, "orphaned");
-  assert.equal(rebound.reason, "pageroot-identity-incomplete");
+  assert.equal(rebound.reason, "managed-element-id-required");
 
   const classOnlyBase = `<main><section class="old"><h2>只出现一次</h2></section><section><h2>其他</h2></section></main>`;
   const classOnlyIndex = buildSourceIndex(classOnlyBase);
@@ -260,7 +248,7 @@ test("insertion-point refs rebind through stable parent and sibling fingerprints
   assert.equal(targetRef.sourceAnchor.startOffset, targetRef.sourceAnchor.endOffset);
   assert.equal(targetRef.fingerprint.tagName, "main");
   assert.equal(targetRef.fingerprint.stableAttributes.id, "root");
-  assert.equal(resolveTargetRef(baseIndex, targetRef).resolution, "exact");
+  assert.equal(resolveTargetRef(baseIndex, targetRef).resolution, "orphaned");
 
   const next = `<main id="root"><section data-key="c">C</section><section data-key="a">A</section><section data-key="b">B</section></main>`;
   const nextIndex = buildSourceIndex(next);
@@ -286,16 +274,8 @@ test("createTargetRef rejects inconsistent levels and text level anchors the act
     sourceSha256: index.sourceSha256,
   });
   const exact = resolveTargetRef(index, textRef);
-  assert.equal(exact.resolution, "exact");
-  assert.equal(exact.target.nodeId, plainText.nodeId);
-  assert.equal(
-    resolveFromPreview(index, plain.nodeId, { level: "text" }).target.nodeId,
-    plainText.nodeId,
-  );
-  assert.equal(
-    resolveFromPreview(index, plain.nodeId, { level: "module" }).target.type,
-    "element",
-  );
+  assert.equal(exact.resolution, "orphaned");
+  assert.equal(exact.reason, "managed-element-id-required");
 
   assert.throws(
     () => createTargetRef(index, mixed.nodeId, { level: "text" }),
@@ -328,7 +308,9 @@ test("createTargetRef rejects inconsistent levels and text level anchors the act
 });
 
 test("insertion exact validates zero-width in-bounds child boundary and parent identity", () => {
-  const html = `<main id="root"><section data-key="a">A</section><section data-key="b">B</section></main>`;
+  const html = materializeSourceElementIdentity(
+    `<main id="root"><section data-key="a">A</section><section data-key="b">B</section></main>`,
+  ).html;
   const index = buildSourceIndex(html);
   const parent = index.elements.find((element) => element.tagName === "main");
   const before = index.elements.find(
@@ -338,6 +320,7 @@ test("insertion exact validates zero-width in-bounds child boundary and parent i
     parentId: parent.nodeId,
     beforeSiblingId: before.nodeId,
   });
+  assert.equal(valid.elementId, parent.pagerootId);
   assert.equal(resolveTargetRef(index, valid).resolution, "exact");
 
   const nonZeroWidth = {
@@ -369,7 +352,7 @@ test("insertion exact validates zero-width in-bounds child boundary and parent i
   };
   assert.equal(resolveTargetRef(index, outOfBounds).resolution, "orphaned");
 
-  const wrongParent = {
+  const wrongSelector = {
     ...valid,
     selector: "#missing-parent",
     fingerprint: {
@@ -377,7 +360,15 @@ test("insertion exact validates zero-width in-bounds child boundary and parent i
       stableAttributes: { id: "missing-parent" },
     },
   };
-  assert.equal(resolveTargetRef(index, wrongParent).resolution, "orphaned");
+  assert.equal(resolveTargetRef(index, wrongSelector).resolution, "exact");
+
+  const missingParent = { ...valid };
+  delete missingParent.elementId;
+  assert.equal(resolveTargetRef(index, missingParent).resolution, "orphaned");
+  assert.equal(
+    resolveTargetRef(index, missingParent).reason,
+    "managed-insertion-requires-parent-id",
+  );
 });
 
 test("insertion rebound never treats positional nth selector as parent identity", () => {
@@ -396,5 +387,5 @@ test("insertion rebound never treats positional nth selector as parent identity"
   const reordered = `<main><section><p>共同前缀</p><i>B</i></section><section><p>共同前缀</p><i>A</i></section></main>`;
   const resolution = resolveTargetRef(buildSourceIndex(reordered), targetRef);
   assert.equal(resolution.resolution, "orphaned");
-  assert.equal(resolution.reason, "pageroot-identity-incomplete");
+  assert.equal(resolution.reason, "managed-insertion-requires-parent-id");
 });

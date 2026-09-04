@@ -13,6 +13,14 @@ import {
   validatePatchScope,
 } from "../app/lib/source-patch-core.js";
 import { materializeSourceElementIdentity } from "../bridge/project-file-repository/working-copy.mjs";
+
+function identify(html) {
+  return materializeSourceElementIdentity(html).html;
+}
+
+function stripIdentity(html) {
+  return String(html).replace(/\s*data-pageroot-id="[^"]*"/gu, "");
+}
 function elementBy(index, predicate) {
   const element = index.elements.find(predicate);
   assert.ok(element, "expected source element");
@@ -46,7 +54,7 @@ function canonicalTestValue(value) {
 }
 
 test("inline style patch preserves quote, attribute order, unrelated declarations, and !important", () => {
-  const html = `<button data-x=1 class='cta' style='color : red !important;  padding:4px ; --Token: 10' aria-label="go">Go</button>`;
+  const html = identify(`<button data-x=1 class='cta' style='color : red !important;  padding:4px ; --Token: 10' aria-label="go">Go</button>`);
   const index = buildSourceIndex(html);
   const button = elementBy(index, (element) => element.tagName === "button");
   const targetRef = createTargetRef(index, button.nodeId);
@@ -60,7 +68,7 @@ test("inline style patch preserves quote, attribute order, unrelated declaration
   }, index);
   const updated = applyPatchPlan(updatePlan, html);
   assert.equal(
-    updated.html,
+    stripIdentity(updated.html),
     `<button data-x=1 class='cta' style='color : rgb(1, 2, 3) !important;  padding:4px ; --Token: 10' aria-label="go">Go</button>`,
   );
   assert.equal(updated.patches[0].startOffset >= button.startTagRange.startOffset, true);
@@ -78,7 +86,7 @@ test("inline style patch preserves quote, attribute order, unrelated declaration
   }, updatedIndex), updated.html);
   assert.match(removeImportant.html, /style='color : blue;  padding:4px ; --Token: 10'/u);
 
-  const normalInline = `<button style="color: red">Go</button>`;
+  const normalInline = identify(`<button style="color: red">Go</button>`);
   const normalInlineIndex = buildSourceIndex(normalInline);
   const normalInlineButton = elementBy(
     normalInlineIndex,
@@ -92,13 +100,13 @@ test("inline style patch preserves quote, attribute order, unrelated declaration
     important: true,
   }, normalInlineIndex), normalInline);
   assert.equal(
-    promotedImportant.html,
+    stripIdentity(promotedImportant.html),
     `<button style="color: blue !important">Go</button>`,
   );
 });
 
 test("inline style patch adds and deletes declarations/attributes without rewriting the start tag", () => {
-  const noStyle = `<div data-key="x" class='card'>Body</div>`;
+  const noStyle = identify(`<div data-key="x" class='card'>Body</div>`);
   const noStyleIndex = buildSourceIndex(noStyle);
   const div = elementBy(noStyleIndex, (element) => element.tagName === "div");
   const added = applyPatchPlan(planSourcePatch({
@@ -108,12 +116,12 @@ test("inline style patch adds and deletes declarations/attributes without rewrit
     value: "12px",
   }, noStyleIndex), noStyle);
   assert.equal(
-    added.html,
-    `<div data-key="x" class='card' style='font-size: 12px'>Body</div>`,
+    stripIdentity(added.html),
+    `<div data-key="x" class='card' style="font-size: 12px">Body</div>`,
   );
   assert.equal(applyPatchPlan(added.inversePlan, added.html).html, noStyle);
 
-  const many = `<div id=x style="color:red; padding: 4px; margin:0">Body</div>`;
+  const many = identify(`<div id=x style="color:red; padding: 4px; margin:0">Body</div>`);
   const manyIndex = buildSourceIndex(many);
   const manyDiv = elementBy(manyIndex, (element) => element.tagName === "div");
   const removed = applyPatchPlan(planSourcePatch({
@@ -122,10 +130,10 @@ test("inline style patch adds and deletes declarations/attributes without rewrit
     property: "padding",
     value: null,
   }, manyIndex), many);
-  assert.equal(removed.html, `<div id=x style="color:red; margin:0">Body</div>`);
+  assert.equal(stripIdentity(removed.html), `<div id=x style="color:red; margin:0">Body</div>`);
   assert.equal(applyPatchPlan(removed.inversePlan, removed.html).html, many);
 
-  const only = `<div id=x style="color:red">Body</div>`;
+  const only = identify(`<div id=x style="color:red">Body</div>`);
   const onlyIndex = buildSourceIndex(only);
   const onlyDiv = elementBy(onlyIndex, (element) => element.tagName === "div");
   const attributeRemoved = applyPatchPlan(planSourcePatch({
@@ -134,10 +142,10 @@ test("inline style patch adds and deletes declarations/attributes without rewrit
     property: "color",
     value: null,
   }, onlyIndex), only);
-  assert.equal(attributeRemoved.html, `<div id=x >Body</div>`);
+  assert.match(stripIdentity(attributeRemoved.html), /<div id=x\s*>Body<\/div>/u);
   assert.equal(applyPatchPlan(attributeRemoved.inversePlan, attributeRemoved.html).html, only);
 
-  const unquoted = `<div style=color:red>Body</div>`;
+  const unquoted = identify(`<div style=color:red>Body</div>`);
   const unquotedIndex = buildSourceIndex(unquoted);
   const unquotedDiv = elementBy(unquotedIndex, (element) => element.tagName === "div");
   const unquotedAdded = applyPatchPlan(planSourcePatch({
@@ -146,11 +154,14 @@ test("inline style patch adds and deletes declarations/attributes without rewrit
     property: "margin",
     value: "0 1px",
   }, unquotedIndex), unquoted);
-  assert.equal(unquotedAdded.html, `<div style=color:red;margin:0&#32;1px>Body</div>`);
+  assert.match(
+    stripIdentity(unquotedAdded.html),
+    /<div style=color:red;margin:0&#32;1px>Body<\/div>/u,
+  );
 });
 
 test("text range style wraps only selected characters across mixed inline content and preserves entities", () => {
-  const html = `<p id="p">开头 &amp; <mark>局部意图</mark> 后文不动</p><aside>outside</aside>`;
+  const html = identify(`<p id="p">开头 &amp; <mark>局部意图</mark> 后文不动</p><aside>outside</aside>`);
   const index = buildSourceIndex(html);
   const paragraph = elementBy(index, (element) => element.tagName === "p");
   const mark = elementBy(index, (element) => element.tagName === "mark");
@@ -172,7 +183,7 @@ test("text range style wraps only selected characters across mixed inline conten
   const result = applyPatchPlan(plan, html);
 
   assert.equal(
-    result.html,
+    stripIdentity(result.html),
     `<p id="p">开头 <span style="all: unset; display: inline !important; font-weight: 700">&amp;</span> <mark><span style="all: unset; display: inline !important; font-weight: 700">局部意图</span></mark> <span style="all: unset; display: inline !important; font-weight: 700">后文</span>不动</p><aside>outside</aside>`,
   );
   assert.equal(result.scopeReport.outsideUnchanged, true);
@@ -191,7 +202,7 @@ test("text range style wraps only selected characters across mixed inline conten
 });
 
 test("text range style assigns persistent IDs to wrappers in an identified source", () => {
-  const html = `<p data-pageroot-id="pr1_11111111111141118111111111111111">Alpha Beta</p>`;
+  const html = identify(`<p data-pageroot-id="pr1_11111111111141118111111111111111">Alpha Beta</p>`);
   const index = buildSourceIndex(html);
   const paragraph = index.elements[0];
   const textNode = index.byNodeId.get(paragraph.textNodeIds[0]);
@@ -212,7 +223,7 @@ test("text range style assigns persistent IDs to wrappers in an identified sourc
 });
 
 test("text range style stays layout-transparent and reuses a whole selected wrapper", () => {
-  const html = `<p class="button">打开原生对话框</p>`;
+  const html = identify(`<p class="button">打开原生对话框</p>`);
   const index = buildSourceIndex(html);
   const paragraph = elementBy(index, (element) => element.tagName === "p");
   const paragraphText = index.byNodeId.get(paragraph.textNodeIds[0]);
@@ -228,9 +239,9 @@ test("text range style stays layout-transparent and reuses a whole selected wrap
 
   assert.match(
     first.html,
-    /打开<span style="all: unset; display: inline !important; font-weight: 700">原生<\/span>对话框/u,
+    /打开<span style="all: unset; display: inline !important; font-weight: 700"[^>]*>原生<\/span>对话框/u,
   );
-  assert.equal(resolveTargetRef(first.sourceIndex, originalTarget).resolution, "orphaned");
+  assert.equal(resolveTargetRef(first.sourceIndex, originalTarget).resolution, "exact");
   const wrapper = elementBy(
     first.sourceIndex,
     (element) => element.tagName === "span" && element.textContent === "原生",
@@ -285,7 +296,7 @@ test("text range style stays layout-transparent and reuses a whole selected wrap
 });
 
 test("text range style rejects invalid, unrelated, and tampered ranges", () => {
-  const html = `<p id="p">hello <strong>world</strong></p><aside>outside</aside>`;
+  const html = identify(`<p id="p">hello <strong>world</strong></p><aside>outside</aside>`);
   const index = buildSourceIndex(html);
   const paragraph = elementBy(index, (element) => element.tagName === "p");
   const aside = elementBy(index, (element) => element.tagName === "aside");
@@ -336,10 +347,10 @@ test("text range style rejects invalid, unrelated, and tampered ranges", () => {
 
 test("text range style rejects raw, restricted, and foreign-content descendants", () => {
   for (const [html, parentTag] of [
-    [`<div id="target">A<xmp>B</xmp>C</div>`, "xmp"],
-    [`<div id="target">A<textarea>B</textarea>C</div>`, "textarea"],
-    [`<div id="target">A<select><option>B</option></select>C</div>`, "option"],
-    [`<div id="target">A<svg><text>B</text></svg>C</div>`, "text"],
+    [identify(`<div id="target">A<xmp>B</xmp>C</div>`), "xmp"],
+    [identify(`<div id="target">A<textarea>B</textarea>C</div>`), "textarea"],
+    [identify(`<div id="target">A<select><option>B</option></select>C</div>`), "option"],
+    [identify(`<div id="target">A<svg><text>B</text></svg>C</div>`), "text"],
   ]) {
     const index = buildSourceIndex(html);
     const target = elementBy(index, (element) => element.stableAttributes.id === "target");
@@ -357,8 +368,8 @@ test("text range style rejects raw, restricted, and foreign-content descendants"
 
 test("inline style patch rejects duplicate style attributes and duplicate property declarations", () => {
   for (const [html, code] of [
-    [`<div style="color:red" style='padding:0'>x</div>`, "DUPLICATE_STYLE_ATTRIBUTE"],
-    [`<div style="color:red; color:blue">x</div>`, "DUPLICATE_STYLE_PROPERTY"],
+    [identify(`<div style="color:red" style='padding:0'>x</div>`), "DUPLICATE_STYLE_ATTRIBUTE"],
+    [identify(`<div style="color:red; color:blue">x</div>`), "DUPLICATE_STYLE_PROPERTY"],
   ]) {
     const index = buildSourceIndex(html);
     const div = elementBy(index, (element) => element.tagName === "div");
@@ -373,8 +384,8 @@ test("inline style patch rejects duplicate style attributes and duplicate proper
 
 test("inline style patch rejects comment-obscured declarations and important tokens", () => {
   for (const html of [
-    `<div style="color:red; /*note*/ color:blue">x</div>`,
-    `<div style="color:red !/**/important">x</div>`,
+    identify(`<div style="color:red; /*note*/ color:blue">x</div>`),
+    identify(`<div style="color:red !/**/important">x</div>`),
   ]) {
     const index = buildSourceIndex(html);
     const div = elementBy(index, (element) => element.tagName === "div");
@@ -389,9 +400,9 @@ test("inline style patch rejects comment-obscured declarations and important tok
 
 test("inline style patch rejects declaration injection and implicit priority changes on every write path", () => {
   for (const html of [
-    `<div style="color:red; padding:4px">x</div>`,
-    `<div class="plain">x</div>`,
-    `<div style=color:red>x</div>`,
+    identify(`<div style="color:red; padding:4px">x</div>`),
+    identify(`<div class="plain">x</div>`),
+    identify(`<div style=color:red>x</div>`),
   ]) {
     const index = buildSourceIndex(html);
     const div = elementBy(index, (element) => element.tagName === "div");
@@ -406,7 +417,7 @@ test("inline style patch rejects declaration injection and implicit priority cha
     }
   }
 
-  const safeHtml = `<div>x</div>`;
+  const safeHtml = identify(`<div>x</div>`);
   const safeIndex = buildSourceIndex(safeHtml);
   const safeDiv = elementBy(safeIndex, (element) => element.tagName === "div");
   const safe = applyPatchPlan(planSourcePatch({
@@ -416,16 +427,16 @@ test("inline style patch rejects declaration injection and implicit priority cha
     value: `url("data:text/plain;a")`,
   }, safeIndex), safeHtml);
   assert.equal(
-    safe.html,
+    stripIdentity(safe.html),
     `<div style="background-image: url(&quot;data:text/plain;a&quot;)">x</div>`,
   );
 });
 
 test("inline style patch rejects escaped and non-canonical declaration property names", () => {
   for (const html of [
-    `<div style="c\\olor:red; color:blue">x</div>`,
-    `<div style="c\\6flor:red; color:blue">x</div>`,
-    `<div style="*color:red; color:blue">x</div>`,
+    identify(`<div style="c\\olor:red; color:blue">x</div>`),
+    identify(`<div style="c\\6flor:red; color:blue">x</div>`),
+    identify(`<div style="*color:red; color:blue">x</div>`),
   ]) {
     const index = buildSourceIndex(html);
     const div = elementBy(index, (element) => element.tagName === "div");
@@ -439,7 +450,7 @@ test("inline style patch rejects escaped and non-canonical declaration property 
 });
 
 test("sibling reorder moves exact source fragments with leading comments, preserves internals, rebinds, and inverts", () => {
-  const html = `<div id="parent">\n  <!-- A -->\n  <section data-key="a" class='one'>\n    <h2>A</h2>\n  </section>\n  <!-- B -->\n  <section data-key="b"><p>B</p></section>\n  <section data-key="c" style="color:red"><p>C</p></section>\n</div>`;
+  const html = identify(`<div id="parent">\n  <!-- A -->\n  <section data-key="a" class='one'>\n    <h2>A</h2>\n  </section>\n  <!-- B -->\n  <section data-key="b"><p>B</p></section>\n  <section data-key="c" style="color:red"><p>C</p></section>\n</div>`);
   const index = buildSourceIndex(html);
   const sections = Object.fromEntries(index.elements
     .filter((element) => element.tagName === "section")
@@ -454,19 +465,19 @@ test("sibling reorder moves exact source fragments with leading comments, preser
   }, index);
   const result = applyPatchPlan(plan, html);
   assert.equal(
-    result.html,
+    stripIdentity(result.html),
     `<div id="parent">\n  <section data-key="c" style="color:red"><p>C</p></section>\n  <!-- A -->\n  <section data-key="a" class='one'>\n    <h2>A</h2>\n  </section>\n  <!-- B -->\n  <section data-key="b"><p>B</p></section>\n</div>`,
   );
   for (const section of Object.values(sections)) {
     assert.equal(result.html.includes(section.raw), true);
   }
-  assert.equal(resolveTargetRef(result.sourceIndex, aRef).resolution, "orphaned");
+  assert.equal(resolveTargetRef(result.sourceIndex, aRef).resolution, "exact");
   assert.equal(result.scopeReport.outsideUnchanged, true);
   assert.equal(applyPatchPlan(result.inversePlan, result.html).html, html);
 });
 
 test("sibling reorder moves an unambiguously owned trailing comment and preserves inverse identity", () => {
-  const html = `<div id="parent">\n<section data-key="a">A</section>\n<section data-key="b">B</section><!-- B tail -->\n</div>`;
+  const html = identify(`<div id="parent">\n<section data-key="a">A</section>\n<section data-key="b">B</section><!-- B tail -->\n</div>`);
   const index = buildSourceIndex(html);
   const sections = Object.fromEntries(index.elements
     .filter((element) => element.tagName === "section")
@@ -486,7 +497,7 @@ test("sibling reorder moves an unambiguously owned trailing comment and preserve
   }, index), html);
 
   assert.equal(
-    result.html,
+    stripIdentity(result.html),
     `<div id="parent">\n<section data-key="b">B</section><!-- B tail -->\n<section data-key="a">A</section>\n</div>`,
   );
   assert.equal(result.targetMappings[0].targetId, "module-b");
@@ -498,9 +509,9 @@ test("sibling reorder moves an unambiguously owned trailing comment and preserve
 
 test("sibling reorder fails closed for non-whitespace siblings and ambiguous comment ownership", () => {
   for (const html of [
-    `<div><section data-key="a">A</section>loose text<section data-key="b">B</section></div>`,
-    `<div><section data-key="a">A</section> <!-- trailing? -->\n<section data-key="b">B</section></div>`,
-    `<div><section data-key="a">A</section><section data-key="b">B</section>\n<!-- parent note --></div>`,
+    identify(`<div><section data-key="a">A</section>loose text<section data-key="b">B</section></div>`),
+    identify(`<div><section data-key="a">A</section> <!-- trailing? -->\n<section data-key="b">B</section></div>`),
+    identify(`<div><section data-key="a">A</section><section data-key="b">B</section>\n<!-- parent note --></div>`),
   ]) {
     const index = buildSourceIndex(html);
     const sections = index.elements.filter((element) => element.tagName === "section");
@@ -513,7 +524,7 @@ test("sibling reorder fails closed for non-whitespace siblings and ambiguous com
 });
 
 test("apply authorizes patches against exact operation TargetRefs and rejects tampering", () => {
-  const html = `<div><p id="a">one</p><p id="b">two</p></div>`;
+  const html = identify(`<div><p id="a">one</p><p id="b">two</p></div>`);
   const index = buildSourceIndex(html);
   const paragraphs = Object.fromEntries(index.elements
     .filter((element) => element.tagName === "p")
@@ -583,7 +594,7 @@ test("apply authorizes patches against exact operation TargetRefs and rejects ta
 });
 
 test("handcrafted self-authenticated inverse plans cannot bypass provenance validation", () => {
-  const html = `<p>safe</p>`;
+  const html = identify(`<p>safe</p>`);
   const forgedOutput = `<p>evil</p>`;
   const index = buildSourceIndex(html);
   const paragraph = elementBy(index, (element) => element.tagName === "p");
@@ -632,7 +643,7 @@ test("handcrafted self-authenticated inverse plans cannot bypass provenance vali
 });
 
 test("source scope evidence rejects undeclared changes", () => {
-  const html = `<div><p>ok</p></div>`;
+  const html = identify(`<div><p>ok</p></div>`);
   const startOffset = html.indexOf("ok");
   const declared = [{
     startOffset,
@@ -641,7 +652,7 @@ test("source scope evidence rejects undeclared changes", () => {
     after: "fine",
     kind: "text",
   }];
-  const validNext = `<div><p>fine</p></div>`;
+  const validNext = html.replace("ok", "fine");
   assert.equal(validatePatchScope(html, validNext, declared).outsideUnchanged, true);
   assert.equal(
     validatePatchScope(html, `${validNext}<script>outside()</script>`, declared).outsideUnchanged,
@@ -650,7 +661,7 @@ test("source scope evidence rejects undeclared changes", () => {
 });
 
 test("target mappings preserve editable-island identity through apply, inverse, and reapplication", () => {
-  const html = `<p>before</p>`;
+  const html = identify(`<p>before</p>`);
   const index = buildSourceIndex(html);
   const paragraph = elementBy(index, (element) => element.tagName === "p");
   const targetRef = createTargetRef(index, paragraph.nodeId, {
@@ -685,7 +696,7 @@ test("target mappings preserve editable-island identity through apply, inverse, 
 });
 
 test("a tracked comment stays on the same element after text edit and inverse restoration", () => {
-  const source = "<!doctype html><html><body><main><p>before</p></main></body></html>";
+  const source = identify("<!doctype html><html><body><main><p>before</p></main></body></html>");
   const index = buildSourceIndex(source);
   const paragraph = elementBy(index, (element) => element.tagName === "p");
   const editTarget = createTargetRef(index, paragraph, {
@@ -707,7 +718,7 @@ test("a tracked comment stays on the same element after text edit and inverse re
     trackedTargetRefs: [commentTarget],
   });
 
-  assert.match(applied.html, /<p>after<\/p>/u);
+  assert.match(applied.html, /<p[^>]*>after<\/p>/u);
   const refreshed = applied.refreshedTrackedTargetRefs.find(
     (target) => target.targetId === "target_comment",
   );
@@ -729,12 +740,12 @@ test("a tracked comment stays on the same element after text edit and inverse re
 });
 
 test("a tracked comment follows its exact sibling through reorder and inverse restoration", () => {
-  const source = [
+  const source = identify([
     "<!doctype html><html><body><main>",
     "<section><p>one</p></section>",
     "<section><p>two</p></section>",
     "</main></body></html>",
-  ].join("\n");
+  ].join("\n"));
   const index = buildSourceIndex(source);
   const parent = elementBy(index, (element) => element.tagName === "main");
   const sections = parent.childElementIds.map((nodeId) => index.byNodeId.get(nodeId));
@@ -779,14 +790,14 @@ test("a tracked comment follows its exact sibling through reorder and inverse re
 });
 
 test("consecutive source-backed moves remain serializable through inverse round trips", () => {
-  const source = [
+  const source = identify([
     "<!doctype html><html><body><main>",
     '<section data-key="a">A</section>',
     '<section data-key="b">B</section>',
     '<section data-key="c">C</section>',
     '<section data-key="d">D</section>',
     "</main></body></html>",
-  ].join("\n");
+  ].join("\n"));
   let currentSource = source;
   let currentIndex = buildSourceIndex(currentSource);
   let movingTarget = createTargetRef(
@@ -844,7 +855,7 @@ test("consecutive source-backed moves remain serializable through inverse round 
 });
 
 test("tracked insertion points refresh deterministically through offset-shifting edits and inverse", () => {
-  const html = `<div><p>A</p><section id="b">B</section></div>`;
+  const html = identify(`<div><p>A</p><section id="b">B</section></div>`);
   const index = buildSourceIndex(html);
   const paragraph = elementBy(index, (element) => element.tagName === "p");
   const parent = elementBy(index, (element) => element.tagName === "div");
@@ -888,7 +899,7 @@ test("tracked insertion points refresh deterministically through offset-shifting
 });
 
 test("duplicate sibling reorder maps operation and tracked target identities deterministically", () => {
-  const html = `<div><section>same</section><section>same</section><section>other</section></div>`;
+  const html = identify(`<div><section>same</section><section>same</section><section>other</section></div>`);
   const index = buildSourceIndex(html);
   const sections = index.elements.filter((element) => element.tagName === "section");
   const firstRef = createTargetRef(index, sections[0].nodeId, {
@@ -914,7 +925,7 @@ test("duplicate sibling reorder maps operation and tracked target identities det
     result.targetMappings.map((mapping) => [mapping.targetId, mapping]),
   );
 
-  assert.equal(result.html, `<div><section>same</section><section>same</section><section>other</section></div>`);
+  assert.equal(stripIdentity(result.html), `<div><section>same</section><section>same</section><section>other</section></div>`);
   assert.equal(mappings.second.afterNodeId, result.sourceIndex.elements
     .filter((element) => element.tagName === "section")[0].nodeId);
   assert.equal(mappings.first.afterNodeId, result.sourceIndex.elements
@@ -926,7 +937,7 @@ test("duplicate sibling reorder maps operation and tracked target identities det
 });
 
 test("tracked insertion points follow their before-sibling through reorder and inverse", () => {
-  const html = `<div><section id="a">A</section><section id="b">B</section></div>`;
+  const html = identify(`<div><section id="a">A</section><section id="b">B</section></div>`);
   const index = buildSourceIndex(html);
   const parent = elementBy(index, (element) => element.tagName === "div");
   const sections = Object.fromEntries(index.elements
@@ -951,7 +962,7 @@ test("tracked insertion points follow their before-sibling through reorder and i
   const movedInsertion = result.refreshedTrackedTargetRefs[0];
 
   assert.equal(
-    result.html,
+    stripIdentity(result.html),
     `<div><section id="b">B</section><section id="a">A</section></div>`,
   );
   assert.equal(movedInsertion.targetId, "slot-before-b");
@@ -970,7 +981,7 @@ test("tracked insertion points follow their before-sibling through reorder and i
 });
 
 test("native text formatting never invents a persistent layout wrapper", () => {
-  const html = `<p id="b">打开<span style="font-weight: normal"><span style="font-weight: 700">原生</span></span><span style="all: inherit; display: contents !important; color: green">对话</span>框</p>`;
+  const html = identify(`<p id="b">打开<span style="font-weight: normal"><span style="font-weight: 700">原生</span></span><span style="all: inherit; display: contents !important; color: green">对话</span>框</p>`);
   const index = buildSourceIndex(html);
   const paragraph = elementBy(index, (element) => element.stableAttributes.id === "b");
   const nativeText = index.textNodes.find((textNode) => textNode.value === "原生");
@@ -995,14 +1006,14 @@ test("native text formatting never invents a persistent layout wrapper", () => {
   assert.doesNotMatch(result.html, /data-pageroot-text-flow-item/u);
   assert.match(
     result.html,
-    /<p id="b">打开<span[^>]*><span[^>]*font-size: 18px[^>]*>原生<\/span><\/span><span[^>]*>对话<\/span>框<\/p>/u,
+    /<p id="b"[^>]*>打开<span[^>]*><span[^>]*font-size: 18px[^>]*>原生<\/span><\/span><span[^>]*>对话<\/span>框<\/p>/u,
   );
   assert.equal(result.refreshedTargetRefs[0].resolution, "exact");
   assert.equal(applyPatchPlan(result.inversePlan, result.html).html, html);
 });
 
 test("whole-root native text replacement changes only the text bytes and undoes exactly", () => {
-  const html = `<p id='b'  data-note="keep">文字</p>`;
+  const html = identify(`<p id='b'  data-note="keep">文字</p>`);
   const index = buildSourceIndex(html);
   const paragraph = elementBy(index, (element) => element.stableAttributes.id === "b");
   const result = applyPatchPlan(planSourcePatch({
@@ -1012,13 +1023,13 @@ test("whole-root native text replacement changes only the text bytes and undoes 
     nextInnerHtml: "新版",
   }, index), html);
 
-  assert.equal(result.html, `<p id='b'  data-note="keep">新版</p>`);
+  assert.equal(stripIdentity(result.html), `<p id='b'  data-note="keep">新版</p>`);
   assert.equal(result.patches.length, 1);
   assert.equal(applyPatchPlan(result.inversePlan, result.html).html, html);
 });
 
 test("direct text fragments under complex parents replace only exact text-node bytes", () => {
-  const html = `<div id="mixed"><div class="chart">KEEP</div><b>强调</b>，裸&amp;文本<span>尾注</span></div>`;
+  const html = identify(`<div id="mixed"><div class="chart">KEEP</div><b>强调</b>，裸&amp;文本<span>尾注</span></div>`);
   const index = buildSourceIndex(html);
   const parent = elementBy(
     index,
@@ -1038,7 +1049,7 @@ test("direct text fragments under complex parents replace only exact text-node b
   }, index), html);
 
   assert.equal(
-    result.html,
+    stripIdentity(result.html),
     `<div id="mixed"><div class="chart">KEEP</div><b>强调</b>，新版&lt;文字&gt;<span>尾注</span></div>`,
   );
   assert.deepEqual(result.patches.map((patch) => patch.kind), ["direct-text-node"]);
@@ -1048,7 +1059,7 @@ test("direct text fragments under complex parents replace only exact text-node b
 });
 
 test("direct text fragments can be deleted and undone through the surviving parent target", () => {
-  const html = `<div id="mixed"><section>KEEP</section>裸文本<span>尾注</span></div>`;
+  const html = identify(`<div id="mixed"><section>KEEP</section>裸文本<span>尾注</span></div>`);
   const index = buildSourceIndex(html);
   const parent = elementBy(
     index,
@@ -1064,7 +1075,7 @@ test("direct text fragments can be deleted and undone through the surviving pare
   }, index), html);
 
   assert.equal(
-    result.html,
+    stripIdentity(result.html),
     `<div id="mixed"><section>KEEP</section><span>尾注</span></div>`,
   );
   assert.equal(result.refreshedTargetRefs[0].resolution, "exact");
@@ -1072,7 +1083,7 @@ test("direct text fragments can be deleted and undone through the surviving pare
 });
 
 test("direct text fragment plans reject markup and non-direct text targets", () => {
-  const html = `<div id="mixed"><section>KEEP</section>裸文本<span>嵌套</span></div>`;
+  const html = identify(`<div id="mixed"><section>KEEP</section>裸文本<span>嵌套</span></div>`);
   const index = buildSourceIndex(html);
   const parent = elementBy(
     index,
@@ -1102,8 +1113,8 @@ test("direct text fragment plans reject markup and non-direct text targets", () 
 
 test("direct text fragments do not bypass safe islands or dedicated editor roots", () => {
   for (const [html, expectedCode] of [
-    [`<p id="safe">普通文字</p>`, "TEXT_FRAGMENT_PARENT_UNSUPPORTED"],
-    [`<canvas id="dedicated">Canvas fallback</canvas>`, "TEXT_FRAGMENT_UNSAFE_CONTEXT"],
+    [identify(`<p id="safe">普通文字</p>`), "TEXT_FRAGMENT_PARENT_UNSUPPORTED"],
+    [identify(`<canvas id="dedicated">Canvas fallback</canvas>`), "TEXT_FRAGMENT_UNSAFE_CONTEXT"],
   ]) {
     const index = buildSourceIndex(html);
     const parent = elementBy(index, (element) => Boolean(element.stableAttributes.id));
@@ -1199,7 +1210,7 @@ test("live elementId that left the current source fails closed without fingerpri
 });
 
 test("editable island checkpoint rejects STALE_SOURCE_HASH and keeps original bytes", () => {
-  const html = `<p>岛内</p><p>岛外保持</p>`;
+  const html = identify(`<p>岛内</p><p>岛外保持</p>`);
   const index = buildSourceIndex(html);
   const inside = elementBy(index, (element) => element.textContent === "岛内");
   const original = html;
@@ -1215,7 +1226,7 @@ test("editable island checkpoint rejects STALE_SOURCE_HASH and keeps original by
 });
 
 test("editable island patches cannot change bytes outside the selected island", () => {
-  const html = `<p>岛内</p><p>岛外保持</p>`;
+  const html = identify(`<p>岛内</p><p>岛外保持</p>`);
   const index = buildSourceIndex(html);
   const inside = elementBy(index, (element) => element.textContent === "岛内");
   const result = applyPatchPlan(planSourcePatch({
@@ -1226,7 +1237,7 @@ test("editable island patches cannot change bytes outside the selected island", 
     nextInnerHtml: "已改",
     expectedSourceSha256: index.sourceSha256,
   }, index), html);
-  assert.equal(result.html, `<p>已改</p><p>岛外保持</p>`);
+  assert.equal(stripIdentity(result.html), `<p>已改</p><p>岛外保持</p>`);
   assert.equal(result.scopeReport.outsideUnchanged, true);
   assert.equal(
     html.slice(inside.contentRange.endOffset),

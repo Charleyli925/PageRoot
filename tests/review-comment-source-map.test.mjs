@@ -86,8 +86,8 @@ test("review comment projection leaves unidentified unique selectors byte-equal"
     projection.sourceIndex,
     selectionFor(target),
   );
-  assert.equal(resolved?.selector, "#unique-target");
-  assert.equal(resolved?.pagerootId, paragraph.pagerootId);
+  assert.equal(resolved, null);
+  assert.equal(paragraph.selector, "#unique-target");
 });
 
 test("review comment source mapping fails closed for ambiguous and orphaned targets", () => {

@@ -861,7 +861,7 @@ export class DocumentWorkflow {
         restoredFromVersionId: payload.restoredFromVersionId || null,
       });
       this.#canvasPort.invalidateRenderAcks();
-      await this.#verifyRendered(html, sourceSha256, activeContext);
+      await this.#acknowledgeCanvas(html, sourceSha256, activeContext);
       if (!this.#isCurrent(activeContext)) return stale(activeContext);
       this.#auditPending = [];
       this.#auditInFlight.clear();
@@ -889,33 +889,23 @@ export class DocumentWorkflow {
         });
         this.#versionSession.restoreView(previousVersionView);
         this.#canvasPort.invalidateRenderAcks();
-        try {
-          await this.#verifyRendered(
-            previousDocument.html,
-            await this.#hashPort.sha256(previousDocument.html),
-            activeContext,
-          );
-        } catch {
-          // The transition stays fail-closed until the caller releases its view lock.
-        }
+        await this.#acknowledgeCanvas(
+          previousDocument.html,
+          previousDocument.workingHtmlSha256
+            || previousDocument.persistedSourceSha256
+            || await this.#hashPort.sha256(previousDocument.html),
+          activeContext,
+        );
       }
       if (!this.#isCurrent(activeContext)) return stale(activeContext);
-      const message = externalAccepted
-        ? "外部 HTML 已被保留，但编辑画布未能安全显示该版本。当前项目已锁定，请重试读取或重新打开文件。"
-        : this.#codecs.errorMessage(cause, "请稍后重试，源文件没有被覆盖。");
-      if (externalAccepted) {
-        // Once the user keeps the external source, the previous canvas is no
-        // longer persistence authority.  A failed render must remain closed
-        // until a later project read verifies the external bytes.
-        this.#documentSession.setPersistence({ state: "failed", error: message });
-      }
+      const message = this.#codecs.errorMessage(cause, "请稍后重试，源文件没有被覆盖。");
       this.#emit({
         type: "document-authority-reload-failed",
         context: activeContext,
         code: sourceErrorCode(cause, "SOURCE_RELOAD_REJECTED"),
         message,
         externalAccepted,
-        fatal: externalAccepted,
+        fatal: false,
       });
       return this.#outcomeFromCause(
         this.#nextOperationId("reload"),
@@ -1011,7 +1001,7 @@ export class DocumentWorkflow {
         restoredFromVersionId: payload.restoredFromVersionId || null,
       });
       this.#canvasPort.invalidateRenderAcks();
-      await this.#verifyRendered(html, sourceSha256, activeContext);
+      await this.#acknowledgeCanvas(html, sourceSha256, activeContext);
       if (!this.#isCurrent(activeContext)) return stale(activeContext);
       this.#auditPending = [];
       this.#auditInFlight.clear();
@@ -1544,16 +1534,8 @@ export class DocumentWorkflow {
         this.#emit({ type: "document-recovery-queued", context: activeContext });
         return succeeded({ recovered: true, queued: true });
       }
-      await this.#verifyRendered(recoveredHtml, targetSha256, activeContext);
-      if (!this.#isCurrent(activeContext)) return stale(activeContext);
-      const frozen = await this.#freezeAuthority(
-        "恢复记录已加载，但编辑画布尚未就绪。",
-      );
-      if (!frozen.ok) {
-        const message = `恢复记录与当前项目、版本或源文件身份不一致。${frozen.reason}`;
-        this.#documentSession.setPersistence({ state: "failed", error: message });
-        return rejected("DOCUMENT_RECOVERY_BOUNDARY_FAILED", message);
-      }
+      await this.#acknowledgeCanvas(recoveredHtml, targetSha256, activeContext);
+      await this.#freezeAuthority("恢复记录已加载，当前投影只读。");
       this.#documentSession.setPersistence({
         state: "conflict",
         error: "恢复记录与当前项目、版本或源文件身份不一致，请比较后选择重新载入或导出当前 HTML。",
@@ -2676,6 +2658,31 @@ export class DocumentWorkflow {
         && !this.#codecs.sameSourcePath(payload.sourcePath, context.sourcePath)
       )
     ) throw invalidAcknowledgement(message, "SOURCE_IDENTITY_MISMATCH");
+  }
+
+  async #acknowledgeCanvas(html, sourceSha256, context) {
+    if (typeof this.#canvasPort.verifyRendered !== "function") return true;
+    try {
+      await this.#canvasPort.verifyRendered(html, sourceSha256, context);
+      if (context && !this.#isCurrent(context)) return false;
+      const confirmed = this.#documentSession.confirmCanvas({
+        generation: this.#documentSession.canvasGeneration,
+        renderedSha256: sourceSha256,
+        workingHtmlSha256: sourceSha256,
+      });
+      if (confirmed) return true;
+      this.#documentSession.failCanvas({
+        generation: this.#documentSession.canvasGeneration,
+        error: "当前画布尚未完成自动恢复。",
+      });
+      return false;
+    } catch (cause) {
+      this.#documentSession.failCanvas({
+        generation: this.#documentSession.canvasGeneration,
+        error: this.#codecs.errorMessage(cause, "当前画布尚未完成自动恢复。"),
+      });
+      return false;
+    }
   }
 
   async #verifyRendered(html, sourceSha256, context) {

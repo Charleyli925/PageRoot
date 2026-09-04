@@ -2999,7 +2999,8 @@ export class ProjectWorkflow {
           canvasOutcome = retryOutcome;
         }
       }
-      if (canvasOutcome.status !== "succeeded") {
+      const canvasReady = canvasOutcome.status === "succeeded";
+      if (!canvasReady) {
         reportInternalFailure({
           area: "canvas",
           operation: "import-canvas-ack",
@@ -3007,26 +3008,14 @@ export class ProjectWorkflow {
           recovered: false,
           cause: canvasOutcome.reason,
         });
-        if (typeof this.#projectOpenPort.rollbackPrepared === "function") {
-          await this.#projectOpenPort.rollbackPrepared(confirmation.requestId);
-        }
-        if (previousAuthority) {
-          this.restoreManagedSourceTransitionAuthority(previousAuthority);
-        }
-        this.#setOpenConfirmation({
-          ...confirmation,
-          deleteOriginal: shouldDelete,
-          busy: false,
-        });
         this.#emit({
           type: "external-open-canvas-failed",
           requestId: confirmation.requestId,
           reason: canvasOutcome.reason || "当前画布尚未完成自动恢复。",
         });
-        return canvasOutcome;
       }
       let disposition = "kept";
-      if (typeof this.#projectOpenPort.finalizePrepared === "function") {
+      if (canvasReady && typeof this.#projectOpenPort.finalizePrepared === "function") {
         const finalized = await this.#projectOpenPort.finalizePrepared(
           confirmation.requestId,
         );

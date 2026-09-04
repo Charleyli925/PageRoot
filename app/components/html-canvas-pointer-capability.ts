@@ -440,11 +440,6 @@ function runtimeCommentAnchorForTarget(
 } | null {
   if (!isProvenRuntimeSourceElement) return null;
   let current: HTMLElement | null = targetElement;
-  let pageFallback: {
-    element: HTMLElement;
-    selection: HtmlCanvasSelection;
-    ref: SourceTargetRef;
-  } | null = null;
   while (current) {
     if (isProvenRuntimeSourceElement(current)) {
       const rawSelection = selectionForElement(
@@ -470,13 +465,10 @@ function runtimeCommentAnchorForTarget(
       if (isValidPagerootElementId(selection.elementId)) {
         return { element: current, selection, ref };
       }
-      if (isPageRoot && selection.resolution === "exact") {
-        pageFallback = { element: current, selection, ref };
-      }
     }
     current = current.parentElement;
   }
-  return pageFallback;
+  return null;
 }
 
 export function resolveCanvasPointerHit(input: CanvasPointerHitInput): CanvasPointerHit {

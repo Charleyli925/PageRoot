@@ -11,10 +11,16 @@ import {
   buildSourceIndex,
   createTargetRef,
 } from "../app/lib/source-patch-core.js";
+import { materializeSourceElementIdentity } from "../bridge/project-file-repository/working-copy.mjs";
+
+function identified(html) {
+  return materializeSourceElementIdentity(html).html;
+}
 
 function selectionFor(targetRef) {
   return {
     id: targetRef.targetId,
+    elementId: targetRef.elementId,
     label: targetRef.label,
     level: targetRef.level,
     selector: targetRef.selector,
@@ -41,7 +47,7 @@ function commentOn(sourceIndex, tagName, text, options = {}) {
 }
 
 test("each resolvable target becomes one marker carrying its source node", () => {
-  const source = "<main><h1 id=\"title\">标题</h1><p id=\"body\">正文</p></main>";
+  const source = identified("<main><h1 id=\"title\">标题</h1><p id=\"body\">正文</p></main>");
   const sourceIndex = buildSourceIndex(source);
   const groups = previewCommentMarkerGroups(sourceIndex, [
     commentOn(sourceIndex, "h1", "标题再短一点"),
@@ -62,7 +68,7 @@ test("each resolvable target becomes one marker carrying its source node", () =>
 });
 
 test("several comments on one target collapse into a single counted marker", () => {
-  const source = "<main><h1 id=\"title\">标题</h1></main>";
+  const source = identified("<main><h1 id=\"title\">标题</h1></main>");
   const sourceIndex = buildSourceIndex(source);
   const groups = previewCommentMarkerGroups(sourceIndex, [
     commentOn(sourceIndex, "h1", "第一条"),
@@ -97,7 +103,7 @@ test("an ambiguous or orphaned target produces no marker at all", () => {
 });
 
 test("an empty comment with no attachment contributes no marker", () => {
-  const source = "<main><h1 id=\"title\">标题</h1><p id=\"body\">正文</p></main>";
+  const source = identified("<main><h1 id=\"title\">标题</h1><p id=\"body\">正文</p></main>");
   const sourceIndex = buildSourceIndex(source);
   const groups = previewCommentMarkerGroups(sourceIndex, [
     commentOn(sourceIndex, "h1", "   "),
@@ -110,7 +116,7 @@ test("an empty comment with no attachment contributes no marker", () => {
 });
 
 test("the measure request carries identities only, never comment text", () => {
-  const source = "<main><h1 id=\"title\">标题</h1></main>";
+  const source = identified("<main><h1 id=\"title\">标题</h1></main>");
   const sourceIndex = buildSourceIndex(source);
   const groups = previewCommentMarkerGroups(sourceIndex, [
     commentOn(sourceIndex, "h1", "这句话不能进入页面"),

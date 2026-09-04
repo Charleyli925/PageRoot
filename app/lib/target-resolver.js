@@ -547,45 +547,7 @@ export function resolveTargetRef(indexOrHtml, targetRef, options = {}) {
     );
   }
   void options;
-  if (targetRef.elementId !== undefined || index.pagerootIdentity?.complete === true) {
-    return resolveManagedOfficialTargetRef(index, targetRef);
-  }
-  if (targetRef.level === "insertion-point") {
-    const exactInsertion = resolveInsertionPoint(index, targetRef);
-    if (exactInsertion.resolution === "exact") return exactInsertion;
-    return resolved(
-      targetRef,
-      "orphaned",
-      null,
-      [],
-      "pageroot-identity-incomplete",
-    );
-  }
-  const exact = exactNode(index, targetRef);
-  if (exact) {
-    return resolved(targetRef, "exact", exact, [], "source-anchor-match");
-  }
-  return resolved(
-    targetRef,
-    "orphaned",
-    null,
-    [],
-    "pageroot-identity-incomplete",
-  );
-}
-
-export function resolveFromPreview(indexOrHtml, nodeId, options = {}) {
-  const index = typeof indexOrHtml === "string"
-    ? buildSourceIndex(indexOrHtml)
-    : indexOrHtml;
-  const targetRef = createTargetRef(index, nodeId, options);
-  const resolution = resolveTargetRef(index, targetRef);
-  return {
-    ...resolution,
-    reason: resolution.resolution === "exact"
-      ? "preview-node-id"
-      : resolution.reason,
-  };
+  return resolveManagedOfficialTargetRef(index, targetRef);
 }
 
 export class TargetResolver {
@@ -593,10 +555,6 @@ export class TargetResolver {
     this.index = typeof indexOrHtml === "string"
       ? buildSourceIndex(indexOrHtml)
       : indexOrHtml;
-  }
-
-  resolveFromPreview(nodeId, options = {}) {
-    return resolveFromPreview(this.index, nodeId, options);
   }
 
   rebind(targetRef) {

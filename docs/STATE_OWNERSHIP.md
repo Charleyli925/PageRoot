@@ -119,8 +119,10 @@ Rules:
   activate the original, import, or trash. Re-querying the same canonical
   last-active path while an intent is still `prepared` or `committing` reuses
   that `requestId`. Cold-start confirmation at epoch 0 skips the Canvas fence,
-  then hydrates after Canvas verification so the workbench can leave
-  `hydrating`. The renderer
+  then hydrates after the Working HTML is published so the workbench can leave
+  `hydrating`. Canvas Hash verification may fail independently: the projection
+  becomes non-editable or statically degraded, and already published source is
+  never rolled back. The renderer
   `ExternalFileOpenSession` deduplicates delivery
   IDs and owns active, queued and deferred switching. Preload suppresses an
   older readiness catch-up once it has observed a live request, so delivery

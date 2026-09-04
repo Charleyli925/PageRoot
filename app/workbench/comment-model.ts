@@ -85,7 +85,7 @@ export function canSaveCommentTarget(target: HtmlCanvasSelection): boolean {
   return Boolean(
     anchor
     && anchor.resolution === "exact"
-    && (isGlobalPageTarget(anchor) || isValidPagerootElementId(anchor.elementId)),
+    && isValidPagerootElementId(anchor.elementId),
   );
 }
 

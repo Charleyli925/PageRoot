@@ -369,8 +369,12 @@ closed and do not enable direct edit. ADR 0061 makes that index the exclusive
 resolver: official location uses only a valid unique `elementId`. Selector,
 ancestor fingerprint, source-offset distance and text prefix/suffix scoring
 are not an official result. Deletion or a missing ID is orphaned without
-heuristic fallback. `html`, `head` and `body` carry Stable IDs like every other
-element; whole-page comments use the body's `elementId`. Semantic saving remains
+heuristic fallback. SourcePatch remains the private source materializer, but
+its public command entry is the same Stable ID: `elementId` on the command or
+TargetRef, then the current `SourceIndex` range, then the semantic operation.
+`command.nodeId`, `command.textNodeId`, preview parseKey lookup and TargetRef
+selector/fingerprint fallback are not edit authorities. `html`, `head` and `body` carry Stable IDs like every other
+element; whole-page comments persist the body's `elementId`. Semantic saving remains
 outside this foundation.
 
 The external original and the hidden V1 snapshot remain byte-exact copies of
@@ -408,8 +412,10 @@ open. It never persists source paths, HTML, Hashes or AI authority. Writes use
 same-directory temporary creation plus atomic rename. `html-projects.json`
 continues to own `activePath` compatibility. Any valid tabs record suppresses
 that compatibility startup: `activeTabId: null` restores Start, while a stored
-active document remains pending until Registry open, a newer Controller epoch,
-hydration and Canvas verification succeed. Registry-title/missing-item
+active document remains pending until Registry open, a newer Controller epoch
+and source hydration succeed. Canvas Hash verification decides whether the
+projection may be edited, reused from cache or statically degraded; it does
+not gate Working HTML publication, save or project switch. Registry-title/missing-item
 reconciliation and restore ordering live below React in `WorkspaceController`:
 the Controller reads tabs first, requests the Registry catalog when needed,
 removes missing items with an actionable Finder recovery event, and activates
@@ -568,7 +574,8 @@ project state are external HTML at the v4 boundary; a path that already has a
 unique external-source binding returns that project's current Working Copy
 instead of creating a second V1. Unbound HTML is classified first and imported
 as a fresh v4 V1 only after the user confirms; the original HTML bytes remain
-untouched unless the user later opts into Trash after Canvas verification. A current Registry
+untouched unless the user later opts into Trash after the published project is
+retained. Canvas failure never rolls that publication back. A current Registry
 write lock serializes ordinary Registry mutations across Bridge processes and is
 the only Registry lock. A Registry that is not a valid current Registry fails
 closed through that one validator; there is no metadata-completion migration and

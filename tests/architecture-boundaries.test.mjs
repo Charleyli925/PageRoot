@@ -272,6 +272,20 @@ test("retired production modules and imports stay outside the graph", () => {
   );
   assert.match(
     retiredArtifactViolations({
+      file: "app/lib/source-patch-core.js",
+      source: "export function resolveFromPreview() {}",
+    }).join("\n"),
+    /resolveFromPreview cannot return/u,
+  );
+  assert.match(
+    retiredArtifactViolations({
+      file: "app/lib/source-patch-engine.js",
+      source: "export function liveExactCommandTarget() {}",
+    }).join("\n"),
+    /liveExactCommandTarget cannot return/u,
+  );
+  assert.match(
+    retiredArtifactViolations({
       file: "app/workbench/review/runtime-projection.ts",
       source: "const pattern = /^element:\\d+:\\d+:[a-z]/iu;",
     }).join("\n"),

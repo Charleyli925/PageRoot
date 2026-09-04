@@ -102,11 +102,12 @@ function expectedHash(command, index) {
 }
 
 function commandTargetRef(index, command, key = "targetRef") {
-  const liveTargetRef = liveExactCommandTarget(index, command, key);
-  if (liveTargetRef) return liveTargetRef;
-  const targetRef = command[key];
-  if (targetRef) return cleanTargetRef(targetRef);
-  fail("TARGET_REQUIRED", `Edit command is missing ${key}.`);
+  const targetRef = officialCommandTarget(index, command, key);
+  if (targetRef) return targetRef;
+  fail(
+    "TARGET_REQUIRED",
+    `Edit command is missing a Stable ID for ${key}.`,
+  );
 }
 
 function liveElementIdFromCommand(command, key) {
@@ -125,11 +126,9 @@ function liveElementIdFromCommand(command, key) {
   return null;
 }
 
-function liveExactCommandTarget(index, command, key = "targetRef") {
+function officialCommandTarget(index, command, key = "targetRef") {
   const elementId = liveElementIdFromCommand(command, key);
   if (!elementId) return null;
-  const expected = command.expectedSourceSha256 ?? index.sourceSha256;
-  if (expected !== index.sourceSha256) return null;
   const element = index.byPagerootId.get(elementId);
   if (!element || element.type !== "element") {
     fail(
@@ -140,22 +139,42 @@ function liveExactCommandTarget(index, command, key = "targetRef") {
   }
   const original = command[key];
   if (key === "textTargetRef") {
-    if (!Number.isInteger(command.directTextOrdinal)) return null;
-    const ordinal = command.directTextOrdinal;
-    const textNodeId = element.textNodeIds?.[ordinal];
-    const node = textNodeId ? index.byNodeId.get(textNodeId) : null;
-    if (!node || node.type !== "text") {
-      fail(
-        "UNSUPPORTED_TARGET_TYPE",
-        "This edit requires a text target.",
-        { elementId, key, directTextOrdinal: ordinal },
-      );
+    if (Number.isInteger(command.directTextOrdinal) && command.directTextOrdinal >= 0) {
+      const ordinal = command.directTextOrdinal;
+      const textNodeId = element.textNodeIds?.[ordinal];
+      const node = textNodeId ? index.byNodeId.get(textNodeId) : null;
+      if (!node || node.type !== "text") {
+        fail(
+          "UNSUPPORTED_TARGET_TYPE",
+          "This edit requires a text target.",
+          { elementId, key, directTextOrdinal: ordinal },
+        );
+      }
+      return createTargetRef(index, node, {
+        targetId: original?.targetId,
+        label: original?.label,
+        level: "text",
+      });
     }
-    return createTargetRef(index, node, {
-      targetId: original?.targetId,
-      label: original?.label,
-      level: "text",
-    });
+    if (original?.level === "text" && original.elementId === elementId) {
+      return original;
+    }
+    const uniqueTextId = element.textNodeIds?.length === 1
+      ? element.textNodeIds[0]
+      : null;
+    const uniqueText = uniqueTextId ? index.byNodeId.get(uniqueTextId) : null;
+    if (uniqueText?.type === "text") {
+      return createTargetRef(index, uniqueText, {
+        targetId: original?.targetId,
+        label: original?.label,
+        level: "text",
+      });
+    }
+    fail(
+      "TARGET_REQUIRED",
+      "Direct text edits require a live text ordinal for this Stable ID.",
+      { elementId, key },
+    );
   }
   return createTargetRef(index, element, {
     targetId: original?.targetId,
@@ -816,14 +835,7 @@ export function planDirectTextNodePatch(indexOrHtml, command) {
   const parentTargetRef = commandTargetRef(index, command);
   const parentResolution = resolvedTarget(index, parentTargetRef, "element");
   const parent = parentResolution.target;
-  const textTargetRef = liveExactCommandTarget(index, command, "textTargetRef")
-    ?? (command.textTargetRef ? cleanTargetRef(command.textTargetRef) : null);
-  if (!textTargetRef) {
-    fail(
-      "TEXT_FRAGMENT_TARGET_REQUIRED",
-      "Direct text replacement requires an exact text TargetRef.",
-    );
-  }
+  const textTargetRef = commandTargetRef(index, command, "textTargetRef");
   const textResolution = resolvedTarget(index, textTargetRef, "text");
   const textNode = textResolution.target;
   if (
@@ -918,6 +930,9 @@ export function planDirectTextNodePatch(indexOrHtml, command) {
       textResolution: textResolution.resolution,
       parentNodeId: parent.nodeId,
       textNodeId: textNode.nodeId,
+      directTextOrdinal: Number.isInteger(command.directTextOrdinal)
+        ? command.directTextOrdinal
+        : parent.textNodeIds.indexOf(textNode.nodeId),
       textTargetRef: currentTextTargetRef,
       beforeFragmentHtml,
       nextFragmentHtml,
@@ -2199,6 +2214,9 @@ function authorizePatchPlan(plan, index, patches) {
         type: "update-direct-text-node",
         targetRef: targetRefs[0],
         textTargetRef: plan.metadata?.textTargetRef,
+        elementId: targetRefs[0]?.elementId,
+        parentElementId: targetRefs[0]?.elementId,
+        directTextOrdinal: plan.metadata?.directTextOrdinal,
         beforeFragmentHtml: plan.metadata?.beforeFragmentHtml,
         nextFragmentHtml: plan.metadata?.nextFragmentHtml,
         expectedSourceSha256: index.sourceSha256,

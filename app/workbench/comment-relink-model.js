@@ -14,10 +14,13 @@
 // `canLocateTarget` and `commentHasContent` also live here so the predicate
 // has one home; comment-model.ts re-exports them for existing consumers.
 
-/** @param {{ resolution?: string, commentAnchor?: { resolution?: string } }} target */
+import { isValidPagerootElementId } from "../../shared/pageroot-element-identity.mjs";
+
+/** @param {{ resolution?: string, elementId?: string, commentAnchor?: { resolution?: string, elementId?: string } }} target */
 export function canLocateTarget(target) {
-  const anchor = target?.commentAnchor || target;
-  return anchor?.resolution === "exact" || anchor?.resolution === "rebound";
+  const persist = target?.commentAnchor || target;
+  return (persist?.resolution === "exact" || persist?.resolution === "rebound")
+    && isValidPagerootElementId(persist?.elementId);
 }
 
 /**

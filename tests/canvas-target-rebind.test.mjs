@@ -90,20 +90,19 @@ test("current comments stay exact by stable element ID and never bind a replacem
 });
 
 test("history target transitions keep an independently identified comment on the edited element", () => {
-  const before = "<!doctype html><html><body><div>撤回前文字</div></body></html>";
-  const after = "<!doctype html><html><body><div>撤回后文字</div></body></html>";
-  const beforeOperationTarget = selectionFor(before, "target_operation");
-  const afterOperationTarget = selectionFor(after, "target_operation");
+  const elementId = "pr1_11111111111141118111111111111111";
+  const before = `<!doctype html><html><body><div data-pageroot-id="${elementId}">撤回前文字</div></body></html>`;
+  const after = `<!doctype html><html><body><div data-pageroot-id="${elementId}">撤回后文字</div></body></html>`;
+  const beforeOperationTarget = stableSelectionFor(before, elementId, "target_operation");
+  const afterOperationTarget = stableSelectionFor(after, elementId, "target_operation");
   const commentTarget = {
-    ...selectionFor(after, "target_comment"),
-    // The current exact source anchor proves the alias in `after`, while the
-    // changed text intentionally makes a generic post-hoc rebind insufficient.
+    ...stableSelectionFor(after, elementId, "target_comment"),
     selector: "",
   };
 
   assert.equal(
     rebindCanvasSelectionTargets(before, [commentTarget])[0].resolution,
-    "orphaned",
+    "exact",
   );
 
   const [rebound] = rebindCanvasSelectionTargetsAcrossHistory(
