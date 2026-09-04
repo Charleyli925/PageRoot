@@ -192,6 +192,23 @@ const e2eWindowRunsInBackground = Boolean(e2eUserDataPath)
 // 前台调试只改变测试窗口的可见性，不应允许自动化测试弹出任何
 // macOS 原生对话框并打断用户；所有 E2E 启动方式都记录错误而不弹窗。
 const e2eNativeDialogsSuppressed = Boolean(e2eUserDataPath);
+const e2eEditRuntimePrepareGate = {
+  held: null,
+};
+if (process.env.PAGEROOT_E2E === "1") {
+  globalThis.__pagerootE2eHoldEditRuntimePrepare = () => {
+    if (e2eEditRuntimePrepareGate.held) return;
+    let release;
+    const barrier = new Promise((resolve) => {
+      release = resolve;
+    });
+    e2eEditRuntimePrepareGate.held = { barrier, release };
+  };
+  globalThis.__pagerootE2eReleaseEditRuntimePrepare = () => {
+    e2eEditRuntimePrepareGate.held?.release();
+    e2eEditRuntimePrepareGate.held = null;
+  };
+}
 const productUserDataPath = e2eUserDataPath || path.join(app.getPath("appData"), "PageRoot");
 app.setPath("userData", productUserDataPath);
 const applicationName = app.isPackaged
@@ -1980,6 +1997,9 @@ const createPreviewSession = createPreviewSessionOperation({
 });
 
 async function prepareEditAuthorRuntime(payload) {
+  if (process.env.PAGEROOT_E2E === "1" && e2eEditRuntimePrepareGate.held) {
+    await e2eEditRuntimePrepareGate.held.barrier;
+  }
   const activeSourcePath = await currentActivePath();
   if (!activeSourcePath) throw new Error("Edit runtime requires an active source path.");
   const activeSource = await readHtmlFile({

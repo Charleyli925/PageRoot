@@ -23,7 +23,7 @@ The active source-shape allowlist is intentionally narrow:
 | --- | --- |
 | pending and already-scheduled callbacks share one cancellable latest-wins slot | `native-dom-v2-editable-island.spec.mjs` queues the same header toggle twice during composition and observes exactly one replay; stale-session behavior remains covered by Native Electron source-fence flows. |
 | system work cannot replace a queued or scheduled user command | `check-architecture.mjs` keeps the explicit user-over-system arbitration boundary before the controller queue. |
-| empty text-fragment deletion replays its queued explicit command after retirement | `native-dom-structural-text.spec.mjs` observes deletion ending the fragment session without a blocked resume. |
+| empty mixed-island sibling-text deletion keeps the host session and frozen descendants | `native-dom-structural-text.spec.mjs` observes the parent remaining editable after deleting only the bare text. |
 | Workbench header drawers defer until the active composition is settled | `native-dom-v2-editable-island.spec.mjs` observes the repeated Project command remaining closed until `compositionend`, then opening once. |
 | format replay rebinds the live element after its checkpoint | Browser toolbar formatting plus the Native Electron current-open undo/selection case observe the post-checkpoint live target and exact source bytes. |
 | canonical island replacement retires the old lease before DOM removal | `check-architecture.mjs` owns the replacement ordering boundary; Native Electron also retains the retired host and observes its editing attributes removed. |

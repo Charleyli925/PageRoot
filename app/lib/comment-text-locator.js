@@ -3,10 +3,14 @@
  * element's decoded descendant text. Runtime text never enters this function.
  */
 export function createElementTextLocator(sourceIndex, range) {
-  const elementNodeId = range?.target?.nodeId;
-  if (!sourceIndex || !range || !elementNodeId || range.segments?.length === 0) return null;
-  const element = sourceIndex.byNodeId.get(elementNodeId);
+  if (!sourceIndex || !range || range.segments?.length === 0) return null;
+  const element = (
+    (range.target?.elementId && sourceIndex.byPagerootId.get(range.target.elementId))
+    || (range.target?.nodeId && sourceIndex.byNodeId.get(range.target.nodeId))
+    || null
+  );
   if (element?.type !== "element") return null;
+  const elementNodeId = element.nodeId;
   const isWithin = (nodeId) => {
     let current = sourceIndex.byNodeId.get(nodeId);
     while (current?.parentId) {

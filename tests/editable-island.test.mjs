@@ -14,14 +14,24 @@ import {
   editableIslandForTarget,
   materializeEditableIslandHtml,
   normalizeEditableIslandHtml,
-  normalizeEditableTextFragmentHtml,
 } from "../app/lib/editable-island.js";
+import { materializeSourceElementIdentity } from "../bridge/project-file-repository/working-copy.mjs";
 
-function targetFor(html, tagName = "p") {
+function identify(html) {
+  return materializeSourceElementIdentity(html).html;
+}
+
+function stripIdentity(html) {
+  return String(html).replace(/\s*data-pageroot-id="[^"]*"/gu, "");
+}
+
+function targetFor(rawHtml, tagName = "p") {
+  const html = identify(rawHtml);
   const index = buildSourceIndex(html);
   const element = index.elements.find((candidate) => candidate.tagName === tagName);
   assert.ok(element);
   return {
+    html,
     index,
     element,
     targetRef: createTargetRef(index, element, { level: "subregion" }),
@@ -36,24 +46,25 @@ function assertIslandError(code, callback) {
 }
 
 test("editable island normalizes only the edited content range and inverts byte-exactly", () => {
-  const html = [
+  const { html, index, element, targetRef } = targetFor([
     "<!doctype html>\r\n",
     "<main data-source='untouched'>\r\n",
     "  <p id='hero'>甲 <strong class='accent'>乙</strong><!--keep--></p>\r\n",
     "  <aside data-keep=\"yes\">  outside &amp; exact  </aside>\r\n",
     "</main>\r\n",
-  ].join("");
-  const { index, element, targetRef } = targetFor(html);
+  ].join(""));
   const before = index.source.slice(
     element.contentRange.startOffset,
     element.contentRange.endOffset,
   );
-  const nextFromInstrumentedDom = [
-    "甲字 ",
-    "<strong class=\"accent\" data-html-ai-source-node-id=\"stale\">乙字</strong>",
-    "<br data-pageroot-runtime=\"ignored\">末尾",
-    "<!--keep-->",
-  ].join("");
+  const nextFromInstrumentedDom = before
+    .replace("甲 ", "甲字 ")
+    .replace(">乙<", ">乙字<")
+    .replace(
+      "<strong class='accent'",
+      "<strong class=\"accent\" data-html-ai-source-node-id=\"stale\"",
+    )
+    .replace("<!--keep-->", "<br data-pageroot-runtime=\"ignored\">末尾<!--keep-->");
   const plan = planEditableIslandPatch(index, {
     targetRef,
     beforeInnerHtml: before,
@@ -63,7 +74,7 @@ test("editable island normalizes only the edited content range and inverts byte-
   const result = applyPatchPlan(plan, html);
 
   assert.equal(
-    result.html,
+    stripIdentity(result.html),
     [
       "<!doctype html>\r\n",
       "<main data-source='untouched'>\r\n",
@@ -82,31 +93,36 @@ test("editable island normalizes only the edited content range and inverts byte-
 });
 
 test("editable island admits mixed inline markup, empty text and hard breaks", () => {
-  const html = "<button><span>开始</span><strong>试览</strong></button>";
-  const { index, targetRef } = targetFor(html, "button");
+  const { html, index, targetRef } = targetFor(
+    "<button><span>开始</span><strong>试览</strong></button>",
+    "button",
+  );
   const island = editableIslandForTarget(index, targetRef);
-  assert.equal(island.innerHtml, "<span>开始</span><strong>试览</strong>");
+  assert.equal(stripIdentity(island.innerHtml), "<span>开始</span><strong>试览</strong>");
 
   const result = applyPatchPlan(planSourcePatch({
     type: "replace-editable-island",
     targetRef,
     beforeInnerHtml: island.innerHtml,
-    nextInnerHtml: "<span>开始</span><strong>试览新增</strong><br>下一行",
+    nextInnerHtml: `${island.innerHtml.replace("试览<", "试览新增<")}<br>下一行`,
   }, index), html);
   assert.equal(
-    result.html,
+    stripIdentity(result.html),
     "<button><span>开始</span><strong>试览新增</strong><br>下一行</button>",
   );
 
   const emptyIndex = result.sourceIndex;
   const emptyRef = result.refreshedTargetRefs[0];
-  const emptied = applyPatchPlan(planSourcePatch({
-    type: "replace-editable-island",
-    targetRef: emptyRef,
-    beforeInnerHtml: "<span>开始</span><strong>试览新增</strong><br>下一行",
-    nextInnerHtml: "",
-  }, emptyIndex), result.html);
-  assert.equal(emptied.html, "<button></button>");
+  const emptiedIsland = editableIslandForTarget(emptyIndex, emptyRef);
+  assertIslandError(
+    "EDITABLE_ISLAND_PERSISTENT_ID_CHANGED",
+    () => planSourcePatch({
+      type: "replace-editable-island",
+      targetRef: emptyRef,
+      beforeInnerHtml: emptiedIsland.innerHtml,
+      nextInnerHtml: "",
+    }, emptyIndex),
+  );
 });
 
 test("managed native line breaks receive one fresh persistent identity", () => {
@@ -144,6 +160,27 @@ test("managed native line breaks receive one fresh persistent identity", () => {
       nextInnerHtml: `first<br data-pageroot-id="pr1_20000000000040008000000000000001">second`,
       expectedSourceSha256: index.sourceSha256,
     }),
+  );
+});
+
+test("editable island allows deleting an identified hard break", () => {
+  const strongId = "pr1_11111111111141118111111111111111";
+  const breakId = "pr1_22222222222242229222222222222222";
+  assert.equal(
+    normalizeEditableIslandHtml(
+      `<strong data-pageroot-id="${strongId}">文</strong>下一行`,
+      {
+        baselineInnerHtml:
+          `<strong data-pageroot-id="${strongId}">文</strong><br data-pageroot-id="${breakId}">下一行`,
+      },
+    ),
+    `<strong data-pageroot-id="${strongId}">文</strong>下一行`,
+  );
+  assert.equal(
+    normalizeEditableIslandHtml("firstsecond", {
+      baselineInnerHtml: `first<br data-pageroot-id="${breakId}">second`,
+    }),
+    "firstsecond",
   );
 });
 
@@ -199,13 +236,12 @@ test("editable island preserves persistent IDs while allowing identified new inl
 });
 
 test("editable island edits a nested-list heading while preserving the child list as an atom", () => {
-  const html = [
+  const { html, index, targetRef } = targetFor([
     "<main><ol><li>",
     "发现阶段",
     "<ul data-keep='yes'><li>访谈 12 位内容创作者</li><li>审计现有流程</li></ul>",
     "</li></ol><p>外部字节保持不变</p></main>",
-  ].join("");
-  const { index, targetRef } = targetFor(html, "li");
+  ].join(""), "li");
   const island = editableIslandForTarget(index, targetRef);
   assert.match(island.innerHtml, /^发现阶段<ul/u);
 
@@ -213,15 +249,11 @@ test("editable island edits a nested-list heading while preserving the child lis
     type: "replace-editable-island",
     targetRef,
     beforeInnerHtml: island.innerHtml,
-    nextInnerHtml: [
-      "发现与验证阶段",
-      '<ul data-keep="yes" contenteditable="false">',
-      "<li>访谈 12 位内容创作者</li><li>审计现有流程</li></ul>",
-    ].join(""),
+    nextInnerHtml: island.innerHtml.replace("发现阶段", "发现与验证阶段"),
   }, index), html);
 
   assert.equal(
-    result.html,
+    stripIdentity(result.html),
     [
       "<main><ol><li>",
       "发现与验证阶段",
@@ -250,10 +282,25 @@ test("editable island keeps wbr atoms while allowing adjacent words to change", 
   );
 });
 
-test("editable island rejects block structure, new protected semantics and atom loss", () => {
+test("editable island freezes nested blocks as atoms instead of rejecting the host", () => {
+  const baseline = `<div class="chart">KEEP</div><b>强调</b>，裸&amp;文本<span>尾注</span>`;
+  assert.equal(
+    normalizeEditableIslandHtml(
+      `<div class="chart">KEEP</div><b>强调</b>，新版<span>尾注</span>`,
+      { baselineInnerHtml: baseline },
+    ),
+    `<div class="chart">KEEP</div><b>强调</b>，新版<span>尾注</span>`,
+  );
   assertIslandError(
-    "EDITABLE_ISLAND_STRUCTURE_UNSUPPORTED",
+    "EDITABLE_ISLAND_ATOM_CHANGED",
     () => normalizeEditableIslandHtml("<div>block</div>"),
+  );
+  assertIslandError(
+    "EDITABLE_ISLAND_ATOM_CHANGED",
+    () => normalizeEditableIslandHtml(
+      `<div class="chart">CHANGED</div><b>强调</b>，裸&amp;文本<span>尾注</span>`,
+      { baselineInnerHtml: baseline },
+    ),
   );
   assertIslandError(
     "EDITABLE_ISLAND_PROTECTED_ATTRIBUTE_ADDED",
@@ -268,27 +315,6 @@ test("editable island rejects block structure, new protected semantics and atom 
       "before after",
       { baselineInnerHtml: "before <img src=\"kept.png\"> after" },
     ),
-  );
-});
-
-test("direct text fragments normalize entities but reject every authored element", () => {
-  assert.equal(
-    normalizeEditableTextFragmentHtml("新版&lt;文字&gt; &amp; emoji 😀", {
-      baselineInnerHtml: "旧版&amp;文字",
-    }),
-    "新版&lt;文字&gt; &amp; emoji 😀",
-  );
-  assertIslandError(
-    "EDITABLE_TEXT_FRAGMENT_STRUCTURE_UNSUPPORTED",
-    () => normalizeEditableTextFragmentHtml("<br>", {
-      baselineInnerHtml: "旧版文字",
-    }),
-  );
-  assertIslandError(
-    "EDITABLE_TEXT_FRAGMENT_STRUCTURE_UNSUPPORTED",
-    () => normalizeEditableTextFragmentHtml("<strong>新版</strong>", {
-      baselineInnerHtml: "旧版文字",
-    }),
   );
 });
 
@@ -311,8 +337,7 @@ test("text may be deleted from an attributed inline wrapper without creating a n
 });
 
 test("editable island authorization rejects a patch that is smaller than the exact island", () => {
-  const html = "<p>abcdef</p>";
-  const { index, targetRef } = targetFor(html);
+  const { html, index, targetRef } = targetFor("<p>abcdef</p>");
   const plan = planEditableIslandPatch(index, {
     targetRef,
     beforeInnerHtml: "abcdef",

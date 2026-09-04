@@ -4,6 +4,7 @@ import {
   activateNativeEdit,
   caseSelector,
   exportCurrentHtml,
+  identifiedHtmlBuffer,
   loadFixture,
   replaceEditableIslandBytes,
   setTextSelection,
@@ -40,11 +41,16 @@ const source = Buffer.from(`<!doctype html>
 </html>
 `, "utf8");
 
+const identifiedSource = identifiedHtmlBuffer(source);
+
 const blockedCopy = /两种样式的边界|请把光标移入文字内部|空的排版元素|会改变排版的 CSS|这里暂时不能直接改字/u;
 
 async function openFixture(page) {
   await page.goto("/");
-  return loadFixture(page, "editable-fail-open.html", { buffer: source });
+  return loadFixture(page, "editable-fail-open.html", {
+    buffer: identifiedSource,
+    identifiedWorkingCopy: false,
+  });
 }
 
 async function editorFeedbackCopy(page, editor) {
@@ -111,7 +117,7 @@ test("canvas text mismatch remounts from source then enters", {
   await expect(target).toContainText("已进");
 });
 
-test("complex parent prefers an exact text-fragment instead of comment-only", {
+test("complex parent enters a frozen-subtree island instead of comment-only", {
   tag: ["@gate-smoke","@smoke-editing"],
 }, async ({ page }) => {
   const { editor, frame } = await openFixture(page);
@@ -132,17 +138,19 @@ test("complex parent prefers an exact text-fragment instead of comment-only", {
     };
   });
   await parent.dblclick({ position: point, force: true });
-  const fragmentHost = parent.locator(
-    ':scope > pageroot-text-fragment[data-pageroot-text-fragment-host="true"]',
+  await expect(parent).toHaveAttribute("contenteditable", "true");
+  await expect(parent.locator(':scope > div[data-keep="chart"]')).toHaveAttribute(
+    "contenteditable",
+    "false",
   );
-  await expect(fragmentHost).toHaveAttribute("contenteditable", "true");
-  await expect(parent).not.toHaveAttribute("contenteditable", "true");
   expect(await editorFeedbackCopy(page, editor)).not.toMatch(
     /复杂网页结构|添加评论交给 AI 处理/u,
   );
-  await fragmentHost.evaluate((element) => {
-    const text = element.firstChild;
-    if (!(text instanceof Text)) throw new Error("Fragment host has no text.");
+  await parent.evaluate((element) => {
+    const text = Array.from(element.childNodes).find(
+      (child) => child.nodeType === Node.TEXT_NODE && child.textContent?.includes("裸文本"),
+    );
+    if (!(text instanceof Text)) throw new Error("Island has no bare text.");
     const range = document.createRange();
     range.selectNodeContents(text);
     const selection = document.getSelection();
@@ -150,13 +158,14 @@ test("complex parent prefers an exact text-fragment instead of comment-only", {
     selection?.addRange(range);
   });
   await page.keyboard.type("精确裸文本");
-  await expect(fragmentHost).toHaveText("精确裸文本");
+  await expect(parent).toContainText("精确裸文本");
   await page.keyboard.press("Escape");
   const exported = (await exportCurrentHtml(page)).toString("utf8");
-  expect(exported).toContain(">精确裸文本<span data-keep=\"tail\">尾注</span>");
-  expect(exported).toContain('<div data-keep="chart">图表结构保持</div>');
+  expect(exported).toContain("精确裸文本");
+  expect(exported).toContain('<div data-keep="chart"');
+  expect(exported).toContain("图表结构保持");
   expect(exported).toContain("不得改动的邻居");
-  expect(exported).not.toMatch(/>裸文本<span data-keep="tail">/u);
+  expect(exported).not.toMatch(/>裸文本<span data-keep="tail"/u);
 });
 
 test("unauthorized island mutation still rolls back after fail-open entry", {
@@ -182,7 +191,7 @@ test("fail-open entry still writes only the selected island bytes", {
   await expect(target).toContainText("补丁");
   await page.keyboard.press("Escape");
   const expected = replaceEditableIslandBytes(
-    source,
+    identifiedSource,
     "layout-css",
     "排版指纹文字补丁",
   );

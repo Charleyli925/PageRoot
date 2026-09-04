@@ -1,6 +1,6 @@
 # ADR 0015: Safe host fallback and exact direct-text-node editing
 
-- Status: Accepted
+- Status: Superseded by [ADR 0004](../0004-v2-editable-islands.md); mixed parents are ordinary editable islands with frozen non-inline subtrees, so the disposable text-fragment host and direct-text-node command are retired.
 - Date: 2026-08-07
 
 ## Context

@@ -1,11 +1,9 @@
 import { isValidPagerootElementId } from "../../../shared/pageroot-element-identity.mjs";
 
 export function isSavableCommentTarget(target) {
-  const anchor = target?.commentAnchor || target;
-  const globalPageTarget = String(anchor?.selector || "").trim().toLowerCase() === "body"
-    && anchor?.level === "module";
-  return anchor?.resolution === "exact"
-    && (globalPageTarget || isValidPagerootElementId(anchor?.elementId));
+  const persist = target?.commentAnchor || target;
+  return persist?.resolution === "exact"
+    && isValidPagerootElementId(persist?.elementId);
 }
 
 export function planCommentCommit({

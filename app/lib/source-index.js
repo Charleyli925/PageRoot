@@ -9,6 +9,9 @@ import {
 } from "./pageroot-element-identity.js";
 
 export const SOURCE_NODE_ATTRIBUTE = "data-html-ai-source-node-id";
+// parseKey / nodeId is a single-parse handle inside SourceIndex. It must not
+// leave source-index / source-patch, enter Runtime DOM, TargetRef, Selection,
+// comments, Review or history, or authorize edits.
 
 const VOID_ELEMENTS = new Set([
   "area",
@@ -696,42 +699,4 @@ export function buildSourceIndex(html) {
     rangeErrorCount: index.rangeErrors.length,
   };
   return index;
-}
-
-export function instrumentPreviewHtml(indexOrHtml, options = {}) {
-  const index = typeof indexOrHtml === "string"
-    ? buildSourceIndex(indexOrHtml)
-    : indexOrHtml;
-  const attributeName = String(options.attributeName ?? SOURCE_NODE_ATTRIBUTE).toLowerCase();
-  const collisions = index.elements.filter(
-    (element) => (element.attributesByName.get(attributeName)?.length ?? 0) > 0,
-  );
-  if (collisions.length > 0) {
-    throw new SourceIndexError(
-      "PREVIEW_ATTRIBUTE_COLLISION",
-      `Source already contains reserved preview attribute ${attributeName}.`,
-      { nodeIds: collisions.map((element) => element.nodeId) },
-    );
-  }
-
-  const insertions = index.elements
-    .map((element) => ({
-      offset: element.closingDelimiterOffset,
-      value: ` ${attributeName}="${element.nodeId}"`,
-    }))
-    .sort((left, right) => left.offset - right.offset);
-  const parts = [];
-  let sourceCursor = 0;
-  for (const insertion of insertions) {
-    parts.push(index.source.slice(sourceCursor, insertion.offset));
-    parts.push(insertion.value);
-    sourceCursor = insertion.offset;
-  }
-  parts.push(index.source.slice(sourceCursor));
-  return {
-    html: parts.join(""),
-    attributeName,
-    nodeIds: index.elements.map((element) => element.nodeId),
-    sourceSha256: index.sourceSha256,
-  };
 }

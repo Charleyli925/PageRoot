@@ -154,15 +154,51 @@ function findElement(document, tagName) {
   return result;
 }
 
+function shiftSourceCodeLocation(location, delta) {
+  if (!location || typeof location !== "object") return;
+  if (Number.isInteger(location.startOffset)) location.startOffset += delta;
+  if (Number.isInteger(location.endOffset)) location.endOffset += delta;
+  if (location.startTag) shiftSourceCodeLocation(location.startTag, delta);
+  if (location.endTag) shiftSourceCodeLocation(location.endTag, delta);
+  if (location.attrs && typeof location.attrs === "object") {
+    for (const value of Object.values(location.attrs)) {
+      shiftSourceCodeLocation(value, delta);
+    }
+  }
+}
+
+function shiftTreeSourceCodeLocations(node, delta) {
+  if (!node || typeof node !== "object") return;
+  if (node.sourceCodeLocation) {
+    shiftSourceCodeLocation(node.sourceCodeLocation, delta);
+  }
+  for (const child of node.childNodes ?? []) {
+    shiftTreeSourceCodeLocations(child, delta);
+  }
+  if (node.content) shiftTreeSourceCodeLocations(node.content, delta);
+}
+
 export function parseHtmlSource(html) {
   const source = String(html);
+  // parse5 drops html/head/body start-tag locations when the first character is
+  // a UTF-8 BOM. Parse the BOM-free payload, then shift offsets back onto the
+  // original string so identity materialization can still name those roots.
+  const bomOffset = source.startsWith("\uFEFF") ? 1 : 0;
+  const parseSource = bomOffset === 0 ? source : source.slice(bomOffset);
   const parseErrors = [];
-  const document = parse(source, {
+  const document = parse(parseSource, {
     sourceCodeLocationInfo: true,
     onParseError(error) {
       parseErrors.push({ ...error });
     },
   });
+  if (bomOffset !== 0) {
+    shiftTreeSourceCodeLocations(document, bomOffset);
+    for (const error of parseErrors) {
+      if (Number.isInteger(error.startOffset)) error.startOffset += bomOffset;
+      if (Number.isInteger(error.endOffset)) error.endOffset += bomOffset;
+    }
+  }
   const elements = [];
   visitElements(
     document,

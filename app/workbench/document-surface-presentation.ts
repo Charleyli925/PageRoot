@@ -97,6 +97,14 @@ export function useDocumentSurfaceHandoff({
     && canvasAuthority.generation === canvasGeneration
     && canvasAuthority.renderedSha256 === sourceSha256
   ) || canvasAuthority?.status === "failed";
+  useEffect(() => {
+    if (!terminal || !retainedCandidateToken) return;
+    // Tab-switch cover ends at the first verified Canvas for that tab.
+    // A later same-document Runtime refresh must not reuse this token.
+    if (tabs.activeTabId !== retainedCandidateToken.tabId) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setCandidateToken(null);
+  }, [retainedCandidateToken, tabs.activeTabId, terminal]);
   const retainPresentedTab = useCallback((token: DocumentSurfaceCacheToken) => {
     const entry = controller?.getSnapshot().documentSurfaceCache?.entries
       .find((candidate) => documentSurfaceCacheEntryMatchesToken(candidate, token));
@@ -119,44 +127,24 @@ export function useDocumentSurfaceHandoff({
       detail: Object.freeze({ tabId, scrollTop }),
     });
   }, [controller]);
-  const activeCandidate = !presentedToken
-    && !terminal
-    && active?.kind === "document"
-    && sourceSha256
-    ? cache.entries.find((entry) => (
-      entry.tier === "hot"
-      && entry.tabId === active.tabId
-      && entry.projectId === active.projectId
-      && entry.documentId === active.documentId
-      && entry.sourceSha256 === sourceSha256
-    )) || null
-    : null;
   const retainedCandidateIsActive = Boolean(
     retainedCandidateToken
     && active?.kind === "document"
     && active.tabId === retainedCandidateToken.tabId
     && sourceSha256 === retainedCandidateToken.sourceSha256,
   );
+  // Cache overlay is tab-switch presentation only: the pending destination,
+  // or that destination retained until its first verified Canvas. Same-document
+  // Runtime refresh stays inside the mounted HtmlCanvasEditor A/B slots.
   const candidateToken = pendingToken
-    || (retainedCandidateIsActive && !terminal ? retainedCandidateToken : null)
-    || tokenForEntry(activeCandidate);
+    || (retainedCandidateIsActive && !terminal ? retainedCandidateToken : null);
   const candidateCachedSurface = entryForToken(cache, candidateToken);
   const presentedCachedSurface = entryForToken(cache, presentedToken);
-  const presentedMatchesActive = Boolean(
-    presentedCachedSurface
-    && active?.kind === "document"
-    && presentedCachedSurface.tabId === active.tabId
-    && presentedCachedSurface.projectId === active.projectId
-    && presentedCachedSurface.documentId === active.documentId
-    && presentedCachedSurface.sourceSha256 === sourceSha256,
-  );
-  // During a handoff, keep the old ready projection over the new live Canvas
-  // until the target reports its own display-ready token. Once the target is
-  // active and its Canvas is verified, normal authority takes over.
-  const visibleCachedSurface = presentedCachedSurface && (
-    Boolean(candidateCachedSurface)
-    || (presentedMatchesActive && !terminal)
-  ) ? presentedCachedSurface : null;
+  // During a tab switch, keep the last ready projection over the new live
+  // Canvas until the destination reports its own display-ready token.
+  const visibleCachedSurface = presentedCachedSurface && candidateCachedSurface
+    ? presentedCachedSurface
+    : null;
   return {
     visibleCachedSurface,
     candidateCachedSurface,

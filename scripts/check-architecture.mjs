@@ -92,7 +92,29 @@ const RETIRED_PRODUCTION_LITERALS = new Set([
   ["source-history", "v1"].join("."),
   ["source-history", "v1", "schema", "json"].join("."),
 ]);
+const SOURCE_NODE_ID_LITERAL = ["data", "html", "ai", "source", "node", "id"].join("-");
+const SOURCE_NODE_ID_ALLOWED_FILES = new Set([
+  ["app", "lib", "source-index.js"].join("/"),
+  ["app", "components", "IslandEditingController.ts"].join("/"),
+  ["shared", "editable-island.mjs"].join("/"),
+]);
+const REVIEW_SOURCE_NODE_ID_LITERAL = ["data", "pageroot", "review", "source", "node", "id"].join("-");
+const PARSE_KEY_PATTERN_SOURCE = ["element", ":\\d+", ":\\d+", ":"].join("");
+const PARSE_KEY_ALLOWED_FILES = new Set([
+  ["app", "lib", "source-index.js"].join("/"),
+  ["app", "lib", "source-patch-core.js"].join("/"),
+  ["app", "lib", "source-patch-engine.js"].join("/"),
+  ["app", "lib", "target-resolver.js"].join("/"),
+]);
 const PAGE_VIEW_CONTEXT_FILE = ["app", "lib", "page-view-context.js"].join("/");
+const DOCUMENT_WORKFLOW_FILE = ["app", "application", "document-workflow.js"].join("/");
+const WORKBENCH_FILE = ["app", "workbench.tsx"].join("/");
+const ACTIVE_DOCUMENT_CANVAS_FILE = [
+  "app",
+  "workbench",
+  "WorkbenchActiveDocumentCanvas.tsx",
+].join("/");
+const TEXT_FRAGMENT_HOST_LITERAL = ["pageroot", "text", "fragment"].join("-");
 const PAGE_VIEW_CONTEXT_RETIRED_ADAPTERS =
   /\bdata-p\b|\bdata-tab\b|resolveDataLinkedTabAction|resolveIndexedHandlerTabAction|SIMPLE_INDEXED_TAB_HANDLER|LEGACY_TAB_/u;
 const PROVIDER_LITERALS = ["qoder", "codex", "qoder-acp", "codex-acp"];
@@ -346,6 +368,75 @@ export function retiredArtifactViolations({ file = "", source = "", module = nul
     if (RETIRED_PRODUCTION_LITERALS.has(literal)) {
       violations.push(`${file}: retired source-history compatibility literal cannot return`);
     }
+    if (literal === SOURCE_NODE_ID_LITERAL && !SOURCE_NODE_ID_ALLOWED_FILES.has(file)) {
+      violations.push(
+        `${file}: Source Node ID cannot leave source-index internals or Runtime DOM`,
+      );
+    }
+    if (literal === REVIEW_SOURCE_NODE_ID_LITERAL) {
+      violations.push(
+        `${file}: Review cannot write parseKey identity onto source HTML`,
+      );
+    }
+  }
+  if (hasIdentifier(handle, "instrumentPreviewHtml")) {
+    violations.push(
+      `${file}: instrumentPreviewHtml cannot return; parseKey must not be written onto DOM`,
+    );
+  }
+  if (hasIdentifier(handle, "resolveFromPreview")) {
+    violations.push(
+      `${file}: resolveFromPreview cannot return; preview parseKey is not an edit authority`,
+    );
+  }
+  if (hasIdentifier(handle, "liveExactCommandTarget")) {
+    violations.push(
+      `${file}: liveExactCommandTarget cannot return; SourcePatch authorizes only by Stable ID`,
+    );
+  }
+  if (hasIdentifier(handle, "planDirectTextNodePatch")) {
+    violations.push(
+      `${file}: planDirectTextNodePatch cannot return; text edits use replace-editable-island`,
+    );
+  }
+  if (hasIdentifier(handle, "mountNativeTextFragmentHost")) {
+    violations.push(
+      `${file}: disposable text-fragment hosts cannot return`,
+    );
+  }
+  if (source.includes(TEXT_FRAGMENT_HOST_LITERAL)) {
+    violations.push(
+      `${file}: disposable text-fragment hosts cannot return`,
+    );
+  }
+  if (file === WORKBENCH_FILE && hasIdentifier(handle, "HtmlDisplaySurface")) {
+    violations.push(
+      `${file}: Workbench cannot replace the live editor with HtmlDisplaySurface`,
+    );
+  }
+  if (file === ACTIVE_DOCUMENT_CANVAS_FILE && hasIdentifier(handle, "cloneElement")) {
+    violations.push(
+      `${file}: cloneElement canvas host cannot return`,
+    );
+  }
+  if (
+    file === DOCUMENT_WORKFLOW_FILE
+    && (
+      hasIdentifier(handle, "recoveryStore")
+      || source.includes("html-ai-recovery")
+    )
+  ) {
+    violations.push(
+      `${file}: document HTML recovery is Main journal only`,
+    );
+  }
+  if (
+    !PARSE_KEY_ALLOWED_FILES.has(file)
+    && source.includes(PARSE_KEY_PATTERN_SOURCE)
+  ) {
+    violations.push(
+      `${file}: parseKey cannot leave source-index/source-patch`,
+    );
   }
   if (
     file === PAGE_VIEW_CONTEXT_FILE

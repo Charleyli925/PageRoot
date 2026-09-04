@@ -10,10 +10,10 @@ import {
   applyPatchPlan,
   buildSourceIndex,
   createTargetRef,
-  instrumentPreviewHtml,
   planSourcePatch,
   resolveTargetRef,
 } from "../app/lib/source-patch-core.js";
+import { materializeSourceElementIdentity } from "../bridge/project-file-repository/working-copy.mjs";
 
 const fixtureRoot = fileURLToPath(
   new URL("./fixtures/targeted-change/", import.meta.url),
@@ -54,7 +54,6 @@ test("the checked-in targeted-change manifest is an executable release gate", as
     const html = await fixture(sample.path);
     const index = buildSourceIndex(html);
     assert.equal(index.integrity.ok, true, sample.path);
-    assert.equal(instrumentPreviewHtml(index).html.includes(SOURCE_NODE_ATTRIBUTE), true);
     assert.equal(html.includes(SOURCE_NODE_ATTRIBUTE), false);
 
     if (sample.lineEnding === "crlf") {
@@ -77,8 +76,8 @@ test("the checked-in targeted-change manifest is an executable release gate", as
           textQuote: expected.textQuote,
           resolution: "ambiguous",
         });
-        assert.equal(resolution.resolution, "ambiguous", expected.label);
-        assert.equal(resolution.candidates.length, candidates.length);
+        assert.equal(resolution.resolution, "orphaned", expected.label);
+        assert.equal(resolution.reason, "managed-element-id-required");
         continue;
       }
 
@@ -86,17 +85,17 @@ test("the checked-in targeted-change manifest is an executable release gate", as
       const targetRef = createTargetRef(index, candidates[0].nodeId, {
         targetId: `fixture:${sample.path}:${expected.label}`,
       });
-      assert.equal(
-        resolveTargetRef(index, targetRef).resolution,
-        expected.expectedResolution,
-        expected.label,
-      );
+      const resolution = resolveTargetRef(index, targetRef);
+      assert.equal(resolution.resolution, "orphaned", expected.label);
+      assert.equal(resolution.reason, "managed-element-id-required", expected.label);
     }
   }
 });
 
 test("fixed Unicode/style/reorder fixtures enforce exact source patches and failure closure", async () => {
-  const unicodeHtml = await fixture("source-index-unicode-lf.html");
+  const unicodeHtml = materializeSourceElementIdentity(
+    await fixture("source-index-unicode-lf.html"),
+  ).html;
   const unicodeIndex = buildSourceIndex(unicodeHtml);
   const heading = unicodeIndex.elements.find(
     (element) => element.tagName === "h1",
@@ -110,7 +109,9 @@ test("fixed Unicode/style/reorder fixtures enforce exact source patches and fail
   assert.equal(textResult.scopeReport.outsideUnchanged, true);
   assert.equal(applyPatchPlan(textResult.inversePlan, textResult.html).html, unicodeHtml);
 
-  const styleHtml = await fixture("styles-and-scope.html");
+  const styleHtml = materializeSourceElementIdentity(
+    await fixture("styles-and-scope.html"),
+  ).html;
   const styleIndex = buildSourceIndex(styleHtml);
   const headingWithInlineStyle = styleIndex.elements.find(
     (element) =>
@@ -129,7 +130,9 @@ test("fixed Unicode/style/reorder fixtures enforce exact source patches and fail
   assert.match(styleResult.html, /style='color: rgb\(1, 2, 3\); padding: 4px !important'/u);
   assert.equal(applyPatchPlan(styleResult.inversePlan, styleResult.html).html, styleHtml);
 
-  const structureHtml = await fixture("structure-and-reorder.html");
+  const structureHtml = materializeSourceElementIdentity(
+    await fixture("structure-and-reorder.html"),
+  ).html;
   const structureIndex = buildSourceIndex(structureHtml);
   const articles = structureIndex.elements.filter(
     (element) => element.tagName === "article",
@@ -162,12 +165,14 @@ test("fixed Unicode/style/reorder fixtures enforce exact source patches and fail
   });
   assert.equal(
     resolveTargetRef(buildSourceIndex(externallyReordered), betaRef).resolution,
-    "rebound",
+    "exact",
   );
 });
 
 test("fixed scope fixture keeps out-of-target bytes when the allowed island is patched", async () => {
-  const baseHtml = await fixture("styles-and-scope.html");
+  const baseHtml = materializeSourceElementIdentity(
+    await fixture("styles-and-scope.html"),
+  ).html;
   const index = buildSourceIndex(baseHtml);
   const allowed = index.elements.find(
     (element) =>
@@ -189,10 +194,10 @@ test("fixed scope fixture keeps out-of-target bytes when the allowed island is p
 });
 
 test("the committed desktop QA fixture reproduces text, style, reorder, and full inverse recovery", async () => {
-  const original = await readFile(
+  const original = materializeSourceElementIdentity(await readFile(
     fileURLToPath(new URL("./fixtures/desktop-qa.html", import.meta.url)),
     "utf8",
-  );
+  )).html;
   const firstIndex = buildSourceIndex(original);
   const heading = firstIndex.elements.find(
     (element) => element.tagName === "h1",

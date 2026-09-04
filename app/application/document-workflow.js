@@ -15,11 +15,8 @@ const SHA256 = /^sha256:[a-f0-9]{64}$/u;
 function isNativeEditCheckpoint(mutation) {
   return Boolean(
     mutation
-    && mutation.kind === "text"
-    && (
-      mutation.property === "editableIslandHtml"
-      || mutation.property === "textFragmentHtml"
-    ),
+    &&     mutation.kind === "text"
+    && mutation.property === "editableIslandHtml",
   );
 }
 
@@ -151,7 +148,6 @@ export class DocumentWorkflow {
   #sourceHistorySession;
   #codecs;
   #hashPort;
-  #recoveryStore;
   #recoveryJournal;
   #canvasPort;
   #scheduler;
@@ -215,14 +211,6 @@ export class DocumentWorkflow {
       throw new TypeError("DocumentWorkflow requires a HashPort.");
     }
     if (
-      !ports.recoveryStore
-      || typeof ports.recoveryStore.readRecords !== "function"
-      || typeof ports.recoveryStore.write !== "function"
-      || typeof ports.recoveryStore.remove !== "function"
-    ) {
-      throw new TypeError("DocumentWorkflow requires a RecoveryStore port.");
-    }
-    if (
       ports.recoveryJournal
       && (
         typeof ports.recoveryJournal.commit !== "function"
@@ -255,7 +243,6 @@ export class DocumentWorkflow {
     this.#sourceHistorySession = sourceHistorySession;
     this.#codecs = createDocumentWorkflowCodecs(codecs);
     this.#hashPort = ports.hash;
-    this.#recoveryStore = ports.recoveryStore;
     this.#recoveryJournal = ports.recoveryJournal || null;
     this.#canvasPort = ports.canvas;
     this.#scheduler = scheduler;
@@ -861,7 +848,7 @@ export class DocumentWorkflow {
         restoredFromVersionId: payload.restoredFromVersionId || null,
       });
       this.#canvasPort.invalidateRenderAcks();
-      await this.#verifyRendered(html, sourceSha256, activeContext);
+      await this.#acknowledgeCanvas(html, sourceSha256, activeContext);
       if (!this.#isCurrent(activeContext)) return stale(activeContext);
       this.#auditPending = [];
       this.#auditInFlight.clear();
@@ -889,33 +876,23 @@ export class DocumentWorkflow {
         });
         this.#versionSession.restoreView(previousVersionView);
         this.#canvasPort.invalidateRenderAcks();
-        try {
-          await this.#verifyRendered(
-            previousDocument.html,
-            await this.#hashPort.sha256(previousDocument.html),
-            activeContext,
-          );
-        } catch {
-          // The transition stays fail-closed until the caller releases its view lock.
-        }
+        await this.#acknowledgeCanvas(
+          previousDocument.html,
+          previousDocument.workingHtmlSha256
+            || previousDocument.persistedSourceSha256
+            || await this.#hashPort.sha256(previousDocument.html),
+          activeContext,
+        );
       }
       if (!this.#isCurrent(activeContext)) return stale(activeContext);
-      const message = externalAccepted
-        ? "外部 HTML 已被保留，但编辑画布未能安全显示该版本。当前项目已锁定，请重试读取或重新打开文件。"
-        : this.#codecs.errorMessage(cause, "请稍后重试，源文件没有被覆盖。");
-      if (externalAccepted) {
-        // Once the user keeps the external source, the previous canvas is no
-        // longer persistence authority.  A failed render must remain closed
-        // until a later project read verifies the external bytes.
-        this.#documentSession.setPersistence({ state: "failed", error: message });
-      }
+      const message = this.#codecs.errorMessage(cause, "请稍后重试，源文件没有被覆盖。");
       this.#emit({
         type: "document-authority-reload-failed",
         context: activeContext,
         code: sourceErrorCode(cause, "SOURCE_RELOAD_REJECTED"),
         message,
         externalAccepted,
-        fatal: externalAccepted,
+        fatal: false,
       });
       return this.#outcomeFromCause(
         this.#nextOperationId("reload"),
@@ -1011,7 +988,7 @@ export class DocumentWorkflow {
         restoredFromVersionId: payload.restoredFromVersionId || null,
       });
       this.#canvasPort.invalidateRenderAcks();
-      await this.#verifyRendered(html, sourceSha256, activeContext);
+      await this.#acknowledgeCanvas(html, sourceSha256, activeContext);
       if (!this.#isCurrent(activeContext)) return stale(activeContext);
       this.#auditPending = [];
       this.#auditInFlight.clear();
@@ -1371,9 +1348,6 @@ export class DocumentWorkflow {
     if (!activeContext) {
       return blocked("DOCUMENT_CONTEXT_REQUIRED", "当前页面尚未完成项目身份初始化。");
     }
-    const keys = this.#recoveryKeys(activeContext);
-    let raw = null;
-    let recoveredKey = "";
     let journalRaw = null;
     if (this.#recoveryJournal && activeContext.projectId && activeContext.documentId) {
       try {
@@ -1414,55 +1388,20 @@ export class DocumentWorkflow {
         });
       }
     }
-    const localRecord = this.#recoveryStore.readRecords(keys)
-      .filter((record) => this.#codecs.isRecord(record?.value))
-      .sort((left, right) => revision(right.value.revision) - revision(left.value.revision))[0]
-      || null;
-    const candidates = [
-      ...(journalRaw ? [{ raw: journalRaw, key: "main-recovery-journal" }] : []),
-      ...(localRecord ? [{ raw: localRecord.value, key: String(localRecord.key || "") }] : []),
-    ].filter((candidate) => (
-      String(candidate.raw.projectId || "") === activeContext.projectId
-      && String(candidate.raw.documentId || "") === activeContext.documentId
+    const raw = journalRaw
+      && String(journalRaw.projectId || "") === activeContext.projectId
+      && String(journalRaw.documentId || "") === activeContext.documentId
       && (
-        !String(candidate.raw.workingCopyId || "")
+        !String(journalRaw.workingCopyId || "")
         || !String(activeContext.workingCopyId || "")
-        || String(candidate.raw.workingCopyId) === String(activeContext.workingCopyId)
+        || String(journalRaw.workingCopyId) === String(activeContext.workingCopyId)
       )
-      && typeof candidate.raw.html === "string"
-      && /<html(?:\s|>)/iu.test(candidate.raw.html)
-    )).sort((left, right) => (
-      revision(right.raw.revision) - revision(left.raw.revision)
-      || Number(right.key === "main-recovery-journal")
-        - Number(left.key === "main-recovery-journal")
-    ));
-    if (candidates[0]) {
-      raw = candidates[0].raw;
-      recoveredKey = candidates[0].key;
-      if (
-        journalRaw
-        && localRecord
-        && revision(journalRaw.revision) === revision(localRecord.value.revision)
-        && await this.#hashPort.sha256(String(localRecord.value.html || ""))
-          === String(journalRaw.recoveryHtmlSha256 || "")
-      ) {
-        raw = {
-          ...localRecord.value,
-          ...journalRaw,
-          html: journalRaw.html,
-          recoveryIdentity: localRecord.value.recoveryIdentity,
-          changeEvents: localRecord.value.changeEvents,
-          sourceHistoryOperations: localRecord.value.sourceHistoryOperations,
-        };
-        recoveredKey = "main-recovery-journal";
-      }
-      if (recoveredKey === "main-recovery-journal") {
-        this.#recoveryCheckpoint = this.#recoveryJournalReceipt;
-      }
-    }
-    if (
-      !raw
-    ) return succeeded({ recovered: false });
+      && typeof journalRaw.html === "string"
+      && /<html(?:\s|>)/iu.test(journalRaw.html)
+      ? journalRaw
+      : null;
+    if (!raw) return succeeded({ recovered: false });
+    this.#recoveryCheckpoint = this.#recoveryJournalReceipt;
 
     try {
       const recoveredHtml = raw.html;
@@ -1477,9 +1416,6 @@ export class DocumentWorkflow {
           persistState: "idle",
           persistError: "",
         });
-        if (recoveredKey && recoveredKey !== "main-recovery-journal") {
-          this.#recoveryStore.remove(recoveredKey);
-        }
         this.#scheduleRecoveryJournal(null, activeContext);
         return succeeded({ recovered: false, reconciled: true });
       }
@@ -1494,12 +1430,10 @@ export class DocumentWorkflow {
         ...recoveredEvents.filter((event) => !existingIds.has(event.eventId)),
       ];
       const storedIdentity = this.#codecs.recoveryIdentityFromRecord(raw.recoveryIdentity);
-      const mainJournalIdentityMatches = recoveredKey === "main-recovery-journal"
-        && sameRecoveryDocument(raw, activeContext);
       const canRebaseSafely = Boolean(
         (
           identityMatches(storedIdentity, this.#recoveryIdentity, this.#codecs.sameSourcePath)
-          || mainJournalIdentityMatches
+          || sameRecoveryDocument(raw, activeContext)
         )
         && String(raw.expectedSourceSha256 || "") === String(currentSourceSha256 || ""),
       );
@@ -1544,16 +1478,8 @@ export class DocumentWorkflow {
         this.#emit({ type: "document-recovery-queued", context: activeContext });
         return succeeded({ recovered: true, queued: true });
       }
-      await this.#verifyRendered(recoveredHtml, targetSha256, activeContext);
-      if (!this.#isCurrent(activeContext)) return stale(activeContext);
-      const frozen = await this.#freezeAuthority(
-        "恢复记录已加载，但编辑画布尚未就绪。",
-      );
-      if (!frozen.ok) {
-        const message = `恢复记录与当前项目、版本或源文件身份不一致。${frozen.reason}`;
-        this.#documentSession.setPersistence({ state: "failed", error: message });
-        return rejected("DOCUMENT_RECOVERY_BOUNDARY_FAILED", message);
-      }
+      await this.#acknowledgeCanvas(recoveredHtml, targetSha256, activeContext);
+      await this.#freezeAuthority("恢复记录已加载，当前投影只读。");
       this.#documentSession.setPersistence({
         state: "conflict",
         error: "恢复记录与当前项目、版本或源文件身份不一致，请比较后选择重新载入或导出当前 HTML。",
@@ -1695,32 +1621,8 @@ export class DocumentWorkflow {
     this.#documentSession.setPersistence({ state: "queued", error: "" });
   }
 
-  #recoveryKeys(context = {}) {
-    const documentId = String(context?.documentId || this.#projectSession.documentId || "");
-    const sourcePath = String(context?.sourcePath || this.#projectSession.sourcePath || "");
-    return [
-      documentId ? `html-ai-recovery:${documentId}` : "",
-      sourcePath ? `html-ai-recovery:${sourcePath}` : "",
-    ].filter(Boolean);
-  }
-
   #persistRecovery(write, context) {
-    const keys = this.#recoveryKeys(write || context);
-    if (keys.length === 0) return false;
     this.#scheduleRecoveryJournal(write, context);
-    if (!write) return this.#recoveryStore.remove(keys);
-    return this.#recoveryStore.write(keys, {
-      schemaVersion: "2.0.0",
-      projectId: write.projectId,
-      documentId: write.documentId,
-      sourcePath: write.sourcePath,
-      recoveryIdentity: write.recoveryIdentity,
-      expectedSourceSha256: write.expectedSourceSha256,
-      revision: write.revision,
-      html: write.html,
-      changeEvents: write.events.map(this.#codecs.persistedChangeEvent),
-      sourceHistoryOperations: write.historyOperations,
-    });
   }
 
   #checkpointFromJournal(journal, context) {
@@ -2163,15 +2065,6 @@ export class DocumentWorkflow {
     if (nextWrite) {
       this.#documentSession.setPendingWrite(nextWrite);
       this.#persistRecovery(nextWrite, acknowledgedContext);
-      if (
-        rebound.routingChanged
-        && !this.#codecs.sameSourcePath(
-          writeContext.sourcePath,
-          acknowledgedContext.sourcePath,
-        )
-      ) {
-        this.#recoveryStore.remove(`html-ai-recovery:${writeContext.sourcePath}`);
-      }
     } else {
       this.#persistRecovery(null, writeContext);
       if (rebound.routingChanged) this.#persistRecovery(null, acknowledgedContext);
@@ -2676,6 +2569,31 @@ export class DocumentWorkflow {
         && !this.#codecs.sameSourcePath(payload.sourcePath, context.sourcePath)
       )
     ) throw invalidAcknowledgement(message, "SOURCE_IDENTITY_MISMATCH");
+  }
+
+  async #acknowledgeCanvas(html, sourceSha256, context) {
+    if (typeof this.#canvasPort.verifyRendered !== "function") return true;
+    try {
+      await this.#canvasPort.verifyRendered(html, sourceSha256, context);
+      if (context && !this.#isCurrent(context)) return false;
+      const confirmed = this.#documentSession.confirmCanvas({
+        generation: this.#documentSession.canvasGeneration,
+        renderedSha256: sourceSha256,
+        workingHtmlSha256: sourceSha256,
+      });
+      if (confirmed) return true;
+      this.#documentSession.failCanvas({
+        generation: this.#documentSession.canvasGeneration,
+        error: "当前画布尚未完成自动恢复。",
+      });
+      return false;
+    } catch (cause) {
+      this.#documentSession.failCanvas({
+        generation: this.#documentSession.canvasGeneration,
+        error: this.#codecs.errorMessage(cause, "当前画布尚未完成自动恢复。"),
+      });
+      return false;
+    }
   }
 
   async #verifyRendered(html, sourceSha256, context) {

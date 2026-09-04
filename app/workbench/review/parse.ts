@@ -12,9 +12,6 @@ import type {
 } from "../../lib/review-projection-facts.js";
 import { reviewSectionChangeOperation } from "../../lib/review-section-operation.js";
 import {
-  REVIEW_SOURCE_NODE_ATTRIBUTE,
-} from "../../lib/review-comment-source-map.js";
-import {
   isValidPagerootElementId,
   PAGEROOT_ELEMENT_ID_ATTRIBUTE,
 } from "../../lib/pageroot-element-identity.js";
@@ -733,15 +730,6 @@ export function candidateSections(document: Document): Element[] {
   return regions;
 }
 
-export function sourceElementsByNodeId(document: Document): Map<string, Element> {
-  const elements = new Map<string, Element>();
-  document.querySelectorAll(`[${REVIEW_SOURCE_NODE_ATTRIBUTE}]`).forEach((element) => {
-    const sourceNodeId = element.getAttribute(REVIEW_SOURCE_NODE_ATTRIBUTE);
-    if (sourceNodeId) elements.set(sourceNodeId, element);
-  });
-  return elements;
-}
-
 /**
  * Collects the section's insertion/removal evidence for
  * `reviewSectionChangeOperation`. Only marker elements are visited, so this
@@ -918,20 +906,14 @@ export function appendProjectionFactToElement(
   element.setAttribute(REVIEW_PROJECTION_FACTS_ATTRIBUTE, serializeReviewProjectionFacts(facts));
 }
 
-export function clearReservedReviewMarkup(
-  document: Document,
-  preserveSourceNodeIdentity = false,
-) {
+export function clearReservedReviewMarkup(document: Document) {
   document.getElementById(REVIEW_STYLE_ID)?.remove();
   document.querySelectorAll(`[${REVIEW_BOOTSTRAP_ATTRIBUTE}]`).forEach((element) => element.remove());
   document.querySelectorAll(`base[${REVIEW_BASE_ATTRIBUTE}]`).forEach((element) => element.remove());
   document.querySelectorAll("*").forEach((element) => {
     [...element.attributes].forEach((attribute) => {
       if (
-        (
-          attribute.name.startsWith("data-pageroot-review-")
-          && (!preserveSourceNodeIdentity || attribute.name !== REVIEW_SOURCE_NODE_ATTRIBUTE)
-        )
+        attribute.name.startsWith("data-pageroot-review-")
         || attribute.name === "data-pageroot-outline-id"
       ) {
         element.removeAttribute(attribute.name);

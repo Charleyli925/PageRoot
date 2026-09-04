@@ -3,14 +3,12 @@ import test from "node:test";
 
 import {
   SOURCE_NODE_ATTRIBUTE,
-  SourceIndexError,
   buildSourceIndex,
   createInsertionPointTargetRef,
   createTargetRef,
-  instrumentPreviewHtml,
-  resolveFromPreview,
   resolveTargetRef,
 } from "../app/lib/source-patch-core.js";
+import { materializeSourceElementIdentity } from "../bridge/project-file-repository/working-copy.mjs";
 
 function resolveNthOfTypeSelector(index, selector) {
   let candidates = [];
@@ -106,52 +104,19 @@ test("SourceIndex retains duplicate attributes and marks implicit/incomplete bou
   assert.equal(Object.hasOwn(div.stableAttributes, "id"), false);
 });
 
-test("instrumented preview injects ephemeral node IDs without changing the source index", () => {
+test("SourceIndex leaves source HTML bytes unchanged and skips forged Source Node attributes", () => {
   const html = `<main><h1>标题</h1><img src=x></main>`;
   const index = buildSourceIndex(html);
-  const preview = instrumentPreviewHtml(index);
   assert.equal(index.source, html);
   assert.equal(html.includes(SOURCE_NODE_ATTRIBUTE), false);
-  assert.equal(preview.nodeIds.length, index.elements.length);
-  for (const nodeId of preview.nodeIds) {
-    assert.match(preview.html, new RegExp(`${SOURCE_NODE_ATTRIBUTE}="${nodeId}"`));
-  }
-  assert.throws(
-    () => instrumentPreviewHtml(`<main ${SOURCE_NODE_ATTRIBUTE}="user-value"></main>`),
-    (error) => error instanceof SourceIndexError
-      && error.code === "PREVIEW_ATTRIBUTE_COLLISION",
-  );
+  const forged = buildSourceIndex(`<main ${SOURCE_NODE_ATTRIBUTE}="user-value"></main>`);
+  const main = forged.elements.find((element) => element.tagName === "main");
+  assert.equal(Object.hasOwn(main.stableAttributes, SOURCE_NODE_ATTRIBUTE), false);
 });
 
-test("instrumented preview preserves byte output for large element sets", () => {
-  const html = `<!doctype html><main>${Array.from(
-    { length: 4_000 },
-    (_, index) => `<section data-row="${index}"><span>row ${index}</span></section>`,
-  ).join("")}</main>`;
-  const index = buildSourceIndex(html);
-  let legacyOutput = html;
-  const insertions = index.elements
-    .map((element) => ({
-      offset: element.closingDelimiterOffset,
-      value: ` ${SOURCE_NODE_ATTRIBUTE}="${element.nodeId}"`,
-    }))
-    .sort((left, right) => right.offset - left.offset);
-  for (const insertion of insertions) {
-    legacyOutput = legacyOutput.slice(0, insertion.offset)
-      + insertion.value
-      + legacyOutput.slice(insertion.offset);
-  }
-
-  const preview = instrumentPreviewHtml(index);
-  assert.equal(preview.html, legacyOutput);
-  assert.equal(preview.nodeIds.length, 8_001);
-});
-
-test("fallback selectors use CSS nth-of-type ordinals across mixed-tag siblings and identify the preview node", () => {
+test("fallback selectors use CSS nth-of-type ordinals across mixed-tag siblings", () => {
   const html = `<!doctype html><html><head><title>Selector</title></head><body><main><h1>A</h1><p>B</p><aside>C</aside><p>D</p></main></body></html>`;
   const index = buildSourceIndex(html);
-  const preview = instrumentPreviewHtml(index);
-  const previewIndex = buildSourceIndex(preview.html);
   const expectedSelectors = new Map([
     ["html", "html:nth-of-type(1)"],
     ["head", "html:nth-of-type(1) > head:nth-of-type(1)"],
@@ -174,41 +139,24 @@ test("fallback selectors use CSS nth-of-type ordinals across mixed-tag siblings 
       resolveNthOfTypeSelector(index, element.selector).map((candidate) => candidate.nodeId),
       [element.nodeId],
     );
-    const [previewElement] = resolveNthOfTypeSelector(previewIndex, element.selector);
-    assert.equal(
-      previewElement.attributesByName.get(SOURCE_NODE_ATTRIBUTE)?.[0]?.rawValue,
-      element.nodeId,
-    );
   }
 });
 
-test("TargetResolver returns exact, rebound after reorder/class change, ambiguous, and orphaned", () => {
+test("TargetResolver orphans ID-less refs instead of scoring selectors", () => {
   const base = `<main id="root"><section class="old" data-key="a"><h2>Alpha 唯一标题</h2></section><section data-key="b"><h2>Beta</h2></section></main>`;
   const baseIndex = buildSourceIndex(base);
   const alpha = baseIndex.elements.find(
     (element) => element.stableAttributes["data-key"] === "a",
   );
   const alphaRef = createTargetRef(baseIndex, alpha.nodeId, { level: "module" });
-  assert.deepEqual(
-    Object.keys(alphaRef).sort(),
-    [
-      "expectedSourceSha256",
-      "fingerprint",
-      "label",
-      "level",
-      "resolution",
-      "selector",
-      "sourceAnchor",
-      "targetId",
-      "textQuote",
-    ],
-  );
-  assert.equal(resolveTargetRef(baseIndex, alphaRef).resolution, "exact");
+  assert.equal(alphaRef.elementId, undefined);
+  assert.equal(resolveTargetRef(baseIndex, alphaRef).resolution, "orphaned");
+  assert.equal(resolveTargetRef(baseIndex, alphaRef).reason, "managed-element-id-required");
 
   const reordered = `<main id="root"><section data-key="b"><h2>Beta</h2></section><section class="renamed" data-key="a"><h2>Alpha 唯一标题</h2></section></main>`;
   const rebound = resolveTargetRef(buildSourceIndex(reordered), alphaRef);
-  assert.equal(rebound.resolution, "rebound");
-  assert.equal(rebound.target.stableAttributes["data-key"], "a");
+  assert.equal(rebound.resolution, "orphaned");
+  assert.equal(rebound.reason, "managed-element-id-required");
 
   const classOnlyBase = `<main><section class="old"><h2>只出现一次</h2></section><section><h2>其他</h2></section></main>`;
   const classOnlyIndex = buildSourceIndex(classOnlyBase);
@@ -217,7 +165,7 @@ test("TargetResolver returns exact, rebound after reorder/class change, ambiguou
   );
   const classOnlyRef = createTargetRef(classOnlyIndex, classOnlyTarget.nodeId);
   const classChanged = `<!-- shifted --><main><section class="new"><h2>只出现一次</h2></section><section><h2>其他</h2></section></main>`;
-  assert.equal(resolveTargetRef(buildSourceIndex(classChanged), classOnlyRef).resolution, "rebound");
+  assert.equal(resolveTargetRef(buildSourceIndex(classChanged), classOnlyRef).resolution, "orphaned");
 
   const duplicates = `<main><section><h2>相同</h2></section><section><h2>相同</h2></section></main>`;
   const duplicateIndex = buildSourceIndex(duplicates);
@@ -226,8 +174,7 @@ test("TargetResolver returns exact, rebound after reorder/class change, ambiguou
     duplicateIndex.elements.filter((element) => element.tagName === "section")[0].nodeId,
   );
   const ambiguous = resolveTargetRef(buildSourceIndex(`<!-- shifted -->${duplicates}`), duplicateRef);
-  assert.equal(ambiguous.resolution, "ambiguous");
-  assert.equal(ambiguous.candidates.length, 2);
+  assert.equal(ambiguous.resolution, "orphaned");
 
   const removed = `<main id="root"><section data-key="b"><h2>Beta</h2></section></main>`;
   assert.equal(resolveTargetRef(buildSourceIndex(removed), alphaRef).resolution, "orphaned");
@@ -243,9 +190,7 @@ test("anonymous SVG shapes rebind through authored geometry without weakening tr
   const targetRef = createTargetRef(baseIndex, firstRect.nodeId);
   const shifted = `<!-- unrelated source edit -->${base}`;
   const rebound = resolveTargetRef(buildSourceIndex(shifted), targetRef);
-  assert.equal(rebound.resolution, "rebound");
-  assert.equal(rebound.target?.stableAttributes.x, "4");
-  assert.equal(rebound.target?.stableAttributes.width, "24");
+  assert.equal(rebound.resolution, "orphaned");
 
   const trulyRepeated = `<svg><rect x="4" y="4" width="24" height="12"></rect><rect x="4" y="4" width="24" height="12"></rect></svg>`;
   const repeatedIndex = buildSourceIndex(trulyRepeated);
@@ -257,8 +202,7 @@ test("anonymous SVG shapes rebind through authored geometry without weakening tr
     buildSourceIndex(`<!-- shifted -->${trulyRepeated}`),
     repeatedRef,
   );
-  assert.equal(ambiguous.resolution, "ambiguous");
-  assert.equal(ambiguous.candidates.length, 2);
+  assert.equal(ambiguous.resolution, "orphaned");
 });
 
 test("inline formatting wrappers preserve complete element TargetRef text identity", () => {
@@ -274,13 +218,7 @@ test("inline formatting wrappers preserve complete element TargetRef text identi
   const resolution = resolveTargetRef(formattedIndex, targetRef);
 
   assert.equal(targetRef.textQuote, "打开原生对话框");
-  assert.equal(resolution.resolution, "rebound");
-  assert.equal(resolution.target?.textContent, "打开原生对话框");
-  const refreshed = createTargetRef(formattedIndex, resolution.target, {
-    targetId: targetRef.targetId,
-  });
-  assert.equal(refreshed.textQuote, "打开原生对话框");
-  assert.equal(refreshed.fingerprint.textPrefix, "打开原生对话框");
+  assert.equal(resolution.resolution, "orphaned");
 });
 
 test("insertion-point refs rebind through stable parent and sibling fingerprints", () => {
@@ -310,16 +248,12 @@ test("insertion-point refs rebind through stable parent and sibling fingerprints
   assert.equal(targetRef.sourceAnchor.startOffset, targetRef.sourceAnchor.endOffset);
   assert.equal(targetRef.fingerprint.tagName, "main");
   assert.equal(targetRef.fingerprint.stableAttributes.id, "root");
-  assert.equal(resolveTargetRef(baseIndex, targetRef).resolution, "exact");
+  assert.equal(resolveTargetRef(baseIndex, targetRef).resolution, "orphaned");
 
   const next = `<main id="root"><section data-key="c">C</section><section data-key="a">A</section><section data-key="b">B</section></main>`;
   const nextIndex = buildSourceIndex(next);
   const rebound = resolveTargetRef(nextIndex, targetRef);
-  const nextB = nextIndex.elements.find(
-    (element) => element.stableAttributes["data-key"] === "b",
-  );
-  assert.equal(rebound.resolution, "rebound");
-  assert.equal(rebound.target.offset, nextB.range.startOffset);
+  assert.equal(rebound.resolution, "orphaned");
 });
 
 test("createTargetRef rejects inconsistent levels and text level anchors the actual single text node", () => {
@@ -340,16 +274,8 @@ test("createTargetRef rejects inconsistent levels and text level anchors the act
     sourceSha256: index.sourceSha256,
   });
   const exact = resolveTargetRef(index, textRef);
-  assert.equal(exact.resolution, "exact");
-  assert.equal(exact.target.nodeId, plainText.nodeId);
-  assert.equal(
-    resolveFromPreview(index, plain.nodeId, { level: "text" }).target.nodeId,
-    plainText.nodeId,
-  );
-  assert.equal(
-    resolveFromPreview(index, plain.nodeId, { level: "module" }).target.type,
-    "element",
-  );
+  assert.equal(exact.resolution, "orphaned");
+  assert.equal(exact.reason, "managed-element-id-required");
 
   assert.throws(
     () => createTargetRef(index, mixed.nodeId, { level: "text" }),
@@ -372,17 +298,19 @@ test("createTargetRef rejects inconsistent levels and text level anchors the act
     ...textRef,
     level: "module",
   });
-  assert.equal(forgedModule.target?.type, "element");
+  assert.equal(forgedModule.resolution, "orphaned");
   const elementRef = createTargetRef(index, plain.nodeId);
   const forgedText = resolveTargetRef(index, {
     ...elementRef,
     level: "text",
   });
-  assert.equal(forgedText.target?.type, "text");
+  assert.equal(forgedText.resolution, "orphaned");
 });
 
 test("insertion exact validates zero-width in-bounds child boundary and parent identity", () => {
-  const html = `<main id="root"><section data-key="a">A</section><section data-key="b">B</section></main>`;
+  const html = materializeSourceElementIdentity(
+    `<main id="root"><section data-key="a">A</section><section data-key="b">B</section></main>`,
+  ).html;
   const index = buildSourceIndex(html);
   const parent = index.elements.find((element) => element.tagName === "main");
   const before = index.elements.find(
@@ -392,6 +320,7 @@ test("insertion exact validates zero-width in-bounds child boundary and parent i
     parentId: parent.nodeId,
     beforeSiblingId: before.nodeId,
   });
+  assert.equal(valid.elementId, parent.pagerootId);
   assert.equal(resolveTargetRef(index, valid).resolution, "exact");
 
   const nonZeroWidth = {
@@ -423,7 +352,7 @@ test("insertion exact validates zero-width in-bounds child boundary and parent i
   };
   assert.equal(resolveTargetRef(index, outOfBounds).resolution, "orphaned");
 
-  const wrongParent = {
+  const wrongSelector = {
     ...valid,
     selector: "#missing-parent",
     fingerprint: {
@@ -431,7 +360,15 @@ test("insertion exact validates zero-width in-bounds child boundary and parent i
       stableAttributes: { id: "missing-parent" },
     },
   };
-  assert.equal(resolveTargetRef(index, wrongParent).resolution, "orphaned");
+  assert.equal(resolveTargetRef(index, wrongSelector).resolution, "exact");
+
+  const missingParent = { ...valid };
+  delete missingParent.elementId;
+  assert.equal(resolveTargetRef(index, missingParent).resolution, "orphaned");
+  assert.equal(
+    resolveTargetRef(index, missingParent).reason,
+    "managed-insertion-requires-parent-id",
+  );
 });
 
 test("insertion rebound never treats positional nth selector as parent identity", () => {
@@ -449,6 +386,6 @@ test("insertion rebound never treats positional nth selector as parent identity"
 
   const reordered = `<main><section><p>共同前缀</p><i>B</i></section><section><p>共同前缀</p><i>A</i></section></main>`;
   const resolution = resolveTargetRef(buildSourceIndex(reordered), targetRef);
-  assert.equal(resolution.resolution, "ambiguous");
-  assert.equal(resolution.candidates.length, 2);
+  assert.equal(resolution.resolution, "orphaned");
+  assert.equal(resolution.reason, "managed-insertion-requires-parent-id");
 });

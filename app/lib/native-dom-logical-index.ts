@@ -1,4 +1,5 @@
 import { isTransparentSourceTextElement } from "./source-text-map.js";
+import { isFrozenEditableIslandSubtree } from "./editable-island.js";
 
 const ATOM_TAGS = new Set([
   "audio",
@@ -44,6 +45,7 @@ export type NativeDomLogicalIndex = {
 export function isNativeDomAtomElement(element: Element): boolean {
   return (
     ATOM_TAGS.has(element.localName)
+    || isFrozenEditableIslandSubtree(element.localName, element.namespaceURI || undefined)
     || element.getAttribute("contenteditable") === "false"
   );
 }
@@ -221,8 +223,11 @@ export function logicalOffsetsForDomPoints(
     if (unresolved === 0) return;
 
     if (
-      element.localName === "br"
-      || isNativeDomAtomElement(element)
+      element !== hostElement
+      && (
+        element.localName === "br"
+        || isNativeDomAtomElement(element)
+      )
     ) {
       consumed += 1;
       return;

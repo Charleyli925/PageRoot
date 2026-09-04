@@ -148,8 +148,8 @@ test("legacy TargetRefs retain ephemeral PageRoot attributes as compatibility ev
   );
   assert.match(legacyTargetRef.selector, /data-pageroot-review-id/u);
   const shifted = resolveTargetRef(buildSourceIndex(`<!-- shift -->${html}`), legacyTargetRef);
-  assert.equal(shifted.resolution, "rebound");
-  assert.equal(shifted.target?.tagName, "section");
+  assert.equal(shifted.resolution, "orphaned");
+  assert.equal(shifted.reason, "managed-element-id-required");
 });
 
 test("stable TargetRefs follow one element across text and position changes without guessing", () => {

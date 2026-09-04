@@ -863,16 +863,6 @@ export class WorkbenchNavigationWorkflow {
           && [application?.activeApplicationId, application?.queuedApplicationId]
             .includes(receipt.applicationId)
         ) return;
-        const canvas = snapshot?.document?.canvasAuthority;
-        if (canvas?.status === "failed") {
-          settle({
-            ok: false,
-            code: "WORKBENCH_NAVIGATION_CANVAS_FAILED",
-            reason: canvas.error || "HTML 画布核对失败。",
-          });
-          return;
-        }
-        if (canvas && !["verified", "idle"].includes(canvas.status)) return;
         settle({ ok: true });
       };
       unsubscribe = this.#controller.subscribe(inspect);
@@ -888,7 +878,7 @@ export class WorkbenchNavigationWorkflow {
         settle({
           ok: false,
           code: "WORKBENCH_NAVIGATION_SETTLE_TIMEOUT",
-          reason: "HTML 已进入当前标签，但权威读取和画布核对未在时限内完成。",
+          reason: "HTML 已进入当前标签，但权威读取未在时限内完成。",
         });
       }, deadlineMs);
     });

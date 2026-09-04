@@ -256,6 +256,76 @@ test("retired production modules and imports stay outside the graph", () => {
     }).join("\n"),
     /retired page-view tab adapters/u,
   );
+  assert.match(
+    retiredArtifactViolations({
+      file: "app/workbench/review-document.ts",
+      source: 'export const attr = "data-pageroot-review-source-node-id";',
+    }).join("\n"),
+    /Review cannot write parseKey identity/u,
+  );
+  assert.match(
+    retiredArtifactViolations({
+      file: "app/lib/review-comment-source-map.js",
+      source: "export function instrumentPreviewHtml() {}",
+    }).join("\n"),
+    /instrumentPreviewHtml cannot return/u,
+  );
+  assert.match(
+    retiredArtifactViolations({
+      file: "app/lib/source-patch-core.js",
+      source: "export function resolveFromPreview() {}",
+    }).join("\n"),
+    /resolveFromPreview cannot return/u,
+  );
+  assert.match(
+    retiredArtifactViolations({
+      file: "app/lib/source-patch-engine.js",
+      source: "export function liveExactCommandTarget() {}",
+    }).join("\n"),
+    /liveExactCommandTarget cannot return/u,
+  );
+  assert.match(
+    retiredArtifactViolations({
+      file: "app/lib/source-patch-engine.js",
+      source: "export function planDirectTextNodePatch() {}",
+    }).join("\n"),
+    /planDirectTextNodePatch cannot return/u,
+  );
+  assert.match(
+    retiredArtifactViolations({
+      file: "app/components/html-canvas-preview-sync.ts",
+      source: 'createElement("pageroot-text-fragment");',
+    }).join("\n"),
+    /disposable text-fragment hosts cannot return/u,
+  );
+  assert.match(
+    retiredArtifactViolations({
+      file: "app/application/document-workflow.js",
+      source: 'this.#recoveryStore.write("html-ai-recovery:doc", {});',
+    }).join("\n"),
+    /document HTML recovery is Main journal only/u,
+  );
+  assert.match(
+    retiredArtifactViolations({
+      file: "app/workbench.tsx",
+      source: "export function Surface() { return HtmlDisplaySurface({}); }",
+    }).join("\n"),
+    /cannot replace the live editor with HtmlDisplaySurface/u,
+  );
+  assert.match(
+    retiredArtifactViolations({
+      file: "app/workbench/WorkbenchActiveDocumentCanvas.tsx",
+      source: "export function Host() { return cloneElement(child); }",
+    }).join("\n"),
+    /cloneElement canvas host cannot return/u,
+  );
+  assert.match(
+    retiredArtifactViolations({
+      file: "app/workbench/review/runtime-projection.ts",
+      source: "const pattern = /^element:\\d+:\\d+:[a-z]/iu;",
+    }).join("\n"),
+    /parseKey cannot leave source-index/u,
+  );
 });
 
 test("the architecture checker contains no implementation-shape assertions", async () => {

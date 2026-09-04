@@ -7,8 +7,8 @@ User HTML bytes
   -> SourceIndex / TargetResolver
   -> isolated authored-DOM preview
   -> native Selection + IslandEditingController
-  -> canonical editable island or exact direct-text-node fragment
-  -> semantic operation foundation or current exact content/text SourcePatch
+  -> canonical editable island (non-inline descendants stay frozen atoms)
+  -> semantic operation foundation or current exact content SourcePatch
   -> renderer SourceHistorySession + normal complete-HTML autosave
   -> serialized atomic file writer
 
@@ -110,8 +110,8 @@ the historical synthetic-spike decision.
   PNGs and a Review runtime owner do not participate. Runtime descendants remain display-only preview
   state and never enter SourcePatch, save, Version, Review analysis or AI
   Request input.
-- Comment selection remains source-node exact inside foreign content. Authored
-  SVG children retain their own instrumented SourceIndex identity; runtime-only
+- Comment selection remains Stable-ID exact inside foreign content. Authored
+  SVG children retain their own SourceIndex identity; runtime-only
   children fail closed and are never promoted to an ancestor `svg`.
 - Comment-rail coordinates are a disposable Canvas measurement projection.
   Every snapshot is tagged with the rendered source Hash, the generation of
@@ -185,13 +185,15 @@ the historical synthetic-spike decision.
   disposable, and the initial private bootstrap is used only for exact
   before-side comment targeting; neither capability changes the diff authority.
 
-  Frozen comments use a separate private locator capability. For every
+  Frozen comments use a separate private locator capability. Review reads
+  `data-pageroot-id` already present in frozen source HTML and never writes a
+  parseKey or second identity attribute onto the prepared document. For every
   source-resolved before target the analyzer keeps an opaque initial-bootstrap
-  binding: a parser path plus a narrow static fingerprint, never a source-node
-  attribute in prepared HTML. The managed preview serves it only to the first
+  binding: the Stable ID plus a parser path and a narrow static fingerprint.
+  The managed preview serves it only to the first
   parser-blocking bootstrap request, then serves an unbound fallback. The
   trusted parent subsequently delivers targets only over a challenged private
-  `MessageChannel`. Comment body, key, source-node and locator-map data are
+  `MessageChannel`. Comment body, key, Stable ID and locator-map data are
   absent from document bytes and later bootstrap reads. A unique source `id`,
   `data-*`, `name`, or `aria-label` is only a safe fallback; missing, ambiguous,
   replaced or disconnected targets omit the before-side marker rather than
@@ -251,9 +253,8 @@ the historical synthetic-spike decision.
   runtime mutation has source, Version or project authority.
 - `IslandEditingController` is the only production text-edit engine in PageRoot 0.9.0. `contenteditable="true"` supplies focus, caret, Selection and IME composition, while the controller owns insertion, deletion, line breaks, paste and formatting. Chromium DOM serialization never has commit authority.
 - `editable-island` owns the V2 capability and normalization contract. An accepted edit replaces only the selected element's parsed `contentRange`; bytes outside that range remain exact. Inside the range, parse5 may perform the smallest safe normalization needed to preserve inline semantics, comments and immutable authored atoms.
-- Transparent inline host discovery records the nearest safe editable island while climbing. If the next parent is structurally unsafe, editing stays on that safe descendant instead of promoting to the unsafe parent.
-- A direct source text node under a structurally unsafe parent may use the same controller through a disposable, layout-checked inline host. Its `update-direct-text-node` transaction is authorized by the surviving parent TargetRef but patches only the exact text-node source range. The disposable host and its attributes never enter source.
--- `native-edit-policy` owns shared session attributes and checkpoint timing. `native-layout-fingerprint` records geometry and text style so `HtmlCanvasEditor` can observe post-entry drift; it does not refuse to enter an island. MutationObserver rollback and checkpoint scope remain the fail-closed safety net. The retired `nativeRuntimePreflight` / `RuntimeDomSourceMap` stack is not on the production path; `HtmlCanvasEditor` only coordinates selection, the island session and SourcePatch.
+- Transparent inline host discovery records the nearest safe editable island while climbing. Nested non-inline HTML, embeds and foreign subtrees stay frozen atoms inside that island; they are never a second text engine or a disposable fragment host.
+- `native-edit-policy` owns shared session attributes and checkpoint timing. `native-layout-fingerprint` records geometry and text style so `HtmlCanvasEditor` can observe post-entry drift; it does not refuse to enter an island. MutationObserver rollback and checkpoint scope remain the fail-closed safety net. The retired `nativeRuntimePreflight` / `RuntimeDomSourceMap` stack is not on the production path; `HtmlCanvasEditor` only coordinates selection, the island session and SourcePatch.
 
 ## Module map
 
@@ -302,7 +303,7 @@ services.
 | Durable Project File Registry, Working Copy CAS, Version/Candidate and Request/Draft records | `bridge/project-file-repository.mjs` façade over `bridge/project-file-repository/` internals (path safety, Registry, Working Copy CAS, Version/Candidate, Request/Draft). Callers keep importing the façade; there is no second persistence owner |
 | Close, switch, submit and history obligations | `app/application/drain-coordinator.js` |
 | Late query rejection and monotonic draft reads | `app/application/project-query-fence.js` |
-| Crash recovery | Main-process `desktop/recovery-journal-store.mjs` owns per-document atomic, read-back verified journals under `userData`; `app/application/recovery-store.js` remains a compatibility input and cannot by itself authorize detach without exact read-back/Hash verification |
+| Crash recovery | Main-process `desktop/recovery-journal-store.mjs` owns per-document atomic, read-back verified journals under `userData`. `DocumentWorkflow` restores document HTML only from that journal. `app/application/recovery-store.js` remains the comment-draft RecoveryStore and is not a document-HTML authority |
 | Desktop renderer host assertion before Controller construction | `app/application/desktop-host.js` |
 | Same-directory source rename, operation journal and durable active/recent path rebase | `desktop/source-rename.mjs` |
 | Directory-change hint, live source-file early warning and non-authoritative active managed locator cache | `desktop/source-file-watch.mjs`, `desktop/active-managed-locator.mjs` |
@@ -339,7 +340,7 @@ services.
 | Formal AI review composition, private comment/projection port lifecycle and isolated-frame coordination | `app/workbench/AiReviewWorkspace.tsx` |
 
 The V2 source-fidelity path remains a protected core: `SourceIndex`,
-`TargetResolver`, `editable-island`, direct-text-node normalization, `IslandEditingController`,
+`TargetResolver`, `editable-island`, `IslandEditingController`,
 `SemanticOperationKernel` owns the pure stable-ID operation contract and lowers
 to `SourcePatchEngine`; PR4 does not yet switch Canvas, history or persistence.
 The complete next HTML remains source-derived and Runtime DOM is never
@@ -348,26 +349,31 @@ proven invariant, not to satisfy a line-count target. The retired V1
 `NativeEditingController`, its per-keystroke tracker, shadow block draft,
 FormatSkeleton and structural planner have been removed. The architecture gate
 rejects reintroducing those files or imports; production text editing has one
-V2 controller route with element-island and exact direct-text-node transaction
-scopes.
+V2 controller route with one element-island transaction scope.
 
 `SourceIndex` also recognizes the ADR 0059 `data-pageroot-id` contract and maps
 only valid, document-unique values back to exact source element records. Missing,
 malformed and duplicated identities are diagnostics, not an instruction from
-the parser to rewrite HTML. ADR 0060 gives `ProjectFileRepository` the separate
-one-time migration authority: new imports create an identified managed Working
-Copy while preserving the external file and immutable V1 bytes; legacy managed
-Working Copies materialize missing IDs only through a Hash-checked recoverable
-transaction on editable workspace entry. Invalid identities fail closed.
-ADR 0061 makes that index the exclusive resolver for managed Working Copy
-TargetRefs: official location uses only a valid unique `elementId`. Selector,
+the parser to rewrite HTML. The persistent element identity is only
+`data-pageroot-id`. Parser-local handles (`nodeId` / `parseKey`) stay inside
+`SourceIndex` / `SourcePatchEngine` for one parse of one revision: they never
+enter Runtime DOM, TargetRef, Selection, comments, Review or history.
+ADR 0060 gives `ProjectFileRepository` the separate one-time migration
+authority: new imports create an identified managed Working Copy while
+preserving the external file and immutable V1 bytes; legacy managed Working
+Copies materialize missing IDs only through a Hash-checked recoverable
+transaction on editable workspace entry. Incomplete or invalid identities fail
+closed and do not enable direct edit. ADR 0061 makes that index the exclusive
+resolver: official location uses only a valid unique `elementId`. Selector,
 ancestor fingerprint, source-offset distance and text prefix/suffix scoring
-still exist as a shadow of the old resolver so edit, comments and Review can
-count fallback-only success; they cannot become the official result. Deletion
-or a missing ID is orphaned without heuristic fallback. Whole-page comments
-keep the deterministic `selector=body + level=module` semantic target.
-ID-less historical TargetRefs against unmanaged or identity-absent HTML retain
-the legacy resolver. Semantic saving remains outside this foundation.
+are not an official result. Deletion or a missing ID is orphaned without
+heuristic fallback. SourcePatch remains the private source materializer, but
+its public command entry is the same Stable ID: `elementId` on the command or
+TargetRef, then the current `SourceIndex` range, then the semantic operation.
+`command.nodeId`, `command.textNodeId`, preview parseKey lookup and TargetRef
+selector/fingerprint fallback are not edit authorities. `html`, `head` and `body` carry Stable IDs like every other
+element; whole-page comments persist the body's `elementId`. Semantic saving remains
+outside this foundation.
 
 The external original and the hidden V1 snapshot remain byte-exact copies of
 the first imported HTML, without PageRoot Stable ID metadata. The visible V1
@@ -404,8 +410,10 @@ open. It never persists source paths, HTML, Hashes or AI authority. Writes use
 same-directory temporary creation plus atomic rename. `html-projects.json`
 continues to own `activePath` compatibility. Any valid tabs record suppresses
 that compatibility startup: `activeTabId: null` restores Start, while a stored
-active document remains pending until Registry open, a newer Controller epoch,
-hydration and Canvas verification succeed. Registry-title/missing-item
+active document remains pending until Registry open, a newer Controller epoch
+and source hydration succeed. Canvas Hash verification decides whether the
+projection may be edited, reused from cache or statically degraded; it does
+not gate Working HTML publication, save or project switch. Registry-title/missing-item
 reconciliation and restore ordering live below React in `WorkspaceController`:
 the Controller reads tabs first, requests the Registry catalog when needed,
 removes missing items with an actionable Finder recovery event, and activates
@@ -426,10 +434,11 @@ Immutable Versions, frozen Requests and Runtime DOM are never migration inputs
 or destinations.
 On the existing direct-edit path, `IslandEditingController` retains IDs on
 authored descendants and allocates an ID when the browser creates a new inline
-wrapper or line break; the text-range style planner likewise identifies each
-new source wrapper. The Repository verifies that every current claim survives
-and may fill only otherwise-valid missing IDs on genuinely new source elements
-before the CAS; it never repairs a lost prior claim.
+wrapper or line break; deleting that hard break retires its ID with the node.
+The text-range style planner likewise identifies each new source wrapper. The
+Repository verifies that every current non-break claim survives and may fill
+only otherwise-valid missing IDs on genuinely new source elements before the
+CAS; it never repairs a lost prior claim.
 
 `/autosave` retains its own transport decoding and revision checks, then
 delegates the current-source write to `ProjectFileRepository`. Path safety,
@@ -564,7 +573,8 @@ project state are external HTML at the v4 boundary; a path that already has a
 unique external-source binding returns that project's current Working Copy
 instead of creating a second V1. Unbound HTML is classified first and imported
 as a fresh v4 V1 only after the user confirms; the original HTML bytes remain
-untouched unless the user later opts into Trash after Canvas verification. A current Registry
+untouched unless the user later opts into Trash after the published project is
+retained. Canvas failure never rolls that publication back. A current Registry
 write lock serializes ordinary Registry mutations across Bridge processes and is
 the only Registry lock. A Registry that is not a valid current Registry fails
 closed through that one validator; there is no metadata-completion migration and

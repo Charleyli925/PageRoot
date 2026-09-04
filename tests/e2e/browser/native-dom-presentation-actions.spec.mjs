@@ -4,6 +4,7 @@ import {
   caseSelector,
   exportCurrentHtml,
   fixtureBuffer,
+  identifiedHtmlBuffer,
   loadFixture,
 } from "./pageroot-driver.mjs";
 
@@ -16,11 +17,11 @@ test("edit mode reveals semantic source content without running authored actions
 }, async ({
   page,
 }) => {
-  const original = fixtureBuffer("presentation-actions.html");
+  const original = identifiedHtmlBuffer(fixtureBuffer("presentation-actions.html"));
   const { editor, frame } = await loadFixture(
     page,
     "presentation-actions.html",
-    { buffer: original },
+    { buffer: original, identifiedWorkingCopy: false },
   );
   const overviewPanel = frame.locator(caseSelector("overview-panel"));
   const detailsPanel = frame.locator(caseSelector("details-panel"));
@@ -101,11 +102,11 @@ test("edit mode reveals semantic source content without running authored actions
 test("explicit data-linked tabs stay inert in edit mode without running scripts or changing bytes", async ({
   page,
 }) => {
-  const original = fixtureBuffer("indexed-script-tabs.html");
+  const original = identifiedHtmlBuffer(fixtureBuffer("indexed-script-tabs.html"));
   const { editor, frame } = await loadFixture(
     page,
     "indexed-script-tabs.html",
-    { buffer: original },
+    { buffer: original, identifiedWorkingCopy: false },
   );
   const firstPanel = frame.locator("#chart0");
   const secondPanel = frame.locator("#chart1");
@@ -137,11 +138,11 @@ test("explicit data-linked tabs stay inert in edit mode without running scripts 
 test("constant-index onclick tabs stay inert in edit mode without executing their handler", async ({
   page,
 }) => {
-  const original = fixtureBuffer("onclick-indexed-tabs.html");
+  const original = identifiedHtmlBuffer(fixtureBuffer("onclick-indexed-tabs.html"));
   const { editor, frame } = await loadFixture(
     page,
     "onclick-indexed-tabs.html",
-    { buffer: original },
+    { buffer: original, identifiedWorkingCopy: false },
   );
   const firstPanel = frame.locator("#chart0");
   const secondPanel = frame.locator("#chart1");

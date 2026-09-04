@@ -24,7 +24,9 @@ current Canvas has verified the identical source SHA-256. Selecting a cached
 tab may display that safe scroll-only frame immediately, but the normal registered-project
 open, Registry/OpenTarget validation, source read, hydration and Canvas gates
 still run. Cached bytes never become Source, save, Version or export authority.
-Restart persistence remains identity-only.
+The cache may paint a pending tab immediately; it does not participate in the
+same document's text input or Runtime refresh, which stay on the mounted
+`HtmlCanvasEditor`. Restart persistence remains identity-only.
 After restart, a trusted read-only Registry projection may repopulate the active
 display cache before normal activation and then prewarm inactive tabs while the
 app is idle. Those bytes remain presentation-only and are never persisted with

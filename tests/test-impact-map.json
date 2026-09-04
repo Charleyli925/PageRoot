@@ -457,6 +457,7 @@
       "patterns": [
         "^app/application/comment-workflow(?:-codecs)?\\.(?:js|d\\.ts)$",
         "^app/application/comment/commit-plan\\.(?:js|d\\.ts)$",
+        "^app/application/recovery-store\\.(?:js|d\\.ts)$",
         "^tests/comment-workflow\\.test\\.mjs$",
         "^tests/comment-commit-plan\\.test\\.mjs$"
       ],
@@ -468,6 +469,7 @@
         "tests/comment-workflow.test.mjs",
         "tests/comment-commit-plan.test.mjs",
         "tests/comment-session.test.mjs",
+        "tests/recovery-store.test.mjs",
         "tests/draft-session.test.mjs",
         "tests/attachment-selection.test.mjs",
         "tests/attachment-storage.test.mjs",
@@ -496,14 +498,13 @@
     {
       "id": "document-session",
       "patterns": [
-        "^app/application/(?:document-session|recovery-store)\\.(?:js|d\\.ts)$"
+        "^app/application/document-session\\.(?:js|d\\.ts)$"
       ],
       "suites": [
         "typecheck"
       ],
       "nodeTests": [
-        "tests/document-session.test.mjs",
-        "tests/recovery-store.test.mjs"
+        "tests/document-session.test.mjs"
       ]
     },
     {
@@ -522,7 +523,6 @@
         "tests/document-workflow.test.mjs",
         "tests/document-save-plan.test.mjs",
         "tests/document-session.test.mjs",
-        "tests/recovery-store.test.mjs",
         "tests/source-history-session.test.mjs",
         "tests/source-history.test.mjs",
         "tests/audit-events.test.mjs"
@@ -606,7 +606,7 @@
         "^app/application/workbench-(?:tabs-(?:session|persistence-coordinator)|navigation-(?:session|workflow))\\.(?:js|d\\.ts)$",
         "^app/application/document-surface-cache-session\\.(?:js|d\\.ts)$",
         "^app/application/browser-document-session\\.(?:js|d\\.ts)$",
-        "^app/workbench/(?:WorkbenchChrome|WorkbenchDocumentSurfaceCache|document-surface-presentation|performance-timeline|workbench-navigation-container)\\.(?:tsx|ts)$",
+        "^app/workbench/(?:WorkbenchChrome|WorkbenchDocumentSurfaceCache|WorkbenchActiveDocumentCanvas|document-surface-presentation|performance-timeline|workbench-navigation-container)\\.(?:tsx|ts)$",
         "^app/workbench/workbench-document-surface-cache\\.module\\.css$",
         "^desktop/workbench-tabs-state\\.mjs$",
         "^tests/e2e/electron/electron-workbench-tabs\\.spec\\.mjs$",
@@ -620,6 +620,7 @@
         "tests/workbench-tabs-session.test.mjs",
         "tests/workbench-navigation-workflow.test.mjs",
         "tests/document-surface-cache-session.test.mjs",
+        "tests/runtime-canvas-retirement.test.mjs",
         "tests/workbench-tabs-persistence-coordinator.test.mjs",
         "tests/workbench-tabs-state.test.mjs",
         "tests/project-workflow.test.mjs",
@@ -1061,7 +1062,7 @@
     {
       "id": "v2-island-controller",
       "patterns": [
-        "^app/components/(?:HtmlCanvasEditor(?:\\.types)?|HtmlDisplaySurface(?:\\.module)?|html-canvas-presentation-scroll|html-canvas-selection-chrome(?:-contract)?|html-preview-sandbox|use-preview-resource-base)\\.(?:tsx|ts|js|css|d\\.ts)$"
+        "^app/components/(?:HtmlCanvasEditor(?:\\.types)?|HtmlDisplaySurface(?:\\.module)?|html-canvas-presentation-scroll|html-canvas-selection-chrome(?:-contract)?|html-canvas-source-element|html-preview-sandbox|use-preview-resource-base)\\.(?:tsx|ts|js|css|d\\.ts)$"
       ],
       "suites": [
         "typecheck",
@@ -1081,7 +1082,7 @@
       "patterns": [
         "^app/application/edit-author-runtime-session\\.(?:js|d\\.ts)$",
         "^app/domain/edit-runtime-contract\\.(?:js|d\\.ts)$",
-        "^app/components/(?:HtmlCanvasEditor(?:\\.types)?|HtmlDisplaySurface(?:\\.module)?|html-canvas-selection-chrome(?:-contract)?|html-preview-sandbox)\\.(?:tsx|ts|js|css|d\\.ts)$",
+        "^app/components/(?:HtmlCanvasEditor(?:\\.types)?|HtmlDisplaySurface(?:\\.module)?|html-canvas-selection-chrome(?:-contract)?|html-canvas-source-element|html-preview-sandbox)\\.(?:tsx|ts|js|css|d\\.ts)$",
         "^app/workbench\\.tsx$",
         "^app/workbench/WorkbenchActiveDocumentCanvas\\.tsx$",
         "^app/workbench/use-edit-runtime-preparation\\.ts$",

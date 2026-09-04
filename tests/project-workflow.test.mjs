@@ -789,7 +789,6 @@ test("real Document and Project workflows protect H1 for navigation, close, and 
       sha256(OLD_HTML),
       null,
     );
-    const recoveryValues = new Map();
     return new DocumentWorkflow({
       bridgeClient: client,
       ensureRegistered: async () => succeeded(projectSession.context),
@@ -817,21 +816,6 @@ test("real Document and Project workflows protect H1 for navigation, close, and 
       },
       ports: {
         hash: { sha256: async (value) => sha256(value) },
-        recoveryStore: {
-          readRecords: (keys) => (Array.isArray(keys) ? keys : [keys])
-            .filter((key) => recoveryValues.has(key))
-            .map((key) => ({ key, value: recoveryValues.get(key) })),
-          write(keys, value) {
-            for (const key of Array.isArray(keys) ? keys : [keys]) {
-              recoveryValues.set(key, structuredClone(value));
-            }
-            return true;
-          },
-          remove(keys) {
-            for (const key of Array.isArray(keys) ? keys : [keys]) recoveryValues.delete(key);
-            return true;
-          },
-        },
         recoveryJournal,
         canvas: canvasPort,
       },
@@ -3417,7 +3401,7 @@ test("a new-external picker result shows confirmation without switching", async 
   assert.equal(harness.workflow.getSnapshot().openConfirmation, null);
 });
 
-test("canvas failure after import rolls back and never finalizes a trash request", async (t) => {
+test("canvas failure after import keeps the published project and never trashes", async (t) => {
   let finalized = 0;
   let rolledBack = 0;
   const harness = createHarness({
@@ -3471,14 +3455,12 @@ test("canvas failure after import rolls back and never finalizes a trash request
     action: "import-new",
     deleteOriginal: true,
   });
-  assert.equal(confirmed.status, "rejected");
+  assert.equal(confirmed.status, "succeeded");
   assert.equal(canvasCalls, 2);
   assert.equal(finalized, 0);
-  assert.equal(rolledBack, 1);
-  assert.equal(
-    harness.workflow.getSnapshot().openConfirmation?.requestId,
-    "req_canvas_fail",
-  );
+  assert.equal(rolledBack, 0);
+  assert.equal(harness.projectSession.sourcePath, A_PATH);
+  assert.equal(harness.workflow.getSnapshot().openConfirmation, null);
   assert.equal(
     harness.events.some((event) => event.type === "external-open-canvas-failed"),
     true,

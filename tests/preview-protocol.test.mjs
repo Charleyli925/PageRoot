@@ -182,7 +182,7 @@ test("private preview bootstrap bytes are consumed before authored fetches", asy
       "<main>public preview bytes</main>",
     ].join(""),
     bootstrapJavaScript: [
-      "const reviewCommentInitialBindings = ['element:1:1:div'];",
+      "const reviewCommentInitialBindings = ['pr1_11111111111141118111111111111111'];",
       "const runtimeProjectionInitialBindings = ['runtime-host-1'];",
     ].join("\n"),
     bootstrapFallbackJavaScript: "const publicBootstrap = true;",

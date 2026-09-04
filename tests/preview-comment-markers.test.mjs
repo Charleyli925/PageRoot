@@ -11,10 +11,16 @@ import {
   buildSourceIndex,
   createTargetRef,
 } from "../app/lib/source-patch-core.js";
+import { materializeSourceElementIdentity } from "../bridge/project-file-repository/working-copy.mjs";
+
+function identified(html) {
+  return materializeSourceElementIdentity(html).html;
+}
 
 function selectionFor(targetRef) {
   return {
     id: targetRef.targetId,
+    elementId: targetRef.elementId,
     label: targetRef.label,
     level: targetRef.level,
     selector: targetRef.selector,
@@ -40,8 +46,8 @@ function commentOn(sourceIndex, tagName, text, options = {}) {
   };
 }
 
-test("each resolvable target becomes one marker carrying its source node", () => {
-  const source = "<main><h1 id=\"title\">标题</h1><p id=\"body\">正文</p></main>";
+test("each resolvable target becomes one marker carrying its Stable ID", () => {
+  const source = identified("<main><h1 id=\"title\">标题</h1><p id=\"body\">正文</p></main>");
   const sourceIndex = buildSourceIndex(source);
   const groups = previewCommentMarkerGroups(sourceIndex, [
     commentOn(sourceIndex, "h1", "标题再短一点"),
@@ -57,12 +63,12 @@ test("each resolvable target becomes one marker carrying its source node", () =>
     groups.map((group) => group.items.map((item) => item.text)),
     [["标题再短一点"], ["这段拆成两句"]],
   );
-  assert.ok(groups.every((group) => typeof group.nodeId === "string" && group.nodeId));
+  assert.ok(groups.every((group) => /^pr1_[0-9a-f]{32}$/u.test(group.nodeId)));
   assert.equal(new Set(groups.map((group) => group.nodeId)).size, 2);
 });
 
 test("several comments on one target collapse into a single counted marker", () => {
-  const source = "<main><h1 id=\"title\">标题</h1></main>";
+  const source = identified("<main><h1 id=\"title\">标题</h1></main>");
   const sourceIndex = buildSourceIndex(source);
   const groups = previewCommentMarkerGroups(sourceIndex, [
     commentOn(sourceIndex, "h1", "第一条"),
@@ -97,7 +103,7 @@ test("an ambiguous or orphaned target produces no marker at all", () => {
 });
 
 test("an empty comment with no attachment contributes no marker", () => {
-  const source = "<main><h1 id=\"title\">标题</h1><p id=\"body\">正文</p></main>";
+  const source = identified("<main><h1 id=\"title\">标题</h1><p id=\"body\">正文</p></main>");
   const sourceIndex = buildSourceIndex(source);
   const groups = previewCommentMarkerGroups(sourceIndex, [
     commentOn(sourceIndex, "h1", "   "),
@@ -110,7 +116,7 @@ test("an empty comment with no attachment contributes no marker", () => {
 });
 
 test("the measure request carries identities only, never comment text", () => {
-  const source = "<main><h1 id=\"title\">标题</h1></main>";
+  const source = identified("<main><h1 id=\"title\">标题</h1></main>");
   const sourceIndex = buildSourceIndex(source);
   const groups = previewCommentMarkerGroups(sourceIndex, [
     commentOn(sourceIndex, "h1", "这句话不能进入页面"),

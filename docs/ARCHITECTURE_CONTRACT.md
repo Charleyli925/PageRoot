@@ -375,8 +375,9 @@ The resolver also returns one `HtmlCanvasSelection`, its `SourceTargetRef` when
 the source mapping is exact, a non-persistent `targetKey`, the current DOM
 generation and the Runtime fail-closed proof. `targetKey` is only an interaction
 identity; it is never persisted or used as source authority. Its priority is a
-valid `elementId`, the current `TargetRef.targetId`, the current generation's
-`nodeId`, and finally a generation-scoped WeakMap key.
+valid `elementId`, then the current `TargetRef.targetId`, and finally a
+generation-scoped WeakMap key. Parse-local SourceIndex handles never become
+target identity.
 
 The following invariants are normative:
 
@@ -474,7 +475,9 @@ renders source-static content, but desktop may choose one bounded direct author
 runtime before the initial editable frame becomes interactive. The sole
 `EditAuthorRuntimeSession`, composed by `WorkspaceController`, keys the attempt
 to `(sourcePath, canvasGeneration)` rather than an autosave revision, source
-echo or comment state. It accepts one exact persisted-source prepare result
+echo or comment state. A same-directory path-only rename that keeps the same
+HTML, source SHA and canvas generation relocates that live key and does not
+consume another prepare. It accepts one exact persisted-source prepare result
 only for the same source SHA and generation; a late old result is revoked and a
 settled session cannot prepare again. The stable attempt key is distinct from
 the latest retry identity: every valid refresh observes current Working HTML,
@@ -618,7 +621,12 @@ Runtime DOM never becomes SourcePatch, Source HTML, save, Version, export,
 Request, Candidate or Review input.
 
 `data-pageroot-id` is persistent source identity, not Runtime edit authority.
-An equal ID on another DOM object grants nothing by itself. For each Runtime
+An equal ID on another DOM object grants nothing by itself. Runtime source
+proof is a private `WeakMap<Element, PagerootElementId>` sealed before author
+Script activation: it answers whether this DOM object is the original parsed
+source object. It is not a second identity. Offset-derived Source Node IDs are
+not written onto Runtime DOM or Review HTML, do not authorize edits, and are never refreshed
+across Working HTML revisions. For each Runtime
 generation, the private source-object authority set is established exactly once
 before author Script activation and is then sealed. A registered object may be
 revoked when its live identity fails, but author code can never add another
@@ -788,8 +796,12 @@ and uses the existing no-effective-page-change result.
 Successful Candidate adoption and stale Review invalidation clear the prepared
 document cache immediately. Unmounting the Review workspace then releases its
 paired preview sessions and iframes. Workbench keeps exactly one active Edit
-Canvas; inactive document tabs retain only bounded script-disabled static
-projections and never retain an `HtmlCanvasEditor` or Runtime DOM.
+Canvas mounted for the current document; script refresh stays inside that
+editor's bounded A/B Runtime slots. Inactive document tabs retain only bounded
+script-disabled static projections and never retain an `HtmlCanvasEditor` or
+Runtime DOM. DocumentSurfaceCache may cover a pending tab switch; it must not
+replace or inert the same document's live editor during text input or Runtime
+refresh.
 
 Formal Review has no runtime-snapshot supplement. The trusted
 `AiReviewWorkspace` begins with the immutable static document pair and keeps
@@ -930,7 +942,8 @@ Native editable-island `<br>` nodes receive fresh IDs in the accepted Canvas
 plan before `setText` is formed, and Repository binds that operation to one
 exact target-content patch and the shared materializer's normalized
 `contentHtml`; multiple new line breaks must retain their declared allocation
-order, not merely the same ID set. Canvas copies only
+order, not merely the same ID set. Deleting a hard break retires that break
+identity with the node; other persistent element identities remain fail-closed. Canvas copies only
 those accepted IDs onto the matching live line-break objects under its expected
 mutation guard. The controller first proves the prior live DOM still equals its
 owned canonical draft, then proves the reconciled live DOM equals the newly
@@ -1031,15 +1044,15 @@ Current managed TargetRefs add `elementId` and the expected canonical source
 Hash, refreshed by deterministic current-source rebind. A complete managed
 Working Copy selects one official resolver contract: only the valid unique
 SourceIndex ID entry may resolve. Tag changes retain that identity; deletion
-or a missing/invalid ID is orphaned without heuristic fallback. The old
-selector, ancestor-fingerprint, source-offset and text-affix scorer still runs
-in shadow and records fallback-only success by surface (edit, comments,
-Review); it must not replace the official result. A source target that survives while its
+or a missing/invalid ID is orphaned without heuristic fallback. Selector,
+ancestor-fingerprint, source-offset and text-affix scoring are not an official
+result and are not retained as a shadow path. Incomplete identity HTML may
+resolve the same-revision source-anchor only; it cannot rebound across a
+hash change and cannot enable direct Canvas edit. A source target that survives while its
 current Canvas projection cannot display it remains the same target with a
 missing/hidden presentation state, never a guessed replacement. `targetId` remains per-record identity; optional selected-text
 locators are UTF-16 ranges inside the owning element's decoded descendant text.
-ID-less TargetRefs against unmanaged or identity-absent HTML keep the legacy
-resolver. Whole-page comments keep `selector=body + level=module`. Immutable
+Whole-page comments use the body's `elementId`. Immutable
 Version records are never rewritten. See ADR 0061.
 
 A Renderer-applied history result may advance the mounted editable-island
@@ -1143,9 +1156,10 @@ content-safety close aggregate.
 
 The recovery-journal identity is project + document + Working Copy + revision
 and HTML Hash; `sourcePath` is a rebased location. A path change requires the
-prior journal receipt and an exact CAS rebase. Main HTML bytes win over the
-compatibility browser record at an equal revision/Hash, while the browser
-record may contribute recovery identity, audit events and history metadata.
+prior journal receipt and an exact CAS rebase. Document HTML crash recovery
+reads only that verified Main journal. Browser RecoveryStore records are
+comment-draft metadata and never contribute HTML bytes, recovery identity,
+audit events or history operations to `DocumentWorkflow`.
 Journal writes retain at most one in-flight record and one latest pending
 record. Startup scan failure degrades the journal capability without preventing
 window creation; bounded scans isolate corrupt entries and Start lists only

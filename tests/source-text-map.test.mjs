@@ -4,7 +4,6 @@ import test from "node:test";
 import { buildSourceIndex } from "../app/lib/source-index.js";
 import {
   SourceTextMapError,
-  buildSourceTextFragmentMap,
   buildSourceTextMap,
   sourceAnchorToTextOffset,
   sourceSegmentsToTextRange,
@@ -46,22 +45,23 @@ test("maps decoded UTF-16 text across authored inline elements without layout se
   });
 });
 
-test("isolates one exact direct text node from a structurally complex parent", () => {
+test("maps mixed block descendants as frozen objects while keeping sibling text editable", () => {
   const index = buildSourceIndex(
     `<div id="mixed"><div>chart</div><b>强调</b>裸&amp;文本<span>尾注</span></div>`,
   );
-  const textNode = index.textNodes.find((node) => node.value === "裸&文本");
-  const map = buildSourceTextFragmentMap(index, textNode.nodeId);
+  const mixed = elementById(index, "mixed");
+  const map = buildSourceTextMap(index, mixed.nodeId, {
+    allowEmpty: true,
+    ignoreComments: true,
+  });
 
-  assert.equal(map.rootNodeId, elementById(index, "mixed").nodeId);
-  assert.equal(map.text, "裸&文本");
-  assert.equal(map.textRunCount, 1);
-  assert.equal(map.boundaryCount, 0);
-  assert.deepEqual(textRangeToSourceSegments(map, 0, map.textLength), [{
-    textNodeId: textNode.nodeId,
-    startOffset: 0,
-    endOffset: textNode.value.length,
-  }]);
+  assert.equal(map.rootNodeId, mixed.nodeId);
+  assert.equal(map.text, "\ufffc强调裸&文本尾注");
+  assert.equal(map.runs.filter((run) => run.kind === "structure").length, 1);
+  assert.equal(
+    map.runs.filter((run) => run.kind === "text").map((run) => run.text).join(""),
+    "强调裸&文本尾注",
+  );
 });
 
 test("round-trips text and child-boundary source anchors with explicit affinity", () => {

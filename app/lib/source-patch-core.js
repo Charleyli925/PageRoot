@@ -14,7 +14,6 @@ export {
   SourceIndexError,
   buildSourceIndex,
   compareParseIntegrity,
-  instrumentPreviewHtml,
   normalizeSourceText,
   scanStartTagAttributes,
   sourceSha256,
@@ -25,9 +24,6 @@ export {
   cleanTargetRef,
   createInsertionPointTargetRef,
   createTargetRef,
-  getTargetResolverShadowStats,
-  resetTargetResolverShadowStats,
-  resolveFromPreview,
   resolveTargetRef,
 } from "./target-resolver.js";
 
@@ -36,7 +32,6 @@ export {
   SourcePatchError,
   applyPatchPlan,
   parseInlineStyle,
-  planDirectTextNodePatch,
   planEditableIslandPatch,
   planInlineStylePatch,
   planSemanticOperationPatch,

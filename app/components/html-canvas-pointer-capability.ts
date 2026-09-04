@@ -1,4 +1,3 @@
-import { SOURCE_NODE_ATTRIBUTE } from "../lib/source-patch-core.js";
 import { sourceTargetRefForSelection } from "../lib/canvas-target-rebind.js";
 import {
   PAGEROOT_ELEMENT_ID_ATTRIBUTE,
@@ -13,7 +12,7 @@ import type {
   SourceTargetRef,
 } from "./html-canvas-internal-types";
 import {
-  directTextNodeAtPoint,
+  identifyingTextRangeAtPoint,
   findCanvasHitSourceElement,
   findCanvasSelectionElement,
   findDedicatedSourceSurfaceAtPoint,
@@ -23,7 +22,6 @@ import {
 } from "./html-canvas-interaction";
 import {
   nativeEditHostForElement,
-  nativeTextFragmentForElement,
 } from "./html-canvas-preview-sync";
 import {
   createRuntimeVisualTargetIndex,
@@ -63,13 +61,12 @@ export function canStartNativeTextEditAtTarget({
 }): boolean {
   if (!element || !sourceIndex || !documentNode) return false;
   const islandHost = nativeEditHostForElement(element, sourceIndex);
-  if (islandHost) return true;
-  const hintedTextNode = point
-    ? directTextNodeAtPoint(documentNode, element, point)
-    : null;
-  return Boolean(
-    nativeTextFragmentForElement(element, sourceIndex, hintedTextNode),
-  );
+  if (!islandHost) return false;
+  // Hovering a module box, including its padding and gap, selects that module.
+  // Nested text hosts still advertise in-place editing.
+  if (inferSelectionLevel(element) === "module") return false;
+  if (!point) return true;
+  return Boolean(identifyingTextRangeAtPoint(documentNode, islandHost, point));
 }
 
 export type ResolvedCanvasTarget = Readonly<{
@@ -182,8 +179,6 @@ export function canvasTargetKeyFor({
       .find((candidate) => isValidPagerootElementId(candidate));
     if (elementId) return `element:${elementId}`;
     if (sourceRef?.targetId) return `target:${sourceRef.targetId}`;
-    const nodeId = element.getAttribute(SOURCE_NODE_ATTRIBUTE) || selection.nodeId;
-    if (nodeId) return `node:${normalized}:${nodeId}`;
   }
   return transientTargetKeyForElement(
     element,
@@ -210,8 +205,6 @@ function canvasVisualKeyFor({
   if (!runtimeGenerated) {
     const elementId = element.getAttribute(PAGEROOT_ELEMENT_ID_ATTRIBUTE);
     if (isValidPagerootElementId(elementId)) return `element:${elementId}`;
-    const nodeId = element.getAttribute(SOURCE_NODE_ATTRIBUTE);
-    if (nodeId) return `node:${normalized}:${nodeId}`;
   }
   return transientTargetKeyForElement(
     element,
@@ -230,7 +223,7 @@ export function canvasVisualTargetElement(
     return runtimeVisualTargetElement(element) ?? element;
   }
   const dedicatedSurface = element.closest("svg, math") as HTMLElement | null;
-  if (dedicatedSurface?.hasAttribute(SOURCE_NODE_ATTRIBUTE)) return dedicatedSurface;
+  if (dedicatedSurface?.hasAttribute(PAGEROOT_ELEMENT_ID_ATTRIBUTE)) return dedicatedSurface;
   return nativeEditHostForElement(element, sourceIndex) ?? element;
 }
 
@@ -445,11 +438,6 @@ function runtimeCommentAnchorForTarget(
 } | null {
   if (!isProvenRuntimeSourceElement) return null;
   let current: HTMLElement | null = targetElement;
-  let pageFallback: {
-    element: HTMLElement;
-    selection: HtmlCanvasSelection;
-    ref: SourceTargetRef;
-  } | null = null;
   while (current) {
     if (isProvenRuntimeSourceElement(current)) {
       const rawSelection = selectionForElement(
@@ -475,13 +463,10 @@ function runtimeCommentAnchorForTarget(
       if (isValidPagerootElementId(selection.elementId)) {
         return { element: current, selection, ref };
       }
-      if (isPageRoot && selection.resolution === "exact") {
-        pageFallback = { element: current, selection, ref };
-      }
     }
     current = current.parentElement;
   }
-  return pageFallback;
+  return null;
 }
 
 export function resolveCanvasPointerHit(input: CanvasPointerHitInput): CanvasPointerHit {

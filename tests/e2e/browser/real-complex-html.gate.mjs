@@ -14,6 +14,7 @@ import {
   currentEditorFrame,
   documentToken,
   exportCurrentHtml,
+  identifiedHtmlBuffer,
   loadFixture,
   replaceEditableIslandTextBytes,
   sha256,
@@ -55,13 +56,15 @@ function editableSourceElementIds(source) {
   return new Set(index.elements.flatMap((element) => {
     if (!element.textContent?.trim()) return [];
     const targetRef = createTargetRef(index, element, { level: "subregion" });
-    return isEditableIslandTarget(index, targetRef).editable ? [element.nodeId] : [];
+    return isEditableIslandTarget(index, targetRef).editable
+      ? [element.pagerootId || element.nodeId]
+      : [];
   }));
 }
 
 async function discoverVisibleEditableHosts(frame, source) {
   const eligibleIds = [...editableSourceElementIds(source)];
-  return frame.locator("[data-html-ai-source-node-id]").evaluateAll(
+  return frame.locator("[data-pageroot-id]").evaluateAll(
     (elements, allowedSourceIds) => {
       const allowed = new Set(allowedSourceIds);
       const transparent = new Set([
@@ -69,9 +72,9 @@ async function discoverVisibleEditableHosts(frame, source) {
         "em", "i", "ins", "kbd", "label", "mark", "q", "s", "samp", "small",
         "span", "strong", "sub", "sup", "time", "u", "var",
       ]);
-      const sourceIdOf = (element) => element.getAttribute("data-html-ai-source-node-id");
+      const sourceIdOf = (element) => element.getAttribute("data-pageroot-id");
       const sourceParent = (element) => element.parentElement?.closest(
-        "[data-html-ai-source-node-id]",
+        "[data-pageroot-id]",
       ) ?? null;
       const stableDomSelector = (element) => {
         const parts = [];
@@ -91,7 +94,7 @@ async function discoverVisibleEditableHosts(frame, source) {
       for (let node = walker.nextNode(); node; node = walker.nextNode()) {
         const match = /\S/u.exec(node.data);
         if (!match || !node.parentElement) continue;
-        let host = node.parentElement.closest("[data-html-ai-source-node-id]");
+        let host = node.parentElement.closest("[data-pageroot-id]");
         while (host) {
           const style = getComputedStyle(host);
           const standalone = style.display !== "inline" && style.display !== "contents";
@@ -314,7 +317,7 @@ async function waitForEditableHost(frame, editor, expectedTarget, label) {
     const active = frame.locator('[contenteditable="true"]');
     const activeCount = await active.count();
     const activeId = activeCount > 0
-      ? await active.first().getAttribute("data-html-ai-source-node-id")
+      ? await active.first().getAttribute("data-pageroot-id")
       : null;
     throw new Error(
       `${label} did not activate. `
@@ -338,6 +341,7 @@ async function loadRealHtml(page, sourcePath, source, { navigate = true } = {}) 
   const name = path.basename(sourcePath);
   const { editor, iframe, frame } = await loadFixture(page, name, {
     buffer: source,
+    identifiedWorkingCopy: false,
     requireComplete: false,
     requireNativeCase: false,
   });
@@ -404,7 +408,7 @@ function uniqueLiteralForCandidate(source, text) {
 }
 
 async function discoverEditableCandidate(frame, source) {
-  const candidates = await frame.locator("[data-html-ai-source-node-id]").evaluateAll((elements) => {
+  const candidates = await frame.locator("[data-pageroot-id]").evaluateAll((elements) => {
     const preferredTags = new Set(["p", "h1", "h2", "h3", "h4", "h5", "h6", "li", "td", "th"]);
     const tagPriority = new Map([
       ["p", 0],
@@ -432,7 +436,7 @@ async function discoverEditableCandidate(frame, source) {
       const style = getComputedStyle(element);
       return {
         index,
-        sourceId: element.getAttribute("data-html-ai-source-node-id"),
+        sourceId: element.getAttribute("data-pageroot-id"),
         tagName: element.localName,
         text: element.textContent || "",
         childElementCount: element.childElementCount,
@@ -486,7 +490,7 @@ async function discoverEditableCandidate(frame, source) {
 }
 
 async function discoverCommentCandidate(frame) {
-  const candidates = await frame.locator("[data-html-ai-source-node-id]").evaluateAll((elements) => {
+  const candidates = await frame.locator("[data-pageroot-id]").evaluateAll((elements) => {
     const dedicatedEditorRoots = new Set([
       "input", "textarea", "select", "option", "script", "style", "template", "title",
       "canvas", "iframe", "svg", "math",
@@ -512,7 +516,7 @@ async function discoverCommentCandidate(frame) {
       );
       return {
         index,
-        sourceId: element.getAttribute("data-html-ai-source-node-id"),
+        sourceId: element.getAttribute("data-pageroot-id"),
         tagName,
         text: (element.textContent || "").trim().slice(0, 80),
         rendered: rect.width > 2 && rect.height > 2
@@ -556,7 +560,7 @@ async function visualGeometrySnapshot(handle) {
       width: Math.round(rect.width * 10) / 10,
       height: Math.round(rect.height * 10) / 10,
     });
-    const visibleSourceRects = Array.from(document.querySelectorAll("[data-html-ai-source-node-id]"))
+    const visibleSourceRects = Array.from(document.querySelectorAll("[data-pageroot-id]"))
       .filter((element) => {
         const rect = element.getBoundingClientRect();
         const style = getComputedStyle(element);
@@ -566,7 +570,7 @@ async function visualGeometrySnapshot(handle) {
           && style.display !== "none" && style.visibility !== "hidden";
       })
       .map((element) => ({
-        sourceId: element.getAttribute("data-html-ai-source-node-id"),
+        sourceId: element.getAttribute("data-pageroot-id"),
         rect: roundedRect(element.getBoundingClientRect()),
       }));
     const targetRect = target.getBoundingClientRect();
@@ -693,11 +697,12 @@ test("a real complex HTML file keeps layout and editable-island source authority
   const beforeStat = statSync(sourcePath);
   const original = readFileSync(sourcePath);
   const originalSha = sha256(original);
-  const { editor, iframe, frame } = await loadRealHtml(page, sourcePath, original);
+  const identified = identifiedHtmlBuffer(original);
+  const { editor, iframe, frame } = await loadRealHtml(page, sourcePath, identified);
   const beforeDocument = await documentToken(frame);
 
-  const candidate = await discoverEditableCandidate(frame, original);
-  const sourceNodes = frame.locator("[data-html-ai-source-node-id]");
+  const candidate = await discoverEditableCandidate(frame, identified);
+  const sourceNodes = frame.locator("[data-pageroot-id]");
   const target = await sourceNodes.nth(candidate.index).elementHandle();
   if (!target) throw new Error(`Editable candidate detached before activation: ${JSON.stringify(candidate)}`);
   await target.scrollIntoViewIfNeeded();
@@ -751,11 +756,11 @@ test("a real complex HTML file keeps layout and editable-island source authority
   expect(caret.rectHeight).toBeGreaterThan(0);
 
   const replacement = "PageRoot真实原位门禁";
-  if (original.includes(Buffer.from(replacement))) {
+  if (identified.includes(Buffer.from(replacement))) {
     throw new Error(`Replacement oracle already exists in source: ${replacement}`);
   }
   const expected = replaceEditableIslandTextBytes(
-    original,
+    identified,
     candidate.sourceId,
     candidate.token,
     replacement,
@@ -792,7 +797,7 @@ test("a real complex HTML file keeps layout and editable-island source authority
   const commentCandidate = await discoverCommentCandidate(currentFrame);
   const commentTarget = currentFrame
     .locator(
-      `[data-html-ai-source-node-id="${escapeAttributeValue(commentCandidate.sourceId)}"]`,
+      `[data-pageroot-id="${escapeAttributeValue(commentCandidate.sourceId)}"]`,
     );
   await expect(commentTarget, `Comment candidate must stay uniquely source-backed: ${JSON.stringify(commentCandidate)}`)
     .toHaveCount(1);
@@ -831,8 +836,9 @@ test(`the real complex page edits every visible V2 host at start, middle and end
   const original = readFileSync(sourcePath);
   const beforeStat = statSync(sourcePath);
   const originalSha = sha256(original);
-  let loaded = await loadRealHtml(page, sourcePath, original);
-  const hosts = await discoverVisibleEditableHosts(loaded.frame, original);
+  const identified = identifiedHtmlBuffer(original);
+  let loaded = await loadRealHtml(page, sourcePath, identified);
+  const hosts = await discoverVisibleEditableHosts(loaded.frame, identified);
   const onlyIndex = process.env.PAGEROOT_CENSUS_ONLY_INDEX === undefined
     ? null
     : Number.parseInt(process.env.PAGEROOT_CENSUS_ONLY_INDEX, 10);
@@ -910,7 +916,7 @@ test(`the real complex page edits every visible V2 host at start, middle and end
       await activate();
       const active = loaded.frame.locator('[contenteditable="true"]');
       await expect(active).toHaveCount(1);
-      const activeId = await active.getAttribute("data-html-ai-source-node-id");
+      const activeId = await active.getAttribute("data-pageroot-id");
       if (!activeId) throw new Error("Activated host lost its source identity.");
       if (testedHostPaths.has(host.domSelector)) {
         throw new Error(`Duplicate editable-host DOM path: ${host.domSelector}`);
@@ -966,7 +972,7 @@ test(`the real complex page edits every visible V2 host at start, middle and end
       console.log(`PageRootV2 census failure: ${JSON.stringify(stats.failures.at(-1))}`);
       await page.keyboard.press("Escape").catch(() => undefined);
       if (process.env.PAGEROOT_CENSUS_STOP_AFTER_FAILURE === "1") break;
-      loaded = await loadRealHtml(page, sourcePath, original);
+      loaded = await loadRealHtml(page, sourcePath, identified);
     }
     stats.hosts.push(hostResult);
   }
@@ -1007,7 +1013,8 @@ test("reported nested-list headings and wbr text preserve real authored structur
   const original = readFileSync(sourcePath);
   const beforeStat = statSync(sourcePath);
   const originalSha = sha256(original);
-  const loaded = await loadRealHtml(page, sourcePath, original);
+  const identified = identifiedHtmlBuffer(original);
+  const loaded = await loadRealHtml(page, sourcePath, identified);
   const { editor } = loaded;
   let { frame } = loaded;
 
@@ -1015,7 +1022,7 @@ test("reported nested-list headings and wbr text preserve real authored structur
   const nested = frame.locator("#panel-outline > ol > li").first();
   const nestedHandle = await nested.elementHandle();
   if (!nestedHandle) throw new Error("The reported nested-list heading is missing.");
-  const nestedSourceId = await nested.getAttribute("data-html-ai-source-node-id");
+  const nestedSourceId = await nested.getAttribute("data-pageroot-id");
   if (!nestedSourceId) throw new Error("The nested-list heading lost source identity.");
   await nested.dblclick({
     position: await renderedTokenPosition(nestedHandle, "发现阶段"),
@@ -1033,7 +1040,7 @@ test("reported nested-list headings and wbr text preserve real authored structur
   await page.keyboard.press("Escape");
   await expect(nested).not.toHaveAttribute("contenteditable", "true");
   const nestedExpected = replaceEditableIslandTextBytes(
-    original,
+    identified,
     nestedSourceId,
     "发现阶段",
     "发现与验证阶段",
@@ -1046,10 +1053,10 @@ test("reported nested-list headings and wbr text preserve real authored structur
   const wbrCandidate = frame.locator("#panel-terms p").filter({
     hasText: "软换行机会：HypertextMarkupLanguage",
   });
-  const wbrSourceId = await wbrCandidate.getAttribute("data-html-ai-source-node-id");
+  const wbrSourceId = await wbrCandidate.getAttribute("data-pageroot-id");
   if (!wbrSourceId) throw new Error("The wbr paragraph lost source identity.");
   const wbr = frame.locator(
-    `[data-html-ai-source-node-id="${escapeAttributeValue(wbrSourceId)}"]`,
+    `[data-pageroot-id="${escapeAttributeValue(wbrSourceId)}"]`,
   );
   const wbrHandle = await wbr.elementHandle();
   if (!wbrHandle) throw new Error("The reported wbr paragraph is missing.");
@@ -1094,32 +1101,33 @@ test("reported real-page end boundaries round-trip with only island normalizatio
   const sourcePath = validatedRealHtmlPath();
   const original = readFileSync(sourcePath);
   const originalSha = sha256(original);
+  const identified = identifiedHtmlBuffer(original);
   const scenarios = [
     {
       name: "header brand",
-      selector: "header.site-header a.brand-lockup > span:last-child[data-html-ai-source-node-id]",
+      selector: "header.site-header a.brand-lockup > span:last-child[data-pageroot-id]",
       boundaryToken: "2030",
     },
     {
       name: "hero real-world paragraph",
-      selector: ".hero .hero-lede[data-html-ai-source-node-id]",
+      selector: ".hero .hero-lede[data-pageroot-id]",
       boundaryToken: "保存。",
     },
     {
       name: "start-browsing link",
-      selector: '.hero .button-row > a.button[href="#dashboard"][data-html-ai-source-node-id]',
+      selector: '.hero .button-row > a.button[href="#dashboard"][data-pageroot-id]',
       boundaryToken: "开始浏览",
     },
     {
       name: "module-ordering paragraph",
-      selector: "#dashboard .section-heading > p:not(.kicker)[data-html-ai-source-node-id]",
+      selector: "#dashboard .section-heading > p:not(.kicker)[data-pageroot-id]",
       boundaryToken: "模块排序。",
     },
   ];
   const report = [];
 
   for (const scenario of scenarios) {
-    const { editor, frame } = await loadRealHtml(page, sourcePath, original);
+    const { editor, frame } = await loadRealHtml(page, sourcePath, identified);
     const target = frame.locator(scenario.selector);
     await expect(target, scenario.name).toHaveCount(1);
     const handle = await target.elementHandle();
@@ -1129,7 +1137,7 @@ test("reported real-page end boundaries round-trip with only island normalizatio
       position: await renderedTokenPosition(handle, scenario.boundaryToken),
     });
     await waitForEditableHost(frame, editor, target, scenario.name);
-    const sourceId = await target.getAttribute("data-html-ai-source-node-id");
+    const sourceId = await target.getAttribute("data-pageroot-id");
     if (!sourceId) throw new Error(`${scenario.name} lost its source identity.`);
     const beforeText = await target.textContent();
     const boundaryStart = beforeText.lastIndexOf(scenario.boundaryToken);
@@ -1152,7 +1160,7 @@ test("reported real-page end boundaries round-trip with only island normalizatio
     await page.keyboard.press("Escape");
 
     const expected = replaceEditableIslandTextBytes(
-      original,
+      identified,
       sourceId,
       scenario.boundaryToken,
       scenario.boundaryToken,

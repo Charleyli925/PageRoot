@@ -3,7 +3,9 @@ import { expect, test } from "@playwright/test";
 import {
   doubleClickRenderedText,
   exportCurrentHtml,
+  identifiedHtmlBuffer,
   loadFixture,
+  replaceEditableIslandTextByCase,
   waitForFramePaint,
 } from "./pageroot-driver.mjs";
 
@@ -51,9 +53,18 @@ const boundaryPoints = [
   "b-text-start",
 ];
 
-async function openFixture(page) {
+const identifiedSource = identifiedHtmlBuffer(source);
+
+async function openFixture(page, name = "source-fidelity.html") {
   await page.goto("/");
-  return loadFixture(page, "source-fidelity.html", { buffer: source });
+  return loadFixture(page, name, {
+    buffer: identifiedSource,
+    identifiedWorkingCopy: false,
+  });
+}
+
+function expectedIdentifiedSource(caseId, beforeText, afterText, baseline = identifiedSource) {
+  return replaceEditableIslandTextByCase(baseline, caseId, beforeText, afterText);
 }
 
 async function attemptDirectEdit(frame, id) {
@@ -101,9 +112,12 @@ async function authoredInnerHtml(target) {
   return target.evaluate((element) => {
     const clone = element.cloneNode(true);
     if (!(clone instanceof HTMLElement)) throw new Error("Expected an HTML element clone.");
-    clone.querySelectorAll("[data-html-ai-source-node-id]").forEach((node) => {
-      node.removeAttribute("data-html-ai-source-node-id");
+    clone.querySelectorAll("*").forEach((node) => {
+      node.removeAttribute("data-pageroot-id");
+      node.removeAttribute("data-pageroot-edit-runtime-source");
     });
+    clone.removeAttribute("data-pageroot-id");
+    clone.removeAttribute("data-pageroot-edit-runtime-source");
     return clone.innerHTML;
   });
 }
@@ -145,7 +159,7 @@ test("every exact collapsed DOM point at A/inline/B boundaries inserts with dete
   };
   for (const point of boundaryPoints) {
     await test.step(point, async () => {
-      const { frame } = await openFixture(page);
+      const { frame } = await openFixture(page, `source-fidelity-${point}.html`);
       const target = await attemptDirectEdit(frame, "exact-boundaries");
       await expect(target).toHaveAttribute("contenteditable", "true");
       // A document bubble listener confirms V2 owns the mutation after
@@ -198,10 +212,7 @@ test("a non-collapsed replacement at the same wrapper endpoints remains native",
   await expect(target).toHaveText("XB");
   expect(await authoredInnerHtml(target)).toBe("<em><strong>X</strong></em>B");
   expect(await editor.getAttribute("data-edit-block-detail")).toBeNull();
-  const expected = Buffer.from(source.toString("utf8").replace(
-    "<strong>A</strong>",
-    "<strong>X</strong>",
-  ), "utf8");
+  const expected = expectedIdentifiedSource("exact-boundaries", "A", "X");
   expect((await exportCurrentHtml(page)).toString("utf8")).toBe(
     expected.toString("utf8"),
   );
@@ -227,10 +238,7 @@ test("a strict text-node interior offset remains a native source-exact edit", as
 
   await expect(target).toHaveText("AXBC");
   expect(await authoredInnerHtml(target)).toBe("<em><strong>AXB</strong></em>C");
-  const expected = Buffer.from(source.toString("utf8").replace(
-    "<strong>AB</strong>",
-    "<strong>AXB</strong>",
-  ), "utf8");
+  const expected = expectedIdentifiedSource("inline-interior", "AB", "AXB");
   expect((await exportCurrentHtml(page)).equals(expected)).toBe(true);
 });
 
@@ -264,9 +272,12 @@ test("visible paragraph start and end preserve authored indentation while accept
   await page.keyboard.insertText("尾");
   await expect(endTarget).toContainText("End尾");
 
-  const expected = Buffer.from(source.toString("utf8")
-    .replace("<em>Start</em>", "<em>首Start</em>")
-    .replace("<strong>End</strong>", "<strong>End尾</strong>"), "utf8");
+  const expected = expectedIdentifiedSource(
+    "visible-end",
+    "End",
+    "End尾",
+    expectedIdentifiedSource("visible-start", "Start", "首Start"),
+  );
   expect((await exportCurrentHtml(page)).toString("utf8")).toBe(
     expected.toString("utf8"),
   );
@@ -313,10 +324,7 @@ test("a visual text end before collapsed whitespace and an inline icon accepts t
   expect(await page.getByTestId("html-canvas-editor").getAttribute(
     "data-edit-block-detail",
   )).toBeNull();
-  const expected = Buffer.from(source.toString("utf8").replace(
-    '开始浏览 <span aria-hidden="true">↓</span>',
-    '开始浏览X <span aria-hidden="true">↓</span>',
-  ), "utf8");
+  const expected = expectedIdentifiedSource("text-before-icon", "开始浏览 ", "开始浏览X ");
   expect((await exportCurrentHtml(page)).equals(expected)).toBe(true);
 });
 
@@ -326,31 +334,41 @@ test("common editable host types accept text before a collapsed inline gap", asy
       id: "heading-before-inline",
       before: "标题 <small>说明</small>",
       after: "标题X <small>说明</small>",
+      tokenBefore: "标题 ",
+      tokenAfter: "标题X ",
     },
     {
       id: "paragraph-before-inline",
       before: "正文 <em>强调</em>",
       after: "正文X <em>强调</em>",
+      tokenBefore: "正文 ",
+      tokenAfter: "正文X ",
     },
     {
       id: "list-before-inline",
       before: "列表 <span>状态</span>",
       after: "列表X <span>状态</span>",
+      tokenBefore: "列表 ",
+      tokenAfter: "列表X ",
     },
     {
       id: "summary-before-inline",
       before: "摘要 <span>详情</span>",
       after: "摘要X <span>详情</span>",
+      tokenBefore: "摘要 ",
+      tokenAfter: "摘要X ",
     },
     {
       id: "cell-before-inline",
       before: "单元格 <span>状态</span>",
       after: "单元格X <span>状态</span>",
+      tokenBefore: "单元格 ",
+      tokenAfter: "单元格X ",
     },
   ];
   for (const fixtureCase of cases) {
     await test.step(fixtureCase.id, async () => {
-      const { frame } = await openFixture(page);
+      const { frame } = await openFixture(page, `source-fidelity-${fixtureCase.id}.html`);
       const target = await attemptDirectEdit(frame, fixtureCase.id);
       await expect(target).toHaveAttribute(
         "contenteditable",
@@ -375,10 +393,11 @@ test("common editable host types accept text before a collapsed inline gap", asy
       expect(await page.getByTestId("html-canvas-editor").getAttribute(
         "data-edit-block-detail",
       )).toBeNull();
-      const expected = Buffer.from(source.toString("utf8").replace(
-        fixtureCase.before,
-        fixtureCase.after,
-      ), "utf8");
+      const expected = expectedIdentifiedSource(
+        fixtureCase.id,
+        fixtureCase.tokenBefore,
+        fixtureCase.tokenAfter,
+      );
       expect((await exportCurrentHtml(page)).equals(expected)).toBe(true);
     });
   }
@@ -446,10 +465,7 @@ test("an IME delivery at a plain visual paragraph end stays before authored inde
   expect(await page.getByTestId("html-canvas-editor").getAttribute(
     "data-edit-block-detail",
   )).toBeNull();
-  const expected = Buffer.from(source.toString("utf8").replace(
-    "Paragraph end",
-    "Paragraph end你",
-  ), "utf8");
+  const expected = expectedIdentifiedSource("plain-visible-end", "Paragraph end", "Paragraph end你");
   expect((await exportCurrentHtml(page)).equals(expected)).toBe(true);
 });
 
@@ -477,10 +493,7 @@ test("an empty transparent wrapper remains intact while its left boundary accept
   expect(await authoredInnerHtml(target)).toBe(
     "A可编辑<em><strong></strong></em>B",
   );
-  const expected = Buffer.from(source.toString("utf8").replace(
-    "A<em><strong></strong></em>B",
-    "A可编辑<em><strong></strong></em>B",
-  ), "utf8");
+  const expected = expectedIdentifiedSource("empty-wrapper", "A", "A可编辑");
   expect((await exportCurrentHtml(page)).equals(expected)).toBe(true);
 });
 
@@ -555,9 +568,6 @@ test("an IME boundary epoch canonicalizes a wrong-side delivery into the left st
   await expect(page.locator(".round-record-counts")).toHaveText(
     "0 条评论 · 1 项直接编辑记录",
   );
-  const expected = Buffer.from(source.toString("utf8").replace(
-    "<strong>A</strong>",
-    "<strong>A你</strong>",
-  ), "utf8");
+  const expected = expectedIdentifiedSource("exact-boundaries", "A", "A你");
   expect((await exportCurrentHtml(page)).equals(expected)).toBe(true);
 });

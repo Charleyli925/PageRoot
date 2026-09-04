@@ -3,6 +3,10 @@ import type { CommentItem } from "./types";
 
 export function canLocateTarget(target: HtmlCanvasSelection): boolean;
 
+export function globalPageCommentTargetFromHtml(
+  html: string,
+): HtmlCanvasSelection | null;
+
 export function commentHasContent(
   comment: Pick<CommentItem, "text" | "attachments">,
 ): boolean;

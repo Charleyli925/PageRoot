@@ -1,4 +1,4 @@
-import { SOURCE_NODE_ATTRIBUTE } from "../lib/source-patch-core.js";
+import { SOURCE_ELEMENT_ATTRIBUTE } from "./html-canvas-source-element";
 import { inferSelectionLevel, selectionForElement } from "./html-canvas-selection";
 import {
   nativeEditHostForElement,
@@ -22,7 +22,7 @@ export function activeTextRangeFromDocument(
   const commonElement = commonNode.nodeType === 1
     ? commonNode as HTMLElement
     : commonNode.parentElement;
-  const hitElement = commonElement?.closest<HTMLElement>(`[${SOURCE_NODE_ATTRIBUTE}]`) ?? null;
+  const hitElement = commonElement?.closest<HTMLElement>(`[${SOURCE_ELEMENT_ATTRIBUTE}]`) ?? null;
   // A generated descendant maps to its nearest authored host for comments,
   // but its text is never a source-backed range or native editable island.
   if (commonElement && hitElement !== commonElement) return null;
@@ -291,7 +291,7 @@ export function findDedicatedSourceSurfaceAtPoint(
     : [];
   const seen = new Set<HTMLElement>();
   const consider = (element: HTMLElement | null) => {
-    if (!element || seen.has(element) || !element.hasAttribute(SOURCE_NODE_ATTRIBUTE)) {
+    if (!element || seen.has(element) || !element.hasAttribute(SOURCE_ELEMENT_ATTRIBUTE)) {
       return null;
     }
     seen.add(element);
@@ -342,7 +342,7 @@ export function findCanvasHitSourceElement(target: EventTarget | null): HTMLElem
   const selected = elementFromEventTarget(target);
   if (!selected) return null;
   const element = compoundValueSelectionRoot(selected);
-  return element.closest<HTMLElement>(`[${SOURCE_NODE_ATTRIBUTE}]`) ?? element;
+  return element.closest<HTMLElement>(`[${SOURCE_ELEMENT_ATTRIBUTE}]`) ?? element;
 }
 
 export function findCanvasSelectionElement(
@@ -358,7 +358,7 @@ export function findCanvasSelectionElement(
   let candidate: HTMLElement | null = element;
   while (candidate && candidate !== candidate.ownerDocument.body) {
     if (
-      candidate.hasAttribute(SOURCE_NODE_ATTRIBUTE)
+      candidate.hasAttribute(SOURCE_ELEMENT_ATTRIBUTE)
       && inferSelectionLevel(candidate) === "module"
     ) return candidate;
     candidate = candidate.parentElement;
@@ -373,7 +373,7 @@ export function eventTargetsRuntimeGeneratedNode(
   if (!isProvenSourceElement) return false;
   const selected = elementFromEventTarget(target);
   if (!selected) return false;
-  const sourceHost = selected.closest<HTMLElement>(`[${SOURCE_NODE_ATTRIBUTE}]`);
+  const sourceHost = selected.closest<HTMLElement>(`[${SOURCE_ELEMENT_ATTRIBUTE}]`);
   if (!sourceHost || sourceHost !== selected) return true;
   return !isProvenSourceElement(sourceHost);
 }

@@ -115,3 +115,19 @@ test("raw unquoted attributes stop before a source self-closing delimiter", () =
     ],
   );
 });
+
+test("a leading UTF-8 BOM still locates explicit html, head and body start tags", () => {
+  const payload = "<!doctype html>\r\n<html lang='zh'><head></head><body><p>字</p></body></html>";
+  const source = `\uFEFF${payload}`;
+  const parsed = parseHtmlSource(source);
+  for (const tagName of ["html", "head", "body"]) {
+    const token = parsed.elements.find((element) => element.name === tagName);
+    assert.ok(token?.start >= 0, tagName);
+    assert.equal(source[token.start], "<");
+    assert.equal(
+      source.slice(token.start, token.start + tagName.length + 1),
+      `<${tagName}`,
+    );
+    assert.equal(source.slice(token.start, token.end).endsWith(">"), true);
+  }
+});

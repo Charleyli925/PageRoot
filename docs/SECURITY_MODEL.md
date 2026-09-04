@@ -101,6 +101,9 @@ PageRoot edits local files and renders user-controlled HTML, so its default poli
   escaping authored base URLs are blocked. A first contained relative base is
   resolved inside the same resource closure. The protocol has no `bypassCSP`, directory listing or project-path
   response. Popup, form submission and top-level navigation remain blocked.
+  `PAGEROOT_E2E=1` may hold Main `prepare` behind a process-local latch so tests
+  can prove static Active acknowledgement without a grant; production never
+  installs that latch.
   A fixed bootstrap privately proves the complete source-node set after parsing
   and before author code runs. An authored head script therefore
   cannot register a generated object against a future parser-node identity;
@@ -392,12 +395,10 @@ capability in PR4.
   snapshot.
 - MutationObserver rejects and restores any child/text mutation not owned by
   the controller.
-- SourcePatch may replace only the selected element's exact content range or,
-  for a uniquely mapped direct text node under an unsafe mixed parent, that
-  text node's exact source range. The direct-text operation also carries the
-  exact surviving parent TargetRef so deletion remains invertible. Outside
+- SourcePatch may replace only the selected element's exact content range.
+  Nested non-inline HTML stays frozen inventory inside that range. Outside
   bytes and source Hash preconditions remain exact; only the authorized island
-  or plain-text fragment may be minimally normalized and reparsed.
+  may be minimally normalized and reparsed.
 - Canvas undo/redo never serializes that preview DOM. The Bridge applies only a
   retained exact inverse/forward Patch after matching project/document
   identity, source Hash, history revision and cursor. Source HTML and the
@@ -437,12 +438,13 @@ so they cannot navigate the frame or suppress the trusted review bootstrap.
 Review facts come only from the two frozen HTML documents. The review renderer has no screenshot owner, runtime-capture IPC, PNG envelope, pixel parser or runtime binding. It reports precise text evidence and outermost element presence; movement, attributes, CSS, layout, wrapping and runtime drawing produce no Review fact.
 
 Comment location remains separately private. Each source-resolved local target
-may use an opaque initial-bootstrap binding: an element path plus a narrow
-static fingerprint, never a source-node identity in authored HTML. The managed
+may use an opaque initial-bootstrap binding: the element's `data-pageroot-id`,
+an element path plus a narrow static fingerprint. Review never writes a parseKey
+or second identity attribute into authored or prepared HTML. The managed
 preview serves that binding only to the first parser-blocking bootstrap request,
 then falls back to an unbound response. The trusted parent sends the final
 key-to-target mapping only to the before bootstrap over a challenged private
-`MessageChannel`. Comment body, key, source-node and locator-map data are absent
+`MessageChannel`. Comment body, key, Stable ID and locator-map data are absent
 from document bytes and later bootstrap reads. A unique source `id`, `data-*`,
 `name`, or `aria-label` is only a safe fallback; missing, ambiguous, replaced or
 disconnected targets omit the comment marker rather than rebinding by guess.
@@ -453,11 +455,11 @@ still invokes the existing fail-closed ready-version activation path through
 Current Edit comments use a separate ADR 0061 identity boundary. On a complete
 managed Working Copy, a TargetRef resolves officially only through SourceIndex's
 valid unique `data-pageroot-id` map; missing, invalid or deleted identity
-becomes orphaned. The old selector, fingerprint, source-offset and text-affix
-resolver still runs in shadow and records fallback-only success; it cannot
-select a replacement. Whole-page comments keep the deterministic body
-semantic target. ID-less records against unmanaged or identity-absent HTML
-retain the bounded legacy resolver. Selected-text locators contain source-backed decoded text offsets and
+becomes orphaned. Selector, fingerprint, source-offset and text-affix
+heuristics are not an official result and are not retained as a shadow path.
+Incomplete identity HTML cannot rebound across a hash change and cannot enable
+direct Canvas edit. Whole-page comments use the body's Stable ID.
+Selected-text locators contain source-backed decoded text offsets and
 never authorize persistence from preview DOM.
 
 Edit-mode reveal actions use the same trust boundary. They accept only strict

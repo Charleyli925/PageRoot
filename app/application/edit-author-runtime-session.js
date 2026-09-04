@@ -61,6 +61,27 @@ function sameKey(left, right) {
     && left.canvasGeneration === right.canvasGeneration;
 }
 
+function sourceDirectory(sourcePath) {
+  const normalized = String(sourcePath || "");
+  const slash = normalized.lastIndexOf("/");
+  const backslash = normalized.lastIndexOf("\\");
+  const index = Math.max(slash, backslash);
+  return index <= 0 ? normalized : normalized.slice(0, index);
+}
+
+const LIVE_RUNTIME_PHASES = new Set(["ready", "running", "settled"]);
+
+function isLiveSameDirectoryPathRelocation(current, next, phase) {
+  return Boolean(current)
+    && Boolean(next)
+    && LIVE_RUNTIME_PHASES.has(phase)
+    && current.canvasGeneration === next.canvasGeneration
+    && current.sourceSha256 === next.sourceSha256
+    && current.html === next.html
+    && current.sourcePath !== next.sourcePath
+    && sourceDirectory(current.sourcePath) === sourceDirectory(next.sourcePath);
+}
+
 function sameExactIdentity(left, right) {
   return sameKey(left, right)
     && left.sourceSha256 === right.sourceSha256
@@ -149,6 +170,8 @@ function normalizedGrant(value, request) {
  * The sole application owner for Edit author-runtime state. Its key is exactly
  * (sourcePath, canvasGeneration): ordinary source revisions, autosaves, and
  * comments intentionally cannot start another preparation in the same canvas.
+ * A same-directory Finder rename that keeps HTML, SHA and canvas generation
+ * only relocates that live key; it does not consume another prepare attempt.
  */
 export class EditAuthorRuntimeSession {
   #port;
@@ -276,6 +299,18 @@ export class EditAuthorRuntimeSession {
     }
     this.#latestSourceIdentity = identity;
     this.#latestSourceAuthoritative = Boolean(sourceIsAuthoritative);
+    if (isLiveSameDirectoryPathRelocation(this.#identity, identity, this.#snapshot.phase)) {
+      this.#identity = identity;
+      this.#emit({
+        phase: this.#snapshot.phase,
+        sourceSha256: identity.sourceSha256,
+        sourcePath: identity.sourcePath,
+        canvasGeneration: identity.canvasGeneration,
+        grant: this.#snapshot.grant,
+        lastOutcome: this.#snapshot.lastOutcome,
+      });
+      return this.#snapshot;
+    }
     const authorityJustBecameAvailable = (
       sameKey(this.#identity, identity)
       && sourceIsAuthoritative

@@ -353,66 +353,6 @@ export function buildSourceTextMap(index, target, options = {}) {
   };
 }
 
-export function buildSourceTextFragmentMap(index, target) {
-  if (!isSourceIndex(index)) {
-    fail("INVALID_SOURCE_INDEX", "SourceTextMap requires an existing SourceIndex.");
-  }
-  const resolved = resolveInputNode(index, target);
-  if (resolved.resolution === "ambiguous") {
-    fail(
-      "SOURCE_TARGET_AMBIGUOUS",
-      "The source text fragment does not resolve uniquely.",
-    );
-  }
-  if (!resolved.node || resolved.resolution === "orphaned") {
-    fail(
-      "SOURCE_TARGET_ORPHANED",
-      "The source text fragment is not present in the current source.",
-      resolved.error ? { cause: String(resolved.error.message ?? resolved.error) } : {},
-    );
-  }
-  if (resolved.node.type !== "text") {
-    fail(
-      "SOURCE_TEXT_FRAGMENT_NOT_TEXT",
-      "A source text fragment requires an exact source text node.",
-      { nodeId: resolved.node.nodeId, type: resolved.node.type },
-    );
-  }
-  const host = hostForNode(index, resolved.node);
-  if (!host || host.namespaceURI !== HTML_NAMESPACE || !host.boundarySafe) {
-    fail(
-      "UNSAFE_SOURCE_BOUNDARY",
-      "The source text fragment does not have a safe HTML parent boundary.",
-      { nodeId: resolved.node.nodeId, parentId: resolved.node.parentId },
-    );
-  }
-
-  const run = {
-    kind: "text",
-    textNodeId: resolved.node.nodeId,
-    parentNodeId: resolved.node.parentId,
-    text: resolved.node.value,
-    sourceStart: resolved.node.range.startOffset,
-    sourceEnd: resolved.node.range.endOffset,
-    textStart: 0,
-    textEnd: resolved.node.value.length,
-  };
-  return {
-    sourceSha256: index.sourceSha256,
-    rootNodeId: host.nodeId,
-    rootTagName: host.tagName,
-    resolution: resolved.resolution,
-    textLength: resolved.node.value.length,
-    text: resolved.node.value,
-    startAnchor: beforeAnchorFor(resolved.node),
-    endAnchor: afterAnchorFor(resolved.node),
-    runs: resolved.node.value.length > 0 ? [run] : [],
-    inlineRanges: [],
-    textRunCount: resolved.node.value.length > 0 ? 1 : 0,
-    boundaryCount: 0,
-  };
-}
-
 export function textOffsetToSourceAnchor(map, offset, affinity = "right") {
   assertMap(map);
   assertTextOffset(map, offset);

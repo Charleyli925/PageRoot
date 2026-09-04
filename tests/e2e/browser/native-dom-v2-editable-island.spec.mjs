@@ -2,7 +2,9 @@ import { expect, test } from "@playwright/test";
 
 import {
   activateNativeEdit,
+  editableIslandInnerHtml,
   exportCurrentHtml,
+  identifiedHtmlBuffer,
   loadFixture,
   replaceEditableIslandBytes,
   selectionSnapshot,
@@ -38,6 +40,8 @@ const source = Buffer.from(`<!doctype html>
 </html>
 `, "utf8");
 
+const identifiedSource = identifiedHtmlBuffer(source);
+
 const editableCases = [
   { id: "plain", text: "普通段落末尾", innerHtml: "普通段落末尾" },
   {
@@ -70,16 +74,25 @@ const editableCases = [
 
 async function openFixture(page) {
   await page.goto("/");
-  return loadFixture(page, "pageroot-v2-editable-island.html", { buffer: source });
+  return loadFixture(page, "pageroot-v2-editable-island.html", {
+    buffer: identifiedSource,
+    identifiedWorkingCopy: false,
+  });
 }
 
 async function authoredInnerHtml(target) {
   return target.evaluate((element) => {
     const clone = element.cloneNode(true);
     if (!(clone instanceof HTMLElement)) throw new Error("Expected HTMLElement.");
-    clone.querySelectorAll("[data-html-ai-source-node-id]").forEach((node) => {
-      node.removeAttribute("data-html-ai-source-node-id");
-    });
+    const attributes = [
+      "contenteditable",
+      "data-pageroot-id",
+      "data-pageroot-edit-runtime-source",
+      "data-html-ai-source-node-id",
+    ];
+    for (const node of [clone, ...clone.querySelectorAll("*")]) {
+      for (const attribute of attributes) node.removeAttribute(attribute);
+    }
     return clone.innerHTML;
   });
 }
@@ -154,12 +167,13 @@ test("start, middle and end all support insert, delete and line break", async ({
 
       expect(await editor.getAttribute("data-edit-block-detail")).toBeNull();
       const lastCharacter = fixtureCase.text.at(-1);
-      const lastCharacterIndex = fixtureCase.innerHtml.lastIndexOf(lastCharacter);
-      const expectedInnerHtml = fixtureCase.innerHtml.slice(0, lastCharacterIndex)
-        + fixtureCase.innerHtml.slice(lastCharacterIndex + lastCharacter.length);
+      const beforeInnerHtml = editableIslandInnerHtml(identifiedSource, fixtureCase.id);
+      const lastCharacterIndex = beforeInnerHtml.lastIndexOf(lastCharacter);
+      const expectedInnerHtml = beforeInnerHtml.slice(0, lastCharacterIndex)
+        + beforeInnerHtml.slice(lastCharacterIndex + lastCharacter.length);
       expect((await exportCurrentHtml(page)).toString("utf8")).toBe(
         replaceEditableIslandBytes(
-          source,
+          identifiedSource,
           fixtureCase.id,
           expectedInnerHtml,
         ).toString("utf8"),
@@ -208,7 +222,7 @@ test("pre-activation runtime DOM drift never enters the source-backed island dra
   await page.keyboard.insertText("新增");
 
   const expected = replaceEditableIslandBytes(
-    source,
+    identifiedSource,
     "plain",
     "普通段落末尾新增",
   ).toString("utf8");
@@ -239,7 +253,7 @@ test("unsupported browser rich input never gains island commit authority", async
   });
   expect(await authoredInnerHtml(target)).toBe("普通段落末尾");
   expect((await exportCurrentHtml(page)).toString("utf8")).toBe(
-    source.toString("utf8"),
+    identifiedSource.toString("utf8"),
   );
 });
 
@@ -273,7 +287,7 @@ test("formatting refuses selections that cross immutable atoms or comments", asy
 
       expect(await authoredInnerHtml(target)).toBe(fixtureCase.innerHtml);
       expect((await exportCurrentHtml(page)).toString("utf8")).toBe(
-        source.toString("utf8"),
+        identifiedSource.toString("utf8"),
       );
       await page.keyboard.press("Escape");
     });

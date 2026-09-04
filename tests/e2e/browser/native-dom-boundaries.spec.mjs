@@ -6,6 +6,7 @@ import {
   documentToken,
   exportCurrentHtml,
   fixtureBuffer,
+  identifiedHtmlBuffer,
   installInputRecorder,
   installLongTaskRecorder,
   keyShortcut,
@@ -672,8 +673,11 @@ test("first double-click places a caret; a second double-click selects the word"
 });
 
 test("an out-of-band authored DOM mutation fails closed and never reaches source", async ({ page }) => {
-  const original = fixtureBuffer("complex-layout.html");
-  const { editor, frame } = await loadFixture(page, "complex-layout.html", { buffer: original });
+  const original = identifiedHtmlBuffer(fixtureBuffer("complex-layout.html"));
+  const { editor, frame } = await loadFixture(page, "complex-layout.html", {
+    buffer: original,
+    identifiedWorkingCopy: false,
+  });
   const target = frame.locator(caseSelector("grid-card"));
   const beforeText = await target.textContent();
   await activateNativeEdit(frame, "grid-card");

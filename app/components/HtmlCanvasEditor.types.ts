@@ -254,6 +254,12 @@ export type HtmlCanvasEditorHandle = {
   getSourceHtml: () => string;
   /** Exact source string whose sanitized representation has finished loading in the iframe. */
   getRenderedSourceHtml: () => string | null;
+  /**
+   * Rebuilds the visible Active frame from the current source as static first.
+   * Used when Canvas generation advances without a new React host (reload
+   * recovery). Runtime A/B may follow on the grant path.
+   */
+  rebuildActiveFrame: () => void;
   /** Current scroll coordinate inside the authored iframe viewport. */
   getScrollTop: () => number;
   /** Restores the authored iframe viewport without changing source. */

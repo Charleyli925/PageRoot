@@ -181,6 +181,44 @@ test("macOS /var aliases preserve a started preparation identity", async () => {
   assert.equal(session.snapshot.phase, "ready");
 });
 
+test("a same-directory Finder rename relocates a live runtime without another prepare", async () => {
+  const requests = [];
+  const revoked = [];
+  const session = new EditAuthorRuntimeSession({
+    port: {
+      prepare: async (request) => {
+        requests.push(request);
+        return success(request);
+      },
+      revoke: async (sessionId) => revoked.push(sessionId),
+    },
+  });
+
+  session.refresh(input({ sourcePath: "/Users/demo/project/report-V1.html" }));
+  assert.equal(session.startPreparation(input({
+    sourcePath: "/Users/demo/project/report-V1.html",
+  })), true);
+  await flushAsync();
+  const grant = session.snapshot.grant;
+  assert.ok(grant);
+  beginRuntime(session, grant);
+  settleRuntime(session, grant, "ready");
+  assert.equal(session.snapshot.phase, "settled");
+
+  session.refresh(input({
+    sourcePath: "/Users/demo/project/Finder 新名字-V1.html",
+    sourceIsAuthoritative: false,
+  }));
+  assert.equal(session.snapshot.phase, "settled");
+  assert.equal(
+    session.snapshot.sourcePath,
+    "/Users/demo/project/Finder 新名字-V1.html",
+  );
+  assert.equal(session.snapshot.grant, grant);
+  assert.equal(requests.length, 1);
+  assert.deepEqual(revoked, []);
+});
+
 test("a managed source transition publishes its distinct preparation path", () => {
   const session = new EditAuthorRuntimeSession({
     port: {

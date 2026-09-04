@@ -42,7 +42,15 @@
   `WorkspaceController` 和一个挂载的业务文档；最近三个标签可保留脚本禁用、只读且无序列化能力的
   显示 iframe，较早标签在 48 MiB / 8 项预算内保留精确 HTML 与滚动/页面视图投影，超出预算只保留身份。
   切回缓存标签先显示页面，再由正常 Registry/OpenTarget 打开链路核对并接管；非活动标签绝不保留
-  contenteditable、Selection、IME、编辑观察器或保存权威。
+  contenteditable、Selection、IME、编辑观察器或保存权威。活动文档始终挂载唯一
+  `HtmlCanvasEditor`：脚本刷新只在编辑器内部短暂 A/B Candidate 完成，不得在 Runtime
+  preparing 时整页换成静态 Surface，也不得让同一文档的 Cache 挡住文字输入。
+  采纳新 Version、从磁盘重载或恢复历史时，工作台推入的新 HTML 先写入 Active
+  静态帧并完成画布核对，再在同一编辑器内做 Runtime A/B；不得把整份新源码只丢进
+  隐藏 Candidate 而让 Active 继续显示上一份 HTML。同一已挂载文档保留最小视口锚点
+  （Stable ID、屏幕偏移、外层滚动），不恢复 Caret、Range 或原生编辑会话；切到不同
+  文档或项目时使用该标签保存的滚动或默认顶部。评论栏把共享滚动台对齐到标记时，
+  不得覆盖这份阅读位置，以免随后的同文档权威 HTML 更新跳回顶部。
   从活动开始页继续项目、处理待办或新建项目时，该开始标签原位变成目标文档；只有用户明确点击「+」
   创建的其他开始标签会保留。若目标文档已存在，则移除当前空白标签并聚焦已有标签。
 - 关闭标签不删除项目、对话、Candidate 或后台 AI 任务。关闭活动文档标签先为当前 revision 取得源文件写回或已读回校验的恢复保护，再原子移除当前标签，最后打开后继标签；后继打开失败时进入开始页，不复活已关闭文档。
@@ -151,8 +159,7 @@ AI 审阅、导入确认、冲突、处理锁定和画布尚未 `verified` 时�
 不足时移到轮廓下方，且始终限制在画布横向范围内；快速掠过不显示任何 Hover
 装饰。
 文案只有三句，且必须复用真实进入文字编辑的证明
-（`nativeEditHostForElement` / `isEditableIslandTarget` /
-`nativeTextFragmentForElement`），不能按标签名猜测。按钮里可安全改的字
+（`nativeEditHostForElement` / `isEditableIslandTarget`），不能按标签名猜测。按钮里可安全改的字
 优先「双击文字直接编辑」。能映射到源码目标时「单击选择并评论」，否则
 「可添加评论交给 AI」。选中且工具条可见时仍更新光标，但不再叠 Hover
 轮廓或文案。说明贴在当前命中轮廓内侧，不是按钮；点标签所在像素等于点该目标。
@@ -378,15 +385,16 @@ Source 逐节点对账；Script 执行状态迁移；为绝对无刷新建立双
 ```text
 单击选择文字宿主
 → 双击并把光标放到点击位置（第一次双击不选中整词）
-→ 向上选择最高的安全编辑宿主；不安全父容器下的直属裸文字则建立精确文本节点片段
-→ IslandEditingController 建立与源码 contentRange 或 text-node range 对应的受控编辑会话
+→ 向上选择最高的安全编辑宿主；非行内后代保持冻结原子，不另建文字片段宿主
+→ IslandEditingController 建立与源码 contentRange 对应的受控编辑会话
 → 浏览器提供光标 / Selection / IME，Controller 接管所有实际文字变更
 → 用户输入、删除或选择文字
 → 约 700ms 或格式、Cmd+S、目标切换、关闭、发送边界
-→ 生成 replace-editable-island 或 update-direct-text-node EditCommand
+→ 生成 replace-editable-island EditCommand
 → SourceIndex + TargetResolver 锁定源码范围
-→ 岛内或纯文本片段做最小安全规范化，SourcePatchEngine 生成精确 range patch 与 inverse patch
+→ 岛内做最小安全规范化，SourcePatchEngine 生成精确 range patch 与 inverse patch
 → 原生换行以裸 `<br>` 进入受管计划，由系统分配 fresh stable ID 后再形成 `setText`；调用方预置新 ID 失败关闭
+→ 删除硬换行时一并退役该 `<br>` 的身份；非 `<br>` 的持久身份仍不得在岛内文字编辑中被改写或删除
 → 保存计划接受后，仅在 expected-mutation 边界把这些 ID 补到对应实时 `<br>`，保留 Selection 并继续当前编辑会话；ID 不新增 Runtime authority
 → 校验岛外字节完全不变，并重解析受影响区域
 → 语义内核从 before/after 完整 HTML 导出 identityDelta（新增/删除/移动 ID、保留根与放置证据）
@@ -410,11 +418,10 @@ Source 逐节点对账；Script 执行状态迁移；为绝对无刷新建立双
 - 旧 revision 的写入可以完成，但不得把新内存内容回滚。
 - 队列继续处理最新 revision，直至 `lastPersistedRevision=editRevision`。
 - 持久化完成后保持正常编辑状态；用户无需阅读内部写入阶段。
-- `contenteditable`、IME 快照、运行时 nodeId 和逻辑选区只存在于当前会话；不能保存为第二份 HTML 或长期 JSON。
+- `contenteditable`、IME 快照和逻辑选区只存在于当前会话；不能保存为第二份 HTML 或长期 JSON。元素身份只保存 `data-pageroot-id`。
 - flex/grid 文字只有在源码、运行时布局和 CSS selector 均安全时，才随首个真实 Patch 创建唯一 canonical 直接文字项；双击本身不修改源码。
 - 直接源码编辑的 `operationTarget` 任何目标为 `ambiguous`、`orphaned`，或 patch 越出已解析源码范围时都必须 fail-closed，保留当前源码并要求用户重新定位；运行时目标的 `ambiguous` 只表示 comment-only 视觉操作，不阻断其已验证 `commentAnchor` 的评论。
-- 行内透明节点向上寻找宿主时，只有新候选仍是安全可编辑岛才继续提升；遇到复杂父容器时回退到最近的安全行内节点。
-- 复杂父容器下只有能唯一对应到一个直属源码 text node 的裸文字才能编辑。优先走现有纯文本 fragment 路径，不因复杂父容器本身改去评论。运行时临时宿主不再因布局或文字样式指纹拒绝进入；提交只替换该 text node 的源码字节，临时宿主不写入 HTML。
+- 行内透明节点向上寻找宿主时，只有新候选仍是安全可编辑岛才继续提升。复杂父容器本身也可以是岛：非行内后代保持冻结原子，直属文字和行内标签在同一宿主里编辑。
 
 PageRoot 0.9.0 只使用一种文字编辑路线：
 
@@ -544,7 +551,7 @@ HTML，包括 Stable ID；不会改变项目、Version、评论、Registry、Rec
 6. 附件先复制到项目记录，正文、附件元数据和 TargetRef 再作为同一评论立即持久化；外部原文件路径不进入项目记录。
 7. 画布显示评论标记。
 
-源码 SVG 使用实际点击的源码节点作为评论目标：`path`、`line`、`text`、`circle`、`rect`、`g` 等节点不得自动提升为外层 `svg`。运行时生成的表格、单元格、图表、SVG、Canvas 或其他区域保留实际命中的视觉目标；它们只能评论，不能取得源码编辑、样式、删除、移动或复制权限。运行时目标沿父级向上寻找最近且仍由当前私有 authority 证明的源码宿主，评论立即使用该宿主的精确 `commentAnchor`；找不到比 `body` 更具体的安全宿主时使用页面级源码锚点。标题读取用户可理解的名称，不向用户显示运行时、宿主或解析状态等实现概念。
+源码 SVG 使用实际点击的源码节点作为评论目标：`path`、`line`、`text`、`circle`、`rect`、`g` 等节点不得自动提升为外层 `svg`。运行时生成的表格、单元格、图表、SVG、Canvas 或其他区域保留实际命中的视觉目标；它们只能评论，不能取得源码编辑、样式、删除、移动或复制权限。运行时目标沿父级向上寻找最近且仍由当前私有 authority 证明、带有效 Stable ID 的源码宿主，评论立即使用该宿主的精确 `commentAnchor`；找不到这样的宿主时不能保存评论位置。标题读取用户可理解的名称，不向用户显示运行时、宿主或解析状态等实现概念。
 
 运行时评论始终使用双锚点：`operationTarget` 保留实际命中的运行时对象并保持 `runtimeGenerated / ambiguous`，`visualTarget` 负责紫色框、标题和当前运行周期的标记，`commentAnchor` 才是经过私有 authority 验证、带有效 Stable ID 的精确源码宿主。`body` 只要同时带有运行时 `visualHint` 就是表格或图表评论的技术性安全锚点，不是显式全局评论；只有用户点击“添加全局评论”得到的 `body + module` 且没有 `visualHint` 的目标，才固定到全局评论的标记、排序、标题、输入提示和整页 AI 范围。运行时命中优先使用跨 realm 安全的点命中和事件路径，每个运行代建立有界空间索引并按动画帧合并 hover；评论恢复先按宿主内相对路径和类型定位，再在有上限的候选中做最佳努力匹配，不能在 pointermove 上扫描整页。
 
@@ -554,7 +561,7 @@ HTML，包括 Stable ID；不会改变项目、Version、评论、Registry、Rec
 
 评论及其附件持久化不依赖 HTML 写入，也不改变 Version。单条评论最多 10 个附件，单文件最大 25 MB；附件上传未完成时不能发送评论或提交本轮。选择批次中为空或超过 25 MB 的文件不占用剩余名额，同批有效文件仍正常加入；超限、空文件和数量溢出都在 Canvas 顶部持续提示。仍有容量时可“重新选择”，容量已满时可“查看附件”并先移除一个。
 
-每条新局部评论必须把持久结构拆成两个部分：`sourceAnchor` 是唯一拥有保存、跨版本重绑和源码定位权限的精确源码 `TargetRef`，并持久化 `elementId`、最后一次确定性刷新的当前源码 Hash、兼容指纹与当前解析状态；`visualHint` 只解释用户实际点到的运行时对象，包含受界限的 `kind`、用户可见标签、清洗后的可见文字摘要、宿主内相对路径和相对源码宿主归一化坐标。`visualHint` 不是 selector、身份或权限，不能保存 Runtime DOM、`outerHTML`、事件对象、脚本状态、截图或 Canvas 输出。选中文字时再保存源码宿主内 UTF-16 `textLocator`（quote、起止 offset、affinity）。`elementId` 是 `sourceAnchor` 的唯一持久元素身份，`tagName` 只是显示/兼容证据。稳定 ID 存在时只按该 ID 解析：文字修改、兄弟插入、移动或 tag 变化后仍为 `exact`；ID 删除或非法才为 `orphaned`，不得回退 selector/fingerprint 猜测替代节点。完整身份的 Managed Working Copy 上，没有 `elementId` 的局部目标正式结果也是 `orphaned`；旧模糊 Resolver 只做 Shadow 并按编辑/评论/Review 统计 fallback-only success。无身份或身份不完整的 HTML 仍按旧 resolver 读取。整页评论继续使用 `selector=body + level=module` 的确定语义目标，以支持没有显式 body 源码节点的 HTML 片段。
+每条新局部评论必须把持久结构拆成两个部分：`sourceElementId` 是唯一拥有保存、跨版本重绑和源码定位权限的 Stable ID；`visualHint` 只解释用户实际点到的运行时对象，包含受界限的 `kind`、用户可见标签、清洗后的可见文字摘要、宿主内相对路径和相对源码宿主归一化坐标。`visualHint` 不是 selector、身份或权限，不能保存 Runtime DOM、`outerHTML`、事件对象、脚本状态、截图或 Canvas 输出。选中文字时再保存源码宿主内 UTF-16 `textLocator`（quote、起止 offset、affinity）。`elementId` 是持久元素身份，`tagName` 只是显示证据。稳定 ID 存在时只按该 ID 解析：文字修改、兄弟插入、移动或 tag 变化后仍为 `exact`；ID 删除或非法才为 `orphaned`，不得回退 selector/fingerprint 猜测替代节点。没有 `elementId` 的局部目标正式结果也是 `orphaned`。整页评论持久化 body's `elementId`，`selector=body` 只是展示语义，不是定位权威。
 
 显式全局评论使用稳定的 `body` 语义目标；首次登记、自动保存和恢复后仍保持 `exact`，不依赖正文 SourceAnchor。兼容旧草稿或历史记录时，以 `selector=body + level=module` 且没有运行时 `visualHint` 识别整个页面并补齐运行时字段；即使旧记录没有 `tagName` 或曾被标成 `orphaned`，也由系统确定性标准化，不向用户显示“重新定位”。`body + visualHint` 始终保留可见对象的评论标题、marker/右栏位置、草稿 placeholder 和 `targets-plus-required-dependencies` AI 范围；视觉匹配失败时才把位置降级到源码宿主，不能把评论改写成全局评论。
 
@@ -918,7 +925,7 @@ AI 候选通过检查并进入待打开状态后，正常连续性候选显示�
 
 进入审阅时同步冻结本轮已保存评论。评论只投影到“修改前”左页的原 TargetRef 位置，常驻一个 30px 的紫底白字“评”标记；鼠标 hover 时展开简洁的只读评论详情气泡，移出后气泡自动消失而“评”保留。标记继续按原评论 TargetRef 锚定，不固定在画布边缘。标记和气泡不提供编辑、回复、删除或其他点击交互，右页不重复显示。评论正文始终保留在可信 React 宿主层。评论定位不读取或授权任何脚本关系，也不改变文字/元素差异集合。
 
-实现补充：冻结源可解析的非全局 TargetRef 使用内容无关的 `sourceNodeId` 私有绑定。准备 before 文档时，精确目标元素绝不带临时身份；分析器只把 `sourceNodeId`、child-index 路径与窄静态指纹放入会话私有的首个 bootstrap 响应。桌面受管预览只将该响应交给解析器阻塞式的第一次请求，随后改为无绑定回退源码，私有端口才交付评论 key→`sourceNodeId` 映射。class-only 的普通目标即使邻近同标签元素被作者重排，只要路径失效后仍唯一匹配私有指纹，仍会显示在原元素上；私有绑定不可用时才回退到唯一 `id`、`data-*`、`name` 或 `aria-label`，绝不走位置路径。绑定缺失、歧义、替换、脱离文档或私有端口失效时不显示标记。作者加载后不能从 HTML 或后续 bootstrap 抓取获得评论正文、评论 key、`sourceNodeId` 或完整定位映射；评论端口的 challenge 由首个受管 capture listener 校验并停止传播，因此作者 capture listener 既看不到 challenge，也不能伪造先到端口。
+实现补充：冻结源可解析的非全局 TargetRef 使用内容无关的 Stable ID 私有绑定。准备 before 文档时，精确目标元素绝不带 parseKey 或第二套身份属性；分析器只把 `data-pageroot-id`、child-index 路径与窄静态指纹放入会话私有的首个 bootstrap 响应。桌面受管预览只将该响应交给解析器阻塞式的第一次请求，随后改为无绑定回退源码，私有端口才交付评论 key→Stable ID 映射。class-only 的普通目标即使邻近同标签元素被作者重排，只要路径失效后仍唯一匹配私有指纹，仍会显示在原元素上；私有绑定不可用时才回退到唯一 `id`、`data-*`、`name` 或 `aria-label`，绝不走位置路径。绑定缺失、歧义、替换、脱离文档或私有端口失效时不显示标记。作者加载后不能从 HTML 或后续 bootstrap 抓取获得评论正文、评论 key、Stable ID 或完整定位映射；评论端口的 challenge 由首个受管 capture listener 校验并停止传播，因此作者 capture listener 既看不到 challenge，也不能伪造先到端口。
 
 两侧审阅画布在无同源、无表单提交、无导航、无弹窗、无下载、无宿主 IPC 的隔离沙箱中运行原页面交互；运行态变化不会写回 HTML、候选 Version 或当前项目。“返回 AI 修改前”先逐行说明不会采用本次 AI 返回、继续以修改前版本为基线，以及 AI HTML 已自动保留；如需 Finder，入口只打开经验证的可见 AI任务，不暴露隐藏 Candidate 或 Request。确认后结束当前待打开选择，直接回到原 HTML 的可编辑状态，原评论和编辑记录继续保留，候选 Version/working HTML 仍留在历史与原位置。“打开 AI 修改后”确认前已跨过当前画布的 source-authority fence；确认后原编辑画布在固定审阅层下完成激活与候选渲染。候选画布和收起的 AI 对话侧栏至少完成一次渲染后，审阅层才一次性移除，因此不会闪现等待 AI 页面。两条确认中，“继续审阅”是建议保留的紫色操作，“返回修改前版本”为灰色操作；打开候选的最终按钮文案为“确认并打开”。
 

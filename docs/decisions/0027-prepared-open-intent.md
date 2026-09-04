@@ -41,10 +41,12 @@ outside the configured projects root.
    only when a project is already bound (`epoch > 0`). Cold-start last-active
    B/C confirmation is epoch 0: there is no edit Canvas to drain, matching
    `#applyAcceptedProject`. It then commits the prepared intent inside
-   `ProjectOpenQueue`, publishes the managed project synchronously, waits for
-   `DocumentSession.canvasAuthority` on that generation and source Hash, then
+   `ProjectOpenQueue` and publishes the managed project synchronously. Canvas
+   Hash verification on that generation and source Hash decides whether the
+   projection may be edited, reused or statically degraded; it does not roll
+   back the published project or block Working HTML success. The workflow then
    hydrates so the workbench can leave the `hydrating` phase that `#applyProject`
-   starts, then waits for `DocumentSession.canvasAuthority`. First import keeps
+   starts. First import keeps
    the original directory as this project's Preview and Edit resource root
    across continue-current, restart, working-copy switches and optional
    original-HTML trash; HTML bytes are copied, sibling assets are not. The
@@ -56,9 +58,9 @@ outside the configured projects root.
    The Repository never receives out-of-root delete authority.
    Querying `getActiveProject` while a prepared intent already exists for that
    canonical path reuses the same `requestId`; it does not cancel and replace it.
-5. Canvas verification failure after commit rolls back the Desktop active
-   project when it still matches the receipt, restores previous renderer
-   authority, keeps the confirmation for retry, and never trashes. Close
+5. Canvas verification failure after commit does not roll back the Desktop
+   active project or already published Working HTML. The confirmation may stay
+   for retry of presentation, and the original is never trashed. Close
    treats an unanswered confirmation as cancel.
 
 ## Consequences

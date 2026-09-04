@@ -26,7 +26,6 @@ reused. The four collisions found in the first curation pass were assigned
 | 0011 | [Workbench is a composition root over explicit sessions and views](0011-workbench-session-decomposition.md) | Living |
 | 0012 | [Registered project mutations resolve identity before path](0012-id-first-project-context.md) | Living |
 | 0014 | [AI candidate acceptance does not classify authored script content](0014-user-authority-over-ai-script-content.md) | Living |
-| 0015 | [Safe host fallback and exact direct-text-node editing](0015-safe-host-fallback-and-direct-text-nodes.md) | Living |
 | 0019 | [WorkspaceController orchestrates application workflows without owning facts](0019-workspace-controller-orchestration.md) | Living |
 | 0022 | [v4 Registry-authorized project roots and promotion paths](0022-user-owned-project-root-identity.md) | Living |
 | 0024 | [Registry catalog and AI-task projection authority](0024-registry-catalog-and-ai-task-projections.md) | Living |

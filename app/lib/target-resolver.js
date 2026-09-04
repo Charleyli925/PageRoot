@@ -39,7 +39,12 @@ function cloneFingerprint(fingerprint) {
 }
 
 function targetNode(index, nodeOrId) {
-  if (typeof nodeOrId === "string") return index.byNodeId.get(nodeOrId) ?? null;
+  if (typeof nodeOrId === "string") {
+    if (isValidPagerootElementId(nodeOrId)) {
+      return index.byPagerootId.get(nodeOrId) ?? null;
+    }
+    return index.byNodeId.get(nodeOrId) ?? null;
+  }
   return nodeOrId && typeof nodeOrId.nodeId === "string" ? nodeOrId : null;
 }
 
@@ -231,103 +236,6 @@ function ancestorMatches(targetAncestors, candidateAncestors) {
     count += 1;
   }
   return count;
-}
-
-function elementCandidateScore(targetRef, element) {
-  const targetFingerprint = targetRef.fingerprint ?? {};
-  if (
-    targetFingerprint.tagName
-    && element.tagName !== targetFingerprint.tagName.toLowerCase()
-  ) {
-    return null;
-  }
-
-  const stableAttributes = targetFingerprint.stableAttributes ?? {};
-  for (const [name, value] of Object.entries(stableAttributes)) {
-    if (element.stableAttributes[name] !== value) return null;
-  }
-
-  let identityScore = 0;
-  const stableEntries = Object.entries(stableAttributes);
-  if (stableEntries.length > 0) {
-    identityScore += stableEntries.some(([name]) => name === "id") ? 90 : 65;
-    identityScore += Math.min(20, Math.max(0, stableEntries.length - 1) * 5);
-  }
-
-  const targetText = normalizeSourceText(targetRef.textQuote ?? "");
-  const elementText = normalizeSourceText(element.textContent);
-  if (targetText && elementText === targetText) identityScore += 60;
-  const prefix = normalizeSourceText(targetFingerprint.textPrefix ?? "");
-  const suffix = normalizeSourceText(targetFingerprint.textSuffix ?? "");
-  if (prefix && elementText.startsWith(prefix)) identityScore += 24;
-  if (suffix && elementText.endsWith(suffix)) identityScore += 24;
-  if (
-    simpleSelectorMatches(element, targetRef.selector)
-    && !isPositionalSelector(targetRef.selector)
-  ) {
-    identityScore += 36;
-  }
-
-  const ancestorCount = ancestorMatches(
-    targetFingerprint.ancestorFingerprint ?? [],
-    element.fingerprint?.ancestorFingerprint ?? [],
-  );
-  identityScore += ancestorCount * 7;
-
-  let locationScore = 0;
-  const sourceAnchor = targetRef.sourceAnchor;
-  if (sourceAnchor) {
-    if (
-      element.range.startOffset === sourceAnchor.startOffset
-      && element.range.endOffset === sourceAnchor.endOffset
-    ) {
-      locationScore += 28;
-    } else if (element.range.startOffset === sourceAnchor.startOffset) {
-      locationScore += 18;
-    } else {
-      const distance = Math.abs(element.range.startOffset - sourceAnchor.startOffset);
-      if (distance <= 64) locationScore += 8;
-      else if (distance <= 256) locationScore += 3;
-    }
-  }
-
-  return {
-    target: element,
-    identityScore,
-    locationScore,
-    score: identityScore + locationScore,
-    ancestorCount,
-  };
-}
-
-function textCandidateScore(index, targetRef, textNode) {
-  const parent = textNode.parentId ? index.byNodeId.get(textNode.parentId) : null;
-  if (!parent || parent.type !== "element") return null;
-  const elementScore = elementCandidateScore(targetRef, parent);
-  if (!elementScore) return null;
-  const targetText = normalizeSourceText(targetRef.textQuote ?? "");
-  const candidateText = normalizeSourceText(textNode.value);
-  let identityScore = elementScore.identityScore;
-  if (targetText && candidateText === targetText) identityScore += 80;
-  const sourceAnchor = targetRef.sourceAnchor;
-  let locationScore = elementScore.locationScore;
-  if (sourceAnchor) {
-    if (
-      textNode.range.startOffset === sourceAnchor.startOffset
-      && textNode.range.endOffset === sourceAnchor.endOffset
-    ) {
-      locationScore += 30;
-    } else if (textNode.range.startOffset === sourceAnchor.startOffset) {
-      locationScore += 18;
-    }
-  }
-  return {
-    target: textNode,
-    parent,
-    identityScore,
-    locationScore,
-    score: identityScore + locationScore,
-  };
 }
 
 function exactNode(index, targetRef) {
@@ -559,95 +467,6 @@ function resolveInsertionPoint(index, targetRef) {
   );
 }
 
-const TARGET_RESOLVER_SURFACES = new Set(["edit", "comments", "review"]);
-
-function emptyShadowSurfaceStats() {
-  return {
-    observations: 0,
-    officialSuccess: 0,
-    shadowSuccess: 0,
-    fallbackOnlySuccess: 0,
-  };
-}
-
-function createShadowStats() {
-  return {
-    edit: emptyShadowSurfaceStats(),
-    comments: emptyShadowSurfaceStats(),
-    review: emptyShadowSurfaceStats(),
-  };
-}
-
-let shadowStats = createShadowStats();
-
-export function resetTargetResolverShadowStats() {
-  shadowStats = createShadowStats();
-}
-
-export function getTargetResolverShadowStats() {
-  return {
-    edit: { ...shadowStats.edit },
-    comments: { ...shadowStats.comments },
-    review: { ...shadowStats.review },
-  };
-}
-
-function normalizeResolverSurface(surface) {
-  return TARGET_RESOLVER_SURFACES.has(surface) ? surface : "edit";
-}
-
-function resolutionSucceeded(resolution) {
-  return resolution === "exact" || resolution === "rebound";
-}
-
-function isWholePageTargetRef(targetRef) {
-  return targetRef.level === "module"
-    && String(targetRef.selector ?? "").trim().toLowerCase() === "body";
-}
-
-function resolveWholePageBody(index, targetRef) {
-  const bodies = index.elements.filter((element) => element.tagName === "body");
-  if (bodies.length === 1) {
-    return resolved(targetRef, "exact", bodies[0], [], "whole-page-body-semantic");
-  }
-  if (bodies.length > 1) {
-    return resolved(
-      targetRef,
-      "ambiguous",
-      null,
-      bodies.map((element) => ({
-        nodeId: element.nodeId,
-        label: element.label,
-        range: element.range,
-      })),
-      "whole-page-body-ambiguous",
-    );
-  }
-  return resolved(targetRef, "orphaned", null, [], "whole-page-body-not-found");
-}
-
-function observeManagedShadow(surface, official, shadow) {
-  const stats = shadowStats[surface];
-  stats.observations += 1;
-  if (resolutionSucceeded(official.resolution)) stats.officialSuccess += 1;
-  if (resolutionSucceeded(shadow.resolution)) stats.shadowSuccess += 1;
-  if (
-    !resolutionSucceeded(official.resolution)
-    && resolutionSucceeded(shadow.resolution)
-  ) {
-    stats.fallbackOnlySuccess += 1;
-    if (typeof console !== "undefined" && typeof console.debug === "function") {
-      console.debug(
-        "[pageroot:target-resolver-shadow]",
-        surface,
-        "fallback-only",
-        official.reason,
-        shadow.reason,
-      );
-    }
-  }
-}
-
 function resolveByStableElementId(index, targetRef) {
   if (!isValidPagerootElementId(targetRef.elementId)) {
     return resolved(targetRef, "orphaned", null, [], "stable-element-id-invalid");
@@ -657,6 +476,18 @@ function resolveByStableElementId(index, targetRef) {
     return resolved(targetRef, "orphaned", null, [], "stable-element-not-found");
   }
   if (targetRef.level === "text") {
+    if (targetRef.expectedSourceSha256 === index.sourceSha256) {
+      const exact = exactNode(index, targetRef);
+      if (exact?.type === "text" && exact.parentId === element.nodeId) {
+        return resolved(
+          targetRef,
+          "exact",
+          exact,
+          [],
+          "stable-element-and-source-hash-match",
+        );
+      }
+    }
     const directTextNodes = element.textNodeIds
       .map((nodeId) => index.byNodeId.get(nodeId))
       .filter((node) => node?.type === "text");
@@ -684,70 +515,7 @@ function resolveByStableElementId(index, targetRef) {
   );
 }
 
-function resolveByLegacyHeuristics(index, targetRef) {
-  const exact = exactNode(index, targetRef);
-  if (exact) return resolved(targetRef, "exact", exact, [], "source-anchor-match");
-
-  const scored = (targetRef.level === "text"
-    ? index.textNodes.map((node) => textCandidateScore(index, targetRef, node))
-    : index.elements.map((element) => elementCandidateScore(targetRef, element)))
-    .filter(Boolean)
-    .filter((candidate) => candidate.identityScore >= 30 || candidate.score >= 45)
-    .sort((left, right) => (
-      right.identityScore - left.identityScore
-      || right.locationScore - left.locationScore
-      || left.target.range.startOffset - right.target.range.startOffset
-    ));
-
-  if (scored.length === 0) {
-    return resolved(targetRef, "orphaned", null, [], "no-confident-candidate");
-  }
-  const top = scored[0];
-  const tied = scored.filter(
-    (candidate) => candidate.identityScore === top.identityScore,
-  );
-  if (tied.length > 1) {
-    return resolved(
-      targetRef,
-      "ambiguous",
-      null,
-      tied.map((candidate) => ({
-        nodeId: candidate.target.nodeId,
-        label: candidate.target.label ?? candidate.parent?.label ?? "Text",
-        range: candidate.target.range,
-        score: candidate.score,
-      })),
-      "multiple-equally-confident-candidates",
-    );
-  }
-  return resolved(
-    targetRef,
-    "rebound",
-    top.target,
-    scored.slice(0, 5).map((candidate) => ({
-      nodeId: candidate.target.nodeId,
-      label: candidate.target.label ?? candidate.parent?.label ?? "Text",
-      range: candidate.target.range,
-      score: candidate.score,
-    })),
-    "unique-fingerprint-match",
-  );
-}
-
-function resolveCompatibilityTargetRef(index, targetRef) {
-  if (targetRef.level === "insertion-point") {
-    return resolveInsertionPoint(index, targetRef);
-  }
-  if (targetRef.elementId !== undefined) {
-    return resolveByStableElementId(index, targetRef);
-  }
-  return resolveByLegacyHeuristics(index, targetRef);
-}
-
 function resolveManagedOfficialTargetRef(index, targetRef) {
-  if (isWholePageTargetRef(targetRef) && targetRef.elementId === undefined) {
-    return resolveWholePageBody(index, targetRef);
-  }
   if (targetRef.level === "insertion-point") {
     if (targetRef.elementId === undefined) {
       return resolved(
@@ -766,12 +534,6 @@ function resolveManagedOfficialTargetRef(index, targetRef) {
   return resolveByStableElementId(index, targetRef);
 }
 
-function shadowCompatibilityTargetRef(index, targetRef) {
-  const shadowRef = { ...targetRef };
-  delete shadowRef.elementId;
-  return resolveCompatibilityTargetRef(index, shadowRef);
-}
-
 export function resolveTargetRef(indexOrHtml, targetRef, options = {}) {
   const index = typeof indexOrHtml === "string"
     ? buildSourceIndex(indexOrHtml)
@@ -784,36 +546,8 @@ export function resolveTargetRef(indexOrHtml, targetRef, options = {}) {
       "TargetRef level must be module, subregion, text, or insertion-point.",
     );
   }
-  if (index.pagerootIdentity?.complete !== true) {
-    return resolveCompatibilityTargetRef(index, targetRef);
-  }
-
-  const official = resolveManagedOfficialTargetRef(index, targetRef);
-  const surface = normalizeResolverSurface(options?.surface);
-  try {
-    observeManagedShadow(
-      surface,
-      official,
-      shadowCompatibilityTargetRef(index, targetRef),
-    );
-  } catch {
-    // Shadow comparison must never change the official managed result.
-  }
-  return official;
-}
-
-export function resolveFromPreview(indexOrHtml, nodeId, options = {}) {
-  const index = typeof indexOrHtml === "string"
-    ? buildSourceIndex(indexOrHtml)
-    : indexOrHtml;
-  const targetRef = createTargetRef(index, nodeId, options);
-  const resolution = resolveTargetRef(index, targetRef);
-  return {
-    ...resolution,
-    reason: resolution.resolution === "exact"
-      ? "preview-node-id"
-      : resolution.reason,
-  };
+  void options;
+  return resolveManagedOfficialTargetRef(index, targetRef);
 }
 
 export class TargetResolver {
@@ -821,10 +555,6 @@ export class TargetResolver {
     this.index = typeof indexOrHtml === "string"
       ? buildSourceIndex(indexOrHtml)
       : indexOrHtml;
-  }
-
-  resolveFromPreview(nodeId, options = {}) {
-    return resolveFromPreview(this.index, nodeId, options);
   }
 
   rebind(targetRef) {

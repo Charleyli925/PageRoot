@@ -1,4 +1,4 @@
-import { SOURCE_NODE_ATTRIBUTE, createInsertionPointTargetRef, resolveTargetRef } from "../lib/source-patch-core.js";
+import { createInsertionPointTargetRef, resolveTargetRef } from "../lib/source-patch-core.js";
 import { sourceTargetRefForSelection } from "../lib/canvas-target-rebind.js";
 import type { PageTabAssociation } from "../lib/page-presentation-dom";
 import type {
@@ -12,7 +12,10 @@ import { selectorForElement } from "./html-canvas-dom";
 import type { HtmlCanvasCommentMarker } from "./html-canvas-selection-chrome";
 import type { SourceIndexValue } from "./html-canvas-internal-types";
 import {
-  escapedSourceNodeId,
+  uniqueSourceElement,
+  sourceElementId,
+} from "./html-canvas-source-element";
+import {
   isRenderedCommentTarget,
   tabAssociationForElement,
 } from "./html-canvas-page-view";
@@ -75,11 +78,9 @@ function separateCommentMarkers(
 
 function querySourceElement(
   documentNode: Document,
-  nodeId: string,
+  elementId: string | null | undefined,
 ): HTMLElement | null {
-  return documentNode.querySelector<HTMLElement>(
-    `[${SOURCE_NODE_ATTRIBUTE}="${escapedSourceNodeId(nodeId)}"]`,
-  );
+  return elementId ? uniqueSourceElement(documentNode, elementId) : null;
 }
 
 export function measureCommentTargetLayouts(options: {
@@ -123,7 +124,7 @@ export function measureCommentTargetLayouts(options: {
           resolution?.resolution ?? "orphaned"
         ) as HtmlCanvasTargetResolution;
         if (resolution?.target?.type !== "element") return missing(targetResolution);
-        targetElement = querySourceElement(documentNode, String(resolution.target.nodeId));
+        targetElement = querySourceElement(documentNode, resolution.target.pagerootId);
       }
       if (!targetElement) return missing(targetResolution);
       const visualElement = entry.visualHint
@@ -210,7 +211,7 @@ export function layoutInsertionPoints(options: {
       (child): child is HTMLElement => child instanceof documentNode.defaultView!.HTMLElement,
     );
     const parentSelector = selectorForElement(parent);
-    const parentNodeId = parent.getAttribute(SOURCE_NODE_ATTRIBUTE);
+    const parentElementId = sourceElementId(parent);
 
     const addBoundary = (
       moduleElement: HTMLElement,
@@ -218,13 +219,13 @@ export function layoutInsertionPoints(options: {
       boundaryTop: number,
       label: string,
     ) => {
-      const beforeSiblingNodeId = beforeSibling?.getAttribute(SOURCE_NODE_ATTRIBUTE) || null;
+      const beforeSiblingElementId = sourceElementId(beforeSibling);
       let insertionTargetRef: ReturnType<typeof createInsertionPointTargetRef> | null = null;
-      if (sourceIndex && parentNodeId && (!beforeSibling || beforeSiblingNodeId)) {
+      if (sourceIndex && parentElementId && (!beforeSibling || beforeSiblingElementId)) {
         try {
           insertionTargetRef = createInsertionPointTargetRef(sourceIndex, {
-            parentId: parentNodeId,
-            beforeSiblingId: beforeSiblingNodeId,
+            parentId: parentElementId,
+            beforeSiblingId: beforeSiblingElementId,
             label,
           });
         } catch {
@@ -243,7 +244,7 @@ export function layoutInsertionPoints(options: {
         frameWidth - 8,
         adjacentRect ? Math.max(moduleRect.right, adjacentRect.right) : moduleRect.right,
       );
-      const fallbackBoundary = beforeSiblingNodeId || `end_${parentSelector}`;
+      const fallbackBoundary = beforeSiblingElementId || `end_${parentSelector}`;
       const fallbackTargetId = `target_insertion_${encodeURIComponent(parentSelector)}_${encodeURIComponent(fallbackBoundary)}`;
       const selectionValue: HtmlCanvasSelection = {
         id: insertionTargetRef?.targetId || fallbackTargetId,
@@ -376,7 +377,7 @@ export function layoutCommentMarkers(options: {
         )
         : null;
       if (resolution?.target?.type === "element") {
-        targetElement = querySourceElement(documentNode, String(resolution.target.nodeId));
+        targetElement = querySourceElement(documentNode, resolution.target.pagerootId);
       }
     } catch {
       targetElement = null;

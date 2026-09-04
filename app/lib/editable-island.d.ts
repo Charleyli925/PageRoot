@@ -47,10 +47,10 @@ export function editableIslandDraftHtml(
   options?: { baselineInnerHtml?: string },
 ): string;
 
-export function normalizeEditableTextFragmentHtml(
-  value: string,
-  options?: { baselineInnerHtml?: string },
-): string;
+export function isFrozenEditableIslandSubtree(
+  tagName: string,
+  namespaceURI?: string,
+): boolean;
 
 export function editableIslandForTarget(
   index: Record<string, unknown>,

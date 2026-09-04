@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  REVIEW_SOURCE_NODE_ATTRIBUTE,
   prepareReviewCommentSourceProjection,
   resolveReviewCommentSourceElement,
 } from "../app/lib/review-comment-source-map.js";
@@ -10,6 +9,7 @@ import {
   buildSourceIndex,
   createTargetRef,
 } from "../app/lib/source-patch-core.js";
+import { materializeSourceElementIdentity } from "../bridge/project-file-repository/working-copy.mjs";
 
 function selectionFor(targetRef) {
   return {
@@ -21,12 +21,16 @@ function selectionFor(targetRef) {
     sourceAnchor: targetRef.sourceAnchor,
     fingerprint: targetRef.fingerprint,
     resolution: targetRef.resolution,
+    elementId: targetRef.elementId,
+    expectedSourceSha256: targetRef.expectedSourceSha256,
   };
 }
 
-test("review comment projection keeps repeated class targets source-distinct", () => {
-  const source = `<main><article class="metric-card">锁单确收</article><article class="metric-card">IPV</article><article class="metric-card">CVR</article></main>`;
-  const sourceIndex = buildSourceIndex(source);
+test("review comment projection keeps identified class targets source-distinct without rewriting HTML", () => {
+  const identified = materializeSourceElementIdentity(
+    `<main><article class="metric-card">锁单确收</article><article class="metric-card">IPV</article><article class="metric-card">CVR</article></main>`,
+  ).html;
+  const sourceIndex = buildSourceIndex(identified);
   const cards = sourceIndex.elements.filter(
     (element) => element.tagName === "article",
   );
@@ -35,30 +39,36 @@ test("review comment projection keeps repeated class targets source-distinct", (
     level: "subregion",
   }));
 
-  assert.deepEqual(
-    targets.map((target) => target.selector),
-    ["article.metric-card", "article.metric-card", "article.metric-card"],
-  );
+  assert.equal(new Set(targets.map((target) => target.selector)).size, 3);
+  targets.forEach((target, index) => {
+    assert.equal(target.elementId, cards[index].pagerootId);
+    assert.equal(
+      target.selector,
+      `article[data-pageroot-id="${cards[index].pagerootId}"]`,
+    );
+  });
 
-  const projection = prepareReviewCommentSourceProjection(source);
+  const projection = prepareReviewCommentSourceProjection(identified);
   assert.equal(projection.projected, true);
+  assert.equal(projection.html, identified);
   assert.equal(projection.sourceIndex?.sourceSha256, sourceIndex.sourceSha256);
   const resolved = targets.map((target) => resolveReviewCommentSourceElement(
     projection.sourceIndex,
     selectionFor(target),
   ));
   assert.equal(resolved.every(Boolean), true);
-  assert.equal(new Set(resolved.map((element) => element.nodeId)).size, 3);
+  assert.equal(new Set(resolved.map((element) => element.pagerootId)).size, 3);
   resolved.forEach((element) => {
+    assert.equal(element.pagerootIdentityStatus, "valid");
     assert.match(
       projection.html,
-      new RegExp(`${REVIEW_SOURCE_NODE_ATTRIBUTE}="${element.nodeId}"`, "u"),
+      new RegExp(`data-pageroot-id="${element.pagerootId}"`, "u"),
     );
   });
 });
 
-test("review comment projection falls back safely on reserved identity collisions", () => {
-  const source = `<main ${REVIEW_SOURCE_NODE_ATTRIBUTE}="authored"><p id="unique-target">保留唯一目标</p></main>`;
+test("review comment projection leaves unidentified unique selectors byte-equal", () => {
+  const source = `<main><p id="unique-target">保留唯一目标</p></main>`;
   const sourceIndex = buildSourceIndex(source);
   const paragraph = sourceIndex.elements.find(
     (element) => element.tagName === "p",
@@ -76,8 +86,8 @@ test("review comment projection falls back safely on reserved identity collision
     projection.sourceIndex,
     selectionFor(target),
   );
-  assert.equal(resolved?.nodeId, paragraph.nodeId);
-  assert.equal(resolved?.selector, "#unique-target");
+  assert.equal(resolved, null);
+  assert.equal(paragraph.selector, "#unique-target");
 });
 
 test("review comment source mapping fails closed for ambiguous and orphaned targets", () => {

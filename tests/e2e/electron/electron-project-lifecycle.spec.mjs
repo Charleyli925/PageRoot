@@ -780,6 +780,7 @@ test("Electron follows a same-directory Finder rename and keeps the selected tab
       launched.page,
       finderPath,
       "list-item",
+      { allowSourceNotAuthoritative: true },
     );
 
     const afterWorkspace = await bridgeJson(

@@ -8,6 +8,7 @@ import {
   createTargetRef,
   planSourcePatch,
 } from "../app/lib/source-patch-core.js";
+import { materializeSourceElementIdentity } from "../bridge/project-file-repository/working-copy.mjs";
 
 const PROFILE_COUNT = 24;
 const TAGS = ["p", "h2", "li", "blockquote", "figcaption"];
@@ -58,7 +59,7 @@ function generatedProfile(index) {
     "</body>",
     "</html>",
   ];
-  const html = `${bom}${lines.join(newline)}${newline}`;
+  const html = materializeSourceElementIdentity(`${bom}${lines.join(newline)}${newline}`).html;
   const expected = html.replace(beforeText, escapeHtmlText(nextText));
   return { seed, html, expected, beforeText, nextText, outsideToken, newline, bom };
 }

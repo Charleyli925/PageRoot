@@ -14,7 +14,6 @@ import { EyeIcon } from "@phosphor-icons/react/dist/csr/Eye";
 import AttachmentLightbox from "./components/AttachmentLightbox";
 import EditRuntimeStaticFallbackNotice from "./components/EditRuntimeStaticFallbackNotice";
 import HtmlCanvasEditor from "./components/HtmlCanvasEditor";
-import HtmlDisplaySurface from "./components/HtmlDisplaySurface";
 import type {
   HtmlCanvasEditRuntimeLoadOutcome,
   HtmlCanvasCommentLayoutTarget,
@@ -160,6 +159,7 @@ import {
   commentHasContent,
   commentsFromRecords,
   formatFileSize,
+  globalPageCommentTargetFromHtml,
   independentCommentTarget,
   insertionLabel,
   normalizeGlobalCommentTargets,
@@ -833,7 +833,6 @@ export default function Workbench() {
   const editRuntimeSnapshot = workspaceControllerSnapshot?.editRuntime ?? null;
   const {
     runtimePhase: editRuntimePhase,
-    runtimePreparing: editRuntimePreparing,
     runtimeRenderPending: editRuntimeRenderPending,
     runtimeGrant: editRuntimeGrant,
   } = useEditRuntimePreparation({
@@ -2655,6 +2654,7 @@ export default function Workbench() {
       workspaceControllerRef.current,
     ).reloadDocumentCanvas().canvasGeneration;
     invalidateCanvasRenderAcks();
+    editorRef.current?.rebuildActiveFrame();
     if (await waitForCurrentGeneration()) return;
     throw new Error("画布没有在时限内确认载入目标 HTML。");
   }, [
@@ -4159,15 +4159,10 @@ export default function Workbench() {
       return;
     }
     setCanvasMode("edit");
-    const globalTarget: HtmlCanvasSelection = {
-      id: "target_global_page",
-      label: "整个页面",
-      selector: "body",
-      level: "module",
-      tagName: "body",
-      text: "",
-      resolution: "exact",
-    };
+    const globalTarget = globalPageCommentTargetFromHtml(
+      currentDocumentSessionSnapshot().html,
+    );
+    if (!globalTarget) return;
     const wasRelinking = Boolean(commentCanvasPort.getSnapshot().relinkingTarget);
     editorRef.current?.clearSelection();
     commentCanvasPort.setSelection(null);
@@ -4179,6 +4174,7 @@ export default function Workbench() {
     openCommentComposer(globalTarget);
   }, [
     commentCanvasPort,
+    currentDocumentSessionSnapshot,
     finishTargetRelink,
     interactionLocked,
     openCommentComposer,
@@ -4661,16 +4657,11 @@ export default function Workbench() {
     const visualHint = commentVisualHintForSelection(target);
     const matchesTarget = (comment: CommentItem) => {
       const commentAnchor = commentSourceAnchor(comment) || comment.target;
-      const sourceMatches = commentAnchor.id === sourceTarget.id
-        || Boolean(
-          commentAnchor.elementId
-          && commentAnchor.elementId === sourceTarget.elementId
-          && commentAnchor.level === sourceTarget.level,
-        )
-        || (
-          commentAnchor.selector === sourceTarget.selector
-          && commentAnchor.level === sourceTarget.level
-        );
+      const sourceMatches = Boolean(
+        commentAnchor.elementId
+        && sourceTarget.elementId
+        && commentAnchor.elementId === sourceTarget.elementId,
+      );
       if (!sourceMatches) return false;
       const commentHint = comment.visualHint
         || commentVisualHintForSelection(comment.target);
@@ -5775,17 +5766,7 @@ export default function Workbench() {
     });
   }, [activeWorkbenchTab, navigationCapability, presentWorkbenchTabOutcome, settingsPageActive]);
   const { visibleCachedSurface, candidateCachedSurface, retainPresentedTab, completeHandoff, updateVisibleScroll, markFirstScroll } = useDocumentSurfaceHandoff({ cache: documentSurfaceCacheSnapshot, tabs: workbenchTabsSnapshot, sourceSha256, renderedSourceSha256: canvasMode === "preview" && canvasRenderAcks.preview?.generation === canvasGeneration ? canvasRenderAcks.preview.sha256 : renderedContentSha256, canvasAuthority, canvasGeneration, controller: workspaceController });
-  const effectiveVisibleCachedSurface = visibleCachedSurface;
-  const cachedSurfaceInteractionPassthrough = Boolean(
-    canvasMode === "edit"
-    && editRuntimePhase === "static"
-    && !editRuntimePreparing
-    && documentRuntimeTabId
-    && visibleCachedSurface?.tabId === documentRuntimeTabId
-  );
-  const cachedSurfaceBlocksCanvas = Boolean(
-    effectiveVisibleCachedSurface && !cachedSurfaceInteractionPassthrough
-  );
+  const cachedSurfaceBlocksCanvas = Boolean(visibleCachedSurface);
   const retryProjectHydrationFromCommentRail = useCallback(() => {
     void workspaceController?.retryProjectHydration();
   }, [workspaceController]);
@@ -5877,7 +5858,6 @@ export default function Workbench() {
     desktopHostReady
     && !desktopHostIssue
     && canMountUnboundCanvas
-    && !editRuntimePreparing,
   );
   const currentProjectDisplayName = currentProjectNameFromFile(sourcePath, projectName);
   const currentProjectSidebarVersions = useMemo(() => (
@@ -6225,14 +6205,13 @@ export default function Workbench() {
       /> : null}
       <WorkbenchDocumentSurfaceCache
         snapshot={documentSurfaceCacheSnapshot}
-        visibleTabId={effectiveVisibleCachedSurface?.tabId || null}
-        visibleSourceSha256={effectiveVisibleCachedSurface?.sourceSha256 || null}
+        visibleTabId={visibleCachedSurface?.tabId || null}
+        visibleSourceSha256={visibleCachedSurface?.sourceSha256 || null}
         candidateTabId={candidateCachedSurface?.tabId || null}
         candidateSourceSha256={candidateCachedSurface?.sourceSha256 || null}
         onVisibleReady={retainPresentedTab} onHandoffComplete={completeHandoff}
         onVisibleScroll={updateVisibleScroll}
         onFirstScroll={markFirstScroll}
-        interactionPassthrough={cachedSurfaceInteractionPassthrough}
         height="var(--comment-canvas-height, 760px)"
       />
       {settingsPageActive ? (
@@ -6368,19 +6347,12 @@ export default function Workbench() {
                     }}
                   />
                 ) : null}
-                {editRuntimePreparing ? (
-                  <HtmlDisplaySurface
-                    html={html}
-                    sourcePath={canvasSourcePath}
-                    height="var(--comment-canvas-height, 760px)"
-                  />
-                ) : null}
                 <WorkbenchActiveDocumentCanvas
                   activeTabId={documentRuntimeTabId}
                   activeSourceSha256={sourceSha256}
                   activeElement={activeRuntimeCanvasMounted ? (
                     <HtmlCanvasEditor
-                  key={`editor-authority-${documentRuntimeTabId || "none"}-${canvasGeneration}`}
+                  key={`editor-authority-${documentRuntimeTabId || "none"}`}
                   ref={editorRef}
                   html={html}
                   semanticRevision={editRevision}
@@ -6444,7 +6416,7 @@ export default function Workbench() {
                   pageViewContext={activePageViewContext}
                   pageViewDocumentKey={pageViewDocumentKey}
                   onPageViewContextChange={acceptPageViewContext}
-                  initialScrollTop={effectiveVisibleCachedSurface?.scrollTop}
+                  initialScrollTop={visibleCachedSurface?.scrollTop}
                   locked={
                     runInProgress
                     || projectHydrating
@@ -6481,7 +6453,7 @@ export default function Workbench() {
               onInteraction={() => workspaceControllerRef.current?.deferDocumentSurfacePrewarm()}
               onReady={handlePreviewReady}
               presentationCovered={cachedSurfaceBlocksCanvas}
-              initialScrollTop={effectiveVisibleCachedSurface?.scrollTop}
+              initialScrollTop={visibleCachedSurface?.scrollTop}
               onScrollTopChange={(scrollTop) => {
                 if (activeWorkbenchTab.kind === "document") {
                   updateVisibleScroll(activeWorkbenchTab.tabId, scrollTop);

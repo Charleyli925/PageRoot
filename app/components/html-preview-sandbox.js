@@ -9,6 +9,10 @@ import {
   isEditRuntimeExecutionId,
   isEditRuntimeSessionId,
 } from "../domain/edit-runtime-contract.js";
+import {
+  PAGEROOT_ELEMENT_ID_ATTRIBUTE,
+  isValidPagerootElementId,
+} from "../../shared/pageroot-element-identity.mjs";
 
 export const EDITOR_STYLE_ATTRIBUTE = "data-html-canvas-editor-style";
 export const FRAME_VERIFICATION_ATTRIBUTE =
@@ -20,7 +24,6 @@ const ORIGINAL_SCRIPT_TYPE_ATTRIBUTE = "data-html-canvas-original-script-type";
 const DISABLED_REFRESH_ATTRIBUTE = "data-html-canvas-disabled-refresh";
 const DISPLAY_POLICY_ATTRIBUTE = "data-pageroot-display-policy";
 const MISSING_ATTRIBUTE_VALUE = "__html_canvas_missing__";
-const SOURCE_NODE_ATTRIBUTE = "data-html-ai-source-node-id";
 export const EDIT_RUNTIME_CSP = [
   "default-src 'none'",
   "script-src pageroot-edit-runtime:",
@@ -157,25 +160,11 @@ export function prepareVerifiedFrameDocument(
   return `${doctypeString(parsed.doctype)}\n${parsed.documentElement.outerHTML}`;
 }
 
-function browserPathForElement(root, target) {
-  const path = [];
-  let current = target;
-  while (current && current !== root) {
-    const parent = current.parentElement;
-    if (!parent) return null;
-    const position = Array.prototype.indexOf.call(parent.children, current);
-    if (position < 0) return null;
-    path.unshift(position);
-    current = parent;
-  }
-  return current === root ? path : null;
-}
-
-function uniqueRuntimeMarker(root, element) {
-  const sourceId = element.getAttribute(SOURCE_NODE_ATTRIBUTE);
-  if (sourceId) return sourceId;
-  const path = browserPathForElement(root, element);
-  return path ? `synthetic:${path.length ? path.join(".") : "root"}` : null;
+function uniqueRuntimeMarker(element) {
+  // Runtime source proof is Stable-ID-only. PageRoot-owned injections such as
+  // the protocol <base> are not source objects and must not mint a second ID.
+  const pagerootId = element.getAttribute(PAGEROOT_ELEMENT_ID_ATTRIBUTE);
+  return isValidPagerootElementId(pagerootId) ? pagerootId : null;
 }
 
 function addFrameVerification(parsed, verificationToken, editorStyles) {
@@ -260,11 +249,13 @@ export function prepareDisposableRuntimeFrameDocument(
   const sourceElements = [root, ...root.querySelectorAll("*")];
   const seenMarkers = new Set();
   for (const element of sourceElements) {
-    const marker = uniqueRuntimeMarker(root, element);
-    if (!marker || seenMarkers.has(marker)) return null;
+    const marker = uniqueRuntimeMarker(element);
+    if (!marker) continue;
+    if (seenMarkers.has(marker)) return null;
     seenMarkers.add(marker);
     element.setAttribute(EDIT_RUNTIME_SOURCE_MARKER_ATTRIBUTE, marker);
   }
+  if (seenMarkers.size === 0) return null;
   const scriptNodes = Array.from(parsed.querySelectorAll("script"));
   if (scriptNodes.length !== scriptContract.scripts.length) return null;
   for (let ordinal = 0; ordinal < scriptNodes.length; ordinal += 1) {
@@ -318,8 +309,16 @@ export function prepareCanvasFrameDocument(
 
 export function baseHrefFromSourcePath(sourcePath) {
   if (!sourcePath) return undefined;
-  const trimmedPath = sourcePath.trim();
+  let trimmedPath = sourcePath.trim();
   if (!trimmedPath) return undefined;
+  // macOS exposes the same tree as /var and /private/var. Treat those
+  // spellings as one directory so a Finder rename cannot look like a new
+  // Canvas authority.
+  if (trimmedPath === "/private/var" || trimmedPath.startsWith("/private/var/")) {
+    trimmedPath = trimmedPath.slice("/private".length);
+  } else if (trimmedPath === "/private/tmp" || trimmedPath.startsWith("/private/tmp/")) {
+    trimmedPath = trimmedPath.slice("/private".length);
+  }
 
   try {
     if (/^[a-z][a-z\d+.-]*:/i.test(trimmedPath)) {

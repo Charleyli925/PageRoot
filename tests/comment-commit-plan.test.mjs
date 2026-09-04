@@ -39,9 +39,13 @@ test("comment commit plan fail-closes disposed, missing, unsafe, uploading and e
     attachmentCount: 1,
   }).kind, "ready");
   assert.equal(planCommentCommit({
-    target: { resolution: "exact", selector: "body", level: "module" },
+    target: { resolution: "exact", elementId: ELEMENT_ID, selector: "body", level: "module" },
     text: "global",
   }).kind, "ready");
+  assert.equal(planCommentCommit({
+    target: { resolution: "exact", selector: "body", level: "module" },
+    text: "global",
+  }).code, "COMMENT_TARGET_UNSAFE");
   assert.equal(isSavableCommentTarget({
     resolution: "exact",
     elementId: ELEMENT_ID,

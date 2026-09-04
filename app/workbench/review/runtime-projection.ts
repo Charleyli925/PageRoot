@@ -901,14 +901,7 @@ function reviewBootstrap(
   };
   const runtimeVisualSourceBoxAttributes = ${JSON.stringify(REVIEW_COMMENT_BINDING_SOURCE_BOX_ATTRIBUTES)};
   const runtimeVisualIdentityAttributeLimit = ${REVIEW_BOOTSTRAP_IDENTITY_ATTRIBUTE_LIMIT};
-  const reviewCommentSourceNodeIdPattern = /^element:\d+:\d+:[a-z][a-z0-9:-]{0,127}$/iu;
-  const safeReviewCommentSourceNodeId = (value) => {
-    const sourceNodeId = RuntimeVisualString(value || "");
-    return sourceNodeId.length <= 256
-      && runtimeVisualRegExpExec(reviewCommentSourceNodeIdPattern, sourceNodeId) !== null
-      ? sourceNodeId
-      : "";
-  };
+  const safeReviewCommentSourceNodeId = (value) => safeStableId(value);
   const runtimeVisualSourceBoxSignature = (host) => runtimeVisualStringify(
     runtimeVisualArrayMap(
       runtimeVisualSourceBoxAttributes,
@@ -1677,9 +1670,11 @@ function reviewBootstrap(
         : typeof candidate.selector === "string"
           ? candidate.selector
           : "";
-      const rawSourceNodeId = typeof candidate.sourceNodeId === "string"
-        ? candidate.sourceNodeId
-        : "";
+      const rawSourceNodeId = typeof candidate.stableId === "string" && candidate.stableId
+        ? candidate.stableId
+        : typeof candidate.sourceNodeId === "string"
+          ? candidate.sourceNodeId
+          : "";
       const sourceNodeId = safeReviewCommentSourceNodeId(rawSourceNodeId);
       if (rawSourceNodeId && !sourceNodeId) return;
       const identityElement = sourceNodeId

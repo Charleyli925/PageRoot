@@ -1,9 +1,10 @@
 import type { HtmlCanvasSelection } from "../../components/HtmlCanvasEditor.types";
 import { buildSourceIndex } from "../../lib/source-patch-core.js";
+import { resolveReviewCommentSourceElement } from "../../lib/review-comment-source-map.js";
 import {
-  REVIEW_SOURCE_NODE_ATTRIBUTE,
-  resolveReviewCommentSourceElement,
-} from "../../lib/review-comment-source-map.js";
+  isValidPagerootElementId,
+  PAGEROOT_ELEMENT_ID_ATTRIBUTE,
+} from "../../lib/pageroot-element-identity.js";
 import type { CommentItem } from "../types";
 import {
   REVIEW_COMMENT_GLOBAL_ATTRIBUTE,
@@ -18,10 +19,27 @@ import type {
   ReviewCommentTarget,
 } from "./types";
 
+function uniqueSourceElementsByPagerootId(document: Document): Map<string, Element> {
+  const mapped = new Map<string, Element>();
+  const conflicts = new Set<string>();
+  document.querySelectorAll(`[${PAGEROOT_ELEMENT_ID_ATTRIBUTE}]`).forEach((element) => {
+    const pagerootId = element.getAttribute(PAGEROOT_ELEMENT_ID_ATTRIBUTE) || "";
+    if (!isValidPagerootElementId(pagerootId) || conflicts.has(pagerootId)) return;
+    const existing = mapped.get(pagerootId);
+    if (existing && existing !== element) {
+      mapped.delete(pagerootId);
+      conflicts.add(pagerootId);
+      return;
+    }
+    mapped.set(pagerootId, element);
+  });
+  return mapped;
+}
+
 export function resolvedCommentElement(
   document: Document,
   sourceIndex: ReturnType<typeof buildSourceIndex>,
-  sourceElementsByNodeId: ReadonlyMap<string, Element>,
+  sourceElementsByPagerootId: ReadonlyMap<string, Element>,
   target: HtmlCanvasSelection,
 ): Element | null {
   if (target.selector.trim().toLowerCase() === "body" && target.level === "module") {
@@ -29,7 +47,9 @@ export function resolvedCommentElement(
   }
   const sourceElement = resolveReviewCommentSourceElement(sourceIndex, target);
   if (sourceElement) {
-    const sourceMappedElement = sourceElementsByNodeId.get(sourceElement.nodeId);
+    const sourceMappedElement = sourceElement.pagerootId
+      ? sourceElementsByPagerootId.get(sourceElement.pagerootId)
+      : undefined;
     if (sourceMappedElement) return sourceMappedElement;
     if (sourceElement.selector) {
       try {
@@ -66,9 +86,10 @@ export function reviewCommentBootstrapBindings(
   reviewCommentTargets: readonly ReviewCommentTarget[],
 ): ReviewCommentBootstrapBinding[] {
   const sourceNodeIdsByKey = new Map(
-    reviewCommentTargets.flatMap((target) => (
-      target.sourceNodeId ? [[target.key, target.sourceNodeId] as const] : []
-    )),
+    reviewCommentTargets.flatMap((target) => {
+      const stableId = target.stableId || target.sourceNodeId;
+      return stableId ? [[target.key, stableId] as const] : [];
+    }),
   );
   const bindings: ReviewCommentBootstrapBinding[] = [];
   const seenSourceNodeIds = new Set<string>();
@@ -124,14 +145,10 @@ export function annotateReviewComments(
   } catch {
     return { groups: [], targets: [] };
   }
-  const sourceElementsByNodeId = new Map<string, Element>();
-  const sourceNodeIdsByElement = new Map<Element, string>();
-  document.querySelectorAll(`[${REVIEW_SOURCE_NODE_ATTRIBUTE}]`).forEach((element) => {
-    const nodeId = element.getAttribute(REVIEW_SOURCE_NODE_ATTRIBUTE);
-    if (nodeId && !sourceElementsByNodeId.has(nodeId)) {
-      sourceElementsByNodeId.set(nodeId, element);
-      sourceNodeIdsByElement.set(element, nodeId);
-    }
+  const sourceElementsByPagerootId = uniqueSourceElementsByPagerootId(document);
+  const pagerootIdByElement = new Map<Element, string>();
+  sourceElementsByPagerootId.forEach((element, pagerootId) => {
+    pagerootIdByElement.set(element, pagerootId);
   });
   const groups = new Map<Element, CommentItem[]>();
   comments.forEach((comment) => {
@@ -140,7 +157,7 @@ export function annotateReviewComments(
     const element = resolvedCommentElement(
       document,
       sourceIndex,
-      sourceElementsByNodeId,
+      sourceElementsByPagerootId,
       sourceTarget,
     );
     if (!element) return;
@@ -169,17 +186,13 @@ export function annotateReviewComments(
         ),
         null,
       );
-    const sourceNodeId = global ? undefined : sourceNodeIdsByElement.get(element);
-    const stableId = global
-      ? undefined
-      : element.getAttribute("data-pageroot-id") || undefined;
-    if (selector || sourceNodeId) {
+    const stableId = global ? undefined : pagerootIdByElement.get(element);
+    if (selector || stableId) {
       targets.push({
         key,
         global,
-        ...(stableId ? { stableId } : {}),
+        ...(stableId ? { stableId, sourceNodeId: stableId } : {}),
         ...(selector ? { selector } : {}),
-        ...(sourceNodeId ? { sourceNodeId } : {}),
       });
     }
     return {

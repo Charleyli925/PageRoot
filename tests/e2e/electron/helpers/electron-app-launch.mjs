@@ -896,28 +896,50 @@ export async function loadedDiskFrame(
   await editor.waitFor({ state: "visible", timeout });
   await expect(editor).toHaveAttribute("data-render-verified", "true", { timeout });
   let frame = null;
-  await expect.poll(async () => {
-    try {
-      const handoff = await editor.getAttribute("data-runtime-handoff");
-      const candidateId = await editor.getAttribute("data-runtime-candidate-id");
-      if (handoff || candidateId) return false;
-      const iframe = editor.locator('iframe[data-runtime-slot-role="active"]');
-      if (await iframe.count() !== 1) return false;
-      const iframeHandle = await iframe.elementHandle();
-      const candidate = await iframeHandle?.contentFrame() || null;
-      if (!candidate) return false;
-      if (await candidate.locator(caseSelector(expectedCase)).count() !== 1) {
-        return false;
+  let lastFrameProbe = null;
+  try {
+    await expect.poll(async () => {
+      try {
+        const handoff = await editor.getAttribute("data-runtime-handoff");
+        const candidateId = await editor.getAttribute("data-runtime-candidate-id");
+        const iframe = editor.locator('iframe[data-runtime-slot-role="active"]');
+        const iframeCount = await iframe.count();
+        const iframeHandle = iframeCount === 1 ? await iframe.elementHandle() : null;
+        const candidate = await iframeHandle?.contentFrame() || null;
+        const caseCount = candidate
+          ? await candidate.locator(caseSelector(expectedCase)).count()
+          : -1;
+        lastFrameProbe = {
+          handoff,
+          candidateId,
+          iframeCount,
+          hasContentFrame: Boolean(candidate),
+          caseCount,
+          expectedCase,
+          block: await editor.getAttribute("data-edit-block-detail"),
+          nativeStart: await editor.getAttribute("data-native-start-status"),
+          runtimePhase: await editor.evaluate((node) => (
+            node.closest(".canvas-edit-surface")?.getAttribute("data-edit-runtime-phase")
+            || null
+          )),
+        };
+        if (handoff || candidateId) return false;
+        if (iframeCount !== 1 || !candidate || caseCount !== 1) return false;
+        frame = candidate;
+        return true;
+      } catch (error) {
+        if (/Frame was detached|Execution context was destroyed/u.test(String(error))) {
+          lastFrameProbe = { error: String(error) };
+          return false;
+        }
+        throw error;
       }
-      frame = candidate;
-      return true;
-    } catch (error) {
-      if (/Frame was detached|Execution context was destroyed/u.test(String(error))) {
-        return false;
-      }
-      throw error;
-    }
-  }, { timeout }).toBe(true);
-  if (!frame) throw new Error("PageRoot did not expose the Electron edit frame.");
+    }, { timeout }).toBe(true);
+  } catch (cause) {
+    throw new Error(
+      `PageRoot did not expose the Electron edit frame: ${JSON.stringify(lastFrameProbe)}`,
+      { cause },
+    );
+  }
   return includeEditor ? { editor, frame, sourcePath: canonicalActiveSourcePath } : frame;
 }

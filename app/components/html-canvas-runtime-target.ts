@@ -1,4 +1,4 @@
-import { SOURCE_NODE_ATTRIBUTE } from "../lib/source-patch-core.js";
+import { PAGEROOT_ELEMENT_ID_ATTRIBUTE } from "../../shared/pageroot-element-identity.mjs";
 import { EDIT_RUNTIME_SOURCE_MARKER_ATTRIBUTE } from "../domain/edit-runtime-contract.js";
 import {
   normalizeRuntimeVisualHint,
@@ -274,7 +274,7 @@ export function runtimeVisualTargetElement(
   const chart = element.closest<HTMLElement>(
     "[data-chart], [data-chart-root], [data-echarts], [role='img']",
   );
-  if (chart && !chart.hasAttribute(SOURCE_NODE_ATTRIBUTE)) return chart;
+  if (chart && !chart.hasAttribute(PAGEROOT_ELEMENT_ID_ATTRIBUTE)) return chart;
   return element;
 }
 
@@ -602,7 +602,7 @@ export function runtimeVisualTargetForHint(
       !options.isProvenSourceElement
       && (
         candidate.hasAttribute(EDIT_RUNTIME_SOURCE_MARKER_ATTRIBUTE)
-        || candidate.hasAttribute(SOURCE_NODE_ATTRIBUTE)
+        || candidate.hasAttribute(PAGEROOT_ELEMENT_ID_ATTRIBUTE)
       )
     ) continue;
     const visualTarget = runtimeVisualTargetElement(candidate);

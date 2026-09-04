@@ -15,10 +15,8 @@ import {
 } from "../../shared/semantic-structure-plan.mjs";
 import {
   editableIslandForTarget,
-  isEditableIslandTarget,
   materializeEditableIslandHtml,
   normalizeEditableIslandHtml,
-  normalizeEditableTextFragmentHtml,
 } from "./editable-island.js";
 import { isNativeDirectEditRoot } from "./native-edit-capability.js";
 import {
@@ -102,64 +100,40 @@ function expectedHash(command, index) {
 }
 
 function commandTargetRef(index, command, key = "targetRef") {
-  const liveTargetRef = liveExactCommandTarget(index, command, key);
-  if (liveTargetRef) return liveTargetRef;
-  const targetRef = command[key];
-  if (targetRef) return cleanTargetRef(targetRef);
-  const nodeId = key === "targetRef" ? command.nodeId : command.beforeNodeId;
-  if (!nodeId) {
-    fail("TARGET_REQUIRED", `Edit command is missing ${key}.`);
-  }
-  return createTargetRef(index, nodeId, {
-    level: key === "targetRef" ? command.level : "subregion",
-  });
+  const targetRef = officialCommandTarget(index, command, key);
+  if (targetRef) return targetRef;
+  fail(
+    "TARGET_REQUIRED",
+    `Edit command is missing a Stable ID for ${key}.`,
+  );
 }
 
-function liveNodeIdFromCommand(command, key) {
-  if (key === "textTargetRef") {
-    return typeof command.textNodeId === "string" && command.textNodeId
-      ? command.textNodeId
-      : null;
+function liveElementIdFromCommand(command, key) {
+  if (key === "beforeTargetRef") {
+    return command.beforeElementId || command.beforeTargetRef?.elementId || null;
   }
   if (key === "targetRef") {
-    return typeof command.nodeId === "string" && command.nodeId
-      ? command.nodeId
-      : null;
+    return command.elementId || command.targetRef?.elementId || null;
   }
   return null;
 }
 
-function liveExactCommandTarget(index, command, key = "targetRef") {
-  // Live locate: the preview already stamped data-html-ai-source-node-id.
-  // Matching sourceSha256 makes that nodeId the exact anchor; fingerprint
-  // scoring is only for rebound after the source itself has changed.
-  const nodeId = liveNodeIdFromCommand(command, key);
-  if (!nodeId) return null;
-  const expected = command.expectedSourceSha256 ?? index.sourceSha256;
-  if (expected !== index.sourceSha256) return null;
-  const node = index.byNodeId.get(nodeId);
-  if (!node) {
+function officialCommandTarget(index, command, key = "targetRef") {
+  const elementId = liveElementIdFromCommand(command, key);
+  if (!elementId) return null;
+  const element = index.byPagerootId.get(elementId);
+  if (!element || element.type !== "element") {
     fail(
       "TARGET_ORPHANED",
-      "The live source node id is no longer in this source.",
-      { nodeId, key },
+      "The live Stable ID is no longer in this source.",
+      { elementId, key },
     );
   }
   const original = command[key];
-  const expectedType = key === "textTargetRef" ? "text" : "element";
-  if (node.type !== expectedType) {
-    fail(
-      "UNSUPPORTED_TARGET_TYPE",
-      `This edit requires a ${expectedType} target.`,
-      { actualType: node.type, nodeId, key },
-    );
-  }
-  return createTargetRef(index, node, {
+  return createTargetRef(index, element, {
     targetId: original?.targetId,
     label: original?.label,
-    level: key === "textTargetRef"
-      ? "text"
-      : (original?.level ?? command.level ?? "subregion"),
+    level: original?.level ?? command.level ?? "subregion",
   });
 }
 
@@ -808,124 +782,6 @@ export function planSemanticEditableIslandPatch(
   });
 }
 
-export function planDirectTextNodePatch(indexOrHtml, command) {
-  const index = typeof indexOrHtml === "string"
-    ? buildSourceIndex(indexOrHtml)
-    : indexOrHtml;
-  const parentTargetRef = commandTargetRef(index, command);
-  const parentResolution = resolvedTarget(index, parentTargetRef, "element");
-  const parent = parentResolution.target;
-  const textTargetRef = liveExactCommandTarget(index, command, "textTargetRef")
-    ?? (command.textTargetRef ? cleanTargetRef(command.textTargetRef) : null);
-  if (!textTargetRef) {
-    fail(
-      "TEXT_FRAGMENT_TARGET_REQUIRED",
-      "Direct text replacement requires an exact text TargetRef.",
-    );
-  }
-  const textResolution = resolvedTarget(index, textTargetRef, "text");
-  const textNode = textResolution.target;
-  if (
-    parent.namespaceURI !== "http://www.w3.org/1999/xhtml"
-    || !parent.boundarySafe
-    || !supportsTextRangeEditing(parent.tagName)
-    || TEXT_RANGE_UNSAFE_CONTEXT_ELEMENTS.has(parent.tagName)
-  ) {
-    fail(
-      "TEXT_FRAGMENT_UNSAFE_CONTEXT",
-      `Direct text replacement is unsafe inside <${parent.tagName}>.`,
-      { parentId: parent.nodeId, tagName: parent.tagName },
-    );
-  }
-  if (textNode.parentId !== parent.nodeId) {
-    fail(
-      "TEXT_FRAGMENT_TARGET_MISMATCH",
-      "The source text fragment is not a direct child of its authorized parent.",
-      { parentId: parent.nodeId, textNodeId: textNode.nodeId },
-    );
-  }
-
-  const currentParentTargetRef = refreshResolvedTargetRef(
-    index,
-    parentTargetRef,
-    parent,
-  );
-  const parentIslandCapability = isEditableIslandTarget(
-    index,
-    currentParentTargetRef,
-  );
-  if (
-    parentIslandCapability.editable
-    || parentIslandCapability.code !== "EDITABLE_ISLAND_STRUCTURE_UNSUPPORTED"
-  ) {
-    fail(
-      "TEXT_FRAGMENT_PARENT_UNSUPPORTED",
-      "Direct text fragments are limited to structurally complex HTML parents.",
-      {
-        parentId: parent.nodeId,
-        islandCapability: parentIslandCapability.code,
-      },
-    );
-  }
-  const currentTextTargetRef = refreshResolvedTargetRef(
-    index,
-    textTargetRef,
-    textNode,
-  );
-  const beforeFragmentHtml = index.source.slice(
-    textNode.range.startOffset,
-    textNode.range.endOffset,
-  );
-  if (
-    Object.hasOwn(command, "beforeFragmentHtml")
-    && command.beforeFragmentHtml !== beforeFragmentHtml
-  ) {
-    fail(
-      "STALE_BEFORE_CONTENT",
-      "The direct source text changed after this edit began.",
-      { expected: command.beforeFragmentHtml, actual: beforeFragmentHtml },
-    );
-  }
-  if (!Object.hasOwn(command, "nextFragmentHtml")) {
-    fail(
-      "NEXT_TEXT_FRAGMENT_HTML_REQUIRED",
-      "Direct text replacement is missing nextFragmentHtml.",
-    );
-  }
-  const nextFragmentHtml = normalizeEditableTextFragmentHtml(
-    String(command.nextFragmentHtml),
-    { baselineInnerHtml: beforeFragmentHtml },
-  );
-  const patch = sourcePatch(
-    textNode.range.startOffset,
-    textNode.range.endOffset,
-    beforeFragmentHtml,
-    nextFragmentHtml,
-    {
-      kind: "direct-text-node",
-      nodeId: textNode.nodeId,
-      parentId: parent.nodeId,
-    },
-  );
-  return makePlan(
-    index,
-    { ...command, type: "update-direct-text-node" },
-    nextFragmentHtml === beforeFragmentHtml ? [] : [patch],
-    [currentParentTargetRef],
-    {
-      resolution: parentResolution.resolution,
-      textResolution: textResolution.resolution,
-      parentNodeId: parent.nodeId,
-      textNodeId: textNode.nodeId,
-      textTargetRef: currentTextTargetRef,
-      beforeFragmentHtml,
-      nextFragmentHtml,
-      beforeText: textNode.value,
-      writeScope: "direct-source-text-node",
-    },
-  );
-}
-
 function normalizePropertyName(property) {
   const value = String(property ?? "").trim();
   if (!CSS_PROPERTY_NAME_PATTERN.test(value)) {
@@ -1477,7 +1333,7 @@ export function planTextRangeStylePatch(indexOrHtml, command, replay = null) {
           endOffset: segment.endOffset,
         })),
         writeScope: "existing-text-range-wrapper-inline-style",
-        coalescedTextRangeElementId: segmentParent.nodeId,
+        coalescedTextRangeElementId: segmentParent.pagerootId ?? segmentParent.nodeId,
       },
     );
   }
@@ -1824,9 +1680,6 @@ export function planSourcePatch(command, indexOrHtml) {
     case "editable-island":
     case "replace-editable-island":
       return planEditableIslandPatch(index, command);
-    case "direct-text-node":
-    case "update-direct-text-node":
-      return planDirectTextNodePatch(index, command);
     case "style":
     case "set-inline-style":
       return planInlineStylePatch(index, command);
@@ -2081,7 +1934,6 @@ function authorizePatchPlan(plan, index, patches) {
   const operationType = operationTypeForPlan(plan);
   if (![
     "replace-editable-island",
-    "update-direct-text-node",
     "set-inline-style",
     "set-text-range-style",
     "reorder-sibling",
@@ -2164,48 +2016,6 @@ function authorizePatchPlan(plan, index, patches) {
         fail(
           "PATCH_PLAN_TAMPERED",
           "Editable island patch does not match the declared operation metadata.",
-        );
-      }
-    }
-  }
-
-  if (operationType === "update-direct-text-node") {
-    if (targetRefs.length !== 1 || resolutions[0].target.type !== "element") {
-      fail(
-        "PATCH_TARGET_COUNT_INVALID",
-        "Direct text replacement requires exactly one parent element TargetRef.",
-      );
-    }
-    const parent = resolutions[0].target;
-    for (const patch of patches) {
-      const patchKind = String(patch.kind ?? "").replace(/^(?:inverse:)+/, "");
-      if (patchKind !== "direct-text-node") {
-        fail(
-          "PATCH_KIND_MISMATCH",
-          "Direct text replacement has an unrelated source operation.",
-          { patch },
-        );
-      }
-      assertPatchWithin(
-        patch,
-        parent.contentRange,
-        "PATCH_OUTSIDE_TARGET",
-        "Direct text replacement is outside its authorized parent.",
-      );
-    }
-    if (!isInverse) {
-      const expected = planDirectTextNodePatch(index, {
-        type: "update-direct-text-node",
-        targetRef: targetRefs[0],
-        textTargetRef: plan.metadata?.textTargetRef,
-        beforeFragmentHtml: plan.metadata?.beforeFragmentHtml,
-        nextFragmentHtml: plan.metadata?.nextFragmentHtml,
-        expectedSourceSha256: index.sourceSha256,
-      });
-      if (!patchesEqual(patches, expected.patches)) {
-        fail(
-          "PATCH_PLAN_TAMPERED",
-          "Direct text patches do not match the declared operation metadata.",
         );
       }
     }

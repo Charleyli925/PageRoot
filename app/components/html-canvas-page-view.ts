@@ -1,4 +1,6 @@
-import { SOURCE_NODE_ATTRIBUTE } from "../lib/source-patch-core.js";
+import {
+  uniqueSourceElement,
+} from "./html-canvas-source-element";
 import { resolvePageViewContext, type PageViewContext } from "../lib/page-view-context.js";
 import {
   activatePageTabContaining,
@@ -14,18 +16,11 @@ import type {
 
 const PAGE_VIEW_CONTEXT_ATTRIBUTE = "data-pageroot-view-context";
 
-export function escapedSourceNodeId(nodeId: string): string {
-  return nodeId.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
-}
-
 function pageViewContextElement(
   documentNode: Document,
   sourceNodeId: string,
 ): HTMLElement | null {
-  const matches = documentNode.querySelectorAll<HTMLElement>(
-    `[${SOURCE_NODE_ATTRIBUTE}="${escapedSourceNodeId(sourceNodeId)}"]`,
-  );
-  return matches.length === 1 ? matches[0] : null;
+  return uniqueSourceElement(documentNode, sourceNodeId);
 }
 
 export function isRenderedCommentTarget(element: HTMLElement): boolean {

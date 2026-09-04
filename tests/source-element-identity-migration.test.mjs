@@ -146,6 +146,20 @@ test("identity materialization preserves authored bytes outside start-tag insert
   assert.equal(repeated.html, materialized.html);
 });
 
+test("UTF-8 BOM Working Copies still receive html, head and body identities", () => {
+  const source = `\uFEFF${RAW_HTML}`;
+  const materialized = materializeSourceElementIdentity(source, {
+    randomUUIDFactory: deterministicUuidFactory(),
+  });
+  assert.equal(materialized.changed, true);
+  assert.equal(materialized.html.startsWith("\uFEFF"), true);
+  assert.match(materialized.html, /<html data-pageroot-id="pr1_[a-f0-9]{32}">/u);
+  assert.match(materialized.html, /<head data-pageroot-id="pr1_[a-f0-9]{32}">/u);
+  assert.match(materialized.html, /<body data-pageroot-id="pr1_[a-f0-9]{32}">/u);
+  assert.equal(materialized.identity.complete, true);
+  assert.equal(materialized.identity.totalElementCount, 8);
+});
+
 test("identity materialization refuses malformed and duplicate authored identities", () => {
   const duplicate = "pr1_bbbbbbbbbbbb4bbb9bbbbbbbbbbbbbbb";
   const invalid = RAW_HTML

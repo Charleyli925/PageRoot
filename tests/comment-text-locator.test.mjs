@@ -35,6 +35,25 @@ test("selected text persists as element-relative decoded offsets and affinity", 
   });
 });
 
+test("selected text locates from a Stable-ID target without an ephemeral nodeId", () => {
+  const html = `<p data-pageroot-id="pr1_11111111111141118111111111111111">可靠文字</p>`;
+  const index = buildSourceIndex(html);
+  const paragraph = index.byPagerootId.get("pr1_11111111111141118111111111111111");
+  const textNode = index.textNodes[0];
+  const locator = createElementTextLocator(index, {
+    target: { elementId: paragraph.pagerootId },
+    segments: [{ textNodeId: textNode.nodeId, startOffset: 0, endOffset: 2 }],
+    text: "可靠",
+    direction: "forward",
+  });
+  assert.deepEqual(locator, {
+    quote: "可靠",
+    startOffset: 0,
+    endOffset: 2,
+    affinity: "forward",
+  });
+});
+
 test("selected text locator fails closed when source segments and quote disagree", () => {
   const html = `<p data-pageroot-id="pr1_11111111111141118111111111111111">可靠文字</p>`;
   const index = buildSourceIndex(html);
