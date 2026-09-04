@@ -43,6 +43,7 @@ export function resolveReviewCommentSourceElement(sourceIndex, target) {
     const resolved = resolveTargetRef(
       sourceIndex,
       sourceTargetRefForSelection(target),
+      { surface: "review" },
     );
     if (
       !resolved.target

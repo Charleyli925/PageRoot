@@ -40,9 +40,14 @@ make a current comment drift, become ambiguous or require a guessed rebind.
    The existing whole-page comment remains the deterministic
    `selector=body + level=module` semantic target so implicit document roots do
    not require an invented source identity.
-5. TargetRefs without `elementId` keep the single legacy resolver for old
-   comments, ID-less historical Versions and unmanaged compatibility input.
-   Explicit user relink may replace an orphaned target; background code may not.
+5. On a complete managed Working Copy, official location is Stable-ID-only.
+   TargetRefs without `elementId` (except the whole-page `selector=body +
+   level=module` semantic target) resolve `orphaned`. The old selector,
+   ancestor-fingerprint, source-offset and text-affix resolver still runs in
+   shadow and records fallback-only success for edit, comments and Review; it
+   is not an official result. Unmanaged or identity-absent HTML keeps the
+   legacy resolver. Explicit user relink may replace an orphaned target;
+   background code may not.
 6. Stable comment grouping and Canvas selection matching use `elementId` plus
    level. Disposable geometry and Runtime DOM remain non-persistent.
 7. This decision does not change AI modification scope, frozen Review comment

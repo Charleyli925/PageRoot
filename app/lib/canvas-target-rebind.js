@@ -40,6 +40,7 @@ export function rebindCanvasSelectionTargets(sourceHtml, targets) {
       const resolved = resolveTargetRef(
         sourceIndex,
         sourceTargetRefForSelection(target),
+        { surface: "comments" },
       );
       const resolution = resolved.resolution;
       if (
@@ -110,6 +111,7 @@ function resolvedNodeIdentity(sourceIndex, target) {
     const resolved = resolveTargetRef(
       sourceIndex,
       sourceTargetRefForSelection(target),
+      { surface: "comments" },
     );
     if (!resolved.target) return null;
     if (resolved.target.type === "insertion-point") {

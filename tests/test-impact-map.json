@@ -958,6 +958,7 @@
         "tests/pageroot-element-identity.test.mjs",
         "tests/source-element-identity-migration.test.mjs",
         "tests/source-index-target-resolver.test.mjs",
+        "tests/target-resolver-managed-id-only.test.mjs",
         "tests/page-view-context.test.mjs",
         "tests/source-patch-engine.test.mjs",
         "tests/semantic-operation-kernel.test.mjs",

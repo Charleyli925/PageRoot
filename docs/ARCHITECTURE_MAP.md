@@ -106,8 +106,9 @@ subscription may suppress composer-text and edit-text-only revisions; saved
 comments, attachment structure, persistence errors and every non-comment
 capability still invalidate the composition root.
 Persistent `sourceAnchor.elementId`, refreshed expected source Hash and optional text locator are
-Comment/Draft facts; `TargetResolver` maps that ID to current source and never consults disposable
-geometry or Runtime DOM. A runtime `visualHint` is bounded display context only: Canvas may best-effort
+Comment/Draft facts; `TargetResolver` maps a complete managed Working Copy only by that ID
+and never consults disposable geometry or Runtime DOM. The old heuristic resolver is shadow-only
+on those documents. A runtime `visualHint` is bounded display context only: Canvas may best-effort
 match it inside the proven source host after a rerun, using a generation-scoped spatial index for
 hover and a bounded kind/path candidate set for restore, then fall back to that host without changing
 permissions. A `body` source anchor with a runtime hint is never an explicit global comment; only a

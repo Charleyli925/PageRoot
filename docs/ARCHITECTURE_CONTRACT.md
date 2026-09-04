@@ -1028,15 +1028,19 @@ Without semantic proof, additions, removals, swaps, transplants, forgeries,
 duplicates, tag changes and moves all fail closed.
 
 Current managed TargetRefs add `elementId` and the expected canonical source
-Hash, refreshed by deterministic current-source rebind. Presence of the
-stable ID selects one resolver contract: only the valid unique SourceIndex ID
-entry may resolve. Tag changes retain that identity; deletion or invalid ID is
-orphaned without heuristic fallback. A source target that survives while its
+Hash, refreshed by deterministic current-source rebind. A complete managed
+Working Copy selects one official resolver contract: only the valid unique
+SourceIndex ID entry may resolve. Tag changes retain that identity; deletion
+or a missing/invalid ID is orphaned without heuristic fallback. The old
+selector, ancestor-fingerprint, source-offset and text-affix scorer still runs
+in shadow and records fallback-only success by surface (edit, comments,
+Review); it must not replace the official result. A source target that survives while its
 current Canvas projection cannot display it remains the same target with a
 missing/hidden presentation state, never a guessed replacement. `targetId` remains per-record identity; optional selected-text
 locators are UTF-16 ranges inside the owning element's decoded descendant text.
-ID-less historical TargetRefs keep the legacy resolver and immutable Version
-records are never rewritten. See ADR 0061.
+ID-less TargetRefs against unmanaged or identity-absent HTML keep the legacy
+resolver. Whole-page comments keep `selector=body + level=module`. Immutable
+Version records are never rewritten. See ADR 0061.
 
 A Renderer-applied history result may advance the mounted editable-island
 projection without replacing its iframe only after exact old/new target
