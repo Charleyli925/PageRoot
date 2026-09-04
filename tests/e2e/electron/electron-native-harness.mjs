@@ -158,6 +158,20 @@ export async function loadedDiskFrame(page, sourcePath, caseId, {
     } catch {
       activeBootstrapCount = 0;
     }
+    const probe = {
+      lastKnownGoodRevision,
+      expectedSourceRevision,
+      staticFallbackVisible,
+      runtimePhase,
+      runtimeOutcome,
+      activeBootstrapCount,
+      candidateId: await loaded.editor.getAttribute("data-runtime-candidate-id"),
+      candidateRevision: await loaded.editor.getAttribute(
+        "data-runtime-candidate-source-revision",
+      ),
+      handoff: await loaded.editor.getAttribute("data-runtime-handoff"),
+      canvasGeneration: await loaded.editor.getAttribute("data-canvas-generation"),
+    };
     return (
       lastKnownGoodRevision === expectedSourceRevision
       && activeBootstrapCount === 1
@@ -166,7 +180,7 @@ export async function loadedDiskFrame(page, sourcePath, caseId, {
         allowSourceNotAuthoritative
         && runtimePhase === "static"
         && runtimeOutcome === "source-not-authoritative"
-      );
+      ) ? true : probe;
   }, { timeout: 60_000 }).toBe(true);
   const frame = await currentEditorFrame(page);
   await frame.waitForFunction(

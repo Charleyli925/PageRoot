@@ -36,6 +36,10 @@ test("preview sandbox derives an encoded directory base without query state", ()
     "https://example.com/a/",
   );
   assert.equal(baseHrefFromSourcePath("relative/page.html"), undefined);
+  assert.equal(
+    baseHrefFromSourcePath("/private/var/folders/example/report-V1.html"),
+    baseHrefFromSourcePath("/var/folders/example/Finder renamed-V1.html"),
+  );
 });
 
 test("runtime source markers stay Stable-ID-only and skip unmarked injections", async () => {

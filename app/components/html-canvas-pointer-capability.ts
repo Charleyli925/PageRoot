@@ -12,6 +12,7 @@ import type {
   SourceTargetRef,
 } from "./html-canvas-internal-types";
 import {
+  identifyingTextRangeAtPoint,
   findCanvasHitSourceElement,
   findCanvasSelectionElement,
   findDedicatedSourceSurfaceAtPoint,
@@ -50,6 +51,7 @@ export type {
 export function canStartNativeTextEditAtTarget({
   documentNode,
   element,
+  point,
   sourceIndex,
 }: {
   documentNode: Document;
@@ -58,7 +60,13 @@ export function canStartNativeTextEditAtTarget({
   sourceIndex: SourceIndexValue | null;
 }): boolean {
   if (!element || !sourceIndex || !documentNode) return false;
-  return Boolean(nativeEditHostForElement(element, sourceIndex));
+  const islandHost = nativeEditHostForElement(element, sourceIndex);
+  if (!islandHost) return false;
+  // Hovering a module box, including its padding and gap, selects that module.
+  // Nested text hosts still advertise in-place editing.
+  if (inferSelectionLevel(element) === "module") return false;
+  if (!point) return true;
+  return Boolean(identifyingTextRangeAtPoint(documentNode, islandHost, point));
 }
 
 export type ResolvedCanvasTarget = Readonly<{

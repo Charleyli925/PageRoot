@@ -203,6 +203,15 @@ async function ready(coordinator, purpose = "execution") {
   });
 }
 
+async function waitForExecutionError(coordinator, expectedCode) {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    await new Promise((resolve) => setImmediate(resolve));
+    const session = coordinator.executionStatus(IDENTITY);
+    if (session.errorCode === expectedCode) return session;
+  }
+  return coordinator.executionStatus(IDENTITY);
+}
+
 test("preflight rejects removed purposes and execution tickets are one-use, TTL-bound, and reverified", async () => {
   let now = 1_000;
   let drifted = false;
@@ -398,8 +407,7 @@ test("runtime failure keeps retry safety separate from the recovery action", asy
     preflightId: ticket.preflightId,
     configurationDigest: ticket.configuration.configurationDigest,
   });
-  await new Promise((resolve) => setImmediate(resolve));
-  const session = coordinator.executionStatus(IDENTITY);
+  const session = await waitForExecutionError(coordinator, "AGENT_BALANCE_INSUFFICIENT");
   assert.equal(session.errorCode, "AGENT_BALANCE_INSUFFICIENT");
   assert.equal(session.safeToRetry, true);
   assert.equal(session.retryable, true);

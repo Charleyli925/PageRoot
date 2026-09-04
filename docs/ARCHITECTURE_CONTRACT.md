@@ -475,7 +475,9 @@ renders source-static content, but desktop may choose one bounded direct author
 runtime before the initial editable frame becomes interactive. The sole
 `EditAuthorRuntimeSession`, composed by `WorkspaceController`, keys the attempt
 to `(sourcePath, canvasGeneration)` rather than an autosave revision, source
-echo or comment state. It accepts one exact persisted-source prepare result
+echo or comment state. A same-directory path-only rename that keeps the same
+HTML, source SHA and canvas generation relocates that live key and does not
+consume another prepare. It accepts one exact persisted-source prepare result
 only for the same source SHA and generation; a late old result is revoked and a
 settled session cannot prepare again. The stable attempt key is distinct from
 the latest retry identity: every valid refresh observes current Working HTML,

@@ -309,8 +309,16 @@ export function prepareCanvasFrameDocument(
 
 export function baseHrefFromSourcePath(sourcePath) {
   if (!sourcePath) return undefined;
-  const trimmedPath = sourcePath.trim();
+  let trimmedPath = sourcePath.trim();
   if (!trimmedPath) return undefined;
+  // macOS exposes the same tree as /var and /private/var. Treat those
+  // spellings as one directory so a Finder rename cannot look like a new
+  // Canvas authority.
+  if (trimmedPath === "/private/var" || trimmedPath.startsWith("/private/var/")) {
+    trimmedPath = trimmedPath.slice("/private".length);
+  } else if (trimmedPath === "/private/tmp" || trimmedPath.startsWith("/private/tmp/")) {
+    trimmedPath = trimmedPath.slice("/private".length);
+  }
 
   try {
     if (/^[a-z][a-z\d+.-]*:/i.test(trimmedPath)) {

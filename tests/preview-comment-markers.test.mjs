@@ -46,7 +46,7 @@ function commentOn(sourceIndex, tagName, text, options = {}) {
   };
 }
 
-test("each resolvable target becomes one marker carrying its source node", () => {
+test("each resolvable target becomes one marker carrying its Stable ID", () => {
   const source = identified("<main><h1 id=\"title\">标题</h1><p id=\"body\">正文</p></main>");
   const sourceIndex = buildSourceIndex(source);
   const groups = previewCommentMarkerGroups(sourceIndex, [
@@ -63,7 +63,7 @@ test("each resolvable target becomes one marker carrying its source node", () =>
     groups.map((group) => group.items.map((item) => item.text)),
     [["标题再短一点"], ["这段拆成两句"]],
   );
-  assert.ok(groups.every((group) => typeof group.nodeId === "string" && group.nodeId));
+  assert.ok(groups.every((group) => /^pr1_[0-9a-f]{32}$/u.test(group.nodeId)));
   assert.equal(new Set(groups.map((group) => group.nodeId)).size, 2);
 });
 

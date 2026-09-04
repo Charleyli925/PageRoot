@@ -2,9 +2,10 @@ import { resolveReviewCommentSourceElement } from "./review-comment-source-map.j
 
 // Grouping rules for the read-only comment markers drawn over a preview.
 //
-// Pure and DOM-free: it maps saved comments onto the source-node identities the
-// preview already stamps on every element, so the marker layer never needs a
-// second annotation pass over authored HTML.
+// Pure and DOM-free: it maps saved comments onto the Stable IDs the preview
+// already stamps as data-pageroot-id, so the marker layer never needs a
+// second annotation pass over authored HTML. The measure protocol still calls
+// that identity `nodeId` so the preview iframe contract stays one field.
 //
 // A target that cannot be resolved exactly produces no marker. The resolver
 // fails closed on ambiguous and orphaned targets, so an unresolved comment is
@@ -44,9 +45,11 @@ export function previewCommentMarkerGroups(sourceIndex, comments) {
     const target = comment?.target;
     if (!target || isGlobalTarget(target)) continue;
     const sourceElement = resolveReviewCommentSourceElement(sourceIndex, target);
-    // No exact source element means no marker. Never fabricate a position.
-    if (!sourceElement?.nodeId) continue;
-    const existing = byNodeId.get(sourceElement.nodeId);
+    // Preview DOM is addressed by Stable ID. An ephemeral parse nodeId cannot
+    // appear as data-pageroot-id, so it must not be sent to the page.
+    const elementId = sourceElement?.pagerootId;
+    if (!elementId) continue;
+    const existing = byNodeId.get(elementId);
     const item = {
       text,
       attachmentCount: comment?.attachments?.length || 0,
@@ -56,7 +59,7 @@ export function previewCommentMarkerGroups(sourceIndex, comments) {
       continue;
     }
     if (byNodeId.size >= MAX_PREVIEW_COMMENT_GROUPS) break;
-    byNodeId.set(sourceElement.nodeId, [item]);
+    byNodeId.set(elementId, [item]);
   }
   return [...byNodeId.entries()].map(([nodeId, items], index) => ({
     key: `preview-comment-${index + 1}`,

@@ -4763,17 +4763,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     }
     const activeRange = activeTextRangeRef.current;
     const sameElement = Boolean(
-      activeRange
-        && (
-          (
-          activeRange.target.elementId
-          && activeRange.target.elementId === commentAnchor.elementId
-        )
-        || (
-          activeRange.target.nodeId
-          && activeRange.target.nodeId === commentAnchor.nodeId
-        )
-      )
+      activeRange && textRangeMatchesTarget(activeRange, commentAnchor),
     );
     const textLocator = target.textLocator
       ?? (sameElement
@@ -6499,7 +6489,14 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     }
 
     const previous = lastPropRef.current;
-    if (previous.html === html && previous.baseHref === documentBaseHref) return;
+    if (previous.html === html) {
+      // A Finder rename or /var vs /private/var spelling change can update
+      // the file URL without changing Working HTML. That is not a new Canvas
+      // authority, and forceStatic would wipe a settled Runtime iframe while
+      // the live grant stays in place and never re-handoffs.
+      lastPropRef.current = { html, baseHref: documentBaseHref };
+      return;
+    }
     lastPropRef.current = { html, baseHref: documentBaseHref };
 
     const echoIndex = pendingHtmlEchoesRef.current.indexOf(html);
@@ -8442,18 +8439,18 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         );
       }
       const activeRange = activeTextRangeRef.current;
-      const sameElement = Boolean(
-        activeRange
-        && (
-          (activeRange.target.elementId && activeRange.target.elementId === selection.elementId)
-          || (activeRange.target.nodeId && activeRange.target.nodeId === selection.nodeId)
-        )
-      );
-      const capturedTextLocator = sameElement
+      const capturedTextLocator = activeRange
         ? textLocatorForActiveRange(activeRange, sourceIndexRef.current)
         : null;
-      const commentTarget = capturedTextLocator
-        ? { ...selection, textLocator: capturedTextLocator }
+      const commentTarget = capturedTextLocator && activeRange
+        ? {
+            ...(
+              textRangeMatchesTarget(activeRange, selection)
+                ? selection
+                : activeRange.target
+            ),
+            textLocator: capturedTextLocator,
+          }
         : selection;
       if (activeNativeEditRef.current) {
         const committed = checkpointNativeEdit("comment");
