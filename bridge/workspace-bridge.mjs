@@ -44,7 +44,6 @@ import { AgentBridgeService } from "./agent-bridge-service.mjs";
 import {
   closeWorkspaceBridgeAfterAgentCleanup,
 } from "./workspace-bridge-shutdown.mjs";
-import { createEmptySourceHistory } from "../shared/source-history.mjs";
 import {
   defaultManagedAgentDelivery,
   legacyDriverForAgentDelivery,
@@ -867,11 +866,6 @@ async function projectFileBaseWorkspaceState(workspace) {
     activeDraft,
     workingCopyRecovered: workspace.workingCopyRecovered === true,
     recoveryIdentity: null,
-    sourceHistory: createEmptySourceHistory({
-      projectId: workspace.project.projectId,
-      documentId: workspace.project.documentId,
-      sourceSha256: workspace.sourceSha256,
-    }),
     versions: projectFileVersionRows(workspace, requirements),
     current: {
       path: target.exactSourcePath,
@@ -906,7 +900,6 @@ function coreSupplementalWorkspaceEnvelope(state, { operationId } = {}) {
   const {
     paths = null,
     project = null,
-    sourceHistory = null,
     versions = [],
     performanceTiming = null,
     ...core
@@ -922,7 +915,6 @@ function coreSupplementalWorkspaceEnvelope(state, { operationId } = {}) {
       snapshotRevision: revision,
       paths,
       project,
-      sourceHistory,
       versions,
     },
     performanceTiming,
@@ -1075,7 +1067,6 @@ async function saveProjectFileAutosave(body) {
     lastPersistedRevision: saved.lastPersistedRevision,
     versionCreated: false,
     currentExactVersionId: state.currentExactVersionId,
-    sourceHistory: state.sourceHistory,
     activeDraft: state.activeDraft,
     recoveryIdentity: null,
   };
@@ -2238,42 +2229,6 @@ async function saveConversationDraft(body) {
   };
 }
 
-async function runSourceHistoryAction(body) {
-  const workspace = await projectFileWorkspaceForSource(body.sourcePath);
-  if (!workspace) throw projectNotFoundError();
-  if (!projectFileBodyIdentityMatches(workspace, body)) {
-    throw new HttpError(
-      409,
-      "PROJECT_CONTEXT_IDENTITY_MISMATCH",
-      "The source-history identity does not match the selected project.",
-    );
-  }
-  const source = await readSourceFile(workspace.target.exactSourcePath);
-  const sourceHistory = createEmptySourceHistory({
-    projectId: workspace.project.projectId,
-    documentId: workspace.project.documentId,
-    sourceSha256: source.sha256,
-  });
-  return {
-    ok: true,
-    status: "history-no-op",
-    replayed: false,
-    projectId: workspace.project.projectId,
-    documentId: workspace.project.documentId,
-    sourcePath: workspace.target.exactSourcePath,
-    openTarget: workspace.target,
-    persistedRevision: Number(workspace.workingCopyState?.lastPersistedRevision || 0),
-    lastPersistedRevision: Number(workspace.workingCopyState?.lastPersistedRevision || 0),
-    currentHtmlSha256: source.sha256,
-    sourceSha256: source.sha256,
-    sha256: source.sha256,
-    content: source.html,
-    lastModifiedAt: source.lastModifiedAt,
-    sourceHistory,
-    versionCreated: false,
-  };
-}
-
 async function autosaveConflictCandidate(sourcePath) {
   const workspace = await projectFileWorkspaceForSource(sourcePath);
   if (!workspace) throw projectNotFoundError();
@@ -2672,11 +2627,6 @@ async function route(request, response) {
     }
     const body = await readBody(request);
     sendJson(response, 200, await saveAutosave(body));
-    return;
-  }
-  if (request.method === "POST" && url.pathname === "/source-history/action") {
-    const body = await readBody(request);
-    sendJson(response, 200, await runSourceHistoryAction(body));
     return;
   }
   if (request.method === "GET" && url.pathname === "/conversation") {

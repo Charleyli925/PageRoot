@@ -18,7 +18,7 @@ collected. A guessed date is not a support-window policy.
 This is a standing policy, not a decoder entry, and it is never removed.
 
 A mutable record is one the product reads, edits and writes again: the Registry,
-`history/source-operations.json`, the Draft aggregate, `manifest.json`,
+the Draft aggregate, `manifest.json`,
 `working-copy-state.json` and `runtime-state.json`. For those records every
 required member stays strictly validated and fails closed when missing or
 invalid, while a member added by a newer PageRoot is preserved unchanged across
@@ -36,10 +36,9 @@ level, not per file: `runtime-state.json` is preserved at its root and in
 - Why: the Registry previously refused any record carrying a key outside a
   hard-coded allowlist, so one added member locked the user out of every managed
   project. The Runtime `historyActivation` receipt had the same exact-key
-  rejection, so one added member made the whole Runtime unreadable. The source
-  history journal and the Draft top level previously rebuilt each object from a
-  fixed field list, so an added member was silently discarded and the truncated
-  record was written back.
+  rejection, so one added member made the whole Runtime unreadable. The Draft
+  top level previously rebuilt each object from a fixed field list, so an added
+  member was silently discarded and the truncated record was written back.
 - This does not weaken `ADR 0028`. A record whose required members are missing is
   still an unrecognized shape and still fails closed; only a fully explainable
   record with extra members is now carried through.
@@ -47,13 +46,10 @@ level, not per file: `runtime-state.json` is preserved at its root and in
   `{ ...read, ...authoritative }`. The reverse order lets a stale file overwrite
   the identity the writer just computed and pin the schema version forever. The
   stored Draft envelope had the reverse order and was corrected.
-- Proof: `tests/source-history.test.mjs`, `tests/draft-service.test.mjs` and
-  `tests/project-working-copy-save.test.mjs` each assert the round trip and each
-  fails without the corresponding production change.
-  `tests/source-history.test.mjs` also asserts that an unknown member never
-  rescues an invalid required member, and
-  `tests/project-working-copy-save.test.mjs` pins both the Draft envelope defect
-  and the authored `fileIdentity` boundary.
+- Proof: `tests/draft-service.test.mjs` and
+  `tests/project-working-copy-save.test.mjs` assert the remaining mutable-record
+  round trips. `tests/project-working-copy-save.test.mjs` pins both the Draft
+  envelope defect and the authored `fileIdentity` boundary.
 - Direction: this protects builds from this change onward only. A build released
   before it still refuses or discards a newer member. Any release that adds a
   member to a mutable record must come strictly after the release carrying

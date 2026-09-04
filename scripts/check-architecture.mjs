@@ -87,6 +87,11 @@ const RETIRED_IMPORT_NAMES = new Set([
   "WorkbenchDocumentCanvasPool",
   "use-runtime-canvas-residency",
 ]);
+const RETIRED_PRODUCTION_LITERALS = new Set([
+  ["", "source-history", "action"].join("/"),
+  ["source-history", "v1"].join("."),
+  ["source-history", "v1", "schema", "json"].join("."),
+]);
 const PROVIDER_LITERALS = ["qoder", "codex", "qoder-acp", "codex-acp"];
 const RAW_ENDPOINTS = new Set([
   "/workspace",
@@ -94,7 +99,6 @@ const RAW_ENDPOINTS = new Set([
   "/source-preview",
   "/source-stat",
   "/autosave",
-  "/source-history/action",
   "/draft",
   "/request",
   "/attachment",
@@ -333,6 +337,11 @@ export function retiredArtifactViolations({ file = "", source = "", module = nul
     const basename = path.posix.basename(specifier).replace(/\.[^.]+$/u, "");
     if (RETIRED_IMPORT_NAMES.has(basename)) {
       violations.push(`${file}: production code cannot import retired module ${specifier}`);
+    }
+  }
+  for (const literal of stringLiterals(handle)) {
+    if (RETIRED_PRODUCTION_LITERALS.has(literal)) {
+      violations.push(`${file}: retired source-history compatibility literal cannot return`);
     }
   }
   return violations;

@@ -2613,14 +2613,12 @@ export class WorkspaceController {
         authoritativeDraft,
       );
       this.#commentWorkflow?.reconcileAuthority();
-      if (this.#codecs.isRecord(payload.sourceHistory)) {
-        this.#sourceHistorySession.activate(
-          registeredContext,
-          nextSourceSha256,
-          payload.sourceHistory,
-          { preservePending: true },
-        );
-      }
+      this.#sourceHistorySession.activate(
+        registeredContext,
+        nextSourceSha256,
+        null,
+        { preservePending: true },
+      );
       this.#emitEvent({
         type: "registration-published",
         context: registeredContext,

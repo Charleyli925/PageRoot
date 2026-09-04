@@ -237,7 +237,7 @@ test("session-local undo and redo carry system-derived identity evidence into Re
     sourceHistoryOperations: session.pendingOperations,
   });
   assert.deepEqual(
-    session.acknowledge(context, session.pendingOperations, null, applied.sourceSha256),
+    session.acknowledge(context, session.pendingOperations, applied.sourceSha256),
     { status: "accepted-head" },
   );
 
@@ -252,7 +252,7 @@ test("session-local undo and redo carry system-derived identity evidence into Re
   assert.equal(buildSourceIndex(undone.html).byPagerootId.has(ids.first), true);
   assert.equal(session.pendingOperations[0].semanticDirection, "undo");
   assert.deepEqual(
-    session.acknowledge(context, session.pendingOperations, null, undone.sourceSha256),
+    session.acknowledge(context, session.pendingOperations, undone.sourceSha256),
     { status: "accepted-head" },
   );
 

@@ -14,7 +14,6 @@ import {
   WorkspaceController,
   registrationContextFromOutcome,
 } from "../app/application/workspace-controller.js";
-import { createEmptySourceHistory } from "../app/domain/source-history.js";
 
 const SOURCE_PATH = "/tmp/workspace-controller.html";
 const NEXT_SOURCE_PATH = "/tmp/workspace-controller-next.html";
@@ -128,11 +127,6 @@ function registrationPayload({
     paths: { projectRecords: "/tmp/PageRoot/project_registration" },
     versions: [{ id: "V1" }],
     runtimeState: { draft },
-    sourceHistory: createEmptySourceHistory({
-      projectId,
-      documentId,
-      sourceSha256,
-    }),
     recoveryIdentity: { token: "recovery_identity" },
     ...(openTarget ? { openTarget } : {}),
     ...(workingCopyRecovered ? { workingCopyRecovered: true } : {}),

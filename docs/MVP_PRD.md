@@ -567,7 +567,6 @@ Prompt、AI 返回、附件、剪贴板、文件名/路径、账号、电脑序�
 - `annotation-records.v3.schema.json`
 - `project-state.v3.schema.json`
 - `runtime-state.v3.schema.json`
-- `source-history.v1.schema.json`
 - `candidate-assessment.v1.schema.json`
 - `scope-report.v1.schema.json`（直接 Patch/旧 Attempt 证据，不由新 AI Attempt 写入）
 - `completion.v1.schema.json`

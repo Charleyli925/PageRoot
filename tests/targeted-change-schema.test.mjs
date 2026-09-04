@@ -38,7 +38,6 @@ const pairs = [
   ["runtime-state.v3.schema.json", "runtime-state.processing.json"],
   ["runtime-state.v3.schema.json", "runtime-state.ready.json"],
   ["runtime-state.v3.schema.json", "runtime-state.submitting.json"],
-  ["source-history.v1.schema.json", "source-history.current.json"],
   [
     "runtime-state.v3.schema.json",
     "runtime-state.recovering-transaction.json",
@@ -71,7 +70,6 @@ test("the clean targeted-change workspace uses strict v3 main records", async ()
       fixture.schemaVersion,
       schemaName === "scope-report.v1.schema.json"
         || schemaName === "candidate-assessment.v1.schema.json"
-        || schemaName === "source-history.v1.schema.json"
         ? "1.0.0"
         : MAIN_SCHEMA_VERSION,
     );

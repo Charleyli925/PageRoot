@@ -1602,7 +1602,7 @@ test("Runtime style edits stay in one document and coalesce at selection boundar
       "  await new Promise((resolve) => setTimeout(resolve, 600));",
       "}",
     ].join("\n"),
-  }, async ({ page, sourcePath }) => {
+  }, async ({ electronApp, page, sourcePath }) => {
     const editor = page.getByTestId("html-canvas-editor");
     const workingCopyPath = await managedWorkingCopyPath(page, sourcePath);
     let frame = (await loadedDiskFrame(page, sourcePath, "runtime-style-first")).frame;
@@ -1663,6 +1663,24 @@ test("Runtime style edits stay in one document and coalesce at selection boundar
       .toHaveCSS("padding-top", "22px");
     await expect(editor.locator('iframe[data-frame-role="runtime-candidate"]')).toHaveCount(0);
     await expect(editor).not.toHaveAttribute("data-runtime-refresh-pending", "");
+
+    const styleRevision = await expectCheckpointPersisted(page, 0);
+    await frame.locator('[data-native-case="runtime-style-first"]').click();
+    await clickEditHistoryMenu(electronApp, page, "undo");
+    const undoRevision = await expectCheckpointPersisted(page, styleRevision);
+    await expect.poll(() => readFileSync(workingCopyPath, "utf8"))
+      .toMatch(/padding-top:\s*20px/u);
+    frame = await currentEditorFrame(page);
+    await expect(frame.locator('[data-native-case="runtime-style-first"]'))
+      .toHaveCSS("padding-top", "20px");
+
+    await clickEditHistoryMenu(electronApp, page, "redo");
+    await expectCheckpointPersisted(page, undoRevision);
+    await expect.poll(() => readFileSync(workingCopyPath, "utf8"))
+      .toMatch(/padding-top:\s*22px/u);
+    frame = await currentEditorFrame(page);
+    await expect(frame.locator('[data-native-case="runtime-style-first"]'))
+      .toHaveCSS("padding-top", "22px");
   });
 });
 

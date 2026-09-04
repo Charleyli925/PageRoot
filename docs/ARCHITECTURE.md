@@ -9,7 +9,7 @@ User HTML bytes
   -> native Selection + IslandEditingController
   -> canonical editable island or exact direct-text-node fragment
   -> semantic operation foundation or current exact content/text SourcePatch
-  -> renderer SourceHistorySession + durable exact Patch journal
+  -> renderer SourceHistorySession + normal complete-HTML autosave
   -> serialized atomic file writer
 
 Comments + frozen input
@@ -297,7 +297,7 @@ services.
 | `PROJECT.md` Bridge read/write, 700ms autosave, unknown-write reconciliation, close/switch drain and editor-restore host port | `app/application/project-rules-workflow.js`, composed by `WorkspaceController` |
 | Renderer source-history context, pending Patch operations and action intent | `app/application/source-history-session.js` |
 | Pure comment/edit-event/tombstone transition rules | `shared/draft-aggregate.mjs` |
-| Pure source-history validation, cursor transitions and exact Patch replay | `shared/source-history.mjs`, re-exported through `app/domain/source-history.js` |
+| Source-operation ID generation and exact pending-save Patch validation | `shared/source-history.mjs`, re-exported through `app/domain/source-history.js`; cursor transitions and replay stay inside Renderer `SourceHistorySession` |
 | Bridge-side draft command validation and CAS | `bridge/draft-service.mjs` |
 | Durable Project File Registry, Working Copy CAS, Version/Candidate and Request/Draft records | `bridge/project-file-repository.mjs` façade over `bridge/project-file-repository/` internals (path safety, Registry, Working Copy CAS, Version/Candidate, Request/Draft). Callers keep importing the façade; there is no second persistence owner |
 | Close, switch, submit and history obligations | `app/application/drain-coordinator.js` |
@@ -431,11 +431,9 @@ before the CAS; it never repairs a lost prior claim.
 delegates the current-source write to `ProjectFileRepository`. Path safety,
 Registry, Working Copy CAS, Version/Candidate and Request/Draft helpers live
 under `bridge/project-file-repository/`; the façade remains the only public
-module and the only persistence owner. The v3 Bridge
-`SourceTransaction` kernel and `history/source-operations.json` journal are
-not on the live open path. `/source-history/action` returns the current source
-bytes and empty history so the renderer empty-history path still works. There
-is no second inline current-source writer in `workspace-bridge.mjs`.
+module and the only persistence owner. The v3 Bridge `SourceTransaction`
+kernel, persistent history journal and action route are retired. There is no
+second inline current-source writer in `workspace-bridge.mjs`.
 
 At close, `DocumentSession` independently hashes the frozen renderer HTML and
 accepts any acknowledged persisted revision at or beyond the close cutoff. A
@@ -482,9 +480,9 @@ queue. The renderer applies the exact inverse or forward patches locally, then
 saves the resulting complete HTML through the normal Hash/CAS and atomic
 autosave path. Crash recovery can finish that save from exact operation
 evidence but never restores the user-visible history stack. A v4 Project File
-does not persist a Bridge source-history journal. The legacy schema and
-`/source-history/action` remain compatibility surfaces until PR10 and are not a
-current editing authority.
+does not persist a Bridge source-history journal. The old schema, decoder,
+client command and action route are retired and cannot become a second history
+authority.
 
 After that acknowledgement, the Canvas may keep the current iframe only when
 both history targets resolve exactly to the same editable-island identity, the

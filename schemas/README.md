@@ -43,7 +43,7 @@ can carry unknown members:
 - **Preserved** — round-tripped from disk. A writer either mutates the object it
   read, or spreads it first and overrides authoritative members after
   (`{ ...read, ...authoritative }`). Covered: `project-registry.v4`,
-  `source-history.v1`, `project-manifest.v4` (manifest, Version entries, Working
+  `project-manifest.v4` (manifest, Version entries, Working
   Copy entries), `working-copy-state.v4`, `project-runtime-state.v4` (root and
   `historyActivation`), and the Draft aggregate, which has no schema file. These
   drop `additionalProperties: false` and carry a `$comment`.
@@ -114,7 +114,6 @@ records.
 - `attempt-outcome.v1.schema.json`
 - `version-transaction.v1.schema.json`
 - `committed-marker.v1.schema.json`
-- `source-history.v1.schema.json`
 - `conversation.v1.schema.json`
 - `conversation.v2.schema.json`
 - `conversation-index.v1.schema.json`
@@ -157,10 +156,10 @@ writers do not emit them; archived outcomes remain terminal and history is
 never rewritten. See [`docs/COMPATIBILITY.md`](../docs/COMPATIBILITY.md) for
 its removal evidence and fixture contract.
 
-`source-history.v1.schema.json` is retained to decode historical bounded source
-operation journals. Current v4 Canvas undo is a renderer-only 20-step stack for
-the currently open HTML and does not write this schema. Crash recovery may keep
-exact operations only as pending-save evidence, never as a restored undo cursor.
+Canvas undo is a renderer-only 20-step stack for the currently open HTML. The
+former persistent-history schema and decoder are retired. Crash recovery may
+keep exact operations only as pending-save evidence, never as a restored undo
+cursor.
 
 `conversation.v2.schema.json` is the current writer contract for one AI
 conversation thread; v1 remains read-only compatibility. A Conversation

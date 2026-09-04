@@ -1962,7 +1962,6 @@ export class DocumentWorkflow {
         if (!this.#acknowledgeSourceHistory({
           write,
           writeContext,
-          history: payload.sourceHistory,
           sourceSha256,
         })) {
           // A durable ACK may arrive after the renderer has moved to another
@@ -2024,12 +2023,11 @@ export class DocumentWorkflow {
     return succeeded({ revision: this.#documentSession.lastPersistedRevision });
   }
 
-  #acknowledgeSourceHistory({ write, writeContext, history, sourceSha256 }) {
+  #acknowledgeSourceHistory({ write, writeContext, sourceSha256 }) {
     if (!this.#isCurrent(writeContext)) return false;
     const acknowledgement = this.#sourceHistorySession.acknowledge(
       writeContext,
       write.historyOperations,
-      history,
       sourceSha256,
     );
     if (
@@ -2040,7 +2038,7 @@ export class DocumentWorkflow {
       this.#sourceHistorySession.activate(
         writeContext,
         sourceSha256,
-        history,
+        null,
       );
     }
     return true;
@@ -2436,7 +2434,6 @@ export class DocumentWorkflow {
         lastModifiedAt: String(
           source.lastModifiedAt || authority.lastModifiedAt || "",
         ),
-        sourceHistory: authority.sourceHistory,
         recoveryIdentity: authority.recoveryIdentity,
         currentExactVersionId: source.currentExactVersionId
           || authority.currentExactVersionId,
@@ -2445,7 +2442,6 @@ export class DocumentWorkflow {
       if (!this.#acknowledgeSourceHistory({
         write,
         writeContext,
-        history: authority.sourceHistory,
         sourceSha256,
       })) {
         // The authority read proved the old write, but the document changed

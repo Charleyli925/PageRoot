@@ -437,6 +437,7 @@ test("delivery contracts select their direct package, verifier and release-archi
     "tests/dependency-audit-policy.test.mjs",
     "tests/desktop-package.test.mjs",
     "tests/packaged-artifact-gate.test.mjs",
+    "tests/source-history-retirement.test.mjs",
   ]);
 
   const verifier = selectGatePlan({

@@ -33,9 +33,8 @@ without expanding Repository or Desktop Main responsibility.
   capabilities after restart.
 - Focused native text fields keep their browser-local undo. Comment cards,
   attachments and other project actions do not enter Canvas history.
-- The legacy `source-history.v1` decoder and Bridge route remain compatibility
-  surfaces during the serial migration. They are not a current v4 history
-  authority or a writer for the memory stack.
+- The former persistent-history decoder and Bridge action route are retired.
+  They cannot become a second history authority or writer for the memory stack.
 
 ## Consequences
 
@@ -46,5 +45,5 @@ without expanding Repository or Desktop Main responsibility.
   restart history migration are no longer needed by the current editing path.
 - Exact patches remain session-local implementation evidence. Runtime DOM is
   never serialized into source or history.
-- PR10 may remove legacy compatibility routes and decoders only after the
-  Developer Preview soak; this PR does not rewrite historical records.
+- Historical project records are not rewritten; the product simply has no
+  reader, writer or action route for the retired journal format.

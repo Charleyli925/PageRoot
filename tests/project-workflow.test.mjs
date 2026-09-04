@@ -17,7 +17,6 @@ import {
   WorkbenchTabsSession,
   projectAppliedEventToWorkbenchTabs,
 } from "../app/application/workbench-tabs-session.js";
-import { createEmptySourceHistory } from "../shared/source-history.mjs";
 import { stopBridgeOrNotifyCloseAborted } from "../desktop/close-recovery.mjs";
 
 const OLD_PATH = "/tmp/project-workflow-old.html";
@@ -228,15 +227,14 @@ function createHarness({
         sourcePath: OLD_PATH,
       },
       sourceHistory: {
-        schemaVersion: "1.0.0",
+        scope: "open-document-memory",
         projectId: "project_old",
         documentId: "document_old",
+        sourcePath: OLD_PATH,
         baseSourceSha256: sha256(OLD_HTML),
         cursor: 0,
         revision: 0,
         entries: [],
-        appliedActions: [],
-        updatedAt: "2026-08-11T00:00:00.000Z",
       },
       sourceHistoryOperations: [],
     }),
@@ -789,12 +787,7 @@ test("real Document and Project workflows protect H1 for navigation, close, and 
     sourceHistorySession.activate(
       context,
       sha256(OLD_HTML),
-      createEmptySourceHistory({
-        projectId: context.projectId,
-        documentId: context.documentId,
-        sourceSha256: sha256(OLD_HTML),
-        now: () => "2026-09-02T00:00:00.000Z",
-      }),
+      null,
     );
     const recoveryValues = new Map();
     return new DocumentWorkflow({
@@ -1110,7 +1103,6 @@ test("production split workspace commits Core without a second source read and f
             project: undefined,
             paths: undefined,
             versions: undefined,
-            sourceHistory: undefined,
           },
           supplemental: {
             operationId: options.operationId,
@@ -1118,7 +1110,6 @@ test("production split workspace commits Core without a second source read and f
             project: flat.project,
             paths: flat.paths,
             versions: flat.versions,
-            sourceHistory: null,
           },
           performanceTiming: { workspaceTotalMs: 9 },
         };
@@ -1173,7 +1164,6 @@ test("Supplemental failure never rolls back committed Core HTML", async (t) => {
             operationId: options.operationId,
             snapshotRevision: `${options.operationId}:revision_2`,
             versions: flat.versions,
-            sourceHistory: { revision: 1 },
           },
         };
       },
@@ -2558,15 +2548,14 @@ test("a Canvas acknowledgement failure rolls the hydration publication back", as
         sourcePath: OLD_PATH,
       },
       sourceHistory: {
-        schemaVersion: "1.0.0",
+        scope: "open-document-memory",
         projectId: "project_old",
         documentId: "document_old",
+        sourcePath: OLD_PATH,
         baseSourceSha256: sha256(OLD_HTML),
         cursor: 0,
         revision: 0,
         entries: [],
-        appliedActions: [],
-        updatedAt: "2026-08-11T00:00:00.000Z",
       },
       sourceHistoryOperations: [],
     },
