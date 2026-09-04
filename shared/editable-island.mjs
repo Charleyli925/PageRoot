@@ -101,6 +101,12 @@ export const IMMUTABLE_EMBED_TAGS = new Set([
   "ul",
   "video",
 ]);
+
+export function isFrozenEditableIslandSubtree(tagName, namespaceURI = HTML_NAMESPACE) {
+  if (namespaceURI !== HTML_NAMESPACE) return true;
+  const tag = String(tagName || "").toLowerCase();
+  return IMMUTABLE_EMBED_TAGS.has(tag) || !INLINE_CONTENT_TAGS.has(tag);
+}
 const RUNTIME_ATTRIBUTE_NAMES = new Set([
   "contenteditable",
   "data-html-ai-source-node-id",
@@ -258,8 +264,7 @@ function protectedAttributeInventory(
       const tagName = node.tagName.toLowerCase();
       const attributes = normalizedAttributes(node);
       if (
-        node.namespaceURI !== HTML_NAMESPACE
-        || IMMUTABLE_EMBED_TAGS.has(tagName)
+        isFrozenEditableIslandSubtree(tagName, node.namespaceURI)
       ) {
         const key = `${tagName}\0${serializeOuter(node)}`;
         atomInventory.set(key, (atomInventory.get(key) ?? 0) + 1);
@@ -267,8 +272,13 @@ function protectedAttributeInventory(
       }
       for (const attribute of attributes) {
         if (attribute.name === PAGEROOT_ELEMENT_ID_ATTRIBUTE) {
-          const key = attribute.value;
-          identities.set(key, (identities.get(key) ?? 0) + 1);
+          // Hard-break anchors may be inserted and deleted as text. Their IDs
+          // are allocated at materialization time and must not freeze the
+          // island against removing a line break the user just created.
+          if (tagName !== "br") {
+            const key = attribute.value;
+            identities.set(key, (identities.get(key) ?? 0) + 1);
+          }
           continue;
         }
         if (!isProtectedAttribute(attribute.name)) continue;
@@ -322,10 +332,7 @@ function sanitizeAndValidateFragment(fragment) {
   const visit = (node) => {
     if (typeof node.tagName === "string") {
       const tagName = node.tagName.toLowerCase();
-      if (
-        node.namespaceURI !== HTML_NAMESPACE
-        || IMMUTABLE_EMBED_TAGS.has(tagName)
-      ) {
+      if (isFrozenEditableIslandSubtree(tagName, node.namespaceURI)) {
         stripRuntimeAttributesDeep(node);
         return;
       }
@@ -523,23 +530,4 @@ export function editableIslandDraftHtml(
     );
   }
   return normalizeEditableIslandHtml(serialize(next), { baselineInnerHtml });
-}
-
-export function normalizeEditableTextFragmentHtml(
-  value,
-  { baselineInnerHtml = "" } = {},
-) {
-  const normalized = normalizeEditableIslandHtml(value, { baselineInnerHtml });
-  const fragment = parseFragment(normalized);
-  const unsupported = childNodesFor(fragment).find(
-    (node) => node.nodeName !== "#text",
-  );
-  if (unsupported) {
-    fail(
-      "EDITABLE_TEXT_FRAGMENT_STRUCTURE_UNSUPPORTED",
-      "A direct source text fragment can only contain plain text.",
-      { nodeName: unsupported.nodeName },
-    );
-  }
-  return serialize(fragment);
 }

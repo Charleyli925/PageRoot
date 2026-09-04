@@ -15,11 +15,8 @@ const SHA256 = /^sha256:[a-f0-9]{64}$/u;
 function isNativeEditCheckpoint(mutation) {
   return Boolean(
     mutation
-    && mutation.kind === "text"
-    && (
-      mutation.property === "editableIslandHtml"
-      || mutation.property === "textFragmentHtml"
-    ),
+    &&     mutation.kind === "text"
+    && mutation.property === "editableIslandHtml",
   );
 }
 

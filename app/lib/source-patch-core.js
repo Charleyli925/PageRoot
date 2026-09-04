@@ -32,7 +32,6 @@ export {
   SourcePatchError,
   applyPatchPlan,
   parseInlineStyle,
-  planDirectTextNodePatch,
   planEditableIslandPatch,
   planInlineStylePatch,
   planSemanticOperationPatch,

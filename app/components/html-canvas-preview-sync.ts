@@ -1,6 +1,5 @@
 import {
   createTargetRef,
-  planSourcePatch,
   resolveTargetRef,
 } from "../lib/source-patch-core.js";
 import { isEditableIslandTarget } from "../lib/editable-island.js";
@@ -17,7 +16,6 @@ import type {
   SourceElementValue,
   SourceIndexValue,
   SourceTargetRef,
-  ActiveTextRange,
   TextRangeSegment,
 } from "./html-canvas-internal-types";
 
@@ -106,175 +104,6 @@ export function nativeEditHostForElement(
     candidate = parentCandidate;
   }
   return nearestSafeCandidate;
-}
-
-export type NativeTextFragmentCandidate = {
-  parentElement: HTMLElement;
-  textNode: Text;
-  textNodeId: string;
-  parentElementId: string | null;
-  directTextOrdinal: number;
-  textTargetRef: SourceTargetRef;
-  sourceInnerHtml: string;
-};
-
-function nativeTextFragmentForDirectText(
-  parentElement: HTMLElement,
-  textNode: Text,
-  sourceIndex: SourceIndexValue,
-): NativeTextFragmentCandidate | null {
-  if (
-    !isCanonicalSourceElement(parentElement, sourceIndex)
-    || nativeEditHostForElement(parentElement, sourceIndex)
-    || textNode.parentElement !== parentElement
-  ) return null;
-  const parentDisplay = parentElement.ownerDocument.defaultView
-    ?.getComputedStyle(parentElement).display ?? "";
-  if (["flex", "inline-flex", "grid", "inline-grid"].includes(parentDisplay)) {
-    return null;
-  }
-  const sourceText = sourceTextNodeForDomText(textNode, sourceIndex);
-  const sourceParent = sourceElementFromDom(parentElement, sourceIndex);
-  const sourceNode = sourceText ? sourceIndex.byNodeId.get(sourceText.nodeId) : null;
-  if (
-    !sourceText
-    || sourceParent?.type !== "element"
-    || sourceNode?.type !== "text"
-    || sourceNode.parentId !== sourceParent.nodeId
-  ) return null;
-  try {
-    const parentTargetRef = createTargetRef(sourceIndex, sourceParent, {
-      level: "subregion",
-    }) as SourceTargetRef;
-    const textTargetRef = createTargetRef(sourceIndex, sourceNode, {
-      level: "text",
-    }) as SourceTargetRef;
-    const parentIslandCapability = isEditableIslandTarget(
-      sourceIndex,
-      parentTargetRef,
-    );
-    if (
-      parentIslandCapability.editable
-      || parentIslandCapability.code !== "EDITABLE_ISLAND_STRUCTURE_UNSUPPORTED"
-    ) return null;
-    const sourceInnerHtml = sourceIndex.source.slice(
-      sourceNode.range.startOffset,
-      sourceNode.range.endOffset,
-    );
-    const ordinal = Math.max(0, sourceParent.textNodeIds.indexOf(sourceText.nodeId));
-    planSourcePatch({
-      type: "update-direct-text-node",
-      targetRef: parentTargetRef,
-      textTargetRef,
-      elementId: sourceParent.pagerootId,
-      parentElementId: sourceParent.pagerootId,
-      directTextOrdinal: ordinal,
-      beforeFragmentHtml: sourceInnerHtml,
-      nextFragmentHtml: sourceInnerHtml,
-      expectedSourceSha256: sourceIndex.sourceSha256,
-    }, sourceIndex);
-    return {
-      parentElement,
-      textNode,
-      textNodeId: sourceText.nodeId,
-      parentElementId: sourceParent.pagerootId ?? null,
-      directTextOrdinal: ordinal,
-      textTargetRef,
-      sourceInnerHtml,
-    };
-  } catch {
-    return null;
-  }
-}
-
-export function nativeTextFragmentForRange(
-  range: ActiveTextRange | null,
-  sourceIndex: SourceIndexValue,
-): NativeTextFragmentCandidate | null {
-  if (!range || range.segments.length !== 1 || !range.target.elementId) return null;
-  const segment = range.segments[0];
-  const sourceText = sourceIndex.byNodeId.get(segment.textNodeId);
-  const sourceParent = range.target.elementId
-    ? sourceIndex.byPagerootId.get(range.target.elementId)
-    : null;
-  if (
-    sourceText?.type !== "text"
-    || sourceParent?.type !== "element"
-    || sourceText.parentId !== sourceParent.nodeId
-    || segment.startOffset < 0
-    || segment.endOffset > sourceText.value.length
-    || segment.endOffset <= segment.startOffset
-  ) return null;
-  const documentNode = range.styleElements[0]?.ownerDocument;
-  const parentElement = sourceParent.pagerootId && documentNode
-    ? uniqueSourceElement(documentNode, sourceParent.pagerootId)
-    : null;
-  if (!parentElement) return null;
-  const textNode = Array.from(parentElement.childNodes).find((node): node is Text => (
-    node.nodeType === 3
-    && sourceTextNodeForDomText(node as Text, sourceIndex)?.nodeId === sourceText.nodeId
-  )) ?? null;
-  if (!textNode) return null;
-  return nativeTextFragmentForDirectText(parentElement, textNode, sourceIndex);
-}
-
-export function nativeTextFragmentForElement(
-  element: HTMLElement,
-  sourceIndex: SourceIndexValue,
-  textNodeHint?: Text | null,
-): NativeTextFragmentCandidate | null {
-  const parentElement = element.closest<HTMLElement>(`[${SOURCE_ELEMENT_ATTRIBUTE}]`);
-  if (!parentElement) return null;
-  const hinted = textNodeHint
-    && parentElement.contains(textNodeHint)
-    && textNodeHint.parentElement === parentElement
-    ? textNodeHint
-    : null;
-  if (hinted) {
-    return nativeTextFragmentForDirectText(parentElement, hinted, sourceIndex);
-  }
-  const directTextNodes = Array.from(parentElement.childNodes).filter((node): node is Text => {
-    if (node.nodeType !== 3) return false;
-    const textNode = node as Text;
-    return Boolean(textNode.data.trim())
-      && Boolean(sourceTextNodeForDomText(textNode, sourceIndex));
-  });
-  if (directTextNodes.length !== 1) return null;
-  return nativeTextFragmentForDirectText(
-    parentElement,
-    directTextNodes[0],
-    sourceIndex,
-  );
-}
-
-export const TEXT_FRAGMENT_HOST_ATTRIBUTE = "data-pageroot-text-fragment-host";
-
-export function mountNativeTextFragmentHost(textNode: Text): {
-  hostElement: HTMLElement;
-  release: () => void;
-} | null {
-  const parentNode = textNode.parentNode;
-  if (!parentNode) return null;
-  const hostElement = textNode.ownerDocument.createElement("pageroot-text-fragment");
-  hostElement.setAttribute(TEXT_FRAGMENT_HOST_ATTRIBUTE, "true");
-  hostElement.style.setProperty("all", "unset", "important");
-  hostElement.style.setProperty("display", "inline", "important");
-  parentNode.insertBefore(hostElement, textNode);
-  hostElement.appendChild(textNode);
-  let released = false;
-  return {
-    hostElement,
-    release: () => {
-      if (released) return;
-      released = true;
-      const mountedParent = hostElement.parentNode;
-      if (!mountedParent) return;
-      while (hostElement.firstChild) {
-        mountedParent.insertBefore(hostElement.firstChild, hostElement);
-      }
-      hostElement.remove();
-    },
-  };
 }
 
 export function sourceTextParentsForSegments(

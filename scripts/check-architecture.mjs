@@ -108,6 +108,7 @@ const PARSE_KEY_ALLOWED_FILES = new Set([
 ]);
 const PAGE_VIEW_CONTEXT_FILE = ["app", "lib", "page-view-context.js"].join("/");
 const DOCUMENT_WORKFLOW_FILE = ["app", "application", "document-workflow.js"].join("/");
+const TEXT_FRAGMENT_HOST_LITERAL = ["pageroot", "text", "fragment"].join("-");
 const PAGE_VIEW_CONTEXT_RETIRED_ADAPTERS =
   /\bdata-p\b|\bdata-tab\b|resolveDataLinkedTabAction|resolveIndexedHandlerTabAction|SIMPLE_INDEXED_TAB_HANDLER|LEGACY_TAB_/u;
 const PROVIDER_LITERALS = ["qoder", "codex", "qoder-acp", "codex-acp"];
@@ -385,6 +386,21 @@ export function retiredArtifactViolations({ file = "", source = "", module = nul
   if (hasIdentifier(handle, "liveExactCommandTarget")) {
     violations.push(
       `${file}: liveExactCommandTarget cannot return; SourcePatch authorizes only by Stable ID`,
+    );
+  }
+  if (hasIdentifier(handle, "planDirectTextNodePatch")) {
+    violations.push(
+      `${file}: planDirectTextNodePatch cannot return; text edits use replace-editable-island`,
+    );
+  }
+  if (hasIdentifier(handle, "mountNativeTextFragmentHost")) {
+    violations.push(
+      `${file}: disposable text-fragment hosts cannot return`,
+    );
+  }
+  if (source.includes(TEXT_FRAGMENT_HOST_LITERAL)) {
+    violations.push(
+      `${file}: disposable text-fragment hosts cannot return`,
     );
   }
   if (

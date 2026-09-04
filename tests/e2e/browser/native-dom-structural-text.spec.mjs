@@ -86,23 +86,26 @@ async function directTextPoint(element, textSnippet) {
   }, textSnippet);
 }
 
-async function selectTextRange(element, start, end) {
-  await element.evaluate((node, offsets) => {
+async function selectDirectText(element, snippet, startOffset = 0, length = snippet.length) {
+  await element.evaluate((node, { snippet: textSnippet, startOffset: start, length: count }) => {
     const text = Array.from(node.childNodes).find(
-      (child) => child.nodeType === Node.TEXT_NODE,
+      (child) => child.nodeType === Node.TEXT_NODE && child.textContent?.includes(textSnippet),
     );
-    if (!(text instanceof Text)) throw new Error("Fragment host has no direct text node.");
-    if (offsets.start < 0 || offsets.end < offsets.start || offsets.end > text.data.length) {
-      throw new RangeError(`Selection ${offsets.start}:${offsets.end} exceeds fragment text.`);
+    if (!(text instanceof Text)) throw new Error(`Fixture has no direct text matching ${textSnippet}.`);
+    const base = text.data.indexOf(textSnippet);
+    const rangeStart = base + start;
+    const rangeEnd = rangeStart + count;
+    if (rangeStart < 0 || rangeEnd < rangeStart || rangeEnd > text.data.length) {
+      throw new RangeError(`Selection ${rangeStart}:${rangeEnd} exceeds ${text.data}.`);
     }
     node.focus({ preventScroll: true });
     const range = document.createRange();
-    range.setStart(text, offsets.start);
-    range.setEnd(text, offsets.end);
+    range.setStart(text, rangeStart);
+    range.setEnd(text, rangeEnd);
     const selection = document.getSelection();
     selection?.removeAllRanges();
     selection?.addRange(range);
-  }, { start, end });
+  }, { snippet, startOffset, length });
 }
 
 test("nested list headings and wbr text edit without changing their authored structure", async ({
@@ -164,7 +167,7 @@ test("nested list headings and wbr text edit without changing their authored str
   expect((await exportCurrentHtml(page)).equals(expected)).toBe(true);
 });
 
-test("mixed block parents fall back to safe inline hosts and exact bare-text fragments", {
+test("mixed block parents edit as one frozen-subtree island", {
   tag: ["@gate-smoke","@smoke-editing"],
 }, async ({
   page,
@@ -177,11 +180,13 @@ test("mixed block parents fall back to safe inline hosts and exact bare-text fra
   });
   const mixedParent = frame.locator(caseSelector("mixed-parent"));
   const mixedInline = frame.locator(caseSelector("mixed-inline"));
+  const frozenChart = mixedParent.locator(':scope > div[data-keep="chart"]');
 
   await mixedInline.dblclick({ force: true });
-  await expect(mixedInline).toHaveAttribute("contenteditable", "true");
-  await expect(mixedParent).not.toHaveAttribute("contenteditable", "true");
-  expect(await mixedInline.evaluate(() => document.getSelection()?.isCollapsed)).toBe(true);
+  await expect(mixedParent).toHaveAttribute("contenteditable", "true");
+  await expect(mixedInline).not.toHaveAttribute("contenteditable", "true");
+  await expect(frozenChart).toHaveAttribute("contenteditable", "false");
+  expect(await mixedParent.evaluate(() => document.getSelection()?.isCollapsed)).toBe(true);
   await selectElementText(mixedInline);
   await page.keyboard.type("强化文字");
   await page.keyboard.press("Escape");
@@ -194,18 +199,17 @@ test("mixed block parents fall back to safe inline hosts and exact bare-text fra
 
   const bareTextPoint = await directTextPoint(mixedParent, "裸文本");
   await mixedParent.dblclick({ position: bareTextPoint, force: true });
-  const fragmentHost = mixedParent.locator(
-    ':scope > pageroot-text-fragment[data-pageroot-text-fragment-host="true"]',
-  );
-  await expect(fragmentHost).toHaveAttribute("contenteditable", "true");
-  await expect(mixedParent).not.toHaveAttribute("contenteditable", "true");
-  expect(await fragmentHost.evaluate(() => document.getSelection()?.isCollapsed)).toBe(true);
-  await selectElementText(fragmentHost);
+  await expect(mixedParent).toHaveAttribute("contenteditable", "true");
+  await expect(frozenChart).toHaveAttribute("contenteditable", "false");
+  expect(await mixedParent.evaluate(() => document.getSelection()?.isCollapsed)).toBe(true);
+  await selectDirectText(mixedParent, "，裸文本");
   await page.keyboard.type("，新版裸文本");
-  await expect(fragmentHost).toHaveText("，新版裸文本");
-  await fragmentHost.evaluate((element) => {
-    const text = element.lastChild;
-    if (!(text instanceof Text)) throw new Error("Fragment host has no text node.");
+  await expect(mixedParent).toContainText("，新版裸文本");
+  await mixedParent.evaluate((element) => {
+    const text = Array.from(element.childNodes).find(
+      (child) => child.nodeType === Node.TEXT_NODE && child.textContent?.includes("，新版裸文本"),
+    );
+    if (!(text instanceof Text)) throw new Error("Island has no edited text node.");
     element.focus({ preventScroll: true });
     const selection = document.getSelection();
     const range = document.createRange();
@@ -229,14 +233,12 @@ test("mixed block parents fall back to safe inline hosts and exact bare-text fra
       data: "你",
     }));
   });
-  await expect(fragmentHost).toHaveText("，新版裸文本你");
+  await expect(mixedParent).toContainText("，新版裸文本你");
   await page.keyboard.press("Meta+s");
-  await expect(fragmentHost).toHaveAttribute("contenteditable", "true");
+  await expect(mixedParent).toHaveAttribute("contenteditable", "true");
   expected = replaceExactOnce(expected, "，裸文本", "，新版裸文本你");
   expect((await exportCurrentHtml(page)).equals(expected)).toBe(true);
-  await expect(mixedParent.locator(':scope > div[data-keep="chart"]')).toHaveText(
-    "图表结构保持",
-  );
+  await expect(frozenChart).toHaveText("图表结构保持");
   await expect(mixedParent.locator(':scope > span[data-keep="tail"]')).toHaveText("尾注");
 
   const ordinary = frame.locator(caseSelector("ordinary-inline"));
@@ -255,7 +257,7 @@ test("mixed block parents fall back to safe inline hosts and exact bare-text fra
   expect((await exportCurrentHtml(page)).equals(expected)).toBe(true);
 });
 
-test("bare-text fragments persist toolbar and shortcut formatting through guarded source patches", {
+test("mixed island formatting wraps selected sibling text without leaving the host", {
   tag: ["@gate-smoke","@smoke-editing"],
 }, async ({
   page,
@@ -267,10 +269,6 @@ test("bare-text fragments persist toolbar and shortcut formatting through guarde
     identifiedWorkingCopy: false,
   });
   const mixedParent = frame.locator(caseSelector("mixed-parent"));
-  const fragmentHost = mixedParent.locator(
-    'pageroot-text-fragment[data-pageroot-text-fragment-host="true"]',
-  );
-  const editingHost = mixedParent.locator('[contenteditable="true"]');
   const initialDocument = await frame.evaluate(() => {
     const key = "__PAGEROOT_FORMAT_DOCUMENT_TOKEN__";
     window[key] ||= crypto.randomUUID();
@@ -281,33 +279,29 @@ test("bare-text fragments persist toolbar and shortcut formatting through guarde
     position: await directTextPoint(mixedParent, "裸文本"),
     force: true,
   });
-  await expect(fragmentHost).toHaveAttribute("contenteditable", "true");
-  await selectTextRange(fragmentHost, 1, 2);
+  await expect(mixedParent).toHaveAttribute("contenteditable", "true");
+  await selectDirectText(mixedParent, "，裸文本", 1, 1);
   const boldButton = page.getByRole("button", { name: "加粗", exact: true });
   await expect(boldButton).toBeEnabled();
   await boldButton.click();
   await expect.poll(async () => ({
-    fragmentCount: await fragmentHost.count(),
     startStatus: await page.getByTestId("html-canvas-editor")
       .getAttribute("data-native-start-status"),
-    formatResume: await page.getByTestId("html-canvas-editor")
-      .getAttribute("data-native-format-resume"),
     blockedDetail: await page.getByTestId("html-canvas-editor")
       .getAttribute("data-edit-block-detail"),
     candidateId: await page.getByTestId("html-canvas-editor")
       .getAttribute("data-runtime-candidate-id"),
-    editingTags: await editingHost
-      .evaluateAll((elements) => elements.map((element) => element.tagName)),
+    editingTags: await mixedParent.evaluate((element) => (
+      element.getAttribute("contenteditable") === "true" ? [element.tagName] : []
+    )),
   })).toEqual({
-    fragmentCount: 0,
     startStatus: "started",
-    formatResume: "source:requested:resumed",
     blockedDetail: null,
     candidateId: null,
-    editingTags: ["SPAN"],
+    editingTags: ["DIV"],
   });
-  await expect(editingHost).toHaveAttribute("contenteditable", "true");
-  await expect.poll(() => editingHost.evaluate((element) => (
+  await expect(mixedParent).toHaveAttribute("contenteditable", "true");
+  await expect.poll(() => mixedParent.evaluate((element) => (
     element.ownerDocument.activeElement === element
   ))).toBe(true);
   expect(await frame.evaluate(() => window.__PAGEROOT_FORMAT_DOCUMENT_TOKEN__))
@@ -329,17 +323,17 @@ test("bare-text fragments persist toolbar and shortcut formatting through guarde
   ));
   await expect(page.locator(".toast.show")).toHaveCount(0);
   await page.keyboard.press("Escape");
-  await expect(editingHost).toHaveCount(0);
+  await expect(mixedParent).not.toHaveAttribute("contenteditable", "true");
 
   await mixedParent.dblclick({
     position: await directTextPoint(mixedParent, "文本"),
     force: true,
   });
-  await expect(fragmentHost).toHaveAttribute("contenteditable", "true");
-  await selectTextRange(fragmentHost, 0, 2);
+  await expect(mixedParent).toHaveAttribute("contenteditable", "true");
+  await selectDirectText(mixedParent, "文本", 0, 2);
   await page.keyboard.press("Meta+i");
-  await expect(editingHost).toHaveAttribute("contenteditable", "true");
-  await expect.poll(() => editingHost.evaluate((element) => (
+  await expect(mixedParent).toHaveAttribute("contenteditable", "true");
+  await expect.poll(() => mixedParent.evaluate((element) => (
     element.ownerDocument.activeElement === element
   ))).toBe(true);
   expect(await frame.evaluate(() => window.__PAGEROOT_FORMAT_DOCUMENT_TOKEN__))
@@ -366,7 +360,7 @@ test("bare-text fragments persist toolbar and shortcut formatting through guarde
   await expect(mixedParent.locator(':scope > span[data-keep="tail"]')).toHaveText("尾注");
 });
 
-test("deleting a bare-text fragment ends its session without a blocked resume", {
+test("deleting sibling bare text keeps the mixed island session open", {
   tag: ["@gate-smoke","@smoke-editing"],
 }, async ({
   page,
@@ -378,16 +372,13 @@ test("deleting a bare-text fragment ends its session without a blocked resume", 
     identifiedWorkingCopy: false,
   });
   const mixedParent = frame.locator(caseSelector("mixed-parent"));
-  const fragmentHost = mixedParent.locator(
-    ':scope > pageroot-text-fragment[data-pageroot-text-fragment-host="true"]',
-  );
 
   await mixedParent.dblclick({
     position: await directTextPoint(mixedParent, "裸文本"),
     force: true,
   });
-  await expect(fragmentHost).toHaveAttribute("contenteditable", "true");
-  await selectElementText(fragmentHost);
+  await expect(mixedParent).toHaveAttribute("contenteditable", "true");
+  await selectDirectText(mixedParent, "，裸文本");
   await page.keyboard.press("Backspace");
 
   const expected = replaceExactOnce(
@@ -395,13 +386,12 @@ test("deleting a bare-text fragment ends its session without a blocked resume", 
     "，裸文本<span",
     "<span",
   );
-  await expect(fragmentHost).toHaveCount(0);
-  await expect(mixedParent).not.toHaveAttribute("contenteditable", "true");
+  await expect(mixedParent).toHaveAttribute("contenteditable", "true");
   await expect.poll(() => editor.getAttribute("data-edit-block-detail")).toBeNull();
   await expect(editor).toHaveAttribute("data-render-verified", "true");
-  // Export only after the terminal source patch has reconnected its iframe;
-  // otherwise this assertion races a keyboard event against navigation.
-  expect((await exportCurrentHtml(page, "Control+Shift+E")).equals(expected)).toBe(true);
+  await expect.poll(async () => (
+    (await exportCurrentHtml(page)).equals(expected)
+  )).toBe(true);
   await expect(page.locator(".toast.show")).toHaveCount(0);
   await expect(mixedParent.locator(':scope > div[data-keep="chart"]')).toHaveText(
     "图表结构保持",

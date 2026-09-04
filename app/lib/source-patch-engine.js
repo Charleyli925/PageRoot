@@ -15,10 +15,8 @@ import {
 } from "../../shared/semantic-structure-plan.mjs";
 import {
   editableIslandForTarget,
-  isEditableIslandTarget,
   materializeEditableIslandHtml,
   normalizeEditableIslandHtml,
-  normalizeEditableTextFragmentHtml,
 } from "./editable-island.js";
 import { isNativeDirectEditRoot } from "./native-edit-capability.js";
 import {
@@ -111,12 +109,6 @@ function commandTargetRef(index, command, key = "targetRef") {
 }
 
 function liveElementIdFromCommand(command, key) {
-  if (key === "textTargetRef") {
-    return command.textTargetRef?.elementId
-      || command.hostElementId
-      || command.parentElementId
-      || null;
-  }
   if (key === "beforeTargetRef") {
     return command.beforeElementId || command.beforeTargetRef?.elementId || null;
   }
@@ -138,44 +130,6 @@ function officialCommandTarget(index, command, key = "targetRef") {
     );
   }
   const original = command[key];
-  if (key === "textTargetRef") {
-    if (Number.isInteger(command.directTextOrdinal) && command.directTextOrdinal >= 0) {
-      const ordinal = command.directTextOrdinal;
-      const textNodeId = element.textNodeIds?.[ordinal];
-      const node = textNodeId ? index.byNodeId.get(textNodeId) : null;
-      if (!node || node.type !== "text") {
-        fail(
-          "UNSUPPORTED_TARGET_TYPE",
-          "This edit requires a text target.",
-          { elementId, key, directTextOrdinal: ordinal },
-        );
-      }
-      return createTargetRef(index, node, {
-        targetId: original?.targetId,
-        label: original?.label,
-        level: "text",
-      });
-    }
-    if (original?.level === "text" && original.elementId === elementId) {
-      return original;
-    }
-    const uniqueTextId = element.textNodeIds?.length === 1
-      ? element.textNodeIds[0]
-      : null;
-    const uniqueText = uniqueTextId ? index.byNodeId.get(uniqueTextId) : null;
-    if (uniqueText?.type === "text") {
-      return createTargetRef(index, uniqueText, {
-        targetId: original?.targetId,
-        label: original?.label,
-        level: "text",
-      });
-    }
-    fail(
-      "TARGET_REQUIRED",
-      "Direct text edits require a live text ordinal for this Stable ID.",
-      { elementId, key },
-    );
-  }
   return createTargetRef(index, element, {
     targetId: original?.targetId,
     label: original?.label,
@@ -826,120 +780,6 @@ export function planSemanticEditableIslandPatch(
     token: EDITABLE_ISLAND_ID_REPLAY_TOKEN,
     pagerootIds: createdPagerootIds,
   });
-}
-
-export function planDirectTextNodePatch(indexOrHtml, command) {
-  const index = typeof indexOrHtml === "string"
-    ? buildSourceIndex(indexOrHtml)
-    : indexOrHtml;
-  const parentTargetRef = commandTargetRef(index, command);
-  const parentResolution = resolvedTarget(index, parentTargetRef, "element");
-  const parent = parentResolution.target;
-  const textTargetRef = commandTargetRef(index, command, "textTargetRef");
-  const textResolution = resolvedTarget(index, textTargetRef, "text");
-  const textNode = textResolution.target;
-  if (
-    parent.namespaceURI !== "http://www.w3.org/1999/xhtml"
-    || !parent.boundarySafe
-    || !supportsTextRangeEditing(parent.tagName)
-    || TEXT_RANGE_UNSAFE_CONTEXT_ELEMENTS.has(parent.tagName)
-  ) {
-    fail(
-      "TEXT_FRAGMENT_UNSAFE_CONTEXT",
-      `Direct text replacement is unsafe inside <${parent.tagName}>.`,
-      { parentId: parent.nodeId, tagName: parent.tagName },
-    );
-  }
-  if (textNode.parentId !== parent.nodeId) {
-    fail(
-      "TEXT_FRAGMENT_TARGET_MISMATCH",
-      "The source text fragment is not a direct child of its authorized parent.",
-      { parentId: parent.nodeId, textNodeId: textNode.nodeId },
-    );
-  }
-
-  const currentParentTargetRef = refreshResolvedTargetRef(
-    index,
-    parentTargetRef,
-    parent,
-  );
-  const parentIslandCapability = isEditableIslandTarget(
-    index,
-    currentParentTargetRef,
-  );
-  if (
-    parentIslandCapability.editable
-    || parentIslandCapability.code !== "EDITABLE_ISLAND_STRUCTURE_UNSUPPORTED"
-  ) {
-    fail(
-      "TEXT_FRAGMENT_PARENT_UNSUPPORTED",
-      "Direct text fragments are limited to structurally complex HTML parents.",
-      {
-        parentId: parent.nodeId,
-        islandCapability: parentIslandCapability.code,
-      },
-    );
-  }
-  const currentTextTargetRef = refreshResolvedTargetRef(
-    index,
-    textTargetRef,
-    textNode,
-  );
-  const beforeFragmentHtml = index.source.slice(
-    textNode.range.startOffset,
-    textNode.range.endOffset,
-  );
-  if (
-    Object.hasOwn(command, "beforeFragmentHtml")
-    && command.beforeFragmentHtml !== beforeFragmentHtml
-  ) {
-    fail(
-      "STALE_BEFORE_CONTENT",
-      "The direct source text changed after this edit began.",
-      { expected: command.beforeFragmentHtml, actual: beforeFragmentHtml },
-    );
-  }
-  if (!Object.hasOwn(command, "nextFragmentHtml")) {
-    fail(
-      "NEXT_TEXT_FRAGMENT_HTML_REQUIRED",
-      "Direct text replacement is missing nextFragmentHtml.",
-    );
-  }
-  const nextFragmentHtml = normalizeEditableTextFragmentHtml(
-    String(command.nextFragmentHtml),
-    { baselineInnerHtml: beforeFragmentHtml },
-  );
-  const patch = sourcePatch(
-    textNode.range.startOffset,
-    textNode.range.endOffset,
-    beforeFragmentHtml,
-    nextFragmentHtml,
-    {
-      kind: "direct-text-node",
-      nodeId: textNode.nodeId,
-      parentId: parent.nodeId,
-    },
-  );
-  return makePlan(
-    index,
-    { ...command, type: "update-direct-text-node" },
-    nextFragmentHtml === beforeFragmentHtml ? [] : [patch],
-    [currentParentTargetRef],
-    {
-      resolution: parentResolution.resolution,
-      textResolution: textResolution.resolution,
-      parentNodeId: parent.nodeId,
-      textNodeId: textNode.nodeId,
-      directTextOrdinal: Number.isInteger(command.directTextOrdinal)
-        ? command.directTextOrdinal
-        : parent.textNodeIds.indexOf(textNode.nodeId),
-      textTargetRef: currentTextTargetRef,
-      beforeFragmentHtml,
-      nextFragmentHtml,
-      beforeText: textNode.value,
-      writeScope: "direct-source-text-node",
-    },
-  );
 }
 
 function normalizePropertyName(property) {
@@ -1840,9 +1680,6 @@ export function planSourcePatch(command, indexOrHtml) {
     case "editable-island":
     case "replace-editable-island":
       return planEditableIslandPatch(index, command);
-    case "direct-text-node":
-    case "update-direct-text-node":
-      return planDirectTextNodePatch(index, command);
     case "style":
     case "set-inline-style":
       return planInlineStylePatch(index, command);
@@ -2097,7 +1934,6 @@ function authorizePatchPlan(plan, index, patches) {
   const operationType = operationTypeForPlan(plan);
   if (![
     "replace-editable-island",
-    "update-direct-text-node",
     "set-inline-style",
     "set-text-range-style",
     "reorder-sibling",
@@ -2180,51 +2016,6 @@ function authorizePatchPlan(plan, index, patches) {
         fail(
           "PATCH_PLAN_TAMPERED",
           "Editable island patch does not match the declared operation metadata.",
-        );
-      }
-    }
-  }
-
-  if (operationType === "update-direct-text-node") {
-    if (targetRefs.length !== 1 || resolutions[0].target.type !== "element") {
-      fail(
-        "PATCH_TARGET_COUNT_INVALID",
-        "Direct text replacement requires exactly one parent element TargetRef.",
-      );
-    }
-    const parent = resolutions[0].target;
-    for (const patch of patches) {
-      const patchKind = String(patch.kind ?? "").replace(/^(?:inverse:)+/, "");
-      if (patchKind !== "direct-text-node") {
-        fail(
-          "PATCH_KIND_MISMATCH",
-          "Direct text replacement has an unrelated source operation.",
-          { patch },
-        );
-      }
-      assertPatchWithin(
-        patch,
-        parent.contentRange,
-        "PATCH_OUTSIDE_TARGET",
-        "Direct text replacement is outside its authorized parent.",
-      );
-    }
-    if (!isInverse) {
-      const expected = planDirectTextNodePatch(index, {
-        type: "update-direct-text-node",
-        targetRef: targetRefs[0],
-        textTargetRef: plan.metadata?.textTargetRef,
-        elementId: targetRefs[0]?.elementId,
-        parentElementId: targetRefs[0]?.elementId,
-        directTextOrdinal: plan.metadata?.directTextOrdinal,
-        beforeFragmentHtml: plan.metadata?.beforeFragmentHtml,
-        nextFragmentHtml: plan.metadata?.nextFragmentHtml,
-        expectedSourceSha256: index.sourceSha256,
-      });
-      if (!patchesEqual(patches, expected.patches)) {
-        fail(
-          "PATCH_PLAN_TAMPERED",
-          "Direct text patches do not match the declared operation metadata.",
         );
       }
     }

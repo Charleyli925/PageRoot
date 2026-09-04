@@ -7,8 +7,8 @@ User HTML bytes
   -> SourceIndex / TargetResolver
   -> isolated authored-DOM preview
   -> native Selection + IslandEditingController
-  -> canonical editable island or exact direct-text-node fragment
-  -> semantic operation foundation or current exact content/text SourcePatch
+  -> canonical editable island (non-inline descendants stay frozen atoms)
+  -> semantic operation foundation or current exact content SourcePatch
   -> renderer SourceHistorySession + normal complete-HTML autosave
   -> serialized atomic file writer
 
@@ -253,9 +253,8 @@ the historical synthetic-spike decision.
   runtime mutation has source, Version or project authority.
 - `IslandEditingController` is the only production text-edit engine in PageRoot 0.9.0. `contenteditable="true"` supplies focus, caret, Selection and IME composition, while the controller owns insertion, deletion, line breaks, paste and formatting. Chromium DOM serialization never has commit authority.
 - `editable-island` owns the V2 capability and normalization contract. An accepted edit replaces only the selected element's parsed `contentRange`; bytes outside that range remain exact. Inside the range, parse5 may perform the smallest safe normalization needed to preserve inline semantics, comments and immutable authored atoms.
-- Transparent inline host discovery records the nearest safe editable island while climbing. If the next parent is structurally unsafe, editing stays on that safe descendant instead of promoting to the unsafe parent.
-- A direct source text node under a structurally unsafe parent may use the same controller through a disposable, layout-checked inline host. Its `update-direct-text-node` transaction is authorized by the surviving parent TargetRef but patches only the exact text-node source range. The disposable host and its attributes never enter source.
--- `native-edit-policy` owns shared session attributes and checkpoint timing. `native-layout-fingerprint` records geometry and text style so `HtmlCanvasEditor` can observe post-entry drift; it does not refuse to enter an island. MutationObserver rollback and checkpoint scope remain the fail-closed safety net. The retired `nativeRuntimePreflight` / `RuntimeDomSourceMap` stack is not on the production path; `HtmlCanvasEditor` only coordinates selection, the island session and SourcePatch.
+- Transparent inline host discovery records the nearest safe editable island while climbing. Nested non-inline HTML, embeds and foreign subtrees stay frozen atoms inside that island; they are never a second text engine or a disposable fragment host.
+- `native-edit-policy` owns shared session attributes and checkpoint timing. `native-layout-fingerprint` records geometry and text style so `HtmlCanvasEditor` can observe post-entry drift; it does not refuse to enter an island. MutationObserver rollback and checkpoint scope remain the fail-closed safety net. The retired `nativeRuntimePreflight` / `RuntimeDomSourceMap` stack is not on the production path; `HtmlCanvasEditor` only coordinates selection, the island session and SourcePatch.
 
 ## Module map
 
@@ -341,7 +340,7 @@ services.
 | Formal AI review composition, private comment/projection port lifecycle and isolated-frame coordination | `app/workbench/AiReviewWorkspace.tsx` |
 
 The V2 source-fidelity path remains a protected core: `SourceIndex`,
-`TargetResolver`, `editable-island`, direct-text-node normalization, `IslandEditingController`,
+`TargetResolver`, `editable-island`, `IslandEditingController`,
 `SemanticOperationKernel` owns the pure stable-ID operation contract and lowers
 to `SourcePatchEngine`; PR4 does not yet switch Canvas, history or persistence.
 The complete next HTML remains source-derived and Runtime DOM is never
@@ -350,8 +349,7 @@ proven invariant, not to satisfy a line-count target. The retired V1
 `NativeEditingController`, its per-keystroke tracker, shadow block draft,
 FormatSkeleton and structural planner have been removed. The architecture gate
 rejects reintroducing those files or imports; production text editing has one
-V2 controller route with element-island and exact direct-text-node transaction
-scopes.
+V2 controller route with one element-island transaction scope.
 
 `SourceIndex` also recognizes the ADR 0059 `data-pageroot-id` contract and maps
 only valid, document-unique values back to exact source element records. Missing,
@@ -436,10 +434,11 @@ Immutable Versions, frozen Requests and Runtime DOM are never migration inputs
 or destinations.
 On the existing direct-edit path, `IslandEditingController` retains IDs on
 authored descendants and allocates an ID when the browser creates a new inline
-wrapper or line break; the text-range style planner likewise identifies each
-new source wrapper. The Repository verifies that every current claim survives
-and may fill only otherwise-valid missing IDs on genuinely new source elements
-before the CAS; it never repairs a lost prior claim.
+wrapper or line break; deleting that hard break retires its ID with the node.
+The text-range style planner likewise identifies each new source wrapper. The
+Repository verifies that every current non-break claim survives and may fill
+only otherwise-valid missing IDs on genuinely new source elements before the
+CAS; it never repairs a lost prior claim.
 
 `/autosave` retains its own transport decoding and revision checks, then
 delegates the current-source write to `ProjectFileRepository`. Path safety,

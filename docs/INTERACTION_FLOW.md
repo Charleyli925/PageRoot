@@ -151,8 +151,7 @@ AI 审阅、导入确认、冲突、处理锁定和画布尚未 `verified` 时�
 不足时移到轮廓下方，且始终限制在画布横向范围内；快速掠过不显示任何 Hover
 装饰。
 文案只有三句，且必须复用真实进入文字编辑的证明
-（`nativeEditHostForElement` / `isEditableIslandTarget` /
-`nativeTextFragmentForElement`），不能按标签名猜测。按钮里可安全改的字
+（`nativeEditHostForElement` / `isEditableIslandTarget`），不能按标签名猜测。按钮里可安全改的字
 优先「双击文字直接编辑」。能映射到源码目标时「单击选择并评论」，否则
 「可添加评论交给 AI」。选中且工具条可见时仍更新光标，但不再叠 Hover
 轮廓或文案。说明贴在当前命中轮廓内侧，不是按钮；点标签所在像素等于点该目标。
@@ -378,15 +377,16 @@ Source 逐节点对账；Script 执行状态迁移；为绝对无刷新建立双
 ```text
 单击选择文字宿主
 → 双击并把光标放到点击位置（第一次双击不选中整词）
-→ 向上选择最高的安全编辑宿主；不安全父容器下的直属裸文字则建立精确文本节点片段
-→ IslandEditingController 建立与源码 contentRange 或 text-node range 对应的受控编辑会话
+→ 向上选择最高的安全编辑宿主；非行内后代保持冻结原子，不另建文字片段宿主
+→ IslandEditingController 建立与源码 contentRange 对应的受控编辑会话
 → 浏览器提供光标 / Selection / IME，Controller 接管所有实际文字变更
 → 用户输入、删除或选择文字
 → 约 700ms 或格式、Cmd+S、目标切换、关闭、发送边界
-→ 生成 replace-editable-island 或 update-direct-text-node EditCommand
+→ 生成 replace-editable-island EditCommand
 → SourceIndex + TargetResolver 锁定源码范围
-→ 岛内或纯文本片段做最小安全规范化，SourcePatchEngine 生成精确 range patch 与 inverse patch
+→ 岛内做最小安全规范化，SourcePatchEngine 生成精确 range patch 与 inverse patch
 → 原生换行以裸 `<br>` 进入受管计划，由系统分配 fresh stable ID 后再形成 `setText`；调用方预置新 ID 失败关闭
+→ 删除硬换行时一并退役该 `<br>` 的身份；非 `<br>` 的持久身份仍不得在岛内文字编辑中被改写或删除
 → 保存计划接受后，仅在 expected-mutation 边界把这些 ID 补到对应实时 `<br>`，保留 Selection 并继续当前编辑会话；ID 不新增 Runtime authority
 → 校验岛外字节完全不变，并重解析受影响区域
 → 语义内核从 before/after 完整 HTML 导出 identityDelta（新增/删除/移动 ID、保留根与放置证据）
@@ -413,8 +413,7 @@ Source 逐节点对账；Script 执行状态迁移；为绝对无刷新建立双
 - `contenteditable`、IME 快照和逻辑选区只存在于当前会话；不能保存为第二份 HTML 或长期 JSON。元素身份只保存 `data-pageroot-id`。
 - flex/grid 文字只有在源码、运行时布局和 CSS selector 均安全时，才随首个真实 Patch 创建唯一 canonical 直接文字项；双击本身不修改源码。
 - 直接源码编辑的 `operationTarget` 任何目标为 `ambiguous`、`orphaned`，或 patch 越出已解析源码范围时都必须 fail-closed，保留当前源码并要求用户重新定位；运行时目标的 `ambiguous` 只表示 comment-only 视觉操作，不阻断其已验证 `commentAnchor` 的评论。
-- 行内透明节点向上寻找宿主时，只有新候选仍是安全可编辑岛才继续提升；遇到复杂父容器时回退到最近的安全行内节点。
-- 复杂父容器下只有能唯一对应到一个直属源码 text node 的裸文字才能编辑。优先走现有纯文本 fragment 路径，不因复杂父容器本身改去评论。运行时临时宿主不再因布局或文字样式指纹拒绝进入；提交只替换该 text node 的源码字节，临时宿主不写入 HTML。
+- 行内透明节点向上寻找宿主时，只有新候选仍是安全可编辑岛才继续提升。复杂父容器本身也可以是岛：非行内后代保持冻结原子，直属文字和行内标签在同一宿主里编辑。
 
 PageRoot 0.9.0 只使用一种文字编辑路线：
 

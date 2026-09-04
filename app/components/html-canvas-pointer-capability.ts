@@ -12,7 +12,6 @@ import type {
   SourceTargetRef,
 } from "./html-canvas-internal-types";
 import {
-  directTextNodeAtPoint,
   findCanvasHitSourceElement,
   findCanvasSelectionElement,
   findDedicatedSourceSurfaceAtPoint,
@@ -22,7 +21,6 @@ import {
 } from "./html-canvas-interaction";
 import {
   nativeEditHostForElement,
-  nativeTextFragmentForElement,
 } from "./html-canvas-preview-sync";
 import {
   createRuntimeVisualTargetIndex,
@@ -52,7 +50,6 @@ export type {
 export function canStartNativeTextEditAtTarget({
   documentNode,
   element,
-  point,
   sourceIndex,
 }: {
   documentNode: Document;
@@ -61,14 +58,7 @@ export function canStartNativeTextEditAtTarget({
   sourceIndex: SourceIndexValue | null;
 }): boolean {
   if (!element || !sourceIndex || !documentNode) return false;
-  const islandHost = nativeEditHostForElement(element, sourceIndex);
-  if (islandHost) return true;
-  const hintedTextNode = point
-    ? directTextNodeAtPoint(documentNode, element, point)
-    : null;
-  return Boolean(
-    nativeTextFragmentForElement(element, sourceIndex, hintedTextNode),
-  );
+  return Boolean(nativeEditHostForElement(element, sourceIndex));
 }
 
 export type ResolvedCanvasTarget = Readonly<{

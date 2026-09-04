@@ -358,10 +358,8 @@ export const CommentRailView = memo(function CommentRailView({
                 <span>{projectLoadError}</span>
                 <button type="button" onClick={onRetryProjectHydration}>重试读取</button>
               </section>
-            ) : !commentLayoutReady ? null
-            : composerInCurrentTab
+            ) : composerInCurrentTab
               && draftTarget
-              && Number.isFinite(composerTop)
               && !interactionLocked ? (
               <section
                 className="comment-composer rail-comment-composer"
@@ -370,7 +368,13 @@ export const CommentRailView = memo(function CommentRailView({
                 data-comment-measure="__composer"
                 data-comment-measure-key={composerMeasurementKey}
                 data-focused="true"
-                style={{ top: `${composerTop as number}px` }}
+                style={{
+                  top: `${
+                    Number.isFinite(composerTop)
+                      ? composerTop as number
+                      : commentRailMinimumTop
+                  }px`,
+                }}
               >
                 <header>
                   <div className="composer-target" data-empty={!draftTarget ? "true" : "false"}>
@@ -529,7 +533,8 @@ export const CommentRailView = memo(function CommentRailView({
                   </footer>
                 )}
               </section>
-            ) : hasCollapsedCommentDraft
+            ) : !commentLayoutReady ? null
+            : hasCollapsedCommentDraft
               && draftTarget
               && draftRecoveryTop !== undefined ? (
               <button

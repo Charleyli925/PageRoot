@@ -14,7 +14,6 @@ import {
   editableIslandForTarget,
   materializeEditableIslandHtml,
   normalizeEditableIslandHtml,
-  normalizeEditableTextFragmentHtml,
 } from "../app/lib/editable-island.js";
 import { materializeSourceElementIdentity } from "../bridge/project-file-repository/working-copy.mjs";
 
@@ -164,6 +163,27 @@ test("managed native line breaks receive one fresh persistent identity", () => {
   );
 });
 
+test("editable island allows deleting an identified hard break", () => {
+  const strongId = "pr1_11111111111141118111111111111111";
+  const breakId = "pr1_22222222222242229222222222222222";
+  assert.equal(
+    normalizeEditableIslandHtml(
+      `<strong data-pageroot-id="${strongId}">文</strong>下一行`,
+      {
+        baselineInnerHtml:
+          `<strong data-pageroot-id="${strongId}">文</strong><br data-pageroot-id="${breakId}">下一行`,
+      },
+    ),
+    `<strong data-pageroot-id="${strongId}">文</strong>下一行`,
+  );
+  assert.equal(
+    normalizeEditableIslandHtml("firstsecond", {
+      baselineInnerHtml: `first<br data-pageroot-id="${breakId}">second`,
+    }),
+    "firstsecond",
+  );
+});
+
 test("editable island replays multiple line-break identities in DOM order", () => {
   const firstBreakId = "pr1_92000000000040008000000000000001";
   const secondBreakId = "pr1_92000000000040008000000000000002";
@@ -262,10 +282,25 @@ test("editable island keeps wbr atoms while allowing adjacent words to change", 
   );
 });
 
-test("editable island rejects block structure, new protected semantics and atom loss", () => {
+test("editable island freezes nested blocks as atoms instead of rejecting the host", () => {
+  const baseline = `<div class="chart">KEEP</div><b>强调</b>，裸&amp;文本<span>尾注</span>`;
+  assert.equal(
+    normalizeEditableIslandHtml(
+      `<div class="chart">KEEP</div><b>强调</b>，新版<span>尾注</span>`,
+      { baselineInnerHtml: baseline },
+    ),
+    `<div class="chart">KEEP</div><b>强调</b>，新版<span>尾注</span>`,
+  );
   assertIslandError(
-    "EDITABLE_ISLAND_STRUCTURE_UNSUPPORTED",
+    "EDITABLE_ISLAND_ATOM_CHANGED",
     () => normalizeEditableIslandHtml("<div>block</div>"),
+  );
+  assertIslandError(
+    "EDITABLE_ISLAND_ATOM_CHANGED",
+    () => normalizeEditableIslandHtml(
+      `<div class="chart">CHANGED</div><b>强调</b>，裸&amp;文本<span>尾注</span>`,
+      { baselineInnerHtml: baseline },
+    ),
   );
   assertIslandError(
     "EDITABLE_ISLAND_PROTECTED_ATTRIBUTE_ADDED",
@@ -280,27 +315,6 @@ test("editable island rejects block structure, new protected semantics and atom 
       "before after",
       { baselineInnerHtml: "before <img src=\"kept.png\"> after" },
     ),
-  );
-});
-
-test("direct text fragments normalize entities but reject every authored element", () => {
-  assert.equal(
-    normalizeEditableTextFragmentHtml("新版&lt;文字&gt; &amp; emoji 😀", {
-      baselineInnerHtml: "旧版&amp;文字",
-    }),
-    "新版&lt;文字&gt; &amp; emoji 😀",
-  );
-  assertIslandError(
-    "EDITABLE_TEXT_FRAGMENT_STRUCTURE_UNSUPPORTED",
-    () => normalizeEditableTextFragmentHtml("<br>", {
-      baselineInnerHtml: "旧版文字",
-    }),
-  );
-  assertIslandError(
-    "EDITABLE_TEXT_FRAGMENT_STRUCTURE_UNSUPPORTED",
-    () => normalizeEditableTextFragmentHtml("<strong>新版</strong>", {
-      baselineInnerHtml: "旧版文字",
-    }),
   );
 });
 

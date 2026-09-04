@@ -13,6 +13,7 @@ import {
   validatePatchScope,
 } from "../app/lib/source-patch-core.js";
 import { materializeSourceElementIdentity } from "../bridge/project-file-repository/working-copy.mjs";
+import { editableIslandForTarget } from "../app/lib/editable-island.js";
 
 function identify(html) {
   return materializeSourceElementIdentity(html).html;
@@ -1028,23 +1029,24 @@ test("whole-root native text replacement changes only the text bytes and undoes 
   assert.equal(applyPatchPlan(result.inversePlan, result.html).html, html);
 });
 
-test("direct text fragments under complex parents replace only exact text-node bytes", () => {
+test("mixed block parents replace only island inner HTML and keep frozen descendants", () => {
   const html = identify(`<div id="mixed"><div class="chart">KEEP</div><b>强调</b>，裸&amp;文本<span>尾注</span></div>`);
   const index = buildSourceIndex(html);
   const parent = elementBy(
     index,
     (element) => element.stableAttributes.id === "mixed",
   );
-  const textNode = index.textNodes.find((node) => node.value === "，裸&文本");
+  const targetRef = createTargetRef(index, parent.nodeId, {
+    level: "subregion",
+    targetId: "mixed-parent",
+  });
+  const island = editableIslandForTarget(index, targetRef);
+  const nextInnerHtml = island.innerHtml.replace("，裸&amp;文本", "，新版&lt;文字&gt;");
   const result = applyPatchPlan(planSourcePatch({
-    type: "update-direct-text-node",
-    targetRef: createTargetRef(index, parent.nodeId, {
-      level: "subregion",
-      targetId: "mixed-parent",
-    }),
-    textTargetRef: createTargetRef(index, textNode.nodeId, { level: "text" }),
-    beforeFragmentHtml: "，裸&amp;文本",
-    nextFragmentHtml: "，新版&lt;文字&gt;",
+    type: "replace-editable-island",
+    targetRef,
+    beforeInnerHtml: island.innerHtml,
+    nextInnerHtml,
     expectedSourceSha256: index.sourceSha256,
   }, index), html);
 
@@ -1052,26 +1054,27 @@ test("direct text fragments under complex parents replace only exact text-node b
     stripIdentity(result.html),
     `<div id="mixed"><div class="chart">KEEP</div><b>强调</b>，新版&lt;文字&gt;<span>尾注</span></div>`,
   );
-  assert.deepEqual(result.patches.map((patch) => patch.kind), ["direct-text-node"]);
+  assert.deepEqual(result.patches.map((patch) => patch.kind), ["editable-island"]);
   assert.equal(result.refreshedTargetRefs[0].targetId, "mixed-parent");
   assert.equal(result.refreshedTargetRefs[0].resolution, "exact");
   assert.equal(applyPatchPlan(result.inversePlan, result.html).html, html);
 });
 
-test("direct text fragments can be deleted and undone through the surviving parent target", () => {
+test("mixed block parents can delete sibling text and undo through the same island", () => {
   const html = identify(`<div id="mixed"><section>KEEP</section>裸文本<span>尾注</span></div>`);
   const index = buildSourceIndex(html);
   const parent = elementBy(
     index,
     (element) => element.stableAttributes.id === "mixed",
   );
-  const textNode = index.textNodes.find((node) => node.value === "裸文本");
+  const targetRef = createTargetRef(index, parent.nodeId, { level: "subregion" });
+  const island = editableIslandForTarget(index, targetRef);
+  const nextInnerHtml = island.innerHtml.replace("裸文本", "");
   const result = applyPatchPlan(planSourcePatch({
-    type: "update-direct-text-node",
-    targetRef: createTargetRef(index, parent.nodeId, { level: "subregion" }),
-    textTargetRef: createTargetRef(index, textNode.nodeId, { level: "text" }),
-    beforeFragmentHtml: "裸文本",
-    nextFragmentHtml: "",
+    type: "replace-editable-island",
+    targetRef,
+    beforeInnerHtml: island.innerHtml,
+    nextInnerHtml,
   }, index), html);
 
   assert.equal(
@@ -1082,7 +1085,7 @@ test("direct text fragments can be deleted and undone through the surviving pare
   assert.equal(applyPatchPlan(result.inversePlan, result.html).html, html);
 });
 
-test("direct text fragment plans reject markup and non-direct text targets", () => {
+test("retired direct-text-node commands fail closed and new nested blocks cannot appear", () => {
   const html = identify(`<div id="mixed"><section>KEEP</section>裸文本<span>嵌套</span></div>`);
   const index = buildSourceIndex(html);
   const parent = elementBy(
@@ -1090,43 +1093,22 @@ test("direct text fragment plans reject markup and non-direct text targets", () 
     (element) => element.stableAttributes.id === "mixed",
   );
   const parentRef = createTargetRef(index, parent.nodeId, { level: "subregion" });
-  const directText = index.textNodes.find((node) => node.value === "裸文本");
-  const nestedText = index.textNodes.find((node) => node.value === "嵌套");
+  const island = editableIslandForTarget(index, parentRef);
 
-  assert.throws(() => planSourcePatch({
+  assertPatchError("UNSUPPORTED_EDIT_COMMAND", () => planSourcePatch({
     type: "update-direct-text-node",
     targetRef: parentRef,
-    textTargetRef: createTargetRef(index, directText.nodeId, { level: "text" }),
-    beforeFragmentHtml: "裸文本",
-    nextFragmentHtml: "<strong>不允许</strong>",
-  }, index), (error) => (
-    error?.code === "EDITABLE_TEXT_FRAGMENT_STRUCTURE_UNSUPPORTED"
-  ));
-  assertPatchError("TEXT_FRAGMENT_TARGET_MISMATCH", () => planSourcePatch({
-    type: "update-direct-text-node",
-    targetRef: parentRef,
-    textTargetRef: createTargetRef(index, nestedText.nodeId, { level: "text" }),
-    beforeFragmentHtml: "嵌套",
     nextFragmentHtml: "新版",
   }, index));
-});
-
-test("direct text fragments do not bypass safe islands or dedicated editor roots", () => {
-  for (const [html, expectedCode] of [
-    [identify(`<p id="safe">普通文字</p>`), "TEXT_FRAGMENT_PARENT_UNSUPPORTED"],
-    [identify(`<canvas id="dedicated">Canvas fallback</canvas>`), "TEXT_FRAGMENT_UNSAFE_CONTEXT"],
-  ]) {
-    const index = buildSourceIndex(html);
-    const parent = elementBy(index, (element) => Boolean(element.stableAttributes.id));
-    const textNode = index.textNodes[0];
-    assertPatchError(expectedCode, () => planSourcePatch({
-      type: "update-direct-text-node",
-      targetRef: createTargetRef(index, parent.nodeId, { level: "subregion" }),
-      textTargetRef: createTargetRef(index, textNode.nodeId, { level: "text" }),
-      beforeFragmentHtml: textNode.value,
-      nextFragmentHtml: "新版",
-    }, index));
-  }
+  assert.throws(
+    () => planSourcePatch({
+      type: "replace-editable-island",
+      targetRef: parentRef,
+      beforeInnerHtml: island.innerHtml,
+      nextInnerHtml: island.innerHtml.replace("裸文本", "<div>不允许</div>"),
+    }, index),
+    (error) => error?.code === "EDITABLE_ISLAND_ATOM_CHANGED",
+  );
 });
 
 test("live elementId plus matching source hash patches that island without fingerprint scoring", () => {
@@ -1155,30 +1137,34 @@ test("live elementId plus matching source hash patches that island without finge
   assert.equal(applyPatchPlan(result.inversePlan, result.html).html, html);
 });
 
-test("live text ordinal plus matching source hash patches only that text fragment", () => {
+test("live Stable ID plus matching source hash patches the whole mixed island", () => {
   const html = materializeSourceElementIdentity(
     `<div id="mixed"><section>KEEP</section>相同<span>尾</span>相同</div>`,
   ).html;
   const index = buildSourceIndex(html);
   const parent = elementBy(index, (element) => element.stableAttributes.id === "mixed");
-  const textNodes = index.textNodes.filter((node) => node.value === "相同");
-  assert.equal(textNodes.length, 2);
-  const secondOrdinal = parent.textNodeIds.indexOf(textNodes[1].nodeId);
+  const targetRef = createTargetRef(index, parent.nodeId, { level: "subregion" });
+  const island = editableIslandForTarget(index, targetRef);
+  const first = island.innerHtml.indexOf("相同");
+  const second = island.innerHtml.indexOf("相同", first + "相同".length);
+  assert.ok(first >= 0 && second > first);
+  const nextInnerHtml = `${
+    island.innerHtml.slice(0, second)
+  }第二段${
+    island.innerHtml.slice(second + "相同".length)
+  }`;
   const result = applyPatchPlan(planSourcePatch({
-    type: "update-direct-text-node",
-    targetRef: createTargetRef(index, parent.nodeId, { level: "subregion" }),
-    textTargetRef: createTargetRef(index, textNodes[0].nodeId, { level: "text" }),
+    type: "replace-editable-island",
+    targetRef,
     elementId: parent.pagerootId,
-    parentElementId: parent.pagerootId,
-    directTextOrdinal: secondOrdinal,
-    beforeFragmentHtml: "相同",
-    nextFragmentHtml: "第二段",
+    beforeInnerHtml: island.innerHtml,
+    nextInnerHtml,
     expectedSourceSha256: index.sourceSha256,
   }, index), html);
 
   assert.equal(result.sourceIndex.textNodes.filter((node) => node.value === "相同").length, 1);
   assert.equal(result.sourceIndex.textNodes.some((node) => node.value === "第二段"), true);
-  assert.equal(result.patches[0].startOffset, textNodes[1].range.startOffset);
+  assert.equal(result.patches[0].kind, "editable-island");
 });
 
 test("live elementId never bypasses a stale source hash", () => {

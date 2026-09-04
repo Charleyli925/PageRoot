@@ -1,42 +1,24 @@
 import {
   EditableIslandError,
   HTML_NAMESPACE,
-  IMMUTABLE_EMBED_TAGS,
-  INLINE_CONTENT_TAGS,
   ROOT_BLOCKED_TAGS,
   editableIslandDraftHtml,
+  isFrozenEditableIslandSubtree,
   materializeEditableIslandHtml,
   normalizeEditableIslandHtml,
-  normalizeEditableTextFragmentHtml,
 } from "../../shared/editable-island.mjs";
 import { resolveTargetRef } from "./target-resolver.js";
 
 export {
   EditableIslandError,
   editableIslandDraftHtml,
+  isFrozenEditableIslandSubtree,
   materializeEditableIslandHtml,
   normalizeEditableIslandHtml,
-  normalizeEditableTextFragmentHtml,
 };
 
 function fail(code, message, details = {}) {
   throw new EditableIslandError(code, message, details);
-}
-function sourceDescendants(index, element) {
-  const descendants = [];
-  const pending = [...element.childIds];
-  while (pending.length > 0) {
-    const node = index.byNodeId.get(pending.shift());
-    if (!node) continue;
-    descendants.push(node);
-    if (
-      node.type !== "element"
-      || !IMMUTABLE_EMBED_TAGS.has(node.tagName)
-    ) {
-      pending.unshift(...(node.childIds ?? []));
-    }
-  }
-  return descendants;
 }
 
 export function editableIslandForTarget(index, targetRef) {
@@ -62,25 +44,6 @@ export function editableIslandForTarget(index, targetRef) {
       `The <${element.tagName}> element cannot own a V2 editable island.`,
       { nodeId: element.nodeId, tagName: element.tagName },
     );
-  }
-
-  for (const descendant of sourceDescendants(index, element)) {
-    if (
-      descendant.type === "element"
-      && (
-        (
-          descendant.namespaceURI === HTML_NAMESPACE
-          && !INLINE_CONTENT_TAGS.has(descendant.tagName)
-          && !IMMUTABLE_EMBED_TAGS.has(descendant.tagName)
-        )
-      )
-    ) {
-      fail(
-        "EDITABLE_ISLAND_STRUCTURE_UNSUPPORTED",
-        `The island contains unsupported <${descendant.tagName}> structure.`,
-        { nodeId: descendant.nodeId, tagName: descendant.tagName },
-      );
-    }
   }
 
   const innerHtml = index.source.slice(

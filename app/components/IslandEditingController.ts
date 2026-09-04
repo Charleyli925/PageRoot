@@ -6,6 +6,7 @@ import {
 } from "../lib/native-dom-logical-index.js";
 import {
   normalizeEditableIslandHtml,
+  isFrozenEditableIslandSubtree,
 } from "../lib/editable-island.js";
 import {
   PAGEROOT_ELEMENT_ID_ATTRIBUTE,
@@ -291,6 +292,23 @@ function insertTextAtSelection(
     selection?.addRange(range);
     return true;
   }
+  if (
+    range.startContainer === range.endContainer
+    && range.startContainer.nodeType === Node.TEXT_NODE
+  ) {
+    const text = range.startContainer as Text;
+    const start = range.startOffset;
+    const end = range.endOffset;
+    if (end > start) text.deleteData(start, end - start);
+    text.insertData(start, value);
+    const caret = hostElement.ownerDocument.createRange();
+    caret.setStart(text, start + value.length);
+    caret.collapse(true);
+    const selection = hostElement.ownerDocument.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(caret);
+    return true;
+  }
   const fragment = hostElement.ownerDocument.createDocumentFragment();
   fragment.append(hostElement.ownerDocument.createTextNode(value));
   return insertFragmentAtSelection(hostElement, fragment);
@@ -489,7 +507,21 @@ const IMMUTABLE_FORMATTING_TAGS = new Set([
   "video",
   "wbr",
 ]);
-const IMMUTABLE_EDIT_CONTAINER_TAGS = new Set(["ol", "ul"]);
+
+function isImmutableEditContainer(element: HTMLElement, hostElement: HTMLElement): boolean {
+  return element !== hostElement
+    && isFrozenEditableIslandSubtree(element.localName, element.namespaceURI || undefined);
+}
+
+function isFrozenSubtreeRoot(element: HTMLElement, hostElement: HTMLElement): boolean {
+  if (!isImmutableEditContainer(element, hostElement)) return false;
+  let ancestor = element.parentElement;
+  while (ancestor && ancestor !== hostElement) {
+    if (isImmutableEditContainer(ancestor, hostElement)) return false;
+    ancestor = ancestor.parentElement;
+  }
+  return true;
+}
 
 function isRuntimeAttributeName(name: string): boolean {
   const normalized = name.toLowerCase();
@@ -638,8 +670,8 @@ export class IslandEditingController {
         );
       }
     }
-    Array.from(this.hostElement.querySelectorAll<HTMLElement>("ol, ul"))
-      .filter((element) => IMMUTABLE_EDIT_CONTAINER_TAGS.has(element.localName))
+    Array.from(this.hostElement.querySelectorAll<HTMLElement>("*"))
+      .filter((element) => isFrozenSubtreeRoot(element, this.hostElement))
       .forEach((element, index) => {
         this.immutableContainerAttributes.push({
           index,
@@ -1558,8 +1590,8 @@ export class IslandEditingController {
       restoreAttribute(this.hostElement, name, saved);
     }
     const immutableContainers = Array.from(
-      this.hostElement.querySelectorAll<HTMLElement>("ol, ul"),
-    ).filter((element) => IMMUTABLE_EDIT_CONTAINER_TAGS.has(element.localName));
+      this.hostElement.querySelectorAll<HTMLElement>("*"),
+    ).filter((element) => isImmutableEditContainer(element, this.hostElement));
     for (const item of this.immutableContainerAttributes) {
       const element = immutableContainers[item.index];
       if (element) restoreAttribute(element, "contenteditable", item.saved);

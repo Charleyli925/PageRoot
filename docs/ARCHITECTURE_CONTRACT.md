@@ -936,7 +936,8 @@ Native editable-island `<br>` nodes receive fresh IDs in the accepted Canvas
 plan before `setText` is formed, and Repository binds that operation to one
 exact target-content patch and the shared materializer's normalized
 `contentHtml`; multiple new line breaks must retain their declared allocation
-order, not merely the same ID set. Canvas copies only
+order, not merely the same ID set. Deleting a hard break retires that break
+identity with the node; other persistent element identities remain fail-closed. Canvas copies only
 those accepted IDs onto the matching live line-break objects under its expected
 mutation guard. The controller first proves the prior live DOM still equals its
 owned canonical draft, then proves the reconciled live DOM equals the newly

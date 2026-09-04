@@ -85,6 +85,7 @@ async function authoredInnerHtml(target) {
     const clone = element.cloneNode(true);
     if (!(clone instanceof HTMLElement)) throw new Error("Expected HTMLElement.");
     const attributes = [
+      "contenteditable",
       "data-pageroot-id",
       "data-pageroot-edit-runtime-source",
       "data-html-ai-source-node-id",

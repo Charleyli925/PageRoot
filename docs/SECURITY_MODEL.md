@@ -392,12 +392,10 @@ capability in PR4.
   snapshot.
 - MutationObserver rejects and restores any child/text mutation not owned by
   the controller.
-- SourcePatch may replace only the selected element's exact content range or,
-  for a uniquely mapped direct text node under an unsafe mixed parent, that
-  text node's exact source range. The direct-text operation also carries the
-  exact surviving parent TargetRef so deletion remains invertible. Outside
+- SourcePatch may replace only the selected element's exact content range.
+  Nested non-inline HTML stays frozen inventory inside that range. Outside
   bytes and source Hash preconditions remain exact; only the authorized island
-  or plain-text fragment may be minimally normalized and reparsed.
+  may be minimally normalized and reparsed.
 - Canvas undo/redo never serializes that preview DOM. The Bridge applies only a
   retained exact inverse/forward Patch after matching project/document
   identity, source Hash, history revision and cursor. Source HTML and the

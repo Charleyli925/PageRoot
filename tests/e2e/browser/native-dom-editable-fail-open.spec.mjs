@@ -117,7 +117,7 @@ test("canvas text mismatch remounts from source then enters", {
   await expect(target).toContainText("已进");
 });
 
-test("complex parent prefers an exact text-fragment instead of comment-only", {
+test("complex parent enters a frozen-subtree island instead of comment-only", {
   tag: ["@gate-smoke","@smoke-editing"],
 }, async ({ page }) => {
   const { editor, frame } = await openFixture(page);
@@ -138,17 +138,19 @@ test("complex parent prefers an exact text-fragment instead of comment-only", {
     };
   });
   await parent.dblclick({ position: point, force: true });
-  const fragmentHost = parent.locator(
-    ':scope > pageroot-text-fragment[data-pageroot-text-fragment-host="true"]',
+  await expect(parent).toHaveAttribute("contenteditable", "true");
+  await expect(parent.locator(':scope > div[data-keep="chart"]')).toHaveAttribute(
+    "contenteditable",
+    "false",
   );
-  await expect(fragmentHost).toHaveAttribute("contenteditable", "true");
-  await expect(parent).not.toHaveAttribute("contenteditable", "true");
   expect(await editorFeedbackCopy(page, editor)).not.toMatch(
     /复杂网页结构|添加评论交给 AI 处理/u,
   );
-  await fragmentHost.evaluate((element) => {
-    const text = element.firstChild;
-    if (!(text instanceof Text)) throw new Error("Fragment host has no text.");
+  await parent.evaluate((element) => {
+    const text = Array.from(element.childNodes).find(
+      (child) => child.nodeType === Node.TEXT_NODE && child.textContent?.includes("裸文本"),
+    );
+    if (!(text instanceof Text)) throw new Error("Island has no bare text.");
     const range = document.createRange();
     range.selectNodeContents(text);
     const selection = document.getSelection();
@@ -156,7 +158,7 @@ test("complex parent prefers an exact text-fragment instead of comment-only", {
     selection?.addRange(range);
   });
   await page.keyboard.type("精确裸文本");
-  await expect(fragmentHost).toHaveText("精确裸文本");
+  await expect(parent).toContainText("精确裸文本");
   await page.keyboard.press("Escape");
   const exported = (await exportCurrentHtml(page)).toString("utf8");
   expect(exported).toContain("精确裸文本");
