@@ -101,6 +101,9 @@ PageRoot edits local files and renders user-controlled HTML, so its default poli
   escaping authored base URLs are blocked. A first contained relative base is
   resolved inside the same resource closure. The protocol has no `bypassCSP`, directory listing or project-path
   response. Popup, form submission and top-level navigation remain blocked.
+  `PAGEROOT_E2E=1` may hold Main `prepare` behind a process-local latch so tests
+  can prove static Active acknowledgement without a grant; production never
+  installs that latch.
   A fixed bootstrap privately proves the complete source-node set after parsing
   and before author code runs. An authored head script therefore
   cannot register a generated object against a future parser-node identity;

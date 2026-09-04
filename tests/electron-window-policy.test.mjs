@@ -44,6 +44,14 @@ test("Electron automation stays backgrounded unless foreground debugging is expl
     /const e2eNativeDialogsSuppressed = Boolean\(e2eUserDataPath\);/u,
   );
   assert.match(
+    mainProcess,
+    /if \(process\.env\.PAGEROOT_E2E === "1"\) \{[\s\S]*?__pagerootE2eHoldEditRuntimePrepare/u,
+  );
+  assert.match(
+    mainProcess,
+    /if \(process\.env\.PAGEROOT_E2E === "1" && e2eEditRuntimePrepareGate\.held\)/u,
+  );
+  assert.match(
     appLifecycle,
     /function presentMainWindow\(\{ userInitiated = false \} = \{\}\)[\s\S]*?e2eWindowRunsInBackground[\s\S]*?return false;/u,
   );

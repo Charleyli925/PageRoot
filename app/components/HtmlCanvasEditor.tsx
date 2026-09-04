@@ -585,14 +585,25 @@ function captureRuntimePresentationAnchor({
   const selectedAnchor = documentNode && selectedStableId
     ? runtimeSourceElementForStableId(documentNode, sourceIndex, selectedStableId)
     : null;
-  const firstVisibleAnchor = documentNode && sourceIndex
+  const iframeRect = iframe?.getBoundingClientRect();
+  const clipRect = (outerScrollElement || iframe)?.getBoundingClientRect();
+  const firstVisibleAnchor = documentNode && sourceIndex && iframeRect && clipRect
     ? Array.from(documentNode.querySelectorAll<HTMLElement>(`[${SOURCE_ELEMENT_ATTRIBUTE}]`))
-      .find((element) => {
+      .reduce<HTMLElement | null>((best, element) => {
+        if (!runtimeStableIdForElement(element, sourceIndex)) return best;
         const rect = element.getBoundingClientRect();
-        return Boolean(runtimeStableIdForElement(element, sourceIndex))
-          && rect.bottom > 0
-          && rect.top < (iframe?.clientHeight || 0);
-      }) ?? null
+        const screenTop = iframeRect.top + rect.top;
+        const screenBottom = iframeRect.top + rect.bottom;
+        if (screenBottom <= clipRect.top + 1 || screenTop >= clipRect.bottom - 1) return best;
+        const clipCenter = (clipRect.top + clipRect.bottom) / 2;
+        const elementCenter = (screenTop + screenBottom) / 2;
+        if (!best) return element;
+        const bestRect = best.getBoundingClientRect();
+        const bestCenter = iframeRect.top + (bestRect.top + bestRect.bottom) / 2;
+        return Math.abs(elementCenter - clipCenter) < Math.abs(bestCenter - clipCenter)
+          ? element
+          : best;
+      }, null)
     : null;
   const anchorElement = selectedAnchor || firstVisibleAnchor;
   const viewportAnchorStableId = runtimeStableIdForElement(anchorElement, sourceIndex);
@@ -615,6 +626,40 @@ function captureRuntimePresentationAnchor({
       ? renderedWidth / iframeWidth
       : 1,
   };
+}
+
+function rememberVisibleCanvasViewport({
+  container,
+  iframe,
+  sourceIndex,
+  destination,
+}: {
+  container: HTMLElement | null;
+  iframe: HTMLIFrameElement | null;
+  sourceIndex: SourceIndexValue | null;
+  destination: { current: RuntimePresentationAnchor | null };
+}) {
+  if (!container?.getClientRects().length || !iframe) return;
+  const next = captureRuntimePresentationAnchor({
+    iframe,
+    outerScrollElement: container.closest(".review-scroll-stage"),
+    sourceIndex,
+    selectedElement: null,
+    selectedSourceSelection: null,
+  });
+  const previous = destination.current;
+  // Comment-rail alignment can jump the shared stage back toward a marker
+  // near the top. Same-document HTML replacement should keep the last
+  // reading position instead of that snap.
+  if (
+    previous
+    && previous.outerScrollTop !== null
+    && next.outerScrollTop !== null
+    && previous.outerScrollTop - next.outerScrollTop > 400
+  ) {
+    return;
+  }
+  destination.current = next;
 }
 
 function canvasTargetOutlineStyle(
@@ -1150,6 +1195,8 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     left: number;
     top: number;
   } | null>(null);
+  const pendingStaticPresentationAnchorRef = useRef<RuntimePresentationAnchor | null>(null);
+  const lastSameDocumentPresentationAnchorRef = useRef<RuntimePresentationAnchor | null>(null);
   const lastValidCommentLayoutRef = useRef<HtmlCanvasCommentLayoutState | null>(null);
   const expectedFrameHtmlRef = useRef<string | null>(null);
   const expectedFrameTokenRef = useRef<string | null>(null);
@@ -1718,18 +1765,28 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     }
     performance.mark("pageroot:canvas:load-start");
     const frameView = iframeRef.current?.contentWindow;
-    pendingFrameViewportRef.current = options.preserveViewport && frameView
-      ? { left: frameView.scrollX, top: frameView.scrollY }
-      : null;
     const sharedScrollElement = containerRef.current?.closest<HTMLElement>(
       ".review-scroll-stage",
     ) ?? null;
+    pendingFrameViewportRef.current = options.preserveViewport && frameView
+      ? { left: frameView.scrollX, top: frameView.scrollY }
+      : null;
+    const rememberedAnchor = lastSameDocumentPresentationAnchorRef.current;
     pendingSharedViewportRef.current = options.preserveViewport && sharedScrollElement
       ? {
           element: sharedScrollElement,
-          left: sharedScrollElement.scrollLeft,
-          top: sharedScrollElement.scrollTop,
+          left: rememberedAnchor?.outerScrollLeft ?? sharedScrollElement.scrollLeft,
+          top: rememberedAnchor?.outerScrollTop ?? sharedScrollElement.scrollTop,
         }
+      : null;
+    pendingStaticPresentationAnchorRef.current = options.forceStatic && options.preserveViewport
+      ? rememberedAnchor ?? captureRuntimePresentationAnchor({
+          iframe: iframeRef.current,
+          outerScrollElement: sharedScrollElement,
+          sourceIndex: sourceIndexRef.current,
+          selectedElement: null,
+          selectedSourceSelection: null,
+        })
       : null;
     runtimeSourceRegistrationCleanupRef.current();
     runtimeSourceRegistrationCleanupRef.current = () => undefined;
@@ -2597,6 +2654,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     activeFrameConnectionPendingRef.current = false;
     pendingFrameViewportRef.current = null;
     pendingSharedViewportRef.current = null;
+    pendingStaticPresentationAnchorRef.current = null;
     // Runtime activation failed after promotion. The old frame remains the
     // source-backed rollback target, but the failed checkpoint must not
     // restore native editing on that frame implicitly.
@@ -2693,6 +2751,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     const previous = candidate.previousActive;
     pendingFrameViewportRef.current = null;
     pendingSharedViewportRef.current = null;
+    pendingStaticPresentationAnchorRef.current = null;
     pendingFrameRestoreEpochRef.current += 1;
     candidate.registrationCleanup();
     runtimeCandidateRef.current = null;
@@ -6363,7 +6422,10 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       getSourceHtml: () => frameSourceHtmlRef.current,
       getRenderedSourceHtml: () => renderedSourceHtmlRef.current,
       rebuildActiveFrame: () => {
-        loadFrameSource(frameSourceHtmlRef.current, { forceStatic: true });
+        loadFrameSource(frameSourceHtmlRef.current, {
+          forceStatic: true,
+          preserveViewport: true,
+        });
       },
       getScrollTop,
       scrollToTop,
@@ -6451,6 +6513,8 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     pendingHistoryBookmarkRef.current = null;
     pendingHistoryCanonicalFenceRef.current = false;
     resetSelection(false);
+    pendingSelectionRef.current = null;
+    pendingToolbarVisibleRef.current = false;
     lastEmittedHtmlRef.current = null;
     pendingHtmlEchoesRef.current = [];
     // Workbench-owned HTML is a new source authority (adopted Version, disk
@@ -6458,8 +6522,10 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     // Active frame must not absorb that replacement into a hidden A/B
     // candidate: Canvas verify and edit unlock wait for Active
     // getRenderedSourceHtml(). Same-document script refresh stays on the
-    // grant effect's forceRuntimeHandoff path.
-    loadFrameSource(html, { forceStatic: true });
+    // grant effect's forceRuntimeHandoff path. Same mounted editor keeps a
+    // minimal viewport anchor; it must not restore Caret, Range or a native
+    // editing session.
+    loadFrameSource(html, { forceStatic: true, preserveViewport: true });
   }, [
     detachNativeEditForFence,
     documentBaseHref,
@@ -6498,6 +6564,21 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     window.addEventListener("resize", handleWindowResize);
     return () => window.removeEventListener("resize", handleWindowResize);
   }, [updateOverlayPosition]);
+
+  useEffect(() => {
+    const stage = containerRef.current?.closest(".review-scroll-stage");
+    if (!stage) return undefined;
+    const handleStageScroll = () => {
+      rememberVisibleCanvasViewport({
+        container: containerRef.current,
+        iframe: iframeRef.current,
+        sourceIndex: sourceIndexRef.current,
+        destination: lastSameDocumentPresentationAnchorRef,
+      });
+    };
+    stage.addEventListener("scroll", handleStageScroll, { passive: true });
+    return () => stage.removeEventListener("scroll", handleStageScroll);
+  }, []);
 
   useEffect(() => {
     requestAnimationFrame(() => updateOverlayPosition());
@@ -7157,6 +7238,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     const pendingToolbarVisible = pendingToolbarVisibleRef.current;
     const pendingViewport = pendingFrameViewportRef.current;
     const pendingSharedViewport = pendingSharedViewportRef.current;
+    const pendingStaticAnchor = pendingStaticPresentationAnchorRef.current;
     const pendingRestoreEpoch = pendingFrameRestoreEpochRef.current;
     const sharedScrollElementForHandoff = isRuntimePromotion
       ? pendingSharedViewport?.element ?? null
@@ -7201,6 +7283,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     pendingToolbarVisibleRef.current = false;
     pendingFrameViewportRef.current = null;
     pendingSharedViewportRef.current = null;
+    pendingStaticPresentationAnchorRef.current = null;
     const positionRuntimeHandoff = (candidate: RuntimeCandidate) => {
       const anchor = candidate.presentationAnchor;
       const frameView = documentNode.defaultView;
@@ -7417,27 +7500,124 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
           behavior: "auto",
         });
       }
-      if (pendingSharedViewport?.element.isConnected) {
-        pendingSharedViewport.element.scrollTo({
+      const staticAnchor = pendingStaticAnchor;
+      if (staticAnchor?.viewportAnchorStableId && documentNode.defaultView) {
+        const element = runtimeSourceElementForStableId(
+          documentNode,
+          sourceIndexRef.current,
+          staticAnchor.viewportAnchorStableId,
+        );
+        const iframeRectTop = iframe.getBoundingClientRect().top;
+        const currentAnchorScreenTop = element
+          ? iframeRectTop + element.getBoundingClientRect().top
+          : Number.NaN;
+        const targetTop = (
+          element
+          && staticAnchor.viewportAnchorScreenOffsetY !== null
+          && Number.isFinite(currentAnchorScreenTop)
+        )
+          ? runtimeAnchorScrollTop({
+              currentScrollTop: documentNode.defaultView.scrollY,
+              currentAnchorOffsetY: currentAnchorScreenTop,
+              desiredAnchorOffsetY: staticAnchor.viewportAnchorScreenOffsetY,
+              maximumScrollTop: Math.max(
+                0,
+                (documentNode.scrollingElement?.scrollHeight || 0) - iframe.clientHeight,
+              ),
+            })
+          : clampRuntimeScroll(
+              staticAnchor.iframeScrollTop,
+              Math.max(
+                0,
+                (documentNode.scrollingElement?.scrollHeight || 0) - iframe.clientHeight,
+              ),
+            );
+        documentNode.defaultView.scrollTo({
           left: clampRuntimeScroll(
-            pendingSharedViewport.left,
+            staticAnchor.iframeScrollLeft,
             Math.max(
               0,
-              pendingSharedViewport.element.scrollWidth
-                - pendingSharedViewport.element.clientWidth,
+              (documentNode.scrollingElement?.scrollWidth || 0) - iframe.clientWidth,
             ),
           ),
-          top: clampRuntimeScroll(
-            pendingSharedViewport.top,
-            Math.max(
-              0,
-              pendingSharedViewport.element.scrollHeight
-                - pendingSharedViewport.element.clientHeight,
-            ),
-          ),
+          top: targetTop,
           behavior: "auto",
         });
       }
+      let remainingOuterViewportFrames = 30;
+      const restoreOuterViewport = () => {
+        if (
+          iframe.contentDocument !== documentNode
+          || frameLoadGenerationRef.current !== connectedFrameGeneration
+          || expectedFrameTokenRef.current !== expectedToken
+          || pendingFrameRestoreEpochRef.current !== pendingRestoreEpoch
+        ) return;
+        const outer = pendingSharedViewport?.element
+          ?? containerRef.current?.closest<HTMLElement>(".review-scroll-stage")
+          ?? null;
+        const desiredOuterTop = staticAnchor?.outerScrollTop
+          ?? pendingSharedViewport?.top
+          ?? null;
+        const desiredOuterLeft = staticAnchor?.outerScrollLeft
+          ?? pendingSharedViewport?.left
+          ?? null;
+        if (outer && desiredOuterTop !== null) {
+          const maxTop = Math.max(0, outer.scrollHeight - outer.clientHeight);
+          if (maxTop + 8 < desiredOuterTop && remainingOuterViewportFrames > 0) {
+            remainingOuterViewportFrames -= 1;
+            requestAnimationFrame(restoreOuterViewport);
+            return;
+          }
+          outer.scrollTo({
+            left: clampRuntimeScroll(
+              desiredOuterLeft ?? 0,
+              Math.max(0, outer.scrollWidth - outer.clientWidth),
+            ),
+            top: clampRuntimeScroll(desiredOuterTop, maxTop),
+            behavior: "auto",
+          });
+          if (staticAnchor?.viewportAnchorStableId && staticAnchor.viewportAnchorScreenOffsetY !== null) {
+            const element = runtimeSourceElementForStableId(
+              documentNode,
+              sourceIndexRef.current,
+              staticAnchor.viewportAnchorStableId,
+            );
+            if (element) {
+              const residual = iframe.getBoundingClientRect().top
+                + element.getBoundingClientRect().top
+                - staticAnchor.viewportAnchorScreenOffsetY;
+              if (Math.abs(residual) > 1) {
+                outer.scrollTo({
+                  left: outer.scrollLeft,
+                  top: clampRuntimeScroll(
+                    outer.scrollTop + residual,
+                    Math.max(0, outer.scrollHeight - outer.clientHeight),
+                  ),
+                  behavior: "auto",
+                });
+              }
+              const iframeRect = iframe.getBoundingClientRect();
+              const rect = element.getBoundingClientRect();
+              const clip = outer.getBoundingClientRect();
+              const screenTop = iframeRect.top + rect.top;
+              const screenBottom = iframeRect.top + rect.bottom;
+              const intersects = screenBottom > clip.top + 8 && screenTop < clip.bottom - 8;
+              if (!intersects && remainingOuterViewportFrames > 0) {
+                remainingOuterViewportFrames -= 1;
+                requestAnimationFrame(restoreOuterViewport);
+                return;
+              }
+            }
+          }
+        }
+        rememberVisibleCanvasViewport({
+          container: containerRef.current,
+          iframe,
+          sourceIndex: sourceIndexRef.current,
+          destination: lastSameDocumentPresentationAnchorRef,
+        });
+      };
+      restoreOuterViewport();
       const connectedRuntimeFrame = runtimeFrameRef.current;
       const connectedRuntimeFrameIsCurrent = Boolean(
         connectedRuntimeFrame?.elementGeneration === connectedFrameGeneration

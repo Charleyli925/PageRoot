@@ -48,6 +48,7 @@ import {
   realpathSync,
   rmSync,
   runOfficialFinalizer,
+  sha256,
   stopPageRoot,
   workingHtmlFiles,
   writeAiOutput,
@@ -3055,6 +3056,273 @@ test("source Review preserves multi-host text evidence and hidden changes withou
       .toHaveAttribute("data-pageroot-review-confirmed", "true");
     await expect(launched.page.getByTestId("review-visual-status")).toHaveCount(0);
   } finally {
+    await stopPageRoot(launched.electronApp, launched.isolatedUserData);
+    removeSourceFixture(fixture.sourceDirectory);
+  }
+});
+
+const STATIC_ACCEPT_UNLOCK_MS = 3_000;
+const ACCEPT_SCROLL_ANCHOR = "accept-scroll-anchor";
+
+async function holdEditRuntimePrepare(electronApp) {
+  const available = await electronApp.evaluate(
+    () => typeof globalThis.__pagerootE2eHoldEditRuntimePrepare,
+  );
+  expect(available).toBe("function");
+  await electronApp.evaluate(() => {
+    globalThis.__pagerootE2eHoldEditRuntimePrepare();
+  });
+}
+
+async function releaseEditRuntimePrepare(electronApp) {
+  await electronApp.evaluate(() => {
+    globalThis.__pagerootE2eReleaseEditRuntimePrepare();
+  });
+}
+
+async function readActiveAcceptSnapshot(page) {
+  const editor = page.getByTestId("html-canvas-editor").filter({ visible: true }).first();
+  const chrome = await page.evaluate(() => {
+    const workbench = document.querySelector("main.workbench");
+    const visibleEditor = [...document.querySelectorAll('[data-testid="html-canvas-editor"]')]
+      .find((node) => node.getClientRects().length > 0) || null;
+    const surface = visibleEditor?.closest(".canvas-edit-surface") || null;
+    const commentButton = document.querySelector(
+      'aside[aria-label="本轮评论"] button[aria-label="全局评论"]',
+    );
+    return {
+      projectState: workbench?.getAttribute("data-project-state") || "",
+      renderedSha256: workbench?.getAttribute("data-rendered-sha256") || "",
+      runtimePhase: surface?.getAttribute("data-edit-runtime-phase") || "",
+      runtimeHandoff: visibleEditor?.getAttribute("data-runtime-handoff") || "",
+      runtimeCandidateId: visibleEditor?.getAttribute("data-runtime-candidate-id") || "",
+      renderVerified: visibleEditor?.getAttribute("data-render-verified") || "",
+      editorLocked: visibleEditor?.getAttribute("data-locked") === "true",
+      commentEnabled: Boolean(commentButton) && !commentButton.disabled,
+      reviewVisible: Boolean(document.querySelector('[data-testid="ai-review-workspace"]')),
+      accepting: Boolean(
+        [...document.querySelectorAll("button")].some((button) => (
+          /正在采纳/.test(button.textContent || "")
+          || /正在采纳/.test(button.getAttribute("aria-label") || "")
+        )),
+      ),
+      unlockCount: Number(window.__pagerootCommentUnlockCount || 0),
+    };
+  });
+  const project = await page.evaluate(() => window.htmlAIProjects?.getActiveProject());
+  const frameFacts = {
+    listItemText: "",
+    scrollY: 0,
+    outerScrollTop: 0,
+    showingDocumentTop: true,
+    anchorInViewport: false,
+    anchorScreenTop: 0,
+    clipTop: 0,
+    clipBottom: 0,
+    iframeHeight: 0,
+  };
+  try {
+    if (await editor.count()) {
+      const frame = page.frameLocator(
+        '[data-testid="html-canvas-editor"]:visible iframe[data-runtime-slot-role="active"]',
+      );
+      frameFacts.listItemText = (
+        await frame.locator(caseSelector("list-item")).textContent({ timeout: 500 }).catch(() => "")
+      ) || "";
+      const inner = await frame.locator(caseSelector(ACCEPT_SCROLL_ANCHOR)).evaluate((node) => {
+        const rect = node.getBoundingClientRect();
+        const view = node.ownerDocument.defaultView;
+        return {
+          top: rect.top,
+          bottom: rect.bottom,
+          scrollY: Number(view?.scrollY || 0),
+        };
+      }).catch(() => null);
+      const chromeGeometry = await page.evaluate(() => {
+        const stage = document.querySelector(".review-scroll-stage");
+        const iframe = [...document.querySelectorAll(
+          '[data-testid="html-canvas-editor"] iframe[data-runtime-slot-role="active"]',
+        )].find((node) => node.getClientRects().length > 0) || null;
+        const stageRect = stage?.getBoundingClientRect();
+        const iframeRect = iframe?.getBoundingClientRect();
+        return {
+          outerScrollTop: Number(stage?.scrollTop || 0),
+          stageTop: stageRect?.top ?? 0,
+          stageBottom: stageRect?.bottom ?? 0,
+          iframeTop: iframeRect?.top ?? 0,
+          iframeBottom: iframeRect?.bottom ?? 0,
+          iframeHeight: iframeRect?.height ?? 0,
+        };
+      });
+      frameFacts.scrollY = inner?.scrollY || 0;
+      frameFacts.outerScrollTop = chromeGeometry.outerScrollTop;
+      if (inner) {
+        const screenTop = chromeGeometry.iframeTop + inner.top;
+        const screenBottom = chromeGeometry.iframeTop + inner.bottom;
+        const clipTop = Math.max(chromeGeometry.stageTop, chromeGeometry.iframeTop);
+        const clipBottom = Math.min(chromeGeometry.stageBottom, chromeGeometry.iframeBottom);
+        frameFacts.anchorInViewport = screenBottom > clipTop + 8
+          && screenTop < clipBottom - 8;
+        frameFacts.showingDocumentTop = chromeGeometry.outerScrollTop < 80
+          && frameFacts.scrollY < 80
+          && inner.top < 80;
+        frameFacts.anchorScreenTop = screenTop;
+        frameFacts.clipTop = clipTop;
+        frameFacts.clipBottom = clipBottom;
+        frameFacts.iframeHeight = chromeGeometry.iframeHeight;
+      }
+    }
+  } catch {
+    // Active iframe may detach for one frame during the static rewrite.
+  }
+  return {
+    ...chrome,
+    ...frameFacts,
+    sourcePath: project?.sourcePath || "",
+    workingSha256: project?.sha256 || project?.sourceSha256 || "",
+  };
+}
+
+test("accepting a Version shows static Active and unlocks editing before Runtime is granted", {
+  tag: ["@gate-smoke", "@smoke-review"],
+}, async () => {
+  test.setTimeout(120_000);
+  const fixture = createSourceFixture("accept-static-first.html", (source) => source.replace(
+    "  </main>",
+    `    <div data-scroll-pad="before" style="height:1800px" aria-hidden="true"></div>
+    <p data-native-case="${ACCEPT_SCROLL_ANCHOR}">滚动锚点保持可见</p>
+    <div data-scroll-pad="after" style="height:1800px" aria-hidden="true"></div>
+  </main>`,
+  ));
+  const launched = await launchPageRoot({ activeSourcePath: fixture.sourcePath });
+  try {
+    const openedFrame = await loadedDiskFrame(launched.page, fixture.sourcePath);
+    const scrollAnchor = openedFrame.locator(caseSelector(ACCEPT_SCROLL_ANCHOR));
+    await expect(scrollAnchor).toBeVisible();
+    const anchorDocumentTop = await scrollAnchor.evaluate((element) => (
+      element.getBoundingClientRect().top
+      + Number(element.ownerDocument.defaultView?.scrollY || 0)
+    ));
+    await launched.page.locator(".review-scroll-stage").evaluate((stage, documentTop) => {
+      const iframe = [...stage.querySelectorAll(
+        '[data-testid="html-canvas-editor"] iframe[data-runtime-slot-role="active"]',
+      )].find((node) => node.getClientRects().length > 0);
+      if (!iframe) return;
+      const iframeOffset = iframe.getBoundingClientRect().top
+        - stage.getBoundingClientRect().top
+        + stage.scrollTop;
+      stage.scrollTop = Math.max(0, iframeOffset + documentTop - stage.clientHeight / 2);
+    }, anchorDocumentTop);
+    await expect.poll(async () => {
+      const snapshot = await readActiveAcceptSnapshot(launched.page);
+      return snapshot.outerScrollTop > 400 && snapshot.anchorInViewport && !snapshot.showingDocumentTop
+        ? snapshot
+        : false;
+    }).toBeTruthy();
+
+    const request = await addCommentAndSubmit(
+      launched.page,
+      launched.electronApp,
+      fixture.sourcePath,
+    );
+    writeAiOutput(request.requestRoot, (base) => preserveCandidateSourceIdsForFixture(
+      base,
+      base.replace(ORIGINAL_TEXT, UPDATED_TEXT),
+    ));
+    runOfficialFinalizer(request.requestRoot, request.changeRequest);
+    await expect(launched.page.getByTestId("ai-conversation-action-bar"))
+      .toContainText("等待你的决定", { timeout: 30_000 });
+
+    await launched.page.evaluate(() => {
+      const button = document.querySelector(
+        'aside[aria-label="本轮评论"] button[aria-label="全局评论"]',
+      );
+      window.__pagerootCommentUnlockCount = 0;
+      window.__pagerootCommentWasDisabled = Boolean(button?.disabled);
+      window.__pagerootCommentUnlockObserver?.disconnect();
+      window.__pagerootCommentUnlockObserver = new MutationObserver(() => {
+        const locked = Boolean(button?.disabled);
+        if (window.__pagerootCommentWasDisabled && !locked) {
+          window.__pagerootCommentUnlockCount += 1;
+        }
+        window.__pagerootCommentWasDisabled = locked;
+      });
+      if (button) {
+        window.__pagerootCommentUnlockObserver.observe(button, {
+          attributes: true,
+          attributeFilter: ["disabled"],
+        });
+      }
+    });
+    await holdEditRuntimePrepare(launched.electronApp);
+    await adoptReadyResult(launched.page);
+    await launched.page.getByRole("button", { name: "确认并采纳" })
+      .click({ timeout: 5_000 })
+      .catch(() => undefined);
+
+    await expect.poll(async () => {
+      const snapshot = await readActiveAcceptSnapshot(launched.page);
+      const runtimeStillIdle = snapshot.runtimeHandoff !== "active"
+        && !snapshot.runtimeCandidateId;
+      const ready = !snapshot.reviewVisible
+        && !snapshot.accepting
+        && runtimeStillIdle
+        && snapshot.renderVerified === "true"
+        && snapshot.listItemText === UPDATED_TEXT
+        && snapshot.commentEnabled
+        && !snapshot.editorLocked
+        && !snapshot.showingDocumentTop
+        && snapshot.anchorInViewport;
+      return {
+        ...snapshot,
+        ready,
+        runtimeStillIdle,
+        geometry: ready
+          ? undefined
+          : `${snapshot.outerScrollTop}|${snapshot.iframeHeight}|${snapshot.anchorScreenTop}|${snapshot.clipTop}|${snapshot.clipBottom}|${snapshot.scrollY}`,
+      };
+    }, { timeout: STATIC_ACCEPT_UNLOCK_MS }).toMatchObject({
+      ready: true,
+      runtimeStillIdle: true,
+      reviewVisible: false,
+      accepting: false,
+      renderVerified: "true",
+      listItemText: UPDATED_TEXT,
+      commentEnabled: true,
+      editorLocked: false,
+      showingDocumentTop: false,
+      anchorInViewport: true,
+      projectState: "ready",
+      runtimeCandidateId: "",
+      geometry: undefined,
+    });
+    const unlocked = await readActiveAcceptSnapshot(launched.page);
+    expect(["preparing", "static", "recovering"]).toContain(unlocked.runtimePhase);
+    expect(unlocked.sourcePath).toMatch(/\/accept-static-first-V2\.html$/u);
+    const expectedSha256 = sha256(readFileSync(unlocked.sourcePath));
+    expect(unlocked.workingSha256).toBe(expectedSha256);
+    const unlocksAtStatic = unlocked.unlockCount;
+
+    await releaseEditRuntimePrepare(launched.electronApp);
+    await expect.poll(async () => {
+      const snapshot = await readActiveAcceptSnapshot(launched.page);
+      return snapshot.runtimePhase === "settled"
+        || snapshot.runtimeHandoff === "active"
+        || snapshot.runtimeCandidateId
+        ? snapshot
+        : false;
+    }, { timeout: 20_000 }).toBeTruthy();
+    const promoted = await readActiveAcceptSnapshot(launched.page);
+    expect(promoted.listItemText).toBe(UPDATED_TEXT);
+    expect(promoted.sourcePath).toBe(unlocked.sourcePath);
+    expect(promoted.workingSha256).toBe(expectedSha256);
+    expect(promoted.commentEnabled).toBe(true);
+    expect(promoted.unlockCount).toBe(unlocksAtStatic);
+    expect(promoted.showingDocumentTop).toBe(false);
+    expect(promoted.anchorInViewport).toBe(true);
+    expect(promoted.listItemText).not.toBe(ORIGINAL_TEXT);
+  } finally {
+    await releaseEditRuntimePrepare(launched.electronApp).catch(() => {});
     await stopPageRoot(launched.electronApp, launched.isolatedUserData);
     removeSourceFixture(fixture.sourceDirectory);
   }

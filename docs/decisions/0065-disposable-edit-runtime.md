@@ -96,7 +96,12 @@ source or be reconciled node by node.
   it with an outer static Surface. A Workbench-owned HTML replacement
   (adopted Version, disk reload, history) writes Active as static first so
   Canvas verify can acknowledge the new bytes; hidden A/B Candidates are only
-  for script refresh of the already-mounted document.
+  for script refresh of the already-mounted document. A same-document
+  authoritative replacement keeps a minimal viewport anchor and must not
+  restore Caret, Range or a native editing session. Canvas verify and edit
+  unlock must complete from that static Active frame even while Runtime
+  prepare is still held. Comment-rail alignment of the shared stage must not
+  replace the last reading position used for that restore.
 - Runtime DOM, Canvas pixels, form state and generated nodes are never
   serialized to source, save, Version, export, Request, Candidate or Review.
   Source HTML plus stable IDs remains the only persistence authority.
