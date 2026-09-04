@@ -2,6 +2,9 @@ import { expect, test } from "@playwright/test";
 
 import { generatedReviewBootstrap } from "../../helpers/generated-review-bootstrap.mjs";
 
+const COMMENT_STABLE_ID = "pr1_11111111111141118111111111111111";
+const COMMENT_STABLE_ID_B = "pr1_22222222222242228222222222222222";
+
 const COMMENT_SOURCE_BOX_SIGNATURE = JSON.stringify([
   ["class", "comment-host"],
   ["height", null],
@@ -106,7 +109,7 @@ test("path-only review comments bind against a real parsed DOM", {
   tag: ["@gate-smoke","@smoke-review"],
 }, async ({ page }) => {
   const binding = {
-    sourceNodeId: "element:1:1:div",
+    sourceNodeId: COMMENT_STABLE_ID,
     path: [1, 0, 0],
     tagName: "DIV",
     sourceBoxSignature: COMMENT_SOURCE_BOX_SIGNATURE,
@@ -160,7 +163,7 @@ test("source-backed comment IDs survive an authored RegExp exec mutation", {
   tag: ["@gate-smoke","@smoke-comments"],
 }, async ({ page }) => {
   const binding = {
-    sourceNodeId: "element:1:1:div",
+    sourceNodeId: COMMENT_STABLE_ID,
     path: [1, 0, 0],
     tagName: "DIV",
     sourceBoxSignature: COMMENT_SOURCE_BOX_SIGNATURE,
@@ -186,7 +189,7 @@ test("review comment keys survive an authored String replace mutation", {
   tag: ["@gate-smoke","@smoke-review"],
 }, async ({ page }) => {
   const binding = {
-    sourceNodeId: "element:1:1:div",
+    sourceNodeId: COMMENT_STABLE_ID,
     path: [1, 0, 0],
     tagName: "DIV",
     sourceBoxSignature: COMMENT_SOURCE_BOX_SIGNATURE,
@@ -212,7 +215,7 @@ test("path-only review comments fail closed when the parsed path and tag diverge
   tag: ["@gate-smoke","@smoke-review"],
 }, async ({ page }) => {
   const binding = {
-    sourceNodeId: "element:1:1:div",
+    sourceNodeId: COMMENT_STABLE_ID,
     path: [1, 0, 0],
     tagName: "DIV",
     sourceBoxSignature: COMMENT_SOURCE_BOX_SIGNATURE,
@@ -241,7 +244,7 @@ test("path-only review comments fail closed when a same-tag parser decoy shifts 
   tag: ["@gate-smoke","@smoke-review"],
 }, async ({ page }) => {
   const binding = {
-    sourceNodeId: "element:1:1:div",
+    sourceNodeId: COMMENT_STABLE_ID,
     path: [1, 0, 0],
     tagName: "DIV",
     sourceBoxSignature: COMMENT_SOURCE_BOX_SIGNATURE,
@@ -271,7 +274,7 @@ test("a pre-author Stable ID binding survives a same-tag parser decoy", {
 }, async ({ page }) => {
   const stableId = "pr1_11111111111141118111111111111111";
   const binding = {
-    sourceNodeId: "element:1:1:div",
+    sourceNodeId: COMMENT_STABLE_ID,
     path: [1, 0, 0],
     tagName: "DIV",
     sourceBoxSignature: COMMENT_SOURCE_BOX_SIGNATURE,
@@ -301,7 +304,7 @@ test("path-only review comments keep a bound target when a later same-tag node i
   tag: ["@gate-smoke","@smoke-review"],
 }, async ({ page }) => {
   const binding = {
-    sourceNodeId: "element:1:1:div",
+    sourceNodeId: COMMENT_STABLE_ID,
     path: [1, 0, 0],
     tagName: "DIV",
     sourceBoxSignature: COMMENT_SOURCE_BOX_SIGNATURE,
@@ -328,7 +331,7 @@ test("identical path-only comment siblings keep their separate frozen paths", {
   tag: ["@gate-smoke","@smoke-review"],
 }, async ({ page }) => {
   const bindings = [0, 1].map((index) => ({
-    sourceNodeId: `element:1:${index + 1}:div`,
+    sourceNodeId: index === 0 ? COMMENT_STABLE_ID : COMMENT_STABLE_ID_B,
     path: [1, 0, index],
     tagName: "DIV",
     sourceBoxSignature: COMMENT_SOURCE_BOX_SIGNATURE,
@@ -360,7 +363,7 @@ test("mixed-shape path-only comment decoys fail closed", {
 }, async ({ page }) => {
   const bindings = [
     {
-      sourceNodeId: "element:1:1:div",
+      sourceNodeId: COMMENT_STABLE_ID,
       path: [1, 0, 0],
       tagName: "DIV",
       sourceBoxSignature: COMMENT_SOURCE_BOX_SIGNATURE,
@@ -368,7 +371,7 @@ test("mixed-shape path-only comment decoys fail closed", {
       identityText: "",
     },
     {
-      sourceNodeId: "element:1:2:div",
+      sourceNodeId: COMMENT_STABLE_ID_B,
       path: [1, 0, 1],
       tagName: "DIV",
       sourceBoxSignature: COMMENT_OTHER_SOURCE_BOX_SIGNATURE,

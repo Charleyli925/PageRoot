@@ -1,11 +1,8 @@
 import {
   buildSourceIndex,
-  instrumentPreviewHtml,
   resolveTargetRef,
 } from "./source-patch-core.js";
 import { sourceTargetRefForSelection } from "./canvas-target-rebind.js";
-
-export const REVIEW_SOURCE_NODE_ATTRIBUTE = "data-pageroot-review-source-node-id";
 
 export function prepareReviewCommentSourceProjection(sourceHtml, enabled = true) {
   const fallback = {
@@ -22,20 +19,13 @@ export function prepareReviewCommentSourceProjection(sourceHtml, enabled = true)
     return fallback;
   }
 
-  try {
-    return {
-      html: instrumentPreviewHtml(sourceIndex, {
-        attributeName: REVIEW_SOURCE_NODE_ATTRIBUTE,
-      }).html,
-      sourceIndex,
-      projected: true,
-    };
-  } catch {
-    return {
-      ...fallback,
-      sourceIndex,
-    };
-  }
+  return {
+    html: sourceHtml,
+    sourceIndex,
+    projected: Boolean(
+      sourceIndex.pagerootIdentity?.complete && sourceIndex.pagerootIdentity?.valid,
+    ),
+  };
 }
 
 export function resolveReviewCommentSourceElement(sourceIndex, target) {

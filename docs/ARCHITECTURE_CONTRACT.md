@@ -623,7 +623,7 @@ An equal ID on another DOM object grants nothing by itself. Runtime source
 proof is a private `WeakMap<Element, PagerootElementId>` sealed before author
 Script activation: it answers whether this DOM object is the original parsed
 source object. It is not a second identity. Offset-derived Source Node IDs are
-not written onto Runtime DOM, do not authorize edits, and are never refreshed
+not written onto Runtime DOM or Review HTML, do not authorize edits, and are never refreshed
 across Working HTML revisions. For each Runtime
 generation, the private source-object authority set is established exactly once
 before author Script activation and is then sealed. A registered object may be

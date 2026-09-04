@@ -14,7 +14,6 @@ export {
   SourceIndexError,
   buildSourceIndex,
   compareParseIntegrity,
-  instrumentPreviewHtml,
   normalizeSourceText,
   scanStartTagAttributes,
   sourceSha256,

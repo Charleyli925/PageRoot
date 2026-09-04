@@ -125,6 +125,7 @@ export type ReviewCommentTarget = {
   global: boolean;
   stableId?: string;
   selector?: string;
+  /** Private bootstrap identity key; always a Stable ID, never a parseKey. */
   sourceNodeId?: string;
 };
 

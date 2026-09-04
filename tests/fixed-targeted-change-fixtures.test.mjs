@@ -10,7 +10,6 @@ import {
   applyPatchPlan,
   buildSourceIndex,
   createTargetRef,
-  instrumentPreviewHtml,
   planSourcePatch,
   resolveTargetRef,
 } from "../app/lib/source-patch-core.js";
@@ -54,7 +53,6 @@ test("the checked-in targeted-change manifest is an executable release gate", as
     const html = await fixture(sample.path);
     const index = buildSourceIndex(html);
     assert.equal(index.integrity.ok, true, sample.path);
-    assert.equal(instrumentPreviewHtml(index).html.includes(SOURCE_NODE_ATTRIBUTE), true);
     assert.equal(html.includes(SOURCE_NODE_ATTRIBUTE), false);
 
     if (sample.lineEnding === "crlf") {

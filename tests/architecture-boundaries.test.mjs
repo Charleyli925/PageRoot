@@ -256,6 +256,27 @@ test("retired production modules and imports stay outside the graph", () => {
     }).join("\n"),
     /retired page-view tab adapters/u,
   );
+  assert.match(
+    retiredArtifactViolations({
+      file: "app/workbench/review-document.ts",
+      source: 'export const attr = "data-pageroot-review-source-node-id";',
+    }).join("\n"),
+    /Review cannot write parseKey identity/u,
+  );
+  assert.match(
+    retiredArtifactViolations({
+      file: "app/lib/review-comment-source-map.js",
+      source: "export function instrumentPreviewHtml() {}",
+    }).join("\n"),
+    /instrumentPreviewHtml cannot return/u,
+  );
+  assert.match(
+    retiredArtifactViolations({
+      file: "app/workbench/review/runtime-projection.ts",
+      source: "const pattern = /^element:\\d+:\\d+:[a-z]/iu;",
+    }).join("\n"),
+    /parseKey cannot leave source-index/u,
+  );
 });
 
 test("the architecture checker contains no implementation-shape assertions", async () => {

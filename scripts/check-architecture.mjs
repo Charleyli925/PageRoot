@@ -98,6 +98,14 @@ const SOURCE_NODE_ID_ALLOWED_FILES = new Set([
   ["app", "components", "IslandEditingController.ts"].join("/"),
   ["shared", "editable-island.mjs"].join("/"),
 ]);
+const REVIEW_SOURCE_NODE_ID_LITERAL = ["data", "pageroot", "review", "source", "node", "id"].join("-");
+const PARSE_KEY_PATTERN_SOURCE = ["element", ":\\d+", ":\\d+", ":"].join("");
+const PARSE_KEY_ALLOWED_FILES = new Set([
+  ["app", "lib", "source-index.js"].join("/"),
+  ["app", "lib", "source-patch-core.js"].join("/"),
+  ["app", "lib", "source-patch-engine.js"].join("/"),
+  ["app", "lib", "target-resolver.js"].join("/"),
+]);
 const PAGE_VIEW_CONTEXT_FILE = ["app", "lib", "page-view-context.js"].join("/");
 const PAGE_VIEW_CONTEXT_RETIRED_ADAPTERS =
   /\bdata-p\b|\bdata-tab\b|resolveDataLinkedTabAction|resolveIndexedHandlerTabAction|SIMPLE_INDEXED_TAB_HANDLER|LEGACY_TAB_/u;
@@ -357,6 +365,24 @@ export function retiredArtifactViolations({ file = "", source = "", module = nul
         `${file}: Source Node ID cannot leave source-index internals or Runtime DOM`,
       );
     }
+    if (literal === REVIEW_SOURCE_NODE_ID_LITERAL) {
+      violations.push(
+        `${file}: Review cannot write parseKey identity onto source HTML`,
+      );
+    }
+  }
+  if (hasIdentifier(handle, "instrumentPreviewHtml")) {
+    violations.push(
+      `${file}: instrumentPreviewHtml cannot return; parseKey must not be written onto DOM`,
+    );
+  }
+  if (
+    !PARSE_KEY_ALLOWED_FILES.has(file)
+    && source.includes(PARSE_KEY_PATTERN_SOURCE)
+  ) {
+    violations.push(
+      `${file}: parseKey cannot leave source-index/source-patch`,
+    );
   }
   if (
     file === PAGE_VIEW_CONTEXT_FILE

@@ -110,8 +110,8 @@ the historical synthetic-spike decision.
   PNGs and a Review runtime owner do not participate. Runtime descendants remain display-only preview
   state and never enter SourcePatch, save, Version, Review analysis or AI
   Request input.
-- Comment selection remains source-node exact inside foreign content. Authored
-  SVG children retain their own instrumented SourceIndex identity; runtime-only
+- Comment selection remains Stable-ID exact inside foreign content. Authored
+  SVG children retain their own SourceIndex identity; runtime-only
   children fail closed and are never promoted to an ancestor `svg`.
 - Comment-rail coordinates are a disposable Canvas measurement projection.
   Every snapshot is tagged with the rendered source Hash, the generation of
@@ -185,13 +185,15 @@ the historical synthetic-spike decision.
   disposable, and the initial private bootstrap is used only for exact
   before-side comment targeting; neither capability changes the diff authority.
 
-  Frozen comments use a separate private locator capability. For every
+  Frozen comments use a separate private locator capability. Review reads
+  `data-pageroot-id` already present in frozen source HTML and never writes a
+  parseKey or second identity attribute onto the prepared document. For every
   source-resolved before target the analyzer keeps an opaque initial-bootstrap
-  binding: a parser path plus a narrow static fingerprint, never a source-node
-  attribute in prepared HTML. The managed preview serves it only to the first
+  binding: the Stable ID plus a parser path and a narrow static fingerprint.
+  The managed preview serves it only to the first
   parser-blocking bootstrap request, then serves an unbound fallback. The
   trusted parent subsequently delivers targets only over a challenged private
-  `MessageChannel`. Comment body, key, source-node and locator-map data are
+  `MessageChannel`. Comment body, key, Stable ID and locator-map data are
   absent from document bytes and later bootstrap reads. A unique source `id`,
   `data-*`, `name`, or `aria-label` is only a safe fallback; missing, ambiguous,
   replaced or disconnected targets omit the before-side marker rather than

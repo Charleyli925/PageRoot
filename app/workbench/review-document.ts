@@ -6,7 +6,6 @@ import {
   serializeReviewProjectionFacts,
 } from "../lib/review-projection-facts.js";
 import {
-  REVIEW_SOURCE_NODE_ATTRIBUTE,
   prepareReviewCommentSourceProjection,
 } from "../lib/review-comment-source-map.js";
 import {
@@ -691,8 +690,8 @@ function* buildReviewDocumentSteps(
   const afterSourceProjection = prepareReviewCommentSourceProjection(afterHtml, true);
   const beforeDocument = parser.parseFromString(beforeSourceProjection.html, "text/html");
   const afterDocument = parser.parseFromString(afterSourceProjection.html, "text/html");
-  clearReservedReviewMarkup(beforeDocument, beforeSourceProjection.projected);
-  clearReservedReviewMarkup(afterDocument, afterSourceProjection.projected);
+  clearReservedReviewMarkup(beforeDocument);
+  clearReservedReviewMarkup(afterDocument);
   yield "parse";
   const commentAnnotations = annotateReviewComments(
     beforeDocument,
@@ -706,11 +705,6 @@ function* buildReviewDocumentSteps(
     ...visualStableIds(side),
     ...reviewCommentTargets.flatMap((target) => target.stableId ? [target.stableId] : []),
   ])];
-  [beforeDocument, afterDocument].forEach((document) => {
-    document.querySelectorAll(`[${REVIEW_SOURCE_NODE_ATTRIBUTE}]`).forEach((element) => {
-      element.removeAttribute(REVIEW_SOURCE_NODE_ATTRIBUTE);
-    });
-  });
   yield "comments";
   annotatePanelPairs(beforeDocument, afterDocument);
   yield "panels";

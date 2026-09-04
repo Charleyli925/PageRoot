@@ -3,11 +3,9 @@ import test from "node:test";
 
 import {
   SOURCE_NODE_ATTRIBUTE,
-  SourceIndexError,
   buildSourceIndex,
   createInsertionPointTargetRef,
   createTargetRef,
-  instrumentPreviewHtml,
   resolveFromPreview,
   resolveTargetRef,
 } from "../app/lib/source-patch-core.js";
@@ -106,52 +104,19 @@ test("SourceIndex retains duplicate attributes and marks implicit/incomplete bou
   assert.equal(Object.hasOwn(div.stableAttributes, "id"), false);
 });
 
-test("instrumented preview injects ephemeral node IDs without changing the source index", () => {
+test("SourceIndex leaves source HTML bytes unchanged and skips forged Source Node attributes", () => {
   const html = `<main><h1>标题</h1><img src=x></main>`;
   const index = buildSourceIndex(html);
-  const preview = instrumentPreviewHtml(index);
   assert.equal(index.source, html);
   assert.equal(html.includes(SOURCE_NODE_ATTRIBUTE), false);
-  assert.equal(preview.nodeIds.length, index.elements.length);
-  for (const nodeId of preview.nodeIds) {
-    assert.match(preview.html, new RegExp(`${SOURCE_NODE_ATTRIBUTE}="${nodeId}"`));
-  }
-  assert.throws(
-    () => instrumentPreviewHtml(`<main ${SOURCE_NODE_ATTRIBUTE}="user-value"></main>`),
-    (error) => error instanceof SourceIndexError
-      && error.code === "PREVIEW_ATTRIBUTE_COLLISION",
-  );
+  const forged = buildSourceIndex(`<main ${SOURCE_NODE_ATTRIBUTE}="user-value"></main>`);
+  const main = forged.elements.find((element) => element.tagName === "main");
+  assert.equal(Object.hasOwn(main.stableAttributes, SOURCE_NODE_ATTRIBUTE), false);
 });
 
-test("instrumented preview preserves byte output for large element sets", () => {
-  const html = `<!doctype html><main>${Array.from(
-    { length: 4_000 },
-    (_, index) => `<section data-row="${index}"><span>row ${index}</span></section>`,
-  ).join("")}</main>`;
-  const index = buildSourceIndex(html);
-  let legacyOutput = html;
-  const insertions = index.elements
-    .map((element) => ({
-      offset: element.closingDelimiterOffset,
-      value: ` ${SOURCE_NODE_ATTRIBUTE}="${element.nodeId}"`,
-    }))
-    .sort((left, right) => right.offset - left.offset);
-  for (const insertion of insertions) {
-    legacyOutput = legacyOutput.slice(0, insertion.offset)
-      + insertion.value
-      + legacyOutput.slice(insertion.offset);
-  }
-
-  const preview = instrumentPreviewHtml(index);
-  assert.equal(preview.html, legacyOutput);
-  assert.equal(preview.nodeIds.length, 8_001);
-});
-
-test("fallback selectors use CSS nth-of-type ordinals across mixed-tag siblings and identify the preview node", () => {
+test("fallback selectors use CSS nth-of-type ordinals across mixed-tag siblings", () => {
   const html = `<!doctype html><html><head><title>Selector</title></head><body><main><h1>A</h1><p>B</p><aside>C</aside><p>D</p></main></body></html>`;
   const index = buildSourceIndex(html);
-  const preview = instrumentPreviewHtml(index);
-  const previewIndex = buildSourceIndex(preview.html);
   const expectedSelectors = new Map([
     ["html", "html:nth-of-type(1)"],
     ["head", "html:nth-of-type(1) > head:nth-of-type(1)"],
@@ -173,11 +138,6 @@ test("fallback selectors use CSS nth-of-type ordinals across mixed-tag siblings 
     assert.deepEqual(
       resolveNthOfTypeSelector(index, element.selector).map((candidate) => candidate.nodeId),
       [element.nodeId],
-    );
-    const [previewElement] = resolveNthOfTypeSelector(previewIndex, element.selector);
-    assert.equal(
-      previewElement.attributesByName.get(SOURCE_NODE_ATTRIBUTE)?.[0]?.rawValue,
-      element.nodeId,
     );
   }
 });

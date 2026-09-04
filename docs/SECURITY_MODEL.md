@@ -437,12 +437,13 @@ so they cannot navigate the frame or suppress the trusted review bootstrap.
 Review facts come only from the two frozen HTML documents. The review renderer has no screenshot owner, runtime-capture IPC, PNG envelope, pixel parser or runtime binding. It reports precise text evidence and outermost element presence; movement, attributes, CSS, layout, wrapping and runtime drawing produce no Review fact.
 
 Comment location remains separately private. Each source-resolved local target
-may use an opaque initial-bootstrap binding: an element path plus a narrow
-static fingerprint, never a source-node identity in authored HTML. The managed
+may use an opaque initial-bootstrap binding: the element's `data-pageroot-id`,
+an element path plus a narrow static fingerprint. Review never writes a parseKey
+or second identity attribute into authored or prepared HTML. The managed
 preview serves that binding only to the first parser-blocking bootstrap request,
 then falls back to an unbound response. The trusted parent sends the final
 key-to-target mapping only to the before bootstrap over a challenged private
-`MessageChannel`. Comment body, key, source-node and locator-map data are absent
+`MessageChannel`. Comment body, key, Stable ID and locator-map data are absent
 from document bytes and later bootstrap reads. A unique source `id`, `data-*`,
 `name`, or `aria-label` is only a safe fallback; missing, ambiguous, replaced or
 disconnected targets omit the comment marker rather than rebinding by guess.
