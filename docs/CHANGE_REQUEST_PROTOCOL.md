@@ -315,7 +315,7 @@ fallback；用户先持久取消旧 Request 形成 fence，再重新发送并建
 
 - `targetId`、`label`、`level`。
 - 当前受管 Working Copy 目标包含 `elementId + expectedSourceSha256 + fingerprint.tagName`；标签指纹是拒绝 ID 错误迁移所需的完整性证据，`selector`、`sourceAnchor` 和其余 fingerprint 字段作为显示、审计与旧记录兼容证据继续保留。
-- 无 `elementId` 的历史 TargetRef 仍要求 `selector`、`sourceAnchor`、`fingerprint` 至少存在一种。
+- 无 `elementId` 的历史 TargetRef 仍要求 `selector`、`sourceAnchor`、`fingerprint` 至少存在一种。完整身份的受管 Working Copy 上，这些字段不再作为正式定位结果，只供 Shadow 对照。
 - 选中文字时可包含 `textLocator.quote/startOffset/endOffset/affinity`；offset 是所属元素解码后代文字中的 UTF-16 位置，不扩大 AI 修改权限。
 - 若包含源码锚点，只使用冻结基线中的 `sourceAnchor.startOffset/endOffset/sourceSha256`。
 - 若包含指纹，使用 `fingerprint.tagName/stableAttributes/ancestorFingerprint`，可带文字前后缀。

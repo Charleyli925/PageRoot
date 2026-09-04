@@ -113,7 +113,11 @@ export function measureCommentTargetLayouts(options: {
         targetResolution = "exact";
       } else {
         const resolution = sourceIndex
-          ? resolveTargetRef(sourceIndex, sourceTargetRefForSelection(target))
+          ? resolveTargetRef(
+            sourceIndex,
+            sourceTargetRefForSelection(target),
+            { surface: "comments" },
+          )
           : null;
         targetResolution = (
           resolution?.resolution ?? "orphaned"
@@ -365,7 +369,11 @@ export function layoutCommentMarkers(options: {
     let targetElement: HTMLElement | null = null;
     try {
       const resolution = sourceIndex
-        ? resolveTargetRef(sourceIndex, sourceTargetRefForSelection(target))
+        ? resolveTargetRef(
+          sourceIndex,
+          sourceTargetRefForSelection(target),
+          { surface: "comments" },
+        )
         : null;
       if (resolution?.target?.type === "element") {
         targetElement = querySourceElement(documentNode, String(resolution.target.nodeId));

@@ -5006,6 +5006,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         const resolved = resolveTargetRef(
           sourceIndex,
           sourceTargetRefForSelection(commentAnchor),
+          { surface: "comments" },
         );
         const sourceNodeId = resolved.target?.type === "element"
           ? resolved.target.nodeId

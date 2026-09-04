@@ -182,9 +182,11 @@ level, not per file: `runtime-state.json` is preserved at its root and in
   evidence only.
 - Current consumer: current Comment/Draft records, Canvas target resolution,
   Request freeze and read-only historical Version projection.
-- Decoder and canonical output: `selectionFromRecord` preserves the old shape,
-  and `TargetResolver` uses the legacy exact/heuristic resolver only when
-  `elementId` is absent. New local-comment producers emit a valid stable ID and
+- Decoder and canonical output: `selectionFromRecord` preserves the old shape.
+  On a complete managed Working Copy, `TargetResolver` locates officially only
+  by `elementId` and shadows the legacy scorer for fallback-only metrics. The
+  legacy exact/heuristic resolver remains official only when identity is
+  absent or incomplete. New local-comment producers emit a valid stable ID and
   capture Hash; whole-page comments retain the deterministic body semantic
   target.
 - Support window and deletion evidence: keep until immutable ID-less Versions

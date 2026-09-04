@@ -450,14 +450,14 @@ This capability cannot discover or authorize additional Review facts. The user
 still invokes the existing fail-closed ready-version activation path through
 “直接打开” or the review confirmation “打开 AI 修改后”.
 
-Current Edit comments use a separate ADR 0061 identity boundary. A TargetRef
-with `elementId` resolves only through SourceIndex's valid unique
-`data-pageroot-id` map; missing, invalid or tag-migrated identity becomes
-orphaned. Stable refs without `fingerprint.tagName` also fail closed, so a
-copied ID cannot bypass tag-migration detection; resolution cannot fall back to
-selector, other fingerprint fields, source offset or Runtime DOM similarity.
-ID-less historical records retain the bounded legacy
-resolver. Selected-text locators contain source-backed decoded text offsets and
+Current Edit comments use a separate ADR 0061 identity boundary. On a complete
+managed Working Copy, a TargetRef resolves officially only through SourceIndex's
+valid unique `data-pageroot-id` map; missing, invalid or deleted identity
+becomes orphaned. The old selector, fingerprint, source-offset and text-affix
+resolver still runs in shadow and records fallback-only success; it cannot
+select a replacement. Whole-page comments keep the deterministic body
+semantic target. ID-less records against unmanaged or identity-absent HTML
+retain the bounded legacy resolver. Selected-text locators contain source-backed decoded text offsets and
 never authorize persistence from preview DOM.
 
 Edit-mode reveal actions use the same trust boundary. They accept only strict

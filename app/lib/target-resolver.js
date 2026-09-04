@@ -559,58 +559,132 @@ function resolveInsertionPoint(index, targetRef) {
   );
 }
 
-export function resolveTargetRef(indexOrHtml, targetRef) {
-  const index = typeof indexOrHtml === "string"
-    ? buildSourceIndex(indexOrHtml)
-    : indexOrHtml;
-  if (!targetRef || typeof targetRef !== "object") {
-    throw new TypeError("resolveTargetRef requires a TargetRef.");
+const TARGET_RESOLVER_SURFACES = new Set(["edit", "comments", "review"]);
+
+function emptyShadowSurfaceStats() {
+  return {
+    observations: 0,
+    officialSuccess: 0,
+    shadowSuccess: 0,
+    fallbackOnlySuccess: 0,
+  };
+}
+
+function createShadowStats() {
+  return {
+    edit: emptyShadowSurfaceStats(),
+    comments: emptyShadowSurfaceStats(),
+    review: emptyShadowSurfaceStats(),
+  };
+}
+
+let shadowStats = createShadowStats();
+
+export function resetTargetResolverShadowStats() {
+  shadowStats = createShadowStats();
+}
+
+export function getTargetResolverShadowStats() {
+  return {
+    edit: { ...shadowStats.edit },
+    comments: { ...shadowStats.comments },
+    review: { ...shadowStats.review },
+  };
+}
+
+function normalizeResolverSurface(surface) {
+  return TARGET_RESOLVER_SURFACES.has(surface) ? surface : "edit";
+}
+
+function resolutionSucceeded(resolution) {
+  return resolution === "exact" || resolution === "rebound";
+}
+
+function isWholePageTargetRef(targetRef) {
+  return targetRef.level === "module"
+    && String(targetRef.selector ?? "").trim().toLowerCase() === "body";
+}
+
+function resolveWholePageBody(index, targetRef) {
+  const bodies = index.elements.filter((element) => element.tagName === "body");
+  if (bodies.length === 1) {
+    return resolved(targetRef, "exact", bodies[0], [], "whole-page-body-semantic");
   }
-  if (!TARGET_LEVELS.has(targetRef.level)) {
-    throw new TypeError(
-      "TargetRef level must be module, subregion, text, or insertion-point.",
+  if (bodies.length > 1) {
+    return resolved(
+      targetRef,
+      "ambiguous",
+      null,
+      bodies.map((element) => ({
+        nodeId: element.nodeId,
+        label: element.label,
+        range: element.range,
+      })),
+      "whole-page-body-ambiguous",
     );
   }
-  if (targetRef.level === "insertion-point") {
-    return resolveInsertionPoint(index, targetRef);
-  }
+  return resolved(targetRef, "orphaned", null, [], "whole-page-body-not-found");
+}
 
-  if (targetRef.elementId !== undefined) {
-    if (!isValidPagerootElementId(targetRef.elementId)) {
-      return resolved(targetRef, "orphaned", null, [], "stable-element-id-invalid");
-    }
-    const element = index.byPagerootId.get(targetRef.elementId) ?? null;
-    if (!element) {
-      return resolved(targetRef, "orphaned", null, [], "stable-element-not-found");
-    }
-    if (targetRef.level === "text") {
-      const directTextNodes = element.textNodeIds
-        .map((nodeId) => index.byNodeId.get(nodeId))
-        .filter((node) => node?.type === "text");
-      if (directTextNodes.length !== 1) {
-        return resolved(targetRef, "orphaned", null, [], "stable-text-node-not-unique");
-      }
-      return resolved(
-        targetRef,
-        "exact",
-        directTextNodes[0],
-        [],
-        targetRef.expectedSourceSha256 === index.sourceSha256
-          ? "stable-element-and-source-hash-match"
-          : "stable-element-match",
+function observeManagedShadow(surface, official, shadow) {
+  const stats = shadowStats[surface];
+  stats.observations += 1;
+  if (resolutionSucceeded(official.resolution)) stats.officialSuccess += 1;
+  if (resolutionSucceeded(shadow.resolution)) stats.shadowSuccess += 1;
+  if (
+    !resolutionSucceeded(official.resolution)
+    && resolutionSucceeded(shadow.resolution)
+  ) {
+    stats.fallbackOnlySuccess += 1;
+    if (typeof console !== "undefined" && typeof console.debug === "function") {
+      console.debug(
+        "[pageroot:target-resolver-shadow]",
+        surface,
+        "fallback-only",
+        official.reason,
+        shadow.reason,
       );
+    }
+  }
+}
+
+function resolveByStableElementId(index, targetRef) {
+  if (!isValidPagerootElementId(targetRef.elementId)) {
+    return resolved(targetRef, "orphaned", null, [], "stable-element-id-invalid");
+  }
+  const element = index.byPagerootId.get(targetRef.elementId) ?? null;
+  if (!element) {
+    return resolved(targetRef, "orphaned", null, [], "stable-element-not-found");
+  }
+  if (targetRef.level === "text") {
+    const directTextNodes = element.textNodeIds
+      .map((nodeId) => index.byNodeId.get(nodeId))
+      .filter((node) => node?.type === "text");
+    if (directTextNodes.length !== 1) {
+      return resolved(targetRef, "orphaned", null, [], "stable-text-node-not-unique");
     }
     return resolved(
       targetRef,
       "exact",
-      element,
+      directTextNodes[0],
       [],
       targetRef.expectedSourceSha256 === index.sourceSha256
         ? "stable-element-and-source-hash-match"
         : "stable-element-match",
     );
   }
+  return resolved(
+    targetRef,
+    "exact",
+    element,
+    [],
+    targetRef.expectedSourceSha256 === index.sourceSha256
+      ? "stable-element-and-source-hash-match"
+      : "stable-element-match",
+  );
+}
 
+function resolveByLegacyHeuristics(index, targetRef) {
   const exact = exactNode(index, targetRef);
   if (exact) return resolved(targetRef, "exact", exact, [], "source-anchor-match");
 
@@ -658,6 +732,74 @@ export function resolveTargetRef(indexOrHtml, targetRef) {
     })),
     "unique-fingerprint-match",
   );
+}
+
+function resolveCompatibilityTargetRef(index, targetRef) {
+  if (targetRef.level === "insertion-point") {
+    return resolveInsertionPoint(index, targetRef);
+  }
+  if (targetRef.elementId !== undefined) {
+    return resolveByStableElementId(index, targetRef);
+  }
+  return resolveByLegacyHeuristics(index, targetRef);
+}
+
+function resolveManagedOfficialTargetRef(index, targetRef) {
+  if (isWholePageTargetRef(targetRef) && targetRef.elementId === undefined) {
+    return resolveWholePageBody(index, targetRef);
+  }
+  if (targetRef.level === "insertion-point") {
+    if (targetRef.elementId === undefined) {
+      return resolved(
+        targetRef,
+        "orphaned",
+        null,
+        [],
+        "managed-insertion-requires-parent-id",
+      );
+    }
+    return resolveInsertionPoint(index, targetRef);
+  }
+  if (targetRef.elementId === undefined) {
+    return resolved(targetRef, "orphaned", null, [], "managed-element-id-required");
+  }
+  return resolveByStableElementId(index, targetRef);
+}
+
+function shadowCompatibilityTargetRef(index, targetRef) {
+  const shadowRef = { ...targetRef };
+  delete shadowRef.elementId;
+  return resolveCompatibilityTargetRef(index, shadowRef);
+}
+
+export function resolveTargetRef(indexOrHtml, targetRef, options = {}) {
+  const index = typeof indexOrHtml === "string"
+    ? buildSourceIndex(indexOrHtml)
+    : indexOrHtml;
+  if (!targetRef || typeof targetRef !== "object") {
+    throw new TypeError("resolveTargetRef requires a TargetRef.");
+  }
+  if (!TARGET_LEVELS.has(targetRef.level)) {
+    throw new TypeError(
+      "TargetRef level must be module, subregion, text, or insertion-point.",
+    );
+  }
+  if (index.pagerootIdentity?.complete !== true) {
+    return resolveCompatibilityTargetRef(index, targetRef);
+  }
+
+  const official = resolveManagedOfficialTargetRef(index, targetRef);
+  const surface = normalizeResolverSurface(options?.surface);
+  try {
+    observeManagedShadow(
+      surface,
+      official,
+      shadowCompatibilityTargetRef(index, targetRef),
+    );
+  } catch {
+    // Shadow comparison must never change the official managed result.
+  }
+  return official;
 }
 
 export function resolveFromPreview(indexOrHtml, nodeId, options = {}) {
