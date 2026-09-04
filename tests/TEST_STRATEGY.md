@@ -219,13 +219,12 @@ Workbench 只确认已提交 loading surface、传入窄 port 并消费快照。
   入口，保存或明确删除才会移除，且草稿不增加主评论数或 `评N`。
   高密度短页面用例还必须证明 Canvas 自然底边保持不变，评论队列不会撑长
   共享页面；页面到底后可继续向下把底部卡片拉入，反向滚动可恢复自然位置。
-- 编辑模式安全内容切换：Node 证明语义 Tab/details/disclosure 与显式
-  `data-p` / `data-tab` → panel-ID、固定数字处理器 → 唯一索引面板这两类
-  旧式页签适配器的严格白名单，以及链接、弹窗、分组 details、重复/跳号
-  索引、动态或多语句处理器、多候选面板和歧义标记的失败关闭；Browser 证明
-  单击选择、双击文字直接编辑、工具条和 `Option + 单击` 不冲突，切换前后共享滚动
-  位置不变、作者处理器未运行且导出字节不变；Electron
-  独立重读真实源文件，证明作者事件未运行且磁盘字节不变。
+- 编辑模式安全内容切换：Node 证明语义 ARIA Tab/details/disclosure 白名单，
+  以及 `data-p` / `data-tab`、固定索引处理器、链接、弹窗、分组 details
+  和歧义标记保持无动作；Browser 证明 ARIA 页签可通过工具条和
+  `Option + 单击` 切换且共享滚动位置不变、作者处理器未运行且导出字节不变，
+  旧式页签不再出现切换动作；Electron 独立重读真实源文件，证明作者事件未运行
+  且磁盘字节不变。
 - 第一次打开真实 HTML 引导：Node 证明 `ui-preferences.json` 损坏/过大视为
   pending、欢迎 `projectId` 不显示卡片、pending 且合格时可见、连续 800ms
   才写入 presented 且卡片仍在、中途打断仍 pending、旧 generation 的

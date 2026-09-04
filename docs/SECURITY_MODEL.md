@@ -464,19 +464,11 @@ Edit-mode reveal actions use the same trust boundary. They accept only strict
 Tabs whose selected panel is proved by `aria-selected` plus `hidden`, native
 details with one direct summary, and local button/region disclosures whose
 `aria-controls`, `aria-labelledby`, `aria-expanded` and `hidden` states agree.
-The only legacy Tab adapter accepts sibling `button`/`div` controls with one
-uniform `data-p` or `data-tab` attribute, a unique one-to-one panel-ID mapping,
-uniform base classes, and exactly one matching `active` control/panel pair. It
-can transfer only that `active` class. A second bounded legacy adapter accepts
-only sibling `button`/`div`/`li` controls whose inline handler is exactly the
-same identifier called with consecutive constant decimal indices, plus one
-uniquely related, equal-length panel group with uniform base classes and one
-matching active pair. The handler string is structural evidence only and is
-never evaluated. Duplicate mappings or indices, mixed identifiers, gaps,
-dynamic or multi-statement handlers, multiple candidate panel groups,
-multi-active state, and unsupported class-only inference all fail closed.
-Links, forms, grouped details, popups, popovers, drawers and authored event
-handlers are never executed. The action changes disposable attributes only and
+`data-p` / `data-tab` class-token Tabs and constant-index handlers such as
+`switchChart(0)` are not edit-mode presentation actions; those pages still use
+Preview when authored scripts must run. Links, forms, grouped details, popups,
+popovers, drawers and authored event handlers are never executed. The action
+changes disposable attributes only and
 has no source-write, filesystem, navigation or implicit scroll authority.
 
 ## Untrusted inputs
