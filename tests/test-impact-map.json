@@ -1088,7 +1088,7 @@
         "^desktop/(?:edit-runtime-bootstrap|edit-runtime-protocol|edit-runtime-preparation-fence|edit-runtime-library-store)\\.mjs$",
         "^desktop/main\\.mjs$",
         "^docs/decisions/(?:0065-disposable-edit-runtime|archive/(?:0025-edit-direct-one-shot-runtime|0058-bounded-canvas-svg-edit-runtime))\\.md$",
-        "^tests/(?:edit-author-runtime-session|edit-runtime-bootstrap|edit-runtime-preparation-fence|edit-runtime-contract|edit-runtime-protocol|edit-runtime-library-store|html-canvas-frame|runtime-canvas-retirement)\\.test\\.mjs$"
+        "^tests/(?:edit-author-runtime-session|edit-runtime-bootstrap|edit-runtime-preparation-fence|edit-runtime-contract|edit-runtime-protocol|edit-runtime-library-store|html-canvas-frame|html-canvas-runtime-startup|runtime-canvas-retirement)\\.test\\.mjs$"
       ],
       "suites": [
         "typecheck",
@@ -1103,6 +1103,7 @@
         "tests/edit-runtime-library-store.test.mjs",
         "tests/html-preview-sandbox.test.mjs",
         "tests/html-canvas-frame.test.mjs",
+        "tests/html-canvas-runtime-startup.test.mjs",
         "tests/workspace-controller.test.mjs",
         "tests/desktop-preload-ipc.test.mjs"
       ]

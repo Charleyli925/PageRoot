@@ -685,7 +685,7 @@ authority registration. Author Script cannot gain authority by copying public
 Stable-ID or marker attributes.
 When its destination leaves Edit Canvas, `leave-canvas` records the same source
 checkpoint but does not rebuild or start a candidate before departure, even
-while `runtimeNeedsRerender` or the visible projection Hash is stale. An aborted
+while a Runtime refresh is pending or the visible projection Hash is stale. An aborted
 leave may later refresh as recovery; it must not clear the stale fact to
 manufacture success. History retains its separate bookmark and canonical
 adoption behavior.

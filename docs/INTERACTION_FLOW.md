@@ -367,6 +367,10 @@ Runtime 降级展示按以下状态投影：直接不支持或运行环境不可
   `data-pageroot-id` 精确解析的 selection；目标已删除或证明失败时允许安全
   清除选择，不能猜测重绑或转存 Runtime DOM。恢复锚点取自晋升前最后可见的
   Active Frame，不得覆盖 Candidate 准备期间的用户滚动。
+- 替换权威 HTML（首次打开、采纳版本、磁盘重载、历史）只把新字节写入静态
+  Active，完成 Canvas 校验和解锁，不等待作者 Script。刷新动态内容时才在
+  隐藏 Candidate 中执行 Script。同一 Document 内的选区保护、IME 和格式后
+  继续输入不是跨 Runtime 迁移，必须保留。
 - 用户完成的每个操作先产生完整 next HTML，再进入既有 Hash/CAS、原子保存
   和恢复链路。重开时以保存 HTML 重新执行 Script，生成 ECharts、Canvas 等
   展示；不要求随机数、当前时间、动画中间帧或运行时交互状态与上次相同。

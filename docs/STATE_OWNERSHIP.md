@@ -292,7 +292,7 @@ Rules:
   materialize complete Working HTML and autosave/recovery evidence while
   retaining the iframe, contenteditable, Selection, caret and focus.
   `leave-canvas` retires native editing without queuing a candidate or clearing
-  `runtimeNeedsRerender`; a later unlock may refresh only as recovery. History
+  a pending Runtime refresh; a later unlock may refresh only as recovery. History
   retains its separate bookmark and canonical-adoption path.
 - The pure `decideEditRuntimeRefresh()` policy owns the projection decision for
   an accepted source operation: safe static text/style/reorder stays in place;

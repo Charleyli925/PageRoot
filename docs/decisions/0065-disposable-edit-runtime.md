@@ -93,10 +93,12 @@ source or be reconciled node by node.
   prepares a fresh closure and runs a fresh disposable page. Script-disabled
   static Canvases keep the existing bounded hot cache for other tabs only.
   Runtime preparing does not unmount the active `HtmlCanvasEditor` or replace
-  it with an outer static Surface. A Workbench-owned HTML replacement
-  (adopted Version, disk reload, history) writes Active as static first so
-  Canvas verify can acknowledge the new bytes; hidden A/B Candidates are only
-  for script refresh of the already-mounted document. A same-document
+  it with an outer static Surface. Replacing authoritative HTML (adopted
+  Version, disk reload, history, first open) writes Active as a static
+  document first so Canvas verify can acknowledge the new bytes without waiting
+  for author Script. Refreshing dynamic content then starts those scripts only
+  in a hidden Candidate. Active has no second path that executes Script
+  directly. A same-document
   authoritative replacement keeps a minimal viewport anchor and must not
   restore Caret, Range or a native editing session. Canvas verify and edit
   unlock must complete from that static Active frame even while Runtime
@@ -128,15 +130,16 @@ saved fact.**
   zoom context, and the selection resolved by stable element ID when those
   facts still have a valid target. Restoration is best-effort presentation;
   failure never permits runtime DOM to become source authority.
-- When a rebuild replaces a settled Runtime iframe, the editor uses a bounded
-  in-memory handoff snapshot: iframe and shared-workspace scroll, a stable-ID
-  visual anchor and offset, selection, native Range/Caret/Focus state, and the
-  last complete comment layout. The old iframe remains the visible, inert
-  authority while the candidate is prepared and positioned; the candidate is
-  promoted only after its layout and restored state are within the handoff
-  tolerance, then the old iframe is retired on the next frame. This is a
-  presentation handoff only, not Runtime DOM persistence or Script-state
-  migration.
+- When a rebuild replaces a settled Runtime iframe, the editor keeps a
+  presentation-only handoff: iframe and shared-workspace scroll, a stable-ID
+  visual anchor and screen offset, and zoom. It must not restore Caret, Range,
+  Focus or a native editing session, and it must not migrate the last comment
+  layout as proof that the new revision has already been measured. The old
+  iframe remains the visible, inert authority while the candidate is prepared
+  and positioned; the candidate is promoted only after its layout and restored
+  reading position are within the handoff tolerance, then the old iframe is
+  retired on the next frame. This is a presentation handoff only, not Runtime
+  DOM persistence or Script-state migration.
 - Every completed operation materializes complete next HTML before ordinary
   autosave/Hash/CAS persistence. Reopen reads that HTML and reruns Script to
   produce ECharts, Canvas and other runtime output afresh.
