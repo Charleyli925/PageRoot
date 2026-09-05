@@ -15,6 +15,12 @@ import {
   TRUSTED_LOCAL_AGENT_POLICY_VERSION,
 } from "../../shared/agent-delivery.mjs";
 import {
+  createAccessOperation,
+  finishAccessOperation,
+  publicAccessOperation,
+  requestCancelAccessOperation,
+} from "../../shared/agent-access-operation.mjs";
+import {
   PAGEROOT_PROVIDER_ID,
   PAGEROOT_RUNTIME_ID,
   DEFAULT_OPENAI_COMPATIBLE_REASONING,
@@ -319,6 +325,13 @@ export function agentAvailabilityCardPresentation(presentation, availability) {
       tone: "ready",
     });
   }
+  if (availability?.reason === "disabled") {
+    return Object.freeze({
+      statusLabel: `${displayName} · 已断开`,
+      detail: "重新连接后才会使用此服务",
+      tone: "attention",
+    });
+  }
   if (status === "not-installed") {
     return Object.freeze({
       statusLabel: `${displayName} · 未安装`,
@@ -396,6 +409,13 @@ export function agentProviderCardPresentation(provider) {
 
 function agentProviderDisplayAvailability(provider) {
   if (!provider) return INITIAL_AGENT_PROVIDER_AVAILABILITY;
+  if (provider.enabled === false) {
+    return agentProviderAvailabilityFromFailureReason(
+      "disabled",
+      provider.availability,
+      provider.availability?.checkedAt || provider.diagnostic?.checkedAt || null,
+    );
+  }
   const diagnosticAvailability = provider.diagnostic
     ? agentProviderAvailabilityFromDiagnostic(
       provider.diagnostic,
@@ -437,6 +457,8 @@ export function agentProviderCardsFromCatalog(snapshot) {
       models: Array.isArray(provider.models) ? provider.models : Object.freeze([]),
       credentialConfigured: provider.credentialConfigured === true,
       connection: provider.connection || null,
+      enabled: provider.enabled !== false,
+      activeOperation: provider.activeOperation || null,
       installState: provider.installState || "idle",
       diagnostic: provider.diagnostic || null,
       });
@@ -454,6 +476,8 @@ function frozenProviderEntry(descriptor, previous = null) {
     models: previous?.models || Object.freeze([]),
     credentialConfigured: previous?.credentialConfigured === true,
     connection: previous?.connection || null,
+    enabled: previous?.enabled !== false,
+    activeOperation: previous?.activeOperation || null,
     diagnostic: previous?.diagnostic || descriptor.diagnostic || null,
   });
 }
@@ -579,6 +603,29 @@ export class AgentCatalogState {
       || providers[0]?.selection
       || null;
     this.#selected = initial ? freezeAgentSelection(initial) : null;
+  }
+
+  applyDisabledProviderIds(ids = []) {
+    const disabled = new Set(Array.isArray(ids) ? ids : []);
+    let changed = false;
+    for (const [providerId, provider] of this.#providers) {
+      const enabled = !disabled.has(providerId);
+      if ((provider.enabled !== false) === enabled) continue;
+      changed = true;
+      this.#invalidateProvider(providerId);
+      this.#providers.set(providerId, Object.freeze({
+        ...provider,
+        enabled,
+        availability: enabled
+          ? checkingAgentProviderAvailability(provider.availability)
+          : agentProviderAvailabilityFromFailureReason(
+            "disabled",
+            provider.availability,
+            validDate(this.#clock),
+          ),
+      }));
+    }
+    if (changed) this.#publish();
   }
 
   getSnapshot() {
@@ -772,10 +819,35 @@ export class AgentCatalogState {
         );
         const current = this.#providers.get(frozen.providerId);
         if (current) {
-          this.#providers.set(frozen.providerId, Object.freeze({ ...current, diagnostic }));
+          const loginComplete = current.activeOperation?.kind === "login"
+            && diagnostic.readiness === "ready";
+          this.#providers.set(frozen.providerId, Object.freeze({
+            ...current,
+            diagnostic,
+            ...(loginComplete ? { activeOperation: null } : {}),
+            ...(current.enabled === false
+              ? {
+                availability: agentProviderAvailabilityFromFailureReason(
+                  "disabled",
+                  current.availability,
+                  validDate(this.#clock),
+                ),
+              }
+              : {}),
+          }));
           this.#publish();
         }
-        return Object.freeze({ result, diagnostic, availability: current?.availability || provider.availability });
+        return Object.freeze({
+          result,
+          diagnostic,
+          availability: current?.enabled === false
+            ? agentProviderAvailabilityFromFailureReason(
+              "disabled",
+              current.availability,
+              validDate(this.#clock),
+            )
+            : current?.availability || provider.availability,
+        });
       } catch (cause) {
         if (
           !this.#disposed
@@ -820,6 +892,11 @@ export class AgentCatalogState {
     const frozen = freezeAgentSelection(selection);
     const provider = this.provider(frozen);
     if (!provider) return Promise.reject(this.#unsupportedProvider(frozen.providerId));
+    if (provider.enabled === false) {
+      return Promise.reject(Object.assign(new Error("This Agent is disconnected in PageRoot."), {
+        code: "AGENT_PROVIDER_DISABLED",
+      }));
+    }
     const trust = String(trustPolicyVersion || provider.trustPolicyVersion || "");
     const digest = String(
       installationDigest || frozen.installationDigest || provider.installationDigest || "",
@@ -1051,6 +1128,14 @@ export class AgentCatalogState {
         installState: ["idle", "failed"].includes(result?.installState)
           ? result.installState
           : "idle",
+        activeOperation: finishAccessOperation(
+          provider.activeOperation || createAccessOperation({
+            providerId: frozen.providerId,
+            kind: "install",
+            generation: this.#generationByProvider.get(frozen.providerId) || 1,
+          }),
+          { state: result?.installState === "failed" ? "failed" : "cancelled" },
+        ),
       });
       await this.diagnose(this.freezeProviderSelection(frozen.providerId) || frozen).catch(() => null);
       return result;
@@ -1058,6 +1143,24 @@ export class AgentCatalogState {
       this.#patchProvider(frozen.providerId, { installState: "failed" });
       throw cause;
     }
+  }
+
+  async cancelAccessOperation(selection = this.freezeSelected()) {
+    const frozen = freezeAgentSelection(selection);
+    const provider = this.provider(frozen);
+    const operation = publicAccessOperation(provider?.activeOperation);
+    if (!operation) return null;
+    if (operation.kind === "install") {
+      return this.cancelInstall(frozen);
+    }
+    const cancelling = requestCancelAccessOperation(operation);
+    this.#patchProvider(frozen.providerId, { activeOperation: cancelling });
+    if (cancelling.state === "cancelling") {
+      this.#patchProvider(frozen.providerId, {
+        activeOperation: finishAccessOperation(cancelling, { state: "cancelled" }),
+      });
+    }
+    return this.provider(frozen)?.activeOperation || null;
   }
 
   async copyGuidance(kind, selection = this.freezeSelected()) {
@@ -1084,6 +1187,18 @@ export class AgentCatalogState {
       kind,
       validDate(this.#clock),
     ));
+    if (kind === "login") {
+      const generation = (this.#generationByProvider.get(frozen.providerId) || 0) + 1;
+      this.#generationByProvider.set(frozen.providerId, generation);
+      this.#patchProvider(frozen.providerId, {
+        activeOperation: createAccessOperation({
+          providerId: frozen.providerId,
+          kind: "login",
+          generation,
+          startedAt: validDate(this.#clock),
+        }),
+      });
+    }
     return Object.freeze({ kind, copied: true });
   }
 
@@ -1363,6 +1478,9 @@ export class AgentCatalogState {
         installState: ["idle", "installing", "failed", "cancelling"].includes(item.installState)
           ? item.installState
           : current.installState || "idle",
+        connection: current.connection,
+        activeOperation: publicAccessOperation(item.activeOperation)
+          || (current.activeOperation?.kind === "install" ? null : current.activeOperation),
       }));
     }
     this.#publish();

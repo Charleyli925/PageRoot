@@ -58,6 +58,20 @@ export function createAgentInstaller({
     throw new TypeError("Agent installer requires fetch().");
   }
   const jobs = new Map();
+  const generations = new Map();
+
+  function nextGeneration(providerId) {
+    const generation = (generations.get(providerId) || 0) + 1;
+    generations.set(providerId, generation);
+    return generation;
+  }
+
+  function publicStartedAt(startedAt) {
+    const timestamp = Number(startedAt);
+    return Number.isFinite(timestamp) && timestamp > 0
+      ? new Date(timestamp).toISOString()
+      : null;
+  }
 
   function jobSnapshot(providerId) {
     const job = jobs.get(providerId);
@@ -66,12 +80,16 @@ export function createAgentInstaller({
         providerId,
         installState: "idle",
         errorCode: null,
+        generation: generations.get(providerId) || null,
+        startedAt: null,
       });
     }
     return Object.freeze({
       providerId,
       installState: INSTALL_STATES.includes(job.state) ? job.state : "failed",
       errorCode: job.errorCode || null,
+      generation: job.generation || generations.get(providerId) || null,
+      startedAt: publicStartedAt(job.startedAt),
     });
   }
 
@@ -130,6 +148,7 @@ export function createAgentInstaller({
         errorCode: null,
         controller,
         startedAt: now(),
+        generation: nextGeneration(entry.providerId),
       };
       job.promise = (async () => {
         const staging = await mkdtemp(path.join(os.tmpdir(), `pageroot-agent-install-${entry.providerId}-`));
@@ -163,7 +182,8 @@ export function createAgentInstaller({
             errorCode: null,
             controller: null,
             promise: null,
-            startedAt: job.startedAt,
+            startedAt: null,
+            generation: job.generation,
           });
           return Object.freeze({
             providerId: entry.providerId,
@@ -177,7 +197,8 @@ export function createAgentInstaller({
               errorCode: null,
               controller: null,
               promise: null,
-              startedAt: job.startedAt,
+              startedAt: null,
+              generation: job.generation,
             });
             fail("AGENT_INSTALL_CANCELLED", "Agent 安装已取消。", { status: 409 });
           }
@@ -190,6 +211,7 @@ export function createAgentInstaller({
             controller: null,
             promise: null,
             startedAt: job.startedAt,
+            generation: job.generation,
           });
           if (cause?.code && String(cause.code).startsWith("AGENT_")) throw cause;
           fail(code, "Agent 安装没有完成。", { status: 503, cause });

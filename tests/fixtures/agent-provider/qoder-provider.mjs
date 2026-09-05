@@ -108,5 +108,5 @@ export function createSyntheticQoderProviderFixture({
       return runOutcome;
     },
   });
-  return Object.freeze({ calls, provider, runtime, installation, capabilities });
+  return Object.freeze({ calls, provider, runtime, installation, capabilities: provider.capabilities });
 }

@@ -521,7 +521,8 @@ Install-level UI preferences (`ui-preferences.json`) are Main-owned, bounded
 and atomically replaced. Schema v1 is migrated without dropping the guide or
 built-in welcome identity; schema v2 adds only the allowlisted `workspace`
 fields `rememberPanelWidths`, `sidebarWidth`, `inspectorWidth`, `motion`,
-`restoreTabsOnLaunch` and `defaultAgentProviderId`. Main strictly validates
+`restoreTabsOnLaunch`, `defaultAgentProviderId` and
+`disabledAgentProviderIds`. Main strictly validates
 field types, provider identifiers and the 200–420px / 280–520px width ranges;
 damaged values are safely normalized on read and unsafe patches are rejected.
 The renderer receives only trusted `get`/`record` for guide actions or a

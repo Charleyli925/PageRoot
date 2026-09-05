@@ -1702,6 +1702,10 @@ export class WorkspaceController {
     return this.#requireRunWorkflow().selectAgentReasoning(reasoning, expectedSelection);
   }
 
+  applyDisabledAgentProviders(ids) {
+    return this.#requireRunWorkflow().applyDisabledAgentProviders(ids);
+  }
+
   connectAgentApiKey(selection, apiKey, extras) {
     return this.#requireRunWorkflow().connectAgentApiKey(selection, apiKey, extras);
   }

@@ -47,6 +47,17 @@ export type AgentProviderEntry = AgentProviderDescriptor & Readonly<{
     reasoningChoices?: readonly Readonly<{ id: string; label: string }>[];
   }>[];
   credentialConfigured?: boolean;
+  enabled?: boolean;
+  activeOperation?: Readonly<{
+    operationId: string;
+    providerId: string;
+    kind: string;
+    state: string;
+    generation: number;
+    startedAt: string | null;
+    errorCode: string | null;
+    cancellable: boolean;
+  }> | null;
   connection?: Readonly<{
     vendorId: string;
     vendorDisplayName: string;
@@ -123,6 +134,7 @@ export class AgentCatalogState {
   subscribe(listener: (snapshot: AgentCatalogSnapshot) => void): () => void;
   dispose(): void;
   select(selection: AgentSelection): AgentSelection;
+  applyDisabledProviderIds(ids?: readonly string[]): void;
   selectModel(modelId: string | null, expectedSelection?: AgentSelection | null): AgentSelection | null;
   selectReasoning(reasoning: string | null, expectedSelection?: AgentSelection | null): AgentSelection | null;
   noteRunFailure(selection: AgentSelection | null | undefined, code: unknown): AgentProviderAvailabilitySnapshot | null;
@@ -155,6 +167,7 @@ export class AgentCatalogState {
   discardTicket(preflight: AgentPreflight): boolean;
   install(selection?: AgentSelection | null): Promise<unknown>;
   cancelInstall(selection?: AgentSelection | null): Promise<unknown>;
+  cancelAccessOperation(selection?: AgentSelection | null): Promise<unknown>;
   copyGuidance(kind: "install" | "login", selection?: AgentSelection | null): Promise<unknown>;
 }
 export const AgentProviderCatalog: typeof AgentCatalogState;

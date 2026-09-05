@@ -926,3 +926,99 @@ test("updating installation digest or models does not clear connection or creden
   assert.equal(catalog.provider().installationDigest, `sha256:${"b".repeat(64)}`);
   assert.deepEqual(catalog.provider().models.map((model) => model.id), ["pageroot:deepseek-v4-flash"]);
 });
+
+test("disabled providers stay disconnected after a ready diagnose and cannot preflight", async () => {
+  const selected = freezeAgentSelection(QODER_AGENT_PROVIDER.selection);
+  const catalog = new AgentCatalogState({
+    bridgeClient: {
+      async agentDiagnose() {
+        return {
+          status: "ready",
+          diagnostic: {
+            readiness: "ready",
+            cause: null,
+            operation: "diagnose",
+          },
+        };
+      },
+      async preflightAgent() {
+        return { status: "ready", preflightId: "unused" };
+      },
+    },
+    providers: [QODER_AGENT_PROVIDER],
+    selected,
+    clock: { now: () => Date.parse("2026-09-06T00:00:00.000Z") },
+  });
+  catalog.applyDisabledProviderIds(["qoder"]);
+  assert.equal(catalog.provider(selected).enabled, false);
+  await catalog.diagnose(selected);
+  assert.equal(catalog.provider(selected).enabled, false);
+  assert.equal(catalog.displayAvailability(selected).reason, "disabled");
+  await assert.rejects(
+    () => catalog.preflight(selected),
+    (error) => error?.code === "AGENT_PROVIDER_DISABLED",
+  );
+  catalog.applyDisabledProviderIds([]);
+  assert.equal(catalog.provider(selected).enabled, true);
+});
+
+test("login guidance records a waiting access operation that cancel finishes", async () => {
+  const selected = freezeAgentSelection(QODER_AGENT_PROVIDER.selection);
+  const catalog = new AgentCatalogState({
+    bridgeClient: {
+      async preflightAgent() { return { status: "ready" }; },
+    },
+    providers: [QODER_AGENT_PROVIDER],
+    selected,
+    handoffPort: {
+      async copy() {
+        return { status: "copied", copied: true };
+      },
+    },
+    clock: { now: () => Date.parse("2026-09-06T00:00:00.000Z") },
+  });
+  await catalog.copyGuidance("login", selected);
+  const waiting = catalog.provider(selected).activeOperation;
+  assert.equal(waiting.kind, "login");
+  assert.equal(waiting.state, "waiting");
+  const cancelled = await catalog.cancelAccessOperation(selected);
+  assert.equal(cancelled.state, "cancelled");
+  assert.equal(cancelled.cancellable, false);
+  const again = await catalog.cancelAccessOperation(selected);
+  assert.equal(again.state, "cancelled");
+});
+
+test("public catalog idle install does not clear a waiting login operation", async () => {
+  const selected = freezeAgentSelection(QODER_AGENT_PROVIDER.selection);
+  const catalog = new AgentCatalogState({
+    bridgeClient: {
+      async preflightAgent() { return { status: "ready" }; },
+      async agentDiagnose() {
+        return { status: "auth-required", diagnostic: { readiness: "auth-required" } };
+      },
+      async agentProviders() {
+        return {
+          providers: [{
+            providerId: "qoder",
+            installable: true,
+            installSource: "managed",
+            installState: "idle",
+            activeOperation: null,
+          }],
+        };
+      },
+    },
+    providers: [QODER_AGENT_PROVIDER],
+    selected,
+    handoffPort: {
+      async copy() {
+        return { status: "copied", copied: true };
+      },
+    },
+    clock: { now: () => Date.parse("2026-09-06T00:00:00.000Z") },
+  });
+  await catalog.copyGuidance("login", selected);
+  await catalog.diagnose(selected).catch(() => null);
+  assert.equal(catalog.provider(selected).activeOperation?.kind, "login");
+  assert.equal(catalog.provider(selected).activeOperation?.state, "waiting");
+});

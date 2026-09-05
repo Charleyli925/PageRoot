@@ -215,7 +215,14 @@ export function createOpenAiCompatibleProvider({
     securityProfile: "client-mediated",
     legacyDrivers: [],
     capabilityRevision: SUPPORTED_AGENT_MODELS_REVISION,
-    capabilities: { availability: true, preflight: true, execution: true, modelCatalog: true },
+    capabilities: {
+      availability: true,
+      preflight: true,
+      execution: true,
+      modelCatalog: true,
+      sessionCredential: true,
+      disconnect: true,
+    },
     resolveInstallation({ environment } = {}) {
       const credential = credentialFromEnvironment(environment);
       if (!credential) fail("AGENT_AUTH_REQUIRED", "还没有接通 API Token。", { status: 401 });

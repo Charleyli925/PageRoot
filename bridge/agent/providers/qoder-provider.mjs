@@ -611,6 +611,8 @@ export function createQoderProvider({
       preflight: true,
       execution: true,
       modelCatalog: true,
+      install: true,
+      login: true,
     },
     resolveInstallation: ({ environment }) => resolveInstallation({ environment }),
     diagnose: (installation, { environment }) => diagnoseRunner(installation, environment),

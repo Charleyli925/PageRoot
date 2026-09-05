@@ -492,6 +492,10 @@
         "to": "shared/agent-delivery.mjs"
       },
       {
+        "from": "shared/agent-access-operation.mjs",
+        "to": "shared/agent-access-operation.mjs"
+      },
+      {
         "from": "shared/openai-compatible-vendors.mjs",
         "to": "shared/openai-compatible-vendors.mjs"
       },
