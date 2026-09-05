@@ -1166,8 +1166,8 @@
     {
       "id": "canvas-overlay-owner",
       "patterns": [
-        "^app/components/(?:HtmlInteractionPreview(?:\\.module)?|html-canvas-(?:comment-layout|page-view|computed-style))\\.(?:tsx|ts|css)$",
-        "^tests/(?:html-canvas-computed-style|html-canvas-selection-chrome-contract)\\.test\\.mjs$"
+        "^app/components/(?:HtmlInteractionPreview(?:\\.module)?|html-canvas-(?:comment-layout|insertion-layout|page-view|computed-style))\\.(?:tsx|ts|js|css|d\\.ts)$",
+        "^tests/(?:html-canvas-computed-style|html-canvas-comment-layout|html-canvas-selection-chrome-contract)\\.test\\.mjs$"
       ],
       "suites": [
         "typecheck",
@@ -1177,6 +1177,7 @@
       "nodeTests": [
         "tests/page-view-context.test.mjs",
         "tests/html-canvas-computed-style.test.mjs",
+        "tests/html-canvas-comment-layout.test.mjs",
         "tests/html-canvas-selection-chrome-contract.test.mjs",
         "tests/edit-pipeline-counters.test.mjs"
       ]
