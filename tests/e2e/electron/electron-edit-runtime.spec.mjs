@@ -52,6 +52,47 @@ async function withRuntimeProject(prefix, files, run, launchOptions = {}) {
   }
 }
 
+async function armRuntimeCommitHold(page) {
+  await page.evaluate(() => {
+    window.__PAGEROOT_E2E_RUNTIME_COMMIT_RELEASES__ = [];
+  });
+}
+
+async function waitForHeldRuntimeCommit(page) {
+  await expect.poll(() => page.evaluate(() => (
+    window.__PAGEROOT_E2E_RUNTIME_COMMIT_RELEASES__?.length || 0
+  ))).toBeGreaterThan(0);
+}
+
+async function releaseHeldRuntimeCommits(page) {
+  await page.evaluate(() => {
+    const releases = window.__PAGEROOT_E2E_RUNTIME_COMMIT_RELEASES__ || [];
+    window.__PAGEROOT_E2E_RUNTIME_COMMIT_RELEASES__ = undefined;
+    releases.forEach((release) => release());
+  });
+}
+
+async function visibleActiveFrameProof(page, nativeCase) {
+  return page.evaluate((targetCase) => {
+    const editor = document.querySelector('[data-testid="html-canvas-editor"]');
+    const activeFrame = Array.from(editor?.querySelectorAll("iframe") || [])
+      .find((frame) => !frame.hasAttribute("data-frame-role"));
+    const target = activeFrame?.contentDocument?.querySelector(
+      `[data-native-case="${targetCase}"]`,
+    );
+    return {
+      renderVerified: editor?.getAttribute("data-render-verified") || null,
+      visible: Boolean(
+        activeFrame instanceof HTMLIFrameElement
+        && activeFrame.isConnected
+        && getComputedStyle(activeFrame).visibility === "visible"
+      ),
+      text: target?.textContent?.trim() || "",
+      nativeStartStatus: editor?.getAttribute("data-native-start-status") || null,
+    };
+  }, nativeCase);
+}
+
 async function armRuntimeHandoffSamples(page) {
   await page.evaluate(() => {
     const editor = document.querySelector('[data-testid="html-canvas-editor"]');
@@ -2685,6 +2726,189 @@ test("a failed candidate after text editing promotes static without resuming Nat
     })).toBe(true);
     await expect.poll(() => reviewStage.evaluate((element) => element.scrollTop))
       .toBeGreaterThan(400);
+  });
+});
+
+test("a ready Candidate waiting to commit still accepts Native Edit on Active", {
+  tag: ["@gate-smoke", "@smoke-editing"],
+}, async () => {
+  const html = `<!doctype html>
+<html><head><title>Runtime commit hold edit</title></head><body>
+  <main>
+    <p data-native-case="runtime-commit-hold-edit" id="commit-hold-edit">
+      候选等待提交时仍可进入文字编辑。
+    </p>
+  </main>
+  <script>
+    document.querySelector('[data-native-case="runtime-commit-hold-edit"]')
+      .dataset.runtimeReady = 'true';
+  </script>
+</body></html>`;
+
+  await withRuntimeProject("pageroot-runtime-commit-hold-edit-e2e-", {
+    "runtime-report.html": html,
+  }, async ({ page, sourcePath }) => {
+    const editor = page.getByTestId("html-canvas-editor");
+    const surface = page.locator(".canvas-edit-surface");
+    let { frame } = await loadedDiskFrame(page, sourcePath, "runtime-commit-hold-edit");
+    await expect(editor).toHaveAttribute("data-render-verified", "true");
+    await expect.poll(() => editor.getAttribute("data-runtime-last-known-good-id"))
+      .toBeTruthy();
+    const lastKnownGoodBefore = await editor.getAttribute("data-runtime-last-known-good-id");
+    const workingCopyPath = await managedWorkingCopyPath(page, sourcePath);
+
+    await armRuntimeCommitHold(page);
+    const target = frame.locator('[data-native-case="runtime-commit-hold-edit"]');
+    await target.click();
+    const duplicateButton = page.getByRole("button", { name: "复制元素", exact: true });
+    await expect(duplicateButton).toBeVisible();
+    await duplicateButton.click();
+    await expect.poll(() => (
+      readFileSync(workingCopyPath, "utf8")
+        .split('<p data-native-case="runtime-commit-hold-edit"').length - 1
+    )).toBeGreaterThanOrEqual(2);
+    await waitForHeldRuntimeCommit(page);
+    await expect(editor).toHaveAttribute("data-runtime-candidate-phase", "preparing");
+    await expect(editor.locator('iframe[data-frame-role="runtime-candidate"]')).toHaveCount(1);
+    await expect.poll(() => visibleActiveFrameProof(page, "runtime-commit-hold-edit"))
+      .toEqual(expect.objectContaining({
+        renderVerified: "true",
+        visible: true,
+      }));
+
+    frame = await currentEditorFrame(page);
+    const activeTarget = frame.locator('[data-native-case="runtime-commit-hold-edit"]').first();
+    await activeTarget.dblclick({ force: true });
+    await expect(activeTarget).toHaveAttribute("contenteditable", "true");
+    await expect(editor).toHaveAttribute("data-native-start-status", "started");
+    await expect(editor).toHaveAttribute("data-runtime-candidate-phase", "preparing");
+
+    await releaseHeldRuntimeCommits(page);
+    await expect(activeTarget).toHaveAttribute("contenteditable", "true");
+    await expect(editor.locator('iframe[data-frame-role="runtime-candidate"]')).toHaveCount(0);
+    await expect(editor).toHaveAttribute("data-runtime-last-known-good-id", lastKnownGoodBefore);
+
+    await activeTarget.press("End");
+    await page.keyboard.insertText(" 提交后继续");
+    await page.keyboard.press("Escape");
+    await expect(activeTarget).not.toHaveAttribute("contenteditable", "true");
+    await expect.poll(() => readFileSync(workingCopyPath, "utf8")).toContain("提交后继续");
+    await expect.poll(() => surface.getAttribute("data-edit-runtime-outcome"), {
+      timeout: 12_000,
+    }).toBe("ready");
+    await expect.poll(() => editor.getAttribute("data-runtime-last-known-good-id"))
+      .not.toBe(lastKnownGoodBefore);
+    frame = await currentEditorFrame(page);
+    await expect(
+      frame.locator('[data-native-case="runtime-commit-hold-edit"]')
+        .filter({ hasText: "提交后继续" }),
+    ).toHaveCount(1);
+  }, {
+    injectedEnv: {
+      PAGEROOT_E2E_RUNTIME_COMMIT_HOOKS: "1",
+    },
+  });
+});
+
+test("a Candidate commit verification failure restores the visible Active", {
+  tag: ["@gate-smoke", "@smoke-editing"],
+}, async () => {
+  const html = `<!doctype html>
+<html><head><title>Runtime commit verification failure</title></head><body>
+  <main>
+    <p data-native-case="runtime-commit-verify-failure" id="commit-verify-failure">
+      提交校验失败后旧画面仍可选择评论和编辑。
+    </p>
+  </main>
+  <script>
+    document.querySelector('[data-native-case="runtime-commit-verify-failure"]')
+      .dataset.runtimeReady = 'true';
+  </script>
+</body></html>`;
+
+  await withRuntimeProject("pageroot-runtime-commit-verify-failure-e2e-", {
+    "runtime-report.html": html,
+  }, async ({ page, sourcePath }) => {
+    const editor = page.getByTestId("html-canvas-editor");
+    let { frame } = await loadedDiskFrame(page, sourcePath, "runtime-commit-verify-failure");
+    await expect(editor).toHaveAttribute("data-render-verified", "true");
+    await expect.poll(() => editor.getAttribute("data-runtime-last-known-good-id"))
+      .toBeTruthy();
+    const lastKnownGoodBefore = await editor.getAttribute("data-runtime-last-known-good-id");
+    const workingCopyPath = await managedWorkingCopyPath(page, sourcePath);
+    const workingHtmlBeforeDuplicate = readFileSync(workingCopyPath, "utf8");
+
+    await armRuntimeCommitHold(page);
+    const target = frame.locator('[data-native-case="runtime-commit-verify-failure"]');
+    await target.click();
+    const duplicateButton = page.getByRole("button", { name: "复制元素", exact: true });
+    await expect(duplicateButton).toBeVisible();
+    await duplicateButton.click();
+    await expect.poll(() => (
+      readFileSync(workingCopyPath, "utf8")
+        .split('<p data-native-case="runtime-commit-verify-failure"').length - 1
+    )).toBeGreaterThanOrEqual(2);
+    await waitForHeldRuntimeCommit(page);
+    await expect(editor).toHaveAttribute("data-runtime-candidate-phase", "preparing");
+    await page.evaluate(() => {
+      window.__PAGEROOT_E2E_FAIL_NEXT_RUNTIME_COMMIT__ = true;
+    });
+    await releaseHeldRuntimeCommits(page);
+
+    await expect.poll(() => visibleActiveFrameProof(page, "runtime-commit-verify-failure"))
+      .toEqual(expect.objectContaining({
+        renderVerified: "true",
+        visible: true,
+        text: "提交校验失败后旧画面仍可选择评论和编辑。",
+      }));
+    await expect(editor).toHaveAttribute("data-render-verified", "true");
+    await expect(editor).toHaveAttribute("data-runtime-last-known-good-id", lastKnownGoodBefore);
+    const workingHtmlAfterFailure = readFileSync(workingCopyPath, "utf8");
+    expect(workingHtmlAfterFailure).not.toBe(workingHtmlBeforeDuplicate);
+    expect(
+      workingHtmlAfterFailure.split('<p data-native-case="runtime-commit-verify-failure"').length - 1,
+    ).toBeGreaterThanOrEqual(2);
+
+    await expect.poll(() => page.locator(".canvas-edit-surface").getAttribute(
+      "data-edit-runtime-phase",
+    )).toBe("static-fallback");
+    await expect(page.getByTestId("edit-runtime-static-fallback")).toBeVisible();
+    await expect(editor).toHaveAttribute("data-render-verified", "true");
+    expect(readFileSync(workingCopyPath, "utf8")).toBe(workingHtmlAfterFailure);
+
+    const staticNotice = page.getByTestId("edit-runtime-static-fallback");
+    await page.getByRole("button", { name: "关闭动态内容提示" }).click();
+    await expect(staticNotice).toHaveCount(0);
+    frame = await currentEditorFrame(page);
+    const restoredTarget = frame.locator('[data-native-case="runtime-commit-verify-failure"]').first();
+    await restoredTarget.click({ force: true });
+    await expect(restoredTarget).toHaveAttribute("data-html-canvas-selected", /.+/u);
+    const toolbar = page.getByRole("toolbar", { name: /编辑/u });
+    await expect(toolbar).toBeVisible();
+    await toolbar.getByRole("button", { name: /给.+留评论/u }).click();
+    const commentComposer = page.getByRole("region", { name: "添加评论" });
+    await commentComposer.getByRole("textbox", { name: "评论内容" })
+      .fill("提交失败后仍可评论。");
+    await commentComposer.getByRole("button", { name: "评论", exact: true }).click();
+    await expect(page.getByRole("textbox", { name: "评论内容" })).toHaveCount(0);
+    await expect(page.locator('aside[aria-label="本轮评论"]'))
+      .toContainText("提交失败后仍可评论。");
+
+    if (await staticNotice.count()) {
+      await page.getByRole("button", { name: "关闭动态内容提示" }).click();
+      await expect(staticNotice).toHaveCount(0);
+    }
+    await restoredTarget.dblclick({ force: true });
+    await expect(restoredTarget).toHaveAttribute("contenteditable", "true");
+    await expect(editor).toHaveAttribute("data-native-start-status", "started");
+    await page.keyboard.press("Escape");
+    await expect(restoredTarget).not.toHaveAttribute("contenteditable", "true");
+    expect(readFileSync(workingCopyPath, "utf8")).toBe(workingHtmlAfterFailure);
+    await expect(editor).toHaveAttribute("data-render-verified", "true");
+  }, {
+    injectedEnv: {
+      PAGEROOT_E2E_RUNTIME_COMMIT_HOOKS: "1",
+    },
   });
 });
 

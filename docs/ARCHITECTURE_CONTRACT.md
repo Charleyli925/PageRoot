@@ -555,8 +555,14 @@ effects. Candidate Script runs while its slot is hidden; after validation React
 positions that Candidate iframe without rewriting Active identity. Immediately
 before the commit it re-captures the minimal anchor from the still-visible
 Active frame, so Candidate-time scrolling or reselection replaces the older
-launch snapshot. One commit then changes Active identity and visibility
-together; failure before that commit discards only the Candidate. The former
+launch snapshot. Native Edit remains available against that visible Active
+until `beginPositioning`; starting an edit prevents this Candidate from
+promoting and must keep the live toolbar and selection chrome. One commit then changes Active identity and visibility
+together. Failure before that commit discards only the Candidate. If
+`connectFrame` fails after the slot switch, the one-shot commit restores the
+previous Active identity and `data-render-verified` attribute. That short
+transactional rollback does not span the Candidate lifecycle and never rolls
+back Working HTML. The former
 active slot is cleared to an inert empty document on the next frame. A user
 Native Edit or IME composition may let a candidate prepare but
 cannot promote or retire a browsing context. Promotion waits until that

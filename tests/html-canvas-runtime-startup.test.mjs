@@ -81,10 +81,11 @@ test("ADR 0065 no longer requires native session or comment-layout handoff resto
   assert.doesNotMatch(adr, /last complete comment layout/u);
 });
 
-test("Candidate commit rewrites Active last and has no snapshot rollback", () => {
+test("Candidate commit rewrites Active last and keeps only a short commit rollback", () => {
   const editor = source("app/components/HtmlCanvasEditor.tsx");
   const promoteRuntimeCandidate = callbackBody(editor, "promoteRuntimeCandidate");
   const commitRuntimeCandidate = callbackBody(editor, "commitRuntimeCandidate");
+  const cancelRuntimeCandidate = callbackBody(editor, "cancelRuntimeCandidate");
 
   assert.doesNotMatch(editor, /type RuntimeActiveFrameSnapshot/u);
   assert.doesNotMatch(editor, /rollbackRuntimeCandidatePromotion/u);
@@ -95,13 +96,21 @@ test("Candidate commit rewrites Active last and has no snapshot rollback", () =>
   assert.doesNotMatch(promoteRuntimeCandidate, /setActiveRuntimeSlotId\(/u);
   assert.doesNotMatch(promoteRuntimeCandidate, /runtimeFrameRef\.current = candidate\.runtimeFrame/u);
   assert.doesNotMatch(promoteRuntimeCandidate, /beginPositioning\(/u);
+  assert.doesNotMatch(promoteRuntimeCandidate, /runtimePromotionRef\.current = candidate/u);
   assert.match(promoteRuntimeCandidate, /commitRuntimeCandidateRef\.current\(candidate, iframe\)/u);
 
-  assert.match(commitRuntimeCandidate, /beginPositioning\(candidate\.attempt\)/u);
+  assert.match(
+    commitRuntimeCandidate,
+    /beginPositioning\(candidate\.attempt\)[\s\S]*runtimePromotionRef\.current = candidate/u,
+  );
+  assert.match(commitRuntimeCandidate, /previousRenderVerified/u);
+  assert.match(commitRuntimeCandidate, /data-render-verified/u);
   assert.match(commitRuntimeCandidate, /runtimeFrameRef\.current = candidate\.runtimeFrame/u);
   assert.match(commitRuntimeCandidate, /setActiveRuntimeSlotId\(candidate\.attempt\.slotId\)/u);
   assert.match(commitRuntimeCandidate, /latestSourceProjectionRef\.current\.source !== candidate\.source/u);
   assert.match(commitRuntimeCandidate, /activeNativeEditRef\.current/u);
+  assert.match(cancelRuntimeCandidate, /if \(activeNativeEditRef\.current\)/u);
+  assert.match(cancelRuntimeCandidate, /pendingToolbarVisibleRef\.current = true/u);
 });
 
 test("reading-position restore is shared and comment layout is not frozen across Frames", () => {
