@@ -883,11 +883,22 @@ export async function assertReviewControlDefaults(page, beforeReviewFrame) {
 }
 
 export async function assertReviewChangeOutline(beforeReviewFrame, afterReviewFrame) {
-  await expect.poll(async () => Promise.all(
-    [beforeReviewFrame, afterReviewFrame].map(async (frame) => (
-      (await frame.locator("[data-pageroot-review-overlay-box]").count()) > 0
-    )),
-  ).then((states) => states.every(Boolean))).toBe(true);
+  // Region-bar focus can still be inside a projection transition. Overlay boxes
+  // are the user-visible change outline; wait for the transition to finish, then
+  // require an outline on both sides instead of sampling a transient empty layer.
+  for (const frame of [beforeReviewFrame, afterReviewFrame]) {
+    await expect.poll(async () => frame.locator("html").evaluate((html) => (
+      !html.hasAttribute("data-pageroot-review-transitioning")
+    )), { timeout: 30_000 }).toBe(true);
+  }
+  await expect.poll(
+    async () => beforeReviewFrame.locator("[data-pageroot-review-overlay-box]").count(),
+    { timeout: 30_000 },
+  ).toBeGreaterThan(0);
+  await expect.poll(
+    async () => afterReviewFrame.locator("[data-pageroot-review-overlay-box]").count(),
+    { timeout: 30_000 },
+  ).toBeGreaterThan(0);
 }
 
 export async function assertProjectionGeometryCase(frame, geometryCase) {
