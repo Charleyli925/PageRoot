@@ -10,7 +10,7 @@ const electronDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "
 
 test("AI smoke configuration selects review activation and broad-edit regression paths", async () => {
   const files = (await readdir(electronDir))
-    .filter((name) => /^ai-(?:review-adoption|provider-availability|run-lifecycle|candidate-validation|request-comments)\.spec\.mjs$/u.test(name))
+    .filter((name) => /^ai-(?:review-adoption|review-versions|provider-availability|run-lifecycle|candidate-validation|request-comments)\.spec\.mjs$/u.test(name))
     .sort();
   const sources = await Promise.all(files.map((name) => readFile(path.join(electronDir, name), "utf8")));
   const tagged = sources.flatMap((source) => (

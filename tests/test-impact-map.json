@@ -451,19 +451,23 @@
       "id": "test-policy",
       "patterns": [
         "^scripts/test-(?:gate|gate-resume|node-group)(?:-core)?\\.mjs$",
+        "^scripts/generate-test-inventory\\.mjs$",
         "^scripts/capability-context\\.(?:mjs|json)$",
         "^scripts/gate-smoke-suites\\.mjs$",
         "^scripts/seeded-fault-oracles\\.mjs$",
         "^tests/e2e/smoke-tags\\.mjs$",
         "^tests/test-impact-map\\.json$",
+        "^tests/test-risk-ledger\\.json$",
         "^tests/test-gate-selection\\.test\\.mjs$",
         "^tests/test-gate-resume\\.test\\.mjs$",
+        "^tests/test-inventory\\.test\\.mjs$",
         "^tests/seeded-fault-oracles\\.test\\.mjs$"
       ],
       "suites": [],
       "nodeTests": [
         "tests/test-gate-selection.test.mjs",
         "tests/test-gate-resume.test.mjs",
+        "tests/test-inventory.test.mjs",
         "tests/seeded-fault-oracles.test.mjs"
       ]
     },
@@ -2425,7 +2429,7 @@
     {
       "id": "ai-e2e",
       "patterns": [
-        "^tests/e2e/electron/ai-(?:review-adoption|provider-availability|run-lifecycle|candidate-validation|request-comments)\\.spec\\.mjs$",
+        "^tests/e2e/electron/ai-(?:review-adoption|review-versions|provider-availability|run-lifecycle|candidate-validation|request-comments)\\.spec\\.mjs$",
         "^tests/e2e/electron/ai-closed-loop-helpers\\.mjs$",
         "^tests/e2e/electron/playwright\\.ai-(?:closed-loop|smoke)\\.config\\.mjs$",
         "^tests/ai-smoke-config\\.test\\.mjs$"

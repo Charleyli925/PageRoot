@@ -9,6 +9,8 @@ test("Electron automation stays backgrounded unless foreground debugging is expl
     "./e2e/electron/electron-native-harness.mjs",
     "./e2e/electron/electron-project-lifecycle.spec.mjs",
     "./e2e/electron/electron-edit-runtime.spec.mjs",
+    "./e2e/electron/electron-runtime-helpers.mjs",
+    "./e2e/electron/electron-runtime-scripts.spec.mjs",
     "./e2e/electron/electron-runtime-continuity.spec.mjs",
     "./e2e/electron/electron-native-input.spec.mjs",
     "./e2e/electron/electron-comments-and-rules.spec.mjs",
