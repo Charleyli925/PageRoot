@@ -2876,11 +2876,12 @@ test("a Candidate commit verification failure restores the visible Active", {
     await expect(editor).toHaveAttribute("data-render-verified", "true");
     expect(readFileSync(workingCopyPath, "utf8")).toBe(workingHtmlAfterFailure);
 
+    const staticNotice = page.getByTestId("edit-runtime-static-fallback");
     await page.getByRole("button", { name: "关闭动态内容提示" }).click();
-    await expect(page.getByTestId("edit-runtime-static-fallback")).toHaveCount(0);
+    await expect(staticNotice).toHaveCount(0);
     frame = await currentEditorFrame(page);
     const restoredTarget = frame.locator('[data-native-case="runtime-commit-verify-failure"]').first();
-    await restoredTarget.click();
+    await restoredTarget.click({ force: true });
     await expect(restoredTarget).toHaveAttribute("data-html-canvas-selected", /.+/u);
     const toolbar = page.getByRole("toolbar", { name: /编辑/u });
     await expect(toolbar).toBeVisible();
@@ -2893,6 +2894,10 @@ test("a Candidate commit verification failure restores the visible Active", {
     await expect(page.locator('aside[aria-label="本轮评论"]'))
       .toContainText("提交失败后仍可评论。");
 
+    if (await staticNotice.count()) {
+      await page.getByRole("button", { name: "关闭动态内容提示" }).click();
+      await expect(staticNotice).toHaveCount(0);
+    }
     await restoredTarget.dblclick({ force: true });
     await expect(restoredTarget).toHaveAttribute("contenteditable", "true");
     await expect(editor).toHaveAttribute("data-native-start-status", "started");
