@@ -60,6 +60,27 @@ inverse operations and integrity; it is not a second public edit API. Do not
 bypass hash, identity, scope or persistence checks, and do not serialize
 Runtime DOM as the save source.
 
+**Current fact.** `HtmlCanvasEditor.applySourceCommand()` still materializes
+twice for one accepted edit: it applies a SourcePatch plan, independently
+applies the semantic kernel (which lowers to SourcePatch again), then
+fail-closes unless both complete HTML/Hash results match. Target mapping still
+reads the first SourcePatch result. Official `resolveTargetRef()` uses only a
+managed unique `elementId`; missing or invalid IDs are orphaned. Selector,
+fingerprint, offset and text-affix scoring are not an official result and are
+not a live shadow path.
+
+**Transitional.** Heuristic helpers may still exist in `target-resolver.js`,
+but the official entry does not call them and does not record fallback-only
+metrics. Canvas still constructs capability-specific SourcePatch commands
+beside kernel operations. Opt-in `edit-pipeline-counters.js` can count
+full-document index builds, full patch applies and insertion-point full-tree
+scans in tests; it is not a Session and has no production stream.
+
+**Target, not done.** Later edits should reuse one verified source snapshot
+inside one operation, then keep a single materialization and on-demand Canvas
+layout. Do not read those as current. `Verified*Context` objects still live
+only inside one operation and are not a reusable source-index cache.
+
 Living ADR status is in `docs/decisions/README.md`. Read this map and the
 Living rows for ADR 0062, 0064 and 0065 for today's contract. Historical
 paragraphs inside an ADR body, including early "do not migrate Canvas yet"
@@ -127,8 +148,8 @@ comments, attachment structure, persistence errors and every non-comment
 capability still invalidate the composition root.
 Persistent `sourceAnchor.elementId`, refreshed expected source Hash and optional text locator are
 Comment/Draft facts; `TargetResolver` maps a complete managed Working Copy only by that ID
-and never consults disposable geometry or Runtime DOM. The old heuristic resolver is shadow-only
-on those documents. A runtime `visualHint` is bounded display context only: Canvas may best-effort
+and never consults disposable geometry or Runtime DOM. The old heuristic resolver is not an
+official result and is not retained as a shadow path. A runtime `visualHint` is bounded display context only: Canvas may best-effort
 match it inside the proven source host after a rerun, using a generation-scoped spatial index for
 hover and a bounded kind/path candidate set for restore, then fall back to that host without changing
 permissions. A `body` source anchor with a runtime hint is never an explicit global comment; only a

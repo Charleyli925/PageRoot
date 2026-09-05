@@ -3,6 +3,7 @@ import {
   compareParseIntegrity,
   sourceSha256,
 } from "./source-index.js";
+import { recordEditPipelineCount } from "./edit-pipeline-counters.js";
 import { decodeHTML } from "entities";
 import {
   canonicalSourceStyleDeclaration,
@@ -354,7 +355,10 @@ function sharedSemanticStructurePatches(index, operation, fragmentHtml = null) {
 
 function semanticFragmentIndex(fragmentHtml, existingIndex, allowedExistingIds = new Set()) {
   const fragment = String(fragmentHtml ?? "");
-  const fragmentIndex = buildSourceIndex(fragment);
+  const fragmentIndex = buildSourceIndex(fragment, {
+    scope: "fragment",
+    caller: "planSemanticOperationPatch:fragment",
+  });
   if (!fragmentIndex.integrity.ok || !fragmentIndex.pagerootIdentity.complete) {
     fail(
       "SEMANTIC_FRAGMENT_IDENTITY_INVALID",
@@ -2529,7 +2533,15 @@ export function applyPatchPlan(plan, sourceHtml, options = {}) {
       fail("INVALID_PATCH_RANGE", "Patch range is outside the source.", { patch });
     }
   }
-  const baseIndex = buildSourceIndex(source);
+  recordEditPipelineCount("fullPatchApply", {
+    scope: "full-document",
+    caller: "applyPatchPlan",
+    codeUnitLength: source.length,
+  });
+  const baseIndex = buildSourceIndex(source, {
+    scope: "full-document",
+    caller: "applyPatchPlan:before",
+  });
   const authorization = authorizePatchPlan(plan, baseIndex, patches);
   for (const patch of patches) {
     const actual = source.slice(patch.startOffset, patch.endOffset);
@@ -2547,7 +2559,10 @@ export function applyPatchPlan(plan, sourceHtml, options = {}) {
     fail("OUTSIDE_TARGET_CHANGED", "Source outside the declared patch ranges changed.", scopeReport);
   }
 
-  const nextIndex = buildSourceIndex(html);
+  const nextIndex = buildSourceIndex(html, {
+    scope: "full-document",
+    caller: "applyPatchPlan:after",
+  });
   const parseIntegrity = compareParseIntegrity(baseIndex, nextIndex);
   if (!parseIntegrity.ok) {
     fail(

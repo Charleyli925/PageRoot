@@ -177,10 +177,12 @@
         "^app/lib/semantic-operation-kernel",
         "^app/lib/source-structure-edit",
         "^app/lib/source-(?:patch-engine|index|text-map)",
+        "^app/lib/edit-pipeline-counters",
         "^app/components/html-canvas-structure-commands",
         "^schemas/semantic-operation",
         "^tests/semantic-operation-kernel",
-        "^tests/source-structure-edit"
+        "^tests/source-structure-edit",
+        "^tests/edit-pipeline-"
       ],
       "entryInterfaces": [
         "schemas/semantic-operation.v1.schema.json",
@@ -201,7 +203,9 @@
         "tests/source-structure-edit.test.mjs",
         "tests/source-patch-engine.test.mjs",
         "tests/source-text-map.test.mjs",
-        "tests/pageroot-element-identity.test.mjs"
+        "tests/pageroot-element-identity.test.mjs",
+        "tests/edit-pipeline-baseline.test.mjs",
+        "tests/edit-pipeline-counters.test.mjs"
       ],
       "requiredDocs": [
         "docs/ARCHITECTURE_MAP.md",

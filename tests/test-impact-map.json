@@ -1099,7 +1099,8 @@
     {
       "id": "source-editing-core",
       "patterns": [
-        "^app/lib/(?:align-preview-source-surface|canvas-target-rebind|comment-text-locator|editable-island|native-dom-logical-index|page-(?:presentation-dom|view-context)|pageroot-element-identity|semantic-operation-kernel|source-(?:index|patch-core|patch-engine|text-map)|target-resolver|native-(?:edit-capability|edit-policy))\\.(?:js|ts|d\\.ts)$",
+        "^app/lib/(?:align-preview-source-surface|canvas-target-rebind|comment-text-locator|editable-island|edit-pipeline-counters|native-dom-logical-index|page-(?:presentation-dom|view-context)|pageroot-element-identity|semantic-operation-kernel|source-(?:index|patch-core|patch-engine|structure-edit|text-map)|target-resolver|native-(?:edit-capability|edit-policy))\\.(?:js|ts|d\\.ts)$",
+        "^app/components/html-canvas-structure-commands\\.ts$",
         "^shared/pageroot-element-identity\\.mjs$",
         "^shared/semantic-identity-delta\\.mjs$",
         "^schemas/(?:pageroot-element-identity|semantic-operation)\\.v1\\.schema\\.json$",
@@ -1120,10 +1121,13 @@
         "tests/target-resolver-managed-id-only.test.mjs",
         "tests/page-view-context.test.mjs",
         "tests/source-patch-engine.test.mjs",
+        "tests/source-structure-edit.test.mjs",
         "tests/semantic-operation-kernel.test.mjs",
         "tests/semantic-identity-save-contract.test.mjs",
         "tests/project-semantic-identity-save.test.mjs",
         "tests/editable-island.test.mjs",
+        "tests/edit-pipeline-baseline.test.mjs",
+        "tests/edit-pipeline-counters.test.mjs",
         "tests/source-text-map.test.mjs",
         "tests/native-edit-capability.test.mjs",
         "tests/native-edit-policy.test.mjs",
@@ -1172,7 +1176,8 @@
       "nodeTests": [
         "tests/page-view-context.test.mjs",
         "tests/html-canvas-computed-style.test.mjs",
-        "tests/html-canvas-selection-chrome-contract.test.mjs"
+        "tests/html-canvas-selection-chrome-contract.test.mjs",
+        "tests/edit-pipeline-counters.test.mjs"
       ]
     },
     {

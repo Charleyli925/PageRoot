@@ -907,10 +907,11 @@ stable ID is the sole element identity; tag, parent, order and outer Hash are
 operation preconditions or change evidence, not alternate identities. Intent is lowered to SourcePatch, whose
 apply path independently re-plans the operation before enforcing exact ranges,
 outside-scope equality and parse integrity. Runtime DOM is never an input.
-PR5 adopts this boundary for existing text, style and sibling-order edits; PR6
-adds stable-ID source insert, duplicate, delete and cross-parent move.
-Canvas verifies that semantic materialization matches the accepted SourcePatch
-result before publishing complete HTML. Repository and Desktop Main do not own
+Text, style, sibling reorder, insert, duplicate, delete and cross-parent move
+already use this boundary. Canvas still verifies that semantic materialization
+matches a separately applied SourcePatch result before publishing complete HTML;
+that dual apply is current, not the target single materialization.
+Repository and Desktop Main do not own
 or persist the semantic revision or the current-open history stack.
 
 ## Mutation protocol
