@@ -919,14 +919,19 @@ export async function assertProjectionGeometryCase(frame, geometryCase) {
   await frame.locator(
     `[data-pageroot-review-region-bar][data-pageroot-review-focus-group="${focusGroupId}"]`,
   ).first().click();
+  await expect.poll(async () => frame.locator("html").evaluate((html) => (
+    html.hasAttribute("data-pageroot-review-transitioning") ? "transitioning" : "idle"
+  )), { timeout: 30_000 }).toBe("idle");
   const frames = frame.locator(
     `[data-pageroot-review-overlay-box][data-tone="${geometryCase.changeType}"][data-pageroot-review-semantic-owner="${owner}"]`,
   );
   const masks = frame.locator(
     `[data-pageroot-review-mask-hole][data-pageroot-review-semantic-owner="${owner}"]`,
   );
-  await expect(frames).toHaveCount(geometryCase.expectedFrameCount);
-  await expect(masks).toHaveCount(geometryCase.expectedMaskCount);
+  await expect.poll(async () => frames.count(), { timeout: 30_000 })
+    .toBe(geometryCase.expectedFrameCount);
+  await expect.poll(async () => masks.count(), { timeout: 30_000 })
+    .toBe(geometryCase.expectedMaskCount);
   await expect.poll(() => frames.evaluate((overlay, { ownerSelector, tolerance }) => {
     const owner = document.querySelector(ownerSelector);
     if (!owner) return false;
