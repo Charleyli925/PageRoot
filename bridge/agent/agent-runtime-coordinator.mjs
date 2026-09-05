@@ -14,7 +14,6 @@ import {
 import { createDefaultProviderRegistry } from "./providers/provider-registry.mjs";
 import {
   agentRecoveryKindForError,
-  defaultManagedAgentDelivery,
   normalizeAgentDelivery,
   publicCompatibilityDriver,
   shippedLegacyDriver,
@@ -62,7 +61,7 @@ function validateTrustPolicy(value, status = 409) {
 function canonicalSelection(value, trustPolicyVersion) {
   return normalizeAgentDelivery({
     mode: "managed-agent",
-    selection: value || defaultManagedAgentDelivery().selection,
+    selection: value,
     trustPolicyVersion,
   }).selection;
 }
@@ -290,7 +289,11 @@ export class AgentRuntimeCoordinator {
       return requestedSelection;
     }
     if (driver) return this.#providerRegistry.selectionFromDriver(driver);
-    return defaultManagedAgentDelivery().selection;
+    failAgentRuntime(
+      "AGENT_SELECTION_UNSUPPORTED",
+      "The requested Agent provider selection is unsupported.",
+      { status: 400 },
+    );
   }
 
   #assertAcceptingStarts() {

@@ -702,6 +702,12 @@ test("current execution converts a supported driver once and rejects a conflicti
     }),
     (error) => error?.code === "AGENT_DRIVER_UNSUPPORTED",
   );
+  await assert.rejects(
+    coordinator.preflight({
+      trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
+    }),
+    (error) => error?.code === "AGENT_SELECTION_UNSUPPORTED",
+  );
 
   const fromSelection = await coordinator.preflight({
     selection,
