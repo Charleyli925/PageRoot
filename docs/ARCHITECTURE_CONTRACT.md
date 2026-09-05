@@ -104,8 +104,10 @@ The renderer's main workspace facts are partitioned as follows:
   re-derived from the registered Repository/runtime record, and only the
   official finalizer plus Repository status path can publish a Candidate;
 - Bridge Agent provider/runtime registries: the provider registry is the sole
-  legacy-driver/provider dispatch point and the runtime registry is the sole
-  runtime dispatch point. The Qoder provider owns installation identity,
+  legacy-driver conversion and provider dispatch point, and the runtime registry
+  is the sole runtime dispatch point. Current Coordinator execution binds by
+  canonical selection after at most one entry conversion; a simultaneous
+  driver and selection that disagree fail closed. The Qoder provider owns installation identity,
   version, login/model preflight and raw-error normalization. The Codex ACP
   provider owns the same facts for `providerId: "codex"`; missing login is
   `session/new` JSON-RPC `-32000`, not advertised `authMethods`. The PageRoot

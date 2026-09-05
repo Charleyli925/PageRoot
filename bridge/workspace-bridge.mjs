@@ -1601,10 +1601,8 @@ async function preflightAgent(body) {
             trustPolicyVersion: body.trustPolicyAccepted,
           })
         : defaultManagedAgentDelivery();
-  const driver = compatibilityDriverForAgentDelivery(delivery);
   return agentBridgeService.preflight({
     ...body,
-    ...(driver ? { driver } : {}),
     selection: delivery.selection,
     trustPolicyAccepted: delivery.trustPolicyVersion,
   });
@@ -1712,9 +1710,8 @@ async function startAgent(body) {
             trustPolicyVersion: body.trustPolicyAccepted,
           })
         : defaultManagedAgentDelivery();
-  const driver = compatibilityDriverForAgentDelivery(delivery);
   return agentBridgeService.submit({
-    ...(driver ? { driver } : {}),
+    ...(body?.driver ? { driver: body.driver } : {}),
     selection: delivery.selection,
     trustPolicyAccepted: delivery.trustPolicyVersion,
     preflightId: body.preflightId,

@@ -667,3 +667,65 @@ test("an unknown historical provider stays readable but cannot become start auth
     (error) => error?.code === "AGENT_PROVIDER_UNSUPPORTED",
   );
 });
+
+test("current execution converts a supported driver once and rejects a conflicting selection", async () => {
+  const coordinator = new AgentRuntimeCoordinator({ providerRegistry: registry() });
+  const selection = Object.freeze({
+    providerId: "synthetic-provider",
+    runtimeId: "synthetic-runtime",
+    requestedModelId: null,
+    resolvedModelId: null,
+    reasoning: Object.freeze({
+      requested: null,
+      applied: null,
+      resolution: "provider-default",
+    }),
+  });
+  await assert.rejects(
+    coordinator.preflight({
+      driver: "synthetic-driver",
+      selection: {
+        providerId: "qoder",
+        runtimeId: "acp",
+        requestedModelId: null,
+        resolvedModelId: null,
+        reasoning: selection.reasoning,
+      },
+      trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
+    }),
+    (error) => error?.code === "AGENT_SELECTION_UNSUPPORTED",
+  );
+  await assert.rejects(
+    coordinator.preflight({
+      driver: "unknown-driver",
+      trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
+    }),
+    (error) => error?.code === "AGENT_DRIVER_UNSUPPORTED",
+  );
+  await assert.rejects(
+    coordinator.preflight({
+      trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
+    }),
+    (error) => error?.code === "AGENT_SELECTION_UNSUPPORTED",
+  );
+
+  const fromSelection = await coordinator.preflight({
+    selection,
+    trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
+  });
+  assert.equal("driver" in fromSelection, false);
+  const redeemed = await coordinator.redeemCommandTicket(fromSelection.preflightId, {
+    purpose: "execution",
+    driver: "synthetic-driver",
+  });
+  assert.equal("driver" in redeemed, false);
+  assert.equal(redeemed.selection.providerId, "synthetic-provider");
+
+  const fromDriver = await coordinator.preflight({
+    driver: "synthetic-driver",
+    trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
+  });
+  assert.equal(fromDriver.driver, "synthetic-driver");
+  assert.equal(fromDriver.selection.providerId, "synthetic-provider");
+  await coordinator.shutdown();
+});
