@@ -2,9 +2,9 @@ name: CI Health
 
 on:
   schedule:
-    # Weekly report generated on GitHub-hosted runners. It may open a
-    # CI health Issue after two consecutive blocking-budget weeks, but it
-    # never writes repository contents and is not a merge gate.
+    # Weekly report generated on GitHub-hosted runners. Automatic Issue
+    # creation stays off until wash-green and flaky metrics are trustworthy.
+    # The workflow never writes repository contents and is not a merge gate.
     - cron: "0 1 * * 1"
   workflow_dispatch:
 
