@@ -17,10 +17,6 @@ import {
 } from "../app/lib/semantic-operation-kernel.js";
 import { buildSourceIndex, sourceSha256 } from "../app/lib/source-index.js";
 import {
-  applyPatchPlan,
-  planInlineStylePatch,
-} from "../app/lib/source-patch-engine.js";
-import {
   createTargetRef,
   planEditableIslandPatch,
 } from "../app/lib/source-patch-core.js";
@@ -144,29 +140,18 @@ function applyIslandText(state, operationId, elementId, text, nextInnerHtml) {
   }));
 }
 
-function canvasDualSetStyle(documentState) {
-  const index = buildSourceIndex(documentState.html);
-  const styleOperation = operation(documentState, "op_canvas_style_01", "setStyle", {
-    target: target(documentState, IDS.section),
-    property: "color",
-    value: "red",
-    important: true,
-  });
-  const mappedResult = applyPatchPlan(
-    planInlineStylePatch(index, {
-      type: "set-inline-style",
-      targetRef: createTargetRef(index, index.byPagerootId.get(IDS.section), { level: "subregion" }),
+function canvasSingleSetStyle(documentState) {
+  return applySemanticOperation(documentState, operation(
+    documentState,
+    "op_canvas_style_01",
+    "setStyle",
+    {
+      target: target(documentState, IDS.section),
       property: "color",
       value: "red",
       important: true,
-      expectedSourceSha256: documentState.sourceSha256,
-    }),
-    documentState.html,
-  );
-  const semanticResult = applySemanticOperation(documentState, styleOperation);
-  assert.equal(mappedResult.html, semanticResult.html);
-  assert.equal(mappedResult.sourceSha256, semanticResult.sourceSha256);
-  return semanticResult;
+    },
+  ));
 }
 
 test("kernel text, space, blank-line, style and structure actions keep identity and history", () => {
@@ -321,7 +306,7 @@ test("kernel text, space, blank-line, style and structure actions keep identity 
   assert.equal(identityFacts(deleted.html).sourceSha256, deleted.sourceSha256);
 });
 
-test("same samples freeze kernel and dual-path computation counts", () => {
+test("same samples freeze kernel and single-path canvas computation counts", () => {
   const kernelCounts = withCounters(() => {
     const baseline = createSemanticDocumentState(baselineHtml());
     applySemanticOperation(baseline, operation(
@@ -332,8 +317,8 @@ test("same samples freeze kernel and dual-path computation counts", () => {
     ));
     return countSnapshot();
   });
-  const dualPathCounts = withCounters(() => {
-    canvasDualSetStyle(createSemanticDocumentState(baselineHtml()));
+  const canvasPathCounts = withCounters(() => {
+    canvasSingleSetStyle(createSemanticDocumentState(baselineHtml()));
     return countSnapshot();
   });
   const manyHtml = manyElementHtml();
@@ -368,12 +353,12 @@ test("same samples freeze kernel and dual-path computation counts", () => {
     fullPatchApplies: 1,
     insertionPointFullTreeScans: 0,
   });
-  assert.deepEqual(dualPathCounts, {
-    sourceIndexBuilds: 6,
-    fullDocumentIndexBuilds: 5,
+  assert.deepEqual(canvasPathCounts, {
+    sourceIndexBuilds: 3,
+    fullDocumentIndexBuilds: 3,
     fragmentIndexBuilds: 0,
-    unlabeledIndexBuilds: 1,
-    fullPatchApplies: 2,
+    unlabeledIndexBuilds: 0,
+    fullPatchApplies: 1,
     insertionPointFullTreeScans: 0,
   });
   assert.ok(manyElementCount >= 240);

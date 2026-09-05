@@ -911,9 +911,9 @@ outside-scope equality and parse integrity. The kernel may reuse a
 HTML bytes and a freshly computed Hash; that reuse is not a skip-validation
 flag and not a persisted index cache. Runtime DOM is never an input.
 Text, style, sibling reorder, insert, duplicate, delete and cross-parent move
-already use this boundary. Canvas still verifies that semantic materialization
-matches a separately applied SourcePatch result before publishing complete HTML;
-that dual apply is current, not the target single materialization.
+already use this boundary. Canvas publishes the kernel's single SourcePatch
+materialization, including tracked comment and selection target mappings;
+SourcePatch is not a second public apply. Persistence checks remain independent.
 Repository and Desktop Main do not own
 or persist the semantic revision or the current-open history stack.
 

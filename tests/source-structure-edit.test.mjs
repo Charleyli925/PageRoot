@@ -14,10 +14,6 @@ import {
   identityFreeSourceElementHtml,
 } from "../app/lib/source-structure-edit.js";
 import { buildSourceIndex, sourceSha256 } from "../app/lib/source-index.js";
-import {
-  applyPatchPlan,
-  planSemanticOperationPatch,
-} from "../app/lib/source-patch-engine.js";
 import { createTargetRef } from "../app/lib/target-resolver.js";
 
 const ids = {
@@ -209,6 +205,9 @@ test("accepted structure patches undo and redo inside the bounded open-document 
 
 test("structure edits keep surviving comment IDs exact and orphan deleted targets", () => {
   const baseline = createSemanticDocumentState(html);
+  const trackedComment = createTargetRef(html, buildSourceIndex(html).byPagerootId.get(ids.first), {
+    targetId: "comment_target_first",
+  });
   const duplicate = applySemanticOperation(
     baseline,
     createDuplicateElementOperation(html, {
@@ -221,18 +220,11 @@ test("structure edits keep surviving comment IDs exact and orphan deleted target
         "40000000-0000-4000-8000-000000000001",
         "40000000-0000-4000-8000-000000000002",
       ),
+      trackedTargetRefs: [trackedComment],
     },
   );
-  const semanticCommand = duplicate.materialization.sourcePatchResult
-    .inversePlan.metadata.semanticCommand;
-  const duplicatePlan = planSemanticOperationPatch(html, semanticCommand);
-  const trackedComment = createTargetRef(html, buildSourceIndex(html).byPagerootId.get(ids.first), {
-    targetId: "comment_target_first",
-  });
-  const mappedDuplicate = applyPatchPlan(duplicatePlan, html, {
-    trackedTargetRefs: [trackedComment],
-  });
-  const survivingComment = mappedDuplicate.refreshedTrackedTargetRefs[0];
+  const survivingComment = duplicate.materialization.sourcePatchResult
+    .refreshedTrackedTargetRefs[0];
   assert.equal(survivingComment.elementId, ids.first);
   assert.equal(survivingComment.resolution, "exact");
 

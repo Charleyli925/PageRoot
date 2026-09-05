@@ -697,7 +697,12 @@ export function applySemanticOperation(inputState, operation, options = {}) {
       expectedSourceSha256: state.sourceSha256,
     })
     : planSemanticOperationPatch(index, command);
-  const materialization = applyPatchPlan(plan, state.html, { baseIndex: index });
+  const materialization = applyPatchPlan(plan, state.html, {
+    baseIndex: index,
+    ...(Array.isArray(options.trackedTargetRefs)
+      ? { trackedTargetRefs: options.trackedTargetRefs }
+      : {}),
+  });
   assertManagedIdentity(materialization.sourceIndex, "Semantic operation output");
   if (operation.type === "insertElement" || operation.type === "moveElement") {
     const expectedParent = materialization.sourceIndex.byPagerootId.get(

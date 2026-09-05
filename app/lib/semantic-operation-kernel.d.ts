@@ -143,7 +143,10 @@ export declare function createSemanticElementPrecondition(
 export declare function applySemanticOperation(
   state: SemanticDocumentState,
   operation: SemanticOperation | GeneratedSemanticInverseOperation,
-  options?: { randomUUID?: () => string },
+  options?: {
+    randomUUID?: () => string;
+    trackedTargetRefs?: readonly unknown[];
+  },
 ): SemanticOperationResult;
 
 export declare function deriveSemanticOperationIdentityDelta(
@@ -166,6 +169,9 @@ export declare class SemanticOperationKernel {
   apply(
     state: SemanticDocumentState,
     operation: SemanticOperation | GeneratedSemanticInverseOperation,
-    options?: { randomUUID?: () => string },
+    options?: {
+      randomUUID?: () => string;
+      trackedTargetRefs?: readonly unknown[];
+    },
   ): SemanticOperationResult;
 }
