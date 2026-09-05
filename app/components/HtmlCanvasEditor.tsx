@@ -458,29 +458,12 @@ type RuntimePresentationAnchor = {
   zoom: number;
 };
 
-type RuntimeActiveFrameSnapshot = {
+type RuntimeSlotRetirement = {
   slotId: RuntimeFrameSlotId;
   render: RuntimeCandidateRender;
   cleanupFrame: () => void;
-  runtimeFrame: RuntimeFrameContext | null;
-  runtimeSourceElements: RuntimeSourceElements | null;
-  runtimeSourceRegistrationCleanup: () => void;
-  frameGeneration: number;
-  nativeDomGeneration: number;
-  sourceIndex: SourceIndexValue | null;
-  frameSourceHtml: string;
-  frameWrittenHtml: string | null;
-  expectedFrameHtml: string | null;
-  expectedFrameToken: string | null;
-  renderedSourceHtml: string | null;
-  renderedProjectionSha256: string;
-  selectedSourceSelection: HtmlCanvasSelection | null;
-  toolbarVisible: boolean;
-  runtimeGeneratedSelection: boolean;
-  connectedFrame: {
-    iframe: HTMLIFrameElement;
-    generation: number;
-  } | null;
+  registrationCleanup: () => void;
+  generation: number;
 };
 
 type RuntimeCandidate = {
@@ -497,7 +480,7 @@ type RuntimeCandidate = {
   previousPendingSelection: HtmlCanvasSelection | null;
   previousPendingToolbarVisible: boolean;
   presentationAnchor: RuntimePresentationAnchor;
-  previousActive: RuntimeActiveFrameSnapshot;
+  retiredSlot: RuntimeSlotRetirement | null;
 };
 
 type RuntimeCandidateTransfer = {
@@ -1225,10 +1208,12 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   const finalizeRuntimePromotionRef = useRef<(candidate: RuntimeCandidate) => void>(
     () => undefined,
   );
-  const rollbackRuntimePromotionRef = useRef<(
-    candidate: RuntimeCandidate,
-    outcome: Exclude<HtmlCanvasEditRuntimeLoadOutcome, "ready">,
-  ) => boolean>(() => false);
+  const commitRuntimeCandidateRef = useRef<
+    (candidate: RuntimeCandidate, iframe: HTMLIFrameElement) => boolean
+  >(() => false);
+  const abortInFlightRuntimeCommitRef = useRef<
+    ((outcome: Exclude<HtmlCanvasEditRuntimeLoadOutcome, "ready">) => boolean) | null
+  >(null);
   const failRuntimeCandidateActivationRef = useRef<(
     candidate: RuntimeCandidate,
     outcome: Exclude<HtmlCanvasEditRuntimeLoadOutcome, "ready">,
@@ -1739,12 +1724,15 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     if (options.forceStatic) {
       deferredRuntimeCandidateRef.current = null;
     }
-    const promotedCandidate = runtimePromotionRef.current;
-    if (promotedCandidate) {
-      // A newer authoritative source update may arrive during the final handoff
-      // frame. Roll back the not-yet-settled promotion before starting that load
-      // so the previous document remains the only live active context.
-      rollbackRuntimePromotionRef.current(promotedCandidate, "superseded");
+    const abortInFlightCommit = abortInFlightRuntimeCommitRef.current;
+    if (abortInFlightCommit) {
+      abortInFlightCommit("superseded");
+    } else {
+      const promotedCandidate = runtimePromotionRef.current;
+      if (promotedCandidate) {
+        failRuntimeCandidateActivationRef.current(promotedCandidate, "superseded")
+          || cancelRuntimeCandidateRef.current(promotedCandidate, "superseded");
+      }
     }
     const pendingCandidate = runtimeCandidateRef.current;
     if (pendingCandidate) {
@@ -1956,15 +1944,14 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       ? transfer.pendingSelection
       : candidate.previousPendingSelection;
     const restoredToolbarVisible = transfer?.pendingToolbarVisible ?? (
-      candidate.previousPendingToolbarVisible || Boolean(
-        candidate.previousActive.toolbarVisible
-        && candidate.previousActive.selectedSourceSelection
-      )
+      candidate.previousPendingToolbarVisible
     );
     pendingToolbarVisibleRef.current = restoredToolbarVisible;
     setToolbarVisible(restoredToolbarVisible);
     runtimeCandidateRef.current = null;
     runtimeCandidateIframeRef.current = null;
+    runtimePromotionRef.current = null;
+    abortInFlightRuntimeCommitRef.current = null;
     setRuntimeCandidateRender(null);
     containerRef.current?.removeAttribute("data-runtime-handoff");
     requestAnimationFrame(() => updateOverlayPositionRef.current());
@@ -2000,6 +1987,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     if (runtimeInactiveGenerationRef.current !== null) {
       clearRuntimeInactiveSlot();
     }
+    abortInFlightRuntimeCommitRef.current?.("superseded");
     const supersededCandidate = runtimeCandidateRef.current;
     const supersededTransfer: RuntimeCandidateTransfer | null = supersededCandidate
       ? {
@@ -2203,27 +2191,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       previousPendingSelection,
       previousPendingToolbarVisible,
       presentationAnchor,
-      previousActive: {
-        slotId: activeRuntimeSlotId,
-        render: frameRender,
-        cleanupFrame: cleanupFrameRef.current,
-        runtimeFrame: runtimeFrameRef.current,
-        runtimeSourceElements: runtimeSourceElementsRef.current,
-        runtimeSourceRegistrationCleanup: runtimeSourceRegistrationCleanupRef.current,
-        frameGeneration: frameLoadGenerationRef.current,
-        nativeDomGeneration: nativeDomGenerationRef.current,
-        sourceIndex: sourceIndexRef.current,
-        frameSourceHtml: frameSourceHtmlRef.current,
-        frameWrittenHtml: frameWrittenHtmlRef.current,
-        expectedFrameHtml: expectedFrameHtmlRef.current,
-        expectedFrameToken: expectedFrameTokenRef.current,
-        renderedSourceHtml: renderedSourceHtmlRef.current,
-        renderedProjectionSha256: renderedProjectionSha256Ref.current,
-        selectedSourceSelection: previousSelectedSourceSelection,
-        toolbarVisible: toolbarVisibleRef.current,
-        runtimeGeneratedSelection: runtimeGeneratedSelectionRef.current,
-        connectedFrame: connectedFrameRef.current,
-      },
+      retiredSlot: null,
     };
     if (runtimeFrame) {
       const registrationProperty = editRuntimeRegistrationProperty(
@@ -2332,8 +2300,6 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     deferLatestStaticRuntimeCandidate,
     documentBaseHref,
     editRuntimeGrant,
-    frameRender,
-    activeRuntimeSlotId,
     publishRuntimeDegradation,
     staticAssetBaseHref,
   ]);
@@ -2402,136 +2368,182 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
   replayDeferredRuntimeCandidateRef.current = replayDeferredRuntimeCandidate;
 
   const finalizeRuntimeCandidatePromotion = useCallback((candidate: RuntimeCandidate) => {
-    if (
-      runtimePromotionRef.current !== candidate
-      || runtimeFrameCoordinatorRef.current!.snapshot.lastKnownGood?.candidateId
-        !== candidate.attempt.candidateId
-    ) return;
-    // The old active browsing context remains authoritative until the new frame
-    // has connected and restored the logical selection. Release its listeners
-    // and runtime registration only after that handoff point.
-    candidate.previousActive.runtimeSourceRegistrationCleanup();
-    candidate.previousActive.cleanupFrame();
+    if (runtimePromotionRef.current !== candidate) return;
+    abortInFlightRuntimeCommitRef.current = null;
+    const retired = candidate.retiredSlot;
+    retired?.registrationCleanup();
+    retired?.cleanupFrame();
     runtimePromotionRef.current = null;
     containerRef.current?.setAttribute("data-runtime-handoff", "active");
-    scheduleRuntimeInactiveSlotClear(candidate.previousActive.render.elementGeneration);
+    if (retired) scheduleRuntimeInactiveSlotClear(retired.generation);
   }, [scheduleRuntimeInactiveSlotClear]);
   finalizeRuntimePromotionRef.current = finalizeRuntimeCandidatePromotion;
 
-  const rollbackRuntimeCandidatePromotion = useCallback((
+  const commitRuntimeCandidate = useCallback((
     candidate: RuntimeCandidate,
-    outcome: Exclude<HtmlCanvasEditRuntimeLoadOutcome, "ready">,
+    iframe: HTMLIFrameElement,
   ): boolean => {
-    if (runtimePromotionRef.current !== candidate) return false;
-    const previous = candidate.previousActive;
-    // During promotion the candidate browsing context occupies iframeRef;
-    // runtimeCandidateIframeRef has already been cleared by promoteRuntimeCandidate.
-    const candidateDocument = iframeRef.current?.contentDocument;
-    const activeCandidateNativeEdit = activeNativeEditRef.current;
     if (
-      activeCandidateNativeEdit
-      && candidateDocument
-      && activeCandidateNativeEdit.rootElement.ownerDocument === candidateDocument
+      runtimeCandidateRef.current !== candidate
+      || runtimePromotionRef.current !== candidate
+      || latestSourceProjectionRef.current.source !== candidate.source
+      || activeNativeEditRef.current
+      || !runtimeFrameCoordinatorRef.current!.canPromote(candidate.attempt)
     ) {
-      const checkpointTimer = nativeEditCheckpointTimerRef.current;
-      if (checkpointTimer !== null) window.clearTimeout(checkpointTimer);
-      nativeEditCheckpointTimerRef.current = null;
-      currentNativeEditLeaseRef.current = null;
-      activeNativeEditRef.current = null;
-      nativeCommandQueueRef.current.discardPendingNativeCommands("session-ended");
-      retainNativeEditFocusRef.current = null;
-      activeCandidateNativeEdit.rootElement.removeAttribute("data-html-canvas-editing");
-      activeCandidateNativeEdit.session.dispose();
-      activeCandidateNativeEdit.rootElement.ownerDocument.getSelection()?.removeAllRanges();
-      activeTextRangeRef.current = null;
-      setIsEditing(false);
-      setHasTextRange(false);
-      runtimeFrameCoordinatorRef.current!.endNativeEdit();
+      failRuntimeCandidateActivationRef.current(candidate, "superseded")
+        || cancelRuntimeCandidateRef.current(candidate, "superseded");
+      return false;
     }
-    const currentCleanup = cleanupFrameRef.current;
-    if (currentCleanup !== previous.cleanupFrame) currentCleanup();
-    const cleanupFrame = runtimeInactiveCleanupFrameRef.current;
-    if (cleanupFrame !== null) window.cancelAnimationFrame(cleanupFrame);
-    runtimeInactiveCleanupFrameRef.current = null;
-    runtimeInactiveGenerationRef.current = null;
+    if (!runtimeFrameCoordinatorRef.current!.beginPositioning(candidate.attempt)) {
+      syncRuntimeCandidateDiagnostics();
+      failRuntimeCandidateActivationRef.current(candidate, "superseded")
+        || cancelRuntimeCandidateRef.current(candidate, "superseded");
+      return false;
+    }
+    syncRuntimeCandidateDiagnostics();
+
+    const previousSlotId = activeRuntimeSlotId;
+    const previousRender = frameRender;
+    const previousCleanup = cleanupFrameRef.current;
+    const previousRegistration = runtimeSourceRegistrationCleanupRef.current;
+    const previousRuntimeFrame = runtimeFrameRef.current;
+    const previousSourceElements = runtimeSourceElementsRef.current;
+    const previousGeneration = frameLoadGenerationRef.current;
+    const previousNativeDomGeneration = nativeDomGenerationRef.current;
+    const previousSourceIndex = sourceIndexRef.current;
+    const previousFrameSourceHtml = frameSourceHtmlRef.current;
+    const previousFrameWrittenHtml = frameWrittenHtmlRef.current;
+    const previousExpectedFrameHtml = expectedFrameHtmlRef.current;
+    const previousExpectedFrameToken = expectedFrameTokenRef.current;
+    const previousRenderedSourceHtml = renderedSourceHtmlRef.current;
+    const previousRenderedProjectionSha256 = renderedProjectionSha256Ref.current;
+    const previousConnectedFrame = connectedFrameRef.current;
+    const promotedGeneration = candidate.render.elementGeneration;
+    const abortCommit = (
+      outcome: Exclude<HtmlCanvasEditRuntimeLoadOutcome, "ready">,
+    ): boolean => {
+      if (abortInFlightRuntimeCommitRef.current !== abortCommit) return false;
+      abortInFlightRuntimeCommitRef.current = null;
+      const committedCleanup = cleanupFrameRef.current;
+      if (committedCleanup !== previousCleanup) committedCleanup();
+      runtimeSourceElementsRef.current = previousSourceElements;
+      runtimeSourceRegistrationCleanupRef.current = previousRegistration;
+      runtimeFrameRef.current = previousRuntimeFrame;
+      frameLoadGenerationRef.current = previousGeneration;
+      nativeDomGenerationRef.current = previousNativeDomGeneration;
+      sourceIndexRef.current = previousSourceIndex;
+      frameSourceHtmlRef.current = previousFrameSourceHtml;
+      frameWrittenHtmlRef.current = previousFrameWrittenHtml;
+      expectedFrameHtmlRef.current = previousExpectedFrameHtml;
+      expectedFrameTokenRef.current = previousExpectedFrameToken;
+      renderedSourceHtmlRef.current = previousRenderedSourceHtml;
+      renderedProjectionSha256Ref.current = previousRenderedProjectionSha256;
+      cleanupFrameRef.current = previousCleanup;
+      connectedFrameRef.current = previousConnectedFrame;
+      activeFrameConnectionPendingRef.current = false;
+      candidate.retiredSlot = null;
+      pendingFrameRestoreEpochRef.current += 1;
+      runtimeCandidateRef.current = candidate;
+      runtimePromotionRef.current = candidate;
+      flushSync(() => {
+        setFrameRender(previousRender);
+        setRuntimeInactiveRender(null);
+        setRuntimeCandidateRender(candidate.render);
+        setActiveRuntimeSlotId(previousSlotId);
+      });
+      failRuntimeCandidateActivationRef.current(candidate, outcome)
+        || cancelRuntimeCandidateRef.current(candidate, outcome);
+      return true;
+    };
+
+    candidate.retiredSlot = {
+      slotId: previousSlotId,
+      render: previousRender,
+      cleanupFrame: previousCleanup,
+      registrationCleanup: previousRegistration,
+      generation: previousGeneration,
+    };
+    abortInFlightRuntimeCommitRef.current = abortCommit;
     candidate.registrationCleanup();
-    if (candidate.runtimeFrame) completeRuntimeAttempt(candidate.runtimeFrame, outcome);
-    else runtimeFrameCoordinatorRef.current!.settle(candidate.attempt, outcome);
-    runtimeCandidateRef.current = null;
-    runtimeCandidateIframeRef.current = null;
-    runtimePromotionRef.current = null;
-    runtimeFrameRef.current = previous.runtimeFrame;
-    runtimeSourceElementsRef.current = previous.runtimeSourceElements;
-    runtimeSourceRegistrationCleanupRef.current = previous.runtimeSourceRegistrationCleanup;
-    frameLoadGenerationRef.current = previous.frameGeneration;
+    runtimeSourceElementsRef.current = candidate.sourceElements;
+    runtimeSourceRegistrationCleanupRef.current = () => undefined;
+    runtimeFrameRef.current = candidate.runtimeFrame;
+    activeFrameConnectionPendingRef.current = true;
+    frameLoadGenerationRef.current = promotedGeneration;
     frameGenerationSequenceRef.current = Math.max(
       frameGenerationSequenceRef.current,
-      previous.frameGeneration,
+      promotedGeneration,
     );
-    nativeDomGenerationRef.current = previous.nativeDomGeneration;
-    // Projection refs describe the visible last-known-good frame. The latest
-    // Working HTML remains independently authoritative in latestSourceProjectionRef.
-    sourceIndexRef.current = previous.sourceIndex;
-    frameSourceHtmlRef.current = previous.frameSourceHtml;
-    frameWrittenHtmlRef.current = previous.frameWrittenHtml;
-    expectedFrameHtmlRef.current = previous.expectedFrameHtml;
-    expectedFrameTokenRef.current = previous.expectedFrameToken;
-    renderedSourceHtmlRef.current = previous.renderedSourceHtml;
-    renderedProjectionSha256Ref.current = previous.renderedProjectionSha256;
-    activeFrameConnectionPendingRef.current = false;
+    nativeDomGenerationRef.current += 1;
+    sourceIndexRef.current = candidate.sourceIndex;
+    frameSourceHtmlRef.current = candidate.source;
+    frameWrittenHtmlRef.current = null;
+    expectedFrameHtmlRef.current = candidate.prepared;
+    expectedFrameTokenRef.current = candidate.verificationToken;
+    renderedSourceHtmlRef.current = null;
+    clearRuntimeRefreshPending();
     pendingFrameViewportRef.current = null;
     pendingSharedViewportRef.current = null;
     pendingStaticPresentationAnchorRef.current = null;
-    // Runtime activation failed after promotion. The old frame remains the
-    // source-backed rollback target, but the failed checkpoint must not
-    // restore native editing on that frame implicitly.
-    // Invalidate every rAF scheduled by the failed candidate before restoring
-    // the previous generation's pending viewport/selection state.
     pendingFrameRestoreEpochRef.current += 1;
-    pendingSelectionRef.current = candidate.previousPendingSelection;
-    pendingToolbarVisibleRef.current = candidate.previousPendingToolbarVisible;
-    selectedElementRef.current?.removeAttribute("data-html-canvas-selected");
-    selectedElementRef.current?.removeAttribute(GLOBAL_SELECTION_ATTRIBUTE);
-    selectedElementRef.current = null;
-    selectedSourceSelectionRef.current = previous.selectedSourceSelection;
-    activeTextRangeRef.current = null;
-    runtimeGeneratedSelectionRef.current = previous.runtimeGeneratedSelection;
-    cleanupFrameRef.current = previous.cleanupFrame;
-    connectedFrameRef.current = previous.connectedFrame;
-    containerRef.current?.setAttribute(
-      "data-render-verified",
-      previous.renderedSourceHtml ? "true" : "false",
-    );
-    containerRef.current?.removeAttribute("data-runtime-handoff");
+    containerRef.current?.setAttribute("data-runtime-handoff", "positioning");
     flushSync(() => {
-      setFrameRender(previous.render);
-      setRuntimeInactiveRender(null);
+      setRuntimeInactiveRender(previousRender);
+      setFrameRender(candidate.render);
       setRuntimeCandidateRender(null);
-      setActiveRuntimeSlotId(previous.slotId);
-      setSelection(previous.selectedSourceSelection);
-      setRuntimeGeneratedSelection(previous.runtimeGeneratedSelection);
-      setToolbarVisible(previous.toolbarVisible);
-      setHasTextRange(false);
+      setActiveRuntimeSlotId(candidate.attempt.slotId);
     });
-    syncRuntimeCandidateDiagnostics();
+    const promotedIframe = iframeRef.current;
+    if (!promotedIframe || promotedIframe !== iframe) {
+      abortCommit("failed");
+      return false;
+    }
+    const outer = containerRef.current?.closest<HTMLElement>(".review-scroll-stage");
+    const anchor = candidate.presentationAnchor;
+    if (
+      outer
+      && anchor.outerScrollLeft !== null
+      && anchor.outerScrollTop !== null
+    ) {
+      outer.scrollTo({
+        left: clampRuntimeScroll(
+          anchor.outerScrollLeft,
+          Math.max(0, outer.scrollWidth - outer.clientWidth),
+        ),
+        top: clampRuntimeScroll(
+          anchor.outerScrollTop,
+          Math.max(0, outer.scrollHeight - outer.clientHeight),
+        ),
+        behavior: "auto",
+      });
+    }
+    if (!connectFrameRef.current(promotedIframe, promotedGeneration)) {
+      abortCommit("failed");
+      return false;
+    }
+    runtimeCandidateRef.current = null;
+    runtimeCandidateIframeRef.current = null;
     return true;
   }, [
-    completeRuntimeAttempt,
+    activeRuntimeSlotId,
+    clearRuntimeRefreshPending,
+    frameRender,
     syncRuntimeCandidateDiagnostics,
   ]);
-  rollbackRuntimePromotionRef.current = rollbackRuntimeCandidatePromotion;
+  commitRuntimeCandidateRef.current = commitRuntimeCandidate;
 
   const promoteRuntimeCandidate = useCallback((candidate: RuntimeCandidate): boolean => {
     if (
       runtimeCandidateRef.current !== candidate
-      || !runtimeFrameCoordinatorRef.current!.accepts(candidate.attempt)
+      || !runtimeFrameCoordinatorRef.current!.canPromote(candidate.attempt)
     ) {
       syncRuntimeCandidateDiagnostics();
       return false;
     }
     const iframe = runtimeCandidateIframeRef.current;
     const documentNode = iframe?.contentDocument;
-    if (!iframe || !documentNode?.documentElement) return false;
+    const frameView = documentNode?.defaultView;
+    if (!iframe || !documentNode?.documentElement || !frameView) return false;
     if (
       candidate.runtimeFrame
       && (
@@ -2550,81 +2562,105 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     } catch {
       return false;
     }
-    // Candidate preparation may outlive the user's next browse or scroll
-    // gesture. The still-visible Active frame is the latest presentation
-    // intent, so refresh the small anchor immediately before positioning.
-    const activeFrame = iframeRef.current;
-    const activeOuterScrollElement = containerRef.current?.closest<HTMLElement>(
-      ".review-scroll-stage",
-    ) ?? null;
-    candidate.presentationAnchor = captureRuntimePresentationAnchor({
-      iframe: activeFrame,
-      outerScrollElement: activeOuterScrollElement,
-      sourceIndex: sourceIndexRef.current,
-      selectedElement: selectedElementRef.current,
-      selectedSourceSelection: selectedSourceSelectionRef.current,
-    });
-    pendingSelectionRef.current = selectedSourceSelectionRef.current;
-    pendingToolbarVisibleRef.current = Boolean(
-      selectedSourceSelectionRef.current && toolbarVisibleRef.current,
-    );
-    if (!runtimeFrameCoordinatorRef.current!.beginPositioning(candidate.attempt)) {
-      syncRuntimeCandidateDiagnostics();
-      return false;
-    }
-    syncRuntimeCandidateDiagnostics();
-
-    const promotedGeneration = candidate.render.elementGeneration;
-    const previous = candidate.previousActive;
-    pendingFrameViewportRef.current = null;
-    pendingSharedViewportRef.current = null;
-    pendingStaticPresentationAnchorRef.current = null;
-    pendingFrameRestoreEpochRef.current += 1;
-    candidate.registrationCleanup();
-    runtimeCandidateRef.current = null;
-    runtimeCandidateIframeRef.current = null;
-    runtimeSourceElementsRef.current = candidate.sourceElements;
-    runtimeSourceRegistrationCleanupRef.current = () => undefined;
-    runtimeFrameRef.current = candidate.runtimeFrame;
-    activeFrameConnectionPendingRef.current = true;
-    frameLoadGenerationRef.current = promotedGeneration;
-    frameGenerationSequenceRef.current = Math.max(
-      frameGenerationSequenceRef.current,
-      promotedGeneration,
-    );
-    nativeDomGenerationRef.current += 1;
-    sourceIndexRef.current = candidate.sourceIndex;
-    frameSourceHtmlRef.current = candidate.source;
-    frameWrittenHtmlRef.current = null;
-    expectedFrameHtmlRef.current = candidate.prepared;
-    expectedFrameTokenRef.current = candidate.verificationToken;
-    renderedSourceHtmlRef.current = null;
-    clearRuntimeRefreshPending();
-    containerRef.current?.setAttribute("data-runtime-handoff", "positioning");
+    const recaptureAnchor = () => {
+      const activeFrame = iframeRef.current;
+      const activeOuterScrollElement = containerRef.current?.closest<HTMLElement>(
+        ".review-scroll-stage",
+      ) ?? null;
+      candidate.presentationAnchor = captureRuntimePresentationAnchor({
+        iframe: activeFrame,
+        outerScrollElement: activeOuterScrollElement,
+        sourceIndex: sourceIndexRef.current,
+        selectedElement: selectedElementRef.current,
+        selectedSourceSelection: selectedSourceSelectionRef.current,
+      });
+      pendingSelectionRef.current = selectedSourceSelectionRef.current;
+      pendingToolbarVisibleRef.current = Boolean(
+        selectedSourceSelectionRef.current && toolbarVisibleRef.current,
+      );
+    };
+    recaptureAnchor();
     runtimePromotionRef.current = candidate;
-    flushSync(() => {
-      setRuntimeInactiveRender(previous.render);
-      setFrameRender(candidate.render);
-      setRuntimeCandidateRender(null);
-      setActiveRuntimeSlotId(candidate.attempt.slotId);
-    });
-    const promotedIframe = iframeRef.current;
-    if (!promotedIframe || promotedIframe !== iframe) {
-      rollbackRuntimePromotionRef.current(candidate, "failed");
-      return false;
-    }
-    if (!connectFrameRef.current(promotedIframe, promotedGeneration)) {
-      rollbackRuntimePromotionRef.current(candidate, "failed");
-      return false;
-    }
+    const isCurrent = () => (
+      runtimeCandidateRef.current === candidate
+      && runtimePromotionRef.current === candidate
+      && runtimeCandidateIframeRef.current === iframe
+      && iframe.contentDocument === documentNode
+      && runtimeFrameCoordinatorRef.current!.accepts(candidate.attempt)
+    );
+    const maximumFrameScrollTop = () => Math.max(
+      0,
+      (documentNode.scrollingElement?.scrollHeight || 0) - iframe.clientHeight,
+    );
+    const maximumFrameScrollLeft = () => Math.max(
+      0,
+      (documentNode.scrollingElement?.scrollWidth || 0) - iframe.clientWidth,
+    );
+    const positionCandidateFrame = () => {
+      const anchor = candidate.presentationAnchor;
+      const element = runtimeSourceElementForStableId(
+        documentNode,
+        candidate.sourceIndex,
+        anchor.viewportAnchorStableId,
+      );
+      const currentAnchorScreenTop = Number(element?.getBoundingClientRect().top)
+        + iframe.getBoundingClientRect().top;
+      const targetTop = (
+        element
+        && anchor.viewportAnchorScreenOffsetY !== null
+        && Number.isFinite(currentAnchorScreenTop)
+      )
+        ? runtimeAnchorScrollTop({
+            currentScrollTop: frameView.scrollY,
+            currentAnchorOffsetY: currentAnchorScreenTop,
+            desiredAnchorOffsetY: anchor.viewportAnchorScreenOffsetY,
+            maximumScrollTop: maximumFrameScrollTop(),
+          })
+        : clampRuntimeScroll(anchor.iframeScrollTop, maximumFrameScrollTop());
+      frameView.scrollTo({
+        left: clampRuntimeScroll(anchor.iframeScrollLeft, maximumFrameScrollLeft()),
+        top: targetTop,
+        behavior: "auto",
+      });
+    };
+    let remainingReadinessFrames = 30;
+    const positionWhenReady = () => {
+      if (!isCurrent()) return;
+      const bodyRect = documentNode.body?.getBoundingClientRect();
+      if (
+        (
+          !bodyRect
+          || !Number.isFinite(bodyRect.width)
+          || !Number.isFinite(bodyRect.height)
+          || iframe.clientHeight <= 0
+          || iframe.clientWidth <= 0
+        )
+        && remainingReadinessFrames > 0
+      ) {
+        remainingReadinessFrames -= 1;
+        requestAnimationFrame(positionWhenReady);
+        return;
+      }
+      recaptureAnchor();
+      positionCandidateFrame();
+      requestAnimationFrame(() => {
+        if (!isCurrent()) return;
+        commitRuntimeCandidateRef.current(candidate, iframe);
+      });
+    };
+    requestAnimationFrame(positionWhenReady);
     return true;
-  }, [clearRuntimeRefreshPending, syncRuntimeCandidateDiagnostics]);
+  }, [syncRuntimeCandidateDiagnostics]);
 
   const failRuntimeCandidate = useCallback((
     candidate: RuntimeCandidate,
     outcome: Exclude<HtmlCanvasEditRuntimeLoadOutcome, "ready">,
   ): boolean => {
-    if (runtimeCandidateRef.current !== candidate) return false;
+    if (
+      runtimeCandidateRef.current !== candidate
+      && runtimePromotionRef.current !== candidate
+    ) return false;
+    runtimeCandidateRef.current = candidate;
     const candidateKind = candidate.attempt.kind;
     const cancelled = cancelRuntimeCandidateRef.current(candidate, outcome);
     if (!cancelled || outcome === "superseded") return cancelled;
@@ -5953,9 +5989,15 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     selection?: NativeEditSelection | null,
   ): boolean => {
     if (activeNativeEditRef.current) detachNativeEditForFence();
-    const runtimePromotion = runtimePromotionRef.current;
-    if (runtimePromotion) {
-      rollbackRuntimePromotionRef.current(runtimePromotion, "superseded");
+    const abortInFlightCommit = abortInFlightRuntimeCommitRef.current;
+    if (abortInFlightCommit) {
+      abortInFlightCommit("superseded");
+    } else {
+      const runtimePromotion = runtimePromotionRef.current;
+      if (runtimePromotion) {
+        failRuntimeCandidateActivationRef.current(runtimePromotion, "superseded")
+          || cancelRuntimeCandidateRef.current(runtimePromotion, "superseded");
+      }
     }
     const runtimeCandidate = runtimeCandidateRef.current;
     if (runtimeCandidate) {
@@ -6465,10 +6507,10 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
       const activeCleanup = cleanupFrameRef.current;
       activeCleanup();
       if (
-        runtimePromotion
-        && runtimePromotion.previousActive.cleanupFrame !== activeCleanup
-      ) runtimePromotion.previousActive.cleanupFrame();
-      runtimePromotion?.previousActive.runtimeSourceRegistrationCleanup();
+        runtimePromotion?.retiredSlot
+        && runtimePromotion.retiredSlot.cleanupFrame !== activeCleanup
+      ) runtimePromotion.retiredSlot.cleanupFrame();
+      runtimePromotion?.retiredSlot?.registrationCleanup();
       disposeRuntimeVisualTargetIndex(
         canvasTargetIdentityScopeRef.current.runtimeVisualTargetIndex,
       );
@@ -6623,7 +6665,13 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         flushPendingHoverResolution,
       );
     };
+    const isAuthoritativeConnectedDocument = () => (
+      iframe === iframeRef.current
+      && iframe.contentDocument === documentNode
+      && frameLoadGenerationRef.current === connectedFrameGeneration
+    );
     const handleClick = (event: MouseEvent) => {
+      if (!isAuthoritativeConnectedDocument()) return;
       cancelPendingHoverResolution();
       hoverControllerRef.current?.hide();
       // Authored controls remain selectable/editable content in the Canvas,
@@ -6682,6 +6730,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     };
 
     const handleDoubleClick = (event: MouseEvent) => {
+      if (!isAuthoritativeConnectedDocument()) return;
       cancelPendingHoverResolution();
       hoverControllerRef.current?.hide();
       if (findNativeActionTarget(event.target)) event.preventDefault();
@@ -6806,6 +6855,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         onRequestFlushRef.current?.();
         return;
       }
+      if (!isAuthoritativeConnectedDocument()) return;
       const activeNativeEdit = activeNativeEditRef.current;
       if (activeNativeEdit?.rootElement.contains(event.target as Node)) {
         retainNativeEditFocusRef.current = null;
@@ -6886,6 +6936,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
     };
 
     const handleBeforeInput = (event: InputEvent) => {
+      if (!isAuthoritativeConnectedDocument()) return;
       const eventElement = event.target instanceof documentNode.defaultView!.Element
         ? event.target
         : null;
@@ -7270,7 +7321,7 @@ const HtmlCanvasEditor = forwardRef<HtmlCanvasEditorHandle, HtmlCanvasEditorProp
         }
         finalizeRuntimePromotionRef.current(candidate);
       };
-      let remainingReadinessFrames = 30;
+      let remainingReadinessFrames = 2;
       const positionWhenReady = () => {
         if (!isCurrent()) return;
         const bodyRect = documentNode.body?.getBoundingClientRect();

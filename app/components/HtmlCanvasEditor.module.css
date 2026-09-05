@@ -592,8 +592,18 @@
 }
 
 /* Runtime handoff keeps the connected document as the visual authority until
-   the replacement has restored its viewport, selection, and layout. */
+   the replacement has restored its viewport. Candidate iframe positioning
+   happens while this attribute is still `preparing`, so the Active frame
+   remains visible and interactive. `positioning` is only the short commit
+   window after Active identity and slot roles switch together. */
 .editor[data-runtime-handoff="preparing"] > iframe[data-frame-role="runtime-candidate"] {
+  z-index: 1;
+  visibility: visible;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.editor[data-runtime-handoff="positioning"] > iframe[data-frame-role="runtime-candidate"] {
   z-index: 1;
   visibility: visible;
   opacity: 0;
