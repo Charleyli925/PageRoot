@@ -40,25 +40,26 @@ export function sameShaWashGreenCount(ciRuns = []) {
     if (run?.status !== "completed") continue;
     const sha = String(run.head_sha || "");
     if (!sha) continue;
-    const entry = bySha.get(sha) || { success: false, failure: false, maxAttempt: 1 };
+    const entry = bySha.get(sha) || { success: false, failure: false };
     if (run.conclusion === "success") entry.success = true;
     if (run.conclusion === "failure") entry.failure = true;
-    entry.maxAttempt = Math.max(entry.maxAttempt, Number(run.run_attempt) || 1);
     bySha.set(sha, entry);
   }
   let count = 0;
   for (const entry of bySha.values()) {
-    if (entry.success && (entry.failure || entry.maxAttempt > 1)) count += 1;
+    // A later successful attempt of the same SHA is not wash-green by itself.
+    // Only count SHAs that actually failed and later succeeded.
+    if (entry.success && entry.failure) count += 1;
   }
   return count;
 }
 
 export function productRetryCount(flakyRecords = []) {
-  return (flakyRecords || []).reduce((total, record) => (
-    total
-    + (Number(record?.product?.flaky) || 0)
-    + (Number(record?.product?.retries) || 0)
-  ), 0);
+  return (flakyRecords || []).reduce((total, record) => {
+    const flaky = Number.isInteger(record?.product?.flaky) ? record.product.flaky : 0;
+    const retries = Number.isInteger(record?.product?.retries) ? record.product.retries : 0;
+    return total + flaky + retries;
+  }, 0);
 }
 
 export function budgetViolations(report) {
@@ -102,7 +103,10 @@ export function budgetViolations(report) {
   return Object.freeze(violations);
 }
 
-export function shouldCreateCiHealthIssue(currentViolations, previousViolations) {
+export function shouldCreateCiHealthIssue(currentViolations, previousViolations, {
+  currentGeneratedAt,
+  previousGeneratedAt,
+} = {}) {
   const currentBlocking = new Set(
     (currentViolations || []).filter((item) => item.blocking).map((item) => item.code),
   );
@@ -110,7 +114,12 @@ export function shouldCreateCiHealthIssue(currentViolations, previousViolations)
   const previousBlocking = new Set(
     (previousViolations || []).filter((item) => item.blocking).map((item) => item.code),
   );
-  return [...currentBlocking].some((code) => previousBlocking.has(code));
+  const shared = [...currentBlocking].some((code) => previousBlocking.has(code));
+  if (!shared) return false;
+  const currentMs = Date.parse(currentGeneratedAt || "");
+  const previousMs = Date.parse(previousGeneratedAt || "");
+  if (!Number.isFinite(currentMs) || !Number.isFinite(previousMs)) return false;
+  return currentMs - previousMs >= 6 * 24 * 60 * 60 * 1000;
 }
 
 function conclusionCounts(runs) {
@@ -341,6 +350,7 @@ function parseOptions(argv) {
     days: DEFAULT_DAYS,
     tokenEnv: "GITHUB_TOKEN",
     output: "output/ci-health/ci-health.json",
+    createIssue: false,
   };
   while (argv.length > 0) {
     const argument = argv.shift();
@@ -350,6 +360,7 @@ function parseOptions(argv) {
     else if (argument === "--days") options.days = Number(value);
     else if (argument === "--token-env") options.tokenEnv = value;
     else if (argument === "--output") options.output = value;
+    else if (argument === "--create-issue") options.createIssue = value === "true";
     else throw new Error(`Unknown argument: ${argument}`);
   }
   if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/u.test(options.repository)) {
@@ -506,7 +517,7 @@ async function run(options) {
   const markdown = renderCiHealthMarkdown(report);
   const markdownDestination = `${destination.replace(/\.json$/u, "")}.md`;
   await writeFile(markdownDestination, markdown, "utf8");
-  if (options.createIssue !== false) {
+  if (options.createIssue === true) {
     const issue = await syncCiHealthIssue(options.repository, token, report).catch((error) => {
       console.warn(`CI health issue sync skipped: ${error instanceof Error ? error.message : String(error)}`);
       return null;
