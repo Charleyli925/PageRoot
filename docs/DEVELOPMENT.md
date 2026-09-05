@@ -50,16 +50,17 @@ boundary.
 
 The packaged Bridge owns the product session through
 `bridge/agent/agent-runtime-coordinator.mjs`; the old Service exports only
-delegate existing routes. Its provider registry maps legacy `qoder-acp` to
-`qoder-provider.mjs` and registers both Qoder and Codex through the single
-`acp` runtime in `bridge/agent/runtimes/acp-runtime.mjs`; unknown
-provider/runtime IDs fail closed. The restricted Host Ports now live in
+delegate existing routes. Its provider registry dispatches Qoder and Codex by
+canonical selection through the single `acp` runtime in
+`bridge/agent/runtimes/acp-runtime.mjs`; unknown
+provider/runtime IDs fail closed. Historical Request `mode: "qoder-acp"` is
+decoded only by `shared/agent-delivery.mjs`. The restricted Host Ports now live in
 `bridge/agent/hosts/`, while frozen execution policy lives in
 `bridge/agent/policies/`.
 `bridge/qoder-acp-client.mjs` retains the legacy transport façade and exact
 compatibility exports without a second policy brand. The
 renderer can request `POST /agent/preflight` and `POST /agent/start` with
-registered task identity, the fixed `qoder-acp` driver, explicit
+registered task identity, a canonical selection, explicit
 `trusted-local-agent-v1` consent and an opaque short-lived ticket. When Qoder
 is not installed it may also `POST /agent/install` for the catalog-pinned
 managed copy. It cannot provide a command, cwd, environment or filesystem path

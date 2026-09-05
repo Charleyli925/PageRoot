@@ -92,9 +92,11 @@ test("shared host and policy sources contain no provider or transport ownership 
   for (const source of sources) assert.doesNotMatch(source, forbidden);
 });
 
-test("legacy qoder-acp dispatch resolves once to the qoder provider and ACP runtime", async () => {
+test("selection-first dispatch resolves to the qoder provider and ACP runtime", async () => {
   const { fixture, registry } = fixtureRegistry();
-  const prepared = await registry.preflight({ driver: "qoder-acp", environment: {} });
+  const prepared = await registry.preflightForSelection(providerSelection(), "execution", {
+    environment: {},
+  });
 
   assert.equal("driver" in prepared, false);
   assert.equal(prepared.providerId, "qoder");
@@ -129,8 +131,8 @@ test("legacy qoder-acp dispatch resolves once to the qoder provider and ACP runt
   ]);
 });
 
-test("selection-first dispatch supports a provider with no legacy driver", async () => {
-  const { fixture, registry } = fixtureRegistry({ legacyDrivers: [] });
+test("selection-first dispatch supports a registered provider without leftover driver adapters", async () => {
+  const { fixture, registry } = fixtureRegistry();
   const selection = providerSelection();
 
   assert.equal("discussion" in fixture.capabilities, false);
@@ -143,9 +145,6 @@ test("selection-first dispatch supports a provider with no legacy driver", async
   });
   assert.equal("driver" in prepared, false);
   assert.deepEqual(prepared.selection, selection);
-  assert.throws(() => registry.resolveDriver("qoder-acp"), {
-    code: "AGENT_DRIVER_UNSUPPORTED",
-  });
 
   const ticket = Object.freeze({
     ...prepared,
@@ -180,7 +179,6 @@ test("diagnosis invokes the provider's real read-only probe without preflight or
 test("providers cannot advertise a removed Discussion capability", () => {
   assert.throws(
     () => createSyntheticQoderProviderFixture({
-      legacyDrivers: [],
       capabilities: { discussion: true },
     }),
     /capability "discussion" is unsupported/u,
@@ -211,8 +209,8 @@ test("provider capability is enforced at preflight, ticket verification, and sta
   );
 });
 
-test("a provider without an explicit selector accepts only its provider default", async () => {
-  const { registry } = fixtureRegistry({ legacyDrivers: [] });
+test("a registered provider accepts only its provider default unless it advertises a selector", async () => {
+  const { registry } = fixtureRegistry();
   const selectedModel = {
     ...providerSelection(),
     requestedModelId: "qoder:synthetic-model",
@@ -224,19 +222,14 @@ test("a provider without an explicit selector accepts only its provider default"
   );
 });
 
-test("unknown provider, runtime, and legacy driver fail closed", async () => {
+test("unknown provider and runtime fail closed", async () => {
   const { fixture, registry } = fixtureRegistry();
-  assert.throws(
-    () => registry.resolveDriver("unknown-driver"),
-    (error) => error?.code === "AGENT_DRIVER_UNSUPPORTED",
-  );
   assert.throws(
     () => createRuntimeRegistry([fixture.runtime]).resolve("unknown-runtime"),
     (error) => error?.code === "AGENT_RUNTIME_UNSUPPORTED",
   );
   assert.throws(
     () => registry.resolveTicket({
-      driver: "qoder-acp",
       providerId: "unknown-provider",
       runtimeId: "acp",
       securityProfile: "client-mediated",
@@ -256,7 +249,9 @@ test("security profiles are frozen across provider, ticket, and runtime launch",
     providers: [mismatched.provider],
     runtimeRegistry: createRuntimeRegistry([mismatched.runtime]),
   });
-  const prepared = await registry.preflight({ driver: "qoder-acp", environment: {} });
+  const prepared = await registry.preflightForSelection(providerSelection(), "execution", {
+    environment: {},
+  });
   assert.equal(Object.isFrozen(prepared), true);
   assert.equal(prepared.securityProfile, "client-mediated");
   await assert.rejects(
@@ -339,14 +334,13 @@ test("Bridge keeps preflight internals private while public execution sessions i
     driver: "qoder-acp",
   });
   const mismatchedTicket = await service.preflight({
-    driver: "qoder-acp",
+    selection: providerSelection(),
     trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
   });
   assert.match(mismatchedTicket.selectionFingerprint, /^sha256:[a-f0-9]{64}$/u);
   await assert.rejects(
     service.submit({
       ...IDENTITY,
-      driver: "qoder-acp",
       selection: {
         providerId: "qoder",
         runtimeId: "acp",
@@ -362,7 +356,7 @@ test("Bridge keeps preflight internals private while public execution sessions i
   );
 
   const ready = await service.preflight({
-    driver: "qoder-acp",
+    selection: providerSelection(),
     trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
   });
   assert.equal(ready.driver, "qoder-acp");
@@ -375,7 +369,7 @@ test("Bridge keeps preflight internals private while public execution sessions i
 
   const started = await service.submit({
     ...IDENTITY,
-    driver: "qoder-acp",
+    selection: providerSelection(),
     trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
     preflightId: ready.preflightId,
     configurationDigest: ready.configuration.configurationDigest,
