@@ -135,11 +135,12 @@ saved fact.**
   visual anchor and screen offset, and zoom. It must not restore Caret, Range,
   Focus or a native editing session, and it must not migrate the last comment
   layout as proof that the new revision has already been measured. The old
-  iframe remains the visible, inert authority while the candidate is prepared
-  and positioned; the candidate is promoted only after its layout and restored
-  reading position are within the handoff tolerance, then the old iframe is
-  retired on the next frame. This is a presentation handoff only, not Runtime
-  DOM persistence or Script-state migration.
+  iframe remains the visible, interactive authority while the candidate is
+  prepared and restores its own iframe reading position. One commit then
+  switches Active identity and visibility together; failure before that commit
+  discards only the Candidate. The old iframe is retired on the next frame.
+  This is a presentation handoff only, not Runtime DOM persistence or
+  Script-state migration.
 - Every completed operation materializes complete next HTML before ordinary
   autosave/Hash/CAS persistence. Reopen reads that HTML and reruns Script to
   produce ECharts, Canvas and other runtime output afresh.

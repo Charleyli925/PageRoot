@@ -313,13 +313,20 @@ Rules:
   also fails, the last-known-good frame stays visible but read-only while reload
   and export remain available. Working HTML never rolls back.
 - `RuntimeFrameCoordinator` uses exactly two fixed DOM slots. Candidate
-  preparation never changes the visible active slot; promotion flips the slot
-  roles only after source/runtime proof and hidden positioning succeed, then
-  clears the former active document on the next animation frame. A stale
-  callback cannot act after its slot lease has been reused. Immediately before
-  positioning, `HtmlCanvasEditor` re-captures the small Presentation Anchor
-  from the still-visible Active frame so scrolling during preparation is the
-  current user intent rather than an old restoration target.
+  preparation never changes the visible active slot or Active identity.
+  Hidden Candidate positioning restores the candidate iframe reading position
+  without rewriting Editor Active refs or the shared outer scroller. One
+  commit then flips Active identity, slot roles and visibility together after
+  a final identity/source/native-edit check; failure before that commit
+  discards only the Candidate. The former active document is cleared on the
+  next animation frame. A stale callback cannot act after its slot lease has
+  been reused. Immediately before the commit, `HtmlCanvasEditor` re-captures
+  the small Presentation Anchor from the still-visible Active frame so
+  scrolling during preparation is the current user intent rather than an old
+  restoration target. A selected element becomes the viewport anchor only when
+  it is currently visible; otherwise the current reading region is kept.
+  Comment layout is measured from the currently visible frame after commit,
+  not migrated as a frozen proof that the new revision was already measured.
 - AI review state fields are orthogonal. Page, filter, visibility, navigation,
   page presentation, scroll and zoom actions may update only their own reducer field. Review
   navigation can reveal a hidden panel in both frames but cannot become a

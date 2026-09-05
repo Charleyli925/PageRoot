@@ -76,6 +76,40 @@ test("ADR 0065 no longer requires native session or comment-layout handoff resto
   assert.match(adr, /hidden Candidate/u);
   assert.match(adr, /Active has no second path that executes Script/u);
   assert.match(adr, /must not restore Caret, Range,\s+Focus or a native editing session/u);
+  assert.match(adr, /One commit then\s+switches Active identity and visibility together/u);
   assert.doesNotMatch(adr, /native Range\/Caret\/Focus state/u);
   assert.doesNotMatch(adr, /last complete comment layout/u);
+});
+
+test("Candidate commit rewrites Active last and has no snapshot rollback", () => {
+  const editor = source("app/components/HtmlCanvasEditor.tsx");
+  const promoteRuntimeCandidate = callbackBody(editor, "promoteRuntimeCandidate");
+  const commitRuntimeCandidate = callbackBody(editor, "commitRuntimeCandidate");
+
+  assert.doesNotMatch(editor, /type RuntimeActiveFrameSnapshot/u);
+  assert.doesNotMatch(editor, /rollbackRuntimeCandidatePromotion/u);
+  assert.doesNotMatch(editor, /previousActive:/u);
+  assert.match(editor, /type RuntimeSlotRetirement/u);
+  assert.match(editor, /retiredSlot: RuntimeSlotRetirement \| null/u);
+
+  assert.doesNotMatch(promoteRuntimeCandidate, /setActiveRuntimeSlotId\(/u);
+  assert.doesNotMatch(promoteRuntimeCandidate, /runtimeFrameRef\.current = candidate\.runtimeFrame/u);
+  assert.doesNotMatch(promoteRuntimeCandidate, /beginPositioning\(/u);
+  assert.match(promoteRuntimeCandidate, /commitRuntimeCandidateRef\.current\(candidate, iframe\)/u);
+
+  assert.match(commitRuntimeCandidate, /beginPositioning\(candidate\.attempt\)/u);
+  assert.match(commitRuntimeCandidate, /runtimeFrameRef\.current = candidate\.runtimeFrame/u);
+  assert.match(commitRuntimeCandidate, /setActiveRuntimeSlotId\(candidate\.attempt\.slotId\)/u);
+  assert.match(commitRuntimeCandidate, /latestSourceProjectionRef\.current\.source !== candidate\.source/u);
+  assert.match(commitRuntimeCandidate, /activeNativeEditRef\.current/u);
+});
+
+test("reading-position restore is shared and comment layout is not frozen across Frames", () => {
+  const editor = source("app/components/HtmlCanvasEditor.tsx");
+  const spec = source("tests/e2e/electron/electron-edit-runtime.spec.mjs");
+  assert.match(editor, /applyReadingPosition\(/u);
+  assert.match(editor, /correctReadingPositionOnce\(/u);
+  assert.match(editor, /selectedVisible \? selectedAnchor/u);
+  assert.doesNotMatch(editor, /lastValidCommentLayoutRef/u);
+  assert.doesNotMatch(spec, /positioningRafSequences\.size\)\.toBeGreaterThanOrEqual\(2\)/u);
 });

@@ -551,10 +551,12 @@ positioning result must prove the current candidate identity before changing
 state; only the latest candidate may publish `ready`, `rejected` or `failed`.
 The coordinator also owns the last-known-good frame identity and the native-edit
 transaction gate; React owns only the fenced slot DOM, viewport and Selection
-effects. Candidate Script runs while its slot is hidden; after validation and
-immediately before positioning React re-captures the minimal anchor from the
-still-visible Active frame, so Candidate-time scrolling or reselection replaces
-the older launch snapshot. After minimal positioning, visibility changes atomically and the former
+effects. Candidate Script runs while its slot is hidden; after validation React
+positions that Candidate iframe without rewriting Active identity. Immediately
+before the commit it re-captures the minimal anchor from the still-visible
+Active frame, so Candidate-time scrolling or reselection replaces the older
+launch snapshot. One commit then changes Active identity and visibility
+together; failure before that commit discards only the Candidate. The former
 active slot is cleared to an inert empty document on the next frame. A user
 Native Edit or IME composition may let a candidate prepare but
 cannot promote or retire a browsing context. Promotion waits until that
