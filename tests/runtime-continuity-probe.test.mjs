@@ -92,6 +92,7 @@ function fakeWindow() {
 test("runtime continuity probe stays silent until tests enable it", () => {
   const { window, editor } = fakeWindow();
   attachRuntimeContinuityProbe(() => editor, window);
+  assert.equal(typeof window.__PAGEROOT_ENABLE_RUNTIME_CONTINUITY__, "function");
   recordRuntimeContinuityEvent("frameCreated", {}, window);
   assert.deepEqual(readRuntimeContinuityTrace(window).events, []);
 });

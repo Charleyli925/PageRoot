@@ -31,6 +31,10 @@ export type ContinuityTrace = {
   samples: ContinuityVisualSample[];
 };
 
+export function installRuntimeContinuityTestHooks(
+  target?: Window & typeof globalThis,
+): void;
+
 export function enableRuntimeContinuityProbe(
   target?: Window & typeof globalThis,
 ): ContinuityTrace & {

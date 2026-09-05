@@ -73,6 +73,15 @@ function isVisuallyPresentFrame(frame, target) {
   return true;
 }
 
+export function installRuntimeContinuityTestHooks(target = typeof window === "undefined" ? null : window) {
+  if (!target) return;
+  target.__PAGEROOT_ENABLE_RUNTIME_CONTINUITY__ = () => enableRuntimeContinuityProbe(target);
+  target.__PAGEROOT_READ_RUNTIME_CONTINUITY__ = () => readRuntimeContinuityTrace(target);
+  target.__PAGEROOT_SUMMARIZE_RUNTIME_CONTINUITY__ = () => (
+    summarizeRuntimeContinuity(readRuntimeContinuityTrace(target))
+  );
+}
+
 export function enableRuntimeContinuityProbe(target = window) {
   const state = readState(target);
   state.enabled = true;
@@ -86,17 +95,17 @@ export function attachRuntimeContinuityProbe(
 ) {
   const state = readState(target);
   state.getRoot = getRoot;
-  target.__PAGEROOT_ENABLE_RUNTIME_CONTINUITY__ = () => enableRuntimeContinuityProbe(target);
-  target.__PAGEROOT_READ_RUNTIME_CONTINUITY__ = () => readRuntimeContinuityTrace(target);
-  target.__PAGEROOT_SUMMARIZE_RUNTIME_CONTINUITY__ = () => (
-    summarizeRuntimeContinuity(readRuntimeContinuityTrace(target))
-  );
+  installRuntimeContinuityTestHooks(target);
   startVisualLoop(target);
   return () => {
     if (state.getRoot === getRoot) state.getRoot = null;
     if (state.raf != null) target.cancelAnimationFrame(state.raf);
     state.raf = null;
   };
+}
+
+if (typeof window !== "undefined") {
+  installRuntimeContinuityTestHooks(window);
 }
 
 export function recordRuntimeContinuityEvent(

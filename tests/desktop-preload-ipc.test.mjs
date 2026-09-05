@@ -371,6 +371,18 @@ test("preload exposes one narrow UI-preferences get/record port", async () => {
   assert.deepEqual(Object.keys(uiPreferences).sort(), ["get", "record"]);
 });
 
+test("preload exposes runtime commit hooks only for explicit E2E launches", async () => {
+  const ordinary = await loadPreloadApis(async () => success(null), {
+    env: { PAGEROOT_E2E: "1" },
+  });
+  assert.equal(ordinary.runtime.diagnostics.e2eRuntimeCommitHooks, false);
+
+  const hooked = await loadPreloadApis(async () => success(null), {
+    env: { PAGEROOT_E2E: "1", PAGEROOT_E2E_RUNTIME_COMMIT_HOOKS: "1" },
+  });
+  assert.equal(hooked.runtime.diagnostics.e2eRuntimeCommitHooks, true);
+});
+
 test("preload hides the UI-preferences port during ordinary E2E launches", async () => {
   const { uiPreferences } = await loadPreloadApis(async () => success({}), {
     env: { PAGEROOT_E2E: "1" },

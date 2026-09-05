@@ -112,6 +112,10 @@ test("seeded faults keep a Draft canary that would kill the corresponding owner"
       `${fault.id} killer ${fault.killer}`,
     );
   }
+  assert.deepEqual(
+    SEEDED_FAULTS.filter((fault) => fault.detection === "electron-live-canary").map((fault) => fault.id),
+    ["active-iframe-cleared", "candidate-created-during-edit"],
+  );
 });
 
 test("duplicate Stable IDs fail closed in the production source index", () => {

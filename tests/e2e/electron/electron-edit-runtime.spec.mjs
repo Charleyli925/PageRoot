@@ -25,13 +25,546 @@ import {
   tmpdir,
   writeFileSync,
 } from "./electron-native-harness.mjs";
-import {
-  armRuntimeHandoffSamples,
-  assertRuntimeCandidateReused,
-  assertRuntimeHandoff,
-  parserPreclaimFixture,
-  withRuntimeProject,
-} from "./electron-runtime-helpers.mjs";
+import { queuedStaticFallbackOracle } from "./queued-static-fallback-oracle.mjs";
+
+async function withRuntimeProject(prefix, files, run, launchOptions = {}) {
+  const sourceDirectory = mkdtempSync(path.join(tmpdir(), prefix));
+  const sourcePath = path.join(sourceDirectory, "runtime-report.html");
+  for (const [relativePath, content] of Object.entries(files)) {
+    const targetPath = path.join(sourceDirectory, relativePath);
+    mkdirSync(path.dirname(targetPath), { recursive: true });
+    writeFileSync(targetPath, content, "utf8");
+  }
+  let electronApp = null;
+  let isolatedUserData = null;
+  try {
+    const launched = await launchPageRoot({
+      activeSourcePath: sourcePath,
+      ...launchOptions,
+    });
+    electronApp = launched.electronApp;
+    isolatedUserData = launched.isolatedUserData;
+    await run({ ...launched, sourcePath, sourceDirectory });
+  } finally {
+    if (electronApp && isolatedUserData) {
+      await stopPageRoot(electronApp, isolatedUserData);
+    }
+    removeValidatedTemporaryDirectory(sourceDirectory, prefix);
+  }
+}
+
+async function armRuntimeCommitHold(page) {
+  await page.evaluate(() => {
+    window.__PAGEROOT_E2E_RUNTIME_COMMIT_RELEASES__ = [];
+  });
+}
+
+async function waitForHeldRuntimeCommit(page) {
+  await expect.poll(() => page.evaluate(() => (
+    window.__PAGEROOT_E2E_RUNTIME_COMMIT_RELEASES__?.length || 0
+  ))).toBeGreaterThan(0);
+}
+
+async function releaseHeldRuntimeCommits(page) {
+  await page.evaluate(() => {
+    const releases = window.__PAGEROOT_E2E_RUNTIME_COMMIT_RELEASES__ || [];
+    window.__PAGEROOT_E2E_RUNTIME_COMMIT_RELEASES__ = undefined;
+    releases.forEach((release) => release());
+  });
+}
+
+async function runtimeContractSnapshot(page) {
+  return page.evaluate(() => {
+    const editor = document.querySelector('[data-testid="html-canvas-editor"]');
+    return {
+      degradation: editor?.getAttribute("data-runtime-degradation") || "none",
+      candidateId: editor?.getAttribute("data-runtime-candidate-id") || null,
+      candidatePhase: editor?.getAttribute("data-runtime-candidate-phase") || null,
+      nativeStartStatus: editor?.getAttribute("data-native-start-status") || null,
+      renderVerified: editor?.getAttribute("data-render-verified") || null,
+      held: window.__PAGEROOT_E2E_RUNTIME_COMMIT_RELEASES__?.length || 0,
+    };
+  });
+}
+
+const QUEUED_STATIC_CASE = "runtime-queued-static-latest";
+const QUEUED_STATIC_R0 = "静态候选必须跟随最新源码";
+const QUEUED_STATIC_R2 = "最新来源";
+
+function queuedStaticFixtureHtml() {
+  return `<!doctype html>
+<html><head><title>Runtime queued static latest</title></head><body>
+  <main>
+    <p data-native-case="${QUEUED_STATIC_CASE}">${QUEUED_STATIC_R0}</p>
+  </main>
+  <script>
+    if (document.querySelectorAll('[data-native-case="${QUEUED_STATIC_CASE}"]')
+      .length > 1) {
+      throw new Error('synthetic queued Runtime activation failure');
+    }
+  </script>
+</body></html>`;
+}
+
+async function duplicateQueuedStaticWorkingHtml(page, sourcePath) {
+  const workingCopyPath = await managedWorkingCopyPath(page, sourcePath);
+  const editor = page.getByTestId("html-canvas-editor").filter({ visible: true }).first();
+  await expect(editor).toHaveAttribute("data-render-verified", "true");
+  const frame = await currentEditorFrame(page);
+  const target = frame.locator(`[data-native-case="${QUEUED_STATIC_CASE}"]`).first();
+  await target.click();
+  const duplicateButton = page.getByRole("button", { name: "复制元素", exact: true });
+  await expect(duplicateButton).toBeVisible();
+  await duplicateButton.click();
+  await expect.poll(() => (
+    readFileSync(workingCopyPath, "utf8")
+      .split(`data-native-case="${QUEUED_STATIC_CASE}"`).length - 1
+  )).toBeGreaterThanOrEqual(2);
+  return { editor, workingCopyPath };
+}
+
+async function collectQueuedStaticFallbackProof(page, workingCopyPath) {
+  const editor = page.getByTestId("html-canvas-editor").filter({ visible: true }).first();
+  const active = editor.locator('iframe[data-runtime-slot-role="active"]');
+  const frame = await currentEditorFrame(page);
+  const targets = frame.locator(`[data-native-case="${QUEUED_STATIC_CASE}"]`);
+  return {
+    diskHtml: readFileSync(workingCopyPath, "utf8"),
+    visibleTexts: await targets.allTextContents(),
+    sandbox: await active.getAttribute("sandbox"),
+    expectedVisibleCount: await targets.count(),
+  };
+}
+
+async function visibleActiveFrameProof(page, nativeCase) {
+  return page.evaluate((targetCase) => {
+    const editor = document.querySelector('[data-testid="html-canvas-editor"]');
+    const activeFrame = Array.from(editor?.querySelectorAll("iframe") || [])
+      .find((frame) => !frame.hasAttribute("data-frame-role"));
+    const target = activeFrame?.contentDocument?.querySelector(
+      `[data-native-case="${targetCase}"]`,
+    );
+    return {
+      renderVerified: editor?.getAttribute("data-render-verified") || null,
+      visible: Boolean(
+        activeFrame instanceof HTMLIFrameElement
+        && activeFrame.isConnected
+        && getComputedStyle(activeFrame).visibility === "visible"
+      ),
+      text: target?.textContent?.trim() || "",
+      nativeStartStatus: editor?.getAttribute("data-native-start-status") || null,
+    };
+  }, nativeCase);
+}
+
+async function armRuntimeHandoffSamples(page) {
+  await page.evaluate(() => {
+    const editor = document.querySelector('[data-testid="html-canvas-editor"]');
+    const oldFrame = editor?.querySelector('iframe[title*="HTML"]');
+    if (!editor || !(oldFrame instanceof HTMLIFrameElement)) {
+      throw new Error("The active Edit iframe was not available before the runtime handoff.");
+    }
+    const samples = [];
+    window.__PAGEROOT_RUNTIME_HANDOFF_SAMPLES__ = samples;
+    window.__PAGEROOT_RUNTIME_CANDIDATE_FRAME__ = null;
+    window.__PAGEROOT_RUNTIME_CANDIDATE_FRAMES__ = Object.create(null);
+    window.__PAGEROOT_RUNTIME_OLD_FRAME__ = oldFrame;
+    window.__PAGEROOT_RUNTIME_SLOT_A__ = editor.querySelector(
+      'iframe[data-runtime-slot="a"]',
+    );
+    window.__PAGEROOT_RUNTIME_SLOT_B__ = editor.querySelector(
+      'iframe[data-runtime-slot="b"]',
+    );
+    window.__PAGEROOT_RUNTIME_HANDOFF_ACTIVE__ = true;
+    const reviewStage = editor.closest(".review-scroll-stage");
+    const sample = (rafSequence = null) => {
+      if (!window.__PAGEROOT_RUNTIME_HANDOFF_ACTIVE__) return;
+      const candidate = editor.querySelector('iframe[data-frame-role="runtime-candidate"]');
+      if (candidate) {
+        const generation = candidate.getAttribute("data-frame-generation");
+        if (generation) {
+          window.__PAGEROOT_RUNTIME_CANDIDATE_FRAMES__[generation] = candidate;
+          window.__PAGEROOT_RUNTIME_CANDIDATE_FRAME__ = candidate;
+        }
+      }
+      const candidateFrame = window.__PAGEROOT_RUNTIME_CANDIDATE_FRAME__;
+      const activeFrame = Array.from(editor.querySelectorAll("iframe"))
+        .find((frame) => !frame.hasAttribute("data-frame-role"));
+      const activeStyle = activeFrame ? getComputedStyle(activeFrame) : null;
+      const candidateStyle = candidateFrame ? getComputedStyle(candidateFrame) : null;
+      const candidateGeneration = candidateFrame?.getAttribute("data-frame-generation")
+        || candidate?.getAttribute("data-frame-generation")
+        || null;
+      const selected = activeFrame?.contentDocument
+        ?.querySelector("[data-html-canvas-selected]");
+      const selectedRect = selected?.getBoundingClientRect() || null;
+      const activeFrameRect = activeFrame?.getBoundingClientRect() || null;
+      const stageRect = reviewStage?.getBoundingClientRect() || null;
+      const activeSelection = activeFrame?.contentDocument?.getSelection();
+      const activeScrollingElement = activeFrame?.contentDocument?.scrollingElement;
+      const sharedScrollElement = reviewStage;
+      let caretOffsetY = null;
+      if (activeSelection?.isCollapsed && activeSelection.focusNode) {
+        try {
+          const range = activeFrame.contentDocument.createRange();
+          range.setStart(activeSelection.focusNode, activeSelection.focusOffset);
+          range.collapse(true);
+          caretOffsetY = range.getBoundingClientRect().top;
+        } catch {
+          caretOffsetY = null;
+        }
+      }
+      const visibleFrames = Array.from(editor.querySelectorAll("iframe"))
+        .filter((frame) => frame.isConnected && getComputedStyle(frame).visibility === "visible")
+        .map((frame) => ({
+          frame,
+          opacity: Number(getComputedStyle(frame).opacity),
+          zIndex: Number(getComputedStyle(frame).zIndex) || 0,
+        }))
+        .filter(({ opacity }) => opacity > 0.01)
+        .sort((left, right) => right.zIndex - left.zIndex);
+      const topFrame = visibleFrames[0]?.frame || null;
+      const topFrameStyle = topFrame ? getComputedStyle(topFrame) : null;
+      const selectionAnchorOffset = activeSelection?.anchorOffset ?? null;
+      const selectionFocusOffset = activeSelection?.focusOffset ?? null;
+      samples.push({
+        rafSequence,
+        runtimeSlotCount: editor.querySelectorAll("iframe[data-runtime-slot]").length,
+        candidateGeneration,
+        candidateVisibility: candidateFrame ? candidateStyle?.visibility : null,
+        candidateOpacity: candidateFrame ? candidateStyle?.opacity : null,
+        candidatePointerEvents: candidateFrame ? candidateStyle?.pointerEvents : null,
+        newFrameOpacity: candidateFrame ? candidateStyle?.opacity : null,
+        newFramePointerEvents: candidateFrame ? candidateStyle?.pointerEvents : null,
+        oldConnected: oldFrame.isConnected,
+        oldGeneration: oldFrame.getAttribute("data-frame-generation"),
+        oldSlotRole: oldFrame.getAttribute("data-runtime-slot-role"),
+        oldBodyChildCount: oldFrame.contentDocument?.body?.childElementCount ?? null,
+        oldScriptCount: oldFrame.contentDocument?.querySelectorAll("script").length ?? null,
+        oldBootstrapCount: oldFrame.contentDocument?.querySelectorAll(
+          "[data-pageroot-edit-runtime-bootstrap]",
+        ).length ?? null,
+        oldRenderVerified: editor.getAttribute("data-render-verified"),
+        oldVisibility: oldFrame.isConnected ? getComputedStyle(oldFrame).visibility : null,
+        oldOpacity: oldFrame.isConnected ? getComputedStyle(oldFrame).opacity : null,
+        handoffState: editor.getAttribute("data-runtime-handoff"),
+        oldSelectedCount: oldFrame.contentDocument
+          ?.querySelectorAll("[data-html-canvas-selected]").length || 0,
+        toolbarVisible: Boolean(
+          editor.querySelector('[role="toolbar"]')?.getClientRects().length,
+        ),
+        activeGeneration: activeFrame?.getAttribute("data-frame-generation") || null,
+        activeVisibility: activeStyle?.visibility || null,
+        activeOpacity: activeStyle?.opacity || null,
+        activePointerEvents: activeStyle?.pointerEvents || null,
+        topFrameGeneration: topFrame?.getAttribute("data-frame-generation") || null,
+        topFrameIsActive: topFrame === activeFrame,
+        topFrameVisibility: topFrameStyle?.visibility || null,
+        topFrameOpacity: topFrameStyle?.opacity || null,
+        topFramePointerEvents: topFrameStyle?.pointerEvents || null,
+        iframeScrollY: activeFrame?.contentWindow?.scrollY ?? null,
+        iframeScrollX: activeFrame?.contentWindow?.scrollX ?? null,
+        sharedScrollTop: sharedScrollElement?.scrollTop ?? null,
+        sharedScrollLeft: sharedScrollElement?.scrollLeft ?? null,
+        iframeWidth: activeFrame?.clientWidth ?? null,
+        iframeHeight: activeFrame?.clientHeight ?? null,
+        documentClientWidth: activeScrollingElement?.clientWidth ?? null,
+        documentClientHeight: activeScrollingElement?.clientHeight ?? null,
+        documentScrollWidth: activeScrollingElement?.scrollWidth ?? null,
+        documentScrollHeight: activeScrollingElement?.scrollHeight ?? null,
+        sharedClientWidth: sharedScrollElement?.clientWidth ?? null,
+        sharedClientHeight: sharedScrollElement?.clientHeight ?? null,
+        sharedScrollWidth: sharedScrollElement?.scrollWidth ?? null,
+        sharedScrollHeight: sharedScrollElement?.scrollHeight ?? null,
+        selectedStableId: selected?.getAttribute("data-pageroot-id") || null,
+        selectionStableId: selected?.getAttribute("data-pageroot-id") || null,
+        viewportAnchorStableId: selected?.getAttribute("data-pageroot-id") || null,
+        selectionAnchorOffset,
+        selectionFocusOffset,
+        selectionCollapsed: activeSelection?.isCollapsed ?? null,
+        viewportAnchorOffsetY: selectedRect?.top ?? null,
+        selectedTop: selectedRect?.top ?? null,
+        selectedScreenTop: selectedRect && activeFrameRect
+          ? activeFrameRect.top + selectedRect.top
+          : null,
+        selectedStageTop: selectedRect && activeFrameRect && stageRect
+          ? activeFrameRect.top - stageRect.top + selectedRect.top
+          : null,
+        caretOffsetY,
+        activeElement: activeFrame?.contentDocument?.activeElement?.getAttribute?.(
+          "data-native-case",
+        ) || activeFrame?.contentDocument?.activeElement?.tagName || null,
+        focused: Boolean(
+          activeFrame?.contentDocument?.activeElement
+          && activeFrame.contentDocument.activeElement !== activeFrame.contentDocument.body,
+        ),
+        layoutReady: editor.getAttribute("data-runtime-layout-ready") === "true",
+      });
+    };
+    const observer = new MutationObserver(() => sample(null));
+    observer.observe(editor, { attributes: true, childList: true, subtree: true });
+    window.__PAGEROOT_RUNTIME_HANDOFF_OBSERVER__ = observer;
+    let animationFrame = 0;
+    let rafSequence = 0;
+    const sampleLoop = () => {
+      rafSequence += 1;
+      sample(rafSequence);
+      if (window.__PAGEROOT_RUNTIME_HANDOFF_ACTIVE__) {
+        animationFrame = requestAnimationFrame(sampleLoop);
+      }
+    };
+    window.__PAGEROOT_RUNTIME_HANDOFF_ANIMATION_FRAME__ = () => cancelAnimationFrame(animationFrame);
+    sampleLoop();
+  });
+}
+
+async function assertRuntimeHandoff(page, {
+  requireActiveChrome = false,
+  expectPromotion = true,
+  assertVisualContinuity = false,
+  expectedViewportSample,
+} = {}) {
+  await expect.poll(() => page.evaluate(() => (
+    window.__PAGEROOT_RUNTIME_HANDOFF_SAMPLES__ || []
+  ).some((sample) => sample.candidateGeneration))).toBe(true);
+  if (expectPromotion) {
+    try {
+      await expect.poll(() => page.evaluate(() => (
+        window.__PAGEROOT_RUNTIME_HANDOFF_SAMPLES__ || []
+      ).some((sample) => (
+        sample.handoffState === "active"
+        && sample.activeGeneration === sample.candidateGeneration
+      )))).toBe(true);
+    } catch (cause) {
+      const diagnostics = await page.evaluate(() => ({
+        attributes: Object.fromEntries(
+          Array.from(document.querySelector('[data-testid="html-canvas-editor"]')?.attributes || [])
+            .filter((attribute) => attribute.name.startsWith("data-"))
+            .map((attribute) => [attribute.name, attribute.value]),
+        ),
+        samples: window.__PAGEROOT_RUNTIME_HANDOFF_SAMPLES__ || [],
+      }));
+      throw new Error(`${cause.message}\nRuntime handoff diagnostics: ${JSON.stringify(diagnostics)}`);
+    }
+    await expect.poll(() => page.evaluate(() => {
+      const samples = window.__PAGEROOT_RUNTIME_HANDOFF_SAMPLES__ || [];
+      const firstActiveRaf = samples.find((sample) => (
+        Number.isInteger(sample.rafSequence)
+        && sample.handoffState === "active"
+        && sample.activeGeneration === sample.candidateGeneration
+      ));
+      return Boolean(
+        firstActiveRaf
+        && samples.some((sample) => (
+          Number.isInteger(sample.rafSequence)
+          && sample.rafSequence >= firstActiveRaf.rafSequence + 2
+        ))
+      );
+    })).toBe(true);
+  } else {
+    // A failed candidate is observed at the handoff boundary. Do not wait for
+    // the runtime session's separate static-fallback policy, because that
+    // would hide whether the still-authoritative old frame stayed visible.
+    await expect.poll(() => page.evaluate(() => (
+      window.__PAGEROOT_RUNTIME_HANDOFF_SAMPLES__ || []
+    ).some((sample) => sample.handoffState === "preparing"))).toBe(true);
+  }
+  const handoffSamples = await page.evaluate(() => {
+    window.__PAGEROOT_RUNTIME_HANDOFF_ACTIVE__ = false;
+    window.__PAGEROOT_RUNTIME_HANDOFF_ANIMATION_FRAME__?.();
+    window.__PAGEROOT_RUNTIME_HANDOFF_OBSERVER__?.disconnect();
+    return window.__PAGEROOT_RUNTIME_HANDOFF_SAMPLES__ || [];
+  });
+  const candidateSamples = handoffSamples.filter((sample) => sample.candidateGeneration);
+  expect(candidateSamples.length).toBeGreaterThan(0);
+  const preparingSamples = candidateSamples.filter((sample) => sample.handoffState === "preparing");
+  expect(preparingSamples.length).toBeGreaterThan(0);
+  const activeFrameStayedManaged = preparingSamples.some((sample) => (
+    sample.oldConnected
+    && sample.oldVisibility === "visible"
+    && sample.oldRenderVerified === "true"
+    && sample.candidateVisibility === "visible"
+    && Number(sample.candidateOpacity) === 0
+    && sample.candidatePointerEvents === "none"
+    && sample.oldGeneration !== sample.candidateGeneration
+  ));
+  if (!activeFrameStayedManaged) {
+    throw new Error(`Runtime preparing samples: ${JSON.stringify(preparingSamples)}`);
+  }
+  if (requireActiveChrome) {
+    const activeChromeStayedIntact = preparingSamples.some((sample) => (
+      sample.oldSelectedCount === 1 && sample.toolbarVisible
+    ));
+    if (!activeChromeStayedIntact) {
+      throw new Error(`Runtime preparing chrome samples: ${JSON.stringify(preparingSamples)}`);
+    }
+  }
+  if (expectPromotion) {
+    // Positioning may be a single commit frame. The contract is the first
+    // visible Active location and old-slot cleanup, not a minimum number of
+    // half-switched frames.
+    const positioningRafSamples = candidateSamples.filter((sample) => (
+      Number.isInteger(sample.rafSequence)
+      && sample.handoffState === "positioning"
+    ));
+    if (positioningRafSamples.length > 0) {
+      expect(positioningRafSamples.some((sample) => (
+        sample.oldConnected
+        && sample.oldVisibility === "visible"
+        && Number(sample.oldOpacity) === 1
+      ))).toBe(true);
+    }
+
+    const firstPreparingSample = preparingSamples.find((sample) => (
+      sample.viewportAnchorStableId
+      || sample.selectionStableId
+      || Number.isFinite(sample.iframeScrollY)
+    ));
+    expect(firstPreparingSample).toBeTruthy();
+    expect(firstPreparingSample.viewportAnchorStableId).toBeTruthy();
+    expect(firstPreparingSample.selectionStableId).toBeTruthy();
+    const handoffBaselineSample = expectedViewportSample || [...handoffSamples].reverse().find((sample) => (
+      !sample.candidateGeneration
+      && sample.selectionStableId === firstPreparingSample.selectionStableId
+      && Number.isFinite(sample.iframeScrollY)
+    )) || firstPreparingSample;
+    expect(handoffBaselineSample.viewportAnchorStableId).toBeTruthy();
+    expect(handoffBaselineSample.selectionStableId).toBeTruthy();
+
+    const activeStateSamples = candidateSamples.filter((sample) => (
+      sample.handoffState === "active"
+    ));
+    const isTopmostActiveSample = (sample) => (
+      sample.activeGeneration === sample.candidateGeneration
+      && sample.activeVisibility === "visible"
+      && Number(sample.activeOpacity) === 1
+      && sample.activePointerEvents === "auto"
+      && sample.topFrameGeneration === sample.candidateGeneration
+      && sample.topFrameIsActive
+      && sample.topFrameVisibility === "visible"
+      && Number(sample.topFrameOpacity) === 1
+      && sample.topFramePointerEvents === "auto"
+      && sample.layoutReady
+    );
+    const positionMatches = (actual, expected) => (
+      Number.isFinite(expected)
+        && Number.isFinite(actual)
+        && Math.abs(actual - expected) <= 8
+    );
+    const activeViewportMatches = (sample) => {
+      if (
+        sample.viewportAnchorStableId !== handoffBaselineSample.viewportAnchorStableId
+        || sample.selectionStableId !== handoffBaselineSample.selectionStableId
+      ) return false;
+      if (assertVisualContinuity) {
+        return positionMatches(
+          sample.selectedScreenTop,
+          handoffBaselineSample.selectedScreenTop,
+        );
+      }
+      return Number.isFinite(sample.selectedTop)
+        && Number.isFinite(sample.iframeHeight)
+        && sample.selectedTop >= 0
+        && sample.selectedTop < sample.iframeHeight;
+    };
+    const firstTopmostActiveIndex = activeStateSamples.findIndex(isTopmostActiveSample);
+    expect(firstTopmostActiveIndex).toBeGreaterThanOrEqual(0);
+    const firstTopmostActiveSample = activeStateSamples[firstTopmostActiveIndex];
+    if (!activeViewportMatches(firstTopmostActiveSample)) {
+      throw new Error(`Runtime presentation anchor mismatch: ${JSON.stringify({
+        baseline: handoffBaselineSample,
+        promoted: firstTopmostActiveSample,
+      })}`);
+    }
+    expect(firstTopmostActiveSample.viewportAnchorStableId)
+      .toBe(handoffBaselineSample.viewportAnchorStableId);
+    expect(firstTopmostActiveSample.selectionStableId)
+      .toBe(handoffBaselineSample.selectionStableId);
+    expect(firstTopmostActiveSample.layoutReady).toBe(true);
+    expect(candidateSamples.every((sample) => sample.runtimeSlotCount === 2)).toBe(true);
+    const firstActiveRaf = activeStateSamples.find((sample) => (
+      Number.isInteger(sample.rafSequence)
+      && isTopmostActiveSample(sample)
+    ));
+    expect(firstActiveRaf).toBeTruthy();
+    const oldSlotClearedWithinTwoFrames = candidateSamples.some((sample) => (
+      Number.isInteger(sample.rafSequence)
+      && sample.rafSequence >= firstActiveRaf.rafSequence
+      && sample.rafSequence <= firstActiveRaf.rafSequence + 2
+      && sample.oldSlotRole === "inactive"
+      && sample.oldVisibility === "hidden"
+      && Number(sample.oldOpacity) === 0
+      && (sample.oldBodyChildCount === 0 || sample.oldBodyChildCount == null)
+      && (sample.oldScriptCount === 0 || sample.oldScriptCount == null)
+      && (sample.oldBootstrapCount === 0 || sample.oldBootstrapCount == null)
+    ));
+    if (!oldSlotClearedWithinTwoFrames) {
+      throw new Error(`Runtime old slot was not cleared within two frames: ${JSON.stringify(
+        candidateSamples.filter((sample) => Number.isInteger(sample.rafSequence)),
+      )}`);
+    }
+    expect(Number.isFinite(firstTopmostActiveSample.selectedTop)).toBe(true);
+    expect(firstTopmostActiveSample.selectedTop).toBeGreaterThanOrEqual(0);
+    expect(firstTopmostActiveSample.selectedTop)
+      .toBeLessThan(firstTopmostActiveSample.iframeHeight);
+    if (assertVisualContinuity) {
+      expect(Math.abs(
+        firstTopmostActiveSample.selectedScreenTop - handoffBaselineSample.selectedScreenTop,
+      )).toBeLessThanOrEqual(8);
+    }
+  }
+  return handoffSamples;
+}
+
+async function assertRuntimeCandidateReused(page) {
+  await expect.poll(() => page.evaluate(() => {
+    const editor = document.querySelector('[data-testid="html-canvas-editor"]');
+    const slots = Array.from(editor?.querySelectorAll('iframe[data-runtime-slot]') || []);
+    const active = slots.find((frame) => (
+      frame.getAttribute("data-runtime-slot-role") === "active"
+    ));
+    const inactive = slots.find((frame) => (
+      frame.getAttribute("data-runtime-slot-role") === "inactive"
+    ));
+    return Boolean(
+      slots.length === 2
+      && slots.filter((frame) => frame.getAttribute("data-runtime-slot") === "a").length === 1
+      && slots.filter((frame) => frame.getAttribute("data-runtime-slot") === "b").length === 1
+      && window.__PAGEROOT_RUNTIME_SLOT_A__ === slots.find(
+        (frame) => frame.getAttribute("data-runtime-slot") === "a",
+      )
+      && window.__PAGEROOT_RUNTIME_SLOT_B__ === slots.find(
+        (frame) => frame.getAttribute("data-runtime-slot") === "b",
+      )
+      && window.__PAGEROOT_RUNTIME_SLOT_A__?.isConnected
+      && window.__PAGEROOT_RUNTIME_SLOT_B__?.isConnected
+      && active
+      && active.isConnected
+      && active === window.__PAGEROOT_RUNTIME_CANDIDATE_FRAME__
+      && active.contentDocument?.documentElement
+      && active.contentDocument.querySelectorAll(
+        "[data-pageroot-edit-runtime-bootstrap]",
+      ).length === 1
+      && inactive
+      && inactive.contentDocument?.body
+      && inactive.contentDocument.body.childElementCount === 0
+      && inactive.contentDocument.querySelectorAll("script").length === 0
+    );
+  })).toBe(true);
+}
+
+function parserPreclaimFixture() {
+  const futurePagerootId = "pr1_123456789abc4def8abc000000000006";
+  return `<!doctype html>
+<html data-pageroot-id="pr1_123456789abc4def8abc000000000001"><head data-pageroot-id="pr1_123456789abc4def8abc000000000002"><title data-pageroot-id="pr1_123456789abc4def8abc000000000003">Preclaim</title><script data-pageroot-id="pr1_123456789abc4def8abc000000000004">
+    const decoy = document.createElement('button');
+    decoy.id = 'runtime-preclaim-decoy';
+    decoy.textContent = '伪造源码按钮';
+    decoy.setAttribute('data-pageroot-id', '${futurePagerootId}');
+    decoy.setAttribute('data-pageroot-edit-runtime-source', '${futurePagerootId}');
+    document.documentElement.append(decoy);
+  </script></head><body data-pageroot-id="pr1_123456789abc4def8abc000000000005"><button id="future-source" data-native-case="runtime-preclaim" data-pageroot-id="${futurePagerootId}">真实源码按钮</button></body></html>`;
+}
 
 test("author script cannot preclaim a future parser-authored source object", {
   tag: ["@gate-smoke", "@smoke-editing"],
@@ -1406,26 +1939,20 @@ test("latest Runtime candidate wins across slow ECharts, native editing and stat
     await expect.poll(() => (
       readFileSync(workingCopyPath, "utf8").split('data-native-case="runtime-latest-wins"').length - 1
     )).toBeGreaterThanOrEqual(3);
-    await page.evaluate(() => {
-      const editorElement = document.querySelector('[data-testid="html-canvas-editor"]');
-      const activeFrame = editorElement?.querySelector('iframe:not([data-frame-role])');
-      const editTarget = activeFrame?.contentDocument?.querySelector(
-        '[data-native-case="runtime-latest-wins-text"]',
-      );
-      if (!(activeFrame instanceof HTMLIFrameElement)
-        || !(editTarget instanceof activeFrame.contentWindow.HTMLElement)) {
-        throw new Error("Latest-wins active heading is missing.");
-      }
-      const rect = editTarget.getBoundingClientRect();
-      const eventInit = {
-        bubbles: true,
-        cancelable: true,
-        clientX: rect.left + Math.max(1, rect.width / 2),
-        clientY: rect.top + Math.max(1, rect.height / 2),
-      };
-      editTarget.dispatchEvent(new MouseEvent("click", { ...eventInit, detail: 1 }));
-      editTarget.dispatchEvent(new MouseEvent("dblclick", { ...eventInit, detail: 2 }));
-    });
+    await expect.poll(() => editor.locator('iframe[data-frame-role="runtime-candidate"]').count())
+      .toBe(0);
+    await expect.poll(async () => (
+      await editor.getAttribute("data-runtime-degradation") || "none"
+    )).toBe("none");
+    // Duplicate replacement can still be settling the Active frame. Re-resolve
+    // and dblclick until Native Edit actually starts, instead of firing one
+    // synthetic MouseEvent into a frame that is about to be replaced.
+    await expect(async () => {
+      frame = await currentActiveRuntimeFrame();
+      const target = frame.locator('[data-native-case="runtime-latest-wins-text"]').first();
+      await target.dblclick();
+      await expect(target).toHaveAttribute("contenteditable", "true");
+    }).toPass({ timeout: 30_000, intervals: [250, 500, 1_000] });
     frame = await currentActiveRuntimeFrame();
     let heading = frame.locator('[data-native-case="runtime-latest-wins-text"]').first();
     await expect(heading).toHaveAttribute("contenteditable", "true");
@@ -1961,72 +2488,61 @@ test("a failed dynamic candidate promotes the latest Script-disabled static page
 test("a queued static fallback follows the latest Working HTML after Native Edit", {
   tag: ["@gate-smoke", "@smoke-editing"],
 }, async () => {
-  const html = `<!doctype html>
-<html><head><title>Runtime queued static latest</title></head><body>
-  <main>
-    <p data-native-case="runtime-queued-static-latest">静态候选必须跟随最新源码</p>
-  </main>
-  <script>
-    if (document.querySelectorAll('[data-native-case="runtime-queued-static-latest"]')
-      .length > 1) {
-      throw new Error('synthetic queued Runtime activation failure');
-    }
-  </script>
-</body></html>`;
-
   await withRuntimeProject("pageroot-runtime-queued-static-latest-e2e-", {
-    "runtime-report.html": html,
+    "runtime-report.html": queuedStaticFixtureHtml(),
   }, async ({ page, sourcePath }) => {
-    let { frame } = await loadedDiskFrame(
+    await loadedDiskFrame(page, sourcePath, QUEUED_STATIC_CASE);
+    await armRuntimeCommitHold(page);
+    const { editor, workingCopyPath } = await duplicateQueuedStaticWorkingHtml(
       page,
       sourcePath,
-      "runtime-queued-static-latest",
     );
-    const editor = page.getByTestId("html-canvas-editor").filter({ visible: true }).first();
-    const target = frame.locator(
-      '[data-native-case="runtime-queued-static-latest"]',
-    ).first();
-    await target.click();
-    await page.getByRole("button", { name: "复制元素", exact: true }).evaluate((button) => {
-      button.click();
-      const editorElement = document.querySelector('[data-testid="html-canvas-editor"]');
-      const activeFrame = editorElement?.querySelector('iframe:not([data-frame-role])');
-      const editTarget = activeFrame?.contentDocument?.querySelector(
-        '[data-native-case="runtime-queued-static-latest"]',
-      );
-      if (!(activeFrame instanceof HTMLIFrameElement)
-        || !(editTarget instanceof activeFrame.contentWindow.HTMLElement)) {
-        throw new Error("Queued-static Active target is missing.");
-      }
-      const rect = editTarget.getBoundingClientRect();
-      const eventInit = {
-        bubbles: true,
-        cancelable: true,
-        clientX: rect.left + Math.max(1, rect.width / 2),
-        clientY: rect.top + Math.max(1, rect.height / 2),
-      };
-      editTarget.dispatchEvent(new MouseEvent("click", { ...eventInit, detail: 1 }));
-      editTarget.dispatchEvent(new MouseEvent("dblclick", { ...eventInit, detail: 2 }));
-    });
-    await expect(editor).toHaveAttribute("data-runtime-candidate-id", /.+/u);
+    const r1 = readFileSync(workingCopyPath, "utf8");
+    expect(r1).toContain(QUEUED_STATIC_R0);
+    expect(r1).not.toContain(QUEUED_STATIC_R2);
 
-    frame = await currentEditorFrame(page);
-    const activeTarget = frame.locator(
-      '[data-native-case="runtime-queued-static-latest"]',
-    ).first();
-    await expect(activeTarget).toHaveAttribute("contenteditable", "true");
-    await expect(editor).toHaveAttribute(
-      "data-runtime-degradation",
-      "static-preparing",
-      { timeout: 12_000 },
+    await waitForHeldRuntimeCommit(page);
+    await expect.poll(() => runtimeContractSnapshot(page)).toEqual(
+      expect.objectContaining({
+        held: expect.any(Number),
+        degradation: "none",
+        renderVerified: "true",
+      }),
     );
+    expect((await runtimeContractSnapshot(page)).held).toBeGreaterThan(0);
+    const preparingNotice = page.getByTestId("edit-runtime-static-fallback");
+    if (await preparingNotice.count()) {
+      await preparingNotice.getByRole("button", { name: "关闭动态内容提示" }).click();
+      await expect(preparingNotice).toHaveCount(0);
+    }
+
+    let frame = await currentEditorFrame(page);
+    const activeTarget = frame.locator(`[data-native-case="${QUEUED_STATIC_CASE}"]`).first();
+    await activeTarget.dblclick();
     await expect(activeTarget).toHaveAttribute("contenteditable", "true");
+    await expect(activeTarget).toBeFocused();
+    await expect(editor).toHaveAttribute("data-native-start-status", "started");
+    await activeTarget.press("End");
+    await page.keyboard.insertText("x");
+    await expect(activeTarget).toContainText("x");
+    await page.keyboard.press("Backspace");
+    await expect(activeTarget).not.toContainText("x");
+
+    await expect(editor.locator('iframe[data-frame-role="runtime-candidate"]')).toHaveCount(0);
+    await expect.poll(async () => (
+      await editor.getAttribute("data-runtime-degradation") || "none"
+    )).toBe("none");
+
+    await releaseHeldRuntimeCommits(page);
+    await expect(activeTarget).toHaveAttribute("contenteditable", "true");
+    await expect(editor).toHaveAttribute("data-runtime-degradation", "static-preparing");
+    await expect(editor.locator('iframe[data-frame-role="runtime-candidate"]')).toHaveCount(0);
 
     const revisionBeforeLatestEdit = Number(await page.locator("[data-persist-state]").first()
       .getAttribute("data-persisted-revision"));
     await activeTarget.press("End");
-    await page.keyboard.insertText(" 最新来源");
-    await expect(activeTarget).toContainText("最新来源");
+    await page.keyboard.insertText(` ${QUEUED_STATIC_R2}`);
+    await expect(activeTarget).toContainText(QUEUED_STATIC_R2);
     const latestTextRevision = await expectCheckpointPersisted(page, revisionBeforeLatestEdit);
     await page.keyboard.press("Escape");
     await expect.poll(async () => {
@@ -2049,18 +2565,65 @@ test("a queued static fallback follows the latest Working HTML after Native Edit
       /^(?:preparing|positioning|active)$/u,
     );
     await expect(editor.locator('iframe[data-frame-role="runtime-candidate"]')).toHaveCount(0);
-    const staticFrame = await currentEditorFrame(page);
-    await expect(editor.locator('iframe[data-runtime-slot-role="active"]'))
-      .toHaveAttribute("sandbox", "allow-same-origin");
-    await expect(staticFrame.locator(
-      '[data-native-case="runtime-queued-static-latest"]',
-    ).first()).toContainText("最新来源");
-    await expect(staticFrame.locator(
-      '[data-native-case="runtime-queued-static-latest"]',
-    )).toHaveCount(2);
-    const workingCopyPath = await managedWorkingCopyPath(page, sourcePath);
-    const latestWorkingSource = readFileSync(workingCopyPath, "utf8");
-    expect(latestWorkingSource).toContain("最新来源");
+    queuedStaticFallbackOracle({
+      ...(await collectQueuedStaticFallbackProof(page, workingCopyPath)),
+      expectedSnippet: QUEUED_STATIC_R2,
+      expectedVisibleCount: 2,
+    });
+
+    const staticNotice = page.getByTestId("edit-runtime-static-fallback");
+    if (await staticNotice.count()) {
+      await staticNotice.getByRole("button", { name: "关闭动态内容提示" }).click();
+      await expect(staticNotice).toHaveCount(0);
+    }
+    frame = await currentEditorFrame(page);
+    const staticTarget = frame.locator(`[data-native-case="${QUEUED_STATIC_CASE}"]`).first();
+    await staticTarget.dblclick();
+    await expect(staticTarget).toHaveAttribute("contenteditable", "true");
+    await expect(staticTarget).toContainText(QUEUED_STATIC_R2);
+    await page.keyboard.press("Escape");
+  }, {
+    injectedEnv: {
+      PAGEROOT_E2E_RUNTIME_COMMIT_HOOKS: "1",
+    },
+  });
+});
+
+test("queued static fallback keeps R1 when Native Edit does not update source", {
+  tag: ["@gate-smoke", "@smoke-editing"],
+}, async () => {
+  await withRuntimeProject("pageroot-runtime-queued-static-r1-e2e-", {
+    "runtime-report.html": queuedStaticFixtureHtml(),
+  }, async ({ page, sourcePath }) => {
+    await loadedDiskFrame(page, sourcePath, QUEUED_STATIC_CASE);
+    await armRuntimeCommitHold(page);
+    const { editor, workingCopyPath } = await duplicateQueuedStaticWorkingHtml(
+      page,
+      sourcePath,
+    );
+    await waitForHeldRuntimeCommit(page);
+    await expect.poll(async () => (
+      await editor.getAttribute("data-runtime-degradation") || "none"
+    )).toBe("none");
+    await releaseHeldRuntimeCommits(page);
+
+    await expect(editor).toHaveAttribute(
+      "data-runtime-degradation",
+      "static-visible",
+      { timeout: 12_000 },
+    );
+    const proof = await collectQueuedStaticFallbackProof(page, workingCopyPath);
+    queuedStaticFallbackOracle({
+      ...proof,
+      expectedSnippet: QUEUED_STATIC_R0,
+      expectedVisibleCount: 2,
+    });
+    expect(proof.diskHtml).not.toContain(QUEUED_STATIC_R2);
+    expect(proof.visibleTexts.join("\n")).not.toContain(QUEUED_STATIC_R2);
+  }, {
+    injectedEnv: {
+      PAGEROOT_E2E_RUNTIME_COMMIT_HOOKS: "1",
+    },
   });
 });
 
@@ -2262,3 +2825,582 @@ test("a failed candidate after text editing promotes static without resuming Nat
   });
 });
 
+test("a ready Candidate waiting to commit still accepts Native Edit on Active", {
+  tag: ["@gate-smoke", "@smoke-editing"],
+}, async () => {
+  const html = `<!doctype html>
+<html><head><title>Runtime commit hold edit</title></head><body>
+  <main>
+    <p data-native-case="runtime-commit-hold-edit" id="commit-hold-edit">
+      候选等待提交时仍可进入文字编辑。
+    </p>
+  </main>
+  <script>
+    document.querySelector('[data-native-case="runtime-commit-hold-edit"]')
+      .dataset.runtimeReady = 'true';
+  </script>
+</body></html>`;
+
+  await withRuntimeProject("pageroot-runtime-commit-hold-edit-e2e-", {
+    "runtime-report.html": html,
+  }, async ({ page, sourcePath }) => {
+    const editor = page.getByTestId("html-canvas-editor");
+    const surface = page.locator(".canvas-edit-surface");
+    let { frame } = await loadedDiskFrame(page, sourcePath, "runtime-commit-hold-edit");
+    await expect(editor).toHaveAttribute("data-render-verified", "true");
+    await expect.poll(() => editor.getAttribute("data-runtime-last-known-good-id"))
+      .toBeTruthy();
+    const lastKnownGoodBefore = await editor.getAttribute("data-runtime-last-known-good-id");
+    const workingCopyPath = await managedWorkingCopyPath(page, sourcePath);
+
+    await armRuntimeCommitHold(page);
+    const target = frame.locator('[data-native-case="runtime-commit-hold-edit"]');
+    await target.click();
+    const duplicateButton = page.getByRole("button", { name: "复制元素", exact: true });
+    await expect(duplicateButton).toBeVisible();
+    await duplicateButton.click();
+    await expect.poll(() => (
+      readFileSync(workingCopyPath, "utf8")
+        .split('<p data-native-case="runtime-commit-hold-edit"').length - 1
+    )).toBeGreaterThanOrEqual(2);
+    await waitForHeldRuntimeCommit(page);
+    await expect(editor).toHaveAttribute("data-runtime-candidate-phase", "preparing");
+    await expect(editor.locator('iframe[data-frame-role="runtime-candidate"]')).toHaveCount(1);
+    await expect.poll(() => visibleActiveFrameProof(page, "runtime-commit-hold-edit"))
+      .toEqual(expect.objectContaining({
+        renderVerified: "true",
+        visible: true,
+      }));
+
+    frame = await currentEditorFrame(page);
+    const activeTarget = frame.locator('[data-native-case="runtime-commit-hold-edit"]').first();
+    await activeTarget.dblclick({ force: true });
+    await expect(activeTarget).toHaveAttribute("contenteditable", "true");
+    await expect(editor).toHaveAttribute("data-native-start-status", "started");
+    await expect(editor).toHaveAttribute("data-runtime-candidate-phase", "preparing");
+
+    await releaseHeldRuntimeCommits(page);
+    await expect(activeTarget).toHaveAttribute("contenteditable", "true");
+    await expect(editor.locator('iframe[data-frame-role="runtime-candidate"]')).toHaveCount(0);
+    await expect(editor).toHaveAttribute("data-runtime-last-known-good-id", lastKnownGoodBefore);
+
+    await activeTarget.press("End");
+    await page.keyboard.insertText(" 提交后继续");
+    await page.keyboard.press("Escape");
+    await expect(activeTarget).not.toHaveAttribute("contenteditable", "true");
+    await expect.poll(() => readFileSync(workingCopyPath, "utf8")).toContain("提交后继续");
+    await expect.poll(() => surface.getAttribute("data-edit-runtime-outcome"), {
+      timeout: 12_000,
+    }).toBe("ready");
+    await expect.poll(() => editor.getAttribute("data-runtime-last-known-good-id"))
+      .not.toBe(lastKnownGoodBefore);
+    frame = await currentEditorFrame(page);
+    await expect(
+      frame.locator('[data-native-case="runtime-commit-hold-edit"]')
+        .filter({ hasText: "提交后继续" }),
+    ).toHaveCount(1);
+  }, {
+    injectedEnv: {
+      PAGEROOT_E2E_RUNTIME_COMMIT_HOOKS: "1",
+    },
+  });
+});
+
+test("a Candidate commit verification failure restores the visible Active", {
+  tag: ["@gate-smoke", "@smoke-editing"],
+}, async () => {
+  const html = `<!doctype html>
+<html><head><title>Runtime commit verification failure</title></head><body>
+  <main>
+    <p data-native-case="runtime-commit-verify-failure" id="commit-verify-failure">
+      提交校验失败后旧画面仍可选择评论和编辑。
+    </p>
+  </main>
+  <script>
+    document.querySelector('[data-native-case="runtime-commit-verify-failure"]')
+      .dataset.runtimeReady = 'true';
+  </script>
+</body></html>`;
+
+  await withRuntimeProject("pageroot-runtime-commit-verify-failure-e2e-", {
+    "runtime-report.html": html,
+  }, async ({ page, sourcePath }) => {
+    const editor = page.getByTestId("html-canvas-editor");
+    let { frame } = await loadedDiskFrame(page, sourcePath, "runtime-commit-verify-failure");
+    await expect(editor).toHaveAttribute("data-render-verified", "true");
+    await expect.poll(() => editor.getAttribute("data-runtime-last-known-good-id"))
+      .toBeTruthy();
+    const lastKnownGoodBefore = await editor.getAttribute("data-runtime-last-known-good-id");
+    const workingCopyPath = await managedWorkingCopyPath(page, sourcePath);
+    const workingHtmlBeforeDuplicate = readFileSync(workingCopyPath, "utf8");
+
+    await armRuntimeCommitHold(page);
+    const target = frame.locator('[data-native-case="runtime-commit-verify-failure"]');
+    await target.click();
+    const duplicateButton = page.getByRole("button", { name: "复制元素", exact: true });
+    await expect(duplicateButton).toBeVisible();
+    await duplicateButton.click();
+    await expect.poll(() => (
+      readFileSync(workingCopyPath, "utf8")
+        .split('<p data-native-case="runtime-commit-verify-failure"').length - 1
+    )).toBeGreaterThanOrEqual(2);
+    await waitForHeldRuntimeCommit(page);
+    await expect(editor).toHaveAttribute("data-runtime-candidate-phase", "preparing");
+    await page.evaluate(() => {
+      window.__PAGEROOT_E2E_FAIL_NEXT_RUNTIME_COMMIT__ = true;
+    });
+    await releaseHeldRuntimeCommits(page);
+
+    await expect.poll(() => visibleActiveFrameProof(page, "runtime-commit-verify-failure"))
+      .toEqual(expect.objectContaining({
+        renderVerified: "true",
+        visible: true,
+        text: "提交校验失败后旧画面仍可选择评论和编辑。",
+      }));
+    await expect(editor).toHaveAttribute("data-render-verified", "true");
+    await expect(editor).toHaveAttribute("data-runtime-last-known-good-id", lastKnownGoodBefore);
+    const workingHtmlAfterFailure = readFileSync(workingCopyPath, "utf8");
+    expect(workingHtmlAfterFailure).not.toBe(workingHtmlBeforeDuplicate);
+    expect(
+      workingHtmlAfterFailure.split('<p data-native-case="runtime-commit-verify-failure"').length - 1,
+    ).toBeGreaterThanOrEqual(2);
+
+    await expect.poll(() => page.locator(".canvas-edit-surface").getAttribute(
+      "data-edit-runtime-phase",
+    )).toBe("static-fallback");
+    await expect.poll(() => editor.getAttribute("data-runtime-degradation"), {
+      timeout: 15_000,
+    }).toMatch(/^(static-visible|none)$/u);
+    await expect(page.getByTestId("edit-runtime-static-fallback")).toBeVisible();
+    await expect(editor).toHaveAttribute("data-render-verified", "true");
+    expect(readFileSync(workingCopyPath, "utf8")).toBe(workingHtmlAfterFailure);
+
+    const staticNotice = page.getByTestId("edit-runtime-static-fallback");
+    await staticNotice.getByRole("button", { name: "关闭动态内容提示" }).click();
+    await expect(staticNotice).toHaveCount(0);
+    frame = await currentEditorFrame(page);
+    const restoredTarget = frame.locator('[data-native-case="runtime-commit-verify-failure"]').first();
+    await restoredTarget.click();
+    await expect(restoredTarget).toHaveAttribute("data-html-canvas-selected", /.+/u);
+    const toolbar = page.getByRole("toolbar", { name: /编辑/u });
+    await expect(toolbar).toBeVisible();
+    await toolbar.getByRole("button", { name: /给.+留评论/u }).click();
+    const commentComposer = page.getByRole("region", { name: "添加评论" });
+    await commentComposer.getByRole("textbox", { name: "评论内容" })
+      .fill("提交失败后仍可评论。");
+    await commentComposer.getByRole("button", { name: "评论", exact: true }).click();
+    await expect(page.getByRole("textbox", { name: "评论内容" })).toHaveCount(0);
+    await expect(page.locator('aside[aria-label="本轮评论"]'))
+      .toContainText("提交失败后仍可评论。");
+
+    if (await staticNotice.count()) {
+      await staticNotice.getByRole("button", { name: "关闭动态内容提示" }).click();
+      await expect(staticNotice).toHaveCount(0);
+    }
+    frame = await currentEditorFrame(page);
+    const editableTarget = frame.locator('[data-native-case="runtime-commit-verify-failure"]').first();
+    await editableTarget.dblclick();
+    await expect(editableTarget).toHaveAttribute("contenteditable", "true");
+    await expect(editor).toHaveAttribute("data-native-start-status", "started");
+    await page.keyboard.press("Escape");
+    frame = await currentEditorFrame(page);
+    await expect(
+      frame.locator('[data-native-case="runtime-commit-verify-failure"]').first(),
+    ).not.toHaveAttribute("contenteditable", "true");
+    expect(readFileSync(workingCopyPath, "utf8")).toBe(workingHtmlAfterFailure);
+    await expect(editor).toHaveAttribute("data-render-verified", "true");
+  }, {
+    injectedEnv: {
+      PAGEROOT_E2E_RUNTIME_COMMIT_HOOKS: "1",
+    },
+  });
+});
+
+test("Electron Edit executes parser-blocking, inline, defer and module programs with DOMContentLoaded and base", async () => {
+  const html = `<!doctype html>
+<html><head><title>Runtime compatibility</title>
+  <template><base href="../inert-assets/"></template>
+  <base target="_blank">
+  <base href="./assets/">
+  <script src="blocking.js"></script>
+  <script>
+    window.__runtimeOrder.push('inline');
+    window.addEventListener('DOMContentLoaded', () => {
+      window.__runtimeOrder.push('dom-content-loaded');
+      document.body.dataset.domContentLoadedReady = 'true';
+    }, { once: true });
+  </script>
+  <script defer src="defer.js"></script>
+  <script type="module">
+    window.__runtimeOrder.push('module');
+    document.body.dataset.moduleReady = 'true';
+  </script>
+</head><body>
+  <main data-native-case="scheduled-runtime"></main>
+</body></html>`;
+  await withRuntimeProject("pageroot-scheduled-runtime-e2e-", {
+    "runtime-report.html": html,
+    "assets/blocking.js": [
+      "window.__runtimeOrder = ['parser-blocking'];",
+      "document.documentElement.dataset.parserBlockingReady = 'true';",
+    ].join("\n"),
+    "assets/defer.js": [
+      "window.__runtimeOrder.push('defer');",
+      "document.body.dataset.deferReady = 'true';",
+    ].join("\n"),
+  }, async ({ page, sourcePath }) => {
+    const { frame } = await loadedDiskFrame(page, sourcePath, "scheduled-runtime");
+    await expect(frame.locator("html")).toHaveAttribute("data-parser-blocking-ready", "true");
+    await expect(frame.locator("body")).toHaveAttribute("data-defer-ready", "true");
+    await expect(frame.locator("body")).toHaveAttribute("data-module-ready", "true");
+    await expect(frame.locator("body")).toHaveAttribute("data-dom-content-loaded-ready", "true");
+    await expect.poll(() => frame.evaluate(() => window.__runtimeOrder)).toEqual([
+      "parser-blocking",
+      "inline",
+      "defer",
+      "module",
+      "dom-content-loaded",
+    ]);
+    await expect(frame.locator("base")).toHaveAttribute(
+      "href",
+      /^pageroot-edit-runtime:\/\/[a-f0-9]{32}\/assets\/$/u,
+    );
+    expect(readFileSync(sourcePath, "utf8")).toBe(html);
+  });
+});
+
+test("unsupported Script programs enter an explicit static Edit state", async () => {
+  const html = `<!doctype html>
+<html><head><title>Static fallback</title></head><body>
+  <main data-native-case="static-runtime-fallback">源码仍可编辑</main>
+  <script type="module">
+    import { runtimeMarker } from './runtime-module.js';
+    document.body.dataset.runtimeMarker = runtimeMarker;
+  </script>
+</body></html>`;
+  await withRuntimeProject("pageroot-static-runtime-fallback-e2e-", {
+    "runtime-report.html": html,
+    "runtime-module.js": "export const runtimeMarker = 'executed';",
+  }, async ({ page, sourcePath }) => {
+    const { frame } = await loadedDiskFrame(page, sourcePath, "static-runtime-fallback");
+    await expect(page.getByTestId("edit-runtime-static-fallback")).toContainText(
+      "部分动态内容未运行",
+    );
+    await expect(page.getByTestId("edit-runtime-static-fallback")).toContainText(
+      "当前已显示静态页面，仍可编辑和保存。",
+    );
+    await expect(page.getByRole("button", { name: "重新加载动态内容" })).toHaveCount(0);
+    await expect(page.locator(".canvas-edit-surface")).toHaveAttribute(
+      "data-edit-runtime-phase",
+      "static-fallback",
+    );
+    const editor = page.getByTestId("html-canvas-editor").filter({ visible: true }).first();
+    await expect(editor).toHaveAttribute("data-render-verified", "true");
+    await expect(editor.locator('iframe[data-runtime-slot-role="active"]'))
+      .toHaveAttribute("sandbox", "allow-same-origin");
+    await expect(frame.locator("body")).not.toHaveAttribute("data-runtime-marker", "executed");
+    await page.getByRole("button", { name: "关闭动态内容提示" }).click();
+    await expect(page.getByTestId("edit-runtime-static-fallback")).toHaveCount(0);
+    await expect(page.locator(".canvas-edit-surface")).toHaveAttribute(
+      "data-edit-runtime-phase",
+      "static-fallback",
+    );
+    expect(readFileSync(sourcePath, "utf8")).toBe(html);
+  });
+});
+
+test("static fallback can reload dynamic content and dismiss itself after success", async () => {
+  const html = `<!doctype html>
+<html><head><title>Runtime retry</title></head><body>
+  <main data-native-case="runtime-retry">动态内容重试</main>
+  <script>
+    parent.__PAGEROOT_RUNTIME_RETRY_COUNT__ =
+      (parent.__PAGEROOT_RUNTIME_RETRY_COUNT__ || 0) + 1;
+    if (parent.__PAGEROOT_RUNTIME_RETRY_COUNT__ === 1) {
+      throw new Error('synthetic first activation failure');
+    }
+    document.body.dataset.runtimeRetryReady = 'true';
+  </script>
+</body></html>`;
+
+  await withRuntimeProject("pageroot-runtime-retry-e2e-", {
+    "runtime-report.html": html,
+  }, async ({ page, sourcePath }) => {
+    await expect(page.getByTestId("edit-runtime-static-fallback")).toContainText(
+      "部分动态内容未更新",
+    );
+    await expect(page.locator(".canvas-edit-surface")).toHaveAttribute(
+      "data-edit-runtime-phase",
+      "static-fallback",
+    );
+    const editor = page.getByTestId("html-canvas-editor").filter({ visible: true }).first();
+    await expect(editor.locator('iframe[data-runtime-slot-role="active"]')).toBeVisible();
+    await expect(editor).toHaveAttribute("data-render-verified", "true");
+    const workingCopyPath = await managedWorkingCopyPath(page, sourcePath);
+    let frame = await currentEditorFrame(page);
+    const retryTarget = frame.locator('[data-native-case="runtime-retry"]');
+    await retryTarget.evaluate((element) => {
+      const rect = element.getBoundingClientRect();
+      const eventInit = {
+        bubbles: true,
+        cancelable: true,
+        clientX: rect.left + Math.max(1, rect.width / 2),
+        clientY: rect.top + Math.max(1, rect.height / 2),
+      };
+      element.dispatchEvent(new MouseEvent("click", { ...eventInit, detail: 1 }));
+      element.dispatchEvent(new MouseEvent("dblclick", { ...eventInit, detail: 2 }));
+    });
+    await expect(retryTarget).toHaveAttribute("contenteditable", "true");
+    await retryTarget.press("End");
+    const revisionBeforeEdit = Number(await page.locator("[data-persist-state]").first()
+      .getAttribute("data-persisted-revision"));
+    await page.keyboard.insertText(" 已保存的新文字");
+    await page.keyboard.press("Escape");
+    await expectCheckpointPersisted(page, revisionBeforeEdit);
+    await expect.poll(() => readFileSync(workingCopyPath, "utf8"))
+      .toContain("已保存的新文字");
+    const latestWorkingSource = readFileSync(workingCopyPath, "utf8");
+    const latestWorkingHash = buildSourceIndex(latestWorkingSource).sourceSha256;
+    await page.evaluate(() => {
+      window.__PAGEROOT_RUNTIME_RETRY_SLOT_TRANSITIONS__ = [];
+      window.__PAGEROOT_RUNTIME_RETRY_SLOT_OBSERVER__?.disconnect();
+      const observer = new MutationObserver((records) => {
+        for (const record of records) {
+          if (!(record.target instanceof HTMLIFrameElement)) continue;
+          window.__PAGEROOT_RUNTIME_RETRY_SLOT_TRANSITIONS__.push({
+            slot: record.target.getAttribute("data-runtime-slot"),
+            attribute: record.attributeName,
+            previous: record.oldValue,
+            current: record.target.getAttribute(record.attributeName),
+            role: record.target.getAttribute("data-runtime-slot-role"),
+            sandbox: record.target.getAttribute("sandbox"),
+          });
+        }
+      });
+      observer.observe(document.body, {
+        attributes: true,
+        attributeOldValue: true,
+        subtree: true,
+        attributeFilter: ["data-runtime-slot-role", "sandbox"],
+      });
+      window.__PAGEROOT_RUNTIME_RETRY_SLOT_OBSERVER__ = observer;
+    });
+    await page.getByRole("button", { name: "重新加载动态内容" }).click();
+    ({ frame } = await loadedDiskFrame(page, sourcePath, "runtime-retry"));
+    await expect.poll(() => page.locator(".canvas-edit-surface").getAttribute(
+      "data-edit-runtime-phase",
+    ), { timeout: 12_000 }).toBe("settled");
+    await expect(page.getByTestId("edit-runtime-static-fallback")).toHaveCount(0);
+    await expect(frame.locator("body")).toHaveAttribute("data-runtime-retry-ready", "true");
+    await expect.poll(() => page.evaluate(() => (
+      window.__PAGEROOT_RUNTIME_RETRY_COUNT__ || 0
+    ))).toBe(2);
+    const slotTransitions = await page.evaluate(() => {
+      window.__PAGEROOT_RUNTIME_RETRY_SLOT_OBSERVER__?.disconnect();
+      return window.__PAGEROOT_RUNTIME_RETRY_SLOT_TRANSITIONS__ || [];
+    });
+    expect(slotTransitions).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        attribute: "data-runtime-slot-role",
+        previous: "inactive",
+        role: "candidate",
+        sandbox: expect.stringContaining("allow-scripts"),
+      }),
+    ]));
+    await expect(frame.locator('[data-native-case="runtime-retry"]')).toHaveText(
+      "动态内容重试 已保存的新文字",
+    );
+    await expect(editor).toHaveAttribute(
+      "data-runtime-last-known-good-source-revision",
+      latestWorkingHash,
+    );
+  });
+});
+
+test("Edit frame navigation blocks location.assign and location.replace", async () => {
+  const html = `<!doctype html>
+<html><head><title>Navigation</title></head><body>
+  <main data-native-case="runtime-navigation">页面保持在原文档</main>
+  <script>
+    window.__attemptAssignNavigation = () => {
+      document.body.dataset.assignAttempted = 'true';
+      location.assign(new URL('/navigation-assign', document.baseURI).href);
+    };
+    window.__attemptReplaceNavigation = () => {
+      document.body.dataset.replaceAttempted = 'true';
+      location.replace(new URL('/navigation-replace', document.baseURI).href);
+    };
+  </script>
+</body></html>`;
+  await withRuntimeProject("pageroot-runtime-navigation-e2e-", {
+    "runtime-report.html": html,
+  }, async ({ page, sourcePath }) => {
+    const { frame } = await loadedDiskFrame(page, sourcePath, "runtime-navigation");
+    await frame.evaluate(() => window.__attemptAssignNavigation());
+    await expect(frame.locator("body")).toHaveAttribute("data-assign-attempted", "true");
+    await expect(frame.locator('[data-native-case="runtime-navigation"]')).toHaveText(
+      "页面保持在原文档",
+    );
+    await frame.evaluate(() => window.__attemptReplaceNavigation());
+    await expect(frame.locator("body")).toHaveAttribute("data-replace-attempted", "true");
+    await expect(frame.locator('[data-native-case="runtime-navigation"]')).toHaveText(
+      "页面保持在原文档",
+    );
+    expect(readFileSync(sourcePath, "utf8")).toBe(html);
+  });
+});
+
+test("Electron Edit renders a source-relative ECharts page in the editable iframe", {
+  tag: ["@gate-smoke", "@smoke-editing"],
+}, async () => {
+  const html = `<!doctype html>
+<html><head><title>Runtime</title></head><body>
+  <main id="chart" data-native-case="echarts-runtime" style="width:320px;height:180px"></main>
+  <script src="echarts.js"></script>
+  <script>
+    const chart = document.querySelector('#chart');
+    echarts.init(chart).setOption({series:[{type:'bar',data:[1,2,3]}]});
+    const runtimeOverlay = document.createElement('div');
+    runtimeOverlay.id = 'runtime-chart-overlay';
+    runtimeOverlay.style.cssText = 'position:absolute;inset:0;z-index:2;cursor:crosshair';
+    chart.append(runtimeOverlay);
+  </script>
+</body></html>`;
+  await withRuntimeProject("pageroot-echarts-runtime-e2e-", {
+    "runtime-report.html": html,
+    "echarts.js": ECHARTS_STUB,
+  }, async ({ page, sourcePath }) => {
+    const { frame } = await loadedDiskFrame(page, sourcePath, "echarts-runtime");
+    await expect(frame.locator("#chart canvas")).toHaveCount(1);
+    await expect(frame.locator("#runtime-chart-overlay")).toBeVisible();
+    await frame.locator("#runtime-chart-overlay").hover();
+    await expect.poll(() => frame.locator("html").getAttribute("data-html-canvas-pointer"))
+      .toBeNull();
+    await expect.poll(() => frame.locator("#runtime-chart-overlay").evaluate(
+      (element) => getComputedStyle(element).cursor,
+    )).toBe("crosshair");
+    await expect(frame.locator("[data-pageroot-edit-runtime-bootstrap]")).toHaveCount(1);
+    await expect(frame.locator("[data-pageroot-edit-runtime-frozen]")).toHaveCount(0);
+    expect(readFileSync(sourcePath, "utf8")).toBe(html);
+    const firstDocumentToken = await documentToken(page);
+    const tabs = page.getByRole("tablist", { name: "已打开的页面" });
+    const documentTab = tabs.getByRole("tab").first();
+    await page.getByRole("button", { name: "新标签页" }).click();
+    await documentTab.click();
+    const reopened = await loadedDiskFrame(page, sourcePath, "echarts-runtime");
+    await expect(reopened.frame.locator("#chart canvas")).toHaveCount(1);
+    await expect.poll(() => documentToken(page)).not.toBe(firstDocumentToken);
+    expect(readFileSync(sourcePath, "utf8")).toBe(html);
+  });
+});
+
+test("author async scripts settle without blocking deferred DOMContentLoaded", {
+  tag: ["@gate-smoke", "@smoke-editing"],
+}, async () => {
+  const html = `<!doctype html>
+<html><head><title>Async Runtime</title></head><body data-native-case="runtime-async-dcl">
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      document.body.dataset.asyncLoadedAtDcl = String(Boolean(window.__asyncProbeLoaded));
+    }, { once: true });
+  </script>
+  <script async src="async-probe.js"></script>
+</body></html>`;
+  await withRuntimeProject("pageroot-runtime-async-dcl-e2e-", {
+    "runtime-report.html": html,
+    "async-probe.js": "window.__asyncProbeLoaded = true;",
+  }, async ({ page, sourcePath }) => {
+    const { frame } = await loadedDiskFrame(page, sourcePath, "runtime-async-dcl");
+    await expect(frame.locator("body")).toHaveAttribute("data-async-loaded-at-dcl", "false");
+    await expect.poll(() => frame.evaluate(() => window.__asyncProbeLoaded)).toBe(true);
+    await expect(page.getByTestId("edit-runtime-static-fallback")).toHaveCount(0);
+    expect(readFileSync(sourcePath, "utf8")).toBe(html);
+  });
+});
+
+test("Electron Edit renders the reviewed ECharts 5.4.3 URL immediately with packaged compatible bytes", {
+  tag: ["@gate-smoke", "@smoke-editing"],
+}, async () => {
+  const html = `<!doctype html>
+<html><head><title>Compatible Runtime</title></head><body>
+  <main id="chart" data-native-case="echarts-compatible-runtime" style="width:320px;height:180px"></main>
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+  <script>
+    echarts.init(document.querySelector('#chart')).setOption({
+      animation: false,
+      xAxis: { type: 'category', data: ['A', 'B', 'C'] },
+      yAxis: { type: 'value' },
+      series: [{ type: 'bar', data: [1, 2, 3] }],
+    });
+  </script>
+</body></html>`;
+  await withRuntimeProject("pageroot-echarts-compatible-e2e-", {
+    "runtime-report.html": html,
+  }, async ({ page, sourcePath }) => {
+    const { frame } = await loadedDiskFrame(
+      page,
+      sourcePath,
+      "echarts-compatible-runtime",
+    );
+    await expect(frame.locator("#chart canvas")).toHaveCount(1);
+    await expect(page.getByTestId("html-canvas-editor")).toHaveAttribute(
+      "data-runtime-library-origins",
+      /bundled-compatible/u,
+    );
+    await expect(page.getByTestId("edit-runtime-static-fallback")).toHaveCount(0);
+    expect(readFileSync(sourcePath, "utf8")).toBe(html);
+  });
+});
+
+test("compatible ECharts activation failure recovers exactly once with exact 5.4.3 bytes", {
+  tag: ["@gate-smoke", "@smoke-editing"],
+}, async () => {
+  const html = `<!doctype html>
+<html><head><title>Exact Runtime Recovery</title></head><body>
+  <main id="chart" data-native-case="echarts-exact-recovery" style="width:320px;height:180px"></main>
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+  <script>
+    const activations = window.parent.__PAGEROOT_ECHARTS_EXACT_RECOVERY__ || [];
+    activations.push(echarts.version);
+    window.parent.__PAGEROOT_ECHARTS_EXACT_RECOVERY__ = activations;
+    document.addEventListener('DOMContentLoaded', () => {
+      if (echarts.version !== '5.4.3') {
+        throw new Error('compatible ECharts must not become activation-ready: ' + echarts.version);
+      }
+      echarts.init(document.querySelector('#chart')).setOption({
+        animation: false,
+        xAxis: { type: 'category', data: ['A', 'B', 'C'] },
+        yAxis: { type: 'value' },
+        series: [{ type: 'bar', data: [1, 2, 3] }],
+      });
+    }, { once: true });
+  </script>
+</body></html>`;
+  await withRuntimeProject("pageroot-echarts-exact-recovery-e2e-", {
+    "runtime-report.html": html,
+  }, async ({ page, sourcePath }) => {
+    const { frame } = await loadedDiskFrame(
+      page,
+      sourcePath,
+      "echarts-exact-recovery",
+    );
+    await expect(frame.locator("#chart canvas")).toHaveCount(1);
+    await expect.poll(() => page.evaluate(() => (
+      window.__PAGEROOT_ECHARTS_EXACT_RECOVERY__ || []
+    ))).toEqual(["5.6.0", "5.4.3"]);
+    await expect(page.getByTestId("html-canvas-editor")).toHaveAttribute(
+      "data-runtime-library-origins",
+      /(?:network|disk-cache)/u,
+    );
+    await expect(page.getByTestId("html-canvas-editor")).not.toHaveAttribute(
+      "data-runtime-library-origins",
+      /bundled-compatible/u,
+    );
+    await expect(page.getByTestId("edit-runtime-static-fallback")).toHaveCount(0);
+    await expect(page.locator(".canvas-edit-surface")).not.toHaveAttribute(
+      "data-edit-runtime-phase",
+      "static-fallback",
+    );
+    expect(readFileSync(sourcePath, "utf8")).toBe(html);
+  });
+});

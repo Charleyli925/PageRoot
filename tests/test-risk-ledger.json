@@ -122,12 +122,6 @@
       "oracle": "Candidate HTML + Version identity + Review projection",
       "stage": "ready-full"
     },
-    "tests/e2e/electron/ai-review-versions.spec.mjs": {
-      "riskId": "ai-candidate-review-adoption",
-      "primaryOwner": "review-document-orchestrator",
-      "oracle": "Candidate HTML + Version identity + Review projection",
-      "stage": "ready-full"
-    },
     "tests/e2e/electron/ai-run-lifecycle.spec.mjs": {
       "riskId": "ai-request-freeze",
       "primaryOwner": "run-workflow",
@@ -179,13 +173,6 @@
       "oracle": "continuity probe + working HTML bytes + caret source offset",
       "stage": "draft-canary",
       "seededFault": "candidate-created-during-edit"
-    },
-    "tests/e2e/electron/electron-runtime-scripts.spec.mjs": {
-      "riskId": "runtime-document-identity",
-      "primaryOwner": "runtime-continuity",
-      "oracle": "iframe generation + Working HTML + candidate handoff",
-      "stage": "draft-canary",
-      "seededFault": "active-iframe-cleared"
     },
     "tests/e2e/electron/electron-seeded-faults.spec.mjs": {
       "riskId": "runtime-fault-detection",

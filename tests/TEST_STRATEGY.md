@@ -34,7 +34,8 @@ turn into a zero-work green result.
 | 门禁 | 使用时机 | 覆盖 | 目标 |
 |---|---|---|---|
 | `npm run gate:edit` | 一次局部修改后 | 只运行影响映射命中的 Node 文件；必要时 typecheck | 快速发现局部逻辑错误，不启动浏览器或 Electron |
-| `npm run gate:plan -- --base origin/main` | 选择或开始跑门禁前 | 输出紧凑 JSON：改动文件、owner、Node 文件、能力级 canary 与预计数量 | 不必读取整份 impact map；已有超宽规则在过期日前只告警，新增超宽为硬失败 |
+| `npm run gate:plan -- --base origin/main` | 选择或开始跑门禁前 | 输出紧凑 JSON：改动文件、owner、Node 文件、能力级 canary、预计数量，以及分类后的阅读集 | 不必读取整份 impact map；已有超宽规则在过期日前只告警，新增超宽为硬失败 |
+| `npm run gate:plan -- --context-domain <id>` | 尚未改文件、需要先定位阅读入口时 | 同一份 capability-context 阅读集；可按能力名或 `--context-file` 查询。多域共享同一文档时，整文件要求覆盖章节要求 | 不选择测试，也不改变 `task:finish` 的 `origin/main` 基准 |
 | `npm run gate:draft` | CI Draft，或本地复现 Draft canary | 受影响 Node 文件加上命中的 Browser/Electron/AI canary，以及被修改的 Playwright spec | 本地 `gate:edit` 仍保持 Node-only；Draft 绿灯必须覆盖被修改能力 |
 | `npm run gate:task` | 一个开发任务完成时 | 静态检查、受影响 Node 文件，以及相关能力级 Browser/Electron/AI 冒烟 | 叶子改动只接通对应 canary；Ready PR 仍跑完整矩阵 |
 | `npm run gate:task -- --resume <run-id>` | 同一源码 Hash 上环境抖动后 | 复用已通过的 typecheck/lint/Node/build，只重跑失败与未执行 suite | 源代码、base、lockfile、Node/平台或 suite 命令变化时拒绝复用 |
@@ -90,7 +91,7 @@ CI 可重试一次）。real HTML、Browser 三分片、native Electron 与 AI �
 ## 测试类型与去重
 
 - 核心 Node：算法、状态机、序列化、事务、错误关闭和 forward/inverse 不变量。
-- Runtime Continuity Probe：`runtime-continuity-probe.js` 只在测试调用 enable 后记录 `frameCreated` / `candidateCreated`、canvas/评论栏宽度、scrollTop 和可见 Frame。生产路径默认静默。Electron `electron-runtime-continuity.spec.mjs` 用静态页、嵌套滚动页和 Script 图表页证明连续编辑不重建 Runtime、评论栏宽度不闪、以及重建后第 6 个空行的 Caret 落点。
+- Runtime Continuity Probe：`runtime-continuity-probe.js` 只在测试调用 enable 后记录 `frameCreated` / `candidateCreated`、canvas/评论栏宽度、scrollTop 和可见 Frame。生产路径默认静默。Electron `electron-runtime-continuity.spec.mjs` 用静态页、嵌套滚动页和 Script 图表页证明连续编辑不重建 Runtime、评论栏宽度不闪、以及重建后第 6 个空行的 Caret 落点。`electron-seeded-faults.spec.mjs` 在同一探针上注入 Active iframe 消失和编辑中 Candidate iframe，证明 canary 会失败并在恢复后收敛。
 - 测试 Inventory 与风险账本：`npm run test:inventory` 从实际 Playwright 配置的 `testMatch` 生成执行清单（含 Ready / Draft smoke / packaged / real-html / review-annotation），并核对 `tests/test-risk-ledger.json` 的 `ready-full` 文件确实被某个 Ready 配置选中。源码正则只用于辅助提取标题与 Tag，不能单独证明用例会被执行。
 - `DocumentWorkflow`：fake Scheduler、Hash、RecoveryStore、Canvas Port 和 Bridge
   验证 100ms 非 checkpoint 合并写入、native-edit checkpoint 立即 flush、单飞 flush、未登记首次登记、精确 HTML/Hash/revision/history
@@ -288,7 +289,7 @@ Workbench 只确认已提交 loading surface、传入窄 port 并消费快照。
   owner、frame/mask count、tolerance 与负例写全；表只能消除样板，不能合并不同
   故障模型。
 
-  基线的 AI Electron 场景按能力拆在 `ai-review-adoption.spec.mjs`、`ai-review-versions.spec.mjs`、`ai-provider-availability.spec.mjs`、`ai-run-lifecycle.spec.mjs`、`ai-candidate-validation.spec.mjs` 与 `ai-request-comments.spec.mjs`；其余非 AI/重复排列按下表有明确 owner。
+  基线的 21 个 AI Electron 场景中，核心 AI 场景按能力拆在 `ai-review-adoption.spec.mjs`、`ai-provider-availability.spec.mjs`、`ai-run-lifecycle.spec.mjs`、`ai-candidate-validation.spec.mjs` 与 `ai-request-comments.spec.mjs`；其余 5 个非 AI/重复排列按下表有明确 owner。
 
   | 已收敛场景 | 唯一 owner |
   | --- | --- |

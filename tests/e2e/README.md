@@ -100,11 +100,10 @@ Capability smoke uses Playwright tags (`@smoke-editing`, `@smoke-project-lifecyc
 `@smoke-recovery`, `@smoke-agent`, `@smoke-review`, `@smoke-provider` and
 `@smoke-run-lifecycle`) rather than title regular expressions. Native Electron
 files are `electron-*.spec.mjs` plus `conflict-force-unlock.spec.mjs`; Runtime
-handoff lives in `electron-edit-runtime.spec.mjs`, script/ECharts cases in
-`electron-runtime-scripts.spec.mjs`, and visual continuity in
-`electron-runtime-continuity.spec.mjs`. AI Review adoption stays in
-`ai-review-adoption.spec.mjs`; Version/projection cases are
-`ai-review-versions.spec.mjs`.
+handoff and queued-static fallback live in `electron-edit-runtime.spec.mjs`,
+visual continuity in `electron-runtime-continuity.spec.mjs`, and live seeded
+faults in `electron-seeded-faults.spec.mjs`. AI Review adoption and Version
+projection stay in `ai-review-adoption.spec.mjs`.
 
 - `native-editable`: the real authored element owns the caret and is directly
   editable.

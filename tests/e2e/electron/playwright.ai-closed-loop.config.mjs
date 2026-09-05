@@ -14,7 +14,7 @@ const artifactRoot = path.join(
 
 export default defineConfig({
   testDir: currentDirectory,
-  testMatch: /ai-(?:review-adoption|review-versions|provider-availability|run-lifecycle|candidate-validation|request-comments)\.spec\.mjs/,
+  testMatch: /ai-(?:review-adoption|provider-availability|run-lifecycle|candidate-validation|request-comments)\.spec\.mjs/,
   outputDir: path.join(artifactRoot, "results"),
   workers: 1,
   // AI closed-loop assertions are product contracts: Candidate promotion,

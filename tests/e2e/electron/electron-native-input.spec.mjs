@@ -100,8 +100,12 @@ test("Electron shows continuous source text immediately without rebuilding the i
     await expect(frame.locator(caseSelector("list-item")))
       .not.toHaveAttribute("contenteditable", "true");
 
-    const resumedFrame = await currentEditorFrame(page);
+    // Leaving Native Edit may start a Runtime Candidate. Wait for that
+    // handoff so the next Frame handle is the live Active, not a stale one.
+    await waitForRuntimeHandoffSettled(page);
+    let resumedFrame = await currentEditorFrame(page);
     await activateNativeEdit(resumedFrame, "list-item");
+    resumedFrame = await currentEditorFrame(page);
     await expect(toolbar).toBeVisible();
     await expect(resumedFrame.locator("[data-html-canvas-selected]")).toHaveCount(1);
 

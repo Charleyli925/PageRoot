@@ -46,7 +46,7 @@ test("Playwright inventory stays aligned with the repository and E2E README", as
     ),
     false,
   );
-  assert.ok(inventory.specFiles.includes("tests/e2e/electron/ai-review-versions.spec.mjs"));
+  assert.ok(inventory.specFiles.includes("tests/e2e/electron/ai-review-adoption.spec.mjs"));
   assert.equal(
     inventory.specFiles.includes("tests/e2e/browser/native-dom-editing.spec.mjs"),
     false,
