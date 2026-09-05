@@ -87,8 +87,8 @@ git push -u origin feature/short-name
 Open a Pull Request, wait for required CI, review the final diff, then squash-merge. Delete the merged branch. Never use a DMG, `.app`, copied folder or local backup as the basis for a new edit.
 
 Every Pull Request starts as Draft. `opened`, `synchronize` and `reopened`
-on a Draft PR without `full-gate` run only impact-selected `pr-feedback`
-inside `ci.yml`. Mark the frozen head Ready once, or add `full-gate`, to
+on a Draft PR without `full-gate` run impact-selected `pr-feedback`
+(`gate:draft`: Node plus the selected capability canary) inside `ci.yml`. Mark the frozen head Ready once, or add `full-gate`, to
 start the complete source matrix. A PR opened already Ready also takes that
 path. Codex review is requested automatically, shown on the PR, and never
 blocks merge. `release-gate` is the required check. Active P0/P1 comments

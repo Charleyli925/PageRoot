@@ -3,6 +3,7 @@ import path from "node:path";
 import {
   CAPABILITY_SMOKE_SUITES,
   GATE_WIDTH_LIMITS,
+  classifyPlaywrightSpec,
   isRuntimeCanarySuite,
   runtimeOfSuite,
 } from "./gate-smoke-suites.mjs";
@@ -40,11 +41,23 @@ export function validateImpactMap(map) {
       if (!suiteIds.has(suiteId)) throw new Error(`Lane ${laneId} references unknown suite ${suiteId}.`);
     }
   }
+  const ruleIds = new Set((map.rules || []).map((rule) => rule.id));
   for (const rule of map.rules || []) {
     if (!rule.id || !Array.isArray(rule.patterns)) throw new Error("Every impact rule needs an id and patterns.");
     for (const pattern of rule.patterns) new RegExp(pattern, "u");
     for (const suiteId of rule.suites || []) {
       if (!suiteIds.has(suiteId)) throw new Error(`Rule ${rule.id} references unknown suite ${suiteId}.`);
+    }
+  }
+  for (const exception of map.widthExceptions || []) {
+    if (!exception.id || !exception.expiresOn) {
+      throw new Error("Every width exception needs an id and expiresOn date.");
+    }
+    if (!ruleIds.has(exception.id)) {
+      throw new Error(`Width exception ${exception.id} does not match a rule.`);
+    }
+    if (!/^\d{4}-\d{2}-\d{2}$/u.test(exception.expiresOn)) {
+      throw new Error(`Width exception ${exception.id} expiresOn must be YYYY-MM-DD.`);
     }
   }
   return map;
@@ -119,6 +132,7 @@ export function selectGatePlan({ map, lane, changedFiles = [] }) {
   const requested = [];
   const requestedSet = new Set();
   const selectedNodeTests = new Set();
+  const selectedChangedSpecs = new Map();
   const fallbackReasons = [];
   const matchedOwners = [];
   const matchedOwnerSet = new Set();
@@ -152,13 +166,20 @@ export function selectGatePlan({ map, lane, changedFiles = [] }) {
 
     for (const file of normalizedFiles) {
       const isTopLevelNodeTest = NODE_TEST_PATH.test(file);
+      const changedSpec = classifyPlaywrightSpec(file);
       const matchedRules = [];
       if (isTopLevelNodeTest) {
         selectedNodeTests.add(file);
         addOrigin(nodeTestOrigins, file, { file, owner: "self" });
         if (allowed.has("node-targeted")) addSuite("node-targeted", `${file} changed`, { file, owner: "self" });
       }
-      let matched = isTopLevelNodeTest;
+      if (changedSpec && allowed.has(changedSpec.suiteId)) {
+        const filesForSuite = selectedChangedSpecs.get(changedSpec.suiteId) || [];
+        if (!filesForSuite.includes(changedSpec.file)) filesForSuite.push(changedSpec.file);
+        selectedChangedSpecs.set(changedSpec.suiteId, filesForSuite);
+        addSuite(changedSpec.suiteId, `${file} changed`, { file, owner: "changed-spec" });
+      }
+      let matched = isTopLevelNodeTest || Boolean(changedSpec);
       for (const rule of map.rules || []) {
         if (!rule.patterns.some((pattern) => new RegExp(pattern, "u").test(file))) continue;
         matched = true;
@@ -231,6 +252,9 @@ export function selectGatePlan({ map, lane, changedFiles = [] }) {
         .sort(([left], [right]) => left.localeCompare(right)),
     ),
     selectedNodeTests: [...selectedNodeTests].sort(),
+    selectedChangedSpecs: Object.fromEntries(
+      [...selectedChangedSpecs.entries()].map(([suiteId, specFiles]) => [suiteId, specFiles.sort()]),
+    ),
     suites,
   };
 }
@@ -265,29 +289,59 @@ function leafNodeFanout(plan, file) {
   return tests.size;
 }
 
-export function buildGateWarnings(plan, { map, inventoryFiles = [] } = {}) {
+function exceptionById(map) {
+  return new Map((map.widthExceptions || []).map((exception) => [exception.id, exception]));
+}
+
+function exceptionIsActive(exception, now) {
+  if (!exception?.expiresOn) return false;
+  return new Date(`${exception.expiresOn}T23:59:59.000Z`) >= now;
+}
+
+export function buildGateWarnings(plan, { map, inventoryFiles = [], now = new Date() } = {}) {
   const warnings = [];
+  const exceptions = exceptionById(map || {});
   for (const file of plan.changedFiles) {
     const count = leafNodeFanout(plan, file);
     if (count > GATE_WIDTH_LIMITS.leafFileNodeTests) {
+      const match = plan.fileMatches.find((entry) => entry.file === file);
+      const owners = match?.rules || [];
+      const blocking = owners.every((owner) => !exceptionIsActive(exceptions.get(owner), now));
       warnings.push({
         code: "leaf-file-node-fanout",
         message: `${file} selected ${count} Node files`,
         file,
         count,
         limit: GATE_WIDTH_LIMITS.leafFileNodeTests,
+        blocking,
       });
     }
   }
   if (inventoryFiles.length > 0) {
     for (const rule of collectRuleCoverage(map, inventoryFiles)) {
-      if (rule.productionModuleCount > GATE_WIDTH_LIMITS.ruleProductionModules) {
+      const overProduction = rule.productionModuleCount > GATE_WIDTH_LIMITS.ruleProductionModules;
+      const overNodeTests = rule.nodeTestCount > GATE_WIDTH_LIMITS.leafFileNodeTests;
+      if (!overProduction && !overNodeTests) continue;
+      const exception = exceptions.get(rule.id);
+      const active = exceptionIsActive(exception, now);
+      if (overProduction) {
         warnings.push({
           code: "rule-production-width",
           message: `${rule.id} matches ${rule.productionModuleCount} production modules`,
           owner: rule.id,
           count: rule.productionModuleCount,
           limit: GATE_WIDTH_LIMITS.ruleProductionModules,
+          blocking: !active,
+        });
+      }
+      if (overNodeTests) {
+        warnings.push({
+          code: "rule-node-test-width",
+          message: `${rule.id} selects ${rule.nodeTestCount} Node files`,
+          owner: rule.id,
+          count: rule.nodeTestCount,
+          limit: GATE_WIDTH_LIMITS.leafFileNodeTests,
+          blocking: !active,
         });
       }
     }
@@ -298,11 +352,57 @@ export function buildGateWarnings(plan, { map, inventoryFiles = [] } = {}) {
   if (runtimes.has("browser") && runtimes.has("electron") && runtimes.has("ai")) {
     warnings.push({
       code: "task-heavy-lane-union",
-      message: "task selected Browser, Electron and AI runtime canaries together",
+      message: `${plan.lane || "task"} selected Browser, Electron and AI runtime canaries together`,
       suites: plan.suites.map((suite) => suite.id).filter(isRuntimeCanarySuite),
+      blocking: false,
     });
   }
   return warnings;
+}
+
+export function assertGateWidthPolicy(plan) {
+  const blocking = (plan.warnings || []).filter((warning) => warning.blocking);
+  if (blocking.length === 0) return plan;
+  throw new Error(
+    `Impact map width budget exceeded:\n${blocking.map((warning) => `- ${warning.code}: ${warning.message}`).join("\n")}`,
+  );
+}
+
+export function draftCiOutputs(plan) {
+  const suiteIds = (plan.suites || []).map((suite) => suite.id);
+  const browserSuites = suiteIds.filter((id) => runtimeOfSuite(id) === "browser" || id === "real-html");
+  const desktopSuites = suiteIds.filter((id) => runtimeOfSuite(id) === "electron" || runtimeOfSuite(id) === "ai");
+  return {
+    has_browser: browserSuites.length > 0 ? "true" : "false",
+    has_desktop: desktopSuites.length > 0 ? "true" : "false",
+    browser_canaries: browserSuites.join("\n"),
+    desktop_canaries: desktopSuites.join("\n"),
+  };
+}
+
+export function filterPlanByRuntimes(plan, runtimes) {
+  const allowed = new Set(runtimes);
+  if (allowed.size === 0) return plan;
+  const keep = (suiteId) => {
+    if (suiteId === "typecheck" || suiteId === "lint" || suiteId === "dependency-audit") {
+      return allowed.has("node");
+    }
+    if (suiteId.startsWith("node-")) return allowed.has("node");
+    if (suiteId === "build-web") return allowed.has("node") || allowed.has("browser");
+    if (suiteId === "real-html" || suiteId.startsWith("browser-")) return allowed.has("browser");
+    if (suiteId === "build-desktop") return allowed.has("electron") || allowed.has("ai");
+    if (suiteId.startsWith("electron-")) return allowed.has("electron");
+    if (suiteId.startsWith("ai-")) return allowed.has("ai");
+    return true;
+  };
+  const suites = plan.suites.filter((suite) => keep(suite.id));
+  const selectedNodeTests = allowed.has("node") ? plan.selectedNodeTests : [];
+  return {
+    ...plan,
+    selectedNodeTests,
+    suites,
+    runtimeCanaries: suites.map((suite) => suite.id).filter(isRuntimeCanarySuite),
+  };
 }
 
 export function estimateRuntimeFanout(plan, tagCounts = {}) {
@@ -319,8 +419,8 @@ export function estimateRuntimeFanout(plan, tagCounts = {}) {
   return fanout;
 }
 
-export function annotateGatePlan(plan, { map, inventoryFiles = [], tagCounts = {} } = {}) {
-  const warnings = buildGateWarnings(plan, { map, inventoryFiles });
+export function annotateGatePlan(plan, { map, inventoryFiles = [], tagCounts = {}, now = new Date() } = {}) {
+  const warnings = buildGateWarnings(plan, { map, inventoryFiles, now });
   const ruleStats = inventoryFiles.length > 0
     ? collectRuleCoverage(map, inventoryFiles).filter((rule) => plan.matchedOwners.includes(rule.id))
       .map((rule) => ({
@@ -352,6 +452,7 @@ export function compactGatePlan(plan) {
     changedFiles: plan.changedFiles,
     matchedOwners: plan.matchedOwners || [],
     nodeTests: plan.selectedNodeTests,
+    changedSpecs: plan.selectedChangedSpecs || {},
     runtimeCanaries: plan.runtimeCanaries || [],
     estimatedFanout: plan.estimatedFanout || {
       nodeFiles: plan.selectedNodeTests.length,
@@ -361,6 +462,7 @@ export function compactGatePlan(plan) {
     warnings: (plan.warnings || []).map((warning) => ({
       code: warning.code,
       message: warning.message,
+      blocking: Boolean(warning.blocking),
     })),
     capabilityContext: {
       domains: capabilityContext.domains || [],

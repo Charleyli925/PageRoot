@@ -34,10 +34,11 @@ turn into a zero-work green result.
 | 门禁 | 使用时机 | 覆盖 | 目标 |
 |---|---|---|---|
 | `npm run gate:edit` | 一次局部修改后 | 只运行影响映射命中的 Node 文件；必要时 typecheck | 快速发现局部逻辑错误，不启动浏览器或 Electron |
-| `npm run gate:plan -- --base origin/main` | 选择或开始跑门禁前 | 输出紧凑 JSON：改动文件、owner、Node 文件、能力级 canary 与预计数量 | 不必读取整份 impact map；过宽规则只告警、不失败 |
+| `npm run gate:plan -- --base origin/main` | 选择或开始跑门禁前 | 输出紧凑 JSON：改动文件、owner、Node 文件、能力级 canary 与预计数量 | 不必读取整份 impact map；已有超宽规则在过期日前只告警，新增超宽为硬失败 |
+| `npm run gate:draft` | CI Draft，或本地复现 Draft canary | 受影响 Node 文件加上命中的 Browser/Electron/AI canary，以及被修改的 Playwright spec | 本地 `gate:edit` 仍保持 Node-only；Draft 绿灯必须覆盖被修改能力 |
 | `npm run gate:task` | 一个开发任务完成时 | 静态检查、受影响 Node 文件，以及相关能力级 Browser/Electron/AI 冒烟 | 叶子改动只接通对应 canary；Ready PR 仍跑完整矩阵 |
 | `npm run gate:task -- --resume <run-id>` | 同一源码 Hash 上环境抖动后 | 复用已通过的 typecheck/lint/Node/build，只重跑失败与未执行 suite | 源代码、base、lockfile、Node/平台或 suite 命令变化时拒绝复用 |
-| PR `pr-feedback` | Draft PR 的 `opened/synchronize/reopened`，且无 `full-gate` label | 按影响映射选择 Node/编译检查（`gate:edit`） | 普通 Draft 推送不消费完整矩阵 |
+| PR `pr-feedback` | Draft PR 的 `opened/synchronize/reopened`，且无 `full-gate` label | `gate:draft`：Node + 风险对应的能力 Canary；Electron/AI 在 macOS 上按需运行 | 普通 Draft 推送不消费完整矩阵，但热点文件不再是 Node-only 绿灯 |
 | PR 完整矩阵 + `release-gate` | Ready（含直接以 Ready 开 PR）或 `full-gate` label | 全量 Node、三分片 Browser、独立 Native Electron、独立 AI 闭环、真实 HTML、依赖基线、按需 dry run、exact-tree 凭证 | `release-gate` 是唯一合并硬门；Codex 评审只展示、不阻断 |
 | `codex-review` | 与完整矩阵相同的触发条件 | 为当前 head 至多发一条 `@codex review`，并写 informational 线程快照 | `continue-on-error`；不在 `release-gate.needs` 中 |
 | `baseline-policy` | 完整矩阵路径上，分支策略通过后 | 全局依赖 advisory policy 与 packaged-runtime closure，并写下 lockfile 快照 | 基线红时不启动 Linux build、Browser 或 macOS Electron runner；`release-gate` 只核验快照 |
@@ -53,7 +54,7 @@ turn into a zero-work green result.
 
 ## 影响映射所有权
 
-`edit` 和 `task` 按生产所有权选择直接 Node oracle：一个文件只进入它实际实现或调用的 owner；一个文件确实跨两个 owner 时，选择器安全地取两者并集。精确规则必须从通用规则中排除，不能再用宽泛目录正则把整个 Session、Workbench 子模块或 Desktop 目录绑成一个桶。Canvas、Review、Agent、Repository 和 Desktop IPC 已按叶子模块拆开：叶子算法或 IPC 文件只接通自己的 Node oracle（必要时再加一个能力 canary）；`HtmlCanvasEditor.tsx`、`review-document.ts` 编排器和 `desktop/main.mjs` 组合层仍可保留较宽并集。新增或移动测试时，同步更新其生产 owner 的精确 `nodeTests` 列表和 `tests/test-gate-selection.test.mjs` 的选择回归；顶层 Node 测试始终至少运行自身，且本所有权基线中的 owned test 不扩张到整组。无法建立精确 owner 的代码继续走既有 `node-core` fallback。无论 edit/task 如何收窄，`release` 的完整 suite 与 prerequisite 顺序都不变。
+`edit` 和 `task` 按生产所有权选择直接 Node oracle：一个文件只进入它实际实现或调用的 owner；一个文件确实跨两个 owner 时，选择器安全地取两者并集。精确规则必须从通用规则中排除，不能再用宽泛目录正则把整个 Session、Workbench 子模块或 Desktop 目录绑成一个桶。Canvas、Review、Agent、Repository 和 Desktop IPC 已按叶子模块拆开：叶子算法或 IPC 文件只接通自己的 Node oracle（必要时再加一个能力 canary）；`HtmlCanvasEditor.tsx` 走 `runtime-continuity`，评论布局走 `browser-comments-smoke`，持久化走 `electron-recovery-smoke`。超宽规则必须登记 `widthExceptions` 与退役日期，过期或新增超宽都会硬失败。新增或移动测试时，同步更新其生产 owner 的精确 `nodeTests` 列表和 `tests/test-gate-selection.test.mjs` 的选择回归；顶层 Node 测试始终至少运行自身，且本所有权基线中的 owned test 不扩张到整组。无法建立精确 owner 的代码继续走既有 `node-core` fallback。无论 edit/task 如何收窄，`release` 的完整 suite 与 prerequisite 顺序都不变。
 
 “最新安装包”的多 PR 源码组合是打包前的 Git 流程：门禁只验证当前干净
 Tree，不在测试执行期间自动合并分支。组合 Tree 含任何未合并 PR 时，
@@ -63,8 +64,9 @@ Tree，不在测试执行期间自动合并分支。组合 Tree 含任何未合�
 
 `npm run task:finish` 是 `gate:task -- --base origin/main` 的安全任务包装，不引入新的门禁层。`tests/task-workflow.test.mjs` 在独立临时 Git 仓库中验证分支名、干净 primary `main`、远端同步、隔离 worktree 创建、现有分支 attach、脏工作区拒绝、GitHub PR/本地独有提交分类、retire 默认 dry-run、显式放弃围栏和最终差异报告，不会操作开发者的真实分支。
 
-PR 必须从 Draft 开始。普通 Draft 推送由 `ci.yml` 的 `pr-feedback` job
-处理，不会创建名为 `release-gate` 的跳过 job。Ready、直接以 Ready 开
+PR 必须从 Draft 开始。普通 Draft 推送由 `ci.yml` 的 `pr-feedback` 汇合
+Ubuntu Node/Browser canary 与按需 macOS Electron/AI canary。本地
+`gate:edit` 仍保持 Node-only。Ready、直接以 Ready 开
 PR，或加上 `full-gate` label 后才跑完整矩阵；`release-gate` 是唯一合
 并硬门。同一路径会为当前 head 至多请求一次 Codex 评审并写 informational
 快照，P0/P1 只展示、不阻断。没有 probe marker、没有 30 秒 settle、没

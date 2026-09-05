@@ -49,7 +49,7 @@ earlier commit's attestation check.
 ## CI ownership and isolation
 
 - `ci.yml` is the only Pull Request workflow. It grants `pull-requests: write` solely to post the informational `@codex review` comment. It never uses `pull_request_target`, never grants `contents: write`, and never merges.
-- Draft without `full-gate` runs only `pr-feedback` (`gate:edit`). Ready, opened already Ready, or `full-gate` runs the complete source matrix. `codex-review` is `continue-on-error` and is not listed in `release-gate.needs`.
+- Draft without `full-gate` runs `pr-feedback` (`gate:draft`: Node plus selected canaries). Ready, opened already Ready, or `full-gate` runs the complete source matrix. `codex-review` is `continue-on-error` and is not listed in `release-gate.needs`.
 - `branch-policy` and `candidate-context` have no dependency on one another. `baseline-policy` waits only for branch policy and runs `audit:dependencies`, whose single command owns both advisory policy and packaged-runtime closure and writes a lockfile snapshot. `linux-deps` / `macos-deps` plus `source-build`, Native Electron and AI Electron depend on this job, so a red global baseline consumes no macOS runner and later jobs restore one OS/lockfile `node_modules` cache instead of repeating `npm ci`. `release-gate` verifies the snapshot instead of scanning twice.
 - Linux builds and shares only the Web renderer used by Node and Browser lanes.
 - Each macOS Electron lane builds the Electron renderer locally. The build is normally sub-second and removes Linux-to-macOS build output as a variable.

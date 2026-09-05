@@ -127,7 +127,7 @@ stash.
 
 1. Use a short-lived branch with an approved prefix.
 2. Keep one coherent outcome per PR.
-3. Open every PR as Draft. Draft opens, pushes and reopens run only impact-selected `pr-feedback` (`gate:edit`) inside `ci.yml`.
+3. Open every PR as Draft. Draft opens, pushes and reopens run impact-selected `pr-feedback` (`gate:draft`: Node plus the selected capability canary) inside `ci.yml`.
 4. The PR body must state outcome, boundary, verification, documentation impact and release impact.
 5. Keep the PR Draft while implementation and focused feedback converge. Batch accepted P0/P1 product fixes before promotion. Codex findings are informational: they never block merge, and P2/P3 comments do not require a new SHA.
 6. When the head is ready, update it onto current `main` and mark the PR Ready once, or add the `full-gate` label. That starts the complete source matrix. A PR opened already Ready also takes this path because `draft == false`. Codex review is requested automatically for that head, shown on the PR, and never included in `release-gate`.
@@ -136,7 +136,7 @@ stash.
 
 Do not use an installed app, DMG, backup folder or another checkout as a source for new edits. If the local checkout contains unrelated work, create an isolated Git worktree rather than stashing or mixing changes.
 
-`ci.yml` is the only Pull Request workflow. Draft without `full-gate` runs `pr-feedback` only, so ordinary pushes never consume the Browser/Electron matrix. Ready or `full-gate` runs `branch-policy`, `candidate-context`, `baseline-policy`, one Linux `linux-deps` populate and one macOS `macos-deps` populate, then Linux source build/Node/Browser and both macOS Electron lanes restore that OS/lockfile `node_modules` cache, optional credential-free `Release Dry Run`, and `release-gate`. Ubuntu Node/Browser jobs skip the Electron binary. `release-gate` verifies the baseline lockfile snapshot instead of auditing twice. `codex-review` is `continue-on-error` and is not a `needs` of `release-gate`. Returning to Draft skips the full matrix; a later commit on a Ready PR reruns the complete matrix for the new head. Opening a PR already Ready is supported. A same-run failed-job rerun reuses the successful `source-build` artifact through its run-ID-stable name and 30-day retention. Local development should normally stop at `gate:edit` and `task:finish`.
+`ci.yml` is the only Pull Request workflow. Draft without `full-gate` runs `pr-feedback`: Ubuntu Node plus any selected Browser canary, and a macOS job only when Electron or AI canaries are selected. Ordinary pushes never consume the complete Browser/Electron matrix. Ready or `full-gate` runs `branch-policy`, `candidate-context`, `baseline-policy`, one Linux `linux-deps` populate and one macOS `macos-deps` populate, then Linux source build/Node/Browser and both macOS Electron lanes restore that OS/lockfile `node_modules` cache, optional credential-free `Release Dry Run`, and `release-gate`. Ubuntu Node/Browser jobs skip the Electron binary. `release-gate` verifies the baseline lockfile snapshot instead of auditing twice. `codex-review` is `continue-on-error` and is not a `needs` of `release-gate`. Returning to Draft skips the full matrix; a later commit on a Ready PR reruns the complete matrix for the new head. Opening a PR already Ready is supported. A same-run failed-job rerun reuses the successful `source-build` artifact through its run-ID-stable name and 30-day retention. Local development should normally stop at `gate:edit` and `task:finish`.
 
 ### Informational Codex review
 
