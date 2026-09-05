@@ -187,6 +187,13 @@
       "stage": "draft-canary",
       "seededFault": "active-iframe-cleared"
     },
+    "tests/e2e/electron/electron-seeded-faults.spec.mjs": {
+      "riskId": "runtime-fault-detection",
+      "primaryOwner": "runtime-continuity",
+      "oracle": "live canary fails on injected iframe/candidate faults and recovers after restore",
+      "stage": "draft-canary",
+      "seededFault": "active-iframe-cleared"
+    },
     "tests/e2e/electron/electron-source-recovery.spec.mjs": {
       "riskId": "source-persistence-recovery",
       "primaryOwner": "document-workflow",

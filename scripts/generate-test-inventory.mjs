@@ -1,5 +1,6 @@
 import { readdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { fileURLToPath } from "node:url";
 
 import { nodeTestGroups } from "./test-node-group.mjs";
@@ -7,12 +8,28 @@ import { nodeTestGroups } from "./test-node-group.mjs";
 const scriptPath = fileURLToPath(import.meta.url);
 const productRoot = path.resolve(path.dirname(scriptPath), "..");
 
+export const PLAYWRIGHT_EXECUTION_LANES = Object.freeze([
+  { id: "browser-full", config: "tests/e2e/browser/playwright.config.mjs", stage: "ready-full" },
+  { id: "browser-real-html", config: "tests/e2e/browser/playwright.real-html.config.mjs", stage: "ready-full" },
+  { id: "electron-native", config: "tests/e2e/electron/playwright.config.mjs", stage: "ready-full" },
+  { id: "electron-ai", config: "tests/e2e/electron/playwright.ai-closed-loop.config.mjs", stage: "ready-full" },
+  { id: "electron-ci-preflight", config: "tests/e2e/electron/playwright.ci-preflight.config.mjs", stage: "ready-full" },
+  { id: "electron-review-annotation", config: "tests/e2e/electron/playwright.review-annotation.config.mjs", stage: "ready-full" },
+  { id: "electron-packaged", config: "tests/e2e/electron/playwright.packaged.config.mjs", stage: "release" },
+  { id: "electron-packaged-startup", config: "tests/e2e/electron/playwright.packaged-startup.config.mjs", stage: "release" },
+  { id: "browser-smoke", config: "tests/e2e/browser/playwright.smoke.config.mjs", stage: "draft-canary" },
+  { id: "electron-smoke", config: "tests/e2e/electron/playwright.smoke.config.mjs", stage: "draft-canary" },
+  { id: "ai-smoke", config: "tests/e2e/electron/playwright.ai-smoke.config.mjs", stage: "draft-canary" },
+]);
+
 async function walk(directory, matches = []) {
   const entries = await readdir(directory, { withFileTypes: true });
   for (const entry of entries) {
     const fullPath = path.join(directory, entry.name);
     if (entry.isDirectory()) await walk(fullPath, matches);
-    else if (entry.isFile() && entry.name.endsWith(".spec.mjs")) matches.push(fullPath);
+    else if (entry.isFile() && (entry.name.endsWith(".spec.mjs") || entry.name.endsWith(".gate.mjs"))) {
+      matches.push(fullPath);
+    }
   }
   return matches;
 }
@@ -33,10 +50,52 @@ function parseSpecTests(source, file) {
   return tests.map((test) => ({ file, ...test }));
 }
 
-export async function collectTestInventory(root = productRoot) {
-  const specFiles = (await walk(path.join(root, "tests/e2e")))
+function matchesTestMatch(fileName, testMatch) {
+  const patterns = Array.isArray(testMatch) ? testMatch : [testMatch];
+  return patterns.some((pattern) => {
+    if (pattern instanceof RegExp) return pattern.test(fileName);
+    if (typeof pattern === "string") return fileName.includes(pattern) || fileName === pattern;
+    return false;
+  });
+}
+
+async function filesForLane(root, lane) {
+  const configModule = await import(pathToFileURL(path.join(root, lane.config)).href);
+  const config = configModule.default;
+  const testDir = config.testDir || path.dirname(path.join(root, lane.config));
+  const testMatch = config.testMatch;
+  const files = (await walk(testDir))
+    .filter((file) => matchesTestMatch(path.basename(file), testMatch))
     .map((file) => path.relative(root, file).replaceAll("\\", "/"))
     .sort();
+  return { ...lane, files };
+}
+
+export async function collectExecutionPlan(root = productRoot) {
+  const lanes = [];
+  for (const lane of PLAYWRIGHT_EXECUTION_LANES) {
+    lanes.push(await filesForLane(root, lane));
+  }
+  const filesByStage = {};
+  for (const lane of lanes) {
+    const bucket = filesByStage[lane.stage] || new Set();
+    for (const file of lane.files) bucket.add(file);
+    filesByStage[lane.stage] = bucket;
+  }
+  return {
+    lanes,
+    filesByStage: Object.fromEntries(
+      Object.entries(filesByStage).map(([stage, files]) => [stage, [...files].sort()]),
+    ),
+  };
+}
+
+export async function collectTestInventory(root = productRoot) {
+  const discovered = (await walk(path.join(root, "tests/e2e")))
+    .map((file) => path.relative(root, file).replaceAll("\\", "/"))
+    .sort();
+  const specFiles = discovered.filter((file) => file.endsWith(".spec.mjs"));
+  const gateFiles = discovered.filter((file) => file.endsWith(".gate.mjs"));
   const playwright = [];
   for (const file of specFiles) {
     const source = await readFile(path.join(root, file), "utf8");
@@ -49,11 +108,14 @@ export async function collectTestInventory(root = productRoot) {
       files.map((file) => path.relative(root, file).replaceAll("\\", "/")).sort(),
     ]),
   );
+  const execution = await collectExecutionPlan(root);
   return {
     generatedBy: "scripts/generate-test-inventory.mjs",
     specFiles,
+    gateFiles,
     playwright,
     node,
+    execution,
   };
 }
 
@@ -72,6 +134,14 @@ export async function assertTestInventory(root = productRoot) {
   if (inventory.playwright.length < 1) {
     throw new Error("Playwright inventory is empty.");
   }
+  const realHtml = inventory.execution.lanes.find((lane) => lane.id === "browser-real-html");
+  if (!realHtml?.files.includes("tests/e2e/browser/real-complex-html.gate.mjs")) {
+    throw new Error("Real-html execution lane does not include real-complex-html.gate.mjs.");
+  }
+  const review = inventory.execution.lanes.find((lane) => lane.id === "electron-review-annotation");
+  if (!review?.files.includes("tests/e2e/electron/review-annotation-clarity.spec.mjs")) {
+    throw new Error("Review-annotation execution lane does not include review-annotation-clarity.spec.mjs.");
+  }
   return inventory;
 }
 
@@ -79,7 +149,10 @@ async function run() {
   const inventory = await assertTestInventory();
   const outputPath = path.join(productRoot, "tests/TEST_INVENTORY.json");
   await writeFile(outputPath, `${JSON.stringify(inventory, null, 2)}\n`);
-  process.stdout.write(`${inventory.specFiles.length} spec files, ${inventory.playwright.length} Playwright tests, ${inventory.node.full.length} Node tests\n`);
+  process.stdout.write(
+    `${inventory.specFiles.length} spec files, ${inventory.playwright.length} Playwright tests, `
+    + `${inventory.execution.lanes.length} execution lanes, ${inventory.node.full.length} Node tests\n`,
+  );
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === scriptPath) {

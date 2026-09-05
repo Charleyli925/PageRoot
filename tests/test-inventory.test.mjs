@@ -15,10 +15,37 @@ const ledger = JSON.parse(
 const ownerIds = new Set(map.rules.map((rule) => rule.id));
 const seededFaultIds = new Set(SEEDED_FAULTS.map((fault) => fault.id));
 
+test("HtmlCanvasEditor draft canary includes all three runtime continuity scenarios", async () => {
+  const source = await readFile(
+    new URL("./e2e/electron/electron-runtime-continuity.spec.mjs", import.meta.url),
+    "utf8",
+  );
+  for (const title of [
+    "continuous editing keeps the Runtime document through type, Enter, style and save",
+    "continuous editing on a Script page keeps the Runtime document",
+    "comment rail and canvas width stay visually continuous while typing in a nested scroller",
+    "double-clicking the sixth blank line after a Runtime refresh places the caret on that br",
+  ]) {
+    assert.match(source, new RegExp(`${title}[\\s\\S]{0,80}@smoke-editing`, "u"));
+  }
+});
+
 test("Playwright inventory stays aligned with the repository and E2E README", async () => {
   const inventory = await assertTestInventory();
   assert.ok(inventory.specFiles.includes("tests/e2e/electron/electron-runtime-continuity.spec.mjs"));
-  assert.ok(inventory.specFiles.includes("tests/e2e/electron/electron-runtime-scripts.spec.mjs"));
+  assert.ok(inventory.specFiles.includes("tests/e2e/electron/electron-seeded-faults.spec.mjs"));
+  assert.ok(inventory.gateFiles.includes("tests/e2e/browser/real-complex-html.gate.mjs"));
+  assert.ok(
+    inventory.execution.filesByStage["ready-full"].includes(
+      "tests/e2e/electron/review-annotation-clarity.spec.mjs",
+    ),
+  );
+  assert.equal(
+    inventory.execution.lanes.find((lane) => lane.id === "electron-native").files.includes(
+      "tests/e2e/electron/review-annotation-clarity.spec.mjs",
+    ),
+    false,
+  );
   assert.ok(inventory.specFiles.includes("tests/e2e/electron/ai-review-versions.spec.mjs"));
   assert.equal(
     inventory.specFiles.includes("tests/e2e/browser/native-dom-editing.spec.mjs"),
@@ -45,4 +72,14 @@ test("risk ledger covers every Playwright spec file and no retired paths", async
   assert.deepEqual(missing, []);
   const extra = Object.keys(ledger.files).filter((file) => !inventory.specFiles.includes(file));
   assert.deepEqual(extra, []);
+});
+
+test("ledger ready-full files are selected by an actual Ready Playwright config", async () => {
+  const inventory = await assertTestInventory();
+  const readyFiles = new Set(inventory.execution.filesByStage["ready-full"] || []);
+  const unexecuted = Object.entries(ledger.files)
+    .filter(([, entry]) => entry.stage === "ready-full")
+    .map(([file]) => file)
+    .filter((file) => !readyFiles.has(file));
+  assert.deepEqual(unexecuted, []);
 });
