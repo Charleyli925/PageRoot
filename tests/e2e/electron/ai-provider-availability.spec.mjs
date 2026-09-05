@@ -861,8 +861,18 @@ test("Qoder ACP polling waits for start and a managed stop kills the Agent", {
 
     await stopButton.click();
     const endingButton = launched.page.getByRole("button", { name: "正在结束…" });
-    await expect(endingButton).toBeVisible();
-    await expect(endingButton).toBeDisabled();
+    const roundStopButton = launched.page.getByRole("button", { name: "结束本轮" });
+    // Cancelling can finish before Playwright samples the disabled label. The
+    // user contract is that stop ends the round and kills the Agent. If the
+    // in-flight label appears, it must be disabled; if the round already left
+    // that frame, "结束本轮" must be gone.
+    await expect.poll(async () => {
+      if (await endingButton.isVisible().catch(() => false)) {
+        await expect(endingButton).toBeDisabled();
+        return "cancelling";
+      }
+      return (await roundStopButton.count()) === 0 ? "ended" : "";
+    }, { timeout: 45_000 }).not.toBe("");
     await expect(launched.page.locator(".toast.show")).toHaveCount(0);
     await expect(launched.page.locator('aside[aria-label="本轮评论"]')
       .getByRole("button", { name: "全局评论", exact: true }))

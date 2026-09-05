@@ -513,16 +513,24 @@ export async function addComment(page, sourcePath, text = (
   // Escape may end a pending edit boundary and start the latest Runtime
   // handoff. Resolve both the frame and target only after that handoff has
   // settled; a fixed physical slot is never proof that its Document is Active.
-  await expect(editor).not.toHaveAttribute(
-    "data-runtime-handoff",
-    /^(?:preparing|positioning|active)$/u,
-    { timeout: 60_000 },
-  );
-  const frame = await loadedDiskFrame(page, active?.sourcePath || sourcePath);
-  const target = frame.locator(targetSelector || caseSelector(targetCase));
-  await frame.locator("body").click({ position: { x: 2, y: 2 } });
-  await target.scrollIntoViewIfNeeded();
-  await target.click();
+  // Runtime can replace the Active iframe after the handoff attribute clears.
+  // Re-resolve the current frame until the native target actually receives the
+  // click; a detached list item is not proof that commenting is unavailable.
+  await expect(async () => {
+    await expect(editor).not.toHaveAttribute(
+      "data-runtime-handoff",
+      /^(?:preparing|positioning|active)$/u,
+      { timeout: 60_000 },
+    );
+    const current = await page.evaluate(
+      () => window.htmlAIProjects?.getActiveProject(),
+    );
+    const frame = await loadedDiskFrame(page, current?.sourcePath || sourcePath);
+    const target = frame.locator(targetSelector || caseSelector(targetCase));
+    await frame.locator("body").click({ position: { x: 2, y: 2 } });
+    await target.scrollIntoViewIfNeeded();
+    await target.click({ timeout: 8_000 });
+  }).toPass({ timeout: 60_000, intervals: [250, 500, 1_000] });
   const commentButton = page.getByRole("button", { name: /给.+留评论/u })
     .filter({ visible: true })
     .first();

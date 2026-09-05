@@ -84,7 +84,29 @@ Inspect the selected task coverage without running it:
 npm run gate:plan -- --base origin/main
 ```
 
-The compact JSON lists changed files, matched owners, Node tests, capability canaries, estimated fan-out, and a schema-v2 capability context from `scripts/capability-context.json`. Its `defaultLevel` is `contract`: read `capabilityContext.contract.files` first; it contains only the matched entry interfaces and reports their `estimatedBytes`. Expand to `capabilityContext.implementation.files` only when implementation evidence is needed; that set adds implementation files, focused tests, and required docs and has its own `estimatedBytes`. `owners` remains top-level capability context metadata. Width warnings are informational. After an environment flake on the same source hash, resume with `npm run gate:task -- --resume <run-id>`; reuse requires an identical HEAD tree, dirty change-set, base, package-lock, Node version, platform, suite commands and surviving build artifacts. Ready/release/candidate/artifact complete proofs never resume.
+Before any files have changed, query the same reading map by capability or known path:
+
+```bash
+npm run gate:plan -- --context-domain comments
+npm run gate:plan -- --context-file app/lib/source-structure-edit.js
+```
+
+Those flags are plan-only. They choose the reading set from the requested
+domain or path, never from mixing in the current Git diff. They never change
+test selection, and `task:finish` keeps its fixed `origin/main` comparison base.
+When several domains share a document, a whole-file requirement covers any
+chapter requirement for that file.
+
+The compact JSON lists changed files, matched owners, Node tests, capability canaries, estimated fan-out, and a schema-v2 capability context from `scripts/capability-context.json`. Its `defaultLevel` is `contract`: read `capabilityContext.contract.files` first; it contains only the matched entry interfaces and reports their `estimatedBytes`. Expand `implementationFiles`, `focusedTests` and `requiredDocs` (with named `sections`) only when that next class is needed. The flattened `implementation` set remains their union. `owners` remains top-level capability context metadata. Width warnings are informational. After an environment flake on the same source hash, resume with `npm run gate:task -- --resume <run-id>`; reuse requires an identical HEAD tree, dirty change-set, base, package-lock, Node version, platform, suite commands and surviving build artifacts. Ready/release/candidate/artifact complete proofs never resume.
+
+After `gate:edit` or `task:finish` has passed for the current change, enlarge or
+repeat verification only for new code, a new failure or a specific unresolved
+risk. Do not rerun `npm test`, the complete Browser/Electron matrix or packaging
+as extra insurance. Node passing does not prove Enter, IME, caret or iframe
+continuity; keep public-behavior evidence for those paths. Packaging, merge and
+release stay outside ordinary development unless the user explicitly requests
+them. The installer rules in this file apply only to those authorized package
+requests.
 
 ### Audit and retire
 
@@ -209,7 +231,7 @@ Behavior and its documentation form one change. Use this routing table:
 | Change Request, Attempt, completion, version or schema | `docs/CHANGE_REQUEST_PROTOCOL.md`, schemas, fixtures and compatibility tests |
 | Development commands, CI or test ownership | `docs/DEVELOPMENT.md`, `tests/TEST_STRATEGY.md`, test impact map |
 | Git or collaboration behavior | `docs/GIT_WORKFLOW.md`, `CONTRIBUTING.md`, `AGENTS.md` when the permanent rule changes |
-| Architecture capability routing or user-visible guards | `docs/ARCHITECTURE_MAP.md`, `docs/GUARD_LEDGER.md`, `docs/ENGINEERING_STANDARDS.md` |
+| Architecture capability routing or user-visible guards | `docs/ARCHITECTURE_MAP.md`, `scripts/capability-context.json`, `docs/GUARD_LEDGER.md`, `docs/ENGINEERING_STANDARDS.md` |
 | Packaging, provenance, signing or publication | `docs/RELEASING.md`, `CHANGELOG.md` |
 | Dependency policy or advisory exception | `docs/DEPENDENCY_SECURITY.md` |
 | Public/private source boundary | `docs/OPEN_SOURCE_BOUNDARY.md`, notices, contribution or security policies as applicable |
