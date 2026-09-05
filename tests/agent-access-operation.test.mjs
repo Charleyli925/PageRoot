@@ -87,3 +87,12 @@ test("credential errors map to the field that the user can correct", () => {
   assert.equal(credentialErrorField("AGENT_ENDPOINT_REGION_MISMATCH"), "baseUrl");
   assert.equal(credentialErrorField("AGENT_PROVIDER_UNAVAILABLE"), null);
 });
+
+test("credential field mapping stays on structured error codes", async () => {
+  const { credentialErrorField } = await import("../shared/agent-access-operation.mjs");
+  assert.equal(credentialErrorField("AGENT_AUTH_REQUIRED"), "apiKey");
+  assert.equal(credentialErrorField("AGENT_SELECTION_UNSUPPORTED"), "modelId");
+  assert.equal(credentialErrorField("AGENT_ENDPOINT_REGION_MISMATCH"), "baseUrl");
+  assert.equal(credentialErrorField("AGENT_PROVIDER_UNAVAILABLE"), null);
+});
+
