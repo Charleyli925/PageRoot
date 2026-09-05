@@ -1084,7 +1084,17 @@ export class AgentCatalogState {
       });
     }
     this.#invalidateProvider(frozen.providerId);
-    this.#patchProvider(frozen.providerId, { installState: "installing" });
+    const generation = (this.#generationByProvider.get(frozen.providerId) || 0) + 1;
+    this.#generationByProvider.set(frozen.providerId, generation);
+    this.#patchProvider(frozen.providerId, {
+      installState: "installing",
+      activeOperation: createAccessOperation({
+        providerId: frozen.providerId,
+        kind: "install",
+        generation,
+        startedAt: validDate(this.#clock),
+      }),
+    });
     this.#setAvailability(frozen.providerId, checkingAgentProviderAvailability(provider.availability));
     try {
       await this.#bridgeClient.installAgent({ providerId: frozen.providerId });
@@ -1149,6 +1159,10 @@ export class AgentCatalogState {
     const frozen = freezeAgentSelection(selection);
     const provider = this.provider(frozen);
     const operation = publicAccessOperation(provider?.activeOperation);
+    const installing = ["installing", "cancelling"].includes(provider?.installState);
+    if (installing && (!operation || operation.kind === "install")) {
+      return this.cancelInstall(frozen);
+    }
     if (!operation) return null;
     if (operation.kind === "install") {
       return this.cancelInstall(frozen);
