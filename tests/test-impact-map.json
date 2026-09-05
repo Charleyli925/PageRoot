@@ -353,7 +353,10 @@
         "^scripts/source-gate-attestation-guard\\.mjs$",
         "^scripts/playwright-retry-policy\\.mjs$",
         "^tests/source-gate-attestation-guard\\.test\\.mjs$",
-        "^tests/e2e/(?:browser|electron)/playwright(?:\\.[a-z-]+)?\\.config\\.mjs$"
+        "^tests/e2e/browser/playwright\\.config\\.mjs$",
+        "^tests/e2e/electron/playwright\\.config\\.mjs$",
+        "^tests/e2e/electron/playwright\\.ai-closed-loop\\.config\\.mjs$",
+        "^tests/e2e/electron/playwright\\.ci-preflight\\.config\\.mjs$"
       ],
       "suites": [],
       "nodeTests": [
