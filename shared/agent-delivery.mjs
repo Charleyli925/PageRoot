@@ -276,12 +276,6 @@ export function publicCompatibilityDriver(selection) {
   return shippedLegacyDriver(selection) || selection?.providerId || null;
 }
 
-export function legacyDriverForAgentDelivery(value) {
-  const delivery = normalizeAgentDelivery(value);
-  if (delivery.mode !== MANAGED_AGENT_MODE) return null;
-  return assertShippedManagedSelection(delivery.selection).legacyDriver;
-}
-
 // New durable writes are narrower than historical reads. Unknown providers are
 // retained by normalizeAgentDelivery so their records remain inspectable and
 // cancellable, but a build may create a managed Request only for a binding it

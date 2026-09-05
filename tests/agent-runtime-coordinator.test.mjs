@@ -18,6 +18,17 @@ const IDENTITY = Object.freeze({
   attemptId: "attempt_001",
   sourcePath: "/tmp/runtime-contract.html",
 });
+const SYNTHETIC_SELECTION = Object.freeze({
+  providerId: "synthetic-provider",
+  runtimeId: "synthetic-runtime",
+  requestedModelId: null,
+  resolvedModelId: null,
+  reasoning: Object.freeze({
+    requested: null,
+    applied: null,
+    resolution: "provider-default",
+  }),
+});
 const CONFIGURATION = Object.freeze({
   schemaVersion: "1.0.0",
   providerId: "synthetic-provider",
@@ -65,8 +76,7 @@ function registry({ run, verifyTicket, preflight } = {}) {
       resolution: "provider-default",
     }),
   });
-  const prepared = (driver) => Object.freeze({
-    ...(driver ? { driver } : {}),
+  const prepared = () => Object.freeze({
     providerId: "synthetic-provider",
     runtimeId: "synthetic-runtime",
     securityProfile: "client-mediated",
@@ -78,16 +88,6 @@ function registry({ run, verifyTicket, preflight } = {}) {
     configuration: CONFIGURATION,
   });
   return {
-    resolveDriver(driver) {
-      if (driver !== "synthetic-driver") throw Object.assign(new Error("unsupported"), {
-        code: "AGENT_DRIVER_UNSUPPORTED",
-      });
-      return {};
-    },
-    selectionFromDriver(driver) {
-      this.resolveDriver(driver);
-      return selection;
-    },
     resolveSelection(received) {
       if (received?.providerId !== selection.providerId
         || received?.runtimeId !== selection.runtimeId) {
@@ -102,10 +102,8 @@ function registry({ run, verifyTicket, preflight } = {}) {
     availabilityForSelection: async () => ({ status: "ready" }),
     preflightForSelection: preflight || (async (received) => {
       if (received?.providerId !== selection.providerId) throw new Error("selection mismatch");
-      return prepared(null);
+      return prepared();
     }),
-    availability: async () => ({ status: "ready" }),
-    preflight: async ({ driver }) => prepared(driver),
     verifyTicket: verifyTicket || (async (ticket) => ticket),
     loadExecutionPolicy: async (_ticket, input) => ({
       ...input,
@@ -115,8 +113,6 @@ function registry({ run, verifyTicket, preflight } = {}) {
     run: run || (async () => {}),
     classifyRunFailure: (_ticket, cause) => cause?.code || "AGENT_RUN_FAILED",
     failureMessage: (_ticket, code) => `failure:${code}`,
-    failureMessageForDriver: (_driver, code) => `failure:${code}`,
-    preflightFailureMessageForDriver: (_driver, code) => `preflight:${code}`,
     failureMessageForSelection(received, code) {
       this.resolveSelection(received);
       return `failure:${code}`;
@@ -183,7 +179,7 @@ test("Frozen Requests cannot alter configuration audit fields behind a valid dig
     await assert.rejects(
       coordinator.submit({
         ...IDENTITY,
-        driver: "synthetic-driver",
+        selection: SYNTHETIC_SELECTION,
         trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
         preflightId: ticket.preflightId,
         configurationDigest: ticket.configuration.configurationDigest,
@@ -197,7 +193,7 @@ test("Frozen Requests cannot alter configuration audit fields behind a valid dig
 
 async function ready(coordinator, purpose = "execution") {
   return coordinator.preflight({
-    driver: "synthetic-driver",
+    selection: SYNTHETIC_SELECTION,
     purpose,
     trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
   });
@@ -233,7 +229,7 @@ test("preflight rejects removed purposes and execution tickets are one-use, TTL-
   const singleUse = await ready(coordinator);
   await coordinator.redeemCommandTicket(singleUse.preflightId, {
     purpose: "execution",
-    driver: "synthetic-driver",
+    selection: SYNTHETIC_SELECTION,
   });
   await assert.rejects(
     coordinator.redeemCommandTicket(singleUse.preflightId, { purpose: "execution" }),
@@ -371,7 +367,7 @@ test("release false keeps the lease fence and blocks shutdown", async () => {
   const ticket = await ready(coordinator);
   await coordinator.submit({
     ...IDENTITY,
-    driver: "synthetic-driver",
+    selection: SYNTHETIC_SELECTION,
     trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
     preflightId: ticket.preflightId,
     configurationDigest: ticket.configuration.configurationDigest,
@@ -402,7 +398,7 @@ test("runtime failure keeps retry safety separate from the recovery action", asy
   const ticket = await ready(coordinator);
   await coordinator.submit({
     ...IDENTITY,
-    driver: "synthetic-driver",
+    selection: SYNTHETIC_SELECTION,
     trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
     preflightId: ticket.preflightId,
     configurationDigest: ticket.configuration.configurationDigest,
@@ -436,7 +432,7 @@ test("durable cancellation is never written after cleanup or lease release fails
   const ticket = await ready(coordinator);
   await coordinator.submit({
     ...IDENTITY,
-    driver: "synthetic-driver",
+    selection: SYNTHETIC_SELECTION,
     trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
     preflightId: ticket.preflightId,
     configurationDigest: ticket.configuration.configurationDigest,
@@ -547,7 +543,7 @@ test("execution status projects only public Agent text with frozen provider iden
   const ticket = await ready(coordinator);
   await coordinator.submit({
     ...IDENTITY,
-    driver: "synthetic-driver",
+    selection: SYNTHETIC_SELECTION,
     trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
     preflightId: ticket.preflightId,
     configurationDigest: ticket.configuration.configurationDigest,
@@ -600,7 +596,7 @@ test("cancellation keeps late Agent narration out of the public session", async 
   const ticket = await ready(coordinator);
   await coordinator.submit({
     ...IDENTITY,
-    driver: "synthetic-driver",
+    selection: SYNTHETIC_SELECTION,
     trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
     preflightId: ticket.preflightId,
     configurationDigest: ticket.configuration.configurationDigest,
@@ -668,39 +664,14 @@ test("an unknown historical provider stays readable but cannot become start auth
   );
 });
 
-test("current execution converts a supported driver once and rejects a conflicting selection", async () => {
+test("current execution requires a canonical selection and never converts a leftover driver", async () => {
   const coordinator = new AgentRuntimeCoordinator({ providerRegistry: registry() });
-  const selection = Object.freeze({
-    providerId: "synthetic-provider",
-    runtimeId: "synthetic-runtime",
-    requestedModelId: null,
-    resolvedModelId: null,
-    reasoning: Object.freeze({
-      requested: null,
-      applied: null,
-      resolution: "provider-default",
-    }),
-  });
   await assert.rejects(
     coordinator.preflight({
       driver: "synthetic-driver",
-      selection: {
-        providerId: "qoder",
-        runtimeId: "acp",
-        requestedModelId: null,
-        resolvedModelId: null,
-        reasoning: selection.reasoning,
-      },
       trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
     }),
     (error) => error?.code === "AGENT_SELECTION_UNSUPPORTED",
-  );
-  await assert.rejects(
-    coordinator.preflight({
-      driver: "unknown-driver",
-      trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
-    }),
-    (error) => error?.code === "AGENT_DRIVER_UNSUPPORTED",
   );
   await assert.rejects(
     coordinator.preflight({
@@ -710,22 +681,15 @@ test("current execution converts a supported driver once and rejects a conflicti
   );
 
   const fromSelection = await coordinator.preflight({
-    selection,
+    selection: SYNTHETIC_SELECTION,
     trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
   });
   assert.equal("driver" in fromSelection, false);
   const redeemed = await coordinator.redeemCommandTicket(fromSelection.preflightId, {
     purpose: "execution",
-    driver: "synthetic-driver",
+    selection: SYNTHETIC_SELECTION,
   });
   assert.equal("driver" in redeemed, false);
   assert.equal(redeemed.selection.providerId, "synthetic-provider");
-
-  const fromDriver = await coordinator.preflight({
-    driver: "synthetic-driver",
-    trustPolicyAccepted: TRUSTED_LOCAL_AGENT_POLICY_VERSION,
-  });
-  assert.equal(fromDriver.driver, "synthetic-driver");
-  assert.equal(fromDriver.selection.providerId, "synthetic-provider");
   await coordinator.shutdown();
 });
