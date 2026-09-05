@@ -55,11 +55,11 @@ const appChannels = Object.freeze({
 });
 const integrationChannels = Object.freeze({
   qoderHandoff: "html-integrations:qoder-handoff",
+  openAgentLogin: "html-agent-access:open-login",
   openVendorApiKey: "html-agent-access:open-vendor-key",
   persistSessionCredential: "html-agent-access:persist-credential",
   clearSessionCredential: "html-agent-access:clear-credential",
   sessionCredentialStatus: "html-agent-access:credential-status",
-  openAgentLogin: "html-agent-access:open-login",
   restoreSessionCredential: "html-agent-access:restore-credential",
 });
 const updateChannels = Object.freeze({
@@ -263,6 +263,13 @@ const integrationsApi = Object.freeze({
     integrationChannels.qoderHandoff,
     payload,
   ),
+  openAgentLogin: (payload) => {
+    const providerId = String(payload?.providerId || "").trim();
+    if (providerId !== "qoder" && providerId !== "codex") {
+      return Promise.reject(new TypeError("官方登录入口无效。"));
+    }
+    return invokeProject(integrationChannels.openAgentLogin, { providerId });
+  },
   openVendorApiKeyPage: (vendorId) => {
     const id = String(vendorId || "").trim();
     if (!["deepseek", "zhipu", "dashscope", "openai"].includes(id)) {
@@ -284,13 +291,6 @@ const integrationsApi = Object.freeze({
   clearSessionCredential: () => invokeProject(integrationChannels.clearSessionCredential),
   sessionCredentialStatus: () => invokeProject(integrationChannels.sessionCredentialStatus),
   restoreSessionCredential: () => invokeProject(integrationChannels.restoreSessionCredential),
-  openAgentLogin: (payload) => {
-    const providerId = String(payload?.providerId || "").trim();
-    if (providerId !== "qoder" && providerId !== "codex") {
-      return Promise.reject(new TypeError("官方登录入口无效。"));
-    }
-    return invokeProject(integrationChannels.openAgentLogin, { providerId });
-  },
 });
 const updateStatusListeners = new Map();
 const updatesApi = Object.freeze({

@@ -64,6 +64,8 @@ export const APP_SOURCE_FILES = [
   "desktop/edit-runtime-library-store.mjs",
   "desktop/edit-runtime-protocol.mjs",
   "desktop/edit-runtime-preparation-fence.mjs",
+  "desktop/agent-login-url.mjs",
+  "shared/agent-vendor-key-url.mjs",
   "app/domain/edit-runtime-contract.js",
   "public/brand-logo.png",
   "dist-desktop/renderer/index.html",
@@ -479,11 +481,6 @@ export async function createSyntheticAppBundle(t, {
     ),
     writeFixtureFile(
       productRoot,
-      "shared/agent-vendor-key-url.mjs",
-      "export const AGENT_VENDOR_KEY_VENDOR_IDS = Object.freeze([]);\nexport const publicAgentVendorKeyUrl = () => null;\n",
-    ),
-    writeFixtureFile(
-      productRoot,
       "shared/agent-login-url.mjs",
       "export const fixtureAgentLoginUrl = true;\n",
     ),
@@ -491,6 +488,11 @@ export async function createSyntheticAppBundle(t, {
       productRoot,
       "shared/agent-auth-source.mjs",
       "export const fixtureAgentAuthSource = true;\n",
+    ),
+    writeFixtureFile(
+      productRoot,
+      "shared/agent-vendor-key-url.mjs",
+      "export const AGENT_VENDOR_KEY_VENDOR_IDS = Object.freeze([]);\nexport const publicAgentVendorKeyUrl = () => null;\n",
     ),
     writeFixtureFile(
       productRoot,
@@ -599,7 +601,6 @@ export async function createSyntheticAppBundle(t, {
       "conversation.mjs",
       "agent-delivery.mjs",
       "agent-access-operation.mjs",
-      "agent-vendor-key-url.mjs",
       "agent-login-url.mjs",
       "agent-auth-source.mjs",
       "openai-compatible-vendors.mjs",

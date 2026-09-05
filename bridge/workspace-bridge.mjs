@@ -46,8 +46,8 @@ import {
 } from "./workspace-bridge-shutdown.mjs";
 import {
   defaultManagedAgentDelivery,
+  legacyDriverForAgentDelivery,
   normalizeAgentDelivery,
-  publicCompatibilityDriver,
 } from "../shared/agent-delivery.mjs";
 import {
   compileTaskSpec,
@@ -1462,6 +1462,14 @@ async function resolveAgentBridgeTask(identity) {
   return { target, request: status.request || null, run };
 }
 
+function compatibilityDriverForAgentDelivery(delivery) {
+  try {
+    return legacyDriverForAgentDelivery(delivery);
+  } catch {
+    return null;
+  }
+}
+
 function agentSessionForStatus({ request, run, lifecycleStatus }) {
   const delivery = request?.request?.agentDelivery;
   if (!run || delivery?.mode === "clipboard") return null;
@@ -1471,7 +1479,8 @@ function agentSessionForStatus({ request, run, lifecycleStatus }) {
   } catch {
     return null;
   }
-  const publicDriver = publicCompatibilityDriver(normalizedDelivery.selection);
+  const compatibilityDriver = compatibilityDriverForAgentDelivery(normalizedDelivery);
+  const publicDriver = compatibilityDriver || normalizedDelivery.selection.providerId;
   const identity = {
     projectId: run.projectId,
     documentId: run.documentId,

@@ -4,10 +4,9 @@ import assert from "node:assert/strict";
 import {
   agentRecoveryKindForError,
   defaultManagedAgentDelivery,
+  legacyDriverForAgentDelivery,
   normalizeAgentDelivery,
   normalizeNewAgentDelivery,
-  publicCompatibilityDriver,
-  shippedLegacyDriver,
 } from "../shared/agent-delivery.mjs";
 
 test("structured Agent errors map technical retry safety to truthful recovery", () => {
@@ -92,7 +91,7 @@ test("malformed policy, reasoning and cross-provider model ids fail closed", () 
   }
 });
 
-test("unknown provider history is readable but cannot become a new start binding", () => {
+test("unknown provider history is readable but cannot resolve to a shipped start binding", () => {
   const delivery = normalizeAgentDelivery({
     mode: "managed-agent",
     selection: {
@@ -105,25 +104,29 @@ test("unknown provider history is readable but cannot become a new start binding
     trustPolicyVersion: "trusted-local-agent-v1",
   });
   assert.equal(delivery.selection.providerId, "future-agent");
-  assert.equal(shippedLegacyDriver(delivery.selection), null);
+  assert.throws(() => legacyDriverForAgentDelivery(delivery), {
+    code: "AGENT_PROVIDER_UNSUPPORTED",
+  });
   assert.throws(() => normalizeNewAgentDelivery(delivery), {
     code: "AGENT_PROVIDER_UNSUPPORTED",
   });
 });
 
-test("new Request validation uses the shipped binding, not a legacy driver alias", () => {
+test("new Request validation uses the shipped binding, not a leftover driver alias", () => {
   const qoder = defaultManagedAgentDelivery();
-  assert.equal(shippedLegacyDriver(qoder.selection), "qoder-acp");
-  assert.equal(publicCompatibilityDriver(qoder.selection), "qoder-acp");
+  assert.equal(legacyDriverForAgentDelivery(qoder), "qoder-acp");
   const codex = {
-    providerId: "codex",
-    runtimeId: "acp",
-    requestedModelId: null,
-    resolvedModelId: null,
-    reasoning: { requested: null, applied: null, resolution: "provider-default" },
+    mode: "managed-agent",
+    selection: {
+      providerId: "codex",
+      runtimeId: "acp",
+      requestedModelId: null,
+      resolvedModelId: null,
+      reasoning: { requested: null, applied: null, resolution: "provider-default" },
+    },
+    trustPolicyVersion: "trusted-local-agent-v1",
   };
-  assert.equal(shippedLegacyDriver(codex), null);
-  assert.equal(publicCompatibilityDriver(codex), "codex");
+  assert.equal(legacyDriverForAgentDelivery(codex), null);
 });
 
 test("new writers reject legacy delivery while its historical projection stays readable", () => {
@@ -177,7 +180,7 @@ test("shipped Codex ACP and 源页 HTTP deliveries can be newly frozen", () => {
       },
     };
     assert.deepEqual(normalizeNewAgentDelivery(delivery).selection.providerId, selection.providerId);
-    assert.equal(shippedLegacyDriver(selection), null);
+    assert.equal(legacyDriverForAgentDelivery(delivery), null);
   }
 });
 

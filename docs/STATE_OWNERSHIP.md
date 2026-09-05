@@ -38,7 +38,7 @@
 | Staged comment attachments and references | Draft aggregate attachment repository | managed draft attachment directory plus draft references | composer and Request freeze |
 | Active/background AI run projections, per-Request Agent delivery mode/session status, recovered handoff-risk disposition, background results, submission phase/unknown-outcome lock and renderer operation locks | Renderer `RunSession` | none beyond authoritative runtime and immutable Request/Attempt records; ACP events are bounded presentation evidence, never Candidate authority | `RunWorkflow`, conversation sidebar, drain coordinator and project context |
 | Renderer Agent provider availability, selected provider/runtime/model/reasoning, bounded public model catalog, installable/installSource/installState projection and selection-keyed preflight cache | `AgentCatalogState` | Settings consumes the Bridge-owned four-fact `AgentDiagnosticSnapshot`; diagnosis is selection-keyed single-flight, never owns a ticket or changes selection, and cannot erase stronger preflight/use evidence. Renderer hydrates `installState` but Bridge remains the install-job owner. Execution tickets are keyed by frozen provider/runtime/model/reasoning/installation/trust and deleted when handed to execution | `WorkspaceController`, Settings, conversation sidebar and `RunWorkflow` |
-| 源页 Agent session Token | Bridge `AgentRuntimeCoordinator` | process memory for the live session; optional Main `safeStorage` ciphertext under `userData/agent-session-credential.v1.json` only after explicit remember; never `ui-preferences.json`, logs or GET responses | Settings connection card; Renderer posts `POST /agent/session-credential` and never rereads the secret |
+| 源页 Agent session Token | Bridge `AgentRuntimeCoordinator` | process memory for the live session, injected only as `PAGEROOT_API_KEY` / `PAGEROOT_API_VENDOR` / `PAGEROOT_API_BASE_URL` for `pageroot`/`http`; optional Main `safeStorage` ciphertext under `userData/agent-session-credential.v1.json` only after explicit remember; never plaintext on disk, `ui-preferences.json`, logs or GET responses | Settings connection card; Renderer posts `POST /agent/session-credential` and never rereads the secret |
 | Product ACP allowlist, managed Agent inventory, in-flight install/login jobs and install drain | Bridge `AgentCatalog` / `AgentInstaller` / `AgentAccessAuth` | managed bytes live under Electron `userData/agents/<providerId>/<version>/` (or `HTML_AI_AGENTS_ROOT`); jobs are process-local with a monotonic `generation`; user-global npm is never spawned; official login URLs stay in process memory | `GET /agent/providers`, `POST /agent/install`, `POST /agent/install/cancel`, `POST /agent/login`, `POST /agent/login/cancel`, `GET /agent/login/url`, Qoder/Codex provider discovery and Coordinator shutdown; public rows expose `activeOperation` and `loginUrlPresent` without paths or OAuth URLs |
 | Agent access-operation projection (`install`/`login`/later auth kinds), `enabled` and stale-generation discard | Renderer `AgentProviderCatalog`; `shared/agent-access-operation.mjs` is a pure helper with no persistence | `enabled=false` persists only as workspace `disabledAgentProviderIds`; operations stay in process memory and cannot rewrite a finished state | Settings cards and Controller `applyDisabledAgentProviders`; diagnose/preflight consume the same snapshot |
 | AI Request freeze, pre-Request Agent use-time check, persisted-boundary verification, safely fenced same-Request Agent start/retry, unknown-POST authority reconciliation, polling lifecycle, cancellation ordering and conflict command sequence | Renderer `RunWorkflow`, composed by `WorkspaceController` | the user intent synchronously freezes selection; after Request publication every path reads the durable Request selection and never the mutable catalog selection | Workbench intent/conversation/sidebar adapter, typed Bridge client and Bridge run lifecycle |
@@ -402,11 +402,12 @@ Rules:
 - Telemetry is observational and best effort. It never owns product state,
   never receives content or paths, and never registers a drain obligation for
   edit, save, switch, submit, close or update installation.
-- Provider Registry owns installed descriptors and selection dispatch. Agent Delivery
+- Provider Registry owns installed descriptors and dispatch. Agent Delivery
   Codec owns canonical Request selection, shipped-binding checks for new
-  managed Requests, and historical `qoder-acp` read projection. Coordinator owns
-  preflight tickets and sessions by selection only. Public session `driver` is a
-  compatibility projection from that selection, not execution authority. Conversation Repository is
+  managed Requests, and historical `mode: "qoder-acp"` projection at the read
+  boundary. Coordinator execution binds by selection only; leftover driver
+  aliases are not converted there. Status without a live session may still
+  project a historical `driver` for Qoder records. Conversation Repository is
   the only v2 writer; v1 conversation records are never migrated in place.
 
 ## 文件与历史合同

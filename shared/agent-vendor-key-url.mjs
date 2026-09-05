@@ -1,3 +1,7 @@
+// Main imports this allowlist from app.asar. Do not also list the file in
+// extraResources: electron-builder then copies it only as a resource and the
+// packaged main process cannot resolve the relative import.
+
 const HTTPS_ORIGIN = "https:";
 
 export const AGENT_VENDOR_KEY_PAGES = Object.freeze({

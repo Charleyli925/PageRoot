@@ -50,7 +50,9 @@ PageRoot edits local files and renders user-controlled HTML, so its default poli
   ticket. Arbitrary command overrides are enabled only when both dedicated E2E
   environment fences are present. Official Qoder/Codex login is started by the
   already-verified installation's `login` command; Main opens only an https URL
-  whose host is on that provider's allowlist. The renderer may request
+  whose host is on that provider's allowlist. Main restates that allowlist in
+  `desktop/agent-login-url.mjs` because `shared/agent-login-url.mjs` ships as a
+  Bridge extraResource and cannot be imported from asar. The renderer may request
   `html-agent-access:open-login` with `providerId` only and never supplies a URL,
   command or path. Public catalog snapshots expose `loginUrlPresent` without the
   OAuth URL. Environment PAT/API keys are reported as `environment` auth scope
@@ -262,9 +264,9 @@ or missing runtime state never scans Request directories to revive an active
 Request or to adopt a replacement input-manifest digest.
 
 The packaged Qoder ACP provider/runtime path narrows the protocol surface but
-does not change that trust statement. Current execution dispatches by canonical
-provider/runtime selection; historical Request `qoder-acp` is decoded only at
-the Agent Delivery codec read boundary. Unknown identifiers fail
+does not change that trust statement. Current execution binds by canonical
+provider/runtime selection; historical `mode: "qoder-acp"` remains readable at
+the delivery codec. Unknown identifiers fail
 closed. Provider/runtime IDs, the opaque installation digest and capabilities
 remain inside the Bridge ticket, and preload exposes no executable, spawn,
 command or path capability. One restricted driver serves execution policy
@@ -376,7 +378,8 @@ Installation and login guidance is copied only after the user's explicit
 button action and must pass the same clipboard write/readback check as the
 normal portable handoff. A local availability failure never writes the
 clipboard. “获取 API Key” opens only the vendor HTTPS page returned by
-`publicAgentVendorKeyUrl()` through Main `shell.openExternal`; renderer sends
+`publicAgentVendorKeyUrl()` through Main `shell.openExternal`; that helper
+ships in app.asar and must not also be listed in extraResources. Renderer sends
 a vendor id, never a URL. Neither the delivery card nor About receives or displays command
 paths, npm prefixes, versions or model counts; stable error classes remain in
 local diagnostics.

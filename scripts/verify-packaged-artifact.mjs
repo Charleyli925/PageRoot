@@ -145,7 +145,6 @@ export const REQUIRED_SHARED_FILES = [
   "conversation.mjs",
   "agent-delivery.mjs",
   "agent-access-operation.mjs",
-  "agent-vendor-key-url.mjs",
   "agent-login-url.mjs",
   "agent-auth-source.mjs",
   "openai-compatible-vendors.mjs",
@@ -202,6 +201,8 @@ export const REQUIRED_APP_SOURCE_FILES = [
   "desktop/edit-runtime-library-store.mjs",
   "desktop/edit-runtime-protocol.mjs",
   "desktop/edit-runtime-preparation-fence.mjs",
+  "desktop/agent-login-url.mjs",
+  "shared/agent-vendor-key-url.mjs",
   "app/domain/edit-runtime-contract.js",
   "public/brand-logo.png",
 ];

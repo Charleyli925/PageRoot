@@ -319,8 +319,10 @@ test("源页 Agent settings stays a Token card and does not block switching back
     const pagerootCard = settingsPage.locator(".pageroot-availability-card");
     await expect(pagerootCard.getByText("源页 Agent · 未登录", { exact: true }))
       .toBeVisible({ timeout: 20_000 });
-    await expect(pagerootCard.getByTestId("settings-agent-vendor")).toBeVisible();
-    await expect(pagerootCard.getByLabel("API Token")).toBeVisible();
+    await expect(pagerootCard.getByRole("textbox", { name: "API Key" })).toBeVisible();
+    await expect(pagerootCard.getByText("其他服务商")).toBeVisible();
+    await expect(pagerootCard.getByTestId("settings-agent-vendor")).toBeHidden();
+    await expect(pagerootCard.getByRole("button", { name: "获取 API Key" })).toBeVisible();
     await expect(settingsPage.getByText("只接通当前选中的 Agent。")).toHaveCount(0);
     await expect(settingsPage.getByRole("button", { name: "重新检查" })).toBeVisible();
     await expect(settingsPage.locator(".qoder-availability-card")).toHaveCount(0);
@@ -368,17 +370,17 @@ test("源页 Agent connects to one verified fixed model and reviews a Candidate"
     const pagerootCard = settingsPage.locator(".pageroot-availability-card");
     await expect(pagerootCard.getByText("源页 Agent · 未登录", { exact: true }))
       .toBeVisible({ timeout: 20_000 });
-    await pagerootCard.getByLabel("API Token").fill("sk-e2e-pageroot");
+    await pagerootCard.getByRole("textbox", { name: "API Key" }).fill("sk-e2e-pageroot");
     await pagerootCard.getByRole("button", { name: "连接", exact: true }).click();
     await expect(pagerootCard.getByText("源页 Agent · 已连接", { exact: true }))
       .toBeVisible({ timeout: 30_000 });
     await expect(pagerootCard.getByTestId("settings-agent-current-connection"))
       .toContainText("DeepSeek");
-    await expect(pagerootCard.getByText("Token 仅在本次打开期间保留。"))
-      .toBeVisible();
     await pagerootCard.getByRole("button", { name: "更换 Token" }).click();
-    await pagerootCard.getByTestId("settings-agent-vendor").selectOption("openai");
-    await pagerootCard.getByLabel("API Token").fill("sk-e2e-invalid-replacement");
+    await expect(pagerootCard.getByText("未勾选记住时仅本次使用。")).toBeVisible();
+    await pagerootCard.getByText("其他服务商").click();
+    await expect(pagerootCard.getByTestId("settings-agent-vendor")).toBeVisible();
+    await pagerootCard.getByRole("textbox", { name: "API Key" }).fill("sk-e2e-invalid-replacement");
     await pagerootCard.getByRole("button", { name: "连接", exact: true }).click();
     await expect(pagerootCard.getByText(/Token 无效|API Key 无效|Token 没有接通/u))
       .toBeVisible({ timeout: 20_000 });
@@ -502,7 +504,7 @@ test("源页运行时余额失败 offers only provider recovery without a false 
     const settingsPage = await openAgentSettingsPage(launched.page);
     await settingsPage.getByTestId("settings-agent-scheme").selectOption({ label: "源页" });
     const pagerootCard = settingsPage.locator(".pageroot-availability-card");
-    await pagerootCard.getByLabel("API Token").fill("sk-e2e-balance");
+    await pagerootCard.getByRole("textbox", { name: "API Key" }).fill("sk-e2e-balance");
     await pagerootCard.getByRole("button", { name: "连接", exact: true }).click();
     await expect(pagerootCard.getByText("源页 Agent · 已连接", { exact: true }))
       .toBeVisible({ timeout: 30_000 });
@@ -557,7 +559,7 @@ test("源页 Agent keeps the Token card and next step when the Token is rejected
     const settingsPage = await openAgentSettingsPage(launched.page);
     await settingsPage.getByTestId("settings-agent-scheme").selectOption({ label: "源页" });
     const pagerootCard = settingsPage.locator(".pageroot-availability-card");
-    await pagerootCard.getByLabel("API Token").fill("sk-e2e-invalid");
+    await pagerootCard.getByRole("textbox", { name: "API Key" }).fill("sk-e2e-invalid");
     await pagerootCard.getByRole("button", { name: "连接", exact: true }).click();
     await expect(pagerootCard.getByText(/Token 无效|API Key 无效|Token 没有接通/u))
       .toBeVisible({ timeout: 20_000 });

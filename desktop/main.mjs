@@ -54,7 +54,7 @@ import {
   waitForBridgeReady,
 } from "./bridge-startup.mjs";
 import { createOpenInDefaultBrowserOperation } from "./open-in-default-browser.mjs";
-import { publicAgentLoginUrl } from "../shared/agent-login-url.mjs";
+import { publicAgentLoginUrl } from "./agent-login-url.mjs";
 import {
   createExternalFileOpenDeliveryCoordinator,
   createExternalFileOpenExitHandoff,
@@ -298,11 +298,11 @@ const WORKBENCH_TAB_CHANNELS = Object.freeze({
 });
 const INTEGRATION_CHANNELS = Object.freeze({
   qoderHandoff: "html-integrations:qoder-handoff",
+  openAgentLogin: "html-agent-access:open-login",
   openVendorApiKey: "html-agent-access:open-vendor-key",
   persistSessionCredential: "html-agent-access:persist-credential",
   clearSessionCredential: "html-agent-access:clear-credential",
   sessionCredentialStatus: "html-agent-access:credential-status",
-  openAgentLogin: "html-agent-access:open-login",
   restoreSessionCredential: "html-agent-access:restore-credential",
 });
 const UPDATE_CHANNELS = Object.freeze({
@@ -3662,6 +3662,20 @@ function registerProjectIpc() {
     trustedProject,
     INTEGRATION_CHANNELS,
     clipboard,
+    openAgentLogin: async (providerId) => {
+      const payload = await fetchBridgeJson(
+        `/agent/login/url?providerId=${encodeURIComponent(providerId)}`,
+      );
+      const loginUrl = publicAgentLoginUrl(payload?.loginUrl, { providerId });
+      if (!loginUrl) {
+        throw new ProjectFileError(
+          "AGENT_LOGIN_URL_UNAVAILABLE",
+          "官方登录页暂时无法打开。",
+        );
+      }
+      await shell.openExternal(loginUrl);
+      return Object.freeze({ opened: true });
+    },
     openVendorApiKeyPage: async (vendorId) => {
       const keyUrl = publicAgentVendorKeyUrl(vendorId);
       if (!keyUrl) {
@@ -3677,20 +3691,6 @@ function registerProjectIpc() {
     clearSessionCredential: () => agentSessionCredentialStore.clear(),
     sessionCredentialStatus: () => agentSessionCredentialStore.publicStatus(),
     restoreSessionCredential: () => restoreRememberedAgentCredential(),
-    openAgentLogin: async (providerId) => {
-      const payload = await fetchBridgeJson(
-        `/agent/login/url?providerId=${encodeURIComponent(providerId)}`,
-      );
-      const loginUrl = publicAgentLoginUrl(payload?.loginUrl, { providerId });
-      if (!loginUrl) {
-        throw new ProjectFileError(
-          "AGENT_LOGIN_URL_UNAVAILABLE",
-          "官方登录页暂时无法打开。",
-        );
-      }
-      await shell.openExternal(loginUrl);
-      return Object.freeze({ opened: true });
-    },
   });
   registerUpdateIpc({
     ipcMain,
