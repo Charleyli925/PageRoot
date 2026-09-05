@@ -377,14 +377,26 @@ export async function openAgentSettingsPage(page) {
   return settings;
 }
 
-export async function openQoderAvailability(page) {
-  const sidebar = page.locator(".workbench-global-sidebar");
-  if (await sidebar.getAttribute("data-open") !== "true") {
-    await page.getByRole("button", { name: "展开左侧边栏" }).click();
+export async function expandAgentSettingsService(page, providerId) {
+  const settings = page.locator(".workbench-settings-page");
+  const row = settings.getByTestId(`settings-agent-row-${providerId}`);
+  await expect(row).toBeVisible();
+  if (await row.getAttribute("data-expanded") === "true") return row;
+  const primary = row.locator(".settings-service-primary");
+  const kind = await primary.getAttribute("data-kind");
+  if (kind === "default") {
+    await row.getByRole("button", { name: /更多/u }).click();
+    await settings.getByRole("menuitem", { name: "连接详情" }).click();
+  } else {
+    await primary.click();
   }
-  await expect(sidebar).toHaveAttribute("data-open", "true");
-  await sidebar.getByRole("button", { name: "设置", exact: true }).click();
-  await page.getByRole("button", { name: "AI 服务", exact: true }).click();
+  await expect(row).toHaveAttribute("data-expanded", "true");
+  return row;
+}
+
+export async function openQoderAvailability(page) {
+  await openAgentSettingsPage(page);
+  await expandAgentSettingsService(page, "qoder");
   const card = page.locator(".workbench-settings-page").locator(".qoder-availability-card").first();
   await expect(card).toBeVisible();
   return card;
