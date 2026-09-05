@@ -199,10 +199,13 @@ async function ready(coordinator, purpose = "execution") {
 }
 
 async function waitForExecutionError(coordinator, expectedCode) {
-  for (let attempt = 0; attempt < 20; attempt += 1) {
-    await new Promise((resolve) => setImmediate(resolve));
+  // Residue checks in the run-failure path are real lstat I/O. setImmediate
+  // can drain before those callbacks, so poll across timer turns instead.
+  const deadline = Date.now() + 1_000;
+  while (Date.now() < deadline) {
     const session = coordinator.executionStatus(IDENTITY);
-    if (session.errorCode === expectedCode) return session;
+    if (session?.errorCode === expectedCode) return session;
+    await new Promise((resolve) => setTimeout(resolve, 10));
   }
   return coordinator.executionStatus(IDENTITY);
 }

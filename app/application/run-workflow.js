@@ -4,6 +4,7 @@ import { revalidateCommentTextLocators } from "./run/text-locator-validation.js"
 import { createRunWorkflowCodecs } from "./run-workflow-codecs.js";
 import { verifyProjectContext } from "./verified-project-context.js";
 import { AgentCatalogState } from "./agent-provider-catalog.js";
+import { credentialErrorField } from "../../shared/agent-access-operation.mjs";
 import {
   agentRecoveryKindForError,
   CLIPBOARD_DELIVERY_MODE,
@@ -132,11 +133,12 @@ function blocked(code, reason) {
   });
 }
 
-function rejected(code, reason) {
+function rejected(code, reason, extras = {}) {
   return Object.freeze({
     status: "rejected",
     code: String(code),
     reason: String(reason),
+    ...extras,
   });
 }
 
@@ -751,7 +753,7 @@ export class RunWorkflow {
       return blocked("RUN_WORKFLOW_DISPOSED", `${displayName} 安装已经停止。`);
     }
     try {
-      const result = await this.#agentCatalog.cancelInstall(frozen);
+      const result = await this.#agentCatalog.cancelAccessOperation(frozen);
       return succeeded({ result, availability: this.#agentCatalog.availability(frozen) });
     } catch (cause) {
       return rejected(
@@ -2188,10 +2190,14 @@ export class RunWorkflow {
         connection: this.#agentCatalog.provider(selection)?.connection || null,
         selection: connection?.selection || null,
       }))
-      .catch((cause) => rejected(
-        errorCode(cause, "AGENT_SESSION_CREDENTIAL_INVALID"),
-        this.#codecs.errorMessage(cause, "API Token 没有接通。"),
-      ));
+      .catch((cause) => {
+        const code = errorCode(cause, "AGENT_SESSION_CREDENTIAL_INVALID");
+        return rejected(
+          code,
+          this.#codecs.errorMessage(cause, "API Key 无效或已失效。"),
+          { field: credentialErrorField(code) || "form" },
+        );
+      });
   }
 
   disconnectAgentApiKey(selection) {

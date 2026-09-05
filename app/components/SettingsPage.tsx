@@ -30,7 +30,7 @@ import type { WorkspacePreferences } from "./desktop-ui-preferences-api";
 import type { SettingsCategory } from "../workbench/settings-types";
 import { architectureLabel, updatePresentation } from "./update-presentation";
 
-type AgentActionOutcome = Readonly<{ status: string; reason?: string }> | null | undefined;
+type AgentActionOutcome = Readonly<{ status: string; reason?: string; code?: string }> | null | undefined;
 
 const DEFAULT_PANEL_WIDTHS = Object.freeze({
   sidebarWidth: 264,
@@ -81,9 +81,10 @@ export type SettingsPageProps = {
   onConnectApiKey: (
     selection: AgentSelection,
     apiKey: string,
-    extras?: Readonly<{ vendorId?: string; baseUrl?: string; modelId?: string }>,
+    extras?: Readonly<{ vendorId?: string; baseUrl?: string; modelId?: string; remember?: boolean }>,
   ) => Promise<AgentActionOutcome>;
   onDisconnectApiKey: (selection: AgentSelection) => Promise<AgentActionOutcome>;
+  onOpenVendorApiKeyPage?: (vendorId: string) => Promise<AgentActionOutcome>;
   onClose: () => void;
 };
 
@@ -281,6 +282,7 @@ function AgentSettings({
   onCancelInstall,
   onConnectApiKey,
   onDisconnectApiKey,
+  onOpenVendorApiKeyPage,
   onSelectAgentModel,
   onSelectAgentReasoning,
 }: {
@@ -296,8 +298,9 @@ function AgentSettings({
   onCopyGuidance(kind: AgentProviderGuidanceKind, selection: AgentSelection): Promise<AgentActionOutcome>;
   onInstall(selection: AgentSelection): Promise<AgentActionOutcome>;
   onCancelInstall(selection: AgentSelection): Promise<AgentActionOutcome>;
-  onConnectApiKey(selection: AgentSelection, apiKey: string, extras?: Readonly<{ vendorId?: string; baseUrl?: string; modelId?: string }>): Promise<AgentActionOutcome>;
+  onConnectApiKey(selection: AgentSelection, apiKey: string, extras?: Readonly<{ vendorId?: string; baseUrl?: string; modelId?: string; remember?: boolean }>): Promise<AgentActionOutcome>;
   onDisconnectApiKey(selection: AgentSelection): Promise<AgentActionOutcome>;
+  onOpenVendorApiKeyPage?(vendorId: string): Promise<AgentActionOutcome>;
   onSelectAgentModel(modelId: string, expectedSelection: AgentSelection): AgentSelection | null;
   onSelectAgentReasoning(reasoning: string, expectedSelection: AgentSelection): AgentSelection | null;
 }) {
@@ -358,6 +361,7 @@ function AgentSettings({
               onRecheck={() => onCheckSelection(selectedCard.selection)}
               onConnectApiKey={(apiKey, extras) => onConnectApiKey(selectedCard.selection, apiKey, extras)}
               onDisconnectApiKey={() => onDisconnectApiKey(selectedCard.selection)}
+              onOpenVendorApiKeyPage={onOpenVendorApiKeyPage}
               onSelectModel={async (modelId) => {
                 if (selectedCard.connection) {
                   return onConnectApiKey(selectedCard.selection, "", {
@@ -551,6 +555,7 @@ export default function SettingsPage({
   onCancelInstall,
   onConnectApiKey,
   onDisconnectApiKey,
+  onOpenVendorApiKeyPage,
   onClose,
 }: SettingsPageProps) {
   const pageRef = useRef<HTMLElement>(null);
@@ -720,6 +725,7 @@ export default function SettingsPage({
             onCancelInstall={onCancelInstall}
             onConnectApiKey={onConnectApiKey}
             onDisconnectApiKey={onDisconnectApiKey}
+            onOpenVendorApiKeyPage={onOpenVendorApiKeyPage}
             onSelectAgentModel={onSelectAgentModel}
             onSelectAgentReasoning={onSelectAgentReasoning}
           />

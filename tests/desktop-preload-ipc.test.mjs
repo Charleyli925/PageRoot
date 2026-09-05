@@ -1245,6 +1245,35 @@ test("preload exposes the narrow QoderWork handoff integration", async () => {
   ]);
 });
 
+test("preload opens only allowlisted vendor Key pages and never reads stored secrets", async () => {
+  const calls = [];
+  const { integrations } = await loadPreloadApis(async (...args) => {
+    calls.push(args);
+    return success({ opened: true, ok: true, remembered: false });
+  });
+  assert.deepEqual(
+    await integrations.openVendorApiKeyPage("deepseek"),
+    { opened: true, ok: true, remembered: false },
+  );
+  assert.equal(calls[0][0], "html-agent-access:open-vendor-key");
+  assert.equal(calls[0][1].vendorId, "deepseek");
+  let unsupportedVendorError = null;
+  try {
+    integrations.openVendorApiKeyPage("custom");
+  } catch (error) {
+    unsupportedVendorError = error;
+  }
+  assert.match(String(unsupportedVendorError?.message || ""), /API Key 页面/u);
+  assert.equal(unsupportedVendorError?.code, "AGENT_VENDOR_KEY_UNSUPPORTED");
+  await integrations.persistSessionCredential({
+    apiKey: "sk-secret",
+    vendorId: "deepseek",
+  });
+  assert.equal(calls[1][0], "html-agent-access:persist-credential");
+  assert.equal(calls[1][1].vendorId, "deepseek");
+  assert.equal(calls[1][1].apiKey, "sk-secret");
+});
+
 test("preload exposes update status, restart installation, and the fixed release fallback", async () => {
   const calls = [];
   const { updates } = await loadPreloadApis(async (...args) => {

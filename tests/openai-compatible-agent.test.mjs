@@ -123,7 +123,7 @@ test("built-in vendors use one fixed, versioned support table and never expose r
   assert.deepEqual(publicOpenAiCompatibleVendors({ includeBeta: true }).map(({ id }) => id), [
     "deepseek", "zhipu", "dashscope", "openai", "custom",
   ]);
-  assert.deepEqual(publicOpenAiCompatibleVendors().map(({ id }) => id), ["custom"]);
+  assert.deepEqual(publicOpenAiCompatibleVendors().map(({ id }) => id), ["deepseek", "custom"]);
   assert.equal(OPENAI_COMPATIBLE_VENDORS.some((vendor) => /anthropic|claude/iu.test(vendor.id)), false);
   assert.match(SUPPORTED_AGENT_MODELS_REVISION, /^\d{4}-\d{2}-\d{2}\./u);
   for (const vendorId of ["deepseek", "zhipu", "dashscope", "openai"]) {
@@ -131,8 +131,13 @@ test("built-in vendors use one fixed, versioned support table and never expose r
     assert.ok(models.length >= 1 && models.length <= 2);
     assert.equal(models.filter((entry) => entry.recommended).length, 1);
     for (const model of models) {
-      assert.equal(model.releaseChannel, "beta");
-      assert.equal(model.smokeVersion, null);
+      if (vendorId === "deepseek" && model.recommended) {
+        assert.equal(model.releaseChannel, "stable");
+        assert.equal(model.smokeVersion, "2026-09-06.1");
+      } else {
+        assert.equal(model.releaseChannel, "beta");
+        assert.equal(model.smokeVersion, null);
+      }
       assert.ok(model.contextWindow > 0);
       assert.ok(model.maxOutputTokens > 0);
       assert.equal(model.supportsCompleteHtml, true);
@@ -142,11 +147,14 @@ test("built-in vendors use one fixed, versioned support table and never expose r
 });
 
 test("built-in catalogs contain only fixed models and are gated until real smoke promotion", () => {
-  assert.deepEqual(publicModelsForVendor("deepseek", {}).map((model) => model.id), []);
+  assert.deepEqual(publicModelsForVendor("deepseek", {}).map((model) => model.id), [
+    "pageroot:deepseek-v4-pro",
+  ]);
   assert.deepEqual(publicModelsForVendor("deepseek", { PAGEROOT_ENABLE_BETA_AGENT_MODELS: "1" }).map((model) => model.id), [
     "pageroot:deepseek-v4-pro",
     "pageroot:deepseek-v4-flash",
   ]);
+  assert.deepEqual(publicModelsForVendor("zhipu", {}).map((model) => model.id), []);
 });
 
 test("custom endpoints require HTTPS and never need or infer a model catalog", () => {
@@ -647,6 +655,47 @@ test("credential/model updates are transactional and failed candidates preserve 
     stillReady.configuration.credentialGeneration > connected.configuration.credentialGeneration,
   );
   assert.deepEqual(calls.at(-1), ["sk-good", "deepseek-v4-pro"]);
+  await coordinator.shutdown();
+});
+
+test("cancelling a candidate configuration leaves the old connection in place", async () => {
+  let release;
+  let hold = false;
+  const inner = createOpenAiCompatibleProvider({
+    completeChat: async () => HTML,
+  });
+  const hanging = new Promise((resolve) => {
+    release = resolve;
+  });
+  const provider = {
+    ...inner,
+    async preflight(...args) {
+      if (hold) await hanging;
+      return inner.preflight(...args);
+    },
+  };
+  const coordinator = new AgentRuntimeCoordinator({
+    environment: { PAGEROOT_ENABLE_BETA_AGENT_MODELS: "1" },
+    providerRegistry: providerRegistry(provider),
+  });
+  const connected = await coordinator.updateAgentConfiguration("pageroot", {
+    apiKey: "sk-good", vendorId: "deepseek", selection: selection(),
+  });
+  hold = true;
+  const pending = coordinator.updateAgentConfiguration("pageroot", {
+    apiKey: "sk-next", vendorId: "openai", selection: selection("gpt-5.4"),
+  });
+  await Promise.resolve();
+  const cancelled = coordinator.cancelAgentConfiguration("pageroot", 2);
+  assert.equal(cancelled.cancelled, true);
+  assert.equal(cancelled.configured, true);
+  release();
+  await assert.rejects(() => pending, { code: "AGENT_SESSION_CREDENTIAL_STALE" });
+  hold = false;
+  const stillReady = await coordinator.preflight({
+    selection: connected.selection, trustPolicyAccepted: TRUST,
+  });
+  assert.equal(stillReady.configuration.vendorId, "deepseek");
   await coordinator.shutdown();
 });
 

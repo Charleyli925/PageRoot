@@ -1084,7 +1084,17 @@ export class AgentCatalogState {
       });
     }
     this.#invalidateProvider(frozen.providerId);
-    this.#patchProvider(frozen.providerId, { installState: "installing" });
+    const generation = (this.#generationByProvider.get(frozen.providerId) || 0) + 1;
+    this.#generationByProvider.set(frozen.providerId, generation);
+    this.#patchProvider(frozen.providerId, {
+      installState: "installing",
+      activeOperation: createAccessOperation({
+        providerId: frozen.providerId,
+        kind: "install",
+        generation,
+        startedAt: validDate(this.#clock),
+      }),
+    });
     this.#setAvailability(frozen.providerId, checkingAgentProviderAvailability(provider.availability));
     try {
       await this.#bridgeClient.installAgent({ providerId: frozen.providerId });
@@ -1149,9 +1159,34 @@ export class AgentCatalogState {
     const frozen = freezeAgentSelection(selection);
     const provider = this.provider(frozen);
     const operation = publicAccessOperation(provider?.activeOperation);
+    const installing = ["installing", "cancelling"].includes(provider?.installState);
+    if (installing && (!operation || operation.kind === "install")) {
+      return this.cancelInstall(frozen);
+    }
     if (!operation) return null;
     if (operation.kind === "install") {
       return this.cancelInstall(frozen);
+    }
+    if (operation.kind === "config-validate") {
+      const cancelling = requestCancelAccessOperation(operation);
+      this.#patchProvider(frozen.providerId, { activeOperation: cancelling });
+      const cancelConfiguration = typeof this.#bridgeClient.cancelAgentConfiguration === "function"
+        ? (body) => this.#bridgeClient.cancelAgentConfiguration(body)
+        : null;
+      if (cancelConfiguration) {
+        const result = await cancelConfiguration({
+          providerId: frozen.providerId,
+          generation: operation.generation,
+        });
+        if (result?.cancelled === false && result?.configured === true) {
+          return this.provider(frozen)?.activeOperation || null;
+        }
+      }
+      this.#invalidateProvider(frozen.providerId);
+      this.#patchProvider(frozen.providerId, {
+        activeOperation: finishAccessOperation(cancelling, { state: "cancelled" }),
+      });
+      return this.provider(frozen)?.activeOperation || null;
     }
     const cancelling = requestCancelAccessOperation(operation);
     this.#patchProvider(frozen.providerId, { activeOperation: cancelling });
@@ -1281,6 +1316,15 @@ export class AgentCatalogState {
     // the start of the transaction. Provider/model/readiness state is not
     // replaced unless the Bridge commits the candidate below.
     this.#invalidateProvider(frozen.providerId);
+    const generation = this.#generationByProvider.get(frozen.providerId) || 1;
+    this.#patchProvider(frozen.providerId, {
+      activeOperation: createAccessOperation({
+        providerId: frozen.providerId,
+        kind: "config-validate",
+        generation,
+        startedAt: validDate(this.#clock),
+      }),
+    });
     const manualModelId = String(extras.modelId || "").trim().slice(0, 80);
     const requestedSelection = freezeAgentSelection({
       ...frozen,
@@ -1290,14 +1334,48 @@ export class AgentCatalogState {
       resolvedModelId: null,
       reasoning: { requested: null, applied: null, resolution: "provider-default" },
     });
-    const result = await updateConfiguration({
-      providerId: frozen.providerId,
-      apiKey,
-      vendorId: extras.vendorId || null,
-      baseUrl: extras.baseUrl || null,
-      selection: requestedSelection,
-    });
+    let result;
+    try {
+      result = await updateConfiguration({
+        providerId: frozen.providerId,
+        apiKey,
+        vendorId: extras.vendorId || null,
+        baseUrl: extras.baseUrl || null,
+        selection: requestedSelection,
+      });
+    } catch (cause) {
+      const current = this.provider(frozen);
+      const operation = publicAccessOperation(current?.activeOperation);
+      if (operation?.generation === generation
+        && !["cancelled", "cancelling"].includes(operation.state)) {
+        this.#patchProvider(frozen.providerId, {
+          activeOperation: finishAccessOperation(operation, {
+            state: String(cause?.code || "") === "AGENT_SESSION_CREDENTIAL_STALE"
+              ? "cancelled"
+              : "failed",
+            errorCode: cause?.code || "AGENT_SESSION_CREDENTIAL_INVALID",
+          }),
+        });
+      }
+      throw cause;
+    }
+    const current = this.provider(frozen);
+    const operation = publicAccessOperation(current?.activeOperation);
+    if (this.#generationByProvider.get(frozen.providerId) !== generation
+      || operation?.state === "cancelled") {
+      throw Object.assign(new Error("更新的连接操作已取代本次结果。"), {
+        code: "AGENT_SESSION_CREDENTIAL_STALE",
+      });
+    }
     if (result?.status !== "ready" || !result?.selection) {
+      if (operation) {
+        this.#patchProvider(frozen.providerId, {
+          activeOperation: finishAccessOperation(operation, {
+            state: "failed",
+            errorCode: "AGENT_SESSION_CREDENTIAL_INVALID",
+          }),
+        });
+      }
       throw Object.assign(new Error("API Token 没有返回可执行配置。"), {
         code: "AGENT_SESSION_CREDENTIAL_INVALID",
       });
@@ -1305,7 +1383,7 @@ export class AgentCatalogState {
     const returnedSelection = freezeAgentSelection(result.selection);
     this.#invalidateProvider(frozen.providerId);
     if (this.#selected?.providerId === frozen.providerId) this.#selected = returnedSelection;
-    const current = this.#providers.get(frozen.providerId);
+    const next = this.#providers.get(frozen.providerId);
     const checkedAt = validDate(this.#clock);
     const diagnostic = agentDiagnosticSnapshot({
       readiness: "ready",
@@ -1318,9 +1396,9 @@ export class AgentCatalogState {
         protocol: { status: "ready", source: "preflight" },
         service: { status: "ready", source: "preflight" },
       },
-    }, checkedAt, current?.diagnostic);
+    }, checkedAt, next?.diagnostic);
     this.#providers.set(frozen.providerId, Object.freeze({
-      ...current,
+      ...next,
       models: publicModels(result.models),
       credentialConfigured: true,
       connection: Object.freeze({
@@ -1331,6 +1409,9 @@ export class AgentCatalogState {
       availability: readyAgentProviderAvailability(checkedAt),
       diagnostic,
       installationDigest: String(result.installationDigest || "") || null,
+      activeOperation: operation
+        ? finishAccessOperation(operation, { state: "succeeded" })
+        : null,
     }));
     this.#publish();
     return result;

@@ -8,6 +8,7 @@ import {
   isStaleAccessOperation,
   publicAccessOperation,
   requestCancelAccessOperation,
+  credentialErrorField,
 } from "../shared/agent-access-operation.mjs";
 
 test("access operations require a known kind and finish only in a terminal state", () => {
@@ -61,4 +62,19 @@ test("install snapshots project in-flight access operations and ignore stale gen
   }), null);
   assert.equal(isStaleAccessOperation(installing, 5), true);
   assert.equal(isStaleAccessOperation(installing, 4), false);
+});
+
+test("credential errors map to the field that the user can correct", () => {
+  assert.equal(credentialErrorField("AGENT_AUTH_REQUIRED"), "apiKey");
+  assert.equal(credentialErrorField("AGENT_SELECTION_UNSUPPORTED"), "modelId");
+  assert.equal(credentialErrorField("AGENT_ENDPOINT_REGION_MISMATCH"), "baseUrl");
+  assert.equal(credentialErrorField("AGENT_PROVIDER_UNAVAILABLE"), null);
+});
+
+test("credential field mapping stays on structured error codes", async () => {
+  const { credentialErrorField } = await import("../shared/agent-access-operation.mjs");
+  assert.equal(credentialErrorField("AGENT_AUTH_REQUIRED"), "apiKey");
+  assert.equal(credentialErrorField("AGENT_SELECTION_UNSUPPORTED"), "modelId");
+  assert.equal(credentialErrorField("AGENT_ENDPOINT_REGION_MISMATCH"), "baseUrl");
+  assert.equal(credentialErrorField("AGENT_PROVIDER_UNAVAILABLE"), null);
 });

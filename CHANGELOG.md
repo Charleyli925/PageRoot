@@ -4,6 +4,7 @@ Notable user-visible changes are documented here. This project follows Semantic 
 
 ## [Unreleased]
 
+- 正式安装包可直接选择 DeepSeek 默认模型，无需 Beta 开关。源页连接表单默认只填 API Key，验证成功后才替换当前连接；可选“记住 API Key”使用系统安全存储，失败不明文降级。
 - 源页可作为默认 AI 服务并在重启后恢复；无效的本机 Qoder CLI 不再挡住健康的受管安装；Codex 能解析真实的模型目录对象。安装取消完成后可以再次安装，不会停在“正在取消”。
 - AI 服务的安装、登录等待和显式断开共用同一份接入状态：设置页与诊断看到相同的操作代次；关闭面板再打开会恢复进行中的安装；显式断开后后台扫描不会自动重新启用。
 - Agent 设置页现在只做无副作用、selection-keyed 的四项连接诊断，正式发送时才预检并冻结模型配置；Custom 接口不再假设存在 `/models`，Codex 诊断会验证 ACP 协议。受管安装期间可直接取消。DeepSeek 改为 SSE 增量接收，HTTP 与 ACP 都只在连续 45 分钟无有效协议数据时中断；运行区只显示等待时间、已接收大小和当前可执行操作。Agent 失败会立即替换“处理中”，并将技术重试安全性与认证、模型、厂商、限流或安装恢复动作分开，不生成半成品 Candidate；历史对话按日期与轮次分组。

@@ -585,7 +585,7 @@ export class WorkspaceController {
   connectAgentApiKey(
     selection: import("../domain/agent-provider-state.js").AgentSelection,
     apiKey: string,
-    extras?: Readonly<{ vendorId?: string; baseUrl?: string; modelId?: string }>,
+    extras?: Readonly<{ vendorId?: string; baseUrl?: string; modelId?: string; remember?: boolean }>,
   ): Promise<RunWorkflowOutcome>;
   disconnectAgentApiKey(
     selection: import("../domain/agent-provider-state.js").AgentSelection,
