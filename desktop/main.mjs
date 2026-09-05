@@ -54,6 +54,7 @@ import {
   waitForBridgeReady,
 } from "./bridge-startup.mjs";
 import { createOpenInDefaultBrowserOperation } from "./open-in-default-browser.mjs";
+import { publicAgentLoginUrl } from "../shared/agent-login-url.mjs";
 import {
   createExternalFileOpenDeliveryCoordinator,
   createExternalFileOpenExitHandoff,
@@ -301,6 +302,7 @@ const INTEGRATION_CHANNELS = Object.freeze({
   persistSessionCredential: "html-agent-access:persist-credential",
   clearSessionCredential: "html-agent-access:clear-credential",
   sessionCredentialStatus: "html-agent-access:credential-status",
+  openAgentLogin: "html-agent-access:open-login",
 });
 const UPDATE_CHANNELS = Object.freeze({
   getStatus: "html-updates:get-status",
@@ -3667,6 +3669,20 @@ function registerProjectIpc() {
     persistSessionCredential: (payload) => agentSessionCredentialStore.persist(payload),
     clearSessionCredential: () => agentSessionCredentialStore.clear(),
     sessionCredentialStatus: () => agentSessionCredentialStore.publicStatus(),
+    openAgentLogin: async (providerId) => {
+      const payload = await fetchBridgeJson(
+        `/agent/login/url?providerId=${encodeURIComponent(providerId)}`,
+      );
+      const loginUrl = publicAgentLoginUrl(payload?.loginUrl, { providerId });
+      if (!loginUrl) {
+        throw new ProjectFileError(
+          "AGENT_LOGIN_URL_UNAVAILABLE",
+          "官方登录页暂时无法打开。",
+        );
+      }
+      await shell.openExternal(loginUrl);
+      return Object.freeze({ opened: true });
+    },
   });
   registerUpdateIpc({
     ipcMain,

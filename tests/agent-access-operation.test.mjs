@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   accessOperationFromInstallSnapshot,
+  accessOperationFromLoginSnapshot,
   createAccessOperation,
   finishAccessOperation,
   isStaleAccessOperation,
@@ -71,10 +72,18 @@ test("credential errors map to the field that the user can correct", () => {
   assert.equal(credentialErrorField("AGENT_PROVIDER_UNAVAILABLE"), null);
 });
 
-test("credential field mapping stays on structured error codes", async () => {
-  const { credentialErrorField } = await import("../shared/agent-access-operation.mjs");
-  assert.equal(credentialErrorField("AGENT_AUTH_REQUIRED"), "apiKey");
-  assert.equal(credentialErrorField("AGENT_SELECTION_UNSUPPORTED"), "modelId");
-  assert.equal(credentialErrorField("AGENT_ENDPOINT_REGION_MISMATCH"), "baseUrl");
-  assert.equal(credentialErrorField("AGENT_PROVIDER_UNAVAILABLE"), null);
+test("login snapshots project waiting access operations", () => {
+  const waiting = accessOperationFromLoginSnapshot({
+    providerId: "codex",
+    loginState: "waiting",
+    generation: 2,
+    startedAt: "2026-09-06T00:00:00.000Z",
+  });
+  assert.equal(waiting.kind, "login");
+  assert.equal(waiting.state, "waiting");
+  assert.equal(accessOperationFromLoginSnapshot({
+    providerId: "codex",
+    loginState: "idle",
+    generation: 2,
+  }), null);
 });

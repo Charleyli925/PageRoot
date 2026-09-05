@@ -620,7 +620,7 @@ test("Qoder settings entry opens Settings without restoring a Discussion compose
     await expect(settings.getByRole("heading", { name: "AI Agent" })).toBeVisible();
     await expect(settings.getByText("Qoder CLI", { exact: true })).toBeVisible();
     await expect(settings.getByText("Qoder CLI · 未登录", { exact: true })).toBeVisible({ timeout: 30_000 });
-    await expect(settings.getByRole("button", { name: "复制登录指令" }))
+    await expect(settings.getByRole("button", { name: "登录 Qoder" }))
       .toBeVisible();
     await expect.poll(() => diagnoseGets).toBeGreaterThan(0);
     expect(preflightPosts).toBe(0);
@@ -635,16 +635,16 @@ test("Qoder settings entry opens Settings without restoring a Discussion compose
     });
     await launched.page.waitForTimeout(100);
     expect(preflightPosts).toBe(0);
-    await settings.getByRole("button", { name: "复制登录指令" }).click();
-    await expect(settings.getByText("Qoder CLI · 未登录", { exact: true })).toBeVisible();
-    await expect(settings.getByRole("button", { name: "重新复制" })).toBeVisible();
+    await settings.getByRole("button", { name: "登录 Qoder" }).click();
+    await expect(settings.getByText("请在浏览器完成登录")).toBeVisible({ timeout: 15_000 });
+    await expect(settings.getByRole("button", { name: "取消" })).toBeVisible();
     await settings.screenshot({
       path: path.join(QODER_VISUAL_OUTPUT, "real-settings-waiting-login.png"),
       animations: "disabled",
     });
-    expect(await launched.electronApp.evaluate(({ clipboard }) => clipboard.readText()))
-      .toContain("qodercli login");
     expect(requestPosts).toBe(0);
+    await settings.getByRole("button", { name: "取消" }).click();
+    await expect(settings.getByRole("button", { name: "登录 Qoder" })).toBeVisible({ timeout: 15_000 });
 
     await closeQoderAvailability(launched.page);
     await expect(sidebar.getByTestId("ai-conversation-input")).toHaveCount(0);

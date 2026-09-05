@@ -7,6 +7,8 @@ import {
 
 const VENDOR_KEY_IDS = new Set(AGENT_VENDOR_KEY_VENDOR_IDS);
 
+const LOGIN_PROVIDER_IDS = new Set(["qoder", "codex"]);
+
 export function registerAgentIpc({
   ipcMain,
   trustedProject,
@@ -16,6 +18,7 @@ export function registerAgentIpc({
   persistSessionCredential,
   clearSessionCredential,
   sessionCredentialStatus,
+  openAgentLogin,
 }) {
   ipcMain.handle(
     INTEGRATION_CHANNELS.qoderHandoff,
@@ -92,6 +95,25 @@ export function registerAgentIpc({
       }
       return sessionCredentialStatus();
     }, "agent_credential_status"),
+  );
+  ipcMain.handle(
+    INTEGRATION_CHANNELS.openAgentLogin,
+    trustedProject(async (payload) => {
+      const providerId = String(payload?.providerId || "").trim();
+      if (!LOGIN_PROVIDER_IDS.has(providerId)) {
+        throw new ProjectFileError(
+          "AGENT_LOGIN_UNSUPPORTED",
+          "This Agent cannot start an official login.",
+        );
+      }
+      if (typeof openAgentLogin !== "function") {
+        throw new ProjectFileError(
+          "AGENT_LOGIN_URL_UNAVAILABLE",
+          "官方登录页暂时无法打开。",
+        );
+      }
+      return openAgentLogin(providerId);
+    }, "agent_open_login"),
   );
 }
 

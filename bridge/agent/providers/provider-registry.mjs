@@ -481,6 +481,43 @@ export function createDefaultProviderRegistry({
     providers,
     runtimeRegistry,
   });
+  catalog.bindLoginExecutor(async (providerId, context) => {
+    const listed = registry.catalog().find((item) => item.providerId === providerId);
+    if (!listed) {
+      throw agentProviderError(
+        "AGENT_PROVIDER_UNSUPPORTED",
+        "The selected Agent is not in PageRoot's ACP catalog.",
+        { status: 404 },
+      );
+    }
+    const { provider } = registry.resolveSelection({
+      providerId: listed.providerId,
+      runtimeId: listed.runtimeId,
+      requestedModelId: null,
+      resolvedModelId: null,
+      reasoning: Object.freeze({
+        requested: null,
+        applied: null,
+        resolution: "provider-default",
+      }),
+    });
+    if (provider.capabilities.login !== true || typeof provider.startLogin !== "function") {
+      throw agentProviderError(
+        "AGENT_LOGIN_UNSUPPORTED",
+        "This Agent cannot start an official login.",
+        { status: 409 },
+      );
+    }
+    const installation = await provider.resolveInstallation({
+      environment: context.environment || process.env,
+    });
+    return provider.startLogin(installation, {
+      environment: context.environment || process.env,
+      signal: context.signal,
+      timeoutMs: context.timeoutMs,
+      onLoginUrl: context.onLoginUrl,
+    });
+  });
   return Object.freeze({
     ...registry,
     agentCatalog: catalog,

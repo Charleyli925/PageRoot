@@ -1864,7 +1864,9 @@
         "^bridge/agent/providers/(?:provider-registry|agent-provider-contract)\\.mjs$",
         "^app/application/agent-provider-catalog\\.(?:js|d\\.ts)$",
         "^app/domain/agent-provider-state\\.(?:js|d\\.ts)$",
-        "^shared/agent-access-operation\\.mjs$"
+        "^shared/agent-access-operation\\.mjs$",
+        "^shared/agent-login-url\\.mjs$",
+        "^shared/agent-auth-source\\.mjs$"
       ],
       "suites": [
         "typecheck"
@@ -1872,14 +1874,17 @@
       "nodeTests": [
         "tests/agent-provider-catalog.test.mjs",
         "tests/agent-provider-contract.test.mjs",
-        "tests/agent-access-operation.test.mjs"
+        "tests/agent-access-operation.test.mjs",
+        "tests/agent-access-auth.test.mjs"
       ]
     },
     {
       "id": "agent-catalog-installer",
       "patterns": [
         "^bridge/agent/catalog/",
-        "^shared/agent-access-operation\\.mjs$"
+        "^shared/agent-access-operation\\.mjs$",
+        "^shared/agent-login-url\\.mjs$",
+        "^shared/agent-auth-source\\.mjs$"
       ],
       "suites": [
         "typecheck",
@@ -1889,6 +1894,7 @@
         "tests/agent-catalog.test.mjs",
         "tests/agent-installer.test.mjs",
         "tests/agent-access-operation.test.mjs",
+        "tests/agent-access-auth.test.mjs",
         "tests/codex-acp-provider.test.mjs",
         "tests/agent-provider-contract.test.mjs"
       ]

@@ -76,6 +76,7 @@ export type SettingsPageProps = {
     kind: AgentProviderGuidanceKind,
     selection: AgentSelection,
   ) => Promise<AgentActionOutcome>;
+  onStartLogin: (selection: AgentSelection) => Promise<AgentActionOutcome>;
   onInstall: (selection: AgentSelection) => Promise<AgentActionOutcome>;
   onCancelInstall: (selection: AgentSelection) => Promise<AgentActionOutcome>;
   onConnectApiKey: (
@@ -278,6 +279,7 @@ function AgentSettings({
   onCheck,
   onCheckSelection,
   onCopyGuidance,
+  onStartLogin,
   onInstall,
   onCancelInstall,
   onConnectApiKey,
@@ -296,6 +298,7 @@ function AgentSettings({
   onCheck(): Promise<AgentActionOutcome>;
   onCheckSelection(selection: AgentSelection): Promise<AgentActionOutcome>;
   onCopyGuidance(kind: AgentProviderGuidanceKind, selection: AgentSelection): Promise<AgentActionOutcome>;
+  onStartLogin(selection: AgentSelection): Promise<AgentActionOutcome>;
   onInstall(selection: AgentSelection): Promise<AgentActionOutcome>;
   onCancelInstall(selection: AgentSelection): Promise<AgentActionOutcome>;
   onConnectApiKey(selection: AgentSelection, apiKey: string, extras?: Readonly<{ vendorId?: string; baseUrl?: string; modelId?: string; remember?: boolean }>): Promise<AgentActionOutcome>;
@@ -355,8 +358,10 @@ function AgentSettings({
               surface="settings"
               actionButtonRef={actionButtonRef}
               onCopyGuidance={(kind) => onCopyGuidance(kind, selectedCard.selection)}
+              onStartLogin={() => onStartLogin(selectedCard.selection)}
               onInstall={() => onInstall(selectedCard.selection)}
               installState={selectedCard.installState}
+              activeOperation={selectedCard.activeOperation}
               onCancelInstall={() => onCancelInstall(selectedCard.selection)}
               onRecheck={() => onCheckSelection(selectedCard.selection)}
               onConnectApiKey={(apiKey, extras) => onConnectApiKey(selectedCard.selection, apiKey, extras)}
@@ -423,7 +428,7 @@ function UpdatesSettings({
   onDownloadUpdate,
   onRequestRestart,
   onOpenReleaseNotes,
-}: Omit<SettingsPageProps, "activeTabId" | "category" | "initialFocus" | "currentAgentName" | "workspacePreferences" | "workspacePreferencesSaving" | "workspacePreferencesError" | "agentChoices" | "selectedAgentChoiceId" | "agentCards" | "onUpdateWorkspacePreference" | "onRetryWorkspacePreferences" | "onSelectAgent" | "onSelectAgentModel" | "onSelectAgentReasoning" | "onClose" | "onCheckUsability" | "onCopyGuidance" | "onInstall" | "onCancelInstall" | "onConnectApiKey" | "onDisconnectApiKey">) {
+}: Omit<SettingsPageProps, "activeTabId" | "category" | "initialFocus" | "currentAgentName" | "workspacePreferences" | "workspacePreferencesSaving" | "workspacePreferencesError" | "agentChoices" | "selectedAgentChoiceId" | "agentCards" | "onUpdateWorkspacePreference" | "onRetryWorkspacePreferences" | "onSelectAgent" | "onSelectAgentModel" | "onSelectAgentReasoning" | "onClose" | "onCheckUsability" | "onCopyGuidance" | "onStartLogin" | "onInstall" | "onCancelInstall" | "onConnectApiKey" | "onDisconnectApiKey">) {
   const presentation = updatePresentation({
     result: updateResult,
     updatesAvailable,
@@ -551,6 +556,7 @@ export default function SettingsPage({
   onOpenReleaseNotes,
   onCheckUsability,
   onCopyGuidance,
+  onStartLogin,
   onInstall,
   onCancelInstall,
   onConnectApiKey,
@@ -721,6 +727,7 @@ export default function SettingsPage({
             onCheck={() => requestAgentCheck(true)}
             onCheckSelection={onCheckUsability}
             onCopyGuidance={onCopyGuidance}
+            onStartLogin={onStartLogin}
             onInstall={onInstall}
             onCancelInstall={onCancelInstall}
             onConnectApiKey={onConnectApiKey}

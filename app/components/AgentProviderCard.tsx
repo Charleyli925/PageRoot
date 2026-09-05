@@ -45,6 +45,10 @@ export type AgentProviderCardPresentation = Readonly<{
 export type AgentProviderCardProps = {
   availability: AgentProviderAvailabilitySnapshot;
   installState?: "idle" | "installing" | "failed" | "cancelling";
+  activeOperation?: Readonly<{
+    kind: string;
+    state: string;
+  }> | null;
   connection?: Readonly<{
     vendorId: string;
     vendorDisplayName: string;
@@ -62,6 +66,7 @@ export type AgentProviderCardProps = {
   disabled?: boolean;
   actionButtonRef?: Ref<HTMLButtonElement>;
   onCopyGuidance: (kind: AgentProviderGuidanceKind) => Promise<AgentActionOutcome>;
+  onStartLogin?: () => Promise<AgentActionOutcome>;
   onInstall?: () => Promise<AgentActionOutcome>;
   onCancelInstall?: () => Promise<AgentActionOutcome>;
   onRecheck?: () => Promise<AgentActionOutcome>;
@@ -124,6 +129,7 @@ function actionsForAvailability(
 export default function AgentProviderCard({
   availability,
   installState = "idle",
+  activeOperation = null,
   connection = null,
   models = [],
   selectedModelId = null,
@@ -133,6 +139,7 @@ export default function AgentProviderCard({
   disabled = false,
   actionButtonRef,
   onCopyGuidance,
+  onStartLogin,
   onInstall,
   onCancelInstall,
   onRecheck,
@@ -160,14 +167,23 @@ export default function AgentProviderCard({
   );
   const presentation = provider.availability(availability);
   const installing = installState === "installing" || installPending;
-  const cancelling = installState === "cancelling" || cancelPending;
-  const statusPresentation = installing && !cancelling
-    ? { ...presentation, statusLabel: "正在安装…", detail: "", tone: "checking" as const }
+  const loggingIn = activeOperation?.kind === "login"
+    && (activeOperation.state === "waiting" || activeOperation.state === "cancelling" || pendingAction === "login");
+  const cancelling = installState === "cancelling"
+    || (activeOperation?.kind === "login" && activeOperation.state === "cancelling")
+    || cancelPending;
+  const statusPresentation = (installing || loggingIn) && !cancelling
+    ? {
+      ...presentation,
+      statusLabel: loggingIn ? "请在浏览器完成登录" : "正在安装…",
+      detail: "",
+      tone: "checking" as const,
+    }
     : cancelling
       ? { ...presentation, statusLabel: "正在取消…", detail: "", tone: "checking" as const }
       : presentation;
   const currentModel = models.find((model) => model.id === selectedModelId) || models[0] || null;
-  const actions = installing || cancelling
+  const actions = installing || cancelling || loggingIn
     ? [{ kind: "cancel-install" as const, label: "取消", copiedLabel: "取消" }]
     : actionsForAvailability(availability, provider).filter((action) => !(
     availability.reason === "model-unavailable"
@@ -197,10 +213,10 @@ export default function AgentProviderCard({
         const outcome = await onCancelInstall();
         confirmed = Boolean(outcome && ["succeeded", "stale"].includes(outcome.status));
         if (!confirmed) {
-          setActionError("安装没有取消，请重试。");
+          setActionError(loggingIn ? "登录没有取消，请重试。" : "安装没有取消，请重试。");
         }
       } catch {
-        setActionError("安装没有取消，请重试。");
+        setActionError(loggingIn ? "登录没有取消，请重试。" : "安装没有取消，请重试。");
       } finally {
         setCancelPending(false);
         setCancelRequested(false);
@@ -237,21 +253,25 @@ export default function AgentProviderCard({
       const outcome = kind === "recheck" && typeof onRecheck === "function"
           ? await onRecheck()
           : kind === "login"
-            ? await onCopyGuidance(kind)
+            ? await (typeof onStartLogin === "function" ? onStartLogin() : onCopyGuidance(kind))
             : null;
       const succeeded = Boolean(outcome && ["succeeded", "stale"].includes(outcome.status));
       if (!succeeded) {
         setActionError(
           kind === "recheck"
               ? "检查没有完成，请重试。"
-              : "指令暂时无法复制，请重试。",
+              : kind === "login"
+                ? "登录没有完成，请重试。"
+                : "指令暂时无法复制，请重试。",
         );
       }
     } catch {
       setActionError(
         kind === "recheck"
             ? "检查没有完成，请重试。"
-            : "指令暂时无法复制，请重试。",
+            : kind === "login"
+              ? "登录没有完成，请重试。"
+              : "指令暂时无法复制，请重试。",
       );
     } finally {
       setPendingAction(null);
@@ -451,6 +471,8 @@ export default function AgentProviderCard({
                     ? "正在取消…"
                     : action.kind === "install"
                     ? "正在安装…"
+                    : action.kind === "login"
+                      ? "正在登录…"
                     : action.kind === "recheck"
                       ? "正在检查…"
                       : "正在复制…")

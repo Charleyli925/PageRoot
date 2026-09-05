@@ -1687,6 +1687,36 @@ async function cancelAgentInstall(body) {
   });
 }
 
+async function loginAgent(body) {
+  const providerId = String(body?.providerId || "").trim();
+  const snapshot = await agentBridgeService.login(providerId);
+  return Object.freeze({
+    ok: true,
+    providerId: snapshot.providerId,
+    loginState: snapshot.loginState,
+    loginUrlPresent: snapshot.loginUrlPresent === true,
+  });
+}
+
+async function cancelAgentLogin(body) {
+  const providerId = String(body?.providerId || "").trim();
+  const snapshot = await agentBridgeService.cancelLogin(providerId);
+  return Object.freeze({
+    ok: true,
+    providerId: snapshot.providerId,
+    loginState: snapshot.loginState,
+  });
+}
+
+async function agentLoginUrl(providerIdInput) {
+  const providerId = String(providerIdInput || "").trim();
+  const loginUrl = agentBridgeService.loginUrl(providerId);
+  if (!loginUrl) {
+    return Object.freeze({ ok: true, providerId, loginUrl: null });
+  }
+  return Object.freeze({ ok: true, providerId, loginUrl });
+}
+
 async function startAgent(body) {
   const target = await projectFileTargetForBody(body);
   if (!target) throw projectNotFoundError();
@@ -2691,6 +2721,20 @@ async function route(request, response) {
   if (request.method === "POST" && url.pathname === "/agent/install/cancel") {
     const body = await readBody(request);
     sendJson(response, 200, await cancelAgentInstall(body));
+    return;
+  }
+  if (request.method === "POST" && url.pathname === "/agent/login") {
+    const body = await readBody(request);
+    sendJson(response, 202, await loginAgent(body));
+    return;
+  }
+  if (request.method === "POST" && url.pathname === "/agent/login/cancel") {
+    const body = await readBody(request);
+    sendJson(response, 200, await cancelAgentLogin(body));
+    return;
+  }
+  if (request.method === "GET" && url.pathname === "/agent/login/url") {
+    sendJson(response, 200, await agentLoginUrl(url.searchParams.get("providerId")));
     return;
   }
   if (request.method === "POST" && url.pathname === "/agent/session-credential") {

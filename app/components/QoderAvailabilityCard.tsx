@@ -31,8 +31,8 @@ const QODER_CARD_PRESENTATION = Object.freeze({
       copiedLabel: "重新安装",
     }),
     login: Object.freeze({
-      label: "复制登录指令",
-      copiedLabel: "重新复制",
+      label: "登录 Qoder",
+      copiedLabel: "重新登录",
     }),
     recheck: Object.freeze({
       label: "重试",

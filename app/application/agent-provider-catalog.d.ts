@@ -48,6 +48,7 @@ export type AgentProviderEntry = AgentProviderDescriptor & Readonly<{
   }>[];
   credentialConfigured?: boolean;
   enabled?: boolean;
+  loginUrlPresent?: boolean;
   activeOperation?: Readonly<{
     operationId: string;
     providerId: string;
@@ -121,11 +122,16 @@ export function agentProviderCardsFromCatalog(snapshot: AgentCatalogSnapshot | n
   }>[];
   credentialConfigured: boolean;
   connection: AgentProviderEntry["connection"];
+  loginUrlPresent?: boolean;
+  activeOperation?: AgentProviderEntry["activeOperation"];
 }>[];
 export class AgentCatalogState {
   constructor(options?: {
     bridgeClient: BridgeClient;
-    handoffPort?: { copy(input: unknown): Promise<unknown> } | null;
+    handoffPort?: {
+      copy(input: unknown): Promise<unknown>;
+      openLogin?(input: { providerId: string }): Promise<unknown>;
+    } | null;
     clock?: { now(): number };
     providers?: readonly AgentProviderDescriptor[];
     selected?: AgentSelection | null;
@@ -167,6 +173,8 @@ export class AgentCatalogState {
   discardTicket(preflight: AgentPreflight): boolean;
   install(selection?: AgentSelection | null): Promise<unknown>;
   cancelInstall(selection?: AgentSelection | null): Promise<unknown>;
+  startLogin(selection?: AgentSelection | null): Promise<unknown>;
+  cancelAccessOperation(selection?: AgentSelection | null): Promise<unknown>;
   cancelAccessOperation(selection?: AgentSelection | null): Promise<unknown>;
   copyGuidance(kind: "install" | "login", selection?: AgentSelection | null): Promise<unknown>;
 }

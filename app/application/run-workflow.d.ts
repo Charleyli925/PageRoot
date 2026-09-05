@@ -101,6 +101,7 @@ export type RunWorkflowConstruction = Readonly<{
         status: "copied" | string;
         copied: boolean;
       }>;
+      openLogin?(input: { providerId: string }): Promise<{ opened?: boolean } | null>;
     }>;
     hash: Readonly<{ sha256(html: string): Promise<string> }>;
   }>;
@@ -146,6 +147,10 @@ export class RunWorkflow {
   copyQoderGuidance(input: {
     kind: AgentProviderGuidanceKind;
   }): Promise<RunWorkflowOutcome<{ kind: AgentProviderGuidanceKind; copied: true }>>;
+  startAgentLogin(selection?: AgentSelection | null): Promise<RunWorkflowOutcome<{
+    availability: AgentProviderAvailabilitySnapshot;
+    cancelled?: boolean;
+  }>>;
   installAgent(selection?: AgentSelection | null): Promise<RunWorkflowOutcome<{
     availability: AgentProviderAvailabilitySnapshot;
   }>>;

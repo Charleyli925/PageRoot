@@ -320,6 +320,9 @@ export type DesktopIntegrationsApi = {
     remembered?: boolean;
     vendorId?: string | null;
   }>;
+  openAgentLogin?: (payload: {
+    providerId: string;
+  }) => Promise<{ opened?: boolean }>;
 };
 
 export type ApplicationUpdateStatus =
