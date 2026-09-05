@@ -1681,6 +1681,11 @@ async function updateAgentConfiguration(body) {
   });
 }
 
+async function cancelAgentConfiguration(body) {
+  const providerId = String(body?.providerId || "").trim();
+  return agentBridgeService.cancelAgentConfiguration(providerId, body?.generation);
+}
+
 async function cancelAgentInstall(body) {
   const providerId = String(body?.providerId || "").trim();
   const snapshot = await agentBridgeService.cancelInstall(providerId);
@@ -2749,6 +2754,11 @@ async function route(request, response) {
   if (request.method === "POST" && url.pathname === "/agent/configuration") {
     const body = await readBody(request);
     sendJson(response, 200, await updateAgentConfiguration(body));
+    return;
+  }
+  if (request.method === "POST" && url.pathname === "/agent/configuration/cancel") {
+    const body = await readBody(request);
+    sendJson(response, 200, await cancelAgentConfiguration(body));
     return;
   }
   if (request.method === "POST" && url.pathname === "/agent/preflight") {

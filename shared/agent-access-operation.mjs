@@ -100,6 +100,18 @@ export function isStaleAccessOperation(operation, generation) {
   return !current || current.generation !== Number(generation);
 }
 
+const CREDENTIAL_FIELD_BY_CODE = Object.freeze({
+  AGENT_AUTH_REQUIRED: "apiKey",
+  AGENT_SESSION_CREDENTIAL_INVALID: "apiKey",
+  AGENT_SELECTION_UNSUPPORTED: "modelId",
+  AGENT_MODEL_ACCESS_DENIED: "modelId",
+  AGENT_ENDPOINT_REGION_MISMATCH: "baseUrl",
+});
+
+export function credentialErrorField(code) {
+  return CREDENTIAL_FIELD_BY_CODE[String(code || "")] || null;
+}
+
 const INSTALL_STATE_TO_ACCESS = Object.freeze({
   installing: "running",
   cancelling: "cancelling",

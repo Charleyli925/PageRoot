@@ -809,18 +809,61 @@
   padding: 0 16px 14px;
 }
 
+.qoder-card-apikey-title,
+.qoder-card-apikey-key-row,
+.qoder-card-apikey-vendors,
 .qoder-card-apikey-vendor,
 .qoder-card-apikey-base,
 .qoder-card-apikey-model,
+.qoder-card-apikey-remember,
 .qoder-card-apikey-note,
 .qoder-card-apikey .qoder-card-error {
   grid-column: 1 / -1;
+}
+
+.qoder-card-apikey-title {
+  margin: 0;
+  color: #2b2936;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.qoder-card-apikey-key-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
+.qoder-card-apikey-get {
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid #e3e0eb;
+  border-radius: 8px;
+  background: #fff;
+  color: #2b2936;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.qoder-card-apikey-vendors summary {
+  cursor: pointer;
+  color: #5c5868;
+  font-size: 11px;
 }
 
 .qoder-card-apikey-note {
   color: #777481;
   font-size: 10px;
   line-height: 1.4;
+}
+
+.qoder-card-apikey-remember {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #2b2936;
+  font-size: 12px;
 }
 
 .qoder-card-apikey-vendor {

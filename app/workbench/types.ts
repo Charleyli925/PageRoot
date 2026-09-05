@@ -311,6 +311,18 @@ export type DesktopIntegrationsApi = {
   openAgentLogin?: (payload: {
     providerId: string;
   }) => Promise<{ opened?: boolean }>;
+  openVendorApiKeyPage?: (vendorId: string) => Promise<{ opened?: boolean }>;
+  persistSessionCredential?: (payload: {
+    apiKey: string;
+    vendorId?: string;
+    baseUrl?: string;
+  }) => Promise<{ ok?: boolean; code?: string; remembered?: boolean }>;
+  clearSessionCredential?: () => Promise<{ ok?: boolean; remembered?: boolean }>;
+  sessionCredentialStatus?: () => Promise<{
+    available?: boolean;
+    remembered?: boolean;
+    vendorId?: string | null;
+  }>;
 };
 
 export type ApplicationUpdateStatus =

@@ -6,6 +6,7 @@ import {
   Menu,
   net,
   protocol,
+  safeStorage,
   shell,
   utilityProcess,
 } from "electron";
@@ -82,6 +83,8 @@ import {
   unregisterProjectIpc,
 } from "./ipc/project-ipc.mjs";
 import { registerAgentIpc, unregisterAgentIpc } from "./ipc/agent-ipc.mjs";
+import { publicAgentVendorKeyUrl } from "../shared/agent-vendor-key-url.mjs";
+import { createAgentSessionCredentialStore } from "./agent-session-credential-store.mjs";
 import { registerUpdateIpc, unregisterUpdateIpc } from "./ipc/update-ipc.mjs";
 import { registerWindowIpc, unregisterWindowIpc } from "./ipc/window-ipc.mjs";
 import { createWindowLifecycle } from "./app-lifecycle.mjs";
@@ -296,6 +299,10 @@ const WORKBENCH_TAB_CHANNELS = Object.freeze({
 const INTEGRATION_CHANNELS = Object.freeze({
   qoderHandoff: "html-integrations:qoder-handoff",
   openAgentLogin: "html-agent-access:open-login",
+  openVendorApiKey: "html-agent-access:open-vendor-key",
+  persistSessionCredential: "html-agent-access:persist-credential",
+  clearSessionCredential: "html-agent-access:clear-credential",
+  sessionCredentialStatus: "html-agent-access:credential-status",
 });
 const UPDATE_CHANNELS = Object.freeze({
   getStatus: "html-updates:get-status",
@@ -461,6 +468,12 @@ const externalFileOpenDelivery = createExternalFileOpenDeliveryCoordinator();
 const preparedHtmlOpenStore = createPreparedHtmlOpenStore();
 const recoveryJournalStore = createRecoveryJournalStore({
   rootPath: path.join(app.getPath("userData"), "recovery-journals-v1"),
+});
+const agentSessionCredentialStore = createAgentSessionCredentialStore({
+  userDataPath: app.getPath("userData"),
+  encryptString: (value) => safeStorage.encryptString(value),
+  decryptString: (buffer) => safeStorage.decryptString(buffer),
+  isEncryptionAvailable: () => safeStorage.isEncryptionAvailable() === true,
 });
 let recoveryJournalAvailable = true;
 let recoveryJournalUnavailableReason = "";
@@ -3310,6 +3323,26 @@ async function fetchBridgeCommand(pathname, body) {
   return payload;
 }
 
+async function restoreRememberedAgentCredential() {
+  if (process.env.PAGEROOT_E2E === "1") return;
+  try {
+    const preferences = await readUiPreferences({
+      userDataPath: app.getPath("userData"),
+    });
+    if (preferences.workspace.disabledAgentProviderIds.includes("pageroot")) return;
+    const credential = await agentSessionCredentialStore.load();
+    if (!credential?.apiKey) return;
+    await fetchBridgePost("/agent/session-credential", {
+      providerId: credential.providerId,
+      apiKey: credential.apiKey,
+      vendorId: credential.vendorId,
+      baseUrl: credential.baseUrl,
+    });
+  } catch {
+    // Remembered Key restore is best-effort; the user can reconnect this session.
+  }
+}
+
 async function listRegisteredProjects() {
   const payload = await fetchBridgeJson("/registered-projects");
   if (!Array.isArray(payload.projects)) {
@@ -3636,6 +3669,20 @@ function registerProjectIpc() {
       await shell.openExternal(loginUrl);
       return Object.freeze({ opened: true });
     },
+    openVendorApiKeyPage: async (vendorId) => {
+      const keyUrl = publicAgentVendorKeyUrl(vendorId);
+      if (!keyUrl) {
+        throw new ProjectFileError(
+          "AGENT_VENDOR_KEY_UNSUPPORTED",
+          "当前服务没有经过校验的 API Key 页面。",
+        );
+      }
+      await shell.openExternal(keyUrl);
+      return Object.freeze({ opened: true });
+    },
+    persistSessionCredential: (payload) => agentSessionCredentialStore.persist(payload),
+    clearSessionCredential: () => agentSessionCredentialStore.clear(),
+    sessionCredentialStatus: () => agentSessionCredentialStore.publicStatus(),
   });
   registerUpdateIpc({
     ipcMain,
@@ -4213,6 +4260,7 @@ async function launchBridge() {
     bridgePort = port;
     ready = true;
     startupPerformanceTimeline.mark("bridge-ready");
+    void restoreRememberedAgentCredential();
     return port;
   } catch (error) {
     // If the child is still alive, keep its handle so the coordinated fatal

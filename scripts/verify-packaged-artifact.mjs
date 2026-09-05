@@ -193,6 +193,7 @@ export const REQUIRED_APP_SOURCE_FILES = [
   "desktop/application-update.mjs",
   "desktop/usage-telemetry.mjs",
   "desktop/ui-preferences.mjs",
+  "desktop/agent-session-credential-store.mjs",
   "desktop/device-identity.mjs",
   "desktop/preview-protocol.mjs",
   "desktop/imported-asset-root.mjs",
@@ -201,6 +202,7 @@ export const REQUIRED_APP_SOURCE_FILES = [
   "desktop/edit-runtime-protocol.mjs",
   "desktop/edit-runtime-preparation-fence.mjs",
   "desktop/agent-login-url.mjs",
+  "shared/agent-vendor-key-url.mjs",
   "app/domain/edit-runtime-contract.js",
   "public/brand-logo.png",
 ];

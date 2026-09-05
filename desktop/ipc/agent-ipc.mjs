@@ -1,5 +1,11 @@
 import { ProjectFileError } from "../project-files.mjs";
 import { handoffToQoderWork } from "../qoder-handoff.mjs";
+import {
+  AGENT_VENDOR_KEY_VENDOR_IDS,
+  publicAgentVendorKeyUrl,
+} from "../../shared/agent-vendor-key-url.mjs";
+
+const VENDOR_KEY_IDS = new Set(AGENT_VENDOR_KEY_VENDOR_IDS);
 
 const LOGIN_PROVIDER_IDS = new Set(["qoder", "codex"]);
 
@@ -9,6 +15,10 @@ export function registerAgentIpc({
   INTEGRATION_CHANNELS,
   clipboard,
   openAgentLogin,
+  openVendorApiKeyPage,
+  persistSessionCredential,
+  clearSessionCredential,
+  sessionCredentialStatus,
 }) {
   ipcMain.handle(
     INTEGRATION_CHANNELS.qoderHandoff,
@@ -46,6 +56,64 @@ export function registerAgentIpc({
       }
       return openAgentLogin(providerId);
     }, "agent_open_login"),
+  );
+  ipcMain.handle(
+    INTEGRATION_CHANNELS.openVendorApiKey,
+    trustedProject(async (payload) => {
+      const vendorId = String(payload?.vendorId || "").trim();
+      if (!VENDOR_KEY_IDS.has(vendorId) || !publicAgentVendorKeyUrl(vendorId)) {
+        throw new ProjectFileError(
+          "AGENT_VENDOR_KEY_UNSUPPORTED",
+          "当前服务没有经过校验的 API Key 页面。",
+        );
+      }
+      if (typeof openVendorApiKeyPage !== "function") {
+        throw new ProjectFileError(
+          "AGENT_VENDOR_KEY_UNAVAILABLE",
+          "无法打开获取 API Key 页面。",
+        );
+      }
+      return openVendorApiKeyPage(vendorId);
+    }, "agent_open_vendor_key"),
+  );
+  ipcMain.handle(
+    INTEGRATION_CHANNELS.persistSessionCredential,
+    trustedProject(async (payload) => {
+      if (typeof persistSessionCredential !== "function") {
+        throw new ProjectFileError(
+          "AGENT_CREDENTIAL_STORE_UNAVAILABLE",
+          "无法安全保存 API Key。",
+        );
+      }
+      return persistSessionCredential({
+        apiKey: payload?.apiKey,
+        vendorId: payload?.vendorId,
+        baseUrl: payload?.baseUrl,
+      });
+    }, "agent_persist_credential"),
+  );
+  ipcMain.handle(
+    INTEGRATION_CHANNELS.clearSessionCredential,
+    trustedProject(async () => {
+      if (typeof clearSessionCredential !== "function") {
+        return Object.freeze({ ok: true, remembered: false });
+      }
+      return clearSessionCredential();
+    }, "agent_clear_credential"),
+  );
+  ipcMain.handle(
+    INTEGRATION_CHANNELS.sessionCredentialStatus,
+    trustedProject(async () => {
+      if (typeof sessionCredentialStatus !== "function") {
+        return Object.freeze({
+          available: false,
+          remembered: false,
+          providerId: "pageroot",
+          vendorId: null,
+        });
+      }
+      return sessionCredentialStatus();
+    }, "agent_credential_status"),
   );
 }
 
